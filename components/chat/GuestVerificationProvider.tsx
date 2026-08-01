@@ -17,6 +17,11 @@ import {
   loadTurnstile,
   type TurnstileWidgetSize,
 } from "@/components/chat/turnstileScript";
+import {
+  GuestVerificationError,
+  type GuestVerificationFailure,
+  type GuestVerificationOutcome,
+} from "@/components/chat/guestVerificationFailure";
 
 /**
  * One guest-verification surface for the whole chat page.
@@ -61,26 +66,14 @@ export type GuestVerificationPhase =
   | "succeeded"
   | "failed";
 
-export type GuestVerificationFailure =
-  | "failed"
-  | "unavailable"
-  | "cancelled"
-  | "timeout"
-  | "expired";
-
-export type GuestVerificationOutcome = "succeeded" | GuestVerificationFailure;
-
-export class GuestVerificationError extends Error {
-  readonly kind: GuestVerificationFailure;
-
-  constructor(kind: GuestVerificationFailure) {
-    // Deliberately generic: never carries a token, a site key or a Cloudflare
-    // payload, because this message reaches logs and error surfaces.
-    super(`Guest verification ${kind}.`);
-    this.name = "GuestVerificationError";
-    this.kind = kind;
-  }
-}
+// Re-exported so existing importers keep working: the definitions themselves
+// now live in guestVerificationFailure.ts, which the standalone-form Turnstile
+// hook shares (see components/chat/useTurnstile.ts).
+export {
+  GuestVerificationError,
+  type GuestVerificationFailure,
+  type GuestVerificationOutcome,
+};
 
 /**
  * How long the script + widget get to become usable. This is a *loading*
@@ -133,6 +126,13 @@ type GuestChatRequestOptions<T> = {
 type GuestVerificationContextValue = {
   /** Guest session, site key present, and not a local bypass host. */
   isEnabled: boolean;
+  /**
+   * The site key this page actually resolved, exposed so a surface that owns
+   * its own widget -- the feedback modal, which must host the challenge inside
+   * its dialog rather than behind it -- uses the same request-time value
+   * instead of the one compiled into the client bundle.
+   */
+  siteKey: string | undefined;
   phase: GuestVerificationPhase;
   failure: GuestVerificationFailure | null;
   lastOutcome: GuestVerificationOutcome | null;
@@ -504,6 +504,7 @@ export function GuestVerificationProvider({
   const value = useMemo<GuestVerificationContextValue>(
     () => ({
       isEnabled,
+      siteKey,
       phase,
       failure,
       lastOutcome,
@@ -523,6 +524,7 @@ export function GuestVerificationProvider({
       cancel,
       failure,
       isEnabled,
+      siteKey,
       longWaitRequestId,
       lastOutcome,
       phase,
@@ -548,6 +550,7 @@ export function GuestVerificationProvider({
  */
 const DISABLED_VALUE: GuestVerificationContextValue = {
   isEnabled: false,
+  siteKey: undefined,
   phase: "idle",
   failure: null,
   lastOutcome: null,

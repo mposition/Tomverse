@@ -16,6 +16,10 @@ import {
   guestMessagesStorageKey,
   guestMessagesConversationPrefix,
 } from "../lib/guestConversationStorage.ts";
+import {
+  hasValidMutationOrigin,
+  requiresMutationOriginCheck,
+} from "../lib/requestOrigin.ts";
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
 const readRepoFile = (relativePath: string) =>
@@ -341,6 +345,10 @@ test("every E2E short-circuit is gated on a non-deployable origin, not the flag 
 
   const guardedFiles = [
     "app/(site)/(application)/layout.tsx",
+    // The Playwright-only admin mount. It is the one *route* the flags gate,
+    // so it must go through the same helper as every other short-circuit
+    // rather than reading the environment variables itself.
+    "app/(site)/(application)/e2e/admin-console-fixture/page.tsx",
     "app/api/billing/config/route.ts",
     "app/api/public/proof-metrics/route.ts",
     "app/api/models/status/route.ts",
@@ -594,4 +602,53 @@ test("assistant markdown restores block-level typography reset by preflight", ()
     /overflow-x-auto[^"]*"[\s\S]{0,120}<table/,
     "a wide table must scroll inside its own container, not the message list"
   );
+});
+
+// ---------------------------------------------------------------------------
+// STG-R002 - the administrator provider verification and recovery endpoints
+// spend provider money and clear a provider's failure block. Both are ordinary
+// mutations, so they must go through the same cross-origin rejection every
+// other mutation does. A future exemption added to EXEMPT_MUTATION_PATHS would
+// silently open them to cross-site submission, which is precisely the kind of
+// change this suite exists to catch.
+// ---------------------------------------------------------------------------
+
+test("the admin verification and recovery mutations are CSRF-protected", () => {
+  const paths = [
+    "/api/admin/provider-health/verify",
+    "/api/admin/provider-health/recover",
+  ];
+  for (const path of paths) {
+    assert.equal(
+      requiresMutationOriginCheck("POST", path),
+      true,
+      `${path} must require the mutation origin check`
+    );
+    assert.equal(
+      requiresMutationOriginCheck("GET", path),
+      false,
+      `${path} reads are safe methods`
+    );
+    // The check itself must actually reject a cross-origin submission.
+    assert.equal(
+      hasValidMutationOrigin(
+        new Request(`https://tomverse.app${path}`, {
+          method: "POST",
+          headers: { origin: "https://evil.example", host: "tomverse.app" },
+        })
+      ),
+      false,
+      `${path} must reject a foreign origin`
+    );
+    assert.equal(
+      hasValidMutationOrigin(
+        new Request(`https://tomverse.app${path}`, {
+          method: "POST",
+          headers: { "sec-fetch-site": "cross-site", host: "tomverse.app" },
+        })
+      ),
+      false,
+      `${path} must reject a cross-site fetch with no origin header`
+    );
+  }
 });

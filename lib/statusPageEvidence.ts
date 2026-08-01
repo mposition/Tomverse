@@ -18,6 +18,18 @@ export const evidenceSourceLabel = (reasonCode: PublicStatusReasonCode): string 
   ) {
     return "(from an automated synthetic check, not real user traffic)";
   }
+  // STG-R002: an administrator's verification call is a fourth evidence
+  // source, and the one most at risk of being read as production health --
+  // it is the check that lets a blocked provider be released. Falling through
+  // to the real-traffic wording would have made a manual check look like
+  // "real users are being served", which is the exact conflation this
+  // function exists to prevent.
+  if (
+    reasonCode === "ADMIN_VERIFICATION_SUCCESS" ||
+    reasonCode === "RECOVERY_VERIFICATION_FAILED"
+  ) {
+    return "(from a manual check by a Tomverse operator, not real user traffic)";
+  }
   return "(from real request traffic monitoring)";
 };
 

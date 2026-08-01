@@ -1,6 +1,7 @@
 import "server-only";
 
 import { prisma } from "@/lib/prisma";
+import { usageBucketCount } from "@/lib/chatUsageBucketCount";
 import { AVAILABLE_MODELS, type AiProvider, type ModelTier } from "@/lib/models";
 import { getRuntimeModel, getRuntimeModels } from "@/lib/modelRegistry";
 import { sendManagedSlackMessage } from "@/lib/managedSlack";
@@ -25,6 +26,12 @@ import {
   isEmptyResponseDiagnostic,
 } from "@/lib/providerHealthPolicyCore";
 import {
+  classifyProviderFailure,
+  isProviderScopedFailureCategory,
+  redactProviderText,
+  type ProviderFailureScope,
+} from "@/lib/providerErrorClassification";
+import {
   DEFAULT_INCIDENT_CONSECUTIVE_FAILURE_THRESHOLD,
   DEFAULT_PROBE_INCIDENT_CONSECUTIVE_FAILURE_THRESHOLD,
   DEFAULT_PUBLIC_STATUS_FRESHNESS_MINUTES,
@@ -33,6 +40,7 @@ import {
   type PublicStatusReasonCode,
 } from "@/lib/providerPublicStatusCore";
 import { probeDailyCostCapMicroUsd } from "@/lib/providerProbe";
+import { getVerificationModelFor } from "@/lib/providerVerification";
 import { getProbeUsageCostTodayMicroUsd } from "@/lib/providerUsageAccounting";
 
 export type ProviderHealthStatus = "available" | "limited" | "outage";
@@ -137,7 +145,20 @@ export type ProviderHealthRow = {
     failureCount5m: number;
     recentErrorCode: string | null;
     updatedAt: string;
+    /** STG-R002: whether this model's failures are evidence about the whole
+     *  provider ("provider", e.g. 401/5xx) or about this model alone
+     *  ("model", e.g. a 400 request-contract rejection). Only provider-scoped
+     *  incidents escalate the provider itself -- one model's malformed
+     *  requests must not take its siblings down with it. */
+    scope: ProviderFailureScope;
   }>;
+  /** STG-R002: administrator verification evidence for this provider. */
+  lastVerificationSuccessAt: string | null;
+  lastVerificationFailureAt: string | null;
+  lastRecoveryAt: string | null;
+  /** Whether a live verification call against this provider is possible at
+   *  all, and therefore whether the recovery path is available. */
+  verificationModelId: string | null;
 };
 
 export type ProviderHealthDashboard = {
@@ -684,7 +705,7 @@ const maybeNotifyProviderFailure = async (
     },
     select: { count: true },
   });
-  const failureCount = failure?.count || 0;
+  const failureCount = usageBucketCount(failure?.count);
   const policy = await alertPolicyFor(provider);
   if (failureCount < policy.providerFailureThreshold) return;
 
@@ -711,7 +732,7 @@ export const notifyProviderBudgetIfNeeded = async (provider: AiProvider) => {
     select: { count: true },
   });
   const budget = providerMonthlyBudgetMicroUsd(provider);
-  const used = usage?.count || 0;
+  const used = usageBucketCount(usage?.count);
   const percent = budget > 0 ? (used / budget) * 100 : 0;
   const policy = await alertPolicyFor(provider);
   const level =
@@ -902,7 +923,7 @@ export const recordModelFailure = async (
     },
     select: { count: true },
   });
-  const failureCount = failure?.count || 0;
+  const failureCount = usageBucketCount(failure?.count);
   const policy = await alertPolicyFor(resolvedProvider);
   if (failureCount < policy.modelFailureThreshold) return;
 
@@ -934,22 +955,27 @@ export const recordProviderFailure = async (
 ) => {
   if (!provider || isNonProviderHealthDiagnostic(code)) return;
   const sanitizedCode = code.replace(/[^A-Za-z0-9_.-]/g, "_").slice(0, 80) || "UNKNOWN";
-  const modelScopedTransient = isEmptyResponseDiagnostic(sanitizedCode);
-  const safeText = (value: string | undefined, maxLength: number) => {
-    if (!value) return null;
-    return value
-      .replace(/Bearer\s+\S+/gi, "Bearer [REDACTED]")
-      .replace(/\b(?:sk|rk|pk)-[A-Za-z0-9_-]{12,}\b/g, "[REDACTED_KEY]")
-      .replace(
-        /\b(api[_-]?key|token|secret|authorization)\s*[:=]\s*[^\s,;]+/gi,
-        "$1=[REDACTED]"
-      )
-      .replace(/\s+/g, " ")
-      .trim()
-      .slice(0, maxLength) || null;
-  };
+  // STG-R002: what this failure is evidence *of*. A provider answering
+  // "400 invalid_message" is rejecting the request we built, not reporting an
+  // outage -- counting those five rejections as provider failures is what
+  // pinned Perplexity (and every model under it) to Incident with no way out,
+  // since only a real success clears consecutiveFailures and no request could
+  // succeed while the provider was blocked.
+  const classification = classifyProviderFailure({
+    diagnosticCode: sanitizedCode,
+    httpStatus: event?.httpStatus,
+  });
+  const scope: ProviderFailureScope = classification.scope;
+  const countsAgainstProvider = scope === "provider";
+  const safeText = (value: string | undefined, maxLength: number) =>
+    redactProviderText(value, maxLength);
   const writes: Array<Promise<unknown>> = [
-    incrementBucket(`provider:${provider}:failure`, "provider-health-day"),
+    // A locally rejected request never reached the provider, so it is not part
+    // of the provider's 24-hour success rate either -- only its diagnostic
+    // trail is kept, so the rejection is still investigable.
+    scope === "none"
+      ? Promise.resolve(null)
+      : incrementBucket(`provider:${provider}:failure`, "provider-health-day"),
     incrementBucket(`provider:${provider}:error:${sanitizedCode}`, "provider-error-day"),
     event
       ? prisma.providerErrorEvent.create({
@@ -971,7 +997,7 @@ export const recordProviderFailure = async (
         })
       : Promise.resolve(null),
   ];
-  if (!modelScopedTransient) {
+  if (countsAgainstProvider) {
     writes.push(
       incrementBucket(
         `provider:${provider}:failure`,
@@ -988,7 +1014,7 @@ export const recordProviderFailure = async (
     );
   }
   await Promise.all(writes);
-  if (!modelScopedTransient) {
+  if (countsAgainstProvider) {
     await maybeNotifyProviderFailure(provider, sanitizedCode);
   }
 };
@@ -1105,12 +1131,14 @@ const latestFor = (rows: BucketRow[], prefix: string) =>
     .sort((a, b) => b.updatedAt.getTime() - a.updatedAt.getTime())[0];
 
 const countFor = (rows: BucketRow[], key: string, period: string) =>
-  rows.find((row) => row.key === key && row.period === period)?.count || 0;
+  usageBucketCount(
+    rows.find((row) => row.key === key && row.period === period)?.count
+  );
 
 const sumFor = (rows: BucketRow[], key: string, period: string) =>
   rows
     .filter((row) => row.key === key && row.period === period)
-    .reduce((total, row) => total + row.count, 0);
+    .reduce((total, row) => total + usageBucketCount(row.count), 0);
 
 const eventContextFor = (event: ProviderErrorEventRow | undefined) => {
   if (!event) return "No event-level diagnostic was retained for this failure.";
@@ -1195,8 +1223,14 @@ export const getProviderHealthDashboard = async (
     fiveMinuteStart.getTime() -
       (PROVIDER_HEALTH_WINDOW_MINUTES - 5) * 60 * 1_000
   );
-  const [rows, usageRows, errorEvents, excludedHealthEvents, runtimeModels, healthStateRows] =
-    await Promise.all([
+  const [
+    rawBucketRows,
+    usageRows,
+    errorEvents,
+    excludedHealthEvents,
+    runtimeModels,
+    healthStateRows,
+  ] = await Promise.all([
     prisma.chatUsageBucket.findMany({
       where: {
         OR: [
@@ -1277,6 +1311,9 @@ export const getProviderHealthDashboard = async (
         lastProbeSuccessAt: true,
         lastProbeFailureAt: true,
         consecutiveProbeFailures: true,
+        lastVerificationSuccessAt: true,
+        lastVerificationFailureAt: true,
+        lastRecoveryAt: true,
       },
     }),
   ]);
@@ -1294,6 +1331,12 @@ export const getProviderHealthDashboard = async (
     getProviderCreditSummaries(MONITORED_PROVIDERS),
     getProviderBillingProfiles(MONITORED_PROVIDERS),
   ]);
+  // ChatUsageBucket."count" is a BigInt column (it also carries micro-USD cost
+  // guardrails); every reader below works in plain numbers.
+  const rows = rawBucketRows.map((row) => ({
+    ...row,
+    count: usageBucketCount(row.count),
+  }));
   const balanceByProvider = new Map(balanceEntries);
 
   const providers: ProviderHealthRow[] = MONITORED_PROVIDERS.map((provider) => {
@@ -1337,7 +1380,7 @@ export const getProviderHealthDashboard = async (
       .slice(0, 4)
       .map((row) => ({
         code: row.key.split(":error:")[1] || "UNKNOWN",
-        count: row.count,
+        count: usageBucketCount(row.count),
         updatedAt: row.updatedAt.toISOString(),
         explanation: errorExplanationFor(row.key.split(":error:")[1] || "UNKNOWN"),
       }));
@@ -1452,6 +1495,15 @@ export const getProviderHealthDashboard = async (
     const providerModels = runtimeModels.filter(
       (model) => model.provider === provider && !model.catalogDeleted
     );
+    // Most recent recorded HTTP status per model, so an incident is classified
+    // from the structured status the provider actually returned rather than
+    // from pattern-matching its diagnostic string. recentErrorEvents is
+    // already newest-first, so the first hit per model is the latest one.
+    const modelEventHttpStatus = new Map<string, number | null>();
+    for (const event of recentErrorEvents) {
+      if (!event.modelId || modelEventHttpStatus.has(event.modelId)) continue;
+      modelEventHttpStatus.set(event.modelId, event.httpStatus);
+    }
     const modelIncidents = providerModels
       .map((model) => {
         const failure = latestFor(rows, `model:${model.id}:failure`);
@@ -1472,15 +1524,31 @@ export const getProviderHealthDashboard = async (
         ).length;
         const failureCount5m =
           failure?.period === "model-health-5m"
-            ? Math.max(0, failure.count - excludedFailureCount5m)
+            ? Math.max(
+                0,
+                usageBucketCount(failure.count) - excludedFailureCount5m
+              )
             : 0;
         if (failureCount5m <= 0) return null;
+        const recentErrorCode = recentError?.key.split(":error:")[1] || null;
+        // STG-R002: the deciding fix for cross-model contamination. A 400
+        // rejection of perplexity/sonar-deep-research says the request we
+        // built was malformed; it is not evidence that perplexity/sonar
+        // cannot answer. Only failures whose category is provider-wide
+        // (credentials, billing, rate limiting, 5xx, network) escalate.
+        const failureScope = classifyProviderFailure({
+          diagnosticCode: recentErrorCode,
+          httpStatus: modelEventHttpStatus.get(model.id) ?? null,
+        });
         return {
           modelId: model.id,
           modelName: model.name,
           failureCount5m,
-          recentErrorCode: recentError?.key.split(":error:")[1] || null,
+          recentErrorCode,
           updatedAt: (failure || recentError)?.updatedAt.toISOString() || now.toISOString(),
+          scope: isProviderScopedFailureCategory(failureScope.category)
+            ? ("provider" as const)
+            : ("model" as const),
         };
       })
       .filter((item): item is NonNullable<typeof item> => Boolean(item))
@@ -1602,13 +1670,21 @@ export const getProviderHealthDashboard = async (
       internalStatus: status,
       consecutiveFailures,
       incidentConsecutiveFailureThreshold: INCIDENT_CONSECUTIVE_FAILURE_THRESHOLD,
+      // STG-R002: only a model incident whose cause is provider-wide can
+      // escalate the provider. Previously any model failing three times in
+      // five minutes marked the whole provider as an incident, which is how a
+      // single deep-research model's HTTP 400s made every Perplexity model
+      // report unavailable. Model-scoped incidents still block that model --
+      // see /api/models/status, which applies them per model.
       hasActiveModelIncident: modelIncidents.some(
-        (incident) => incident.failureCount5m >= 3
+        (incident) => incident.failureCount5m >= 3 && incident.scope === "provider"
       ),
       lastProbeSuccessAt: healthState?.lastProbeSuccessAt ?? null,
       lastProbeFailureAt: healthState?.lastProbeFailureAt ?? null,
       consecutiveProbeFailures,
       probeIncidentConsecutiveFailureThreshold: PROBE_INCIDENT_CONSECUTIVE_FAILURE_THRESHOLD,
+      lastVerificationSuccessAt: healthState?.lastVerificationSuccessAt ?? null,
+      lastVerificationFailureAt: healthState?.lastVerificationFailureAt ?? null,
     });
 
     return {
@@ -1676,6 +1752,12 @@ export const getProviderHealthDashboard = async (
       alertLevel,
       fallback: FALLBACKS[provider],
       modelIncidents,
+      lastVerificationSuccessAt:
+        healthState?.lastVerificationSuccessAt?.toISOString() ?? null,
+      lastVerificationFailureAt:
+        healthState?.lastVerificationFailureAt?.toISOString() ?? null,
+      lastRecoveryAt: healthState?.lastRecoveryAt?.toISOString() ?? null,
+      verificationModelId: getVerificationModelFor(provider)?.id ?? null,
     };
   });
 

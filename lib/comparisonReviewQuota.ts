@@ -1,6 +1,7 @@
 import "server-only";
 
 import { prisma } from "@/lib/prisma";
+import { usageBucketCount } from "@/lib/chatUsageBucketCount";
 import { ChatAccessError } from "@/lib/chatSecurity";
 
 export type ComparisonReviewQuotaReservation = {
@@ -80,7 +81,7 @@ const readMonthlyReviewCount = async (
     },
     select: { count: true },
   });
-  return bucket?.count || 0;
+  return usageBucketCount(bucket?.count);
 };
 
 export const reserveFreeComparisonReview = (subjectKey: string) =>

@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
+import { useSession } from "next-auth/react";
 import { ArrowRight, ExternalLink, Menu, X } from "lucide-react";
 import { useLanguage, type Language } from "@/components/LanguageProvider";
 import { MarketingConsentSlot } from "@/components/analytics/AnalyticsProvider";
@@ -76,6 +77,7 @@ const resourceLinks: Record<Language, Array<{ label: string; path: string }>> = 
 const chrome = {
   en: {
     app: "Chat",
+    appSignedIn: "Open Tomverse",
     menu: "Menu",
     close: "Close menu",
     topMenu: [
@@ -94,6 +96,7 @@ const chrome = {
   },
   ko: {
     app: "채팅하기",
+    appSignedIn: "채팅으로 돌아가기",
     menu: "메뉴",
     close: "메뉴 닫기",
     topMenu: [
@@ -112,6 +115,7 @@ const chrome = {
   },
   zh: {
     app: "开始聊天",
+    appSignedIn: "返回聊天",
     menu: "菜单",
     close: "关闭菜单",
     topMenu: [
@@ -130,6 +134,7 @@ const chrome = {
   },
   fr: {
     app: "Discuter",
+    appSignedIn: "Revenir au chat",
     menu: "Menu",
     close: "Fermer le menu",
     topMenu: [
@@ -148,6 +153,7 @@ const chrome = {
   },
   de: {
     app: "Chatten",
+    appSignedIn: "Zum Chat zurueck",
     menu: "Menu",
     close: "Menu schliessen",
     topMenu: [
@@ -166,6 +172,7 @@ const chrome = {
   },
   es: {
     app: "Chatear",
+    appSignedIn: "Volver al chat",
     menu: "Menu",
     close: "Cerrar menu",
     topMenu: [
@@ -184,6 +191,7 @@ const chrome = {
   },
   pt: {
     app: "Conversar",
+    appSignedIn: "Voltar ao chat",
     menu: "Menu",
     close: "Fechar menu",
     topMenu: [
@@ -204,6 +212,7 @@ const chrome = {
   Language,
   {
     app: string;
+    appSignedIn: string;
     menu: string;
     close: string;
     topMenu: Array<{ label: string; href: string }>;
@@ -220,9 +229,18 @@ export function MarketingHeader({
 }) {
   const { lang } = useLanguage();
   const labels = chrome[lang] ?? chrome.en;
+  const { status: sessionStatus } = useSession();
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [isHeroCtaVisible, setIsHeroCtaVisible] = useState(false);
   const chatHref = `/chat?lang=${encodeURIComponent(lang)}`;
+  // "Try it" is wrong for someone who already has an account open in another
+  // tab -- on /pricing it read as an invitation to sign up again. Both labels
+  // lead to the same place, so the loading state keeps the signed-out wording
+  // rather than flashing a neutral placeholder on every prerendered marketing
+  // page; only the wording changes once the session resolves, never the
+  // destination.
+  const appCtaLabel =
+    sessionStatus === "authenticated" ? labels.appSignedIn : labels.app;
 
   useEffect(() => {
     const heroCta = document.getElementById("landing-hero-primary");
@@ -350,9 +368,11 @@ export function MarketingHeader({
             // 40px CTA flanked by 44px neighbours. Expressed in px, not rem,
             // so a 200% root font cannot double it into the overflow that
             // FINAL-F001 tracks -- the label inside still scales.
+            data-testid="marketing-header-app-cta"
+            data-session-state={sessionStatus}
             className={`hidden h-[44px] items-center gap-2 rounded-xl px-4 text-sm font-bold transition sm:inline-flex ${headerCtaClass}`}
           >
-            {labels.app}
+            {appCtaLabel}
             <ArrowRight className="h-4 w-4" />
           </Link>
           <button
@@ -418,9 +438,11 @@ export function MarketingHeader({
                   cta_location: "marketing_mobile_menu",
                 });
               }}
+              data-testid="marketing-mobile-app-cta"
+              data-session-state={sessionStatus}
               className={`mt-3 inline-flex h-11 items-center justify-center gap-2 rounded-xl px-4 text-sm font-bold transition ${headerCtaClass}`}
             >
-              {labels.app}
+              {appCtaLabel}
               <ArrowRight className="h-4 w-4" />
             </Link>
           </nav>

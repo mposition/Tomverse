@@ -140,8 +140,17 @@ export function UsageLimitModal({
             </a>
           ) : (
             <>
+              {/* The purchase started here, so it has to come back here: the
+                  credit-pack checkout used to hard-code /chat and drop both
+                  the language and any acknowledgement of what happened. */}
               <CreditPackPurchaseButton
                 trigger="limit_hit"
+                ctaLocation="credit_limit_modal"
+                returnTo={`/chat?lang=${encodeURIComponent(lang)}`}
+                // Height deliberately unchanged: this button is inside the
+                // usage-limit modal's visual golden, and re-recording that
+                // baseline is out of scope here (and cannot be done on a
+                // non-canonical runner -- docs/qa/canonical-visual-baseline.md).
                 className="flex items-center justify-center rounded-xl bg-zinc-900 px-4 py-2.5 text-sm font-bold text-white transition hover:bg-zinc-800 dark:bg-white dark:text-zinc-950 dark:hover:bg-zinc-200"
               >
                 {t("chat.continueWithAdditionalCredits")}

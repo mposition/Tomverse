@@ -1,3 +1,5 @@
+import { resolveModelPricing } from "@/lib/modelPricing";
+
 export type AiProvider =
     | "openai"
     | "anthropic"
@@ -378,131 +380,50 @@ export type ModelBillingProfile = {
     cachedInputPriceMultiplier: number;
 };
 
-type ModelCostClass = "standard" | "advanced" | "premium";
+type BillableModel = Pick<
+    AiModel,
+    | "id"
+    | "usageClass"
+    | "provider"
+    | "apiModel"
+    | "maxOutputTokens"
+    | "reservationOutputTokens"
+    | "inputUsdPerMillionTokens"
+    | "outputUsdPerMillionTokens"
+    | "cachedInputPriceMultiplier"
+>;
 
-const BILLING_DEFAULTS: Record<ModelCostClass, ModelBillingProfile> = {
-    standard: {
-        maxOutputTokens: 2_048,
-        reservationOutputTokens: 1_024,
-        inputUsdPerMillionTokens: 0.5,
-        outputUsdPerMillionTokens: 1,
-        cachedInputPriceMultiplier: 1,
-    },
-    advanced: {
-        maxOutputTokens: 4_096,
-        reservationOutputTokens: 2_048,
-        inputUsdPerMillionTokens: 3,
-        outputUsdPerMillionTokens: 12,
-        cachedInputPriceMultiplier: 1,
-    },
-    premium: {
-        maxOutputTokens: 8_192,
-        reservationOutputTokens: 2_048,
-        inputUsdPerMillionTokens: 15,
-        outputUsdPerMillionTokens: 60,
-        cachedInputPriceMultiplier: 1,
-    },
-};
+/**
+ * Full pricing decision for one request, including which price tier applied and
+ * where the number came from. Reservation and settlement both go through this
+ * so a stored snapshot can always be traced back to a pricing version.
+ *
+ * `estimatedPromptTokens` selects the long-context tier for models that price
+ * large prompts differently (Gemini 3.1 Pro's 200K step, today). Callers that
+ * do not know the prompt size get the first (cheapest-context) tier, which is
+ * only correct for flat-priced models -- so anything that reserves budget must
+ * pass the estimate.
+ */
+export const resolveModelRequestPricing = (
+    model: BillableModel,
+    options?: { estimatedPromptTokens?: number }
+) => resolveModelPricing(model, options);
 
-const getModelCostClass = (usageClass: ModelUsageClass): ModelCostClass => {
-    if (
-        usageClass === "premium" ||
-        usageClass === "premium-reasoning" ||
-        usageClass === "deep-research"
-    ) {
-        return "premium";
-    }
-    if (usageClass === "standard") return "standard";
-    return "advanced";
-};
-
-const MODEL_BILLING_DEFAULTS: Partial<
-    Record<string, Partial<ModelBillingProfile>>
-> = {
-    "llama-4-scout": {
-        maxOutputTokens: 8_192,
-        reservationOutputTokens: 2_048,
-        inputUsdPerMillionTokens: 0.11,
-        outputUsdPerMillionTokens: 0.34,
-        cachedInputPriceMultiplier: 1,
-    },
-    "deepseek-v4-flash": {
-        inputUsdPerMillionTokens: 0.14,
-        outputUsdPerMillionTokens: 0.28,
-        cachedInputPriceMultiplier: 0.02,
-    },
-    "deepseek-v4-pro": {
-        maxOutputTokens: 4_096,
-        reservationOutputTokens: 2_048,
-        inputUsdPerMillionTokens: 0.435,
-        outputUsdPerMillionTokens: 0.87,
-        cachedInputPriceMultiplier: 1 / 120,
-    },
-    "deepseek-r1": {
-        inputUsdPerMillionTokens: 0.14,
-        outputUsdPerMillionTokens: 0.28,
-        cachedInputPriceMultiplier: 0.02,
-    },
-};
-
-const modelEnvKey = (modelId: string, suffix: string) =>
-    `CHAT_MODEL_${modelId.replace(/[^A-Za-z0-9]/g, "_").toUpperCase()}_${suffix}`;
-
-const positiveNumber = (value: string | undefined, fallback: number) => {
-    const parsed = Number(value);
-    return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
-};
-
-const priceMultiplier = (value: string | undefined, fallback: number) => {
-    const parsed = Number(value);
-    return Number.isFinite(parsed) && parsed >= 0 && parsed <= 1
-        ? parsed
-        : fallback;
-};
-
+/**
+ * Backwards-compatible narrow view used by callers that only need the five
+ * numbers the reservation math consumes.
+ */
 export const getModelBillingProfile = (
-    model: Pick<AiModel, "id" | "usageClass" | "provider" | "maxOutputTokens" | "reservationOutputTokens" | "inputUsdPerMillionTokens" | "outputUsdPerMillionTokens" | "cachedInputPriceMultiplier">
+    model: BillableModel,
+    options?: { estimatedPromptTokens?: number }
 ): ModelBillingProfile => {
-    const defaults = {
-        ...BILLING_DEFAULTS[getModelCostClass(model.usageClass)],
-        ...MODEL_BILLING_DEFAULTS[model.id],
-    };
-    const maxOutputTokens = Math.floor(model.maxOutputTokens ?? positiveNumber(
-        process.env[modelEnvKey(model.id, "MAX_OUTPUT_TOKENS")],
-        defaults.maxOutputTokens
-    ));
-    const reservationOutputTokens = Math.min(
-        maxOutputTokens,
-        Math.floor(
-            model.reservationOutputTokens ?? positiveNumber(
-                process.env[
-                    modelEnvKey(model.id, "RESERVATION_OUTPUT_TOKENS")
-                ],
-                defaults.reservationOutputTokens
-            )
-        )
-    );
+    const pricing = resolveModelPricing(model, options);
     return {
-        maxOutputTokens,
-        reservationOutputTokens,
-        inputUsdPerMillionTokens: model.inputUsdPerMillionTokens ?? positiveNumber(
-            process.env[modelEnvKey(model.id, "INPUT_USD_PER_MILLION")],
-            defaults.inputUsdPerMillionTokens
-        ),
-        outputUsdPerMillionTokens: model.outputUsdPerMillionTokens ?? positiveNumber(
-            process.env[modelEnvKey(model.id, "OUTPUT_USD_PER_MILLION")],
-            defaults.outputUsdPerMillionTokens
-        ),
-        cachedInputPriceMultiplier: model.cachedInputPriceMultiplier ?? priceMultiplier(
-            process.env[
-                modelEnvKey(model.id, "CACHED_INPUT_PRICE_MULTIPLIER")
-            ],
-            model.provider === "mistral"
-                ? 0.1
-                : model.provider === "zhipu"
-                  ? 0.2
-                  : defaults.cachedInputPriceMultiplier
-        ),
+        maxOutputTokens: pricing.maxOutputTokens,
+        reservationOutputTokens: pricing.reservationOutputTokens,
+        inputUsdPerMillionTokens: pricing.inputUsdPerMillionTokens,
+        outputUsdPerMillionTokens: pricing.outputUsdPerMillionTokens,
+        cachedInputPriceMultiplier: pricing.cachedInputPriceMultiplier,
     };
 };
 

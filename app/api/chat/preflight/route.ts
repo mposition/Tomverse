@@ -34,6 +34,7 @@ import { isChatCostSafetyCode } from "@/lib/chatCostSafetyCore";
 import { WEB_SEARCH_MODES } from "@/lib/appDefaults";
 import { getWebSearchCapability } from "@/lib/webSearchCapability";
 import { getWebSearchSurchargeCredits } from "@/lib/webSearchCredits";
+import { estimatePromptTokens } from "@/lib/chatTokenEstimate";
 
 const preflightSchema = z
     .object({
@@ -69,8 +70,7 @@ const parseStoredModelIds = (value: unknown) => {
         : [];
 };
 
-const estimateTextTokens = (text: string) =>
-    text ? Math.max(1, Math.ceil(Buffer.byteLength(text, "utf8") / 4)) : 0;
+const estimateTextTokens = (text: string) => estimatePromptTokens(text);
 
 const comparisonTraceId = (request: Request) => {
     const suppliedTraceId = request.headers
@@ -244,6 +244,7 @@ export async function POST(request: Request) {
                 ),
                 attachmentTokens,
             });
+            const capability = getWebSearchCapability(model.id);
             return createChatBudget(
                 access.kind,
                 model,
@@ -251,13 +252,20 @@ export async function POST(request: Request) {
                 {
                     webSearchSurchargeCredits: getWebSearchSurchargeCredits(
                         payload.webSearchMode ?? "off",
-                        getWebSearchCapability(model.id)
+                        capability
                     ),
+                    nativeSearchEnabled:
+                        payload.webSearchMode === "always" &&
+                        capability.support === "native",
                 }
             );
         });
         modelIdsForLog = models.map((model) => model.id);
-        const result = await preflightChatComparisonAccess(access, budgets);
+        const result = await preflightChatComparisonAccess(access, budgets, {
+            traceId,
+            enabledTools:
+                payload.webSearchMode === "always" ? ["web_search"] : [],
+        });
 
         return Response.json(
             {

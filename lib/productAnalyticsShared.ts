@@ -82,6 +82,23 @@ export const PRODUCT_ANALYTICS_EVENT_NAMES = [
   // is the missing input: `navigation` says whether a given switch actually
   // crossed a root boundary and paid for it.
   "marketing_language_switched",
+  // The credit-pack purchase funnel. Before these, the only thing measurable
+  // between "someone opened /pricing" and "Stripe redirected them back" was
+  // `checkout_started`, which the pricing page never reached: its add-on CTA
+  // was a link to /chat. A drop-off at the CTA, at the sign-in round trip, or
+  // at pack selection all looked identical -- like nobody wanting credits.
+  "credit_pack_cta_view",
+  "credit_pack_cta_click",
+  "credit_pack_selected",
+  // The visitor was asked to sign in before a purchase could continue. Paired
+  // with `purchase_intent_resumed`, which fires when they come back and the
+  // intent is still intact, so an intent lost in the round trip is visible as
+  // the gap between the two.
+  "authentication_required",
+  "purchase_intent_resumed",
+  // Stripe sent the visitor back through `cancel_url`. Distinct from
+  // `checkout_failed`: nothing went wrong, they chose not to buy.
+  "checkout_cancelled",
 ] as const;
 
 export type ProductAnalyticsEventName =
@@ -136,6 +153,17 @@ export const analyticsPropertiesSchema = z
       .max(1_000_000)
       .optional(),
     current_plan: z.enum(["free", "pro", "max"]).optional(),
+    // What the visitor is trying to move to, which is not always a plan card:
+    // a credit-pack purchase leaves `current_plan` unchanged, so `plan_id`
+    // alone could not distinguish "wants Max" from "stays on Pro, buys credits".
+    target_plan: z.enum(["free", "pro", "max"]).optional(),
+    // Whether the session was resolved, and to what, at the moment the event
+    // fired. The reported defect -- a signed-in visitor being shown "Sign in to
+    // buy credits" -- was invisible in analytics precisely because no event
+    // recorded which side of the auth boundary the CTA believed it was on.
+    authentication_state: z
+      .enum(["loading", "authenticated", "unauthenticated"])
+      .optional(),
     trigger: purchaseAnalyticsTriggerSchema.optional(),
     plan_credits_remaining: z.number().int().min(0).max(1_000_000).optional(),
     addon_credits_remaining: z.number().int().min(0).max(1_000_000).optional(),
@@ -158,13 +186,33 @@ export const analyticsPropertiesSchema = z
     onboarding_id: z.string().trim().min(1).max(32).optional(),
     limit_scope: z.enum(["guest", "daily", "monthly"]).optional(),
     failure_stage: z
-      .enum(["promotion_validation", "checkout_session"])
+      .enum([
+        "promotion_validation",
+        "checkout_session",
+        // Loading the account's eligible packs, which is a separate failure
+        // from creating the session: a 401 here means the visitor never got to
+        // choose, and the recovery is re-authentication rather than a retry.
+        "credit_pack_load",
+      ])
       .optional(),
+    // Mirrors BILLING_ERROR_CODES in lib/purchaseIntent.ts, lower-cased to
+    // match the rest of this schema. Keeping the two in step is what lets a
+    // funnel drop-off be attributed to an expired session rather than being
+    // pooled into one "checkout failed" bucket.
     error_code: z
       .enum([
         "promotion_invalid",
         "network_error",
         "checkout_request_failed",
+        "authentication_required",
+        "session_expired",
+        "pack_not_available_for_plan",
+        "checkout_configuration_error",
+        "billing_market_mismatch",
+        "active_subscription_exists",
+        "plan_change_not_supported",
+        "checkout_rate_limited",
+        "unknown_error",
       ])
       .optional(),
     market_tier: z.enum(["primary", "limited", "preview"]).optional(),
