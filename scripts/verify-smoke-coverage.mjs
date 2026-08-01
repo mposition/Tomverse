@@ -52,7 +52,7 @@ const MANIFEST = [
   // --- attachments ---------------------------------------------------------
   { file: "attachment-flow.spec.ts", title: "selected image previews before and after send", categories: ["attachmentImage"], mandatory: true },
   { file: "attachment-flow.spec.ts", title: "PDF remains a friendly file card and sends successfully", categories: ["attachmentPdf"], mandatory: true },
-  { file: "attachment-flow.spec.ts", title: "image attachments disable text-only Llama models and keep Scout available", categories: ["attachmentModelCompat"], mandatory: true },
+  { file: "attachment-flow.spec.ts", title: "image attachments disable text-only models and keep a vision model available", categories: ["attachmentModelCompat"], mandatory: true },
 
   // --- UI contracts --------------------------------------------------------
   { file: "ui-contracts.spec.ts", title: "desktop exposes stable QA contracts", categories: ["uiContractDesktop"] },

@@ -9,10 +9,13 @@ export type ModelPickerFeature = "image" | "reasoning" | "search" | "code";
 export const RECOMMENDED_MODEL_IDS = [
   "gpt-5-4-mini",
   "claude-sonnet-5",
-  "deepseek-r1",
+  "gemini-3-6-flash",
 ] as const;
 
 const koreanDescriptions: Record<string, string> = {
+  "gpt-5-6-sol": "최고 수준의 추론, 코딩과 복잡한 전문 작업",
+  "gpt-5-6-terra": "성능과 비용의 균형을 맞춘 분석과 코딩",
+  "gpt-5-6-luna": "효율적인 대량 질문과 문서 작업",
   "gpt-5-5": "복잡한 분석과 중요한 의사결정",
   "gpt-5-5-thinking": "단계적인 사고가 필요한 어려운 문제",
   "gpt-5-4-mini": "빠른 일상 질문과 간단한 문서 작업",
@@ -20,14 +23,17 @@ const koreanDescriptions: Record<string, string> = {
   "claude-opus-4-8": "까다롭고 중요한 작업의 섬세한 추론",
   "claude-sonnet-5": "글쓰기, 구조화된 분석과 상세 문서 작업",
   "claude-haiku-4-5": "빠른 요약, 초안 작성과 가벼운 분석",
+  "gemini-3-6-flash": "빠른 에이전트 작업, 코딩과 멀티모달 분석",
   "gemini-3-5-flash": "빠른 응답과 이미지·파일 분석",
   "gemini-3-1-pro": "상세한 멀티모달 분석과 복잡한 문서",
   "gemini-2-5-pro": "이전 세대 멀티모달 분석",
-  "gemini-2-5-flash": "저비용 일상 작업과 빠른 파일 질문",
+  "gemini-2-5-flash": "빠른 문서 분석과 대량 일상 작업",
   "llama-3-1": "매우 빠르고 가벼운 텍스트 질문",
   "llama-4-scout": "빠른 이미지 질문과 긴 문맥 탐색",
   "llama-3-3": "오픈 모델 기반의 범용 텍스트 분석",
+  "groq-gpt-oss-120b": "빠른 오픈 모델 추론, 코딩과 기술 분석",
   "grok-4": "최신 이슈 대화와 폭넓은 고급 분석",
+  "grok-4-3": "빠른 범용 분석과 정확한 지시 이행",
   "grok-4-5": "복잡한 기술·분석 작업의 깊은 추론",
   "grok-3": "직접적인 대화 스타일의 범용 분석",
   "grok-3-mini": "빠르고 간결한 일상 답변",
@@ -36,7 +42,7 @@ const koreanDescriptions: Record<string, string> = {
   "deepseek-r1": "수학, 코드와 명시적 추론이 필요한 문제",
   "mistral-small-4": "효율적인 다국어 글쓰기와 일상 작업",
   "mistral-large-3": "고품질 다국어 분석과 긴 글 작업",
-  "mistral-medium-3-1": "균형 잡힌 다국어 초안 작성과 분석",
+  "mistral-medium-3-1": "균형 잡힌 멀티모달 분석과 다국어 작업",
   codestral: "코드 생성, 자동 완성과 저장소 질문",
   "kimi-k2.7-code": "코딩 작업과 긴 기술 문맥",
   "qwen3.7-max": "고난도 다국어 추론과 복잡한 지시",
@@ -459,7 +465,7 @@ export const modelMatchesCapability = (
     return support === "native" || support === "search-model";
   }
   const name = `${model.id} ${model.name}`.toLowerCase();
-  return ["mini", "flash", "haiku", "small", "lite", "llama-3-1"].some((term) =>
+  return ["mini", "flash", "haiku", "small", "lite", "luna"].some((term) =>
     name.includes(term)
   );
 };

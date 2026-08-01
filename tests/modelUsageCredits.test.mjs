@@ -87,6 +87,59 @@ test("Llama 4 Scout is a Standard vision model with explicit Groq limits", () =>
   assert.equal(modelSupportsImageInput(getModel("llama-3-1")), false);
 });
 
+test("new catalogue plans and credit weights follow their verified cost bands", () => {
+  const expected = {
+    "gpt-5-6-sol": ["Pro", "Premium", 8],
+    "gpt-5-6-terra": ["Free", "Advanced", 4],
+    "gpt-5-6-luna": ["Guest", "Standard", 1],
+    "gemini-3-6-flash": ["Free", "Advanced", 4],
+    "gemini-2-5-flash": ["Guest", "Standard", 1],
+    "groq-gpt-oss-120b": ["Free", "Advanced", 4],
+    "grok-4-3": ["Free", "Advanced", 4],
+    "mistral-medium-3-1": ["Free", "Advanced", 4],
+  };
+
+  for (const [id, [minimumPlan, category, credits]] of Object.entries(expected)) {
+    const model = getModel(id);
+    assert.equal(model.minimumPlan, minimumPlan, id);
+    assert.deepEqual(getModelUsageProfile(model), { category, credits }, id);
+  }
+});
+
+test("new catalogue models expose verified context, output and attachment capabilities", () => {
+  for (const id of ["gpt-5-6-sol", "gpt-5-6-terra", "gpt-5-6-luna"]) {
+    const model = getModel(id);
+    assert.equal(model.contextWindowTokens, 1_050_000, id);
+    assert.equal(getModelBillingProfile(model).maxOutputTokens, 128_000, id);
+    assert.equal(modelSupportsImageInput(model), true, id);
+    assert.equal(modelSupportsNativePdfInput(model), true, id);
+  }
+
+  for (const id of ["gemini-3-6-flash", "gemini-2-5-flash"]) {
+    const model = getModel(id);
+    assert.equal(model.contextWindowTokens, 1_048_576, id);
+    assert.equal(getModelBillingProfile(model).maxOutputTokens, 65_536, id);
+    assert.equal(modelSupportsImageInput(model), true, id);
+    assert.equal(modelSupportsNativePdfInput(model), true, id);
+  }
+
+  const gptOss = getModel("groq-gpt-oss-120b");
+  assert.equal(gptOss.contextWindowTokens, 131_072);
+  assert.equal(getModelBillingProfile(gptOss).maxOutputTokens, 65_536);
+  assert.equal(modelSupportsImageInput(gptOss), false);
+
+  const grok = getModel("grok-4-3");
+  assert.equal(grok.contextWindowTokens, 1_000_000);
+  assert.equal(modelSupportsImageInput(grok), true);
+  assert.equal(modelSupportsNativePdfInput(grok), false);
+
+  const mistral = getModel("mistral-medium-3-1");
+  assert.equal(mistral.apiModel, "mistral-medium-3-5");
+  assert.equal(mistral.contextWindowTokens, 262_144);
+  assert.equal(modelSupportsImageInput(mistral), true);
+  assert.equal(modelSupportsNativePdfInput(mistral), false);
+});
+
 test("long input applies the configured credit multiplier", () => {
   const premium = getModel("gpt-5-5");
   assert.equal(getInputCreditMultiplier(16_000), 1);

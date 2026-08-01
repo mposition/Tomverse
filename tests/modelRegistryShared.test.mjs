@@ -6,6 +6,8 @@ import {
   isSafeProviderApiBaseUrl,
   normalizeApiBaseUrl,
   PROVIDER_API_CONFIGURATION,
+  STATIC_CATALOG_RECONCILIATION_MODEL_IDS,
+  staticModelRegistryReconciliationRows,
 } from "../lib/modelRegistryShared.ts";
 
 test("provider registry defaults use public HTTPS endpoints and named environment keys", () => {
@@ -14,6 +16,43 @@ test("provider registry defaults use public HTTPS endpoints and named environmen
   )) {
     assert.equal(isSafeProviderApiBaseUrl(configuration.baseUrl), true, provider);
     assert.match(configuration.apiKeyEnvName, /^[A-Z][A-Z0-9_]*$/);
+  }
+});
+
+test("catalog reconciliation is exact-ID scoped and preserves operator-owned fields", () => {
+  const rows = staticModelRegistryReconciliationRows();
+  assert.deepEqual(
+    rows.map((row) => row.id).sort(),
+    [...STATIC_CATALOG_RECONCILIATION_MODEL_IDS].sort()
+  );
+
+  for (const row of rows) {
+    assert.equal("catalogDeleted" in row.data, false, row.id);
+    assert.equal("sortOrder" in row.data, false, row.id);
+    assert.equal("apiBaseUrl" in row.data, false, row.id);
+    assert.equal("apiKeyEnvName" in row.data, false, row.id);
+  }
+
+  const active = rows.find((row) => row.id === "gemini-2-5-flash");
+  assert.ok(active);
+  assert.equal(active.data.apiModel, "gemini-3.5-flash-lite");
+  assert.equal("enabled" in active.data, false);
+  assert.equal("status" in active.data, false);
+
+  const scout = rows.find((row) => row.id === "llama-4-scout");
+  assert.ok(scout);
+  assert.equal(scout.data.enabled, false);
+  assert.equal(scout.data.publiclyListed, false);
+  assert.equal(scout.data.status, "disabled");
+  assert.equal(scout.data.replacementModelId, "groq-gpt-oss-120b");
+
+  for (const modelId of ["llama-3-1", "llama-3-3"]) {
+    const llama = rows.find((row) => row.id === modelId);
+    assert.ok(llama, modelId);
+    assert.equal(llama.data.enabled, false, modelId);
+    assert.equal(llama.data.publiclyListed, false, modelId);
+    assert.equal(llama.data.status, "disabled", modelId);
+    assert.equal(llama.data.replacementModelId, "groq-gpt-oss-120b", modelId);
   }
 });
 

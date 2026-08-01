@@ -9,7 +9,7 @@ import { chatModelSummaryCopy } from "../components/chat/chatModelSummaryCopy.ts
 const MODELS = [
   { id: "gpt-5-4-mini", name: "GPT-5.4 mini", provider: "openai" },
   { id: "claude-sonnet-5", name: "Claude Sonnet 5", provider: "anthropic" },
-  { id: "gemini-2-5-flash", name: "Gemini 3.1 Flash-Lite", provider: "google" },
+  { id: "gemini-2-5-flash", name: "Gemini 3.5 Flash-Lite", provider: "google" },
   { id: "grok-3-mini", name: "Grok 3 Mini", provider: "xai" },
 ];
 

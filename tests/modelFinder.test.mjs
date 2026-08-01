@@ -101,12 +101,12 @@ test("complementary suggestion fills the missing capability in priority order", 
     "gemini-2-5-flash",
   ]);
   assert.deepEqual(noReasoningOrResearch, {
-    modelId: "deepseek-r1",
+    modelId: "groq-gpt-oss-120b",
     reason: "reasoning",
   });
 
   const hasReasoningOnly = getComplementaryModelSuggestion([
-    "deepseek-r1",
+    "groq-gpt-oss-120b",
     "gemini-2-5-flash",
   ]);
   assert.deepEqual(hasReasoningOnly, {
@@ -115,7 +115,7 @@ test("complementary suggestion fills the missing capability in priority order", 
   });
 
   const hasReasoningAndResearch = getComplementaryModelSuggestion([
-    "deepseek-r1",
+    "groq-gpt-oss-120b",
     "perplexity/sonar",
   ]);
   assert.deepEqual(hasReasoningAndResearch, {
@@ -126,10 +126,10 @@ test("complementary suggestion fills the missing capability in priority order", 
 
 test("complementary suggestion never re-suggests an already-selected model", () => {
   const suggestion = getComplementaryModelSuggestion([
-    "deepseek-r1",
+    "groq-gpt-oss-120b",
     "deepseek-v4-flash",
   ]);
   assert.equal(suggestion?.modelId, "perplexity/sonar");
-  assert.notEqual(suggestion?.modelId, "deepseek-r1");
+  assert.notEqual(suggestion?.modelId, "groq-gpt-oss-120b");
   assert.notEqual(suggestion?.modelId, "deepseek-v4-flash");
 });

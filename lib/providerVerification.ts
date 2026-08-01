@@ -2,6 +2,7 @@ import "server-only";
 
 import { generateText } from "ai";
 import { getActiveAiModel } from "@/lib/activeAiModel";
+import { getModelGenerationSettings } from "@/lib/modelGenerationCompatibility";
 import {
   AVAILABLE_MODELS,
   getModelBillingProfile,
@@ -263,14 +264,12 @@ export async function runProviderVerification(
   try {
     const result = await generate({
       model: getActiveAiModel(model),
+      ...getModelGenerationSettings(model),
       system: VERIFICATION_SYSTEM_PROMPT,
       prompt: VERIFICATION_PROMPT,
-      // The request shape is deliberately the plainest one every provider in
-      // this catalog accepts: no temperature, no tools, no provider-specific
-      // parameters. A verification that fails because we sent an exotic
-      // parameter would be indistinguishable from a provider outage -- which
-      // is the exact confusion this whole feature exists to remove. Cost is
-      // held down by the model choice and the output-token budget instead.
+      // Keep the request shape minimal: no temperature or tools. The shared
+      // compatibility helper only adds provider options required for a model
+      // whose catalog identity promises a reasoning mode.
       maxOutputTokens: VERIFICATION_MAX_OUTPUT_TOKENS,
       maxRetries: 0,
       abortSignal: AbortSignal.timeout(VERIFICATION_TIMEOUT_MS),

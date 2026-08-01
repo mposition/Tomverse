@@ -107,7 +107,7 @@ async function mockQuickComparison(page: Page) {
               responseId: "C",
               messageId: "answer-c",
               modelId: reviewModels[2],
-              modelName: "Gemini 3.1 Flash-Lite",
+              modelName: "Gemini 3.5 Flash-Lite",
             },
           ],
           reviewerModelId: "gpt-5-4-mini",
