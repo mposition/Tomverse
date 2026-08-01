@@ -33,6 +33,16 @@ export default async function SiteLayout({
   const lang = isSupportedDocumentLanguage(documentLanguage)
     ? documentLanguage
     : "en";
+  // UI-001. The theme bootstrap is an inline script, so under a strict CSP it
+  // needs the request's nonce. Like the document language above, this is
+  // infrastructure the proxy resolved for the request -- not per-user state --
+  // and it is absent on the prerendered routes under this root, where
+  // lib/staticMarketingCsp.ts hashes the built HTML instead.
+  const nonce = (await headers()).get("x-nonce") || undefined;
 
-  return <DocumentShell lang={lang}>{children}</DocumentShell>;
+  return (
+    <DocumentShell lang={lang} nonce={nonce}>
+      {children}
+    </DocumentShell>
+  );
 }

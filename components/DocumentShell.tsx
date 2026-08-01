@@ -1,6 +1,7 @@
 import { ThemeController } from "@/components/ThemeController";
 import { fontVariables } from "@/lib/fonts";
 import type { Language } from "@/lib/language";
+import { THEME_BOOTSTRAP_SCRIPT } from "@/lib/themeBootstrap";
 
 /**
  * The `<html>` / `<body>` wrapper every root layout renders.
@@ -29,9 +30,17 @@ import type { Language } from "@/lib/language";
  */
 export function DocumentShell({
   lang,
+  nonce,
   children,
 }: Readonly<{
   lang: Language;
+  /**
+   * Per-request CSP nonce, read from the proxy's `x-nonce` header by the
+   * dynamic root. Prerendered roots pass nothing: a nonce cannot exist at build
+   * time, and those routes are covered by the inline-script hashes
+   * `lib/staticMarketingCsp.ts` computes from the built HTML instead.
+   */
+  nonce?: string;
   children: React.ReactNode;
 }>) {
   return (
@@ -41,6 +50,15 @@ export function DocumentShell({
       className={`${fontVariables} h-full antialiased`}
     >
       <body className="min-h-full flex flex-col">
+        {/*
+          UI-001. First child of <body> so it executes during parse, before the
+          first paint. `ThemeController` below still owns every later change;
+          this only removes the light flash that its useEffect cannot prevent.
+        */}
+        <script
+          nonce={nonce}
+          dangerouslySetInnerHTML={{ __html: THEME_BOOTSTRAP_SCRIPT }}
+        />
         <ThemeController />
         {children}
       </body>

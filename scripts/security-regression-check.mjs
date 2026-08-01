@@ -1010,11 +1010,19 @@ const checks = [
         applicationLayout.includes('export const dynamic = "force-dynamic"') &&
         applicationLayout.includes("getServerSession(authOptions)") &&
         // VAL-004 narrowed this rule rather than relaxing it. A root layout may
-        // read the document language the proxy resolved and nothing else --
+        // read request-scoped values the proxy resolved and nothing else --
         // reading a session, a cookie or the database there would put per-user
         // state above every route under that root.
-        siteReads.length === 1 &&
+        //
+        // UI-001 added the second permitted read. The CSP nonce is the same
+        // category as the document language: minted per request by the proxy,
+        // identical for every visitor who happens to share that request, and
+        // carrying no user identity. The theme bootstrap is an inline script and
+        // cannot execute under `script-src 'self' 'nonce-...'` without it. The
+        // allowlist stays exhaustive -- anything else still fails this check.
+        siteReads.length === 2 &&
         siteReads[0] === "DOCUMENT_LANGUAGE_HEADER" &&
+        siteReads[1] === '"x-nonce"' &&
         rootLayouts[0].includes('import { headers } from "next/headers"') &&
         // The localized root takes its language from `params`, so it needs no
         // request-time read at all and must stay prerenderable: an accidental

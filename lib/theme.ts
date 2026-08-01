@@ -7,7 +7,10 @@ export const isThemePreference = (value: unknown): value is ThemePreference =>
   THEME_PREFERENCES.includes(value as ThemePreference);
 
 const SYSTEM_DARK_QUERY = "(prefers-color-scheme: dark)";
-const THEME_STORAGE_KEY = "tomverse_theme_preference";
+// Exported so the first-paint bootstrap in lib/themeBootstrap.ts reads the same
+// key this module writes. Two spellings of it would mean the bootstrap silently
+// falls back to "system" for everyone who has chosen a theme.
+export const THEME_STORAGE_KEY = "tomverse_theme_preference";
 export const THEME_PREFERENCE_CHANGED_EVENT = "tomverse:theme-preference-changed";
 
 export const applyThemePreference = (
