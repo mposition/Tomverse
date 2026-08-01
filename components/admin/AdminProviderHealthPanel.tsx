@@ -248,7 +248,13 @@ function ProviderVerificationSection({
   const recoveryBlockedReason = eligibility.allowed ? null : eligibility.detail;
 
   return (
-    <div className="mt-4 rounded-2xl border border-zinc-800 bg-zinc-900/40 p-4">
+    // Scoped test id: the real console renders one of these per provider, so
+    // copy assertions need a container to resolve against rather than matching
+    // the same sentence in eleven rows.
+    <div
+      data-testid={`provider-verification-${provider.provider}`}
+      className="mt-4 rounded-2xl border border-zinc-800 bg-zinc-900/40 p-4"
+    >
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <PanelLabel>Verification and recovery</PanelLabel>
