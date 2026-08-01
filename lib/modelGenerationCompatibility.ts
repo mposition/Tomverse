@@ -12,7 +12,6 @@ export const GEMINI_STRICT_GENERATION_MODEL_IDS = new Set([
 
 const supportsConfiguredReasoning = (model: Pick<AiModel, "id" | "provider">) =>
   model.provider === "openai" ||
-  model.id === "groq-gpt-oss-120b" ||
   model.id === "grok-4-3" ||
   model.id === "grok-4-5";
 

@@ -152,11 +152,12 @@ test.describe("attachment UX", () => {
       .click();
     await openModelCatalogue(page);
 
+    // Was llama-3-1 / llama-4-scout until Llama left the public catalogue
+    // with Groq's hosting. Any enabled Guest-tier pair -- one text-only, one
+    // vision -- exercises the same assertion.
     const textOnlyModel = page.locator(
       '[data-testid="model-option"][data-model-id="deepseek-v4-flash"]'
     );
-    // Was llama-4-scout until Groq stopped serving it and it was disabled;
-    // any enabled Guest-tier vision model exercises the same assertion.
     const visionModel = page.locator(
       '[data-testid="model-option"][data-model-id="gemini-2-5-flash"]'
     );

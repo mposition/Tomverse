@@ -42,13 +42,14 @@ import {
 import { probeDailyCostCapMicroUsd } from "@/lib/providerProbe";
 import { getVerificationModelFor } from "@/lib/providerVerification";
 import { getProbeUsageCostTodayMicroUsd } from "@/lib/providerUsageAccounting";
+import {
+  PROVIDER_FALLBACKS,
+  type ProviderFallback,
+} from "@/lib/providerFallbackCandidates";
+
+export type { ProviderFallback };
 
 export type ProviderHealthStatus = "available" | "limited" | "outage";
-
-export type ProviderFallback = {
-  reason: string;
-  recommendedModelIds: string[];
-};
 
 export type ProviderStatusReason = {
   code: string;
@@ -216,19 +217,6 @@ const PROVIDER_HEALTH_RECOVERY_SUCCESSES = 3;
 const isNonProviderHealthDiagnostic = (code: string | null | undefined) =>
   Boolean(code && NON_PROVIDER_HEALTH_DIAGNOSTIC_CODES.has(code));
 
-const FALLBACKS: Record<AiProvider, ProviderFallback> = {
-  openai: { reason: "General model fallback", recommendedModelIds: ["gemini-2-5-flash", "claude-haiku-4-5", "groq-gpt-oss-120b"] },
-  anthropic: { reason: "Writing and analysis fallback", recommendedModelIds: ["gpt-5-4-mini", "gemini-2-5-flash", "mistral-small-4"] },
-  google: { reason: "Fast general fallback", recommendedModelIds: ["gpt-5-4-mini", "mistral-small-4", "groq-gpt-oss-120b"] },
-  groq: { reason: "Fast open-model fallback", recommendedModelIds: ["mistral-small-4", "qwen3.6-flash", "deepseek-v4-flash"] },
-  xai: { reason: "Current-answer fallback", recommendedModelIds: ["gpt-5-4-mini", "perplexity/sonar", "gemini-2-5-flash"] },
-  deepseek: { reason: "Reasoning fallback", recommendedModelIds: ["qwen3.6-flash", "mistral-small-4", "gpt-5-4-mini"] },
-  mistral: { reason: "EU/multilingual fallback", recommendedModelIds: ["groq-gpt-oss-120b", "qwen3.6-flash", "gpt-5-4-mini"] },
-  moonshot: { reason: "Coding fallback", recommendedModelIds: ["codestral", "qwen3.7-plus", "deepseek-v4-pro"] },
-  qwen: { reason: "Multilingual fallback", recommendedModelIds: ["mistral-small-4", "gemini-2-5-flash", "groq-gpt-oss-120b"] },
-  zhipu: { reason: "GLM fallback", recommendedModelIds: ["qwen3.6-flash", "deepseek-v4-flash", "mistral-small-4"] },
-  perplexity: { reason: "Search provider fallback; web-aware answer may be unavailable", recommendedModelIds: ["gpt-5-4-mini", "gemini-2-5-flash", "claude-haiku-4-5"] },
-};
 
 const providerSet = new Set<AiProvider>(
   AVAILABLE_MODELS.map((model) => model.provider)
@@ -1750,7 +1738,7 @@ export const getProviderHealthDashboard = async (
       expectedEffectiveHeadroomMicroUsd,
       limitAlignment,
       alertLevel,
-      fallback: FALLBACKS[provider],
+      fallback: PROVIDER_FALLBACKS[provider],
       modelIncidents,
       lastVerificationSuccessAt:
         healthState?.lastVerificationSuccessAt?.toISOString() ?? null,

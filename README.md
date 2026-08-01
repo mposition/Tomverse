@@ -188,8 +188,31 @@ copy receives a unique draft ID and starts disabled and hidden so its new API
 model ID can be verified before it becomes callable.
 
 The checked-in `AVAILABLE_MODELS` array is retained only as the first-deploy
-bootstrap and a rolling-migration fallback. Existing rows are never overwritten
-by the bootstrap. Removing a model from the Admin Console archives it
+bootstrap and a rolling-migration fallback. Existing rows keep their
+admin-tuned values -- name, blurb, pricing, sort order -- and are never
+overwritten by the bootstrap, with one deliberate exception: **withdrawal from
+the offer is replayed**. A model the checked-in catalogue marks as not
+offerable has `enabled`, `publiclyListed` and `status` -- plus its
+`replacementModelId` -- forced onto any existing row on every bootstrap.
+Without that, a model withdrawn in `lib/models.ts` after its row already
+existed stayed selectable forever, because the bootstrap only ever inserted.
+
+Two states are replayed, and each keeps its own `status` rather than being
+flattened together:
+
+- **Retired** (`status="disabled"`) -- the provider stopped serving it, or the
+  catalogue dropped it. Points at a live `replacementModelId`, and stays
+  resolvable so stored conversations, the credit ledger and admin history keep
+  reading.
+- **Pre-launch** (`status="coming-soon"`) -- the id is registered and
+  reviewable but the model has not cleared its launch gate. It has no
+  replacement, because it never replaced anything. Replayed for the same
+  reason as retirement: an environment that received an earlier build with the
+  model enabled would otherwise keep offering it.
+
+The replay is idempotent, never deletes a row, and never touches
+`catalogDeleted`, which stays a human-controlled admin action. Removing a model
+from the Admin Console archives it
 (`catalogDeleted=true`, `enabled=false`, `publiclyListed=false`) instead of
 physically deleting the ID, so historical conversations remain readable. A
 saved archived entry is restored to the active catalogue.
@@ -989,14 +1012,38 @@ distinct from the real-traffic `lastSuccessAt`/`lastFailureAt`/
 each other.
 
 The probe model for a provider is resolved from the model registry (the
-cheapest enabled `standard`-tier model, or -- for the two providers with no
-standard-tier option, Moonshot and Perplexity -- the cheapest enabled model
+cheapest enabled `standard`-tier model, or -- for providers with no
+standard-tier option, such as Moonshot and xAI -- the cheapest enabled model
 of any tier) and can be overridden per provider without a deploy via a JSON
 map:
 
 ```text
 PROVIDER_PROBE_MODEL_OVERRIDES={"openai":"gpt-5-4-mini"}
 ```
+
+An override is only honored when it names a model that exists, belongs to
+that provider **and is enabled**. A retired model therefore cannot be pinned
+as a probe target -- retiring a model does not clear an environment variable
+naming it, so the entry is dropped and the default target is used. That is no
+longer silent: the resolver logs which entry it ignored and why.
+
+The probe deliberately sends no `reasoning_effort`. A model's catalogue
+`reasoning` value is a capability signal rather than a request parameter, so
+there is nothing to lower by default, and every parameter the probe has added
+in the past (`max_output_tokens`, `temperature`) has at some point been
+rejected by a provider and recorded as a provider-health failure. Reasoning
+tokens also come out of the same 32-token output budget, so the saving is
+worth cents a month. To evaluate it on staging first:
+
+```text
+PROVIDER_PROBE_REASONING_EFFORT=low
+```
+
+Accepted values are `none`, `minimal`, `low`, `medium` and `high`; anything
+else is ignored. It is applied only to probe targets the catalogue marks as
+reasoning models, and reaches the provider through the OpenAI-compatible
+chat namespace that xAI, Moonshot, DeepSeek, Mistral, Qwen, Zhipu and Groq
+all share.
 
 A daily cost ceiling guards the whole cycle, checked before every run against
 that day's total `ProviderDailyUsage` rows recorded with `source: "probe"`

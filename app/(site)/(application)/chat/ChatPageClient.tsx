@@ -2751,6 +2751,24 @@ export function ChatPageClient({
     return true;
   };
 
+  // The same entitlement rule swapSelectedModel enforces below, exposed so
+  // the outage banner can decide what to *offer* with it instead of only
+  // finding out at the moment the user clicks. Retiring Grok 3 / Grok 3 Mini
+  // onto the Pro-only Grok 4.5 is what made the difference visible: without
+  // this, a Free user's only offered recovery would have been a model the
+  // swap handler immediately refuses.
+  const canSelectModelForPlan = useCallback(
+    (modelId: string) => {
+      const model = getModel(modelId);
+      if (!model) return false;
+      if (!canUseModelWithPlan(currentAccessPlan, model)) return false;
+      return isGuestMode
+        ? clampGuestSelectedModels([modelId]).includes(modelId)
+        : true;
+    },
+    [clampGuestSelectedModels, currentAccessPlan, getModel, isGuestMode]
+  );
+
   // Swaps one already-selected model for another in a single state update --
   // used when the picker is already at the model cap, so the two selections
   // change atomically instead of racing two separate toggleModel() calls
@@ -3335,6 +3353,7 @@ export function ChatPageClient({
           onDownload={handleDownloadConversation}
           onToggleModel={toggleModel}
           onSwapModel={swapSelectedModel}
+          canSelectModel={canSelectModelForPlan}
           webSearchMode={webSearchMode}
           onWebSearchModeChange={handleWebSearchModeChange}
           onOpenDeepResearchSetup={() => setIsDeepResearchSetupOpen(true)}
@@ -3386,6 +3405,7 @@ export function ChatPageClient({
           onDownload={handleDownloadConversation}
           onToggleModel={toggleModel}
           onSwapModel={swapSelectedModel}
+          canSelectModel={canSelectModelForPlan}
           webSearchMode={webSearchMode}
           onWebSearchModeChange={handleWebSearchModeChange}
           onOpenDeepResearchSetup={() => setIsDeepResearchSetupOpen(true)}

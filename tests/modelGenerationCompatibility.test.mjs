@@ -26,9 +26,9 @@ test("GPT-5.6 does not gain a synthetic Thinking configuration", () => {
 });
 
 test("OpenAI-compatible reasoning models pass reasoning_effort through the SDK", () => {
-  assert.deepEqual(getModelProviderOptions(getModel("groq-gpt-oss-120b")), {
-    openai: { reasoningEffort: "medium", forceReasoning: true },
-  });
+  // grok-4-3 is retired, but it stays covered here: forceReasoning is what
+  // stops the SDK dropping reasoning_effort for a provider that is not on its
+  // own allowlist, and that is the part a relisting would depend on.
   assert.deepEqual(getModelProviderOptions(getModel("grok-4-3")), {
     openai: { reasoningEffort: "none", forceReasoning: true },
   });

@@ -57,7 +57,6 @@ test("uses Gemini base model IDs and only keeps generateContent models", () => {
 test("preserves the exact 2026-08-01 provider API model strings", () => {
   const openaiCompatible = [
     ["openai", "gpt-5.6-sol"],
-    ["groq", "openai/gpt-oss-120b"],
     ["xai", "grok-4.3"],
     ["deepseek", "deepseek-v4-flash"],
     ["mistral", "mistral-medium-3-5"],

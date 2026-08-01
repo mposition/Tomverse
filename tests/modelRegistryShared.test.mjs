@@ -44,16 +44,36 @@ test("catalog reconciliation is exact-ID scoped and preserves operator-owned fie
   assert.equal(scout.data.enabled, false);
   assert.equal(scout.data.publiclyListed, false);
   assert.equal(scout.data.status, "disabled");
-  assert.equal(scout.data.replacementModelId, "groq-gpt-oss-120b");
+  assert.equal(scout.data.replacementModelId, "gemini-3-5-flash");
 
-  for (const modelId of ["llama-3-1", "llama-3-3"]) {
+  // Each retired Llama hands off to a live model at its own tier, from
+  // another provider -- Groq has none left. Every replacement here must be a
+  // model this reconciliation is not itself retiring.
+  for (const [modelId, replacementModelId] of [
+    ["llama-3-1", "deepseek-v4-flash"],
+    ["llama-3-3", "mistral-medium-3-1"],
+  ]) {
     const llama = rows.find((row) => row.id === modelId);
     assert.ok(llama, modelId);
     assert.equal(llama.data.enabled, false, modelId);
     assert.equal(llama.data.publiclyListed, false, modelId);
     assert.equal(llama.data.status, "disabled", modelId);
-    assert.equal(llama.data.replacementModelId, "groq-gpt-oss-120b", modelId);
+    assert.equal(llama.data.replacementModelId, replacementModelId, modelId);
   }
+
+  // xAI keeps only Grok 4.5, so every other Grok in scope is reconciled into
+  // a retired row pointing at it.
+  for (const modelId of ["grok-4", "grok-4-3", "grok-3", "grok-3-mini"]) {
+    const grok = rows.find((row) => row.id === modelId);
+    assert.ok(grok, modelId);
+    assert.equal(grok.data.enabled, false, modelId);
+    assert.equal(grok.data.replacementModelId, "grok-4-5", modelId);
+  }
+
+  const grok45 = rows.find((row) => row.id === "grok-4-5");
+  assert.ok(grok45);
+  assert.equal("enabled" in grok45.data, false);
+  assert.equal("status" in grok45.data, false);
 });
 
 test("model registry URL validation blocks SSRF-oriented endpoints", () => {
