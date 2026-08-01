@@ -197,7 +197,9 @@ export function AdminUserSecurityControls({
           approvalId: data?.approvalId,
         });
         setFailure(described);
-        dispatchAppToast(described.message, "error");
+        // An approval-pending 409 is the policy working, so it is announced as
+        // information rather than as a failure the operator should retry.
+        dispatchAppToast(described.message, described.tone);
         return;
       }
 
@@ -215,7 +217,9 @@ export function AdminUserSecurityControls({
     } catch {
       setFailure({
         message: ADMIN_SECURITY_NETWORK_FAILURE_MESSAGE,
+        tone: "error",
         requiresReauthentication: false,
+        approvalId: null,
       });
       dispatchAppToast(ADMIN_SECURITY_NETWORK_FAILURE_MESSAGE, "error");
     } finally {
@@ -524,9 +528,15 @@ export function AdminUserSecurityControls({
 
       {failure ? (
         <div
-          role="alert"
+          role={failure.tone === "error" ? "alert" : "status"}
+          aria-live={failure.tone === "error" ? "assertive" : "polite"}
           data-testid="admin-security-request-error"
-          className="mt-4 rounded-xl border border-red-500/40 bg-red-500/10 p-3 text-xs font-bold text-red-100"
+          data-tone={failure.tone}
+          className={`mt-4 rounded-xl border p-3 text-xs font-bold ${
+            failure.tone === "error"
+              ? "border-red-500/40 bg-red-500/10 text-red-100"
+              : "border-amber-500/40 bg-amber-500/10 text-amber-100"
+          }`}
         >
           <p>{failure.message}</p>
           {failure.requiresReauthentication ? (
