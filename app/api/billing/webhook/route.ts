@@ -5,6 +5,10 @@ import type Stripe from "stripe";
 import { prisma } from "@/lib/prisma";
 import { getStripe } from "@/lib/stripe";
 import { processStripeEvent } from "@/lib/stripeWebhookProcessing";
+import { apiSecurityResponse, readLimitedText } from "@/lib/apiSecurity";
+import { safeErrorMetadata } from "@/lib/providerErrorClassification";
+
+const MAX_STRIPE_WEBHOOK_BYTES = 1024 * 1024;
 
 export async function POST(req: Request) {
   const signature = req.headers.get("stripe-signature");
@@ -19,7 +23,7 @@ export async function POST(req: Request) {
   let event: Stripe.Event;
   let logId: string | null = null;
   try {
-    const rawBody = await req.text();
+    const rawBody = await readLimitedText(req, MAX_STRIPE_WEBHOOK_BYTES);
     event = getStripe().webhooks.constructEvent(rawBody, signature, webhookSecret);
 
     // Stripe delivers events at-least-once. Skip re-running processing for an
@@ -57,7 +61,9 @@ export async function POST(req: Request) {
     });
     logId = log.id;
   } catch (error) {
-    console.error("Invalid Stripe webhook signature:", error);
+    const securityResponse = apiSecurityResponse(error);
+    if (securityResponse) return securityResponse;
+    console.error("Invalid Stripe webhook signature:", safeErrorMetadata(error));
     return NextResponse.json({ error: "Invalid signature." }, { status: 400 });
   }
 
@@ -71,21 +77,24 @@ export async function POST(req: Request) {
     }
     return NextResponse.json({ received: true });
   } catch (error) {
-    console.error("Stripe webhook processing failed:", error);
+    const errorMetadata = safeErrorMetadata(error);
+    console.error("Stripe webhook processing failed:", errorMetadata);
     if (logId) {
       await prisma.stripeWebhookEventLog
         .update({
           where: { id: logId },
           data: {
             status: "failed",
-            error:
-              error instanceof Error
-                ? error.message.slice(0, 1_000)
-                : "Unknown webhook processing error.",
+            error: `Webhook processing failed (${errorMetadata.name}${
+              errorMetadata.code ? `.${errorMetadata.code}` : ""
+            }).`,
           },
         })
         .catch((logError) => {
-          console.error("Stripe webhook log update failed:", logError);
+          console.error(
+            "Stripe webhook log update failed:",
+            safeErrorMetadata(logError)
+          );
         });
     }
     return NextResponse.json(

@@ -2,7 +2,9 @@ import "server-only";
 
 import { prisma } from "@/lib/prisma";
 import { isE2EDatabaseDisabled } from "@/lib/e2eTestMode";
-import type { SessionSecuritySnapshot } from "@/lib/sessionRevocationCore";
+import type {
+    SessionSecuritySnapshotResult,
+} from "@/lib/sessionRevocationCore";
 
 /**
  * Short-lived cache so resolving a session does not hit the database on every
@@ -16,7 +18,7 @@ const LOOKUP_FAILURE_TTL_MS = 5_000;
 
 const snapshotCache = new Map<
     string,
-    { expiresAt: number; snapshot: SessionSecuritySnapshot | null }
+    { expiresAt: number; snapshot: SessionSecuritySnapshotResult }
 >();
 
 const invalidateSnapshot = (userId: string) => {
@@ -52,12 +54,13 @@ export const revokeAllUserSessions = async (userId: string) => {
 
 /**
  * Reads the server-side signals that decide whether a token is still valid.
- * Returns null when the user no longer exists or the lookup fails, which callers
- * treat as "do not change the session" rather than "sign everyone out".
+ * Missing users and lookup failures are returned as explicit states so a JWT
+ * cannot outlive its user record or be accepted when revocation cannot be
+ * checked. Null is reserved for the isolated E2E database bypass.
  */
 export const readSessionSecuritySnapshot = async (
     userId: string
-): Promise<SessionSecuritySnapshot | null> => {
+): Promise<SessionSecuritySnapshotResult> => {
     // The Playwright server runs without a reachable database, so this lookup
     // would spend its connect timeout on every session resolution. Null is the
     // "leave the session alone" answer, which is what the fabricated E2E
@@ -70,12 +73,13 @@ export const readSessionSecuritySnapshot = async (
         return cached.snapshot;
     }
 
-    let snapshot: SessionSecuritySnapshot | null = null;
+    let snapshot: SessionSecuritySnapshotResult;
     try {
-        snapshot = await prisma.user.findUnique({
+        const user = await prisma.user.findUnique({
             where: { id: userId },
             select: { accountStatus: true, sessionsRevokedAt: true },
         });
+        snapshot = user ?? { lookupStatus: "user-not-found" };
     } catch (error) {
         console.error("Session security snapshot lookup failed:", {
             errorName: error instanceof Error ? error.name : "UnknownError",
@@ -84,9 +88,9 @@ export const readSessionSecuritySnapshot = async (
         // fresh connection attempt on every single request.
         snapshotCache.set(userId, {
             expiresAt: Date.now() + LOOKUP_FAILURE_TTL_MS,
-            snapshot: null,
+            snapshot: { lookupStatus: "lookup-error" },
         });
-        return null;
+        return { lookupStatus: "lookup-error" };
     }
 
     snapshotCache.set(userId, {

@@ -327,7 +327,7 @@ export function GuestVerificationSheet() {
         className={
           isOpen
             ? `absolute left-0 right-0 z-10 mx-auto w-full max-w-md overflow-y-auto rounded-t-3xl border-t border-zinc-200 bg-white px-4 pb-4 pt-3 shadow-2xl dark:border-zinc-800 dark:bg-zinc-950 motion-safe:transition-transform motion-safe:duration-200 ${
-                isRaised ? "translate-y-0" : "motion-safe:translate-y-6"
+              isRaised ? "translate-y-0" : "motion-safe:-translate-y-6"
               }`
             : "w-full px-4"
         }

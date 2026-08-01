@@ -7,6 +7,7 @@ import {
 } from "./support/app-fixtures";
 import { restoreActiveConversation } from "./support/chat-state-fixtures";
 import { openOnScreenKeyboard, closeOnScreenKeyboard } from "./support/ui-audit";
+import { setRootFontSize } from "./support/chat-state-fixtures";
 
 /**
  * REAUDIT-P1-04. The mobile shell was `h-[100dvh] overflow-hidden`: a box that
@@ -162,17 +163,10 @@ async function seedGuestPreferences(page: Page) {
 }
 
 async function setRootFont(page: Page, size: number) {
-  await page.evaluate((value) => {
-    document.documentElement.style.fontSize = `${value}px`;
-  }, size);
-  // Two frames: one for the style, one for the auto-growing textarea and the
-  // shell's flex distribution to settle against it.
-  await page.evaluate(
-    () =>
-      new Promise<void>((resolve) =>
-        requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
-      )
-  );
+  if (size !== 16 && size !== 20 && size !== 24 && size !== 32) {
+    throw new Error(`Unsupported QA root font size: ${size}px`);
+  }
+  await setRootFontSize(page, size);
 }
 
 type CellReport = {
@@ -892,6 +886,29 @@ test.describe("no-fallback provider banner with the keyboard open", () => {
       await assertTouchTargets(page, label);
 
       await closeOnScreenKeyboard(page);
+    }
+  );
+
+  test(
+    "safe-area insets do not push the composer under the home indicator",
+    { tag: "@ui-risk" },
+    async ({ page }) => {
+      test.setTimeout(120_000);
+      await page.setViewportSize({ width: 390, height: 844 });
+      await page.goto("/chat?lang=ko");
+      await expect(page.getByTestId("chat-textarea")).toBeVisible();
+      // env() cannot be forced from a test, so the fixture reproduces what the
+      // inset buys: 34px of reserved space below the composer's own padding.
+      await page.addStyleTag({ url: "/qa/mobile-safe-area-200.css" });
+      await page.getByTestId("chat-textarea").fill("세이프 에어리어 확인");
+
+      const report = await readCell(page);
+      expect(report.sendHit, "send above the home indicator").toBe("self");
+      expect(report.textareaHit, "textarea above the home indicator").toBe("self");
+      expect(
+        report.disclaimerIntersection,
+        "the disclaimer sits below the composer, not over it"
+      ).toBe(0);
     }
   );
 

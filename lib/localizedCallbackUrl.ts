@@ -11,14 +11,17 @@ export function withChatLanguage(callbackUrl: string | null | undefined, lang: L
     const source = callbackUrl || "/chat";
 
     try {
-        const isAbsoluteUrl = /^https?:\/\//i.test(source);
         const parsed = new URL(source, "https://tomverse.app");
+        const isInternalPath =
+            source.startsWith("/") &&
+            !source.startsWith("//") &&
+            parsed.origin === "https://tomverse.app";
+        if (!isInternalPath) return fallback;
 
         if (parsed.pathname === "/chat" && !isAppLanguage(parsed.searchParams.get("lang"))) {
             parsed.searchParams.set("lang", lang);
         }
 
-        if (isAbsoluteUrl) return parsed.toString();
         return `${parsed.pathname}${parsed.search}${parsed.hash}`;
     } catch {
         return fallback;

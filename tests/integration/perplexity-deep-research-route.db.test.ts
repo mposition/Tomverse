@@ -608,7 +608,7 @@ for (const scenario of [
     poll: {
       json: { status: "FAILED", error_message: "The model could not complete this request." },
     },
-    expectedMessage: "The model could not complete this request.",
+      expectedMessage: "The Perplexity deep research job failed.",
     diagnosticCode: "DEEP_RESEARCH_JOB_FAILED",
   },
   {
