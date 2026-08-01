@@ -110,6 +110,18 @@ test.describe("admin console shell", () => {
   test("an unknown workspace section renders the not-found page instead of a workspace", async ({
     page,
   }) => {
+    const notFoundMarker = page.locator(
+      'meta[name="robots"][content="noindex"]'
+    );
+
+    // A real workspace carries "noindex, nofollow, nocache" from the admin
+    // layout's own metadata, which this exact attribute selector does not
+    // match. Establishing that first is what makes the assertion below a
+    // discriminator rather than a check that something is always present.
+    await page.goto("/admin/overview");
+    await expect(consoleHeading(page)).toHaveText("Overview");
+    await expect(notFoundMarker).toHaveCount(0);
+
     await page.goto("/admin/not-a-real-section");
 
     await expect(
@@ -124,15 +136,15 @@ test.describe("admin console shell", () => {
     // Next.js streams the admin shell (`admin/loading.tsx` opens a Suspense
     // boundary) before the section segment calls notFound(), so the response
     // status is already committed as 200 and the not-found signal travels as
-    // the documented `noindex` marker instead. That extra bare-`noindex` meta
-    // is present only on a not-found response -- admin pages carry
-    // "noindex, nofollow, nocache" from their own metadata -- so it is what
-    // distinguishes the two here. See
-    // node_modules/next/dist/docs/01-app/03-api-reference/03-file-conventions/loading.md
+    // the documented `noindex` marker instead. A bare-`noindex` meta appears
+    // only on a not-found response -- admin pages carry
+    // "noindex, nofollow, nocache" from their own metadata, which this exact
+    // attribute selector does not match -- so its presence is what
+    // distinguishes the two. Presence, not count: hydration may re-insert the
+    // tag, and how many copies end up in the document is not the contract.
+    // See node_modules/next/dist/docs/01-app/03-api-reference/03-file-conventions/loading.md
     // ("Status Codes"), and docs/qa/e2e-coverage-matrix.md for the finding.
-    await expect(
-      page.locator('meta[name="robots"][content="noindex"]')
-    ).toHaveCount(1);
+    await expect(notFoundMarker.first()).toBeAttached();
   });
 
   test("the legacy /admin entry point forwards to the overview workspace", async ({
