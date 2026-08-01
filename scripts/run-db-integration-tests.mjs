@@ -130,3 +130,19 @@ run(
   ],
   "Running the administrator provider recovery route and its audit trail"
 );
+// Also its own process: it replaces the notification queue module to inject an
+// outbox write failure, which every importer in the process would otherwise
+// inherit.
+run(
+  [
+    "--conditions=react-server",
+    "--experimental-test-module-mocks",
+    "--no-warnings=ExperimentalWarning",
+    "--import",
+    "tsx",
+    "--test",
+    "--test-concurrency=1",
+    "tests/integration/refund-decision-route.db.test.ts",
+  ],
+  "Running the administrator refund decision transaction and its outbox"
+);
