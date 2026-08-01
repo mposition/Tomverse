@@ -1,14 +1,15 @@
 # 플랜 변경 정책
 
-Pro ↔ Max 플랜 변경에 관한 승인된 정책입니다. **정책은 확정됐고, 서버 · Stripe ·
-웹훅 구현이 끝났습니다. 남은 것은 UI(7절 5단계)입니다.** 이 문서가 구현의
-계약입니다.
+Pro ↔ Max 플랜 변경에 관한 승인된 정책입니다. **정책은 확정됐고, 구현이
+끝났습니다**(서버 상태기계 · Stripe 실행 · 웹훅 정산 · 변경 화면). 이 문서가
+구현의 계약입니다.
 
 관련 파일을 바꾸기 전에 읽어 주세요.
 
 - `lib/planChangeStateMachine.ts` — 허용 판정 · preview 유효성 · 예약 상태기계
 - `lib/planChangeService.ts` — Stripe 실행과 `PlanChangeRequest` 기록
 - `app/api/billing/plan-change/**`
+- `components/billing/PlanChangeDialog.tsx`와 `components/billing/planChangeCopy.ts`
 - `lib/planChangeCredits.ts`의 `planCreditsAfterPlanChange()`
 - `lib/purchaseIntent.ts`의 `resolvePlanCtaState()`
 - `app/api/billing/checkout/route.ts`의 플랜 변경 차단 분기
@@ -19,6 +20,11 @@ Pro ↔ Max 플랜 변경에 관한 승인된 정책입니다. **정책은 확�
 
 제품에는 구독 **변경** 흐름이 없습니다. `/api/billing/*`에는 신규 Checkout
 생성과 기간 말 해지만 있습니다. 따라서 지금은 다음을 유지합니다.
+
+> **갱신 (2026-08-01).** 이 절은 구현 이전 상태의 기록입니다. 지금은 요금
+> 페이지의 Pro↔Max CTA가 전용 변경 화면(`change_plan`)을 엽니다. 아래 세 개의
+> 409는 **그대로 유지**되며(5절), 구독 interval을 알 수 없는 계정만 계속
+> 고객지원으로 안내합니다.
 
 - 요금 페이지의 Pro↔Max CTA는 결제가 아니라 **고객지원 문의**로 연결합니다.
   온라인 변경이 아직 지원되지 않는다는 사실을 문구로 명시합니다.
@@ -418,10 +424,42 @@ pending update부터 "결제는 됐는데 권한이 되돌아간" 상태가 나�
    `pending_if_incomplete`, Subscription Schedule, preview · confirm · 조회 ·
    예약 취소 엔드포인트, 웹훅 정산.
 4. ~~**웹훅 · 재동기화**~~ (4절) — 완료
-5. **CTA · 변경 화면** — `resolvePlanCtaState()`의 `manage_plan` 분기를 전용 변경
-   화면으로 교체. **다음 단계.** 화면이 갖춰야 할 것: preview 금액 표시, 갱신 재개
-   별도 opt-in(체크 하나로 두 가지에 동의시키지 않기), 예약된 다운그레이드와 적용일
-   표시, 예약 취소 버튼, 거부 코드별 문구.
+5. ~~**CTA · 변경 화면**~~ — 완료(8절).
 
-`resolvePlanCtaState()` 수정은 **마지막 UI 단계**입니다. 이 함수를 먼저 바꾸면
-동작하지 않는 CTA가 다시 생깁니다.
+`resolvePlanCtaState()` 수정은 **마지막 UI 단계**였습니다. 서버 · Stripe · 웹훅이
+모두 끝난 뒤에 바꿨기 때문에, 이 CTA는 처음부터 실제로 동작합니다.
+
+## 8. 변경 화면 (2026-08-01)
+
+`resolvePlanCtaState()`에 `change_plan` 상태를 추가하고
+`components/billing/PlanChangeDialog.tsx`를 붙였습니다.
+
+- **CTA 판정.** 활성 구독이 있고 양쪽이 모두 유료 플랜이면 `change_plan`,
+  **단 구독 interval을 알 때만**입니다. 변경은 언제나 이미 청구 중인 interval
+  위에서 일어나므로, interval을 모르면 열어 봐야 confirm에서 거부됩니다 —
+  그런 계정은 계속 `manage_plan`(고객지원)입니다. 필드가 생기기 전에 동기화된
+  구독이 실제로 여기에 해당합니다.
+- **방향은 한 상태로 묶습니다.** 업그레이드와 다운그레이드가 같은 `change_plan`을
+  쓰고, 실제 방향은 서버가 confirm 시점에 다시 판정합니다. label만 위·아래를
+  구분합니다("Max로 업그레이드" vs "Pro로 변경") — Max 사용자에게 "Pro로
+  업그레이드"를 보여주던 것이 승격처럼 읽히면서 강등을 설명하는 문구였습니다.
+- **금액을 먼저 보여줍니다.** preview는 아무것도 바꾸지 않고, confirm은 사용자의
+  두 번째 행동입니다.
+- **업그레이드 confirm은 "완료"라고 말하지 않습니다.** invoice가 결제될 때
+  플랜이 바뀌므로, 서버가 `applied`를 보고하지 않는 한 화면은 "결제를 기다리고
+  있습니다"입니다.
+- **갱신 재개는 별도 체크박스입니다.** `renewal: "cancellation_preserved"`일 때만
+  나타나고, 체크하지 않으면 `resumeRenewal`을 아예 보내지 않습니다. confirm
+  버튼이 두 가지 동의를 겸하지 않습니다.
+- **진행 중인 변경이 새 견적보다 우선합니다.** 화면을 열면 먼저
+  `GET /api/billing/plan-change`를 읽고, 예약이 있으면 견적 대신 그것을 보여주며
+  취소 버튼을 답니다. 두 번째 변경을 제안하는 것은 서버가 거부하는 일이고,
+  가격을 읽게 한 뒤에 거부를 보여주는 것이 더 나쁩니다.
+- **거부 코드마다 다음 행동을 말합니다.** 서버 원문은 노출하지 않습니다. schedule
+  충돌·통화 미지원처럼 재시도해도 같은 답이 나오는 코드는 재시도 버튼 없이
+  고객지원으로 보냅니다.
+- **검증.** `tests/e2e/plan-change-dialog.spec.ts` 13개(금액 표시, pending 문구,
+  applied 문구, 다운그레이드 적용일, 예약 취소, 갱신 재개 opt-in 양방향, stale
+  견적, 지원 전용 거부, 더블클릭 1회 전송, Escape·focus 복귀, 320px·200%),
+  `tests/purchaseIntent.test.mjs`의 CTA 상태 행렬,
+  `tests/e2e/pricing-purchase-cta.spec.ts` 26개.
