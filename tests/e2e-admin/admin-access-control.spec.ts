@@ -103,7 +103,7 @@ test.describe("admin access control", () => {
     const navigation = page.getByRole("navigation", {
       name: "Admin console navigation",
     });
-    await expect(activeNavLink(page)).toHaveText("Users");
+    await expect(activeNavLink(page)).toHaveAttribute("href", "/admin/users");
     await expect(
       navigation.getByRole("link", { name: "Users Read" })
     ).toBeVisible();

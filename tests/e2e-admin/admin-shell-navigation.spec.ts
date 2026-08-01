@@ -85,9 +85,11 @@ test.describe("admin console shell", () => {
       await page.goto(item.href);
 
       await expect(consoleHeading(page)).toHaveText(item.label);
-      // Exactly one entry is marked current, and it is this one.
+      // Exactly one entry is marked current, and it is this one. Matched on
+      // href rather than text: a role without write access to the entry gets a
+      // "Read" marker appended inside the same link.
       await expect(activeNavLink(page)).toHaveCount(1);
-      await expect(activeNavLink(page)).toHaveText(item.label);
+      await expect(activeNavLink(page)).toHaveAttribute("href", item.href);
       await expect(page.getByText("Admin Console", { exact: true }).first()).toBeVisible();
     });
   }
@@ -158,7 +160,7 @@ test.describe("admin console shell", () => {
       breadcrumb.getByRole("link", { name: "Users", exact: true })
     ).toHaveAttribute("href", "/admin/users");
     // The parent navigation entry stays current for the child route.
-    await expect(activeNavLink(page)).toHaveText("Users");
+    await expect(activeNavLink(page)).toHaveAttribute("href", "/admin/users");
   });
 
   test("the header reports the signed-in administrator and their role", async ({

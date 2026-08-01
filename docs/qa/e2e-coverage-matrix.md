@@ -274,7 +274,41 @@ and sends nothing.
 | Admin console visual regression goldens | The visual baseline policy (`docs/qa/canonical-visual-baseline.md`) pins one canonical environment; adding a second suite of goldens is a separate decision. | A design decision plus canonical-runner capacity. |
 | `/e2e/admin-security-controls` harness page | Kept as-is. `tests/e2e/admin-user-security-controls.spec.ts` still guards the component's toast/error/expiry behaviour in isolation; the new suite covers the same controls on the real route. Removing it is a separate cleanup. | — |
 
-## 5. Known findings
+## 5. Running the user suite outside the canonical environment
+
+A sandbox or developer machine will not produce a clean `npm run test:e2e:pr`,
+for two reasons that are both about the environment rather than the product.
+Both were measured rather than assumed, so the distinction is checkable:
+
+**Concurrency.** The config uses `workers: 4, retries: 0` locally and
+`workers: 1, retries: 2` under `CI`. On a constrained machine the parallel run
+produces scattered failures across unrelated specs. Re-running the exact
+failing test locations with `CI=1` — same commit, same build, same browser,
+only the concurrency changed — turned 27 failing locations into **45 passed,
+0 failed**. Reproduce with:
+
+```
+CI=1 PLAYWRIGHT_CHROMIUM_EXECUTABLE=<chromium> \
+  npx playwright test --project=desktop-chromium <file>:<line> ...
+```
+
+**Screenshot goldens.** `chat-state-visual-regression.spec.ts` compares against
+committed PNGs, and `docs/qa/canonical-visual-baseline.md` states that a run
+using `PLAYWRIGHT_CHROMIUM_EXECUTABLE` is not canonical and its screenshots
+must not be judged against them. On such a runner the spec fails
+deterministically (identically across all three `CI=1` retries) with pixel
+diffs of 0.01–0.03 of the image, concentrated in glyph edges — the signature
+the baseline document describes for a Chromium version mismatch. These
+failures are not a signal about a change: verified by running the same
+locations on the commit *before* this suite was added, which produced the
+**same 20 failing screenshots and the same leading diff of 11966 pixels**,
+against a spec file and golden set that are byte-identical between the two
+commits.
+
+Judge goldens only on the canonical runner described in
+`docs/qa/canonical-visual-baseline.md`.
+
+## 6. Known findings
 
 1. **An unknown admin section answers HTTP 200, not 404.**
    `app/(site)/(application)/admin/loading.tsx` opens a Suspense boundary, so
