@@ -97,8 +97,9 @@ run(
     "tests/integration/conversation-title.db.test.ts",
     "tests/integration/provider-recovery.db.test.ts",
     "tests/integration/provider-failure-scope.db.test.ts",
+    "tests/integration/subscription-sync-ordering.db.test.ts",
   ],
-  "Running financial, credit, model-registry, admin-security, admin-users, login-methods, account-deletion, conversation-title, provider-recovery, and provider-failure-scope transaction scenarios"
+  "Running financial, credit, model-registry, admin-security, admin-users, login-methods, account-deletion, conversation-title, provider-recovery, provider-failure-scope, and subscription-sync-ordering transaction scenarios"
 );
 // Runs apart from the batch above: it drives the real route handlers, which
 // needs mock.module (--experimental-test-module-mocks) to replace the session

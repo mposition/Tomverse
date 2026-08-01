@@ -171,6 +171,33 @@ Stripe는 웹훅 전달 순서를 보장하지 않으므로, 오래된 이벤트
 이 보강 없이 플랜 변경을 열면, 결제는 성공했는데 권한이 되돌아가거나 그 반대인
 상태를 사람이 손으로 고쳐야 합니다.
 
+### 구현 완료 (2026-08-01)
+
+- **재조회.** `resyncSubscriptionFromStripe()`가 이벤트마다 Stripe에서 구독을 다시
+  읽습니다. 이벤트 payload는 트리거일 뿐입니다. 재조회 실패는 삼키지 않고
+  throw해서 route가 500을 반환하고 Stripe가 재전송하게 합니다 — 실패 시 payload로
+  대체하면 제거하려던 동작이 그대로 남습니다.
+- **순서 역전 방지.** `User.subscriptionSyncedAt`에 **조회 시각**을 기록하고, 그보다
+  이전에 읽은 snapshot은 거부합니다. 시각은 Stripe 요청 **전에** 찍습니다. 응답은
+  Stripe가 응답을 만든 시점의 상태만 보장하므로, 도착 시각으로 찍으면 느린
+  요청(오래된 데이터)이 빠른 요청(최신 데이터)보다 최신인 척할 수 있습니다.
+  비교와 쓰기는 `updateMany` 조건 한 문장이라 두 handler가 동시에 "최신 아님"을
+  읽고 둘 다 쓰는 일이 불가능합니다.
+- **처리 이벤트.** `lib/stripeWebhookSyncCore.ts`의
+  `SUBSCRIPTION_RESYNC_EVENT_TYPES`. `invoice.*`가 중요한 이유는
+  `pending_if_incomplete`로 만든 변경이 invoice가 결제되기 전까지 구독 객체에
+  나타나지 않기 때문입니다 — SCA 대기 중에는 구독이 여전히 Pro로 읽힙니다.
+- **invoice의 구독 위치.** 이 SDK 버전에서는 `invoice.subscription`이 아니라
+  `invoice.parent.subscription_details.subscription`입니다. 옛 필드를 읽으면
+  `undefined`가 나와 resync가 조용히 no-op이 됩니다.
+- **자동 · 수동 재동기화.** 자동은 웹훅 자체(모든 이벤트가 재조회)이고, 수동은
+  `POST /api/admin/billing/resync`입니다. 전달되지 않은 이벤트나 Stripe 대시보드에서
+  직접 한 변경은 웹훅이 고쳐 주지 못하므로 별도 경로가 필요합니다. 관리자 resync는
+  현재 시각으로 찍혀 늦게 오는 웹훅보다 항상 우선합니다.
+- **검증.** `tests/stripeWebhookSyncCore.test.mjs`(판정 · 이벤트 추출),
+  `tests/integration/subscription-sync-ordering.db.test.ts`(실제 PostgreSQL에서
+  조건부 UPDATE).
+
 ## 5. 엔드포인트 구조 — 기존 409를 제거하지 않습니다
 
 플랜 변경은 **전용 엔드포인트 두 개**로 만듭니다. `/api/billing/checkout`의 차단
@@ -199,16 +226,18 @@ Stripe는 웹훅 전달 순서를 보장하지 않으므로, 오래된 이벤트
 
 ## 7. 구현 순서
 
-앞 단계가 끝나기 전에 뒤 단계를 시작하지 않습니다.
+앞 단계가 끝나기 전에 뒤 단계를 시작하지 않습니다. 웹훅 보강(4절)은 2 · 3절보다
+먼저 끝냈습니다 — 순서 역전 방지가 없는 상태에서 플랜 변경을 붙이면 첫 번째
+pending update부터 "결제는 됐는데 권한이 되돌아간" 상태가 나옵니다.
 
 1. ~~**크레딧 경제성 결정**~~ — 확정. `lib/planChangeCredits.ts`에
    `planCreditsAfterPlanChange()`로 인코딩했고 `tests/planChangeCredits.test.mjs`가
    양방향 경계를 고정합니다.
 2. **서버 변경 상태기계** — 허용/거부 판정(같은 interval인지, 방향이 무엇인지),
-   예약 상태, 실패 시 원복. preview · confirm 엔드포인트.
+   예약 상태, 실패 시 원복. preview · confirm 엔드포인트. **다음 단계.**
 3. **Stripe 결제 · 예약** — proration preview, `always_invoice` +
    `pending_if_incomplete`, Subscription Schedule
-4. **웹훅 · 재동기화** (4절)
+4. ~~**웹훅 · 재동기화**~~ (4절) — 완료
 5. **CTA 변경** — `resolvePlanCtaState()`의 `manage_plan` 분기를 전용 변경 화면으로
    교체
 

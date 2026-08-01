@@ -23,6 +23,10 @@ model User {
   subscriptionCurrentPeriodEnd  DateTime?
   subscriptionBillingInterval   String?
   subscriptionCancelAtPeriodEnd Boolean       @default(false)
+  /// When the stored subscription state was read from Stripe. Webhooks arrive
+  /// out of order, so a snapshot read before this is refused rather than
+  /// reverting the account to an older plan. See lib/stripeWebhookSyncCore.ts.
+  subscriptionSyncedAt          DateTime?
   creditDebtCredits             Int           @default(0)
   creditDebtCostMicroUsd        BigInt        @default(0)
   billingRiskStatus             String        @default("normal")
