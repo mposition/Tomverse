@@ -89,6 +89,26 @@ UI-012에서 승인된 정책(B안)입니다. accent 색은 **hue가 아니라 �
 - 모든 오류 응답의 `resetAt`은 생성 시점보다 미래여야 합니다.
 - 이 계약을 어기는 변경은 릴리스 차단 사유입니다.
 
+# Plan change (Pro <-> Max)
+
+플랜 변경 CTA나 `/api/billing/checkout`의 차단 분기를 건드리기 전에 읽습니다.
+
+- `docs/policy/plan-change.md`
+
+**온라인 플랜 변경은 아직 지원하지 않습니다.** 제품에는 구독 *변경* 흐름이 없고
+신규 Checkout과 기간 말 해지만 있습니다. 그래서:
+
+- 서버는 동일 플랜 재구매와 다운그레이드를 `PLAN_CHANGE_NOT_SUPPORTED`로,
+  활성 구독 상태의 상위 플랜 요청을 `ACTIVE_SUBSCRIPTION_EXISTS`로 각각 409
+  차단합니다. **이 차단을 UI보다 먼저 풀지 않습니다.** 풀면 한 계정이 두 플랜을
+  동시에 결제합니다.
+- UI는 변경을 결제로 안내하지 않습니다. `resolvePlanCtaState()`가 이 상태를
+  `manage_plan`으로 판정하고, CTA는 고객지원 문의로 연결하며, 온라인 변경이
+  아직 지원되지 않는다는 사실을 문구로 명시합니다.
+- `resolvePlanCtaState()`의 `manage_plan` 분기 교체는 구현의 **마지막** 단계입니다.
+  크레딧 경제성 결정 → 서버 상태기계 → Stripe 결제·예약 → 웹훅 재동기화가 모두
+  끝난 뒤에 바꿉니다. 먼저 바꾸면 동작하지 않는 CTA가 다시 생깁니다.
+
 <!-- BEGIN:mobile-chat-composer-invariant -->
 ## Mobile chat composer invariant
 

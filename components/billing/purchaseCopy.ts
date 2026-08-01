@@ -26,7 +26,9 @@ export type PurchaseCtaCopy = {
   currentPlan: string;
   upgradeTo: (plan: string) => string;
   signInAndStart: (plan: string) => string;
+  /** Label for a plan change this product cannot yet perform online. */
   managePlan: string;
+  /** States plainly that online plan change is unavailable, not just where to go. */
   managePlanHint: string;
   startFree: string;
   retry: string;
@@ -49,9 +51,9 @@ export const purchaseCtaCopy: Record<Language, PurchaseCtaCopy> = {
     currentPlan: "Current plan",
     upgradeTo: (plan) => `Upgrade to ${plan}`,
     signInAndStart: (plan) => `Sign in to start ${plan}`,
-    managePlan: "Manage plan",
+    managePlan: "Ask support to change plan",
     managePlanHint:
-      "Plan changes for an active subscription are handled in account settings.",
+      "Changing plan online is not supported yet. Support can make the change for you.",
     startFree: "Start free",
     retry: "Try again",
     signInAgain: "Sign in again",
@@ -73,9 +75,9 @@ export const purchaseCtaCopy: Record<Language, PurchaseCtaCopy> = {
     currentPlan: "현재 플랜",
     upgradeTo: (plan) => `${plan}로 업그레이드`,
     signInAndStart: (plan) => `로그인하고 ${plan} 시작`,
-    managePlan: "플랜 관리",
+    managePlan: "고객지원에 플랜 변경 문의",
     managePlanHint:
-      "이용 중인 구독의 플랜 변경은 계정 설정에서 진행합니다.",
+      "온라인 플랜 변경은 아직 지원하지 않습니다. 고객지원이 대신 변경해 드립니다.",
     startFree: "무료로 시작",
     retry: "다시 시도",
     signInAgain: "다시 로그인",
@@ -97,8 +99,8 @@ export const purchaseCtaCopy: Record<Language, PurchaseCtaCopy> = {
     currentPlan: "当前方案",
     upgradeTo: (plan) => `升级到 ${plan}`,
     signInAndStart: (plan) => `登录后开通 ${plan}`,
-    managePlan: "管理方案",
-    managePlanHint: "有效订阅的方案变更请在账户设置中进行。",
+    managePlan: "联系支持变更方案",
+    managePlanHint: "目前尚不支持在线变更方案，支持团队可以为你完成变更。",
     startFree: "免费开始",
     retry: "重试",
     signInAgain: "重新登录",
@@ -120,9 +122,9 @@ export const purchaseCtaCopy: Record<Language, PurchaseCtaCopy> = {
     currentPlan: "Formule actuelle",
     upgradeTo: (plan) => `Passer à ${plan}`,
     signInAndStart: (plan) => `Se connecter pour démarrer ${plan}`,
-    managePlan: "Gérer la formule",
+    managePlan: "Demander un changement au support",
     managePlanHint:
-      "Les changements de formule d'un abonnement actif se font dans les paramètres du compte.",
+      "Le changement de formule en ligne n'est pas encore pris en charge. Le support peut le faire pour vous.",
     startFree: "Commencer gratuitement",
     retry: "Réessayer",
     signInAgain: "Se reconnecter",
@@ -145,9 +147,9 @@ export const purchaseCtaCopy: Record<Language, PurchaseCtaCopy> = {
     currentPlan: "Aktueller Tarif",
     upgradeTo: (plan) => `Auf ${plan} upgraden`,
     signInAndStart: (plan) => `Anmelden und ${plan} starten`,
-    managePlan: "Tarif verwalten",
+    managePlan: "Tarifwechsel beim Support anfragen",
     managePlanHint:
-      "Tarifwechsel bei einem aktiven Abo erfolgen in den Kontoeinstellungen.",
+      "Ein Tarifwechsel online wird noch nicht unterstützt. Der Support nimmt ihn für dich vor.",
     startFree: "Kostenlos starten",
     retry: "Erneut versuchen",
     signInAgain: "Erneut anmelden",
@@ -170,9 +172,9 @@ export const purchaseCtaCopy: Record<Language, PurchaseCtaCopy> = {
     currentPlan: "Plan actual",
     upgradeTo: (plan) => `Actualizar a ${plan}`,
     signInAndStart: (plan) => `Inicia sesión para empezar con ${plan}`,
-    managePlan: "Gestionar plan",
+    managePlan: "Pedir el cambio a soporte",
     managePlanHint:
-      "Los cambios de plan de una suscripción activa se hacen en los ajustes de la cuenta.",
+      "Cambiar de plan en línea aún no está disponible. Soporte puede hacer el cambio por ti.",
     startFree: "Empezar gratis",
     retry: "Reintentar",
     signInAgain: "Inicia sesión de nuevo",
@@ -195,9 +197,9 @@ export const purchaseCtaCopy: Record<Language, PurchaseCtaCopy> = {
     currentPlan: "Plano atual",
     upgradeTo: (plan) => `Fazer upgrade para ${plan}`,
     signInAndStart: (plan) => `Entrar para começar no ${plan}`,
-    managePlan: "Gerenciar plano",
+    managePlan: "Pedir a mudança ao suporte",
     managePlanHint:
-      "Mudanças de plano em uma assinatura ativa são feitas nas configurações da conta.",
+      "Mudar de plano online ainda não é suportado. O suporte faz a mudança para você.",
     startFree: "Começar grátis",
     retry: "Tentar de novo",
     signInAgain: "Entrar novamente",
