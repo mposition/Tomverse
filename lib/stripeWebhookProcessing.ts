@@ -34,6 +34,7 @@ import {
   normalizeBillingCurrency,
 } from "@/lib/billingMarkets";
 import { getUsdRevenueSnapshot } from "@/lib/billingPriceCatalog";
+import { settlePlanChangesForSubscription } from "@/lib/planChangeService";
 import {
   isSubscriptionResyncEvent,
   shouldApplySubscriptionSnapshot,
@@ -94,7 +95,13 @@ async function syncSubscription(
     typeof subscription.customer === "string"
       ? subscription.customer
       : subscription.customer.id;
-  const priceId = subscription.items.data[0]?.price.id || null;
+  const price = subscription.items.data[0]?.price;
+  const priceId = price?.id || null;
+  const productId = price
+    ? typeof price.product === "string"
+      ? price.product
+      : price.product.id
+    : null;
   const plans = await getBillingPlans();
   const planByPrice = priceId
     ? plans.find(
@@ -102,9 +109,17 @@ async function syncSubscription(
           plan.stripePriceId === priceId || plan.stripeAnnualPriceId === priceId
       )
     : null;
+  const planByProduct = productId
+    ? plans.find((plan) => plan.stripeProductId === productId)
+    : null;
+  // What Stripe invoices decides the plan, and metadata is only the fallback.
+  // Metadata is a note written when the subscription was created; a plan change
+  // replaces the item's price, so reading metadata first would leave an
+  // upgraded account on the plan it used to have.
   const planId =
-    normalizePlanId(subscription.metadata.planId) ||
-    (planByPrice?.id ?? null);
+    planByPrice?.id ??
+    planByProduct?.id ??
+    normalizePlanId(subscription.metadata.planId);
   const active = subscriptionActiveStatuses.has(subscription.status);
   const plan = active && planId ? tierForPlanId(planId) : "Free";
   const billingInterval = getBillingInterval(subscription);
@@ -173,13 +188,21 @@ async function syncSubscription(
  * event's own stale snapshot as a fallback is exactly the behaviour being
  * removed.
  */
-export async function resyncSubscriptionFromStripe(subscriptionId: string) {
+export async function resyncSubscriptionFromStripe(
+  subscriptionId: string,
+  eventType: string | null = null
+) {
   // Stamped before the request, not after: a response only proves the state as
   // of when Stripe built it, so timestamping on arrival would let a slow read
   // of older data outrank a fast read of newer data.
   const observedAt = new Date();
   const subscription = await getStripe().subscriptions.retrieve(subscriptionId);
-  return syncSubscription(subscription, observedAt);
+  const synced = await syncSubscription(subscription, observedAt);
+  // After the account, not before: a reservation is settled by comparing what
+  // was reserved against what the subscription now bills, and that comparison
+  // wants the same freshly read subscription rather than a second retrieve.
+  await settlePlanChangesForSubscription(subscription, eventType);
+  return synced;
 }
 
 export type BillingResyncOutcome = {
@@ -631,7 +654,7 @@ export async function processStripeEvent(event: Stripe.Event) {
           event.data.object
         );
         if (subscriptionId) {
-          await resyncSubscriptionFromStripe(subscriptionId);
+          await resyncSubscriptionFromStripe(subscriptionId, event.type);
         }
       }
       break;

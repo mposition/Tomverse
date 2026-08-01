@@ -1,11 +1,14 @@
 # 플랜 변경 정책
 
-Pro ↔ Max 플랜 변경에 관한 승인된 정책입니다. **정책은 확정됐고, 아직 구현되지
-않았습니다.** 이 문서가 구현의 계약입니다.
+Pro ↔ Max 플랜 변경에 관한 승인된 정책입니다. **정책은 확정됐고, 서버 · Stripe ·
+웹훅 구현이 끝났습니다. 남은 것은 UI(7절 5단계)입니다.** 이 문서가 구현의
+계약입니다.
 
 관련 파일을 바꾸기 전에 읽어 주세요.
 
 - `lib/planChangeStateMachine.ts` — 허용 판정 · preview 유효성 · 예약 상태기계
+- `lib/planChangeService.ts` — Stripe 실행과 `PlanChangeRequest` 기록
+- `app/api/billing/plan-change/**`
 - `lib/planChangeCredits.ts`의 `planCreditsAfterPlanChange()`
 - `lib/purchaseIntent.ts`의 `resolvePlanCtaState()`
 - `app/api/billing/checkout/route.ts`의 플랜 변경 차단 분기
@@ -279,6 +282,60 @@ Stripe는 웹훅 전달 순서를 보장하지 않으므로, 오래된 이벤트
   `describePlanChangeForSupport()`. 조회용 식별자만 담고 이메일 · 이름 · 금액은
   담지 않습니다.
 
+### Stripe 실행 · 엔드포인트 구현 완료 (2026-08-01)
+
+`lib/planChangeService.ts`가 Stripe와 이야기하는 유일한 곳이고 `PlanChangeRequest`를
+쓰는 유일한 곳입니다. 상태기계와 분리한 덕분에 판정 전체를 네트워크 없이 test할 수
+있습니다.
+
+| 엔드포인트 | 역할 |
+|---|---|
+| `POST /api/billing/plan-change/preview` | 견적. 아무것도 바꾸지 않음 |
+| `POST /api/billing/plan-change/confirm` | 견적을 실행. `requestId` 필수 |
+| `GET /api/billing/plan-change` | 진행 중인 변경(계정 화면용) |
+| `DELETE /api/billing/plan-change` | 예약된 다운그레이드 취소 |
+| `/api/billing/checkout` | **변경 없음.** 409 세 분기 그대로 |
+
+- **업그레이드.** `subscriptions.update`에 `proration_behavior: "always_invoice"` +
+  `payment_behavior: "pending_if_incomplete"`. 이 두 parameter가 "결제 전 Max 없음"의
+  전부입니다 — 이 파일의 실행 순서가 아니라 Stripe가 변경을 *pending update*로
+  세워 두고 invoice가 결제될 때까지 적용하지 않습니다. 카드 실패나 미완료 SCA는
+  Pro로 남습니다.
+- **다운그레이드.** `subscriptionSchedules.create({from_subscription})` 후 phase 2개로
+  update — 현재 phase는 기간 말까지 Max 그대로, 다음 phase가 Pro,
+  `proration_behavior: "none"`. 마지막 phase에 `duration` 1주기를 주고
+  `end_behavior: "release"`로 되돌려줍니다. 열어 두면 구독이 영원히 schedule 아래
+  남아 이후 모든 변경이 `SUBSCRIPTION_SCHEDULE_CONFLICT`가 됩니다.
+- **취소는 `release`이지 `cancel`이 아닙니다.** `cancel`은 구독까지 해지합니다.
+- **금액은 Stripe가 계산합니다.** `invoices.createPreview`의 `amount_due`를 그대로
+  보여줍니다. 실제 구독에는 전부 promotion discount가 붙어 있어 자체 계산은 invoice와
+  어긋납니다.
+- **대상 Price는 (Product, interval, 통화, tax behavior)로 조회**합니다. 정확히 1개가
+  아니면 fail-closed(`PLAN_CHANGE_PRICE_UNAVAILABLE`, 503). tax behavior를 맞추는
+  이유는 Stripe가 혼합을 거부하기 때문이고, 그걸 confirm 시점에 알게 되면 사용자가
+  이미 승인한 뒤입니다.
+- **권한은 여기서 올리지 않습니다.** 계정의 plan은 오직
+  `stripeWebhookProcessing.ts`의 `syncSubscription()`이, Stripe에서 다시 읽은 구독으로
+  옮깁니다.
+- **plan 판정 근거를 metadata에서 price로 옮겼습니다.** `syncSubscription()`은 이제
+  price → product → metadata 순으로 봅니다. metadata는 구독 생성 시점에 적어 둔
+  메모라, 플랜 변경이 item price를 바꿔도 그대로 "pro"입니다. metadata를 먼저 읽으면
+  **업그레이드한 계정이 예전 플랜에 머뭅니다.** (schedule phase의 metadata도 함께
+  설정하지만, 판정은 청구되는 price를 따릅니다.)
+- **정산은 웹훅에서.** `resyncSubscriptionFromStripe()`가 계정을 동기화한 뒤
+  `settlePlanChangesForSubscription()`을 같은 구독 객체로 호출합니다. 판정은
+  `resolvePlanChangeSettlement()`(순수)가 하고, 쓰기는 `status = 'pending'`인 행만
+  matching하는 조건부 update라 재전달은 두 번째부터 아무것도 바꾸지 않습니다.
+- **confirm 직후 10분은 "없음"으로 실패를 단정하지 않습니다**
+  (`PLAN_CHANGE_SETTLEMENT_GRACE_MS`). invoice 생성이나 schedule 부착이 아직일 수
+  있고, 그걸 실패로 읽으면 성공하려던 변경을 무너뜨립니다. 단
+  `pending_update_expired`는 Stripe가 직접 폐기했다는 뜻이므로 즉시 실패입니다.
+- **계정당 진행 중 변경은 1건.** `PlanChangeRequest(userId) WHERE status='pending'`
+  부분 unique index입니다. 응용 계층 검사만으로는 confirm 두 개가 경합할 때 둘 다
+  통과할 수 있고, 그러면 같은 구독에 경쟁하는 변경이 둘 생깁니다. Prisma schema로는
+  표현할 수 없어 migration SQL에만 있고, `tests/integration/plan-change-reservation.db.test.ts`가
+  존재를 증명합니다.
+
 ## 6. Stripe 구성 확인 결과 (2026-08-01, 읽기 전용)
 
 Stripe MCP는 이 계정의 **live key**에 연결돼 있습니다(`acct_1Trz6uCqxdHJo2tM`,
@@ -357,12 +414,14 @@ pending update부터 "결제는 됐는데 권한이 되돌아간" 상태가 나�
 2. **서버 변경 상태기계** — 판정 · preview 유효성 · 예약 상태기계는
    `lib/planChangeStateMachine.ts`로 완료(5절). preview · confirm **엔드포인트는
    아직**이며, 3단계의 Stripe 호출과 함께 붙입니다.
-3. **Stripe 결제 · 예약** — proration preview, `always_invoice` +
-   `pending_if_incomplete`, Subscription Schedule, preview · confirm ·
-   예약 취소 엔드포인트. **다음 단계.**
+3. ~~**Stripe 결제 · 예약**~~ — 완료(5절). proration preview, `always_invoice` +
+   `pending_if_incomplete`, Subscription Schedule, preview · confirm · 조회 ·
+   예약 취소 엔드포인트, 웹훅 정산.
 4. ~~**웹훅 · 재동기화**~~ (4절) — 완료
-5. **CTA 변경** — `resolvePlanCtaState()`의 `manage_plan` 분기를 전용 변경 화면으로
-   교체
+5. **CTA · 변경 화면** — `resolvePlanCtaState()`의 `manage_plan` 분기를 전용 변경
+   화면으로 교체. **다음 단계.** 화면이 갖춰야 할 것: preview 금액 표시, 갱신 재개
+   별도 opt-in(체크 하나로 두 가지에 동의시키지 않기), 예약된 다운그레이드와 적용일
+   표시, 예약 취소 버튼, 거부 코드별 문구.
 
 `resolvePlanCtaState()` 수정은 **마지막 UI 단계**입니다. 이 함수를 먼저 바꾸면
 동작하지 않는 CTA가 다시 생깁니다.

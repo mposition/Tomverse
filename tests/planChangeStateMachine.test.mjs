@@ -9,6 +9,7 @@ import {
   PLAN_CHANGE_REFUSAL_STATUS,
   planChangeStateFingerprint,
   resolvePlanChange,
+  resolvePlanChangeSettlement,
   transitionPlanChangeReservation,
 } from "../lib/planChangeStateMachine.ts";
 
@@ -496,6 +497,101 @@ test("cancelling a change that is not scheduled says which of the two it is", ()
     }),
     { allowed: false, code: "NO_SCHEDULED_PLAN_CHANGE" }
   );
+});
+
+const settle = (overrides = {}) =>
+  resolvePlanChangeSettlement({
+    execution: "immediate_upgrade",
+    targetTier: "Max",
+    reservationScheduleId: null,
+    confirmedAt: new Date("2026-08-01T10:00:00.000Z"),
+    observedTier: "Pro",
+    hasPendingUpdate: true,
+    subscriptionScheduleId: null,
+    eventType: null,
+    now: new Date("2026-08-01T10:00:05.000Z"),
+    ...overrides,
+  });
+
+test("a subscription that now bills the target plan settles the change", () => {
+  assert.equal(settle({ observedTier: "Max" }), "applied");
+  assert.equal(
+    settle({
+      execution: "scheduled_downgrade",
+      targetTier: "Pro",
+      observedTier: "Pro",
+      hasPendingUpdate: false,
+    }),
+    "applied"
+  );
+});
+
+test("nothing is concluded from absence in the seconds after a confirm", () => {
+  // Stripe has not necessarily finished writing: the invoice may still be
+  // being created and the schedule may not yet be attached. Reading that as
+  // failure would tear down a change that is about to succeed.
+  assert.equal(settle({ hasPendingUpdate: false }), null);
+  assert.equal(
+    settle({
+      execution: "scheduled_downgrade",
+      targetTier: "Pro",
+      observedTier: "Max",
+      reservationScheduleId: "sub_sched_1",
+      subscriptionScheduleId: null,
+      hasPendingUpdate: false,
+    }),
+    null
+  );
+});
+
+test("Stripe expiring the parked change fails it immediately, grace or not", () => {
+  assert.equal(
+    settle({
+      eventType: "customer.subscription.pending_update_expired",
+      hasPendingUpdate: false,
+    }),
+    "failed"
+  );
+});
+
+test("past the grace window, a vanished pending update is a failed upgrade", () => {
+  const past = new Date("2026-08-01T10:30:00.000Z");
+  assert.equal(settle({ hasPendingUpdate: false, now: past }), "failed");
+  // Still parked means still waiting -- an SCA challenge can outlive the
+  // window without the change having failed.
+  assert.equal(settle({ hasPendingUpdate: true, now: past }), null);
+});
+
+test("past the grace window, a detached schedule is a cancelled downgrade", () => {
+  const past = new Date("2026-08-01T10:30:00.000Z");
+  const scheduled = {
+    execution: "scheduled_downgrade",
+    targetTier: "Pro",
+    // Still on Max: the boundary has not been reached, so the reservation is
+    // judged by whether anything is still going to apply it.
+    observedTier: "Max",
+    reservationScheduleId: "sub_sched_1",
+    hasPendingUpdate: false,
+    now: past,
+  };
+
+  assert.equal(settle({ ...scheduled, subscriptionScheduleId: null }), "cancelled");
+  assert.equal(
+    settle({ ...scheduled, subscriptionScheduleId: "sub_sched_other" }),
+    "cancelled"
+  );
+  // Still attached, still waiting for the boundary.
+  assert.equal(
+    settle({ ...scheduled, subscriptionScheduleId: "sub_sched_1" }),
+    null
+  );
+});
+
+test("a change confirmed at an unknown time is never settled by absence", () => {
+  // No confirmedAt means the grace window cannot be evaluated, so only
+  // positive evidence may move the reservation.
+  assert.equal(settle({ confirmedAt: null, hasPendingUpdate: false }), null);
+  assert.equal(settle({ confirmedAt: null, observedTier: "Max" }), "applied");
 });
 
 test("the support record carries identifiers and no personal data", () => {

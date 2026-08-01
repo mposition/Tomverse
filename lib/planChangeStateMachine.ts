@@ -443,6 +443,74 @@ export function transitionPlanChangeReservation({
   return { applied: true };
 }
 
+/**
+ * How long after a confirm we refuse to conclude anything from absence.
+ *
+ * Right after a confirm the processor has not necessarily finished writing:
+ * the invoice may still be being created, the schedule may not yet be attached
+ * to the subscription. A webhook re-read inside that window can legitimately
+ * show neither the new plan nor the pending update, and reading that as "the
+ * change failed" would tear down a change that is about to succeed.
+ */
+export const PLAN_CHANGE_SETTLEMENT_GRACE_MS = 10 * 60 * 1000;
+
+/**
+ * What an in-flight change has become, judged against a subscription just
+ * re-read from the processor. Null means "still in flight, decide later".
+ *
+ * Absence of evidence is only treated as failure outside the grace window, or
+ * when the processor said so outright by expiring the pending update.
+ */
+export function resolvePlanChangeSettlement({
+  execution,
+  targetTier,
+  reservationScheduleId,
+  confirmedAt,
+  observedTier,
+  hasPendingUpdate,
+  subscriptionScheduleId,
+  eventType = null,
+  now,
+  graceMs = PLAN_CHANGE_SETTLEMENT_GRACE_MS,
+}: {
+  execution: PlanChangeExecution;
+  targetTier: PlanChangeTier;
+  reservationScheduleId: string | null;
+  confirmedAt: Date | null;
+  observedTier: "Free" | PlanChangeTier;
+  hasPendingUpdate: boolean;
+  subscriptionScheduleId: string | null;
+  eventType?: string | null;
+  now: Date;
+  graceMs?: number;
+}): PlanChangeReservationStatus | null {
+  if (observedTier === targetTier) return "applied";
+
+  // The processor discarded the parked change itself. Nothing to wait for.
+  if (
+    execution === "immediate_upgrade" &&
+    eventType === "customer.subscription.pending_update_expired"
+  ) {
+    return "failed";
+  }
+
+  const settledLongEnough =
+    confirmedAt !== null && now.getTime() - confirmedAt.getTime() >= graceMs;
+  if (!settledLongEnough) return null;
+
+  if (execution === "immediate_upgrade") {
+    return hasPendingUpdate ? null : "failed";
+  }
+
+  if (reservationScheduleId && subscriptionScheduleId !== reservationScheduleId) {
+    // The schedule that backed the reservation is no longer on the
+    // subscription, and the plan did not move. Nothing will apply it.
+    return "cancelled";
+  }
+
+  return null;
+}
+
 export type PlanChangeCancellationCheck =
   | { allowed: true }
   | {
