@@ -103,8 +103,9 @@ test("font-black is reserved for headline-sized customer text", () => {
   // Short brand expressions are the one body-size exception the weight policy
   // allows; everything else at <=16px uses 500-700.
   const BRAND_EXPRESSION_ALLOWLIST = new Set([
-    // Moved again by the go-live error-boundary merge.
-    "app/(site)/(application)/chat/ChatPageClient.tsx:336",
+    // Moved again by the go-live error-boundary merge, then down two more
+    // lines when the credit-pack checkout-return handler added its imports.
+    "app/(site)/(application)/chat/ChatPageClient.tsx:338",
     // Same "Tomverse Insight" brand span; it moved down four lines when the
     // superseded walkthrough embed above it was replaced by a stage diagram.
     "components/marketing/ChatWorkspaceGuide.tsx:190",

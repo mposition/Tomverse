@@ -24,6 +24,7 @@ import { lockCreditAccount } from "@/lib/creditDebt";
 import { reserveAddOnCredits, settleAddOnCredits } from "@/lib/creditLedger";
 import { getCreditPack } from "@/lib/creditPacks";
 import { prisma } from "@/lib/prisma";
+import { usageBucketCount } from "@/lib/chatUsageBucketCount";
 
 const resetFinanceTestData = () =>
   prisma.$executeRawUnsafe(`
@@ -354,6 +355,15 @@ test("stores Mistral cached-token usage and the request-time pricing snapshot", 
     cachedInputCostMicroUsd: 202,
     outputCostMicroUsd: 180,
     totalCostMicroUsd: 392,
+    // The settlement snapshot is the audit record for a charge, so it also
+    // pins which price list produced it, which cost source the *reservation*
+    // used, and whether the token counts came from the provider or from the
+    // fallback estimator. See settleChatUsage in lib/chatSecurity.ts.
+    pricingVersion: "test-fixture-pricing",
+    reservationCostSource: "registry",
+    longContextThresholdTokens: null,
+    usageSource: "provider_usage_metadata",
+    reasoningTokens: null,
   });
 
   const providerUsage = await prisma.providerDailyUsage.findFirstOrThrow({
@@ -429,6 +439,11 @@ test("settles Perplexity from the provider-reported cost and keeps the token est
     outputCostMicroUsd: 3_333,
     tokenEstimatedTotalCostMicroUsd: 4_500,
     totalCostMicroUsd: 7_777,
+    pricingVersion: "test-fixture-pricing",
+    reservationCostSource: "registry",
+    longContextThresholdTokens: null,
+    usageSource: "provider_usage_metadata",
+    reasoningTokens: null,
   });
 
   await releaseChatAccess(acquired.leaseId);
@@ -482,6 +497,11 @@ test("adds native web search cost on top of the token cost and keeps both separa
     searchCostMicroUsd: 25_000,
     searchQueryCount: 3,
     totalCostMicroUsd: 33_000,
+    pricingVersion: "test-fixture-pricing",
+    reservationCostSource: "registry",
+    longContextThresholdTokens: null,
+    usageSource: "provider_usage_metadata",
+    reasoningTokens: null,
   });
 
   await releaseChatAccess(acquired.leaseId);
@@ -528,6 +548,11 @@ test("charges no search cost when the provider ran no native web search", async 
     cachedInputCostMicroUsd: 0,
     outputCostMicroUsd: 4_000,
     totalCostMicroUsd: 8_000,
+    pricingVersion: "test-fixture-pricing",
+    reservationCostSource: "registry",
+    longContextThresholdTokens: null,
+    usageSource: "provider_usage_metadata",
+    reasoningTokens: null,
   });
 
   await releaseChatAccess(acquired.leaseId);
@@ -726,7 +751,7 @@ test("serializes concurrent reservations without overspending plan or add-on bal
   const monthUsage = await prisma.chatUsageBucket.findFirstOrThrow({
     where: { key: chatAccess(user, 2).subjectKey, period: "month" },
   });
-  assert.equal(monthUsage.count, 2);
+  assert.equal(usageBucketCount(monthUsage.count), 2);
 
   await Promise.all(
     succeeded.map(({ value }) => releaseChatAccess(value.leaseId))
@@ -817,7 +842,7 @@ test("uses add-on credits beyond the plan daily guardrail", async () => {
       },
     },
   });
-  assert.equal(dailyUsage.count, 300);
+  assert.equal(usageBucketCount(dailyUsage.count), 300);
   const reservedLot = await prisma.creditLot.findUniqueOrThrow({
     where: { id: lot.id },
   });
@@ -871,11 +896,11 @@ test("an answer longer than the reservation is settled up, not silently capped",
   const planCostBucket = await prisma.chatUsageBucket.findFirstOrThrow({
     where: { key: access.subjectKey, period: "cost-day" },
   });
-  assert.equal(planCostBucket.count, actualCost);
+  assert.equal(usageBucketCount(planCostBucket.count), actualCost);
   const totalCostBucket = await prisma.chatUsageBucket.findFirstOrThrow({
     where: { key: access.subjectKey, period: "op-cost-day" },
   });
-  assert.equal(totalCostBucket.count, actualCost);
+  assert.equal(usageBucketCount(totalCostBucket.count), actualCost);
 
   const snapshot = settled.pricingSnapshot as Record<string, unknown>;
   assert.equal(snapshot.pricingVersion, "test-fixture-pricing");
@@ -919,7 +944,7 @@ test("a failed model refunds while a completed sibling settles", async () => {
       where: { key: access.subjectKey, period },
     });
     assert.equal(
-      bucket.count,
+      usageBucketCount(bucket.count),
       completedCost,
       `${period} still carries the failed model's reservation`
     );
@@ -928,7 +953,7 @@ test("a failed model refunds while a completed sibling settles", async () => {
   const monthCredits = await prisma.chatUsageBucket.findFirstOrThrow({
     where: { key: access.subjectKey, period: "month" },
   });
-  assert.equal(monthCredits.count, 8);
+  assert.equal(usageBucketCount(monthCredits.count), 8);
 
   await Promise.all([
     releaseChatAccess(completed.leaseId),
@@ -1090,11 +1115,11 @@ test("purchased credits are not blocked a second time by the plan cost guardrail
       },
     },
   });
-  assert.equal(planCost.count, guardrails.planDay);
+  assert.equal(usageBucketCount(planCost.count), guardrails.planDay);
   const totalCost = await prisma.chatUsageBucket.findFirstOrThrow({
     where: { key: access.subjectKey, period: "op-cost-day" },
   });
-  assert.equal(totalCost.count, 1_000 * 5 + 4_096 * 25);
+  assert.equal(usageBucketCount(totalCost.count), 1_000 * 5 + 4_096 * 25);
 
   await settleChatUsage(acquired.usageReservation, {
     inputTokens: 1_000,
@@ -1106,5 +1131,60 @@ test("purchased credits are not blocked a second time by the plan cost guardrail
     where: { id: lot.id },
   });
   assert.ok(settledLot.remainingCredits < 20);
+  await releaseChatAccess(acquired.leaseId);
+});
+
+// The int4 fix has two halves. The limit half -- binding a guardrail above
+// 2,147,483,647 µUSD into the guard query -- is covered by
+// tests/chatCostGuardrails.test.mjs and by the Max reservation scenarios above.
+// This covers the other half: the running total itself.
+//
+// `count = count + amount` overflowed on int4 just as the bound limit did, so
+// a bucket that had been quietly filling up would start failing once it
+// approached the ceiling -- later, and further from the cause, than the
+// original report. Widening the column fixed both, and this pins the second
+// one so a future narrowing (or an int cast in the guard query) cannot pass
+// the limit-side tests while breaking accumulation.
+test("a cost bucket accumulates past the old int4 ceiling", async () => {
+  const user = await createUser("Max");
+  const access = chatAccess(user, 10_000);
+  const now = new Date();
+  const monthStart = new Date(
+    Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1)
+  );
+
+  // The operational total-cost bucket: its limit (totalMonth, 2,500,000,000
+  // µUSD for this plan) is the one that sits above the ceiling, so it is the
+  // only bucket whose running total can legitimately reach it. Seeded close
+  // enough that one reservation's cost carries the total across.
+  await prisma.chatUsageBucket.create({
+    data: {
+      key: access.subjectKey,
+      period: "op-cost-month",
+      periodStart: monthStart,
+      count: BigInt(2_147_450_000),
+    },
+  });
+
+  const acquired = await acquireChatAccess(
+    access,
+    chatBudget({
+      credits: 8,
+      inputTokens: 1_000,
+      outputTokens: 4_096,
+      inputRate: 5,
+      outputRate: 25,
+    })
+  );
+  assert.ok(acquired.usageReservation);
+
+  const bucket = await prisma.chatUsageBucket.findFirstOrThrow({
+    where: { key: access.subjectKey, period: "op-cost-month" },
+  });
+  assert.ok(
+    usageBucketCount(bucket.count) > 2_147_483_647,
+    `expected the running total to pass int4's ceiling, got ${bucket.count}`
+  );
+
   await releaseChatAccess(acquired.leaseId);
 });

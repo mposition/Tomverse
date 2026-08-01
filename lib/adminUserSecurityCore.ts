@@ -1,3 +1,10 @@
+import {
+  ADMIN_NETWORK_FAILURE_MESSAGE,
+  ADMIN_REAUTHENTICATION_MESSAGE,
+  describeAdminApiFailure,
+  type AdminApiFailure,
+} from "@/lib/adminApiOutcome";
+
 /**
  * The client-side rules for `POST /api/admin/users/:id/security`.
  *
@@ -200,14 +207,10 @@ export const adminSecurityActionSuccessMessage = (
     ? "This account was already active, so no change was made."
     : SUCCESS_MESSAGES[action];
 
-export type AdminSecurityFailure = {
-  message: string;
-  /** True when the administrator has to sign in again before retrying. */
-  requiresReauthentication: boolean;
-};
+export type AdminSecurityFailure = AdminApiFailure;
 
 export const ADMIN_SECURITY_REAUTHENTICATION_MESSAGE =
-  "Your administrator sign-in is no longer recent enough for this control. Sign in again, then retry the action.";
+  ADMIN_REAUTHENTICATION_MESSAGE;
 
 /**
  * Turns any failed response into something the console can show.
@@ -217,39 +220,18 @@ export const ADMIN_SECURITY_REAUTHENTICATION_MESSAGE =
  * `code: "ADMIN_REAUTHENTICATION_REQUIRED"` when the step-up window has
  * expired. A body that could not be parsed at all still has to produce a
  * message, so the status carries it.
+ *
+ * The mapping itself lives in `lib/adminApiOutcome.ts` so every admin panel
+ * says the same thing about the same response -- an approval-pending 409 in
+ * particular must not read as a failure anywhere.
  */
-export const describeAdminSecurityFailure = ({
-  status,
-  error,
-  code,
-  approvalId,
-}: {
+export const describeAdminSecurityFailure = (input: {
   status: number;
   error?: string | null;
   code?: string | null;
   approvalId?: string | null;
-}): AdminSecurityFailure => {
-  if (status === 428 || code === "ADMIN_REAUTHENTICATION_REQUIRED") {
-    return {
-      message: ADMIN_SECURITY_REAUTHENTICATION_MESSAGE,
-      requiresReauthentication: true,
-    };
-  }
-
-  const trimmed = (error || "").trim();
-  if (approvalId) {
-    return {
-      message: `${trimmed || "A second administrator must approve this action."} Approval ${approvalId}`,
-      requiresReauthentication: false,
-    };
-  }
-
-  return {
-    message:
-      trimmed || `Security control failed. The server answered ${status}.`,
-    requiresReauthentication: false,
-  };
-};
+}): AdminSecurityFailure =>
+  describeAdminApiFailure({ ...input, fallback: "Security control failed." });
 
 export const ADMIN_SECURITY_NETWORK_FAILURE_MESSAGE =
-  "Security control failed before the server answered. Check the connection and retry.";
+  ADMIN_NETWORK_FAILURE_MESSAGE;

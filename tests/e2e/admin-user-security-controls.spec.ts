@@ -5,7 +5,7 @@ import { prepareGuestPage } from "./support/app-fixtures";
  * Regression cover for the admin customer security controls.
  *
  * The controls and the console shell are mounted by
- * `/e2e/admin-security-controls`, a route that only exists on the Playwright
+ * `/e2e/admin-console-fixture`, a route that only exists on the Playwright
  * fixture server (`isE2EFixtureMode()`), because the real `/admin/users/:id`
  * needs an authorised administrator session and a live database and the
  * fixture server has neither. The components under test -- AdminConsoleShell,
@@ -13,7 +13,7 @@ import { prepareGuestPage } from "./support/app-fixtures";
  * real console renders.
  */
 
-const HARNESS = "/e2e/admin-security-controls";
+const HARNESS = "/e2e/admin-console-fixture";
 const TARGET_ID = "qa-target-user";
 const SECURITY_PATH = `/api/admin/users/${TARGET_ID}/security`;
 const DETAIL_PATH = `/api/admin/users/${TARGET_ID}`;

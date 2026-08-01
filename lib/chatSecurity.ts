@@ -4,6 +4,7 @@ import { createHash, createHmac, randomUUID, timingSafeEqual } from "node:crypto
 import type { Prisma } from "@prisma/client";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
+import { usageBucketCount } from "@/lib/chatUsageBucketCount";
 import {
     canUseModelWithPlan,
     getModelUsageProfile,
@@ -578,8 +579,8 @@ export const getGuestUsageSnapshot = async (request: Request) => {
             select: { count: true },
         }),
     ]);
-    const used = dayBucket?.count || 0;
-    const monthUsed = monthBucket?.count || 0;
+    const used = usageBucketCount(dayBucket?.count);
+    const monthUsed = usageBucketCount(monthBucket?.count);
     const dayRemaining = Math.max(0, dayLimit - used);
     const monthRemaining = Math.max(0, monthLimit - monthUsed);
     return {
@@ -728,7 +729,7 @@ const readUsageCount = async (
         },
         select: { count: true },
     });
-    return bucket?.count || 0;
+    return usageBucketCount(bucket?.count);
 };
 
 const safeBigIntNumber = (value: bigint) => {
@@ -1552,7 +1553,7 @@ export const acquireChatAccess = async (
             });
             const availableMonthlyCost = Math.max(
                 0,
-                guardrails.planMonth - (monthlyCost?.count || 0)
+                guardrails.planMonth - usageBucketCount(monthlyCost?.count)
             );
             if (availableMonthlyCost > 0) {
                 const debtOffset = await offsetCreditDebt(tx, {
@@ -1657,7 +1658,7 @@ export const acquireChatAccess = async (
             });
             const rawPlanRemaining = Math.max(
                 0,
-                monthRule.limit - (current?.count || 0)
+                monthRule.limit - usageBucketCount(current?.count)
             );
             const debtOffset = await offsetCreditDebt(tx, {
                 userId: access.userId,

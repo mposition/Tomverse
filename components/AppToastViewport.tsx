@@ -88,7 +88,13 @@ export function AppToastViewport() {
           aria-live={appToastPoliteness(toast.tone)}
           data-testid="app-toast"
           data-tone={toast.tone}
-          className={`pointer-events-auto flex w-[min(26rem,100%)] items-start gap-3 rounded-2xl border px-4 py-3 text-sm font-semibold shadow-2xl shadow-black/40 ${
+          // `pointer-events-none` on the surface, `auto` on the dismiss button
+          // only. A toast is bottom-anchored over a scrollable console, so on a
+          // short viewport it can land on top of a control; letting clicks pass
+          // straight through means it can never take one. Verified from each
+          // control's own centre point with `elementFromPoint` in
+          // tests/e2e/admin-narrow-width.spec.ts.
+          className={`pointer-events-none flex w-[min(26rem,100%)] items-start gap-3 rounded-2xl border px-4 py-3 text-sm font-semibold shadow-2xl shadow-black/40 ${
             toast.tone === "success"
               ? "border-emerald-500/40 bg-emerald-950 text-emerald-50"
               : toast.tone === "error"
@@ -120,7 +126,7 @@ export function AppToastViewport() {
             type="button"
             onClick={() => dismiss(toast.id)}
             aria-label="Dismiss notification"
-            className="-mr-1 flex h-7 w-7 shrink-0 cursor-pointer items-center justify-center rounded-lg text-current opacity-70 transition hover:opacity-100"
+            className="pointer-events-auto -mr-1 flex h-7 w-7 shrink-0 cursor-pointer items-center justify-center rounded-lg text-current opacity-70 transition hover:opacity-100"
           >
             <X className="h-4 w-4" aria-hidden="true" />
           </button>
