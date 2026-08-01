@@ -9,6 +9,7 @@ import {
 import { AdminReauthenticationRequiredError } from "@/lib/adminReauthentication";
 import { prisma } from "@/lib/prisma";
 import { getScheduledJobsDashboard } from "@/lib/scheduledJobs";
+import { SCHEDULED_JOB_DEFINITIONS } from "@/lib/scheduledJobsCore";
 
 const resetAdminSecurityData = () =>
   prisma.$executeRawUnsafe(`
@@ -213,24 +214,66 @@ test("an elapsed re-authentication window is refused before an approval is recor
   assert.equal(await prisma.adminActionApproval.count(), 0);
 });
 
-test("scheduled job dashboard flags missing and overdue invocations", async () => {
-  const now = new Date("2026-07-18T12:00:00.000Z");
-  await prisma.scheduledJobRun.create({
+// Ages are derived from the job's own silence budget rather than written as a
+// literal. This test used to fixture a run 20 minutes old, which was overdue
+// against the 12-minute budget it was written for; SCHED-DRIFT-001 corrected
+// that budget to one cron cadence plus slack, and the same 20-minute run
+// stopped being overdue without the fixture saying anything about why.
+const RECONCILIATION_SILENCE_BUDGET_MS = (() => {
+  const definition = SCHEDULED_JOB_DEFINITIONS.find(
+    (job) => job.key === "credit_reservation_reconciliation"
+  );
+  if (!definition) {
+    throw new Error(
+      "credit_reservation_reconciliation is no longer a scheduled job definition"
+    );
+  }
+  return definition.maximumSilenceMs;
+})();
+
+const FIXTURE_NOW = new Date("2026-07-18T12:00:00.000Z");
+
+const recordReconciliationRun = (ageMs: number) =>
+  prisma.scheduledJobRun.create({
     data: {
       jobKey: "credit_reservation_reconciliation",
       status: "succeeded",
-      startedAt: new Date(now.getTime() - 20 * 60 * 1_000),
-      completedAt: new Date(now.getTime() - 19 * 60 * 1_000),
+      startedAt: new Date(FIXTURE_NOW.getTime() - ageMs),
+      completedAt: new Date(FIXTURE_NOW.getTime() - ageMs + 60 * 1_000),
       processedCount: 3,
     },
   });
-  const dashboard = await getScheduledJobsDashboard(now);
+
+test("scheduled job dashboard flags missing and overdue invocations", async () => {
+  await recordReconciliationRun(RECONCILIATION_SILENCE_BUDGET_MS + 5 * 60 * 1_000);
+
+  const dashboard = await getScheduledJobsDashboard(FIXTURE_NOW);
   const reconciliation = dashboard.find(
     (job) => job.key === "credit_reservation_reconciliation"
   );
   const cleanup = dashboard.find((job) => job.key === "retention_cleanup");
   assert.equal(reconciliation?.status, "delayed");
+  assert.equal(reconciliation?.delayed, true);
   assert.equal(reconciliation?.lastProcessedCount, 3);
+  // Never run at all is delayed too, and reports no last run rather than a
+  // fabricated one.
   assert.equal(cleanup?.status, "delayed");
   assert.equal(cleanup?.lastRunAt, null);
+});
+
+// The other side of the same boundary, over real rows. Whether the budget
+// itself is sane is pinned by tests/scheduledJobsCore.test.mjs against the
+// Railway cron files; what only a database can show is that the dashboard
+// compares the budget against the run it actually read back. Without this
+// case, a dashboard that reported every job delayed would still pass above.
+test("a reconciliation run inside its silence budget is not flagged as delayed", async () => {
+  await recordReconciliationRun(RECONCILIATION_SILENCE_BUDGET_MS - 5 * 60 * 1_000);
+
+  const dashboard = await getScheduledJobsDashboard(FIXTURE_NOW);
+  const reconciliation = dashboard.find(
+    (job) => job.key === "credit_reservation_reconciliation"
+  );
+  assert.equal(reconciliation?.status, "succeeded");
+  assert.equal(reconciliation?.delayed, false);
+  assert.equal(reconciliation?.lastProcessedCount, 3);
 });
