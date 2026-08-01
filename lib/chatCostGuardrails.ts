@@ -66,6 +66,26 @@ const MINIMUM_GUARDRAIL_MICRO_USD = {
     month: 10_000_000,
 } as const;
 
+/**
+ * Hard ceiling on any guardrail, in micro-USD.
+ *
+ * Guardrails are enforced against `ChatUsageBucket.count`, which is a Postgres
+ * `integer`. A limit above its range does not make the guardrail looser -- it
+ * makes the reservation query fail outright with `value ... is out of range for
+ * type integer`, which would reject every request for that plan. The Max plan's
+ * derived total-cost guardrail (10,000 credits x the per-credit ceiling x the
+ * purchased-credit headroom) lands past this, so the clamp is load-bearing
+ * rather than theoretical.
+ *
+ * US$2,147 in a single month is far beyond anything a plan's own credits can
+ * legitimately buy, so clamping here never blocks legitimate use; it only keeps
+ * the number representable. Raising it requires widening the column first.
+ */
+export const MAX_USAGE_BUCKET_COUNT = 2_147_483_647;
+
+const withinBucketRange = (value: number) =>
+    Math.min(MAX_USAGE_BUCKET_COUNT, Math.max(0, Math.floor(value)));
+
 export type PlanCreditEntitlement = {
     /** Plan credits granted per account-local day. 0 or less means unlimited. */
     dailyCreditLimit: number;
@@ -122,12 +142,14 @@ export const findRetiredCostLimitEnvNames = (
     );
 
 const derivedGuardrail = (credits: number, period: CostGuardrailPeriod) =>
-    Math.max(
-        MINIMUM_GUARDRAIL_MICRO_USD[period],
-        Math.ceil(
-            Math.max(0, credits) *
-                COST_PER_CREDIT_CEILING_MICRO_USD *
-                GUARDRAIL_HEADROOM_MULTIPLIER
+    withinBucketRange(
+        Math.max(
+            MINIMUM_GUARDRAIL_MICRO_USD[period],
+            Math.ceil(
+                Math.max(0, credits) *
+                    COST_PER_CREDIT_CEILING_MICRO_USD *
+                    GUARDRAIL_HEADROOM_MULTIPLIER
+            )
         )
     );
 
@@ -152,9 +174,12 @@ export const getCostGuardrailLimits = (
         dailyCredits > 0
             ? Math.min(derivedGuardrail(dailyCredits, "day"), derivedPlanMonth)
             : derivedPlanMonth;
-    const derivedTotalDay = derivedPlanDay * PURCHASED_CREDIT_HEADROOM_MULTIPLE;
-    const derivedTotalMonth =
-        derivedPlanMonth * PURCHASED_CREDIT_HEADROOM_MULTIPLE;
+    const derivedTotalDay = withinBucketRange(
+        derivedPlanDay * PURCHASED_CREDIT_HEADROOM_MULTIPLE
+    );
+    const derivedTotalMonth = withinBucketRange(
+        derivedPlanMonth * PURCHASED_CREDIT_HEADROOM_MULTIPLE
+    );
 
     const clampedOverrides: string[] = [];
     const applyOverride = (
@@ -170,7 +195,7 @@ export const getCostGuardrailLimits = (
             clampedOverrides.push(envName);
             return derived;
         }
-        return override;
+        return withinBucketRange(override);
     };
 
     return {
@@ -201,24 +226,29 @@ export const getCostGuardrailLimits = (
 export const getGuestCostGuardrailLimits = (
     environment: Record<string, string | undefined> = process.env
 ) => ({
-    day: positiveInteger(environment.CHAT_GUEST_COST_MICROUSD_PER_DAY) ?? 20_000,
-    month:
+    day: withinBucketRange(
+        positiveInteger(environment.CHAT_GUEST_COST_MICROUSD_PER_DAY) ?? 20_000
+    ),
+    month: withinBucketRange(
         positiveInteger(environment.CHAT_GUEST_COST_MICROUSD_PER_MONTH) ??
-        100_000,
+            100_000
+    ),
 });
 
 export const getProviderCostGuardrailLimits = (
     provider: string,
     environment: Record<string, string | undefined> = process.env
 ) => ({
-    day:
+    day: withinBucketRange(
         positiveInteger(
             environment[`CHAT_PROVIDER_${provider.toUpperCase()}_COST_MICROUSD_PER_DAY`]
-        ) ?? 10_000_000,
-    month:
+        ) ?? 10_000_000
+    ),
+    month: withinBucketRange(
         positiveInteger(
             environment[
                 `CHAT_PROVIDER_${provider.toUpperCase()}_COST_MICROUSD_PER_MONTH`
             ]
-        ) ?? 100_000_000,
+        ) ?? 100_000_000
+    ),
 });

@@ -60,6 +60,15 @@ guardrail = 크레딧 수 × COST_PER_CREDIT_CEILING_MICRO_USD × GUARDRAIL_HEAD
 `totalDay`/`totalMonth`는 구매 크레딧 여유분(`PURCHASED_CREDIT_HEADROOM_MULTIPLE`
 = 5배)까지 포함한 전체 비용 guardrail입니다.
 
+### 모든 한도는 int32 범위로 clamp한다
+
+guardrail은 `ChatUsageBucket.count`(Postgres `integer`)에 대해 집행됩니다.
+범위를 넘는 한도는 "더 느슨한 한도"가 아니라 `value ... is out of range for
+type integer` 오류가 되어 **해당 플랜의 모든 요청을 거부**합니다. Max 플랜의
+유도 `totalMonth`(10,000 × 40,000 × 1.25 × 5 = 2,500,000,000)가 실제로 이
+범위를 넘기 때문에 `MAX_USAGE_BUCKET_COUNT`(2,147,483,647) clamp는 이론적
+장치가 아니라 필수입니다. 이 값을 올리려면 컬럼 폭을 먼저 넓혀야 합니다.
+
 ### 환경변수 override는 유도값 아래로 내려갈 수 없다
 
 `CHAT_COST_GUARDRAIL_{PLAN}_{PLAN|TOTAL}_MICROUSD_PER_{DAY|MONTH}`로 올릴 수는

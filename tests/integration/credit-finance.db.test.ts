@@ -108,6 +108,18 @@ const chatBudget = ({
   longContextThresholdTokens: null,
 });
 
+// Provenance the settlement snapshot carries on every reservation, so a stored
+// cost can always be traced back to the price it was reserved at. `chatBudget`
+// above pins the fixture's pricing version, and every settlement below passes
+// explicit provider token counts, so these values are the same in each case.
+const RESERVATION_PROVENANCE = {
+  pricingVersion: "test-fixture-pricing",
+  reservationCostSource: "registry",
+  longContextThresholdTokens: null,
+  usageSource: "provider_usage_metadata",
+  reasoningTokens: null,
+} as const;
+
 const createAddOnLot = (
   userId: string,
   credits: number,
@@ -342,6 +354,7 @@ test("stores Mistral cached-token usage and the request-time pricing snapshot", 
   assert.equal(finalized.settledOutputTokens, 30);
   assert.equal(finalized.settledCostMicroUsd, BigInt(392));
   assert.deepEqual(finalized.pricingSnapshot, {
+    ...RESERVATION_PROVENANCE,
     costSource: "token_estimate",
     inputTokens: 1_013,
     uncachedInputTokens: 5,
@@ -416,6 +429,7 @@ test("settles Perplexity from the provider-reported cost and keeps the token est
   // Billed on the provider's number (7_777), not the 4_500 token estimate.
   assert.equal(finalized.settledCostMicroUsd, BigInt(7_777));
   assert.deepEqual(finalized.pricingSnapshot, {
+    ...RESERVATION_PROVENANCE,
     costSource: "provider_response",
     inputTokens: 1_000,
     uncachedInputTokens: 1_000,
@@ -467,6 +481,7 @@ test("adds native web search cost on top of the token cost and keeps both separa
   // tokens 800*5 + 200*20 = 8_000; search 25_000; total 33_000.
   assert.equal(finalized.settledCostMicroUsd, BigInt(33_000));
   assert.deepEqual(finalized.pricingSnapshot, {
+    ...RESERVATION_PROVENANCE,
     costSource: "token_estimate",
     inputTokens: 800,
     uncachedInputTokens: 800,
@@ -516,6 +531,7 @@ test("charges no search cost when the provider ran no native web search", async 
   });
   assert.equal(finalized.settledCostMicroUsd, BigInt(8_000));
   assert.deepEqual(finalized.pricingSnapshot, {
+    ...RESERVATION_PROVENANCE,
     costSource: "token_estimate",
     inputTokens: 800,
     uncachedInputTokens: 800,

@@ -7,6 +7,7 @@ import {
   getGuestCostGuardrailLimits,
   getProviderCostGuardrailLimits,
   GUARDRAIL_HEADROOM_MULTIPLIER,
+  MAX_USAGE_BUCKET_COUNT,
   PURCHASED_CREDIT_HEADROOM_MULTIPLE,
   RETIRED_COST_LIMIT_ENV_NAMES,
 } from "../lib/chatCostGuardrails.ts";
@@ -115,6 +116,46 @@ test("setting a retired variable cannot lower the guardrail", () => {
   });
   assert.equal(limits.planDay, limits.derived.planDay);
   assert.equal(limits.planMonth, limits.derived.planMonth);
+});
+
+test("no guardrail can exceed the usage bucket's integer column", () => {
+  // ChatUsageBucket.count is a Postgres `integer`. A limit past its range does
+  // not loosen the guardrail, it makes the reservation query fail with
+  // `value ... is out of range for type integer` and rejects every request on
+  // that plan. Max's derived total-cost guardrail lands past it, so this clamp
+  // is load-bearing.
+  const plans = [
+    ["Free", FREE],
+    ["Pro", PRO],
+    ["Max", MAX],
+    // A pathological plan configuration must not be able to break it either.
+    ["Max", { dailyCreditLimit: 0, monthlyCreditLimit: 10_000_000 }],
+  ];
+  for (const [plan, entitlement] of plans) {
+    const limits = getCostGuardrailLimits(plan, entitlement, {});
+    for (const [name, value] of Object.entries(limits)) {
+      if (typeof value !== "number") continue;
+      assert.ok(
+        Number.isSafeInteger(value) && value > 0 && value <= MAX_USAGE_BUCKET_COUNT,
+        `${plan} ${name} = ${value} is outside the usage bucket range`
+      );
+    }
+    for (const value of Object.values(limits.derived)) {
+      assert.ok(value <= MAX_USAGE_BUCKET_COUNT);
+    }
+  }
+
+  assert.equal(
+    getCostGuardrailLimits("Max", MAX, {}).totalMonth,
+    MAX_USAGE_BUCKET_COUNT
+  );
+});
+
+test("an environment override above the column range is clamped down", () => {
+  const limits = getCostGuardrailLimits("Pro", PRO, {
+    CHAT_COST_GUARDRAIL_PRO_TOTAL_MICROUSD_PER_MONTH: "999999999999",
+  });
+  assert.equal(limits.totalMonth, MAX_USAGE_BUCKET_COUNT);
 });
 
 test("guest and provider guardrails stay absolute and independently configured", () => {
