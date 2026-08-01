@@ -229,10 +229,14 @@ test("rows outside the window are excluded", async () => {
 });
 
 test("a fallback-priced model nobody registered is reported as drift", async () => {
+  // The control has to be a model that is actually registered today. Naming one
+  // fails the day its price is verified or the model is retired, which says
+  // nothing about drift detection.
+  const registered = PENDING_VERIFIED_PRICE_REGISTER[0].modelId;
   await decision({
     decision: "allowed",
     models: [
-      { modelId: "grok-4", costSource: FALLBACK_COST_SOURCE },
+      { modelId: registered, costSource: FALLBACK_COST_SOURCE },
       { modelId: "brand-new-premium-model", costSource: FALLBACK_COST_SOURCE },
     ],
   });

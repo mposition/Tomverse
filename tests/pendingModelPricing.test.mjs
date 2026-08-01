@@ -11,6 +11,13 @@ import {
   PENDING_VERIFIED_PRICE_REGISTER,
 } from "../lib/modelPricing.ts";
 
+// Fixtures name their subject by position, not by model ID. Entries leave the
+// register for two ordinary reasons -- the price gets verified, or the model is
+// retired -- and a fixture that hard-codes an ID fails on the day either
+// happens, which says nothing about the code under test.
+const SAMPLE = PENDING_VERIFIED_PRICE_REGISTER[0]?.modelId;
+const OTHER = PENDING_VERIFIED_PRICE_REGISTER[1]?.modelId;
+
 const entry = (modelId) =>
   PENDING_VERIFIED_PRICE_REGISTER.find((item) => item.modelId === modelId);
 
@@ -88,7 +95,7 @@ test("the shipped register has no errors, only the unassigned-owner warnings", (
 });
 
 test("an expired entry is an error, not a warning", () => {
-  const expiry = new Date(`${entry("grok-4").expiresAt}T00:00:00.000Z`);
+  const expiry = new Date(`${entry(SAMPLE).expiresAt}T00:00:00.000Z`);
   const problems = findPendingPriceRegisterProblems({
     models: AVAILABLE_MODELS,
     now: new Date(expiry.getTime() + 86_400_000),
@@ -100,11 +107,11 @@ test("an expired entry is an error, not a warning", () => {
 });
 
 test("an entry stays a warning right up to its deadline", () => {
-  const expiry = new Date(`${entry("grok-4").expiresAt}T00:00:00.000Z`);
+  const expiry = new Date(`${entry(SAMPLE).expiresAt}T00:00:00.000Z`);
   const problems = findPendingPriceRegisterProblems({
     models: AVAILABLE_MODELS,
     now: new Date(expiry.getTime() - 1),
-    register: withEntry("grok-4", {}),
+    register: withEntry(SAMPLE, {}),
   });
   assert.deepEqual(
     problems.filter((problem) => problem.reason === "expired"),
@@ -134,11 +141,11 @@ test("a registered model that has since been priced is an error", () => {
 });
 
 test("duplicate and malformed entries are errors", () => {
-  const base = entry("grok-4");
+  const base = entry(SAMPLE);
   const problems = findPendingPriceRegisterProblems({
     models: AVAILABLE_MODELS,
     now: beforeAnyExpiry,
-    register: [base, base, { ...entry("qwen3.7-max"), expiresAt: "not-a-date" }],
+    register: [base, base, { ...entry(OTHER), expiresAt: "not-a-date" }],
   });
   const reasons = problems
     .filter((problem) => problem.severity === "error")
@@ -151,7 +158,7 @@ test("a fully assigned entry produces no warnings", () => {
   const problems = findPendingPriceRegisterProblems({
     models: AVAILABLE_MODELS,
     now: beforeAnyExpiry,
-    register: withEntry("grok-4", {
+    register: withEntry(SAMPLE, {
       owner: "billing-oncall",
       verificationTicket: "TOM-1234",
       productionApproval: {
@@ -159,7 +166,7 @@ test("a fully assigned entry produces no warnings", () => {
         approvedAt: "2026-08-01",
         rationale: "Conservative fallback accepted while the price is verified.",
       },
-    }).filter((item) => item.modelId === "grok-4"),
+    }).filter((item) => item.modelId === SAMPLE),
   });
   assert.deepEqual(problems, []);
 });

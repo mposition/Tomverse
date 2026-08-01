@@ -104,7 +104,7 @@ test.describe("conversation auto-title generation (logged-in)", () => {
   test("three simultaneous model panels only trigger one generate-title request", async ({
     page,
   }, testInfo) => {
-    const models = ["claude-haiku-4-5", "gemini-2-5-flash", "grok-3-mini"];
+    const models = ["claude-haiku-4-5", "gemini-2-5-flash", "deepseek-v4-flash"];
     await prepareGuestPage(page, "en");
     await mockAuthenticatedApi(page, { selectedModels: models });
 
@@ -137,7 +137,7 @@ test.describe("conversation auto-title generation (logged-in)", () => {
 
     await expect(page.getByText("Answer from claude-haiku-4-5.")).toBeVisible();
     await expect(page.getByText("Answer from gemini-2-5-flash.")).toBeVisible();
-    await expect(page.getByText("Answer from grok-3-mini.")).toBeVisible();
+    await expect(page.getByText("Answer from deepseek-v4-flash.")).toBeVisible();
     await expect(sidebarList(page).getByText("Multi Model Comparison")).toBeVisible();
 
     // Give any accidental extra requests a moment to have fired before

@@ -6,6 +6,12 @@ export type ModelPickerCapability = "all" | "favorites" | "recommended" | "fast"
 export type ModelPickerUsageBand = "all" | "light" | "medium" | "heavy" | "intensive";
 export type ModelPickerFeature = "image" | "reasoning" | "search" | "code";
 
+// The picker's "recommended" filter. Held deepseek-r1 as its reasoning entry
+// until DeepSeek stopped serving deepseek-reasoner. The replacement is
+// gemini-3-6-flash rather than the closest reasoning model (grok-4-5),
+// because after the xAI consolidation grok-4-5 is Pro-only and a filter every
+// visitor sees should not be two-thirds unreachable. Explicit reasoning is
+// still reachable below Pro through deepseek-v4-pro and gpt-5-6-terra.
 export const RECOMMENDED_MODEL_IDS = [
   "gpt-5-4-mini",
   "claude-sonnet-5",
@@ -28,10 +34,12 @@ const koreanDescriptions: Record<string, string> = {
   "gemini-3-1-pro": "상세한 멀티모달 분석과 복잡한 문서",
   "gemini-2-5-pro": "이전 세대 멀티모달 분석",
   "gemini-2-5-flash": "빠른 문서 분석과 대량 일상 작업",
+  // Retired ids keep their Korean blurbs so admin history and any surface
+  // that resolves a stored conversation's model still reads in Korean. They
+  // are never reachable from the picker itself.
   "llama-3-1": "매우 빠르고 가벼운 텍스트 질문",
   "llama-4-scout": "빠른 이미지 질문과 긴 문맥 탐색",
   "llama-3-3": "오픈 모델 기반의 범용 텍스트 분석",
-  "groq-gpt-oss-120b": "빠른 오픈 모델 추론, 코딩과 기술 분석",
   "grok-4": "최신 이슈 대화와 폭넓은 고급 분석",
   "grok-4-3": "빠른 범용 분석과 정확한 지시 이행",
   "grok-4-5": "복잡한 기술·분석 작업의 깊은 추론",
@@ -45,6 +53,7 @@ const koreanDescriptions: Record<string, string> = {
   "mistral-medium-3-1": "균형 잡힌 멀티모달 분석과 다국어 작업",
   codestral: "코드 생성, 자동 완성과 저장소 질문",
   "kimi-k2.7-code": "코딩 작업과 긴 기술 문맥",
+  "kimi-k3": "이미지까지 다루는 긴 문맥 추론",
   "qwen3.7-max": "고난도 다국어 추론과 복잡한 지시",
   "qwen3.7-plus": "균형 잡힌 다국어 분석과 업무 글쓰기",
   "qwen3.6-flash": "빠른 다국어 질문과 번역",

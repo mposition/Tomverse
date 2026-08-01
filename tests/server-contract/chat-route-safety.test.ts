@@ -220,22 +220,40 @@ const assertNothingSpent = (spies: Spies, context: string) => {
   );
 };
 
-test("a retired model is rejected without touching the provider or credits", async () => {
-  const { POST, spies } = await loadRouteWithSpies();
+// Every model this catalogue has retired, whichever wave retired it: Groq
+// stopped serving Llama, and xAI's older Grok models were consolidated onto
+// Grok 4.5. A new request naming any of them must be refused here, before a
+// provider client is built or a credit is reserved.
+for (const retiredModelId of [
+  "llama-3-1",
+  "llama-3-3",
+  "llama-4-scout",
+  "grok-4",
+  "grok-3",
+  "grok-3-mini",
+]) {
+  test(`the retired model ${retiredModelId} is rejected without touching the provider or credits`, async () => {
+    const { POST, spies } = await loadRouteWithSpies();
 
-  const response = await POST(
-    chatRequest({
-      messages: [{ role: "user", content: "hello" }],
-      // Retired in lib/models.ts: groq stopped serving it.
-      modelId: "llama-4-scout",
-    })
-  );
+    const response = await POST(
+      chatRequest({
+        messages: [{ role: "user", content: "hello" }],
+        modelId: retiredModelId,
+      })
+    );
 
-  assert.equal(response.status, 410);
-  const payload = (await response.json()) as { code?: string };
-  assert.equal(payload.code, "MODEL_RETIRED");
-  assertNothingSpent(spies, "retired model");
-});
+    assert.equal(response.status, 410);
+    const payload = (await response.json()) as {
+      code?: string;
+      error?: string;
+    };
+    assert.equal(payload.code, "MODEL_RETIRED");
+    // The refusal names the replacement, so the user has somewhere to go
+    // rather than only being told "no".
+    assert.match(String(payload.error), /no longer available/i);
+    assertNothingSpent(spies, `retired model ${retiredModelId}`);
+  });
+}
 
 test("an unknown model is rejected without touching the provider or credits", async () => {
   const { POST, spies } = await loadRouteWithSpies();

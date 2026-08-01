@@ -28,7 +28,7 @@ import { setRootFontSize } from "./support/chat-state-fixtures";
  * The assertions below are per-element rects and hit-tests for that reason.
  *
  * REFLOW-P1-01 extends it. The original matrix only ever fixtured a *healthy*
- * replacement (`fallbackModelIds: ["mistral-medium-3-1"]`,
+ * replacement (`fallbackModelIds: [FALLBACK_MODEL]`,
  * `fallbackHealth: "operational"`), so the state where the banner is at its
  * tallest and the user has the least room -- no replacement exists, so the
  * banner adds "현재 사용할 수 있는 대체 모델이 없습니다." and a picker action
@@ -73,7 +73,11 @@ const REPRO_KEYBOARD_INSET = 320;
 
 /** The guest's default model (see prepareGuestPage), so it is always selected. */
 const IMPACTED_MODEL = "gemini-2-5-flash";
-const FALLBACK_MODEL = "mistral-medium-3-1";
+// Guest-selectable on purpose. The banner filters replacement candidates by
+// the viewer's entitlement (see ProviderStatusBanner's canSelectModel), so a
+// Free-tier model offered to a guest collapses these scenarios into
+// `no-fallback` and stops them measuring the swap button they exist for.
+const FALLBACK_MODEL = "deepseek-v4-flash";
 
 type FallbackHealth = "operational" | "degraded" | "none" | "unknown";
 

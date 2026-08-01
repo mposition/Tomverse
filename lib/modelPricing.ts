@@ -405,21 +405,6 @@ export const MODEL_PRICING: readonly ModelPricingProfile[] = [
     },
     // Provider-verified profiles added by the 2026-08-01 catalogue migration.
     {
-        modelId: "groq-gpt-oss-120b",
-        provider: "groq",
-        apiModelId: "openai/gpt-oss-120b",
-        ...DIRECT_STANDARD,
-        tiers: flatTier(0.15, 0.6, 0.5),
-        reasoningTokenBilling: "billed_as_output",
-        maxOutputTokens: 65_536,
-        reservationOutputTokens: 8_192,
-        reservationOutputBasis: "conservative_default",
-        cachedInputPricingVerified: true,
-        priceSource: "groq_gpt_oss_120b_model_page",
-        pricingVersion: "groq-gpt-oss-120b-2026-08-01",
-        effectiveDate: "2026-08-01",
-    },
-    {
         modelId: "grok-4-3",
         provider: "xai",
         apiModelId: "grok-4.3",
@@ -448,6 +433,14 @@ export const MODEL_PRICING: readonly ModelPricingProfile[] = [
         effectiveDate: "2026-08-01",
     },
     {
+        // Load-bearing beyond ordinary chat accounting: consolidating xAI onto
+        // this model also made it the provider probe's target
+        // (lib/providerProbe.ts picks the cheapest enabled probe-safe model,
+        // and it is now the only xAI one). Probe cost is booked from this
+        // profile against a cap shared by every provider, so on the
+        // US$15/US$60 class fallback one xAI cycle cost US$0.00267 and 144
+        // cycles a day came to US$0.3845 -- 38% of the whole US$1 cap from one
+        // provider. At the published rate it is US$0.042.
         modelId: "grok-4-5",
         provider: "xai",
         apiModelId: "grok-4.5",
@@ -846,15 +839,10 @@ export const PENDING_VERIFIED_PRICE_REGISTER: readonly PendingVerifiedPriceEntry
             productionApproval: null,
             settlementSource: "reservation_pricing",
         },
-        {
-            modelId: "grok-4",
-            owner: null,
-            verificationTicket: null,
-            registeredAt: "2026-08-01",
-            expiresAt: "2026-10-30",
-            productionApproval: null,
-            settlementSource: "reservation_pricing",
-        },
+        // grok-4-5 left this register once its real profile went in above, from
+        // xAI's published rates. grok-4 left it for the other reason an entry
+        // stops being needed: it is retired, so findUnpricedModels filters it
+        // out by `enabled` and there is nothing left to exempt.
         {
             modelId: "mistral-large-3",
             owner: null,

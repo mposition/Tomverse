@@ -479,7 +479,7 @@ test("more answers than a comparison supports is refused", async () => {
       responses: [
         ...VALID_RESPONSES,
         { messageId: "m3", modelId: "gemini-2-5-flash", content: "Third." },
-        { messageId: "m4", modelId: "llama-3-3", content: "Fourth." },
+        { messageId: "m4", modelId: "mistral-small-4", content: "Fourth." },
       ],
     })
   );
