@@ -427,6 +427,17 @@ export async function cleanupExpiredData() {
         OR "shareExpiresAt" IS NOT NULL
       )
   `;
+  // Settled notification deliveries are an operational audit trail, not a
+  // queue: 30 days is long enough to answer "did that report ever reach us"
+  // and short enough that the table cannot grow without bound. Pending rows
+  // are never swept -- they still owe a delivery.
+  const notificationDeliveries = await prisma.notificationDelivery.deleteMany({
+    where: {
+      status: { in: ["delivered", "abandoned"] },
+      updatedAt: { lt: new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000) },
+    },
+  });
+
   const oauthTokensEncrypted = await encryptExistingOAuthTokens();
   const creditLotsExpired = await expireCreditLots();
   const guestAttachments = await sweepExpiredGuestAttachments(now);
@@ -440,6 +451,7 @@ export async function cleanupExpiredData() {
     productAnalyticsEvents: productAnalyticsEvents.count,
     limitDecisions: limitDecisions.deleted,
     promotionRiskIdentifiers: promotionRiskIdentifiers.count,
+    notificationDeliveries: notificationDeliveries.count,
     shareSnapshots: Number(shareSnapshots),
     oauthTokensEncrypted,
     creditLotsExpired,
