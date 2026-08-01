@@ -111,6 +111,15 @@ jobs:
         timeout-minutes: 5
         run: npm run check:model-pricing
 
+      # The cost guardrails are derived from plan credits and stored in
+      # ChatUsageBucket.count. When that product outgrew int4, PostgreSQL threw
+      # 22003 in the guard query instead of returning an allow/deny decision and
+      # every Max-plan request failed. Re-check the storage requirement whenever
+      # a policy constant or plan grant moves.
+      - name: Usage bucket storage range
+        timeout-minutes: 5
+        run: npm run check:usage-bucket-range
+
       - name: Strict encoding validation
         timeout-minutes: 5
         run: npm run check:encoding:strict

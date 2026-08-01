@@ -25,6 +25,10 @@ import { reserveAddOnCredits, settleAddOnCredits } from "@/lib/creditLedger";
 import { getCreditPack } from "@/lib/creditPacks";
 import { prisma } from "@/lib/prisma";
 import { usageBucketCount } from "@/lib/chatUsageBucketCount";
+import {
+  getPlanGuardrailStorage,
+  POSTGRES_INT4_MAX,
+} from "@/lib/usageBucketRange";
 
 const resetFinanceTestData = () =>
   prisma.$executeRawUnsafe(`
@@ -1187,4 +1191,74 @@ test("a cost bucket accumulates past the old int4 ceiling", async () => {
   );
 
   await releaseChatAccess(acquired.leaseId);
+});
+
+// The storage contract itself, asserted against a real column rather than
+// inferred from the schema file: the largest value the guardrail arithmetic
+// can derive has to survive a write and come back byte-identical.
+//
+// The accumulation test above proves the counter can *cross* int4. This proves
+// the exact figure the policy document names -- Max's 2,500,000,000 µUSD
+// total-cost guardrail -- round-trips, so a bucket is allowed to sit at its
+// own limit rather than failing just short of it.
+test("the largest derived guardrail survives a database round trip", async () => {
+  const user = await createUser("Max");
+  const access = chatAccess(user, 10_000);
+  const monthStart = new Date(Date.UTC(2026, 7, 1));
+
+  const max = getPlanGuardrailStorage().find((plan) => plan.plan === "Max");
+  assert.ok(max);
+  assert.equal(max.largestStoredValue, 2_500_000_000);
+  assert.ok(max.largestStoredValue > POSTGRES_INT4_MAX);
+
+  await prisma.chatUsageBucket.create({
+    data: {
+      key: access.subjectKey,
+      period: "op-cost-month",
+      periodStart: monthStart,
+      count: BigInt(max.largestStoredValue),
+    },
+  });
+
+  const stored = await prisma.chatUsageBucket.findUniqueOrThrow({
+    where: {
+      key_period_periodStart: {
+        key: access.subjectKey,
+        period: "op-cost-month",
+        periodStart: monthStart,
+      },
+    },
+  });
+  // Identical value, not merely "large enough" -- a narrowing cast would
+  // truncate or throw, and a lossy read would round.
+  assert.equal(stored.count, BigInt(2_500_000_000));
+  assert.equal(usageBucketCount(stored.count), 2_500_000_000);
+
+  // And every plan's own ceiling, so a future constant change is caught here
+  // as well as in the static check.
+  for (const plan of getPlanGuardrailStorage()) {
+    const period = `round-trip-${plan.plan}`;
+    await prisma.chatUsageBucket.create({
+      data: {
+        key: access.subjectKey,
+        period,
+        periodStart: monthStart,
+        count: BigInt(plan.largestStoredValue),
+      },
+    });
+    const row = await prisma.chatUsageBucket.findUniqueOrThrow({
+      where: {
+        key_period_periodStart: {
+          key: access.subjectKey,
+          period,
+          periodStart: monthStart,
+        },
+      },
+    });
+    assert.equal(
+      usageBucketCount(row.count),
+      plan.largestStoredValue,
+      `${plan.plan} plan's ${plan.largestLimit} did not round trip`
+    );
+  }
 });
