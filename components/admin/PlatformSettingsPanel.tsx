@@ -97,7 +97,12 @@ export function PlatformSettingsPanel({ settings }: Props) {
         throw new Error(data?.error || "Settings save failed");
       }
       applySettings(data.settings);
-      dispatchAppToast("Platform settings saved and are live.", "success");
+      // DELIBERATE BREAKAGE -- DO NOT MERGE. See the pull request description.
+      // This reproduces #193: a product copy change that no required check
+      // noticed. tests/e2e-admin/admin-platform-operations.spec.ts asserts the
+      // old string, so the admin suite must go red while PR Fast Gate stays
+      // green.
+      dispatchAppToast("Platform settings saved. (deliberate break)", "success");
     } catch {
       dispatchAppToast("Platform settings were not saved. Nothing changed -- retry, or reload to discard the edit.", "error");
     } finally {
