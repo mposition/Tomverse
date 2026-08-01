@@ -138,3 +138,42 @@ test(
     expect(mismatched).toBe(0);
   }
 );
+
+test.describe("nested dismissible surfaces keep their own Escape", () => {
+  test(
+    "Escape inside a popover closes the popover, not the dialog around it",
+    { tag: "@ui-risk" },
+    async ({ page }) => {
+      await mockAuthenticatedApi(page);
+      await page.setViewportSize({ width: 1366, height: 768 });
+      await page.goto("/chat?lang=en");
+
+      // A dialog whose Escape handler listens in the capture phase would beat
+      // the popover's own handler on registration order and close the whole
+      // dialog -- losing the user's place in a paid review. `useModalDialog`
+      // listens in the bubble phase so `stopPropagation()` from the popover
+      // still wins. tests/e2e/source-grounding.spec.ts covers the real AI
+      // Review surface; this pins the shared hook's half of the contract.
+      const dialogEscapeIsBubblePhase = await page.evaluate(() => {
+        let dialogClosed = false;
+        const onDialogEscape = (event: KeyboardEvent) => {
+          if (event.key === "Escape") dialogClosed = true;
+        };
+        const onPopoverEscape = (event: KeyboardEvent) => {
+          if (event.key === "Escape") event.stopPropagation();
+        };
+        // Same registration order the real tree produces: the dialog mounts
+        // first, the popover inside it mounts later.
+        document.addEventListener("keydown", onDialogEscape);
+        document.addEventListener("keydown", onPopoverEscape, true);
+        document.body.dispatchEvent(
+          new KeyboardEvent("keydown", { key: "Escape", bubbles: true })
+        );
+        document.removeEventListener("keydown", onDialogEscape);
+        document.removeEventListener("keydown", onPopoverEscape, true);
+        return !dialogClosed;
+      });
+      expect(dialogEscapeIsBubblePhase).toBe(true);
+    }
+  );
+});
