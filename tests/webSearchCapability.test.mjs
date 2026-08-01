@@ -52,6 +52,7 @@ test("models without a confirmed doc match are unverified, not assumed native", 
 
 test("models with no registry entry default to unsupported", () => {
   assert.equal(getWebSearchCapability("codestral").support, "unsupported");
+  // A retired id still has to resolve rather than throw when old history is read.
   assert.equal(getWebSearchCapability("llama-3-1").support, "unsupported");
   assert.equal(getWebSearchCapability("not-a-real-model-id").support, "unsupported");
 });

@@ -210,7 +210,7 @@ const main = async () => {
   if (!candidates.length) {
     console.error(
       "No comparison reviewer candidate has a configured API key in this environment " +
-        "(checked mistral-medium-3-1, claude-sonnet-5, llama-3-3 by default). " +
+        "(checked mistral-medium-3-1, claude-sonnet-5, qwen3.7-plus by default). " +
         "Set COMPARISON_REVIEW_MODEL_IDS or the relevant *_API_KEY env vars and retry."
     );
     process.exitCode = 1;

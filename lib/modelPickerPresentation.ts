@@ -24,6 +24,9 @@ const koreanDescriptions: Record<string, string> = {
   "gemini-3-1-pro": "상세한 멀티모달 분석과 복잡한 문서",
   "gemini-2-5-pro": "이전 세대 멀티모달 분석",
   "gemini-2-5-flash": "저비용 일상 작업과 빠른 파일 질문",
+  // Retired ids keep their Korean blurbs so admin history and any surface
+  // that resolves a stored conversation's model still reads in Korean. They
+  // are never reachable from the picker itself.
   "llama-3-1": "매우 빠르고 가벼운 텍스트 질문",
   "llama-4-scout": "빠른 이미지 질문과 긴 문맥 탐색",
   "llama-3-3": "오픈 모델 기반의 범용 텍스트 분석",
@@ -39,6 +42,7 @@ const koreanDescriptions: Record<string, string> = {
   "mistral-medium-3-1": "균형 잡힌 다국어 초안 작성과 분석",
   codestral: "코드 생성, 자동 완성과 저장소 질문",
   "kimi-k2.7-code": "코딩 작업과 긴 기술 문맥",
+  "kimi-k3": "이미지까지 다루는 긴 문맥 추론",
   "qwen3.7-max": "고난도 다국어 추론과 복잡한 지시",
   "qwen3.7-plus": "균형 잡힌 다국어 분석과 업무 글쓰기",
   "qwen3.6-flash": "빠른 다국어 질문과 번역",
@@ -459,7 +463,7 @@ export const modelMatchesCapability = (
     return support === "native" || support === "search-model";
   }
   const name = `${model.id} ${model.name}`.toLowerCase();
-  return ["mini", "flash", "haiku", "small", "lite", "llama-3-1"].some((term) =>
+  return ["mini", "flash", "haiku", "small", "lite"].some((term) =>
     name.includes(term)
   );
 };

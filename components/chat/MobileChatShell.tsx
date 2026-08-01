@@ -99,6 +99,8 @@ type MobileChatShellProps = {
   onDownload: (id: string, title: string) => void;
   onToggleModel: (modelId: string) => boolean;
   onSwapModel: (removeModelId: string, addModelId: string) => boolean;
+  /** Plan/guest entitlement check, so the outage banner never offers a swap this viewer cannot run. */
+  canSelectModel?: (modelId: string) => boolean;
   webSearchMode: WebSearchMode;
   onWebSearchModeChange: (mode: WebSearchMode) => void;
   onOpenDeepResearchSetup: () => void;
@@ -148,6 +150,7 @@ export function MobileChatShell({
   onDownload,
   onToggleModel,
   onSwapModel,
+  canSelectModel,
   webSearchMode,
   onWebSearchModeChange,
   onOpenDeepResearchSetup,
@@ -680,6 +683,7 @@ export function MobileChatShell({
         selectedModels={selectedModels}
         compact
         onSwapModel={onSwapModel}
+        canSelectModel={canSelectModel}
       />
 
       {!isConversationEmpty && selectedModels.length > 1 && (

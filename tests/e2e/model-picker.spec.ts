@@ -156,7 +156,7 @@ test("the filter sheet reports its active count, result count, and resets", asyn
     dialog.locator('[data-testid="model-option"][data-model-id="perplexity/sonar"]')
   ).toHaveCount(1);
   await expect(
-    dialog.locator('[data-testid="model-option"][data-model-id="llama-3-1"]')
+    dialog.locator('[data-testid="model-option"][data-model-id="deepseek-v4-flash"]')
   ).toHaveCount(0);
   await expect(
     dialog.locator('[data-testid="model-option"][data-model-id="gpt-5-4-mini"]')

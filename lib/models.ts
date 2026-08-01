@@ -105,6 +105,16 @@ export type AiModel = {
     operationalReason?: string;
     /** Safe status explanation that may be shown to end users. */
     userVisibleNote?: string;
+    /**
+     * Whether, and how strongly, this model reasons -- a catalogue fact, not
+     * a request parameter. It drives the picker's reasoning badge, the
+     * reasoning filter and the usage class; the only place it becomes a
+     * provider field is Perplexity's deep-research submit
+     * (lib/perplexityDeepResearch.ts). Every other provider is asked with no
+     * `reasoning_effort`, so its own default applies. Set it to what the
+     * model actually does, and never expose a per-request effort control for
+     * a provider this app does not send the field to.
+     */
     reasoning?: "none" | "low" | "medium" | "high";
     /** Published context window for catalogue metadata and request validation. */
     contextWindowTokens?: number;
@@ -171,20 +181,43 @@ export const AVAILABLE_MODELS = [
     { id: "gemini-2-5-pro", name: "Gemini 2.5 Pro", apiModel: "gemini-2.5-pro", provider: "google", icon: "✨", bestFor: "Legacy multimodal analysis", minimumPlan: "Free", usageClass: "advanced", replacementModelId: "gemini-3-1-pro", publiclyListed: false, enabled: false, status: "disabled", inputCapabilities: FULL_BINARY_INPUT },
     { id: "gemini-2-5-flash", name: "Gemini 3.1 Flash-Lite", apiModel: "gemini-3.1-flash-lite", provider: "google", icon: "✨", bestFor: "Low-cost everyday tasks and quick file questions", minimumPlan: "Guest", usageClass: "standard", enabled: true, status: "enabled", inputCapabilities: FULL_BINARY_INPUT },
 
-    { id: "llama-3-1", name: "Llama 3.1", apiModel: "llama-3.1-8b-instant", provider: "groq", icon: "∞", bestFor: "Very fast, lightweight text questions", minimumPlan: "Guest", usageClass: "standard", enabled: true, status: "enabled" },
-    // Groq stopped serving this model: the catalog monitor first recorded it
-    // missing on 2026-07-21 and escalated it to likely_deprecated after seven
-    // consecutive absences, while live calls returned HTTP 404. Disabled
-    // rather than repointed because Groq currently exposes no vision-capable
-    // replacement -- llama-3-3 is the closest enabled sibling, so it takes
-    // over as the replacement target even though it is text-only.
-    { id: "llama-4-scout", name: "Llama 4 Scout", apiModel: "meta-llama/llama-4-scout-17b-16e-instruct", provider: "groq", icon: "∞", bestFor: "Legacy fast visual questions and long-context exploration", minimumPlan: "Guest", usageClass: "standard", replacementModelId: "llama-3-3", publiclyListed: false, enabled: false, status: "disabled", contextWindowTokens: 131_072, inputCapabilities: { image: true, nativePdf: false, maxImages: 5, maxBase64ImagePayloadBytes: 4 * 1024 * 1024 } },
-    { id: "llama-3-3", name: "Llama 3.3", apiModel: "llama-3.3-70b-versatile", provider: "groq", icon: "∞", bestFor: "Broad open-model text analysis and instruction following", minimumPlan: "Free", usageClass: "advanced", enabled: true, status: "enabled" },
+    // Llama is retired from the public catalogue. Tomverse never self-hosted
+    // it -- every Llama answer was served through Groq -- and Groq is ending
+    // public hosting for the three models mapped here (see
+    // https://console.groq.com/docs/deprecations). Groq's suggested
+    // successors are the open-weight openai/gpt-oss-* models, which are
+    // deliberately NOT adopted: they are open-weight models, not OpenAI's
+    // hosted GPT line, and listing them would either misrepresent them or
+    // add an unreviewed product category purely to keep a provider's model
+    // count from reaching zero.
+    //
+    // The three entries stay in the catalogue as historical rows so stored
+    // conversations, the credit ledger and admin history keep resolving their
+    // ids. Each names the closest ACTIVE model for its role and plan tier --
+    // never another retired model, which is why llama-4-scout no longer
+    // points at llama-3-3. A replacement is only ever offered, never applied
+    // on the user's behalf, so it cannot hand out a tier the user has not
+    // paid for.
+    { id: "llama-3-1", name: "Llama 3.1", apiModel: "llama-3.1-8b-instant", provider: "groq", icon: "∞", bestFor: "Legacy fast, lightweight text questions", minimumPlan: "Guest", usageClass: "standard", replacementModelId: "deepseek-v4-flash", publiclyListed: false, enabled: false, status: "disabled" },
+    // Was already retired ahead of the rest: the catalog monitor first
+    // recorded it missing from Groq on 2026-07-21 and escalated it to
+    // likely_deprecated after seven consecutive absences, while live calls
+    // returned HTTP 404. Its replacement moves to Gemini 3.5 Flash, the
+    // closest active model that keeps native image input.
+    { id: "llama-4-scout", name: "Llama 4 Scout", apiModel: "meta-llama/llama-4-scout-17b-16e-instruct", provider: "groq", icon: "∞", bestFor: "Legacy fast visual questions and long-context exploration", minimumPlan: "Guest", usageClass: "standard", replacementModelId: "gemini-3-5-flash", publiclyListed: false, enabled: false, status: "disabled", contextWindowTokens: 131_072, inputCapabilities: { image: true, nativePdf: false, maxImages: 5, maxBase64ImagePayloadBytes: 4 * 1024 * 1024 } },
+    { id: "llama-3-3", name: "Llama 3.3", apiModel: "llama-3.3-70b-versatile", provider: "groq", icon: "∞", bestFor: "Legacy open-model text analysis and instruction following", minimumPlan: "Free", usageClass: "advanced", replacementModelId: "mistral-medium-3-1", publiclyListed: false, enabled: false, status: "disabled" },
 
-    { id: "grok-4", name: "Grok 4", apiModel: "grok-4", provider: "xai", icon: "𝕏", bestFor: "Current-events discussion and broad advanced analysis", minimumPlan: "Pro", usageClass: "premium", enabled: true, status: "enabled" },
+    // xAI text models are consolidated on Grok 4.5. This is a Tomverse
+    // catalogue-simplification decision, not a claim that xAI has switched
+    // the older endpoints off: one clearly-positioned Grok is easier to
+    // choose than four overlapping ones. The older ids stay resolvable for
+    // stored conversations and all point at grok-4-5, which is Pro-only --
+    // callers must offer it, not force it, and must fall back to an
+    // accessible active model for users without Pro.
+    { id: "grok-4", name: "Grok 4", apiModel: "grok-4", provider: "xai", icon: "𝕏", bestFor: "Legacy current-events discussion and broad advanced analysis", minimumPlan: "Pro", usageClass: "premium", replacementModelId: "grok-4-5", publiclyListed: false, enabled: false, status: "disabled" },
     { id: "grok-4-5", name: "Grok 4.5", apiModel: "grok-4.5", provider: "xai", icon: "𝕏", bestFor: "Deep reasoning on complex technical and analytical tasks", minimumPlan: "Pro", usageClass: "premium-reasoning", enabled: true, status: "enabled", reasoning: "high" },
-    { id: "grok-3", name: "Grok 3", apiModel: "grok-3", provider: "xai", icon: "𝕏", bestFor: "General analysis with a direct conversational style", minimumPlan: "Free", usageClass: "advanced", enabled: true, status: "enabled" },
-    { id: "grok-3-mini", name: "Grok 3 Mini", apiModel: "grok-3-mini", provider: "xai", icon: "𝕏", bestFor: "Fast, concise everyday answers", minimumPlan: "Guest", usageClass: "standard", enabled: true, status: "enabled" },
+    { id: "grok-3", name: "Grok 3", apiModel: "grok-3", provider: "xai", icon: "𝕏", bestFor: "Legacy general analysis with a direct conversational style", minimumPlan: "Free", usageClass: "advanced", replacementModelId: "grok-4-5", publiclyListed: false, enabled: false, status: "disabled" },
+    { id: "grok-3-mini", name: "Grok 3 Mini", apiModel: "grok-3-mini", provider: "xai", icon: "𝕏", bestFor: "Legacy fast, concise everyday answers", minimumPlan: "Guest", usageClass: "standard", replacementModelId: "grok-4-5", publiclyListed: false, enabled: false, status: "disabled" },
     { id: "deepseek-v4-flash", name: "DeepSeek-V4 Flash", apiModel: "deepseek-v4-flash", provider: "deepseek", icon: "DS", bestFor: "Fast coding help and technical questions", minimumPlan: "Guest", usageClass: "standard", enabled: true, status: "enabled" },
     { id: "deepseek-v4-pro", name: "DeepSeek-V4 Pro", apiModel: "deepseek-v4-pro", provider: "deepseek", icon: "DS", bestFor: "Cost-efficient technical analysis and coding", minimumPlan: "Free", usageClass: "standard", enabled: true, status: "enabled" },
     { id: "deepseek-r1", name: "DeepSeek R1 Reasoning", apiModel: "deepseek-reasoner", provider: "deepseek", icon: "DS", bestFor: "Math, code, and problems requiring explicit reasoning", minimumPlan: "Free", usageClass: "reasoning", enabled: true, status: "enabled", reasoning: "high" },
@@ -193,6 +226,20 @@ export const AVAILABLE_MODELS = [
     { id: "mistral-medium-3-1", name: "Mistral Medium 3.1", apiModel: "mistral-medium-latest", provider: "mistral", icon: "M", bestFor: "Balanced multilingual drafting and analysis", minimumPlan: "Free", usageClass: "advanced", enabled: true, status: "enabled" },
     { id: "codestral", name: "Codestral", apiModel: "codestral-latest", provider: "mistral", icon: "M", bestFor: "Code generation, completion, and repository questions", minimumPlan: "Free", usageClass: "advanced", enabled: true, status: "enabled" },
     { id: "kimi-k2.7-code", name: "Kimi K2.7", apiModel: "kimi-k2.7-code", provider: "moonshot", icon: "KM", bestFor: "Coding tasks and long technical context", minimumPlan: "Free", usageClass: "advanced", enabled: true, status: "enabled" },
+    // Kimi K3 is a separate model from kimi-k2.7-code, not a rename of it:
+    // K2.7 stays listed as the coding-specialised Free model.
+    //
+    // Only fields confirmed in Moonshot's own model documentation are set
+    // here (github.com/MoonshotAI/Kimi-K3): the API model id `kimi-k3`, the
+    // 1,048,576-token context window, native image input, and always-on
+    // thinking. `reasoning` is the catalogue's capability signal, and "high"
+    // is the closest value this type allows to Moonshot's reasoning_effort
+    // default of "max"; the OpenAI-compatible adapter does not send the field,
+    // so the provider's own default applies. Token prices, cached-input price
+    // and the output cap are NOT published in that documentation, so they are
+    // deliberately left to the usage-class defaults rather than guessed --
+    // see the task report for the outstanding verification.
+    { id: "kimi-k3", name: "Kimi K3", apiModel: "kimi-k3", provider: "moonshot", icon: "KM", bestFor: "Long-context reasoning across text and images", minimumPlan: "Pro", usageClass: "premium-reasoning", enabled: true, status: "enabled", reasoning: "high", contextWindowTokens: 1_048_576, inputCapabilities: { image: true, nativePdf: false } },
     { id: "qwen3.7-max", name: "Qwen 3.7 Max", apiModel: "qwen3.7-max", provider: "qwen", icon: "QW", bestFor: "Demanding multilingual reasoning and complex instructions", minimumPlan: "Pro", usageClass: "premium", enabled: true, status: "enabled" },
     { id: "qwen3.7-plus", name: "Qwen 3.7 Plus", apiModel: "qwen3.7-plus", provider: "qwen", icon: "QW", bestFor: "Balanced multilingual analysis and business writing", minimumPlan: "Free", usageClass: "advanced", enabled: true, status: "enabled" },
     { id: "qwen3.6-flash", name: "Qwen 3.6", apiModel: "qwen3.6-flash", provider: "qwen", icon: "QW", bestFor: "Fast multilingual questions and translation", minimumPlan: "Guest", usageClass: "standard", enabled: true, status: "enabled" },
@@ -552,4 +599,22 @@ export const isPubliclySelectableModel = (
 
 if (!isEnabledModelId(DEFAULT_MODEL_ID)) {
     throw new Error(`Default model "${DEFAULT_MODEL_ID}" must be enabled.`);
+}
+
+// A retirement is only useful if the model it points at can actually be
+// reached. Pointing one retired model at another (as llama-4-scout once
+// pointed at llama-3-3) leaves the picker, the status route and the chat
+// route's 410 all naming something nobody can select, so the whole catalogue
+// is checked at import time rather than only in tests.
+for (const model of AVAILABLE_MODELS as readonly AiModel[]) {
+    if (!model.replacementModelId) continue;
+    if (model.replacementModelId === model.id) {
+        throw new Error(`Model "${model.id}" names itself as its replacement.`);
+    }
+    const replacement = modelMap.get(model.replacementModelId);
+    if (!replacement || !isPubliclySelectableModel(replacement)) {
+        throw new Error(
+            `Model "${model.id}" names replacement "${model.replacementModelId}", which is not publicly selectable.`
+        );
+    }
 }

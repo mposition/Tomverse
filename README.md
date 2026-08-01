@@ -188,8 +188,17 @@ copy receives a unique draft ID and starts disabled and hidden so its new API
 model ID can be verified before it becomes callable.
 
 The checked-in `AVAILABLE_MODELS` array is retained only as the first-deploy
-bootstrap and a rolling-migration fallback. Existing rows are never overwritten
-by the bootstrap. Removing a model from the Admin Console archives it
+bootstrap and a rolling-migration fallback. Existing rows keep their
+admin-tuned values -- name, blurb, pricing, sort order -- and are never
+overwritten by the bootstrap, with one deliberate exception: **retirement is
+replayed**. A model the checked-in catalogue marks retired
+(`enabled=false`, `publiclyListed=false`, `status="disabled"`) has those three
+fields, plus its `replacementModelId`, forced onto any existing row on every
+bootstrap. Without that, a model retired in `lib/models.ts` after its row
+already existed stayed selectable forever, because the bootstrap only ever
+inserted. The replay is idempotent, never deletes a row, and never touches
+`catalogDeleted`, which stays a human-controlled admin action. Removing a model
+from the Admin Console archives it
 (`catalogDeleted=true`, `enabled=false`, `publiclyListed=false`) instead of
 physically deleting the ID, so historical conversations remain readable. A
 saved archived entry is restored to the active catalogue.

@@ -25,7 +25,10 @@ test("DeepSeek model defaults distinguish cache-hit and cache-miss pricing", () 
   });
 });
 
-test("Llama 4 Scout uses the published Groq token pricing and output cap", () => {
+// Retired with the rest of Llama, but its billing profile is deliberately
+// kept: ledger rows and cost reports for conversations that ran on it must
+// keep settling against the prices they were charged at.
+test("retired Llama 4 Scout keeps its published Groq token pricing for historical settlement", () => {
   assert.deepEqual(profile("llama-4-scout"), {
     maxOutputTokens: 8_192,
     reservationOutputTokens: 2_048,

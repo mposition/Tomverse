@@ -31,13 +31,30 @@ test("getProbeModelFor returns no model for a provider whose every model is sear
 });
 
 test("getProbeModelFor still probes a non-standard tier when that tier is probe-safe (moonshot)", () => {
-  // The exclusion is by usage class, not "anything non-standard": moonshot's
-  // only enabled model is advanced-tier but not search-backed, so it stays
-  // probeable.
+  // The exclusion is by usage class, not "anything non-standard": neither of
+  // moonshot's enabled models is standard-tier, but neither is search-backed
+  // either, so the provider stays probeable.
   const model = getProbeModelFor("moonshot");
   assert.ok(model);
   assert.equal(model.provider, "moonshot");
   assert.notEqual(model.usageClass, "standard");
+});
+
+test("a provider with no enabled model yields no probe rather than a false failure", () => {
+  // groq is deliberately kept wired up with zero public models after Llama's
+  // retirement. Returning undefined makes the caller record no_probe_model;
+  // anything else would report a provider outage for a provider Tomverse is
+  // simply not calling.
+  assert.equal(getProbeModelFor("groq"), undefined);
+});
+
+test("xai probes the one model it still has", () => {
+  // Consolidating on Grok 4.5 removed the cheap standard-tier probe target,
+  // so the probe now runs a premium-reasoning model. That is a deliberate
+  // cost choice, revisitable through PROVIDER_PROBE_MODEL_OVERRIDES.
+  const model = getProbeModelFor("xai");
+  assert.ok(model);
+  assert.equal(model.id, "grok-4-5");
 });
 
 test("getProbeModelFor honors PROVIDER_PROBE_MODEL_OVERRIDES for a provider", async () => {

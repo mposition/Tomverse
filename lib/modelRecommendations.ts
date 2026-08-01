@@ -67,11 +67,11 @@ const USE_CASE_CANDIDATES: Record<
 > = {
   everyday: [
     "gpt-5-4-mini",
-    "grok-3-mini",
     "gemini-2-5-flash",
     "qwen3.6-flash",
-    "llama-3-1",
     "claude-haiku-4-5",
+    "mistral-small-4",
+    "glm-5.2",
   ],
   writing: [
     "claude-haiku-4-5",
@@ -88,6 +88,7 @@ const USE_CASE_CANDIDATES: Record<
     "deepseek-r1",
     "gemini-3-1-pro",
     "mistral-large-3",
+    "kimi-k3",
   ],
   multimodal: [
     "gemini-3-5-flash",
@@ -109,10 +110,10 @@ const USE_CASE_CANDIDATES: Record<
   ],
   value: [
     "gemini-2-5-flash",
-    "llama-3-1",
+    "deepseek-v4-flash",
     "mistral-small-4",
     "glm-5.2",
-    "grok-3-mini",
+    "qwen3.6-flash",
     "deepseek-v4-pro",
   ],
 };

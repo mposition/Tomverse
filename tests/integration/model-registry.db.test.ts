@@ -17,6 +17,115 @@ after(async () => {
   await prisma.$disconnect();
 });
 
+// Runs FIRST, before anything in this file calls ensureModelRegistrySeeded():
+// the bootstrap memoises itself, so the retirement replay only ever happens on
+// the process's first call and this is the one chance to observe it.
+//
+// The defect it covers: `createMany({ skipDuplicates: true })` only inserts, so
+// a model already in the runtime registry when it was retired in lib/models.ts
+// kept its old enabled/publiclyListed/status values and stayed on offer. Each
+// wave of retirements re-opens that hole for its own ids, so this seeds the
+// exact pre-retirement shape and checks the bootstrap closes it.
+const RETIRED_MODEL_EXPECTATIONS = [
+  { id: "grok-3", replacementModelId: "grok-4-5" },
+  { id: "grok-3-mini", replacementModelId: "grok-4-5" },
+  { id: "grok-4", replacementModelId: "grok-4-5" },
+  { id: "llama-3-1", replacementModelId: "deepseek-v4-flash" },
+  { id: "llama-3-3", replacementModelId: "mistral-medium-3-1" },
+  { id: "llama-4-scout", replacementModelId: "gemini-3-5-flash" },
+] as const;
+
+test("bootstrapping replays catalogue retirements onto pre-existing registry rows", async () => {
+  const retiredIds = RETIRED_MODEL_EXPECTATIONS.map((entry) => entry.id);
+
+  // Seed the rows first so they exist, then force them back into the state a
+  // pre-retirement deploy would have left them in.
+  await prisma.modelRegistryEntry.createMany({
+    data: RETIRED_MODEL_EXPECTATIONS.map((entry, index) => ({
+      id: entry.id,
+      name: `Stale ${entry.id}`,
+      apiModel: entry.id,
+      provider: entry.id.startsWith("grok") ? "xai" : "groq",
+      apiBaseUrl: entry.id.startsWith("grok")
+        ? "https://api.x.ai/v1"
+        : "https://api.groq.com/openai/v1",
+      apiKeyEnvName: entry.id.startsWith("grok") ? "XAI_API_KEY" : "GROQ_API_KEY",
+      icon: "?",
+      bestFor: "stale row",
+      minimumPlan: "Guest",
+      usageClass: "standard",
+      creditWeight: 1,
+      sortOrder: 9_000 + index,
+    })),
+    skipDuplicates: true,
+  });
+  await prisma.modelRegistryEntry.updateMany({
+    where: { id: { in: [...retiredIds] } },
+    data: {
+      enabled: true,
+      publiclyListed: true,
+      status: "enabled",
+      replacementModelId: null,
+    },
+  });
+
+  await ensureModelRegistrySeeded();
+
+  for (const expected of RETIRED_MODEL_EXPECTATIONS) {
+    const row = await prisma.modelRegistryEntry.findUnique({
+      where: { id: expected.id },
+    });
+    assert.ok(row, `${expected.id} must never be deleted from the registry`);
+    assert.equal(row.enabled, false, `${expected.id} should be disabled`);
+    assert.equal(row.publiclyListed, false, `${expected.id} should be delisted`);
+    assert.equal(row.status, "disabled");
+    assert.equal(row.replacementModelId, expected.replacementModelId);
+    // catalogDeleted stays a human-controlled admin action, so the replay
+    // must not have set it.
+    assert.equal(row.catalogDeleted, false);
+
+    // Historical resolution survives; new calls do not.
+    const historical = await getRuntimeModel(expected.id);
+    assert.ok(historical, `${expected.id} must stay resolvable for old chats`);
+    assert.ok(historical.name);
+    assert.equal(await getEnabledRuntimeModel(expected.id), undefined);
+    assert.equal(
+      (await assertModelRuntimeAvailable(expected.id)).allowed,
+      false
+    );
+  }
+
+  // The replacement each retirement points at has to be something a user can
+  // actually pick, or the offer is a dead end.
+  for (const expected of RETIRED_MODEL_EXPECTATIONS) {
+    const replacement = await getEnabledRuntimeModel(expected.replacementModelId);
+    assert.ok(
+      replacement,
+      `${expected.id} points at ${expected.replacementModelId}, which is not enabled at runtime`
+    );
+    assert.notEqual(replacement.publiclyListed, false);
+  }
+});
+
+test("re-running the bootstrap leaves retired rows untouched", async () => {
+  const before = await prisma.modelRegistryEntry.findMany({
+    where: { id: { in: RETIRED_MODEL_EXPECTATIONS.map((entry) => entry.id) } },
+    orderBy: { id: "asc" },
+  });
+
+  await ensureModelRegistrySeeded();
+
+  const after = await prisma.modelRegistryEntry.findMany({
+    where: { id: { in: RETIRED_MODEL_EXPECTATIONS.map((entry) => entry.id) } },
+    orderBy: { id: "asc" },
+  });
+  assert.equal(after.length, before.length);
+  assert.deepEqual(
+    after.map((row) => [row.id, row.enabled, row.publiclyListed, row.status]),
+    before.map((row) => [row.id, row.enabled, row.publiclyListed, row.status])
+  );
+});
+
 test("persists and resolves a newly registered model without a source catalogue entry", async () => {
   await ensureModelRegistrySeeded();
   await prisma.modelRegistryEntry.create({

@@ -138,7 +138,7 @@ test.describe("attachment UX", () => {
     expect(uploadState.finalizeCount).toBe(1);
   });
 
-  test("image attachments disable text-only Llama models and keep Scout available", { tag: "@smoke" }, async ({ page }) => {
+  test("image attachments disable text-only models and keep vision models selectable", { tag: "@smoke" }, async ({ page }) => {
     await attachFromComputer(page, {
       name: "vision-model-check.png",
       mimeType: "image/png",
@@ -152,16 +152,17 @@ test.describe("attachment UX", () => {
       .click();
     await openModelCatalogue(page);
 
-    const textOnlyLlama = page.locator(
-      '[data-testid="model-option"][data-model-id="llama-3-1"]'
+    // Was llama-3-1 / llama-4-scout until Llama left the public catalogue
+    // with Groq's hosting. Any enabled Guest-tier pair -- one text-only, one
+    // vision -- exercises the same assertion.
+    const textOnlyModel = page.locator(
+      '[data-testid="model-option"][data-model-id="deepseek-v4-flash"]'
     );
-    // Was llama-4-scout until Groq stopped serving it and it was disabled;
-    // any enabled Guest-tier vision model exercises the same assertion.
     const visionModel = page.locator(
       '[data-testid="model-option"][data-model-id="gemini-2-5-flash"]'
     );
-    await expect(textOnlyLlama).toBeDisabled();
-    await expect(textOnlyLlama).toHaveAttribute("data-model-image-input", "false");
+    await expect(textOnlyModel).toBeDisabled();
+    await expect(textOnlyModel).toHaveAttribute("data-model-image-input", "false");
     await expect(visionModel).toBeEnabled();
     await expect(visionModel).toHaveAttribute("data-model-image-input", "true");
   });
@@ -174,7 +175,7 @@ test.describe("attachment UX", () => {
       .click();
     await openModelCatalogue(page);
     await page
-      .locator('[data-testid="model-option"][data-model-id="llama-3-1"]')
+      .locator('[data-testid="model-option"][data-model-id="deepseek-v4-flash"]')
       .click();
     // Escape steps back to the recommendations first, then closes the picker.
     await page.keyboard.press("Escape");
@@ -188,7 +189,7 @@ test.describe("attachment UX", () => {
     });
 
     const warning = page.getByTestId("image-model-compatibility-warning");
-    await expect(warning).toContainText("Llama 3.1");
+    await expect(warning).toContainText("DeepSeek-V4 Flash");
     await warning
       .getByRole("button", {
         name: /미지원 모델 선택 해제|Remove incompatible models|移除不兼容模型/,

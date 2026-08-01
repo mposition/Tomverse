@@ -49,9 +49,9 @@ test("recommendations stay within the 6-8 band the picker is designed for", () =
 test("favourites, model-finder answers and recents never push the list past the cap", () => {
   const recommendations = getModelRecommendations({
     ...freeInput,
-    favoriteModelIds: ["claude-sonnet-5", "deepseek-r1", "grok-3"],
+    favoriteModelIds: ["claude-sonnet-5", "deepseek-r1", "mistral-large-3"],
     personalizedModelIds: ["mistral-medium-3-1", "qwen3.7-plus", "glm-5.2"],
-    recentModelIds: ["llama-3-3", "codestral"],
+    recentModelIds: ["codestral", "kimi-k2.7-code"],
   });
   assert.equal(recommendations.length, MAX_MODEL_RECOMMENDATIONS);
   const ids = recommendations.map((item) => item.modelId);
@@ -60,6 +60,35 @@ test("favourites, model-finder answers and recents never push the list past the 
   assert.deepEqual(ids.slice(0, 2), ["claude-sonnet-5", "deepseek-r1"]);
   assert.equal(recommendations[0].source, "favorite");
   assert.equal(recommendations[2].source, "personalized");
+});
+
+// A retired model stays in the user's stored favourites and recents forever
+// -- nothing rewrites those lists when a model leaves the catalogue -- so the
+// recommender is the layer that has to refuse them.
+test("retired models a user still has stored are never recommended back", () => {
+  const recommendations = getModelRecommendations({
+    ...freeInput,
+    favoriteModelIds: ["grok-3", "llama-3-3"],
+    personalizedModelIds: ["grok-3-mini"],
+    recentModelIds: ["llama-3-1", "llama-4-scout", "grok-4"],
+  });
+  const ids = recommendations.map((item) => item.modelId);
+  for (const retiredId of [
+    "grok-3",
+    "grok-3-mini",
+    "grok-4",
+    "llama-3-1",
+    "llama-3-3",
+    "llama-4-scout",
+  ]) {
+    assert.equal(
+      ids.includes(retiredId),
+      false,
+      `${retiredId} is retired and must not be recommended`
+    );
+  }
+  // The list is still built from the use-case tables rather than collapsing.
+  assert.ok(recommendations.length >= TARGET_MIN_MODEL_RECOMMENDATIONS);
 });
 
 test("disabled and delisted models are never recommended", () => {
@@ -135,7 +164,7 @@ test("a provider outage removes the model instead of recommending a dead slot", 
   );
   assert.equal(
     degraded.find((item) => item.useCase === "everyday").modelId,
-    "grok-3-mini"
+    "gemini-2-5-flash"
   );
 });
 
@@ -145,7 +174,7 @@ test("a degraded provider loses its slot to a healthy alternative but is still s
     modelStatuses: { "gpt-5-4-mini": "limited" },
   });
   const everyday = recommendations.find((item) => item.useCase === "everyday");
-  assert.equal(everyday.modelId, "grok-3-mini");
+  assert.equal(everyday.modelId, "gemini-2-5-flash");
   assert.equal(everyday.status, "available");
 
   // With no healthy alternative left, the limited model is offered and says so.

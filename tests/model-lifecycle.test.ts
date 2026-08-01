@@ -3,6 +3,8 @@ import test from "node:test";
 
 import {
   AVAILABLE_MODELS,
+  PUBLIC_MODELS,
+  PUBLIC_MODEL_PROVIDERS,
   isPubliclySelectableModel,
   isRetiredModel,
   type AiModel,
@@ -123,5 +125,131 @@ test("groq llama-4-scout stays retired and unselectable", () => {
   assert.ok(scout, "llama-4-scout should remain in the catalog for history");
   assert.equal(isRetiredModel(scout!), true);
   assert.equal(isPubliclySelectableModel(scout!), false);
-  assert.equal(scout!.replacementModelId, "llama-3-3");
+  // Repointed off llama-3-3 when that model was retired too: a retirement
+  // that names another retired model leaves users nowhere to go.
+  assert.equal(scout!.replacementModelId, "gemini-3-5-flash");
+});
+
+// ---------------------------------------------------------------------------
+// Catalogue policy: Llama is retired with Groq's public hosting, xAI is
+// consolidated on Grok 4.5, and Groq's suggested GPT-OSS successors are
+// deliberately not adopted.
+// ---------------------------------------------------------------------------
+
+const RETIRED_LLAMA_IDS = ["llama-3-1", "llama-3-3", "llama-4-scout"] as const;
+const RETIRED_GROK_IDS = ["grok-4", "grok-3", "grok-3-mini"] as const;
+
+const entry = (id: string) => CATALOG.find((model) => model.id === id);
+
+test("no Llama model is publicly listed or selectable", () => {
+  for (const id of RETIRED_LLAMA_IDS) {
+    const model = entry(id);
+    assert.ok(model, `${id} must stay in the catalog for stored conversations`);
+    assert.equal(isRetiredModel(model!), true, `${id} must be retired`);
+    assert.equal(isPubliclySelectableModel(model!), false);
+    assert.equal(model!.publiclyListed, false);
+    assert.equal(model!.enabled, false);
+    assert.equal(model!.status, "disabled");
+  }
+
+  assert.deepEqual(
+    PUBLIC_MODELS.filter((model) => /llama/i.test(`${model.id} ${model.name} ${model.apiModel}`))
+      .map((model) => model.id),
+    []
+  );
+});
+
+test("each retired Llama names the active model that took over its role", () => {
+  assert.equal(entry("llama-3-1")!.replacementModelId, "deepseek-v4-flash");
+  assert.equal(entry("llama-3-3")!.replacementModelId, "mistral-medium-3-1");
+  assert.equal(entry("llama-4-scout")!.replacementModelId, "gemini-3-5-flash");
+});
+
+test("groq has no publicly selectable model left", () => {
+  assert.deepEqual(
+    CATALOG.filter(
+      (model) => model.provider === "groq" && isPubliclySelectableModel(model)
+    ).map((model) => model.id),
+    []
+  );
+  // The provider itself is deliberately kept wired up for internal
+  // evaluation and incident response -- only its public catalogue is empty.
+  assert.ok(
+    CATALOG.some((model) => model.provider === "groq"),
+    "the groq provider connection must stay in the catalog"
+  );
+});
+
+test("GPT-OSS is absent from the catalogue entirely", () => {
+  const gptOss = CATALOG.filter((model) =>
+    /gpt-oss/i.test(`${model.id} ${model.name} ${model.apiModel}`)
+  );
+  assert.deepEqual(gptOss.map((model) => model.id), []);
+  assert.deepEqual(
+    PUBLIC_MODELS.filter((model) =>
+      /gpt-oss/i.test(`${model.id} ${model.name} ${model.apiModel}`)
+    ).map((model) => model.id),
+    []
+  );
+});
+
+test("xai exposes Grok 4.5 and nothing else", () => {
+  const publicXai = PUBLIC_MODELS.filter(
+    (model) => model.provider === "xai" && isPubliclySelectableModel(model)
+  );
+  assert.deepEqual(publicXai.map((model) => model.id), ["grok-4-5"]);
+
+  const grok45 = entry("grok-4-5")!;
+  assert.equal(grok45.apiModel, "grok-4.5");
+  assert.equal(grok45.enabled, true);
+  assert.equal(grok45.status, "enabled");
+  assert.notEqual(grok45.publiclyListed, false);
+});
+
+test("older Grok models stay resolvable as history but cannot be selected", () => {
+  for (const id of RETIRED_GROK_IDS) {
+    const model = entry(id);
+    assert.ok(model, `${id} must stay resolvable for stored conversations`);
+    assert.ok(model!.name, `${id} must keep a display name for old transcripts`);
+    assert.equal(isRetiredModel(model!), true);
+    assert.equal(isPubliclySelectableModel(model!), false);
+    assert.equal(model!.replacementModelId, "grok-4-5");
+  }
+});
+
+test("Kimi K3 and Kimi K2.7 are two distinct public models", () => {
+  const k3 = entry("kimi-k3");
+  const k27 = entry("kimi-k2.7-code");
+  assert.ok(k3, "kimi-k3 must exist");
+  assert.ok(k27, "kimi-k2.7-code must stay published alongside it");
+  assert.notEqual(k3!.apiModel, k27!.apiModel);
+  assert.equal(k3!.apiModel, "kimi-k3");
+  assert.equal(k27!.apiModel, "kimi-k2.7-code");
+  assert.equal(k3!.provider, "moonshot");
+  assert.equal(k27!.provider, "moonshot");
+  assert.equal(k3!.icon, k27!.icon);
+  assert.equal(isPubliclySelectableModel(k3!), true);
+  assert.equal(isPubliclySelectableModel(k27!), true);
+  // Officially documented specification only -- see lib/models.ts.
+  assert.equal(k3!.minimumPlan, "Pro");
+  assert.equal(k3!.usageClass, "premium-reasoning");
+  assert.equal(k3!.contextWindowTokens, 1_048_576);
+  assert.equal(k3!.inputCapabilities?.image, true);
+  assert.equal(k3!.reasoning, "high");
+});
+
+test("the public provider and model counts are derived, not hard-coded", () => {
+  const selectable = PUBLIC_MODELS.filter(isPubliclySelectableModel);
+  const derivedProviders = new Set(selectable.map((model) => model.provider));
+
+  // Whatever the catalogue currently says, the exported counts must agree
+  // with it -- this is what keeps the marketing provider count honest after
+  // a retirement empties a provider.
+  assert.deepEqual(
+    [...PUBLIC_MODEL_PROVIDERS].sort(),
+    [...derivedProviders].sort()
+  );
+  assert.equal(derivedProviders.has("groq"), false);
+  assert.ok(PUBLIC_MODEL_PROVIDERS.length > 0);
+  assert.ok(selectable.length > 0);
 });
