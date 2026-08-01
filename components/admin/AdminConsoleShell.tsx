@@ -322,6 +322,10 @@ export function AdminConsoleShell({
                     key={item.href}
                     href={item.href}
                     onClick={() => setMobileNavOpen(false)}
+                    // The active entry was previously distinguished by colour
+                    // alone, which tells assistive technology nothing about
+                    // where the operator is.
+                    aria-current={active ? "page" : undefined}
                     className={`group flex min-h-10 items-center gap-3 rounded-xl px-3 py-2 text-sm font-bold transition ${
                       active ? "bg-blue-600 text-white" : "text-zinc-400 hover:bg-zinc-900 hover:text-zinc-100"
                     }`}

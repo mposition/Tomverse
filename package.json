@@ -12,6 +12,8 @@
     "test:e2e": "npm run build && npm run test:e2e:run",
     "test:e2e:run": "playwright test",
     "test:e2e:pr": "playwright test --project=desktop-chromium",
+    "test:e2e:admin": "npm run build && npm run test:e2e:admin:run",
+    "test:e2e:admin:run": "node scripts/run-admin-e2e.mjs",
     "test:e2e:smoke": "playwright test --project=desktop-chromium --grep=@smoke",
     "test:e2e:ui-risk": "playwright test --project=desktop-chromium --project=mobile-chromium --grep=@ui-risk",
     "test:e2e:visual": "playwright test --project=desktop-chromium tests/e2e/chat-state-visual-regression.spec.ts",
