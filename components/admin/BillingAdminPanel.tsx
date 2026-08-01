@@ -872,9 +872,9 @@ export function BillingAdminPanel({
         throw new Error(data?.error || "Billing refresh failed");
       }
       applyResponse(data);
-      dispatchAppToast("Billing settings loaded from DB.", "success");
+      dispatchAppToast("Billing settings reloaded. The form now matches what is stored.", "success");
     } catch {
-      dispatchAppToast("Failed to load billing settings from DB.", "error");
+      dispatchAppToast("Billing settings could not be reloaded, so the form still shows the values it had. Retry before editing.", "error");
     } finally {
       setIsRefreshing(false);
     }
@@ -900,9 +900,9 @@ export function BillingAdminPanel({
         throw new Error(data?.error || "Billing save failed");
       }
       applyResponse(data);
-      dispatchAppToast("Billing settings saved to DB.", "success");
+      dispatchAppToast("Billing settings saved. Plans, promotions and the price catalogue are live.", "success");
     } catch {
-      dispatchAppToast("Failed to save billing settings.", "error");
+      dispatchAppToast("Billing settings were not saved. Nothing changed -- retry, or reload to discard the edit.", "error");
     } finally {
       setIsSaving(false);
     }

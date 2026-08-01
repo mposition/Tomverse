@@ -15,6 +15,7 @@ import {
   X,
 } from "lucide-react";
 import { dispatchAppToast } from "@/lib/appToast";
+import { describeAdminApiFailure } from "@/lib/adminApiOutcome";
 import { adminDateTimeLabel as dateTimeLabel } from "@/lib/adminDateTime";
 import { buildPlanAdjustPayload } from "@/lib/adminPlanAdjustCore";
 import type {
@@ -443,16 +444,29 @@ export function AdminUsersPanel({
         method: "POST",
       });
       const data = (await response.json().catch(() => null)) as
-        | { user?: Partial<AdminUserDetail>; error?: string }
+        | { user?: Partial<AdminUserDetail>; error?: string; code?: string; approvalId?: string }
         | null;
       if (!response.ok || !data?.user) {
-        throw new Error(data?.error || "Stripe resync failed.");
+        const failure = describeAdminApiFailure({
+          status: response.status,
+          error: data?.error,
+          code: data?.code,
+          approvalId: data?.approvalId,
+          fallback: "Stripe was not resynced, so nothing changed.",
+        });
+        dispatchAppToast(failure.message, failure.tone);
+        return;
       }
       setDetailUser((current) => (current ? { ...current, ...data.user } : current));
-      dispatchAppToast("Stripe billing resynced.", "success");
-    } catch (error) {
+      // The route reads Stripe and writes the plan, subscription and price it
+      // found -- it does not change anything in Stripe.
       dispatchAppToast(
-        error instanceof Error ? error.message : "Stripe resync failed.",
+        "Plan, subscription and price re-read from Stripe and saved.",
+        "success"
+      );
+    } catch {
+      dispatchAppToast(
+        "Stripe was not resynced. Check the connection and retry.",
         "error"
       );
     } finally {
@@ -515,18 +529,29 @@ export function AdminUsersPanel({
         }
       );
       const data = (await response.json().catch(() => null)) as
-        | { user?: Partial<AdminUserDetail>; error?: string }
+        | { user?: Partial<AdminUserDetail>; error?: string; code?: string; approvalId?: string }
         | null;
       if (!response.ok || !data?.user) {
-        throw new Error(data?.error || "Billing hold release failed.");
+        const failure = describeAdminApiFailure({
+          status: response.status,
+          error: data?.error,
+          code: data?.code,
+          approvalId: data?.approvalId,
+          fallback: "The billing hold was not released, so AI access is unchanged.",
+        });
+        dispatchAppToast(failure.message, failure.tone);
+        return;
       }
       setDetailUser((current) => (current ? { ...current, ...data.user } : current));
       setRiskReleaseReason("");
       setRiskReleaseConfirm("");
-      dispatchAppToast("Billing dispute hold released. Credit debt remains enforceable.", "success");
-    } catch (error) {
       dispatchAppToast(
-        error instanceof Error ? error.message : "Billing hold release failed.",
+        "AI access restored. The outstanding credit debt is unchanged and still enforceable.",
+        "success"
+      );
+    } catch {
+      dispatchAppToast(
+        "The billing hold was not released. Check the connection and retry.",
         "error"
       );
     } finally {
@@ -557,18 +582,38 @@ export function AdminUsersPanel({
         }
       );
       const data = (await response.json().catch(() => null)) as
-        | { success?: boolean; error?: string }
+        | {
+            success?: boolean;
+            error?: string;
+            code?: string;
+            approvalId?: string;
+            stripeRefundId?: string;
+          }
         | null;
       if (!response.ok || !data?.success) {
-        throw new Error(data?.error || "Credit purchase refund failed.");
+        const failure = describeAdminApiFailure({
+          status: response.status,
+          error: data?.error,
+          code: data?.code,
+          approvalId: data?.approvalId,
+          fallback: "The credit purchase was not refunded, so balances are unchanged.",
+        });
+        dispatchAppToast(failure.message, failure.tone);
+        return;
       }
       setCreditRefundReasons((current) => ({ ...current, [purchase.id]: "" }));
       setCreditRefundConfirms((current) => ({ ...current, [purchase.id]: "" }));
       await loadUserDetail(userId);
-      dispatchAppToast("Credit purchase refunded and balances reconciled.", "success");
-    } catch (error) {
+      // The route only reaches `success` after Stripe accepted the refund, so
+      // this may claim the money moved -- and consumed credits that could not
+      // be revoked are now debt, which the reloaded detail shows above.
       dispatchAppToast(
-        error instanceof Error ? error.message : "Credit purchase refund failed.",
+        "Stripe refunded the purchase. Remaining credits were revoked, and any already-consumed value is now recorded as credit debt.",
+        "success"
+      );
+    } catch {
+      dispatchAppToast(
+        "The credit purchase refund did not complete. Reload the customer before retrying.",
         "error"
       );
     } finally {

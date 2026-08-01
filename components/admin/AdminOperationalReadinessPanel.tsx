@@ -66,14 +66,16 @@ function CheckpointCard({ row, onSaved }: { row: Checkpoint; onSaved: (rows: Che
         </div>
         {row.overdue ? <AlertTriangle className="h-5 w-5 text-amber-300" /> : <CheckCircle2 className="h-5 w-5 text-emerald-300" />}
       </div>
-      <div className="mt-3 grid gap-2">
+      {/* `[&>*]:min-w-0`: see AdminPrivacyRequestsPanel -- a grid item will not
+          shrink below `<input type="datetime-local">`'s intrinsic width. */}
+      <div className="mt-3 grid gap-2 [&>*]:min-w-0">
         <select value={status} onChange={(event) => setStatus(event.target.value)} className="h-10 rounded-xl border border-zinc-700 bg-zinc-950 px-3 text-sm text-white">
           <option value="healthy">Healthy</option>
           <option value="warning">Warning</option>
           <option value="failed">Failed</option>
           <option value="not_configured">Not configured</option>
         </select>
-        <input type="datetime-local" value={nextDueAt} onChange={(event) => setNextDueAt(event.target.value)} className="h-10 rounded-xl border border-zinc-700 bg-zinc-950 px-3 text-sm text-white" aria-label={`${row.name} next due`} />
+        <input type="datetime-local" value={nextDueAt} onChange={(event) => setNextDueAt(event.target.value)} className="h-10 w-full min-w-0 rounded-xl border border-zinc-700 bg-zinc-950 px-3 text-sm text-white" aria-label={`${row.name} next due`} />
         <input value={detail} onChange={(event) => setDetail(event.target.value)} placeholder="Verification result or operator note" className="h-10 rounded-xl border border-zinc-700 bg-zinc-950 px-3 text-sm text-white" />
         <input value={evidenceUrl} onChange={(event) => setEvidenceUrl(event.target.value)} placeholder="Optional evidence URL" className="h-10 rounded-xl border border-zinc-700 bg-zinc-950 px-3 text-sm text-white" />
         <button type="button" onClick={() => void save()} disabled={saving} className="inline-flex h-10 items-center justify-center gap-2 rounded-xl bg-blue-600 px-3 text-xs font-bold text-white hover:bg-blue-500 disabled:opacity-50">
@@ -105,16 +107,16 @@ export function AdminOperationalReadinessPanel() {
   return (
     <section className="rounded-3xl border border-zinc-800 bg-zinc-950/70 p-5">
       <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
+        <div className="min-w-0 flex-1">
           <p className="text-xs font-bold uppercase tracking-[0.18em] text-blue-300">Operational assurance</p>
-          <h2 className="mt-2 text-2xl font-black text-white">Recovery and access checkpoints</h2>
+          <h2 className="mt-2 break-words text-2xl font-black text-white">Recovery and access checkpoints</h2>
           <p className="mt-2 text-sm text-zinc-400">Record provider-confirmed backup evidence, restore drills, access reviews, and external audit archives without claiming automated verification.</p>
         </div>
         <button type="button" onClick={() => void load()} disabled={loading} className="inline-flex h-10 items-center gap-2 rounded-xl border border-zinc-700 px-3 text-xs font-bold text-zinc-200 hover:bg-zinc-800 disabled:opacity-50">
           {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />} Refresh
         </button>
       </div>
-      <div className="mt-5 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+      <div className="mt-5 grid gap-3 [&>*]:min-w-0 md:grid-cols-2 xl:grid-cols-4">
         {rows.map((row) => <CheckpointCard key={`${row.key}-${row.updatedAt}`} row={row} onSaved={setRows} />)}
       </div>
     </section>
