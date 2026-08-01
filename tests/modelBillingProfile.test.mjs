@@ -25,6 +25,19 @@ test("DeepSeek model defaults distinguish cache-hit and cache-miss pricing", () 
   });
 });
 
+// Grok 4.5 is the sole xAI model and therefore also the provider probe's
+// target, so its price is what the shared daily probe cap is spent against.
+// Falling through to the "premium" cost class booked USD 15/60 per million
+// against a model that really costs USD 2/6.
+test("Grok 4.5 uses xAI's published prices, not the premium cost-class default", () => {
+  const grok = profile("grok-4-5");
+  assert.equal(grok.inputUsdPerMillionTokens, 2);
+  assert.equal(grok.outputUsdPerMillionTokens, 6);
+  // xAI publishes USD 0.30 per million cached input tokens; the profile
+  // stores it as a multiple of the input price.
+  assert.equal(grok.cachedInputPriceMultiplier * grok.inputUsdPerMillionTokens, 0.3);
+});
+
 // Retired with the rest of Llama, but its billing profile is deliberately
 // kept: ledger rows and cost reports for conversations that ran on it must
 // keep settling against the prices they were charged at.

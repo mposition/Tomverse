@@ -2,9 +2,13 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { readFileSync } from "node:fs";
 import {
+  DEFAULT_PROBE_DAILY_COST_CAP_USD,
+  PROBE_MAX_OUTPUT_TOKENS,
   getProbeModelFor,
   runProviderProbe,
 } from "../lib/providerProbe.ts";
+import { getModelBillingProfile } from "../lib/models.ts";
+import { calculateProviderUsageCost } from "../lib/providerUsageCost.ts";
 
 // getProbeModelFor and the no-op dev/test path never require an API key or
 // network access, so no withApiKey-style helper is needed here -- unlike
@@ -55,6 +59,45 @@ test("xai probes the one model it still has", () => {
   const model = getProbeModelFor("xai");
   assert.ok(model);
   assert.equal(model.id, "grok-4-5");
+});
+
+test("xai's probe target is costed from xAI's published prices, not the premium fallback", () => {
+  // The daily probe cost cap is shared across every provider and is spent
+  // using each probe target's billing profile, so a mispriced target burns
+  // the shared cap at the wrong rate. Grok 4.5 became xAI's only model and
+  // therefore its probe target while still falling through to the "premium"
+  // cost class: USD 15/60 per million booked against a USD 2/6 model.
+  const billing = getModelBillingProfile(getProbeModelFor("xai"));
+  assert.equal(billing.inputUsdPerMillionTokens, 2);
+  assert.equal(billing.outputUsdPerMillionTokens, 6);
+  assert.notEqual(billing.inputUsdPerMillionTokens, 15);
+  assert.notEqual(billing.outputUsdPerMillionTokens, 60);
+});
+
+test("one xai probe cycle costs what the daily cap was sized against", () => {
+  // Pins the arithmetic the cost-acceptance decision rests on: a generous
+  // 50 input / 32 output tokens (the probe's whole output budget) must stay
+  // far enough under the USD 1 shared daily cap that 144 cycles a day cannot
+  // approach it. At the premium fallback this same cycle cost USD 0.00267.
+  const billing = getModelBillingProfile(getProbeModelFor("xai"));
+  const cost = calculateProviderUsageCost({
+    inputTokens: 50,
+    outputTokens: PROBE_MAX_OUTPUT_TOKENS,
+    inputUsdPerMillionTokens: billing.inputUsdPerMillionTokens,
+    outputUsdPerMillionTokens: billing.outputUsdPerMillionTokens,
+    cachedInputPriceMultiplier: billing.cachedInputPriceMultiplier,
+  });
+  const perCycleUsd = cost.totalCostMicroUsd / 1_000_000;
+  const dailyUsd = perCycleUsd * 144;
+
+  assert.ok(
+    perCycleUsd < 0.0004,
+    `a worst-case probe cycle should cost well under USD 0.0004, got ${perCycleUsd}`
+  );
+  assert.ok(
+    dailyUsd < DEFAULT_PROBE_DAILY_COST_CAP_USD / 10,
+    `xai's own daily probe spend should stay an order of magnitude under the shared cap, got ${dailyUsd}`
+  );
 });
 
 test("getProbeModelFor honors PROVIDER_PROBE_MODEL_OVERRIDES for a provider", async () => {
@@ -127,6 +170,103 @@ test("runProviderProbe sends a request shape every provider accepts", async () =
     false,
     "temperature must stay unset so providers that allow only their default are not rejected"
   );
+});
+
+// PROVIDER_PROBE_REASONING_EFFORT. The probe has never sent reasoning_effort,
+// so switching this on adds a parameter rather than lowering one -- and the
+// two outages this file already documents were both caused by a probe
+// parameter a provider rejected. It therefore stays off unless an operator
+// asks for it, and applies only where it means something.
+const withEnv = async (name, value, run) => {
+  const original = process.env[name];
+  if (value === undefined) delete process.env[name];
+  else process.env[name] = value;
+  try {
+    return await run();
+  } finally {
+    if (original === undefined) delete process.env[name];
+    else process.env[name] = original;
+  }
+};
+
+const probeRequestFor = async (provider) => {
+  let received;
+  await runProviderProbe(provider, {
+    generate: async (options) => {
+      received = options;
+      return { text: "OK", usage: { inputTokens: 10, outputTokens: 1 } };
+    },
+  });
+  return received;
+};
+
+test("no reasoning effort is sent unless an operator asks for one", async () => {
+  await withEnv("PROVIDER_PROBE_REASONING_EFFORT", undefined, async () => {
+    const request = await probeRequestFor("xai");
+    assert.equal(
+      "providerOptions" in request,
+      false,
+      "the default probe must not introduce a parameter a provider could reject"
+    );
+  });
+});
+
+test("a configured reasoning effort reaches a reasoning probe target", async () => {
+  await withEnv("PROVIDER_PROBE_REASONING_EFFORT", "low", async () => {
+    const request = await probeRequestFor("xai");
+    // xAI is reached through the OpenAI-compatible chat model, so this is the
+    // namespace that becomes reasoning_effort on the wire.
+    assert.deepEqual(request.providerOptions, { openai: { reasoningEffort: "low" } });
+  });
+});
+
+test("a non-reasoning probe target is never sent a reasoning effort", async () => {
+  await withEnv("PROVIDER_PROBE_REASONING_EFFORT", "low", async () => {
+    // openai's probe target is the standard-tier gpt-5-4-mini.
+    const request = await probeRequestFor("openai");
+    assert.equal("providerOptions" in request, false);
+  });
+});
+
+test("an unrecognized reasoning effort is ignored rather than passed through", async () => {
+  await withEnv("PROVIDER_PROBE_REASONING_EFFORT", "cheapest-please", async () => {
+    const request = await probeRequestFor("xai");
+    assert.equal("providerOptions" in request, false);
+  });
+});
+
+test("an unusable probe model override is reported instead of silently dropped", async () => {
+  const warnings = [];
+  const originalWarn = console.warn;
+  console.warn = (...args) => warnings.push(args);
+  try {
+    await withEnv(
+      "PROVIDER_PROBE_MODEL_OVERRIDES",
+      // grok-3-mini is retired, so it can never be probed. Naming a retired
+      // model here is the likely case in practice: retiring a model does not
+      // clear the environment variable that points at it.
+      JSON.stringify({ xai: "grok-3-mini" }),
+      async () => {
+        // The parsed override map is cached on first read, so this asserts the
+        // warning path directly rather than through getProbeModelFor's cache.
+        const { getProbeModelFor: freshGetProbeModelFor } = await import(
+          `../lib/providerProbe.ts?override-warning`
+        );
+        const model = freshGetProbeModelFor("xai");
+        assert.ok(model);
+        assert.equal(model.id, "grok-4-5", "the default target still wins");
+      }
+    );
+  } finally {
+    console.warn = originalWarn;
+  }
+
+  const overrideWarning = warnings.find((args) =>
+    String(args[0]).includes("PROVIDER_PROBE_MODEL_OVERRIDES")
+  );
+  assert.ok(overrideWarning, "an ignored override must be logged");
+  assert.equal(overrideWarning[1].overrideModelId, "grok-3-mini");
+  assert.match(overrideWarning[1].reason, /not enabled/);
 });
 
 test("runProviderProbe reports provider_error with a diagnostic code when the call throws", async () => {

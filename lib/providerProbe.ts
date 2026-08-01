@@ -62,7 +62,7 @@ const PROBE_TIMEOUT_MS = 10_000;
 // has to absorb reasoning tokens on models that emit them. The probe only
 // needs the single word OK back, so the extra headroom costs nothing
 // measurable against the daily cap.
-const PROBE_MAX_OUTPUT_TOKENS = 32;
+export const PROBE_MAX_OUTPUT_TOKENS = 32;
 
 export const DEFAULT_PROBE_DAILY_COST_CAP_USD = 1;
 
@@ -79,6 +79,55 @@ export const probeDailyCostCapMicroUsd = (): number => {
 const PROBE_PROMPT = "Reply with exactly one word: OK";
 const PROBE_SYSTEM_PROMPT =
   "You are a synthetic health-check probe. Reply with exactly the single word OK and nothing else.";
+
+const PROBE_REASONING_EFFORTS = ["none", "minimal", "low", "medium", "high"] as const;
+
+/**
+ * Optional `reasoning_effort` for probe requests, opt-in through
+ * PROVIDER_PROBE_REASONING_EFFORT.
+ *
+ * Two facts decide the default, which is to send nothing at all:
+ *
+ * 1. The probe has never sent this parameter. A model's catalogue
+ *    `reasoning` field is a capability signal, not a request parameter (see
+ *    the note on AiModel.reasoning) -- the only place it becomes one is
+ *    Perplexity's deep-research submit. So there is no "high" here to lower;
+ *    turning this on ADDS a parameter, it does not change one.
+ * 2. Adding a parameter to the probe has broken it twice: OpenAI rejected
+ *    max_output_tokens below its floor, and moonshot rejected any explicit
+ *    temperature. Each cycle then failed provider-side and was recorded as
+ *    provider health, which is how a healthy provider gets published as an
+ *    incident. `reasoning_effort` support is per-model, and a rejection here
+ *    is indistinguishable from an outage.
+ *
+ * The saving it buys is bounded by PROBE_MAX_OUTPUT_TOKENS -- reasoning
+ * tokens come out of the same 32-token budget -- so it is worth at most a
+ * few cents a month per provider. That is not worth risking a false incident
+ * on an unverified model, hence: verify on staging with this set, then
+ * decide whether production wants it.
+ *
+ * Applied only to models the catalogue marks as reasoning models, so a plain
+ * chat model is never sent a parameter it has no use for.
+ */
+const probeReasoningEffort = (): (typeof PROBE_REASONING_EFFORTS)[number] | undefined => {
+  const raw = process.env.PROVIDER_PROBE_REASONING_EFFORT?.trim().toLowerCase();
+  return PROBE_REASONING_EFFORTS.find((effort) => effort === raw);
+};
+
+/**
+ * Every OpenAI-compatible provider in this app is reached through
+ * @ai-sdk/openai's chat model (see lib/activeAiModel.ts), so the `openai`
+ * provider-options namespace is the one that reaches xAI, Moonshot, DeepSeek,
+ * Mistral, Qwen, Zhipu and Groq alike. Anthropic and Google use their own
+ * providers and ignore this namespace -- harmless, and neither of their probe
+ * targets is a reasoning model.
+ */
+const probeProviderOptions = (model: AiModel) => {
+  const reasoningEffort = probeReasoningEffort();
+  if (!reasoningEffort) return undefined;
+  if (!model.reasoning || model.reasoning === "none") return undefined;
+  return { openai: { reasoningEffort } };
+};
 
 let cachedModelOverrides: Record<string, string> | undefined;
 
@@ -109,6 +158,24 @@ const parseModelOverrides = (): Record<string, string> => {
   }
   cachedModelOverrides = {};
   return cachedModelOverrides;
+};
+
+const warnedOverrides = new Set<string>();
+
+const warnAboutUnusableOverride = (provider: AiProvider, overrideId: string) => {
+  const key = `${provider}:${overrideId}`;
+  if (warnedOverrides.has(key)) return;
+  warnedOverrides.add(key);
+  const candidate = AVAILABLE_MODELS.find((model) => model.id === overrideId);
+  const reason = !candidate
+    ? "no model with that id exists"
+    : candidate.provider !== provider
+      ? `it belongs to provider "${candidate.provider}"`
+      : "it is not enabled in the catalogue";
+  console.warn(
+    "Provider probe: ignoring PROVIDER_PROBE_MODEL_OVERRIDES entry and using the default probe model instead.",
+    { provider, overrideModelId: overrideId, reason }
+  );
 };
 
 const totalPricePerMillionTokens = (model: AiModel) => {
@@ -146,6 +213,16 @@ export const getProbeModelFor = (provider: AiProvider): AiModel | undefined => {
         model.id === overrideId && model.provider === provider && model.enabled
     );
     if (overridden) return overridden;
+    // An override that cannot be honored used to fall through in silence, so
+    // an operator who set one to pin a cheaper or a specific model saw the
+    // default get probed and had no way to tell the setting had been dropped.
+    // The three reasons it is dropped -- unknown id, wrong provider, model
+    // not enabled -- look identical from the outside, and a retired model is
+    // the likeliest of them (retiring a model does not clear the env var that
+    // names it). Warn once per cycle rather than change the eligibility rule:
+    // whether a disabled model may be probed is a policy decision, not a bug
+    // to be fixed in passing.
+    warnAboutUnusableOverride(provider, overrideId);
   }
 
   const enabledForProvider = AVAILABLE_MODELS.filter(
@@ -211,6 +288,7 @@ export async function runProviderProbe(
   }
 
   const generate = injectedGenerate ?? generateText;
+  const providerOptions = probeProviderOptions(model);
   try {
     const result = await generate({
       model: getActiveAiModel(model),
@@ -224,6 +302,10 @@ export async function runProviderProbe(
       // provider-specific rejection.
       maxOutputTokens: PROBE_MAX_OUTPUT_TOKENS,
       maxRetries: 0,
+      // Absent unless PROVIDER_PROBE_REASONING_EFFORT is set, and even then
+      // only for reasoning models -- spread so the key does not appear at all
+      // in the default case.
+      ...(providerOptions ? { providerOptions } : {}),
       abortSignal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
     });
     return {

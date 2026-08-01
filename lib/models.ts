@@ -466,6 +466,22 @@ const getModelCostClass = (usageClass: ModelUsageClass): ModelCostClass => {
 const MODEL_BILLING_DEFAULTS: Partial<
     Record<string, Partial<ModelBillingProfile>>
 > = {
+    // xAI's published Grok 4.5 prices. Load-bearing beyond ordinary chat
+    // accounting: consolidating xAI onto this model also made it the provider
+    // probe's target (lib/providerProbe.ts picks the cheapest enabled
+    // probe-safe model, and it is now the only one). Without an explicit
+    // entry it fell through to the "premium" cost class -- USD 15/60 per
+    // million, roughly 7.5x input and 10x output -- so every probe cycle and
+    // every real Grok request booked several times its true cost against the
+    // shared daily probe cap and the xAI monthly spend ceiling.
+    //
+    // cachedInputPriceMultiplier is a multiple of the input price, so xAI's
+    // USD 0.30 cached-input rate is 0.30 / 2.00.
+    "grok-4-5": {
+        inputUsdPerMillionTokens: 2,
+        outputUsdPerMillionTokens: 6,
+        cachedInputPriceMultiplier: 0.3 / 2,
+    },
     "llama-4-scout": {
         maxOutputTokens: 8_192,
         reservationOutputTokens: 2_048,
