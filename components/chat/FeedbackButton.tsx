@@ -113,6 +113,14 @@ export function FeedbackButton({
   const [isSending, setIsSending] = useState(false);
   const [detailsCopied, setDetailsCopied] = useState(false);
   const [submitError, setSubmitError] = useState<SubmitError | null>(null);
+  /**
+   * The diagnostics as they will be sent. Seeded from the sanitiser and then
+   * owned by the user: pattern matching cannot know what it missed, and a
+   * short secret is exactly the shape no detector can separate from ordinary
+   * text. Letting the person delete it is the only complete answer.
+   */
+  const [diagnostics, setDiagnostics] = useState<string | null>(null);
+  const [attachDiagnostics, setAttachDiagnostics] = useState(true);
 
   const baseId = useId();
   const titleId = `${baseId}-title`;
@@ -216,6 +224,10 @@ export function FeedbackButton({
     () => (rawErrorDetails ? sanitizeFeedbackDiagnostics(rawErrorDetails) : ""),
     [rawErrorDetails]
   );
+  /** What is actually attached: the user's edit if they made one. */
+  const effectiveDiagnostics = attachDiagnostics
+    ? (diagnostics ?? sanitizedDiagnostics)
+    : "";
 
   const closeDialog = useCallback(() => {
     // Closing is never blocked, including mid-flight. The request keeps
@@ -236,6 +248,8 @@ export function FeedbackButton({
       );
     }
     setType("bug");
+    setDiagnostics(null);
+    setAttachDiagnostics(true);
     // The last failure is deliberately kept, alongside the draft it belongs
     // to: someone reopening the dialog is reopening it to retry, and the
     // reason the previous attempt failed is still true until they do. It is
@@ -377,7 +391,11 @@ export function FeedbackButton({
         message.trim() || (isErrorReport ? errorReportDefaultMessage : "");
       const outcome = await submitFeedback({
         type,
-        message: composeFeedbackMessage({ description, rawErrorDetails }),
+        message: composeFeedbackMessage({
+          description,
+          // Already sanitised, and possibly edited or removed by the user.
+          rawErrorDetails: effectiveDiagnostics || undefined,
+        }),
         traceId: traceId.trim().slice(0, FEEDBACK_TRACE_ID_MAX_LENGTH) || undefined,
         modelId: currentModelId || undefined,
         plan: currentPlan || undefined,
@@ -418,9 +436,9 @@ export function FeedbackButton({
   const copyDetails = async () => {
     // Copies what is actually attached, not the raw text: the button sits next
     // to the preview and the two must agree.
-    if (!sanitizedDiagnostics) return;
+    if (!effectiveDiagnostics) return;
     try {
-      await navigator.clipboard.writeText(sanitizedDiagnostics);
+      await navigator.clipboard.writeText(effectiveDiagnostics);
       setDetailsCopied(true);
       window.setTimeout(() => setDetailsCopied(false), 1_500);
     } catch {
@@ -620,8 +638,9 @@ export function FeedbackButton({
                   {/*
                     The diagnostics are attached automatically, so without this
                     nobody ever sees what actually leaves the browser. The
-                    sanitiser removes the credential shapes it can recognise --
-                    and a reader is the only check on the ones it cannot.
+                    sanitiser removes the credential shapes it can recognise;
+                    a reader is the only check on the ones it cannot, and the
+                    field is editable so they can act on what they find.
                   */}
                   {isErrorReport && sanitizedDiagnostics && (
                     <details
@@ -631,25 +650,55 @@ export function FeedbackButton({
                       <summary className="min-h-11 cursor-pointer list-none py-2 text-xs font-bold text-zinc-600 break-keep focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:text-zinc-300">
                         {t("feedback.diagnosticsPreview")}
                       </summary>
-                      <p className="mt-1 text-xs leading-5 text-zinc-500 break-keep dark:text-zinc-400">
+                      <p
+                        id={`${baseId}-diagnostics-note`}
+                        className="mt-1 text-xs leading-5 text-zinc-500 break-keep dark:text-zinc-400"
+                      >
                         {t("feedback.diagnosticsPreviewNote")}
                       </p>
-                      <pre
-                        data-testid="feedback-diagnostics-body"
-                        className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap break-words rounded-lg bg-white p-2 font-mono text-[11px] leading-5 text-zinc-600 dark:bg-zinc-950 dark:text-zinc-300"
-                      >
-                        {sanitizedDiagnostics}
-                      </pre>
-                      <button
-                        type="button"
-                        data-testid="feedback-copy-diagnostics"
-                        onClick={copyDetails}
-                        className="mt-2 min-h-11 text-xs font-bold text-zinc-500 underline underline-offset-2 hover:text-zinc-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:hover:text-zinc-200"
-                      >
-                        {detailsCopied
-                          ? t("feedback.copyDiagnosticsCopied")
-                          : t("feedback.copyDiagnostics")}
-                      </button>
+                      <label className="mt-2 flex items-start gap-2 text-xs font-semibold leading-5 text-zinc-600 break-keep dark:text-zinc-300">
+                        <input
+                          type="checkbox"
+                          data-testid="feedback-diagnostics-attach"
+                          checked={attachDiagnostics}
+                          onChange={(event) =>
+                            setAttachDiagnostics(event.target.checked)
+                          }
+                          className="mt-0.5 h-4 w-4 shrink-0 accent-blue-600"
+                        />
+                        {t("feedback.diagnosticsAttach")}
+                      </label>
+                      {attachDiagnostics ? (
+                        <textarea
+                          data-testid="feedback-diagnostics-body"
+                          value={effectiveDiagnostics}
+                          onChange={(event) => setDiagnostics(event.target.value)}
+                          rows={6}
+                          aria-label={t("feedback.diagnosticsEditLabel")}
+                          aria-describedby={`${baseId}-diagnostics-note`}
+                          spellCheck={false}
+                          className="mt-2 max-h-48 w-full resize-y overflow-auto rounded-lg border border-zinc-200 bg-white p-2 font-mono text-[11px] leading-5 text-zinc-600 outline-none focus:border-blue-500 focus-visible:ring-2 focus-visible:ring-blue-500 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-300"
+                        />
+                      ) : (
+                        <p
+                          data-testid="feedback-diagnostics-omitted"
+                          className="mt-2 text-xs font-semibold leading-5 text-zinc-500 break-keep dark:text-zinc-400"
+                        >
+                          {t("feedback.diagnosticsOmitted")}
+                        </p>
+                      )}
+                      {attachDiagnostics ? (
+                        <button
+                          type="button"
+                          data-testid="feedback-copy-diagnostics"
+                          onClick={copyDetails}
+                          className="mt-2 min-h-11 text-xs font-bold text-zinc-500 underline underline-offset-2 hover:text-zinc-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:hover:text-zinc-200"
+                        >
+                          {detailsCopied
+                            ? t("feedback.copyDiagnosticsCopied")
+                            : t("feedback.copyDiagnostics")}
+                        </button>
+                      ) : null}
                     </details>
                   )}
                 </fieldset>
