@@ -9,6 +9,7 @@ import {
   freezeAnimations,
   restoreActiveConversation,
 } from "./support/chat-state-fixtures";
+import { getWebSearchCapability } from "@/lib/webSearchCapability";
 
 // ---------------------------------------------------------------------------
 // How much of a phone screen the *answers* actually get.
@@ -317,10 +318,20 @@ test.describe("Composer tool status", () => {
   test("a fully blocked search keeps its full-width notice, not just an icon", async ({
     page,
   }) => {
-    // gpt-5-4-mini and gemini-2-5-flash both lack verified native search, so
-    // "always" with only those two is the all-unsupported state.
+    // Both of these lack verified native search, so "always" with only these
+    // two is the all-unsupported state. Not gemini-2-5-flash: it carried no
+    // verified support when this was written and now carries Google's, which
+    // turned the fixture into the one-of-two case the test above already
+    // covers -- the chip correctly read "warning" and this read it as a defect.
+    const blockedPair = ["gpt-5-4-mini", "deepseek-v4-flash"] as const;
+    for (const modelId of blockedPair) {
+      expect(
+        getWebSearchCapability(modelId).support,
+        `fixture error: ${modelId} now supports web search, so this is no longer the fully blocked state`
+      ).not.toBe("native");
+    }
     await enterMobileComparison(page, {
-      models: ["gpt-5-4-mini", "gemini-2-5-flash"],
+      models: [...blockedPair],
       viewport: { width: 320, height: 640 },
     });
 
