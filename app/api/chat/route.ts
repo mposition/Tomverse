@@ -96,6 +96,7 @@ import {
     GUEST_MAX_ATTACHMENTS_PER_MESSAGE,
 } from "@/lib/guestAttachments";
 import { isChatCostSafetyCode } from "@/lib/chatCostSafetyCore";
+import { estimatePromptTokens } from "@/lib/chatTokenEstimate";
 import {
     providerDiagnosticCode,
     safeErrorMessage,
@@ -888,8 +889,11 @@ export async function POST(req: Request) {
         let totalExtractedCharacters = 0;
         let totalImageCount = 0;
         let totalBase64ImagePayloadBytes = 0;
+        // Shared with the composer estimate and the comparison preflight so a
+        // Korean conversation is not reserved several times too small here and
+        // correctly elsewhere -- see lib/chatTokenEstimate.ts.
         const estimateTextTokens = (text: string) =>
-            Math.max(1, Math.ceil(Buffer.byteLength(text, "utf8") / 4));
+            Math.max(1, estimatePromptTokens(text));
 
         const formattedMessages: ModelMessage[] = [];
         for (const msg of messages) {
@@ -1259,6 +1263,7 @@ export async function POST(req: Request) {
                     webSearchMode ?? "off",
                     webSearchCapability
                 ),
+                nativeSearchEnabled,
             }
         );
         if (
@@ -1275,6 +1280,7 @@ export async function POST(req: Request) {
         const accessGrant = await acquireChatAccess(access, budget, {
             traceId,
             source: "chat",
+            enabledTools: nativeSearchEnabled ? ["web_search"] : [],
         });
         leaseId = accessGrant.leaseId;
         usageReservation = accessGrant.usageReservation;
@@ -1491,6 +1497,8 @@ export async function POST(req: Request) {
                 inputTokens?: number;
                 cachedInputTokens?: number;
                 outputTokens?: number;
+                reasoningTokens?: number;
+                usageFromProvider?: boolean;
                 searchSurchargeCredits?: number;
                 searchExecuted?: boolean;
             }
@@ -1511,6 +1519,11 @@ export async function POST(req: Request) {
                         outputTokens:
                             usage?.outputTokens ??
                             estimatedGeneratedOutputTokens(),
+                        reasoningTokens: usage?.reasoningTokens,
+                        // Absent provider usage metadata, the output figure
+                        // above is the documented fallback estimate rather
+                        // than a measured value -- recorded as such.
+                        usageFromProvider: usage?.usageFromProvider === true,
                         outcome,
                         searchSurchargeCredits: usage?.searchSurchargeCredits,
                         searchExecuted: usage?.searchExecuted,
@@ -1739,6 +1752,10 @@ export async function POST(req: Request) {
                                     cachedInputTokens:
                                         usage.inputTokenDetails.cacheReadTokens,
                                     outputTokens: usage.outputTokens,
+                                    reasoningTokens:
+                                        usage.outputTokenDetails
+                                            .reasoningTokens,
+                                    usageFromProvider: true,
                                     ...searchSettlementFields,
                                 }
                             );

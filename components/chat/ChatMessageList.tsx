@@ -61,9 +61,14 @@ type MarkdownCodeProps = ComponentPropsWithoutRef<"code"> & ExtraProps;
 const QUOTA_ERROR_CODES = new Set([
   "CREDIT_BALANCE_INSUFFICIENT",
   "CREDIT_COST_ALLOWANCE_INSUFFICIENT",
+  "PLAN_ENTITLEMENT_EXHAUSTED",
   "PLAN_DAILY_CREDIT_LIMIT_REACHED",
   "CHAT_QUOTA_EXCEEDED",
   "FREE_PRO_MODEL_QUOTA_EXCEEDED",
+  "OPERATIONAL_COST_GUARDRAIL_TRIGGERED",
+  "PROVIDER_BUDGET_EXHAUSTED",
+  // Retired codes, still classified so a response cached from an older
+  // deployment keeps offering the "change what you asked for" affordances.
   "INTERNAL_DAILY_COST_SAFETY_LIMIT",
   "INTERNAL_MONTHLY_COST_SAFETY_LIMIT",
   "PROVIDER_DAILY_SPEND_LIMIT_REACHED",

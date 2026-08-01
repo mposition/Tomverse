@@ -105,14 +105,47 @@ const checks = [
   {
     name: "Chat usage limits reserve tokens, cost, provider budget, and lease",
     file: "lib/chatSecurity.ts",
-    test: (source) =>
-      source.includes("CHAT_USER_TOKENS_PER_DAY") &&
-      source.includes("getPlanEstimatedCostLimits") &&
-      source.includes("CHAT_FREE_COST_MICROUSD_PER_DAY") &&
-      source.includes("CHAT_PRO_COST_MICROUSD_PER_DAY") &&
-      source.includes("CHAT_MAX_COST_MICROUSD_PER_DAY") &&
-      source.includes("provider-cost-month") &&
-      source.includes("ChatRequestLease"),
+    test: (source) => {
+      const guardrails = read("lib/chatCostGuardrails.ts");
+      return (
+        source.includes("CHAT_USER_TOKENS_PER_DAY") &&
+        source.includes("getChatCostGuardrails") &&
+        // Plan-funded and total cost are separate buckets, so purchased
+        // credits are not blocked twice by a plan-shaped ceiling.
+        source.includes('period: "cost-day"') &&
+        source.includes('period: "op-cost-day"') &&
+        source.includes('period: "op-cost-month"') &&
+        source.includes("provider-cost-month") &&
+        source.includes("ChatRequestLease") &&
+        // The retired per-user USD entitlement ceilings must stay unread.
+        !source.includes("CHAT_FREE_COST_MICROUSD_PER_DAY") &&
+        !source.includes("CHAT_PRO_COST_MICROUSD_PER_DAY") &&
+        !source.includes("CHAT_MAX_COST_MICROUSD_PER_DAY") &&
+        // A guardrail override below the derived floor is clamped, not honoured.
+        guardrails.includes("clampedOverrides") &&
+        guardrails.includes("COST_PER_CREDIT_CEILING_MICRO_USD")
+      );
+    },
+  },
+  {
+    name: "Internal cost figures never reach an end-user response",
+    file: "lib/chatSecurity.ts",
+    test: (source) => {
+      const decisions = read("lib/chatLimitDecisionCore.ts");
+      return (
+        // Guardrail diagnostics are prefixed `internal` and stripped on the
+        // way out; they survive only in the limit-decision event and logs.
+        source.includes("publicChatErrorDetails") &&
+        source.includes('!key.startsWith("internal")') &&
+        source.includes("internalLimitCostMicroUsd") &&
+        // Limit decisions record the hashed usage subject, never prompt text.
+        decisions.includes("subjectKey") &&
+        !decisions.includes("promptText") &&
+        // A reset instant handed to a blocked user is always in the future.
+        decisions.includes("futureResetAt") &&
+        source.includes("safeDailyResetAt")
+      );
+    },
   },
   {
     name: "R2 reads validate metadata before bounded streaming",
@@ -273,10 +306,14 @@ const checks = [
     file: "lib/chatSecurity.ts",
     test: (source) =>
       source.includes(
-        "cachedInputPriceMultiplier: profile.cachedInputPriceMultiplier"
+        "cachedInputPriceMultiplier: pricing.cachedInputPriceMultiplier"
       ) &&
       source.includes("usage.cachedInputTokens") &&
-      source.includes("pricingSnapshot: costBreakdown") &&
+      source.includes("pricingSnapshot: {") &&
+      source.includes("...costBreakdown,") &&
+      // The rate a reservation was priced at is frozen with it, so a later
+      // price change never re-settles an existing reservation.
+      source.includes("pricingVersion: canonical.pricingVersion") &&
       source.includes("settledCachedInputTokens"),
   },
   {
@@ -313,8 +350,8 @@ const checks = [
         model.includes("deepseekUsageFetch") &&
         adapter.includes("prompt_cache_hit_tokens") &&
         adapter.includes("prompt_tokens_details") &&
-        read("lib/models.ts").includes('"deepseek-v4-flash": {') &&
-        read("lib/models.ts").includes('"deepseek-v4-pro": {')
+        read("lib/modelPricing.ts").includes('modelId: "deepseek-v4-flash"') &&
+        read("lib/modelPricing.ts").includes('modelId: "deepseek-v4-pro"')
       );
     },
   },

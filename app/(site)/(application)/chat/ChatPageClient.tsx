@@ -1052,14 +1052,21 @@ export function ChatPageClient({
           return true;
         }
         const localizedMessage =
-          code === "CREDIT_BALANCE_INSUFFICIENT" ||
+          code === "PLAN_ENTITLEMENT_EXHAUSTED"
+            ? t("chat.planEntitlementExhausted")
+          : code === "CONCURRENT_RESERVATION_CONFLICT"
+            ? t("chat.concurrentReservationConflict")
+          : code === "CREDIT_BALANCE_INSUFFICIENT" ||
           code === "CREDIT_COST_ALLOWANCE_INSUFFICIENT"
             ? t("chat.comparisonCreditsInsufficient")
-            : code === "INTERNAL_DAILY_COST_SAFETY_LIMIT"
+            : code === "OPERATIONAL_COST_GUARDRAIL_TRIGGERED"
+              ? t("chat.operationalCostGuardrail")
+              : code === "INTERNAL_DAILY_COST_SAFETY_LIMIT"
               ? t("chat.internalDailyCostSafetyLimit")
               : code === "INTERNAL_MONTHLY_COST_SAFETY_LIMIT"
                 ? t("chat.internalMonthlyCostSafetyLimit")
-                : code === "PROVIDER_DAILY_SPEND_LIMIT_REACHED" ||
+                : code === "PROVIDER_BUDGET_EXHAUSTED" ||
+                    code === "PROVIDER_DAILY_SPEND_LIMIT_REACHED" ||
                     code === "PROVIDER_SPEND_LIMIT_REACHED"
                   ? t("chat.providerCostSafetyLimit")
                   : code === "PLAN_DAILY_CREDIT_LIMIT_REACHED"
