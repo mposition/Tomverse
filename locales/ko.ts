@@ -1,4 +1,7 @@
 export const ko = {
+    notifications: {
+        dismiss: "알림 닫기",
+    },
     sidebar: {
         title: "Tomverse Insight",
         accountTooltip: "계정 및 플랜",

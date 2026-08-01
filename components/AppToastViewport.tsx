@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AlertCircle, CheckCircle2, Info, X } from "lucide-react";
+import { useLanguage } from "@/components/LanguageProvider";
 import { APP_TOAST_EVENT, type AppToastEventDetail } from "@/lib/appToast";
 import {
   appendAppToast,
@@ -21,15 +22,31 @@ import {
  * dispatched into nothing. Input validation, 400/409/428/500 bodies and success
  * confirmations all vanished silently.
  *
- * This viewport is mounted once per shell that needs it (today: the admin
- * console, see AdminConsoleShell) rather than in the shared
- * `(application)` layout, because mounting it there would double every toast
- * on `/chat`, which already renders its own.
+ * This viewport is mounted once per shell that needs it -- the admin console
+ * (AdminConsoleShell) and the marketing shell (MarketingShell) -- rather than
+ * in the shared `(application)` layout, because mounting it there would double
+ * every toast on `/chat`, which already renders its own listener.
+ *
+ * UX-006. The marketing mount is what makes checkout, promotion and support
+ * failures visible: `UpgradeInterestButton` and `SupportPageContent` report
+ * every outcome through `dispatchAppToast()`, and on `/pricing` and `/support`
+ * there was nothing listening, so a failed checkout left a dead button and no
+ * message at all. The three shells never render together, so exactly one
+ * listener handles any given event.
  */
 let toastSequence = 0;
 
 export function AppToastViewport() {
+  // Every shell that mounts this viewport sits inside a LanguageProvider: the
+  // admin console and the application both inherit one from
+  // app/(site)/(application)/layout.tsx, and the marketing shell mounts the
+  // viewport inside MarketingProviders for the same reason.
+  const { t } = useLanguage();
   const [toasts, setToasts] = useState<AppToastItem[]>([]);
+  // Exposed as `data-ready` below. The listener is registered in an effect, so
+  // an event dispatched between first paint and hydration is genuinely lost --
+  // tests have to wait for this rather than for the element, or they race.
+  const [isListening, setIsListening] = useState(false);
   const timersRef = useRef(new Map<string, ReturnType<typeof setTimeout>>());
 
   const dismiss = useCallback((id: string) => {
@@ -63,7 +80,9 @@ export function AppToastViewport() {
     };
 
     window.addEventListener(APP_TOAST_EVENT, handleToast);
+    setIsListening(true);
     return () => {
+      setIsListening(false);
       window.removeEventListener(APP_TOAST_EVENT, handleToast);
       // A shell can unmount mid-flight (navigation, sign-out). Leaving timers
       // armed would call setState on an unmounted tree.
@@ -79,6 +98,7 @@ export function AppToastViewport() {
     // primary actions. `w-[min(...)]` keeps it inside a 320px viewport.
     <div
       data-testid="app-toast-viewport"
+      data-ready={isListening ? "true" : "false"}
       className="pointer-events-none fixed inset-x-0 bottom-0 z-[95] flex flex-col items-center gap-2 px-4 pb-[calc(1rem+env(safe-area-inset-bottom))] empty:hidden sm:items-end sm:px-6"
     >
       {toasts.map((toast) => (
@@ -125,7 +145,7 @@ export function AppToastViewport() {
           <button
             type="button"
             onClick={() => dismiss(toast.id)}
-            aria-label="Dismiss notification"
+            aria-label={t("notifications.dismiss")}
             className="pointer-events-auto -mr-1 flex h-7 w-7 shrink-0 cursor-pointer items-center justify-center rounded-lg text-current opacity-70 transition hover:opacity-100"
           >
             <X className="h-4 w-4" aria-hidden="true" />

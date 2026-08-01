@@ -1,4 +1,7 @@
 export const zh = {
+    notifications: {
+        dismiss: "关闭通知",
+    },
     sidebar: {
         title: "Tomverse Insight",
         accountTooltip: "账户与套餐",

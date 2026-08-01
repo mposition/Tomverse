@@ -1,6 +1,9 @@
 import { en } from "./en";
 
 export const fr = {
+    notifications: {
+        dismiss: "Fermer la notification",
+    },
     sidebar: {
         title: "Tomverse Insight",
         accountTooltip: "Compte et forfait",

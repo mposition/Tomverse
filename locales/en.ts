@@ -1,4 +1,7 @@
 export const en = {
+    notifications: {
+        dismiss: "Dismiss notification",
+    },
     sidebar: {
         title: "Tomverse Insight",
         accountTooltip: "Account & plan",
