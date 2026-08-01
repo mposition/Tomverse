@@ -111,6 +111,31 @@ test("the integration database is built from migrations by default", () => {
   );
 });
 
+test("the baseline guard decides from the schema, not from the history", () => {
+  // The bug a restore drill found: the guard read `_prisma_migrations` first
+  // and called an empty history "fresh". A `prisma db push` database has a
+  // complete schema and an empty history, so it was sent into `migrate deploy`
+  // and failed on `relation "User" already exists` -- leaving a failed row that
+  // blocks every later deploy.
+  const guard = readFileSync(
+    join(ROOT, "scripts", "baseline-existing-database.mjs"),
+    "utf8"
+  );
+  const schemaProbe = guard.indexOf(`to_regclass('public."User"')`);
+  const historyProbe = guard.indexOf("to_regclass('public._prisma_migrations')");
+  assert.ok(schemaProbe > 0 && historyProbe > 0, "both probes must exist");
+  assert.ok(
+    schemaProbe < historyProbe,
+    "the guard must check for the schema before reading the migration history"
+  );
+  // And the ambiguous restore -- a current schema beside an older history --
+  // must refuse rather than let deploy poison the history.
+  assert.ok(
+    guard.includes("schemaMatchesPrisma"),
+    "the guard must detect a schema that already matches schema.prisma"
+  );
+});
+
 test("deployments baseline a pre-existing database before applying migrations", () => {
   const scripts = JSON.parse(
     readFileSync(join(ROOT, "package.json"), "utf8")

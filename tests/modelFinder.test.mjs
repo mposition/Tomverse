@@ -96,17 +96,20 @@ test("a research-and-sources answer includes an advanced research add-on", () =>
 });
 
 test("complementary suggestion fills the missing capability in priority order", () => {
+  // deepseek-r1 was the reasoning suggestion until DeepSeek retired
+  // deepseek-reasoner; the slot now falls through to the next live model in
+  // REASONING_SUGGESTION_ORDER rather than disappearing.
   const noReasoningOrResearch = getComplementaryModelSuggestion([
     "gpt-5-4-mini",
     "gemini-2-5-flash",
   ]);
   assert.deepEqual(noReasoningOrResearch, {
-    modelId: "groq-gpt-oss-120b",
+    modelId: "grok-4-5",
     reason: "reasoning",
   });
 
   const hasReasoningOnly = getComplementaryModelSuggestion([
-    "groq-gpt-oss-120b",
+    "grok-4-5",
     "gemini-2-5-flash",
   ]);
   assert.deepEqual(hasReasoningOnly, {
@@ -115,21 +118,23 @@ test("complementary suggestion fills the missing capability in priority order", 
   });
 
   const hasReasoningAndResearch = getComplementaryModelSuggestion([
-    "groq-gpt-oss-120b",
+    "grok-4-5",
     "perplexity/sonar",
   ]);
+  // Tracks the head of STANDARD_CANDIDATE_ORDER, which gpt-5-6-luna took
+  // over from gpt-5-4-mini when it became the app default.
   assert.deepEqual(hasReasoningAndResearch, {
-    modelId: "gpt-5-4-mini",
+    modelId: "gpt-5-6-luna",
     reason: "different_provider",
   });
 });
 
 test("complementary suggestion never re-suggests an already-selected model", () => {
   const suggestion = getComplementaryModelSuggestion([
-    "groq-gpt-oss-120b",
+    "grok-4-5",
     "deepseek-v4-flash",
   ]);
   assert.equal(suggestion?.modelId, "perplexity/sonar");
-  assert.notEqual(suggestion?.modelId, "groq-gpt-oss-120b");
+  assert.notEqual(suggestion?.modelId, "grok-4-5");
   assert.notEqual(suggestion?.modelId, "deepseek-v4-flash");
 });

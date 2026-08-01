@@ -74,8 +74,7 @@ test("new models are listed and historical retirements stay hidden on desktop an
     "gpt-5-6-terra",
     "gpt-5-6-luna",
     "gemini-3-6-flash",
-    "groq-gpt-oss-120b",
-    "grok-4-3",
+    "grok-4-5",
   ]) {
     await expect(
       dialog.locator(`[data-testid="model-option"][data-model-id="${modelId}"]`)
@@ -85,6 +84,9 @@ test("new models are listed and historical retirements stay hidden on desktop an
   for (const modelId of [
     "deepseek-r1",
     "grok-3",
+    "grok-4-3",
+    "grok-4",
+    "grok-3-mini",
     "llama-3-1",
     "llama-3-3",
     "llama-4-scout",
@@ -280,7 +282,10 @@ test("favorited models lead the recommendations", async ({ page }) => {
   await page.evaluate(() => {
     localStorage.setItem(
       "favorite_model_ids",
-      JSON.stringify(["claude-sonnet-5", "deepseek-r1"])
+      // Both Free-tier and live: a favourite that is retired (deepseek-r1 was,
+      // once DeepSeek dropped deepseek-reasoner) is deliberately filtered out
+      // of recommendations, which is covered in tests/modelRecommendations.
+      JSON.stringify(["claude-sonnet-5", "mistral-medium-3-1"])
     );
   });
   await page.reload();
@@ -290,7 +295,7 @@ test("favorited models lead the recommendations", async ({ page }) => {
   const cards = dialog.getByTestId("recommended-model-option");
   await expect(cards.nth(0)).toHaveAttribute("data-model-id", "claude-sonnet-5");
   await expect(cards.nth(0)).toHaveAttribute("data-recommendation-source", "favorite");
-  await expect(cards.nth(1)).toHaveAttribute("data-model-id", "deepseek-v4-flash");
+  await expect(cards.nth(1)).toHaveAttribute("data-model-id", "mistral-medium-3-1");
 });
 
 test("long input explains its multiplier beside the send controls", async ({ page }) => {

@@ -83,8 +83,20 @@ test("the + menu opens a tools sheet with web search, Deep Research, and an unch
 });
 
 test("selecting a web search mode shows a removable status chip", async ({ page }) => {
-  await mockAuthenticatedApi(page);
+  // The selection is pinned rather than inherited from the app default: this
+  // test is about the state where NO selected model can search, and the
+  // default model moved to gpt-5-6-luna, which has verified provider-native
+  // search. gpt-5-4-mini is still enabled and still "unverified" in
+  // lib/webSearchCapability.ts, so it is what actually produces the blocked
+  // state under test.
+  await mockAuthenticatedApi(page, { selectedModels: ["gpt-5-4-mini"] });
   await page.goto("/chat?lang=en");
+  // /chat opens on the welcome screen with no active conversation, where the
+  // selection is DEFAULT_MODEL_ID rather than anything this fixture seeded.
+  // The seeded conversation has to actually be opened for its selectedModels
+  // to apply -- the same reason the "does not repeat across a new chat" test
+  // below opens it.
+  await openRecentConversation(page);
 
   await toolsMenuTrigger(page).click();
   await page.getByTestId("tools-web-search-row").click();
@@ -92,7 +104,7 @@ test("selecting a web search mode shows a removable status chip", async ({ page 
 
   // The chip carries the request state itself instead of echoing the menu
   // label ("Web search - Use web search"): the only selected model here is
-  // gpt-5-4-mini, which has no verified provider-native search, so the honest
+  // gpt-5-4-mini, pinned above, which has no verified provider-native search, so the honest
   // state is "unavailable" plus a way out -- never a silent fall back to
   // training knowledge.
   const chip = page.getByTestId("web-search-mode-chip");

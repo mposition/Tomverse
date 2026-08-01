@@ -68,12 +68,17 @@ const USE_CASE_CANDIDATES: Record<
   readonly string[]
 > = {
   everyday: [
-    "gpt-5-4-mini",
+    // Swapped on 2026-08-01 when gpt-5-6-luna became DEFAULT_MODEL_ID.
+    // gpt-5-4-mini keeps the slot behind it: it is still enabled and still a
+    // reasonable everyday pick, so it stays discoverable for the observation
+    // period, and this list skips it automatically if it is ever retired.
     "gpt-5-6-luna",
-    "grok-3-mini",
+    "gpt-5-4-mini",
     "gemini-2-5-flash",
     "qwen3.6-flash",
     "claude-haiku-4-5",
+    "mistral-small-4",
+    "glm-5.2",
   ],
   writing: [
     "claude-haiku-4-5",
@@ -81,7 +86,7 @@ const USE_CASE_CANDIDATES: Record<
     "mistral-medium-3-1",
     "qwen3.7-plus",
     "claude-fable-5",
-    "gpt-5-4-mini",
+    "gpt-5-6-luna",
   ],
   analysis: [
     "gpt-5-6-sol",
@@ -89,19 +94,20 @@ const USE_CASE_CANDIDATES: Record<
     "gpt-5-5",
     "grok-4-5",
     "gemini-3-6-flash",
+    "gemini-3-1-pro",
     "claude-sonnet-5",
+    "mistral-large-3",
   ],
   multimodal: [
     "gemini-3-6-flash",
     "gemini-3-5-flash",
     "gemini-2-5-flash",
-    "gpt-5-4-mini",
+    "gpt-5-6-luna",
     "gemini-3-1-pro",
   ],
   coding: [
     "gpt-5-6-terra",
     "deepseek-v4-flash",
-    "groq-gpt-oss-120b",
     "codestral",
     "kimi-k2.7-code",
     "deepseek-v4-pro",
@@ -114,10 +120,10 @@ const USE_CASE_CANDIDATES: Record<
   value: [
     "gpt-5-6-luna",
     "gemini-2-5-flash",
-    "groq-gpt-oss-120b",
+    "deepseek-v4-flash",
     "mistral-small-4",
     "glm-5.2",
-    "grok-3-mini",
+    "qwen3.6-flash",
     "deepseek-v4-pro",
   ],
 };

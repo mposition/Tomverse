@@ -325,6 +325,47 @@ export const MODEL_PRICING: readonly ModelPricingProfile[] = [
         effectiveDate: "2026-08-01",
     },
     {
+        // Added when gpt-5-6-luna took over as the default model and 5.4 mini
+        // became the baseline it is compared against. Until then this model
+        // had no explicit profile at all, so it resolved through the generic
+        // "standard" class fallback of US$0.50 in / US$1.00 out -- against a
+        // published US$4.50 output rate, i.e. every 5.4 mini answer was
+        // costed internally at roughly a fifth of what it actually costs, and
+        // its reservation was sized from that same wrong number.
+        //
+        // Flat-priced: unlike the GPT-5.6 family above, 5.4 mini publishes no
+        // long-context price step, so there is one unbounded tier rather than
+        // a gpt56Tiers() pair.
+        //
+        // Three separate output numbers, deliberately not collapsed:
+        //   * 128,000 -- the provider's published maximum output.
+        //   * maxOutputTokens -- the cap this app actually sends upstream
+        //     (app/api/chat/route.ts passes it straight to streamText), set
+        //     to the published maximum, matching every other OpenAI entry
+        //     here rather than inheriting the fallback's unrelated 2,048.
+        //   * reservationOutputTokens -- what the credit reservation carries,
+        //     kept identical to gpt-5-6-luna's 4,096 so the two models are
+        //     reserved on the same basis while they are being compared.
+        // The reservation basis stays "conservative_default" because no p90
+        // output-token telemetry was available to size it from.
+        modelId: "gpt-5-4-mini",
+        provider: "openai",
+        apiModelId: "gpt-5.4-mini",
+        ...DIRECT_STANDARD,
+        tiers: flatTier(0.75, 4.5, 0.1),
+        reasoningTokenBilling: "billed_as_output",
+        // No nativeSearchCostMicroUsdPerQuery: this model is "unverified" in
+        // lib/webSearchCapability.ts, so no native search tool is ever
+        // attached to it and there is no per-query cost to book.
+        maxOutputTokens: 128_000,
+        reservationOutputTokens: 4_096,
+        reservationOutputBasis: "conservative_default",
+        cachedInputPricingVerified: true,
+        priceSource: "openai_gpt_5_4_mini_model_page",
+        pricingVersion: "openai-gpt-5.4-mini-2026-08-01",
+        effectiveDate: "2026-08-01",
+    },
+    {
         modelId: "gemini-3-6-flash",
         provider: "google",
         apiModelId: "gemini-3.6-flash",
@@ -405,21 +446,6 @@ export const MODEL_PRICING: readonly ModelPricingProfile[] = [
     },
     // Provider-verified profiles added by the 2026-08-01 catalogue migration.
     {
-        modelId: "groq-gpt-oss-120b",
-        provider: "groq",
-        apiModelId: "openai/gpt-oss-120b",
-        ...DIRECT_STANDARD,
-        tiers: flatTier(0.15, 0.6, 0.5),
-        reasoningTokenBilling: "billed_as_output",
-        maxOutputTokens: 65_536,
-        reservationOutputTokens: 8_192,
-        reservationOutputBasis: "conservative_default",
-        cachedInputPricingVerified: true,
-        priceSource: "groq_gpt_oss_120b_model_page",
-        pricingVersion: "groq-gpt-oss-120b-2026-08-01",
-        effectiveDate: "2026-08-01",
-    },
-    {
         modelId: "grok-4-3",
         provider: "xai",
         apiModelId: "grok-4.3",
@@ -448,6 +474,14 @@ export const MODEL_PRICING: readonly ModelPricingProfile[] = [
         effectiveDate: "2026-08-01",
     },
     {
+        // Load-bearing beyond ordinary chat accounting: consolidating xAI onto
+        // this model also made it the provider probe's target
+        // (lib/providerProbe.ts picks the cheapest enabled probe-safe model,
+        // and it is now the only xAI one). Probe cost is booked from this
+        // profile against a cap shared by every provider, so on the
+        // US$15/US$60 class fallback one xAI cycle cost US$0.00267 and 144
+        // cycles a day came to US$0.3845 -- 38% of the whole US$1 cap from one
+        // provider. At the published rate it is US$0.042.
         modelId: "grok-4-5",
         provider: "xai",
         apiModelId: "grok-4.5",
@@ -780,27 +814,109 @@ export const resolveModelPricing = (
 };
 
 /**
+ * How long a premium model may stay on the conservative fallback before the CI
+ * warning becomes a failure. Pending is a temporary state with a deadline, not
+ * a resting place.
+ */
+export const PENDING_PRICE_VERIFICATION_WINDOW_DAYS = 90;
+
+export type PendingVerifiedPriceEntry = {
+    modelId: string;
+    /**
+     * Who is accountable for verifying the price. `null` means unassigned --
+     * reported as a warning, and the entry still expires on schedule.
+     */
+    owner: string | null;
+    /** Tracking issue for the verification. `null` means not filed yet. */
+    verificationTicket: string | null;
+    /** ISO date (UTC) the model was accepted onto the fallback. */
+    registeredAt: string;
+    /** ISO date (UTC) after which the check fails instead of warning. */
+    expiresAt: string;
+    /**
+     * Explicit sign-off to keep the model enabled in production while its price
+     * is unverified. Pricing a model conservatively is a billing decision, so
+     * it needs an owner's name on it separately from the code review that added
+     * the entry. `null` means nobody has approved it.
+     */
+    productionApproval: {
+        approvedBy: string;
+        approvedAt: string;
+        rationale: string;
+    } | null;
+    /**
+     * Where the settled cost comes from once the response arrives.
+     * `provider_reported_usage` means the fallback rates only ever size the
+     * up-front reservation and never reach a settled figure.
+     */
+    settlementSource: "reservation_pricing" | "provider_reported_usage";
+    note?: string;
+};
+
+/**
  * Enabled premium models that are knowingly still on the conservative fallback
  * because no verified price source has been recorded for them yet.
  *
- * This list exists so the check below can be fail-closed for *new* models
+ * This register exists so the check below can be fail-closed for *new* models
  * without silently blessing the ones that predate it. Being on it is not an
  * exemption: the fallback deliberately overstates cost (US$15/US$60), which
- * makes reservations larger than reality, so each entry should be replaced with
- * a real profile as its price is verified. Adding a new model here instead of
- * pricing it is a regression, not a fix.
+ * over-sizes reservations, rejects some requests earlier than the real price
+ * would, and -- everywhere settlement uses the reservation rates -- records an
+ * internal cost above what the provider actually charged. Each entry carries an
+ * owner, a verification ticket and an expiry so that state is tracked rather
+ * than tolerated. Adding a new model here instead of pricing it is a
+ * regression, not a fix.
  *
- * Note on Perplexity: its settled cost comes from the provider's own reported
- * response usage (lib/perplexityUsageCore.ts), so the token rates here only
- * ever size the up-front reservation.
+ * See docs/policy/credit-and-cost-limits.md, "검증 대기 가격 운영".
  */
-export const PENDING_VERIFIED_PRICE_MODEL_IDS: readonly string[] = [
-    "claude-fable-5",
-    "grok-4",
-    "mistral-large-3",
-    "qwen3.7-max",
-    "perplexity/sonar-deep-research",
-];
+export const PENDING_VERIFIED_PRICE_REGISTER: readonly PendingVerifiedPriceEntry[] =
+    [
+        {
+            modelId: "claude-fable-5",
+            owner: null,
+            verificationTicket: null,
+            registeredAt: "2026-08-01",
+            expiresAt: "2026-10-30",
+            productionApproval: null,
+            settlementSource: "reservation_pricing",
+        },
+        // grok-4-5 left this register once its real profile went in above, from
+        // xAI's published rates. grok-4 left it for the other reason an entry
+        // stops being needed: it is retired, so findUnpricedModels filters it
+        // out by `enabled` and there is nothing left to exempt.
+        {
+            modelId: "mistral-large-3",
+            owner: null,
+            verificationTicket: null,
+            registeredAt: "2026-08-01",
+            expiresAt: "2026-10-30",
+            productionApproval: null,
+            settlementSource: "reservation_pricing",
+        },
+        {
+            modelId: "qwen3.7-max",
+            owner: null,
+            verificationTicket: null,
+            registeredAt: "2026-08-01",
+            expiresAt: "2026-10-30",
+            productionApproval: null,
+            settlementSource: "reservation_pricing",
+        },
+        {
+            modelId: "perplexity/sonar-deep-research",
+            owner: null,
+            verificationTicket: null,
+            registeredAt: "2026-08-01",
+            expiresAt: "2026-10-30",
+            productionApproval: null,
+            settlementSource: "provider_reported_usage",
+            note: "Settles from the provider's own reported usage (lib/perplexityUsageCore.ts), so these rates only size the reservation. A deep-research turn issues many search queries and reasoning tokens, so a chat-shaped token reservation mis-sizes it in both directions; a dedicated reservation model is under review against the reserved/settled ratio this register reports.",
+        },
+    ];
+
+/** The register's model IDs, in registration order. */
+export const PENDING_VERIFIED_PRICE_MODEL_IDS: readonly string[] =
+    PENDING_VERIFIED_PRICE_REGISTER.map((entry) => entry.modelId);
 
 export type UnpricedModel = {
     modelId: string;
@@ -870,4 +986,127 @@ export const assertPricedPremiumModels = (
         );
     }
     return unpriced;
+};
+
+export type PendingPriceProblem = {
+    severity: "error" | "warning";
+    modelId: string;
+    reason:
+        | "expired"
+        | "priced"
+        | "duplicate"
+        | "invalid_dates"
+        | "unassigned_owner"
+        | "missing_ticket"
+        | "unapproved_production";
+    message: string;
+};
+
+const parseRegisterDate = (value: string) => {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return null;
+    const date = new Date(`${value}T00:00:00.000Z`);
+    return Number.isNaN(date.getTime()) ? null : date;
+};
+
+export const daysUntil = (expiresAt: string, now: Date) => {
+    const date = parseRegisterDate(expiresAt);
+    if (!date) return null;
+    return Math.ceil((date.getTime() - now.getTime()) / 86_400_000);
+};
+
+/**
+ * Everything wrong with the pending-price register, checked together.
+ *
+ * Errors fail CI; warnings are reported and left. The split is deliberate: an
+ * unassigned owner is a gap someone has to fill, while an expired entry means
+ * the model has been billed at a knowingly wrong internal price for a full
+ * verification window and the warning has stopped working.
+ *
+ * This is a CI and review check, not a startup guard. A date passing must never
+ * take production down -- `assertPricedPremiumModels` stays the runtime gate,
+ * and it only rejects models that were never registered at all.
+ */
+export const findPendingPriceRegisterProblems = ({
+    models,
+    now = new Date(),
+    register = PENDING_VERIFIED_PRICE_REGISTER,
+}: {
+    models: Parameters<typeof findUnpricedModels>[0];
+    now?: Date;
+    register?: readonly PendingVerifiedPriceEntry[];
+}): PendingPriceProblem[] => {
+    const problems: PendingPriceProblem[] = [];
+    const unpriced = findUnpricedModels(models);
+    const seen = new Set<string>();
+
+    for (const entry of register) {
+        if (seen.has(entry.modelId)) {
+            problems.push({
+                severity: "error",
+                modelId: entry.modelId,
+                reason: "duplicate",
+                message: `${entry.modelId} is listed twice in PENDING_VERIFIED_PRICE_REGISTER.`,
+            });
+            continue;
+        }
+        seen.add(entry.modelId);
+
+        if (!unpriced.some((model) => model.modelId === entry.modelId)) {
+            problems.push({
+                severity: "error",
+                modelId: entry.modelId,
+                reason: "priced",
+                message: `${entry.modelId} has an explicit pricing profile now and must leave PENDING_VERIFIED_PRICE_REGISTER.`,
+            });
+            continue;
+        }
+
+        const registeredAt = parseRegisterDate(entry.registeredAt);
+        const expiresAt = parseRegisterDate(entry.expiresAt);
+        if (!registeredAt || !expiresAt || expiresAt <= registeredAt) {
+            problems.push({
+                severity: "error",
+                modelId: entry.modelId,
+                reason: "invalid_dates",
+                message: `${entry.modelId} needs a YYYY-MM-DD registeredAt and a later expiresAt (got ${entry.registeredAt} to ${entry.expiresAt}).`,
+            });
+        } else if (expiresAt.getTime() <= now.getTime()) {
+            const overdue = Math.floor(
+                (now.getTime() - expiresAt.getTime()) / 86_400_000
+            );
+            problems.push({
+                severity: "error",
+                modelId: entry.modelId,
+                reason: "expired",
+                message: `${entry.modelId} has been on the conservative fallback past its ${entry.expiresAt} deadline (${overdue} day(s) overdue). Add a verified pricing profile, or re-approve production enablement and set a new deadline.`,
+            });
+        }
+
+        if (!entry.owner) {
+            problems.push({
+                severity: "warning",
+                modelId: entry.modelId,
+                reason: "unassigned_owner",
+                message: `${entry.modelId} has no price-verification owner.`,
+            });
+        }
+        if (!entry.verificationTicket) {
+            problems.push({
+                severity: "warning",
+                modelId: entry.modelId,
+                reason: "missing_ticket",
+                message: `${entry.modelId} has no verification ticket.`,
+            });
+        }
+        if (!entry.productionApproval) {
+            problems.push({
+                severity: "warning",
+                modelId: entry.modelId,
+                reason: "unapproved_production",
+                message: `${entry.modelId} is enabled in production on an unverified price with no recorded approval.`,
+            });
+        }
+    }
+
+    return problems;
 };

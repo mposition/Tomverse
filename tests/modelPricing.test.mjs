@@ -133,7 +133,6 @@ test("new catalogue models use their exact provider prices and output caps", () 
     "gpt-5-6-luna": [0.2, 1.2, 128_000],
     "gemini-3-6-flash": [1.5, 7.5, 65_536],
     "gemini-2-5-flash": [0.3, 2.5, 65_536],
-    "groq-gpt-oss-120b": [0.15, 0.6, 65_536],
     "grok-4-3": [1.25, 2.5, 16_384],
     "grok-4-5": [2, 6, 16_384],
     "mistral-medium-3-1": [1.5, 7.5, 16_384],

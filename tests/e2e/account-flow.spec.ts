@@ -147,9 +147,24 @@ test("theme preference changes immediately and follows the system setting", asyn
   await settingsDialog.getByLabel(/테마|Theme/).selectOption("system");
   await settingsDialog.getByRole("button", { name: /확인|OK/, exact: true }).click();
 
-  await expect(page.locator("html")).toHaveClass(/dark/);
+  // UI-001. "system" deliberately writes neither class: `app/globals.css`
+  // distinguishes an explicit light choice from *no* choice by their absence,
+  // so the OS answers through `prefers-color-scheme`. Asserting a `dark` class
+  // here would be asserting the contract that replaced -- what has to hold is
+  // that the page actually renders dark, and that the choice is recorded.
+  const documentBackground = () =>
+    page.locator("body").evaluate((element) => getComputedStyle(element).backgroundColor);
+
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "system");
+  await expect(page.locator("html")).not.toHaveClass(/\b(dark|light)\b/);
+  await expect.poll(documentBackground).toBe("rgb(10, 10, 10)");
+
   await page.emulateMedia({ colorScheme: "light" });
-  await expect(page.locator("html")).not.toHaveClass(/dark/);
+  // Still "system", still classless -- only the OS moved, and the page has to
+  // follow it without the preference changing.
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "system");
+  await expect(page.locator("html")).not.toHaveClass(/\b(dark|light)\b/);
+  await expect.poll(documentBackground).toBe("rgb(255, 255, 255)");
 });
 
 test("authenticated selector opens a swap dialog for a fourth model", async ({ page }) => {

@@ -40,6 +40,7 @@
     "check:usage-bucket-range": "node --import tsx scripts/check-usage-bucket-range.mjs",
     "security:regression": "node scripts/security-regression-check.mjs",
     "db:migrate": "node scripts/require-direct-database-url.mjs && node scripts/baseline-existing-database.mjs && prisma migrate deploy",
+    "db:compare-schema": "node scripts/compare-schema-to-migrations.mjs",
     "db:refresh-test": "node scripts/refresh-test-database.mjs",
     "maintenance:cleanup": "node scripts/run-maintenance.mjs",
     "maintenance:credit-reservations": "node scripts/run-credit-reconciliation.mjs",
@@ -47,6 +48,8 @@
     "maintenance:provider-usage": "node scripts/run-provider-usage-sync.mjs",
     "maintenance:provider-model-catalog": "node scripts/run-provider-model-catalog-monitor.mjs",
     "maintenance:provider-probe": "node scripts/run-provider-probe.mjs",
+    "maintenance:default-model-reconciliation": "node --import tsx scripts/run-default-model-reconciliation.mjs",
+    "eval:default-model": "node --conditions=react-server --import tsx scripts/evalDefaultModel.mjs",
     "postinstall": "prisma generate"
   },
   "dependencies": {

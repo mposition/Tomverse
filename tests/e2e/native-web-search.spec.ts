@@ -116,10 +116,13 @@ const seedFreshAccount = async (page: Page) => {
   });
 };
 
-// A fresh account starts on the single compiled-in default model
-// (gpt-5-4-mini). toggleModel() refuses to drop the last remaining model, so
-// the default can only be removed once at least one target is already
-// selected -- add the first target, drop the default, then add the rest.
+// A fresh account starts on the single compiled-in default model, which moved
+// from gpt-5-4-mini to gpt-5-6-luna on 2026-08-01. toggleModel() refuses to
+// drop the last remaining model, so the default can only be removed once at
+// least one target is already selected -- add the first target, drop the
+// default, then add the rest.
+const COMPILED_IN_DEFAULT_MODEL_ID = "gpt-5-6-luna";
+
 const selectModelsViaPicker = async (page: Page, models: string[]) => {
   // STG-F008: specific models are picked from the full catalogue, which is the
   // picker's second step.
@@ -127,7 +130,11 @@ const selectModelsViaPicker = async (page: Page, models: string[]) => {
   const optionFor = (modelId: string) =>
     page.locator(`[data-testid="model-option"][data-model-id="${modelId}"]`);
   await optionFor(models[0]).click();
-  await optionFor("gpt-5-4-mini").click();
+  // Skipped when the default is itself one of the targets, so this never
+  // deselects a model the caller asked for.
+  if (!models.includes(COMPILED_IN_DEFAULT_MODEL_ID)) {
+    await optionFor(COMPILED_IN_DEFAULT_MODEL_ID).click();
+  }
   for (const modelId of models.slice(1)) {
     await optionFor(modelId).click();
   }

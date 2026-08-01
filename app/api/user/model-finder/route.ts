@@ -136,7 +136,7 @@ export async function POST(req: Request) {
     if (body.action === "accept_default") {
       const defaultModelId = isModelFinderDefaultId(APP_DEFAULTS.defaultModelId)
         ? APP_DEFAULTS.defaultModelId
-        : "gpt-5-4-mini";
+        : "gpt-5-6-luna";
       const settings = await prisma.userSettings.upsert({
         where: { userId },
         update: {

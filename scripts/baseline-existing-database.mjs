@@ -1,47 +1,63 @@
 import { spawnSync } from "node:child_process";
+import { readdirSync } from "node:fs";
+import { resolve as resolvePath } from "node:path";
 import pg from "pg";
 
 /**
- * Records the baseline migration as already applied on a database that predates
- * it, so `prisma migrate deploy` does not try to recreate the schema.
+ * Reconciles a database that already holds the schema with a migration history
+ * that does not say so, before `prisma migrate deploy` runs.
  *
  * ## Why this exists
  *
  * The migration history was replaced by a single baseline
  * (prisma/migrations/00000000000000_baseline), because the old history could
- * not build the schema from an empty database at all. Databases that were
- * migrated by that old history already hold every table, but their
- * `_prisma_migrations` table has no row for the baseline -- so the next
- * `migrate deploy` sees one unapplied migration, runs it, and fails on
- * `relation "User" already exists` (P3018). Worse, the failed row then blocks
- * every later deploy until someone resolves it by hand.
+ * not build the schema from an empty database at all. Databases built before
+ * that -- and databases built with `prisma db push`, which records nothing --
+ * already hold every table, but their `_prisma_migrations` has no row for the
+ * baseline. `migrate deploy` then applies it and fails on `relation "User"
+ * already exists` (P3018). Worse, the failed row blocks every later deploy
+ * until someone resolves it by hand.
  *
- * This runs before `migrate deploy` and closes that gap without a manual step.
- * It is Prisma's documented `migrate resolve --applied` baselining, decided
- * from the database's own state rather than from a human remembering.
+ * This runs first and closes that gap. It is Prisma's documented
+ * `migrate resolve --applied` baselining, decided from the database's own
+ * state rather than from a human remembering.
  *
  * ## What it will and will not do
  *
  * `migrate resolve --applied` writes one row to `_prisma_migrations`. It runs
- * no DDL and cannot alter or damage the schema. The only real hazard is
- * marking the baseline applied on a database that does *not* already have the
- * schema, which would skip the DDL it needs -- so the decision is gated on the
- * schema visibly being there:
+ * no DDL and cannot alter or damage a schema. The hazard is the opposite one:
+ * marking something applied on a database that does *not* have it, which would
+ * skip the DDL it needs. So the decision is gated on the schema visibly being
+ * there.
  *
- *  - no `_prisma_migrations` table, or no finished migration in it: a fresh
- *    database. Do nothing; `migrate deploy` applies the baseline normally.
- *  - the baseline is already recorded as finished: do nothing.
- *  - `User` is missing: not a pre-baseline database whatever else is true.
- *    Do nothing, and let `migrate deploy` speak for itself.
- *  - otherwise -- finished migrations exist, the baseline is not among them,
- *    and the schema is present: resolve the baseline as applied.
+ *  - **No `User` table** -- nothing has been applied here. Do nothing;
+ *    `migrate deploy` builds the database normally. This is the only fresh
+ *    case, and it is decided by the schema, not by the history: a `db push`
+ *    database has a complete schema and an empty history, and treating that as
+ *    fresh is what made an earlier version of this script fail.
+ *  - **`User` exists, baseline not recorded** -- resolve the baseline. Covers
+ *    pre-baseline databases, `db push` databases, and a database where an
+ *    earlier deploy already failed on the baseline (an unfinished row is not a
+ *    finished one, so it takes the same path).
+ *  - **`User` exists, baseline recorded, later migrations still pending** --
+ *    the ordinary case. Do nothing and let them apply.
  *
- * The last case also covers a database where an earlier deploy already failed
- * on the baseline: that leaves an unfinished row, which is not a finished one,
- * so it is resolved the same way.
+ * ## The case this refuses
+ *
+ * A restore can leave a current schema beside an older `_prisma_migrations` --
+ * for instance a database dump restored over a history snapshot from a
+ * different moment. `migrate deploy` would then try to add columns that are
+ * already there and fail with P3018, leaving the poisoned row behind.
+ *
+ * That state is ambiguous: the pending migrations might be genuinely needed,
+ * or already reflected. Rather than guess, this detects it -- pending
+ * migrations *and* a schema that already matches `schema.prisma` exactly --
+ * and refuses with the commands to resolve it. Refusing leaves the database
+ * untouched; proceeding would not.
  */
 
 const BASELINE_MIGRATION = "00000000000000_baseline";
+const MIGRATIONS_DIR = resolvePath(import.meta.dirname, "..", "prisma", "migrations");
 const { Client } = pg;
 
 const directUrl = process.env.DIRECT_DATABASE_URL;
@@ -83,6 +99,32 @@ const normalizeConnectionString = (value) => {
   return value;
 };
 
+const localMigrations = () =>
+  readdirSync(MIGRATIONS_DIR, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => entry.name)
+    .sort();
+
+/** True when the database already matches schema.prisma exactly. */
+const schemaMatchesPrisma = () => {
+  const result = spawnSync(
+    process.execPath,
+    [
+      "node_modules/prisma/build/index.js",
+      "migrate",
+      "diff",
+      "--from-schema",
+      "prisma/schema.prisma",
+      "--to-config-datasource",
+      "prisma.config.ts",
+      "--exit-code",
+    ],
+    { stdio: "pipe" }
+  );
+  // 0 = no difference, 2 = differences, 1 = error.
+  return result.status === 0;
+};
+
 const client = new Client({
   connectionString: normalizeConnectionString(directUrl),
   connectionTimeoutMillis: 10_000,
@@ -95,49 +137,50 @@ let shouldResolve = false;
 try {
   await client.connect();
 
-  const { rows: historyRows } = await client.query(
-    `SELECT to_regclass('public._prisma_migrations') IS NOT NULL AS present`
-  );
-  if (!historyRows[0]?.present) {
-    log("No migration history table; treating this as a fresh database.");
-    process.exit(0);
-  }
-
-  const { rows: countRows } = await client.query(`
-    SELECT
-      count(*) FILTER (WHERE finished_at IS NOT NULL) AS finished,
-      count(*) FILTER (
-        WHERE migration_name = $1 AND finished_at IS NOT NULL
-      ) AS baseline_finished
-    FROM "_prisma_migrations"
-  `, [BASELINE_MIGRATION]);
-  const finished = Number(countRows[0]?.finished || 0);
-  const baselineFinished = Number(countRows[0]?.baseline_finished || 0);
-
-  if (baselineFinished > 0) {
-    log("Baseline is already recorded as applied; nothing to do.");
-    process.exit(0);
-  }
-  if (finished === 0) {
-    log("No finished migrations recorded; treating this as a fresh database.");
-    process.exit(0);
-  }
-
+  // The schema decides, not the history. A `db push` database has every table
+  // and an empty history; reading the history first would call it fresh.
   const { rows: schemaRows } = await client.query(
     `SELECT to_regclass('public."User"') IS NOT NULL AS present`
   );
   if (!schemaRows[0]?.present) {
-    fail(
-      'This database records finished migrations but has no "User" table, so it is neither a fresh database nor a pre-baseline one. Refusing to guess; inspect it before deploying.',
-      { finishedMigrations: finished }
+    log("No schema present; treating this as a fresh database.");
+    process.exit(0);
+  }
+
+  const { rows: historyRows } = await client.query(
+    `SELECT to_regclass('public._prisma_migrations') IS NOT NULL AS present`
+  );
+  const recorded = historyRows[0]?.present
+    ? (
+        await client.query(
+          `SELECT migration_name FROM "_prisma_migrations" WHERE finished_at IS NOT NULL`
+        )
+      ).rows.map((row) => row.migration_name)
+    : [];
+  const recordedSet = new Set(recorded);
+
+  if (!recordedSet.has(BASELINE_MIGRATION)) {
+    shouldResolve = true;
+    log(
+      "The schema is present but the baseline is not recorded. Marking it applied.",
+      { recordedMigrations: recorded.length, baseline: BASELINE_MIGRATION }
     );
   }
 
-  shouldResolve = true;
-  log(
-    "Pre-baseline database detected: the schema is present and the baseline is not recorded. Marking it applied.",
-    { finishedMigrations: finished, baseline: BASELINE_MIGRATION }
+  // Anything still pending after the baseline is resolved.
+  const pending = localMigrations().filter(
+    (name) => name !== BASELINE_MIGRATION && !recordedSet.has(name)
   );
+  if (pending.length > 0 && schemaMatchesPrisma()) {
+    fail(
+      "This database already matches schema.prisma, but migrations are recorded as unapplied. `migrate deploy` would try to re-apply them and fail with P3018, leaving a failed row that blocks every later deploy. This usually means a restore paired a database dump with an older _prisma_migrations. Nothing has been changed. If these migrations really are already in place, record them and re-run the deploy.",
+      {
+        pending,
+        recordedMigrations: recorded.length,
+        command: `prisma migrate resolve --applied ${pending.join(" --applied ")}`,
+      }
+    );
+  }
 } catch (error) {
   const message =
     error && typeof error === "object" && typeof error.message === "string"

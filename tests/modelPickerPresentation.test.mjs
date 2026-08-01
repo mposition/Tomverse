@@ -58,11 +58,14 @@ test("usage bands supplement rather than replace exact credit values", () => {
 
 test("recommended and capability filters use model behavior", () => {
   assert.deepEqual(RECOMMENDED_MODEL_IDS, [
-    "gpt-5-4-mini",
+    "gpt-5-6-luna",
     "claude-sonnet-5",
     "gemini-3-6-flash",
   ]);
-  assert.equal(modelMatchesCapability(getModel("groq-gpt-oss-120b"), "reasoning"), true);
+  assert.equal(modelMatchesCapability(getModel("grok-4-5"), "reasoning"), true);
+  // A retired model still classifies correctly -- the reasoning filter reads
+  // the model's own capability, not its lifecycle.
+  assert.equal(modelMatchesCapability(getModel("deepseek-r1"), "reasoning"), true);
   assert.equal(modelMatchesCapability(getModel("perplexity/sonar"), "search"), true);
   assert.equal(modelMatchesCapability(getModel("gpt-5-4-mini"), "fast"), true);
   assert.equal(modelPickerCopy.ko.personalizedRecommendations, "나에게 추천");

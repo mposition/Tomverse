@@ -94,8 +94,6 @@ test("new catalogue plans and credit weights follow their verified cost bands", 
     "gpt-5-6-luna": ["Guest", "Standard", 1],
     "gemini-3-6-flash": ["Free", "Advanced", 4],
     "gemini-2-5-flash": ["Guest", "Standard", 1],
-    "groq-gpt-oss-120b": ["Free", "Advanced", 4],
-    "grok-4-3": ["Free", "Advanced", 4],
     "mistral-medium-3-1": ["Free", "Advanced", 4],
   };
 
@@ -123,15 +121,17 @@ test("new catalogue models expose verified context, output and attachment capabi
     assert.equal(modelSupportsNativePdfInput(model), true, id);
   }
 
-  const gptOss = getModel("groq-gpt-oss-120b");
-  assert.equal(gptOss.contextWindowTokens, 131_072);
-  assert.equal(getModelBillingProfile(gptOss).maxOutputTokens, 65_536);
-  assert.equal(modelSupportsImageInput(gptOss), false);
-
+  // Retired here rather than launched, but the capability fields stay
+  // asserted: they are what an old transcript renders from, and what a
+  // future relisting would start from.
   const grok = getModel("grok-4-3");
   assert.equal(grok.contextWindowTokens, 1_000_000);
   assert.equal(modelSupportsImageInput(grok), true);
   assert.equal(modelSupportsNativePdfInput(grok), false);
+
+  const grok45 = getModel("grok-4-5");
+  assert.equal(grok45.contextWindowTokens, 500_000);
+  assert.equal(modelSupportsImageInput(grok45), true);
 
   const mistral = getModel("mistral-medium-3-1");
   assert.equal(mistral.apiModel, "mistral-medium-3-5");

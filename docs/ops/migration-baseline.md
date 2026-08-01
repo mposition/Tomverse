@@ -68,26 +68,39 @@ guard의 판단 규칙:
 아니므로 같은 경로로 처리). `migrate resolve --applied`는 `_prisma_migrations`에
 행 하나를 쓸 뿐 DDL을 실행하지 않으므로 스키마를 손상시킬 수 없습니다.
 
-## 병합 전에 사람이 해야 할 확인
+## production 스키마와 대조하기
 
-여기까지는 저장소 안에서 검증했지만, **production의 실제 스키마와는 대조하지
-못했습니다.** 접근 권한이 있는 사람이 병합 전에 한 번 확인해 주십시오.
+`npm run db:compare-schema` 한 줄입니다. 대상 DB는 **읽기만** 합니다.
 
 ```bash
-# 1. production의 schema-only dump를 받는다
-pg_dump --schema-only --no-owner --no-privileges "$PRODUCTION_DIRECT_URL" > prod-schema.sql
-
-# 2. baseline만으로 만든 빈 DB를 만든다
-createdb baseline_check
-DIRECT_DATABASE_URL=postgresql://.../baseline_check npm run db:migrate
-pg_dump --schema-only --no-owner --no-privileges "postgresql://.../baseline_check" > baseline-schema.sql
-
-# 3. 대조한다. 차이가 있다면 그것은 손으로 넣은 SQL이거나 schema.prisma에 없는 것이다
-diff <(sort prod-schema.sql) <(sort baseline-schema.sql)
+COMPARE_SOURCE_DATABASE_URL="$PRODUCTION_DIRECT_URL" \
+COMPARE_SCRATCH_DATABASE_URL="postgresql://.../tomverse_compare_scratch" \
+npm run db:compare-schema
 ```
 
-`migrate diff`는 CHECK 제약을 보지 못하므로 이 dump 대조가 유일한 확인 수단입니다.
-차이가 나오면 baseline에 반영한 뒤 다시 대조합니다.
+scratch DB는 비어 있어야 하고 이름에 `test`·`scratch`·`tmp`·`ci`·`compare` 중
+하나가 들어가야 합니다. 소스와 같으면 실행을 거부합니다.
+
+무엇이 다른지는 `pg_dump` 텍스트 비교가 아니라 **카탈로그에서 직접** 읽습니다 —
+컬럼, 인덱스(`pg_indexes.indexdef`), 제약(`pg_get_constraintdef`), enum, 함수,
+트리거. 서버가 정규화한 문자열이라 서버 버전이나 문장 순서 차이에 흔들리지
+않습니다. 차이가 있으면 exit 1이라 릴리스 게이트로 쓸 수 있습니다.
+
+**왜 `prisma migrate diff`로는 안 되는가.** 실제로 확인했습니다. 손으로 CHECK
+제약과 partial unique index를 하나씩 넣은 DB에 대해:
+
+| 도구 | 결과 |
+|---|---|
+| `prisma migrate diff --exit-code` | `No difference detected.` (exit 0) — **둘 다 놓침** |
+| `npm run db:compare-schema` | 둘 다 이름과 정의까지 보고, exit 1 |
+
+`schema.prisma`가 표현하지 못하는 것은 `migrate diff`도 보지 못합니다. 그것이
+이 스크립트가 존재하는 이유입니다.
+
+> **아직 production 대조는 실행되지 않았습니다.** 이 저장소 안에서는 접속 정보를
+> 얻을 수 없습니다(Railway MCP는 변수 이름만 반환합니다). 권한이 있는 분이 위
+> 명령을 한 번 실행해 주십시오. `only in the source`로 나오는 항목은 migration
+> 이력에 없는 SQL이며, **새로 만드는 모든 환경에 빠져 있게 됩니다.**
 
 ## 새 migration을 추가할 때
 
@@ -119,11 +132,39 @@ migration에 직접 씁니다.
 그리고 통합 테스트가 계속 migration으로 스키마를 만드는지 지킵니다. 후자를
 `push`로 되돌리면 partial index와 CHECK 제약이 조용히 전부 사라집니다.
 
+## 복원·신규 환경 drill (수행 완료)
+
+로컬 PostgreSQL 16에서 실제로 수행한 결과입니다. guard의 결함 두 가지가 여기서
+드러났고, 고친 뒤 다시 돌렸습니다.
+
+| 상황 | 기대 | 결과 |
+|---|---|---|
+| 빈 DB에 `npm run db:migrate` | baseline 포함 전체 적용 | 54 테이블, CHECK 10건, drift 0 |
+| 현재 백업을 새 DB에 복원 후 배포 | 아무것도 적용하지 않음 | `No pending migrations to apply` |
+| 복원된 DB를 migration 산출물과 대조 | 완전 일치 | 컬럼 770 · 인덱스 222 · 제약 93 전부 동일 |
+| baseline 이전 production 형태 (스키마 구버전 + 78건 기록) | baseline 기록 후 나머지 적용 | 3건 정상 적용 |
+| 스키마는 최신인데 이력이 구버전인 복원 | **거부**, DB 무변경 | 거부됨, 실패 행 0건 |
+
+drill이 찾아낸 것:
+
+1. **`db push`로 만든 DB를 "신규"로 오판했습니다.** guard가 이력을 먼저 읽어
+   "완료된 migration 0건 → 신규"로 판단했는데, `db push` DB는 스키마가 완전하고
+   이력이 비어 있습니다. 그대로 배포하면 `relation "User" already exists`로
+   실패하고 실패 행이 남습니다. 이제 **이력이 아니라 스키마로 판단**합니다.
+2. **스키마는 최신인데 이력이 구버전인 복원**에서 `migrate deploy`가 이미 있는
+   컬럼을 다시 추가하려다 P3018로 죽고, 역시 실패 행을 남겼습니다. 이 상태는
+   pending migration이 정말 필요한 것인지 이미 반영된 것인지 알 수 없으므로
+   **추측하지 않고 거부**하며, 해결 명령을 함께 출력합니다. 거부는 DB를 건드리지
+   않지만 진행은 건드립니다.
+
 ## 남은 작업
 
-- **백업 복원 및 신규 환경 생성 drill.** baseline으로 빈 DB를 만드는 것은
-  검증했지만, 실제 백업 복원과 신규 Railway 환경 생성은 해당 인프라에서 한 번
-  실행해 봐야 합니다.
+- **production 스키마 대조 실행.** 도구는 준비됐고 위 명령 한 줄이지만, 이
+  저장소에서는 접속 정보를 얻을 수 없어 아직 실행되지 않았습니다.
+- **실제 인프라에서의 drill.** 위 표는 로컬 PostgreSQL 16 기준입니다. Railway
+  백업 복원과 신규 환경 생성은 해당 인프라에서 한 번 밟아봐야 관리형 서비스
+  특유의 차이(확장, 역할, 연결 제한)까지 확인됩니다.
 - **CI에서 빈 PostgreSQL로 `migrate deploy`를 돌리는 job.** DB 통합 워크플로가
   이제 그 경로를 쓰므로 사실상 확보돼 있지만, migration 전용 job으로 분리하면
-  실패 원인이 더 분명해집니다.
+  실패 원인이 더 분명해집니다. `db:compare-schema`를 릴리스 게이트로 붙이는 것도
+  같은 자리에서 하면 좋습니다.

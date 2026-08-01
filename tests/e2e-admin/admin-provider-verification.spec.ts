@@ -28,21 +28,35 @@ import { adminFixtureDatabase } from "./support/database";
 const PROVIDER = "perplexity";
 const VERIFY_PATH = "/api/admin/provider-health/verify";
 
+/**
+ * Every control is resolved inside the console's `main` landmark.
+ *
+ * Not decoration: under a full parallel run the browser can hold a second,
+ * inert copy of the panel outside `main` -- identical markup, absent from the
+ * accessibility tree, and never seen by a user. An unscoped `getByTestId` then
+ * matches twice and fails on strict mode rather than on anything the console
+ * did wrong. Scoping to `main` asserts the panel the administrator actually
+ * uses, and still fails loudly if the panel itself ever renders a control
+ * twice -- which is the duplicate worth catching.
+ */
+const workspace = (page: import("@playwright/test").Page) =>
+  page.getByRole("main");
+
 const verifyButton = (page: import("@playwright/test").Page) =>
-  page.getByTestId(`provider-verify-${PROVIDER}`);
+  workspace(page).getByTestId(`provider-verify-${PROVIDER}`);
 const confirmButton = (page: import("@playwright/test").Page) =>
-  page.getByTestId(`provider-verify-confirm-${PROVIDER}`);
+  workspace(page).getByTestId(`provider-verify-confirm-${PROVIDER}`);
 const recoverButton = (page: import("@playwright/test").Page) =>
-  page.getByTestId(`provider-recover-${PROVIDER}`);
+  workspace(page).getByTestId(`provider-recover-${PROVIDER}`);
 const resultCard = (page: import("@playwright/test").Page) =>
-  page.getByTestId(`provider-verification-result-${PROVIDER}`);
+  workspace(page).getByTestId(`provider-verification-result-${PROVIDER}`);
 /**
  * The real console renders one verification block per provider, so any copy
  * assertion has to resolve inside this provider's block rather than matching
  * the same sentence in every other row.
  */
 const verificationSection = (page: import("@playwright/test").Page) =>
-  page.getByTestId(`provider-verification-${PROVIDER}`);
+  workspace(page).getByTestId(`provider-verification-${PROVIDER}`);
 
 /**
  * The self-locking state this feature exists to release: a stale run of

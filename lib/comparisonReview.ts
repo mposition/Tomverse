@@ -771,6 +771,22 @@ export const buildQuickComparisonSummaryPrompt = ({
   };
 };
 
+/**
+ * Default reviewer panel. Exported so the catalogue-reference suite can check
+ * these ids against the live catalogue: they are resolved through
+ * `getEnabledModel` and silently skipped when unknown, so a retired id here
+ * shrinks the panel instead of failing.
+ *
+ * Was llama-3-3 in the third slot until Llama left the public catalogue with
+ * Groq's hosting; qwen3.7-plus is the closest active Free general-analysis
+ * model and keeps the panel on three providers.
+ */
+export const COMPARISON_REVIEW_DEFAULT_MODEL_IDS = [
+  "mistral-medium-3-1",
+  "claude-sonnet-5",
+  "qwen3.7-plus",
+] as const;
+
 const reviewerIds = () => {
   const configured = process.env.COMPARISON_REVIEW_MODEL_IDS
     ?.split(",")
@@ -778,8 +794,22 @@ const reviewerIds = () => {
     .filter(Boolean);
   return configured?.length
     ? configured
-    : ["mistral-medium-3-1", "claude-sonnet-5", "groq-gpt-oss-120b"];
+    : [...COMPARISON_REVIEW_DEFAULT_MODEL_IDS];
 };
+
+/**
+ * Default quick-comparison panel, exported for the same reason as the full
+ * panel above. The last slot held a Groq model (llama-4-scout, then
+ * llama-3-3) for provider spread until Llama left the public catalogue;
+ * Qwen 3.6 keeps both the spread and the "quick" cost profile.
+ */
+export const QUICK_COMPARISON_DEFAULT_MODEL_IDS = [
+  "gpt-5-6-luna",
+  "gemini-2-5-flash",
+  "claude-haiku-4-5",
+  "mistral-small-4",
+  "qwen3.6-flash",
+] as const;
 
 const quickReviewerIds = () => {
   const configured = process.env.QUICK_COMPARISON_MODEL_IDS
@@ -788,15 +818,7 @@ const quickReviewerIds = () => {
     .filter(Boolean);
   return configured?.length
     ? configured
-    : [
-        "gpt-5-4-mini",
-        "gemini-2-5-flash",
-        "claude-haiku-4-5",
-        "mistral-small-4",
-        // Keep a Groq model here so the default reviewer panel retains its
-        // provider spread after the Llama shutdown migration.
-        "groq-gpt-oss-120b",
-      ];
+    : [...QUICK_COMPARISON_DEFAULT_MODEL_IDS];
 };
 
 const availableReviewerModels = (ids: string[]) =>
