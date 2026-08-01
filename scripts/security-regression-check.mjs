@@ -2079,6 +2079,47 @@ const checks = [
     },
   },
   {
+    // The goldens report `Not verified` on a substitute browser instead of a
+    // red diff (tests/e2e/support/canonical-visual.ts). That is only safe
+    // while no workflow can put CI into the substitute case: a runner with
+    // PLAYWRIGHT_CHROMIUM_EXECUTABLE set would skip every golden and still
+    // report green, which is a quieter version of the `--update-snapshots`
+    // failure the checks above already refuse.
+    name: "Goldens are skipped as Not verified off-canonical, and no workflow can put CI there",
+    file: "tests/e2e/support/canonical-visual.ts",
+    test: (source) => {
+      const setsExecutable = workflowFiles().filter((path) =>
+        read(path).includes("PLAYWRIGHT_CHROMIUM_EXECUTABLE")
+      );
+      if (setsExecutable.length > 0) {
+        console.error(
+          `Workflows must not set PLAYWRIGHT_CHROMIUM_EXECUTABLE -- it would skip every golden: ${setsExecutable.join(", ")}`
+        );
+        return false;
+      }
+      return (
+        source.includes("PLAYWRIGHT_CHROMIUM_EXECUTABLE") &&
+        source.includes("Not verified -- non-canonical browser") &&
+        source.includes("docs/qa/canonical-visual-baseline.md") &&
+        // Skipping is the whole mechanism; re-recording from here is the
+        // outcome the policy exists to prevent, so the guard must never
+        // reach for it.
+        !source.includes("--update-snapshots") &&
+        // Both golden surfaces are wired to it. A guard nothing calls is
+        // indistinguishable from no guard.
+        read("tests/e2e/chat-state-visual-regression.spec.ts").includes(
+          "skipUnlessCanonicalVisualBrowser()"
+        ) &&
+        read("tests/e2e/mobile-composer-contract.spec.ts").includes(
+          "test.beforeEach(skipUnlessCanonicalVisualBrowser)"
+        ) &&
+        read("docs/qa/canonical-visual-baseline.md").includes(
+          "skipUnlessCanonicalVisualBrowser"
+        )
+      );
+    },
+  },
+  {
     name: "Financial DB gate is path-scoped on PRs but always available on main and manual runs",
     file: ".github/workflows/credit-finance-db-integration.yml",
     test: (source) =>
