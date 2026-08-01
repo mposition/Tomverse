@@ -46,6 +46,7 @@ type World = {
   turnstileGrant: string | undefined;
   turnstileError: { status: number; code: string } | null;
   stored: StoredFeedback[];
+  deliveries: Array<Record<string, unknown> & { id: string }>;
   createShouldFail: boolean;
   emails: { to: string }[];
   emailShouldFail: boolean;
@@ -59,6 +60,7 @@ const freshWorld = (): World => ({
   turnstileGrant: undefined,
   turnstileError: null,
   stored: [],
+  deliveries: [],
   createShouldFail: false,
   emails: [],
   emailShouldFail: false,
@@ -124,34 +126,72 @@ async function loadRoute(): Promise<{
 
     mock.module(mod("lib/email.ts"), {
       namedExports: {
+        // Returns the real shape: the delivery path reads `skipped` to tell
+        // "this deployment declined to send" apart from "the provider took it".
         sendTransactionalEmail: async ({ to }: { to: string }) => {
           if (world.emailShouldFail) throw new Error("mailbox unavailable");
           world.emails.push({ to });
+          return { sent: true, skipped: false, id: "qa-email" };
         },
       },
     });
 
-    mock.module(mod("lib/prisma.ts"), {
-      namedExports: {
-        prisma: {
-          feedback: {
-            create: async ({ data }: { data: Record<string, unknown> }) => {
-              if (world.createShouldFail) {
-                throw new Error("database is unavailable");
-              }
-              nextId += 1;
-              const record = {
-                ...data,
-                id: `clzfeedback000${String(nextId).padStart(4, "0")}abcd`,
-                status: "open",
-                createdAt: new Date("2099-01-01T00:00:00.000Z"),
-              } as StoredFeedback;
-              world.stored.push(record);
-              return record;
-            },
-          },
+    // The report and its operator-notification queue row commit together, so
+    // the fake models both tables and a transaction that simply runs its
+    // callback against the same client.
+    const fakePrisma: Record<string, unknown> = {
+      $transaction: async (fn: (tx: unknown) => Promise<unknown>) =>
+        fn(fakePrisma),
+      feedback: {
+        create: async ({ data }: { data: Record<string, unknown> }) => {
+          if (world.createShouldFail) {
+            throw new Error("database is unavailable");
+          }
+          nextId += 1;
+          const record = {
+            ...data,
+            id: `clzfeedback000${String(nextId).padStart(4, "0")}abcd`,
+            status: "open",
+            createdAt: new Date("2099-01-01T00:00:00.000Z"),
+          } as StoredFeedback;
+          world.stored.push(record);
+          return record;
+        },
+        findUnique: async ({ where }: { where: { id: string } }) =>
+          world.stored.find((row) => row.id === where.id) ?? null,
+      },
+      notificationDelivery: {
+        upsert: async ({
+          create,
+        }: {
+          create: { kind: string; referenceId: string };
+        }) => {
+          nextId += 1;
+          const row = {
+            id: `clzdelivery000${String(nextId).padStart(4, "0")}`,
+            ...create,
+            status: "pending",
+            attempts: 0,
+          };
+          world.deliveries.push(row);
+          return { id: row.id };
+        },
+        update: async ({
+          where,
+          data,
+        }: {
+          where: { id: string };
+          data: Record<string, unknown>;
+        }) => {
+          const row = world.deliveries.find((entry) => entry.id === where.id);
+          if (row) Object.assign(row, data);
+          return row;
         },
       },
+    };
+
+    mock.module(mod("lib/prisma.ts"), {
+      namedExports: { prisma: fakePrisma },
     });
   }
 
