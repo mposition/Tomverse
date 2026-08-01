@@ -68,6 +68,13 @@ test("bootstrapping replays catalogue retirements onto pre-existing registry row
       replacementModelId: null,
     },
   });
+  // Same pre-state for the pre-launch model, so this one bootstrap covers
+  // both halves of the withdrawal replay -- see the test below, which reads
+  // the result rather than seeding a second time.
+  await prisma.modelRegistryEntry.updateMany({
+    where: { id: "kimi-k3" },
+    data: { enabled: true, publiclyListed: true, status: "enabled" },
+  });
 
   await ensureModelRegistrySeeded();
 
@@ -105,6 +112,29 @@ test("bootstrapping replays catalogue retirements onto pre-existing registry row
     );
     assert.notEqual(replacement.publiclyListed, false);
   }
+});
+
+// A model withheld before launch has the same failure mode as a retired one:
+// if an environment received a build that had it enabled, nothing would ever
+// correct the row. The replay therefore covers it too -- and must write
+// "coming-soon" rather than flattening it into "disabled", because the two
+// states mean opposite things to an operator reading the registry. Reads the
+// state the bootstrap above already produced; the bootstrap memoises, so
+// there is exactly one replay per process to observe.
+test("the same bootstrap withdraws a pre-launch model without marking it retired", async () => {
+  const row = await prisma.modelRegistryEntry.findUnique({
+    where: { id: "kimi-k3" },
+  });
+  assert.ok(row, "kimi-k3 must stay registered");
+  assert.equal(row.enabled, false);
+  assert.equal(row.publiclyListed, false);
+  assert.equal(row.status, "coming-soon");
+  assert.equal(row.catalogDeleted, false);
+  // Withheld, not retired: it has no predecessor to hand users off to.
+  assert.equal(row.replacementModelId, null);
+
+  assert.equal(await getEnabledRuntimeModel("kimi-k3"), undefined);
+  assert.equal((await assertModelRuntimeAvailable("kimi-k3")).allowed, false);
 });
 
 test("re-running the bootstrap leaves retired rows untouched", async () => {

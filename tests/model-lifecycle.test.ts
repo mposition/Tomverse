@@ -5,8 +5,10 @@ import {
   AVAILABLE_MODELS,
   PUBLIC_MODELS,
   PUBLIC_MODEL_PROVIDERS,
+  isPreLaunchModel,
   isPubliclySelectableModel,
   isRetiredModel,
+  isWithdrawnFromOfferModel,
   type AiModel,
 } from "../lib/models";
 
@@ -217,7 +219,7 @@ test("older Grok models stay resolvable as history but cannot be selected", () =
   }
 });
 
-test("Kimi K3 and Kimi K2.7 are two distinct public models", () => {
+test("Kimi K3 and Kimi K2.7 are two distinct models, not a rename", () => {
   const k3 = entry("kimi-k3");
   const k27 = entry("kimi-k2.7-code");
   assert.ok(k3, "kimi-k3 must exist");
@@ -228,14 +230,62 @@ test("Kimi K3 and Kimi K2.7 are two distinct public models", () => {
   assert.equal(k3!.provider, "moonshot");
   assert.equal(k27!.provider, "moonshot");
   assert.equal(k3!.icon, k27!.icon);
-  assert.equal(isPubliclySelectableModel(k3!), true);
+  // The coding-specialised model is unaffected by K3 being withheld.
   assert.equal(isPubliclySelectableModel(k27!), true);
-  // Officially documented specification only -- see lib/models.ts.
-  assert.equal(k3!.minimumPlan, "Pro");
-  assert.equal(k3!.usageClass, "premium-reasoning");
+  // Officially documented capability fields only -- see lib/models.ts. None
+  // of these is a price, and none of them makes the model launchable.
   assert.equal(k3!.contextWindowTokens, 1_048_576);
   assert.equal(k3!.inputCapabilities?.image, true);
   assert.equal(k3!.reasoning, "high");
+});
+
+// Kimi K3's unit economics are not established: no published price, no
+// explicit chat reasoning effort, no output cap, no reasoning_content
+// handling, and a flat 3x ceiling on long-input credits against a 1M-token
+// window. Until those are settled it is registered but withheld, and this is
+// what stops "enabled: true" being restored without them.
+test("Kimi K3 is registered but not launched", () => {
+  const k3 = entry("kimi-k3")!;
+  assert.equal(isPreLaunchModel(k3), true);
+  assert.equal(k3.enabled, false);
+  assert.equal(k3.publiclyListed, false);
+  assert.equal(k3.status, "coming-soon");
+  assert.equal(isPubliclySelectableModel(k3), false);
+  // Withheld, not retired: it has nothing to hand users off to, and it must
+  // not be described to them as a model that used to work.
+  assert.equal(isRetiredModel(k3), false);
+  assert.equal(k3.replacementModelId, undefined);
+  // No price may be asserted for it while it is unpriced.
+  assert.equal(k3.inputUsdPerMillionTokens, undefined);
+  assert.equal(k3.outputUsdPerMillionTokens, undefined);
+});
+
+test("a pre-launch model is withdrawn from the offer just like a retired one", () => {
+  // Both are replayed onto existing registry rows by the bootstrap, which is
+  // the only thing that can correct an environment that received an earlier
+  // build with the model enabled.
+  assert.equal(isWithdrawnFromOfferModel(entry("kimi-k3")!), true);
+  assert.equal(isWithdrawnFromOfferModel(entry("grok-3")!), true);
+  assert.equal(isWithdrawnFromOfferModel(entry("grok-4-5")!), false);
+});
+
+// Models known to have no published provider price yet. getModelBillingProfile
+// always returns a number -- an unpriced model silently inherits its usage
+// class's fallback -- so nothing downstream can tell that a price is missing.
+// Listing them here is what makes it visible, and the assertion below is what
+// stops one being offered while it is still on the list.
+const UNPRICED_MODEL_IDS = ["kimi-k3"];
+
+test("a model with no published price is never offered to users", () => {
+  for (const modelId of UNPRICED_MODEL_IDS) {
+    const model = entry(modelId);
+    assert.ok(model, `${modelId} should be in the catalogue`);
+    assert.equal(
+      isPubliclySelectableModel(model!),
+      false,
+      `${modelId} is selectable while unpriced -- register its provider price profile first, then remove it from UNPRICED_MODEL_IDS`
+    );
+  }
 });
 
 test("the public provider and model counts are derived, not hard-coded", () => {

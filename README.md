@@ -190,13 +190,27 @@ model ID can be verified before it becomes callable.
 The checked-in `AVAILABLE_MODELS` array is retained only as the first-deploy
 bootstrap and a rolling-migration fallback. Existing rows keep their
 admin-tuned values -- name, blurb, pricing, sort order -- and are never
-overwritten by the bootstrap, with one deliberate exception: **retirement is
-replayed**. A model the checked-in catalogue marks retired
-(`enabled=false`, `publiclyListed=false`, `status="disabled"`) has those three
-fields, plus its `replacementModelId`, forced onto any existing row on every
-bootstrap. Without that, a model retired in `lib/models.ts` after its row
-already existed stayed selectable forever, because the bootstrap only ever
-inserted. The replay is idempotent, never deletes a row, and never touches
+overwritten by the bootstrap, with one deliberate exception: **withdrawal from
+the offer is replayed**. A model the checked-in catalogue marks as not
+offerable has `enabled`, `publiclyListed` and `status` -- plus its
+`replacementModelId` -- forced onto any existing row on every bootstrap.
+Without that, a model withdrawn in `lib/models.ts` after its row already
+existed stayed selectable forever, because the bootstrap only ever inserted.
+
+Two states are replayed, and each keeps its own `status` rather than being
+flattened together:
+
+- **Retired** (`status="disabled"`) -- the provider stopped serving it, or the
+  catalogue dropped it. Points at a live `replacementModelId`, and stays
+  resolvable so stored conversations, the credit ledger and admin history keep
+  reading.
+- **Pre-launch** (`status="coming-soon"`) -- the id is registered and
+  reviewable but the model has not cleared its launch gate. It has no
+  replacement, because it never replaced anything. Replayed for the same
+  reason as retirement: an environment that received an earlier build with the
+  model enabled would otherwise keep offering it.
+
+The replay is idempotent, never deletes a row, and never touches
 `catalogDeleted`, which stays a human-controlled admin action. Removing a model
 from the Admin Console archives it
 (`catalogDeleted=true`, `enabled=false`, `publiclyListed=false`) instead of

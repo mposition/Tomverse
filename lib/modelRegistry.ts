@@ -8,7 +8,7 @@ import {
   AVAILABLE_MODELS,
   getModelBillingProfile,
   getModelUsageProfile,
-  isRetiredModel,
+  isWithdrawnFromOfferModel,
   type AiModel,
   type ModelInputCapabilities,
   type ModelMinimumPlan,
@@ -139,36 +139,45 @@ export const registryRowToModel = (row: ModelRegistryEntry): AiModel => {
 let bootstrapPromise: Promise<void> | null = null;
 let didWarnAboutRegistrySchema = false;
 
-// Retirement is a deliberate, human-authored lifecycle decision (a provider
-// stopped serving the model), unlike the tunable fields -- name, blurb,
-// pricing, sort order -- that an admin may legitimately diverge from the
-// bootstrap catalog on.
-const STATIC_RETIRED_MODELS = STATIC_RUNTIME_MODELS.filter(isRetiredModel);
+// Withdrawing a model from the offer is a deliberate, human-authored
+// lifecycle decision -- a provider stopped serving it, or it has not cleared
+// its launch gate -- unlike the tunable fields (name, blurb, pricing, sort
+// order) that an admin may legitimately diverge from the bootstrap catalog on.
+const STATIC_WITHDRAWN_MODELS = STATIC_RUNTIME_MODELS.filter(
+    isWithdrawnFromOfferModel
+);
 
 // `createMany({ skipDuplicates: true })` only ever inserts, so a model that
 // was already in the runtime registry before it was retired in
 // `lib/models.ts` kept its old `enabled`/`publiclyListed`/`status` values
 // forever -- the public model API and the picker went on offering a model no
-// provider would serve. Retirement is therefore replayed onto existing rows
-// on every bootstrap. `catalogDeleted` is deliberately untouched: it stays
-// human-controlled.
-async function applyStaticRetirements() {
-  if (STATIC_RETIRED_MODELS.length === 0) return;
+// provider would serve. The withdrawal is therefore replayed onto existing
+// rows on every bootstrap.
+//
+// This covers pre-launch models as well as retired ones, because the failure
+// is identical from the row's point of view: a build that had the model
+// enabled reaching an environment before the build that withdrew it leaves an
+// enabled row nothing would ever correct. Each model's own `status` is
+// written, so a retirement lands as "disabled" and a withheld launch as
+// "coming-soon" rather than being flattened together. `catalogDeleted` is
+// deliberately untouched: it stays human-controlled.
+async function applyStaticWithdrawals() {
+  if (STATIC_WITHDRAWN_MODELS.length === 0) return;
 
-  for (const model of STATIC_RETIRED_MODELS) {
+  for (const model of STATIC_WITHDRAWN_MODELS) {
     const result = await prisma.modelRegistryEntry.updateMany({
       where: {
         id: model.id,
         OR: [
           { enabled: true },
           { publiclyListed: true },
-          { status: { not: "disabled" } },
+          { status: { not: model.status } },
         ],
       },
       data: {
         enabled: false,
         publiclyListed: false,
-        status: "disabled",
+        status: model.status,
         ...(model.replacementModelId
           ? { replacementModelId: model.replacementModelId }
           : {}),
@@ -183,9 +192,10 @@ async function applyStaticRetirements() {
 
     if (result.count > 0) {
       console.warn(
-        "Model registry: applied static catalog retirement to runtime row.",
+        "Model registry: applied static catalog withdrawal to runtime row.",
         {
           modelId: model.id,
+          status: model.status,
           replacementModelId: model.replacementModelId ?? null,
         }
       );
@@ -198,7 +208,7 @@ export async function ensureModelRegistrySeeded() {
   if (!bootstrapPromise) {
     bootstrapPromise = prisma.modelRegistryEntry
       .createMany({ data: staticSeedRows(), skipDuplicates: true })
-      .then(() => applyStaticRetirements())
+      .then(() => applyStaticWithdrawals())
       .catch((error) => {
         bootstrapPromise = null;
         throw error;

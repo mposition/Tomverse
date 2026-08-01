@@ -207,14 +207,21 @@ test("retired models stay out of the user model catalogue", async ({ page }) => 
       dialog.locator(`[data-testid="model-option"][data-model-id="${retiredModelId}"]`)
     ).toHaveCount(0);
   }
-  // Grok 4.5 is the one xAI model that survives, and Kimi K3 joins the
-  // catalogue alongside the coding-specialised Kimi K2.7 rather than
-  // replacing it.
-  for (const liveModelId of ["grok-4-5", "kimi-k3", "kimi-k2.7-code"]) {
+  // Grok 4.5 is the one xAI model that survives, and Kimi K2.7 keeps its
+  // place.
+  for (const liveModelId of ["grok-4-5", "kimi-k2.7-code"]) {
     await expect(
       dialog.locator(`[data-testid="model-option"][data-model-id="${liveModelId}"]`)
     ).toHaveCount(1);
   }
+  // Kimi K3's id is registered but the model is withheld until its unit
+  // economics are settled, so it must not reach the picker -- and it must not
+  // be teased there either, since a listed-but-unselectable entry is a
+  // promise the catalogue cannot keep.
+  await expect(
+    dialog.locator('[data-testid="model-option"][data-model-id="kimi-k3"]')
+  ).toHaveCount(0);
+  await expect(dialog.getByText(/kimi k3/i)).toHaveCount(0);
   // GPT-OSS is Groq's suggested Llama successor and is deliberately not
   // adopted, so nothing in the catalogue may advertise it.
   await expect(dialog.getByText(/gpt-?oss/i)).toHaveCount(0);

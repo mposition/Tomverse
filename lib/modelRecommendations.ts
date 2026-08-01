@@ -88,7 +88,6 @@ const USE_CASE_CANDIDATES: Record<
     "deepseek-r1",
     "gemini-3-1-pro",
     "mistral-large-3",
-    "kimi-k3",
   ],
   multimodal: [
     "gemini-3-5-flash",

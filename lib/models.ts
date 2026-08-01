@@ -229,17 +229,43 @@ export const AVAILABLE_MODELS = [
     // Kimi K3 is a separate model from kimi-k2.7-code, not a rename of it:
     // K2.7 stays listed as the coding-specialised Free model.
     //
-    // Only fields confirmed in Moonshot's own model documentation are set
-    // here (github.com/MoonshotAI/Kimi-K3): the API model id `kimi-k3`, the
-    // 1,048,576-token context window, native image input, and always-on
-    // thinking. `reasoning` is the catalogue's capability signal, and "high"
-    // is the closest value this type allows to Moonshot's reasoning_effort
-    // default of "max"; the OpenAI-compatible adapter does not send the field,
-    // so the provider's own default applies. Token prices, cached-input price
-    // and the output cap are NOT published in that documentation, so they are
-    // deliberately left to the usage-class defaults rather than guessed --
-    // see the task report for the outstanding verification.
-    { id: "kimi-k3", name: "Kimi K3", apiModel: "kimi-k3", provider: "moonshot", icon: "KM", bestFor: "Long-context reasoning across text and images", minimumPlan: "Pro", usageClass: "premium-reasoning", enabled: true, status: "enabled", reasoning: "high", contextWindowTokens: 1_048_576, inputCapabilities: { image: true, nativePdf: false } },
+    // NOT LAUNCHED. The entry exists so the id is registered and reviewable,
+    // but it is delisted, disabled and status "coming-soon" -- never offered,
+    // never callable -- because its unit economics are not established. Only
+    // the capability fields below are confirmed by Moonshot's own model
+    // documentation (github.com/MoonshotAI/Kimi-K3): the API model id
+    // `kimi-k3`, the 1,048,576-token context window, native image input, and
+    // always-on thinking. Token prices, cached-input price and the output cap
+    // are NOT published there, so nothing here may be read as a price.
+    //
+    // Do not set enabled/status to "enabled" until all of these are done:
+    //
+    //  1. Official Moonshot price profile registered in MODEL_BILLING_DEFAULTS
+    //     (input, cached input, output), the way grok-4-5 is.
+    //  2. The reasoning effort ordinary chat sends is explicit. Today the
+    //     chat route sends none, so Moonshot's default ("max") applies to a
+    //     model that always thinks -- see the AiModel.reasoning note.
+    //  3. maxOutputTokens set from the published cap instead of the premium
+    //     cost class's 8_192.
+    //  4. `reasoning_content` handling verified end to end. It is currently
+    //     neither captured nor stored: the chat route consumes only
+    //     result.textStream, and Message has no column for it, so thinking
+    //     tokens are paid for and discarded, and follow-up turns cannot
+    //     carry them.
+    //  5. Real Korean-language requests measured for cache hit/miss and
+    //     reasoning-token cost.
+    //  6. Economics checked against Max, annual and the 50% promotion, not
+    //     Pro list price alone.
+    //  7. Long inputs charged from real reserved cost. INPUT_CREDIT_MULTIPLIERS
+    //     tops out at a flat 3x above 100K tokens, which on a 1M-token context
+    //     window charges a 900K-token request exactly what it charges a 101K
+    //     one.
+    //
+    // `usageClass: "premium-reasoning"` (16 credits) is a placeholder that is
+    // only defensible for a short, low-effort Pro request. Splitting the SKU
+    // by effort, or pricing long context dynamically, is the open product
+    // decision -- see the task report.
+    { id: "kimi-k3", name: "Kimi K3", apiModel: "kimi-k3", provider: "moonshot", icon: "KM", bestFor: "Long-context reasoning across text and images", minimumPlan: "Pro", usageClass: "premium-reasoning", publiclyListed: false, enabled: false, status: "coming-soon", reasoning: "high", contextWindowTokens: 1_048_576, inputCapabilities: { image: true, nativePdf: false } },
     { id: "qwen3.7-max", name: "Qwen 3.7 Max", apiModel: "qwen3.7-max", provider: "qwen", icon: "QW", bestFor: "Demanding multilingual reasoning and complex instructions", minimumPlan: "Pro", usageClass: "premium", enabled: true, status: "enabled" },
     { id: "qwen3.7-plus", name: "Qwen 3.7 Plus", apiModel: "qwen3.7-plus", provider: "qwen", icon: "QW", bestFor: "Balanced multilingual analysis and business writing", minimumPlan: "Free", usageClass: "advanced", enabled: true, status: "enabled" },
     { id: "qwen3.6-flash", name: "Qwen 3.6", apiModel: "qwen3.6-flash", provider: "qwen", icon: "QW", bestFor: "Fast multilingual questions and translation", minimumPlan: "Guest", usageClass: "standard", enabled: true, status: "enabled" },
@@ -594,6 +620,31 @@ export const isRetiredModel = (
     model.enabled === false &&
     model.publiclyListed === false &&
     model.status === "disabled";
+
+/**
+ * A model registered but never launched: the id is reserved and reviewable,
+ * but the model has not cleared whatever gate it needs (unit economics,
+ * provider verification) and must not be offered or called. The mirror image
+ * of retirement -- not yet, rather than no longer.
+ */
+export const isPreLaunchModel = (
+    model: Pick<AiModel, "enabled" | "publiclyListed" | "status">
+) =>
+    model.enabled === false &&
+    model.publiclyListed === false &&
+    model.status === "coming-soon";
+
+/**
+ * A model the checked-in catalogue says must not be offered, whichever end of
+ * its life that is. `lib/modelRegistry.ts` replays exactly this set onto the
+ * runtime registry on every bootstrap, so a row that already exists cannot
+ * keep offering a model the catalogue has since withdrawn -- the defect that
+ * kept a retired model selectable, which a pre-launch model would hit the same
+ * way if a build that had it enabled reached an environment first.
+ */
+export const isWithdrawnFromOfferModel = (
+    model: Pick<AiModel, "enabled" | "publiclyListed" | "status">
+) => isRetiredModel(model) || isPreLaunchModel(model);
 
 /**
  * Whether a model may be offered to users -- listed in the picker and
