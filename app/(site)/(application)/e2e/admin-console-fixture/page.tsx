@@ -8,7 +8,12 @@ import {
   type RefundRequestRow,
 } from "@/components/admin/RefundRequestsPanel";
 import type { AdminSecurityUser } from "@/components/admin/AdminUserSecurityControls";
+import { AdminProviderHealthPanel } from "@/components/admin/AdminProviderHealthPanel";
 import { isE2EFixtureMode } from "@/lib/e2eTestMode";
+import {
+  providerHealthFixture,
+  type ProviderHealthFixtureState,
+} from "./providerHealthFixture";
 import { AdminUserSecurityHarness } from "./AdminUserSecurityHarness";
 
 export const dynamic = "force-dynamic";
@@ -119,7 +124,15 @@ export default async function AdminConsoleFixturePage({
   //   security (default) - the customer security controls only
   //   narrow             - adds the two other panels with a `datetime-local`
   //   toasts             - adds the panels whose result copy is under test
+  //   provider-health    - the provider verification and recovery controls
   const view = single(params.view) || "security";
+  // The verification and recovery controls read the provider's public status,
+  // its failure count and its last verification result, so the state is chosen
+  // per test rather than baked in. `canRunVerification` is the ops:write gate
+  // the real console passes; the spec drives both values.
+  const providerHealthState = (single(params.providerState) ||
+    "incident") as ProviderHealthFixtureState;
+  const canRunVerification = single(params.canVerify) !== "false";
 
   return (
     <AdminConsoleShell
@@ -145,6 +158,16 @@ export default async function AdminConsoleFixturePage({
         <section className="mt-4 flex flex-col gap-4">
           <AdminPrivacyRequestsPanel />
           <AdminOperationalReadinessPanel />
+        </section>
+      ) : null}
+      {view === "provider-health" ? (
+        <section className="mt-4 flex flex-col gap-4">
+          <AdminProviderHealthPanel
+            initialDashboard={providerHealthFixture(providerHealthState)}
+            canManageCredits={false}
+            canRunVerification={canRunVerification}
+            providerFilter="perplexity"
+          />
         </section>
       ) : null}
       {view === "toasts" ? (
