@@ -35,6 +35,12 @@ const VIEWPORTS = [
 const LOCALES = ["ko", "en"] as const;
 const ROOT_FONT_SIZES = [16, 20, 24, 32] as const;
 
+// These cells measure the banner in its *tallest realistic* shape for a guest:
+// an outage on a selected model, with a replacement the guest can actually
+// take. The replacement has to be guest-selectable -- it was mistral-medium-3-1
+// (Free tier) until the banner started filtering candidates by entitlement, at
+// which point this snapshot silently collapsed into the no-replacement state
+// and stopped measuring the swap button at all.
 const OUTAGE_SNAPSHOT = {
   generatedAt: "2099-01-01T00:00:00.000Z",
   models: [
@@ -42,8 +48,15 @@ const OUTAGE_SNAPSHOT = {
       id: "gemini-2-5-flash",
       provider: "google",
       status: "unavailable",
-      fallbackModelIds: ["mistral-medium-3-1"],
+      fallbackModelIds: ["deepseek-v4-flash"],
       fallbackHealth: "operational",
+    },
+    {
+      id: "deepseek-v4-flash",
+      provider: "deepseek",
+      status: "available",
+      fallbackModelIds: [],
+      fallbackHealth: "none",
     },
   ],
 };
