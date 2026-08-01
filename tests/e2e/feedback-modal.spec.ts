@@ -1127,11 +1127,11 @@ test.describe("diagnostics disclosure", () => {
     // Not hidden behind the scenes: the preview is in the dialog.
     const preview = page.getByTestId("feedback-diagnostics");
     await expect(preview).toBeVisible();
-    await preview.getByRole("group").or(preview).first().click();
+    await preview.click();
     const body = page.getByTestId("feedback-diagnostics-body");
     await expect(body).toBeVisible();
 
-    const shown = await body.innerText();
+    const shown = await body.inputValue();
     // The key is gone even though no pattern in the denylist matches it.
     expect(shown).not.toContain(fakeGoogleKey());
     expect(shown).toContain("[redacted]");
@@ -1146,7 +1146,7 @@ test.describe("diagnostics disclosure", () => {
 
     const body = page.getByTestId("feedback-diagnostics-body");
     await page.getByTestId("feedback-diagnostics").click();
-    const shown = (await body.innerText()).trim();
+    const shown = (await body.inputValue()).trim();
 
     await page.getByTestId("feedback-submit").click();
     await expect(page.getByTestId("feedback-dialog")).toBeHidden();
@@ -1154,5 +1154,48 @@ test.describe("diagnostics disclosure", () => {
     const sent = feedback.requests[0].message;
     expect(sent).toContain(shown);
     expect(sent).not.toContain(fakeGoogleKey());
+  });
+
+  test("the user can delete what the sanitiser could not recognise", async ({
+    page,
+  }) => {
+    // The complete answer to "a pattern cannot know what it missed": a short
+    // secret no detector can separate from ordinary text is still removable,
+    // because the field is the user's to edit.
+    await seedErrorWithSecret(page);
+    const feedback = await mockFeedbackApi(page);
+
+    await page.getByTestId("feedback-diagnostics").click();
+    const body = page.getByTestId("feedback-diagnostics-body");
+    await body.fill("Provider error. (details removed by the reporter)");
+
+    await page.getByTestId("feedback-submit").click();
+    await expect(page.getByTestId("feedback-dialog")).toBeHidden();
+
+    const sent = feedback.requests[0].message;
+    expect(sent).toContain("details removed by the reporter");
+    // The original diagnostics, sanitised or not, are gone.
+    expect(sent).not.toContain("0d1f6b1e-9a2c-4d3f-8b7a-5c6d7e8f9012");
+  });
+
+  test("the diagnostics can be dropped entirely", async ({ page }) => {
+    await seedErrorWithSecret(page);
+    const feedback = await mockFeedbackApi(page);
+
+    await page.getByTestId("feedback-diagnostics").click();
+    await page.getByTestId("feedback-diagnostics-attach").uncheck();
+    await expect(page.getByTestId("feedback-diagnostics-body")).toBeHidden();
+    await expect(page.getByTestId("feedback-diagnostics-omitted")).toBeVisible();
+
+    // The report still submits -- the default description satisfies the
+    // five-character contract on its own.
+    await expect(page.getByTestId("feedback-submit")).toBeEnabled();
+    await page.getByTestId("feedback-submit").click();
+    await expect(page.getByTestId("feedback-dialog")).toBeHidden();
+
+    const sent = feedback.requests[0].message;
+    expect(sent.trim().length).toBeGreaterThanOrEqual(5);
+    expect(sent).not.toContain("Provider error");
+    expect(sent).not.toContain("0d1f6b1e-9a2c-4d3f-8b7a-5c6d7e8f9012");
   });
 });
