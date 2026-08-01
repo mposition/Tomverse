@@ -43,10 +43,13 @@ export function AppToastViewport() {
   // viewport inside MarketingProviders for the same reason.
   const { t } = useLanguage();
   const [toasts, setToasts] = useState<AppToastItem[]>([]);
-  // Exposed as `data-ready` below. The listener is registered in an effect, so
-  // an event dispatched between first paint and hydration is genuinely lost --
-  // tests have to wait for this rather than for the element, or they race.
-  const [isListening, setIsListening] = useState(false);
+  // Marked on the container as `data-ready` once the listener is actually
+  // registered. Registration happens in an effect, so an event dispatched
+  // between first paint and hydration is genuinely lost -- a test that waits
+  // for the element alone races hydration instead of testing the contract.
+  // Written straight to the node rather than held in state: it is a readiness
+  // marker, not something the rendered output depends on.
+  const viewportRef = useRef<HTMLDivElement | null>(null);
   const timersRef = useRef(new Map<string, ReturnType<typeof setTimeout>>());
 
   const dismiss = useCallback((id: string) => {
@@ -80,9 +83,10 @@ export function AppToastViewport() {
     };
 
     window.addEventListener(APP_TOAST_EVENT, handleToast);
-    setIsListening(true);
+    const viewport = viewportRef.current;
+    if (viewport) viewport.dataset.ready = "true";
     return () => {
-      setIsListening(false);
+      if (viewport) viewport.dataset.ready = "false";
       window.removeEventListener(APP_TOAST_EVENT, handleToast);
       // A shell can unmount mid-flight (navigation, sign-out). Leaving timers
       // armed would call setState on an unmounted tree.
@@ -97,8 +101,9 @@ export function AppToastViewport() {
     // is bottom-anchored and right-aligned from `sm` up, clear of the console's
     // primary actions. `w-[min(...)]` keeps it inside a 320px viewport.
     <div
+      ref={viewportRef}
       data-testid="app-toast-viewport"
-      data-ready={isListening ? "true" : "false"}
+      data-ready="false"
       className="pointer-events-none fixed inset-x-0 bottom-0 z-[95] flex flex-col items-center gap-2 px-4 pb-[calc(1rem+env(safe-area-inset-bottom))] empty:hidden sm:items-end sm:px-6"
     >
       {toasts.map((toast) => (
