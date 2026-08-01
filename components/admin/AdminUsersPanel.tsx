@@ -15,6 +15,7 @@ import {
   X,
 } from "lucide-react";
 import { dispatchAppToast } from "@/lib/appToast";
+import { adminDateTimeLabel as dateTimeLabel } from "@/lib/adminDateTime";
 import { buildPlanAdjustPayload } from "@/lib/adminPlanAdjustCore";
 import type {
   AdminUserRow,
@@ -24,6 +25,10 @@ import type {
 import { formatBillingMinor, normalizeBillingCurrency } from "@/lib/billingMarkets";
 import { AdminNotesBox } from "@/components/admin/AdminNotesBox";
 import { AdminUserDeleteButton } from "@/components/admin/AdminUserDeleteButton";
+import {
+  AdminUserSecurityControls,
+  toAdminSecurityUser,
+} from "@/components/admin/AdminUserSecurityControls";
 
 type Props = {
   rows: AdminUserRow[];
@@ -61,6 +66,8 @@ type AdminUserDetail = {
   billingRiskReason: string | null;
   billingRiskAt: string | null;
   accountStatus: string;
+  accountDeletionRequestedAt: string | null;
+  accountDeletionScheduledFor: string | null;
   accountSuspendedAt: string | null;
   accountSuspendedUntil: string | null;
   accountSuspensionReason: string | null;
@@ -198,29 +205,6 @@ const planClass = (plan: string | null | undefined) => {
   return "border-emerald-500/30 bg-emerald-500/10 text-emerald-200";
 };
 
-const dateTimeLabel = (
-  value: string | null | undefined,
-  timeZone = "UTC"
-) => {
-  if (!value) return "-";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "-";
-  try {
-    return new Intl.DateTimeFormat("en-CA", {
-      timeZone,
-      year: "numeric",
-      month: "2-digit",
-      day: "2-digit",
-      hour: "2-digit",
-      minute: "2-digit",
-      hourCycle: "h23",
-      timeZoneName: "short",
-    }).format(date);
-  } catch {
-    return date.toISOString().replace("T", " ").slice(0, 16) + " UTC";
-  }
-};
-
 const segmentLabels: Record<AdminUserSegment, string> = {
   all: "All accounts",
   free: "Free access",
@@ -264,10 +248,6 @@ export function AdminUsersPanel({
   const [riskReleaseConfirm, setRiskReleaseConfirm] = useState("");
   const [creditRefundReasons, setCreditRefundReasons] = useState<Record<string, string>>({});
   const [creditRefundConfirms, setCreditRefundConfirms] = useState<Record<string, string>>({});
-  const [securityReason, setSecurityReason] = useState("");
-  const [securityUntil, setSecurityUntil] = useState("");
-  const [securityIncidentNote, setSecurityIncidentNote] = useState("");
-  const [securityTicketReference, setSecurityTicketReference] = useState("");
   const [segment, setSegment] = useState<AdminUserSegment>(initialSegment);
   const [pageSize, setPageSize] = useState<PageSize>(initialPageSize);
   const [pageIndex, setPageIndex] = useState(initialPageIndex);
@@ -589,81 +569,6 @@ export function AdminUsersPanel({
     } catch (error) {
       dispatchAppToast(
         error instanceof Error ? error.message : "Credit purchase refund failed.",
-        "error"
-      );
-    } finally {
-      setBillingAction(null);
-    }
-  };
-
-  const applySecurityAction = async (
-    userId: string,
-    action:
-      | "suspend"
-      | "unsuspend"
-      | "revoke_sessions"
-      | "restrict_ai"
-      | "unrestrict_ai"
-      | "unlink_oauth"
-      | "restore_account",
-    provider?: string
-  ) => {
-    if (billingAction) return;
-    if (securityReason.trim().length < 5) {
-      dispatchAppToast("Enter an audit reason of at least five characters.", "error");
-      return;
-    }
-    if (action === "restore_account" && securityTicketReference.trim().length < 3) {
-      dispatchAppToast("Enter the support ticket reference to restore this account.", "error");
-      return;
-    }
-    setBillingAction(`security:${action}${provider ? `:${provider}` : ""}`);
-    try {
-      const response = await fetch(
-        `/api/admin/users/${encodeURIComponent(userId)}/security`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            action,
-            reason: securityReason,
-            until: securityUntil ? new Date(securityUntil).toISOString() : null,
-            incidentNote: securityIncidentNote.trim() || null,
-            provider: provider || null,
-            supportTicketReference:
-              action === "restore_account" ? securityTicketReference.trim() : null,
-          }),
-        }
-      );
-      const data = (await response.json().catch(() => null)) as
-        | {
-            user?: Partial<AdminUserDetail>;
-            error?: string;
-            approvalId?: string;
-            alreadyRestored?: boolean;
-          }
-        | null;
-      if (!response.ok || !data?.user) {
-        throw new Error(
-          data?.approvalId
-            ? `${data.error || "A second administrator must approve this action."} Approval ${data.approvalId}`
-            : data?.error || "Security control failed."
-        );
-      }
-      await loadUserDetail(userId);
-      setSecurityReason("");
-      setSecurityUntil("");
-      setSecurityIncidentNote("");
-      setSecurityTicketReference("");
-      dispatchAppToast(
-        data.alreadyRestored
-          ? "Account was already active -- no change made."
-          : "User security control applied.",
-        "success"
-      );
-    } catch (error) {
-      dispatchAppToast(
-        error instanceof Error ? error.message : "Security control failed.",
         "error"
       );
     } finally {
@@ -1068,132 +973,12 @@ export function AdminUsersPanel({
             </div>
 
             <div className="grid gap-4 px-5 pb-5 lg:grid-cols-2">
-              <section className={`rounded-2xl border p-4 lg:col-span-2 ${
-                detailUser.accountStatus === "suspended" || detailUser.aiUsageRestricted
-                  ? "border-amber-500/30 bg-amber-500/10"
-                  : "border-zinc-800 bg-zinc-900/60"
-              }`}>
-                <div className="flex flex-wrap items-start justify-between gap-3">
-                  <div>
-                    <h4 className="font-black text-white">Account security controls</h4>
-                    <p className="mt-1 text-xs text-zinc-400">
-                      Last login: {dateTimeLabel(detailUser.lastLoginAt, detailUser.usage.timeZone)} · Active sessions: {detailUser._count.sessions}
-                    </p>
-                  </div>
-                  <div className="flex flex-wrap gap-2 text-xs font-bold">
-                    <span className={`rounded-full border px-2.5 py-1 ${
-                      detailUser.accountStatus === "suspended"
-                        ? "border-red-500/30 bg-red-500/10 text-red-200"
-                        : "border-emerald-500/30 bg-emerald-500/10 text-emerald-200"
-                    }`}>
-                      Account {detailUser.accountStatus}
-                    </span>
-                    <span className={`rounded-full border px-2.5 py-1 ${
-                      detailUser.aiUsageRestricted
-                        ? "border-amber-500/30 bg-amber-500/10 text-amber-200"
-                        : "border-zinc-700 text-zinc-300"
-                    }`}>
-                      AI {detailUser.aiUsageRestricted ? "restricted" : "allowed"}
-                    </span>
-                  </div>
-                </div>
-                {detailUser.accountSuspensionReason || detailUser.aiUsageRestrictionReason ? (
-                  <div className="mt-3 rounded-xl border border-zinc-800 bg-zinc-950 p-3 text-xs text-zinc-400">
-                    {detailUser.accountSuspensionReason ? (
-                      <p>Suspension: {detailUser.accountSuspensionReason} · until {dateTimeLabel(detailUser.accountSuspendedUntil, detailUser.usage.timeZone)}</p>
-                    ) : null}
-                    {detailUser.aiUsageRestrictionReason ? (
-                      <p>AI restriction: {detailUser.aiUsageRestrictionReason} · until {dateTimeLabel(detailUser.aiUsageRestrictedUntil, detailUser.usage.timeZone)}</p>
-                    ) : null}
-                    {detailUser.securityIncidentNote ? <p className="mt-1 text-zinc-300">Incident note: {detailUser.securityIncidentNote}</p> : null}
-                  </div>
-                ) : null}
-                <div className="mt-4 grid gap-2 md:grid-cols-3">
-                  <input
-                    value={securityReason}
-                    onChange={(event) => setSecurityReason(event.target.value)}
-                    placeholder="Required audit reason"
-                    className="h-10 rounded-xl border border-zinc-700 bg-zinc-950 px-3 text-sm text-white outline-none focus:border-blue-400 md:col-span-2"
-                  />
-                  <input
-                    type="datetime-local"
-                    value={securityUntil}
-                    onChange={(event) => setSecurityUntil(event.target.value)}
-                    aria-label="Optional security control expiry"
-                    className="h-10 rounded-xl border border-zinc-700 bg-zinc-950 px-3 text-sm text-white outline-none focus:border-blue-400"
-                  />
-                  <input
-                    value={securityIncidentNote}
-                    onChange={(event) => setSecurityIncidentNote(event.target.value)}
-                    placeholder="Optional security incident note"
-                    className="h-10 rounded-xl border border-zinc-700 bg-zinc-950 px-3 text-sm text-white outline-none focus:border-blue-400 md:col-span-3"
-                  />
-                  {detailUser.accountStatus === "pending_deletion" && (
-                    <input
-                      value={securityTicketReference}
-                      onChange={(event) => setSecurityTicketReference(event.target.value)}
-                      placeholder="Support ticket reference (required to restore)"
-                      className="h-10 rounded-xl border border-zinc-700 bg-zinc-950 px-3 text-sm text-white outline-none focus:border-blue-400 md:col-span-3"
-                    />
-                  )}
-                </div>
-                <div className="mt-3 flex flex-wrap gap-2">
-                  {detailUser.accountStatus === "pending_deletion" ? (
-                    <button
-                      type="button"
-                      onClick={() => applySecurityAction(detailUser.id, "restore_account")}
-                      disabled={Boolean(billingAction)}
-                      className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-xs font-bold text-emerald-100 hover:bg-emerald-500/20 disabled:opacity-50"
-                    >
-                      Cancel deletion & restore account
-                    </button>
-                  ) : (
-                    <button
-                      type="button"
-                      onClick={() => applySecurityAction(detailUser.id, detailUser.accountStatus === "suspended" ? "unsuspend" : "suspend")}
-                      disabled={Boolean(billingAction)}
-                      className="rounded-xl border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs font-bold text-red-100 hover:bg-red-500/20 disabled:opacity-50"
-                    >
-                      {detailUser.accountStatus === "suspended" ? "Unsuspend account" : "Suspend account"}
-                    </button>
-                  )}
-                  <button
-                    type="button"
-                    onClick={() => applySecurityAction(detailUser.id, detailUser.aiUsageRestricted ? "unrestrict_ai" : "restrict_ai")}
-                    disabled={Boolean(billingAction)}
-                    className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs font-bold text-amber-100 hover:bg-amber-500/20 disabled:opacity-50"
-                  >
-                    {detailUser.aiUsageRestricted ? "Restore AI usage" : "Restrict AI usage"}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => applySecurityAction(detailUser.id, "revoke_sessions")}
-                    disabled={Boolean(billingAction)}
-                    className="rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2 text-xs font-bold text-white hover:bg-zinc-800 disabled:opacity-50"
-                  >
-                    Revoke all sessions
-                  </button>
-                </div>
-                {detailUser.accounts.length > 0 ? (
-                  <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-zinc-800 pt-3">
-                    <span className="text-xs font-bold text-zinc-500">Unlink OAuth (owner + two-person approval):</span>
-                    {detailUser.accounts.map((account) => (
-                      <button
-                        key={`unlink-${account.provider}-${account.providerAccountId}`}
-                        type="button"
-                        onClick={() => applySecurityAction(detailUser.id, "unlink_oauth", account.provider)}
-                        disabled={Boolean(billingAction)}
-                        className="rounded-lg border border-red-500/30 px-2.5 py-1.5 text-xs font-bold text-red-200 hover:bg-red-500/10 disabled:opacity-50"
-                      >
-                        Unlink {account.provider}
-                      </button>
-                    ))}
-                  </div>
-                ) : null}
-                <p className="mt-3 text-xs text-zinc-500">
-                  High-risk controls require a recent administrator login. Sign in again if the console requests reauthentication.
-                </p>
-              </section>
+              <AdminUserSecurityControls
+                user={toAdminSecurityUser(detailUser)}
+                busy={Boolean(billingAction)}
+                onBusyChange={(busy) => setBillingAction(busy ? "security" : null)}
+                onApplied={() => loadUserDetail(detailUser.id)}
+              />
 
               <section className={`rounded-2xl border p-4 lg:col-span-2 ${
                 detailUser.billingRiskStatus === "disputed_hold" || detailUser.creditDebtCredits > 0

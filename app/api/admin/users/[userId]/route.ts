@@ -75,6 +75,8 @@ export async function GET(req: Request, context: RouteContext) {
           billingRiskReason: true,
           billingRiskAt: true,
           accountStatus: true,
+          accountDeletionRequestedAt: true,
+          accountDeletionScheduledFor: true,
           accountSuspendedAt: true,
           accountSuspendedUntil: true,
           accountSuspensionReason: true,
@@ -285,6 +287,10 @@ export async function GET(req: Request, context: RouteContext) {
         ...user,
         creditDebtCostMicroUsd: Number(user.creditDebtCostMicroUsd),
         billingRiskAt: user.billingRiskAt?.toISOString() || null,
+        accountDeletionRequestedAt:
+          user.accountDeletionRequestedAt?.toISOString() || null,
+        accountDeletionScheduledFor:
+          user.accountDeletionScheduledFor?.toISOString() || null,
         accountSuspendedAt: user.accountSuspendedAt?.toISOString() || null,
         accountSuspendedUntil: user.accountSuspendedUntil?.toISOString() || null,
         aiUsageRestrictedAt: user.aiUsageRestrictedAt?.toISOString() || null,
