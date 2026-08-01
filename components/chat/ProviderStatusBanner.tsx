@@ -29,6 +29,17 @@ type ProviderStatusBannerProps = {
   compact?: boolean;
   onSwapModel?: (removeModelId: string, addModelId: string) => void;
   /**
+   * Whether this viewer may actually select a model, given their plan and
+   * guest limits. `/api/models/status` is public and cached, so it cannot
+   * know -- its `fallbackModelIds` are entitlement-blind and have to be
+   * narrowed here before any of them is offered as a one-click switch.
+   * Offering an unaffordable model would send the user into the upgrade
+   * prompt instead of onto a working model; when nothing they can run is
+   * left the banner falls through to the picker action, which is a real
+   * recovery path.
+   */
+  canSelectModel?: (modelId: string) => boolean;
+  /**
    * PROV-BANNER-001. The tallest this banner may be, in CSS pixels, measured by
    * the shell that owns the layout against the *visible* viewport rather than
    * the layout one. Null keeps the `dvh` fallback below, which is correct
@@ -111,6 +122,7 @@ export function ProviderStatusBanner({
   selectedModels = [],
   compact = false,
   onSwapModel,
+  canSelectModel,
   maxHeight = null,
 }: ProviderStatusBannerProps) {
   const { models: AVAILABLE_MODELS, publicModels: PUBLIC_MODELS } = useModelCatalog();
@@ -226,7 +238,8 @@ export function ProviderStatusBanner({
         (id) =>
           !selectedSet.has(id) &&
           !claimed.has(id) &&
-          statusById.get(id) !== "unavailable"
+          statusById.get(id) !== "unavailable" &&
+          (canSelectModel?.(id) ?? true)
       );
       if (addModelId) claimed.add(addModelId);
       return {
@@ -257,7 +270,7 @@ export function ProviderStatusBanner({
             : "operational";
 
     return { impacted, recoveries, fallbackHealth };
-  }, [models, selectedModels]);
+  }, [canSelectModel, models, selectedModels]);
 
   const hasImpact = bannerState.impacted.length > 0;
 

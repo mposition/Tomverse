@@ -4,6 +4,7 @@ import { randomUUID } from "node:crypto";
 import { generateText, Output } from "ai";
 import { z } from "zod";
 import { getActiveAiModel } from "@/lib/activeAiModel";
+import { getModelGenerationSettings } from "@/lib/modelGenerationCompatibility";
 import {
   accessibleQuickReviewers,
   buildQuickComparisonSummaryPrompt,
@@ -225,7 +226,7 @@ export async function POST(request: Request) {
               system: summaryPrompt.system,
               prompt: summaryPrompt.prompt,
               output: Output.object({ schema: quickComparisonSummaryResultSchema }),
-              temperature: 0.1,
+              ...getModelGenerationSettings(candidate, { temperature: 0.1 }),
               maxOutputTokens: budget.maxOutputTokens,
               maxRetries: 1,
               abortSignal: AbortSignal.timeout(35_000),

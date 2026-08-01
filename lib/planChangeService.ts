@@ -540,6 +540,10 @@ export async function confirmPlanChange({
         where: { id: stored.id },
         data: {
           status: "pending",
+          // Set together with the status, always. The unique index on this
+          // column is the only thing standing between two racing confirms and
+          // two competing changes to one subscription.
+          pendingForUserId: userId,
           confirmedAt: new Date(),
           renewalDecision: decision.plan.renewal,
         },
@@ -556,6 +560,7 @@ export async function confirmPlanChange({
       where: { id: stored.id },
       data: {
         status: "pending",
+        pendingForUserId: userId,
         confirmedAt: new Date(),
         stripeScheduleId: scheduleId,
         appliesAt: decision.plan.effectiveAt,
@@ -723,7 +728,9 @@ export async function cancelScheduledPlanChange({
 
   await prisma.planChangeRequest.updateMany({
     where: { id: row.id, status: "pending" },
-    data: { status: "cancelled", settledAt: new Date() },
+    // Cleared with the status: a settled row must not keep the account's one
+    // in-flight slot, or the customer could never request another change.
+    data: { status: "cancelled", pendingForUserId: null, settledAt: new Date() },
   });
   return { ok: true };
 }
@@ -818,6 +825,7 @@ export async function settlePlanChangesForSubscription(
       where: { id: row.id, status: "pending" },
       data: {
         status: next,
+        pendingForUserId: null,
         settledAt: new Date(),
         ...(next === "failed" ? { failureCode: "pending_update_discarded" } : {}),
       },

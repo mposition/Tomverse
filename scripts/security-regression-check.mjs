@@ -739,7 +739,7 @@ const checks = [
       const signup = read("app/(site)/(application)/auth/signin/SignInPageContent.tsx");
       const chatInput = read("components/chat/ChatInput.tsx");
       const migration = read(
-        "prisma/migrations/20260714233000_expand_product_analytics_funnel/migration.sql"
+        "prisma/migrations/00000000000000_baseline/migration.sql"
       );
       const purchase = read("lib/stripeWebhookProcessing.ts");
       return (
@@ -777,10 +777,16 @@ const checks = [
       const input = read("components/chat/ChatInput.tsx");
       const schema = read("prisma/schema.prisma");
       const migration = read(
-        "prisma/migrations/20260715093000_add_model_finder_preferences/migration.sql"
+        "prisma/migrations/00000000000000_baseline/migration.sql"
       );
+      // Migration assertions split by what they are actually about. Anything
+      // structural -- a table, a column, a CHECK constraint -- is read from
+      // prisma/migrations/00000000000000_baseline, because that is what a
+      // freshly provisioned database gets. One-off ALTER and data steps only
+      // ever existed in the replaced history, so they are read from
+      // prisma/migrations-archive/, which is frozen.
       const dismissalMigration = read(
-        "prisma/migrations/20260715220000_add_model_finder_dismissed_at/migration.sql"
+        "prisma/migrations-archive/20260715220000_add_model_finder_dismissed_at/migration.sql"
       );
       return (
         source.includes("getServerSession(authOptions)") &&
@@ -864,7 +870,7 @@ const checks = [
   },
   {
     name: "TOMVERSE50 is bounded, advertised from live config, and auto-validated",
-    file: "prisma/migrations/20260714190000_configure_tomverse50_public_launch/migration.sql",
+    file: "prisma/migrations-archive/20260714190000_configure_tomverse50_public_launch/migration.sql",
     test: (source) =>
       source.includes("'TOMVERSE50'") &&
       source.includes('"discountPercent" = 50') &&
@@ -882,7 +888,7 @@ const checks = [
   },
   {
     name: "TOMFRIEND100 is a bounded 60-day non-renewing Pro pass",
-    file: "prisma/migrations/20260716150000_founding_tester_pass/migration.sql",
+    file: "prisma/migrations-archive/20260716150000_founding_tester_pass/migration.sql",
     test: (source) => {
       const checkout = read("app/api/billing/checkout/route.ts");
       const maintenance = read("lib/maintenance.ts");
@@ -1257,7 +1263,7 @@ const checks = [
     test: (source) => {
       const shared = read("lib/productAnalyticsShared.ts");
       const migration = read(
-        "prisma/migrations/20260726120000_add_model_picker_funnel_events/migration.sql"
+        "prisma/migrations/00000000000000_baseline/migration.sql"
       );
       const searchTracking = source.slice(
         source.indexOf("const handleSearchChange"),
@@ -1753,7 +1759,7 @@ const checks = [
       ) &&
       read("prisma/schema.prisma").includes("model CreditDebtEntry") &&
       read(
-        "prisma/migrations/20260715193000_add_credit_debt_and_billing_risk/migration.sql"
+        "prisma/migrations/00000000000000_baseline/migration.sql"
       ).includes('CREATE TABLE "CreditDebtEntry"'),
   },
   {
@@ -1802,7 +1808,7 @@ const checks = [
     test: (source) => {
       const schema = read("prisma/schema.prisma");
       const migration = read(
-        "prisma/migrations/20260715213000_add_durable_chat_credit_reservations/migration.sql"
+        "prisma/migrations/00000000000000_baseline/migration.sql"
       );
       return (
         schema.includes("model ChatCreditReservation") &&

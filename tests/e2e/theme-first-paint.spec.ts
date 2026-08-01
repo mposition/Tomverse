@@ -124,20 +124,6 @@ function expectNoFlash(observation: ThemeObservation, label: string) {
 const DARK_BACKGROUND = "rgb(10, 10, 10)";
 const LIGHT_BACKGROUND = "rgb(255, 255, 255)";
 
-/**
- * Below `lg`, MarketingChrome's top menu is `hidden` and reachable only through
- * `marketing-menu-button`, so a role query for a nav link finds nothing at all
- * on a phone viewport -- `display: none` keeps it out of the accessibility
- * tree. The soft-navigation assertion below is about the theme, not about how
- * the link is reached, so the menu is opened when it is the only route.
- */
-async function openMarketingMenuIfCollapsed(page: Page) {
-  const menuButton = page.getByTestId("marketing-menu-button");
-  if (await menuButton.isVisible()) {
-    await menuButton.click();
-  }
-}
-
 test.describe("theme is correct on the first paint", () => {
   test.beforeEach(async ({ page }) => {
     await prepareGuestPage(page, "en");
@@ -268,7 +254,12 @@ test.describe("theme is correct on the first paint", () => {
     const before = await page.evaluate(
       () => getComputedStyle(document.body).backgroundColor
     );
-    await openMarketingMenuIfCollapsed(page);
+    // Below `lg` the marketing header collapses its nav behind a menu button
+    // (`MarketingChrome`'s `hidden … lg:flex`), so on a narrow project the link
+    // has to be revealed before it can be clicked. Same page, same soft
+    // navigation -- only the affordance that reaches it differs.
+    const menu = page.getByRole("button", { name: /^(Menu|메뉴|菜单)$/ });
+    if (await menu.isVisible()) await menu.click();
     await page.getByRole("link", { name: /pricing/i }).first().click();
     await page.waitForLoadState("networkidle");
     const after = await page.evaluate(

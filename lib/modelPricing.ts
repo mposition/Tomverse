@@ -152,6 +152,24 @@ const flatTier = (
     },
 ];
 
+const gpt56Tiers = (
+    inputUsdPerMillionTokens: number,
+    outputUsdPerMillionTokens: number
+): readonly ModelPriceTier[] => [
+    {
+        maxPromptTokens: 272_000,
+        inputUsdPerMillionTokens,
+        outputUsdPerMillionTokens,
+        cachedInputPriceMultiplier: 0.1,
+    },
+    {
+        maxPromptTokens: null,
+        inputUsdPerMillionTokens: inputUsdPerMillionTokens * 2,
+        outputUsdPerMillionTokens: outputUsdPerMillionTokens * 1.5,
+        cachedInputPriceMultiplier: 0.1,
+    },
+];
+
 /**
  * Conservative defaults for a model with no explicit profile. Intentionally
  * expensive: an unpriced model should reserve too much, not too little, and
@@ -224,6 +242,54 @@ const DIRECT_STANDARD = {
 // ---------------------------------------------------------------------------
 export const MODEL_PRICING: readonly ModelPricingProfile[] = [
     {
+        modelId: "gpt-5-6-sol",
+        provider: "openai",
+        apiModelId: "gpt-5.6-sol",
+        ...DIRECT_STANDARD,
+        tiers: gpt56Tiers(5, 30),
+        reasoningTokenBilling: "billed_as_output",
+        nativeSearchCostMicroUsdPerQuery: 10_000,
+        maxOutputTokens: 128_000,
+        reservationOutputTokens: 16_384,
+        reservationOutputBasis: "conservative_default",
+        cachedInputPricingVerified: true,
+        priceSource: "openai_gpt_5_6_sol_model_page",
+        pricingVersion: "openai-gpt-5.6-sol-2026-08-01",
+        effectiveDate: "2026-08-01",
+    },
+    {
+        modelId: "gpt-5-6-terra",
+        provider: "openai",
+        apiModelId: "gpt-5.6-terra",
+        ...DIRECT_STANDARD,
+        tiers: gpt56Tiers(2, 12),
+        reasoningTokenBilling: "billed_as_output",
+        nativeSearchCostMicroUsdPerQuery: 10_000,
+        maxOutputTokens: 128_000,
+        reservationOutputTokens: 8_192,
+        reservationOutputBasis: "conservative_default",
+        cachedInputPricingVerified: true,
+        priceSource: "openai_gpt_5_6_terra_model_page",
+        pricingVersion: "openai-gpt-5.6-terra-2026-08-01",
+        effectiveDate: "2026-08-01",
+    },
+    {
+        modelId: "gpt-5-6-luna",
+        provider: "openai",
+        apiModelId: "gpt-5.6-luna",
+        ...DIRECT_STANDARD,
+        tiers: gpt56Tiers(0.2, 1.2),
+        reasoningTokenBilling: "billed_as_output",
+        nativeSearchCostMicroUsdPerQuery: 10_000,
+        maxOutputTokens: 128_000,
+        reservationOutputTokens: 4_096,
+        reservationOutputBasis: "conservative_default",
+        cachedInputPricingVerified: true,
+        priceSource: "openai_gpt_5_6_luna_model_page",
+        pricingVersion: "openai-gpt-5.6-luna-2026-08-01",
+        effectiveDate: "2026-08-01",
+    },
+    {
         modelId: "gpt-5-5",
         provider: "openai",
         apiModelId: "gpt-5.5",
@@ -256,6 +322,39 @@ export const MODEL_PRICING: readonly ModelPricingProfile[] = [
         cachedInputPricingVerified: false,
         priceSource: "openai_standard_api_list_price",
         pricingVersion: "openai-gpt-5.5-2026-08-01",
+        effectiveDate: "2026-08-01",
+    },
+    {
+        modelId: "gemini-3-6-flash",
+        provider: "google",
+        apiModelId: "gemini-3.6-flash",
+        ...DIRECT_STANDARD,
+        tiers: flatTier(1.5, 7.5, 0.1),
+        reasoningTokenBilling: "billed_as_output",
+        nativeSearchCostMicroUsdPerQuery: 14_000,
+        maxOutputTokens: 65_536,
+        reservationOutputTokens: 8_192,
+        reservationOutputBasis: "conservative_default",
+        cachedInputPricingVerified: true,
+        priceSource: "google_gemini_3_6_flash_standard_api_list_price",
+        pricingVersion: "google-gemini-3.6-flash-2026-08-01",
+        effectiveDate: "2026-08-01",
+    },
+    {
+        // Stable Tomverse ID upgraded in place to Gemini 3.5 Flash-Lite.
+        modelId: "gemini-2-5-flash",
+        provider: "google",
+        apiModelId: "gemini-3.5-flash-lite",
+        ...DIRECT_STANDARD,
+        tiers: flatTier(0.3, 2.5, 0.1),
+        reasoningTokenBilling: "billed_as_output",
+        nativeSearchCostMicroUsdPerQuery: 14_000,
+        maxOutputTokens: 65_536,
+        reservationOutputTokens: 4_096,
+        reservationOutputBasis: "conservative_default",
+        cachedInputPricingVerified: true,
+        priceSource: "google_gemini_3_5_flash_lite_standard_api_list_price",
+        pricingVersion: "google-gemini-3.5-flash-lite-2026-08-01",
         effectiveDate: "2026-08-01",
     },
     {
@@ -304,8 +403,71 @@ export const MODEL_PRICING: readonly ModelPricingProfile[] = [
         pricingVersion: "anthropic-claude-opus-4-8-2026-08-01",
         effectiveDate: "2026-08-01",
     },
-    // Profiles migrated unchanged from the previous MODEL_BILLING_DEFAULTS map
-    // in lib/models.ts, so no existing settled cost changes with this refactor.
+    // Provider-verified profiles added by the 2026-08-01 catalogue migration.
+    {
+        modelId: "grok-4-3",
+        provider: "xai",
+        apiModelId: "grok-4.3",
+        ...DIRECT_STANDARD,
+        tiers: [
+            {
+                maxPromptTokens: 199_999,
+                inputUsdPerMillionTokens: 1.25,
+                outputUsdPerMillionTokens: 2.5,
+                cachedInputPriceMultiplier: 0.16,
+            },
+            {
+                maxPromptTokens: null,
+                inputUsdPerMillionTokens: 2.5,
+                outputUsdPerMillionTokens: 5,
+                cachedInputPriceMultiplier: 0.16,
+            },
+        ],
+        reasoningTokenBilling: "billed_as_output",
+        maxOutputTokens: 16_384,
+        reservationOutputTokens: 4_096,
+        reservationOutputBasis: "conservative_default",
+        cachedInputPricingVerified: true,
+        priceSource: "xai_grok_4_3_standard_api_list_price",
+        pricingVersion: "xai-grok-4.3-2026-08-01",
+        effectiveDate: "2026-08-01",
+    },
+    {
+        // Load-bearing beyond ordinary chat accounting: consolidating xAI onto
+        // this model also made it the provider probe's target
+        // (lib/providerProbe.ts picks the cheapest enabled probe-safe model,
+        // and it is now the only xAI one). Probe cost is booked from this
+        // profile against a cap shared by every provider, so on the
+        // US$15/US$60 class fallback one xAI cycle cost US$0.00267 and 144
+        // cycles a day came to US$0.3845 -- 38% of the whole US$1 cap from one
+        // provider. At the published rate it is US$0.042.
+        modelId: "grok-4-5",
+        provider: "xai",
+        apiModelId: "grok-4.5",
+        ...DIRECT_STANDARD,
+        tiers: [
+            {
+                maxPromptTokens: 199_999,
+                inputUsdPerMillionTokens: 2,
+                outputUsdPerMillionTokens: 6,
+                cachedInputPriceMultiplier: 0.15,
+            },
+            {
+                maxPromptTokens: null,
+                inputUsdPerMillionTokens: 4,
+                outputUsdPerMillionTokens: 12,
+                cachedInputPriceMultiplier: 0.15,
+            },
+        ],
+        reasoningTokenBilling: "billed_as_output",
+        maxOutputTokens: 16_384,
+        reservationOutputTokens: 8_192,
+        reservationOutputBasis: "conservative_default",
+        cachedInputPricingVerified: true,
+        priceSource: "xai_grok_4_5_standard_api_list_price",
+        pricingVersion: "xai-grok-4.5-2026-08-01",
+        effectiveDate: "2026-08-01",
+    },
     {
         modelId: "llama-4-scout",
         provider: "groq",
@@ -328,13 +490,13 @@ export const MODEL_PRICING: readonly ModelPricingProfile[] = [
         ...DIRECT_STANDARD,
         tiers: flatTier(0.14, 0.28, 0.02),
         reasoningTokenBilling: "billed_as_output",
-        maxOutputTokens: 2_048,
-        reservationOutputTokens: 1_024,
+        maxOutputTokens: 384_000,
+        reservationOutputTokens: 4_096,
         reservationOutputBasis: "conservative_default",
         cachedInputPricingVerified: true,
         priceSource: "deepseek_published_cache_hit_and_miss_pricing",
-        pricingVersion: "deepseek-v4-flash-2026-06-01",
-        effectiveDate: "2026-06-01",
+        pricingVersion: "deepseek-v4-flash-2026-08-01",
+        effectiveDate: "2026-08-01",
     },
     {
         modelId: "deepseek-v4-pro",
@@ -343,13 +505,30 @@ export const MODEL_PRICING: readonly ModelPricingProfile[] = [
         ...DIRECT_STANDARD,
         tiers: flatTier(0.435, 0.87, 1 / 120),
         reasoningTokenBilling: "billed_as_output",
-        maxOutputTokens: 4_096,
-        reservationOutputTokens: 2_048,
+        maxOutputTokens: 384_000,
+        reservationOutputTokens: 8_192,
         reservationOutputBasis: "conservative_default",
         cachedInputPricingVerified: true,
         priceSource: "deepseek_published_cache_hit_and_miss_pricing",
-        pricingVersion: "deepseek-v4-pro-2026-06-01",
-        effectiveDate: "2026-06-01",
+        pricingVersion: "deepseek-v4-pro-2026-08-01",
+        effectiveDate: "2026-08-01",
+    },
+    {
+        modelId: "mistral-medium-3-1",
+        provider: "mistral",
+        apiModelId: "mistral-medium-3-5",
+        ...DIRECT_STANDARD,
+        tiers: flatTier(1.5, 7.5),
+        reasoningTokenBilling: "billed_as_output",
+        // Mistral publishes the context window but not a distinct output
+        // ceiling for this model. Keep an explicit operational request cap.
+        maxOutputTokens: 16_384,
+        reservationOutputTokens: 4_096,
+        reservationOutputBasis: "conservative_default",
+        cachedInputPricingVerified: false,
+        priceSource: "mistral_medium_3_5_model_card",
+        pricingVersion: "mistral-medium-3.5-2026-08-01",
+        effectiveDate: "2026-08-01",
     },
     {
         modelId: "deepseek-r1",
@@ -512,13 +691,18 @@ export const resolveModelPricing = (
         model.cachedInputPriceMultiplier ??
         boundedMultiplier(
             envCached,
-            // Two providers publish a flat cache discount that is not
-            // model-specific, so it stays a provider-level default.
-            model.provider === "mistral"
-                ? 0.1
-                : model.provider === "zhipu"
-                  ? 0.2
-                  : tier.cachedInputPriceMultiplier
+            // An explicit model profile wins over provider defaults. This is
+            // important for Medium 3.5: its input/output list price is
+            // verified, but no model-specific cached-input price was found,
+            // so its tier deliberately uses 1 (no discount) rather than the
+            // legacy Mistral-wide fallback below.
+            profile
+                ? tier.cachedInputPriceMultiplier
+                : model.provider === "mistral"
+                  ? 0.1
+                  : model.provider === "zhipu"
+                    ? 0.2
+                    : tier.cachedInputPriceMultiplier
         );
 
     const maxOutputTokens = Math.floor(
@@ -589,28 +773,109 @@ export const resolveModelPricing = (
 };
 
 /**
+ * How long a premium model may stay on the conservative fallback before the CI
+ * warning becomes a failure. Pending is a temporary state with a deadline, not
+ * a resting place.
+ */
+export const PENDING_PRICE_VERIFICATION_WINDOW_DAYS = 90;
+
+export type PendingVerifiedPriceEntry = {
+    modelId: string;
+    /**
+     * Who is accountable for verifying the price. `null` means unassigned --
+     * reported as a warning, and the entry still expires on schedule.
+     */
+    owner: string | null;
+    /** Tracking issue for the verification. `null` means not filed yet. */
+    verificationTicket: string | null;
+    /** ISO date (UTC) the model was accepted onto the fallback. */
+    registeredAt: string;
+    /** ISO date (UTC) after which the check fails instead of warning. */
+    expiresAt: string;
+    /**
+     * Explicit sign-off to keep the model enabled in production while its price
+     * is unverified. Pricing a model conservatively is a billing decision, so
+     * it needs an owner's name on it separately from the code review that added
+     * the entry. `null` means nobody has approved it.
+     */
+    productionApproval: {
+        approvedBy: string;
+        approvedAt: string;
+        rationale: string;
+    } | null;
+    /**
+     * Where the settled cost comes from once the response arrives.
+     * `provider_reported_usage` means the fallback rates only ever size the
+     * up-front reservation and never reach a settled figure.
+     */
+    settlementSource: "reservation_pricing" | "provider_reported_usage";
+    note?: string;
+};
+
+/**
  * Enabled premium models that are knowingly still on the conservative fallback
  * because no verified price source has been recorded for them yet.
  *
- * This list exists so the check below can be fail-closed for *new* models
+ * This register exists so the check below can be fail-closed for *new* models
  * without silently blessing the ones that predate it. Being on it is not an
  * exemption: the fallback deliberately overstates cost (US$15/US$60), which
- * makes reservations larger than reality, so each entry should be replaced with
- * a real profile as its price is verified. Adding a new model here instead of
- * pricing it is a regression, not a fix.
+ * over-sizes reservations, rejects some requests earlier than the real price
+ * would, and -- everywhere settlement uses the reservation rates -- records an
+ * internal cost above what the provider actually charged. Each entry carries an
+ * owner, a verification ticket and an expiry so that state is tracked rather
+ * than tolerated. Adding a new model here instead of pricing it is a
+ * regression, not a fix.
  *
- * Note on Perplexity: its settled cost comes from the provider's own reported
- * response usage (lib/perplexityUsageCore.ts), so the token rates here only
- * ever size the up-front reservation.
+ * See docs/policy/credit-and-cost-limits.md, "검증 대기 가격 운영".
  */
-export const PENDING_VERIFIED_PRICE_MODEL_IDS: readonly string[] = [
-    "claude-fable-5",
-    "grok-4",
-    "grok-4-5",
-    "mistral-large-3",
-    "qwen3.7-max",
-    "perplexity/sonar-deep-research",
-];
+export const PENDING_VERIFIED_PRICE_REGISTER: readonly PendingVerifiedPriceEntry[] =
+    [
+        {
+            modelId: "claude-fable-5",
+            owner: null,
+            verificationTicket: null,
+            registeredAt: "2026-08-01",
+            expiresAt: "2026-10-30",
+            productionApproval: null,
+            settlementSource: "reservation_pricing",
+        },
+        // grok-4-5 left this register once its real profile went in above, from
+        // xAI's published rates. grok-4 left it for the other reason an entry
+        // stops being needed: it is retired, so findUnpricedModels filters it
+        // out by `enabled` and there is nothing left to exempt.
+        {
+            modelId: "mistral-large-3",
+            owner: null,
+            verificationTicket: null,
+            registeredAt: "2026-08-01",
+            expiresAt: "2026-10-30",
+            productionApproval: null,
+            settlementSource: "reservation_pricing",
+        },
+        {
+            modelId: "qwen3.7-max",
+            owner: null,
+            verificationTicket: null,
+            registeredAt: "2026-08-01",
+            expiresAt: "2026-10-30",
+            productionApproval: null,
+            settlementSource: "reservation_pricing",
+        },
+        {
+            modelId: "perplexity/sonar-deep-research",
+            owner: null,
+            verificationTicket: null,
+            registeredAt: "2026-08-01",
+            expiresAt: "2026-10-30",
+            productionApproval: null,
+            settlementSource: "provider_reported_usage",
+            note: "Settles from the provider's own reported usage (lib/perplexityUsageCore.ts), so these rates only size the reservation. A deep-research turn issues many search queries and reasoning tokens, so a chat-shaped token reservation mis-sizes it in both directions; a dedicated reservation model is under review against the reserved/settled ratio this register reports.",
+        },
+    ];
+
+/** The register's model IDs, in registration order. */
+export const PENDING_VERIFIED_PRICE_MODEL_IDS: readonly string[] =
+    PENDING_VERIFIED_PRICE_REGISTER.map((entry) => entry.modelId);
 
 export type UnpricedModel = {
     modelId: string;
@@ -680,4 +945,127 @@ export const assertPricedPremiumModels = (
         );
     }
     return unpriced;
+};
+
+export type PendingPriceProblem = {
+    severity: "error" | "warning";
+    modelId: string;
+    reason:
+        | "expired"
+        | "priced"
+        | "duplicate"
+        | "invalid_dates"
+        | "unassigned_owner"
+        | "missing_ticket"
+        | "unapproved_production";
+    message: string;
+};
+
+const parseRegisterDate = (value: string) => {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return null;
+    const date = new Date(`${value}T00:00:00.000Z`);
+    return Number.isNaN(date.getTime()) ? null : date;
+};
+
+export const daysUntil = (expiresAt: string, now: Date) => {
+    const date = parseRegisterDate(expiresAt);
+    if (!date) return null;
+    return Math.ceil((date.getTime() - now.getTime()) / 86_400_000);
+};
+
+/**
+ * Everything wrong with the pending-price register, checked together.
+ *
+ * Errors fail CI; warnings are reported and left. The split is deliberate: an
+ * unassigned owner is a gap someone has to fill, while an expired entry means
+ * the model has been billed at a knowingly wrong internal price for a full
+ * verification window and the warning has stopped working.
+ *
+ * This is a CI and review check, not a startup guard. A date passing must never
+ * take production down -- `assertPricedPremiumModels` stays the runtime gate,
+ * and it only rejects models that were never registered at all.
+ */
+export const findPendingPriceRegisterProblems = ({
+    models,
+    now = new Date(),
+    register = PENDING_VERIFIED_PRICE_REGISTER,
+}: {
+    models: Parameters<typeof findUnpricedModels>[0];
+    now?: Date;
+    register?: readonly PendingVerifiedPriceEntry[];
+}): PendingPriceProblem[] => {
+    const problems: PendingPriceProblem[] = [];
+    const unpriced = findUnpricedModels(models);
+    const seen = new Set<string>();
+
+    for (const entry of register) {
+        if (seen.has(entry.modelId)) {
+            problems.push({
+                severity: "error",
+                modelId: entry.modelId,
+                reason: "duplicate",
+                message: `${entry.modelId} is listed twice in PENDING_VERIFIED_PRICE_REGISTER.`,
+            });
+            continue;
+        }
+        seen.add(entry.modelId);
+
+        if (!unpriced.some((model) => model.modelId === entry.modelId)) {
+            problems.push({
+                severity: "error",
+                modelId: entry.modelId,
+                reason: "priced",
+                message: `${entry.modelId} has an explicit pricing profile now and must leave PENDING_VERIFIED_PRICE_REGISTER.`,
+            });
+            continue;
+        }
+
+        const registeredAt = parseRegisterDate(entry.registeredAt);
+        const expiresAt = parseRegisterDate(entry.expiresAt);
+        if (!registeredAt || !expiresAt || expiresAt <= registeredAt) {
+            problems.push({
+                severity: "error",
+                modelId: entry.modelId,
+                reason: "invalid_dates",
+                message: `${entry.modelId} needs a YYYY-MM-DD registeredAt and a later expiresAt (got ${entry.registeredAt} to ${entry.expiresAt}).`,
+            });
+        } else if (expiresAt.getTime() <= now.getTime()) {
+            const overdue = Math.floor(
+                (now.getTime() - expiresAt.getTime()) / 86_400_000
+            );
+            problems.push({
+                severity: "error",
+                modelId: entry.modelId,
+                reason: "expired",
+                message: `${entry.modelId} has been on the conservative fallback past its ${entry.expiresAt} deadline (${overdue} day(s) overdue). Add a verified pricing profile, or re-approve production enablement and set a new deadline.`,
+            });
+        }
+
+        if (!entry.owner) {
+            problems.push({
+                severity: "warning",
+                modelId: entry.modelId,
+                reason: "unassigned_owner",
+                message: `${entry.modelId} has no price-verification owner.`,
+            });
+        }
+        if (!entry.verificationTicket) {
+            problems.push({
+                severity: "warning",
+                modelId: entry.modelId,
+                reason: "missing_ticket",
+                message: `${entry.modelId} has no verification ticket.`,
+            });
+        }
+        if (!entry.productionApproval) {
+            problems.push({
+                severity: "warning",
+                modelId: entry.modelId,
+                reason: "unapproved_production",
+                message: `${entry.modelId} is enabled in production on an unverified price with no recorded approval.`,
+            });
+        }
+    }
+
+    return problems;
 };

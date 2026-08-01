@@ -1,3 +1,5 @@
+import { getModel } from "@/lib/models";
+
 type ExportMessage = {
     role: string;
     content: string;
@@ -11,11 +13,18 @@ type ExportConversation = {
     messages: ExportMessage[];
 };
 
-const modelNames: Record<string, string> = {
+// Hand-maintained names for ids that predate the model registry and are no
+// longer in the catalogue at all. Everything still in the catalogue -- including
+// every RETIRED model, which is exactly why retirement never deletes an entry --
+// resolves through getModel below, so an export of an old conversation prints
+// "Llama 3.3" or "Grok 3 Mini" rather than a bare id.
+const legacyModelNames: Record<string, string> = {
     "gpt-4o": "GPT-4o",
-    "claude-haiku-4-5": "Claude Haiku 4.5",
     "gemini-1-5": "Gemini 1.5",
 };
+
+const displayNameFor = (modelId: string) =>
+    getModel(modelId)?.name || legacyModelNames[modelId] || modelId;
 
 function formatDate(value?: Date | string) {
     if (!value) return "";
@@ -45,9 +54,9 @@ export function formatExportMessage(message: ExportMessage) {
     const label =
         message.role === "user"
             ? "User"
-            : modelNames[message.modelId || ""] ||
-              message.modelId ||
-              "Assistant";
+            : message.modelId
+              ? displayNameFor(message.modelId)
+              : "Assistant";
 
     return [
         "==================================================",

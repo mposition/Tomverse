@@ -172,9 +172,85 @@ cached input 할인은 이 네 모델에 대해 검증된 출처가 없어서 �
 명시적 profile이 없는 모델은 보수적인 등급 fallback을 씁니다.
 `npm run check:model-pricing`이 **enabled premium 모델에 profile이 없으면
 실패**하고, PR Fast Gate의 static 단계에서 실행됩니다. 아직 검증된 가격이 없는
-기존 premium 모델은 `PENDING_VERIFIED_PRICE_MODEL_IDS`에 명시적으로 적어
-두었고, 이 목록에 없는 새 premium 모델은 CI에서 막힙니다. 목록이 낡으면
-(이미 가격이 붙었는데 남아 있으면) 역시 실패합니다.
+기존 premium 모델은 `PENDING_VERIFIED_PRICE_REGISTER`에 명시적으로 등록해
+두었고, 이 목록에 없는 새 premium 모델은 CI에서 막힙니다.
+
+### 검증 대기 가격 운영
+
+premium fallback(US$15 입력 / US$60 출력)은 **과소 예약과 비용 폭증은
+막지만 무해하지 않습니다.** 실제 가격보다 크게 잡히므로
+
+- 예약이 과다해져 실제 가격이라면 통과했을 요청이 일찍 거절될 수 있고,
+- 정산이 예약 시점 가격을 쓰는 경로에서는 내부 비용이 실제 청구액보다
+  크게 기록됩니다.
+
+그래서 fallback은 **기한이 있는 임시 상태**로만 허용합니다.
+`PENDING_VERIFIED_PRICE_REGISTER`(`lib/modelPricing.ts`)의 각 항목은 다음을
+가집니다.
+
+| 항목 | 의미 |
+|---|---|
+| `owner` | 가격 검증 담당자. `null`이면 미지정(경고) |
+| `verificationTicket` | 검증 추적 티켓. `null`이면 미발행(경고) |
+| `registeredAt` | fallback 등록일(UTC, `YYYY-MM-DD`) |
+| `expiresAt` | 기한. 지나면 CI **실패** |
+| `productionApproval` | 미검증 가격으로 production 활성화를 유지한다는 별도 승인(`approvedBy`·`approvedAt`·`rationale`). `null`이면 미승인(경고) |
+| `settlementSource` | `reservation_pricing`이면 fallback 단가가 정산까지 반영되고, `provider_reported_usage`면 예약 크기만 정한다 |
+
+기한은 `PENDING_PRICE_VERIFICATION_WINDOW_DAYS`(90일)를 넘길 수 없습니다.
+`findPendingPriceRegisterProblems()`가 다음을 검사하고
+`npm run check:model-pricing`이 이를 실행합니다.
+
+- **실패**: 기한 초과, 이미 가격이 붙었는데 목록에 남아 있음, 항목 중복,
+  날짜 형식 오류
+- **경고**: 담당자 미지정, 티켓 미발행, production 승인 미기록
+
+기한이 지났을 때 할 일은 둘 중 하나입니다. 검증된 가격으로
+`MODEL_PRICING` 항목을 추가하거나, 가격을 확인할 수 없다면 production 유지
+여부를 `productionApproval`에 다시 승인으로 남기고 새 기한을 설정합니다.
+**기한만 미루는 것은 승인이 아닙니다.**
+
+이 검사는 CI·리뷰용이며 startup guard가 아닙니다. 날짜가 지났다고 production이
+내려가서는 안 되므로 runtime gate는 `assertPricedPremiumModels()` 그대로이고,
+그쪽은 애초에 등록조차 되지 않은 모델만 막습니다.
+
+### fallback 사용량 모니터링
+
+등록부는 "어떤 가격이 미검증인가"만 말하고 "그래서 누가 막히고 있는가"는
+말하지 않습니다. 후자는 시스템이 이미 쓰고 있는 데이터로 집계합니다
+(`lib/fallbackPricingMetricsCore.ts`, `lib/fallbackPricingMetrics.ts`).
+
+- `ChatLimitDecisionEvent`의 모델별 `costSource`로
+  **`conservative_fallback` 요청 수와 비율**(`fallbackShare`)
+- 같은 이벤트에서 **fallback이 관여한 크레딧·비용 거절 건수**
+  (`fallbackAttributableRejections`, 코드별 분해 포함)
+- `ChatCreditReservation`의 `reservedCostMicroUsd` / `settledCostMicroUsd`와
+  `pricingSnapshot.reservationCostSource`로 **예약 대비 정산 비율**
+  (`reservedToSettledRatio`, 모델별 포함)
+
+거절 건수는 **상한값**입니다. 실제 가격이었어도 한도를 넘었을 요청이 섞여
+있으므로 인과가 아니라 "다시 계산해 봐야 할 모집단"으로 읽습니다. 비율은
+정산이 끝난 예약만으로 계산합니다 — 미정산 예약의 0을 분모에 넣으면 측정하지
+않은 과다 예약을 보고하게 됩니다.
+
+조회: `GET /api/admin/fallback-pricing?days=7`(admin 전용, 최대 90일). 등록부에
+없는데 트래픽에 나타난 fallback 모델은 `unregisteredFallbackModels`로 함께
+보고합니다.
+
+### Perplexity Deep Research 예약 모델 검토
+
+`perplexity/sonar-deep-research`는 다른 다섯 모델과 상태가 다릅니다. 정산이
+provider가 보고한 usage(`lib/perplexityUsageCore.ts`,
+`pricingSnapshot.usageSource`)에서 오므로 **fallback 단가는 내부 비용 기록을
+왜곡하지 않고 예약 크기만 정합니다.** 남는 문제는 예약 모양입니다. deep
+research 한 턴은 다수의 검색 질의와 reasoning token을 발생시키므로, chat
+completion 모양의 토큰 예약은 체계적으로 어긋납니다.
+
+전용 예약 모델의 판단 근거는 위 지표입니다. `reservedToSettledRatio`가 이
+모델에서 지속적으로 1에서 멀면(과다 예약이면 조기 거절, 1 미만이면 과소 예약)
+토큰이 아니라 요청·검색 질의 단위로 예약하는 전용 항목을 도입합니다. 그때까지는
+보수적인 예약을 유지합니다 — 과소 예약 쪽이 더 나쁩니다. 이 검토는 등록부
+항목의 `note`에 연결돼 있습니다.
 
 ### 소급 적용 금지
 
@@ -234,11 +310,15 @@ Console에만 남습니다.
 ## 8. 바꾸기 전에
 
 - 새 premium 모델을 enable하기 전에 `MODEL_PRICING`에 항목을 추가합니다.
+- 가격을 확인할 수 없어 fallback으로 enable해야 한다면
+  `PENDING_VERIFIED_PRICE_REGISTER`에 담당자·티켓·기한·production 승인을 함께
+  등록합니다. 등록 없는 fallback은 CI에서 막힙니다.
 - guardrail 기본값을 낮추려면 `COST_PER_CREDIT_CEILING_MICRO_USD` 유도 근거를
   먼저 갱신합니다. 환경변수로는 내려갈 수 없습니다.
 - entitlement 오류와 guardrail 오류를 하나의 코드로 합치지 않습니다.
 - 사용자 응답에 원시 내부 USD를 넣지 않습니다.
 - 관련 테스트: `tests/modelPricing.test.mjs`, `tests/chatCostGuardrails.test.mjs`,
+  `tests/pendingModelPricing.test.mjs`, `tests/fallbackPricingMetrics.test.mjs`,
   `tests/chatAvailabilityCore.test.mjs`, `tests/chatLimitDecisionCore.test.mjs`,
   `tests/chatTokenEstimate.test.mjs`, `tests/chatCostSafetyCore.test.mjs`,
   `tests/integration/credit-finance.db.test.ts`,

@@ -166,7 +166,7 @@ test("selecting two models suggests one complementary model instead of the full 
   await page.getByTestId("model-combo-complementary-add").click();
   await openModelCatalogue(page);
   await expect(
-    page.locator('[data-testid="model-option"][data-model-id="deepseek-r1"]')
+    page.locator('[data-testid="model-option"][data-model-id="groq-gpt-oss-120b"]')
   ).toHaveAttribute("aria-pressed", "true");
 });
 

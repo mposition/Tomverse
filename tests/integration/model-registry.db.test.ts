@@ -6,6 +6,7 @@ import {
   ensureModelRegistrySeeded,
   getEnabledRuntimeModel,
   getRuntimeModel,
+  reconcileStaticWithdrawals,
 } from "../../lib/modelRegistry";
 import { assertModelRuntimeAvailable } from "../../lib/modelAvailability";
 import { getModelBillingProfile, getModelUsageProfile } from "../../lib/models";
@@ -15,6 +16,185 @@ const modelId = `integration/model-${randomUUID()}`;
 after(async () => {
   await prisma.modelRegistryEntry.deleteMany({ where: { id: modelId } });
   await prisma.$disconnect();
+});
+
+// Runs FIRST, before anything in this file calls ensureModelRegistrySeeded():
+// the bootstrap memoises itself, so the retirement replay only ever happens on
+// the process's first call and this is the one chance to observe it.
+//
+// The defect it covers: `createMany({ skipDuplicates: true })` only inserts, so
+// a model already in the runtime registry when it was retired in lib/models.ts
+// kept its old enabled/publiclyListed/status values and stayed on offer. Each
+// wave of retirements re-opens that hole for its own ids, so this seeds the
+// exact pre-retirement shape and checks the bootstrap closes it.
+const RETIRED_MODEL_EXPECTATIONS = [
+  { id: "grok-3", replacementModelId: "grok-4-5" },
+  { id: "grok-3-mini", replacementModelId: "grok-4-5" },
+  { id: "grok-4", replacementModelId: "grok-4-5" },
+  { id: "llama-3-1", replacementModelId: "deepseek-v4-flash" },
+  { id: "llama-3-3", replacementModelId: "mistral-medium-3-1" },
+  { id: "llama-4-scout", replacementModelId: "gemini-3-5-flash" },
+] as const;
+
+test("bootstrapping replays catalogue retirements onto pre-existing registry rows", async () => {
+  const retiredIds = RETIRED_MODEL_EXPECTATIONS.map((entry) => entry.id);
+
+  // Seed the rows first so they exist, then force them back into the state a
+  // pre-retirement deploy would have left them in.
+  await prisma.modelRegistryEntry.createMany({
+    data: RETIRED_MODEL_EXPECTATIONS.map((entry, index) => ({
+      id: entry.id,
+      name: `Stale ${entry.id}`,
+      apiModel: entry.id,
+      provider: entry.id.startsWith("grok") ? "xai" : "groq",
+      apiBaseUrl: entry.id.startsWith("grok")
+        ? "https://api.x.ai/v1"
+        : "https://api.groq.com/openai/v1",
+      apiKeyEnvName: entry.id.startsWith("grok") ? "XAI_API_KEY" : "GROQ_API_KEY",
+      icon: "?",
+      bestFor: "stale row",
+      minimumPlan: "Guest",
+      usageClass: "standard",
+      creditWeight: 1,
+      sortOrder: 9_000 + index,
+    })),
+    skipDuplicates: true,
+  });
+  await prisma.modelRegistryEntry.updateMany({
+    where: { id: { in: [...retiredIds] } },
+    data: {
+      enabled: true,
+      publiclyListed: true,
+      status: "enabled",
+      replacementModelId: null,
+    },
+  });
+  // Same pre-state for the pre-launch model, so this one bootstrap covers
+  // both halves of the withdrawal replay -- see the test below, which reads
+  // the result rather than seeding a second time.
+  await prisma.modelRegistryEntry.updateMany({
+    where: { id: "kimi-k3" },
+    data: { enabled: true, publiclyListed: true, status: "enabled" },
+  });
+
+  await ensureModelRegistrySeeded();
+
+  for (const expected of RETIRED_MODEL_EXPECTATIONS) {
+    const row = await prisma.modelRegistryEntry.findUnique({
+      where: { id: expected.id },
+    });
+    assert.ok(row, `${expected.id} must never be deleted from the registry`);
+    assert.equal(row.enabled, false, `${expected.id} should be disabled`);
+    assert.equal(row.publiclyListed, false, `${expected.id} should be delisted`);
+    assert.equal(row.status, "disabled");
+    assert.equal(row.replacementModelId, expected.replacementModelId);
+    // catalogDeleted stays a human-controlled admin action, so the replay
+    // must not have set it.
+    assert.equal(row.catalogDeleted, false);
+
+    // Historical resolution survives; new calls do not.
+    const historical = await getRuntimeModel(expected.id);
+    assert.ok(historical, `${expected.id} must stay resolvable for old chats`);
+    assert.ok(historical.name);
+    assert.equal(await getEnabledRuntimeModel(expected.id), undefined);
+    assert.equal(
+      (await assertModelRuntimeAvailable(expected.id)).allowed,
+      false
+    );
+  }
+
+  // The replacement each retirement points at has to be something a user can
+  // actually pick, or the offer is a dead end.
+  for (const expected of RETIRED_MODEL_EXPECTATIONS) {
+    const replacement = await getEnabledRuntimeModel(expected.replacementModelId);
+    assert.ok(
+      replacement,
+      `${expected.id} points at ${expected.replacementModelId}, which is not enabled at runtime`
+    );
+    assert.notEqual(replacement.publiclyListed, false);
+  }
+});
+
+// A model withheld before launch has the same failure mode as a retired one:
+// if an environment received a build that had it enabled, nothing would ever
+// correct the row. The replay therefore covers it too -- and must write
+// "coming-soon" rather than flattening it into "disabled", because the two
+// states mean opposite things to an operator reading the registry. Reads the
+// state the bootstrap above already produced; the bootstrap memoises, so
+// there is exactly one replay per process to observe.
+test("the same bootstrap withdraws a pre-launch model without marking it retired", async () => {
+  const row = await prisma.modelRegistryEntry.findUnique({
+    where: { id: "kimi-k3" },
+  });
+  assert.ok(row, "kimi-k3 must stay registered");
+  assert.equal(row.enabled, false);
+  assert.equal(row.publiclyListed, false);
+  assert.equal(row.status, "coming-soon");
+  assert.equal(row.catalogDeleted, false);
+  // Withheld, not retired: it has no predecessor to hand users off to.
+  assert.equal(row.replacementModelId, null);
+
+  assert.equal(await getEnabledRuntimeModel("kimi-k3"), undefined);
+  assert.equal((await assertModelRuntimeAvailable("kimi-k3")).allowed, false);
+});
+
+// The defect this covers: the withdrawal replay used to express "needs
+// correcting" as a WHERE clause over enabled/publiclyListed/status, so a row
+// that was already withdrawn but pointed at a replacement the catalogue has
+// since changed was invisible to it. llama-4-scout was in exactly that shape
+// -- disabled, delisted, and still handing users llama-3-3 after llama-3-3 was
+// retired underneath it.
+test("an already-withdrawn row with a stale replacement is still corrected", async () => {
+  await prisma.modelRegistryEntry.update({
+    where: { id: "llama-4-scout" },
+    data: {
+      enabled: false,
+      publiclyListed: false,
+      status: "disabled",
+      // The value production actually held: a replacement that is itself
+      // retired, so the row satisfied every lifecycle check while offering
+      // users a dead end.
+      replacementModelId: "llama-3-3",
+    },
+  });
+
+  // ensureModelRegistrySeeded memoises, so the reconciliation is invoked
+  // directly -- which is also how an operator would repair an environment.
+  await reconcileStaticWithdrawals();
+
+  const row = await prisma.modelRegistryEntry.findUnique({
+    where: { id: "llama-4-scout" },
+  });
+  assert.ok(row);
+  assert.equal(
+    row.replacementModelId,
+    "gemini-3-5-flash",
+    "a stale replacement on an already-withdrawn row must still be corrected"
+  );
+
+  // And the replacement it now names is one a user can actually select.
+  const replacement = await getEnabledRuntimeModel(row.replacementModelId!);
+  assert.ok(replacement, "the corrected replacement must be enabled at runtime");
+  assert.notEqual(replacement.publiclyListed, false);
+});
+
+test("re-running the bootstrap leaves retired rows untouched", async () => {
+  const before = await prisma.modelRegistryEntry.findMany({
+    where: { id: { in: RETIRED_MODEL_EXPECTATIONS.map((entry) => entry.id) } },
+    orderBy: { id: "asc" },
+  });
+
+  await ensureModelRegistrySeeded();
+
+  const after = await prisma.modelRegistryEntry.findMany({
+    where: { id: { in: RETIRED_MODEL_EXPECTATIONS.map((entry) => entry.id) } },
+    orderBy: { id: "asc" },
+  });
+  assert.equal(after.length, before.length);
+  assert.deepEqual(
+    after.map((row) => [row.id, row.enabled, row.publiclyListed, row.status]),
+    before.map((row) => [row.id, row.enabled, row.publiclyListed, row.status])
+  );
 });
 
 test("persists and resolves a newly registered model without a source catalogue entry", async () => {

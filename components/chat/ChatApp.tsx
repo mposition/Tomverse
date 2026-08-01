@@ -835,10 +835,29 @@ function ChatAppComponent({
         const costSafetyDetails = isChatCostSafetyCode(errorCode)
           ? formatChatCostSafetyDetails(requestError.details)
           : "";
+        // The replacement travels as data (see the MODEL_RETIRED branch in
+        // app/api/chat/route.ts) so the sentence stays in the user's language
+        // and still names the model that actually took over. Without a
+        // replacement the copy stays generic rather than naming a model that
+        // has nothing to do with the one that was retired.
+        const replacementModelName =
+          requestError.details &&
+          typeof requestError.details === "object" &&
+          typeof (requestError.details as Record<string, unknown>)
+            .replacementModelName === "string"
+            ? ((requestError.details as Record<string, string>)
+                .replacementModelName)
+            : null;
+        const retiredMessage = replacementModelName
+          ? t("chat.modelRetiredWithReplacement").replace(
+              "{model}",
+              replacementModelName
+            )
+          : t("chat.modelRetired");
         setAssistantMessage(
           assistantMessageId,
           `${errorCode === "MODEL_RETIRED"
-            ? t("chat.modelRetired")
+            ? retiredMessage
             : localizedRequestError || typeof requestError.publicMessage === "string"
               ? localizedRequestError || requestError.publicMessage
               : t("chat.responseError")}${

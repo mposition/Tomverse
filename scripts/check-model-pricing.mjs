@@ -11,11 +11,15 @@
 
 import { AVAILABLE_MODELS } from "../lib/models.ts";
 import {
+  daysUntil,
+  findPendingPriceRegisterProblems,
   findUnpricedModels,
   MODEL_PRICING,
   PENDING_VERIFIED_PRICE_MODEL_IDS,
+  PENDING_VERIFIED_PRICE_REGISTER,
 } from "../lib/modelPricing.ts";
 
+const now = new Date();
 const unpriced = findUnpricedModels(AVAILABLE_MODELS);
 const errors = unpriced.filter((entry) => entry.severity === "error");
 const warnings = unpriced.filter((entry) => entry.severity === "warning");
@@ -29,17 +33,53 @@ for (const entry of warnings) {
   );
 }
 
-const staleAcknowledgements = PENDING_VERIFIED_PRICE_MODEL_IDS.filter(
-  (modelId) => !unpriced.some((entry) => entry.modelId === modelId)
-);
-if (staleAcknowledgements.length > 0) {
-  console.error(
-    `\n${staleAcknowledgements.length} model(s) are listed in PENDING_VERIFIED_PRICE_MODEL_IDS but are now priced:`
-  );
-  for (const modelId of staleAcknowledgements) {
-    console.error(`  - ${modelId}`);
+// The register itself: who owns each pending price, and how long it has left
+// before the warning above becomes a failure.
+if (PENDING_VERIFIED_PRICE_REGISTER.length > 0) {
+  console.log("\nPending verified prices:");
+  for (const entry of PENDING_VERIFIED_PRICE_REGISTER) {
+    const remaining = daysUntil(entry.expiresAt, now);
+    const deadline =
+      remaining === null
+        ? "invalid expiry"
+        : remaining > 0
+          ? `${remaining}d left`
+          : `${-remaining}d overdue`;
+    console.log(
+      `  ${entry.modelId.padEnd(32)} owner=${entry.owner ?? "UNASSIGNED"} ` +
+        `ticket=${entry.verificationTicket ?? "NONE"} ` +
+        `approval=${entry.productionApproval?.approvedBy ?? "NONE"} ` +
+        `registered=${entry.registeredAt} expires=${entry.expiresAt} (${deadline}) ` +
+        `settles=${entry.settlementSource}`
+    );
   }
-  console.error("\nRemove them from the list in lib/modelPricing.ts.");
+}
+
+const registerProblems = findPendingPriceRegisterProblems({
+  models: AVAILABLE_MODELS,
+  now,
+});
+const registerWarnings = registerProblems.filter(
+  (problem) => problem.severity === "warning"
+);
+const registerErrors = registerProblems.filter(
+  (problem) => problem.severity === "error"
+);
+
+for (const problem of registerWarnings) {
+  console.warn(`warning: ${problem.message}`);
+}
+
+if (registerErrors.length > 0) {
+  console.error(
+    `\n${registerErrors.length} pending-price register problem(s):`
+  );
+  for (const problem of registerErrors) {
+    console.error(`  - ${problem.message}`);
+  }
+  console.error(
+    "\nSee docs/policy/credit-and-cost-limits.md, the pending price section."
+  );
   process.exit(1);
 }
 
@@ -59,6 +99,7 @@ if (errors.length > 0) {
 }
 
 console.log(
-  `Model pricing check passed: ${MODEL_PRICING.length} explicit profiles, ` +
-    `${warnings.length} model(s) on a conservative fallback, 0 unpriced premium models.`
+  `\nModel pricing check passed: ${MODEL_PRICING.length} explicit profiles, ` +
+    `${warnings.length} model(s) on a conservative fallback, 0 unpriced premium models, ` +
+    `${registerWarnings.length} register warning(s), 0 expired pending prices.`
 );

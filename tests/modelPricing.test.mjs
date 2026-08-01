@@ -126,6 +126,73 @@ test("Gemini 3.1 Pro switches price tier at the 200K prompt boundary", () => {
   assert.equal(above.longContextThresholdTokens, 200_000);
 });
 
+test("new catalogue models use their exact provider prices and output caps", () => {
+  const expected = {
+    "gpt-5-6-sol": [5, 30, 128_000],
+    "gpt-5-6-terra": [2, 12, 128_000],
+    "gpt-5-6-luna": [0.2, 1.2, 128_000],
+    "gemini-3-6-flash": [1.5, 7.5, 65_536],
+    "gemini-2-5-flash": [0.3, 2.5, 65_536],
+    "grok-4-3": [1.25, 2.5, 16_384],
+    "grok-4-5": [2, 6, 16_384],
+    "mistral-medium-3-1": [1.5, 7.5, 16_384],
+  };
+
+  for (const [modelId, [input, output, maxOutputTokens]] of Object.entries(expected)) {
+    const pricing = resolveModelPricing(model(modelId), {
+      estimatedPromptTokens: 10_000,
+    });
+    assert.equal(pricing.inputUsdPerMillionTokens, input, modelId);
+    assert.equal(pricing.outputUsdPerMillionTokens, output, modelId);
+    assert.equal(pricing.maxOutputTokens, maxOutputTokens, modelId);
+    assert.equal(pricing.isFallbackPricing, false, modelId);
+    assert.equal(pricing.routing, "direct_provider_api", modelId);
+  }
+
+  const mistralMedium = resolveModelPricing(model("mistral-medium-3-1"));
+  assert.equal(mistralMedium.cachedInputPriceMultiplier, 1);
+  assert.equal(mistralMedium.cachedInputPricingVerified, false);
+});
+
+test("GPT-5.6 and Grok long-context tiers apply at their documented boundaries", () => {
+  const solShort = resolveModelPricing(model("gpt-5-6-sol"), {
+    estimatedPromptTokens: 272_000,
+  });
+  const solLong = resolveModelPricing(model("gpt-5-6-sol"), {
+    estimatedPromptTokens: 272_001,
+  });
+  assert.deepEqual(
+    [solShort.inputUsdPerMillionTokens, solShort.outputUsdPerMillionTokens],
+    [5, 30]
+  );
+  assert.deepEqual(
+    [solLong.inputUsdPerMillionTokens, solLong.outputUsdPerMillionTokens],
+    [10, 45]
+  );
+
+  for (const [modelId, shortRates, longRates] of [
+    ["grok-4-3", [1.25, 2.5], [2.5, 5]],
+    ["grok-4-5", [2, 6], [4, 12]],
+  ]) {
+    const short = resolveModelPricing(model(modelId), {
+      estimatedPromptTokens: 199_999,
+    });
+    const long = resolveModelPricing(model(modelId), {
+      estimatedPromptTokens: 200_000,
+    });
+    assert.deepEqual(
+      [short.inputUsdPerMillionTokens, short.outputUsdPerMillionTokens],
+      shortRates,
+      modelId
+    );
+    assert.deepEqual(
+      [long.inputUsdPerMillionTokens, long.outputUsdPerMillionTokens],
+      longRates,
+      modelId
+    );
+  }
+});
+
 test("flat-priced models are unaffected by prompt size", () => {
   for (const modelId of ["gpt-5-5", "gpt-5-5-thinking", "claude-opus-4-8"]) {
     const small = resolveModelPricing(model(modelId), {
@@ -223,19 +290,19 @@ test("no enabled premium model is silently unpriced", () => {
   }
 });
 
-test("existing billing snapshots keep their previously published rates", () => {
-  // Backwards compatibility: profiles migrated out of lib/models.ts must not
-  // change value, so no already-settled UsageBucket is retroactively wrong.
+test("current profiles expose verified limits without mutating stored snapshots", () => {
+  // Stored reservations/settlements retain their pricingVersion and costSource;
+  // these assertions cover only the profile used for future requests.
   assert.deepEqual(getModelBillingProfile(model("deepseek-v4-flash")), {
-    maxOutputTokens: 2_048,
-    reservationOutputTokens: 1_024,
+    maxOutputTokens: 384_000,
+    reservationOutputTokens: 4_096,
     inputUsdPerMillionTokens: 0.14,
     outputUsdPerMillionTokens: 0.28,
     cachedInputPriceMultiplier: 0.02,
   });
   assert.deepEqual(getModelBillingProfile(model("deepseek-v4-pro")), {
-    maxOutputTokens: 4_096,
-    reservationOutputTokens: 2_048,
+    maxOutputTokens: 384_000,
+    reservationOutputTokens: 8_192,
     inputUsdPerMillionTokens: 0.435,
     outputUsdPerMillionTokens: 0.87,
     cachedInputPriceMultiplier: 1 / 120,

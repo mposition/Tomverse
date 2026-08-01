@@ -24,32 +24,63 @@ import {
   deliverNotificationNow,
   enqueueNotificationDelivery,
 } from "@/lib/notificationDeliveries";
+import {
+  REFUND_REQUEST_METADATA_KEY,
+  REFUND_STATUS,
+  refundIdempotencyKey,
+} from "@/lib/refundSagaCore";
 import { getStripe, isStripeConfigured } from "@/lib/stripe";
 
 /**
- * Queues the decision email and makes the first attempt inline.
+ * The decision a request carries once it has been reviewed, and the
+ * notification the customer is owed for it.
  *
- * Both decisions used to `.catch(console.error)`, so a customer whose refund
- * was approved or rejected could simply never be told. The row is written
- * first, so a failed send is retried rather than lost.
+ * The decision, its audit entry and its outbox row all commit in one
+ * transaction (see the PATCH handler). A send cannot be made atomic with a
+ * database write -- but the durable statement that a send *is owed* can be,
+ * and that is what makes the retry queue able to finish the job. An earlier
+ * version enqueued in a second transaction after the decision had committed:
+ * a failure in that window approved a refund, told nobody, and left no row for
+ * the retry worker to find.
  */
-const notifyRefundDecision = async (
-  requestId: string,
-  kind: "refundRequestApproved" | "refundRequestRejected"
-) => {
-  const notificationKind = NOTIFICATION_KIND[kind];
-  const delivery = await prisma.$transaction((tx) =>
-    enqueueNotificationDelivery(tx, {
-      kind: notificationKind,
-      referenceId: requestId,
-    })
-  );
-  await deliverNotificationNow({
-    deliveryId: delivery.id,
-    kind: notificationKind,
-    referenceId: requestId,
-  });
-};
+const REFUND_DECISIONS = {
+  approve: {
+    status: "approved",
+    notificationKind: NOTIFICATION_KIND.refundRequestApproved,
+  },
+  reject: {
+    status: "rejected",
+    notificationKind: NOTIFICATION_KIND.refundRequestRejected,
+  },
+} as const;
+
+/**
+ * Raised when the conditional `pending` claim inside the decision transaction
+ * matches no row, i.e. another request reviewed this one first. Rolls the
+ * whole decision back rather than writing a second one over it.
+ */
+class RefundDecisionRaceError extends Error {
+  constructor() {
+    super("Refund request was reviewed concurrently.");
+    this.name = "RefundDecisionRaceError";
+  }
+}
+
+/**
+ * The inline first send, after the decision has committed.
+ *
+ * Deliberately not part of the transaction and deliberately unable to fail the
+ * request: the outbox row is committed, so the worst a failure here costs is a
+ * few minutes' delay. Failing the route instead would report an error for a
+ * decision that actually succeeded, and the retry to "fix" it would be refused
+ * as already reviewed.
+ */
+const deliverRefundDecision = (
+  deliveryId: string,
+  kind: (typeof REFUND_DECISIONS)[keyof typeof REFUND_DECISIONS]["notificationKind"],
+  requestId: string
+) =>
+  deliverNotificationNow({ deliveryId, kind, referenceId: requestId });
 
 const updateRefundRequestSchema = z
   .object({
@@ -146,15 +177,31 @@ async function createStripeRefundForSubscription(
         metadata: { amount, currency: charge.currency.toUpperCase(), chargeId: charge.id },
       });
     }
-    return stripe.refunds.create({
-      charge: charge.id,
-      amount,
-      reason: "requested_by_customer",
-      metadata: {
-        tomverseRefundRequest: "true",
-        subscriptionId,
+    return stripe.refunds.create(
+      {
+        charge: charge.id,
+        amount,
+        reason: "requested_by_customer",
+        metadata: {
+          tomverseRefundRequest: "true",
+          // Which request this belongs to. Without it a refund that succeeded
+          // while the local write failed could not be matched back to
+          // anything, so reconciliation had nothing to look for.
+          ...(approval
+            ? { [REFUND_REQUEST_METADATA_KEY]: approval.requestId }
+            : {}),
+          subscriptionId,
+        },
       },
-    });
+      approval
+        ? {
+            // Scoped to the request, so a retry after a crash is answered from
+            // Stripe's record of the first call instead of issuing a second
+            // refund.
+            idempotencyKey: refundIdempotencyKey(approval.requestId),
+          }
+        : undefined
+    );
   };
   const refund =
     approval &&
@@ -214,11 +261,55 @@ export async function PATCH(req: Request, context: RouteContext) {
         { status: 404 }
       );
     }
-    if (refundRequest.status !== "pending") {
+    const decision = REFUND_DECISIONS[body.action];
+
+    if (refundRequest.status === REFUND_STATUS.processing) {
+      // Another attempt is between Stripe and the local commit. Refusing here
+      // is the point of the claim: retrying now is what would refund twice.
+      // Either it finishes on its own, or reconciliation resolves it.
       return NextResponse.json(
-        { error: "Refund request has already been reviewed." },
+        {
+          error:
+            "This refund is being processed. It will finish or be reconciled automatically; try again shortly.",
+        },
         { status: 409 }
       );
+    }
+
+    if (refundRequest.status !== REFUND_STATUS.pending) {
+      // A different decision is a real conflict and stays refused.
+      if (refundRequest.status !== decision.status) {
+        return NextResponse.json(
+          { error: "Refund request has already been reviewed." },
+          { status: 409 }
+        );
+      }
+      // The same decision, replayed -- a lost response, or a retry of an
+      // earlier attempt. Answering 409 here is what made the notification gap
+      // unrecoverable: the operator could see the decision had landed but had
+      // no way to re-drive the mail it owed. So this is idempotent, and it
+      // reconciles the outbox row, which also heals rows decided before the
+      // enqueue joined the decision transaction.
+      const replayed = await prisma.refundRequest.findUniqueOrThrow({
+        where: { id: refundRequest.id },
+        include: { timelineEvents: { orderBy: { createdAt: "asc" } } },
+      });
+      const delivery = await prisma.$transaction((tx) =>
+        enqueueNotificationDelivery(tx, {
+          kind: decision.notificationKind,
+          referenceId: refundRequest.id,
+        })
+      );
+      await deliverRefundDecision(
+        delivery.id,
+        decision.notificationKind,
+        refundRequest.id
+      );
+      return NextResponse.json({
+        success: true,
+        refundRequest: replayed,
+        replayed: true,
+      });
     }
 
     // The recipient's language is no longer looked up here: the notification
@@ -251,6 +342,23 @@ export async function PATCH(req: Request, context: RouteContext) {
           );
         }
       }
+      // Claim the request BEFORE any money moves.
+      //
+      // Stripe cannot join the local transaction, so the only way to make the
+      // gap between them survivable is to record that the attempt started.
+      // Claiming here does two things at once: it stops a second administrator
+      // reaching Stripe at all, and it means a crash after `refunds.create`
+      // leaves the row in `processing` -- where reconciliation will find it --
+      // rather than in `pending`, where the next attempt would refund again.
+      const processingClaim = await prisma.refundRequest.updateMany({
+        where: { id: refundRequest.id, status: REFUND_STATUS.pending },
+        data: {
+          status: REFUND_STATUS.processing,
+          processingStartedAt: new Date(),
+        },
+      });
+      if (processingClaim.count !== 1) throw new RefundDecisionRaceError();
+
       let stripeRefund;
       try {
         stripeRefund = await createStripeRefundForSubscription(
@@ -266,6 +374,16 @@ export async function PATCH(req: Request, context: RouteContext) {
           }
         );
       } catch (error) {
+        // The refund did not happen, so the claim has to come back off. An
+        // approval waiting on two-person sign-off is not a failure: leaving it
+        // `processing` would strand it, so it is released the same way.
+        await prisma.refundRequest.updateMany({
+          where: { id: refundRequest.id, status: REFUND_STATUS.processing },
+          data: {
+            status: REFUND_STATUS.pending,
+            processingStartedAt: null,
+          },
+        });
         if (error instanceof AdminApprovalRequiredError) throw error;
         console.error("Stripe refund creation failed:", error);
         await writeAdminAuditLog({
@@ -279,6 +397,7 @@ export async function PATCH(req: Request, context: RouteContext) {
             plan: refundRequest.plan,
             stripeCustomerId: refundRequest.stripeCustomerId,
             stripeSubscriptionId: refundRequest.stripeSubscriptionId,
+            releasedToPending: true,
           },
         });
         return NextResponse.json(
@@ -288,11 +407,14 @@ export async function PATCH(req: Request, context: RouteContext) {
       }
 
       await cancelStripeSubscription(refundRequest.stripeSubscriptionId);
-      const updated = await prisma.$transaction(async (tx) => {
-        const request = await tx.refundRequest.update({
-          where: { id: refundRequest.id },
+      const decided = await prisma.$transaction(async (tx) => {
+        // Conditional on the claim this request made, so a reconciliation pass
+        // that resolved the row in the meantime is not overwritten.
+        const claimed = await tx.refundRequest.updateMany({
+          where: { id: refundRequest.id, status: REFUND_STATUS.processing },
           data: {
             status: "approved",
+            processingStartedAt: null,
             adminNote: body.adminNote || null,
             reviewedByUserId: session.user.id,
             reviewedAt: new Date(),
@@ -302,6 +424,10 @@ export async function PATCH(req: Request, context: RouteContext) {
             refundAmountCents: stripeRefund.refundAmountCents,
             refundCurrency: stripeRefund.refundCurrency,
           },
+        });
+        if (claimed.count !== 1) throw new RefundDecisionRaceError();
+        const request = await tx.refundRequest.findUniqueOrThrow({
+          where: { id: refundRequest.id },
           include: {
             timelineEvents: {
               orderBy: { createdAt: "asc" },
@@ -354,48 +480,68 @@ export async function PATCH(req: Request, context: RouteContext) {
           });
         }
 
+        await writeAdminAuditLog({
+          session,
+          request: req,
+          action: "refund.approved",
+          targetType: "RefundRequest",
+          targetId: request.id,
+          summary: `Approved refund request for ${request.email || "unknown customer"}.`,
+          metadata: {
+            plan: request.plan,
+            stripeCustomerId: request.stripeCustomerId,
+            stripeSubscriptionId: request.stripeSubscriptionId,
+            stripeRefundId: request.stripeRefundId,
+            refundAmountCents: request.refundAmountCents,
+            creditReviewConfirmed: Boolean(body.confirmCreditReview),
+            creditPurchaseCount: creditReview?._count.creditPurchases || 0,
+            creditDebtCredits: creditReview?.creditDebtCredits || 0,
+            creditDebtCostMicroUsd: Number(
+              creditReview?.creditDebtCostMicroUsd || BigInt(0)
+            ),
+          },
+          tx,
+        });
+
+        const delivery = await enqueueNotificationDelivery(tx, {
+          kind: decision.notificationKind,
+          referenceId: refundRequest.id,
+        });
+
         return {
-          ...request,
-          timelineEvents: [...request.timelineEvents, event],
+          refundRequest: {
+            ...request,
+            timelineEvents: [...request.timelineEvents, event],
+          },
+          deliveryId: delivery.id,
         };
       });
 
-      await writeAdminAuditLog({
-        session,
-        request: req,
-        action: "refund.approved",
-        targetType: "RefundRequest",
-        targetId: updated.id,
-        summary: `Approved refund request for ${updated.email || "unknown customer"}.`,
-        metadata: {
-          plan: updated.plan,
-          stripeCustomerId: updated.stripeCustomerId,
-          stripeSubscriptionId: updated.stripeSubscriptionId,
-          stripeRefundId: updated.stripeRefundId,
-          refundAmountCents: updated.refundAmountCents,
-          creditReviewConfirmed: Boolean(body.confirmCreditReview),
-          creditPurchaseCount: creditReview?._count.creditPurchases || 0,
-          creditDebtCredits: creditReview?.creditDebtCredits || 0,
-          creditDebtCostMicroUsd: Number(
-            creditReview?.creditDebtCostMicroUsd || BigInt(0)
-          ),
-        },
+      await deliverRefundDecision(
+        decided.deliveryId,
+        decision.notificationKind,
+        refundRequest.id
+      );
+
+      return NextResponse.json({
+        success: true,
+        refundRequest: decided.refundRequest,
       });
-
-      await notifyRefundDecision(updated.id, "refundRequestApproved");
-
-      return NextResponse.json({ success: true, refundRequest: updated });
     }
 
-    const updated = await prisma.$transaction(async (tx) => {
-      const request = await tx.refundRequest.update({
-        where: { id: refundRequest.id },
+    const decided = await prisma.$transaction(async (tx) => {
+      const claimed = await tx.refundRequest.updateMany({
+        where: { id: refundRequest.id, status: "pending" },
         data: {
           status: "rejected",
           adminNote: body.adminNote || null,
           reviewedByUserId: session.user.id,
           reviewedAt: new Date(),
         },
+      });
+      if (claimed.count !== 1) throw new RefundDecisionRaceError();
+      const request = await tx.refundRequest.findUniqueOrThrow({
+        where: { id: refundRequest.id },
         include: {
           timelineEvents: {
             orderBy: { createdAt: "asc" },
@@ -414,34 +560,56 @@ export async function PATCH(req: Request, context: RouteContext) {
           },
         },
       });
+      await writeAdminAuditLog({
+        session,
+        request: req,
+        action: "refund.rejected",
+        targetType: "RefundRequest",
+        targetId: request.id,
+        summary: `Rejected refund request for ${request.email || "unknown customer"}.`,
+        metadata: {
+          plan: request.plan,
+          stripeCustomerId: request.stripeCustomerId,
+          stripeSubscriptionId: request.stripeSubscriptionId,
+        },
+        tx,
+      });
+
+      const delivery = await enqueueNotificationDelivery(tx, {
+        kind: decision.notificationKind,
+        referenceId: refundRequest.id,
+      });
+
       return {
-        ...request,
-        timelineEvents: [...request.timelineEvents, event],
+        refundRequest: {
+          ...request,
+          timelineEvents: [...request.timelineEvents, event],
+        },
+        deliveryId: delivery.id,
       };
     });
 
-    await writeAdminAuditLog({
-      session,
-      request: req,
-      action: "refund.rejected",
-      targetType: "RefundRequest",
-      targetId: updated.id,
-      summary: `Rejected refund request for ${updated.email || "unknown customer"}.`,
-      metadata: {
-        plan: updated.plan,
-        stripeCustomerId: updated.stripeCustomerId,
-        stripeSubscriptionId: updated.stripeSubscriptionId,
-      },
+    await deliverRefundDecision(
+      decided.deliveryId,
+      decision.notificationKind,
+      refundRequest.id
+    );
+
+    return NextResponse.json({
+      success: true,
+      refundRequest: decided.refundRequest,
     });
-
-    await notifyRefundDecision(updated.id, "refundRequestRejected");
-
-    return NextResponse.json({ success: true, refundRequest: updated });
   } catch (error) {
     const approvalResponse = adminApprovalErrorResponse(error);
     if (approvalResponse) return approvalResponse;
     const securityResponse = apiSecurityResponse(error);
     if (securityResponse) return securityResponse;
+    if (error instanceof RefundDecisionRaceError) {
+      return NextResponse.json(
+        { error: "Refund request has already been reviewed." },
+        { status: 409 }
+      );
+    }
     console.error("Refund request update failed:", error);
     return NextResponse.json(
       { error: "Failed to update refund request." },

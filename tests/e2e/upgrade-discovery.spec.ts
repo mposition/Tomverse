@@ -428,19 +428,18 @@ test.describe("value-moment upgrade prompt", () => {
   test("panel-only send waits for a changed model selection to persist", async ({
     page,
   }) => {
-    // UI-EMPTY-001 makes the whole comparison panel `inert` while the
-    // conversation has no messages yet, so that a keyboard or screen-reader
-    // user cannot reach a comparison the conversation does not have. The
-    // per-panel follow-up input is inside that subtree, which means an empty
-    // conversation cannot produce a panel-only send at all -- the input takes
-    // no focus, no keystroke and no submit.
+    // The history below is seeded so the panel is in the state its follow-up
+    // input is meant for: a conversation that already has an answer to follow
+    // up on. That is what this test is about -- the ordering between the model
+    // PATCH and the message POST -- not the empty state.
     //
-    // This test predates that contract and was seeding no messages, so it was
-    // asserting on an interaction the product deliberately refuses: the send
-    // never happened, `messageSavedAfterPatch` kept its initial false, and the
-    // failure read like a persistence-ordering bug. Seeding history puts the
-    // panel in the only state where its follow-up input is meant to work, so
-    // the ordering this test exists to protect is actually exercised.
+    // The comment that used to sit here said the panels are `inert` while the
+    // conversation is empty. They are not: that was tried and reverted, and
+    // the empty state still leaves the panels' own controls reachable. The
+    // open defect and the decision it is waiting on are tracked in
+    // .github/audits/ui-empty-001-keyboard-exposure-2026-08-01.md, which also
+    // records that no test currently covers a panel-only send on an empty
+    // conversation -- this one stopped doing so when it started seeding.
     await mockAuthenticatedApi(page, {
       selectedModels: ["gpt-5-4-mini", "claude-haiku-4-5"],
       messages: [
@@ -455,12 +454,15 @@ test.describe("value-moment upgrade prompt", () => {
     });
     await page.reload();
     await expect(page.getByTestId("chat-input")).toBeVisible();
-    // The panel is only interactive once the conversation is known to be
-    // non-empty; without this the send below would be silently refused again.
-    await expect(page.getByTestId("desktop-model-panel").first()).not.toHaveAttribute(
-      "inert",
-      ""
-    );
+    // Wait for the seeded history to actually be on screen before driving the
+    // panel. This replaces a `not.toHaveAttribute("inert", "")` check that
+    // could not fail: no panel is ever `inert` today, so it passed on the
+    // first evaluation whether or not the conversation had loaded, and the
+    // readiness it claimed to establish was never established. The rendered
+    // answer is positive evidence that this panel has the conversation.
+    await expect(
+      page.getByTestId("desktop-model-panel").first().getByText("seeded answer")
+    ).toBeVisible();
 
     let modelPatchCompleted = false;
     let messageSavedAfterPatch = false;

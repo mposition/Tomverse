@@ -6,7 +6,8 @@ import { isE2EDatabaseDisabled } from "@/lib/e2eTestMode";
 import { prisma } from "@/lib/prisma";
 import {
   getModelUsageProfile,
-  isRetiredModel,
+  isWithdrawnFromOfferModel,
+  resolveSelectableModelId,
   type AiModel,
   type ModelInputCapabilities,
   type ModelMinimumPlan,
@@ -19,6 +20,7 @@ import {
   isApprovedProviderApiBaseUrl,
   isApprovedProviderApiKeyEnvName,
   isAiProvider,
+  staticModelRegistryReconciliationRows,
   staticModelRegistrySeedRows,
 } from "@/lib/modelRegistryShared";
 
@@ -85,36 +87,85 @@ export const registryRowToModel = (row: ModelRegistryEntry): AiModel => {
 let bootstrapPromise: Promise<void> | null = null;
 let didWarnAboutRegistrySchema = false;
 
-// Retirement is a deliberate, human-authored lifecycle decision (a provider
-// stopped serving the model), unlike the tunable fields -- name, blurb,
-// pricing, sort order -- that an admin may legitimately diverge from the
-// bootstrap catalog on.
-const STATIC_RETIRED_MODELS = STATIC_RUNTIME_MODELS.filter(isRetiredModel);
+// Withdrawing a model from the offer is a deliberate, human-authored
+// lifecycle decision -- a provider stopped serving it, or it has not cleared
+// its launch gate -- unlike the tunable fields (name, blurb, pricing, sort
+// order) that an admin may legitimately diverge from the bootstrap catalog on.
+const STATIC_WITHDRAWN_MODELS = STATIC_RUNTIME_MODELS.filter(
+    isWithdrawnFromOfferModel
+);
 
 // `createMany({ skipDuplicates: true })` only ever inserts, so a model that
 // was already in the runtime registry before it was retired in
 // `lib/models.ts` kept its old `enabled`/`publiclyListed`/`status` values
 // forever -- the public model API and the picker went on offering a model no
-// provider would serve. Retirement is therefore replayed onto existing rows
-// on every bootstrap. `catalogDeleted` is deliberately untouched: it stays
-// human-controlled.
-async function applyStaticRetirements() {
-  if (STATIC_RETIRED_MODELS.length === 0) return;
+// provider would serve. The withdrawal is therefore replayed onto existing
+// rows on every bootstrap.
+//
+// This covers pre-launch models as well as retired ones, because the failure
+// is identical from the row's point of view: a build that had the model
+// enabled reaching an environment before the build that withdrew it leaves an
+// enabled row nothing would ever correct. Each model's own `status` is
+// written, so a retirement lands as "disabled" and a withheld launch as
+// "coming-soon" rather than being flattened together. `catalogDeleted` is
+// deliberately untouched: it stays human-controlled.
+/**
+ * Forces every model the checked-in catalogue has withdrawn back into its
+ * withdrawn state on the runtime registry. Exported as well as called from the
+ * bootstrap so it can be invoked deliberately -- by a test, or by an operator
+ * reconciling an environment -- rather than only as a side effect of the first
+ * request after a deploy. Safe to run repeatedly: it writes only rows that
+ * differ, and never touches catalogDeleted or any admin-tunable field.
+ */
+export async function reconcileStaticWithdrawals() {
+  if (STATIC_WITHDRAWN_MODELS.length === 0) return;
 
-  for (const model of STATIC_RETIRED_MODELS) {
-    const result = await prisma.modelRegistryEntry.updateMany({
-      where: {
-        id: model.id,
-        OR: [
-          { enabled: true },
-          { publiclyListed: true },
-          { status: { not: "disabled" } },
-        ],
-      },
+  const withdrawnIds = STATIC_WITHDRAWN_MODELS.map((model) => model.id);
+  // Read first, then write only the rows that actually differ. The previous
+  // version expressed "needs correcting" as a WHERE clause
+  // (enabled OR publiclyListed OR status mismatch) and so could not see a row
+  // that was ALREADY withdrawn but pointed at the wrong replacement -- exactly
+  // the shape llama-4-scout was in when llama-3-3 was retired underneath it:
+  // disabled, delisted, correct status, and handing users a model that no
+  // longer exists. Comparing values instead of guessing at a predicate also
+  // keeps this idempotent without relying on Prisma's null-vs-`not` filter
+  // semantics, which differ by field nullability.
+  const rows = await prisma.modelRegistryEntry.findMany({
+    where: { id: { in: withdrawnIds } },
+    select: {
+      id: true,
+      enabled: true,
+      publiclyListed: true,
+      status: true,
+      replacementModelId: true,
+    },
+  });
+  const rowsById = new Map(rows.map((row) => [row.id, row]));
+
+  for (const model of STATIC_WITHDRAWN_MODELS) {
+    const row = rowsById.get(model.id);
+    // Not seeded yet: createMany above will have inserted it in the correct
+    // state, or it is genuinely absent. Either way there is nothing to fix.
+    if (!row) continue;
+
+    const intendedReplacement = model.replacementModelId ?? null;
+    const isCurrent =
+      row.enabled === false &&
+      row.publiclyListed === false &&
+      row.status === model.status &&
+      // Only asserted when the catalogue names one. A withdrawal with no
+      // replacement (a pre-launch model) must not blank out a replacement an
+      // operator set by hand.
+      (intendedReplacement === null ||
+        row.replacementModelId === intendedReplacement);
+    if (isCurrent) continue;
+
+    await prisma.modelRegistryEntry.update({
+      where: { id: model.id },
       data: {
         enabled: false,
         publiclyListed: false,
-        status: "disabled",
+        status: model.status,
         ...(model.replacementModelId
           ? { replacementModelId: model.replacementModelId }
           : {}),
@@ -127,15 +178,55 @@ async function applyStaticRetirements() {
       },
     });
 
-    if (result.count > 0) {
-      console.warn(
-        "Model registry: applied static catalog retirement to runtime row.",
-        {
-          modelId: model.id,
-          replacementModelId: model.replacementModelId ?? null,
-        }
-      );
-    }
+    console.warn(
+      "Model registry: applied static catalog withdrawal to runtime row.",
+      {
+        modelId: model.id,
+        status: model.status,
+        replacementModelId: intendedReplacement,
+        previous: {
+          enabled: row.enabled,
+          publiclyListed: row.publiclyListed,
+          status: row.status,
+          replacementModelId: row.replacementModelId,
+        },
+      }
+    );
+  }
+}
+
+// Exact-ID reconciliation for the 2026-08-01 provider catalogue migration.
+// Unlike createMany(skipDuplicates), this updates the upstream ID, display
+// metadata, capability and pricing fields of existing rows. It deliberately
+// excludes catalogDeleted, sortOrder, provider connection settings, actor
+// metadata and active-model lifecycle fields so an operator's incident switch
+// is never turned back on by an application restart.
+async function applyScopedStaticCatalogReconciliation() {
+  const changes = staticModelRegistryReconciliationRows();
+  if (changes.length === 0) return;
+
+  const existingRows = await prisma.modelRegistryEntry.findMany({
+    where: { id: { in: changes.map((change) => change.id) } },
+  });
+  const existingById = new Map(existingRows.map((row) => [row.id, row]));
+
+  for (const change of changes) {
+    const current = existingById.get(change.id);
+    if (!current) continue;
+    const hasDrift = Object.entries(change.data).some(
+      ([field, value]) =>
+        current[field as keyof ModelRegistryEntry] !== value
+    );
+    if (!hasDrift) continue;
+
+    await prisma.modelRegistryEntry.update({
+      where: { id: change.id },
+      data: change.data as Prisma.ModelRegistryEntryUpdateInput,
+    });
+    console.warn(
+      "Model registry: reconciled provider-verified static metadata.",
+      { modelId: change.id }
+    );
   }
 }
 
@@ -143,8 +234,14 @@ export async function ensureModelRegistrySeeded() {
   if (E2E_DATABASE_DISABLED()) return;
   if (!bootstrapPromise) {
     bootstrapPromise = prisma.modelRegistryEntry
-      .createMany({ data: staticModelRegistrySeedRows(), skipDuplicates: true })
-      .then(() => applyStaticRetirements())
+      .createMany({
+        data: staticModelRegistrySeedRows(),
+        skipDuplicates: true,
+      })
+      .then(async () => {
+        await reconcileStaticWithdrawals();
+        await applyScopedStaticCatalogReconciliation();
+      })
       .catch((error) => {
         bootstrapPromise = null;
         throw error;
@@ -216,19 +313,27 @@ export async function getPublicRuntimeModels() {
   );
 }
 
+export function clampSelectedModelsAgainstRuntime(
+  modelIds: string[],
+  models: readonly AiModel[],
+  maximum = 3
+) {
+  const modelMap = new Map(models.map((model) => [model.id, model]));
+  return Array.from(new Set(modelIds))
+    .map((modelId) =>
+      resolveSelectableModelId(modelId, (candidateId) => modelMap.get(candidateId))
+    )
+    .filter((modelId): modelId is string => Boolean(modelId))
+    .filter((modelId, index, resolved) => resolved.indexOf(modelId) === index)
+    .slice(0, maximum);
+}
+
 export async function clampRuntimeSelectedModels(
   modelIds: string[],
   maximum = 3
 ) {
   const models = await getRuntimeModels();
-  const enabledIds = new Set(
-    models
-      .filter((model) => model.enabled && !model.catalogDeleted)
-      .map((model) => model.id)
-  );
-  return Array.from(new Set(modelIds))
-    .filter((modelId) => enabledIds.has(modelId))
-    .slice(0, maximum);
+  return clampSelectedModelsAgainstRuntime(modelIds, models, maximum);
 }
 
 export function modelRegistryCreateData(

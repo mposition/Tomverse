@@ -9,6 +9,7 @@ import {
 } from "@/lib/scheduledJobs";
 import { monitorInfrastructureThresholdsIfDue } from "@/lib/infrastructureThresholdMonitor";
 import { drainNotificationDeliveriesQuietly } from "@/lib/notificationDeliveryJob";
+import { reconcileProcessingRefundRequestsQuietly } from "@/lib/refundReconciliation";
 
 const isAuthorized = (request: Request) => {
   const configured = process.env.MAINTENANCE_SECRET;
@@ -41,13 +42,29 @@ export async function POST(request: Request) {
     // entry having to be provisioned. It never throws, so it cannot turn a
     // successful reconciliation into a failed one.
     const notificationDeliveries = await drainNotificationDeliveriesQuietly();
+    // Rides along for the same reason, and matters more: a refund stuck in
+    // `processing` means money may have left the account with nothing
+    // recording it. It never throws, so it cannot turn a successful
+    // reconciliation into a failed one.
+    const refundRequests = await reconcileProcessingRefundRequestsQuietly();
     await completeScheduledJob({
       runId: run?.id,
       processedCount: result.examined,
-      result: { ...result, infrastructureMonitor, notificationDeliveries },
+      result: {
+        ...result,
+        infrastructureMonitor,
+        notificationDeliveries,
+        refundRequests,
+      },
     });
     return Response.json(
-      { success: true, result, infrastructureMonitor, notificationDeliveries },
+      {
+        success: true,
+        result,
+        infrastructureMonitor,
+        notificationDeliveries,
+        refundRequests,
+      },
       { headers: { "Cache-Control": "no-store" } }
     );
   } catch (error) {

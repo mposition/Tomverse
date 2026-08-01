@@ -5,7 +5,10 @@ import { prisma } from "@/lib/prisma";
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
 import { APP_DEFAULTS } from "@/lib/appDefaults";
-import { isEnabledRuntimeModelId } from "@/lib/modelRegistry";
+import {
+    clampRuntimeSelectedModels,
+    isEnabledRuntimeModelId,
+} from "@/lib/modelRegistry";
 import { getUserChatUsageKey } from "@/lib/chatSecurity";
 import { migrateCurrentDailyUsageBuckets } from "@/lib/userDailyUsage";
 import {
@@ -110,9 +113,16 @@ export async function GET(req: Request) {
                 console.error("Account welcome email failed:", error);
             });
         } else if (!(await isEnabledRuntimeModelId(settings.defaultModel))) {
+            const [replacementModelId] = await clampRuntimeSelectedModels(
+                [settings.defaultModel],
+                1
+            );
             settings = await prisma.userSettings.update({
                 where: { userId },
-                data: { defaultModel: APP_DEFAULTS.defaultModelId },
+                data: {
+                    defaultModel:
+                        replacementModelId || APP_DEFAULTS.defaultModelId,
+                },
             });
         }
 

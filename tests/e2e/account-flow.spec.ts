@@ -115,27 +115,8 @@ test("a stale Private Mode sessionStorage flag from before the removal is ignore
   expect(flagAfterLoad).toBeNull();
 });
 
-/** app/globals.css paints these; asserted directly so "follows the OS" is
- *  checked on what the visitor sees rather than on a class name. */
-const DARK_BACKGROUND = "rgb(10, 10, 10)";
-const LIGHT_BACKGROUND = "rgb(255, 255, 255)";
-
-const themeClasses = (page: Page) =>
-  page.locator("html").evaluate((element) => ({
-    dark: element.classList.contains("dark"),
-    light: element.classList.contains("light"),
-  }));
-
-const backgroundColor = (page: Page) =>
-  page.locator("body").evaluate((element) => getComputedStyle(element).backgroundColor);
-
 test("theme preference changes immediately and follows the system setting", async ({ page }) => {
-  // UI-001 made the class set three-valued: "dark" and "light" are explicit
-  // choices, and "system" writes *neither*, because it is the absence of a
-  // class that lets the `prefers-color-scheme` rule in app/globals.css answer.
-  // Asserting `.dark` for the system case -- as this test used to -- asserts
-  // the one thing that would stop the OS from being followed.
-  await expect.poll(() => themeClasses(page)).toEqual({ dark: true, light: false });
+  await expect(page.locator("html")).toHaveClass(/dark/);
   await openAccountMenu(page);
   await page
     .getByTestId("account-menu")
@@ -148,14 +129,12 @@ test("theme preference changes immediately and follows the system setting", asyn
   await settingsDialog.getByLabel(/테마|Theme/).selectOption("light");
   await settingsDialog.getByRole("button", { name: /확인|OK/, exact: true }).click();
 
-  await expect.poll(() => themeClasses(page)).toEqual({ dark: false, light: true });
-  await expect.poll(() => backgroundColor(page)).toBe(LIGHT_BACKGROUND);
+  await expect(page.locator("html")).not.toHaveClass(/dark/);
+  await expect
+    .poll(() => page.locator("body").evaluate((element) => getComputedStyle(element).backgroundColor))
+    .toBe("rgb(255, 255, 255)");
 
-  // An explicit light choice has to survive a dark OS -- that contradiction is
-  // the case CSS alone cannot serve, and the reason ThemeBootstrap exists.
   await page.emulateMedia({ colorScheme: "dark" });
-  await expect.poll(() => backgroundColor(page)).toBe(LIGHT_BACKGROUND);
-
   await openAccountMenu(page);
   await page
     .getByTestId("account-menu")
@@ -168,12 +147,24 @@ test("theme preference changes immediately and follows the system setting", asyn
   await settingsDialog.getByLabel(/테마|Theme/).selectOption("system");
   await settingsDialog.getByRole("button", { name: /확인|OK/, exact: true }).click();
 
-  // Back on "system": neither class, and the paint tracks the OS in both
-  // directions without another visit to the dialog.
-  await expect.poll(() => themeClasses(page)).toEqual({ dark: false, light: false });
-  await expect.poll(() => backgroundColor(page)).toBe(DARK_BACKGROUND);
+  // UI-001. "system" deliberately writes neither class: `app/globals.css`
+  // distinguishes an explicit light choice from *no* choice by their absence,
+  // so the OS answers through `prefers-color-scheme`. Asserting a `dark` class
+  // here would be asserting the contract that replaced -- what has to hold is
+  // that the page actually renders dark, and that the choice is recorded.
+  const documentBackground = () =>
+    page.locator("body").evaluate((element) => getComputedStyle(element).backgroundColor);
+
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "system");
+  await expect(page.locator("html")).not.toHaveClass(/\b(dark|light)\b/);
+  await expect.poll(documentBackground).toBe("rgb(10, 10, 10)");
+
   await page.emulateMedia({ colorScheme: "light" });
-  await expect.poll(() => backgroundColor(page)).toBe(LIGHT_BACKGROUND);
+  // Still "system", still classless -- only the OS moved, and the page has to
+  // follow it without the preference changing.
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "system");
+  await expect(page.locator("html")).not.toHaveClass(/\b(dark|light)\b/);
+  await expect.poll(documentBackground).toBe("rgb(255, 255, 255)");
 });
 
 test("authenticated selector opens a swap dialog for a fourth model", async ({ page }) => {

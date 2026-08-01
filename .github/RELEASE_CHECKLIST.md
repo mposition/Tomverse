@@ -47,8 +47,15 @@ Reviewed by:        ____________________
 Artifacts checked:  ____________________
 ```
 
-Goldens are never refreshed by CI. If a baseline genuinely needs updating,
-update it in a reviewed pull request of its own — never as part of a release.
+No CI job that *judges* a golden ever rewrites one — `scripts/security-regression-check.mjs`
+asserts that PR Fast Gate, Main Chromium Regression, Nightly Visual Regression
+and the daily audit carry no snapshot-updating flag. Updating a baseline is a
+separate, manual act: dispatch the `Record Visual Baseline` workflow at the ref
+that changed the pixels, review its diff artifact, and merge the throwaway
+`visual-baseline/<run id>` branch it pushes as a pull request of its own —
+never as part of a release. Recording it anywhere but that workflow's canonical
+environment produces a baseline that is itself the defect (see
+`docs/qa/canonical-visual-baseline.md`).
 
 ### Waiver
 

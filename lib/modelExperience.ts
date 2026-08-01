@@ -27,7 +27,11 @@ const providerTags: Partial<Record<AiModel["provider"], ModelExperienceTag[]>> =
   xai: ["current"],
   deepseek: ["costFriendly"],
   mistral: ["eu", "multilingual"],
-  moonshot: ["coding"],
+  // Deliberately empty rather than ["coding"]: Moonshot serves a
+  // coding-specialised model (kimi-k2.7-code) *and* a general long-context
+  // reasoning one (kimi-k3), so "coding" is a per-model fact here, not a
+  // provider-wide one. The id check below tags the coding model.
+  moonshot: [],
   qwen: ["multilingual"],
   perplexity: ["search"],
 };
@@ -37,7 +41,9 @@ export const getModelExperienceTags = (model: AiModel) => {
 
   if (model.reasoning && model.reasoning !== "none") tags.add("reasoning");
   if (model.minimumPlan === "Guest") tags.add("free");
-  if (model.name.toLowerCase().includes("code") || model.id.includes("codestral")) {
+  // Matches getModelPickerFeatures' rule, so the marketing catalogue and the
+  // in-app picker agree on which models are coding models.
+  if (model.name.toLowerCase().includes("code") || model.id.includes("code")) {
     tags.add("coding");
   }
   if (model.name.toLowerCase().includes("small") || model.name.toLowerCase().includes("flash")) {

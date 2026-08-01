@@ -3,6 +3,7 @@ import "server-only";
 import { generateText } from "ai";
 import { prisma } from "@/lib/prisma";
 import { getActiveAiModel } from "@/lib/activeAiModel";
+import { getModelGenerationSettings } from "@/lib/modelGenerationCompatibility";
 import {
   ENABLED_MODELS,
   getEnabledModel,
@@ -189,7 +190,7 @@ export async function generateConversationTitle(
         model: getActiveAiModel(model),
         system: TITLE_SYSTEM_PROMPT,
         prompt,
-        temperature: 0.2,
+        ...getModelGenerationSettings(model, { temperature: 0.2 }),
         maxOutputTokens: 32,
         maxRetries: 1,
         abortSignal: AbortSignal.timeout(15_000),
