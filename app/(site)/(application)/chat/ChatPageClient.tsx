@@ -3400,6 +3400,8 @@ export function ChatPageClient({
     {toast && (
       <div
         key={toast.id}
+        data-testid="app-toast"
+        data-tone={toast.tone}
         role={toast.tone === "error" ? "alert" : "status"}
         aria-live={toast.tone === "error" ? "assertive" : "polite"}
         className="fixed bottom-5 left-1/2 z-[70] flex max-w-[calc(100vw-2rem)] -translate-x-1/2 items-center gap-3 rounded-2xl border border-zinc-200 bg-white px-4 py-3 text-sm font-semibold text-zinc-900 shadow-2xl shadow-zinc-900/15 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-100"

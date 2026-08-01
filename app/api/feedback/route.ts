@@ -15,6 +15,7 @@ import {
   readLimitedJson,
 } from "@/lib/apiSecurity";
 import { ensureGuestVerified } from "@/lib/turnstile";
+import { feedbackReferenceFromId } from "@/lib/feedbackPolicy";
 
 const feedbackSchema = z
   .object({
@@ -51,6 +52,19 @@ const supportNotificationEmail = () =>
   process.env.ADMIN_ALERT_EMAIL ||
   firstCsvValue(process.env.ADMIN_EMAILS);
 
+/**
+ * How the guest check was satisfied, for the operational log. Never the token
+ * itself, and never the grant cookie -- only which of the three paths was
+ * taken.
+ */
+type TurnstileOutcome =
+  /** Signed-in caller: no challenge is required at all. */
+  | "not_required"
+  /** A recent pass was still valid, so no challenge was run. */
+  | "existing_grant"
+  /** A fresh token was verified and a new grant issued. */
+  | "verified";
+
 export async function POST(req: Request) {
   try {
     const session = await getServerSession(authOptions);
@@ -63,12 +77,16 @@ export async function POST(req: Request) {
     });
     const body = await readLimitedJson(req, 8 * 1024, feedbackSchema);
     let turnstileGrantCookie: string | undefined;
+    let turnstileOutcome: TurnstileOutcome = "not_required";
     if (!session?.user?.id) {
       turnstileGrantCookie = await ensureGuestVerified(
         req,
         body.turnstileToken,
         "support_request"
       );
+      // A returned cookie means a fresh token was verified; nothing back means
+      // an existing grant already covered this caller.
+      turnstileOutcome = turnstileGrantCookie ? "verified" : "existing_grant";
     }
     const email = session?.user?.email || body.email || null;
     const feedback = await prisma.feedback.create({
@@ -87,6 +105,10 @@ export async function POST(req: Request) {
       },
     });
 
+    // From here on the submission is stored. Nothing below may turn this into
+    // a failure for the user: a notification that cannot be delivered is an
+    // operations problem, not a rejected report.
+    let notificationDelivered = false;
     const supportEmail = supportNotificationEmail();
     if (supportEmail) {
       try {
@@ -121,12 +143,15 @@ export async function POST(req: Request) {
             </div>
           `,
         });
+        notificationDelivered = true;
       } catch (error) {
         console.warn(
           JSON.stringify({
             event: "support_notification_failed",
             feedbackId: feedback.id,
-            reason: error instanceof Error ? error.message : "unknown",
+            // The delivery error's *class*, not its text: a provider message
+            // can quote the request it was given.
+            reason: error instanceof Error ? error.name : "unknown",
           })
         );
       }
@@ -140,18 +165,33 @@ export async function POST(req: Request) {
       );
     }
 
+    // The operational record of one submission. Deliberately made of
+    // presence flags and classifications only: no message body, no trace ID
+    // value, no Turnstile token, no cookie, no user agent.
     console.info(
       JSON.stringify({
         event: "user_feedback",
-        userId: session?.user?.id || null,
         feedbackId: feedback.id,
+        subject: session?.user?.id ? "user" : "guest",
+        userId: session?.user?.id || null,
         type: body.type,
+        status: 200,
+        turnstile: turnstileOutcome,
+        notificationDelivered,
         hasTraceId: Boolean(body.traceId),
+        hasModelId: Boolean(body.modelId),
         hasAttachments: Boolean(body.hasAttachments),
         attachmentCount: body.attachmentCount || 0,
+        at: new Date().toISOString(),
       })
     );
-    const response = NextResponse.json({ success: true });
+    const response = NextResponse.json({
+      success: true,
+      // Returned so the submitter can be told, in concrete terms, that the
+      // report was stored -- and can quote something back to support.
+      feedbackId: feedback.id,
+      reference: feedbackReferenceFromId(feedback.id),
+    });
     if (turnstileGrantCookie) {
       response.headers.append("Set-Cookie", turnstileGrantCookie);
     }
@@ -161,7 +201,23 @@ export async function POST(req: Request) {
     if (securityResponse) return securityResponse;
     const chatSecurityResponse = chatErrorResponse(error);
     if (chatSecurityResponse) return chatSecurityResponse;
-    console.error("Feedback submit failed:", error);
-    return NextResponse.json({ error: "Failed to submit feedback." }, { status: 500 });
+    // Name and code only: a database error message can carry the parameters it
+    // was called with, which here would be the feedback body itself.
+    console.error(
+      JSON.stringify({
+        event: "user_feedback_failed",
+        status: 500,
+        reason: error instanceof Error ? error.name : "unknown",
+        code:
+          error && typeof error === "object" && "code" in error
+            ? String((error as { code: unknown }).code).slice(0, 40)
+            : null,
+        at: new Date().toISOString(),
+      })
+    );
+    return NextResponse.json(
+      { error: "Failed to submit feedback.", code: "FEEDBACK_SUBMIT_FAILED" },
+      { status: 500 }
+    );
   }
 }
