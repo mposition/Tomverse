@@ -16,6 +16,7 @@ import { readFileSync } from "node:fs";
 
 const GUARDED_FILES = [
   "components/auth/AuthButton.tsx",
+  "components/billing/PlanChangeDialog.tsx",
   "components/chat/ChatInput.tsx",
   "components/chat/ComparisonActionRail.tsx",
   "components/chat/ComparisonReviewDialog.tsx",
