@@ -39,7 +39,7 @@
     "check:model-pricing": "node --import tsx scripts/check-model-pricing.mjs",
     "check:usage-bucket-range": "node --import tsx scripts/check-usage-bucket-range.mjs",
     "security:regression": "node scripts/security-regression-check.mjs",
-    "db:migrate": "node scripts/require-direct-database-url.mjs && prisma migrate deploy",
+    "db:migrate": "node scripts/require-direct-database-url.mjs && node scripts/baseline-existing-database.mjs && prisma migrate deploy",
     "db:refresh-test": "node scripts/refresh-test-database.mjs",
     "maintenance:cleanup": "node scripts/run-maintenance.mjs",
     "maintenance:credit-reservations": "node scripts/run-credit-reconciliation.mjs",
