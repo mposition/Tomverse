@@ -43,6 +43,7 @@ import {
 } from "@/lib/perplexityUsageCapture";
 import type { PerplexityUsageCostSnapshot } from "@/lib/perplexityUsageCore";
 import { prisma } from "@/lib/prisma";
+import { safeErrorMetadata } from "@/lib/providerErrorClassification";
 import {
   recordModelFailure,
   recordModelSuccess,
@@ -511,8 +512,10 @@ export async function POST(
             modelId: candidate.id,
             phase: "request",
             traceId,
-            errorName: error instanceof Error ? error.name : undefined,
-            message: error instanceof Error ? error.message : String(error),
+            errorName: safeErrorMetadata(error).name,
+            errorCode: safeErrorMetadata(error).code,
+            httpStatus: safeErrorMetadata(error).statusCode,
+            retryable: safeErrorMetadata(error).isRetryable,
           }),
           recordModelFailure(
             candidate.id,
@@ -523,7 +526,7 @@ export async function POST(
         console.error("Quick comparison reviewer attempt failed:", {
           traceId,
           reviewerModelId: candidate.id,
-          error,
+          ...safeErrorMetadata(error),
         });
       } finally {
         if (providerUsageTraceId) {
@@ -535,7 +538,7 @@ export async function POST(
 
     console.error("All quick comparison reviewers failed:", {
       traceId,
-      lastError,
+      ...safeErrorMetadata(lastError),
     });
     return jsonError(
       "The quick comparison could not be completed. Reserved credits were refunded.",
@@ -559,7 +562,10 @@ export async function POST(
     if (chatResponse) return chatResponse;
     const securityResponse = apiSecurityResponse(error);
     if (securityResponse) return securityResponse;
-    console.error("Quick comparison failed:", { traceId, error });
+    console.error("Quick comparison failed:", {
+      traceId,
+      ...safeErrorMetadata(error),
+    });
     return jsonError(
       "Failed to create the quick comparison.",
       "QUICK_COMPARISON_FAILED",

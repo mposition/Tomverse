@@ -10,7 +10,6 @@ import {
 } from "@/lib/models";
 import {
   providerDiagnosticCode,
-  safeErrorMessage,
   safeErrorMetadata,
 } from "@/lib/providerErrorClassification";
 import { calculateProviderUsageCost } from "@/lib/providerUsageCost";
@@ -43,15 +42,6 @@ export type ProviderProbeOutcome =
       reason: ProviderProbeFailureReason;
       timedOut: boolean;
       diagnosticCode?: string;
-      /**
-       * The provider's own error text, truncated. Strictly for operator logs
-       * -- deliberately never persisted to ProviderProbeResult, which is
-       * public-safe by contract and keeps only the sanitized diagnosticCode.
-       * Without it a 400 is undiagnosable after the fact: the status code
-       * alone cannot distinguish "this model id is wrong" from "these
-       * request parameters are rejected".
-       */
-      errorMessage?: string;
       latencyMs: number;
     };
 
@@ -247,7 +237,6 @@ export async function runProviderProbe(
       reason: timedOut ? "timeout" : "provider_error",
       timedOut,
       diagnosticCode: providerDiagnosticCode("PROVIDER_PROBE_FAILED", error),
-      errorMessage: safeErrorMessage(error)?.slice(0, 300),
       latencyMs: Date.now() - startedAt,
     };
   }

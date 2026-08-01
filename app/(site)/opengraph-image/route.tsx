@@ -1,11 +1,9 @@
 import { ImageResponse } from "next/og";
 
-export const alt =
-  "Tomverse Insight by Tomverse — compare GPT, Claude, and Gemini side by side";
-export const size = { width: 1200, height: 630 };
-export const contentType = "image/png";
+export const dynamic = "force-static";
+const imageSize = { width: 1200, height: 630 };
 
-export default function OpenGraphImage() {
+export function GET() {
   return new ImageResponse(
     (
       <div
@@ -57,6 +55,6 @@ export default function OpenGraphImage() {
         </div>
       </div>
     ),
-    size
+    imageSize
   );
 }

@@ -13,6 +13,7 @@ import {
   readLimitedJson,
 } from "@/lib/apiSecurity";
 import { ensureGuestVerified } from "@/lib/turnstile";
+import { safeErrorMetadata } from "@/lib/providerErrorClassification";
 
 const requestSchema = z
   .object({
@@ -31,13 +32,6 @@ const jsonError = (
     { error, code, traceId },
     { status, headers: { "Cache-Control": "no-store" } }
   );
-
-const safeErrorMessage = (error: unknown) => {
-  if (!error || typeof error !== "object" || !("message" in error)) {
-    return undefined;
-  }
-  return typeof error.message === "string" ? error.message : undefined;
-};
 
 // Guest counterpart to the authenticated
 // app/api/conversations/[conversationId]/generate-title route. Guests never
@@ -96,7 +90,7 @@ export async function POST(request: Request) {
         JSON.stringify({
           event: "guest_conversation_title_usage_record_failed",
           traceId,
-          message: safeErrorMessage(error)?.slice(0, 1_000),
+          ...safeErrorMetadata(error),
         })
       );
     }
@@ -116,7 +110,7 @@ export async function POST(request: Request) {
       JSON.stringify({
         event: "guest_conversation_title_failed",
         traceId,
-        message: safeErrorMessage(error)?.slice(0, 1_000),
+        ...safeErrorMetadata(error),
       })
     );
     // A title-generation failure must never surface as a user-facing error --

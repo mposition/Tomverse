@@ -62,6 +62,8 @@ function SignInButtons() {
         searchParams.get("reason") === "admin-session-expired";
     const providerError = searchParams.get("error");
     const pageViewTrackedRef = useRef(false);
+    const emailInputRef = useRef<HTMLInputElement | null>(null);
+    const codeInputRef = useRef<HTMLInputElement | null>(null);
 
     useEffect(() => {
         if (status === "authenticated") {
@@ -95,6 +97,12 @@ function SignInButtons() {
     // of a countdown that would otherwise read out tens of thousands of
     // seconds.
     const [isMinuteRateLimited, setIsMinuteRateLimited] = useState(false);
+
+    useEffect(() => {
+        if (step !== "code") return;
+        const frame = requestAnimationFrame(() => codeInputRef.current?.focus());
+        return () => cancelAnimationFrame(frame);
+    }, [step]);
 
     useEffect(() => {
         if (!retryAfterUntil) return;
@@ -302,7 +310,12 @@ function SignInButtons() {
 
             {step === "email" ? (
                 <div className="space-y-2">
+                    <label htmlFor="email-login-address" className="sr-only">
+                        {t("auth.emailLoginEmailInputLabel")}
+                    </label>
                     <input
+                        ref={emailInputRef}
+                        id="email-login-address"
                         type="email"
                         value={email}
                         onChange={(event) => {
@@ -323,7 +336,7 @@ function SignInButtons() {
                         autoComplete="email"
                         aria-invalid={emailError ? true : undefined}
                         aria-describedby={emailError ? "email-login-error" : undefined}
-                        className="w-full rounded-xl border border-zinc-200 bg-white px-4 py-3 text-sm text-zinc-900 outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 disabled:cursor-not-allowed disabled:opacity-50 dark:border-zinc-700 dark:bg-zinc-950 dark:text-white aria-[invalid=true]:border-red-400 aria-[invalid=true]:focus:border-red-500 aria-[invalid=true]:focus:ring-red-500/10"
+                        className="w-full rounded-xl border border-zinc-200 bg-white px-4 py-3 text-base text-zinc-900 outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 disabled:cursor-not-allowed disabled:opacity-50 dark:border-zinc-700 dark:bg-zinc-950 dark:text-white aria-[invalid=true]:border-red-400 aria-[invalid=true]:focus:border-red-500 aria-[invalid=true]:focus:ring-red-500/10 md:text-sm"
                     />
                     {emailError ? (
                         <p id="email-login-error" role="alert" className="px-1 text-xs font-semibold text-red-600 dark:text-red-400">
@@ -349,15 +362,21 @@ function SignInButtons() {
                 </div>
             ) : (
                 <div className="space-y-2">
-                    <p className="text-xs leading-5 text-zinc-500 dark:text-zinc-400">
+                    <p id="email-login-code-description" role="status" className="text-xs leading-5 text-zinc-500 dark:text-zinc-400">
                         {t("auth.emailLoginCodeSentBody").replace("{email}", email)}
                     </p>
+                    <label htmlFor="email-login-code" className="sr-only">
+                        {t("auth.emailLoginCodeInputLabel")}
+                    </label>
                     <input
+                        ref={codeInputRef}
+                        id="email-login-code"
                         value={code}
                         onChange={(event) => setCode(event.target.value.replace(/[^0-9]/g, "").slice(0, 6))}
                         inputMode="numeric"
                         autoComplete="one-time-code"
                         placeholder="000000"
+                        aria-describedby="email-login-code-description"
                         className="w-full rounded-xl border border-zinc-200 bg-white px-4 py-3 text-center font-mono text-lg tracking-widest text-zinc-950 outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 dark:border-zinc-700 dark:bg-zinc-950 dark:text-white"
                     />
                     <button
@@ -374,6 +393,7 @@ function SignInButtons() {
                             setStep("email");
                             setCode("");
                             setFormError(null);
+                            requestAnimationFrame(() => emailInputRef.current?.focus());
                         }}
                         className="w-full text-center text-xs font-semibold text-zinc-500 hover:underline dark:text-zinc-400"
                     >
@@ -382,9 +402,18 @@ function SignInButtons() {
                 </div>
             )}
             {displayedFormError ? (
-                <p role="alert" className="text-center text-xs font-semibold text-red-600 dark:text-red-400">
-                    {displayedFormError}
-                </p>
+                <>
+                    <p
+                        role={isMinuteRateLimited ? undefined : "alert"}
+                        aria-hidden={isMinuteRateLimited ? true : undefined}
+                        className="text-center text-xs font-semibold text-red-600 dark:text-red-400"
+                    >
+                        {displayedFormError}
+                    </p>
+                    {isMinuteRateLimited && formError ? (
+                        <p role="alert" className="sr-only">{formError}</p>
+                    ) : null}
+                </>
             ) : null}
         </div>
     );
@@ -407,7 +436,7 @@ export function SignInPageContent() {
     }, [consentSlot, registerAuthConsentSlot]);
 
     return (
-        <div className="flex min-h-screen flex-col items-center justify-center gap-3 bg-zinc-100 px-4 pt-8 pb-[max(2rem,env(safe-area-inset-bottom))] transition-colors duration-300 dark:bg-zinc-950">
+        <main className="flex min-h-screen flex-col items-center justify-center gap-3 bg-zinc-100 px-4 pt-8 pb-[max(2rem,env(safe-area-inset-bottom))] transition-colors duration-300 dark:bg-zinc-950">
             <div
                 data-testid="signin-card"
                 className="w-full max-w-md overflow-hidden rounded-3xl border border-zinc-200 bg-white shadow-2xl shadow-zinc-300/40 transition-all dark:border-zinc-800 dark:bg-zinc-900 dark:shadow-black/30"
@@ -434,6 +463,6 @@ export function SignInPageContent() {
                 </div>
             </div>
             <div ref={setConsentSlot} className="w-full max-w-md empty:hidden" />
-        </div>
+        </main>
     );
 }

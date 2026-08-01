@@ -13,7 +13,9 @@
 # testing
 /coverage
 /playwright-report/
+/playwright-report-admin/
 /test-results/
+/test-results-admin/
 /blob-report/
 # Sandbox-only Playwright browser-executable override; never a real fix.
 playwright.local-sandbox.config.ts

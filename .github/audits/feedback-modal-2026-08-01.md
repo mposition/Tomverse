@@ -201,3 +201,37 @@ denylist는 알려준 형식만큼만 좋습니다. 두 축으로 보완했습�
 엔트로피 기반 탐지는 **28자 미만의 짧은 비밀값**은 잡지 않습니다. 짧은 토큰까지
 가리면 진단 정보가 사실상 비어버리기 때문에 의도한 선택입니다. 그 구간은
 미리보기(사람 검토)가 담당합니다.
+
+---
+
+## 후속 2 (같은 날): 마지막 잔여 위험 해소
+
+### 28자 미만 짧은 비밀값
+
+앞 절에서 "미리보기(사람 검토)가 담당한다"고 남겨둔 구간입니다. 읽을 수만
+있고 손댈 수는 없으면 검토는 절반짜리입니다 — 놓친 것을 발견해도 할 수 있는
+일이 제출 취소밖에 없기 때문입니다. 미리보기를 **편집 가능한 필드**로
+바꿨습니다.
+
+- `feedback-diagnostics-body`가 `<textarea>`입니다. sanitize된 본문으로
+  seed되고, 사용자가 고친 뒤에는 고친 내용이 그대로 전송됩니다.
+- `feedback-diagnostics-attach` 체크박스로 진단 정보를 **통째로 뺄 수도**
+  있습니다. 해제하면 `feedback-diagnostics-omitted` 안내가 뜨고 본문에서
+  진단 블록이 사라집니다.
+- 진단을 빼도 제출은 가능합니다. 기존 `errorReportDefaultMessage`가 서버의
+  최소 5자 계약을 그대로 충족하므로 우회가 아닙니다.
+- "진단 정보 복사"도 여전히 화면에 보이는 값을 복사합니다 — 미리보기 =
+  전송 = 복사 불변식은 편집 후에도 유지됩니다.
+
+탐지기가 무엇을 놓쳤는지는 탐지기가 알 수 없습니다. 이제 그 답이 "사용자가
+지울 수 있다"입니다.
+
+### 검증
+
+- `tests/feedbackPolicy.test.mjs` 40건
+- `tests/e2e/feedback-modal.spec.ts` 51건(desktop+mobile 102 pass) — 편집한
+  내용이 그대로 전송됨, 진단 전체 제외 후에도 제출 성공, 미리보기 값과 전송
+  본문 일치
+- `test:unit` 906 / `test:server-contract` 100 / `security:regression` 117
+- typecheck / eslint / build / encoding / accent / model-pricing /
+  fixture-route-gate 통과

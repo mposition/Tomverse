@@ -13,6 +13,13 @@ const eslintConfig = defineConfig([
     "build/**",
     "playwright-report/**",
     "test-results/**",
+    ".claude/**",
+    // The Admin Console E2E suite writes its own report and artifact
+    // directories. Both are gitignored, but they were not listed here, so
+    // running that suite and then `npm run lint` produced hundreds of errors
+    // out of Playwright's bundled report viewer.
+    "playwright-report-admin/**",
+    "test-results-admin/**",
     "next-env.d.ts",
   ]),
 ]);

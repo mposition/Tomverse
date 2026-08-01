@@ -119,3 +119,16 @@ run(
   ],
   "Running the deep-research submit/poll credit and persistence scenarios"
 );
+run(
+  [
+    "--conditions=react-server",
+    "--experimental-test-module-mocks",
+    "--no-warnings=ExperimentalWarning",
+    "--import",
+    "tsx",
+    "--test",
+    "--test-concurrency=1",
+    "tests/integration/provider-recovery-route.db.test.ts",
+  ],
+  "Running the administrator provider recovery route and its audit trail"
+);

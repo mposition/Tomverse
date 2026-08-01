@@ -1,6 +1,7 @@
 import "server-only";
 
 import {
+  NOTIFICATION_QUEUE_DEPTH_ALERT,
   drainNotificationDeliveries,
   type NotificationDrainResult,
 } from "@/lib/notificationDeliveries";
@@ -16,13 +17,15 @@ import {
  * console reads.
  *
  * Two callers share it: the dedicated maintenance endpoint, and the credit
- * reconciliation cron that already runs every five minutes. Having both means
+ * reconciliation cron that already runs every fifteen minutes. Having both means
  * the queue keeps draining on an existing schedule -- no new cron entry has to
  * be provisioned before this starts working -- while still offering an
  * explicit endpoint to run or re-run it on demand.
  */
 export async function runNotificationDeliveryDrain(options?: {
-  limit?: number;
+  batchSize?: number;
+  maxBatches?: number;
+  timeBudgetMs?: number;
   now?: Date;
 }): Promise<NotificationDrainResult> {
   const run = await startScheduledJob("notification_delivery_retry");
@@ -50,6 +53,24 @@ export async function runNotificationDeliveryDrain(options?: {
         },
       });
     }
+    // A queue that is deep, or a pass that ran out of budget before clearing
+    // it, is a backlog. Said out loud here so it is noticed while the mail is
+    // merely late, rather than after it has abandoned.
+    if (result.pending >= NOTIFICATION_QUEUE_DEPTH_ALERT || !result.exhausted) {
+      await reportOperationalIncident({
+        code: "NOTIFICATION_DELIVERY_BACKLOG",
+        title: "Operator notification queue is not keeping up",
+        error: `${result.pending} notification(s) still pending after ${result.batches} batch(es)`,
+        severity: "warning",
+        cooldownMs: 30 * 60 * 1_000,
+        context: {
+          component: "notification-delivery-retry",
+          pending: result.pending,
+          batches: result.batches,
+          exhausted: result.exhausted,
+        },
+      });
+    }
     return result;
   } catch (error) {
     await failScheduledJob({ runId: run?.id, error });
@@ -62,7 +83,9 @@ export async function runNotificationDeliveryDrain(options?: {
  * job it is riding along with.
  */
 export async function drainNotificationDeliveriesQuietly(options?: {
-  limit?: number;
+  batchSize?: number;
+  maxBatches?: number;
+  timeBudgetMs?: number;
 }) {
   try {
     return await runNotificationDeliveryDrain(options);

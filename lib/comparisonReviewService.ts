@@ -30,6 +30,7 @@ import {
   perplexityUsageHeaders,
 } from "@/lib/perplexityUsageCapture";
 import type { PerplexityUsageCostSnapshot } from "@/lib/perplexityUsageCore";
+import { safeErrorMetadata } from "@/lib/providerErrorClassification";
 import {
   recordModelFailure,
   recordModelSuccess,
@@ -327,8 +328,10 @@ export const runComparisonReview = async (
           modelId: candidate.id,
           phase: "request",
           traceId,
-          errorName: error instanceof Error ? error.name : undefined,
-          message: error instanceof Error ? error.message : String(error),
+          errorName: safeErrorMetadata(error).name,
+          errorCode: safeErrorMetadata(error).code,
+          httpStatus: safeErrorMetadata(error).statusCode,
+          retryable: safeErrorMetadata(error).isRetryable,
         }),
         recordModelFailure(
           candidate.id,
@@ -339,7 +342,7 @@ export const runComparisonReview = async (
       console.error("Comparison reviewer attempt failed:", {
         traceId,
         reviewerModelId: candidate.id,
-        error,
+        ...safeErrorMetadata(error),
       });
       return null;
     } finally {

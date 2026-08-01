@@ -8,7 +8,10 @@ import {
   setTurnstileScript,
   installTurnstileScript,
 } from "./support/app-fixtures";
-import { freezeAnimations } from "./support/chat-state-fixtures";
+import {
+  freezeAnimations,
+  setRootFontSize,
+} from "./support/chat-state-fixtures";
 
 // ---------------------------------------------------------------------------
 // Guest verification placement and coordination.
@@ -1135,7 +1138,7 @@ test.describe("Guest verification: long-wait feedback", () => {
     const notice = page.getByTestId("guest-verification-long-wait");
     await expect(notice).toBeVisible({ timeout: LONG_WAIT_BUDGET_MS });
 
-    await page.addStyleTag({ content: "html{font-size:32px !important}" });
+    await setRootFontSize(page, 32);
     await page.waitForTimeout(300);
 
     // Still readable, still inside the viewport, and the escape route is still

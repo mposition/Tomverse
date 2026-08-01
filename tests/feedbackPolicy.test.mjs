@@ -519,14 +519,21 @@ test("a short token is left alone however random it looks", () => {
   assert.equal(looksLikeUnknownSecret("Err500Retry2"), false);
 });
 
-test("the user is shown exactly what will be attached", () => {
+test("the user is shown exactly what will be attached, and can change it", () => {
   const source = read("components/chat/FeedbackButton.tsx");
   // The preview renders the sanitised text, not the raw details.
   assert.match(source, /sanitizedDiagnostics = useMemo/);
   assert.match(source, /data-testid="feedback-diagnostics-body"/);
-  assert.match(source, /\{sanitizedDiagnostics\}/);
+  // And it is a field, not a read-only block: a pattern cannot know what it
+  // missed, so the person reading it has to be able to delete it.
+  assert.match(source, /value=\{effectiveDiagnostics\}/);
+  assert.match(source, /onChange=\{\(event\) => setDiagnostics\(event\.target\.value\)\}/);
+  // Or drop the attachment entirely.
+  assert.match(source, /data-testid="feedback-diagnostics-attach"/);
+  // What is sent is what was shown, edits included.
+  assert.match(source, /rawErrorDetails: effectiveDiagnostics \|\| undefined,/);
   // And the copy button hands over the same thing.
-  assert.match(source, /clipboard\.writeText\(sanitizedDiagnostics\)/);
+  assert.match(source, /clipboard\.writeText\(effectiveDiagnostics\)/);
   assert.ok(
     !/clipboard\.writeText\(rawErrorDetails\)/.test(source),
     "the copy button still hands over unsanitised text"

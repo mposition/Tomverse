@@ -255,7 +255,15 @@ export type UsagePatch = {
     planRemainingCredits: number;
     purchasedRemainingCredits: number;
   }>;
-  limits?: Partial<{ creditsDay: number; creditsMonth: number; maxModels: number }>;
+  limits?: Partial<{
+    creditsDay: number;
+    creditsMonth: number;
+    maxModels: number;
+    /** Plan entitlements the sidebar's conversation menu gates on. */
+    allowAttachments: boolean;
+    allowSharing: boolean;
+    allowDownloads: boolean;
+  }>;
 };
 
 /** Overrides GET /api/user/usage on top of mockAuthenticatedApi's default. */
@@ -363,6 +371,19 @@ export async function restoreActiveConversation(page: Page, conversationId = "qa
  */
 export async function freezeAnimations(page: Page) {
   await page.addStyleTag({ url: "/qa/freeze-animations.css" });
+}
+
+export async function setRootFontSize(
+  page: Page,
+  size: 16 | 20 | 24 | 32
+) {
+  await page.addStyleTag({ url: `/qa/root-font-${size}.css` });
+  await page.evaluate(
+    () =>
+      new Promise<void>((resolve) =>
+        requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
+      )
+  );
 }
 
 /**

@@ -1,5 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 import { mockPublicProofMetrics, prepareGuestPage } from "./support/app-fixtures";
+import { setRootFontSize } from "./support/chat-state-fixtures";
 
 /**
  * FINAL-F001 / FINAL-F004 / EXT-REAUDIT-F002 -- WCAG 1.4.4 **Resize text**.
@@ -23,8 +24,6 @@ import { mockPublicProofMetrics, prepareGuestPage } from "./support/app-fixtures
  * the 44px target minimum at any text scale, and the header row wraps so the
  * controls reflow onto a second line instead of leaving the viewport.
  */
-
-const ROOT_FONT_200 = "html{font-size:32px !important}";
 
 const VIEWPORTS = [
   { name: "320", width: 320, height: 568 },
@@ -100,7 +99,7 @@ async function clippedElements(page: Page, scope = "main") {
 }
 
 async function applyRootFont200(page: Page) {
-  await page.addStyleTag({ content: ROOT_FONT_200 });
+  await setRootFontSize(page, 32);
   // Let the reflow settle before measuring.
   await page.waitForTimeout(300);
 }
