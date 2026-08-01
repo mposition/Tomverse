@@ -60,6 +60,56 @@ guardrail = 크레딧 수 × COST_PER_CREDIT_CEILING_MICRO_USD × GUARDRAIL_HEAD
 `totalDay`/`totalMonth`는 구매 크레딧 여유분(`PURCHASED_CREDIT_HEADROOM_MULTIPLE`
 = 5배)까지 포함한 전체 비용 guardrail입니다.
 
+### 저장 자료형 계약: `ChatUsageBucket.count`는 BIGINT를 유지한다
+
+guardrail 산식의 결과는 **DB에 저장되고 SQL로 비교되는 값**입니다. 산식만
+맞고 저장 자료형이 좁으면, 한도가 느슨해지는 게 아니라 쿼리 자체가 실패합니다.
+실제로 그렇게 됐습니다.
+
+```
+Max totalMonth = 10,000 × 40,000 × 1.25 × 5 = 2,500,000,000 micro-USD
+int4 상한                                    = 2,147,483,647
+```
+
+`acquireChatAccess`가 이 한도를 guardrail UPSERT의
+`WHERE "count" <= $limit - $amount`에 바인딩하므로, int4에서는 PostgreSQL이
+allow/deny를 돌려주는 대신 `22003 (value out of range for type integer)`을
+던졌습니다. 즉 요청이 깔끔하게 거절되는 게 아니라 **실패**했고, 경계인
+**약 8,590 월간 크레딧**을 넘는 모든 플랜이 해당됐습니다. 기본 설정에서는
+Max 전체입니다(Pro는 3,000이라 아래에 머뭅니다).
+
+계약:
+
+1. **`ChatUsageBucket.count`는 PostgreSQL `BIGINT` / Prisma `BigInt`를
+   유지합니다.** 저장되는 카운터 자체가 한도값까지 도달해야 하므로, 한도를
+   int4 아래로 되돌려 맞추는 것은 해결이 아니라 이 문서가 막으려는 "크레딧이
+   살 수 있는 것보다 낮은 숨은 한도"를 다시 만드는 일입니다.
+2. **`Int` / `INTEGER`로 되돌리는 마이그레이션을 금지합니다.** 좁히려면 먼저
+   위 산식과 모든 플랜의 최대 저장값을 다시 계산해 근거를 이 문서에 남깁니다.
+3. **guardrail 상수, 플랜 크레딧, headroom 배수를 바꿀 때마다 최대 저장값을
+   재계산합니다.** `COST_PER_CREDIT_CEILING_MICRO_USD`,
+   `GUARDRAIL_HEADROOM_MULTIPLIER`, `PURCHASED_CREDIT_HEADROOM_MULTIPLE`,
+   그리고 플랜의 `monthlyMessageLimit`가 모두 이 곱에 들어갑니다.
+4. **읽기 경계에서 `usageBucketCount()`를 씁니다.** `bigint`를 `number`로
+   좁히고 `Number.isSafeInteger()`로 검증합니다. 안전 정수를 벗어나면 조용히
+   반올림하지 않고 실패합니다.
+5. **`bigint`를 API JSON으로 그대로 넘기지 않습니다.**
+   `NextResponse.json()`에 `bigint`가 도달하면
+   `Do not know how to serialize a BigInt`로 던집니다.
+
+관련 파일:
+
+- `prisma/migrations/20260801130000_widen_chat_usage_bucket_count/migration.sql`
+- `lib/chatUsageBucketCount.ts`
+- `tests/usageBucketRange.test.mjs` (schema 자료형 + 플랜별 최대 저장값)
+- `tests/integration/credit-finance.db.test.ts`
+  ("a cost bucket's running total crosses int4's ceiling",
+  "the largest derived guardrail survives a database round trip")
+
+자동 검사: `npm run check:usage-bucket-range`가 PR Fast Gate에서 schema 자료형,
+되돌리는 마이그레이션, 모든 기본 플랜의 최대 guardrail이 DB·JavaScript 안전
+범위 안에 있는지를 fail-closed로 확인합니다.
+
 ### 환경변수 override는 유도값 아래로 내려갈 수 없다
 
 `CHAT_COST_GUARDRAIL_{PLAN}_{PLAN|TOTAL}_MICROUSD_PER_{DAY|MONTH}`로 올릴 수는

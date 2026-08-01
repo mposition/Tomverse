@@ -37,6 +37,7 @@
     "check:accent-tokens": "node scripts/check-accent-tokens.mjs",
     "verify:fixture-route-gate": "node scripts/verify-fixture-route-gate.mjs",
     "check:model-pricing": "node --import tsx scripts/check-model-pricing.mjs",
+    "check:usage-bucket-range": "node --import tsx scripts/check-usage-bucket-range.mjs",
     "security:regression": "node scripts/security-regression-check.mjs",
     "db:migrate": "node scripts/require-direct-database-url.mjs && prisma migrate deploy",
     "db:refresh-test": "node scripts/refresh-test-database.mjs",
