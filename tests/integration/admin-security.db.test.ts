@@ -9,6 +9,7 @@ import {
 import { AdminReauthenticationRequiredError } from "@/lib/adminReauthentication";
 import { prisma } from "@/lib/prisma";
 import { getScheduledJobsDashboard } from "@/lib/scheduledJobs";
+import { SCHEDULED_JOB_DEFINITIONS } from "@/lib/scheduledJobsCore";
 
 const resetAdminSecurityData = () =>
   prisma.$executeRawUnsafe(`
@@ -213,14 +214,27 @@ test("an elapsed re-authentication window is refused before an approval is recor
   assert.equal(await prisma.adminActionApproval.count(), 0);
 });
 
+// SCHED-DRIFT-001 again, from the other side. These fixtures used to hard-code
+// "20 minutes ago", which was overdue against the 12-minute budget the
+// catalogue carried at the time and is comfortably healthy against the
+// 35-minute budget it carries now. A literal here pins the test to whatever
+// cadence happened to be true the day it was written, which is the same drift
+// the catalogue itself was fixed for -- so both fixtures are derived from the
+// budget the dashboard actually applies.
+const reconciliationSilenceMs =
+  SCHEDULED_JOB_DEFINITIONS.find(
+    (definition) => definition.key === "credit_reservation_reconciliation"
+  )?.maximumSilenceMs ?? 0;
+
 test("scheduled job dashboard flags missing and overdue invocations", async () => {
   const now = new Date("2026-07-18T12:00:00.000Z");
+  const overdueBy = reconciliationSilenceMs + 5 * 60 * 1_000;
   await prisma.scheduledJobRun.create({
     data: {
       jobKey: "credit_reservation_reconciliation",
       status: "succeeded",
-      startedAt: new Date(now.getTime() - 20 * 60 * 1_000),
-      completedAt: new Date(now.getTime() - 19 * 60 * 1_000),
+      startedAt: new Date(now.getTime() - overdueBy - 60 * 1_000),
+      completedAt: new Date(now.getTime() - overdueBy),
       processedCount: 3,
     },
   });
@@ -233,4 +247,27 @@ test("scheduled job dashboard flags missing and overdue invocations", async () =
   assert.equal(reconciliation?.lastProcessedCount, 3);
   assert.equal(cleanup?.status, "delayed");
   assert.equal(cleanup?.lastRunAt, null);
+});
+
+test("a run still inside its silence budget is not reported delayed", async () => {
+  // The defect #206 fixed: a healthy reconciliation was shown delayed for the
+  // last minutes of every cycle. Asserted here against the real dashboard, not
+  // only against the timing helper.
+  const now = new Date("2026-07-18T12:00:00.000Z");
+  const quietFor = reconciliationSilenceMs - 60 * 1_000;
+  await prisma.scheduledJobRun.create({
+    data: {
+      jobKey: "credit_reservation_reconciliation",
+      status: "succeeded",
+      startedAt: new Date(now.getTime() - quietFor - 60 * 1_000),
+      completedAt: new Date(now.getTime() - quietFor),
+      processedCount: 1,
+    },
+  });
+  const dashboard = await getScheduledJobsDashboard(now);
+  const reconciliation = dashboard.find(
+    (job) => job.key === "credit_reservation_reconciliation"
+  );
+  assert.equal(reconciliation?.delayed, false);
+  assert.equal(reconciliation?.status, "succeeded");
 });
