@@ -203,10 +203,12 @@ export function ChatSidebar({
         "flex w-full items-center justify-between whitespace-nowrap rounded px-3 py-2 text-sm transition-colors";
 
     const menuItemEnabled =
-        "cursor-pointer text-zinc-300 hover:bg-zinc-800 hover:text-zinc-100";
+        "cursor-pointer text-zinc-700 hover:bg-zinc-100 hover:text-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800 dark:hover:text-zinc-100";
 
+    // zinc-600 on zinc-900/50 was 2.29:1 -- a disabled item still has to be
+    // readable enough to tell the user which action is unavailable.
     const menuItemDisabled =
-        "cursor-not-allowed bg-zinc-900/50 text-zinc-600";
+        "cursor-not-allowed bg-zinc-100 text-zinc-500 dark:bg-zinc-900/50 dark:text-zinc-400";
 
     const organizerExpanded =
         sidebarTourStep !== null || organizerPreference === "expanded";
@@ -1361,7 +1363,7 @@ export function ChatSidebar({
                                          e.stopPropagation();
                                          toggleConversationMenu(conv.id, e.currentTarget);
                                      }}
-                                     className={`flex shrink-0 cursor-pointer items-center justify-center text-zinc-500 transition-colors hover:text-zinc-200 ${isMobileDrawer ? "h-11 w-11" : "p-1"}`}
+                                     className={`flex shrink-0 cursor-pointer items-center justify-center text-zinc-500 transition-colors hover:text-zinc-900 dark:hover:text-zinc-100 ${isMobileDrawer ? "h-11 w-11" : "p-1"}`}
                                      title={t("chat.moreActions")}
                                      aria-label={`${t("chat.moreActions")}: ${conv.title}`}
                                      aria-expanded={isMenuOpen}
@@ -1376,7 +1378,7 @@ export function ChatSidebar({
                                          data-testid="conversation-menu-panel"
                                          role="menu"
                                          onClick={(event) => event.stopPropagation()}
-                                         className="context-menu-wrapper fixed z-[120] flex flex-col overflow-y-auto overscroll-contain rounded-lg border border-zinc-800 bg-zinc-900 p-1.5 text-xs text-zinc-300 shadow-2xl animate-fadeIn"
+                                         className="context-menu-wrapper fixed z-[120] flex flex-col overflow-y-auto overscroll-contain rounded-lg border border-zinc-200 bg-white p-1.5 text-xs text-zinc-700 shadow-2xl animate-fadeIn dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-300"
                                          style={{
                                              left: conversationMenuPosition.left,
                                              width: conversationMenuPosition.width,
