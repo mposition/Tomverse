@@ -160,6 +160,8 @@ export function UserUsageSummary({
           <div className="mt-3 border-t border-zinc-200 pt-3 dark:border-zinc-800">
             <CreditPackPurchaseButton
               trigger="usage_widget"
+              ctaLocation="usage_widget"
+              returnTo={`/chat?lang=${encodeURIComponent(lang)}`}
               className="flex min-h-10 w-full items-center justify-center rounded-xl bg-emerald-600 px-3 py-2 text-xs font-bold text-white hover:bg-emerald-500"
             >
               {t("upgrade.buyAdditionalCredits")}
@@ -272,11 +274,11 @@ export function UserUsageSummary({
                 >
                   {upgradeLabel}
                 </UpgradeCtaLink>
-                <CreditPackPurchaseButton trigger="usage_widget" className="rounded-lg border border-amber-400 px-2.5 py-1.5 font-bold">{addCreditLabel}</CreditPackPurchaseButton>
+                <CreditPackPurchaseButton trigger="usage_widget" ctaLocation="usage_summary_warning" returnTo={`/chat?lang=${encodeURIComponent(lang)}`} className="rounded-lg border border-amber-400 px-2.5 py-1.5 font-bold">{addCreditLabel}</CreditPackPurchaseButton>
               </>
             ) : (
               <>
-                <CreditPackPurchaseButton trigger="usage_widget" className="rounded-lg bg-emerald-600 px-2.5 py-1.5 font-bold text-white">{addCreditLabel}</CreditPackPurchaseButton>
+                <CreditPackPurchaseButton trigger="usage_widget" ctaLocation="usage_summary_primary" returnTo={`/chat?lang=${encodeURIComponent(lang)}`} className="rounded-lg bg-emerald-600 px-2.5 py-1.5 font-bold text-white">{addCreditLabel}</CreditPackPurchaseButton>
                 {usage.plan === "Pro" && (
                   <UpgradeCtaLink
                     targetPlan="Max"

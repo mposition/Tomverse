@@ -1442,6 +1442,8 @@ export function AuthButton({
                                             </UpgradeInterestButton>}
                                             <CreditPackPurchaseButton
                                                 trigger="account"
+                                                ctaLocation="account_settings_billing"
+                                                returnTo={`/chat?lang=${encodeURIComponent(globalLang)}`}
                                                 className="flex w-full items-center justify-center gap-2 rounded-xl border border-accent-plan-max-300 bg-accent-plan-max-50 px-3 py-3 text-sm font-bold text-accent-plan-max-700 transition-colors hover:bg-accent-plan-max-100 disabled:cursor-not-allowed disabled:opacity-70 dark:border-accent-plan-max-900/60 dark:bg-accent-plan-max-950/30 dark:text-accent-plan-max-200 dark:hover:bg-accent-plan-max-950/50"
                                             >
                                                 <CreditCard className="h-4 w-4" />

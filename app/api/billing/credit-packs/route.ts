@@ -38,6 +38,7 @@ import {
   type BillingCurrency,
 } from "@/lib/billingMarkets";
 import { checkoutBillingMetadata } from "@/lib/billingTransactions";
+import { buildCreditPackReturnUrls } from "@/lib/purchaseIntent";
 
 const inputSchema = z
   .object({
@@ -47,6 +48,12 @@ const inputSchema = z
     trigger: purchaseAnalyticsTriggerSchema.default("proactive"),
     currency: z.enum(BILLING_CURRENCIES).optional(),
     country: z.string().trim().toUpperCase().regex(/^[A-Z]{2}$/).optional(),
+    // A *proposal* for where Stripe should return the visitor. It is never
+    // used as given: buildCreditPackReturnUrls() re-validates it against the
+    // server's own route allowlist and substitutes /chat when it fails, so a
+    // crafted value cannot turn success_url into an off-site redirect. The
+    // length cap keeps a hostile body from reaching the URL builder at all.
+    returnTo: z.string().max(512).optional(),
   })
   .strict();
 const normalizePlan = (value: unknown): ModelTier =>
@@ -70,7 +77,13 @@ export async function GET(req: Request) {
   try {
     const session = await getServerSession(authOptions);
     if (!session?.user?.id) {
-      return NextResponse.json({ error: "Authentication required." }, { status: 401 });
+      // The code is what lets the client tell "never signed in" apart from
+      // "session expired mid-purchase" and offer the matching recovery, rather
+      // than reporting both as a generic loading failure.
+      return NextResponse.json(
+        { code: "AUTHENTICATION_REQUIRED", error: "Authentication required." },
+        { status: 401 }
+      );
     }
     await consumeApiRateLimit(req, session.user.id, "credit-packs-read", {
       minute: 60,
@@ -130,19 +143,24 @@ export async function POST(req: Request) {
   try {
     const session = await getServerSession(authOptions);
     if (!session?.user?.id) {
-      return NextResponse.json({ error: "Authentication required." }, { status: 401 });
+      return NextResponse.json(
+        { code: "AUTHENTICATION_REQUIRED", error: "Authentication required." },
+        { status: 401 }
+      );
     }
     await consumeApiRateLimit(req, session.user.id, "credit-pack-checkout", {
       minute: 5,
       day: 20,
     });
-    const { packId, language, analytics, trigger, currency, country } = await readLimitedJson(
-      req,
-      4 * 1024,
-      inputSchema
-    );
+    const { packId, language, analytics, trigger, currency, country, returnTo } =
+      await readLimitedJson(req, 4 * 1024, inputSchema);
     const pack = getCreditPack(packId);
-    if (!pack) return NextResponse.json({ error: "Credit pack not found." }, { status: 404 });
+    if (!pack) {
+      return NextResponse.json(
+        { code: "PACK_NOT_AVAILABLE_FOR_PLAN", error: "Credit pack not found." },
+        { status: 404 }
+      );
+    }
     const market = validateBillingMarketRequest({ req, currency, country });
     const catalog = await getBillingPriceCatalog();
     const priceMinor = getCreditPackPriceMinor(pack.id, market.currency, catalog);
@@ -176,7 +194,10 @@ export async function POST(req: Request) {
     const plan = normalizePlan(user.plan);
     if (!pack.allowedPlans.includes(plan)) {
       return NextResponse.json(
-        { error: "This credit pack is not available for the current plan." },
+        {
+          code: "PACK_NOT_AVAILABLE_FOR_PLAN",
+          error: "This credit pack is not available for the current plan.",
+        },
         { status: 403 }
       );
     }
@@ -251,6 +272,16 @@ export async function POST(req: Request) {
           analyticsCurrency: market.currency,
         }
       : {};
+    // A cancelled purchase used to land on /chat with no explanation and no
+    // way back to what the visitor was doing; a successful one landed on the
+    // chat welcome screen even when it started on /pricing. Both endpoints are
+    // decided here, from a client proposal the allowlist has already vetted.
+    const returnUrls = buildCreditPackReturnUrls({
+      origin,
+      returnTo,
+      packId: pack.id,
+      language,
+    });
     const checkout = await stripe.checkout.sessions.create({
       mode: "payment",
       customer: customerId,
@@ -287,10 +318,8 @@ export async function POST(req: Request) {
         ...billingMetadata,
         ...analyticsMetadata,
       },
-      success_url: `${origin}/chat?billing=credits-success&pack=${encodeURIComponent(pack.id)}${
-        language ? `&lang=${encodeURIComponent(language)}` : ""
-      }`,
-      cancel_url: `${origin}/chat?billing=credits-cancelled`,
+      success_url: returnUrls.successUrl,
+      cancel_url: returnUrls.cancelUrl,
       allow_promotion_codes: false,
     });
     return NextResponse.json({ url: checkout.url });
@@ -304,6 +333,12 @@ export async function POST(req: Request) {
     const response = apiSecurityResponse(error);
     if (response) return response;
     console.error("Failed to create credit-pack checkout:", error);
-    return NextResponse.json({ error: "Failed to start credit-pack checkout." }, { status: 500 });
+    return NextResponse.json(
+      {
+        code: "CHECKOUT_CONFIGURATION_ERROR",
+        error: "Failed to start credit-pack checkout.",
+      },
+      { status: 500 }
+    );
   }
 }

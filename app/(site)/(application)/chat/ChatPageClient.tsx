@@ -19,6 +19,8 @@ import {
 import { SourceGroundingBadge } from "@/components/chat/SourceGroundingBadge";
 import { toSourceGrounding } from "@/lib/sourceGrounding";
 import { UpgradeCtaLink } from "@/components/billing/UpgradeCtaLink";
+import { purchaseCtaCopy } from "@/components/billing/purchaseCopy";
+import { normalizeCreditPackId } from "@/lib/purchaseIntent";
 import { ModelFinder } from "@/components/onboarding/ModelFinder";
 import { DeepResearchSetupSheet } from "@/components/chat/DeepResearchSetupSheet";
 import { Conversation, type ChatAttachment } from "@/components/chat/types";
@@ -1115,6 +1117,46 @@ export function ChatPageClient({
       }
     };
   }, []);
+
+  // A credit-pack purchase that started in chat now returns to chat with an
+  // outcome. Previously `billing=credits-success` was written into the URL by
+  // the checkout route and read by nothing at all: the visitor landed back on
+  // their conversation with no confirmation that anything had been bought, and
+  // a cancelled purchase was indistinguishable from a successful one.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const billing = params.get("billing");
+    if (billing !== "credits-success" && billing !== "credits-cancelled") return;
+
+    const packId = normalizeCreditPackId(params.get("pack"));
+    const urlLanguage = params.get("lang");
+    const copyLanguage = isLanguage(urlLanguage) ? urlLanguage : lang;
+    const purchaseCopy = purchaseCtaCopy[copyLanguage] || purchaseCtaCopy.en;
+    const packLabel = packId
+      ? packId
+          .split("_")[0]
+          .replace(/^./, (character) => character.toUpperCase())
+      : purchaseCopy.buyCredits;
+
+    queueMicrotask(() => {
+      if (billing === "credits-success") {
+        showToast(purchaseCopy.purchaseSuccessBody(packLabel), "success");
+        // The balance the usage widget is showing predates the purchase.
+        notifyUserUsageChanged();
+      } else {
+        showToast(purchaseCopy.purchaseCancelledBody(packLabel), "info");
+      }
+    });
+
+    params.delete("billing");
+    params.delete("pack");
+    const nextSearch = params.toString();
+    window.history.replaceState(
+      null,
+      "",
+      `${window.location.pathname}${nextSearch ? `?${nextSearch}` : ""}${window.location.hash}`
+    );
+  }, [lang, showToast]);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
