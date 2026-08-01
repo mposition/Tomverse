@@ -274,6 +274,42 @@ test("a pre-launch model is withdrawn from the offer just like a retired one", (
 // class's fallback -- so nothing downstream can tell that a price is missing.
 // Listing them here is what makes it visible, and the assertion below is what
 // stops one being offered while it is still on the list.
+// Two selectable models may share one provider model id -- that is how a
+// "Thinking" variant is built -- but only if the request Tomverse sends for
+// them actually differs. gpt-5-5-thinking shared apiModel "gpt-5.5" with
+// gpt-5-5 while the chat route sent no reasoning parameter at all, so the two
+// were the same upstream call at 16 credits versus 8. The route now sends
+// reasoningEffort for OpenAI reasoning models; this pins the pairing so a
+// future duplicate cannot reintroduce a name-only variant.
+const REASONING_FORWARDED_PROVIDERS = new Set(["openai"]);
+
+test("a shared apiModel is only allowed when the request really differs", () => {
+  const byApiModel = new Map<string, AiModel[]>();
+  for (const model of CATALOG) {
+    if (!isPubliclySelectableModel(model)) continue;
+    const group = byApiModel.get(model.apiModel) ?? [];
+    group.push(model);
+    byApiModel.set(model.apiModel, group);
+  }
+
+  for (const [apiModel, group] of byApiModel) {
+    if (group.length < 2) continue;
+    const efforts = new Set(group.map((model) => model.reasoning ?? "none"));
+    assert.equal(
+      efforts.size,
+      group.length,
+      `${group.map((m) => m.id).join(", ")} all send apiModel "${apiModel}" with the same reasoning effort, so they are the same request at different prices`
+    );
+    for (const model of group) {
+      assert.equal(
+        REASONING_FORWARDED_PROVIDERS.has(model.provider),
+        true,
+        `${model.id} shares apiModel "${apiModel}" but its provider (${model.provider}) is not one the chat route forwards reasoning effort to, so the variants are indistinguishable upstream`
+      );
+    }
+  }
+});
+
 const UNPRICED_MODEL_IDS = ["kimi-k3"];
 
 test("a model with no published price is never offered to users", () => {

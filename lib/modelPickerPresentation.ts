@@ -6,10 +6,14 @@ export type ModelPickerCapability = "all" | "favorites" | "recommended" | "fast"
 export type ModelPickerUsageBand = "all" | "light" | "medium" | "heavy" | "intensive";
 export type ModelPickerFeature = "image" | "reasoning" | "search" | "code";
 
+// The picker's "recommended" filter. Held deepseek-r1 as its reasoning entry
+// until DeepSeek stopped serving deepseek-reasoner; grok-4-5 is the closest
+// live reasoning model, though unlike deepseek-r1 it is Pro-only -- no
+// reasoning-class model below Pro exists any more.
 export const RECOMMENDED_MODEL_IDS = [
   "gpt-5-4-mini",
   "claude-sonnet-5",
-  "deepseek-r1",
+  "grok-4-5",
 ] as const;
 
 const koreanDescriptions: Record<string, string> = {

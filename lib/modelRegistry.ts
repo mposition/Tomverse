@@ -161,19 +161,59 @@ const STATIC_WITHDRAWN_MODELS = STATIC_RUNTIME_MODELS.filter(
 // written, so a retirement lands as "disabled" and a withheld launch as
 // "coming-soon" rather than being flattened together. `catalogDeleted` is
 // deliberately untouched: it stays human-controlled.
-async function applyStaticWithdrawals() {
+/**
+ * Forces every model the checked-in catalogue has withdrawn back into its
+ * withdrawn state on the runtime registry. Exported as well as called from the
+ * bootstrap so it can be invoked deliberately -- by a test, or by an operator
+ * reconciling an environment -- rather than only as a side effect of the first
+ * request after a deploy. Safe to run repeatedly: it writes only rows that
+ * differ, and never touches catalogDeleted or any admin-tunable field.
+ */
+export async function reconcileStaticWithdrawals() {
   if (STATIC_WITHDRAWN_MODELS.length === 0) return;
 
+  const withdrawnIds = STATIC_WITHDRAWN_MODELS.map((model) => model.id);
+  // Read first, then write only the rows that actually differ. The previous
+  // version expressed "needs correcting" as a WHERE clause
+  // (enabled OR publiclyListed OR status mismatch) and so could not see a row
+  // that was ALREADY withdrawn but pointed at the wrong replacement -- exactly
+  // the shape llama-4-scout was in when llama-3-3 was retired underneath it:
+  // disabled, delisted, correct status, and handing users a model that no
+  // longer exists. Comparing values instead of guessing at a predicate also
+  // keeps this idempotent without relying on Prisma's null-vs-`not` filter
+  // semantics, which differ by field nullability.
+  const rows = await prisma.modelRegistryEntry.findMany({
+    where: { id: { in: withdrawnIds } },
+    select: {
+      id: true,
+      enabled: true,
+      publiclyListed: true,
+      status: true,
+      replacementModelId: true,
+    },
+  });
+  const rowsById = new Map(rows.map((row) => [row.id, row]));
+
   for (const model of STATIC_WITHDRAWN_MODELS) {
-    const result = await prisma.modelRegistryEntry.updateMany({
-      where: {
-        id: model.id,
-        OR: [
-          { enabled: true },
-          { publiclyListed: true },
-          { status: { not: model.status } },
-        ],
-      },
+    const row = rowsById.get(model.id);
+    // Not seeded yet: createMany above will have inserted it in the correct
+    // state, or it is genuinely absent. Either way there is nothing to fix.
+    if (!row) continue;
+
+    const intendedReplacement = model.replacementModelId ?? null;
+    const isCurrent =
+      row.enabled === false &&
+      row.publiclyListed === false &&
+      row.status === model.status &&
+      // Only asserted when the catalogue names one. A withdrawal with no
+      // replacement (a pre-launch model) must not blank out a replacement an
+      // operator set by hand.
+      (intendedReplacement === null ||
+        row.replacementModelId === intendedReplacement);
+    if (isCurrent) continue;
+
+    await prisma.modelRegistryEntry.update({
+      where: { id: model.id },
       data: {
         enabled: false,
         publiclyListed: false,
@@ -190,16 +230,20 @@ async function applyStaticWithdrawals() {
       },
     });
 
-    if (result.count > 0) {
-      console.warn(
-        "Model registry: applied static catalog withdrawal to runtime row.",
-        {
-          modelId: model.id,
-          status: model.status,
-          replacementModelId: model.replacementModelId ?? null,
-        }
-      );
-    }
+    console.warn(
+      "Model registry: applied static catalog withdrawal to runtime row.",
+      {
+        modelId: model.id,
+        status: model.status,
+        replacementModelId: intendedReplacement,
+        previous: {
+          enabled: row.enabled,
+          publiclyListed: row.publiclyListed,
+          status: row.status,
+          replacementModelId: row.replacementModelId,
+        },
+      }
+    );
   }
 }
 
@@ -208,7 +252,7 @@ export async function ensureModelRegistrySeeded() {
   if (!bootstrapPromise) {
     bootstrapPromise = prisma.modelRegistryEntry
       .createMany({ data: staticSeedRows(), skipDuplicates: true })
-      .then(() => applyStaticWithdrawals())
+      .then(() => reconcileStaticWithdrawals())
       .catch((error) => {
         bootstrapPromise = null;
         throw error;

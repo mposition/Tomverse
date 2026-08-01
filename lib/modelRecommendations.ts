@@ -85,7 +85,6 @@ const USE_CASE_CANDIDATES: Record<
     "claude-sonnet-5",
     "gpt-5-5",
     "grok-4-5",
-    "deepseek-r1",
     "gemini-3-1-pro",
     "mistral-large-3",
   ],
@@ -100,7 +99,6 @@ const USE_CASE_CANDIDATES: Record<
     "codestral",
     "kimi-k2.7-code",
     "deepseek-v4-pro",
-    "deepseek-r1",
   ],
   search: [
     "perplexity/sonar",

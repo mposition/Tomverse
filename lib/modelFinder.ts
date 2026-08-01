@@ -44,6 +44,19 @@ export type ModelFinderRecommendation = {
   score: number;
 };
 
+/**
+ * Explicit-reasoning models the complementary suggestion may offer, cheapest
+ * first. Ordered by hand rather than derived, because "which reasoning model
+ * to suggest" is a product judgement; entries that are retired or delisted are
+ * skipped at read time, so a retirement degrades the order rather than
+ * emptying the slot.
+ */
+const REASONING_SUGGESTION_ORDER = [
+  "deepseek-r1",
+  "grok-4-5",
+  "gpt-5-5-thinking",
+] as const;
+
 const STANDARD_CANDIDATE_ORDER = [
   "gpt-5-4-mini",
   "gemini-2-5-flash",
@@ -319,8 +332,19 @@ export const getComplementaryModelSuggestion = (
   const hasReasoning =
     selectedClasses.has("reasoning") || selectedClasses.has("premium-reasoning");
   if (!hasReasoning) {
-    const candidate = getModel("deepseek-r1");
-    if (candidate?.enabled && !selectedModelIds.includes(candidate.id)) {
+    // Was hardcoded to deepseek-r1, which silently stopped producing a
+    // suggestion at all the moment DeepSeek retired deepseek-reasoner. Reading
+    // the catalogue instead means the reasoning slot survives any single
+    // model's retirement, and the cheapest live option wins so the suggestion
+    // stays the smallest step up from what the user already has.
+    const candidate = REASONING_SUGGESTION_ORDER.map((id) => getModel(id)).find(
+      (model): model is AiModel =>
+        model != null &&
+        model.enabled &&
+        model.publiclyListed !== false &&
+        !selectedModelIds.includes(model.id)
+    );
+    if (candidate) {
       return { modelId: candidate.id, reason: "reasoning" };
     }
   }

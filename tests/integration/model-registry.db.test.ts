@@ -6,6 +6,7 @@ import {
   ensureModelRegistrySeeded,
   getEnabledRuntimeModel,
   getRuntimeModel,
+  reconcileStaticWithdrawals,
 } from "../../lib/modelRegistry";
 import { assertModelRuntimeAvailable } from "../../lib/modelAvailability";
 import { getModelBillingProfile, getModelUsageProfile } from "../../lib/models";
@@ -135,6 +136,46 @@ test("the same bootstrap withdraws a pre-launch model without marking it retired
 
   assert.equal(await getEnabledRuntimeModel("kimi-k3"), undefined);
   assert.equal((await assertModelRuntimeAvailable("kimi-k3")).allowed, false);
+});
+
+// The defect this covers: the withdrawal replay used to express "needs
+// correcting" as a WHERE clause over enabled/publiclyListed/status, so a row
+// that was already withdrawn but pointed at a replacement the catalogue has
+// since changed was invisible to it. llama-4-scout was in exactly that shape
+// -- disabled, delisted, and still handing users llama-3-3 after llama-3-3 was
+// retired underneath it.
+test("an already-withdrawn row with a stale replacement is still corrected", async () => {
+  await prisma.modelRegistryEntry.update({
+    where: { id: "llama-4-scout" },
+    data: {
+      enabled: false,
+      publiclyListed: false,
+      status: "disabled",
+      // The value production actually held: a replacement that is itself
+      // retired, so the row satisfied every lifecycle check while offering
+      // users a dead end.
+      replacementModelId: "llama-3-3",
+    },
+  });
+
+  // ensureModelRegistrySeeded memoises, so the reconciliation is invoked
+  // directly -- which is also how an operator would repair an environment.
+  await reconcileStaticWithdrawals();
+
+  const row = await prisma.modelRegistryEntry.findUnique({
+    where: { id: "llama-4-scout" },
+  });
+  assert.ok(row);
+  assert.equal(
+    row.replacementModelId,
+    "gemini-3-5-flash",
+    "a stale replacement on an already-withdrawn row must still be corrected"
+  );
+
+  // And the replacement it now names is one a user can actually select.
+  const replacement = await getEnabledRuntimeModel(row.replacementModelId!);
+  assert.ok(replacement, "the corrected replacement must be enabled at runtime");
+  assert.notEqual(replacement.publiclyListed, false);
 });
 
 test("re-running the bootstrap leaves retired rows untouched", async () => {

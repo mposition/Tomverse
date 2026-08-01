@@ -49,7 +49,7 @@ test("recommendations stay within the 6-8 band the picker is designed for", () =
 test("favourites, model-finder answers and recents never push the list past the cap", () => {
   const recommendations = getModelRecommendations({
     ...freeInput,
-    favoriteModelIds: ["claude-sonnet-5", "deepseek-r1", "mistral-large-3"],
+    favoriteModelIds: ["claude-sonnet-5", "mistral-large-3", "qwen3.7-max"],
     personalizedModelIds: ["mistral-medium-3-1", "qwen3.7-plus", "glm-5.2"],
     recentModelIds: ["codestral", "kimi-k2.7-code"],
   });
@@ -57,7 +57,7 @@ test("favourites, model-finder answers and recents never push the list past the 
   const ids = recommendations.map((item) => item.modelId);
   assert.equal(new Set(ids).size, ids.length, "recommendations must be unique");
   // Explicit user signals lead the list.
-  assert.deepEqual(ids.slice(0, 2), ["claude-sonnet-5", "deepseek-r1"]);
+  assert.deepEqual(ids.slice(0, 2), ["claude-sonnet-5", "mistral-large-3"]);
   assert.equal(recommendations[0].source, "favorite");
   assert.equal(recommendations[2].source, "personalized");
 });

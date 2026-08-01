@@ -242,7 +242,10 @@ test("favorited models lead the recommendations", async ({ page }) => {
   await page.evaluate(() => {
     localStorage.setItem(
       "favorite_model_ids",
-      JSON.stringify(["claude-sonnet-5", "deepseek-r1"])
+      // Both Free-tier and live: a favourite that is retired (deepseek-r1 was,
+      // once DeepSeek dropped deepseek-reasoner) is deliberately filtered out
+      // of recommendations, which is covered in tests/modelRecommendations.
+      JSON.stringify(["claude-sonnet-5", "mistral-medium-3-1"])
     );
   });
   await page.reload();
@@ -252,7 +255,7 @@ test("favorited models lead the recommendations", async ({ page }) => {
   const cards = dialog.getByTestId("recommended-model-option");
   await expect(cards.nth(0)).toHaveAttribute("data-model-id", "claude-sonnet-5");
   await expect(cards.nth(0)).toHaveAttribute("data-recommendation-source", "favorite");
-  await expect(cards.nth(1)).toHaveAttribute("data-model-id", "deepseek-r1");
+  await expect(cards.nth(1)).toHaveAttribute("data-model-id", "mistral-medium-3-1");
 });
 
 test("long input explains its multiplier beside the send controls", async ({ page }) => {
