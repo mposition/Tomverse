@@ -167,7 +167,6 @@ export async function POST(request: Request) {
             environment,
             errorClassification,
             diagnosticCode: outcome.diagnosticCode ?? null,
-            errorMessage: outcome.errorMessage ?? null,
             timedOut: outcome.timedOut,
             latencyMs: outcome.latencyMs,
           });

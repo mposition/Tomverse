@@ -127,21 +127,23 @@ test("runProviderProbe reports provider_error with a diagnostic code when the ca
     assert.equal(result.timedOut, false);
     assert.ok(result.diagnosticCode.includes("ECONNRESET"));
     assert.ok(result.diagnosticCode.includes("HTTP_503"));
-    assert.equal(result.errorMessage, "simulated provider outage");
+    assert.equal("errorMessage" in result, false);
   }
 });
 
-test("runProviderProbe truncates the captured provider error message", async () => {
-  // Operator-log only, so it is bounded rather than public-safe-sanitized;
-  // the sanitized diagnosticCode remains the only thing persisted.
+test("runProviderProbe never exposes the provider error message", async () => {
   const result = await runProviderProbe("openai", {
     generate: async () => {
-      throw new Error("x".repeat(1_000));
+      throw Object.assign(new Error("secret prompt and response"), {
+        requestBodyValues: { prompt: "secret prompt" },
+        responseBody: "secret response",
+      });
     },
   });
   assert.equal(result.ok, false);
   if (!result.ok) {
-    assert.equal(result.errorMessage.length, 300);
+    assert.equal("errorMessage" in result, false);
+    assert.doesNotMatch(JSON.stringify(result), /secret prompt|secret response/);
   }
 });
 

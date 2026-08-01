@@ -15,17 +15,21 @@ import {
 } from "@/lib/conversationLock";
 import { getModel } from "@/lib/models";
 import {
-  PerplexityDeepResearchError,
   pollDeepResearchJob,
 } from "@/lib/perplexityDeepResearch";
 import { prisma } from "@/lib/prisma";
+import { safeErrorMetadata } from "@/lib/providerErrorClassification";
 import {
   recordModelFailure,
   recordModelSuccess,
   recordProviderFailure,
   recordProviderSuccess,
 } from "@/lib/providerMonitoring";
-import { apiSecurityResponse, consumeApiRateLimit } from "@/lib/apiSecurity";
+import {
+  apiSecurityResponse,
+  consumeApiRateLimit,
+  readLimitedJson,
+} from "@/lib/apiSecurity";
 
 const MAX_STORED_MESSAGE_CHARACTERS = 100_000;
 
@@ -70,7 +74,7 @@ export async function POST(request: Request) {
       day: 2_000,
     });
 
-    const body = requestSchema.parse(await request.json());
+    const body = await readLimitedJson(request, 1_024, requestSchema);
 
     const job = await prisma.perplexityAsyncJob.findUnique({
       where: { assistantMessageId: body.assistantMessageId },
@@ -126,7 +130,7 @@ export async function POST(request: Request) {
       console.error("Deep research poll failed:", {
         traceId,
         jobId: job.id,
-        error: error instanceof PerplexityDeepResearchError ? error.message : error,
+        ...safeErrorMetadata(error),
       });
       return Response.json(
         {
@@ -213,7 +217,11 @@ export async function POST(request: Request) {
           },
           { providerUsageSnapshot: poll.usageSnapshot }
         ).catch((error) =>
-          console.error("Deep research settlement failed:", { traceId, jobId: job.id, error })
+          console.error("Deep research settlement failed:", {
+            traceId,
+            jobId: job.id,
+            ...safeErrorMetadata(error),
+          })
         );
       }
       await Promise.all([
@@ -261,7 +269,11 @@ export async function POST(request: Request) {
         outputTokens: 0,
         outcome: poll.status === "FAILED" ? "failed" : "empty",
       }).catch((error) =>
-        console.error("Deep research refund failed:", { traceId, jobId: job.id, error })
+        console.error("Deep research refund failed:", {
+          traceId,
+          jobId: job.id,
+          ...safeErrorMetadata(error),
+        })
       );
     }
     await Promise.allSettled([
@@ -280,7 +292,10 @@ export async function POST(request: Request) {
   } catch (error) {
     const securityResponse = apiSecurityResponse(error);
     if (securityResponse) return securityResponse;
-    console.error("Deep research status check failed:", { traceId, error });
+    console.error("Deep research status check failed:", {
+      traceId,
+      ...safeErrorMetadata(error),
+    });
     return jsonError(
       "Failed to check the deep research job status.",
       "DEEP_RESEARCH_STATUS_FAILED",
