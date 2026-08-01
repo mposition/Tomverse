@@ -1,6 +1,8 @@
+import { ThemeBootstrap } from "@/components/ThemeBootstrap";
 import { ThemeController } from "@/components/ThemeController";
 import { fontVariables } from "@/lib/fonts";
 import type { Language } from "@/lib/language";
+import { themeDocumentClass, type ThemePreference } from "@/lib/theme";
 
 /**
  * The `<html>` / `<body>` wrapper every root layout renders.
@@ -29,18 +31,43 @@ import type { Language } from "@/lib/language";
  */
 export function DocumentShell({
   lang,
+  theme,
+  nonce,
   children,
 }: Readonly<{
   lang: Language;
+  /**
+   * UI-001. The explicit choice this request is known to carry, or null when
+   * it cannot be known — which is every `force-static` marketing route, where
+   * the HTML is prerendered once and cached publicly. Null renders no theme
+   * class at all, so the stylesheet's `prefers-color-scheme` answers and
+   * ThemeBootstrap corrects an explicit choice before the first paint. Writing
+   * a per-visitor class into cacheable HTML would poison that cache.
+   */
+  theme?: ThemePreference | null;
+  /** Present on nonce'd dynamic routes; absent on hash-based static ones. */
+  nonce?: string;
   children: React.ReactNode;
 }>) {
+  const themeClass = theme ? themeDocumentClass(theme) : "";
   return (
     <html
       lang={lang}
       suppressHydrationWarning
-      className={`${fontVariables} h-full antialiased`}
+      data-theme={theme || undefined}
+      className={`${fontVariables} h-full antialiased${themeClass ? ` ${themeClass}` : ""}`}
     >
       <body className="min-h-full flex flex-col">
+        {/*
+          First child of <body>, above everything renderable: the parser
+          executes it before it has reached any content to paint, which is the
+          same guarantee <head> would give without tripping
+          @next/next/no-head-element. MarketingConsentReservation is placed the
+          same way for the same reason. On dynamic routes the class is already
+          on <html> above and this only re-asserts it; on static marketing
+          routes it is the only thing that can.
+        */}
+        <ThemeBootstrap nonce={nonce} />
         <ThemeController />
         {children}
       </body>

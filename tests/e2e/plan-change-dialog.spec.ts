@@ -436,26 +436,62 @@ test.describe("plan change dialog", () => {
   });
 
   test("a double-clicked confirm reaches the server once", async ({ page }) => {
+    const reservation = {
+      requestId: "pcp_upgrade",
+      direction: "upgrade",
+      execution: "immediate_upgrade",
+      fromTier: "Pro",
+      toTier: "Max",
+      billingInterval: "monthly",
+      status: "pending",
+      appliesAt: null,
+      cancellable: false,
+    };
     const harness = await preparePlanChange(page, {
       plan: "Pro",
       preview: UPGRADE_QUOTE,
-      confirm: {
-        requestId: "pcp_upgrade",
-        direction: "upgrade",
-        execution: "immediate_upgrade",
-        fromTier: "Pro",
-        toTier: "Max",
-        billingInterval: "monthly",
-        status: "pending",
-        appliesAt: null,
-        cancellable: false,
-      },
+      confirm: reservation,
     });
+
+    // The confirm response is held open so that both clicks land while the
+    // first request is still in flight -- which is the only state the
+    // single-flight guard exists for.
+    //
+    // Letting the mock answer immediately made the outcome a race the test did
+    // not control. On mobile the dialog re-rendered into its reserved stage
+    // before the second click started, the confirm button was gone with it,
+    // and `click()` then waited for an element that was never coming back
+    // until the whole test timed out -- reported against the next line, as a
+    // reserved panel that "never appeared" while the page snapshot showed it
+    // plainly on screen. Desktop won the same race the other way and passed.
+    // Registered after preparePlanChange so this handler wins the route.
+    let confirmArrived = () => {};
+    const firstConfirm = new Promise<void>((resolve) => {
+      confirmArrived = resolve;
+    });
+    let releaseConfirm = () => {};
+    const held = new Promise<void>((resolve) => {
+      releaseConfirm = resolve;
+    });
+    await page.route("**/api/billing/plan-change/confirm", async (route) => {
+      harness.confirmRequests.push(
+        route.request().postDataJSON() as Record<string, unknown>
+      );
+      confirmArrived();
+      await held;
+      await route.fulfill(json({ success: true, reservation }));
+    });
+
     await openDialog(page, "max");
 
     const confirm = page.getByTestId("plan-change-confirm");
     await confirm.click();
-    await confirm.click({ force: true, trial: false }).catch(() => {});
+    await firstConfirm;
+    // Still mounted, and disabled: that is what has to stop the second click
+    // from reaching the server, rather than the button happening to vanish.
+    await expect(confirm).toBeDisabled();
+    await confirm.click({ force: true, trial: false, timeout: 2_000 }).catch(() => {});
+    releaseConfirm();
 
     await expect(page.getByTestId("plan-change-reserved")).toBeVisible();
     expect(harness.confirmRequests).toHaveLength(1);
