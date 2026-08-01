@@ -34,6 +34,12 @@ import {
   normalizeBillingCurrency,
 } from "@/lib/billingMarkets";
 import { getUsdRevenueSnapshot } from "@/lib/billingPriceCatalog";
+import { settlePlanChangesForSubscription } from "@/lib/planChangeService";
+import {
+  isSubscriptionResyncEvent,
+  shouldApplySubscriptionSnapshot,
+  subscriptionIdFromEventObject,
+} from "@/lib/stripeWebhookSyncCore";
 
 const subscriptionActiveStatuses = new Set(["active", "trialing", "past_due"]);
 
@@ -71,12 +77,31 @@ const addBillingPeriod = (
   return next;
 };
 
-async function syncSubscription(subscription: Stripe.Subscription) {
+/**
+ * Applies a subscription snapshot that was read from Stripe at `observedAt`.
+ *
+ * `observedAt` is not decoration. Stripe delivers webhooks out of order, so two
+ * handlers can be applying different reads of the same subscription
+ * concurrently; the conditional update is what stops the older read from
+ * winning. It is expressed as a `updateMany` predicate rather than a
+ * read-then-write so the comparison and the write are one statement and cannot
+ * interleave.
+ */
+async function syncSubscription(
+  subscription: Stripe.Subscription,
+  observedAt: Date
+) {
   const customerId =
     typeof subscription.customer === "string"
       ? subscription.customer
       : subscription.customer.id;
-  const priceId = subscription.items.data[0]?.price.id || null;
+  const price = subscription.items.data[0]?.price;
+  const priceId = price?.id || null;
+  const productId = price
+    ? typeof price.product === "string"
+      ? price.product
+      : price.product.id
+    : null;
   const plans = await getBillingPlans();
   const planByPrice = priceId
     ? plans.find(
@@ -84,9 +109,17 @@ async function syncSubscription(subscription: Stripe.Subscription) {
           plan.stripePriceId === priceId || plan.stripeAnnualPriceId === priceId
       )
     : null;
+  const planByProduct = productId
+    ? plans.find((plan) => plan.stripeProductId === productId)
+    : null;
+  // What Stripe invoices decides the plan, and metadata is only the fallback.
+  // Metadata is a note written when the subscription was created; a plan change
+  // replaces the item's price, so reading metadata first would leave an
+  // upgraded account on the plan it used to have.
   const planId =
-    normalizePlanId(subscription.metadata.planId) ||
-    (planByPrice?.id ?? null);
+    planByPrice?.id ??
+    planByProduct?.id ??
+    normalizePlanId(subscription.metadata.planId);
   const active = subscriptionActiveStatuses.has(subscription.status);
   const plan = active && planId ? tierForPlanId(planId) : "Free";
   const billingInterval = getBillingInterval(subscription);
@@ -98,6 +131,7 @@ async function syncSubscription(subscription: Stripe.Subscription) {
     select: {
       id: true,
       email: true,
+      subscriptionSyncedAt: true,
       settings: {
         select: { language: true },
       },
@@ -105,8 +139,27 @@ async function syncSubscription(subscription: Stripe.Subscription) {
   });
   if (!user) return null;
 
-  await prisma.user.update({
-    where: { id: user.id },
+  const decision = shouldApplySubscriptionSnapshot({
+    storedObservedAt: user.subscriptionSyncedAt,
+    observedAt,
+  });
+  if (!decision.apply) {
+    console.warn("Stripe subscription snapshot ignored as stale.", {
+      subscriptionId: subscription.id,
+      storedObservedAt: user.subscriptionSyncedAt?.toISOString() || null,
+      observedAt: observedAt.toISOString(),
+    });
+    return null;
+  }
+
+  const applied = await prisma.user.updateMany({
+    where: {
+      id: user.id,
+      OR: [
+        { subscriptionSyncedAt: null },
+        { subscriptionSyncedAt: { lte: observedAt } },
+      ],
+    },
     data: {
       plan,
       stripeSubscriptionId: subscription.id,
@@ -115,10 +168,141 @@ async function syncSubscription(subscription: Stripe.Subscription) {
       subscriptionCurrentPeriodEnd: periodEnd,
       subscriptionBillingInterval: billingInterval,
       subscriptionCancelAtPeriodEnd: Boolean(subscription.cancel_at_period_end),
+      subscriptionSyncedAt: observedAt,
     },
   });
+  // A concurrent handler applied a newer read between the select and the
+  // update. Its state is the correct one, so this snapshot is dropped rather
+  // than retried -- retrying would only race again.
+  if (applied.count === 0) return null;
 
   return { user, plan, periodEnd, billingInterval };
+}
+
+/**
+ * Re-reads a subscription from Stripe and applies it.
+ *
+ * This is the whole point of the hardening: the webhook payload says *that*
+ * something changed, and Stripe says *what it is now*. A failure here is left
+ * to throw so the route answers 500 and Stripe redelivers -- applying the
+ * event's own stale snapshot as a fallback is exactly the behaviour being
+ * removed.
+ */
+export async function resyncSubscriptionFromStripe(
+  subscriptionId: string,
+  eventType: string | null = null
+) {
+  // Stamped before the request, not after: a response only proves the state as
+  // of when Stripe built it, so timestamping on arrival would let a slow read
+  // of older data outrank a fast read of newer data.
+  const observedAt = new Date();
+  const subscription = await getStripe().subscriptions.retrieve(subscriptionId);
+  const synced = await syncSubscription(subscription, observedAt);
+  // After the account, not before: a reservation is settled by comparing what
+  // was reserved against what the subscription now bills, and that comparison
+  // wants the same freshly read subscription rather than a second retrieve.
+  await settlePlanChangesForSubscription(subscription, eventType);
+  return synced;
+}
+
+export type BillingResyncOutcome = {
+  result: "synced" | "cleared" | "no_subscription";
+  plan: "Free" | "Pro" | "Max";
+  subscriptionStatus: string | null;
+  stripeSubscriptionId: string | null;
+  observedAt: Date;
+};
+
+/**
+ * Brings one account's stored billing state back in line with Stripe.
+ *
+ * Used by the admin resync endpoint. The webhook path already re-reads on every
+ * event, but that only repairs accounts whose events arrive -- a dropped
+ * delivery or a change made in the Stripe dashboard leaves an account stale
+ * with nothing to correct it.
+ *
+ * When Stripe has no subscription for the customer at all, the account is
+ * cleared to Free rather than left alone. That is the honest outcome of "make
+ * the database say what Stripe says", and it is what a resync is for; the
+ * caller audit-logs it.
+ */
+export async function resyncAccountBillingFromStripe({
+  userId,
+  stripeCustomerId,
+  stripeSubscriptionId,
+}: {
+  userId: string;
+  stripeCustomerId: string;
+  stripeSubscriptionId: string | null;
+}): Promise<BillingResyncOutcome> {
+  const stripe = getStripe();
+  const observedAt = new Date();
+
+  let subscription: Stripe.Subscription | null = null;
+  if (stripeSubscriptionId) {
+    try {
+      subscription = await stripe.subscriptions.retrieve(stripeSubscriptionId);
+    } catch (error) {
+      // A subscription id that Stripe no longer knows is not a failure to
+      // report -- it is the answer. Fall through to the customer lookup.
+      console.warn("Stored Stripe subscription could not be retrieved.", {
+        stripeSubscriptionId,
+        errorName: error instanceof Error ? error.name : "UnknownError",
+      });
+    }
+  }
+  if (!subscription) {
+    const subscriptions = await stripe.subscriptions.list({
+      customer: stripeCustomerId,
+      status: "all",
+      limit: 10,
+    });
+    // Prefer a live subscription over a cancelled one; among equals take the
+    // most recently created, which is what `list` already returns first.
+    subscription =
+      subscriptions.data.find((candidate) =>
+        subscriptionActiveStatuses.has(candidate.status)
+      ) ||
+      subscriptions.data[0] ||
+      null;
+  }
+
+  if (!subscription) {
+    const cleared = await prisma.user.updateMany({
+      where: {
+        id: userId,
+        OR: [
+          { subscriptionSyncedAt: null },
+          { subscriptionSyncedAt: { lte: observedAt } },
+        ],
+      },
+      data: {
+        plan: "Free",
+        stripeSubscriptionId: null,
+        stripePriceId: null,
+        subscriptionStatus: null,
+        subscriptionBillingInterval: null,
+        subscriptionCancelAtPeriodEnd: false,
+        subscriptionSyncedAt: observedAt,
+      },
+    });
+    return {
+      result: cleared.count > 0 ? "cleared" : "no_subscription",
+      plan: "Free",
+      subscriptionStatus: null,
+      stripeSubscriptionId: null,
+      observedAt,
+    };
+  }
+
+  const synced = await syncSubscription(subscription, observedAt);
+  return {
+    result: synced ? "synced" : "no_subscription",
+    plan: synced?.plan ?? "Free",
+    subscriptionStatus: subscription.status,
+    stripeSubscriptionId: subscription.id,
+    observedAt,
+  };
 }
 
 async function recordPromotionRedemptionFromCheckout(
@@ -270,6 +454,9 @@ async function handleCheckoutCompleted(session: Stripe.Checkout.Session) {
     typeof session.subscription === "string"
       ? session.subscription
       : session.subscription.id;
+  // Stamped before the retrieve, for the same reason
+  // resyncSubscriptionFromStripe() does it.
+  const observedAt = new Date();
   const subscription = await getStripe().subscriptions.retrieve(subscriptionId, {
     expand: ["default_payment_method"],
   });
@@ -282,7 +469,7 @@ async function handleCheckoutCompleted(session: Stripe.Checkout.Session) {
   ).catch((error) => {
     console.error("Promotion redemption record failed:", error);
   });
-  const synced = await syncSubscription(subscription);
+  const synced = await syncSubscription(subscription, observedAt);
   let billingSnapshot: CheckoutBillingSnapshot | null = null;
   if (synced && session.amount_total !== null) {
     const legacyCurrency = normalizeBillingCurrency(session.currency);
@@ -392,13 +579,25 @@ async function handleCheckoutCompleted(session: Stripe.Checkout.Session) {
   }
 }
 
-async function handleSubscriptionDeleted(subscription: Stripe.Subscription) {
+async function handleSubscriptionDeleted(
+  subscription: Stripe.Subscription,
+  observedAt: Date
+) {
   const customerId =
     typeof subscription.customer === "string"
       ? subscription.customer
       : subscription.customer.id;
+  // Guarded like every other write. A deletion is terminal for *this*
+  // subscription, but the account may already have moved on to a newer one --
+  // an unguarded downgrade to Free here would undo it.
   await prisma.user.updateMany({
-    where: { stripeCustomerId: customerId },
+    where: {
+      stripeCustomerId: customerId,
+      OR: [
+        { subscriptionSyncedAt: null },
+        { subscriptionSyncedAt: { lte: observedAt } },
+      ],
+    },
     data: {
       plan: "Free",
       stripeSubscriptionId: null,
@@ -407,6 +606,7 @@ async function handleSubscriptionDeleted(subscription: Stripe.Subscription) {
       subscriptionCurrentPeriodEnd: getPeriodEnd(subscription),
       subscriptionBillingInterval: null,
       subscriptionCancelAtPeriodEnd: false,
+      subscriptionSyncedAt: observedAt,
     },
   });
 }
@@ -432,14 +632,31 @@ export async function processStripeEvent(event: Stripe.Event) {
         event.data.object as Stripe.Dispute
       );
       break;
-    case "customer.subscription.created":
-    case "customer.subscription.updated":
-      await syncSubscription(event.data.object as Stripe.Subscription);
-      break;
     case "customer.subscription.deleted":
-      await handleSubscriptionDeleted(event.data.object as Stripe.Subscription);
+      await handleSubscriptionDeleted(
+        event.data.object as Stripe.Subscription,
+        new Date()
+      );
       break;
     default:
+      // Everything that means "this subscription may have moved" -- including
+      // the invoice and schedule events a plan change depends on -- resolves to
+      // a subscription id and is re-read from Stripe. The payload is the
+      // trigger; Stripe is the source of truth.
+      //
+      // A plan change made with `pending_if_incomplete` does not show up on the
+      // subscription until its invoice is paid, so `invoice.paid` is what
+      // promotes the account, and `pending_update_expired` is what confirms the
+      // change was abandoned.
+      if (isSubscriptionResyncEvent(event.type)) {
+        const subscriptionId = subscriptionIdFromEventObject(
+          event.type,
+          event.data.object
+        );
+        if (subscriptionId) {
+          await resyncSubscriptionFromStripe(subscriptionId, event.type);
+        }
+      }
       break;
   }
 }
