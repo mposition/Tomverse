@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useRef, useState } from "react";
+import { FormEvent, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useSession } from "next-auth/react";
 import {
@@ -404,6 +404,23 @@ export function SupportPageContent() {
   const page = copy[lang] ?? copy.en;
   const [type, setType] = useState<keyof SupportCopy["types"]>("support");
   const [email, setEmail] = useState("");
+  // A caller can preselect the request category with `?topic=`. The pricing
+  // page's plan-change CTA uses it: online plan changes are not supported yet
+  // (docs/policy/plan-change.md), so the CTA sends people here, and landing on
+  // a form already set to "Billing" is the difference between a handoff and
+  // being dropped at a generic contact page.
+  //
+  // Read from `window.location` in an effect rather than through
+  // `useSearchParams`, because this route is `force-static` and that hook
+  // would opt the prerendered tree into client-side rendering.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const requested = new URLSearchParams(window.location.search).get("topic");
+    if (!requested || !(requested in copy.en.types)) return;
+    queueMicrotask(() =>
+      setType(requested as keyof SupportCopy["types"])
+    );
+  }, []);
   const [traceId, setTraceId] = useState("");
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);

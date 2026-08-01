@@ -32,6 +32,7 @@ import {
   feedbackFailureCopyKey,
   feedbackMessageState,
   isPlausibleTraceId,
+  sanitizeFeedbackDiagnostics,
   FEEDBACK_MESSAGE_MAX_LENGTH,
   FEEDBACK_MESSAGE_MIN_LENGTH,
   FEEDBACK_TRACE_ID_MAX_LENGTH,
@@ -130,6 +131,13 @@ export function FeedbackButton({
    * frame would both pass a state-based check and fire two POSTs.
    */
   const submittingRef = useRef(false);
+  /**
+   * Whether the dialog is on screen right now. A submission that finishes
+   * after the user closed the dialog has nowhere to put an inline message, so
+   * it reports through a toast instead -- which is what lets the close control
+   * stay live while a request is in flight.
+   */
+  const openRef = useRef(false);
 
   const isGuest = status === "unauthenticated";
   // The chat page resolves the Turnstile site key at request time and shares it
@@ -198,12 +206,26 @@ export function FeedbackButton({
 
   const traceIdLooksWrong = !isPlausibleTraceId(traceId);
 
+  /**
+   * Exactly what will be attached, after both sanitiser passes. Shown to the
+   * user rather than kept behind the scenes: pattern matching only knows the
+   * credential formats it was told about, and a person reading their own error
+   * text is the last check on whatever slipped through.
+   */
+  const sanitizedDiagnostics = useMemo(
+    () => (rawErrorDetails ? sanitizeFeedbackDiagnostics(rawErrorDetails) : ""),
+    [rawErrorDetails]
+  );
+
   const closeDialog = useCallback(() => {
-    // Closing mid-flight would strand the request with nowhere to report its
-    // outcome, so the close controls are inert while a submission is running.
-    if (submittingRef.current) return;
+    // Closing is never blocked, including mid-flight. The request keeps
+    // running -- abandoning a submission the user already committed to would
+    // be worse -- and reports its outcome through a toast instead.
+    if (submittingRef.current) {
+      dispatchAppToast(t("feedback.sendingContinues"), "info");
+    }
     setOpen(false);
-  }, []);
+  }, [t]);
 
   const openDialog = () => {
     if (!traceId && typeof window !== "undefined") {
@@ -214,11 +236,18 @@ export function FeedbackButton({
       );
     }
     setType("bug");
-    setSubmitError(null);
+    // The last failure is deliberately kept, alongside the draft it belongs
+    // to: someone reopening the dialog is reopening it to retry, and the
+    // reason the previous attempt failed is still true until they do. It is
+    // cleared the moment a new submission starts.
     setOpen(true);
   };
 
   // --- dialog behaviour -----------------------------------------------------
+
+  useEffect(() => {
+    openRef.current = open;
+  }, [open]);
 
   useEffect(() => {
     if (!open) return;
@@ -294,6 +323,21 @@ export function FeedbackButton({
 
   // --- submission -----------------------------------------------------------
 
+  /**
+   * Records a failure where the user can actually see it. The state is always
+   * set, so reopening the dialog still shows the reason; the toast is added
+   * when the dialog is no longer on screen, which is the only channel left
+   * once the user has closed it mid-flight.
+   */
+  const reportFailure = (failure: SubmitError) => {
+    setSubmitError(failure);
+    if (openRef.current) return;
+    const text = failure.reference
+      ? interpolate(t(failure.copyKey), { reference: failure.reference })
+      : t(failure.copyKey);
+    dispatchAppToast(text, "error");
+  };
+
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (submittingRef.current) return;
@@ -320,7 +364,7 @@ export function FeedbackButton({
           const failure = isGuestVerificationError(error)
             ? error.kind
             : ("failed" as GuestVerificationFailure);
-          setSubmitError({
+          reportFailure({
             source: "verification",
             copyKey: guestVerificationFailureKey(failure, "feedback"),
             reference: null,
@@ -345,7 +389,7 @@ export function FeedbackButton({
       });
 
       if (!outcome.ok) {
-        setSubmitError({
+        reportFailure({
           source: "submit",
           copyKey: feedbackFailureCopyKey(outcome.failure),
           reference: outcome.reference,
@@ -372,9 +416,11 @@ export function FeedbackButton({
   };
 
   const copyDetails = async () => {
-    if (!rawErrorDetails) return;
+    // Copies what is actually attached, not the raw text: the button sits next
+    // to the preview and the two must agree.
+    if (!sanitizedDiagnostics) return;
     try {
-      await navigator.clipboard.writeText(rawErrorDetails);
+      await navigator.clipboard.writeText(sanitizedDiagnostics);
       setDetailsCopied(true);
       window.setTimeout(() => setDetailsCopied(false), 1_500);
     } catch {
@@ -440,9 +486,8 @@ export function FeedbackButton({
                   type="button"
                   data-testid="feedback-close"
                   onClick={closeDialog}
-                  disabled={isSending}
                   aria-label={t("feedback.close")}
-                  className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-zinc-500 transition hover:bg-zinc-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 disabled:opacity-50 dark:hover:bg-zinc-900"
+                  className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-zinc-500 transition hover:bg-zinc-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:hover:bg-zinc-900"
                 >
                   <X className="h-4 w-4" aria-hidden="true" />
                 </button>
@@ -572,17 +617,40 @@ export function FeedbackButton({
                       : "-"}
                   </div>
 
-                  {isErrorReport && (
-                    <button
-                      type="button"
-                      data-testid="feedback-copy-diagnostics"
-                      onClick={copyDetails}
-                      className="mt-2 min-h-11 text-xs font-bold text-zinc-500 underline underline-offset-2 hover:text-zinc-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:hover:text-zinc-200"
+                  {/*
+                    The diagnostics are attached automatically, so without this
+                    nobody ever sees what actually leaves the browser. The
+                    sanitiser removes the credential shapes it can recognise --
+                    and a reader is the only check on the ones it cannot.
+                  */}
+                  {isErrorReport && sanitizedDiagnostics && (
+                    <details
+                      data-testid="feedback-diagnostics"
+                      className="mt-3 rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-2 dark:border-zinc-800 dark:bg-zinc-900/70"
                     >
-                      {detailsCopied
-                        ? t("feedback.copyDiagnosticsCopied")
-                        : t("feedback.copyDiagnostics")}
-                    </button>
+                      <summary className="min-h-11 cursor-pointer list-none py-2 text-xs font-bold text-zinc-600 break-keep focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:text-zinc-300">
+                        {t("feedback.diagnosticsPreview")}
+                      </summary>
+                      <p className="mt-1 text-xs leading-5 text-zinc-500 break-keep dark:text-zinc-400">
+                        {t("feedback.diagnosticsPreviewNote")}
+                      </p>
+                      <pre
+                        data-testid="feedback-diagnostics-body"
+                        className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap break-words rounded-lg bg-white p-2 font-mono text-[11px] leading-5 text-zinc-600 dark:bg-zinc-950 dark:text-zinc-300"
+                      >
+                        {sanitizedDiagnostics}
+                      </pre>
+                      <button
+                        type="button"
+                        data-testid="feedback-copy-diagnostics"
+                        onClick={copyDetails}
+                        className="mt-2 min-h-11 text-xs font-bold text-zinc-500 underline underline-offset-2 hover:text-zinc-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:hover:text-zinc-200"
+                      >
+                        {detailsCopied
+                          ? t("feedback.copyDiagnosticsCopied")
+                          : t("feedback.copyDiagnostics")}
+                      </button>
+                    </details>
                   )}
                 </fieldset>
 

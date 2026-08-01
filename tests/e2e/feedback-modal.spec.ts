@@ -8,6 +8,15 @@ import {
 } from "./support/app-fixtures";
 import { restoreActiveConversation } from "./support/chat-state-fixtures";
 
+/**
+ * Credential-shaped fixtures are assembled at runtime, never written out as
+ * literals: a fake key is still a real key *shape* committed to the
+ * repository, and .gitleaks.toml's allowlist is deliberately narrow (see
+ * tests/gitleaksAllowlist.test.mjs).
+ */
+const fakeGoogleKey = () =>
+  ["AIza", "SyD1x9Qp", "LmNv2345", "abcdEFGH", "ijkLMNop", "QRs"].join("");
+
 // ---------------------------------------------------------------------------
 // The chat "Send feedback" modal.
 //
@@ -973,5 +982,177 @@ test.describe("localisation", () => {
     const error = page.getByTestId("feedback-submit-error");
     await expect(error).toHaveText(/요청이 너무 많습니다/);
     await expect(error).not.toHaveText(/feedback\./);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Closing while a submission is in flight
+// ---------------------------------------------------------------------------
+
+test.describe("closing mid-flight", () => {
+  /** Holds /api/feedback open so the dialog is genuinely mid-send. */
+  const heldFeedbackApi = async (page: Page, outcome: "ok" | "fail" = "ok") => {
+    let release = () => {};
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    await page.route("**/api/feedback", async (route) => {
+      await held;
+      if (outcome === "fail") {
+        await route.fulfill({
+          status: 500,
+          contentType: "application/json",
+          body: JSON.stringify({ code: "FEEDBACK_SUBMIT_FAILED" }),
+        });
+        return;
+      }
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ success: true, reference: "0001ABCD" }),
+      });
+    });
+    return () => release();
+  };
+
+  test("the dialog closes during a send instead of locking shut", async ({ page }) => {
+    await gotoAuthenticatedChat(page);
+    const release = await heldFeedbackApi(page);
+    await openFeedbackFromSidebar(page);
+
+    await page.getByTestId("feedback-message").fill("closing while it sends");
+    await page.getByTestId("feedback-submit").click();
+    // Mid-flight: the close control is live, not disabled.
+    await expect(page.getByTestId("feedback-close")).toBeEnabled();
+    await page.getByTestId("feedback-close").click();
+    await expect(page.getByTestId("feedback-dialog")).toBeHidden();
+
+    // And the user is told the send is still running.
+    await expect(page.getByTestId("app-toast")).toContainText(/still sending/i);
+    release();
+  });
+
+  test("Escape also closes during a send", async ({ page }) => {
+    await gotoAuthenticatedChat(page);
+    const release = await heldFeedbackApi(page);
+    await openFeedbackFromSidebar(page);
+
+    await page.getByTestId("feedback-message").fill("escape while it sends");
+    await page.getByTestId("feedback-submit").click();
+    await page.keyboard.press("Escape");
+
+    await expect(page.getByTestId("feedback-dialog")).toBeHidden();
+    await expect(page.getByTestId("sidebar-feedback-button")).toBeFocused();
+    release();
+  });
+
+  test("a success that lands after closing still confirms receipt", async ({ page }) => {
+    await gotoAuthenticatedChat(page);
+    const release = await heldFeedbackApi(page, "ok");
+    await openFeedbackFromSidebar(page);
+
+    await page.getByTestId("feedback-message").fill("finishes after closing");
+    await page.getByTestId("feedback-submit").click();
+    await page.getByTestId("feedback-close").click();
+    await expect(page.getByTestId("feedback-dialog")).toBeHidden();
+
+    release();
+    const toast = page.getByTestId("app-toast");
+    await expect(toast).toHaveAttribute("data-tone", "success");
+    await expect(toast).toContainText("0001ABCD");
+  });
+
+  test("a failure that lands after closing reaches the user, and keeps the draft", async ({
+    page,
+  }) => {
+    await gotoAuthenticatedChat(page);
+    const release = await heldFeedbackApi(page, "fail");
+    await openFeedbackFromSidebar(page);
+
+    await page.getByTestId("feedback-message").fill("fails after closing");
+    await page.getByTestId("feedback-submit").click();
+    await page.getByTestId("feedback-close").click();
+    await expect(page.getByTestId("feedback-dialog")).toBeHidden();
+
+    release();
+    // The dialog is gone, so the toast is the only channel left.
+    const toast = page.getByTestId("app-toast");
+    await expect(toast).toHaveAttribute("data-tone", "error");
+    await expect(toast).toContainText(/server problem/i);
+
+    // Reopening shows the same reason and the text that was never sent.
+    await openFeedbackFromSidebar(page);
+    await expect(page.getByTestId("feedback-message")).toHaveValue(
+      "fails after closing"
+    );
+    await expect(page.getByTestId("feedback-submit-error")).toHaveText(
+      /server problem/i
+    );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// What the attached diagnostics actually contain
+// ---------------------------------------------------------------------------
+
+test.describe("diagnostics disclosure", () => {
+  const seedErrorWithSecret = async (page: Page) => {
+    await prepareGuestPage(page, "en");
+    await mockAuthenticatedApi(page, {
+      selectedModels: ["gpt-5-4-mini"],
+      messages: [
+        { id: "u1", role: "user", content: "Hello", status: "normal" },
+        {
+          id: "a1",
+          role: "assistant",
+          modelId: "gpt-5-4-mini",
+          content: [
+            "Provider error for model claude-haiku-4-5-20251001.",
+            "Trace ID: 0d1f6b1e-9a2c-4d3f-8b7a-5c6d7e8f9012",
+            `upstream key ${fakeGoogleKey()} rejected`,
+          ].join("\n"),
+          status: "error",
+        },
+      ],
+    });
+    await restoreActiveConversation(page);
+    await page.goto("/chat?lang=en");
+    await page.getByTestId("report-error-button").first().click();
+    await expect(page.getByTestId("feedback-dialog")).toBeVisible();
+  };
+
+  test("the user can read exactly what will be attached @ui-risk", async ({ page }) => {
+    await seedErrorWithSecret(page);
+
+    // Not hidden behind the scenes: the preview is in the dialog.
+    const preview = page.getByTestId("feedback-diagnostics");
+    await expect(preview).toBeVisible();
+    await preview.getByRole("group").or(preview).first().click();
+    const body = page.getByTestId("feedback-diagnostics-body");
+    await expect(body).toBeVisible();
+
+    const shown = await body.innerText();
+    // The key is gone even though no pattern in the denylist matches it.
+    expect(shown).not.toContain(fakeGoogleKey());
+    expect(shown).toContain("[redacted]");
+    // The diagnostics that make the report useful survive.
+    expect(shown).toContain("0d1f6b1e-9a2c-4d3f-8b7a-5c6d7e8f9012");
+    expect(shown).toContain("claude-haiku-4-5-20251001");
+  });
+
+  test("what is previewed is what is sent", async ({ page }) => {
+    await seedErrorWithSecret(page);
+    const feedback = await mockFeedbackApi(page);
+
+    const body = page.getByTestId("feedback-diagnostics-body");
+    await page.getByTestId("feedback-diagnostics").click();
+    const shown = (await body.innerText()).trim();
+
+    await page.getByTestId("feedback-submit").click();
+    await expect(page.getByTestId("feedback-dialog")).toBeHidden();
+
+    const sent = feedback.requests[0].message;
+    expect(sent).toContain(shown);
+    expect(sent).not.toContain(fakeGoogleKey());
   });
 });

@@ -27,6 +27,7 @@ import { purchaseCtaCopy } from "@/components/billing/purchaseCopy";
 import {
   PRICING_CREDIT_PACKS_ANCHOR,
   PRICING_PLANS_ANCHOR,
+  buildPlanChangeSupportHref,
   buildPricingIntentHref,
   buildPurchaseSignInHref,
   normalizeCreditPackId,
@@ -1592,8 +1593,13 @@ export function PricingPageContent() {
                     {ctaText.currentPlan}
                   </button>
                 ) : ctaState === "manage_plan" ? (
+                  // Support, not `/chat`. Account settings can cancel a
+                  // subscription; it cannot change one, so pointing there was
+                  // the same dead end as a 409 checkout, just slower to find.
+                  // See docs/policy/plan-change.md for the flow that replaces
+                  // this, and why the server keeps refusing until it exists.
                   <Link
-                    href={`/chat?lang=${encodeURIComponent(lang)}`}
+                    href={buildPlanChangeSupportHref(lang)}
                     onClick={() =>
                       trackProductEvent("plan_selected", 0, {
                         plan_id: planId,

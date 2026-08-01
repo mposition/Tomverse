@@ -113,15 +113,103 @@ const DIAGNOSTIC_REDACTIONS: Array<[RegExp, string]> = [
   [/\bAKIA[0-9A-Z]{12,}\b/g, "[redacted]"],
 ];
 
+// ---------------------------------------------------------------------------
+// Unknown credential shapes
+//
+// The list above only knows the formats it was told about, so a provider whose
+// key format nobody here has seen would sail straight through it. This second
+// pass does not try to recognise a format at all: it looks for the *shape* of a
+// generated credential -- long, dense, mixed-case-and-digits, high entropy --
+// and redacts it whatever issued it.
+//
+// It is deliberately conservative about what it lets through, because two
+// things in this text are high entropy and must survive: the trace ID the
+// whole feature exists to carry, and ordinary identifiers like model names.
+// ---------------------------------------------------------------------------
+
+/** Below this a token is too short to be worth treating as a secret. */
+const MIN_UNKNOWN_SECRET_LENGTH = 28;
+/** Random base64/hex sits well above 4; English-shaped text sits below. */
+const MIN_UNKNOWN_SECRET_ENTROPY = 3.8;
+/** Only characters a generated credential is actually made of. */
+const CREDENTIAL_CHARSET = /^[A-Za-z0-9+/=_.-]+$/;
+/** The trace ID users are asked to send. High entropy, and not a secret. */
+const UUID_SHAPE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+/** A long hex digest: no case mixing, but unmistakably generated. */
+const LONG_HEX_SHAPE = /^[0-9a-f]{32,}$/i;
+
+const shannonEntropyPerCharacter = (value: string) => {
+  const counts = new Map<string, number>();
+  for (const character of value) {
+    counts.set(character, (counts.get(character) || 0) + 1);
+  }
+  let entropy = 0;
+  for (const count of counts.values()) {
+    const probability = count / value.length;
+    entropy -= probability * Math.log2(probability);
+  }
+  return entropy;
+};
+
+/**
+ * Whether one whitespace-delimited token looks like a credential nobody
+ * registered a pattern for.
+ */
+export const looksLikeUnknownSecret = (token: string) => {
+  if (token.length < MIN_UNKNOWN_SECRET_LENGTH) return false;
+  if (!CREDENTIAL_CHARSET.test(token)) return false;
+  // A trace ID is exactly what support asks the user to quote back.
+  if (UUID_SHAPE.test(token)) return false;
+  // A long run of digits is a timestamp or an ID, not a key.
+  if (/^\d+$/.test(token)) return false;
+
+  const isLongHexDigest = LONG_HEX_SHAPE.test(token);
+  // Generated credentials mix cases and digits densely; file paths, dotted
+  // identifiers and model names do not.
+  const isDenseMixedToken =
+    /[a-z]/.test(token) && /[A-Z]/.test(token) && /\d/.test(token);
+  if (!isLongHexDigest && !isDenseMixedToken) return false;
+
+  // Repetition is the signature of a placeholder, not of a key.
+  if (new Set(token).size < 10) return false;
+  return shannonEntropyPerCharacter(token) >= MIN_UNKNOWN_SECRET_ENTROPY;
+};
+
+/**
+ * Maximal runs of the characters a generated credential is made of, with
+ * base64 padding allowed only where it belongs -- at the end.
+ *
+ * Scanning for runs rather than splitting on whitespace is what finds a key
+ * inside `key="..."`, `[...]` or `(...)`: the quotes and brackets are simply
+ * not part of the run. `=` is excluded from the interior for the same reason,
+ * so a `label=SECRET` pair yields the secret without swallowing its label.
+ */
+const CREDENTIAL_RUN = /[A-Za-z0-9+/_-]{20,}={0,2}/g;
+
+const redactUnknownSecrets = (value: string) =>
+  value.replace(CREDENTIAL_RUN, (candidate) =>
+    looksLikeUnknownSecret(candidate) ? "[redacted]" : candidate
+  );
+
 /**
  * Strips credentials out of the raw error text that "Report this error"
- * attaches automatically. The user never sees this text before it is sent, so
- * it is the one part of a feedback submission nobody has reviewed.
+ * attaches automatically.
+ *
+ * Two passes, because a denylist alone is only ever as good as the formats it
+ * was told about: the labelled and known-issuer patterns run first so the
+ * label survives and support can still read what kind of value was removed,
+ * then the shape-based pass removes anything else that looks generated.
+ *
+ * The result is also what the dialog shows the user before sending, so a
+ * person gets the last look at whatever both passes let through.
  */
 export const sanitizeFeedbackDiagnostics = (value: string) =>
-  DIAGNOSTIC_REDACTIONS.reduce(
-    (text, [pattern, replacement]) => text.replace(pattern, replacement),
-    value
+  redactUnknownSecrets(
+    DIAGNOSTIC_REDACTIONS.reduce(
+      (text, [pattern, replacement]) => text.replace(pattern, replacement),
+      value
+    )
   ).trim();
 
 /**
