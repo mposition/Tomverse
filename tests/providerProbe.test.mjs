@@ -247,12 +247,7 @@ test("an unusable probe model override is reported instead of silently dropped",
       // clear the environment variable that points at it.
       JSON.stringify({ xai: "grok-3-mini" }),
       async () => {
-        // The parsed override map is cached on first read, so this asserts the
-        // warning path directly rather than through getProbeModelFor's cache.
-        const { getProbeModelFor: freshGetProbeModelFor } = await import(
-          `../lib/providerProbe.ts?override-warning`
-        );
-        const model = freshGetProbeModelFor("xai");
+        const model = getProbeModelFor("xai");
         assert.ok(model);
         assert.equal(model.id, "grok-4-5", "the default target still wins");
       }
@@ -267,6 +262,26 @@ test("an unusable probe model override is reported instead of silently dropped",
   assert.ok(overrideWarning, "an ignored override must be logged");
   assert.equal(overrideWarning[1].overrideModelId, "grok-3-mini");
   assert.match(overrideWarning[1].reason, /not enabled/);
+});
+
+test("the override map is read fresh, so a later change is not masked by an earlier read", async () => {
+  // Guards the reason the previous test can call getProbeModelFor directly:
+  // a memoised map made the answer depend on whichever caller read it first,
+  // which in this process is one of the tests above.
+  const withOverride = await withEnv(
+    "PROVIDER_PROBE_MODEL_OVERRIDES",
+    JSON.stringify({ openai: "gpt-5-5" }),
+    async () => getProbeModelFor("openai")
+  );
+  assert.equal(withOverride?.id, "gpt-5-5");
+
+  const withoutOverride = await withEnv(
+    "PROVIDER_PROBE_MODEL_OVERRIDES",
+    undefined,
+    async () => getProbeModelFor("openai")
+  );
+  assert.equal(withoutOverride?.usageClass, "standard");
+  assert.notEqual(withoutOverride?.id, "gpt-5-5");
 });
 
 test("runProviderProbe reports provider_error with a diagnostic code when the call throws", async () => {

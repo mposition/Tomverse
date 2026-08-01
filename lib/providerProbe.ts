@@ -119,35 +119,35 @@ const probeProviderOptions = (model: AiModel) => {
   return { openai: { reasoningEffort } };
 };
 
-let cachedModelOverrides: Record<string, string> | undefined;
-
 /**
  * Parses PROVIDER_PROBE_MODEL_OVERRIDES (a JSON map of provider -> modelId),
  * matching the CONVERSATION_TITLE_MODEL_ID-style override convention already
  * used in this codebase. A malformed value is ignored (falls back to the
  * registry-driven default) rather than crashing the whole probe cycle.
+ *
+ * Read fresh every time rather than memoised. This runs once per provider per
+ * probe cycle -- ten minutes apart -- so parsing a short JSON string is not a
+ * cost worth caching, and a module-level cache made the value depend on
+ * whichever caller happened to read it first: tests had to import a
+ * second copy of this module to observe a different setting, and an operator
+ * changing the variable would have had to restart the process.
  */
 const parseModelOverrides = (): Record<string, string> => {
-  if (cachedModelOverrides !== undefined) return cachedModelOverrides;
   const raw = process.env.PROVIDER_PROBE_MODEL_OVERRIDES?.trim();
-  if (!raw) {
-    cachedModelOverrides = {};
-    return cachedModelOverrides;
-  }
+  if (!raw) return {};
   try {
     const parsed: unknown = JSON.parse(raw);
     if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
-      const entries = Object.entries(parsed as Record<string, unknown>).filter(
-        (entry): entry is [string, string] => typeof entry[1] === "string"
+      return Object.fromEntries(
+        Object.entries(parsed as Record<string, unknown>).filter(
+          (entry): entry is [string, string] => typeof entry[1] === "string"
+        )
       );
-      cachedModelOverrides = Object.fromEntries(entries);
-      return cachedModelOverrides;
     }
   } catch {
     // fall through
   }
-  cachedModelOverrides = {};
-  return cachedModelOverrides;
+  return {};
 };
 
 const warnedOverrides = new Set<string>();
