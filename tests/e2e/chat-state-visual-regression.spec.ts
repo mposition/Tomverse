@@ -638,6 +638,16 @@ test.describe("Insufficient credits state", () => {
     await expect(page.getByTestId("usage-limit-modal")).toBeVisible();
     await expect(page.getByText("플랜 한도에 도달했습니다").first()).toBeVisible();
     await expect(page.getByRole("link", { name: /signin/ })).toHaveCount(0);
+
+    const purchaseTrigger = page.getByTestId("credit-pack-purchase-trigger");
+    await purchaseTrigger.click();
+    const purchaseDialog = page.getByTestId("credit-pack-modal");
+    await expect(purchaseDialog).toBeVisible();
+    await expect(purchaseDialog.locator("button").first()).toBeFocused();
+    await page.keyboard.press("Escape");
+    await expect(purchaseDialog).toHaveCount(0);
+    await expect(page.getByTestId("usage-limit-modal")).toBeVisible();
+    await expect(purchaseTrigger).toBeFocused();
   });
 
   test("guest limit reached shows a login CTA, distinct from the account plan-limit copy", async ({ page }) => {

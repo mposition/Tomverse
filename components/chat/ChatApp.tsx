@@ -806,14 +806,21 @@ function ChatAppComponent({
                 "{seconds}",
                 String(Math.max(1, retryAfterSeconds ?? 5))
               )
+            : errorCode === "PLAN_ENTITLEMENT_EXHAUSTED"
+              ? t("chat.planEntitlementExhausted")
+            : errorCode === "CONCURRENT_RESERVATION_CONFLICT"
+              ? t("chat.concurrentReservationConflict")
             : errorCode === "CREDIT_BALANCE_INSUFFICIENT" ||
           errorCode === "CREDIT_COST_ALLOWANCE_INSUFFICIENT"
             ? t("chat.comparisonCreditsInsufficient")
-            : errorCode === "INTERNAL_DAILY_COST_SAFETY_LIMIT"
+            : errorCode === "OPERATIONAL_COST_GUARDRAIL_TRIGGERED"
+              ? t("chat.operationalCostGuardrail")
+              : errorCode === "INTERNAL_DAILY_COST_SAFETY_LIMIT"
               ? t("chat.internalDailyCostSafetyLimit")
               : errorCode === "INTERNAL_MONTHLY_COST_SAFETY_LIMIT"
                 ? t("chat.internalMonthlyCostSafetyLimit")
-                : errorCode === "PROVIDER_DAILY_SPEND_LIMIT_REACHED" ||
+                : errorCode === "PROVIDER_BUDGET_EXHAUSTED" ||
+                    errorCode === "PROVIDER_DAILY_SPEND_LIMIT_REACHED" ||
                     errorCode === "PROVIDER_SPEND_LIMIT_REACHED"
                   ? t("chat.providerCostSafetyLimit")
                   : errorCode === "PLAN_DAILY_CREDIT_LIMIT_REACHED"

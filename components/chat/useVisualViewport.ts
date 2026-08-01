@@ -96,9 +96,40 @@ const getShortViewportSnapshot = () => {
   return visibleHeight < MIN_PINNED_DRAWER_HEIGHT;
 };
 
+/**
+ * PROV-BANNER-001. How many CSS pixels of the page the user can actually see
+ * right now -- the layout viewport minus whatever the on-screen keyboard (or
+ * the browser's own chrome) is covering.
+ *
+ * `100dvh`, `45dvh` and `window.innerHeight` all still report the phone's full
+ * height while the keyboard is up on iOS Safari and on Android Chrome's default
+ * "resizes-visual" mode, so a box sized as a fraction of any of them can take
+ * far more of the *visible* screen than its percentage suggests: 45dvh of an
+ * 844px phone is 380px, which is 73% of what is left once a 320px keyboard is
+ * raised. Anything that has to stay a minority of the visible screen has to
+ * measure it here instead.
+ *
+ * Pinch zoom also shrinks `visualViewport.height`, but the user is panning
+ * deliberately there and nothing should reflow underneath them, so a zoomed
+ * viewport reports the layout height unchanged -- the same rule
+ * `getKeyboardInsetSnapshot` already applies.
+ *
+ * 0 means "not measured yet" (SSR and the hydration render), which callers read
+ * as "keep the CSS fallback" rather than as a zero-height viewport.
+ */
+const getVisibleViewportHeightSnapshot = () => {
+  if (typeof window === "undefined") return 0;
+  const viewport = window.visualViewport;
+  const layoutHeight = window.innerHeight;
+  if (!viewport) return layoutHeight;
+  if (viewport.scale > 1.01) return layoutHeight;
+  return Math.round(Math.min(viewport.height, layoutHeight));
+};
+
 const getServerCompactBottomDockSnapshot = () => false;
 const getServerKeyboardInsetSnapshot = () => 0;
 const getServerShortViewportSnapshot = () => false;
+const getServerVisibleViewportHeightSnapshot = () => 0;
 
 /**
  * True when the *visible* viewport is too short to afford a full-height bottom
@@ -139,5 +170,21 @@ export function useShortViewport() {
     subscribeToVisualViewport,
     getShortViewportSnapshot,
     getServerShortViewportSnapshot
+  );
+}
+
+/**
+ * The height of the part of the page the user can actually see, in CSS pixels.
+ * 0 until it has been measured on the client, so a caller keeps whatever CSS
+ * fallback it declared instead of collapsing during hydration.
+ *
+ * Shares the one subscription above, so a keyboard opening moves this, the
+ * keyboard inset and the compact-dock flag within the same commit.
+ */
+export function useVisibleViewportHeight() {
+  return useSyncExternalStore(
+    subscribeToVisualViewport,
+    getVisibleViewportHeightSnapshot,
+    getServerVisibleViewportHeightSnapshot
   );
 }

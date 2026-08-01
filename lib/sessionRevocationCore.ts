@@ -19,10 +19,17 @@ export type SessionSecuritySnapshot = {
   sessionsRevokedAt: Date | string | null;
 };
 
+export type SessionSecuritySnapshotResult =
+  | SessionSecuritySnapshot
+  | { lookupStatus: "user-not-found" | "lookup-error" }
+  | null;
+
 export type SessionRevocationReason =
   | "missing-issued-at"
   | "revoked"
-  | "account-not-active";
+  | "account-not-active"
+  | "user-not-found"
+  | "lookup-error";
 
 const toMillis = (value: Date | string | null | undefined) => {
   if (!value) return null;
@@ -41,11 +48,13 @@ export const sessionRevocationReason = ({
   snapshot,
 }: {
   issuedAt: string | number | null | undefined;
-  snapshot: SessionSecuritySnapshot | null;
+  snapshot: SessionSecuritySnapshotResult;
 }): SessionRevocationReason | null => {
-  // No snapshot means the lookup failed; leave the session alone rather than
-  // signing every user out on a transient database error.
+  // Null is reserved for the isolated E2E database bypass. Real lookup
+  // failures and missing users are explicit states and fail closed below.
   if (!snapshot) return null;
+
+  if ("lookupStatus" in snapshot) return snapshot.lookupStatus;
 
   if (snapshot.accountStatus && snapshot.accountStatus !== "active") {
     return "account-not-active";
@@ -65,5 +74,5 @@ export const sessionRevocationReason = ({
 
 export const isSessionRevoked = (input: {
   issuedAt: string | number | null | undefined;
-  snapshot: SessionSecuritySnapshot | null;
+  snapshot: SessionSecuritySnapshotResult;
 }) => sessionRevocationReason(input) !== null;

@@ -103,8 +103,9 @@ test("font-black is reserved for headline-sized customer text", () => {
   // Short brand expressions are the one body-size exception the weight policy
   // allows; everything else at <=16px uses 500-700.
   const BRAND_EXPRESSION_ALLOWLIST = new Set([
-    // Moved again by the go-live error-boundary merge.
-    "app/(site)/(application)/chat/ChatPageClient.tsx:336",
+    // Moved again by the go-live error-boundary merge, then down two more
+    // lines when the credit-pack checkout-return handler added its imports.
+    "app/(site)/(application)/chat/ChatPageClient.tsx:338",
     // Same "Tomverse Insight" brand span; it moved down four lines when the
     // superseded walkthrough embed above it was replaced by a stage diagram.
     "components/marketing/ChatWorkspaceGuide.tsx:190",
@@ -200,7 +201,10 @@ test("every email template shares one web-safe font policy", () => {
     "lib/emailLoginEmails.ts",
     "lib/providerModelCatalogReport.ts",
     "app/api/admin/test-email/route.ts",
-    "app/api/feedback/route.ts",
+    // The support notification moved out of app/api/feedback/route.ts when it
+    // gained a retry queue: the same mail is now rendered by the submission
+    // path and by the retry, so it has to live in one place.
+    "lib/supportNotificationEmail.ts",
   ];
 
   for (const template of templates) {

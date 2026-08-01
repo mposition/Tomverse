@@ -251,10 +251,23 @@ test("a cancelled request never leaves the search surcharge charged when the sea
 test("cost reservations use realistic output while preserving provider output caps", () => {
   const premium = getModelBillingProfile(getModel("gpt-5-5"));
   assert.equal(premium.maxOutputTokens, 8_192);
-  assert.equal(premium.reservationOutputTokens, 2_048);
+  // Raised from a shared 2,048 to a per-model p90: a reservation far below the
+  // real answer is settled upward afterwards and therefore protects nothing.
+  assert.equal(premium.reservationOutputTokens, 4_096);
+  assert.equal(premium.outputUsdPerMillionTokens, 30);
 
-  const threePremiumOutputReservationMicroUsd =
-    3 * premium.reservationOutputTokens * premium.outputUsdPerMillionTokens;
-  assert.equal(threePremiumOutputReservationMicroUsd, 368_640);
-  assert.ok(threePremiumOutputReservationMicroUsd < 1_500_000);
+  // The three models from the production incident, reserved together. Under
+  // the old generic premium price (US$60/MTok output, 2,048 reserved tokens)
+  // this was 368,640 micro-USD against a hidden US$1.50 daily ceiling; the
+  // real prices make the same comparison materially cheaper on input and the
+  // guardrail is now derived from the plan's own credits instead.
+  const outputReservation = (modelId) => {
+    const profile = getModelBillingProfile(getModel(modelId));
+    return profile.reservationOutputTokens * profile.outputUsdPerMillionTokens;
+  };
+  const incidentOutputReservationMicroUsd =
+    outputReservation("gpt-5-5-thinking") +
+    outputReservation("claude-opus-4-8") +
+    outputReservation("gemini-3-1-pro");
+  assert.equal(incidentOutputReservationMicroUsd, 184_320 + 102_400 + 49_152);
 });

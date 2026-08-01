@@ -97,6 +97,7 @@ import {
     GUEST_MAX_ATTACHMENTS_PER_MESSAGE,
 } from "@/lib/guestAttachments";
 import { isChatCostSafetyCode } from "@/lib/chatCostSafetyCore";
+import { estimatePromptTokens } from "@/lib/chatTokenEstimate";
 import {
     providerDiagnosticCode,
     safeErrorMessage,
@@ -140,42 +141,6 @@ const parseStoredModelIds = (value: unknown) => {
         : [];
 };
 
-const asRecord = (value: unknown): Record<string, unknown> | null =>
-    value && typeof value === "object" && !Array.isArray(value)
-        ? (value as Record<string, unknown>)
-        : null;
-
-const summarizeProviderCompletionMetadata = (metadata: unknown) => {
-    const google = asRecord(asRecord(metadata)?.google);
-    if (!google) return undefined;
-
-    const promptFeedback = asRecord(google.promptFeedback);
-    const blockedCategories = Array.isArray(google.safetyRatings)
-        ? google.safetyRatings
-              .map(asRecord)
-              .filter((rating): rating is Record<string, unknown> => Boolean(rating))
-              .filter((rating) => rating.blocked === true)
-              .map((rating) =>
-                  typeof rating.category === "string" ? rating.category : null
-              )
-              .filter((category): category is string => Boolean(category))
-              .slice(0, 5)
-        : [];
-    const parts = [
-        typeof promptFeedback?.blockReason === "string"
-            ? `blockReason=${promptFeedback.blockReason}`
-            : null,
-        typeof google.finishMessage === "string"
-            ? `finishMessage=${google.finishMessage}`
-            : null,
-        blockedCategories.length > 0
-            ? `blockedSafety=${blockedCategories.join(",")}`
-            : null,
-    ].filter((part): part is string => Boolean(part));
-
-    return parts.length > 0 ? parts.join("; ") : undefined;
-};
-
 const isClosedStreamControllerError = (error: unknown) => {
     const metadata = safeErrorMetadata(error);
     return (
@@ -200,7 +165,6 @@ const logRequestError = (
             modelId,
             ...safeErrorMetadata(error),
             ...details,
-            message: safeErrorMessage(error)?.slice(0, 1_000),
         })
     );
 };
@@ -910,8 +874,11 @@ export async function POST(req: Request) {
         let totalExtractedCharacters = 0;
         let totalImageCount = 0;
         let totalBase64ImagePayloadBytes = 0;
+        // Shared with the composer estimate and the comparison preflight so a
+        // Korean conversation is not reserved several times too small here and
+        // correctly elsewhere -- see lib/chatTokenEstimate.ts.
         const estimateTextTokens = (text: string) =>
-            Math.max(1, Math.ceil(Buffer.byteLength(text, "utf8") / 4));
+            Math.max(1, estimatePromptTokens(text));
 
         const formattedMessages: ModelMessage[] = [];
         for (const msg of messages) {
@@ -1281,6 +1248,7 @@ export async function POST(req: Request) {
                     webSearchMode ?? "off",
                     webSearchCapability
                 ),
+                nativeSearchEnabled,
             }
         );
         if (
@@ -1297,6 +1265,7 @@ export async function POST(req: Request) {
         const accessGrant = await acquireChatAccess(access, budget, {
             traceId,
             source: "chat",
+            enabledTools: nativeSearchEnabled ? ["web_search"] : [],
         });
         leaseId = accessGrant.leaseId;
         usageReservation = accessGrant.usageReservation;
@@ -1413,6 +1382,11 @@ export async function POST(req: Request) {
                 }).catch(() => {});
                 usageReservation = null;
                 if (!isMessageContractError) {
+                    // The provider's HTTP status is forwarded as structured
+                    // data so recordProviderFailure can tell a request-contract
+                    // rejection (400) from an actual Perplexity outage (5xx)
+                    // instead of counting both against the provider.
+                    const submitMetadata = safeErrorMetadata(error);
                     await recordProviderFailure(
                         modelConfig.provider,
                         "DEEP_RESEARCH_SUBMIT_FAILED",
@@ -1420,10 +1394,10 @@ export async function POST(req: Request) {
                             modelId: requestedModelId,
                             phase: "request",
                             traceId,
-                            message:
-                                error instanceof Error
-                                    ? error.message
-                                    : String(error),
+                            errorName: submitMetadata.name,
+                            errorCode: submitMetadata.code,
+                            httpStatus: submitMetadata.statusCode,
+                            retryable: submitMetadata.isRetryable,
                         }
                     ).catch(() => {});
                     await recordModelFailure(
@@ -1521,6 +1495,8 @@ export async function POST(req: Request) {
                 inputTokens?: number;
                 cachedInputTokens?: number;
                 outputTokens?: number;
+                reasoningTokens?: number;
+                usageFromProvider?: boolean;
                 searchSurchargeCredits?: number;
                 searchExecuted?: boolean;
             }
@@ -1541,6 +1517,11 @@ export async function POST(req: Request) {
                         outputTokens:
                             usage?.outputTokens ??
                             estimatedGeneratedOutputTokens(),
+                        reasoningTokens: usage?.reasoningTokens,
+                        // Absent provider usage metadata, the output figure
+                        // above is the documented fallback estimate rather
+                        // than a measured value -- recorded as such.
+                        usageFromProvider: usage?.usageFromProvider === true,
                         outcome,
                         searchSurchargeCredits: usage?.searchSurchargeCredits,
                         searchExecuted: usage?.searchExecuted,
@@ -1672,7 +1653,6 @@ export async function POST(req: Request) {
                             result.usage,
                             result.finishReason,
                             result.rawFinishReason,
-                            result.providerMetadata,
                             result.content,
                         ] as const);
                         const [
@@ -1680,7 +1660,6 @@ export async function POST(req: Request) {
                             usageResult,
                             finishReasonResult,
                             rawFinishReasonResult,
-                            providerMetadataResult,
                             contentResult,
                         ] = completionResults;
                         const rejectedCompletion = completionResults.find(
@@ -1696,13 +1675,6 @@ export async function POST(req: Request) {
                             rawFinishReasonResult.status === "fulfilled"
                                 ? rawFinishReasonResult.value
                                 : undefined;
-                        const providerMetadataSummary =
-                            providerMetadataResult.status === "fulfilled"
-                                ? summarizeProviderCompletionMetadata(
-                                      providerMetadataResult.value
-                                  )
-                                : undefined;
-
                         if (responseResult.status === "fulfilled") {
                             try {
                                 const responseHeaders = responseResult.value.headers;
@@ -1769,6 +1741,10 @@ export async function POST(req: Request) {
                                     cachedInputTokens:
                                         usage.inputTokenDetails.cacheReadTokens,
                                     outputTokens: usage.outputTokens,
+                                    reasoningTokens:
+                                        usage.outputTokenDetails
+                                            .reasoningTokens,
+                                    usageFromProvider: true,
                                     ...searchSettlementFields,
                                 }
                             );
@@ -1859,16 +1835,6 @@ export async function POST(req: Request) {
                                       completionError
                                   )
                                 : `AI_EMPTY_RESPONSE.${finishReasonCode}`;
-                            const diagnosticMessage = [
-                                safeErrorMessage(completionError),
-                                `finishReason=${finishReason}`,
-                                rawFinishReason
-                                    ? `rawFinishReason=${rawFinishReason}`
-                                    : null,
-                                providerMetadataSummary,
-                            ]
-                                .filter((part): part is string => Boolean(part))
-                                .join("; ");
                             try {
                                 await recordProviderFailure(
                                     modelConfig.provider,
@@ -1887,7 +1853,6 @@ export async function POST(req: Request) {
                                             completionMetadata.statusCode,
                                         retryable:
                                             completionMetadata.isRetryable,
-                                        message: diagnosticMessage,
                                     }
                                 );
                                 await recordModelFailure(
@@ -1981,7 +1946,6 @@ export async function POST(req: Request) {
                                 errorCode: errorMetadata.code,
                                 httpStatus: errorMetadata.statusCode,
                                 retryable: errorMetadata.isRetryable,
-                                message: safeErrorMessage(error),
                             }
                         );
                         await recordModelFailure(
@@ -2101,7 +2065,6 @@ export async function POST(req: Request) {
                     errorCode: errorMetadata.code,
                     httpStatus: errorMetadata.statusCode,
                     retryable: errorMetadata.isRetryable,
-                    message: safeErrorMessage(error),
                 }
             );
             await recordModelFailure(

@@ -8,6 +8,7 @@ import {
   startScheduledJob,
 } from "@/lib/scheduledJobs";
 import { monitorInfrastructureThresholdsIfDue } from "@/lib/infrastructureThresholdMonitor";
+import { drainNotificationDeliveriesQuietly } from "@/lib/notificationDeliveryJob";
 
 const isAuthorized = (request: Request) => {
   const configured = process.env.MAINTENANCE_SECRET;
@@ -35,13 +36,18 @@ export async function POST(request: Request) {
       1_000
     );
     const infrastructureMonitor = await monitorInfrastructureThresholdsIfDue();
+    // Rides along on the only fifteen-minute schedule this deployment already
+    // has, so the operator-notification queue drains without a second cron
+    // entry having to be provisioned. It never throws, so it cannot turn a
+    // successful reconciliation into a failed one.
+    const notificationDeliveries = await drainNotificationDeliveriesQuietly();
     await completeScheduledJob({
       runId: run?.id,
       processedCount: result.examined,
-      result: { ...result, infrastructureMonitor },
+      result: { ...result, infrastructureMonitor, notificationDeliveries },
     });
     return Response.json(
-      { success: true, result, infrastructureMonitor },
+      { success: true, result, infrastructureMonitor, notificationDeliveries },
       { headers: { "Cache-Control": "no-store" } }
     );
   } catch (error) {

@@ -5,6 +5,7 @@ import { getBillingPlanByTier } from "@/lib/billingConfig";
 import { getUserChatUsageKey } from "@/lib/chatSecurity";
 import { getPurchasedCreditSummary } from "@/lib/creditLedger";
 import { prisma } from "@/lib/prisma";
+import { usageBucketCount } from "@/lib/chatUsageBucketCount";
 import {
   purchaseAnalyticsTriggerSchema,
   type PurchaseAnalyticsTrigger,
@@ -59,7 +60,7 @@ export async function getPurchaseAnalyticsSnapshot({
       planCreditsRemaining: Math.max(
         0,
         billingPlan.monthlyMessageLimit -
-          (usage?.count || 0) -
+          usageBucketCount(usage?.count) -
           Math.max(0, creditDebtCredits)
       ),
       addonCreditsRemaining: Math.max(0, purchasedBalance.remainingCredits),

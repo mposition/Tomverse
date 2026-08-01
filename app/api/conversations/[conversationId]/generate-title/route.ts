@@ -20,6 +20,7 @@ import {
   generateConversationTitle,
   recordTitleGenerationUsage,
 } from "@/lib/conversationTitle";
+import { safeErrorMetadata } from "@/lib/providerErrorClassification";
 
 const requestSchema = z
   .object({
@@ -27,19 +28,12 @@ const requestSchema = z
   })
   .strict();
 
-const safeErrorMessage = (error: unknown) => {
-  if (!error || typeof error !== "object" || !("message" in error)) {
-    return undefined;
-  }
-  return typeof error.message === "string" ? error.message : undefined;
-};
-
 const logRouteError = (event: string, traceId: string, error: unknown) => {
   console.error(
     JSON.stringify({
       event,
       traceId,
-      message: safeErrorMessage(error)?.slice(0, 1_000),
+      ...safeErrorMetadata(error),
     })
   );
 };

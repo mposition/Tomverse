@@ -137,8 +137,49 @@ test("test campaign retains first-touch UTM through consent, chat, signup, and c
     .toContain("signup_started");
   await expect(page).toHaveURL(/\/chat(?:\?|$)/);
 
+  // The pricing page now renders its plan CTAs from the *resolved* session and
+  // the authoritative plan, so a checkout can only be started by an account
+  // that is actually signed in -- a signed-out visitor is offered "Sign in to
+  // start Pro" instead. The Google step above is mocked, so the session it
+  // would have established has to be mocked here too.
+  await page.unroute("**/api/auth/session**");
+  await page.route("**/api/auth/session**", (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        user: {
+          id: "qa-campaign-user",
+          name: "QA Campaign",
+          email: "campaign@tomverse.app",
+          image: null,
+        },
+        expires: "2099-01-01T00:00:00.000Z",
+      }),
+    })
+  );
+  await page.route("**/api/user/usage**", (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        plan: "Free",
+        subscription: {
+          status: null,
+          billingInterval: null,
+          currentPeriodEnd: null,
+          cancelAtPeriodEnd: false,
+        },
+        balances: { planRemainingCredits: 0, purchasedRemainingCredits: 0 },
+        limits: { creditsDay: 30, creditsMonth: 300 },
+      }),
+    })
+  );
+
   await page.goto("/pricing");
-  await page.getByRole("button", { name: "Upgrade to Pro" }).click();
+  const proCta = page.getByTestId("pricing-cta-pro");
+  await expect(proCta).toHaveAttribute("data-cta-state", "upgrade");
+  await proCta.getByRole("button", { name: "Upgrade to Pro" }).click();
   await page.getByRole("button", { name: "Continue to checkout" }).first().click();
   await expect(page).toHaveURL(/__qa_checkout__/);
   await expect

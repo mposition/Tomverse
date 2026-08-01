@@ -31,6 +31,7 @@ import { ModeInfoSheet } from "@/components/chat/ModeInfoSheet";
 import {
   useCompactBottomDock,
   useKeyboardInset,
+  useVisibleViewportHeight,
 } from "@/components/chat/useVisualViewport";
 import { chatModelSummaryCopy } from "@/components/chat/chatModelSummaryCopy";
 import { deriveComparisonReadiness } from "@/lib/comparisonReadiness";
@@ -65,6 +66,30 @@ type PromptPayload = {
 };
 
 type ModelRuntimeStatus = "idle" | "loading" | "responding" | "error" | "cancelled" | "paused";
+
+/**
+ * PROV-BANNER-001. The provider outage banner's share of the screen.
+ *
+ * `MAX_VISIBLE_RATIO` is the policy REAUDIT-P1-04 already approved -- a notice
+ * may take up to 45% of the screen and scrolls beyond that -- re-based from the
+ * layout viewport onto the viewport the user can actually see, which is the
+ * only one that changes when the keyboard rises.
+ *
+ * `MIN_CONVERSATION_AREA_REM` is what the answer canvas (or, on a new chat, the
+ * welcome copy above the composer) keeps no matter how much the banner has to
+ * say. In rem, so it grows with the reader's text size instead of collapsing to
+ * a sliver at 200%.
+ *
+ * `MIN_REM` is the banner's own floor: a two-line title plus the 44px action
+ * row at the reader's text size. A `max-height` never *adds* height, so this
+ * only matters when the banner genuinely has that much to say -- it stops the
+ * measured budget from squeezing the notice down to a caption when the shell is
+ * short, which would be the "reduce the banner to an icon" outcome the composer
+ * contract forbids. It is still clamped by `MAX_VISIBLE_RATIO`.
+ */
+const PROVIDER_BANNER_MAX_VISIBLE_RATIO = 0.45;
+const PROVIDER_BANNER_MIN_REM = 5;
+const MIN_CONVERSATION_AREA_REM = 4;
 
 type MobileChatShellProps = {
   conversations: Conversation[];
@@ -460,6 +485,10 @@ export function MobileChatShell({
     hasComparableConversation: !isConversationEmpty && Boolean(currentChatId),
     isBusy: isCompareSummaryLoading,
   });
+  // REFLOW-P1-01. On a new chat the welcome copy and the composer are one
+  // surface: the composer portals into the welcome screen's own slot, so
+  // whatever happens to that surface happens to the composer.
+  const showWelcomeSurface = isConversationEmpty && selectedModels.length > 0;
   const isCompactBottomDock = useCompactBottomDock();
   // SHORT-VIEWPORT-001: on iOS Safari and Android Chrome's default mode the
   // layout viewport keeps its full height while the keyboard is up, so a
@@ -470,6 +499,60 @@ export function MobileChatShell({
   const drawerKeyboardInset = useKeyboardInset();
   // Same number, used for the shell's own scroll region (see <main> below).
   const composerKeyboardInset = drawerKeyboardInset;
+  // PROV-BANNER-001. What the user can really see, which is what the outage
+  // banner's cap has to be a fraction of.
+  const visibleViewportHeight = useVisibleViewportHeight();
+  const headerRef = useRef<HTMLElement | null>(null);
+  const bottomDockRef = useRef<HTMLDivElement | null>(null);
+  // The shell rows the banner may never eat into: the header above it, the
+  // bottom dock below it, and -- on a new chat, where the composer lives inside
+  // the welcome surface rather than in the dock -- the composer itself.
+  const [reservedShellHeight, setReservedShellHeight] = useState(0);
+  const [rootFontSizePx, setRootFontSizePx] = useState(16);
+
+  useEffect(() => {
+    if (typeof ResizeObserver === "undefined") return;
+    const composerOutsideDock = showWelcomeSurface ? welcomeInputSlot : null;
+    const measured = [
+      headerRef.current,
+      bottomDockRef.current,
+      composerOutsideDock,
+    ].filter((element): element is HTMLElement => Boolean(element));
+    const measure = () => {
+      const total = measured.reduce(
+        (sum, element) => sum + element.getBoundingClientRect().height,
+        0
+      );
+      // None of these rows is sized by the banner, so this measurement can
+      // never chase its own result: the header and the dock are `shrink-0` and
+      // the composer keeps its own height whatever the banner does.
+      setReservedShellHeight((current) =>
+        Math.abs(current - total) < 1 ? current : total
+      );
+      const rootFontSize =
+        parseFloat(getComputedStyle(document.documentElement).fontSize) || 16;
+      setRootFontSizePx((current) =>
+        current === rootFontSize ? current : rootFontSize
+      );
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    measured.forEach((element) => observer.observe(element));
+    return () => observer.disconnect();
+  }, [showWelcomeSurface, visibleViewportHeight, welcomeInputSlot]);
+
+  const providerBannerMaxHeight = useMemo(() => {
+    // Not measured yet (SSR, first client render): the banner keeps its own
+    // `dvh` fallback rather than being handed a number derived from nothing.
+    if (!visibleViewportHeight) return null;
+    const ceiling = visibleViewportHeight * PROVIDER_BANNER_MAX_VISIBLE_RATIO;
+    const budget =
+      visibleViewportHeight -
+      reservedShellHeight -
+      MIN_CONVERSATION_AREA_REM * rootFontSizePx;
+    const floor = PROVIDER_BANNER_MIN_REM * rootFontSizePx;
+    return Math.max(1, Math.round(Math.min(ceiling, Math.max(budget, floor))));
+  }, [reservedShellHeight, rootFontSizePx, visibleViewportHeight]);
   const isAnyWorkingOrError = selectedModels.some((modelId) => {
     const status = modelStatuses[modelId];
     return status === "responding" || status === "loading" || status === "error";
@@ -543,6 +626,7 @@ export function MobileChatShell({
       className="flex h-[100dvh] w-full max-w-full flex-col overflow-y-auto overflow-x-hidden overscroll-contain bg-white text-[13px] text-zinc-900 dark:bg-zinc-950 dark:text-zinc-100"
     >
       <header
+        ref={headerRef}
         data-testid="mobile-chat-header"
         data-has-status={hasHeaderStatus ? "true" : "false"}
         className={`min-w-0 shrink-0 overflow-hidden border-b border-zinc-200 bg-white px-3 pt-[calc(0.45rem+env(safe-area-inset-top))] dark:border-zinc-800 dark:bg-zinc-950 ${headerBottomPadding}`}
@@ -679,12 +763,24 @@ export function MobileChatShell({
         )}
       </header>
 
-      <ProviderStatusBanner
-        selectedModels={selectedModels}
-        compact
-        onSwapModel={onSwapModel}
-        canSelectModel={canSelectModel}
-      />
+      {/*
+        PROV-BANNER-001. `shrink-0`, so the banner's height is the one this
+        shell measured and not whatever the flex algorithm has left over. Left
+        shrinkable it was the only elastic row in the column once the welcome
+        surface stopped shrinking, so a short viewport at 200% text squeezed the
+        outage notice towards zero -- which is the "reduce the banner to an
+        icon" outcome the composer contract forbids. It keeps its budgeted
+        height and the shell scrolls instead.
+      */}
+      <div className="shrink-0">
+        <ProviderStatusBanner
+          selectedModels={selectedModels}
+          compact
+          onSwapModel={onSwapModel}
+          canSelectModel={canSelectModel}
+          maxHeight={providerBannerMaxHeight}
+        />
+      </div>
 
       {!isConversationEmpty && selectedModels.length > 1 && (
         <div className="shrink-0 border-b border-zinc-200 bg-zinc-50 px-2 py-1.5 dark:border-zinc-800 dark:bg-zinc-900/60">
@@ -752,14 +848,47 @@ export function MobileChatShell({
       )}
 
       <section
-        // Deliberately still `min-h-0`. A rem-based floor here looked like an
-        // improvement -- it stops the answer canvas being squeezed -- but it
-        // moved the composer 51px down at 320x568 and default text, where the
-        // section is the row that absorbs the shell's last few pixels today.
-        // The composer's reachability is bought by the shell's scroll owner
-        // above, not by reserving space here, so the distribution is left
-        // exactly as the recorded baseline has it.
-        className="relative flex min-h-0 flex-1 flex-col overflow-hidden bg-zinc-50 dark:bg-zinc-950"
+        data-testid="mobile-conversation-surface"
+        data-surface={showWelcomeSurface ? "welcome" : "conversation"}
+        // A conversation with answers in it is still `min-h-0 flex-1`. A
+        // rem-based floor there looked like an improvement -- it stops the
+        // answer canvas being squeezed -- but it moved the composer 51px down
+        // at 320x568 and default text, where the section is the row that
+        // absorbs the shell's last few pixels today. The composer is in the
+        // bottom dock in that state, so its reachability is bought by the
+        // shell's scroll owner, not by reserving space here.
+        //
+        // REFLOW-P1-01. A *new* chat is the opposite case, because the composer
+        // portals into the welcome screen inside this section. `min-h-0 flex-1`
+        // let the section shrink to nothing. Measured at 390x844 / ko / 200%
+        // text with a no-fallback outage banner and a 320px keyboard, where the
+        // user can see 524px:
+        //
+        //   header    0..215   (215px)
+        //   banner  231..471   (240px, capped at 379.8px = 45dvh of 844)
+        //   section            (0px -- flexed away)
+        //   dock    471..524   (the disclaimer, which is all that fit)
+        //   composer 588..822, textarea 601..705, send 721..809
+        //
+        // Every composer control was below the 524px line, inside a welcome
+        // overlay that was itself 0px tall with 586px of content in it.
+        // `elementFromPoint` at the textarea's centre returned
+        // `mobile-chat-shell`, and after scrolling the overlay -- the nearest
+        // scroll owner -- it returned `provider-status-title`: the composer was
+        // not painted anywhere the user could reach. The shell could not help
+        // either; with the section at 0 it had nothing left to scroll.
+        //
+        // So on a new chat the welcome surface is laid out in normal flow and
+        // never shrinks (`flex-[1_0_auto]`): it keeps its content's height,
+        // pushes the shell's content past the viewport when it has to, and the
+        // shell -- the single scroll owner on the way to the composer -- scrolls
+        // to it. There is no second, nested scroll region between the two any
+        // more, so "at most one scroll owner" is structural rather than lucky.
+        className={`relative flex flex-col bg-zinc-50 dark:bg-zinc-950 ${
+          showWelcomeSurface
+            ? "flex-[1_0_auto] justify-center"
+            : "min-h-0 flex-1 overflow-hidden"
+        }`}
         onTouchStart={(event) => {
           const touch = event.touches[0];
           touchStartXRef.current = touch.clientX;
@@ -779,41 +908,44 @@ export function MobileChatShell({
           switchModelByOffset(deltaX < 0 ? 1 : -1);
         }}
       >
-        {isConversationEmpty && selectedModels.length > 0 && (
-          // REAUDIT-P1-04. The welcome overlay is absolutely positioned, so
-          // its content -- including the composer, which portals into its
-          // centred slot -- was free to paint past the section's bottom edge.
-          // Measured at 320x568 with a draft and an outage banner, the empty
-          // state's composer ran to y=547 while the AI disclaimer starts at
-          // y=528: 1166px^2 of the composer sat under the notice. Scrolling the
-          // overlay keeps the welcome screen inside its own box at any text
-          // size, which is also the one scroll the user needs there.
-          <div className="absolute inset-0 z-10 overflow-y-auto overscroll-contain bg-zinc-50 dark:bg-zinc-950">
-            <ChatWelcomeScreen
-              recentConversations={recentConversations}
-              onSelectConversation={onSelectConversation}
-              inputSlotRef={setWelcomeInputSlot}
-              consentSlotRef={setWelcomeConsentSlot}
-              recentAccess="disclosure"
-              recentDisclosureRef={(node) => {
-                recentDisclosureRef.current = node;
-              }}
-              onOpenRecentConversations={() => openDrawer(recentDisclosureRef.current)}
-            />
-          </div>
+        {showWelcomeSurface && (
+          // REAUDIT-P1-04 kept this in an absolutely positioned, independently
+          // scrolling overlay so it could not paint past the section's bottom
+          // edge. That solved the overlap and created the nested scroll owner
+          // REFLOW-P1-01 is removing: in normal flow the welcome copy, the
+          // composer and the AI disclaimer are all rows of the same scroll
+          // region, so the composer can neither be clipped nor be left behind
+          // by a scroll that moved the wrong surface.
+          <ChatWelcomeScreen
+            recentConversations={recentConversations}
+            onSelectConversation={onSelectConversation}
+            inputSlotRef={setWelcomeInputSlot}
+            consentSlotRef={setWelcomeConsentSlot}
+            recentAccess="disclosure"
+            recentDisclosureRef={(node) => {
+              recentDisclosureRef.current = node;
+            }}
+            onOpenRecentConversations={() => openDrawer(recentDisclosureRef.current)}
+          />
         )}
         {selectedModels.length > 0 ? (
           selectedModels.map((modelId, panelIndex) => {
-            const isActive = resolvedActiveModelId === modelId;
+            // The panels stay mounted while the welcome surface is up -- they
+            // are what reports the conversation empty in the first place -- but
+            // they render no transcript in that state (ChatApp's
+            // `useCenteredWelcome` branch), so they are laid out only when they
+            // have something to lay out.
+            const isPanelVisible =
+              resolvedActiveModelId === modelId && !showWelcomeSurface;
 
             return (
               <div
                 key={`${currentChatId || "new"}:panel:${panelIndex}`}
                 className={`min-h-0 flex-1 flex-col overflow-hidden ${
-                  isActive ? "flex" : "hidden"
+                  isPanelVisible ? "flex" : "hidden"
                 }`}
-                style={isActive ? undefined : { contentVisibility: "hidden" }}
-                aria-hidden={!isActive}
+                style={isPanelVisible ? undefined : { contentVisibility: "hidden" }}
+                aria-hidden={!isPanelVisible}
               >
                 <ChatApp
                   modelId={modelId}
@@ -860,7 +992,18 @@ export function MobileChatShell({
         these differences" before there were any differences to read. It now
         sits directly above the composer inside the same bottom dock, sharing
         the composer's alignment axis without becoming one of its controls.
+
+        The dock is one measured box (PROV-BANNER-001) rather than four
+        siblings, so the shell can subtract exactly what it costs from the
+        outage banner's budget. It is a plain `shrink-0` column, so every row
+        inside it keeps the width, order and flex behaviour it had as a direct
+        child of the shell.
       */}
+      <div
+        ref={bottomDockRef}
+        data-testid="mobile-bottom-dock"
+        className="flex w-full shrink-0 flex-col"
+      >
       <ComparisonActionRail
         layout="mobile"
         readiness={comparisonReadiness}
@@ -913,6 +1056,7 @@ export function MobileChatShell({
         )}
 
       <AiDisclaimerNotice testId="chat-ai-disclaimer-mobile" />
+      </div>
 
       {isDrawerOpen && (
         <div

@@ -5,8 +5,6 @@ import { isMissingDatabaseSchemaError } from "@/lib/databaseError";
 import { isE2EDatabaseDisabled } from "@/lib/e2eTestMode";
 import { prisma } from "@/lib/prisma";
 import {
-  AVAILABLE_MODELS,
-  getModelBillingProfile,
   getModelUsageProfile,
   isWithdrawnFromOfferModel,
   type AiModel,
@@ -17,68 +15,16 @@ import {
 } from "@/lib/models";
 import {
   PROVIDER_API_CONFIGURATION,
+  STATIC_RUNTIME_MODELS,
   isApprovedProviderApiBaseUrl,
   isApprovedProviderApiKeyEnvName,
   isAiProvider,
+  staticModelRegistrySeedRows,
 } from "@/lib/modelRegistryShared";
 
 // Evaluated per call rather than captured at module load, so the guard sees the
 // real environment regardless of import order.
 const E2E_DATABASE_DISABLED = isE2EDatabaseDisabled;
-
-const staticModelWithRuntimeDefaults = (
-  model: AiModel,
-  sortOrder: number
-): AiModel => {
-  const providerConfig = PROVIDER_API_CONFIGURATION[model.provider];
-  const billing = getModelBillingProfile(model);
-  return {
-    ...model,
-    apiBaseUrl: providerConfig.baseUrl,
-    apiKeyEnvName: providerConfig.apiKeyEnvName,
-    creditWeight: getModelUsageProfile(model).credits,
-    catalogDeleted: false,
-    sortOrder,
-    ...billing,
-  };
-};
-
-const STATIC_RUNTIME_MODELS = AVAILABLE_MODELS.map(staticModelWithRuntimeDefaults);
-
-const staticSeedRows = () =>
-  STATIC_RUNTIME_MODELS.map((model) => ({
-    id: model.id,
-    name: model.name,
-    apiModel: model.apiModel,
-    provider: model.provider,
-    apiBaseUrl: model.apiBaseUrl!,
-    apiKeyEnvName: model.apiKeyEnvName!,
-    icon: model.icon,
-    bestFor: model.bestFor,
-    minimumPlan: model.minimumPlan,
-    usageClass: model.usageClass,
-    creditWeight: model.creditWeight!,
-    publiclyListed: model.publiclyListed !== false,
-    enabled: model.enabled,
-    status: model.status,
-    operationalReason: model.operationalReason || null,
-    userVisibleNote: model.userVisibleNote || null,
-    replacementModelId: model.replacementModelId || null,
-    catalogDeleted: false,
-    reasoning: model.reasoning || null,
-    contextWindowTokens: model.contextWindowTokens || null,
-    supportsImage: model.inputCapabilities?.image === true,
-    supportsNativePdf: model.inputCapabilities?.nativePdf === true,
-    maxImages: model.inputCapabilities?.maxImages || null,
-    maxBase64ImagePayloadBytes:
-      model.inputCapabilities?.maxBase64ImagePayloadBytes || null,
-    maxOutputTokens: model.maxOutputTokens || null,
-    reservationOutputTokens: model.reservationOutputTokens || null,
-    inputUsdPerMillionTokens: model.inputUsdPerMillionTokens ?? null,
-    outputUsdPerMillionTokens: model.outputUsdPerMillionTokens ?? null,
-    cachedInputPriceMultiplier: model.cachedInputPriceMultiplier ?? null,
-    sortOrder: model.sortOrder || 0,
-  }));
 
 const inputCapabilitiesFromRow = (
   row: ModelRegistryEntry
@@ -251,7 +197,10 @@ export async function ensureModelRegistrySeeded() {
   if (E2E_DATABASE_DISABLED()) return;
   if (!bootstrapPromise) {
     bootstrapPromise = prisma.modelRegistryEntry
-      .createMany({ data: staticSeedRows(), skipDuplicates: true })
+      .createMany({
+        data: staticModelRegistrySeedRows(),
+        skipDuplicates: true,
+      })
       .then(() => reconcileStaticWithdrawals())
       .catch((error) => {
         bootstrapPromise = null;

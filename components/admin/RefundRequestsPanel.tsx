@@ -4,6 +4,8 @@ import { useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { CheckCircle2, Download, Loader2, RotateCcw, XCircle } from "lucide-react";
 import { dispatchAppToast } from "@/lib/appToast";
+import { describeAdminApiFailure } from "@/lib/adminApiOutcome";
+import { describeRefundApproval } from "@/lib/adminRefundOutcomeCopy";
 import { formatBillingMinor, normalizeBillingCurrency } from "@/lib/billingMarkets";
 
 export type RefundRequestRow = {
@@ -157,9 +159,22 @@ export function RefundRequestsPanel({ rows }: Props) {
       const data = (await response.json().catch(() => null)) as {
         refundRequest?: RefundRequestRow;
         error?: string;
+        code?: string;
+        approvalId?: string;
       } | null;
       if (!response.ok || !data?.refundRequest) {
-        throw new Error(data?.error || "Refund update failed");
+        // A 409 with an approvalId is the two-person policy working, not a
+        // failure -- reporting it as one makes the operator retry and queue a
+        // second request.
+        const failure = describeAdminApiFailure({
+          status: response.status,
+          error: data?.error,
+          code: data?.code,
+          approvalId: data?.approvalId,
+          fallback: "The refund request was not updated.",
+        });
+        dispatchAppToast(failure.message, failure.tone);
+        return;
       }
       setItems((current) =>
         current.map((item) =>
@@ -173,15 +188,20 @@ export function RefundRequestsPanel({ rows }: Props) {
             : item
         )
       );
+      if (action === "approve") {
+        // Whether money actually moved depends on what Stripe had; the row
+        // above now carries the same status this sentence reports.
+        const outcome = describeRefundApproval(data.refundRequest);
+        dispatchAppToast(outcome.message, outcome.tone);
+      } else {
+        dispatchAppToast(
+          "Refund request rejected. The subscription and plan were left unchanged.",
+          "success"
+        );
+      }
+    } catch {
       dispatchAppToast(
-        action === "approve"
-          ? "Refund request approved. The user was moved to Free."
-          : "Refund request rejected.",
-        "success"
-      );
-    } catch (error) {
-      dispatchAppToast(
-        error instanceof Error ? error.message : "Failed to update refund request.",
+        "The refund request was not updated. Check the connection and retry.",
         "error"
       );
     } finally {

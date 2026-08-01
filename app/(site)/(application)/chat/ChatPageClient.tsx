@@ -19,6 +19,8 @@ import {
 import { SourceGroundingBadge } from "@/components/chat/SourceGroundingBadge";
 import { toSourceGrounding } from "@/lib/sourceGrounding";
 import { UpgradeCtaLink } from "@/components/billing/UpgradeCtaLink";
+import { purchaseCtaCopy } from "@/components/billing/purchaseCopy";
+import { normalizeCreditPackId } from "@/lib/purchaseIntent";
 import { ModelFinder } from "@/components/onboarding/ModelFinder";
 import { DeepResearchSetupSheet } from "@/components/chat/DeepResearchSetupSheet";
 import { Conversation, type ChatAttachment } from "@/components/chat/types";
@@ -1052,14 +1054,21 @@ export function ChatPageClient({
           return true;
         }
         const localizedMessage =
-          code === "CREDIT_BALANCE_INSUFFICIENT" ||
+          code === "PLAN_ENTITLEMENT_EXHAUSTED"
+            ? t("chat.planEntitlementExhausted")
+          : code === "CONCURRENT_RESERVATION_CONFLICT"
+            ? t("chat.concurrentReservationConflict")
+          : code === "CREDIT_BALANCE_INSUFFICIENT" ||
           code === "CREDIT_COST_ALLOWANCE_INSUFFICIENT"
             ? t("chat.comparisonCreditsInsufficient")
-            : code === "INTERNAL_DAILY_COST_SAFETY_LIMIT"
+            : code === "OPERATIONAL_COST_GUARDRAIL_TRIGGERED"
+              ? t("chat.operationalCostGuardrail")
+              : code === "INTERNAL_DAILY_COST_SAFETY_LIMIT"
               ? t("chat.internalDailyCostSafetyLimit")
               : code === "INTERNAL_MONTHLY_COST_SAFETY_LIMIT"
                 ? t("chat.internalMonthlyCostSafetyLimit")
-                : code === "PROVIDER_DAILY_SPEND_LIMIT_REACHED" ||
+                : code === "PROVIDER_BUDGET_EXHAUSTED" ||
+                    code === "PROVIDER_DAILY_SPEND_LIMIT_REACHED" ||
                     code === "PROVIDER_SPEND_LIMIT_REACHED"
                   ? t("chat.providerCostSafetyLimit")
                   : code === "PLAN_DAILY_CREDIT_LIMIT_REACHED"
@@ -1115,6 +1124,46 @@ export function ChatPageClient({
       }
     };
   }, []);
+
+  // A credit-pack purchase that started in chat now returns to chat with an
+  // outcome. Previously `billing=credits-success` was written into the URL by
+  // the checkout route and read by nothing at all: the visitor landed back on
+  // their conversation with no confirmation that anything had been bought, and
+  // a cancelled purchase was indistinguishable from a successful one.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const billing = params.get("billing");
+    if (billing !== "credits-success" && billing !== "credits-cancelled") return;
+
+    const packId = normalizeCreditPackId(params.get("pack"));
+    const urlLanguage = params.get("lang");
+    const copyLanguage = isLanguage(urlLanguage) ? urlLanguage : lang;
+    const purchaseCopy = purchaseCtaCopy[copyLanguage] || purchaseCtaCopy.en;
+    const packLabel = packId
+      ? packId
+          .split("_")[0]
+          .replace(/^./, (character) => character.toUpperCase())
+      : purchaseCopy.buyCredits;
+
+    queueMicrotask(() => {
+      if (billing === "credits-success") {
+        showToast(purchaseCopy.purchaseSuccessBody(packLabel), "success");
+        // The balance the usage widget is showing predates the purchase.
+        notifyUserUsageChanged();
+      } else {
+        showToast(purchaseCopy.purchaseCancelledBody(packLabel), "info");
+      }
+    });
+
+    params.delete("billing");
+    params.delete("pack");
+    const nextSearch = params.toString();
+    window.history.replaceState(
+      null,
+      "",
+      `${window.location.pathname}${nextSearch ? `?${nextSearch}` : ""}${window.location.hash}`
+    );
+  }, [lang, showToast]);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -3413,6 +3462,8 @@ export function ChatPageClient({
     {toast && (
       <div
         key={toast.id}
+        data-testid="app-toast"
+        data-tone={toast.tone}
         role={toast.tone === "error" ? "alert" : "status"}
         aria-live={toast.tone === "error" ? "assertive" : "polite"}
         className="fixed bottom-5 left-1/2 z-[70] flex max-w-[calc(100vw-2rem)] -translate-x-1/2 items-center gap-3 rounded-2xl border border-zinc-200 bg-white px-4 py-3 text-sm font-semibold text-zinc-900 shadow-2xl shadow-zinc-900/15 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-100"

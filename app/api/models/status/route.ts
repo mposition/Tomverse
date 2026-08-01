@@ -37,6 +37,12 @@ const fallbackModelStatus = (publicModels: Awaited<ReturnType<typeof getPublicRu
     id: model.id,
     provider: model.provider,
     status: resolveModelRuntimeAvailability(model),
+    statusSource:
+      resolveModelRuntimeAvailability(model) === "available"
+        ? ("none" as const)
+        : ("registry" as const),
+    modelIncident: false,
+    providerIncident: false,
     providerStatus: "unknown" as const,
     providerStatusReason: "Provider health data is unavailable.",
     fallbackModelIds: model.replacementModelId
@@ -94,14 +100,30 @@ export async function GET(req: Request) {
 
     const publicModelIds = new Set(publicModels.map((model) => model.id));
 
-    const resolveStatus = (model: (typeof publicModels)[number]) => {
+    // STG-R002: what actually decided a model's status, so a caller can tell
+    // "this one model is failing" apart from "this provider is down". They
+    // call for different responses: the first has healthy siblings to fall
+    // back to, the second does not.
+    type StatusSource = "registry" | "model" | "provider" | "none";
+
+    const resolveStatus = (
+      model: (typeof publicModels)[number]
+    ): { status: "available" | "limited" | "unavailable"; source: StatusSource } => {
       const provider = providerStatus.get(model.provider);
       const incident = modelIncidents.get(model.id);
-      let status: "available" | "limited" | "unavailable" =
+      const status: "available" | "limited" | "unavailable" =
         resolveModelRuntimeAvailability(model);
-      if (status !== "unavailable" && incident && incident.failureCount5m >= 3) {
-        status = "unavailable";
-      } else if (status !== "unavailable") {
+      if (status === "unavailable") return { status, source: "registry" };
+      if (incident && incident.failureCount5m >= 3) {
+        // Applied per model regardless of the incident's scope: a model that
+        // is failing is unusable whether the cause is its own request contract
+        // or the provider behind it. What changed is that a model-scoped
+        // incident no longer escalates to the provider (see
+        // providerMonitoring's hasActiveModelIncident), so its siblings stay
+        // available instead of being blocked alongside it.
+        return { status: "unavailable", source: "model" };
+      }
+      {
         // Derived from the same public projection /status renders, rather
         // than from the internal health enum. Reading `provider.status`
         // here was why a provider shown as "Incident" on /status could still
@@ -114,12 +136,13 @@ export async function GET(req: Request) {
         //                            evidence of failure, and the caller is
         //                            told so via providerStatus)
         if (provider?.publicStatus === "incident") {
-          status = "unavailable";
-        } else if (provider?.publicStatus === "degraded") {
-          status = "limited";
+          return { status: "unavailable", source: "provider" };
+        }
+        if (provider?.publicStatus === "degraded") {
+          return { status: "limited", source: "provider" };
         }
       }
-      return status;
+      return { status, source: "none" };
     };
 
     // RECON-OPS-001: every model's status is resolved once up front so the
@@ -131,14 +154,16 @@ export async function GET(req: Request) {
 
     const models = publicModels.map((model) => {
       const provider = providerStatus.get(model.provider);
-      const status = modelStatuses.get(model.id) ?? "available";
+      const resolved = modelStatuses.get(model.id);
+      const status = resolved?.status ?? "available";
+      const statusSource: StatusSource = resolved?.source ?? "none";
       const { fallbackModelIds, fallbackHealth } =
         status === "unavailable"
           ? selectFallbackCandidates({
               replacementModelId: model.replacementModelId,
               recommendedModelIds: provider?.fallback.recommendedModelIds,
               isPublicModel: (modelId) => publicModelIds.has(modelId),
-              statusOf: (modelId) => modelStatuses.get(modelId),
+              statusOf: (modelId) => modelStatuses.get(modelId)?.status,
             })
           : { fallbackModelIds: [] as string[], fallbackHealth: "none" as const };
 
@@ -146,6 +171,11 @@ export async function GET(req: Request) {
         id: model.id,
         provider: model.provider,
         status,
+        // "model" means this model alone is failing and its siblings may be
+        // fine; "provider" means everything behind this provider is affected.
+        statusSource,
+        modelIncident: statusSource === "model",
+        providerIncident: provider?.publicStatus === "incident",
         providerStatus: provider?.publicStatus ?? "unknown",
         providerStatusReason: provider?.publicStatusReasonText ?? null,
         fallbackModelIds,

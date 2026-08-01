@@ -63,6 +63,52 @@ UI-012에서 승인된 정책(B안)입니다. accent 색은 **hue가 아니라 �
 
 예외가 필요하면 이 문서에 근거를 적고 나서 추가합니다.
 
+# Credit entitlement vs operational guardrail
+
+크레딧·비용 한도를 건드리기 전에 읽습니다.
+
+- `docs/policy/credit-and-cost-limits.md`
+
+절대 조건:
+
+- **사용자 entitlement는 크레딧입니다.** 플랜 크레딧과 구매 크레딧이 사용
+  권한을 정하며, 그 위에 숨은 USD 한도를 두지 않습니다.
+- **operational guardrail은 별개 층입니다.** 이름(`CHAT_COST_GUARDRAIL_*`),
+  오류 코드(`OPERATIONAL_COST_GUARDRAIL_TRIGGERED`, `PROVIDER_BUDGET_EXHAUSTED`),
+  버킷(`op-cost-*`), 지표를 entitlement와 섞지 않습니다.
+- guardrail 한도는 플랜 크레딧에서 유도하며, 환경변수 override는 유도값
+  아래로 내려갈 수 없습니다(`lib/chatCostGuardrails.ts`가 강제).
+- 모든 enabled premium 모델은 `lib/modelPricing.ts`에 명시적 가격 profile을
+  가져야 합니다. `npm run check:model-pricing`이 PR Fast Gate에서 fail-closed로
+  검사합니다.
+- 가격 변경은 소급 적용하지 않습니다. `pricingVersion`과 `costSource`를
+  reservation·settlement snapshot에 저장합니다.
+- 사용자 응답에 원시 내부 USD를 노출하지 않습니다. `internal*` 진단 필드는
+  `publicChatErrorDetails()`가 제거하고, Admin Console과 구조화 로그에만
+  남깁니다.
+- 모든 오류 응답의 `resetAt`은 생성 시점보다 미래여야 합니다.
+- 이 계약을 어기는 변경은 릴리스 차단 사유입니다.
+
+# Plan change (Pro <-> Max)
+
+플랜 변경 CTA나 `/api/billing/checkout`의 차단 분기를 건드리기 전에 읽습니다.
+
+- `docs/policy/plan-change.md`
+
+**온라인 플랜 변경은 아직 지원하지 않습니다.** 제품에는 구독 *변경* 흐름이 없고
+신규 Checkout과 기간 말 해지만 있습니다. 그래서:
+
+- 서버는 동일 플랜 재구매와 다운그레이드를 `PLAN_CHANGE_NOT_SUPPORTED`로,
+  활성 구독 상태의 상위 플랜 요청을 `ACTIVE_SUBSCRIPTION_EXISTS`로 각각 409
+  차단합니다. **이 차단을 UI보다 먼저 풀지 않습니다.** 풀면 한 계정이 두 플랜을
+  동시에 결제합니다.
+- UI는 변경을 결제로 안내하지 않습니다. `resolvePlanCtaState()`가 이 상태를
+  `manage_plan`으로 판정하고, CTA는 고객지원 문의로 연결하며, 온라인 변경이
+  아직 지원되지 않는다는 사실을 문구로 명시합니다.
+- `resolvePlanCtaState()`의 `manage_plan` 분기 교체는 구현의 **마지막** 단계입니다.
+  크레딧 경제성 결정 → 서버 상태기계 → Stripe 결제·예약 → 웹훅 재동기화가 모두
+  끝난 뒤에 바꿉니다. 먼저 바꾸면 동작하지 않는 CTA가 다시 생깁니다.
+
 <!-- BEGIN:mobile-chat-composer-invariant -->
 ## Mobile chat composer invariant
 

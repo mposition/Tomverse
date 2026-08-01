@@ -39,6 +39,15 @@ type ProviderStatusBannerProps = {
    * recovery path.
    */
   canSelectModel?: (modelId: string) => boolean;
+  /**
+   * PROV-BANNER-001. The tallest this banner may be, in CSS pixels, measured by
+   * the shell that owns the layout against the *visible* viewport rather than
+   * the layout one. Null keeps the `dvh` fallback below, which is correct
+   * wherever there is no on-screen keyboard to make the two disagree (the
+   * desktop workspace) and is also what the first client render uses before the
+   * viewport has been measured.
+   */
+  maxHeight?: number | null;
 };
 
 /**
@@ -114,6 +123,7 @@ export function ProviderStatusBanner({
   compact = false,
   onSwapModel,
   canSelectModel,
+  maxHeight = null,
 }: ProviderStatusBannerProps) {
   const { models: AVAILABLE_MODELS, publicModels: PUBLIC_MODELS } = useModelCatalog();
   const PUBLIC_MODEL_IDS = useMemo(
@@ -424,12 +434,25 @@ export function ProviderStatusBanner({
         // REAUDIT-P1-04. An outage banner is a notice, not the workspace. At
         // 200% text on a 568px phone this card grew to 266px -- nearly half the
         // screen -- and every pixel of it came out of the answers and the
-        // composer below. Capping it at 45% of the viewport and scrolling the
-        // rest keeps the whole sentence and every recovery action reachable
-        // (they are in the scroll region, not hidden behind a "more") while the
-        // composer keeps a workable share of the screen. At default text sizes
-        // the card is 88-102px tall, so the cap never engages.
+        // composer below. Capping it and scrolling the rest keeps the whole
+        // sentence and every recovery action reachable (they are in the scroll
+        // region, not hidden behind a "more") while the composer keeps a
+        // workable share of the screen. At default text sizes the card is
+        // 88-102px tall, so the cap never engages.
+        //
+        // PROV-BANNER-001. `45dvh` was the wrong 45%. `dvh` tracks the *layout*
+        // viewport, which iOS Safari and Android Chrome's default mode keep at
+        // the phone's full height while the on-screen keyboard is up: at
+        // 390x844 with a 320px keyboard the user sees 524px and this cap still
+        // allowed 380px of it -- 73% of the visible screen for a notice. The
+        // shell that owns the layout now measures the visible viewport (and
+        // what the header, the composer and the disclaimer need out of it) and
+        // passes the result down; the class below stays as the fallback for the
+        // desktop workspace, where no keyboard ever splits the two viewports,
+        // and for the first client render before the measurement exists.
         className="mx-3 mt-2 max-h-[45dvh] overflow-y-auto overscroll-contain rounded-2xl border border-red-200 bg-red-50 px-2.5 py-2 text-xs text-red-800 shadow-sm dark:border-red-900/60 dark:bg-red-950/30 dark:text-red-200"
+        style={maxHeight ? { maxHeight: `${maxHeight}px` } : undefined}
+        data-height-basis={maxHeight ? "visible-viewport" : "layout-viewport"}
         role="status"
         aria-live="polite"
         aria-labelledby={headingId}

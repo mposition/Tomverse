@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { after, afterEach, before, beforeEach, mock, test } from "node:test";
 import { pathToFileURL } from "node:url";
 import { resolve } from "node:path";
+import { usageBucketCount } from "@/lib/chatUsageBucketCount";
 
 // Financial + persistence contract for the one model that submits work to a
 // provider and settles it later: perplexity/sonar-deep-research.
@@ -260,7 +261,7 @@ const chargedCredits = async (reservationId: string) => {
         },
         select: { count: true },
       });
-      return row?.count ?? 0;
+      return usageBucketCount(row?.count);
     })
   );
   return Math.max(...counts);
@@ -368,7 +369,7 @@ test("a Perplexity submit failure refunds in full, leaves no rows, and counts on
     assert.ok(buckets.length > 0, `${key} was never counted`);
     for (const bucket of buckets) {
       assert.equal(
-        bucket.count,
+        usageBucketCount(bucket.count),
         1,
         `${key} counted ${bucket.count} failures in ${bucket.period}`
       );
@@ -607,7 +608,7 @@ for (const scenario of [
     poll: {
       json: { status: "FAILED", error_message: "The model could not complete this request." },
     },
-    expectedMessage: "The model could not complete this request.",
+      expectedMessage: "The Perplexity deep research job failed.",
     diagnosticCode: "DEEP_RESEARCH_JOB_FAILED",
   },
   {

@@ -4,17 +4,34 @@ import { createHash, createHmac, randomUUID, timingSafeEqual } from "node:crypto
 import type { Prisma } from "@prisma/client";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
+import { usageBucketCount } from "@/lib/chatUsageBucketCount";
 import {
     canUseModelWithPlan,
-    getModelBillingProfile,
     getModelUsageProfile,
     getSettledUsageCredits,
     getWeightedUsageCredits,
+    resolveModelRequestPricing,
     type AiModel,
     type ModelMinimumPlan,
     type ModelTier,
     type ModelUsageClass,
 } from "@/lib/models";
+import {
+    getCostGuardrailLimits,
+    getGuestCostGuardrailLimits,
+    getProviderCostGuardrailLimits,
+    type CostGuardrailLimits,
+} from "@/lib/chatCostGuardrails";
+import {
+    CONCURRENT_RESERVATION_CONFLICT,
+    CREDIT_BALANCE_INSUFFICIENT,
+    OPERATIONAL_COST_GUARDRAIL_TRIGGERED,
+    PLAN_ENTITLEMENT_EXHAUSTED,
+    PROVIDER_BUDGET_EXHAUSTED,
+} from "@/lib/chatCostSafetyCore";
+import { estimateToolInputTokenOverhead } from "@/lib/chatTokenEstimate";
+import { futureResetAt } from "@/lib/chatLimitDecisionCore";
+import { recordChatLimitDecision } from "@/lib/chatLimitDecisions";
 import { isWebSearchMode, type WebSearchMode } from "@/lib/appDefaults";
 import { getAnonymousClientKey } from "@/lib/clientIp";
 import { recordInternalProviderUsage } from "@/lib/providerUsageAccounting";
@@ -77,6 +94,11 @@ export type ChatBudget = {
     outputUsdPerMillionTokens: number;
     cachedInputPriceMultiplier: number;
     provider: AiModel["provider"];
+    /** Which entry of lib/modelPricing.ts produced the rates above. */
+    pricingVersion: string;
+    costSource: string;
+    /** Prompt-size threshold that selected the applied price tier, if any. */
+    longContextThresholdTokens: number | null;
 };
 
 type ReservationEntry = {
@@ -105,6 +127,9 @@ export type ChatUsageReservation = {
     planReservedCredits: number;
     addOnReservedCredits: number;
     addOnReservations: AddOnCreditReservationEntry[];
+    pricingVersion?: string;
+    costSource?: string;
+    longContextThresholdTokens?: number | null;
 };
 
 const durableReservationPayloadSchema = z
@@ -140,6 +165,11 @@ const durableReservationPayloadSchema = z
         inputUsdPerMillionTokens: z.number().nonnegative(),
         outputUsdPerMillionTokens: z.number().nonnegative(),
         cachedInputPriceMultiplier: z.number().min(0).max(1).default(1),
+        // Optional so a reservation written before the pricing registry landed
+        // still deserializes and settles at the rates it was reserved with.
+        pricingVersion: z.string().min(1).max(120).optional(),
+        costSource: z.string().min(1).max(60).optional(),
+        longContextThresholdTokens: z.number().int().nonnegative().nullable().optional(),
         planReservedCredits: z.number().int().nonnegative(),
         addOnReservedCredits: z.number().int().nonnegative(),
         addOnReservations: z.array(
@@ -200,38 +230,43 @@ const positiveInteger = (value: string | undefined, fallback: number) => {
     return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : fallback;
 };
 
-export const getPlanEstimatedCostLimits = (plan: ModelTier) => ({
-    day:
-        plan === "Max"
-            ? positiveInteger(
-                  process.env.CHAT_MAX_COST_MICROUSD_PER_DAY,
-                  3_000_000
-              )
+const planCreditEntitlement = (
+    plan: ModelTier,
+    planLimits?: ChatAccess["planLimits"]
+) => ({
+    dailyCreditLimit:
+        planLimits?.dailyMessageLimit ??
+        (plan === "Max"
+            ? 0
+            : plan === "Pro"
+              ? positiveInteger(process.env.CHAT_PRO_PER_DAY, 300)
+              : positiveInteger(process.env.CHAT_FREE_PER_DAY, 30)),
+    monthlyCreditLimit:
+        planLimits?.monthlyMessageLimit ??
+        (plan === "Max"
+            ? positiveInteger(process.env.CHAT_MAX_PER_MONTH, 10_000)
             : plan === "Pro"
               ? positiveInteger(
-                    process.env.CHAT_PRO_COST_MICROUSD_PER_DAY,
-                    1_500_000
+                    process.env.CHAT_PRO_PER_MONTH,
+                    positiveInteger(process.env.CHAT_USER_PER_MONTH, 3_000)
                 )
-              : positiveInteger(
-                    process.env.CHAT_FREE_COST_MICROUSD_PER_DAY,
-                    250_000
-                ),
-    month:
-        plan === "Max"
-            ? positiveInteger(
-                  process.env.CHAT_MAX_COST_MICROUSD_PER_MONTH,
-                  9_000_000
-              )
-            : plan === "Pro"
-              ? positiveInteger(
-                    process.env.CHAT_PRO_COST_MICROUSD_PER_MONTH,
-                    4_500_000
-                )
-              : positiveInteger(
-                    process.env.CHAT_FREE_COST_MICROUSD_PER_MONTH,
-                    500_000
-                ),
+              : positiveInteger(process.env.CHAT_FREE_PER_MONTH, 300)),
 });
+
+/**
+ * Operational cost guardrails for a plan.
+ *
+ * This is NOT the user's entitlement -- that is plan credits plus purchased
+ * credits, enforced by the credit ledger. These limits exist only to stop
+ * abnormal spend (a mispriced model, a provider incident, an abusive account)
+ * and are derived from the plan's own credit grant so they cannot bind before
+ * the credits themselves do. See lib/chatCostGuardrails.ts for the derivation.
+ */
+export const getChatCostGuardrails = (
+    plan: ModelTier,
+    planLimits?: ChatAccess["planLimits"]
+): CostGuardrailLimits =>
+    getCostGuardrailLimits(plan, planCreditEntitlement(plan, planLimits));
 
 export const assertModelAccess = (access: Pick<ChatAccess, "kind" | "plan">, model: AiModel) => {
     const currentPlan = access.kind === "guest" ? "Guest" : access.plan || "Free";
@@ -273,9 +308,17 @@ export const createChatBudget = (
     kind: AccessKind,
     model: AiModel,
     estimatedInputTokens: number,
-    options?: { webSearchSurchargeCredits?: number }
+    options?: {
+        webSearchSurchargeCredits?: number;
+        /**
+         * Whether a provider-native search tool will be attached. A searching
+         * turn feeds retrieved result text back into the prompt, so its real
+         * input is materially larger than the conversation alone -- reserving
+         * without it is what made searching requests settle above reservation.
+         */
+        nativeSearchEnabled?: boolean;
+    }
 ): ChatBudget => {
-    const profile = getModelBillingProfile(model);
     const maxInputTokens =
         kind === "guest"
             ? positiveInteger(process.env.CHAT_GUEST_MAX_INPUT_TOKENS, 16_000)
@@ -293,6 +336,20 @@ export const createChatBudget = (
         );
     }
 
+    // Credits are weighted by the conversation the user actually sent, so tool
+    // overhead never inflates what they are charged -- it only widens the
+    // internal cost reservation, which is refunded down at settlement.
+    const reservedInputTokens = Math.min(
+        maxInputTokens,
+        estimatedInputTokens +
+            estimateToolInputTokenOverhead({
+                nativeSearchEnabled: options?.nativeSearchEnabled === true,
+            })
+    );
+    const pricing = resolveModelRequestPricing(model, {
+        estimatedPromptTokens: reservedInputTokens,
+    });
+
     return {
         modelId: model.id,
         minimumPlan: model.minimumPlan,
@@ -300,15 +357,56 @@ export const createChatBudget = (
         usageCredits:
             getWeightedUsageCredits(model, estimatedInputTokens) +
             (options?.webSearchSurchargeCredits || 0),
-        inputTokens: estimatedInputTokens,
-        maxOutputTokens: profile.maxOutputTokens,
-        reservedOutputTokens: profile.reservationOutputTokens,
-        inputUsdPerMillionTokens: profile.inputUsdPerMillionTokens,
-        outputUsdPerMillionTokens: profile.outputUsdPerMillionTokens,
-        cachedInputPriceMultiplier: profile.cachedInputPriceMultiplier,
+        inputTokens: reservedInputTokens,
+        maxOutputTokens: pricing.maxOutputTokens,
+        reservedOutputTokens: pricing.reservationOutputTokens,
+        inputUsdPerMillionTokens: pricing.inputUsdPerMillionTokens,
+        outputUsdPerMillionTokens: pricing.outputUsdPerMillionTokens,
+        cachedInputPriceMultiplier: pricing.cachedInputPriceMultiplier,
         provider: model.provider,
+        pricingVersion: pricing.pricingVersion,
+        costSource: pricing.costSource,
+        longContextThresholdTokens: pricing.longContextThresholdTokens,
     };
 };
+
+const decisionModelsFromBudgets = (budgets: readonly ChatBudget[]) =>
+    budgets.map((budget) => ({
+        modelId: budget.modelId,
+        provider: budget.provider,
+        estimatedInputTokens: budget.inputTokens,
+        estimatedOutputTokens: budget.reservedOutputTokens,
+        estimatedCostMicroUsd: getChatBudgetReservedCostMicroUsd(budget),
+        inputUsdPerMillionTokens: budget.inputUsdPerMillionTokens,
+        outputUsdPerMillionTokens: budget.outputUsdPerMillionTokens,
+        pricingVersion: budget.pricingVersion,
+        costSource: budget.costSource,
+        longContextThresholdTokens: budget.longContextThresholdTokens,
+    }));
+
+const numericDetail = (
+    details: Record<string, number | string> | undefined,
+    key: string
+) => {
+    const value = details?.[key];
+    return typeof value === "number" ? value : null;
+};
+
+const textDetail = (
+    details: Record<string, number | string> | undefined,
+    key: string
+) => {
+    const value = details?.[key];
+    return typeof value === "string" ? value : null;
+};
+
+/**
+ * Allowed decisions are only persisted when explicitly enabled: every chat turn
+ * would otherwise write a row. Rejections are always persisted, because a
+ * blocked user with a Trace ID is exactly who support needs to answer.
+ */
+const shouldRecordAllowedDecisions = () =>
+    process.env.CHAT_LIMIT_DECISION_LOG_ALLOWED === "1";
 
 const limitsFor = (access: Pick<ChatAccess, "kind" | "plan" | "planLimits">): LimitRule[] => {
     if (access.kind !== "user") {
@@ -481,8 +579,8 @@ export const getGuestUsageSnapshot = async (request: Request) => {
             select: { count: true },
         }),
     ]);
-    const used = dayBucket?.count || 0;
-    const monthUsed = monthBucket?.count || 0;
+    const used = usageBucketCount(dayBucket?.count);
+    const monthUsed = usageBucketCount(monthBucket?.count);
     const dayRemaining = Math.max(0, dayLimit - used);
     const monthRemaining = Math.max(0, monthLimit - monthUsed);
     return {
@@ -542,6 +640,25 @@ const retryAfterFor = (period: Period, now: Date, dailyEnd?: Date) => {
 
 const monthlyResetAt = (now: Date) =>
     new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1));
+
+/**
+ * A reset instant that is always in the future.
+ *
+ * A day window's end is normally ahead of `now`, but it is derived from stored
+ * settings and can go stale -- for instance in the moments around a DST shift
+ * or right after a time-zone change moved the current bucket. Telling a blocked
+ * user to wait for an instant that has already passed is worse than useless, so
+ * a stale boundary is rolled forward whole days until it is ahead of now.
+ */
+const safeDailyResetAt = (windowEnd: Date, now: Date) => {
+    const future = futureResetAt(windowEnd, now);
+    if (future) return future;
+    const dayMs = 86_400_000;
+    const elapsed = now.getTime() - windowEnd.getTime();
+    return new Date(
+        windowEnd.getTime() + (Math.floor(elapsed / dayMs) + 1) * dayMs
+    );
+};
 
 const incrementUsage = async (
     tx: Prisma.TransactionClient,
@@ -612,7 +729,7 @@ const readUsageCount = async (
         },
         select: { count: true },
     });
-    return bucket?.count || 0;
+    return usageBucketCount(bucket?.count);
 };
 
 const safeBigIntNumber = (value: bigint) => {
@@ -625,7 +742,8 @@ const safeBigIntNumber = (value: bigint) => {
 
 export const preflightChatComparisonAccess = async (
     access: ChatAccess,
-    budgets: ChatBudget[]
+    budgets: ChatBudget[],
+    options?: { traceId?: string; enabledTools?: string[] }
 ) => {
     try {
         await assertOperationalFeatureEnabled("aiChatEnabled");
@@ -671,7 +789,7 @@ export const preflightChatComparisonAccess = async (
 
     const now = new Date();
     const plan = access.plan || "Free";
-    const costLimits = getPlanEstimatedCostLimits(plan);
+    const guardrails = getChatCostGuardrails(plan, access.planLimits);
     const totalCredits = budgets.reduce(
         (sum, budget) => sum + budget.usageCredits,
         0
@@ -685,10 +803,56 @@ export const preflightChatComparisonAccess = async (
         0
     );
 
-    await prisma.$transaction(async (tx) => {
+    // Held in one object rather than three `let`s so the values assigned
+    // inside the transaction callback are visible to the code after it.
+    const decisionState: {
+        timeZone: string;
+        resetAt: Date | null;
+        availableCredits: number | null;
+    } = { timeZone: "UTC", resetAt: null, availableCredits: null };
+
+    const recordDecision = async (error?: ChatAccessError) =>
+        recordChatLimitDecision({
+            traceId: options?.traceId || randomUUID(),
+            subjectKey: access.subjectKey,
+            userId: access.userId,
+            plan,
+            phase: "comparison_preflight",
+            decision: error ? "rejected" : "allowed",
+            errorCode: error?.code ?? null,
+            limitLayer: error
+                ? textDetail(error.details, "limitLayer") ?? "entitlement"
+                : null,
+            limitScope: error ? textDetail(error.details, "scope") : null,
+            models: decisionModelsFromBudgets(budgets),
+            enabledTools: options?.enabledTools ?? [],
+            requiredCredits:
+                numericDetail(error?.details, "requiredCredits") ??
+                totalCredits,
+            availableCredits: decisionState.availableCredits,
+            usedAllowanceMicroUsd: numericDetail(
+                error?.details,
+                "internalUsedCostMicroUsd"
+            ),
+            requiredAllowanceMicroUsd:
+                numericDetail(error?.details, "internalRequiredCostMicroUsd") ??
+                totalReservedCost,
+            limitMicroUsd: numericDetail(
+                error?.details,
+                "internalLimitCostMicroUsd"
+            ),
+            timeZone: decisionState.timeZone,
+            resetAt:
+                textDetail(error?.details, "resetAt") ?? decisionState.resetAt,
+        }).catch(() => undefined);
+
+    try {
+        await prisma.$transaction(async (tx) => {
         await lockCreditAccount(tx, access.userId!);
         await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${access.subjectKey}))`;
         const userDayWindow = await getUserDayWindow(tx, access.userId!, now);
+        decisionState.timeZone = userDayWindow.timeZone;
+        decisionState.resetAt = safeDailyResetAt(userDayWindow.end, now);
 
         const billingRisk = await tx.user.findUniqueOrThrow({
             where: { id: access.userId! },
@@ -817,6 +981,7 @@ export const preflightChatComparisonAccess = async (
             dailyPlanCreditsRemaining,
             purchasedCreditsRemaining: purchasedCreditsAvailable,
         });
+        decisionState.availableCredits = creditAllocation.totalCreditsAvailableNow;
         if (creditAllocation.dailyPlanGuardrailBlocked) {
             throw new ChatAccessError(
                 429,
@@ -836,10 +1001,19 @@ export const preflightChatComparisonAccess = async (
             );
         }
         if (creditAllocation.balanceInsufficient) {
+            // Plan credits exhausted with nothing purchased is a different
+            // conversation from "you have credits, just not enough": the first
+            // is answered by buying credits or upgrading, the second by asking
+            // for less. They get different codes so the UI can say so.
+            const planOnly = purchasedCreditsAvailable === 0;
             throw new ChatAccessError(
                 402,
-                "CREDIT_BALANCE_INSUFFICIENT",
-                "The selected models need more credits than are currently available.",
+                planOnly
+                    ? PLAN_ENTITLEMENT_EXHAUSTED
+                    : CREDIT_BALANCE_INSUFFICIENT,
+                planOnly
+                    ? "This month's plan credits are used up. Buy additional credits or upgrade to keep comparing models."
+                    : "The selected models need more credits than are currently available.",
                 undefined,
                 {
                     requiredCredits: totalCredits,
@@ -849,6 +1023,7 @@ export const preflightChatComparisonAccess = async (
                         0,
                         totalCredits - planCreditsRemaining - purchasedCreditsAvailable
                     ),
+                    resetAt: monthlyResetAt(now).toISOString(),
                 }
             );
         }
@@ -922,22 +1097,43 @@ export const preflightChatComparisonAccess = async (
             }
         }
 
+        // Operational guardrails, not entitlement. `cost-*` counts only the
+        // plan-funded share, so a user paying with purchased credits is bounded
+        // by the funded cost allowance on their own credit lots instead of
+        // being blocked a second time by a plan-shaped ceiling. `op-cost-*`
+        // counts everything and is the abnormal-spend backstop.
         const costChecks = [
             {
                 period: "cost-day",
                 start: userDayWindow.start,
-                limit: costLimits.day,
-                required: totalReservedCost,
-                code: "INTERNAL_DAILY_COST_SAFETY_LIMIT",
-                scope: "daily",
+                limit: guardrails.planDay,
+                required: planReservedCost,
+                scope: "user_plan_cost_day",
+                daily: true,
             },
             {
                 period: "cost-month",
                 start: monthStart,
-                limit: costLimits.month,
+                limit: guardrails.planMonth,
                 required: planReservedCost,
-                code: "INTERNAL_MONTHLY_COST_SAFETY_LIMIT",
-                scope: "monthly",
+                scope: "user_plan_cost_month",
+                daily: false,
+            },
+            {
+                period: "op-cost-day",
+                start: userDayWindow.start,
+                limit: guardrails.totalDay,
+                required: totalReservedCost,
+                scope: "user_total_cost_day",
+                daily: true,
+            },
+            {
+                period: "op-cost-month",
+                start: monthStart,
+                limit: guardrails.totalMonth,
+                required: totalReservedCost,
+                scope: "user_total_cost_month",
+                daily: false,
             },
         ] as const;
         for (const check of costChecks) {
@@ -950,31 +1146,28 @@ export const preflightChatComparisonAccess = async (
             if (check.required > 0 && used + check.required > check.limit) {
                 throw new ChatAccessError(
                     429,
-                    check.code,
-                    check.scope === "daily"
-                        ? "This model comparison exceeds the remaining internal daily cost safety allowance. Choose fewer high-cost models or try again after the daily reset."
-                        : "This model comparison exceeds the remaining internal monthly cost safety allowance. Choose lower-cost models or wait for the monthly reset.",
+                    OPERATIONAL_COST_GUARDRAIL_TRIGGERED,
+                    "An internal cost safety check paused this comparison. Your credits are unaffected -- try again shortly or choose fewer high-cost models.",
                     retryAfterFor(
-                        check.scope === "daily" ? "day" : "month",
+                        check.daily ? "day" : "month",
                         now,
-                        check.scope === "daily" ? userDayWindow.end : undefined
+                        check.daily ? userDayWindow.end : undefined
                     ),
+                    // Deliberately free of raw internal USD: the exact figures
+                    // go to the limit-decision event and the admin console, not
+                    // into an end-user response.
                     {
                         scope: check.scope,
-                        plan,
-                        usedCostMicroUsd: used,
-                        newEstimatedCostMicroUsd: check.required,
-                        limitCostMicroUsd: check.limit,
-                        requiredCostMicroUsd: check.required,
-                        availableCostMicroUsd: Math.max(0, check.limit - used),
-                        resetAt:
-                            check.scope === "daily"
-                                ? userDayWindow.end.toISOString()
-                                : monthlyResetAt(now).toISOString(),
-                        timeZone:
-                            check.scope === "daily"
-                                ? userDayWindow.timeZone
-                                : "UTC",
+                        limitLayer: "operational_guardrail",
+                        resetAt: (check.daily
+                            ? safeDailyResetAt(userDayWindow.end, now)
+                            : monthlyResetAt(now)
+                        ).toISOString(),
+                        timeZone: check.daily ? userDayWindow.timeZone : "UTC",
+                        // Carried for the caller's structured log/event only.
+                        internalUsedCostMicroUsd: used,
+                        internalRequiredCostMicroUsd: check.required,
+                        internalLimitCostMicroUsd: check.limit,
                     }
                 );
             }
@@ -1042,32 +1235,21 @@ export const preflightChatComparisonAccess = async (
         }
         for (const [provider, required] of providerGroups) {
             const providerKey = `provider:${provider}`;
-            const dailyLimit = positiveInteger(
-                process.env[
-                    `CHAT_PROVIDER_${provider.toUpperCase()}_COST_MICROUSD_PER_DAY`
-                ],
-                10_000_000
-            );
-            const monthlyLimit = positiveInteger(
-                process.env[
-                    `CHAT_PROVIDER_${provider.toUpperCase()}_COST_MICROUSD_PER_MONTH`
-                ],
-                100_000_000
-            );
+            const providerLimits = getProviderCostGuardrailLimits(provider);
             const providerChecks = [
                 {
                     period: "provider-cost-day",
                     start: periodStart("day", now),
-                    limit: dailyLimit,
+                    limit: providerLimits.day,
                     required: required.daily,
-                    code: "PROVIDER_DAILY_SPEND_LIMIT_REACHED",
+                    scope: "provider_cost_day",
                 },
                 {
                     period: "provider-cost-month",
                     start: monthStart,
-                    limit: monthlyLimit,
+                    limit: providerLimits.month,
                     required: required.monthly,
-                    code: "PROVIDER_SPEND_LIMIT_REACHED",
+                    scope: "provider_cost_month",
                 },
             ];
             for (const check of providerChecks) {
@@ -1080,24 +1262,43 @@ export const preflightChatComparisonAccess = async (
                 if (used + check.required > check.limit) {
                     throw new ChatAccessError(
                         503,
-                        check.code,
-                        `The ${provider} provider cost safety limit is currently reached. Choose another provider or try again later.`,
+                        PROVIDER_BUDGET_EXHAUSTED,
+                        `The ${provider} provider is temporarily unavailable while its spend budget is reviewed. Choose another provider or try again later.`,
                         undefined,
-                        { provider }
+                        {
+                            provider,
+                            scope: check.scope,
+                            limitLayer: "operational_guardrail",
+                            internalUsedCostMicroUsd: used,
+                            internalRequiredCostMicroUsd: check.required,
+                            internalLimitCostMicroUsd: check.limit,
+                        }
                     );
                 }
             }
         }
     }, {
-        maxWait: 5_000,
-        timeout: 15_000,
-    });
+            maxWait: 5_000,
+            timeout: 15_000,
+        });
+    } catch (error) {
+        if (error instanceof ChatAccessError) {
+            await recordDecision(error);
+        }
+        throw error;
+    }
+
+    if (shouldRecordAllowedDecisions()) {
+        await recordDecision();
+    }
 
     return {
         modelCount: budgets.length,
         requiredCredits: totalCredits,
         reservedTokens: totalReservedTokens,
         reservedCostMicroUsd: totalReservedCost,
+        timeZone: decisionState.timeZone,
+        dailyResetAt: decisionState.resetAt?.toISOString() ?? null,
     };
 };
 
@@ -1107,6 +1308,8 @@ export const acquireChatAccess = async (
     options?: {
         traceId?: string;
         source?: "chat" | "comparison_review";
+        /** Tool names enabled for this turn, recorded on the limit decision. */
+        enabledTools?: string[];
     }
 ): Promise<{
     leaseId: string;
@@ -1164,18 +1367,51 @@ export const acquireChatAccess = async (
     const reservedTokens = getChatBudgetReservedTokens(budget);
     const reservedCost = getChatBudgetReservedCostMicroUsd(budget);
     const plan = access.plan || "Free";
-    const estimatedCostLimits = getPlanEstimatedCostLimits(plan);
-    const providerMonthlyEnvKey = `CHAT_PROVIDER_${budget.provider.toUpperCase()}_COST_MICROUSD_PER_MONTH`;
-    const providerMonthlyLimit = positiveInteger(
-        process.env[providerMonthlyEnvKey],
-        100_000_000
-    );
-    const providerDailyEnvKey = `CHAT_PROVIDER_${budget.provider.toUpperCase()}_COST_MICROUSD_PER_DAY`;
-    const providerDailyLimit = positiveInteger(
-        process.env[providerDailyEnvKey],
-        10_000_000
-    );
+    const guardrails = getChatCostGuardrails(plan, access.planLimits);
+    const guestGuardrails = getGuestCostGuardrailLimits();
+    const providerGuardrails = getProviderCostGuardrailLimits(budget.provider);
+    const providerMonthlyLimit = providerGuardrails.month;
+    const providerDailyLimit = providerGuardrails.day;
+    const decisionState: {
+        timeZone: string;
+        resetAt: Date | null;
+        availableCredits: number | null;
+    } = { timeZone: "UTC", resetAt: null, availableCredits: null };
 
+    const recordDecision = async (error?: ChatAccessError) =>
+        recordChatLimitDecision({
+            traceId,
+            subjectKey: access.subjectKey,
+            userId: access.userId,
+            plan: access.kind === "guest" ? "Guest" : plan,
+            phase: "chat_reservation",
+            decision: error ? "rejected" : "allowed",
+            errorCode: error?.code ?? null,
+            limitLayer: error
+                ? textDetail(error.details, "limitLayer") ?? "entitlement"
+                : null,
+            limitScope: error ? textDetail(error.details, "scope") : null,
+            models: decisionModelsFromBudgets([budget]),
+            enabledTools: options?.enabledTools ?? [],
+            requiredCredits: budget.usageCredits,
+            availableCredits: decisionState.availableCredits,
+            usedAllowanceMicroUsd: numericDetail(
+                error?.details,
+                "internalUsedCostMicroUsd"
+            ),
+            requiredAllowanceMicroUsd:
+                numericDetail(error?.details, "internalRequiredCostMicroUsd") ??
+                reservedCost,
+            limitMicroUsd: numericDetail(
+                error?.details,
+                "internalLimitCostMicroUsd"
+            ),
+            timeZone: decisionState.timeZone,
+            resetAt:
+                textDetail(error?.details, "resetAt") ?? decisionState.resetAt,
+        }).catch(() => undefined);
+
+    try {
     await prisma.$transaction(async (tx) => {
         if (access.kind === "user") {
             if (!access.userId) {
@@ -1192,6 +1428,8 @@ export const acquireChatAccess = async (
                       start: periodStart("day", now),
                       end: new Date(periodStart("day", now).getTime() + 86_400_000),
                   };
+        decisionState.timeZone = accessDayWindow.timeZone;
+        decisionState.resetAt = safeDailyResetAt(accessDayWindow.end, now);
         const accessPeriodStart = (period: Period) =>
             period === "day" ? accessDayWindow.start : periodStart(period, now);
         const tokenLimits =
@@ -1232,36 +1470,61 @@ export const acquireChatAccess = async (
                           ),
                       },
                   ];
+        // `cost-*` tracks the plan-funded share only; `op-cost-*` tracks every
+        // micro-USD including purchased-credit-funded spend. Both are
+        // operational guardrails -- neither is the user's entitlement.
         const costLimits =
             access.kind === "user"
                 ? [
                       {
                           period: "cost-day",
                           start: accessDayWindow.start,
-                          limit: estimatedCostLimits.day,
+                          limit: guardrails.planDay,
+                          scope: "user_plan_cost_day",
+                          planFundedOnly: true,
+                          daily: true,
                       },
                       {
                           period: "cost-month",
                           start: periodStart("month", now),
-                          limit: estimatedCostLimits.month,
+                          limit: guardrails.planMonth,
+                          scope: "user_plan_cost_month",
+                          planFundedOnly: true,
+                          daily: false,
+                      },
+                      {
+                          period: "op-cost-day",
+                          start: accessDayWindow.start,
+                          limit: guardrails.totalDay,
+                          scope: "user_total_cost_day",
+                          planFundedOnly: false,
+                          daily: true,
+                      },
+                      {
+                          period: "op-cost-month",
+                          start: periodStart("month", now),
+                          limit: guardrails.totalMonth,
+                          scope: "user_total_cost_month",
+                          planFundedOnly: false,
+                          daily: false,
                       },
                   ]
                 : [
                       {
                           period: "cost-day",
                           start: accessDayWindow.start,
-                          limit: positiveInteger(
-                              process.env.CHAT_GUEST_COST_MICROUSD_PER_DAY,
-                              20_000
-                          ),
+                          limit: guestGuardrails.day,
+                          scope: "guest_cost_day",
+                          planFundedOnly: false,
+                          daily: true,
                       },
                       {
                           period: "cost-month",
                           start: periodStart("month", now),
-                          limit: positiveInteger(
-                              process.env.CHAT_GUEST_COST_MICROUSD_PER_MONTH,
-                              100_000
-                          ),
+                          limit: guestGuardrails.month,
+                          scope: "guest_cost_month",
+                          planFundedOnly: false,
+                          daily: false,
                       },
                   ];
         if (access.kind === "user") {
@@ -1290,7 +1553,7 @@ export const acquireChatAccess = async (
             });
             const availableMonthlyCost = Math.max(
                 0,
-                estimatedCostLimits.month - (monthlyCost?.count || 0)
+                guardrails.planMonth - usageBucketCount(monthlyCost?.count)
             );
             if (availableMonthlyCost > 0) {
                 const debtOffset = await offsetCreditDebt(tx, {
@@ -1310,14 +1573,16 @@ export const acquireChatAccess = async (
                         access.subjectKey,
                         "cost-month",
                         monthStart,
-                        estimatedCostLimits.month,
+                        guardrails.planMonth,
                         costOffset
                     );
                     if (!allowed) {
                         throw new ChatAccessError(
                             409,
-                            "CREDIT_DEBT_OFFSET_CONFLICT",
-                            "Credit debt balance changed. Please retry."
+                            CONCURRENT_RESERVATION_CONFLICT,
+                            "Credit debt balance changed. Please retry.",
+                            undefined,
+                            { conflictScope: "credit_debt_offset" }
                         );
                     }
                 }
@@ -1393,7 +1658,7 @@ export const acquireChatAccess = async (
             });
             const rawPlanRemaining = Math.max(
                 0,
-                monthRule.limit - (current?.count || 0)
+                monthRule.limit - usageBucketCount(current?.count)
             );
             const debtOffset = await offsetCreditDebt(tx, {
                 userId: access.userId,
@@ -1417,8 +1682,10 @@ export const acquireChatAccess = async (
                 if (!offsetAllowed) {
                     throw new ChatAccessError(
                         409,
-                        "CREDIT_DEBT_OFFSET_CONFLICT",
-                        "Credit debt balance changed. Please retry."
+                        CONCURRENT_RESERVATION_CONFLICT,
+                        "Credit debt balance changed. Please retry.",
+                        undefined,
+                        { conflictScope: "credit_debt_offset" }
                     );
                 }
             }
@@ -1445,6 +1712,7 @@ export const acquireChatAccess = async (
             });
             planReservedCredits = creditAllocation.planReservedCredits;
             addOnReservedCredits = creditAllocation.addOnCreditsRequired;
+            decisionState.availableCredits = creditAllocation.planCreditsAvailableNow;
             if (planReservedCredits > 0) {
                 if (dailyRule) {
                     const dailyAllowed = await incrementUsage(
@@ -1458,8 +1726,10 @@ export const acquireChatAccess = async (
                     if (!dailyAllowed) {
                         throw new ChatAccessError(
                             409,
-                            "CREDIT_RESERVATION_CONFLICT",
-                            "Daily plan credit balance changed. Please retry."
+                            CONCURRENT_RESERVATION_CONFLICT,
+                            "Daily plan credit balance changed. Please retry.",
+                            undefined,
+                            { conflictScope: "daily_plan_credits" }
                         );
                     }
                     reservationEntries.push({
@@ -1479,7 +1749,13 @@ export const acquireChatAccess = async (
                     planReservedCredits
                 );
                 if (!allowed) {
-                    throw new ChatAccessError(409, "CREDIT_RESERVATION_CONFLICT", "Credit balance changed. Please retry.");
+                    throw new ChatAccessError(
+                        409,
+                        CONCURRENT_RESERVATION_CONFLICT,
+                        "Credit balance changed. Please retry.",
+                        undefined,
+                        { conflictScope: "monthly_plan_credits" }
+                    );
                 }
                 reservationEntries.push({
                     key: access.subjectKey,
@@ -1542,10 +1818,15 @@ export const acquireChatAccess = async (
                                 }
                             );
                         }
+                        const planOnly = error.availableCredits === 0;
                         throw new ChatAccessError(
                             402,
-                            "CREDIT_BALANCE_INSUFFICIENT",
-                            "Not enough credits are available for this request.",
+                            planOnly
+                                ? PLAN_ENTITLEMENT_EXHAUSTED
+                                : CREDIT_BALANCE_INSUFFICIENT,
+                            planOnly
+                                ? "This month's plan credits are used up. Buy additional credits or upgrade to keep sending requests."
+                                : "Not enough credits are available for this request.",
                             undefined,
                             {
                                 requiredCredits: budget.usageCredits,
@@ -1557,6 +1838,7 @@ export const acquireChatAccess = async (
                                     budget.usageCredits -
                                         currentAllocation.totalCreditsAvailableNow
                                 ),
+                                resetAt: monthlyResetAt(now).toISOString(),
                             }
                         );
                     }
@@ -1709,10 +1991,13 @@ export const acquireChatAccess = async (
         }
 
         for (const rule of costLimits) {
-            const reservedRuleCost =
-                access.kind === "user" && rule.period === "cost-month"
-                    ? reservedCost - addOnReservedCost
-                    : reservedCost;
+            // Purchased credits carry their own funded cost allowance on the
+            // credit lot, so the plan-shaped guardrail must not charge the
+            // add-on-funded share a second time. Only the total-cost guardrail
+            // and the provider budget see the whole amount.
+            const reservedRuleCost = rule.planFundedOnly
+                ? reservedCost - addOnReservedCost
+                : reservedCost;
             if (reservedRuleCost <= 0) continue;
             const allowed = await incrementUsage(
                 tx,
@@ -1723,7 +2008,6 @@ export const acquireChatAccess = async (
                 reservedRuleCost
             );
             if (!allowed) {
-                const isDailySafetyLimit = rule.period === "cost-day";
                 const usedCost = await readUsageCount(
                     tx,
                     access.subjectKey,
@@ -1732,36 +2016,26 @@ export const acquireChatAccess = async (
                 );
                 throw new ChatAccessError(
                     429,
-                    isDailySafetyLimit
-                        ? "INTERNAL_DAILY_COST_SAFETY_LIMIT"
-                        : "INTERNAL_MONTHLY_COST_SAFETY_LIMIT",
-                    isDailySafetyLimit
-                        ? "This request exceeds the remaining internal daily cost safety allowance. Choose fewer high-cost models or try again after the daily reset."
-                        : "This request exceeds the remaining internal monthly cost safety allowance. Choose lower-cost models or wait for the monthly reset.",
+                    OPERATIONAL_COST_GUARDRAIL_TRIGGERED,
+                    "An internal cost safety check paused this request. Your credits are unaffected -- try again shortly or choose a lower-cost model.",
                     retryAfterFor(
-                        isDailySafetyLimit ? "day" : "month",
+                        rule.daily ? "day" : "month",
                         now,
-                        isDailySafetyLimit ? accessDayWindow.end : undefined
+                        rule.daily ? accessDayWindow.end : undefined
                     ),
                     {
-                        scope: isDailySafetyLimit ? "daily" : "monthly",
-                        plan: access.kind === "guest" ? "Guest" : plan,
-                        usedCostMicroUsd: usedCost,
-                        newEstimatedCostMicroUsd: reservedRuleCost,
-                        requiredCostMicroUsd: reservedRuleCost,
-                        availableCostMicroUsd: Math.max(
-                            0,
-                            rule.limit - usedCost
-                        ),
-                        reservedCostMicroUsd: reservedRuleCost,
-                        limitMicroUsd: rule.limit,
-                        limitCostMicroUsd: rule.limit,
-                        resetAt: isDailySafetyLimit
-                            ? accessDayWindow.end.toISOString()
-                            : monthlyResetAt(now).toISOString(),
-                        timeZone: isDailySafetyLimit
+                        scope: rule.scope,
+                        limitLayer: "operational_guardrail",
+                        resetAt: (rule.daily
+                            ? safeDailyResetAt(accessDayWindow.end, now)
+                            : monthlyResetAt(now)
+                        ).toISOString(),
+                        timeZone: rule.daily
                             ? accessDayWindow.timeZone
                             : "UTC",
+                        internalUsedCostMicroUsd: usedCost,
+                        internalRequiredCostMicroUsd: reservedRuleCost,
+                        internalLimitCostMicroUsd: rule.limit,
                     }
                 );
             }
@@ -1770,10 +2044,7 @@ export const acquireChatAccess = async (
                 period: rule.period,
                 periodStart: rule.start,
                 amount: reservedRuleCost,
-                metric:
-                    access.kind === "user" && rule.period === "cost-month"
-                        ? "plan-cost"
-                        : "cost",
+                metric: rule.planFundedOnly ? "plan-cost" : "cost",
             });
             if (access.kind === "guest") {
                 const ipPeriod = `ip-${rule.period}`;
@@ -1823,8 +2094,16 @@ export const acquireChatAccess = async (
             if (!providerDayAllowed) {
                 throw new ChatAccessError(
                     503,
-                    "PROVIDER_DAILY_SPEND_LIMIT_REACHED",
-                    "This AI provider is temporarily unavailable."
+                    PROVIDER_BUDGET_EXHAUSTED,
+                    "This AI provider is temporarily unavailable.",
+                    undefined,
+                    {
+                        provider: budget.provider,
+                        scope: "provider_cost_day",
+                        limitLayer: "operational_guardrail",
+                        internalRequiredCostMicroUsd: reservedCost,
+                        internalLimitCostMicroUsd: providerDailyLimit,
+                    }
                 );
             }
             reservationEntries.push({
@@ -1847,8 +2126,16 @@ export const acquireChatAccess = async (
             if (!providerAllowed) {
                 throw new ChatAccessError(
                     503,
-                    "PROVIDER_SPEND_LIMIT_REACHED",
-                    "This AI provider is temporarily unavailable."
+                    PROVIDER_BUDGET_EXHAUSTED,
+                    "This AI provider is temporarily unavailable.",
+                    undefined,
+                    {
+                        provider: budget.provider,
+                        scope: "provider_cost_month",
+                        limitLayer: "operational_guardrail",
+                        internalRequiredCostMicroUsd: reservedCost,
+                        internalLimitCostMicroUsd: providerMonthlyLimit,
+                    }
                 );
             }
             reservationEntries.push({
@@ -1904,6 +2191,11 @@ export const acquireChatAccess = async (
             planReservedCredits,
             addOnReservedCredits,
             addOnReservations,
+            // Frozen with the reservation: a later price change must never
+            // re-settle an existing reservation at the new rate.
+            pricingVersion: budget.pricingVersion,
+            costSource: budget.costSource,
+            longContextThresholdTokens: budget.longContextThresholdTokens,
         };
         await tx.chatCreditReservation.create({
             data: {
@@ -1925,9 +2217,18 @@ export const acquireChatAccess = async (
             },
         });
     });
+    } catch (error) {
+        if (error instanceof ChatAccessError) {
+            await recordDecision(error);
+        }
+        throw error;
+    }
 
     if (!durableReservation) {
         throw new Error("Durable chat credit reservation was not created.");
+    }
+    if (shouldRecordAllowedDecisions()) {
+        await recordDecision();
     }
 
     return {
@@ -1943,6 +2244,14 @@ export const settleChatUsage = async (
         inputTokens?: number;
         cachedInputTokens?: number;
         outputTokens?: number;
+        /**
+         * Reasoning/thinking tokens the provider reported. Already inside
+         * `outputTokens` for every model priced here, so it is recorded for
+         * observability rather than billed a second time.
+         */
+        reasoningTokens?: number;
+        /** True when the numbers came from provider usage metadata. */
+        usageFromProvider?: boolean;
         outcome: "completed" | "cancelled" | "failed" | "empty";
         /** Extra credits reserved on top of the base weight for a native web search attempt. */
         searchSurchargeCredits?: number;
@@ -2044,6 +2353,14 @@ export const settleChatUsage = async (
                       tokenCostBreakdown.outputCostMicroUsd,
               }
             : { ...tokenCostBreakdown, costSource: "token_estimate" as const };
+        // Provider usage metadata is authoritative; the estimator is only the
+        // documented fallback for a response that never reported usage.
+        const usageSource: "provider_usage_metadata" | "fallback_estimator" =
+            usage.usageFromProvider === false
+                ? "fallback_estimator"
+                : Number.isSafeInteger(usage.outputTokens)
+                  ? "provider_usage_metadata"
+                  : "fallback_estimator";
         // Native web search's own per-call provider cost (never sent by the
         // client -- derived server-side from the AI SDK's provider response,
         // see lib/webSearchExecutionNormalizer.ts). Perplexity always takes
@@ -2145,7 +2462,17 @@ export const settleChatUsage = async (
                 settledInputTokens: actualInput,
                 settledCachedInputTokens: actualCachedInput,
                 settledOutputTokens: actualOutput,
-                pricingSnapshot: costBreakdown,
+                pricingSnapshot: {
+                    ...costBreakdown,
+                    pricingVersion: canonical.pricingVersion ?? null,
+                    reservationCostSource: canonical.costSource ?? null,
+                    longContextThresholdTokens:
+                        canonical.longContextThresholdTokens ?? null,
+                    usageSource,
+                    reasoningTokens: Number.isSafeInteger(usage.reasoningTokens)
+                        ? Math.max(0, usage.reasoningTokens!)
+                        : null,
+                },
                 providerUsageSnapshot: providerUsageSnapshot ?? undefined,
                 settledAt: new Date(),
                 reconciledAt: options?.reconciled ? new Date() : null,
@@ -2532,6 +2859,22 @@ export const validateChatPayload = (body: unknown) => {
     };
 };
 
+/**
+ * Diagnostic fields prefixed `internal` are for the structured limit-decision
+ * event, the admin console and logs only. Raw internal micro-USD is never worth
+ * showing an end user and is exactly the kind of figure that made the previous
+ * guardrail error read like a billing statement.
+ */
+export const publicChatErrorDetails = (
+    details: Record<string, number | string> | undefined
+) => {
+    if (!details) return undefined;
+    const entries = Object.entries(details).filter(
+        ([key]) => !key.startsWith("internal")
+    );
+    return entries.length > 0 ? Object.fromEntries(entries) : undefined;
+};
+
 export const chatErrorResponse = (error: unknown) => {
     if (!(error instanceof ChatAccessError)) return null;
 
@@ -2539,11 +2882,12 @@ export const chatErrorResponse = (error: unknown) => {
     if (error.retryAfter) {
         headers.set("Retry-After", String(error.retryAfter));
     }
+    const details = publicChatErrorDetails(error.details);
     return new Response(
         JSON.stringify({
             error: error.message,
             code: error.code,
-            ...(error.details ? { details: error.details } : {}),
+            ...(details ? { details } : {}),
         }),
         { status: error.status, headers }
     );

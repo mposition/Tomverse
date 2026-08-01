@@ -4,6 +4,7 @@ import {
   openModelPickerCatalogue,
   prepareGuestPage,
 } from "./support/app-fixtures";
+import { setRootFontSize } from "./support/chat-state-fixtures";
 
 type MockStatus = "available" | "limited" | "unavailable";
 
@@ -1010,7 +1011,7 @@ test.describe("outage banner touch targets (UI-TOUCH-001)", () => {
     await page.goto("/chat");
     await expect(banner(page)).toBeVisible();
 
-    await page.addStyleTag({ content: "html { font-size: 200% !important; }" });
+    await setRootFontSize(page, 32);
     await page.waitForTimeout(150);
 
     // The sentence still reads in full -- no clamp swallowing the model name.
