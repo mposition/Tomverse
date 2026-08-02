@@ -1,10 +1,10 @@
 import "server-only";
 
+import { findRefundForRequestAtProvider } from "@/lib/refundProviderLookup";
 import {
   DEFAULT_PROCESSING_STALE_AFTER_MS,
   REFUND_STATUS,
   decideReconciliation,
-  findRefundForRequest,
   type StripeRefundSnapshot,
 } from "@/lib/refundSagaCore";
 import {
@@ -50,8 +50,7 @@ const findProviderRefund = async (
 ): Promise<StripeRefundSnapshot | null> => {
   const stripe = getStripe();
   if (chargeId) {
-    const refunds = await stripe.refunds.list({ charge: chargeId, limit: 100 });
-    return findRefundForRequest(requestId, refunds.data);
+    return findRefundForRequestAtProvider(stripe, requestId, chargeId);
   }
   if (!subscriptionId) return null;
   // No charge recorded locally -- the crash may have happened before it was
@@ -78,8 +77,7 @@ const findProviderRefund = async (
   });
   const charge = charges.data[0];
   if (!charge) return null;
-  const refunds = await stripe.refunds.list({ charge: charge.id, limit: 100 });
-  return findRefundForRequest(requestId, refunds.data);
+  return findRefundForRequestAtProvider(stripe, requestId, charge.id);
 };
 
 export const reconcileProcessingRefundRequests = async ({

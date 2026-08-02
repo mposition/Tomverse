@@ -2016,7 +2016,18 @@ const checks = [
         prWorkflow.includes("npm run test:e2e:smoke") &&
         // The UI-001/002/003/006/007 regressions are merge-blocking on
         // develop, not something main finds after the fact.
-        prWorkflow.includes("npm run test:e2e:ui-risk") &&
+        //
+        // The tier is sharded by Chromium project, so "it runs" and "it gates"
+        // are two separate facts and both are checked. A substring match on
+        // the run command alone would still pass if the shard job were dropped
+        // from the required check's `needs` -- the tier would run and block
+        // nothing, which is the failure this assertion exists to catch.
+        prWorkflow.includes("npm run test:e2e:ui-risk:shard") &&
+        packageSource.includes(
+          '"test:e2e:ui-risk:shard": "node scripts/run-ui-risk-shard.mjs"'
+        ) &&
+        prWorkflow.includes("UI_RISK: ${{ needs.ui-risk.result }}") &&
+        prWorkflow.includes('"ui-risk=$UI_RISK"') &&
         // UI-012: accent colours stay addressed by role, checked before the
         // browser tier because it needs neither a build nor a browser.
         prWorkflow.includes("npm run check:accent-tokens") &&
