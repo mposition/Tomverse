@@ -74,6 +74,7 @@ const QUOTA_ERROR_CODES = new Set([
   "PROVIDER_DAILY_SPEND_LIMIT_REACHED",
   "PROVIDER_SPEND_LIMIT_REACHED",
   "CHAT_CONCURRENCY_EXCEEDED",
+  "CHAT_IP_CONCURRENCY_EXCEEDED",
 ]);
 
 type ErrorCategory = "quota" | "model_retired" | "attachment" | "generic";
@@ -684,6 +685,19 @@ export function ChatMessageList({
                           <a href={href} target="_blank" rel="noreferrer" className="text-blue-600 dark:text-blue-400 underline">
                             {children}
                           </a>
+                        ),
+                        // Never put model-controlled image URLs in `src`.
+                        // Retrieved pages and attachments can prompt-inject a
+                        // model into embedding prior chat text in a tracking
+                        // URL; a normal <img> would send it without a click.
+                        img: ({ alt }) => (
+                          <span
+                            className="inline-flex rounded-md border border-zinc-300 bg-zinc-100 px-2 py-1 text-xs text-zinc-600 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-300"
+                            role="note"
+                          >
+                            {t("chat.markdownImageBlocked")}
+                            {alt ? `: ${alt}` : ""}
+                          </span>
                         ),
                       }}
                     >

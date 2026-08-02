@@ -104,6 +104,7 @@ import {
   type ChatAttachmentCapabilities,
 } from "@/lib/guestAttachmentPolicy";
 import { useGuestVerification } from "@/components/chat/GuestVerificationProvider";
+import { useModalDialog } from "@/components/useModalDialog";
 
 type PublicModelStatus = "available" | "limited" | "unavailable";
 type PublicModelStatusRecord = {
@@ -920,6 +921,9 @@ export function ChatInput({
 
   const menuRef = useRef<HTMLDivElement>(null);
   const menuPopoverRef = useRef<HTMLDivElement>(null);
+  const replaceModelDialogRef = useRef<HTMLDivElement | null>(null);
+  const replaceModelCancelRef = useRef<HTMLButtonElement | null>(null);
+  const replaceModelReturnFocusRef = useRef<HTMLButtonElement | null>(null);
   // Set by ModelPickerPanel while the picker is mounted. Escape is layered:
   // the panel closes its filter sheet, then the All-models step, and only
   // returns false once there is nothing left but the dialog itself.
@@ -930,6 +934,26 @@ export function ChatInput({
   // Not always a button any more: the mobile header's model summary opens this
   // same picker and expects focus back when it closes.
   const lastMenuTriggerRef = useRef<HTMLElement | null>(null);
+  const closeReplaceModelDialog = useCallback(
+    () => setReplaceModelCandidate(null),
+    []
+  );
+  const requestModelSwap = useCallback(
+    (model: AiModel, trigger: HTMLButtonElement) => {
+      replaceModelReturnFocusRef.current = trigger;
+      setReplaceModelCandidate(model);
+    },
+    []
+  );
+
+  useModalDialog({
+    open: Boolean(replaceModelCandidate),
+    onClose: closeReplaceModelDialog,
+    dialogRef: replaceModelDialogRef,
+    panelRef: replaceModelDialogRef,
+    initialFocusRef: replaceModelCancelRef,
+    returnFocusRef: replaceModelReturnFocusRef,
+  });
 
   useEffect(() => {
     if (
@@ -1309,6 +1333,12 @@ export function ChatInput({
     if (!isMenuOpen) return;
 
     const handleMenuKeyDown = (event: KeyboardEvent) => {
+      const nestedDialog =
+        event.target instanceof Element
+          ? event.target.closest('[role="dialog"][aria-modal="true"]')
+          : null;
+      if (nestedDialog && !menuPopoverRef.current?.contains(nestedDialog)) return;
+
       const focusableElements = getMenuFocusableElements();
       const activeElement = document.activeElement as HTMLElement | null;
 
@@ -2717,9 +2747,10 @@ export function ChatInput({
                   : `Estimated ${estimatedRequestCredits} credits${inputCreditMultiplier > 1 ? ` · ${inputCreditMultiplier}×` : ""}`
               }
               aria-label={
-                lang === "ko"
-                  ? `예상 ${estimatedRequestCredits}크레딧, 상세 보기`
-                  : `Estimated ${estimatedRequestCredits} credits, view breakdown`
+                t("chat.creditEstimateAria").replace(
+                  "{credits}",
+                  String(estimatedRequestCredits)
+                )
               }
             >
               <CreditCostBadge
@@ -2759,8 +2790,8 @@ export function ChatInput({
                 (!value.trim() && attachments.length === 0)
               }
               className={`flex shrink-0 cursor-pointer touch-manipulation items-center justify-center rounded-full bg-blue-600 text-white hover:bg-blue-500 disabled:cursor-not-allowed disabled:bg-zinc-300 disabled:text-zinc-500 dark:disabled:bg-zinc-700 dark:disabled:text-zinc-400 ${isMobileShell ? "h-11 w-11" : "h-9 w-9"}`}
-              title={`${t("chat.send")} · ${estimatedRequestCredits} credits`}
-              aria-label={`${t("chat.send")} · ${estimatedRequestCredits} credits`}
+              title={`${t("chat.send")} · ${estimatedRequestCredits} ${t("chat.creditUnit")}`}
+              aria-label={`${t("chat.send")} · ${estimatedRequestCredits} ${t("chat.creditUnit")}`}
               aria-describedby={
                 sendDisabledReason ? "chat-send-disabled-reason" : undefined
               }
@@ -3213,7 +3244,7 @@ export function ChatInput({
                         searchInputRef={modelSearchInputRef}
                         escapeHandlerRef={modelPickerEscapeRef}
                         onToggleModel={onToggleModel}
-                        onRequestSwap={setReplaceModelCandidate}
+                        onRequestSwap={requestModelSwap}
                         onToggleFavorite={toggleFavoriteModel}
                         onRememberRecentModel={rememberRecentModel}
                         onBackToActions={() => setMenuView("actions")}
@@ -3230,14 +3261,16 @@ export function ChatInput({
               const candidate = replaceModelCandidate;
               return (
                 <div
-                  className="fixed inset-0 z-[110] flex items-end justify-center bg-black/50 md:items-center"
-                  onClick={() => setReplaceModelCandidate(null)}
+                  className="fixed inset-0 z-[140] flex items-end justify-center bg-black/50 p-3 md:items-center"
+                  onClick={closeReplaceModelDialog}
                 >
                   <div
+                    ref={replaceModelDialogRef}
                     role="dialog"
                     aria-modal="true"
                     aria-label={t("chat.swapModelTitle").replace("{model}", candidate.name)}
-                    className="w-full max-w-sm rounded-t-3xl bg-white p-5 pb-[max(1.25rem,env(safe-area-inset-bottom))] dark:bg-zinc-900 md:rounded-3xl"
+                    data-testid="replace-model-dialog"
+                    className="max-h-full w-full max-w-sm overflow-y-auto overscroll-contain rounded-t-3xl bg-white p-5 pb-[max(1.25rem,env(safe-area-inset-bottom))] dark:bg-zinc-900 md:rounded-3xl"
                     onClick={(event) => event.stopPropagation()}
                     onMouseDown={(event) => event.stopPropagation()}
                   >
@@ -3262,7 +3295,7 @@ export function ChatInput({
                               } else {
                                 dispatchAppToast(t("chat.swapModelFailed"), "error");
                               }
-                              setReplaceModelCandidate(null);
+                              closeReplaceModelDialog();
                             }}
                             className="flex w-full items-center gap-2 rounded-xl border border-zinc-200 px-3 py-2.5 text-left text-sm font-semibold text-zinc-800 transition hover:border-blue-400 hover:bg-blue-50 dark:border-zinc-700 dark:text-zinc-100 dark:hover:bg-blue-950/30"
                           >
@@ -3273,8 +3306,9 @@ export function ChatInput({
                       })}
                     </div>
                     <button
+                      ref={replaceModelCancelRef}
                       type="button"
-                      onClick={() => setReplaceModelCandidate(null)}
+                      onClick={closeReplaceModelDialog}
                       className="mt-3 w-full rounded-xl border border-zinc-200 py-2.5 text-sm font-bold text-zinc-700 dark:border-zinc-700 dark:text-zinc-200"
                     >
                       {t("auth.cancel")}

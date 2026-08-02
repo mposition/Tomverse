@@ -59,7 +59,10 @@ import {
     identifyChatCaller,
     linkChatReservationProviderRequest,
     readChatJsonBody,
+    heartbeatChatAccess,
+    leaseHeartbeatIntervalMs,
     releaseChatAccess,
+    resolveLeaseTtlSeconds,
     settleChatUsage,
     type ChatUsageReservation,
     validateChatPayload,
@@ -585,6 +588,10 @@ export async function DELETE(req: Request) {
 export async function POST(req: Request) {
     const traceId = randomUUID();
     let leaseId: string | null = null;
+    // Declared out here so the failure path can stop the renewal timer even
+    // when the stream was never built: an interval left running would keep
+    // renewing a lease no request owns any more.
+    let stopLeaseHeartbeat: (() => void) | null = null;
     let usageReservation: ChatUsageReservation | null = null;
     let requestedModelIdForLog: string | undefined;
     let requestedProviderForLog: AiModel["provider"] | undefined;
@@ -601,6 +608,7 @@ export async function POST(req: Request) {
             turnstileToken,
             deepResearchDepth,
             webSearchMode,
+            admissionToken,
         } = validateChatPayload(body);
         const requestedModelId = modelId || APP_DEFAULTS.defaultModelId;
         requestedModelIdForLog = requestedModelId;
@@ -1277,6 +1285,11 @@ export async function POST(req: Request) {
             traceId,
             source: "chat",
             enabledTools: nativeSearchEnabled ? ["web_search"] : [],
+            // Comparison runs arrive with a slot already reserved for this
+            // model by the aggregate preflight. Without it the three panels of
+            // one comparison would each race for a slot, and a run could be
+            // admitted in part.
+            admissionToken,
         });
         leaseId = accessGrant.leaseId;
         usageReservation = accessGrant.usageReservation;
@@ -1298,9 +1311,16 @@ export async function POST(req: Request) {
         // status) instead of holding this request or the 120s concurrency
         // lease open for the job's lifetime.
         if (modelConfig.usageClass === "deep-research") {
+            // Ownership of this turn moves to the polling job: the request
+            // ends here, so its slot must end here too rather than being held
+            // for a job that can outlive any lease.
             const activeLeaseId = leaseId;
             leaseId = null;
-            await releaseChatAccess(activeLeaseId);
+            await releaseChatAccess(activeLeaseId, {
+                traceId,
+                reason: "deep_research_handoff",
+                subjectScope: access.kind,
+            });
 
             if (!conversationId || !assistantMessageId || !session?.user?.id) {
                 await settleChatUsage(usageReservation, {
@@ -1544,10 +1564,46 @@ export async function POST(req: Request) {
             })();
             return usageSettlement;
         };
+        // A healthy long response keeps its own slot alive instead of relying
+        // on a TTL big enough for the worst case. Production saw a stream still
+        // writing at 125s under a flat 120s lease -- with a renewal, a legit
+        // ten-minute answer is as safe as a ten-second one, and a process that
+        // dies stops renewing so its slot frees within one TTL.
+        let heartbeat: ReturnType<typeof setInterval> | null = setInterval(
+            () => {
+                void heartbeatChatAccess(activeLeaseId).then((alive) => {
+                    if (alive || !heartbeat) return;
+                    clearInterval(heartbeat);
+                    heartbeat = null;
+                }).catch((error) => {
+                    logRequestError(
+                        "chat_lease_heartbeat_failed",
+                        traceId,
+                        error,
+                        requestedModelId
+                    );
+                });
+            },
+            leaseHeartbeatIntervalMs(resolveLeaseTtlSeconds())
+        );
+        // Node keeps the process alive for pending timers; this one must never
+        // be the reason a worker stays up after its request is done.
+        heartbeat.unref?.();
+        const stopHeartbeat = () => {
+            if (!heartbeat) return;
+            clearInterval(heartbeat);
+            heartbeat = null;
+        };
+        stopLeaseHeartbeat = stopHeartbeat;
         const release = async () => {
             if (released) return;
             released = true;
-            await releaseChatAccess(activeLeaseId);
+            stopHeartbeat();
+            await releaseChatAccess(activeLeaseId, {
+                traceId,
+                reason: streamState === "cancelled" ? "stream_cancelled" : "stream_finished",
+                subjectScope: access.kind,
+            });
         };
         const releaseSafely = async () => {
             try {
@@ -1994,8 +2050,12 @@ export async function POST(req: Request) {
             headers,
         });
     } catch (error: unknown) {
+        stopLeaseHeartbeat?.();
         if (leaseId) {
-            await releaseChatAccess(leaseId);
+            await releaseChatAccess(leaseId, {
+                traceId,
+                reason: "request_failed_before_stream",
+            });
         }
         if (usageReservation) {
             try {

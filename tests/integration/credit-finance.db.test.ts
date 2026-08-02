@@ -791,8 +791,12 @@ test("preflights and reserves three premium models without full-output quota col
     // The reserved cost is well past the retired US$1.50/day ceiling and is
     // still allowed, because the guardrail is derived from the plan's credits.
     assert.ok(preflight.reservedCostMicroUsd < 1_500_000);
-    // A preflight writes nothing, so a refused request cannot consume usage.
+    // A preflight consumes no usage: it reserves the comparison's concurrency
+    // slots (so the run is admitted as a whole) and nothing else, so a refused
+    // request still cannot spend credits or cost allowance.
     assert.equal(await prisma.chatUsageBucket.count(), 0);
+    assert.equal(await prisma.chatCreditReservation.count(), 0);
+    assert.equal(await prisma.chatRequestLease.count(), 3);
     // Reset instants handed to the client are always ahead of now.
     assert.ok(preflight.dailyResetAt);
     assert.ok(new Date(preflight.dailyResetAt!).getTime() > Date.now());

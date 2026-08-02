@@ -1,5 +1,7 @@
 import "server-only";
 
+import { stripeKeyLiveMode } from "@/lib/stripeMode";
+
 const strongSecret = (value: string | undefined) =>
   typeof value === "string" && value.trim().length >= 32;
 
@@ -84,6 +86,10 @@ export const getSecurityEnvironmentStatus = () => {
     cspEnforcement: !production || process.env.CSP_MODE === "enforce",
     stripeWebhookSecret:
       !production || configured(process.env.STRIPE_WEBHOOK_SECRET),
+    // A test-mode key in production turns Stripe's test cards into real app
+    // entitlements. Readiness must fail before the load balancer sends traffic.
+    stripeLiveMode:
+      !production || stripeKeyLiveMode(process.env.STRIPE_SECRET_KEY) === true,
     providerUsageSyncSecret:
       !production || strongSecret(process.env.PROVIDER_USAGE_SYNC_SECRET),
     cloudflareOriginProtection:

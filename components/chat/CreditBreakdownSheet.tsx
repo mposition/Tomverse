@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useRef } from "react";
 import { X } from "lucide-react";
 import { useLanguage } from "@/components/LanguageProvider";
+import { useModalDialog } from "@/components/useModalDialog";
 import { CreditCostBadge } from "@/components/credits/CreditCostBadge";
 import { modelPickerCopy } from "@/lib/modelPickerPresentation";
 
@@ -32,29 +33,24 @@ export function CreditBreakdownSheet({
 }: CreditBreakdownSheetProps) {
   const { t, lang } = useLanguage();
   const pickerCopy = modelPickerCopy[lang];
+  const dialogRef = useRef<HTMLDivElement | null>(null);
+  const panelRef = useRef<HTMLDivElement | null>(null);
   const closeButtonRef = useRef<HTMLButtonElement | null>(null);
 
-  useEffect(() => {
-    if (!open) return;
-
-    const focusFrame = requestAnimationFrame(() => {
-      closeButtonRef.current?.focus();
-    });
-    const handleEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape") onClose();
-    };
-    document.addEventListener("keydown", handleEscape);
-    return () => {
-      cancelAnimationFrame(focusFrame);
-      document.removeEventListener("keydown", handleEscape);
-    };
-  }, [open, onClose]);
+  useModalDialog({
+    open,
+    onClose,
+    dialogRef,
+    panelRef,
+    initialFocusRef: closeButtonRef,
+  });
 
   if (!open) return null;
 
   return (
     <div
-      className="fixed inset-0 z-[110] flex items-end bg-black/40 backdrop-blur-sm"
+      ref={dialogRef}
+      className="fixed inset-0 z-[130] flex items-end bg-black/40 backdrop-blur-sm"
       role="dialog"
       aria-modal="true"
       aria-label={pickerCopy.estimatedUsageTitle}
@@ -65,7 +61,7 @@ export function CreditBreakdownSheet({
         onClick={onClose}
         aria-label={t("auth.cancel")}
       />
-      <div className="relative z-10 w-full rounded-t-3xl border-t border-zinc-200 bg-white p-4 pb-[calc(1rem+env(safe-area-inset-bottom))] shadow-2xl dark:border-zinc-800 dark:bg-zinc-950">
+      <div ref={panelRef} className="relative z-10 max-h-[calc(100dvh-1rem)] w-full overflow-y-auto overscroll-contain rounded-t-3xl border-t border-zinc-200 bg-white p-4 pb-[calc(1rem+env(safe-area-inset-bottom))] shadow-2xl dark:border-zinc-800 dark:bg-zinc-950">
         <div className="mx-auto mb-3 h-1 w-10 rounded-full bg-zinc-300 dark:bg-zinc-700" />
         <div className="flex items-center justify-between gap-2">
           <p className="text-sm font-bold text-zinc-900 dark:text-zinc-100">

@@ -91,7 +91,7 @@ type ModelCatalogueProps = {
   limitDescriptionId?: string;
   recentModelIds: string[];
   onToggleFavorite: (modelId: string) => void;
-  onSelectModel: (model: AiModel) => void;
+  onSelectModel: (model: AiModel, trigger: HTMLButtonElement) => void;
 };
 
 export function ModelCatalogue({
@@ -426,7 +426,7 @@ export function ModelCatalogue({
                       data-model-image-input={modelSupportsImageInput(model)}
                       data-model-plan-locked={isPlanLocked}
                       disabled={selectionDisabled && !isSelected}
-                      onClick={() => onSelectModel(model)}
+                      onClick={(event) => onSelectModel(model, event.currentTarget)}
                       aria-pressed={isSelected}
                       aria-describedby={
                         isAtCapacity && !isSelected ? limitDescriptionId : undefined

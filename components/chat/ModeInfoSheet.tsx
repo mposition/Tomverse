@@ -1,9 +1,10 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useRef } from "react";
 import Link from "next/link";
 import { UserRound, X } from "lucide-react";
 import { useLanguage } from "@/components/LanguageProvider";
+import { useModalDialog } from "@/components/useModalDialog";
 
 type ModeInfoSheetProps = {
   mode: "guest" | null;
@@ -21,23 +22,17 @@ export function ModeInfoSheet({
   activeModelCount = 1,
 }: ModeInfoSheetProps) {
   const { t } = useLanguage();
+  const dialogRef = useRef<HTMLDivElement | null>(null);
+  const panelRef = useRef<HTMLDivElement | null>(null);
   const closeButtonRef = useRef<HTMLButtonElement | null>(null);
 
-  useEffect(() => {
-    if (!mode) return;
-
-    const focusFrame = requestAnimationFrame(() => {
-      closeButtonRef.current?.focus();
-    });
-    const handleEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape") onClose();
-    };
-    document.addEventListener("keydown", handleEscape);
-    return () => {
-      cancelAnimationFrame(focusFrame);
-      document.removeEventListener("keydown", handleEscape);
-    };
-  }, [mode, onClose]);
+  useModalDialog({
+    open: Boolean(mode),
+    onClose,
+    dialogRef,
+    panelRef,
+    initialFocusRef: closeButtonRef,
+  });
 
   if (!mode) return null;
 
@@ -48,7 +43,8 @@ export function ModeInfoSheet({
 
   return (
     <div
-      className="fixed inset-0 z-[95] flex items-end bg-black/40 backdrop-blur-sm"
+      ref={dialogRef}
+      className="fixed inset-0 z-[130] flex items-end bg-black/40 backdrop-blur-sm"
       role="dialog"
       aria-modal="true"
       aria-label={t("chat.onGuestMode")}
@@ -59,7 +55,7 @@ export function ModeInfoSheet({
         onClick={onClose}
         aria-label={t("auth.cancel")}
       />
-      <div className="relative z-10 w-full rounded-t-3xl border-t border-zinc-200 bg-white p-4 pb-[calc(1rem+env(safe-area-inset-bottom))] shadow-2xl dark:border-zinc-800 dark:bg-zinc-950">
+      <div ref={panelRef} className="relative z-10 max-h-[calc(100dvh-1rem)] w-full overflow-y-auto overscroll-contain rounded-t-3xl border-t border-zinc-200 bg-white p-4 pb-[calc(1rem+env(safe-area-inset-bottom))] shadow-2xl dark:border-zinc-800 dark:bg-zinc-950">
         <div className="mx-auto mb-3 h-1 w-10 rounded-full bg-zinc-300 dark:bg-zinc-700" />
         <div className="flex items-start justify-between gap-2">
           <p className="flex items-center gap-2 text-sm font-bold text-blue-700 dark:text-blue-300">

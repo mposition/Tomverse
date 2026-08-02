@@ -60,6 +60,33 @@ import {
     OperationalFeatureDisabledError,
 } from "@/lib/appSettings";
 import {
+    concurrencyRejectionDetails,
+    concurrencyRejectionMessage,
+    CONCURRENCY_RETRY_AFTER_SECONDS,
+    IP_CONCURRENCY_EXCEEDED,
+    SUBJECT_CONCURRENCY_EXCEEDED,
+    resolveAdmissionTtlSeconds,
+    resolveChatConcurrencyPlan,
+    resolveLeaseTtlSeconds,
+    type ChatConcurrencyPlan,
+    type ChatConcurrencyScope,
+} from "@/lib/chatConcurrencyCore";
+import {
+    admissionSlotFor,
+    issueAdmissionToken,
+    verifyAdmissionToken,
+    type AdmissionSlot,
+} from "@/lib/chatAdmissionCore";
+import {
+    claimAdmissionSlot,
+    countActiveLeases,
+    insertLeases,
+    releaseChatRequestLease,
+    releaseUnclaimedAdmission,
+    sweepExpiredLeasesForScopes,
+    touchChatRequestLease,
+} from "@/lib/chatRequestLease";
+import {
     enforceUserOperationalSecurity,
     UserOperationalRestrictionError,
 } from "@/lib/userOperationalSecurity";
@@ -814,6 +841,197 @@ const readUsageCount = async (
     return usageBucketCount(bucket?.count);
 };
 
+/* ------------------------------------------------------------------------- */
+/* Concurrency admission                                                     */
+/* ------------------------------------------------------------------------- */
+
+const concurrencyError = (
+    scope: ChatConcurrencyScope,
+    activeRequests: number,
+    requestedSlots: number
+) =>
+    new ChatAccessError(
+        429,
+        scope.errorCode,
+        concurrencyRejectionMessage(scope.scope),
+        CONCURRENCY_RETRY_AFTER_SECONDS,
+        concurrencyRejectionDetails(scope, activeRequests, requestedSlots)
+    );
+
+/**
+ * Checks every concurrency scope that applies to this caller.
+ *
+ * The subject scope is the caller's own allowance -- their account, or their
+ * signed guest cookie. The IP scope, when present, is the far higher anonymous
+ * abuse ceiling. They are separate limits with separate codes: a guest blocked
+ * by their own running answer and a guest blocked by a hostile neighbour on the
+ * same NAT are not the same event and must not read, log or resolve the same
+ * way.
+ */
+const assertConcurrencyCapacity = async (
+    tx: Prisma.TransactionClient,
+    plan: ChatConcurrencyPlan,
+    requestedSlots: number
+) => {
+    for (const scope of [plan.subject, plan.ip]) {
+        if (!scope) continue;
+        const active = await countActiveLeases(tx, scope);
+        if (active + requestedSlots > scope.limit) {
+            throw concurrencyError(scope, active, requestedSlots);
+        }
+    }
+};
+
+/**
+ * Locks every scope this caller is counted in, in a stable order.
+ *
+ * Two locks, always subject-then-IP, so two guests behind one NAT can never
+ * deadlock against each other by taking them in opposite orders.
+ */
+const lockConcurrencyScopes = async (
+    tx: Prisma.TransactionClient,
+    plan: ChatConcurrencyPlan
+) => {
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`chat-lease:${plan.subject.key}`}))`;
+    if (plan.ip) {
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`chat-lease:${plan.ip.key}`}))`;
+    }
+};
+
+type ReservedAdmission = {
+    admissionId: string;
+    slots: AdmissionSlot[];
+    expiresAt: Date;
+};
+
+/**
+ * Reserves one concurrency slot per model for a comparison, all or nothing.
+ *
+ * Runs inside the caller's transaction and under the scope locks, so either
+ * every model in the comparison has a slot when this returns or none does and
+ * the transaction unwinds. That is the whole point: a comparison that is
+ * admitted for two of three models is a worse outcome than one that is refused
+ * outright, because the user pays for the two that ran.
+ */
+const reserveComparisonAdmission = async (
+    tx: Prisma.TransactionClient,
+    access: ChatAccess,
+    modelIds: string[],
+    now: Date
+): Promise<ReservedAdmission> => {
+    const plan = resolveChatConcurrencyPlan(access);
+    await lockConcurrencyScopes(tx, plan);
+    await sweepExpiredLeasesForScopes(tx, {
+        subjectKey: plan.subject.key,
+        ipKey: plan.ip?.key ?? null,
+    });
+    await assertConcurrencyCapacity(tx, plan, modelIds.length);
+
+    const admissionId = randomUUID();
+    const expiresAt = new Date(
+        now.getTime() + resolveAdmissionTtlSeconds() * 1000
+    );
+    const slots = modelIds.map((modelId) => ({
+        leaseId: randomUUID(),
+        modelId,
+    }));
+    await insertLeases(
+        tx,
+        slots.map((slot) => ({
+            id: slot.leaseId,
+            subjectKey: plan.subject.key,
+            ipKey: plan.ip?.key ?? null,
+            modelId: slot.modelId,
+            admissionId,
+            claimedAt: null,
+            expiresAt,
+        }))
+    );
+    return { admissionId, slots, expiresAt };
+};
+
+export type ChatAdmissionGrant = {
+    token: string;
+    admissionId: string;
+    expiresAt: string;
+};
+
+const buildAdmissionGrant = (
+    access: ChatAccess,
+    comparisonId: string,
+    reserved: ReservedAdmission
+): ChatAdmissionGrant => ({
+    token: issueAdmissionToken(
+        {
+            version: 1,
+            admissionId: reserved.admissionId,
+            subjectKey: access.subjectKey,
+            comparisonId,
+            slots: reserved.slots,
+            expiresAtMs: reserved.expiresAt.getTime(),
+        },
+        getSecret()
+    ),
+    admissionId: reserved.admissionId,
+    expiresAt: reserved.expiresAt.toISOString(),
+});
+
+/**
+ * Structured record of a concurrency refusal.
+ *
+ * Separate from the credit/cost decision log because it is a different layer,
+ * and the fields that matter here (which scope, how full it was, how many slots
+ * the action wanted) do not exist there. Everything identifying is already
+ * hashed -- `subjectKey` and `ipScopeKey` are HMAC digests, never a raw IP,
+ * user ID or guest cookie -- and no prompt text, USD figure or lease key is
+ * included.
+ */
+const logConcurrencyRejection = (input: {
+    traceId: string;
+    phase: "chat_reservation" | "comparison_preflight";
+    kind: AccessKind;
+    subjectKey: string;
+    error: ChatAccessError;
+    comparisonId?: string | null;
+    leaseTtlSeconds: number;
+}) => {
+    const details = input.error.details || {};
+    console.warn(
+        JSON.stringify({
+            event: "chat_concurrency_rejected",
+            traceId: input.traceId,
+            phase: input.phase,
+            code: input.error.code,
+            limitLayer: details.limitLayer ?? null,
+            leaseScope: details.scope ?? null,
+            plan: input.kind === "guest" ? "Guest" : "user",
+            subjectKey: input.subjectKey,
+            activeRequests: details.activeRequests ?? null,
+            requestedSlots: details.requestedSlots ?? null,
+            concurrentLimit: details.concurrentLimit ?? null,
+            leaseTtlSeconds: input.leaseTtlSeconds,
+            comparisonId: input.comparisonId ?? null,
+            timestamp: new Date().toISOString(),
+        })
+    );
+};
+
+const isConcurrencyCode = (code: string) =>
+    code === SUBJECT_CONCURRENCY_EXCEEDED || code === IP_CONCURRENCY_EXCEEDED;
+
+/**
+ * Gives back every slot of an admission the caller never used.
+ *
+ * Exposed so a route that fails after a successful preflight (a model went
+ * away, the conversation turned out to be locked, the browser aborted) can
+ * unwind the reservation immediately rather than leaving the subject's
+ * allowance held until the admission TTL.
+ */
+export const rollbackChatAdmission = async (
+    admissionId: string,
+    context?: { traceId?: string }
+) => releaseUnclaimedAdmission(admissionId, context);
+
 const safeBigIntNumber = (value: bigint) => {
     const number = Number(value);
     if (!Number.isSafeInteger(number) || number < 0) {
@@ -822,10 +1040,90 @@ const safeBigIntNumber = (value: bigint) => {
     return number;
 };
 
+/**
+ * Aggregate admission for a guest's multi-model comparison.
+ *
+ * Guests have no credit ledger and no plan, so there is nothing here to check
+ * that `acquireChatAccess` does not already check per model. What there *is* to
+ * decide once, for the whole comparison, is concurrency: three panels are three
+ * requests, and letting them race for slots individually is what produced the
+ * "some answers ran, the rest were refused" report.
+ */
+const preflightGuestComparisonAdmission = async (
+    access: ChatAccess,
+    budgets: ChatBudget[],
+    options: { traceId: string; comparisonId: string; enabledTools?: string[] }
+): Promise<ChatAdmissionGrant> => {
+    const now = new Date();
+    const recordGuestDecision = async (error?: ChatAccessError) =>
+        recordChatLimitDecision({
+            traceId: options.traceId,
+            subjectKey: access.subjectKey,
+            plan: "Guest",
+            phase: "comparison_preflight",
+            decision: error ? "rejected" : "allowed",
+            errorCode: error?.code ?? null,
+            limitLayer: error
+                ? textDetail(error.details, "limitLayer") ?? "entitlement"
+                : null,
+            limitScope: error ? textDetail(error.details, "scope") : null,
+            models: decisionModelsFromBudgets(budgets),
+            enabledTools: options.enabledTools ?? [],
+            requiredCredits: budgets.reduce(
+                (sum, budget) => sum + budget.usageCredits,
+                0
+            ),
+            availableCredits: null,
+            timeZone: "UTC",
+            resetAt: null,
+        }).catch(() => undefined);
+
+    let reserved: ReservedAdmission;
+    try {
+        reserved = await prisma.$transaction(
+            async (tx) =>
+                reserveComparisonAdmission(
+                    tx,
+                    access,
+                    budgets.map((budget) => budget.modelId),
+                    now
+                ),
+            { maxWait: 5_000, timeout: 15_000 }
+        );
+    } catch (error) {
+        if (error instanceof ChatAccessError) {
+            await recordGuestDecision(error);
+            if (isConcurrencyCode(error.code)) {
+                logConcurrencyRejection({
+                    traceId: options.traceId,
+                    phase: "comparison_preflight",
+                    kind: access.kind,
+                    subjectKey: access.subjectKey,
+                    error,
+                    comparisonId: options.comparisonId,
+                    leaseTtlSeconds: resolveAdmissionTtlSeconds(),
+                });
+            }
+        }
+        throw error;
+    }
+    if (shouldRecordAllowedDecisions()) await recordGuestDecision();
+    return buildAdmissionGrant(access, options.comparisonId, reserved);
+};
+
 export const preflightChatComparisonAccess = async (
     access: ChatAccess,
     budgets: ChatBudget[],
-    options?: { traceId?: string; enabledTools?: string[] }
+    options?: {
+        traceId?: string;
+        enabledTools?: string[];
+        /**
+         * Ties the issued admission to the user action that requested it. Only
+         * an identifier -- the security boundary is the signature plus the
+         * conditional claim, not this string.
+         */
+        comparisonId?: string;
+    }
 ) => {
     try {
         await assertOperationalFeatureEnabled("aiChatEnabled");
@@ -836,21 +1134,6 @@ export const preflightChatComparisonAccess = async (
                 "AI_CHAT_DISABLED_BY_ADMIN",
                 "AI chat is temporarily paused for operational maintenance."
             );
-        }
-        throw error;
-    }
-    if (access.kind !== "user" || !access.userId) {
-        throw new ChatAccessError(
-            401,
-            "COMPARISON_AUTHENTICATION_REQUIRED",
-            "Sign in before comparing multiple models."
-        );
-    }
-    try {
-        await enforceUserOperationalSecurity(access.userId);
-    } catch (error) {
-        if (error instanceof UserOperationalRestrictionError) {
-            throw new ChatAccessError(403, error.code, error.message);
         }
         throw error;
     }
@@ -867,6 +1150,43 @@ export const preflightChatComparisonAccess = async (
             "DUPLICATE_COMPARISON_MODELS",
             "Comparison models must be unique."
         );
+    }
+    if (access.kind !== "user" || !access.userId) {
+        const admission = await preflightGuestComparisonAdmission(
+            access,
+            budgets,
+            {
+                traceId: options?.traceId || randomUUID(),
+                comparisonId: options?.comparisonId || "guest-comparison",
+                enabledTools: options?.enabledTools,
+            }
+        );
+        return {
+            modelCount: budgets.length,
+            requiredCredits: budgets.reduce(
+                (sum, budget) => sum + budget.usageCredits,
+                0
+            ),
+            reservedTokens: budgets.reduce(
+                (sum, budget) => sum + getChatBudgetReservedTokens(budget),
+                0
+            ),
+            reservedCostMicroUsd: budgets.reduce(
+                (sum, budget) => sum + getChatBudgetReservedCostMicroUsd(budget),
+                0
+            ),
+            timeZone: "UTC",
+            dailyResetAt: null as string | null,
+            admission,
+        };
+    }
+    try {
+        await enforceUserOperationalSecurity(access.userId);
+    } catch (error) {
+        if (error instanceof UserOperationalRestrictionError) {
+            throw new ChatAccessError(403, error.code, error.message);
+        }
+        throw error;
     }
 
     const now = new Date();
@@ -892,6 +1212,7 @@ export const preflightChatComparisonAccess = async (
         resetAt: Date | null;
         availableCredits: number | null;
     } = { timeZone: "UTC", resetAt: null, availableCredits: null };
+    let reservedAdmission: ReservedAdmission | null = null;
 
     const recordDecision = async (error?: ChatAccessError) =>
         recordChatLimitDecision({
@@ -948,33 +1269,16 @@ export const preflightChatComparisonAccess = async (
             );
         }
 
-        const concurrentLimit = positiveInteger(
-            process.env.CHAT_USER_CONCURRENT,
-            3
+        // Every slot this comparison needs, taken in one go. A slot reserved
+        // here is claimed later by exactly one model request; if any check
+        // below this line fails, the transaction unwinds and the slots go with
+        // it, so a refused comparison never leaves an allowance held.
+        reservedAdmission = await reserveComparisonAdmission(
+            tx,
+            access,
+            budgets.map((budget) => budget.modelId),
+            now
         );
-        await tx.$executeRaw`
-            DELETE FROM "ChatRequestLease"
-            WHERE "subjectKey" = ${access.subjectKey} AND "expiresAt" <= NOW()
-        `;
-        const activeLeaseRows = await tx.$queryRaw<Array<{ count: bigint }>>`
-            SELECT COUNT(*)::bigint AS "count"
-            FROM "ChatRequestLease"
-            WHERE "subjectKey" = ${access.subjectKey}
-        `;
-        const activeLeaseCount = Number(activeLeaseRows[0]?.count || 0);
-        if (activeLeaseCount + budgets.length > concurrentLimit) {
-            throw new ChatAccessError(
-                429,
-                "CHAT_CONCURRENCY_EXCEEDED",
-                "The selected comparison would exceed the number of chats that can run at once. Wait for the current response to finish and try again.",
-                5,
-                {
-                    activeRequests: activeLeaseCount,
-                    requestedModels: budgets.length,
-                    concurrentLimit,
-                }
-            );
-        }
 
         const planRules = limitsFor(access);
         const minuteRule = planRules.find((rule) => rule.period === "minute");
@@ -1387,12 +1691,27 @@ export const preflightChatComparisonAccess = async (
     } catch (error) {
         if (error instanceof ChatAccessError) {
             await recordDecision(error);
+            if (isConcurrencyCode(error.code)) {
+                logConcurrencyRejection({
+                    traceId: options?.traceId || "",
+                    phase: "comparison_preflight",
+                    kind: access.kind,
+                    subjectKey: access.subjectKey,
+                    error,
+                    comparisonId: options?.comparisonId,
+                    leaseTtlSeconds: resolveAdmissionTtlSeconds(),
+                });
+            }
         }
         throw error;
     }
 
     if (shouldRecordAllowedDecisions()) {
         await recordDecision();
+    }
+
+    if (!reservedAdmission) {
+        throw new Error("Comparison admission slots were not reserved.");
     }
 
     return {
@@ -1402,6 +1721,11 @@ export const preflightChatComparisonAccess = async (
         reservedCostMicroUsd: totalReservedCost,
         timeZone: decisionState.timeZone,
         dailyResetAt: decisionState.resetAt?.toISOString() ?? null,
+        admission: buildAdmissionGrant(
+            access,
+            options?.comparisonId || "comparison",
+            reservedAdmission
+        ),
     };
 };
 
@@ -1413,6 +1737,13 @@ export const acquireChatAccess = async (
         source?: "chat" | "comparison_review";
         /** Tool names enabled for this turn, recorded on the limit decision. */
         enabledTools?: string[];
+        /**
+         * Admission token issued by the aggregate comparison preflight. When it
+         * verifies and still has an unclaimed slot for this model, the request
+         * occupies that slot instead of competing for a new one -- which is
+         * what stops a three-model comparison from being admitted in part.
+         */
+        admissionToken?: string | null;
     }
 ): Promise<{
     leaseId: string;
@@ -1442,7 +1773,7 @@ export const acquireChatAccess = async (
         }
     }
     const now = new Date();
-    const leaseId = randomUUID();
+    let leaseId: string = randomUUID();
     const reservationId = randomUUID();
     const traceId = options?.traceId || reservationId;
     const reservationSource = options?.source || "chat";
@@ -1462,10 +1793,42 @@ export const acquireChatAccess = async (
     let addOnReservedCost = 0;
     let addOnReservations: AddOnCreditReservationEntry[] = [];
     let durableReservation: ChatUsageReservation | null = null;
-    const concurrentLimit =
-        access.kind === "user"
-            ? positiveInteger(process.env.CHAT_USER_CONCURRENT, 3)
-            : positiveInteger(process.env.CHAT_GUEST_CONCURRENT, 3);
+    const concurrencyPlan = resolveChatConcurrencyPlan(access);
+    const leaseTtlSeconds = resolveLeaseTtlSeconds();
+    // Signature and subject binding are verified here; whether the slot is
+    // still available is decided by the conditional claim inside the
+    // transaction. A token that fails either check is simply absent -- the
+    // request then takes the ordinary single-slot path rather than failing.
+    const admissionSlot = (() => {
+        const token = options?.admissionToken?.trim();
+        if (!token) return null;
+        const verified = verifyAdmissionToken(token, {
+            secret: getSecret(),
+            subjectKey: access.subjectKey,
+            modelId: budget.modelId,
+            now,
+        });
+        if (!verified.ok) {
+            console.warn(
+                JSON.stringify({
+                    event: "chat_admission_rejected",
+                    traceId,
+                    reason: verified.reason,
+                    modelId: budget.modelId,
+                    timestamp: now.toISOString(),
+                })
+            );
+            return null;
+        }
+        const slot = admissionSlotFor(verified.payload, budget.modelId);
+        return slot
+            ? {
+                  leaseId: slot.leaseId,
+                  admissionId: verified.payload.admissionId,
+                  comparisonId: verified.payload.comparisonId,
+              }
+            : null;
+    })();
     const ipPerMinute = positiveInteger(process.env.CHAT_IP_PER_MINUTE, 40);
     const reservedTokens = getChatBudgetReservedTokens(budget);
     const reservedCost = getChatBudgetReservedCostMicroUsd(budget);
@@ -2256,31 +2619,58 @@ export const acquireChatAccess = async (
             });
         }
 
-        const leaseSubjectKey =
-            access.kind === "guest" ? access.ipKey : access.subjectKey;
-        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${leaseSubjectKey}))`;
-        await tx.$executeRaw`
-            DELETE FROM "ChatRequestLease"
-            WHERE "subjectKey" = ${leaseSubjectKey} AND "expiresAt" <= NOW()
-        `;
-        const activeRows = await tx.$queryRaw<Array<{ count: bigint }>>`
-            SELECT COUNT(*)::bigint AS "count"
-            FROM "ChatRequestLease"
-            WHERE "subjectKey" = ${leaseSubjectKey}
-        `;
-        if (Number(activeRows[0]?.count || 0) >= concurrentLimit) {
-            throw new ChatAccessError(
-                429,
-                "CHAT_CONCURRENCY_EXCEEDED",
-                "Too many chats are running at once.",
-                5
+        // A comparison that was admitted as a whole hands each model request
+        // the slot it already holds. Claiming is a conditional update on a row
+        // the aggregate preflight created, so a replayed or foreign token
+        // claims nothing and falls through to the ordinary check below.
+        let claimedAdmissionSlot = false;
+        if (admissionSlot) {
+            claimedAdmissionSlot = await claimAdmissionSlot(
+                tx,
+                {
+                    leaseId: admissionSlot.leaseId,
+                    admissionId: admissionSlot.admissionId,
+                    subjectKey: access.subjectKey,
+                    modelId: budget.modelId,
+                },
+                leaseTtlSeconds
             );
+            if (claimedAdmissionSlot) {
+                leaseId = admissionSlot.leaseId;
+            } else {
+                console.warn(
+                    JSON.stringify({
+                        event: "chat_admission_claim_missed",
+                        traceId,
+                        reason: "slot_unavailable",
+                        modelId: budget.modelId,
+                        timestamp: new Date().toISOString(),
+                    })
+                );
+            }
         }
 
-        await tx.$executeRaw`
-            INSERT INTO "ChatRequestLease" ("id", "subjectKey", "expiresAt", "createdAt")
-            VALUES (${leaseId}, ${leaseSubjectKey}, ${new Date(now.getTime() + 120_000)}, NOW())
-        `;
+        if (!claimedAdmissionSlot) {
+            await lockConcurrencyScopes(tx, concurrencyPlan);
+            await sweepExpiredLeasesForScopes(tx, {
+                subjectKey: concurrencyPlan.subject.key,
+                ipKey: concurrencyPlan.ip?.key ?? null,
+            });
+            await assertConcurrencyCapacity(tx, concurrencyPlan, 1);
+            await insertLeases(tx, [
+                {
+                    id: leaseId,
+                    subjectKey: concurrencyPlan.subject.key,
+                    ipKey: concurrencyPlan.ip?.key ?? null,
+                    modelId: budget.modelId,
+                    admissionId: null,
+                    claimedAt: now,
+                    expiresAt: new Date(
+                        now.getTime() + leaseTtlSeconds * 1000
+                    ),
+                },
+            ]);
+        }
 
         durableReservation = {
             reservationId,
@@ -2329,6 +2719,17 @@ export const acquireChatAccess = async (
     } catch (error) {
         if (error instanceof ChatAccessError) {
             await recordDecision(error);
+            if (isConcurrencyCode(error.code)) {
+                logConcurrencyRejection({
+                    traceId,
+                    phase: "chat_reservation",
+                    kind: access.kind,
+                    subjectKey: access.subjectKey,
+                    error,
+                    comparisonId: admissionSlot?.comparisonId ?? null,
+                    leaseTtlSeconds,
+                });
+            }
         }
         throw error;
     }
@@ -2740,15 +3141,35 @@ export const reconcileExpiredChatCreditReservations = async (
     };
 };
 
-export const releaseChatAccess = async (leaseId: string) => {
-    try {
-        await prisma.$executeRaw`
-            DELETE FROM "ChatRequestLease" WHERE "id" = ${leaseId}
-        `;
-    } catch (error) {
-        console.error("Failed to release chat request lease:", error);
-    }
-};
+/**
+ * Frees the concurrency slot a request was holding.
+ *
+ * Idempotent by construction, so the completed / provider-error / client-abort
+ * / disconnect paths may all call it, and a retry after a partial failure is
+ * safe. A failure that survives its retries is reported as an operational
+ * event rather than swallowed into `console.error`, and
+ * `reconcileExpiredChatRequestLeases` is the backstop that removes whatever a
+ * dead process left behind.
+ */
+export const releaseChatAccess = async (
+    leaseId: string,
+    context?: { traceId?: string; reason?: string; subjectScope?: string }
+) => releaseChatRequestLease(leaseId, context);
+
+/**
+ * Keeps a running stream's slot alive.
+ *
+ * The lease TTL is deliberately short so a crashed process frees its slot
+ * quickly; a healthy long response stays admitted by renewing, not by having
+ * been given a bigger constant up front.
+ */
+export const heartbeatChatAccess = async (leaseId: string) =>
+    touchChatRequestLease(leaseId, resolveLeaseTtlSeconds());
+
+export {
+    reconcileExpiredChatRequestLeases,
+} from "@/lib/chatRequestLease";
+export { leaseHeartbeatIntervalMs, resolveLeaseTtlSeconds } from "@/lib/chatConcurrencyCore";
 
 export const assertChatRequestSize = (request: Request) => {
     const contentLength = Number(request.headers.get("content-length"));
@@ -2819,6 +3240,7 @@ export const validateChatPayload = (body: unknown) => {
         turnstileToken?: unknown;
         deepResearchDepth?: unknown;
         webSearchMode?: unknown;
+        admissionToken?: unknown;
     };
     if (
         !Array.isArray(payload.messages) ||
@@ -2906,6 +3328,21 @@ export const validateChatPayload = (body: unknown) => {
             "Invalid web search mode."
         );
     }
+    // Shape only. A token that is well-formed but forged, expired, issued to
+    // another subject or already consumed is rejected where it is used, and
+    // the request then falls back to the ordinary single-slot admission.
+    if (
+        payload.admissionToken !== undefined &&
+        (typeof payload.admissionToken !== "string" ||
+            payload.admissionToken.length < 1 ||
+            payload.admissionToken.length > 4_096)
+    ) {
+        throw new ChatAccessError(
+            400,
+            "INVALID_ADMISSION_TOKEN",
+            "Invalid admission token."
+        );
+    }
 
     let totalCharacters = 0;
     for (const message of payload.messages) {
@@ -2965,6 +3402,7 @@ export const validateChatPayload = (body: unknown) => {
         turnstileToken?: string;
         deepResearchDepth?: "quick" | "standard" | "deep";
         webSearchMode?: WebSearchMode;
+        admissionToken?: string;
     };
 };
 

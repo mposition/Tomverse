@@ -99,6 +99,10 @@ async function openFixture(page: Page, rootFontPx: number) {
   const response = await page.goto(FIXTURE);
   expect(response?.status()).toBeLessThan(400);
   await expect(page.getByTestId("admin-user-security-controls")).toBeVisible();
+  await expect(page.getByTestId("app-toast-viewport")).toHaveAttribute(
+    "data-ready",
+    "true"
+  );
   await page.evaluate((size) => {
     document.documentElement.style.fontSize = `${size}px`;
   }, rootFontPx);
@@ -110,6 +114,10 @@ async function horizontalOffenders(page: Page) {
     const documentWidth = document.documentElement.clientWidth;
     const offenders: Array<{ tag: string; testId: string; className: string; right: number }> = [];
     for (const element of Array.from(document.querySelectorAll<HTMLElement>("*"))) {
+      // A skip link is deliberately clipped to a 1px box until it receives
+      // focus. Its text range may sit outside the viewport while hidden, but
+      // it neither widens the document nor represents visible overflow.
+      if (element.classList.contains("sr-only")) continue;
       const box = element.getBoundingClientRect();
       if (box.width === 0 && box.height === 0) continue;
       if (box.right <= documentWidth + 0.5 && box.left >= -0.5) continue;

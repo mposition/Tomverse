@@ -51,7 +51,6 @@ async function runAxe(
   page: Page,
   options: { include?: string; rules: string[] }
 ): Promise<AxeViolation[]> {
-  await page.addScriptTag({ path: AXE_PATH });
   return page.evaluate(
     async ({ include, rules }) => {
       const axe = (window as unknown as { axe: AxeApi }).axe;
@@ -102,6 +101,7 @@ test.describe("RECON-A11Y-001: desktop panel model selects", () => {
       await mockAuthenticatedApi(page, {
         selectedModels: ["gpt-5-4-mini", "claude-haiku-4-5", "claude-sonnet-5"],
       });
+      await page.addInitScript({ path: AXE_PATH });
       await page.goto(`/chat?lang=${lang}`);
       await openRecentConversation(page);
 
@@ -147,6 +147,7 @@ test.describe("RECON-A11Y-002: pricing comparison scroll region", () => {
       await page.setViewportSize({ width: 390, height: 844 });
       await prepareGuestPage(page, lang);
       await mockPublicProofMetrics(page);
+      await page.addInitScript({ path: AXE_PATH });
       await page.goto(`/pricing?lang=${lang}`);
 
       const region = page.getByRole("region", {
@@ -212,6 +213,7 @@ test.describe("RECON-A11Y-003: colour contrast at the gate SHA", () => {
         await page.emulateMedia({ colorScheme: scheme });
         await prepareGuestPage(page, "en");
         await mockPublicProofMetrics(page);
+        await page.addInitScript({ path: AXE_PATH });
         await page.goto(`${route}?lang=en`);
         await page.waitForLoadState("networkidle").catch(() => undefined);
 
@@ -288,6 +290,7 @@ for (const scheme of ["light", "dark"] as const) {
     await prepareGuestPage(page, "en");
     await mockPromotionalBilling(page);
     await mockPublicProofMetrics(page);
+    await page.addInitScript({ path: AXE_PATH });
     await page.goto("/pricing?lang=en");
     await expect(page.getByText(PROMOTION_CODE)).toBeVisible();
 

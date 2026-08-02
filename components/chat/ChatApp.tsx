@@ -61,6 +61,13 @@ type ChatAppProps = {
     userMessageId: string;
     attachments: ChatAttachment[];
     deepResearchDepth?: "quick" | "standard" | "deep";
+    /**
+     * Concurrency slot this panel was already admitted for by the aggregate
+     * comparison preflight. Opaque, signed and single-use server-side; a panel
+     * that has none (a retry, a single-model send) simply takes the ordinary
+     * per-request admission path.
+     */
+    admissionToken?: string | null;
   } | null;
   isPanelDisabled?: boolean;
   isGuestMode?: boolean;
@@ -557,7 +564,8 @@ function ChatAppComponent({
     userMsgId: string,
     attachments: ChatAttachment[] = [],
     analyticsPromptId: string | null = null,
-    deepResearchDepth?: "quick" | "standard" | "deep"
+    deepResearchDepth?: "quick" | "standard" | "deep",
+    admissionToken?: string | null
   ) => {
   	if ((!text && attachments.length === 0) || isSendingRef.current) return;
 
@@ -644,6 +652,7 @@ function ChatAppComponent({
                 }
               : {}),
             ...(deepResearchDepth ? { deepResearchDepth } : {}),
+            ...(admissionToken ? { admissionToken } : {}),
             ...(webSearchMode && webSearchMode !== "off" ? { webSearchMode } : {}),
           }),
           signal: controller.signal,
@@ -840,6 +849,8 @@ function ChatAppComponent({
                     ? t("chat.dailyPlanCreditsUnavailable")
                     : errorCode === "CHAT_CONCURRENCY_EXCEEDED"
                     ? t("chat.comparisonConcurrencyLimit")
+                    : errorCode === "CHAT_IP_CONCURRENCY_EXCEEDED"
+                    ? t("chat.networkConcurrencyLimit")
                     : errorCode === "FREE_PRO_MODEL_QUOTA_EXCEEDED"
                       ? t("chat.comparisonHigherCostQuotaExceeded")
                   : errorCode === "CHAT_QUOTA_EXCEEDED"
@@ -965,7 +976,8 @@ function ChatAppComponent({
           promptPayload.id,
           modelId === "perplexity/sonar-deep-research"
             ? promptPayload.deepResearchDepth
-            : undefined
+            : undefined,
+          promptPayload.admissionToken
         );
     });
     return () => {

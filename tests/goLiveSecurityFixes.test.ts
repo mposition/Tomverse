@@ -20,6 +20,10 @@ import {
   hasValidMutationOrigin,
   requiresMutationOriginCheck,
 } from "../lib/requestOrigin.ts";
+import {
+  stripeEventMatchesKeyMode,
+  stripeKeyLiveMode,
+} from "../lib/stripeMode.ts";
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
 const readRepoFile = (relativePath: string) =>
@@ -784,4 +788,123 @@ test("an unready security environment keeps /api/ready from reporting ready", as
     "nextAuthUrlIsHttps" in status.checks,
     "the readiness payload must expose the NEXTAUTH_URL check by name"
   );
+});
+
+test("production readiness rejects Stripe test and unknown key modes", async () => {
+  const { getSecurityEnvironmentStatus } = await import(
+    "../lib/securityEnvironment.ts"
+  );
+  const originalNodeEnv = process.env.NODE_ENV;
+  const originalStripeKey = process.env.STRIPE_SECRET_KEY;
+  try {
+    // @ts-expect-error NODE_ENV is typed as a literal union but is writable.
+    process.env.NODE_ENV = "production";
+    for (const rejected of [undefined, "", "sk_test_fixture", "unknown_key"]) {
+      if (rejected === undefined) delete process.env.STRIPE_SECRET_KEY;
+      else process.env.STRIPE_SECRET_KEY = rejected;
+      assert.equal(getSecurityEnvironmentStatus().checks.stripeLiveMode, false);
+    }
+    process.env.STRIPE_SECRET_KEY = "sk_live_fixture";
+    assert.equal(getSecurityEnvironmentStatus().checks.stripeLiveMode, true);
+    process.env.STRIPE_SECRET_KEY = "rk_live_fixture";
+    assert.equal(getSecurityEnvironmentStatus().checks.stripeLiveMode, true);
+  } finally {
+    // @ts-expect-error see above.
+    process.env.NODE_ENV = originalNodeEnv;
+    if (originalStripeKey === undefined) delete process.env.STRIPE_SECRET_KEY;
+    else process.env.STRIPE_SECRET_KEY = originalStripeKey;
+  }
+});
+
+test("Stripe key mode parsing fails closed and webhook checks before DB writes", () => {
+  assert.equal(stripeKeyLiveMode("sk_live_fixture"), true);
+  assert.equal(stripeKeyLiveMode("rk_live_fixture"), true);
+  assert.equal(stripeKeyLiveMode("sk_test_fixture"), false);
+  assert.equal(stripeKeyLiveMode("future_key"), null);
+  assert.equal(stripeEventMatchesKeyMode(true, "sk_live_fixture"), true);
+  assert.equal(stripeEventMatchesKeyMode(false, "sk_live_fixture"), false);
+  assert.equal(stripeEventMatchesKeyMode(false, "sk_test_fixture"), true);
+  assert.equal(stripeEventMatchesKeyMode(true, "future_key"), false);
+
+  const source = readRepoCode("app/api/billing/webhook/route.ts");
+  const modeCheck = source.indexOf(
+    "!stripeEventMatchesKeyMode",
+    source.indexOf("constructEvent")
+  );
+  const firstDatabaseWrite = source.indexOf(
+    "prisma.stripeWebhookEventLog.findUnique"
+  );
+  assert.ok(modeCheck >= 0, "the signed event mode must be checked");
+  assert.ok(
+    firstDatabaseWrite > modeCheck,
+    "mode mismatch must be rejected before any webhook database access"
+  );
+  const reprocessSource = readRepoCode(
+    "app/api/admin/webhooks/[webhookId]/reprocess/route.ts"
+  );
+  assert.ok(
+    reprocessSource.indexOf("stripeEventMatchesKeyMode") <
+      reprocessSource.indexOf("processStripeEvent(event)"),
+    "admin replay must share the same mode boundary before entitlement writes"
+  );
+});
+
+test("assistant markdown never assigns model-controlled image URLs to src", () => {
+  const source = readRepoCode("components/chat/ChatMessageList.tsx");
+  const start = source.indexOf("img: (");
+  const imageRenderer = source.slice(start, source.indexOf("}}", start));
+  assert.ok(imageRenderer.length > 0, "assistant markdown needs an image override");
+  assert.doesNotMatch(
+    imageRenderer,
+    /\bsrc=/,
+    "the inert renderer must not fetch the model-provided URL"
+  );
+  assert.match(imageRenderer, /markdownImageBlocked/);
+});
+
+test("readiness and image optimization stay behind origin protection", () => {
+  const source = readRepoCode("proxy.ts");
+  const originGate = source.indexOf("!isAllowedRequestHost");
+  const preGate = source.slice(0, originGate);
+  assert.match(preGate, /pathname === "\/api\/health"/);
+  assert.doesNotMatch(preGate, /\/api\/ready/);
+  assert.doesNotMatch(source, /_next\/static\|_next\/image/);
+});
+
+test("auto-fix pins executable supply-chain inputs and scopes secrets to steps", () => {
+  const source = readRepoCode(".github/workflows/cron-auto-fix.yml");
+  assert.doesNotMatch(source, /uses:\s+actions\/(checkout|setup-node)@v\d/);
+  assert.match(source, /actions\/checkout@[0-9a-f]{40}/);
+  assert.match(source, /actions\/setup-node@[0-9a-f]{40}/);
+  assert.doesNotMatch(
+    source,
+    /npm install -g @anthropic-ai\/claude-code\s*$/m
+  );
+  assert.match(source, /CLAUDE_CODE_VERSION: "\d+\.\d+\.\d+"/);
+  assert.match(source, /CLAUDE_CODE_INTEGRITY: "sha512-/);
+  const attemptJobEnv = source.slice(
+    source.indexOf("  attempt-fix:"),
+    source.indexOf("    steps:", source.indexOf("  attempt-fix:"))
+  );
+  assert.doesNotMatch(
+    attemptJobEnv,
+    /(GH_TOKEN|AUTO_FIX_SYNC_SECRET|ANTHROPIC_API_KEY):/
+  );
+});
+
+test("secondary sheets use the shared modal focus and scroll-lock contract", () => {
+  for (const relativePath of [
+    "components/chat/AiDisclaimerNotice.tsx",
+    "components/chat/CreditBreakdownSheet.tsx",
+    "components/chat/ModeInfoSheet.tsx",
+    "components/auth/AuthButton.tsx",
+    "components/chat/ChatInput.tsx",
+  ]) {
+    const source = readRepoCode(relativePath);
+    assert.match(
+      source,
+      /useModalDialog\s*\(/,
+      `${relativePath} must not implement only part of the modal contract`
+    );
+  }
 });

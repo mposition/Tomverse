@@ -111,6 +111,36 @@ UI-012에서 승인된 정책(B안)입니다. accent 색은 **hue가 아니라 �
 - 모든 오류 응답의 `resetAt`은 생성 시점보다 미래여야 합니다.
 - 이 계약을 어기는 변경은 릴리스 차단 사유입니다.
 
+# Chat concurrency and identity namespace
+
+게스트 동시 실행 scope, lease 수명, guest→로그인 전환의 대화 ID를 건드리기 전에
+읽습니다.
+
+- `docs/policy/chat-concurrency-and-identity.md`
+
+- **동시 실행은 entitlement도 guardrail도 아닌 세 번째 층입니다.** `limitLayer`는
+  주체 한도가 `concurrency`, IP 집계 상한이 `operational_admission`입니다.
+  크레딧·플랜·provider 예산과 코드도 문구도 섞지 않습니다.
+- **게스트의 동시 실행 한도는 signed guest cookie(`access.subjectKey`) 기준입니다.**
+  `access.ipKey`로 되돌리면 같은 NAT의 서로 다른 게스트가 서로의 한도를 소비합니다.
+- **IP 집계 상한은 별개로 유지합니다**(`CHAT_IP_CONCURRENT`,
+  `CHAT_IP_CONCURRENCY_EXCEEDED`). 게스트 한도 아래로 설정할 수 없고, 기존 IP
+  기준 분당·일일·토큰·비용 abuse protection을 대체하지 않습니다.
+  `CHAT_GUEST_CONCURRENT`를 올려 문제를 덮지 않습니다.
+- **다중 모델 비교는 전부 승인되거나 전부 거절됩니다.** aggregate preflight가 한
+  transaction에서 슬롯을 예약하고, 서명·subject 결속·만료를 가진 admission token을
+  각 모델 요청이 조건부 UPDATE로 한 번만 소비합니다. token은 어느 슬롯을 쓸지만
+  정하며 모델·소유권·크레딧·비용 검사를 대체하지 않습니다.
+- **lease는 고정 TTL이 아니라 heartbeat로 유지합니다.** 완료·provider 오류·취소·
+  연결 끊김·스트림 생성 실패·deep research 인계 모두에서 결정적으로 해제하고,
+  실패는 구조화 이벤트로 남기며 15분 주기 reconciliation이 orphan을 정리합니다.
+- **계정 API에는 현재 identity namespace의 서버 Conversation ID만 전달합니다.**
+  `guest_` 접두사 검사는 보안 경계가 아니라 상태 invariant이고, 소유권은 계속
+  서버가 정합니다. `guest_*`를 DB Conversation ID로 인정하거나
+  `CONVERSATION_FORBIDDEN`을 완화하지 않습니다.
+- **로그인 시 guest localStorage를 삭제하지 않습니다.** 전환은 *선택*만 해제하고
+  guest snapshot은 import modal이 결정할 수 있도록 보존합니다.
+
 # Plan change (Pro <-> Max)
 
 플랜 변경 CTA나 `/api/billing/checkout`의 차단 분기를 건드리기 전에 읽습니다.

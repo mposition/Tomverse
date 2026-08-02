@@ -134,6 +134,7 @@ export function GuestImportModal({
           <button
             type="button"
             onClick={() => !isImporting && onSkip()}
+            data-testid="guest-import-close"
             className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-zinc-500 transition hover:bg-zinc-100 dark:hover:bg-zinc-900"
             aria-label={t("auth.cancel")}
           >
@@ -175,6 +176,7 @@ export function GuestImportModal({
               type="button"
               onClick={handleImportCurrentOnly}
               disabled={isImporting}
+              data-testid="guest-import-current"
               className="flex items-center justify-center rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-bold text-white transition hover:bg-blue-500 disabled:opacity-60"
             >
               {t("chat.guestImportCurrentOnly")}
@@ -183,6 +185,7 @@ export function GuestImportModal({
               type="button"
               onClick={handleImportAll}
               disabled={isImporting}
+              data-testid="guest-import-all"
               className="flex items-center justify-center rounded-xl border border-zinc-200 bg-white px-4 py-2.5 text-sm font-bold text-zinc-700 transition hover:bg-zinc-50 disabled:opacity-60 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:bg-zinc-800"
             >
               {interpolateCopy(t("chat.guestImportAll"), { count: conversations.length })}
@@ -191,6 +194,7 @@ export function GuestImportModal({
               type="button"
               onClick={() => onSkip()}
               disabled={isImporting}
+              data-testid="guest-import-skip"
               className="mt-1 text-center text-sm font-semibold text-zinc-500 transition hover:text-zinc-700 disabled:opacity-60 dark:hover:text-zinc-300"
             >
               {t("chat.guestImportSkip")}

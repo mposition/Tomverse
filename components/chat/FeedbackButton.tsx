@@ -18,6 +18,7 @@ import { useLanguage } from "@/components/LanguageProvider";
 import { useTurnstile } from "@/components/chat/useTurnstile";
 import { useGuestVerification } from "@/components/chat/GuestVerificationProvider";
 import { TurnstileFormSlot } from "@/components/chat/TurnstileFormSlot";
+import { useKeyboardInset } from "@/components/chat/useVisualViewport";
 import {
   guestVerificationFailureKey,
 } from "@/components/chat/guestVerificationCopy";
@@ -121,6 +122,7 @@ export function FeedbackButton({
    */
   const [diagnostics, setDiagnostics] = useState<string | null>(null);
   const [attachDiagnostics, setAttachDiagnostics] = useState(true);
+  const keyboardInset = useKeyboardInset();
 
   const baseId = useId();
   const titleId = `${baseId}-title`;
@@ -464,6 +466,11 @@ export function FeedbackButton({
           <div
             data-testid="feedback-dialog-layer"
             className="fixed inset-0 z-[130] flex items-end justify-center bg-black/60 p-0 sm:items-center sm:p-4"
+            style={
+              keyboardInset > 0
+                ? { paddingBottom: `${keyboardInset + 8}px` }
+                : undefined
+            }
           >
             <button
               type="button"
@@ -480,6 +487,13 @@ export function FeedbackButton({
               aria-describedby={descriptionId}
               data-testid="feedback-dialog"
               className="relative z-10 max-h-[calc(100dvh-1rem)] w-full max-w-md overflow-y-auto overscroll-contain rounded-t-2xl border border-zinc-200 bg-white p-5 pb-[calc(1.25rem+env(safe-area-inset-bottom))] shadow-2xl dark:border-zinc-800 dark:bg-zinc-950 sm:max-h-[calc(100dvh-2rem)] sm:rounded-2xl sm:pb-5"
+              style={
+                keyboardInset > 0
+                  ? {
+                      maxHeight: `calc(100dvh - ${keyboardInset + 16}px)`,
+                    }
+                  : undefined
+              }
             >
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">

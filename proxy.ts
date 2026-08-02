@@ -86,10 +86,10 @@ const blockedMutationOriginResponse = (request: NextRequest) => {
 };
 
 export function proxy(request: NextRequest) {
-  if (
-    request.nextUrl.pathname === "/api/health" ||
-    request.nextUrl.pathname === "/api/ready"
-  ) {
+  // Container liveness must remain directly reachable by Railway. Readiness
+  // performs database and monitoring work, so it goes through the same host
+  // and Cloudflare origin-secret boundary as every other dynamic endpoint.
+  if (request.nextUrl.pathname === "/api/health") {
     return NextResponse.next();
   }
 
@@ -259,6 +259,6 @@ export const config = {
   // sending a single request header. Prefetch requests are cheap-pathed inside
   // proxy() instead, after those checks have run.
   matcher: [
-    "/((?!_next/static|_next/image|favicon.ico|robots.txt|sitemap.xml).*)",
+    "/((?!_next/static|favicon.ico|robots.txt|sitemap.xml).*)",
   ],
 };
