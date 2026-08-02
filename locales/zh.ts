@@ -1,4 +1,7 @@
 export const zh = {
+    skipLink: {
+        toMainContent: "跳到主要内容",
+    },
     notifications: {
         dismiss: "关闭通知",
     },
@@ -86,6 +89,7 @@ export const zh = {
         removeProject: "从项目中移除",
         renameProject: "重命名项目",
         deleteProject: "删除项目",
+        deleteProjectArmed: "确认删除 {project}",
         projectRenameFailed: "无法更新项目名称。",
         projectDeleteConfirm: "再次点击将删除此项目。对话将移动到未分类。",
         projectDeleteFailed: "无法删除项目。",

@@ -1,0 +1,211 @@
+import { expect, test, type Page } from "@playwright/test";
+import { mockAuthenticatedApi, prepareGuestPage } from "./support/app-fixtures";
+
+/**
+ * UX-016 and UX-018.
+ *
+ * UX-016: there was no skip link anywhere. WCAG 2.4.1 is Level A, and on
+ * `/chat` with a populated sidebar it was roughly thirty tab stops to the
+ * composer on every load.
+ *
+ * UX-018: the project delete button armed on first press and never disarmed.
+ * The only signals were a background colour and a toast that self-dismisses at
+ * 3.2s, while the accessible name stayed "Delete project" in both states -- so
+ * a screen-reader user heard the same thing before and after arming and
+ * destroyed the project on the second press.
+ */
+
+const firstTabLandsOnSkipLink = async (page: Page) => {
+  await page.keyboard.press("Tab");
+  const focused = await page.evaluate(
+    () => document.activeElement?.getAttribute("data-testid") ?? null
+  );
+  expect(focused).toBe("skip-to-content");
+};
+
+test.describe("skip link", () => {
+  for (const route of ["/", "/pricing", "/chat", "/auth/signin", "/ko"]) {
+    test(
+      `${route} exposes a skip link as the first tab stop`,
+      { tag: "@ui-risk" },
+      async ({ page }) => {
+        await prepareGuestPage(page, "en");
+        await page.goto(route);
+        await firstTabLandsOnSkipLink(page);
+
+        const link = page.getByTestId("skip-to-content");
+        // Hidden until focused, then genuinely on screen.
+        const box = await link.boundingBox();
+        expect(box).not.toBeNull();
+        expect(box!.width).toBeGreaterThan(1);
+        expect(box!.height).toBeGreaterThan(1);
+
+        // The target exists and is focusable.
+        await link.press("Enter");
+        const target = await page.evaluate(() => {
+          const element = document.getElementById("main-content");
+          return {
+            exists: Boolean(element),
+            focusable: element?.getAttribute("tabindex") === "-1",
+          };
+        });
+        expect(target.exists).toBe(true);
+        expect(target.focusable).toBe(true);
+      }
+    );
+  }
+
+  test(
+    "the skip target adds no second main landmark",
+    { tag: "@ui-risk" },
+    async ({ page }) => {
+      await prepareGuestPage(page, "en");
+      await page.goto("/pricing");
+      // The wrapper is a display:contents div, so the page keeps exactly the
+      // landmarks it declared for itself.
+      const mainCount = await page.evaluate(
+        () => document.querySelectorAll("main").length
+      );
+      expect(mainCount).toBeLessThanOrEqual(1);
+
+      const wrapperIsMain = await page.evaluate(
+        () => document.getElementById("main-content")?.tagName.toLowerCase()
+      );
+      expect(wrapperIsMain).toBe("div");
+    }
+  );
+
+  test(
+    "the skip link is localized",
+    { tag: "@ui-risk" },
+    async ({ page }) => {
+      await page.goto("/ko");
+      await expect(page.getByTestId("skip-to-content")).toHaveText(
+        "본문으로 건너뛰기"
+      );
+    }
+  );
+});
+
+test.describe("project delete arming", () => {
+  const openProjects = async (page: Page) => {
+    await mockAuthenticatedApi(page);
+    // The shared fixture returns no projects, and the control under test only
+    // exists on a project row.
+    await page.unroute("**/api/projects**");
+    await page.route("**/api/projects**", (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          projects: [{ id: "project-1", name: "Quarterly review" }],
+        }),
+      })
+    );
+
+    await page.setViewportSize({ width: 1366, height: 768 });
+    await page.goto("/chat?lang=en");
+    const organizer = page.getByTestId("sidebar-organizer-toggle");
+    if ((await organizer.getAttribute("aria-expanded")) !== "true") {
+      await organizer.click();
+    }
+    await expect(page.getByTestId("sidebar-projects")).toBeVisible();
+  };
+
+  test(
+    "arming renames the control and reports its pressed state",
+    { tag: "@ui-risk" },
+    async ({ page }) => {
+      await openProjects(page);
+
+      const deleteButton = page
+        .getByRole("button", { name: /delete project/i })
+        .first();
+      await expect(deleteButton).toHaveCount(1);
+
+      await expect(deleteButton).toHaveAttribute("aria-pressed", "false");
+      await deleteButton.click();
+
+      // The name has to change, or arming is inaudible.
+      const armed = page.getByRole("button", { name: /confirm deletion of/i });
+      await expect(armed).toHaveCount(1);
+      await expect(armed).toHaveAttribute("aria-pressed", "true");
+    }
+  );
+
+  test(
+    "an armed control disarms itself instead of staying primed",
+    { tag: "@ui-risk" },
+    async ({ page }) => {
+      await openProjects(page);
+
+      const deleteButton = page
+        .getByRole("button", { name: /delete project/i })
+        .first();
+      await expect(deleteButton).toHaveCount(1);
+      await deleteButton.click();
+      await expect(
+        page.getByRole("button", { name: /confirm deletion of/i })
+      ).toHaveCount(1);
+
+      // Disarms just after the confirming toast goes, rather than staying
+      // primed until the next click minutes later.
+      await expect(
+        page.getByRole("button", { name: /confirm deletion of/i })
+      ).toHaveCount(0, { timeout: 10_000 });
+      await expect(
+        page.getByRole("button", { name: /delete project/i }).first()
+      ).toHaveAttribute("aria-pressed", "false");
+    }
+  );
+
+  test(
+    "Escape disarms without deleting",
+    { tag: "@ui-risk" },
+    async ({ page }) => {
+      await openProjects(page);
+
+      const deleteButton = page
+        .getByRole("button", { name: /delete project/i })
+        .first();
+      await expect(deleteButton).toHaveCount(1);
+      await deleteButton.click();
+      await expect(
+        page.getByRole("button", { name: /confirm deletion of/i })
+      ).toHaveCount(1);
+
+      await page.keyboard.press("Escape");
+      await expect(
+        page.getByRole("button", { name: /confirm deletion of/i })
+      ).toHaveCount(0);
+      // The project itself is untouched.
+      await expect(
+        page.getByRole("button", { name: /delete project/i })
+      ).not.toHaveCount(0);
+    }
+  );
+});
+
+test(
+  "admin search and privacy inputs carry a real accessible name",
+  { tag: "@ui-risk" },
+  async ({ page }) => {
+    await prepareGuestPage(page, "en");
+    await page.goto("/chat");
+    // UX-021's rule, asserted where it is cheap to assert: no text input in the
+    // rendered app may rely on its placeholder as its only name.
+    const unnamed = await page.evaluate(() =>
+      Array.from(
+        document.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>(
+          "input:not([type=checkbox]):not([type=radio]):not([type=hidden]), textarea"
+        )
+      ).filter((field) => {
+        if (field.getAttribute("aria-label")) return false;
+        if (field.getAttribute("aria-labelledby")) return false;
+        if (field.labels && field.labels.length > 0) return false;
+        return Boolean(field.getAttribute("placeholder"));
+      }).length
+    );
+    expect(unnamed).toBe(0);
+  }
+);

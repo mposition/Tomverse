@@ -83,6 +83,17 @@ const getOrganizerPreference = (): OrganizerPreference => {
 
 const getServerOrganizerPreference = (): OrganizerPreference => "auto";
 
+const DELETE_ARM_TIMEOUT_MS = 5_000;
+
+const interpolateSidebarCopy = (
+    template: string,
+    values: Record<string, string | number>
+) =>
+    Object.entries(values).reduce(
+        (copy, [key, value]) => copy.replaceAll(`{${key}}`, String(value)),
+        template
+    );
+
 export function ChatSidebar({
     conversations,
     currentChatId,
@@ -313,6 +324,19 @@ export function ChatSidebar({
         document.addEventListener("keydown", handleKeyDown);
         return () => document.removeEventListener("keydown", handleKeyDown);
     }, [deleteProjectArmedId, editingProjectId, showProjectForm]);
+
+    // UX-018. The armed state used to persist until the next click anywhere,
+    // long after the confirming toast had self-dismissed at 3.2s -- so a second
+    // click minutes later still deleted. It disarms itself just after the toast
+    // goes, and the timer is cleared on unmount and on re-arm.
+    useEffect(() => {
+        if (!deleteProjectArmedId) return;
+        const timer = window.setTimeout(
+            () => setDeleteProjectArmedId(null),
+            DELETE_ARM_TIMEOUT_MS
+        );
+        return () => window.clearTimeout(timer);
+    }, [deleteProjectArmedId]);
 
     const toggleStoredId = (storageKey: string, id: string, setter: (ids: string[]) => void) => {
         let next: string[] = [];
@@ -1191,9 +1215,24 @@ export function ChatSidebar({
                                                                 ? "text-white/80 hover:bg-white/10"
                                                                 : "text-zinc-400 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-950/30 dark:hover:text-red-300"
                                                     }`}
-                                                    aria-label={t("sidebar.deleteProject")}
+                                                    // UX-018. Armed state was carried by
+                                                    // background colour alone and a toast
+                                                    // that self-dismisses in 3.2s, while the
+                                                    // name stayed "Delete project" -- so a
+                                                    // screen-reader user got identical output
+                                                    // before and after arming and destroyed
+                                                    // the project on the second press.
+                                                    aria-label={
+                                                        isDeleteArmed
+                                                            ? interpolateSidebarCopy(
+                                                                  t("sidebar.deleteProjectArmed"),
+                                                                  { project: project.name }
+                                                              )
+                                                            : t("sidebar.deleteProject")
+                                                    }
+                                                    aria-pressed={isDeleteArmed}
                                                 >
-                                                    <Trash2 className="h-3.5 w-3.5" />
+                                                    <Trash2 aria-hidden="true" className="h-3.5 w-3.5" />
                                                 </button>
                                             </>
                                         )}

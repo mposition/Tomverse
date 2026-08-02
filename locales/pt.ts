@@ -1,6 +1,9 @@
 import { en } from "./en";
 
 export const pt = {
+    skipLink: {
+        toMainContent: "Ir para o conteúdo principal",
+    },
     notifications: {
         dismiss: "Fechar a notificação",
     },
@@ -88,6 +91,7 @@ export const pt = {
         removeProject: "Remover do projeto",
         renameProject: "Renomear projeto",
         deleteProject: "Excluir projeto",
+        deleteProjectArmed: "Confirmar a exclusão de {project}",
         projectRenameFailed: "Não foi possível atualizar o nome do projeto.",
         projectDeleteConfirm: "Clique novamente para excluir este projeto. As conversas irão para Sem categoria.",
         projectDeleteFailed: "Não foi possível excluir o projeto.",

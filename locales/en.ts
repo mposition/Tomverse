@@ -1,4 +1,7 @@
 export const en = {
+    skipLink: {
+        toMainContent: "Skip to main content",
+    },
     notifications: {
         dismiss: "Dismiss notification",
     },
@@ -86,6 +89,7 @@ export const en = {
         removeProject: "Remove from project",
         renameProject: "Rename project",
         deleteProject: "Delete project",
+        deleteProjectArmed: "Confirm deletion of {project}",
         projectRenameFailed: "Project name could not be updated.",
         projectDeleteConfirm: "Click again to delete this project. Chats will move to Uncategorized.",
         projectDeleteFailed: "Project could not be deleted.",

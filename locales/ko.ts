@@ -1,4 +1,7 @@
 export const ko = {
+    skipLink: {
+        toMainContent: "본문으로 건너뛰기",
+    },
     notifications: {
         dismiss: "알림 닫기",
     },
@@ -86,6 +89,7 @@ export const ko = {
         removeProject: "프로젝트에서 제거",
         renameProject: "프로젝트 이름 변경",
         deleteProject: "프로젝트 삭제",
+        deleteProjectArmed: "{project} 삭제 확인",
         projectRenameFailed: "프로젝트 이름을 변경하지 못했습니다.",
         projectDeleteConfirm: "한 번 더 클릭하면 이 프로젝트가 삭제됩니다. 대화는 미분류로 이동합니다.",
         projectDeleteFailed: "프로젝트를 삭제하지 못했습니다.",
