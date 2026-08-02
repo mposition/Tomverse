@@ -1,5 +1,6 @@
 import { expect, test, type Page, type Route } from "@playwright/test";
 import { expectNoHorizontalOverflow } from "./support/app-fixtures";
+import { setRootFontSize } from "./support/chat-state-fixtures";
 
 /**
  * The pricing page's purchase funnel, end to end, without touching Stripe.
@@ -904,12 +905,8 @@ test.describe("pricing purchase CTAs at 320px and 200% text", () => {
   }) => {
     await preparePricingPage(page, { plan: "Pro" });
     await page.setViewportSize({ width: 320, height: 720 });
-    await page.addInitScript(() => {
-      const style = document.createElement("style");
-      style.textContent = ":root { font-size: 32px; }";
-      document.documentElement.appendChild(style);
-    });
     await gotoPricing(page);
+    await setRootFontSize(page, 32);
 
     await expectNoHorizontalOverflow(page);
 

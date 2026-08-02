@@ -1,4 +1,5 @@
 import { createHash, createHmac } from "node:crypto";
+export { stripeKeyLiveMode } from "@/lib/stripeMode";
 
 /**
  * Pure decision layer for turning a Tomverse promotion into the Stripe Coupon
@@ -115,23 +116,6 @@ export const promotionStripePolicyViolation = (
   if (promotion.discountPercent < 0 || promotion.discountPercent > 100) {
     return "discount_percent_out_of_range";
   }
-  return null;
-};
-
-/**
- * Live/test mode implied by the secret key, or null when the key shape is not
- * one we recognise.
- *
- * Null means "do not judge", not "assume live". A restricted or future key
- * format must not be able to make every stored object look like a mode
- * mismatch and take promotion checkout down.
- */
-export const stripeKeyLiveMode = (
-  secretKey: string | undefined | null
-): boolean | null => {
-  if (!secretKey) return null;
-  if (/^(sk|rk)_live_/.test(secretKey)) return true;
-  if (/^(sk|rk)_test_/.test(secretKey)) return false;
   return null;
 };
 

@@ -4,6 +4,10 @@ import { NextResponse } from "next/server";
 import type Stripe from "stripe";
 import { prisma } from "@/lib/prisma";
 import { getStripe } from "@/lib/stripe";
+import {
+  stripeEventMatchesKeyMode,
+  stripeKeyLiveMode,
+} from "@/lib/stripeMode";
 import { processStripeEvent } from "@/lib/stripeWebhookProcessing";
 import { apiSecurityResponse, readLimitedText } from "@/lib/apiSecurity";
 import { safeErrorMetadata } from "@/lib/providerErrorClassification";
@@ -25,6 +29,33 @@ export async function POST(req: Request) {
   try {
     const rawBody = await readLimitedText(req, MAX_STRIPE_WEBHOOK_BYTES);
     event = getStripe().webhooks.constructEvent(rawBody, signature, webhookSecret);
+
+    // Reject a signed event from the other Stripe mode before any database
+    // write. This is a second line of defence behind production readiness and
+    // also protects a directly reached origin while a deployment is unready.
+    const configuredLiveMode = stripeKeyLiveMode(
+      process.env.STRIPE_SECRET_KEY
+    );
+    if (
+      !stripeEventMatchesKeyMode(
+        event.livemode,
+        process.env.STRIPE_SECRET_KEY
+      )
+    ) {
+      console.error("Stripe webhook mode mismatch.", {
+        configuredMode:
+          configuredLiveMode === null
+            ? "unknown"
+            : configuredLiveMode
+              ? "live"
+              : "test",
+        eventMode: event.livemode ? "live" : "test",
+      });
+      return NextResponse.json(
+        { error: "Stripe webhook mode mismatch." },
+        { status: 400 }
+      );
+    }
 
     // Stripe delivers events at-least-once. Skip re-running processing for an
     // event we've already fully processed instead of relying solely on each

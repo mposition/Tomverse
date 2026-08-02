@@ -62,6 +62,7 @@ import {
 } from "@/lib/accountSettingsEvents";
 import { listImportableGuestConversations } from "@/lib/guestImport";
 import { openGuestImportModal } from "@/lib/guestImportModalEvents";
+import { useModalDialog } from "@/components/useModalDialog";
 
 type LoginMethod =
     | { type: "oauth"; provider: "google" | "azure-ad"; linked: boolean }
@@ -83,6 +84,10 @@ export function AuthButton({
     const [activeSettingsTab, setActiveSettingsTab] = useState<"account" | "preferences" | "data" | "plan">("account");
     const settingsButtonRef = useRef<HTMLButtonElement | null>(null);
     const settingsDialogRef = useRef<HTMLDivElement | null>(null);
+    const deleteAccountButtonRef = useRef<HTMLButtonElement | null>(null);
+    const deleteAccountDialogRef = useRef<HTMLDivElement | null>(null);
+    const addEmailButtonRef = useRef<HTMLButtonElement | null>(null);
+    const addEmailDialogRef = useRef<HTMLDivElement | null>(null);
     const accountMenuRef = useRef<HTMLDivElement | null>(null);
     const accountMenuButtonRef = useRef<HTMLButtonElement | null>(null);
 
@@ -289,6 +294,10 @@ export function AuthButton({
 
     const handleRemoveLoginMethod = async (method: "google" | "azure-ad" | "email") => {
         if (isRemovingLoginMethod) return;
+        if (!canRemoveLoginMethod) {
+            dispatchAppToast(t("auth.removeLoginMethodBlocked"), "error");
+            return;
+        }
         if (armedRemoveMethod !== method) {
             setArmedRemoveMethod(method);
             dispatchAppToast(t("auth.confirmRemoveLoginMethod"), "info");
@@ -350,6 +359,27 @@ export function AuthButton({
         setAddEmailCode("");
     }, []);
 
+    useModalDialog({
+        open: isModalOpen,
+        onClose: closeSettingsModal,
+        dialogRef: settingsDialogRef,
+        panelRef: settingsDialogRef,
+    });
+    useModalDialog({
+        open: isModalOpen && isDeleteAccountModalOpen,
+        onClose: closeDeleteAccountModal,
+        dialogRef: deleteAccountDialogRef,
+        panelRef: deleteAccountDialogRef,
+        returnFocusRef: deleteAccountButtonRef,
+    });
+    useModalDialog({
+        open: isModalOpen && isAddEmailModalOpen,
+        onClose: closeAddEmailModal,
+        dialogRef: addEmailDialogRef,
+        panelRef: addEmailDialogRef,
+        returnFocusRef: addEmailButtonRef,
+    });
+
     const handleRequestAddEmailCode = async () => {
         if (isSendingAddEmailCode) return;
         setIsSendingAddEmailCode(true);
@@ -395,24 +425,6 @@ export function AuthButton({
             setIsVerifyingAddEmailCode(false);
         }
     };
-
-    const getSettingsFocusableElements = useCallback(() => {
-        const dialog = settingsDialogRef.current;
-        if (!dialog) return [];
-
-        return Array.from(
-            dialog.querySelectorAll<HTMLElement>(
-                [
-                    "button:not([disabled])",
-                    "input:not([disabled])",
-                    "select:not([disabled])",
-                    "textarea:not([disabled])",
-                    "a[href]",
-                    '[tabindex]:not([tabindex="-1"])',
-                ].join(",")
-            )
-        ).filter((element) => element.offsetParent !== null);
-    }, []);
 
     useEffect(() => {
         if (isModalOpen && session) {
@@ -462,58 +474,6 @@ export function AuthButton({
                 .catch(() => undefined);
         }
     }, [isModalOpen, session, globalLang]);
-
-    useEffect(() => {
-        if (!isModalOpen) return;
-
-        const animationFrame = requestAnimationFrame(() => {
-            getSettingsFocusableElements()[0]?.focus();
-        });
-
-        return () => cancelAnimationFrame(animationFrame);
-    }, [getSettingsFocusableElements, isModalOpen]);
-
-    useEffect(() => {
-        if (!isModalOpen) return;
-
-        const handleKeyDown = (event: KeyboardEvent) => {
-            if (event.key === "Escape") {
-                event.preventDefault();
-                if (isDeleteAccountModalOpen) {
-                    closeDeleteAccountModal();
-                } else {
-                    closeSettingsModal();
-                }
-                return;
-            }
-
-            if (event.key !== "Tab" || isDeleteAccountModalOpen) return;
-
-            const focusableElements = getSettingsFocusableElements();
-            if (focusableElements.length === 0) {
-                event.preventDefault();
-                return;
-            }
-
-            const firstElement = focusableElements[0];
-            const lastElement = focusableElements[focusableElements.length - 1];
-            const activeElement = document.activeElement;
-
-            if (event.shiftKey && activeElement === firstElement) {
-                event.preventDefault();
-                lastElement.focus();
-                return;
-            }
-
-            if (!event.shiftKey && activeElement === lastElement) {
-                event.preventDefault();
-                firstElement.focus();
-            }
-        };
-
-        document.addEventListener("keydown", handleKeyDown, true);
-        return () => document.removeEventListener("keydown", handleKeyDown, true);
-    }, [closeDeleteAccountModal, closeSettingsModal, getSettingsFocusableElements, isModalOpen, isDeleteAccountModalOpen]);
 
     useEffect(() => {
         if (!isAccountMenuOpen) return;
@@ -979,7 +939,7 @@ export function AuthButton({
         ) : null}
 
             {isModalOpen && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
+                <div className="fixed inset-0 z-[130] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
                     <div
                         ref={settingsDialogRef}
                         className="flex max-h-[calc(100dvh-2rem)] w-full max-w-3xl flex-col overflow-hidden rounded-2xl border border-zinc-200 bg-white text-zinc-900 shadow-2xl dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-100"
@@ -1102,17 +1062,26 @@ export function AuthButton({
                                                                 </div>
                                                             </div>
                                                             {isEnabled ? (
+                                                              <>
                                                                 <button
+                                                                    ref={addEmailButtonRef}
                                                                     type="button"
                                                                     onClick={() => handleRemoveLoginMethod(method.type === "email" ? "email" : method.provider)}
-                                                                    disabled={isRemovingLoginMethod || !canRemoveThis}
-                                                                    title={!canRemoveThis ? t("auth.removeLoginMethodBlocked") : ""}
-                                                                    className="shrink-0 rounded-lg px-2.5 py-1.5 text-xs font-bold text-red-600 transition-colors hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-40 dark:hover:bg-red-950/40"
+                                                                    disabled={isRemovingLoginMethod}
+                                                                    aria-disabled={!canRemoveThis || isRemovingLoginMethod}
+                                                                    aria-describedby={!canRemoveThis ? `remove-login-method-blocked-${key}` : undefined}
+                                                                    className={`shrink-0 rounded-lg px-2.5 py-1.5 text-xs font-bold text-red-600 transition-colors hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-40 dark:hover:bg-red-950/40 ${!canRemoveThis ? "cursor-not-allowed opacity-40" : ""}`}
                                                                 >
                                                                     {armedRemoveMethod === (method.type === "email" ? "email" : method.provider)
                                                                         ? t("auth.confirmRemoveLoginMethodButton")
                                                                         : t("auth.removeLoginMethod")}
                                                                 </button>
+                                                                {!canRemoveThis && (
+                                                                    <span id={`remove-login-method-blocked-${key}`} className="sr-only">
+                                                                        {t("auth.removeLoginMethodBlocked")}
+                                                                    </span>
+                                                                )}
+                                                              </>
                                                             ) : method.type === "email" ? (
                                                                 <button
                                                                     type="button"
@@ -1139,6 +1108,7 @@ export function AuthButton({
                                             <h3 className="text-sm font-bold text-red-700 dark:text-red-300">{t("auth.dangerZone")}</h3>
                                             <p className="mt-1 text-sm leading-6 text-red-700/80 dark:text-red-200/80">{t("auth.accountDangerZoneDescription")}</p>
                                             <button
+                                                ref={deleteAccountButtonRef}
                                                 type="button"
                                                 onClick={() => setIsDeleteAccountModalOpen(true)}
                                                 className="mt-4 flex w-full items-center justify-center gap-2 rounded-xl border border-red-300 bg-white px-3 py-3 text-sm font-semibold text-red-600 transition-colors hover:bg-red-50 dark:border-red-900/60 dark:bg-red-950/40 dark:text-red-200 dark:hover:bg-red-950/70"
@@ -1536,13 +1506,15 @@ export function AuthButton({
 
             {isModalOpen && isDeleteAccountModalOpen && (
                 <div
-                    className="fixed inset-0 z-[95] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm"
+                    className="fixed inset-0 z-[140] flex items-end justify-center bg-black/60 p-3 backdrop-blur-sm sm:items-center sm:p-4"
                     onClick={(event) => {
                         if (event.target === event.currentTarget) closeDeleteAccountModal();
                     }}
                 >
                     <div
-                        className="w-full max-w-md rounded-2xl border border-red-300 bg-white p-5 shadow-2xl dark:border-red-900/70 dark:bg-zinc-900"
+                        ref={deleteAccountDialogRef}
+                        data-testid="delete-account-dialog"
+                        className="max-h-full w-full max-w-md overflow-y-auto overscroll-contain rounded-2xl border border-red-300 bg-white p-5 shadow-2xl dark:border-red-900/70 dark:bg-zinc-900"
                         role="dialog"
                         aria-modal="true"
                         aria-labelledby="delete-account-modal-title"
@@ -1617,13 +1589,15 @@ export function AuthButton({
 
             {isModalOpen && isAddEmailModalOpen && (
                 <div
-                    className="fixed inset-0 z-[95] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm"
+                    className="fixed inset-0 z-[140] flex items-end justify-center bg-black/60 p-3 backdrop-blur-sm sm:items-center sm:p-4"
                     onClick={(event) => {
                         if (event.target === event.currentTarget) closeAddEmailModal();
                     }}
                 >
                     <div
-                        className="w-full max-w-md rounded-2xl border border-zinc-200 bg-white p-5 shadow-2xl dark:border-zinc-800 dark:bg-zinc-900"
+                        ref={addEmailDialogRef}
+                        data-testid="add-email-dialog"
+                        className="max-h-full w-full max-w-md overflow-y-auto overscroll-contain rounded-2xl border border-zinc-200 bg-white p-5 shadow-2xl dark:border-zinc-800 dark:bg-zinc-900"
                         role="dialog"
                         aria-modal="true"
                         aria-labelledby="add-email-modal-title"

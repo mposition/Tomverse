@@ -36,6 +36,7 @@ export function useModalDialog({
   dialogRef,
   panelRef,
   initialFocusRef,
+  returnFocusRef,
 }: {
   open: boolean;
   onClose: () => void;
@@ -45,12 +46,18 @@ export function useModalDialog({
   panelRef: RefObject<HTMLElement | null>;
   /** Preferred initial focus target. Falls back to the first focusable child. */
   initialFocusRef?: RefObject<HTMLElement | null>;
+  /**
+   * Explicit trigger to restore when pointer activation does not move focus
+   * (notably touch Safari). Falls back to the active element at open time.
+   */
+  returnFocusRef?: RefObject<HTMLElement | null>;
 }) {
   useEffect(() => {
     if (!open) return;
 
     const returnTarget =
-      document.activeElement instanceof HTMLElement ? document.activeElement : null;
+      returnFocusRef?.current ??
+      (document.activeElement instanceof HTMLElement ? document.activeElement : null);
     const previousOverflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
 
@@ -141,8 +148,13 @@ export function useModalDialog({
         // The trigger can be gone by now (a row that was just deleted, a menu
         // that closed with the dialog); focusing a detached node would silently
         // drop focus to <body>.
-        if (returnTarget?.isConnected) returnTarget.focus({ preventScroll: true });
+        if (!returnTarget?.isConnected) return;
+        returnTarget.focus({ preventScroll: true });
+        // WebKit can ignore the focus-options overload while a nested fixed
+        // dialog is being removed. Retry with the baseline focus API so the
+        // trigger contract is still kept on iOS/Safari.
+        if (document.activeElement !== returnTarget) returnTarget.focus();
       });
     };
-  }, [open, onClose, dialogRef, panelRef, initialFocusRef]);
+  }, [open, onClose, dialogRef, panelRef, initialFocusRef, returnFocusRef]);
 }

@@ -79,8 +79,23 @@ test("a fourth pick offers a swap instead of silently doing nothing", async ({
   await unselected.click();
 
   // The swap sheet is the resolution path: it names what is being replaced.
-  await expect(page.getByRole("dialog").last()).toBeVisible();
+  const swapDialog = page.getByTestId("replace-model-dialog");
+  await expect(swapDialog).toBeVisible();
   await expect(page.getByTestId("selected-model-chip").first()).toBeVisible();
+
+  // This is a modal nested inside the model-picker dialog. It owns keyboard
+  // focus and Escape; closing it must leave the picker and its draft intact.
+  await expect(swapDialog.getByRole("button", { name: "Cancel" })).toBeFocused();
+  for (let step = 0; step < 10; step += 1) {
+    await page.keyboard.press("Tab");
+    expect(
+      await swapDialog.evaluate((node) => node.contains(document.activeElement))
+    ).toBe(true);
+  }
+  await page.keyboard.press("Escape");
+  await expect(swapDialog).toBeHidden();
+  await expect(dialog).toBeVisible();
+  await expect(unselected).toBeFocused();
 });
 
 test("removing one model reopens a slot and the estimate follows", async ({

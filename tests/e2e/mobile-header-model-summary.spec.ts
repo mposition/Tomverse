@@ -99,11 +99,7 @@ async function openSeededConversation(page: Page) {
 async function showPanel(page: Page, modelId: string) {
   const tab = page.locator(`[data-testid="mobile-model-tab"][data-model-id="${modelId}"]`);
   await tab.click();
-  // aria-selected lives on the role="tab" wrapper around the button.
-  await expect(page.locator(`[role="tab"]:has([data-model-id="${modelId}"])`)).toHaveAttribute(
-    "aria-selected",
-    "true"
-  );
+  await expect(tab).toHaveAttribute("aria-selected", "true");
 }
 
 test.beforeEach(async ({ page }, testInfo) => {
@@ -125,11 +121,11 @@ test("header counts the active models and leaves naming them to the tabs", async
   await expect(primaryModel(page)).toHaveCount(0);
   // ...and the tab strip is where the panel on screen is identified.
   const selectedModelId = await page
-    .locator('[role="tab"][aria-selected="true"] [data-testid="mobile-model-tab"]')
+    .locator('[data-testid="mobile-model-tab"][aria-selected="true"]')
     .getAttribute("data-model-id");
   expect(selectedModelId).toBeTruthy();
   await expect(
-    page.locator('[role="tab"][aria-selected="true"] [data-testid="mobile-model-tab"]')
+    page.locator('[data-testid="mobile-model-tab"][aria-selected="true"]')
   ).toContainText(MODEL_NAMES[selectedModelId!]);
 
   // The full selection is still what a screen reader gets from the button.

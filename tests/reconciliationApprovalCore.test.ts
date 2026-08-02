@@ -171,7 +171,7 @@ test("nothing in the repository runs the reconciliation by itself", () => {
     } catch {
       continue;
     }
-    if (relative === "scripts/run-default-model-reconciliation.mjs") continue;
+    if (relative === join("scripts", "run-default-model-reconciliation.mjs")) continue;
     if (!/run-default-model-reconciliation/.test(contents)) continue;
 
     // package.json is allowed to *define* the operator command; what it must

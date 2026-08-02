@@ -869,6 +869,7 @@ export function PricingPageContent() {
   const [planChangeTarget, setPlanChangeTarget] = useState<"Pro" | "Max" | null>(
     null
   );
+  const planChangeTriggerRef = useRef<HTMLButtonElement | null>(null);
   const purchaseResumedRef = useRef(false);
   const creditPackCtaRef = useRef<HTMLDivElement | null>(null);
   const annualCopy = annualLabelByLanguage[lang] ?? annualLabelByLanguage.en!;
@@ -1615,6 +1616,7 @@ export function PricingPageContent() {
                   // with 409 and always will, so a checkout button here would
                   // be the dead end this branch was built to remove.
                   <button
+                    ref={planChangeTriggerRef}
                     type="button"
                     data-testid={`pricing-change-plan-${planId}`}
                     onClick={() => {
@@ -1762,6 +1764,7 @@ export function PricingPageContent() {
             targetTier={planChangeTarget}
             billingInterval={account.billingInterval}
             lang={lang}
+            returnFocusToRef={planChangeTriggerRef}
           />
         ) : null}
 

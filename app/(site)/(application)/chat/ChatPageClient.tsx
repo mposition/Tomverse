@@ -467,6 +467,16 @@ export function ChatPageClient({
   const [pendingRemoveModelId, setPendingRemoveModelId] = useState<string | null>(null);
   const [pendingRevokeShareId, setPendingRevokeShareId] = useState<string | null>(null);
   const [billingSuccess, setBillingSuccess] = useState<BillingSuccessState | null>(null);
+  const billingSuccessDialogRef = useRef<HTMLDivElement | null>(null);
+  const billingSuccessCloseRef = useRef<HTMLButtonElement | null>(null);
+  const closeBillingSuccess = useCallback(() => setBillingSuccess(null), []);
+  useModalDialog({
+    open: Boolean(billingSuccess),
+    onClose: closeBillingSuccess,
+    dialogRef: billingSuccessDialogRef,
+    panelRef: billingSuccessDialogRef,
+    initialFocusRef: billingSuccessCloseRef,
+  });
   const [compareSummary, setCompareSummary] = useState<{
     title: string;
     result: {
@@ -3954,26 +3964,26 @@ export function ChatPageClient({
       </aside>
     )}
     {billingSuccess && (
-      <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm">
+      <div className="fixed inset-0 z-[130] flex items-end justify-center bg-black/70 px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-[max(0.75rem,env(safe-area-inset-top))] backdrop-blur-sm sm:items-center sm:p-4">
         <div
+          ref={billingSuccessDialogRef}
           role="dialog"
           aria-modal="true"
-          aria-label={
-            billingSuccess.accessType === "founding_tester_pass"
-              ? t("billing.testerPassActivatedEyebrow")
-              : t("billing.paymentSuccessfulEyebrow")
-          }
-          className="relative w-full max-w-lg overflow-hidden rounded-3xl border border-blue-400/30 bg-zinc-950 text-white shadow-2xl shadow-blue-950/40"
+          aria-labelledby="billing-success-title"
+          data-testid="billing-success-dialog"
+          className="relative flex max-h-full w-full max-w-lg flex-col overflow-hidden rounded-t-3xl border border-blue-400/30 bg-zinc-950 text-white shadow-2xl shadow-blue-950/40 sm:rounded-3xl"
         >
-          <div className="absolute inset-x-0 top-0 h-56 bg-gradient-to-br from-blue-500/35 via-cyan-400/15 to-purple-500/25 sm:h-52" />
-          <div className="relative px-6 pb-7 pt-6 sm:px-8 sm:pb-8 sm:pt-8">
+          <div className="pointer-events-none absolute inset-x-0 top-0 h-56 bg-gradient-to-br from-blue-500/35 via-blue-400/15 to-zinc-950/0 sm:h-52" />
+          <div className="relative overflow-y-auto overscroll-contain px-6 pb-7 pt-6 sm:px-8 sm:pb-8 sm:pt-8">
             <div className="flex items-start justify-between gap-4">
               <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-blue-500 text-white shadow-lg shadow-blue-500/30">
                 <Sparkles className="h-7 w-7" aria-hidden="true" />
               </div>
               <button
+                ref={billingSuccessCloseRef}
                 type="button"
-                onClick={() => setBillingSuccess(null)}
+                data-testid="billing-success-close"
+                onClick={closeBillingSuccess}
                 className="rounded-full border border-white/10 bg-white/5 px-3 py-2 text-sm font-bold text-zinc-300 transition hover:bg-white/10 hover:text-white"
               >
                 {t("billing.close")}
@@ -3986,7 +3996,7 @@ export function ChatPageClient({
                   ? t("billing.testerPassActivatedEyebrow")
                   : t("billing.paymentSuccessfulEyebrow")}
               </p>
-              <h2 className="mt-3 text-[2rem] font-black leading-tight tracking-tight sm:text-4xl">
+              <h2 id="billing-success-title" className="mt-3 text-[2rem] font-black leading-tight tracking-tight sm:text-4xl">
                 {billingSuccess.accessType === "founding_tester_pass"
                   ? t("billing.testerPassActivatedTitle")
                   : t("billing.paymentSuccessfulTitle")}
@@ -4020,9 +4030,9 @@ export function ChatPageClient({
                       : t("billing.intervalMonthly")}
                 </p>
               </div>
-              <div className="rounded-2xl border border-emerald-400/20 bg-emerald-400/10 p-4">
-                <p className="text-xs font-semibold text-emerald-200">{t("billing.status")}</p>
-                <p className="mt-1 text-lg font-black text-emerald-200">{t("billing.active")}</p>
+              <div className="rounded-2xl border border-status-success-500/20 bg-status-success-500/10 p-4">
+                <p className="text-xs font-semibold text-status-success-200">{t("billing.status")}</p>
+                <p className="mt-1 text-lg font-black text-status-success-200">{t("billing.active")}</p>
               </div>
             </div>
 
@@ -4035,7 +4045,8 @@ export function ChatPageClient({
             <div className="mt-7 flex flex-col gap-3 sm:flex-row">
               <button
                 type="button"
-                onClick={() => setBillingSuccess(null)}
+                data-testid="billing-success-primary"
+                onClick={closeBillingSuccess}
                 className="inline-flex flex-1 items-center justify-center gap-2 rounded-2xl bg-blue-600 px-5 py-3 text-sm font-bold text-white transition hover:bg-blue-500"
               >
                 {t("billing.startTomverse")}

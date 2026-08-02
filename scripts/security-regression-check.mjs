@@ -659,11 +659,17 @@ const checks = [
     },
   },
   {
-    name: "Liveness and readiness bypass canonical host protection",
+    name: "Only cheap liveness bypasses canonical host protection",
     file: "proxy.ts",
-    test: (source) =>
-      source.includes('request.nextUrl.pathname === "/api/health"') &&
-      source.includes('request.nextUrl.pathname === "/api/ready"'),
+    test: (source) => {
+      const originGate = source.indexOf("!isAllowedRequestHost");
+      const preGate = source.slice(0, originGate);
+      return (
+        preGate.includes('request.nextUrl.pathname === "/api/health"') &&
+        !preGate.includes('request.nextUrl.pathname === "/api/ready"') &&
+        !source.includes("_next/static|_next/image")
+      );
+    },
   },
   {
     name: "Locked conversations are excluded from all-conversation export",

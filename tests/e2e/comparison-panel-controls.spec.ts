@@ -1,5 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 import { openRecentConversation, prepareGuestPage } from "./support/app-fixtures";
+import { setRootFontSize } from "./support/chat-state-fixtures";
 
 /**
  * UX-013 and UI-014, both on the comparison panel header.
@@ -166,7 +167,7 @@ test.describe("comparison panel controls", () => {
     { tag: "@ui-risk" },
     async ({ page }) => {
       await openWithPanels(page, 3);
-      await page.addStyleTag({ content: "html { font-size: 32px !important; }" });
+      await setRootFontSize(page, 32);
       await page.waitForTimeout(250);
 
       const overflow = await page.evaluate(() => ({

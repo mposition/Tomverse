@@ -12,6 +12,7 @@ import {
 import { prisma } from "@/lib/prisma";
 import { getStripe } from "@/lib/stripe";
 import { processStripeEvent } from "@/lib/stripeWebhookProcessing";
+import { stripeEventMatchesKeyMode } from "@/lib/stripeMode";
 
 type RouteContext = {
   params: Promise<{ webhookId: string }>;
@@ -44,6 +45,17 @@ export async function POST(req: Request, context: RouteContext) {
     }
 
     const event = await getStripe().events.retrieve(log.stripeEventId);
+    if (
+      !stripeEventMatchesKeyMode(
+        event.livemode,
+        process.env.STRIPE_SECRET_KEY
+      )
+    ) {
+      return NextResponse.json(
+        { error: "Stripe webhook mode mismatch." },
+        { status: 409 }
+      );
+    }
     await processStripeEvent(event);
 
     const updated = await prisma.stripeWebhookEventLog.update({

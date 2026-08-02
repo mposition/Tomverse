@@ -4,6 +4,7 @@ import {
   openModelPickerCatalogue,
   prepareGuestPage,
 } from "./support/app-fixtures";
+import { setRootFontSize } from "./support/chat-state-fixtures";
 
 async function installClipboardMock(page: Page) {
   await page.addInitScript(() => {
@@ -64,11 +65,43 @@ test.beforeEach(async ({ page }) => {
 test("billing success modal respects the explicit return language", { tag: "@smoke" }, async ({ page }) => {
   await page.goto("/chat?billing=success&plan=max&interval=monthly&lang=ko");
 
-  const successDialog = page.getByRole("dialog", { name: "결제 완료" });
+  const successDialog = page.getByTestId("billing-success-dialog");
   await expect(successDialog).toBeVisible();
   await expect(successDialog).toContainText("결제가 성공적으로 완료되었습니다.");
   await expect(successDialog).toContainText("월간");
   await expect(successDialog.getByRole("button", { name: "닫기" })).toBeVisible();
+});
+
+test("billing success remains operable at 320px and 200% text scaling", { tag: "@ui-risk" }, async ({ page }) => {
+  await page.setViewportSize({ width: 320, height: 568 });
+  await page.goto("/chat?billing=success&plan=max&interval=monthly&lang=en");
+  await setRootFontSize(page, 32);
+
+  const dialog = page.getByTestId("billing-success-dialog");
+  await expect(dialog).toBeVisible();
+  await expect(page.getByTestId("billing-success-close")).toBeFocused();
+
+  const box = await dialog.boundingBox();
+  expect(box).not.toBeNull();
+  expect(box!.x).toBeGreaterThanOrEqual(0);
+  expect(box!.x + box!.width).toBeLessThanOrEqual(321);
+  expect(box!.y).toBeGreaterThanOrEqual(0);
+  expect(box!.y + box!.height).toBeLessThanOrEqual(569);
+
+  const primary = page.getByTestId("billing-success-primary");
+  await primary.scrollIntoViewIfNeeded();
+  const primaryBox = await primary.boundingBox();
+  expect(primaryBox).not.toBeNull();
+  expect(primaryBox!.y + primaryBox!.height).toBeLessThanOrEqual(569);
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth > document.documentElement.clientWidth + 1
+    )
+  ).toBe(false);
+
+  await page.keyboard.press("Escape");
+  await expect(dialog).toBeHidden();
+  await expect(page.locator("body")).not.toHaveCSS("overflow", "hidden");
 });
 
 test("authenticated user opens settings", { tag: "@smoke" }, async ({ page }) => {

@@ -20,7 +20,13 @@
  * component renders those answers; it does not compute them.
  */
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type RefObject,
+} from "react";
 import { createPortal } from "react-dom";
 import Link from "next/link";
 import { ArrowRight, CalendarClock, X } from "lucide-react";
@@ -30,15 +36,13 @@ import {
   normalizeBillingCurrency,
 } from "@/lib/billingMarkets";
 import { buildPlanChangeSupportHref } from "@/lib/purchaseIntent";
+import { useModalDialog } from "@/components/useModalDialog";
 import {
   normalizePlanChangeErrorCode,
   planChangeNeedsSupport,
   planChangeText,
   type PlanChangeCopyErrorCode,
 } from "@/components/billing/planChangeCopy";
-
-const FOCUSABLE_SELECTOR =
-  'a[href], button:not([disabled]), input:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
 type Quote = {
   requestId: string;
@@ -106,6 +110,7 @@ export function PlanChangeDialog({
   billingInterval,
   lang,
   onSettled,
+  returnFocusToRef,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -114,11 +119,12 @@ export function PlanChangeDialog({
   lang: string;
   /** Called after a confirm or cancel so the page can refresh its account state. */
   onSettled?: () => void;
+  /** Explicit CTA for touch Safari, where tapping a button need not focus it. */
+  returnFocusToRef?: RefObject<HTMLElement | null>;
 }) {
   const text = planChangeText(lang);
   const dialogRef = useRef<HTMLElement | null>(null);
   const closeButtonRef = useRef<HTMLButtonElement | null>(null);
-  const returnFocusRef = useRef<HTMLElement | null>(null);
   // Taken before any state is committed, and deliberately not released on
   // success: a second click while the request is in flight would confirm the
   // same quote twice.
@@ -133,6 +139,15 @@ export function PlanChangeDialog({
   const [attempt, setAttempt] = useState(0);
 
   const close = useCallback(() => onOpenChange(false), [onOpenChange]);
+
+  useModalDialog({
+    open,
+    onClose: close,
+    dialogRef,
+    panelRef: dialogRef,
+    initialFocusRef: closeButtonRef,
+    returnFocusRef: returnFocusToRef,
+  });
 
   useEffect(() => {
     if (!open) return;
@@ -198,52 +213,6 @@ export function PlanChangeDialog({
       controller.abort();
     };
   }, [attempt, billingInterval, open, targetTier]);
-
-  // Modal semantics: Escape closes, Tab cycles inside, focus returns to the
-  // control that opened it. Same shape as the credit-pack modal, for the same
-  // reason -- without the trap a keyboard visitor tabs into the page behind.
-  useEffect(() => {
-    if (!open) return;
-    returnFocusRef.current = document.activeElement as HTMLElement | null;
-    const focusFrame = requestAnimationFrame(() => {
-      closeButtonRef.current?.focus();
-    });
-
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        event.stopPropagation();
-        close();
-        return;
-      }
-      if (event.key !== "Tab") return;
-      const dialog = dialogRef.current;
-      if (!dialog) return;
-      const focusable = Array.from(
-        dialog.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR)
-      ).filter(
-        (node) => node.offsetParent !== null || node === document.activeElement
-      );
-      if (focusable.length === 0) return;
-      const first = focusable[0];
-      const last = focusable[focusable.length - 1];
-      const active = document.activeElement as HTMLElement | null;
-      if (event.shiftKey && (active === first || !dialog.contains(active))) {
-        event.preventDefault();
-        last.focus();
-      } else if (!event.shiftKey && active === last) {
-        event.preventDefault();
-        first.focus();
-      }
-    };
-
-    document.addEventListener("keydown", handleKeyDown, true);
-    return () => {
-      cancelAnimationFrame(focusFrame);
-      document.removeEventListener("keydown", handleKeyDown, true);
-      const returnTarget = returnFocusRef.current;
-      if (returnTarget?.isConnected) returnTarget.focus();
-    };
-  }, [close, open]);
 
   const confirm = async () => {
     if (!quote || inFlightRef.current) return;
