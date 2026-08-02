@@ -176,6 +176,7 @@ export function ChatSidebar({
     const conversationMenuAnchorRef = useRef<HTMLButtonElement | null>(null);
     const conversationMenuPanelRef = useRef<HTMLDivElement | null>(null);
     const helpMenuRef = useRef<HTMLSpanElement | null>(null);
+    const helpMenuPanelRef = useRef<HTMLSpanElement | null>(null);
     const [showHelpMenu, setShowHelpMenu] = useState(false);
     const [sidebarTourStep, setSidebarTourStep] = useState<number | null>(null);
     const organizerPreference = useSyncExternalStore(
@@ -203,6 +204,10 @@ export function ChatSidebar({
     const { t, lang } = useLanguage();
     const helpCopy = chatHelpCopy[lang];
     const tooltipIdPrefix = useId();
+    // UX-032. Ids so each trigger's `aria-controls` resolves to the popup it
+    // actually opens.
+    const helpMenuId = `${tooltipIdPrefix}-help-popup`;
+    const conversationMenuId = `${tooltipIdPrefix}-conversation-actions`;
     const helpTooltipId = `${tooltipIdPrefix}-help`;
     const accountUsage = useUserUsage(!isGuestMode);
     const canShare =
@@ -298,11 +303,27 @@ export function ChatSidebar({
             }
         };
         const closeOnEscape = (event: KeyboardEvent) => {
-            if (event.key === "Escape") setShowHelpMenu(false);
+            if (event.key !== "Escape") return;
+            setShowHelpMenu(false);
+            // A disclosure that swallows focus on close strands the keyboard
+            // user at the top of the document.
+            helpMenuRef.current
+                ?.querySelector<HTMLElement>('[data-testid="sidebar-help-button"]')
+                ?.focus();
         };
+        // The popup renders after the trigger, but the first control still has
+        // to be reachable without hunting for it.
+        const frame = requestAnimationFrame(() => {
+            helpMenuPanelRef.current
+                ?.querySelector<HTMLElement>(
+                    'a[href], button:not([disabled]), [tabindex]:not([tabindex="-1"])'
+                )
+                ?.focus();
+        });
         document.addEventListener("pointerdown", closeOnOutsideClick);
         document.addEventListener("keydown", closeOnEscape);
         return () => {
+            cancelAnimationFrame(frame);
             document.removeEventListener("pointerdown", closeOnOutsideClick);
             document.removeEventListener("keydown", closeOnEscape);
         };
@@ -701,10 +722,22 @@ export function ChatSidebar({
             closeConversationMenu();
         };
 
+        // UX-032. This panel is portalled to the end of <body>, so before this
+        // the next Tab after opening it went to whatever followed the trigger
+        // in the sidebar -- the menu was on screen beside the row and nowhere
+        // near it in the tab order. Escape already returned focus to the
+        // anchor; this is the other half.
+        const frame = requestAnimationFrame(() => {
+            conversationMenuPanelRef.current
+                ?.querySelector<HTMLElement>('button:not([disabled])')
+                ?.focus();
+        });
+
         document.addEventListener("keydown", closeOnEscape);
         document.addEventListener("scroll", closeOnViewportChange, true);
         window.addEventListener("resize", closeOnViewportChange);
         return () => {
+            cancelAnimationFrame(frame);
             document.removeEventListener("keydown", closeOnEscape);
             document.removeEventListener("scroll", closeOnViewportChange, true);
             window.removeEventListener("resize", closeOnViewportChange);
@@ -810,7 +843,14 @@ export function ChatSidebar({
                         aria-label={t("sidebar.helpAndGuides")}
                         aria-describedby={helpTooltipId}
                         aria-expanded={showHelpMenu}
-                        aria-haspopup="menu"
+                        // UX-032. `aria-haspopup="menu"` promised a menu's
+                        // keyboard model -- arrow keys between items, Tab out,
+                        // one roving stop -- that this popup never implemented,
+                        // and its content (a section heading, an expandable
+                        // build-info panel) is not permitted inside `menu`
+                        // anyway. It is a disclosure, and now says so.
+                        aria-haspopup="true"
+                        aria-controls={showHelpMenu ? helpMenuId : undefined}
                         data-testid="sidebar-help-button"
                         onClick={() => {
                             setShowHelpMenu((current) => !current);
@@ -834,7 +874,10 @@ export function ChatSidebar({
                     ) : null}
                     {showHelpMenu ? (
                         <span
-                            role="menu"
+                            ref={helpMenuPanelRef}
+                            id={helpMenuId}
+                            role="group"
+                            aria-label={t("sidebar.helpAndGuides")}
                             className="absolute right-0 top-full z-[75] mt-2 block w-64 rounded-2xl border border-zinc-200 bg-white p-2 text-left shadow-2xl dark:border-zinc-700 dark:bg-zinc-900"
                         >
                             <span className="block px-3 py-2 text-xs font-bold uppercase tracking-wide text-zinc-500">
@@ -842,7 +885,6 @@ export function ChatSidebar({
                             </span>
                             <button
                                 type="button"
-                                role="menuitem"
                                 data-testid="sidebar-tour-replay"
                                 onClick={startSidebarTour}
                                 className="flex w-full items-center gap-2 rounded-xl px-3 py-2.5 text-sm font-bold text-zinc-700 hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-800"
@@ -855,7 +897,6 @@ export function ChatSidebar({
                                 target="_blank"
                                 rel="noopener noreferrer"
                                 prefetch={false}
-                                role="menuitem"
                                 data-testid="sidebar-help-link"
                                 onClick={() => setShowHelpMenu(false)}
                                 className="flex w-full items-center gap-2 rounded-xl px-3 py-2.5 text-sm font-bold text-zinc-700 hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-800"
@@ -1411,7 +1452,13 @@ export function ChatSidebar({
                                      title={t("chat.moreActions")}
                                      aria-label={`${t("chat.moreActions")}: ${conv.title}`}
                                      aria-expanded={isMenuOpen}
-                                     aria-haspopup="menu"
+                                     // UX-032. Same as the help popup above:
+                                     // no arrow-key model was ever implemented,
+                                     // so claiming `menu` told assistive tech
+                                     // to expect one and left the user pressing
+                                     // keys that do nothing.
+                                     aria-haspopup="true"
+                                     aria-controls={isMenuOpen ? conversationMenuId : undefined}
                                  >
                                      <MoreVertical className="h-4 w-4" />
                                  </button>
@@ -1420,7 +1467,9 @@ export function ChatSidebar({
                                      <div
                                          ref={conversationMenuPanelRef}
                                          data-testid="conversation-menu-panel"
-                                         role="menu"
+                                         id={conversationMenuId}
+                                         role="group"
+                                         aria-label={`${t("chat.moreActions")}: ${conv.title}`}
                                          onClick={(event) => event.stopPropagation()}
                                          className="context-menu-wrapper fixed z-[120] flex flex-col overflow-y-auto overscroll-contain rounded-lg border border-zinc-200 bg-white p-1.5 text-xs text-zinc-700 shadow-2xl animate-fadeIn dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-300"
                                          style={{
