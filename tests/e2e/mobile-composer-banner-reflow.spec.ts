@@ -808,9 +808,7 @@ test.describe("mobile composer reachability under IME, keyboard and safe areas",
         });
         // env() cannot be forced from a test, so the fixture reproduces what the
         // inset buys: 34px of reserved space below the composer's own padding.
-        await page.addStyleTag({
-          content: `[data-testid="chat-ai-disclaimer-mobile"]{padding-bottom:calc(0.4rem + 34px)}`,
-        });
+        await page.addStyleTag({ url: "/qa/mobile-safe-area-200.css" });
         await setRootFont(page, REPRO_ROOT_FONT);
         await page.getByTestId("chat-textarea").fill("세이프 에어리어 확인");
 

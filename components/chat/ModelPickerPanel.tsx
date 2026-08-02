@@ -128,7 +128,7 @@ export type ModelPickerPanelProps = {
    */
   escapeHandlerRef: MutableRefObject<(() => boolean) | null>;
   onToggleModel: (modelId: string) => boolean;
-  onRequestSwap: (model: AiModel) => void;
+  onRequestSwap: (model: AiModel, trigger: HTMLButtonElement) => void;
   onToggleFavorite: (modelId: string) => void;
   onRememberRecentModel: (modelId: string) => void;
   onBackToActions: () => void;
@@ -299,12 +299,16 @@ export function ModelPickerPanel({
     }
   };
 
-  const selectModel = (model: AiModel, rank?: number) => {
+  const selectModel = (
+    model: AiModel,
+    trigger: HTMLButtonElement,
+    rank?: number
+  ) => {
     const isSelected = selectedModelIds.includes(model.id);
     onRememberRecentModel(model.id);
     if (!isSelected && isAtCapacity) {
       onTrackEvent("model_picker_max_reached", { model_id: model.id });
-      onRequestSwap(model);
+      onRequestSwap(model, trigger);
       return;
     }
     if (!isSelected && rank !== undefined) {
@@ -596,7 +600,7 @@ export function ModelPickerPanel({
           isAtCapacity={isAtCapacity}
           limitDescriptionId={limitDescriptionId}
           onToggleFavorite={onToggleFavorite}
-          onSelectModel={(model) => selectModel(model)}
+          onSelectModel={(model, trigger) => selectModel(model, trigger)}
         />
       ) : (
         <div
@@ -652,7 +656,9 @@ export function ModelPickerPanel({
                       ? limitDescriptionId
                       : undefined
                   }
-                  onSelect={(model) => selectModel(model, index + 1)}
+                  onSelect={(model, trigger) =>
+                    selectModel(model, trigger, index + 1)
+                  }
                 />
               ))}
             </section>
@@ -746,7 +752,7 @@ function RecommendationCard({
   creditsLabel: string;
   limitedLabel: string;
   limitDescriptionId?: string;
-  onSelect: (model: AiModel) => void;
+  onSelect: (model: AiModel, trigger: HTMLButtonElement) => void;
 }) {
   if (!model) return null;
 
@@ -760,7 +766,7 @@ function RecommendationCard({
       data-recommendation-source={recommendation.source}
       aria-pressed={recommendation.isSelected}
       aria-describedby={limitDescriptionId}
-      onClick={() => onSelect(model)}
+      onClick={(event) => onSelect(model, event.currentTarget)}
       className={`flex min-h-16 w-full items-start gap-2 rounded-xl border px-3 py-2.5 text-left transition ${
         recommendation.isSelected
           ? "border-blue-300 bg-blue-50/70 dark:border-blue-900/60 dark:bg-blue-950/20"

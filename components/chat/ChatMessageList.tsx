@@ -686,6 +686,19 @@ export function ChatMessageList({
                             {children}
                           </a>
                         ),
+                        // Never put model-controlled image URLs in `src`.
+                        // Retrieved pages and attachments can prompt-inject a
+                        // model into embedding prior chat text in a tracking
+                        // URL; a normal <img> would send it without a click.
+                        img: ({ alt }) => (
+                          <span
+                            className="inline-flex rounded-md border border-zinc-300 bg-zinc-100 px-2 py-1 text-xs text-zinc-600 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-300"
+                            role="note"
+                          >
+                            {t("chat.markdownImageBlocked")}
+                            {alt ? `: ${alt}` : ""}
+                          </span>
+                        ),
                       }}
                     >
                       {displayContent}

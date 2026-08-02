@@ -206,6 +206,7 @@ export function MobileChatShell({
   // for a screen reader to wander into.
   const { isChallengeVisible: isGuestVerificationOpen } = useGuestVerification();
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
+  const drawerDialogRef = useRef<HTMLDivElement | null>(null);
   const drawerPanelRef = useRef<HTMLDivElement | null>(null);
   const drawerCloseButtonRef = useRef<HTMLButtonElement | null>(null);
   const recentDisclosureRef = useRef<HTMLButtonElement | null>(null);
@@ -349,7 +350,14 @@ export function MobileChatShell({
     });
 
     const handleEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape") closeDrawer();
+      if (event.key !== "Escape") return;
+      const eventOwner =
+        event.target instanceof Element
+          ? event.target.closest('[role="dialog"][aria-modal="true"]')
+          : null;
+      if (eventOwner && eventOwner !== drawerDialogRef.current) return;
+      event.preventDefault();
+      closeDrawer();
     };
 
     document.addEventListener("keydown", handleEscape);
@@ -402,6 +410,11 @@ export function MobileChatShell({
 
     const handleDrawerKeyDown = (event: KeyboardEvent) => {
       if (event.key !== "Tab") return;
+      const eventOwner =
+        event.target instanceof Element
+          ? event.target.closest('[role="dialog"][aria-modal="true"]')
+          : null;
+      if (eventOwner && eventOwner !== drawerDialogRef.current) return;
 
       const focusableElements = getDrawerFocusableElements();
       if (focusableElements.length === 0) {
@@ -1133,6 +1146,7 @@ export function MobileChatShell({
 
       {isDrawerOpen && (
         <div
+          ref={drawerDialogRef}
           className="fixed inset-0 z-[80] bg-black/50 backdrop-blur-sm"
           role="dialog"
           aria-modal="true"

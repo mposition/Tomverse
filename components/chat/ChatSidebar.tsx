@@ -219,7 +219,7 @@ export function ChatSidebar({
         "flex w-full items-center justify-between whitespace-nowrap rounded px-3 py-2 text-sm transition-colors";
 
     const menuItemEnabled =
-        "cursor-pointer text-zinc-700 hover:bg-zinc-100 hover:text-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800 dark:hover:text-zinc-100";
+        "cursor-pointer text-zinc-900 hover:bg-zinc-100 hover:text-black dark:text-zinc-200 dark:hover:bg-zinc-800 dark:hover:text-white";
 
     // zinc-600 on zinc-900/50 was 2.29:1 -- a disabled item still has to be
     // readable enough to tell the user which action is unavailable.

@@ -141,6 +141,53 @@ test(
 
 test.describe("nested dismissible surfaces keep their own Escape", () => {
   test(
+    "a destructive account dialog traps focus without closing settings",
+    { tag: "@ui-risk" },
+    async ({ page }) => {
+      await mockAuthenticatedApi(page);
+      await page.goto("/chat?lang=en");
+
+      const accountTrigger = page.getByTestId("account-menu-trigger");
+      if ((page.viewportSize()?.width ?? 0) < 768) {
+        await page.getByRole("button", { name: "Open chat menu" }).click();
+      }
+      await expect(accountTrigger).toBeVisible();
+      await accountTrigger.click();
+      await page
+        .getByTestId("account-menu")
+        .getByTestId("account-settings")
+        .click();
+      const settings = page.getByRole("dialog", { name: "User Settings" });
+      await expect(settings).toBeVisible();
+
+      const deleteTrigger = settings.getByRole("button", { name: "Delete Account" });
+      await deleteTrigger.scrollIntoViewIfNeeded();
+      await deleteTrigger.click();
+      const nested = page.getByTestId("delete-account-dialog");
+      await expect(nested).toBeVisible();
+      await expectFocusEntersDialog(page);
+      expect(await bodyScrollLocked(page)).toBe(true);
+
+      for (let step = 0; step < 12; step += 1) {
+        await page.keyboard.press("Tab");
+        expect(
+          await nested.evaluate((node) => node.contains(document.activeElement))
+        ).toBe(true);
+      }
+
+      await page.keyboard.press("Escape");
+      await expect(nested).toBeHidden();
+      await expect(settings).toBeVisible();
+      await expect(deleteTrigger).toBeFocused();
+      expect(await bodyScrollLocked(page)).toBe(true);
+
+      await page.keyboard.press("Escape");
+      await expect(settings).toBeHidden();
+      await expect(accountTrigger).toBeFocused();
+    }
+  );
+
+  test(
     "Escape inside a popover closes the popover, not the dialog around it",
     { tag: "@ui-risk" },
     async ({ page }) => {

@@ -69,6 +69,16 @@ const copy: Record<Language, { title: string; body: string; notice: string; buy:
   pt: { title: "Comprar créditos adicionais", body: "Créditos avulsos para trabalho extra neste mês.", notice: "Créditos comprados continuam disponíveis após o limite diário do plano. Eles não alteram acesso a modelos, recursos, limites de taxa ou simultaneidade, orçamentos de provedores nem proteções de uso justo.", buy: "Comprar", close: "Fechar", loading: "Carregando…", expiry: "Válido por 12 meses", error: "Não foi possível carregar os pacotes.", selected: "Selecionado" },
 };
 
+const creditUnit: Record<Language, string> = {
+  en: "credits",
+  ko: "크레딧",
+  zh: "积分",
+  fr: "crédits",
+  de: "Credits",
+  es: "créditos",
+  pt: "créditos",
+};
+
 const FOCUSABLE_SELECTOR =
   'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
@@ -554,7 +564,7 @@ export function CreditPackPurchaseButton({
                       </span>
                     ) : null}
                   </div>
-                  <p className="mt-2 min-w-0 break-words text-2xl font-black text-zinc-950 dark:text-white">{pack.credits.toLocaleString(lang)} <span className="text-sm text-zinc-500">credits</span></p>
+                  <p className="mt-2 min-w-0 break-words text-2xl font-black text-zinc-950 dark:text-white">{pack.credits.toLocaleString(lang)} <span className="text-sm text-zinc-500">{creditUnit[lang]}</span></p>
                   <p className="mt-1 text-xs text-zinc-500">{text.expiry}</p>
                   <button
                     type="button"
