@@ -10,6 +10,7 @@ import { logAuthAuditEvent } from "@/lib/securityAudit";
 import { effectivePlanForAccess } from "@/lib/foundingTesterPassCore";
 import { verifyEmailLoginCode, verifyEmailLoginLink } from "@/lib/emailLogin";
 import { appUrl } from "@/lib/accountEmails";
+import { sessionCookiesAreSecure } from "@/lib/sessionCookiePolicy";
 
 // next-auth v4's CredentialsProvider only exposes authorize()'s second
 // argument as a RequestInternal (plain headers object, not a Headers
@@ -61,7 +62,11 @@ export const authOptions: NextAuthOptions = {
     // that nothing validated. `getSecurityEnvironmentStatus` now checks that
     // URL as well, so a production deploy that gets it wrong fails /api/ready
     // rather than shipping a downgradeable cookie.
-    useSecureCookies: process.env.NODE_ENV === "production",
+    // The rule itself lives in lib/sessionCookiePolicy.ts, because the admin
+    // E2E harness has to mint a cookie under the name this produces and cannot
+    // import a server-only module to find out what that is. Stating it in two
+    // places is what broke that harness the first time.
+    useSecureCookies: sessionCookiesAreSecure(process.env.NODE_ENV),
     adapter: encryptedTokenAdapter,
     providers: [
         GoogleProvider({

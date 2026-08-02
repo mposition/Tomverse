@@ -7,13 +7,30 @@ import {
   type AdminE2EIdentity,
   type AdminE2EIdentityKey,
 } from "./harness-config";
+import {
+  ALL_SESSION_COOKIE_NAMES,
+  sessionCookieName,
+  sessionCookiesAreSecure,
+} from "@/lib/sessionCookiePolicy";
 
 /**
- * NextAuth v4 names the session cookie `__Secure-next-auth.session-token` only
- * when `NEXTAUTH_URL` is https. The harness server is plain http on loopback,
- * so it is the unprefixed name.
+ * The name NextAuth will look for in *this* harness.
+ *
+ * The previous comment here said the prefixed name appears "only when
+ * NEXTAUTH_URL is https", and minted the unprefixed one because the harness
+ * serves plain http on loopback. That was true while `lib/auth.ts` let NextAuth
+ * infer the flag from the URL. SEC-010 states it from the environment instead,
+ * and this harness starts the app with `next start` (see
+ * `playwright.admin.config.ts`), which sets `NODE_ENV=production` -- so the
+ * server is on the secure-cookie branch and was ignoring every session this
+ * file seeded.
+ *
+ * Derived rather than hard-coded, and derived through the same module the
+ * server uses, so the two cannot drift apart again.
  */
-export const SESSION_COOKIE_NAME = "next-auth.session-token";
+export const SESSION_COOKIE_NAME = sessionCookieName(
+  sessionCookiesAreSecure("production")
+);
 
 const SESSION_MAX_AGE_SECONDS = 7 * 24 * 60 * 60;
 
@@ -71,13 +88,26 @@ export const signIn = async (
 ) => {
   const user = ADMIN_E2E_IDENTITIES[key];
   const token = await mintSessionToken(user, options);
-  await context.clearCookies({ name: SESSION_COOKIE_NAME });
+  // Both spellings, so a context seeded before this change cannot leave the
+  // other name behind for NextAuth to find.
+  for (const name of ALL_SESSION_COOKIE_NAMES) {
+    await context.clearCookies({ name });
+  }
+  // `domain` + `path` rather than `url`. CDP rejects a Secure cookie whose
+  // `url` is http outright ("Invalid cookie fields"), while Chromium is happy
+  // to store and send one scoped to a loopback host -- 127.0.0.1 is a
+  // trustworthy origin, which is the whole reason the harness can serve plain
+  // http and still exercise the production cookie name.
+  const harnessOrigin = new URL(ADMIN_E2E_BASE_URL);
   await context.addCookies([
     {
       name: SESSION_COOKIE_NAME,
       value: token,
-      url: ADMIN_E2E_BASE_URL,
+      domain: harnessOrigin.hostname,
+      path: "/",
       httpOnly: true,
+      // The `__Secure-` prefix is only honoured on a Secure cookie.
+      secure: true,
       sameSite: "Lax",
     },
   ]);
@@ -86,5 +116,7 @@ export const signIn = async (
 
 /** Drops the session cookie, leaving the context signed out. */
 export const signOut = async (context: BrowserContext) => {
-  await context.clearCookies({ name: SESSION_COOKIE_NAME });
+  for (const name of ALL_SESSION_COOKIE_NAMES) {
+    await context.clearCookies({ name });
+  }
 };

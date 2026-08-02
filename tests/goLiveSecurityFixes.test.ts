@@ -705,8 +705,24 @@ test("the session cookie is marked Secure from the environment, not from a URL",
   const source = readRepoCode("lib/auth.ts");
   assert.match(
     source,
-    /useSecureCookies:\s*process\.env\.NODE_ENV\s*===\s*"production"/,
+    /useSecureCookies:\s*sessionCookiesAreSecure\(process\.env\.NODE_ENV\)/,
     "authOptions must state useSecureCookies rather than letting next-auth infer it"
+  );
+  // The rule has to stay in one place. It was stated here and assumed again in
+  // the admin E2E harness, and the two disagreed the moment this changed: the
+  // harness minted the unprefixed cookie name while the production build read
+  // the `__Secure-` one, so every seeded admin session was ignored.
+  const policy = readRepoCode("lib/sessionCookiePolicy.ts");
+  assert.match(policy, /nodeEnv === "production"/);
+  assert.ok(
+    !policy.includes('import "server-only"'),
+    "the harness runs in its own process and must be able to import this"
+  );
+  const harness = readRepoCode("tests/e2e-admin/support/session.ts");
+  assert.match(harness, /sessionCookieName\(/);
+  assert.ok(
+    !/SESSION_COOKIE_NAME = "/.test(harness),
+    "the harness must derive the cookie name, not restate it"
   );
 });
 
