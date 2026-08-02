@@ -128,17 +128,41 @@ Ancestry verified:  ____________________
 
 ### When it does not land on its own
 
-The workflow refuses to guess. On a merge conflict, or when the push to
-`develop` is refused by branch protection, it opens
-`automation/back-merge-main-<sha>` as a pull request instead and `verify` fails.
-That failure is the signal that a person has to finish the job:
+The workflow refuses to guess, and it fails in two different ways depending on
+*why* it could not land. `verify` fails on both, so neither is silent — but only
+one of them leaves you a pull request.
 
-- [ ] If such a pull request exists, it was merged **with a merge commit**
+**The push to `develop` was refused** (branch protection, typically). The merge
+itself succeeded, so there is nothing to judge: the workflow pushes
+`automation/back-merge-main-<sha>` and opens a pull request carrying the merge
+commit it already made.
+
+- [ ] If `automation/back-merge-main-<sha>` exists, its pull request was merged
+      **with a merge commit** — never squash, never rebase
 
 Squashing it accomplishes nothing at all — the second parent is what carries the
 ancestry, and a squash discards it. That is not hypothetical: of the three
 back-merges opened by hand on 2026-08-01, #203 and #213 were squashed on the way
 in and left the gap exactly where it was.
+
+**The merge conflicted.** The workflow aborts and fails the job. **It does not
+open a pull request, and it pushes no branch** — a machine cannot know which
+side to keep (the `eslint.config.mjs` conflict in #217 was `develop` adding an
+ignore entry `main` lacked), and a pull request full of a guess is worse than
+none. There is nothing to review; there is work to do:
+
+- [ ] Branch from `origin/develop`, merge `origin/main`, resolve the conflict,
+      open a pull request and merge it **with a merge commit**
+
+```
+git fetch origin
+git switch -c back-merge-main-$(git rev-parse --short origin/main) origin/develop
+git merge --no-ff origin/main      # resolve, then commit
+```
+
+Do not resolve by taking one side wholesale, and do not `--strategy=ours`: the
+conflict exists because both branches changed the same lines, and discarding
+`develop`'s side silently reverts released work.
 
 ### Why this exists, and why the repository setting is not the fix
 
