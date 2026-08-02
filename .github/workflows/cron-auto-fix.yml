@@ -54,9 +54,6 @@ jobs:
       matrix:
         run: ${{ fromJson(needs.discover.outputs.runs) }}
     env:
-      GH_TOKEN: ${{ secrets.GH_AUTOMATION_PAT }}
-      AUTO_FIX_SYNC_SECRET: ${{ secrets.AUTO_FIX_SYNC_SECRET }}
-      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
       RUN_ID: ${{ matrix.run.id }}
       JOB_KEY: ${{ matrix.run.jobKey }}
       RUN_ERROR: ${{ matrix.run.error }}
@@ -64,10 +61,11 @@ jobs:
       NEXT_PUBLIC_TURNSTILE_SITE_KEY: tomverse-playwright-turnstile-site-key
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           fetch-depth: 0
           token: ${{ secrets.GH_AUTOMATION_PAT }}
+          persist-credentials: false
 
       - name: Configure git identity
         run: |
@@ -91,7 +89,7 @@ jobs:
           esac
 
       - name: Setup Node.js
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: 22
           cache: npm
@@ -100,7 +98,18 @@ jobs:
         run: npm ci
 
       - name: Install Claude Code CLI
-        run: npm install -g @anthropic-ai/claude-code
+        env:
+          CLAUDE_CODE_VERSION: "2.1.220"
+          CLAUDE_CODE_INTEGRITY: "sha512-ogBrvwkqF9f8okmnXKxmRNHuvtFxFEffe5pWdqOV3iQDxlUOKirFqnyWC7NGXXnDA4WkkbPH8pvSbwyCR2Auyw=="
+        run: |
+          package=$(npm pack --json "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}" | jq -r '.[0].filename')
+          actual="sha512-$(openssl dgst -sha512 -binary "$package" | openssl base64 -A)"
+          if [ "$actual" != "$CLAUDE_CODE_INTEGRITY" ]; then
+            echo "Claude Code package integrity mismatch."
+            exit 1
+          fi
+          npm install -g "./$package"
+          rm -f "$package"
 
       - name: Write incident context
         env:
@@ -110,6 +119,8 @@ jobs:
 
       - name: Run Claude Code to analyze and fix
         id: claude
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         run: |
           ALLOWED_PATHS="${{ steps.scope.outputs.paths }}"
           claude -p "A scheduled job failed in the Tomverse repo. Job key: ${JOB_KEY}. Run id: ${RUN_ID}. Failure details (raw JSON) are in /tmp/incident.txt.
@@ -147,6 +158,8 @@ jobs:
 
       - name: Report no action needed
         if: steps.diff-check.outputs.has_diff != 'true'
+        env:
+          AUTO_FIX_SYNC_SECRET: ${{ secrets.AUTO_FIX_SYNC_SECRET }}
         run: |
           curl -sS -f -X POST \
             -H "Authorization: Bearer ${AUTO_FIX_SYNC_SECRET}" \
@@ -156,6 +169,8 @@ jobs:
 
       - name: Discard out-of-scope changes and report needs_human
         if: steps.diff-check.outputs.has_diff == 'true' && steps.diff-check.outputs.out_of_scope == 'true'
+        env:
+          AUTO_FIX_SYNC_SECRET: ${{ secrets.AUTO_FIX_SYNC_SECRET }}
         run: |
           git checkout -- .
           git clean -fd
@@ -199,6 +214,8 @@ jobs:
           steps.diff-check.outputs.has_diff == 'true' &&
           steps.diff-check.outputs.out_of_scope != 'true' &&
           (failure() && (steps.gate-security.outcome == 'failure' || steps.gate-unit.outcome == 'failure' || steps.gate-encoding.outcome == 'failure' || steps.gate-build.outcome == 'failure' || steps.gate-e2e.outcome == 'failure'))
+        env:
+          AUTO_FIX_SYNC_SECRET: ${{ secrets.AUTO_FIX_SYNC_SECRET }}
         run: |
           git checkout -- .
           git clean -fd
@@ -217,7 +234,11 @@ jobs:
           steps.gate-encoding.outcome == 'success' &&
           steps.gate-build.outcome == 'success' &&
           steps.gate-e2e.outcome == 'success'
+        env:
+          GH_TOKEN: ${{ secrets.GH_AUTOMATION_PAT }}
+          AUTO_FIX_SYNC_SECRET: ${{ secrets.AUTO_FIX_SYNC_SECRET }}
         run: |
+          gh auth setup-git
           branch="autofix/${JOB_KEY}-${RUN_ID}"
           git checkout -b "$branch"
           git add -A -- ${{ steps.scope.outputs.paths }}

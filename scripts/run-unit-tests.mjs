@@ -31,6 +31,12 @@ const result = spawnSync(
     "--import",
     "tsx",
     "--test",
+    // PDF worker tests spawn their own parser process. On high-core Windows
+    // hosts, running every test file concurrently intermittently terminates
+    // that file before it can report an assertion. Serial file execution keeps
+    // the mandatory gate deterministic; individual tests inside each file are
+    // still free to exercise their own concurrency.
+    "--test-concurrency=1",
     "--test-reporter=spec",
     "--test-reporter-destination=stdout",
     ...tests,

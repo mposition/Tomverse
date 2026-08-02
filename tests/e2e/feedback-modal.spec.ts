@@ -6,7 +6,14 @@ import {
   prepareGuestPage,
   type QaLanguage,
 } from "./support/app-fixtures";
-import { restoreActiveConversation } from "./support/chat-state-fixtures";
+import {
+  restoreActiveConversation,
+  setRootFontSize,
+} from "./support/chat-state-fixtures";
+import {
+  expectInsideVisibleViewport,
+  openOnScreenKeyboard,
+} from "./support/ui-audit";
 
 /**
  * Credential-shaped fixtures are assembled at runtime, never written out as
@@ -857,7 +864,7 @@ test.describe("dialog semantics", () => {
 
   test("nothing is clipped at 200% text scaling", async ({ page }) => {
     await gotoAuthenticatedChat(page);
-    await page.addStyleTag({ content: "html { font-size: 32px !important; }" });
+    await setRootFontSize(page, 32);
     const dialog = await openFeedbackFromSidebar(page);
 
     // The dialog scrolls rather than cutting its own controls off.
@@ -925,6 +932,19 @@ test.describe("mobile", () => {
         document.documentElement.clientWidth + 1
     );
     expect(overflows).toBe(false);
+  });
+
+  test("the focused form and submit action clear the on-screen keyboard @ui-risk", async ({ page }) => {
+    await gotoAuthenticatedChat(page);
+    const dialog = await openMobileFeedback(page);
+    await expect(page.getByTestId("feedback-message")).toBeFocused();
+
+    await openOnScreenKeyboard(page, 300);
+    await expectInsideVisibleViewport(page, dialog, "feedback dialog");
+
+    const submit = page.getByTestId("feedback-submit");
+    await submit.scrollIntoViewIfNeeded();
+    await expectInsideVisibleViewport(page, submit, "feedback submit");
   });
 
   test("a guest challenge is reachable on a phone", async ({ page }) => {

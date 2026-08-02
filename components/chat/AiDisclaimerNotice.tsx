@@ -1,8 +1,9 @@
 "use client";
 
-import { useCallback, useEffect, useId, useRef, useState } from "react";
+import { useCallback, useId, useRef, useState } from "react";
 import { X } from "lucide-react";
 import { useLanguage } from "@/components/LanguageProvider";
+import { useModalDialog } from "@/components/useModalDialog";
 
 /**
  * The AI-accuracy and sensitive-data warning, as one line plus a way to read
@@ -27,29 +28,21 @@ export function AiDisclaimerNotice({ testId }: { testId?: string }) {
   const { t } = useLanguage();
   const [isOpen, setIsOpen] = useState(false);
   const dialogId = useId();
+  const dialogRef = useRef<HTMLDivElement | null>(null);
+  const panelRef = useRef<HTMLDivElement | null>(null);
   const closeButtonRef = useRef<HTMLButtonElement | null>(null);
-  const triggerRef = useRef<HTMLButtonElement | null>(null);
 
   const close = useCallback(() => {
     setIsOpen(false);
-    // Whatever opened the sheet gets focus back, so a keyboard user is not
-    // returned to the top of the document -- on Escape as well as on a tap.
-    requestAnimationFrame(() => triggerRef.current?.focus());
   }, []);
 
-  useEffect(() => {
-    if (!isOpen) return;
-
-    const focusFrame = requestAnimationFrame(() => closeButtonRef.current?.focus());
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") close();
-    };
-    document.addEventListener("keydown", handleKeyDown);
-    return () => {
-      cancelAnimationFrame(focusFrame);
-      document.removeEventListener("keydown", handleKeyDown);
-    };
-  }, [close, isOpen]);
+  useModalDialog({
+    open: isOpen,
+    onClose: close,
+    dialogRef,
+    panelRef,
+    initialFocusRef: closeButtonRef,
+  });
 
   return (
     <>
@@ -59,7 +52,6 @@ export function AiDisclaimerNotice({ testId }: { testId?: string }) {
       >
         <span className="min-w-0 truncate">{t("chat.aiDisclaimerShort")}</span>
         <button
-          ref={triggerRef}
           type="button"
           data-testid="chat-ai-disclaimer-details"
           onClick={() => setIsOpen(true)}
@@ -77,7 +69,8 @@ export function AiDisclaimerNotice({ testId }: { testId?: string }) {
 
       {isOpen && (
         <div
-          className="fixed inset-0 z-[95] flex items-end bg-black/40 backdrop-blur-sm"
+          ref={dialogRef}
+          className="fixed inset-0 z-[130] flex items-end bg-black/40 backdrop-blur-sm"
           role="dialog"
           aria-modal="true"
           aria-label={t("chat.aiDisclaimerTitle")}
@@ -90,6 +83,7 @@ export function AiDisclaimerNotice({ testId }: { testId?: string }) {
             aria-label={t("auth.cancel")}
           />
           <div
+            ref={panelRef}
             data-testid="chat-ai-disclaimer-sheet"
             className="relative z-10 max-h-[calc(100dvh-1rem)] w-full overflow-y-auto overscroll-contain rounded-t-3xl border-t border-zinc-200 bg-white p-4 pb-[calc(1rem+env(safe-area-inset-bottom))] text-left shadow-2xl dark:border-zinc-800 dark:bg-zinc-950"
           >

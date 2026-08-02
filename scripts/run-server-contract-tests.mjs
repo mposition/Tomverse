@@ -8,6 +8,10 @@
 //   * module mocks are process-global, so running them beside the unit suite
 //     would let a mock installed by one file leak into another.
 //
+// Run files serially because several suites load route handlers while parsing
+// PDFs or images. Unbounded worker concurrency makes those tests resource-
+// sensitive on high-core CI hosts without adding any coverage.
+//
 // Each file drives a real route handler and asserts what it did *not* do --
 // principally that a rejected chat request never reaches a provider and never
 // reserves credits.
@@ -34,6 +38,7 @@ const result = spawnSync(
     "--import",
     "tsx",
     "--test",
+    "--test-concurrency=1",
     ...tests,
   ],
   { stdio: "inherit", env: process.env }

@@ -96,7 +96,7 @@ test("sent message renders without leaving the active model", async ({ page }) =
   // screen is identified by the selected tab rather than by the header. An
   // empty conversation has no tab strip yet, hence the count check first.
   const selectedTabLocator = page.locator(
-    '[role="tab"][aria-selected="true"] [data-testid="mobile-model-tab"]'
+    '[data-testid="mobile-model-tab"][aria-selected="true"]'
   );
   const activeModelName =
     (await selectedTabLocator.count()) === 1
@@ -116,7 +116,7 @@ test("sent message renders without leaving the active model", async ({ page }) =
   // that is expected. What must not change is which panel the send left on
   // screen.
   const selectedTab = page.locator(
-    '[role="tab"][aria-selected="true"] [data-testid="mobile-model-tab"]'
+    '[data-testid="mobile-model-tab"][aria-selected="true"]'
   );
   await expect(selectedTab).toHaveCount(1);
   if (activeModelName) {
@@ -144,20 +144,21 @@ test("input remains reachable at virtual-keyboard height", async ({ page }) => {
 test("model tab changes the visible chat panel", async ({ page }) => {
   const tabs = page.getByTestId("mobile-model-tab");
   await expect(tabs).toHaveCount(2);
-  // aria-selected lives on the role="tab" wrapper, not on the button inside it
-  // (the wrapper also holds the per-tab remove control) -- same convention
-  // mobile-header-model-summary.spec.ts documents.
-  await expect(page.locator('[role="tab"][aria-selected="true"]')).toHaveCount(1);
+  // The focusable model button owns both role="tab" and aria-selected. The
+  // adjacent remove button is deliberately outside the tab widget.
+  await expect(
+    page.locator('[data-testid="mobile-model-tab"][aria-selected="true"]')
+  ).toHaveCount(1);
 
   const targetModelId = await page
-    .locator('[role="tab"][aria-selected="false"] [data-testid="mobile-model-tab"]')
+    .locator('[data-testid="mobile-model-tab"][aria-selected="false"]')
     .first()
     .getAttribute("data-model-id");
   expect(targetModelId).toBeTruthy();
   const targetTab = page.locator(
-    `[role="tab"]:has([data-testid="mobile-model-tab"][data-model-id="${targetModelId}"])`
+    `[data-testid="mobile-model-tab"][data-model-id="${targetModelId}"]`
   );
-  await targetTab.getByTestId("mobile-model-tab").click();
+  await targetTab.click();
   await expect(targetTab).toHaveAttribute("aria-selected", "true");
   // The point of a tab is which panel it puts on screen: the visible answer
   // must be the one seeded for the model just selected, not the other panel's.
@@ -172,9 +173,8 @@ test("model tab changes the visible chat panel", async ({ page }) => {
 test("horizontal swipe changes the active model tab", async ({ page }) => {
   const tabs = page.getByTestId("mobile-model-tab");
   await expect(tabs).toHaveCount(2);
-  const tabWrappers = page.locator('[role="tab"]:has([data-testid="mobile-model-tab"])');
   await tabs.nth(0).click();
-  await expect(tabWrappers.nth(0)).toHaveAttribute("aria-selected", "true");
+  await expect(tabs.nth(0)).toHaveAttribute("aria-selected", "true");
 
   const chatArea = page.getByTestId("mobile-chat-shell").locator("section").first();
   await chatArea.dispatchEvent("touchstart", {
@@ -202,7 +202,7 @@ test("horizontal swipe changes the active model tab", async ({ page }) => {
     ],
   });
 
-  await expect(tabWrappers.nth(1)).toHaveAttribute("aria-selected", "true");
+  await expect(tabs.nth(1)).toHaveAttribute("aria-selected", "true");
   await expect(
     visibleMessages(page, "assistant").filter({
       hasText: `Seeded answer from ${TWO_MODELS[1]}`,

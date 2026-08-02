@@ -50,6 +50,12 @@ test.describe("conversation context menu", () => {
       expect(panelIsLight).toBe(true);
 
       // And the label on it still has to be readable.
+      // Sample the settled state rather than an engine-dependent frame inside
+      // the 120ms opacity entrance, which composites both colours with the
+      // page underneath and is not the state a user reads.
+      await panel.evaluate((element) =>
+        Promise.all(element.getAnimations().map((animation) => animation.finished))
+      );
       const item = panel.getByRole("button").first();
       const sample = await measureContrast(item, "context menu item");
       expect(sample.passes, formatContrastSample("context menu item", sample)).toBe(

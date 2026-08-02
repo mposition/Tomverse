@@ -1,6 +1,7 @@
 import "server-only";
 
 import Stripe from "stripe";
+export { stripeKeyLiveMode } from "@/lib/stripeMode";
 
 let stripeClient: Stripe | null = null;
 
