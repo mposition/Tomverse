@@ -13,7 +13,16 @@
 //
 // Usage:
 //   node --import tsx scripts/run-default-model-reconciliation.mjs
-//   node --import tsx scripts/run-default-model-reconciliation.mjs --apply
+//   node --import tsx scripts/run-default-model-reconciliation.mjs \
+//     --apply --approved-retirement --ticket="<url>" --actor="<name>" \
+//     --from=gpt-5-4-mini --to=gpt-5-6-luna
+//
+// A dry run needs nothing: reporting what would change is the safe half and
+// stays one command away. A write needs the whole line above, because
+// --apply on its own cannot tell "the retirement is shipping in this deploy"
+// from "somebody copied a command", and the difference is whether these rows
+// are stale pointers or live user choices. It also refuses to run inside CI
+// or an npm build/start/deploy/migrate lifecycle step at all.
 //
 // Requires DATABASE_URL. Reads and writes only:
 //   * AppSetting["guestDefaultModelId"]  (only when it names the old id)
@@ -34,6 +43,10 @@ import {
   rewriteDefaultModel,
   rewriteSelectedModels,
 } from "../lib/defaultModelReconciliationCore.ts";
+import {
+  findReconciliationApprovalProblems,
+  readReconciliationEnvironment,
+} from "../lib/reconciliationApprovalCore.ts";
 
 const FROM_MODEL_ID = "gpt-5-4-mini";
 const TO_MODEL_ID = "gpt-5-6-luna";
@@ -42,6 +55,37 @@ const CONVERSATION_PAGE_SIZE = 500;
 
 const apply = process.argv.includes("--apply");
 const mode = apply ? "APPLY" : "DRY RUN";
+
+const argValue = (name) => {
+  const match = process.argv.find((arg) => arg.startsWith(`--${name}=`));
+  return match ? match.slice(name.length + 3).trim() || null : null;
+};
+
+const approval = {
+  apply,
+  approvedRetirement: process.argv.includes("--approved-retirement"),
+  ticket: argValue("ticket"),
+  actor: argValue("actor"),
+  fromModelId: argValue("from"),
+  toModelId: argValue("to"),
+  environment: readReconciliationEnvironment(process.env),
+};
+
+const approvalProblems = findReconciliationApprovalProblems(approval, {
+  fromModelId: FROM_MODEL_ID,
+  toModelId: TO_MODEL_ID,
+});
+if (approvalProblems.length > 0) {
+  console.error(
+    `\nRefusing to write. ${approvalProblems.length} requirement(s) not met:\n` +
+      approvalProblems
+        .map((problem) => `  - [${problem.code}] ${problem.message}`)
+        .join("\n") +
+      "\n\nRun without --apply to see what would change. See section 7 of\n" +
+      "docs/policy/default-model-luna-migration.md before writing anything."
+  );
+  process.exit(1);
+}
 
 if (!process.env.DATABASE_URL?.trim()) {
   console.error("DATABASE_URL is required.");
@@ -52,7 +96,8 @@ const malformedConversations = [];
 const warnings = [];
 
 console.log(
-  `Default model reconciliation (${mode}): ${FROM_MODEL_ID} -> ${TO_MODEL_ID}`
+  `Default model reconciliation (${mode}): ${FROM_MODEL_ID} -> ${TO_MODEL_ID}` +
+    (apply ? `\n  approved by ${approval.actor} under ${approval.ticket}` : "")
 );
 
 try {

@@ -33,8 +33,16 @@
 //   ... --repeats=5          how many times to run each scenario per arm
 //   ... --arms=baseline,medium
 //   ... --json=report.json   write the raw per-run records for archiving
+//   ... --max-cost-usd=2.50  stop once this much provider cost has accrued
+//   ... --preflight=<path>   the preflight artefact this main run follows
+//   ... --preflight-override="<reason>"   run without one, on the record
 //
 // Requires OPENAI_API_KEY.
+//
+// This script decides nothing. It never retires a model, never edits the
+// catalogue, never writes to a database and never sets a flag anything else
+// reads. Its only outputs are console text and, with --json, the artefacts a
+// human cites in a decision.
 
 import { execFileSync } from "node:child_process";
 import { generateText, tool } from "ai";
@@ -42,6 +50,10 @@ import { z } from "zod";
 import { getActiveAiModel } from "../lib/activeAiModel.ts";
 import { getModel } from "../lib/models.ts";
 import { resolveModelPricing } from "../lib/modelPricing.ts";
+import {
+  classifyArmOutcome,
+  evaluatePreflightArtifact,
+} from "../lib/defaultModelEvalGateCore.ts";
 
 const BASELINE_MODEL_ID = "gpt-5-4-mini";
 const CANDIDATE_MODEL_ID = "gpt-5-6-luna";
@@ -53,6 +65,30 @@ const argValue = (name, fallback) => {
 
 const repeats = Math.max(1, Number(argValue("repeats", "3")) || 3);
 const jsonPath = argValue("json", "");
+
+// A ceiling on what this run may spend at the provider, in USD. Off by
+// default, because a smoke run costs fractions of a cent and a hard stop that
+// nobody asked for would truncate a decision-grade run into an unusable one.
+// When set, the run stops the moment the accrued cost crosses it and says so
+// in the summary and the manifest -- a truncated run is reported as truncated
+// rather than quietly presented as if the missing calls had not been planned.
+const rawMaxCost = argValue("max-cost-usd", "");
+const maxCostUsd = rawMaxCost === "" ? null : Number(rawMaxCost);
+if (maxCostUsd !== null && !(Number.isFinite(maxCostUsd) && maxCostUsd > 0)) {
+  console.error(`--max-cost-usd must be a positive number (got "${rawMaxCost}").`);
+  process.exit(1);
+}
+
+// The preflight artefact this run follows on from. Section 4.5.1 of the
+// policy makes a --repeats=2 preflight a precondition for the main run, not a
+// suggestion: it is what establishes that all four arms really reached their
+// own model, that reasoning settings arrived as intended, and that the usage
+// fields are populated. A thousand-call run that discovers any of that
+// afterwards has spent the money and produced nothing citable.
+const preflightPath = argValue("preflight", "");
+const preflightOverride = argValue("preflight-override", "");
+/** The repeat count above which a run is treated as the main run, not a probe. */
+const PREFLIGHT_REQUIRED_ABOVE_REPEATS = 5;
 
 // The baseline arm is sent with no reasoning_effort at all, which is exactly
 // how the product calls gpt-5-4-mini today: lib/modelGenerationCompatibility
@@ -414,11 +450,68 @@ const runOnce = async (arm, scenario) => {
   };
 };
 
+/** Reads a preflight artefact and applies evaluatePreflightArtifact to it. */
+const readPreflightVerdict = async (path) => {
+  try {
+    const { readFile } = await import("node:fs/promises");
+    return evaluatePreflightArtifact(JSON.parse(await readFile(path, "utf8")));
+  } catch (error) {
+    return {
+      ok: false,
+      reason: `could not be read: ${String(error?.message || error)}`,
+    };
+  }
+};
+
 const main = async () => {
   if (!process.env.OPENAI_API_KEY?.trim()) {
     console.error("OPENAI_API_KEY is required to run the default-model eval.");
     process.exitCode = 1;
     return;
+  }
+
+  // The preflight gate, before a single request is sent.
+  let preflight = { required: repeats > PREFLIGHT_REQUIRED_ABOVE_REPEATS };
+  if (preflight.required) {
+    if (preflightPath) {
+      const verdict = await readPreflightVerdict(preflightPath);
+      if (!verdict.ok) {
+        console.error(
+          `\nThe preflight artefact ${preflightPath} ${verdict.reason}.\n\n` +
+            "A main run is not allowed to follow a preflight that did not establish\n" +
+            "anything. Fix what the preflight found, re-run\n" +
+            "  npm run eval:default-model -- --repeats=2 --json=artifacts/default-model-eval-preflight.json\n" +
+            "and point --preflight at the new artefact."
+        );
+        process.exitCode = 1;
+        return;
+      }
+      preflight = { ...preflight, ...verdict, path: preflightPath, passed: true };
+      console.log(
+        `Preflight: ${preflightPath} (commit ${verdict.commitSha ?? "unknown"}, repeats ${verdict.repeats ?? "?"}) -- all arms answered.`
+      );
+    } else if (preflightOverride) {
+      // Allowed, but never silent: the reason is printed and lands in the
+      // manifest, so a reviewer sees that this run skipped the gate and why.
+      preflight = { ...preflight, passed: false, override: preflightOverride };
+      console.warn(
+        `\nPREFLIGHT SKIPPED on the record: "${preflightOverride}".\n` +
+          "This run is not covered by section 4.5.1's preflight step, and the\n" +
+          "override text is stored in the manifest."
+      );
+    } else {
+      console.error(
+        `\n--repeats=${repeats} is a main run, and section 4.5.1 requires a --repeats=2 preflight first.\n\n` +
+          "  npm run eval:default-model -- --repeats=2 --json=artifacts/default-model-eval-preflight.json\n" +
+          "  npm run eval:default-model -- --repeats=25 --preflight=artifacts/default-model-eval-preflight.json --json=artifacts/default-model-eval-<timestamp>.json\n\n" +
+          "The preflight is what establishes that all four arms reach their own model with\n" +
+          "their own reasoning settings and that usage fields come back populated. Discovering\n" +
+          "otherwise after 1,200 billed calls costs the money and produces nothing citable.\n" +
+          'Pass --preflight-override="<reason>" to proceed anyway, on the record.'
+      );
+      process.exitCode = 1;
+      return;
+    }
   }
 
   const requestedArms = argValue("arms", "");
@@ -452,13 +545,33 @@ const main = async () => {
   // for each repeat, so a provider-side wobble hits them together instead of
   // biasing one. It does not remove the need for an independent re-run, but it
   // stops the ordering itself from being the explanation.
+  let spentMicroUsd = 0;
+  let costCeilingStoppedAt = null;
+
   for (const scenario of scenarios) {
+    if (costCeilingStoppedAt) break;
     const perArmPasses = new Map(arms.map((arm) => [arm.name, 0]));
     for (let repeat = 0; repeat < repeats; repeat += 1) {
+      if (costCeilingStoppedAt) break;
       for (const arm of arms) {
+        // Checked between calls rather than predicted before them: the cost of
+        // a call is only known once its usage comes back, so the ceiling is an
+        // "stop now" line rather than an "and this one would fit" one. It is
+        // checked at the top of an arm loop so a repeat is never left with
+        // some arms run and others not -- a partially-run repeat would bias
+        // exactly the comparison the round-robin exists to protect.
+        if (maxCostUsd !== null && spentMicroUsd / 1e6 >= maxCostUsd) {
+          costCeilingStoppedAt = {
+            scenarioId: scenario.id,
+            repeat,
+            spentUsd: spentMicroUsd / 1e6,
+          };
+          break;
+        }
         const attemptedAt = new Date().toISOString();
         try {
           const run = await runOnce(arm, scenario);
+          spentMicroUsd += run.costMicroUsd;
           records.push({
             arm: arm.name,
             modelId: arm.modelId,
@@ -502,11 +615,25 @@ const main = async () => {
     const latencies = runs.map((run) => run.latencyMs);
     const passedCount = runs.filter((run) => run.passed).length;
     const emptyCount = runs.filter((run) => run.empty).length;
+    const providerErrorRate = attempted === 0 ? 0 : errors.length / attempted;
+    // An arm where every request failed produced no answers, so it produced
+    // no evidence about answer quality either. Reporting that as a 0% success
+    // rate would read as the model failing every scenario, when what happened
+    // is that it was never asked -- the difference between "this model is bad"
+    // and "this environment cannot reach this model". This repository has
+    // already seen the second: the egress proxy blocks api.openai.com, and the
+    // harness reports a 100% provider error rate there.
+    //
+    // `inconclusive` arms are excluded from the quality verdict entirely
+    // rather than being scored badly.
+    const outcome = classifyArmOutcome({ attempted, providerErrorRate });
     const summary = {
       arm: arm.name,
       modelId: arm.modelId,
       reasoningEffort: arm.reasoningEffort,
       attempted,
+      outcome,
+      qualityJudgeable: outcome === "measured",
       decisionGrade: attempted >= DECISION_MIN_RUNS_PER_ARM,
       successRate: attempted === 0 ? 0 : passedCount / attempted,
       // The bound each rule is actually judged on, so a verdict never rests on
@@ -514,7 +641,7 @@ const main = async () => {
       successRateLower95: wilsonInterval(passedCount, attempted).lower,
       providerErrorRateUpper95: wilsonInterval(errors.length, attempted).upper,
       emptyResponseRateUpper95: wilsonInterval(emptyCount, attempted).upper,
-      providerErrorRate: attempted === 0 ? 0 : errors.length / attempted,
+      providerErrorRate,
       emptyResponseRate: attempted === 0 ? 0 : emptyCount / attempted,
       // Separated so a run that hit a rate limit is not read as a run where
       // the model failed. Transient errors still count against the error rate
@@ -537,6 +664,7 @@ const main = async () => {
   console.table(
     summaries.map((summary) => ({
       arm: summary.arm,
+      outcome: summary.outcome,
       runs: summary.attempted,
       pass: `${(summary.successRate * 100).toFixed(1)}%`,
       "pass>=": `${(summary.successRateLower95 * 100).toFixed(1)}%`,
@@ -642,6 +770,14 @@ const main = async () => {
     }),
     perScenarioMinRunsForVerdict: PER_SCENARIO_MIN_RUNS_FOR_VERDICT,
     decisionMinRunsPerArm: DECISION_MIN_RUNS_PER_ARM,
+    preflight,
+    maxCostUsd,
+    spentUsd: Number((spentMicroUsd / 1e6).toFixed(6)),
+    costCeilingStoppedAt,
+    // Stated in the artefact itself, because the artefact is what outlives
+    // this console output and gets attached to a decision.
+    retirementIsNotAutomated:
+      "This harness never retires a model. Sections 4.3, 4.6 and 5 of docs/policy/default-model-luna-migration.md are separate human decisions.",
   };
 
   if (jsonPath) {
@@ -697,6 +833,47 @@ const main = async () => {
         "records, manifest and blinded review set cannot be cited in a retirement decision."
     );
   }
+
+  // Reported before the sample-size warnings, because it changes what those
+  // warnings mean: an arm nobody could reach is not an arm with too few
+  // samples, it is an arm with no measurement at all.
+  const unreachableArms = summaries.filter(
+    (summary) => summary.outcome === "provider_unavailable"
+  );
+  const inconclusiveArms = summaries.filter(
+    (summary) => summary.outcome === "inconclusive"
+  );
+  if (unreachableArms.length > 0) {
+    console.warn(
+      `\nNOT A QUALITY RESULT -- every request failed for ${unreachableArms
+        .map((summary) => summary.arm)
+        .join(", ")}.\n` +
+        "A 0% success rate here means the provider was never reached, not that the model\n" +
+        "answered badly. Check network egress, the API key's model permissions and the\n" +
+        "provider's status before reading any of the quality rules for these arms."
+    );
+  }
+  if (inconclusiveArms.length > 0) {
+    console.warn(
+      `\nINCONCLUSIVE -- more than half of the requests failed for ${inconclusiveArms
+        .map((summary) => `${summary.arm} (${(summary.providerErrorRate * 100).toFixed(0)}%)`)
+        .join(", ")}.\n` +
+        "The surviving runs are not a representative sample of that arm."
+    );
+  }
+  if (costCeilingStoppedAt) {
+    console.warn(
+      `\nTRUNCATED BY --max-cost-usd=${maxCostUsd}: stopped at scenario ` +
+        `"${costCeilingStoppedAt.scenarioId}", repeat ${costCeilingStoppedAt.repeat}, ` +
+        `after US$${costCeilingStoppedAt.spentUsd.toFixed(6)}.\n` +
+        "Scenarios after that point have no samples at all, so this run is not a\n" +
+        "complete comparison however many runs the arms show."
+    );
+  }
+  console.log(
+    `\nProvider cost for this run: US$${(spentMicroUsd / 1e6).toFixed(6)}` +
+      (maxCostUsd === null ? " (no ceiling set)" : ` of a US$${maxCostUsd} ceiling`)
+  );
 
   const smokeArms = summaries.filter((summary) => !summary.decisionGrade);
   if (smokeArms.length > 0) {

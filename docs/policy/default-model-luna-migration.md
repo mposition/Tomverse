@@ -24,6 +24,78 @@ Tomverse Insight의 OpenAI 기본 모델을 `gpt-5-4-mini`에서 `gpt-5-6-luna`�
 - 두 모델 모두 Guest 계층 Standard이며 **1크레딧**입니다. 이 이전으로 어떤
   사용자도 접근 권한을 얻거나 잃지 않고, 어떤 요청도 더 비싸지지 않습니다.
 
+## 1.1 "기본 모델"은 두 개의 다른 결정입니다
+
+계속 서로 혼동되므로 먼저 갈라 둡니다. 둘은 값이 같아도 별개이고, 한쪽을 바꾸는
+것이 다른 쪽을 바꾸지 않습니다.
+
+**A. 게스트의 첫 대화**
+
+- DB의 `AppSetting["guestDefaultModelId"]`
+- `getPublicAppSettings()`가 읽습니다
+- **하는 일은 하나뿐입니다**: brand trio 3종 중 **어느 것이 선두인지**를 정합니다
+  (`resolveGuestDefaultSelectedModels`). 모델을 추가하지도 제거하지도 않습니다
+- 로그인 계정의 `UserSettings.defaultModel`과 **아무 관계가 없습니다**
+
+**B. 신규 로그인 계정**
+
+- `lib/models.ts`의 `DEFAULT_MODEL_ID`
+- `lib/appDefaults.ts`의 `APP_DEFAULTS.defaultModelId`
+- `prisma/schema.prisma`의 `UserSettings.defaultModel` 컬럼 기본값
+- `app/api/user/settings/route.ts`가 행이 없을 때 만드는 값
+- 새 conversation의 fallback
+
+한 값의 네 가지 표기이고, **넷을 함께 읽는 코드는 없습니다.** 그래서 조용히
+어긋납니다.
+
+### 유효하지만 아무 효과가 없는 설정은 저장하지 않습니다
+
+`guestDefaultModelId`는 trio를 재정렬할 뿐이므로, trio 밖의 모델은 resolver가
+버립니다. 그런데 예전 검증은 "enabled · 게스트 접근 가능 · Standard"까지만
+봤습니다. 그 셋을 통과하고 trio 밖인 모델은 **저장이 성공하고, 값이 그대로 다시
+읽히고, `/api/app-settings`가 서빙하고, 게스트 화면은 하나도 바뀌지 않습니다.**
+관리자 입장에서는 동작하는 설정과 동작하지 않는 설정이 똑같이 보입니다.
+
+이제 `lib/appDefaults.ts`의 `guestDefaultLeadRejection()`이 trio 소속까지
+요구하고, `lib/appSettings.ts`와 `/api/admin/billing`이 그것을 적용해 **어떤
+모델이라면 되는지 말해 주는 검증 오류**로 거부합니다.
+
+게스트에게 보이는 세 모델을 바꾸는 것은 `GUEST_BRAND_TRIO_MODEL_IDS`를 옮기는
+제품 결정이고, 크레딧 추정·picker·cost hydration·E2E 기대치가 **한 변경으로**
+함께 움직여야 합니다. admin 설정이 옆에서 할 수 있는 일이 아닙니다.
+
+### `npm run check:default-models`
+
+읽기 전용 감사입니다. 아무것도 쓰지 않습니다 — AppSetting을 건드리지 않고,
+`UserSettings` 행을 만들거나 갱신하지 않으며, reconciliation을 돌리지 않습니다.
+읽기 전용 `DATABASE_URL`을 주면 운영 DB의 실제 상태를 보고하고, 없으면 컴파일된
+카탈로그만 감사하고 그렇다고 말합니다(그 절반이 CI가 답할 수 있는 부분이라 PR
+Fast Gate의 static 단계에 있습니다).
+
+출력: `storedGuestDefaultModelId` · `normalizedGuestDefaultModelId` ·
+`effectiveGuestSelectedModelIds` · `storedSettingApplied` ·
+`compiledAuthenticatedDefaultModelId` · `appDefaultsDefaultModelId` ·
+`prismaUserSettingsDefaultModel` · `prismaConversationSelectedModels` ·
+`userSettingsCreateDefaultModel` · 각 모델의 runtime 상태(enabled ·
+publiclyListed · catalogDeleted · guest eligibility · usage class) · SSR과
+hydration 후 선택. 값마다 출처(`app_setting` · `compiled_default` ·
+`prisma_schema` · `runtime_catalogue`)를 함께 찍습니다.
+
+실패 조건:
+
+- 저장된 guest default가 유효한데 실제 선택에 반영되지 않음
+  (`guest_setting_not_applied`) — **저장은 됐는데 효과가 없는 상태**
+- disabled · unlisted · catalogDeleted 모델이 기본값
+- 게스트가 쓸 수 없는 모델이 기본값
+- Standard가 아닌 모델이 guest default
+- `DEFAULT_MODEL_ID` · `APP_DEFAULTS.defaultModelId` · Prisma schema 기본값 불일치
+- 신규 `UserSettings` 생성 경로가 다른 값을 저장
+- hydration 전후 게스트 선택 불일치
+
+2026-08-02 현재 `origin/develop`(`d819176`)에서 **통과**합니다. trio의 선두가
+이미 `gpt-5-6-luna`이고, 컴파일된 기본값 · Prisma 기본값 · 설정 route의 생성값이
+셋 다 `gpt-5-6-luna`입니다.
+
 ## 2. 왜 Luna인가
 
 | 항목 | `gpt-5-4-mini` | `gpt-5-6-luna` |
@@ -110,6 +182,25 @@ GPT-5.6 계열은 272K 초과 prompt에서 input 2배 / output 1.5배가 적용�
    둡니다. 상한은 언제나 `maxOutputTokens`입니다.
 9. **적용 후 drift 감시와 복귀 경로.** 적용 이후 p90/p95가 산출 시점 대비
    유의하게 커지면 경고하고, `conservative_default`로 되돌리는 경로를 유지합니다.
+
+#### 측정 도구: `npm run report:output-token-telemetry`
+
+읽기 전용입니다. 정산된 `ChatCreditReservation`에서 모델별 p50/p90/p95/p99와
+workload별 분포를 내고, **위 아홉 조건을 하나씩 판정**해 `PASS` · `FAIL` ·
+`HUMAN`으로 표시합니다.
+
+- 조건 1(모델별 독립)은 구조로 보장합니다 — 다른 모델의 토큰은 애초에 집계에
+  들어가지 않습니다.
+- 조건 4·5는 데이터로 판정합니다. 정산된 provider 보고 토큰만 쓰고, 비용이
+  발생한 부분·중단 응답은 포함하되 비용이 없는 실패는 제외합니다.
+- 조건 7(감사 보관) · 8(안전 여유·floor) · 9(drift 감시)는 **사람만 닫을 수
+  있어** 언제나 `HUMAN`입니다. 이 보고서는 보관할 artefact이지 보관 행위가
+  아닙니다.
+
+**측정 가능한 조건을 전부 만족해도 `recommendedBasis`는 항상
+`conservative_default`입니다.** 이 도구는 근거를 만들 뿐 결정을 하지 않으며,
+telemetry 없이 `p90_output_tokens`를 적용하는 경로는 존재하지 않습니다. 실제
+적용은 별도 승인과 새 `pricingVersion`을 갖는 별도 PR입니다.
 
 **이 변경은 최종 과금을 바꾸지 않습니다.** 정산은 실제 사용량으로 이루어지고,
 예약은 그 앞단에서 과소·과다 예약을 줄이는 최적화일 뿐입니다. 다만 **같은 단가라도
@@ -245,11 +336,43 @@ npm run eval:default-model -- --repeats=2 --json=artifacts/default-model-eval-pr
 JSON 산출물 3종이 생성되는지, 그리고 본 실행의 예상 호출량과 비용
 (`--repeats=25` = 1,200회)입니다.
 
+**사전 점검은 게이트입니다 (harness가 강제)**
+
+`--repeats`가 5를 넘으면 harness가 본 실행으로 보고, `--preflight=<경로>`로
+사전 점검 산출물을 요구합니다. 통과 기준은 "사전 점검을 돌렸다"가 아닙니다 —
+**네 arm이 모두 있고 각각 최소 한 번은 실제로 응답했어야** 합니다. 전부 오류가
+난 사전 점검은 이 게이트가 잡으려는 바로 그 상황입니다. 근거 없이 진행하려면
+`--preflight-override="<사유>"`를 주며, 사유는 화면과 manifest에 남습니다.
+
 **2) 본 실행**
 
 ```
-npm run eval:default-model -- --repeats=25 --json=artifacts/default-model-eval-<timestamp>.json
+npm run eval:default-model -- --repeats=25 \
+  --preflight=artifacts/default-model-eval-preflight.json \
+  --json=artifacts/default-model-eval-<timestamp>.json \
+  --max-cost-usd=<한도>
 ```
+
+`--max-cost-usd`는 누적 provider 비용이 한도를 넘는 순간 멈춥니다. 멈춘 실행은
+`TRUNCATED BY --max-cost-usd`로 보고되고 manifest에 남습니다 — 이후 시나리오는
+표본이 아예 0이므로, arm별 실행 수가 몇이든 완전한 비교가 아닙니다. 판정은 arm
+경계가 아니라 repeat 경계에서 끊어 round-robin이 지키려던 균형을 깨지 않습니다.
+
+**공급자 오류는 품질 실패가 아닙니다.** arm의 provider 오류율이 100%면 성공률이
+0%로 나오는데, 이는 모델이 모든 시나리오에 실패한 것과 숫자가 같습니다. 실제로는
+**묻지도 못한** 것입니다 — 이 작업 환경이 정확히 그 상태입니다(egress proxy가
+`api.openai.com`을 막습니다). harness가 arm마다 `outcome`을 붙입니다.
+
+| outcome | 뜻 |
+|---|---|
+| `measured` | 품질 규칙을 판정할 수 있음 |
+| `inconclusive` | 절반 넘게 실패 — 살아남은 실행은 대표 표본이 아님 |
+| `provider_unavailable` | 전부 실패 — **품질에 대해 아무것도 말하지 않음** |
+| `not_run` | 실행 없음 |
+
+**harness는 아무것도 은퇴시키지 않습니다.** DB에 쓰지 않고, 카탈로그를 고치지
+않으며, 다른 무엇이 읽는 플래그를 세우지 않습니다. 산출물은 화면 출력과 `--json`
+artefact뿐이고, manifest 자체에 그 사실이 적힙니다.
 
 **`baseline, none, low, medium` 네 arm을 같은 commit·같은 환경·같은 실행에서**
 돌립니다. harness는 일부 arm만 돌면 `PARTIAL RUN`을, 작업 트리가 dirty면 경고를
@@ -406,7 +529,13 @@ mini로 생성된 것이라면, 둘 중 하나만 허용됩니다.
 
 ## 6. 잔여 위험
 
-- **live 확인 불가.** 이 작업 환경의 egress proxy가
+- **live 확인은 여전히 불가.** 2026-08-02 재확인 결과 이 환경의 egress proxy가
+  `api.openai.com`을 여전히 막습니다(`Host not in allowlist`).
+  `npm run check:openai-model-access`가 그 상태를 `forbidden`으로 분류하고
+  **"모델을 볼 수 없다"가 아니라 "가시성을 확인하지 못했다"**로 보고합니다.
+  운영자가 production key로 한 번 실행해야 합니다. 그 결과는 가시성 근거일 뿐
+  가격 근거가 아닙니다.
+- **문서 수치의 근거.** 이 작업 환경의 egress proxy가
   `developers.openai.com`과 `api.openai.com`을 모두 403으로 차단해, 공식 모델
   페이지와 인증된 `GET /v1/models` 응답을 직접 확인하지 못했습니다. 이 문서의
   apiModel·가격·context·최대 출력 수치는 작업 지시서가 제시한 공식 값과,
@@ -449,9 +578,31 @@ mini로 생성된 것이라면, 둘 중 하나만 허용됩니다.
    **정확히 `gpt-5-4-mini`일 때만** 갱신합니다. 이 key는 seed되지 않고 관리자가
    설정할 때만 행이 생기므로, 다른 값은 관리자 커스텀 값으로 보고 보존합니다.
 3. **기존 사용자·대화 상태** — `scripts/run-default-model-reconciliation.mjs`
-   (`npm run maintenance:default-model-reconciliation`). 기본은 dry run이고
-   `--apply`로 기록합니다. **이 스크립트는 은퇴 배포와 함께 실행합니다.**
-   mini가 아직 정상 동작하는 동안 사용자의 선택을 덮어쓰지 않기 위해서입니다.
+   (`npm run maintenance:default-model-reconciliation`). 기본은 dry run이며
+   dry run에는 아무 승인도 필요 없습니다 — 무엇이 바뀔지 보는 것은 안전한
+   절반이고 한 명령 거리에 있어야 합니다. **쓰기에는 전부가 필요합니다.**
+
+   ```
+   npm run maintenance:default-model-reconciliation -- \
+     --apply --approved-retirement --ticket="<url>" --actor="<이름>" \
+     --from=gpt-5-4-mini --to=gpt-5-6-luna
+   ```
+
+   `--apply` 하나로는 "은퇴가 이 배포에 실려 있다"와 "누가 명령을 복사했다"를
+   구분할 수 없고, 그 차이가 이 행들이 **낡은 포인터인지 살아 있는 사용자
+   선택인지**를 가릅니다. 그래서 은퇴 명시 · 티켓 · 실행자 · 대상/대체 모델을
+   모두 요구하고, 대상이 다르면 조용히 방향을 바꾸는 대신 거부합니다.
+
+   **CI와 npm의 build·start·deploy·migrate·postinstall lifecycle 단계에서는
+   승인이 아무리 완전해도 쓰지 않습니다.** 스스로 도는 reconciliation은 은퇴를
+   결정하기도 전에 모든 계정의 저장된 모델을 옮깁니다. 판정은
+   `lib/reconciliationApprovalCore.ts`(순수)에 있고
+   `tests/reconciliationApprovalCore.test.mjs`가 전체 matrix를 검증하며, 같은
+   테스트가 **저장소 안의 어떤 스크립트·workflow·package script도 이 명령을
+   스스로 실행하지 않는지** 확인합니다.
+
+   **이 스크립트는 은퇴 배포와 함께 실행합니다.** mini가 아직 정상 동작하는
+   동안 사용자의 선택을 덮어쓰지 않기 위해서입니다.
 
    - `UserSettings.defaultModel`이 정확히 `gpt-5-4-mini`인 행만 갱신
    - `Conversation.selectedModels`는 문자열 치환이 아니라 **JSON 배열로 파싱**해
