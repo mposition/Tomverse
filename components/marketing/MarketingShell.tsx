@@ -1,4 +1,5 @@
 import { MarketingConsentReservation } from "@/components/analytics/MarketingConsentReservation";
+import { AppToastViewport } from "@/components/AppToastViewport";
 import { MarketingProviders } from "@/components/marketing/MarketingProviders";
 import { StructuredData } from "@/components/seo/StructuredData";
 import { SITE_NAME, SITE_ORIGIN } from "@/lib/seo";
@@ -64,6 +65,13 @@ export function MarketingShell({
       />
       <MarketingProviders measurementId={measurementId}>
         {children}
+        {/*
+          UX-006. Inside the providers, because the viewport reads its dismiss
+          label from LanguageProvider. Marketing, the admin console and the chat
+          shell never render together, so an event is still announced exactly
+          once.
+        */}
+        <AppToastViewport />
       </MarketingProviders>
     </>
   );

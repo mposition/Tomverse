@@ -8,6 +8,7 @@ import {
 } from "@/lib/models";
 import { getEnabledRuntimeModel } from "@/lib/modelRegistry";
 import { prisma } from "@/lib/prisma";
+import { invalidatePublicSnapshot } from "@/lib/publicSnapshotCache";
 
 export type PublicAppSettings = {
   guestDefaultModelId: string;
@@ -117,6 +118,9 @@ export async function updateGuestDefaultModel(modelId: string) {
       value: modelId,
     },
   });
+  // SEC-012. `/api/app-settings` answers from a shared snapshot; without this
+  // the console would show its own change as unapplied until the TTL lapsed.
+  invalidatePublicSnapshot("app-settings");
 
   return normalized;
 }
@@ -142,6 +146,7 @@ export async function updatePublicAppSettings(settings: PublicAppSettings) {
       })
     )
   );
+  invalidatePublicSnapshot("app-settings");
   return getPublicAppSettings();
 }
 

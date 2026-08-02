@@ -6,6 +6,7 @@ import { authOptions } from "@/lib/auth";
 import { hasAdminPermission, isAdminSession } from "@/lib/adminAuth";
 import { writeAdminAuditLog } from "@/lib/adminAudit";
 import { apiSecurityResponse, consumeApiRateLimit, readLimitedJson } from "@/lib/apiSecurity";
+import { invalidatePublicSnapshot } from "@/lib/publicSnapshotCache";
 import { prisma } from "@/lib/prisma";
 import { createModelRegistrySchema, registryInputToData, validateProviderConfiguration } from "@/lib/modelRegistryAdmin";
 import {
@@ -93,6 +94,10 @@ export async function POST(req: Request) {
       summary: `Created model registry entry ${id}.`,
       metadata: { provider: body.provider, apiModel: body.apiModel, minimumPlan: body.minimumPlan, creditWeight: body.creditWeight },
     });
+    // SEC-012. `/api/models/catalog` answers from a shared snapshot, so a
+    // registry write has to drop it or the console shows the model it just
+    // created as absent until the TTL lapses.
+    invalidatePublicSnapshot("model-catalog");
     const model = registryRowToModel(row);
     return NextResponse.json({ model: adminModel(model) }, { status: 201 });
   } catch (error) {

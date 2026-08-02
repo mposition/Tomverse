@@ -1,7 +1,7 @@
 # Release checklist
 
-Run through this before promoting a build — except section 4, which an operator
-runs against production at the deployed SHA, and section 6, which is checked
+Run through this before promoting a build — except §7.6, which an operator runs
+against production at the deployed SHA, and section 5, which is checked
 immediately after the merge. Every item needs either evidence tied to the
 **release SHA** or a written waiver — an unticked box is a release blocker, not
 a formality.
@@ -17,18 +17,30 @@ Date / timezone:    ____________________
 
 ## 1. Automated gates
 
+- [ ] `npm ci` (lockfile installs cleanly)
+- [ ] `npm audit --omit=dev` — **0 vulnerabilities**
+- [ ] `npm audit` — 0, or every remaining advisory has a waiver recorded in §8
 - [ ] `npm run typecheck`
 - [ ] `npm run lint -- app components lib tests scripts`
 - [ ] `npm run test:unit`
 - [ ] `npm run test:server-contract`
 - [ ] `npm run security:regression`
+- [ ] `npm run check:accent-tokens`
+- [ ] `npm run check:model-pricing`
+- [ ] `npm run check:default-models`
 - [ ] `npm run check:encoding:strict`
 - [ ] `npm run build`
 - [ ] `npm run verify:smoke-coverage`
-- [ ] `npm run check:model-pricing`
-- [ ] `npm run check:default-models`
+- [ ] `npm run test:e2e:ui-risk`
+- [ ] `npm run test:e2e:admin` (needs `ADMIN_E2E_DATABASE_URL` — a dedicated,
+      disposable database; the harness truncates every table between tests)
+- [ ] `npm run test:db:integration` (needs `TEST_DATABASE_URL`, whose name must
+      carry a test marker and must differ from the application database URL)
 - [ ] Chromium E2E: `desktop-chromium`, `desktop-compact`, `mobile-chromium`
       — no unexplained failures
+
+A suite that could not run is **not** a pass. Record it as N/V in §8 with the
+reason, the owner and what is needed to run it.
 
 ## 2. Visual regression gate (required)
 
@@ -82,53 +94,7 @@ over: the next release needs its own reviewed run or its own waiver.
       per-provider contradiction between them
 - [ ] Model picker, provider banner and chat send agree with both of the above
 
-## 4. Production schema comparison (operator, at the release SHA)
-
-`prisma migrate diff` cannot see either of the two things this repository's
-migration baseline had to reconstruct by hand — CHECK constraints and
-partial/expression indexes — so "the baseline reproduces production" is a claim
-nothing in CI can settle. `npm run db:compare-schema` reads both catalogues and
-settles it, and it has never been run against production: the connection
-details are not obtainable from inside the repository.
-
-Run it **from the deployed release SHA**, against a **direct** production URL
-with a read-only role, and a scratch database that is empty and disposable.
-
-```bash
-COMPARE_SOURCE_DATABASE_URL="$PRODUCTION_DIRECT_URL" \
-COMPARE_SCRATCH_DATABASE_URL="postgresql://.../tomverse_compare_scratch" \
-npm run db:compare-schema
-```
-
-- [ ] Run at the release SHA (the command prints the commit it ran at)
-- [ ] Source was a direct URL, not a pooler, on a read-only role
-- [ ] Scratch database was empty, disposable and not the source
-- [ ] PostgreSQL major version matched — a version warning invalidates the
-      comparison rather than qualifying it
-- [ ] **All three classifications reviewed**, not just the total:
-      `only_in_source`, `only_in_database`, `definition_mismatch`
-- [ ] Output attached to the operations ticket with secrets removed
-
-```
-Ran at SHA:         ____________________
-only_in_source:     ____________________
-only_in_database:   ____________________
-definition_mismatch:____________________
-```
-
-`definition_mismatch` is the dangerous class: the name exists on both sides, so
-every "does it exist" check passes while the object behind it means something
-else. The partial unique index that stops two racing plan-change confirms from
-both reserving is exactly that shape.
-
-**Do not correct anything found here by hand, and never with `db push`.**
-Classify each difference — manual drift, extension-owned object, or a migration
-nobody wrote — then fix it with a **new forward migration** and re-run. Editing
-an applied migration changes its checksum and breaks deploys on every
-environment that already ran it. The schema dump is not a CI artifact and no
-connection string goes into the ticket.
-
-## 5. Accessibility
+## 4. Accessibility
 
 - [ ] `.github/ACCESSIBILITY_QA_MATRIX.md` filled in for this release SHA
 - [ ] No P0/P1 accessibility blocker outstanding
@@ -138,7 +104,7 @@ The automated rows in that matrix run in CI. The screen-reader, Korean-IME,
 external-keyboard and real-browser-zoom rows do not, and a green suite says
 nothing about them.
 
-## 6. After the release merge — confirm shared ancestry was restored
+## 5. After the release merge — confirm shared ancestry was restored
 
 This is the one item here that runs *after* the merge button. **Do not perform
 the back-merge by hand.** Since #232 it is automatic, and a manual one now races
@@ -197,9 +163,176 @@ First real trigger, for calibration: #233 was merged as a squash (`2e0eff2`,
 one parent) and the workflow produced `b172d0b` (two parents) unattended —
 run `30723157564`, `verify` green, merge changed no file.
 
-## 7. Scope notes
+## 6. Scope notes
 
 A green visual run is **not** an accessibility result. Screenshot goldens
 cannot see focus order, accessible names, announcements or contrast in forced
 colors. Accessibility evidence is tracked separately and is not satisfied by
 anything in section 2.
+
+## 7. Database and deployment configuration
+
+Every box needs evidence captured against the release SHA — a command and its
+output, or a screenshot of the setting. "Looks right" is not evidence, and a
+value nobody could read is N/V in §8, never a tick.
+
+### 7.1 Migrations
+
+- [ ] `prisma migrate deploy` run against the target database
+- [ ] No pending migration remains (`prisma migrate status` is clean)
+- [ ] `20260730120000_add_user_sessions_revoked_at` is applied
+- [ ] `User.sessionsRevokedAt` is nullable, so the previous release still runs
+      against this schema and a rollback does not need a down-migration
+- [ ] A backup or restore point exists from **before** the migration ran
+
+```
+Migrate output:     ____________________
+Backup / snapshot:  ____________________
+```
+
+### 7.2 Environment
+
+- [ ] `CSP_MODE=enforce`
+- [ ] `REQUIRE_CLOUDFLARE_ORIGIN_SECRET=true`
+- [ ] `CLOUDFLARE_ORIGIN_SECRET` is at least 32 characters
+- [ ] `TRUSTED_PROXY_IP_HEADER=cf-connecting-ip`
+- [ ] `NEXTAUTH_URL` is exactly the public HTTPS origin. Session cookies lose
+      `Secure` and the `__Secure-` prefix when it is not `https://`, and the
+      Playwright short-circuits are gated on it not being a loopback address
+- [ ] `E2E_AUTH_BYPASS` and `E2E_DISABLE_DATABASE` are unset, or at least not
+      `"true"`, in production
+- [ ] `DATABASE_URL` and `DIRECT_DATABASE_URL` are private hosts, or carry
+      `sslmode=verify-full` / `verify-ca`
+
+### 7.3 Edge
+
+- [ ] Cloudflare strips or overwrites client-supplied `cf-*` headers.
+      **Spoof test**, from outside the edge, against the release deployment:
+
+      curl -s -o /dev/null -w '%{http_code}\n' https://<origin>/chat \
+        -H 'cf-ipcountry: XX' -H 'purpose: prefetch'
+
+      The billing market and client IP must not reflect the forged values.
+      `purpose: prefetch` is included deliberately: the proxy matcher is
+      unconditional, and a request carrying it must still be host-checked.
+- [ ] A request that reaches the origin directly, without the Cloudflare origin
+      secret, is rejected with 421
+
+### 7.4 Readiness and liveness
+
+- [ ] `/api/ready` is wired into pre-promotion checks and into the external
+      readiness monitor
+- [ ] The Railway container healthcheck stays on **`/api/health`**.
+      `/api/ready` reports dependency state, so wiring it to container liveness
+      makes a database blip restart healthy processes and turns a degradation
+      into an outage.
+
+### 7.5 Legacy conversation-lock passwords
+
+SEC-011. `Conversation.password` rows written before scrypt hashing hold the
+password in plaintext, and `verifyConversationPassword` still accepts them by
+comparing `sha256(candidate)` against `sha256(stored)` — which only works
+because `stored` *is* the password. Unlocking upgrades a row opportunistically,
+so this only ever closes for conversations someone happens to open. The rest
+need the migration.
+
+**Stage 1 — this release.** Migrate the data. The verifier stays.
+
+- [ ] A backup or restore point exists from **before** the migration ran
+      (§7.1's snapshot covers this if the migration runs after it)
+- [ ] Dry run first, count recorded:
+
+      npm run migrate:conversation-lock-passwords -- --dry-run
+
+      Prints a JSON summary. `migrated` is the number of rows still holding
+      plaintext; nothing is written. The script never prints a password value.
+- [ ] Migration executed:
+
+      npm run migrate:conversation-lock-passwords -- --confirm-production
+
+      `--confirm-production` is mandatory when `NODE_ENV=production`; the
+      script refuses to write without it. Re-running is safe — an already
+      hashed row is counted, not touched.
+- [ ] A follow-up query confirms **0** remaining plaintext rows:
+
+      SELECT count(*) FROM "Conversation"
+      WHERE "password" IS NOT NULL AND "password" NOT LIKE 'scrypt$1$%';
+
+- [ ] Locked conversations still unlock with their existing password (spot
+      check at least one real account, or the `@ui-risk` lock specs against a
+      restored copy of the migrated database)
+
+**Stage 2 — a later release.** Only after production has been *observed* at 0
+rows for a full release cycle, delete `compareLegacyPassword` and the
+`needsUpgrade: true` branch in `lib/conversationLock.ts`, and drop the
+opportunistic re-hash in `app/api/conversations/[conversationId]/verify/route.ts`.
+
+Removing the verifier in the same release as the migration is what this
+ordering exists to prevent: a row missed by the migration — a batch that
+errored, a conversation created from a stale replica, a restore from a
+pre-migration backup — stops being *insecurely* unlockable and starts being
+*permanently* unlockable, locking the owner out of their own conversation with
+no recovery path.
+
+```
+Dry-run count:      ____________________
+Post-run count:     ____________________
+Stage 2 tracked in: ____________________
+```
+
+### 7.6 Schema comparison against the migration history
+
+`prisma migrate diff` cannot see either of the two things this repository's
+migration baseline had to reconstruct by hand — CHECK constraints and
+partial/expression indexes — so "the baseline reproduces production" is a claim
+nothing in CI can settle. `npm run db:compare-schema` reads both catalogues and
+settles it, and it has never been run against production: the connection
+details are not obtainable from inside the repository.
+
+Run it **from the deployed release SHA**, against a **direct** production URL
+with a read-only role, and a scratch database that is empty and disposable.
+
+```bash
+COMPARE_SOURCE_DATABASE_URL="$PRODUCTION_DIRECT_URL" \
+COMPARE_SCRATCH_DATABASE_URL="postgresql://.../tomverse_compare_scratch" \
+npm run db:compare-schema
+```
+
+- [ ] Run at the release SHA (the command prints the commit it ran at)
+- [ ] Source was a direct URL, not a pooler, on a read-only role
+- [ ] Scratch database was empty, disposable and not the source
+- [ ] PostgreSQL major version matched — a version warning invalidates the
+      comparison rather than qualifying it
+- [ ] **All three classifications reviewed**, not just the total:
+      `only_in_source`, `only_in_database`, `definition_mismatch`
+- [ ] Output attached to the operations ticket with secrets removed
+
+```
+Ran at SHA:         ____________________
+only_in_source:     ____________________
+only_in_database:   ____________________
+definition_mismatch:____________________
+```
+
+`definition_mismatch` is the dangerous class: the name exists on both sides, so
+every "does it exist" check passes while the object behind it means something
+else. `PlanChangeRequest_userId_active_key` — the partial unique index that
+stopped two racing plan-change confirms from both reserving — was exactly that
+shape before `20260801190000_plan_change_pending_slot` moved the same invariant
+onto a generated column.
+
+**Do not correct anything found here by hand, and never with `db push`.**
+Classify each difference — manual drift, extension-owned object, or a migration
+nobody wrote — then fix it with a **new forward migration** and re-run. Editing
+an applied migration changes its checksum and breaks deploys on every
+environment that already ran it. The schema dump is not a CI artifact and no
+connection string goes into the ticket.
+
+## 8. Unverified items and waivers
+
+Anything above that could not be verified from this environment goes here with
+a named owner. N/V is an accepted, tracked risk; a silent tick is neither.
+
+| Item | Why not verified | Owner | Command / evidence needed |
+| --- | --- | --- | --- |
+|  |  |  |  |

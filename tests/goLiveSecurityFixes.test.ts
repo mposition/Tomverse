@@ -670,3 +670,86 @@ test("the admin verification and recovery mutations are CSRF-protected", () => {
     );
   }
 });
+
+// ---------------------------------------------------------------------------
+// SEC-010 - the session cookie's `Secure` attribute must not be inferred from
+// an unvalidated string. next-auth v4 derives `useSecureCookies` from whether
+// NEXTAUTH_URL starts with `https`, so a deployment served over http -- or one
+// behind a proxy with NEXTAUTH_URL unset -- issued the session cookie without
+// `Secure` and without the `__Secure-` prefix, and nothing reported it.
+// `lib/auth.ts` now states the flag from the environment, and the readiness
+// check fails closed on a production NEXTAUTH_URL that is not https.
+// ---------------------------------------------------------------------------
+
+test("the session cookie is marked Secure from the environment, not from a URL", () => {
+  const source = readRepoCode("lib/auth.ts");
+  assert.match(
+    source,
+    /useSecureCookies:\s*process\.env\.NODE_ENV\s*===\s*"production"/,
+    "authOptions must state useSecureCookies rather than letting next-auth infer it"
+  );
+});
+
+test("the readiness check rejects a production NEXTAUTH_URL that is not https", async () => {
+  const { getSecurityEnvironmentStatus } = await import(
+    "../lib/securityEnvironment.ts"
+  );
+  const originalNodeEnv = process.env.NODE_ENV;
+  const originalUrl = process.env.NEXTAUTH_URL;
+  const nextAuthUrlCheck = (value: string | undefined) => {
+    if (value === undefined) delete process.env.NEXTAUTH_URL;
+    else process.env.NEXTAUTH_URL = value;
+    return getSecurityEnvironmentStatus().checks.nextAuthUrlIsHttps;
+  };
+
+  try {
+    // @ts-expect-error NODE_ENV is typed as a literal union but is writable.
+    process.env.NODE_ENV = "production";
+    for (const rejected of [
+      undefined,
+      "",
+      "   ",
+      "http://tomverse.app",
+      "http://localhost:3000",
+      "tomverse.app",
+      "//tomverse.app",
+    ]) {
+      assert.equal(
+        nextAuthUrlCheck(rejected),
+        false,
+        `NEXTAUTH_URL=${JSON.stringify(rejected)} must fail readiness in production`
+      );
+    }
+    assert.equal(nextAuthUrlCheck("https://tomverse.app"), true);
+    assert.equal(nextAuthUrlCheck("  https://tomverse.app  "), true);
+
+    // Outside production the check must not block local development, which has
+    // no certificate.
+    // @ts-expect-error see above.
+    process.env.NODE_ENV = "development";
+    assert.equal(nextAuthUrlCheck("http://localhost:3000"), true);
+  } finally {
+    // @ts-expect-error see above.
+    process.env.NODE_ENV = originalNodeEnv;
+    if (originalUrl === undefined) delete process.env.NEXTAUTH_URL;
+    else process.env.NEXTAUTH_URL = originalUrl;
+  }
+});
+
+test("an unready security environment keeps /api/ready from reporting ready", async () => {
+  const { getSecurityEnvironmentStatus } = await import(
+    "../lib/securityEnvironment.ts"
+  );
+  // `ready` is the conjunction of every check, so a single false must sink it.
+  // Asserted here rather than trusted, because the route publishes this value
+  // to the load balancer.
+  const status = getSecurityEnvironmentStatus();
+  assert.equal(
+    status.ready,
+    Object.values(status.checks).every(Boolean)
+  );
+  assert.ok(
+    "nextAuthUrlIsHttps" in status.checks,
+    "the readiness payload must expose the NEXTAUTH_URL check by name"
+  );
+});

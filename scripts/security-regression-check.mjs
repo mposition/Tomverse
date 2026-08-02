@@ -33,6 +33,25 @@ const unparseableWorkflowLines = (source) =>
     .filter(({ line }) => /^\S/.test(line))
     .filter(({ line }) => !UNINDENTED_LINE_IS_ALLOWED.test(line));
 
+/**
+ * The workflow-level `concurrency:` block and nothing else -- from the
+ * top-level key to the next line in column 0.
+ *
+ * Substring-matching the whole file cannot be used here: the settings are the
+ * kind that want a comment explaining them, and a comment naturally quotes the
+ * value it is warning against. `.github/workflows/e2e.yml` documents that
+ * `queue: max` with `cancel-in-progress: true` is a validation error, which a
+ * file-wide match reads as the workflow *having* `cancel-in-progress: true`.
+ */
+const workflowConcurrencyBlock = (source) => {
+  const lines = source.split("\n");
+  const start = lines.findIndex((line) => /^concurrency:\s*$/.test(line));
+  if (start < 0) return "";
+  const rest = lines.slice(start + 1);
+  const end = rest.findIndex((line) => /^\S/.test(line));
+  return rest.slice(0, end < 0 ? rest.length : end).join("\n");
+};
+
 const checks = [
   {
     name: "Next.js X-Powered-By header is disabled",
@@ -2094,7 +2113,27 @@ const checks = [
         // which is how it previously ended up costing every PR ~82s.
         !prWorkflow.includes("chat-state-visual-regression") &&
         !prWorkflow.includes("ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION") &&
-        !mainWorkflow.includes("ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION")
+        !mainWorkflow.includes("ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION") &&
+        // Every push to main is a release and needs its own verdict, so this
+        // run must not cancel its predecessor. `cancel-in-progress: false` is
+        // half of it: the default group still holds only one pending run, and
+        // a third arrival evicts it, so a release burst loses the middle of
+        // the sequence. `queue: max` is the half that preserves a verdict per
+        // SHA. Asserted together because either alone is a silent regression
+        // -- nothing fails at the time, the runs simply stop existing.
+        //
+        // Read from the workflow-level `concurrency:` block rather than from
+        // the file, because the header comment above it quotes the forbidden
+        // combination in prose; a whole-file match reads that as the setting.
+        workflowConcurrencyBlock(mainWorkflow).includes(
+          "cancel-in-progress: false"
+        ) &&
+        workflowConcurrencyBlock(mainWorkflow).includes("queue: max") &&
+        // Not merely wrong together: GitHub rejects the workflow outright,
+        // which would take the canonical run offline rather than weaken it.
+        !workflowConcurrencyBlock(mainWorkflow).includes(
+          "cancel-in-progress: true"
+        )
       );
     },
   },

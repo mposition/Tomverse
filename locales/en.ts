@@ -1,4 +1,10 @@
 export const en = {
+    skipLink: {
+        toMainContent: "Skip to main content",
+    },
+    notifications: {
+        dismiss: "Dismiss notification",
+    },
     sidebar: {
         title: "Tomverse Insight",
         accountTooltip: "Account & plan",
@@ -83,6 +89,7 @@ export const en = {
         removeProject: "Remove from project",
         renameProject: "Rename project",
         deleteProject: "Delete project",
+        deleteProjectArmed: "Confirm deletion of {project}",
         projectRenameFailed: "Project name could not be updated.",
         projectDeleteConfirm: "Click again to delete this project. Chats will move to Uncategorized.",
         projectDeleteFailed: "Project could not be deleted.",
@@ -159,6 +166,7 @@ export const en = {
         maxModelCompare: "You can compare up to 3 models.",
         maxGuestModelCompare: "Guest mode can compare up to 3 models.",
         modelOnlyPlaceholder: "Ask only this model",
+        modelOnlyInputLabel: "Ask only {model}",
         modelOnlySendTitle: "Send only to this model",
         comingSoonModel: "This model is coming soon.",
         attachFile: "Attach files",
@@ -303,6 +311,9 @@ export const en = {
         imageUnsupportedSelected: "These selected models cannot read images:",
         removeImageUnsupportedModels: "Remove incompatible models",
         closeModelPanel: "Close model panel",
+        panelPauseLabel: "Pause panel {position}, {model} (currently on)",
+        panelResumeLabel: "Resume panel {position}, {model} (currently off)",
+        panelCloseLabel: "Close panel {position}, {model}",
         pausePanel: "Pause chat",
         resumePanel: "Resume chat",
         retryWithoutFiles: "Retry without files",

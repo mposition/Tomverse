@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowLeft,
   Check,
@@ -12,6 +12,7 @@ import {
 import { ModelLogo } from "@/components/chat/ModelLogo";
 import { CreditCostBadge } from "@/components/credits/CreditCostBadge";
 import { useLanguage } from "@/components/LanguageProvider";
+import { useModalDialog } from "@/components/useModalDialog";
 import {
   getModelFinderCombination,
   getModelFinderPromptKey,
@@ -63,6 +64,8 @@ const stageNumber = (stage: Stage) => (stage === "tasks" ? 1 : 2);
 export function ModelFinder({ enabled, onComplete }: ModelFinderProps) {
   const { getModel } = useModelCatalog();
   const { t, lang } = useLanguage();
+  const dialogRef = useRef<HTMLElement | null>(null);
+  const closeButtonRef = useRef<HTMLButtonElement | null>(null);
   const [isOpen, setIsOpen] = useState(false);
   const [stage, setStage] = useState<Stage>("intro");
   const [tasks, setTasks] = useState<ModelFinderTask[]>([]);
@@ -217,11 +220,24 @@ export function ModelFinder({ enabled, onComplete }: ModelFinderProps) {
     }
   };
 
+  // UX-010. The first thing a new signed-in user sees was a dialog that claimed
+  // aria-modal without moving focus into itself, trapping Tab, or handling
+  // Escape -- so onboarding was unusable with a keyboard or a screen reader.
+  const closeFinder = useCallback(() => setIsOpen(false), []);
+  useModalDialog({
+    open: enabled && isOpen,
+    onClose: closeFinder,
+    dialogRef,
+    panelRef: dialogRef,
+    initialFocusRef: closeButtonRef,
+  });
+
   if (!enabled || !isOpen) return null;
 
   return (
     <div className="fixed inset-0 z-[100] flex items-end justify-center bg-black/70 p-0 backdrop-blur-sm sm:items-center sm:p-5">
       <section
+        ref={dialogRef}
         role="dialog"
         aria-modal="true"
         aria-labelledby="model-finder-title"
@@ -229,9 +245,10 @@ export function ModelFinder({ enabled, onComplete }: ModelFinderProps) {
         className="relative flex max-h-[92dvh] w-full max-w-2xl flex-col overflow-hidden rounded-t-3xl border border-zinc-200 bg-white shadow-2xl dark:border-zinc-800 dark:bg-zinc-950 sm:rounded-3xl"
       >
         <button
+          ref={closeButtonRef}
           type="button"
           data-testid="model-finder-close"
-          onClick={() => setIsOpen(false)}
+          onClick={closeFinder}
           aria-label={t("chat.close")}
           className="absolute right-4 top-4 z-10 flex h-8 w-8 items-center justify-center rounded-full text-zinc-400 transition hover:bg-zinc-100 hover:text-zinc-700 dark:hover:bg-zinc-800 dark:hover:text-zinc-200"
         >

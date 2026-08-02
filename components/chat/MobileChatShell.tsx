@@ -144,6 +144,10 @@ type MobileChatShellProps = {
   onFollowupSent: (modelId: string) => void;
 };
 
+const mobileModelTabId = (modelId: string) => `mobile-model-tab-${modelId}`;
+const mobileModelTabPanelId = (modelId: string) =>
+  `mobile-model-tabpanel-${modelId}`;
+
 export function MobileChatShell({
   conversations,
   currentChatId,
@@ -305,6 +309,34 @@ export function MobileChatShell({
       setActiveModelId(selectedModels[nextIndex]);
     },
     [activeModelIndex, selectedModels]
+  );
+
+  /**
+   * UX-026. The tab strip announced itself as a tablist but behaved like a row
+   * of buttons: no arrow-key movement, no Home/End, and every tab in the tab
+   * order. Screen-reader and switch users were told to expect one stop with
+   * arrow keys inside it and got one stop per model instead. This is the same
+   * handler `DesktopChatShell` already carries, kept deliberately identical so
+   * the two shells cannot drift into two different keyboard models.
+   */
+  const handleTabKeyDown = useCallback(
+    (event: React.KeyboardEvent<HTMLButtonElement>) => {
+      if (event.key === "ArrowRight") {
+        event.preventDefault();
+        switchModelByOffset(1);
+      } else if (event.key === "ArrowLeft") {
+        event.preventDefault();
+        switchModelByOffset(-1);
+      } else if (event.key === "Home") {
+        event.preventDefault();
+        if (selectedModels[0]) setActiveModelId(selectedModels[0]);
+      } else if (event.key === "End") {
+        event.preventDefault();
+        const last = selectedModels[selectedModels.length - 1];
+        if (last) setActiveModelId(last);
+      }
+    },
+    [selectedModels, switchModelByOffset]
   );
 
   useEffect(() => {
@@ -489,6 +521,9 @@ export function MobileChatShell({
   // surface: the composer portals into the welcome screen's own slot, so
   // whatever happens to that surface happens to the composer.
   const showWelcomeSurface = isConversationEmpty && selectedModels.length > 0;
+  // UX-026. The single condition the tab strip and its panels both read, so a
+  // tab can never be rendered without the panel its `aria-controls` names.
+  const showModelTabs = !isConversationEmpty && selectedModels.length > 1;
   const isCompactBottomDock = useCompactBottomDock();
   // SHORT-VIEWPORT-001: on iOS Safari and Android Chrome's default mode the
   // layout viewport keeps its full height while the keyboard is up, so a
@@ -782,7 +817,7 @@ export function MobileChatShell({
         />
       </div>
 
-      {!isConversationEmpty && selectedModels.length > 1 && (
+      {showModelTabs && (
         <div className="shrink-0 border-b border-zinc-200 bg-zinc-50 px-2 py-1.5 dark:border-zinc-800 dark:bg-zinc-900/60">
           <div className="flex min-w-0 gap-1.5" role="tablist" aria-label={t("chat.modelSelect")}>
             {selectedModels.map((modelId) => {
@@ -794,8 +829,16 @@ export function MobileChatShell({
               return (
                 <div
                   key={modelId}
-                  role="tab"
-                  aria-selected={isActive}
+                  /*
+                    UX-026. `role="tab"` used to sit here, on a non-focusable
+                    wrapper holding *two* buttons. A tab is a single widget: the
+                    role belonged on the control the user actually activates,
+                    and putting it on the container meant `aria-selected` was
+                    announced for something that could never be focused while
+                    the button inside it announced nothing. The wrapper is now
+                    what it looks like -- a rounded box around a tab and its
+                    remove button, matching DesktopChatShell.
+                  */
                   className={`relative flex h-11 min-w-0 flex-1 touch-manipulation items-center rounded-full border shadow-sm transition-colors ${
                     isActive
                       ? "border-blue-500 bg-blue-600 text-white"
@@ -804,6 +847,14 @@ export function MobileChatShell({
                 >
                   <button
                     type="button"
+                    role="tab"
+                    id={mobileModelTabId(modelId)}
+                    aria-selected={isActive}
+                    aria-controls={mobileModelTabPanelId(modelId)}
+                    // Roving tab order: one stop for the whole strip, and the
+                    // arrow keys move within it.
+                    tabIndex={isActive ? 0 : -1}
+                    onKeyDown={handleTabKeyDown}
                     data-testid="mobile-model-tab"
                     data-model-id={modelId}
                     onClick={() => setActiveModelId(modelId)}
@@ -941,6 +992,18 @@ export function MobileChatShell({
             return (
               <div
                 key={`${currentChatId || "new"}:panel:${panelIndex}`}
+                // UX-026. The tabs named a panel that never declared itself one,
+                // so `aria-controls` had nothing to resolve to and there was no
+                // way to move from a tab to its content. Applied only while the
+                // strip is on screen: with one model, or on the welcome
+                // surface, there is no tablist and these would be orphans.
+                {...(showModelTabs
+                  ? {
+                      role: "tabpanel",
+                      id: mobileModelTabPanelId(modelId),
+                      "aria-labelledby": mobileModelTabId(modelId),
+                    }
+                  : {})}
                 className={`min-h-0 flex-1 flex-col overflow-hidden ${
                   isPanelVisible ? "flex" : "hidden"
                 }`}
@@ -1129,7 +1192,12 @@ export function MobileChatShell({
               onClick={closeDrawer}
               // Above the sidebar's own sticky header (z-10), which the button
               // deliberately floats over -- the header reserves pr-16 for it.
-              className="absolute right-3 top-3 z-20 flex h-11 w-11 items-center justify-center rounded-xl bg-zinc-900/80 text-white"
+              //
+              // The offset carries the top inset itself. Absolute positioning
+              // resolves against the panel's border edge, so the panel's
+              // `pt-[env(safe-area-inset-top)]` moves its content but not this
+              // button, which otherwise settles under the notch.
+              className="absolute right-3 top-[calc(0.75rem+env(safe-area-inset-top))] z-20 flex h-11 w-11 items-center justify-center rounded-xl bg-zinc-900/80 text-white"
               aria-label={t("auth.cancel")}
             >
               <X className="h-5 w-5" />

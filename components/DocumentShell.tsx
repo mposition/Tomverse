@@ -3,6 +3,10 @@ import { ThemeController } from "@/components/ThemeController";
 import { fontVariables } from "@/lib/fonts";
 import type { Language } from "@/lib/language";
 import { themeDocumentClass, type ThemePreference } from "@/lib/theme";
+import {
+  MAIN_CONTENT_ID,
+  SkipToContentLink,
+} from "@/components/SkipToContentLink";
 
 /**
  * The `<html>` / `<body>` wrapper every root layout renders.
@@ -69,7 +73,16 @@ export function DocumentShell({
         */}
         <ThemeBootstrap nonce={nonce} />
         <ThemeController />
-        {children}
+        <SkipToContentLink lang={lang} />
+        {/*
+          UX-016. The skip link's target. `display: contents` means this adds a
+          focusable anchor and nothing else -- no box, no landmark, no layout
+          effect -- so every route has a working target without each page having
+          to opt in, and without competing with the `<main>` a page declares.
+        */}
+        <div id={MAIN_CONTENT_ID} tabIndex={-1} className="contents">
+          {children}
+        </div>
       </body>
     </html>
   );

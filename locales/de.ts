@@ -1,6 +1,12 @@
 import { en } from "./en";
 
 export const de = {
+    skipLink: {
+        toMainContent: "Zum Hauptinhalt springen",
+    },
+    notifications: {
+        dismiss: "Benachrichtigung schließen",
+    },
     sidebar: {
         title: "Tomverse Insight",
         accountTooltip: "Konto & Plan",
@@ -85,6 +91,7 @@ export const de = {
         removeProject: "Aus Projekt entfernen",
         renameProject: "Projekt umbenennen",
         deleteProject: "Projekt löschen",
+        deleteProjectArmed: "Löschen von {project} bestätigen",
         projectRenameFailed: "Projektname konnte nicht aktualisiert werden.",
         projectDeleteConfirm: "Noch einmal klicken, um dieses Projekt zu löschen. Chats werden nach Nicht kategorisiert verschoben.",
         projectDeleteFailed: "Projekt konnte nicht gelöscht werden.",
@@ -168,6 +175,7 @@ export const de = {
         maxModelCompare: "Sie können bis zu 3 Modelle vergleichen.",
         maxGuestModelCompare: "Der Gastmodus kann bis zu 3 Modelle vergleichen.",
         modelOnlyPlaceholder: "Nur dieses Modell fragen",
+        modelOnlyInputLabel: "Nur {model} fragen",
         modelOnlySendTitle: "Nur an dieses Modell senden",
         comingSoonModel: "Dieses Modell kommt bald.",
         attachFile: "Dateien anhängen",
@@ -264,6 +272,9 @@ export const de = {
         imageUnsupportedSelected: "Diese ausgewählten Modelle können Bilder nicht lesen:",
         removeImageUnsupportedModels: "Nicht kompatible Modelle entfernen",
         closeModelPanel: "Modellpanel schließen",
+        panelPauseLabel: "Panel {position}, {model} pausieren (derzeit aktiv)",
+        panelResumeLabel: "Panel {position}, {model} fortsetzen (derzeit inaktiv)",
+        panelCloseLabel: "Panel {position}, {model} schließen",
         pausePanel: "Chat pausieren",
         resumePanel: "Chat fortsetzen",
         retryWithoutFiles: "Ohne Dateien erneut versuchen",

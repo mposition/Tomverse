@@ -53,6 +53,15 @@ const encryptedTokenAdapter: Adapter = {
 
 export const authOptions: NextAuthOptions = {
     secret: process.env.NEXTAUTH_SECRET,
+    // SEC-010. NextAuth otherwise derives this from whether NEXTAUTH_URL starts
+    // with https, so a deployment served over http -- or one relying on
+    // x-forwarded-* with NEXTAUTH_URL unset -- silently issued the session
+    // cookie without `Secure` and without the `__Secure-` prefix. Stating it
+    // means the cookie's protection follows the environment, not a URL string
+    // that nothing validated. `getSecurityEnvironmentStatus` now checks that
+    // URL as well, so a production deploy that gets it wrong fails /api/ready
+    // rather than shipping a downgradeable cookie.
+    useSecureCookies: process.env.NODE_ENV === "production",
     adapter: encryptedTokenAdapter,
     providers: [
         GoogleProvider({

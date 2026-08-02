@@ -100,6 +100,7 @@ export function AdminGlobalSearchPanel() {
           <input
             value={query}
             onChange={(event) => setQuery(event.target.value)}
+            aria-label="Search records by email, Stripe ID, trace ID, refund or audit action"
             placeholder="Search email, Stripe ID, trace ID, refund, audit action..."
             className="h-11 w-full rounded-xl border border-zinc-800 bg-zinc-950 pl-10 pr-3 text-sm text-white outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10"
           />
