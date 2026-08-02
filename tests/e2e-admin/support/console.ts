@@ -1,6 +1,11 @@
 import { expect, test as base, type Page } from "@playwright/test";
 import { resetAndSeedAdminFixtures } from "./database";
-import { signIn, signOut, type SignInOptions } from "./session";
+import {
+  assertSessionContract,
+  signIn,
+  signOut,
+  type SignInOptions,
+} from "./session";
 import {
   ADMIN_E2E_BASE_URL,
   type AdminE2EIdentityKey,
@@ -35,9 +40,14 @@ export const test = base.extend<AdminFixtures>({
     },
     { auto: true },
   ],
+  // Every sign-in is confirmed against the server before the spec continues.
+  // Without it a broken session contract surfaces as ~114 locator timeouts on
+  // the sign-in page -- the shape of the failure this fixture now names in one
+  // line, at the first `signInAs`, in well under a second.
   signInAs: async ({ context }, provide) => {
     await provide(async (key, options) => {
-      await signIn(context, key, options);
+      const user = await signIn(context, key, options);
+      await assertSessionContract(context, user);
     });
   },
   signOutOfAdmin: async ({ context }, provide) => {

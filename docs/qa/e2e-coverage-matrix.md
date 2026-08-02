@@ -8,7 +8,18 @@ Two suites, two configurations, because they need opposite environments:
 | Suite | Config | Server | Session | Data |
 |---|---|---|---|---|
 | User platform | `playwright.config.ts` | `next start` on `127.0.0.1:3100` | `E2E_AUTH_BYPASS` + the `__tomverse_e2e_auth` cookie, plus `page.route()` API mocks | none — `E2E_DISABLE_DATABASE=true` |
-| Admin Console | `playwright.admin.config.ts` | `next start` on `127.0.0.1:3101` | a genuine NextAuth JWT | an isolated PostgreSQL database, truncated and re-seeded before every test |
+| Admin Console | `playwright.admin.config.ts` | `next start` on `127.0.0.1:3102`, behind TLS on `https://127.0.0.1:3101` | a genuine NextAuth JWT in the production `__Secure-next-auth.session-token` cookie | an isolated PostgreSQL database, truncated and re-seeded before every test |
+
+The admin suite's https origin is load-bearing, not decoration. `lib/auth.ts`
+names the session cookie from `NODE_ENV`, so the production server this suite
+runs reads `__Secure-next-auth.session-token` — and Chromium's CDP
+`Storage.setCookies` refuses to write a `__Secure-` cookie from a non-https
+source URL, while Playwright's `APIRequestContext` will not attach a `Secure`
+cookie to an http request. On plain http the suite could neither create the
+session nor send it to `/api/admin/**`, which is what left every signed-in spec
+staring at the sign-in page. `scripts/admin-e2e-tls-terminator.mjs` terminates
+TLS with a throwaway certificate generated per run; the production cookie
+policy is untouched.
 
 Run them with `npm run test:e2e:pr` / `npm run test:e2e:chromium` and
 `npm run test:e2e:admin`.
