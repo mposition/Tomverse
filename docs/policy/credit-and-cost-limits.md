@@ -214,10 +214,106 @@ flex service tier, regional·data-residency endpoint를 쓰지 않습니다. 따
 | GPT-5.5 / GPT-5.5 Thinking | US$5 | US$30 | 동일 upstream(`gpt-5.5`), reasoning token은 출력에 포함 |
 | Gemini 3.1 Pro Preview | US$2 (≤200K) / US$4 (>200K) | US$12 / US$18 | prompt 크기로 tier 선택 |
 | Claude Opus 4.8 | US$5 | US$25 | |
+| GPT-5.6 Luna (≤272K) | US$0.20 | US$1.20 | cached US$0.02, cache write US$0.25(기록만) |
+| GPT-5.6 Luna (>272K) | US$0.40 | US$1.80 | cached US$0.04, cache write US$0.50(기록만) |
+| GPT-5.4 mini | US$0.75 | US$4.50 | cached US$0.075, 단일 tier, cache write 미확인 |
+
+Luna의 장문 tier는 입력 상한(로그인 128,000 · 게스트 16,000 토큰) 때문에 chat
+경로에서 도달하지 않습니다. 계산은 검증돼 있으나 실제 과금 경로에서 발동한 적은
+없습니다.
 
 cached input 할인은 이 네 모델에 대해 검증된 출처가 없어서 배수 1(할인 없음)로
 둡니다. 보수적인 쪽이며 기존 동작과 동일합니다. 검증되면
 `cachedInputPricingVerified`와 함께 갱신합니다.
+
+### DB에 저장된 가격은 관리자 override입니다 (2026-08-02)
+
+`ModelRegistryEntry`의 `inputUsdPerMillionTokens` ·
+`outputUsdPerMillionTokens` · `cachedInputPriceMultiplier` 세 컬럼의 계약입니다.
+
+| 저장값 | 뜻 |
+|---|---|
+| `NULL` | `lib/modelPricing.ts`를 **상속**합니다. tier와 장문 구간까지 그대로 |
+| 숫자 | **관리자가 이 모델의 가격을 덮어썼습니다.** tier는 평탄해집니다 |
+
+seed는 세 컬럼을 항상 `NULL`로 씁니다. **reconciliation은 세 컬럼을 아예 쓰지
+않습니다** — 부팅마다 도는 경로라 값을 쓰면 다음 배포에서 관리자 override를
+덮어쓰고, profile 가격을 쓰면 NULL-상속이 무의미해집니다. 가격 변경은 이미
+코드 배포만으로 모든 환경에 도달합니다.
+
+이전에는 그렇지 않았습니다. `STATIC_RUNTIME_MODELS`가
+`getModelBillingProfile(model)` — **해석된** 가격 — 를 spread했기 때문에 모든
+행이 숫자를 갖고 seed됐고, `resolveModelPricing`의
+`model.inputUsdPerMillionTokens ?? <profile>`이 그 컬럼을 먼저 읽어 profile을
+가렸습니다. 결과가 셋이었고 셋 다 조용했습니다.
+
+1. **장문 tier가 사라졌습니다.** Gemini 3.1 Pro는 200K 초과 prompt를 4/18로
+   과금하지만, 행에는 평탄한 2/12만 있고 컬럼은 tier를 표현하지 못합니다.
+   `CHAT_USER_MAX_INPUT_TOKENS`를 200,000 위로 올렸다면 조용히 과소 과금했을
+   자리입니다.
+2. **`costSource`가 전부 `model_registry_override`였습니다.** 그래서
+   `GET /api/admin/fallback-pricing`의 fallback 비율이 0%로 보였습니다 —
+   `claude-fable-5`·`mistral-large-3`·`qwen3.7-max`·
+   `perplexity/sonar-deep-research`가 실제로는 US$15/US$60 fallback으로 예약되고
+   있는 동안에도요. 그 상태를 기한으로 관리하려던 등록부가 보고할 대상을
+   잃었습니다.
+3. **관리자의 결정과 상속된 기본값을 구분할 수 없었습니다.**
+
+`prisma/migrations/20260802020000_registry_prices_inherit_profile`이 seed가
+찍어 둔 행을 지웁니다. **전면 `SET NULL`이 아니라 allowlist**입니다 — 이
+컬럼에서 살아남아야 하는 값은 관리자가 손으로 넣은 값뿐이므로, 각 행은
+`(id, input, output)`이 그 모델에 대해 seed가 쓴 것으로 알려진 값과 정확히
+일치할 때만 지워집니다(`gpt-5-4-mini`는 profile 이전의 US$0.50/US$1.00 포함).
+cached multiplier는 double이라 등가 비교 대신 허용오차로 맞추고, 이 값만 다른
+행은 세 컬럼을 모두 유지합니다 — 절반은 상속이고 절반은 선택인 가격을 만들지
+않기 위해서입니다.
+
+기존 reservation·settlement·usage bucket·결제 ledger는 건드리지 않습니다.
+각자 자기 `pricingVersion`과 `costSource`를 갖고 있고, 가격 변경은 소급되지
+않습니다.
+
+확인: `npm run check:model-pricing-db`(읽기 전용). 모델별 저장값 · 유효 가격 ·
+`costSource` · `pricingVersion`을 보여주고, **상속하면 같은 숫자가 나오는
+override**가 남아 있으면 실패합니다. 그런 override는 오늘 아무 숫자도 바꾸지
+않으면서 밑의 tier를 꺼 둡니다.
+
+### 처리 경로: `service_tier`와 `/v1/models`
+
+`MODEL_PRICING`의 모든 항목은 `processingTier: "standard"`입니다. 이것은 선호가
+아니라 **이 앱이 실제로 보내는 요청에 대한 주장**이고, **아무 요청도 tier를
+지정하지 않는 동안에만** 참입니다.
+
+- OpenAI는 `service_tier`가 생략되면 `auto`로 처리합니다. `auto`는 Standard
+  가격표가 맞다는 보장이 아닙니다.
+- Flex·Batch는 더 싸고, Priority/Fast는 더 비싸며, Regional Processing은 그
+  위에 할증이 붙습니다.
+- `npm run check:model-pricing`이 `app`·`lib`·`components`·`scripts`에서
+  `service_tier`/`serviceTier`를 grep해, `PROCESSING_TIER_REQUEST_ALLOWLIST`에
+  없는 파일에 나타나면 **실패**합니다. 목록은 의도적으로 비어 있습니다.
+
+**남은 gap:** 응답의 `service_tier`를 읽지 않습니다. 그래서 snapshot에는 이
+registry가 **가정한** tier가 남고 요청이 **실제로 처리된** tier는 남지 않습니다.
+닫으려면 응답 필드를 pricing snapshot까지 배선해야 하고, 그것은 새
+`pricingVersion`을 갖는 별개 변경입니다.
+
+`GET /v1/models`는 **가격 출처가 아닙니다.** 계정·키별 모델 가시성만 답하고
+가격은 전혀 돌려주지 않습니다. `npm run check:openai-model-access`가 그 확인을
+따로 제공하되(기본은 읽기 한 번, `--invoke`는 명시적 opt-in과 예상 비용 표시
+필요), 출력 자체가 "이것은 가격 근거가 아니다"라고 적습니다.
+
+### cache write 가격은 기록하되 과금하지 않습니다
+
+`ModelPriceTier.cacheWriteUsdPerMillionTokens`는 감사용 기록이며 **과금에
+쓰이지 않습니다**(`CACHE_WRITE_PRICING_IS_RECORDED_NOT_BILLED`). cache read와
+cache write는 공급자 가격표에서 별개 항목인데, 이 앱이 세는 것은 read뿐입니다 —
+`cachedInputTokens`(`lib/providerUsageCost.ts`)가 read 수이고, **cache write
+토큰을 보고하는 provider usage adapter는 하나도 없습니다.** 측정한 값에서 write
+수를 유도하는 것은 숫자를 지어내는 일이므로, 요율은 gap이 보이도록 적어만 두고
+`resolveModelPricing`은 무시합니다.
+
+- `gpt-5-6-luna`: 단문 US$0.25, 장문 US$0.50 (입력 요율과 같은 x2)
+- `gpt-5-4-mini`: **기록하지 않습니다.** 확인된 값이 없으며, 아무도 확인하지
+  않은 값을 기록하는 것은 없는 것보다 나쁩니다.
 
 ### 알 수 없는 모델과 CI
 
@@ -369,7 +465,18 @@ Console에만 남습니다.
   먼저 갱신합니다. 환경변수로는 내려갈 수 없습니다.
 - entitlement 오류와 guardrail 오류를 하나의 코드로 합치지 않습니다.
 - 사용자 응답에 원시 내부 USD를 넣지 않습니다.
+- 세 가격 컬럼에 값을 쓰기 전에 위 "DB에 저장된 가격은 관리자 override" 절을
+  읽습니다. seed와 reconciliation은 쓰지 않습니다.
+- 요청에 처리 tier를 넣기 전에 해당 tier의 가격 항목을 먼저 만들고
+  `PROCESSING_TIER_REQUEST_ALLOWLIST`에 등록합니다.
+- 읽기 전용 운영 도구: `npm run check:model-pricing-db`(저장값·유효값·
+  `costSource`·`pricingVersion`), `npm run report:cost-bucket-corrections`
+  (정상 가격 기준 재계산과 차이 — **후보만 만들고 bucket을 고치지 않습니다**),
+  `npm run check:openai-model-access`(가시성만, 가격 아님).
 - 관련 테스트: `tests/modelPricing.test.mjs`, `tests/chatCostGuardrails.test.mjs`,
+  `tests/modelRegistryPricingInheritance.test.ts`,
+  `tests/openAiPricingContract.test.ts`,
+  `tests/costBucketCorrectionCore.test.mjs`,
   `tests/pendingModelPricing.test.mjs`, `tests/fallbackPricingMetrics.test.mjs`,
   `tests/chatAvailabilityCore.test.mjs`, `tests/chatLimitDecisionCore.test.mjs`,
   `tests/chatTokenEstimate.test.mjs`, `tests/chatCostSafetyCore.test.mjs`,

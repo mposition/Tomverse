@@ -135,6 +135,46 @@ export const resolveGuestDefaultSelectedModels = ({
   return trio;
 };
 
+/**
+ * Why a model may not be stored as `AppSetting["guestDefaultModelId"]`, or
+ * `null` when it may. Pure, so the rule can be checked without a database.
+ *
+ * The last clause is the one that matters and the one that used to be
+ * missing. This setting does exactly one thing -- reorder the brand trio --
+ * so a model outside the trio is dropped by `resolveGuestDefaultSelectedModels`
+ * above. Storing one succeeded, read back, and served through
+ * `/api/app-settings` while changing nothing a guest ever saw: an
+ * administrator had no way to tell a setting that works from a setting that
+ * silently does not. Which three models guests see is a product decision that
+ * moves `GUEST_BRAND_TRIO_MODEL_IDS` together with the picker, the credit
+ * estimate and the E2E expectations -- not something this setting can do from
+ * the side.
+ */
+export const guestDefaultLeadRejection = ({
+  modelId,
+  exists,
+  guestEligible,
+  usageCategory,
+}: {
+  modelId: string;
+  exists: boolean;
+  guestEligible: boolean;
+  usageCategory: string | null;
+}): string | null => {
+  if (!exists) return `"${modelId}" is not an enabled model.`;
+  if (!guestEligible) return `"${modelId}" is not available to guests.`;
+  if (usageCategory !== "Standard") {
+    return `"${modelId}" is priced as ${usageCategory ?? "unknown"}, not Standard, so a guest could not pay for it.`;
+  }
+  if (!GUEST_BRAND_TRIO_MODEL_IDS.includes(modelId)) {
+    return (
+      `"${modelId}" is not one of the guest brand trio (${GUEST_BRAND_TRIO_MODEL_IDS.join(", ")}), ` +
+      "so it would be stored but never applied: this setting only chooses which of those three leads."
+    );
+  }
+  return null;
+};
+
 export const getGuestDefaultSelectedModels = (
   leadModelId: string = APP_DEFAULTS.guestDefaultModelId
 ) =>

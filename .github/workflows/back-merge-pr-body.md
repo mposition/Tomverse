@@ -1,4 +1,6 @@
-Automated back-merge, opened because the merge could not land on `develop` directly — either it conflicted, or the push was refused.
+Automated back-merge, opened because the push to `develop` was refused — branch protection, typically. The merge itself succeeded: the commit on this branch is the real thing, already made.
+
+A back-merge that *conflicts* never reaches this template. That path aborts and fails the job without pushing a branch or opening a pull request, because a machine cannot know which side to keep. See `.github/workflows/back-merge-main-to-develop.yml`.
 
 > **Merge this with "Create a merge commit".** The whole value of this pull request is the second parent. Squashing or rebasing discards it, and the pull request then does nothing at all. #203 and #213 were both squashed, and both had to be redone.
 

@@ -19,11 +19,24 @@ name: Back-merge main into develop
 #
 # Two jobs:
 #
-#   back-merge  performs it, and falls back to a pull request when the merge
-#               conflicts or the push is refused
+#   back-merge  performs it. The two ways it can fail are handled differently
+#               and deliberately so:
+#
+#                 * the merge CONFLICTS -- it aborts and fails the job. No
+#                   branch is pushed and no pull request is opened, because
+#                   choosing a side is a judgement call and a pull request
+#                   full of somebody's guess is worse than none. A person
+#                   starts from `origin/develop`, merges `origin/main`,
+#                   resolves, and merges the result with a merge commit.
+#                 * the merge SUCCEEDS but the push to `develop` is REFUSED
+#                   (branch protection, typically) -- there is nothing to
+#                   judge, so it opens `automation/back-merge-main-<sha>` as
+#                   a pull request carrying the merge commit it already made.
+#
 #   verify      asserts the invariant afterwards -- `main` reachable from
 #               `develop` -- and fails loudly when it is not, which is the
-#               signal that a human has to finish the job
+#               signal that a human has to finish the job. It fails on both
+#               paths above, so neither is silent.
 #
 # The invariant, and the one command that decides it:
 #
@@ -95,7 +108,7 @@ jobs:
             -m "See .github/workflows/back-merge-main-to-develop.yml."; then
             echo "conflicted=false" >> "$GITHUB_OUTPUT"
           else
-            echo "::warning::The back-merge conflicted. Opening a pull request instead."
+            echo "::warning::The back-merge conflicted. The job will fail without opening a pull request; a person has to resolve it."
             git merge --abort || true
             echo "conflicted=true" >> "$GITHUB_OUTPUT"
           fi
@@ -127,11 +140,22 @@ jobs:
             echo "pushed=false" >> "$GITHUB_OUTPUT"
           fi
 
-      # The fallback, for a conflict or a refused push alike. The branch keeps
-      # the merge commit, so merging this pull request WITH A MERGE COMMIT
-      # restores the ancestry. Squashing it would discard the second parent and
-      # achieve nothing -- which is what happened to #203 and #213.
-      - name: Open a pull request when the merge could not land
+      # This step reaches two different outcomes, and the difference is the
+      # whole contract:
+      #
+      #   push refused  -- the merge already succeeded, so replaying it here
+      #                    succeeds too. The branch is pushed and a pull
+      #                    request opened. Merging that pull request WITH A
+      #                    MERGE COMMIT restores the ancestry; squashing it
+      #                    discards the second parent and achieves nothing,
+      #                    which is what happened to #203 and #213.
+      #   conflicted    -- replaying it conflicts again, so this aborts and
+      #                    exits 1. NO branch is pushed and NO pull request is
+      #                    opened: a pull request whose content a machine
+      #                    guessed is worse than the absence of one. The job
+      #                    fails, `verify` fails after it, and a person picks
+      #                    it up from `origin/develop`.
+      - name: Open a pull request when the push was refused, or fail on a conflict
         if: |
           steps.needed.outputs.needed == 'true' &&
           (steps.merge.outputs.conflicted == 'true' || steps.push.outputs.pushed == 'false')

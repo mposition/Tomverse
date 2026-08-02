@@ -96,7 +96,7 @@ export const isHashedConversationPassword = (stored: string) =>
  * unlocking while `scripts/migrate-legacy-conversation-passwords.mjs` clears
  * them.
  *
- * Do not delete this together with the migration. See §6.5 of
+ * Do not delete this together with the migration. See §7.5 of
  * `.github/RELEASE_CHECKLIST.md`: it goes in a *later* release, after
  * production has been observed at zero plaintext rows. Removing it early turns
  * any row the migration missed from insecurely unlockable into permanently

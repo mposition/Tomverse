@@ -1,3 +1,22 @@
+import { en } from "./en";
+
+/**
+ * UX-020. Chinese is a "limited" locale in `lib/localeLaunchPolicy.ts`, and the
+ * English spreads below are what that limit actually looks like in the source.
+ *
+ * They change nothing at runtime -- `LanguageProvider`'s `t()` already fell
+ * back to English for a missing key -- but they make the gap visible where the
+ * strings live, and they let `satisfies typeof en` at the bottom hold. Without
+ * that check Chinese silently drifted 182 keys behind English, including the
+ * entire model finder and most of the chat interface, while the locale policy
+ * went on claiming Chinese covered the product interface. `fr`, `de`, `es` and
+ * `pt` were already written this way; Chinese and Korean were the two that had
+ * no check at all.
+ *
+ * Replacing a spread with reviewed Chinese strings is the work this makes
+ * measurable. Adding a *new* English spread is a deliberate act that shows up
+ * in review rather than a key quietly going missing.
+ */
 export const zh = {
     skipLink: {
         toMainContent: "跳到主要内容",
@@ -95,6 +114,7 @@ export const zh = {
         projectDeleteFailed: "无法删除项目。",
     },
     chat: {
+        ...en.chat,
         guestVerificationTitle: "请确认后继续",
         guestVerificationDescription: "这是为了减少自动化请求的快速确认，通常会自动完成。",
         guestVerificationClose: "取消确认",
@@ -573,7 +593,9 @@ export const zh = {
         cta: "输入问题",
         dontShowAgain: "关闭此指南",
     },
+    modelFinder: en.modelFinder,
     auth: {
+        ...en.auth,
         saveMessage: "设置已保存。",
         failedMessage: "设置保存失败。",
         loading: "加载中...",
@@ -754,4 +776,4 @@ export const zh = {
         changes: "当服务或法律要求发生变化时，我们可能更新本政策，并显示修订后的生效日期。",
         back: "返回 Tomverse",
     }
-};
+} satisfies typeof en;

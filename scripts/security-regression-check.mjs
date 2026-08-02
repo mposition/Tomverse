@@ -52,6 +52,55 @@ const workflowConcurrencyBlock = (source) => {
   return rest.slice(0, end < 0 ? rest.length : end).join("\n");
 };
 
+/**
+ * `mobile-composer-contract.spec.ts` gates only its goldens on the canonical
+ * browser; its 30 geometry and behaviour tests must keep running on a
+ * substitute one. That distinction lives in *where* the gate is called, which a
+ * whole-file substring match cannot see.
+ */
+const composerGateIsScopedToTheVisualBlock = () => {
+  const source = read("tests/e2e/mobile-composer-contract.spec.ts");
+  const blockAt = source.indexOf(
+    'test.describe("Mobile composer: visual record"'
+  );
+  if (blockAt < 0) return false;
+  const beforeBlock = source.slice(0, blockAt);
+  const insideBlock = source.slice(blockAt);
+  return (
+    insideBlock.includes("test.beforeEach(skipUnlessCanonicalVisualBrowser)") &&
+    // An import is not a call; anything that invokes it above the block would
+    // apply the skip to the whole file.
+    !/skipUnlessCanonicalVisualBrowser\s*\)/.test(
+      beforeBlock.replace(/^import[\s\S]*?;$/m, "")
+    ) &&
+    !beforeBlock.includes("skipUnlessCanonicalVisualBrowser()")
+  );
+};
+
+/**
+ * The back-merge fallback step must refuse a conflict before it can push
+ * anything: an unresolved index means bail out and fail, and only a clean
+ * replay reaches `git push`. Expressed as an ordering rather than a presence
+ * check, because presence is what a duplicated string satisfies by accident.
+ */
+const conflictExitsBeforeAnyPush = (backMergeJob) => {
+  const stepAt = backMergeJob.indexOf(
+    "- name: Open a pull request when the push was refused, or fail on a conflict"
+  );
+  if (stepAt < 0) return false;
+  const step = backMergeJob.slice(stepAt);
+  const detectsConflict = step.indexOf("git ls-files --unmerged");
+  const aborts = step.indexOf("git merge --abort");
+  const exits = step.indexOf("exit 1");
+  const pushes = step.indexOf("git push");
+  return (
+    detectsConflict >= 0 &&
+    aborts > detectsConflict &&
+    exits > detectsConflict &&
+    pushes > exits
+  );
+};
+
 const checks = [
   {
     name: "Next.js X-Powered-By header is disabled",
@@ -2203,9 +2252,13 @@ const checks = [
         read("tests/e2e/chat-state-visual-regression.spec.ts").includes(
           "skipUnlessCanonicalVisualBrowser()"
         ) &&
-        read("tests/e2e/mobile-composer-contract.spec.ts").includes(
-          "test.beforeEach(skipUnlessCanonicalVisualBrowser)"
-        ) &&
+        // Scoped to the visual-record block, not the file. Hoisting the gate
+        // to the top level would read identically as a substring while
+        // silently taking the 30 geometry and behaviour tests out of every
+        // substitute environment -- and those are exactly the coverage the
+        // PLAYWRIGHT_CHROMIUM_EXECUTABLE fallback exists to buy back. The
+        // import above the block is not a call and does not count.
+        composerGateIsScopedToTheVisualBlock() &&
         read("docs/qa/canonical-visual-baseline.md").includes(
           "skipUnlessCanonicalVisualBrowser"
         )
@@ -2259,8 +2312,23 @@ const checks = [
         verifyJob.includes(
           "git merge-base --is-ancestor origin/main origin/develop"
         ) &&
-        // A conflict opens a pull request rather than resolving blind.
+        // A refused push -- the merge already succeeded, so there is nothing
+        // to judge -- recovers into a pull request.
         backMergeJob.includes("automation/back-merge-main-") &&
+        // A *conflict* does not. It aborts and exits non-zero, pushing no
+        // branch and opening no pull request, because a machine cannot know
+        // which side to keep. Pinned because "recover from both" is the
+        // intuitive reading and the documentation drifted into it once
+        // already: the checklist, this workflow's header and the automated
+        // pull request's own body all claimed a conflict opened a pull
+        // request, which it never did.
+        //
+        // Read from the fallback step alone, and as an *ordering*: the
+        // conflict exit has to come before the push. `git merge --abort`
+        // appears in the earlier merge step too, so a job-wide substring
+        // match stays green with the fallback's own abort deleted -- measured,
+        // which is why this is not a substring match.
+        conflictExitsBeforeAnyPush(backMergeJob) &&
         // It may only ever move develop. A back-merge that could push main
         // would be a way to move the release branch outside a review.
         !/git push (-u )?origin main\b/.test(source) &&
@@ -2269,7 +2337,12 @@ const checks = [
         checklist.includes("back-merge-main-to-develop.yml") &&
         // Matched across a line wrap: the checklist is hard-wrapped, so the
         // sentence moves whenever the paragraph above it is edited.
-        /Do not perform\s+the back-merge by hand/.test(checklist)
+        /Do not perform\s+the back-merge by hand/.test(checklist) &&
+        // ...and it has to state the conflict path correctly. The wrong
+        // version sent an operator looking for a pull request that is never
+        // opened, on the one path where the recovery is entirely manual.
+        /does not\s+open a pull request/.test(checklist) &&
+        !/On a merge conflict, or when the push/.test(checklist)
       );
     },
   },

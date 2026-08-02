@@ -150,7 +150,22 @@ export const staticModelWithRuntimeDefaults = (
   sortOrder: number
 ): AiModel => {
   const providerConfig = PROVIDER_API_CONFIGURATION[model.provider];
-  const billing = getModelBillingProfile(model);
+  // Only the token-shaped limits are materialised here. The three price
+  // columns are deliberately left as the catalogue declared them -- almost
+  // always `undefined` -- because in lib/modelPricing.ts an explicitly
+  // present price means "an administrator overrode this model", and it wins
+  // over the profile *including its long-context tiers*.
+  //
+  // Baking the resolved price back in erased three separate things:
+  //   * Gemini 3.1 Pro's >200K step (a flat 2/12 replaced the 2/12 -> 4/18
+  //     pair, so a long prompt was priced at the short-prompt rate);
+  //   * `costSource`, which reported `model_registry_override` for every
+  //     model, so the fallback-pricing metrics saw a 0% fallback share even
+  //     while unpriced models were being billed at the US$15/US$60 fallback;
+  //   * the distinction the pricing contract rests on -- a stored number is
+  //     an operator decision, a stored NULL inherits lib/modelPricing.ts.
+  const { maxOutputTokens, reservationOutputTokens } =
+    getModelBillingProfile(model);
   return {
     ...model,
     apiBaseUrl: providerConfig.baseUrl,
@@ -158,7 +173,8 @@ export const staticModelWithRuntimeDefaults = (
     creditWeight: getModelUsageProfile(model).credits,
     catalogDeleted: false,
     sortOrder,
-    ...billing,
+    maxOutputTokens,
+    reservationOutputTokens,
   };
 };
 
@@ -193,6 +209,10 @@ export const staticModelRegistrySeedRows = () =>
       model.inputCapabilities?.maxBase64ImagePayloadBytes || null,
     maxOutputTokens: model.maxOutputTokens || null,
     reservationOutputTokens: model.reservationOutputTokens || null,
+    // NULL means "inherit lib/modelPricing.ts", which is what a seed must
+    // always mean. A number here is an administrator's custom override and is
+    // never written by seeding or reconciliation -- see the comment on
+    // staticModelWithRuntimeDefaults and docs/policy/credit-and-cost-limits.md.
     inputUsdPerMillionTokens: model.inputUsdPerMillionTokens ?? null,
     outputUsdPerMillionTokens: model.outputUsdPerMillionTokens ?? null,
     cachedInputPriceMultiplier: model.cachedInputPriceMultiplier ?? null,
@@ -210,12 +230,14 @@ export const STATIC_CATALOG_RECONCILIATION_MODEL_IDS = [
   // Added 2026-08-01 with the Luna default switch. 5.4 mini is NOT being
   // retired here -- it stays enabled, so the `lifecycle` branch below is not
   // taken for it and its enabled/publiclyListed/status are left alone. What
-  // this entry does reach is the metadata the switch changed: its first
-  // explicit price profile (US$0.75/US$4.50, cached 0.1x), its 128K output
-  // cap and 4,096-token reservation, and its published 400K context window.
-  // Without it, an environment seeded before today would keep the generic
-  // US$0.50/US$1.00 class-fallback numbers frozen in its row forever, because
-  // createMany(skipDuplicates) never updates an existing row.
+  // this entry reaches is the metadata the switch changed and that has
+  // nowhere else to come from: its 128K output cap, its 4,096-token
+  // reservation and its published 400K context window.
+  //
+  // Its price is NOT reconciled. US$0.75/US$4.50 lives in
+  // lib/modelPricing.ts and reaches every environment whose row leaves the
+  // price columns NULL; the 2026-08-02 migration is what clears the rows an
+  // earlier seed had stamped with the old US$0.50/US$1.00 fallback.
   "gpt-5-4-mini",
   "gemini-3-6-flash",
   "gemini-2-5-flash",
@@ -268,9 +290,13 @@ export const staticModelRegistryReconciliationRows = () =>
           maxBase64ImagePayloadBytes: row.maxBase64ImagePayloadBytes,
           maxOutputTokens: row.maxOutputTokens,
           reservationOutputTokens: row.reservationOutputTokens,
-          inputUsdPerMillionTokens: row.inputUsdPerMillionTokens,
-          outputUsdPerMillionTokens: row.outputUsdPerMillionTokens,
-          cachedInputPriceMultiplier: row.cachedInputPriceMultiplier,
+          // The three price columns are absent on purpose. Reconciliation
+          // runs on every boot, so writing a price here would overwrite an
+          // administrator's override on the next deploy, and writing the
+          // profile price would defeat NULL-means-inherit: a price change in
+          // lib/modelPricing.ts already reaches every environment without a
+          // database write. What reconciliation is for is metadata that has
+          // nowhere else to come from.
           ...lifecycle,
         },
       };

@@ -129,8 +129,12 @@ const updateBillingSchema = z
           .trim()
           .min(1)
           .max(100)
+          // Eligibility is not the whole rule: the setting only reorders the
+          // guest brand trio, so a model outside it saves cleanly and then
+          // does nothing. lib/appSettings.ts spells out which is which.
           .refine(isValidGuestDefaultModel, {
-            message: "Guest default model must be an enabled Free model.",
+            message:
+              "Guest default model must be one of the guest brand-trio models, which are the only ones this setting can lead with.",
           }),
       })
       .strict()
