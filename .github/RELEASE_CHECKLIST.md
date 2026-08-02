@@ -22,6 +22,7 @@ Date / timezone:    ____________________
 - [ ] `npm run typecheck`
 - [ ] `npm run lint -- app components lib tests scripts`
 - [ ] `npm run test:unit`
+- [ ] `npm run test:server-contract`
 - [ ] `npm run security:regression`
 - [ ] `npm run check:accent-tokens`
 - [ ] `npm run check:encoding:strict`
