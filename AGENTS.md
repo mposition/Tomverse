@@ -135,11 +135,36 @@ UI-012에서 승인된 정책(B안)입니다. accent 색은 **hue가 아니라 �
   `lib/appDefaults.ts`의 `GUEST_DEFAULT_MODEL_ID`와 `GUEST_BRAND_TRIO_MODEL_IDS`,
   Prisma 컬럼 기본값이 함께 움직입니다. 한쪽만 바꾸지 않습니다.
 - **`gpt-5-4-mini`는 은퇴하지 않았습니다.** enabled·publiclyListed 상태를
-  유지하는 것은 의도된 관찰 기간입니다. 정책 문서 4.3의 eval 기준을 실제로
-  충족하기 전에는 disabled로 내리지 않습니다.
+  유지하는 것은 의도된 관찰 기간입니다.
+- **수치 eval 통과는 은퇴의 필요조건이지 충분조건이 아닙니다.** 정책 문서
+  4.3(수치)과 4.6(사용량·고정 사용자 비율, 도구 호환성, support·공유 링크,
+  안내·유예기간, staging 검증)을 **모두** 충족해야 은퇴할 수 있습니다.
+- **eval 표본 하한은 규칙마다 다릅니다.** 합산 규칙(오류율·빈 응답률)은 arm당
+  ≥300(권장 500), **시나리오별 5%p 규칙은 시나리오당 ≥100**입니다 —
+  `--repeats=25`면 시나리오당 25회라 해상도가 4%p여서 5%p 기준을 판정할 수
+  없습니다. 판정은 점추정이 아니라 Wilson 95% 구간 경계로 합니다.
+- **`--repeats=25`를 돌렸다는 사실만으로 decision-grade가 아닙니다.** 정책 문서
+  4.5.1의 절차 — 사전 점검, 네 arm 동일 commit·동일 실행, `--json` 증거 보존
+  (manifest·원본 기록·블라인드 검토 세트), 블라인드 정성 검토, 다른 시간대
+  독립 재실행, staging 수동 검증 — 을 모두 묶어야 인용할 수 있습니다.
+  `scripts/evalDefaultModel.mjs`가 `SMOKE RUN`·`PARTIAL RUN`·`UNDERPOWERED`·
+  dirty tree를 경고로 출력합니다.
+- **긴급 운영 비활성화는 품질 eval과 분리합니다.** 공급자 장애·폐기·보안 사유는
+  4.3·4.6을 기다리지 않고 운영 lifecycle로 즉시 내릴 수 있으며, 이는 이 문서의
+  은퇴가 아닙니다(4.7). `operationalReason`이 제품 은퇴와 운영 중단을 구분해야
+  합니다.
 - OpenAI는 `gpt-5.4-mini`를 계속 서비스합니다. 은퇴하더라도 공급자 종료가
-  아니라 **Tomverse 제품 카탈로그 결정**이며, `operationalReason`이 이를
-  구분해야 합니다.
+  아니라 **Tomverse 제품 카탈로그 결정**입니다.
+- **은퇴는 마케팅 갱신과 한 변경으로 배포합니다.** 공개 마케팅이 지목하는 모델
+  ID는 `lib/marketingModelReferences.ts` 하나뿐이고
+  `tests/marketingModelReferences.test.mjs`가 이를 강제합니다. 문구·CTA·배지·결과
+  라벨·ko/en·SEO metadata·deep link·캡처 fixture는 사람이 함께 옮깁니다. mini로
+  생성된 예시 답변은 이름만 바꾸지 말고 재생성하거나 과거 결과임을 유지합니다.
+- **`reservationOutputBasis`를 p90으로 바꾸려면 정책 문서 3.1의 9개 조건**
+  (모델별 독립 산출, 기간·표본 수, workload 분리, 정산된 출력·과금 reasoning
+  토큰, 중단·부분 응답 포함, 동질 표본, 감사 보관, 안전 여유·floor, drift 감시)
+  을 충족하고 새 `pricingVersion`으로 구분합니다. 그 전까지는
+  `conservative_default`를 유지합니다.
 - 두 모델 모두 Guest 계층 Standard **1크레딧**입니다. 은퇴 평가 중에 크레딧을
   임의로 바꾸지 않고, 기존 mini 사용자를 Terra·Sol 같은 상위 유료 모델로
   자동 이동시키지 않습니다.
