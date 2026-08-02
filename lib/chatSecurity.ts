@@ -6,6 +6,7 @@ import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { usageBucketCount } from "@/lib/chatUsageBucketCount";
 import {
+    AVAILABLE_MODELS,
     canUseModelWithPlan,
     getModelUsageProfile,
     getSettledUsageCredits,
@@ -19,9 +20,16 @@ import {
 import {
     getCostGuardrailLimits,
     getGuestCostGuardrailLimits,
-    getProviderCostGuardrailLimits,
     type CostGuardrailLimits,
 } from "@/lib/chatCostGuardrails";
+import {
+    classifyProviderBudgetUtilisation,
+    findAlternativeModelsForBlockedProvider,
+    getProviderCostGuardrailLimits,
+    type ProviderBudgetUtilisationLevel,
+} from "@/lib/providerCostBudget";
+import { PROVIDER_FALLBACKS } from "@/lib/providerFallbackCandidates";
+import { reportOperationalIncident } from "@/lib/operationalMonitoring";
 import {
     CONCURRENT_RESERVATION_CONFLICT,
     CREDIT_BALANCE_INSUFFICIENT,
@@ -213,13 +221,18 @@ export const deserializeReservation = (payload: Prisma.JsonValue) => {
     } satisfies ChatUsageReservation;
 };
 
+export type ChatErrorDetails = Record<string, number | string | string[]>;
+
 export class ChatAccessError extends Error {
     constructor(
         public readonly status: number,
         public readonly code: string,
         message: string,
         public readonly retryAfter?: number,
-        public readonly details?: Record<string, number | string>
+        // `string[]` carries a list of model IDs (the way out of a blocked
+        // provider). Never a cost: everything numeric here is either already
+        // public or prefixed `internal` and stripped before the client sees it.
+        public readonly details?: ChatErrorDetails
     ) {
         super(message);
     }
@@ -384,18 +397,12 @@ const decisionModelsFromBudgets = (budgets: readonly ChatBudget[]) =>
         longContextThresholdTokens: budget.longContextThresholdTokens,
     }));
 
-const numericDetail = (
-    details: Record<string, number | string> | undefined,
-    key: string
-) => {
+const numericDetail = (details: ChatErrorDetails | undefined, key: string) => {
     const value = details?.[key];
     return typeof value === "number" ? value : null;
 };
 
-const textDetail = (
-    details: Record<string, number | string> | undefined,
-    key: string
-) => {
+const textDetail = (details: ChatErrorDetails | undefined, key: string) => {
     const value = details?.[key];
     return typeof value === "string" ? value : null;
 };
@@ -712,6 +719,81 @@ export async function assertGuestQuickSummaryDailyLimit(
         );
     }
 }
+
+/**
+ * Models a user blocked by `provider`'s budget can still reach. Model IDs only:
+ * this goes into a client response, so it names the way out without naming any
+ * cost.
+ */
+const alternativeModelsForProvider = (provider: string) =>
+    findAlternativeModelsForBlockedProvider({
+        blockedProvider: provider,
+        candidateModelIds:
+            PROVIDER_FALLBACKS[provider as keyof typeof PROVIDER_FALLBACKS]
+                ?.recommendedModelIds ?? [],
+        models: AVAILABLE_MODELS,
+    });
+
+/**
+ * Reports a provider budget approaching its limit, before it refuses anything.
+ *
+ * Deliberately not awaited: this runs inside the reservation transaction, and
+ * an alert delivery must never hold a database transaction open or fail a
+ * request that the budget itself allowed. `reportOperationalIncident` already
+ * logs synchronously and rate-limits by code, so the un-awaited call is a
+ * notification, not the record.
+ *
+ * `notice` (70%) is logged only. Paging on the first threshold of a limit
+ * nobody is near yet teaches operators to ignore the ones that matter.
+ */
+const reportProviderBudgetUtilisation = ({
+    provider,
+    scope,
+    level,
+    ratio,
+    usedMicroUsd,
+    requiredMicroUsd,
+    limitMicroUsd,
+}: {
+    provider: string;
+    scope: string;
+    level: ProviderBudgetUtilisationLevel;
+    ratio: number;
+    usedMicroUsd: number;
+    requiredMicroUsd: number;
+    limitMicroUsd: number;
+}) => {
+    const percent = Math.round(ratio * 100);
+    console.warn(
+        JSON.stringify({
+            event: "provider_budget_utilisation",
+            provider,
+            scope,
+            level,
+            percent,
+            usedMicroUsd,
+            requiredMicroUsd,
+            limitMicroUsd,
+            timestamp: new Date().toISOString(),
+        })
+    );
+    if (level === "notice") return;
+    void reportOperationalIncident({
+        code: `PROVIDER_BUDGET_${level.toUpperCase()}_${scope.toUpperCase()}_${provider.toUpperCase()}`,
+        title: `${provider} spend budget at ${percent}% (${scope})`,
+        error: `${provider} would reach ${percent}% of its ${scope} budget with the request in hand.`,
+        severity: level === "exhausted" ? "error" : "warning",
+        context: {
+            component: "chat-security",
+            provider,
+            scope,
+            percent,
+            usedMicroUsd,
+            requiredMicroUsd,
+            limitMicroUsd,
+        },
+    }).catch(() => undefined);
+};
 
 const readUsageCount = async (
     tx: Prisma.TransactionClient,
@@ -1259,7 +1341,26 @@ export const preflightChatComparisonAccess = async (
                     check.period,
                     check.start
                 );
-                if (used + check.required > check.limit) {
+                const utilisation = classifyProviderBudgetUtilisation({
+                    usedMicroUsd: used,
+                    requiredMicroUsd: check.required,
+                    limitMicroUsd: check.limit,
+                });
+                // Report the approach, not just the wall. A provider budget
+                // refuses everyone at once, so the first anyone hears of it
+                // must not be the 503.
+                if (utilisation.level !== "nominal") {
+                    reportProviderBudgetUtilisation({
+                        provider,
+                        scope: check.scope,
+                        level: utilisation.level,
+                        ratio: utilisation.ratio,
+                        usedMicroUsd: used,
+                        requiredMicroUsd: check.required,
+                        limitMicroUsd: check.limit,
+                    });
+                }
+                if (utilisation.level === "exhausted") {
                     throw new ChatAccessError(
                         503,
                         PROVIDER_BUDGET_EXHAUSTED,
@@ -1269,6 +1370,8 @@ export const preflightChatComparisonAccess = async (
                             provider,
                             scope: check.scope,
                             limitLayer: "operational_guardrail",
+                            alternativeModelIds:
+                                alternativeModelsForProvider(provider),
                             internalUsedCostMicroUsd: used,
                             internalRequiredCostMicroUsd: check.required,
                             internalLimitCostMicroUsd: check.limit,
@@ -2101,6 +2204,9 @@ export const acquireChatAccess = async (
                         provider: budget.provider,
                         scope: "provider_cost_day",
                         limitLayer: "operational_guardrail",
+                        alternativeModelIds: alternativeModelsForProvider(
+                            budget.provider
+                        ),
                         internalRequiredCostMicroUsd: reservedCost,
                         internalLimitCostMicroUsd: providerDailyLimit,
                     }
@@ -2133,6 +2239,9 @@ export const acquireChatAccess = async (
                         provider: budget.provider,
                         scope: "provider_cost_month",
                         limitLayer: "operational_guardrail",
+                        alternativeModelIds: alternativeModelsForProvider(
+                            budget.provider
+                        ),
                         internalRequiredCostMicroUsd: reservedCost,
                         internalLimitCostMicroUsd: providerMonthlyLimit,
                     }
@@ -2866,7 +2975,7 @@ export const validateChatPayload = (body: unknown) => {
  * guardrail error read like a billing statement.
  */
 export const publicChatErrorDetails = (
-    details: Record<string, number | string> | undefined
+    details: ChatErrorDetails | undefined
 ) => {
     if (!details) return undefined;
     const entries = Object.entries(details).filter(

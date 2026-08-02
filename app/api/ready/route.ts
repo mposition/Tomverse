@@ -6,6 +6,11 @@ import { after } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSecurityEnvironmentStatus } from "@/lib/securityEnvironment";
 import { reportOperationalDependencyStatus } from "@/lib/operationalMonitoring";
+import { AVAILABLE_MODELS } from "@/lib/models";
+import {
+  getActiveProviders,
+  getProviderBudgetReadiness,
+} from "@/lib/providerCostBudget";
 
 const DATABASE_CHECK_TIMEOUT_MS = 5_000;
 const baseHeaders = {
@@ -49,8 +54,14 @@ const readinessResponse = async (head = false) => {
   const securityStatus = getSecurityEnvironmentStatus();
   const securityEnvironment =
     process.env.NODE_ENV !== "production" || securityStatus.ready;
+  // A provider budget is a global cap: misconfigured, it refuses every user of
+  // that provider at once. Refusing traffic here is the cheaper failure.
+  const budgetStatus = getProviderBudgetReadiness(
+    getActiveProviders(AVAILABLE_MODELS)
+  );
+  const providerBudgets = budgetStatus.ready;
   const database = databaseResult.ready;
-  const ready = database && securityEnvironment;
+  const ready = database && securityEnvironment && providerBudgets;
   const headers = ready
     ? { ...baseHeaders, "X-Tomverse-Trace-Id": traceId }
     : {
@@ -77,6 +88,26 @@ const readinessResponse = async (head = false) => {
           component: "api-ready",
           route: "/api/ready",
           durationMs: databaseResult.durationMs,
+          traceId,
+        },
+      }),
+      reportOperationalDependencyStatus({
+        dependency: "provider-cost-budgets",
+        healthy: providerBudgets,
+        code: "PROVIDER_COST_BUDGET_NOT_READY",
+        title: "Provider spend budgets are not configured correctly",
+        error:
+          budgetStatus.errors.length > 0
+            ? budgetStatus.errors.map((problem) => problem.message).join(" | ")
+            : "Provider spend budgets are configured.",
+        severity: "fatal",
+        context: {
+          component: "api-ready",
+          route: "/api/ready",
+          failedProviders:
+            [
+              ...new Set(budgetStatus.errors.map((problem) => problem.provider)),
+            ].join(",") || "none",
           traceId,
         },
       }),
@@ -113,6 +144,7 @@ const readinessResponse = async (head = false) => {
       checks: {
         database,
         securityEnvironment,
+        providerBudgets,
       },
       traceId,
     },

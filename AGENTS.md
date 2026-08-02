@@ -85,6 +85,11 @@ UI-012에서 승인된 정책(B안)입니다. accent 색은 **hue가 아니라 �
   담당자·검증 티켓·등록일·기한·production 승인과 함께 등록합니다. 기한(최대
   90일)이 지나면 같은 검사가 경고에서 실패로 바뀝니다. fallback 사용 비율과
   예약 대비 정산 비율은 `GET /api/admin/fallback-pricing`에서 봅니다.
+- **provider 예산은 production에서 반드시 명시합니다.** production 기본값은
+  없고, 활성 provider에 `CHAT_PROVIDER_*_COST_MICROUSD_PER_DAY`/`_PER_MONTH`가
+  없으면 `/api/ready`가 실패합니다. 단일 계정의 plan guardrail보다 낮은 값은
+  바닥으로 올려 강제하고 보고합니다. 환경변수를 **먼저** 배포하고 코드를
+  나중에 배포합니다. 현황은 `GET /api/admin/provider-budgets`에서 봅니다.
 - 가격 변경은 소급 적용하지 않습니다. `pricingVersion`과 `costSource`를
   reservation·settlement snapshot에 저장합니다.
 - 사용자 응답에 원시 내부 USD를 노출하지 않습니다. `internal*` 진단 필드는

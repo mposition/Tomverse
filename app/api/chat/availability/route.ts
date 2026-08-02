@@ -34,7 +34,7 @@ import { estimatePromptTokens } from "@/lib/chatTokenEstimate";
 import { WEB_SEARCH_MODES } from "@/lib/appDefaults";
 import { getWebSearchCapability } from "@/lib/webSearchCapability";
 import { getWebSearchSurchargeCredits } from "@/lib/webSearchCredits";
-import { getProviderCostGuardrailLimits } from "@/lib/chatCostGuardrails";
+import { getProviderCostGuardrailLimits } from "@/lib/providerCostBudget";
 import { futureResetAt } from "@/lib/chatLimitDecisionCore";
 
 const availabilitySchema = z

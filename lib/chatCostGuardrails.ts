@@ -207,18 +207,8 @@ export const getGuestCostGuardrailLimits = (
         100_000,
 });
 
-export const getProviderCostGuardrailLimits = (
-    provider: string,
-    environment: Record<string, string | undefined> = process.env
-) => ({
-    day:
-        positiveInteger(
-            environment[`CHAT_PROVIDER_${provider.toUpperCase()}_COST_MICROUSD_PER_DAY`]
-        ) ?? 10_000_000,
-    month:
-        positiveInteger(
-            environment[
-                `CHAT_PROVIDER_${provider.toUpperCase()}_COST_MICROUSD_PER_MONTH`
-            ]
-        ) ?? 100_000_000,
-});
+// The provider-wide budget used to live here. It moved to
+// lib/providerCostBudget.ts, which derives its floor from the plan guardrails
+// above -- a global cap below one account's own entitlement is this module's
+// defect one layer down. Import it from there; re-exporting it here would make
+// the dependency circular, and the binding would be undefined at module init.
