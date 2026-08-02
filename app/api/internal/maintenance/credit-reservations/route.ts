@@ -1,6 +1,7 @@
 import { createHash, timingSafeEqual } from "node:crypto";
 import { after } from "next/server";
 import { reconcileExpiredChatCreditReservations } from "@/lib/chatSecurity";
+import { reconcileExpiredChatRequestLeases } from "@/lib/chatRequestLease";
 import { reportOperationalIncident } from "@/lib/operationalMonitoring";
 import {
   completeScheduledJob,
@@ -47,6 +48,13 @@ export async function POST(request: Request) {
     // recording it. It never throws, so it cannot turn a successful
     // reconciliation into a failed one.
     const refundRequests = await reconcileProcessingRefundRequestsQuietly();
+    // Concurrency leases orphaned by a killed worker or a failed release are
+    // swept on this fifteen-minute cadence rather than the daily cleanup: an
+    // orphan holds a slot a real person is waiting on, so a day of it is a day
+    // of unexplained "a response is already being generated".
+    const requestLeases = await reconcileExpiredChatRequestLeases().catch(
+      () => ({ removed: 0 })
+    );
     await completeScheduledJob({
       runId: run?.id,
       processedCount: result.examined,
@@ -55,6 +63,7 @@ export async function POST(request: Request) {
         infrastructureMonitor,
         notificationDeliveries,
         refundRequests,
+        requestLeases,
       },
     });
     return Response.json(
@@ -64,6 +73,7 @@ export async function POST(request: Request) {
         infrastructureMonitor,
         notificationDeliveries,
         refundRequests,
+        requestLeases,
       },
       { headers: { "Cache-Control": "no-store" } }
     );

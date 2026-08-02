@@ -200,6 +200,23 @@ export async function prepareGuestPage(page: Page, language: QaLanguage = "ko") 
   await page.route("**/api/auth/session**", (route) =>
     route.fulfill(json(null))
   );
+  // Guests run the aggregate comparison preflight too -- it is what admits all
+  // three panels of a comparison at once instead of letting them race for
+  // concurrency slots. Mocked here so guest specs do not depend on it.
+  await page.route("**/api/chat/preflight", async (route) => {
+    const body = route.request().postDataJSON() as {
+      comparisonId?: string;
+      modelIds?: string[];
+    };
+    await route.fulfill(
+      json({
+        ok: true,
+        comparisonId: body.comparisonId || "qa-guest-comparison",
+        modelCount: body.modelIds?.length || 0,
+        requiredCredits: body.modelIds?.length || 0,
+      })
+    );
+  });
 
   await page.addInitScript((lang) => {
     // A scriptable stand-in for Cloudflare's widget. The default -- "silent" --

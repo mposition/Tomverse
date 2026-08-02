@@ -63,6 +63,7 @@ type PromptPayload = {
   userMessageId: string;
   attachments: ChatAttachment[];
   deepResearchDepth?: "quick" | "standard" | "deep";
+  admissionToken?: string | null;
 };
 
 type ModelRuntimeStatus = "idle" | "loading" | "responding" | "error" | "cancelled" | "paused";
