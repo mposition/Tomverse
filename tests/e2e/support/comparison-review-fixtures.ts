@@ -12,7 +12,7 @@ export const reviewModels = [
   "gpt-5-4-mini",
   "claude-haiku-4-5",
   // The stable Tomverse catalog id is intentionally preserved even though the
-  // provider-facing API model has advanced to Gemini 3.1 Flash-Lite.
+  // provider-facing API model has advanced to Gemini 3.5 Flash-Lite.
   "gemini-2-5-flash",
 ];
 
@@ -68,7 +68,7 @@ export async function mockComparisonReview(
               {
                 messageId: "41111111-1111-4111-8111-111111111111",
                 modelId: reviewModels[2],
-                modelName: "Gemini 3.1 Flash-Lite",
+                modelName: "Gemini 3.5 Flash-Lite",
               },
             ],
             estimatedCredits: 4,
@@ -224,7 +224,7 @@ export async function mockComparisonReview(
               responseId: "C",
               messageId: "41111111-1111-4111-8111-111111111111",
               modelId: reviewModels[2],
-              modelName: "Gemini 3.1 Flash-Lite",
+              modelName: "Gemini 3.5 Flash-Lite",
             },
           ],
           reviewerModelId: "mistral-medium-3-1",
@@ -249,7 +249,7 @@ export async function mockConversationHistory(page: Page) {
   const assistantMessageByModel: Record<string, { id: string; content: string }> = {
     [reviewModels[0]]: { id: "21111111-1111-4111-8111-111111111111", content: "GPT-5.4 mini answer" },
     [reviewModels[1]]: { id: "31111111-1111-4111-8111-111111111111", content: "Claude Haiku 4.5 answer" },
-    [reviewModels[2]]: { id: "41111111-1111-4111-8111-111111111111", content: "Gemini 3.1 Flash-Lite answer" },
+    [reviewModels[2]]: { id: "41111111-1111-4111-8111-111111111111", content: "Gemini 3.5 Flash-Lite answer" },
   };
   await page.route(
     /.*\/api\/conversations\/qa-conversation(\?.*)?$/,

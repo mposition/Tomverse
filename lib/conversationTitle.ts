@@ -3,6 +3,7 @@ import "server-only";
 import { generateText } from "ai";
 import { prisma } from "@/lib/prisma";
 import { getActiveAiModel } from "@/lib/activeAiModel";
+import { getModelGenerationSettings } from "@/lib/modelGenerationCompatibility";
 import {
   ENABLED_MODELS,
   getEnabledModel,
@@ -29,7 +30,7 @@ export type TitleGenerationResult =
 
 const MAX_TITLE_LENGTH = 50;
 const MAX_INPUT_CHARS = 2_000;
-const DEFAULT_TITLE_MODEL_ID = "gpt-5-4-mini";
+const DEFAULT_TITLE_MODEL_ID = "gpt-5-6-luna";
 
 const QUOTE_PAIRS: Array<[string, string]> = [
   ['"', '"'],
@@ -101,7 +102,7 @@ const providerHasApiKey = (provider: AiProvider): boolean =>
 /**
  * Ordered list of models to try for title generation, best first:
  *   1. CONVERSATION_TITLE_MODEL_ID (operator override), if set
- *   2. the compiled-in default (gpt-5-4-mini)
+ *   2. the compiled-in default (gpt-5-6-luna)
  *   3. every other enabled "standard" model whose provider key is present
  *
  * Only models whose provider actually has an API key in this environment are
@@ -189,7 +190,7 @@ export async function generateConversationTitle(
         model: getActiveAiModel(model),
         system: TITLE_SYSTEM_PROMPT,
         prompt,
-        temperature: 0.2,
+        ...getModelGenerationSettings(model, { temperature: 0.2 }),
         maxOutputTokens: 32,
         maxRetries: 1,
         abortSignal: AbortSignal.timeout(15_000),

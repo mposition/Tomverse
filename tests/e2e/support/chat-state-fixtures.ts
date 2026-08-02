@@ -404,6 +404,19 @@ export async function setRootFontSize(
 export async function setDeterministicTheme(page: Page, theme: Theme) {
   await page.addInitScript((value: Theme) => {
     window.localStorage.setItem("tomverse_theme_preference", value);
+    // UI-001. The cookie is the authority now -- it is the only store the
+    // server render and the pre-paint bootstrap can both see, so
+    // `lib/theme.ts` reads it ahead of `localStorage`, which survives only as
+    // a migration source. Seeding just the local copy stopped being enough:
+    // a suite that asks for light and then dark on the same context (see
+    // ui-state-contrast.spec.ts, which loops both themes inside one test)
+    // would have the first iteration's cookie outrank the second iteration's
+    // request, and every later theme would silently be the first one.
+    //
+    // Written on every navigation rather than once through
+    // `context.addCookies`, so each `goto` re-asserts the requested theme
+    // instead of inheriting whatever the previous iteration left behind.
+    document.cookie = `tomverse_theme=${value}; Path=/; Max-Age=31536000; SameSite=Lax`;
   }, theme);
 }
 

@@ -739,7 +739,7 @@ const checks = [
       const signup = read("app/(site)/(application)/auth/signin/SignInPageContent.tsx");
       const chatInput = read("components/chat/ChatInput.tsx");
       const migration = read(
-        "prisma/migrations/20260714233000_expand_product_analytics_funnel/migration.sql"
+        "prisma/migrations/00000000000000_baseline/migration.sql"
       );
       const purchase = read("lib/stripeWebhookProcessing.ts");
       return (
@@ -777,10 +777,16 @@ const checks = [
       const input = read("components/chat/ChatInput.tsx");
       const schema = read("prisma/schema.prisma");
       const migration = read(
-        "prisma/migrations/20260715093000_add_model_finder_preferences/migration.sql"
+        "prisma/migrations/00000000000000_baseline/migration.sql"
       );
+      // Migration assertions split by what they are actually about. Anything
+      // structural -- a table, a column, a CHECK constraint -- is read from
+      // prisma/migrations/00000000000000_baseline, because that is what a
+      // freshly provisioned database gets. One-off ALTER and data steps only
+      // ever existed in the replaced history, so they are read from
+      // prisma/migrations-archive/, which is frozen.
       const dismissalMigration = read(
-        "prisma/migrations/20260715220000_add_model_finder_dismissed_at/migration.sql"
+        "prisma/migrations-archive/20260715220000_add_model_finder_dismissed_at/migration.sql"
       );
       return (
         source.includes("getServerSession(authOptions)") &&
@@ -864,7 +870,7 @@ const checks = [
   },
   {
     name: "TOMVERSE50 is bounded, advertised from live config, and auto-validated",
-    file: "prisma/migrations/20260714190000_configure_tomverse50_public_launch/migration.sql",
+    file: "prisma/migrations-archive/20260714190000_configure_tomverse50_public_launch/migration.sql",
     test: (source) =>
       source.includes("'TOMVERSE50'") &&
       source.includes('"discountPercent" = 50') &&
@@ -882,7 +888,7 @@ const checks = [
   },
   {
     name: "TOMFRIEND100 is a bounded 60-day non-renewing Pro pass",
-    file: "prisma/migrations/20260716150000_founding_tester_pass/migration.sql",
+    file: "prisma/migrations-archive/20260716150000_founding_tester_pass/migration.sql",
     test: (source) => {
       const checkout = read("app/api/billing/checkout/route.ts");
       const maintenance = read("lib/maintenance.ts");
@@ -999,30 +1005,42 @@ const checks = [
         read("app/[locale]/layout.tsx"),
       ];
       const requestReadsIn = (layout) =>
-        [...layout.matchAll(/\(await headers\(\)\)\.get\(([^)]*)\)/g)].map(
-          (match) => match[1].trim()
-        );
+        [
+          ...layout.matchAll(
+            /(?:\(await headers\(\)\)|requestHeaders)\.get\(([^)]*)\)/g
+          ),
+        ].map((match) => match[1].trim());
       const siteReads = requestReadsIn(rootLayouts[0]);
       const localeReads = requestReadsIn(rootLayouts[1]);
+      const proxySource = read("proxy.ts");
+      // VAL-004 narrowed this rule rather than relaxing it, and UI-001 narrows
+      // it again on the same terms. A root layout may read values the *proxy*
+      // resolved for this request and nothing else: reading a session, a
+      // cookie or the database there would put per-user state above every
+      // route under that root, which is what the assertions further down still
+      // forbid outright.
+      //
+      // UI-001 adds the theme. It is per-visitor, so the property that keeps it
+      // safe is not in this layout but in the proxy: THEME_HEADER is set only
+      // when the request is *not* a static marketing request, so the
+      // prerendered, publicly cached HTML is never rendered with one visitor's
+      // theme. That guard is asserted here rather than assumed, because
+      // deleting it is what would turn this into a cache-poisoning bug.
+      const allowedSiteReads = new Set([
+        "DOCUMENT_LANGUAGE_HEADER",
+        "THEME_HEADER",
+        '"x-nonce"',
+      ]);
       return (
         source.includes('export const dynamic = "force-static"') &&
         source.includes("export const revalidate = false") &&
         applicationLayout.includes('export const dynamic = "force-dynamic"') &&
         applicationLayout.includes("getServerSession(authOptions)") &&
-        // VAL-004 narrowed this rule rather than relaxing it. A root layout may
-        // read request-scoped values the proxy resolved and nothing else --
-        // reading a session, a cookie or the database there would put per-user
-        // state above every route under that root.
-        //
-        // UI-001 added the second permitted read. The CSP nonce is the same
-        // category as the document language: minted per request by the proxy,
-        // identical for every visitor who happens to share that request, and
-        // carrying no user identity. The theme bootstrap is an inline script and
-        // cannot execute under `script-src 'self' 'nonce-...'` without it. The
-        // allowlist stays exhaustive -- anything else still fails this check.
-        siteReads.length === 2 &&
-        siteReads[0] === "DOCUMENT_LANGUAGE_HEADER" &&
-        siteReads[1] === '"x-nonce"' &&
+        siteReads.length > 0 &&
+        siteReads.every((entry) => allowedSiteReads.has(entry)) &&
+        siteReads.includes("DOCUMENT_LANGUAGE_HEADER") &&
+        proxySource.includes("if (!isStaticMarketingRequest) {") &&
+        proxySource.includes("requestHeaders.set(THEME_HEADER, theme)") &&
         rootLayouts[0].includes('import { headers } from "next/headers"') &&
         // The localized root takes its language from `params`, so it needs no
         // request-time read at all and must stay prerenderable: an accidental
@@ -1245,7 +1263,7 @@ const checks = [
     test: (source) => {
       const shared = read("lib/productAnalyticsShared.ts");
       const migration = read(
-        "prisma/migrations/20260726120000_add_model_picker_funnel_events/migration.sql"
+        "prisma/migrations/00000000000000_baseline/migration.sql"
       );
       const searchTracking = source.slice(
         source.indexOf("const handleSearchChange"),
@@ -1741,7 +1759,7 @@ const checks = [
       ) &&
       read("prisma/schema.prisma").includes("model CreditDebtEntry") &&
       read(
-        "prisma/migrations/20260715193000_add_credit_debt_and_billing_risk/migration.sql"
+        "prisma/migrations/00000000000000_baseline/migration.sql"
       ).includes('CREATE TABLE "CreditDebtEntry"'),
   },
   {
@@ -1790,7 +1808,7 @@ const checks = [
     test: (source) => {
       const schema = read("prisma/schema.prisma");
       const migration = read(
-        "prisma/migrations/20260715213000_add_durable_chat_credit_reservations/migration.sql"
+        "prisma/migrations/00000000000000_baseline/migration.sql"
       );
       return (
         schema.includes("model ChatCreditReservation") &&
@@ -2057,6 +2075,108 @@ const checks = [
         !prWorkflow.includes("chat-state-visual-regression") &&
         !prWorkflow.includes("ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION") &&
         !mainWorkflow.includes("ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION")
+      );
+    },
+  },
+  {
+    // The goldens report `Not verified` on a substitute browser instead of a
+    // red diff (tests/e2e/support/canonical-visual.ts). That is only safe
+    // while no workflow can put CI into the substitute case: a runner with
+    // PLAYWRIGHT_CHROMIUM_EXECUTABLE set would skip every golden and still
+    // report green, which is a quieter version of the `--update-snapshots`
+    // failure the checks above already refuse.
+    name: "Goldens are skipped as Not verified off-canonical, and no workflow can put CI there",
+    file: "tests/e2e/support/canonical-visual.ts",
+    test: (source) => {
+      const setsExecutable = workflowFiles().filter((path) =>
+        read(path).includes("PLAYWRIGHT_CHROMIUM_EXECUTABLE")
+      );
+      if (setsExecutable.length > 0) {
+        console.error(
+          `Workflows must not set PLAYWRIGHT_CHROMIUM_EXECUTABLE -- it would skip every golden: ${setsExecutable.join(", ")}`
+        );
+        return false;
+      }
+      return (
+        source.includes("PLAYWRIGHT_CHROMIUM_EXECUTABLE") &&
+        source.includes("Not verified -- non-canonical browser") &&
+        source.includes("docs/qa/canonical-visual-baseline.md") &&
+        // Skipping is the whole mechanism; re-recording from here is the
+        // outcome the policy exists to prevent, so the guard must never
+        // reach for it.
+        !source.includes("--update-snapshots") &&
+        // Both golden surfaces are wired to it. A guard nothing calls is
+        // indistinguishable from no guard.
+        read("tests/e2e/chat-state-visual-regression.spec.ts").includes(
+          "skipUnlessCanonicalVisualBrowser()"
+        ) &&
+        read("tests/e2e/mobile-composer-contract.spec.ts").includes(
+          "test.beforeEach(skipUnlessCanonicalVisualBrowser)"
+        ) &&
+        read("docs/qa/canonical-visual-baseline.md").includes(
+          "skipUnlessCanonicalVisualBrowser"
+        )
+      );
+    },
+  },
+  {
+    // #232 replaced a manual recovery step with this workflow, and the release
+    // checklist now says to verify rather than perform it. What makes that
+    // safe is the `verify` job: without it, a back-merge that conflicted or was
+    // refused would leave main outside develop's ancestry silently, which is
+    // the exact failure the manual step used to catch by being on a checklist.
+    // `if: always()` is load-bearing -- verify runs *because* the back-merge
+    // may have failed, so a `needs:` without it would skip precisely when the
+    // invariant most needs reporting.
+    name: "The main-into-develop back-merge is automated and its ancestry check cannot be skipped",
+    file: ".github/workflows/back-merge-main-to-develop.yml",
+    test: (source) => {
+      const checklist = read(".github/RELEASE_CHECKLIST.md");
+      // Both strings below appear more than once in this file -- in the header
+      // commentary as well as in the steps -- so a whole-file substring match
+      // passes while the step that matters has been gutted. Measured: rewriting
+      // the merge step's `--no-ff` and the verify step's ancestry command both
+      // left a whole-file check green. Slice to the job that has to carry each.
+      const verifyAt = source.indexOf("\n  verify:");
+      const backMergeAt = source.indexOf("\n  back-merge:");
+      if (verifyAt < 0 || backMergeAt < 0 || backMergeAt > verifyAt) {
+        console.error(
+          "back-merge-main-to-develop.yml no longer has a back-merge job followed by a verify job."
+        );
+        return false;
+      }
+      const backMergeJob = source.slice(backMergeAt, verifyAt);
+      const verifyJob = source.slice(verifyAt);
+      return (
+        // Fires on the event that opens the gap, not on a schedule.
+        /^on:\s*$/m.test(source) &&
+        source.includes("push:") &&
+        source.includes("      - main") &&
+        // A merge commit is the entire point: the second parent is what
+        // carries the ancestry, so this must not become a fast-forward or a
+        // rebase, either of which would leave nothing recording it.
+        backMergeJob.includes("git merge --no-ff origin/main") &&
+        !backMergeJob.includes("--ff-only") &&
+        !backMergeJob.includes("git rebase") &&
+        // The guard, and the one command that decides the invariant. Both have
+        // to be in the verify job itself: `if: always()` anywhere else does
+        // not make this one run after a failed back-merge, which is the only
+        // time it matters.
+        verifyJob.includes("if: always()") &&
+        verifyJob.includes(
+          "git merge-base --is-ancestor origin/main origin/develop"
+        ) &&
+        // A conflict opens a pull request rather than resolving blind.
+        backMergeJob.includes("automation/back-merge-main-") &&
+        // It may only ever move develop. A back-merge that could push main
+        // would be a way to move the release branch outside a review.
+        !/git push (-u )?origin main\b/.test(source) &&
+        // The checklist has to agree that this is automated, or an operator
+        // following it by hand races the workflow for the same ref.
+        checklist.includes("back-merge-main-to-develop.yml") &&
+        // Matched across a line wrap: the checklist is hard-wrapped, so the
+        // sentence moves whenever the paragraph above it is edited.
+        /Do not perform\s+the back-merge by hand/.test(checklist)
       );
     },
   },

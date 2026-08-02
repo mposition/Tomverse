@@ -7,7 +7,13 @@ import {
   type AiModel,
 } from "@/lib/models";
 
-const GUEST_DEFAULT_MODEL_ID = "gemini-2-5-flash";
+// Kept in step with DEFAULT_MODEL_ID so a guest's leading model is the same
+// model a signed-in account gets by default. It was gemini-2-5-flash while
+// the app default was gpt-5-4-mini; both moved to gpt-5-6-luna on 2026-08-01.
+// Operational deployments may still hold an older guestDefaultModelId in
+// AppSetting -- prisma/migrations/20260801200000_default_model_gpt_5_6_luna
+// realigns that exact key rather than relying on this constant alone.
+const GUEST_DEFAULT_MODEL_ID = "gpt-5-6-luna";
 
 // The three most recognizable frontier brands, shown for every guest so
 // their first chat immediately demonstrates Tomverse's core comparison
@@ -15,12 +21,16 @@ const GUEST_DEFAULT_MODEL_ID = "gemini-2-5-flash";
 // guestDefaultModelId (AppSetting) below — that setting only controls which
 // of these three leads (see getGuestDefaultSelectedModels); it has no effect
 // if it names a model outside the trio.
-export const GUEST_BRAND_TRIO_MODEL_IDS = ["gpt-5-4-mini", "claude-haiku-4-5", "gemini-2-5-flash"];
+//
+// The OpenAI slot moved from gpt-5-4-mini to gpt-5-6-luna with the default
+// switch. Both are Guest-tier Standard models at 1 credit, so the trio still
+// costs a guest exactly 3 credits per comparison.
+export const GUEST_BRAND_TRIO_MODEL_IDS = ["gpt-5-6-luna", "claude-haiku-4-5", "gemini-2-5-flash"];
 
 // Backstops used only if one of the brand trio above is itself disabled or
 // ineligible, so the guest default still comes out to 3 distinct models
 // instead of silently collapsing via Set dedup.
-export const GUEST_FALLBACK_MODEL_IDS = ["llama-3-1", "grok-3-mini", "deepseek-v4-flash"];
+export const GUEST_FALLBACK_MODEL_IDS = ["deepseek-v4-flash", "mistral-small-4", "qwen3.6-flash"];
 
 /** Resolves a model id against whichever catalogue the caller is holding. */
 export type ModelLookup = (modelId: string) => AiModel | undefined;

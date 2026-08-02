@@ -79,6 +79,8 @@ type DesktopChatShellProps = {
   onDownload: (id: string, title: string) => void;
   onToggleModel: (modelId: string) => boolean;
   onSwapModel: (removeModelId: string, addModelId: string) => boolean;
+  /** Plan/guest entitlement check, so the outage banner never offers a swap this viewer cannot run. */
+  canSelectModel?: (modelId: string) => boolean;
   webSearchMode: WebSearchMode;
   onWebSearchModeChange: (mode: WebSearchMode) => void;
   onOpenDeepResearchSetup: () => void;
@@ -130,6 +132,7 @@ export function DesktopChatShell({
   onDownload,
   onToggleModel,
   onSwapModel,
+  canSelectModel,
   webSearchMode,
   onWebSearchModeChange,
   onOpenDeepResearchSetup,
@@ -401,6 +404,7 @@ export function DesktopChatShell({
           selectedModels={selectedModels}
           compact
           onSwapModel={onSwapModel}
+          canSelectModel={canSelectModel}
         />
         {/*
           UI-P1-05. The tab bar used to be suppressed while the conversation

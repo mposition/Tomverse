@@ -20,6 +20,12 @@
 # Sandbox-only Playwright browser-executable override; never a real fix.
 playwright.local-sandbox.config.ts
 
+# Default-model eval output (scripts/evalDefaultModel.mjs --json).
+# Real, billed provider responses -- large, and evidence of one run rather than
+# source. Retain the files with the decision record and summarise the manifest
+# in .github/audits/, per docs/policy/default-model-luna-migration.md 4.5.1.
+/artifacts/
+
 # next.js
 /.next/
 /out/
@@ -56,9 +62,11 @@ next-env.d.ts
 # docs/qa/ holds approved QA policy (the canonical visual baseline) that CI
 # and the Playwright config both point at, and docs/policy/ holds approved
 # product policy that code and CI enforce (credit entitlement vs operational
-# cost guardrail).
+# cost guardrail). docs/ops/ holds runbooks the deployment path itself depends
+# on -- the migration baseline procedure is not reconstructable from the code.
 docs/*
 !docs/ui-contracts/
 !docs/qa/
 !docs/policy/
+!docs/ops/
 .playwright-mcp

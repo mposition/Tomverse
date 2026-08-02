@@ -18,6 +18,10 @@ import {
 } from "@/lib/models";
 import { getRuntimeModels } from "@/lib/modelRegistry";
 import { getActiveAiModel } from "@/lib/activeAiModel";
+import {
+    getModelGenerationSettings,
+    hasUnsupportedGeminiPrefill,
+} from "@/lib/modelGenerationCompatibility";
 import { getWebSearchCapability } from "@/lib/webSearchCapability";
 import { getWebSearchSurchargeCredits } from "@/lib/webSearchCredits";
 import { buildWebSearchToolConfig, WEB_SEARCH_TOOL_NAMES } from "@/lib/webSearchToolConfig";
@@ -172,9 +176,10 @@ const tracedJsonError = (
     error: string,
     code: string,
     status: number,
-    traceId: string
+    traceId: string,
+    details?: Record<string, unknown>
 ) =>
-    new Response(JSON.stringify({ error, code, traceId }), {
+    new Response(JSON.stringify({ error, code, traceId, ...(details ? { details } : {}) }), {
         status,
         headers: {
             "Content-Type": "application/json",
@@ -603,16 +608,36 @@ export async function POST(req: Request) {
         const runtimeModelMap = new Map(runtimeModels.map((model) => [model.id, model]));
         const catalogModel = runtimeModelMap.get(requestedModelId);
         if (catalogModel && !catalogModel.enabled) {
-            const replacement = catalogModel.replacementModelId
+            const replacementCandidate = catalogModel.replacementModelId
                 ? runtimeModelMap.get(catalogModel.replacementModelId)
                 : undefined;
+            // Only name a replacement the user could actually go and pick.
+            // A retirement that points at a delisted or disabled model is a
+            // dead end, so in that case the message stays generic.
+            const replacement =
+                replacementCandidate?.enabled &&
+                replacementCandidate.publiclyListed !== false &&
+                !replacementCandidate.catalogDeleted
+                    ? replacementCandidate
+                    : undefined;
             return tracedJsonError(
                 replacement
                     ? `${catalogModel.name} is no longer available. Please select ${replacement.name}.`
                     : `${catalogModel.name} is no longer available. Please select another model.`,
                 "MODEL_RETIRED",
                 410,
-                traceId
+                traceId,
+                // The client renders its own localized sentence, so it needs
+                // the replacement as data rather than inside English prose --
+                // the copy used to hard-code one model name for every
+                // retirement, which named the wrong model the moment a second
+                // model was retired onto a different successor.
+                replacement
+                    ? {
+                          replacementModelId: replacement.id,
+                          replacementModelName: replacement.name,
+                      }
+                    : undefined
             );
         }
         const modelConfig = catalogModel?.enabled && !catalogModel.catalogDeleted
@@ -622,6 +647,14 @@ export async function POST(req: Request) {
             return tracedJsonError(
                 "Unknown or disabled model.",
                 "MODEL_NOT_AVAILABLE",
+                400,
+                traceId
+            );
+        }
+        if (hasUnsupportedGeminiPrefill(modelConfig, messages)) {
+            return tracedJsonError(
+                "Gemini 3.6 and later requests must end with a user message.",
+                "GEMINI_PREFILLED_MODEL_TURN_UNSUPPORTED",
                 400,
                 traceId
             );
@@ -1429,6 +1462,7 @@ export async function POST(req: Request) {
                 modelConfig.provider === "perplexity"
                     ? perplexityUsageHeaders(traceId)
                     : undefined,
+            ...getModelGenerationSettings(modelConfig),
             ...(webSearchToolConfig ?? {}),
         });
 

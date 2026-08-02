@@ -32,7 +32,7 @@ const setWebSearchModeAlways = async (page: Page) => {
   await page.getByTestId("web-search-mode-option-always").click();
 };
 
-// gpt-5-5 and claude-sonnet-5 are Pro-tier; the default mocked plan is Free.
+// GPT-5.6 Sol and Claude Sonnet 5 are Pro-tier; the default mocked plan is Free.
 const asProPlan = async (page: Page) => {
   await page.unroute("**/api/user/usage**");
   await page.route("**/api/user/usage**", (route) =>
@@ -116,10 +116,13 @@ const seedFreshAccount = async (page: Page) => {
   });
 };
 
-// A fresh account starts on the single compiled-in default model
-// (gpt-5-4-mini). toggleModel() refuses to drop the last remaining model, so
-// the default can only be removed once at least one target is already
-// selected -- add the first target, drop the default, then add the rest.
+// A fresh account starts on the single compiled-in default model, which moved
+// from gpt-5-4-mini to gpt-5-6-luna on 2026-08-01. toggleModel() refuses to
+// drop the last remaining model, so the default can only be removed once at
+// least one target is already selected -- add the first target, drop the
+// default, then add the rest.
+const COMPILED_IN_DEFAULT_MODEL_ID = "gpt-5-6-luna";
+
 const selectModelsViaPicker = async (page: Page, models: string[]) => {
   // STG-F008: specific models are picked from the full catalogue, which is the
   // picker's second step.
@@ -127,7 +130,11 @@ const selectModelsViaPicker = async (page: Page, models: string[]) => {
   const optionFor = (modelId: string) =>
     page.locator(`[data-testid="model-option"][data-model-id="${modelId}"]`);
   await optionFor(models[0]).click();
-  await optionFor("gpt-5-4-mini").click();
+  // Skipped when the default is itself one of the targets, so this never
+  // deselects a model the caller asked for.
+  if (!models.includes(COMPILED_IN_DEFAULT_MODEL_ID)) {
+    await optionFor(COMPILED_IN_DEFAULT_MODEL_ID).click();
+  }
   for (const modelId of models.slice(1)) {
     await optionFor(modelId).click();
   }
@@ -161,7 +168,7 @@ test.describe("native web search (webSearchMode: always)", () => {
   test("3 different providers each get their own native tool, with independent per-panel outcomes and unchanged model list", async ({
     page,
   }, testInfo) => {
-    const models = ["gpt-5-5", "claude-sonnet-5", "gemini-3-5-flash"];
+    const models = ["gpt-5-6-sol", "claude-sonnet-5", "gemini-3-6-flash"];
     await prepareGuestPage(page, "en");
     await mockAuthenticatedApi(page);
     await asProPlan(page);
@@ -181,7 +188,7 @@ test.describe("native web search (webSearchMode: always)", () => {
       requestedModelIds.push(modelId);
       expect(body.webSearchMode).toBe("always");
 
-      if (modelId === "gpt-5-5") {
+      if (modelId === "gpt-5-6-sol") {
         await route.fulfill({
           status: 200,
           contentType: "text/plain; charset=utf-8",
@@ -213,7 +220,7 @@ test.describe("native web search (webSearchMode: always)", () => {
         });
         return;
       }
-      if (modelId === "gemini-3-5-flash") {
+      if (modelId === "gemini-3-6-flash") {
         await route.fulfill({
           status: 200,
           contentType: "text/plain; charset=utf-8",
@@ -249,7 +256,7 @@ test.describe("native web search (webSearchMode: always)", () => {
     await expect(page.getByText("I can answer this without searching.")).toBeVisible();
     await expect(page.getByText("Falling back to a general answer.")).toBeVisible();
 
-    await expect(assistantBadge(page, "gpt-5-5")).toHaveAttribute(
+    await expect(assistantBadge(page, "gpt-5-6-sol")).toHaveAttribute(
       "data-search-status",
       "executed"
     );
@@ -257,7 +264,7 @@ test.describe("native web search (webSearchMode: always)", () => {
       "data-search-status",
       "requested-not-executed"
     );
-    await expect(assistantBadge(page, "gemini-3-5-flash")).toHaveAttribute(
+    await expect(assistantBadge(page, "gemini-3-6-flash")).toHaveAttribute(
       "data-search-status",
       "failed"
     );
@@ -265,7 +272,7 @@ test.describe("native web search (webSearchMode: always)", () => {
     // Citations only render for the panel that actually executed a search,
     // as a real, safe external link.
     const citationLink = page
-      .locator('[data-testid="chat-message"][data-model-id="gpt-5-5"]')
+      .locator('[data-testid="chat-message"][data-model-id="gpt-5-6-sol"]')
       .last()
       .getByTestId("search-citation-list")
       .getByRole("link");
@@ -337,10 +344,9 @@ test.describe("native web search (webSearchMode: always)", () => {
   test("mixed supported/unsupported selection shows a compact partial-support chip and an unsupported badge", async ({
     page,
   }, testInfo) => {
-    // gpt-5-4-mini and gemini-2-5-flash are deliberately "unverified" (not
-    // confirmed native) in lib/webSearchCapability.ts; claude-haiku-4-5 is
-    // confirmed native -- this is the app's own real guest default trio, so
-    // this one test runs as a guest to also cover the guest code path.
+    // gpt-5-4-mini remains unverified; Claude and the in-place upgraded
+    // Gemini 3.5 Flash-Lite have confirmed native search. This is the app's
+    // real guest default trio, so the test also covers the guest code path.
     const models = ["gpt-5-4-mini", "claude-haiku-4-5", "gemini-2-5-flash"];
     const CHAT_ID = "guest_native_search_mixed";
     await prepareGuestPage(page, "en");
@@ -374,7 +380,11 @@ test.describe("native web search (webSearchMode: always)", () => {
         return;
       }
       const body = route.request().postDataJSON() as { modelId?: string };
-      const executed = body.modelId === "claude-haiku-4-5";
+      const executed = ["claude-haiku-4-5", "gemini-2-5-flash"].includes(
+        body.modelId || ""
+      );
+      const provider =
+        body.modelId === "gemini-2-5-flash" ? "google" : "anthropic";
       await route.fulfill({
         status: 200,
         contentType: "text/plain; charset=utf-8",
@@ -385,7 +395,7 @@ test.describe("native web search (webSearchMode: always)", () => {
             requested: true,
             supported: executed,
             executed,
-            provider: executed ? "anthropic" : "openai",
+            provider: executed ? provider : "openai",
             citations: [],
           }
         ),
@@ -401,7 +411,7 @@ test.describe("native web search (webSearchMode: always)", () => {
     // row any more, and tapping the chip names the models that cannot search.
     const chip = page.getByTestId("web-search-mode-chip");
     await expect(chip).toHaveAttribute("data-tone", "warning");
-    await expect(chip).toContainText("1/3 supported");
+    await expect(chip).toContainText("2/3 supported");
     await expect(page.getByTestId("web-search-readiness-summary")).toHaveCount(0);
     await expect(page.getByTestId("web-search-exception-detail")).toHaveCount(0);
     await page.getByTestId("web-search-exception-toggle").click();
@@ -412,7 +422,7 @@ test.describe("native web search (webSearchMode: always)", () => {
 
     await sendChatMessage(page, testInfo, "Any current news?");
 
-    await expect(page.getByText("Searched and answered.")).toBeVisible();
+    await expect(page.getByText("Searched and answered.")).toHaveCount(2);
     await expect(assistantBadge(page, "claude-haiku-4-5")).toHaveAttribute(
       "data-search-status",
       "executed"
@@ -423,7 +433,7 @@ test.describe("native web search (webSearchMode: always)", () => {
     );
     await expect(assistantBadge(page, "gemini-2-5-flash")).toHaveAttribute(
       "data-search-status",
-      "unsupported"
+      "executed"
     );
   });
 

@@ -6,6 +6,7 @@ import {
   isSupportedDocumentLanguage,
 } from "@/lib/documentLanguage";
 import { rootMetadata, rootViewport } from "@/lib/rootMetadata";
+import { isThemePreference, THEME_HEADER } from "@/lib/theme";
 
 export const metadata = rootMetadata;
 export const viewport = rootViewport;
@@ -29,19 +30,24 @@ export default async function SiteLayout({
 }: Readonly<{
   children: React.ReactNode;
 }>) {
-  const documentLanguage = (await headers()).get(DOCUMENT_LANGUAGE_HEADER);
+  const requestHeaders = await headers();
+  const documentLanguage = requestHeaders.get(DOCUMENT_LANGUAGE_HEADER);
   const lang = isSupportedDocumentLanguage(documentLanguage)
     ? documentLanguage
     : "en";
-  // UI-001. The theme bootstrap is an inline script, so under a strict CSP it
-  // needs the request's nonce. Like the document language above, this is
-  // infrastructure the proxy resolved for the request -- not per-user state --
-  // and it is absent on the prerendered routes under this root, where
-  // lib/staticMarketingCsp.ts hashes the built HTML instead.
-  const nonce = (await headers()).get("x-nonce") || undefined;
+
+  // UI-001. Both of these are absent on the statically prerendered marketing
+  // routes under this root, and that absence is the correct answer rather than
+  // a gap: their HTML is cached publicly, so it must not carry one visitor's
+  // theme, and it is served under a hash-based CSP with no nonce. The
+  // stylesheet's `prefers-color-scheme` covers the default there and
+  // ThemeBootstrap corrects an explicit choice before the first paint.
+  const themeHeader = requestHeaders.get(THEME_HEADER);
+  const theme = isThemePreference(themeHeader) ? themeHeader : null;
+  const nonce = requestHeaders.get("x-nonce") || undefined;
 
   return (
-    <DocumentShell lang={lang} nonce={nonce}>
+    <DocumentShell lang={lang} theme={theme} nonce={nonce}>
       {children}
     </DocumentShell>
   );

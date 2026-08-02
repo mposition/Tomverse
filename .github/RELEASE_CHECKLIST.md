@@ -1,8 +1,9 @@
 # Release checklist
 
-Run through this before promoting a build. Every item needs either evidence
-tied to the **release SHA** or a written waiver — an unticked box is a release
-blocker, not a formality.
+Run through this before promoting a build — except section 5, which is checked
+immediately after the merge. Every item needs either evidence tied to the
+**release SHA** or a written waiver — an unticked box is a release blocker, not
+a formality.
 
 Record the release SHA once and reuse it everywhere below; evidence produced
 against a different SHA does not count.
@@ -17,7 +18,7 @@ Date / timezone:    ____________________
 
 - [ ] `npm ci` (lockfile installs cleanly)
 - [ ] `npm audit --omit=dev` — **0 vulnerabilities**
-- [ ] `npm audit` — 0, or every remaining advisory has a waiver recorded in §7
+- [ ] `npm audit` — 0, or every remaining advisory has a waiver recorded in §8
 - [ ] `npm run typecheck`
 - [ ] `npm run lint -- app components lib tests scripts`
 - [ ] `npm run test:unit`
@@ -34,7 +35,7 @@ Date / timezone:    ____________________
 - [ ] Chromium E2E: `desktop-chromium`, `desktop-compact`, `mobile-chromium`
       — no unexplained failures
 
-A suite that could not run is **not** a pass. Record it as N/V in §7 with the
+A suite that could not run is **not** a pass. Record it as N/V in §8 with the
 reason, the owner and what is needed to run it.
 
 ## 2. Visual regression gate (required)
@@ -58,8 +59,15 @@ Reviewed by:        ____________________
 Artifacts checked:  ____________________
 ```
 
-Goldens are never refreshed by CI. If a baseline genuinely needs updating,
-update it in a reviewed pull request of its own — never as part of a release.
+No CI job that *judges* a golden ever rewrites one — `scripts/security-regression-check.mjs`
+asserts that PR Fast Gate, Main Chromium Regression, Nightly Visual Regression
+and the daily audit carry no snapshot-updating flag. Updating a baseline is a
+separate, manual act: dispatch the `Record Visual Baseline` workflow at the ref
+that changed the pixels, review its diff artifact, and merge the throwaway
+`visual-baseline/<run id>` branch it pushes as a pull request of its own —
+never as part of a release. Recording it anywhere but that workflow's canonical
+environment produces a baseline that is itself the defect (see
+`docs/qa/canonical-visual-baseline.md`).
 
 ### Waiver
 
@@ -92,20 +100,79 @@ The automated rows in that matrix run in CI. The screen-reader, Korean-IME,
 external-keyboard and real-browser-zoom rows do not, and a green suite says
 nothing about them.
 
-## 5. Scope notes
+## 5. After the release merge — confirm shared ancestry was restored
+
+This is the one item here that runs *after* the merge button. **Do not perform
+the back-merge by hand.** Since #232 it is automatic, and a manual one now races
+the automation for the same ref.
+
+`.github/workflows/back-merge-main-to-develop.yml` fires on every push to
+`main`. It merges `main` into `develop` as a real merge commit, reports whether
+the merge changed any file, and a separate `verify` job asserts the invariant
+with `if: always()`. Your job here is to confirm it did, not to do it.
+
+- [ ] The **Back-merge main into develop** run for this release finished, and
+      its `verify` job passed
+- [ ] Independently checked: `git fetch origin && git merge-base --is-ancestor origin/main origin/develop`
+      exits 0
+- [ ] The run's "Report what the merge changed" step says the merge changes no
+      file — or, if it does not, the extra content is understood (that means
+      `main` carries work `develop` never had, such as a hotfix landed directly)
+
+```
+Release merge SHA:  ____________________
+Back-merge run URL: ____________________
+Ancestry verified:  ____________________
+```
+
+### When it does not land on its own
+
+The workflow refuses to guess. On a merge conflict, or when the push to
+`develop` is refused by branch protection, it opens
+`automation/back-merge-main-<sha>` as a pull request instead and `verify` fails.
+That failure is the signal that a person has to finish the job:
+
+- [ ] If such a pull request exists, it was merged **with a merge commit**
+
+Squashing it accomplishes nothing at all — the second parent is what carries the
+ancestry, and a squash discards it. That is not hypothetical: of the three
+back-merges opened by hand on 2026-08-01, #203 and #213 were squashed on the way
+in and left the gap exactly where it was.
+
+### Why this exists, and why the repository setting is not the fix
+
+A squash rewrites the release into a single new commit, so `main` and `develop`
+end up sharing no commit at all even though their trees are identical. Nothing
+breaks at the time — the code is released and correct — but the *next* change
+`develop` makes to already-released code has no common base, and every file the
+release touched arrives as an `add/add` conflict. #195 opened with 14 of them;
+#200 cost eighteen.
+
+Turning on **Settings → General → Pull requests → Allow merge commits** was the
+obvious fix and is the wrong one: GitHub's merge-method setting is
+repository-wide and cannot be scoped to one target branch, while squash is
+wanted for feature pull requests into `develop`. #232 makes the release's merge
+method stop mattering instead, which is why this section now verifies rather
+than instructs.
+
+First real trigger, for calibration: #233 was merged as a squash (`2e0eff2`,
+one parent) and the workflow produced `b172d0b` (two parents) unattended —
+run `30723157564`, `verify` green, merge changed no file.
+
+## 6. Scope notes
 
 A green visual run is **not** an accessibility result. Screenshot goldens
 cannot see focus order, accessible names, announcements or contrast in forced
 colors. Accessibility evidence is tracked separately and is not satisfied by
 anything in section 2.
 
-## 6. Database and deployment configuration
+## 7. Database and deployment configuration
 
 Every box needs evidence captured against the release SHA — a command and its
 output, or a screenshot of the setting. "Looks right" is not evidence, and a
-value nobody could read is N/V in §7, never a tick.
+value nobody could read is N/V in §8, never a tick.
 
-### 6.1 Migrations
+### 7.1 Migrations
 
 - [ ] `prisma migrate deploy` run against the target database
 - [ ] No pending migration remains (`prisma migrate status` is clean)
@@ -119,7 +186,7 @@ Migrate output:     ____________________
 Backup / snapshot:  ____________________
 ```
 
-### 6.2 Environment
+### 7.2 Environment
 
 - [ ] `CSP_MODE=enforce`
 - [ ] `REQUIRE_CLOUDFLARE_ORIGIN_SECRET=true`
@@ -133,7 +200,7 @@ Backup / snapshot:  ____________________
 - [ ] `DATABASE_URL` and `DIRECT_DATABASE_URL` are private hosts, or carry
       `sslmode=verify-full` / `verify-ca`
 
-### 6.3 Edge
+### 7.3 Edge
 
 - [ ] Cloudflare strips or overwrites client-supplied `cf-*` headers.
       **Spoof test**, from outside the edge, against the release deployment:
@@ -147,7 +214,7 @@ Backup / snapshot:  ____________________
 - [ ] A request that reaches the origin directly, without the Cloudflare origin
       secret, is rejected with 421
 
-### 6.4 Readiness and liveness
+### 7.4 Readiness and liveness
 
 - [ ] `/api/ready` is wired into pre-promotion checks and into the external
       readiness monitor
@@ -156,7 +223,7 @@ Backup / snapshot:  ____________________
       makes a database blip restart healthy processes and turns a degradation
       into an outage.
 
-### 6.5 Legacy conversation-lock passwords
+### 7.5 Legacy conversation-lock passwords
 
 SEC-011. `Conversation.password` rows written before scrypt hashing hold the
 password in plaintext, and `verifyConversationPassword` still accepts them by
@@ -168,7 +235,7 @@ need the migration.
 **Stage 1 — this release.** Migrate the data. The verifier stays.
 
 - [ ] A backup or restore point exists from **before** the migration ran
-      (§6.1's snapshot covers this if the migration runs after it)
+      (§7.1's snapshot covers this if the migration runs after it)
 - [ ] Dry run first, count recorded:
 
       npm run migrate:conversation-lock-passwords -- --dry-run
@@ -209,7 +276,7 @@ Post-run count:     ____________________
 Stage 2 tracked in: ____________________
 ```
 
-## 7. Unverified items and waivers
+## 8. Unverified items and waivers
 
 Anything above that could not be verified from this environment goes here with
 a named owner. N/V is an accepted, tracked risk; a silent tick is neither.

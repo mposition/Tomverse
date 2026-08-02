@@ -111,3 +111,41 @@ This is a capability fallback for *behavioural* coverage, so that a blocked
 download does not cost the entire suite. It does not make the run canonical.
 Report the blocked host, mark the visual result `Not verified`, and leave the
 goldens alone.
+
+### The suite says so itself
+
+That paragraph was the whole policy for a while, and prose does not survive
+contact with a red test. Every run in such an environment produced a wall of
+screenshot diffs, and each time somebody re-derived the same conclusion from
+scratch -- three separate write-ups in `.github/audits/` reach it independently.
+
+So the goldens now declare it. `tests/e2e/support/canonical-visual.ts` exposes
+`skipUnlessCanonicalVisualBrowser()`, which every golden is gated on:
+
+| environment | goldens | behavioural tests |
+|---|---|---|
+| `PLAYWRIGHT_CHROMIUM_EXECUTABLE` unset (CI, developer machines) | judged | run |
+| `PLAYWRIGHT_CHROMIUM_EXECUTABLE` set | **skipped, reason = `Not verified`** | run |
+
+A skip is the accurate result here, and specifically not a pass: Playwright
+reports it as skipped with the reason and this document attached, which is what
+`Not verified` was always supposed to mean. Nothing about the canonical run
+changes, because CI never sets the variable --
+`scripts/security-regression-check.mjs` fails the build if any workflow does,
+since a runner in the substitute case would skip every golden and still report
+green.
+
+Only the goldens are gated. `mobile-composer-contract.spec.ts` keeps measuring
+overlap, widths, line boxes and overflow on the substitute browser; those
+answers do not depend on the rasteriser.
+
+#### The signature, for whoever meets it next
+
+On a substitute Chromium the diff is invariant to the product, which is how you
+tell it apart from a regression. `mobile-composer-contract`'s two composer
+goldens reported **exactly 906 differing pixels** on Chromium 141 against a
+baseline recorded on Chromium 151 -- the same 906 on `e46389e` (2026-07-30) and
+on `90e5572` (2026-08-01), across a composer rework, a provider-banner change
+and the UI-001 theme change in between. Both were judged green by the canonical
+runner throughout (`e2e.yml` shard 1, runs `30696253742` and `30703064212`).
+A product regression moves that number; a rasteriser difference does not.

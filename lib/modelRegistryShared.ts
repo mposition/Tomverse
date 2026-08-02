@@ -198,3 +198,80 @@ export const staticModelRegistrySeedRows = () =>
     cachedInputPriceMultiplier: model.cachedInputPriceMultiplier ?? null,
     sortOrder: model.sortOrder || 0,
   }));
+
+// Only these human-reviewed lifecycle/API migrations are authoritative over
+// an already-existing runtime row. This is intentionally not a general seed
+// sync: operator-managed availability, catalogue deletion, ordering and
+// unrelated custom metadata remain untouched.
+export const STATIC_CATALOG_RECONCILIATION_MODEL_IDS = [
+  "gpt-5-6-sol",
+  "gpt-5-6-terra",
+  "gpt-5-6-luna",
+  // Added 2026-08-01 with the Luna default switch. 5.4 mini is NOT being
+  // retired here -- it stays enabled, so the `lifecycle` branch below is not
+  // taken for it and its enabled/publiclyListed/status are left alone. What
+  // this entry does reach is the metadata the switch changed: its first
+  // explicit price profile (US$0.75/US$4.50, cached 0.1x), its 128K output
+  // cap and 4,096-token reservation, and its published 400K context window.
+  // Without it, an environment seeded before today would keep the generic
+  // US$0.50/US$1.00 class-fallback numbers frozen in its row forever, because
+  // createMany(skipDuplicates) never updates an existing row.
+  "gpt-5-4-mini",
+  "gemini-3-6-flash",
+  "gemini-2-5-flash",
+  "grok-4",
+  "grok-4-3",
+  "grok-4-5",
+  "grok-3",
+  "grok-3-mini",
+  "llama-3-1",
+  "llama-3-3",
+  "llama-4-scout",
+  "deepseek-v4-flash",
+  "deepseek-v4-pro",
+  "deepseek-r1",
+  "mistral-medium-3-1",
+] as const;
+
+const reconciliationModelIds = new Set<string>(
+  STATIC_CATALOG_RECONCILIATION_MODEL_IDS
+);
+
+export const staticModelRegistryReconciliationRows = () =>
+  staticModelRegistrySeedRows()
+    .filter((row) => reconciliationModelIds.has(row.id))
+    .map((row) => {
+      const lifecycle = row.enabled
+        ? {}
+        : {
+            publiclyListed: row.publiclyListed,
+            enabled: row.enabled,
+            status: row.status,
+            operationalReason: row.operationalReason,
+            userVisibleNote: row.userVisibleNote,
+            replacementModelId: row.replacementModelId,
+          };
+      return {
+        id: row.id,
+        data: {
+          name: row.name,
+          apiModel: row.apiModel,
+          bestFor: row.bestFor,
+          minimumPlan: row.minimumPlan,
+          usageClass: row.usageClass,
+          creditWeight: row.creditWeight,
+          reasoning: row.reasoning,
+          contextWindowTokens: row.contextWindowTokens,
+          supportsImage: row.supportsImage,
+          supportsNativePdf: row.supportsNativePdf,
+          maxImages: row.maxImages,
+          maxBase64ImagePayloadBytes: row.maxBase64ImagePayloadBytes,
+          maxOutputTokens: row.maxOutputTokens,
+          reservationOutputTokens: row.reservationOutputTokens,
+          inputUsdPerMillionTokens: row.inputUsdPerMillionTokens,
+          outputUsdPerMillionTokens: row.outputUsdPerMillionTokens,
+          cachedInputPriceMultiplier: row.cachedInputPriceMultiplier,
+          ...lifecycle,
+        },
+      };
+    });

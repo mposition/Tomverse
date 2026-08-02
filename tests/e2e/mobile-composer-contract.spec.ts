@@ -7,6 +7,7 @@ import {
   prepareGuestPage,
   type QaConversationMessage,
 } from "./support/app-fixtures";
+import { skipUnlessCanonicalVisualBrowser } from "./support/canonical-visual";
 import {
   freezeAnimations,
   installChatModelStub,
@@ -61,7 +62,7 @@ const MODEL_B = "claude-sonnet-5";
 const MODEL_C = "gemini-3-5-flash";
 const THREE_MODELS = [MODEL_A, MODEL_B, MODEL_C];
 /** Neither of these can search: the fully blocked state. */
-const NO_SEARCH_MODELS = ["gpt-5-4-mini", "gemini-2-5-flash"];
+const NO_SEARCH_MODELS = ["gpt-5-4-mini", "deepseek-v4-flash"];
 /** All three verified for provider-native search: the full-support state. */
 const ALL_SEARCH_MODELS = ["claude-haiku-4-5", "claude-sonnet-5", "gemini-3-5-flash"];
 const DEEP_RESEARCH_MODEL = "perplexity/sonar-deep-research";
@@ -860,6 +861,12 @@ test.describe("Mobile composer: visual record", () => {
   // The before/after screenshots the change checklist asks reviewers to
   // compare, pinned as goldens so the next change has to update them
   // deliberately.
+  //
+  // Only these two tests are gated on the canonical browser. Everything above
+  // measures geometry and behaviour, which a substitute Chromium answers just
+  // as well; pixels are the one thing it cannot answer.
+  test.beforeEach(skipUnlessCanonicalVisualBrowser);
+
   for (const width of [390, 320]) {
     test(`composer golden at ${width}px, 3 models, partial web search`, async ({
       page,

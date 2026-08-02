@@ -1,213 +1,274 @@
 import { expect, test, type Page } from "@playwright/test";
+import { prepareGuestPage } from "./support/app-fixtures";
 
 /**
- * UI-001. The theme was applied by `ThemeController`, a `useEffect`, so it ran
- * only after hydration. Until then the document painted with the `:root`
- * defaults -- white -- in a product whose default theme is dark. On the
- * statically prerendered marketing routes the cached HTML is always light-first,
- * so the flash was unconditional there.
+ * UI-001. The theme applied by the *first paint* must already be the one the
+ * visitor ends up with.
  *
- * These tests deliberately do not assert on the *steady* state, which passed
- * before the fix too because Playwright retries. They sample the document at the
- * first opportunity the page gives them and assert it is already correct:
+ * Before this, `.dark` could only be written by React, so every document
+ * painted light and snapped to the user's theme after hydration. Two halves fix
+ * it, and they are tested separately because they fail separately:
  *
- * - `readAtFirstPaint` registers an init script that captures
- *   `documentElement.className` from inside `requestAnimationFrame` on
- *   `DOMContentLoaded`, i.e. before React has hydrated.
- * - the raw HTML assertions confirm the bootstrap ships in the served bytes.
+ *  - `app/globals.css` answers "no explicit choice" from `prefers-color-scheme`
+ *    with no script at all. This is what a `force-static`, publicly cached
+ *    marketing page can honour, since it depends on nothing per-visitor.
+ *  - `components/ThemeBootstrap.tsx` answers the one case CSS cannot: an
+ *    explicit choice that contradicts the OS. It runs during HTML parsing,
+ *    before the first paint.
+ *
+ * The assertions below compare the theme at `DOMContentLoaded` -- captured by
+ * an init script, which is the earliest a test can observe the document -- with
+ * the theme after hydration. Equal means no flash. Asserting only the final
+ * state would pass on the very build this spec exists to fail.
  */
 
-const THEME_KEY = "tomverse_theme_preference";
+const THEME_COOKIE = "tomverse_theme";
+const LEGACY_STORAGE_KEY = "tomverse_theme_preference";
 
-type FirstPaintSample = {
+type ThemeSample = {
   className: string;
   dataTheme: string | null;
+  backgroundColor: string;
   colorScheme: string;
 };
 
-async function readAtFirstPaint(page: Page): Promise<FirstPaintSample> {
-  return page.evaluate(
-    () =>
-      (window as unknown as { __themeFirstPaint?: FirstPaintSample })
-        .__themeFirstPaint as FirstPaintSample
-  );
-}
+type ThemeObservation = {
+  firstPaint: ThemeSample | null;
+  hydrated: ThemeSample;
+  consoleErrors: string[];
+  cspViolations: string[];
+};
 
-async function captureFirstPaint(page: Page, stored: string | null) {
-  await page.addInitScript(
-    ({ key, value }) => {
-      try {
-        if (value === null) window.localStorage.removeItem(key);
-        else window.localStorage.setItem(key, value);
-      } catch {
-        // Storage can be unavailable; the bootstrap must cope either way.
-      }
-      const record = () => {
-        const root = document.documentElement;
-        (
-          window as unknown as { __themeFirstPaint?: unknown }
-        ).__themeFirstPaint = {
-          className: root.className,
-          dataTheme: root.dataset.theme ?? null,
-          colorScheme: root.style.colorScheme,
-        };
+/**
+ * Records the document's theme as soon as the parser reaches the end of the
+ * document, which is after ThemeBootstrap has run and before React hydrates.
+ */
+async function captureFromFirstPaint(page: Page) {
+  await page.addInitScript(() => {
+    const read = () => {
+      const root = document.documentElement;
+      return {
+        className: root.className,
+        dataTheme: root.dataset.theme ?? null,
+        // `--background` is applied to <body>, not <html> (app/globals.css),
+        // so the painted colour has to be read there.
+        backgroundColor: document.body
+          ? getComputedStyle(document.body).backgroundColor
+          : "",
+        colorScheme: getComputedStyle(root).colorScheme,
       };
-      // Runs before hydration: DOMContentLoaded fires once the parser has seen
-      // the bootstrap, and the rAF callback lands before the first paint.
-      document.addEventListener("DOMContentLoaded", () =>
-        requestAnimationFrame(record)
-      );
-    },
-    { key: THEME_KEY, value: stored }
-  );
+    };
+    const record = () => {
+      (window as unknown as Record<string, unknown>).__firstPaintTheme = read();
+    };
+    if (document.readyState === "loading") {
+      document.addEventListener("DOMContentLoaded", record, { once: true });
+    } else {
+      record();
+    }
+  });
 }
 
-test.describe("theme is correct before the first paint", () => {
-  test(
-    "a stored dark preference is applied before hydration",
-    { tag: "@ui-risk" },
-    async ({ page }) => {
-      await captureFirstPaint(page, "dark");
-      await page.goto("/pricing");
-
-      const sample = await readAtFirstPaint(page);
-      expect(sample.className).toContain("dark");
-      expect(sample.dataTheme).toBe("dark");
-      expect(sample.colorScheme).toBe("dark");
+async function observe(page: Page, path: string): Promise<ThemeObservation> {
+  const consoleErrors: string[] = [];
+  const cspViolations: string[] = [];
+  page.on("console", (message) => {
+    if (message.type() !== "error" && message.type() !== "warning") return;
+    const text = message.text();
+    // React reports a server/client mismatch as a hydration error. The theme
+    // classes are under `suppressHydrationWarning`, so any that appears here is
+    // a real one.
+    if (/hydrat/i.test(text)) consoleErrors.push(text);
+    if (/Content Security Policy|Refused to execute/i.test(text)) {
+      cspViolations.push(text);
     }
-  );
+  });
 
-  test(
-    "a stored light preference never flashes dark",
-    { tag: "@ui-risk" },
-    async ({ page }) => {
-      await captureFirstPaint(page, "light");
-      await page.goto("/pricing");
+  await page.goto(path);
+  await page.waitForLoadState("networkidle");
 
-      const sample = await readAtFirstPaint(page);
-      expect(sample.className).not.toContain("dark");
-      expect(sample.dataTheme).toBe("light");
-      expect(sample.colorScheme).toBe("light");
-    }
-  );
+  const result = await page.evaluate(() => {
+    const root = document.documentElement;
+    return {
+      firstPaint:
+        ((window as unknown as Record<string, unknown>).__firstPaintTheme as
+          | ThemeSample
+          | undefined) ?? null,
+      hydrated: {
+        className: root.className,
+        dataTheme: root.dataset.theme ?? null,
+        backgroundColor: getComputedStyle(document.body).backgroundColor,
+        colorScheme: getComputedStyle(root).colorScheme,
+      },
+    };
+  });
 
-  test(
-    "system preference resolves to dark before the first paint",
-    { tag: "@ui-risk" },
-    async ({ page }) => {
-      await page.emulateMedia({ colorScheme: "dark" });
-      await captureFirstPaint(page, "system");
-      await page.goto("/pricing");
+  return { ...result, consoleErrors, cspViolations };
+}
 
-      const sample = await readAtFirstPaint(page);
-      expect(sample.className).toContain("dark");
-      expect(sample.dataTheme).toBe("system");
-      expect(sample.colorScheme).toBe("dark");
-    }
-  );
+/** The theme did not change between the first paint and hydration. */
+function expectNoFlash(observation: ThemeObservation, label: string) {
+  expect(observation.firstPaint, `${label}: first-paint sample missing`).not.toBeNull();
+  expect(
+    observation.firstPaint!.backgroundColor,
+    `${label}: background changed after hydration (this is the flash)`
+  ).toBe(observation.hydrated.backgroundColor);
+  expect(
+    observation.firstPaint!.colorScheme,
+    `${label}: color-scheme changed after hydration`
+  ).toBe(observation.hydrated.colorScheme);
+  expect(observation.consoleErrors, `${label}: hydration errors`).toEqual([]);
+  expect(observation.cspViolations, `${label}: CSP violations`).toEqual([]);
+}
 
-  test(
-    "no stored preference follows the system setting",
-    { tag: "@ui-risk" },
-    async ({ page }) => {
-      await page.emulateMedia({ colorScheme: "dark" });
-      await captureFirstPaint(page, null);
-      await page.goto("/pricing");
+const DARK_BACKGROUND = "rgb(10, 10, 10)";
+const LIGHT_BACKGROUND = "rgb(255, 255, 255)";
 
-      const sample = await readAtFirstPaint(page);
-      expect(sample.className).toContain("dark");
-      expect(sample.dataTheme).toBe("system");
-    }
-  );
+test.describe("theme is correct on the first paint", () => {
+  test.beforeEach(async ({ page }) => {
+    await prepareGuestPage(page, "en");
+    await captureFromFirstPaint(page);
+  });
 
-  test(
-    "a corrupted stored value falls back to system instead of throwing",
-    { tag: "@ui-risk" },
-    async ({ page }) => {
-      await page.emulateMedia({ colorScheme: "dark" });
-      await captureFirstPaint(page, "{not-a-theme}");
-      await page.goto("/pricing");
+  // The half CSS answers on its own: no cookie, no stored value, so the OS
+  // decides and a statically cached page is still correct.
+  for (const colorScheme of ["light", "dark"] as const) {
+    for (const path of ["/about", "/chat"]) {
+      test(`no explicit choice follows the OS (${colorScheme}, ${path})`, async ({
+        page,
+      }) => {
+        await page.emulateMedia({ colorScheme });
+        const observation = await observe(page, path);
+        const label = `system/${colorScheme}${path}`;
 
-      const sample = await readAtFirstPaint(page);
-      expect(sample.dataTheme).toBe("system");
-      expect(sample.className).toContain("dark");
-    }
-  );
-
-  test(
-    "the localized prerendered root also bootstraps the theme",
-    { tag: "@ui-risk" },
-    async ({ page }) => {
-      await captureFirstPaint(page, "dark");
-      await page.goto("/ko");
-
-      const sample = await readAtFirstPaint(page);
-      expect(sample.className).toContain("dark");
-      expect(sample.dataTheme).toBe("dark");
-      await expect(page.locator("html")).toHaveAttribute("lang", "ko");
-    }
-  );
-
-  test(
-    "the application root also bootstraps the theme",
-    { tag: "@ui-risk" },
-    async ({ page }) => {
-      await captureFirstPaint(page, "dark");
-      await page.goto("/chat");
-
-      const sample = await readAtFirstPaint(page);
-      expect(sample.className).toContain("dark");
-      expect(sample.dataTheme).toBe("dark");
-    }
-  );
-
-  test(
-    "the bootstrap ships inline, self-contained, in the served HTML",
-    { tag: "@ui-risk" },
-    async ({ request, baseURL }) => {
-      for (const route of ["/pricing", "/ko", "/chat"]) {
-        const response = await request.get(`${baseURL}${route}`, {
-          failOnStatusCode: false,
-        });
-        const html = await response.text();
-        expect(html, `${route} must carry the bootstrap`).toContain(
-          "prefers-color-scheme: dark"
+        expectNoFlash(observation, label);
+        expect(observation.hydrated.backgroundColor, label).toBe(
+          colorScheme === "dark" ? DARK_BACKGROUND : LIGHT_BACKGROUND
         );
-        expect(html, `${route} must read the stored preference`).toContain(
-          THEME_KEY
-        );
-      }
-    }
-  );
-
-  test(
-    "switching theme after load still works and leaves no hydration error",
-    { tag: "@ui-risk" },
-    async ({ page }) => {
-      const consoleErrors: string[] = [];
-      page.on("console", (message) => {
-        if (message.type() === "error") consoleErrors.push(message.text());
       });
-      page.on("pageerror", (error) => consoleErrors.push(String(error)));
-
-      await captureFirstPaint(page, "dark");
-      await page.goto("/pricing");
-      await expect(page.locator("html")).toHaveClass(/dark/);
-
-      // ThemeController still owns everything after the bootstrap.
-      await page.evaluate((key) => {
-        window.localStorage.setItem(key, "light");
-        window.dispatchEvent(
-          new CustomEvent("tomverse:theme-preference-changed", {
-            detail: "light",
-          })
-        );
-      }, THEME_KEY);
-      await expect(page.locator("html")).not.toHaveClass(/dark/);
-
-      expect(
-        consoleErrors.filter((message) => /hydrat|did not match/i.test(message))
-      ).toEqual([]);
     }
-  );
+  }
+
+  // The half only the bootstrap can answer: the choice contradicts the OS, and
+  // on /about the HTML is prerendered and cached with no theme in it at all.
+  for (const [choice, colorScheme, expected] of [
+    ["light", "dark", LIGHT_BACKGROUND],
+    ["dark", "light", DARK_BACKGROUND],
+  ] as const) {
+    for (const path of ["/about", "/chat"]) {
+      test(`an explicit ${choice} choice overrides an OS set to ${colorScheme} (${path})`, async ({
+        page,
+        context,
+      }) => {
+        await context.addCookies([
+          { name: THEME_COOKIE, value: choice, url: "http://127.0.0.1:3100" },
+        ]);
+        await page.emulateMedia({ colorScheme });
+        const observation = await observe(page, path);
+        const label = `${choice}/os-${colorScheme}${path}`;
+
+        expectNoFlash(observation, label);
+        expect(observation.hydrated.backgroundColor, label).toBe(expected);
+        expect(observation.hydrated.className, `${label}: class`).toContain(choice);
+      });
+    }
+  }
+
+  test("a cached marketing page carries no visitor theme in its HTML", async ({
+    page,
+  }) => {
+    // The cache-poisoning guard: whatever this visitor's cookie says, the
+    // prerendered document must not have been rendered with it, or the next
+    // visitor behind the same cache entry inherits it.
+    const response = await page.request.get("/about", {
+      headers: { Cookie: `${THEME_COOKIE}=dark` },
+    });
+    const html = await response.text();
+    const openingTag = /<html[^>]*>/.exec(html)?.[0] ?? "";
+    expect(openingTag, "static marketing HTML must not carry a theme class").not.toMatch(
+      /\b(dark|light)\b/
+    );
+    expect(openingTag, "nor a data-theme").not.toContain("data-theme");
+    // ... while still shipping the script that corrects it client-side.
+    expect(html).toContain(THEME_COOKIE);
+  });
+
+  test("a pre-cookie choice is migrated and then served from the cookie", async ({
+    page,
+    context,
+  }) => {
+    // Everyone who picked a theme before the cookie existed has it only in
+    // localStorage. It must still apply on the first paint, and must be
+    // promoted so the *server* can honour it next time.
+    await page.addInitScript((key) => {
+      window.localStorage.setItem(key, "dark");
+    }, LEGACY_STORAGE_KEY);
+    await page.emulateMedia({ colorScheme: "light" });
+
+    const observation = await observe(page, "/chat");
+    expectNoFlash(observation, "migration");
+    expect(observation.hydrated.backgroundColor).toBe(DARK_BACKGROUND);
+
+    const cookies = await context.cookies();
+    expect(
+      cookies.find((cookie) => cookie.name === THEME_COOKIE)?.value,
+      "the stored choice must be promoted to the cookie"
+    ).toBe("dark");
+  });
+
+  test("the cookie wins when the two stores disagree", async ({ page, context }) => {
+    // A stale localStorage value must never override the cookie, or the theme
+    // the server rendered from would be replaced after hydration.
+    await context.addCookies([
+      { name: THEME_COOKIE, value: "light", url: "http://127.0.0.1:3100" },
+    ]);
+    await page.addInitScript((key) => {
+      window.localStorage.setItem(key, "dark");
+    }, LEGACY_STORAGE_KEY);
+    await page.emulateMedia({ colorScheme: "dark" });
+
+    const observation = await observe(page, "/chat");
+    expectNoFlash(observation, "cookie vs storage");
+    expect(observation.hydrated.backgroundColor).toBe(LIGHT_BACKGROUND);
+  });
+
+  test("a localized marketing route is themed like the English one", async ({
+    page,
+  }) => {
+    await page.emulateMedia({ colorScheme: "dark" });
+    const observation = await observe(page, "/ko");
+    expectNoFlash(observation, "localized marketing");
+    expect(observation.hydrated.backgroundColor).toBe(DARK_BACKGROUND);
+  });
+
+  test("a soft navigation keeps the theme it arrived with", async ({
+    page,
+    context,
+  }) => {
+    await context.addCookies([
+      { name: THEME_COOKIE, value: "dark", url: "http://127.0.0.1:3100" },
+    ]);
+    await page.emulateMedia({ colorScheme: "light" });
+    await observe(page, "/about");
+
+    const before = await page.evaluate(
+      () => getComputedStyle(document.body).backgroundColor
+    );
+    // Below `lg` the marketing header collapses its nav behind a menu button
+    // (`MarketingChrome`'s `hidden … lg:flex`), so on a narrow project the link
+    // has to be revealed before it can be clicked. Same page, same soft
+    // navigation -- only the affordance that reaches it differs.
+    const menu = page.getByRole("button", { name: /^(Menu|메뉴|菜单)$/ });
+    if (await menu.isVisible()) await menu.click();
+    await page.getByRole("link", { name: /pricing/i }).first().click();
+    await page.waitForLoadState("networkidle");
+    const after = await page.evaluate(
+      () => getComputedStyle(document.body).backgroundColor
+    );
+
+    // The bootstrap is inert on a client navigation by design; the theme has to
+    // survive on the class already applied rather than be re-applied.
+    expect(after, "theme changed across a soft navigation").toBe(before);
+    expect(after).toBe(DARK_BACKGROUND);
+  });
 });

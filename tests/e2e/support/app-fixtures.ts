@@ -437,6 +437,11 @@ export type QaConversationMessage = {
 export async function mockAuthenticatedApi(
   page: Page,
   options: {
+    /**
+     * The seeded conversation's model selection. Note this only takes effect
+     * once that conversation is actually opened (see openRecentConversation) --
+     * /chat's welcome screen starts from DEFAULT_MODEL_ID instead.
+     */
     selectedModels?: string[];
     showSidebarTour?: boolean;
     /**
@@ -487,7 +492,11 @@ export async function mockAuthenticatedApi(
   const conversation = () => ({
     id: "qa-conversation",
     title: state.title,
-    selectedModels: options.selectedModels || ["gpt-5-4-mini"],
+    // Stands in for the compiled-in default selection, so it tracks
+    // DEFAULT_MODEL_ID rather than naming a model in its own right. Moved to
+    // gpt-5-6-luna with the app default on 2026-08-01; a spec that needs a
+    // specific model still passes `selectedModels` explicitly.
+    selectedModels: options.selectedModels || ["gpt-5-6-luna"],
     disabledPanels: [],
     webSearchMode: options.webSearchMode || "off",
     isLocked: state.locked,
@@ -553,7 +562,10 @@ export async function mockAuthenticatedApi(
       json({
         theme: state.theme,
         language: "ko",
-        defaultModel: "gpt-5-4-mini",
+        // Tracks DEFAULT_MODEL_ID, not a model chosen for its own sake: this
+        // is "the account default a seeded QA user still has". Moved to
+        // gpt-5-6-luna on 2026-08-01.
+        defaultModel: "gpt-5-6-luna",
         timeZone: state.timeZone,
         timeZoneInitializedAt: state.timeZoneInitializedAt,
         timeZoneChangedAt: state.timeZoneChangedAt,
@@ -568,7 +580,7 @@ export async function mockAuthenticatedApi(
         settings: {
           preferredTasks: [],
           preferredPriority: null,
-          defaultModelId: "gpt-5-4-mini",
+          defaultModelId: "gpt-5-6-luna",
           modelFinderCompletedAt: null,
         },
       })

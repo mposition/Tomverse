@@ -200,8 +200,10 @@ test("generateConversationTitle falls through to another provider when the first
       assert.equal(result.ok, true);
       if (result.ok) {
         assert.equal(result.title, "Weekend Trip Planning");
-        // The recovering model is the second candidate, not the failed default.
-        assert.notEqual(result.modelId, "gpt-5-4-mini");
+        // The recovering model is the second candidate, not the failed
+        // default. Tracks DEFAULT_TITLE_MODEL_ID, which moved to
+        // gpt-5-6-luna with the app default on 2026-08-01.
+        assert.notEqual(result.modelId, "gpt-5-6-luna");
       }
     }
   );

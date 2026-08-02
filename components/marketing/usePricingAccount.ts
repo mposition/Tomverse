@@ -2,7 +2,10 @@
 
 import { useEffect, useState } from "react";
 import { useSession } from "next-auth/react";
-import type { AccountPlanTier } from "@/lib/purchaseIntent";
+import type {
+  AccountPlanTier,
+  PricingBillingInterval,
+} from "@/lib/purchaseIntent";
 
 /**
  * What the pricing page needs to know about the visitor before it can render a
@@ -27,6 +30,12 @@ export type PricingAccountState = {
    * CTA must offer management rather than a checkout that would be rejected.
    */
   hasActiveSubscription: boolean;
+  /**
+   * The interval the live subscription bills on. A plan change is only offered
+   * between plans on the *same* interval, so a CTA that does not know this
+   * cannot offer one.
+   */
+  billingInterval: PricingBillingInterval | null;
   /** Set when the subscription is running out at the end of the paid period. */
   cancelAtPeriodEnd: boolean;
   currentPeriodEnd: string | null;
@@ -41,6 +50,9 @@ const ACTIVE_SUBSCRIPTION_STATUSES = new Set(["active", "trialing", "past_due"])
 const normalizePlan = (value: unknown): AccountPlanTier | null =>
   value === "Pro" || value === "Max" || value === "Free" ? value : null;
 
+const normalizeInterval = (value: unknown): PricingBillingInterval | null =>
+  value === "monthly" || value === "annual" ? value : null;
+
 const nonNegative = (value: unknown) => Math.max(0, Number(value) || 0);
 
 export function usePricingAccount(): PricingAccountState {
@@ -48,6 +60,7 @@ export function usePricingAccount(): PricingAccountState {
   const [account, setAccount] = useState<Omit<PricingAccountState, "status">>({
     plan: null,
     hasActiveSubscription: false,
+    billingInterval: null,
     cancelAtPeriodEnd: false,
     currentPeriodEnd: null,
     planCreditsRemaining: 0,
@@ -68,6 +81,7 @@ export function usePricingAccount(): PricingAccountState {
             : {
                 plan: null,
                 hasActiveSubscription: false,
+                billingInterval: null,
                 cancelAtPeriodEnd: false,
                 currentPeriodEnd: null,
                 planCreditsRemaining: 0,
@@ -102,6 +116,7 @@ export function usePricingAccount(): PricingAccountState {
           hasActiveSubscription:
             typeof subscriptionStatus === "string" &&
             ACTIVE_SUBSCRIPTION_STATUSES.has(subscriptionStatus),
+          billingInterval: normalizeInterval(data.subscription?.billingInterval),
           cancelAtPeriodEnd: Boolean(data.subscription?.cancelAtPeriodEnd),
           currentPeriodEnd:
             typeof data.subscription?.currentPeriodEnd === "string"

@@ -81,6 +81,15 @@ UI-012에서 승인된 정책(B안)입니다. accent 색은 **hue가 아니라 �
 - 모든 enabled premium 모델은 `lib/modelPricing.ts`에 명시적 가격 profile을
   가져야 합니다. `npm run check:model-pricing`이 PR Fast Gate에서 fail-closed로
   검사합니다.
+- 가격이 아직 검증되지 않은 premium 모델은 `PENDING_VERIFIED_PRICE_REGISTER`에
+  담당자·검증 티켓·등록일·기한·production 승인과 함께 등록합니다. 기한(최대
+  90일)이 지나면 같은 검사가 경고에서 실패로 바뀝니다. fallback 사용 비율과
+  예약 대비 정산 비율은 `GET /api/admin/fallback-pricing`에서 봅니다.
+- **provider 예산은 production에서 반드시 명시합니다.** production 기본값은
+  없고, 활성 provider에 `CHAT_PROVIDER_*_COST_MICROUSD_PER_DAY`/`_PER_MONTH`가
+  없으면 `/api/ready`가 실패합니다. 단일 계정의 plan guardrail보다 낮은 값은
+  바닥으로 올려 강제하고 보고합니다. 환경변수를 **먼저** 배포하고 코드를
+  나중에 배포합니다. 현황은 `GET /api/admin/provider-budgets`에서 봅니다.
 - 가격 변경은 소급 적용하지 않습니다. `pricingVersion`과 `costSource`를
   reservation·settlement snapshot에 저장합니다.
 - 사용자 응답에 원시 내부 USD를 노출하지 않습니다. `internal*` 진단 필드는
@@ -95,19 +104,82 @@ UI-012에서 승인된 정책(B안)입니다. accent 색은 **hue가 아니라 �
 
 - `docs/policy/plan-change.md`
 
-**온라인 플랜 변경은 아직 지원하지 않습니다.** 제품에는 구독 *변경* 흐름이 없고
-신규 Checkout과 기간 말 해지만 있습니다. 그래서:
+**Pro↔Max 온라인 변경은 전용 엔드포인트로만 합니다.** `/api/billing/checkout`은
+변경을 수행하지 않으며 앞으로도 하지 않습니다.
 
 - 서버는 동일 플랜 재구매와 다운그레이드를 `PLAN_CHANGE_NOT_SUPPORTED`로,
   활성 구독 상태의 상위 플랜 요청을 `ACTIVE_SUBSCRIPTION_EXISTS`로 각각 409
-  차단합니다. **이 차단을 UI보다 먼저 풀지 않습니다.** 풀면 한 계정이 두 플랜을
-  동시에 결제합니다.
-- UI는 변경을 결제로 안내하지 않습니다. `resolvePlanCtaState()`가 이 상태를
-  `manage_plan`으로 판정하고, CTA는 고객지원 문의로 연결하며, 온라인 변경이
-  아직 지원되지 않는다는 사실을 문구로 명시합니다.
-- `resolvePlanCtaState()`의 `manage_plan` 분기 교체는 구현의 **마지막** 단계입니다.
-  크레딧 경제성 결정 → 서버 상태기계 → Stripe 결제·예약 → 웹훅 재동기화가 모두
-  끝난 뒤에 바꿉니다. 먼저 바꾸면 동작하지 않는 CTA가 다시 생깁니다.
+  차단합니다. **이 세 분기는 그대로 둡니다.** 풀면 신규 구독 Checkout으로 변경을
+  우회할 수 있게 되고, 한 계정이 두 플랜을 동시에 결제합니다.
+- 변경은 `app/api/billing/plan-change/**`(preview · confirm · 조회 · 예약 취소)가
+  수행하고, 판정은 `lib/planChangeStateMachine.ts`(순수), Stripe 실행은
+  `lib/planChangeService.ts`가 맡습니다. 이 분담을 섞지 않습니다.
+- **결제 전에 권한을 올리지 않습니다.** 업그레이드는
+  `proration_behavior=always_invoice` + `payment_behavior=pending_if_incomplete`로
+  보내고, 계정의 plan은 오직 `syncSubscription()`이 Stripe에서 다시 읽은 구독으로
+  옮깁니다.
+- **다운그레이드는 Subscription Schedule을 직접 관리합니다.** Customer Portal은
+  같은 interval의 Price 여러 개를 한 Product에 두지 못하므로 이 변경을 담지
+  못합니다. Portal을 실행 경로로 되돌리지 않습니다.
+- **`cancel_at_period_end`를 자동으로 해제하지 않습니다.** 별도 opt-in(별도 label을
+  가진 별도 control)에서 온 `resumeRenewal`이 있을 때만 해제합니다.
+- **같은 interval끼리만 허용합니다.** 월간↔연간 변경은 아직 없습니다. 구독
+  interval을 모르는 계정은 CTA가 `manage_plan`(고객지원)으로 남습니다.
+- 크레딧 산식은 `lib/planChangeCredits.ts`에 있습니다. 플랜 변경은 월 사용량을
+  초기화하지도, 추가 지급하지도, 이미 쓴 크레딧을 회수하지도 않습니다.
+  업그레이드와 다운그레이드가 같은 함수를 씁니다.
+
+# Default model (GPT-5.6 Luna)
+
+`DEFAULT_MODEL_ID`, 게스트 기본값, `gpt-5-4-mini`의 lifecycle을 건드리기 전에
+읽습니다.
+
+- `docs/policy/default-model-luna-migration.md`
+
+- **기본 모델은 `gpt-5-6-luna`입니다.** `lib/models.ts`의 `DEFAULT_MODEL_ID`,
+  `lib/appDefaults.ts`의 `GUEST_DEFAULT_MODEL_ID`와 `GUEST_BRAND_TRIO_MODEL_IDS`,
+  Prisma 컬럼 기본값이 함께 움직입니다. 한쪽만 바꾸지 않습니다.
+- **`gpt-5-4-mini`는 은퇴하지 않았습니다.** enabled·publiclyListed 상태를
+  유지하는 것은 의도된 관찰 기간입니다.
+- **수치 eval 통과는 은퇴의 필요조건이지 충분조건이 아닙니다.** 정책 문서
+  4.3(수치)과 4.6(사용량·고정 사용자 비율, 도구 호환성, support·공유 링크,
+  안내·유예기간, staging 검증)을 **모두** 충족해야 은퇴할 수 있습니다.
+- **eval 표본 하한은 규칙마다 다릅니다.** 합산 규칙(오류율·빈 응답률)은 arm당
+  ≥300(권장 500), **시나리오별 5%p 규칙은 시나리오당 ≥100**입니다 —
+  `--repeats=25`면 시나리오당 25회라 해상도가 4%p여서 5%p 기준을 판정할 수
+  없습니다. 판정은 점추정이 아니라 Wilson 95% 구간 경계로 합니다.
+- **`--repeats=25`를 돌렸다는 사실만으로 decision-grade가 아닙니다.** 정책 문서
+  4.5.1의 절차 — 사전 점검, 네 arm 동일 commit·동일 실행, `--json` 증거 보존
+  (manifest·원본 기록·블라인드 검토 세트), 블라인드 정성 검토, 다른 시간대
+  독립 재실행, staging 수동 검증 — 을 모두 묶어야 인용할 수 있습니다.
+  `scripts/evalDefaultModel.mjs`가 `SMOKE RUN`·`PARTIAL RUN`·`UNDERPOWERED`·
+  dirty tree를 경고로 출력합니다.
+- **긴급 운영 비활성화는 품질 eval과 분리합니다.** 공급자 장애·폐기·보안 사유는
+  4.3·4.6을 기다리지 않고 운영 lifecycle로 즉시 내릴 수 있으며, 이는 이 문서의
+  은퇴가 아닙니다(4.7). `operationalReason`이 제품 은퇴와 운영 중단을 구분해야
+  합니다.
+- OpenAI는 `gpt-5.4-mini`를 계속 서비스합니다. 은퇴하더라도 공급자 종료가
+  아니라 **Tomverse 제품 카탈로그 결정**입니다.
+- **은퇴는 마케팅 갱신과 한 변경으로 배포합니다.** 공개 마케팅이 지목하는 모델
+  ID는 `lib/marketingModelReferences.ts` 하나뿐이고
+  `tests/marketingModelReferences.test.mjs`가 이를 강제합니다. 문구·CTA·배지·결과
+  라벨·ko/en·SEO metadata·deep link·캡처 fixture는 사람이 함께 옮깁니다. mini로
+  생성된 예시 답변은 이름만 바꾸지 말고 재생성하거나 과거 결과임을 유지합니다.
+- **`reservationOutputBasis`를 p90으로 바꾸려면 정책 문서 3.1의 9개 조건**
+  (모델별 독립 산출, 기간·표본 수, workload 분리, 정산된 출력·과금 reasoning
+  토큰, 중단·부분 응답 포함, 동질 표본, 감사 보관, 안전 여유·floor, drift 감시)
+  을 충족하고 새 `pricingVersion`으로 구분합니다. 그 전까지는
+  `conservative_default`를 유지합니다.
+- 두 모델 모두 Guest 계층 Standard **1크레딧**입니다. 은퇴 평가 중에 크레딧을
+  임의로 바꾸지 않고, 기존 mini 사용자를 Terra·Sol 같은 상위 유료 모델로
+  자동 이동시키지 않습니다.
+- 사용자 선택 상태(`UserSettings.defaultModel`,
+  `Conversation.selectedModels`)의 일괄 이전은
+  `scripts/run-default-model-reconciliation.mjs`가 담당하며 **은퇴 배포와 함께**
+  실행합니다. `Conversation.selectedModels`는 문자열 치환이 아니라 JSON 배열로
+  파싱해 변환하고, malformed 값은 파괴하지 않고 보고합니다.
+- 과거 `Message.modelId`, usage reservation/settlement의 modelId와 pricing
+  snapshot, 결제 ledger, `catalogDeleted`는 소급 변경하지 않습니다.
 
 <!-- BEGIN:mobile-chat-composer-invariant -->
 ## Mobile chat composer invariant

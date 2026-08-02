@@ -64,6 +64,46 @@ test("All models reveals the full catalogue and its filters", async ({ page }) =
   await expectNoHorizontalOverflow(page);
 });
 
+test("new models are listed and historical retirements stay hidden on desktop and mobile", async ({
+  page,
+}) => {
+  const dialog = await openModelCatalogue(page);
+
+  for (const modelId of [
+    "gpt-5-6-sol",
+    "gpt-5-6-terra",
+    "gpt-5-6-luna",
+    "gemini-3-6-flash",
+    "grok-4-5",
+  ]) {
+    await expect(
+      dialog.locator(`[data-testid="model-option"][data-model-id="${modelId}"]`)
+    ).toHaveCount(1);
+  }
+
+  for (const modelId of [
+    "deepseek-r1",
+    "grok-3",
+    "grok-4-3",
+    "grok-4",
+    "grok-3-mini",
+    "llama-3-1",
+    "llama-3-3",
+    "llama-4-scout",
+  ]) {
+    await expect(
+      dialog.locator(`[data-testid="model-option"][data-model-id="${modelId}"]`)
+    ).toHaveCount(0);
+  }
+
+  await expect(
+    dialog.locator('[data-testid="model-option"][data-model-id="gemini-2-5-flash"]')
+  ).toContainText("Gemini 3.5 Flash-Lite");
+  await expect(
+    dialog.locator('[data-testid="model-option"][data-model-id="mistral-medium-3-1"]')
+  ).toContainText("Mistral Medium 3.5");
+});
+
 test("going back from All models keeps the selection intact", async ({ page }) => {
   await mockAuthenticatedApi(page, { selectedModels: ["gpt-5-4-mini"] });
   await page.reload();
@@ -156,7 +196,7 @@ test("the filter sheet reports its active count, result count, and resets", asyn
     dialog.locator('[data-testid="model-option"][data-model-id="perplexity/sonar"]')
   ).toHaveCount(1);
   await expect(
-    dialog.locator('[data-testid="model-option"][data-model-id="llama-3-1"]')
+    dialog.locator('[data-testid="model-option"][data-model-id="deepseek-v4-flash"]')
   ).toHaveCount(0);
   await expect(
     dialog.locator('[data-testid="model-option"][data-model-id="gpt-5-4-mini"]')
@@ -242,7 +282,10 @@ test("favorited models lead the recommendations", async ({ page }) => {
   await page.evaluate(() => {
     localStorage.setItem(
       "favorite_model_ids",
-      JSON.stringify(["claude-sonnet-5", "deepseek-r1"])
+      // Both Free-tier and live: a favourite that is retired (deepseek-r1 was,
+      // once DeepSeek dropped deepseek-reasoner) is deliberately filtered out
+      // of recommendations, which is covered in tests/modelRecommendations.
+      JSON.stringify(["claude-sonnet-5", "mistral-medium-3-1"])
     );
   });
   await page.reload();
@@ -252,7 +295,7 @@ test("favorited models lead the recommendations", async ({ page }) => {
   const cards = dialog.getByTestId("recommended-model-option");
   await expect(cards.nth(0)).toHaveAttribute("data-model-id", "claude-sonnet-5");
   await expect(cards.nth(0)).toHaveAttribute("data-recommendation-source", "favorite");
-  await expect(cards.nth(1)).toHaveAttribute("data-model-id", "deepseek-r1");
+  await expect(cards.nth(1)).toHaveAttribute("data-model-id", "mistral-medium-3-1");
 });
 
 test("long input explains its multiplier beside the send controls", async ({ page }) => {

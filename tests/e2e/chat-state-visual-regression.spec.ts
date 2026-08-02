@@ -24,6 +24,7 @@ import {
   suppressTransientUi,
   type Theme,
 } from "./support/chat-state-fixtures";
+import { skipUnlessCanonicalVisualBrowser } from "./support/canonical-visual";
 import {
   mockComparisonReview,
   mockConversationHistory,
@@ -53,6 +54,10 @@ test.beforeEach(async ({}, testInfo) => {
     testInfo.project.name !== "desktop-chromium",
     "Visual-regression goldens are maintained on a single engine (desktop-chromium) to keep them deterministic; run with --project=desktop-chromium."
   );
+  // Every test in this file is a golden, so the whole file is gated. The same
+  // Chromium mismatch that costs mobile-composer-contract two tests costs this
+  // one 49 of 74 (docs/qa/canonical-visual-baseline.md).
+  skipUnlessCanonicalVisualBrowser();
 });
 
 // useIsMobileShell() (components/chat/useIsMobileShell.ts) requires both a

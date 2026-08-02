@@ -184,3 +184,56 @@ rasteriser 차이입니다.
 | `npm run typecheck` / `eslint . --max-warnings=0` | pass |
 | `check:encoding` / `check:accent-tokens` | pass |
 | `mobile-safari` | 미실행 — WebKit 2336 binary 부재 (N/V) |
+
+---
+
+## 9. 종결 — canonical 판정 (2026-08-01)
+
+§7이 남긴 조건("canonical 환경에서 재실행해 확정")이 충족됐습니다. **두 golden은
+canonical runner에서 통과합니다.** `Not verified`를 해제하고 이 문서를 종결합니다.
+
+### 근거
+
+`e2e.yml`(Main Chromium Regression)은 `ubuntu-24.04` + lockfile 고정 Playwright/
+Chromium에서 `npm run test:e2e:chromium`을 **필터 없이** 실행합니다. 이 spec의
+golden은 `desktop-chromium`에서만 판정되고, 3-way shard 중 **shard 1**에
+배정됩니다(로컬 `--list --shard=1/3`로 확인).
+
+| main SHA | run | shard 1 결과 | golden 2건 |
+|---|---|---|---|
+| `1acf1a8` (#200) | `30696253742` | success | 실패 목록에 없음 → **통과** |
+| `87a18e1` (#228) | `30703064212` | 3 failed / 1038 passed | 실패 3건 모두 다른 spec → **통과** |
+
+`30703064212`의 shard 1 실패는 `account-flow.spec.ts:118`,
+`mobile-message-visibility.spec.ts:317`, `provider-status.spec.ts:204`이며
+composer golden은 포함되지 않습니다.
+
+### 이 환경에서는 왜 계속 실패하는가 — 불변 signature
+
+`90e5572`(2026-08-01, 이 컨테이너)에서 재현:
+
+```
+906 pixels (ratio 0.02 of all image pixels) are different.   # 390px
+906 pixels (ratio 0.03 of all image pixels) are different.   # 320px
+```
+
+§4의 `e46389e`(2026-07-30) 측정값과 **정확히 같은 906**입니다. 그 사이 composer
+재작업, provider banner 변경, UI-001 theme 변경이 모두 들어갔습니다. 제품 회귀라면
+이 숫자가 움직입니다. 움직이지 않았다는 것이 rasteriser 차이라는 증거입니다.
+
+### 판정
+
+- 두 golden: **Pass (canonical)**. `Not verified`는 이 환경의 실행에만 적용됩니다.
+- golden 미갱신. 재기록할 이유가 없습니다.
+- **flaky 아님.** canonical에서 결정적으로 통과하고, 대체 browser에서 결정적으로
+  같은 값으로 실패합니다. 두 쪽 모두 재시도로 결과가 바뀌지 않습니다.
+
+### 재발 방지
+
+같은 진단이 이 저장소에서 최소 3회 반복됐습니다(이 문서,
+`short-viewport-drawer-2026-07-30.md` §6, `REMEDIATION_EXECUTION_...` R-05).
+`tests/e2e/support/canonical-visual.ts`의 `skipUnlessCanonicalVisualBrowser()`가
+이제 대체 browser에서 golden을 **skip + 사유 부착**으로 보고합니다. 정책은
+`docs/qa/canonical-visual-baseline.md` §"The suite says so itself"에 있고,
+CI가 `PLAYWRIGHT_CHROMIUM_EXECUTABLE`을 설정하면 `security:regression`이
+실패합니다.
