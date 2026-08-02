@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { test } from "node:test";
 
 import {
@@ -6,6 +8,7 @@ import {
   MODEL_LIST_ENDPOINT_IS_NOT_A_PRICE_SOURCE,
   MODEL_PRICING,
   PROCESSING_TIER_REQUEST_ALLOWLIST,
+  RESPONSE_PROCESSING_TIER_IS_NOT_RECORDED,
   resolveModelPricing,
 } from "@/lib/modelPricing";
 import { getModel } from "@/lib/models";
@@ -129,9 +132,36 @@ test("every profile is priced for a direct call at the standard tier", () => {
   }
   // The claim above only holds while no request selects a tier -- an omitted
   // OpenAI `service_tier` is served as `auto`, not necessarily as Standard.
-  // npm run check:model-pricing greps for one; this pins the allowlist it
-  // consults so widening it is a reviewed change.
-  assert.deepEqual([...PROCESSING_TIER_REQUEST_ALLOWLIST], []);
+  // npm run check:model-pricing surfaces every mention; this pins what the
+  // exceptions are allowed to be.
+  for (const entry of PROCESSING_TIER_REQUEST_ALLOWLIST) {
+    assert.equal(
+      entry.sendsATier,
+      false,
+      `${entry.file}: no file may put a tier on an outbound request while every profile records Standard pricing`
+    );
+    assert.ok(
+      entry.reason.trim().length > 30,
+      `${entry.file}: an exception needs a reason a reviewer can check, not a path in a list`
+    );
+  }
+
+  // Reading the tier back is the gap, not a violation of it: no chat-path
+  // snapshot records the tier a request was actually served at.
+  assert.equal(RESPONSE_PROCESSING_TIER_IS_NOT_RECORDED, true);
+});
+
+test("the processing-tier guard sees files that are not committed yet", () => {
+  // It did not, and that is why CI caught what a local run had passed:
+  // `git grep` reads tracked files only, so a brand-new script was invisible
+  // until it was committed. A guard whose answer depends on `git add` is not
+  // a guard.
+  const source = readFileSync(
+    join(process.cwd(), "scripts/check-model-pricing.mjs"),
+    "utf8"
+  );
+  const args = source.slice(source.indexOf("const tierGrep"), source.indexOf("const allowedTierFiles"));
+  assert.match(args, /"--untracked"/);
 });
 
 test("the model-list endpoint is documented as not being a price source", () => {

@@ -279,7 +279,8 @@ const DIRECT_STANDARD = {
 } as const;
 
 /**
- * Source files allowed to name a processing tier in a provider request.
+ * Source files allowed to name a processing tier at all, each with the reason
+ * it does.
  *
  * Every profile below declares `processingTier: "standard"`, and that is an
  * assertion about the request this application actually sends -- not a
@@ -289,18 +290,46 @@ const DIRECT_STANDARD = {
  * Batch are cheaper, Priority/Fast is dearer, and a regional-processing
  * endpoint adds a surcharge on top of any of them.
  *
- * `npm run check:model-pricing` greps the tree for a request-side tier
- * selector and fails when one appears outside this list, so a tier can only be
- * introduced together with the pricing entries that describe it. The list is
- * empty on purpose: nothing sets one today.
+ * `npm run check:model-pricing` greps the tree -- **including files not yet
+ * committed** -- and fails on any occurrence outside this list. The check is
+ * deliberately blunt rather than clever: telling "sets a tier on the request"
+ * apart from "reads the tier off the response" by regex means guessing at
+ * `service_tier:` versus `service_tier =` versus `["service_tier"] =`, and a
+ * guard that guesses is one refactor away from waving through the thing it
+ * exists to stop. So every mention is surfaced and each exception carries a
+ * written reason a reviewer can check.
  *
- * Recorded as a gap rather than solved here: the app does not read the
- * `service_tier` a response came back on, so a snapshot records the tier this
- * registry *assumes* rather than the tier the request was *served at*. Closing
- * that means plumbing the response field into the pricing snapshot, which is
- * a separate change with its own `pricingVersion`.
+ * `sendsATier` is the field that matters: no entry may set it to `true`
+ * without the pricing profiles that describe that tier landing in the same
+ * change.
  */
-export const PROCESSING_TIER_REQUEST_ALLOWLIST: readonly string[] = [];
+export type ProcessingTierMention = {
+    /** Repository-relative path. */
+    file: string;
+    /** Whether this file puts a tier into an outbound provider request. */
+    sendsATier: boolean;
+    reason: string;
+};
+
+export const PROCESSING_TIER_REQUEST_ALLOWLIST: readonly ProcessingTierMention[] =
+    [
+        {
+            file: "scripts/check-openai-model-access.mjs",
+            sendsATier: false,
+            reason: "Reads `service_tier` off the response and reports it. Its own optional --invoke request sets none, which is the point: the tier a request is *served at* is the only evidence that the Standard table was the right one.",
+        },
+    ];
+
+/**
+ * Recorded as a gap rather than solved here: nothing on the chat path reads
+ * the `service_tier` a response came back on, so a pricing snapshot records
+ * the tier this registry *assumes* rather than the tier the request was
+ * *served at*. `npm run check:openai-model-access -- --invoke` can observe it
+ * for one request; carrying it into every snapshot means plumbing the response
+ * field through settlement, which is a separate change with its own
+ * `pricingVersion`.
+ */
+export const RESPONSE_PROCESSING_TIER_IS_NOT_RECORDED = true;
 
 /**
  * `GET /v1/models` is **not** a price source, and nothing in this file may be

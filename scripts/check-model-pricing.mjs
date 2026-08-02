@@ -34,11 +34,17 @@ const now = new Date();
 // request on it silently, so a request-side selector is a build failure until
 // it is added to PROCESSING_TIER_REQUEST_ALLOWLIST.
 // ---------------------------------------------------------------------------
+// `--untracked` is load-bearing. Without it `git grep` only reads what is
+// already tracked, so a brand-new file passes locally and fails in CI after it
+// has been committed -- which is exactly what happened to
+// scripts/check-openai-model-access.mjs. A guard that answers differently
+// before and after `git add` is not a guard.
 const tierGrep = spawnSync(
   "git",
   [
     "grep",
-    "-lnE",
+    "--untracked",
+    "-lE",
     "(service_tier|serviceTier)",
     "--",
     "app",
@@ -48,28 +54,48 @@ const tierGrep = spawnSync(
   ],
   { encoding: "utf8" }
 );
+const allowedTierFiles = new Map(
+  PROCESSING_TIER_REQUEST_ALLOWLIST.map((entry) => [entry.file, entry])
+);
 const tierFiles = (tierGrep.stdout || "")
   .split("\n")
   .map((line) => line.trim())
   .filter(Boolean)
-  // This file and the check itself describe the rule; they do not send one.
+  // This file and the check itself state the rule; they do not send one.
   .filter(
     (file) =>
       file !== "lib/modelPricing.ts" && file !== "scripts/check-model-pricing.mjs"
-  )
-  .filter((file) => !PROCESSING_TIER_REQUEST_ALLOWLIST.includes(file));
+  );
 
-if (tierFiles.length > 0) {
+const unexpectedTierFiles = tierFiles.filter((file) => !allowedTierFiles.has(file));
+const sendingTierFiles = tierFiles
+  .map((file) => allowedTierFiles.get(file))
+  .filter((entry) => entry?.sendsATier);
+
+if (unexpectedTierFiles.length > 0 || sendingTierFiles.length > 0) {
   console.error(
-    `\n${tierFiles.length} file(s) name a provider processing tier:\n` +
-      tierFiles.map((file) => `  - ${file}`).join("\n") +
+    `\n${unexpectedTierFiles.length + sendingTierFiles.length} file(s) name a provider processing tier without a matching price:\n` +
+      unexpectedTierFiles.map((file) => `  - ${file} (not in the allowlist)`).join("\n") +
+      sendingTierFiles
+        .map((entry) => `  - ${entry.file} (allowlisted, but sendsATier is true)`)
+        .join("\n") +
       "\n\nEvery profile in lib/modelPricing.ts records Standard pricing for a\n" +
-      "request that selects no tier. Flex, batch, priority and regional\n" +
-      "processing are priced differently, so a tier can only be introduced\n" +
-      "together with the profile entries that price it. Add the file to\n" +
-      "PROCESSING_TIER_REQUEST_ALLOWLIST once that is done."
+      "request that selects no tier -- an omitted OpenAI service_tier is served\n" +
+      "as `auto`, not necessarily as Standard. Flex, batch, priority and\n" +
+      "regional processing are priced differently, so a tier can only be\n" +
+      "introduced together with the profile entries that price it.\n\n" +
+      "A file that only *reads* the tier off a response belongs in\n" +
+      "PROCESSING_TIER_REQUEST_ALLOWLIST with sendsATier: false and a reason."
   );
   process.exit(1);
+}
+
+for (const entry of PROCESSING_TIER_REQUEST_ALLOWLIST) {
+  if (!tierFiles.includes(entry.file)) {
+    console.warn(
+      `warning: ${entry.file} is allowlisted for naming a processing tier but no longer does. Remove the entry.`
+    );
+  }
 }
 
 const unpriced = findUnpricedModels(AVAILABLE_MODELS);
