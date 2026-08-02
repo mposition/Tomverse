@@ -421,7 +421,7 @@ test.describe("marketing header touch targets (UI-TOUCH-001)", () => {
         // The switcher's hit area is the label, not the select: the label is
         // `overflow-hidden`, so anything the select could paint outside it
         // would be clipped and would not be tappable.
-        const switcher = page.locator('label:has(select[aria-label="Language"])');
+        const switcher = page.locator('label:has([data-testid="marketing-language-switcher"])');
         await assertMinTouchTarget(switcher, `${label} language switcher`);
         await assertHitTestReturnsSelf(switcher, `${label} language switcher`);
 
@@ -458,10 +458,10 @@ test.describe("marketing header touch targets (UI-TOUCH-001)", () => {
   }) => {
     await page.setViewportSize({ width: 390, height: 844 });
     await page.goto("/?lang=en");
-    const select = page.locator('select[aria-label="Language"]');
+    const select = page.getByTestId("marketing-language-switcher");
     await select.focus();
     const ring = await page
-      .locator('label:has(select[aria-label="Language"])')
+      .locator('label:has([data-testid="marketing-language-switcher"])')
       .evaluate((element) => {
         const style = getComputedStyle(element);
         return {

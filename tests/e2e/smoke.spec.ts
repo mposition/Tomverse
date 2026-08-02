@@ -39,7 +39,7 @@ test("home renders the marketing site", { tag: "@smoke" }, async ({ page }) => {
   );
   await expect(page.getByTestId("landing-guest-cta")).toHaveCount(0);
 
-  await page.getByLabel("Language").selectOption("ko");
+  await page.getByTestId("marketing-language-switcher").selectOption("ko");
   await expect(
     page.getByRole("heading", {
       name: "한 번 질문하고, 여러 AI 답변을 비교하세요.",
@@ -111,7 +111,7 @@ test("guest preview opens a 3-model comparison chat by default", { tag: "@smoke"
 
 test("pricing page supports Chinese copy", async ({ page }) => {
   await page.goto("/pricing");
-  await page.getByLabel("Language").selectOption("zh");
+  await page.getByTestId("marketing-language-switcher").selectOption("zh");
   await expect(
     page.getByRole("heading", { name: "选择适合你的 AI 能力等级。" })
   ).toBeVisible();

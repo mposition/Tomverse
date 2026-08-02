@@ -65,6 +65,11 @@ export function MarketingLanguageSwitcher() {
       <Languages className="h-4 w-4 shrink-0 text-blue-600 dark:text-blue-400" />
       <span className="sr-only">{t("languageSwitcher.label")}</span>
       <select
+        // UX-022. The accessible name is localized, so it is not a stable
+        // handle. Specs locate the switcher by this id instead -- otherwise
+        // every locale needs its own selector, and switching *into* a locale
+        // makes the control unfindable in the same test.
+        data-testid="marketing-language-switcher"
         aria-label={t("languageSwitcher.label")}
         aria-describedby={
           selectedPolicy.marketTier === "primary"
