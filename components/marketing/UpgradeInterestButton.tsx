@@ -805,6 +805,12 @@ export function UpgradeInterestButton({
 
   const submit = async () => {
     if (isSending || isValidatingPromotion) return;
+    // One id per submission, so the server can give Stripe an idempotency key
+    // for the Checkout Session. A retry of *this* request reuses it and gets
+    // the same Session back; pressing the button again is a new purchase
+    // attempt and must get a new one -- a key that never changes would keep
+    // replaying a Session that expired 31 minutes in for the rest of the day.
+    const purchaseAttemptId = crypto.randomUUID();
     const normalizedInputCode = promoCode.trim().toUpperCase();
     let failureStage: "promotion_validation" | "checkout_session" =
       "checkout_session";
@@ -882,6 +888,7 @@ export function UpgradeInterestButton({
           currency: checkoutMarket.currency,
           country: checkoutMarket.country,
           trigger: purchaseTrigger,
+          purchaseAttemptId,
           ...(analytics ? { analytics } : {}),
         }),
       });

@@ -7,6 +7,7 @@ import type Stripe from "stripe";
 import { z } from "zod";
 import { authOptions } from "@/lib/auth";
 import {
+  ApiSecurityError,
   apiSecurityResponse,
   consumeApiRateLimit,
   readLimitedJson,
@@ -63,6 +64,17 @@ import {
   effectivePlanForAccess,
   isInternalPassPromotion,
 } from "@/lib/foundingTesterPassCore";
+import {
+  ensureStripePromotionDiscount,
+  StripePromotionProvisioningError,
+} from "@/lib/stripePromotionProvisioning";
+import {
+  checkoutSessionIdempotencyKey,
+  externalCheckoutError,
+  isRetryableStripeError,
+  stripeCustomerIdempotencyKey,
+  stripeErrorFacts,
+} from "@/lib/stripePromotionProvisioningCore";
 
 const checkoutSchema = z
   .object({
@@ -74,10 +86,34 @@ const checkoutSchema = z
     trigger: purchaseAnalyticsTriggerSchema.default("proactive"),
     currency: z.enum(BILLING_CURRENCIES).optional(),
     country: z.string().trim().toUpperCase().regex(/^[A-Z]{2}$/).optional(),
+    // One customer action. The client mints it when the purchase is submitted
+    // and reuses it for network retries of *that* submission, which is what
+    // lets the Stripe Session create carry an idempotency key without a
+    // second click replaying a Session that has since expired.
+    purchaseAttemptId: z.string().uuid().optional(),
   })
   .strict();
 
 const activeSubscriptionStatuses = new Set(["active", "trialing", "past_due"]);
+
+/**
+ * Keying material for the idempotency keys sent to Stripe.
+ *
+ * The same deployment secret the promotion layer already hashes with, for the
+ * same reason: Stripe stores and displays idempotency keys, so the account they
+ * belong to must not be readable from them.
+ */
+const idempotencyKeySecret = () => {
+  const secret = process.env.NEXTAUTH_SECRET;
+  if (!secret) {
+    throw new ApiSecurityError(
+      503,
+      "SECURITY_NOT_CONFIGURED",
+      "Checkout security is not configured."
+    );
+  }
+  return secret;
+};
 
 /**
  * Plan ordering, so "is this a new subscription, a change, or a downgrade" is
@@ -195,63 +231,56 @@ async function activateInternalPass({
   return periodEnd;
 }
 
-async function ensureStripeDiscount(
-  promotion: CheckoutPromotion,
-  planId: BillingPlanId
-): Promise<Stripe.Checkout.SessionCreateParams.Discount> {
-  if (promotion.stripePromotionCodeId) {
-    return { promotion_code: promotion.stripePromotionCodeId };
-  }
-
-  const stripe = getStripe();
-  if (!promotion.maxRedemptions || !promotion.endsAt) {
-    throw new Error("Promotion limits are not configured.");
-  }
-  const couponId =
-    promotion.stripeCouponId ||
-    (
-      await stripe.coupons.create({
-        name: `${promotion.code} ${planId.toUpperCase()}`,
-        duration: "repeating",
-        duration_in_months: promotion.durationMonths,
-        percent_off:
-          promotion.discountPercent > 0 ? promotion.discountPercent : undefined,
-        amount_off:
-          promotion.discountPercent > 0
-            ? undefined
-            : promotion.discountAmountCents || undefined,
-        currency: promotion.discountPercent > 0 ? undefined : "usd",
-        metadata: {
-          tomversePromotionId: promotion.id,
-          planId,
-        },
-      })
-    ).id;
-  const promotionCode = await stripe.promotionCodes.create({
-    promotion: { type: "coupon", coupon: couponId },
-    code: promotion.code,
-    active: true,
-    max_redemptions: promotion.maxRedemptions,
-    expires_at: Math.floor(new Date(promotion.endsAt).getTime() / 1000),
-    metadata: {
-      tomversePromotionId: promotion.id,
-      planId,
-    },
-  });
-
-  await prisma.billingPromotion.update({
-    where: { id: promotion.id },
-    data: {
-      stripeCouponId: couponId,
-      stripePromotionCodeId: promotionCode.id,
-    },
-  });
-
-  return { promotion_code: promotionCode.id };
+async function createCheckoutSession(
+  params: Stripe.Checkout.SessionCreateParams,
+  options?: Stripe.RequestOptions
+) {
+  return getStripe().checkout.sessions.create(params, options);
 }
 
-async function createCheckoutSession(params: Stripe.Checkout.SessionCreateParams) {
-  return getStripe().checkout.sessions.create(params);
+/**
+ * Structured record of one failed checkout, keyed by a trace id the customer is
+ * also given so support can join the two without the customer quoting anything
+ * sensitive.
+ *
+ * What is deliberately absent: the Stripe secret, the Session URL, the
+ * customer's email, the payment method, the raw client IP. The account appears
+ * only as the opaque hash the promotion layer already uses.
+ */
+function logCheckoutFailure({
+  traceId,
+  stage,
+  internalCode,
+  retryable,
+  planId,
+  billingInterval,
+  promotionId,
+  promotionCode,
+  details,
+}: {
+  traceId: string;
+  stage: string;
+  internalCode: string;
+  retryable: boolean;
+  planId: string;
+  billingInterval: string;
+  promotionId: string | null;
+  promotionCode: string | null;
+  details?: Record<string, unknown>;
+}) {
+  console.error("Stripe checkout failed.", {
+    traceId,
+    stage,
+    internalCode,
+    retryable,
+    planId,
+    billingInterval,
+    promotionId,
+    // The code string is operator-facing configuration, not customer data, and
+    // it is the only way to find the promotion in the admin console.
+    promotionCode,
+    ...details,
+  });
 }
 
 function buildCheckoutLineItem(
@@ -313,6 +342,10 @@ function buildCheckoutLineItem(
 }
 
 export async function POST(req: Request) {
+  // Minted before anything can fail, so every 5xx below can carry it and a
+  // customer who reports "checkout is broken" hands support one string that
+  // finds the exact request in the structured log.
+  const traceId = randomUUID();
   try {
     const session = await getServerSession(authOptions);
     if (!session?.user?.id) {
@@ -336,7 +369,13 @@ export async function POST(req: Request) {
       trigger,
       currency,
       country,
+      purchaseAttemptId: requestedPurchaseAttemptId,
     } = await readLimitedJson(req, 4 * 1024, checkoutSchema);
+    // A client that predates this field, or one whose request was replayed
+    // without it, still gets a valid key -- it just does not get retry
+    // deduplication, which is strictly better than deduplicating two genuinely
+    // separate purchase attempts into one Session.
+    const purchaseAttemptId = requestedPurchaseAttemptId || randomUUID();
     const plans = await getBillingPlans();
     const plan = plans.find((item) => item.id === planId && item.isActive);
     if (!plan) {
@@ -624,18 +663,38 @@ export async function POST(req: Request) {
     });
 
     const stripe = getStripe();
+    const idempotencySecret = idempotencyKeySecret();
     let stripeCustomerId = user.stripeCustomerId;
     if (!stripeCustomerId) {
-      const customer = await stripe.customers.create({
-        email: user.email || undefined,
-        name: user.name || undefined,
-        metadata: { userId: user.id },
-      });
+      // Keyed per account, because two checkout attempts that both start before
+      // the first one writes `stripeCustomerId` back would otherwise create two
+      // customers -- and the subscription then lands on the one the account is
+      // not pointing at.
+      const customer = await stripe.customers.create(
+        {
+          email: user.email || undefined,
+          name: user.name || undefined,
+          metadata: { userId: user.id },
+        },
+        {
+          idempotencyKey: stripeCustomerIdempotencyKey({
+            userId: user.id,
+            secret: idempotencySecret,
+          }),
+        }
+      );
       stripeCustomerId = customer.id;
-      await prisma.user.update({
-        where: { id: user.id },
+      // Conditional, so the loser of that race does not overwrite the id the
+      // winner already stored.
+      await prisma.user.updateMany({
+        where: { id: user.id, stripeCustomerId: null },
         data: { stripeCustomerId },
       });
+      const stored = await prisma.user.findUnique({
+        where: { id: user.id },
+        select: { stripeCustomerId: true },
+      });
+      stripeCustomerId = stored?.stripeCustomerId || stripeCustomerId;
     }
 
     let promotionLeaseReserved = false;
@@ -643,10 +702,33 @@ export async function POST(req: Request) {
       await reservePromotionCheckout(appliedPromotion.id, user.id);
       promotionLeaseReserved = true;
     }
+    // Hoisted so the failure log can say whether a discount had been resolved
+    // by the time the Session create was attempted -- that one bit separates
+    // "the promotion could not be provisioned" from "the promotion was fine and
+    // the Session itself was refused".
+    let discountApplied = false;
     try {
-      const discount = appliedPromotion
-        ? await ensureStripeDiscount(appliedPromotion, planId as BillingPlanId)
+      const discountResult = appliedPromotion
+        ? await ensureStripePromotionDiscount({
+            promotion: appliedPromotion,
+            planId: planId as BillingPlanId,
+            planProductId: plan.stripeProductId,
+            customerId: stripeCustomerId,
+          })
         : null;
+      if (discountResult?.driftReasons.length) {
+        // Not fatal: Stripe and the database disagree about a cap that has not
+        // denied anyone anything yet. Reported so it is fixed before it does.
+        console.warn("Stripe promotion linkage drift.", {
+          traceId,
+          promotionId: appliedPromotion?.id || null,
+          promotionCode: appliedPromotion?.code || null,
+          resolution: discountResult.resolution,
+          driftReasons: discountResult.driftReasons,
+        });
+      }
+      const discount = discountResult?.discount || null;
+      discountApplied = Boolean(discount);
       const promotionMetadata: Record<string, string> = {};
       if (appliedPromotion) {
         promotionMetadata.promotionId = appliedPromotion.id;
@@ -654,63 +736,148 @@ export async function POST(req: Request) {
         promotionMetadata.promotionRiskFlags =
           encodePromotionRiskFlags(promotionRiskFlags);
       }
-      const checkoutSession = await createCheckoutSession({
-        mode: "subscription",
-        customer: stripeCustomerId,
-        line_items: [
-          buildCheckoutLineItem(
-            plan,
+      const checkoutSession = await createCheckoutSession(
+        {
+          mode: "subscription",
+          customer: stripeCustomerId,
+          line_items: [
+            buildCheckoutLineItem(
+              plan,
+              billingInterval,
+              market.currency,
+              basePriceMinor
+            ),
+          ],
+          success_url: billingSuccessUrl(
+            origin,
+            planId as BillingPlanId,
             billingInterval,
-            market.currency,
-            basePriceMinor
+            language
           ),
-        ],
-        success_url: billingSuccessUrl(
-          origin,
-          planId as BillingPlanId,
-          billingInterval,
-          language
-        ),
-        // Cancelling used to drop the visitor on a bare /pricing with no
-        // acknowledgement and no way back to the plan they were considering.
-        cancel_url: `${origin}/pricing?billing=cancelled&plan=${encodeURIComponent(
-          planId
-        )}${language ? `&lang=${encodeURIComponent(language)}` : ""}#plans`,
-        expires_at: appliedPromotion
-          ? Math.floor(Date.now() / 1000) + PROMOTION_CHECKOUT_TTL_SECONDS
-          : undefined,
-        client_reference_id: user.id,
-        allow_promotion_codes: false,
-        discounts: discount ? [discount] : undefined,
-        subscription_data: {
+          // Cancelling used to drop the visitor on a bare /pricing with no
+          // acknowledgement and no way back to the plan they were considering.
+          cancel_url: `${origin}/pricing?billing=cancelled&plan=${encodeURIComponent(
+            planId
+          )}${language ? `&lang=${encodeURIComponent(language)}` : ""}#plans`,
+          expires_at: appliedPromotion
+            ? Math.floor(Date.now() / 1000) + PROMOTION_CHECKOUT_TTL_SECONDS
+            : undefined,
+          client_reference_id: user.id,
+          // Stripe rejects a Session that carries both `allow_promotion_codes`
+          // and `discounts` -- it checks that the parameters are *present*, not
+          // what they are set to, so sending `false` alongside a discount is the
+          // same 400 as sending `true`. That is what broke every promotion
+          // checkout: the discount was applied correctly and the Session was then
+          // refused, surfacing as a generic 500.
+          //
+          // Omitting the field is not a relaxation. Stripe's own default is
+          // false, and a Session that pins a server-validated discount cannot
+          // show the code entry box regardless: the two are mutually exclusive.
+          // Every path that does *not* carry a discount still says so
+          // explicitly, so the Stripe-side code box is never reachable from a
+          // Tomverse checkout.
+          ...(discount
+            ? { discounts: [discount] }
+            : { allow_promotion_codes: false }),
+          subscription_data: {
+            metadata: {
+              userId: user.id,
+              planId,
+              tier: tierForPlanId(planId),
+              billingInterval,
+              ...billingMetadata,
+              ...promotionMetadata,
+              ...analyticsMetadata,
+            },
+          },
           metadata: {
             userId: user.id,
             planId,
-            tier: tierForPlanId(planId),
             billingInterval,
             ...billingMetadata,
             ...promotionMetadata,
             ...analyticsMetadata,
           },
         },
-        metadata: {
-          userId: user.id,
-          planId,
-          billingInterval,
-          ...billingMetadata,
-          ...promotionMetadata,
-          ...analyticsMetadata,
-        },
-      });
+        {
+          idempotencyKey: checkoutSessionIdempotencyKey({
+            userId: user.id,
+            purchaseAttemptId,
+            secret: idempotencySecret,
+          }),
+        }
+      );
 
       return NextResponse.json({ url: checkoutSession.url });
     } catch (error) {
       if (promotionLeaseReserved && appliedPromotion) {
+        // Released on *every* failure below this point, not just a Stripe one:
+        // a lease that outlives the attempt that took it locks the customer out
+        // of retrying for its full 31-minute TTL for no reason. A release that
+        // itself fails is reported rather than swallowed, because the lock is
+        // then real and only time will clear it.
         await releasePromotionCheckout(appliedPromotion.id, user.id).catch(
-          () => undefined
+          (releaseError) => {
+            console.error("Promotion checkout lease release failed.", {
+              traceId,
+              promotionId: appliedPromotion.id,
+              promotionCode: appliedPromotion.code,
+              errorName:
+                releaseError instanceof Error
+                  ? releaseError.name
+                  : "UnknownError",
+            });
+          }
         );
       }
-      throw error;
+      if (error instanceof StripePromotionProvisioningError) {
+        logCheckoutFailure({
+          traceId,
+          stage: error.stage,
+          internalCode: error.code,
+          retryable: error.retryable,
+          planId,
+          billingInterval,
+          promotionId: appliedPromotion?.id || null,
+          promotionCode: appliedPromotion?.code || null,
+          details: error.details,
+        });
+        const external = externalCheckoutError(error.code);
+        return NextResponse.json(
+          { code: external.code, error: external.error, traceId },
+          { status: external.status }
+        );
+      }
+      // Everything left is the Session create itself. A provider outage and a
+      // request Stripe will refuse identically forever are different answers:
+      // one is worth retrying, the other needs an operator.
+      const facts = stripeErrorFacts(error);
+      const retryable = isRetryableStripeError(facts);
+      const internalCode = retryable
+        ? "CHECKOUT_PROVIDER_UNAVAILABLE"
+        : "CHECKOUT_SESSION_CREATE_FAILED";
+      logCheckoutFailure({
+        traceId,
+        stage: "session",
+        internalCode,
+        retryable,
+        planId,
+        billingInterval,
+        promotionId: appliedPromotion?.id || null,
+        promotionCode: appliedPromotion?.code || null,
+        details: {
+          stripeErrorType: facts.type,
+          stripeErrorCode: facts.code,
+          stripeErrorParam: facts.param,
+          stripeRequestId: facts.requestId,
+          discountApplied,
+        },
+      });
+      const external = externalCheckoutError(internalCode);
+      return NextResponse.json(
+        { code: external.code, error: external.error, traceId },
+        { status: external.status }
+      );
     }
   } catch (error) {
     if (error instanceof BillingMarketValidationError) {
@@ -733,9 +900,28 @@ export async function POST(req: Request) {
         { status: 409 }
       );
     }
-    console.error("Stripe checkout failed:", error);
+    // Anything that got here failed before the Stripe calls -- plan lookup,
+    // promotion validation, the analytics snapshot, the internal pass path.
+    // Logged with the same trace id the customer is handed.
+    logCheckoutFailure({
+      traceId,
+      stage: "request",
+      internalCode: "CHECKOUT_SESSION_CREATE_FAILED",
+      retryable: false,
+      planId: "unknown",
+      billingInterval: "unknown",
+      promotionId: null,
+      promotionCode: null,
+      details: {
+        errorName: error instanceof Error ? error.name : "UnknownError",
+      },
+    });
     return NextResponse.json(
-      { code: "CHECKOUT_CONFIGURATION_ERROR", error: "Failed to start checkout." },
+      {
+        code: "CHECKOUT_CONFIGURATION_ERROR",
+        error: "Failed to start checkout.",
+        traceId,
+      },
       { status: 500 }
     );
   }
