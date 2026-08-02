@@ -615,10 +615,30 @@ test("assistant markdown restores block-level typography reset by preflight", ()
       `markdown ${tag} needs an explicit override under Tailwind preflight`
     );
   }
+  // The table renderer wraps the table in its own horizontal scroller, so a
+  // wide table scrolls inside the message rather than dragging the whole
+  // message list sideways. Matched by structure rather than by how close the
+  // two lines happen to sit: UX-031 added `tabIndex`, `role` and `aria-label`
+  // to that wrapper, which a distance-based pattern read as the wrapper
+  // disappearing.
+  const tableRenderer = source.slice(
+    source.indexOf("table: ("),
+    source.indexOf("th: (")
+  );
+  assert.ok(tableRenderer.length > 0, "the markdown table renderer must exist");
   assert.match(
-    source,
-    /overflow-x-auto[^"]*"[\s\S]{0,120}<table/,
+    tableRenderer,
+    /overflow-x-auto/,
     "a wide table must scroll inside its own container, not the message list"
+  );
+  assert.match(
+    tableRenderer,
+    /<table\b/,
+    "the scroller must be the table's own wrapper"
+  );
+  assert.ok(
+    tableRenderer.indexOf("overflow-x-auto") < tableRenderer.indexOf("<table"),
+    "the scroller must wrap the table, not sit inside it"
   );
 });
 

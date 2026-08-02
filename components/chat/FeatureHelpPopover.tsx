@@ -268,7 +268,20 @@ export function FeatureHelpPopover({
             <span
               ref={popoverRef}
               id={id}
-              role="tooltip"
+              /*
+                UI-027. Not a tooltip. This holds a heading, a paragraph and an
+                external "learn more" link -- and on the sheet variant a close
+                button too. A `tooltip` may not contain interactive content:
+                nothing announces the link, and there is no way to reach it,
+                because a tooltip is not a place assistive tech navigates into.
+                The trigger already carries `aria-expanded` and `aria-controls`,
+                so this is a disclosure and now says so. `role="group"` rather
+                than `dialog`, because the hover variant does not move focus or
+                trap it and must not claim it does; the sheet variant below is a
+                real dialog and keeps that role.
+              */
+              role="group"
+              aria-label={title}
               data-testid={testId ? `${testId}-content` : undefined}
               onMouseEnter={keepPopoverOpen}
               onMouseLeave={scheduleClosePopover}

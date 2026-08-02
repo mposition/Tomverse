@@ -285,3 +285,25 @@ a named owner. N/V is an accepted, tracked risk; a silent tick is neither.
 | Item | Why not verified | Owner | Command / evidence needed |
 | --- | --- | --- | --- |
 |  |  |  |  |
+
+### Carried forward from the 2026-08 go-live review
+
+Everything below was reached during that review and could not be closed from a
+development container. Each row names what would close it, so the next person
+runs a command rather than re-deriving the gap. Copy a row into the table above
+for the release you are cutting, with a real owner, rather than treating this
+list as already accepted.
+
+| Item | Why not verified | Owner | Command / evidence needed |
+| --- | --- | --- | --- |
+| §2 Nightly Visual Regression for the release SHA | The workflow cannot be dispatched from a development container | Release manager | `workflow_dispatch` on **Nightly Visual Regression** at the release ref; record the run URL and who reviewed the diffs |
+| §3 Staging verification (build-info SHA, `/status` vs `/api/models/status`) | No staging deployment reachable | Release manager | `curl https://<staging>/api/build-info`, then `/status` and `/api/models/status` in the same window |
+| §4 Screen reader, Korean IME, external keyboard, real browser zoom | Not automatable; the E2E suite emulates viewport, not zoom or AT | Accessibility owner | `.github/ACCESSIBILITY_QA_MATRIX.md` rows, filled against the release SHA |
+| §7.1 `prisma migrate deploy` / `migrate status` | No production or staging database | Release manager | Migrate output and the pre-migration snapshot id |
+| §7.2 Production environment values | Environment variables are not readable from here | Infrastructure owner | A screenshot or `railway variables` output for each row in §7.2 |
+| §7.3 Cloudflare header spoof test and the 421 direct-origin rejection | Requires a request from outside the edge, against a real deployment | Infrastructure owner | The two `curl` commands in §7.3, run against the release deployment |
+| §7.5 SEC-011 production migration and its zero-row verification | The migration must run against the production database | Release manager | `npm run migrate:conversation-lock-passwords -- --dry-run`, then `--confirm-production`, then the count query in §7.5 |
+| WebKit (`mobile-safari`) E2E project | WebKit is absent from this container's Playwright bundle; only Chromium is installed | QA | `npx playwright install webkit && npx playwright test --project=mobile-safari` on a runner that has it |
+| UX-020 Chinese, French, German, Spanish and Portuguese translations | 182 Chinese keys and ~225 keys per preview locale answer in English. Translating them needs a reviewer per language, not a machine pass into the product's core interface | Localization owner | Lower the per-locale ceiling in `tests/localeParity.test.mjs` as strings land; the test measures the remaining gap |
+| UX-024 Conversation switching during a streaming response | `ChatPageClient`'s `isSending` is a hardcoded `false`, so the guard in `handleSelectConversation` is dead. What is actually lost on a switch could not be measured: the shared fixture seeds one conversation, so the switch itself is not reproducible without a two-conversation fixture | Chat owner | A two-conversation fixture, then decide block-vs-allow before hoisting `modelStatuses` out of the two shells |
+| Dependency currency (not vulnerabilities) | `npm audit` and `npm audit --omit=dev` both report **0** as of this review. `npm outdated` lists semver-compatible updates and three major jumps (eslint 10, openai 7, typescript 7) that are their own pieces of work | Platform owner | `npm audit --omit=dev` at the release SHA; schedule the majors separately |

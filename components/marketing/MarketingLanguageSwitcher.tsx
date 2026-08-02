@@ -18,7 +18,7 @@ import { MARKETING_LOCALE_NOTICE_ID } from "./LocaleSupportNotice";
 const languageOptions: Language[] = ["ko", "en", "zh", "fr", "de", "es", "pt"];
 
 export function MarketingLanguageSwitcher() {
-  const { lang, setLang } = useLanguage();
+  const { lang, setLang, t } = useLanguage();
   const pathname = usePathname();
   const router = useRouter();
   const selectedPolicy = getLocaleLaunchPolicy(lang);
@@ -63,9 +63,9 @@ export function MarketingLanguageSwitcher() {
       className="inline-flex h-11 min-w-0 max-w-[10.5rem] items-center gap-2 overflow-hidden rounded-xl border border-zinc-300 bg-white px-2.5 text-sm font-bold text-zinc-700 shadow-sm transition hover:bg-zinc-50 focus-within:ring-2 focus-within:ring-blue-600 focus-within:ring-offset-2 dark:focus-within:ring-blue-400 dark:focus-within:ring-offset-zinc-950 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100 dark:hover:bg-zinc-800 sm:max-w-none sm:px-3"
     >
       <Languages className="h-4 w-4 shrink-0 text-blue-600 dark:text-blue-400" />
-      <span className="sr-only">Language</span>
+      <span className="sr-only">{t("languageSwitcher.label")}</span>
       <select
-        aria-label="Language"
+        aria-label={t("languageSwitcher.label")}
         aria-describedby={
           selectedPolicy.marketTier === "primary"
             ? undefined

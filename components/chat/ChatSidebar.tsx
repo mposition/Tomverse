@@ -820,9 +820,23 @@ export function ChatSidebar({
                         className="h-full w-full object-cover"
                     />
                 </span>
-                <h1 className={`${isMobileDrawer ? "text-sm" : "text-base"} font-bold tracking-tight text-zinc-800 dark:text-zinc-100`}>
-                    Tomverse Insight
-                </h1>
+                {/*
+                  UX-028. A heading on the desktop shell, where this sidebar is
+                  the page's own chrome, and plain text inside the mobile
+                  drawer, where it is not: the drawer is a dialog, and an <h1>
+                  inside it would be the page's only top-level heading while
+                  being unreachable until the dialog is opened. The mobile shell
+                  carries its own <h1> instead.
+                */}
+                {isMobileDrawer ? (
+                    <p className="text-sm font-bold tracking-tight text-zinc-800 dark:text-zinc-100">
+                        Tomverse Insight
+                    </p>
+                ) : (
+                    <h1 className="text-base font-bold tracking-tight text-zinc-800 dark:text-zinc-100">
+                        Tomverse Insight
+                    </h1>
+                )}
                 <BuildStagingBadge />
                 <div className="ml-auto flex items-center gap-1">
                 {!isMobileDrawer && (

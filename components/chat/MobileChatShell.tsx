@@ -660,6 +660,15 @@ export function MobileChatShell({
       }
       className="flex h-[100dvh] w-full max-w-full flex-col overflow-y-auto overflow-x-hidden overscroll-contain bg-white text-[13px] text-zinc-900 dark:bg-zinc-950 dark:text-zinc-100"
     >
+      {/*
+        UX-028. The mobile shell had no <h1> at all. The only one on the page
+        lived in ChatSidebar, which on this shell renders inside the drawer --
+        so heading navigation found nothing until the user opened a dialog, and
+        then found the page's top-level heading inside it. Visually hidden
+        because the header already shows the brand mark; this is the structure,
+        not a second copy of it.
+      */}
+      <h1 className="sr-only">Tomverse Insight</h1>
       <header
         ref={headerRef}
         data-testid="mobile-chat-header"
