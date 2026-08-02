@@ -522,6 +522,16 @@ checkpoint; it is an operational estimate, not an invoice or payment action.
 Cloudflare usage percentages use the current Standard storage free-tier
 allowances as reference thresholds and are likewise not authoritative billing.
 
+Because the projected balance is an application estimate rather than Railway's
+billed balance, the `PROJECTED_BALANCE_LOW` warning it produces is a
+dashboard-only advisory: it stays visible on the Admin Infrastructure tab and
+in the scheduled infrastructure report, but on its own it never creates an
+operational incident, so it triggers no Sentry event, Resend email, or
+Slack/Discord real-time alert (`lib/infrastructureAlertPolicy.ts`). Railway
+API failures (`status: "error"`), any other or unknown Railway warning reason,
+and all R2/Database/Prisma warnings and errors still page the incident
+channels as before.
+
 Before deploying the Admin Infrastructure, provider billing profiles, and
 provider error-detail features,
 apply the checked-in database migration with `npm run db:migrate` from a
@@ -925,9 +935,12 @@ a healthy job delayed on every cycle. `tests/scheduledJobsCore.test.mjs` reads
 this file's cron and fails if the two disagree. The daily cleanup also runs the
 reconciler as a fallback, but it is not a substitute for this Cron service. The
 same service runs the Railway, R2, PostgreSQL, and Prisma threshold monitor at
-most once every 15 minutes. Warning or error thresholds are sent through the
-DB-independent operational alert channels and appear as a separate
-scheduled-job row in Admin.
+most once every 15 minutes. Actionable warning or error thresholds are sent
+through the DB-independent operational alert channels and appear as a separate
+scheduled-job row in Admin. Dashboard-only advisories such as Railway
+`PROJECTED_BALANCE_LOW` are recorded in the job result (`advisories`,
+`suppressedAdvisories`) without an alert; the `alerts` count covers only
+incidents that were actually reported.
 
 Create a third Railway Cron service for the daily operations summary and
 set its Config File Path to `/railway.provider-usage-sync.json`. It runs at
