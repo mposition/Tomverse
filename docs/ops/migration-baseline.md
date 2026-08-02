@@ -56,21 +56,30 @@ baseline 이전에 만들어진 DB는 테이블은 다 있지만 `_prisma_migrat
 
 guard의 판단 규칙:
 
+**판단은 이력이 아니라 스키마로 합니다.** 이력을 먼저 읽으면 `db push`로 만든 DB —
+스키마는 완전하고 이력은 비어 있는 — 를 신규로 오판합니다.
+
 | DB 상태 | 동작 |
 |---|---|
-| `_prisma_migrations` 없음 | 신규 DB. 아무것도 하지 않음 (deploy가 baseline 적용) |
-| 완료된 migration이 0건 | 신규 DB로 간주. 아무것도 하지 않음 |
-| baseline이 완료로 기록됨 | 아무것도 하지 않음 |
-| `User` 테이블 없음 | 판단 거부하고 실패 — 사람이 확인해야 하는 상태 |
-| 그 외 (완료 이력 있음 + baseline 없음 + 스키마 있음) | `migrate resolve --applied` |
+| `User` 테이블 없음 | 신규 DB. 아무것도 하지 않음 (deploy가 baseline 적용) |
+| 스키마 있음 + baseline 미기록 | `migrate resolve --applied` |
+| 스키마 있음 + baseline 기록됨 + 나머지 pending | 아무것도 하지 않음 (deploy가 적용) |
+| 스키마가 이미 `schema.prisma`와 일치하는데 pending migration이 있음 | **거부**하고 해결 명령 출력 |
 
-마지막 규칙은 **이미 한 번 배포가 실패한 DB도 복구합니다** (실패 행은 완료 행이
-아니므로 같은 경로로 처리). `migrate resolve --applied`는 `_prisma_migrations`에
-행 하나를 쓸 뿐 DDL을 실행하지 않으므로 스키마를 손상시킬 수 없습니다.
+두 번째 규칙은 pre-baseline DB, `db push` DB, **이미 한 번 배포가 실패한 DB**를 모두
+같은 경로로 처리합니다 (실패 행은 완료 행이 아니므로). `migrate resolve --applied`는
+`_prisma_migrations`에 행 하나를 쓸 뿐 DDL을 실행하지 않으므로 스키마를 손상시킬 수
+없습니다.
+
+마지막 규칙은 **복원이 최신 dump와 구버전 이력을 짝지은 경우**입니다. pending
+migration이 정말 필요한지 이미 반영됐는지 알 수 없는 상태라 추측하지 않습니다.
+그대로 진행하면 P3018로 죽고 실패 행이 남아 이후 배포까지 막히지만, 거부는 DB를
+전혀 건드리지 않습니다.
 
 ## production 스키마와 대조하기
 
-`npm run db:compare-schema` 한 줄입니다. 대상 DB는 **읽기만** 합니다.
+`npm run db:compare-schema` 한 줄입니다. **대상 DB는 읽기만 합니다** — 이 스크립트가
+소스에 보내는 질의는 전부 `SELECT`이고, 쓰기는 scratch DB에만 일어납니다.
 
 ```bash
 COMPARE_SOURCE_DATABASE_URL="$PRODUCTION_DIRECT_URL" \
@@ -78,29 +87,61 @@ COMPARE_SCRATCH_DATABASE_URL="postgresql://.../tomverse_compare_scratch" \
 npm run db:compare-schema
 ```
 
-scratch DB는 비어 있어야 하고 이름에 `test`·`scratch`·`tmp`·`ci`·`compare` 중
-하나가 들어가야 합니다. 소스와 같으면 실행을 거부합니다.
+### 실행 조건
 
-무엇이 다른지는 `pg_dump` 텍스트 비교가 아니라 **카탈로그에서 직접** 읽습니다 —
-컬럼, 인덱스(`pg_indexes.indexdef`), 제약(`pg_get_constraintdef`), enum, 함수,
-트리거. 서버가 정규화한 문자열이라 서버 버전이나 문장 순서 차이에 흔들리지
-않습니다. 차이가 있으면 exit 1이라 릴리스 게이트로 쓸 수 있습니다.
+- **소스는 direct URL**을 씁니다. pooler를 거치면 세션 단위 카탈로그 질의가
+  일관되지 않을 수 있습니다.
+- **가능하면 읽기 전용 계정**으로 접속합니다. 스크립트가 쓰지 않는 것과, 쓸 수
+  없는 것은 다릅니다.
+- **scratch는 소스와 다른 빈 DB**여야 합니다. 이름에 `test`·`scratch`·`tmp`·`ci`·
+  `compare` 중 하나가 없거나 소스와 같으면 실행을 거부합니다.
+- **PostgreSQL major version과 extension 조건을 소스와 맞춥니다.** 다르면
+  스크립트가 경고를 출력합니다 — 그 상태의 차이는 drift가 아니라 서버 간 표현
+  차이일 수 있습니다.
+- 출력 첫머리에 **commit SHA·시각·양쪽 DB 이름과 서버 버전**이 evidence로 찍힙니다.
+  운영 증거로 그대로 보관합니다.
+- **자격증명은 출력에 남지 않습니다.** 접속 실패 메시지까지 포함해 connection
+  string 형태는 전부 마스킹됩니다.
 
-**왜 `prisma migrate diff`로는 안 되는가.** 실제로 확인했습니다. 손으로 CHECK
-제약과 partial unique index를 하나씩 넣은 DB에 대해:
+### 결과 해석
+
+셋을 구분해서 보고합니다. 원인과 교정 방법이 다르기 때문입니다.
+
+| 분류 | 뜻 |
+|---|---|
+| `only in the source` | migration 이력이 만들지 않는 객체. **새로 만드는 모든 환경에 빠집니다.** 손으로 넣었거나 extension이 소유한 객체입니다 |
+| `only in migrations` | 소스가 이력보다 뒤처졌거나, 이력 밖에서 삭제된 객체 |
+| `definition mismatch` | **같은 이름이 양쪽에 있는데 정의가 다릅니다.** 없어진 게 없으므로 "존재하는가" 검사는 전부 통과합니다 — 가장 위험한 분류입니다 |
+
+세 번째가 이 도구를 다시 손본 이유입니다. 단순 집합 차이로는 이름이 같고 정의만
+바뀐 인덱스를 "하나 없어지고 하나 생김"으로 보고하게 되고, **이름이 여전히
+해석되는데 의미가 달라졌다는 사실**이 묻힙니다. 이 저장소에서 실제로 사고가 났던
+partial unique index가 정확히 그 유형입니다.
+
+**차이가 나와도 production이나 baseline을 손으로 고치지 않습니다.** manual drift인지,
+extension이 소유한 객체인지, 아무도 쓰지 않은 migration인지 먼저 분류한 뒤 **새
+migration으로** 교정하고 다시 돌립니다. 이미 적용된 migration을 편집하면 checksum이
+바뀌어 그것을 이미 실행한 모든 환경의 배포가 깨집니다.
+
+### 왜 `prisma migrate diff`로는 안 되는가
+
+실제로 확인했습니다. 손으로 CHECK 제약과 partial unique index를 하나씩 넣은 DB에 대해:
 
 | 도구 | 결과 |
 |---|---|
 | `prisma migrate diff --exit-code` | `No difference detected.` (exit 0) — **둘 다 놓침** |
 | `npm run db:compare-schema` | 둘 다 이름과 정의까지 보고, exit 1 |
 
-`schema.prisma`가 표현하지 못하는 것은 `migrate diff`도 보지 못합니다. 그것이
-이 스크립트가 존재하는 이유입니다.
+`schema.prisma`가 표현하지 못하는 것은 `migrate diff`도 보지 못합니다.
+
+### 언제 돌려야 하는가
+
+- **다음 schema migration을 배포하기 전**
+- **DR 준비 완료를 선언하기 전**
 
 > **아직 production 대조는 실행되지 않았습니다.** 이 저장소 안에서는 접속 정보를
-> 얻을 수 없습니다(Railway MCP는 변수 이름만 반환합니다). 권한이 있는 분이 위
-> 명령을 한 번 실행해 주십시오. `only in the source`로 나오는 항목은 migration
-> 이력에 없는 SQL이며, **새로 만드는 모든 환경에 빠져 있게 됩니다.**
+> 얻을 수 없습니다(Railway MCP는 변수 이름만 반환하고 CLI도 없습니다). 권한이
+> 있는 분이 위 명령을 한 번 실행해 주십시오.
 
 ## 새 migration을 추가할 때
 
