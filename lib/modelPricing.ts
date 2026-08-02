@@ -64,7 +64,33 @@ export type ModelPriceTier = {
      * this exact model -- never understating cost is the conservative default.
      */
     cachedInputPriceMultiplier: number;
+    /**
+     * The provider's published price for *writing* an entry into the prompt
+     * cache, recorded for audit and deliberately **not billed**.
+     *
+     * Cache reads and cache writes are separate lines on the provider's price
+     * list, and only the read has a token count anywhere in this application:
+     * `cachedInputTokens` (lib/providerUsageCost.ts) is the read count, and no
+     * provider usage adapter reports cache-*write* tokens at all. Deriving a
+     * write count from what is measured would be inventing a number, so the
+     * rate is written down here -- so the gap is visible and so a future
+     * adapter has the verified figure to hand -- and `resolveModelPricing`
+     * ignores it. See `CACHE_WRITE_PRICING_IS_RECORDED_NOT_BILLED`.
+     *
+     * `undefined` means the provider publishes no separate cache-write price
+     * for this model, or none has been verified. It never means zero.
+     */
+    cacheWriteUsdPerMillionTokens?: number;
 };
+
+/**
+ * Restates, in one place a test can assert against, that the cache-write rates
+ * recorded above are audit data rather than a billing input. If a provider
+ * usage adapter ever starts reporting cache-write tokens, this is the flag to
+ * flip -- together with a new `pricingVersion`, because the same model would
+ * then cost a different internal figure for the same request.
+ */
+export const CACHE_WRITE_PRICING_IS_RECORDED_NOT_BILLED = true;
 
 export type ModelPricingProfile = {
     modelId: string;
@@ -152,21 +178,43 @@ const flatTier = (
     },
 ];
 
+/**
+ * The GPT-5.6 family's two-tier shape: past a 272,000-token prompt the input
+ * rate doubles and the output rate goes up by half.
+ *
+ * `cacheWriteUsdPerMillionTokens` is the short-context cache-write rate, and
+ * the long-context tier's is derived by the same x2 the input rate takes --
+ * the published long-context cache-write price is exactly twice the
+ * short-context one for every model in this family where both are published.
+ * Omit it for a model whose cache-write price has not been verified rather
+ * than guessing: it is recorded, not billed, so an absent value costs nothing
+ * and an invented one would be a fabricated audit trail.
+ */
 const gpt56Tiers = (
     inputUsdPerMillionTokens: number,
-    outputUsdPerMillionTokens: number
+    outputUsdPerMillionTokens: number,
+    cacheWriteUsdPerMillionTokens?: number
 ): readonly ModelPriceTier[] => [
     {
         maxPromptTokens: 272_000,
         inputUsdPerMillionTokens,
         outputUsdPerMillionTokens,
         cachedInputPriceMultiplier: 0.1,
+        ...(cacheWriteUsdPerMillionTokens === undefined
+            ? {}
+            : { cacheWriteUsdPerMillionTokens }),
     },
     {
         maxPromptTokens: null,
         inputUsdPerMillionTokens: inputUsdPerMillionTokens * 2,
         outputUsdPerMillionTokens: outputUsdPerMillionTokens * 1.5,
         cachedInputPriceMultiplier: 0.1,
+        ...(cacheWriteUsdPerMillionTokens === undefined
+            ? {}
+            : {
+                  cacheWriteUsdPerMillionTokens:
+                      cacheWriteUsdPerMillionTokens * 2,
+              }),
     },
 ];
 
@@ -230,6 +278,43 @@ const DIRECT_STANDARD = {
     processingTier: "standard",
 } as const;
 
+/**
+ * Source files allowed to name a processing tier in a provider request.
+ *
+ * Every profile below declares `processingTier: "standard"`, and that is an
+ * assertion about the request this application actually sends -- not a
+ * preference. It holds only while no request sets one, because OpenAI's
+ * `service_tier` defaults to `auto` when omitted, and `auto` may be served at
+ * a tier whose price is not the Standard price these profiles record. Flex and
+ * Batch are cheaper, Priority/Fast is dearer, and a regional-processing
+ * endpoint adds a surcharge on top of any of them.
+ *
+ * `npm run check:model-pricing` greps the tree for a request-side tier
+ * selector and fails when one appears outside this list, so a tier can only be
+ * introduced together with the pricing entries that describe it. The list is
+ * empty on purpose: nothing sets one today.
+ *
+ * Recorded as a gap rather than solved here: the app does not read the
+ * `service_tier` a response came back on, so a snapshot records the tier this
+ * registry *assumes* rather than the tier the request was *served at*. Closing
+ * that means plumbing the response field into the pricing snapshot, which is
+ * a separate change with its own `pricingVersion`.
+ */
+export const PROCESSING_TIER_REQUEST_ALLOWLIST: readonly string[] = [];
+
+/**
+ * `GET /v1/models` is **not** a price source, and nothing in this file may be
+ * derived from it.
+ *
+ * It answers one question -- can this API key see this model -- and returns no
+ * pricing whatsoever. Treating its response as confirmation of a price would
+ * mean recording, as verified, a number the provider never sent. Prices here
+ * come from the provider's published pricing pages, and `priceSource` names
+ * which one. `npm run check:openai-model-access` exists to make the
+ * visibility check available on its own without implying anything about cost.
+ */
+export const MODEL_LIST_ENDPOINT_IS_NOT_A_PRICE_SOURCE = true;
+
 // ---------------------------------------------------------------------------
 // Explicit per-model profiles.
 //
@@ -274,11 +359,24 @@ export const MODEL_PRICING: readonly ModelPricingProfile[] = [
         effectiveDate: "2026-08-01",
     },
     {
+        // Published Standard-tier rates, USD per million tokens:
+        //   short context (<=272K prompt): 0.20 in / 0.02 cached / 0.25 cache
+        //                                  write / 1.20 out
+        //   long context  (> 272K prompt): 0.40 in / 0.04 cached / 0.50 cache
+        //                                  write / 1.80 out
+        // gpt56Tiers derives the long tier from the short one, and 0.02/0.04
+        // come out of the 0.1 cached multiplier. The cache-write rates are
+        // recorded and not billed -- see ModelPriceTier.
+        //
+        // Reachability: this application caps input at 128,000 tokens for a
+        // signed-in account and 16,000 for a guest (lib/chatSecurity.ts), so
+        // the long tier is priced correctly but has never been reached on the
+        // chat path.
         modelId: "gpt-5-6-luna",
         provider: "openai",
         apiModelId: "gpt-5.6-luna",
         ...DIRECT_STANDARD,
-        tiers: gpt56Tiers(0.2, 1.2),
+        tiers: gpt56Tiers(0.2, 1.2, 0.25),
         reasoningTokenBilling: "billed_as_output",
         nativeSearchCostMicroUsdPerQuery: 10_000,
         maxOutputTokens: 128_000,
@@ -335,7 +433,9 @@ export const MODEL_PRICING: readonly ModelPricingProfile[] = [
         //
         // Flat-priced: unlike the GPT-5.6 family above, 5.4 mini publishes no
         // long-context price step, so there is one unbounded tier rather than
-        // a gpt56Tiers() pair.
+        // a gpt56Tiers() pair. US$0.75 in / US$0.075 cached / US$4.50 out; no
+        // cache-write rate is recorded because none was verified for this
+        // model, and a recorded price that nobody checked is worse than none.
         //
         // Three separate output numbers, deliberately not collapsed:
         //   * 128,000 -- the provider's published maximum output.

@@ -1,6 +1,7 @@
 # Release checklist
 
-Run through this before promoting a build — except section 5, which is checked
+Run through this before promoting a build — except section 4, which an operator
+runs against production at the deployed SHA, and section 6, which is checked
 immediately after the merge. Every item needs either evidence tied to the
 **release SHA** or a written waiver — an unticked box is a release blocker, not
 a formality.
@@ -24,6 +25,8 @@ Date / timezone:    ____________________
 - [ ] `npm run check:encoding:strict`
 - [ ] `npm run build`
 - [ ] `npm run verify:smoke-coverage`
+- [ ] `npm run check:model-pricing`
+- [ ] `npm run check:default-models`
 - [ ] Chromium E2E: `desktop-chromium`, `desktop-compact`, `mobile-chromium`
       — no unexplained failures
 
@@ -79,7 +82,53 @@ over: the next release needs its own reviewed run or its own waiver.
       per-provider contradiction between them
 - [ ] Model picker, provider banner and chat send agree with both of the above
 
-## 4. Accessibility
+## 4. Production schema comparison (operator, at the release SHA)
+
+`prisma migrate diff` cannot see either of the two things this repository's
+migration baseline had to reconstruct by hand — CHECK constraints and
+partial/expression indexes — so "the baseline reproduces production" is a claim
+nothing in CI can settle. `npm run db:compare-schema` reads both catalogues and
+settles it, and it has never been run against production: the connection
+details are not obtainable from inside the repository.
+
+Run it **from the deployed release SHA**, against a **direct** production URL
+with a read-only role, and a scratch database that is empty and disposable.
+
+```bash
+COMPARE_SOURCE_DATABASE_URL="$PRODUCTION_DIRECT_URL" \
+COMPARE_SCRATCH_DATABASE_URL="postgresql://.../tomverse_compare_scratch" \
+npm run db:compare-schema
+```
+
+- [ ] Run at the release SHA (the command prints the commit it ran at)
+- [ ] Source was a direct URL, not a pooler, on a read-only role
+- [ ] Scratch database was empty, disposable and not the source
+- [ ] PostgreSQL major version matched — a version warning invalidates the
+      comparison rather than qualifying it
+- [ ] **All three classifications reviewed**, not just the total:
+      `only_in_source`, `only_in_database`, `definition_mismatch`
+- [ ] Output attached to the operations ticket with secrets removed
+
+```
+Ran at SHA:         ____________________
+only_in_source:     ____________________
+only_in_database:   ____________________
+definition_mismatch:____________________
+```
+
+`definition_mismatch` is the dangerous class: the name exists on both sides, so
+every "does it exist" check passes while the object behind it means something
+else. The partial unique index that stops two racing plan-change confirms from
+both reserving is exactly that shape.
+
+**Do not correct anything found here by hand, and never with `db push`.**
+Classify each difference — manual drift, extension-owned object, or a migration
+nobody wrote — then fix it with a **new forward migration** and re-run. Editing
+an applied migration changes its checksum and breaks deploys on every
+environment that already ran it. The schema dump is not a CI artifact and no
+connection string goes into the ticket.
+
+## 5. Accessibility
 
 - [ ] `.github/ACCESSIBILITY_QA_MATRIX.md` filled in for this release SHA
 - [ ] No P0/P1 accessibility blocker outstanding
@@ -89,7 +138,7 @@ The automated rows in that matrix run in CI. The screen-reader, Korean-IME,
 external-keyboard and real-browser-zoom rows do not, and a green suite says
 nothing about them.
 
-## 5. After the release merge — confirm shared ancestry was restored
+## 6. After the release merge — confirm shared ancestry was restored
 
 This is the one item here that runs *after* the merge button. **Do not perform
 the back-merge by hand.** Since #232 it is automatic, and a manual one now races
@@ -148,7 +197,7 @@ First real trigger, for calibration: #233 was merged as a squash (`2e0eff2`,
 one parent) and the workflow produced `b172d0b` (two parents) unattended —
 run `30723157564`, `verify` green, merge changed no file.
 
-## 6. Scope notes
+## 7. Scope notes
 
 A green visual run is **not** an accessibility result. Screenshot goldens
 cannot see focus order, accessible names, announcements or contrast in forced

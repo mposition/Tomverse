@@ -51,7 +51,14 @@
     "maintenance:provider-probe": "node scripts/run-provider-probe.mjs",
     "maintenance:default-model-reconciliation": "node --import tsx scripts/run-default-model-reconciliation.mjs",
     "eval:default-model": "node --conditions=react-server --import tsx scripts/evalDefaultModel.mjs",
-    "postinstall": "prisma generate"
+    "postinstall": "prisma generate",
+    "check:default-models": "node --conditions=react-server --import tsx scripts/check-default-models.mjs",
+    "check:openai-model-access": "node --conditions=react-server --import tsx scripts/check-openai-model-access.mjs",
+    "report:output-token-telemetry": "node --conditions=react-server --import tsx scripts/report-output-token-telemetry.mjs",
+    "check:model-pricing-db": "node --conditions=react-server --import tsx scripts/check-model-pricing-db.mjs",
+    "report:cost-bucket-corrections": "node --conditions=react-server --import tsx scripts/report-cost-bucket-corrections.mjs",
+    "drill:railway-restore-preflight": "node scripts/railway-restore-preflight.mjs",
+    "drill:railway-restore-verify": "node scripts/railway-restore-verify.mjs"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^4.0.20",

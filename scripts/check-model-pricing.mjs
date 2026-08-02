@@ -9,6 +9,8 @@
 // as warnings, because their fallback is close enough to real list prices to
 // be safe while a profile is written.
 
+import { spawnSync } from "node:child_process";
+
 import { AVAILABLE_MODELS } from "../lib/models.ts";
 import {
   daysUntil,
@@ -17,9 +19,59 @@ import {
   MODEL_PRICING,
   PENDING_VERIFIED_PRICE_MODEL_IDS,
   PENDING_VERIFIED_PRICE_REGISTER,
+  PROCESSING_TIER_REQUEST_ALLOWLIST,
 } from "../lib/modelPricing.ts";
 
 const now = new Date();
+
+// ---------------------------------------------------------------------------
+// Processing tier.
+//
+// Every profile claims `processingTier: "standard"`, which is only true while
+// no request selects a tier: OpenAI treats an omitted `service_tier` as
+// `auto`, and flex, batch and priority all price differently from Standard.
+// A tier introduced without the matching pricing entry would mis-cost every
+// request on it silently, so a request-side selector is a build failure until
+// it is added to PROCESSING_TIER_REQUEST_ALLOWLIST.
+// ---------------------------------------------------------------------------
+const tierGrep = spawnSync(
+  "git",
+  [
+    "grep",
+    "-lnE",
+    "(service_tier|serviceTier)",
+    "--",
+    "app",
+    "lib",
+    "components",
+    "scripts",
+  ],
+  { encoding: "utf8" }
+);
+const tierFiles = (tierGrep.stdout || "")
+  .split("\n")
+  .map((line) => line.trim())
+  .filter(Boolean)
+  // This file and the check itself describe the rule; they do not send one.
+  .filter(
+    (file) =>
+      file !== "lib/modelPricing.ts" && file !== "scripts/check-model-pricing.mjs"
+  )
+  .filter((file) => !PROCESSING_TIER_REQUEST_ALLOWLIST.includes(file));
+
+if (tierFiles.length > 0) {
+  console.error(
+    `\n${tierFiles.length} file(s) name a provider processing tier:\n` +
+      tierFiles.map((file) => `  - ${file}`).join("\n") +
+      "\n\nEvery profile in lib/modelPricing.ts records Standard pricing for a\n" +
+      "request that selects no tier. Flex, batch, priority and regional\n" +
+      "processing are priced differently, so a tier can only be introduced\n" +
+      "together with the profile entries that price it. Add the file to\n" +
+      "PROCESSING_TIER_REQUEST_ALLOWLIST once that is done."
+  );
+  process.exit(1);
+}
+
 const unpriced = findUnpricedModels(AVAILABLE_MODELS);
 const errors = unpriced.filter((entry) => entry.severity === "error");
 const warnings = unpriced.filter((entry) => entry.severity === "warning");

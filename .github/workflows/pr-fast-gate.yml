@@ -138,6 +138,17 @@ jobs:
         timeout-minutes: 5
         run: npm run check:usage-bucket-range
 
+      # Two separate decisions that get mistaken for each other: which model
+      # leads a guest's first comparison (an AppSetting) and what a newly
+      # signed-in account gets (DEFAULT_MODEL_ID, APP_DEFAULTS, the Prisma
+      # column default and the row app/api/user/settings creates). Nothing
+      # else reads all four together, so they drift apart in silence. With no
+      # DATABASE_URL this audits the compiled catalogue against the schema,
+      # which is exactly the half CI can answer.
+      - name: Default model coherence
+        timeout-minutes: 5
+        run: npm run check:default-models
+
       - name: Strict encoding validation
         timeout-minutes: 5
         run: npm run check:encoding:strict
