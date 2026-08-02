@@ -59,6 +59,18 @@ type GuestChatQaState = {
   /** Tokens the "server" has already consumed -- a replay is rejected. */
   spentTokens: string[];
   replays: number;
+  /**
+   * When set, the next token-bearing request has its token verified normally
+   * (spent, grant issued -- exactly what the real server does now) but the
+   * request then fails this LATER gate. Fires once, then clears. This is the
+   * production incident shape: verification succeeded, CHAT_RATE_LIMITED
+   * followed, and the grant must survive it.
+   */
+  failVerifiedRetryOnceWith: {
+    status: number;
+    code: string;
+    error: string;
+  } | null;
 };
 
 /**
@@ -73,6 +85,7 @@ async function mockGuestChatRequiringVerification(page: Page) {
     granted: false,
     spentTokens: [],
     replays: 0,
+    failVerifiedRetryOnceWith: null,
   };
 
   await page.route("**/api/chat", async (route) => {
@@ -113,6 +126,23 @@ async function mockGuestChatRequiringVerification(page: Page) {
       }
       state.spentTokens.push(token);
       state.granted = true;
+      if (state.failVerifiedRetryOnceWith) {
+        // The token was verified and the grant issued -- the failure below is
+        // a different layer's answer, exactly like the fixed server.
+        const failure = state.failVerifiedRetryOnceWith;
+        state.failVerifiedRetryOnceWith = null;
+        await route.fulfill({
+          status: failure.status,
+          contentType: "application/json",
+          body: JSON.stringify({
+            code: failure.code,
+            error: failure.error,
+            traceId: "qa-trace-downstream",
+            details: { retryAfterSeconds: 5 },
+          }),
+        });
+        return;
+      }
     }
 
     await route.fulfill({
@@ -887,6 +917,130 @@ test.describe("Guest verification: mobile shell", () => {
       .toBe(1);
     expect(chat.replays).toBe(0);
     await expect(mockWidget(page)).toHaveCount(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The verified retry meets a later gate (trace e81bb83c-… / c7216139-…).
+//
+// Production incident: three panels hit TURNSTILE_REQUIRED, one solved the
+// challenge, its verified retry was rate-limited (CHAT_RATE_LIMITED) -- and
+// the two waiting panels each fired a tokenless retry that could only harvest
+// another TURNSTILE_REQUIRED, whose raw English sentence then rendered inside
+// a Korean UI. What must hold now: the waiters inherit the verifier's failure
+// with ZERO extra requests, the grant survives the downstream error, and the
+// next manual send rides that grant without a second challenge.
+// ---------------------------------------------------------------------------
+
+test.describe("Guest verification: verified retry meets a later gate", () => {
+  test("a rate-limited verified retry fails the waiting panels without a tokenless retry storm", async ({
+    page,
+  }) => {
+    const chat = await enterGuestChat(page, {
+      viewport: DESKTOP_VIEWPORT,
+      script: "interactive",
+    });
+    chat.failVerifiedRetryOnceWith = {
+      status: 429,
+      code: "CHAT_RATE_LIMITED",
+      error: "Too many requests. Please slow down.",
+    };
+
+    await send(page, "Compare under a rate limit", DESKTOP_VIEWPORT.width);
+    await expect(mockWidget(page)).toBeVisible();
+    expect(await completeTurnstileChallenge(page)).toBe(true);
+
+    // 3 tokenless first attempts + exactly 1 verified retry. The two waiting
+    // panels must NOT have retried: their verifier failed, so a tokenless
+    // request could only produce another TURNSTILE_REQUIRED.
+    await expect.poll(() => chat.attempts.length).toBe(4);
+    await page.waitForTimeout(500);
+    expect(chat.attempts).toHaveLength(4);
+    expect(chat.attempts.filter((attempt) => attempt.token !== null)).toHaveLength(1);
+    expect(chat.spentTokens).toHaveLength(1);
+    expect(chat.replays).toBe(0);
+
+    // The server's raw verification sentence never renders, in any panel.
+    expect(await page.getByText("Guest verification is required.").count()).toBe(0);
+    // The user's own message (their draft) is still on screen to resend.
+    await expect(
+      page.getByText("Compare under a rate limit").first()
+    ).toBeVisible();
+
+    // One challenge, one token -- and the token itself never leaks into the DOM.
+    const state = await readTurnstileState(page);
+    expect(state!.issuedTokens).toHaveLength(1);
+    expect(await page.getByText("qa-turnstile-token").count()).toBe(0);
+
+    // The token WAS verified, so the grant survived the 429: the next manual
+    // send goes through on the grant alone -- no new challenge, no new token.
+    await send(page, "Try again after the limit", DESKTOP_VIEWPORT.width);
+    for (const modelId of THREE_MODELS) {
+      await expect(page.getByText(`Answer from ${modelId}.`)).toBeVisible();
+    }
+    const finalState = await readTurnstileState(page);
+    expect(finalState!.issuedTokens).toHaveLength(1);
+    expect(chat.spentTokens).toHaveLength(1);
+    expect(
+      chat.attempts.slice(4).every((attempt) => attempt.token === null),
+      "the post-grant sends must not spend another token"
+    ).toBe(true);
+  });
+
+  test("a server that keeps demanding verification shows localized copy, not the English original", async ({
+    page,
+  }) => {
+    await prepareGuestPage(page, "ko");
+    await installTurnstileScript(page, "interactive");
+
+    // A server whose grant never arrives (the pre-fix behaviour, or a broken
+    // edge cache): every request -- token or not -- gets TURNSTILE_REQUIRED.
+    const attempts: { token: string | null }[] = [];
+    await page.route("**/api/chat", async (route) => {
+      if (route.request().method() !== "POST") {
+        await route.fallback();
+        return;
+      }
+      const body = route.request().postDataJSON() as { turnstileToken?: string };
+      attempts.push({
+        token:
+          typeof body.turnstileToken === "string" ? body.turnstileToken : null,
+      });
+      await route.fulfill({
+        status: 403,
+        contentType: "application/json",
+        body: JSON.stringify({
+          code: "TURNSTILE_REQUIRED",
+          error: "Guest verification is required.",
+          traceId: "qa-trace-repeat",
+        }),
+      });
+    });
+
+    await page.setViewportSize(DESKTOP_VIEWPORT);
+    await page.goto(
+      `/chat?lang=ko&models=${encodeURIComponent(THREE_MODELS.join(","))}`
+    );
+    await expect(page.getByTestId("chat-textarea")).toBeVisible();
+    await freezeAnimations(page);
+
+    await send(page, "반복 오류 확인", DESKTOP_VIEWPORT.width);
+    await expect(mockWidget(page)).toBeVisible();
+    expect(await completeTurnstileChallenge(page)).toBe(true);
+
+    // 3 tokenless + 1 verified retry, then everything stops: the repeat
+    // rejection must not restart the cycle.
+    await expect.poll(() => attempts.length).toBe(4);
+    await page.waitForTimeout(500);
+    expect(attempts).toHaveLength(4);
+    expect(attempts.filter((attempt) => attempt.token !== null)).toHaveLength(1);
+
+    // Korean UI shows the localized verification copy -- never the server's
+    // English prose.
+    expect(await page.getByText("Guest verification is required.").count()).toBe(0);
+    await expect(
+      page.getByText("확인을 완료하지 못했습니다").first()
+    ).toBeVisible();
   });
 });
 
