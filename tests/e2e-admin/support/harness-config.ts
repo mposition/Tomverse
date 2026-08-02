@@ -23,11 +23,12 @@
  *
  *  - **Authentication is real.** Tests mint a genuine NextAuth JWT with
  *    `next-auth/jwt`'s `encode()` and the server's own `NEXTAUTH_SECRET`, and
- *    set it as the ordinary `next-auth.session-token` cookie. The server
- *    decodes it through the unmodified `authOptions`, so server components and
- *    `/api/admin/**` observe the same identity for free. Minting a token is
- *    equivalent to knowing the deployment secret; it grants nothing that
- *    knowing the secret would not already grant.
+ *    set it as the very cookie a production server issues --
+ *    `__Secure-next-auth.session-token`, `Secure`, `HttpOnly`, `SameSite=Lax`.
+ *    The server decodes it through the unmodified `authOptions`, so server
+ *    components and `/api/admin/**` observe the same identity for free.
+ *    Minting a token is equivalent to knowing the deployment secret; it grants
+ *    nothing that knowing the secret would not already grant.
  *  - **Authorization is real.** These identities become administrators only
  *    because `ADMIN_EMAILS` / `ADMIN_<ROLE>_EMAILS` list them, which is the
  *    same mechanism production uses. No code path anywhere treats them
@@ -49,9 +50,60 @@
  */
 export type HarnessEnv = Record<string, string | undefined>;
 
-export const ADMIN_E2E_PORT = 3101;
 export const ADMIN_E2E_HOST = "127.0.0.1";
-export const ADMIN_E2E_BASE_URL = `http://${ADMIN_E2E_HOST}:${ADMIN_E2E_PORT}`;
+
+/** The public port. TLS terminates here; this is the only origin tests know. */
+export const ADMIN_E2E_PORT = 3101;
+export const ADMIN_E2E_BASE_URL = `https://${ADMIN_E2E_HOST}:${ADMIN_E2E_PORT}`;
+
+/**
+ * The loopback port `next start` itself listens on, behind the terminator.
+ *
+ * Nothing outside `playwright.admin.config.ts` and the terminator should ever
+ * name it: a spec that reached the application directly would be talking to a
+ * different origin than the one `NEXTAUTH_URL`, the cookie and the CSRF guard
+ * all agree on.
+ */
+export const ADMIN_E2E_APP_PORT = 3102;
+
+/**
+ * The mode the harness server runs in. `playwright.admin.config.ts` starts it
+ * with `next start`, which sets `NODE_ENV=production` and cannot be talked out
+ * of it -- that is the whole point of this tier, since the admin console's
+ * authorization is only exercised faithfully by a production server.
+ */
+export const ADMIN_E2E_SERVER_MODE = "production";
+
+/**
+ * The session cookie name the server decodes.
+ *
+ * `lib/auth.ts` pins `useSecureCookies: process.env.NODE_ENV === "production"`
+ * (SEC-010), so the prefix follows the server's mode and no longer follows
+ * whether `NEXTAUTH_URL` happens to start with https. The harness server is
+ * production, so NextAuth's `defaultCookies()` names the session cookie with
+ * the `__Secure-` prefix and marks it `Secure`.
+ *
+ * That is why the harness serves https, and it is not a preference. Chromium
+ * accepts a `Secure` cookie from a `Set-Cookie` on loopback http, but CDP's
+ * `Storage.setCookies` -- what `BrowserContext.addCookies()` calls -- refuses
+ * one whose source URL is not https ("Invalid cookie fields"), and
+ * Playwright's `APIRequestContext` will not attach a `Secure` cookie to an
+ * http request even when the jar holds it. Both are load-bearing here: the
+ * specs sign in by injecting a minted token and then assert `/api/admin/**`
+ * through `page.request`.
+ *
+ * Nothing here relaxes the production policy: the harness moved up to meet the
+ * production cookie contract rather than asking the server to drop it.
+ */
+export const ADMIN_E2E_SESSION_COOKIE_NAME =
+  "__Secure-next-auth.session-token";
+
+/**
+ * The unprefixed name a development-mode server would use. The harness never
+ * writes it; sign-in and sign-out clear it anyway so a jar carrying one from an
+ * older revision cannot present a second identity beside the prefixed cookie.
+ */
+export const ADMIN_E2E_LEGACY_SESSION_COOKIE_NAME = "next-auth.session-token";
 
 /**
  * `.invalid` is reserved by RFC 2606 and can never resolve, so a harness
@@ -247,7 +299,10 @@ export const adminE2eServerEnv = ({
   DATABASE_URL: databaseUrl,
   DIRECT_URL: databaseUrl,
   DIRECT_DATABASE_URL: databaseUrl,
-  DISABLE_CSP_UPGRADE_INSECURE_REQUESTS: "true",
+  // The public https origin, not the loopback port `next start` binds. Every
+  // absolute URL the app generates, the cookie's scope and
+  // `getSecurityEnvironmentStatus`'s production https check all read this, and
+  // all three now describe what the browser actually talks to.
   NEXTAUTH_URL: ADMIN_E2E_BASE_URL,
   NEXTAUTH_SECRET: nextAuthSecret,
   REQUIRE_CLOUDFLARE_ORIGIN_SECRET: "false",
