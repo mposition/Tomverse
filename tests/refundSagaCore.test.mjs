@@ -136,3 +136,94 @@ test("an expanded charge object is read as its id", () => {
   ];
   assert.equal(findRefundForRequest("req_1", refunds)?.chargeId, "ch_expanded");
 });
+
+// --- the lookup that outlives the idempotency key -------------------------
+//
+// The request-scoped key makes a retry safe for 24 hours. Past that window
+// Stripe treats the retry as a new request, so the only thing standing between
+// a long outage and a second refund is finding the first one by metadata --
+// which means the search has to be complete.
+
+test("the provider lookup walks every page, not just the first", async () => {
+  const { findRefundForRequestAtProvider } = await import(
+    "../lib/refundProviderLookup.ts"
+  );
+  // 100 unrelated refunds, then ours on the second page. A single-page lookup
+  // answers "no refund exists" here -- the answer that refunds twice.
+  const page1 = Array.from({ length: 100 }, (_, i) => ({
+    id: `re_other_${i}`,
+    metadata: { tomverseRefundRequestId: `req_other_${i}` },
+  }));
+  const page2 = [
+    { id: "re_mine", status: "succeeded", amount: 2000, currency: "usd", charge: "ch_1", metadata: { tomverseRefundRequestId: "req_mine" } },
+  ];
+  let calls = 0;
+  const stripe = {
+    refunds: {
+      list: async ({ starting_after: after }) => {
+        calls += 1;
+        return after
+          ? { data: page2, has_more: false }
+          : { data: page1, has_more: true };
+      },
+    },
+  };
+  const found = await findRefundForRequestAtProvider(stripe, "req_mine", "ch_1");
+  assert.equal(found?.id, "re_mine");
+  assert.equal(calls, 2, "the second page must actually be requested");
+});
+
+test("the provider lookup stops as soon as it matches", async () => {
+  const { findRefundForRequestAtProvider } = await import(
+    "../lib/refundProviderLookup.ts"
+  );
+  let calls = 0;
+  const stripe = {
+    refunds: {
+      list: async () => {
+        calls += 1;
+        return {
+          data: [{ id: "re_mine", charge: "ch_1", metadata: { tomverseRefundRequestId: "req_mine" } }],
+          has_more: true,
+        };
+      },
+    },
+  };
+  assert.equal((await findRefundForRequestAtProvider(stripe, "req_mine", "ch_1"))?.id, "re_mine");
+  assert.equal(calls, 1);
+});
+
+test("an unbounded charge refuses rather than reporting no refund", async () => {
+  const { findRefundForRequestAtProvider } = await import(
+    "../lib/refundProviderLookup.ts"
+  );
+  // Running out of pages is not evidence that no refund exists. Returning null
+  // here would be a guess in the direction that costs money twice.
+  const stripe = {
+    refunds: {
+      list: async () => ({
+        data: [{ id: "re_x", metadata: { tomverseRefundRequestId: "someone_else" } }],
+        has_more: true,
+      }),
+    },
+  };
+  await assert.rejects(
+    () => findRefundForRequestAtProvider(stripe, "req_mine", "ch_1"),
+    /Could not determine whether a refund already exists/
+  );
+});
+
+test("no match on any page returns null", async () => {
+  const { findRefundForRequestAtProvider } = await import(
+    "../lib/refundProviderLookup.ts"
+  );
+  const stripe = {
+    refunds: {
+      list: async () => ({
+        data: [{ id: "re_x", metadata: { tomverseRefundRequestId: "someone_else" } }],
+        has_more: false,
+      }),
+    },
+  };
+  assert.equal(await findRefundForRequestAtProvider(stripe, "req_mine", "ch_1"), null);
+});

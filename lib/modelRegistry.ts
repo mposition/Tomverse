@@ -178,19 +178,31 @@ export async function reconcileStaticWithdrawals() {
       },
     });
 
-    console.warn(
-      "Model registry: applied static catalog withdrawal to runtime row.",
-      {
+    // console.info, not warn.
+    //
+    // This is a successful reconciliation reporting what it changed, and it
+    // runs on every deploy that withdraws a model. On stderr the collector
+    // files it as severity=error, so a normal release fills the error stream
+    // with entries that need no action -- which is how a real error stops
+    // being noticed. Structured so the fields can be queried rather than
+    // grepped out of an interpolated sentence.
+    console.info(
+      JSON.stringify({
+        event: "model_registry.static_withdrawal_applied",
+        severity: "info",
         modelId: model.id,
         status: model.status,
         replacementModelId: intendedReplacement,
-        previous: {
-          enabled: row.enabled,
-          publiclyListed: row.publiclyListed,
-          status: row.status,
-          replacementModelId: row.replacementModelId,
+        changedFields: {
+          enabled: { from: row.enabled, to: false },
+          publiclyListed: { from: row.publiclyListed, to: false },
+          status: { from: row.status, to: model.status },
+          replacementModelId: {
+            from: row.replacementModelId,
+            to: intendedReplacement,
+          },
         },
-      }
+      })
     );
   }
 }
@@ -223,9 +235,13 @@ async function applyScopedStaticCatalogReconciliation() {
       where: { id: change.id },
       data: change.data as Prisma.ModelRegistryEntryUpdateInput,
     });
-    console.warn(
-      "Model registry: reconciled provider-verified static metadata.",
-      { modelId: change.id }
+    console.info(
+      JSON.stringify({
+        event: "model_registry.static_metadata_reconciled",
+        severity: "info",
+        modelId: change.id,
+        changedFields: Object.keys(change.data),
+      })
     );
   }
 }

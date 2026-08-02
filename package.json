@@ -16,6 +16,7 @@
     "test:e2e:admin:run": "node scripts/run-admin-e2e.mjs",
     "test:e2e:smoke": "playwright test --project=desktop-chromium --grep=@smoke",
     "test:e2e:ui-risk": "playwright test --project=desktop-chromium --project=mobile-chromium --grep=@ui-risk",
+    "test:e2e:ui-risk:shard": "node scripts/run-ui-risk-shard.mjs",
     "test:e2e:visual": "playwright test --project=desktop-chromium tests/e2e/chat-state-visual-regression.spec.ts",
     "test:e2e:chromium": "playwright test --project=desktop-chromium --project=desktop-compact --project=mobile-chromium",
     "test:e2e:quick": "npm run build && npm run test:e2e:pr",
