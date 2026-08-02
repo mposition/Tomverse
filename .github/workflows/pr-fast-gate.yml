@@ -152,13 +152,14 @@ jobs:
   build-and-e2e:
     name: Production build and Chromium smoke tests
     runs-on: ubuntu-latest
-    # Measured 143s of work with a warm cache (run #130 step timings, minus
-    # the steps that moved to static-and-unit). 20 minutes is ~8x that: still
-    # generous for a cold npm/Playwright cache, but a hung Playwright web
-    # server now stops burning runner time at 20 minutes instead of 40.
-    # Step-level timeouts bound each stage under that, so a hang says which
-    # stage hung rather than only that the job did.
-    timeout-minutes: 20
+    # Raised from 20 with the @ui-risk step below, which alone now measures
+    # 10.1 minutes (run 30726393703) against the 143s the whole job took at
+    # run #130. The job budget has to clear the sum of its steps or the step
+    # timeouts stop being the thing that reports which stage hung: the steps
+    # ahead of @ui-risk measure ~2.8 minutes warm, so 16 + 2.8 needs more than
+    # 20. Still bounded, and still generous only for a cold npm/Playwright
+    # cache rather than for a hang.
+    timeout-minutes: 28
     # NEXT_PUBLIC values are embedded by `next build`. Guest E2E tests mock
     # Turnstile in the browser, but the client still requires a configured key.
     env:
@@ -304,13 +305,32 @@ jobs:
       #   UI-006  Korean display headings that must not break mid-어절
       #   UI-007  the 11px floor on consumer auxiliary text
       #
-      # Measured 46s for 44 tests over both Chromium projects. The full 63-
-      # golden visual matrix stays out of the PR tier -- it runs unfiltered on
-      # main push and nightly, and the assertion below still forbids naming it
-      # here.
+      # The full 63-golden visual matrix stays out of the PR tier -- it runs
+      # unfiltered on main push and nightly, and the assertion below still
+      # forbids naming it here.
+      #
+      # Budget. This tier was 44 tests taking 46s when it was written; it is
+      # now 552 over both Chromium projects, and run 30726393703 finished in
+      # 10.1 minutes -- close enough to the old 10-minute cap that the step was
+      # killed as the reporter printed its summary. The failure was the budget,
+      # not the suite: nothing in it failed.
+      #
+      # 16 minutes is ~55% headroom over the measured 10.1, which is what a
+      # tier that has grown twelvefold since its budget was set needs. Cost is
+      # concentrated in a handful of matrix-shaped files rather than spread
+      # evenly -- mobile-composer-banner-reflow (143s over 44 tests),
+      # pricing-promotion-reflow (94s/61), ui-state-contrast (73s/20) -- so the
+      # next growth step to watch for is another such file, not another
+      # ordinary spec.
+      #
+      # Workers stay at the config default of 1 here as well, but for a weaker
+      # reason than the smoke step above: the smoke step measured worse at 2,
+      # and this one has not been measured at all. At 552 tests over 20 files
+      # execution now dominates rather than server boot, so 2 workers is worth
+      # measuring before the next budget increase.
       - name: Run high-risk UI regression checks
         if: steps.scope.outputs.code == 'true'
-        timeout-minutes: 10
+        timeout-minutes: 16
         run: npm run test:e2e:ui-risk
 
       - name: Upload failed test evidence
