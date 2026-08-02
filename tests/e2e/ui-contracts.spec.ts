@@ -38,19 +38,26 @@ test("desktop exposes stable QA contracts", { tag: "@smoke" }, async ({ page }) 
   await expect(page.getByText("Status", { exact: true })).toBeVisible();
   await expect(page.getByText("Labels", { exact: true })).toBeVisible();
 
+  // UI-027. Located by its own test id rather than by `role="tooltip"`. These
+  // popovers hold a heading, a paragraph and an external "learn more" link, and
+  // a tooltip may not contain interactive content -- nothing announced the link
+  // and there was no way to reach it, because a tooltip is not somewhere
+  // assistive tech navigates into. They are disclosures now. What this test
+  // asserts is unchanged: the popup is on screen, inside the viewport, and says
+  // the right thing.
   await page.getByTestId("status-help").click();
-  let tooltip = page.getByRole("tooltip");
-  await expect(tooltip).toContainText("protection and sharing state");
+  let popover = page.getByTestId("status-help-content");
+  await expect(popover).toContainText("protection and sharing state");
 
   for (const helpTestId of ["status-help", "labels-help", "projects-help"]) {
     if (helpTestId !== "status-help") {
       await page.keyboard.press("Escape");
       await page.getByTestId(helpTestId).click();
-      tooltip = page.getByRole("tooltip");
-      await expect(tooltip).toBeVisible();
+      popover = page.getByTestId(`${helpTestId}-content`);
+      await expect(popover).toBeVisible();
     }
 
-    const box = await tooltip.boundingBox();
+    const box = await popover.boundingBox();
     const viewport = page.viewportSize();
     expect(box).not.toBeNull();
     expect(viewport).not.toBeNull();

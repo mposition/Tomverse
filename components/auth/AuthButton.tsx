@@ -993,7 +993,7 @@ export function AuthButton({
                                     <Settings className="h-5 w-5" />
                                 </span>
                                 <div>
-                                    <h3 id="user-settings-title" className="text-base font-bold">{t("auth.userSettings")}</h3>
+                                    <h2 id="user-settings-title" className="text-base font-bold">{t("auth.userSettings")}</h2>
                                     <p className="mt-0.5 text-xs text-zinc-500 dark:text-zinc-400">
                                         {session.user.email}
                                     </p>
@@ -1065,13 +1065,13 @@ export function AuthButton({
                                             <div className="flex items-start gap-3">
                                                 <ShieldCheck className="mt-0.5 h-5 w-5 shrink-0 text-status-success-500" />
                                                 <div>
-                                                    <h4 className="text-sm font-bold">{t("auth.securityStatus")}</h4>
+                                                    <h3 className="text-sm font-bold">{t("auth.securityStatus")}</h3>
                                                     <p className="mt-1 text-sm leading-6 text-zinc-500">{t("auth.securityStatusDescription")}</p>
                                                 </div>
                                             </div>
                                         </section>
                                         <section className="rounded-2xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-950/60">
-                                            <h4 className="text-sm font-bold">{t("auth.manageLoginMethods")}</h4>
+                                            <h3 className="text-sm font-bold">{t("auth.manageLoginMethods")}</h3>
                                             <p className="mt-1 text-sm leading-6 text-zinc-500">{t("auth.manageLoginMethodsDescription")}</p>
                                             <div className="mt-3 space-y-2">
                                                 {loginMethods.map((method) => {
@@ -1136,7 +1136,7 @@ export function AuthButton({
                                             </div>
                                         </section>
                                         <section className="rounded-2xl border border-red-200 bg-red-50 p-4 dark:border-red-950/70 dark:bg-red-950/20">
-                                            <h4 className="text-sm font-bold text-red-700 dark:text-red-300">{t("auth.dangerZone")}</h4>
+                                            <h3 className="text-sm font-bold text-red-700 dark:text-red-300">{t("auth.dangerZone")}</h3>
                                             <p className="mt-1 text-sm leading-6 text-red-700/80 dark:text-red-200/80">{t("auth.accountDangerZoneDescription")}</p>
                                             <button
                                                 type="button"
@@ -1252,7 +1252,7 @@ export function AuthButton({
                                     <div className="space-y-4">
                                         {listImportableGuestConversations().length > 0 && (
                                             <section className="rounded-2xl border border-zinc-200 bg-zinc-50 p-4 dark:border-zinc-800 dark:bg-zinc-950/60">
-                                                <h4 className="text-sm font-bold">{t("auth.guestImportSectionTitle")}</h4>
+                                                <h3 className="text-sm font-bold">{t("auth.guestImportSectionTitle")}</h3>
                                                 <p className="mt-1 text-sm leading-6 text-zinc-500">{t("auth.guestImportSectionDisclaimer")}</p>
                                                 <button
                                                     type="button"
@@ -1265,7 +1265,7 @@ export function AuthButton({
                                             </section>
                                         )}
                                         <section className="rounded-2xl border border-zinc-200 bg-zinc-50 p-4 dark:border-zinc-800 dark:bg-zinc-950/60">
-                                            <h4 className="text-sm font-bold">{t("auth.dataExportTitle")}</h4>
+                                            <h3 className="text-sm font-bold">{t("auth.dataExportTitle")}</h3>
                                             <p className="mt-1 text-sm leading-6 text-zinc-500">{t("auth.dataExportDescription")}</p>
                                             <button
                                                 type="button"
@@ -1281,14 +1281,14 @@ export function AuthButton({
                                             </button>
                                         </section>
                                         <section className="rounded-2xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-950/60">
-                                            <h4 className="text-sm font-bold">{t("auth.dataRetentionTitle")}</h4>
+                                            <h3 className="text-sm font-bold">{t("auth.dataRetentionTitle")}</h3>
                                             <p className="mt-1 text-sm leading-6 text-zinc-500">{t("auth.dataRetentionDescription")}</p>
                                             <p className="mt-2 rounded-xl border border-blue-200 bg-blue-50 px-3 py-2 text-xs leading-5 text-blue-700 dark:border-blue-900/60 dark:bg-blue-950/20 dark:text-blue-200">
                                                 {t("auth.attachmentRetentionNotice")}
                                             </p>
                                         </section>
                                         <section className="rounded-2xl border border-red-200 bg-red-50 p-4 dark:border-red-950/70 dark:bg-red-950/20">
-                                            <h4 className="text-sm font-bold text-red-700 dark:text-red-300">{t("auth.dangerZone")}</h4>
+                                            <h3 className="text-sm font-bold text-red-700 dark:text-red-300">{t("auth.dangerZone")}</h3>
                                             <p className="mt-1 text-sm leading-6 text-red-700/80 dark:text-red-200/80">{t("auth.dangerZoneDescription")}</p>
                                             <button
                                                 type="button"
@@ -1313,9 +1313,9 @@ export function AuthButton({
                                             <div className="flex items-center justify-between gap-3">
                                                 <div>
                                                     <p className="text-xs font-bold uppercase tracking-wide text-blue-500">{t("auth.currentPlan")}</p>
-                                                    <h4 className="mt-1 text-lg font-bold text-zinc-900 dark:text-zinc-100">
+                                                    <h3 className="mt-1 text-lg font-bold text-zinc-900 dark:text-zinc-100">
                                                         {accountPlan ? t(`auth.${accountPlan.toLowerCase()}Plan`) : t("auth.loading")}
-                                                    </h4>
+                                                    </h3>
                                                 </div>
                                                 <span className={`rounded-full px-3 py-1 text-xs font-bold text-white ${accountPlan === "Free" ? "bg-status-success-600" : accountPlan === "Pro" ? "bg-blue-600" : accountPlan === "Max" ? "bg-accent-plan-max-600" : "bg-zinc-600"}`}>
                                                     {accountPlan ? t(`modelTiers.${accountPlan.toLowerCase()}`) : t("auth.loading")}
@@ -1348,9 +1348,9 @@ export function AuthButton({
                                         {(accountPlan === "Pro" || accountPlan === "Max") && (
                                             <div className="grid gap-4 lg:grid-cols-2">
                                                 <section className="rounded-2xl border border-blue-200 bg-blue-50 p-4 dark:border-blue-900/60 dark:bg-blue-950/20">
-                                                    <h4 className="text-sm font-bold text-blue-800 dark:text-blue-200">
+                                                    <h3 className="text-sm font-bold text-blue-800 dark:text-blue-200">
                                                         {t("auth.cancelPlanTitle")}
-                                                    </h4>
+                                                    </h3>
                                                     <p className="mt-1 text-sm leading-6 text-blue-800/80 dark:text-blue-100/80">
                                                         {formatCopy("auth.cancelPlanDescription", {
                                                             date: planPeriodEndLabel || t("auth.cancelPlanFallbackDate"),
@@ -1377,9 +1377,9 @@ export function AuthButton({
                                                 </section>
 
                                                 <section className="rounded-2xl border border-amber-200 bg-amber-50 p-4 dark:border-amber-900/60 dark:bg-amber-950/20">
-                                                    <h4 className="text-sm font-bold text-amber-800 dark:text-amber-200">
+                                                    <h3 className="text-sm font-bold text-amber-800 dark:text-amber-200">
                                                         {t("auth.refundRequestTitle")}
-                                                    </h4>
+                                                    </h3>
                                                     <p className="mt-1 text-sm leading-6 text-amber-800/80 dark:text-amber-100/80">
                                                         {t("auth.refundRequestDescription")}
                                                     </p>
@@ -1447,7 +1447,7 @@ export function AuthButton({
                                             </section>
                                         )}
                                         <section className="rounded-2xl border border-zinc-200 bg-white p-4 text-sm leading-6 text-zinc-500 dark:border-zinc-800 dark:bg-zinc-950/60">
-                                            <h4 className="text-sm font-bold text-zinc-900 dark:text-zinc-100">{t("auth.planPolicyTitle")}</h4>
+                                            <h3 className="text-sm font-bold text-zinc-900 dark:text-zinc-100">{t("auth.planPolicyTitle")}</h3>
                                             <ul className="mt-2 list-disc space-y-1 pl-5">
                                                 <li>{t("auth.planPolicyGuest")}</li>
                                                 <li>{t("auth.planPolicyFree")}</li>
@@ -1548,9 +1548,9 @@ export function AuthButton({
                         aria-labelledby="delete-account-modal-title"
                     >
                         <div className="flex items-start justify-between gap-4">
-                            <h3 id="delete-account-modal-title" className="text-sm font-bold text-red-700 dark:text-red-200">
+                            <h2 id="delete-account-modal-title" className="text-sm font-bold text-red-700 dark:text-red-200">
                                 {t("auth.deleteAccountImmediateTitle")}
-                            </h3>
+                            </h2>
                             <button
                                 type="button"
                                 onClick={closeDeleteAccountModal}
@@ -1629,9 +1629,9 @@ export function AuthButton({
                         aria-labelledby="add-email-modal-title"
                     >
                         <div className="flex items-start justify-between gap-4">
-                            <h3 id="add-email-modal-title" className="text-sm font-bold">
+                            <h2 id="add-email-modal-title" className="text-sm font-bold">
                                 {t("auth.addLoginMethod")}
-                            </h3>
+                            </h2>
                             <button
                                 type="button"
                                 onClick={closeAddEmailModal}

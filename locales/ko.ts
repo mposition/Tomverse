@@ -6,6 +6,11 @@ export const ko = {
     skipLink: {
         toMainContent: "본문으로 건너뛰기",
     },
+    // UX-022. The language switcher labelled itself "Language" in every
+    // locale, including the ones a visitor switches *to*.
+    languageSwitcher: {
+        label: "언어",
+    },
     notifications: {
         dismiss: "알림 닫기",
     },
@@ -171,6 +176,14 @@ export const ko = {
         maxGuestModelCompare: "게스트 모드는 최대 3개 모델까지 비교할 수 있습니다.",
         modelOnlyPlaceholder: "이 모델에게만 추가 질문",
         modelOnlyInputLabel: "{model}에게만 추가 질문",
+        markdownTableRegion: "표, 가로 스크롤 가능",
+        markdownCodeRegion: "코드 블록, 가로 스크롤 가능",
+        chatRenameFailed: "대화 이름을 변경하지 못했습니다.",
+        chatDeleteFailed: "대화를 삭제하지 못했습니다.",
+        chatLockFailed: "대화를 잠그지 못했습니다.",
+        chatUnlockFailed: "대화 잠금을 해제하지 못했습니다.",
+        chatCreateFailed: "새 대화를 시작하지 못했습니다. 전송된 내용은 없습니다.",
+        modelHistoryDeleteFailed: "이 모델의 기록을 삭제하지 못했습니다.",
         modelOnlySendTitle: "이 모델에게만 보내기",
         comingSoonModel: "이 모델은 곧 지원될 예정입니다.",
         attachFile: "파일 첨부",

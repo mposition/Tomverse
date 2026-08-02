@@ -140,7 +140,15 @@ export function SidebarAccountRailButton({
             </button>
             {!isOpen ? (
                 <span
-                    role="tooltip"
+                    /*
+                      UI-027. Presentational, not a tooltip. Nothing references
+                      it -- there is no `aria-describedby` pointing here -- and
+                      the trigger's own `aria-label` already carries this exact
+                      string, so announcing it as a tooltip would repeat the
+                      button's name rather than add anything. It stays as the
+                      hover affordance it is.
+                    */
+                    aria-hidden="true"
                     className="pointer-events-none absolute bottom-0 left-full z-50 ml-2 hidden w-max max-w-56 rounded-xl border border-zinc-200 bg-white px-3 py-2 text-xs font-bold text-zinc-700 shadow-xl group-hover/account:block group-focus-within/account:block dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-200"
                 >
                     {t(user ? "sidebar.accountTooltip" : "sidebar.accountTooltipGuest")}
