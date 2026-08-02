@@ -808,10 +808,6 @@ export function ChatPageClient({
   // released by the transition below; the guest transcript itself stays in
   // localStorage so the import modal can still offer it.
   const guestSelectionAtSignInRef = useRef<string | null>(null);
-  // Bumped on every identity change. Work started under an older value writes
-  // nothing: a guest stream or a fetch that resolves after sign-in belongs to
-  // the namespace it started in, not to whoever is signed in now.
-  const identityEpochRef = useRef(0);
   // showToast is declared further down (it needs the toast timer state), and
   // the recovery path above has to be declared before the effects that call
   // it, so it reaches the notifier through this ref rather than by ordering.
@@ -872,7 +868,18 @@ export function ChatPageClient({
     // validates the saved id against this account's own conversation list.
     if (transition.initial) return;
 
-    identityEpochRef.current += 1;
+    // Anything the previous identity had in flight or queued belongs to that
+    // identity. A debounced model-settings PATCH fired after this point would
+    // aim the old conversation at the new account's API, so the pending write
+    // is dropped and the request already on the wire is aborted.
+    if (modelSyncTimerRef.current) {
+      clearTimeout(modelSyncTimerRef.current);
+      modelSyncTimerRef.current = null;
+    }
+    pendingModelSyncRef.current = null;
+    confirmedModelSettingsRef.current = null;
+    modelSyncAbortRef.current?.abort();
+    modelSyncAbortRef.current = null;
     staleConversationIdsRef.current.clear();
 
     const carriedId = currentChatIdRef.current;
