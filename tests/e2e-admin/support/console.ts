@@ -1,6 +1,11 @@
 import { expect, test as base, type Page } from "@playwright/test";
 import { resetAndSeedAdminFixtures } from "./database";
-import { signIn, signOut, type SignInOptions } from "./session";
+import {
+  assertSessionContract,
+  signIn,
+  signOut,
+  type SignInOptions,
+} from "./session";
 import {
   ADMIN_E2E_BASE_URL,
   type AdminE2EIdentityKey,
@@ -35,9 +40,14 @@ export const test = base.extend<AdminFixtures>({
     },
     { auto: true },
   ],
+  // Every sign-in is confirmed against the server before the spec continues.
+  // Without it a broken session contract surfaces as ~114 locator timeouts on
+  // the sign-in page -- the shape of the failure this fixture now names in one
+  // line, at the first `signInAs`, in well under a second.
   signInAs: async ({ context }, provide) => {
     await provide(async (key, options) => {
-      await signIn(context, key, options);
+      const user = await signIn(context, key, options);
+      await assertSessionContract(context, user);
     });
   },
   signOutOfAdmin: async ({ context }, provide) => {
@@ -57,50 +67,18 @@ export const test = base.extend<AdminFixtures>({
  * 403 from the role check -- so the header is always set, and these helpers
  * are the only way the specs call a mutating endpoint.
  */
-/**
- * The console's own API, called with the signed-in administrator's session.
- *
- * The session cookie is attached by hand. SEC-010 put the session cookie on the
- * `__Secure-` name in a production build, and this harness is a production
- * build (`next start`) served over plain http on loopback. Chromium is content
- * with that -- 127.0.0.1 is a trustworthy origin, so the browser both stores
- * and sends the cookie, which is why page navigation works. Playwright's
- * `page.request` is a Node HTTP client rather than the browser's network stack,
- * and it will not attach a Secure cookie to an http URL, so every call here
- * arrived unauthenticated.
- *
- * Read from the context's jar rather than re-minted, so these requests are the
- * same session the browser is using and cannot drift from it.
- */
 export const adminApi = (page: Page) => {
-  const requestOptions = async () => {
-    // No URL filter: `cookies(url)` applies the same secure-scheme rule that
-    // drops the cookie in the first place, so filtering by the harness's http
-    // origin returns nothing.
-    const cookies = await page.context().cookies();
-    const cookieHeader = cookies
-      .map((cookie) => `${cookie.name}=${cookie.value}`)
-      .join("; ");
-    return {
-      headers: {
-        Origin: ADMIN_E2E_BASE_URL,
-        ...(cookieHeader ? { Cookie: cookieHeader } : {}),
-      },
-    };
-  };
+  const headers = { Origin: ADMIN_E2E_BASE_URL };
   return {
-    get: async (url: string) => page.request.get(url, await requestOptions()),
-    post: async (url: string, data?: unknown) =>
-      page.request.post(url, { ...(await requestOptions()), data: data ?? {} }),
-    patch: async (url: string, data?: unknown) =>
-      page.request.patch(url, { ...(await requestOptions()), data: data ?? {} }),
-    put: async (url: string, data?: unknown) =>
-      page.request.put(url, { ...(await requestOptions()), data: data ?? {} }),
-    delete: async (url: string, data?: unknown) =>
-      page.request.delete(url, {
-        ...(await requestOptions()),
-        data: data ?? {},
-      }),
+    get: (url: string) => page.request.get(url, { headers }),
+    post: (url: string, data?: unknown) =>
+      page.request.post(url, { headers, data: data ?? {} }),
+    patch: (url: string, data?: unknown) =>
+      page.request.patch(url, { headers, data: data ?? {} }),
+    put: (url: string, data?: unknown) =>
+      page.request.put(url, { headers, data: data ?? {} }),
+    delete: (url: string, data?: unknown) =>
+      page.request.delete(url, { headers, data: data ?? {} }),
   };
 };
 

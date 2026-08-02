@@ -986,14 +986,48 @@ const checks = [
       source.includes('"Cache-Control": "no-store, max-age=0"'),
   },
   {
+    // Two separate guarantees, and the fix for the promotion-checkout outage
+    // sits between them. Stripe refuses a Session that carries both
+    // `allow_promotion_codes` and `discounts` -- it tests for the parameter
+    // being present, not for its value -- so sending `false` next to a discount
+    // is the same 400 as sending `true`, and that is what made every promotion
+    // checkout return a 500.
+    //
+    // What must NOT come back is the customer-entered code box: the discount
+    // has to be the server-validated promotion id, and any path that omits a
+    // discount has to keep saying `allow_promotion_codes: false` out loud.
+    // `allow_promotion_codes: true` must appear nowhere at all.
     name: "Checkout disables Stripe code bypass and applies validated promotion IDs",
     file: "app/api/billing/checkout/route.ts",
     test: (source) =>
       source.includes("validatePromotionForCheckout") &&
       source.includes("allow_promotion_codes: false") &&
-      source.includes("promotion_code:") &&
+      !source.includes("allow_promotion_codes: true") &&
+      // The exclusive form: a discount, or the explicit opt-out, never both.
+      /\.\.\.\(discount\s*\r?\n?\s*\?\s*\{ discounts: \[discount\] \}\s*\r?\n?\s*:\s*\{ allow_promotion_codes: false \}\)/.test(
+        source
+      ) &&
+      source.includes("ensureStripePromotionDiscount") &&
       source.includes("reservePromotionCheckout") &&
       !source.includes("promoCode: appliedPromotion"),
+  },
+  {
+    // The discount handed to Checkout is always a Stripe object this promotion
+    // owns. Adopting an object found by code search without checking its
+    // metadata, its coupon and its mode would let an unrelated -- or hostile --
+    // promotion code become the discount a Tomverse plan is sold at.
+    name: "Stripe promotion provisioning verifies ownership before reuse and never deletes live objects",
+    file: "lib/stripePromotionProvisioning.ts",
+    test: (source) =>
+      source.includes("canAdoptStripePromotionCode") &&
+      source.includes("canUseStripePromotionCode") &&
+      source.includes("idempotencyKey: promotionCouponIdempotencyKey") &&
+      source.includes("idempotencyKey: promotionCodeIdempotencyKey") &&
+      // Conditional linkage write: never blind-overwrite another writer's ids.
+      source.includes("db.billingPromotion.updateMany") &&
+      !/\.(del|update)\s*\(\s*[^)]*active:\s*false/.test(source) &&
+      !source.includes("promotionCodes.del(") &&
+      !source.includes("coupons.del("),
   },
   {
     name: "Active promotions require redemption caps, expiry, and explicit annual stacking",

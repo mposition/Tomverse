@@ -6,7 +6,10 @@ import {
   ADMIN_E2E_EMAIL_DOMAIN,
   ADMIN_E2E_IDENTITIES,
   ADMIN_E2E_IDENTITY_KEYS,
+  ADMIN_E2E_LEGACY_SESSION_COOKIE_NAME,
   ADMIN_E2E_ROLES,
+  ADMIN_E2E_SERVER_MODE,
+  ADMIN_E2E_SESSION_COOKIE_NAME,
   AdminE2EConfigurationError,
   adminE2eNextAuthSecret,
   adminE2eServerEnv,
@@ -186,6 +189,32 @@ test("no product source refers to the harness identities or its secret", () => {
     [],
     `Product code must never reference the admin E2E harness:\n${offenders.join("\n")}`
   );
+});
+
+test("the harness signs in with the cookie a production server actually reads", () => {
+  // The regression this pins: `lib/auth.ts` chooses the session cookie's name
+  // from NODE_ENV, and the harness runs `next start`, so the harness has to
+  // write the `__Secure-` prefixed name. It previously wrote the unprefixed
+  // one, and every signed-in admin spec silently became an anonymous visitor.
+  //
+  // Asserted against the source rather than by importing `authOptions`, which
+  // pulls in Prisma and the whole provider configuration. If the policy line
+  // ever moves, this fails and the harness name has to be reconsidered with
+  // it -- which is the point.
+  const authSource = readFileSync(join(process.cwd(), "lib/auth.ts"), "utf8");
+  assert.match(
+    authSource,
+    /useSecureCookies:\s*process\.env\.NODE_ENV === "production"/,
+    "lib/auth.ts must keep deriving the secure-cookie policy from NODE_ENV"
+  );
+
+  assert.equal(ADMIN_E2E_SERVER_MODE, "production");
+  assert.equal(
+    ADMIN_E2E_SESSION_COOKIE_NAME,
+    `__Secure-${ADMIN_E2E_LEGACY_SESSION_COOKIE_NAME}`,
+    "a production server prefixes the session cookie, so the harness must too"
+  );
+  assert.equal(ADMIN_E2E_LEGACY_SESSION_COOKIE_NAME, "next-auth.session-token");
 });
 
 test("the harness identity domain can never receive real mail", () => {

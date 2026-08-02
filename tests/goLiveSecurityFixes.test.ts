@@ -705,25 +705,21 @@ test("the session cookie is marked Secure from the environment, not from a URL",
   const source = readRepoCode("lib/auth.ts");
   assert.match(
     source,
-    /useSecureCookies:\s*sessionCookiesAreSecure\(process\.env\.NODE_ENV\)/,
+    /useSecureCookies:\s*process\.env\.NODE_ENV\s*===\s*"production"/,
     "authOptions must state useSecureCookies rather than letting next-auth infer it"
   );
-  // The rule has to stay in one place. It was stated here and assumed again in
-  // the admin E2E harness, and the two disagreed the moment this changed: the
-  // harness minted the unprefixed cookie name while the production build read
-  // the `__Secure-` one, so every seeded admin session was ignored.
-  const policy = readRepoCode("lib/sessionCookiePolicy.ts");
-  assert.match(policy, /nodeEnv === "production"/);
-  assert.ok(
-    !policy.includes('import "server-only"'),
-    "the harness runs in its own process and must be able to import this"
+  // Stating it broke the admin E2E harness, which minted the unprefixed cookie
+  // name while a `next start` server read the `__Secure-` one, so every seeded
+  // session was ignored. The harness serves https now and names the cookie for
+  // that; asserted here because the two have to agree, and the last time they
+  // did not the whole suite reported as a timeout rather than as assertions.
+  const harness = readRepoCode("tests/e2e-admin/support/harness-config.ts");
+  assert.match(
+    harness,
+    /ADMIN_E2E_BASE_URL = `https:/,
+    "the admin harness must serve https for the production cookie name to be honoured"
   );
-  const harness = readRepoCode("tests/e2e-admin/support/session.ts");
-  assert.match(harness, /sessionCookieName\(/);
-  assert.ok(
-    !/SESSION_COOKIE_NAME = "/.test(harness),
-    "the harness must derive the cookie name, not restate it"
-  );
+  assert.match(harness, /ADMIN_E2E_SESSION_COOKIE_NAME/);
 });
 
 test("the readiness check rejects a production NEXTAUTH_URL that is not https", async () => {
