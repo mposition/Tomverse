@@ -177,7 +177,7 @@ export function ModelsPageContent() {
                 </span>
                 <div>
                   <h2 className="font-bold">{model.name}</h2>
-                  <p className="text-xs font-semibold text-zinc-500">{model.id}</p>
+                  <p className="text-xs font-semibold text-zinc-500 dark:text-zinc-400">{model.id}</p>
                 </div>
               </div>
               <p className="mt-4 text-sm leading-6 text-zinc-600 dark:text-zinc-300">
@@ -185,24 +185,24 @@ export function ModelsPageContent() {
               </p>
               <div className="mt-3 flex flex-wrap gap-1.5">
                 {tags.map((tag) => (
-                  <span key={tag} className="rounded-full bg-white px-2 py-1 text-[11px] font-bold text-zinc-500 ring-1 ring-zinc-200 dark:bg-zinc-950 dark:ring-zinc-800">
+                  <span key={tag} className="rounded-full bg-white px-2 py-1 text-[11px] font-bold text-zinc-500 ring-1 ring-zinc-200 dark:bg-zinc-950 dark:text-zinc-400 dark:ring-zinc-800">
                     {t(`modelTags.${tag}`)}
                   </span>
                 ))}
               </div>
               <div className="mt-5 grid grid-cols-2 gap-3">
                 <div>
-                  <p className="text-[11px] font-bold uppercase text-zinc-500">{content.provider}</p>
+                  <p className="text-[11px] font-bold uppercase text-zinc-500 dark:text-zinc-400">{content.provider}</p>
                   <p className="mt-1 truncate text-sm font-bold capitalize">{model.provider}</p>
                 </div>
                 <div>
-                  <p className="text-[11px] font-bold uppercase text-zinc-500">{content.usageClass}</p>
+                  <p className="text-[11px] font-bold uppercase text-zinc-500 dark:text-zinc-400">{content.usageClass}</p>
                   <p className="mt-1 text-sm font-bold">
                     {t(`modelUsageClasses.${usageProfile.category.toLowerCase()}`)}
                   </p>
                 </div>
                 <div>
-                  <p className="text-[11px] font-bold uppercase text-zinc-500">{content.baseCharge}</p>
+                  <p className="text-[11px] font-bold uppercase text-zinc-500 dark:text-zinc-400">{content.baseCharge}</p>
                   <CreditCostBadge
                     credits={usageProfile.credits}
                     size="md"
@@ -212,8 +212,8 @@ export function ModelsPageContent() {
                   />
                 </div>
                 <div>
-                  <p className="text-[11px] font-bold uppercase text-zinc-500">{content.status}</p>
-                  <p className={`mt-1 text-sm font-bold ${status === "available" ? "text-emerald-600 dark:text-emerald-400" : "text-amber-600 dark:text-amber-400"}`}>{content.enabled}</p>
+                  <p className="text-[11px] font-bold uppercase text-zinc-500 dark:text-zinc-400">{content.status}</p>
+                  <p className={`mt-1 text-sm font-bold ${status === "available" ? "text-emerald-700 dark:text-emerald-400" : "text-amber-600 dark:text-amber-400"}`}>{content.enabled}</p>
                 </div>
               </div>
             </article>

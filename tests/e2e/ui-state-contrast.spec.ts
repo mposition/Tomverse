@@ -218,7 +218,29 @@ test("full-error recovery copy carries no sub-11px text", { tag: "@ui-risk" }, a
  * replaced-element fallback content, and disabled controls -- the last of
  * which WCAG 2.2 SC 1.4.3 exempts as an inactive user interface component.
  */
-const REQUIRED_ROUTES = ["/", "/chat", "/auth/signin", "/pricing"] as const;
+/**
+ * UI-008 / UX-014. The four routes this started with were the ones the Insight
+ * audit had screenshots of. Everything a visitor can reach before signing in is
+ * in scope now: the legal and support pages carry the longest runs of
+ * supporting text in the product, `/status` is what a user reads during an
+ * incident, and `/models` and `/faq` are the two densest tables of small
+ * secondary copy. Each route is measured in both locales, both themes and both
+ * viewports, so the matrix is 4x what the route count suggests.
+ */
+const REQUIRED_ROUTES = [
+  "/",
+  "/chat",
+  "/auth/signin",
+  "/pricing",
+  "/support",
+  "/terms",
+  "/privacy",
+  "/refund",
+  "/status",
+  "/models",
+  "/faq",
+  "/about",
+] as const;
 const REQUIRED_LOCALES = ["ko", "en"] as const;
 const REQUIRED_VIEWPORTS = [
   { width: 1440, height: 900, name: "desktop" },
