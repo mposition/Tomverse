@@ -1,7 +1,12 @@
 import "server-only";
 
-import { createHmac, randomUUID, timingSafeEqual } from "node:crypto";
-import { getTrustedClientIp } from "@/lib/clientIp";
+import {
+  createHash,
+  createHmac,
+  randomUUID,
+  timingSafeEqual,
+} from "node:crypto";
+import { getAnonymousClientKey, getTrustedClientIp } from "@/lib/clientIp";
 import { ChatAccessError } from "@/lib/chatSecurity";
 
 type SiteverifyResponse = {
@@ -15,8 +20,72 @@ type SiteverifyResponse = {
 // escalating to a visible checkbox on nearly every send. Once a guest passes
 // Turnstile once, this short-lived signed cookie lets subsequent requests
 // skip re-verification for a while instead of re-running Turnstile every time.
-const GUEST_TURNSTILE_GRANT_COOKIE = "tomverse_guest_verified";
+//
+// SEC-004. The grant used to be a single cookie signed over nothing but its own
+// expiry, which made it both transferable and universal:
+//
+//   * transferable, because the signature did not name a client. One scripted
+//     solve produced a 30-minute bearer token that worked from any address, so
+//     a pool of bots could share one solved challenge.
+//   * universal, because the signature did not name an action. Passing the
+//     cheapest challenge (`guest_chat`) also bought thirty minutes of
+//     `guest_ai_review` -- an 8-credit AI cross-review -- and of
+//     `guest_attachment`, the worker-isolated file parse. The client already
+//     mints a separate action-bound token per surface; only the server-side
+//     grant collapsed them.
+//
+// Both are now in the signature, and the cookie is named per earning action so
+// verifying for one surface does not evict the grant for another. Grants issued
+// by the previous release are simply not recognised (different cookie name), so
+// the worst case at deploy is that guests mid-session verify once more.
+const GUEST_TURNSTILE_GRANT_COOKIE_PREFIX = "tomverse_guest_verified_";
 const GUEST_TURNSTILE_GRANT_TTL_SECONDS = 60 * 30;
+
+/** Every action the grant mechanism can be asked about. */
+export const GUEST_TURNSTILE_ACTIONS = [
+  "guest_chat",
+  "guest_conversation_title",
+  "guest_quick_summary",
+  "guest_ai_review",
+  "guest_attachment",
+  "support_request",
+] as const;
+
+export type GuestTurnstileAction = (typeof GUEST_TURNSTILE_ACTIONS)[number];
+
+/**
+ * Which actions a grant earned for a given action also satisfies.
+ *
+ * Almost everything covers only itself. The exception is
+ * `guest_conversation_title`: it is a background convenience fired once per
+ * conversation straight after a successful guest answer, the client sends no
+ * token for it at all, and it must never be the reason a challenge appears.
+ * Covering it from a `guest_chat` grant keeps that property. It is also the
+ * cheapest of the guest endpoints, so folding it in concedes nothing an
+ * attacker could not already do by sending the chat message itself.
+ */
+const GRANT_COVERAGE: Record<
+  GuestTurnstileAction,
+  readonly GuestTurnstileAction[]
+> = {
+  guest_chat: ["guest_chat", "guest_conversation_title"],
+  guest_conversation_title: ["guest_conversation_title"],
+  guest_quick_summary: ["guest_quick_summary"],
+  guest_ai_review: ["guest_ai_review"],
+  guest_attachment: ["guest_attachment"],
+  support_request: ["support_request"],
+};
+
+const isGuestTurnstileAction = (
+  value: string
+): value is GuestTurnstileAction =>
+  (GUEST_TURNSTILE_ACTIONS as readonly string[]).includes(value);
+
+/** Earning actions whose grant satisfies `action`. */
+const grantingActionsFor = (action: GuestTurnstileAction) =>
+  GUEST_TURNSTILE_ACTIONS.filter((candidate) =>
+    GRANT_COVERAGE[candidate].includes(action)
+  );
 
 const getGrantSecret = () => {
   const secret = process.env.NEXTAUTH_SECRET;
@@ -30,9 +99,28 @@ const getGrantSecret = () => {
   return secret;
 };
 
-const signGuestTurnstileGrant = (expiresAt: number) =>
+/**
+ * Ties the grant to the client it was issued to.
+ *
+ * `getAnonymousClientKey` is the trusted Cloudflare address in production, and
+ * a coarse fingerprint when that header is unresolvable. Neither is a strong
+ * identity, and it is not meant to be: the point is that a grant lifted from
+ * one client and replayed from a fleet of others no longer works. A guest whose
+ * address genuinely changes mid-session pays exactly one more challenge, which
+ * is usually invisible (`appearance: "interaction-only"`).
+ */
+const grantBinding = (request: Request) =>
+  createHash("sha256")
+    .update(getAnonymousClientKey(request))
+    .digest("base64url");
+
+const signGuestTurnstileGrant = (
+  action: GuestTurnstileAction,
+  binding: string,
+  expiresAt: number
+) =>
   createHmac("sha256", getGrantSecret())
-    .update(`guest_turnstile_grant:${expiresAt}`)
+    .update(`guest_turnstile_grant:v2:${action}:${binding}:${expiresAt}`)
     .digest("base64url");
 
 const readCookie = (request: Request, name: string) => {
@@ -47,16 +135,30 @@ const readCookie = (request: Request, name: string) => {
   return null;
 };
 
-export const buildGuestTurnstileGrantCookie = () => {
+export const buildGuestTurnstileGrantCookie = (
+  request: Request,
+  action: GuestTurnstileAction
+) => {
   const expiresAt =
     Math.floor(Date.now() / 1000) + GUEST_TURNSTILE_GRANT_TTL_SECONDS;
-  const signature = signGuestTurnstileGrant(expiresAt);
+  const signature = signGuestTurnstileGrant(
+    action,
+    grantBinding(request),
+    expiresAt
+  );
   const secure = process.env.NODE_ENV === "production" ? "; Secure" : "";
-  return `${GUEST_TURNSTILE_GRANT_COOKIE}=${expiresAt}.${signature}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${GUEST_TURNSTILE_GRANT_TTL_SECONDS}; Priority=High${secure}`;
+  return `${GUEST_TURNSTILE_GRANT_COOKIE_PREFIX}${action}=${expiresAt}.${signature}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${GUEST_TURNSTILE_GRANT_TTL_SECONDS}; Priority=High${secure}`;
 };
 
-export const hasValidGuestTurnstileGrant = (request: Request) => {
-  const token = readCookie(request, GUEST_TURNSTILE_GRANT_COOKIE);
+const hasGrantForExactAction = (
+  request: Request,
+  action: GuestTurnstileAction,
+  binding: string
+) => {
+  const token = readCookie(
+    request,
+    `${GUEST_TURNSTILE_GRANT_COOKIE_PREFIX}${action}`
+  );
   if (!token) return false;
 
   const [expiresValue, signature, ...extra] = token.split(".");
@@ -69,12 +171,22 @@ export const hasValidGuestTurnstileGrant = (request: Request) => {
     return false;
   }
 
-  const expected = signGuestTurnstileGrant(expiresAt);
+  const expected = signGuestTurnstileGrant(action, binding, expiresAt);
   const actualBuffer = Buffer.from(signature || "");
   const expectedBuffer = Buffer.from(expected);
   return (
     actualBuffer.length === expectedBuffer.length &&
     timingSafeEqual(actualBuffer, expectedBuffer)
+  );
+};
+
+export const hasValidGuestTurnstileGrant = (
+  request: Request,
+  action: GuestTurnstileAction
+) => {
+  const binding = grantBinding(request);
+  return grantingActionsFor(action).some((granting) =>
+    hasGrantForExactAction(request, granting, binding)
   );
 };
 
@@ -183,9 +295,17 @@ export async function verifyGuestTurnstile(
 export async function ensureGuestVerified(
   request: Request,
   token: string | undefined,
-  expectedAction = "guest_chat"
+  expectedAction: GuestTurnstileAction = "guest_chat"
 ): Promise<string | undefined> {
-  if (hasValidGuestTurnstileGrant(request)) return undefined;
+  // SEC-004. Defence in depth against a caller passing a string that is not one
+  // of the declared actions: an unknown action has no coverage entry, so it
+  // must never be treated as covered by an existing grant.
+  if (
+    isGuestTurnstileAction(expectedAction) &&
+    hasValidGuestTurnstileGrant(request, expectedAction)
+  ) {
+    return undefined;
+  }
   await verifyGuestTurnstile(request, token, expectedAction);
-  return buildGuestTurnstileGrantCookie();
+  return buildGuestTurnstileGrantCookie(request, expectedAction);
 }
