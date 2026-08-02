@@ -544,18 +544,36 @@ export function DesktopChatShell({
                       "aria-labelledby": `model-tab-${modelId}`,
                     }
                   : {})}
-                aria-hidden={!isPanelVisible}
-                // UI-EMPTY-001 note: while the welcome overlay is up these
-                // panels keep their own controls in the tab order and in the
-                // accessibility tree. Marking them `inert` was tried and
-                // reverted -- the per-panel model select and follow-up input
-                // are genuinely operated in that state (see
-                // upgrade-discovery.spec.ts "panel-only send waits for a
-                // changed model selection to persist"), so inerting them
-                // breaks a real path. The exposure predates the overlay's
-                // alpha change and is unchanged by it; closing it means
-                // deciding what the empty state should let a keyboard user
-                // reach, which is a product decision, not a colour one.
+                // `aria-hidden` states the exclusion the empty state needs, and
+                // `inert` below enforces it. Both, because they are not
+                // interchangeable: `inert` alone is invisible to tooling that
+                // derives the accessibility tree from the DOM rather than from
+                // the platform (Playwright's `ariaSnapshot()` still listed
+                // every panel control), while `aria-hidden` alone would leave
+                // them focusable -- a focusable node hidden from assistive tech
+                // is worse than either. Together they are safe: nothing in here
+                // can take focus, so nothing can be focused-but-unannounced.
+                aria-hidden={!isPanelVisible || isConversationEmpty}
+                // UI-EMPTY-001. While the welcome screen is up these panels are
+                // decoration: they are painted through its translucent surface
+                // so the first screen still reads as a three-model comparison,
+                // but nothing in them is a control the user can act on yet.
+                // Without this they stayed in the tab order and in the
+                // accessibility tree, so a keyboard user reached 24 stops a
+                // mouse user could not -- every one of them covered on screen.
+                //
+                // The start screen carries the pre-chat controls itself: the
+                // composer, and with it the model picker, portal into
+                // ChatWelcomeScreen (see inputPortalTarget above), so choosing
+                // models and discovering locked ones before the first question
+                // goes through the front of the screen rather than through a
+                // selector hidden behind it. That is what makes this safe to
+                // close -- an earlier attempt inerted the panels while that
+                // front path was the only thing keeping the capability, and it
+                // broke a real one. The capability is not in the panels.
+                //
+                // Deliberately not `hidden`: the panels have to keep painting.
+                inert={isConversationEmpty || undefined}
                 style={isPanelVisible ? undefined : { contentVisibility: "hidden" }}
                 className={`relative flex-col overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-sm shadow-zinc-200/60 transition-all duration-300 ease-in-out dark:border-zinc-800 dark:bg-zinc-950 dark:shadow-black/20 ${
                   !isPanelVisible ? "hidden" : isPanelDisabled ? "flex w-44 shrink-0" : "flex min-w-0 flex-1"
