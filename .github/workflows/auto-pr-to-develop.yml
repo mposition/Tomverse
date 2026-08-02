@@ -5,6 +5,12 @@ on:
     branches-ignore:
       - main
       - develop
+      # Dependabot branches target main, never develop, so there is no auto-PR
+      # to create for them. A push from Dependabot also cannot read repository
+      # secrets -- GH_AUTOMATION_PAT arrives empty and every gh call exits 4 --
+      # which put a red required check on each Dependabot PR for a reason that
+      # was never a defect in the update.
+      - dependabot/**
 
 permissions:
   contents: read
@@ -26,6 +32,18 @@ jobs:
         uses: actions/checkout@v6
         with:
           fetch-depth: 0
+
+      # Deliberately not falling back to ${{ github.token }}: a pull request
+      # opened with GITHUB_TOKEN does not trigger workflow runs, so the auto-PR
+      # would sit there with no checks at all. A missing PAT has to be fixed,
+      # not worked around -- this step just says so in one line instead of
+      # leaving gh's "set the GH_TOKEN environment variable" hint behind.
+      - name: Verify the automation token is available
+        run: |
+          if [ -z "${GH_TOKEN}" ]; then
+            echo "::error::GH_AUTOMATION_PAT is empty for this run. Check that the secret exists and that this event can read repository secrets."
+            exit 1
+          fi
 
       - name: Skip if branch has no diff against develop
         id: diff-check
