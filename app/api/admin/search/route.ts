@@ -9,6 +9,11 @@ import {
   consumeApiRateLimit,
 } from "@/lib/apiSecurity";
 import { prisma } from "@/lib/prisma";
+import { writeAdminAuditLog } from "@/lib/adminAudit";
+import {
+  adminSearchWhere,
+  hashAdminSearchQuery,
+} from "@/lib/adminSearchPolicy";
 
 const toIso = (value: Date | null | undefined) => value?.toISOString() || null;
 
@@ -41,81 +46,37 @@ export async function GET(req: Request) {
       limitDecisions,
     ] = await Promise.all([
         prisma.user.findMany({
-          where: {
-            OR: [
-              { id: { contains: query, mode: "insensitive" } },
-              { email: { contains: query, mode: "insensitive" } },
-              { name: { contains: query, mode: "insensitive" } },
-              { stripeCustomerId: { contains: query, mode: "insensitive" } },
-              { stripeSubscriptionId: { contains: query, mode: "insensitive" } },
-            ],
-          },
+          where: adminSearchWhere("user", query),
           orderBy: { id: "desc" },
           take,
           select: { id: true, email: true, name: true, plan: true },
         }),
         prisma.feedback.findMany({
-          where: {
-            OR: [
-              { id: { contains: query, mode: "insensitive" } },
-              { email: { contains: query, mode: "insensitive" } },
-              { traceId: { contains: query, mode: "insensitive" } },
-              { modelId: { contains: query, mode: "insensitive" } },
-              { message: { contains: query, mode: "insensitive" } },
-            ],
-          },
+          where: adminSearchWhere("feedback", query),
           orderBy: { createdAt: "desc" },
           take,
           select: { id: true, email: true, type: true, status: true, traceId: true, createdAt: true },
         }),
         prisma.refundRequest.findMany({
-          where: {
-            OR: [
-              { id: { contains: query, mode: "insensitive" } },
-              { email: { contains: query, mode: "insensitive" } },
-              { stripeCustomerId: { contains: query, mode: "insensitive" } },
-              { stripeSubscriptionId: { contains: query, mode: "insensitive" } },
-              { reason: { contains: query, mode: "insensitive" } },
-            ],
-          },
+          where: adminSearchWhere("refundRequest", query),
           orderBy: { requestedAt: "desc" },
           take,
           select: { id: true, email: true, plan: true, status: true, requestedAt: true },
         }),
         prisma.adminAuditLog.findMany({
-          where: {
-            OR: [
-              { actorEmail: { contains: query, mode: "insensitive" } },
-              { action: { contains: query, mode: "insensitive" } },
-              { targetType: { contains: query, mode: "insensitive" } },
-              { targetId: { contains: query, mode: "insensitive" } },
-              { summary: { contains: query, mode: "insensitive" } },
-            ],
-          },
+          where: adminSearchWhere("adminAuditLog", query),
           orderBy: { createdAt: "desc" },
           take,
           select: { id: true, actorEmail: true, action: true, targetType: true, targetId: true, createdAt: true },
         }),
         prisma.conversation.findMany({
-          where: {
-            OR: [
-              { id: { contains: query, mode: "insensitive" } },
-              { title: { contains: query, mode: "insensitive" } },
-              { shareToken: { contains: query, mode: "insensitive" } },
-            ],
-          },
+          where: adminSearchWhere("conversation", query),
           orderBy: { updatedAt: "desc" },
           take,
           select: { id: true, title: true, userId: true, updatedAt: true },
         }),
         prisma.message.findMany({
-          where: {
-            OR: [
-              { id: { contains: query, mode: "insensitive" } },
-              { content: { contains: query, mode: "insensitive" } },
-              { modelId: { contains: query, mode: "insensitive" } },
-            ],
-          },
+          where: adminSearchWhere("message", query),
           orderBy: { createdAt: "desc" },
           take,
           select: {
@@ -129,7 +90,7 @@ export async function GET(req: Request) {
         // A blocked user only ever has their Trace ID, so it has to resolve
         // here as well as through /api/admin/limit-decisions.
         prisma.chatLimitDecisionEvent.findMany({
-          where: { traceId: { contains: query, mode: "insensitive" } },
+          where: adminSearchWhere("chatLimitDecisionEvent", query),
           orderBy: { createdAt: "desc" },
           take,
           select: {
@@ -143,6 +104,36 @@ export async function GET(req: Request) {
           },
         }),
       ]);
+
+    // SEC-008. Every search is attributable. Only the digest of the term is
+    // stored: a plain-text row would turn the audit log into a transcript of
+    // what administrators went looking for, readable by the next administrator
+    // and carried into every export. The counts are what make a fishing
+    // expedition visible -- many searches, few hits.
+    await writeAdminAuditLog({
+      session,
+      request: req,
+      action: "admin.search",
+      targetType: "Search",
+      targetId: null,
+      summary: `Ran a global administrator search (${query.length} characters).`,
+      metadata: {
+        queryDigest: hashAdminSearchQuery(
+          query,
+          process.env.ADMIN_AUDIT_INTEGRITY_KEY || process.env.NEXTAUTH_SECRET
+        ),
+        queryLength: query.length,
+        matches: {
+          user: users.length,
+          feedback: feedback.length,
+          refundRequest: refunds.length,
+          adminAuditLog: auditLogs.length,
+          conversation: conversations.length,
+          message: messages.length,
+          chatLimitDecisionEvent: limitDecisions.length,
+        },
+      },
+    });
 
     return NextResponse.json({
       results: [
