@@ -58,7 +58,10 @@ export function ModelCatalogProvider({
   const [models, setModels] = useState<readonly AiModel[]>(initialModels);
 
   const reload = useCallback(async () => {
-    const response = await fetch("/api/models/catalog", { cache: "no-store" });
+    // `no-cache`, not `no-store`: still revalidates on every reload, but sends
+    // `If-None-Match` so an unchanged catalogue comes back as a 304 with no
+    // body. SEC-012 -- this fires on every page load.
+    const response = await fetch("/api/models/catalog", { cache: "no-cache" });
     const data = (await response.json().catch(() => null)) as
       | { models?: AiModel[] }
       | null;
