@@ -41,6 +41,7 @@
     "security:regression": "node scripts/security-regression-check.mjs",
     "db:migrate": "node scripts/require-direct-database-url.mjs && prisma migrate deploy",
     "db:refresh-test": "node scripts/refresh-test-database.mjs",
+    "migrate:conversation-lock-passwords": "node --conditions=react-server --import tsx scripts/migrate-legacy-conversation-passwords.mjs",
     "maintenance:cleanup": "node scripts/run-maintenance.mjs",
     "maintenance:credit-reservations": "node scripts/run-credit-reconciliation.mjs",
     "maintenance:notification-deliveries": "node scripts/run-notification-deliveries.mjs",

@@ -158,15 +158,55 @@ Backup / snapshot:  ____________________
 
 ### 6.5 Legacy conversation-lock passwords
 
-- [ ] Migration script run with `--dry-run` first; row count recorded
-- [ ] Migration executed, and a follow-up query confirms **0** remaining
-      plaintext rows
-- [ ] `compareLegacyPassword` removal is scheduled for a *later* release, not
-      this one — it stays until production has been observed at 0 rows
+SEC-011. `Conversation.password` rows written before scrypt hashing hold the
+password in plaintext, and `verifyConversationPassword` still accepts them by
+comparing `sha256(candidate)` against `sha256(stored)` — which only works
+because `stored` *is* the password. Unlocking upgrades a row opportunistically,
+so this only ever closes for conversations someone happens to open. The rest
+need the migration.
+
+**Stage 1 — this release.** Migrate the data. The verifier stays.
+
+- [ ] A backup or restore point exists from **before** the migration ran
+      (§6.1's snapshot covers this if the migration runs after it)
+- [ ] Dry run first, count recorded:
+
+      npm run migrate:conversation-lock-passwords -- --dry-run
+
+      Prints a JSON summary. `migrated` is the number of rows still holding
+      plaintext; nothing is written. The script never prints a password value.
+- [ ] Migration executed:
+
+      npm run migrate:conversation-lock-passwords -- --confirm-production
+
+      `--confirm-production` is mandatory when `NODE_ENV=production`; the
+      script refuses to write without it. Re-running is safe — an already
+      hashed row is counted, not touched.
+- [ ] A follow-up query confirms **0** remaining plaintext rows:
+
+      SELECT count(*) FROM "Conversation"
+      WHERE "password" IS NOT NULL AND "password" NOT LIKE 'scrypt$1$%';
+
+- [ ] Locked conversations still unlock with their existing password (spot
+      check at least one real account, or the `@ui-risk` lock specs against a
+      restored copy of the migrated database)
+
+**Stage 2 — a later release.** Only after production has been *observed* at 0
+rows for a full release cycle, delete `compareLegacyPassword` and the
+`needsUpgrade: true` branch in `lib/conversationLock.ts`, and drop the
+opportunistic re-hash in `app/api/conversations/[conversationId]/verify/route.ts`.
+
+Removing the verifier in the same release as the migration is what this
+ordering exists to prevent: a row missed by the migration — a batch that
+errored, a conversation created from a stale replica, a restore from a
+pre-migration backup — stops being *insecurely* unlockable and starts being
+*permanently* unlockable, locking the owner out of their own conversation with
+no recovery path.
 
 ```
 Dry-run count:      ____________________
 Post-run count:     ____________________
+Stage 2 tracked in: ____________________
 ```
 
 ## 7. Unverified items and waivers
