@@ -204,6 +204,7 @@ function ProviderVerificationSection({
   canRunVerification,
   verifying,
   recovering,
+  evaluatedAt,
   onVerify,
   onRecover,
 }: {
@@ -212,6 +213,8 @@ function ProviderVerificationSection({
   canRunVerification: boolean;
   verifying: boolean;
   recovering: boolean;
+  /** When the dashboard this row was built from was read. */
+  evaluatedAt: string;
   onVerify: RunVerification;
   onRecover: RunRecovery;
 }) {
@@ -224,8 +227,15 @@ function ProviderVerificationSection({
   // the control's enabled state matches the server's answer -- but the button
   // is a courtesy, never the control: /api/admin/provider-health/recover
   // re-reads the evidence and decides for itself.
+  //
+  // `now` is the dashboard's read time, not `new Date()`. This component is
+  // rendered on the server as well as in the browser, and a clock read during
+  // render gives the two renders different answers -- which React reports as a
+  // hydration mismatch and recovers from by re-rendering the tree on the
+  // client. The dashboard's own timestamp is the same value in both places,
+  // and it is also the instant the evidence below was actually read.
   const eligibility = evaluateRecoveryEligibility({
-    now: new Date(),
+    now: new Date(evaluatedAt),
     provider: provider.provider,
     evidence: lastCheck
       ? {
@@ -442,6 +452,7 @@ function ProviderRow({
   recovering,
   savingCredit,
   savingBilling,
+  evaluatedAt,
   onSaveCredit,
   onSaveBilling,
   onVerify,
@@ -455,6 +466,7 @@ function ProviderRow({
   recovering: boolean;
   savingCredit: boolean;
   savingBilling: boolean;
+  evaluatedAt: string;
   onSaveCredit: SaveCredit;
   onSaveBilling: SaveBilling;
   onVerify: RunVerification;
@@ -750,6 +762,7 @@ function ProviderRow({
         canRunVerification={canRunVerification}
         verifying={verifying}
         recovering={recovering}
+        evaluatedAt={evaluatedAt}
         onVerify={onVerify}
         onRecover={onRecover}
       />
@@ -1610,6 +1623,7 @@ export function AdminProviderHealthPanel({
           canManageCredits={canManageCredits}
           canRunVerification={canRunVerification}
           verificationSummary={verificationSummaries[provider.provider] ?? null}
+          evaluatedAt={dashboard.generatedAt}
           verifying={verifyingProvider === provider.provider}
           recovering={recoveringProvider === provider.provider}
           savingCredit={savingProvider === provider.provider}
