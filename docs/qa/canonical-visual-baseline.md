@@ -149,3 +149,10 @@ on `90e5572` (2026-08-01), across a composer rework, a provider-banner change
 and the UI-001 theme change in between. Both were judged green by the canonical
 runner throughout (`e2e.yml` shard 1, runs `30696253742` and `30703064212`).
 A product regression moves that number; a rasteriser difference does not.
+
+Read that as narrowly as it is written. It says those two goldens passed on the
+canonical runner, and that one specific browser pair (baseline on Chromium 151,
+judged on Chromium 141) produces a deterministic 906-pixel difference. It does
+not say the golden suite is stable, that every environment agrees, or that a
+substitute browser's result may be reported as a pass. A skip is `Not verified`
+in every case — including when the tree is in fact fine.
