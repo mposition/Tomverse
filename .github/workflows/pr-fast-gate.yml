@@ -97,6 +97,24 @@ jobs:
         timeout-minutes: 10
         run: npm run test:unit
 
+      # Its own process, not part of test:unit, because it needs
+      # --experimental-test-module-mocks and module mocks are process-global
+      # (see scripts/run-server-contract-tests.mjs). That separation is why it
+      # was never wired into CI: until now the only places naming it were audit
+      # write-ups, i.e. it ran when someone remembered to run it.
+      #
+      # What it asserts is not optional. It pins that a rejected chat request
+      # reaches no provider and reserves no credits, and -- since #250 -- that
+      # /api/models/catalog does not go back to spreading the registry row,
+      # which is what published Tomverse's per-model USD cost basis to anyone
+      # who asked. A guard nobody runs is not a guard.
+      #
+      # No database, no browser: 110 tests in ~6s, so it belongs in the static
+      # tier beside the other cheap fail-closed checks.
+      - name: Server contract tests
+        timeout-minutes: 5
+        run: npm run test:server-contract
+
       # UI-012: semantic accent colours must stay addressed by role inside the
       # guarded components. Cheap, no browser, so it sits with the other static
       # checks rather than in the browser tier.

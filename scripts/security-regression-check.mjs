@@ -2014,6 +2014,15 @@ const checks = [
         // fails instead of passing an empty gate.
         prWorkflow.includes("npm run verify:smoke-coverage") &&
         prWorkflow.includes("npm run test:e2e:smoke") &&
+        // The server-contract suite runs in its own process, so it is easy to
+        // leave out of a workflow and impossible to notice: it was absent from
+        // CI entirely until 2026-08-02, named only in audit write-ups. It
+        // carries the guard on #250's cost-basis disclosure and on "a rejected
+        // chat request reaches no provider", so it fails closed here.
+        prWorkflow.includes("npm run test:server-contract") &&
+        packageSource.includes(
+          '"test:server-contract": "node scripts/run-server-contract-tests.mjs"'
+        ) &&
         // The UI-001/002/003/006/007 regressions are merge-blocking on
         // develop, not something main finds after the fact.
         prWorkflow.includes("npm run test:e2e:ui-risk") &&
