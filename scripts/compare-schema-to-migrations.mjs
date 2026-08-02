@@ -1,6 +1,11 @@
 import { spawnSync } from "node:child_process";
 import pg from "pg";
 
+import {
+  compareSchemas,
+  redactConnectionStrings,
+} from "../lib/schemaComparisonCore.mjs";
+
 /**
  * Compares a live database's schema against one built purely from
  * prisma/migrations, and reports every difference.
@@ -52,13 +57,11 @@ const fail = (message, details = {}) => {
 };
 
 /**
- * Strips anything that looks like a connection string out of text that is
- * about to be printed. The URLs are only ever read from the environment, but
- * PostgreSQL and Prisma both echo them in error messages, and this output is
- * meant to be kept as operational evidence.
+ * Every printed line goes through this. See lib/schemaComparisonCore.mjs --
+ * the classification and the redaction live there so both can be tested
+ * without a PostgreSQL server.
  */
-const redact = (text) =>
-  String(text).replace(/postgres(?:ql)?:\/\/[^\s"']+/gi, "[redacted-connection-string]");
+const redact = redactConnectionStrings;
 
 /** The commit the comparison ran at, so the result can be filed against it. */
 const gitCommit = () => {
@@ -295,57 +298,33 @@ if (
 
 /**
  * Three outcomes, deliberately kept apart -- they have different causes and
- * different corrections:
- *
- *  - `onlyInSource`   an object the migration history does not create, so it
- *                     is missing from every new environment. Usually applied
- *                     by hand, sometimes owned by an extension.
- *  - `onlyInMigrations` the source is behind the history, or the object was
- *                     dropped outside it.
- *  - `mismatch`       the same name exists in both and means something
- *                     different. The dangerous one: nothing is missing, so
- *                     every "does it exist" check passes.
+ * different corrections. The comparison itself is in
+ * lib/schemaComparisonCore.mjs; what stays here is how it is presented.
  */
-let differences = 0;
+const { comparisons, totals, differenceCount: differences } = compareSchemas(
+  source.schema,
+  built.schema,
+  Object.keys(QUERIES)
+);
+
 const report = [];
-const findings = { onlyInSource: [], onlyInMigrations: [], mismatch: [] };
-
-for (const section of Object.keys(QUERIES)) {
-  const a = source.schema[section];
-  const b = built.schema[section];
-  const onlyInSource = [];
-  const onlyInMigrations = [];
-  const mismatch = [];
-
-  for (const [key, definition] of a) {
-    if (!b.has(key)) onlyInSource.push(`${key} :: ${definition}`);
-    else if (b.get(key) !== definition) {
-      mismatch.push({ key, source: definition, migrations: b.get(key) });
-    }
-  }
-  for (const [key, definition] of b) {
-    if (!a.has(key)) onlyInMigrations.push(`${key} :: ${definition}`);
-  }
-
-  const total = onlyInSource.length + onlyInMigrations.length + mismatch.length;
-  if (total === 0) {
-    report.push(`  ${section}: ${a.size} identical`);
+for (const comparison of comparisons) {
+  if (comparison.differenceCount === 0) {
+    report.push(`  ${comparison.section}: ${comparison.identicalCount} identical`);
     continue;
   }
-  differences += total;
-  report.push(`  ${section}: ${total} difference(s)`);
-  for (const row of onlyInSource) report.push(`    only in the source:    ${row}`);
-  for (const row of onlyInMigrations) report.push(`    only in migrations:    ${row}`);
-  for (const row of mismatch) {
+  report.push(`  ${comparison.section}: ${comparison.differenceCount} difference(s)`);
+  for (const row of comparison.onlyInSource) {
+    report.push(`    only in the source:    ${row}`);
+  }
+  for (const row of comparison.onlyInDatabase) {
+    report.push(`    only in migrations:    ${row}`);
+  }
+  for (const row of comparison.definitionMismatch) {
     report.push(`    definition mismatch:   ${row.key}`);
     report.push(`        source:     ${row.source}`);
-    report.push(`        migrations: ${row.migrations}`);
+    report.push(`        migrations: ${row.database}`);
   }
-  findings.onlyInSource.push(...onlyInSource.map((row) => `${section}: ${row}`));
-  findings.onlyInMigrations.push(
-    ...onlyInMigrations.map((row) => `${section}: ${row}`)
-  );
-  findings.mismatch.push(...mismatch.map((row) => `${section}: ${row.key}`));
 }
 
 console.log("\n[compare-schema] Result\n" + report.join("\n"));
@@ -356,9 +335,9 @@ if (differences > 0) {
       "",
       `[compare-schema] ${differences} difference(s).`,
       "",
-      `  only in the source   (${findings.onlyInSource.length})  not created by the migration history -- missing from every new environment.`,
-      `  only in migrations   (${findings.onlyInMigrations.length})  the source is behind, or the object was dropped outside the history.`,
-      `  definition mismatch  (${findings.mismatch.length})  same name, different meaning. Nothing is missing, so existence checks all pass.`,
+      `  only_in_source       (${totals.only_in_source})  not created by the migration history -- missing from every new environment.`,
+      `  only_in_database     (${totals.only_in_database})  the source is behind, or the object was dropped outside the history.`,
+      `  definition_mismatch  (${totals.definition_mismatch})  same name, different meaning. Nothing is missing, so existence checks all pass.`,
       "",
       "Do NOT hand-edit the source database or the baseline to make this pass.",
       "Classify each difference first -- manual drift, extension-owned object,",

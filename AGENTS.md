@@ -81,6 +81,19 @@ UI-012에서 승인된 정책(B안)입니다. accent 색은 **hue가 아니라 �
 - 모든 enabled premium 모델은 `lib/modelPricing.ts`에 명시적 가격 profile을
   가져야 합니다. `npm run check:model-pricing`이 PR Fast Gate에서 fail-closed로
   검사합니다.
+- **`ModelRegistryEntry`의 가격 컬럼이 `NULL`이면 코드 profile을 상속하고,
+  숫자면 관리자 override입니다.** seed는 항상 `NULL`을 쓰고 reconciliation은 이
+  세 컬럼을 아예 쓰지 않습니다. 해석된 가격을 행에 다시 넣으면 장문 tier가
+  사라지고 `costSource`가 전부 override로 보고돼 fallback 지표가 0%가 됩니다.
+  확인은 `npm run check:model-pricing-db`.
+- **처리 tier를 요청에 넣지 않습니다.** 모든 profile이 Standard 가격이며, 이는
+  아무 요청도 `service_tier`를 지정하지 않는 동안에만 참입니다(생략 시 OpenAI
+  기본값은 `auto`). `npm run check:model-pricing`이 request-side tier 지정을
+  fail-closed로 막습니다.
+- **`GET /v1/models`는 가격 출처가 아닙니다.** 계정별 모델 가시성만 확인합니다
+  (`npm run check:openai-model-access`).
+- cache write 가격은 감사용으로 기록만 하고 과금하지 않습니다 — cache write
+  토큰을 보고하는 usage adapter가 없습니다.
 - 가격이 아직 검증되지 않은 premium 모델은 `PENDING_VERIFIED_PRICE_REGISTER`에
   담당자·검증 티켓·등록일·기한·production 승인과 함께 등록합니다. 기한(최대
   90일)이 지나면 같은 검사가 경고에서 실패로 바뀝니다. fallback 사용 비율과
@@ -136,6 +149,15 @@ UI-012에서 승인된 정책(B안)입니다. accent 색은 **hue가 아니라 �
 
 - `docs/policy/default-model-luna-migration.md`
 
+- **"기본 모델"은 두 개의 다른 결정입니다.** 게스트 첫 대화는 DB의
+  `AppSetting["guestDefaultModelId"]`이고 brand trio 중 **선두만** 정합니다.
+  신규 로그인 계정은 `DEFAULT_MODEL_ID` → `APP_DEFAULTS.defaultModelId` →
+  `UserSettings.defaultModel` 컬럼 기본값 → `app/api/user/settings/route.ts`가
+  만드는 행입니다. 둘을 섞지 않습니다. `npm run check:default-models`가 양쪽을
+  함께 읽고 PR Fast Gate에서 검사합니다.
+- **trio 밖의 모델은 `guestDefaultModelId`로 저장할 수 없습니다.** resolver가
+  무시하므로 저장은 되고 효과는 없는 설정이 됩니다. `guestDefaultLeadRejection()`
+  이 거부합니다.
 - **기본 모델은 `gpt-5-6-luna`입니다.** `lib/models.ts`의 `DEFAULT_MODEL_ID`,
   `lib/appDefaults.ts`의 `GUEST_DEFAULT_MODEL_ID`와 `GUEST_BRAND_TRIO_MODEL_IDS`,
   Prisma 컬럼 기본값이 함께 움직입니다. 한쪽만 바꾸지 않습니다.
@@ -176,7 +198,9 @@ UI-012에서 승인된 정책(B안)입니다. accent 색은 **hue가 아니라 �
 - 사용자 선택 상태(`UserSettings.defaultModel`,
   `Conversation.selectedModels`)의 일괄 이전은
   `scripts/run-default-model-reconciliation.mjs`가 담당하며 **은퇴 배포와 함께**
-  실행합니다. `Conversation.selectedModels`는 문자열 치환이 아니라 JSON 배열로
+  실행합니다. dry run은 자유롭지만 **쓰기에는 `--approved-retirement`·티켓·
+  실행자·대상/대체 모델이 모두 필요하고, CI와 build/start/deploy/migrate
+  lifecycle에서는 어떤 승인으로도 쓰지 않습니다.** `Conversation.selectedModels`는 문자열 치환이 아니라 JSON 배열로
   파싱해 변환하고, malformed 값은 파괴하지 않고 보고합니다.
 - 과거 `Message.modelId`, usage reservation/settlement의 modelId와 pricing
   snapshot, 결제 ledger, `catalogDeleted`는 소급 변경하지 않습니다.

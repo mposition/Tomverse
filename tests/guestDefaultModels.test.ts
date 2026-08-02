@@ -5,6 +5,7 @@ import {
   createGuestEligibilityCheck,
   getGuestDefaultSelectedModels,
   GUEST_BRAND_TRIO_MODEL_IDS,
+  guestDefaultLeadRejection,
   GUEST_FALLBACK_MODEL_IDS,
   resolveGuestDefaultSelectedModels,
 } from "@/lib/appDefaults";
@@ -118,4 +119,74 @@ test("estimated credits are the sum of the selected models' costs", () => {
     estimatedCreditsFor(models) - estimatedCreditsFor([dropped])
   );
   assert.equal(estimatedCreditsFor([]), 0);
+});
+
+// The write side of the same decision. The resolver above already ignores a
+// lead outside the trio; these are what stop that from being reachable at all,
+// because a setting that saves and then does nothing is worse than one that
+// refuses -- the administrator gets a success either way.
+
+test("only a brand-trio model may be stored as the guest lead", () => {
+  for (const modelId of GUEST_BRAND_TRIO_MODEL_IDS) {
+    const model = getModel(modelId) as AiModel;
+    assert.equal(
+      guestDefaultLeadRejection({
+        modelId,
+        exists: true,
+        guestEligible: true,
+        usageCategory: getModelUsageProfile(model).category,
+      }),
+      null,
+      modelId
+    );
+  }
+});
+
+test("an eligible model outside the trio is rejected as a no-op, not accepted", () => {
+  const outsider = GUEST_FALLBACK_MODEL_IDS[0];
+  assert.equal(
+    isGuestEligible(outsider),
+    true,
+    "the fixture must pass every eligibility rule, so only the trio rule can reject it"
+  );
+
+  const rejection = guestDefaultLeadRejection({
+    modelId: outsider,
+    exists: true,
+    guestEligible: true,
+    usageCategory: "Standard",
+  });
+  assert.ok(rejection);
+  assert.match(rejection, /stored but never applied/);
+  // And the message has to name what would work, or it is just a refusal.
+  for (const modelId of GUEST_BRAND_TRIO_MODEL_IDS) {
+    assert.ok(rejection.includes(modelId), modelId);
+  }
+});
+
+test("disabled, non-guest and non-Standard leads are each rejected on their own terms", () => {
+  const lead = GUEST_BRAND_TRIO_MODEL_IDS[0];
+  const base = {
+    modelId: lead,
+    exists: true,
+    guestEligible: true,
+    usageCategory: "Standard",
+  };
+
+  assert.match(
+    guestDefaultLeadRejection({ ...base, exists: false }) ?? "",
+    /not an enabled model/
+  );
+  assert.match(
+    guestDefaultLeadRejection({ ...base, guestEligible: false }) ?? "",
+    /not available to guests/
+  );
+  assert.match(
+    guestDefaultLeadRejection({ ...base, usageCategory: "Premium" }) ?? "",
+    /not Standard/
+  );
+  assert.match(
+    guestDefaultLeadRejection({ ...base, usageCategory: null }) ?? "",
+    /not Standard/
+  );
 });
