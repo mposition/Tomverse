@@ -185,7 +185,15 @@ export function AdminConsoleShell({
   const [loadingAlerts, setLoadingAlerts] = useState(false);
   const [autoRefresh, setAutoRefresh] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
-  const [lastUpdated, setLastUpdated] = useState(() => new Date());
+  // Starts empty rather than at `new Date()`. This component is server-rendered
+  // before it is hydrated, so a clock read during render gives the two renders
+  // two different seconds, and React answers that mismatch by re-rendering the
+  // whole tree on the client. When that recovery happens while the Suspense
+  // boundary from `admin/loading.tsx` is still streaming, the streamed copy of
+  // the page is left behind in the document and every control on the page
+  // exists twice. The reading is a client-side one anyway: it means "when this
+  // browser last refreshed", which the server cannot know.
+  const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [recentPaths, setRecentPaths] = useState<string[]>([]);
   const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const page = titleFromPath(pathname);
@@ -204,6 +212,13 @@ export function AdminConsoleShell({
     },
     [router]
   );
+
+  useEffect(() => {
+    // Deferred the same way the recent-route effect below defers its write.
+    // Either way the read happens after the commit, which is the point: the
+    // server never produces this value, so there is nothing to disagree with.
+    queueMicrotask(() => setLastUpdated(new Date()));
+  }, [pathname]);
 
   useEffect(() => {
     let existing: unknown = [];
@@ -442,7 +457,9 @@ export function AdminConsoleShell({
                 <button type="button" onClick={() => refresh("manual")} className="inline-flex items-center gap-2 rounded-xl border border-zinc-700 bg-zinc-900 px-3 py-2 text-xs font-bold text-white hover:bg-zinc-800">
                   <RefreshCw className={`h-3.5 w-3.5 ${refreshing ? "animate-spin" : ""}`} /> Refresh
                 </button>
-                <span className="text-[11px] text-zinc-600">Updated {lastUpdated.toISOString().slice(11, 19)} UTC</span>
+                <span className="text-[11px] text-zinc-600">
+                  Updated {lastUpdated ? `${lastUpdated.toISOString().slice(11, 19)} UTC` : "--:--:-- UTC"}
+                </span>
               </div>
             </div>
             {children}

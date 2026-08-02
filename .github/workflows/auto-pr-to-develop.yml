@@ -52,10 +52,35 @@ jobs:
             echo "PR #$existing already open for $BRANCH -> develop"
           fi
 
+      # A pull request that touches .github/workflows/** cannot have auto-merge
+      # enabled by this token: GitHub refuses the mutation with
+      #
+      #   refusing to allow a Personal Access Token to create or update
+      #   workflow ... without `workflow` scope (enablePullRequestAutoMerge)
+      #
+      # That is a deliberate restriction and the right one -- a change to the
+      # gate should not be able to arrange its own merge. But failing the job
+      # over it puts a red check on every workflow PR for a reason that is not
+      # a defect, and a check that is red for non-defects stops being read.
+      #
+      # So the refusal is reported and tolerated; anything else still fails.
+      # The pull request is unaffected either way -- only auto-merge is, and
+      # such a PR is merged by a human on purpose.
       - name: Enable auto-merge
         if: steps.diff-check.outputs.has_diff == 'true'
         run: |
+          set -uo pipefail
           pr_number=$(gh pr list --head "$BRANCH" --base develop --state open --json number --jq '.[0].number')
-          if [ -n "$pr_number" ]; then
-            gh pr merge "$pr_number" --squash --auto
+          if [ -z "$pr_number" ]; then
+            exit 0
           fi
+          if output=$(gh pr merge "$pr_number" --squash --auto 2>&1); then
+            echo "$output"
+            exit 0
+          fi
+          echo "$output"
+          if printf '%s' "$output" | grep -q "without \`workflow\` scope"; then
+            echo "Auto-merge not enabled: this PR changes a workflow file, so it must be merged by a human."
+            exit 0
+          fi
+          exit 1

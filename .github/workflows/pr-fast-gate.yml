@@ -292,27 +292,6 @@ jobs:
         timeout-minutes: 10
         run: npm run test:e2e:smoke
 
-      # UI-008. The @smoke tier covers the commercial contracts (sign-in,
-      # billing, credit preflight, attachments); it deliberately covers none of
-      # the layout and accessibility regressions the Insight UI audit found,
-      # which is why those went unnoticed until a manual audit. This is the
-      # focused, deterministic subset of that follow-up work:
-      #
-      #   UI-001  the model picker under a real reduced visual viewport
-      #   UI-002  the analytics settings target, hit area and overlap
-      #   UI-003  composited-pixel contrast on the failure/recovery surfaces
-      #   UI-006  Korean display headings that must not break mid-어절
-      #   UI-007  the 11px floor on consumer auxiliary text
-      #
-      # Measured 46s for 44 tests over both Chromium projects. The full 63-
-      # golden visual matrix stays out of the PR tier -- it runs unfiltered on
-      # main push and nightly, and the assertion below still forbids naming it
-      # here.
-      - name: Run high-risk UI regression checks
-        if: steps.scope.outputs.code == 'true'
-        timeout-minutes: 10
-        run: npm run test:e2e:ui-risk
-
       - name: Upload failed test evidence
         if: failure()
         timeout-minutes: 5
@@ -325,12 +304,166 @@ jobs:
           if-no-files-found: ignore
           retention-days: 14
 
+  # UI-008. The @smoke tier covers the commercial contracts (sign-in, billing,
+  # credit preflight, attachments); it deliberately covers none of the layout
+  # and accessibility regressions the Insight UI audit found, which is why
+  # those went unnoticed until a manual audit. This is the focused,
+  # deterministic subset of that follow-up work:
+  #
+  #   UI-001  the model picker under a real reduced visual viewport
+  #   UI-002  the analytics settings target, hit area and overlap
+  #   UI-003  composited-pixel contrast on the failure/recovery surfaces
+  #   UI-006  Korean display headings that must not break mid-어절
+  #   UI-007  the 11px floor on consumer auxiliary text
+  #
+  # Split out of build-and-e2e, where it was one step with a 10-minute budget.
+  # That budget was written when the tier was 44 tests measured at 46s. It is
+  # now 488 tests over 15 files, and it began timing out mid-run with every
+  # test still passing -- a red required check that said nothing about the
+  # product. Raising the number alone would only move the same cliff.
+  #
+  # Sharded by project because that is the seam the tests already have: the
+  # two Chromium projects are independent browser configurations, the split is
+  # almost exactly even (244 each), and a failure names the viewport class it
+  # belongs to rather than an arbitrary shard index. Each shard builds its own
+  # copy rather than sharing an artifact -- the shards run concurrently, so the
+  # cost is runner time, not wall clock, and it keeps this job independent of
+  # build-and-e2e's success.
+  #
+  # The full 63-golden visual matrix stays out of the PR tier -- it runs
+  # unfiltered on main push and nightly.
+  ui-risk:
+    name: High-risk UI regression checks (${{ matrix.project }})
+    runs-on: ubuntu-latest
+    # Each shard: install, build, then ~half of the tier. 25 minutes is well
+    # above the measured work so a slow runner does not fail a passing suite,
+    # while still bounding a hung Playwright web server.
+    timeout-minutes: 25
+    strategy:
+      # One shard's failure must not cancel the other: the second result is
+      # what tells a reviewer whether the defect is viewport-specific.
+      fail-fast: false
+      matrix:
+        project: [desktop-chromium, mobile-chromium]
+    env:
+      NEXTAUTH_URL: http://127.0.0.1:3100
+      NEXT_PUBLIC_TURNSTILE_SITE_KEY: tomverse-playwright-turnstile-site-key
+    steps:
+      # Full history so the scope check below can diff against the PR base --
+      # the same reason build-and-e2e needs it.
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      # Identical rule to build-and-e2e's: a documentation-only PR skips the
+      # expensive half, and every error path falls back to code=true so the
+      # failure mode is "ran too much", never "skipped a check". Inlined rather
+      # than shared because this repository has no composite action to share it
+      # through; if a third job needs it, extract it then.
+      - name: Determine whether this PR touches anything but documentation
+        id: scope
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -uo pipefail
+          if ! changed=$(git diff --no-renames --name-only "$BASE_SHA"...HEAD); then
+            echo "Could not diff against $BASE_SHA; running the full gate."
+            echo "code=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [ -z "$changed" ]; then
+            echo "Diff reported no changed paths; running the full gate."
+            echo "code=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          code=false
+          while IFS= read -r path; do
+            case "$path" in
+              .github/audits/*) ;;
+              docs/*.md) ;;
+              */*) code=true ;;
+              *.md) ;;
+              *) code=true ;;
+            esac
+            if [ "$code" = "true" ]; then
+              echo "Non-documentation path found: $path"
+              break
+            fi
+          done <<< "$changed"
+          if [ "$code" = "false" ]; then
+            echo "Documentation-only PR: skipping the UI regression shards."
+          fi
+          echo "code=$code" >> "$GITHUB_OUTPUT"
+
+      - name: Setup Node.js
+        if: steps.scope.outputs.code == 'true'
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Restore Next.js build cache
+        if: steps.scope.outputs.code == 'true'
+        continue-on-error: true
+        uses: actions/cache@v5
+        with:
+          path: .next/cache
+          key: ${{ runner.os }}-next-pr-${{ hashFiles('package-lock.json') }}-${{ hashFiles('app/**/*.ts', 'app/**/*.tsx', 'components/**/*.ts', 'components/**/*.tsx', 'lib/**/*.ts', 'lib/**/*.tsx', 'next.config.ts', 'tsconfig.json') }}
+          restore-keys: |
+            ${{ runner.os }}-next-pr-${{ hashFiles('package-lock.json') }}-
+            ${{ runner.os }}-next-
+
+      - name: Install dependencies
+        if: steps.scope.outputs.code == 'true'
+        timeout-minutes: 10
+        run: npm ci --no-audit --no-fund
+
+      - name: Production build
+        if: steps.scope.outputs.code == 'true'
+        timeout-minutes: 15
+        run: npm run build
+
+      - name: Restore Playwright Chromium cache
+        if: steps.scope.outputs.code == 'true'
+        continue-on-error: true
+        uses: actions/cache@v5
+        with:
+          path: ~/.cache/ms-playwright
+          key: ${{ runner.os }}-playwright-${{ hashFiles('package-lock.json') }}-chromium
+          restore-keys: |
+            ${{ runner.os }}-playwright-${{ hashFiles('package-lock.json') }}-
+
+      - name: Install Chromium
+        if: steps.scope.outputs.code == 'true'
+        timeout-minutes: 10
+        run: npx playwright install --with-deps chromium
+
+      - name: Run the high-risk UI regression checks
+        if: steps.scope.outputs.code == 'true'
+        timeout-minutes: 20
+        env:
+          UI_RISK_PROJECT: ${{ matrix.project }}
+        run: npm run test:e2e:ui-risk:shard
+
+      - name: Upload failed test evidence
+        if: failure()
+        timeout-minutes: 5
+        uses: actions/upload-artifact@v7
+        with:
+          name: pr-fast-gate-ui-risk-${{ matrix.project }}-${{ github.run_id }}
+          path: |
+            test-results
+            playwright-report
+          if-no-files-found: ignore
+          retention-days: 14
+
   # The required status check. Its name is load-bearing -- see the header.
   fast-gate:
     name: Security, unit, build, and Chromium smoke tests
     runs-on: ubuntu-latest
     timeout-minutes: 5
-    needs: [secret-scan, static-and-unit, build-and-e2e]
+    needs: [secret-scan, static-and-unit, build-and-e2e, ui-risk]
     # `always()` so this reports a red check instead of going pending when an
     # upstream job fails, is cancelled, or is skipped. The step below decides
     # the verdict; reaching it is not itself a pass.
@@ -347,13 +480,17 @@ jobs:
           SECRET_SCAN: ${{ needs.secret-scan.result }}
           STATIC_AND_UNIT: ${{ needs.static-and-unit.result }}
           BUILD_AND_E2E: ${{ needs.build-and-e2e.result }}
+          # A matrix job's result is the roll-up of every shard: `success` only
+          # if all shards succeeded, so both viewport classes are gated.
+          UI_RISK: ${{ needs.ui-risk.result }}
         run: |
           set -uo pipefail
           failed=0
           for entry in \
             "secret-scan=$SECRET_SCAN" \
             "static-and-unit=$STATIC_AND_UNIT" \
-            "build-and-e2e=$BUILD_AND_E2E"
+            "build-and-e2e=$BUILD_AND_E2E" \
+            "ui-risk=$UI_RISK"
           do
             job="${entry%%=*}"
             result="${entry#*=}"

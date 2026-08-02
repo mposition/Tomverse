@@ -24,6 +24,7 @@ import {
   deliverNotificationNow,
   enqueueNotificationDelivery,
 } from "@/lib/notificationDeliveries";
+import { findRefundForRequestAtProvider } from "@/lib/refundProviderLookup";
 import {
   REFUND_REQUEST_METADATA_KEY,
   REFUND_STATUS,
@@ -165,6 +166,42 @@ async function createStripeRefundForSubscription(
   }
 
   const amount = charge.amount - charge.amount_refunded;
+
+  // Ask before creating.
+  //
+  // The idempotency key below makes a retry safe only inside Stripe's 24-hour
+  // replay window. A request stranded longer than that -- a provider outage, a
+  // database outage, a queue that backed up -- comes back with the key expired,
+  // and to Stripe the retry is then an ordinary new request that issues a
+  // second refund. Metadata does not expire, so the refund is looked up by the
+  // request it belongs to and adopted if it is already there.
+  //
+  // Only for an approval: without one there is no request id to match on, so
+  // there is nothing to adopt.
+  if (approval) {
+    const existing = await findRefundForRequestAtProvider(
+      stripe,
+      approval.requestId,
+      charge.id
+    );
+    if (existing) {
+      console.warn(
+        JSON.stringify({
+          event: "refund_adopted_existing_provider_refund",
+          refundRequestId: approval.requestId,
+          stripeRefundId: existing.id,
+        })
+      );
+      return {
+        stripeRefundId: existing.id,
+        stripeRefundStatus: existing.status || "pending",
+        stripeChargeId: existing.chargeId || charge.id,
+        refundAmountCents: existing.amountCents ?? amount,
+        refundCurrency: existing.currency || charge.currency.toUpperCase(),
+      };
+    }
+  }
+
   const createRefund = async () => {
     if (approval) {
       await writeAdminAuditLog({

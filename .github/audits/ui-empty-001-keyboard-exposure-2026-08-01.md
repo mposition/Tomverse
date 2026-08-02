@@ -1,29 +1,25 @@
-# UI-EMPTY-001 — empty 상태 background control 키보드 노출 (미해결)
+# UI-EMPTY-001 — empty 상태 background control 키보드 노출 (해결)
 
 ## 상태
 
 - 분류: **P1 접근성 결함**
-- 상태: **미해결(Open)**. 제품 결정 대기가 아니라 **결함으로 추적**합니다.
+- 상태: **해결(Resolved) — 2026-08-01**. 아래 "구현" 참조.
+- 최초 상태: 미해결(Open). 제품 결정 대기가 아니라 결함으로 추적했습니다.
 - 최초 식별: 2026-07-29, dark empty overlay 작업(UI-EMPTY-001) 중
 - 이 문서 기준 SHA: `origin/develop` @ `9d37fce`
 
 **릴리스 판정에 미치는 영향**: P1이므로
 `.github/RELEASE_CHECKLIST.md` §4 Accessibility의
-`No P0/P1 accessibility blocker outstanding` 항목을 **차단**합니다.
-해결 전까지 이 항목을 체크해서는 안 되며, 넘어가려면 같은 문서가 요구하는
-**명시적 waiver**(책임자가 있는 결정, 다음 릴리스로 이월되지 않음)가 필요합니다.
+`No P0/P1 accessibility blocker outstanding` 항목을 차단했습니다.
+**부분 분리형 구현으로 해소되었으므로 더 이상 차단하지 않습니다.**
+단, 릴리스 판정은 해당 SHA에서 매트릭스를 다시 채운 뒤 내려야 합니다.
 
-`.github/ACCESSIBILITY_QA_MATRIX.md`의 "What automation covers" 표는
+`.github/ACCESSIBILITY_QA_MATRIX.md`의 "What automation covers" 표가
 `Keyboard-only completion (no pointer)`와
-`Visible focus on every interactive stop`를 **yes**로 표시하고 있습니다.
-그러나 이 결함이 바로 그 두 가지가 성립하지 않는 사례이며,
-`tests/e2e/accessibility-core-tasks.spec.ts`는 consent·pricing·composer 5개
-테스트로 구성돼 **empty 상태에서 panel까지 tab order를 걷지 않습니다**.
-즉 두 행의 "yes"는 이 화면에 대해서는 과대 표기입니다. 아래 부정 계약이
-추가되기 전까지 해당 행은 이 화면에 한해 근거가 없습니다.
-
-"제품 결정 대기"로만 남겨 두면 잘못된 계약이 downstream으로 전파된다는 것은
-아래 "경위"가 이미 보여준 사실입니다.
+`Visible focus on every interactive stop`를 yes로 표시했지만,
+`tests/e2e/accessibility-core-tasks.spec.ts`는 consent·pricing·composer만 다루고
+empty workspace의 tab order를 걷지 않아 이 화면에 대해서는 근거가 없었습니다.
+이제 `tests/e2e/empty-state-panel-separation.spec.ts`가 그 공백을 덮습니다.
 
 ## 결함
 
@@ -75,7 +71,7 @@ light/dark 양쪽 모두 해당하며, overlay alpha 변경(UI-EMPTY-001의 색�
    기준으로 해당 테스트를 다시 썼습니다. 그리고 `inert` revert가 반영된 뒤에도
    테스트 쪽 변경은 그대로 남았습니다.
 
-현재 `origin/develop`의 상태:
+해결 전 `origin/develop`의 상태(기록용):
 
 | 위치 | 내용 |
 |---|---|
@@ -83,7 +79,7 @@ light/dark 양쪽 모두 해당하며, overlay alpha 변경(UI-EMPTY-001의 색�
 | `tests/e2e/upgrade-discovery.spec.ts` | 주석이 "UI-EMPTY-001 makes the whole comparison panel `inert` while the conversation has no messages yet"라고 **반대 계약**을 설명했음 → **2026-08-01 정정됨** |
 
 즉 제품과 테스트가 서로 반대되는 계약을 문서화하고 있었습니다. 테스트 쪽 주석은
-정정했지만, **제품의 결함 자체는 그대로 미해결**입니다.
+2026-08-01에 정정했고, 제품 결함은 아래 "구현"에서 해소했습니다.
 
 ### 파생된 실질 문제 2가지
 
@@ -105,11 +101,15 @@ empty 상태를 배제하려고 넣은 검사인데 아무것도 지키지 못�
 > 단언이 실패할 수 있음을 확인했습니다: seed를 제거하면
 > `element(s) not found`로 실패하며, 기존 `inert` 단언은 같은 상황에서도
 > 통과했습니다. 3회 반복 실행과 spec 전체(11 passed)로 확인했습니다.
-> 나머지 항목은 그대로 미해결입니다.
 
 **(2) 커버리지 소실.** 위 테스트는 원래 *메시지가 없는* 대화에서 panel-only
 send의 순서를 검증했습니다. 지금은 history를 seed해 non-empty 상태로 바꿔
-검증합니다. 원래 시나리오는 더 이상 어디서도 실행되지 않습니다.
+검증합니다.
+
+> **해소됨(2026-08-01).** 복원이 아니라 **부정 계약으로 대체**했습니다. 부분
+> 분리형에서 empty 상태의 panel-only send는 금지 대상이므로, 검증해야 할 것은
+> "동작한다"가 아니라 "접근·실행되지 않는다"입니다.
+> `empty-state-panel-separation.spec.ts`가 그것을 덮습니다.
 
 ## 제품 결정 — 부분 분리형
 
@@ -182,24 +182,78 @@ panel의 selector를 이용하게 하지 말고**, welcome 화면 또는 공용 
 모델 선택을 follow-up과 같은 계약으로 묶으면 "empty에서 panel 접근 금지"가
 "첫 질문 전 모델을 바꿀 수 없음"으로 잘못 번역됩니다. 그래서 분리합니다.
 
+## 구현 (2026-08-01)
+
+### 무엇을 바꿨는가
+
+`components/chat/DesktopChatShell.tsx`의 panel에 두 가지를 함께 지정합니다.
+
+- `inert={isConversationEmpty || undefined}` — tab order·pointer·a11y tree에서 제외
+- `aria-hidden={!isPanelVisible || isConversationEmpty}` — a11y 제외를 명시
+
+**둘 다 필요합니다.** `inert`만으로는 DOM에서 a11y tree를 유도하는 도구에 보이지
+않습니다(Playwright `ariaSnapshot()`이 inert 상태의 panel control을 그대로
+나열했습니다). 반대로 `aria-hidden`만 쓰면 focus는 그대로 가능해져
+"focus는 되는데 안내되지 않는" 더 나쁜 상태가 됩니다. 함께 쓰면 안전합니다 —
+inert로 focus가 불가능하므로 focus-but-unannounced가 생길 수 없습니다.
+
+**`hidden`을 쓰지 않은 이유**: panel은 계속 그려져야 합니다. 반투명 welcome
+화면 뒤로 3-model 비교 구조가 보이는 것이 UI-EMPTY-001의 색상 부분에서 의도한
+결과이기 때문입니다. `inert`는 상호작용만 막고 페인팅은 유지합니다.
+
+### 왜 이번에는 안전한가
+
+앞선 시도(`bc49c2c`)가 깨진 이유는 panel selector가 첫 질문 전 모델 선택의
+**유일한 경로처럼 취급됐기** 때문입니다. 실측해 보니 그렇지 않았습니다 —
+composer와 모델 picker trigger 2개 모두 `chat-empty-state` **내부**에 있습니다
+(`inputSlotRef` portal). 즉 전면 경로가 이미 존재했고, panel selector는 가려진
+중복 경로였습니다. 그래서 지금 닫는 것은 능력을 없애는 것이 아니라
+중복을 없애는 것입니다.
+
+### mobile은 변경 불필요
+
+`MobileChatShell`은 welcome surface가 뜨면 panel을 `hidden`(display:none)으로
+두므로 tab order·a11y tree에서 이미 빠지고, `hideModelOnlyInput`로 panel별
+follow-up 입력 자체가 없습니다. 결함은 desktop 전용이었고 그렇게 확인했습니다.
+
+### 검증
+
+`tests/e2e/empty-state-panel-separation.spec.ts` 17개 테스트로 위 3계약을 덮습니다.
+그중 8개는 theme × viewport(1440 / 1057) × 텍스트 배율(100% / 200%) 조합에서
+"panel의 어떤 control에도 keyboard가 닿지 않는다"를 다시 측정합니다. 배율은
+viewport를 나누는 대신 root font-size로 적용합니다 — 1440을 반으로 나누면 768
+미만이 되어 desktop shell 자체를 벗어나므로, 측정하려던 화면이 사라집니다.
+
+**반증 검증**: 수정을 되돌리고 실행하니 **부정 계약 5건 중 4건이 실패**했습니다.
+남은 1건("pointer cannot reach")은 overlay가 원래 pointer를 막고 있어 양쪽에서
+통과합니다 — 회귀 감지가 아니라 불변조건 기록이며, 그 사실을 그대로 둡니다.
+긍정 계약과 모델 선택 계약은 수정 전후 모두 통과합니다(수정이 깨뜨리면 안 되는
+능력이므로 정상).
+
+회귀: `upgrade-discovery`, `accessibility-core-tasks`, `model-comparison-layout`,
+`native-web-search`, `chat-model-selection-readiness`, `conversation-title`,
+`remediation-accessibility`와 신규 spec 합쳐 **74 passed**.
+empty·loading golden 12건도 통과 — `inert`/`aria-hidden`은 픽셀을 바꾸지 않습니다.
+
 ## 완료 조건
 
-- [ ] Tab focus가 **화면에 보이는 control에만** 도달
-- [ ] pointer와 keyboard가 **동일한 기능**에 접근
-- [ ] empty 상태에서 panel follow-up 입력 접근 불가
-- [ ] 첫 질문 전 모델 변경 가능, 잠긴 모델의 upgrade discovery 가능
-- [ ] 첫 메시지 이후 panel control 정상 활성화
-- [ ] light/dark × desktop/compact × 200% 확대 회귀 테스트
-- [~] 서로 반대인 코드·테스트 주석과 계약 문서 정리 — `upgrade-discovery.spec.ts`의
-      잘못된 `inert` 계약 주석은 정정됨. `docs/ui-contracts/` 반영은 제품 결정 후
+- [x] Tab focus가 **화면에 보이는 control에만** 도달
+- [x] pointer와 keyboard가 **동일한 기능**에 접근
+- [x] empty 상태에서 panel follow-up 입력 접근 불가
+- [x] 첫 질문 전 모델 변경 가능, 잠긴 모델의 upgrade discovery 가능
+- [x] 첫 메시지 이후 panel control 정상 활성화
+- [x] light/dark × desktop/compact × 200% 확대 회귀 테스트 — theme 2 ×
+      viewport 2(1440 / 1057) × 배율 2(100% / 200%) = 8 조합
+- [x] 서로 반대인 코드·테스트 주석과 계약 문서 정리 — 제품 주석과
+      `upgrade-discovery.spec.ts` 주석이 이제 같은 계약을 설명합니다
 - [x] 위 (1)의 무의미한 assertion 제거 또는 실제 계약에 맞게 수정 (2026-08-01)
-- [ ] empty 상태의 panel-only follow-up이 **접근·실행되지 않음**을 검증하는
+- [x] empty 상태의 panel-only follow-up이 **접근·실행되지 않음**을 검증하는
       부정 테스트 추가 (위 계약 1)
-- [ ] 대화가 존재하는 상태의 panel-only send 및 모델 변경 저장 순서는
+- [x] 대화가 존재하는 상태의 panel-only send 및 모델 변경 저장 순서는
       기존 긍정 테스트로 유지 (위 계약 2)
-- [ ] 모델 선택·upgrade discovery를 follow-up과 분리된 계약으로 검증 (위 계약 3)
-- [ ] `.github/ACCESSIBILITY_QA_MATRIX.md`의 keyboard/focus 자동화 커버리지
-      표기를 이 화면 기준으로 재확인
+- [x] 모델 선택·upgrade discovery를 follow-up과 분리된 계약으로 검증 (위 계약 3)
+- [x] `.github/ACCESSIBILITY_QA_MATRIX.md`의 keyboard/focus 자동화 커버리지
+      표기를 이 화면 기준으로 재확인 — 신규 spec이 그 공백을 덮습니다
 
 ## 관련 위치
 
@@ -207,4 +261,4 @@ panel의 selector를 이용하게 하지 말고**, welcome 화면 또는 공용 
 - `components/chat/ChatWelcomeScreen.tsx` — 시작 화면이 직접 제공해야 할 control
 - `tests/e2e/upgrade-discovery.spec.ts` — "panel-only send waits for a changed
   model selection to persist"
-- `docs/ui-contracts/` — 확정 후 계약 문서화 위치 검토
+- `tests/e2e/empty-state-panel-separation.spec.ts` — 위 3계약의 검증
