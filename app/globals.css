@@ -444,6 +444,23 @@ html[data-consent-pending] [data-testid="marketing-consent-slot"] {
   outline-offset: 2px;
 }
 
+/* UI-023. `animate-fadeIn` was used by the conversation context menu but never
+   defined anywhere, so Tailwind emitted nothing and the class was inert. Only
+   opacity is animated -- no transform -- so it cannot cause layout movement,
+   and the reduced-motion block below collapses it to nothing. */
+@keyframes tomverse-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@utility animate-fadeIn {
+  animation: tomverse-fade-in 120ms ease-out;
+}
+
 /* Respect the OS reduced-motion preference. The typing indicator and status
    dots animate indefinitely while a response streams, which is exactly the
    sustained motion this setting exists to suppress. */

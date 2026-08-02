@@ -89,6 +89,19 @@ export const hashConversationPassword = async (password: unknown) => {
 export const isHashedConversationPassword = (stored: string) =>
     stored.startsWith(`${HASH_PREFIX}$${HASH_VERSION}$`);
 
+/**
+ * SEC-011, stage 1 of 2. This is not a password check: it compares
+ * `sha256(candidate)` with `sha256(stored)`, which can only match when `stored`
+ * is the plaintext. It exists solely so rows written before scrypt hashing keep
+ * unlocking while `scripts/migrate-legacy-conversation-passwords.mjs` clears
+ * them.
+ *
+ * Do not delete this together with the migration. See §6.5 of
+ * `.github/RELEASE_CHECKLIST.md`: it goes in a *later* release, after
+ * production has been observed at zero plaintext rows. Removing it early turns
+ * any row the migration missed from insecurely unlockable into permanently
+ * unlockable, with no recovery path for the owner.
+ */
 const compareLegacyPassword = (password: string, stored: string) => {
     const actual = createHash("sha256").update(password).digest();
     const expected = createHash("sha256").update(stored).digest();

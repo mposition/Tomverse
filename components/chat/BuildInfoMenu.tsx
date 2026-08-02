@@ -76,7 +76,9 @@ export function BuildInfoMenuItem({
     <>
       <button
         type="button"
-        role="menuitem"
+        // UX-032. No `role="menuitem"`: the containers that render this are
+        // disclosures, not menus, and this control expands a detail panel
+        // inside the popup -- which `menu` does not permit as a child anyway.
         data-testid="sidebar-build-info-toggle"
         aria-expanded={isExpanded}
         onClick={() => setIsExpanded((current) => !current)}

@@ -83,6 +83,17 @@ const getOrganizerPreference = (): OrganizerPreference => {
 
 const getServerOrganizerPreference = (): OrganizerPreference => "auto";
 
+const DELETE_ARM_TIMEOUT_MS = 5_000;
+
+const interpolateSidebarCopy = (
+    template: string,
+    values: Record<string, string | number>
+) =>
+    Object.entries(values).reduce(
+        (copy, [key, value]) => copy.replaceAll(`{${key}}`, String(value)),
+        template
+    );
+
 export function ChatSidebar({
     conversations,
     currentChatId,
@@ -165,6 +176,7 @@ export function ChatSidebar({
     const conversationMenuAnchorRef = useRef<HTMLButtonElement | null>(null);
     const conversationMenuPanelRef = useRef<HTMLDivElement | null>(null);
     const helpMenuRef = useRef<HTMLSpanElement | null>(null);
+    const helpMenuPanelRef = useRef<HTMLSpanElement | null>(null);
     const [showHelpMenu, setShowHelpMenu] = useState(false);
     const [sidebarTourStep, setSidebarTourStep] = useState<number | null>(null);
     const organizerPreference = useSyncExternalStore(
@@ -192,6 +204,10 @@ export function ChatSidebar({
     const { t, lang } = useLanguage();
     const helpCopy = chatHelpCopy[lang];
     const tooltipIdPrefix = useId();
+    // UX-032. Ids so each trigger's `aria-controls` resolves to the popup it
+    // actually opens.
+    const helpMenuId = `${tooltipIdPrefix}-help-popup`;
+    const conversationMenuId = `${tooltipIdPrefix}-conversation-actions`;
     const helpTooltipId = `${tooltipIdPrefix}-help`;
     const accountUsage = useUserUsage(!isGuestMode);
     const canShare =
@@ -203,10 +219,12 @@ export function ChatSidebar({
         "flex w-full items-center justify-between whitespace-nowrap rounded px-3 py-2 text-sm transition-colors";
 
     const menuItemEnabled =
-        "cursor-pointer text-zinc-300 hover:bg-zinc-800 hover:text-zinc-100";
+        "cursor-pointer text-zinc-700 hover:bg-zinc-100 hover:text-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800 dark:hover:text-zinc-100";
 
+    // zinc-600 on zinc-900/50 was 2.29:1 -- a disabled item still has to be
+    // readable enough to tell the user which action is unavailable.
     const menuItemDisabled =
-        "cursor-not-allowed bg-zinc-900/50 text-zinc-600";
+        "cursor-not-allowed bg-zinc-100 text-zinc-500 dark:bg-zinc-900/50 dark:text-zinc-400";
 
     const organizerExpanded =
         sidebarTourStep !== null || organizerPreference === "expanded";
@@ -285,11 +303,27 @@ export function ChatSidebar({
             }
         };
         const closeOnEscape = (event: KeyboardEvent) => {
-            if (event.key === "Escape") setShowHelpMenu(false);
+            if (event.key !== "Escape") return;
+            setShowHelpMenu(false);
+            // A disclosure that swallows focus on close strands the keyboard
+            // user at the top of the document.
+            helpMenuRef.current
+                ?.querySelector<HTMLElement>('[data-testid="sidebar-help-button"]')
+                ?.focus();
         };
+        // The popup renders after the trigger, but the first control still has
+        // to be reachable without hunting for it.
+        const frame = requestAnimationFrame(() => {
+            helpMenuPanelRef.current
+                ?.querySelector<HTMLElement>(
+                    'a[href], button:not([disabled]), [tabindex]:not([tabindex="-1"])'
+                )
+                ?.focus();
+        });
         document.addEventListener("pointerdown", closeOnOutsideClick);
         document.addEventListener("keydown", closeOnEscape);
         return () => {
+            cancelAnimationFrame(frame);
             document.removeEventListener("pointerdown", closeOnOutsideClick);
             document.removeEventListener("keydown", closeOnEscape);
         };
@@ -311,6 +345,19 @@ export function ChatSidebar({
         document.addEventListener("keydown", handleKeyDown);
         return () => document.removeEventListener("keydown", handleKeyDown);
     }, [deleteProjectArmedId, editingProjectId, showProjectForm]);
+
+    // UX-018. The armed state used to persist until the next click anywhere,
+    // long after the confirming toast had self-dismissed at 3.2s -- so a second
+    // click minutes later still deleted. It disarms itself just after the toast
+    // goes, and the timer is cleared on unmount and on re-arm.
+    useEffect(() => {
+        if (!deleteProjectArmedId) return;
+        const timer = window.setTimeout(
+            () => setDeleteProjectArmedId(null),
+            DELETE_ARM_TIMEOUT_MS
+        );
+        return () => window.clearTimeout(timer);
+    }, [deleteProjectArmedId]);
 
     const toggleStoredId = (storageKey: string, id: string, setter: (ids: string[]) => void) => {
         let next: string[] = [];
@@ -675,10 +722,22 @@ export function ChatSidebar({
             closeConversationMenu();
         };
 
+        // UX-032. This panel is portalled to the end of <body>, so before this
+        // the next Tab after opening it went to whatever followed the trigger
+        // in the sidebar -- the menu was on screen beside the row and nowhere
+        // near it in the tab order. Escape already returned focus to the
+        // anchor; this is the other half.
+        const frame = requestAnimationFrame(() => {
+            conversationMenuPanelRef.current
+                ?.querySelector<HTMLElement>('button:not([disabled])')
+                ?.focus();
+        });
+
         document.addEventListener("keydown", closeOnEscape);
         document.addEventListener("scroll", closeOnViewportChange, true);
         window.addEventListener("resize", closeOnViewportChange);
         return () => {
+            cancelAnimationFrame(frame);
             document.removeEventListener("keydown", closeOnEscape);
             document.removeEventListener("scroll", closeOnViewportChange, true);
             window.removeEventListener("resize", closeOnViewportChange);
@@ -784,7 +843,14 @@ export function ChatSidebar({
                         aria-label={t("sidebar.helpAndGuides")}
                         aria-describedby={helpTooltipId}
                         aria-expanded={showHelpMenu}
-                        aria-haspopup="menu"
+                        // UX-032. `aria-haspopup="menu"` promised a menu's
+                        // keyboard model -- arrow keys between items, Tab out,
+                        // one roving stop -- that this popup never implemented,
+                        // and its content (a section heading, an expandable
+                        // build-info panel) is not permitted inside `menu`
+                        // anyway. It is a disclosure, and now says so.
+                        aria-haspopup="true"
+                        aria-controls={showHelpMenu ? helpMenuId : undefined}
                         data-testid="sidebar-help-button"
                         onClick={() => {
                             setShowHelpMenu((current) => !current);
@@ -808,7 +874,10 @@ export function ChatSidebar({
                     ) : null}
                     {showHelpMenu ? (
                         <span
-                            role="menu"
+                            ref={helpMenuPanelRef}
+                            id={helpMenuId}
+                            role="group"
+                            aria-label={t("sidebar.helpAndGuides")}
                             className="absolute right-0 top-full z-[75] mt-2 block w-64 rounded-2xl border border-zinc-200 bg-white p-2 text-left shadow-2xl dark:border-zinc-700 dark:bg-zinc-900"
                         >
                             <span className="block px-3 py-2 text-xs font-bold uppercase tracking-wide text-zinc-500">
@@ -816,7 +885,6 @@ export function ChatSidebar({
                             </span>
                             <button
                                 type="button"
-                                role="menuitem"
                                 data-testid="sidebar-tour-replay"
                                 onClick={startSidebarTour}
                                 className="flex w-full items-center gap-2 rounded-xl px-3 py-2.5 text-sm font-bold text-zinc-700 hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-800"
@@ -829,7 +897,6 @@ export function ChatSidebar({
                                 target="_blank"
                                 rel="noopener noreferrer"
                                 prefetch={false}
-                                role="menuitem"
                                 data-testid="sidebar-help-link"
                                 onClick={() => setShowHelpMenu(false)}
                                 className="flex w-full items-center gap-2 rounded-xl px-3 py-2.5 text-sm font-bold text-zinc-700 hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-800"
@@ -865,6 +932,10 @@ export function ChatSidebar({
                         value={searchQuery}
                         onChange={(event) => setSearchQuery(event.target.value)}
                         placeholder={t("sidebar.searchPlaceholder")}
+                        // UX-021. A placeholder is not an accessible name: it
+                        // is announced inconsistently and disappears the moment
+                        // the field has a value.
+                        aria-label={t("sidebar.searchPlaceholder")}
                         className="h-9 w-full rounded-lg border border-zinc-200 bg-white pl-9 pr-3 text-xs text-zinc-800 outline-none transition placeholder:text-zinc-400 focus:border-blue-400 focus:ring-2 focus:ring-blue-500/20 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-100 dark:focus:border-blue-500"
                     />
                 </div>
@@ -1052,6 +1123,7 @@ export function ChatSidebar({
                                 onChange={(event) => setProjectName(event.target.value)}
                                 maxLength={32}
                                 placeholder={t("sidebar.projectNamePlaceholder")}
+                                aria-label={t("sidebar.projectNamePlaceholder")}
                                 className="h-8 min-w-0 flex-1 rounded-lg border border-zinc-200 bg-zinc-50 px-2 text-xs font-medium text-zinc-900 outline-none focus:border-blue-500 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-100"
                             />
                             <button
@@ -1189,9 +1261,24 @@ export function ChatSidebar({
                                                                 ? "text-white/80 hover:bg-white/10"
                                                                 : "text-zinc-400 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-950/30 dark:hover:text-red-300"
                                                     }`}
-                                                    aria-label={t("sidebar.deleteProject")}
+                                                    // UX-018. Armed state was carried by
+                                                    // background colour alone and a toast
+                                                    // that self-dismisses in 3.2s, while the
+                                                    // name stayed "Delete project" -- so a
+                                                    // screen-reader user got identical output
+                                                    // before and after arming and destroyed
+                                                    // the project on the second press.
+                                                    aria-label={
+                                                        isDeleteArmed
+                                                            ? interpolateSidebarCopy(
+                                                                  t("sidebar.deleteProjectArmed"),
+                                                                  { project: project.name }
+                                                              )
+                                                            : t("sidebar.deleteProject")
+                                                    }
+                                                    aria-pressed={isDeleteArmed}
                                                 >
-                                                    <Trash2 className="h-3.5 w-3.5" />
+                                                    <Trash2 aria-hidden="true" className="h-3.5 w-3.5" />
                                                 </button>
                                             </>
                                         )}
@@ -1361,11 +1448,17 @@ export function ChatSidebar({
                                          e.stopPropagation();
                                          toggleConversationMenu(conv.id, e.currentTarget);
                                      }}
-                                     className={`flex shrink-0 cursor-pointer items-center justify-center text-zinc-500 transition-colors hover:text-zinc-200 ${isMobileDrawer ? "h-11 w-11" : "p-1"}`}
+                                     className={`flex shrink-0 cursor-pointer items-center justify-center text-zinc-500 transition-colors hover:text-zinc-900 dark:hover:text-zinc-100 ${isMobileDrawer ? "h-11 w-11" : "p-1"}`}
                                      title={t("chat.moreActions")}
                                      aria-label={`${t("chat.moreActions")}: ${conv.title}`}
                                      aria-expanded={isMenuOpen}
-                                     aria-haspopup="menu"
+                                     // UX-032. Same as the help popup above:
+                                     // no arrow-key model was ever implemented,
+                                     // so claiming `menu` told assistive tech
+                                     // to expect one and left the user pressing
+                                     // keys that do nothing.
+                                     aria-haspopup="true"
+                                     aria-controls={isMenuOpen ? conversationMenuId : undefined}
                                  >
                                      <MoreVertical className="h-4 w-4" />
                                  </button>
@@ -1374,9 +1467,11 @@ export function ChatSidebar({
                                      <div
                                          ref={conversationMenuPanelRef}
                                          data-testid="conversation-menu-panel"
-                                         role="menu"
+                                         id={conversationMenuId}
+                                         role="group"
+                                         aria-label={`${t("chat.moreActions")}: ${conv.title}`}
                                          onClick={(event) => event.stopPropagation()}
-                                         className="context-menu-wrapper fixed z-[120] flex flex-col overflow-y-auto overscroll-contain rounded-lg border border-zinc-800 bg-zinc-900 p-1.5 text-xs text-zinc-300 shadow-2xl animate-fadeIn"
+                                         className="context-menu-wrapper fixed z-[120] flex flex-col overflow-y-auto overscroll-contain rounded-lg border border-zinc-200 bg-white p-1.5 text-xs text-zinc-700 shadow-2xl animate-fadeIn dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-300"
                                          style={{
                                              left: conversationMenuPosition.left,
                                              width: conversationMenuPosition.width,

@@ -483,7 +483,7 @@ export function AdminConsoleShell({
           <div className="relative z-10 max-h-[80vh] w-full max-w-2xl overflow-hidden rounded-2xl border border-zinc-700 bg-zinc-950 shadow-2xl">
             <div className="flex items-center gap-3 border-b border-zinc-800 px-4">
               <Command className="h-5 w-5 text-blue-300" />
-              <input autoFocus value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search records or type a page name..." className="h-14 min-w-0 flex-1 bg-transparent text-sm text-white outline-none placeholder:text-zinc-600" />
+              <input autoFocus value={query} onChange={(event) => setQuery(event.target.value)} aria-label="Search records or jump to a page" placeholder="Search records or type a page name..." className="h-14 min-w-0 flex-1 bg-transparent text-sm text-white outline-none placeholder:text-zinc-600" />
               {searching ? <Loader2 className="h-4 w-4 animate-spin text-zinc-500" /> : null}
               <button type="button" onClick={() => setCommandOpen(false)} className="flex h-8 w-8 items-center justify-center rounded-lg hover:bg-zinc-900" aria-label="Close"><X className="h-4 w-4" /></button>
             </div>

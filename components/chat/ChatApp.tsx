@@ -6,6 +6,7 @@ import { Message, type ChatAttachment } from "@/components/chat/types";
 import { useSession } from "next-auth/react";
 import { useLanguage } from "@/components/LanguageProvider";
 import { useGuestVerification } from "@/components/chat/GuestVerificationProvider";
+import { useModelCatalog } from "@/components/ModelCatalogProvider";
 import { ArrowUp, PauseCircle } from "lucide-react";
 import {
   formatChatCostSafetyDetails,
@@ -89,6 +90,14 @@ type ChatAppProps = {
   stopSignal?: number;
 };
 
+/**
+ * UX-021. The follow-up field's accessible name. Kept as an interpolation so
+ * the copy stays in `locales/*.ts` -- the model name is the only part that
+ * varies, and it is not translated.
+ */
+const interpolateModelOnlyLabel = (template: string, modelName: string) =>
+    template.replace("{model}", modelName);
+
 function ChatAppComponent({
   modelId,
   initialConversationId = null,
@@ -113,6 +122,10 @@ function ChatAppComponent({
   const { data: session, status } = useSession();
   const sessionUserId = session?.user?.id || null;
     const { t } = useLanguage();
+    // UX-021. Only used to name this panel's follow-up field. Three panels
+    // render three of these, so a name that does not say *which* model is the
+    // same as no name at all for anyone navigating by form field.
+    const { getModel } = useModelCatalog();
   // No panel owns a Turnstile widget any more: verification is a property of
   // the guest session, so the chat shell's single coordinator runs it (and
   // shows it, once, in the shell's own verification surface).
@@ -1064,6 +1077,10 @@ function ChatAppComponent({
                               data-testid="model-only-input"
                               data-model-id={modelId}
                               placeholder={t("chat.modelOnlyPlaceholder")}
+                              aria-label={interpolateModelOnlyLabel(
+                                  t("chat.modelOnlyInputLabel"),
+                                  getModel(modelId)?.name || modelId
+                              )}
                               className="max-h-28 min-h-7 flex-1 resize-none border-0 bg-transparent py-1 text-sm leading-5 text-zinc-900 outline-none placeholder:text-zinc-400 disabled:opacity-50 dark:text-zinc-100 dark:placeholder:text-zinc-500"
                           />
                       </div>

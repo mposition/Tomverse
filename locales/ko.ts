@@ -1,4 +1,10 @@
 export const ko = {
+    skipLink: {
+        toMainContent: "본문으로 건너뛰기",
+    },
+    notifications: {
+        dismiss: "알림 닫기",
+    },
     sidebar: {
         title: "Tomverse Insight",
         accountTooltip: "계정 및 플랜",
@@ -83,6 +89,7 @@ export const ko = {
         removeProject: "프로젝트에서 제거",
         renameProject: "프로젝트 이름 변경",
         deleteProject: "프로젝트 삭제",
+        deleteProjectArmed: "{project} 삭제 확인",
         projectRenameFailed: "프로젝트 이름을 변경하지 못했습니다.",
         projectDeleteConfirm: "한 번 더 클릭하면 이 프로젝트가 삭제됩니다. 대화는 미분류로 이동합니다.",
         projectDeleteFailed: "프로젝트를 삭제하지 못했습니다.",
@@ -159,6 +166,7 @@ export const ko = {
         maxModelCompare: "최대 3개 모델까지 비교할 수 있습니다.",
         maxGuestModelCompare: "게스트 모드는 최대 3개 모델까지 비교할 수 있습니다.",
         modelOnlyPlaceholder: "이 모델에게만 추가 질문",
+        modelOnlyInputLabel: "{model}에게만 추가 질문",
         modelOnlySendTitle: "이 모델에게만 보내기",
         comingSoonModel: "이 모델은 곧 지원될 예정입니다.",
         attachFile: "파일 첨부",
@@ -303,6 +311,9 @@ export const ko = {
         imageUnsupportedSelected: "이미지를 읽을 수 없는 선택 모델:",
         removeImageUnsupportedModels: "미지원 모델 선택 해제",
         closeModelPanel: "모델 패널 닫기",
+        panelPauseLabel: "패널 {position} {model} 일시정지 (현재 켜짐)",
+        panelResumeLabel: "패널 {position} {model} 다시 시작 (현재 꺼짐)",
+        panelCloseLabel: "패널 {position} {model} 닫기",
         pausePanel: "대화 일시정지",
         resumePanel: "대화 다시 시작",
         retryWithoutFiles: "첨부파일 없이 다시 시도",

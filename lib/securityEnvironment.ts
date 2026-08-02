@@ -29,6 +29,15 @@ const databaseTransportStatus = (value: string | undefined) => {
   }
 };
 
+const isHttpsUrl = (value: string | undefined) => {
+  if (!configured(value)) return false;
+  try {
+    return new URL(value!.trim()).protocol === "https:";
+  } catch {
+    return false;
+  }
+};
+
 export const getSecurityEnvironmentStatus = () => {
   const azureClientId = process.env.AZURE_AD_CLIENT_ID;
   const azureClientSecret = process.env.AZURE_AD_CLIENT_SECRET;
@@ -57,6 +66,12 @@ export const getSecurityEnvironmentStatus = () => {
 
   const checks = {
     nextAuthSecret: strongSecret(process.env.NEXTAUTH_SECRET),
+    // SEC-010. The public URL decides cookie scope and every absolute URL the
+    // app generates. An http origin in production means a session cookie an
+    // attacker on the network can read, so this fails closed rather than
+    // warning.
+    nextAuthUrlIsHttps:
+      !production || isHttpsUrl(process.env.NEXTAUTH_URL),
     oauthTokenEncryptionKey: strongSecret(
       process.env.OAUTH_TOKEN_ENCRYPTION_KEY
     ),
