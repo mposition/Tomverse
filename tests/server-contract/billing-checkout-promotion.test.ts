@@ -123,6 +123,20 @@ const PROMOTION = {
   isActive: true,
 };
 
+/**
+ * The error classes the route will actually see, captured from the very
+ * objects the mocks are built out of.
+ *
+ * Not re-imported in the test body. A second `await import()` of a mocked
+ * module can hand back a different copy of the class than the one the route
+ * holds, and then the route's `instanceof` check fails, the classified branch
+ * is skipped, and the assertion reads as "the route answered 500" when what
+ * actually happened is that the test built its error from the wrong realm.
+ * That is load-order dependent, so it passes locally and fails in CI.
+ */
+let apiSecurityErrorClass: typeof import("../../lib/apiSecurity").ApiSecurityError;
+let provisioningErrorClass: typeof import("../../lib/stripePromotionProvisioning").StripePromotionProvisioningError;
+
 async function loadRoute(): Promise<{
   POST: (request: Request) => Promise<Response>;
 }> {
@@ -136,6 +150,8 @@ async function loadRoute(): Promise<{
     });
 
     const realApiSecurity = original("lib/apiSecurity.ts");
+    apiSecurityErrorClass =
+      realApiSecurity.ApiSecurityError as typeof apiSecurityErrorClass;
     mock.module(mod("lib/apiSecurity.ts"), {
       namedExports: {
         ...realApiSecurity,
@@ -203,9 +219,12 @@ async function loadRoute(): Promise<{
       },
     });
 
+    const realProvisioning = original("lib/stripePromotionProvisioning.ts");
+    provisioningErrorClass =
+      realProvisioning.StripePromotionProvisioningError as typeof provisioningErrorClass;
     mock.module(mod("lib/stripePromotionProvisioning.ts"), {
       namedExports: {
-        ...original("lib/stripePromotionProvisioning.ts"),
+        ...realProvisioning,
         ensureStripePromotionDiscount: async () => {
           if (world.discountError) throw world.discountError;
           return world.discountResult;
@@ -409,10 +428,8 @@ test("a first-time customer is created under a per-account idempotency key", asy
 });
 
 test("a promotion configuration failure answers 4xx with a trace id, not a 500", async () => {
-  const { StripePromotionProvisioningError } = (await import(
-    mod("lib/stripePromotionProvisioning.ts")
-  )) as typeof import("../../lib/stripePromotionProvisioning");
-  world.discountError = new StripePromotionProvisioningError(
+  await loadRoute();
+  world.discountError = new provisioningErrorClass(
     "PROMOTION_CODE_CONFLICT",
     "promotion_code",
     { stripePromotionCodeId: "promo_someone_else" }
@@ -493,10 +510,8 @@ test("a lease release that itself fails still answers the customer", async () =>
 });
 
 test("a second concurrent checkout on the same promotion is a 409, not a 500", async () => {
-  const { ApiSecurityError } = (await import(
-    mod("lib/apiSecurity.ts")
-  )) as typeof import("../../lib/apiSecurity");
-  world.promotionReserveError = new ApiSecurityError(
+  await loadRoute();
+  world.promotionReserveError = new apiSecurityErrorClass(
     409,
     "PROMOTION_CHECKOUT_IN_PROGRESS",
     "A checkout using this promotion is already in progress."
