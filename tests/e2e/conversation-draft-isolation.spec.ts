@@ -371,10 +371,12 @@ test.describe("conversation-scoped composer drafts", () => {
       .getByTestId("conversation-menu-panel")
       .getByRole("button", { name: "삭제" })
       .click();
-    // The mobile shell leaves its sidebar drawer open behind the confirmation,
-    // and the drawer owns pointer events -- so close it before confirming.
+    // The mobile shell closes its own drawer when a conversation action opens a
+    // page-level dialog, so the confirmation is not behind it. This used to
+    // press Escape here to close the drawer by hand, which only worked while
+    // ConfirmDialog ignored Escape; it now owns Escape as the topmost modal
+    // (UX-010), so pressing it here would dismiss the confirmation instead.
     if (await isMobileShell(page)) {
-      await page.keyboard.press("Escape");
       await expect(page.getByTestId("sidebar-conversation-list")).toHaveCount(0);
     }
     await page

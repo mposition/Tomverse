@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   AlertTriangle,
   Check,
@@ -14,6 +14,7 @@ import {
   X,
 } from "lucide-react";
 import { useLanguage } from "@/components/LanguageProvider";
+import { useModalDialog } from "@/components/useModalDialog";
 import { useModelCatalog } from "@/components/ModelCatalogProvider";
 import { useGuestVerification } from "@/components/chat/GuestVerificationProvider";
 import { CreditCostBadge } from "@/components/credits/CreditCostBadge";
@@ -474,19 +475,24 @@ export function ComparisonReviewDialog({
     }
   }, [open]);
 
-  useEffect(() => {
-    if (!open) return;
-    const previousOverflow = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape" && !running) onClose();
-    };
-    document.addEventListener("keydown", handleKeyDown);
-    return () => {
-      document.body.style.overflow = previousOverflow;
-      document.removeEventListener("keydown", handleKeyDown);
-    };
-  }, [onClose, open, running]);
+  const reviewDialogRef = useRef<HTMLDivElement | null>(null);
+  const reviewPanelRef = useRef<HTMLDivElement | null>(null);
+  // UX-010. Scroll lock and Escape were here already; initial focus, the Tab
+  // cycle and focus return were not, so a keyboard user opening AI Review
+  // landed nowhere and tabbed through the workspace behind it.
+  //
+  // Escape stays inert while a review is running, matching the disabled close
+  // button: the request is billed and cancelling it is UX-019's separate change,
+  // so dismissing here would hide a charge the user cannot see the result of.
+  const requestClose = useCallback(() => {
+    if (!running) onClose();
+  }, [onClose, running]);
+  useModalDialog({
+    open,
+    onClose: requestClose,
+    dialogRef: reviewDialogRef,
+    panelRef: reviewPanelRef,
+  });
 
   const modelNames = useMemo(
     () =>
@@ -639,12 +645,13 @@ export function ComparisonReviewDialog({
 
   return (
     <div
+      ref={reviewDialogRef}
       className="fixed inset-0 z-[85] flex items-end justify-center bg-black/65 p-0 backdrop-blur-sm sm:items-center sm:p-5"
       role="dialog"
       aria-modal="true"
       aria-labelledby="comparison-review-title"
     >
-      <div className="flex max-h-[calc(100dvh-env(safe-area-inset-top))] w-full flex-col overflow-hidden rounded-t-3xl border border-zinc-200 bg-white shadow-2xl dark:border-zinc-800 dark:bg-zinc-900 sm:max-h-[90dvh] sm:max-w-5xl sm:rounded-3xl">
+      <div ref={reviewPanelRef} className="flex max-h-[calc(100dvh-env(safe-area-inset-top))] w-full flex-col overflow-hidden rounded-t-3xl border border-zinc-200 bg-white shadow-2xl dark:border-zinc-800 dark:bg-zinc-900 sm:max-h-[90dvh] sm:max-w-5xl sm:rounded-3xl">
         <div
           aria-hidden="true"
           className="h-[3px] shrink-0 bg-gradient-to-r from-tomverse-accent-start via-tomverse-accent-mid to-tomverse-accent-end"

@@ -5,6 +5,7 @@ import type { ReactNode } from "react";
 import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { dispatchAppToast } from "@/lib/appToast";
 import { useLanguage, type Language } from "@/components/LanguageProvider";
+import { useModalDialog } from "@/components/useModalDialog";
 import {
   getBillingConfigUrl,
   type FeaturedBillingPromotion,
@@ -670,14 +671,18 @@ export function UpgradeInterestButton({
       : null;
   const passCopy = foundingTesterPassCopy[lang] || foundingTesterPassCopy.en;
 
-  useEffect(() => {
-    if (!isOpen) return;
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setIsOpen(false);
-    };
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [isOpen]);
+  const checkoutDialogRef = useRef<HTMLDivElement | null>(null);
+  const checkoutPanelRef = useRef<HTMLFormElement | null>(null);
+  // UX-010. Escape alone is not the modal contract: this dialog takes payment
+  // details, and focus stayed on the trigger behind the overlay while Tab walked
+  // the obscured page underneath.
+  const closeCheckout = useCallback(() => setIsOpen(false), []);
+  useModalDialog({
+    open: isOpen,
+    onClose: closeCheckout,
+    dialogRef: checkoutDialogRef,
+    panelRef: checkoutPanelRef,
+  });
 
   const requestPromotionValidation = useCallback(
     async (
@@ -977,12 +982,14 @@ export function UpgradeInterestButton({
       </button>
       {isOpen ? (
         <div
+          ref={checkoutDialogRef}
           className="fixed inset-0 z-[90] flex items-end justify-center bg-black/60 px-3 py-3 backdrop-blur-sm sm:items-center sm:py-6"
           role="dialog"
           aria-modal="true"
           aria-labelledby={`${inputId}-title`}
         >
           <form
+            ref={checkoutPanelRef}
             className="grid max-h-[calc(100dvh-1.5rem)] w-full max-w-4xl overflow-y-auto rounded-3xl border border-zinc-200 bg-white shadow-2xl dark:border-zinc-800 dark:bg-zinc-950 md:max-h-[92vh] md:grid-cols-[1.1fr_0.9fr] md:overflow-hidden"
             onSubmit={(event) => {
               event.preventDefault();

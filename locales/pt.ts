@@ -1,6 +1,12 @@
 import { en } from "./en";
 
 export const pt = {
+    skipLink: {
+        toMainContent: "Ir para o conteúdo principal",
+    },
+    notifications: {
+        dismiss: "Fechar a notificação",
+    },
     sidebar: {
         title: "Tomverse Insight",
         accountTooltip: "Conta e plano",
@@ -85,6 +91,7 @@ export const pt = {
         removeProject: "Remover do projeto",
         renameProject: "Renomear projeto",
         deleteProject: "Excluir projeto",
+        deleteProjectArmed: "Confirmar a exclusão de {project}",
         projectRenameFailed: "Não foi possível atualizar o nome do projeto.",
         projectDeleteConfirm: "Clique novamente para excluir este projeto. As conversas irão para Sem categoria.",
         projectDeleteFailed: "Não foi possível excluir o projeto.",
@@ -168,6 +175,7 @@ export const pt = {
         maxModelCompare: "Você pode comparar até 3 modelos.",
         maxGuestModelCompare: "O modo convidado pode comparar até 3 modelos.",
         modelOnlyPlaceholder: "Perguntar apenas a este modelo",
+        modelOnlyInputLabel: "Perguntar apenas a {model}",
         modelOnlySendTitle: "Enviar apenas para este modelo",
         comingSoonModel: "Este modelo estará disponível em breve.",
         attachFile: "Anexar arquivos",
@@ -264,6 +272,9 @@ export const pt = {
         imageUnsupportedSelected: "Estes modelos selecionados não conseguem ler imagens:",
         removeImageUnsupportedModels: "Remover modelos incompatíveis",
         closeModelPanel: "Fechar painel de modelos",
+        panelPauseLabel: "Pausar o painel {position}, {model} (atualmente ativo)",
+        panelResumeLabel: "Retomar o painel {position}, {model} (atualmente inativo)",
+        panelCloseLabel: "Fechar o painel {position}, {model}",
         pausePanel: "Pausar chat",
         resumePanel: "Retomar chat",
         retryWithoutFiles: "Tentar novamente sem arquivos",

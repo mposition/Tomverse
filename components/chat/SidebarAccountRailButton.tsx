@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import Link from "next/link";
 import { signIn, signOut, useSession } from "next-auth/react";
 import {
@@ -38,6 +38,35 @@ export function SidebarAccountRailButton({
     const [isOpen, setIsOpen] = useState(false);
     const containerRef = useRef<HTMLDivElement | null>(null);
     const triggerRef = useRef<HTMLButtonElement | null>(null);
+    const popoverRef = useRef<HTMLDivElement | null>(null);
+    const popoverId = useId();
+
+    /**
+     * UX-032. This popover used to declare `role="menu"` with `role="menuitem"`
+     * children. Neither was true. A menu commits to a keyboard model -- arrow
+     * keys move between items, Tab leaves, one roving stop for the whole menu
+     * -- and none of that was implemented, so a screen-reader user in
+     * application mode was told to press arrows and nothing happened. The
+     * container also held a user-info block, which is not a permitted child of
+     * `menu` at all.
+     *
+     * It is a disclosure: a button that reveals a group of controls. Saying so
+     * costs nothing and stops promising behaviour that is not here. What a
+     * disclosure does owe the user is focus management, which is added below --
+     * the popover is rendered after the trigger in DOM order, but the first
+     * control has to be reachable without hunting for it.
+     */
+    useEffect(() => {
+        if (!isOpen) return;
+        const frame = requestAnimationFrame(() => {
+            popoverRef.current
+                ?.querySelector<HTMLElement>(
+                    'a[href], button:not([disabled]), [tabindex]:not([tabindex="-1"])'
+                )
+                ?.focus();
+        });
+        return () => cancelAnimationFrame(frame);
+    }, [isOpen]);
 
     useEffect(() => {
         if (!isOpen) return;
@@ -73,7 +102,6 @@ export function SidebarAccountRailButton({
     const analyticsSettingsItem = (
         <button
             type="button"
-            role="menuitem"
             data-testid="sidebar-rail-analytics-settings"
             onClick={() => {
                 setIsOpen(false);
@@ -93,8 +121,9 @@ export function SidebarAccountRailButton({
                 type="button"
                 data-testid="sidebar-rail-account-trigger"
                 aria-label={t(user ? "sidebar.accountTooltip" : "sidebar.accountTooltipGuest")}
-                aria-haspopup="menu"
+                aria-haspopup="true"
                 aria-expanded={isOpen}
+                aria-controls={isOpen ? popoverId : undefined}
                 onClick={() => setIsOpen((current) => !current)}
                 className="flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-full bg-accent-account-700 text-sm font-bold text-white ring-1 ring-accent-account-400/50 transition hover:ring-2 hover:ring-accent-account-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:bg-accent-account-700 dark:ring-accent-account-400/40"
             >
@@ -119,7 +148,9 @@ export function SidebarAccountRailButton({
             ) : null}
             {isOpen ? (
                 <div
-                    role="menu"
+                    ref={popoverRef}
+                    id={popoverId}
+                    role="group"
                     aria-label={t(user ? "auth.accountMenu" : "sidebar.accountTooltipGuest")}
                     className="absolute bottom-0 left-full z-[75] ml-2 w-64 rounded-2xl border border-zinc-200 bg-white p-2 text-left shadow-2xl dark:border-zinc-700 dark:bg-zinc-900"
                 >
@@ -151,7 +182,6 @@ export function SidebarAccountRailButton({
                             <div className="mt-1 space-y-1">
                                 <button
                                     type="button"
-                                    role="menuitem"
                                     onClick={() => {
                                         setIsOpen(false);
                                         openAccountSettings("plan");
@@ -179,7 +209,6 @@ export function SidebarAccountRailButton({
                                 ) : null}
                                 <button
                                     type="button"
-                                    role="menuitem"
                                     onClick={() => {
                                         setIsOpen(false);
                                         openAccountSettings("account");
@@ -191,7 +220,6 @@ export function SidebarAccountRailButton({
                                 </button>
                                 <button
                                     type="button"
-                                    role="menuitem"
                                     onClick={() => {
                                         setIsOpen(false);
                                         openAccountSettings("preferences");
@@ -207,7 +235,6 @@ export function SidebarAccountRailButton({
                                     target="_blank"
                                     rel="noopener noreferrer"
                                     prefetch={false}
-                                    role="menuitem"
                                     onClick={() => setIsOpen(false)}
                                     className="flex min-h-11 w-full items-center gap-2 rounded-xl px-3 text-sm font-bold text-zinc-700 transition hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-800"
                                 >
@@ -217,7 +244,6 @@ export function SidebarAccountRailButton({
                                 <div className="my-1 border-t border-zinc-200 dark:border-zinc-800" />
                                 <button
                                     type="button"
-                                    role="menuitem"
                                     onClick={() => {
                                         setIsOpen(false);
                                         void signOut();

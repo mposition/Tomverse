@@ -1,4 +1,10 @@
 export const zh = {
+    skipLink: {
+        toMainContent: "跳到主要内容",
+    },
+    notifications: {
+        dismiss: "关闭通知",
+    },
     sidebar: {
         title: "Tomverse Insight",
         accountTooltip: "账户与套餐",
@@ -83,6 +89,7 @@ export const zh = {
         removeProject: "从项目中移除",
         renameProject: "重命名项目",
         deleteProject: "删除项目",
+        deleteProjectArmed: "确认删除 {project}",
         projectRenameFailed: "无法更新项目名称。",
         projectDeleteConfirm: "再次点击将删除此项目。对话将移动到未分类。",
         projectDeleteFailed: "无法删除项目。",
@@ -157,6 +164,7 @@ export const zh = {
         maxModelCompare: "最多可比较 3 个模型。",
         maxGuestModelCompare: "访客模式最多可比较 3 个模型。",
         modelOnlyPlaceholder: "只向此模型追问",
+        modelOnlyInputLabel: "只向 {model} 追问",
         modelOnlySendTitle: "只发送给此模型",
         comingSoonModel: "此模型即将支持。",
         attachFile: "添加文件",
@@ -281,6 +289,9 @@ export const zh = {
         imageUnsupportedSelected: "以下所选模型无法读取图片：",
         removeImageUnsupportedModels: "移除不兼容模型",
         closeModelPanel: "关闭模型面板",
+        panelPauseLabel: "暂停面板 {position} {model}（当前已开启）",
+        panelResumeLabel: "恢复面板 {position} {model}（当前已关闭）",
+        panelCloseLabel: "关闭面板 {position} {model}",
         pausePanel: "暂停对话",
         resumePanel: "恢复对话",
         retryWithoutFiles: "不带文件重试",

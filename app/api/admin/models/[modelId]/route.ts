@@ -11,6 +11,7 @@ import {
 import { hasAdminPermission, isAdminSession } from "@/lib/adminAuth";
 import { writeAdminAuditLog } from "@/lib/adminAudit";
 import { apiSecurityResponse, consumeApiRateLimit, readLimitedJson } from "@/lib/apiSecurity";
+import { invalidatePublicSnapshot } from "@/lib/publicSnapshotCache";
 import { prisma } from "@/lib/prisma";
 import { updateModelRegistrySchema, registryInputToData, validateProviderConfiguration } from "@/lib/modelRegistryAdmin";
 import { ensureModelRegistrySeeded, registryRowToModel } from "@/lib/modelRegistry";
@@ -112,6 +113,10 @@ export async function PATCH(
       summary: `Updated model registry entry ${modelId}.`,
       metadata: { provider: body.provider, apiModel: body.apiModel, status: body.status, creditWeight: body.creditWeight },
     });
+    // SEC-012. `/api/models/catalog` answers from a shared snapshot, so a
+    // registry write has to drop it or the change is invisible until the TTL
+    // lapses.
+    invalidatePublicSnapshot("model-catalog");
     const model = registryRowToModel(row);
     return NextResponse.json({ model: { ...model, environment: validateProviderConfiguration(model) } });
   } catch (error) {
@@ -191,6 +196,7 @@ export async function DELETE(
       targetId: modelId,
       summary: `Removed model ${modelId} from the active catalogue while preserving historical resolution.`,
     });
+    invalidatePublicSnapshot("model-catalog");
     return NextResponse.json({ model: registryRowToModel(row) });
   } catch (error) {
     const approvalResponse = adminApprovalErrorResponse(error);

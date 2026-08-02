@@ -1,6 +1,12 @@
 import { en } from "./en";
 
 export const fr = {
+    skipLink: {
+        toMainContent: "Aller au contenu principal",
+    },
+    notifications: {
+        dismiss: "Fermer la notification",
+    },
     sidebar: {
         title: "Tomverse Insight",
         accountTooltip: "Compte et forfait",
@@ -85,6 +91,7 @@ export const fr = {
         removeProject: "Retirer du projet",
         renameProject: "Renommer le projet",
         deleteProject: "Supprimer le projet",
+        deleteProjectArmed: "Confirmer la suppression de {project}",
         projectRenameFailed: "Impossible de renommer le projet.",
         projectDeleteConfirm: "Cliquez encore pour supprimer ce projet. Les chats seront déplacés vers Non classé.",
         projectDeleteFailed: "Impossible de supprimer le projet.",
@@ -168,6 +175,7 @@ export const fr = {
         maxModelCompare: "Vous pouvez comparer jusqu'à 3 modèles.",
         maxGuestModelCompare: "Le mode invité peut comparer jusqu'à 3 modèles.",
         modelOnlyPlaceholder: "Demander uniquement à ce modèle",
+        modelOnlyInputLabel: "Demander uniquement à {model}",
         modelOnlySendTitle: "Envoyer uniquement à ce modèle",
         comingSoonModel: "Ce modèle arrive bientôt.",
         attachFile: "Joindre des fichiers",
@@ -264,6 +272,9 @@ export const fr = {
         imageUnsupportedSelected: "Ces modèles sélectionnés ne peuvent pas lire les images :",
         removeImageUnsupportedModels: "Retirer les modèles incompatibles",
         closeModelPanel: "Fermer le panneau des modèles",
+        panelPauseLabel: "Mettre en pause le panneau {position}, {model} (actuellement actif)",
+        panelResumeLabel: "Reprendre le panneau {position}, {model} (actuellement inactif)",
+        panelCloseLabel: "Fermer le panneau {position}, {model}",
         pausePanel: "Mettre le chat en pause",
         resumePanel: "Reprendre le chat",
         retryWithoutFiles: "Réessayer sans fichiers",

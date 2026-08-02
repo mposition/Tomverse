@@ -43,6 +43,7 @@
     "db:migrate": "node scripts/require-direct-database-url.mjs && node scripts/baseline-existing-database.mjs && prisma migrate deploy",
     "db:compare-schema": "node scripts/compare-schema-to-migrations.mjs",
     "db:refresh-test": "node scripts/refresh-test-database.mjs",
+    "migrate:conversation-lock-passwords": "node --conditions=react-server --import tsx scripts/migrate-legacy-conversation-passwords.mjs",
     "maintenance:cleanup": "node scripts/run-maintenance.mjs",
     "maintenance:credit-reservations": "node scripts/run-credit-reconciliation.mjs",
     "maintenance:notification-deliveries": "node scripts/run-notification-deliveries.mjs",
@@ -98,7 +99,19 @@
     "typescript": "^5"
   },
   "overrides": {
+    "@eslint/config-array": {
+      "brace-expansion": "^1.1.17"
+    },
+    "@eslint/eslintrc": {
+      "brace-expansion": "^1.1.17"
+    },
     "@hono/node-server": "1.19.13",
+    "eslint": {
+      "brace-expansion": "^1.1.17"
+    },
+    "eslint-config-next": {
+      "brace-expansion": "^1.1.17"
+    },
     "fast-uri": "3.1.4",
     "postcss": "8.5.25",
     "sharp": "$sharp",
