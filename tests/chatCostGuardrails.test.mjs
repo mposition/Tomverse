@@ -5,7 +5,6 @@ import {
   findRetiredCostLimitEnvNames,
   getCostGuardrailLimits,
   getGuestCostGuardrailLimits,
-  getProviderCostGuardrailLimits,
   GUARDRAIL_HEADROOM_MULTIPLIER,
   PURCHASED_CREDIT_HEADROOM_MULTIPLE,
   RETIRED_COST_LIMIT_ENV_NAMES,
@@ -117,21 +116,11 @@ test("setting a retired variable cannot lower the guardrail", () => {
   assert.equal(limits.planMonth, limits.derived.planMonth);
 });
 
-test("guest and provider guardrails stay absolute and independently configured", () => {
+test("guest guardrails stay absolute and independently configured", () => {
   assert.deepEqual(getGuestCostGuardrailLimits({}), {
     day: 20_000,
     month: 100_000,
   });
-  assert.deepEqual(getProviderCostGuardrailLimits("openai", {}), {
-    day: 10_000_000,
-    month: 100_000_000,
-  });
-  assert.deepEqual(
-    getProviderCostGuardrailLimits("google", {
-      CHAT_PROVIDER_GOOGLE_COST_MICROUSD_PER_DAY: "5000000",
-    }),
-    { day: 5_000_000, month: 100_000_000 }
-  );
 });
 
 // The Max plan's own default grant produces a total-cost guardrail past

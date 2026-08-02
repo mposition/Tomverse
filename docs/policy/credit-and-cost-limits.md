@@ -134,6 +134,58 @@ credit lot의 `remainingFundedCostMicroUsd`가 이미 제한하고 있어서, �
 한도로 두 번 막는 것은 정책 7 위반입니다. 전역 guardrail(`op-cost-*`)과
 provider guardrail은 그대로 적용됩니다.
 
+### Provider 예산 계약
+
+`lib/providerCostBudget.ts`. provider 예산은 필요한 운영 장치입니다 — 가격
+오설정·재시도 폭주·남용 계정으로 비용이 폭주하면 청구서가 아니라 시스템이
+먼저 멈춰야 합니다. 다만 이건 **전역 상한**이라 최악의 방향으로 실패합니다.
+잘못된 기본값 하나가 크레딧을 가진 모든 사용자를 한꺼번에 거절하고,
+`PROVIDER_BUDGET_EXHAUSTED`(503)는 크레딧에 대해 아무 말도 하지 않습니다.
+
+원래 provider마다 **일 US$10 / 월 US$100**이 조용한 기본값이었습니다. Pro 계정
+한 명의 plan guardrail(일 US$15 / 월 US$150)보다 낮고, Max 한 명(US$500)보다는
+한참 낮습니다. **전체 사용자를 위한 전역 상한이 한 사용자의 entitlement보다
+좁았다**는 뜻입니다. 보고된 사고의 원인은 아니었고 이번 변경의 회귀도
+아니었습니다 — 같은 결함이 한 층 아래에서 기다리고 있었을 뿐입니다.
+
+계약은 넷입니다.
+
+1. **production은 예산을 명시한다.** production 기본값은 없습니다. 활성
+   provider에 예산이 없으면 조용히 아무도 고르지 않은 숫자를 물려받는 대신
+   readiness가 실패합니다(`GET /api/ready`의 `providerBudgets`).
+2. **바닥 아래 값은 올려서 강제하고 보고한다.** 바닥은 단일 계정의 최대 plan
+   guardrail(`getSingleAccountCostCeiling()`)입니다. 한 계정의 entitlement보다
+   좁은 전역 상한은 그 계정이 권리를 다 쓰기 전에 발동하므로, 운영 장치의
+   이름을 쓴 entitlement 한도가 됩니다. 이 저장소가 릴리스 하나를 들여 분리한
+   바로 그 혼동입니다. 오늘 값은 **일 US$500 / 월 US$500**(Max 10,000크레딧,
+   일일 무제한이라 day = month)입니다.
+3. **값은 신뢰하지 않고 검증한다.** 양의 안전 정수, day ≤ month, 그리고
+   micro-USD 단위 — `500`은 US$500이 아니라 0.05센트이므로 오타로 보고
+   차단합니다(`PROVIDER_BUDGET_UNIT_SUSPICION_MICRO_USD`).
+4. **막기 전에 알린다.** 사용률 **70% / 85% / 95%**에서
+   `provider_budget_utilisation` 구조화 로그가 남고, 85% 이상은
+   `reportOperationalIncident`로 알림이 갑니다(70%는 로그만 — 아직 아무도 근처에
+   가지 않은 한도의 첫 임계에서 호출하면 정작 중요한 알림을 무시하게 됩니다).
+   판정은 **이미 쓴 양 + 지금 요청분**으로 합니다. 지나간 것만 보는 보고는 항상
+   늦게 도착합니다.
+
+차단될 때는 같은 provider 전체가 아니라 **다른 provider의 대체 모델**을
+`alternativeModelIds`로 함께 돌려줍니다(`lib/providerFallbackCandidates.ts`).
+모델 ID만 담으며 가격·예산·내부 USD는 절대 넣지 않습니다.
+
+조회: `GET /api/admin/provider-budgets` — provider별 설정값·유효값·오늘과 이번
+달 사용량·잔여·사용률·reset 시각(UTC)·clamp 여부를 함께 돌려줍니다. 설정값과
+유효값을 따로 보고하는 이유는 clamp가 일어났을 때 **운영자가 설정한 숫자가
+실제로 적용되는 숫자가 아니라는 사실**이 보여야 하기 때문입니다.
+
+**배포 순서는 뒤집을 수 없습니다.** 코드를 먼저 배포하면 예산이 없는
+production이 readiness에서 죽습니다.
+
+1. 활성 provider별 production·staging 예산 결정
+2. 환경변수 선배포
+3. production fallback 금지·검증 로직이 든 코드 배포
+4. `/api/ready`와 `/api/admin/provider-budgets`로 유효값 확인
+
 ## 3. 가격 registry
 
 `lib/modelPricing.ts`가 유일한 가격 출처입니다. 항목마다 다음을 기록합니다.
