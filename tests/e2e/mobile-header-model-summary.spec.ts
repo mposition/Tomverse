@@ -4,6 +4,8 @@ import {
   openRecentConversation,
   prepareGuestPage,
 } from "./support/app-fixtures";
+import { GUEST_BRAND_TRIO_MODEL_IDS } from "@/lib/appDefaults";
+import { AVAILABLE_MODELS } from "@/lib/models";
 
 // STG-F009: on mobile the header showed a single representative model name
 // ("GPT-5.4 mini") while the composer showed "3 AIs", so a multi-model
@@ -18,12 +20,20 @@ import {
 // and still names its model here. Either way the button's accessible name
 // carries the entire selection, paused panels included.
 
-const MODELS = ["gpt-5-4-mini", "claude-haiku-4-5", "gemini-2-5-flash"];
-const MODEL_NAMES: Record<string, string> = {
-  "gpt-5-4-mini": "GPT-5.4 mini",
-  "claude-haiku-4-5": "Claude Haiku 4.5",
-  "gemini-2-5-flash": "Gemini 3.5 Flash-Lite",
-};
+// The guest default selection, taken from the product rather than copied:
+// `gpt-5-4-mini` sat here until the default moved to `gpt-5-6-luna`, and the
+// picker's first step lists recommended models, so the stale id was selected
+// but absent from the panel the header opens -- which read as the header
+// failing to reach its own selection. Deriving it means the next default
+// change moves this fixture with it instead of breaking it.
+const MODELS = [...GUEST_BRAND_TRIO_MODEL_IDS];
+const MODEL_NAMES: Record<string, string> = Object.fromEntries(
+  MODELS.map((modelId) => {
+    const model = AVAILABLE_MODELS.find((entry) => entry.id === modelId);
+    if (!model) throw new Error(`Guest trio model is not in the catalogue: ${modelId}`);
+    return [modelId, model.name];
+  })
+);
 const CHAT_ID = "guest_header_summary";
 const TITLE = "Header summary test";
 

@@ -1,6 +1,6 @@
 # Release checklist
 
-Run through this before promoting a build — except section 5, which runs
+Run through this before promoting a build — except section 5, which is checked
 immediately after the merge. Every item needs either evidence tied to the
 **release SHA** or a written waiver — an unticked box is a release blocker, not
 a formality.
@@ -88,46 +88,64 @@ The automated rows in that matrix run in CI. The screen-reader, Korean-IME,
 external-keyboard and real-browser-zoom rows do not, and a green suite says
 nothing about them.
 
-## 5. After the release merge — restore shared ancestry
+## 5. After the release merge — confirm shared ancestry was restored
 
-This is the one item here that runs *after* the merge button, and it is the one
-most often missed, because nothing fails at the time.
+This is the one item here that runs *after* the merge button. **Do not perform
+the back-merge by hand.** Since #232 it is automatic, and a manual one now races
+the automation for the same ref.
 
-- [ ] The release PR was merged **with a merge commit**, not a squash
-- [ ] If it was squashed: `main` was merged back into `develop` immediately
-- [ ] Verified: `git fetch origin && git merge-base --is-ancestor origin/main origin/develop`
+`.github/workflows/back-merge-main-to-develop.yml` fires on every push to
+`main`. It merges `main` into `develop` as a real merge commit, reports whether
+the merge changed any file, and a separate `verify` job asserts the invariant
+with `if: always()`. Your job here is to confirm it did, not to do it.
+
+- [ ] The **Back-merge main into develop** run for this release finished, and
+      its `verify` job passed
+- [ ] Independently checked: `git fetch origin && git merge-base --is-ancestor origin/main origin/develop`
       exits 0
+- [ ] The run's "Report what the merge changed" step says the merge changes no
+      file — or, if it does not, the extra content is understood (that means
+      `main` carries work `develop` never had, such as a hotfix landed directly)
 
 ```
 Release merge SHA:  ____________________
-Ancestry restored:  ____________________
+Back-merge run URL: ____________________
+Ancestry verified:  ____________________
 ```
+
+### When it does not land on its own
+
+The workflow refuses to guess. On a merge conflict, or when the push to
+`develop` is refused by branch protection, it opens
+`automation/back-merge-main-<sha>` as a pull request instead and `verify` fails.
+That failure is the signal that a person has to finish the job:
+
+- [ ] If such a pull request exists, it was merged **with a merge commit**
+
+Squashing it accomplishes nothing at all — the second parent is what carries the
+ancestry, and a squash discards it. That is not hypothetical: of the three
+back-merges opened by hand on 2026-08-01, #203 and #213 were squashed on the way
+in and left the gap exactly where it was.
+
+### Why this exists, and why the repository setting is not the fix
 
 A squash rewrites the release into a single new commit, so `main` and `develop`
 end up sharing no commit at all even though their trees are identical. Nothing
-is broken by that on its own — the code is released and correct — but the *next*
-release PR opens against a base it has no common history with, and every file
-the previous release touched arrives as an `add/add` conflict. #195 opened with
-14 of them, all in already-shipped code.
+breaks at the time — the code is released and correct — but the *next* change
+`develop` makes to already-released code has no common base, and every file the
+release touched arrives as an `add/add` conflict. #195 opened with 14 of them;
+#200 cost eighteen.
 
-Merging `main` back into `develop` puts the release commit in `develop`'s
-ancestry and ends the cycle. The merge changes no file content, which is worth
-confirming rather than assuming:
+Turning on **Settings → General → Pull requests → Allow merge commits** was the
+obvious fix and is the wrong one: GitHub's merge-method setting is
+repository-wide and cannot be scoped to one target branch, while squash is
+wanted for feature pull requests into `develop`. #232 makes the release's merge
+method stop mattering instead, which is why this section now verifies rather
+than instructs.
 
-```
-git diff --quiet <develop-before-the-merge>   # exits 0
-```
-
-Recent history shows the pattern clearly: releases through #175 used merge
-commits (`939efaa`, `3efb7b9`, `7edb70e` all have two parents), and #186, #195,
-#200 and #209 were each squashed and each needed a follow-up
-`Merge main into develop` before the next release could open cleanly.
-
-Prefer fixing this at the source. If **Settings → General → Pull requests →
-Allow merge commits** is off, or a `main` ruleset requires linear history,
-merge commits are not available and this manual step is the standing cost. The
-merge strategy is not recorded anywhere in the repository, so it cannot be
-enforced by CI — only by this checklist.
+First real trigger, for calibration: #233 was merged as a squash (`2e0eff2`,
+one parent) and the workflow produced `b172d0b` (two parents) unattended —
+run `30723157564`, `verify` green, merge changed no file.
 
 ## 6. Scope notes
 

@@ -2120,6 +2120,67 @@ const checks = [
     },
   },
   {
+    // #232 replaced a manual recovery step with this workflow, and the release
+    // checklist now says to verify rather than perform it. What makes that
+    // safe is the `verify` job: without it, a back-merge that conflicted or was
+    // refused would leave main outside develop's ancestry silently, which is
+    // the exact failure the manual step used to catch by being on a checklist.
+    // `if: always()` is load-bearing -- verify runs *because* the back-merge
+    // may have failed, so a `needs:` without it would skip precisely when the
+    // invariant most needs reporting.
+    name: "The main-into-develop back-merge is automated and its ancestry check cannot be skipped",
+    file: ".github/workflows/back-merge-main-to-develop.yml",
+    test: (source) => {
+      const checklist = read(".github/RELEASE_CHECKLIST.md");
+      // Both strings below appear more than once in this file -- in the header
+      // commentary as well as in the steps -- so a whole-file substring match
+      // passes while the step that matters has been gutted. Measured: rewriting
+      // the merge step's `--no-ff` and the verify step's ancestry command both
+      // left a whole-file check green. Slice to the job that has to carry each.
+      const verifyAt = source.indexOf("\n  verify:");
+      const backMergeAt = source.indexOf("\n  back-merge:");
+      if (verifyAt < 0 || backMergeAt < 0 || backMergeAt > verifyAt) {
+        console.error(
+          "back-merge-main-to-develop.yml no longer has a back-merge job followed by a verify job."
+        );
+        return false;
+      }
+      const backMergeJob = source.slice(backMergeAt, verifyAt);
+      const verifyJob = source.slice(verifyAt);
+      return (
+        // Fires on the event that opens the gap, not on a schedule.
+        /^on:\s*$/m.test(source) &&
+        source.includes("push:") &&
+        source.includes("      - main") &&
+        // A merge commit is the entire point: the second parent is what
+        // carries the ancestry, so this must not become a fast-forward or a
+        // rebase, either of which would leave nothing recording it.
+        backMergeJob.includes("git merge --no-ff origin/main") &&
+        !backMergeJob.includes("--ff-only") &&
+        !backMergeJob.includes("git rebase") &&
+        // The guard, and the one command that decides the invariant. Both have
+        // to be in the verify job itself: `if: always()` anywhere else does
+        // not make this one run after a failed back-merge, which is the only
+        // time it matters.
+        verifyJob.includes("if: always()") &&
+        verifyJob.includes(
+          "git merge-base --is-ancestor origin/main origin/develop"
+        ) &&
+        // A conflict opens a pull request rather than resolving blind.
+        backMergeJob.includes("automation/back-merge-main-") &&
+        // It may only ever move develop. A back-merge that could push main
+        // would be a way to move the release branch outside a review.
+        !/git push (-u )?origin main\b/.test(source) &&
+        // The checklist has to agree that this is automated, or an operator
+        // following it by hand races the workflow for the same ref.
+        checklist.includes("back-merge-main-to-develop.yml") &&
+        // Matched across a line wrap: the checklist is hard-wrapped, so the
+        // sentence moves whenever the paragraph above it is edited.
+        /Do not perform\s+the back-merge by hand/.test(checklist)
+      );
+    },
+  },
+  {
     name: "Financial DB gate is path-scoped on PRs but always available on main and manual runs",
     file: ".github/workflows/credit-finance-db-integration.yml",
     test: (source) =>

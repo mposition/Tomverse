@@ -20,6 +20,12 @@
 # Sandbox-only Playwright browser-executable override; never a real fix.
 playwright.local-sandbox.config.ts
 
+# Default-model eval output (scripts/evalDefaultModel.mjs --json).
+# Real, billed provider responses -- large, and evidence of one run rather than
+# source. Retain the files with the decision record and summarise the manifest
+# in .github/audits/, per docs/policy/default-model-luna-migration.md 4.5.1.
+/artifacts/
+
 # next.js
 /.next/
 /out/

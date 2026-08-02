@@ -76,7 +76,7 @@ test("every registered model is still actually unpriced", () => {
   }
 });
 
-test("the shipped register has no errors, only the unassigned-owner warnings", () => {
+test("the shipped register has no errors, and warns on exactly what is unfilled", () => {
   const problems = findPendingPriceRegisterProblems({
     models: AVAILABLE_MODELS,
     now: beforeAnyExpiry,
@@ -85,12 +85,21 @@ test("the shipped register has no errors, only the unassigned-owner warnings", (
     problems.filter((problem) => problem.severity === "error"),
     []
   );
-  // Owner, ticket and production approval are still to be filled in by a
-  // human; the check has to keep saying so rather than going quiet.
-  const reasons = new Set(problems.map((problem) => problem.reason));
+
+  // Owner, ticket and production approval get filled in one at a time by a
+  // human, so the expectation is derived from the register rather than listed:
+  // the check must warn about every field still blank and go quiet about each
+  // one as it is filled -- never the reverse.
+  const expected = PENDING_VERIFIED_PRICE_REGISTER.flatMap((item) => [
+    ...(item.owner ? [] : [`${item.modelId}:unassigned_owner`]),
+    ...(item.verificationTicket ? [] : [`${item.modelId}:missing_ticket`]),
+    ...(item.productionApproval
+      ? []
+      : [`${item.modelId}:unapproved_production`]),
+  ]);
   assert.deepEqual(
-    [...reasons].sort(),
-    ["missing_ticket", "unapproved_production", "unassigned_owner"]
+    problems.map((problem) => `${problem.modelId}:${problem.reason}`).sort(),
+    expected.sort()
   );
 });
 
