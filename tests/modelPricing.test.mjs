@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { AVAILABLE_MODELS, getModelBillingProfile } from "../lib/models.ts";
 import {
   FALLBACK_PRICING,
@@ -124,6 +126,105 @@ test("Gemini 3.1 Pro switches price tier at the 200K prompt boundary", () => {
   assert.equal(above.outputUsdPerMillionTokens, 18);
   assert.equal(above.costSource, "registry_long_context");
   assert.equal(above.longContextThresholdTokens, 200_000);
+});
+
+// The migration writes numbers into the database; this file is where those
+// numbers are decided. Nothing else connects them, so a later price change
+// here would leave the deployed rows behind -- which is exactly how the four
+// incident models ended up frozen at the fallback in the first place. This
+// reads the SQL and fails if the two disagree.
+test("the price-correction migration writes what this registry says", () => {
+  const sql = readFileSync(
+    join(
+      import.meta.dirname,
+      "..",
+      "prisma",
+      "migrations",
+      "20260802010000_reconcile_incident_model_prices",
+      "migration.sql"
+    ),
+    "utf8"
+  ).replace(/--[^\n]*/g, "");
+
+  const statements = sql.split(";").filter((s) => /UPDATE/i.test(s));
+  assert.equal(statements.length, 3, "expected one statement per applied price");
+
+  const applied = new Map();
+  for (const statement of statements) {
+    const price = /"inputUsdPerMillionTokens"\s*=\s*([\d.]+)\s*,\s*"outputUsdPerMillionTokens"\s*=\s*([\d.]+)/.exec(
+      statement
+    );
+    assert.ok(price, `could not read the applied price from: ${statement.trim().slice(0, 60)}`);
+    for (const [, id] of statement.matchAll(/'([a-z0-9.\-]+)'/g)) {
+      if (id === "gpt-5-5" || !applied.has(id)) applied.set(id, [Number(price[1]), Number(price[2])]);
+    }
+  }
+
+  assert.deepEqual(
+    [...applied.keys()].sort(),
+    ["claude-opus-4-8", "gemini-3-1-pro", "gpt-5-5", "gpt-5-5-thinking"],
+    "the migration must target exactly the four incident models"
+  );
+
+  for (const [modelId, [input, output]] of applied) {
+    const profile = getModelPricingProfile(modelId);
+    assert.ok(profile, `${modelId} must have an explicit profile`);
+    assert.equal(profile.tiers[0].inputUsdPerMillionTokens, input, modelId);
+    assert.equal(profile.tiers[0].outputUsdPerMillionTokens, output, modelId);
+  }
+
+  // Guarded on the exact fallback pair, so an administrator's own price and an
+  // already-corrected environment are both left alone.
+  const premium = FALLBACK_PRICING.premium.tiers[0];
+  for (const statement of statements) {
+    assert.match(
+      statement,
+      new RegExp(`"inputUsdPerMillionTokens"\\s*=\\s*${premium.inputUsdPerMillionTokens}\\b`),
+      "each statement must be guarded on the fallback input price"
+    );
+    assert.match(
+      statement,
+      new RegExp(`"outputUsdPerMillionTokens"\\s*=\\s*${premium.outputUsdPerMillionTokens}\\b`),
+      "each statement must be guarded on the fallback output price"
+    );
+    assert.doesNotMatch(
+      statement,
+      /"enabled"|"publiclyListed"|"status"|"creditWeight"|"reservationOutputTokens"|"maxOutputTokens"/,
+      "this migration corrects prices only"
+    );
+  }
+});
+
+// A stored registry price is a flat number, so it cannot express a tier: once
+// gemini-3-1-pro's row holds 2/12 (migration 20260802010000), the 4/18
+// long-context tier above 200K prompt tokens is unreachable through that row
+// no matter what this file says, because resolveModelPricing reads
+// `model.inputUsdPerMillionTokens ?? ...` first.
+//
+// That is safe only while a request cannot get past the boundary. The user
+// ceiling is CHAT_USER_MAX_INPUT_TOKENS, defaulting to 128,000 in
+// lib/chatSecurity.ts. Raising it to 200,000 or beyond without first clearing
+// that stored price would silently bill long-context Gemini requests at the
+// short-context rate -- understating cost, which is the direction this
+// codebase never accepts.
+test("raising the input ceiling past a long-context boundary is not silent", () => {
+  const source = readFileSync(
+    join(import.meta.dirname, "..", "lib", "chatSecurity.ts"),
+    "utf8"
+  );
+  const ceiling = /CHAT_USER_MAX_INPUT_TOKENS,\s*([\d_]+)\)/.exec(source);
+  assert.ok(ceiling, "could not read the default user input ceiling");
+  const maxInputTokens = Number(ceiling[1].replace(/_/g, ""));
+
+  const tiered = getModelPricingProfile("gemini-3-1-pro");
+  assert.ok(tiered, "gemini-3-1-pro must keep a tiered profile");
+  const boundary = tiered.tiers[0].maxPromptTokens;
+  assert.equal(boundary, 200_000);
+
+  assert.ok(
+    maxInputTokens <= boundary,
+    `CHAT_USER_MAX_INPUT_TOKENS is ${maxInputTokens}, past gemini-3-1-pro's ${boundary}-token tier boundary. A flat price stored on the registry row cannot express the ${tiered.tiers[1].inputUsdPerMillionTokens}/${tiered.tiers[1].outputUsdPerMillionTokens} tier, so clear that row's inputUsdPerMillionTokens/outputUsdPerMillionTokens before raising this ceiling.`
+  );
 });
 
 test("new catalogue models use their exact provider prices and output caps", () => {
