@@ -225,8 +225,15 @@ composer golden은 포함되지 않습니다.
 
 - 두 golden: **Pass (canonical)**. `Not verified`는 이 환경의 실행에만 적용됩니다.
 - golden 미갱신. 재기록할 이유가 없습니다.
-- **flaky 아님.** canonical에서 결정적으로 통과하고, 대체 browser에서 결정적으로
-  같은 값으로 실패합니다. 두 쪽 모두 재시도로 결과가 바뀌지 않습니다.
+- **이 2건은 flaky가 아닙니다.** canonical runner에서 결정적으로 통과하고,
+  대체 Chromium에서는 결정적으로 같은 906px로 실패합니다. 두 쪽 모두 재시도로
+  결과가 바뀌지 않습니다.
+- **결론의 범위**: 이 판정은 `mobile-composer-contract`의 composer golden 2건과,
+  확인된 browser 조합(baseline은 Chromium 151, 대체 실행은 Chromium 141)에
+  한정됩니다. 다른 golden이나 다른 browser 조합에 대해서는 아무것도 말하지
+  않으며, "golden 전체가 안정적"이라는 뜻이 아닙니다.
+- **대체 browser의 결과는 제품 pass/fail이 아니라 `Not verified`입니다.** skip을
+  pass로 읽지 않습니다.
 
 ### 재발 방지
 

@@ -143,6 +143,26 @@ migration으로** 교정하고 다시 돌립니다. 이미 적용된 migration�
 > 얻을 수 없습니다(Railway MCP는 변수 이름만 반환하고 CLI도 없습니다). 권한이
 > 있는 분이 위 명령을 한 번 실행해 주십시오.
 
+### 릴리스 상태 (2026-08-02 확인)
+
+`definition mismatch` 분류가 든 이 버전은 **이미 `main`에 있습니다.**
+`origin/main`(`31fb337`)의 `scripts/compare-schema-to-migrations.mjs`는
+`origin/develop`(`d819176`)의 것과 byte 단위로 동일하고, `package.json`의
+`db:compare-schema` script도 양쪽에 있습니다. 즉 **다음 릴리스를 기다릴 필요가
+없고**, 배포된 main SHA에서 바로 실행할 수 있습니다.
+
+실행 항목은 `.github/RELEASE_CHECKLIST.md` 4절에 있습니다 — 세 분류
+(`only_in_source` · `only_in_database` · `definition_mismatch`)를 모두 기록하고,
+비밀정보를 제거한 출력을 운영 티켓에 첨부하며, 발견된 차이는 직접 SQL이 아니라
+forward migration으로 교정합니다.
+
+분류 로직은 `lib/schemaComparisonCore.mjs`로 분리돼 있고
+`tests/schemaComparisonCore.test.mjs`가 검증합니다. 특히 **이름을 유지한 채
+predicate를 잃은 partial unique index**와 **정의가 바뀐 CHECK 제약**이 추가·삭제
+한 쌍이 아니라 `definition_mismatch` 한 건으로 보고되는지, 컬럼의 자료형·
+nullability·기본값이 각각 비교되는지, 그리고 connection string이 출력에 절대
+남지 않는지를 fixture로 확인합니다.
+
 ## 새 migration을 추가할 때
 
 평소와 같습니다. baseline은 `00000000000000_`으로 시작해 항상 사전순 최초이므로
@@ -159,10 +179,19 @@ migration으로** 교정하고 다시 돌립니다. 이미 적용된 migration�
 두 종류가 있고 **둘 다 `migrate diff`가 drift로 보지 못합니다.** 새로 추가할 때는
 migration에 직접 씁니다.
 
-1. **CHECK 제약** — 현재 10건이 baseline에 있습니다.
-2. **partial·expression index** — 예: `PlanChangeRequest_userId_active_key`
-   (`UNIQUE (userId) WHERE status = 'pending'`). 동시에 들어온 두 플랜 변경
-   확정이 둘 다 예약되는 것을 막는 유일한 장치입니다.
+1. **CHECK 제약** — 현재 10건이 baseline에 있습니다. 2026-08-02 로컬
+   PostgreSQL 16에 migration으로 만든 DB에서 10건을 확인했습니다.
+2. **partial·expression index** — `PlanChangeRequest_userId_active_key`
+   (`UNIQUE (userId) WHERE status = 'pending'`)가 그 예였습니다. 동시에 들어온
+   두 플랜 변경 확정이 둘 다 예약되는 것을 막는 장치입니다.
+
+   **현재 이력에는 partial index가 0건입니다.** `20260801190000_plan_change_pending_slot`
+   이 위 index를 drop하고 같은 불변식을 생성 컬럼 위의 일반 unique
+   (`PlanChangeRequest_pendingForUserId_key`)로 옮겼습니다. 장치가 사라진 것이
+   아니라 표현이 바뀐 것이며, 그래서 **"partial index가 n건 있어야 한다"는 식의
+   고정된 기대치를 검증에 넣지 않습니다** — 몇 건이어야 하는지는 그 commit의
+   migration 이력의 성질이고, 그것을 아는 도구는 `npm run db:compare-schema`
+   입니다.
 
 두 번째는 실제로 사고가 났습니다. `test:db:integration`이 `db push`로 스키마를
 만들던 시절, 이 인덱스는 생성되지 않았고 **그것을 검증하는 테스트가 develop에서
@@ -204,7 +233,11 @@ drill이 찾아낸 것:
   저장소에서는 접속 정보를 얻을 수 없어 아직 실행되지 않았습니다.
 - **실제 인프라에서의 drill.** 위 표는 로컬 PostgreSQL 16 기준입니다. Railway
   백업 복원과 신규 환경 생성은 해당 인프라에서 한 번 밟아봐야 관리형 서비스
-  특유의 차이(확장, 역할, 연결 제한)까지 확인됩니다.
+  특유의 차이(확장, 역할, 연결 제한, private networking)까지 확인됩니다.
+  절차·preflight·검증 스크립트·보고서 template·cleanup checklist는
+  `docs/ops/railway-restore-drill.md`에 준비돼 있습니다. **아직 실행하지
+  않았습니다** — 승인, backup 선택, 비용 한도, 별도 project, 파기 승인이 사람의
+  결정이고 이 작업에는 실행 권한이 포함되지 않았습니다.
 - **CI에서 빈 PostgreSQL로 `migrate deploy`를 돌리는 job.** DB 통합 워크플로가
   이제 그 경로를 쓰므로 사실상 확보돼 있지만, migration 전용 job으로 분리하면
   실패 원인이 더 분명해집니다. `db:compare-schema`를 릴리스 게이트로 붙이는 것도

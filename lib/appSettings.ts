@@ -1,6 +1,6 @@
 import "server-only";
 
-import { APP_DEFAULTS } from "@/lib/appDefaults";
+import { APP_DEFAULTS, guestDefaultLeadRejection } from "@/lib/appDefaults";
 import { isE2EDatabaseDisabled } from "@/lib/e2eTestMode";
 import {
   canUseModelWithPlan,
@@ -32,14 +32,30 @@ export type OperationalFeatureFlags = Pick<
 const enabledFromValue = (value: string | null | undefined) => value !== "false";
 const e2eDatabaseDisabled = isE2EDatabaseDisabled;
 
-export const isValidGuestDefaultModel = async (modelId: string) => {
+/**
+ * Why a value may not be stored here. The rule itself lives in
+ * `guestDefaultLeadRejection` (pure, so it can be tested without a database);
+ * this resolves the model against the runtime registry and applies it.
+ *
+ * The part worth knowing: eligibility is not enough. This setting only
+ * reorders the guest brand trio, so a model outside it saves cleanly, reads
+ * back, is served by `/api/app-settings`, and changes nothing a guest ever
+ * sees. That is rejected rather than accepted.
+ */
+export const guestDefaultModelRejection = async (
+  modelId: string
+): Promise<string | null> => {
   const model = await getEnabledRuntimeModel(modelId);
-  return Boolean(
-    model &&
-      canUseModelWithPlan("Guest", model) &&
-      getModelUsageProfile(model).category === "Standard"
-  );
+  return guestDefaultLeadRejection({
+    modelId,
+    exists: Boolean(model),
+    guestEligible: Boolean(model && canUseModelWithPlan("Guest", model)),
+    usageCategory: model ? getModelUsageProfile(model).category : null,
+  });
 };
+
+export const isValidGuestDefaultModel = async (modelId: string) =>
+  (await guestDefaultModelRejection(modelId)) === null;
 
 const normalizeGuestDefaultModel = async (modelId: string | null | undefined) =>
   modelId && (await isValidGuestDefaultModel(modelId))
@@ -88,12 +104,9 @@ export async function getOperationalFeatureFlags(): Promise<OperationalFeatureFl
 
 export async function updateGuestDefaultModel(modelId: string) {
   if (e2eDatabaseDisabled()) return normalizeGuestDefaultModel(modelId);
-  const normalized = await normalizeGuestDefaultModel(modelId);
-  if (normalized !== modelId) {
-    throw new Error(
-      "Guest default model must be an enabled guest-accessible Standard model."
-    );
-  }
+  const rejection = await guestDefaultModelRejection(modelId);
+  if (rejection) throw new Error(`Guest default model rejected: ${rejection}`);
+  const normalized = modelId;
 
   await prisma.appSetting.upsert({
     where: { key: GUEST_DEFAULT_MODEL_KEY },
@@ -114,14 +127,11 @@ export async function updateGuestDefaultModel(modelId: string) {
 
 export async function updatePublicAppSettings(settings: PublicAppSettings) {
   if (e2eDatabaseDisabled()) return settings;
-  const guestDefaultModelId = await normalizeGuestDefaultModel(
+  const rejection = await guestDefaultModelRejection(
     settings.guestDefaultModelId
   );
-  if (guestDefaultModelId !== settings.guestDefaultModelId) {
-    throw new Error(
-      "Guest default model must be an enabled guest-accessible Standard model."
-    );
-  }
+  if (rejection) throw new Error(`Guest default model rejected: ${rejection}`);
+  const guestDefaultModelId = settings.guestDefaultModelId;
   await prisma.$transaction(
     [
       [GUEST_DEFAULT_MODEL_KEY, guestDefaultModelId],

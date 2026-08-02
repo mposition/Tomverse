@@ -35,8 +35,12 @@ export const localeLaunchPolicy = {
     paidMarketingEligible: false,
     selectorLabel: "中文 · 有限支持",
     badge: "中文有限支持",
+    // UX-020. This used to claim Chinese covered the product interface. It did
+    // not: the chat interface and the model finder answer in English, and had
+    // done since they were added. `tests/localeParity.test.mjs` now measures
+    // that number, so the notice and the strings cannot disagree again.
     scopeNotice:
-      "中文目前涵盖产品界面、价格、核心比较内容以及已翻译的法律和帮助页面。客户支持仅提供书面渠道，回复可能使用英语，暂不提供电话支持。",
+      "中文目前涵盖营销页面、价格、已翻译的法律和帮助页面。聊天界面与模型推荐目前仍显示英文。客户支持仅提供书面渠道，回复可能使用英语，暂不提供电话支持。",
     englishFallbackNotice:
       "此页面尚无经过审核的中文版本，因此当前显示英文内容。完整支持请使用 English 或 한국어。",
   },

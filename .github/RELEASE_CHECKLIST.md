@@ -1,6 +1,7 @@
 # Release checklist
 
-Run through this before promoting a build — except section 5, which is checked
+Run through this before promoting a build — except §7.6, which an operator runs
+against production at the deployed SHA, and section 5, which is checked
 immediately after the merge. Every item needs either evidence tied to the
 **release SHA** or a written waiver — an unticked box is a release blocker, not
 a formality.
@@ -25,6 +26,8 @@ Date / timezone:    ____________________
 - [ ] `npm run test:server-contract`
 - [ ] `npm run security:regression`
 - [ ] `npm run check:accent-tokens`
+- [ ] `npm run check:model-pricing`
+- [ ] `npm run check:default-models`
 - [ ] `npm run check:encoding:strict`
 - [ ] `npm run build`
 - [ ] `npm run verify:smoke-coverage`
@@ -128,17 +131,41 @@ Ancestry verified:  ____________________
 
 ### When it does not land on its own
 
-The workflow refuses to guess. On a merge conflict, or when the push to
-`develop` is refused by branch protection, it opens
-`automation/back-merge-main-<sha>` as a pull request instead and `verify` fails.
-That failure is the signal that a person has to finish the job:
+The workflow refuses to guess, and it fails in two different ways depending on
+*why* it could not land. `verify` fails on both, so neither is silent — but only
+one of them leaves you a pull request.
 
-- [ ] If such a pull request exists, it was merged **with a merge commit**
+**The push to `develop` was refused** (branch protection, typically). The merge
+itself succeeded, so there is nothing to judge: the workflow pushes
+`automation/back-merge-main-<sha>` and opens a pull request carrying the merge
+commit it already made.
+
+- [ ] If `automation/back-merge-main-<sha>` exists, its pull request was merged
+      **with a merge commit** — never squash, never rebase
 
 Squashing it accomplishes nothing at all — the second parent is what carries the
 ancestry, and a squash discards it. That is not hypothetical: of the three
 back-merges opened by hand on 2026-08-01, #203 and #213 were squashed on the way
 in and left the gap exactly where it was.
+
+**The merge conflicted.** The workflow aborts and fails the job. **It does not
+open a pull request, and it pushes no branch** — a machine cannot know which
+side to keep (the `eslint.config.mjs` conflict in #217 was `develop` adding an
+ignore entry `main` lacked), and a pull request full of a guess is worse than
+none. There is nothing to review; there is work to do:
+
+- [ ] Branch from `origin/develop`, merge `origin/main`, resolve the conflict,
+      open a pull request and merge it **with a merge commit**
+
+```
+git fetch origin
+git switch -c back-merge-main-$(git rev-parse --short origin/main) origin/develop
+git merge --no-ff origin/main      # resolve, then commit
+```
+
+Do not resolve by taking one side wholesale, and do not `--strategy=ours`: the
+conflict exists because both branches changed the same lines, and discarding
+`develop`'s side silently reverts released work.
 
 ### Why this exists, and why the repository setting is not the fix
 
@@ -276,6 +303,54 @@ Dry-run count:      ____________________
 Post-run count:     ____________________
 Stage 2 tracked in: ____________________
 ```
+
+### 7.6 Schema comparison against the migration history
+
+`prisma migrate diff` cannot see either of the two things this repository's
+migration baseline had to reconstruct by hand — CHECK constraints and
+partial/expression indexes — so "the baseline reproduces production" is a claim
+nothing in CI can settle. `npm run db:compare-schema` reads both catalogues and
+settles it, and it has never been run against production: the connection
+details are not obtainable from inside the repository.
+
+Run it **from the deployed release SHA**, against a **direct** production URL
+with a read-only role, and a scratch database that is empty and disposable.
+
+```bash
+COMPARE_SOURCE_DATABASE_URL="$PRODUCTION_DIRECT_URL" \
+COMPARE_SCRATCH_DATABASE_URL="postgresql://.../tomverse_compare_scratch" \
+npm run db:compare-schema
+```
+
+- [ ] Run at the release SHA (the command prints the commit it ran at)
+- [ ] Source was a direct URL, not a pooler, on a read-only role
+- [ ] Scratch database was empty, disposable and not the source
+- [ ] PostgreSQL major version matched — a version warning invalidates the
+      comparison rather than qualifying it
+- [ ] **All three classifications reviewed**, not just the total:
+      `only_in_source`, `only_in_database`, `definition_mismatch`
+- [ ] Output attached to the operations ticket with secrets removed
+
+```
+Ran at SHA:         ____________________
+only_in_source:     ____________________
+only_in_database:   ____________________
+definition_mismatch:____________________
+```
+
+`definition_mismatch` is the dangerous class: the name exists on both sides, so
+every "does it exist" check passes while the object behind it means something
+else. `PlanChangeRequest_userId_active_key` — the partial unique index that
+stopped two racing plan-change confirms from both reserving — was exactly that
+shape before `20260801190000_plan_change_pending_slot` moved the same invariant
+onto a generated column.
+
+**Do not correct anything found here by hand, and never with `db push`.**
+Classify each difference — manual drift, extension-owned object, or a migration
+nobody wrote — then fix it with a **new forward migration** and re-run. Editing
+an applied migration changes its checksum and breaks deploys on every
+environment that already ran it. The schema dump is not a CI artifact and no
+connection string goes into the ticket.
 
 ## 8. Unverified items and waivers
 

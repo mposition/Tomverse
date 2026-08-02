@@ -1,3 +1,7 @@
+import { en } from "./en";
+
+// UX-020. Korean is a primary locale and is complete; this check is what keeps
+// it that way. It was the only complete locale with nothing enforcing it.
 export const ko = {
     skipLink: {
         toMainContent: "본문으로 건너뛰기",
@@ -944,4 +948,4 @@ export const ko = {
         changes: "서비스 또는 법적 요구사항이 변경되면 이 방침을 업데이트하고 개정된 시행일을 표시할 수 있습니다.",
         back: "Tomverse로 돌아가기",
     }
-};
+} satisfies typeof en;
