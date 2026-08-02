@@ -1358,6 +1358,23 @@ export function ChatInput({
       }
 
       if (activeElement instanceof HTMLSelectElement) return;
+
+      // UX-027. Home and End belong to the caret whenever one exists. This
+      // listener is on `document` in the capture phase, so while the user was
+      // typing in the model search box it took both keys before the input saw
+      // them: pressing Home to get back to the start of a query jumped focus to
+      // the first model in the list instead, and the query was left as typed.
+      // Arrow keys stay intercepted -- moving through options while focus stays
+      // in the text field is the combobox behaviour this menu wants.
+      const isTextEntry =
+        activeElement instanceof HTMLTextAreaElement ||
+        (activeElement instanceof HTMLInputElement &&
+          !["checkbox", "radio", "button", "submit", "range", "color"].includes(
+            activeElement.type
+          )) ||
+        (activeElement instanceof HTMLElement && activeElement.isContentEditable);
+      if (isTextEntry && (event.key === "Home" || event.key === "End")) return;
+
       if (focusableElements.length === 0) return;
 
       event.preventDefault();

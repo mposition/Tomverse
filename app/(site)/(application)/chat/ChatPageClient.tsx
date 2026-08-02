@@ -18,6 +18,7 @@ import {
   type ChatAttachmentCapabilities,
 } from "@/lib/guestAttachmentPolicy";
 import { SourceGroundingBadge } from "@/components/chat/SourceGroundingBadge";
+import { dispatchAppToast } from "@/lib/appToast";
 import { toSourceGrounding } from "@/lib/sourceGrounding";
 import { UpgradeCtaLink } from "@/components/billing/UpgradeCtaLink";
 import { purchaseCtaCopy } from "@/components/billing/purchaseCopy";
@@ -1937,6 +1938,7 @@ export function ChatPageClient({
             );
         } catch (e) {
             console.error("Failed to lock conversation:", e);
+            dispatchAppToast(t("chat.chatLockFailed"), "error");
         }
     };
 
@@ -1967,6 +1969,7 @@ export function ChatPageClient({
             setUnlockDialog(null);
         } catch (e) {
             console.error("Failed to unlock conversation:", e);
+            dispatchAppToast(t("chat.chatUnlockFailed"), "error");
         }
     };
 
@@ -1983,14 +1986,20 @@ export function ChatPageClient({
       );
     } else {      
       try {
-        await fetch(`/api/conversations/${id}`, {
+        // UX-015. `fetch` resolves for a 4xx or 5xx, so without this check a
+        // rejected rename refetched the list and put the old title back with
+        // no explanation -- indistinguishable from the rename never having
+        // been typed.
+        const response = await fetch(`/api/conversations/${id}`, {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ title: newTitle }),
         });
+        if (!response.ok) throw new Error(`Rename failed: ${response.status}`);
         fetchConversations();
       } catch (error) {
         console.error("Failed to rename conversation:", error);
+        dispatchAppToast(t("chat.chatRenameFailed"), "error");
       }
     }
   };
@@ -2019,16 +2028,21 @@ export function ChatPageClient({
       }
     } else {    
       try {
-        await fetch(`/api/conversations/${id}`, {
+        const response = await fetch(`/api/conversations/${id}`, {
           method: "DELETE",
         });
-        
+        // UX-015. Same reason as the rename above, and worse here: a refused
+        // delete left the conversation in the list, which reads as the click
+        // having missed rather than as the server saying no.
+        if (!response.ok) throw new Error(`Delete failed: ${response.status}`);
+
         if (currentChatId === id) {
           handleNewChat();
         }
         fetchConversations();
       } catch (error) {
         console.error("Failed to delete conversation:", error);
+        dispatchAppToast(t("chat.chatDeleteFailed"), "error");
       }
     }
   };
@@ -2386,6 +2400,10 @@ export function ChatPageClient({
         }
       } catch (error) {
         console.error("Failed to create conversation:", error);
+        // UX-015. This `return` abandons the send. Without a message the
+        // question simply vanished from the composer with nothing sent and
+        // nothing said.
+        dispatchAppToast(t("chat.chatCreateFailed"), "error");
         return;
       }
     }
@@ -2925,6 +2943,7 @@ export function ChatPageClient({
         });
       } catch (error) {
         console.error("Failed to delete model history:", error);
+        dispatchAppToast(t("chat.modelHistoryDeleteFailed"), "error");
       }
     }
   };

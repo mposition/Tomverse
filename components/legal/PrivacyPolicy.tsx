@@ -38,7 +38,7 @@ export function PrivacyPolicy() {
             >
                 <div className="border-b border-zinc-200 pb-8 dark:border-zinc-800">
                     <h1 className="text-3xl font-bold">{t("privacyPolicy.title")}</h1>
-                    <p className="mt-2 text-sm text-zinc-500">{t("privacyPolicy.effective")}</p>
+                    <p className="mt-2 text-sm text-zinc-500 dark:text-zinc-400">{t("privacyPolicy.effective")}</p>
                     <p className="mt-6 max-w-3xl text-base leading-7 text-zinc-600 dark:text-zinc-300">
                         {t("privacyPolicy.intro")}
                     </p>

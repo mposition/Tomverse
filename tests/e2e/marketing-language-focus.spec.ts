@@ -46,7 +46,7 @@ for (const theme of THEMES) {
     );
     await openMarketingPage(page, "/pricing", theme, { width: 1440, height: 900 });
 
-    const select = page.locator('select[aria-label="Language"]').first();
+    const select = page.getByTestId("marketing-language-switcher").first();
     await expect(select).toBeVisible();
     const readIndicator = () =>
       select.evaluate((element) => {

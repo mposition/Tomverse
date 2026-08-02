@@ -537,7 +537,7 @@ export function SupportPageContent() {
             return (
               <div key={label as string} className="rounded-2xl border border-zinc-200 bg-zinc-50 p-4 dark:border-zinc-800 dark:bg-zinc-900/40">
                 <IconComponent className="h-5 w-5 text-blue-600 dark:text-blue-400" />
-                <p className="mt-3 text-xs font-bold uppercase tracking-[0.16em] text-zinc-500">{label as string}</p>
+                <p className="mt-3 text-xs font-bold uppercase tracking-[0.16em] text-zinc-500 dark:text-zinc-400">{label as string}</p>
                 <p className="mt-1 text-sm font-bold">{value as string}</p>
               </div>
             );

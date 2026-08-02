@@ -2,6 +2,11 @@ export const en = {
     skipLink: {
         toMainContent: "Skip to main content",
     },
+    // UX-022. The language switcher labelled itself "Language" in every
+    // locale, including the ones a visitor switches *to*.
+    languageSwitcher: {
+        label: "Language",
+    },
     notifications: {
         dismiss: "Dismiss notification",
     },
@@ -167,6 +172,14 @@ export const en = {
         maxGuestModelCompare: "Guest mode can compare up to 3 models.",
         modelOnlyPlaceholder: "Ask only this model",
         modelOnlyInputLabel: "Ask only {model}",
+        markdownTableRegion: "Table, scrollable",
+        markdownCodeRegion: "Code block, scrollable",
+        chatRenameFailed: "Could not rename this conversation.",
+        chatDeleteFailed: "Could not delete this conversation.",
+        chatLockFailed: "Could not lock this conversation.",
+        chatUnlockFailed: "Could not unlock this conversation.",
+        chatCreateFailed: "Could not start a new conversation. Nothing was sent.",
+        modelHistoryDeleteFailed: "Could not clear this model's history.",
         modelOnlySendTitle: "Send only to this model",
         comingSoonModel: "This model is coming soon.",
         attachFile: "Attach files",

@@ -601,7 +601,18 @@ export function ChatMessageList({
                       remarkPlugins={[remarkGfm]}
                       rehypePlugins={[rehypeHighlight]}
                       components={{
-                        p: ({ children }) => <p className="mb-3 last:mb-0 whitespace-pre-wrap">{children}</p>,
+                        /*
+                          UI-026. No `whitespace-pre-wrap` here. CommonMark
+                          collapses a single newline inside a paragraph into a
+                          space, but react-markdown leaves that newline in the
+                          text node -- so preserving whitespace turned every
+                          soft wrap the model happened to emit into a hard line
+                          break, and any run of spaces into visible gaps. The
+                          user's own message below still preserves whitespace,
+                          because that text is not markdown and was typed the
+                          way it reads.
+                        */
+                        p: ({ children }) => <p className="mb-3 last:mb-0">{children}</p>,
                         ul: ({ children }) => <ul className="mb-3 list-disc pl-5 last:mb-0">{children}</ul>,
                         ol: ({ children }) => <ol className="mb-3 list-decimal pl-5 last:mb-0">{children}</ol>,
                         li: ({ children }) => <li className="mb-1">{children}</li>,
@@ -624,8 +635,19 @@ export function ChatMessageList({
                         hr: () => <hr className="my-4 border-t border-zinc-200 dark:border-zinc-700" />,
                         // The wrapper scrolls the table itself; without it a wide
                         // table forces the whole message list to scroll sideways.
+                        // UX-031. A scroll container with nothing focusable in
+                        // it cannot be scrolled by keyboard at all -- there is
+                        // no way to reach the right-hand columns of a wide
+                        // table without a pointer. `tabIndex={0}` makes the
+                        // region itself a stop so the arrow keys reach it, and
+                        // the role and name stop it being an unlabelled stop.
                         table: ({ children }) => (
-                            <div className="mb-3 max-w-full overflow-x-auto last:mb-0">
+                            <div
+                                className="mb-3 max-w-full overflow-x-auto last:mb-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+                                tabIndex={0}
+                                role="region"
+                                aria-label={t("chat.markdownTableRegion")}
+                            >
                                 <table className="w-full border-collapse text-left text-[0.95em]">{children}</table>
                             </div>
                         ),
@@ -637,8 +659,16 @@ export function ChatMessageList({
                         td: ({ children }) => (
                             <td className="border border-zinc-300 px-2 py-1 align-top dark:border-zinc-600">{children}</td>
                         ),
+                        // UX-031, same reasoning as the table above: a long
+                        // line of code scrolls sideways and nothing inside a
+                        // <pre> can take focus.
                         pre: ({ children }) => (
-                          <pre className="mb-3 overflow-x-auto rounded-lg bg-zinc-950 p-3 text-zinc-100 last:mb-0 [&>code]:block [&>code]:rounded-none [&>code]:bg-transparent [&>code]:p-0 [&>code]:text-zinc-100">
+                          <pre
+                            className="mb-3 overflow-x-auto rounded-lg bg-zinc-950 p-3 text-zinc-100 last:mb-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 [&>code]:block [&>code]:rounded-none [&>code]:bg-transparent [&>code]:p-0 [&>code]:text-zinc-100"
+                            tabIndex={0}
+                            role="region"
+                            aria-label={t("chat.markdownCodeRegion")}
+                          >
                             {children}
                           </pre>
                         ),

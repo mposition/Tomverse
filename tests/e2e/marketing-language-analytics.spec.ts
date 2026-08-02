@@ -86,7 +86,7 @@ test("switching to a localized route reports the switch and that it reloaded", {
   await expect(page.getByTestId("landing-hero-title")).toBeVisible();
   await waitForAnalyticsClient(page);
 
-  await page.getByLabel("Language").selectOption("ko");
+  await page.getByTestId("marketing-language-switcher").selectOption("ko");
   // The destination is a different root layout, so this is a document load.
   await page.waitForURL((url) => url.pathname === "/ko");
   await expect(page.getByTestId("landing-hero-title")).toBeVisible();
@@ -120,7 +120,7 @@ test("a switch that stays in the same document reports itself as a client one", 
   await page.goto("/pricing?lang=en");
   await waitForAnalyticsClient(page);
 
-  await page.getByLabel("Language").selectOption("ko");
+  await page.getByTestId("marketing-language-switcher").selectOption("ko");
 
   await expect
     .poll(() => captured.filter((e) => e.event_name === "marketing_language_switched").length)

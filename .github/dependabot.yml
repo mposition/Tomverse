@@ -5,6 +5,16 @@ updates:
     schedule:
       interval: weekly
     open-pull-requests-limit: 10
+    ignore:
+      # TypeScript 7 is the native port and no longer ships the JavaScript
+      # compiler API. `next build` refuses it ("TypeScript 7.0.2 does not
+      # provide the compiler API required by Next.js"), and
+      # scripts/text-encoding-check-core.mjs needs ts.createSourceFile and
+      # ts.SyntaxKind directly. Remove this entry once Next.js supports the
+      # TypeScript 7 compiler API and the encoding checker no longer depends
+      # on the JS API. TypeScript 6 stays eligible.
+      - dependency-name: typescript
+        versions: [">=7"]
     groups:
       production-dependencies:
         dependency-type: production

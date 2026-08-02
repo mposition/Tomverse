@@ -21,6 +21,11 @@ export const zh = {
     skipLink: {
         toMainContent: "跳到主要内容",
     },
+    // UX-022. The language switcher labelled itself "Language" in every
+    // locale, including the ones a visitor switches *to*.
+    languageSwitcher: {
+        label: "语言",
+    },
     notifications: {
         dismiss: "关闭通知",
     },
@@ -185,6 +190,14 @@ export const zh = {
         maxGuestModelCompare: "访客模式最多可比较 3 个模型。",
         modelOnlyPlaceholder: "只向此模型追问",
         modelOnlyInputLabel: "只向 {model} 追问",
+        markdownTableRegion: "表格，可横向滚动",
+        markdownCodeRegion: "代码块，可横向滚动",
+        chatRenameFailed: "无法重命名此对话。",
+        chatDeleteFailed: "无法删除此对话。",
+        chatLockFailed: "无法锁定此对话。",
+        chatUnlockFailed: "无法解锁此对话。",
+        chatCreateFailed: "无法开始新对话。未发送任何内容。",
+        modelHistoryDeleteFailed: "无法清除此模型的记录。",
         modelOnlySendTitle: "只发送给此模型",
         comingSoonModel: "此模型即将支持。",
         attachFile: "添加文件",

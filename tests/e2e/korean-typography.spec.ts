@@ -126,7 +126,7 @@ async function countRenderedLines(page: Page, selector: string): Promise<number>
 }
 
 async function selectLanguage(page: Page, lang: "ko" | "en" | "zh") {
-  const select = page.getByLabel("Language");
+  const select = page.getByTestId("marketing-language-switcher");
   if ((await select.inputValue()) === lang) return;
 
   // The switcher pushes to the localized route for pages that have one

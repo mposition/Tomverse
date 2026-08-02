@@ -4,6 +4,11 @@ export const fr = {
     skipLink: {
         toMainContent: "Aller au contenu principal",
     },
+    // UX-022. The language switcher labelled itself "Language" in every
+    // locale, including the ones a visitor switches *to*.
+    languageSwitcher: {
+        label: "Langue",
+    },
     notifications: {
         dismiss: "Fermer la notification",
     },
@@ -176,6 +181,14 @@ export const fr = {
         maxGuestModelCompare: "Le mode invité peut comparer jusqu'à 3 modèles.",
         modelOnlyPlaceholder: "Demander uniquement à ce modèle",
         modelOnlyInputLabel: "Demander uniquement à {model}",
+        markdownTableRegion: "Tableau, défilable",
+        markdownCodeRegion: "Bloc de code, défilable",
+        chatRenameFailed: "Impossible de renommer cette conversation.",
+        chatDeleteFailed: "Impossible de supprimer cette conversation.",
+        chatLockFailed: "Impossible de verrouiller cette conversation.",
+        chatUnlockFailed: "Impossible de déverrouiller cette conversation.",
+        chatCreateFailed: "Impossible de démarrer une nouvelle conversation. Rien n'a été envoyé.",
+        modelHistoryDeleteFailed: "Impossible d'effacer l'historique de ce modèle.",
         modelOnlySendTitle: "Envoyer uniquement à ce modèle",
         comingSoonModel: "Ce modèle arrive bientôt.",
         attachFile: "Joindre des fichiers",

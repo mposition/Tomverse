@@ -69,7 +69,7 @@ function unlocalizedPath(pathname: string): string {
 }
 
 async function selectLanguage(page: Page, lang: "ko" | "en" | "zh") {
-  const select = page.getByLabel("Language");
+  const select = page.getByTestId("marketing-language-switcher");
   if ((await select.inputValue()) === lang) {
     // WebKit can finish the document load before the next/font face has
     // settled. Keep the no-navigation path under the same font-ready
