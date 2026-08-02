@@ -331,34 +331,95 @@ jobs:
       NEXTAUTH_URL: http://127.0.0.1:3100
       NEXT_PUBLIC_TURNSTILE_SITE_KEY: tomverse-playwright-turnstile-site-key
     steps:
-      - name: Check out the pull request head
+      # Full history so the scope check below can diff against the PR base --
+      # the same reason build-and-e2e needs it.
+      - name: Checkout
         uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
 
-      - name: Detect whether code changed
+      # Identical rule to build-and-e2e's: a documentation-only PR skips the
+      # expensive half, and every error path falls back to code=true so the
+      # failure mode is "ran too much", never "skipped a check". Inlined rather
+      # than shared because this repository has no composite action to share it
+      # through; if a third job needs it, extract it then.
+      - name: Determine whether this PR touches anything but documentation
         id: scope
-        uses: ./.github/actions/detect-code-scope
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -uo pipefail
+          if ! changed=$(git diff --no-renames --name-only "$BASE_SHA"...HEAD); then
+            echo "Could not diff against $BASE_SHA; running the full gate."
+            echo "code=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [ -z "$changed" ]; then
+            echo "Diff reported no changed paths; running the full gate."
+            echo "code=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          code=false
+          while IFS= read -r path; do
+            case "$path" in
+              .github/audits/*) ;;
+              docs/*.md) ;;
+              */*) code=true ;;
+              *.md) ;;
+              *) code=true ;;
+            esac
+            if [ "$code" = "true" ]; then
+              echo "Non-documentation path found: $path"
+              break
+            fi
+          done <<< "$changed"
+          if [ "$code" = "false" ]; then
+            echo "Documentation-only PR: skipping the UI regression shards."
+          fi
+          echo "code=$code" >> "$GITHUB_OUTPUT"
 
-      - name: Set up Node.js
+      - name: Setup Node.js
         if: steps.scope.outputs.code == 'true'
         uses: actions/setup-node@v6
         with:
           node-version: 22
           cache: npm
 
+      - name: Restore Next.js build cache
+        if: steps.scope.outputs.code == 'true'
+        continue-on-error: true
+        uses: actions/cache@v5
+        with:
+          path: .next/cache
+          key: ${{ runner.os }}-next-pr-${{ hashFiles('package-lock.json') }}-${{ hashFiles('app/**/*.ts', 'app/**/*.tsx', 'components/**/*.ts', 'components/**/*.tsx', 'lib/**/*.ts', 'lib/**/*.tsx', 'next.config.ts', 'tsconfig.json') }}
+          restore-keys: |
+            ${{ runner.os }}-next-pr-${{ hashFiles('package-lock.json') }}-
+            ${{ runner.os }}-next-
+
       - name: Install dependencies
         if: steps.scope.outputs.code == 'true'
         timeout-minutes: 10
-        run: npm ci
+        run: npm ci --no-audit --no-fund
+
+      - name: Production build
+        if: steps.scope.outputs.code == 'true'
+        timeout-minutes: 15
+        run: npm run build
+
+      - name: Restore Playwright Chromium cache
+        if: steps.scope.outputs.code == 'true'
+        continue-on-error: true
+        uses: actions/cache@v5
+        with:
+          path: ~/.cache/ms-playwright
+          key: ${{ runner.os }}-playwright-${{ hashFiles('package-lock.json') }}-chromium
+          restore-keys: |
+            ${{ runner.os }}-playwright-${{ hashFiles('package-lock.json') }}-
 
       - name: Install Chromium
         if: steps.scope.outputs.code == 'true'
         timeout-minutes: 10
         run: npx playwright install --with-deps chromium
-
-      - name: Build
-        if: steps.scope.outputs.code == 'true'
-        timeout-minutes: 15
-        run: npm run build
 
       - name: Run the high-risk UI regression checks
         if: steps.scope.outputs.code == 'true'
