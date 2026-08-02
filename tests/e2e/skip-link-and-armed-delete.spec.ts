@@ -191,21 +191,69 @@ test(
   { tag: "@ui-risk" },
   async ({ page }) => {
     await prepareGuestPage(page, "en");
+    await page.setViewportSize({ width: 1366, height: 768 });
     await page.goto("/chat");
-    // UX-021's rule, asserted where it is cheap to assert: no text input in the
-    // rendered app may rely on its placeholder as its only name.
-    const unnamed = await page.evaluate(() =>
+
+    // The sweep below is only meaningful once the fields it sweeps exist. An
+    // earlier version ran straight after `goto` and passed against a page that
+    // had not rendered the sidebar search or the per-panel follow-up fields --
+    // it was green locally and found four unnamed fields the moment CI was
+    // slightly slower. Wait for the last thing to mount, then assert the page
+    // really is populated before trusting a count of zero.
+    await expect(page.getByTestId("model-only-input").first()).toBeAttached();
+    await expect(page.getByTestId("chat-textarea")).toBeAttached();
+
+    const fields = await page.evaluate(() =>
       Array.from(
         document.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>(
           "input:not([type=checkbox]):not([type=radio]):not([type=hidden]), textarea"
         )
-      ).filter((field) => {
-        if (field.getAttribute("aria-label")) return false;
-        if (field.getAttribute("aria-labelledby")) return false;
-        if (field.labels && field.labels.length > 0) return false;
-        return Boolean(field.getAttribute("placeholder"));
-      }).length
+      ).map((field) => ({
+        named: Boolean(
+          field.getAttribute("aria-label") ||
+            field.getAttribute("aria-labelledby") ||
+            (field.labels && field.labels.length > 0)
+        ),
+        placeholder: field.getAttribute("placeholder"),
+        testId: field.getAttribute("data-testid"),
+        type: (field as HTMLInputElement).type,
+      }))
     );
-    expect(unnamed).toBe(0);
+    expect(fields.length).toBeGreaterThanOrEqual(4);
+
+    // UX-021's rule: no text field in the rendered app may rely on its
+    // placeholder as its only name. A placeholder is announced inconsistently
+    // and disappears as soon as the field has a value.
+    const unnamed = fields.filter(
+      (field) => !field.named && Boolean(field.placeholder)
+    );
+    expect(
+      unnamed,
+      `placeholder-only fields: ${JSON.stringify(unnamed)}`
+    ).toEqual([]);
+  }
+);
+
+test(
+  "each model panel's follow-up field names its own model",
+  { tag: "@ui-risk" },
+  async ({ page }) => {
+    // Three panels render three of these. A name that does not say *which*
+    // model is the same as no name at all for anyone moving between form
+    // fields, so the count of distinct names has to match the count of fields.
+    await prepareGuestPage(page, "en");
+    await page.setViewportSize({ width: 1366, height: 768 });
+    await page.goto("/chat");
+
+    const inputs = page.getByTestId("model-only-input");
+    await expect(inputs.first()).toBeAttached();
+    const count = await inputs.count();
+    expect(count).toBeGreaterThan(1);
+
+    const names = await inputs.evaluateAll((elements) =>
+      elements.map((element) => element.getAttribute("aria-label") || "")
+    );
+    expect(names.every((name) => name.length > 0)).toBe(true);
+    expect(new Set(names).size).toBe(count);
   }
 );

@@ -164,6 +164,7 @@ export const zh = {
         maxModelCompare: "最多可比较 3 个模型。",
         maxGuestModelCompare: "访客模式最多可比较 3 个模型。",
         modelOnlyPlaceholder: "只向此模型追问",
+        modelOnlyInputLabel: "只向 {model} 追问",
         modelOnlySendTitle: "只发送给此模型",
         comingSoonModel: "此模型即将支持。",
         attachFile: "添加文件",

@@ -891,6 +891,10 @@ export function ChatSidebar({
                         value={searchQuery}
                         onChange={(event) => setSearchQuery(event.target.value)}
                         placeholder={t("sidebar.searchPlaceholder")}
+                        // UX-021. A placeholder is not an accessible name: it
+                        // is announced inconsistently and disappears the moment
+                        // the field has a value.
+                        aria-label={t("sidebar.searchPlaceholder")}
                         className="h-9 w-full rounded-lg border border-zinc-200 bg-white pl-9 pr-3 text-xs text-zinc-800 outline-none transition placeholder:text-zinc-400 focus:border-blue-400 focus:ring-2 focus:ring-blue-500/20 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-100 dark:focus:border-blue-500"
                     />
                 </div>
@@ -1078,6 +1082,7 @@ export function ChatSidebar({
                                 onChange={(event) => setProjectName(event.target.value)}
                                 maxLength={32}
                                 placeholder={t("sidebar.projectNamePlaceholder")}
+                                aria-label={t("sidebar.projectNamePlaceholder")}
                                 className="h-8 min-w-0 flex-1 rounded-lg border border-zinc-200 bg-zinc-50 px-2 text-xs font-medium text-zinc-900 outline-none focus:border-blue-500 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-100"
                             />
                             <button

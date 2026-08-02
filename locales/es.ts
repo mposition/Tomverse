@@ -175,6 +175,7 @@ export const es = {
         maxModelCompare: "Puedes comparar hasta 3 modelos.",
         maxGuestModelCompare: "El modo invitado puede comparar hasta 3 modelos.",
         modelOnlyPlaceholder: "Preguntar solo a este modelo",
+        modelOnlyInputLabel: "Preguntar solo a {model}",
         modelOnlySendTitle: "Enviar solo a este modelo",
         comingSoonModel: "Este modelo llegará pronto.",
         attachFile: "Adjuntar archivos",

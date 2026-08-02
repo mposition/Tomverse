@@ -166,6 +166,7 @@ export const ko = {
         maxModelCompare: "최대 3개 모델까지 비교할 수 있습니다.",
         maxGuestModelCompare: "게스트 모드는 최대 3개 모델까지 비교할 수 있습니다.",
         modelOnlyPlaceholder: "이 모델에게만 추가 질문",
+        modelOnlyInputLabel: "{model}에게만 추가 질문",
         modelOnlySendTitle: "이 모델에게만 보내기",
         comingSoonModel: "이 모델은 곧 지원될 예정입니다.",
         attachFile: "파일 첨부",

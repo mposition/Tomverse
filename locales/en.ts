@@ -166,6 +166,7 @@ export const en = {
         maxModelCompare: "You can compare up to 3 models.",
         maxGuestModelCompare: "Guest mode can compare up to 3 models.",
         modelOnlyPlaceholder: "Ask only this model",
+        modelOnlyInputLabel: "Ask only {model}",
         modelOnlySendTitle: "Send only to this model",
         comingSoonModel: "This model is coming soon.",
         attachFile: "Attach files",
