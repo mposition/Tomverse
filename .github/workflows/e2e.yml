@@ -30,9 +30,37 @@ on:
 permissions:
   contents: read
 
+# Every push to `main` is a release, so every push needs its own verdict.
+#
+# This run takes ~27 minutes wall clock (~63 runner-minutes across the three
+# shards). On 2026-08-02 seven releases landed 11-20 minutes apart, and with
+# `cancel-in-progress: true` each one killed the previous run before it could
+# finish: `14ecd96`, `cd3e1b0` and `2a7eb03` were all cancelled in a row. The
+# last *completed* verdict was `2e0eff2`, a failure, four releases and two
+# hours earlier -- so the fix meant to clear it (#252) shipped three times
+# without a completed canonical run ever confirming it.
+#
+# `cancel-in-progress: false` alone does not fix that. By default a group
+# holds one running and one *pending* run, and a third arrival cancels the
+# pending one and takes its place, so a burst still loses the middle of the
+# sequence. `queue: max` raises the pending limit to 100, which is what
+# actually preserves a verdict per SHA. The two settings are only valid
+# together in this direction: `queue: max` with `cancel-in-progress: true` is
+# a workflow validation error.
+#
+# The cost is queue delay, not money -- this repository is public on standard
+# GitHub-hosted runners. During a burst the newest release's verdict can be
+# hours behind, which is the deliberate trade: a late answer for every commit
+# beats a prompt answer for one and silence for the rest.
+#
+# What this does NOT do is stop a broken release from shipping. It runs after
+# the merge button, so it reports rather than blocks. Moving the canonical
+# suite in front of the release -- a required gate on the release pull request
+# -- is the real fix and is not attempted here.
 concurrency:
   group: main-chromium-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
+  queue: max
 
 jobs:
   playwright:
