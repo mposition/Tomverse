@@ -1,6 +1,13 @@
 ﻿"use client";
 
-import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
+import React, {
+  useState,
+  useEffect,
+  useCallback,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+} from "react";
 import { AlertCircle, ArrowRight, CheckCircle2, Info, Loader2, Sparkles, X } from "lucide-react";
 import { useModalDialog } from "@/components/useModalDialog";
 import { DesktopChatShell } from "@/components/chat/DesktopChatShell";
@@ -111,6 +118,15 @@ import {
   writePendingGuestImportIntent,
   type GuestConversationSummary,
 } from "@/lib/guestImport";
+import {
+  conversationIdBelongsToIdentity,
+  describeIdentityTransition,
+  identityNamespaceKey,
+  isGuestConversationId,
+  resolveIdentityNamespace,
+  selectionAfterIdentityTransition,
+  type IdentityNamespace,
+} from "@/lib/chatIdentityNamespace";
 import { GuestImportModal } from "@/components/chat/GuestImportModal";
 import { GUEST_IMPORT_MODAL_OPEN_EVENT } from "@/lib/guestImportModalEvents";
 import { useGuestVerification } from "@/components/chat/GuestVerificationProvider";
@@ -445,6 +461,7 @@ export function ChatPageClient({
     userMessageId: string;
     attachments: ChatAttachment[];
     deepResearchDepth?: "quick" | "standard" | "deep";
+    admissionToken?: string | null;
   } | null>(null);
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
   const [pendingRemoveModelId, setPendingRemoveModelId] = useState<string | null>(null);
@@ -770,6 +787,176 @@ export function ChatPageClient({
     currentChatIdRef.current = currentChatId;
   }, [currentChatId]);
 
+  /* --------------------------------------------------------------------- */
+  /* Identity namespace                                                     */
+  /* --------------------------------------------------------------------- */
+  // Which identity this tab is operating as. A conversation id belongs to
+  // exactly one of them (see lib/chatIdentityNamespace.ts), and crossing the
+  // boundary with one is what sent /api/conversations/guest_* to the account
+  // API and got CONVERSATION_FORBIDDEN back -- once for the detail request,
+  // once for the model-settings sync, and once per comparison panel.
+  const identityNamespace = useMemo(
+    () => resolveIdentityNamespace(status, sessionUserId),
+    [sessionUserId, status]
+  );
+  const identityNamespaceRef = useRef<IdentityNamespace>(identityNamespace);
+  const appliedIdentityKeyRef = useRef<string | null>(null);
+  // Ids this identity has already been refused. Kept so a stale selection is
+  // recovered from once instead of being retried by every panel forever.
+  const staleConversationIdsRef = useRef<Set<string>>(new Set());
+  // The guest conversation that was open at sign-in. Only the *selection* is
+  // released by the transition below; the guest transcript itself stays in
+  // localStorage so the import modal can still offer it.
+  const guestSelectionAtSignInRef = useRef<string | null>(null);
+  // Bumped on every identity change. Work started under an older value writes
+  // nothing: a guest stream or a fetch that resolves after sign-in belongs to
+  // the namespace it started in, not to whoever is signed in now.
+  const identityEpochRef = useRef(0);
+  // showToast is declared further down (it needs the toast timer state), and
+  // the recovery path above has to be declared before the effects that call
+  // it, so it reaches the notifier through this ref rather than by ordering.
+  const showToastRef = useRef<
+    ((message: string, tone: AppToast["tone"]) => void) | null
+  >(null);
+
+  const belongsToCurrentIdentity = useCallback(
+    (id: string | null | undefined) =>
+      conversationIdBelongsToIdentity(id, identityNamespaceRef.current) &&
+      !staleConversationIdsRef.current.has(id as string),
+    []
+  );
+
+  /**
+   * The only id an account API may be given.
+   *
+   * Returns null -- and the caller skips the request -- whenever the id does
+   * not belong to the identity in effect. The server's ownership check is
+   * untouched and remains the actual boundary; this is the client refusing to
+   * send a request it already knows is wrong.
+   */
+  const accountConversationId = useCallback(
+    (id: string | null | undefined) => {
+      if (identityNamespaceRef.current.kind !== "account") return null;
+      if (belongsToCurrentIdentity(id)) return id as string;
+      if (id) {
+        console.warn(
+          JSON.stringify({
+            event: "chat_conversation_id_namespace_violation",
+            reason: isGuestConversationId(id) ? "guest_id" : "stale_id",
+          })
+        );
+      }
+      return null;
+    },
+    [belongsToCurrentIdentity]
+  );
+
+  // Runs before every passive effect in the same commit -- including the
+  // session bootstrap and the conversation restore further down -- so the
+  // stale id is gone before anything can call an account API with it.
+  useLayoutEffect(() => {
+    const nextKey = identityNamespaceKey(identityNamespace);
+    if (identityNamespace.kind === "unresolved") return;
+    if (appliedIdentityKeyRef.current === nextKey) return;
+
+    const transition = describeIdentityTransition(
+      appliedIdentityKeyRef.current === null
+        ? null
+        : identityNamespaceRef.current,
+      identityNamespace
+    );
+    identityNamespaceRef.current = identityNamespace;
+    appliedIdentityKeyRef.current = nextKey;
+    // First resolution of a freshly mounted tab: there is no previous identity
+    // to have carried anything over from, and the restore effect below still
+    // validates the saved id against this account's own conversation list.
+    if (transition.initial) return;
+
+    identityEpochRef.current += 1;
+    staleConversationIdsRef.current.clear();
+
+    const carriedId = currentChatIdRef.current;
+    if (transition.guestToAccount && typeof window !== "undefined") {
+      guestSelectionAtSignInRef.current =
+        carriedId ?? window.sessionStorage.getItem(ACTIVE_CHAT_STORAGE_KEY);
+    }
+
+    const retainedId = selectionAfterIdentityTransition(carriedId, transition);
+    if (retainedId !== carriedId) {
+      currentChatIdRef.current = retainedId;
+      setCurrentChatId(retainedId);
+      setPromptPayload(null);
+      // The saved id is written for *this* tab's restore. It belongs to the
+      // identity that wrote it, so it must not survive into the next one --
+      // the guest transcript it points at is untouched in localStorage.
+      if (!retainedId && typeof window !== "undefined") {
+        window.sessionStorage.removeItem(ACTIVE_CHAT_STORAGE_KEY);
+      }
+    }
+  }, [identityNamespace]);
+
+  /**
+   * Releases a selection the current identity turned out not to be able to
+   * open, without destroying anything the user might still want.
+   *
+   * The server's 403 stands: a conversation that genuinely belongs to someone
+   * else is never opened by this path, and nothing is retried. What changes is
+   * only the client's own selection -- drafts, guest transcripts and the guest
+   * import snapshot are all left alone.
+   */
+  // Neither shell may be handed an id from another identity: each comparison
+  // panel loads its own history from it, so one stale id becomes one 403 per
+  // panel. Derived from the reactive namespace rather than the ref so it is
+  // already null on the render that follows an identity change.
+  const shellConversationId = useMemo(
+    () =>
+      conversationIdBelongsToIdentity(currentChatId, identityNamespace)
+        ? currentChatId
+        : null,
+    [currentChatId, identityNamespace]
+  );
+
+  const recoverFromStaleConversation = useCallback(
+    (conversationId: string, options?: { silent?: boolean }) => {
+      if (staleConversationIdsRef.current.has(conversationId)) return;
+      staleConversationIdsRef.current.add(conversationId);
+      console.warn(
+        JSON.stringify({
+          event: "chat_stale_conversation_released",
+          reason: isGuestConversationId(conversationId)
+            ? "guest_id_in_account_namespace"
+            : "conversation_forbidden",
+        })
+      );
+      setConversations((previous) =>
+        previous.filter((conversation) => conversation.id !== conversationId)
+      );
+      if (currentChatIdRef.current === conversationId) {
+        currentChatIdRef.current = null;
+        setCurrentChatId(null);
+        setPromptPayload(null);
+      }
+      // Readiness must resolve on every path out of here, or the model
+      // selector and the mobile summary skeleton stay stuck forever.
+      setIsInitialConversationResolved(true);
+      if (!options?.silent) {
+        showToastRef.current?.(t("chat.conversationUnavailableSwitched"), "info");
+      }
+    },
+    [t]
+  );
+
+  /**
+   * True when a failed account request means "this id is not openable by the
+   * identity in effect". Only 403 CONVERSATION_FORBIDDEN counts: a locked
+   * conversation (423) and a rate limit are different answers with different
+   * ways out, and neither releases the selection.
+   */
+  const isStaleConversationResponse = (
+    status: number,
+    code: unknown
+  ) => status === 403 && code === "CONVERSATION_FORBIDDEN";
+
   // One-time cleanup for browsers that still have the old Private Mode flag
   // set from before the feature was removed -- must never be restored from.
   useEffect(() => {
@@ -809,7 +996,13 @@ export function ChatPageClient({
 
     queueMicrotask(() => {
       setGuestImportCandidates(importable);
-      setGuestImportDefaultId(window.sessionStorage.getItem(ACTIVE_CHAT_STORAGE_KEY));
+      // The identity transition released the *selection* but stashed which
+      // guest conversation it was, precisely so this modal can still default
+      // to it. The transcript itself was never touched.
+      setGuestImportDefaultId(
+        guestSelectionAtSignInRef.current ??
+          window.sessionStorage.getItem(ACTIVE_CHAT_STORAGE_KEY)
+      );
       setIsGuestImportModalOpen(true);
     });
   }, [isGuestMode, sessionUserId, isUserSettingsLoaded]);
@@ -818,7 +1011,10 @@ export function ChatPageClient({
     const importable = listImportableGuestConversations();
     setGuestImportCandidates(importable);
     setGuestImportDefaultId(
-      typeof window !== "undefined" ? window.sessionStorage.getItem(ACTIVE_CHAT_STORAGE_KEY) : null
+      guestSelectionAtSignInRef.current ??
+        (typeof window !== "undefined"
+          ? window.sessionStorage.getItem(ACTIVE_CHAT_STORAGE_KEY)
+          : null)
     );
     setIsGuestImportModalOpen(true);
   }, []);
@@ -828,6 +1024,11 @@ export function ChatPageClient({
       window.localStorage.setItem(GUEST_IMPORT_SEEN_KEY, "1");
     }
     setIsGuestImportModalOpen(false);
+    // Skipping or dismissing the import is a decision, so the tab must end up
+    // somewhere: with no account conversation selected that is the welcome
+    // screen, and readiness has to resolve or the model selector and the
+    // mobile summary skeleton stay disabled for the rest of the session.
+    setIsInitialConversationResolved(true);
   }, []);
 
   // Gated on isInitialConversationResolved so this doesn't run before the
@@ -953,6 +1154,10 @@ export function ChatPageClient({
     []
   );
 
+  useEffect(() => {
+    showToastRef.current = showToast;
+  }, [showToast]);
+
   const runComparisonPreflight = useCallback(
     async ({
       comparisonId,
@@ -968,8 +1173,14 @@ export function ChatPageClient({
       const modelIds = selectedModels.filter(
         (modelId) => !effectiveDisabledPanels.includes(modelId)
       );
-      if (isGuestMode || modelIds.length < 2) return true;
-      if (comparisonPreflightInFlightRef.current) return false;
+      // Guests run this too. A guest comparison is the same three requests an
+      // account's is, so its concurrency has to be admitted once for the whole
+      // run -- otherwise the panels race each other and some are refused after
+      // others have already started.
+      if (modelIds.length < 2) return { allowed: true, admissionToken: null };
+      if (comparisonPreflightInFlightRef.current) {
+        return { allowed: false, admissionToken: null };
+      }
 
       comparisonPreflightInFlightRef.current = true;
       const clientTraceId = crypto.randomUUID();
@@ -1022,10 +1233,19 @@ export function ChatPageClient({
               `${t("chat.comparisonPreflightFailed")} (${t("chat.traceId")}: ${clientTraceId})`,
               "error"
             );
-            return false;
+            return { allowed: false, admissionToken: null };
           }
 
-          if (response.ok) return true;
+          if (response.ok) {
+            const grant = await response.json().catch(() => null);
+            return {
+              allowed: true,
+              admissionToken:
+                typeof grant?.admissionToken === "string"
+                  ? grant.admissionToken
+                  : null,
+            };
+          }
           errorBody = await response.json().catch(() => null);
           code = typeof errorBody?.code === "string" ? errorBody.code : "";
 
@@ -1056,11 +1276,13 @@ export function ChatPageClient({
             `${t("chat.comparisonPreflightFailed")} (${t("chat.traceId")}: ${clientTraceId})`,
             "error"
           );
-          return false;
+          return { allowed: false, admissionToken: null };
         }
         if (
-          response.status === 500 &&
-          code === "COMPARISON_PREFLIGHT_FAILED"
+          (response.status === 500 &&
+            code === "COMPARISON_PREFLIGHT_FAILED") ||
+          (response.status === 503 &&
+            code === "COMPARISON_PREFLIGHT_TEMPORARILY_UNAVAILABLE")
         ) {
           const traceId =
             typeof errorBody?.traceId === "string"
@@ -1068,9 +1290,12 @@ export function ChatPageClient({
               : response.headers.get("X-Request-ID") || clientTraceId;
           // The comparison preflight is an all-or-nothing UX guard, not the
           // security boundary. Every /api/chat request revalidates the model,
-          // conversation ownership, plan, credits, and cost limits before a
-          // provider call. If only this aggregate check fails unexpectedly,
-          // continue through those authoritative per-model checks.
+          // conversation ownership, plan, credits, cost limits and its own
+          // concurrency slot before a provider call. If only this aggregate
+          // check is unavailable -- after its one retry -- continue through
+          // those authoritative per-model checks rather than refusing to send
+          // at all. A real verdict (429, 403) still blocks; only an
+          // infrastructure failure of the check itself degrades open.
           console.warn(
             JSON.stringify({
               event: "chat_comparison_preflight_degraded",
@@ -1081,7 +1306,7 @@ export function ChatPageClient({
             "tomverse_last_preflight_trace_id",
             traceId
           );
-          return true;
+          return { allowed: true, admissionToken: null };
         }
         const localizedMessage =
           code === "PLAN_ENTITLEMENT_EXHAUSTED"
@@ -1107,6 +1332,8 @@ export function ChatPageClient({
                     ? t("chat.comparisonDailyCreditsInsufficient")
                     : code === "CHAT_CONCURRENCY_EXCEEDED"
                       ? t("chat.comparisonConcurrencyLimit")
+                      : code === "CHAT_IP_CONCURRENCY_EXCEEDED"
+                        ? t("chat.networkConcurrencyLimit")
                       : code === "FREE_PRO_MODEL_QUOTA_EXCEEDED"
                         ? t("chat.comparisonHigherCostQuotaExceeded")
                         : typeof errorBody?.error === "string" &&
@@ -1128,7 +1355,7 @@ export function ChatPageClient({
           }`,
           "error"
         );
-        return false;
+        return { allowed: false, admissionToken: null };
       } catch (error) {
         console.error(
           JSON.stringify({
@@ -1141,11 +1368,11 @@ export function ChatPageClient({
           `${t("chat.comparisonPreflightFailed")} (${t("chat.traceId")}: ${clientTraceId})`,
           "error"
         );
-        return false;
+        return { allowed: false, admissionToken: null };
       } finally {
         comparisonPreflightInFlightRef.current = false;
       }
-    }, [effectiveDisabledPanels, isGuestMode, selectedModels, showToast, t, webSearchMode]);
+    }, [effectiveDisabledPanels, selectedModels, showToast, t, webSearchMode]);
 
   useEffect(() => {
     return () => {
@@ -1777,11 +2004,30 @@ export function ChatPageClient({
       );
     }
 
+    // State invariant, checked before the request rather than after the 403:
+    // only an id this account can own is ever put on an account URL. The
+    // server still decides ownership -- this only stops a request that is
+    // already known to be wrong from being made at all.
+    const accountId = accountConversationId(id);
+    if (!accountId) {
+      recoverFromStaleConversation(id);
+      return;
+    }
+
 	try {
-	  const res = await fetch(`/api/conversations/${id}`, { cache: "no-store" });
+	  const res = await fetch(`/api/conversations/${accountId}`, { cache: "no-store" });
       if (res.ok) {
         const data = await res.json();
           applyConversationSettings(data, id);
+      } else {
+        const body = await res.json().catch(() => null);
+        // A genuine 403 on someone else's conversation stays a 403 and is
+        // never opened. All that happens here is that this client stops
+        // holding a selection it cannot use, once, without retrying.
+        if (isStaleConversationResponse(res.status, body?.code)) {
+          recoverFromStaleConversation(id);
+          return;
+        }
 	  }
     } catch (error) {
       console.error("Failed to load conversation settings:", error);
@@ -1836,9 +2082,13 @@ export function ChatPageClient({
       }
       await fetchConversations();
       if (conversationIdToOpen) {
+        // The server's id for the imported conversation -- an account id, in
+        // this account's namespace. The guest id it came from is never
+        // selected again.
         void handleSelectConversation(conversationIdToOpen);
       }
       setIsGuestImportModalOpen(false);
+      setIsInitialConversationResolved(true);
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
     []
@@ -2104,7 +2354,7 @@ export function ChatPageClient({
     updatedModels: string[],
     updatedDisabled: string[]
   ) => {
-    if (!targetChatId || !sessionUserId) {
+    if (!accountConversationId(targetChatId) || !sessionUserId) {
       return;
     }
 
@@ -2148,8 +2398,9 @@ export function ChatPageClient({
       }
       return;
     }
-    if (!currentChatId || !sessionUserId) return;
-    void fetch(`/api/conversations/${currentChatId}`, {
+    const webSearchTargetId = accountConversationId(currentChatId);
+    if (!webSearchTargetId || !sessionUserId) return;
+    void fetch(`/api/conversations/${webSearchTargetId}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ webSearchMode: mode }),
@@ -2171,6 +2422,10 @@ export function ChatPageClient({
   const ensureModelSettingsReady = async (targetChatId: string) => {
     if (isGuestMode || !sessionUserId) {
       return true;
+    }
+    if (!accountConversationId(targetChatId)) {
+      recoverFromStaleConversation(targetChatId);
+      return false;
     }
     const ready = await flushModelSettingsToServer(targetChatId);
     if (ready) return true;
@@ -2415,13 +2670,13 @@ export function ChatPageClient({
         if (!modelSettingsReady) return;
       }
       const comparisonId = Date.now().toString();
-      const preflightAllowed = await runComparisonPreflight({
+      const preflight = await runComparisonPreflight({
         comparisonId,
         conversationId: activeChatId,
         prompt: trimmed,
         promptAttachments,
       });
-      if (!preflightAllowed) return;
+      if (!preflight.allowed) return;
 	  const userMsgId = crypto.randomUUID();
       const conversation = conversations.find((item) => item.id === activeChatId);
       const previousCount =
@@ -2477,6 +2732,9 @@ export function ChatPageClient({
         attachments: promptAttachments,
         ...(options?.deepResearchDepth
           ? { deepResearchDepth: options.deepResearchDepth }
+          : {}),
+        ...(preflight.admissionToken
+          ? { admissionToken: preflight.admissionToken }
           : {}),
       });
       // The single point where a draft is cleared by sending: the prompt is
@@ -2937,8 +3195,10 @@ export function ChatPageClient({
     
     if (currentChatId) {
       syncModelSettingsToServer(currentChatId, nextModels, nextDisabled);
+      const historyTargetId = accountConversationId(currentChatId);
+      if (!historyTargetId) return;
       try {
-        await fetch(`/api/conversations/${currentChatId}/messages?modelId=${modelId}`, {
+        await fetch(`/api/conversations/${historyTargetId}/messages?modelId=${modelId}`, {
           method: "DELETE"
         });
       } catch (error) {
@@ -3364,7 +3624,7 @@ export function ChatPageClient({
       ) : isMobileViewport ? (
         <MobileChatShell
           conversations={blendedConversations}
-          currentChatId={currentChatId}
+          currentChatId={shellConversationId}
           selectedModels={selectedModels}
           disabledPanels={effectiveDisabledPanels}
           promptPayload={promptPayload}
@@ -3416,7 +3676,7 @@ export function ChatPageClient({
       ) : (
         <DesktopChatShell
           conversations={blendedConversations}
-          currentChatId={currentChatId}
+          currentChatId={shellConversationId}
           selectedModels={selectedModels}
           disabledPanels={effectiveDisabledPanels}
           promptPayload={promptPayload}

@@ -35,6 +35,12 @@ GPT-5.5 Thinking + Web Search 요청에서 `INTERNAL_DAILY_COST_SAFETY_LIMIT`으
 동시 요청 경쟁은 어느 쪽도 아니며 `CONCURRENT_RESERVATION_CONFLICT`(409)로
 재시도를 요청합니다.
 
+**동시 실행 제한도 어느 쪽도 아닙니다.** "지금 몇 개가 흐르고 있는가"는 크레딧과
+무관한 별개 층이며, `limitLayer`가 `concurrency`(주체 한도,
+`CHAT_CONCURRENCY_EXCEEDED`)와 `operational_admission`(익명 IP 집계 상한,
+`CHAT_IP_CONCURRENCY_EXCEEDED`)으로 나뉩니다. 문구·코드·환경변수를 entitlement나
+guardrail과 섞지 않습니다 — `docs/policy/chat-concurrency-and-identity.md`.
+
 ### guardrail은 entitlement에서 유도한다
 
 한도를 손으로 고르면 같은 사고가 반복됩니다. 그래서 guardrail은 플랜이

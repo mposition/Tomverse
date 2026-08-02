@@ -388,13 +388,31 @@ model ProviderProbeResult {
   @@index([runId])
 }
 
+// One in-flight chat response. Counted to enforce concurrency, never to bill.
+//
+// `subjectKey` is the individual caller (an account, or a *signed guest
+// cookie* -- not an IP). `ipKey` is carried alongside so the same row can also
+// be counted for the anonymous aggregate abuse ceiling without a second row
+// and without a second thing to release. See lib/chatConcurrencyCore.ts.
+//
+// A row with `claimedAt = NULL` is a slot reserved by the aggregate comparison
+// preflight and not yet consumed by its model request; it expires quickly on
+// its own if the browser never sends the request.
 model ChatRequestLease {
-  id         String   @id
-  subjectKey String
-  expiresAt  DateTime
-  createdAt  DateTime @default(now())
+  id          String    @id
+  subjectKey  String
+  ipKey       String?
+  admissionId String?
+  modelId     String?
+  claimedAt   DateTime?
+  heartbeatAt DateTime  @default(now())
+  expiresAt   DateTime
+  createdAt   DateTime  @default(now())
 
   @@index([subjectKey, expiresAt])
+  @@index([ipKey, expiresAt])
+  @@index([admissionId])
+  @@index([expiresAt])
 }
 
 // Why one chat request was allowed or refused by a credit/cost limit, keyed by

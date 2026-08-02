@@ -90,20 +90,19 @@ export async function POST(request: Request) {
     }> = [];
     try {
         const session = await getServerSession(authOptions);
-        if (!session?.user?.id) {
-            return Response.json(
-                {
-                    error: "Sign in before comparing multiple models.",
-                    code: "COMPARISON_AUTHENTICATION_REQUIRED",
-                    traceId,
-                },
-                { status: 401, headers: { "X-Request-ID": traceId } }
-            );
-        }
+        // Guests reach this route too, and must: a three-model comparison is
+        // three POST /api/chat requests for them exactly as it is for an
+        // account, so its concurrency has to be admitted as a whole here or the
+        // panels race each other for slots. What a guest does *not* get from
+        // this route is a credit or plan verdict -- they have neither, and
+        // every per-model check still runs on each /api/chat request.
+        const guestAccess = session?.user?.id
+            ? null
+            : identifyChatCaller(request, null);
 
         await consumeApiRateLimit(
             request,
-            session.user.id,
+            session?.user?.id ?? guestAccess!.subjectKey,
             "chat-comparison-preflight",
             { minute: 30, day: 1_000 }
         );
@@ -124,28 +123,34 @@ export async function POST(request: Request) {
             );
         }
 
-        const billingPlan = await getUserBillingPlan(session.user.id);
-        const maxModels = effectivePlanModelLimit(billingPlan);
-        if (uniqueModelIds.length > maxModels) {
-            return Response.json(
-                {
-                    error: `Your plan allows up to ${maxModels} models per comparison.`,
-                    code: "PLAN_MODEL_LIMIT_EXCEEDED",
-                    traceId,
-                },
-                { status: 403, headers: { "X-Request-ID": traceId } }
-            );
+        const billingPlan = session?.user?.id
+            ? await getUserBillingPlan(session.user.id)
+            : null;
+        if (billingPlan) {
+            const maxModels = effectivePlanModelLimit(billingPlan);
+            if (uniqueModelIds.length > maxModels) {
+                return Response.json(
+                    {
+                        error: `Your plan allows up to ${maxModels} models per comparison.`,
+                        code: "PLAN_MODEL_LIMIT_EXCEEDED",
+                        traceId,
+                    },
+                    { status: 403, headers: { "X-Request-ID": traceId } }
+                );
+            }
         }
 
-        const access = identifyChatCaller(
-            request,
-            session.user.id,
-            billingPlan.tier,
-            {
-                dailyMessageLimit: billingPlan.dailyMessageLimit,
-                monthlyMessageLimit: billingPlan.monthlyMessageLimit,
-            }
-        );
+        const access =
+            guestAccess ??
+            identifyChatCaller(
+                request,
+                session!.user!.id!,
+                billingPlan!.tier,
+                {
+                    dailyMessageLimit: billingPlan!.dailyMessageLimit,
+                    monthlyMessageLimit: billingPlan!.monthlyMessageLimit,
+                }
+            );
         const runtimeModels = await getRuntimeModels();
         const runtimeModelMap = new Map(runtimeModels.map((model) => [model.id, model]));
         const models = uniqueModelIds.map((modelId) => {
@@ -167,7 +172,10 @@ export async function POST(request: Request) {
             content: string;
             modelId: string | null;
         }> = [];
-        if (payload.conversationId !== "private-chat") {
+        // A guest's transcript lives in their browser, so there is no server
+        // conversation to read history from -- and no ownership question to
+        // answer. Signed-in callers keep the full check below unchanged.
+        if (session?.user?.id && payload.conversationId !== "private-chat") {
             const conversation = await prisma.conversation.findUnique({
                 where: { id: payload.conversationId },
                 select: {
@@ -263,9 +271,20 @@ export async function POST(request: Request) {
         modelIdsForLog = models.map((model) => model.id);
         const result = await preflightChatComparisonAccess(access, budgets, {
             traceId,
+            comparisonId: payload.comparisonId,
             enabledTools:
                 payload.webSearchMode === "always" ? ["web_search"] : [],
         });
+
+        const headers = new Headers({
+            "Cache-Control": "no-store",
+            "X-Request-ID": traceId,
+        });
+        // A first-time guest gets their signed cookie here rather than on the
+        // first /api/chat request: the admission is bound to the guest subject
+        // that cookie names, so the browser has to be holding it before the
+        // model requests arrive.
+        if (access.setCookie) headers.append("Set-Cookie", access.setCookie);
 
         return Response.json(
             {
@@ -273,8 +292,13 @@ export async function POST(request: Request) {
                 comparisonId: payload.comparisonId,
                 modelCount: result.modelCount,
                 requiredCredits: result.requiredCredits,
+                // Opaque to the client: it is signed, subject-bound and
+                // short-lived, and it only decides which concurrency slot each
+                // model request occupies.
+                admissionToken: result.admission.token,
+                admissionExpiresAt: result.admission.expiresAt,
             },
-            { headers: { "Cache-Control": "no-store", "X-Request-ID": traceId } }
+            { headers }
         );
     } catch (error) {
         const securityResponse = apiSecurityResponse(error);

@@ -74,6 +74,7 @@ const QUOTA_ERROR_CODES = new Set([
   "PROVIDER_DAILY_SPEND_LIMIT_REACHED",
   "PROVIDER_SPEND_LIMIT_REACHED",
   "CHAT_CONCURRENCY_EXCEEDED",
+  "CHAT_IP_CONCURRENCY_EXCEEDED",
 ]);
 
 type ErrorCategory = "quota" | "model_retired" | "attachment" | "generic";
