@@ -92,6 +92,10 @@ jobs:
           if [ -z "$pr_number" ]; then
             exit 0
           fi
+          if [ "$(gh pr view "$pr_number" --json isDraft --jq '.isDraft')" = "true" ]; then
+            echo "Auto-merge not enabled: PR #$pr_number is still a draft."
+            exit 0
+          fi
           if output=$(gh pr merge "$pr_number" --squash --auto 2>&1); then
             echo "$output"
             exit 0
