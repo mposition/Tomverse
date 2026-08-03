@@ -160,7 +160,10 @@ export const catalogNextCursor = (provider: AiProvider, payload: unknown) => {
   const root = record(payload);
   if (!root) return null;
   if (provider === "google") return text(root.nextPageToken);
-  if (provider === "anthropic" && root.has_more === true) {
+  if (
+    (provider === "anthropic" || provider === "minimax") &&
+    root.has_more === true
+  ) {
     return text(root.last_id);
   }
   return null;

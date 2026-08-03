@@ -72,7 +72,7 @@ test.use({ hasTouch: true });
 
 const MODEL_A = "gpt-5-4-mini"; // OpenAI, standard tier
 const MODEL_B = "claude-sonnet-5"; // Anthropic, advanced tier
-const MODEL_C = "gemini-3-5-flash"; // Google, standard tier
+const MODEL_C = "gemini-3-6-flash"; // Google, advanced tier
 const DEEP_RESEARCH_MODEL = "perplexity/sonar-deep-research";
 
 const SHORT_ANSWER = "The capital of France is Paris.";

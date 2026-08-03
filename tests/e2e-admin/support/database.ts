@@ -16,6 +16,7 @@ import {
   FIXTURE_CREDIT,
   FIXTURE_CUSTOMERS,
   FIXTURE_FEEDBACK,
+  FIXTURE_TRACE_REPORT,
   FIXTURE_HEALTH_CHECK,
   FIXTURE_INCIDENT,
   FIXTURE_JOB_RUN,
@@ -255,6 +256,27 @@ export const seedAdminFixtures = async () => {
   });
 
   // --- Support surfaces --------------------------------------------------
+  // The verified trace evidence exists before the feedback rows so the open
+  // report can reference it by plain FK inside createMany.
+  await prisma.traceErrorEvidence.create({
+    data: {
+      id: FIXTURE_TRACE_REPORT.verified.evidenceId,
+      occurrenceId: FIXTURE_TRACE_REPORT.verified.occurrenceId,
+      traceId: FIXTURE_TRACE_REPORT.verified.traceId,
+      traceProvenance: "server_generated",
+      environment: "e2e",
+      release: FIXTURE_TRACE_REPORT.verified.release,
+      routeClass: FIXTURE_TRACE_REPORT.verified.routeClass,
+      phase: "request",
+      errorCode: FIXTURE_TRACE_REPORT.verified.errorCode,
+      classificationSource: "server",
+      httpStatus: 500,
+      provider: "openai",
+      modelId: "gpt-5-6-luna",
+      retryable: false,
+      occurredAt: at(-2 * HOUR),
+    },
+  });
   await prisma.feedback.createMany({
     data: [
       {
@@ -270,6 +292,14 @@ export const seedAdminFixtures = async () => {
         emailUpdatesConsent: true,
         language: "en",
         createdAt: at(-2 * HOUR),
+        // The fully verified trace path: signed token verified, evidence
+        // recorded and exactly linked, server-classified code.
+        traceId: FIXTURE_TRACE_REPORT.verified.traceId,
+        errorReportVerification: "verified",
+        traceProvenance: "server_generated",
+        errorClassificationSource: "server",
+        evidenceAvailability: "recorded",
+        traceEvidenceId: FIXTURE_TRACE_REPORT.verified.evidenceId,
       },
       {
         id: FIXTURE_FEEDBACK.slaBreached.id,
@@ -280,6 +310,13 @@ export const seedAdminFixtures = async () => {
         message: FIXTURE_FEEDBACK.slaBreached.message,
         plan: "Max",
         createdAt: at(-FIXTURE_FEEDBACK.slaBreached.ageHours * HOUR),
+        // The honest opposite: a client-classified empty response with no
+        // token -- unverified by design.
+        traceId: FIXTURE_TRACE_REPORT.clientClassified.traceId,
+        errorReportVerification: "missing_token",
+        traceProvenance: "server_generated",
+        errorClassificationSource: "client",
+        clientErrorCode: "EMPTY_RESPONSE",
       },
       {
         id: FIXTURE_FEEDBACK.resolved.id,
@@ -291,6 +328,28 @@ export const seedAdminFixtures = async () => {
         createdAt: at(-6 * DAY),
       },
     ],
+  });
+
+  // Phase 2 shadow diagnosis for the verified report: a candidate waiting on
+  // a human, exactly as the worker leaves it. Observational only -- the panel
+  // must label it as such.
+  await prisma.feedbackAutoFixCase.create({
+    data: {
+      id: FIXTURE_TRACE_REPORT.verified.caseId,
+      feedbackId: FIXTURE_FEEDBACK.open.id,
+      traceId: FIXTURE_TRACE_REPORT.verified.traceId,
+      occurrenceId: FIXTURE_TRACE_REPORT.verified.occurrenceId,
+      fingerprint: `${FIXTURE_TRACE_REPORT.verified.errorCode}|${FIXTURE_TRACE_REPORT.verified.release}`,
+      sourceRelease: FIXTURE_TRACE_REPORT.verified.release,
+      state: "awaiting_human_review",
+      classification: "application_candidate",
+      attemptCount: 1,
+      diagnosticSummary: {
+        classification: "application_candidate",
+        errorCode: FIXTURE_TRACE_REPORT.verified.errorCode,
+        routeClass: FIXTURE_TRACE_REPORT.verified.routeClass,
+      },
+    },
   });
 
   await prisma.privacyRequest.create({

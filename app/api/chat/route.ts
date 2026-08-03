@@ -49,6 +49,16 @@ import {
     validatePdfSafely,
 } from "@/lib/mediaSecurity";
 import {
+    extractPdfTextWithMistralOcr,
+    MISTRAL_OCR_COST_MICRO_USD_PER_PAGE,
+} from "@/lib/mistralOcr";
+import { recordInternalProviderUsage } from "@/lib/providerUsageAccounting";
+import {
+    parseProviderResponseMessages,
+    providerContextText,
+    serializeProviderResponseMessages,
+} from "@/lib/messageProviderContext";
+import {
     BoundedBufferError,
     readResponseToBuffer,
 } from "@/lib/boundedBuffer";
@@ -959,10 +969,60 @@ async function handleChatPost(
         const estimateTextTokens = (text: string) =>
             Math.max(1, estimatePromptTokens(text));
 
+        const providerContextQueues = new Map<string, ModelMessage[][]>();
+        if (
+            conversationId &&
+            session?.user?.id &&
+            modelConfig.reasoning !== undefined
+        ) {
+            try {
+                const storedContexts =
+                    await prisma.messageProviderContext.findMany({
+                        where: {
+                            modelId: requestedModelId,
+                            message: { conversationId },
+                        },
+                        orderBy: { createdAt: "asc" },
+                        select: {
+                            responseMessages: true,
+                            message: { select: { content: true } },
+                        },
+                    });
+                for (const stored of storedContexts) {
+                    const restored = parseProviderResponseMessages(
+                        stored.responseMessages
+                    );
+                    if (!restored) continue;
+                    const queue =
+                        providerContextQueues.get(stored.message.content) || [];
+                    queue.push(restored);
+                    providerContextQueues.set(stored.message.content, queue);
+                }
+            } catch (error) {
+                // Provider context improves reasoning continuity but must not
+                // make an otherwise valid conversation unreadable if the
+                // private side table is temporarily unavailable.
+                logRequestError(
+                    "provider_context_load_failed",
+                    traceId,
+                    error,
+                    requestedModelId
+                );
+            }
+        }
+
         const formattedMessages: ModelMessage[] = [];
         for (const msg of messages) {
             if (msg.role === "assistant") {
                 const content = String(msg.content ?? "");
+                const preserved = providerContextQueues.get(content)?.shift();
+                if (preserved) {
+                    estimatedInputTokens += estimateTextTokens(
+                        providerContextText(preserved)
+                    );
+                    formattedMessages.push(...preserved);
+                    continue;
+                }
                 estimatedInputTokens += estimateTextTokens(content);
                 formattedMessages.push({ role: "assistant", content });
                 continue;
@@ -1138,6 +1198,7 @@ async function handleChatPost(
                             "Extracted attachment text exceeds the request limit."
                         );
                     }
+                    let pdfValidated = false;
                     try {
                         extractedPdfText = await extractPdfTextSafely(
                             pdfBuffer,
@@ -1152,6 +1213,7 @@ async function handleChatPost(
                         );
                         try {
                             await validatePdfSafely(pdfBuffer);
+                            pdfValidated = true;
                         } catch {
                             throw new ChatAccessError(
                                 400,
@@ -1159,11 +1221,87 @@ async function handleChatPost(
                                 "The attached PDF is invalid or unsupported."
                             );
                         }
-                        if (modelSupportsNativePdfInput(modelConfig)) {
-                            pdfFilePartBuffer = pdfBuffer;
+                    }
+
+                    // Scanned or image-only PDFs have no local text layer.
+                    // Validate them before leaving the process, then use OCR 4
+                    // as a backend conversion model. It is never exposed in
+                    // the Insight model picker and never consumes user model
+                    // credits; its page cost is recorded as internal usage.
+                    if (!extractedPdfText) {
+                        if (!pdfValidated) {
+                            try {
+                                await validatePdfSafely(pdfBuffer);
+                                pdfValidated = true;
+                            } catch {
+                                throw new ChatAccessError(
+                                    400,
+                                    "INVALID_PDF_ATTACHMENT",
+                                    "The attached PDF is invalid or unsupported."
+                                );
+                            }
+                        }
+
+                        try {
+                            const ocrResult = await extractPdfTextWithMistralOcr(
+                                pdfBuffer,
+                                remainingCharacters - 64
+                            );
+                            if (ocrResult?.text) {
+                                extractedPdfText = ocrResult.text;
+                            }
+                            if (ocrResult) {
+                                const ocrCostMicroUsd =
+                                    ocrResult.pageCount *
+                                    MISTRAL_OCR_COST_MICRO_USD_PER_PAGE;
+                                await recordInternalProviderUsage({
+                                    provider: "mistral",
+                                    modelId: ocrResult.modelId,
+                                    inputTokens: 0,
+                                    cachedInputTokens: 0,
+                                    outputTokens: 0,
+                                    estimatedCostMicroUsd: ocrCostMicroUsd,
+                                    uncachedInputCostMicroUsd: ocrCostMicroUsd,
+                                    cachedInputCostMicroUsd: 0,
+                                    outputCostMicroUsd: 0,
+                                    source: "ocr",
+                                }).catch((error) => {
+                                    logRequestError(
+                                        "mistral_ocr_usage_record_failed",
+                                        traceId,
+                                        error,
+                                        requestedModelId
+                                    );
+                                });
+                                console.info(
+                                    JSON.stringify({
+                                        event: "mistral_ocr_completed",
+                                        traceId,
+                                        backendModelId: ocrResult.modelId,
+                                        pageCount: ocrResult.pageCount,
+                                        attachmentBytes: pdfBuffer.byteLength,
+                                        timestamp: new Date().toISOString(),
+                                    })
+                                );
+                            }
+                        } catch (error) {
+                            logRequestError(
+                                "mistral_ocr_failed",
+                                traceId,
+                                error,
+                                requestedModelId
+                            );
+                            if (!modelSupportsNativePdfInput(modelConfig)) {
+                                throw new ChatAccessError(
+                                    502,
+                                    "PDF_OCR_UNAVAILABLE",
+                                    "The document text service is temporarily unavailable. Try again shortly or choose a model with native PDF support."
+                                );
+                            }
                         }
                     }
-                    if (!extractedPdfText && !pdfFilePartBuffer) {
+
+                    if (!extractedPdfText) {
                         if (modelSupportsNativePdfInput(modelConfig)) {
                             pdfFilePartBuffer = pdfBuffer;
                         } else {
@@ -1888,13 +2026,21 @@ async function handleChatPost(
                                               MAX_STORED_MESSAGE_CHARACTERS
                                           )}\n\n[Response truncated for storage]`
                                         : generatedText;
+                                const providerContext =
+                                    modelConfig.reasoning !== undefined &&
+                                    responseResult.status === "fulfilled"
+                                        ? serializeProviderResponseMessages(
+                                              responseResult.value.messages
+                                          )
+                                        : null;
                                 await prisma.$transaction(async (tx) => {
                                     await assertMessageCapacity(
                                         tx,
                                         session!.user!.id,
                                         conversationId,
                                         1,
-                                        Buffer.byteLength(storedContent, "utf8")
+                                        Buffer.byteLength(storedContent, "utf8") +
+                                            (providerContext?.byteLength || 0)
                                     );
                                     const sourcePrompt = await tx.message.findFirst({
                                         where: {
@@ -1928,6 +2074,17 @@ async function handleChatPost(
                                             searchMetadata: webSearchExecution,
                                         },
                                     });
+                                    if (providerContext) {
+                                        await tx.messageProviderContext.create({
+                                            data: {
+                                                messageId: assistantMessageId,
+                                                modelId: requestedModelId,
+                                                provider: modelConfig.provider,
+                                                responseMessages:
+                                                    providerContext.messages,
+                                            },
+                                        });
+                                    }
                                 });
                             } catch (error) {
                                 logRequestError(

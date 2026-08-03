@@ -5,7 +5,7 @@ import { getWebSearchCapability } from "../lib/webSearchCapability.ts";
 
 const openaiCapability = getWebSearchCapability("gpt-5-5");
 const anthropicCapability = getWebSearchCapability("claude-sonnet-5");
-const googleCapability = getWebSearchCapability("gemini-3-5-flash");
+const googleCapability = getWebSearchCapability("gemini-3-6-flash");
 const perplexityCapability = getWebSearchCapability("perplexity/sonar");
 const unsupportedCapability = getWebSearchCapability("codestral");
 

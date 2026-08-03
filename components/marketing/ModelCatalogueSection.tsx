@@ -21,6 +21,7 @@ const PROVIDER_LABELS: Record<AiProvider, string> = {
   deepseek: "DeepSeek",
   mistral: "Mistral",
   moonshot: "Moonshot AI",
+  minimax: "MiniMax",
   qwen: "Qwen",
   zhipu: "Zhipu AI",
   perplexity: "Perplexity",

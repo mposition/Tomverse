@@ -128,10 +128,10 @@ test("an unpriced model on an inherited row still reports as fallback-priced", (
   // depend on this: when the fallback price was stored in the row, the
   // fallback share measured 0% while models were in fact reserved at
   // US$15/US$60.
-  const fable = getModel("claude-fable-5");
-  assert.ok(fable);
+  const unpriced = getModel("mistral-large-3");
+  assert.ok(unpriced);
   const pricing = resolveModelPricing({
-    ...fable,
+    ...unpriced,
     inputUsdPerMillionTokens: undefined,
     outputUsdPerMillionTokens: undefined,
     cachedInputPriceMultiplier: undefined,

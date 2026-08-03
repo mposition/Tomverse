@@ -44,6 +44,7 @@ const providerConsoleHref: Record<AiProvider, string> = {
   deepseek: "https://platform.deepseek.com/usage",
   mistral: "https://admin.mistral.ai/organization/usage",
   moonshot: "https://platform.kimi.ai/console/account",
+  minimax: "https://platform.minimax.io/user-center/basic-information/interface-key",
   qwen: "https://billing-cost.console.alibabacloud.com/finance/month-bill/account",
   zhipu: "https://z.ai/manage-apikey/billing",
   perplexity:

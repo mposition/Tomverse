@@ -64,7 +64,7 @@ test("always mode + one native-supported model reserves 8 credits", () => {
 
 test("always mode + three native-supported models reserves 24 credits total", () => {
   const estimate = estimateRequestCredits({
-    models: [getModel("gpt-5-5"), getModel("claude-sonnet-5"), getModel("gemini-3-5-flash")],
+    models: [getModel("gpt-5-5"), getModel("claude-sonnet-5"), getModel("gemini-3-6-flash")],
     estimatedInputTokens: 100,
     webSearchMode: "always",
   });

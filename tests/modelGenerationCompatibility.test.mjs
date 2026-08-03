@@ -37,6 +37,33 @@ test("OpenAI-compatible reasoning models pass reasoning_effort through the SDK",
   });
 });
 
+test("Claude 5 models use adaptive thinking with their catalogue effort", () => {
+  for (const id of ["claude-fable-5", "claude-opus-4-8"]) {
+    assert.deepEqual(getModelProviderOptions(getModel(id)), {
+      anthropic: {
+        thinking: { type: "adaptive" },
+        effort: "high",
+      },
+    });
+  }
+});
+
+test("Kimi K3 uses the Moonshot provider and explicit high effort", () => {
+  assert.deepEqual(getModelGenerationSettings(getModel("kimi-k3"), {
+    temperature: 0.2,
+  }), {
+    providerOptions: {
+      moonshotai: { reasoningEffort: "high" },
+    },
+  });
+});
+
+test("MiniMax M3 enables adaptive thinking without Anthropic-only effort", () => {
+  assert.deepEqual(getModelProviderOptions(getModel("minimax-m3")), {
+    anthropic: { thinking: { type: "adaptive" } },
+  });
+});
+
 test("new Gemini request paths omit unsupported sampling parameters", () => {
   for (const id of ["gemini-3-6-flash", "gemini-2-5-flash"]) {
     assert.deepEqual(getModelGenerationSettings(getModel(id), { temperature: 0.1 }), {});

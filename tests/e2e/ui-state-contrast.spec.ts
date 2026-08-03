@@ -56,7 +56,7 @@ async function expectScopeMeetsAa(page: Page, scopeSelector: string, label: stri
 const FAILING_STUB = {
   "gpt-5-4-mini": { kind: "error", status: 500, message: "QA fixture: request failed." },
   "claude-sonnet-5": { kind: "error", status: 500, message: "QA fixture: request failed." },
-  "gemini-3-5-flash": {
+  "gemini-3-6-flash": {
     kind: "error",
     status: 500,
     message: "QA fixture: request failed.",
@@ -66,7 +66,7 @@ const FAILING_STUB = {
 const PARTIAL_STUB = {
   "gpt-5-4-mini": { kind: "success", chunks: ["The capital of France is Paris."], intervalMs: 5 },
   "claude-sonnet-5": { kind: "success", chunks: ["Paris."], intervalMs: 5 },
-  "gemini-3-5-flash": {
+  "gemini-3-6-flash": {
     kind: "error",
     status: 500,
     message: "QA fixture: model C failed.",
