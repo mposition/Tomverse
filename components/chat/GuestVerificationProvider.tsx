@@ -22,6 +22,10 @@ import {
   type GuestVerificationFailure,
   type GuestVerificationOutcome,
 } from "@/components/chat/guestVerificationFailure";
+import {
+  createGuestChatCoordinatorState,
+  runCoordinatedGuestChatRequest,
+} from "@/components/chat/guestChatRequestCoordinator";
 
 /**
  * One guest-verification surface for the whole chat page.
@@ -114,11 +118,14 @@ type PendingVerification = {
 };
 
 type GuestChatRequestOptions<T> = {
-  /** Runs once real verification produced a token (or is not configured). */
+  /** Runs once real verification produced a token. */
   sendWithToken: (token: string | undefined) => Promise<T>;
   /**
    * Runs for the panels that waited: by then the winner's verified retry has
-   * already set the server's grant cookie, so these must NOT spend a token.
+   * already completed successfully, so the server's grant cookie is set and
+   * these must NOT spend a token. If the winner's retry failed instead, the
+   * waiting panels fail with it -- they never send a tokenless request the
+   * server would only answer with another TURNSTILE_REQUIRED.
    */
   sendAfterGrant: () => Promise<T>;
 };
@@ -223,7 +230,7 @@ export function GuestVerificationProvider({
   // Serialises every verification: a second action never opens a second
   // widget, it queues behind the first.
   const queueRef = useRef<Promise<unknown>>(Promise.resolve());
-  const guestChatVerificationRef = useRef<Promise<void> | null>(null);
+  const guestChatCoordinatorRef = useRef(createGuestChatCoordinatorState());
 
   const clearTimers = useCallback(() => {
     if (readyTimerRef.current !== null) {
@@ -304,34 +311,18 @@ export function GuestVerificationProvider({
   );
 
   const runGuestChatRequest = useCallback(
-    async <T,>({
-      sendWithToken,
-      sendAfterGrant,
-    }: GuestChatRequestOptions<T>): Promise<T> => {
-      const inFlight = guestChatVerificationRef.current;
-      if (inFlight) {
-        // Another panel is already running the challenge. Wait for its full
-        // verified retry -- not just for the token -- because only a completed
-        // retry proves the server issued the grant cookie this panel relies on.
-        await inFlight.catch(() => {});
-        return sendAfterGrant();
-      }
-
-      const verifyAndRetry = (async () => {
-        const token = await requestToken("guest_chat");
-        return sendWithToken(token);
-      })();
-      guestChatVerificationRef.current = verifyAndRetry.then(
-        () => undefined,
-        () => undefined
-      );
-      try {
-        return await verifyAndRetry;
-      } finally {
-        guestChatVerificationRef.current = null;
-      }
-    },
-    [requestToken]
+    <T,>({ sendWithToken, sendAfterGrant }: GuestChatRequestOptions<T>) =>
+      // The coordination itself -- including "a waiting panel inherits the
+      // verifier's failure instead of firing a tokenless retry" and "no site
+      // key means a typed unavailable error, not a repeat request" -- lives in
+      // guestChatRequestCoordinator.ts, where it is unit-tested.
+      runCoordinatedGuestChatRequest(guestChatCoordinatorRef.current, {
+        isEnabled,
+        requestToken: () => requestToken("guest_chat"),
+        sendWithToken,
+        sendAfterGrant,
+      }),
+    [isEnabled, requestToken]
   );
 
   const cancel = useCallback(() => {
@@ -557,7 +548,12 @@ const DISABLED_VALUE: GuestVerificationContextValue = {
   isChallengeVisible: false,
   isLongWait: false,
   requestToken: () => Promise.resolve(undefined),
-  runGuestChatRequest: ({ sendWithToken }) => sendWithToken(undefined),
+  // Reached only after the server has already refused a tokenless request
+  // with TURNSTILE_REQUIRED. Without a mounted coordinator there is no way to
+  // produce a token, so repeating the same tokenless request would only repeat
+  // the same refusal -- fail as the typed outcome instead.
+  runGuestChatRequest: () =>
+    Promise.reject(new GuestVerificationError("unavailable")),
   cancel: () => {},
   registerHost: () => {},
   setHostSize: () => {},

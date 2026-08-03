@@ -6,6 +6,8 @@ import { Message, type ChatAttachment } from "@/components/chat/types";
 import { useSession } from "next-auth/react";
 import { useLanguage } from "@/components/LanguageProvider";
 import { useGuestVerification } from "@/components/chat/GuestVerificationProvider";
+import { isGuestVerificationError } from "@/components/chat/guestVerificationFailure";
+import { guestVerificationFailureKey } from "@/components/chat/guestVerificationCopy";
 import { useModelCatalog } from "@/components/ModelCatalogProvider";
 import { ArrowUp, PauseCircle } from "lucide-react";
 import {
@@ -803,6 +805,30 @@ function ChatAppComponent({
           assistantText.trim() ? assistantText : t("chat.responseCancelled"),
           "cancelled"
         );
+      } else if (isGuestVerificationError(error)) {
+        // The challenge itself ended without a token (failed / cancelled /
+        // timeout / expired / unavailable) -- either in this panel or in the
+        // verifying panel this one was waiting on. The panel gets the same
+        // localized sentence every verification surface uses; the draft and
+        // attachments live in the optimistic user turn, which stays.
+        const failureTraceId = requestTraceId;
+        if (failureTraceId && typeof window !== "undefined") {
+          window.localStorage.setItem(
+            "tomverse_last_error_trace_id",
+            failureTraceId
+          );
+        }
+        setAssistantMessage(
+          assistantMessageId,
+          `${t(guestVerificationFailureKey(error.kind))}${
+            failureTraceId ? `\n${t("chat.traceId")}: ${failureTraceId}` : ""
+          }`,
+          "error",
+          {
+            errorCode: `GUEST_VERIFICATION_${error.kind.toUpperCase()}`,
+            errorHadAttachments: attachments.length > 0,
+          }
+        );
       } else {
         const traceId =
           typeof requestError.traceId === "string"
@@ -823,7 +849,18 @@ function ChatAppComponent({
             ? (requestError.details as Record<string, number>).retryAfterSeconds
             : null;
         const localizedRequestError =
-          errorCode === "CHAT_RATE_LIMITED"
+          // A verification code surfacing here means the recovery flow itself
+          // was refused again (e.g. the grant cookie was not honoured). The
+          // server's English sentence must never reach the panel raw -- the
+          // guest reads the same localized verification copy as everywhere
+          // else, and the trace id below keeps it diagnosable.
+          errorCode === "TURNSTILE_REQUIRED" || errorCode === "TURNSTILE_FAILED"
+            ? t("chat.guestVerificationFailed")
+          : errorCode === "TURNSTILE_UNAVAILABLE" ||
+              errorCode === "TURNSTILE_NOT_CONFIGURED" ||
+              errorCode === "SECURITY_NOT_CONFIGURED"
+            ? t("chat.guestVerificationUnavailable")
+          : errorCode === "CHAT_RATE_LIMITED"
             ? t("chat.tooManyRequestsRetry").replace(
                 "{seconds}",
                 String(Math.max(1, retryAfterSeconds ?? 5))
