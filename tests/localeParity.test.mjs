@@ -68,7 +68,10 @@ const ENGLISH_STRING_CEILING = {
   // fr +2 (230 -> 232): externalImport.messagesCount and
   // .historyConversations — "{count} messages" / "{count} conversations" are
   // spelled identically in French; the section is otherwise fully translated.
-  fr: 232,
+  // fr +1 (232 -> 233): memoryReview.kind.structure — "Structure" is spelled
+  // identically in French; the memoryReview section is otherwise fully
+  // translated.
+  fr: 233,
   // de/es/pt +1 for the same saveAsDefaultHint key.
   de: 233,
   es: 229,
