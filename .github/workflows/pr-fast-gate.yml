@@ -129,6 +129,14 @@ jobs:
         timeout-minutes: 5
         run: npm run check:model-pricing
 
+      # Import/memory policy §12.1/§12.4: an "approved" extraction pair is
+      # what the memory pipeline will actually call, so approval without
+      # complete eval evidence, passing §12.3 metrics, a live (unexpired)
+      # approval and a human-approved eval budget fails the build.
+      - name: Memory extraction eval register
+        timeout-minutes: 5
+        run: npm run check:memory-extraction-eval
+
       # gpt-image-2 lives outside AVAILABLE_MODELS by design, so the model
       # pricing check above cannot see it. Same release contract -- every
       # enabled price is explicit and verified -- separate fail-closed net.
