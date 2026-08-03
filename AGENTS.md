@@ -249,6 +249,36 @@ UI-012에서 승인된 정책(B안)입니다. accent 색은 **hue가 아니라 �
   `docs/ui-contracts/account-model-settings.md`.
 
 <!-- BEGIN:mobile-chat-composer-invariant -->
+# 이미지 생성 (v2: 멀티 모델 비교)
+
+이미지 생성 관련 코드를 건드리기 전에 읽습니다.
+
+- `docs/policy/image-generation.md` (v2 개정 §11–§15 포함)
+
+절대 조건:
+
+- **핵심 계약은 멀티 모델 비교입니다.** 단일 모델 요청은 1-모델 그룹의
+  특수한 경우입니다. 채팅 admission token은 재사용하지 않습니다 —
+  `modelIds` 단일 POST가 한 트랜잭션에서 그룹·target·attempt·예약·
+  admission·budget을 원자 생성하고, 거절은 행도 비용도 남기지 않습니다.
+- **그룹 상태는 저장하지 않습니다.** 각 target의 최신 attempt에서
+  파생하며, 재시도는 새 그룹이 아니라 같은 target의 새 attempt입니다.
+  succeeded target 재실행은 거부합니다(이중 과금 금지).
+- **고정 성공 가격은 최악 원가가 유한할 때만 유지됩니다.** thinking
+  상한을 공식 문서로 확인할 수 없는 모델은 fail-closed로 비활성입니다.
+  `ceil(maxCost/900µ)`이 수학적 최소 크레딧이고 판매 크레딧은 별도
+  승인입니다. 이미지 가격 검증은 텍스트 모델의
+  `PENDING_VERIFIED_PRICE_REGISTER`와 별개 계층입니다.
+- **budget은 provider별 총액입니다**(`IMAGE_PROVIDER_{P}_COST_*`).
+  모델별은 관측 차원일 뿐입니다. 동시성은 workflow(활성 그룹 수)와
+  execution(provider별 job 수) 두 층입니다.
+- **Guest·Free는 전 위치 잠금 노출**(비노출·마지막 단계 차단 금지)이고,
+  이미지 결과 비교는 `comparison-action-rail`의 원칙만 차용하며 계약·
+  컴포넌트를 직접 재사용하지 않습니다. AI Review는 이미지 대화에서 계속
+  금지입니다.
+- **v1 flag는 staging 검증 전용입니다.** 멀티 모델 UX 완성 전 production
+  공개 활성화 금지, Google 모델은 가격 검증 통과 전 활성화 금지.
+
 # Trace 기반 오류 신고 자동화
 
 feedback의 Trace 검증, `errorReportToken`, `TraceErrorEvidence`, chat 오류
