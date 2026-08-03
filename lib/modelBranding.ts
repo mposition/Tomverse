@@ -31,7 +31,13 @@ export const getModelBrand = (provider: AiProvider | string): ModelBrand => {
     case "moonshot":
       return { mark: "KM", className: "from-white to-blue-50", image: "/model-icons/kimi.png" };
     case "minimax":
-      return { mark: "MM", className: "from-white to-red-50" };
+      // MiniMax has no local image asset, so the letter mark needs a real
+      // brand-colour surface. A near-white gradient makes the shared white
+      // fallback text fail WCAG contrast on the public model catalogue.
+      return {
+        mark: "MM",
+        className: "bg-red-700 from-red-600 to-red-800",
+      };
     default:
       return { mark: provider.slice(0, 2).toUpperCase(), className: "from-zinc-500 to-zinc-700" };
   }
