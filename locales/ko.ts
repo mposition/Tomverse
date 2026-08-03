@@ -570,7 +570,7 @@ export const ko = {
         emailUpdatesAccountHint:
           "이 신고 건의 접수 및 처리 상태 안내를 계정 이메일로 보내드립니다.",
         emailUpdatesEmailLabel: "알림 받을 이메일",
-        emailUpdatesEmailPlaceholder: "you@example.com",
+        emailUpdatesEmailPlaceholder: "hong.gildong@example.com",
         emailUpdatesEmailHint: "이 신고 건의 상태 안내에만 사용됩니다.",
         emailUpdatesEmailInvalid: "올바른 이메일 주소를 입력해 주세요.",
         emailUpdatesScheduled: "접수 이메일과 처리 상태를 보내드릴 예정입니다.",

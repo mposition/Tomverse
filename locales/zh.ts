@@ -467,7 +467,7 @@ export const zh = {
         emailUpdatesLabel: "通过电子邮件接收处理状态",
         emailUpdatesAccountHint: "此报告的受理与处理状态通知将发送到你的账户邮箱。",
         emailUpdatesEmailLabel: "接收通知的邮箱",
-        emailUpdatesEmailPlaceholder: "you@example.com",
+        emailUpdatesEmailPlaceholder: "zhang.san@example.com",
         emailUpdatesEmailHint: "仅用于此报告的状态通知。",
         emailUpdatesEmailInvalid: "请输入有效的电子邮件地址。",
         emailUpdatesScheduled: "我们会向你发送受理回执和处理状态邮件。",

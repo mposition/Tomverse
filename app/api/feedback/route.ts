@@ -117,48 +117,46 @@ export async function POST(req: Request) {
     // operator notification, the received lifecycle event, and (when consented)
     // the submitter's receipt email. Enqueuing after the write would leave a
     // window where a crash loses a notification with no record one was owed.
-    const { feedback, delivery, userDelivery } = await prisma.$transaction(
-      async (tx) => {
-        const feedback = await tx.feedback.create({
-          data: {
-            userId: session?.user?.id || null,
-            email,
-            type: body.type,
-            message: body.message,
-            traceId: body.traceId || null,
-            modelId: body.modelId || null,
-            plan: body.plan || null,
-            hasAttachments: Boolean(body.hasAttachments),
-            attachmentCount: body.attachmentCount || 0,
-            path: body.path || null,
-            userAgent: body.userAgent || null,
-            language,
-            emailUpdatesConsent,
-          },
-        });
-        // The immutable snapshot the receipt email renders from -- and the
-        // record that this stage was announced at most once.
-        await tx.feedbackLifecycleEvent.create({
-          data: {
-            feedbackId: feedback.id,
-            stage: FEEDBACK_LIFECYCLE_STAGE.received,
-            previousStatus: null,
-            newStatus: feedback.status,
-          },
-        });
-        const delivery = await enqueueNotificationDelivery(tx, {
-          kind: NOTIFICATION_KIND.supportFeedback,
-          referenceId: feedback.id,
-        });
-        const userDelivery = emailUpdatesConsent
-          ? await enqueueNotificationDelivery(tx, {
-              kind: NOTIFICATION_KIND.feedbackUserReceived,
-              referenceId: feedback.id,
-            })
-          : null;
-        return { feedback, delivery, userDelivery };
-      }
-    );
+    const { feedback, delivery, userDelivery } = await prisma.$transaction(async (tx) => {
+      const feedback = await tx.feedback.create({
+        data: {
+          userId: session?.user?.id || null,
+          email,
+          type: body.type,
+          message: body.message,
+          traceId: body.traceId || null,
+          modelId: body.modelId || null,
+          plan: body.plan || null,
+          hasAttachments: Boolean(body.hasAttachments),
+          attachmentCount: body.attachmentCount || 0,
+          path: body.path || null,
+          userAgent: body.userAgent || null,
+          language,
+          emailUpdatesConsent,
+        },
+      });
+      // The immutable snapshot the receipt email renders from -- and the
+      // record that this stage was announced at most once.
+      await tx.feedbackLifecycleEvent.create({
+        data: {
+          feedbackId: feedback.id,
+          stage: FEEDBACK_LIFECYCLE_STAGE.received,
+          previousStatus: null,
+          newStatus: feedback.status,
+        },
+      });
+      const delivery = await enqueueNotificationDelivery(tx, {
+        kind: NOTIFICATION_KIND.supportFeedback,
+        referenceId: feedback.id,
+      });
+      const userDelivery = emailUpdatesConsent
+        ? await enqueueNotificationDelivery(tx, {
+            kind: NOTIFICATION_KIND.feedbackUserReceived,
+            referenceId: feedback.id,
+          })
+        : null;
+      return { feedback, delivery, userDelivery };
+    });
 
     // From here on the submission is stored. Nothing below may turn this into
     // a failure for the user: a notification that cannot be delivered is an
