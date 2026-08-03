@@ -1378,7 +1378,6 @@ test.describe("per-message trace ownership", () => {
   // outside it is not recognised as a guest conversation at all.
   const CHAT_ID = "guest_trace_chat";
   const MODEL_A = "gpt-5-4-mini";
-  const MODEL_B = "claude-sonnet-5";
   const TRACE_A = "aaaaaaaa-1111-4111-8111-111111111111";
   const TRACE_B = "bbbbbbbb-2222-4222-8222-222222222222";
   const TRACE_EMPTY = "cccccccc-3333-4333-8333-333333333333";
