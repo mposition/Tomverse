@@ -211,26 +211,24 @@ test("retired models stay out of the user model catalogue", async ({ page }) => 
     "grok-4",
     "grok-3",
     "grok-3-mini",
+    "codestral",
   ]) {
     await expect(
       dialog.locator(`[data-testid="model-option"][data-model-id="${retiredModelId}"]`)
     ).toHaveCount(0);
   }
-  // Grok 4.5 is the one xAI model that survives, and Kimi K2.7 keeps its
-  // place.
-  for (const liveModelId of ["grok-4-5", "kimi-k2.7-code"]) {
+  // Grok 4.5 is the one xAI model that survives, Kimi K2.7 keeps its
+  // place, and the newly launched Kimi/MiniMax models are public.
+  for (const liveModelId of [
+    "grok-4-5",
+    "kimi-k2.7-code",
+    "kimi-k3",
+    "minimax-m3",
+  ]) {
     await expect(
       dialog.locator(`[data-testid="model-option"][data-model-id="${liveModelId}"]`)
     ).toHaveCount(1);
   }
-  // Kimi K3's id is registered but the model is withheld until its unit
-  // economics are settled, so it must not reach the picker -- and it must not
-  // be teased there either, since a listed-but-unselectable entry is a
-  // promise the catalogue cannot keep.
-  await expect(
-    dialog.locator('[data-testid="model-option"][data-model-id="kimi-k3"]')
-  ).toHaveCount(0);
-  await expect(dialog.getByText(/kimi k3/i)).toHaveCount(0);
   // GPT-OSS is Groq's suggested Llama successor and is deliberately not
   // adopted, so nothing in the catalogue may advertise it.
   await expect(dialog.getByText(/gpt-?oss/i)).toHaveCount(0);
@@ -1105,7 +1103,7 @@ test.describe("widespread selected outage copy and layout (RECON-OPS-002)", () =
     // below catches.
     { id: "gemini-3-6-flash", provider: "google", name: "Gemini 3.6 Flash" },
     { id: "glm-5.2", provider: "zhipu", name: "GLM 5.2" },
-    { id: "codestral", provider: "mistral", name: "Codestral" },
+    { id: "minimax-m3", provider: "minimax", name: "MiniMax M3" },
     { id: "mistral-large-3", provider: "mistral", name: "Mistral Large 3" },
     { id: "grok-4-5", provider: "xai", name: "Grok 4.5" },
     { id: "deepseek-v4-pro", provider: "deepseek", name: "DeepSeek-V4 Pro" },

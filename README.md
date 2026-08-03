@@ -330,8 +330,12 @@ and **Provider reconciliation unavailable on current Mistral plan**. Compare the
 internal monthly total with Mistral Console Usage manually. If a future Mistral
 plan exposes a supported numeric billing endpoint, the generic
 `PROVIDER_MISTRAL_USAGE_*` variables can opt the provider back into automatic
-reconciliation. This calculation covers Chat Completions; OCR, Audio, Agents,
-Connectors, and fine-tuning require separate accounting before they are enabled.
+reconciliation. This calculation covers Chat Completions and the OCR 4 backend.
+Scanned PDFs that have no local text layer are sent to `mistral-ocr-4-0`;
+Tomverse keeps only bounded Markdown in the active chat request and records the
+published US$4/1,000-page cost under the separate `ocr` usage source. OCR 4 is
+not exposed as a selectable Insight chat model. Audio, Agents, Connectors, and
+fine-tuning still require separate accounting before they are enabled.
 
 Deploy migration `20260715233000_mistral_response_usage_accounting` before
 releasing cached-token accounting in production.
@@ -435,6 +439,28 @@ does not expose a supported date-based cost API, so Usage Reconciliation shows
 request-time model price snapshot supply the internal daily cost; the Balance
 API remains a separate live prepaid-funds check. Compare the monthly internal
 total with Kimi API Platform manually.
+
+Kimi K3 uses the official `@ai-sdk/moonshotai` adapter rather than the generic
+OpenAI adapter. This keeps `reasoning_content` separate from visible answer
+text. The complete provider response needed by K3 multi-turn chat is stored in
+the private `MessageProviderContext` table and is never returned by conversation
+APIs or exports. Ordinary Insight chat requests set `reasoning_effort=high`
+instead of inheriting K3's more expensive `max` default.
+
+MiniMax M3 uses MiniMax's Anthropic-compatible endpoint so thinking blocks stay
+separate from visible answer text. Configure the key and operational budgets
+before deploying the code that enables the provider:
+
+```text
+MINIMAX_API_KEY=<MiniMax API key>
+CHAT_PROVIDER_MINIMAX_COST_MICROUSD_PER_DAY=<explicit production daily cap>
+CHAT_PROVIDER_MINIMAX_COST_MICROUSD_PER_MONTH=<explicit production monthly cap>
+```
+
+The request path omits `service_tier`, so the registered M3 prices describe the
+standard tier. Usage reconciliation is internal response accounting unless a
+supported aggregate endpoint is explicitly configured through
+`PROVIDER_MINIMAX_USAGE_*`.
 
 Google Cloud Billing reconciliation reads the standard Cloud Billing export in
 BigQuery. First enable the standard usage-cost export, then give a dedicated

@@ -27,7 +27,7 @@ test("confirmed-native models report the right tool provider and force/cost flag
     assert.deepEqual(getWebSearchCapability(id), anthropic);
   }
 
-  const google = getWebSearchCapability("gemini-3-5-flash");
+  const google = getWebSearchCapability("gemini-3-6-flash");
   assert.equal(google.support, "native");
   assert.equal(google.provider, "google");
   assert.equal(google.canForceExecution, false);

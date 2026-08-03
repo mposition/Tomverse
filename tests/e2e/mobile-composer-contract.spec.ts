@@ -59,12 +59,12 @@ test.beforeEach(async ({}, testInfo) => {
  *  the composer sits in the partial-support state the contract calls out. */
 const MODEL_A = "gpt-5-4-mini";
 const MODEL_B = "claude-sonnet-5";
-const MODEL_C = "gemini-3-5-flash";
+const MODEL_C = "gemini-3-6-flash";
 const THREE_MODELS = [MODEL_A, MODEL_B, MODEL_C];
 /** Neither of these can search: the fully blocked state. */
 const NO_SEARCH_MODELS = ["gpt-5-4-mini", "deepseek-v4-flash"];
 /** All three verified for provider-native search: the full-support state. */
-const ALL_SEARCH_MODELS = ["claude-haiku-4-5", "claude-sonnet-5", "gemini-3-5-flash"];
+const ALL_SEARCH_MODELS = ["claude-haiku-4-5", "claude-sonnet-5", "gemini-3-6-flash"];
 const DEEP_RESEARCH_MODEL = "perplexity/sonar-deep-research";
 
 /** The contract's floor: the input keeps ~all of the composer's inner width. */

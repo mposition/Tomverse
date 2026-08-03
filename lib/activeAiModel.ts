@@ -3,6 +3,7 @@ import "server-only";
 import { createAnthropic } from "@ai-sdk/anthropic";
 import { createGoogle } from "@ai-sdk/google";
 import { createOpenAI } from "@ai-sdk/openai";
+import { createMoonshotAI } from "@ai-sdk/moonshotai";
 import type { AiModel } from "@/lib/models";
 import { PROVIDER_API_CONFIGURATION } from "@/lib/modelRegistryShared";
 import { deepseekUsageFetch } from "@/lib/deepseekUsageAdapter";
@@ -39,7 +40,11 @@ export const getActiveAiModel = (model: AiModel) => {
     case "xai":
       return createOpenAI(configuration).chat(model.apiModel);
     case "moonshot":
-      return createOpenAI(configuration).chat(model.apiModel);
+      // The dedicated provider preserves reasoning_content as an AI SDK
+      // reasoning part. The generic OpenAI adapter silently discarded it.
+      return createMoonshotAI(configuration)(model.apiModel);
+    case "minimax":
+      return createAnthropic(configuration)(model.apiModel);
     case "qwen":
       return createOpenAI(configuration).chat(model.apiModel);
     case "perplexity":

@@ -49,7 +49,7 @@ const providerHeaders = (
   provider: AiProvider,
   apiKey: string
 ): Record<string, string> => {
-  if (provider === "anthropic") {
+  if (provider === "anthropic" || provider === "minimax") {
     return {
       Accept: "application/json",
       "anthropic-version": "2023-06-01",
@@ -77,7 +77,7 @@ const providerCatalogUrl = (
   if (provider === "google") {
     url.searchParams.set("pageSize", "1000");
     if (cursor) url.searchParams.set("pageToken", cursor);
-  } else if (provider === "anthropic") {
+  } else if (provider === "anthropic" || provider === "minimax") {
     url.searchParams.set("limit", "1000");
     if (cursor) url.searchParams.set("after_id", cursor);
   }

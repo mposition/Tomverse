@@ -39,7 +39,7 @@ test.beforeEach(async ({}, testInfo) => {
 
 const MODEL_A = "gpt-5-4-mini";
 const MODEL_B = "claude-sonnet-5";
-const MODEL_C = "gemini-3-5-flash";
+const MODEL_C = "gemini-3-6-flash";
 const THREE_MODELS = [MODEL_A, MODEL_B, MODEL_C];
 
 /**

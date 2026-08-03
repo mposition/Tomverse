@@ -233,10 +233,14 @@ test("new catalogue models use their exact provider prices and output caps", () 
     "gpt-5-6-terra": [2, 12, 128_000],
     "gpt-5-6-luna": [0.2, 1.2, 128_000],
     "gemini-3-6-flash": [1.5, 7.5, 65_536],
+    "gemini-3-5-flash": [1.5, 9, 65_536],
     "gemini-2-5-flash": [0.3, 2.5, 65_536],
     "grok-4-3": [1.25, 2.5, 16_384],
     "grok-4-5": [2, 6, 16_384],
     "mistral-medium-3-1": [1.5, 7.5, 16_384],
+    "claude-fable-5": [10, 50, 128_000],
+    "kimi-k3": [3, 15, 1_048_576],
+    "minimax-m3": [0.3, 1.2, 524_288],
   };
 
   for (const [modelId, [input, output, maxOutputTokens]] of Object.entries(expected)) {
@@ -253,6 +257,33 @@ test("new catalogue models use their exact provider prices and output caps", () 
   const mistralMedium = resolveModelPricing(model("mistral-medium-3-1"));
   assert.equal(mistralMedium.cachedInputPriceMultiplier, 1);
   assert.equal(mistralMedium.cachedInputPricingVerified, false);
+
+  const fable = resolveModelPricing(model("claude-fable-5"));
+  assert.equal(fable.cachedInputPriceMultiplier, 0.1);
+  assert.equal(fable.cachedInputPricingVerified, true);
+
+  const kimi = resolveModelPricing(model("kimi-k3"));
+  assert.equal(kimi.cachedInputPriceMultiplier, 0.1);
+  assert.equal(kimi.cachedInputPricingVerified, true);
+});
+
+test("MiniMax M3 switches price tier above a 512K prompt", () => {
+  const short = resolveModelPricing(model("minimax-m3"), {
+    estimatedPromptTokens: 512_000,
+  });
+  const long = resolveModelPricing(model("minimax-m3"), {
+    estimatedPromptTokens: 512_001,
+  });
+  assert.deepEqual(
+    [short.inputUsdPerMillionTokens, short.outputUsdPerMillionTokens],
+    [0.3, 1.2]
+  );
+  assert.deepEqual(
+    [long.inputUsdPerMillionTokens, long.outputUsdPerMillionTokens],
+    [0.6, 2.4]
+  );
+  assert.equal(long.costSource, "registry_long_context");
+  assert.equal(long.longContextThresholdTokens, 512_000);
 });
 
 test("GPT-5.6 and Grok long-context tiers apply at their documented boundaries", () => {

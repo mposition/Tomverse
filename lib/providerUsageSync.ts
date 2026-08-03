@@ -1392,6 +1392,31 @@ const moonshotInternalUsage = async (
   };
 };
 
+const minimaxInternalUsage = async (
+  date: Date
+): Promise<ProviderUsageSyncResult> => {
+  const provider: AiProvider = "minimax";
+  const usage = await getInternalProviderUsageSummary({ provider, date });
+  return {
+    provider,
+    displayName: PROVIDER_DISPLAY_NAMES[provider],
+    status: "internal",
+    reportedCostMicroUsd: null,
+    internalCostMicroUsd: usage.estimatedCostMicroUsd,
+    internalUsage: {
+      requestCount: usage.requestCount,
+      inputTokens: usage.inputTokens,
+      cachedInputTokens: usage.cachedInputTokens,
+      outputTokens: usage.outputTokens,
+    },
+    usageSourceLabel: "Internal response accounting",
+    reconciliationLabel: "Official aggregate cost API unavailable",
+    message:
+      "MiniMax response Usage is costed with the request-time model price snapshot. Verify the period total in MiniMax Platform.",
+    diagnostic: null,
+  };
+};
+
 const deepseekInternalUsage = async (
   date: Date
 ): Promise<ProviderUsageSyncResult> => {
@@ -1480,6 +1505,10 @@ const syncProviderUsage = async (
       return hasGenericUsageEndpoint(provider, date)
         ? syncGenericUsage(provider, date)
         : moonshotInternalUsage(date);
+    case "minimax":
+      return hasGenericUsageEndpoint(provider, date)
+        ? syncGenericUsage(provider, date)
+        : minimaxInternalUsage(date);
     case "perplexity":
       return perplexityInternalUsage(date);
     default:

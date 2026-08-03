@@ -511,6 +511,25 @@ export const MODEL_PRICING: readonly ModelPricingProfile[] = [
         effectiveDate: "2026-08-01",
     },
     {
+        modelId: "gemini-3-5-flash",
+        provider: "google",
+        apiModelId: "gemini-3.5-flash",
+        ...DIRECT_STANDARD,
+        // Google prices 3.5 Flash above 3.6 Flash on output ($9 vs $7.50).
+        // It therefore belongs in the same Advanced credit band; leaving it
+        // on the Standard fallback understated both its price and output cap.
+        tiers: flatTier(1.5, 9, 0.1),
+        reasoningTokenBilling: "billed_as_output",
+        nativeSearchCostMicroUsdPerQuery: 14_000,
+        maxOutputTokens: 65_536,
+        reservationOutputTokens: 8_192,
+        reservationOutputBasis: "conservative_default",
+        cachedInputPricingVerified: true,
+        priceSource: "google_gemini_3_5_flash_standard_api_list_price",
+        pricingVersion: "google-gemini-3.5-flash-2026-08-03",
+        effectiveDate: "2026-08-03",
+    },
+    {
         // Stable Tomverse ID upgraded in place to Gemini 3.5 Flash-Lite.
         modelId: "gemini-2-5-flash",
         provider: "google",
@@ -558,20 +577,38 @@ export const MODEL_PRICING: readonly ModelPricingProfile[] = [
         effectiveDate: "2026-08-01",
     },
     {
-        modelId: "claude-opus-4-8",
+        modelId: "claude-fable-5",
         provider: "anthropic",
-        apiModelId: "claude-opus-4-8",
+        apiModelId: "claude-fable-5",
         ...DIRECT_STANDARD,
-        tiers: flatTier(5, 25),
+        tiers: flatTier(10, 50, 0.1),
         reasoningTokenBilling: "billed_as_output",
         nativeSearchCostMicroUsdPerQuery: 10_000,
-        maxOutputTokens: 8_192,
-        reservationOutputTokens: 4_096,
-        reservationOutputBasis: "p90_output_tokens",
-        cachedInputPricingVerified: false,
-        priceSource: "anthropic_standard_api_list_price",
-        pricingVersion: "anthropic-claude-opus-4-8-2026-08-01",
-        effectiveDate: "2026-08-01",
+        maxOutputTokens: 128_000,
+        reservationOutputTokens: 8_192,
+        reservationOutputBasis: "conservative_default",
+        cachedInputPricingVerified: true,
+        priceSource: "anthropic_claude_5_standard_api_list_price",
+        pricingVersion: "anthropic-claude-fable-5-2026-08-03",
+        effectiveDate: "2026-08-03",
+    },
+    {
+        // The Tomverse ID is stable; this profile follows its new Opus 5
+        // upstream route and therefore gets a new, non-retroactive version.
+        modelId: "claude-opus-4-8",
+        provider: "anthropic",
+        apiModelId: "claude-opus-5",
+        ...DIRECT_STANDARD,
+        tiers: flatTier(5, 25, 0.1),
+        reasoningTokenBilling: "billed_as_output",
+        nativeSearchCostMicroUsdPerQuery: 10_000,
+        maxOutputTokens: 128_000,
+        reservationOutputTokens: 8_192,
+        reservationOutputBasis: "conservative_default",
+        cachedInputPricingVerified: true,
+        priceSource: "anthropic_claude_5_standard_api_list_price",
+        pricingVersion: "anthropic-claude-opus-5-2026-08-03",
+        effectiveDate: "2026-08-03",
     },
     // Provider-verified profiles added by the 2026-08-01 catalogue migration.
     {
@@ -699,6 +736,69 @@ export const MODEL_PRICING: readonly ModelPricingProfile[] = [
         priceSource: "mistral_medium_3_5_model_card",
         pricingVersion: "mistral-medium-3.5-2026-08-01",
         effectiveDate: "2026-08-01",
+    },
+    {
+        // Historical settlement profile only: Codestral is no longer
+        // enabled or listed in Insight, but old reservations remain payable.
+        modelId: "codestral",
+        provider: "mistral",
+        apiModelId: "codestral-latest",
+        ...DIRECT_STANDARD,
+        tiers: flatTier(0.3, 0.9),
+        reasoningTokenBilling: "billed_as_output",
+        maxOutputTokens: 32_768,
+        reservationOutputTokens: 4_096,
+        reservationOutputBasis: "conservative_default",
+        cachedInputPricingVerified: false,
+        priceSource: "mistral_codestral_standard_api_list_price",
+        pricingVersion: "mistral-codestral-2026-08-03",
+        effectiveDate: "2026-08-03",
+    },
+    {
+        modelId: "kimi-k3",
+        provider: "moonshot",
+        apiModelId: "kimi-k3",
+        ...DIRECT_STANDARD,
+        tiers: flatTier(3, 15, 0.1),
+        reasoningTokenBilling: "billed_as_output",
+        maxOutputTokens: 1_048_576,
+        reservationOutputTokens: 16_384,
+        reservationOutputBasis: "conservative_default",
+        cachedInputPricingVerified: true,
+        priceSource: "moonshot_kimi_k3_official_platform_price",
+        pricingVersion: "moonshot-kimi-k3-2026-08-03",
+        effectiveDate: "2026-08-03",
+    },
+    {
+        modelId: "minimax-m3",
+        provider: "minimax",
+        apiModelId: "MiniMax-M3",
+        ...DIRECT_STANDARD,
+        // MiniMax M3 currently doubles its standard token rates above a
+        // 512K-token prompt. Keep the long-context tier explicit so the
+        // reservation cannot silently price a 1M prompt at the short rate.
+        tiers: [
+            {
+                maxPromptTokens: 512_000,
+                inputUsdPerMillionTokens: 0.3,
+                outputUsdPerMillionTokens: 1.2,
+                cachedInputPriceMultiplier: 0.2,
+            },
+            {
+                maxPromptTokens: null,
+                inputUsdPerMillionTokens: 0.6,
+                outputUsdPerMillionTokens: 2.4,
+                cachedInputPriceMultiplier: 0.2,
+            },
+        ],
+        reasoningTokenBilling: "billed_as_output",
+        maxOutputTokens: 524_288,
+        reservationOutputTokens: 8_192,
+        reservationOutputBasis: "conservative_default",
+        cachedInputPricingVerified: true,
+        priceSource: "minimax_m3_official_api_promotional_price",
+        pricingVersion: "minimax-m3-2026-08-03",
+        effectiveDate: "2026-08-03",
     },
     {
         modelId: "deepseek-r1",
@@ -1000,21 +1100,6 @@ export type PendingVerifiedPriceEntry = {
  */
 export const PENDING_VERIFIED_PRICE_REGISTER: readonly PendingVerifiedPriceEntry[] =
     [
-        {
-            modelId: "claude-fable-5",
-            owner: "@mposition",
-            verificationTicket:
-                "https://github.com/mposition/tomverse/issues/244",
-            registeredAt: "2026-08-01",
-            expiresAt: "2026-10-30",
-            productionApproval: {
-                approvedBy: "@mposition",
-                approvedAt: "2026-08-02T10:00:00.000Z",
-                rationale:
-                    "Approved temporary production use with conservative fallback pricing while the linked verification ticket is completed. Review is required before 2026-10-30.",
-            },
-            settlementSource: "reservation_pricing",
-        },
         // grok-4-5 left this register once its real profile went in above, from
         // xAI's published rates. grok-4 left it for the other reason an entry
         // stops being needed: it is retired, so findUnpricedModels filters it

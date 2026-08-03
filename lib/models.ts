@@ -9,6 +9,7 @@ export type AiProvider =
     | "deepseek"
     | "mistral"
     | "moonshot"
+    | "minimax"
     | "qwen"
     | "zhipu"
     | "perplexity";
@@ -110,12 +111,9 @@ export type AiModel = {
     /**
      * Whether, and how strongly, this model reasons -- a catalogue fact, not
      * a request parameter. It drives the picker's reasoning badge, the
-     * reasoning filter and the usage class; the only place it becomes a
-     * provider field is Perplexity's deep-research submit
-     * (lib/perplexityDeepResearch.ts). Every other provider is asked with no
-     * `reasoning_effort`, so its own default applies. Set it to what the
-     * model actually does, and never expose a per-request effort control for
-     * a provider this app does not send the field to.
+     * reasoning filter and the usage class. Provider-specific request options
+     * are derived centrally in lib/modelGenerationCompatibility.ts; this is
+     * never a user-controlled arbitrary request parameter.
      */
     reasoning?: "none" | "low" | "medium" | "high";
     /** Published context window for catalogue metadata and request validation. */
@@ -192,13 +190,15 @@ export const AVAILABLE_MODELS = [
     // ever guards the combined input+output check.
     { id: "gpt-5-4-mini", name: "GPT-5.4 mini", apiModel: "gpt-5.4-mini", provider: "openai", icon: "🤖", bestFor: "Fast everyday questions and concise document work", minimumPlan: "Guest", usageClass: "standard", enabled: true, status: "enabled", contextWindowTokens: 400_000, inputCapabilities: FULL_BINARY_INPUT },
 
-    { id: "claude-fable-5", name: "Claude Fable 5", apiModel: "claude-fable-5", provider: "anthropic", icon: "🧠", bestFor: "Polished writing, planning, and long-form analysis", minimumPlan: "Pro", usageClass: "premium", enabled: true, status: "enabled", inputCapabilities: FULL_BINARY_INPUT },
-    { id: "claude-opus-4-8", name: "Claude Opus 4.8", apiModel: "claude-opus-4-8", provider: "anthropic", icon: "🧠", bestFor: "Nuanced reasoning across demanding, high-stakes tasks", minimumPlan: "Pro", usageClass: "premium", enabled: true, status: "enabled", inputCapabilities: FULL_BINARY_INPUT },
+    { id: "claude-fable-5", name: "Claude Fable 5", apiModel: "claude-fable-5", provider: "anthropic", icon: "🧠", bestFor: "Polished writing, planning, and long-form analysis", minimumPlan: "Pro", usageClass: "premium-reasoning", enabled: true, status: "enabled", reasoning: "high", contextWindowTokens: 1_000_000, inputCapabilities: FULL_BINARY_INPUT },
+    // Stable Tomverse ID upgraded in place. Stored conversations and historic
+    // ledgers keep `claude-opus-4-8`; new requests use Anthropic's Opus 5 API.
+    { id: "claude-opus-4-8", name: "Claude Opus 5", apiModel: "claude-opus-5", provider: "anthropic", icon: "🧠", bestFor: "Frontier reasoning across demanding, high-stakes tasks", minimumPlan: "Pro", usageClass: "premium", enabled: true, status: "enabled", reasoning: "high", contextWindowTokens: 1_000_000, inputCapabilities: FULL_BINARY_INPUT },
     { id: "claude-sonnet-5", name: "Claude Sonnet 5", apiModel: "claude-sonnet-5", provider: "anthropic", icon: "🧠", bestFor: "Writing, structured analysis, and detailed documents", minimumPlan: "Free", usageClass: "advanced", enabled: true, status: "enabled", inputCapabilities: FULL_BINARY_INPUT },
     { id: "claude-haiku-4-5", name: "Claude Haiku 4.5", apiModel: "claude-haiku-4-5-20251001", provider: "anthropic", icon: "🧠", bestFor: "Quick summaries, drafting, and lightweight analysis", minimumPlan: "Guest", usageClass: "standard", enabled: true, status: "enabled", inputCapabilities: FULL_BINARY_INPUT },
 
     { id: "gemini-3-6-flash", name: "Gemini 3.6 Flash", apiModel: "gemini-3.6-flash", provider: "google", icon: "✨", bestFor: "Fast agentic, coding, and multimodal analysis", minimumPlan: "Free", usageClass: "advanced", enabled: true, status: "enabled", contextWindowTokens: 1_048_576, inputCapabilities: FULL_BINARY_INPUT },
-    { id: "gemini-3-5-flash", name: "Gemini 3.5 Flash", apiModel: "gemini-3.5-flash", provider: "google", icon: "✨", bestFor: "Fast responses with image and file analysis", minimumPlan: "Free", usageClass: "standard", enabled: true, status: "enabled", inputCapabilities: FULL_BINARY_INPUT },
+    { id: "gemini-3-5-flash", name: "Gemini 3.5 Flash", apiModel: "gemini-3.5-flash", provider: "google", icon: "✨", bestFor: "Legacy fast multimodal analysis", minimumPlan: "Free", usageClass: "advanced", replacementModelId: "gemini-3-6-flash", publiclyListed: false, enabled: false, status: "disabled", operationalReason: "Tomverse consolidated the overlapping Flash catalogue on Gemini 3.6 Flash on 2026-08-03.", userVisibleNote: "This model was retired and replaced by Gemini 3.6 Flash.", contextWindowTokens: 1_048_576, inputCapabilities: FULL_BINARY_INPUT },
     { id: "gemini-3-1-pro", name: "Gemini 3.1 Pro", apiModel: "gemini-3.1-pro-preview", provider: "google", icon: "✨", bestFor: "Detailed multimodal analysis and complex documents", minimumPlan: "Pro", usageClass: "premium", enabled: true, status: "enabled", inputCapabilities: FULL_BINARY_INPUT },
     { id: "gemini-2-5-pro", name: "Gemini 2.5 Pro", apiModel: "gemini-2.5-pro", provider: "google", icon: "✨", bestFor: "Legacy multimodal analysis", minimumPlan: "Free", usageClass: "advanced", replacementModelId: "gemini-3-1-pro", publiclyListed: false, enabled: false, status: "disabled", inputCapabilities: FULL_BINARY_INPUT },
     { id: "gemini-2-5-flash", name: "Gemini 3.5 Flash-Lite", apiModel: "gemini-3.5-flash-lite", provider: "google", icon: "✨", bestFor: "Low-latency document parsing and high-volume everyday tasks", minimumPlan: "Guest", usageClass: "standard", enabled: true, status: "enabled", contextWindowTokens: 1_048_576, inputCapabilities: FULL_BINARY_INPUT },
@@ -244,9 +244,9 @@ export const AVAILABLE_MODELS = [
     // Was already retired ahead of the rest: Groq shut it down on 2026-07-17,
     // the catalog monitor first recorded it missing on 2026-07-21 and
     // escalated it to likely_deprecated after seven consecutive absences, and
-    // live calls returned HTTP 404. Its replacement is Gemini 3.5 Flash, the
+    // live calls returned HTTP 404. Its replacement is Gemini 3.6 Flash, the
     // closest active model that keeps native image input.
-    { id: "llama-4-scout", name: "Llama 4 Scout", apiModel: "meta-llama/llama-4-scout-17b-16e-instruct", provider: "groq", icon: "∞", bestFor: "Legacy fast visual questions and long-context exploration", minimumPlan: "Guest", usageClass: "standard", replacementModelId: "gemini-3-5-flash", publiclyListed: false, enabled: false, status: "disabled", operationalReason: "Groq shut down Llama 4 Scout on 2026-07-17.", userVisibleNote: "This model was retired and replaced by Gemini 3.5 Flash.", contextWindowTokens: 131_072, inputCapabilities: { image: true, nativePdf: false, maxImages: 5, maxBase64ImagePayloadBytes: 4 * 1024 * 1024 } },
+    { id: "llama-4-scout", name: "Llama 4 Scout", apiModel: "meta-llama/llama-4-scout-17b-16e-instruct", provider: "groq", icon: "∞", bestFor: "Legacy fast visual questions and long-context exploration", minimumPlan: "Guest", usageClass: "standard", replacementModelId: "gemini-3-6-flash", publiclyListed: false, enabled: false, status: "disabled", operationalReason: "Groq shut down Llama 4 Scout on 2026-07-17.", userVisibleNote: "This model was retired and replaced by Gemini 3.6 Flash.", contextWindowTokens: 131_072, inputCapabilities: { image: true, nativePdf: false, maxImages: 5, maxBase64ImagePayloadBytes: 4 * 1024 * 1024 } },
     { id: "llama-3-3", name: "Llama 3.3", apiModel: "llama-3.3-70b-versatile", provider: "groq", icon: "∞", bestFor: "Legacy open-model text analysis and instruction following", minimumPlan: "Free", usageClass: "advanced", replacementModelId: "mistral-medium-3-1", publiclyListed: false, enabled: false, status: "disabled", operationalReason: "Tomverse retired Llama 3.3 on 2026-08-01 ahead of Groq's scheduled 2026-08-16 shutdown.", userVisibleNote: "This model was retired and replaced by Mistral Medium 3.5." },
 
     // xAI is consolidated on Grok 4.5 -- it is the only publicly listed Grok.
@@ -280,48 +280,13 @@ export const AVAILABLE_MODELS = [
     { id: "mistral-small-4", name: "Mistral Small 4", apiModel: "mistral-small-latest", provider: "mistral", icon: "M", bestFor: "Efficient multilingual writing and everyday tasks", minimumPlan: "Guest", usageClass: "standard", enabled: true, status: "enabled" },
     { id: "mistral-large-3", name: "Mistral Large 3", apiModel: "mistral-large-latest", provider: "mistral", icon: "M", bestFor: "High-quality multilingual analysis and long-form work", minimumPlan: "Pro", usageClass: "premium", enabled: true, status: "enabled" },
     { id: "mistral-medium-3-1", name: "Mistral Medium 3.5", apiModel: "mistral-medium-3-5", provider: "mistral", icon: "M", bestFor: "Multimodal agentic work, coding, and multilingual analysis", minimumPlan: "Free", usageClass: "advanced", enabled: true, status: "enabled", contextWindowTokens: 262_144, inputCapabilities: { image: true, nativePdf: false } },
-    { id: "codestral", name: "Codestral", apiModel: "codestral-latest", provider: "mistral", icon: "M", bestFor: "Code generation, completion, and repository questions", minimumPlan: "Free", usageClass: "advanced", enabled: true, status: "enabled" },
+    { id: "codestral", name: "Codestral", apiModel: "codestral-latest", provider: "mistral", icon: "M", bestFor: "Legacy code generation and repository questions", minimumPlan: "Free", usageClass: "advanced", replacementModelId: "mistral-medium-3-1", publiclyListed: false, enabled: false, status: "disabled", operationalReason: "Removed from Tomverse Insight on 2026-08-03 ahead of the separate Tomverse Code catalogue.", userVisibleNote: "This model is no longer available in Insight. Use Mistral Medium 3.5 instead." },
     { id: "kimi-k2.7-code", name: "Kimi K2.7", apiModel: "kimi-k2.7-code", provider: "moonshot", icon: "KM", bestFor: "Coding tasks and long technical context", minimumPlan: "Free", usageClass: "advanced", enabled: true, status: "enabled" },
-    // Kimi K3 is a separate model from kimi-k2.7-code, not a rename of it:
-    // K2.7 stays listed as the coding-specialised Free model.
-    //
-    // NOT LAUNCHED. The entry exists so the id is registered and reviewable,
-    // but it is delisted, disabled and status "coming-soon" -- never offered,
-    // never callable -- because its unit economics are not established. Only
-    // the capability fields below are confirmed by Moonshot's own model
-    // documentation (github.com/MoonshotAI/Kimi-K3): the API model id
-    // `kimi-k3`, the 1,048,576-token context window, native image input, and
-    // always-on thinking. Token prices, cached-input price and the output cap
-    // are NOT published there, so nothing here may be read as a price.
-    //
-    // Do not set enabled/status to "enabled" until all of these are done:
-    //
-    //  1. Official Moonshot price profile registered in MODEL_BILLING_DEFAULTS
-    //     (input, cached input, output), the way grok-4-5 is.
-    //  2. The reasoning effort ordinary chat sends is explicit. Today the
-    //     chat route sends none, so Moonshot's default ("max") applies to a
-    //     model that always thinks -- see the AiModel.reasoning note.
-    //  3. maxOutputTokens set from the published cap instead of the premium
-    //     cost class's 8_192.
-    //  4. `reasoning_content` handling verified end to end. It is currently
-    //     neither captured nor stored: the chat route consumes only
-    //     result.textStream, and Message has no column for it, so thinking
-    //     tokens are paid for and discarded, and follow-up turns cannot
-    //     carry them.
-    //  5. Real Korean-language requests measured for cache hit/miss and
-    //     reasoning-token cost.
-    //  6. Economics checked against Max, annual and the 50% promotion, not
-    //     Pro list price alone.
-    //  7. Long inputs charged from real reserved cost. INPUT_CREDIT_MULTIPLIERS
-    //     tops out at a flat 3x above 100K tokens, which on a 1M-token context
-    //     window charges a 900K-token request exactly what it charges a 101K
-    //     one.
-    //
-    // `usageClass: "premium-reasoning"` (16 credits) is a placeholder that is
-    // only defensible for a short, low-effort Pro request. Splitting the SKU
-    // by effort, or pricing long context dynamically, is the open product
-    // decision -- see the task report.
-    { id: "kimi-k3", name: "Kimi K3", apiModel: "kimi-k3", provider: "moonshot", icon: "KM", bestFor: "Long-context reasoning across text and images", minimumPlan: "Pro", usageClass: "premium-reasoning", publiclyListed: false, enabled: false, status: "coming-soon", reasoning: "high", contextWindowTokens: 1_048_576, inputCapabilities: { image: true, nativePdf: false } },
+    // Kimi K3 is separate from the coding-specialised K2.7 entry. K3 always
+    // thinks; ordinary chat explicitly requests high effort rather than the
+    // much more expensive provider default (`max`).
+    { id: "kimi-k3", name: "Kimi K3", apiModel: "kimi-k3", provider: "moonshot", icon: "KM", bestFor: "Long-context reasoning across text and images", minimumPlan: "Pro", usageClass: "premium-reasoning", enabled: true, status: "enabled", reasoning: "high", contextWindowTokens: 1_048_576, inputCapabilities: { image: true, nativePdf: false } },
+    { id: "minimax-m3", name: "MiniMax M3", apiModel: "MiniMax-M3", provider: "minimax", icon: "MM", bestFor: "Fast agentic reasoning, long context, and multimodal analysis", minimumPlan: "Free", usageClass: "advanced", enabled: true, status: "enabled", reasoning: "medium", contextWindowTokens: 1_000_000, inputCapabilities: { image: true, nativePdf: false } },
     { id: "qwen3.7-max", name: "Qwen 3.7 Max", apiModel: "qwen3.7-max", provider: "qwen", icon: "QW", bestFor: "Demanding multilingual reasoning and complex instructions", minimumPlan: "Pro", usageClass: "premium", enabled: true, status: "enabled" },
     { id: "qwen3.7-plus", name: "Qwen 3.7 Plus", apiModel: "qwen3.7-plus", provider: "qwen", icon: "QW", bestFor: "Balanced multilingual analysis and business writing", minimumPlan: "Free", usageClass: "advanced", enabled: true, status: "enabled" },
     { id: "qwen3.6-flash", name: "Qwen 3.6", apiModel: "qwen3.6-flash", provider: "qwen", icon: "QW", bestFor: "Fast multilingual questions and translation", minimumPlan: "Guest", usageClass: "standard", enabled: true, status: "enabled" },

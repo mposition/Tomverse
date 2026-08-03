@@ -10,17 +10,45 @@ export const GEMINI_STRICT_GENERATION_MODEL_IDS = new Set([
   "gemini-2-5-flash",
 ]);
 
-const supportsConfiguredReasoning = (model: Pick<AiModel, "id" | "provider">) =>
-  model.provider === "openai" ||
-  model.id === "grok-4-3" ||
-  model.id === "grok-4-5";
-
 export const getModelProviderOptions = (
   model: Pick<AiModel, "id" | "provider" | "reasoning">
 ): ProviderOptions | undefined => {
-  if (model.reasoning === undefined || !supportsConfiguredReasoning(model)) {
+  if (model.reasoning === undefined) {
     return undefined;
   }
+
+  if (model.provider === "anthropic") {
+    return {
+      anthropic: {
+        thinking: { type: "adaptive" },
+        effort: model.reasoning,
+      },
+    };
+  }
+
+  if (model.provider === "minimax") {
+    return {
+      anthropic: {
+        // MiniMax supports adaptive thinking on its Anthropic-compatible
+        // endpoint, but not Anthropic's separate `effort` field.
+        thinking: { type: "adaptive" },
+      },
+    };
+  }
+
+  if (model.provider === "moonshot") {
+    return {
+      moonshotai: {
+        reasoningEffort: model.reasoning,
+      },
+    };
+  }
+
+  const usesOpenAiReasoning =
+    model.provider === "openai" ||
+    model.id === "grok-4-3" ||
+    model.id === "grok-4-5";
+  if (!usesOpenAiReasoning) return undefined;
 
   return {
     openai: {
