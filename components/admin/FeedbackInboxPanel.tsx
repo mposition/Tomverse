@@ -439,6 +439,7 @@ export function FeedbackInboxPanel({ rows }: Props) {
             return (
               <article
                 key={feedback.id}
+                data-testid="feedback-entry"
                 className="rounded-2xl border border-zinc-800 bg-zinc-900/70 p-4"
               >
                 <div className="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
