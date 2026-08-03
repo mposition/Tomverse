@@ -56,6 +56,8 @@ type World = {
   logs: string[];
   /** True while the route's $transaction callback is running. */
   txActive: boolean;
+  /** TraceErrorEvidence rows the route may link a verified report to. */
+  evidenceRows: Array<{ id: string; occurrenceId: string }>;
 };
 
 const freshWorld = (): World => ({
@@ -73,6 +75,7 @@ const freshWorld = (): World => ({
   emailShouldFail: false,
   logs: [],
   txActive: false,
+  evidenceRows: [],
 });
 
 let world = freshWorld();
@@ -260,6 +263,16 @@ async function loadRoute(): Promise<{
           if (row) Object.assign(row, data);
           return row;
         },
+      },
+      traceErrorEvidence: {
+        findUnique: async ({
+          where,
+        }: {
+          where: { occurrenceId: string };
+        }) =>
+          world.evidenceRows.find(
+            (row) => row.occurrenceId === where.occurrenceId
+          ) ?? null,
       },
     };
 
@@ -856,4 +869,214 @@ test("the route still enforces the minimum in its own source", async () => {
   ) as string;
   assert.match(source, /message:\s*z\.string\(\)\.trim\(\)\.min\(5\)\.max\(2_000\)/);
   assert.match(source, /ensureGuestVerified\(/);
+});
+
+// --- error report token verification ----------------------------------------
+//
+// The token contract at the route level: verification is an annotation on the
+// stored report, never a gate in front of it, and the raw token itself is
+// verified and discarded -- it must not reach the stored row or the log.
+
+const TOKEN_SECRET = "a-feedback-contract-secret-32chars!!";
+
+const withSigningSecret = async <T>(run: () => Promise<T>): Promise<T> => {
+  const previous = process.env.ERROR_REPORT_SIGNING_SECRET;
+  process.env.ERROR_REPORT_SIGNING_SECRET = TOKEN_SECRET;
+  try {
+    return await run();
+  } finally {
+    if (previous === undefined) delete process.env.ERROR_REPORT_SIGNING_SECRET;
+    else process.env.ERROR_REPORT_SIGNING_SECRET = previous;
+  }
+};
+
+const issueToken = async (input: {
+  traceId: string;
+  errorCode?: string;
+  occurrenceId?: string;
+}) => {
+  const tokenModule = (await import(
+    `${mod("lib/errorReportToken.ts")}?spy=cached`
+  )) as typeof import("../../lib/errorReportToken");
+  return tokenModule.issueErrorReportToken({
+    routeClass: "chat",
+    ...input,
+  });
+};
+
+test("a report without a token stores as missing_token, not a failure", async () => {
+  await withSigningSecret(async () => {
+    const { POST } = await loadRoute();
+    const response = await withCapturedLogs(() =>
+      POST(
+        post({
+          type: "bug",
+          message: "server error happened",
+          traceId: "11111111-2222-4333-8444-555555555555",
+          traceProvenance: "server_generated",
+        })
+      )
+    );
+    assert.equal(response.status, 200);
+    assert.equal(world.stored[0].errorReportVerification, "missing_token");
+    // Without a token the provenance stays the client's claim.
+    assert.equal(world.stored[0].traceProvenance, "server_generated");
+    assert.equal(world.stored[0].traceEvidenceId, null);
+  });
+});
+
+test("a valid token verifies and links the exact evidence occurrence", async () => {
+  await withSigningSecret(async () => {
+    const { POST } = await loadRoute();
+    world.evidenceRows.push({ id: "ev-1", occurrenceId: "occ-1" });
+    const traceId = "22222222-2222-4333-8444-555555555555";
+    const token = await issueToken({
+      traceId,
+      errorCode: "AI_PROVIDER_ERROR",
+      occurrenceId: "occ-1",
+    });
+    assert.ok(token);
+    const response = await withCapturedLogs(() =>
+      POST(
+        post({
+          type: "bug",
+          message: "server error happened",
+          traceId,
+          errorReportToken: token!,
+        })
+      )
+    );
+    assert.equal(response.status, 200);
+    const stored = world.stored[0];
+    assert.equal(stored.errorReportVerification, "verified");
+    assert.equal(stored.traceProvenance, "server_generated");
+    assert.equal(stored.errorClassificationSource, "server");
+    assert.equal(stored.evidenceAvailability, "recorded");
+    assert.equal(stored.traceEvidenceId, "ev-1");
+    // The raw token is verified and discarded: not stored, not logged.
+    assert.ok(!JSON.stringify(world.stored).includes(token!));
+    assert.ok(!world.logs.join("\n").includes(token!));
+  });
+});
+
+test("a token for a different trace stores as payload_mismatch", async () => {
+  await withSigningSecret(async () => {
+    const { POST } = await loadRoute();
+    const token = await issueToken({
+      traceId: "33333333-2222-4333-8444-555555555555",
+    });
+    const response = await withCapturedLogs(() =>
+      POST(
+        post({
+          type: "bug",
+          message: "server error happened",
+          traceId: "44444444-2222-4333-8444-555555555555",
+          errorReportToken: token!,
+        })
+      )
+    );
+    assert.equal(response.status, 200);
+    assert.equal(world.stored[0].errorReportVerification, "payload_mismatch");
+    assert.equal(world.stored[0].traceEvidenceId, null);
+  });
+});
+
+test("a forged token stores as invalid_signature and still stores the report", async () => {
+  await withSigningSecret(async () => {
+    const { POST } = await loadRoute();
+    const token = await issueToken({
+      traceId: "55555555-2222-4333-8444-555555555555",
+    });
+    const forged = `${token!.slice(0, -4)}AAAA`;
+    const response = await withCapturedLogs(() =>
+      POST(
+        post({
+          type: "bug",
+          message: "server error happened",
+          traceId: "55555555-2222-4333-8444-555555555555",
+          errorReportToken: forged,
+        })
+      )
+    );
+    assert.equal(response.status, 200);
+    assert.equal(world.stored.length, 1);
+    assert.equal(world.stored[0].errorReportVerification, "invalid_signature");
+  });
+});
+
+test("a verified limit-class token points at the existing limit events", async () => {
+  await withSigningSecret(async () => {
+    const { POST } = await loadRoute();
+    const traceId = "66666666-2222-4333-8444-555555555555";
+    // Limit-class errors get a token but no occurrenceId -- the existing
+    // limit-decision events are their record.
+    const token = await issueToken({ traceId, errorCode: "CHAT_QUOTA_EXCEEDED" });
+    const response = await withCapturedLogs(() =>
+      POST(
+        post({
+          type: "bug",
+          message: "quota error report",
+          traceId,
+          errorReportToken: token!,
+        })
+      )
+    );
+    assert.equal(response.status, 200);
+    assert.equal(world.stored[0].errorReportVerification, "verified");
+    assert.equal(world.stored[0].evidenceAvailability, "existing_limit_event");
+  });
+});
+
+test("a client-classified EMPTY_RESPONSE stays unverified and keeps its client code", async () => {
+  await withSigningSecret(async () => {
+    const { POST } = await loadRoute();
+    const response = await withCapturedLogs(() =>
+      POST(
+        post({
+          type: "bug",
+          message: "the answer was empty",
+          traceId: "77777777-2222-4333-8444-555555555555",
+          traceProvenance: "server_generated",
+          clientErrorCode: "EMPTY_RESPONSE",
+        })
+      )
+    );
+    assert.equal(response.status, 200);
+    const stored = world.stored[0];
+    assert.equal(stored.errorReportVerification, "missing_token");
+    assert.equal(stored.clientErrorCode, "EMPTY_RESPONSE");
+    assert.equal(stored.errorClassificationSource, "client");
+    // The log carries classifications only, never the trace value itself.
+    const entry = world.logs.find((line) => line.includes('"user_feedback"'));
+    const record = JSON.parse(entry as string) as Record<string, unknown>;
+    assert.equal(record.errorReportVerification, "missing_token");
+    assert.equal(record.errorClassificationSource, "client");
+    assert.ok(
+      !(entry as string).includes("77777777-2222-4333-8444-555555555555"),
+      "the trace value reached the log"
+    );
+  });
+});
+
+test("without a signing secret the report still stores as missing_token", async () => {
+  const previous = process.env.ERROR_REPORT_SIGNING_SECRET;
+  delete process.env.ERROR_REPORT_SIGNING_SECRET;
+  try {
+    const { POST } = await loadRoute();
+    const response = await withCapturedLogs(() =>
+      POST(
+        post({
+          type: "bug",
+          message: "secretless deployment",
+          traceId: "88888888-2222-4333-8444-555555555555",
+          errorReportToken: "terr1.some.token",
+        })
+      )
+    );
+    assert.equal(response.status, 200);
+    assert.equal(world.stored[0].errorReportVerification, "missing_token");
+  } finally {
+    if (previous === undefined) delete process.env.ERROR_REPORT_SIGNING_SECRET;
+    else process.env.ERROR_REPORT_SIGNING_SECRET = previous;
+  }
 });

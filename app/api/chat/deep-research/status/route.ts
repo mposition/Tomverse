@@ -30,6 +30,8 @@ import {
   consumeApiRateLimit,
   readLimitedJson,
 } from "@/lib/apiSecurity";
+import { ERROR_REPORT_TOKEN_HEADER } from "@/lib/errorReportContract";
+import { issueChatErrorReportGrant } from "@/lib/traceErrorEvidence";
 
 const MAX_STORED_MESSAGE_CHARACTERS = 100_000;
 
@@ -285,9 +287,29 @@ export async function POST(request: Request) {
       }),
       recordModelFailure(job.modelId, provider, diagnosticCode),
     ]);
+    // The failed poll is this flow's server-classified terminal error, so the
+    // error-report grant is issued here -- the trace is this route's own
+    // randomUUID, and the headers mirror the main chat route's contract.
+    const grant = issueChatErrorReportGrant({
+      traceId,
+      routeClass: "deep-research-status",
+      errorCode: diagnosticCode,
+      httpStatus: 200,
+      phase: "stream",
+      provider,
+      modelId: job.modelId,
+    });
     return Response.json(
-      { status: "failed", error: errorMessage },
-      { headers: { "Cache-Control": "no-store" } }
+      { status: "failed", error: errorMessage, traceId },
+      {
+        headers: {
+          "Cache-Control": "no-store",
+          "X-Request-ID": traceId,
+          ...(grant.errorReportToken
+            ? { [ERROR_REPORT_TOKEN_HEADER]: grant.errorReportToken }
+            : {}),
+        },
+      }
     );
   } catch (error) {
     const securityResponse = apiSecurityResponse(error);
