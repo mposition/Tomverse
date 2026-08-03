@@ -1,10 +1,11 @@
 ---
-status: draft
+status: approved
 implementationBlockedUntilApproved: true
-approvedScopes: []
-approvedBy: null
-approvedAt: null
-approvalTicket: null
+approvedScopes:
+  - RELEASE_A_IMPORT
+approvedBy: @mposition
+approvedAt: 2026-08-03
+approvalTicket: N/A
 ---
 
 # 외부 대화 Import · 계정 장기 메모리 · 사용자 정의 AI 프로필
