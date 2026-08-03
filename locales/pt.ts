@@ -413,6 +413,16 @@ export const pt = {
         messageCounter: "{count} / {max}",
         errorReportHint: "Você pode enviar sem acrescentar nada: os detalhes do erro vão anexados de qualquer forma.",
         traceOptionalHint: "O trace ID é opcional. Você pode enviar sem ele.",
+        emailUpdatesLabel: "Receber o estado por e-mail",
+        emailUpdatesAccountHint:
+          "O recibo e as atualizações deste relatório serão enviados para o e-mail da sua conta.",
+        emailUpdatesEmailLabel: "E-mail para atualizações",
+        emailUpdatesEmailPlaceholder: "voce@exemplo.com",
+        emailUpdatesEmailHint:
+          "Usado apenas para atualizações sobre este relatório.",
+        emailUpdatesEmailInvalid: "Insira um endereço de e-mail válido.",
+        emailUpdatesScheduled:
+          "Enviaremos por e-mail o recibo e as atualizações de estado.",
         traceFormatHint: "Isso não parece um trace ID. Ele será enviado exatamente como digitado.",
         errorInvalid: "Confira o que você escreveu e envie novamente.",
         errorVerification: "É preciso concluir uma verificação de segurança. Conclua e envie novamente.",

@@ -761,12 +761,57 @@ model Feedback {
   attachmentCount Int      @default(0)
   path            String?
   userAgent       String?
+  /// The submitter's language, captured once at submission and never mutated,
+  /// so every lifecycle email for this report renders in the same language.
+  /// One of lib/language.ts SUPPORTED_LANGUAGES; "en" when unknown.
+  language        String   @default("en")
+  /// Per-report transactional consent to lifecycle status emails. NOT a
+  /// marketing preference: it covers only this report's received/reviewing/
+  /// completed notifications. Defaults to no consent.
+  emailUpdatesConsent Boolean @default(false)
+  /// How the report was resolved -- one of FEEDBACK_CLOSURE_OUTCOMES in
+  /// lib/feedbackLifecycleCore.ts. Current state for the admin console; the
+  /// email renders from the immutable completed lifecycle event instead.
+  closureOutcome  String?
+  /// The short reply written FOR THE SUBMITTER. Never the internal admin note,
+  /// and never merged with one.
+  userReply       String?
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
+
+  lifecycleEvents FeedbackLifecycleEvent[]
 
   @@index([status, createdAt])
   @@index([type, createdAt])
   @@index([userId, createdAt])
+}
+
+/// One immutable record per lifecycle stage of one feedback report.
+///
+/// The user-facing status email is rendered from this row, not from the
+/// mutable Feedback columns, so a retried delivery presents byte-for-byte the
+/// payload the first attempt presented -- which the provider's idempotency key
+/// requires. Rows are only ever inserted; the unique constraint is what makes
+/// "one email per stage" hold under concurrent admin requests.
+model FeedbackLifecycleEvent {
+  id             String   @id @default(cuid())
+  feedbackId     String
+  feedback       Feedback @relation(fields: [feedbackId], references: [id], onDelete: Cascade)
+  /// received | reviewing | completed
+  stage          String
+  previousStatus String?
+  newStatus      String
+  /// Set on the completed stage only -- one of FEEDBACK_CLOSURE_OUTCOMES.
+  outcomeCode    String?
+  /// Snapshot of the user-facing reply at closure time. Never the admin note.
+  userReply      String?
+  /// The admin who made the transition; null for the submission itself.
+  actorUserId    String?
+  createdAt      DateTime @default(now())
+
+  /// One event -- and therefore at most one user email -- per stage.
+  @@unique([feedbackId, stage])
+  @@index([feedbackId, createdAt])
 }
 
 /// An operator notification that still owes a delivery.

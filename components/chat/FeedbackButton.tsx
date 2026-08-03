@@ -104,13 +104,20 @@ export function FeedbackButton({
   triggerClassName?: string;
   triggerTestId?: string;
 }) {
-  const { t } = useLanguage();
+  const { t, lang } = useLanguage();
   const { status } = useSession();
   const isErrorReport = Boolean(rawErrorDetails);
   const [open, setOpen] = useState(false);
   const [type, setType] = useState<"bug" | "feature" | "billing" | "other">("bug");
   const [message, setMessage] = useState("");
   const [traceId, setTraceId] = useState("");
+  /**
+   * Per-report opt-in to lifecycle status emails. Off by default: this is
+   * transactional consent for this submission, never a stored preference.
+   */
+  const [emailUpdates, setEmailUpdates] = useState(false);
+  /** Where a guest wants the status emails; accounts use their server email. */
+  const [notifyEmail, setNotifyEmail] = useState("");
   const [isSending, setIsSending] = useState(false);
   const [detailsCopied, setDetailsCopied] = useState(false);
   const [submitError, setSubmitError] = useState<SubmitError | null>(null);
@@ -130,6 +137,7 @@ export function FeedbackButton({
   const hintId = `${baseId}-hint`;
   const counterId = `${baseId}-counter`;
   const traceHintId = `${baseId}-trace-hint`;
+  const notifyEmailHintId = `${baseId}-notify-email-hint`;
   const errorId = `${baseId}-error`;
 
   const dialogRef = useRef<HTMLDivElement | null>(null);
@@ -171,12 +179,19 @@ export function FeedbackButton({
 
   const errorReportDefaultMessage = t("feedback.errorReportDefaultMessage");
   const messageState = feedbackMessageState(message);
+  // Deliberately permissive -- the server's zod schema is the real validator.
+  // This only keeps an obviously incomplete address from blocking a receipt
+  // the user asked for.
+  const notifyEmailValid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(notifyEmail.trim());
+  const needsNotifyEmail = isGuest && emailUpdates;
   const canSubmit =
     canSubmitFeedback({
       message,
       isErrorReport,
       defaultMessage: errorReportDefaultMessage,
-    }) && !isSending;
+    }) &&
+    (!needsNotifyEmail || notifyEmailValid) &&
+    !isSending;
 
   /**
    * The sentence under the textarea. It is never the only signal -- the button
@@ -406,6 +421,11 @@ export function FeedbackButton({
         path: window.location.pathname,
         userAgent: navigator.userAgent,
         ...(turnstileToken ? { turnstileToken } : {}),
+        emailUpdates,
+        // Only a guest supplies an address; a signed-in caller's account email
+        // is resolved on the server and cannot be overridden from here.
+        ...(needsNotifyEmail ? { email: notifyEmail.trim() } : {}),
+        language: lang,
       });
 
       if (!outcome.ok) {
@@ -421,12 +441,18 @@ export function FeedbackButton({
       setMessage("");
       setTraceId("");
       setSubmitError(null);
+      // The receipt sentence and the email notice are one toast. The notice
+      // only says emails are *scheduled* -- a send failure is the retry
+      // queue's business and never turns the stored submission into a failure.
+      const sentCopy = outcome.reference
+        ? interpolate(t("feedback.sentWithReference"), {
+            reference: outcome.reference,
+          })
+        : t("feedback.sent");
       dispatchAppToast(
-        outcome.reference
-          ? interpolate(t("feedback.sentWithReference"), {
-              reference: outcome.reference,
-            })
-          : t("feedback.sent"),
+        outcome.emailUpdatesEnabled
+          ? `${sentCopy} ${t("feedback.emailUpdatesScheduled")}`
+          : sentCopy,
         "success"
       );
     } finally {
@@ -639,6 +665,71 @@ export function FeedbackButton({
                       ? t("feedback.traceFormatHint")
                       : t("feedback.traceOptionalHint")}
                   </p>
+
+                  {/*
+                    Transactional consent for THIS report only. Unchecked by
+                    default; a guest who opts in also supplies the address the
+                    receipts should go to, while a signed-in user's account
+                    email is resolved server-side and never asked for here.
+                  */}
+                  <div className="mt-4 rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-2.5 dark:border-zinc-800 dark:bg-zinc-900/70">
+                    <label className="flex items-start gap-2 text-sm font-bold leading-5 text-zinc-700 break-keep dark:text-zinc-200">
+                      <input
+                        type="checkbox"
+                        data-testid="feedback-email-updates"
+                        checked={emailUpdates}
+                        onChange={(event) => setEmailUpdates(event.target.checked)}
+                        className="mt-0.5 h-4 w-4 shrink-0 accent-blue-600"
+                      />
+                      {t("feedback.emailUpdatesLabel")}
+                    </label>
+                    {emailUpdates && !isGuest ? (
+                      <p
+                        data-testid="feedback-email-updates-account-hint"
+                        className="mt-1.5 text-xs leading-5 text-zinc-500 break-keep dark:text-zinc-400"
+                      >
+                        {t("feedback.emailUpdatesAccountHint")}
+                      </p>
+                    ) : null}
+                    {needsNotifyEmail ? (
+                      <>
+                        <label
+                          htmlFor={`${baseId}-notify-email`}
+                          className="mt-2 block text-sm font-bold text-zinc-700 dark:text-zinc-200"
+                        >
+                          {t("feedback.emailUpdatesEmailLabel")}
+                        </label>
+                        <input
+                          id={`${baseId}-notify-email`}
+                          type="email"
+                          inputMode="email"
+                          autoComplete="email"
+                          data-testid="feedback-notify-email"
+                          value={notifyEmail}
+                          onChange={(event) => setNotifyEmail(event.target.value)}
+                          maxLength={254}
+                          aria-describedby={notifyEmailHintId}
+                          aria-invalid={
+                            notifyEmail.trim() && !notifyEmailValid
+                              ? true
+                              : undefined
+                          }
+                          placeholder={t("feedback.emailUpdatesEmailPlaceholder")}
+                          className={`mt-1.5 min-h-11 ${fieldClassName}`}
+                        />
+                        <p
+                          id={notifyEmailHintId}
+                          role="status"
+                          data-testid="feedback-notify-email-hint"
+                          className="mt-1.5 text-xs font-semibold leading-5 text-zinc-500 break-keep dark:text-zinc-400"
+                        >
+                          {notifyEmail.trim() && !notifyEmailValid
+                            ? t("feedback.emailUpdatesEmailInvalid")
+                            : t("feedback.emailUpdatesEmailHint")}
+                        </p>
+                      </>
+                    ) : null}
+                  </div>
 
                   <div className="mt-4 rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-2 text-xs leading-5 text-zinc-500 break-keep dark:border-zinc-800 dark:bg-zinc-900/70 dark:text-zinc-400">
                     {t("feedback.autoContext")} {currentModelId || "-"} /{" "}

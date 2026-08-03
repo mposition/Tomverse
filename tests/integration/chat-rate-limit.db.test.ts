@@ -723,13 +723,16 @@ test("contended preflights and single requests settle on a verdict, never a dead
         );
     }
 
+    // The first four preflights are comparisons and the rest singles, but the
+    // shared return type is a union -- narrow on the discriminating field so
+    // the compiler agrees with what the slices already guarantee.
     for (const outcome of admittedComparisons) {
-        if (outcome.status === "fulfilled") {
+        if (outcome.status === "fulfilled" && "admission" in outcome.value) {
             await rollbackChatAdmission(outcome.value.admission.admissionId);
         }
     }
     for (const outcome of admittedSingles) {
-        if (outcome.status === "fulfilled") {
+        if (outcome.status === "fulfilled" && "leaseId" in outcome.value) {
             await releaseChatAccess(outcome.value.leaseId);
         }
     }

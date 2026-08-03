@@ -48,6 +48,9 @@ type FeedbackQaState = {
     traceId?: string;
     type?: string;
     hasToken: boolean;
+    emailUpdates?: boolean;
+    email?: string;
+    language?: string;
   }>;
 };
 
@@ -76,12 +79,18 @@ async function mockFeedbackApi(
       traceId?: string;
       type?: string;
       turnstileToken?: string;
+      emailUpdates?: boolean;
+      email?: string;
+      language?: string;
     };
     state.requests.push({
       message: String(body.message ?? ""),
       traceId: body.traceId,
       type: body.type,
       hasToken: typeof body.turnstileToken === "string" && body.turnstileToken.length > 0,
+      emailUpdates: body.emailUpdates,
+      email: body.email,
+      language: body.language,
     });
 
     const outcome = respond();
@@ -107,6 +116,8 @@ async function mockFeedbackApi(
         success: true,
         feedbackId: "clzfeedback0001abcd",
         reference: "0001ABCD",
+        // Mirrors the real route: enabled only when the caller opted in.
+        emailUpdatesEnabled: body.emailUpdates === true,
       }),
     });
   });
@@ -553,6 +564,125 @@ test.describe("submission", () => {
 // ---------------------------------------------------------------------------
 // Guest verification
 // ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// Email status updates: per-report consent
+// ---------------------------------------------------------------------------
+
+test.describe("email status updates consent", () => {
+  test("consent is off by default and the payload says so", async ({ page }) => {
+    await gotoAuthenticatedChat(page);
+    const feedback = await mockFeedbackApi(page);
+    await openFeedbackFromSidebar(page);
+
+    await expect(page.getByTestId("feedback-email-updates")).not.toBeChecked();
+    await page.getByTestId("feedback-message").fill("no updates please");
+    await page.getByTestId("feedback-submit").click();
+
+    await expect(page.getByTestId("feedback-dialog")).toBeHidden();
+    expect(feedback.requests[0].emailUpdates).toBe(false);
+    expect(feedback.requests[0].email).toBeUndefined();
+    // The success toast must not promise emails nobody asked for.
+    const toast = page.getByTestId("app-toast");
+    await expect(toast).toBeVisible();
+    await expect(toast).not.toContainText(/status updates/i);
+  });
+
+  test("a signed-in user who opts in sees the account hint and sends no address", async ({
+    page,
+  }) => {
+    await gotoAuthenticatedChat(page);
+    const feedback = await mockFeedbackApi(page);
+    await openFeedbackFromSidebar(page);
+
+    await page.getByTestId("feedback-email-updates").check();
+    // The account email is resolved server-side; the dialog neither asks for
+    // nor accepts an address from a signed-in caller.
+    await expect(
+      page.getByTestId("feedback-email-updates-account-hint")
+    ).toBeVisible();
+    await expect(page.getByTestId("feedback-notify-email")).toHaveCount(0);
+
+    await page.getByTestId("feedback-message").fill("account email updates");
+    await page.getByTestId("feedback-submit").click();
+
+    await expect(page.getByTestId("feedback-dialog")).toBeHidden();
+    expect(feedback.requests[0].emailUpdates).toBe(true);
+    expect(feedback.requests[0].email).toBeUndefined();
+    const toast = page.getByTestId("app-toast");
+    await expect(toast).toHaveAttribute("data-tone", "success");
+    await expect(toast).toContainText("receipt and status updates");
+  });
+
+  test("a guest who opts in must supply a valid address before sending", async ({
+    page,
+  }) => {
+    await prepareGuestPage(page, "en");
+    await installTurnstileScript(page, "silent");
+    await page.goto("/chat?lang=en");
+    const feedback = await mockFeedbackApi(page);
+    await openFeedbackFromSidebar(page);
+
+    await page.getByTestId("feedback-message").fill("guest wants updates");
+    await page.getByTestId("feedback-email-updates").check();
+    const emailInput = page.getByTestId("feedback-notify-email");
+    await expect(emailInput).toBeVisible();
+
+    // An empty or malformed address blocks the send and says why.
+    await expect(page.getByTestId("feedback-submit")).toBeDisabled();
+    await emailInput.fill("not-an-email");
+    await expect(page.getByTestId("feedback-submit")).toBeDisabled();
+    await expect(page.getByTestId("feedback-notify-email-hint")).toContainText(
+      /valid email/i
+    );
+
+    await emailInput.fill("guest@example.com");
+    await expect(page.getByTestId("feedback-submit")).toBeEnabled();
+    await page.getByTestId("feedback-submit").click();
+
+    await expect(page.getByTestId("feedback-dialog")).toBeHidden();
+    expect(feedback.requests[0].emailUpdates).toBe(true);
+    expect(feedback.requests[0].email).toBe("guest@example.com");
+    expect(feedback.requests[0].language).toBe("en");
+    const toast = page.getByTestId("app-toast");
+    await expect(toast).toContainText("receipt and status updates");
+  });
+
+  test("unchecking consent hides the guest address field and sends none", async ({
+    page,
+  }) => {
+    await prepareGuestPage(page, "en");
+    await installTurnstileScript(page, "silent");
+    await page.goto("/chat?lang=en");
+    const feedback = await mockFeedbackApi(page);
+    await openFeedbackFromSidebar(page);
+
+    await page.getByTestId("feedback-email-updates").check();
+    await page.getByTestId("feedback-notify-email").fill("guest@example.com");
+    await page.getByTestId("feedback-email-updates").uncheck();
+    await expect(page.getByTestId("feedback-notify-email")).toHaveCount(0);
+
+    await page.getByTestId("feedback-message").fill("changed my mind");
+    await expect(page.getByTestId("feedback-submit")).toBeEnabled();
+    await page.getByTestId("feedback-submit").click();
+
+    await expect(page.getByTestId("feedback-dialog")).toBeHidden();
+    expect(feedback.requests[0].emailUpdates).toBe(false);
+    expect(feedback.requests[0].email).toBeUndefined();
+  });
+
+  test("the Korean consent copy is translated, not raw keys", async ({ page }) => {
+    await gotoAuthenticatedChat(page, "ko");
+    await mockFeedbackApi(page);
+    await openFeedbackFromSidebar(page);
+
+    const label = page.getByTestId("feedback-email-updates");
+    await expect(label).toBeVisible();
+    const dialog = page.getByTestId("feedback-dialog");
+    await expect(dialog).toContainText("처리 상태를 이메일로 받기");
+    await expect(dialog).not.toContainText("feedback.emailUpdatesLabel");
+  });
+});
 
 test.describe("guest verification", () => {
   test("a signed-in user submits without any Turnstile token", async ({ page }) => {

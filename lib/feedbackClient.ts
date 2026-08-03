@@ -33,6 +33,10 @@ export type FeedbackSubmitPayload = {
   path?: string;
   userAgent?: string;
   turnstileToken?: string;
+  /** Per-report opt-in to lifecycle status emails for this submission. */
+  emailUpdates?: boolean;
+  /** The submitter's UI language, for the lifecycle emails. */
+  language?: string;
 };
 
 export type FeedbackSubmitOutcome =
@@ -41,6 +45,8 @@ export type FeedbackSubmitOutcome =
       feedbackId: string | null;
       /** Short handle worth showing the user; null when the server sent none. */
       reference: string | null;
+      /** True when the server confirmed lifecycle emails are on for this report. */
+      emailUpdatesEnabled: boolean;
     }
   | {
       ok: false;
@@ -133,7 +139,12 @@ export async function submitFeedback(
       : feedbackId
         ? feedbackReferenceFromId(feedbackId)
         : null;
-    return { ok: true, feedbackId, reference };
+    return {
+      ok: true,
+      feedbackId,
+      reference,
+      emailUpdatesEnabled: body?.emailUpdatesEnabled === true,
+    };
   }
 
   const body = await readJsonSafely(response);

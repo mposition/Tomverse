@@ -47,6 +47,8 @@ type SupportCopy = {
   typeLabel: string;
   types: Record<"support" | "bug" | "billing" | "feature" | "other", string>;
   emailInput: string;
+  emailUpdatesLabel: string;
+  emailUpdatesNote: string;
   traceInput: string;
   messageInput: string;
   submit: string;
@@ -98,6 +100,9 @@ const copy: Record<Language, SupportCopy> = {
       other: "Other",
     },
     emailInput: "Email address",
+    emailUpdatesLabel: "Email me status updates for this request",
+    emailUpdatesNote:
+      "A receipt and status updates will go to this address. Uncheck to receive no status emails.",
     traceInput: "Trace ID or reference number, optional",
     messageInput: "Tell us what happened and what you expected.",
     submit: "Send request",
@@ -147,6 +152,9 @@ const copy: Record<Language, SupportCopy> = {
       other: "기타",
     },
     emailInput: "이메일 주소",
+    emailUpdatesLabel: "이 문의의 처리 상태를 이메일로 받기",
+    emailUpdatesNote:
+      "접수 및 처리 상태 안내가 이 주소로 발송됩니다. 원치 않으면 선택을 해제하세요.",
     traceInput: "추적 ID 또는 참고 번호, 선택 사항",
     messageInput: "무슨 일이 있었고 어떤 결과를 기대했는지 알려주세요.",
     submit: "문의 보내기",
@@ -195,6 +203,8 @@ const copy: Record<Language, SupportCopy> = {
       other: "其他",
     },
     emailInput: "邮箱地址",
+    emailUpdatesLabel: "通过电子邮件接收此请求的处理状态",
+    emailUpdatesNote: "受理回执和处理状态会发送到此邮箱。不需要时请取消勾选。",
     traceInput: "追踪 ID 或参考编号，可选",
     messageInput: "请说明发生了什么，以及您期望的结果。",
     submit: "发送请求",
@@ -243,6 +253,9 @@ const copy: Record<Language, SupportCopy> = {
       other: "Autre",
     },
     emailInput: "Adresse email",
+    emailUpdatesLabel: "Recevoir le statut de cette demande par e-mail",
+    emailUpdatesNote:
+      "L'accusé de réception et le suivi seront envoyés à cette adresse. Décochez pour ne pas recevoir d'e-mails de statut.",
     traceInput: "Trace ID ou référence, optionnel",
     messageInput: "Expliquez ce qui s'est passé et le résultat attendu.",
     submit: "Envoyer",
@@ -291,6 +304,9 @@ const copy: Record<Language, SupportCopy> = {
       other: "Sonstiges",
     },
     emailInput: "E-Mail-Adresse",
+    emailUpdatesLabel: "Statusupdates zu dieser Anfrage per E-Mail erhalten",
+    emailUpdatesNote:
+      "Eingangsbestätigung und Statusupdates gehen an diese Adresse. Abwählen, um keine Status-E-Mails zu erhalten.",
     traceInput: "Trace ID oder Referenz, optional",
     messageInput: "Beschreiben Sie, was passiert ist und was Sie erwartet haben.",
     submit: "Anfrage senden",
@@ -339,6 +355,9 @@ const copy: Record<Language, SupportCopy> = {
       other: "Otro",
     },
     emailInput: "Correo electrónico",
+    emailUpdatesLabel: "Recibir por correo el estado de esta solicitud",
+    emailUpdatesNote:
+      "El acuse de recibo y las actualizaciones irán a esta dirección. Desmarca para no recibir correos de estado.",
     traceInput: "Trace ID o referencia, opcional",
     messageInput: "Cuéntanos qué pasó y qué esperabas.",
     submit: "Enviar solicitud",
@@ -387,6 +406,9 @@ const copy: Record<Language, SupportCopy> = {
       other: "Outro",
     },
     emailInput: "Endereço de email",
+    emailUpdatesLabel: "Receber por e-mail o estado deste pedido",
+    emailUpdatesNote:
+      "O recibo e as atualizações de estado serão enviados para este endereço. Desmarque para não receber e-mails de estado.",
     traceInput: "Trace ID ou referência, opcional",
     messageInput: "Conte o que aconteceu e o que esperava.",
     submit: "Enviar solicitação",
@@ -423,6 +445,11 @@ export function SupportPageContent() {
   }, []);
   const [traceId, setTraceId] = useState("");
   const [message, setMessage] = useState("");
+  // Per-request transactional consent to lifecycle status emails. On by
+  // default here because this form already requires the address for a written
+  // reply -- but the checkbox makes the consent visible and revocable before
+  // anything is submitted.
+  const [emailUpdates, setEmailUpdates] = useState(true);
   const [busy, setBusy] = useState(false);
   const isGuestRequest = status === "unauthenticated";
   const {
@@ -472,6 +499,8 @@ export function SupportPageContent() {
         path: typeof window !== "undefined" ? window.location.pathname : "/support",
         userAgent: typeof navigator !== "undefined" ? navigator.userAgent : undefined,
         ...(turnstileToken ? { turnstileToken } : {}),
+        emailUpdates,
+        language: lang,
       });
 
       if (!outcome.ok) {
@@ -490,13 +519,18 @@ export function SupportPageContent() {
       // Cleared only once the submission is actually stored.
       setTraceId("");
       setMessage("");
+      // The email notice only says receipts are scheduled -- whether a send
+      // later succeeds is the retry queue's business, never a submit failure.
+      const sentCopy = outcome.reference
+        ? t("feedback.sentWithReference").replaceAll(
+            "{reference}",
+            outcome.reference
+          )
+        : page.success;
       dispatchAppToast(
-        outcome.reference
-          ? t("feedback.sentWithReference").replaceAll(
-              "{reference}",
-              outcome.reference
-            )
-          : page.success,
+        outcome.emailUpdatesEnabled
+          ? `${sentCopy} ${t("feedback.emailUpdatesScheduled")}`
+          : sentCopy,
         "success"
       );
     } finally {
@@ -594,6 +628,24 @@ export function SupportPageContent() {
                 className="mt-2 h-12 w-full rounded-xl border border-zinc-200 bg-white px-3 text-sm outline-none transition focus:border-blue-500 dark:border-zinc-800 dark:bg-zinc-950"
               />
             </label>
+            <label className="mt-3 flex items-start gap-2 text-sm font-bold leading-6">
+              <input
+                type="checkbox"
+                data-testid="support-email-updates"
+                checked={emailUpdates}
+                onChange={(event) => setEmailUpdates(event.target.checked)}
+                aria-describedby="support-email-updates-note"
+                className="mt-1 h-4 w-4 shrink-0 accent-blue-600"
+              />
+              {page.emailUpdatesLabel}
+            </label>
+            <p
+              id="support-email-updates-note"
+              data-testid="support-email-updates-note"
+              className="mt-1.5 text-xs font-semibold leading-5 text-zinc-500 break-keep dark:text-zinc-400"
+            >
+              {page.emailUpdatesNote}
+            </p>
             <label className="mt-4 block text-sm font-bold">
               {page.traceInput}
               <input
