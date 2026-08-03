@@ -349,6 +349,8 @@ export function ImageGenerationWorkspace({
       return (
         <div
           data-testid="image-generation-failed"
+          data-error-kind={moderation ? "moderation" : "generic"}
+          data-refunded={generation.refunded ? "true" : "false"}
           className="flex items-start gap-2.5 rounded-2xl border border-red-200 bg-red-50 p-3.5 text-sm text-red-800 dark:border-red-900/60 dark:bg-red-950/30 dark:text-red-200"
         >
           <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
@@ -631,6 +633,7 @@ export function ImageGenerationWorkspace({
           <div className="flex flex-wrap items-center gap-2">
             <span
               data-testid="image-token-estimate"
+              data-over-limit={promptTooLong ? "true" : "false"}
               className={`text-[11px] font-medium ${
                 promptTooLong
                   ? "font-semibold text-red-600 dark:text-red-400"
