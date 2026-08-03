@@ -101,6 +101,7 @@ export async function GET(req: Request) {
       return {
         id: conv.id,
         title: conv.title,
+        kind: conv.kind === "image" ? ("image" as const) : ("chat" as const),
         projectId: conv.projectId || null,
         selectedModels:
           selectedModels.length > 0 ? selectedModels : [resolvedDefaultEngine],

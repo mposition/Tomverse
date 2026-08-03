@@ -36,6 +36,13 @@ export type Message = {
 export type Conversation = {
   id: string;
     title: string;
+    /**
+     * "chat" (default) or "image". Server-decided at creation. An image
+     * conversation renders the image workspace instead of the chat panels;
+     * chat send, comparison, AI Review, web search, deep research, share and
+     * export are all unavailable for it (docs/policy/image-generation.md §1).
+     */
+    kind?: "chat" | "image";
     projectId?: string | null;
     selectedModels?: string[];
     disabledPanels?: string[];

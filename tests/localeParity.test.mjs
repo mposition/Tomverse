@@ -65,11 +65,11 @@ const ENGLISH_STRING_CEILING = {
   zh: 191,
   // Preview markets, all of which spread `...en.chat` and `en.modelFinder`.
   // fr +1 (226 -> 227): modelFinder.saveAsDefaultHint, taken from en wholesale.
-  fr: 227,
+  fr: 230,
   // de/es/pt +1 for the same saveAsDefaultHint key.
-  de: 231,
-  es: 228,
-  pt: 226,
+  de: 233,
+  es: 229,
+  pt: 227,
 };
 
 test("every supported language is in the dictionary map", () => {

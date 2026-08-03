@@ -157,6 +157,7 @@ export async function GET(
         id: true,
         userId: true,
         title: true,
+        kind: true,
         selectedModels: true,
         disabledPanels: true,
         webSearchMode: true,
@@ -217,6 +218,8 @@ export async function GET(
     return NextResponse.json({
       ...conversation,
         messages,
+        kind:
+          conversation.kind === "image" ? ("image" as const) : ("chat" as const),
         projectId: conversation.projectId || null,
         messagePage: {
           hasMore: hasMoreMessages,
