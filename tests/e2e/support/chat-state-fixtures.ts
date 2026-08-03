@@ -19,7 +19,7 @@ export const MOBILE_VIEWPORT = { width: 390, height: 844 };
 export const MOBILE_MIN_VIEWPORT = { width: 320, height: 568 };
 
 /** The default comparison set every state fixture starts from. */
-export const THREE_MODELS = ["gpt-5-4-mini", "claude-sonnet-5", "gemini-3-5-flash"];
+export const THREE_MODELS = ["gpt-5-4-mini", "claude-sonnet-5", "gemini-3-6-flash"];
 
 export type Theme = "light" | "dark";
 

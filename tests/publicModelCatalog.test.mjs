@@ -109,7 +109,7 @@ test("a retired model is still resolvable, with the note that explains it", () =
 
   const scout = publicBody().find((model) => model.id === "llama-4-scout");
   assert.ok(scout);
-  assert.equal(scout.userVisibleNote, "This model was retired and replaced by Gemini 3.5 Flash.");
+  assert.equal(scout.userVisibleNote, "This model was retired and replaced by Gemini 3.6 Flash.");
 });
 
 test("the administrators-only explanation is not the one users receive", () => {

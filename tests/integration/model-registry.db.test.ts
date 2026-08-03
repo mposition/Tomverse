@@ -28,12 +28,14 @@ after(async () => {
 // wave of retirements re-opens that hole for its own ids, so this seeds the
 // exact pre-retirement shape and checks the bootstrap closes it.
 const RETIRED_MODEL_EXPECTATIONS = [
+  { id: "gemini-3-5-flash", replacementModelId: "gemini-3-6-flash" },
   { id: "grok-3", replacementModelId: "grok-4-5" },
   { id: "grok-3-mini", replacementModelId: "grok-4-5" },
   { id: "grok-4", replacementModelId: "grok-4-5" },
   { id: "llama-3-1", replacementModelId: "deepseek-v4-flash" },
   { id: "llama-3-3", replacementModelId: "mistral-medium-3-1" },
-  { id: "llama-4-scout", replacementModelId: "gemini-3-5-flash" },
+  { id: "llama-4-scout", replacementModelId: "gemini-3-6-flash" },
+  { id: "codestral", replacementModelId: "mistral-medium-3-1" },
 ] as const;
 
 test("bootstrapping replays catalogue retirements onto pre-existing registry rows", async () => {
@@ -46,11 +48,27 @@ test("bootstrapping replays catalogue retirements onto pre-existing registry row
       id: entry.id,
       name: `Stale ${entry.id}`,
       apiModel: entry.id,
-      provider: entry.id.startsWith("grok") ? "xai" : "groq",
-      apiBaseUrl: entry.id.startsWith("grok")
-        ? "https://api.x.ai/v1"
-        : "https://api.groq.com/openai/v1",
-      apiKeyEnvName: entry.id.startsWith("grok") ? "XAI_API_KEY" : "GROQ_API_KEY",
+      provider: entry.id === "codestral"
+        ? "mistral"
+        : entry.id.startsWith("gemini")
+          ? "google"
+          : entry.id.startsWith("grok")
+            ? "xai"
+            : "groq",
+      apiBaseUrl: entry.id === "codestral"
+        ? "https://api.mistral.ai/v1"
+        : entry.id.startsWith("gemini")
+          ? "https://generativelanguage.googleapis.com/v1beta"
+          : entry.id.startsWith("grok")
+            ? "https://api.x.ai/v1"
+            : "https://api.groq.com/openai/v1",
+      apiKeyEnvName: entry.id === "codestral"
+        ? "MISTRAL_API_KEY"
+        : entry.id.startsWith("gemini")
+          ? "GOOGLE_GENERATIVE_AI_API_KEY"
+          : entry.id.startsWith("grok")
+            ? "XAI_API_KEY"
+            : "GROQ_API_KEY",
       icon: "?",
       bestFor: "stale row",
       minimumPlan: "Guest",
@@ -69,14 +87,6 @@ test("bootstrapping replays catalogue retirements onto pre-existing registry row
       replacementModelId: null,
     },
   });
-  // Same pre-state for the pre-launch model, so this one bootstrap covers
-  // both halves of the withdrawal replay -- see the test below, which reads
-  // the result rather than seeding a second time.
-  await prisma.modelRegistryEntry.updateMany({
-    where: { id: "kimi-k3" },
-    data: { enabled: true, publiclyListed: true, status: "enabled" },
-  });
-
   await ensureModelRegistrySeeded();
 
   for (const expected of RETIRED_MODEL_EXPECTATIONS) {
@@ -115,27 +125,26 @@ test("bootstrapping replays catalogue retirements onto pre-existing registry row
   }
 });
 
-// A model withheld before launch has the same failure mode as a retired one:
-// if an environment received a build that had it enabled, nothing would ever
-// correct the row. The replay therefore covers it too -- and must write
-// "coming-soon" rather than flattening it into "disabled", because the two
-// states mean opposite things to an operator reading the registry. Reads the
-// state the bootstrap above already produced; the bootstrap memoises, so
-// there is exactly one replay per process to observe.
-test("the same bootstrap withdraws a pre-launch model without marking it retired", async () => {
-  const row = await prisma.modelRegistryEntry.findUnique({
-    where: { id: "kimi-k3" },
-  });
-  assert.ok(row, "kimi-k3 must stay registered");
-  assert.equal(row.enabled, false);
-  assert.equal(row.publiclyListed, false);
-  assert.equal(row.status, "coming-soon");
-  assert.equal(row.catalogDeleted, false);
-  // Withheld, not retired: it has no predecessor to hand users off to.
-  assert.equal(row.replacementModelId, null);
+test("the launched and upgraded catalogue metadata reaches runtime rows", async () => {
+  const kimi = await getEnabledRuntimeModel("kimi-k3");
+  assert.ok(kimi, "kimi-k3 must be enabled after its one-time launch migration");
+  assert.notEqual(kimi.publiclyListed, false);
+  assert.equal(kimi.status, "enabled");
+  assert.equal(getModelUsageProfile(kimi).credits, 16);
+  assert.equal((await assertModelRuntimeAvailable("kimi-k3")).allowed, true);
 
-  assert.equal(await getEnabledRuntimeModel("kimi-k3"), undefined);
-  assert.equal((await assertModelRuntimeAvailable("kimi-k3")).allowed, false);
+  const fable = await getEnabledRuntimeModel("claude-fable-5");
+  assert.ok(fable);
+  assert.equal(getModelUsageProfile(fable).credits, 16);
+
+  const opus = await getEnabledRuntimeModel("claude-opus-4-8");
+  assert.ok(opus);
+  assert.equal(opus.name, "Claude Opus 5");
+  assert.equal(opus.apiModel, "claude-opus-5");
+
+  const minimax = await getEnabledRuntimeModel("minimax-m3");
+  assert.ok(minimax);
+  assert.equal(minimax.provider, "minimax");
 });
 
 // The defect this covers: the withdrawal replay used to express "needs
@@ -168,7 +177,7 @@ test("an already-withdrawn row with a stale replacement is still corrected", asy
   assert.ok(row);
   assert.equal(
     row.replacementModelId,
-    "gemini-3-5-flash",
+    "gemini-3-6-flash",
     "a stale replacement on an already-withdrawn row must still be corrected"
   );
 

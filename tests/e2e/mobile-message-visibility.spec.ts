@@ -41,7 +41,7 @@ test.beforeEach(async ({}, testInfo) => {
 /** 2 of these 3 have verified native web search -- gpt-5-4-mini does not. */
 const MODEL_A = "gpt-5-4-mini";
 const MODEL_B = "claude-sonnet-5";
-const MODEL_C = "gemini-3-5-flash";
+const MODEL_C = "gemini-3-6-flash";
 const THREE_MODELS = [MODEL_A, MODEL_B, MODEL_C];
 
 /** The answer canvas must keep at least this share of the mobile shell. */

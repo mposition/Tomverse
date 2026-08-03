@@ -5,13 +5,13 @@ import {
   AVAILABLE_MODELS,
   PUBLIC_MODELS,
   PUBLIC_MODEL_PROVIDERS,
-  isPreLaunchModel,
   isPubliclySelectableModel,
   isRetiredModel,
   isWithdrawnFromOfferModel,
   resolveSelectableModelId,
   type AiModel,
 } from "../lib/models";
+import { getModelPricingProfile } from "../lib/modelPricing";
 
 // UX-F003. Two independent defects let a model no provider would serve stay
 // selectable:
@@ -130,7 +130,22 @@ test("groq llama-4-scout stays retired and unselectable", () => {
   assert.equal(isPubliclySelectableModel(scout!), false);
   // Repointed off llama-3-3 when that model was retired too: a retirement
   // that names another retired model leaves users nowhere to go.
-  assert.equal(scout!.replacementModelId, "gemini-3-5-flash");
+  assert.equal(scout!.replacementModelId, "gemini-3-6-flash");
+});
+
+test("Gemini 3.5 Flash stays historical while 3.6 Flash is the selectable successor", () => {
+  const legacy = entry("gemini-3-5-flash");
+  const successor = entry("gemini-3-6-flash");
+
+  assert.ok(legacy, "gemini-3-5-flash must remain resolvable for old chats");
+  assert.ok(successor, "gemini-3-6-flash must remain in the public catalogue");
+  assert.equal(isRetiredModel(legacy!), true);
+  assert.equal(isPubliclySelectableModel(legacy!), false);
+  assert.equal(legacy!.usageClass, "advanced");
+  assert.equal(legacy!.replacementModelId, "gemini-3-6-flash");
+  assert.equal(resolveSelectableModelId("gemini-3-5-flash"), "gemini-3-6-flash");
+  assert.equal(isPubliclySelectableModel(successor!), true);
+  assert.equal(successor!.usageClass, "advanced");
 });
 
 // ---------------------------------------------------------------------------
@@ -165,7 +180,7 @@ test("no Llama model is publicly listed or selectable", () => {
 test("each retired Llama names the active model that took over its role", () => {
   assert.equal(entry("llama-3-1")!.replacementModelId, "deepseek-v4-flash");
   assert.equal(entry("llama-3-3")!.replacementModelId, "mistral-medium-3-1");
-  assert.equal(entry("llama-4-scout")!.replacementModelId, "gemini-3-5-flash");
+  assert.equal(entry("llama-4-scout")!.replacementModelId, "gemini-3-6-flash");
 });
 
 test("groq has no publicly selectable model left", () => {
@@ -236,13 +251,14 @@ test("older Grok models stay resolvable as history but cannot be selected", () =
 test("every retirement resolves to a model a user can actually select", () => {
   const expected = new Map([
     ["deepseek-r1", "deepseek-v4-flash"],
+    ["gemini-3-5-flash", "gemini-3-6-flash"],
     ["grok-4", "grok-4-5"],
     ["grok-4-3", "grok-4-5"],
     ["grok-3", "grok-4-5"],
     ["grok-3-mini", "grok-4-5"],
     ["llama-3-1", "deepseek-v4-flash"],
     ["llama-3-3", "mistral-medium-3-1"],
-    ["llama-4-scout", "gemini-3-5-flash"],
+    ["llama-4-scout", "gemini-3-6-flash"],
   ]);
 
   for (const [id, replacementModelId] of expected) {
@@ -282,50 +298,43 @@ test("Kimi K3 and Kimi K2.7 are two distinct models, not a rename", () => {
   assert.equal(k3!.provider, "moonshot");
   assert.equal(k27!.provider, "moonshot");
   assert.equal(k3!.icon, k27!.icon);
-  // The coding-specialised model is unaffected by K3 being withheld.
+  // The coding-specialised model remains available alongside K3.
   assert.equal(isPubliclySelectableModel(k27!), true);
-  // Officially documented capability fields only -- see lib/models.ts. None
-  // of these is a price, and none of them makes the model launchable.
   assert.equal(k3!.contextWindowTokens, 1_048_576);
   assert.equal(k3!.inputCapabilities?.image, true);
   assert.equal(k3!.reasoning, "high");
 });
 
-// Kimi K3's unit economics are not established: no published price, no
-// explicit chat reasoning effort, no output cap, no reasoning_content
-// handling, and a flat 3x ceiling on long-input credits against a 1M-token
-// window. Until those are settled it is registered but withheld, and this is
-// what stops "enabled: true" being restored without them.
-test("Kimi K3 is registered but not launched", () => {
+test("Kimi K3 launches with explicit economics and reasoning capability", () => {
   const k3 = entry("kimi-k3")!;
-  assert.equal(isPreLaunchModel(k3), true);
-  assert.equal(k3.enabled, false);
-  assert.equal(k3.publiclyListed, false);
-  assert.equal(k3.status, "coming-soon");
-  assert.equal(isPubliclySelectableModel(k3), false);
-  // Withheld, not retired: it has nothing to hand users off to, and it must
-  // not be described to them as a model that used to work.
+  assert.equal(k3.enabled, true);
+  assert.notEqual(k3.publiclyListed, false);
+  assert.equal(k3.status, "enabled");
+  assert.equal(isPubliclySelectableModel(k3), true);
   assert.equal(isRetiredModel(k3), false);
   assert.equal(k3.replacementModelId, undefined);
-  // No price may be asserted for it while it is unpriced.
-  assert.equal(k3.inputUsdPerMillionTokens, undefined);
-  assert.equal(k3.outputUsdPerMillionTokens, undefined);
+  assert.equal(k3.usageClass, "premium-reasoning");
+
+  const pricing = getModelPricingProfile("kimi-k3");
+  assert.ok(pricing);
+  assert.equal(pricing!.tiers[0].inputUsdPerMillionTokens, 3);
+  assert.equal(pricing!.tiers[0].outputUsdPerMillionTokens, 15);
+  assert.equal(pricing!.tiers[0].cachedInputPriceMultiplier, 0.1);
+  assert.equal(pricing!.maxOutputTokens, 1_048_576);
 });
 
-test("a pre-launch model is withdrawn from the offer just like a retired one", () => {
-  // Both are replayed onto existing registry rows by the bootstrap, which is
-  // the only thing that can correct an environment that received an earlier
-  // build with the model enabled.
-  assert.equal(isWithdrawnFromOfferModel(entry("kimi-k3")!), true);
-  assert.equal(isWithdrawnFromOfferModel(entry("grok-3")!), true);
-  assert.equal(isWithdrawnFromOfferModel(entry("grok-4-5")!), false);
+test("Codestral is withdrawn from Insight with a live Mistral replacement", () => {
+  const codestral = entry("codestral")!;
+  assert.equal(isWithdrawnFromOfferModel(codestral), true);
+  assert.equal(isRetiredModel(codestral), true);
+  assert.equal(isPubliclySelectableModel(codestral), false);
+  assert.equal(codestral.replacementModelId, "mistral-medium-3-1");
+  assert.equal(
+    isPubliclySelectableModel(entry(codestral.replacementModelId!)!),
+    true
+  );
 });
 
-// Models known to have no published provider price yet. getModelBillingProfile
-// always returns a number -- an unpriced model silently inherits its usage
-// class's fallback -- so nothing downstream can tell that a price is missing.
-// Listing them here is what makes it visible, and the assertion below is what
-// stops one being offered while it is still on the list.
 // Two selectable models may share one provider model id -- that is how a
 // "Thinking" variant is built -- but only if the request Tomverse sends for
 // them actually differs. gpt-5-5-thinking shared apiModel "gpt-5.5" with
@@ -359,20 +368,6 @@ test("a shared apiModel is only allowed when the request really differs", () => 
         `${model.id} shares apiModel "${apiModel}" but its provider (${model.provider}) is not one the chat route forwards reasoning effort to, so the variants are indistinguishable upstream`
       );
     }
-  }
-});
-
-const UNPRICED_MODEL_IDS = ["kimi-k3"];
-
-test("a model with no published price is never offered to users", () => {
-  for (const modelId of UNPRICED_MODEL_IDS) {
-    const model = entry(modelId);
-    assert.ok(model, `${modelId} should be in the catalogue`);
-    assert.equal(
-      isPubliclySelectableModel(model!),
-      false,
-      `${modelId} is selectable while unpriced -- register its provider price profile first, then remove it from UNPRICED_MODEL_IDS`
-    );
   }
 });
 

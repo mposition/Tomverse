@@ -25,7 +25,7 @@ test("Anthropic native capability offers the tool without forcing it", () => {
 
 test("Google native capability offers google_search without forcing it", () => {
   const config = buildWebSearchToolConfig(
-    getWebSearchCapability("gemini-3-5-flash")
+    getWebSearchCapability("gemini-3-6-flash")
   );
   assert.ok(config);
   assert.equal(config.toolChoice, undefined);
@@ -55,7 +55,7 @@ test("WEB_SEARCH_TOOL_NAMES matches the actual tool keys built for each provider
   for (const [modelId, toolKey] of [
     ["gpt-5-5", "web_search"],
     ["claude-sonnet-5", "web_search"],
-    ["gemini-3-5-flash", "google_search"],
+    ["gemini-3-6-flash", "google_search"],
   ]) {
     const capability = getWebSearchCapability(modelId);
     const config = buildWebSearchToolConfig(capability);

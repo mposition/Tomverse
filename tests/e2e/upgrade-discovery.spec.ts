@@ -562,7 +562,7 @@ test.describe("value-moment upgrade prompt", () => {
     await expect.poll(() => patchCount).toBe(1);
 
     // A second change while the first PATCH is still being processed.
-    await firstPanel.locator("select").selectOption("gemini-3-5-flash");
+    await firstPanel.locator("select").selectOption("gemini-3-6-flash");
     // Give a wrongly-implemented client every opportunity to overlap.
     await page.waitForTimeout(600);
     expect(patchCount).toBe(1);
@@ -571,7 +571,7 @@ test.describe("value-moment upgrade prompt", () => {
     await expect.poll(() => completedPatchBodies.length).toBe(2);
     expect(sawOverlappingPatch).toBe(false);
     const finalPatch = completedPatchBodies.at(-1)!;
-    expect(finalPatch).toContain("gemini-3-5-flash");
+    expect(finalPatch).toContain("gemini-3-6-flash");
     expect(finalPatch).not.toContain("gemini-2-5-flash");
   });
 
@@ -1024,7 +1024,7 @@ test.describe("value-moment upgrade prompt", () => {
           contentType: "application/json",
           body: JSON.stringify({
             id: "qa-conversation",
-            selectedModels: ["gemini-3-5-flash", "claude-haiku-4-5"],
+            selectedModels: ["gemini-3-6-flash", "claude-haiku-4-5"],
             disabledPanels: [],
             messages: [
               {
@@ -1048,8 +1048,8 @@ test.describe("value-moment upgrade prompt", () => {
     );
 
     const firstPanel = page.getByTestId("desktop-model-panel").first();
-    await firstPanel.locator("select").selectOption("gemini-3-5-flash");
-    await expect(firstPanel).toHaveAttribute("data-model-id", "gemini-3-5-flash");
+    await firstPanel.locator("select").selectOption("gemini-3-6-flash");
+    await expect(firstPanel).toHaveAttribute("data-model-id", "gemini-3-6-flash");
 
     await expect(firstPanel.getByText("Shared conversation question")).toBeVisible();
     await expect(firstPanel.getByText("Answer from the previous model")).toHaveCount(0);

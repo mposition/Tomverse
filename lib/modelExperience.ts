@@ -32,6 +32,7 @@ const providerTags: Partial<Record<AiModel["provider"], ModelExperienceTag[]>> =
   // reasoning one (kimi-k3), so "coding" is a per-model fact here, not a
   // provider-wide one. The id check below tags the coding model.
   moonshot: [],
+  minimax: ["costFriendly", "files"],
   qwen: ["multilingual"],
   perplexity: ["search"],
 };
