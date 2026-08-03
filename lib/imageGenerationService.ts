@@ -454,6 +454,27 @@ export const requestImageGeneration = async (
         });
       }
 
+      // v2 (§11): every request is a comparison group; the single-model path
+      // is a 1-target group. The group inherits the request idempotency key,
+      // so the (userId, key) race behaves exactly as before -- the loser's
+      // P2002 (on either unique) replays the winner idempotently.
+      const group = await tx.imageGenerationGroup.create({
+        data: {
+          userId: input.userId,
+          conversationId,
+          groupIdempotencyKey: input.idempotencyKey,
+        },
+        select: { id: true },
+      });
+      const target = await tx.imageGenerationTarget.create({
+        data: {
+          groupId: group.id,
+          provider: "openai",
+          modelId: IMAGE_GENERATION_MODEL_ID,
+        },
+        select: { id: true },
+      });
+
       const generation = await tx.imageGeneration.create({
         data: {
           id: generationId,
@@ -465,8 +486,14 @@ export const requestImageGeneration = async (
           size: input.size,
           quality: input.quality,
           leaseId,
+          groupId: group.id,
+          targetId: target.id,
         },
         select: { id: true, conversationId: true, status: true },
+      });
+      await tx.imageGenerationTarget.update({
+        where: { id: target.id },
+        data: { currentGenerationId: generationId },
       });
 
       await tx.imageCreditReservation.create({
@@ -483,6 +510,12 @@ export const requestImageGeneration = async (
           addOnReservedCredits: allocation.addOnCreditsRequired,
           reservedCostMicroUsd: BigInt(maxCost),
           reservedFundedCostMicroUsd: BigInt(addOnFundedCostMicroUsd),
+          // Identity snapshot (§12): written explicitly, never defaulted.
+          provider: "openai",
+          modelId: IMAGE_GENERATION_MODEL_ID,
+          groupId: group.id,
+          targetId: target.id,
+          identitySource: "recorded",
           pricingVersion: IMAGE_PRICING_VERSION,
           costSource: "fixed_estimate",
           pricingSnapshot: {
@@ -490,6 +523,8 @@ export const requestImageGeneration = async (
             outputCostMicroUsd: pricing.outputCostMicroUsd,
             maxRequestCostMicroUsd: maxCost,
             promptTokenLimit: IMAGE_PROMPT_MAX_TOKENS,
+            provider: "openai",
+            modelId: IMAGE_GENERATION_MODEL_ID,
           },
           reservationPayload: entries as unknown as Prisma.InputJsonValue,
         },
