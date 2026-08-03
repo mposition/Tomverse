@@ -5,6 +5,13 @@ import type {
     ExternalConversationAdapter,
 } from "@/lib/externalImportAdapters/types";
 
+export type {
+    ExternalAdapterProvider,
+    ExternalConversationAdapter,
+    ParsedExternalConversation,
+    ParsedExternalMessage,
+} from "@/lib/externalImportAdapters/types";
+
 export const EXTERNAL_IMPORT_ADAPTERS: readonly ExternalConversationAdapter[] =
     [chatgptAdapter, claudeAdapter];
 
