@@ -165,7 +165,17 @@ test.describe("nested dismissible surfaces keep their own Escape", () => {
       await deleteTrigger.click();
       const nested = page.getByTestId("delete-account-dialog");
       await expect(nested).toBeVisible();
-      await expectFocusEntersDialog(page);
+      // Not expectFocusEntersDialog(): the settings dialog underneath is
+      // itself aria-modal, so the any-dialog poll can pass while focus is
+      // still on the Delete Account trigger -- before the nested dialog's
+      // own requestAnimationFrame focus has landed. Tabbing in that window
+      // walks the settings dialog and fails the trap assertion below. Poll
+      // for the nested dialog specifically.
+      await expect
+        .poll(() =>
+          nested.evaluate((node) => node.contains(document.activeElement))
+        )
+        .toBe(true);
       expect(await bodyScrollLocked(page)).toBe(true);
 
       for (let step = 0; step < 12; step += 1) {
