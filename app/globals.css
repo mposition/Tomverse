@@ -196,6 +196,18 @@
   --color-accent-deep-research-900: var(--color-violet-900);
   --color-accent-deep-research-950: var(--color-violet-950);
 
+  /* accent-image: Image generation workspace. fuchsia is otherwise unused, so this role owns it outright. */
+  --color-accent-image-50: var(--color-fuchsia-50);
+  --color-accent-image-100: var(--color-fuchsia-100);
+  --color-accent-image-200: var(--color-fuchsia-200);
+  --color-accent-image-400: var(--color-fuchsia-400);
+  --color-accent-image-500: var(--color-fuchsia-500);
+  --color-accent-image-600: var(--color-fuchsia-600);
+  --color-accent-image-700: var(--color-fuchsia-700);
+  --color-accent-image-800: var(--color-fuchsia-800);
+  --color-accent-image-900: var(--color-fuchsia-900);
+  --color-accent-image-950: var(--color-fuchsia-950);
+
   /* accent-model-catalogue: The model catalogue entry point. */
   --color-accent-model-catalogue-500: var(--color-purple-500);
 

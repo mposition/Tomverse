@@ -3,6 +3,10 @@ import "server-only";
 import { APP_DEFAULTS, guestDefaultLeadRejection } from "@/lib/appDefaults";
 import { isE2EDatabaseDisabled } from "@/lib/e2eTestMode";
 import {
+  IMAGE_GENERATION_FLAG_KEY,
+  imageGenerationEnabledFromValue,
+} from "@/lib/imageGenerationAccess";
+import {
   canUseModelWithPlan,
   getModelUsageProfile,
 } from "@/lib/models";
@@ -148,6 +152,35 @@ export async function updatePublicAppSettings(settings: PublicAppSettings) {
   );
   invalidatePublicSnapshot("app-settings");
   return getPublicAppSettings();
+}
+
+// Image generation is deliberately NOT part of OPERATIONAL_FLAG_KEYS /
+// PublicAppSettings. Those flags are default-on kill switches
+// (`enabledFromValue`: anything but "false" is enabled); a beta feature needs
+// the opposite -- default-off, enabled only by an explicit opt-in row. The
+// pure semantics live in lib/imageGenerationAccess.ts so tests cover them
+// without a database. Admin/public surfacing arrives with the operations PR;
+// until then the flag is toggled by seeding the AppSetting row directly.
+export async function isImageGenerationEnabled(): Promise<boolean> {
+  if (e2eDatabaseDisabled()) return false;
+  const row = await prisma.appSetting.findUnique({
+    where: { key: IMAGE_GENERATION_FLAG_KEY },
+    select: { value: true },
+  });
+  return imageGenerationEnabledFromValue(row?.value);
+}
+
+export class ImageGenerationDisabledError extends Error {
+  constructor() {
+    super("Image generation is not enabled.");
+    this.name = "ImageGenerationDisabledError";
+  }
+}
+
+export async function assertImageGenerationEnabled() {
+  if (!(await isImageGenerationEnabled())) {
+    throw new ImageGenerationDisabledError();
+  }
 }
 
 export class OperationalFeatureDisabledError extends Error {
