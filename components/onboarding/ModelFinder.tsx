@@ -428,6 +428,12 @@ export function ModelFinder({ enabled, onComplete }: ModelFinderProps) {
                   {t("modelFinder.saveAsDefault")}
                 </button>
               </div>
+              <p
+                data-testid="model-finder-save-hint"
+                className="mt-3 text-center text-xs leading-5 text-zinc-500 dark:text-zinc-400"
+              >
+                {t("modelFinder.saveAsDefaultHint")}
+              </p>
             </div>
           ) : (
             <div>

@@ -153,7 +153,6 @@ export async function POST(req: Request) {
         {
           success: true,
           defaultModelId: settings.defaultModel,
-          modelIds: [settings.defaultModel],
           modelFinderCompletedAt: settings.modelFinderCompletedAt?.toISOString(),
         },
         { headers: noStoreHeaders }
@@ -191,11 +190,13 @@ export async function POST(req: Request) {
       },
     });
 
+    // The response must only claim what was actually persisted. Echoing the
+    // requested modelIds here once made a single-model save look like a saved
+    // combination.
     return NextResponse.json(
       {
         success: true,
         defaultModelId: settings.defaultModel,
-        modelIds: body.modelIds,
         modelFinderCompletedAt: settings.modelFinderCompletedAt?.toISOString(),
       },
       { headers: noStoreHeaders }

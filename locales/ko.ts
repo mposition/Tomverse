@@ -739,7 +739,9 @@ export const ko = {
         primary: "나만의 AI 조합",
         estimatedTotal: "예상 기본 사용량: {credits}크레딧",
         useOnce: "이번 대화에 사용",
-        saveAsDefault: "기본 조합으로 저장",
+        saveAsDefault: "대표 모델로 저장하고 이 조합 사용",
+        saveAsDefaultHint:
+            "이번 대화에는 선택한 조합 전체가 적용되지만, 다음 새 대화는 저장된 대표 모델 하나로 시작합니다.",
         pickerCta: "뭘 골라야 할지 모르겠다면? AI 조합 추천받기",
         pickerCtaCompact: "다시 추천받기",
         roles: {

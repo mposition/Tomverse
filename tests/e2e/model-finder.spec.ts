@@ -44,13 +44,14 @@ test("the in-picker combo CTA recommends an AI combination and applies only the 
     const modelIds = Array.isArray(savedBody.modelIds)
       ? (savedBody.modelIds as string[])
       : ["gpt-5-4-mini"];
+    // The real route only persists and reports what was actually saved -- it
+    // must never echo the requested modelIds back as a saved combination.
     await route.fulfill({
       status: 200,
       contentType: "application/json",
       body: JSON.stringify({
         success: true,
         defaultModelId: modelIds[0],
-        modelIds,
         modelFinderCompletedAt: "2026-07-24T00:00:00.000Z",
       }),
     });

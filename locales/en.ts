@@ -735,7 +735,9 @@ export const en = {
         primary: "Your AI combination",
         estimatedTotal: "Estimated base usage: {credits} credits",
         useOnce: "Use for this conversation",
-        saveAsDefault: "Save as default combination",
+        saveAsDefault: "Save lead model and use this combination",
+        saveAsDefaultHint:
+            "This conversation uses the full combination, but your next new chat starts with the saved lead model only.",
         pickerCta: "Not sure? Get an AI combo",
         pickerCtaCompact: "Recommend again",
         roles: {
