@@ -34,6 +34,7 @@ import {
     type Language,
 } from "@/components/LanguageProvider";
 import { APP_DEFAULTS } from "@/lib/appDefaults";
+import { canUseModelWithPlan } from "@/lib/models";
 import { localeLaunchPolicy } from "@/lib/localeLaunchPolicy";
 import { dispatchAppToast } from "@/lib/appToast";
 import { notifyUserSettingsUpdated } from "@/lib/userSettingsEvents";
@@ -544,6 +545,15 @@ export function AuthButton({
     }, [isAccountMenuOpen]);
 
     // Derived combination facts for the editor and the save gate.
+    //
+    // Plan access is judged conservatively: while the usage (and therefore the
+    // plan) is still loading, locked-looking is the safe default -- a model
+    // must never look selectable for a moment and then be refused. The server
+    // still enforces the same rule with a 400 on save.
+    const settingsPlan = accountUsage?.plan ?? "Free";
+    const isPlanLockedModel = (model: { minimumPlan: "Guest" | "Free" | "Pro" }) =>
+        !canUseModelWithPlan(settingsPlan, model);
+    const hasPlanLockedModels = ENABLED_MODELS.some(isPlanLockedModel);
     const combinationTotalCredits = defaultModelIds.reduce((total, modelId) => {
         const model = ENABLED_MODELS.find((candidate) => candidate.id === modelId);
         return model ? total + getModelUsageProfile(model).credits : total;
@@ -557,6 +567,10 @@ export function AuthButton({
     });
 
     const replaceCombinationModel = (index: number, nextModelId: string) => {
+        const nextModel = ENABLED_MODELS.find(
+            (candidate) => candidate.id === nextModelId
+        );
+        if (!nextModel || isPlanLockedModel(nextModel)) return;
         setDefaultModelIds((current) => {
             if (current.includes(nextModelId) && current[index] !== nextModelId) {
                 return current;
@@ -582,7 +596,8 @@ export function AuthButton({
         setDefaultModelIds((current) => {
             if (current.length >= 3) return current;
             const candidate = ENABLED_MODELS.find(
-                (model) => !current.includes(model.id)
+                (model) =>
+                    !current.includes(model.id) && !isPlanLockedModel(model)
             );
             return candidate ? [...current, candidate.id] : current;
         });
@@ -1371,9 +1386,18 @@ export function AuthButton({
                                                                     !defaultModelIds.includes(model.id)
                                                             ).map((model) => {
                                                                 const usageProfile = getModelUsageProfile(model);
+                                                                const planLocked = isPlanLockedModel(model);
                                                                 return (
-                                                                    <option className="bg-white text-zinc-900" key={model.id} value={model.id}>
+                                                                    <option
+                                                                        className="bg-white text-zinc-900"
+                                                                        key={model.id}
+                                                                        value={model.id}
+                                                                        disabled={planLocked}
+                                                                    >
                                                                         {model.icon} {model.name} · {t(`modelUsageClasses.${usageProfile.category.toLowerCase()}`)} · {usageProfile.credits}
+                                                                        {planLocked
+                                                                            ? ` · 🔒 ${formatCopy("auth.newConversationModelsPlanLocked", { plan: model.minimumPlan })}`
+                                                                            : ""}
                                                                     </option>
                                                                 );
                                                             })}
@@ -1428,6 +1452,21 @@ export function AuthButton({
                                             {defaultModelIds.length === 1 && (
                                                 <p className="mt-1 text-xs leading-5 text-zinc-500">
                                                     {t("auth.newConversationModelsSingleHint")}
+                                                </p>
+                                            )}
+                                            {hasPlanLockedModels && settingsPlan === "Free" && (
+                                                <p className="mt-1 text-xs leading-5 text-zinc-500">
+                                                    {t("auth.newConversationModelsPlanLockedHint")}{" "}
+                                                    <UpgradeCtaLink
+                                                        targetPlan="Pro"
+                                                        currentPlan={settingsPlan}
+                                                        trigger="account"
+                                                        ctaLocation="settings_new_conversation_models"
+                                                        testId="settings-combination-upgrade"
+                                                        className="font-semibold text-blue-600 hover:underline dark:text-blue-300"
+                                                    >
+                                                        {t("auth.newConversationModelsPlanLockedCta")}
+                                                    </UpgradeCtaLink>
                                                 </p>
                                             )}
                                             {newlyAddedHighCostModelIds.length > 0 && (

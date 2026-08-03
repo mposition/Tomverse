@@ -83,6 +83,13 @@ export async function GET(req: Request) {
     });
 
     const runtimeModels = await getRuntimeModels();
+    // EXISTING conversations that lost or never had a readable selectedModels
+    // value fall back to the single representative model, deliberately NOT to
+    // the account's new-conversation combination: applying the combination
+    // here would silently widen an old single-model conversation into several
+    // panels. The combination only ever shapes a NEW conversation (see the
+    // POST handler below and docs/policy/default-model-luna-migration.md
+    // §1.2).
     const [resolvedDefaultEngine = APP_DEFAULTS.defaultModelId] =
       clampSelectedModelsAgainstRuntime([defaultEngine], runtimeModels, 1);
     const formattedConversations = conversations.map((conv) => {

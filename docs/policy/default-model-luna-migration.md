@@ -156,6 +156,29 @@ UI 계약은 `docs/ui-contracts/account-model-settings.md`가 고정하고,
 fail-closed로 검사합니다. "마지막 사용 조합" 같은 추가 시작 모드는 이 개정의
 범위 밖이며, 도입하려면 별도 설계 결정이 필요합니다.
 
+**배포 순서 (migration-first)**
+
+additive nullable 컬럼이 "안전"한 방향은 한쪽뿐입니다: **기존 코드는 새
+컬럼을 몰라도 되지만, 새 코드는 컬럼 없이 동작하지 못합니다.** 새 Prisma
+Client는 `UserSettings`를 `select` 없이 읽는 모든 경로에서 이 컬럼을
+조회하므로, migration보다 먼저 트래픽을 받으면 설정 조회·저장이 실패합니다.
+
+1. nullable 컬럼 migration을 먼저 적용하고 성공을 확인합니다
+2. 그 다음에 신규 코드를 배포합니다
+3. readiness와 설정·새 대화 smoke test를 확인합니다
+4. 문제 시 코드는 rollback하되 **nullable 컬럼은 그대로 둡니다** — 기존
+   코드는 이 컬럼을 무시하므로 컬럼 제거는 필요도 없고 위험만 더합니다
+
+migration과 코드가 한 배포에 묶여 있다면, migration 완료 후에만 신규
+인스턴스가 트래픽을 받는다는 보장이 있어야 합니다.
+
+**기존 conversation의 fallback은 이 개정의 대상이 아닙니다.** 저장값을 읽을
+수 없는 기존 conversation의 표시 fallback은 `[defaultModel]` 하나이며, 계정의
+새 대화 기본 조합을 적용하지 않습니다 — 적용하면 단일 모델이던 기존 대화가
+여러 패널로 조용히 확장됩니다. 조합은 오직 **새** conversation의 시작
+상태만 정합니다(`tests/newConversationModels.test.mjs`가 소스 수준으로
+고정).
+
 ## 2. 왜 Luna인가
 
 | 항목 | `gpt-5-4-mini` | `gpt-5-6-luna` |

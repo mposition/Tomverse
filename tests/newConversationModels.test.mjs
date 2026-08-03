@@ -197,3 +197,33 @@ test("a legacy defaultModel-only save moves the lead and drops the last on overf
     "bravo",
   ]);
 });
+
+test("existing-conversation fallbacks stay single-model, only new creations use the combination", async () => {
+  // Pinned at source level: the GET list's per-row fallback for an existing
+  // conversation is the single representative model, never the account's
+  // new-conversation combination -- applying the combination there would
+  // silently widen an old single-model conversation into several panels.
+  const { readFileSync } = await import("node:fs");
+  const route = readFileSync(
+    new URL("../app/api/conversations/route.ts", import.meta.url),
+    "utf8"
+  );
+  const getSection = route.slice(
+    route.indexOf("export async function GET"),
+    route.indexOf("export async function POST")
+  );
+  const postSection = route.slice(route.indexOf("export async function POST"));
+  assert.match(
+    getSection,
+    /\[resolvedDefaultEngine = APP_DEFAULTS\.defaultModelId\]/,
+    "the GET list fallback must stay a single resolved representative model"
+  );
+  assert.ok(
+    !getSection.includes("resolveNewConversationModels"),
+    "the GET list must not apply the new-conversation combination to existing rows"
+  );
+  assert.ok(
+    postSection.includes("resolveNewConversationModels"),
+    "the POST creation fallback must go through the shared resolver"
+  );
+});
