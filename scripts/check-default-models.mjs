@@ -24,8 +24,10 @@ import {
 } from "../lib/appDefaults.ts";
 import {
   auditDefaultModels,
+  parsePrismaFieldContract,
   parsePrismaStringDefault,
 } from "../lib/defaultModelAuditCore.ts";
+import { resolveNewConversationModels } from "../lib/newConversationModels.ts";
 import { resolveGuestInitialSelectedModels } from "../lib/guestChatInitialModels.ts";
 import {
   AVAILABLE_MODELS,
@@ -153,6 +155,69 @@ const userSettingsCreateDefaultModel =
     : (/defaultModel:\s*"([^"]+)"/.exec(settingsRoute)?.[1] ??
       "unknown (app/api/user/settings/route.ts creates the row from something else)");
 
+// ---------------------------------------------------------------------------
+// C. The signed-in new-conversation combination: schema contract, the routes
+//    and the client read as text, plus resolver fixtures run against the same
+//    catalogue as the rest of the audit.
+// ---------------------------------------------------------------------------
+const modelFinderRoute = readFileSync(
+  join(process.cwd(), "app/api/user/model-finder/route.ts"),
+  "utf8"
+);
+const conversationsRoute = readFileSync(
+  join(process.cwd(), "app/api/conversations/route.ts"),
+  "utf8"
+);
+const chatPageClient = readFileSync(
+  join(process.cwd(), "app/(site)/(application)/chat/ChatPageClient.tsx"),
+  "utf8"
+);
+
+const resolveFixture = (stored) =>
+  resolveNewConversationModels({
+    stored,
+    defaultModel: DEFAULT_MODEL_ID,
+    models,
+    plan: "Free",
+  });
+const nullFixture = resolveFixture(null);
+const malformedFixture = resolveFixture("not-an-array");
+const truncationFixture = resolveFixture([
+  ...GUEST_BRAND_TRIO_MODEL_IDS,
+  "model-that-does-not-exist",
+]);
+const leadFixture = resolveFixture([...GUEST_BRAND_TRIO_MODEL_IDS]);
+
+const newConversation = {
+  prismaColumn: parsePrismaFieldContract(
+    schema,
+    "UserSettings",
+    "newConversationModelIds"
+  ),
+  settingsRouteUsesResolver: /lib\/newConversationModels/.test(settingsRoute),
+  settingsRouteRewritesOnRead: /userSettings\.update\(/.test(settingsRoute),
+  modelFinderSavesCombination: /newConversationModelIds:/.test(modelFinderRoute),
+  modelFinderEchoesRequest: /modelIds:\s*body\.modelIds/.test(modelFinderRoute),
+  conversationsRouteUsesResolver: /lib\/newConversationModels/.test(
+    conversationsRoute
+  ),
+  clientNewChatUsesSingleDefault:
+    /setSelectedModels\(\[userDefaultEngine\]\)/.test(chatPageClient),
+  resolverNullFallsBack:
+    nullFixture.storedModelIds === null &&
+    nullFixture.effectiveModelIds.length === 1 &&
+    nullFixture.effectiveModelIds[0] === DEFAULT_MODEL_ID,
+  resolverMalformedFallsBack:
+    malformedFixture.storedModelIds === null &&
+    malformedFixture.reasons.includes("stored_value_malformed") &&
+    malformedFixture.effectiveModelIds[0] === DEFAULT_MODEL_ID,
+  resolverTruncatesToMax:
+    truncationFixture.reasons.includes("over_limit_truncated") &&
+    truncationFixture.effectiveModelIds.length <= 3,
+  resolverLeadMatchesEffectiveDefault:
+    leadFixture.effectiveDefaultModelId === leadFixture.effectiveModelIds[0],
+};
+
 const interesting = Array.from(
   new Set([
     ...GUEST_BRAND_TRIO_MODEL_IDS,
@@ -192,6 +257,7 @@ const report = auditDefaultModels({
   ssrGuestSelectedModelIds,
   hydratedGuestSelectedModelIds,
   modelStates,
+  newConversation,
 });
 
 if (json) {
@@ -243,6 +309,19 @@ if (json) {
   console.log("\nB. Newly signed-in account");
   for (const [label, entry] of Object.entries(report.authenticated)) {
     console.log(line(label, entry.value, entry.source));
+  }
+
+  console.log("\nC. Signed-in new conversation combination");
+  console.log(
+    line(
+      "prismaColumn",
+      report.newConversation.prismaColumn,
+      "prisma_schema"
+    )
+  );
+  for (const [label, value] of Object.entries(report.newConversation)) {
+    if (label === "prismaColumn") continue;
+    console.log(`  ${label.padEnd(38)} ${value}`);
   }
 
   console.log("\nRuntime state");

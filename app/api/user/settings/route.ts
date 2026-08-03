@@ -5,10 +5,18 @@ import { prisma } from "@/lib/prisma";
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
 import { APP_DEFAULTS } from "@/lib/appDefaults";
+import { getUserBillingPlan } from "@/lib/billingEntitlements";
 import {
-    clampRuntimeSelectedModels,
+    getRuntimeModels,
     isEnabledRuntimeModelId,
 } from "@/lib/modelRegistry";
+import {
+    moveCombinationLead,
+    normalizeNewConversationModelIdsForWrite,
+    parseStoredNewConversationModelIds,
+    resolveNewConversationModels,
+    NEW_CONVERSATION_MODELS_MAX,
+} from "@/lib/newConversationModels";
 import { getUserChatUsageKey } from "@/lib/chatSecurity";
 import { migrateCurrentDailyUsageBuckets } from "@/lib/userDailyUsage";
 import {
@@ -30,6 +38,11 @@ const settingsSchema = z
         theme: z.enum(["dark", "light", "system"]).optional(),
         language: z.enum(["en", "ko", "zh", "fr", "de", "es", "pt"]).optional(),
         defaultModel: z.string().min(1).max(120).optional(),
+        newConversationModelIds: z
+            .array(z.string().trim().min(1).max(120))
+            .min(1)
+            .max(NEW_CONVERSATION_MODELS_MAX)
+            .optional(),
         timeZone: z
             .string()
             .trim()
@@ -112,25 +125,51 @@ export async function GET(req: Request) {
             }).catch((error) => {
                 console.error("Account welcome email failed:", error);
             });
-        } else if (!(await isEnabledRuntimeModelId(settings.defaultModel))) {
-            const [replacementModelId] = await clampRuntimeSelectedModels(
-                [settings.defaultModel],
-                1
+        }
+
+        // Read path: never rewrite the stored default model or combination.
+        // A stored model that is no longer selectable is resolved to an
+        // effective state and reported; only an explicit user save or an
+        // approved retirement reconciliation persists a change
+        // (docs/policy/default-model-luna-migration.md §1.2).
+        const [models, billingPlan] = await Promise.all([
+            getRuntimeModels(),
+            getUserBillingPlan(userId),
+        ]);
+        const resolved = resolveNewConversationModels({
+            stored: settings.newConversationModelIds,
+            defaultModel: settings.defaultModel,
+            models,
+            plan: billingPlan.tier,
+        });
+        if (resolved.reasons.length > 0) {
+            console.warn(
+                "user-settings.model-selection-drift",
+                JSON.stringify({
+                    userId,
+                    storedDefaultModelId: settings.defaultModel,
+                    storedModelIds: resolved.storedModelIds,
+                    effectiveModelIds: resolved.effectiveModelIds,
+                    reasons: resolved.reasons,
+                    changed: resolved.changed,
+                })
             );
-            settings = await prisma.userSettings.update({
-                where: { userId },
-                data: {
-                    defaultModel:
-                        replacementModelId || APP_DEFAULTS.defaultModelId,
-                },
-            });
         }
 
         return NextResponse.json({
             theme: settings.theme,
             language: settings.language,
-            defaultModel: settings.defaultModel,
-            defaultModelId: settings.defaultModel,
+            defaultModel: resolved.effectiveDefaultModelId,
+            defaultModelId: resolved.effectiveDefaultModelId,
+            newConversationModelIds: resolved.effectiveModelIds,
+            modelSelectionNotice: resolved.changed
+                ? {
+                      reasons: resolved.reasons,
+                      storedDefaultModelId: settings.defaultModel,
+                      storedModelIds: resolved.storedModelIds,
+                      effectiveModelIds: resolved.effectiveModelIds,
+                  }
+                : null,
             isNewAccount,
             preferredTasks: settings.preferredTasks,
             preferredPriority: settings.preferredPriority,
@@ -159,12 +198,54 @@ export async function POST(req: Request) {
             minute: 10,
             day: 100,
         });
-        const { theme, language, defaultModel, timeZone, timeZoneSource } = await readLimitedJson(
-            req,
-            4 * 1024,
-            settingsSchema
-        );
-        if (defaultModel && !(await isEnabledRuntimeModelId(defaultModel))) {
+        const {
+            theme,
+            language,
+            defaultModel,
+            newConversationModelIds,
+            timeZone,
+            timeZoneSource,
+        } = await readLimitedJson(req, 4 * 1024, settingsSchema);
+
+        // Explicit combination save: every model must be selectable right now
+        // on this account's plan, and the representative model is always the
+        // combination's first item. Both fields land in the same transaction.
+        let normalizedCombination: string[] | null = null;
+        if (newConversationModelIds !== undefined) {
+            const [models, billingPlan] = await Promise.all([
+                getRuntimeModels(),
+                getUserBillingPlan(userId),
+            ]);
+            const normalized = normalizeNewConversationModelIdsForWrite({
+                requested: newConversationModelIds,
+                models,
+                plan: billingPlan.tier,
+            });
+            if (!normalized.ok) {
+                return NextResponse.json(
+                    {
+                        error: "The new conversation combination is not valid for this account.",
+                        code: "NEW_CONVERSATION_MODELS_INVALID",
+                        rejection: normalized.rejection,
+                        ...(normalized.modelId ? { modelId: normalized.modelId } : {}),
+                    },
+                    { status: 400 }
+                );
+            }
+            if (
+                defaultModel !== undefined &&
+                defaultModel !== normalized.modelIds[0]
+            ) {
+                return NextResponse.json(
+                    {
+                        error: "defaultModel must match the first model of the combination.",
+                        code: "DEFAULT_MODEL_LEAD_MISMATCH",
+                    },
+                    { status: 400 }
+                );
+            }
+            normalizedCombination = normalized.modelIds;
+        } else if (defaultModel && !(await isEnabledRuntimeModelId(defaultModel))) {
             return NextResponse.json({ error: "Unsupported default model." }, { status: 400 });
         }
         const requestedTimeZone =
@@ -212,12 +293,35 @@ export async function POST(req: Request) {
                 });
             }
 
+            // Model fields always move together, in this transaction:
+            //   * explicit combination -> lead becomes defaultModel;
+            //   * legacy defaultModel-only -> the new lead moves to the front
+            //     of the existing combination (order kept, deduped, at most
+            //     the maximum, LAST item dropped on overflow), or [lead] when
+            //     no combination was ever saved.
+            const modelWrite = normalizedCombination
+                ? {
+                      defaultModel: normalizedCombination[0],
+                      newConversationModelIds: normalizedCombination,
+                  }
+                : defaultModel !== undefined
+                  ? {
+                        defaultModel,
+                        newConversationModelIds: moveCombinationLead(
+                            parseStoredNewConversationModelIds(
+                                current?.newConversationModelIds
+                            ).modelIds,
+                            defaultModel
+                        ),
+                    }
+                  : {};
+
             return tx.userSettings.upsert({
                 where: { userId },
                 update: {
                     ...(theme !== undefined ? { theme } : {}),
                     ...(language !== undefined ? { language } : {}),
-                    ...(defaultModel !== undefined ? { defaultModel } : {}),
+                    ...modelWrite,
                     ...(effectiveRequestedTimeZone !== undefined
                         ? {
                               timeZone: effectiveRequestedTimeZone,
@@ -234,7 +338,15 @@ export async function POST(req: Request) {
                     userId,
                     theme: theme || APP_DEFAULTS.defaultTheme,
                     language: language || APP_DEFAULTS.defaultLanguage,
-                    defaultModel: defaultModel || APP_DEFAULTS.defaultModelId,
+                    defaultModel:
+                        normalizedCombination?.[0] ||
+                        defaultModel ||
+                        APP_DEFAULTS.defaultModelId,
+                    ...(normalizedCombination
+                        ? { newConversationModelIds: normalizedCombination }
+                        : defaultModel
+                          ? { newConversationModelIds: [defaultModel] }
+                          : {}),
                     timeZone: effectiveRequestedTimeZone || DEFAULT_USER_TIME_ZONE,
                     timeZoneInitializedAt:
                         effectiveRequestedTimeZone !== undefined ? now : null,

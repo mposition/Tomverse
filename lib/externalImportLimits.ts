@@ -64,6 +64,16 @@ export const EXTERNAL_IMPORT_CLIENT_ARCHIVE_LIMITS = {
 } as const;
 
 /**
+ * Request-body ceilings for the staging API. The batch ceiling leaves room
+ * for one worst-case oversized message (1M code points, up to ~4MB UTF-8,
+ * roughly doubled by JSON escaping) plus batch overhead, so a message never
+ * has to span requests; the pre-truncation original is digested and discarded
+ * within the one request that carried it (§5.4).
+ */
+export const EXTERNAL_IMPORT_MAX_BATCH_REQUEST_BYTES = 12 * 1024 * 1024;
+export const EXTERNAL_IMPORT_MAX_CONTROL_REQUEST_BYTES = 256 * 1024;
+
+/**
  * Locale-independent marker inserted between the retained head and tail of a
  * truncated message. ASCII on purpose: it must survive any provider content
  * and never collide with the surrounding text's language.
@@ -73,6 +83,36 @@ export const EXTERNAL_IMPORT_TRUNCATION_MARKER =
 
 /** Share of the retained budget kept from the head of an over-long message. */
 export const EXTERNAL_IMPORT_TRUNCATION_HEAD_RATIO = 0.75;
+
+export type ExternalImportUsage = {
+    conversations: number;
+    messages: number;
+    bytes: number;
+};
+
+/**
+ * The all-or-nothing quota decision (§5.3), pure so the arithmetic is
+ * testable without 50MB of fixture data. Callers are responsible for reading
+ * `usage` under the per-account advisory lock — this function only decides.
+ */
+export function externalImportQuotaExceeded(
+    usage: ExternalImportUsage,
+    addition: ExternalImportUsage,
+    limits: Pick<
+        typeof EXTERNAL_IMPORT_STORAGE_LIMITS,
+        | "maxNormalizedTextBytesPerAccount"
+        | "maxExternalConversationsPerAccount"
+        | "maxExternalMessagesPerAccount"
+    > = EXTERNAL_IMPORT_STORAGE_LIMITS
+): boolean {
+    return (
+        usage.conversations + addition.conversations >
+            limits.maxExternalConversationsPerAccount ||
+        usage.messages + addition.messages >
+            limits.maxExternalMessagesPerAccount ||
+        usage.bytes + addition.bytes > limits.maxNormalizedTextBytesPerAccount
+    );
+}
 
 export type ExternalMessageTruncationPlan =
     | { kind: "store_verbatim" }

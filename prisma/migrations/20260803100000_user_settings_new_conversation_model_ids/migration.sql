@@ -1,0 +1,21 @@
+-- Signed-in "new conversation default combination" (third default-model
+-- decision; docs/policy/default-model-luna-migration.md §1.2).
+--
+-- The Model Finder's "Save as default combination" only ever persisted the
+-- first recommended model into UserSettings.defaultModel while the UI and the
+-- API response claimed the whole combination was saved. The combination now
+-- gets its own column, and UserSettings.defaultModel keeps its existing
+-- meaning (representative model: solo start, combination lead, fallback,
+-- backwards compatibility).
+--
+-- Scope note:
+--   * Additive and nullable, with NO schema default and NO backfill. NULL is
+--     interpreted as [defaultModel] by lib/newConversationModels.ts, so every
+--     existing account keeps its current single-model behaviour without a
+--     write. Existing rows' defaultModel values are not touched.
+--   * Native JSONB, not the JSON-in-a-string legacy of
+--     Conversation.selectedModels.
+--   * This is not a retirement reconciliation; the reconciliation script and
+--     its approval flow are unrelated to this column.
+
+ALTER TABLE "UserSettings" ADD COLUMN "newConversationModelIds" JSONB;

@@ -2,6 +2,7 @@ import { createHash, timingSafeEqual } from "node:crypto";
 import { after } from "next/server";
 import { reconcileExpiredChatCreditReservations } from "@/lib/chatSecurity";
 import { reconcileExpiredChatRequestLeases } from "@/lib/chatRequestLease";
+import { reconcileExpiredExternalImportStaging } from "@/lib/externalImportService";
 import { reportOperationalIncident } from "@/lib/operationalMonitoring";
 import {
   completeScheduledJob,
@@ -62,6 +63,15 @@ export async function POST(request: Request) {
     // died). It never throws, so it cannot turn a successful reconciliation
     // into a failed one.
     const imageAssets = await runImageAssetMaintenanceQuietly();
+    // Staged external-import payloads carry user conversation content and a
+    // 24h-idle / 72h-absolute lifetime (policy §5.5). The lazy checks in
+    // batch/finalize are the primary guard; this sweep clears content whose
+    // owner never came back. Never throws, so it cannot turn a successful
+    // reconciliation into a failed one.
+    const externalImportStaging =
+      await reconcileExpiredExternalImportStaging().catch(() => ({
+        expiredImports: 0,
+      }));
     await completeScheduledJob({
       runId: run?.id,
       processedCount: result.examined,
@@ -72,6 +82,7 @@ export async function POST(request: Request) {
         refundRequests,
         requestLeases,
         imageAssets,
+        externalImportStaging,
       },
     });
     return Response.json(
@@ -83,6 +94,7 @@ export async function POST(request: Request) {
         refundRequests,
         requestLeases,
         imageAssets,
+        externalImportStaging,
       },
       { headers: { "Cache-Control": "no-store" } }
     );
