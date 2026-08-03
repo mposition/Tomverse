@@ -3612,3 +3612,17 @@ export const chatErrorResponse = (error: unknown) => {
         { status: error.status, headers }
     );
 };
+
+// The usage-bucket primitives, shared with the image generation billing path
+// (lib/imageGenerationService.ts). Image generation charges the same plan
+// credit wallet and the same bucket table, and the conditional
+// INSERT ... ON CONFLICT ... WHERE in incrementUsage IS the concurrency
+// defence -- a second, slightly different copy of that SQL is exactly the
+// kind of drift that corrupts a shared wallet, so the one implementation is
+// exported instead of mirrored.
+export {
+    incrementUsage as incrementUsageBucket,
+    readUsageCount as readUsageBucketCount,
+    periodStart as usagePeriodStart,
+    monthlyResetAt as usageMonthlyResetAt,
+};

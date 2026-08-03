@@ -157,20 +157,30 @@ export const auditImageGenerationInvariants = async (
 export type ImageAssetMaintenanceResult = {
   cleanup: ImageAssetCleanupSweepResult;
   invariants: ImageInvariantAuditResult;
+  staleRecovery: { examined: number; refunded: number };
 };
 
 /**
  * The ride-along for the fifteen-minute maintenance cron. Never throws, so
  * it cannot turn a successful credit reconciliation run into a failed one
- * (same contract as drainNotificationDeliveriesQuietly).
+ * (same contract as drainNotificationDeliveriesQuietly). Alongside the R2
+ * tombstone sweep, this is the refund arm for generations whose executor
+ * died: the settling claim inside the service makes it race-safe against a
+ * worker that is merely slow.
  */
 export const runImageAssetMaintenanceQuietly = async (
   now = new Date()
 ): Promise<ImageAssetMaintenanceResult> => {
   try {
     const cleanup = await drainImageAssetCleanupQueue(200, now);
+    const { reconcileStaleImageGenerations } = await import(
+      "@/lib/imageGenerationService"
+    );
+    const staleRecovery = await reconcileStaleImageGenerations(now).catch(
+      () => ({ examined: 0, refunded: 0 })
+    );
     const invariants = await auditImageGenerationInvariants(now);
-    return { cleanup, invariants };
+    return { cleanup, invariants, staleRecovery };
   } catch (error) {
     console.error("Image asset maintenance failed:", error);
     return {
@@ -180,6 +190,7 @@ export const runImageAssetMaintenanceQuietly = async (
         staleGenerations: 0,
         cleanupBacklog: 0,
       },
+      staleRecovery: { examined: 0, refunded: 0 },
     };
   }
 };
