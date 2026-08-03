@@ -21,6 +21,7 @@ import {
     truncateExternalMessageContent,
     utf8ByteLength,
 } from "@/lib/externalImportLimits";
+import { recordExternalImportCounter } from "@/lib/externalImportMetrics";
 import { prisma } from "@/lib/prisma";
 
 /**
@@ -200,6 +201,50 @@ export function createExternalImport(input: {
             digestVersion: EXTERNAL_IMPORT_DIGEST_VERSION,
         },
     });
+}
+
+/**
+ * Import history for the settings page. Import rows only — staged
+ * conversation payloads stay out of every general listing (§5.5); the
+ * per-import status endpoint is the one place staged titles appear, for the
+ * owner, during an active wizard run.
+ *
+ * Available while the feature flag is off, like DELETE: after a rollback the
+ * owner must still be able to find what they imported in order to delete it
+ * (§15).
+ */
+export async function listExternalImports(userId: string) {
+    const rows = await prisma.externalImport.findMany({
+        where: { userId },
+        orderBy: { createdAt: "desc" },
+        take: 50,
+        select: {
+            id: true,
+            provider: true,
+            status: true,
+            failureCode: true,
+            conversationCount: true,
+            messageCount: true,
+            normalizedBytes: true,
+            truncationCount: true,
+            duplicateCount: true,
+            createdAt: true,
+            completedAt: true,
+        },
+    });
+    return rows.map((row) => ({
+        id: row.id,
+        provider: row.provider,
+        status: row.status,
+        failureCode: row.failureCode,
+        conversationCount: row.conversationCount,
+        messageCount: row.messageCount,
+        normalizedBytes: asSafeNumber(row.normalizedBytes),
+        truncationCount: row.truncationCount,
+        duplicateCount: row.duplicateCount,
+        createdAt: row.createdAt.toISOString(),
+        completedAt: row.completedAt?.toISOString() ?? null,
+    }));
 }
 
 export async function getExternalImportStatus(userId: string, importId: string) {
@@ -719,6 +764,11 @@ export async function reconcileExpiredExternalImportStaging(now = new Date()) {
         await prisma.$transaction(async (tx) => {
             await expireStagingImport(tx, row.id);
         });
+    }
+    if (stale.length > 0) {
+        // §22 staging-cleanup metric. A counter rather than a row aggregate:
+        // the expired rows stay owner-deletable, so only the counter survives.
+        await recordExternalImportCounter("staging_expired", stale.length, now);
     }
     return { expiredImports: stale.length };
 }

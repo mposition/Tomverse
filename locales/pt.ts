@@ -785,6 +785,97 @@ export const pt = {
         refundRequestSuccess: "Solicitação de reembolso recebida.",
         refundRequestFailed: "Não foi possível enviar a solicitação de reembolso.",
     },
+    externalImport: {
+        dataTabTitle: "Importar de outro serviço de IA",
+        dataTabDescription:
+            "Guarde na sua conta Tomverse conversas de um arquivo de exportação do ChatGPT ou do Claude. O arquivo de exportação é lido apenas no seu navegador.",
+        dataTabUsage:
+            "{conversations} conversas importadas · {storage} armazenados",
+        dataTabOpen: "Abrir configurações de importação",
+        pageTitle: "Importar conversas de outro serviço de IA",
+        pageDescription:
+            "Envie uma exportação oficial de dados do ChatGPT ou do Claude, revise o conteúdo e escolha quais conversas manter na sua conta Tomverse.",
+        backToChat: "Voltar ao chat",
+        backToImports: "Voltar às importações",
+        signInRequired:
+            "Entre na sua conta para importar conversas de outro serviço de IA.",
+        disabledNotice:
+            "A importação de conversas externas não está disponível no momento.",
+        privacyNote:
+            "O arquivo de exportação nunca sai do seu dispositivo: ele é aberto no navegador, e apenas o texto normalizado das conversas que você selecionar é armazenado na sua conta. Imagens, áudio e anexos não são importados. Excluir conversas importadas do Tomverse não exclui nada no serviço original.",
+        capacityTitle: "Armazenamento de importação",
+        capacityUsage: "{used} de {limit} usados",
+        capacityConversations: "{used} de {limit} conversas importadas",
+        selectFile: "Escolher arquivo de exportação",
+        selectFileHint:
+            "Exportação de dados do ChatGPT ou do Claude (.zip ou .json), até 1 GB. Arquivos grandes não são problema — arquivos de mídia são ignorados sem serem lidos.",
+        parsing: "Lendo a exportação no seu navegador…",
+        parsingProgress: "{conversations} conversas encontradas",
+        cancel: "Cancelar",
+        desktopRecommended:
+            "Esta exportação é grande demais para o navegador deste dispositivo. Como o arquivo é aberto localmente, tente novamente em um computador desktop.",
+        parseFailed:
+            "Não foi possível ler o arquivo como uma exportação compatível.",
+        previewTitle: "Escolha as conversas a importar",
+        previewProvider: "Exportação detectada: {provider}",
+        previewSummary:
+            "{selected} de {total} conversas selecionadas · cerca de {size}",
+        warningsTitle: "Não incluído",
+        warningSkippedMessages:
+            "{count} mensagens de sistema ou de ferramentas ignoradas",
+        warningSkippedParts:
+            "{count} itens não textuais (imagens, áudio, arquivos) ignorados",
+        warningBranches:
+            "{count} ramificações alternativas de conversa não são importadas",
+        notImportableBadge: "Não pode ser importada",
+        notImportableExplain:
+            "{count} conversas contêm uma mensagem acima do limite de tamanho de importação e não podem ser importadas.",
+        truncationTitle: "Algumas mensagens longas serão encurtadas",
+        truncationExplain:
+            "{conversations} conversas contêm mensagens acima do limite de armazenamento de {limit} caracteres. Se você aprovar, o início e o fim de cada mensagem longa são mantidos e o meio é substituído por um marcador.",
+        truncationApprove:
+            "Importar essas conversas com mensagens encurtadas",
+        truncatedBadge: "Será encurtada",
+        quotaExceededWarning:
+            "A seleção é maior que o seu armazenamento de importação restante. Desmarque algumas conversas para continuar.",
+        messagesCount: "{count} mensagens",
+        startImport: "Enviar seleção",
+        uploading: "Enviando lote {sent} de {total}…",
+        uploadFailed:
+            "O envio falhou. Você pode tentar novamente — lotes que já chegaram não são enviados duas vezes.",
+        retryUpload: "Tentar enviar novamente",
+        stagedTitle: "Revisar e confirmar",
+        stagedSummary:
+            "{staged} conversas prontas para importar · {duplicates} duplicadas ignoradas",
+        stagedTruncated: "{count} mensagens serão armazenadas encurtadas",
+        allDuplicates: "Tudo nesta seleção já está na sua conta.",
+        finalize: "Confirmar importação",
+        finalizing: "Confirmando…",
+        finalizeFailedQuota:
+            "Sua conta não tem armazenamento de importação suficiente para esta seleção.",
+        stagingExpired:
+            "Esta sessão de importação expirou. Comece novamente a partir do arquivo de exportação.",
+        importCompleted:
+            "Importação concluída: {count} conversas agora estão guardadas na sua conta.",
+        startAnother: "Importar outra exportação",
+        errorGeneric: "Algo deu errado. Tente novamente.",
+        historyTitle: "Exportações importadas",
+        historyEmpty: "Nada foi importado ainda.",
+        historyConversations: "{count} conversas",
+        statusCompleted: "Concluída",
+        statusFailed: "Falhou",
+        statusCancelled: "Cancelada",
+        statusStaging: "Em andamento",
+        viewDetail: "Ver",
+        deleteImport: "Excluir",
+        deleteImportArmed: "Clique novamente para excluir",
+        deleting: "Excluindo…",
+        deleteNote:
+            "Excluir remove apenas as cópias importadas do Tomverse; o serviço original não é afetado.",
+        detailTitle: "Exportação importada",
+        detailNotFound: "Esta importação não foi encontrada.",
+        detailConversations: "Conversas importadas",
+    },
     privacyPolicy: {
         title: "Política de privacidade",
         effective: "Em vigor: 16 de julho de 2026",

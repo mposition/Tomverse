@@ -14,6 +14,7 @@ import {
 } from "@/lib/appSettings";
 import { authOptions } from "@/lib/auth";
 import { EXTERNAL_IMPORT_MAX_BATCH_REQUEST_BYTES } from "@/lib/externalImportLimits";
+import { recordExternalImportCounter } from "@/lib/externalImportMetrics";
 import { appendExternalImportBatch } from "@/lib/externalImportService";
 
 // Content length limits here are transport guards in UTF-16 units; the
@@ -130,6 +131,14 @@ export async function POST(
                 { error: error.message, code: "EXTERNAL_IMPORT_DISABLED" },
                 { status: 403 }
             );
+        }
+        if (
+            error instanceof ApiSecurityError &&
+            error.code === "EXTERNAL_IMPORT_QUOTA_EXCEEDED"
+        ) {
+            // Quota refusals leave no terminal row to aggregate (§22): the
+            // import stays in staging, so the rejection is a day counter.
+            await recordExternalImportCounter("quota_rejected");
         }
         const securityResponse = apiSecurityResponse(error);
         if (securityResponse) return securityResponse;
