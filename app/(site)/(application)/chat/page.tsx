@@ -1,7 +1,7 @@
 export const dynamic = "force-dynamic";
 
 import { APP_DEFAULTS } from "@/lib/appDefaults";
-import { getPublicAppSettings } from "@/lib/appSettings";
+import { getPublicAppSettings, isImageGenerationEnabled } from "@/lib/appSettings";
 import { GuestVerificationProvider } from "@/components/chat/GuestVerificationProvider";
 import { ChatPageClient } from "./ChatPageClient";
 
@@ -17,8 +17,12 @@ import { ChatPageClient } from "./ChatPageClient";
 // the server -- no extra request, and nothing left to correct afterwards.
 export default async function ChatPage() {
   let guestDefaultModelId: string = APP_DEFAULTS.guestDefaultModelId;
+  // Default-off opt-in (lib/imageGenerationAccess.ts): a read failure keeps
+  // the entry points hidden, exactly like a missing flag row.
+  let imageGenerationEnabled = false;
   try {
     guestDefaultModelId = (await getPublicAppSettings()).guestDefaultModelId;
+    imageGenerationEnabled = await isImageGenerationEnabled();
   } catch (error) {
     // A settings read failure must not change what the guest sees: the
     // compiled-in default resolves to the same brand trio, so the count and
@@ -35,7 +39,10 @@ export default async function ChatPage() {
     <GuestVerificationProvider
       siteKey={process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY}
     >
-      <ChatPageClient guestDefaultModelId={guestDefaultModelId} />
+      <ChatPageClient
+        guestDefaultModelId={guestDefaultModelId}
+        imageGenerationEnabled={imageGenerationEnabled}
+      />
     </GuestVerificationProvider>
   );
 }

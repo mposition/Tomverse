@@ -11,6 +11,10 @@ import {
   reconcileStaleImageGenerations,
   requestImageGeneration,
 } from "@/lib/imageGenerationService";
+import {
+  IMAGE_GENERATION_READ_SELECT,
+  serializeImageGeneration,
+} from "@/lib/imageGenerationRead";
 import { imageAssetR2Key } from "@/lib/imageGenerationStateCore";
 import { prisma } from "@/lib/prisma";
 
@@ -508,4 +512,31 @@ test("purchased credits carry the request when plan credits are exhausted, and a
     new Date(now.getTime() + 61 * 60 * 1_000)
   );
   assert.equal(secondSweep.refunded, 0);
+});
+
+test("the read select and serializer rebuild the timeline shape without minting URLs early", async () => {
+  const user = await createUser();
+  const conversation = await createImageConversation(user.id);
+  const generation = await createGeneration(user.id, conversation.id);
+  await createReservation(user.id, conversation.id, generation.id);
+
+  const row = await prisma.imageGeneration.findUnique({
+    where: { id: generation.id },
+    select: IMAGE_GENERATION_READ_SELECT,
+  });
+  const reservation = await prisma.imageCreditReservation.findUnique({
+    where: { generationId: generation.id },
+    select: { reservedCredits: true, refundedAt: true },
+  });
+  assert.ok(row);
+  const serialized = await serializeImageGeneration(row, reservation);
+  assert.equal(serialized.generationId, generation.id);
+  assert.equal(serialized.conversationId, conversation.id);
+  assert.equal(serialized.status, "pending");
+  assert.equal(serialized.prompt, "sunset over mountains");
+  assert.equal(serialized.reservedCredits, 15);
+  assert.equal(serialized.refunded, false);
+  // A non-succeeded generation never exposes asset URLs -- the serializer
+  // must not touch R2 for it (no R2 credentials exist in this test).
+  assert.deepEqual(serialized.assets, []);
 });

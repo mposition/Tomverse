@@ -7,8 +7,11 @@ import {
   consumeApiRateLimit,
 } from "@/lib/apiSecurity";
 import { authOptions } from "@/lib/auth";
+import {
+  IMAGE_GENERATION_READ_SELECT,
+  serializeImageGeneration,
+} from "@/lib/imageGenerationRead";
 import { prisma } from "@/lib/prisma";
-import { createR2ReadUrl } from "@/lib/r2";
 
 // GET /api/images/generations/[generationId] -- the polling and recovery
 // endpoint. A client that lost the POST response (tab closed, network drop)
@@ -36,23 +39,7 @@ export async function GET(req: Request, { params }: Params) {
     const { generationId } = await params;
     const generation = await prisma.imageGeneration.findUnique({
       where: { id: generationId },
-      select: {
-        id: true,
-        userId: true,
-        conversationId: true,
-        status: true,
-        publicErrorCode: true,
-        preset: true,
-        size: true,
-        quality: true,
-        createdAt: true,
-        completedAt: true,
-        failedAt: true,
-        assets: {
-          where: { status: "ready", deletedAt: null },
-          select: { role: true, r2Key: true, mimeType: true },
-        },
-      },
+      select: IMAGE_GENERATION_READ_SELECT,
     });
     if (!generation || generation.userId !== userId) {
       return NextResponse.json(
@@ -66,33 +53,8 @@ export async function GET(req: Request, { params }: Params) {
       select: { reservedCredits: true, refundedAt: true },
     });
 
-    const assets =
-      generation.status === "succeeded"
-        ? await Promise.all(
-            generation.assets.map(async (asset) => ({
-              role: asset.role,
-              mimeType: asset.mimeType,
-              url: await createR2ReadUrl(asset.r2Key, 300),
-            }))
-          )
-        : [];
-
     return NextResponse.json(
-      {
-        generationId: generation.id,
-        conversationId: generation.conversationId,
-        status: generation.status,
-        preset: generation.preset,
-        size: generation.size,
-        quality: generation.quality,
-        reservedCredits: reservation?.reservedCredits ?? null,
-        refunded: Boolean(reservation?.refundedAt),
-        publicErrorCode: generation.publicErrorCode,
-        createdAt: generation.createdAt.toISOString(),
-        completedAt: generation.completedAt?.toISOString() ?? null,
-        failedAt: generation.failedAt?.toISOString() ?? null,
-        assets,
-      },
+      await serializeImageGeneration(generation, reservation),
       { headers: { "Cache-Control": "no-store" } }
     );
   } catch (error) {

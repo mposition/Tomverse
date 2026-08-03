@@ -36,6 +36,8 @@ import { Conversation, type ChatAttachment } from "@/components/chat/types";
 import { useConversationDrafts } from "@/components/chat/useConversationDrafts";
 import { useModelCatalog } from "@/components/ModelCatalogProvider";
 import { useSession } from "next-auth/react";
+import { ImageGenerationWorkspace } from "@/components/images/ImageGenerationWorkspace";
+import { planAllowsImageGeneration } from "@/lib/imageGenerationAccess";
 import {
   useLanguage,
   type Language,
@@ -434,8 +436,11 @@ export function ChatPageClient({
   // Resolved on the server (see page.tsx) rather than fetched after mount, so
   // this component's very first render already knows the guest default.
   guestDefaultModelId,
+  imageGenerationEnabled = false,
 }: {
   guestDefaultModelId: string;
+  /** The image generation opt-in flag, resolved server-side in page.tsx. */
+  imageGenerationEnabled?: boolean;
 }) {
   const {
     models: AVAILABLE_MODELS,
@@ -453,6 +458,10 @@ export function ChatPageClient({
     useState(false);
   const [currentChatId, setCurrentChatId] = useState<string | null>(null);
   const [conversations, setConversations] = useState<Conversation[]>([]);
+  // True while a "new image" draft is open: the workspace renders with no
+  // server row, which is only created by the first successful generation
+  // request (docs/policy/image-generation.md §6).
+  const [isImageDraftActive, setIsImageDraftActive] = useState(false);
   const { data: session, status } = useSession();
   const sessionUserId = session?.user?.id || null;
   // Declared before any model state below because the initial selected models
@@ -2070,12 +2079,44 @@ export function ChatPageClient({
     setDisabledPanels([]);
     setWebSearchMode(APP_DEFAULTS.defaultWebSearchMode);
     setIsDeepResearchPending(false);
+    setIsImageDraftActive(false);
     discardDraft(blankedDraftScope);
       setPromptPayload(null);
       setIsInitialConversationResolved(true);
 
       setFocusToken((prev) => prev + 1);
   };
+
+    const handleNewImage = () => {
+        localComparisonResponsesRef.current.clear();
+        latestLocalComparisonPromptRef.current = null;
+        setIsImageDraftActive(true);
+        currentChatIdRef.current = null;
+        setCurrentChatId(null);
+        setPromptPayload(null);
+        setIsDeepResearchPending(false);
+        setIsInitialConversationResolved(true);
+    };
+
+    // The first successful generation request created the conversation row
+    // atomically server-side; adopt it so the sidebar shows it immediately.
+    const handleImageConversationCreated = (conversation: {
+        id: string;
+        title: string;
+    }) => {
+        setConversations((prev) => [
+            {
+                id: conversation.id,
+                title: conversation.title,
+                kind: "image" as const,
+                messageCount: 0,
+            },
+            ...prev,
+        ]);
+        setIsImageDraftActive(false);
+        currentChatIdRef.current = conversation.id;
+        setCurrentChatId(conversation.id);
+    };
 
     const handleSelectConversation = async (id: string, skipLockCheck = false) => {
         if (isSending) return;
@@ -2090,6 +2131,20 @@ export function ChatPageClient({
                 return;
 
             }
+        }
+
+        // An image conversation swaps the whole surface for the image
+        // workspace: no chat drafts, model settings or panels to restore,
+        // and the workspace loads its own generation history.
+        const selectedTarget = conversations.find((c) => c.id === id);
+        if (selectedTarget?.kind === "image") {
+            setIsImageDraftActive(false);
+            currentChatIdRef.current = id;
+            setCurrentChatId(id);
+            setPromptPayload(null);
+            setIsDeepResearchPending(false);
+            setIsInitialConversationResolved(true);
+            return;
         }
 
         if (isGuestMode) {
@@ -2114,6 +2169,7 @@ export function ChatPageClient({
       setCurrentChatId(id);
 	  setPromptPayload(null);
       setIsDeepResearchPending(false);
+      setIsImageDraftActive(false);
 
     if (isGuestMode) {
       const targetConv = conversations.find((c) => c.id === id);
@@ -3757,6 +3813,27 @@ export function ChatPageClient({
     Math.ceil(new TextEncoder().encode(inputValue).length / 4)
   );
 
+  const activeImageConversation = conversations.find(
+    (conversation) =>
+      conversation.id === currentChatId && conversation.kind === "image"
+  );
+  const isImageWorkspaceActive =
+    !isGuestMode && (isImageDraftActive || Boolean(activeImageConversation));
+  const canOfferNewImage = imageGenerationEnabled && !isGuestMode;
+  const imageWorkspaceElement = isImageWorkspaceActive ? (
+    <ImageGenerationWorkspace
+      // Remount on switch: the workspace's local timeline, draft prompt and
+      // poll loop all belong to exactly one conversation.
+      key={isImageDraftActive ? "image-draft" : currentChatId ?? "image-draft"}
+      conversationId={isImageDraftActive ? null : currentChatId}
+      onConversationCreated={handleImageConversationCreated}
+      flagEnabled={imageGenerationEnabled}
+      planAllowsImageGeneration={
+        !isGuestMode && planAllowsImageGeneration(accountUsage?.plan ?? "Free")
+      }
+    />
+  ) : null;
+
   return (
     <>
       <ModelFinder
@@ -3807,6 +3884,8 @@ export function ChatPageClient({
           maxGuestMessages={MAX_GUEST_MESSAGES}
           isModelSelectionReady={isModelSelectionReady}
           onNewChat={handleNewChat}
+          onNewImage={canOfferNewImage ? handleNewImage : null}
+          imageWorkspace={imageWorkspaceElement}
           onSelectConversation={handleSelectConversation}
           onRename={handleRename}
           onDelete={handleDelete}
@@ -3859,6 +3938,8 @@ export function ChatPageClient({
           maxGuestMessages={MAX_GUEST_MESSAGES}
           isModelSelectionReady={isModelSelectionReady}
           onNewChat={handleNewChat}
+          onNewImage={canOfferNewImage ? handleNewImage : null}
+          imageWorkspace={imageWorkspaceElement}
           onSelectConversation={handleSelectConversation}
           onRename={handleRename}
           onDelete={handleDelete}
