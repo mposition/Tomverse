@@ -79,6 +79,9 @@ model User {
   privacyRequests         PrivacyRequest[]
   planChangeRequests      PlanChangeRequest[]
   externalImports         ExternalImport[]
+  memoryItems             MemoryItem[]
+  memoryExtractionRuns    MemoryExtractionRun[]
+  memorySettings          UserMemorySettings?
 
   @@index([plan, id])
   @@index([createdAt])
@@ -97,22 +100,22 @@ model UserSettings {
   userId String @unique
   user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  theme                  String    @default("dark") // "dark", "light", "system"
-  language               String    @default("en") // "ko", "en"
-  defaultModel           String    @default("gpt-5-6-luna")
+  theme                   String    @default("dark") // "dark", "light", "system"
+  language                String    @default("en") // "ko", "en"
+  defaultModel            String    @default("gpt-5-6-luna")
   // 1-3 model IDs a signed-in account starts a new conversation with.
   // NULL (never a schema default, never backfilled) means [defaultModel];
   // lib/newConversationModels.ts is the only interpreter. See
   // docs/policy/default-model-luna-migration.md §1.2.
   newConversationModelIds Json?
-  preferredTasks         Json?
-  preferredPriority      String?
-  usesFilesFrequently    String?
-  modelFinderCompletedAt DateTime?
-  modelFinderDismissedAt DateTime?
-  timeZone               String    @default("UTC")
-  timeZoneInitializedAt  DateTime?
-  timeZoneChangedAt      DateTime?
+  preferredTasks          Json?
+  preferredPriority       String?
+  usesFilesFrequently     String?
+  modelFinderCompletedAt  DateTime?
+  modelFinderDismissedAt  DateTime?
+  timeZone                String    @default("UTC")
+  timeZoneInitializedAt   DateTime?
+  timeZoneChangedAt       DateTime?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -194,6 +197,13 @@ model Conversation {
   // by lib/imageAssetLifecycle.ts). See docs/policy/image-generation.md.
   kind String @default("chat")
 
+  /// Per-conversation memory mode (import/memory policy §8.1 invariant 1):
+  /// "inherit" | "on" | "off" — allowlist CHECK lives in the migration.
+  /// Server-stored and server-decided; "inherit" resolves to the account
+  /// default, and no mode can override the account master toggle, the
+  /// feature flag, revocation, or ownership checks.
+  memoryMode String @default("inherit")
+
   // For kind = "image" this is stored as "[]" and never read: the image
   // model comes from the image generation server layer's fixed allowlist,
   // not from conversation state.
@@ -237,13 +247,13 @@ model ConversationProject {
 }
 
 model Message {
-  id             String  @id @default(cuid())
-  role           String
-  content        String
-  status         String  @default("normal")
-  modelId        String?
-  pendingJobId   String?
-  searchMetadata Json?
+  id              String                  @id @default(cuid())
+  role            String
+  content         String
+  status          String                  @default("normal")
+  modelId         String?
+  pendingJobId    String?
+  searchMetadata  Json?
   providerContext MessageProviderContext?
 
   conversationId String
@@ -258,8 +268,8 @@ model Message {
 // Kept in a separate table so ordinary conversation queries and exports can
 // never expose it through a broad Message selection.
 model MessageProviderContext {
-  messageId        String  @id
-  message          Message @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  messageId        String   @id
+  message          Message  @relation(fields: [messageId], references: [id], onDelete: Cascade)
   modelId          String
   provider         String
   responseMessages Json
@@ -934,42 +944,42 @@ model AppSetting {
 }
 
 model Feedback {
-  id                  String   @id @default(cuid())
-  userId              String?
-  email               String?
-  type                String
-  status              String   @default("open")
-  message             String
-  traceId             String?
-  modelId             String?
-  plan                String?
-  hasAttachments      Boolean  @default(false)
-  attachmentCount     Int      @default(0)
-  path                String?
-  userAgent           String?
+  id                        String              @id @default(cuid())
+  userId                    String?
+  email                     String?
+  type                      String
+  status                    String              @default("open")
+  message                   String
+  traceId                   String?
+  modelId                   String?
+  plan                      String?
+  hasAttachments            Boolean             @default(false)
+  attachmentCount           Int                 @default(0)
+  path                      String?
+  userAgent                 String?
   /// The submitter's language, captured once at submission and never mutated,
   /// so every lifecycle email for this report renders in the same language.
   /// One of lib/language.ts SUPPORTED_LANGUAGES; "en" when unknown.
-  language            String   @default("en")
+  language                  String              @default("en")
   /// Per-report transactional consent to lifecycle status emails. NOT a
   /// marketing preference: it covers only this report's received/reviewing/
   /// completed notifications. Defaults to no consent.
-  emailUpdatesConsent Boolean  @default(false)
+  emailUpdatesConsent       Boolean             @default(false)
   /// How the report was resolved -- one of FEEDBACK_CLOSURE_OUTCOMES in
   /// lib/feedbackLifecycleCore.ts. Current state for the admin console; the
   /// email renders from the immutable completed lifecycle event instead.
-  closureOutcome      String?
+  closureOutcome            String?
   /// The short reply written FOR THE SUBMITTER. Never the internal admin note,
   /// and never merged with one.
-  userReply           String?
+  userReply                 String?
   /// Outcome of verifying the server-issued errorReportToken -- one of
   /// TOKEN_VERIFICATION_STATUS in lib/errorReportContract.ts. Never the raw
   /// token, which is verified and discarded in the same request.
-  errorReportVerification String?
+  errorReportVerification   String?
   /// Where the submitted trace ID came from, as far as it can be proven:
   /// server_generated only when the token verified; otherwise the client's
   /// unauthenticated claim (or null for reports without a trace).
-  traceProvenance String?
+  traceProvenance           String?
   /// Who classified the error code the reporter attached: "server" when it
   /// came from a verified token, "client" for client-side classifications
   /// like EMPTY_RESPONSE. A client classification is never presented as a
@@ -977,14 +987,14 @@ model Feedback {
   errorClassificationSource String?
   /// The client-classified error code, kept separate from any server code
   /// inside the verified token payload.
-  clientErrorCode String?
+  clientErrorCode           String?
   /// Whether an evidence row exists for a verified report, and if not, why
   /// not -- one of EVIDENCE_AVAILABILITY in lib/errorReportContract.ts.
-  evidenceAvailability String?
-  traceEvidenceId String?
-  traceEvidence   TraceErrorEvidence? @relation(fields: [traceEvidenceId], references: [id], onDelete: SetNull)
-  createdAt           DateTime @default(now())
-  updatedAt           DateTime @updatedAt
+  evidenceAvailability      String?
+  traceEvidenceId           String?
+  traceEvidence             TraceErrorEvidence? @relation(fields: [traceEvidenceId], references: [id], onDelete: SetNull)
+  createdAt                 DateTime            @default(now())
+  updatedAt                 DateTime            @updatedAt
 
   lifecycleEvents FeedbackLifecycleEvent[]
   autoFixCase     FeedbackAutoFixCase?
@@ -1002,45 +1012,45 @@ model Feedback {
 /// human -- it never modifies code, never pushes a branch, never opens a PR.
 /// llmConfidence is observational only and stays null in Phase 2.
 model FeedbackAutoFixCase {
-  id         String   @id @default(cuid())
-  feedbackId String   @unique
-  feedback   Feedback @relation(fields: [feedbackId], references: [id], onDelete: Cascade)
-  traceId    String
+  id                  String    @id @default(cuid())
+  feedbackId          String    @unique
+  feedback            Feedback  @relation(fields: [feedbackId], references: [id], onDelete: Cascade)
+  traceId             String
   /// Trusted occurrence identity from the verified token, when one existed.
-  occurrenceId  String?
+  occurrenceId        String?
   /// errorCode|routeClass|release -- duplicate-spotting only, never identity.
-  fingerprint   String?
-  sourceRelease String?
+  fingerprint         String?
+  sourceRelease       String?
   /// One of AUTOFIX_CASE_STATE; transitions enforced by the core module and
   /// written with compare-and-swap conditional updates.
-  state String @default("received")
+  state               String    @default("received")
   /// One of AUTOFIX_CLASSIFICATION once classified.
   classification      String?
   ineligibilityReason String?
   /// Reserved for a future LLM diagnosis pass; observational, never a gate.
-  llmConfidence Float?
+  llmConfidence       Float?
   /// Bounded technical facts only -- no user text, no prompts, no tokens.
-  diagnosticSummary Json?
-  attemptCount   Int       @default(0)
-  claimedAt      DateTime?
-  heartbeatAt    DateTime?
+  diagnosticSummary   Json?
+  attemptCount        Int       @default(0)
+  claimedAt           DateTime?
+  heartbeatAt         DateTime?
   /// Doubles as the not-before instant while state = evidence_delayed.
-  leaseExpiresAt DateTime?
-  terminalReason String?
-  closedAt       DateTime?
+  leaseExpiresAt      DateTime?
+  terminalReason      String?
+  closedAt            DateTime?
   /// --- Phase 3 (null until a fix attempt runs; docs/policy §9) -----------
   /// feedback-autofix/<case-id> -- the case id, never a raw trace ID.
-  fixBranch     String?
-  fixPrNumber   Int?
-  fixPrUrl      String?
+  fixBranch           String?
+  fixPrNumber         Int?
+  fixPrUrl            String?
   /// Read back from GitHub after the human-approved merge; never inferred
   /// from enabling auto-merge.
-  mergeSha      String?
-  stagingSha    String?
+  mergeSha            String?
+  stagingSha          String?
   /// The validated Red→Green proof payload (lib/feedbackAutoFixPolicy.ts).
-  redGreenProof Json?
-  createdAt      DateTime  @default(now())
-  updatedAt      DateTime  @updatedAt
+  redGreenProof       Json?
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
 
   @@index([state, leaseExpiresAt])
   @@index([createdAt])
@@ -1059,30 +1069,30 @@ model FeedbackAutoFixCase {
 /// or message bodies, no raw provider payloads, no headers, no tokens.
 /// Retention: 30 days, purged by lib/maintenance.ts.
 model TraceErrorEvidence {
-  id           String  @id @default(cuid())
+  id                   String   @id @default(cuid())
   /// Trusted per-occurrence identity minted by the server at error time.
-  occurrenceId String  @unique
-  traceId      String
+  occurrenceId         String   @unique
+  traceId              String
   /// One of TRACE_PROVENANCE in lib/errorReportContract.ts; rows are only
   /// written for server_generated traces today.
-  traceProvenance String
-  environment  String
-  release      String?
-  routeClass   String
-  phase        String?
-  errorCode    String?
+  traceProvenance      String
+  environment          String
+  release              String?
+  routeClass           String
+  phase                String?
+  errorCode            String?
   /// One of ERROR_CLASSIFICATION_SOURCE; always "server" for rows written by
   /// the error builders.
-  classificationSource String @default("server")
-  httpStatus   Int?
-  provider     String?
-  modelId      String?
-  retryable    Boolean?
-  fingerprint  String?
-  sentryEventId String?
-  occurredAt   DateTime @default(now())
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  classificationSource String   @default("server")
+  httpStatus           Int?
+  provider             String?
+  modelId              String?
+  retryable            Boolean?
+  fingerprint          String?
+  sentryEventId        String?
+  occurredAt           DateTime @default(now())
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
 
   feedback Feedback[]
 
@@ -1846,6 +1856,159 @@ model ExternalMessage {
   originalCharacterCount Int?
   retainedCharacterCount Int?
 
+  memoryEvidences MemoryEvidence[]
+
   @@unique([externalConversationId, ordinal])
   @@index([userId])
+}
+
+/// Release B (import/memory policy §8, §20). An account-scoped long-term
+/// memory: a normalized declarative statement plus lifecycle state. Nothing
+/// here is injected anywhere until the B4 retrieval slice exists, the
+/// feature flags are on, and the §12 eval gates have passed — the schema is
+/// deployable with everything off (§15).
+model MemoryItem {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  /// Factual or style kind (§8.2) — allowlist CHECK lives in the migration.
+  kind String
+
+  /// Normalized declarative statement ("사용자는 존댓말 답변을 선호한다"),
+  /// never the source text and never an instruction (§8.2, §8.4).
+  statement String
+
+  /// §8.3 state machine — allowlist CHECK lives in the migration.
+  status String @default("candidate")
+
+  /// "standard" | "sensitive". Sensitive items are excluded from bulk
+  /// approval and require individual review (§8.4).
+  sensitivity String @default("standard")
+
+  confidence Float
+  importance Int     @default(0)
+  pinned     Boolean @default(false)
+
+  /// Canonical key grouping conflicting statements (§8.3): equal keys with
+  /// different values are surfaced to the user, never auto-overwritten.
+  conflictKey String?
+
+  /// Lexical retrieval terms (§9, retrieval v1 — no embeddings). The GIN
+  /// index is created by raw SQL in the migration. Populated by the B4
+  /// slice's tokenizer; empty until then.
+  searchTerms      String[] @default([])
+  retrievalVersion Int      @default(1)
+
+  revision   Int     @default(1)
+  userEdited Boolean @default(false)
+
+  expiresAt       DateTime?
+  suspendedReason String?
+
+  /// Provenance of automatic extraction (§12): null for user-authored items.
+  extractionModelId String?
+  promptVersion     String?
+
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+  approvedAt DateTime?
+
+  evidences MemoryEvidence[]
+
+  @@index([userId, status])
+  @@index([userId, conflictKey])
+}
+
+/// Evidence backing one memory item (§8.5, as settled by the 2026-08-03
+/// amendment): the sourceType decides the exact FK pattern, enforced by a
+/// CHECK in the migration —
+///   external_message → externalMessageId set, manualContent NULL
+///   tomverse_message → tomverseMessageId set (schema reserved for later)
+///   manual           → both FKs NULL, manualContent is the evidence body.
+/// evidenceDigest re-verifies the source content (or the manual text) so a
+/// changed source is detectable (§8.4).
+model MemoryEvidence {
+  id           String     @id @default(cuid())
+  memoryItemId String
+  memoryItem   MemoryItem @relation(fields: [memoryItemId], references: [id], onDelete: Cascade)
+  userId       String
+
+  sourceType String // external_message | tomverse_message | manual
+
+  externalMessageId String?
+  /// DB-level cascade keeps Release A's delete paths unblocked; the §13.1
+  /// source-delete flow and the reconciliation sweep are responsible for
+  /// transitioning memories whose evidence disappeared (delete by default,
+  /// suspended_by_source_delete on an explicit keep).
+  externalMessage   ExternalMessage? @relation(fields: [externalMessageId], references: [id], onDelete: Cascade)
+
+  /// Reserved (§8.5): no relation until a release actually uses it.
+  tomverseMessageId String?
+
+  /// Manual evidence body (sourceType=manual only): the user-entered grounds
+  /// text. Subject to the same validator and length rules as statements.
+  manualContent String?
+
+  evidenceDigest String
+  createdAt      DateTime @default(now())
+
+  @@index([memoryItemId])
+  @@index([externalMessageId])
+  @@index([userId])
+}
+
+/// One background extraction run (§3, §11). Layered as background
+/// concurrency — never an interactive chat lease — with at most one active
+/// run per user, enforced transactionally by the B2 slice's service.
+model MemoryExtractionRun {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  /// pending | running | completed | failed | cancelled — allowlist CHECK
+  /// lives in the migration.
+  status String @default("pending")
+
+  extractionModelId String
+  promptVersion     String
+
+  /// Selected ExternalConversation IDs (owner-verified at run creation).
+  sourceSelection Json
+
+  chunkTotal     Int
+  chunkCompleted Int       @default(0)
+  leaseExpiresAt DateTime?
+  pricingVersion String?
+
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  completedAt DateTime?
+
+  @@index([userId, status])
+  /// Orphan reconciliation (§11): expired leases are found by status +
+  /// lease deadline, mirroring the chat lease sweep.
+  @@index([status, leaseExpiresAt])
+}
+
+/// Account-level memory controls (§8.1). The master toggle is not an
+/// operational kill switch (§15) — the AppSetting flags stay authoritative
+/// above it, and no conversation mode can override a disabled master.
+model UserMemorySettings {
+  userId String @id
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  /// Approved memories are used unless the owner turns this off. Approval
+  /// itself is always explicit and per-item (§8.3), so a default-on master
+  /// exposes nothing the user has not individually reviewed.
+  masterEnabled Boolean @default(true)
+
+  /// Style memories (§8.2) are separately deactivatable.
+  styleEnabled Boolean @default(true)
+
+  /// What "inherit" resolves to: "on" | "off" — CHECK in the migration.
+  defaultConversationMode String @default("on")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }

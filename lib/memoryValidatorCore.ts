@@ -1,0 +1,357 @@
+/**
+ * Deterministic server-side validator for memory candidates (Release B,
+ * slice B1).
+ *
+ * docs/policy/external-conversation-import-and-memory.md §8.2–§8.4, §12.3–4.
+ *
+ * This module is the layer that holds regardless of what any model says: an
+ * extraction model's classification is advisory, and every candidate —
+ * extracted or user-authored — passes through these checks before it can be
+ * stored, and again before it can be bulk-approved. Pure and dependency-free
+ * so the §12.4 "deterministic validator tests" run without a database or a
+ * provider key.
+ *
+ * The three critical eval categories map to hard guarantees here:
+ *   ② assistant-only claims: a factual kind with no user-role (or manual)
+ *      evidence is rejected outright.
+ *   ③ secrets/credentials: a statement matching a credential shape is
+ *      rejected and never bulk-safe.
+ *   ④ injection/directives/URLs: rejected or demoted out of the bulk set.
+ *
+ * Patterns are deliberately conservative and enumerable — a regex either
+ * matches or it does not, and the tests pin both directions. Loosening one
+ * is a policy change, not a refactor.
+ */
+
+export const FACTUAL_MEMORY_KINDS = [
+    "identity",
+    "preference",
+    "occupation",
+    "expertise",
+    "long_term_goal",
+    "project",
+    "constraint",
+    "decision",
+    "relationship",
+    "recurring_context",
+] as const;
+
+export const STYLE_MEMORY_KINDS = [
+    "communication_style",
+    "tone",
+    "verbosity",
+    "structure",
+    "formatting",
+    "language",
+    "explanation_depth",
+    "citation_preference",
+    "code_style",
+] as const;
+
+export const MEMORY_KINDS = [
+    ...FACTUAL_MEMORY_KINDS,
+    ...STYLE_MEMORY_KINDS,
+] as const;
+
+export const MEMORY_STATUSES = [
+    "candidate",
+    "active",
+    "rejected",
+    "superseded",
+    "expired",
+    "suspended_by_source_lock",
+    "suspended_by_source_delete",
+    "manual_review_required",
+    "deleted",
+] as const;
+
+export const MEMORY_SENSITIVITIES = ["standard", "sensitive"] as const;
+
+export const MEMORY_EVIDENCE_SOURCE_TYPES = [
+    "external_message",
+    "tomverse_message",
+    "manual",
+] as const;
+
+export const CONVERSATION_MEMORY_MODES = ["inherit", "on", "off"] as const;
+
+/** Statement bounds in Unicode code points (§8.4 length check). */
+export const MEMORY_STATEMENT_MIN_CODE_POINTS = 4;
+export const MEMORY_STATEMENT_MAX_CODE_POINTS = 400;
+
+export type MemoryKind = (typeof MEMORY_KINDS)[number];
+
+export type MemoryEvidenceInput = {
+    sourceType: (typeof MEMORY_EVIDENCE_SOURCE_TYPES)[number];
+    /** Role of the source message; null/undefined for manual evidence. */
+    role?: "user" | "assistant" | null;
+};
+
+export type MemoryCandidateInput = {
+    kind: string;
+    statement: string;
+    confidence: number;
+    /** Claimed sensitivity — the validator can raise it, never lower it. */
+    sensitivity?: string;
+    /** ISO 8601, or null for no expiry. */
+    expiresAt?: string | null;
+    evidence: readonly MemoryEvidenceInput[];
+};
+
+export type MemoryDisposition =
+    | "accepted"
+    | "manual_review_required"
+    | "sensitive_review_required"
+    | "rejected";
+
+export type MemoryValidationResult = {
+    disposition: MemoryDisposition;
+    /**
+     * Eligible for "approve all non-sensitive" (§8.4 bulk-safe contract).
+     * Only ever true for an accepted, standard-sensitivity candidate.
+     */
+    bulkSafe: boolean;
+    sensitivity: (typeof MEMORY_SENSITIVITIES)[number];
+    violations: string[];
+};
+
+const countCodePoints = (value: string): number => {
+    let count = 0;
+    const iterator = value[Symbol.iterator]();
+    while (!iterator.next().done) count += 1;
+    return count;
+};
+
+/**
+ * Credential/secret shapes (§8.4, eval category ③). Matching any of these
+ * rejects the candidate: a secret is dangerous to store even for review, so
+ * the statement must be rewritten without the secret material.
+ */
+const CREDENTIAL_PATTERNS: readonly RegExp[] = [
+    /-----BEGIN [A-Z ]{0,24}PRIVATE KEY-----/,
+    /\bAKIA[0-9A-Z]{16}\b/,
+    /\bgh[pousr]_[A-Za-z0-9]{20,}\b/,
+    /\bsk-[A-Za-z0-9_-]{16,}\b/,
+    /\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{5,}\b/,
+    /\b(password|passwd|passphrase)\s*(is|[:=])\s*\S+/i,
+    /(비밀번호|암호)\s*(는|은|[:=])\s*\S+/,
+    /\b(api[ _-]?key|secret[ _-]?key|access[ _-]?token|client[ _-]?secret)\s*(is|[:=])\s*\S+/i,
+];
+
+/**
+ * Injection/override shapes (§8.4, eval category ④) that are rejected
+ * outright: text that exists to redirect the assistant has no declarative
+ * reading worth reviewing.
+ */
+const INJECTION_PATTERNS: readonly RegExp[] = [
+    /\bignore\s+(all\s+|any\s+)?(previous|prior|earlier|above)\s+(instructions?|messages?|rules?|prompts?)\b/i,
+    /\bdisregard\s+(the\s+)?(previous|prior|system|above)\b/i,
+    /\breveal\s+(the\s+|your\s+)?system\s+prompt\b/i,
+    /\bjailbreak\b/i,
+    /\bnew\s+instructions?\s*:/i,
+    /(이전|기존|위의?)\s*(지시|명령|프롬프트|규칙)(사항)?\s*(을|를|은|는)?\s*(무시|잊)/,
+    /시스템\s*프롬프트.{0,10}(공개|알려|보여)/,
+];
+
+/** System/developer/tool voice and model-identity redirection — rejected. */
+const SYSTEM_VOICE_PATTERNS: readonly RegExp[] = [
+    /^(system|developer|assistant|tool)\s*[:\-]/i,
+    /\byou\s+are\s+(now\s+)?(a|an|the)?\s*(chatgpt|claude|gemini|gpt[-\s]?\d|dan)\b/i,
+    /\b(act|behave|respond)\s+as\s+(if\s+you\s+are\s+)?(chatgpt|claude|gemini|another\s+model)\b/i,
+    /(너는|당신은)\s*(이제|지금부터)/,
+    /(chatgpt|claude|gemini|지피티)\s*(인\s*것)?처럼\s*(대답|응답|행동)/i,
+];
+
+/** External execution / file / command demands — rejected. */
+const EXECUTION_PATTERNS: readonly RegExp[] = [
+    /\b(execute|run)\b.{0,24}\b(command|script|shell|code|file)\b/i,
+    /\bcurl\s+-|\bwget\s+https?:/i,
+    /\brm\s+-rf\b/,
+    /(명령어|스크립트|파일)\s*(을|를)?\s*실행/,
+];
+
+/**
+ * Demotion shapes (§8.4): a URL, a redirect, or an imperative with an
+ * absolute marker is excluded from bulk approval and parked for individual
+ * review — a person may still decide it is a legitimate preference once
+ * rewritten declaratively.
+ */
+const URL_PATTERN = /\bhttps?:\/\/|\bwww\.[a-z0-9-]/i;
+
+const REDIRECT_PATTERNS: readonly RegExp[] = [
+    /\bfrom\s+now\s+on\b/i,
+    /\brespond\s+only\s+(with|in)\b/i,
+    /(지금부터|앞으로)\s*(는|은)?\s*(모든|항상)?/,
+];
+
+/** Imperative surface forms — a statement must be declarative (§8.2). */
+const IMPERATIVE_PATTERNS: readonly RegExp[] = [
+    /^(always|never|do\s+not|don't|must|please)\b/i,
+    /\byou\s+(must|should|shall|will|have\s+to)\b/i,
+    /(해\s?줘|해\s?주세요|하세요|해라|하라|하시오|할\s?것)\s*[.!]?$/,
+];
+
+const ABSOLUTE_MARKER_PATTERN = /(항상|반드시|무조건|절대)/;
+
+/** PII shapes that force individual (sensitive) review — never bulk. */
+const SENSITIVE_PII_PATTERNS: readonly RegExp[] = [
+    /\b\d{6}-[1-4]\d{6}\b/, // Korean resident registration number shape
+    /\b(?:\d[ -]?){15}\d\b/, // payment card length run
+];
+
+const matchesAny = (patterns: readonly RegExp[], value: string): boolean =>
+    patterns.some((pattern) => pattern.test(value));
+
+const isFactualKind = (kind: string): boolean =>
+    (FACTUAL_MEMORY_KINDS as readonly string[]).includes(kind);
+
+const isKnownKind = (kind: string): boolean =>
+    (MEMORY_KINDS as readonly string[]).includes(kind);
+
+/**
+ * Validates one candidate. Deterministic: same input and `now` always yield
+ * the same result. `now` exists only for the expiry check.
+ */
+export function validateMemoryCandidate(
+    input: MemoryCandidateInput,
+    now: Date = new Date()
+): MemoryValidationResult {
+    const violations: string[] = [];
+    let rejected = false;
+    let sensitiveReview = false;
+    let manualReview = false;
+    let sensitivity: (typeof MEMORY_SENSITIVITIES)[number] =
+        input.sensitivity === "sensitive" ? "sensitive" : "standard";
+
+    const statement = input.statement.normalize("NFC").trim();
+
+    // Structure (§8.4: 길이, 허용 kind, confidence 범위, expiry 형식).
+    if (!isKnownKind(input.kind)) {
+        violations.push("MEMORY_KIND_UNKNOWN");
+        rejected = true;
+    }
+    const length = countCodePoints(statement);
+    if (
+        length < MEMORY_STATEMENT_MIN_CODE_POINTS ||
+        length > MEMORY_STATEMENT_MAX_CODE_POINTS
+    ) {
+        violations.push("MEMORY_STATEMENT_LENGTH");
+        rejected = true;
+    }
+    if (
+        !Number.isFinite(input.confidence) ||
+        input.confidence < 0 ||
+        input.confidence > 1
+    ) {
+        violations.push("MEMORY_CONFIDENCE_RANGE");
+        rejected = true;
+    }
+    if (input.expiresAt != null) {
+        const expiry = new Date(input.expiresAt);
+        if (Number.isNaN(expiry.getTime())) {
+            violations.push("MEMORY_EXPIRY_INVALID");
+            rejected = true;
+        } else if (expiry.getTime() <= now.getTime()) {
+            violations.push("MEMORY_EXPIRY_NOT_FUTURE");
+            rejected = true;
+        }
+    }
+
+    // Evidence relationship (§8.2, eval category ②): every candidate needs
+    // evidence, and a factual claim needs at least one user-authored source —
+    // a user-role message or the user's own manual grounds text. A style
+    // preference may legitimately be inferred from assistant answers.
+    if (input.evidence.length === 0) {
+        violations.push("MEMORY_EVIDENCE_REQUIRED");
+        rejected = true;
+    } else if (isFactualKind(input.kind)) {
+        const hasUserAuthoredEvidence = input.evidence.some(
+            (evidence) =>
+                evidence.sourceType === "manual" || evidence.role === "user"
+        );
+        if (!hasUserAuthoredEvidence) {
+            violations.push("MEMORY_FACTUAL_REQUIRES_USER_EVIDENCE");
+            rejected = true;
+        }
+    }
+
+    // Category ③ — credential/secret shapes reject and mark sensitive.
+    if (matchesAny(CREDENTIAL_PATTERNS, statement)) {
+        violations.push("MEMORY_CREDENTIAL_PATTERN");
+        rejected = true;
+        sensitivity = "sensitive";
+    }
+
+    // Category ④ — hard rejects.
+    if (matchesAny(INJECTION_PATTERNS, statement)) {
+        violations.push("MEMORY_PROMPT_INJECTION_PATTERN");
+        rejected = true;
+    }
+    if (matchesAny(SYSTEM_VOICE_PATTERNS, statement)) {
+        violations.push("MEMORY_SYSTEM_VOICE_PATTERN");
+        rejected = true;
+    }
+    if (matchesAny(EXECUTION_PATTERNS, statement)) {
+        violations.push("MEMORY_EXECUTION_PATTERN");
+        rejected = true;
+    }
+
+    // Category ④ — demotions: reviewable by a person, never bulk.
+    if (URL_PATTERN.test(statement)) {
+        violations.push("MEMORY_URL_PRESENT");
+        manualReview = true;
+    }
+    const imperative = matchesAny(IMPERATIVE_PATTERNS, statement);
+    if (imperative) {
+        violations.push("MEMORY_IMPERATIVE_FORM");
+        manualReview = true;
+    }
+    if (ABSOLUTE_MARKER_PATTERN.test(statement) && imperative) {
+        violations.push("MEMORY_ABSOLUTE_DIRECTIVE");
+        rejected = true;
+    }
+    if (matchesAny(REDIRECT_PATTERNS, statement) && imperative) {
+        violations.push("MEMORY_REDIRECT_DIRECTIVE");
+        rejected = true;
+    }
+
+    // PII shapes force individual sensitive review (§8.4: 민감 후보는 개별
+    // 승인만 가능).
+    if (matchesAny(SENSITIVE_PII_PATTERNS, statement)) {
+        violations.push("MEMORY_SENSITIVE_PII_PATTERN");
+        sensitiveReview = true;
+        sensitivity = "sensitive";
+    }
+    if (sensitivity === "sensitive" && !rejected) {
+        sensitiveReview = true;
+    }
+
+    const disposition: MemoryDisposition = rejected
+        ? "rejected"
+        : sensitiveReview
+          ? "sensitive_review_required"
+          : manualReview
+            ? "manual_review_required"
+            : "accepted";
+
+    return {
+        disposition,
+        bulkSafe: disposition === "accepted" && sensitivity === "standard",
+        sensitivity,
+        violations,
+    };
+}
+
+/**
+ * Canonical key for duplicate / near-duplicate detection (§8.4): NFC,
+ * case-folded, punctuation and whitespace collapsed. Two statements with the
+ * same key are treated as the same assertion.
+ */
+export function memoryStatementKey(statement: string): string {
+    return statement
+        .normalize("NFC")
+        .toLowerCase()
+        .replace(/[\p{P}\p{S}]+/gu, " ")
+        .replace(/\s+/gu, " ")
+        .trim();
+}
