@@ -125,6 +125,7 @@ export const pt = {
         imageGenerationGenerate: "Gerar",
         imageGenerationGenerating: "Gerando imagem...",
         imageGenerationGeneratingHint: "Pode levar até cerca de dois minutos. Sair da página não cancela a geração.",
+        imageGenerationTakingLong: "Está demorando mais do que o normal. Se não puder ser concluída, será marcada como falha automaticamente e os créditos reservados serão totalmente reembolsados.",
         imageGenerationFailed: "A geração da imagem falhou.",
         imageGenerationModerationBlocked: "O sistema de segurança recusou esta solicitação. Ajuste a descrição e tente novamente.",
         imageGenerationRefunded: "Os créditos reservados foram reembolsados.",

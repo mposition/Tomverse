@@ -142,6 +142,7 @@ export const zh = {
         imageGenerationGenerate: "生成",
         imageGenerationGenerating: "正在生成图像...",
         imageGenerationGeneratingHint: "最长可能需要约两分钟。离开页面不会取消生成。",
+        imageGenerationTakingLong: "耗时比平时更长。如果无法完成，将自动标记为失败，并全额退还预留的积分。",
         imageGenerationFailed: "图像生成失败。",
         imageGenerationModerationBlocked: "安全系统拒绝了该请求。请调整描述后重试。",
         imageGenerationRefunded: "已退还预留的积分。",

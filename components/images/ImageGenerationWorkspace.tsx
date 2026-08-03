@@ -370,17 +370,26 @@ export function ImageGenerationWorkspace({
       );
     }
     if (!isTerminal(generation.status)) {
+      // Re-evaluated on every 5s poll merge; past ~2.5 minutes the run has
+      // outlived a normal provider round-trip, so say what happens next
+      // (the stale sweep fails and fully refunds it) instead of spinning
+      // silently for the reclaim window.
+      const runningLong =
+        Date.now() - new Date(generation.createdAt).getTime() > 150_000;
       return (
         <div
           role="status"
           data-testid="image-generation-progress"
+          data-running-long={runningLong ? "true" : "false"}
           className="flex items-center gap-2.5 rounded-2xl border border-accent-image-200 bg-accent-image-50 p-3.5 text-sm text-accent-image-800 dark:border-accent-image-900/60 dark:bg-accent-image-950/30 dark:text-accent-image-200"
         >
           <Loader2 className="h-4 w-4 shrink-0 animate-spin" aria-hidden="true" />
           <div className="min-w-0">
             <p className="font-semibold">{t("chat.imageGenerationGenerating")}</p>
             <p className="mt-0.5 text-xs opacity-80">
-              {t("chat.imageGenerationGeneratingHint")}
+              {runningLong
+                ? t("chat.imageGenerationTakingLong")
+                : t("chat.imageGenerationGeneratingHint")}
             </p>
           </div>
         </div>
