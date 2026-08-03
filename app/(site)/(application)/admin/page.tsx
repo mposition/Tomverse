@@ -26,7 +26,7 @@ import {
     getAdminUsersPage,
     getAdminUserStats,
 } from "@/lib/adminUsers";
-import { getPublicAppSettings } from "@/lib/appSettings";
+import { getPublicAppSettings, isImageGenerationEnabled } from "@/lib/appSettings";
 import { getRuntimeModels } from "@/lib/modelRegistry";
 import { prisma } from "@/lib/prisma";
 import { AdminProviderHealthPanel } from "@/components/admin/AdminProviderHealthPanel";
@@ -1153,7 +1153,7 @@ export async function AdminWorkspace({ activeView }: { activeView: AdminWorkspac
                     )}
 
                     {activeTab === "platform" && (
-                        <PlatformSettingsPanel settings={appSettings} />
+                        <PlatformSettingsPanel settings={appSettings} imageGenerationEnabled={await isImageGenerationEnabled()} />
                     )}
 
                     {activeTab === "billing" && (

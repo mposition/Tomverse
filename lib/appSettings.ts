@@ -163,8 +163,9 @@ export async function updatePublicAppSettings(settings: PublicAppSettings) {
 // (`enabledFromValue`: anything but "false" is enabled); a beta feature needs
 // the opposite -- default-off, enabled only by an explicit opt-in row. The
 // pure semantics live in lib/imageGenerationAccess.ts so tests cover them
-// without a database. Admin/public surfacing arrives with the operations PR;
-// until then the flag is toggled by seeding the AppSetting row directly.
+// without a database. Admin surfacing is the dedicated toggle in the admin
+// platform settings (setImageGenerationEnabled below); public surfacing is
+// the chat page resolving the flag server-side into its RSC payload.
 export async function isImageGenerationEnabled(): Promise<boolean> {
   if (e2eDatabaseDisabled()) return false;
   const row = await prisma.appSetting.findUnique({
@@ -172,6 +173,17 @@ export async function isImageGenerationEnabled(): Promise<boolean> {
     select: { value: true },
   });
   return imageGenerationEnabledFromValue(row?.value);
+}
+
+// The admin write path. "true"/"false" are the only stored values; a missing
+// row and "false" are equally off (imageGenerationEnabledFromValue), so
+// disabling never needs a delete.
+export async function setImageGenerationEnabled(enabled: boolean) {
+  await prisma.appSetting.upsert({
+    where: { key: IMAGE_GENERATION_FLAG_KEY },
+    update: { value: enabled ? "true" : "false" },
+    create: { key: IMAGE_GENERATION_FLAG_KEY, value: enabled ? "true" : "false" },
+  });
 }
 
 export class ImageGenerationDisabledError extends Error {
