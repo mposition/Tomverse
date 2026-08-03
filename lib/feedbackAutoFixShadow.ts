@@ -11,6 +11,7 @@ import {
   classifyAutoFixCase,
   isAutoFixShadowModeEnabled,
 } from "@/lib/feedbackAutoFixCore";
+import { reclaimExpiredFixLeases } from "@/lib/feedbackAutoFixSync";
 
 /**
  * The Phase 2 diagnosis-only worker. Runs on the maintenance cadence, claims
@@ -392,7 +393,18 @@ export const runFeedbackAutoFixShadowWorker = async (limit = 25) => {
     },
   });
 
-  return { enabled: true, claimed, processed, exhausted: exhausted.count };
+  // Phase 3 housekeeping (no-op while nothing has ever been claimed for a
+  // fix): a fix runner that died returns its case to the review pool when
+  // the lease expires, instead of stranding it in fix_attempting.
+  const reclaimedFixLeases = await reclaimExpiredFixLeases();
+
+  return {
+    enabled: true,
+    claimed,
+    processed,
+    exhausted: exhausted.count,
+    reclaimedFixLeases,
+  };
 };
 
 /** Closed-case retention: shadow cases are diagnostics, not billing records.
