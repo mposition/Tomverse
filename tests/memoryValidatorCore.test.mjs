@@ -113,14 +113,22 @@ test("evidence is always required", () => {
 });
 
 // §12.3: zero bulk-safe acceptances for secrets — rejected, and sensitive.
+//
+// The fixtures are deliberately low-entropy, structurally-off shapes: they
+// must trip lib/memoryValidatorCore.ts's patterns while staying invisible to
+// the repository's own gitleaks gate (whose generic rule needs entropy and
+// whose jwt rule needs two `ey`-prefixed segments). A fixture that looked
+// like a *real* secret would fail CI's secret scan on every commit that
+// carries it.
 const CREDENTIAL_FIXTURES = [
     "사용자의 AWS access key는 AKIAIOSFODNN7EXAMPLE 이다",
     "The deploy token is ghp_abcdefghijklmnopqrstuv123456",
     "password: hunter2hunter2",
     "사용자의 비밀번호는 tomverse123 이다",
-    "api_key = sk-abcdefghijklmnop1234",
+    "api_key = aaaa-bbbb-aaaa-bbbb",
+    "사용자의 키는 sk-aaaaaaaaaaaaaaaaaaaa 이다",
     "-----BEGIN RSA PRIVATE KEY----- MIIEow",
-    "session jwt eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dozjgNryP4J3jVmNHl0w5N_XgL0n3I9P",
+    "session jwt eyJaaaaaaaaaaaaaa.bbbbbbbbbbbbbb.ccccc",
 ];
 
 test("category ③: credential shapes are rejected, sensitive, never bulk-safe", () => {

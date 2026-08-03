@@ -1,0 +1,12 @@
+# Synthetic validator fixtures, not credentials.
+#
+# Commit e159b4e introduced tests/memoryValidatorCore.test.mjs with two
+# credential-SHAPED strings exercising the memory validator's §8.4 secret
+# patterns (import/memory policy, eval category ③). The strings were
+# invented for the test and never belonged to any system; the follow-up
+# commit reshaped them so they no longer resemble real secrets, but the
+# introducing commit is immutable history and stays pinned here.
+#
+# Scope: exactly these two findings in that one commit — nothing wider.
+e159b4ed85a3ba5e3f9c286b8a1f207933aa7254:tests/memoryValidatorCore.test.mjs:generic-api-key:121
+e159b4ed85a3ba5e3f9c286b8a1f207933aa7254:tests/memoryValidatorCore.test.mjs:jwt:123
