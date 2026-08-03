@@ -160,10 +160,13 @@ test.describe("admin access control", () => {
     const api = adminApi(page);
 
     // support:write covers the feedback inbox and not the billing catalogue.
+    // Closing feedback now requires the closure outcome the completion dialog
+    // collects; the permission is what is under test, the payload just has to
+    // be a valid close.
     await signInAs("support");
     const supportOnFeedback = await api.patch(
       `/api/admin/feedback/${FIXTURE_FEEDBACK.open.id}`,
-      { status: "resolved" }
+      { status: "resolved", outcomeCode: "answered" }
     );
     expect(supportOnFeedback.status()).toBe(200);
 
@@ -183,7 +186,7 @@ test.describe("admin access control", () => {
     await signInAs("billing");
     const billingOnFeedback = await api.patch(
       `/api/admin/feedback/${FIXTURE_FEEDBACK.slaBreached.id}`,
-      { status: "resolved" }
+      { status: "resolved", outcomeCode: "answered" }
     );
     expect(billingOnFeedback.status()).toBe(403);
 

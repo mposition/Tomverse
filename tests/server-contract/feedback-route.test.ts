@@ -46,11 +46,16 @@ type World = {
   turnstileGrant: string | undefined;
   turnstileError: { status: number; code: string } | null;
   stored: StoredFeedback[];
-  deliveries: Array<Record<string, unknown> & { id: string }>;
+  deliveries: Array<Record<string, unknown> & { id: string; inTx: boolean }>;
+  lifecycleEvents: Array<Record<string, unknown> & { id: string; inTx: boolean }>;
+  /** UserSettings.language for the signed-in caller, when one exists. */
+  settingsLanguage: string | null;
   createShouldFail: boolean;
-  emails: { to: string }[];
+  emails: { to: string; subject: string; text: string; idempotencyKey?: string }[];
   emailShouldFail: boolean;
   logs: string[];
+  /** True while the route's $transaction callback is running. */
+  txActive: boolean;
 };
 
 const freshWorld = (): World => ({
@@ -61,10 +66,13 @@ const freshWorld = (): World => ({
   turnstileError: null,
   stored: [],
   deliveries: [],
+  lifecycleEvents: [],
+  settingsLanguage: null,
   createShouldFail: false,
   emails: [],
   emailShouldFail: false,
   logs: [],
+  txActive: false,
 });
 
 let world = freshWorld();
@@ -128,9 +136,19 @@ async function loadRoute(): Promise<{
       namedExports: {
         // Returns the real shape: the delivery path reads `skipped` to tell
         // "this deployment declined to send" apart from "the provider took it".
-        sendTransactionalEmail: async ({ to }: { to: string }) => {
+        sendTransactionalEmail: async ({
+          to,
+          subject,
+          text,
+          idempotencyKey,
+        }: {
+          to: string;
+          subject: string;
+          text: string;
+          idempotencyKey?: string;
+        }) => {
           if (world.emailShouldFail) throw new Error("mailbox unavailable");
-          world.emails.push({ to });
+          world.emails.push({ to, subject, text, idempotencyKey });
           return { sent: true, skipped: false, id: "qa-email" };
         },
       },
@@ -140,8 +158,14 @@ async function loadRoute(): Promise<{
     // the fake models both tables and a transaction that simply runs its
     // callback against the same client.
     const fakePrisma: Record<string, unknown> = {
-      $transaction: async (fn: (tx: unknown) => Promise<unknown>) =>
-        fn(fakePrisma),
+      $transaction: async (fn: (tx: unknown) => Promise<unknown>) => {
+        world.txActive = true;
+        try {
+          return await fn(fakePrisma);
+        } finally {
+          world.txActive = false;
+        }
+      },
       feedback: {
         create: async ({ data }: { data: Record<string, unknown> }) => {
           if (world.createShouldFail) {
@@ -160,18 +184,67 @@ async function loadRoute(): Promise<{
         findUnique: async ({ where }: { where: { id: string } }) =>
           world.stored.find((row) => row.id === where.id) ?? null,
       },
+      userSettings: {
+        findUnique: async () =>
+          world.settingsLanguage ? { language: world.settingsLanguage } : null,
+      },
+      feedbackLifecycleEvent: {
+        create: async ({ data }: { data: Record<string, unknown> }) => {
+          nextId += 1;
+          const row = {
+            id: `clzevent000${String(nextId).padStart(4, "0")}`,
+            ...data,
+            inTx: world.txActive,
+          };
+          world.lifecycleEvents.push(row);
+          return row;
+        },
+        findUnique: async ({
+          where,
+        }: {
+          where: { feedbackId_stage: { feedbackId: string; stage: string } };
+        }) => {
+          const event = world.lifecycleEvents.find(
+            (row) =>
+              row.feedbackId === where.feedbackId_stage.feedbackId &&
+              row.stage === where.feedbackId_stage.stage
+          );
+          if (!event) return null;
+          const feedback = world.stored.find(
+            (row) => row.id === event.feedbackId
+          );
+          if (!feedback) return null;
+          return {
+            outcomeCode: event.outcomeCode ?? null,
+            userReply: event.userReply ?? null,
+            feedback: {
+              id: feedback.id,
+              type: feedback.type,
+              email: feedback.email ?? null,
+              emailUpdatesConsent: Boolean(feedback.emailUpdatesConsent),
+              language: feedback.language ?? "en",
+            },
+          };
+        },
+      },
       notificationDelivery: {
         upsert: async ({
           create,
         }: {
           create: { kind: string; referenceId: string };
         }) => {
+          const existing = world.deliveries.find(
+            (row) =>
+              row.kind === create.kind && row.referenceId === create.referenceId
+          );
+          if (existing) return { id: existing.id };
           nextId += 1;
           const row = {
             id: `clzdelivery000${String(nextId).padStart(4, "0")}`,
             ...create,
             status: "pending",
             attempts: 0,
+            inTx: world.txActive,
           };
           world.deliveries.push(row);
           return { id: row.id };
@@ -534,6 +607,246 @@ test("a failed write is logged without the payload that failed", async () => {
   const logged = world.logs.join("\n");
   assert.ok(!logged.includes("ANOTHER-CONFIDENTIAL-STRING"));
   assert.ok(logged.includes("user_feedback_failed"));
+});
+
+// --- submitter lifecycle notifications ---------------------------------------
+
+test("a consented guest submission queues the operator and the receipt notification exactly once, in the transaction", async () => {
+  const { POST } = await loadRoute();
+  const response = await withCapturedLogs(() =>
+    POST(
+      post({
+        type: "bug",
+        message: "it broke on submit",
+        email: "guest@example.com",
+        emailUpdates: true,
+        language: "ko",
+      })
+    )
+  );
+
+  assert.equal(response.status, 200);
+  const kinds = world.deliveries.map((row) => row.kind).sort();
+  assert.deepEqual(kinds, ["feedback_user_received", "support_feedback"]);
+  // Both queue rows and the received event committed with the report itself.
+  assert.ok(world.deliveries.every((row) => row.inTx), "a queue row was written outside the transaction");
+  assert.equal(world.lifecycleEvents.length, 1);
+  assert.equal(world.lifecycleEvents[0].stage, "received");
+  assert.ok(world.lifecycleEvents[0].inTx, "the received event was written outside the transaction");
+  // The stored consent and language snapshot drive every later email.
+  assert.equal(world.stored[0].emailUpdatesConsent, true);
+  assert.equal(world.stored[0].language, "ko");
+  assert.equal((await readJson(response)).emailUpdatesEnabled, true);
+});
+
+test("the receipt email goes to the guest, in their language, without the report body", async () => {
+  const { POST } = await loadRoute();
+  await withCapturedLogs(() =>
+    POST(
+      post({
+        type: "bug",
+        message: "SECRET-REPORT-BODY should never be mailed to the user",
+        traceId: "TRACE-VALUE-1234",
+        email: "guest@example.com",
+        emailUpdates: true,
+        language: "ko",
+      })
+    )
+  );
+
+  const receipt = world.emails.find((mail) => mail.to === "guest@example.com");
+  assert.ok(receipt, "no receipt email was attempted");
+  assert.match(receipt!.subject, /^\[Tomverse\] 오류 신고가 접수되었습니다 \([A-Z0-9]{8}\)$/);
+  assert.ok(!receipt!.text.includes("SECRET-REPORT-BODY"));
+  assert.ok(!receipt!.text.includes("TRACE-VALUE-1234"));
+  assert.ok(!receipt!.text.includes(world.stored[0].id as string), "the raw feedback id leaked into the receipt");
+  // The provider idempotency key is the queue row's id, so every retry
+  // presents the same key.
+  const delivery = world.deliveries.find(
+    (row) => row.kind === "feedback_user_received"
+  );
+  assert.equal(receipt!.idempotencyKey, `notification-delivery:${delivery!.id}`);
+});
+
+test("without consent there is no receipt queue row and no receipt email", async () => {
+  const { POST } = await loadRoute();
+  const response = await withCapturedLogs(() =>
+    POST(post({ type: "bug", message: "no consent given", email: "guest@example.com" }))
+  );
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(
+    world.deliveries.map((row) => row.kind),
+    ["support_feedback"]
+  );
+  assert.equal(world.emails.filter((m) => m.to === "guest@example.com").length, 0);
+  assert.equal((await readJson(response)).emailUpdatesEnabled, false);
+  assert.equal(world.stored[0].emailUpdatesConsent, false);
+});
+
+test("consent without any address enables nothing", async () => {
+  const { POST } = await loadRoute();
+  const response = await withCapturedLogs(() =>
+    POST(post({ type: "bug", message: "wants updates, gave no email", emailUpdates: true }))
+  );
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(
+    world.deliveries.map((row) => row.kind),
+    ["support_feedback"]
+  );
+  assert.equal((await readJson(response)).emailUpdatesEnabled, false);
+});
+
+test("the server-verified account email always beats the client-sent one", async () => {
+  const { POST } = await loadRoute();
+  world.session = { user: { id: "user_9", email: "account@tomverse.app" } };
+  await withCapturedLogs(() =>
+    POST(
+      post({
+        type: "bug",
+        message: "attacker-controlled address",
+        email: "attacker@evil.example",
+        emailUpdates: true,
+      })
+    )
+  );
+
+  assert.equal(world.stored[0].email, "account@tomverse.app");
+  const receipt = world.emails.find((mail) =>
+    mail.to !== "support@tomverse.app"
+  );
+  assert.ok(receipt, "no receipt was attempted");
+  assert.equal(receipt!.to, "account@tomverse.app");
+  assert.ok(world.emails.every((mail) => mail.to !== "attacker@evil.example"));
+});
+
+test("a signed-in caller's language comes from the server-side setting, never the payload", async () => {
+  const { POST } = await loadRoute();
+  world.session = { user: { id: "user_10", email: "member@tomverse.app" } };
+  world.settingsLanguage = "de";
+  await withCapturedLogs(() =>
+    POST(post({ type: "bug", message: "language contract", language: "ko" }))
+  );
+
+  assert.equal(world.stored[0].language, "de");
+});
+
+test("an unsupported guest language falls back to English", async () => {
+  const { POST } = await loadRoute();
+  await withCapturedLogs(() =>
+    POST(post({ type: "bug", message: "language fallback", language: "xx" }))
+  );
+
+  assert.equal(world.stored[0].language, "en");
+});
+
+test("a guest recipient address gets its own rate-limit budget, only when it will be mailed", async () => {
+  const { POST } = await loadRoute();
+  await withCapturedLogs(() =>
+    POST(
+      post({
+        type: "bug",
+        message: "recipient budget",
+        email: "victim@example.com",
+        emailUpdates: true,
+      })
+    )
+  );
+  assert.ok(world.rateLimits.includes("feedback-recipient"));
+
+  world = freshWorld();
+  await withCapturedLogs(() =>
+    POST(post({ type: "bug", message: "no consent, no budget", email: "victim@example.com" }))
+  );
+  assert.ok(!world.rateLimits.includes("feedback-recipient"));
+
+  // A signed-in caller mails their own verified account address, which needs
+  // no per-recipient budget.
+  world = freshWorld();
+  world.session = { user: { id: "user_11", email: "member@tomverse.app" } };
+  await withCapturedLogs(() =>
+    POST(post({ type: "bug", message: "account recipient", emailUpdates: true }))
+  );
+  assert.ok(!world.rateLimits.includes("feedback-recipient"));
+});
+
+test("a failed receipt email is not a failed submission, and stays queued for retry", async () => {
+  const { POST } = await loadRoute();
+  world.emailShouldFail = true;
+  const response = await withCapturedLogs(() =>
+    POST(
+      post({
+        type: "bug",
+        message: "provider outage while submitting",
+        email: "guest@example.com",
+        emailUpdates: true,
+      })
+    )
+  );
+
+  assert.equal(response.status, 200);
+  assert.equal((await readJson(response)).success, true);
+  const receiptRow = world.deliveries.find(
+    (row) => row.kind === "feedback_user_received"
+  );
+  assert.ok(receiptRow);
+  assert.equal(receiptRow!.status, "pending", "the receipt must stay owed to the retry queue");
+  assert.ok(world.logs.some((line) => line.includes("feedback_user_receipt_failed")));
+});
+
+test("the receipt renders identically from the stored snapshot on retry", async () => {
+  const { POST } = await loadRoute();
+  await withCapturedLogs(() =>
+    POST(
+      post({
+        type: "feature",
+        message: "please add exports",
+        email: "guest@example.com",
+        emailUpdates: true,
+        language: "fr",
+      })
+    )
+  );
+  const first = world.emails.find((mail) => mail.to === "guest@example.com");
+  assert.ok(first);
+
+  // A retry goes through the same renderer against the same stored rows.
+  const deliveries = (await import(
+    `${mod("lib/notificationDeliveries.ts")}?spy=cached`
+  )) as typeof import("../../lib/notificationDeliveries");
+  const row = world.deliveries.find((r) => r.kind === "feedback_user_received")!;
+  const retry = await deliveries.attemptNotificationDelivery({
+    kind: "feedback_user_received",
+    referenceId: row.referenceId as string,
+    deliveryId: row.id,
+  });
+  assert.equal(retry.kind, "delivered");
+  const second = world.emails.at(-1)!;
+  assert.equal(second.subject, first!.subject);
+  assert.equal(second.text, first!.text);
+  assert.equal(second.idempotencyKey, first!.idempotencyKey);
+});
+
+test("the log never carries the recipient address or consent email", async () => {
+  const { POST } = await loadRoute();
+  await withCapturedLogs(() =>
+    POST(
+      post({
+        type: "bug",
+        message: "privacy of the address",
+        email: "very-private@example.com",
+        emailUpdates: true,
+      })
+    )
+  );
+
+  const logged = world.logs.join("\n");
+  assert.ok(!logged.includes("very-private@example.com"), "the recipient address reached the log");
+  const entry = world.logs.find((line) => line.includes('"user_feedback"'));
+  const record = JSON.parse(entry as string) as Record<string, unknown>;
+  assert.equal(record.emailUpdatesConsent, true);
+  assert.equal(record.userReceiptDelivered, true);
 });
 
 test("the route still enforces the minimum in its own source", async () => {

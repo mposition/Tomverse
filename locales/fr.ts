@@ -414,6 +414,16 @@ export const fr = {
         messageCounter: "{count} / {max}",
         errorReportHint: "Vous pouvez envoyer sans rien ajouter : les détails de l'erreur sont joints dans tous les cas.",
         traceOptionalHint: "L'ID de suivi est facultatif. Vous pouvez envoyer sans.",
+        emailUpdatesLabel: "Recevoir le statut par e-mail",
+        emailUpdatesAccountHint:
+          "L'accusé de réception et le suivi de ce signalement seront envoyés à l'adresse e-mail de votre compte.",
+        emailUpdatesEmailLabel: "E-mail pour le suivi",
+        emailUpdatesEmailPlaceholder: "vous@exemple.com",
+        emailUpdatesEmailHint:
+          "Utilisé uniquement pour le suivi de ce signalement.",
+        emailUpdatesEmailInvalid: "Saisissez une adresse e-mail valide.",
+        emailUpdatesScheduled:
+          "Nous vous enverrons un accusé de réception et le suivi par e-mail.",
         traceFormatHint: "Cela ne ressemble pas à un ID de suivi. Il sera envoyé tel quel.",
         errorInvalid: "Vérifiez ce que vous avez saisi puis renvoyez.",
         errorVerification: "Une vérification de sécurité est nécessaire. Terminez-la puis renvoyez.",

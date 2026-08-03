@@ -60,6 +60,7 @@ type SendAttempt = {
 
 type World = {
   feedback: FeedbackRow[];
+  lifecycleEvents: Array<Record<string, unknown>>;
   deliveries: DeliveryRow[];
   sends: SendAttempt[];
   /** Queue of outcomes for successive sends; the last one repeats. */
@@ -69,6 +70,7 @@ type World = {
 
 const freshWorld = (): World => ({
   feedback: [],
+  lifecycleEvents: [],
   deliveries: [],
   sends: [],
   sendScript: ["ok"],
@@ -101,6 +103,20 @@ const fakePrisma = {
     },
     findUnique: async ({ where }: { where: { id: string } }) =>
       world.feedback.find((row) => row.id === where.id) ?? null,
+  },
+  // The submission transaction also writes the received lifecycle event; this
+  // suite is about the operator queue, so the event store is a plain list.
+  feedbackLifecycleEvent: {
+    create: async ({ data }: { data: Record<string, unknown> }) => {
+      ids += 1;
+      const row = { id: `clzevent${String(ids).padStart(6, "0")}`, ...data };
+      world.lifecycleEvents.push(row);
+      return row;
+    },
+    findUnique: async () => null,
+  },
+  userSettings: {
+    findUnique: async () => null,
   },
   notificationDelivery: {
     upsert: async ({
