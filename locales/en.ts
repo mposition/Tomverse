@@ -122,6 +122,7 @@ export const en = {
         imageGenerationGenerate: "Generate",
         imageGenerationGenerating: "Generating image...",
         imageGenerationGeneratingHint: "This can take up to about two minutes. Leaving this page does not cancel it.",
+        imageGenerationTakingLong: "This is taking longer than usual. If it cannot finish, it will be marked failed automatically and the reserved credits fully refunded.",
         imageGenerationFailed: "Image generation failed.",
         imageGenerationModerationBlocked: "This prompt was declined by the safety system. Adjust the description and try again.",
         imageGenerationRefunded: "The reserved credits were refunded.",

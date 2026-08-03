@@ -30,6 +30,7 @@ import { getPublicAppSettings, isExternalImportEnabled, isImageGenerationEnabled
 import { getRuntimeModels } from "@/lib/modelRegistry";
 import { prisma } from "@/lib/prisma";
 import { AdminProviderHealthPanel } from "@/components/admin/AdminProviderHealthPanel";
+import { AdminImageGenerationPanel } from "@/components/admin/AdminImageGenerationPanel";
 import { AdminAuditPanel, type AdminAuditRow } from "@/components/admin/AdminAuditPanel";
 import { AdminAlertPolicyPanel } from "@/components/admin/AdminAlertPolicyPanel";
 import { AdminSlackTemplatesPanel } from "@/components/admin/AdminSlackTemplatesPanel";
@@ -1305,6 +1306,7 @@ export async function AdminWorkspace({ activeView }: { activeView: AdminWorkspac
                     {activeTab === "usage-cost" && (
                         <section className="flex flex-col gap-4">
                             <AdminProviderUsageSyncPanel />
+                            <AdminImageGenerationPanel />
                             <AdminProviderHealthPanel
                                 initialDashboard={dashboard}
                                 canManageCredits={adminRole === "owner" || adminRole === "billing"}

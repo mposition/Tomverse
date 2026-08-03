@@ -1012,6 +1012,17 @@ model FeedbackAutoFixCase {
   leaseExpiresAt DateTime?
   terminalReason String?
   closedAt       DateTime?
+  /// --- Phase 3 (null until a fix attempt runs; docs/policy §9) -----------
+  /// feedback-autofix/<case-id> -- the case id, never a raw trace ID.
+  fixBranch     String?
+  fixPrNumber   Int?
+  fixPrUrl      String?
+  /// Read back from GitHub after the human-approved merge; never inferred
+  /// from enabling auto-merge.
+  mergeSha      String?
+  stagingSha    String?
+  /// The validated Red→Green proof payload (lib/feedbackAutoFixPolicy.ts).
+  redGreenProof Json?
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
 
