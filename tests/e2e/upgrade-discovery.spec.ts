@@ -506,6 +506,513 @@ test.describe("value-moment upgrade prompt", () => {
     await expect.poll(() => messageSavedAfterPatch).toBe(true);
   });
 
+  /**
+   * Trace 5dc1d2ee-6c98-44fa-8b6f-03d798c3f011 (MODEL_NOT_SELECTED). The old
+   * sync aborted the in-flight PATCH when a newer change arrived -- but an
+   * aborted fetch still commits server-side, so when the *older* request
+   * finished after the newer one, the database kept the stale selection and
+   * the next send was refused. The queue serializes writes per conversation:
+   * a second PATCH may not even be issued until the first response has been
+   * observed, and the write that runs then carries the newest snapshot.
+   */
+  test("overlapping model changes are serialized and the final PATCH carries the newest selection", async ({
+    page,
+  }) => {
+    let patchCount = 0;
+    let inFlightPatches = 0;
+    let sawOverlappingPatch = false;
+    const completedPatchBodies: string[][] = [];
+    let releaseFirstPatch: (() => void) | null = null;
+    const firstPatchGate = new Promise<void>((resolve) => {
+      releaseFirstPatch = resolve;
+    });
+
+    await page.route(
+      /.*\/api\/conversations\/qa-conversation(\?.*)?$/,
+      async (route) => {
+        if (route.request().method() !== "PATCH") {
+          await route.fallback();
+          return;
+        }
+        const index = (patchCount += 1);
+        inFlightPatches += 1;
+        if (inFlightPatches > 1) sawOverlappingPatch = true;
+        const body = route.request().postDataJSON() as {
+          selectedModels?: string[];
+        };
+        // The first save is slow -- exactly the window in which the old
+        // abort-based sync let a newer PATCH finish first and be overwritten.
+        if (index === 1) await firstPatchGate;
+        inFlightPatches -= 1;
+        completedPatchBodies.push(body.selectedModels || []);
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({
+            id: "qa-conversation",
+            selectedModels: body.selectedModels || [],
+            disabledPanels: [],
+          }),
+        });
+      }
+    );
+
+    const firstPanel = page.getByTestId("desktop-model-panel").first();
+    await firstPanel.locator("select").selectOption("gemini-2-5-flash");
+    await expect.poll(() => patchCount).toBe(1);
+
+    // A second change while the first PATCH is still being processed.
+    await firstPanel.locator("select").selectOption("gemini-3-5-flash");
+    // Give a wrongly-implemented client every opportunity to overlap.
+    await page.waitForTimeout(600);
+    expect(patchCount).toBe(1);
+
+    releaseFirstPatch!();
+    await expect.poll(() => completedPatchBodies.length).toBe(2);
+    expect(sawOverlappingPatch).toBe(false);
+    const finalPatch = completedPatchBodies.at(-1)!;
+    expect(finalPatch).toContain("gemini-3-5-flash");
+    expect(finalPatch).not.toContain("gemini-2-5-flash");
+  });
+
+  test("a send issued while a model PATCH is already in flight waits for that save", async ({
+    page,
+  }) => {
+    let patchCount = 0;
+    let patchCompleted = false;
+    let preflightCount = 0;
+    let preflightAfterPatch = false;
+    let releasePatch: (() => void) | null = null;
+    const patchGate = new Promise<void>((resolve) => {
+      releasePatch = resolve;
+    });
+
+    await page.route(
+      /.*\/api\/conversations\/qa-conversation(\?.*)?$/,
+      async (route) => {
+        if (route.request().method() !== "PATCH") {
+          await route.fallback();
+          return;
+        }
+        patchCount += 1;
+        const body = route.request().postDataJSON() as {
+          selectedModels?: string[];
+        };
+        await patchGate;
+        patchCompleted = true;
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({
+            id: "qa-conversation",
+            selectedModels: body.selectedModels || [],
+            disabledPanels: [],
+          }),
+        });
+      }
+    );
+    await page.unroute("**/api/chat/preflight");
+    await page.route("**/api/chat/preflight", async (route) => {
+      preflightCount += 1;
+      preflightAfterPatch = patchCompleted;
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ ok: true, modelCount: 2, requiredCredits: 2 }),
+      });
+    });
+
+    const firstPanel = page.getByTestId("desktop-model-panel").first();
+    await firstPanel.locator("select").selectOption("gemini-2-5-flash");
+    await expect.poll(() => patchCount).toBe(1);
+
+    await page.getByTestId("chat-textarea").fill("Send during the save");
+    await page.getByTestId("chat-textarea").press("Enter");
+    // The barrier must hold the preflight back while the save is running.
+    await page.waitForTimeout(500);
+    expect(preflightCount).toBe(0);
+
+    releasePatch!();
+    await expect.poll(() => preflightCount).toBe(1);
+    expect(preflightAfterPatch).toBe(true);
+  });
+
+  /**
+   * The single-model path never runs the comparison preflight, so the
+   * MODEL_NOT_SELECTED guard in /api/chat is the first server check it meets.
+   * The send barrier has to protect this path on its own: the swap's PATCH
+   * must be confirmed before /api/chat is called with the new model.
+   */
+  test("a single-model send right after a model swap reaches /api/chat only after the swap is saved", async ({
+    page,
+  }) => {
+    await mockAuthenticatedApi(page, { selectedModels: ["gpt-5-4-mini"] });
+    await page.reload();
+    await expect(page.getByTestId("chat-input")).toBeVisible();
+
+    let patchCompleted = false;
+    let preflightCount = 0;
+    const chatRequests: Array<{ afterPatch: boolean; modelId: string }> = [];
+    await page.route(
+      /.*\/api\/conversations\/qa-conversation(\?.*)?$/,
+      async (route) => {
+        if (route.request().method() !== "PATCH") {
+          await route.fallback();
+          return;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 400));
+        patchCompleted = true;
+        const body = route.request().postDataJSON() as {
+          selectedModels?: string[];
+        };
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({
+            id: "qa-conversation",
+            selectedModels: body.selectedModels || [],
+            disabledPanels: [],
+          }),
+        });
+      }
+    );
+    await page.unroute("**/api/chat/preflight");
+    await page.route("**/api/chat/preflight", async (route) => {
+      preflightCount += 1;
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ ok: true, modelCount: 1, requiredCredits: 1 }),
+      });
+    });
+    await page.route("**/api/chat", async (route) => {
+      if (route.request().method() !== "POST") {
+        await route.fallback();
+        return;
+      }
+      const body = route.request().postDataJSON() as { modelId?: string };
+      chatRequests.push({
+        afterPatch: patchCompleted,
+        modelId: body.modelId || "",
+      });
+      await route.fulfill({
+        status: 200,
+        contentType: "text/plain; charset=utf-8",
+        body: "Single model answer",
+      });
+    });
+
+    const firstPanel = page.getByTestId("desktop-model-panel").first();
+    await firstPanel.locator("select").selectOption("gemini-2-5-flash");
+    await page.getByTestId("chat-textarea").fill("Swap then send immediately");
+    await page.getByTestId("chat-textarea").press("Enter");
+
+    await expect.poll(() => chatRequests.length, { timeout: 10_000 }).toBe(1);
+    expect(chatRequests[0]!.afterPatch).toBe(true);
+    expect(chatRequests[0]!.modelId).toBe("gemini-2-5-flash");
+    expect(preflightCount).toBe(0);
+  });
+
+  test("retry waits for a pending model selection save before re-sending", async ({
+    page,
+  }) => {
+    let chatFailuresServed = 0;
+    let patchCompleted = false;
+    const retryChatRequests: Array<{ afterPatch: boolean; modelId: string }> =
+      [];
+    let releasePatch: (() => void) | null = null;
+    const patchGate = new Promise<void>((resolve) => {
+      releasePatch = resolve;
+    });
+
+    await page.route("**/api/chat", async (route) => {
+      if (route.request().method() !== "POST") {
+        await route.fallback();
+        return;
+      }
+      const body = route.request().postDataJSON() as { modelId?: string };
+      if (body.modelId === "gpt-5-4-mini" && chatFailuresServed === 0) {
+        chatFailuresServed += 1;
+        await route.fulfill({
+          status: 500,
+          contentType: "application/json",
+          body: JSON.stringify({
+            error: "QA fixture: upstream failure.",
+            code: "UPSTREAM_FAILURE",
+          }),
+        });
+        return;
+      }
+      if (body.modelId === "gpt-5-4-mini") {
+        retryChatRequests.push({
+          afterPatch: patchCompleted,
+          modelId: body.modelId,
+        });
+      }
+      await route.fulfill({
+        status: 200,
+        contentType: "text/plain; charset=utf-8",
+        body: "Recovered answer",
+      });
+    });
+
+    await page.getByTestId("chat-textarea").fill("Fail one panel");
+    await page.getByTestId("chat-textarea").press("Enter");
+    const retry = page.getByRole("button", { name: "다시 시도", exact: true });
+    await expect(retry).toHaveCount(1);
+
+    // A model change on the *other* panel leaves this panel (and its retry
+    // affordance) mounted while its save hangs.
+    await page.route(
+      /.*\/api\/conversations\/qa-conversation(\?.*)?$/,
+      async (route) => {
+        if (route.request().method() !== "PATCH") {
+          await route.fallback();
+          return;
+        }
+        const body = route.request().postDataJSON() as {
+          selectedModels?: string[];
+        };
+        await patchGate;
+        patchCompleted = true;
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({
+            id: "qa-conversation",
+            selectedModels: body.selectedModels || [],
+            disabledPanels: [],
+          }),
+        });
+      }
+    );
+    const secondPanel = page.getByTestId("desktop-model-panel").nth(1);
+    await secondPanel.locator("select").selectOption("gemini-2-5-flash");
+
+    await retry.click();
+    await page.waitForTimeout(500);
+    expect(retryChatRequests.length).toBe(0);
+
+    releasePatch!();
+    await expect.poll(() => retryChatRequests.length).toBe(1);
+    expect(retryChatRequests[0]!.afterPatch).toBe(true);
+  });
+
+  test("one conversation's hanging model save does not block another conversation's send", async ({
+    page,
+  }) => {
+    // A second conversation beside the seeded qa-conversation.
+    await page.unroute("**/api/conversations");
+    await page.route("**/api/conversations", async (route) => {
+      if (route.request().method() !== "GET") {
+        await route.fallback();
+        return;
+      }
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify([
+          {
+            id: "qa-conversation",
+            title: "QA conversation",
+            selectedModels: ["gpt-5-4-mini", "claude-haiku-4-5"],
+            disabledPanels: [],
+            isLocked: false,
+            shareEnabled: false,
+            shareExpiresAt: null,
+          },
+          {
+            id: "qa-conversation-b",
+            title: "QA conversation B",
+            selectedModels: ["gpt-5-4-mini", "claude-haiku-4-5"],
+            disabledPanels: [],
+            isLocked: false,
+            shareEnabled: false,
+            shareExpiresAt: null,
+          },
+        ]),
+      });
+    });
+    let conversationAPatchResolved = false;
+    await page.route(
+      /.*\/api\/conversations\/qa-conversation(\?.*)?$/,
+      async (route) => {
+        if (route.request().method() !== "PATCH") {
+          await route.fallback();
+          return;
+        }
+        // Conversation A's save hangs for the whole test.
+        await new Promise(() => {});
+        conversationAPatchResolved = true;
+      }
+    );
+    const conversationBPatchBodies: string[][] = [];
+    await page.route(
+      /.*\/api\/conversations\/qa-conversation-b(\?.*)?$/,
+      async (route) => {
+        const method = route.request().method();
+        if (method === "PATCH") {
+          const body = route.request().postDataJSON() as {
+            selectedModels?: string[];
+          };
+          conversationBPatchBodies.push(body.selectedModels || []);
+          await route.fulfill({
+            status: 200,
+            contentType: "application/json",
+            body: JSON.stringify({
+              id: "qa-conversation-b",
+              selectedModels: body.selectedModels || [],
+              disabledPanels: [],
+            }),
+          });
+          return;
+        }
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({
+            id: "qa-conversation-b",
+            title: "QA conversation B",
+            selectedModels: ["gpt-5-4-mini", "claude-haiku-4-5"],
+            disabledPanels: [],
+            webSearchMode: "off",
+            isLocked: false,
+            shareEnabled: false,
+            shareExpiresAt: null,
+            messages: [],
+            messagePage: { hasMore: false, nextCursor: null },
+          }),
+        });
+      }
+    );
+    await page.route(
+      "**/api/conversations/qa-conversation-b/messages**",
+      async (route) => {
+        await route.fulfill({
+          status: route.request().method() === "POST" ? 201 : 200,
+          contentType: "application/json",
+          body: "{}",
+        });
+      }
+    );
+    let preflightCount = 0;
+    await page.unroute("**/api/chat/preflight");
+    await page.route("**/api/chat/preflight", async (route) => {
+      preflightCount += 1;
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ ok: true, modelCount: 2, requiredCredits: 2 }),
+      });
+    });
+    // Refresh the sidebar list so conversation B exists to switch to.
+    await page.reload();
+    await expect(page.getByTestId("chat-input")).toBeVisible();
+
+    // A model change in conversation A whose save never completes.
+    const firstPanel = page.getByTestId("desktop-model-panel").first();
+    await firstPanel.locator("select").selectOption("gemini-2-5-flash");
+
+    // Switching to conversation B and sending there must not wait on A.
+    await page
+      .getByTestId("sidebar-conversation-item")
+      .filter({ hasText: "QA conversation B" })
+      .click();
+    await page.getByTestId("chat-textarea").fill("Send in conversation B");
+    await page.getByTestId("chat-textarea").press("Enter");
+
+    await expect.poll(() => preflightCount, { timeout: 10_000 }).toBe(1);
+    expect(conversationAPatchResolved).toBe(false);
+    // Nothing queued for A ever leaked into B's PATCHes.
+    for (const body of conversationBPatchBodies) {
+      expect(body).not.toContain("gemini-2-5-flash");
+    }
+  });
+
+  test("a late conversation detail response does not revert a newer local model change", async ({
+    page,
+  }) => {
+    let releaseDetailGet: (() => void) | null = null;
+    const detailGate = new Promise<void>((resolve) => {
+      releaseDetailGet = resolve;
+    });
+    let patchCount = 0;
+    await page.route(
+      /.*\/api\/conversations\/qa-conversation(\?.*)?$/,
+      async (route) => {
+        const method = route.request().method();
+        const url = route.request().url();
+        if (method === "PATCH") {
+          patchCount += 1;
+          const body = route.request().postDataJSON() as {
+            selectedModels?: string[];
+          };
+          await route.fulfill({
+            status: 200,
+            contentType: "application/json",
+            body: JSON.stringify({
+              id: "qa-conversation",
+              selectedModels: body.selectedModels || [],
+              disabledPanels: [],
+            }),
+          });
+          return;
+        }
+        // Only the settings read (no modelId) is delayed; the per-panel
+        // history loads keep flowing.
+        if (method === "GET" && !url.includes("modelId=")) {
+          await detailGate;
+          await route.fulfill({
+            status: 200,
+            contentType: "application/json",
+            body: JSON.stringify({
+              id: "qa-conversation",
+              title: "QA conversation",
+              // The state as it was BEFORE the change below -- a response
+              // this old must not roll the panel back.
+              selectedModels: ["gpt-5-4-mini", "claude-haiku-4-5"],
+              disabledPanels: [],
+              webSearchMode: "off",
+              isLocked: false,
+              shareEnabled: false,
+              shareExpiresAt: null,
+              messages: [],
+              messagePage: { hasMore: false, nextCursor: null },
+            }),
+          });
+          return;
+        }
+        await route.fallback();
+      }
+    );
+
+    // Re-select the conversation so its (now gated) settings read is in
+    // flight. The welcome-screen helper does not apply here -- the beforeEach
+    // already opened the conversation, so the sidebar entry is the re-entry
+    // point.
+    await page
+      .getByTestId("sidebar-conversation-item")
+      .filter({ hasText: "QA conversation" })
+      .first()
+      .click();
+    const firstPanel = page.getByTestId("desktop-model-panel").first();
+    await firstPanel.locator("select").selectOption("gemini-2-5-flash");
+    await expect(firstPanel).toHaveAttribute(
+      "data-model-id",
+      "gemini-2-5-flash"
+    );
+    await expect.poll(() => patchCount).toBeGreaterThan(0);
+
+    releaseDetailGet!();
+    // The stale read has landed; the newer local (and now saved) selection
+    // must survive it.
+    await page.waitForTimeout(400);
+    await expect(firstPanel).toHaveAttribute(
+      "data-model-id",
+      "gemini-2-5-flash"
+    );
+  });
+
   test("changing a panel model keeps the conversation's shared user history", async ({
     page,
   }) => {

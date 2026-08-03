@@ -165,7 +165,13 @@ test.describe("nested dismissible surfaces keep their own Escape", () => {
       await deleteTrigger.click();
       const nested = page.getByTestId("delete-account-dialog");
       await expect(nested).toBeVisible();
-      await expectFocusEntersDialog(page);
+      // `expectFocusEntersDialog` accepts focus inside *any* open dialog, and
+      // the settings dialog underneath still contains it until the nested
+      // dialog's rAF initial focus lands. Poll for the nested dialog
+      // specifically so the Tab loop below starts from a settled state.
+      await expect
+        .poll(() => nested.evaluate((node) => node.contains(document.activeElement)))
+        .toBe(true);
       expect(await bodyScrollLocked(page)).toBe(true);
 
       for (let step = 0; step < 12; step += 1) {
@@ -184,6 +190,54 @@ test.describe("nested dismissible surfaces keep their own Escape", () => {
       await page.keyboard.press("Escape");
       await expect(settings).toBeHidden();
       await expect(accountTrigger).toBeFocused();
+    }
+  );
+
+  test(
+    "Tab pressed before the nested dialog's initial focus lands is still trapped",
+    { tag: "@ui-risk" },
+    async ({ page }) => {
+      await mockAuthenticatedApi(page);
+      // Initial focus moves into a freshly opened dialog inside
+      // `requestAnimationFrame`, one frame after it renders. Under CI load
+      // that frame can arrive after the user's first Tab, which then starts
+      // from the trigger inside the settings dialog underneath. Delaying every
+      // rAF callback turns that race into a deterministic window.
+      await page.addInitScript(() => {
+        const original = window.requestAnimationFrame.bind(window);
+        window.requestAnimationFrame = (callback: FrameRequestCallback) =>
+          original(() => {
+            setTimeout(() => callback(performance.now()), 250);
+          });
+      });
+      await page.goto("/chat?lang=en");
+
+      const accountTrigger = page.getByTestId("account-menu-trigger");
+      if ((page.viewportSize()?.width ?? 0) < 768) {
+        await page.getByRole("button", { name: "Open chat menu" }).click();
+      }
+      await expect(accountTrigger).toBeVisible();
+      await accountTrigger.click();
+      await page
+        .getByTestId("account-menu")
+        .getByTestId("account-settings")
+        .click();
+      const settings = page.getByRole("dialog", { name: "User Settings" });
+      await expect(settings).toBeVisible();
+
+      const deleteTrigger = settings.getByRole("button", { name: "Delete Account" });
+      await deleteTrigger.scrollIntoViewIfNeeded();
+      await deleteTrigger.click();
+      const nested = page.getByTestId("delete-account-dialog");
+      await expect(nested).toBeVisible();
+
+      // Deliberately no wait for focus to enter the nested dialog: Tab fires
+      // while focus is still on the trigger inside the settings dialog. The
+      // topmost modal must claim it and pull focus inside.
+      await page.keyboard.press("Tab");
+      expect(
+        await nested.evaluate((node) => node.contains(document.activeElement))
+      ).toBe(true);
     }
   );
 

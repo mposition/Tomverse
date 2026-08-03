@@ -1,0 +1,168 @@
+import assert from "node:assert/strict";
+import { test } from "node:test";
+import {
+    EXTERNAL_IMPORT_CLIENT_ARCHIVE_LIMITS,
+    EXTERNAL_IMPORT_STORAGE_LIMITS,
+    EXTERNAL_IMPORT_TRUNCATION_MARKER,
+    countCodePoints,
+    planExternalMessageTruncation,
+    truncateExternalMessageContent,
+    utf8ByteLength,
+} from "../lib/externalImportLimits.ts";
+
+// docs/policy/external-conversation-import-and-memory.md §5.2–§5.4. The
+// numbers themselves are policy decisions — a change here must first change
+// the approved policy document.
+
+test("server-authoritative storage limits match the approved policy", () => {
+    assert.equal(
+        EXTERNAL_IMPORT_STORAGE_LIMITS.maxNormalizedTextBytesPerAccount,
+        50 * 1024 * 1024
+    );
+    assert.equal(
+        EXTERNAL_IMPORT_STORAGE_LIMITS.maxExternalConversationsPerAccount,
+        2_000
+    );
+    assert.equal(
+        EXTERNAL_IMPORT_STORAGE_LIMITS.maxExternalMessagesPerAccount,
+        100_000
+    );
+    assert.equal(
+        EXTERNAL_IMPORT_STORAGE_LIMITS.maxStoredMessageCodePoints,
+        100_000
+    );
+    assert.equal(
+        EXTERNAL_IMPORT_STORAGE_LIMITS.maxInboundMessageCodePoints,
+        1_000_000
+    );
+    assert.equal(
+        EXTERNAL_IMPORT_STORAGE_LIMITS.stagingIdleTtlMs,
+        24 * 60 * 60 * 1000
+    );
+    assert.equal(
+        EXTERNAL_IMPORT_STORAGE_LIMITS.stagingAbsoluteMaxLifetimeMs,
+        72 * 60 * 60 * 1000
+    );
+});
+
+test("client archive safety limits match the approved policy", () => {
+    assert.equal(
+        EXTERNAL_IMPORT_CLIENT_ARCHIVE_LIMITS.maxArchiveContainerBytes,
+        1024 * 1024 * 1024
+    );
+    assert.equal(EXTERNAL_IMPORT_CLIENT_ARCHIVE_LIMITS.maxArchiveEntries, 50_000);
+    assert.equal(EXTERNAL_IMPORT_CLIENT_ARCHIVE_LIMITS.maxNestedArchiveDepth, 0);
+    assert.equal(
+        EXTERNAL_IMPORT_CLIENT_ARCHIVE_LIMITS.maxParsedEntryBytes,
+        250 * 1024 * 1024
+    );
+    assert.equal(
+        EXTERNAL_IMPORT_CLIENT_ARCHIVE_LIMITS.maxParsedTextTotalBytes,
+        300 * 1024 * 1024
+    );
+    assert.equal(
+        EXTERNAL_IMPORT_CLIENT_ARCHIVE_LIMITS.maxParsedEntryCompressionRatio,
+        100
+    );
+    assert.equal(
+        EXTERNAL_IMPORT_CLIENT_ARCHIVE_LIMITS.maxSyncJsonParseBytes,
+        16 * 1024 * 1024
+    );
+});
+
+test("code points and UTF-8 bytes are counted per contract", () => {
+    assert.equal(countCodePoints("abc"), 3);
+    assert.equal(countCodePoints("한글"), 2);
+    assert.equal(countCodePoints("👍"), 1); // one code point, two UTF-16 units
+    assert.equal(utf8ByteLength("a"), 1);
+    assert.equal(utf8ByteLength("한"), 3);
+    assert.equal(utf8ByteLength("👍"), 4);
+});
+
+test("messages at or under the stored cap are stored verbatim", () => {
+    assert.deepEqual(planExternalMessageTruncation(0), {
+        kind: "store_verbatim",
+    });
+    assert.deepEqual(
+        planExternalMessageTruncation(
+            EXTERNAL_IMPORT_STORAGE_LIMITS.maxStoredMessageCodePoints
+        ),
+        { kind: "store_verbatim" }
+    );
+});
+
+test("messages between the caps require truncation that fits the stored cap", () => {
+    const plan = planExternalMessageTruncation(
+        EXTERNAL_IMPORT_STORAGE_LIMITS.maxStoredMessageCodePoints + 1
+    );
+    assert.equal(plan.kind, "requires_truncation");
+    const markerCodePoints = countCodePoints(EXTERNAL_IMPORT_TRUNCATION_MARKER);
+    assert.equal(
+        plan.headCodePoints + plan.tailCodePoints + markerCodePoints,
+        EXTERNAL_IMPORT_STORAGE_LIMITS.maxStoredMessageCodePoints
+    );
+    // §5.4: about 75% head, 25% tail.
+    const retained = plan.headCodePoints + plan.tailCodePoints;
+    assert.ok(Math.abs(plan.headCodePoints / retained - 0.75) < 0.01);
+});
+
+test("messages beyond the inbound hard limit are not truncatable", () => {
+    assert.deepEqual(
+        planExternalMessageTruncation(
+            EXTERNAL_IMPORT_STORAGE_LIMITS.maxInboundMessageCodePoints + 1
+        ),
+        { kind: "exceeds_inbound_limit" }
+    );
+});
+
+test("planning rejects invalid counts", () => {
+    assert.throws(() => planExternalMessageTruncation(-1));
+    assert.throws(() => planExternalMessageTruncation(1.5));
+});
+
+test("truncation preserves code point boundaries and the stored cap", () => {
+    const limits = {
+        maxStoredMessageCodePoints: 1_000,
+        maxInboundMessageCodePoints: 10_000,
+    };
+    // Surrogate pairs throughout: a split inside one would produce a lone
+    // surrogate and an ill-formed string.
+    const content = "👍".repeat(1_500);
+    const plan = planExternalMessageTruncation(
+        countCodePoints(content),
+        limits
+    );
+    assert.equal(plan.kind, "requires_truncation");
+    const result = truncateExternalMessageContent(content, plan);
+
+    assert.ok(result.content.isWellFormed());
+    assert.equal(
+        countCodePoints(result.content),
+        limits.maxStoredMessageCodePoints
+    );
+    assert.equal(
+        result.retainedCharacterCount,
+        limits.maxStoredMessageCodePoints
+    );
+    assert.ok(result.content.includes(EXTERNAL_IMPORT_TRUNCATION_MARKER));
+    assert.ok(result.content.startsWith("👍"));
+    assert.ok(result.content.endsWith("👍"));
+});
+
+test("truncation output is deterministic for preview/server parity", () => {
+    // §5.4: the worker preview and the server re-validation must agree
+    // byte-for-byte on what the user approved.
+    const limits = {
+        maxStoredMessageCodePoints: 500,
+        maxInboundMessageCodePoints: 10_000,
+    };
+    const content = "가나다라마바사".repeat(200);
+    const plan = planExternalMessageTruncation(
+        countCodePoints(content),
+        limits
+    );
+    assert.equal(plan.kind, "requires_truncation");
+    const first = truncateExternalMessageContent(content, plan);
+    const second = truncateExternalMessageContent(content, plan);
+    assert.equal(first.content, second.content);
+});

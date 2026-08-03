@@ -76,6 +76,7 @@ model User {
   productAnalyticsEvents ProductAnalyticsEvent[]
   privacyRequests        PrivacyRequest[]
   planChangeRequests     PlanChangeRequest[]
+  externalImports        ExternalImport[]
 
   @@index([plan, id])
   @@index([createdAt])
@@ -766,12 +767,57 @@ model Feedback {
   attachmentCount Int      @default(0)
   path            String?
   userAgent       String?
+  /// The submitter's language, captured once at submission and never mutated,
+  /// so every lifecycle email for this report renders in the same language.
+  /// One of lib/language.ts SUPPORTED_LANGUAGES; "en" when unknown.
+  language        String   @default("en")
+  /// Per-report transactional consent to lifecycle status emails. NOT a
+  /// marketing preference: it covers only this report's received/reviewing/
+  /// completed notifications. Defaults to no consent.
+  emailUpdatesConsent Boolean @default(false)
+  /// How the report was resolved -- one of FEEDBACK_CLOSURE_OUTCOMES in
+  /// lib/feedbackLifecycleCore.ts. Current state for the admin console; the
+  /// email renders from the immutable completed lifecycle event instead.
+  closureOutcome  String?
+  /// The short reply written FOR THE SUBMITTER. Never the internal admin note,
+  /// and never merged with one.
+  userReply       String?
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
+
+  lifecycleEvents FeedbackLifecycleEvent[]
 
   @@index([status, createdAt])
   @@index([type, createdAt])
   @@index([userId, createdAt])
+}
+
+/// One immutable record per lifecycle stage of one feedback report.
+///
+/// The user-facing status email is rendered from this row, not from the
+/// mutable Feedback columns, so a retried delivery presents byte-for-byte the
+/// payload the first attempt presented -- which the provider's idempotency key
+/// requires. Rows are only ever inserted; the unique constraint is what makes
+/// "one email per stage" hold under concurrent admin requests.
+model FeedbackLifecycleEvent {
+  id             String   @id @default(cuid())
+  feedbackId     String
+  feedback       Feedback @relation(fields: [feedbackId], references: [id], onDelete: Cascade)
+  /// received | reviewing | completed
+  stage          String
+  previousStatus String?
+  newStatus      String
+  /// Set on the completed stage only -- one of FEEDBACK_CLOSURE_OUTCOMES.
+  outcomeCode    String?
+  /// Snapshot of the user-facing reply at closure time. Never the admin note.
+  userReply      String?
+  /// The admin who made the transition; null for the submission itself.
+  actorUserId    String?
+  createdAt      DateTime @default(now())
+
+  /// One event -- and therefore at most one user email -- per stage.
+  @@unique([feedbackId, stage])
+  @@index([feedbackId, createdAt])
 }
 
 /// An operator notification that still owes a delivery.
@@ -1382,4 +1428,113 @@ model PrivacyRequest {
   @@index([userId, createdAt])
   @@index([email, createdAt])
   @@index([legalHold, dueAt])
+}
+
+// ==========================================
+// External conversation import (Release A).
+// Contract: docs/policy/external-conversation-import-and-memory.md §4, §5, §20.
+// External conversations never live in Conversation/Message — source model
+// labels stay provenance-only and must not reach runtime modelId semantics.
+// ==========================================
+
+model ExternalImport {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  provider String // "chatgpt" | "claude" — allowlist CHECK lives in the migration
+  status   String @default("inspecting") // inspecting | staging | preview_ready | finalizing | completed | failed | cancelled
+
+  /// Client-sent hint for fast duplicate-candidate detection only. Never an
+  /// authoritative dedup input — the server recomputes every digest (§4.1).
+  clientFingerprint   String?
+  importDigest        String? // server-computed, set at finalize
+  digestVersion       Int
+  parserVersion       String
+  sourceFormatVersion String?
+
+  conversationCount Int    @default(0)
+  messageCount      Int    @default(0)
+  normalizedBytes   BigInt @default(0)
+  truncationCount   Int    @default(0)
+  duplicateCount    Int    @default(0)
+  failureCode       String?
+
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  completedAt DateTime?
+
+  conversations ExternalConversation[]
+
+  @@index([userId, status])
+  @@index([userId, createdAt])
+  // Staging TTL sweep: stale non-terminal rows are found by last activity
+  // (24h idle / 72h absolute, EXTERNAL_IMPORT_STORAGE_LIMITS).
+  @@index([status, updatedAt])
+}
+
+model ExternalConversation {
+  id     String         @id @default(cuid())
+  userId String
+  import ExternalImport @relation(fields: [importId], references: [id], onDelete: Cascade)
+
+  importId String
+  provider String
+
+  /// Stable digest of the provider's own conversation ID (never the raw ID).
+  /// Groups immutable snapshots of the same source lineage (§4.2).
+  externalStableId String
+
+  title             String
+  sourceModelLabels Json?
+  sourceCreatedAt   DateTime?
+  sourceUpdatedAt   DateTime?
+
+  /// Server-computed over ordered message dedup digests (§4.1). Unique per
+  /// account: an exact re-import is a skip, a changed export becomes a new
+  /// immutable snapshot row — existing rows are never merged into.
+  conversationDigest String
+  digestVersion      Int
+
+  messageCount Int
+  contentBytes BigInt
+
+  finalized  Boolean  @default(false)
+  importedAt DateTime @default(now())
+
+  messages ExternalMessage[]
+
+  @@unique([userId, conversationDigest])
+  @@index([userId, externalStableId])
+  @@index([userId, finalized])
+  @@index([importId])
+}
+
+model ExternalMessage {
+  id           String               @id @default(cuid())
+  userId       String
+  conversation ExternalConversation @relation(fields: [externalConversationId], references: [id], onDelete: Cascade)
+
+  externalConversationId String
+  externalStableId       String
+  role                   String // "user" | "assistant" — allowlist CHECK lives in the migration
+
+  content       String
+  contentDigest String
+
+  /// Digest of the pre-truncation normalized content. The unretained part is
+  /// never stored — this digest is the only trace of it (§4.1, §5.4).
+  originalContentDigest String?
+  digestVersion         Int
+
+  sourceModelLabel String?
+  sourceTimestamp  DateTime?
+  ordinal          Int
+
+  truncated              Boolean @default(false)
+  originalCharacterCount Int?
+  retainedCharacterCount Int?
+
+  @@unique([externalConversationId, ordinal])
+  @@index([userId])
 }

@@ -5,6 +5,7 @@ import {
   getBillingPlanByTier,
   type BillingPlanConfig,
 } from "@/lib/billingConfig";
+import { planAllowsImageGeneration } from "@/lib/imageGenerationAccess";
 import type { ModelTier } from "@/lib/models";
 import { prisma } from "@/lib/prisma";
 import { effectivePlanForAccess } from "@/lib/foundingTesterPassCore";
@@ -12,7 +13,8 @@ import { effectivePlanForAccess } from "@/lib/foundingTesterPassCore";
 export type BillingFeature =
   | "attachments"
   | "sharing"
-  | "downloads";
+  | "downloads"
+  | "imageGeneration";
 
 const normalizePlanTier = (value: unknown): ModelTier =>
   value === "Pro" || value === "Max" || value === "Free" ? value : "Free";
@@ -45,13 +47,31 @@ export const effectivePlanModelLimit = (plan: BillingPlanConfig) =>
     Math.min(APP_DEFAULTS.maxSelectedModels, Math.trunc(plan.maxModels))
   );
 
+// Exhaustive on purpose. The previous if-chain fell through to
+// `allowDownloads` (true on every plan) for any feature it did not know
+// about, which would have silently opened a newly added feature to Free the
+// moment someone extended the union without touching this function. The
+// `never` check makes that mistake a compile error; the runtime `false` is
+// the fail-closed answer for an unrecognised value from stale callers.
 export const planAllowsFeature = (
   plan: BillingPlanConfig,
   feature: BillingFeature
-) => {
-  if (feature === "attachments") return plan.allowAttachments;
-  if (feature === "sharing") return plan.allowSharing;
-  return plan.allowDownloads;
+): boolean => {
+  switch (feature) {
+    case "attachments":
+      return plan.allowAttachments;
+    case "sharing":
+      return plan.allowSharing;
+    case "downloads":
+      return plan.allowDownloads;
+    case "imageGeneration":
+      return planAllowsImageGeneration(plan.tier);
+    default: {
+      const unhandled: never = feature;
+      void unhandled;
+      return false;
+    }
+  }
 };
 
 export const featureNotIncludedResponse = (feature: BillingFeature) =>
