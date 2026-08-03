@@ -28,7 +28,11 @@ import { useEffect, type RefObject } from "react";
  *   target's nearest `[role="dialog"][aria-modal="true"]` ancestor, not by DOM
  *   order: a portal can render before or after the dialog that opened it, so
  *   position is not a reliable signal. Escape inside a nested dialog must close
- *   that one, never the one underneath.
+ *   that one, never the one underneath. The one exception is Tab arriving from
+ *   an *underlying* aria-modal dialog while this dialog is topmost: initial
+ *   focus lands a frame after open, so a fast Tab can still start from the
+ *   trigger underneath, and the topmost dialog claims it rather than letting
+ *   focus walk the inert dialog below.
  */
 export function useModalDialog({
   open,
@@ -81,19 +85,31 @@ export function useModalDialog({
       focusableWithin(panel)[0]?.focus();
     });
 
-    const ownsEvent = (event: KeyboardEvent) => {
+    const ownsEvent = (
+      event: KeyboardEvent,
+      options?: { claimUnderlyingDialogEvents?: boolean }
+    ) => {
       const dialog = dialogRef.current;
       if (!dialog || !panelRef.current) return false;
+
+      const modalDialogs = Array.from(
+        document.querySelectorAll<HTMLElement>('[role="dialog"][aria-modal="true"]')
+      );
+      if (modalDialogs.at(-1) !== dialog) return false;
 
       const eventOwner =
         event.target instanceof Element
           ? event.target.closest<HTMLElement>('[role="dialog"][aria-modal="true"]')
           : null;
-      if (eventOwner && eventOwner !== dialog) return false;
-      const modalDialogs = Array.from(
-        document.querySelectorAll<HTMLElement>('[role="dialog"][aria-modal="true"]')
-      );
-      return modalDialogs.at(-1) === dialog;
+      if (!eventOwner || eventOwner === dialog) return true;
+      // The event began inside another aria-modal dialog. This dialog is the
+      // topmost one, so that other dialog is underneath and inert; whether the
+      // key still belongs to it depends on the key. Tab claims it (below):
+      // focus can legitimately sit in the underlying dialog for the frame
+      // between this dialog rendering and its initial focus landing, and a Tab
+      // in that window must be trapped, not walk the inert dialog. Escape
+      // declines it, preserving the nested-surface contract.
+      return Boolean(options?.claimUnderlyingDialogEvents);
     };
 
     // Escape listens in the *bubble* phase on purpose. A dismissible surface
@@ -113,7 +129,11 @@ export function useModalDialog({
     const handleKeyDown = (event: KeyboardEvent) => {
       const panel = panelRef.current;
       if (!panel) return;
-      if (event.key !== "Tab" || !ownsEvent(event)) return;
+      if (
+        event.key !== "Tab" ||
+        !ownsEvent(event, { claimUnderlyingDialogEvents: true })
+      )
+        return;
 
       const focusable = focusableWithin(panel);
       if (focusable.length === 0) {
