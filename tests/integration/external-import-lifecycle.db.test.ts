@@ -1060,3 +1060,60 @@ test("the history row says whether an unfinished import can be resumed", async (
     assert.ok(sealedRow.expiresAt);
     assert.equal(sealedRow.expired, false);
 });
+
+test("the status endpoint gives a resumed screen what the wizard's review had", async () => {
+    const user = await createUser();
+    const longMessage = "z".repeat(
+        EXTERNAL_IMPORT_STORAGE_LIMITS.maxStoredMessageCodePoints + 50
+    );
+    const { importId, stagedIds } = await stageOneBatch(user.id, [
+        conversationPayload("resume-plain", ["hello", "world"]),
+        conversationPayload("resume-long", [longMessage, "reply"]),
+    ]);
+    await sealExternalImport({
+        userId: user.id,
+        importId,
+        finalSequence: 0,
+        expectedStagedConversationIds: stagedIds,
+        expectedDuplicateCount: 0,
+    });
+
+    const status = await getExternalImportStatus(user.id, importId);
+    assert.equal(status.status, "preview_ready");
+    assert.equal(status.expired, false);
+    // The deadlines a resumed screen shows are server-computed, and the
+    // effective one is whichever of the two clocks comes first (§5.5).
+    assert.ok(status.effectiveExpiresAt);
+    assert.ok(
+        new Date(status.effectiveExpiresAt!) <=
+            new Date(status.absoluteExpiresAt!)
+    );
+    assert.ok(
+        new Date(status.effectiveExpiresAt!) <= new Date(status.idleExpiresAt!)
+    );
+
+    // Per-conversation truncation counts, so the resumed confirmation can
+    // name the shortened conversations exactly as the wizard's review did.
+    const plain = status.conversations.find((row) =>
+        row.title.includes("resume-plain")
+    )!;
+    const long = status.conversations.find((row) =>
+        row.title.includes("resume-long")
+    )!;
+    assert.equal(plain.truncatedMessageCount, 0);
+    assert.equal(long.truncatedMessageCount, 1);
+    // And the digests the client needs to recompute a subset digest.
+    assert.equal(plain.conversationDigest.length, 64);
+
+    // A completed import reports no open-status deadlines at all.
+    await finalizeExternalImport({
+        userId: user.id,
+        importId,
+        idempotencyKey: "resume-finalize",
+        selectedConversationIds: [plain.id],
+    });
+    const done = await getExternalImportStatus(user.id, importId);
+    assert.equal(done.status, "completed");
+    assert.equal(done.expired, false);
+    assert.equal(done.effectiveExpiresAt, undefined);
+});
