@@ -107,6 +107,7 @@ import {
   formatChatCostSafetyDetails,
   isChatCostSafetyCode,
 } from "@/lib/chatCostSafetyCore";
+import { retryAfterSecondsFromResponse } from "@/lib/chatRateLimitCore";
 import {
   buildGuestImportPayload,
   consumePendingGuestImportIntent,
@@ -1318,8 +1319,28 @@ export function ChatPageClient({
           );
           return { allowed: true, admissionToken: null };
         }
+        // A rate rejection is the one refusal here that resolves by itself, so
+        // it is the one that has to say when. The server sends the wait twice
+        // -- `Retry-After` and `details.retryAfterSeconds` -- and this reads
+        // either into the current language's sentence.
+        //
+        // Deliberately not retried: `CHAT_RATE_LIMITED` is a real verdict, not
+        // an infrastructure failure of the check, and an automatic resend is
+        // exactly the traffic the limit exists to shed. The draft and its
+        // attachments survive because this returns before the composer is
+        // cleared, so the user re-sends when they choose to.
         const localizedMessage =
-          code === "PLAN_ENTITLEMENT_EXHAUSTED"
+          code === "CHAT_RATE_LIMITED"
+            ? t("chat.tooManyRequestsRetry").replace(
+                "{seconds}",
+                String(
+                  retryAfterSecondsFromResponse(
+                    response.headers.get("Retry-After"),
+                    errorBody?.details
+                  )
+                )
+              )
+          : code === "PLAN_ENTITLEMENT_EXHAUSTED"
             ? t("chat.planEntitlementExhausted")
           : code === "CONCURRENT_RESERVATION_CONFLICT"
             ? t("chat.concurrentReservationConflict")
