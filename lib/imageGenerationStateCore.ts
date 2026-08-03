@@ -74,12 +74,17 @@ export const imageAssetR2Key = (input: {
   }`;
 
 // A generation still pending/processing/settling after this long has lost
-// its worker: the concurrency lease tops out at 30 minutes
-// (MAX_LEASE_TTL_SECONDS) and a healthy provider call finishes in ~2, so
-// nothing legitimate is still live at 45. The reconciliation sweep claims
-// these via `settling` and refunds them (refund wiring lands with the
-// billing PR).
-export const STALE_IMAGE_GENERATION_AFTER_MS = 45 * 60 * 1_000;
+// its worker. Worst legitimate run is bounded: at most three provider
+// attempts of ~2 minutes each plus ~4s of backoff (imageProviderAdapter),
+// plus storage and thumbnail derivation -- under 8 minutes end to end; 12
+// keeps a comfortable margin. Reclaiming earlier matters because the v1
+// executor dies with its process on a redeploy (observed on staging during
+// the beta rollout), and this window plus the 15-minute sweep cadence is
+// exactly how long a user waits for the automatic refund. Correctness does
+// not depend on the value: the `settling` claim is exactly-once, so a
+// pathologically slow worker that finishes after the sweep reclaimed its row
+// simply loses the claim and discards the result.
+export const STALE_IMAGE_GENERATION_AFTER_MS = 12 * 60 * 1_000;
 
 export const IMAGE_ASSET_CLEANUP_REASONS = [
   "conversation_deleted",

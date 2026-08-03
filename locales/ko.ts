@@ -126,6 +126,7 @@ export const ko = {
         imageGenerationGenerate: "생성",
         imageGenerationGenerating: "이미지를 생성하는 중...",
         imageGenerationGeneratingHint: "최대 2분 정도 걸릴 수 있어요. 페이지를 벗어나도 생성은 취소되지 않습니다.",
+        imageGenerationTakingLong: "생각보다 오래 걸리고 있어요. 완료되지 못하면 자동으로 실패 처리되고 예약된 크레딧이 전액 환급됩니다.",
         imageGenerationFailed: "이미지 생성에 실패했습니다.",
         imageGenerationModerationBlocked: "안전 시스템이 이 요청을 거절했습니다. 설명을 바꿔 다시 시도해 주세요.",
         imageGenerationRefunded: "예약된 크레딧은 환급되었습니다.",

@@ -53,7 +53,10 @@ test("R2 keys use the opaque user id namespace and enumerate by conversation pre
 });
 
 test("policy constants hold their approved values", () => {
-  assert.equal(STALE_IMAGE_GENERATION_AFTER_MS, 45 * 60 * 1_000);
+  // 12 minutes since the beta observation of redeploy-killed executors:
+  // worst legitimate run is under 8 minutes (bounded provider retries plus
+  // storage), and this window sets the automatic-refund latency.
+  assert.equal(STALE_IMAGE_GENERATION_AFTER_MS, 12 * 60 * 1_000);
   assert.equal(IMAGE_ASSET_CLEANUP_MAX_ATTEMPTS, 10);
   assert.deepEqual(
     [...IMAGE_GENERATION_STATUSES],

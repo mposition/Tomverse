@@ -125,6 +125,7 @@ export const de = {
         imageGenerationGenerate: "Generieren",
         imageGenerationGenerating: "Bild wird generiert...",
         imageGenerationGeneratingHint: "Das kann bis zu etwa zwei Minuten dauern. Das Verlassen der Seite bricht die Generierung nicht ab.",
+        imageGenerationTakingLong: "Das dauert länger als üblich. Falls es nicht abgeschlossen werden kann, wird es automatisch als fehlgeschlagen markiert und die reservierten Credits werden vollständig erstattet.",
         imageGenerationFailed: "Bildgenerierung fehlgeschlagen.",
         imageGenerationModerationBlocked: "Das Sicherheitssystem hat diese Anfrage abgelehnt. Passe die Beschreibung an und versuche es erneut.",
         imageGenerationRefunded: "Die reservierten Credits wurden erstattet.",
