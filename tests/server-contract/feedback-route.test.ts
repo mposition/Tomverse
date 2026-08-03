@@ -58,6 +58,8 @@ type World = {
   txActive: boolean;
   /** TraceErrorEvidence rows the route may link a verified report to. */
   evidenceRows: Array<{ id: string; occurrenceId: string }>;
+  /** Phase 2 shadow cases created inside the submission transaction. */
+  autoFixCases: Array<Record<string, unknown> & { inTx: boolean }>;
 };
 
 const freshWorld = (): World => ({
@@ -76,6 +78,7 @@ const freshWorld = (): World => ({
   logs: [],
   txActive: false,
   evidenceRows: [],
+  autoFixCases: [],
 });
 
 let world = freshWorld();
@@ -273,6 +276,18 @@ async function loadRoute(): Promise<{
           world.evidenceRows.find(
             (row) => row.occurrenceId === where.occurrenceId
           ) ?? null,
+      },
+      feedbackAutoFixCase: {
+        create: async ({ data }: { data: Record<string, unknown> }) => {
+          nextId += 1;
+          const row = {
+            id: `clzcase000${String(nextId).padStart(4, "0")}`,
+            ...data,
+            inTx: world.txActive,
+          };
+          world.autoFixCases.push(row);
+          return row;
+        },
       },
     };
 
@@ -1079,4 +1094,114 @@ test("without a signing secret the report still stores as missing_token", async 
     if (previous === undefined) delete process.env.ERROR_REPORT_SIGNING_SECRET;
     else process.env.ERROR_REPORT_SIGNING_SECRET = previous;
   }
+});
+
+// --- Phase 2 shadow-case queueing --------------------------------------------
+//
+// A verified bug report queues a diagnosis-only case in the same transaction
+// as the report itself -- and only then: the flag is fail-closed, non-bug
+// types never queue, and an unverified trace never queues.
+
+const withShadowMode = async <T>(
+  enabled: boolean,
+  run: () => Promise<T>
+): Promise<T> => {
+  const previous = process.env.FEEDBACK_AUTOFIX_SHADOW_ENABLED;
+  if (enabled) process.env.FEEDBACK_AUTOFIX_SHADOW_ENABLED = "true";
+  else delete process.env.FEEDBACK_AUTOFIX_SHADOW_ENABLED;
+  try {
+    return await run();
+  } finally {
+    if (previous === undefined) {
+      delete process.env.FEEDBACK_AUTOFIX_SHADOW_ENABLED;
+    } else {
+      process.env.FEEDBACK_AUTOFIX_SHADOW_ENABLED = previous;
+    }
+  }
+};
+
+test("a verified bug report queues a shadow case inside the transaction", async () => {
+  await withSigningSecret(async () => {
+    await withShadowMode(true, async () => {
+      const { POST } = await loadRoute();
+      world.evidenceRows.push({ id: "ev-case", occurrenceId: "occ-case" });
+      const traceId = "99999999-2222-4333-8444-555555555555";
+      const token = await issueToken({
+        traceId,
+        errorCode: "AI_PROVIDER_ERROR",
+        occurrenceId: "occ-case",
+      });
+      const response = await withCapturedLogs(() =>
+        POST(
+          post({
+            type: "bug",
+            message: "verified server failure",
+            traceId,
+            errorReportToken: token!,
+          })
+        )
+      );
+      assert.equal(response.status, 200);
+      assert.equal(world.autoFixCases.length, 1);
+      const created = world.autoFixCases[0];
+      assert.equal(created.inTx, true, "case must commit with the report");
+      assert.equal(created.traceId, traceId);
+      assert.equal(created.occurrenceId, "occ-case");
+      assert.ok(
+        String(created.fingerprint).startsWith("AI_PROVIDER_ERROR|"),
+        "fingerprint carries the server-classified code"
+      );
+    });
+  });
+});
+
+test("no shadow case without the flag, for non-bug types, or unverified traces", async () => {
+  await withSigningSecret(async () => {
+    const traceId = "aaaa9999-2222-4333-8444-555555555555";
+    const token = await issueToken({ traceId, errorCode: "AI_PROVIDER_ERROR" });
+
+    // Flag off: verified bug, still no case.
+    await withShadowMode(false, async () => {
+      const { POST } = await loadRoute();
+      await withCapturedLogs(() =>
+        POST(
+          post({
+            type: "bug",
+            message: "flag is off",
+            traceId,
+            errorReportToken: token!,
+          })
+        )
+      );
+      assert.equal(world.autoFixCases.length, 0);
+    });
+
+    // Flag on, but a feature request: no case.
+    await withShadowMode(true, async () => {
+      const { POST } = await loadRoute();
+      await withCapturedLogs(() =>
+        POST(
+          post({
+            type: "feature",
+            message: "please add a thing",
+            traceId,
+            errorReportToken: token!,
+          })
+        )
+      );
+      assert.equal(world.autoFixCases.length, 0);
+
+      // Flag on, bug, but no token: stored as missing_token, no case.
+      await withCapturedLogs(() =>
+        POST(
+          post({
+            type: "bug",
+            message: "manual trace only",
+            traceId,
+          })
+        )
+      );
+      assert.equal(world.autoFixCases.length, 0);
+    });
+  });
 });
