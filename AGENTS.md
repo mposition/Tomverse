@@ -33,6 +33,7 @@ UI-012에서 승인된 정책(B안)입니다. accent 색은 **hue가 아니라 �
 |---|---|---|
 | AI Review | `accent-ai-review-start\|mid\|end-*`, `tomverse-accent-*`, `tomverse-review-*` | cyan → blue → purple |
 | Deep Research | `accent-deep-research-*` | violet |
+| 이미지 생성 | `accent-image-*` | fuchsia |
 | Web Search | `accent-web-search-*` | sky |
 | Model Catalogue | `accent-model-catalogue-*` | purple |
 | Max plan | `accent-plan-max-*` | purple |
