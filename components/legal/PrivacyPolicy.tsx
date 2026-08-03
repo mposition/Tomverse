@@ -13,6 +13,7 @@ const sections = [
     ["purposeTitle", "purpose", Database],
     ["providersTitle", "providers", Send],
     ["attachmentsTitle", "attachments", FileUp],
+    ["externalImportTitle", "externalImport", FileUp],
     ["analyticsTitle", "analytics", BarChart3],
     ["retentionTitle", "retention", Database],
     ["sharingTitle", "sharing", Share2],
