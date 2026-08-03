@@ -60,6 +60,19 @@ export async function createR2UploadUrl(
   );
 }
 
+export async function createR2ReadUrl(key: string, expiresInSeconds = 300) {
+  const { client, bucket } = getR2Client();
+
+  return getSignedUrl(
+    client,
+    new GetObjectCommand({
+      Bucket: bucket,
+      Key: key,
+    }),
+    { expiresIn: expiresInSeconds }
+  );
+}
+
 const normalizeContentType = (value: string | undefined) =>
   value?.split(";", 1)[0]?.trim().toLowerCase() || "";
 

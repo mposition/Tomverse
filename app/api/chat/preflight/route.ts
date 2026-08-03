@@ -28,6 +28,7 @@ import {
     getUserBillingPlan,
 } from "@/lib/billingEntitlements";
 import { getRuntimeModels } from "@/lib/modelRegistry";
+import { conversationKindNotSupportedResponse, isChatConversationKind } from "@/lib/conversationKindGuard";
 import { prisma } from "@/lib/prisma";
 import { estimatePreflightAttachmentTokens } from "@/lib/chatAttachmentTokens";
 import { isChatCostSafetyCode } from "@/lib/chatCostSafetyCore";
@@ -182,6 +183,7 @@ export async function POST(request: Request) {
                     userId: true,
                     password: true,
                     selectedModels: true,
+                    kind: true,
                     messages: {
                         orderBy: { createdAt: "desc" },
                         take: 100,
@@ -212,6 +214,11 @@ export async function POST(request: Request) {
                 )
             ) {
                 return conversationLockedResponse();
+            }
+            // Image conversations never admit chat requests -- same gate as
+            // the chat route itself (docs/policy/image-generation.md §1).
+            if (!isChatConversationKind(conversation.kind)) {
+                return conversationKindNotSupportedResponse();
             }
             const selectedModels = new Set(
                 parseStoredModelIds(conversation.selectedModels)

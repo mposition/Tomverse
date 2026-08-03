@@ -10,6 +10,7 @@ import {
     validateR2ObjectMetadata,
     writeR2Object,
 } from "@/lib/r2";
+import { conversationKindNotSupportedResponse, isChatConversationKind } from "@/lib/conversationKindGuard";
 import { prisma } from "@/lib/prisma";
 import {
     modelSupportsImageInput,
@@ -837,7 +838,7 @@ async function handleChatPost(
             }
             const conversation = await prisma.conversation.findUnique({
                 where: { id: conversationId },
-                select: { userId: true, password: true, selectedModels: true },
+                select: { userId: true, password: true, selectedModels: true, kind: true },
             });
             if (!conversation || conversation.userId !== session.user.id) {
                 return tracedJsonError(
@@ -856,6 +857,12 @@ async function handleChatPost(
                 )
             ) {
                 return conversationLockedResponse();
+            }
+            // Image conversations never accept chat messages; their model
+            // comes from the image generation layer, not selectedModels.
+            // See docs/policy/image-generation.md section 1.
+            if (!isChatConversationKind(conversation.kind)) {
+                return conversationKindNotSupportedResponse();
             }
             const selectedConversationModels = Array.from(
                 new Set(parseStoredModelIds(conversation.selectedModels))

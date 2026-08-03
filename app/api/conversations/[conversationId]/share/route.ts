@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { Prisma } from "@prisma/client";
 import { getServerSession } from "next-auth/next";
+import { conversationKindNotSupportedResponse, isChatConversationKind } from "@/lib/conversationKindGuard";
 import { prisma } from "@/lib/prisma";
 import { authOptions } from "@/lib/auth";
 import { createShareToken } from "@/lib/shareTokens";
@@ -93,11 +94,18 @@ export async function POST(
     select: {
       userId: true,
       password: true,
+      kind: true,
     },
   });
 
   if (!accessConversation || accessConversation.userId !== userId) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
+  // Sharing an image conversation is explicitly out of scope for v1: the
+  // share snapshot schema carries text messages only and publishing R2
+  // assets needs its own design (docs/policy/image-generation.md §1).
+  if (!isChatConversationKind(accessConversation.kind)) {
+    return conversationKindNotSupportedResponse();
   }
   logSecurityAuditEvent("conversation.share.create", {
     userId,
