@@ -534,7 +534,9 @@ function ProviderRow({
   const internalBudgetSourceDetail =
     provider.internalBudgetSource === "railway_environment"
       ? `Railway ${internalBudgetVariableName}`
-      : `Code default · ${internalBudgetVariableName} absent or invalid`;
+      : provider.internalBudgetSource === "unconfigured"
+        ? `UNCONFIGURED · ${internalBudgetVariableName} absent in production, enforcement failing closed`
+        : `Code default · ${internalBudgetVariableName} absent or invalid`;
   const limitDifferenceMicroUsd =
     providerBillingLimitMicroUsd === null
       ? null

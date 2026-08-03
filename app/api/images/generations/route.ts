@@ -10,7 +10,7 @@ import {
   readLimitedJson,
 } from "@/lib/apiSecurity";
 import { authOptions } from "@/lib/auth";
-import { chatErrorResponse } from "@/lib/chatSecurity";
+import { ChatAccessError, chatErrorResponse } from "@/lib/chatSecurity";
 import {
   processImageGeneration,
   requestImageGeneration,
@@ -81,6 +81,19 @@ export async function POST(req: Request) {
       { status: result.reused ? 200 : 202 }
     );
   } catch (error) {
+    // Row-less preflight rejections are observable only here: reason code
+    // and layer, never the prompt or any part of it
+    // (docs/policy/image-generation.md section 10).
+    if (error instanceof ChatAccessError) {
+      console.info(
+        JSON.stringify({
+          event: "image_generation_preflight_rejected",
+          code: error.code,
+          status: error.status,
+          occurredAt: new Date().toISOString(),
+        })
+      );
+    }
     const chatResponse = chatErrorResponse(error);
     if (chatResponse) return chatResponse;
     const securityResponse = apiSecurityResponse(error);

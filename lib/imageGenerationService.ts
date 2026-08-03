@@ -59,6 +59,7 @@ import {
   STALE_IMAGE_GENERATION_AFTER_MS,
   type ImageGenerationFailurePhase,
 } from "@/lib/imageGenerationStateCore";
+import { resolveImageProviderBudget } from "@/lib/imageProviderBudget";
 import { reportOperationalIncident } from "@/lib/operationalMonitoring";
 import { prisma } from "@/lib/prisma";
 import { writeR2Object } from "@/lib/r2";
@@ -80,29 +81,6 @@ const imageLeaseSubjectKey = (userId: string) =>
   `image:${getUserChatUsageKey(userId)}`;
 
 const IMAGE_PROVIDER_BUDGET_KEY = "image-provider:openai";
-
-const positiveInteger = (value: string | undefined) => {
-  const parsed = Number(value);
-  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : null;
-};
-
-// Mirrors the chat provider-budget contract (lib/providerCostBudget.ts): no
-// silent production default. Missing env in production fails closed as a
-// budget rejection; the dev/test fallback matches
-// DEVELOPMENT_PROVIDER_BUDGET_MICRO_USD. /api/ready gating and the floor
-// derivation arrive with the operations PR -- until then the flag stays off
-// in production anyway.
-const imageProviderBudgetLimits = () => {
-  const day = positiveInteger(
-    process.env.IMAGE_PROVIDER_OPENAI_COST_MICROUSD_PER_DAY
-  );
-  const month = positiveInteger(
-    process.env.IMAGE_PROVIDER_OPENAI_COST_MICROUSD_PER_MONTH
-  );
-  if (day && month) return { day, month };
-  if (process.env.NODE_ENV === "production") return null;
-  return { day: 10_000_000, month: 100_000_000 };
-};
 
 const imageConcurrencyLimit = () => {
   const parsed = Number(process.env.IMAGE_USER_CONCURRENT);
@@ -239,7 +217,9 @@ export const requestImageGeneration = async (
   }
 
   const maxCost = maxRequestCostMicroUsd(pricing);
-  const budget = imageProviderBudgetLimits();
+  // Floor-clamped effective limits; null means the configuration is unusable
+  // (missing or partial in production) and the request fails closed.
+  const budget = resolveImageProviderBudget().limits;
   if (!budget) {
     throw new ChatAccessError(
       503,
