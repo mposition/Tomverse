@@ -16,11 +16,80 @@ async function backToRecommendations(page: Page) {
   ).toBeVisible();
 }
 
-test("the in-picker combo CTA recommends an AI combination and applies only the kept models", async ({
+/**
+ * Opens the model picker's full catalogue and asserts that exactly the given
+ * models are selected, then closes the popover again.
+ */
+async function expectSelectedModels(page: Page, expected: string[]) {
+  await modelMenuTrigger(page).click();
+  await openModelCatalogue(page);
+  for (const modelId of expected) {
+    await expect(
+      page.locator(`[data-testid="model-option"][data-model-id="${modelId}"]`)
+    ).toHaveAttribute("aria-pressed", "true");
+  }
+  await expect(
+    page.locator('[data-testid="model-option"][aria-pressed="true"]')
+  ).toHaveCount(expected.length);
+  await page.getByTestId("model-picker-done").click();
+  await expect(page.locator("#chat-input-popover")).toBeHidden();
+}
+
+/**
+ * Starts a new chat from wherever the shell keeps the control: the sidebar
+ * button on desktop, the header button on mobile (hidden while the active
+ * conversation is already blank -- then there is nothing to do).
+ */
+async function startNewChat(page: Page) {
+  const sidebarButton = page.getByTestId("sidebar-new-chat");
+  if (await sidebarButton.isVisible()) {
+    await sidebarButton.click();
+    return;
+  }
+  const headerButton = page.getByRole("button", { name: "새 대화" });
+  if (await headerButton.isVisible()) {
+    await headerButton.click();
+  }
+}
+
+test("saving the combination persists it for the next new chat and across a reload", async ({
   page,
 }) => {
   await mockAuthenticatedApi(page);
   await page.unroute("**/api/user/model-finder");
+  await page.unroute("**/api/user/settings");
+
+  // The mock HOLDS the saved state: the model-finder save writes it, and the
+  // settings read serves it back -- the contract the real routes now follow.
+  let savedCombination: string[] | null = null;
+
+  await page.route("**/api/user/settings**", async (route) => {
+    if (route.request().method() === "POST") {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ success: true, settings: {} }),
+      });
+      return;
+    }
+    const lead = savedCombination?.[0] ?? "gpt-5-6-luna";
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        theme: "dark",
+        language: "ko",
+        defaultModel: lead,
+        defaultModelId: lead,
+        newConversationModelIds: savedCombination ?? [lead],
+        modelSelectionNotice: null,
+        timeZone: "UTC",
+        timeZoneInitializedAt: "2026-05-01T00:00:00.000Z",
+        timeZoneChangedAt: "2026-05-01T00:00:00.000Z",
+        timeZoneChangeAllowedAt: "2026-05-31T00:00:00.000Z",
+      }),
+    });
+  });
 
   let savedBody: Record<string, unknown> | null = null;
   await page.route("**/api/user/model-finder", async (route) => {
@@ -44,14 +113,15 @@ test("the in-picker combo CTA recommends an AI combination and applies only the 
     const modelIds = Array.isArray(savedBody.modelIds)
       ? (savedBody.modelIds as string[])
       : ["gpt-5-4-mini"];
-    // The real route only persists and reports what was actually saved -- it
-    // must never echo the requested modelIds back as a saved combination.
+    savedCombination = modelIds;
+    // Canonical response: only what was persisted, never a request echo.
     await route.fulfill({
       status: 200,
       contentType: "application/json",
       body: JSON.stringify({
         success: true,
         defaultModelId: modelIds[0],
+        newConversationModelIds: modelIds,
         modelFinderCompletedAt: "2026-07-24T00:00:00.000Z",
       }),
     });
@@ -103,6 +173,24 @@ test("the in-picker combo CTA recommends an AI combination and applies only the 
     const sidebarConversation = sidebarList.getByText("QA conversation");
     await expect(sidebarConversation.locator("..")).not.toHaveClass(/bg-zinc-200/);
   }
+
+  // The fresh chat carries exactly the two saved models -- the canonical
+  // combination the server persisted, not just its lead.
+  await expectSelectedModels(page, ["gpt-5-6-luna", "gemini-2-5-flash"]);
+
+  // A reload restores the previously active conversation, whose own
+  // selectedModels rightly win -- so the persistence claim is asserted where
+  // it applies: the NEXT new chat, whose start state is rebuilt from
+  // GET /api/user/settings serving the saved combination.
+  await page.reload();
+  await expect(modelMenuTrigger(page)).toBeVisible();
+  await startNewChat(page);
+  await expectSelectedModels(page, ["gpt-5-6-luna", "gemini-2-5-flash"]);
+
+  // And once more from the blank chat: pressing "New Chat" again must not
+  // collapse the combination back to a single model.
+  await startNewChat(page);
+  await expectSelectedModels(page, ["gpt-5-6-luna", "gemini-2-5-flash"]);
 });
 
 test("the finder can be closed mid-flow without completing it", async ({ page }) => {
