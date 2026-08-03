@@ -12,8 +12,10 @@ import {
 } from "@/lib/appDefaults";
 import {
   auditDefaultModels,
+  parsePrismaFieldContract,
   parsePrismaStringDefault,
   type DefaultModelAuditInput,
+  type NewConversationAuditInput,
 } from "@/lib/defaultModelAuditCore";
 import { DEFAULT_MODEL_ID, getModel, getModelUsageProfile } from "@/lib/models";
 
@@ -42,6 +44,23 @@ const stateFor = (modelId: string) => {
   };
 };
 
+const healthyNewConversation = (
+  overrides: Partial<NewConversationAuditInput> = {}
+): NewConversationAuditInput => ({
+  prismaColumn: { present: true, nullable: true, hasDefault: false },
+  settingsRouteUsesResolver: true,
+  settingsRouteRewritesOnRead: false,
+  modelFinderSavesCombination: true,
+  modelFinderEchoesRequest: false,
+  conversationsRouteUsesResolver: true,
+  clientNewChatUsesSingleDefault: false,
+  resolverNullFallsBack: true,
+  resolverMalformedFallsBack: true,
+  resolverTruncatesToMax: true,
+  resolverLeadMatchesEffectiveDefault: true,
+  ...overrides,
+});
+
 const healthyInput = (
   overrides: Partial<DefaultModelAuditInput> = {}
 ): DefaultModelAuditInput => {
@@ -49,6 +68,7 @@ const healthyInput = (
     isEligible: isGuestEligible,
   });
   return {
+    newConversation: healthyNewConversation(),
     storedGuestDefaultModelId: null,
     normalizedGuestDefaultModelId: APP_DEFAULTS.guestDefaultModelId,
     effectiveGuestSelectedModelIds: selection,
@@ -276,4 +296,138 @@ test("app/api/user/settings/route.ts creates a row from the compiled default", (
   );
   assert.match(route, /defaultModel:\s*APP_DEFAULTS\.defaultModelId/);
   assert.equal(APP_DEFAULTS.defaultModelId, DEFAULT_MODEL_ID);
+});
+
+// ---------------------------------------------------------------------------
+// C. The signed-in new-conversation combination (policy §1.2).
+// ---------------------------------------------------------------------------
+
+test("a healthy section C produces no findings", () => {
+  assert.deepEqual(codes(healthyInput()), []);
+});
+
+test("the combination column must exist, stay nullable and carry no default", () => {
+  assert.deepEqual(
+    codes(
+      healthyInput({
+        newConversation: healthyNewConversation({
+          prismaColumn: { present: false, nullable: false, hasDefault: false },
+        }),
+      })
+    ),
+    ["new_conversation_column_missing"]
+  );
+  assert.deepEqual(
+    codes(
+      healthyInput({
+        newConversation: healthyNewConversation({
+          prismaColumn: { present: true, nullable: false, hasDefault: true },
+        }),
+      })
+    ),
+    [
+      "new_conversation_column_not_nullable",
+      "new_conversation_column_has_default",
+    ]
+  );
+});
+
+test("a read path that rewrites the row is a finding", () => {
+  assert.deepEqual(
+    codes(
+      healthyInput({
+        newConversation: healthyNewConversation({
+          settingsRouteRewritesOnRead: true,
+        }),
+      })
+    ),
+    ["new_conversation_read_path_rewrites"]
+  );
+});
+
+test("every interpreter must go through the shared resolver", () => {
+  assert.deepEqual(
+    codes(
+      healthyInput({
+        newConversation: healthyNewConversation({
+          settingsRouteUsesResolver: false,
+        }),
+      })
+    ),
+    ["new_conversation_resolver_not_shared"]
+  );
+  assert.deepEqual(
+    codes(
+      healthyInput({
+        newConversation: healthyNewConversation({
+          conversationsRouteUsesResolver: false,
+        }),
+      })
+    ),
+    ["new_conversation_resolver_not_shared"]
+  );
+});
+
+test("the model finder must persist the combination and never echo the request", () => {
+  assert.deepEqual(
+    codes(
+      healthyInput({
+        newConversation: healthyNewConversation({
+          modelFinderSavesCombination: false,
+          modelFinderEchoesRequest: true,
+        }),
+      })
+    ),
+    [
+      "new_conversation_write_paths_desynced",
+      "new_conversation_response_echoes_request",
+    ]
+  );
+});
+
+test("a client that still starts new chats from one model is a finding", () => {
+  assert.deepEqual(
+    codes(
+      healthyInput({
+        newConversation: healthyNewConversation({
+          clientNewChatUsesSingleDefault: true,
+        }),
+      })
+    ),
+    ["new_conversation_client_single_model_init"]
+  );
+});
+
+test("each broken resolver fixture is its own finding", () => {
+  assert.deepEqual(
+    codes(
+      healthyInput({
+        newConversation: healthyNewConversation({
+          resolverNullFallsBack: false,
+          resolverTruncatesToMax: false,
+        }),
+      })
+    ),
+    ["new_conversation_fallback_broken", "new_conversation_fallback_broken"]
+  );
+});
+
+test("parsePrismaFieldContract reads the real column's contract", () => {
+  const schema = readFileSync(
+    join(process.cwd(), "prisma/schema.prisma"),
+    "utf8"
+  );
+  assert.deepEqual(
+    parsePrismaFieldContract(schema, "UserSettings", "newConversationModelIds"),
+    { present: true, nullable: true, hasDefault: false }
+  );
+  // A non-nullable defaulted column for contrast.
+  assert.deepEqual(
+    parsePrismaFieldContract(schema, "UserSettings", "defaultModel"),
+    { present: true, nullable: false, hasDefault: true }
+  );
+  assert.deepEqual(
+    parsePrismaFieldContract(schema, "UserSettings", "notAField"),
+    { present: false, nullable: false, hasDefault: false }
+  );
 });

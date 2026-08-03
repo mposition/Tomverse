@@ -60,12 +60,16 @@ const ENGLISH_STRING_CEILING = {
   // and shared technical labels ("Max", "GPT-5.4 mini"), not untranslated copy.
   ko: 8,
   // Limited market. The chat interface and the model finder are English.
-  zh: 190,
+  // +1 (190 -> 191): modelFinder.saveAsDefaultHint arrived with the saved
+  // new-conversation combination and zh takes modelFinder from en wholesale.
+  zh: 191,
   // Preview markets, all of which spread `...en.chat` and `en.modelFinder`.
-  fr: 226,
-  de: 230,
-  es: 227,
-  pt: 225,
+  // fr +1 (226 -> 227): modelFinder.saveAsDefaultHint, taken from en wholesale.
+  fr: 227,
+  // de/es/pt +1 for the same saveAsDefaultHint key.
+  de: 231,
+  es: 228,
+  pt: 226,
 };
 
 test("every supported language is in the dictionary map", () => {
