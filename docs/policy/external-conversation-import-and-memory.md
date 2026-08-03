@@ -271,17 +271,64 @@ batch sequence·idempotency 계약이 동일하게 적용됩니다.
   대상이 아니라 선택 불가입니다(§5.3).
 - truncated content를 완전한 원문으로 표시하지 않습니다.
 
-### 5.5 staging → finalize
+### 5.5 staging → seal → finalize
 
 capacity 조회 → worker 파싱 → normalized chunk 전송 → 서버 재검증(schema·
-owner·quota·size) → 서버 digest 재계산 → 중복·idempotency 판정 → preview →
-명시적 finalize → transaction으로 원자 저장.
+owner·quota·size) → 서버 digest 재계산 → 중복·idempotency 판정 → **seal** →
+preview → 명시적 finalize → transaction으로 원자 저장.
 
 - staging row는 일반 목록·검색·export에 노출하지 않습니다.
 - staging TTL은 **마지막 활동 기준 24시간**, absolute maximum lifetime은
   **생성 기준 72시간**입니다(중앙 상수). 만료 시
   `EXTERNAL_IMPORT_STAGING_EXPIRED`를 반환하고 reconciliation이 payload를
-  자동 정리합니다.
+  자동 정리합니다. **`preview_ready`도 같은 두 시계를 그대로 적용받습니다** —
+  seal은 업로드 완료를 확정할 뿐 수명을 연장하지 않습니다. 서버가 idle·
+  absolute 중 먼저 도래하는 `effectiveExpiresAt`을 계산해 응답에 담습니다.
+
+#### seal — 업로드 완료 확정 (`POST .../[importId]/seal`)
+
+seal이 확정하는 것은 **오직 두 가지**입니다.
+
+1. 클라이언트가 의도한 batch 업로드가 끝났다.
+2. 클라이언트가 들고 있는 staged 결과가 서버가 저장한 상태와 일치한다.
+
+seal은 **무엇을 최종 저장할지 확정하거나 freeze하지 않습니다.** finalize는
+seal된 staged 집합의 **부분집합**을 받을 수 있고, `expectedImportDigest`는
+그때 선택된 subset으로 **다시 계산**합니다. seal이 반환하는 전체 집합
+digest(`sealedSelectionDigest`)를 subset finalize에 재사용하면 정상적인 부분
+저장이 `EXTERNAL_IMPORT_SELECTION_CHANGED`로 거절됩니다.
+
+- 클라이언트 선언: `finalSequence`, `expectedStagedConversationIds`,
+  `expectedDuplicateCount`.
+- 서버 검증(모두 서버가 직접 쓴 값과 대조): 인증·소유권, feature flag, rate
+  limit, strict schema, status가 `staging`(또는 이미 `preview_ready`), TTL
+  미만, `lastBatchSequence === finalSequence`, 실제 staged ID 집합과 선언된
+  집합의 정확한 일치, staged row 수 일치, `duplicateCount` 일치.
+- 서버는 전체 export나 사용자가 원래 선택한 항목 전체를 독립적으로 알지
+  못합니다. 계약은 "클라이언트 완료 선언 + 서버 저장 결과와 대조 검증"입니다.
+- 검증 실패는 `409 EXTERNAL_IMPORT_SELECTION_CHANGED` 계열이며 상태를 바꾸지
+  않습니다. 성공 시에만 `preview_ready`로 전환합니다.
+- **멱등**: staged row·`lastBatchSequence`·`duplicateCount`는 `preview_ready`
+  에서 더 이상 변하지 않으므로, 같은 선언의 재시도는 동일한 검증을 통과해
+  `200` replay가 되고 다른 선언은 같은 검증에서 409가 됩니다. 별도 seal
+  선언 컬럼을 두지 않는 이유입니다.
+
+#### `preview_ready` lifecycle
+
+- batch append는 계속 `staging`에서만 허용합니다. sealed import에 append하면
+  409 `EXTERNAL_IMPORT_SELECTION_CHANGED`입니다.
+- finalize는 `staging`과 `preview_ready`를 모두 처리하고, 양쪽 모두 subset을
+  받습니다. 성공 시 선택되지 않은 staged row는 기존 계약대로 삭제합니다.
+- quota 실패는 아무것도 쓰지 않으므로 `preview_ready` 상태와 staged row가
+  그대로 남고, 사용자는 선택을 줄여 재업로드 없이 다시 finalize합니다.
+- DELETE는 `preview_ready`를 staging 취소와 동일하게 처리합니다.
+- lazy expiry와 15분 reconciliation sweep은 `staging`·`preview_ready`를 모두
+  대상으로 합니다.
+- **배포 호환성**: seal 이전 버전 클라이언트가 이미 열어 둔 화면은 `staging`
+  에서 바로 finalize할 수 있어야 하므로, `staging` finalize 경로는 absolute
+  TTL(72시간) 동안 유지합니다. 새 UI는 `preview_ready`만 재개 가능으로
+  취급하며, seal되지 않은 부분 업로드에는 재개 CTA를 제공하지 않습니다.
+  클라이언트 계약 변경은 `EXTERNAL_IMPORT_PARSER_VERSION`으로 구분합니다.
 - **finalize 멱등 계약**:
   - 같은 idempotency key + 같은 import digest·selection의 재요청 →
     **`200`으로 기존 완료 결과를 반환**합니다(no-op). 오류가 아닙니다.
@@ -747,7 +794,7 @@ cross-user 정보는 오류에 포함하지 않습니다.
 | `EXTERNAL_IMPORT_BATCH_OUT_OF_ORDER` | 409 | 순서 복구 후 가능 | chunk sequence 위반 |
 | `EXTERNAL_IMPORT_BATCH_CONFLICT` | 409 | 불가 | 동일 sequence 상이 payload |
 | `EXTERNAL_IMPORT_QUOTA_EXCEEDED` | 409 | 선택 축소 후 가능 | all-or-nothing 거부 |
-| `EXTERNAL_IMPORT_SELECTION_CHANGED` | 409 | preview 재확인 후 가능 | staging과 finalize 선택 불일치 |
+| `EXTERNAL_IMPORT_SELECTION_CHANGED` | 409 | preview 재확인 후 가능 | staging과 finalize 선택 불일치. **seal 검증 실패(sequence·staged ID 집합·duplicate count 불일치)와 sealed import에 대한 batch append도 같은 코드**입니다 — 셋 다 "클라이언트가 들고 있는 선택 상태와 서버 상태가 어긋났다"는 같은 의미이고, 복구도 같습니다(§5.5) |
 | `EXTERNAL_IMPORT_ALREADY_FINALIZED` | 409 | 불필요 | **다른 key**의 재-finalize에만 사용. 같은 key·digest 재요청은 오류가 아니라 `200` 멱등 응답(§5.5) |
 | `EXTERNAL_IMPORT_STAGING_EXPIRED` | 410 | 재시작 필요 | staging TTL 만료(§5.5) |
 
@@ -973,7 +1020,8 @@ GET    /api/imports/external/capacity          잔여 quota (파싱 전 표시�
 POST   /api/imports/external                   import 생성 (staging 시작)
 GET    /api/imports/external/[importId]        상태 조회
 POST   /api/imports/external/[importId]/batches   normalized chunk 수신 (sequence + idempotency)
-POST   /api/imports/external/[importId]/finalize  all-or-nothing 확정
+POST   /api/imports/external/[importId]/seal      업로드 완료 선언의 서버 검증 → preview_ready (§5.5)
+POST   /api/imports/external/[importId]/finalize  all-or-nothing 확정 (sealed 집합의 부분집합 허용)
 DELETE /api/imports/external/[importId]        취소·staging 정리 / 완료분 삭제
 GET    /api/external-conversations             finalized 목록 (viewer)
 GET    /api/external-conversations/[id]        read-only 조회
@@ -1016,7 +1064,10 @@ POST          /api/assistant-profiles/[profileId]/preview       (실제 credit·
 ### UI 경로
 
 ```
-/settings/imports, /settings/imports/[importId], external viewer   (A)
+/settings/imports              관리 화면 (저장 공간·가져온 대화·이력·진행 중 작업)  (A)
+/settings/imports/new          전체 화면 Wizard (static segment, [importId]와 공존)  (A)
+/settings/imports/[importId]   완료 결과 · 작업 상태 상세                            (A)
+/settings/imports/conversations/[id]   read-only viewer                              (A)
 /settings/memory, /settings/memory/runs/[runId]                    (B)
 /settings/assistants, /settings/assistants/new, /settings/assistants/[profileId]  (C)
 ```
@@ -1030,6 +1081,22 @@ Data 탭(`AuthButton.tsx`)에는 진입점·요약만 두고 대형 UI를 modal�
 - **A**: provider별 parse 성공·실패, parserVersion 실패율, count/byte bucket,
   duplicate/truncation/quota 거부율, staging cleanup, finalize latency, mobile
   desktop recommendation. filename·title·content·외부 ID·digest 금지.
+- **A — Wizard 단계 이벤트**: `external_import_step_entered`와
+  `external_import_step_abandoned`. 속성은 닫힌 `import_step` enum
+  (`provider_guide` `file_selection` `parsing` `conversation_selection`
+  `server_review` `completed` `desktop_recommended`) 하나뿐이며 filename·
+  대화 제목·본문·외부 ID·fingerprint·digest를 넣지 않습니다.
+  **해석 한계 — 다음을 오류로 읽지 마세요.**
+  - `abandoned`는 취소·이전·명시적 라우트 이탈처럼 확실한 사용자 행동에만
+    기록합니다. **브라우저 탭·창을 그냥 닫는 이탈은 측정되지 않습니다.**
+  - 따라서 단계별 `entered` 수는 언제나 `abandoned` 수보다 크거나 같을 수
+    있고, 두 수의 합이 맞지 않는 것은 계측 오류가 아닙니다.
+  - 실질 이탈률은 `abandoned`가 아니라 **연속한 두 단계의 `entered` 수 차이**
+    로 읽습니다. `abandoned`는 "명시적으로 그만둔" 하한선일 뿐입니다.
+  - `preparing_review` `finalizing` `upload_failed` `expired` `parse_failed`
+    는 단계가 아니라 단계 안의 순간이므로 enum에 없습니다. `quota_revision`은
+    출처에 따라 `conversation_selection` 또는 `server_review`로 집계되며,
+    이벤트는 label이 **바뀔 때만** 발생하므로 중복 계수되지 않습니다.
 - **B**: run 성공·실패·취소, pair별 실패율, chunk당 credit p50/p95, batch
   sub-budget 소진, validator 거부율, sensitive review 비율, 승인·수정·거부율,
   injection 비율, 주입 token bucket, truncation 비율, stale bundle 비율, lock

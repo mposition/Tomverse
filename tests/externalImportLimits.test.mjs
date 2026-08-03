@@ -4,6 +4,7 @@ import {
     EXTERNAL_IMPORT_CLIENT_ARCHIVE_LIMITS,
     EXTERNAL_IMPORT_STORAGE_LIMITS,
     EXTERNAL_IMPORT_TRUNCATION_MARKER,
+    computeExternalImportExpiries,
     countCodePoints,
     planExternalMessageTruncation,
     truncateExternalMessageContent,
@@ -207,4 +208,33 @@ test("the rollout flag fails closed on any value but the explicit opt-in", async
     assert.equal(externalImportEnabledFromValue("TRUE"), false);
     assert.equal(externalImportEnabledFromValue(null), false);
     assert.equal(externalImportEnabledFromValue(undefined), false);
+});
+
+/**
+ * §5.5 staging TTLs. Both open statuses (`staging` and `preview_ready`) run on
+ * the same two clocks, and the effective deadline is whichever comes first —
+ * so a long-lived import expires on its absolute lifetime even while it is
+ * being touched, and an idle one expires well before that.
+ */
+test("the effective expiry is the earlier of the idle and absolute deadlines", () => {
+    const createdAt = new Date("2026-08-01T00:00:00.000Z");
+
+    // Freshly touched, hours old: the 24h idle clock is still further out
+    // than nothing, but the 72h absolute clock is further still.
+    const active = computeExternalImportExpiries({
+        createdAt,
+        updatedAt: new Date("2026-08-01T02:00:00.000Z"),
+    });
+    assert.equal(active.idleExpiresAt, "2026-08-02T02:00:00.000Z");
+    assert.equal(active.absoluteExpiresAt, "2026-08-04T00:00:00.000Z");
+    assert.equal(active.effectiveExpiresAt, active.idleExpiresAt);
+
+    // Touched at the very end of its life: the absolute deadline wins, so
+    // continued activity cannot extend the import indefinitely.
+    const elderly = computeExternalImportExpiries({
+        createdAt,
+        updatedAt: new Date("2026-08-03T23:00:00.000Z"),
+    });
+    assert.equal(elderly.effectiveExpiresAt, elderly.absoluteExpiresAt);
+    assert.equal(elderly.effectiveExpiresAt, "2026-08-04T00:00:00.000Z");
 });

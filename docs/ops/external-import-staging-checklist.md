@@ -36,12 +36,23 @@
 
 - [ ] Admin Console → Platform settings의 "External conversation import"
       토글로 flag를 켠다. audit 로그에 app_settings 갱신이 남는다.
-- [ ] Data 탭에 진입점과 사용량 요약이 나타나고 `/settings/imports`로
-      이동한다.
+- [ ] Data 탭에 진입점과 사용량 요약이 나타나고 `/settings/imports`
+      (관리 화면)로 이동한다. "새로 가져오기"가 `/settings/imports/new`
+      Wizard를 연다.
+- [ ] Wizard 1단계에서 ChatGPT·Claude 내보내기 안내 카드와 "파일이 아직
+      없어요 / 이미 있어요" 두 경로가 보이고, 개인정보 전체 설명이 접근 가능한
+      disclosure 뒤에 있다.
 - [ ] ChatGPT export **ZIP**을 선택하면 브라우저에서 파싱되고(개발자 도구
-      Network에 원본 archive 업로드가 **없어야 한다** — §5.1), preview에
-      대화 수·메시지 수·예상 저장량·경고(건너뛴 항목·분기)가 표시된다.
-- [ ] 일부만 선택해 업로드→확정하면 완료 요약과 함께 목록·용량이 갱신된다.
+      Network에 원본 archive 업로드가 **없어야 한다** — §5.1), 대화 선택
+      단계에 대화 수·메시지 수·예상 저장량·남은 공간·경고(건너뛴 항목·분기)가
+      표시된다.
+- [ ] 안내에서 ChatGPT를 고르고 Claude export를 올려도 실패하지 않고
+      "Claude 기준으로 진행합니다" 비차단 안내만 표시된다.
+- [ ] 일부만 선택해 "선택 내용 확인" → "대화 N개 가져오기"로 확정하면 완료
+      요약과 함께 목록·용량이 갱신된다.
+- [ ] 검색·날짜 필터를 걸어도 화면 밖 선택이 유지되고 "선택 N개 중 M개는
+      현재 필터에 표시되지 않음" 안내가 보인다. 필터를 지우면 이전 선택이
+      그대로 복원된다.
 - [ ] `conversations.json` 단독 파일과 Claude export로도 같은 흐름이 된다.
 - [ ] viewer에서 가져온 대화가 원문 그대로(plain text) 보이고, 원본 모델
       라벨이 provenance로 표시된다.
@@ -62,6 +73,39 @@
       차단하고, 서버 finalize 강행 시 409 `EXTERNAL_IMPORT_QUOTA_EXCEEDED`
       all-or-nothing 거부가 확인된다. admin 지표의 `quota_rejected`
       카운터가 증가한다.
+
+## C2. Seal · 재개 · 만료 (§5.5)
+
+- [ ] 확인 화면에 도달하면 `ExternalImport.status`가 `preview_ready`이고,
+      같은 선언으로 seal을 다시 호출하면 200 idempotent replay가 온다.
+- [ ] 선언을 바꿔(예: duplicate count) seal을 호출하면 409
+      `EXTERNAL_IMPORT_SELECTION_CHANGED`이고 상태는 그대로다.
+- [ ] `preview_ready` import에 batch를 더 보내면 409로 거부된다.
+- [ ] 확인 화면에서 일부 대화를 해제하고 확정하면 선택한 것만 저장되고
+      나머지 staged row는 삭제된다(부분집합 finalize).
+- [ ] Wizard 중간에 브라우저 뒤로가기를 누르면 관리 화면으로 나가고,
+      서버 import가 아직 없으면 "Tomverse에 저장된 데이터 없음"이 보인다.
+      `beforeunload` 경고가 뜨지 않는다.
+- [ ] 관리 화면의 진행 중 카드: `preview_ready`에만 "이어서 완료하기"가 있고,
+      seal되지 않은 `staging`에는 다시 시작·삭제만 있다.
+- [ ] TTL이 지난 작업은 조용히 사라지지 않고 "만료되어 다시 시작해야 함"으로
+      표시된다. 15분 maintenance sweep이 `staging`과 `preview_ready`를 모두
+      정리한다.
+- [ ] 배포 직후, seal 이전 버전 화면을 열어 둔 탭에서 `staging` finalize가
+      여전히 성공한다(72시간 호환 기간).
+
+## C3. 용량 부족 복구 (§5.3)
+
+- [ ] 대화 선택 단계에서 선택량과 남은 공간이 나란히 보이고, 초과하면
+      진행 버튼이 잠긴다.
+- [ ] 업로드 중 서버가 quota로 거부하면 **같은 내용 다시 시도 버튼이 없고**
+      선택을 줄이라는 안내만 나온다. 승인된 batch가 하나라도 있었다면 기존
+      staging이 삭제되고 새 import로 다시 시작한다는 안내가 함께 보이며,
+      로컬 선택과 truncation 동의는 유지된다.
+- [ ] 네트워크를 잠깐 끊어 전송을 실패시키면 같은 sequence 재시도 버튼이
+      나오고, 재시도 시 이미 도착한 batch가 중복 생성되지 않는다.
+- [ ] finalize에서 quota로 거부되면 아무것도 저장되지 않고 확인 화면으로
+      돌아와, 선택을 줄여 **재업로드 없이** 다시 확정할 수 있다.
 
 ## D. 보안 spot check
 
@@ -87,7 +131,11 @@
 
 - [ ] `GET /api/admin/external-imports`가 provider·parserVersion 분해,
       bucket, 중복·truncation 비율, 카운터를 반환하고 값이 위 검증 활동과
-      부합한다.
+      부합한다. `parserVersion`이 `v2`로 기록된다.
+- [ ] `external_import_step_entered` / `_abandoned`가 기록되고 `import_step`
+      외의 속성이 없다. **단계별 `entered` 합계와 `abandoned` 합계가 맞지 않는
+      것은 정상이다**(브라우저를 그냥 닫는 이탈은 측정되지 않음, §22). 실질
+      이탈은 연속 단계의 `entered` 차이로 읽는다.
 - [ ] 15분 maintenance 결과에 `externalImportStaging` sweep 수치가 보인다
       (중도 이탈 import를 만들어 두고 다음날 만료 처리를 확인하는 것은
       선택 항목).
