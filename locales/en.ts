@@ -1043,7 +1043,6 @@ export const en = {
         parseFailed: "The file could not be read as a supported export.",
         previewTitle: "Choose conversations to import",
         previewProvider: "Detected export: {provider}",
-        previewSummary: "{selected} of {total} conversations selected · about {size}",
         warningsTitle: "Not included",
         warningSkippedMessages: "{count} system or tool messages were skipped",
         warningSkippedParts: "{count} non-text parts (images, audio, files) were skipped",
@@ -1054,23 +1053,17 @@ export const en = {
         truncationTitle: "Some long messages will be shortened",
         truncationExplain:
             "{conversations} conversations contain messages longer than the storage limit of {limit} characters. If you approve, the beginning and end of each long message are kept and the middle is replaced with a marker.",
-        truncationApprove: "Import these conversations with shortened messages",
         truncatedBadge: "Will be shortened",
         quotaExceededWarning:
             "The selection is larger than your remaining import storage. Deselect some conversations to continue.",
         messagesCount: "{count} messages",
-        startImport: "Upload selection",
-        uploading: "Uploading batch {sent} of {total}…",
         uploadFailed:
             "The upload failed. You can retry — batches that already arrived are not sent twice.",
         retryUpload: "Retry upload",
-        stagedTitle: "Review and confirm",
         stagedSummary:
             "{staged} conversations ready to import · {duplicates} duplicates skipped",
         stagedTruncated: "{count} messages will be stored shortened",
         allDuplicates: "Everything in this selection is already in your account.",
-        finalize: "Confirm import",
-        finalizing: "Confirming…",
         finalizeFailedQuota:
             "Your account does not have enough import storage left for this selection.",
         stagingExpired: "This import session expired. Start again from the export file.",
@@ -1105,6 +1098,96 @@ export const en = {
             "This message was shortened to fit the storage limit. The full text remains only at the original service.",
         viewerMessagesShown: "{shown} of {total} messages shown",
         deleteSnapshot: "Delete this version",
+        // Export guidance step (wizard step 1)
+        guideTitle: "First, get your export file ready",
+        guideDescription:
+            "Pick the service you are importing from and we will show you how to get its export file. This choice is guidance only — the actual format is detected from the file itself.",
+        guideEntryNeedsExport: "I don't have an export file yet",
+        guideEntryHasFile: "I already have the file",
+        guideChatgptTitle: "How to get a ChatGPT export",
+        guideChatgptStep1: "In ChatGPT, open Settings → Data controls.",
+        guideChatgptStep2: "Request a data export.",
+        guideChatgptStep3:
+            "Download the ZIP from the link you receive by email. There is no need to unzip it.",
+        guideClaudeTitle: "How to get a Claude export",
+        guideClaudeStep1: "In Claude, open Settings → Privacy.",
+        guideClaudeStep2: "Request a data export.",
+        guideClaudeStep3:
+            "Download the file from the link you receive by email. Both ZIP and JSON work as-is.",
+        guideFormats: "Both ZIP and JSON files are supported.",
+        guideStaysLocal:
+            "The export file never leaves your device — it is opened inside your browser.",
+        guideMediaExcluded: "Images, audio and attachments are not imported.",
+        guidePrivacyDisclosure: "See how this data is handled",
+        guideContinue: "Choose the export file",
+        providerMismatchNotice:
+            "This is a {detected} export, so we will continue with {detected}.",
+        // Desktop-recommended state
+        desktopRecommendedTitle: "This device cannot open the file safely",
+        desktopRecommendedNoUpload: "The export file was not uploaded.",
+        desktopRecommendedNoData: "Nothing has been stored in Tomverse yet.",
+        desktopRecommendedRetry: "Please try again on a desktop computer.",
+        // Step indicator
+        stepIndicatorLabel: "Import progress",
+        stepPrepareExport: "Prepare export",
+        stepInspectFile: "Check the file",
+        stepSelectConversations: "Choose conversations",
+        stepConfirmImport: "Confirm import",
+        stepDone: "Done",
+        stepPosition: "Step {current} of {total}, {name}",
+        back: "Back",
+        // Conversation selection step
+        searchPlaceholder: "Search conversation titles",
+        filterFrom: "From date",
+        filterTo: "To date",
+        filterClear: "Clear filters",
+        selectAllNormal: "Select all normal conversations",
+        clearAllNormal: "Clear selection",
+        selectionHiddenNotice:
+            "{hidden} of the {selected} selected are not shown by the current filter.",
+        selectionSummary: "{selected} conversations selected · about {size}",
+        remainingSpace: "About {remaining} of space left",
+        rowTruncationConsent: "Include, stored shortened",
+        rowTruncationImpact:
+            "{count} messages will be stored with only their beginning and end.",
+        rowBlockedReason:
+            "{count} messages are above the import limit, so the whole conversation is excluded — not just those messages.",
+        rowPosition: "Conversation {index} of {total}",
+        continueToReview: "Review the selection",
+        preparingReviewTitle: "Preparing your import",
+        preparingReviewProgress: "{sent} of {total} prepared",
+        preparingReviewNotSaved:
+            "Nothing is stored in your account yet — that happens after the final confirmation.",
+        // Import confirmation step
+        reviewTitle: "Check what will be imported",
+        reviewFinalizeCta: "Import {count} conversations",
+        reviewBackToSelection: "Back to choosing conversations",
+        reviewExpiresAt: "This confirmation stays valid until {time}.",
+        finalizingTitle: "Saving to your account",
+        finalizingNotice: "Please keep this screen open until saving finishes.",
+        // Storage-shortfall recovery
+        quotaRevisionTitle: "Not enough import storage",
+        quotaRevisionExplain:
+            "Retrying the same selection will fail the same way unless your stored total changes. Please choose fewer conversations.",
+        quotaRevisionRestartNotice:
+            "Part of the selection was already sent, so we will start a fresh import. Your choices and approvals are kept.",
+        quotaRevisionAdjust: "Adjust the selection",
+        uploadRetryTransient:
+            "Preparation stopped because of a connection problem. It resumes where it stopped, and anything already received is not sent again.",
+        expiredTitle: "This import expired",
+        diagnosticsToggle: "Technical details",
+        // Management screen
+        newImportCta: "Start a new import",
+        inProgressTitle: "Imports in progress",
+        inProgressResume: "Finish this import",
+        inProgressRestart: "Start over",
+        inProgressNotResumable:
+            "This import cannot be continued. Start over or delete it.",
+        noServerDataYet: "Nothing has been stored in Tomverse.",
+        statusPreviewReady: "Waiting for confirmation",
+        statusExpired: "Expired",
+        expiredCardNotice: "This expired and has to be started again.",
+        abandonImport: "Leave this import",
     },
     // Account long-term memory review (Release B, slice B3). The list,
     // delete and settings stay reachable regardless of the rollout flag;

@@ -819,8 +819,6 @@ export const de = {
             "Die Datei konnte nicht als unterstützter Export gelesen werden.",
         previewTitle: "Unterhaltungen zum Import auswählen",
         previewProvider: "Erkannter Export: {provider}",
-        previewSummary:
-            "{selected} von {total} Unterhaltungen ausgewählt · etwa {size}",
         warningsTitle: "Nicht enthalten",
         warningSkippedMessages:
             "{count} System- oder Tool-Nachrichten übersprungen",
@@ -834,25 +832,18 @@ export const de = {
         truncationTitle: "Einige lange Nachrichten werden gekürzt",
         truncationExplain:
             "{conversations} Unterhaltungen enthalten Nachrichten über der Speichergrenze von {limit} Zeichen. Wenn Sie zustimmen, bleiben Anfang und Ende jeder langen Nachricht erhalten, die Mitte wird durch eine Markierung ersetzt.",
-        truncationApprove:
-            "Diese Unterhaltungen mit gekürzten Nachrichten importieren",
         truncatedBadge: "Wird gekürzt",
         quotaExceededWarning:
             "Die Auswahl ist größer als Ihr verbleibender Import-Speicher. Wählen Sie einige Unterhaltungen ab, um fortzufahren.",
         messagesCount: "{count} Nachrichten",
-        startImport: "Auswahl hochladen",
-        uploading: "Stapel {sent} von {total} wird hochgeladen…",
         uploadFailed:
             "Das Hochladen ist fehlgeschlagen. Sie können es erneut versuchen — bereits angekommene Stapel werden nicht doppelt gesendet.",
         retryUpload: "Hochladen erneut versuchen",
-        stagedTitle: "Prüfen und bestätigen",
         stagedSummary:
             "{staged} Unterhaltungen bereit zum Import · {duplicates} Duplikate übersprungen",
         stagedTruncated: "{count} Nachrichten werden gekürzt gespeichert",
         allDuplicates:
             "Alles in dieser Auswahl ist bereits in Ihrem Konto vorhanden.",
-        finalize: "Import bestätigen",
-        finalizing: "Wird bestätigt…",
         finalizeFailedQuota:
             "Ihr Konto hat nicht mehr genug Import-Speicher für diese Auswahl.",
         stagingExpired:
@@ -888,6 +879,104 @@ export const de = {
             "Diese Nachricht wurde gekürzt gespeichert, um die Speichergrenze einzuhalten. Der vollständige Text existiert nur noch beim ursprünglichen Dienst.",
         viewerMessagesShown: "{shown} von {total} Nachrichten angezeigt",
         deleteSnapshot: "Diese Version löschen",
+        // Export-Vorbereitung (Schritt 1 des Assistenten)
+        guideTitle: "Halten Sie zuerst Ihre Exportdatei bereit",
+        guideDescription:
+            "Wählen Sie den Dienst, aus dem Sie importieren — wir zeigen Ihnen, wie Sie dessen Exportdatei erhalten. Diese Auswahl dient nur der Anleitung; das tatsächliche Format wird aus der Datei selbst erkannt.",
+        guideEntryNeedsExport: "Ich habe noch keine Exportdatei",
+        guideEntryHasFile: "Ich habe die Datei bereits",
+        guideChatgptTitle: "So erhalten Sie einen ChatGPT-Export",
+        guideChatgptStep1:
+            "Öffnen Sie in ChatGPT Einstellungen → Datenkontrollen.",
+        guideChatgptStep2: "Fordern Sie einen Datenexport an.",
+        guideChatgptStep3:
+            "Laden Sie die ZIP-Datei über den Link aus der E-Mail herunter. Entpacken ist nicht nötig.",
+        guideClaudeTitle: "So erhalten Sie einen Claude-Export",
+        guideClaudeStep1: "Öffnen Sie in Claude Einstellungen → Datenschutz.",
+        guideClaudeStep2: "Fordern Sie einen Datenexport an.",
+        guideClaudeStep3:
+            "Laden Sie die Datei über den Link aus der E-Mail herunter. ZIP und JSON funktionieren beide unverändert.",
+        guideFormats: "ZIP- und JSON-Dateien werden beide unterstützt.",
+        guideStaysLocal:
+            "Die Exportdatei verlässt Ihr Gerät nicht — sie wird nur im Browser geöffnet.",
+        guideMediaExcluded:
+            "Bilder, Audio und Anhänge werden nicht importiert.",
+        guidePrivacyDisclosure: "Umgang mit diesen Daten ansehen",
+        guideContinue: "Exportdatei auswählen",
+        providerMismatchNotice:
+            "Dies ist ein {detected}-Export, daher fahren wir mit {detected} fort.",
+        // Zustand „Desktop empfohlen“
+        desktopRecommendedTitle:
+            "Dieses Gerät kann die Datei nicht sicher öffnen",
+        desktopRecommendedNoUpload:
+            "Die Exportdatei wurde nicht hochgeladen.",
+        desktopRecommendedNoData:
+            "In Tomverse wurde noch nichts gespeichert.",
+        desktopRecommendedRetry:
+            "Bitte versuchen Sie es an einem Desktop-Computer erneut.",
+        // Schrittanzeige
+        stepIndicatorLabel: "Import-Fortschritt",
+        stepPrepareExport: "Export vorbereiten",
+        stepInspectFile: "Datei prüfen",
+        stepSelectConversations: "Unterhaltungen wählen",
+        stepConfirmImport: "Import bestätigen",
+        stepDone: "Fertig",
+        stepPosition: "Schritt {current} von {total}, {name}",
+        back: "Zurück",
+        // Auswahl der Unterhaltungen
+        searchPlaceholder: "Titel von Unterhaltungen suchen",
+        filterFrom: "Startdatum",
+        filterTo: "Enddatum",
+        filterClear: "Filter zurücksetzen",
+        selectAllNormal: "Alle normalen Unterhaltungen auswählen",
+        clearAllNormal: "Auswahl aufheben",
+        selectionHiddenNotice:
+            "{hidden} der {selected} ausgewählten werden vom aktuellen Filter nicht angezeigt.",
+        selectionSummary:
+            "{selected} Unterhaltungen ausgewählt · etwa {size}",
+        remainingSpace: "Noch etwa {remaining} frei",
+        rowTruncationConsent: "Gekürzt speichern und einschließen",
+        rowTruncationImpact:
+            "{count} Nachrichten werden nur mit Anfang und Ende gespeichert.",
+        rowBlockedReason:
+            "{count} Nachrichten überschreiten die Importgrenze, daher wird die gesamte Unterhaltung ausgeschlossen — nicht nur diese Nachrichten.",
+        rowPosition: "Unterhaltung {index} von {total}",
+        continueToReview: "Auswahl prüfen",
+        preparingReviewTitle: "Import wird vorbereitet",
+        preparingReviewProgress: "{sent} von {total} vorbereitet",
+        preparingReviewNotSaved:
+            "In Ihrem Konto ist noch nichts gespeichert — das geschieht erst nach der letzten Bestätigung.",
+        // Bestätigungsschritt
+        reviewTitle: "Prüfen Sie, was importiert wird",
+        reviewFinalizeCta: "{count} Unterhaltungen importieren",
+        reviewBackToSelection: "Zurück zur Auswahl der Unterhaltungen",
+        reviewExpiresAt: "Diese Bestätigung gilt bis {time}.",
+        finalizingTitle: "Wird in Ihrem Konto gespeichert",
+        finalizingNotice:
+            "Bitte lassen Sie dieses Fenster offen, bis das Speichern beendet ist.",
+        // Wiederherstellung bei zu wenig Platz
+        quotaRevisionTitle: "Nicht genug Importspeicher",
+        quotaRevisionExplain:
+            "Ein erneuter Versuch mit derselben Auswahl schlägt genauso fehl, solange Ihr gespeicherter Gesamtumfang gleich bleibt. Bitte wählen Sie weniger Unterhaltungen.",
+        quotaRevisionRestartNotice:
+            "Ein Teil der Auswahl wurde bereits gesendet, daher beginnt ein neuer Import. Ihre Auswahl und Zustimmungen bleiben erhalten.",
+        quotaRevisionAdjust: "Auswahl anpassen",
+        uploadRetryTransient:
+            "Die Vorbereitung wurde wegen eines Verbindungsproblems unterbrochen. Sie wird an der Abbruchstelle fortgesetzt; bereits Empfangenes wird nicht erneut gesendet.",
+        expiredTitle: "Dieser Import ist abgelaufen",
+        diagnosticsToggle: "Technische Details",
+        // Verwaltungsansicht
+        newImportCta: "Neuen Import starten",
+        inProgressTitle: "Laufende Importe",
+        inProgressResume: "Diesen Import abschließen",
+        inProgressRestart: "Neu beginnen",
+        inProgressNotResumable:
+            "Dieser Import kann nicht fortgesetzt werden. Beginnen Sie neu oder löschen Sie ihn.",
+        noServerDataYet: "In Tomverse wurde nichts gespeichert.",
+        statusPreviewReady: "Wartet auf Bestätigung",
+        statusExpired: "Abgelaufen",
+        expiredCardNotice: "Abgelaufen — er muss neu gestartet werden.",
+        abandonImport: "Diesen Import verlassen",
     },
     memoryReview: {
         dataTabTitle: "Konto-Langzeitgedächtnis",

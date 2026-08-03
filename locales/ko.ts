@@ -1040,7 +1040,6 @@ export const ko = {
         parseFailed: "지원되는 내보내기 형식으로 읽을 수 없는 파일입니다.",
         previewTitle: "가져올 대화 선택",
         previewProvider: "감지된 내보내기: {provider}",
-        previewSummary: "대화 {total}개 중 {selected}개 선택 · 약 {size}",
         warningsTitle: "포함되지 않는 항목",
         warningSkippedMessages: "시스템·도구 메시지 {count}개 제외",
         warningSkippedParts: "텍스트가 아닌 항목(이미지·오디오·파일) {count}개 제외",
@@ -1051,22 +1050,16 @@ export const ko = {
         truncationTitle: "일부 긴 메시지가 줄여서 저장됩니다",
         truncationExplain:
             "{conversations}개 대화에 저장 한도({limit}자)를 넘는 메시지가 있습니다. 동의하면 긴 메시지의 앞부분과 뒷부분만 남기고 중간은 표시로 대체됩니다.",
-        truncationApprove: "줄인 메시지로 이 대화들을 가져오는 데 동의합니다",
         truncatedBadge: "줄여서 저장됨",
         quotaExceededWarning:
             "선택한 대화가 남은 가져오기 저장 공간보다 큽니다. 일부 대화의 선택을 해제하세요.",
         messagesCount: "메시지 {count}개",
-        startImport: "선택한 대화 업로드",
-        uploading: "배치 {total}개 중 {sent}번째 업로드 중…",
         uploadFailed:
             "업로드에 실패했습니다. 다시 시도할 수 있으며, 이미 도착한 배치는 중복 전송되지 않습니다.",
         retryUpload: "업로드 다시 시도",
-        stagedTitle: "확인 후 확정",
         stagedSummary: "가져올 대화 {staged}개 준비됨 · 중복 {duplicates}개 제외",
         stagedTruncated: "메시지 {count}개가 줄여서 저장됩니다",
         allDuplicates: "선택한 대화가 모두 이미 계정에 있습니다.",
-        finalize: "가져오기 확정",
-        finalizing: "확정하는 중…",
         finalizeFailedQuota:
             "이 선택을 저장하기에는 계정의 가져오기 저장 공간이 부족합니다.",
         stagingExpired: "가져오기 세션이 만료되었습니다. 내보내기 파일부터 다시 시작하세요.",
@@ -1100,6 +1093,96 @@ export const ko = {
             "이 메시지는 저장 한도에 맞춰 줄여서 저장되었습니다. 전체 원문은 원래 서비스에만 남아 있습니다.",
         viewerMessagesShown: "메시지 {total}개 중 {shown}개 표시",
         deleteSnapshot: "이 버전 삭제",
+        // 내보내기 안내 단계 (Wizard 1단계)
+        guideTitle: "먼저 내보내기 파일을 준비하세요",
+        guideDescription:
+            "가져오려는 서비스를 고르면 내보내기 파일을 받는 방법을 안내합니다. 이 선택은 안내용이며, 실제 형식은 파일을 연 뒤에 자동으로 확인합니다.",
+        guideEntryNeedsExport: "내보내기 파일이 아직 없어요",
+        guideEntryHasFile: "이미 파일이 있어요",
+        guideChatgptTitle: "ChatGPT 내보내기 받는 방법",
+        guideChatgptStep1: "ChatGPT에서 설정 → 데이터 제어를 엽니다.",
+        guideChatgptStep2: "데이터 내보내기를 요청합니다.",
+        guideChatgptStep3:
+            "메일로 받은 링크에서 ZIP 파일을 내려받습니다. 압축을 풀지 않아도 됩니다.",
+        guideClaudeTitle: "Claude 내보내기 받는 방법",
+        guideClaudeStep1: "Claude에서 설정 → 개인정보를 엽니다.",
+        guideClaudeStep2: "데이터 내보내기를 요청합니다.",
+        guideClaudeStep3:
+            "메일로 받은 링크에서 파일을 내려받습니다. ZIP과 JSON 모두 그대로 쓸 수 있습니다.",
+        guideFormats: "ZIP 파일과 JSON 파일을 모두 지원합니다.",
+        guideStaysLocal:
+            "원본 파일은 기기를 벗어나지 않습니다. 브라우저 안에서만 열립니다.",
+        guideMediaExcluded: "이미지·음성·첨부파일은 가져오지 않습니다.",
+        guidePrivacyDisclosure: "개인정보 처리 자세히 보기",
+        guideContinue: "내보내기 파일 선택하기",
+        providerMismatchNotice:
+            "{detected} 내보내기 파일로 확인되어 {detected} 기준으로 진행합니다.",
+        // 데스크톱 권장 상태
+        desktopRecommendedTitle: "이 기기에서는 파일을 열기 어렵습니다",
+        desktopRecommendedNoUpload: "원본 파일은 업로드되지 않았습니다.",
+        desktopRecommendedNoData: "Tomverse에 아직 저장된 데이터가 없습니다.",
+        desktopRecommendedRetry: "데스크톱 컴퓨터에서 다시 시도해 주세요.",
+        // 단계 표시기
+        stepIndicatorLabel: "가져오기 진행",
+        stepPrepareExport: "내보내기 준비",
+        stepInspectFile: "파일 확인",
+        stepSelectConversations: "대화 선택",
+        stepConfirmImport: "가져오기 확인",
+        stepDone: "완료",
+        stepPosition: "{total}단계 중 {current}단계, {name}",
+        back: "이전",
+        // 대화 선택 단계
+        searchPlaceholder: "대화 제목 검색",
+        filterFrom: "시작 날짜",
+        filterTo: "종료 날짜",
+        filterClear: "필터 지우기",
+        selectAllNormal: "정상 대화 전체 선택",
+        clearAllNormal: "선택 해제",
+        selectionHiddenNotice:
+            "선택 {selected}개 중 {hidden}개는 현재 필터에 표시되지 않습니다.",
+        selectionSummary: "대화 {selected}개 선택 · 약 {size}",
+        remainingSpace: "남은 공간 약 {remaining}",
+        rowTruncationConsent: "줄여서 저장해 포함",
+        rowTruncationImpact:
+            "메시지 {count}개가 앞뒤만 남기고 줄여서 저장됩니다.",
+        rowBlockedReason:
+            "메시지 {count}개가 가져오기 한도를 넘어, 해당 메시지만 빠지는 것이 아니라 이 대화 전체가 제외됩니다.",
+        rowPosition: "{total}개 중 {index}번째 대화",
+        continueToReview: "선택 내용 확인",
+        preparingReviewTitle: "가져오기를 준비하는 중",
+        preparingReviewProgress: "{total}개 중 {sent}개 준비 완료",
+        preparingReviewNotSaved:
+            "아직 계정에 저장되지 않았습니다. 마지막 확인 후에 저장됩니다.",
+        // 가져오기 확인 단계
+        reviewTitle: "가져올 내용을 확인하세요",
+        reviewFinalizeCta: "대화 {count}개 가져오기",
+        reviewBackToSelection: "대화 선택으로 돌아가기",
+        reviewExpiresAt: "이 확인 화면은 {time}까지 유효합니다.",
+        finalizingTitle: "계정에 저장하는 중",
+        finalizingNotice: "저장이 끝날 때까지 이 화면을 닫지 마세요.",
+        // 저장 공간 부족 복구
+        quotaRevisionTitle: "가져오기 저장 공간이 부족합니다",
+        quotaRevisionExplain:
+            "계정에 쌓인 저장량이 바뀌지 않는 한 그대로 다시 시도해도 같은 결과가 나옵니다. 가져올 대화를 줄여 주세요.",
+        quotaRevisionRestartNotice:
+            "이미 전송된 항목이 있어 새 가져오기로 다시 시작합니다. 선택한 내용과 동의 상태는 그대로 유지됩니다.",
+        quotaRevisionAdjust: "선택 조정하기",
+        uploadRetryTransient:
+            "연결 문제로 준비가 중단되었습니다. 중단된 지점부터 다시 시도하며, 이미 도착한 항목은 다시 보내지 않습니다.",
+        expiredTitle: "이 작업은 만료되었습니다",
+        diagnosticsToggle: "자세한 오류 정보",
+        // 관리 화면
+        newImportCta: "새로 가져오기",
+        inProgressTitle: "진행 중인 작업",
+        inProgressResume: "이어서 완료하기",
+        inProgressRestart: "다시 시작",
+        inProgressNotResumable:
+            "이 작업은 이어서 진행할 수 없습니다. 다시 시작하거나 삭제하세요.",
+        noServerDataYet: "Tomverse에 저장된 데이터가 없습니다.",
+        statusPreviewReady: "확인 대기 중",
+        statusExpired: "만료됨",
+        expiredCardNotice: "만료되어 다시 시작해야 합니다.",
+        abandonImport: "가져오기 그만두기",
     },
     // 계정 장기 기억 검토 (Release B, slice B3). 목록·삭제·설정은 flag와
     // 무관하게 항상 접근 가능하고, 검토·작성 동작만 rollout flag를 따릅니다.
