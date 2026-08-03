@@ -3,6 +3,7 @@ import { after } from "next/server";
 import { reconcileExpiredChatCreditReservations } from "@/lib/chatSecurity";
 import { reconcileExpiredChatRequestLeases } from "@/lib/chatRequestLease";
 import { reconcileExpiredExternalImportStaging } from "@/lib/externalImportService";
+import { reconcileExpiredMemoryExtractionRuns } from "@/lib/memoryExtractionService";
 import { reportOperationalIncident } from "@/lib/operationalMonitoring";
 import {
   completeScheduledJob,
@@ -72,6 +73,13 @@ export async function POST(request: Request) {
       await reconcileExpiredExternalImportStaging().catch(() => ({
         expiredImports: 0,
       }));
+    // Memory extraction leases (policy §3): a running run whose heartbeat
+    // stopped goes back to pending, progress intact, so the owner can resume
+    // instead of being blocked by their own orphan. Never throws.
+    const memoryExtractionLeases =
+      await reconcileExpiredMemoryExtractionRuns().catch(() => ({
+        reclaimedRuns: 0,
+      }));
     await completeScheduledJob({
       runId: run?.id,
       processedCount: result.examined,
@@ -83,6 +91,7 @@ export async function POST(request: Request) {
         requestLeases,
         imageAssets,
         externalImportStaging,
+        memoryExtractionLeases,
       },
     });
     return Response.json(
@@ -95,6 +104,7 @@ export async function POST(request: Request) {
         requestLeases,
         imageAssets,
         externalImportStaging,
+        memoryExtractionLeases,
       },
       { headers: { "Cache-Control": "no-store" } }
     );

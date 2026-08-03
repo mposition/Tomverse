@@ -156,8 +156,15 @@ run(
     "tests/integration/subscription-sync-ordering.db.test.ts",
     "tests/integration/plan-change-reservation.db.test.ts",
     "tests/integration/image-generation.db.test.ts",
+    // The import/memory program's suites were written alongside their slices
+    // but never listed here, i.e. never actually run by CI — a guard nobody
+    // runs is not a guard. Keep this list in step with tests/integration/.
+    "tests/integration/external-import-schema.db.test.ts",
+    "tests/integration/external-import-lifecycle.db.test.ts",
+    "tests/integration/memory-schema.db.test.ts",
+    "tests/integration/memory-extraction.db.test.ts",
   ],
-  "Running financial, credit, chat-concurrency, chat-rate-limit, fallback-pricing, model-registry, admin-security, admin-users, login-methods, account-deletion, conversation-title, conversation-lock-migration, provider-recovery, provider-failure-scope, subscription-sync-ordering, plan-change-reservation, and image-generation transaction scenarios"
+  "Running financial, credit, chat-concurrency, chat-rate-limit, fallback-pricing, model-registry, admin-security, admin-users, login-methods, account-deletion, conversation-title, conversation-lock-migration, provider-recovery, provider-failure-scope, subscription-sync-ordering, plan-change-reservation, image-generation, external-import, and memory transaction scenarios"
 );
 // Runs apart from the batch above: it drives the real route handlers, which
 // needs mock.module (--experimental-test-module-mocks) to replace the session
