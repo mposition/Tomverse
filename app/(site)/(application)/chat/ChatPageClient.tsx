@@ -423,7 +423,12 @@ export function ChatPageClient({
   const isSending = false;
   const [focusToken, setFocusToken] = useState(0);
 
-    const [userDefaultEngine, setUserDefaultEngine] = useState<string>(APP_DEFAULTS.defaultModelId);
+    // The account's saved new-conversation combination (lead first). This is
+    // what a new chat starts with; the representative model is always
+    // userDefaultModelIds[0].
+    const [userDefaultModelIds, setUserDefaultModelIds] = useState<string[]>([
+        APP_DEFAULTS.defaultModelId,
+    ]);
   const [isUserSettingsLoaded, setIsUserSettingsLoaded] = useState(false);
   // Both shells gate their model UI on this: a signed-in tab only knows its
   // real selection once settings, the conversation list and the initial
@@ -1530,13 +1535,13 @@ export function ChatPageClient({
         webSearchMode?: unknown;
         messages?: Array<{ role?: string; modelId?: string | null }>;
     }, targetChatId?: string) => {
-        const savedModels = normalizeStringArray(data.selectedModels, [userDefaultEngine]);
+        const savedModels = normalizeStringArray(data.selectedModels, userDefaultModelIds);
         const nextModels = clampSelectedModels(uniqueStrings(savedModels));
         const nextDisabled = normalizeStringArray(data.disabledPanels, []).filter(
             (modelId) => nextModels.includes(modelId)
         );
 
-        setSelectedModels(nextModels.length > 0 ? nextModels : [userDefaultEngine]);
+        setSelectedModels(nextModels.length > 0 ? nextModels : userDefaultModelIds);
         setDisabledPanels(nextDisabled);
         setWebSearchMode(
             isWebSearchMode(data.webSearchMode)
@@ -1546,11 +1551,11 @@ export function ChatPageClient({
         if (targetChatId) {
           confirmedModelSettingsRef.current = {
             targetChatId,
-            models: nextModels.length > 0 ? nextModels : [userDefaultEngine],
+            models: nextModels.length > 0 ? nextModels : userDefaultModelIds,
             disabled: nextDisabled,
           };
         }
-    }, [clampSelectedModels, userDefaultEngine]);
+    }, [clampSelectedModels, userDefaultModelIds]);
 
   useEffect(() => {
     if (!isGuestMode) {
@@ -1575,7 +1580,7 @@ export function ChatPageClient({
       queueMicrotask(() => {
       if (cancelled) return;
       guestBootstrapAppliedRef.current = true;
-      setUserDefaultEngine(guestDefaultModelId);
+      setUserDefaultModelIds([guestDefaultModelId]);
       // Decided once and written once. selectedModels already holds this same
       // value from the first render, so this cannot change what is on screen;
       // it exists so the restore path below can refine it in the same commit
@@ -1747,9 +1752,16 @@ export function ChatPageClient({
             const detail = (event as CustomEvent<UserSettingsUpdatedDetail>).detail;
             if (!detail || !isEnabledModelId(detail.defaultModel)) return;
 
-            setUserDefaultEngine(detail.defaultModel);
+            // A legacy dispatch without a combination means [defaultModel].
+            const combination = (
+                detail.newConversationModelIds ?? [detail.defaultModel]
+            ).filter(isEnabledModelId);
+            const nextDefaultModels =
+                combination.length > 0 ? combination : [detail.defaultModel];
+
+            setUserDefaultModelIds(nextDefaultModels);
             if (!currentChatId) {
-                setSelectedModels([detail.defaultModel]);
+                setSelectedModels(nextDefaultModels);
                 setDisabledPanels([]);
             }
         };
@@ -1792,10 +1804,12 @@ export function ChatPageClient({
     // stayed stuck until the tab was reloaded.
     const isEnabledModelIdRef = useRef(isEnabledModelId);
     const newAccountDefaultSelectedModelsRef = useRef(newAccountDefaultSelectedModels);
+    const tRef = useRef(t);
     useEffect(() => {
         isEnabledModelIdRef.current = isEnabledModelId;
         newAccountDefaultSelectedModelsRef.current = newAccountDefaultSelectedModels;
-    }, [isEnabledModelId, newAccountDefaultSelectedModels]);
+        tRef.current = t;
+    }, [isEnabledModelId, newAccountDefaultSelectedModels, t]);
 
     useEffect(() => {
         if (sessionUserId) {
@@ -1823,12 +1837,58 @@ export function ChatPageClient({
                 })
                 .then((data) => {
                     if (data && isEnabledModelIdRef.current(data.defaultModel)) {
-                        setUserDefaultEngine(data.defaultModel);
+                        // The saved new-conversation combination (effective,
+                        // resolved server-side); [defaultModel] when none.
+                        const combination = Array.isArray(data.newConversationModelIds)
+                            ? (data.newConversationModelIds as unknown[]).filter(
+                                  (modelId): modelId is string =>
+                                      typeof modelId === "string" &&
+                                      isEnabledModelIdRef.current(modelId)
+                              )
+                            : [];
+                        const nextDefaultModels =
+                            combination.length > 0
+                                ? combination
+                                : [data.defaultModel];
+                        setUserDefaultModelIds(nextDefaultModels);
                         if (!currentChatIdRef.current) {
                             setSelectedModels(
                                 data.isNewAccount
                                     ? newAccountDefaultSelectedModelsRef.current
-                                    : [data.defaultModel]
+                                    : nextDefaultModels
+                            );
+                        }
+                    }
+
+                    // Stored/effective drift: tell the user once per session
+                    // per distinct notice; the read path never rewrites the
+                    // stored combination, so re-saving in Settings is the way
+                    // to confirm the replacement.
+                    if (data?.modelSelectionNotice) {
+                        const signature = JSON.stringify([
+                            data.modelSelectionNotice.reasons ?? null,
+                            data.modelSelectionNotice.storedModelIds ?? null,
+                            data.modelSelectionNotice.effectiveModelIds ?? null,
+                        ]);
+                        const storageKey = "tomverse:model-selection-notice";
+                        let alreadyShown = false;
+                        try {
+                            alreadyShown =
+                                window.sessionStorage.getItem(storageKey) ===
+                                signature;
+                            if (!alreadyShown) {
+                                window.sessionStorage.setItem(
+                                    storageKey,
+                                    signature
+                                );
+                            }
+                        } catch {
+                            // Storage unavailable: fall through and show it.
+                        }
+                        if (!alreadyShown) {
+                            showToastRef.current?.(
+                                tRef.current("chat.modelSelectionNotice"),
+                                "info"
                             );
                         }
                     }
@@ -1878,7 +1938,7 @@ export function ChatPageClient({
                 })
                 .catch((err) => {
                     console.error("Failed to load user settings:", err);
-                    setUserDefaultEngine(APP_DEFAULTS.defaultModelId);
+                    setUserDefaultModelIds([APP_DEFAULTS.defaultModelId]);
                     if (!currentChatIdRef.current) {
                         setSelectedModels([APP_DEFAULTS.defaultModelId]);
                     }
@@ -1933,7 +1993,9 @@ export function ChatPageClient({
     } else {
         currentChatIdRef.current = null;
         setCurrentChatId(null);
-        setSelectedModels([userDefaultEngine]);
+        // A new chat starts from the saved new-conversation combination, not
+        // just the representative model.
+        setSelectedModels(clampSelectedModels(uniqueStrings(userDefaultModelIds)));
         blankedDraftScope = null;
     }
 
@@ -3209,7 +3271,6 @@ export function ChatPageClient({
       latestLocalComparisonPromptRef.current = null;
       currentChatIdRef.current = null;
       setCurrentChatId(null);
-      setUserDefaultEngine(applied[0]);
       setSelectedModels(applied);
       setDisabledPanels([]);
       setPersonalizedPrompt(promptExample || null);

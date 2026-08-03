@@ -101,7 +101,28 @@ export function AuthButton({
 
     const [theme, setTheme] = useState<ThemePreference>(APP_DEFAULTS.defaultTheme);
     const [language, setLanguage] = useState<Language>(APP_DEFAULTS.defaultLanguage);
-    const [defaultModel, setDefaultModel] = useState<string>(APP_DEFAULTS.defaultModelId);
+    // The new-conversation default combination, lead first. The representative
+    // model is always defaultModelIds[0]; the server keeps the two in sync.
+    const [defaultModelIds, setDefaultModelIds] = useState<string[]>([
+        APP_DEFAULTS.defaultModelId,
+    ]);
+    // True while GET reported a stored/effective drift the user has not
+    // confirmed away by re-saving (docs/ui-contracts/account-model-settings.md).
+    const [modelDriftNotice, setModelDriftNotice] = useState(false);
+    const [highCostAcknowledged, setHighCostAcknowledged] = useState(false);
+    // The last server-confirmed combination, mirrored in state so render-time
+    // derivations (the high-cost consent gate) never read a ref during render.
+    const [savedModelIds, setSavedModelIds] = useState<string[]>([
+        APP_DEFAULTS.defaultModelId,
+    ]);
+    // What the server last confirmed -- the dirty-field baseline, so a
+    // theme-only save never re-sends (and never re-persists) model fields.
+    const savedSettingsRef = useRef<{
+        theme: ThemePreference;
+        language: Language;
+        timeZone: string;
+        modelIds: string[];
+    } | null>(null);
     const [timeZone, setTimeZone] = useState("UTC");
     const [timeZoneChangeAllowedAt, setTimeZoneChangeAllowedAt] = useState<string | null>(null);
     const [timeZoneChangeLocked, setTimeZoneChangeLocked] = useState(false);
@@ -432,14 +453,34 @@ export function AuthButton({
                 .then((res) => res.json())
                 .then((data) => {
                     if (!data.error) {
-                        setTheme(
-                            isThemePreference(data.theme)
-                                ? data.theme
-                                : APP_DEFAULTS.defaultTheme
-                        );
-                        setLanguage(data.language || globalLang);
-                        setDefaultModel(data.defaultModel || APP_DEFAULTS.defaultModelId);
-                        setTimeZone(data.timeZone || "UTC");
+                        const nextTheme = isThemePreference(data.theme)
+                            ? data.theme
+                            : APP_DEFAULTS.defaultTheme;
+                        const nextLanguage = data.language || globalLang;
+                        const nextTimeZone = data.timeZone || "UTC";
+                        const combination = Array.isArray(data.newConversationModelIds)
+                            ? (data.newConversationModelIds as unknown[]).filter(
+                                  (modelId): modelId is string =>
+                                      typeof modelId === "string"
+                              )
+                            : [];
+                        const nextModelIds =
+                            combination.length > 0
+                                ? combination
+                                : [data.defaultModel || APP_DEFAULTS.defaultModelId];
+                        setTheme(nextTheme);
+                        setLanguage(nextLanguage);
+                        setDefaultModelIds(nextModelIds);
+                        setModelDriftNotice(Boolean(data.modelSelectionNotice));
+                        setHighCostAcknowledged(false);
+                        setTimeZone(nextTimeZone);
+                        setSavedModelIds(nextModelIds);
+                        savedSettingsRef.current = {
+                            theme: nextTheme,
+                            language: nextLanguage,
+                            timeZone: nextTimeZone,
+                            modelIds: nextModelIds,
+                        };
                         const allowedAt = data.timeZoneChangeAllowedAt || null;
                         setTimeZoneChangeAllowedAt(allowedAt);
                         setTimeZoneChangeLocked(
@@ -502,12 +543,81 @@ export function AuthButton({
         };
     }, [isAccountMenuOpen]);
 
+    // Derived combination facts for the editor and the save gate.
+    const combinationTotalCredits = defaultModelIds.reduce((total, modelId) => {
+        const model = ENABLED_MODELS.find((candidate) => candidate.id === modelId);
+        return model ? total + getModelUsageProfile(model).credits : total;
+    }, 0);
+    // Higher-cost models the user is ADDING (present now, absent from the last
+    // server-confirmed combination) need explicit recurring-cost consent.
+    const newlyAddedHighCostModelIds = defaultModelIds.filter((modelId) => {
+        if (savedModelIds.includes(modelId)) return false;
+        const model = ENABLED_MODELS.find((candidate) => candidate.id === modelId);
+        return model ? getModelUsageProfile(model).category !== "Standard" : false;
+    });
+
+    const replaceCombinationModel = (index: number, nextModelId: string) => {
+        setDefaultModelIds((current) => {
+            if (current.includes(nextModelId) && current[index] !== nextModelId) {
+                return current;
+            }
+            const next = [...current];
+            next[index] = nextModelId;
+            return next;
+        });
+    };
+    const makeCombinationLead = (index: number) => {
+        setDefaultModelIds((current) =>
+            index <= 0 || index >= current.length
+                ? current
+                : [current[index], ...current.filter((_, i) => i !== index)]
+        );
+    };
+    const removeCombinationModel = (index: number) => {
+        setDefaultModelIds((current) =>
+            current.length <= 1 ? current : current.filter((_, i) => i !== index)
+        );
+    };
+    const addCombinationModel = () => {
+        setDefaultModelIds((current) => {
+            if (current.length >= 3) return current;
+            const candidate = ENABLED_MODELS.find(
+                (model) => !current.includes(model.id)
+            );
+            return candidate ? [...current, candidate.id] : current;
+        });
+    };
+
     const handleSaveSettings = async () => {
+        if (newlyAddedHighCostModelIds.length > 0 && !highCostAcknowledged) {
+            dispatchAppToast(
+                t("auth.newConversationModelsHighCostRequired"),
+                "error"
+            );
+            return;
+        }
+        // Dirty fields only: an unchanged combination is never re-sent, so a
+        // theme-only save cannot silently persist an effective replacement the
+        // user did not agree to.
+        const saved = savedSettingsRef.current;
+        const modelsDirty =
+            !saved ||
+            JSON.stringify(saved.modelIds) !== JSON.stringify(defaultModelIds);
+        const payload: Record<string, unknown> = {};
+        if (!saved || saved.theme !== theme) payload.theme = theme;
+        if (!saved || saved.language !== language) payload.language = language;
+        if (!saved || saved.timeZone !== timeZone) payload.timeZone = timeZone;
+        if (modelsDirty) payload.newConversationModelIds = defaultModelIds;
+        if (Object.keys(payload).length === 0) {
+            closeSettingsModal();
+            dispatchAppToast(t("auth.saveMessage"), "success");
+            return;
+        }
         try {
             const res = await fetch("/api/user/settings", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ theme, language, defaultModel, timeZone }),
+                body: JSON.stringify(payload),
             });
 
             const data = await res.json().catch(() => null);
@@ -524,6 +634,32 @@ export function AuthButton({
                             new Date().getTime()
                     )
                 );
+                // Apply the canonical persisted combination, not the request.
+                const canonicalRaw = data?.settings?.newConversationModelIds;
+                const canonical = Array.isArray(canonicalRaw)
+                    ? (canonicalRaw as unknown[]).filter(
+                          (modelId): modelId is string =>
+                              typeof modelId === "string"
+                      )
+                    : [];
+                const canonicalLead =
+                    (typeof data?.settings?.defaultModel === "string" &&
+                        data.settings.defaultModel) ||
+                    canonical[0] ||
+                    defaultModelIds[0] ||
+                    APP_DEFAULTS.defaultModelId;
+                const canonicalModelIds =
+                    canonical.length > 0 ? canonical : [canonicalLead];
+                setDefaultModelIds(canonicalModelIds);
+                if (modelsDirty) setModelDriftNotice(false);
+                setHighCostAcknowledged(false);
+                setSavedModelIds(canonicalModelIds);
+                savedSettingsRef.current = {
+                    theme,
+                    language,
+                    timeZone: data?.settings?.timeZone || timeZone,
+                    modelIds: canonicalModelIds,
+                };
                 closeSettingsModal();
                 dispatchAppToast(t("auth.saveMessage"), "success");
 
@@ -531,8 +667,20 @@ export function AuthButton({
 
                 storeAndApplyThemePreference(theme);
 
-                notifyUserSettingsUpdated({ defaultModel, theme });
+                notifyUserSettingsUpdated({
+                    defaultModel: canonicalLead,
+                    newConversationModelIds: canonicalModelIds,
+                    theme,
+                });
                 notifyUserUsageChanged();
+            } else if (
+                data?.code === "NEW_CONVERSATION_MODELS_INVALID" ||
+                data?.code === "DEFAULT_MODEL_LEAD_MISMATCH"
+            ) {
+                dispatchAppToast(
+                    t("auth.newConversationModelsInvalid"),
+                    "error"
+                );
             } else if (
                 data?.code === "TIME_ZONE_CHANGE_COOLDOWN" &&
                 typeof data.retryAt === "string"
@@ -1184,26 +1332,121 @@ export function AuthButton({
                                             </span>
                                         </label>
 
-                                        <label className="flex items-center gap-3 rounded-xl border border-zinc-200 bg-zinc-50 p-3 dark:border-zinc-800 dark:bg-zinc-950/60">
-                                            <Bot className="h-4 w-4 shrink-0 text-zinc-500" />
-                                            <span className="min-w-0 flex-1">
-                                                <span className="block text-xs font-semibold text-zinc-500">{t("auth.defaultModel")}</span>
-                                                <select
-                                                    value={defaultModel}
-                                                    onChange={(e) => setDefaultModel(e.target.value)}
-                                                    className="mt-1 w-full cursor-pointer bg-transparent text-sm font-semibold text-zinc-900 outline-none dark:text-zinc-100"
+                                        <div
+                                            data-testid="settings-new-conversation-models"
+                                            className="rounded-xl border border-zinc-200 bg-zinc-50 p-3 dark:border-zinc-800 dark:bg-zinc-950/60"
+                                        >
+                                            <div className="flex items-center gap-3">
+                                                <Bot className="h-4 w-4 shrink-0 text-zinc-500" />
+                                                <span className="block text-xs font-semibold text-zinc-500">
+                                                    {t("auth.newConversationModelsTitle")}
+                                                </span>
+                                            </div>
+                                            {modelDriftNotice && (
+                                                <p
+                                                    data-testid="settings-model-drift-notice"
+                                                    className="mt-2 rounded-lg bg-amber-50 px-2.5 py-1.5 text-xs leading-5 text-amber-800 dark:bg-amber-950/30 dark:text-amber-200"
                                                 >
-                                                    {ENABLED_MODELS.map((model) => {
-                                                        const usageProfile = getModelUsageProfile(model);
-                                                        return (
-                                                            <option className="bg-white text-zinc-900" key={model.id} value={model.id}>
-                                                                {model.icon} {model.name} · {t(`modelUsageClasses.${usageProfile.category.toLowerCase()}`)} · {usageProfile.credits}
-                                                            </option>
-                                                        );
-                                                    })}
-                                                </select>
-                                            </span>
-                                        </label>
+                                                    {t("auth.newConversationModelsDrift")}
+                                                </p>
+                                            )}
+                                            <div className="mt-2 space-y-2">
+                                                {defaultModelIds.map((modelId, index) => (
+                                                    <div
+                                                        key={modelId}
+                                                        data-testid="settings-combination-row"
+                                                        className="flex items-center gap-2"
+                                                    >
+                                                        <select
+                                                            aria-label={t("auth.defaultModel")}
+                                                            value={modelId}
+                                                            onChange={(e) =>
+                                                                replaceCombinationModel(index, e.target.value)
+                                                            }
+                                                            className="w-full min-w-0 flex-1 cursor-pointer bg-transparent text-sm font-semibold text-zinc-900 outline-none dark:text-zinc-100"
+                                                        >
+                                                            {ENABLED_MODELS.filter(
+                                                                (model) =>
+                                                                    model.id === modelId ||
+                                                                    !defaultModelIds.includes(model.id)
+                                                            ).map((model) => {
+                                                                const usageProfile = getModelUsageProfile(model);
+                                                                return (
+                                                                    <option className="bg-white text-zinc-900" key={model.id} value={model.id}>
+                                                                        {model.icon} {model.name} · {t(`modelUsageClasses.${usageProfile.category.toLowerCase()}`)} · {usageProfile.credits}
+                                                                    </option>
+                                                                );
+                                                            })}
+                                                        </select>
+                                                        {index === 0 ? (
+                                                            <span
+                                                                data-testid="settings-lead-model-badge"
+                                                                className="shrink-0 rounded-full bg-blue-100 px-2 py-0.5 text-[11px] font-bold text-blue-700 dark:bg-blue-950/40 dark:text-blue-200"
+                                                            >
+                                                                {t("auth.newConversationModelsLead")}
+                                                            </span>
+                                                        ) : (
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => makeCombinationLead(index)}
+                                                                className="shrink-0 rounded-lg border border-zinc-200 px-2 py-1 text-xs font-semibold text-zinc-600 transition hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-900"
+                                                            >
+                                                                {t("auth.newConversationModelsMakeLead")}
+                                                            </button>
+                                                        )}
+                                                        {defaultModelIds.length > 1 && (
+                                                            <button
+                                                                type="button"
+                                                                aria-label={t("auth.newConversationModelsRemove")}
+                                                                onClick={() => removeCombinationModel(index)}
+                                                                className="shrink-0 rounded-lg p-1 text-zinc-400 transition hover:bg-zinc-100 hover:text-zinc-600 dark:hover:bg-zinc-900 dark:hover:text-zinc-300"
+                                                            >
+                                                                <X className="h-4 w-4" />
+                                                            </button>
+                                                        )}
+                                                    </div>
+                                                ))}
+                                            </div>
+                                            {defaultModelIds.length < 3 && (
+                                                <button
+                                                    type="button"
+                                                    data-testid="settings-combination-add"
+                                                    onClick={addCombinationModel}
+                                                    className="mt-2 w-full rounded-lg border border-dashed border-zinc-300 px-3 py-2 text-xs font-semibold text-zinc-600 transition hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-900"
+                                                >
+                                                    {t("auth.newConversationModelsAdd")}
+                                                </button>
+                                            )}
+                                            <p
+                                                data-testid="settings-combination-total"
+                                                className="mt-2 text-xs font-bold text-zinc-500"
+                                            >
+                                                {formatCopy("auth.newConversationModelsTotal", {
+                                                    credits: String(combinationTotalCredits),
+                                                })}
+                                            </p>
+                                            {defaultModelIds.length === 1 && (
+                                                <p className="mt-1 text-xs leading-5 text-zinc-500">
+                                                    {t("auth.newConversationModelsSingleHint")}
+                                                </p>
+                                            )}
+                                            {newlyAddedHighCostModelIds.length > 0 && (
+                                                <label className="mt-2 flex items-start gap-2 rounded-lg bg-amber-50 px-2.5 py-1.5 dark:bg-amber-950/30">
+                                                    <input
+                                                        type="checkbox"
+                                                        data-testid="settings-high-cost-consent"
+                                                        checked={highCostAcknowledged}
+                                                        onChange={(e) =>
+                                                            setHighCostAcknowledged(e.target.checked)
+                                                        }
+                                                        className="mt-0.5"
+                                                    />
+                                                    <span className="text-xs leading-5 text-amber-800 dark:text-amber-200">
+                                                        {t("auth.newConversationModelsHighCostConsent")}
+                                                    </span>
+                                                </label>
+                                            )}
+                                        </div>
                                         <button
                                             type="button"
                                             onClick={() => {
