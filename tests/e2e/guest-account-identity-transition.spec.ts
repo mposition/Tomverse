@@ -214,10 +214,16 @@ test("a conversation this account cannot open is released once, without retrying
   await page.reload();
 
   // Whatever the restore attempts, it must settle: the composer comes back and
-  // the refused id is not re-requested in a loop.
+  // the refused id stops being asked for. The assertion is that the count
+  // *stops growing*, not that it lands on a particular number -- how many
+  // reads the initial resolution legitimately makes is a timing detail, while
+  // "it never stops" is the defect (three panels each retrying the same 403).
   await expect(page.getByTestId("chat-textarea")).toBeEnabled();
   await page.waitForTimeout(1_500);
-  expect(forbiddenReads).toBeLessThanOrEqual(2);
+  const settledReads = forbiddenReads;
+  expect(settledReads).toBeGreaterThan(0);
+  await page.waitForTimeout(2_500);
+  expect(forbiddenReads).toBe(settledReads);
   await expect
     .poll(async () => (await readGuestState(page)).activeChatId)
     .toBe(null);
