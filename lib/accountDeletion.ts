@@ -153,6 +153,10 @@ export async function deleteTomverseAccount(
         message: "[deleted account]",
         traceId: null,
         userAgent: null,
+        // Withdraws lifecycle-email consent with the address: a still-pending
+        // submitter notification renders against this row at send time and
+        // becomes unsendable instead of mailing a removed contact.
+        emailUpdatesConsent: false,
       },
     });
 

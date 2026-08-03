@@ -11,6 +11,9 @@ import {
   buildRefundRequestEmail,
   type RefundEmailStage,
 } from "@/lib/billingEmails";
+import { buildFeedbackLifecycleEmail } from "@/lib/feedbackLifecycleEmails";
+import type { FeedbackLifecycleStage } from "@/lib/feedbackLifecycleCore";
+import { feedbackReferenceFromId } from "@/lib/feedbackPolicy";
 import {
   NOTIFICATION_DELIVERY_STATUS,
   classifyNotificationError,
@@ -47,10 +50,27 @@ export const NOTIFICATION_KIND = {
   refundRequestReceived: "refund_request_received",
   refundRequestApproved: "refund_request_approved",
   refundRequestRejected: "refund_request_rejected",
+  // The submitter-facing lifecycle emails. Distinct kinds from the operator
+  // notification above -- support_feedback keeps going to the team unchanged --
+  // and one kind per stage, so the (kind, referenceId) unique constraint is
+  // what makes "at most one email per feedback and stage" hold.
+  feedbackUserReceived: "feedback_user_received",
+  feedbackUserReviewing: "feedback_user_reviewing",
+  feedbackUserCompleted: "feedback_user_completed",
 } as const;
 
 export type NotificationKind =
   (typeof NOTIFICATION_KIND)[keyof typeof NOTIFICATION_KIND];
+
+/** Which submitter-facing kind announces each lifecycle stage. */
+export const FEEDBACK_USER_NOTIFICATION_KIND: Record<
+  FeedbackLifecycleStage,
+  NotificationKind
+> = {
+  received: NOTIFICATION_KIND.feedbackUserReceived,
+  reviewing: NOTIFICATION_KIND.feedbackUserReviewing,
+  completed: NOTIFICATION_KIND.feedbackUserCompleted,
+};
 
 /** How many deliveries one batch claims at a time. */
 const DEFAULT_BATCH_SIZE = 25;
@@ -189,6 +209,51 @@ async function renderNotification(
         plan: feedback.plan,
         attachmentCount: feedback.attachmentCount,
         path: feedback.path,
+      }),
+    };
+  }
+
+  const feedbackUserStage: Record<string, FeedbackLifecycleStage> = {
+    [NOTIFICATION_KIND.feedbackUserReceived]: "received",
+    [NOTIFICATION_KIND.feedbackUserReviewing]: "reviewing",
+    [NOTIFICATION_KIND.feedbackUserCompleted]: "completed",
+  };
+  const lifecycleStage = feedbackUserStage[kind];
+  if (lifecycleStage) {
+    // Rendered from the immutable lifecycle event, so a retry presents the
+    // same subject and body as the first attempt. Only the recipient is
+    // resolved at send time: consent withdrawn or the address removed (account
+    // deletion) makes every still-pending stage unsendable rather than mailing
+    // an address the user took away.
+    const event = await prisma.feedbackLifecycleEvent.findUnique({
+      where: {
+        feedbackId_stage: { feedbackId: referenceId, stage: lifecycleStage },
+      },
+      select: {
+        outcomeCode: true,
+        userReply: true,
+        feedback: {
+          select: {
+            id: true,
+            type: true,
+            email: true,
+            emailUpdatesConsent: true,
+            language: true,
+          },
+        },
+      },
+    });
+    if (!event) return null;
+    const feedback = event.feedback;
+    if (!feedback.email || !feedback.emailUpdatesConsent) return null;
+    return {
+      to: feedback.email,
+      ...buildFeedbackLifecycleEmail(lifecycleStage, {
+        reference: feedbackReferenceFromId(feedback.id),
+        type: feedback.type,
+        language: feedback.language,
+        outcomeCode: event.outcomeCode,
+        userReply: event.userReply,
       }),
     };
   }

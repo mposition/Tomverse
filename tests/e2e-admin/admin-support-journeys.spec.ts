@@ -137,6 +137,80 @@ test.describe("support journeys", () => {
     expect(audit[0].actorEmail).toBe(ADMIN_E2E_IDENTITIES.support.email);
   });
 
+  test("closing feedback goes through the completion dialog and records the outcome", async ({
+    page,
+    signInAs,
+  }) => {
+    await signInAs("support");
+    await page.goto("/admin/feedback");
+
+    const entry = page
+      .locator("article")
+      .filter({ hasText: FIXTURE_FEEDBACK.open.message });
+    // The reporter opted into lifecycle emails; the console says so without
+    // repeating the address.
+    await expect(entry.getByTestId("feedback-notify-badge")).toHaveText(
+      /Email updates on/
+    );
+
+    // Closing is never one click: the dialog collects the outcome and the
+    // user-facing reply first.
+    await entry.getByRole("button", { name: "resolved", exact: true }).click();
+    const dialog = page.getByTestId("feedback-completion-dialog");
+    await expect(dialog).toBeVisible();
+
+    await page
+      .getByTestId("feedback-completion-outcome")
+      .selectOption("not_reproduced");
+    const reply =
+      "We could not reproduce this yet; please share the exact steps if it happens again.";
+    await page.getByTestId("feedback-completion-reply").fill(reply);
+
+    // The preview shows exactly what the reporter will be emailed -- the
+    // neutral not-reproduced wording, never a fixed claim, plus the reply.
+    const preview = page.getByTestId("feedback-completion-preview");
+    await expect(preview).toContainText("could not reproduce");
+    await expect(preview).toContainText(reply);
+    await expect(preview).not.toContainText("has been fixed");
+
+    await page.getByTestId("feedback-completion-confirm").click();
+    await expect(dialog).toBeHidden();
+    await expect(
+      entry.getByRole("button", { name: "resolved", exact: true })
+    ).toBeDisabled();
+
+    const stored = await adminFixtureDatabase().feedback.findUniqueOrThrow({
+      where: { id: FIXTURE_FEEDBACK.open.id },
+      select: { status: true, closureOutcome: true, userReply: true },
+    });
+    expect(stored.status).toBe("resolved");
+    expect(stored.closureOutcome).toBe("not_reproduced");
+    expect(stored.userReply).toBe(reply);
+
+    // The immutable completed event carries the snapshot the email renders
+    // from, and the submitter notification is queued exactly once.
+    const event = await adminFixtureDatabase().feedbackLifecycleEvent.findUniqueOrThrow(
+      {
+        where: {
+          feedbackId_stage: {
+            feedbackId: FIXTURE_FEEDBACK.open.id,
+            stage: "completed",
+          },
+        },
+      }
+    );
+    expect(event.outcomeCode).toBe("not_reproduced");
+    expect(event.userReply).toBe(reply);
+
+    const deliveries = await adminFixtureDatabase().notificationDelivery.findMany({
+      where: {
+        kind: "feedback_user_completed",
+        referenceId: FIXTURE_FEEDBACK.open.id,
+      },
+    });
+    expect(deliveries).toHaveLength(1);
+  });
+
   test("a privacy request is progressed and the queue reflects the new status", async ({
     page,
     signInAs,

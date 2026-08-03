@@ -150,6 +150,25 @@ export const buildGuestTurnstileGrantCookie = (
   return `${GUEST_TURNSTILE_GRANT_COOKIE_PREFIX}${action}=${expiresAt}.${signature}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${GUEST_TURNSTILE_GRANT_TTL_SECONDS}; Priority=High${secure}`;
 };
 
+/**
+ * Whether any cookie that *could* carry a grant for `action` exists at all,
+ * valid or not. Diagnostic only -- it distinguishes a guest who was never
+ * verified (no cookie) from one whose grant was issued but no longer verifies
+ * (expired, or bound to a different client), which is the signature of the
+ * "verified, then asked again" incident class.
+ */
+const hasGrantCookieForAction = (
+  request: Request,
+  action: GuestTurnstileAction
+) =>
+  grantingActionsFor(action).some(
+    (granting) =>
+      readCookie(
+        request,
+        `${GUEST_TURNSTILE_GRANT_COOKIE_PREFIX}${granting}`
+      ) !== null
+  );
+
 const hasGrantForExactAction = (
   request: Request,
   action: GuestTurnstileAction,
@@ -287,15 +306,65 @@ export async function verifyGuestTurnstile(
 }
 
 /**
+ * One structured line per verification rejection. Booleans and enums only:
+ * never the token, a cookie value, the site key, or a raw address. The
+ * combination of `hasToken` and `grantCookiePresent` separates the three
+ * populations that all surface as a Turnstile error --
+ *   * first contact (no token, no cookie): the normal security contract;
+ *   * a repeat after a successful verification (no token, cookie present but
+ *     not verifying): a lost/expired/rebound grant, the incident class this
+ *     log exists to catch;
+ *   * a rejected token (token present): a failed or replayed challenge.
+ */
+const logGuestTurnstileRejection = (
+  request: Request,
+  expectedAction: string,
+  token: string | undefined,
+  error: ChatAccessError,
+  context?: { traceId?: string }
+) => {
+  const grantCookiePresent = isGuestTurnstileAction(expectedAction)
+    ? hasGrantCookieForAction(request, expectedAction)
+    : false;
+  console.warn(
+    JSON.stringify({
+      event: "guest_turnstile_rejected",
+      code: error.code,
+      status: error.status,
+      traceId: context?.traceId,
+      action: expectedAction,
+      hasToken: Boolean(token),
+      grantCookiePresent,
+      likelyRepeatAfterGrant: !token && grantCookiePresent,
+      secretConfigured: Boolean(process.env.TURNSTILE_SECRET_KEY),
+      expectedHostnameConfigured: Boolean(
+        process.env.TURNSTILE_EXPECTED_HOSTNAME || process.env.NEXTAUTH_URL
+      ),
+      publicSiteKeyConfigured: Boolean(
+        process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY
+      ),
+      timestamp: new Date().toISOString(),
+    })
+  );
+};
+
+/**
  * Skips re-verification when the guest already has a valid grant from a
  * recent successful Turnstile pass; otherwise verifies as before and, on
  * success, returns a Set-Cookie value the caller should attach to its
  * response so the next request can skip Turnstile too.
+ *
+ * The caller must attach that cookie to whatever response the request ends
+ * with -- error responses included. A guest whose token was accepted has paid
+ * their challenge; if a later gate (rate limit, concurrency, credits) then
+ * rejects the request, dropping the cookie makes the next attempt fail
+ * verification again and the user sees TURNSTILE_REQUIRED in a loop.
  */
 export async function ensureGuestVerified(
   request: Request,
   token: string | undefined,
-  expectedAction: GuestTurnstileAction = "guest_chat"
+  expectedAction: GuestTurnstileAction = "guest_chat",
+  context?: { traceId?: string }
 ): Promise<string | undefined> {
   // SEC-004. Defence in depth against a caller passing a string that is not one
   // of the declared actions: an unknown action has no coverage entry, so it
@@ -306,6 +375,13 @@ export async function ensureGuestVerified(
   ) {
     return undefined;
   }
-  await verifyGuestTurnstile(request, token, expectedAction);
+  try {
+    await verifyGuestTurnstile(request, token, expectedAction);
+  } catch (error) {
+    if (error instanceof ChatAccessError) {
+      logGuestTurnstileRejection(request, expectedAction, token, error, context);
+    }
+    throw error;
+  }
   return buildGuestTurnstileGrantCookie(request, expectedAction);
 }

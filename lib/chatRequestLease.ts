@@ -27,6 +27,77 @@ export type LeaseInsert = {
     /** Null for a slot reserved by preflight and not yet consumed. */
     claimedAt: Date | null;
     expiresAt: Date;
+    /**
+     * The per-minute request capacity this slot pre-paid, when it was reserved
+     * by the aggregate comparison preflight. Both are null for an ordinary
+     * single-request lease, which charges its own minute bucket inside its own
+     * transaction and so has nothing to give back.
+     *
+     * `rateIpKey` is not `ipKey`: that one is the IP *concurrency* scope and is
+     * populated for guests only, while the per-minute IP ceiling applies to
+     * signed-in callers too.
+     */
+    rateIpKey?: string | null;
+    rateMinuteStart?: Date | null;
+};
+
+type ReleasedSlot = {
+    subjectKey: string;
+    rateIpKey: string | null;
+    rateMinuteStart: Date | null;
+    claimedAt: Date | null;
+};
+
+/**
+ * Gives back the per-minute request capacity of slots that never ran.
+ *
+ * Only ever called with rows this transaction has already deleted, so the
+ * refund and the disappearance of the thing being refunded commit together:
+ * the same slot cannot be credited twice, and a slot that survives is not
+ * credited at all. A claimed slot is never passed in -- its request consumed
+ * the capacity its slot reserved.
+ *
+ * The bucket is addressed by the minute the preflight actually charged, not by
+ * the current minute, so a rollback arriving after the window rolled over
+ * credits the row it debited instead of stealing from the new one.
+ */
+const refundRateReservations = async (
+    tx: Prisma.TransactionClient,
+    released: readonly ReleasedSlot[]
+) => {
+    const refunds = new Map<
+        string,
+        { key: string; periodStart: Date; amount: number }
+    >();
+    for (const slot of released) {
+        if (!slot.rateMinuteStart) continue;
+        // One slot pre-paid one unit in each scope it was charged in: the
+        // caller's own bucket and, when the rate ceiling applied, the IP's.
+        for (const key of [slot.subjectKey, slot.rateIpKey]) {
+            if (!key) continue;
+            const groupId = `${key}|${slot.rateMinuteStart.toISOString()}`;
+            const existing = refunds.get(groupId);
+            if (existing) existing.amount += 1;
+            else {
+                refunds.set(groupId, {
+                    key,
+                    periodStart: slot.rateMinuteStart,
+                    amount: 1,
+                });
+            }
+        }
+    }
+    for (const refund of refunds.values()) {
+        await tx.$executeRaw`
+            UPDATE "ChatUsageBucket"
+            SET "count" = GREATEST("count" - ${refund.amount}::bigint, 0),
+                "updatedAt" = NOW()
+            WHERE "key" = ${refund.key}
+              AND "period" = 'minute'
+              AND "periodStart" = ${refund.periodStart}
+        `;
+    }
+    return refunds.size;
 };
 
 /**
@@ -35,17 +106,28 @@ export type LeaseInsert = {
  * Expiry-based cleanup at read time is what keeps a crashed process from
  * holding a slot forever; the periodic sweep below only covers subjects that
  * never come back.
+ *
+ * An expired *unclaimed* admission slot also still holds the minute of request
+ * rate its preflight pre-paid, so this hands that back at the same moment it
+ * drops the slot. Without it a comparison the browser never sent would keep
+ * both its concurrency slot and its rate unit until the minute rolled over,
+ * which the next attempt from the same caller would run straight into.
  */
 export const sweepExpiredLeasesForScopes = async (
     tx: Prisma.TransactionClient,
     keys: { subjectKey: string; ipKey?: string | null }
 ) => {
-    await tx.$executeRaw`
+    const released = await tx.$queryRaw<ReleasedSlot[]>`
         DELETE FROM "ChatRequestLease"
         WHERE "expiresAt" <= NOW()
           AND ("subjectKey" = ${keys.subjectKey}
                OR ("ipKey" IS NOT NULL AND "ipKey" = ${keys.ipKey ?? null}))
+        RETURNING "subjectKey", "rateIpKey", "rateMinuteStart", "claimedAt"
     `;
+    await refundRateReservations(
+        tx,
+        released.filter((slot) => !slot.claimedAt)
+    );
 };
 
 export const countActiveLeases = async (
@@ -75,10 +157,12 @@ export const insertLeases = async (
         await tx.$executeRaw`
             INSERT INTO "ChatRequestLease"
                 ("id", "subjectKey", "ipKey", "admissionId", "modelId",
-                 "claimedAt", "heartbeatAt", "expiresAt", "createdAt")
+                 "claimedAt", "heartbeatAt", "expiresAt", "createdAt",
+                 "rateIpKey", "rateMinuteStart")
             VALUES (${lease.id}, ${lease.subjectKey}, ${lease.ipKey},
                     ${lease.admissionId}, ${lease.modelId}, ${lease.claimedAt},
-                    NOW(), ${lease.expiresAt}, NOW())
+                    NOW(), ${lease.expiresAt}, NOW(),
+                    ${lease.rateIpKey ?? null}, ${lease.rateMinuteStart ?? null})
         `;
     }
 };
@@ -201,22 +285,38 @@ export const releaseChatRequestLease = async (
 };
 
 /**
- * Drops every slot of an admission that was never consumed.
+ * Drops every slot of an admission that was never consumed, and hands back the
+ * per-minute request capacity those slots pre-paid.
  *
  * Called when a comparison fails between "slots reserved" and "requests sent",
  * so an aborted run gives its allowance back immediately instead of after a
  * TTL. Claimed slots are left alone -- those belong to requests that are
- * genuinely running and release themselves.
+ * genuinely running, that consumed the capacity their slot reserved, and that
+ * release themselves.
+ *
+ * One statement, so the refund can neither be applied to a slot that is still
+ * there nor applied twice: a slot is deleted and its unit given back in the
+ * same transaction, and a second call finds nothing left to delete. The refund
+ * names the exact minute bucket the preflight charged (`rateMinuteStart`), so
+ * a rollback arriving after the minute has rolled over credits the bucket it
+ * actually debited rather than the current one, and `GREATEST(..., 0)` keeps a
+ * counter that was reset underneath us from going negative.
  */
 export const releaseUnclaimedAdmission = async (
     admissionId: string,
     context?: { traceId?: string }
 ) => {
     try {
-        return await prisma.$executeRaw`
-            DELETE FROM "ChatRequestLease"
-            WHERE "admissionId" = ${admissionId} AND "claimedAt" IS NULL
-        `;
+        return await prisma.$transaction(async (tx) => {
+            const released = await tx.$queryRaw<ReleasedSlot[]>`
+                DELETE FROM "ChatRequestLease"
+                WHERE "admissionId" = ${admissionId} AND "claimedAt" IS NULL
+                RETURNING "subjectKey", "rateIpKey", "rateMinuteStart",
+                          "claimedAt"
+            `;
+            await refundRateReservations(tx, released);
+            return released.length;
+        });
     } catch (error) {
         console.error(
             JSON.stringify({
@@ -238,6 +338,12 @@ export const releaseUnclaimedAdmission = async (
  * ended. Expiry makes those slots harmless, but only this sweep makes them
  * *gone*, which is what keeps the row count (and therefore the concurrency
  * count) honest over a long-running deployment.
+ *
+ * Deliberately does not refund per-minute rate capacity, unlike the read-time
+ * sweep above. It runs every fifteen minutes, by which point the minute bucket
+ * a slot charged has long since been replaced by a new one, so there is
+ * nothing left to give back; the read-time sweep is what catches an abandoned
+ * admission while its minute is still current.
  */
 export const reconcileExpiredChatRequestLeases = async (
     now = new Date(),

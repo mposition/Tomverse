@@ -199,6 +199,7 @@ test("every email template shares one web-safe font policy", () => {
   const templates = [
     "lib/accountEmails.ts",
     "lib/billingEmails.ts",
+    "lib/feedbackLifecycleEmails.ts",
     "lib/emailLoginEmails.ts",
     "lib/providerModelCatalogReport.ts",
     "app/api/admin/test-email/route.ts",
