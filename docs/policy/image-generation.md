@@ -1,24 +1,39 @@
 # 이미지 생성 가격·과금·수명주기 정책
 
-승인일: 2026-08-03. 이 문서는 이미지 생성 기능의 가격, 크레딧, 환급, 자산
+승인일: 2026-08-03 (v1). **v2 개정: 2026-08-03 — 멀티 모델 비교를 이미지
+기능의 핵심 계약으로 재정의.** v2 결정은 제품 책임자가 UX 결정안(세션
+채팅 기록)으로 승인했으며, §11–§15가 그 기록이다. 단 두 항목은 조건부다:
+Google 모델 활성화는 공식 가격·thinking 상한의 수동 검증 통과가 선행돼야
+하고(§12), 모델별 판매 크레딧은 그 검증 후 별도 승인한다.
+
+이 문서는 이미지 생성 기능의 가격, 크레딧, 환급, 자산
 수명주기, 운영 gate의 단일 기준이다. 코드 상수의 출처는
 `lib/imageGenerationPricing.ts`와 `lib/imageGenerationAccess.ts`이고,
 `npm run check:image-pricing`이 PR Fast Gate에서 fail-closed로 강제한다.
 이 계약을 어기는 변경은 릴리스 차단 사유다.
 
-## 1. 범위 (v1)
+## 1. 범위 (v2)
 
-- 모델: `gpt-image-2` 하나. `AVAILABLE_MODELS`·`ModelRegistry` 밖의 이미지
-  전용 계층에서만 관리한다(`lib/providerModelCatalogCore.ts`의 catalogue
-  필터는 그대로 둔다).
-- text-to-image 전용, 요청당 1장, 품질 3종(Draft/Standard/Final)과 크기
-  3종(1024×1024, 1536×1024, 1024×1536)만. `size=auto`·`quality=auto`·부분
-  스트리밍·투명 배경·편집·참조 이미지는 범위 밖이다.
-- 3개 크기는 provider 제약이 아니라 **Tomverse 제품 제한**이다. gpt-image-2는
-  임의 해상도를 지원한다.
-- Pro·Max 전용. Free·Guest는 `PLAN_FEATURE_NOT_INCLUDED`로 차단한다.
-- 이미지 대화(`Conversation.kind = "image"`)의 공유, `/api/chat` 전송, 비교,
-  AI Review, Web Search, Deep Research는 UI와 서버 양쪽에서 차단한다.
+- **핵심 계약은 멀티 모델 비교다**: 한 프롬프트를 여러 이미지 모델에 동시에
+  보내고 결과를 나란히 비교한다(§11). 단일 모델 요청은 1-모델 그룹이라는
+  특수한 경우일 뿐 별도 경로가 아니다.
+- 모델은 `AVAILABLE_MODELS`·`ModelRegistry` 밖의 **이미지 모델 registry**
+  (§12)에서만 관리한다. 초기 등록: `gpt-image-2`(활성),
+  `gemini-3.1-flash-image-preview`(Nano Banana 2 — 등록하되 §12의 가격
+  검증 통과 전까지 **비활성**), `gemini-3.1-flash-lite-image`(3순위 평가
+  후보). 비교 그룹의 모델 수 상한은 `IMAGE_GROUP_MAX_MODELS`(출시 기본 2)
+  이며 UI·데이터 모델에 상한값을 하드코딩하지 않는다.
+- text-to-image 전용, 모델당 요청 1장. `size=auto`·`quality=auto`·부분
+  스트리밍·투명 배경·편집·참조 이미지는 여전히 범위 밖이다. 크기·품질
+  선택지는 모델별 profile이 정의하되 provider 제약이 아니라 **Tomverse
+  제품 제한**이다.
+- Pro·Max 전용. Free·Guest는 서버에서 `PLAN_FEATURE_NOT_INCLUDED`로
+  차단하고, UI 노출 정책은 §13을 따른다(잠금 노출 — UI 비노출은 보안
+  경계가 아니다).
+- 이미지 대화(`Conversation.kind = "image"`)의 공유, `/api/chat` 전송,
+  채팅 비교, AI Review, Web Search, Deep Research는 UI와 서버 양쪽에서
+  계속 차단한다. 이미지 결과의 나란한 비교(§11)는 채팅 비교 계약
+  (`ComparisonActionRail`·admission token)과 무관한 별도 기능이다.
 
 ## 2. 게이트 두 층
 
@@ -153,8 +168,15 @@ gate 없이 노출되는 배포 창은 금지된다. UI 비노출은 보안 경�
 - 배포·프로세스 종료로 회수 불가능해진 stale 작업은 reconciliation이
   `failed` 처리하고 전액 환급한다. Railway graceful shutdown 유예
   (`RAILWAY_DEPLOYMENT_DRAINING_SECONDS`)를 함께 설정한다.
-- 동시 실행은 entitlement·guardrail과 별개인 concurrency 층이다:
-  `IMAGE_USER_CONCURRENT`(기본 1), 채팅 한도와 분리, `limitLayer` 의미
+- 동시 실행은 entitlement·guardrail과 별개인 concurrency 층이며 v2에서
+  **두 층으로 분리한다**. 그룹 하나 = lease 하나로 끝내면 모델 fan-out이
+  작업량 증폭 통로가 되기 때문이다.
+  - **workflow concurrency**: 사용자당 동시 활성 비교 그룹 수
+    (`IMAGE_USER_CONCURRENT_GROUPS`, 기본 1).
+  - **execution concurrency**: 그룹 내부에서 실제로 실행되는 provider job
+    수와 provider별 상한(`IMAGE_PROVIDER_{P}_CONCURRENT_JOBS`).
+  예: 2-모델 그룹은 workflow 슬롯 1개를 소비하고 OpenAI job 1 + Google
+  job 1을 동시에 실행한다. `limitLayer` 의미
   (`concurrency`/`operational_admission`)는 기존 계약과 동일. lease는
   heartbeat로 유지하고 모든 종료 경로에서 결정적으로 해제한다.
 - v1에 분산 글로벌 큐는 없다. gpt-image-2의 IPM 한도는 **조직 단위
@@ -163,8 +185,12 @@ gate 없이 노출되는 배포 창은 금지된다. UI 비노출은 보안 경�
 
 ## 8. Provider budget
 
-- namespace: `IMAGE_PROVIDER_OPENAI_COST_MICROUSD_PER_{DAY|MONTH}` — 채팅
-  budget과 분리한다.
+- **budget은 모델별이 아니라 provider별 총액이다.** namespace:
+  `IMAGE_PROVIDER_{OPENAI|GOOGLE|...}_COST_MICROUSD_PER_{DAY|MONTH}` — 채팅
+  budget과 분리한다. 모델별 비용은 budget이 아니라 관측·경보 차원으로만
+  분해한다.
+- `/api/ready`는 flag가 켜진 동안 **활성 이미지 모델이 존재하는 모든
+  provider**의 budget 설정을 fail-closed로 검사한다.
 - floor는 채팅의 산식을 재사용하지 않는다:
   `일·월 floor = Max 월 크레딧 × 최악 크레딧당 원가 × headroom`
   (참고치: headroom 25%에서 약 $10.80). 한 Max 계정이 월 크레딧을 하루에
@@ -202,3 +228,124 @@ gate 없이 노출되는 배포 창은 금지된다. UI 비노출은 보안 경�
 - prompt 원문 열람은 권한 있는 Admin 경로 + 감사 로그로만 한다.
 - moderation 내부 분류는 사용자·사이드바 제목·analytics label에 노출하지
   않는다.
+
+## 11. 멀티 모델 비교 계약 (v2)
+
+- **요청은 `modelIds`를 포함한 단일 POST다.** 한 DB 트랜잭션에서 비교
+  그룹(`ImageGenerationGroup`), 모델별 논리 슬롯(`ImageGenerationTarget`,
+  `(groupId, modelId)` unique), 실행 attempt(`ImageGeneration`), 금융
+  예약(attempt당 `ImageCreditReservation` 1개), workflow admission,
+  provider별 budget 예약을 전부 생성한다. 어느 하나라도 사전 승인에
+  실패하면 **행도 비용도 남기지 않는다**(§6 invariant의 그룹 확장).
+  채팅 비교의 admission token은 재사용하지 않는다 — 이미지는 이미 202
+  비동기라 단일 원자 트랜잭션이 그 역할을 대신한다.
+- **실행이 시작된 뒤에는 모델별 독립 성공·실패다.** 실패한 attempt의
+  예약만 환급하고(§5 규칙 그대로), 성공 결과를 되돌리거나 그룹 전체
+  재실행을 강요하지 않는다.
+- **그룹 상태는 저장 컬럼이 아니라 각 target의 최신 attempt에서 파생하는
+  read-model이다**(dual-write drift 방지). 파생 규칙: 전부 succeeded →
+  `succeeded` / 전부 failed → `failed` / 전부 terminal이고 혼재 →
+  `partial_success` / 하나라도 비terminal → 진행 중. 실패 target 재시도가
+  시작되면 성공 결과를 유지한 채 그룹은 다시 진행 중이다. 저장 컬럼
+  도입은 목록 조회 성능이 실측으로 요구할 때만 이 문서 개정으로 결정한다.
+- **재시도는 새 그룹이 아니라 같은 target 아래 새 attempt다**
+  (`attemptNumber`, `retryOfGenerationId`). idempotency는 두 층이다:
+  최초 생성 `(userId, groupIdempotencyKey)`, 재시도
+  `(targetId, retryIdempotencyKey)`. 새 재시도 예약과 target의 현재
+  attempt 갱신은 같은 트랜잭션이며, succeeded target의 재실행은 거부한다
+  (이중 과금 금지). UI는 target의 최신 attempt를 현재 상태로 보여주고
+  과거 attempt는 감사 기록으로 보존한다.
+- 폴링은 그룹 단위 endpoint 하나로 그룹·target·attempt 상태를 함께
+  반환한다.
+
+## 12. 이미지 모델 registry와 가격 검증 (v2)
+
+- 이미지 모델은 채팅 catalogue와 분리된 **이미지 모델 registry**로
+  관리한다. 모델 profile: provider, API model ID, stable/preview 상태,
+  지원 해상도·화면비, 기능(문자 렌더링 등), 크레딧 표, latency 등급,
+  provenance 종류(C2PA/SynthID), MIME 처리.
+- **가격 검증은 텍스트 모델의 `PENDING_VERIFIED_PRICE_REGISTER`를
+  재사용하지 않는다.** 이미지 전용 pending-price register를 신설한다
+  (담당자·검증 티켓·기한 구조는 동일 철학, 계층은 분리). 텍스트·이미지
+  공통 registry로의 일반화는 세 번째 이미지 provider가 등장할 때
+  재평가한다.
+- **고정 성공 가격 유지 조건** — 모델을 활성화하려면 전부 충족해야 한다:
+  1. 입력·thinking·이미지 출력 등 모든 과금 요소를 포함한 **최악 요청
+     원가가 유한하게 계산 가능**해야 한다.
+  2. 서버가 그 최대를 벗어나는 요청 parameter를 허용하지 않아야 한다
+     (예: thinking 상한 고정, response modality를 이미지로 제한).
+  3. 최악 조건에서 `maxRequestCostMicroUsd / chargedCredits ≤ 900µUSD`
+     (§4 상한 유지).
+  4. 모델별 크레딧은 최소 `ceil(maxRequestCostMicroUsd / 900)` 이상.
+  5. 위 값은 정책상 **수학적 최소 크레딧**일 뿐이며, **판매 크레딧**은
+     목표 잔여율·환불 위험·가격 drift 여유를 반영해 별도 승인한다.
+  6. thinking 비용은 평균이 아니라 provider가 허용하는 상한·최악 조건으로
+     계산한다. 공식 문서에서 상한을 확인할 수 없으면 **고정 가격 산정
+     불가 — 모델 활성화 보류**다.
+  7. 성공 후 사용자에게 추가 청구하지 않는다. 실측 원가는 내부 정산·관측
+     전용이다.
+- **공식 도메인 본문을 직접 읽고 기록한 가격만 `verified`다.** 검색
+  요약·제3자 출처로 대체하지 않는다. 2026-08-03 기준
+  `gemini-3.1-flash-image-preview`(Nano Banana 2)는 preview 상태이며 가격·
+  thinking 상한이 미검증이므로 **등록-비활성**이다. 수동 검증 통과와 판매
+  크레딧 승인 후에만 활성화한다.
+- adapter는 provider가 반환한 원본 bytes와 MIME을 무변형 저장하고(PNG
+  가정 금지), 정규화된 usage(input/thinking/output)·moderation 분류·
+  provider request ID·provenance 종류를 공통 형태로 보고한다.
+
+## 13. 진입점과 노출 정책 (v2)
+
+- 진입점은 네 곳이다: ① 데스크톱 사이드바 **split-button**(기본 클릭 =
+  새 채팅, 펼침 메뉴에 이미지 생성), ② 모바일 **"새로 만들기" bottom
+  sheet**(split-button을 축소하지 않는다), ③ 채팅 컴포저 도구 메뉴의
+  **이미지 생성**(서버 행 없이 image draft로 전환), ④ 모델 카탈로그의
+  **`채팅 | 이미지` 분리 탭**. v1의 별도 "새 이미지" 버튼은 대체·제거한다.
+- 카탈로그의 기존 `이미지 입력` 필터(`modelSupportsImageInput` — 입력
+  능력)와 이미지 **생성** 모델 목록을 같은 목록에 혼합하지 않는다.
+- 컴포저에서 전환 시 작성 중 텍스트는 이미지 prompt 초안으로 가져오고,
+  취소하면 원래 채팅 draft(텍스트·첨부·모델·도구 상태)를 복원한다.
+  첨부는 조용히 버리지 않는다 — 채팅 draft에 보존하고 이미지 생성이
+  텍스트 전용임을 1회 안내한다.
+- **Guest·Free는 전 위치 잠금 노출이다**: 항목은 보이되 LockKeyhole과
+  필요 플랜을 표시하고, 클릭 시 Guest는 로그인 안내, Free는 Pro·Max
+  업그레이드 안내로 연결한다(카탈로그·Deep Research 행의 기존 잠금
+  관례와 동일). 마지막 단계 차단은 금지 — 진입 전에 상태를 명시한다.
+  서버 entitlement 검사는 독립적으로 유지된다.
+- 이미지 결과 비교 UI는 `comparison-action-rail` 계약의 **원칙만**
+  차용한다(상태 기반 노출을 순수 predicate로 결정, 셸 분기 금지, 정상
+  완료 상태 문장은 sr-only, 액션별 자기 가격·자기 사유를
+  `aria-describedby`로). `ComparisonActionRail`·`shouldShowVisualStatus()`
+  자체를 재사용하지 않으며, 이미지 비교를 이유로 AI Review·요약을
+  활성화하지 않는다.
+- 시각 역할은 `accent-image-*` 토큰만 사용한다. AI Review 전용 gradient
+  조합은 이미지 UI에 쓰지 않는다.
+
+## 14. v1 데이터 backfill (v2)
+
+- 기존 v1 `ImageGeneration` 행은 **1행당 그룹 1개 + target 1개로
+  backfill**해 read path를 하나로 유지한다. nullable `groupId`를 장기
+  병행하는 legacy 경로는 두지 않는다.
+- v1이 단일 모델·단일 provider였다는 사실로 기존 `ImageCreditReservation`
+  의 `provider="openai"`, `modelId="gpt-image-2"`를 추론해 보강할 수
+  있다. 추론값은 감사 기록에서 실측값과 구분되도록 표시한다.
+- generation과 연결이 끊긴 orphan 금융 기록도 같은 규칙으로 보강하되,
+  알 수 없는 `pricingVersion`이나 모순된 행은 파괴하지 않고 별도
+  보고한다.
+- migration 전에 read-only audit을 실행한다: generation 총수·상태 분포,
+  예약 없는 generation 수, orphan 예약 수, provider/modelId 분포 확인.
+  migration 후 검증: 그룹 수 = 기존 generation 수, target unique 위반 0.
+  복구는 rollback이 아니라 forward repair로 한다.
+- status·timestamp·자산 관계·기존 idempotency 의미는 backfill이 변경하지
+  않는다.
+
+## 15. v2 릴리스 게이트
+
+- **v1 flag는 staging 내부 검증 전용이다.** 멀티 모델 UX(§11–§13)가
+  구현·검증되기 전에 production에서 flag를 켜 공개 베타로 활성화하지
+  않는다. flag-off 코드 배포는 허용된다.
+- Google 모델은 §12의 수동 가격 검증과 판매 크레딧 승인 전까지 어떤
+  환경에서도 활성화하지 않는다(등록-비활성 유지).
+- 유료 eval(동일 프롬프트 benchmark: prompt fidelity·구도·문자 렌더링·
+  인물/손 일관성·한국어 이해·latency·moderation 오탐·포맷 안정성·실측
+  원가)은 별도 예산 승인 후 실행하고, 결과를 모델 활성화 결정에
+  인용한다.
