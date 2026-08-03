@@ -2,6 +2,10 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { after, beforeEach, test } from "node:test";
 
+import {
+  isImageGenerationEnabled,
+  setImageGenerationEnabled,
+} from "@/lib/appSettings";
 import { getUserChatUsageKey } from "@/lib/chatSecurity";
 import {
   auditImageGenerationInvariants,
@@ -539,4 +543,16 @@ test("the read select and serializer rebuild the timeline shape without minting 
   // A non-succeeded generation never exposes asset URLs -- the serializer
   // must not touch R2 for it (no R2 credentials exist in this test).
   assert.deepEqual(serialized.assets, []);
+});
+
+test("the admin setter round-trips the opt-in flag and off never needs a delete", async () => {
+  assert.equal(await isImageGenerationEnabled(), false);
+  await setImageGenerationEnabled(true);
+  assert.equal(await isImageGenerationEnabled(), true);
+  await setImageGenerationEnabled(false);
+  assert.equal(await isImageGenerationEnabled(), false);
+  const row = await prisma.appSetting.findUnique({
+    where: { key: "feature.imageGenerationEnabled" },
+  });
+  assert.equal(row?.value, "false");
 });

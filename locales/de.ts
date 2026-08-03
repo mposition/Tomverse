@@ -125,6 +125,7 @@ export const de = {
         imageGenerationGenerate: "Generieren",
         imageGenerationGenerating: "Bild wird generiert...",
         imageGenerationGeneratingHint: "Das kann bis zu etwa zwei Minuten dauern. Das Verlassen der Seite bricht die Generierung nicht ab.",
+        imageGenerationTakingLong: "Das dauert länger als üblich. Falls es nicht abgeschlossen werden kann, wird es automatisch als fehlgeschlagen markiert und die reservierten Credits werden vollständig erstattet.",
         imageGenerationFailed: "Bildgenerierung fehlgeschlagen.",
         imageGenerationModerationBlocked: "Das Sicherheitssystem hat diese Anfrage abgelehnt. Passe die Beschreibung an und versuche es erneut.",
         imageGenerationRefunded: "Die reservierten Credits wurden erstattet.",
@@ -785,6 +786,109 @@ export const de = {
         refundRequestSuccess: "Rückerstattungsanfrage erhalten.",
         refundRequestFailed: "Rückerstattungsanfrage konnte nicht gesendet werden.",
     },
+    externalImport: {
+        dataTabTitle: "Aus einem anderen KI-Dienst importieren",
+        dataTabDescription:
+            "Speichern Sie frühere Unterhaltungen aus einer ChatGPT- oder Claude-Exportdatei in Ihrem Tomverse-Konto. Die Exportdatei wird nur in Ihrem Browser gelesen.",
+        dataTabUsage:
+            "{conversations} importierte Unterhaltungen · {storage} gespeichert",
+        dataTabOpen: "Import-Einstellungen öffnen",
+        pageTitle: "Unterhaltungen aus einem anderen KI-Dienst importieren",
+        pageDescription:
+            "Laden Sie einen offiziellen Datenexport von ChatGPT oder Claude hoch, prüfen Sie den Inhalt und wählen Sie die Unterhaltungen aus, die Sie in Ihrem Tomverse-Konto behalten möchten.",
+        backToChat: "Zurück zum Chat",
+        backToImports: "Zurück zu den Importen",
+        signInRequired:
+            "Melden Sie sich an, um Unterhaltungen aus einem anderen KI-Dienst zu importieren.",
+        disabledNotice:
+            "Der Import externer Unterhaltungen ist derzeit nicht verfügbar.",
+        privacyNote:
+            "Die Exportdatei verlässt Ihr Gerät nie: Sie wird im Browser geöffnet, und nur der normalisierte Text der von Ihnen ausgewählten Unterhaltungen wird in Ihrem Konto gespeichert. Bilder, Audio und Anhänge werden nicht importiert. Das Löschen importierter Unterhaltungen in Tomverse löscht nichts beim ursprünglichen Dienst.",
+        capacityTitle: "Import-Speicher",
+        capacityUsage: "{used} von {limit} belegt",
+        capacityConversations: "{used} von {limit} importierten Unterhaltungen",
+        selectFile: "Exportdatei auswählen",
+        selectFileHint:
+            "ChatGPT- oder Claude-Datenexport (.zip oder .json), bis zu 1 GB. Große Archive sind kein Problem — Mediendateien werden übersprungen, ohne gelesen zu werden.",
+        parsing: "Export wird in Ihrem Browser gelesen…",
+        parsingProgress: "{conversations} Unterhaltungen gefunden",
+        cancel: "Abbrechen",
+        desktopRecommended:
+            "Dieser Export ist für den Browser dieses Geräts zu groß. Da die Datei lokal geöffnet wird, versuchen Sie es bitte auf einem Desktop-Computer erneut.",
+        parseFailed:
+            "Die Datei konnte nicht als unterstützter Export gelesen werden.",
+        previewTitle: "Unterhaltungen zum Import auswählen",
+        previewProvider: "Erkannter Export: {provider}",
+        previewSummary:
+            "{selected} von {total} Unterhaltungen ausgewählt · etwa {size}",
+        warningsTitle: "Nicht enthalten",
+        warningSkippedMessages:
+            "{count} System- oder Tool-Nachrichten übersprungen",
+        warningSkippedParts:
+            "{count} Nicht-Text-Inhalte (Bilder, Audio, Dateien) übersprungen",
+        warningBranches:
+            "{count} alternative Gesprächsverzweigungen werden nicht importiert",
+        notImportableBadge: "Import nicht möglich",
+        notImportableExplain:
+            "{count} Unterhaltungen enthalten eine Nachricht über der Import-Größengrenze und können nicht importiert werden.",
+        truncationTitle: "Einige lange Nachrichten werden gekürzt",
+        truncationExplain:
+            "{conversations} Unterhaltungen enthalten Nachrichten über der Speichergrenze von {limit} Zeichen. Wenn Sie zustimmen, bleiben Anfang und Ende jeder langen Nachricht erhalten, die Mitte wird durch eine Markierung ersetzt.",
+        truncationApprove:
+            "Diese Unterhaltungen mit gekürzten Nachrichten importieren",
+        truncatedBadge: "Wird gekürzt",
+        quotaExceededWarning:
+            "Die Auswahl ist größer als Ihr verbleibender Import-Speicher. Wählen Sie einige Unterhaltungen ab, um fortzufahren.",
+        messagesCount: "{count} Nachrichten",
+        startImport: "Auswahl hochladen",
+        uploading: "Stapel {sent} von {total} wird hochgeladen…",
+        uploadFailed:
+            "Das Hochladen ist fehlgeschlagen. Sie können es erneut versuchen — bereits angekommene Stapel werden nicht doppelt gesendet.",
+        retryUpload: "Hochladen erneut versuchen",
+        stagedTitle: "Prüfen und bestätigen",
+        stagedSummary:
+            "{staged} Unterhaltungen bereit zum Import · {duplicates} Duplikate übersprungen",
+        stagedTruncated: "{count} Nachrichten werden gekürzt gespeichert",
+        allDuplicates:
+            "Alles in dieser Auswahl ist bereits in Ihrem Konto vorhanden.",
+        finalize: "Import bestätigen",
+        finalizing: "Wird bestätigt…",
+        finalizeFailedQuota:
+            "Ihr Konto hat nicht mehr genug Import-Speicher für diese Auswahl.",
+        stagingExpired:
+            "Diese Import-Sitzung ist abgelaufen. Beginnen Sie erneut mit der Exportdatei.",
+        importCompleted:
+            "Import abgeschlossen: {count} Unterhaltungen sind jetzt in Ihrem Konto gespeichert.",
+        startAnother: "Weiteren Export importieren",
+        errorGeneric: "Etwas ist schiefgelaufen. Bitte versuchen Sie es erneut.",
+        historyTitle: "Importierte Exporte",
+        historyEmpty: "Es wurde noch nichts importiert.",
+        historyConversations: "{count} Unterhaltungen",
+        statusCompleted: "Abgeschlossen",
+        statusFailed: "Fehlgeschlagen",
+        statusCancelled: "Abgebrochen",
+        statusStaging: "In Bearbeitung",
+        viewDetail: "Ansehen",
+        deleteImport: "Löschen",
+        deleteImportArmed: "Zum Löschen erneut klicken",
+        deleting: "Wird gelöscht…",
+        deleteNote:
+            "Das Löschen entfernt nur die nach Tomverse importierten Kopien; der ursprüngliche Dienst bleibt unberührt.",
+        detailTitle: "Importierter Export",
+        detailNotFound: "Dieser Import wurde nicht gefunden.",
+        detailConversations: "Importierte Unterhaltungen",
+        conversationsEmpty: "Noch keine importierten Unterhaltungen.",
+        loadMore: "Mehr anzeigen",
+        previousSnapshots: "{count} frühere Versionen",
+        exportAll: "Alles herunterladen (JSON)",
+        viewerRoleUser: "Nutzer",
+        viewerRoleAssistant: "Assistent",
+        viewerSourceModel: "Ursprüngliches Modell: {label}",
+        viewerTruncatedNotice:
+            "Diese Nachricht wurde gekürzt gespeichert, um die Speichergrenze einzuhalten. Der vollständige Text existiert nur noch beim ursprünglichen Dienst.",
+        viewerMessagesShown: "{shown} von {total} Nachrichten angezeigt",
+        deleteSnapshot: "Diese Version löschen",
+    },
     privacyPolicy: {
         title: "Datenschutzerklärung",
         effective: "Gültig ab: 16. Juli 2026",
@@ -797,6 +901,8 @@ export const de = {
         providers: "Prompts, notwendiger Kontext, Modellauswahl und Anhänge werden an den ausgewählten KI-Anbieter gesendet, um Antworten zu erzeugen. Anbieter können Daten nach ihren eigenen Bedingungen und Richtlinien verarbeiten oder speichern, möglicherweise in einem anderen Land.",
         attachmentsTitle: "Anhänge",
         attachments: "Anhänge können vorübergehend in verschlüsseltem Objektspeicher für Modellzustellung und Dokumentextraktion gespeichert werden. Temporäre Anhänge werden derzeit nach etwa einem Tag per Lifecycle-Regel gelöscht.",
+        externalImportTitle: "Aus anderen KI-Diensten importierte Unterhaltungen",
+        externalImport: "Sie können frühere Unterhaltungen, die Sie aus einer bei einem anderen KI-Dienst wie ChatGPT oder Claude heruntergeladenen Exportdatei auswählen, in Ihrem Tomverse-Konto speichern. Die Exportdatei wird ausschließlich in Ihrem Browser geöffnet; das ursprüngliche Archiv wird niemals auf Server oder Speicher von Tomverse hochgeladen oder dort aufbewahrt. Gespeichert werden nur der normalisierte Text der ausgewählten Unterhaltungen sowie Herkunftsangaben (Ausgangsdienst, ursprüngliche Zeitstempel, Modellnamen nur zur Anzeige). Bilder, Audio und Anhänge werden nicht importiert. Importierte Unterhaltungen können personenbezogene Daten anderer Personen enthalten; Sie sind daher dafür verantwortlich sicherzustellen, dass Sie zum Import dieser Daten berechtigt sind. Sie können importierte Inhalte jederzeit einsehen, löschen und exportieren; sie werden mit Ihrem Konto gelöscht. Eine Löschung bei Tomverse löscht nicht die beim ursprünglichen Dienst gespeicherten Daten.",
         analyticsTitle: "Produktanalyse und Kampagnenzuordnung",
         analytics: "Tomverse nutzt stets den für den Dienst erforderlichen Sitzungs-, Sicherheits-, Sprach- und Einstellungsspeicher. Für Produktanalysen müssen Besucher aus EU/EWR, Vereinigtem Königreich, Schweiz oder einer nicht verifizierten Region vor dem Start von Google Analytics 4 ausdrücklich zustimmen. In Australien und nach rechtlicher Prüfung freigegebenen Regionen startet die datensparsame Analyse nach einem klaren Hinweis und kann sofort oder später deaktiviert werden. Erfasst werden genehmigte Ereignisse und Metadaten wie UTM-Quelle, Sprache, Land, Modellanzahl und Tarif. Google kann zudem IP-Adresse, Browserdaten, Seiten-URL und ungefähren Standort außerhalb des Besucherlandes verarbeiten. Prompts, Modellantworten, Dateinamen, Dateiinhalte, E-Mail-Adressen und Profilnamen werden nie einbezogen. Werbespeicher und Personalisierung bleiben deaktiviert.",
         retentionTitle: "Aufbewahrung und Löschung",

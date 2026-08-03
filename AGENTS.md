@@ -274,10 +274,19 @@ feedback의 Trace 검증, `errorReportToken`, `TraceErrorEvidence`, chat 오류
 - **feedback 제출과 Trace 검증은 분리됩니다.** 검증 실패는 신고 저장을 막지
   않습니다. verification/classification/evidence availability는 독립 관찰로
   별도 저장하며, client 분류를 server 사실로 승격하지 않습니다.
-- **Phase 2·3(자동 진단·자동 수정)은 미구현입니다.** LLM confidence를 자동
-  게이트로 쓰지 않고, 결정적 Red→Green 증명 없는 자동 수정을 금지하며,
-  자동 생성 수정의 target은 `develop`뿐입니다. staging 배포를 production
-  해결로 표시하지 않습니다.
+- **Phase 2는 diagnosis-only shadow mode입니다**
+  (`FEEDBACK_AUTOFIX_SHADOW_ENABLED` 뒤에서 fail-closed).
+  `FeedbackAutoFixCase`는 증거 수집·결정적 분류·진단 요약까지만 하며, 코드
+  수정·branch·PR·LLM 호출이 없습니다. 상태 전이는
+  `lib/feedbackAutoFixCore.ts`의 그래프만 허용하고 진단 요약에 사용자
+  본문을 넣지 않습니다.
+- **Phase 3(자동 수정)은 인프라만 존재하고 운영은 비활성입니다**
+  (`FEEDBACK_AUTOFIX_ENABLED` + sync secret + 수동 dispatch 3중 잠금,
+  정책 문서 §9.1). LLM confidence를 자동 게이트로 쓰지 않고, 결정적
+  Red→Green 증명 없는 자동 수정을 금지하며, 자동 생성 수정의 target은
+  `develop`뿐이고 auto-merge는 켜지 않습니다. change policy는
+  `lib/feedbackAutoFixPolicy.ts`가 정의하며 파이프라인 자기 자신을 수정
+  대상에서 제외합니다. staging 배포를 production 해결로 표시하지 않습니다.
 
 ## Mobile chat composer invariant
 

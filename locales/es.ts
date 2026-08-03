@@ -125,6 +125,7 @@ export const es = {
         imageGenerationGenerate: "Generar",
         imageGenerationGenerating: "Generando imagen...",
         imageGenerationGeneratingHint: "Puede tardar hasta unos dos minutos. Salir de la página no cancela la generación.",
+        imageGenerationTakingLong: "Está tardando más de lo habitual. Si no puede completarse, se marcará como fallida automáticamente y los créditos reservados se reembolsarán por completo.",
         imageGenerationFailed: "La generación de la imagen falló.",
         imageGenerationModerationBlocked: "El sistema de seguridad rechazó esta solicitud. Ajusta la descripción e inténtalo de nuevo.",
         imageGenerationRefunded: "Los créditos reservados fueron reembolsados.",
@@ -785,6 +786,108 @@ export const es = {
         refundRequestSuccess: "Solicitud de reembolso recibida.",
         refundRequestFailed: "No se pudo enviar la solicitud de reembolso.",
     },
+    externalImport: {
+        dataTabTitle: "Importar desde otro servicio de IA",
+        dataTabDescription:
+            "Guarda en tu cuenta de Tomverse conversaciones de un archivo de exportación de ChatGPT o Claude. El archivo de exportación solo se lee en tu navegador.",
+        dataTabUsage:
+            "{conversations} conversaciones importadas · {storage} almacenados",
+        dataTabOpen: "Abrir ajustes de importación",
+        pageTitle: "Importar conversaciones desde otro servicio de IA",
+        pageDescription:
+            "Sube una exportación oficial de datos de ChatGPT o Claude, revisa su contenido y elige qué conversaciones conservar en tu cuenta de Tomverse.",
+        backToChat: "Volver al chat",
+        backToImports: "Volver a las importaciones",
+        signInRequired:
+            "Inicia sesión para importar conversaciones desde otro servicio de IA.",
+        disabledNotice:
+            "La importación de conversaciones externas no está disponible en este momento.",
+        privacyNote:
+            "El archivo de exportación nunca sale de tu dispositivo: se abre en tu navegador y solo se almacena en tu cuenta el texto normalizado de las conversaciones que selecciones. Las imágenes, el audio y los adjuntos no se importan. Eliminar conversaciones importadas de Tomverse no elimina nada en el servicio original.",
+        capacityTitle: "Almacenamiento de importación",
+        capacityUsage: "{used} de {limit} usados",
+        capacityConversations: "{used} de {limit} conversaciones importadas",
+        selectFile: "Elegir archivo de exportación",
+        selectFileHint:
+            "Exportación de datos de ChatGPT o Claude (.zip o .json), hasta 1 GB. Los archivos grandes no son problema: los archivos multimedia se omiten sin leerse.",
+        parsing: "Leyendo la exportación en tu navegador…",
+        parsingProgress: "{conversations} conversaciones encontradas",
+        cancel: "Cancelar",
+        desktopRecommended:
+            "Esta exportación es demasiado grande para el navegador de este dispositivo. Como el archivo se abre localmente, inténtalo de nuevo en un ordenador de escritorio.",
+        parseFailed:
+            "El archivo no se pudo leer como una exportación compatible.",
+        previewTitle: "Elige las conversaciones a importar",
+        previewProvider: "Exportación detectada: {provider}",
+        previewSummary:
+            "{selected} de {total} conversaciones seleccionadas · aproximadamente {size}",
+        warningsTitle: "No incluido",
+        warningSkippedMessages:
+            "Se omitieron {count} mensajes de sistema o de herramientas",
+        warningSkippedParts:
+            "Se omitieron {count} elementos no textuales (imágenes, audio, archivos)",
+        warningBranches:
+            "{count} ramas alternativas de conversación no se importan",
+        notImportableBadge: "No se puede importar",
+        notImportableExplain:
+            "{count} conversaciones contienen un mensaje que supera el límite de tamaño de importación y no se pueden importar.",
+        truncationTitle: "Algunos mensajes largos se acortarán",
+        truncationExplain:
+            "{conversations} conversaciones contienen mensajes que superan el límite de almacenamiento de {limit} caracteres. Si lo apruebas, se conservan el principio y el final de cada mensaje largo y el medio se sustituye por un marcador.",
+        truncationApprove:
+            "Importar estas conversaciones con mensajes acortados",
+        truncatedBadge: "Se acortará",
+        quotaExceededWarning:
+            "La selección supera tu almacenamiento de importación restante. Deselecciona algunas conversaciones para continuar.",
+        messagesCount: "{count} mensajes",
+        startImport: "Subir selección",
+        uploading: "Subiendo lote {sent} de {total}…",
+        uploadFailed:
+            "La subida falló. Puedes reintentar: los lotes que ya llegaron no se envían dos veces.",
+        retryUpload: "Reintentar subida",
+        stagedTitle: "Revisar y confirmar",
+        stagedSummary:
+            "{staged} conversaciones listas para importar · {duplicates} duplicados omitidos",
+        stagedTruncated: "{count} mensajes se almacenarán acortados",
+        allDuplicates: "Todo lo de esta selección ya está en tu cuenta.",
+        finalize: "Confirmar importación",
+        finalizing: "Confirmando…",
+        finalizeFailedQuota:
+            "A tu cuenta no le queda suficiente almacenamiento de importación para esta selección.",
+        stagingExpired:
+            "Esta sesión de importación expiró. Empieza de nuevo desde el archivo de exportación.",
+        importCompleted:
+            "Importación completada: {count} conversaciones están ahora guardadas en tu cuenta.",
+        startAnother: "Importar otra exportación",
+        errorGeneric: "Algo salió mal. Inténtalo de nuevo.",
+        historyTitle: "Exportaciones importadas",
+        historyEmpty: "Aún no se ha importado nada.",
+        historyConversations: "{count} conversaciones",
+        statusCompleted: "Completada",
+        statusFailed: "Fallida",
+        statusCancelled: "Cancelada",
+        statusStaging: "En curso",
+        viewDetail: "Ver",
+        deleteImport: "Eliminar",
+        deleteImportArmed: "Haz clic de nuevo para eliminar",
+        deleting: "Eliminando…",
+        deleteNote:
+            "Eliminar solo quita las copias importadas de Tomverse; el servicio original no se ve afectado.",
+        detailTitle: "Exportación importada",
+        detailNotFound: "No se encontró esta importación.",
+        detailConversations: "Conversaciones importadas",
+        conversationsEmpty: "Aún no hay conversaciones importadas.",
+        loadMore: "Mostrar más",
+        previousSnapshots: "{count} versiones anteriores",
+        exportAll: "Descargar todo (JSON)",
+        viewerRoleUser: "Usuario",
+        viewerRoleAssistant: "Asistente",
+        viewerSourceModel: "Modelo original: {label}",
+        viewerTruncatedNotice:
+            "Este mensaje se guardó acortado para respetar el límite de almacenamiento. El texto completo solo permanece en el servicio original.",
+        viewerMessagesShown: "{shown} de {total} mensajes mostrados",
+        deleteSnapshot: "Eliminar esta versión",
+    },
     privacyPolicy: {
         title: "Política de privacidad",
         effective: "Vigente desde: 16 de julio de 2026",
@@ -797,6 +900,8 @@ export const es = {
         providers: "Los prompts, el contexto necesario, la selección de modelo y los adjuntos se envían al proveedor de IA seleccionado para generar respuestas. Los proveedores pueden procesar o conservar datos según sus propios términos y políticas, posiblemente en otro país.",
         attachmentsTitle: "Adjuntos",
         attachments: "Los adjuntos pueden almacenarse temporalmente en almacenamiento cifrado para entrega al modelo y extracción de documentos. Actualmente se eliminan tras aproximadamente un día mediante la política de ciclo de vida.",
+        externalImportTitle: "Conversaciones importadas de otros servicios de IA",
+        externalImport: "Puedes guardar en tu cuenta de Tomverse las conversaciones anteriores que selecciones de un archivo de exportación descargado de otro servicio de IA, como ChatGPT o Claude. El archivo de exportación se abre únicamente en tu navegador; el archivo original nunca se sube ni se conserva en los servidores o el almacenamiento de Tomverse. Solo se guarda como material privado de la cuenta el texto normalizado de las conversaciones que selecciones, junto con los datos de procedencia (servicio de origen, marcas de tiempo originales, nombres de modelo solo para mostrar). Las imágenes, el audio y los archivos adjuntos no se importan. Las conversaciones importadas pueden contener información personal de otras personas, por lo que es tu responsabilidad confirmar que tienes derecho a importar esos datos. Puedes consultar, eliminar y exportar el material importado en cualquier momento, y se elimina junto con tu cuenta. Eliminarlo de Tomverse no elimina los datos que conserva el servicio original.",
         analyticsTitle: "Analítica de producto y atribución de campañas",
         analytics: "Tomverse siempre usa el almacenamiento esencial de sesión, seguridad, idioma y preferencias necesario para prestar el servicio. Para analítica, los visitantes de la UE/EEE, Reino Unido, Suiza o una región no verificada deben aceptar antes de iniciar Google Analytics 4. En Australia y regiones añadidas tras revisión legal, la analítica minimizada comienza después de un aviso claro y puede desactivarse de inmediato o más tarde. Registramos eventos aprobados y metadatos como fuente UTM, idioma, país, número de modelos y plan. Google también puede procesar la dirección IP, datos del navegador, URL de página y ubicación aproximada fuera del país del visitante. Nunca se incluyen prompts, respuestas, nombres o contenidos de archivos, correos ni nombres de perfil. El almacenamiento publicitario y la personalización permanecen desactivados.",
         retentionTitle: "Retención y eliminación",

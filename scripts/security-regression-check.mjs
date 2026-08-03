@@ -2394,6 +2394,60 @@ const checks = [
       source.includes("actions/checkout@v6") &&
       source.includes("actions/setup-node@v6"),
   },
+  {
+    // One branch must never grow two PRs. The automation namespaces open
+    // their own PRs (cron-auto-fix -> main, feedback-autofix -> develop), so
+    // the generic auto-PR workflow has to stay out of them -- a PAT push
+    // does trigger workflows, which is exactly how the duplicate happened.
+    name: "Auto PR to Develop excludes the automation branch namespaces",
+    file: ".github/workflows/auto-pr-to-develop.yml",
+    test: (source) =>
+      source.includes("- autofix/**") &&
+      source.includes("- feedback-autofix/**"),
+  },
+  {
+    // Phase 3 fix workflow supply chain and trigger surface: dispatch-only
+    // (a schedule is a §9 go-live decision), never pull_request_target, and
+    // every third-party executable pinned by SHA or integrity hash.
+    name: "Feedback auto-fix workflow is dispatch-only with pinned supply chain",
+    file: ".github/workflows/feedback-autofix.yml",
+    test: (source) =>
+      source.includes("workflow_dispatch:") &&
+      !source.includes("pull_request_target") &&
+      !source.includes("schedule:") &&
+      source.includes(
+        "actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803"
+      ) &&
+      source.includes(
+        "actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38"
+      ) &&
+      source.includes("CLAUDE_CODE_INTEGRITY"),
+  },
+  {
+    // Token separation: the LLM step must not see the GitHub PAT or the sync
+    // secret, and the PR step must not see the LLM key. Checked per step
+    // block so a refactor cannot silently co-locate them.
+    name: "Feedback auto-fix workflow separates its credentials by step",
+    file: ".github/workflows/feedback-autofix.yml",
+    test: (source) => {
+      const steps = source.split(/\n {6}- name: /);
+      const fixStep = steps.find((step) => step.startsWith("Attempt the fix"));
+      const prStep = steps.find((step) =>
+        step.startsWith("Push the branch and open the develop PR")
+      );
+      return (
+        Boolean(fixStep) &&
+        Boolean(prStep) &&
+        fixStep.includes("FEEDBACK_AUTOFIX_ANTHROPIC_API_KEY") &&
+        !fixStep.includes("GH_AUTOMATION_PAT") &&
+        !fixStep.includes("FEEDBACK_AUTOFIX_SYNC_SECRET") &&
+        prStep.includes("GH_AUTOMATION_PAT") &&
+        !prStep.includes("ANTHROPIC") &&
+        !prStep.includes("FEEDBACK_AUTOFIX_SYNC_SECRET") &&
+        !prStep.includes("--auto")
+      );
+    },
+  },
 ];
 
 const failures = [];

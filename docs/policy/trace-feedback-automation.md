@@ -9,8 +9,8 @@
 | Phase | 범위 | 상태 |
 |---|---|---|
 | 1 | 메시지별 Trace 상관관계, 서버 발급 token, Trace evidence 모델, Admin 표시 | **구현됨** |
-| 2 | case 상태 머신, 증거 수집(collector), 적격성 판정, 진단 보고서 (diagnosis-only shadow mode) | 설계만 존재 |
-| 3 | 제한된 자동 수정, `develop` PR, 사람 승인, staging 검증 | 설계만 존재 |
+| 2 | case 상태 머신, 증거 수집(collector), 적격성 판정, 진단 보고서 (diagnosis-only shadow mode) | **구현됨** (기본 비활성 — §8) |
+| 3 | 제한된 자동 수정, `develop` PR, 사람 승인, staging 검증 | **인프라 구현됨** (완전 비활성 — §9.1) |
 
 각 Phase는 별도 PR과 별도 사람 승인으로 진행한다. Phase 2·3 코드는 아직
 존재하지 않으며, Admin Console도 자동 수정 상태를 표시하지 않는다.
@@ -184,18 +184,113 @@ user agent, cookie/header 원문, provider 원시 payload, 원시 token, secret,
   `evidence_pending`/`sentry_unavailable`로 남긴다. source-map upload token을
   재사용하지 말고 별도 read-only `project:read` token을 쓴다.
 
-## 8. Phase 2 진입 조건과 설계 요약
+## 8. Phase 2 — diagnosis-only shadow mode (구현됨)
 
-- 최소 30일 관찰 + 검증된 traced report 최소 30건 + 개인정보·금지 정보
-  유출 0건. 표본 조건 변경은 근거·owner·승인자와 함께 이 문서에 기록한다.
-- Phase 2는 diagnosis-only shadow mode다: PR·branch·코드 수정 없음. LLM
-  confidence는 관찰 필드일 뿐 게이트가 아니다. client-supplied Trace와
-  client-classified `EMPTY_RESPONSE`는 자동 진단 대상에서 제외한다.
-- 관찰 지표: token 검증 비율, evidence 충분 비율, 분류 정확도(사람 대조),
-  clean base 결정적 재현 후보 비율, 자동 제외 영역 비율, 비용.
+Phase 2는 관찰 인프라다: PR·branch·코드 수정이 없고, LLM을 호출하지 않으며,
+LLM confidence는 관찰용 컬럼(`llmConfidence`, 항상 null)일 뿐 게이트가
+아니다. client-supplied Trace와 client-classified `EMPTY_RESPONSE`는 자동
+진단 대상에서 제외된다.
 
-## 9. Phase 3 경계 (미구현 — 사전 약속)
+구현 요약:
 
+- **case 생성**: `type=bug` + 검증된 token(`verified`)일 때만 feedback 저장
+  transaction 안에서 `FeedbackAutoFixCase`(feedbackId unique)를 만든다.
+  fingerprint는 `serverErrorCode|release`로 중복 관찰용이며 identity가
+  아니다.
+- **kill switch**: `FEEDBACK_AUTOFIX_SHADOW_ENABLED === "true"`일 때만
+  큐잉·처리한다. 기본 fail-closed. 끄면 신규 case가 생기지 않고 worker가
+  중단되며, 기존 case는 그대로 남는다.
+- **worker**: `lib/feedbackAutoFixShadow.ts`가 maintenance cron cadence로
+  실행된다(`/api/internal/maintenance/cleanup`에 편승, 실패해도 retention
+  작업을 실패시키지 않음). claim은 compare-and-swap 조건부 UPDATE + 5분
+  lease이고, lease가 만료된 고아 case는 다음 pass가 collecting으로 되돌려
+  재처리한다. 상태 전이는 `lib/feedbackAutoFixCore.ts`의 그래프만 허용한다
+  (임의 terminal 점프 금지).
+- **상태**: received → collecting_evidence → {evidence_ready |
+  evidence_delayed} → classifying → {diagnostic_ready →
+  awaiting_human_review | ineligible} → closed.
+- **evidence 지연**: 검증됐지만 row가 `not_yet_available`이면 1/5/15/30/60/
+  120분 백오프(worker cadence 하한)로 최대 6회 재시도 후
+  `evidence_incomplete`로 정직하게 종료한다. §7의 Sentry ingestion 지연
+  원칙의 구현이며, cadence가 cron 주기라서 §7의 초 단위 백오프보다 거칠다는
+  점을 명시해 둔다.
+- **분류(결정적 규칙)**: untrusted_trace(미검증) / client_classified /
+  operational_limit(기존 limit event 참조) / provider_transient(retryable
+  또는 `AI_EMPTY_RESPONSE*`·`DEEP_RESEARCH_JOB*`) / evidence_incomplete /
+  **application_candidate**(검증 + 기록된 비일시적 서버 실패)만 사람 검토
+  대기(awaiting_human_review)로 간다. candidate는 "수정 대상"이 아니라
+  "사람이 볼 가치가 있음"이라는 뜻이다.
+- **진단 요약**: 기술 사실만 담는 bounded JSON(오류 코드·route·release·
+  provider/model·재시도성·관련 provider/limit event 수·Sentry event ID).
+  사용자 본문·prompt·원시 provider payload·token은 절대 넣지 않는다.
+- **Sentry 읽기**: 전용 read-only 환경변수(`SENTRY_EVIDENCE_READ_TOKEN`,
+  `SENTRY_EVIDENCE_ORG_SLUG`, `SENTRY_EVIDENCE_PROJECT_SLUG`)가 있을 때만
+  event title 1회 fetch(5초 timeout). 미설정·실패는 case를 지연시키지 않고
+  요약에 사유만 남긴다. source-map upload token을 재사용하지 않는다.
+- **관찰 지표**: `GET /api/admin/trace-diagnostics`(admin 전용)가 30일
+  창의 신고 수·token 검증 분포·case 상태/분류 분포를 집계한다. 분류
+  정확도(사람 대조)와 clean base 재현 후보 비율은 candidate를 사람이
+  검토하며 수기로 축적한다.
+- **retention**: terminal(closed·ineligible) case는 90일 후
+  `cleanupExpiredData()`가 정리한다. 열린 case는 삭제하지 않는다.
+
+## 9. Phase 3 경계 (인프라 구현됨 — 운영 비활성)
+
+- **진입 조건**: Phase 2 shadow mode에서 최소 30일 관찰 + 검증된 traced
+  report 최소 30건 + 개인정보·금지 정보 유출 0건, 그리고 별도 사람 승인.
+  표본 조건 변경은 근거·owner·승인자와 함께 이 문서에 기록한다.
+  **코드는 이 조건을 스스로 검사하지 않는다** — `FEEDBACK_AUTOFIX_ENABLED`
+  플래그를 켜는 행위가 "사람이 조건 충족을 확인했다"는 약속이다.
+
+### 9.1 구현 상태와 활성화 절차
+
+인프라는 배포돼 있지만 3중으로 잠겨 있다: (1) `FEEDBACK_AUTOFIX_ENABLED`
+미설정 시 모든 엔드포인트가 비활성 응답, (2)
+`FEEDBACK_AUTOFIX_SYNC_SECRET`(≥32자) 미설정 시 전 엔드포인트 401,
+(3) workflow는 `workflow_dispatch` 전용이고 schedule이 없다(§9.2).
+
+구성 요소:
+
+- **상태 확장**: `awaiting_human_review → fix_attempting →
+  red_green_proven → pr_open → merged → staging_verified → closed`,
+  실패는 `fix_failed`. 전이는 `lib/feedbackAutoFixCore.ts` 그래프만
+  허용하고, lease가 만료된 fix 시도는 review pool로 되돌아간다.
+- **sync 프로토콜**: `app/api/internal/feedback-autofix/{pending,claim,
+  result,heartbeat}` — 전부 POST, dedicated Bearer secret(digest 비교),
+  bounded body + 폐쇄형 Zod schema. claim은 CAS이고, result 콜백은
+  서버가 change manifest와 Red→Green proof를 **재검증**한 뒤에만 전이한다
+  (workflow의 자기 보고를 신뢰하지 않음). replay·순서 위반은
+  `{applied:false}` no-op이다.
+- **change policy** (`lib/feedbackAutoFixPolicy.ts`): 최대 5파일/300줄,
+  테스트 추가 필수, 테스트 삭제·skip/only·snapshot 금지, `.github/`·
+  `prisma/`·config·정책 문서·인증/결제/크레딧/concurrency 표면·**파이프라인
+  자기 자신** 금지. workflow가 git diff에서 manifest를 재계산해 검사하고
+  (`scripts/feedback-autofix-policy-check.mjs`) 서버가 다시 검사한다.
+- **Red→Green proof**: 신규 테스트만 clean base worktree에 적용해 assertion
+  으로 실패(문법·import 실패는 불인정), fixed head에서 동일 테스트 통과,
+  base≠head SHA. proof는 case에 저장된다.
+- **workflow** (`.github/workflows/feedback-autofix.yml`): checkout·
+  setup-node commit SHA 고정 + fix CLI version/integrity 고정, LLM step엔
+  LLM key만·PR step엔 GH PAT만·sync secret은 그 둘 어디에도 없음(전부
+  security regression이 고정). branch는 `feedback-autofix/<case-id>`,
+  PR은 `develop` 대상이며 **auto-merge를 켜지 않는다** — 초기 운영(최초
+  20개 PR과 30일 중 늦은 쪽)엔 사람 승인이 필수다.
+
+활성화 절차(순서 고정): ① §9 진입 조건 확인·기록 → ② GitHub secrets
+설정: `FEEDBACK_AUTOFIX_SYNC_SECRET`(서버 env와 동일 값),
+`FEEDBACK_AUTOFIX_ANTHROPIC_API_KEY` → ③ 서버 env:
+`FEEDBACK_AUTOFIX_SYNC_SECRET`, `FEEDBACK_AUTOFIX_ENABLED=true`,
+필요 시 `FEEDBACK_AUTOFIX_MAX_CASES_PER_DAY`(기본 5) → ④ 수동
+`workflow_dispatch`로 첫 실행. kill switch는 ③의 플래그 제거 하나로
+충분하다(모든 엔드포인트가 즉시 비활성).
+
+### 9.2 미검증(N/V) 사항
+
+- workflow는 실제로 실행된 적이 없다(secrets 미설정, dispatch 전용).
+  첫 활성화 때 §9.1 ④를 staging 환경 대상(TOMVERSE_APP_URL 조정)으로
+  드라이런하는 것을 권장한다.
+- scheduled 실행은 default branch에서만 동작하며, schedule 추가 자체가
+  별도 go-live 결정이다.
 - 유일한 자동 적격 게이트는 **결정적 Red→Green 재현 증명**이다: clean
   `develop`에서 assertion으로 실패(문법 오류·import 누락·fixture 부재 제외),
   수정 후 동일 테스트 통과, 허용된 저위험 파일만 변경, 필수 CI 통과,

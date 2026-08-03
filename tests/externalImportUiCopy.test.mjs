@@ -1,0 +1,150 @@
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { test } from "node:test";
+import { de } from "../locales/de.ts";
+import { en } from "../locales/en.ts";
+import { es } from "../locales/es.ts";
+import { fr } from "../locales/fr.ts";
+import { ko } from "../locales/ko.ts";
+import { pt } from "../locales/pt.ts";
+import { zh } from "../locales/zh.ts";
+
+/**
+ * docs/policy/external-conversation-import-and-memory.md §16, §17, §21.
+ *
+ * The Release A import UI ships with copy in all seven locales, checked
+ * statically — the seven-locale render matrix is deliberately not an E2E
+ * concern. Beyond parity, two product rules are enforced here: the feature's
+ * name must not collide with the guest-conversation import that already
+ * lives in the Data tab, and no locale may promise memory features that
+ * Release A does not have.
+ */
+
+const LOCALES = { ko, en, zh, fr, de, es, pt };
+
+// French pluralizes these two exactly like English ("{count} messages"),
+// so the not-English check would misread a correct translation.
+const ENGLISH_HOMOGRAPH_KEYS = new Set([
+    "fr.messagesCount",
+    "fr.historyConversations",
+]);
+
+test("every supported locale carries every external import UI key", () => {
+    const englishKeys = Object.keys(en.externalImport);
+    assert.ok(englishKeys.length > 0);
+    for (const [name, bundle] of Object.entries(LOCALES)) {
+        for (const key of englishKeys) {
+            const value = bundle.externalImport?.[key];
+            assert.equal(
+                typeof value,
+                "string",
+                `${name}.externalImport.${key} must exist`
+            );
+            assert.ok(
+                value.trim().length > 0,
+                `${name}.externalImport.${key} must not be empty`
+            );
+        }
+    }
+});
+
+test("no locale silently reuses the English copy", () => {
+    for (const [name, bundle] of Object.entries(LOCALES)) {
+        if (name === "en") continue;
+        for (const [key, english] of Object.entries(en.externalImport)) {
+            if (ENGLISH_HOMOGRAPH_KEYS.has(`${name}.${key}`)) continue;
+            assert.notEqual(
+                bundle.externalImport[key],
+                english,
+                `${name}.externalImport.${key} must not duplicate the English copy`
+            );
+        }
+    }
+});
+
+test("placeholders survive translation", () => {
+    // Interpolation is plain string replacement, so a translated string that
+    // drops or renames a {placeholder} renders the raw token to the user.
+    const placeholderPattern = /\{[a-zA-Z]+\}/g;
+    for (const [key, english] of Object.entries(en.externalImport)) {
+        const expected = [...english.matchAll(placeholderPattern)]
+            .map((match) => match[0])
+            .sort();
+        if (expected.length === 0) continue;
+        for (const [name, bundle] of Object.entries(LOCALES)) {
+            const actual = [
+                ...bundle.externalImport[key].matchAll(placeholderPattern),
+            ]
+                .map((match) => match[0])
+                .sort();
+            assert.deepEqual(
+                actual,
+                expected,
+                `${name}.externalImport.${key} must keep placeholders ${expected.join(", ")}`
+            );
+        }
+    }
+});
+
+test("the feature's name never collides with the guest import", () => {
+    // Policy §21: "이 브라우저의 게스트 대화 가져오기" (guest conversations
+    // stored in this browser) and "다른 AI 서비스에서 가져오기" (an export
+    // from another service) are different features and must read as such.
+    for (const [name, bundle] of Object.entries(LOCALES)) {
+        assert.notEqual(
+            bundle.externalImport.dataTabTitle,
+            bundle.auth.guestImportSectionTitle,
+            `${name} must not reuse the guest import section title`
+        );
+    }
+});
+
+test("the components render the copy", () => {
+    const sources = [
+        "../components/imports/ExternalImportSettings.tsx",
+        "../components/imports/ExternalImportDetail.tsx",
+        "../components/imports/ExternalConversationViewer.tsx",
+        "../components/auth/AuthButton.tsx",
+    ].map((path) => readFileSync(new URL(path, import.meta.url), "utf8"));
+    for (const key of [
+        "externalImport.pageTitle",
+        "externalImport.privacyNote",
+        "externalImport.truncationApprove",
+        "externalImport.detailTitle",
+        "externalImport.dataTabTitle",
+        "externalImport.viewerTruncatedNotice",
+        "externalImport.previousSnapshots",
+        "externalImport.exportAll",
+        "externalImport.deleteSnapshot",
+    ]) {
+        assert.ok(
+            sources.some((source) => source.includes(key)),
+            `${key} must be rendered by an import component`
+        );
+    }
+});
+
+test("the copy makes no promise the implementation does not keep", () => {
+    // Release A imports and stores; it does not extract memories, continue
+    // conversations, or lock imports behind a password (§1, §6, §7). And the
+    // marketing boundary (§17) forbids replication claims.
+    for (const [name, bundle] of Object.entries(LOCALES)) {
+        const body = Object.values(bundle.externalImport)
+            .join(" ")
+            .toLowerCase();
+        for (const forbidden of [
+            "memory",
+            "메모리",
+            "记忆",
+            "mémoire",
+            "gedächtnis",
+            "memoria",
+            "memória",
+        ]) {
+            assert.ok(
+                !body.includes(forbidden),
+                `${name} must not describe memory features in Release A copy`
+            );
+        }
+    }
+});

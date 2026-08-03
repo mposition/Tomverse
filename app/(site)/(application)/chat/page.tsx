@@ -1,6 +1,8 @@
 export const dynamic = "force-dynamic";
 
+import { cookies } from "next/headers";
 import { APP_DEFAULTS } from "@/lib/appDefaults";
+import { isE2EFixtureMode } from "@/lib/e2eTestMode";
 import { getPublicAppSettings, isImageGenerationEnabled } from "@/lib/appSettings";
 import { GuestVerificationProvider } from "@/components/chat/GuestVerificationProvider";
 import { ChatPageClient } from "./ChatPageClient";
@@ -30,6 +32,17 @@ export default async function ChatPage() {
     console.error("Failed to load public app settings for chat:", {
       errorName: error instanceof Error ? error.name : "UnknownError",
     });
+  }
+
+  // Playwright override, mirroring the __tomverse_e2e_auth pattern in the
+  // application layout: with the database disabled the opt-in flag can never
+  // read true, so a test opts in per-context with a cookie. Only honoured in
+  // fixture mode (loopback origin + both E2E env vars), and production
+  // readiness fails outright if those vars are ever set there
+  // (lib/securityEnvironment.ts e2eBypassDisabled).
+  if (!imageGenerationEnabled && isE2EFixtureMode()) {
+    imageGenerationEnabled =
+      (await cookies()).get("__tomverse_e2e_image_generation")?.value === "1";
   }
 
   // The verification coordinator wraps the page rather than living inside it,

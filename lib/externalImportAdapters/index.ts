@@ -5,8 +5,23 @@ import type {
     ExternalConversationAdapter,
 } from "@/lib/externalImportAdapters/types";
 
+export type {
+    ExternalAdapterProvider,
+    ExternalConversationAdapter,
+    ParsedExternalConversation,
+    ParsedExternalMessage,
+} from "@/lib/externalImportAdapters/types";
+
 export const EXTERNAL_IMPORT_ADAPTERS: readonly ExternalConversationAdapter[] =
     [chatgptAdapter, claudeAdapter];
+
+/**
+ * Version label of the client-side parsing stack (adapters + archive walker +
+ * pipeline), sent with each import so parse failure rates can be broken down
+ * by parser build in the §22 metrics. Bump on any behavioural change to the
+ * adapters, the archive rules or the pipeline.
+ */
+export const EXTERNAL_IMPORT_PARSER_VERSION = "v1";
 
 /** First adapter whose detect() accepts the parsed export, or null. */
 export function detectExternalImportAdapter(

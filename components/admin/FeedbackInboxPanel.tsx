@@ -51,6 +51,14 @@ export type FeedbackRow = {
   errorClassificationSource: string | null;
   clientErrorCode: string | null;
   evidenceAvailability: string | null;
+  /** Phase 2 diagnosis-only shadow case, when one was queued. Observational:
+   * no auto-fix pipeline exists, and the panel says so in words. */
+  autoFixCase: {
+    state: string;
+    classification: string | null;
+    ineligibilityReason: string | null;
+    updatedAt: string;
+  } | null;
   /** The exactly-linked evidence occurrence, when verification made one. */
   traceEvidence: {
     occurrenceId: string;
@@ -431,6 +439,7 @@ export function FeedbackInboxPanel({ rows }: Props) {
             return (
               <article
                 key={feedback.id}
+                data-testid="feedback-entry"
                 className="rounded-2xl border border-zinc-800 bg-zinc-900/70 p-4"
               >
                 <div className="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
@@ -565,6 +574,21 @@ export function FeedbackInboxPanel({ rows }: Props) {
                     {evidenceAvailabilityLabel(feedback.evidenceAvailability) ? (
                       <span className="truncate">
                         {evidenceAvailabilityLabel(feedback.evidenceAvailability)}
+                      </span>
+                    ) : null}
+                    {feedback.autoFixCase ? (
+                      <span
+                        data-testid="feedback-autofix-case"
+                        className="truncate"
+                      >
+                        Shadow diagnosis (observation only, no auto-fix):{" "}
+                        {feedback.autoFixCase.state}
+                        {feedback.autoFixCase.classification
+                          ? ` — ${feedback.autoFixCase.classification}`
+                          : ""}
+                        {feedback.autoFixCase.ineligibilityReason
+                          ? ` (${feedback.autoFixCase.ineligibilityReason})`
+                          : ""}
                       </span>
                     ) : null}
                     {feedback.traceEvidence ? (

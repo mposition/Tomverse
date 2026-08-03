@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { Bot, Database, Loader2, RefreshCw, Save, Settings2, ShieldAlert } from "lucide-react";
+import { Bot, Database, Image as ImageIcon, Loader2, RefreshCw, Save, Settings2, ShieldAlert } from "lucide-react";
 import {
   canUseModelWithPlan,
   getModelUsageProfile,
@@ -14,14 +14,24 @@ import { ModelLogo } from "@/components/chat/ModelLogo";
 
 type AdminAppSettingsResponse = {
   settings?: PublicAppSettings;
+  imageGenerationEnabled?: boolean;
+  externalConversationImportEnabled?: boolean;
   error?: string;
 };
 
 type Props = {
   settings: PublicAppSettings;
+  /** Opt-in beta flag; resolved separately from the default-on kill switches. */
+  imageGenerationEnabled: boolean;
+  /** Release A import rollout flag; same opt-in, fail-closed shape. */
+  externalConversationImportEnabled: boolean;
 };
 
-export function PlatformSettingsPanel({ settings }: Props) {
+export function PlatformSettingsPanel({
+  settings,
+  imageGenerationEnabled: initialImageGenerationEnabled,
+  externalConversationImportEnabled: initialExternalImportEnabled,
+}: Props) {
   const { models } = useModelCatalog();
   const guestModels = useMemo(
     () =>
@@ -40,17 +50,33 @@ export function PlatformSettingsPanel({ settings }: Props) {
   const [aiChatEnabled, setAiChatEnabled] = useState(settings.aiChatEnabled);
   const [attachmentsEnabled, setAttachmentsEnabled] = useState(settings.attachmentsEnabled);
   const [publicSharingEnabled, setPublicSharingEnabled] = useState(settings.publicSharingEnabled);
+  const [imageGenerationEnabled, setImageGenerationEnabled] = useState(
+    initialImageGenerationEnabled
+  );
+  const [externalImportEnabled, setExternalImportEnabled] = useState(
+    initialExternalImportEnabled
+  );
   const [lastSyncedAt, setLastSyncedAt] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const selectedModel =
     guestModels.find((model) => model.id === guestDefaultModelId) || guestModels[0];
 
-  const applySettings = (nextSettings: PublicAppSettings) => {
+  const applySettings = (
+    nextSettings: PublicAppSettings,
+    nextImageGenerationEnabled?: boolean,
+    nextExternalImportEnabled?: boolean
+  ) => {
     setGuestDefaultModelId(nextSettings.guestDefaultModelId);
     setAiChatEnabled(nextSettings.aiChatEnabled);
     setAttachmentsEnabled(nextSettings.attachmentsEnabled);
     setPublicSharingEnabled(nextSettings.publicSharingEnabled);
+    if (typeof nextImageGenerationEnabled === "boolean") {
+      setImageGenerationEnabled(nextImageGenerationEnabled);
+    }
+    if (typeof nextExternalImportEnabled === "boolean") {
+      setExternalImportEnabled(nextExternalImportEnabled);
+    }
     setLastSyncedAt(new Date().toLocaleTimeString());
   };
 
@@ -67,7 +93,11 @@ export function PlatformSettingsPanel({ settings }: Props) {
       if (!response.ok || !data?.settings) {
         throw new Error(data?.error || "Settings reload failed");
       }
-      applySettings(data.settings);
+      applySettings(
+        data.settings,
+        data.imageGenerationEnabled,
+        data.externalConversationImportEnabled
+      );
       dispatchAppToast("Platform settings reloaded. The form now matches what is stored.", "success");
     } catch {
       dispatchAppToast("Platform settings could not be reloaded, so the form still shows the values it had. Retry before editing.", "error");
@@ -88,6 +118,8 @@ export function PlatformSettingsPanel({ settings }: Props) {
           aiChatEnabled,
           attachmentsEnabled,
           publicSharingEnabled,
+          imageGenerationEnabled,
+          externalConversationImportEnabled: externalImportEnabled,
         }),
       });
       const data = (await response.json().catch(() => null)) as
@@ -96,7 +128,11 @@ export function PlatformSettingsPanel({ settings }: Props) {
       if (!response.ok || !data?.settings) {
         throw new Error(data?.error || "Settings save failed");
       }
-      applySettings(data.settings);
+      applySettings(
+        data.settings,
+        data.imageGenerationEnabled,
+        data.externalConversationImportEnabled
+      );
       dispatchAppToast("Platform settings saved and are live.", "success");
     } catch {
       dispatchAppToast("Platform settings were not saved. Nothing changed -- retry, or reload to discard the edit.", "error");
@@ -182,6 +218,62 @@ export function PlatformSettingsPanel({ settings }: Props) {
                   </label>
                 ))}
               </div>
+            </div>
+          </div>
+        </div>
+        <div className="rounded-2xl border border-zinc-800 bg-zinc-950/70 p-5 xl:col-span-2">
+          <div className="flex items-start gap-4">
+            <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-fuchsia-500/30 bg-fuchsia-500/10 text-fuchsia-300">
+              <ImageIcon className="h-5 w-5" />
+            </span>
+            <div className="min-w-0 flex-1">
+              <p className="text-xs font-bold uppercase tracking-[0.18em] text-fuchsia-300">Opt-in beta</p>
+              <h3 className="mt-2 text-xl font-black text-white">Image generation</h3>
+              <p className="mt-2 text-sm leading-6 text-zinc-400">
+                Default-off, unlike the kill switches above: it is enabled only
+                while this toggle is on. Provider budget env vars must be live
+                first or /api/ready fails the moment this turns on
+                (docs/policy/image-generation.md §8).
+              </p>
+              <label className="mt-4 flex w-fit cursor-pointer items-center gap-3 rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-3 text-sm font-bold text-white">
+                <input
+                  type="checkbox"
+                  data-testid="admin-image-generation-flag"
+                  checked={imageGenerationEnabled}
+                  onChange={(event) => setImageGenerationEnabled(event.target.checked)}
+                  className="h-5 w-5 accent-fuchsia-600"
+                />
+                <span>Image generation enabled</span>
+              </label>
+            </div>
+          </div>
+        </div>
+        <div className="rounded-2xl border border-zinc-800 bg-zinc-950/70 p-5 xl:col-span-2">
+          <div className="flex items-start gap-4">
+            <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-blue-500/30 bg-blue-500/10 text-blue-300">
+              <Database className="h-5 w-5" />
+            </span>
+            <div className="min-w-0 flex-1">
+              <p className="text-xs font-bold uppercase tracking-[0.18em] text-blue-300">Opt-in rollout</p>
+              <h3 className="mt-2 text-xl font-black text-white">External conversation import</h3>
+              <p className="mt-2 text-sm leading-6 text-zinc-400">
+                Release A of the import/memory program: ChatGPT and Claude
+                export files, parsed in the browser, stored per account.
+                Default-off and fail-closed; turning this off closes the
+                import APIs and UI while listing, deletion and export stay
+                available to owners
+                (docs/policy/external-conversation-import-and-memory.md §15).
+              </p>
+              <label className="mt-4 flex w-fit cursor-pointer items-center gap-3 rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-3 text-sm font-bold text-white">
+                <input
+                  type="checkbox"
+                  data-testid="admin-external-import-flag"
+                  checked={externalImportEnabled}
+                  onChange={(event) => setExternalImportEnabled(event.target.checked)}
+                  className="h-5 w-5 accent-blue-600"
+                />
+                <span>External conversation import enabled</span>
+              </label>
             </div>
           </div>
         </div>

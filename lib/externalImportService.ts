@@ -21,6 +21,7 @@ import {
     truncateExternalMessageContent,
     utf8ByteLength,
 } from "@/lib/externalImportLimits";
+import { recordExternalImportCounter } from "@/lib/externalImportMetrics";
 import { prisma } from "@/lib/prisma";
 
 /**
@@ -199,6 +200,205 @@ export function createExternalImport(input: {
             clientFingerprint: input.clientFingerprint ?? null,
             digestVersion: EXTERNAL_IMPORT_DIGEST_VERSION,
         },
+    });
+}
+
+/**
+ * Import history for the settings page. Import rows only — staged
+ * conversation payloads stay out of every general listing (§5.5); the
+ * per-import status endpoint is the one place staged titles appear, for the
+ * owner, during an active wizard run.
+ *
+ * Available while the feature flag is off, like DELETE: after a rollback the
+ * owner must still be able to find what they imported in order to delete it
+ * (§15).
+ */
+export async function listExternalImports(userId: string) {
+    const rows = await prisma.externalImport.findMany({
+        where: { userId },
+        orderBy: { createdAt: "desc" },
+        take: 50,
+        select: {
+            id: true,
+            provider: true,
+            status: true,
+            failureCode: true,
+            conversationCount: true,
+            messageCount: true,
+            normalizedBytes: true,
+            truncationCount: true,
+            duplicateCount: true,
+            createdAt: true,
+            completedAt: true,
+        },
+    });
+    return rows.map((row) => ({
+        id: row.id,
+        provider: row.provider,
+        status: row.status,
+        failureCode: row.failureCode,
+        conversationCount: row.conversationCount,
+        messageCount: row.messageCount,
+        normalizedBytes: asSafeNumber(row.normalizedBytes),
+        truncationCount: row.truncationCount,
+        duplicateCount: row.duplicateCount,
+        createdAt: row.createdAt.toISOString(),
+        completedAt: row.completedAt?.toISOString() ?? null,
+    }));
+}
+
+/**
+ * Finalized conversations for the account-private viewer (§21). Rows carry
+ * `externalStableId` so the client can group immutable snapshots of the same
+ * source lineage and present the latest one first (§4.2). Staged rows never
+ * appear here (§5.5).
+ */
+export async function listExternalConversations(
+    userId: string,
+    { offset = 0, limit = 50 }: { offset?: number; limit?: number } = {}
+) {
+    const [total, rows] = await Promise.all([
+        prisma.externalConversation.count({
+            where: { userId, finalized: true },
+        }),
+        prisma.externalConversation.findMany({
+            where: { userId, finalized: true },
+            orderBy: [{ importedAt: "desc" }, { id: "desc" }],
+            skip: offset,
+            take: limit,
+            select: {
+                id: true,
+                importId: true,
+                provider: true,
+                title: true,
+                externalStableId: true,
+                messageCount: true,
+                contentBytes: true,
+                sourceCreatedAt: true,
+                sourceUpdatedAt: true,
+                importedAt: true,
+            },
+        }),
+    ]);
+    return {
+        total,
+        offset,
+        limit,
+        conversations: rows.map((row) => ({
+            id: row.id,
+            importId: row.importId,
+            provider: row.provider,
+            title: row.title,
+            externalStableId: row.externalStableId,
+            messageCount: row.messageCount,
+            contentBytes: asSafeNumber(row.contentBytes),
+            sourceCreatedAt: row.sourceCreatedAt?.toISOString() ?? null,
+            sourceUpdatedAt: row.sourceUpdatedAt?.toISOString() ?? null,
+            importedAt: row.importedAt.toISOString(),
+        })),
+    };
+}
+
+/**
+ * One finalized conversation with a page of its messages, for the read-only
+ * viewer. Content leaves this function as the stored plain text — rendering
+ * it inertly (never as HTML) is the viewer's contract (§4, §19).
+ */
+export async function getExternalConversation(
+    userId: string,
+    conversationId: string,
+    { offset = 0, limit = 100 }: { offset?: number; limit?: number } = {}
+) {
+    const row = await prisma.externalConversation.findUnique({
+        where: { id: conversationId },
+    });
+    // One 404 for "does not exist", "not yours" and "not finalized": a
+    // cross-user probe must not learn that the ID is real, and staging rows
+    // stay invisible outside their wizard run.
+    if (!row || row.userId !== userId || !row.finalized) {
+        throw new ApiSecurityError(404, "NOT_FOUND", "Conversation not found.");
+    }
+    const messages = await prisma.externalMessage.findMany({
+        where: { externalConversationId: row.id },
+        orderBy: { ordinal: "asc" },
+        skip: offset,
+        take: limit,
+        select: {
+            id: true,
+            role: true,
+            ordinal: true,
+            content: true,
+            sourceModelLabel: true,
+            sourceTimestamp: true,
+            truncated: true,
+            originalCharacterCount: true,
+            retainedCharacterCount: true,
+        },
+    });
+    return {
+        id: row.id,
+        importId: row.importId,
+        provider: row.provider,
+        title: row.title,
+        externalStableId: row.externalStableId,
+        sourceModelLabels: Array.isArray(row.sourceModelLabels)
+            ? (row.sourceModelLabels as string[])
+            : [],
+        sourceCreatedAt: row.sourceCreatedAt?.toISOString() ?? null,
+        sourceUpdatedAt: row.sourceUpdatedAt?.toISOString() ?? null,
+        importedAt: row.importedAt.toISOString(),
+        messageTotal: row.messageCount,
+        offset,
+        limit,
+        messages: messages.map((message) => ({
+            id: message.id,
+            role: message.role,
+            ordinal: message.ordinal,
+            content: message.content,
+            sourceModelLabel: message.sourceModelLabel,
+            sourceTimestamp: message.sourceTimestamp?.toISOString() ?? null,
+            truncated: message.truncated,
+            originalCharacterCount: message.originalCharacterCount,
+            retainedCharacterCount: message.retainedCharacterCount,
+        })),
+    };
+}
+
+/**
+ * Deletes one finalized snapshot (§4.2: earlier snapshots of a lineage are
+ * individually deletable). The parent import's counters are corrected in the
+ * same transaction so the history rows stay truthful; `duplicateCount` is a
+ * record of what the import run itself skipped and is left alone.
+ */
+export async function deleteExternalConversationSnapshot(
+    userId: string,
+    conversationId: string
+) {
+    return prisma.$transaction(async (tx) => {
+        const row = await tx.externalConversation.findUnique({
+            where: { id: conversationId },
+        });
+        if (!row || row.userId !== userId || !row.finalized) {
+            throw new ApiSecurityError(
+                404,
+                "NOT_FOUND",
+                "Conversation not found."
+            );
+        }
+        const truncatedMessages = await tx.externalMessage.count({
+            where: { externalConversationId: row.id, truncated: true },
+        });
+        await tx.externalConversation.delete({ where: { id: row.id } });
+        await tx.externalImport.updateMany({
+            where: { id: row.importId },
+            data: {
+                conversationCount: { decrement: 1 },
+                messageCount: { decrement: row.messageCount },
+                normalizedBytes: { decrement: row.contentBytes },
+                truncationCount: { decrement: truncatedMessages },
+            },
+        });
+        return { outcome: "deleted" as const };
     });
 }
 
@@ -699,6 +899,108 @@ export async function deleteExternalImport(userId: string, importId: string) {
 }
 
 /**
+ * Yields every finalized conversation with its full messages, in stable
+ * order, for the account export download (§21). Paged so the route can
+ * stream a response that may approach the 50MB account quota without ever
+ * materializing it whole.
+ */
+export async function* iterateExternalExportConversations(userId: string) {
+    const pageSize = 20;
+    let cursor: { importedAt: Date; id: string } | null = null;
+    for (;;) {
+        const rows: Array<{
+            id: string;
+            provider: string;
+            title: string;
+            externalStableId: string;
+            sourceModelLabels: unknown;
+            conversationDigest: string;
+            digestVersion: number;
+            sourceCreatedAt: Date | null;
+            sourceUpdatedAt: Date | null;
+            importedAt: Date;
+        }> = await prisma.externalConversation.findMany({
+            where: {
+                userId,
+                finalized: true,
+                ...(cursor
+                    ? {
+                          OR: [
+                              { importedAt: { lt: cursor.importedAt } },
+                              {
+                                  importedAt: cursor.importedAt,
+                                  id: { lt: cursor.id },
+                              },
+                          ],
+                      }
+                    : {}),
+            },
+            orderBy: [{ importedAt: "desc" }, { id: "desc" }],
+            take: pageSize,
+            select: {
+                id: true,
+                provider: true,
+                title: true,
+                externalStableId: true,
+                sourceModelLabels: true,
+                conversationDigest: true,
+                digestVersion: true,
+                sourceCreatedAt: true,
+                sourceUpdatedAt: true,
+                importedAt: true,
+            },
+        });
+        if (rows.length === 0) return;
+        for (const row of rows) {
+            const messages = await prisma.externalMessage.findMany({
+                where: { externalConversationId: row.id },
+                orderBy: { ordinal: "asc" },
+                select: {
+                    role: true,
+                    ordinal: true,
+                    content: true,
+                    contentDigest: true,
+                    originalContentDigest: true,
+                    sourceModelLabel: true,
+                    sourceTimestamp: true,
+                    truncated: true,
+                    originalCharacterCount: true,
+                    retainedCharacterCount: true,
+                },
+            });
+            yield {
+                provider: row.provider,
+                title: row.title,
+                externalStableId: row.externalStableId,
+                conversationDigest: row.conversationDigest,
+                digestVersion: row.digestVersion,
+                sourceModelLabels: Array.isArray(row.sourceModelLabels)
+                    ? (row.sourceModelLabels as string[])
+                    : [],
+                sourceCreatedAt: row.sourceCreatedAt?.toISOString() ?? null,
+                sourceUpdatedAt: row.sourceUpdatedAt?.toISOString() ?? null,
+                importedAt: row.importedAt.toISOString(),
+                messages: messages.map((message) => ({
+                    role: message.role,
+                    ordinal: message.ordinal,
+                    content: message.content,
+                    contentDigest: message.contentDigest,
+                    originalContentDigest: message.originalContentDigest,
+                    sourceModelLabel: message.sourceModelLabel,
+                    sourceTimestamp:
+                        message.sourceTimestamp?.toISOString() ?? null,
+                    truncated: message.truncated,
+                    originalCharacterCount: message.originalCharacterCount,
+                    retainedCharacterCount: message.retainedCharacterCount,
+                })),
+            };
+        }
+        const last = rows[rows.length - 1];
+        cursor = { importedAt: last.importedAt, id: last.id };
+    }
+}
+
+/**
  * Staging TTL sweep (§5.5), run from the 15-minute maintenance cycle. Lazy
  * checks in batch/finalize are the primary guard; this clears content whose
  * owner never came back.
@@ -719,6 +1021,11 @@ export async function reconcileExpiredExternalImportStaging(now = new Date()) {
         await prisma.$transaction(async (tx) => {
             await expireStagingImport(tx, row.id);
         });
+    }
+    if (stale.length > 0) {
+        // §22 staging-cleanup metric. A counter rather than a row aggregate:
+        // the expired rows stay owner-deletable, so only the counter survives.
+        await recordExternalImportCounter("staging_expired", stale.length, now);
     }
     return { expiredImports: stale.length };
 }

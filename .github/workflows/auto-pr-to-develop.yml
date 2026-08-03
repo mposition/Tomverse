@@ -11,6 +11,15 @@ on:
       # which put a red required check on each Dependabot PR for a reason that
       # was never a defect in the update.
       - dependabot/**
+      # Automation-owned branch namespaces own their PR creation themselves.
+      # cron-auto-fix.yml pushes autofix/** with a PAT (a PAT push DOES
+      # trigger workflows) and opens its own main PR; without this exclusion
+      # the same branch also got an auto develop PR -- two PRs, one branch.
+      # feedback-autofix/** is the Phase 3 error-report namespace
+      # (docs/policy/trace-feedback-automation.md §9): its workflow opens the
+      # develop PR itself so the case can record the PR number it created.
+      - autofix/**
+      - feedback-autofix/**
 
 permissions:
   contents: read

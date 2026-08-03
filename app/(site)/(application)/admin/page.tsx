@@ -26,10 +26,11 @@ import {
     getAdminUsersPage,
     getAdminUserStats,
 } from "@/lib/adminUsers";
-import { getPublicAppSettings } from "@/lib/appSettings";
+import { getPublicAppSettings, isExternalImportEnabled, isImageGenerationEnabled } from "@/lib/appSettings";
 import { getRuntimeModels } from "@/lib/modelRegistry";
 import { prisma } from "@/lib/prisma";
 import { AdminProviderHealthPanel } from "@/components/admin/AdminProviderHealthPanel";
+import { AdminImageGenerationPanel } from "@/components/admin/AdminImageGenerationPanel";
 import { AdminAuditPanel, type AdminAuditRow } from "@/components/admin/AdminAuditPanel";
 import { AdminAlertPolicyPanel } from "@/components/admin/AdminAlertPolicyPanel";
 import { AdminSlackTemplatesPanel } from "@/components/admin/AdminSlackTemplatesPanel";
@@ -314,6 +315,16 @@ export async function AdminWorkspace({ activeView }: { activeView: AdminWorkspac
                         occurredAt: true,
                     },
                 },
+                // Phase 2 shadow diagnosis state -- observational only; the
+                // panel labels it explicitly as "no auto-fix exists".
+                autoFixCase: {
+                    select: {
+                        state: true,
+                        classification: true,
+                        ineligibilityReason: true,
+                        updatedAt: true,
+                    },
+                },
             },
         }),
         prisma.feedback.count({ where: { status: "open" } }),
@@ -542,6 +553,14 @@ export async function AdminWorkspace({ activeView }: { activeView: AdminWorkspac
                   modelId: feedback.traceEvidence.modelId,
                   sentryEventId: feedback.traceEvidence.sentryEventId,
                   occurredAt: feedback.traceEvidence.occurredAt.toISOString(),
+              }
+            : null,
+        autoFixCase: feedback.autoFixCase
+            ? {
+                  state: feedback.autoFixCase.state,
+                  classification: feedback.autoFixCase.classification,
+                  ineligibilityReason: feedback.autoFixCase.ineligibilityReason,
+                  updatedAt: feedback.autoFixCase.updatedAt.toISOString(),
               }
             : null,
         createdAt: feedback.createdAt.toISOString(),
@@ -1135,7 +1154,7 @@ export async function AdminWorkspace({ activeView }: { activeView: AdminWorkspac
                     )}
 
                     {activeTab === "platform" && (
-                        <PlatformSettingsPanel settings={appSettings} />
+                        <PlatformSettingsPanel settings={appSettings} imageGenerationEnabled={await isImageGenerationEnabled()} externalConversationImportEnabled={await isExternalImportEnabled()} />
                     )}
 
                     {activeTab === "billing" && (
@@ -1287,6 +1306,7 @@ export async function AdminWorkspace({ activeView }: { activeView: AdminWorkspac
                     {activeTab === "usage-cost" && (
                         <section className="flex flex-col gap-4">
                             <AdminProviderUsageSyncPanel />
+                            <AdminImageGenerationPanel />
                             <AdminProviderHealthPanel
                                 initialDashboard={dashboard}
                                 canManageCredits={adminRole === "owner" || adminRole === "billing"}

@@ -54,6 +54,28 @@ export const FIXTURE_CONVERSATION = {
   title: "Quarterly model comparison",
 } as const;
 
+/**
+ * Trace observability seeded onto the two open feedback rows (never as new
+ * rows: the work-queue counter asserts on the open count). The `open` row is
+ * the fully verified path -- signed token, recorded evidence, a Phase 2
+ * shadow case awaiting human review; `slaBreached` is the honest opposite --
+ * a client-classified EMPTY_RESPONSE with no token.
+ */
+export const FIXTURE_TRACE_REPORT = {
+  verified: {
+    traceId: "e2e10000-1111-4111-8111-111111111111",
+    evidenceId: "e2e-trace-evidence-open",
+    occurrenceId: "e2e-occurrence-open",
+    errorCode: "AI_PROVIDER_ERROR",
+    routeClass: "chat",
+    release: "e2e-release-sha",
+    caseId: "e2e-autofix-case-open",
+  },
+  clientClassified: {
+    traceId: "e2e20000-2222-4222-8222-222222222222",
+  },
+} as const;
+
 export const FIXTURE_FEEDBACK = {
   open: {
     id: "e2e-feedback-open",

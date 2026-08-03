@@ -34,6 +34,7 @@ import {
   isErrorReportSigningConfigured,
   verifyErrorReportToken,
 } from "@/lib/errorReportToken";
+import { isAutoFixShadowModeEnabled } from "@/lib/feedbackAutoFixCore";
 
 const feedbackSchema = z
   .object({
@@ -108,6 +109,10 @@ const resolveTraceReport = async (body: {
     clientErrorCode: body.clientErrorCode || null,
     evidenceAvailability: null as string | null,
     traceEvidenceId: null as string | null,
+    /** Authenticated facts from the verified token payload; null otherwise. */
+    occurrenceId: null as string | null,
+    serverErrorCode: null as string | null,
+    sourceRelease: null as string | null,
   };
   if (!body.traceId) return base;
   if (!body.errorReportToken || !isErrorReportSigningConfigured()) {
@@ -136,6 +141,9 @@ const resolveTraceReport = async (body: {
     errorClassificationSource: outcome.payload.errorCode
       ? (ERROR_CLASSIFICATION_SOURCE.server as string)
       : base.errorClassificationSource,
+    occurrenceId: outcome.payload.occurrenceId ?? null,
+    serverErrorCode: outcome.payload.errorCode ?? null,
+    sourceRelease: outcome.payload.release ?? null,
   };
   if (!outcome.payload.occurrenceId) {
     // No occurrence identity: either the issuing policy chose not to record
@@ -254,6 +262,29 @@ export async function POST(req: Request) {
           traceEvidenceId: traceReport.traceEvidenceId,
         },
       });
+      // Phase 2 shadow mode: a verified bug report queues a diagnosis-only
+      // case in the same transaction. Fail-closed behind the env flag; the
+      // case never modifies code and never blocks the submission -- the
+      // worker on the maintenance cadence does the rest.
+      if (
+        isAutoFixShadowModeEnabled() &&
+        body.type === "bug" &&
+        traceReport.verification === TOKEN_VERIFICATION_STATUS.verified &&
+        body.traceId
+      ) {
+        await tx.feedbackAutoFixCase.create({
+          data: {
+            feedbackId: feedback.id,
+            traceId: body.traceId,
+            occurrenceId: traceReport.occurrenceId,
+            sourceRelease: traceReport.sourceRelease,
+            fingerprint: [
+              traceReport.serverErrorCode || "unclassified",
+              traceReport.sourceRelease || "unknown-release",
+            ].join("|"),
+          },
+        });
+      }
       // The immutable snapshot the receipt email renders from -- and the
       // record that this stage was announced at most once.
       await tx.feedbackLifecycleEvent.create({
