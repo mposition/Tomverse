@@ -69,6 +69,7 @@ model User {
   creditDebtEntries       CreditDebtEntry[]
   chatCreditReservations  ChatCreditReservation[]
   imageGenerations        ImageGeneration[]
+  imageGenerationGroups   ImageGenerationGroup[]
   imageCreditReservations ImageCreditReservation[]
   adminAuditLogs          AdminAuditLog[]
   adminNotes              AdminNote[]
@@ -218,15 +219,16 @@ model Conversation {
   shareExpiresAt DateTime?
   shareRevokedAt DateTime?
 
-  messages          Message[]
-  comparisonReviews ComparisonReview[]
-  imageGenerations  ImageGeneration[]
-  user              User?                @relation(fields: [userId], references: [id], onDelete: Cascade)
-  project           ConversationProject? @relation(fields: [projectId], references: [id], onDelete: SetNull)
-  createdAt         DateTime             @default(now())
-  updatedAt         DateTime             @updatedAt
-  password          String?
-  importedGuestKey  String?
+  messages              Message[]
+  comparisonReviews     ComparisonReview[]
+  imageGenerations      ImageGeneration[]
+  imageGenerationGroups ImageGenerationGroup[]
+  user                  User?                  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  project               ConversationProject?   @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  createdAt             DateTime               @default(now())
+  updatedAt             DateTime               @updatedAt
+  password              String?
+  importedGuestKey      String?
 
   @@unique([userId, importedGuestKey])
   @@index([userId, projectId])
@@ -794,19 +796,68 @@ model ImageGeneration {
   providerRequestId   String?
   leaseId             String?
 
+  // v2 (policy §11): every generation is one execution attempt of a target
+  // inside a comparison group. groupId is a denormalized copy of the
+  // target's group for query paths; the FK chain runs through targetId.
+  groupId             String
+  targetId            String
+  attemptNumber       Int     @default(1)
+  retryOfGenerationId String?
+  retryIdempotencyKey String?
+
   createdAt   DateTime  @default(now())
   startedAt   DateTime?
   completedAt DateTime?
   failedAt    DateTime?
   updatedAt   DateTime  @updatedAt
 
-  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
-  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
-  assets       ImageAsset[]
+  user            User                   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  conversation    Conversation           @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  target          ImageGenerationTarget  @relation("TargetAttempts", fields: [targetId], references: [id], onDelete: Cascade)
+  currentOfTarget ImageGenerationTarget? @relation("TargetCurrentAttempt")
+  assets          ImageAsset[]
 
   @@unique([userId, idempotencyKey])
+  @@unique([targetId, retryIdempotencyKey])
   @@index([status, updatedAt])
   @@index([conversationId, createdAt])
+  @@index([groupId])
+}
+
+// One user action: a prompt fanned out to one or more image models
+// (policy §11). Group state is never stored -- it derives from each
+// target's current attempt (lib/imageGenerationStateCore.ts).
+model ImageGenerationGroup {
+  id                  String   @id @default(cuid())
+  userId              String
+  conversationId      String
+  groupIdempotencyKey String
+  createdAt           DateTime @default(now())
+
+  user         User                    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  conversation Conversation            @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  targets      ImageGenerationTarget[]
+
+  @@unique([userId, groupIdempotencyKey])
+  @@index([conversationId, createdAt])
+}
+
+// A logical model slot inside a group. Retries append attempts under the
+// same target; currentGenerationId moves to the newest attempt in the same
+// transaction that creates it (policy §11 two-layer idempotency).
+model ImageGenerationTarget {
+  id                  String   @id @default(cuid())
+  groupId             String
+  provider            String
+  modelId             String
+  currentGenerationId String?  @unique
+  createdAt           DateTime @default(now())
+
+  group             ImageGenerationGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  generations       ImageGeneration[]    @relation("TargetAttempts")
+  currentGeneration ImageGeneration?     @relation("TargetCurrentAttempt", fields: [currentGenerationId], references: [id], onDelete: SetNull)
+
+  @@unique([groupId, modelId])
 }
 
 // A stored object derived from one generation: the untouched provider
@@ -879,6 +930,17 @@ model ImageCreditReservation {
   preset  String
   quality String
   size    String
+
+  // v2 identity snapshot (policy §12/§14): plain strings, never FKs -- this
+  // financial record must survive deletion of everything it describes.
+  // provider/modelId have no schema default on purpose: v2 code writes them
+  // explicitly. identitySource distinguishes rows whose identity was
+  // inferred by the v1 backfill from rows recorded at reservation time.
+  provider       String
+  modelId        String
+  groupId        String?
+  targetId       String?
+  identitySource String  @default("recorded")
 
   reservedCredits            Int
   planReservedCredits        Int

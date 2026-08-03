@@ -99,3 +99,40 @@ export type ImageAssetCleanupReason =
 // surface as an admin metric instead: a key that failed this often needs an
 // operator, not attempt one hundred.
 export const IMAGE_ASSET_CLEANUP_MAX_ATTEMPTS = 10;
+
+// Group state is never stored (policy §11): it derives from each target's
+// CURRENT attempt only. Passing every attempt would let an already-retried
+// failure drag the derivation backwards -- callers must pass exactly one
+// status per target.
+export const IMAGE_GROUP_STATUSES = [
+  "in_progress",
+  "succeeded",
+  "partial_success",
+  "failed",
+] as const;
+
+export type ImageGroupStatus = (typeof IMAGE_GROUP_STATUSES)[number];
+
+const isTerminalGenerationStatus = (status: ImageGenerationStatus) =>
+  status === "succeeded" || status === "failed";
+
+export const deriveImageGroupStatus = (
+  currentAttemptStatuses: readonly ImageGenerationStatus[]
+): ImageGroupStatus => {
+  if (currentAttemptStatuses.length === 0) {
+    // A group with no targets violates the creation invariant; report the
+    // most conservative live state rather than inventing a terminal one.
+    return "in_progress";
+  }
+  if (
+    currentAttemptStatuses.some((status) => !isTerminalGenerationStatus(status))
+  ) {
+    return "in_progress";
+  }
+  const succeeded = currentAttemptStatuses.filter(
+    (status) => status === "succeeded"
+  ).length;
+  if (succeeded === currentAttemptStatuses.length) return "succeeded";
+  if (succeeded === 0) return "failed";
+  return "partial_success";
+};
