@@ -7,6 +7,7 @@ import {
   useRef,
   useState,
   type MouseEvent as ReactMouseEvent,
+  type ReactNode,
 } from "react";
 import { createPortal } from "react-dom";
 import { useChatConsentSlotRef } from "@/components/analytics/AnalyticsProvider";
@@ -115,6 +116,8 @@ type MobileChatShellProps = {
   maxGuestMessages: number;
   isModelSelectionReady: boolean;
   onNewChat: () => void;
+  onNewImage?: (() => void) | null;
+  imageWorkspace?: ReactNode;
   onSelectConversation: (id: string) => void;
   onRename: (id: string, title: string) => void;
   onDelete: (id: string) => void;
@@ -170,6 +173,8 @@ export function MobileChatShell({
   maxGuestMessages,
   isModelSelectionReady,
   onNewChat,
+  onNewImage,
+  imageWorkspace,
   onSelectConversation,
   onRename,
   onDelete,
@@ -822,6 +827,21 @@ export function MobileChatShell({
       </header>
 
       {/*
+        An image conversation replaces the whole chat surface below the top
+        bar -- model tabs, panels, comparison rail and composer are chat-only
+        (docs/policy/image-generation.md §1). The header and the drawer stay,
+        so navigation is unchanged.
+      */}
+      {imageWorkspace ? (
+        <div
+          data-testid="mobile-image-workspace"
+          className="flex min-h-0 w-full flex-1 flex-col overflow-hidden"
+        >
+          {imageWorkspace}
+        </div>
+      ) : (
+        <>
+      {/*
         PROV-BANNER-001. `shrink-0`, so the banner's height is the one this
         shell measured and not whatever the flex algorithm has left over. Left
         shrinkable it was the only elastic row in the column once the welcome
@@ -1143,6 +1163,8 @@ export function MobileChatShell({
 
       <AiDisclaimerNotice testId="chat-ai-disclaimer-mobile" />
       </div>
+      </>
+      )}
 
       {isDrawerOpen && (
         <div
@@ -1179,6 +1201,15 @@ export function MobileChatShell({
                 drawerReturnFocusRef.current = null;
                 onNewChat();
               }}
+              onNewImage={
+                onNewImage
+                  ? () => {
+                      setIsDrawerOpen(false);
+                      drawerReturnFocusRef.current = null;
+                      onNewImage();
+                    }
+                  : null
+              }
               onSelectConversation={(id) => {
                 setIsDrawerOpen(false);
                 drawerReturnFocusRef.current = null;

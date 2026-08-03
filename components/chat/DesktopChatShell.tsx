@@ -70,6 +70,8 @@ type DesktopChatShellProps = {
   maxGuestMessages: number;
   isModelSelectionReady: boolean;
   onNewChat: () => void;
+  onNewImage?: (() => void) | null;
+  imageWorkspace?: React.ReactNode;
   onSelectConversation: (id: string) => void;
   onRename: (id: string, title: string) => void;
   onDelete: (id: string) => void;
@@ -123,6 +125,8 @@ export function DesktopChatShell({
   maxGuestMessages,
   isModelSelectionReady,
   onNewChat,
+  onNewImage,
+  imageWorkspace,
   onSelectConversation,
   onRename,
   onDelete,
@@ -384,6 +388,7 @@ export function DesktopChatShell({
         conversations={conversations}
         currentChatId={currentChatId}
         onNewChat={onNewChat}
+        onNewImage={onNewImage ?? null}
         onSelectConversation={onSelectConversation}
         onRename={onRename}
         onDelete={onDelete}
@@ -401,6 +406,21 @@ export function DesktopChatShell({
       />
 
       <section className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+        {/*
+          An image conversation replaces the entire chat surface -- panels,
+          welcome overlay, comparison rail and composer are all chat-only
+          (docs/policy/image-generation.md §1). The sidebar above stays, so
+          navigation between chat and image conversations is one list.
+        */}
+        {imageWorkspace ? (
+          <div
+            data-testid="desktop-image-workspace"
+            className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden"
+          >
+            {imageWorkspace}
+          </div>
+        ) : (
+          <>
         <ProviderStatusBanner
           selectedModels={selectedModels}
           compact
@@ -805,6 +825,8 @@ export function DesktopChatShell({
             />,
             composerPortalHost
           )}
+          </>
+        )}
       </section>
     </main>
   );

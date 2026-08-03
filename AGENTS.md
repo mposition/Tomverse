@@ -235,8 +235,50 @@ UI-012에서 승인된 정책(B안)입니다. accent 색은 **hue가 아니라 �
   파싱해 변환하고, malformed 값은 파괴하지 않고 보고합니다.
 - 과거 `Message.modelId`, usage reservation/settlement의 modelId와 pricing
   snapshot, 결제 ledger, `catalogDeleted`는 소급 변경하지 않습니다.
+- **"새 대화 기본 조합"은 세 번째 독립 결정입니다**(정책 문서 1.2).
+  `UserSettings.newConversationModelIds`(`Json?`, default 없음)가 로그인
+  사용자의 새 대화 시작 상태의 source of truth이고, `NULL`은
+  `[defaultModel]`로 해석합니다. 해석은 `lib/newConversationModels.ts`의
+  공통 resolver만 담당합니다. 조합을 저장하는 모든 쓰기 경로는 첫 항목과
+  `defaultModel`을 같은 transaction에서 동기화합니다.
+- **읽기 경로는 DB를 rewrite하지 않습니다.** `GET /api/user/settings`가
+  비활성 기본 모델을 발견해도 stored 값은 보존하고 effective 상태와
+  `modelSelectionNotice`만 반환합니다. 영구 변경은 사용자의 명시적 재저장
+  또는 승인된 retirement reconciliation뿐입니다. 저장 성공 응답은 요청
+  echo가 아니라 실제 DB 저장값만 반환합니다. UI 계약은
+  `docs/ui-contracts/account-model-settings.md`.
 
 <!-- BEGIN:mobile-chat-composer-invariant -->
+# Trace 기반 오류 신고 자동화
+
+feedback의 Trace 검증, `errorReportToken`, `TraceErrorEvidence`, chat 오류
+응답 builder를 건드리기 전에 읽습니다.
+
+- `docs/policy/trace-feedback-automation.md`
+
+절대 조건:
+
+- **Trace ID 문자열은 인증 수단이 아닙니다.** provenance
+  (`server_generated`/`client_supplied`/`client_fallback`/`unknown`)를
+  구분하고, 사용자 입력 Trace만으로 자동화 적격성을 인정하지 않습니다.
+- **token은 서버가 직접 생성한 Trace의 server-classified 오류에만 중앙
+  발급합니다** (`issueChatErrorReportGrant` 한 곳). client/Edge Trace와
+  client-classified `EMPTY_RESPONSE`에는 발급하지 않고, 정상 stream에
+  선발급하지 않습니다. token 모듈은 Node 전용이며 `proxy.ts`/Edge bundle에
+  import하지 않습니다.
+- **원시 token은 저장·전송 금지.** feedback 제출 body 1회가 유일한 예외이고
+  서버는 검증 후 즉시 버립니다. `Message.errorReport`는 runtime 전용이며
+  모든 직렬화는 `lib/chatMessageSerialization.ts`의 allowlist를 통합니다.
+- **evidence identity는 Trace ID와 독립입니다.** `traceId`를 PK·unique·
+  upsert key로 쓰지 않고, 연결은 token payload의 `occurrenceId`로만 합니다.
+- **feedback 제출과 Trace 검증은 분리됩니다.** 검증 실패는 신고 저장을 막지
+  않습니다. verification/classification/evidence availability는 독립 관찰로
+  별도 저장하며, client 분류를 server 사실로 승격하지 않습니다.
+- **Phase 2·3(자동 진단·자동 수정)은 미구현입니다.** LLM confidence를 자동
+  게이트로 쓰지 않고, 결정적 Red→Green 증명 없는 자동 수정을 금지하며,
+  자동 생성 수정의 target은 `develop`뿐입니다. staging 배포를 production
+  해결로 표시하지 않습니다.
+
 ## Mobile chat composer invariant
 
 Before changing `ChatInput.tsx`, `MobileChatShell.tsx`, composer styles, tool chips, or mobile bottom-dock layout, read:

@@ -130,14 +130,26 @@ gate 없이 노출되는 배포 창은 금지된다. UI 비노출은 보안 경�
   행을 남기지 않는다(`preflight_rejected`는 지표로만 관측).
 - generation이 0개인 image Conversation은 정상 흐름이 아니라 invariant
   위반으로 보고한다.
+- **`selectedModels` invariant**: image 대화는 생성 시 `"[]"`를 명시
+  저장하고 어떤 서버 경로도 이를 읽지 않는다. 이미지 모델은 이미지 생성
+  계층의 고정 allowlist에서만 결정된다. 소비처 감사 결과 공용 경로는 전부
+  `safeParse(..., fallback)` 또는 `|| []` 방어가 있어 빈 배열에 안전하다
+  (`components/chat/ChatSidebar.tsx`의 모델 수 계산 포함).
 
 ## 7. 실행 방식과 동시 실행
 
-- 실행은 **DB 기반 image worker**가 담당한다: POST는 원자 생성 후 즉시
-  202와 `conversationId`·`generationId`를 반환하고, worker가 `pending`을
-  조건부 claim해 provider 호출·저장·정산을 수행하며, UI는 상태 조회로
-  렌더링한다. 동기 handler 완주 방식은 Cloudflare proxy read timeout
-  (기본 125초)과 OpenAI 최대 ~2분 생성 시간이 겹쳐 채택하지 않는다.
+- 실행 모델은 **claim 기반 비동기 처리**다: POST는 원자 생성 후 즉시
+  202와 `conversationId`·`generationId`를 반환하고, 실행자는 `pending`을
+  조건부 claim(`pending → processing`)해 provider 호출·저장·정산을
+  수행하며, UI는 상태 조회로 렌더링한다. 동기 handler 완주 방식은
+  Cloudflare proxy read timeout(기본 125초)과 OpenAI 최대 ~2분 생성
+  시간이 겹쳐 채택하지 않는다.
+- **v1 실행자는 응답 후 같은 프로세스에서 실행되는 `after()` 훅**이다.
+  202가 이미 전송된 뒤 실행되므로 proxy timeout의 영향을 받지 않고,
+  claim이 조건부라서 15분 reconciliation sweep이나 미래의 전용 worker
+  서비스와 안전하게 공존한다(저장소에 장기 실행 worker 선례가 없어 별도
+  Railway 서비스 신설은 운영 PR에서 실측 후 결정). 프로세스 종료로 죽은
+  실행은 정확히 stale 케이스이며 sweep이 `failed` 처리 후 전액 환급한다.
 - 배포·프로세스 종료로 회수 불가능해진 stale 작업은 reconciliation이
   `failed` 처리하고 전액 환급한다. Railway graceful shutdown 유예
   (`RAILWAY_DEPLOYMENT_DRAINING_SECONDS`)를 함께 설정한다.

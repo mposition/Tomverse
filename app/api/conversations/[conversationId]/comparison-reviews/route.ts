@@ -39,6 +39,7 @@ import {
   conversationLockedResponse,
   hasConversationUnlockGrant,
 } from "@/lib/conversationLock";
+import { conversationKindNotSupportedResponse, isChatConversationKind } from "@/lib/conversationKindGuard";
 import { prisma } from "@/lib/prisma";
 import {
   apiSecurityResponse,
@@ -82,7 +83,7 @@ const authorizeConversation = async (
 ) => {
   const conversation = await prisma.conversation.findUnique({
     where: { id: conversationId },
-    select: { id: true, userId: true, password: true, title: true },
+    select: { id: true, userId: true, password: true, title: true, kind: true },
   });
   if (!conversation || conversation.userId !== userId) {
     return { response: jsonError("Conversation not found.", "NOT_FOUND", 404) };
@@ -96,6 +97,11 @@ const authorizeConversation = async (
     )
   ) {
     return { response: conversationLockedResponse() };
+  }
+  // Comparison reviews are a chat-conversation feature; image conversations
+  // have no model answers to compare (docs/policy/image-generation.md §1).
+  if (!isChatConversationKind(conversation.kind)) {
+    return { response: conversationKindNotSupportedResponse() };
   }
   return { conversation };
 };

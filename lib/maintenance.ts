@@ -9,6 +9,7 @@ import {
 import { expireCreditLots } from "@/lib/creditLedger";
 import { reconcileExpiredChatCreditReservations } from "@/lib/chatSecurity";
 import { purgeExpiredChatLimitDecisions } from "@/lib/chatLimitDecisions";
+import { purgeExpiredTraceErrorEvidence } from "@/lib/traceErrorEvidence";
 import {
   sendFoundingTesterPassEndedEmail,
   sendFoundingTesterPassReminderEmail,
@@ -377,6 +378,12 @@ export async function cleanupExpiredData() {
     },
   });
 
+  // Same 30-day window as the provider error diagnostics above; the count is
+  // the only thing recorded -- never the evidence contents. Feedback rows
+  // linked to a purged occurrence keep their verification outcome (the FK
+  // nulls out via onDelete: SetNull).
+  const traceErrorEvidence = await purgeExpiredTraceErrorEvidence();
+
   const productAnalyticsEvents = await prisma.productAnalyticsEvent.deleteMany({
     where: {
       occurredAt: {
@@ -448,6 +455,7 @@ export async function cleanupExpiredData() {
     usageBuckets: Number(usageBuckets),
     requestLeases: Number(requestLeases),
     providerErrorEvents: providerErrorEvents.count,
+    traceErrorEvidence,
     productAnalyticsEvents: productAnalyticsEvents.count,
     limitDecisions: limitDecisions.deleted,
     promotionRiskIdentifiers: promotionRiskIdentifiers.count,

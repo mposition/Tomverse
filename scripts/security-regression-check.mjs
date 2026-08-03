@@ -690,7 +690,12 @@ const checks = [
     name: "Provider monitoring keeps DB and enforced monthly limits separate",
     file: "lib/providerMonitoring.ts",
     test: (source) =>
-      source.includes('internalBudgetSource: "railway_environment" | "code_default"') &&
+      // Tri-state on purpose: a missing production budget reports as
+      // "unconfigured" and alerts, never as an invented code default --
+      // the monitoring path must agree with the fail-closed enforcement.
+      source.includes("internalBudgetSource: ProviderBudgetConfigSource") &&
+      source.includes('"unconfigured"') &&
+      source.includes("Provider budget unconfigured") &&
       source.includes("providerBillingHeadroomMicroUsd") &&
       source.includes("internalBudgetHeadroomMicroUsd") &&
       source.includes("Math.min(providerBillingLimitMicroUsd, monthBudgetMicroUsd)") &&
@@ -706,6 +711,24 @@ const checks = [
       source.includes("CHAT_PROVIDER_${provider.provider.toUpperCase()}_COST_MICROUSD_PER_MONTH") &&
       source.includes("Not enforced by Tomverse") &&
       source.includes("Request blocking"),
+  },
+  {
+    name: "Image provider budget has no silent production default",
+    file: "lib/imageProviderBudget.ts",
+    test: (source) =>
+      source.includes("IMAGE_PROVIDER_OPENAI_COST_MICROUSD_PER_DAY") &&
+      source.includes("IMAGE_PROVIDER_OPENAI_COST_MICROUSD_PER_MONTH") &&
+      source.includes('"missing_in_production"') &&
+      source.includes('"partial_configuration"') &&
+      source.includes("imageProviderBudgetFloorMicroUsd"),
+  },
+  {
+    name: "Readiness gates on the image provider budget while the flag is on",
+    file: "app/api/ready/route.ts",
+    test: (source) =>
+      source.includes("getImageProviderBudgetReadiness") &&
+      source.includes("IMAGE_PROVIDER_COST_BUDGET_NOT_READY") &&
+      source.includes("imageProviderBudget"),
   },
   {
     name: "Product analytics payload is strict and content-free",

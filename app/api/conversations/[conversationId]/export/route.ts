@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth/next";
+import { conversationKindNotSupportedResponse, isChatConversationKind } from "@/lib/conversationKindGuard";
 import { prisma } from "@/lib/prisma";
 import { authOptions } from "@/lib/auth";
 import {
@@ -51,6 +52,7 @@ export async function GET(
                 title: true,
                 createdAt: true,
                 password: true,
+                kind: true,
             },
         });
 
@@ -67,6 +69,11 @@ export async function GET(
             )
         ) {
             return conversationLockedResponse();
+        }
+        // The export format is a text-message transcript; image
+        // conversations have none (docs/policy/image-generation.md §1).
+        if (!isChatConversationKind(conversation.kind)) {
+            return conversationKindNotSupportedResponse();
         }
 
         const encoder = new TextEncoder();

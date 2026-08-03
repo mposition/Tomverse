@@ -96,6 +96,89 @@ hydration 후 선택. 값마다 출처(`app_setting` · `compiled_default` ·
 이미 `gpt-5-6-luna`이고, 컴파일된 기본값 · Prisma 기본값 · 설정 route의 생성값이
 셋 다 `gpt-5-6-luna`입니다.
 
+## 1.2 세 번째 개념: 로그인 사용자의 새 대화 기본 조합
+
+2026-08-03에 추가된 **세 번째 독립 결정**입니다. A(게스트 선두)도 B(플랫폼·계정
+대표 모델)도 대체하지 않으며, 둘 중 어느 쪽을 바꾸는 것도 이 결정을 바꾸지
+않습니다.
+
+**C. 로그인 사용자의 새 대화 기본 조합**
+
+- `UserSettings.newConversationModelIds` (`Json?`, schema default 없음)
+- 1~3개 모델 ID 배열이며, **실제 새 대화 시작 상태의 source of truth**입니다
+- `NULL`(DB NULL·JSON null 모두)은 `[defaultModel]`로 해석합니다 — 기존 계정은
+  backfill 없이 단일 모델 동작을 그대로 보존합니다
+- 해석은 `lib/newConversationModels.ts`의 공통 resolver 하나가 담당합니다.
+  route와 클라이언트가 제각각 fallback을 구현하지 않습니다
+
+**대표 모델(`UserSettings.defaultModel`)과의 관계**
+
+- `defaultModel`은 삭제되지도, 의미가 바뀌지도 않습니다. 단독 시작·조합 선두·
+  fallback·하위 호환 값이며, 사용자 UI 명칭은 "대표 모델"입니다
+- **조합이 명시적으로 저장되는 모든 쓰기 경로에서 `defaultModel`은 조합의 첫
+  항목과 같은 transaction 안에서 동기화**됩니다 (Model Finder `complete`·
+  `accept_default`, `/api/user/settings` POST)
+- legacy client가 `defaultModel`만 보내면 기존 유효 조합의 선두를 그 모델로
+  옮기고 나머지 순서를 유지합니다(중복 제거, 최대 3개, 초과 시 마지막 항목
+  제거). 기존 조합이 없으면 `[defaultModel]`을 저장합니다
+
+**stored와 effective의 구분 (2026-08-03 정책 개정)**
+
+이전에는 `GET /api/user/settings`가 비활성 `defaultModel`을 발견하면 DB를
+replacement로 **영구 갱신**했습니다. 이 동작은 폐지되었습니다:
+
+- **읽기 경로는 어떤 경우에도 DB를 rewrite하지 않습니다.** resolver가 저장값
+  (stored)과 실제 제공 가능한 값(effective)을 구분해 계산하고, 응답은 effective
+  상태와 변경 reason(`modelSelectionNotice`)을 반환합니다
+- 저장 모델이 delist·disable·retire되어 replacement로 해석되더라도 조용히
+  축소·교체하지 않고 사용자에게 안내합니다. 같은 reason과 모델 조합에 대한
+  시각적 안내는 세션당 한 번으로 제한하되, 구조화 로그는 매번 남깁니다
+- **영구 변경은 두 경로뿐입니다**: 사용자의 명시적 재저장, 또는 승인된
+  retirement reconciliation(§7). 이 문서가 요구하는 "은퇴 모델의 replacement
+  복구"는 응답의 effective 상태로 충족되며 DB rewrite를 의미하지 않습니다
+- 저장 성공 응답은 요청 echo가 아니라 **실제 DB에 저장된 정규화 값**만
+  반환합니다. Model Finder의 "기본 조합으로 저장"이 첫 모델만 저장하면서 요청
+  배열 전체를 저장 결과처럼 응답하던 결함(2026-08-03 수정)이 이 규칙의
+  배경입니다
+
+**비용 규칙**
+
+- 기존 사용자에게 모델이나 비용을 자동으로 추가하지 않습니다
+- Advanced·Research 모델은 반복 기본 사용 비용임을 저장 전에 명시적으로 확인
+  받아야 조합에 들어갈 수 있습니다
+- 크레딧 합계의 출처는 기존 클라이언트 계산 경로(runtime catalogue usage
+  profile) 하나입니다. API 응답에 별도 `estimatedCredits`를 추가하지 않습니다
+- resolver는 상위 플랜·고비용 모델로 자동 승격하지 않습니다
+
+UI 계약은 `docs/ui-contracts/account-model-settings.md`가 고정하고,
+`npm run check:default-models`의 **C. Signed-in new conversation combination**
+섹션이 컬럼 nullable 계약·fallback·쓰기 경로 동기화·읽기 경로의 no-rewrite를
+fail-closed로 검사합니다. "마지막 사용 조합" 같은 추가 시작 모드는 이 개정의
+범위 밖이며, 도입하려면 별도 설계 결정이 필요합니다.
+
+**배포 순서 (migration-first)**
+
+additive nullable 컬럼이 "안전"한 방향은 한쪽뿐입니다: **기존 코드는 새
+컬럼을 몰라도 되지만, 새 코드는 컬럼 없이 동작하지 못합니다.** 새 Prisma
+Client는 `UserSettings`를 `select` 없이 읽는 모든 경로에서 이 컬럼을
+조회하므로, migration보다 먼저 트래픽을 받으면 설정 조회·저장이 실패합니다.
+
+1. nullable 컬럼 migration을 먼저 적용하고 성공을 확인합니다
+2. 그 다음에 신규 코드를 배포합니다
+3. readiness와 설정·새 대화 smoke test를 확인합니다
+4. 문제 시 코드는 rollback하되 **nullable 컬럼은 그대로 둡니다** — 기존
+   코드는 이 컬럼을 무시하므로 컬럼 제거는 필요도 없고 위험만 더합니다
+
+migration과 코드가 한 배포에 묶여 있다면, migration 완료 후에만 신규
+인스턴스가 트래픽을 받는다는 보장이 있어야 합니다.
+
+**기존 conversation의 fallback은 이 개정의 대상이 아닙니다.** 저장값을 읽을
+수 없는 기존 conversation의 표시 fallback은 `[defaultModel]` 하나이며, 계정의
+새 대화 기본 조합을 적용하지 않습니다 — 적용하면 단일 모델이던 기존 대화가
+여러 패널로 조용히 확장됩니다. 조합은 오직 **새** conversation의 시작
+상태만 정합니다(`tests/newConversationModels.test.mjs`가 소스 수준으로
+고정).
+
 ## 2. 왜 Luna인가
 
 | 항목 | `gpt-5-4-mini` | `gpt-5-6-luna` |

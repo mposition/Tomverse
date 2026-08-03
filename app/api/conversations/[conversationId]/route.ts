@@ -2,6 +2,7 @@
 
 import { NextResponse } from "next/server";
 import type { Prisma } from "@prisma/client";
+import { enqueueImageAssetCleanupForConversations } from "@/lib/imageAssetLifecycle";
 import { prisma } from "@/lib/prisma";
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
@@ -156,6 +157,7 @@ export async function GET(
         id: true,
         userId: true,
         title: true,
+        kind: true,
         selectedModels: true,
         disabledPanels: true,
         webSearchMode: true,
@@ -216,6 +218,8 @@ export async function GET(
     return NextResponse.json({
       ...conversation,
         messages,
+        kind:
+          conversation.kind === "image" ? ("image" as const) : ("chat" as const),
         projectId: conversation.projectId || null,
         messagePage: {
           hasMore: hasMoreMessages,
@@ -567,8 +571,16 @@ export async function DELETE(req: Request, { params }: Params) {
       return conversationLockedResponse();
     }
 
-    await prisma.conversation.delete({
-      where: { id: conversationId },
+    // DB-first tombstone: generated-image R2 keys are enqueued for cleanup
+    // in the same transaction that deletes the rows, and the fifteen-minute
+    // maintenance sweep deletes the objects afterwards. Deleting R2 first
+    // and the rows second would leave the database pointing at missing
+    // objects whenever the second step failed.
+    await prisma.$transaction(async (tx) => {
+      await enqueueImageAssetCleanupForConversations(tx, [conversationId]);
+      await tx.conversation.delete({
+        where: { id: conversationId },
+      });
     });
     logSecurityAuditEvent("conversation.delete", {
       userId,

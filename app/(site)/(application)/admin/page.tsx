@@ -294,6 +294,27 @@ export async function AdminWorkspace({ activeView }: { activeView: AdminWorkspac
         prisma.feedback.findMany({
             orderBy: { createdAt: "desc" },
             take: 10,
+            include: {
+                // The linked evidence occurrence, when the report verified
+                // with an exact link. Sanitized technical fields only -- the
+                // evidence model stores no message bodies by contract.
+                traceEvidence: {
+                    select: {
+                        occurrenceId: true,
+                        environment: true,
+                        release: true,
+                        routeClass: true,
+                        phase: true,
+                        errorCode: true,
+                        classificationSource: true,
+                        httpStatus: true,
+                        provider: true,
+                        modelId: true,
+                        sentryEventId: true,
+                        occurredAt: true,
+                    },
+                },
+            },
         }),
         prisma.feedback.count({ where: { status: "open" } }),
         prisma.refundRequest.findMany({
@@ -501,6 +522,28 @@ export async function AdminWorkspace({ activeView }: { activeView: AdminWorkspac
         emailUpdatesConsent: feedback.emailUpdatesConsent,
         closureOutcome: feedback.closureOutcome,
         userReply: feedback.userReply,
+        errorReportVerification: feedback.errorReportVerification,
+        traceProvenance: feedback.traceProvenance,
+        errorClassificationSource: feedback.errorClassificationSource,
+        clientErrorCode: feedback.clientErrorCode,
+        evidenceAvailability: feedback.evidenceAvailability,
+        traceEvidence: feedback.traceEvidence
+            ? {
+                  occurrenceId: feedback.traceEvidence.occurrenceId,
+                  environment: feedback.traceEvidence.environment,
+                  release: feedback.traceEvidence.release,
+                  routeClass: feedback.traceEvidence.routeClass,
+                  phase: feedback.traceEvidence.phase,
+                  errorCode: feedback.traceEvidence.errorCode,
+                  classificationSource:
+                      feedback.traceEvidence.classificationSource,
+                  httpStatus: feedback.traceEvidence.httpStatus,
+                  provider: feedback.traceEvidence.provider,
+                  modelId: feedback.traceEvidence.modelId,
+                  sentryEventId: feedback.traceEvidence.sentryEventId,
+                  occurredAt: feedback.traceEvidence.occurredAt.toISOString(),
+              }
+            : null,
         createdAt: feedback.createdAt.toISOString(),
     }));
     const auditRows: AdminAuditRow[] = auditLogs.map((log) => ({

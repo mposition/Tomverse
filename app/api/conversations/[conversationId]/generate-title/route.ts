@@ -3,6 +3,7 @@ export const dynamic = "force-dynamic";
 import { randomUUID } from "node:crypto";
 import { NextResponse } from "next/server";
 import { z } from "zod";
+import { conversationKindNotSupportedResponse, isChatConversationKind } from "@/lib/conversationKindGuard";
 import { prisma } from "@/lib/prisma";
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
@@ -71,7 +72,7 @@ export async function POST(
 
     const existingConv = await prisma.conversation.findUnique({
       where: { id: conversationId },
-      select: { userId: true, password: true },
+      select: { userId: true, password: true, kind: true },
     });
     if (!existingConv) {
       return NextResponse.json(
@@ -90,6 +91,12 @@ export async function POST(
       !hasConversationUnlockGrant(req, userId, conversationId, existingConv.password)
     ) {
       return conversationLockedResponse();
+    }
+    // Title generation calls a text model; image conversation titles are a
+    // server-side prompt slice, never a model call
+    // (docs/policy/image-generation.md §1).
+    if (!isChatConversationKind(existingConv.kind)) {
+      return conversationKindNotSupportedResponse();
     }
 
     const firstMessage = await prisma.message.findFirst({

@@ -10,6 +10,7 @@ import {
     validateR2ObjectMetadata,
     writeR2Object,
 } from "@/lib/r2";
+import { conversationKindNotSupportedResponse, isChatConversationKind } from "@/lib/conversationKindGuard";
 import { prisma } from "@/lib/prisma";
 import {
     modelSupportsImageInput,
@@ -27,6 +28,8 @@ import { getWebSearchSurchargeCredits } from "@/lib/webSearchCredits";
 import { buildWebSearchToolConfig, WEB_SEARCH_TOOL_NAMES } from "@/lib/webSearchToolConfig";
 import { normalizeWebSearchExecution } from "@/lib/webSearchExecutionNormalizer";
 import { buildSearchMetadataTrailerChunk } from "@/lib/webSearchStreamTrailer";
+import { ERROR_REPORT_TOKEN_HEADER } from "@/lib/errorReportContract";
+import { issueChatErrorReportGrant } from "@/lib/traceErrorEvidence";
 import {
     consumePerplexityUsage,
     discardPerplexityUsage,
@@ -180,15 +183,37 @@ const tracedJsonError = (
     code: string,
     status: number,
     traceId: string,
-    details?: Record<string, unknown>
-) =>
-    new Response(JSON.stringify({ error, code, traceId, ...(details ? { details } : {}) }), {
+    details?: Record<string, unknown>,
+    grantContext?: {
+        phase?: string;
+        provider?: string | null;
+        modelId?: string | null;
+        error?: unknown;
+    }
+) => {
+    // Central error-report grant issuance for this route's JSON errors. The
+    // traceId here is always this route's own randomUUID (server_generated);
+    // the grant signs it so the feedback endpoint can tell a genuine server
+    // error report from a typed-in trace string. Header-only on purpose: the
+    // body contract stays byte-identical for existing consumers.
+    const grant = issueChatErrorReportGrant({
+        traceId,
+        routeClass: "chat",
+        errorCode: code,
+        httpStatus: status,
+        ...(grantContext || {}),
+    });
+    return new Response(JSON.stringify({ error, code, traceId, ...(details ? { details } : {}) }), {
         status,
         headers: {
             "Content-Type": "application/json",
             "X-Request-ID": traceId,
+            ...(grant.errorReportToken
+                ? { [ERROR_REPORT_TOKEN_HEADER]: grant.errorReportToken }
+                : {}),
         },
     });
+};
 const OFFICE_ATTACHMENT_TYPES = new Set([
     "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -837,7 +862,7 @@ async function handleChatPost(
             }
             const conversation = await prisma.conversation.findUnique({
                 where: { id: conversationId },
-                select: { userId: true, password: true, selectedModels: true },
+                select: { userId: true, password: true, selectedModels: true, kind: true },
             });
             if (!conversation || conversation.userId !== session.user.id) {
                 return tracedJsonError(
@@ -856,6 +881,12 @@ async function handleChatPost(
                 )
             ) {
                 return conversationLockedResponse();
+            }
+            // Image conversations never accept chat messages; their model
+            // comes from the image generation layer, not selectedModels.
+            // See docs/policy/image-generation.md section 1.
+            if (!isChatConversationKind(conversation.kind)) {
+                return conversationKindNotSupportedResponse();
             }
             const selectedConversationModels = Array.from(
                 new Set(parseStoredModelIds(conversation.selectedModels))
@@ -2132,6 +2163,23 @@ async function handleChatPost(
                 );
             }
             accessError.headers.set("X-Request-ID", traceId);
+            if (error instanceof ChatAccessError) {
+                // Limit/entitlement rejections are reportable too; the grant
+                // signs the trace but records no new evidence row -- the
+                // existing limit-decision events are the record for these.
+                const grant = issueChatErrorReportGrant({
+                    traceId,
+                    routeClass: "chat",
+                    errorCode: error.code,
+                    httpStatus: error.status,
+                });
+                if (grant.errorReportToken) {
+                    accessError.headers.set(
+                        ERROR_REPORT_TOKEN_HEADER,
+                        grant.errorReportToken
+                    );
+                }
+            }
             return accessError;
         }
 
@@ -2178,7 +2226,14 @@ async function handleChatPost(
             "AI 응답 생성에 실패했습니다.",
             "AI_PROVIDER_ERROR",
             500,
-            traceId
+            traceId,
+            undefined,
+            {
+                phase: "request",
+                provider: requestedProviderForLog,
+                modelId: requestedModelIdForLog,
+                error,
+            }
         );
     }
 }

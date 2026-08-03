@@ -43,6 +43,7 @@ import {
   perplexityUsageHeaders,
 } from "@/lib/perplexityUsageCapture";
 import type { PerplexityUsageCostSnapshot } from "@/lib/perplexityUsageCore";
+import { conversationKindNotSupportedResponse, isChatConversationKind } from "@/lib/conversationKindGuard";
 import { prisma } from "@/lib/prisma";
 import { safeErrorMetadata } from "@/lib/providerErrorClassification";
 import {
@@ -122,10 +123,13 @@ export async function GET(
     const { conversationId } = await context.params;
     const conversation = await prisma.conversation.findUnique({
       where: { id: conversationId },
-      select: { userId: true, password: true, title: true },
+      select: { userId: true, password: true, title: true, kind: true },
     });
     if (!conversation || conversation.userId !== session.user.id) {
       return jsonError("Conversation not found.", "NOT_FOUND", 404, traceId);
+    }
+    if (!isChatConversationKind(conversation.kind)) {
+      return conversationKindNotSupportedResponse();
     }
     if (
       !hasConversationUnlockGrant(
@@ -255,10 +259,13 @@ export async function POST(
     const { conversationId } = await context.params;
     const conversation = await prisma.conversation.findUnique({
       where: { id: conversationId },
-      select: { userId: true, password: true, title: true },
+      select: { userId: true, password: true, title: true, kind: true },
     });
     if (!conversation || conversation.userId !== session.user.id) {
       return jsonError("Conversation not found.", "NOT_FOUND", 404, traceId);
+    }
+    if (!isChatConversationKind(conversation.kind)) {
+      return conversationKindNotSupportedResponse();
     }
     if (
       !hasConversationUnlockGrant(

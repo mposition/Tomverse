@@ -1,4 +1,5 @@
 ﻿import type { WebSearchExecution } from "@/lib/webSearchExecutionNormalizer";
+import type { MessageErrorReportContext } from "@/lib/errorReportContract";
 
 export type ChatAttachment = {
   id: string;
@@ -19,6 +20,14 @@ export type Message = {
   modelId?: string;
   errorCode?: string;
   errorHadAttachments?: boolean;
+  /**
+   * Live-memory error report context for this message's own error: its trace,
+   * where that trace came from, and (when the server issued one) the signed
+   * error report token. Runtime only -- every serializer in
+   * lib/chatMessageSerialization.ts excludes it, so it never reaches
+   * localStorage, /api/chat transcripts, imports or sync payloads.
+   */
+  errorReport?: MessageErrorReportContext;
   createdAt?: string;
   pendingJobId?: string | null;
   searchMetadata?: WebSearchExecution | null;
@@ -27,6 +36,13 @@ export type Message = {
 export type Conversation = {
   id: string;
     title: string;
+    /**
+     * "chat" (default) or "image". Server-decided at creation. An image
+     * conversation renders the image workspace instead of the chat panels;
+     * chat send, comparison, AI Review, web search, deep research, share and
+     * export are all unavailable for it (docs/policy/image-generation.md §1).
+     */
+    kind?: "chat" | "image";
     projectId?: string | null;
     selectedModels?: string[];
     disabledPanels?: string[];

@@ -36,6 +36,8 @@ import { Conversation, type ChatAttachment } from "@/components/chat/types";
 import { useConversationDrafts } from "@/components/chat/useConversationDrafts";
 import { useModelCatalog } from "@/components/ModelCatalogProvider";
 import { useSession } from "next-auth/react";
+import { ImageGenerationWorkspace } from "@/components/images/ImageGenerationWorkspace";
+import { planAllowsImageGeneration } from "@/lib/imageGenerationAccess";
 import {
   useLanguage,
   type Language,
@@ -434,8 +436,11 @@ export function ChatPageClient({
   // Resolved on the server (see page.tsx) rather than fetched after mount, so
   // this component's very first render already knows the guest default.
   guestDefaultModelId,
+  imageGenerationEnabled = false,
 }: {
   guestDefaultModelId: string;
+  /** The image generation opt-in flag, resolved server-side in page.tsx. */
+  imageGenerationEnabled?: boolean;
 }) {
   const {
     models: AVAILABLE_MODELS,
@@ -453,6 +458,10 @@ export function ChatPageClient({
     useState(false);
   const [currentChatId, setCurrentChatId] = useState<string | null>(null);
   const [conversations, setConversations] = useState<Conversation[]>([]);
+  // True while a "new image" draft is open: the workspace renders with no
+  // server row, which is only created by the first successful generation
+  // request (docs/policy/image-generation.md §6).
+  const [isImageDraftActive, setIsImageDraftActive] = useState(false);
   const { data: session, status } = useSession();
   const sessionUserId = session?.user?.id || null;
   // Declared before any model state below because the initial selected models
@@ -466,7 +475,12 @@ export function ChatPageClient({
   const isSending = false;
   const [focusToken, setFocusToken] = useState(0);
 
-    const [userDefaultEngine, setUserDefaultEngine] = useState<string>(APP_DEFAULTS.defaultModelId);
+    // The account's saved new-conversation combination (lead first). This is
+    // what a new chat starts with; the representative model is always
+    // userDefaultModelIds[0].
+    const [userDefaultModelIds, setUserDefaultModelIds] = useState<string[]>([
+        APP_DEFAULTS.defaultModelId,
+    ]);
   const [isUserSettingsLoaded, setIsUserSettingsLoaded] = useState(false);
   // Both shells gate their model UI on this: a signed-in tab only knows its
   // real selection once settings, the conversation list and the initial
@@ -1588,13 +1602,15 @@ export function ChatPageClient({
         webSearchMode?: unknown;
         messages?: Array<{ role?: string; modelId?: string | null }>;
     }, targetChatId?: string) => {
-        const savedModels = normalizeStringArray(data.selectedModels, [userDefaultEngine]);
+        const savedModels = normalizeStringArray(data.selectedModels, userDefaultModelIds);
         const nextModels = clampSelectedModels(uniqueStrings(savedModels));
         const nextDisabled = normalizeStringArray(data.disabledPanels, []).filter(
             (modelId) => nextModels.includes(modelId)
         );
+        // The empty-conversation fallback is the account's saved
+        // new-conversation combination, not just the representative model.
         const appliedModels =
-            nextModels.length > 0 ? nextModels : [userDefaultEngine];
+            nextModels.length > 0 ? nextModels : userDefaultModelIds;
 
         setSelectedModels(appliedModels);
         setDisabledPanels(nextDisabled);
@@ -1616,7 +1632,7 @@ export function ChatPageClient({
             disabled: nextDisabled,
           });
         }
-    }, [clampSelectedModels, userDefaultEngine]);
+    }, [clampSelectedModels, userDefaultModelIds]);
 
   useEffect(() => {
     if (!isGuestMode) {
@@ -1641,7 +1657,7 @@ export function ChatPageClient({
       queueMicrotask(() => {
       if (cancelled) return;
       guestBootstrapAppliedRef.current = true;
-      setUserDefaultEngine(guestDefaultModelId);
+      setUserDefaultModelIds([guestDefaultModelId]);
       // Decided once and written once. selectedModels already holds this same
       // value from the first render, so this cannot change what is on screen;
       // it exists so the restore path below can refine it in the same commit
@@ -1813,9 +1829,16 @@ export function ChatPageClient({
             const detail = (event as CustomEvent<UserSettingsUpdatedDetail>).detail;
             if (!detail || !isEnabledModelId(detail.defaultModel)) return;
 
-            setUserDefaultEngine(detail.defaultModel);
+            // A legacy dispatch without a combination means [defaultModel].
+            const combination = (
+                detail.newConversationModelIds ?? [detail.defaultModel]
+            ).filter(isEnabledModelId);
+            const nextDefaultModels =
+                combination.length > 0 ? combination : [detail.defaultModel];
+
+            setUserDefaultModelIds(nextDefaultModels);
             if (!currentChatId) {
-                setSelectedModels([detail.defaultModel]);
+                setSelectedModels(nextDefaultModels);
                 setDisabledPanels([]);
             }
         };
@@ -1858,10 +1881,12 @@ export function ChatPageClient({
     // stayed stuck until the tab was reloaded.
     const isEnabledModelIdRef = useRef(isEnabledModelId);
     const newAccountDefaultSelectedModelsRef = useRef(newAccountDefaultSelectedModels);
+    const tRef = useRef(t);
     useEffect(() => {
         isEnabledModelIdRef.current = isEnabledModelId;
         newAccountDefaultSelectedModelsRef.current = newAccountDefaultSelectedModels;
-    }, [isEnabledModelId, newAccountDefaultSelectedModels]);
+        tRef.current = t;
+    }, [isEnabledModelId, newAccountDefaultSelectedModels, t]);
 
     useEffect(() => {
         if (sessionUserId) {
@@ -1889,12 +1914,58 @@ export function ChatPageClient({
                 })
                 .then((data) => {
                     if (data && isEnabledModelIdRef.current(data.defaultModel)) {
-                        setUserDefaultEngine(data.defaultModel);
+                        // The saved new-conversation combination (effective,
+                        // resolved server-side); [defaultModel] when none.
+                        const combination = Array.isArray(data.newConversationModelIds)
+                            ? (data.newConversationModelIds as unknown[]).filter(
+                                  (modelId): modelId is string =>
+                                      typeof modelId === "string" &&
+                                      isEnabledModelIdRef.current(modelId)
+                              )
+                            : [];
+                        const nextDefaultModels =
+                            combination.length > 0
+                                ? combination
+                                : [data.defaultModel];
+                        setUserDefaultModelIds(nextDefaultModels);
                         if (!currentChatIdRef.current) {
                             setSelectedModels(
                                 data.isNewAccount
                                     ? newAccountDefaultSelectedModelsRef.current
-                                    : [data.defaultModel]
+                                    : nextDefaultModels
+                            );
+                        }
+                    }
+
+                    // Stored/effective drift: tell the user once per session
+                    // per distinct notice; the read path never rewrites the
+                    // stored combination, so re-saving in Settings is the way
+                    // to confirm the replacement.
+                    if (data?.modelSelectionNotice) {
+                        const signature = JSON.stringify([
+                            data.modelSelectionNotice.reasons ?? null,
+                            data.modelSelectionNotice.storedModelIds ?? null,
+                            data.modelSelectionNotice.effectiveModelIds ?? null,
+                        ]);
+                        const storageKey = "tomverse:model-selection-notice";
+                        let alreadyShown = false;
+                        try {
+                            alreadyShown =
+                                window.sessionStorage.getItem(storageKey) ===
+                                signature;
+                            if (!alreadyShown) {
+                                window.sessionStorage.setItem(
+                                    storageKey,
+                                    signature
+                                );
+                            }
+                        } catch {
+                            // Storage unavailable: fall through and show it.
+                        }
+                        if (!alreadyShown) {
+                            showToastRef.current?.(
+                                tRef.current("chat.modelSelectionNotice"),
+                                "info"
                             );
                         }
                     }
@@ -1944,7 +2015,7 @@ export function ChatPageClient({
                 })
                 .catch((err) => {
                     console.error("Failed to load user settings:", err);
-                    setUserDefaultEngine(APP_DEFAULTS.defaultModelId);
+                    setUserDefaultModelIds([APP_DEFAULTS.defaultModelId]);
                     if (!currentChatIdRef.current) {
                         setSelectedModels([APP_DEFAULTS.defaultModelId]);
                     }
@@ -1999,19 +2070,53 @@ export function ChatPageClient({
     } else {
         currentChatIdRef.current = null;
         setCurrentChatId(null);
-        setSelectedModels([userDefaultEngine]);
+        // A new chat starts from the saved new-conversation combination, not
+        // just the representative model.
+        setSelectedModels(clampSelectedModels(uniqueStrings(userDefaultModelIds)));
         blankedDraftScope = null;
     }
 
     setDisabledPanels([]);
     setWebSearchMode(APP_DEFAULTS.defaultWebSearchMode);
     setIsDeepResearchPending(false);
+    setIsImageDraftActive(false);
     discardDraft(blankedDraftScope);
       setPromptPayload(null);
       setIsInitialConversationResolved(true);
 
       setFocusToken((prev) => prev + 1);
   };
+
+    const handleNewImage = () => {
+        localComparisonResponsesRef.current.clear();
+        latestLocalComparisonPromptRef.current = null;
+        setIsImageDraftActive(true);
+        currentChatIdRef.current = null;
+        setCurrentChatId(null);
+        setPromptPayload(null);
+        setIsDeepResearchPending(false);
+        setIsInitialConversationResolved(true);
+    };
+
+    // The first successful generation request created the conversation row
+    // atomically server-side; adopt it so the sidebar shows it immediately.
+    const handleImageConversationCreated = (conversation: {
+        id: string;
+        title: string;
+    }) => {
+        setConversations((prev) => [
+            {
+                id: conversation.id,
+                title: conversation.title,
+                kind: "image" as const,
+                messageCount: 0,
+            },
+            ...prev,
+        ]);
+        setIsImageDraftActive(false);
+        currentChatIdRef.current = conversation.id;
+        setCurrentChatId(conversation.id);
+    };
 
     const handleSelectConversation = async (id: string, skipLockCheck = false) => {
         if (isSending) return;
@@ -2026,6 +2131,20 @@ export function ChatPageClient({
                 return;
 
             }
+        }
+
+        // An image conversation swaps the whole surface for the image
+        // workspace: no chat drafts, model settings or panels to restore,
+        // and the workspace loads its own generation history.
+        const selectedTarget = conversations.find((c) => c.id === id);
+        if (selectedTarget?.kind === "image") {
+            setIsImageDraftActive(false);
+            currentChatIdRef.current = id;
+            setCurrentChatId(id);
+            setPromptPayload(null);
+            setIsDeepResearchPending(false);
+            setIsInitialConversationResolved(true);
+            return;
         }
 
         if (isGuestMode) {
@@ -2050,6 +2169,7 @@ export function ChatPageClient({
       setCurrentChatId(id);
 	  setPromptPayload(null);
       setIsDeepResearchPending(false);
+      setIsImageDraftActive(false);
 
     if (isGuestMode) {
       const targetConv = conversations.find((c) => c.id === id);
@@ -3280,7 +3400,6 @@ export function ChatPageClient({
       latestLocalComparisonPromptRef.current = null;
       currentChatIdRef.current = null;
       setCurrentChatId(null);
-      setUserDefaultEngine(applied[0]);
       setSelectedModels(applied);
       setDisabledPanels([]);
       setPersonalizedPrompt(promptExample || null);
@@ -3694,6 +3813,27 @@ export function ChatPageClient({
     Math.ceil(new TextEncoder().encode(inputValue).length / 4)
   );
 
+  const activeImageConversation = conversations.find(
+    (conversation) =>
+      conversation.id === currentChatId && conversation.kind === "image"
+  );
+  const isImageWorkspaceActive =
+    !isGuestMode && (isImageDraftActive || Boolean(activeImageConversation));
+  const canOfferNewImage = imageGenerationEnabled && !isGuestMode;
+  const imageWorkspaceElement = isImageWorkspaceActive ? (
+    <ImageGenerationWorkspace
+      // Remount on switch: the workspace's local timeline, draft prompt and
+      // poll loop all belong to exactly one conversation.
+      key={isImageDraftActive ? "image-draft" : currentChatId ?? "image-draft"}
+      conversationId={isImageDraftActive ? null : currentChatId}
+      onConversationCreated={handleImageConversationCreated}
+      flagEnabled={imageGenerationEnabled}
+      planAllowsImageGeneration={
+        !isGuestMode && planAllowsImageGeneration(accountUsage?.plan ?? "Free")
+      }
+    />
+  ) : null;
+
   return (
     <>
       <ModelFinder
@@ -3744,6 +3884,8 @@ export function ChatPageClient({
           maxGuestMessages={MAX_GUEST_MESSAGES}
           isModelSelectionReady={isModelSelectionReady}
           onNewChat={handleNewChat}
+          onNewImage={canOfferNewImage ? handleNewImage : null}
+          imageWorkspace={imageWorkspaceElement}
           onSelectConversation={handleSelectConversation}
           onRename={handleRename}
           onDelete={handleDelete}
@@ -3796,6 +3938,8 @@ export function ChatPageClient({
           maxGuestMessages={MAX_GUEST_MESSAGES}
           isModelSelectionReady={isModelSelectionReady}
           onNewChat={handleNewChat}
+          onNewImage={canOfferNewImage ? handleNewImage : null}
+          imageWorkspace={imageWorkspaceElement}
           onSelectConversation={handleSelectConversation}
           onRename={handleRename}
           onDelete={handleDelete}

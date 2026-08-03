@@ -28,6 +28,10 @@ import {
 } from "@/components/chat/guestVerificationFailure";
 import { submitFeedback } from "@/lib/feedbackClient";
 import {
+  ERROR_CLASSIFICATION_SOURCE,
+  type MessageErrorReportContext,
+} from "@/lib/errorReportContract";
+import {
   canSubmitFeedback,
   composeFeedbackMessage,
   feedbackFailureCopyKey,
@@ -87,6 +91,7 @@ export function FeedbackButton({
   currentPlan,
   attachmentCount = 0,
   rawErrorDetails,
+  errorReport,
   triggerLabel,
   triggerClassName,
   triggerTestId,
@@ -100,6 +105,13 @@ export function FeedbackButton({
   // the whole point is that the user shouldn't have to copy/paste it
   // themselves.
   rawErrorDetails?: string;
+  /**
+   * This message's own error context: its trace, provenance and (when the
+   * server issued one) the signed report token. Per-message and live-memory
+   * only -- it always wins over the legacy localStorage fallback so one
+   * panel's report can never pick up another panel's later trace.
+   */
+  errorReport?: MessageErrorReportContext;
   triggerLabel?: string;
   triggerClassName?: string;
   triggerTestId?: string;
@@ -259,9 +271,14 @@ export function FeedbackButton({
   const openDialog = () => {
     if (!traceId && typeof window !== "undefined") {
       // Auto-filled once, and only into an empty field: a value the user typed
-      // or corrected is never overwritten.
+      // or corrected is never overwritten. The message's own trace always
+      // wins; the legacy last-error localStorage key is a convenience
+      // fallback for the generic feedback modal only, and must never
+      // override a per-message value with a later panel's trace.
       setTraceId(
-        window.localStorage.getItem("tomverse_last_error_trace_id") || ""
+        errorReport?.traceId ||
+          window.localStorage.getItem("tomverse_last_error_trace_id") ||
+          ""
       );
     }
     setType("bug");
@@ -414,6 +431,24 @@ export function FeedbackButton({
           rawErrorDetails: effectiveDiagnostics || undefined,
         }),
         traceId: traceId.trim().slice(0, FEEDBACK_TRACE_ID_MAX_LENGTH) || undefined,
+        // The signed token rides along only while the submitted trace is
+        // still the message's own: a trace the user edited is a manual
+        // claim, and sending the token with it would only produce a
+        // mismatch. The token is used for this one request and never stored.
+        ...(errorReport?.errorReportToken &&
+        traceId.trim() === errorReport.traceId
+          ? { errorReportToken: errorReport.errorReportToken }
+          : {}),
+        ...(errorReport && traceId.trim() === errorReport.traceId
+          ? {
+              traceProvenance: errorReport.traceProvenance,
+              ...(errorReport.errorCode &&
+              errorReport.errorClassificationSource ===
+                ERROR_CLASSIFICATION_SOURCE.client
+                ? { clientErrorCode: errorReport.errorCode }
+                : {}),
+            }
+          : {}),
         modelId: currentModelId || undefined,
         plan: currentPlan || undefined,
         hasAttachments: attachmentCount > 0,

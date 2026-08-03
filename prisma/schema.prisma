@@ -57,26 +57,28 @@ model User {
   sessionsInvalidatedAt         DateTime?
   settings                      UserSettings?
 
-  accounts               Account[]
-  sessions               Session[]
-  projects               ConversationProject[]
-  refundRequests         RefundRequest[]
-  promotionRedemptions   BillingPromotionRedemption[]
-  billingTransactions    BillingTransaction[]
-  creditPurchases        CreditPurchase[]
-  creditLots             CreditLot[]
-  creditLedgerEntries    CreditLedgerEntry[]
-  creditDebtEntries      CreditDebtEntry[]
-  chatCreditReservations ChatCreditReservation[]
-  adminAuditLogs         AdminAuditLog[]
-  adminNotes             AdminNote[]
-  modelOverrides         ModelOverride[]
-  conversations          Conversation[]
-  comparisonReviews      ComparisonReview[]
-  productAnalyticsEvents ProductAnalyticsEvent[]
-  privacyRequests        PrivacyRequest[]
-  planChangeRequests     PlanChangeRequest[]
-  externalImports        ExternalImport[]
+  accounts                Account[]
+  sessions                Session[]
+  projects                ConversationProject[]
+  refundRequests          RefundRequest[]
+  promotionRedemptions    BillingPromotionRedemption[]
+  billingTransactions     BillingTransaction[]
+  creditPurchases         CreditPurchase[]
+  creditLots              CreditLot[]
+  creditLedgerEntries     CreditLedgerEntry[]
+  creditDebtEntries       CreditDebtEntry[]
+  chatCreditReservations  ChatCreditReservation[]
+  imageGenerations        ImageGeneration[]
+  imageCreditReservations ImageCreditReservation[]
+  adminAuditLogs          AdminAuditLog[]
+  adminNotes              AdminNote[]
+  modelOverrides          ModelOverride[]
+  conversations           Conversation[]
+  comparisonReviews       ComparisonReview[]
+  productAnalyticsEvents  ProductAnalyticsEvent[]
+  privacyRequests         PrivacyRequest[]
+  planChangeRequests      PlanChangeRequest[]
+  externalImports         ExternalImport[]
 
   @@index([plan, id])
   @@index([createdAt])
@@ -98,6 +100,11 @@ model UserSettings {
   theme                  String    @default("dark") // "dark", "light", "system"
   language               String    @default("en") // "ko", "en"
   defaultModel           String    @default("gpt-5-6-luna")
+  // 1-3 model IDs a signed-in account starts a new conversation with.
+  // NULL (never a schema default, never backfilled) means [defaultModel];
+  // lib/newConversationModels.ts is the only interpreter. See
+  // docs/policy/default-model-luna-migration.md §1.2.
+  newConversationModelIds Json?
   preferredTasks         Json?
   preferredPriority      String?
   usesFilesFrequently    String?
@@ -180,6 +187,16 @@ model Conversation {
   title     String
   projectId String?
 
+  // "chat" | "image". Server-decided: the conversation create endpoint's
+  // strict schema never accepts it, and an "image" row is only ever created
+  // inside the image generation reservation transaction, so an image
+  // conversation cannot exist without at least one ImageGeneration (audited
+  // by lib/imageAssetLifecycle.ts). See docs/policy/image-generation.md.
+  kind String @default("chat")
+
+  // For kind = "image" this is stored as "[]" and never read: the image
+  // model comes from the image generation server layer's fixed allowlist,
+  // not from conversation state.
   selectedModels String @default("[\"gpt-5-6-luna\"]")
   disabledPanels String @default("[]")
   webSearchMode  String @default("off") // off | auto | always
@@ -193,6 +210,7 @@ model Conversation {
 
   messages          Message[]
   comparisonReviews ComparisonReview[]
+  imageGenerations  ImageGeneration[]
   user              User?                @relation(fields: [userId], references: [id], onDelete: Cascade)
   project           ConversationProject? @relation(fields: [projectId], references: [id], onDelete: SetNull)
   createdAt         DateTime             @default(now())
@@ -200,8 +218,9 @@ model Conversation {
   password          String?
   importedGuestKey  String?
 
-  @@index([userId, projectId])
   @@unique([userId, importedGuestKey])
+  @@index([userId, projectId])
+  @@index([userId, kind])
 }
 
 model ConversationProject {
@@ -324,18 +343,18 @@ model ProviderErrorEvent {
 // of truth for "when did we last actually hear from this provider" -- it's
 // what the public status page's freshness check is computed from.
 model ProviderHealthState {
-  provider            String    @id
-  lastSuccessAt       DateTime?
-  lastFailureAt       DateTime?
-  consecutiveFailures Int       @default(0)
+  provider                  String    @id
+  lastSuccessAt             DateTime?
+  lastFailureAt             DateTime?
+  consecutiveFailures       Int       @default(0)
   // AUD-R001: synthetic-probe evidence, kept in separate fields from the
   // real-user-traffic ones above so the two evidence streams never
   // overwrite each other -- recordProviderProbeSuccess/Failure only ever
   // touch these three, recordProviderSuccess/Failure only ever touch the
   // three above. lib/providerPublicStatusCore.ts merges both explicitly.
-  lastProbeSuccessAt       DateTime?
-  lastProbeFailureAt       DateTime?
-  consecutiveProbeFailures Int       @default(0)
+  lastProbeSuccessAt        DateTime?
+  lastProbeFailureAt        DateTime?
+  consecutiveProbeFailures  Int       @default(0)
   // STG-R002: administrator-triggered live verification evidence. A third
   // stream again, for the same reason: an operator proving the API answers is
   // not the same claim as "real user traffic is being served", so it must
@@ -350,7 +369,7 @@ model ProviderHealthState {
   // that proved it was safe to lift".
   lastRecoveryAt            DateTime?
   lastRecoveryCheckId       String?
-  updatedAt           DateTime  @updatedAt
+  updatedAt                 DateTime  @updatedAt
 
   @@index([lastSuccessAt])
   @@index([lastProbeSuccessAt])
@@ -365,24 +384,24 @@ model ProviderHealthState {
 // those values in the first place (see lib/providerProbe.ts), and checked
 // by a static-scan unit test.
 model ProviderProbeResult {
-  id                 String   @id @default(cuid())
+  id                  String   @id @default(cuid())
   /// The owning ScheduledJobRun.id for this probe cycle.
-  runId              String
-  provider           String
-  modelId            String
-  environment        String
-  startedAt          DateTime
-  completedAt        DateTime
-  success            Boolean
-  timedOut           Boolean  @default(false)
-  latencyMs          Int?
+  runId               String
+  provider            String
+  modelId             String
+  environment         String
+  startedAt           DateTime
+  completedAt         DateTime
+  success             Boolean
+  timedOut            Boolean  @default(false)
+  latencyMs           Int?
   /// Public-safe classification only, e.g. "TIMEOUT" | "AUTH" | "RATE_LIMIT" |
   /// "SERVER_ERROR" | "NETWORK" | "UNKNOWN" -- never a raw provider message.
   errorClassification String?
   /// Sanitized diagnostic code in the same shape providerDiagnosticCode()
   /// produces (e.g. "PROVIDER_PROBE_FAILED.ECONNRESET.HTTP_503.RETRYABLE").
-  diagnosticCode     String?
-  createdAt          DateTime @default(now())
+  diagnosticCode      String?
+  createdAt           DateTime @default(now())
 
   @@index([provider, createdAt])
   @@index([provider, modelId, createdAt])
@@ -400,15 +419,15 @@ model ProviderProbeResult {
 // preflight and not yet consumed by its model request; it expires quickly on
 // its own if the browser never sends the request.
 model ChatRequestLease {
-  id          String    @id
-  subjectKey  String
-  ipKey       String?
-  admissionId String?
-  modelId     String?
-  claimedAt   DateTime?
-  heartbeatAt DateTime  @default(now())
-  expiresAt   DateTime
-  createdAt   DateTime  @default(now())
+  id              String    @id
+  subjectKey      String
+  ipKey           String?
+  admissionId     String?
+  modelId         String?
+  claimedAt       DateTime?
+  heartbeatAt     DateTime  @default(now())
+  expiresAt       DateTime
+  createdAt       DateTime  @default(now())
   // Per-minute request capacity the aggregate preflight paid for this slot, so
   // an admission that is rolled back can hand it straight back instead of
   // holding it for the rest of the minute. Separate from `ipKey`, which is the
@@ -716,6 +735,156 @@ model ChatCreditReservation {
   @@index([providerResponseId])
 }
 
+// One image generation request in the image work mode: the operational
+// record (prompt, pinned provider parameters, lifecycle status). Financial
+// numbers live in ImageCreditReservation, which deliberately does NOT
+// cascade with this row or its conversation -- deleting a chat must not
+// delete the audit trail of what was charged.
+// Policy: docs/policy/image-generation.md.
+model ImageGeneration {
+  id             String @id @default(cuid())
+  userId         String
+  conversationId String
+  idempotencyKey String
+  prompt         String
+  preset         String // draft | standard | final
+  provider       String @default("openai")
+  modelId        String @default("gpt-image-2")
+  size           String // 1024x1024 | 1536x1024 | 1024x1536
+  quality        String // low | medium | high
+  backgroundMode String @default("opaque")
+  outputFormat   String @default("png")
+  moderationMode String @default("auto")
+
+  // pending -> processing -> settling -> succeeded | failed. `settling` is
+  // the exactly-once claim: the worker or the reconciliation sweep moves a
+  // row here with a conditional update before touching the credit ledger,
+  // so the two can never settle or refund the same generation twice.
+  // Transitions are defined in lib/imageGenerationStateCore.ts.
+  status              String  @default("pending")
+  failurePhase        String? // provider_moderation_rejected | provider_user_error | provider_rate_limited | provider_failed | original_storage_failed | stale_job_reconciled
+  publicErrorCode     String?
+  internalErrorDetail String?
+  providerRequestId   String?
+  leaseId             String?
+
+  createdAt   DateTime  @default(now())
+  startedAt   DateTime?
+  completedAt DateTime?
+  failedAt    DateTime?
+  updatedAt   DateTime  @updatedAt
+
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  assets       ImageAsset[]
+
+  @@unique([userId, idempotencyKey])
+  @@index([status, updatedAt])
+  @@index([conversationId, createdAt])
+}
+
+// A stored object derived from one generation: the untouched provider
+// original (provenance metadata preserved -- never re-encoded) and the
+// thumbnail derived from it. Thumbnail failure never demotes the original:
+// the generation stays succeeded and the thumbnail retries in the
+// background.
+model ImageAsset {
+  id                  String  @id @default(cuid())
+  generationId        String
+  role                String // original | thumbnail
+  // ready | pending | failed. Originals are written as ready; thumbnails
+  // start pending and repair in the background.
+  status              String  @default("pending")
+  r2Key               String  @unique
+  mimeType            String
+  width               Int
+  height              Int
+  byteSize            Int
+  sha256              String
+  provenancePreserved Boolean @default(true)
+  thumbnailRetryCount Int     @default(0)
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  generation ImageGeneration @relation(fields: [generationId], references: [id], onDelete: Cascade)
+
+  @@unique([generationId, role])
+  @@index([status, updatedAt])
+}
+
+// DB-first deletion tombstone for R2 objects. Deleting a conversation
+// enqueues every attached asset key here in the SAME transaction that
+// removes the rows, then the fifteen-minute maintenance sweep deletes the
+// R2 objects idempotently and marks the row completed. R2 is never deleted
+// before the database knows about it, so a partial failure retries from
+// this row instead of leaving the database pointing at missing objects.
+model ImageAssetCleanup {
+  id          String    @id @default(cuid())
+  r2Key       String    @unique
+  reason      String // conversation_deleted | account_deleted | storage_rollback
+  attempts    Int       @default(0)
+  lastError   String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  completedAt DateTime?
+
+  @@index([completedAt, createdAt])
+}
+
+// The financial record of one image generation, split from ImageGeneration
+// on purpose (mirroring ChatCreditReservation): no conversation or
+// generation foreign key, so user-initiated deletion never erases the
+// pricing snapshot, the lot-level reservation payload needed for crash
+// recovery (settleAddOnCredits requires per-lot entries), or the provider
+// request id an audit needs. `generationId` is a plain unique string.
+// Status: reserved -> settling -> settled, claimed with a conditional
+// update for exactly-once settlement.
+model ImageCreditReservation {
+  id             String  @id // caller-supplied: image-credit-reservation:{generationId}:v1
+  userId         String?
+  generationId   String  @unique
+  conversationId String?
+
+  status  String  @default("reserved") // reserved | settling | settled
+  outcome String? // completed | failed | cancelled
+
+  preset  String
+  quality String
+  size    String
+
+  reservedCredits            Int
+  planReservedCredits        Int
+  addOnReservedCredits       Int
+  reservedCostMicroUsd       BigInt
+  reservedFundedCostMicroUsd BigInt @default(0)
+  settledCredits             Int    @default(0)
+  settledCostMicroUsd        BigInt @default(0)
+  settledFundedCostMicroUsd  BigInt @default(0)
+
+  pricingVersion     String
+  costSource         String
+  pricingSnapshot    Json
+  // AddOnCreditReservationEntry[] -- the per-lot credits and funded cost
+  // reserved by reserveAddOnCredits, preserved so a reconciliation sweep
+  // after a crash can refund lot by lot without the in-memory entries.
+  reservationPayload Json
+
+  providerRequestId String?
+  refundedAt        DateTime?
+  settledAt         DateTime?
+  reconciledAt      DateTime?
+  lastError         String?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([status, createdAt])
+  @@index([userId, createdAt])
+}
+
 // Tracks a single Perplexity "sonar-deep-research" async job durably, since
 // the request can run well past 30 minutes -- long enough to outlive both
 // the request that submitted it and a page refresh. See lib/perplexityDeepResearch.ts
@@ -749,42 +918,109 @@ model AppSetting {
 }
 
 model Feedback {
-  id              String   @id @default(cuid())
-  userId          String?
-  email           String?
-  type            String
-  status          String   @default("open")
-  message         String
-  traceId         String?
-  modelId         String?
-  plan            String?
-  hasAttachments  Boolean  @default(false)
-  attachmentCount Int      @default(0)
-  path            String?
-  userAgent       String?
+  id                  String   @id @default(cuid())
+  userId              String?
+  email               String?
+  type                String
+  status              String   @default("open")
+  message             String
+  traceId             String?
+  modelId             String?
+  plan                String?
+  hasAttachments      Boolean  @default(false)
+  attachmentCount     Int      @default(0)
+  path                String?
+  userAgent           String?
   /// The submitter's language, captured once at submission and never mutated,
   /// so every lifecycle email for this report renders in the same language.
   /// One of lib/language.ts SUPPORTED_LANGUAGES; "en" when unknown.
-  language        String   @default("en")
+  language            String   @default("en")
   /// Per-report transactional consent to lifecycle status emails. NOT a
   /// marketing preference: it covers only this report's received/reviewing/
   /// completed notifications. Defaults to no consent.
-  emailUpdatesConsent Boolean @default(false)
+  emailUpdatesConsent Boolean  @default(false)
   /// How the report was resolved -- one of FEEDBACK_CLOSURE_OUTCOMES in
   /// lib/feedbackLifecycleCore.ts. Current state for the admin console; the
   /// email renders from the immutable completed lifecycle event instead.
-  closureOutcome  String?
+  closureOutcome      String?
   /// The short reply written FOR THE SUBMITTER. Never the internal admin note,
   /// and never merged with one.
-  userReply       String?
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  userReply           String?
+  /// Outcome of verifying the server-issued errorReportToken -- one of
+  /// TOKEN_VERIFICATION_STATUS in lib/errorReportContract.ts. Never the raw
+  /// token, which is verified and discarded in the same request.
+  errorReportVerification String?
+  /// Where the submitted trace ID came from, as far as it can be proven:
+  /// server_generated only when the token verified; otherwise the client's
+  /// unauthenticated claim (or null for reports without a trace).
+  traceProvenance String?
+  /// Who classified the error code the reporter attached: "server" when it
+  /// came from a verified token, "client" for client-side classifications
+  /// like EMPTY_RESPONSE. A client classification is never presented as a
+  /// server-authenticated fact.
+  errorClassificationSource String?
+  /// The client-classified error code, kept separate from any server code
+  /// inside the verified token payload.
+  clientErrorCode String?
+  /// Whether an evidence row exists for a verified report, and if not, why
+  /// not -- one of EVIDENCE_AVAILABILITY in lib/errorReportContract.ts.
+  evidenceAvailability String?
+  traceEvidenceId String?
+  traceEvidence   TraceErrorEvidence? @relation(fields: [traceEvidenceId], references: [id], onDelete: SetNull)
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
 
   lifecycleEvents FeedbackLifecycleEvent[]
 
   @@index([status, createdAt])
   @@index([type, createdAt])
   @@index([userId, createdAt])
+  @@index([traceId])
+}
+
+/// Server-side evidence for one error *occurrence* on a server-generated
+/// trace. The primary key and the occurrenceId are both server-minted:
+/// trace IDs can be client-influenced elsewhere (proxy.ts adopts a client
+/// x-request-id; preflight adopts X-Client-Request-ID), so the trace ID is
+/// deliberately a non-unique index -- never an identity, never an upsert key.
+/// The same trace string may own several rows; feedback links to exactly one
+/// via the occurrenceId carried inside the signed errorReportToken.
+///
+/// Stored fields are the minimum needed for support correlation: no prompt
+/// or message bodies, no raw provider payloads, no headers, no tokens.
+/// Retention: 30 days, purged by lib/maintenance.ts.
+model TraceErrorEvidence {
+  id           String  @id @default(cuid())
+  /// Trusted per-occurrence identity minted by the server at error time.
+  occurrenceId String  @unique
+  traceId      String
+  /// One of TRACE_PROVENANCE in lib/errorReportContract.ts; rows are only
+  /// written for server_generated traces today.
+  traceProvenance String
+  environment  String
+  release      String?
+  routeClass   String
+  phase        String?
+  errorCode    String?
+  /// One of ERROR_CLASSIFICATION_SOURCE; always "server" for rows written by
+  /// the error builders.
+  classificationSource String @default("server")
+  httpStatus   Int?
+  provider     String?
+  modelId      String?
+  retryable    Boolean?
+  fingerprint  String?
+  sentryEventId String?
+  occurredAt   DateTime @default(now())
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  feedback Feedback[]
+
+  @@index([traceId])
+  @@index([release, occurredAt])
+  @@index([errorCode, occurredAt])
+  @@index([occurredAt])
 }
 
 /// One immutable record per lifecycle stage of one feedback report.
@@ -1168,29 +1404,29 @@ model AdminProviderIncident {
 // provider response body, no prompt content -- only a sanitized diagnostic
 // code and a redacted message.
 model ProviderHealthCheck {
-  id             String   @id @default(cuid())
-  provider       String
-  modelId        String?
-  kind           String   @default("configuration")
-  status         String
-  latencyMs      Int?
-  errorCode      String?
+  id                          String    @id @default(cuid())
+  provider                    String
+  modelId                     String?
+  kind                        String    @default("configuration")
+  status                      String
+  latencyMs                   Int?
+  errorCode                   String?
   /// Sanitized code in the shape providerDiagnosticCode() produces, e.g.
   /// "PROVIDER_VERIFICATION_FAILED.HTTP_400".
-  diagnosticCode String?
-  message        String?
-  traceId        String?
+  diagnosticCode              String?
+  message                     String?
+  traceId                     String?
   /// Set once, when this check has been consumed to clear a provider's
   /// blocking consecutiveFailures counter. Guards double-submits: a check can
   /// authorise exactly one recovery.
-  recoveryApplied Boolean @default(false)
-  recoveryAppliedAt DateTime?
+  recoveryApplied             Boolean   @default(false)
+  recoveryAppliedAt           DateTime?
   /// consecutiveFailures immediately before the recovery this check
   /// authorised, so the audit record states what was actually cleared.
   previousConsecutiveFailures Int?
-  createdById    String?
-  createdByEmail String?
-  createdAt      DateTime @default(now())
+  createdById                 String?
+  createdByEmail              String?
+  createdAt                   DateTime  @default(now())
 
   @@index([provider, createdAt])
   @@index([status, createdAt])
@@ -1292,7 +1528,7 @@ model PlanChangeRequest {
   quotedAmountMinor Int?
 
   /// "previewed" | "pending" | "applied" | "cancelled" | "expired" | "failed"
-  status           String    @default("previewed")
+  status String @default("previewed")
 
   /// Carries `userId` exactly while `status = "pending"`, and null otherwise.
   ///
@@ -1448,12 +1684,23 @@ model ExternalImport {
   parserVersion       String
   sourceFormatVersion String?
 
-  conversationCount Int    @default(0)
-  messageCount      Int    @default(0)
-  normalizedBytes   BigInt @default(0)
-  truncationCount   Int    @default(0)
-  duplicateCount    Int    @default(0)
+  conversationCount Int     @default(0)
+  messageCount      Int     @default(0)
+  normalizedBytes   BigInt  @default(0)
+  truncationCount   Int     @default(0)
+  duplicateCount    Int     @default(0)
   failureCode       String?
+
+  /// Staging batch ledger (§5.5). Batches arrive strictly in sequence; only
+  /// the most recent one may be idempotently retried, so one (sequence,
+  /// digest) pair is enough to tell a retry from a conflicting resend.
+  lastBatchSequence Int     @default(-1)
+  lastBatchDigest   String?
+
+  /// Set by the first successful finalize. A retry with the same key and the
+  /// same import digest returns the stored success; a different key on a
+  /// completed import is EXTERNAL_IMPORT_ALREADY_FINALIZED (§5.5).
+  finalizeIdempotencyKey String?
 
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt

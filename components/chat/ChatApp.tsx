@@ -23,6 +23,16 @@ import type { WebSearchMode } from "@/lib/appDefaults";
 import { splitSearchMetadataTrailer } from "@/lib/webSearchStreamTrailer";
 import type { WebSearchExecution } from "@/lib/webSearchExecutionNormalizer";
 import { guestMessagesStorageKey } from "@/lib/guestConversationStorage";
+import {
+  toChatRequestMessage,
+  toGuestPersistableMessage,
+} from "@/lib/chatMessageSerialization";
+import {
+  ERROR_CLASSIFICATION_SOURCE,
+  ERROR_REPORT_TOKEN_HEADER,
+  TRACE_PROVENANCE,
+  type MessageErrorReportContext,
+} from "@/lib/errorReportContract";
 
 const processedPromptKeys = new Set<string>();
 const CHAT_STREAM_IDLE_TIMEOUT_MS = 90_000;
@@ -37,21 +47,6 @@ const WELCOME_MESSAGE_ID = "welcome";
 
 const isTranscriptMessage = (message: Message) =>
   message.id !== WELCOME_MESSAGE_ID;
-
-const toChatRequestMessage = (message: Message): Message => {
-  if (!message.attachments?.length) return message;
-
-  return {
-    ...message,
-    attachments: message.attachments.map((attachment) => {
-      if (!attachment.objectKey) return attachment;
-
-      const requestAttachment = { ...attachment };
-      delete requestAttachment.data;
-      return requestAttachment;
-    }),
-  };
-};
 
 type ChatAppProps = {
   modelId: string;
@@ -241,7 +236,11 @@ function ChatAppComponent({
     id: string,
     content: string,
     status?: Message["status"],
-    errorMeta?: { errorCode?: string; errorHadAttachments?: boolean },
+    errorMeta?: {
+      errorCode?: string;
+      errorHadAttachments?: boolean;
+      errorReport?: MessageErrorReportContext;
+    },
     extraFields?: Partial<Message>
   ) => {
     setMessages((prev) =>
@@ -295,13 +294,19 @@ function ChatAppComponent({
         setAssistantMessage(jobAssistantMessageId, phaseText, "normal");
 
         let poll: { status?: string; content?: string; error?: string } | null = null;
+        let pollTraceId: string | null = null;
+        let pollErrorReportToken: string | null = null;
         try {
           const res = await fetch("/api/chat/deep-research/status", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ assistantMessageId: jobAssistantMessageId }),
           });
-          if (res.ok) poll = await res.json();
+          if (res.ok) {
+            poll = await res.json();
+            pollTraceId = res.headers.get("X-Request-ID");
+            pollErrorReportToken = res.headers.get(ERROR_REPORT_TOKEN_HEADER);
+          }
         } catch {
           // Transient network error talking to our own status endpoint --
           // just retry on the next tick instead of failing the job.
@@ -318,7 +323,22 @@ function ChatAppComponent({
             jobAssistantMessageId,
             poll.error || t("chat.responseError"),
             "error",
-            { errorCode: "DEEP_RESEARCH_FAILED" }
+            {
+              errorCode: "DEEP_RESEARCH_FAILED",
+              errorReport: pollTraceId
+                ? {
+                    traceId: pollTraceId,
+                    traceProvenance: TRACE_PROVENANCE.serverGenerated,
+                    ...(pollErrorReportToken
+                      ? { errorReportToken: pollErrorReportToken }
+                      : {}),
+                    errorCode: "DEEP_RESEARCH_FAILED",
+                    errorClassificationSource:
+                      ERROR_CLASSIFICATION_SOURCE.server,
+                    occurredAt: new Date().toISOString(),
+                  }
+                : undefined,
+            }
           );
           return;
         }
@@ -551,7 +571,7 @@ function ChatAppComponent({
                   // objectKey; the preview is worth less than the history.
                   localStorage.setItem(
                       storageKey,
-                      JSON.stringify(messages.map(toChatRequestMessage))
+                      JSON.stringify(messages.map(toGuestPersistableMessage))
                   );
               } catch (error) {
                   console.error("Failed to persist guest messages:", error);
@@ -621,10 +641,34 @@ function ChatAppComponent({
     };
     resetIdleTimeout();
     let requestTraceId: string | null = null;
+    // The signed error report token from the response headers, when the
+    // server issued one. Lives only in this closure and in the error
+    // message's runtime `errorReport` context -- never persisted.
+    let requestErrorReportToken: string | null = null;
     // Declared here (not inside the try block below) so a stop mid-stream
     // can still show whatever was generated before the abort, instead of
     // discarding it -- the catch block needs to read it too.
     let assistantText = "";
+    const buildErrorReport = (
+      traceId: string | null,
+      errorCode: string,
+      classificationSource: MessageErrorReportContext["errorClassificationSource"]
+    ): MessageErrorReportContext | undefined =>
+      traceId
+        ? {
+            traceId,
+            // Every trace this closure sees arrived in a server response
+            // (header or body); the token is what proves it, so a missing
+            // token simply verifies as unverified later.
+            traceProvenance: TRACE_PROVENANCE.serverGenerated,
+            ...(requestErrorReportToken
+              ? { errorReportToken: requestErrorReportToken }
+              : {}),
+            errorCode,
+            errorClassificationSource: classificationSource,
+            occurredAt: new Date().toISOString(),
+          }
+        : undefined;
 
     try {
       const sendChatRequest = async (turnstileToken?: string) => {
@@ -661,6 +705,10 @@ function ChatAppComponent({
         });
         resetIdleTimeout();
         requestTraceId = res.headers.get("X-Request-ID");
+        // Always this response's own header (or null): the token must never
+        // outlive the trace it was signed for, or a retried request would
+        // pair a stale token with a fresh trace and verify as a mismatch.
+        requestErrorReportToken = res.headers.get(ERROR_REPORT_TOKEN_HEADER);
 
         if (!res.ok) {
           const errorBody = await res.json().catch(() => null);
@@ -776,7 +824,19 @@ function ChatAppComponent({
               : ""
           }`,
           "error",
-          { errorCode: "EMPTY_RESPONSE", errorHadAttachments: attachments.length > 0 }
+          {
+            errorCode: "EMPTY_RESPONSE",
+            errorHadAttachments: attachments.length > 0,
+            // EMPTY_RESPONSE is a *client* classification: the stream ended
+            // normally (HTTP 200) with no text, so no server error was
+            // emitted and no token exists. The report stays unverified by
+            // design -- see docs/policy/trace-feedback-automation.md.
+            errorReport: buildErrorReport(
+              requestTraceId,
+              "EMPTY_RESPONSE",
+              ERROR_CLASSIFICATION_SOURCE.client
+            ),
+          }
         );
       } else {
         setAssistantMessage(assistantMessageId, assistantText, "normal", undefined, {
@@ -827,6 +887,11 @@ function ChatAppComponent({
           {
             errorCode: `GUEST_VERIFICATION_${error.kind.toUpperCase()}`,
             errorHadAttachments: attachments.length > 0,
+            errorReport: buildErrorReport(
+              failureTraceId,
+              `GUEST_VERIFICATION_${error.kind.toUpperCase()}`,
+              ERROR_CLASSIFICATION_SOURCE.client
+            ),
           }
         );
       } else {
@@ -927,7 +992,17 @@ function ChatAppComponent({
             traceId ? `\n${t("chat.traceId")}: ${traceId}` : ""
           }`,
           "error",
-          { errorCode: errorCode || "UNKNOWN_ERROR", errorHadAttachments: attachments.length > 0 }
+          {
+            errorCode: errorCode || "UNKNOWN_ERROR",
+            errorHadAttachments: attachments.length > 0,
+            errorReport: buildErrorReport(
+              traceId,
+              errorCode || "UNKNOWN_ERROR",
+              errorCode
+                ? ERROR_CLASSIFICATION_SOURCE.server
+                : ERROR_CLASSIFICATION_SOURCE.client
+            ),
+          }
         );
       }	
     } finally {
