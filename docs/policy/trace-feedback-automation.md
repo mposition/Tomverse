@@ -9,7 +9,7 @@
 | Phase | 범위 | 상태 |
 |---|---|---|
 | 1 | 메시지별 Trace 상관관계, 서버 발급 token, Trace evidence 모델, Admin 표시 | **구현됨** |
-| 2 | case 상태 머신, 증거 수집(collector), 적격성 판정, 진단 보고서 (diagnosis-only shadow mode) | 설계만 존재 |
+| 2 | case 상태 머신, 증거 수집(collector), 적격성 판정, 진단 보고서 (diagnosis-only shadow mode) | **구현됨** (기본 비활성 — §8) |
 | 3 | 제한된 자동 수정, `develop` PR, 사람 승인, staging 검증 | 설계만 존재 |
 
 각 Phase는 별도 PR과 별도 사람 승인으로 진행한다. Phase 2·3 코드는 아직
@@ -184,18 +184,61 @@ user agent, cookie/header 원문, provider 원시 payload, 원시 token, secret,
   `evidence_pending`/`sentry_unavailable`로 남긴다. source-map upload token을
   재사용하지 말고 별도 read-only `project:read` token을 쓴다.
 
-## 8. Phase 2 진입 조건과 설계 요약
+## 8. Phase 2 — diagnosis-only shadow mode (구현됨)
 
-- 최소 30일 관찰 + 검증된 traced report 최소 30건 + 개인정보·금지 정보
-  유출 0건. 표본 조건 변경은 근거·owner·승인자와 함께 이 문서에 기록한다.
-- Phase 2는 diagnosis-only shadow mode다: PR·branch·코드 수정 없음. LLM
-  confidence는 관찰 필드일 뿐 게이트가 아니다. client-supplied Trace와
-  client-classified `EMPTY_RESPONSE`는 자동 진단 대상에서 제외한다.
-- 관찰 지표: token 검증 비율, evidence 충분 비율, 분류 정확도(사람 대조),
-  clean base 결정적 재현 후보 비율, 자동 제외 영역 비율, 비용.
+Phase 2는 관찰 인프라다: PR·branch·코드 수정이 없고, LLM을 호출하지 않으며,
+LLM confidence는 관찰용 컬럼(`llmConfidence`, 항상 null)일 뿐 게이트가
+아니다. client-supplied Trace와 client-classified `EMPTY_RESPONSE`는 자동
+진단 대상에서 제외된다.
+
+구현 요약:
+
+- **case 생성**: `type=bug` + 검증된 token(`verified`)일 때만 feedback 저장
+  transaction 안에서 `FeedbackAutoFixCase`(feedbackId unique)를 만든다.
+  fingerprint는 `serverErrorCode|release`로 중복 관찰용이며 identity가
+  아니다.
+- **kill switch**: `FEEDBACK_AUTOFIX_SHADOW_ENABLED === "true"`일 때만
+  큐잉·처리한다. 기본 fail-closed. 끄면 신규 case가 생기지 않고 worker가
+  중단되며, 기존 case는 그대로 남는다.
+- **worker**: `lib/feedbackAutoFixShadow.ts`가 maintenance cron cadence로
+  실행된다(`/api/internal/maintenance/cleanup`에 편승, 실패해도 retention
+  작업을 실패시키지 않음). claim은 compare-and-swap 조건부 UPDATE + 5분
+  lease이고, lease가 만료된 고아 case는 다음 pass가 collecting으로 되돌려
+  재처리한다. 상태 전이는 `lib/feedbackAutoFixCore.ts`의 그래프만 허용한다
+  (임의 terminal 점프 금지).
+- **상태**: received → collecting_evidence → {evidence_ready |
+  evidence_delayed} → classifying → {diagnostic_ready →
+  awaiting_human_review | ineligible} → closed.
+- **evidence 지연**: 검증됐지만 row가 `not_yet_available`이면 1/5/15/30/60/
+  120분 백오프(worker cadence 하한)로 최대 6회 재시도 후
+  `evidence_incomplete`로 정직하게 종료한다. §7의 Sentry ingestion 지연
+  원칙의 구현이며, cadence가 cron 주기라서 §7의 초 단위 백오프보다 거칠다는
+  점을 명시해 둔다.
+- **분류(결정적 규칙)**: untrusted_trace(미검증) / client_classified /
+  operational_limit(기존 limit event 참조) / provider_transient(retryable
+  또는 `AI_EMPTY_RESPONSE*`·`DEEP_RESEARCH_JOB*`) / evidence_incomplete /
+  **application_candidate**(검증 + 기록된 비일시적 서버 실패)만 사람 검토
+  대기(awaiting_human_review)로 간다. candidate는 "수정 대상"이 아니라
+  "사람이 볼 가치가 있음"이라는 뜻이다.
+- **진단 요약**: 기술 사실만 담는 bounded JSON(오류 코드·route·release·
+  provider/model·재시도성·관련 provider/limit event 수·Sentry event ID).
+  사용자 본문·prompt·원시 provider payload·token은 절대 넣지 않는다.
+- **Sentry 읽기**: 전용 read-only 환경변수(`SENTRY_EVIDENCE_READ_TOKEN`,
+  `SENTRY_EVIDENCE_ORG_SLUG`, `SENTRY_EVIDENCE_PROJECT_SLUG`)가 있을 때만
+  event title 1회 fetch(5초 timeout). 미설정·실패는 case를 지연시키지 않고
+  요약에 사유만 남긴다. source-map upload token을 재사용하지 않는다.
+- **관찰 지표**: `GET /api/admin/trace-diagnostics`(admin 전용)가 30일
+  창의 신고 수·token 검증 분포·case 상태/분류 분포를 집계한다. 분류
+  정확도(사람 대조)와 clean base 재현 후보 비율은 candidate를 사람이
+  검토하며 수기로 축적한다.
+- **retention**: terminal(closed·ineligible) case는 90일 후
+  `cleanupExpiredData()`가 정리한다. 열린 case는 삭제하지 않는다.
 
 ## 9. Phase 3 경계 (미구현 — 사전 약속)
 
+- **진입 조건**: Phase 2 shadow mode에서 최소 30일 관찰 + 검증된 traced
+  report 최소 30건 + 개인정보·금지 정보 유출 0건, 그리고 별도 사람 승인.
+  표본 조건 변경은 근거·owner·승인자와 함께 이 문서에 기록한다.
 - 유일한 자동 적격 게이트는 **결정적 Red→Green 재현 증명**이다: clean
   `develop`에서 assertion으로 실패(문법 오류·import 누락·fixture 부재 제외),
   수정 후 동일 테스트 통과, 허용된 저위험 파일만 변경, 필수 CI 통과,

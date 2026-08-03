@@ -971,11 +971,53 @@ model Feedback {
   updatedAt           DateTime @updatedAt
 
   lifecycleEvents FeedbackLifecycleEvent[]
+  autoFixCase     FeedbackAutoFixCase?
 
   @@index([status, createdAt])
   @@index([type, createdAt])
   @@index([userId, createdAt])
   @@index([traceId])
+}
+
+/// One diagnosis-only shadow-mode case per verified bug report (Phase 2 of
+/// docs/policy/trace-feedback-automation.md). The case collects evidence,
+/// classifies eligibility with the deterministic rules in
+/// lib/feedbackAutoFixCore.ts and leaves a bounded diagnostic summary for a
+/// human -- it never modifies code, never pushes a branch, never opens a PR.
+/// llmConfidence is observational only and stays null in Phase 2.
+model FeedbackAutoFixCase {
+  id         String   @id @default(cuid())
+  feedbackId String   @unique
+  feedback   Feedback @relation(fields: [feedbackId], references: [id], onDelete: Cascade)
+  traceId    String
+  /// Trusted occurrence identity from the verified token, when one existed.
+  occurrenceId  String?
+  /// errorCode|routeClass|release -- duplicate-spotting only, never identity.
+  fingerprint   String?
+  sourceRelease String?
+  /// One of AUTOFIX_CASE_STATE; transitions enforced by the core module and
+  /// written with compare-and-swap conditional updates.
+  state String @default("received")
+  /// One of AUTOFIX_CLASSIFICATION once classified.
+  classification      String?
+  ineligibilityReason String?
+  /// Reserved for a future LLM diagnosis pass; observational, never a gate.
+  llmConfidence Float?
+  /// Bounded technical facts only -- no user text, no prompts, no tokens.
+  diagnosticSummary Json?
+  attemptCount   Int       @default(0)
+  claimedAt      DateTime?
+  heartbeatAt    DateTime?
+  /// Doubles as the not-before instant while state = evidence_delayed.
+  leaseExpiresAt DateTime?
+  terminalReason String?
+  closedAt       DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  @@index([state, leaseExpiresAt])
+  @@index([createdAt])
+  @@index([fingerprint, sourceRelease])
 }
 
 /// Server-side evidence for one error *occurrence* on a server-generated

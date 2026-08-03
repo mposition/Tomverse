@@ -314,6 +314,16 @@ export async function AdminWorkspace({ activeView }: { activeView: AdminWorkspac
                         occurredAt: true,
                     },
                 },
+                // Phase 2 shadow diagnosis state -- observational only; the
+                // panel labels it explicitly as "no auto-fix exists".
+                autoFixCase: {
+                    select: {
+                        state: true,
+                        classification: true,
+                        ineligibilityReason: true,
+                        updatedAt: true,
+                    },
+                },
             },
         }),
         prisma.feedback.count({ where: { status: "open" } }),
@@ -542,6 +552,14 @@ export async function AdminWorkspace({ activeView }: { activeView: AdminWorkspac
                   modelId: feedback.traceEvidence.modelId,
                   sentryEventId: feedback.traceEvidence.sentryEventId,
                   occurredAt: feedback.traceEvidence.occurredAt.toISOString(),
+              }
+            : null,
+        autoFixCase: feedback.autoFixCase
+            ? {
+                  state: feedback.autoFixCase.state,
+                  classification: feedback.autoFixCase.classification,
+                  ineligibilityReason: feedback.autoFixCase.ineligibilityReason,
+                  updatedAt: feedback.autoFixCase.updatedAt.toISOString(),
               }
             : null,
         createdAt: feedback.createdAt.toISOString(),

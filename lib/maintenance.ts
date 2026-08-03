@@ -10,6 +10,7 @@ import { expireCreditLots } from "@/lib/creditLedger";
 import { reconcileExpiredChatCreditReservations } from "@/lib/chatSecurity";
 import { purgeExpiredChatLimitDecisions } from "@/lib/chatLimitDecisions";
 import { purgeExpiredTraceErrorEvidence } from "@/lib/traceErrorEvidence";
+import { purgeClosedAutoFixCases } from "@/lib/feedbackAutoFixShadow";
 import {
   sendFoundingTesterPassEndedEmail,
   sendFoundingTesterPassReminderEmail,
@@ -384,6 +385,10 @@ export async function cleanupExpiredData() {
   // nulls out via onDelete: SetNull).
   const traceErrorEvidence = await purgeExpiredTraceErrorEvidence();
 
+  // Shadow diagnosis cases that reached a terminal state keep their value for
+  // 90 days of metric aggregation, then age out; open cases are never purged.
+  const autoFixCases = await purgeClosedAutoFixCases();
+
   const productAnalyticsEvents = await prisma.productAnalyticsEvent.deleteMany({
     where: {
       occurredAt: {
@@ -456,6 +461,7 @@ export async function cleanupExpiredData() {
     requestLeases: Number(requestLeases),
     providerErrorEvents: providerErrorEvents.count,
     traceErrorEvidence,
+    autoFixCases,
     productAnalyticsEvents: productAnalyticsEvents.count,
     limitDecisions: limitDecisions.deleted,
     promotionRiskIdentifiers: promotionRiskIdentifiers.count,
