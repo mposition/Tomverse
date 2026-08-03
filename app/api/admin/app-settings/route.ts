@@ -10,7 +10,9 @@ import { adminApprovalErrorResponse } from "@/lib/adminApproval";
 import { assertRecentAdminAuthentication } from "@/lib/adminReauthentication";
 import {
   getPublicAppSettings,
+  isImageGenerationEnabled,
   isValidGuestDefaultModel,
+  setImageGenerationEnabled,
   updatePublicAppSettings,
 } from "@/lib/appSettings";
 import {
@@ -25,6 +27,9 @@ const updateAppSettingsSchema = z
     aiChatEnabled: z.boolean(),
     attachmentsEnabled: z.boolean(),
     publicSharingEnabled: z.boolean(),
+    // Opt-in beta flag, NOT one of the default-on kill switches above -- it
+    // is stored and resolved separately (lib/imageGenerationAccess.ts).
+    imageGenerationEnabled: z.boolean(),
   })
   .strict();
 
@@ -41,7 +46,10 @@ export async function GET(req: Request) {
     });
 
     const settings = await getPublicAppSettings();
-    return NextResponse.json({ settings });
+    return NextResponse.json({
+      settings,
+      imageGenerationEnabled: await isImageGenerationEnabled(),
+    });
   } catch (error) {
     const securityResponse = apiSecurityResponse(error);
     if (securityResponse) return securityResponse;
@@ -85,7 +93,9 @@ export async function PATCH(req: Request) {
       summary: "Started platform defaults and feature-flag update.",
       metadata: body,
     });
-    const settings = await updatePublicAppSettings(body);
+    const { imageGenerationEnabled, ...publicSettings } = body;
+    const settings = await updatePublicAppSettings(publicSettings);
+    await setImageGenerationEnabled(imageGenerationEnabled);
     await writeAdminAuditLog({
       session,
       request: req,
@@ -95,7 +105,10 @@ export async function PATCH(req: Request) {
       summary: `Updated platform defaults and operational feature flags.`,
       metadata: body,
     });
-    return NextResponse.json({ settings });
+    return NextResponse.json({
+      settings,
+      imageGenerationEnabled: await isImageGenerationEnabled(),
+    });
   } catch (error) {
     const approvalResponse = adminApprovalErrorResponse(error);
     if (approvalResponse) return approvalResponse;
