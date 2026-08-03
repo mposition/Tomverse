@@ -65,7 +65,10 @@ const ENGLISH_STRING_CEILING = {
   zh: 191,
   // Preview markets, all of which spread `...en.chat` and `en.modelFinder`.
   // fr +1 (226 -> 227): modelFinder.saveAsDefaultHint, taken from en wholesale.
-  fr: 230,
+  // fr +2 (230 -> 232): externalImport.messagesCount and
+  // .historyConversations — "{count} messages" / "{count} conversations" are
+  // spelled identically in French; the section is otherwise fully translated.
+  fr: 232,
   // de/es/pt +1 for the same saveAsDefaultHint key.
   de: 233,
   es: 229,

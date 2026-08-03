@@ -12,7 +12,10 @@ import {
 } from "@/lib/appSettings";
 import { authOptions } from "@/lib/auth";
 import { EXTERNAL_IMPORT_MAX_CONTROL_REQUEST_BYTES } from "@/lib/externalImportLimits";
-import { createExternalImport } from "@/lib/externalImportService";
+import {
+    createExternalImport,
+    listExternalImports,
+} from "@/lib/externalImportService";
 
 const createImportSchema = z
     .object({
@@ -23,6 +26,33 @@ const createImportSchema = z
         clientFingerprint: z.string().trim().min(1).max(128).optional(),
     })
     .strict();
+
+export async function GET(req: Request) {
+    try {
+        const session = await getServerSession(authOptions);
+        if (!session?.user) {
+            return NextResponse.json({ error: "권한 없음" }, { status: 401 });
+        }
+        // Listing stays available while the feature flag is off, like DELETE:
+        // a rollback must never strand already-imported data out of reach of
+        // its owner's delete button (policy §15).
+        await consumeApiRateLimit(req, session.user.id, "external-import-list", {
+            minute: 30,
+            day: 1000,
+        });
+
+        const imports = await listExternalImports(session.user.id);
+        return NextResponse.json(
+            { imports },
+            { headers: { "Cache-Control": "no-store" } }
+        );
+    } catch (error) {
+        const securityResponse = apiSecurityResponse(error);
+        if (securityResponse) return securityResponse;
+        console.error("external import list failed", error);
+        return NextResponse.json({ error: "서버 오류" }, { status: 500 });
+    }
+}
 
 export async function POST(req: Request) {
     try {

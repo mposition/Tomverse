@@ -1009,6 +1009,91 @@ export const en = {
         refundRequestSuccess: "Refund request received.",
         refundRequestFailed: "Could not submit the refund request.",
     },
+    // External conversation import (Release A). "Import from another AI
+    // service" is deliberately distinct from auth.guestImportSectionTitle
+    // ("Import this browser's guest conversations") — two different features
+    // that must never share a name (policy §21).
+    externalImport: {
+        dataTabTitle: "Import from another AI service",
+        dataTabDescription:
+            "Store past conversations from a ChatGPT or Claude export file in your Tomverse account. The export file is read only in your browser.",
+        dataTabUsage: "{conversations} imported conversations · {storage} stored",
+        dataTabOpen: "Open import settings",
+        pageTitle: "Import conversations from another AI service",
+        pageDescription:
+            "Upload an official data export from ChatGPT or Claude, review what it contains, and choose which conversations to keep in your Tomverse account.",
+        backToChat: "Back to chat",
+        backToImports: "Back to imports",
+        signInRequired: "Sign in to import conversations from another AI service.",
+        disabledNotice: "External conversation import is not available right now.",
+        privacyNote:
+            "The export file never leaves your device: it is opened in your browser, and only the normalized text of the conversations you select is stored in your account. Images, audio and attachments are not imported. Deleting imported conversations from Tomverse does not delete anything at the original service.",
+        capacityTitle: "Import storage",
+        capacityUsage: "{used} of {limit} storage used",
+        capacityConversations: "{used} of {limit} imported conversations",
+        selectFile: "Choose export file",
+        selectFileHint:
+            "ChatGPT or Claude data export (.zip or .json), up to 1GB. Large archives are fine — media files are skipped without being read.",
+        parsing: "Reading the export in your browser…",
+        parsingProgress: "{conversations} conversations found",
+        cancel: "Cancel",
+        desktopRecommended:
+            "This export is too large for this device's browser. Because the file is opened locally, please try again on a desktop computer.",
+        parseFailed: "The file could not be read as a supported export.",
+        previewTitle: "Choose conversations to import",
+        previewProvider: "Detected export: {provider}",
+        previewSummary: "{selected} of {total} conversations selected · about {size}",
+        warningsTitle: "Not included",
+        warningSkippedMessages: "{count} system or tool messages were skipped",
+        warningSkippedParts: "{count} non-text parts (images, audio, files) were skipped",
+        warningBranches: "{count} alternate conversation branches are not imported",
+        notImportableBadge: "Cannot be imported",
+        notImportableExplain:
+            "{count} conversations contain a message above the import size limit and cannot be imported.",
+        truncationTitle: "Some long messages will be shortened",
+        truncationExplain:
+            "{conversations} conversations contain messages longer than the storage limit of {limit} characters. If you approve, the beginning and end of each long message are kept and the middle is replaced with a marker.",
+        truncationApprove: "Import these conversations with shortened messages",
+        truncatedBadge: "Will be shortened",
+        quotaExceededWarning:
+            "The selection is larger than your remaining import storage. Deselect some conversations to continue.",
+        messagesCount: "{count} messages",
+        startImport: "Upload selection",
+        uploading: "Uploading batch {sent} of {total}…",
+        uploadFailed:
+            "The upload failed. You can retry — batches that already arrived are not sent twice.",
+        retryUpload: "Retry upload",
+        stagedTitle: "Review and confirm",
+        stagedSummary:
+            "{staged} conversations ready to import · {duplicates} duplicates skipped",
+        stagedTruncated: "{count} messages will be stored shortened",
+        allDuplicates: "Everything in this selection is already in your account.",
+        finalize: "Confirm import",
+        finalizing: "Confirming…",
+        finalizeFailedQuota:
+            "Your account does not have enough import storage left for this selection.",
+        stagingExpired: "This import session expired. Start again from the export file.",
+        importCompleted:
+            "Import completed: {count} conversations are now stored in your account.",
+        startAnother: "Import another export",
+        errorGeneric: "Something went wrong. Please try again.",
+        historyTitle: "Imported exports",
+        historyEmpty: "Nothing has been imported yet.",
+        historyConversations: "{count} conversations",
+        statusCompleted: "Completed",
+        statusFailed: "Failed",
+        statusCancelled: "Cancelled",
+        statusStaging: "In progress",
+        viewDetail: "View",
+        deleteImport: "Delete",
+        deleteImportArmed: "Click again to delete",
+        deleting: "Deleting…",
+        deleteNote:
+            "Deleting removes the imported copies from Tomverse only; the original service is not affected.",
+        detailTitle: "Imported export",
+        detailNotFound: "This import could not be found.",
+        detailConversations: "Imported conversations",
+    },
     privacyPolicy: {
         title: "Privacy Policy",
         effective: "Effective: July 16, 2026",

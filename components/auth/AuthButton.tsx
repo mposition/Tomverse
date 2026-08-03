@@ -64,6 +64,7 @@ import {
 import { listImportableGuestConversations } from "@/lib/guestImport";
 import { openGuestImportModal } from "@/lib/guestImportModalEvents";
 import { useModalDialog } from "@/components/useModalDialog";
+import Link from "next/link";
 
 type LoginMethod =
     | { type: "oauth"; provider: "google" | "azure-ad"; linked: boolean }
@@ -83,6 +84,14 @@ export function AuthButton({
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [isAccountMenuOpen, setIsAccountMenuOpen] = useState(false);
     const [activeSettingsTab, setActiveSettingsTab] = useState<"account" | "preferences" | "data" | "plan">("account");
+    // Data-tab entry point for external conversation import. Hidden until the
+    // capacity endpoint answers 200: that endpoint is the authoritative
+    // session + rollout-flag probe, so a disabled flag closes this entry
+    // fail-closed exactly when it closes the API (policy §15).
+    const [externalImportEntry, setExternalImportEntry] = useState<
+        | { kind: "hidden" }
+        | { kind: "ready"; conversations: number; bytes: number }
+    >({ kind: "hidden" });
     const settingsButtonRef = useRef<HTMLButtonElement | null>(null);
     const settingsDialogRef = useRef<HTMLDivElement | null>(null);
     const deleteAccountButtonRef = useRef<HTMLButtonElement | null>(null);
@@ -276,6 +285,35 @@ export function AuthButton({
             });
         }
     }, [isModalOpen, activeSettingsTab, session?.user, fetchLoginMethods]);
+
+    useEffect(() => {
+        if (!isModalOpen || activeSettingsTab !== "data" || !session?.user) {
+            return;
+        }
+        let cancelled = false;
+        fetch("/api/imports/external/capacity", { cache: "no-store" })
+            .then(async (response) => {
+                if (cancelled || !response.ok) return;
+                const capacity = (await response.json()) as {
+                    usage?: {
+                        externalConversations?: number;
+                        normalizedTextBytes?: number;
+                    };
+                } | null;
+                if (cancelled) return;
+                setExternalImportEntry({
+                    kind: "ready",
+                    conversations: capacity?.usage?.externalConversations ?? 0,
+                    bytes: capacity?.usage?.normalizedTextBytes ?? 0,
+                });
+            })
+            .catch(() => {
+                // Unreachable API reads as unavailable: the entry stays hidden.
+            });
+        return () => {
+            cancelled = true;
+        };
+    }, [isModalOpen, activeSettingsTab, session?.user]);
 
     // Picks up the redirect from /api/user/login-methods/oauth/callback (the
     // custom OAuth-provider-linking flow) and surfaces a toast, since that
@@ -1502,6 +1540,32 @@ export function AuthButton({
 
                                 {activeSettingsTab === "data" && (
                                     <div className="space-y-4">
+                                        {externalImportEntry.kind === "ready" && (
+                                            <section
+                                                className="rounded-2xl border border-zinc-200 bg-zinc-50 p-4 dark:border-zinc-800 dark:bg-zinc-950/60"
+                                                data-testid="external-import-entry"
+                                            >
+                                                <h3 className="text-sm font-bold">{t("externalImport.dataTabTitle")}</h3>
+                                                <p className="mt-1 text-sm leading-6 text-zinc-500">{t("externalImport.dataTabDescription")}</p>
+                                                {externalImportEntry.conversations > 0 && (
+                                                    <p className="mt-1 text-sm leading-6 text-zinc-500">
+                                                        {formatCopy("externalImport.dataTabUsage", {
+                                                            conversations: String(externalImportEntry.conversations),
+                                                            storage: `${(externalImportEntry.bytes / (1024 * 1024)).toFixed(1)} MB`,
+                                                        })}
+                                                    </p>
+                                                )}
+                                                <Link
+                                                    href="/settings/imports"
+                                                    onClick={closeSettingsModal}
+                                                    data-testid="external-import-entry-link"
+                                                    className="mt-4 flex w-full items-center justify-center gap-2 rounded-xl border border-zinc-200 bg-white px-3 py-3 text-sm font-semibold text-zinc-700 transition-colors hover:bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:bg-zinc-800"
+                                                >
+                                                    <Database className="h-4 w-4" />
+                                                    {t("externalImport.dataTabOpen")}
+                                                </Link>
+                                            </section>
+                                        )}
                                         {listImportableGuestConversations().length > 0 && (
                                             <section className="rounded-2xl border border-zinc-200 bg-zinc-50 p-4 dark:border-zinc-800 dark:bg-zinc-950/60">
                                                 <h3 className="text-sm font-bold">{t("auth.guestImportSectionTitle")}</h3>

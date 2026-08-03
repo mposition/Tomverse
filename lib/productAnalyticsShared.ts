@@ -99,6 +99,16 @@ export const PRODUCT_ANALYTICS_EVENT_NAMES = [
   // Stripe sent the visitor back through `cancel_url`. Distinct from
   // `checkout_failed`: nothing went wrong, they chose not to buy.
   "checkout_cancelled",
+  // External conversation import (Release A). Parsing happens in a browser
+  // Web Worker, so parse outcomes and the mobile desktop-recommendation state
+  // are only observable client-side; the server-side lifecycle counters live
+  // in the admin external-imports report instead. Content-free by schema:
+  // the only properties are a provider enum and a bounded reason label --
+  // never a filename, title, content or digest (policy §22).
+  "external_import_parse_completed",
+  "external_import_parse_failed",
+  "external_import_desktop_recommended",
+  "external_import_finalized",
 ] as const;
 
 export type ProductAnalyticsEventName =
@@ -264,6 +274,12 @@ export const analyticsPropertiesSchema = z
     // "document" when the switch crossed the (site)/[locale] root boundary and
     // reloaded, "client" when it stayed in the same document.
     navigation: z.enum(["document", "client"]).optional(),
+    // External conversation import. "unknown" covers a parse that failed
+    // before the provider was detected. The failure reason is the worker's
+    // closed reason label (archive_too_large, no_conversation_data, ...) --
+    // a state name, never anything derived from the archive's contents.
+    import_provider: z.enum(["chatgpt", "claude", "unknown"]).optional(),
+    import_failure_reason: z.string().trim().min(1).max(64).optional(),
   })
   .strict()
   .superRefine((properties, context) => {

@@ -1007,6 +1007,88 @@ export const ko = {
         refundRequestSuccess: "환불 요청이 접수되었습니다.",
         refundRequestFailed: "환불 요청을 접수하지 못했습니다.",
     },
+    // 외부 대화 Import (Release A). "다른 AI 서비스에서 가져오기"는 Data 탭의
+    // "이 브라우저의 게스트 대화 가져오기"(auth.guestImportSectionTitle)와
+    // 다른 기능이므로 명칭을 공유하지 않습니다 (policy §21).
+    externalImport: {
+        dataTabTitle: "다른 AI 서비스에서 가져오기",
+        dataTabDescription:
+            "ChatGPT·Claude 내보내기 파일의 과거 대화를 Tomverse 계정에 저장합니다. 내보내기 파일은 브라우저 안에서만 읽습니다.",
+        dataTabUsage: "가져온 대화 {conversations}개 · {storage} 저장됨",
+        dataTabOpen: "가져오기 설정 열기",
+        pageTitle: "다른 AI 서비스에서 대화 가져오기",
+        pageDescription:
+            "ChatGPT 또는 Claude의 공식 데이터 내보내기 파일을 올리고, 내용을 확인한 뒤 Tomverse 계정에 보관할 대화를 선택하세요.",
+        backToChat: "채팅으로 돌아가기",
+        backToImports: "가져오기 목록으로",
+        signInRequired: "다른 AI 서비스의 대화를 가져오려면 로그인하세요.",
+        disabledNotice: "외부 대화 가져오기는 지금 사용할 수 없습니다.",
+        privacyNote:
+            "내보내기 파일은 기기를 벗어나지 않습니다. 파일은 브라우저에서 열리고, 선택한 대화의 정규화된 텍스트만 계정에 저장됩니다. 이미지·오디오·첨부 파일은 가져오지 않습니다. Tomverse에서 가져온 대화를 삭제해도 원래 서비스의 데이터는 삭제되지 않습니다.",
+        capacityTitle: "가져오기 저장 공간",
+        capacityUsage: "저장 공간 {limit} 중 {used} 사용",
+        capacityConversations: "가져온 대화 {limit}개 중 {used}개",
+        selectFile: "내보내기 파일 선택",
+        selectFileHint:
+            "ChatGPT 또는 Claude 데이터 내보내기(.zip 또는 .json), 최대 1GB. 용량이 커도 괜찮습니다 — 미디어 파일은 읽지 않고 건너뜁니다.",
+        parsing: "브라우저에서 내보내기 파일을 읽는 중…",
+        parsingProgress: "대화 {conversations}개 발견",
+        cancel: "취소",
+        desktopRecommended:
+            "이 내보내기 파일은 이 기기의 브라우저로 열기에 너무 큽니다. 파일이 기기에서 직접 열리기 때문에, 데스크톱 컴퓨터에서 다시 시도해 주세요.",
+        parseFailed: "지원되는 내보내기 형식으로 읽을 수 없는 파일입니다.",
+        previewTitle: "가져올 대화 선택",
+        previewProvider: "감지된 내보내기: {provider}",
+        previewSummary: "대화 {total}개 중 {selected}개 선택 · 약 {size}",
+        warningsTitle: "포함되지 않는 항목",
+        warningSkippedMessages: "시스템·도구 메시지 {count}개 제외",
+        warningSkippedParts: "텍스트가 아닌 항목(이미지·오디오·파일) {count}개 제외",
+        warningBranches: "대체 대화 분기 {count}개는 가져오지 않음",
+        notImportableBadge: "가져올 수 없음",
+        notImportableExplain:
+            "{count}개 대화에 가져오기 크기 한도를 넘는 메시지가 있어 가져올 수 없습니다.",
+        truncationTitle: "일부 긴 메시지가 줄여서 저장됩니다",
+        truncationExplain:
+            "{conversations}개 대화에 저장 한도({limit}자)를 넘는 메시지가 있습니다. 동의하면 긴 메시지의 앞부분과 뒷부분만 남기고 중간은 표시로 대체됩니다.",
+        truncationApprove: "줄인 메시지로 이 대화들을 가져오는 데 동의합니다",
+        truncatedBadge: "줄여서 저장됨",
+        quotaExceededWarning:
+            "선택한 대화가 남은 가져오기 저장 공간보다 큽니다. 일부 대화의 선택을 해제하세요.",
+        messagesCount: "메시지 {count}개",
+        startImport: "선택한 대화 업로드",
+        uploading: "배치 {total}개 중 {sent}번째 업로드 중…",
+        uploadFailed:
+            "업로드에 실패했습니다. 다시 시도할 수 있으며, 이미 도착한 배치는 중복 전송되지 않습니다.",
+        retryUpload: "업로드 다시 시도",
+        stagedTitle: "확인 후 확정",
+        stagedSummary: "가져올 대화 {staged}개 준비됨 · 중복 {duplicates}개 제외",
+        stagedTruncated: "메시지 {count}개가 줄여서 저장됩니다",
+        allDuplicates: "선택한 대화가 모두 이미 계정에 있습니다.",
+        finalize: "가져오기 확정",
+        finalizing: "확정하는 중…",
+        finalizeFailedQuota:
+            "이 선택을 저장하기에는 계정의 가져오기 저장 공간이 부족합니다.",
+        stagingExpired: "가져오기 세션이 만료되었습니다. 내보내기 파일부터 다시 시작하세요.",
+        importCompleted: "가져오기 완료: 대화 {count}개가 계정에 저장되었습니다.",
+        startAnother: "다른 내보내기 가져오기",
+        errorGeneric: "문제가 발생했습니다. 다시 시도해 주세요.",
+        historyTitle: "가져온 내보내기",
+        historyEmpty: "아직 가져온 항목이 없습니다.",
+        historyConversations: "대화 {count}개",
+        statusCompleted: "완료",
+        statusFailed: "실패",
+        statusCancelled: "취소됨",
+        statusStaging: "진행 중",
+        viewDetail: "보기",
+        deleteImport: "삭제",
+        deleteImportArmed: "한 번 더 누르면 삭제됩니다",
+        deleting: "삭제 중…",
+        deleteNote:
+            "삭제하면 Tomverse에 가져온 사본만 제거되며, 원래 서비스에는 영향이 없습니다.",
+        detailTitle: "가져온 내보내기",
+        detailNotFound: "이 가져오기를 찾을 수 없습니다.",
+        detailConversations: "가져온 대화",
+    },
     privacyPolicy: {
         title: "개인정보 처리방침",
         effective: "시행일: 2026년 7월 16일",
