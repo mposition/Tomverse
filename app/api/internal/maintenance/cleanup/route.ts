@@ -1,6 +1,7 @@
 import { createHash, timingSafeEqual } from "node:crypto";
 import { after } from "next/server";
 import { cleanupExpiredData } from "@/lib/maintenance";
+import { runFeedbackAutoFixShadowWorker } from "@/lib/feedbackAutoFixShadow";
 import { reportOperationalIncident } from "@/lib/operationalMonitoring";
 import {
   completeScheduledJob,
@@ -34,6 +35,28 @@ export async function POST(request: Request) {
 
   const run = await startScheduledJob("retention_cleanup");
   try {
+    // Phase 2 shadow diagnosis rides the maintenance cadence. Diagnostics
+    // only -- its failure must never fail the retention job, so it reports
+    // through its own structured log and a warning here.
+    const shadow = await runFeedbackAutoFixShadowWorker().catch((error) => {
+      console.warn(
+        JSON.stringify({
+          event: "autofix_shadow_worker_failed",
+          reason: error instanceof Error ? error.name : "unknown",
+          at: new Date().toISOString(),
+        })
+      );
+      return null;
+    });
+    if (shadow?.enabled) {
+      console.info(
+        JSON.stringify({
+          event: "autofix_shadow_worker_run",
+          ...shadow,
+          at: new Date().toISOString(),
+        })
+      );
+    }
     const deleted = await cleanupExpiredData();
     const processedCount = Object.values(deleted).reduce<number>(
       (sum, value) => sum + (typeof value === "number" ? value : 0),
