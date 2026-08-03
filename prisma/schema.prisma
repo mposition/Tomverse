@@ -97,6 +97,11 @@ model UserSettings {
   theme                  String    @default("dark") // "dark", "light", "system"
   language               String    @default("en") // "ko", "en"
   defaultModel           String    @default("gpt-5-6-luna")
+  // 1-3 model IDs a signed-in account starts a new conversation with.
+  // NULL (never a schema default, never backfilled) means [defaultModel];
+  // lib/newConversationModels.ts is the only interpreter. See
+  // docs/policy/default-model-luna-migration.md §1.2.
+  newConversationModelIds Json?
   preferredTasks         Json?
   preferredPriority      String?
   usesFilesFrequently    String?

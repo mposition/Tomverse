@@ -10,12 +10,15 @@ import {
   readLimitedJson,
 } from "@/lib/apiSecurity";
 import { APP_DEFAULTS } from "@/lib/appDefaults";
+import { getUserBillingPlan } from "@/lib/billingEntitlements";
 import {
   MODEL_FINDER_PRIORITIES,
   MODEL_FINDER_TASKS,
   getModelFinderCombination,
   isModelFinderDefaultId,
 } from "@/lib/modelFinder";
+import { getRuntimeModels } from "@/lib/modelRegistry";
+import { normalizeNewConversationModelIdsForWrite } from "@/lib/newConversationModels";
 import { prisma } from "@/lib/prisma";
 
 const answersSchema = z
@@ -134,18 +137,24 @@ export async function POST(req: Request) {
     const actionAt = new Date();
 
     if (body.action === "accept_default") {
+      // Guarded default decision: never store APP_DEFAULTS.defaultModelId
+      // without the isModelFinderDefaultId check.
       const defaultModelId = isModelFinderDefaultId(APP_DEFAULTS.defaultModelId)
         ? APP_DEFAULTS.defaultModelId
         : "gpt-5-6-luna";
+      // Accepting the default is an explicit choice, so the combination is
+      // stored as [defaultModelId] rather than left to the null fallback.
       const settings = await prisma.userSettings.upsert({
         where: { userId },
         update: {
           defaultModel: defaultModelId,
+          newConversationModelIds: [defaultModelId],
           modelFinderCompletedAt: actionAt,
         },
         create: {
           userId,
           defaultModel: defaultModelId,
+          newConversationModelIds: [defaultModelId],
           modelFinderCompletedAt: actionAt,
         },
       });
@@ -153,6 +162,7 @@ export async function POST(req: Request) {
         {
           success: true,
           defaultModelId: settings.defaultModel,
+          newConversationModelIds: [defaultModelId],
           modelFinderCompletedAt: settings.modelFinderCompletedAt?.toISOString(),
         },
         { headers: noStoreHeaders }
@@ -171,13 +181,40 @@ export async function POST(req: Request) {
       );
     }
 
+    // The whole combination is persisted, so every model must be selectable
+    // right now on this account's plan -- no silent truncation, no
+    // auto-replacement at save time.
+    const [models, billingPlan] = await Promise.all([
+      getRuntimeModels(),
+      getUserBillingPlan(userId),
+    ]);
+    const normalized = normalizeNewConversationModelIdsForWrite({
+      requested: body.modelIds,
+      models,
+      plan: billingPlan.tier,
+    });
+    if (!normalized.ok) {
+      return NextResponse.json(
+        {
+          error: "One or more selected models cannot be saved for this account.",
+          code: "NEW_CONVERSATION_MODELS_INVALID",
+          rejection: normalized.rejection,
+          ...(normalized.modelId ? { modelId: normalized.modelId } : {}),
+        },
+        { status: 400, headers: noStoreHeaders }
+      );
+    }
+
+    // One transaction: the representative model is the combination's first
+    // item, and the two fields never drift apart.
     const settings = await prisma.userSettings.upsert({
       where: { userId },
       update: {
         preferredTasks: body.answers.tasks,
         preferredPriority: body.answers.priority,
         usesFilesFrequently: "rarely",
-        defaultModel: body.modelIds[0],
+        defaultModel: normalized.modelIds[0],
+        newConversationModelIds: normalized.modelIds,
         modelFinderCompletedAt: actionAt,
       },
       create: {
@@ -185,18 +222,19 @@ export async function POST(req: Request) {
         preferredTasks: body.answers.tasks,
         preferredPriority: body.answers.priority,
         usesFilesFrequently: "rarely",
-        defaultModel: body.modelIds[0],
+        defaultModel: normalized.modelIds[0],
+        newConversationModelIds: normalized.modelIds,
         modelFinderCompletedAt: actionAt,
       },
     });
 
-    // The response must only claim what was actually persisted. Echoing the
-    // requested modelIds here once made a single-model save look like a saved
-    // combination.
+    // Canonical response: only what was actually persisted, never an echo of
+    // the raw request.
     return NextResponse.json(
       {
         success: true,
         defaultModelId: settings.defaultModel,
+        newConversationModelIds: normalized.modelIds,
         modelFinderCompletedAt: settings.modelFinderCompletedAt?.toISOString(),
       },
       { headers: noStoreHeaders }
