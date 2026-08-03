@@ -9,6 +9,7 @@ import {
   IMAGE_GENERATION_STATUSES,
   STALE_IMAGE_GENERATION_AFTER_MS,
   canTransitionImageGenerationStatus,
+  deriveImageGroupStatus,
   imageAssetR2Key,
   imageConversationR2Prefix,
 } from "../lib/imageGenerationStateCore.ts";
@@ -64,4 +65,26 @@ test("policy constants hold their approved values", () => {
   );
   assert.ok(IMAGE_GENERATION_FAILURE_PHASES.includes("stale_job_reconciled"));
   assert.ok(IMAGE_ASSET_CLEANUP_REASONS.includes("conversation_deleted"));
+});
+
+test("group status derives from current attempts only (policy section 11)", () => {
+  assert.equal(deriveImageGroupStatus(["succeeded", "succeeded"]), "succeeded");
+  assert.equal(deriveImageGroupStatus(["failed", "failed"]), "failed");
+  assert.equal(
+    deriveImageGroupStatus(["succeeded", "failed"]),
+    "partial_success"
+  );
+  assert.equal(deriveImageGroupStatus(["succeeded", "pending"]), "in_progress");
+  assert.equal(
+    deriveImageGroupStatus(["succeeded", "settling"]),
+    "in_progress"
+  );
+  // A retried failure means the target's CURRENT attempt is live again: the
+  // group goes back to in-progress while succeeded results stay terminal.
+  assert.equal(
+    deriveImageGroupStatus(["succeeded", "processing"]),
+    "in_progress"
+  );
+  // No targets is an invariant violation; the derivation stays conservative.
+  assert.equal(deriveImageGroupStatus([]), "in_progress");
 });
