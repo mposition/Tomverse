@@ -126,6 +126,8 @@ export function ImageGenerationWorkspace({
   const [size, setSize] = useState<ImageSize>("1024x1024");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
+  // The poll loop's wall clock, read at render time in place of Date.now().
+  const [pollClockMs, setPollClockMs] = useState(0);
   const listRef = useRef<HTMLDivElement | null>(null);
   const refreshedAssetIds = useRef(new Set<string>());
   // The id may arrive mid-flight via onConversationCreated; the ref keeps the
@@ -210,6 +212,7 @@ export function ImageGenerationWorkspace({
   useEffect(() => {
     if (!hasActiveGeneration) return;
     const timer = setInterval(async () => {
+      setPollClockMs(Date.now());
       const active = generations.filter(
         (generation) => !isTerminal(generation.status)
       );
@@ -370,12 +373,14 @@ export function ImageGenerationWorkspace({
       );
     }
     if (!isTerminal(generation.status)) {
-      // Re-evaluated on every 5s poll merge; past ~2.5 minutes the run has
-      // outlived a normal provider round-trip, so say what happens next
-      // (the stale sweep fails and fully refunds it) instead of spinning
-      // silently for the reclaim window.
+      // Advanced by the 5s poll clock (render purity forbids Date.now()
+      // here); past ~2.5 minutes the run has outlived a normal provider
+      // round-trip, so say what happens next (the stale sweep fails and
+      // fully refunds it) instead of spinning silently for the reclaim
+      // window.
       const runningLong =
-        Date.now() - new Date(generation.createdAt).getTime() > 150_000;
+        pollClockMs > 0 &&
+        pollClockMs - new Date(generation.createdAt).getTime() > 150_000;
       return (
         <div
           role="status"

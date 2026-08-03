@@ -83,13 +83,15 @@ function Stat({ label, value, detail }: { label: string; value: string; detail?:
 export function AdminImageGenerationPanel() {
   const [report, setReport] = useState<AdminImageGenerationReport | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [isLoading, setIsLoading] = useState(false);
+  // Starts true: the mount effect immediately loads, and setting it there
+  // synchronously would be a set-state-in-effect violation -- every state
+  // write in load() happens after the first await instead.
+  const [isLoading, setIsLoading] = useState(true);
 
   const load = useCallback(async () => {
-    setIsLoading(true);
-    setError(null);
     try {
       const response = await fetch("/api/admin/image-generation", { cache: "no-store" });
+      setError(null);
       const data = (await response.json().catch(() => null)) as
         | AdminImageGenerationReport
         | { error?: string }
@@ -110,7 +112,9 @@ export function AdminImageGenerationPanel() {
   }, []);
 
   useEffect(() => {
-    void load();
+    // Deferred a tick so no state write is synchronous within the effect --
+    // the same idiom the other admin panels use for their mount load.
+    queueMicrotask(() => void load());
   }, [load]);
 
   const invariantIssues = report
@@ -149,7 +153,10 @@ export function AdminImageGenerationPanel() {
           )}
           <button
             type="button"
-            onClick={() => void load()}
+            onClick={() => {
+              setIsLoading(true);
+              void load();
+            }}
             disabled={isLoading}
             className="inline-flex items-center gap-2 rounded-xl border border-zinc-700 px-4 py-2 text-sm font-bold text-zinc-200 hover:bg-zinc-900 disabled:cursor-not-allowed disabled:opacity-60"
           >
