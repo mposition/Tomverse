@@ -265,6 +265,10 @@ export const seedAdminFixtures = async () => {
         status: "open",
         message: FIXTURE_FEEDBACK.open.message,
         plan: "Pro",
+        // Opted into lifecycle status emails, so the console journeys can
+        // exercise the notify badge and the completion dialog's email path.
+        emailUpdatesConsent: true,
+        language: "en",
         createdAt: at(-2 * HOUR),
       },
       {

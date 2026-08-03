@@ -1,5 +1,6 @@
 import "server-only";
 
+import { planInfrastructureAlerts } from "@/lib/infrastructureAlertPolicy";
 import { getInfrastructureDashboard } from "@/lib/infrastructureMonitoring";
 import { reportOperationalIncident } from "@/lib/operationalMonitoring";
 import { prisma } from "@/lib/prisma";
@@ -19,25 +20,19 @@ export async function monitorInfrastructureThresholdsIfDue(now = new Date()) {
     },
     select: { id: true },
   }).catch(() => null);
-  if (recent) return { checked: false, alerts: 0 };
+  if (recent) return { checked: false, alerts: 0, advisories: 0 };
 
   const run = await startScheduledJob("infrastructure_threshold_monitor");
   try {
     const dashboard = await getInfrastructureDashboard();
-    const dependencies = [
-      ["railway", dashboard.railway.status, dashboard.railway.message],
-      ["r2", dashboard.r2.status, dashboard.r2.message],
-      ["database", dashboard.database.status, dashboard.database.message],
-      ["prisma", dashboard.prismaUsage.status, dashboard.prismaUsage.message],
-    ] as const;
-    const unhealthy = dependencies.filter(([, status]) => status === "warning" || status === "error");
+    // Dashboard-only advisories (e.g. Railway PROJECTED_BALANCE_LOW) stay on
+    // the Admin screen and scheduled reports; only actionable incidents reach
+    // the real-time channels. `alerts` counts what was actually reported.
+    const plan = planInfrastructureAlerts(dashboard);
     await Promise.all(
-      unhealthy.map(([dependency, status, message]) =>
+      plan.incidents.map(({ dependency, ...incident }) =>
         reportOperationalIncident({
-          code: `INFRASTRUCTURE_${dependency.toUpperCase()}_${status.toUpperCase()}`,
-          title: `${dependency} infrastructure is ${status}`,
-          error: message,
-          severity: status === "error" ? "fatal" : "warning",
+          ...incident,
           cooldownMs: 30 * 60 * 1_000,
           context: { component: "infrastructure-threshold-monitor", dependency },
         })
@@ -45,13 +40,19 @@ export async function monitorInfrastructureThresholdsIfDue(now = new Date()) {
     );
     await completeScheduledJob({
       runId: run?.id,
-      processedCount: dependencies.length,
+      processedCount: plan.decisions.length,
       result: {
-        alerts: unhealthy.length,
-        statuses: Object.fromEntries(dependencies.map(([name, status]) => [name, status])),
+        alerts: plan.incidents.length,
+        advisories: plan.advisories.length,
+        suppressedAdvisories: plan.advisories,
+        statuses: plan.statuses,
       },
     });
-    return { checked: true, alerts: unhealthy.length };
+    return {
+      checked: true,
+      alerts: plan.incidents.length,
+      advisories: plan.advisories.length,
+    };
   } catch (error) {
     await failScheduledJob({ runId: run?.id, error });
     await reportOperationalIncident({
@@ -62,6 +63,6 @@ export async function monitorInfrastructureThresholdsIfDue(now = new Date()) {
       cooldownMs: 30 * 60 * 1_000,
       context: { component: "infrastructure-threshold-monitor" },
     });
-    return { checked: false, alerts: 0 };
+    return { checked: false, alerts: 0, advisories: 0 };
   }
 }

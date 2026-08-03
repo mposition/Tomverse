@@ -334,6 +334,7 @@ export const en = {
         resumePanel: "Resume chat",
         retryWithoutFiles: "Retry without files",
         comparisonPreflightFailed: "The selected models could not be checked before sending. Please try again.",
+        modelSettingsSyncFailed: "Your model selection could not be saved to the server. Please try sending again.",
         comparisonCreditsInsufficient: "The selected models need more credits than you currently have. Choose fewer models or add credits.",
         comparisonDailyCreditsInsufficient: "The selected models need more daily credits than remain today.",
         comparisonConcurrencyLimit: "A response is already being generated. Try again once it finishes or is stopped.",
@@ -562,6 +563,16 @@ export const en = {
         messageCounter: "{count} / {max}",
         errorReportHint: "You can send this without adding anything. The error details are attached either way.",
         traceOptionalHint: "The trace ID is optional. You can send without it.",
+        emailUpdatesLabel: "Email me status updates",
+        emailUpdatesAccountHint:
+          "A receipt and status updates for this report will go to your account email.",
+        emailUpdatesEmailLabel: "Email for updates",
+        emailUpdatesEmailPlaceholder: "you@example.com",
+        emailUpdatesEmailHint:
+          "Used only for status updates about this report.",
+        emailUpdatesEmailInvalid: "Enter a valid email address.",
+        emailUpdatesScheduled:
+          "We will email you a receipt and status updates.",
         traceFormatHint: "That does not look like a trace ID. It will be sent exactly as typed.",
         errorInvalid: "Check what you entered and send again.",
         errorVerification: "A security check is needed. Complete it and send again.",

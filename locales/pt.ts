@@ -295,6 +295,7 @@ export const pt = {
         resumePanel: "Retomar chat",
         retryWithoutFiles: "Tentar novamente sem arquivos",
         comparisonPreflightFailed: "Não foi possível verificar os modelos selecionados antes do envio. Tente novamente.",
+        modelSettingsSyncFailed: "Não foi possível salvar sua seleção de modelos no servidor. Envie novamente.",
         comparisonCreditsInsufficient: "Os créditos atuais não são suficientes para todos os modelos selecionados. Reduza o número de modelos ou adicione créditos.",
         comparisonDailyCreditsInsufficient: "Os créditos diários restantes não são suficientes para todos os modelos selecionados.",
         comparisonConcurrencyLimit: "Já está a ser gerada uma resposta. Tente novamente quando terminar ou for interrompida.",
@@ -413,6 +414,16 @@ export const pt = {
         messageCounter: "{count} / {max}",
         errorReportHint: "Você pode enviar sem acrescentar nada: os detalhes do erro vão anexados de qualquer forma.",
         traceOptionalHint: "O trace ID é opcional. Você pode enviar sem ele.",
+        emailUpdatesLabel: "Receber o estado por e-mail",
+        emailUpdatesAccountHint:
+          "O recibo e as atualizações deste relatório serão enviados para o e-mail da sua conta.",
+        emailUpdatesEmailLabel: "E-mail para atualizações",
+        emailUpdatesEmailPlaceholder: "voce@exemplo.com",
+        emailUpdatesEmailHint:
+          "Usado apenas para atualizações sobre este relatório.",
+        emailUpdatesEmailInvalid: "Insira um endereço de e-mail válido.",
+        emailUpdatesScheduled:
+          "Enviaremos por e-mail o recibo e as atualizações de estado.",
         traceFormatHint: "Isso não parece um trace ID. Ele será enviado exatamente como digitado.",
         errorInvalid: "Confira o que você escreveu e envie novamente.",
         errorVerification: "É preciso concluir uma verificação de segurança. Conclua e envie novamente.",
