@@ -14,11 +14,12 @@ import {
 } from "@/lib/apiSecurity";
 import { ensureGuestVerified } from "@/lib/turnstile";
 import { feedbackReferenceFromId } from "@/lib/feedbackPolicy";
+import { FEEDBACK_LIFECYCLE_STAGE } from "@/lib/feedbackLifecycleCore";
+import { isLanguage } from "@/lib/language";
 import {
   NOTIFICATION_KIND,
-  attemptNotificationDelivery,
+  deliverNotificationNow,
   enqueueNotificationDelivery,
-  recordNotificationAttempt,
 } from "@/lib/notificationDeliveries";
 import { NOTIFICATION_DELIVERY_STATUS } from "@/lib/notificationRetryCore";
 
@@ -35,6 +36,13 @@ const feedbackSchema = z
     path: z.string().trim().max(300).optional(),
     userAgent: z.string().trim().max(500).optional(),
     turnstileToken: z.string().trim().min(1).max(2_048).optional(),
+    /**
+     * Per-report opt-in to lifecycle status emails. Transactional consent for
+     * this submission only -- never a account-wide marketing preference.
+     */
+    emailUpdates: z.boolean().optional(),
+    /** The submitter's UI language; validated against lib/language.ts. */
+    language: z.string().trim().max(10).optional(),
   })
   .strict();
 
@@ -74,81 +82,132 @@ export async function POST(req: Request) {
       // an existing grant already covered this caller.
       turnstileOutcome = turnstileGrantCookie ? "verified" : "existing_grant";
     }
+    // The server-verified account address always wins: a signed-in caller's
+    // client-sent email must never override it, or a compromised client could
+    // point another account's receipts at an arbitrary inbox.
     const email = session?.user?.email || body.email || null;
-    // The report and the promise to notify about it commit together. Enqueuing
-    // after the write would leave a window where a crash loses the
-    // notification with no record that one was ever owed.
-    const { feedback, delivery } = await prisma.$transaction(async (tx) => {
-      const feedback = await tx.feedback.create({
-        data: {
-          userId: session?.user?.id || null,
-          email,
-          type: body.type,
-          message: body.message,
-          traceId: body.traceId || null,
-          modelId: body.modelId || null,
-          plan: body.plan || null,
-          hasAttachments: Boolean(body.hasAttachments),
-          attachmentCount: body.attachmentCount || 0,
-          path: body.path || null,
-          userAgent: body.userAgent || null,
-        },
+    const emailUpdatesConsent = Boolean(body.emailUpdates) && Boolean(email);
+    if (!session?.user?.id && emailUpdatesConsent && body.email) {
+      // A guest asking us to mail an address they typed is the one place this
+      // endpoint fans out to an arbitrary recipient, so the address itself gets
+      // its own budget on top of the per-caller one above (same pattern as
+      // lib/emailLogin.ts). Checked only after Turnstile passed, so a token-less
+      // bot cannot burn a victim address's budget and lock them out of receipts.
+      await consumeApiRateLimit(
+        req,
+        `feedback-recipient:${body.email.toLowerCase()}`,
+        "feedback-recipient",
+        { minute: 2, day: 5 }
+      );
+    }
+    // The submitter's language, captured once so every later lifecycle email
+    // renders in the language the report was made in. For accounts it comes
+    // from the server-side setting, never from the client payload.
+    let language = "en";
+    if (session?.user?.id) {
+      const settings = await prisma.userSettings.findUnique({
+        where: { userId: session.user.id },
+        select: { language: true },
       });
-      const delivery = await enqueueNotificationDelivery(tx, {
-        kind: NOTIFICATION_KIND.supportFeedback,
-        referenceId: feedback.id,
-      });
-      return { feedback, delivery };
-    });
+      if (isLanguage(settings?.language)) language = settings.language;
+    } else if (isLanguage(body.language)) {
+      language = body.language;
+    }
+    // The report and every promise attached to it commit together: the
+    // operator notification, the received lifecycle event, and (when consented)
+    // the submitter's receipt email. Enqueuing after the write would leave a
+    // window where a crash loses a notification with no record one was owed.
+    const { feedback, delivery, userDelivery } = await prisma.$transaction(
+      async (tx) => {
+        const feedback = await tx.feedback.create({
+          data: {
+            userId: session?.user?.id || null,
+            email,
+            type: body.type,
+            message: body.message,
+            traceId: body.traceId || null,
+            modelId: body.modelId || null,
+            plan: body.plan || null,
+            hasAttachments: Boolean(body.hasAttachments),
+            attachmentCount: body.attachmentCount || 0,
+            path: body.path || null,
+            userAgent: body.userAgent || null,
+            language,
+            emailUpdatesConsent,
+          },
+        });
+        // The immutable snapshot the receipt email renders from -- and the
+        // record that this stage was announced at most once.
+        await tx.feedbackLifecycleEvent.create({
+          data: {
+            feedbackId: feedback.id,
+            stage: FEEDBACK_LIFECYCLE_STAGE.received,
+            previousStatus: null,
+            newStatus: feedback.status,
+          },
+        });
+        const delivery = await enqueueNotificationDelivery(tx, {
+          kind: NOTIFICATION_KIND.supportFeedback,
+          referenceId: feedback.id,
+        });
+        const userDelivery = emailUpdatesConsent
+          ? await enqueueNotificationDelivery(tx, {
+              kind: NOTIFICATION_KIND.feedbackUserReceived,
+              referenceId: feedback.id,
+            })
+          : null;
+        return { feedback, delivery, userDelivery };
+      }
+    );
 
     // From here on the submission is stored. Nothing below may turn this into
     // a failure for the user: a notification that cannot be delivered is an
-    // operations problem, not a rejected report. The first attempt happens
+    // operations problem, not a rejected report. The first attempts happen
     // inline so the common case still notifies immediately; anything else is
     // left to the retry queue, which drains on the maintenance cron.
-    let notificationDelivered = false;
-    try {
-      const outcome = await attemptNotificationDelivery({
-        kind: NOTIFICATION_KIND.supportFeedback,
+    const supportOutcome = await deliverNotificationNow({
+      deliveryId: delivery.id,
+      kind: NOTIFICATION_KIND.supportFeedback,
+      referenceId: feedback.id,
+    });
+    if (!supportOutcome.delivered) {
+      console.warn(
+        JSON.stringify({
+          event: "support_notification_failed",
+          feedbackId: feedback.id,
+          deliveryId: delivery.id,
+          // The delivery outcome's *class*, not a provider message: that
+          // body echoes the request, which here is the reporter's words.
+          reason: supportOutcome.errorKind,
+          queued: supportOutcome.status === NOTIFICATION_DELIVERY_STATUS.pending,
+        })
+      );
+    }
+    let userReceiptDelivered = false;
+    if (userDelivery) {
+      const receiptOutcome = await deliverNotificationNow({
+        deliveryId: userDelivery.id,
+        kind: NOTIFICATION_KIND.feedbackUserReceived,
         referenceId: feedback.id,
-        deliveryId: delivery.id,
       });
-      const transition = await recordNotificationAttempt({
-        id: delivery.id,
-        attemptsBefore: 0,
-        outcome,
-      });
-      notificationDelivered =
-        transition.status === NOTIFICATION_DELIVERY_STATUS.delivered;
-      if (!notificationDelivered) {
+      userReceiptDelivered = receiptOutcome.delivered;
+      if (!receiptOutcome.delivered) {
         console.warn(
           JSON.stringify({
-            event: "support_notification_failed",
+            event: "feedback_user_receipt_failed",
             feedbackId: feedback.id,
-            deliveryId: delivery.id,
-            // The delivery outcome's *class*, not a provider message: that
-            // body echoes the request, which here is the reporter's words.
-            reason: transition.lastErrorKind,
-            queued: transition.status === NOTIFICATION_DELIVERY_STATUS.pending,
+            deliveryId: userDelivery.id,
+            reason: receiptOutcome.errorKind,
+            queued:
+              receiptOutcome.status === NOTIFICATION_DELIVERY_STATUS.pending,
           })
         );
       }
-    } catch (error) {
-      // The row is already queued, so a failure to even record the attempt
-      // still leaves the notification recoverable on the next drain.
-      console.warn(
-        JSON.stringify({
-          event: "support_notification_attempt_unrecorded",
-          feedbackId: feedback.id,
-          deliveryId: delivery.id,
-          reason: error instanceof Error ? error.name : "unknown",
-        })
-      );
     }
 
     // The operational record of one submission. Deliberately made of
     // presence flags and classifications only: no message body, no trace ID
-    // value, no Turnstile token, no cookie, no user agent.
+    // value, no email address, no Turnstile token, no cookie, no user agent.
     console.info(
       JSON.stringify({
         event: "user_feedback",
@@ -158,8 +217,12 @@ export async function POST(req: Request) {
         type: body.type,
         status: 200,
         turnstile: turnstileOutcome,
-        notificationDelivered,
+        notificationDelivered: supportOutcome.delivered,
         notificationDeliveryId: delivery.id,
+        emailUpdatesConsent,
+        userReceiptDeliveryId: userDelivery?.id || null,
+        userReceiptDelivered,
+        language,
         hasTraceId: Boolean(body.traceId),
         hasModelId: Boolean(body.modelId),
         hasAttachments: Boolean(body.hasAttachments),
@@ -173,6 +236,10 @@ export async function POST(req: Request) {
       // report was stored -- and can quote something back to support.
       feedbackId: feedback.id,
       reference: feedbackReferenceFromId(feedback.id),
+      // Whether lifecycle status emails are on for this report, so the UI can
+      // say a receipt is on its way -- never whether the send succeeded, which
+      // is the queue's business, not the submitter's problem.
+      emailUpdatesEnabled: emailUpdatesConsent,
     });
     if (turnstileGrantCookie) {
       response.headers.append("Set-Cookie", turnstileGrantCookie);
