@@ -44,7 +44,76 @@ export type FeedbackRow = {
   emailUpdatesConsent: boolean;
   closureOutcome: string | null;
   userReply: string | null;
+  /** Token verification outcome -- lib/errorReportContract.ts vocabulary.
+   * Null for reports that predate the feature or carry no trace. */
+  errorReportVerification: string | null;
+  traceProvenance: string | null;
+  errorClassificationSource: string | null;
+  clientErrorCode: string | null;
+  evidenceAvailability: string | null;
+  /** The exactly-linked evidence occurrence, when verification made one. */
+  traceEvidence: {
+    occurrenceId: string;
+    environment: string;
+    release: string | null;
+    routeClass: string;
+    phase: string | null;
+    errorCode: string | null;
+    classificationSource: string;
+    httpStatus: number | null;
+    provider: string | null;
+    modelId: string | null;
+    sentryEventId: string | null;
+    occurredAt: string;
+  } | null;
   createdAt: string;
+};
+
+/**
+ * Operator-facing sentence for each verification state. Words, not colour:
+ * verified/unverified must never be a hue-only distinction, and a
+ * client-classified report must never read as a server-authenticated fact.
+ */
+const traceVerificationLabel = (feedback: FeedbackRow) => {
+  switch (feedback.errorReportVerification) {
+    case "verified":
+      return "Verified server error (signed token)";
+    case "missing_token":
+      return feedback.clientErrorCode === "EMPTY_RESPONSE"
+        ? "Client-classified EMPTY_RESPONSE — server token not issued"
+        : "Unverified — no server token";
+    case "expired":
+      return "Unverified — token expired";
+    case "invalid_signature":
+      return "Unverified — invalid token signature";
+    case "payload_mismatch":
+      return "Unverified — token does not match this trace";
+    case "unsupported_version":
+      return "Unverified — unsupported token version";
+    case "untrusted_trace_source":
+      return "Unverified — client-supplied trace";
+    default:
+      return feedback.traceId ? "Unverified — manual trace" : null;
+  }
+};
+
+const evidenceAvailabilityLabel = (value: string | null) => {
+  switch (value) {
+    case "recorded":
+      return "Evidence recorded";
+    case "intentionally_not_recorded":
+      return "No evidence row by policy";
+    case "existing_limit_event":
+      return "See existing limit-decision events for this trace";
+    case "existing_provider_event":
+      return "See existing provider events for this trace";
+    case "not_yet_available":
+      return "Evidence row not found (write pending, capped or failed)";
+    case "ambiguous_trace":
+      return "Multiple occurrences share this trace — no exact link";
+    default:
+      return null;
+  }
 };
 
 type Props = {
@@ -465,6 +534,73 @@ export function FeedbackInboxPanel({ rows }: Props) {
                     UA: {feedback.userAgent || "-"}
                   </span>
                 </div>
+
+                {/*
+                  Server-side trace evidence, kept visually separate from the
+                  reporter's own words above. Everything here is either an
+                  authenticated fact from the signed token/evidence row or is
+                  explicitly labelled as a client claim. Phase 1 shows
+                  observability only -- no auto-fix state exists yet, so none
+                  is invented here.
+                */}
+                {traceVerificationLabel(feedback) ? (
+                  <div
+                    data-testid="feedback-trace-verification"
+                    className="mt-2 grid gap-1.5 rounded-xl border border-zinc-800 bg-zinc-950/70 p-3 text-xs text-zinc-400"
+                  >
+                    <span className="font-bold text-zinc-200">
+                      {traceVerificationLabel(feedback)}
+                    </span>
+                    <span className="truncate">
+                      Trace source:{" "}
+                      {feedback.errorReportVerification === "verified"
+                        ? "server_generated (authenticated)"
+                        : `${feedback.traceProvenance || "unknown"} (client claim)`}
+                    </span>
+                    {feedback.clientErrorCode ? (
+                      <span className="truncate">
+                        Client-classified code: {feedback.clientErrorCode}
+                      </span>
+                    ) : null}
+                    {evidenceAvailabilityLabel(feedback.evidenceAvailability) ? (
+                      <span className="truncate">
+                        {evidenceAvailabilityLabel(feedback.evidenceAvailability)}
+                      </span>
+                    ) : null}
+                    {feedback.traceEvidence ? (
+                      <div
+                        data-testid="feedback-trace-evidence"
+                        className="mt-1 grid gap-1 border-t border-zinc-800 pt-2 md:grid-cols-2"
+                      >
+                        <span className="truncate">
+                          Server code: {feedback.traceEvidence.errorCode || "-"}{" "}
+                          ({feedback.traceEvidence.classificationSource})
+                        </span>
+                        <span className="truncate">
+                          Route: {feedback.traceEvidence.routeClass}
+                          {feedback.traceEvidence.phase
+                            ? ` / ${feedback.traceEvidence.phase}`
+                            : ""}
+                        </span>
+                        <span className="truncate">
+                          Release: {feedback.traceEvidence.release || "-"} (
+                          {feedback.traceEvidence.environment})
+                        </span>
+                        <span className="truncate">
+                          Provider: {feedback.traceEvidence.provider || "-"} /{" "}
+                          {feedback.traceEvidence.modelId || "-"}
+                        </span>
+                        <span className="truncate">
+                          Occurred: {feedback.traceEvidence.occurredAt}
+                        </span>
+                        <span className="truncate">
+                          Sentry event:{" "}
+                          {feedback.traceEvidence.sentryEventId || "-"}
+                        </span>
+                      </div>
+                    ) : null}
+                  </div>
+                ) : null}
                 <div className="mt-3">
                   <AdminNotesBox targetType="Feedback" targetId={feedback.id} />
                 </div>

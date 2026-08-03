@@ -776,6 +776,27 @@ model Feedback {
   /// The short reply written FOR THE SUBMITTER. Never the internal admin note,
   /// and never merged with one.
   userReply       String?
+  /// Outcome of verifying the server-issued errorReportToken -- one of
+  /// TOKEN_VERIFICATION_STATUS in lib/errorReportContract.ts. Never the raw
+  /// token, which is verified and discarded in the same request.
+  errorReportVerification String?
+  /// Where the submitted trace ID came from, as far as it can be proven:
+  /// server_generated only when the token verified; otherwise the client's
+  /// unauthenticated claim (or null for reports without a trace).
+  traceProvenance String?
+  /// Who classified the error code the reporter attached: "server" when it
+  /// came from a verified token, "client" for client-side classifications
+  /// like EMPTY_RESPONSE. A client classification is never presented as a
+  /// server-authenticated fact.
+  errorClassificationSource String?
+  /// The client-classified error code, kept separate from any server code
+  /// inside the verified token payload.
+  clientErrorCode String?
+  /// Whether an evidence row exists for a verified report, and if not, why
+  /// not -- one of EVIDENCE_AVAILABILITY in lib/errorReportContract.ts.
+  evidenceAvailability String?
+  traceEvidenceId String?
+  traceEvidence   TraceErrorEvidence? @relation(fields: [traceEvidenceId], references: [id], onDelete: SetNull)
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
@@ -784,6 +805,52 @@ model Feedback {
   @@index([status, createdAt])
   @@index([type, createdAt])
   @@index([userId, createdAt])
+  @@index([traceId])
+}
+
+/// Server-side evidence for one error *occurrence* on a server-generated
+/// trace. The primary key and the occurrenceId are both server-minted:
+/// trace IDs can be client-influenced elsewhere (proxy.ts adopts a client
+/// x-request-id; preflight adopts X-Client-Request-ID), so the trace ID is
+/// deliberately a non-unique index -- never an identity, never an upsert key.
+/// The same trace string may own several rows; feedback links to exactly one
+/// via the occurrenceId carried inside the signed errorReportToken.
+///
+/// Stored fields are the minimum needed for support correlation: no prompt
+/// or message bodies, no raw provider payloads, no headers, no tokens.
+/// Retention: 30 days, purged by lib/maintenance.ts.
+model TraceErrorEvidence {
+  id           String  @id @default(cuid())
+  /// Trusted per-occurrence identity minted by the server at error time.
+  occurrenceId String  @unique
+  traceId      String
+  /// One of TRACE_PROVENANCE in lib/errorReportContract.ts; rows are only
+  /// written for server_generated traces today.
+  traceProvenance String
+  environment  String
+  release      String?
+  routeClass   String
+  phase        String?
+  errorCode    String?
+  /// One of ERROR_CLASSIFICATION_SOURCE; always "server" for rows written by
+  /// the error builders.
+  classificationSource String @default("server")
+  httpStatus   Int?
+  provider     String?
+  modelId      String?
+  retryable    Boolean?
+  fingerprint  String?
+  sentryEventId String?
+  occurredAt   DateTime @default(now())
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  feedback Feedback[]
+
+  @@index([traceId])
+  @@index([release, occurredAt])
+  @@index([errorCode, occurredAt])
+  @@index([occurredAt])
 }
 
 /// One immutable record per lifecycle stage of one feedback report.

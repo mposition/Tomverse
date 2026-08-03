@@ -26,6 +26,11 @@ export type FeedbackSubmitPayload = {
   message: string;
   email?: string;
   traceId?: string;
+  /** Server-issued proof for the trace above; sent once, never stored. */
+  errorReportToken?: string;
+  /** The client's unauthenticated claims about the error context. */
+  traceProvenance?: string;
+  clientErrorCode?: string;
   modelId?: string;
   plan?: string;
   hasAttachments?: boolean;

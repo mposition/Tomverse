@@ -3,10 +3,13 @@ import {
   completeTurnstileChallenge,
   installTurnstileScript,
   mockAuthenticatedApi,
+  openRecentConversation,
   prepareGuestPage,
+  sendChatMessage,
   type QaLanguage,
 } from "./support/app-fixtures";
 import {
+  installChatModelStub,
   restoreActiveConversation,
   setRootFontSize,
 } from "./support/chat-state-fixtures";
@@ -51,6 +54,9 @@ type FeedbackQaState = {
     emailUpdates?: boolean;
     email?: string;
     language?: string;
+    errorReportToken?: string;
+    traceProvenance?: string;
+    clientErrorCode?: string;
   }>;
 };
 
@@ -82,6 +88,9 @@ async function mockFeedbackApi(
       emailUpdates?: boolean;
       email?: string;
       language?: string;
+      errorReportToken?: string;
+      traceProvenance?: string;
+      clientErrorCode?: string;
     };
     state.requests.push({
       message: String(body.message ?? ""),
@@ -91,6 +100,9 @@ async function mockFeedbackApi(
       emailUpdates: body.emailUpdates,
       email: body.email,
       language: body.language,
+      errorReportToken: body.errorReportToken,
+      traceProvenance: body.traceProvenance,
+      clientErrorCode: body.clientErrorCode,
     });
 
     const outcome = respond();
@@ -1347,5 +1359,257 @@ test.describe("diagnostics disclosure", () => {
     expect(sent.trim().length).toBeGreaterThanOrEqual(5);
     expect(sent).not.toContain("Provider error");
     expect(sent).not.toContain("0d1f6b1e-9a2c-4d3f-8b7a-5c6d7e8f9012");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Per-message trace ownership and the error report token
+//
+// The regressions these guard:
+//   - one global localStorage key meant a later error in another panel
+//     silently replaced the trace a user was about to report;
+//   - the signed error report token must ride along only while the submitted
+//     trace is still the message's own, and must never be persisted -- a
+//     reload legitimately loses it and the report verifies as missing_token.
+// ---------------------------------------------------------------------------
+
+test.describe("per-message trace ownership", () => {
+  // The guest_ prefix is the guest conversation namespace invariant -- an ID
+  // outside it is not recognised as a guest conversation at all.
+  const CHAT_ID = "guest_trace_chat";
+  const MODEL_A = "gpt-5-4-mini";
+  const MODEL_B = "claude-sonnet-5";
+  const TRACE_A = "aaaaaaaa-1111-4111-8111-111111111111";
+  const TRACE_B = "bbbbbbbb-2222-4222-8222-222222222222";
+  const TRACE_EMPTY = "cccccccc-3333-4333-8333-333333333333";
+  // Opaque stand-ins for the header value; E2E never verifies tokens.
+  const TOKEN_A = ["qa-report", "token-alpha"].join("-");
+  const TOKEN_B = ["qa-report", "token-bravo"].join("-");
+
+  const seedGuestConversation = async (page: Page, models: string[]) => {
+    await prepareGuestPage(page, "en");
+    await page.addInitScript(
+      ({ chatId, selectedModels }) => {
+        // Init scripts re-run on every navigation, including reloads. Seed
+        // only once so a reload test reads what the app persisted, not a
+        // fixture reset.
+        if (window.localStorage.getItem("guest_conversations")) return;
+        window.localStorage.setItem(
+          "guest_conversations",
+          JSON.stringify([
+            {
+              id: chatId,
+              title: "Trace ownership",
+              selectedModels,
+              disabledPanels: [],
+              webSearchMode: "off",
+              createdAt: new Date().toISOString(),
+            },
+          ])
+        );
+        // A prior completed turn per panel: the recent-conversations list
+        // only surfaces conversations that have content, and the live sends
+        // below append after it.
+        for (const modelId of selectedModels) {
+          window.localStorage.setItem(
+            `guest_messages_${chatId}_${modelId}`,
+            JSON.stringify([
+              { id: "u1", role: "user", content: "Earlier question", status: "normal" },
+              {
+                id: "a1",
+                role: "assistant",
+                content: `Earlier answer from ${modelId}.`,
+                status: "normal",
+              },
+            ])
+          );
+        }
+      },
+      { chatId: CHAT_ID, selectedModels: models }
+    );
+  };
+
+  const reportButtons = (page: Page) => page.getByTestId("report-error-button");
+
+  test("each error's report keeps its own trace and token", async ({
+    page,
+  }, testInfo) => {
+    await seedGuestConversation(page, [MODEL_A]);
+    // Two sends, two different failures: the first message must keep its own
+    // trace even after the second error has moved the legacy global
+    // localStorage key on.
+    await installChatModelStub(page, {
+      [MODEL_A]: [
+        {
+          kind: "error",
+          status: 500,
+          code: "AI_PROVIDER_ERROR",
+          traceId: TRACE_A,
+          errorReportToken: TOKEN_A,
+        },
+        {
+          kind: "error",
+          status: 500,
+          code: "AI_PROVIDER_ERROR",
+          traceId: TRACE_B,
+          errorReportToken: TOKEN_B,
+        },
+      ],
+    });
+    const feedback = await mockFeedbackApi(page);
+    await page.goto("/chat?lang=en");
+    await openRecentConversation(page, { title: "Trace ownership" });
+    await sendChatMessage(page, testInfo, "please fail once");
+    await expect(reportButtons(page)).toHaveCount(1);
+    await sendChatMessage(page, testInfo, "please fail again");
+    await expect(reportButtons(page)).toHaveCount(2);
+    await expect
+      .poll(() =>
+        page.evaluate(() =>
+          window.localStorage.getItem("tomverse_last_error_trace_id")
+        )
+      )
+      .toBe(TRACE_B);
+
+    // The FIRST error's report still carries the FIRST trace and token --
+    // not the later one the global key now holds.
+    await reportButtons(page).first().click();
+    await expect(page.getByTestId("feedback-trace")).toHaveValue(TRACE_A);
+    await page.getByTestId("feedback-submit").click();
+    await expect(page.getByTestId("feedback-dialog")).toBeHidden();
+    expect(feedback.requests).toHaveLength(1);
+    expect(feedback.requests[0].traceId).toBe(TRACE_A);
+    expect(feedback.requests[0].errorReportToken).toBe(TOKEN_A);
+    expect(feedback.requests[0].traceProvenance).toBe("server_generated");
+
+    // And the second error's report is its own.
+    await reportButtons(page).nth(1).click();
+    await expect(page.getByTestId("feedback-trace")).toHaveValue(TRACE_B);
+    await page.getByTestId("feedback-submit").click();
+    await expect(page.getByTestId("feedback-dialog")).toBeHidden();
+    expect(feedback.requests).toHaveLength(2);
+    expect(feedback.requests[1].traceId).toBe(TRACE_B);
+    expect(feedback.requests[1].errorReportToken).toBe(TOKEN_B);
+  });
+
+  test("the token never reaches guest localStorage", async ({
+    page,
+  }, testInfo) => {
+    await seedGuestConversation(page, [MODEL_A]);
+    await installChatModelStub(page, {
+      [MODEL_A]: {
+        kind: "error",
+        status: 500,
+        code: "AI_PROVIDER_ERROR",
+        traceId: TRACE_A,
+        errorReportToken: TOKEN_A,
+      },
+    });
+    await page.goto("/chat?lang=en");
+    await openRecentConversation(page, { title: "Trace ownership" });
+    await sendChatMessage(page, testInfo, "fail and persist");
+    await expect(reportButtons(page)).toHaveCount(1);
+
+    // The failed turn is persisted for the guest -- without the runtime
+    // errorReport context, so the raw token never touches storage.
+    await expect
+      .poll(async () =>
+        page.evaluate(
+          ({ chatId, modelId }) =>
+            window.localStorage.getItem(
+              `guest_messages_${chatId}_${modelId}`
+            ) || "",
+          { chatId: CHAT_ID, modelId: MODEL_A }
+        )
+      )
+      .toContain("AI_PROVIDER_ERROR");
+    const storageDump = await page.evaluate(() =>
+      Object.entries(window.localStorage)
+        .map(([key, value]) => `${key}=${value}`)
+        .join("\n")
+    );
+    expect(storageDump).not.toContain(TOKEN_A);
+    expect(storageDump).not.toContain("errorReportToken");
+    expect(storageDump).not.toContain("errorReport");
+  });
+
+  test("a reload keeps the report path but sheds the token", async ({
+    page,
+  }, testInfo) => {
+    await seedGuestConversation(page, [MODEL_A]);
+    await installChatModelStub(page, {
+      [MODEL_A]: {
+        kind: "error",
+        status: 500,
+        code: "AI_PROVIDER_ERROR",
+        traceId: TRACE_A,
+        errorReportToken: TOKEN_A,
+      },
+    });
+    const feedback = await mockFeedbackApi(page);
+    await page.goto("/chat?lang=en");
+    await openRecentConversation(page, { title: "Trace ownership" });
+    await sendChatMessage(page, testInfo, "fail before the reload");
+    await expect(reportButtons(page)).toHaveCount(1);
+
+    // Wait for the failed turn to actually land in guest storage -- the
+    // persist effect runs after the error renders, and reloading before it
+    // flushes would test an empty transcript instead of the contract.
+    await expect
+      .poll(async () =>
+        page.evaluate(
+          ({ chatId, modelId }) =>
+            window.localStorage.getItem(
+              `guest_messages_${chatId}_${modelId}`
+            ) || "",
+          { chatId: CHAT_ID, modelId: MODEL_A }
+        )
+      )
+      .toContain("AI_PROVIDER_ERROR");
+
+    // A reload with the active-conversation marker restores the same view,
+    // with the failed turn re-read from guest storage.
+    await page.evaluate((id) => {
+      window.sessionStorage.setItem("tomverse_active_chat_id", id);
+    }, CHAT_ID);
+    await page.reload();
+    await expect(reportButtons(page)).toHaveCount(1);
+    await reportButtons(page).first().click();
+    // The legacy last-error key still offers the trace as a convenience...
+    await expect(page.getByTestId("feedback-trace")).toHaveValue(TRACE_A);
+    await page.getByTestId("feedback-submit").click();
+    await expect(page.getByTestId("feedback-dialog")).toBeHidden();
+    // ...but the token was memory-only, so the report goes out without one
+    // and the server records it as missing_token. That is the contract.
+    expect(feedback.requests).toHaveLength(1);
+    expect(feedback.requests[0].traceId).toBe(TRACE_A);
+    expect(feedback.requests[0].errorReportToken).toBeUndefined();
+  });
+
+  test("an empty response reports unverified with a client classification", async ({
+    page,
+  }, testInfo) => {
+    await seedGuestConversation(page, [MODEL_A]);
+    await installChatModelStub(page, {
+      [MODEL_A]: { kind: "empty", traceId: TRACE_EMPTY },
+    });
+    const feedback = await mockFeedbackApi(page);
+    await page.goto("/chat?lang=en");
+    await openRecentConversation(page, { title: "Trace ownership" });
+    await sendChatMessage(page, testInfo, "answer with nothing");
+    await expect(reportButtons(page)).toHaveCount(1);
+
+    await reportButtons(page).first().click();
+    await expect(page.getByTestId("feedback-trace")).toHaveValue(TRACE_EMPTY);
+    await page.getByTestId("feedback-submit").click();
+    await expect(page.getByTestId("feedback-dialog")).toBeHidden();
+    expect(feedback.requests).toHaveLength(1);
+    const sent = feedback.requests[0];
+    expect(sent.traceId).toBe(TRACE_EMPTY);
+    // A normal 200 stream never pre-issues a token; the EMPTY_RESPONSE
+    // classification is the client's and is labelled as such.
+    expect(sent.errorReportToken).toBeUndefined();
+    expect(sent.clientErrorCode).toBe("EMPTY_RESPONSE");
+    expect(sent.traceProvenance).toBe("server_generated");
   });
 });

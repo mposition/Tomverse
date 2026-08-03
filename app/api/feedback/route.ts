@@ -22,6 +22,18 @@ import {
   enqueueNotificationDelivery,
 } from "@/lib/notificationDeliveries";
 import { NOTIFICATION_DELIVERY_STATUS } from "@/lib/notificationRetryCore";
+import {
+  ERROR_CLASSIFICATION_SOURCE,
+  EVIDENCE_AVAILABILITY,
+  TOKEN_VERIFICATION_STATUS,
+  TRACE_PROVENANCE,
+  traceEvidenceRecordability,
+  type TraceProvenance,
+} from "@/lib/errorReportContract";
+import {
+  isErrorReportSigningConfigured,
+  verifyErrorReportToken,
+} from "@/lib/errorReportToken";
 
 const feedbackSchema = z
   .object({
@@ -29,6 +41,16 @@ const feedbackSchema = z
     email: z.string().trim().email().max(254).optional(),
     message: z.string().trim().min(5).max(2_000),
     traceId: z.string().trim().max(120).optional(),
+    /**
+     * Server-issued proof that the trace above belongs to a real server
+     * error. Verified and discarded in this request -- never stored, never
+     * logged. Its absence only affects the report's verification status,
+     * never whether the report is accepted.
+     */
+    errorReportToken: z.string().trim().max(2_048).optional(),
+    /** The client's own unauthenticated claims about the error context. */
+    traceProvenance: z.string().trim().max(40).optional(),
+    clientErrorCode: z.string().trim().max(80).optional(),
     modelId: z.string().trim().max(120).optional(),
     plan: z.string().trim().max(40).optional(),
     hasAttachments: z.boolean().optional(),
@@ -58,6 +80,93 @@ type TurnstileOutcome =
   | "existing_grant"
   /** A fresh token was verified and a new grant issued. */
   | "verified";
+
+const KNOWN_PROVENANCE = new Set<string>(Object.values(TRACE_PROVENANCE));
+
+/**
+ * Resolves how much of the reporter's trace claim the server can vouch for.
+ * Verification, classification source and evidence availability are three
+ * independent observations (docs/policy/trace-feedback-automation.md); a
+ * failed verification never blocks the submission itself.
+ */
+const resolveTraceReport = async (body: {
+  traceId?: string;
+  errorReportToken?: string;
+  traceProvenance?: string;
+  clientErrorCode?: string;
+}) => {
+  const claimedProvenance: TraceProvenance =
+    body.traceProvenance && KNOWN_PROVENANCE.has(body.traceProvenance)
+      ? (body.traceProvenance as TraceProvenance)
+      : TRACE_PROVENANCE.unknown;
+  const base = {
+    verification: null as string | null,
+    traceProvenance: body.traceId ? (claimedProvenance as string) : null,
+    errorClassificationSource: body.clientErrorCode
+      ? (ERROR_CLASSIFICATION_SOURCE.client as string)
+      : null,
+    clientErrorCode: body.clientErrorCode || null,
+    evidenceAvailability: null as string | null,
+    traceEvidenceId: null as string | null,
+  };
+  if (!body.traceId) return base;
+  if (!body.errorReportToken || !isErrorReportSigningConfigured()) {
+    return { ...base, verification: TOKEN_VERIFICATION_STATUS.missingToken };
+  }
+
+  const outcome = verifyErrorReportToken(body.errorReportToken);
+  if (outcome.status !== TOKEN_VERIFICATION_STATUS.verified) {
+    return { ...base, verification: outcome.status };
+  }
+  if (outcome.payload.traceId !== body.traceId) {
+    return {
+      ...base,
+      verification: TOKEN_VERIFICATION_STATUS.payloadMismatch,
+    };
+  }
+
+  // Verified: the trace and the server-classified code inside the payload
+  // are authenticated facts. Evidence is a separate observation -- the link
+  // is exact (by the occurrence identity the token carries) or not made at
+  // all; the newest row for a trace string is never guessed at.
+  const verified = {
+    ...base,
+    verification: TOKEN_VERIFICATION_STATUS.verified as string,
+    traceProvenance: TRACE_PROVENANCE.serverGenerated as string,
+    errorClassificationSource: outcome.payload.errorCode
+      ? (ERROR_CLASSIFICATION_SOURCE.server as string)
+      : base.errorClassificationSource,
+  };
+  if (!outcome.payload.occurrenceId) {
+    // No occurrence identity: either the issuing policy chose not to record
+    // a row for this class (limit-style errors keep their existing limit
+    // decision records), or the write budget was exhausted at issuance.
+    const recordability = traceEvidenceRecordability(
+      outcome.payload.errorCode || "",
+      0
+    );
+    return {
+      ...verified,
+      evidenceAvailability: recordability.record
+        ? EVIDENCE_AVAILABILITY.notYetAvailable
+        : recordability.availability,
+    };
+  }
+  const evidence = await prisma.traceErrorEvidence.findUnique({
+    where: { occurrenceId: outcome.payload.occurrenceId },
+    select: { id: true },
+  });
+  return evidence
+    ? {
+        ...verified,
+        evidenceAvailability: EVIDENCE_AVAILABILITY.recorded,
+        traceEvidenceId: evidence.id,
+      }
+    : {
+        ...verified,
+        evidenceAvailability: EVIDENCE_AVAILABILITY.notYetAvailable,
+      };
+};
 
 export async function POST(req: Request) {
   try {
@@ -117,6 +226,10 @@ export async function POST(req: Request) {
     // operator notification, the received lifecycle event, and (when consented)
     // the submitter's receipt email. Enqueuing after the write would leave a
     // window where a crash loses a notification with no record one was owed.
+    // Verified (or not) before the write so the outcome commits atomically
+    // with the report. The raw token is read here once and never persisted;
+    // a verification failure of any kind still stores the feedback.
+    const traceReport = await resolveTraceReport(body);
     const { feedback, delivery, userDelivery } = await prisma.$transaction(async (tx) => {
       const feedback = await tx.feedback.create({
         data: {
@@ -133,6 +246,12 @@ export async function POST(req: Request) {
           userAgent: body.userAgent || null,
           language,
           emailUpdatesConsent,
+          errorReportVerification: traceReport.verification,
+          traceProvenance: traceReport.traceProvenance,
+          errorClassificationSource: traceReport.errorClassificationSource,
+          clientErrorCode: traceReport.clientErrorCode,
+          evidenceAvailability: traceReport.evidenceAvailability,
+          traceEvidenceId: traceReport.traceEvidenceId,
         },
       });
       // The immutable snapshot the receipt email renders from -- and the
@@ -222,6 +341,12 @@ export async function POST(req: Request) {
         userReceiptDelivered,
         language,
         hasTraceId: Boolean(body.traceId),
+        // Classifications only -- never the trace value or the token itself.
+        errorReportVerification: traceReport.verification,
+        traceProvenance: traceReport.traceProvenance,
+        errorClassificationSource: traceReport.errorClassificationSource,
+        evidenceAvailability: traceReport.evidenceAvailability,
+        hasEvidenceLink: Boolean(traceReport.traceEvidenceId),
         hasModelId: Boolean(body.modelId),
         hasAttachments: Boolean(body.hasAttachments),
         attachmentCount: body.attachmentCount || 0,

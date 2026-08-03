@@ -34,10 +34,14 @@ export type StreamAttempt =
       code?: string;
       message?: string;
       traceId?: string;
+      /** Rides in the X-Error-Report-Token response header, mirroring the
+       * real error builders. Opaque here -- E2E never verifies it. */
+      errorReportToken?: string;
       details?: Record<string, unknown>;
     }
   // 200 response whose body stream closes with zero bytes -- the real
   // EMPTY_RESPONSE path (see ChatApp.tsx's `!assistantText.trim()` check).
+  // Deliberately token-less: a normal stream never pre-issues one.
   | { kind: "empty"; traceId?: string }
   | { kind: "async-job"; jobId?: string; traceId?: string };
 
@@ -109,7 +113,13 @@ function patchWindowFetchForChatStub(serializedSpec: string) {
           }),
           {
             status: (attempt.status as number) || 500,
-            headers: { "Content-Type": "application/json", "X-Request-ID": traceId },
+            headers: {
+              "Content-Type": "application/json",
+              "X-Request-ID": traceId,
+              ...(attempt.errorReportToken
+                ? { "X-Error-Report-Token": attempt.errorReportToken as string }
+                : {}),
+            },
           }
         );
       }

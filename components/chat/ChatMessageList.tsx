@@ -824,6 +824,7 @@ export function ChatMessageList({
                             currentPlan={currentPlan}
                             attachmentCount={msg.errorHadAttachments ? 1 : 0}
                             rawErrorDetails={msg.content}
+                            errorReport={msg.errorReport}
                             triggerLabel={t("chat.reportError")}
                             triggerClassName={secondaryButtonClass}
                             triggerTestId="report-error-button"
