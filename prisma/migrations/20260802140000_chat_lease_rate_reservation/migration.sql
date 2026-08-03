@@ -1,0 +1,31 @@
+-- A multi-model comparison reserves its per-minute request capacity up front.
+--
+-- The aggregate preflight already reserved every concurrency slot a comparison
+-- needs in one transaction, but the per-minute request rate was only *read*
+-- there and incremented later, once per model, by each POST /api/chat. With a
+-- guest limit of five and three already spent this minute, a three-model
+-- comparison passed the read, then had two panels increment successfully and
+-- the third come back 429 CHAT_RATE_LIMITED -- a partial run, which is the
+-- outcome the admission design exists to prevent.
+--
+-- The preflight now increments both minute buckets (the caller's own subject
+-- and the aggregate IP ceiling) by the whole model count, atomically, and each
+-- model request that claims one of the pre-reserved slots skips its own
+-- increment so nothing is counted twice.
+--
+-- These two columns record what a slot pre-paid, so `rollbackChatAdmission`
+-- can give the capacity of every *unclaimed* slot back at once rather than
+-- leaving it held until the minute rolls over.
+--
+--   * `rateIpKey` is deliberately not `ipKey`. `ipKey` is the IP *concurrency*
+--     scope and is populated for guests only; the per-minute rate ceiling
+--     applies to signed-in callers as well, and reusing the column would make
+--     an account count against the anonymous concurrency ceiling.
+--   * `rateMinuteStart` names the exact ChatUsageBucket row that was charged,
+--     so a refund can never touch a different minute's bucket.
+--
+-- Both are NULL for an ordinary single-request lease, which pays for itself
+-- inside its own transaction and has nothing to hand back.
+ALTER TABLE "ChatRequestLease"
+  ADD COLUMN IF NOT EXISTS "rateIpKey" TEXT,
+  ADD COLUMN IF NOT EXISTS "rateMinuteStart" TIMESTAMP(3);

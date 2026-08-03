@@ -408,6 +408,14 @@ model ChatRequestLease {
   heartbeatAt DateTime  @default(now())
   expiresAt   DateTime
   createdAt   DateTime  @default(now())
+  // Per-minute request capacity the aggregate preflight paid for this slot, so
+  // an admission that is rolled back can hand it straight back instead of
+  // holding it for the rest of the minute. Separate from `ipKey`, which is the
+  // IP *concurrency* scope and exists for guests only: the per-minute IP rate
+  // ceiling applies to signed-in callers too, and merging the two would make
+  // an account consume the anonymous concurrency ceiling.
+  rateIpKey       String?
+  rateMinuteStart DateTime?
 
   @@index([subjectKey, expiresAt])
   @@index([ipKey, expiresAt])

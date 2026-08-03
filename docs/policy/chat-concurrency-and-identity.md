@@ -29,6 +29,8 @@
 | Operational guardrail | 비용 폭증·provider 사고 | `operational_guardrail` | `OPERATIONAL_COST_GUARDRAIL_TRIGGERED` 등 |
 | **주체 동시 실행** | 이 사용자/게스트가 지금 돌리는 응답 수 | `concurrency` | `CHAT_CONCURRENCY_EXCEEDED` |
 | **IP 집계 상한** | 익명 트래픽의 남용 천장 | `operational_admission` | `CHAT_IP_CONCURRENCY_EXCEEDED` |
+| **주체 분당 요청 rate** | 이 사용자/게스트가 이번 분에 보낸 요청 수 | `rate_limit` | `CHAT_RATE_LIMITED` (`scope: *_rate_minute`) |
+| **IP 분당 요청 rate** | 이 공인 IP가 이번 분에 보낸 요청 수 | `operational_admission` | `CHAT_RATE_LIMITED` (`scope: ip_rate_minute`) |
 
 문구도 층마다 다릅니다. 크레딧이 없어서 막힌 사람과 자기 답변이 아직 돌고 있어서
 막힌 사람과 옆자리 사람 때문에 막힌 사람에게 같은 문장을 보여 주면, 셋 중 둘은
@@ -88,6 +90,49 @@ NAT 하나 뒤의 모든 게스트가 한도 3개를 나눠 썼고, 3모델 비�
    않습니다 — admission은 UX 계약이지 보안 경계가 아닙니다.
 6. preflight 자체가 인프라 사유로 응답하지 못하면(500/503) client는 한 번
    재시도한 뒤 **열어 둡니다**. 진짜 판정(429·403)은 그대로 막습니다.
+
+## 3.1 분당 요청 rate도 같은 계약을 따른다
+
+**바뀐 것:** 동시 실행 슬롯은 전부 아니면 전무로 예약했지만, **분당 요청
+rate는 preflight에서 읽기만 하고 실제 증가는 모델 요청마다** 일어났습니다.
+게스트는 그 읽기조차 없었습니다. `CHAT_GUEST_PER_MINUTE=5`에 이번 분 3회를
+쓴 게스트가 3모델 비교를 보내면, preflight를 통과하고 두 패널이 버킷을 4·5로
+올린 뒤 세 번째가 `chat_reservation` 단계에서 `CHAT_RATE_LIMITED` 429가
+됐습니다 — 정확히 admission이 없애려던 부분 실행입니다(Trace `c7216139-…`).
+
+계약:
+
+- **preflight가 `모델 수`만큼의 분당 용량을 원자적으로 예약합니다.** 게스트도
+  로그인 사용자도, 주체 버킷(`CHAT_GUEST_PER_MINUTE` / `CHAT_USER_PER_MINUTE`)과
+  IP 버킷(`CHAT_IP_PER_MINUTE`) **양쪽 모두**입니다. 조건부 UPDATE 하나가 전량을
+  올리거나 아무것도 올리지 않으므로, 확인과 사용 사이에 다른 탭이 끼어들어도
+  일부만 실행되지 않습니다. 읽기 검사로 되돌리지 않습니다.
+- **IP 분당 상한은 로그인 사용자에게도 적용합니다.** IP 동시 실행 상한(§2)은
+  게스트 전용이지만, 분당 rate 상한은 `acquireChatAccess`가 늘 모든 요청에
+  부과해 왔습니다. preflight에서 게스트만 검사하면 로그인 사용자의 비교가
+  preflight를 통과하고 패널 하나를 IP 상한에 잃습니다.
+- **슬롯을 claim한 모델 요청은 분당 버킷을 다시 올리지 않습니다.** claim은
+  transaction 맨 앞에서 일어나고, 성공한 경우에만 주체·IP 분당 증가를
+  건너뜁니다. claim에 실패한 요청(위조·재사용·만료·타 subject)은 평소대로 전액을
+  스스로 부담하므로, admission token은 **슬롯만 정하고 rate를 면제하지
+  않습니다**.
+- **쓰지 않은 예약은 돌려줍니다.** preflight transaction이 실패하면 예약도 함께
+  사라지고(두 scope 중 뒤쪽이 거절해도 앞쪽 차감이 남지 않습니다),
+  `rollbackChatAdmission()`과 만료 lease sweep이 claim되지 않은 슬롯의 분당
+  용량을 즉시 반납합니다. 슬롯이 어느 버킷을 얼마나 샀는지는 lease 행의
+  `rateIpKey`·`rateMinuteStart`에 적혀 있어, 분이 넘어간 뒤 도착한 rollback도
+  **자기가 차감한 그 버킷**을 되돌립니다.
+- **거절 응답은 429 + `CHAT_RATE_LIMITED` + `Retry-After` ≥ 1 +
+  `details.retryAfterSeconds`(같은 값) + 미래의 `resetAt`** 입니다. `scope`가
+  주체(`guest_rate_minute`·`user_rate_minute`)와 IP(`ip_rate_minute`)를 가르고,
+  `limitLayer`는 각각 `rate_limit`·`operational_admission`입니다 —
+  `entitlement`로 기록하지 않습니다.
+- **client는 자동으로 재시도하지 않습니다.** 현재 언어의
+  `chat.tooManyRequestsRetry`에 서버가 준 초를 넣어 보여 주고 Trace ID를
+  유지하며, 작성 중인 draft와 첨부는 그대로 둡니다. 500/503의 한 번 재시도는
+  인프라 실패용이며 429에는 적용되지 않습니다.
+- **한도 기본값(5 / 20 / 40)을 올려 덮지 않고, IP 보호를 제거하지 않습니다.**
+  단일 모델 요청의 서버 측 검사도 그대로입니다.
 
 ## 4. lease 수명
 
@@ -184,7 +229,8 @@ settings·metadata)에는 **현재 identity namespace에 속한 서버 Conversat
 ## 6. 관측
 
 - `chat_limit_decision` — `limitLayer`가 `concurrency` / `operational_admission`
-  으로 기록됩니다. 동시 실행을 entitlement로 오인 기록하지 않습니다.
+  / `rate_limit`으로 기록됩니다. 동시 실행과 분당 rate를 entitlement로 오인
+  기록하지 않습니다. `limitScope`로 주체·IP를 가릅니다.
 - `chat_concurrency_rejected` — lease scope, active count, requested slots,
   concurrent limit, lease TTL, comparison ID. subject는 해시된 usage key이고
   **원시 IP·PII·lease key·내부 USD는 넣지 않습니다.**
@@ -206,7 +252,13 @@ settings·metadata)에는 **현재 identity namespace에 속한 서버 Conversat
   ID로 인정하지 않습니다.
 - 403을 무조건 재시도하거나 200으로 바꾸지 않습니다.
 - 로그인 시 guest localStorage 전체를 삭제하지 않습니다.
+- 분당 rate 예약을 읽기 전용 검사로 되돌리지 않습니다. admission token이 rate
+  까지 면제하도록 확장하지 않습니다.
 - 관련 테스트: `tests/chatConcurrencyCore.test.mjs`,
-  `tests/chatAdmissionCore.test.mjs`, `tests/chatIdentityNamespace.test.mjs`,
+  `tests/chatAdmissionCore.test.mjs`, `tests/chatRateLimitCore.test.mjs`,
+  `tests/chatIdentityNamespace.test.mjs`,
   `tests/integration/chat-concurrency.db.test.ts`,
+  `tests/integration/chat-rate-limit.db.test.ts`,
+  `tests/server-contract/chat-preflight-rate-limit.test.ts`,
+  `tests/e2e/comparison-rate-limit.spec.ts`,
   `tests/e2e/guest-account-identity-transition.spec.ts`.

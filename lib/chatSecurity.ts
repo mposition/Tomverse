@@ -78,6 +78,15 @@ import {
     type AdmissionSlot,
 } from "@/lib/chatAdmissionCore";
 import {
+    CHAT_RATE_LIMITED,
+    ipRateScope,
+    rateLimitRejectionDetails,
+    rateLimitRejectionMessage,
+    resolveIpPerMinuteLimit,
+    subjectRateScope,
+    type ChatRateScope,
+} from "@/lib/chatRateLimitCore";
+import {
     claimAdmissionSlot,
     countActiveLeases,
     insertLeases,
@@ -905,6 +914,83 @@ type ReservedAdmission = {
 };
 
 /**
+ * Takes the whole comparison's per-minute request capacity in one go.
+ *
+ * A three-model comparison is three `POST /api/chat` requests, and each of
+ * those spends one unit of the caller's per-minute allowance and one of the
+ * IP's. Reading the counter here and letting the model requests increment it
+ * later is what produced the report this exists to fix: with a guest limit of
+ * five and three units already spent, the read passed, two panels incremented
+ * successfully, and the third came back 429 -- a comparison admitted in part.
+ *
+ * So the capacity is *reserved*, not inspected. `incrementUsage` is a single
+ * conditional UPDATE that adds the whole model count or adds nothing, which
+ * makes another tab arriving between this line and the model requests unable
+ * to take a unit this comparison is already holding. Both increments run
+ * inside the caller's transaction, so a rejection anywhere below -- including
+ * the IP scope refusing after the subject scope was charged -- unwinds them.
+ *
+ * Each model request then claims its slot and skips its own increment, so
+ * nothing is counted twice.
+ */
+const reserveComparisonRateCapacity = async (
+    tx: Prisma.TransactionClient,
+    access: ChatAccess,
+    requestedRequests: number,
+    now: Date
+) => {
+    const minuteStart = periodStart("minute", now);
+    const resetAt = new Date(minuteStart.getTime() + 60_000);
+    const retryAfterSeconds = retryAfterFor("minute", now);
+    const subjectLimit = limitsFor(access).find(
+        (rule) => rule.period === "minute"
+    )?.limit;
+
+    const refuse = async (scope: ChatRateScope): Promise<never> => {
+        const used = await readUsageCount(tx, scope.key, "minute", minuteStart);
+        throw new ChatAccessError(
+            429,
+            CHAT_RATE_LIMITED,
+            rateLimitRejectionMessage(scope.scope),
+            retryAfterSeconds,
+            rateLimitRejectionDetails(scope, {
+                usedRequests: used,
+                requestedRequests,
+                retryAfterSeconds,
+                resetAt,
+            })
+        );
+    };
+
+    const scopes: ChatRateScope[] = [];
+    if (subjectLimit !== undefined) {
+        scopes.push(
+            subjectRateScope(access.kind, access.subjectKey, subjectLimit)
+        );
+    }
+    // The aggregate ceiling applies to signed-in callers as well as guests:
+    // it is the protection that a fresh cookie -- or a fresh account -- cannot
+    // walk away from, and `acquireChatAccess` has always charged it per
+    // request. Checking it only for guests here would let a comparison pass
+    // preflight and then lose a panel to it.
+    scopes.push(ipRateScope(access.ipKey, resolveIpPerMinuteLimit()));
+
+    for (const scope of scopes) {
+        const allowed = await incrementUsage(
+            tx,
+            scope.key,
+            "minute",
+            minuteStart,
+            scope.limit,
+            requestedRequests
+        );
+        if (!allowed) await refuse(scope);
+    }
+
+    return { minuteStart };
+};
+
+/**
  * Reserves one concurrency slot per model for a comparison, all or nothing.
  *
  * Runs inside the caller's transaction and under the scope locks, so either
@@ -926,6 +1012,16 @@ const reserveComparisonAdmission = async (
         ipKey: plan.ip?.key ?? null,
     });
     await assertConcurrencyCapacity(tx, plan, modelIds.length);
+    // Two different questions, asked in the order the caller can act on:
+    // "is one of your own answers still running" comes before "are you sending
+    // faster than your allowance", because the first has a visible cause on
+    // screen. Both are all-or-nothing for the whole comparison.
+    const { minuteStart } = await reserveComparisonRateCapacity(
+        tx,
+        access,
+        modelIds.length,
+        now
+    );
 
     const admissionId = randomUUID();
     const expiresAt = new Date(
@@ -945,6 +1041,9 @@ const reserveComparisonAdmission = async (
             admissionId,
             claimedAt: null,
             expiresAt,
+            // What this slot pre-paid, so an unused one can hand it back.
+            rateIpKey: access.ipKey,
+            rateMinuteStart: minuteStart,
         }))
     );
     return { admissionId, slots, expiresAt };
@@ -1269,10 +1368,15 @@ export const preflightChatComparisonAccess = async (
             );
         }
 
-        // Every slot this comparison needs, taken in one go. A slot reserved
-        // here is claimed later by exactly one model request; if any check
-        // below this line fails, the transaction unwinds and the slots go with
-        // it, so a refused comparison never leaves an allowance held.
+        // Every slot and every unit of request rate this comparison needs,
+        // taken in one go. A slot reserved here is claimed later by exactly one
+        // model request; if any check below this line fails, the transaction
+        // unwinds and both the slots and the rate units go with it, so a
+        // refused comparison never leaves an allowance held.
+        //
+        // The per-minute rate used to be *read* here and charged later by each
+        // model request, which is precisely how a comparison that this check
+        // said would fit still lost its last panel to a 429.
         reservedAdmission = await reserveComparisonAdmission(
             tx,
             access,
@@ -1281,24 +1385,6 @@ export const preflightChatComparisonAccess = async (
         );
 
         const planRules = limitsFor(access);
-        const minuteRule = planRules.find((rule) => rule.period === "minute");
-        if (minuteRule) {
-            const start = periodStart("minute", now);
-            const used = await readUsageCount(
-                tx,
-                access.subjectKey,
-                "minute",
-                start
-            );
-            if (used + budgets.length > minuteRule.limit) {
-                throw new ChatAccessError(
-                    429,
-                    "CHAT_RATE_LIMITED",
-                    "The selected comparison would exceed the current request rate limit. Wait briefly and try again.",
-                    retryAfterFor("minute", now)
-                );
-            }
-        }
         const dailyCreditRule = planRules.find((rule) => rule.period === "day");
         let dailyPlanCreditsUsed = 0;
         let dailyPlanCreditsRemaining: number | null = null;
@@ -1886,6 +1972,69 @@ export const acquireChatAccess = async (
             await lockCreditAccount(tx, access.userId);
         }
         await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${access.subjectKey}))`;
+        // Every lock this transaction will need, taken here, in the one order
+        // the comparison preflight also takes them: credit account, subject,
+        // lease-subject, lease-IP, and only then rows.
+        //
+        // This used to be taken further down, just before the lease insert,
+        // which was harmless while the preflight touched no usage rows. It is
+        // not harmless now: the preflight holds the lease-scope locks while it
+        // reserves the comparison's minute buckets, so a request that charged
+        // its own minute bucket first and asked for those locks afterwards
+        // would hold a row the preflight wanted while waiting for a lock the
+        // preflight held -- a genuine deadlock, which Postgres resolves by
+        // killing one of the two with an error neither caller can act on.
+        // Ordering is the fix; retrying is not.
+        await lockConcurrencyScopes(tx, concurrencyPlan);
+        // Expired leases go before anything is charged, for the same reason:
+        // every path that touches both tables -- this one, the comparison
+        // preflight, and the admission rollback -- writes lease rows before
+        // usage rows, so no two of them can hold half of what the other is
+        // waiting for. It also means the capacity check below counts live
+        // slots rather than dead ones, which is what it was always for.
+        await sweepExpiredLeasesForScopes(tx, {
+            subjectKey: concurrencyPlan.subject.key,
+            ipKey: concurrencyPlan.ip?.key ?? null,
+        });
+        // Claimed first, because the answer decides what this request still has
+        // to pay for. A comparison that was admitted as a whole already
+        // reserved this model's concurrency slot *and* its unit of per-minute
+        // request rate in the preflight transaction; charging the minute
+        // buckets again here would count one request twice and refuse the
+        // comparison's own last panel with its own reservation.
+        //
+        // Claiming is a conditional update on a row the aggregate preflight
+        // created, so a replayed, foreign, expired or forged token claims
+        // nothing -- and a request that claims nothing pays for itself in
+        // full, below, exactly as a single-model request does. The claim lives
+        // inside this transaction, so a rejection further down releases it
+        // along with everything else.
+        let claimedAdmissionSlot = false;
+        if (admissionSlot) {
+            claimedAdmissionSlot = await claimAdmissionSlot(
+                tx,
+                {
+                    leaseId: admissionSlot.leaseId,
+                    admissionId: admissionSlot.admissionId,
+                    subjectKey: access.subjectKey,
+                    modelId: budget.modelId,
+                },
+                leaseTtlSeconds
+            );
+            if (claimedAdmissionSlot) {
+                leaseId = admissionSlot.leaseId;
+            } else {
+                console.warn(
+                    JSON.stringify({
+                        event: "chat_admission_claim_missed",
+                        traceId,
+                        reason: "slot_unavailable",
+                        modelId: budget.modelId,
+                        timestamp: new Date().toISOString(),
+                    })
+                );
+            }
+        }
         const accessDayWindow =
             access.kind === "user"
                 ? await getUserDayWindow(tx, access.userId!, now)
@@ -2061,6 +2210,10 @@ export const acquireChatAccess = async (
             ) {
                 continue;
             }
+            // Already paid for by the comparison's preflight, on behalf of this
+            // exact model. Skipping it is what makes the reservation a
+            // reservation rather than a second charge.
+            if (claimedAdmissionSlot && rule.period === "minute") continue;
             const amount = rule.period === "minute" ? 1 : budget.usageCredits;
             const allowed = await incrementUsage(
                 tx,
@@ -2083,13 +2236,44 @@ export const acquireChatAccess = async (
                 // used for the same distinction in preflightChatComparisonAccess
                 // above -- instead of collapsing everything into
                 // CHAT_QUOTA_EXCEEDED regardless of which period tripped.
-                const isRateLimit = rule.period === "minute";
+                if (rule.period === "minute") {
+                    const scope = subjectRateScope(
+                        access.kind,
+                        access.subjectKey,
+                        rule.limit
+                    );
+                    // The layer matters as much as the code: without it this
+                    // rejection was recorded as `entitlement`, so a decision
+                    // log could not tell someone who has to wait ten seconds
+                    // from someone who is out of credits.
+                    throw new ChatAccessError(
+                        429,
+                        CHAT_RATE_LIMITED,
+                        rateLimitRejectionMessage(scope.scope),
+                        retryAfterSeconds,
+                        {
+                            ...rateLimitRejectionDetails(scope, {
+                                usedRequests: await readUsageCount(
+                                    tx,
+                                    scope.key,
+                                    "minute",
+                                    accessPeriodStart("minute")
+                                ),
+                                requestedRequests: 1,
+                                retryAfterSeconds,
+                                resetAt: new Date(
+                                    accessPeriodStart("minute").getTime() +
+                                        60_000
+                                ),
+                            }),
+                            period: rule.period,
+                        }
+                    );
+                }
                 throw new ChatAccessError(
                     429,
-                    isRateLimit ? "CHAT_RATE_LIMITED" : "CHAT_QUOTA_EXCEEDED",
-                    isRateLimit
-                        ? "Chat request rate limit exceeded."
-                        : "AI response credit limit exceeded.",
+                    "CHAT_QUOTA_EXCEEDED",
+                    "AI response credit limit exceeded.",
                     retryAfterSeconds,
                     { period: rule.period, retryAfterSeconds }
                 );
@@ -2347,20 +2531,40 @@ export const acquireChatAccess = async (
             });
         }
 
-        const ipAllowed = await incrementUsage(
-            tx,
-            access.ipKey,
-            "minute",
-            periodStart("minute", now),
-            ipPerMinute
-        );
-        if (!ipAllowed) {
-            throw new ChatAccessError(
-                429,
-                "CHAT_RATE_LIMITED",
-                "Too many chat requests.",
-                retryAfterFor("minute", now)
+        // Same reservation, aggregate scope: a claimed slot already holds one
+        // unit of this IP's minute. An unclaimed request still charges it here,
+        // which is what keeps the single-model path unchanged.
+        if (!claimedAdmissionSlot) {
+            const ipMinuteStart = periodStart("minute", now);
+            const ipScope = ipRateScope(access.ipKey, ipPerMinute);
+            const ipAllowed = await incrementUsage(
+                tx,
+                ipScope.key,
+                "minute",
+                ipMinuteStart,
+                ipScope.limit,
+                1
             );
+            if (!ipAllowed) {
+                const retryAfterSeconds = retryAfterFor("minute", now);
+                throw new ChatAccessError(
+                    429,
+                    CHAT_RATE_LIMITED,
+                    rateLimitRejectionMessage(ipScope.scope),
+                    retryAfterSeconds,
+                    rateLimitRejectionDetails(ipScope, {
+                        usedRequests: await readUsageCount(
+                            tx,
+                            ipScope.key,
+                            "minute",
+                            ipMinuteStart
+                        ),
+                        requestedRequests: 1,
+                        retryAfterSeconds,
+                        resetAt: new Date(ipMinuteStart.getTime() + 60_000),
+                    })
+                );
+            }
         }
         if (access.kind === "guest") {
             for (const rule of limitsFor(access).filter(
@@ -2619,43 +2823,12 @@ export const acquireChatAccess = async (
             });
         }
 
-        // A comparison that was admitted as a whole hands each model request
-        // the slot it already holds. Claiming is a conditional update on a row
-        // the aggregate preflight created, so a replayed or foreign token
-        // claims nothing and falls through to the ordinary check below.
-        let claimedAdmissionSlot = false;
-        if (admissionSlot) {
-            claimedAdmissionSlot = await claimAdmissionSlot(
-                tx,
-                {
-                    leaseId: admissionSlot.leaseId,
-                    admissionId: admissionSlot.admissionId,
-                    subjectKey: access.subjectKey,
-                    modelId: budget.modelId,
-                },
-                leaseTtlSeconds
-            );
-            if (claimedAdmissionSlot) {
-                leaseId = admissionSlot.leaseId;
-            } else {
-                console.warn(
-                    JSON.stringify({
-                        event: "chat_admission_claim_missed",
-                        traceId,
-                        reason: "slot_unavailable",
-                        modelId: budget.modelId,
-                        timestamp: new Date().toISOString(),
-                    })
-                );
-            }
-        }
-
+        // The slot itself was claimed at the top of this transaction, before
+        // anything was charged. A request that claimed nothing takes the
+        // ordinary single-slot path here, unchanged.
         if (!claimedAdmissionSlot) {
-            await lockConcurrencyScopes(tx, concurrencyPlan);
-            await sweepExpiredLeasesForScopes(tx, {
-                subjectKey: concurrencyPlan.subject.key,
-                ipKey: concurrencyPlan.ip?.key ?? null,
-            });
+            // Locks and the expiry sweep both already happened at the top of
+            // the transaction.
             await assertConcurrencyCapacity(tx, concurrencyPlan, 1);
             await insertLeases(tx, [
                 {
