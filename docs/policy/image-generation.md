@@ -130,6 +130,11 @@ gate 없이 노출되는 배포 창은 금지된다. UI 비노출은 보안 경�
   행을 남기지 않는다(`preflight_rejected`는 지표로만 관측).
 - generation이 0개인 image Conversation은 정상 흐름이 아니라 invariant
   위반으로 보고한다.
+- **`selectedModels` invariant**: image 대화는 생성 시 `"[]"`를 명시
+  저장하고 어떤 서버 경로도 이를 읽지 않는다. 이미지 모델은 이미지 생성
+  계층의 고정 allowlist에서만 결정된다. 소비처 감사 결과 공용 경로는 전부
+  `safeParse(..., fallback)` 또는 `|| []` 방어가 있어 빈 배열에 안전하다
+  (`components/chat/ChatSidebar.tsx`의 모델 수 계산 포함).
 
 ## 7. 실행 방식과 동시 실행
 
