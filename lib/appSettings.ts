@@ -11,6 +11,13 @@ import {
   imageGenerationEnabledFromValue,
 } from "@/lib/imageGenerationAccess";
 import {
+  MEMORY_EXTRACTION_FLAG_KEY,
+  MEMORY_EXTRACTION_REVOKED_PAIRS_KEY,
+  memoryExtractionEnabledFromValue,
+  parseRevokedPairs,
+  type RevokedPairsState,
+} from "@/lib/memoryAccess";
+import {
   canUseModelWithPlan,
   getModelUsageProfile,
 } from "@/lib/models";
@@ -239,6 +246,47 @@ export async function assertExternalImportEnabled() {
   if (!(await isExternalImportEnabled())) {
     throw new ExternalImportDisabledError();
   }
+}
+
+// Release B rollout flags (import/memory policy §15): the same default-off
+// opt-in shape as the two flags above. Injection is not surfaced anywhere
+// yet — §12.4 forbids turning it on before the human eval procedure — but
+// the reader exists so every consumer resolves it one way.
+export async function isMemoryExtractionEnabled(): Promise<boolean> {
+  if (e2eDatabaseDisabled()) return false;
+  const row = await prisma.appSetting.findUnique({
+    where: { key: MEMORY_EXTRACTION_FLAG_KEY },
+    select: { value: true },
+  });
+  return memoryExtractionEnabledFromValue(row?.value);
+}
+
+export class MemoryFeatureDisabledError extends Error {
+  constructor() {
+    super("Account memory is not enabled.");
+    this.name = "MemoryFeatureDisabledError";
+  }
+}
+
+export async function assertMemoryExtractionEnabled() {
+  if (!(await isMemoryExtractionEnabled())) {
+    throw new MemoryFeatureDisabledError();
+  }
+}
+
+/**
+ * Operational pair revocation (§12.1): reads
+ * AppSetting["memoryExtractionRevokedPairs"]. Malformed content reads as
+ * revoke-all — see lib/memoryAccess.ts for why that direction is the safe
+ * one.
+ */
+export async function getMemoryExtractionRevokedPairs(): Promise<RevokedPairsState> {
+  if (e2eDatabaseDisabled()) return { kind: "none" };
+  const row = await prisma.appSetting.findUnique({
+    where: { key: MEMORY_EXTRACTION_REVOKED_PAIRS_KEY },
+    select: { value: true },
+  });
+  return parseRevokedPairs(row?.value);
 }
 
 export class OperationalFeatureDisabledError extends Error {
