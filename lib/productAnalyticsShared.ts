@@ -109,6 +109,15 @@ export const PRODUCT_ANALYTICS_EVENT_NAMES = [
   "external_import_parse_failed",
   "external_import_desktop_recommended",
   "external_import_finalized",
+  // Step-level funnel for the import wizard. `entered` fires on every change
+  // of `import_step`; `abandoned` fires only on a deliberate exit (cancel,
+  // going back, leaving the route). A passive browser close is NOT observable
+  // here, so per-step `entered` counts are >= `abandoned` counts by
+  // construction and the two do not have to reconcile -- real drop-off is the
+  // difference between consecutive steps' `entered` counts. Content-free: the
+  // only property is the closed `import_step` enum.
+  "external_import_step_entered",
+  "external_import_step_abandoned",
 ] as const;
 
 export type ProductAnalyticsEventName =
@@ -280,6 +289,20 @@ export const analyticsPropertiesSchema = z
     // a state name, never anything derived from the archive's contents.
     import_provider: z.enum(["chatgpt", "claude", "unknown"]).optional(),
     import_failure_reason: z.string().trim().min(1).max(64).optional(),
+    // Which wizard step the funnel event is about. A closed enum, not a free
+    // string: filenames, conversation titles, message bodies, external ids,
+    // fingerprints and digests must never reach analytics (policy §22).
+    import_step: z
+      .enum([
+        "provider_guide",
+        "file_selection",
+        "parsing",
+        "conversation_selection",
+        "server_review",
+        "completed",
+        "desktop_recommended",
+      ])
+      .optional(),
   })
   .strict()
   .superRefine((properties, context) => {
