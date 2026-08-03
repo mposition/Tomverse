@@ -3,6 +3,7 @@ status: approved
 implementationBlockedUntilApproved: true
 approvedScopes:
   - RELEASE_A_IMPORT
+  - RELEASE_B_IMPORT
 approvedBy: @mposition
 approvedAt: 2026-08-03
 approvalTicket: N/A
