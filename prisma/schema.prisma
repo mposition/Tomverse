@@ -1455,6 +1455,17 @@ model ExternalImport {
   duplicateCount    Int    @default(0)
   failureCode       String?
 
+  /// Staging batch ledger (§5.5). Batches arrive strictly in sequence; only
+  /// the most recent one may be idempotently retried, so one (sequence,
+  /// digest) pair is enough to tell a retry from a conflicting resend.
+  lastBatchSequence Int     @default(-1)
+  lastBatchDigest   String?
+
+  /// Set by the first successful finalize. A retry with the same key and the
+  /// same import digest returns the stored success; a different key on a
+  /// completed import is EXTERNAL_IMPORT_ALREADY_FINALIZED (§5.5).
+  finalizeIdempotencyKey String?
+
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
   completedAt DateTime?

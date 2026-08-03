@@ -166,3 +166,45 @@ test("truncation output is deterministic for preview/server parity", () => {
     const second = truncateExternalMessageContent(content, plan);
     assert.equal(first.content, second.content);
 });
+
+test("the quota decision is all-or-nothing arithmetic over every axis", async () => {
+    const { externalImportQuotaExceeded } = await import(
+        "../lib/externalImportLimits.ts"
+    );
+    const limits = {
+        maxNormalizedTextBytesPerAccount: 100,
+        maxExternalConversationsPerAccount: 2,
+        maxExternalMessagesPerAccount: 10,
+    };
+    const usage = { conversations: 1, messages: 5, bytes: 50 };
+    const fits = { conversations: 1, messages: 5, bytes: 50 };
+    assert.equal(externalImportQuotaExceeded(usage, fits, limits), false);
+    assert.equal(
+        externalImportQuotaExceeded(
+            usage,
+            { ...fits, conversations: 2 },
+            limits
+        ),
+        true
+    );
+    assert.equal(
+        externalImportQuotaExceeded(usage, { ...fits, messages: 6 }, limits),
+        true
+    );
+    assert.equal(
+        externalImportQuotaExceeded(usage, { ...fits, bytes: 51 }, limits),
+        true
+    );
+});
+
+test("the rollout flag fails closed on any value but the explicit opt-in", async () => {
+    const { externalImportEnabledFromValue } = await import(
+        "../lib/externalImportAccess.ts"
+    );
+    assert.equal(externalImportEnabledFromValue("true"), true);
+    assert.equal(externalImportEnabledFromValue("false"), false);
+    assert.equal(externalImportEnabledFromValue(""), false);
+    assert.equal(externalImportEnabledFromValue("TRUE"), false);
+    assert.equal(externalImportEnabledFromValue(null), false);
+    assert.equal(externalImportEnabledFromValue(undefined), false);
+});

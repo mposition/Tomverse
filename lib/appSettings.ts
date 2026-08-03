@@ -3,6 +3,10 @@ import "server-only";
 import { APP_DEFAULTS, guestDefaultLeadRejection } from "@/lib/appDefaults";
 import { isE2EDatabaseDisabled } from "@/lib/e2eTestMode";
 import {
+  EXTERNAL_IMPORT_FLAG_KEY,
+  externalImportEnabledFromValue,
+} from "@/lib/externalImportAccess";
+import {
   IMAGE_GENERATION_FLAG_KEY,
   imageGenerationEnabledFromValue,
 } from "@/lib/imageGenerationAccess";
@@ -180,6 +184,33 @@ export class ImageGenerationDisabledError extends Error {
 export async function assertImageGenerationEnabled() {
   if (!(await isImageGenerationEnabled())) {
     throw new ImageGenerationDisabledError();
+  }
+}
+
+// Same default-off opt-in shape as image generation above, for the same
+// reason: a rollout flag must fail closed when the row is missing
+// (docs/policy/external-conversation-import-and-memory.md §15). Admin/public
+// surfacing arrives with the Release A operations slice; until then the flag
+// is toggled by seeding the AppSetting row directly.
+export async function isExternalImportEnabled(): Promise<boolean> {
+  if (e2eDatabaseDisabled()) return false;
+  const row = await prisma.appSetting.findUnique({
+    where: { key: EXTERNAL_IMPORT_FLAG_KEY },
+    select: { value: true },
+  });
+  return externalImportEnabledFromValue(row?.value);
+}
+
+export class ExternalImportDisabledError extends Error {
+  constructor() {
+    super("External conversation import is not enabled.");
+    this.name = "ExternalImportDisabledError";
+  }
+}
+
+export async function assertExternalImportEnabled() {
+  if (!(await isExternalImportEnabled())) {
+    throw new ExternalImportDisabledError();
   }
 }
 
