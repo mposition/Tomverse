@@ -1,6 +1,7 @@
 ---
 status: draft
 implementationBlockedUntilApproved: true
+approvedScopes: []
 approvedBy: null
 approvedAt: null
 approvalTicket: null
@@ -13,10 +14,20 @@ approvalTicket: null
 구현의 사후 설명이 아니라 구현 전에 확정된 정책이며, 이 문서와 충돌하는 변경은
 릴리스 차단 사유입니다.
 
-**`status: draft`인 동안 릴리스 A/B/C의 코드를 작성하지 않습니다.** 사람이
-검토하여 frontmatter에 `status: approved`, 승인자, 승인 시점, 승인 티켓을
-기록해야 구현을 시작할 수 있습니다. 에이전트는 이 필드를 스스로 기입할 수
-없습니다.
+**승인은 릴리스 scope 단위입니다.** `status: approved`는 문서 방향의 승인일
+뿐이며, 릴리스 구현은 `approvedScopes`에 해당 릴리스가 명시된 경우에만 시작할
+수 있습니다.
+
+- `approvedScopes: [RELEASE_A_IMPORT]` → 릴리스 A만 해제. B/C는 **pending
+  approval** 상태로 남습니다.
+- 릴리스 B는 §23의 B 관련 미결정 항목(오류 HTTP 의미, manual evidence 구조,
+  source 삭제 시 상태 등)을 이 문서에서 확정한 뒤 별도로
+  `RELEASE_B_MEMORY`를 `approvedScopes`에 추가해야 시작할 수 있습니다.
+- 릴리스 C도 같은 방식으로 `RELEASE_C_ASSISTANT_PROFILES` scope 승인이
+  필요합니다.
+
+사람이 검토하여 frontmatter에 승인 상태·scope·승인자·승인 시점·승인 티켓을
+기록해야 하며, 에이전트는 이 필드를 스스로 기입할 수 없습니다.
 
 관련 기존 계약 — 이 문서는 아래를 대체하지 않고 그 위에 쌓입니다.
 
@@ -117,14 +128,44 @@ MEMORY_EXTRACTION_PROVIDER_<PROVIDER>_COST_MICROUSD_PER_MONTH (절대값 overrid
   conversation digest → (정렬된 conversation digest) → import digest.
 - truncation이 필요한 message는 truncation 전 원문의 `originalContentDigest`와
   저장 content의 `contentDigest`를 각각 계산합니다. 잘려서 저장되지 않는 원문은
-  digest 계산 후 보관하지 않습니다.
-- algorithm(SHA-256 권장)·canonicalization(NFC, 개행 정규화, role·ordinal 포함)·
-  `digestVersion`은 중앙 모듈 하나에서 관리합니다.
+  digest 계산 후 보관하지 않습니다. inbound 한도와 대형 message의 chunk 전송·
+  streaming digest 방식은 §5.4가 정의합니다.
+- **`digestVersion=1` 확정값**: algorithm은 **SHA-256**입니다.
+  canonicalization은 다음과 같습니다.
+  - `contentDigest` / `originalContentDigest` = SHA-256(UTF-8(NFC 정규화 +
+    개행을 `\n`으로 통일한 content)). content만 포함합니다.
+  - message dedup digest = SHA-256(UTF-8(`provider` + `\n` + 원본 external
+    conversation key + `\n` + `role` + `\n` + `ordinal` + `\n` +
+    source content digest)). source content digest는 truncated message면
+    `originalContentDigest`, 아니면 `contentDigest`입니다 — truncation 승인
+    여부가 source 동일성 판정을 바꾸지 않습니다.
+  - `conversationDigest` = SHA-256(UTF-8(`provider` + `\n` + 원본 external
+    conversation key + `\n` + ordinal 순으로 이어 붙인 message dedup digest)).
+  - `importDigest` = SHA-256(UTF-8(사전순 정렬한 conversationDigest 연결)).
+  - 이 정의는 중앙 모듈 하나에서 관리하고, 변경 시 `digestVersion`을 올립니다.
 - digest는 인증·소유권·접근 권한 증명이 아니며, digest 원문과 client
   fingerprint를 로그·telemetry에 남기지 않습니다.
-- 중복 판정: 같은 계정 안에서 conversation digest가 일치하면 재-import 시
-  중복으로 skip하고, 더 최신 export의 부분 중복은 message digest 단위로
-  판정합니다. 판정 결과(신규/중복/갱신)는 preview에 표시합니다.
+
+### 4.2 중복·재-import 의미론 (릴리스 A 확정)
+
+저장된 `ExternalConversation`은 **immutable snapshot**입니다. 재-import 시
+기존 row에 message를 추가·수정·삭제하지 않습니다.
+
+- **완전 일치**: 같은 계정에 같은 `conversationDigest`가 이미 finalized로
+  존재하면 중복으로 skip합니다. preview에 "중복(제외됨)"으로 표시합니다.
+- **같은 source의 다른 버전**: 같은 `externalStableId`(source lineage)에
+  `conversationDigest`가 다른 export가 오면 — 더 최신 export에 message가
+  추가된 경우 포함 — **새 immutable snapshot row로 저장**합니다. 기존
+  snapshot은 유지되며, viewer는 같은 lineage를 묶어 최신 snapshot을 기본으로
+  표시하고 이전 snapshot은 개별 삭제할 수 있습니다.
+- message digest 비교는 preview 안내("이전 Import본 대비 message N개
+  추가/변경")에만 사용하고, **저장 병합에는 사용하지 않습니다.** 개별
+  message를 건너뛰어 불완전한 conversation을 만드는 방식을 금지합니다.
+- 부분 병합(기존 snapshot에 신규 message만 추가)은 첫 릴리스에서 구현하지
+  않으며, 도입하려면 이 문서를 먼저 갱신합니다.
+- quota는 snapshot별 실제 저장 bytes를 각각 계산합니다. 같은 lineage의 여러
+  snapshot이 저장 공간을 중복 소비하는 것은 알려진 비용이며 preview에
+  표시합니다.
 
 ## 5. Import 생명주기
 
@@ -163,10 +204,27 @@ MEMORY_EXTRACTION_PROVIDER_<PROVIDER>_COST_MICROUSD_PER_MONTH (절대값 overrid
 
 | 항목 | 기본값 |
 |---|---|
-| normalized external text / 계정 | 50MB |
+| normalized external text / 계정 | 50MB (UTF-8 bytes) |
 | external conversations / 계정 | 2,000 |
 | external messages / 계정 | 100,000 |
-| 단일 normalized message | 100,000자 |
+| 단일 message **저장** 한도 | 100,000 Unicode code points |
+| 단일 message **inbound(pre-truncation)** hard limit | 1,000,000 Unicode code points |
+
+한도의 의미를 구분합니다.
+
+- **저장 한도(100,000 code points)**: `ExternalMessage.content`로 저장되는
+  상한. 초과분은 §5.4의 truncation 계약을 따릅니다.
+- **inbound hard limit(1,000,000 code points)**: truncation 전 원문으로 서버가
+  수신(streaming digest 계산)하는 상한. 이를 넘는 message는 truncation
+  대상조차 아니며, 서버가 개별 message를 누락하지 않으므로 **해당
+  conversation 전체를 선택 불가로 표시**하고 preview에서 사유를 안내합니다.
+- **계정 quota(50MB)**: 중복 skip 판정 이후 **실제로 저장되는**(truncation
+  이후 retained) normalized content의 net-new UTF-8 bytes 기준입니다. skip된
+  중복과 잘려나간 원문 부분은 quota에 계산하지 않습니다.
+- **동시 finalize 직렬화**: quota 판정과 저장은 계정 단위 advisory lock(기존
+  `STORAGE_LIMITS`·`assertConversationCapacity` 계약과 같은 방식) 안에서 한
+  transaction으로 직렬화합니다. 두 finalize가 동시에 진행돼도 합산이 quota를
+  넘을 수 없습니다.
 
 - 강제 권한은 서버에 있고 클라이언트는 preview 표시용 미러입니다.
 - 파싱 시작 전 `GET /api/imports/external/capacity`로 잔여 quota를 먼저
@@ -176,9 +234,10 @@ MEMORY_EXTRACTION_PROVIDER_<PROVIDER>_COST_MICROUSD_PER_MONTH (절대값 overrid
   `409 EXTERNAL_IMPORT_QUOTA_EXCEEDED`로 전체 거부합니다. 서버가 임의로 최신·
   과거 순 부분 저장이나 message 누락을 하지 않습니다.
 
-### 5.4 메시지 truncation
+### 5.4 메시지 truncation과 대형 message 전송
 
-100,000자 초과 message는 사용자가 preview에서 명시적으로 승인한 경우에만:
+저장 한도(100,000 code points) 초과 ~ inbound hard limit(1,000,000 code
+points) 이하 message는 사용자가 preview에서 명시적으로 승인한 경우에만:
 
 - Unicode code point 경계 보존, 앞 약 75% + 뒤 약 25%, locale 독립 내부 marker
 - `truncated`, `originalCharacterCount`, `retainedCharacterCount`,
@@ -186,8 +245,18 @@ MEMORY_EXTRACTION_PROVIDER_<PROVIDER>_COST_MICROUSD_PER_MONTH (절대값 overrid
 - preview에 영향 conversation/message 수·원래/저장 문자 수·정책 설명·media
   미포함 사실을 표시
 
-승인하지 않으면 해당 conversation을 선택에서 제거합니다. truncated content를
-완전한 원문으로 표시하지 않습니다.
+**전송·digest 방식**: batch body는 기존 API 보안 정책의 크기 제한을
+따르므로, 저장 한도를 넘는 message의 truncation 전 원문은 **message-part
+chunk로 분할 전송**하고 서버가 **streaming digest**로
+`originalContentDigest`를 계산합니다. 서버는 원문 전체를 한 번에 메모리에
+올리거나 저장하지 않으며, digest 계산이 끝나면 retained 부분(75/25)만
+저장하고 나머지는 요청 처리 범위를 벗어나 보관하지 않습니다. part 전송에도
+batch sequence·idempotency 계약이 동일하게 적용됩니다.
+
+- 승인하지 않으면 해당 conversation을 선택에서 제거합니다.
+- inbound hard limit을 넘는 message가 있는 conversation은 truncation 승인
+  대상이 아니라 선택 불가입니다(§5.3).
+- truncated content를 완전한 원문으로 표시하지 않습니다.
 
 ### 5.5 staging → finalize
 
@@ -196,8 +265,17 @@ owner·quota·size) → 서버 digest 재계산 → 중복·idempotency 판정 �
 명시적 finalize → transaction으로 원자 저장.
 
 - staging row는 일반 목록·검색·export에 노출하지 않습니다.
-- staging에는 TTL과 reconciliation을 두고, 만료·중단 payload를 자동 정리합니다.
-- finalize retry는 server-computed digest + idempotency key로 멱등합니다.
+- staging TTL은 **마지막 활동 기준 24시간**, absolute maximum lifetime은
+  **생성 기준 72시간**입니다(중앙 상수). 만료 시
+  `EXTERNAL_IMPORT_STAGING_EXPIRED`를 반환하고 reconciliation이 payload를
+  자동 정리합니다.
+- **finalize 멱등 계약**:
+  - 같은 idempotency key + 같은 import digest·selection의 재요청 →
+    **`200`으로 기존 완료 결과를 반환**합니다(no-op). 오류가 아닙니다.
+  - 같은 key + 다른 payload/digest → `409 EXTERNAL_IMPORT_BATCH_CONFLICT`.
+  - 이미 완료된 import를 **다른 key**로 재-finalize →
+    `409 EXTERNAL_IMPORT_ALREADY_FINALIZED`(명시적 상태 충돌, 응답에 완료
+    상태 포함).
 
 ### 5.6 정규화 규칙
 
@@ -589,10 +667,12 @@ provider의 보증·제휴 암시, 숨은 프롬프트 복원 주장.
 
 ## 18. 오류 코드 계약
 
-전체 enumeration은 이 문서가 관리합니다. 구현 중 임의 코드를 추가하지 않고,
-추가가 필요하면 이 표를 먼저 갱신합니다. 모든 오류 응답의 `resetAt`은 생성
-시점보다 미래여야 하며, 내부 USD·memory content·cross-user 정보는 오류에
-포함하지 않습니다.
+이 목록은 **이 프로그램 전용 오류 코드**의 enumeration입니다. 인증(401),
+owner 권한(403), not-found(404), rate limit(429), 공통 payload 검증 등
+API 공통 오류는 기존 저장소 계약을 그대로 따르며 여기서 재정의하지 않습니다.
+이 프로그램 전용 코드를 새로 추가하려면 이 표를 먼저 갱신합니다. 모든 오류
+응답의 `resetAt`은 생성 시점보다 미래여야 하며, 내부 USD·memory content·
+cross-user 정보는 오류에 포함하지 않습니다.
 
 ### 릴리스 A
 
@@ -606,8 +686,8 @@ provider의 보증·제휴 암시, 숨은 프롬프트 복원 주장.
 | `EXTERNAL_IMPORT_BATCH_CONFLICT` | 409 | 불가 | 동일 sequence 상이 payload |
 | `EXTERNAL_IMPORT_QUOTA_EXCEEDED` | 409 | 선택 축소 후 가능 | all-or-nothing 거부 |
 | `EXTERNAL_IMPORT_SELECTION_CHANGED` | 409 | preview 재확인 후 가능 | staging과 finalize 선택 불일치 |
-| `EXTERNAL_IMPORT_ALREADY_FINALIZED` | 409 | 불필요 | 멱등 완료 응답 포함 |
-| `EXTERNAL_IMPORT_STAGING_EXPIRED` | 410 | 재시작 필요 | staging TTL 만료 |
+| `EXTERNAL_IMPORT_ALREADY_FINALIZED` | 409 | 불필요 | **다른 key**의 재-finalize에만 사용. 같은 key·digest 재요청은 오류가 아니라 `200` 멱등 응답(§5.5) |
+| `EXTERNAL_IMPORT_STAGING_EXPIRED` | 410 | 재시작 필요 | staging TTL 만료(§5.5) |
 
 `EXTERNAL_IMPORT_DESKTOP_RECOMMENDED`는 서버 코드가 아닌 클라이언트 상태입니다.
 
@@ -619,9 +699,12 @@ provider의 보증·제휴 암시, 숨은 프롬프트 복원 주장.
 | `MEMORY_EXTRACTION_ALREADY_RUNNING` | 409 | `background_concurrency` | 완료 후 가능 | 사용자당 1 run |
 | `MEMORY_EXTRACTION_PAIR_UNAVAILABLE` | 403 | — | 불가 | 승인 pair 없음/revoked |
 | `MEMORY_EXTRACTION_PROVIDER_BUDGET_EXHAUSTED` | 429 | `operational_guardrail` | `resetAt` 이후 | batch sub-budget, `resetAt` 필수 |
-| `MEMORY_EXTRACTION_LEASE_EXPIRED` | 410 | run 재개로 가능 | lease/claim 만료 |
-| `CHAT_CONTEXT_BUNDLE_STALE` | 409 | 자동 1회 (`details.requiresPreflight: true`) | preflight-chat 불일치 |
-| `MEMORY_ITEM_CONFLICT` | 409 | 사용자 판정 필요 | canonical key 충돌 |
+| `MEMORY_EXTRACTION_LEASE_EXPIRED` | 410 | `background_concurrency` | run 재개로 가능 | lease/claim 만료 |
+| `CHAT_CONTEXT_BUNDLE_STALE` | 409 | — | 자동 1회 (`details.requiresPreflight: true`) | preflight-chat 불일치 |
+| `MEMORY_ITEM_CONFLICT` | 409 | — | 사용자 판정 필요 | canonical key 충돌 |
+
+릴리스 B의 오류 계약에는 §23에 기록된 미결정 항목이 남아 있습니다(HTTP 의미
+정합 등). **B scope 승인 전에 이 표를 확정본으로 갱신해야 합니다.**
 
 entitlement(`CREDIT_*`, `PLAN_*`)와 guardrail(`OPERATIONAL_*`, `PROVIDER_*`)
 오류는 기존 코드·문구를 그대로 사용하며 위 코드들과 섞지 않습니다.
@@ -703,7 +786,9 @@ model ExternalConversation {
   finalized          Boolean  @default(false)
   importedAt         DateTime @default(now())
   // 릴리스 B에서 lock relation 추가 (A에서는 필드도 추가하지 않음)
+  // immutable snapshot: 같은 externalStableId(lineage)에 여러 snapshot 허용 (§4.2)
   @@unique([userId, conversationDigest])
+  @@index([userId, externalStableId])
   @@index([userId, finalized])
 }
 
@@ -902,14 +987,33 @@ Data 탭(`AuthButton.tsx`)에는 진입점·요약만 두고 대형 UI를 modal�
 - 모바일 대형 archive Import는 데스크톱 권장으로 제한됩니다.
 - media·첨부는 Import되지 않습니다.
 
-사람이 결정해야 하는 항목 (승인 전 또는 승인과 함께):
+### 릴리스 A scope 승인에 필요한 항목
 
-1. **이 문서의 승인** — `status: approved`, 승인자, 티켓, 날짜.
-2. extraction model 후보 확정과 verified pricing 등록(`lib/modelPricing.ts`
+1. **`approvedScopes: [RELEASE_A_IMPORT]` 기록** — `status: approved`,
+   승인자, 티켓, 날짜와 함께. 릴리스 A의 계약(§4, §5, §18 릴리스 A 표)은
+   이 문서에서 확정값으로 기록돼 있습니다.
+
+### 릴리스 B scope 승인 전에 이 문서에서 확정해야 하는 항목 (pending)
+
+1. batch provider budget 오류의 HTTP 의미 정합 — 기존
+   `PROVIDER_BUDGET_EXHAUSTED`는 `503`이므로
+   `MEMORY_EXTRACTION_PROVIDER_BUDGET_EXHAUSTED`의 `429`를 기존
+   `docs/policy/credit-and-cost-limits.md` 계약과 맞춰 하나로 확정.
+2. `MemoryEvidence.sourceType=manual`의 구조 — manual evidence는 대응 FK가
+   없으므로 "nullable FK 중 정확히 하나" 규칙의 예외를 명시하거나 별도
+   리소스로 분리.
+3. source 삭제 시 파생 memory의 전환 상태를 `deleted` /
+   `manual_review_required` / `suspended_by_source_delete` 중 하나로 확정.
+4. extraction model 후보 확정과 verified pricing 등록(`lib/modelPricing.ts`
    계약), eval 실행 예산 승인.
-3. provider별 batch sub-budget 실제 값(기본 10% 유지 여부).
-4. memory export 파일 포맷 상세(JSON 구조)와 보존 기간 수치.
-5. 릴리스 A 완료 후 staging 검증 체크리스트 승인(릴리스 B 전제 조건).
+5. provider별 batch sub-budget 실제 값(기본 10% 유지 여부).
+6. memory export 파일 포맷 상세(JSON 구조)와 보존 기간 수치.
+7. 릴리스 A 완료 후 staging 검증 체크리스트 승인(릴리스 B 전제 조건).
+
+### 릴리스 C scope 승인 전에 확정해야 하는 항목 (pending)
+
+1. knowledge quota 수치(파일 수·개별 크기·계정 총 byte).
+2. knowledge 보존 기간과 R2 lifecycle 정책 수치.
 
 ## 24. 참조
 
@@ -920,3 +1024,35 @@ Data 탭(`AuthButton.tsx`)에는 진입점·요약만 두고 대형 UI를 modal�
   `check:model-pricing`, `check:model-pricing-db`,
   `check:memory-extraction-eval`(B부터), `security:regression`, 관련 Playwright
   E2E, `build`. 실행하지 못한 검사는 통과로 보고하지 않습니다.
+
+## 25. 사전 조사 기록 (POLICY_ONLY 검토 증거)
+
+이 문서 작성·보정 시 실제로 확인한 저장소 계약:
+
+- **정책 문서**: `AGENTS.md`(루트), `docs/policy/credit-and-cost-limits.md`
+  (층 분리·guardrail 유도·`ChatUsageBucket` BIGINT 계약),
+  `docs/policy/chat-concurrency-and-identity.md`(4개 층 표·admission token
+  §3·lease heartbeat §4·15분 reconciliation), `docs/ops/migration-baseline.md`
+  (baseline 무수정·forward migration·`db:migrate` guard 규칙).
+- **Schema**: `prisma/schema.prisma` — datasource `postgresql`,
+  `Conversation`(176행~, `selectedModels` JSON 문자열·`password`·
+  `importedGuestKey`·share 필드), `Message`(219행~, `modelId String?`),
+  `AppSetting`(735행~).
+- **API·보안**: `app/api/conversations/import-guest/route.ts`(runtime modelId
+  검증 76–91행), `app/api/chat/route.ts`(`MAX_STORED_MESSAGE_CHARACTERS`
+  100,000 등 첨부·본문 한도), `app/api/chat/preflight/route.ts` 존재,
+  `lib/apiSecurity.ts`(`STORAGE_LIMITS`·capacity assertion),
+  `lib/chatAdmissionCore.ts`·`lib/chatRequestLease.ts`·
+  `lib/chatConcurrencyCore.ts`.
+- **Lock 소비 route**: `lib/conversationLock.ts`를 소비하는 10개 route 확인 —
+  `app/api/conversations/[conversationId]/`의 route·messages·share·export·
+  verify·compare-summary·generate-title·comparison-reviews(2)·목록 route.
+- **Privacy locale**: `locales/{ko,en,zh,fr,de,es,pt}.ts`의 `privacyPolicy`
+  섹션(7개 locale 관리 확인).
+- **UI contract**: `docs/ui-contracts/mobile-chat-composer.md`,
+  `mobile-sidebar-drawer.md`, `comparison-action-rail.md`, `typography.md`
+  존재 확인(요구사항은 `AGENTS.md` 요약 기준).
+- **기타**: `components/auth/AuthButton.tsx`(Data 탭, 1,736행 모달 —
+  전용 페이지 결정의 근거), `lib/r2.ts`(R2 client),
+  guest attachment TTL sweep(`cleanupExpiredData` 주석), 검증 명령
+  존재(`package.json` scripts).
