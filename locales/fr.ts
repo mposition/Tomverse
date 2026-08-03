@@ -873,6 +873,17 @@ export const fr = {
         detailTitle: "Export importé",
         detailNotFound: "Cet import est introuvable.",
         detailConversations: "Conversations importées",
+        conversationsEmpty: "Aucune conversation importée pour l'instant.",
+        loadMore: "Afficher plus",
+        previousSnapshots: "{count} versions antérieures",
+        exportAll: "Tout télécharger (JSON)",
+        viewerRoleUser: "Utilisateur",
+        viewerRoleAssistant: "Assistant IA",
+        viewerSourceModel: "Modèle d'origine : {label}",
+        viewerTruncatedNotice:
+            "Ce message a été raccourci pour respecter la limite de stockage. Le texte intégral ne subsiste que chez le service d'origine.",
+        viewerMessagesShown: "{shown} messages affichés sur {total}",
+        deleteSnapshot: "Supprimer cette version",
     },
     privacyPolicy: {
         title: "Politique de confidentialité",

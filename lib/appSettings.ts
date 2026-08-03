@@ -201,9 +201,10 @@ export async function assertImageGenerationEnabled() {
 
 // Same default-off opt-in shape as image generation above, for the same
 // reason: a rollout flag must fail closed when the row is missing
-// (docs/policy/external-conversation-import-and-memory.md §15). Admin/public
-// surfacing arrives with the Release A operations slice; until then the flag
-// is toggled by seeding the AppSetting row directly.
+// (docs/policy/external-conversation-import-and-memory.md §15). Admin
+// surfacing is the platform-settings toggle (setExternalImportEnabled
+// below); the import UI resolves availability through the flag-gated
+// capacity endpoint rather than a public settings field.
 export async function isExternalImportEnabled(): Promise<boolean> {
   if (e2eDatabaseDisabled()) return false;
   const row = await prisma.appSetting.findUnique({
@@ -211,6 +212,20 @@ export async function isExternalImportEnabled(): Promise<boolean> {
     select: { value: true },
   });
   return externalImportEnabledFromValue(row?.value);
+}
+
+// The admin write path, mirroring setImageGenerationEnabled: "true"/"false"
+// are the only stored values, and a missing row equals "false", so disabling
+// never needs a delete.
+export async function setExternalImportEnabled(enabled: boolean) {
+  await prisma.appSetting.upsert({
+    where: { key: EXTERNAL_IMPORT_FLAG_KEY },
+    update: { value: enabled ? "true" : "false" },
+    create: {
+      key: EXTERNAL_IMPORT_FLAG_KEY,
+      value: enabled ? "true" : "false",
+    },
+  });
 }
 
 export class ExternalImportDisabledError extends Error {

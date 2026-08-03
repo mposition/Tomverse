@@ -1094,6 +1094,17 @@ export const en = {
         detailTitle: "Imported export",
         detailNotFound: "This import could not be found.",
         detailConversations: "Imported conversations",
+        conversationsEmpty: "No imported conversations yet.",
+        loadMore: "Show more",
+        previousSnapshots: "{count} earlier versions",
+        exportAll: "Download all (JSON)",
+        viewerRoleUser: "User",
+        viewerRoleAssistant: "Assistant",
+        viewerSourceModel: "Original model: {label}",
+        viewerTruncatedNotice:
+            "This message was shortened to fit the storage limit. The full text remains only at the original service.",
+        viewerMessagesShown: "{shown} of {total} messages shown",
+        deleteSnapshot: "Delete this version",
     },
     privacyPolicy: {
         title: "Privacy Policy",

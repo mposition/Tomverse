@@ -15,6 +15,7 @@ import { ModelLogo } from "@/components/chat/ModelLogo";
 type AdminAppSettingsResponse = {
   settings?: PublicAppSettings;
   imageGenerationEnabled?: boolean;
+  externalConversationImportEnabled?: boolean;
   error?: string;
 };
 
@@ -22,11 +23,14 @@ type Props = {
   settings: PublicAppSettings;
   /** Opt-in beta flag; resolved separately from the default-on kill switches. */
   imageGenerationEnabled: boolean;
+  /** Release A import rollout flag; same opt-in, fail-closed shape. */
+  externalConversationImportEnabled: boolean;
 };
 
 export function PlatformSettingsPanel({
   settings,
   imageGenerationEnabled: initialImageGenerationEnabled,
+  externalConversationImportEnabled: initialExternalImportEnabled,
 }: Props) {
   const { models } = useModelCatalog();
   const guestModels = useMemo(
@@ -49,6 +53,9 @@ export function PlatformSettingsPanel({
   const [imageGenerationEnabled, setImageGenerationEnabled] = useState(
     initialImageGenerationEnabled
   );
+  const [externalImportEnabled, setExternalImportEnabled] = useState(
+    initialExternalImportEnabled
+  );
   const [lastSyncedAt, setLastSyncedAt] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
@@ -57,7 +64,8 @@ export function PlatformSettingsPanel({
 
   const applySettings = (
     nextSettings: PublicAppSettings,
-    nextImageGenerationEnabled?: boolean
+    nextImageGenerationEnabled?: boolean,
+    nextExternalImportEnabled?: boolean
   ) => {
     setGuestDefaultModelId(nextSettings.guestDefaultModelId);
     setAiChatEnabled(nextSettings.aiChatEnabled);
@@ -65,6 +73,9 @@ export function PlatformSettingsPanel({
     setPublicSharingEnabled(nextSettings.publicSharingEnabled);
     if (typeof nextImageGenerationEnabled === "boolean") {
       setImageGenerationEnabled(nextImageGenerationEnabled);
+    }
+    if (typeof nextExternalImportEnabled === "boolean") {
+      setExternalImportEnabled(nextExternalImportEnabled);
     }
     setLastSyncedAt(new Date().toLocaleTimeString());
   };
@@ -82,7 +93,11 @@ export function PlatformSettingsPanel({
       if (!response.ok || !data?.settings) {
         throw new Error(data?.error || "Settings reload failed");
       }
-      applySettings(data.settings, data.imageGenerationEnabled);
+      applySettings(
+        data.settings,
+        data.imageGenerationEnabled,
+        data.externalConversationImportEnabled
+      );
       dispatchAppToast("Platform settings reloaded. The form now matches what is stored.", "success");
     } catch {
       dispatchAppToast("Platform settings could not be reloaded, so the form still shows the values it had. Retry before editing.", "error");
@@ -104,6 +119,7 @@ export function PlatformSettingsPanel({
           attachmentsEnabled,
           publicSharingEnabled,
           imageGenerationEnabled,
+          externalConversationImportEnabled: externalImportEnabled,
         }),
       });
       const data = (await response.json().catch(() => null)) as
@@ -112,7 +128,11 @@ export function PlatformSettingsPanel({
       if (!response.ok || !data?.settings) {
         throw new Error(data?.error || "Settings save failed");
       }
-      applySettings(data.settings, data.imageGenerationEnabled);
+      applySettings(
+        data.settings,
+        data.imageGenerationEnabled,
+        data.externalConversationImportEnabled
+      );
       dispatchAppToast("Platform settings saved and are live.", "success");
     } catch {
       dispatchAppToast("Platform settings were not saved. Nothing changed -- retry, or reload to discard the edit.", "error");
@@ -224,6 +244,35 @@ export function PlatformSettingsPanel({
                   className="h-5 w-5 accent-fuchsia-600"
                 />
                 <span>Image generation enabled</span>
+              </label>
+            </div>
+          </div>
+        </div>
+        <div className="rounded-2xl border border-zinc-800 bg-zinc-950/70 p-5 xl:col-span-2">
+          <div className="flex items-start gap-4">
+            <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-blue-500/30 bg-blue-500/10 text-blue-300">
+              <Database className="h-5 w-5" />
+            </span>
+            <div className="min-w-0 flex-1">
+              <p className="text-xs font-bold uppercase tracking-[0.18em] text-blue-300">Opt-in rollout</p>
+              <h3 className="mt-2 text-xl font-black text-white">External conversation import</h3>
+              <p className="mt-2 text-sm leading-6 text-zinc-400">
+                Release A of the import/memory program: ChatGPT and Claude
+                export files, parsed in the browser, stored per account.
+                Default-off and fail-closed; turning this off closes the
+                import APIs and UI while listing, deletion and export stay
+                available to owners
+                (docs/policy/external-conversation-import-and-memory.md §15).
+              </p>
+              <label className="mt-4 flex w-fit cursor-pointer items-center gap-3 rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-3 text-sm font-bold text-white">
+                <input
+                  type="checkbox"
+                  data-testid="admin-external-import-flag"
+                  checked={externalImportEnabled}
+                  onChange={(event) => setExternalImportEnabled(event.target.checked)}
+                  className="h-5 w-5 accent-blue-600"
+                />
+                <span>External conversation import enabled</span>
               </label>
             </div>
           </div>

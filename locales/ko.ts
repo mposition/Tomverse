@@ -1089,6 +1089,17 @@ export const ko = {
         detailTitle: "가져온 내보내기",
         detailNotFound: "이 가져오기를 찾을 수 없습니다.",
         detailConversations: "가져온 대화",
+        conversationsEmpty: "아직 가져온 대화가 없습니다.",
+        loadMore: "더 보기",
+        previousSnapshots: "이전 버전 {count}개",
+        exportAll: "전체 내려받기(JSON)",
+        viewerRoleUser: "사용자",
+        viewerRoleAssistant: "어시스턴트",
+        viewerSourceModel: "원본 모델: {label}",
+        viewerTruncatedNotice:
+            "이 메시지는 저장 한도에 맞춰 줄여서 저장되었습니다. 전체 원문은 원래 서비스에만 남아 있습니다.",
+        viewerMessagesShown: "메시지 {total}개 중 {shown}개 표시",
+        deleteSnapshot: "이 버전 삭제",
     },
     privacyPolicy: {
         title: "개인정보 처리방침",

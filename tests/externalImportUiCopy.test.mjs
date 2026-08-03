@@ -103,6 +103,7 @@ test("the components render the copy", () => {
     const sources = [
         "../components/imports/ExternalImportSettings.tsx",
         "../components/imports/ExternalImportDetail.tsx",
+        "../components/imports/ExternalConversationViewer.tsx",
         "../components/auth/AuthButton.tsx",
     ].map((path) => readFileSync(new URL(path, import.meta.url), "utf8"));
     for (const key of [
@@ -111,6 +112,10 @@ test("the components render the copy", () => {
         "externalImport.truncationApprove",
         "externalImport.detailTitle",
         "externalImport.dataTabTitle",
+        "externalImport.viewerTruncatedNotice",
+        "externalImport.previousSnapshots",
+        "externalImport.exportAll",
+        "externalImport.deleteSnapshot",
     ]) {
         assert.ok(
             sources.some((source) => source.includes(key)),
