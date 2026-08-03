@@ -26,7 +26,14 @@ export type SecurityAuditEvent =
     | "conversation.lock.remove"
     | "conversation.lock.verify"
     | "conversation.delete"
-    | "account.deletion.schedule";
+    | "account.deletion.schedule"
+    // Release B §13.1-§13.2. Content-free by construction: these carry the
+    // hashed subject and an outcome, never a statement, evidence or count of
+    // anything a memory says. Retention follows the existing audit-log
+    // convention (90 days).
+    | "memory.export.create"
+    | "memory.export.download"
+    | "memory.delete_all";
 type AuditOutcome = "attempt" | "success" | "denied" | "rate_limited" | "failure";
 
 const auditValue = (

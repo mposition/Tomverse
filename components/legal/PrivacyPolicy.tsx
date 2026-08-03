@@ -14,6 +14,7 @@ const sections = [
     ["providersTitle", "providers", Send],
     ["attachmentsTitle", "attachments", FileUp],
     ["externalImportTitle", "externalImport", FileUp],
+    ["memoryTitle", "memory", Database],
     ["analyticsTitle", "analytics", BarChart3],
     ["retentionTitle", "retention", Database],
     ["sharingTitle", "sharing", Share2],

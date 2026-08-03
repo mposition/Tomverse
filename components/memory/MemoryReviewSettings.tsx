@@ -6,6 +6,7 @@ import {
     AlertTriangle,
     ArrowLeft,
     Check,
+    Download,
     Loader2,
     Pin,
     PinOff,
@@ -64,6 +65,12 @@ const badgeClass =
     "inline-flex items-center rounded-md px-1.5 py-0.5 text-[11px] font-semibold";
 
 const PAGE_SIZE = 100;
+
+/**
+ * Typed exactly, never translated: the server compares this literal, so a
+ * localized phrase would be rejected. Same contract as account deletion.
+ */
+const DELETE_ALL_CONFIRMATION = "DELETE ALL MEMORIES";
 
 export type MemoryEvidenceView = {
     id: string;
@@ -297,6 +304,17 @@ export function MemoryReviewSettings() {
         "validation" | "generic" | null
     >(null);
     const [createSuccess, setCreateSuccess] = useState(false);
+
+    const [exportBusy, setExportBusy] = useState(false);
+    const [exportError, setExportError] = useState<
+        "reauth" | "generic" | null
+    >(null);
+    const [deleteAllText, setDeleteAllText] = useState("");
+    const [deleteAllBusy, setDeleteAllBusy] = useState(false);
+    const [deleteAllError, setDeleteAllError] = useState<
+        "reauth" | "generic" | null
+    >(null);
+    const [deleteAllDone, setDeleteAllDone] = useState(false);
 
     const loadSettings = useCallback(async () => {
         try {
@@ -537,6 +555,63 @@ export function MemoryReviewSettings() {
             loadMemories,
         ]
     );
+
+    /**
+     * Fetched rather than navigated to, unlike the imported-data export: this
+     * endpoint is step-up gated, and a plain navigation would paint a raw
+     * JSON 428 body over the page instead of telling the user to sign in
+     * again. The server still streams the document; buffering it here is a
+     * client-side concern and memory statements are bounded (§8.4).
+     */
+    const downloadExport = useCallback(async () => {
+        setExportBusy(true);
+        setExportError(null);
+        try {
+            const response = await fetch("/api/memories/export", {
+                cache: "no-store",
+            });
+            if (!response.ok) {
+                setExportError(response.status === 428 ? "reauth" : "generic");
+                return;
+            }
+            const blob = await response.blob();
+            const url = URL.createObjectURL(blob);
+            const anchor = document.createElement("a");
+            anchor.href = url;
+            anchor.download = "tomverse-memories.json";
+            document.body.appendChild(anchor);
+            anchor.click();
+            anchor.remove();
+            URL.revokeObjectURL(url);
+        } catch {
+            setExportError("generic");
+        } finally {
+            setExportBusy(false);
+        }
+    }, []);
+
+    const deleteAll = useCallback(async () => {
+        setDeleteAllBusy(true);
+        setDeleteAllError(null);
+        const result = await callApi("/api/memories/delete-all", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                confirm: true,
+                confirmationText: DELETE_ALL_CONFIRMATION,
+            }),
+        });
+        setDeleteAllBusy(false);
+        if (result.ok) {
+            setDeleteAllText("");
+            setDeleteAllDone(true);
+            void loadMemories();
+            return;
+        }
+        setDeleteAllError(
+            result.failure.status === 428 ? "reauth" : "generic"
+        );
+    }, [loadMemories]);
 
     const groups = useMemo(() => {
         if (listState.kind !== "ready") {
@@ -1234,6 +1309,107 @@ export function MemoryReviewSettings() {
                         {t("memoryReview.createSubmit")}
                     </button>
                 </div>
+            </section>
+
+            <section className={sectionClass} data-testid="memory-export-card">
+                <h2 className="text-sm font-bold">
+                    {t("memoryReview.exportTitle")}
+                </h2>
+                <p className="mt-1 text-sm leading-6 text-zinc-500">
+                    {t("memoryReview.exportDescription")}
+                </p>
+                {exportError && (
+                    <p
+                        className="mt-2 rounded-lg border border-red-200 bg-red-50 px-2.5 py-1.5 text-xs leading-5 text-red-700 dark:border-red-900/60 dark:bg-red-950/20 dark:text-red-200"
+                        data-testid="memory-export-error"
+                    >
+                        {exportError === "reauth"
+                            ? t("memoryReview.reauthRequired")
+                            : t("memoryReview.errorGeneric")}
+                    </p>
+                )}
+                <button
+                    type="button"
+                    className={`${secondaryButtonClass} mt-3`}
+                    data-testid="memory-export"
+                    disabled={exportBusy}
+                    onClick={() => void downloadExport()}
+                >
+                    {exportBusy ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                        <Download className="h-4 w-4" />
+                    )}
+                    {t("memoryReview.exportDownload")}
+                </button>
+            </section>
+
+            <section
+                className="rounded-2xl border border-red-200 bg-red-50 p-4 dark:border-red-950/70 dark:bg-red-950/20"
+                data-testid="memory-danger-zone"
+            >
+                <h2 className="text-sm font-bold text-red-700 dark:text-red-300">
+                    {t("memoryReview.deleteAllTitle")}
+                </h2>
+                <p className="mt-1 text-sm leading-6 text-red-700/80 dark:text-red-200/80">
+                    {t("memoryReview.deleteAllDescription")}
+                </p>
+                <p className="mt-2 text-xs leading-5 text-red-700/80 dark:text-red-200/80">
+                    {t("memoryReview.deleteAllImportsNote")}
+                </p>
+                {deleteAllDone && (
+                    <p
+                        className="mt-2 rounded-lg border border-emerald-200 bg-emerald-50 px-2.5 py-1.5 text-xs leading-5 text-emerald-800 dark:border-emerald-900/60 dark:bg-emerald-950/20 dark:text-emerald-200"
+                        data-testid="memory-delete-all-done"
+                    >
+                        {t("memoryReview.deleteAllDone")}
+                    </p>
+                )}
+                {deleteAllError && (
+                    <p
+                        className="mt-2 rounded-lg border border-red-300 bg-white px-2.5 py-1.5 text-xs leading-5 text-red-700 dark:border-red-900 dark:bg-zinc-900 dark:text-red-200"
+                        data-testid="memory-delete-all-error"
+                    >
+                        {deleteAllError === "reauth"
+                            ? t("memoryReview.reauthRequired")
+                            : t("memoryReview.errorGeneric")}
+                    </p>
+                )}
+                <label className="mt-3 block">
+                    <span className="text-xs font-semibold text-red-700 dark:text-red-200">
+                        {interpolate(t("memoryReview.deleteAllConfirmLabel"), {
+                            phrase: DELETE_ALL_CONFIRMATION,
+                        })}
+                    </span>
+                    <input
+                        type="text"
+                        className="mt-1 w-full rounded-lg border border-red-200 bg-white px-2.5 py-1.5 text-base text-zinc-900 sm:text-sm dark:border-red-900/60 dark:bg-zinc-900 dark:text-zinc-100"
+                        data-testid="memory-delete-all-confirmation"
+                        value={deleteAllText}
+                        autoComplete="off"
+                        onChange={(event) => {
+                            setDeleteAllText(event.target.value);
+                            setDeleteAllDone(false);
+                        }}
+                    />
+                </label>
+                <button
+                    type="button"
+                    className="mt-3 inline-flex items-center justify-center gap-2 rounded-xl border border-red-200 bg-white px-4 py-2.5 text-sm font-semibold text-red-600 transition-colors hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-red-900/60 dark:bg-red-950/40 dark:text-red-200 dark:hover:bg-red-950/70"
+                    data-testid="memory-delete-all"
+                    disabled={
+                        deleteAllBusy ||
+                        deleteAllText.trim() !== DELETE_ALL_CONFIRMATION
+                    }
+                    onClick={() => void deleteAll()}
+                >
+                    {deleteAllBusy ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                        <Trash2 className="h-4 w-4" />
+                    )}
+                    {t("memoryReview.deleteAllSubmit")}
+                </button>
             </section>
         </div>
     );

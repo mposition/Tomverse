@@ -1265,6 +1265,19 @@ export const en = {
         createSensitiveLabel: "Mark as sensitive information",
         createSubmit: "Add memory",
         createSuccess: "Memory added.",
+        reauthRequired: "For your security, sign in again to continue.",
+        exportTitle: "Download your memories",
+        exportDescription:
+            "Download every memory stored in your account, with its state and evidence provenance, as a single JSON file. The file is not retained on our servers.",
+        exportDownload: "Download all (JSON)",
+        deleteAllTitle: "Delete all memories",
+        deleteAllDescription:
+            "Deletes every stored memory and its evidence, and cancels any extraction in progress. This cannot be undone.",
+        deleteAllImportsNote:
+            "Imported conversations are not deleted. You can delete those separately in the import settings.",
+        deleteAllConfirmLabel: "Type {phrase} to confirm",
+        deleteAllSubmit: "Delete all memories",
+        deleteAllDone: "All memories have been deleted.",
         status: {
             candidate: "Awaiting review",
             active: "In use",
@@ -1311,6 +1324,8 @@ export const en = {
         attachments: "Attachments may be stored temporarily in encrypted object storage for model delivery and document extraction. Temporary attachments are currently deleted after approximately one day under the lifecycle policy.",
         externalImportTitle: "Conversations imported from other AI services",
         externalImport: "You can store past conversations you select from an export file downloaded from another AI service, such as ChatGPT or Claude, in your Tomverse account. The export file is opened only in your browser; the original archive is never uploaded to or retained by Tomverse servers or storage. Only the normalized text of the conversations you select, together with provenance details (source service, original timestamps, display-only model names), is stored as account-private material. Images, audio and attachments are not imported. Imported conversations may contain other people's personal information, so it is your responsibility to confirm that you are entitled to import that data. You can view, delete and export imported material at any time, and it is deleted with your account. Deleting it from Tomverse does not delete the data held by the original service.",
+        memoryTitle: "Account long-term memory",
+        memory: "If you choose to use the memory feature, Tomverse sends the parts of your imported conversations that you select to the AI provider you confirm, in order to extract memory candidates. Extraction uses the model and the credit amount shown to you before it runs. Extracted candidates are not used to generate answers until you review and approve them. Candidates classified as sensitive, and those that need individual review, are excluded from bulk approval and must be confirmed one at a time. Candidates, approved memories and their evidence are retained in your account until you delete them or your account data is deleted. Approved memories and answer-style preferences are sent as reference material to the AI provider that generates each new answer, which means to each model's provider when you compare several models. You can view, edit and disable stored memories at any time, download the full list as a file, or delete all of them at once. Turning memory off stops it being used in new chats.",
         analyticsTitle: "Product analytics and campaign attribution",
         analytics: "Tomverse always uses essential session, security, language, and preference storage needed to provide the service. For product analytics, EU/EEA, UK, Swiss, and unverified-region visitors must opt in before Google Analytics 4 starts. In Australia and any other region added only after legal review, privacy-minimized analytics starts after a clear notice and can be turned off immediately or later in Analytics settings. We record approved product events and metadata such as UTM source, language, country, model count, and plan. Google may also process connection and device data, including an IP address, browser information, page URL, and approximate location, potentially outside the visitor's country. Prompts, model responses, filenames, file contents, email addresses, and profile names are never included. Advertising storage and personalization remain disabled.",
         retentionTitle: "Retention and deletion",
