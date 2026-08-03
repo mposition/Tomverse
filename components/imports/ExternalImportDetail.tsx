@@ -234,24 +234,30 @@ export function ExternalImportDetail({ importId }: { importId: string }) {
                             {state.detail.conversations.map((conversation) => (
                                 <li
                                     key={conversation.id}
-                                    className="rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-2 dark:border-zinc-800 dark:bg-zinc-950/60"
                                     data-testid="external-import-detail-conversation"
                                 >
-                                    <p className="truncate text-sm font-semibold text-zinc-900 dark:text-zinc-100">
-                                        {conversation.title}
-                                    </p>
-                                    <p className="mt-0.5 text-xs leading-5 text-zinc-500">
-                                        {interpolate(
-                                            t("externalImport.messagesCount"),
-                                            {
-                                                count: conversation.messageCount,
-                                            }
-                                        )}
-                                        {" · "}
-                                        {formatBytes(
-                                            conversation.contentBytes
-                                        )}
-                                    </p>
+                                    <Link
+                                        href={`/settings/imports/conversations/${conversation.id}`}
+                                        className="block rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-2 hover:bg-zinc-100 dark:border-zinc-800 dark:bg-zinc-950/60 dark:hover:bg-zinc-900"
+                                    >
+                                        <p className="truncate text-sm font-semibold text-zinc-900 dark:text-zinc-100">
+                                            {conversation.title}
+                                        </p>
+                                        <p className="mt-0.5 text-xs leading-5 text-zinc-500">
+                                            {interpolate(
+                                                t(
+                                                    "externalImport.messagesCount"
+                                                ),
+                                                {
+                                                    count: conversation.messageCount,
+                                                }
+                                            )}
+                                            {" · "}
+                                            {formatBytes(
+                                                conversation.contentBytes
+                                            )}
+                                        </p>
+                                    </Link>
                                 </li>
                             ))}
                         </ul>

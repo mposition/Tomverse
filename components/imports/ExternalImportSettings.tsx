@@ -12,6 +12,7 @@ import {
     AlertTriangle,
     ArrowLeft,
     CheckCircle2,
+    Download,
     FileArchive,
     Loader2,
     Trash2,
@@ -25,6 +26,10 @@ import {
     type ImportPreview,
 } from "@/lib/externalImportPipeline";
 import { EXTERNAL_IMPORT_STORAGE_LIMITS } from "@/lib/externalImportLimits";
+import {
+    groupConversationsByLineage,
+    type LineageGroup,
+} from "@/lib/externalConversationLineage";
 import type { WorkerResponse } from "@/lib/workers/externalImportWorker";
 import { trackProductEvent } from "@/lib/productAnalyticsClient";
 
@@ -114,6 +119,25 @@ type HistoryState =
     | { kind: "unauthenticated" }
     | { kind: "error" };
 
+export type ViewerConversationRow = {
+    id: string;
+    provider: string;
+    title: string;
+    externalStableId: string;
+    messageCount: number;
+    contentBytes: number;
+    importedAt: string;
+};
+
+/** Hidden covers 401/403: the viewer list is flag-gated, unlike history. */
+type ConversationsState =
+    | { kind: "loading" }
+    | { kind: "ready"; rows: ViewerConversationRow[]; total: number }
+    | { kind: "hidden" }
+    | { kind: "error" };
+
+const CONVERSATIONS_PAGE_SIZE = 50;
+
 type StagedTotals = {
     importId: string;
     stagedConversationIds: string[];
@@ -173,6 +197,11 @@ export function ExternalImportSettings() {
     const [truncationApproved, setTruncationApproved] = useState(false);
     const [armedDeleteId, setArmedDeleteId] = useState<string | null>(null);
     const [deletingId, setDeletingId] = useState<string | null>(null);
+    const [conversationsState, setConversationsState] =
+        useState<ConversationsState>({ kind: "loading" });
+    const [expandedLineages, setExpandedLineages] = useState<
+        ReadonlySet<string>
+    >(new Set());
 
     const workerRef = useRef<Worker | null>(null);
     const providerRef = useRef<"chatgpt" | "claude" | null>(null);
@@ -236,12 +265,57 @@ export function ExternalImportSettings() {
         }
     }, []);
 
+    const loadConversations = useCallback(
+        async ({ append = false }: { append?: boolean } = {}) => {
+            const offset =
+                append && conversationsState.kind === "ready"
+                    ? conversationsState.rows.length
+                    : 0;
+            try {
+                const response = await fetch(
+                    `/api/external-conversations?offset=${offset}&limit=${CONVERSATIONS_PAGE_SIZE}`,
+                    { cache: "no-store" }
+                );
+                if (response.status === 401 || response.status === 403) {
+                    setConversationsState({ kind: "hidden" });
+                    return;
+                }
+                if (!response.ok) {
+                    setConversationsState({ kind: "error" });
+                    return;
+                }
+                const body = (await response.json()) as {
+                    total: number;
+                    conversations: ViewerConversationRow[];
+                };
+                const nextRows = Array.isArray(body.conversations)
+                    ? body.conversations
+                    : [];
+                setConversationsState((current) => ({
+                    kind: "ready",
+                    total: body.total,
+                    rows:
+                        append && current.kind === "ready"
+                            ? [...current.rows, ...nextRows]
+                            : nextRows,
+                }));
+            } catch {
+                setConversationsState({ kind: "error" });
+            }
+        },
+        [conversationsState]
+    );
+
     useEffect(() => {
         queueMicrotask(() => {
             void loadCapacity();
             void loadHistory();
+            void loadConversations();
         });
-    }, [loadCapacity, loadHistory]);
+        // Mount-only: the reload paths (finalize, delete) call the loaders
+        // directly, and loadConversations' identity changes with its state.
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
 
     useEffect(
         () => () => {
@@ -579,11 +653,12 @@ export function ExternalImportSettings() {
                 });
                 void loadCapacity();
                 void loadHistory();
+                void loadConversations();
             } catch {
                 setPhase({ kind: "finalize_failed", errorCode: null, totals });
             }
         },
-        [loadCapacity, loadHistory]
+        [loadCapacity, loadConversations, loadHistory]
     );
 
     const discardStagingImport = useCallback(
@@ -615,6 +690,7 @@ export function ExternalImportSettings() {
                 );
                 if (response.ok) {
                     void loadCapacity();
+                    void loadConversations();
                     await loadHistory();
                 }
             } finally {
@@ -622,7 +698,7 @@ export function ExternalImportSettings() {
                 setArmedDeleteId(null);
             }
         },
-        [armedDeleteId, loadCapacity, loadHistory]
+        [armedDeleteId, loadCapacity, loadConversations, loadHistory]
     );
 
     const toggleConversation = useCallback(
@@ -1053,6 +1129,109 @@ export function ExternalImportSettings() {
                 </>
             )}
 
+            {conversationsState.kind !== "hidden" && (
+                <section
+                    className={sectionClass}
+                    data-testid="external-import-conversations"
+                >
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                        <h2 className="text-sm font-bold">
+                            {t("externalImport.detailConversations")}
+                        </h2>
+                        {conversationsState.kind === "ready" &&
+                            conversationsState.rows.length > 0 && (
+                                <button
+                                    type="button"
+                                    onClick={() => {
+                                        window.location.href =
+                                            "/api/imports/external/export";
+                                    }}
+                                    className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-zinc-700 hover:bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:bg-zinc-800"
+                                    data-testid="external-import-export"
+                                >
+                                    <Download className="h-3.5 w-3.5" />
+                                    {t("externalImport.exportAll")}
+                                </button>
+                            )}
+                    </div>
+                    {conversationsState.kind === "loading" && (
+                        <div className="mt-3 flex items-center gap-2 text-sm text-zinc-500">
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                        </div>
+                    )}
+                    {conversationsState.kind === "error" && (
+                        <p className="mt-3 text-sm leading-6 text-zinc-500">
+                            {t("externalImport.errorGeneric")}
+                        </p>
+                    )}
+                    {conversationsState.kind === "ready" &&
+                        conversationsState.rows.length === 0 && (
+                            <p
+                                className="mt-3 text-sm leading-6 text-zinc-500"
+                                data-testid="external-import-conversations-empty"
+                            >
+                                {t("externalImport.conversationsEmpty")}
+                            </p>
+                        )}
+                    {conversationsState.kind === "ready" &&
+                        conversationsState.rows.length > 0 && (
+                            <>
+                                <ul className="mt-3 space-y-1">
+                                    {groupConversationsByLineage(
+                                        conversationsState.rows
+                                    ).map((group) => (
+                                        <LineageGroupRow
+                                            key={group.latest.id}
+                                            group={group}
+                                            expanded={expandedLineages.has(
+                                                group.latest.id
+                                            )}
+                                            onToggleExpanded={() =>
+                                                setExpandedLineages(
+                                                    (current) => {
+                                                        const next = new Set(
+                                                            current
+                                                        );
+                                                        if (
+                                                            next.has(
+                                                                group.latest.id
+                                                            )
+                                                        ) {
+                                                            next.delete(
+                                                                group.latest.id
+                                                            );
+                                                        } else {
+                                                            next.add(
+                                                                group.latest.id
+                                                            );
+                                                        }
+                                                        return next;
+                                                    }
+                                                )
+                                            }
+                                        />
+                                    ))}
+                                </ul>
+                                {conversationsState.rows.length <
+                                    conversationsState.total && (
+                                    <button
+                                        type="button"
+                                        className={`${secondaryButtonClass} mt-3 w-full`}
+                                        data-testid="external-import-conversations-more"
+                                        onClick={() =>
+                                            void loadConversations({
+                                                append: true,
+                                            })
+                                        }
+                                    >
+                                        {t("externalImport.loadMore")}
+                                    </button>
+                                )}
+                            </>
+                        )}
+                </section>
+            )}
+
             <section className={sectionClass} data-testid="external-import-history">
                 <h2 className="text-sm font-bold">
                     {t("externalImport.historyTitle")}
@@ -1155,6 +1334,82 @@ export function ExternalImportSettings() {
                     )}
             </section>
         </div>
+    );
+}
+
+function ConversationRowLink({
+    row,
+}: {
+    row: ViewerConversationRow;
+}) {
+    const { t } = useLanguage();
+    return (
+        <Link
+            href={`/settings/imports/conversations/${row.id}`}
+            className="flex items-center justify-between gap-3 rounded-xl border border-zinc-200 bg-white px-3 py-2 hover:bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-900 dark:hover:bg-zinc-800"
+            data-testid="external-import-conversation-link"
+        >
+            <span className="min-w-0">
+                <span className="block truncate text-sm font-semibold text-zinc-900 dark:text-zinc-100">
+                    {row.title}
+                </span>
+                <span className="mt-0.5 block text-xs leading-5 text-zinc-500">
+                    {providerLabel(row.provider)}
+                    {" · "}
+                    {interpolate(t("externalImport.messagesCount"), {
+                        count: row.messageCount,
+                    })}
+                    {" · "}
+                    {new Date(row.importedAt).toLocaleDateString()}
+                </span>
+            </span>
+        </Link>
+    );
+}
+
+/**
+ * One source lineage (§4.2): the latest snapshot up front, earlier immutable
+ * snapshots behind an explicit disclosure, each individually openable (and
+ * deletable from its viewer page).
+ */
+function LineageGroupRow({
+    group,
+    expanded,
+    onToggleExpanded,
+}: {
+    group: LineageGroup<ViewerConversationRow>;
+    expanded: boolean;
+    onToggleExpanded: () => void;
+}) {
+    const { t } = useLanguage();
+    return (
+        <li data-testid="external-import-lineage">
+            <ConversationRowLink row={group.latest} />
+            {group.previous.length > 0 && (
+                <div className="mt-1 pl-4">
+                    <button
+                        type="button"
+                        className="text-xs font-semibold text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100"
+                        data-testid="external-import-lineage-toggle"
+                        aria-expanded={expanded}
+                        onClick={onToggleExpanded}
+                    >
+                        {interpolate(t("externalImport.previousSnapshots"), {
+                            count: group.previous.length,
+                        })}
+                    </button>
+                    {expanded && (
+                        <ul className="mt-1 space-y-1">
+                            {group.previous.map((row) => (
+                                <li key={row.id}>
+                                    <ConversationRowLink row={row} />
+                                </li>
+                            ))}
+                        </ul>
+                    )}
+                </div>
+            )}
+        </li>
     );
 }
 

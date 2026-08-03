@@ -876,6 +876,17 @@ export const de = {
         detailTitle: "Importierter Export",
         detailNotFound: "Dieser Import wurde nicht gefunden.",
         detailConversations: "Importierte Unterhaltungen",
+        conversationsEmpty: "Noch keine importierten Unterhaltungen.",
+        loadMore: "Mehr anzeigen",
+        previousSnapshots: "{count} frühere Versionen",
+        exportAll: "Alles herunterladen (JSON)",
+        viewerRoleUser: "Nutzer",
+        viewerRoleAssistant: "Assistent",
+        viewerSourceModel: "Ursprüngliches Modell: {label}",
+        viewerTruncatedNotice:
+            "Diese Nachricht wurde gekürzt gespeichert, um die Speichergrenze einzuhalten. Der vollständige Text existiert nur noch beim ursprünglichen Dienst.",
+        viewerMessagesShown: "{shown} von {total} Nachrichten angezeigt",
+        deleteSnapshot: "Diese Version löschen",
     },
     privacyPolicy: {
         title: "Datenschutzerklärung",

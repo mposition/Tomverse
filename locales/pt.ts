@@ -875,6 +875,17 @@ export const pt = {
         detailTitle: "Exportação importada",
         detailNotFound: "Esta importação não foi encontrada.",
         detailConversations: "Conversas importadas",
+        conversationsEmpty: "Ainda não há conversas importadas.",
+        loadMore: "Mostrar mais",
+        previousSnapshots: "{count} versões anteriores",
+        exportAll: "Baixar tudo (JSON)",
+        viewerRoleUser: "Usuário",
+        viewerRoleAssistant: "Assistente",
+        viewerSourceModel: "Modelo original: {label}",
+        viewerTruncatedNotice:
+            "Esta mensagem foi encurtada para respeitar o limite de armazenamento. O texto completo permanece apenas no serviço original.",
+        viewerMessagesShown: "{shown} de {total} mensagens exibidas",
+        deleteSnapshot: "Excluir esta versão",
     },
     privacyPolicy: {
         title: "Política de privacidade",

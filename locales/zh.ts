@@ -907,6 +907,17 @@ export const zh = {
         detailTitle: "已导入的导出文件",
         detailNotFound: "找不到此导入记录。",
         detailConversations: "已导入的对话",
+        conversationsEmpty: "尚未导入任何对话。",
+        loadMore: "显示更多",
+        previousSnapshots: "{count} 个较早版本",
+        exportAll: "全部下载（JSON）",
+        viewerRoleUser: "用户",
+        viewerRoleAssistant: "助手",
+        viewerSourceModel: "原始模型：{label}",
+        viewerTruncatedNotice:
+            "此消息为符合存储上限而被截短保存。完整原文仅保留在原服务中。",
+        viewerMessagesShown: "共 {total} 条消息，已显示 {shown} 条",
+        deleteSnapshot: "删除此版本",
     },
     privacyPolicy: {
         title: "隐私政策",

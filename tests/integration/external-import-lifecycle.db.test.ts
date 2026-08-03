@@ -5,12 +5,20 @@ import { ApiSecurityError } from "@/lib/apiSecurity";
 import {
     appendExternalImportBatch,
     createExternalImport,
+    deleteExternalConversationSnapshot,
     deleteExternalImport,
     finalizeExternalImport,
+    getExternalConversation,
     getExternalImportCapacity,
     getExternalImportStatus,
+    iterateExternalExportConversations,
+    listExternalConversations,
     reconcileExpiredExternalImportStaging,
 } from "@/lib/externalImportService";
+import {
+    isExternalImportEnabled,
+    setExternalImportEnabled,
+} from "@/lib/appSettings";
 import {
     EXTERNAL_IMPORT_STORAGE_LIMITS,
     EXTERNAL_IMPORT_TRUNCATION_MARKER,
@@ -440,4 +448,182 @@ test("expired staging is swept and further activity gets 410", async () => {
         }),
         expectCode("EXTERNAL_IMPORT_STAGING_EXPIRED")
     );
+});
+
+/** Finalizes one import with the given conversation payloads, returning IDs. */
+const finalizeImport = async (
+    userId: string,
+    payloads: ReturnType<typeof conversationPayload>[]
+) => {
+    const created = await createExternalImport({
+        userId,
+        provider: "chatgpt",
+        parserVersion: "test-1",
+    });
+    const batch = await appendExternalImportBatch({
+        userId,
+        importId: created.id,
+        sequence: 0,
+        batchDigest: `digest-${created.id}`,
+        conversations: payloads,
+    });
+    const stagedIds = batch.results
+        .filter((result) => result.outcome === "staged")
+        .map((result) => result.stagedConversationId!);
+    await finalizeExternalImport({
+        userId,
+        importId: created.id,
+        idempotencyKey: `finalize-${created.id}`,
+        selectedConversationIds: stagedIds,
+    });
+    return { importId: created.id, conversationIds: stagedIds };
+};
+
+test("the viewer lists finalized conversations only, in import order", async () => {
+    const user = await createUser();
+    // A staged-but-never-finalized import must stay invisible (§5.5).
+    const abandoned = await createExternalImport({
+        userId: user.id,
+        provider: "chatgpt",
+        parserVersion: "test-1",
+    });
+    await appendExternalImportBatch({
+        userId: user.id,
+        importId: abandoned.id,
+        sequence: 0,
+        batchDigest: "digest-abandoned",
+        conversations: [conversationPayload("conv-staged")],
+    });
+    const { conversationIds } = await finalizeImport(user.id, [
+        conversationPayload("conv-a"),
+        conversationPayload("conv-b"),
+    ]);
+
+    const listed = await listExternalConversations(user.id, {});
+    assert.equal(listed.total, 2);
+    assert.deepEqual(
+        [...listed.conversations.map((row) => row.id)].sort(),
+        [...conversationIds].sort()
+    );
+
+    const paged = await listExternalConversations(user.id, {
+        offset: 1,
+        limit: 1,
+    });
+    assert.equal(paged.total, 2);
+    assert.equal(paged.conversations.length, 1);
+});
+
+test("the viewer reads one conversation with message pages, owner-scoped", async () => {
+    const user = await createUser();
+    const other = await createUser();
+    const { conversationIds } = await finalizeImport(user.id, [
+        conversationPayload("conv-a", ["one", "two", "three", "four"]),
+    ]);
+
+    const firstPage = await getExternalConversation(
+        user.id,
+        conversationIds[0],
+        { offset: 0, limit: 2 }
+    );
+    assert.equal(firstPage.messageTotal, 4);
+    assert.deepEqual(
+        firstPage.messages.map((message) => message.content),
+        ["one", "two"]
+    );
+    const secondPage = await getExternalConversation(
+        user.id,
+        conversationIds[0],
+        { offset: 2, limit: 2 }
+    );
+    assert.deepEqual(
+        secondPage.messages.map((message) => message.content),
+        ["three", "four"]
+    );
+
+    // Cross-user probes read as not-found, like every other import surface.
+    await assert.rejects(
+        getExternalConversation(other.id, conversationIds[0], {}),
+        expectCode("NOT_FOUND")
+    );
+});
+
+test("deleting one snapshot corrects the parent import's counters", async () => {
+    const user = await createUser();
+    const { importId, conversationIds } = await finalizeImport(user.id, [
+        conversationPayload("conv-a"),
+        conversationPayload("conv-b", ["only"]),
+    ]);
+    const before = await prisma.externalImport.findUniqueOrThrow({
+        where: { id: importId },
+    });
+    assert.equal(before.conversationCount, 2);
+    assert.equal(before.messageCount, 3);
+
+    const target = await prisma.externalConversation.findUniqueOrThrow({
+        where: { id: conversationIds[1] },
+    });
+    await deleteExternalConversationSnapshot(user.id, target.id);
+
+    const after = await prisma.externalImport.findUniqueOrThrow({
+        where: { id: importId },
+    });
+    assert.equal(after.conversationCount, 1);
+    assert.equal(after.messageCount, 3 - target.messageCount);
+    assert.equal(
+        Number(after.normalizedBytes),
+        Number(before.normalizedBytes) - Number(target.contentBytes)
+    );
+    assert.equal(
+        await prisma.externalMessage.count({
+            where: { externalConversationId: target.id },
+        }),
+        0
+    );
+
+    const otherUser = await createUser();
+    await assert.rejects(
+        deleteExternalConversationSnapshot(otherUser.id, conversationIds[0]),
+        expectCode("NOT_FOUND")
+    );
+});
+
+test("the export iterator yields every finalized conversation with provenance", async () => {
+    const user = await createUser();
+    await finalizeImport(user.id, [
+        conversationPayload("conv-a"),
+        conversationPayload("conv-b"),
+        conversationPayload("conv-c"),
+    ]);
+
+    const exported = [];
+    for await (const conversation of iterateExternalExportConversations(
+        user.id
+    )) {
+        exported.push(conversation);
+    }
+    assert.equal(exported.length, 3);
+    for (const conversation of exported) {
+        assert.equal(conversation.provider, "chatgpt");
+        assert.equal(conversation.digestVersion, 1);
+        assert.match(conversation.conversationDigest, /^[0-9a-f]{64}$/);
+        assert.equal(conversation.messages.length, 2);
+        assert.deepEqual(
+            conversation.messages.map((message) => message.role),
+            ["user", "assistant"]
+        );
+    }
+});
+
+test("the rollout flag round-trips through the admin setter", async () => {
+    try {
+        assert.equal(await isExternalImportEnabled(), false);
+        await setExternalImportEnabled(true);
+        assert.equal(await isExternalImportEnabled(), true);
+        await setExternalImportEnabled(false);
+        assert.equal(await isExternalImportEnabled(), false);
+    } finally {
+        // The flag lives in AppSetting, which resetData does not truncate.
+        await setExternalImportEnabled(false);
+    }
 });
