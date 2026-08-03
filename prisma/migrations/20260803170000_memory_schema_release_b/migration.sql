@@ -107,10 +107,11 @@ CREATE INDEX "MemoryItem_userId_status_idx" ON "MemoryItem"("userId", "status");
 -- CreateIndex
 CREATE INDEX "MemoryItem_userId_conflictKey_idx" ON "MemoryItem"("userId", "conflictKey");
 
--- CreateIndex (retrieval v1, §9 — lexical GIN over searchTerms; this cannot
--- be expressed in schema.prisma. The table is empty at creation time, so the
+-- CreateIndex (retrieval v1, §9 — lexical GIN over searchTerms, mirrored by
+-- the schema.prisma declaration `type: Gin, ops: ArrayOps` so the drift
+-- check sees both sides agree. The table is empty at creation time, so the
 -- build does not block production writes.)
-CREATE INDEX "MemoryItem_searchTerms_gin_idx" ON "MemoryItem" USING GIN ("searchTerms");
+CREATE INDEX "MemoryItem_searchTerms_gin_idx" ON "MemoryItem" USING GIN ("searchTerms" array_ops);
 
 -- CreateIndex
 CREATE INDEX "MemoryEvidence_memoryItemId_idx" ON "MemoryEvidence"("memoryItemId");

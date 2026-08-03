@@ -1918,6 +1918,10 @@ model MemoryItem {
 
   @@index([userId, status])
   @@index([userId, conflictKey])
+  /// §9 retrieval v1 — lexical GIN over the term array. Declared here so the
+  /// db-integration drift check sees schema and migration agree; the mapped
+  /// name matches the migration's hand-written CREATE INDEX.
+  @@index([searchTerms(ops: ArrayOps)], type: Gin, map: "MemoryItem_searchTerms_gin_idx")
 }
 
 /// Evidence backing one memory item (§8.5, as settled by the 2026-08-03
