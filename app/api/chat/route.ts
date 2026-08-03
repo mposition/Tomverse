@@ -587,6 +587,31 @@ export async function DELETE(req: Request) {
 
 export async function POST(req: Request) {
     const traceId = randomUUID();
+    // Filled in the moment ensureGuestVerified() passes a fresh token. Every
+    // response that leaves this handler afterwards -- the streaming success,
+    // the deep-research handoff, and every later 4xx/5xx (rate limit,
+    // concurrency, credits, provider budget) -- must carry the grant cookie.
+    // Appending it here, on whatever Response the inner handler produced, is
+    // what guarantees no return path can forget it: a guest whose challenge
+    // was accepted must never be asked to solve another one just because the
+    // request then failed a different gate. Verification failures never set
+    // this (ensureGuestVerified throws before assigning), so a rejected token
+    // still earns nothing.
+    const verificationGrant: { setCookie?: string } = {};
+    const response = await handleChatPost(req, traceId, verificationGrant);
+    if (verificationGrant.setCookie) {
+        // append, not set: the response may already carry the guest identity
+        // cookie (accessGrant.setCookie below), and both must survive.
+        response.headers.append("Set-Cookie", verificationGrant.setCookie);
+    }
+    return response;
+}
+
+async function handleChatPost(
+    req: Request,
+    traceId: string,
+    verificationGrant: { setCookie?: string }
+): Promise<Response> {
     let leaseId: string | null = null;
     // Declared out here so the failure path can stop the renewal timer even
     // when the stream was never built: an interval left running would keep
@@ -595,7 +620,6 @@ export async function POST(req: Request) {
     let usageReservation: ChatUsageReservation | null = null;
     let requestedModelIdForLog: string | undefined;
     let requestedProviderForLog: AiModel["provider"] | undefined;
-    let turnstileGrantCookie: string | undefined;
     try {
         assertChatRequestSize(req);
         const session = await getServerSession(authOptions);
@@ -795,7 +819,12 @@ export async function POST(req: Request) {
         }
         assertModelAccess(access, modelConfig);
         if (access.kind === "guest") {
-            turnstileGrantCookie = await ensureGuestVerified(req, turnstileToken);
+            verificationGrant.setCookie = await ensureGuestVerified(
+                req,
+                turnstileToken,
+                "guest_chat",
+                { traceId }
+            );
         }
         if (conversationId && assistantMessageId) {
             if (!session?.user?.id) {
@@ -2042,9 +2071,9 @@ export async function POST(req: Request) {
         if (accessGrant.setCookie) {
             headers.append("Set-Cookie", accessGrant.setCookie);
         }
-        if (turnstileGrantCookie) {
-            headers.append("Set-Cookie", turnstileGrantCookie);
-        }
+        // The Turnstile grant cookie is appended by POST() on every return
+        // path, success and failure alike -- adding it here as well would
+        // send it twice.
 
         return new Response(protectedStream.pipeThrough(new TextEncoderStream()), {
             headers,
