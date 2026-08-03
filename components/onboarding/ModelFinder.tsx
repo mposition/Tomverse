@@ -133,7 +133,11 @@ export function ModelFinder({ enabled, onComplete }: ModelFinderProps) {
     );
   }, [combo, stage]);
 
-  const saveAction = async (body: Record<string, unknown>) => {
+  // Validates the whole canonical response: what the screen applies from a
+  // save is what the server actually persisted, never the request as sent.
+  const saveAction = async (
+    body: Record<string, unknown>
+  ): Promise<{ defaultModelId: string; newConversationModelIds: string[] }> => {
     setIsSaving(true);
     setError("");
     try {
@@ -143,12 +147,29 @@ export function ModelFinder({ enabled, onComplete }: ModelFinderProps) {
         body: JSON.stringify(body),
       });
       const data = (await response.json().catch(() => null)) as {
-        defaultModelId?: string;
+        defaultModelId?: unknown;
+        newConversationModelIds?: unknown;
       } | null;
-      if (!response.ok || !data?.defaultModelId) {
+      const defaultModelId =
+        typeof data?.defaultModelId === "string" ? data.defaultModelId : null;
+      const rawCombination = data?.newConversationModelIds;
+      const newConversationModelIds =
+        Array.isArray(rawCombination) &&
+        rawCombination.length > 0 &&
+        rawCombination.every(
+          (modelId): modelId is string => typeof modelId === "string"
+        )
+          ? rawCombination
+          : null;
+      if (
+        !response.ok ||
+        !defaultModelId ||
+        !newConversationModelIds ||
+        newConversationModelIds[0] !== defaultModelId
+      ) {
         throw new Error(`Model finder save failed: ${response.status}`);
       }
-      return data.defaultModelId;
+      return { defaultModelId, newConversationModelIds };
     } finally {
       setIsSaving(false);
     }
@@ -156,16 +177,19 @@ export function ModelFinder({ enabled, onComplete }: ModelFinderProps) {
 
   const handleUseDefault = async () => {
     try {
-      const defaultModelId = await saveAction({ action: "accept_default" });
+      const saved = await saveAction({ action: "accept_default" });
       trackProductEvent("model_finder_skipped", 0, { method: "default" });
       trackProductEvent("recommended_model_accepted", 1, {
-        model_id: defaultModelId,
+        model_id: saved.defaultModelId,
         recommendation_rank: 1,
         method: "default",
       });
-      notifyUserSettingsUpdated({ defaultModel: defaultModelId });
+      notifyUserSettingsUpdated({
+        defaultModel: saved.defaultModelId,
+        newConversationModelIds: saved.newConversationModelIds,
+      });
       onComplete({
-        modelIds: [defaultModelId],
+        modelIds: saved.newConversationModelIds,
         promptExample: t("modelFinder.prompts.general"),
       });
       setIsOpen(false);
@@ -198,21 +222,30 @@ export function ModelFinder({ enabled, onComplete }: ModelFinderProps) {
     }
 
     try {
-      const defaultModelId = await saveAction({
+      const saved = await saveAction({
         action: "complete",
         answers,
         modelIds,
       });
-      trackProductEvent("model_finder_completed", modelIds.length, {
-        model_id: defaultModelId,
-        method: "save",
-      });
+      // Analytics and the applied selection both use the canonical persisted
+      // combination, not the request as sent.
+      trackProductEvent(
+        "model_finder_completed",
+        saved.newConversationModelIds.length,
+        {
+          model_id: saved.defaultModelId,
+          method: "save",
+        }
+      );
       trackProductEvent("recommended_model_accepted", 1, {
-        model_id: defaultModelId,
+        model_id: saved.defaultModelId,
         recommendation_rank: 1,
       });
-      notifyUserSettingsUpdated({ defaultModel: defaultModelId });
-      onComplete({ modelIds, promptExample });
+      notifyUserSettingsUpdated({
+        defaultModel: saved.defaultModelId,
+        newConversationModelIds: saved.newConversationModelIds,
+      });
+      onComplete({ modelIds: saved.newConversationModelIds, promptExample });
       setIsOpen(false);
     } catch (saveError) {
       console.error(saveError);
@@ -428,6 +461,12 @@ export function ModelFinder({ enabled, onComplete }: ModelFinderProps) {
                   {t("modelFinder.saveAsDefault")}
                 </button>
               </div>
+              <p
+                data-testid="model-finder-save-hint"
+                className="mt-3 text-center text-xs leading-5 text-zinc-500 dark:text-zinc-400"
+              >
+                {t("modelFinder.saveAsDefaultHint")}
+              </p>
             </div>
           ) : (
             <div>

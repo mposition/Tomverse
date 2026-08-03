@@ -2,6 +2,7 @@ import { createHash, timingSafeEqual } from "node:crypto";
 import { after } from "next/server";
 import { reconcileExpiredChatCreditReservations } from "@/lib/chatSecurity";
 import { reconcileExpiredChatRequestLeases } from "@/lib/chatRequestLease";
+import { reconcileExpiredExternalImportStaging } from "@/lib/externalImportService";
 import { reportOperationalIncident } from "@/lib/operationalMonitoring";
 import {
   completeScheduledJob,
@@ -11,6 +12,7 @@ import {
 import { monitorInfrastructureThresholdsIfDue } from "@/lib/infrastructureThresholdMonitor";
 import { drainNotificationDeliveriesQuietly } from "@/lib/notificationDeliveryJob";
 import { reconcileProcessingRefundRequestsQuietly } from "@/lib/refundReconciliation";
+import { runImageAssetMaintenanceQuietly } from "@/lib/imageAssetLifecycle";
 
 const isAuthorized = (request: Request) => {
   const configured = process.env.MAINTENANCE_SECRET;
@@ -55,6 +57,21 @@ export async function POST(request: Request) {
     const requestLeases = await reconcileExpiredChatRequestLeases().catch(
       () => ({ removed: 0 })
     );
+    // Rides along like the queues above: drains the DB-first image asset
+    // deletion tombstones against R2 and audits the image invariants (an
+    // image conversation with no generation, a generation whose worker
+    // died). It never throws, so it cannot turn a successful reconciliation
+    // into a failed one.
+    const imageAssets = await runImageAssetMaintenanceQuietly();
+    // Staged external-import payloads carry user conversation content and a
+    // 24h-idle / 72h-absolute lifetime (policy §5.5). The lazy checks in
+    // batch/finalize are the primary guard; this sweep clears content whose
+    // owner never came back. Never throws, so it cannot turn a successful
+    // reconciliation into a failed one.
+    const externalImportStaging =
+      await reconcileExpiredExternalImportStaging().catch(() => ({
+        expiredImports: 0,
+      }));
     await completeScheduledJob({
       runId: run?.id,
       processedCount: result.examined,
@@ -64,6 +81,8 @@ export async function POST(request: Request) {
         notificationDeliveries,
         refundRequests,
         requestLeases,
+        imageAssets,
+        externalImportStaging,
       },
     });
     return Response.json(
@@ -74,6 +93,8 @@ export async function POST(request: Request) {
         notificationDeliveries,
         refundRequests,
         requestLeases,
+        imageAssets,
+        externalImportStaging,
       },
       { headers: { "Cache-Control": "no-store" } }
     );

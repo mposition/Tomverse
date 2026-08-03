@@ -33,6 +33,7 @@ UI-012에서 승인된 정책(B안)입니다. accent 색은 **hue가 아니라 �
 |---|---|---|
 | AI Review | `accent-ai-review-start\|mid\|end-*`, `tomverse-accent-*`, `tomverse-review-*` | cyan → blue → purple |
 | Deep Research | `accent-deep-research-*` | violet |
+| 이미지 생성 | `accent-image-*` | fuchsia |
 | Web Search | `accent-web-search-*` | sky |
 | Model Catalogue | `accent-model-catalogue-*` | purple |
 | Max plan | `accent-plan-max-*` | purple |
@@ -234,6 +235,18 @@ UI-012에서 승인된 정책(B안)입니다. accent 색은 **hue가 아니라 �
   파싱해 변환하고, malformed 값은 파괴하지 않고 보고합니다.
 - 과거 `Message.modelId`, usage reservation/settlement의 modelId와 pricing
   snapshot, 결제 ledger, `catalogDeleted`는 소급 변경하지 않습니다.
+- **"새 대화 기본 조합"은 세 번째 독립 결정입니다**(정책 문서 1.2).
+  `UserSettings.newConversationModelIds`(`Json?`, default 없음)가 로그인
+  사용자의 새 대화 시작 상태의 source of truth이고, `NULL`은
+  `[defaultModel]`로 해석합니다. 해석은 `lib/newConversationModels.ts`의
+  공통 resolver만 담당합니다. 조합을 저장하는 모든 쓰기 경로는 첫 항목과
+  `defaultModel`을 같은 transaction에서 동기화합니다.
+- **읽기 경로는 DB를 rewrite하지 않습니다.** `GET /api/user/settings`가
+  비활성 기본 모델을 발견해도 stored 값은 보존하고 effective 상태와
+  `modelSelectionNotice`만 반환합니다. 영구 변경은 사용자의 명시적 재저장
+  또는 승인된 retirement reconciliation뿐입니다. 저장 성공 응답은 요청
+  echo가 아니라 실제 DB 저장값만 반환합니다. UI 계약은
+  `docs/ui-contracts/account-model-settings.md`.
 
 <!-- BEGIN:mobile-chat-composer-invariant -->
 # Trace 기반 오류 신고 자동화

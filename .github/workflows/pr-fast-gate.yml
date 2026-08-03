@@ -129,6 +129,13 @@ jobs:
         timeout-minutes: 5
         run: npm run check:model-pricing
 
+      # gpt-image-2 lives outside AVAILABLE_MODELS by design, so the model
+      # pricing check above cannot see it. Same release contract -- every
+      # enabled price is explicit and verified -- separate fail-closed net.
+      - name: Image pricing coverage
+        timeout-minutes: 5
+        run: npm run check:image-pricing
+
       # The cost guardrails are derived from plan credits and stored in
       # ChatUsageBucket.count. When that product outgrew int4, PostgreSQL threw
       # 22003 in the guard query instead of returning an allow/deny decision and

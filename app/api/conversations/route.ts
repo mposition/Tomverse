@@ -1,6 +1,7 @@
 ﻿export const dynamic = "force-dynamic";
 
 import { NextResponse } from "next/server";
+import { enqueueImageAssetCleanupForConversations } from "@/lib/imageAssetLifecycle";
 import { prisma } from "@/lib/prisma";
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
@@ -26,6 +27,7 @@ import {
   getUserBillingPlan,
   modelLimitResponse,
 } from "@/lib/billingEntitlements";
+import { resolveNewConversationModels } from "@/lib/newConversationModels";
 
 const modelSchema = z.string().min(1).max(120);
 const createConversationSchema = z
@@ -82,6 +84,13 @@ export async function GET(req: Request) {
     });
 
     const runtimeModels = await getRuntimeModels();
+    // EXISTING conversations that lost or never had a readable selectedModels
+    // value fall back to the single representative model, deliberately NOT to
+    // the account's new-conversation combination: applying the combination
+    // here would silently widen an old single-model conversation into several
+    // panels. The combination only ever shapes a NEW conversation (see the
+    // POST handler below and docs/policy/default-model-luna-migration.md
+    // §1.2).
     const [resolvedDefaultEngine = APP_DEFAULTS.defaultModelId] =
       clampSelectedModelsAgainstRuntime([defaultEngine], runtimeModels, 1);
     const formattedConversations = conversations.map((conv) => {
@@ -147,8 +156,20 @@ export async function POST(req: Request) {
     const billingPlan = await getUserBillingPlan(userId);
     const maxModels = effectivePlanModelLimit(billingPlan);
 
+    // A create without a model array starts from the account's saved
+    // new-conversation combination (null -> [defaultModel]), resolved by the
+    // shared resolver -- the same start state the client shows.
+    const fallbackModels = body.selectedModels
+      ? null
+      : resolveNewConversationModels({
+          stored: userSettings?.newConversationModelIds ?? null,
+          defaultModel: defaultEngine,
+          models: await getRuntimeModels(),
+          plan: billingPlan.tier,
+        }).effectiveModelIds;
+
     const normalizedModels = await clampRuntimeSelectedModels(
-      body.selectedModels || [defaultEngine]
+      body.selectedModels || fallbackModels || [defaultEngine]
     );
     if (body.selectedModels && normalizedModels.length !== new Set(body.selectedModels).size) {
       return NextResponse.json({ error: "One or more selected models are unavailable." }, { status: 400 });
@@ -251,11 +272,20 @@ export async function DELETE(req: Request) {
       return NextResponse.json({ success: true, deleted: 0 });
     }
 
-    const result = await prisma.conversation.deleteMany({
-      where: {
-        userId,
-        id: { in: conversations.map((conversation) => conversation.id) },
-      },
+    // Same DB-first tombstone order as the single-conversation delete: R2
+    // keys are enqueued before the rows disappear, never deleted ahead of
+    // the database.
+    const result = await prisma.$transaction(async (tx) => {
+      const conversationIds = conversations.map(
+        (conversation) => conversation.id
+      );
+      await enqueueImageAssetCleanupForConversations(tx, conversationIds);
+      return tx.conversation.deleteMany({
+        where: {
+          userId,
+          id: { in: conversationIds },
+        },
+      });
     });
 
     return NextResponse.json({ success: true, deleted: result.count });
