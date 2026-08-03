@@ -204,3 +204,19 @@ run(
   ],
   "Running the administrator refund decision transaction and its outbox"
 );
+// Its own process for the same reason as the refund decision suite: it wraps
+// the notification queue module to inject an enqueue failure, and it stubs the
+// session and admin-auth seams for the feedback routes.
+run(
+  [
+    "--conditions=react-server",
+    "--experimental-test-module-mocks",
+    "--no-warnings=ExperimentalWarning",
+    "--import",
+    "tsx",
+    "--test",
+    "--test-concurrency=1",
+    "tests/integration/feedback-lifecycle.db.test.ts",
+  ],
+  "Running the feedback lifecycle notification transaction scenarios"
+);

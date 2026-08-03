@@ -1,8 +1,9 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import {
+  BellRing,
   CheckCircle2,
   Clipboard,
   Download,
@@ -10,9 +11,20 @@ import {
   Loader2,
   MessageSquare,
   Search,
+  X,
 } from "lucide-react";
 import { dispatchAppToast } from "@/lib/appToast";
 import { AdminNotesBox } from "@/components/admin/AdminNotesBox";
+import {
+  FEEDBACK_CLOSURE_OUTCOMES,
+  FEEDBACK_USER_REPLY_MAX_LENGTH,
+  FEEDBACK_USER_REPLY_MIN_LENGTH,
+  feedbackUserReplyState,
+  isTerminalFeedbackStatus,
+  type FeedbackClosureOutcome,
+} from "@/lib/feedbackLifecycleCore";
+import { buildFeedbackLifecycleEmail } from "@/lib/feedbackLifecycleEmails";
+import { feedbackReferenceFromId } from "@/lib/feedbackPolicy";
 
 export type FeedbackRow = {
   id: string;
@@ -28,6 +40,10 @@ export type FeedbackRow = {
   attachmentCount: number;
   path: string | null;
   userAgent: string | null;
+  language: string;
+  emailUpdatesConsent: boolean;
+  closureOutcome: string | null;
+  userReply: string | null;
   createdAt: string;
 };
 
@@ -35,7 +51,34 @@ type Props = {
   rows: FeedbackRow[];
 };
 
+/** The server's account of what happened to the submitter email, verbatim. */
+type UserNotificationResult =
+  | { queued: true; delivered: boolean }
+  | { queued: false; reason: "no_stage" | "already_notified" | "not_notifiable" };
+
 const statuses = ["open", "reviewing", "resolved", "closed"] as const;
+
+/** Whether lifecycle emails can reach this reporter at all. */
+const isNotifiable = (feedback: FeedbackRow) =>
+  Boolean(feedback.email) && feedback.emailUpdatesConsent;
+
+/**
+ * The sentence the toast adds about the submitter email. A failed send is
+ * "queued for retry" -- never a failed status change, which by this point has
+ * already committed.
+ */
+const userNotificationSentence = (result: UserNotificationResult | undefined) => {
+  if (!result) return "";
+  if (result.queued) {
+    return result.delivered
+      ? " The reporter was emailed."
+      : " Reporter email queued; delivery will be retried.";
+  }
+  if (result.reason === "already_notified") {
+    return " This stage was already announced -- no new email.";
+  }
+  return "";
+};
 
 const statusClass = (status: string) => {
   if (status === "resolved") return "border-emerald-500/30 bg-emerald-500/10 text-emerald-300";
@@ -70,6 +113,15 @@ export function FeedbackInboxPanel({ rows }: Props) {
     initialStatus
   );
   const [busyId, setBusyId] = useState<string | null>(null);
+  /**
+   * Closing is never one click: resolved/closed go through a small dialog
+   * that collects the outcome code and the user-facing reply, and previews
+   * the email the reporter will receive.
+   */
+  const [closeTarget, setCloseTarget] = useState<{
+    feedback: FeedbackRow;
+    status: "resolved" | "closed";
+  } | null>(null);
 
   const updateLocation = (nextQuery: string, nextStatus: typeof statusFilter) => {
     const params = new URLSearchParams(searchParams.toString());
@@ -105,17 +157,32 @@ export function FeedbackInboxPanel({ rows }: Props) {
 
   const openCount = items.filter((item) => item.status === "open").length;
 
-  const updateStatus = async (id: string, status: typeof statuses[number]) => {
-    if (busyId) return;
+  const updateStatus = async (
+    id: string,
+    status: typeof statuses[number],
+    closure?: { outcomeCode: FeedbackClosureOutcome; userReply?: string }
+  ) => {
+    if (busyId) return false;
     setBusyId(id);
     try {
       const response = await fetch(`/api/admin/feedback/${id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ status }),
+        body: JSON.stringify({
+          status,
+          ...(closure
+            ? {
+                outcomeCode: closure.outcomeCode,
+                ...(closure.userReply?.trim()
+                  ? { userReply: closure.userReply.trim() }
+                  : {}),
+              }
+            : {}),
+        }),
       });
       const data = (await response.json().catch(() => null)) as {
         feedback?: FeedbackRow;
+        userNotification?: UserNotificationResult;
         error?: string;
       } | null;
       if (!response.ok || !data?.feedback) {
@@ -132,12 +199,19 @@ export function FeedbackInboxPanel({ rows }: Props) {
             : item
         )
       );
-      dispatchAppToast("Feedback status updated.", "success");
+      // The status change succeeded whatever happened to the email; the
+      // sentence about the email only ever adds detail.
+      dispatchAppToast(
+        `Feedback status updated.${userNotificationSentence(data.userNotification)}`,
+        "success"
+      );
+      return true;
     } catch (error) {
       dispatchAppToast(
         error instanceof Error ? error.message : "Failed to update feedback.",
         "error"
       );
+      return false;
     } finally {
       setBusyId(null);
     }
@@ -302,6 +376,24 @@ export function FeedbackInboxPanel({ rows }: Props) {
                       <span className="text-xs text-zinc-500">
                         {dateLabel(feedback.createdAt)} UTC
                       </span>
+                      {/*
+                        Whether lifecycle emails can reach this reporter. A
+                        capability flag only -- the address itself is already
+                        shown once below and is not repeated here.
+                      */}
+                      <span
+                        data-testid="feedback-notify-badge"
+                        className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs font-bold ${
+                          isNotifiable(feedback)
+                            ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-300"
+                            : "border-zinc-700 bg-zinc-950 text-zinc-500"
+                        }`}
+                      >
+                        <BellRing className="h-3 w-3" />
+                        {isNotifiable(feedback)
+                          ? "Email updates on"
+                          : "No email updates"}
+                      </span>
                     </div>
                     <div className="mt-3 text-sm font-bold text-white">
                       {feedback.email || "guest"}
@@ -333,7 +425,13 @@ export function FeedbackInboxPanel({ rows }: Props) {
                         key={status}
                         type="button"
                         disabled={busy || feedback.status === status}
-                        onClick={() => updateStatus(feedback.id, status)}
+                        onClick={() =>
+                          isTerminalFeedbackStatus(status)
+                            ? // Closing asks for the outcome and the
+                              // user-facing reply first; it is never one click.
+                              setCloseTarget({ feedback, status })
+                            : updateStatus(feedback.id, status)
+                        }
                         className="inline-flex items-center justify-center gap-1.5 rounded-xl border border-zinc-700 px-3 py-2 text-xs font-bold capitalize text-zinc-200 transition hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-50"
                       >
                         {busy && feedback.status !== status ? (
@@ -346,6 +444,16 @@ export function FeedbackInboxPanel({ rows }: Props) {
                     ))}
                   </div>
                 </div>
+
+                {isNotifiable(feedback) && feedback.status === "open" ? (
+                  <p
+                    data-testid="feedback-reviewing-email-hint"
+                    className="mt-2 text-xs font-semibold leading-5 text-blue-200/80"
+                  >
+                    Moving this report to reviewing (or closing it) emails the
+                    reporter a status update.
+                  </p>
+                ) : null}
 
                 <div className="mt-3 grid gap-2 rounded-xl border border-zinc-800 bg-zinc-950/70 p-3 text-xs text-zinc-500 md:grid-cols-2 xl:grid-cols-4">
                   <span className="truncate">Trace: {feedback.traceId || "-"}</span>
@@ -365,6 +473,215 @@ export function FeedbackInboxPanel({ rows }: Props) {
           })
         )}
       </div>
+
+      {closeTarget ? (
+        <FeedbackCompletionDialog
+          feedback={closeTarget.feedback}
+          status={closeTarget.status}
+          busy={busyId === closeTarget.feedback.id}
+          onCancel={() => setCloseTarget(null)}
+          onConfirm={async (closure) => {
+            const done = await updateStatus(
+              closeTarget.feedback.id,
+              closeTarget.status,
+              closure
+            );
+            if (done) setCloseTarget(null);
+          }}
+        />
+      ) : null}
     </section>
+  );
+}
+
+/**
+ * The small closing dialog: outcome code, the user-facing reply, and a preview
+ * of exactly what the reporter will be emailed. The preview is rendered by the
+ * same builder the delivery queue uses, in the language the report was
+ * submitted in, so what the admin approves is what gets sent.
+ *
+ * The reply here is the SUBMITTER-facing text. Internal admin notes live in
+ * AdminNotesBox and never reach an email.
+ */
+function FeedbackCompletionDialog({
+  feedback,
+  status,
+  busy,
+  onCancel,
+  onConfirm,
+}: {
+  feedback: FeedbackRow;
+  status: "resolved" | "closed";
+  busy: boolean;
+  onCancel: () => void;
+  onConfirm: (closure: {
+    outcomeCode: FeedbackClosureOutcome;
+    userReply?: string;
+  }) => void;
+}) {
+  const [outcomeCode, setOutcomeCode] = useState<FeedbackClosureOutcome>(
+    feedback.type === "bug" ? "fixed" : "answered"
+  );
+  const [userReply, setUserReply] = useState(feedback.userReply || "");
+  const selectRef = useRef<HTMLSelectElement | null>(null);
+
+  useEffect(() => {
+    selectRef.current?.focus();
+  }, []);
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      event.stopPropagation();
+      onCancel();
+    };
+    document.addEventListener("keydown", handleKeyDown, true);
+    return () => document.removeEventListener("keydown", handleKeyDown, true);
+  }, [onCancel]);
+
+  const replyState = feedbackUserReplyState(userReply);
+  const replyValid = replyState === "empty" || replyState === "ready";
+  const notifiable = isNotifiable(feedback);
+  const alreadyCompleted =
+    isTerminalFeedbackStatus(feedback.status) || Boolean(feedback.closureOutcome);
+  const preview = useMemo(
+    () =>
+      buildFeedbackLifecycleEmail("completed", {
+        reference: feedbackReferenceFromId(feedback.id),
+        type: feedback.type,
+        language: feedback.language,
+        outcomeCode,
+        userReply: userReply.trim() || null,
+      }),
+    [feedback.id, feedback.language, feedback.type, outcomeCode, userReply]
+  );
+
+  return (
+    <div
+      data-testid="feedback-completion-layer"
+      className="fixed inset-0 z-[140] flex items-center justify-center bg-black/70 p-4"
+    >
+      <button
+        type="button"
+        aria-label="Cancel"
+        onClick={onCancel}
+        className="absolute inset-0 h-full w-full cursor-default"
+      />
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-label={`Close feedback as ${status}`}
+        data-testid="feedback-completion-dialog"
+        className="relative z-10 max-h-[calc(100dvh-2rem)] w-full max-w-lg overflow-y-auto rounded-2xl border border-zinc-800 bg-zinc-950 p-5 shadow-2xl"
+      >
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <h3 className="text-lg font-black capitalize text-white">
+              Mark as {status}
+            </h3>
+            <p className="mt-1 text-xs leading-5 text-zinc-400">
+              {notifiable
+                ? alreadyCompleted
+                  ? "This report was already closed once. The completion email is sent only for the first closure, so no new email will go out."
+                  : "The reporter opted into email updates. Confirming sends the completion email previewed below."
+                : "This reporter has no email updates. The status changes without sending anything."}
+            </p>
+          </div>
+          <button
+            type="button"
+            data-testid="feedback-completion-cancel"
+            onClick={onCancel}
+            aria-label="Cancel"
+            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl text-zinc-500 transition hover:bg-zinc-900"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+
+        <label className="mt-4 block text-xs font-bold uppercase tracking-[0.14em] text-zinc-400">
+          Outcome
+          <select
+            ref={selectRef}
+            data-testid="feedback-completion-outcome"
+            value={outcomeCode}
+            onChange={(event) =>
+              setOutcomeCode(event.target.value as FeedbackClosureOutcome)
+            }
+            className="mt-1.5 h-11 w-full rounded-xl border border-zinc-800 bg-zinc-950 px-3 text-sm text-white outline-none transition focus:border-blue-500"
+          >
+            {FEEDBACK_CLOSURE_OUTCOMES.map((code) => (
+              <option key={code} value={code}>
+                {code}
+              </option>
+            ))}
+          </select>
+        </label>
+
+        <label className="mt-4 block text-xs font-bold uppercase tracking-[0.14em] text-zinc-400">
+          Reply to the reporter (optional, included in the email)
+          <textarea
+            data-testid="feedback-completion-reply"
+            value={userReply}
+            onChange={(event) => setUserReply(event.target.value)}
+            rows={3}
+            maxLength={FEEDBACK_USER_REPLY_MAX_LENGTH}
+            aria-invalid={!replyValid ? true : undefined}
+            className="mt-1.5 w-full resize-y rounded-xl border border-zinc-800 bg-zinc-950 p-3 text-sm leading-6 text-white outline-none transition focus:border-blue-500"
+          />
+        </label>
+        <p
+          data-testid="feedback-completion-reply-hint"
+          role="status"
+          className={`mt-1 text-xs font-semibold leading-5 ${
+            replyValid ? "text-zinc-500" : "text-amber-300"
+          }`}
+        >
+          {replyState === "tooShort"
+            ? `A reply needs at least ${FEEDBACK_USER_REPLY_MIN_LENGTH} characters, or leave it empty.`
+            : `Visible to the reporter. Never paste internal notes, trace IDs or diagnostics here. ${userReply.trim().length}/${FEEDBACK_USER_REPLY_MAX_LENGTH}`}
+        </p>
+
+        {notifiable && !alreadyCompleted ? (
+          <div
+            data-testid="feedback-completion-preview"
+            className="mt-4 rounded-xl border border-zinc-800 bg-zinc-900/70 p-3"
+          >
+            <p className="text-xs font-bold uppercase tracking-[0.14em] text-zinc-400">
+              Email preview ({feedback.language})
+            </p>
+            <p className="mt-2 text-sm font-bold text-white">{preview.subject}</p>
+            <pre className="mt-2 max-h-40 overflow-y-auto whitespace-pre-wrap font-sans text-xs leading-5 text-zinc-300">
+              {preview.text}
+            </pre>
+          </div>
+        ) : null}
+
+        <div className="mt-5 flex justify-end gap-2">
+          <button
+            type="button"
+            onClick={onCancel}
+            className="rounded-xl border border-zinc-700 px-4 py-2 text-xs font-bold text-zinc-200 transition hover:bg-zinc-900"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            data-testid="feedback-completion-confirm"
+            disabled={busy || !replyValid}
+            onClick={() =>
+              onConfirm({
+                outcomeCode,
+                ...(userReply.trim() ? { userReply: userReply.trim() } : {}),
+              })
+            }
+            className="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-4 py-2 text-xs font-bold text-white transition hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
+            Mark {status}
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }

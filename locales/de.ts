@@ -413,6 +413,16 @@ export const de = {
         messageCounter: "{count} / {max}",
         errorReportHint: "Sie können ohne Ergänzung senden. Die Fehlerdetails werden ohnehin angehängt.",
         traceOptionalHint: "Die Trace ID ist optional. Sie können auch ohne sie senden.",
+        emailUpdatesLabel: "Statusupdates per E-Mail erhalten",
+        emailUpdatesAccountHint:
+          "Eingangsbestätigung und Statusupdates zu dieser Meldung gehen an Ihre Konto-E-Mail-Adresse.",
+        emailUpdatesEmailLabel: "E-Mail für Updates",
+        emailUpdatesEmailPlaceholder: "sie@beispiel.de",
+        emailUpdatesEmailHint:
+          "Wird nur für Statusupdates zu dieser Meldung verwendet.",
+        emailUpdatesEmailInvalid: "Geben Sie eine gültige E-Mail-Adresse ein.",
+        emailUpdatesScheduled:
+          "Wir senden Ihnen eine Eingangsbestätigung und Statusupdates per E-Mail.",
         traceFormatHint: "Das sieht nicht nach einer Trace ID aus. Sie wird unverändert mitgesendet.",
         errorInvalid: "Prüfen Sie Ihre Eingaben und senden Sie erneut.",
         errorVerification: "Eine Sicherheitsprüfung ist nötig. Schließen Sie sie ab und senden Sie erneut.",

@@ -497,6 +497,10 @@ export async function AdminWorkspace({ activeView }: { activeView: AdminWorkspac
         attachmentCount: feedback.attachmentCount,
         path: feedback.path,
         userAgent: feedback.userAgent,
+        language: feedback.language,
+        emailUpdatesConsent: feedback.emailUpdatesConsent,
+        closureOutcome: feedback.closureOutcome,
+        userReply: feedback.userReply,
         createdAt: feedback.createdAt.toISOString(),
     }));
     const auditRows: AdminAuditRow[] = auditLogs.map((log) => ({
