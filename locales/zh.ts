@@ -332,6 +332,7 @@ export const zh = {
         resumePanel: "恢复对话",
         retryWithoutFiles: "不带文件重试",
         comparisonPreflightFailed: "发送前无法检查所选模型，请重试。",
+        modelSettingsSyncFailed: "无法将模型选择保存到服务器，请重新发送。",
         comparisonCreditsInsufficient: "当前积分不足以运行所有所选模型。请减少模型数量或购买积分。",
         comparisonDailyCreditsInsufficient: "今日剩余积分不足以运行所有所选模型。",
         comparisonConcurrencyLimit: "已有回复正在生成。请在其完成或停止后再试。",

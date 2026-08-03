@@ -338,6 +338,7 @@ export const ko = {
         resumePanel: "대화 다시 시작",
         retryWithoutFiles: "첨부파일 없이 다시 시도",
         comparisonPreflightFailed: "전송 전에 선택한 모델의 사용 가능 여부를 확인하지 못했습니다. 다시 시도해 주세요.",
+        modelSettingsSyncFailed: "모델 선택을 서버에 저장하지 못했습니다. 다시 전송해 주세요.",
         comparisonCreditsInsufficient: "선택한 모델을 모두 실행하기에는 현재 크레딧이 부족합니다. 모델 수를 줄이거나 크레딧을 추가해 주세요.",
         comparisonDailyCreditsInsufficient: "선택한 모델을 모두 실행하기에는 오늘 남은 일일 크레딧이 부족합니다.",
         comparisonConcurrencyLimit: "현재 처리 중인 답변이 있습니다. 완료되거나 중단된 후 다시 시도해 주세요.",

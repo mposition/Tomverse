@@ -334,6 +334,7 @@ export const en = {
         resumePanel: "Resume chat",
         retryWithoutFiles: "Retry without files",
         comparisonPreflightFailed: "The selected models could not be checked before sending. Please try again.",
+        modelSettingsSyncFailed: "Your model selection could not be saved to the server. Please try sending again.",
         comparisonCreditsInsufficient: "The selected models need more credits than you currently have. Choose fewer models or add credits.",
         comparisonDailyCreditsInsufficient: "The selected models need more daily credits than remain today.",
         comparisonConcurrencyLimit: "A response is already being generated. Try again once it finishes or is stopped.",

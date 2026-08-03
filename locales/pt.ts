@@ -295,6 +295,7 @@ export const pt = {
         resumePanel: "Retomar chat",
         retryWithoutFiles: "Tentar novamente sem arquivos",
         comparisonPreflightFailed: "Não foi possível verificar os modelos selecionados antes do envio. Tente novamente.",
+        modelSettingsSyncFailed: "Não foi possível salvar sua seleção de modelos no servidor. Envie novamente.",
         comparisonCreditsInsufficient: "Os créditos atuais não são suficientes para todos os modelos selecionados. Reduza o número de modelos ou adicione créditos.",
         comparisonDailyCreditsInsufficient: "Os créditos diários restantes não são suficientes para todos os modelos selecionados.",
         comparisonConcurrencyLimit: "Já está a ser gerada uma resposta. Tente novamente quando terminar ou for interrompida.",

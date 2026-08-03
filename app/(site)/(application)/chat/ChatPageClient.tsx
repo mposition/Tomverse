@@ -83,6 +83,10 @@ import {
 } from "@/components/chat/useUserUsage";
 import { getChatCreditAllocation } from "@/lib/chatCreditAllocation";
 import {
+  createModelSettingsSyncQueue,
+  type ModelSettingsSnapshot,
+} from "@/lib/modelSettingsSyncQueue";
+import {
   trackProductEvent,
   trackProductEventOnce,
 } from "@/lib/productAnalyticsClient";
@@ -159,12 +163,51 @@ const normalizeStringArray = (value: unknown, fallback: string[]) => {
 };
 
 const uniqueStrings = (values: string[]) => Array.from(new Set(values));
-type PendingModelSettingsSync = {
-  targetChatId: string;
-  models: string[];
-  disabled: string[];
-};
-type ConfirmedModelSettings = PendingModelSettingsSync;
+
+/**
+ * PATCHes one conversation's model settings and reports the server's
+ * normalized answer back as the confirmed state. Module-level because it
+ * closes over nothing from the component -- which is also what lets the
+ * identity-transition effect replace the whole queue without re-wiring it.
+ */
+const createConversationModelSettingsSyncQueue = () =>
+  createModelSettingsSyncQueue({
+    debounceMs: 250,
+    persist: async (conversationId, snapshot) => {
+      const response = await fetch(`/api/conversations/${conversationId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          selectedModels: snapshot.models,
+          disabledPanels: snapshot.disabled,
+        }),
+      });
+      if (!response.ok) {
+        const body = await response.json().catch(() => null);
+        return {
+          ok: false,
+          retryable: response.status >= 500 || response.status === 429,
+          traceId:
+            typeof body?.traceId === "string"
+              ? body.traceId
+              : response.headers.get("X-Request-ID") || undefined,
+        };
+      }
+      const data = await response.json().catch(() => null);
+      // The server's normalized answer is the confirmed state -- what it
+      // actually stored, not what was sent.
+      return {
+        ok: true,
+        confirmed: {
+          models: normalizeStringArray(data?.selectedModels, snapshot.models),
+          disabled: normalizeStringArray(
+            data?.disabledPanels,
+            snapshot.disabled
+          ),
+        },
+      };
+    },
+  });
 const isLanguage = (value: unknown): value is Language =>
   value === "en" ||
   value === "ko" ||
@@ -606,10 +649,29 @@ export function ChatPageClient({
   // callback is threaded up from ChatApp today), which is disclosed in the
   // chip's own copy rather than silently claimed as a real cancel.
   const [isDeepResearchPending, setIsDeepResearchPending] = useState(false);
-  const modelSyncTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const modelSyncAbortRef = useRef<AbortController | null>(null);
-  const pendingModelSyncRef = useRef<PendingModelSettingsSync | null>(null);
-  const confirmedModelSettingsRef = useRef<ConfirmedModelSettings | null>(null);
+  // The latest committed selection, readable synchronously by the send
+  // barrier (state values close over stale renders inside async handlers).
+  // Written by the central mutation below and kept aligned with React state
+  // by the effect right after it.
+  const latestModelSettingsRef = useRef<ModelSettingsSnapshot>({
+    models: [],
+    disabled: [],
+  });
+  // One serialized, coalescing PATCH queue per conversation. Never aborts an
+  // in-flight write (an aborted fetch still commits server-side, which is
+  // exactly the out-of-order overwrite this replaces) -- a newer change is
+  // coalesced and written as the immediately next request instead. Replaced
+  // wholesale on identity transitions so nothing queued by the previous
+  // identity is ever written under the next one.
+  const modelSettingsSyncQueueRef = useRef(
+    createConversationModelSettingsSyncQueue()
+  );
+  useEffect(() => {
+    latestModelSettingsRef.current = {
+      models: selectedModels,
+      disabled: disabledPanels,
+    };
+  }, [selectedModels, disabledPanels]);
   const comparisonCompletionsRef = useRef<Map<string, Set<string>>>(new Map());
   const comparisonTrackedRef = useRef<Set<string>>(new Set());
   const localComparisonResponsesRef = useRef<
@@ -880,17 +942,13 @@ export function ChatPageClient({
     if (transition.initial) return;
 
     // Anything the previous identity had in flight or queued belongs to that
-    // identity. A debounced model-settings PATCH fired after this point would
-    // aim the old conversation at the new account's API, so the pending write
-    // is dropped and the request already on the wire is aborted.
-    if (modelSyncTimerRef.current) {
-      clearTimeout(modelSyncTimerRef.current);
-      modelSyncTimerRef.current = null;
-    }
-    pendingModelSyncRef.current = null;
-    confirmedModelSettingsRef.current = null;
-    modelSyncAbortRef.current?.abort();
-    modelSyncAbortRef.current = null;
+    // identity. A queued model-settings PATCH fired after this point would
+    // aim the old conversation at the new account's API, so the whole sync
+    // queue is replaced. A request already on the wire is left to finish --
+    // it was authorized under the identity that issued it, and abandoning
+    // its result here cannot make it un-happen server-side.
+    modelSettingsSyncQueueRef.current =
+      createConversationModelSettingsSyncQueue();
     staleConversationIdsRef.current.clear();
 
     const carriedId = currentChatIdRef.current;
@@ -1535,20 +1593,28 @@ export function ChatPageClient({
         const nextDisabled = normalizeStringArray(data.disabledPanels, []).filter(
             (modelId) => nextModels.includes(modelId)
         );
+        const appliedModels =
+            nextModels.length > 0 ? nextModels : [userDefaultEngine];
 
-        setSelectedModels(nextModels.length > 0 ? nextModels : [userDefaultEngine]);
+        setSelectedModels(appliedModels);
         setDisabledPanels(nextDisabled);
+        latestModelSettingsRef.current = {
+            models: appliedModels,
+            disabled: nextDisabled,
+        };
         setWebSearchMode(
             isWebSearchMode(data.webSearchMode)
                 ? data.webSearchMode
                 : APP_DEFAULTS.defaultWebSearchMode
         );
         if (targetChatId) {
-          confirmedModelSettingsRef.current = {
-            targetChatId,
-            models: nextModels.length > 0 ? nextModels : [userDefaultEngine],
+          // A server read seeds the queue's confirmed state; markConfirmed
+          // refuses while local changes are unconfirmed, so a stale read can
+          // never masquerade as the server's latest word.
+          modelSettingsSyncQueueRef.current.markConfirmed(targetChatId, {
+            models: appliedModels,
             disabled: nextDisabled,
-          };
+          });
         }
     }, [clampSelectedModels, userDefaultEngine]);
 
@@ -2037,7 +2103,8 @@ export function ChatPageClient({
         },
         // No targetChatId: this is an optimistic read of the list, not the
         // server's confirmation of what this conversation is saved as, so it
-        // must not seed confirmedModelSettingsRef and suppress the real sync.
+        // must not seed the sync queue's confirmed state and suppress the
+        // real sync.
         undefined
       );
     }
@@ -2053,10 +2120,24 @@ export function ChatPageClient({
     }
 
 	try {
+	  const revisionBeforeDetailFetch =
+	    modelSettingsSyncQueueRef.current.localRevision(accountId);
 	  const res = await fetch(`/api/conversations/${accountId}`, { cache: "no-store" });
       if (res.ok) {
         const data = await res.json();
+        // A detail response that lands late must not clobber newer local
+        // state: neither another conversation the user has since switched
+        // to, nor a model change made while this request was in flight.
+        // The revision compare also covers a change that was already
+        // *confirmed* during the read -- the response still predates it.
+        if (
+          currentChatIdRef.current === id &&
+          modelSettingsSyncQueueRef.current.localRevision(accountId) ===
+            revisionBeforeDetailFetch &&
+          !modelSettingsSyncQueueRef.current.hasUnconfirmedChanges(accountId)
+        ) {
           applyConversationSettings(data, id);
+        }
       } else {
         const body = await res.json().catch(() => null);
         // A genuine 403 on someone else's conversation stays a 403 and is
@@ -2324,6 +2405,9 @@ export function ChatPageClient({
         // having missed rather than as the server saying no.
         if (!response.ok) throw new Error(`Delete failed: ${response.status}`);
 
+        // A deleted conversation can never be PATCHed again -- drop any
+        // queued or confirmed sync state it still holds.
+        modelSettingsSyncQueueRef.current.reset(id);
         if (currentChatId === id) {
           handleNewChat();
         }
@@ -2339,83 +2423,38 @@ export function ChatPageClient({
     setPendingDeleteId(id);
   };
   
-  const persistModelSettingsToServer = async (
-    pending: PendingModelSettingsSync
-  ) => {
-    modelSyncAbortRef.current?.abort();
-    const controller = new AbortController();
-    modelSyncAbortRef.current = controller;
-    try {
-      const response = await fetch(
-        `/api/conversations/${pending.targetChatId}`,
-        {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            selectedModels: pending.models,
-            disabledPanels: pending.disabled,
-          }),
-          signal: controller.signal,
-        }
-      );
-      if (!response.ok) {
-        throw new Error(`Model settings sync failed: ${response.status}`);
-      }
-      confirmedModelSettingsRef.current = pending;
-      if (pendingModelSyncRef.current === pending) {
-        pendingModelSyncRef.current = null;
-      }
-      return true;
-    } catch (error: unknown) {
-      const wasAborted = error instanceof Error && error.name === "AbortError";
-      if (!wasAborted) {
-        console.error("Failed to sync model settings:", error);
-        if (pendingModelSyncRef.current === pending) {
-          const confirmed = confirmedModelSettingsRef.current;
-          if (confirmed?.targetChatId === pending.targetChatId) {
-            setSelectedModels(confirmed.models);
-            setDisabledPanels(confirmed.disabled);
-          }
-          pendingModelSyncRef.current = null;
-        }
-      }
-      return false;
-    } finally {
-      if (modelSyncAbortRef.current === controller) {
-        modelSyncAbortRef.current = null;
-      }
-    }
-  };
-
-  const syncModelSettingsToServer = (
-    targetChatId: string,
-    updatedModels: string[],
-    updatedDisabled: string[]
-  ) => {
-    if (!accountConversationId(targetChatId) || !sessionUserId) {
-      return;
-    }
-
-    if (modelSyncTimerRef.current) {
-      clearTimeout(modelSyncTimerRef.current);
-      modelSyncTimerRef.current = null;
-    }
-    modelSyncAbortRef.current?.abort();
-
-    const models = clampSelectedModels(updatedModels);
-    const pending: PendingModelSettingsSync = {
-      targetChatId,
-      models,
-      disabled: uniqueStrings(updatedDisabled).filter((modelId) =>
+  /**
+   * The single mutation path for a conversation's model selection. Every
+   * change -- user toggles, panel swaps, ?models= presets, programmatic
+   * updates -- goes through here so the screen state and the per-conversation
+   * sync queue can never disagree about what the latest selection is.
+   */
+  const mutateModelSettings = useCallback(
+    (
+      targetChatId: string | null,
+      nextModels: string[],
+      nextDisabled: string[]
+    ) => {
+      const models = uniqueStrings(nextModels);
+      const disabled = uniqueStrings(nextDisabled).filter((modelId) =>
         models.includes(modelId)
-      ),
-    };
-    pendingModelSyncRef.current = pending;
-    modelSyncTimerRef.current = setTimeout(() => {
-      modelSyncTimerRef.current = null;
-      void persistModelSettingsToServer(pending);
-    }, 250);
-  };
+      );
+      setSelectedModels(models);
+      setDisabledPanels(disabled);
+      // Written synchronously (not only via the state-mirroring effect) so a
+      // send barrier that runs before React commits still captures this
+      // change.
+      latestModelSettingsRef.current = { models, disabled };
+      const syncTargetId = accountConversationId(targetChatId);
+      if (!syncTargetId || !sessionUserId) return;
+      const syncModels = clampSelectedModels(models);
+      modelSettingsSyncQueueRef.current.enqueue(syncTargetId, {
+        models: syncModels,
+        disabled: disabled.filter((modelId) => syncModels.includes(modelId)),
+      });
+    },
+    [accountConversationId, clampSelectedModels, sessionUserId]
+  );
 
   // Deliberate user action (picked from the tools sheet), not the frequent
   // rapid-toggle case selectedModels' debounced sync guards against -- an
@@ -2447,35 +2486,67 @@ export function ChatPageClient({
     });
   };
 
-  const flushModelSettingsToServer = async (targetChatId: string) => {
-    const pending = pendingModelSyncRef.current;
-    if (!pending || pending.targetChatId !== targetChatId) return true;
-    if (modelSyncTimerRef.current) {
-      clearTimeout(modelSyncTimerRef.current);
-      modelSyncTimerRef.current = null;
-    }
-    return persistModelSettingsToServer(pending);
-  };
-
+  /**
+   * The send barrier every send path runs before /api/chat or the comparison
+   * preflight: full comparison sends, single-model sends, per-panel
+   * follow-ups, both retry paths and the deep-research auto-send. It captures
+   * the selection this send is being made with and resolves only once the
+   * server has confirmed that exact snapshot -- "no pending request" is not
+   * treated as success, so a selection the server never saw can no longer be
+   * sent against.
+   */
   const ensureModelSettingsReady = async (targetChatId: string) => {
     if (isGuestMode || !sessionUserId) {
       return true;
     }
-    if (!accountConversationId(targetChatId)) {
+    const accountId = accountConversationId(targetChatId);
+    if (!accountId) {
       recoverFromStaleConversation(targetChatId);
       return false;
     }
-    const ready = await flushModelSettingsToServer(targetChatId);
-    if (ready) return true;
+    const capturedModels = clampSelectedModels(
+      latestModelSettingsRef.current.models
+    );
+    const captured: ModelSettingsSnapshot = {
+      models: capturedModels,
+      disabled: uniqueStrings(latestModelSettingsRef.current.disabled).filter(
+        (modelId) => capturedModels.includes(modelId)
+      ),
+    };
+    const outcome = await modelSettingsSyncQueueRef.current.ensureConfirmed(
+      accountId,
+      captured
+    );
+    if (
+      outcome.status === "confirmed" &&
+      captured.models.every((modelId) =>
+        outcome.confirmed.models.includes(modelId)
+      )
+    ) {
+      return true;
+    }
 
-    const traceId = crypto.randomUUID();
+    const traceId =
+      outcome.status === "failed" ? outcome.traceId : crypto.randomUUID();
     console.error(JSON.stringify({
       event: "chat_model_settings_flush_failed",
       traceId,
       conversationId: targetChatId,
+      outcome: outcome.status,
+      capturedModelIds: captured.models,
+      confirmedModelIds: outcome.confirmed?.models ?? null,
     }));
+    // The send is abandoned; the screen recovers to the last state the
+    // server actually confirmed so what is shown is what a retry would be
+    // allowed to use.
+    const confirmed = outcome.confirmed;
+    if (confirmed && currentChatIdRef.current === targetChatId) {
+      setSelectedModels(confirmed.models);
+      setDisabledPanels(confirmed.disabled);
+      latestModelSettingsRef.current = confirmed;
+    }
     showToast(
-      `${t("chat.comparisonPreflightFailed")} (${t("chat.traceId")}: ${traceId})`,
+      `${t("chat.modelSettingsSyncFailed")} (${t("chat.traceId")}: ${traceId})`,
       "error"
     );
     return false;
@@ -2526,8 +2597,11 @@ export function ChatPageClient({
       if (cancelled) return;
       comparisonPresetAppliedRef.current = true;
       if (presetModels.length > 0) {
-        setSelectedModels(presetModels);
-        setDisabledPanels([]);
+        // Through the central mutation so a preset applied onto an already
+        // open account conversation is also written to the server -- a
+        // preset that only changed the screen left the very next send to be
+        // refused with MODEL_NOT_SELECTED.
+        mutateModelSettings(currentChatId, presetModels, []);
         if (currentChatId) {
           setConversations((current) =>
             current.map((conversation) =>
@@ -2569,13 +2643,14 @@ export function ChatPageClient({
     clampGuestSelectedModels,
     clampSelectedModels,
     isGuestMode,
+    mutateModelSettings,
     setInputValue,
     isUserSettingsLoaded,
     maxSelectableModels,
     isEnabledModelId,
     status,
   ]);
-  
+
   // STG-F003: nothing marks the composer busy until well after the submit
   // path has awaited a conversation create, the model-settings flush and the
   // preflight, so a second Enter -- or an Enter racing the send button --
@@ -2676,13 +2751,17 @@ export function ChatPageClient({
           const data = await res.json();
           activeChatId = data.id;
           justCreatedTitle = newConversationTitle;
-          confirmedModelSettingsRef.current = {
-            targetChatId: data.id,
+          // The conversation was created from this exact selection one line
+          // above, so it is the server-confirmed state -- seed it so the
+          // barrier below does not need a redundant first PATCH. (PATCH
+          // responses, where the server may genuinely disagree, feed the
+          // queue their normalized answer instead.)
+          modelSettingsSyncQueueRef.current.markConfirmed(data.id, {
             models: clampSelectedModels(selectedModels),
             disabled: uniqueStrings(disabledPanels).filter((modelId) =>
               selectedModels.includes(modelId)
             ),
-          };
+          });
           setCurrentChatId(activeChatId);
           currentChatIdRef.current = activeChatId;
           // Same hand-off as the guest branch above: the draft follows the id
@@ -3076,11 +3155,7 @@ export function ChatPageClient({
     nextModels = isGuestMode
       ? clampGuestSelectedModels(nextModels)
       : clampSelectedModels(nextModels).slice(0, maxSelectableModels);
-	setSelectedModels(nextModels);
-    setDisabledPanels(nextDisabled);
-    if (currentChatId) {
-      syncModelSettingsToServer(currentChatId, nextModels, nextDisabled);
-    }
+    mutateModelSettings(currentChatId, nextModels, nextDisabled);
     return true;
   };
 
@@ -3126,11 +3201,7 @@ export function ChatPageClient({
       ? clampGuestSelectedModels(nextModels)
       : clampSelectedModels(nextModels).slice(0, maxSelectableModels);
     const nextDisabled = disabledPanels.filter((id) => id !== removeModelId);
-    setSelectedModels(nextModels);
-    setDisabledPanels(nextDisabled);
-    if (currentChatId) {
-      syncModelSettingsToServer(currentChatId, nextModels, nextDisabled);
-    }
+    mutateModelSettings(currentChatId, nextModels, nextDisabled);
     return true;
   };
 
@@ -3227,12 +3298,10 @@ export function ChatPageClient({
   const executeRemoveModel = async (modelId: string) => {
     const nextModels = selectedModels.filter((id) => id !== modelId);
     const nextDisabled = disabledPanels.filter((id) => id !== modelId);
-    
-    setSelectedModels(nextModels);
-    setDisabledPanels(nextDisabled);
-    
+
+    mutateModelSettings(currentChatId, nextModels, nextDisabled);
+
     if (currentChatId) {
-      syncModelSettingsToServer(currentChatId, nextModels, nextDisabled);
       const historyTargetId = accountConversationId(currentChatId);
       if (!historyTargetId) return;
       try {
@@ -3247,16 +3316,14 @@ export function ChatPageClient({
   };
 
   const togglePanelDisable = (modelId: string) => {
-    setDisabledPanels((currentDisabled) => {
-      const nextDisabled = currentDisabled.includes(modelId)
-        ? currentDisabled.filter((id) => id !== modelId)
-        : [...currentDisabled, modelId];
-
-      if (currentChatId) {
-        syncModelSettingsToServer(currentChatId, selectedModels, nextDisabled);
-      }
-      return nextDisabled;
-    });
+    // Read from the synchronously maintained ref rather than the state
+    // closure so two toggles in one tick compose instead of the second
+    // overwriting the first.
+    const { models, disabled } = latestModelSettingsRef.current;
+    const nextDisabled = disabled.includes(modelId)
+      ? disabled.filter((id) => id !== modelId)
+      : [...disabled, modelId];
+    mutateModelSettings(currentChatId, models, nextDisabled);
   };
   
   const changePanelModel = (oldModelId: string, newModelId: string) => {
@@ -3281,10 +3348,8 @@ export function ChatPageClient({
       nextDisabled = [...nextDisabled.filter((id) => id !== oldModelId), newModelId];
     }
 
-    setSelectedModels(nextModels);
-    setDisabledPanels(nextDisabled);
-	if (currentChatId) syncModelSettingsToServer(currentChatId, nextModels, nextDisabled);
-  };  
+    mutateModelSettings(currentChatId, nextModels, nextDisabled);
+  };
   
     const blendedConversations = conversations; 
   
