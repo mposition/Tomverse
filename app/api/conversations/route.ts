@@ -1,6 +1,7 @@
 ﻿export const dynamic = "force-dynamic";
 
 import { NextResponse } from "next/server";
+import { enqueueImageAssetCleanupForConversations } from "@/lib/imageAssetLifecycle";
 import { prisma } from "@/lib/prisma";
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
@@ -251,11 +252,20 @@ export async function DELETE(req: Request) {
       return NextResponse.json({ success: true, deleted: 0 });
     }
 
-    const result = await prisma.conversation.deleteMany({
-      where: {
-        userId,
-        id: { in: conversations.map((conversation) => conversation.id) },
-      },
+    // Same DB-first tombstone order as the single-conversation delete: R2
+    // keys are enqueued before the rows disappear, never deleted ahead of
+    // the database.
+    const result = await prisma.$transaction(async (tx) => {
+      const conversationIds = conversations.map(
+        (conversation) => conversation.id
+      );
+      await enqueueImageAssetCleanupForConversations(tx, conversationIds);
+      return tx.conversation.deleteMany({
+        where: {
+          userId,
+          id: { in: conversationIds },
+        },
+      });
     });
 
     return NextResponse.json({ success: true, deleted: result.count });

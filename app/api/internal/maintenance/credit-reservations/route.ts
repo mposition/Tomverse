@@ -11,6 +11,7 @@ import {
 import { monitorInfrastructureThresholdsIfDue } from "@/lib/infrastructureThresholdMonitor";
 import { drainNotificationDeliveriesQuietly } from "@/lib/notificationDeliveryJob";
 import { reconcileProcessingRefundRequestsQuietly } from "@/lib/refundReconciliation";
+import { runImageAssetMaintenanceQuietly } from "@/lib/imageAssetLifecycle";
 
 const isAuthorized = (request: Request) => {
   const configured = process.env.MAINTENANCE_SECRET;
@@ -55,6 +56,12 @@ export async function POST(request: Request) {
     const requestLeases = await reconcileExpiredChatRequestLeases().catch(
       () => ({ removed: 0 })
     );
+    // Rides along like the queues above: drains the DB-first image asset
+    // deletion tombstones against R2 and audits the image invariants (an
+    // image conversation with no generation, a generation whose worker
+    // died). It never throws, so it cannot turn a successful reconciliation
+    // into a failed one.
+    const imageAssets = await runImageAssetMaintenanceQuietly();
     await completeScheduledJob({
       runId: run?.id,
       processedCount: result.examined,
@@ -64,6 +71,7 @@ export async function POST(request: Request) {
         notificationDeliveries,
         refundRequests,
         requestLeases,
+        imageAssets,
       },
     });
     return Response.json(
@@ -74,6 +82,7 @@ export async function POST(request: Request) {
         notificationDeliveries,
         refundRequests,
         requestLeases,
+        imageAssets,
       },
       { headers: { "Cache-Control": "no-store" } }
     );

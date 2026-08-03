@@ -57,25 +57,27 @@ model User {
   sessionsInvalidatedAt         DateTime?
   settings                      UserSettings?
 
-  accounts               Account[]
-  sessions               Session[]
-  projects               ConversationProject[]
-  refundRequests         RefundRequest[]
-  promotionRedemptions   BillingPromotionRedemption[]
-  billingTransactions    BillingTransaction[]
-  creditPurchases        CreditPurchase[]
-  creditLots             CreditLot[]
-  creditLedgerEntries    CreditLedgerEntry[]
-  creditDebtEntries      CreditDebtEntry[]
-  chatCreditReservations ChatCreditReservation[]
-  adminAuditLogs         AdminAuditLog[]
-  adminNotes             AdminNote[]
-  modelOverrides         ModelOverride[]
-  conversations          Conversation[]
-  comparisonReviews      ComparisonReview[]
-  productAnalyticsEvents ProductAnalyticsEvent[]
-  privacyRequests        PrivacyRequest[]
-  planChangeRequests     PlanChangeRequest[]
+  accounts                Account[]
+  sessions                Session[]
+  projects                ConversationProject[]
+  refundRequests          RefundRequest[]
+  promotionRedemptions    BillingPromotionRedemption[]
+  billingTransactions     BillingTransaction[]
+  creditPurchases         CreditPurchase[]
+  creditLots              CreditLot[]
+  creditLedgerEntries     CreditLedgerEntry[]
+  creditDebtEntries       CreditDebtEntry[]
+  chatCreditReservations  ChatCreditReservation[]
+  imageGenerations        ImageGeneration[]
+  imageCreditReservations ImageCreditReservation[]
+  adminAuditLogs          AdminAuditLog[]
+  adminNotes              AdminNote[]
+  modelOverrides          ModelOverride[]
+  conversations           Conversation[]
+  comparisonReviews       ComparisonReview[]
+  productAnalyticsEvents  ProductAnalyticsEvent[]
+  privacyRequests         PrivacyRequest[]
+  planChangeRequests      PlanChangeRequest[]
 
   @@index([plan, id])
   @@index([createdAt])
@@ -179,6 +181,16 @@ model Conversation {
   title     String
   projectId String?
 
+  // "chat" | "image". Server-decided: the conversation create endpoint's
+  // strict schema never accepts it, and an "image" row is only ever created
+  // inside the image generation reservation transaction, so an image
+  // conversation cannot exist without at least one ImageGeneration (audited
+  // by lib/imageAssetLifecycle.ts). See docs/policy/image-generation.md.
+  kind String @default("chat")
+
+  // For kind = "image" this is stored as "[]" and never read: the image
+  // model comes from the image generation server layer's fixed allowlist,
+  // not from conversation state.
   selectedModels String @default("[\"gpt-5-6-luna\"]")
   disabledPanels String @default("[]")
   webSearchMode  String @default("off") // off | auto | always
@@ -192,6 +204,7 @@ model Conversation {
 
   messages          Message[]
   comparisonReviews ComparisonReview[]
+  imageGenerations  ImageGeneration[]
   user              User?                @relation(fields: [userId], references: [id], onDelete: Cascade)
   project           ConversationProject? @relation(fields: [projectId], references: [id], onDelete: SetNull)
   createdAt         DateTime             @default(now())
@@ -199,8 +212,9 @@ model Conversation {
   password          String?
   importedGuestKey  String?
 
-  @@index([userId, projectId])
   @@unique([userId, importedGuestKey])
+  @@index([userId, projectId])
+  @@index([userId, kind])
 }
 
 model ConversationProject {
@@ -323,18 +337,18 @@ model ProviderErrorEvent {
 // of truth for "when did we last actually hear from this provider" -- it's
 // what the public status page's freshness check is computed from.
 model ProviderHealthState {
-  provider            String    @id
-  lastSuccessAt       DateTime?
-  lastFailureAt       DateTime?
-  consecutiveFailures Int       @default(0)
+  provider                  String    @id
+  lastSuccessAt             DateTime?
+  lastFailureAt             DateTime?
+  consecutiveFailures       Int       @default(0)
   // AUD-R001: synthetic-probe evidence, kept in separate fields from the
   // real-user-traffic ones above so the two evidence streams never
   // overwrite each other -- recordProviderProbeSuccess/Failure only ever
   // touch these three, recordProviderSuccess/Failure only ever touch the
   // three above. lib/providerPublicStatusCore.ts merges both explicitly.
-  lastProbeSuccessAt       DateTime?
-  lastProbeFailureAt       DateTime?
-  consecutiveProbeFailures Int       @default(0)
+  lastProbeSuccessAt        DateTime?
+  lastProbeFailureAt        DateTime?
+  consecutiveProbeFailures  Int       @default(0)
   // STG-R002: administrator-triggered live verification evidence. A third
   // stream again, for the same reason: an operator proving the API answers is
   // not the same claim as "real user traffic is being served", so it must
@@ -349,7 +363,7 @@ model ProviderHealthState {
   // that proved it was safe to lift".
   lastRecoveryAt            DateTime?
   lastRecoveryCheckId       String?
-  updatedAt           DateTime  @updatedAt
+  updatedAt                 DateTime  @updatedAt
 
   @@index([lastSuccessAt])
   @@index([lastProbeSuccessAt])
@@ -364,24 +378,24 @@ model ProviderHealthState {
 // those values in the first place (see lib/providerProbe.ts), and checked
 // by a static-scan unit test.
 model ProviderProbeResult {
-  id                 String   @id @default(cuid())
+  id                  String   @id @default(cuid())
   /// The owning ScheduledJobRun.id for this probe cycle.
-  runId              String
-  provider           String
-  modelId            String
-  environment        String
-  startedAt          DateTime
-  completedAt        DateTime
-  success            Boolean
-  timedOut           Boolean  @default(false)
-  latencyMs          Int?
+  runId               String
+  provider            String
+  modelId             String
+  environment         String
+  startedAt           DateTime
+  completedAt         DateTime
+  success             Boolean
+  timedOut            Boolean  @default(false)
+  latencyMs           Int?
   /// Public-safe classification only, e.g. "TIMEOUT" | "AUTH" | "RATE_LIMIT" |
   /// "SERVER_ERROR" | "NETWORK" | "UNKNOWN" -- never a raw provider message.
   errorClassification String?
   /// Sanitized diagnostic code in the same shape providerDiagnosticCode()
   /// produces (e.g. "PROVIDER_PROBE_FAILED.ECONNRESET.HTTP_503.RETRYABLE").
-  diagnosticCode     String?
-  createdAt          DateTime @default(now())
+  diagnosticCode      String?
+  createdAt           DateTime @default(now())
 
   @@index([provider, createdAt])
   @@index([provider, modelId, createdAt])
@@ -705,6 +719,156 @@ model ChatCreditReservation {
   @@index([traceId])
   @@index([providerRequestId])
   @@index([providerResponseId])
+}
+
+// One image generation request in the image work mode: the operational
+// record (prompt, pinned provider parameters, lifecycle status). Financial
+// numbers live in ImageCreditReservation, which deliberately does NOT
+// cascade with this row or its conversation -- deleting a chat must not
+// delete the audit trail of what was charged.
+// Policy: docs/policy/image-generation.md.
+model ImageGeneration {
+  id             String @id @default(cuid())
+  userId         String
+  conversationId String
+  idempotencyKey String
+  prompt         String
+  preset         String // draft | standard | final
+  provider       String @default("openai")
+  modelId        String @default("gpt-image-2")
+  size           String // 1024x1024 | 1536x1024 | 1024x1536
+  quality        String // low | medium | high
+  backgroundMode String @default("opaque")
+  outputFormat   String @default("png")
+  moderationMode String @default("auto")
+
+  // pending -> processing -> settling -> succeeded | failed. `settling` is
+  // the exactly-once claim: the worker or the reconciliation sweep moves a
+  // row here with a conditional update before touching the credit ledger,
+  // so the two can never settle or refund the same generation twice.
+  // Transitions are defined in lib/imageGenerationStateCore.ts.
+  status              String  @default("pending")
+  failurePhase        String? // provider_moderation_rejected | provider_user_error | provider_rate_limited | provider_failed | original_storage_failed | stale_job_reconciled
+  publicErrorCode     String?
+  internalErrorDetail String?
+  providerRequestId   String?
+  leaseId             String?
+
+  createdAt   DateTime  @default(now())
+  startedAt   DateTime?
+  completedAt DateTime?
+  failedAt    DateTime?
+  updatedAt   DateTime  @updatedAt
+
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  assets       ImageAsset[]
+
+  @@unique([userId, idempotencyKey])
+  @@index([status, updatedAt])
+  @@index([conversationId, createdAt])
+}
+
+// A stored object derived from one generation: the untouched provider
+// original (provenance metadata preserved -- never re-encoded) and the
+// thumbnail derived from it. Thumbnail failure never demotes the original:
+// the generation stays succeeded and the thumbnail retries in the
+// background.
+model ImageAsset {
+  id                  String  @id @default(cuid())
+  generationId        String
+  role                String // original | thumbnail
+  // ready | pending | failed. Originals are written as ready; thumbnails
+  // start pending and repair in the background.
+  status              String  @default("pending")
+  r2Key               String  @unique
+  mimeType            String
+  width               Int
+  height              Int
+  byteSize            Int
+  sha256              String
+  provenancePreserved Boolean @default(true)
+  thumbnailRetryCount Int     @default(0)
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  generation ImageGeneration @relation(fields: [generationId], references: [id], onDelete: Cascade)
+
+  @@unique([generationId, role])
+  @@index([status, updatedAt])
+}
+
+// DB-first deletion tombstone for R2 objects. Deleting a conversation
+// enqueues every attached asset key here in the SAME transaction that
+// removes the rows, then the fifteen-minute maintenance sweep deletes the
+// R2 objects idempotently and marks the row completed. R2 is never deleted
+// before the database knows about it, so a partial failure retries from
+// this row instead of leaving the database pointing at missing objects.
+model ImageAssetCleanup {
+  id          String    @id @default(cuid())
+  r2Key       String    @unique
+  reason      String // conversation_deleted | account_deleted | storage_rollback
+  attempts    Int       @default(0)
+  lastError   String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  completedAt DateTime?
+
+  @@index([completedAt, createdAt])
+}
+
+// The financial record of one image generation, split from ImageGeneration
+// on purpose (mirroring ChatCreditReservation): no conversation or
+// generation foreign key, so user-initiated deletion never erases the
+// pricing snapshot, the lot-level reservation payload needed for crash
+// recovery (settleAddOnCredits requires per-lot entries), or the provider
+// request id an audit needs. `generationId` is a plain unique string.
+// Status: reserved -> settling -> settled, claimed with a conditional
+// update for exactly-once settlement.
+model ImageCreditReservation {
+  id             String  @id // caller-supplied: image-credit-reservation:{generationId}:v1
+  userId         String?
+  generationId   String  @unique
+  conversationId String?
+
+  status  String  @default("reserved") // reserved | settling | settled
+  outcome String? // completed | failed | cancelled
+
+  preset  String
+  quality String
+  size    String
+
+  reservedCredits            Int
+  planReservedCredits        Int
+  addOnReservedCredits       Int
+  reservedCostMicroUsd       BigInt
+  reservedFundedCostMicroUsd BigInt @default(0)
+  settledCredits             Int    @default(0)
+  settledCostMicroUsd        BigInt @default(0)
+  settledFundedCostMicroUsd  BigInt @default(0)
+
+  pricingVersion     String
+  costSource         String
+  pricingSnapshot    Json
+  // AddOnCreditReservationEntry[] -- the per-lot credits and funded cost
+  // reserved by reserveAddOnCredits, preserved so a reconciliation sweep
+  // after a crash can refund lot by lot without the in-memory entries.
+  reservationPayload Json
+
+  providerRequestId String?
+  refundedAt        DateTime?
+  settledAt         DateTime?
+  reconciledAt      DateTime?
+  lastError         String?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([status, createdAt])
+  @@index([userId, createdAt])
 }
 
 // Tracks a single Perplexity "sonar-deep-research" async job durably, since
@@ -1114,29 +1278,29 @@ model AdminProviderIncident {
 // provider response body, no prompt content -- only a sanitized diagnostic
 // code and a redacted message.
 model ProviderHealthCheck {
-  id             String   @id @default(cuid())
-  provider       String
-  modelId        String?
-  kind           String   @default("configuration")
-  status         String
-  latencyMs      Int?
-  errorCode      String?
+  id                          String    @id @default(cuid())
+  provider                    String
+  modelId                     String?
+  kind                        String    @default("configuration")
+  status                      String
+  latencyMs                   Int?
+  errorCode                   String?
   /// Sanitized code in the shape providerDiagnosticCode() produces, e.g.
   /// "PROVIDER_VERIFICATION_FAILED.HTTP_400".
-  diagnosticCode String?
-  message        String?
-  traceId        String?
+  diagnosticCode              String?
+  message                     String?
+  traceId                     String?
   /// Set once, when this check has been consumed to clear a provider's
   /// blocking consecutiveFailures counter. Guards double-submits: a check can
   /// authorise exactly one recovery.
-  recoveryApplied Boolean @default(false)
-  recoveryAppliedAt DateTime?
+  recoveryApplied             Boolean   @default(false)
+  recoveryAppliedAt           DateTime?
   /// consecutiveFailures immediately before the recovery this check
   /// authorised, so the audit record states what was actually cleared.
   previousConsecutiveFailures Int?
-  createdById    String?
-  createdByEmail String?
-  createdAt      DateTime @default(now())
+  createdById                 String?
+  createdByEmail              String?
+  createdAt                   DateTime  @default(now())
 
   @@index([provider, createdAt])
   @@index([status, createdAt])
@@ -1238,7 +1402,7 @@ model PlanChangeRequest {
   quotedAmountMinor Int?
 
   /// "previewed" | "pending" | "applied" | "cancelled" | "expired" | "failed"
-  status           String    @default("previewed")
+  status String @default("previewed")
 
   /// Carries `userId` exactly while `status = "pending"`, and null otherwise.
   ///
