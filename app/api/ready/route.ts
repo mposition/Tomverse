@@ -6,6 +6,7 @@ import { after } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSecurityEnvironmentStatus } from "@/lib/securityEnvironment";
 import { reportOperationalDependencyStatus } from "@/lib/operationalMonitoring";
+import { getImageProviderBudgetReadiness } from "@/lib/imageProviderBudgetReadiness";
 import { AVAILABLE_MODELS } from "@/lib/models";
 import {
   getActiveProviders,
@@ -60,8 +61,16 @@ const readinessResponse = async (head = false) => {
     getActiveProviders(AVAILABLE_MODELS)
   );
   const providerBudgets = budgetStatus.ready;
+  // The image budget gates readiness only while the image generation flag is
+  // ON: "flag off, budget absent" is the legal intermediate state of the
+  // env-first deploy order (docs/policy/image-generation.md section 8).
+  const imageBudgetStatus = await getImageProviderBudgetReadiness().catch(
+    () => null
+  );
+  const imageProviderBudget = imageBudgetStatus?.ready ?? true;
   const database = databaseResult.ready;
-  const ready = database && securityEnvironment && providerBudgets;
+  const ready =
+    database && securityEnvironment && providerBudgets && imageProviderBudget;
   const headers = ready
     ? { ...baseHeaders, "X-Tomverse-Trace-Id": traceId }
     : {
@@ -112,6 +121,25 @@ const readinessResponse = async (head = false) => {
         },
       }),
       reportOperationalDependencyStatus({
+        dependency: "image-provider-cost-budget",
+        healthy: imageProviderBudget,
+        code: "IMAGE_PROVIDER_COST_BUDGET_NOT_READY",
+        title: "Image provider spend budget is not configured correctly",
+        error: imageProviderBudget
+          ? "Image provider budget is configured (or the feature flag is off)."
+          : (imageBudgetStatus?.resolved.problems ?? [])
+              .map((problem) => problem.message)
+              .join(" | ") ||
+            "Image generation is enabled but its provider budget is unusable.",
+        severity: "fatal",
+        context: {
+          component: "api-ready",
+          route: "/api/ready",
+          imageGenerationFlagEnabled: imageBudgetStatus?.flagEnabled ?? false,
+          traceId,
+        },
+      }),
+      reportOperationalDependencyStatus({
         dependency: "security-environment",
         healthy: securityEnvironment,
         code: "SECURITY_ENVIRONMENT_NOT_READY",
@@ -145,6 +173,7 @@ const readinessResponse = async (head = false) => {
         database,
         securityEnvironment,
         providerBudgets,
+        imageProviderBudget,
       },
       traceId,
     },

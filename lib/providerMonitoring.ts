@@ -128,7 +128,7 @@ export type ProviderHealthRow = {
   creditAlertLevel: ProviderCreditAlertLevel;
   billingProfile: ProviderBillingProfile;
   projectedMonthEndMicroUsd: number;
-  internalBudgetSource: "railway_environment" | "code_default";
+  internalBudgetSource: ProviderBudgetConfigSource;
   providerBillingHeadroomMicroUsd: number | null;
   internalBudgetHeadroomMicroUsd: number;
   expectedEffectiveCeilingMicroUsd: number;
@@ -269,7 +269,14 @@ const publicStatusFreshnessMinutesFor = (provider: AiProvider) =>
     )
   );
 
-const providerMonthlyBudgetConfig = (provider: AiProvider) => {
+export type ProviderBudgetConfigSource =
+  | "railway_environment"
+  | "code_default"
+  | "unconfigured";
+
+const providerMonthlyBudgetConfig = (
+  provider: AiProvider
+): { amountMicroUsd: number; source: ProviderBudgetConfigSource } => {
   const raw = process.env[
     `CHAT_PROVIDER_${envProvider(provider)}_COST_MICROUSD_PER_MONTH`
   ];
@@ -277,22 +284,29 @@ const providerMonthlyBudgetConfig = (provider: AiProvider) => {
   const hasValidEnvironmentValue =
     Number.isSafeInteger(parsed) && parsed > 0;
 
-  return {
-    amountMicroUsd: hasValidEnvironmentValue ? parsed : 100_000_000,
-    source: hasValidEnvironmentValue
-      ? "railway_environment" as const
-      : "code_default" as const,
-  };
+  if (hasValidEnvironmentValue) {
+    return { amountMicroUsd: parsed, source: "railway_environment" };
+  }
+  // The enforcement layer (lib/providerCostBudget.ts) treats a missing
+  // production budget as a readiness failure; monitoring must not paper over
+  // the same state with an invented number that makes the dashboard look
+  // funded. In production the state is reported as unconfigured (and
+  // notifyProviderBudgetIfNeeded alerts on it); the code default remains a
+  // development convenience only.
+  if (process.env.NODE_ENV === "production") {
+    return { amountMicroUsd: 0, source: "unconfigured" };
+  }
+  return { amountMicroUsd: 100_000_000, source: "code_default" };
 };
 
-const providerMonthlyBudgetMicroUsd = (provider: AiProvider) =>
-  providerMonthlyBudgetConfig(provider).amountMicroUsd;
-
-const providerDailyBudgetMicroUsd = (provider: AiProvider) =>
-  positiveInteger(
+const providerDailyBudgetMicroUsd = (provider: AiProvider) => {
+  const configured = positiveInteger(
     process.env[`CHAT_PROVIDER_${envProvider(provider)}_COST_MICROUSD_PER_DAY`],
-    10_000_000
+    0
   );
+  if (configured > 0) return configured;
+  return process.env.NODE_ENV === "production" ? 0 : 10_000_000;
+};
 
 const parseThresholds = (value: string | null | undefined) => {
   if (!value) return [50, 80, 95];
@@ -719,7 +733,24 @@ export const notifyProviderBudgetIfNeeded = async (provider: AiProvider) => {
     },
     select: { count: true },
   });
-  const budget = providerMonthlyBudgetMicroUsd(provider);
+  const budgetConfig = providerMonthlyBudgetConfig(provider);
+  // An unconfigured production budget is itself the alert: silently skipping
+  // the percentage thresholds here is exactly the contradiction with the
+  // fail-closed enforcement layer this branch removes.
+  if (budgetConfig.source === "unconfigured") {
+    const reserved = await reserveDailyAlert(
+      `provider-alert:${provider}:budget:unconfigured`
+    );
+    if (reserved) {
+      await sendProviderAlert(
+        provider,
+        "Provider budget unconfigured",
+        "No spend budget is configured for this provider in production; enforcement is failing closed."
+      );
+    }
+    return;
+  }
+  const budget = budgetConfig.amountMicroUsd;
   const used = usageBucketCount(usage?.count);
   const percent = budget > 0 ? (used / budget) * 100 : 0;
   const policy = await alertPolicyFor(provider);
