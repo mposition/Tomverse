@@ -817,8 +817,6 @@ export const fr = {
         parseFailed: "Le fichier n'a pas pu être lu comme un export pris en charge.",
         previewTitle: "Choisir les conversations à importer",
         previewProvider: "Export détecté : {provider}",
-        previewSummary:
-            "{selected} conversations sélectionnées sur {total} · environ {size}",
         warningsTitle: "Non inclus",
         warningSkippedMessages: "{count} messages système ou outils ignorés",
         warningSkippedParts:
@@ -831,24 +829,18 @@ export const fr = {
         truncationTitle: "Certains messages longs seront raccourcis",
         truncationExplain:
             "{conversations} conversations contiennent des messages dépassant la limite de stockage de {limit} caractères. Si vous approuvez, le début et la fin de chaque message long sont conservés et le milieu est remplacé par un marqueur.",
-        truncationApprove: "Importer ces conversations avec des messages raccourcis",
         truncatedBadge: "Sera raccourci",
         quotaExceededWarning:
             "La sélection dépasse votre espace de stockage d'import restant. Désélectionnez des conversations pour continuer.",
         messagesCount: "{count} messages",
-        startImport: "Téléverser la sélection",
-        uploading: "Envoi du lot {sent} sur {total}…",
         uploadFailed:
             "Le téléversement a échoué. Vous pouvez réessayer — les lots déjà reçus ne sont pas renvoyés.",
         retryUpload: "Réessayer le téléversement",
-        stagedTitle: "Vérifier et confirmer",
         stagedSummary:
             "{staged} conversations prêtes à importer · {duplicates} doublons ignorés",
         stagedTruncated: "{count} messages seront stockés raccourcis",
         allDuplicates:
             "Tout le contenu de cette sélection est déjà dans votre compte.",
-        finalize: "Confirmer l'import",
-        finalizing: "Confirmation…",
         finalizeFailedQuota:
             "Votre compte n'a plus assez d'espace de stockage d'import pour cette sélection.",
         stagingExpired:
@@ -884,6 +876,104 @@ export const fr = {
             "Ce message a été raccourci pour respecter la limite de stockage. Le texte intégral ne subsiste que chez le service d'origine.",
         viewerMessagesShown: "{shown} messages affichés sur {total}",
         deleteSnapshot: "Supprimer cette version",
+        // Étape de préparation de l'export (étape 1 de l'assistant)
+        guideTitle: "Préparez d'abord votre fichier d'export",
+        guideDescription:
+            "Choisissez le service depuis lequel vous importez : nous vous indiquerons comment obtenir son fichier d'export. Ce choix sert uniquement de guide — le format réel est détecté à partir du fichier lui-même.",
+        guideEntryNeedsExport: "Je n'ai pas encore de fichier d'export",
+        guideEntryHasFile: "J'ai déjà le fichier",
+        guideChatgptTitle: "Obtenir un export ChatGPT",
+        guideChatgptStep1:
+            "Dans ChatGPT, ouvrez Paramètres → Contrôles des données.",
+        guideChatgptStep2: "Demandez un export de vos données.",
+        guideChatgptStep3:
+            "Téléchargez le ZIP depuis le lien reçu par e-mail. Inutile de le décompresser.",
+        guideClaudeTitle: "Obtenir un export Claude",
+        guideClaudeStep1:
+            "Dans Claude, ouvrez Paramètres → Confidentialité.",
+        guideClaudeStep2: "Demandez un export de vos données.",
+        guideClaudeStep3:
+            "Téléchargez le fichier depuis le lien reçu par e-mail. Le ZIP comme le JSON fonctionnent tels quels.",
+        guideFormats: "Les fichiers ZIP et JSON sont pris en charge.",
+        guideStaysLocal:
+            "Le fichier d'export ne quitte jamais votre appareil : il est ouvert dans votre navigateur.",
+        guideMediaExcluded:
+            "Les images, l'audio et les pièces jointes ne sont pas importés.",
+        guidePrivacyDisclosure: "Voir comment ces données sont traitées",
+        guideContinue: "Choisir le fichier d'export",
+        providerMismatchNotice:
+            "Il s'agit d'un export {detected} : nous continuons donc avec {detected}.",
+        // État « ordinateur recommandé »
+        desktopRecommendedTitle:
+            "Cet appareil ne peut pas ouvrir le fichier en toute sécurité",
+        desktopRecommendedNoUpload: "Le fichier d'export n'a pas été envoyé.",
+        desktopRecommendedNoData:
+            "Rien n'a encore été enregistré dans Tomverse.",
+        desktopRecommendedRetry:
+            "Veuillez réessayer depuis un ordinateur de bureau.",
+        // Indicateur d'étapes
+        stepIndicatorLabel: "Progression de l'import",
+        stepPrepareExport: "Préparer l'export",
+        stepInspectFile: "Vérifier le fichier",
+        stepSelectConversations: "Choisir les conversations",
+        stepConfirmImport: "Confirmer l'import",
+        stepDone: "Terminé",
+        stepPosition: "Étape {current} sur {total}, {name}",
+        back: "Retour",
+        // Étape de sélection des conversations
+        searchPlaceholder: "Rechercher un titre de conversation",
+        filterFrom: "Date de début",
+        filterTo: "Date de fin",
+        filterClear: "Effacer les filtres",
+        selectAllNormal: "Sélectionner toutes les conversations normales",
+        clearAllNormal: "Tout désélectionner",
+        selectionHiddenNotice:
+            "{hidden} des {selected} sélectionnées ne sont pas affichées par le filtre actuel.",
+        selectionSummary:
+            "{selected} conversations sélectionnées · environ {size}",
+        remainingSpace: "Environ {remaining} d'espace restant",
+        rowTruncationConsent: "Inclure, en version raccourcie",
+        rowTruncationImpact:
+            "{count} messages seront enregistrés avec seulement leur début et leur fin.",
+        rowBlockedReason:
+            "{count} messages dépassent la limite d'import : toute la conversation est donc exclue, pas seulement ces messages.",
+        rowPosition: "Conversation {index} sur {total}",
+        continueToReview: "Vérifier la sélection",
+        preparingReviewTitle: "Préparation de votre import",
+        preparingReviewProgress: "{sent} sur {total} préparés",
+        preparingReviewNotSaved:
+            "Rien n'est encore enregistré dans votre compte : cela se produit après la confirmation finale.",
+        // Étape de confirmation
+        reviewTitle: "Vérifiez ce qui sera importé",
+        reviewFinalizeCta: "Importer {count} conversations",
+        reviewBackToSelection: "Revenir au choix des conversations",
+        reviewExpiresAt: "Cette confirmation reste valable jusqu'à {time}.",
+        finalizingTitle: "Enregistrement dans votre compte",
+        finalizingNotice:
+            "Merci de garder cet écran ouvert jusqu'à la fin de l'enregistrement.",
+        // Récupération après manque d'espace
+        quotaRevisionTitle: "Espace d'import insuffisant",
+        quotaRevisionExplain:
+            "Réessayer la même sélection échouera de la même façon tant que votre total enregistré ne change pas. Choisissez moins de conversations.",
+        quotaRevisionRestartNotice:
+            "Une partie de la sélection a déjà été envoyée : un nouvel import va donc démarrer. Vos choix et vos accords sont conservés.",
+        quotaRevisionAdjust: "Ajuster la sélection",
+        uploadRetryTransient:
+            "La préparation s'est arrêtée à cause d'un problème de connexion. Elle reprend là où elle s'est arrêtée, et ce qui est déjà reçu n'est pas renvoyé.",
+        expiredTitle: "Cet import a expiré",
+        diagnosticsToggle: "Détails techniques",
+        // Écran de gestion
+        newImportCta: "Démarrer un nouvel import",
+        inProgressTitle: "Imports en cours",
+        inProgressResume: "Terminer cet import",
+        inProgressRestart: "Recommencer",
+        inProgressNotResumable:
+            "Cet import ne peut pas être poursuivi. Recommencez-le ou supprimez-le.",
+        noServerDataYet: "Rien n'a été enregistré dans Tomverse.",
+        statusPreviewReady: "En attente de confirmation",
+        statusExpired: "Expiré",
+        expiredCardNotice: "Expiré : il faut recommencer.",
+        abandonImport: "Quitter cet import",
     },
     privacyPolicy: {
         title: "Politique de confidentialité",
