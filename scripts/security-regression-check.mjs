@@ -2394,6 +2394,17 @@ const checks = [
       source.includes("actions/checkout@v6") &&
       source.includes("actions/setup-node@v6"),
   },
+  {
+    // One branch must never grow two PRs. The automation namespaces open
+    // their own PRs (cron-auto-fix -> main, feedback-autofix -> develop), so
+    // the generic auto-PR workflow has to stay out of them -- a PAT push
+    // does trigger workflows, which is exactly how the duplicate happened.
+    name: "Auto PR to Develop excludes the automation branch namespaces",
+    file: ".github/workflows/auto-pr-to-develop.yml",
+    test: (source) =>
+      source.includes("- autofix/**") &&
+      source.includes("- feedback-autofix/**"),
+  },
 ];
 
 const failures = [];
