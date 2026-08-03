@@ -26,6 +26,20 @@ export const AUTOFIX_CASE_STATE = {
   ineligible: "ineligible",
   awaitingHumanReview: "awaiting_human_review",
   closed: "closed",
+  // --- Phase 3 (docs/policy §9; dark until FEEDBACK_AUTOFIX_ENABLED) ------
+  /** A fix workflow run holds the case under a lease. */
+  fixAttempting: "fix_attempting",
+  /** The deterministic Red→Green proof was validated server-side. */
+  redGreenProven: "red_green_proven",
+  /** A develop PR exists; a human must approve it (never auto-merge in the
+   * initial operating period). */
+  prOpen: "pr_open",
+  /** GitHub's mergedAt/mergeSha were read back -- never inferred. */
+  merged: "merged",
+  /** The merge commit was confirmed on staging with readiness green. */
+  stagingVerified: "staging_verified",
+  /** The attempt could not produce a proof or a PR; a human decides next. */
+  fixFailed: "fix_failed",
 } as const;
 export type AutoFixCaseState =
   (typeof AUTOFIX_CASE_STATE)[keyof typeof AUTOFIX_CASE_STATE];
@@ -57,8 +71,26 @@ const TRANSITIONS: Record<AutoFixCaseState, readonly AutoFixCaseState[]> = {
     AUTOFIX_CASE_STATE.collectingEvidence,
   ],
   diagnostic_ready: [AUTOFIX_CASE_STATE.awaitingHumanReview],
-  awaiting_human_review: [AUTOFIX_CASE_STATE.closed],
+  awaiting_human_review: [
+    AUTOFIX_CASE_STATE.closed,
+    // Phase 3 entry: a candidate may be claimed by the fix workflow. The
+    // claim endpoint additionally requires FEEDBACK_AUTOFIX_ENABLED -- the
+    // graph edge alone never activates anything.
+    AUTOFIX_CASE_STATE.fixAttempting,
+  ],
   ineligible: [AUTOFIX_CASE_STATE.closed],
+  // --- Phase 3 -------------------------------------------------------------
+  fix_attempting: [
+    AUTOFIX_CASE_STATE.redGreenProven,
+    AUTOFIX_CASE_STATE.fixFailed,
+    // Lease recovery: an expired claim returns to the review pool.
+    AUTOFIX_CASE_STATE.awaitingHumanReview,
+  ],
+  red_green_proven: [AUTOFIX_CASE_STATE.prOpen, AUTOFIX_CASE_STATE.fixFailed],
+  pr_open: [AUTOFIX_CASE_STATE.merged, AUTOFIX_CASE_STATE.fixFailed],
+  merged: [AUTOFIX_CASE_STATE.stagingVerified, AUTOFIX_CASE_STATE.fixFailed],
+  staging_verified: [AUTOFIX_CASE_STATE.closed],
+  fix_failed: [AUTOFIX_CASE_STATE.closed, AUTOFIX_CASE_STATE.awaitingHumanReview],
   closed: [],
 };
 
@@ -196,3 +228,13 @@ export const AUTOFIX_LEASE_MS = 5 * 60 * 1000;
  * the literal string "true". Fail-closed by default. */
 export const isAutoFixShadowModeEnabled = () =>
   process.env.FEEDBACK_AUTOFIX_SHADOW_ENABLED === "true";
+
+/**
+ * Phase 3 master switch. Entirely separate from shadow mode and default OFF:
+ * turning it on is an operational decision gated by policy §9 (30 days of
+ * shadow observation, ≥30 verified traced reports, zero leaks, and explicit
+ * human approval) -- the code never checks those conditions itself, so the
+ * flag is the commitment that a human verified them.
+ */
+export const isAutoFixFixingEnabled = () =>
+  process.env.FEEDBACK_AUTOFIX_ENABLED === "true";

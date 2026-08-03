@@ -7,6 +7,7 @@ import {
   autoFixCollectBackoffMs,
   canTransitionAutoFixCase,
   classifyAutoFixCase,
+  isAutoFixFixingEnabled,
   isAutoFixShadowModeEnabled,
 } from "../lib/feedbackAutoFixCore";
 
@@ -200,6 +201,85 @@ test("shadow mode is fail-closed behind the env flag", () => {
       delete process.env.FEEDBACK_AUTOFIX_SHADOW_ENABLED;
     } else {
       process.env.FEEDBACK_AUTOFIX_SHADOW_ENABLED = previous;
+    }
+  }
+});
+
+// --- Phase 3 edges -----------------------------------------------------------
+
+test("the Phase 3 happy path is allowed, and only via the graph", () => {
+  const path = [
+    AUTOFIX_CASE_STATE.awaitingHumanReview,
+    AUTOFIX_CASE_STATE.fixAttempting,
+    AUTOFIX_CASE_STATE.redGreenProven,
+    AUTOFIX_CASE_STATE.prOpen,
+    AUTOFIX_CASE_STATE.merged,
+    AUTOFIX_CASE_STATE.stagingVerified,
+    AUTOFIX_CASE_STATE.closed,
+  ];
+  for (let i = 0; i < path.length - 1; i += 1) {
+    assert.ok(
+      canTransitionAutoFixCase(path[i], path[i + 1]),
+      `${path[i]} -> ${path[i + 1]}`
+    );
+  }
+  // No skipping: a proof cannot jump straight to merged, and an attempt
+  // cannot open a PR without a validated proof.
+  assert.ok(
+    !canTransitionAutoFixCase(
+      AUTOFIX_CASE_STATE.redGreenProven,
+      AUTOFIX_CASE_STATE.merged
+    )
+  );
+  assert.ok(
+    !canTransitionAutoFixCase(
+      AUTOFIX_CASE_STATE.fixAttempting,
+      AUTOFIX_CASE_STATE.prOpen
+    )
+  );
+  assert.ok(
+    !canTransitionAutoFixCase(
+      AUTOFIX_CASE_STATE.fixAttempting,
+      AUTOFIX_CASE_STATE.stagingVerified
+    )
+  );
+});
+
+test("a died fix runner returns to the review pool, never forward", () => {
+  assert.ok(
+    canTransitionAutoFixCase(
+      AUTOFIX_CASE_STATE.fixAttempting,
+      AUTOFIX_CASE_STATE.awaitingHumanReview
+    )
+  );
+  assert.ok(
+    !canTransitionAutoFixCase(
+      AUTOFIX_CASE_STATE.awaitingHumanReview,
+      AUTOFIX_CASE_STATE.redGreenProven
+    )
+  );
+});
+
+test("the Phase 3 master switch is fail-closed and separate from shadow mode", () => {
+  const previous = process.env.FEEDBACK_AUTOFIX_ENABLED;
+  const previousShadow = process.env.FEEDBACK_AUTOFIX_SHADOW_ENABLED;
+  try {
+    delete process.env.FEEDBACK_AUTOFIX_ENABLED;
+    process.env.FEEDBACK_AUTOFIX_SHADOW_ENABLED = "true";
+    assert.equal(
+      isAutoFixFixingEnabled(),
+      false,
+      "shadow mode alone never enables fixing"
+    );
+    process.env.FEEDBACK_AUTOFIX_ENABLED = "true";
+    assert.equal(isAutoFixFixingEnabled(), true);
+  } finally {
+    if (previous === undefined) delete process.env.FEEDBACK_AUTOFIX_ENABLED;
+    else process.env.FEEDBACK_AUTOFIX_ENABLED = previous;
+    if (previousShadow === undefined) {
+      delete process.env.FEEDBACK_AUTOFIX_SHADOW_ENABLED;
+    } else {
+      process.env.FEEDBACK_AUTOFIX_SHADOW_ENABLED = previousShadow;
     }
   }
 });

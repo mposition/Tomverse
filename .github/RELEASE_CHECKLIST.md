@@ -194,6 +194,20 @@ cannot see focus order, accessible names, announcements or contrast in forced
 colors. Accessibility evidence is tracked separately and is not satisfied by
 anything in section 2.
 
+### 6.1 Automated fix PRs (feedback auto-fix, Phase 3)
+
+Only applicable while `FEEDBACK_AUTOFIX_ENABLED` is set anywhere
+(docs/policy/trace-feedback-automation.md §9.1); otherwise mark N/A.
+
+- [ ] List every `feedback-autofix/**` PR included in this release
+- [ ] Each one carries a validated Red→Green proof on its case
+      (`FeedbackAutoFixCase.redGreenProof`) and a human approval —
+      an unreviewed auto-fix PR in a release is a blocker
+- [ ] Each merged case's staging verification (`staging_verified`) happened
+      against its read-back merge SHA
+- [ ] No auto-fix diff touches an excluded area
+      (lib/feedbackAutoFixPolicy.ts is the authority)
+
 ## 7. Database and deployment configuration
 
 Every box needs evidence captured against the release SHA — a command and its
