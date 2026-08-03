@@ -38,6 +38,7 @@
     "check:accent-tokens": "node scripts/check-accent-tokens.mjs",
     "verify:fixture-route-gate": "node scripts/verify-fixture-route-gate.mjs",
     "check:model-pricing": "node --import tsx scripts/check-model-pricing.mjs",
+    "check:image-pricing": "node --import tsx scripts/check-image-pricing.mjs",
     "check:usage-bucket-range": "node --import tsx scripts/check-usage-bucket-range.mjs",
     "security:regression": "node scripts/security-regression-check.mjs",
     "billing:reconcile-promotion": "node --import tsx scripts/reconcile-promotion.mjs",
