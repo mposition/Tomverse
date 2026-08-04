@@ -104,7 +104,6 @@ type MobileChatShellProps = {
   personalizedPrompt?: string | null;
   attachments: ChatAttachment[];
   setAttachments: AttachmentsChangeHandler;
-  isSending: boolean;
   focusToken: number;
   isGuestMode: boolean;
   /** What this caller may do with the AI cross-review. */
@@ -167,7 +166,6 @@ export function MobileChatShell({
   personalizedPrompt,
   attachments,
   setAttachments,
-  isSending,
   focusToken,
   isGuestMode,
   aiReviewAccess,
@@ -1140,7 +1138,7 @@ export function MobileChatShell({
             personalizedPrompt={personalizedPrompt}
             onSubmit={onSubmit}
             onCancel={() => setStopSignal((current) => current + 1)}
-            isSending={isSending || isAnyModelResponding}
+            isSending={isAnyModelResponding}
             focusToken={focusToken}
             isNewConversation={isActiveConversationEmpty}
             currentChatId={currentChatId}
