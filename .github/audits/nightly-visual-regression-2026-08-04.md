@@ -112,6 +112,7 @@ Deep Research가 먼저 드러난 이유는, **선택을 바꾼 직후 그 선�
 |---|---|
 | Record Visual Baseline, 재기록 전 canonical 판정 | 19 failed / 62 passed — **#3과 완전히 동일**, 즉 #4의 기능 실패 9건이 사라짐 |
 | Record Visual Baseline, 재기록 후 clean run (`--retries=0`) | **81 passed / 0 failed** |
+| Nightly Visual Regression 재실행 ([run 30865246182](https://github.com/mposition/Tomverse/actions/runs/30865246182), 수정 브랜치, `npm run test:e2e:visual -- --retries=0`) | **success** — 아티팩트 268 KB로 diff PNG·video·trace 없음 (실패 0건) |
 | PR #336 전체 체크 | 10/10 green (High-risk UI regression desktop·mobile, 빌드·smoke, lint·unit, Admin Console E2E 포함) |
 | `npm run test:unit` | 1583 passed |
 | `npm run security:regression` | 125 checks passed |
