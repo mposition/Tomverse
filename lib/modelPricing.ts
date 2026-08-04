@@ -168,13 +168,21 @@ export const getNativeSearchCostMicroUsdPerQuery = (provider: string) =>
 const flatTier = (
     inputUsdPerMillionTokens: number,
     outputUsdPerMillionTokens: number,
-    cachedInputPriceMultiplier = 1
+    cachedInputPriceMultiplier = 1,
+    cacheWriteUsdPerMillionTokens?: number
 ): readonly ModelPriceTier[] => [
     {
         maxPromptTokens: null,
         inputUsdPerMillionTokens,
         outputUsdPerMillionTokens,
         cachedInputPriceMultiplier,
+        // Omitted rather than guessed for a model whose cache-write rate has
+        // not been read off the provider's own price list: the value is audit
+        // data, so an absent one costs nothing and an invented one is a
+        // fabricated record.
+        ...(cacheWriteUsdPerMillionTokens === undefined
+            ? {}
+            : { cacheWriteUsdPerMillionTokens }),
     },
 ];
 
@@ -289,6 +297,12 @@ const DIRECT_STANDARD = {
  * a tier whose price is not the Standard price these profiles record. Flex and
  * Batch are cheaper, Priority/Fast is dearer, and a regional-processing
  * endpoint adds a surcharge on top of any of them.
+ *
+ * Anthropic's `inference_geo` is guarded by the same list. It is not a
+ * processing tier, but it is the same kind of thing: on Claude 4.6 and later
+ * -- every Anthropic model routed to here -- `inference_geo: "us"` multiplies
+ * every pricing category by 1.1x, and the profiles record the global default.
+ * Verified 2026-08-04 against Anthropic's published pricing page.
  *
  * `npm run check:model-pricing` greps the tree -- **including files not yet
  * committed** -- and fails on any occurrence outside this list. The check is
@@ -581,7 +595,10 @@ export const MODEL_PRICING: readonly ModelPricingProfile[] = [
         provider: "anthropic",
         apiModelId: "claude-fable-5",
         ...DIRECT_STANDARD,
-        tiers: flatTier(10, 50, 0.1),
+        // 5-minute cache write, recorded for audit and not billed. The 1-hour
+        // write is twice it (US$20/MTok); only the shorter duration is stored,
+        // matching the field's meaning for every other profile.
+        tiers: flatTier(10, 50, 0.1, 12.5),
         reasoningTokenBilling: "billed_as_output",
         nativeSearchCostMicroUsdPerQuery: 10_000,
         maxOutputTokens: 128_000,
@@ -599,7 +616,8 @@ export const MODEL_PRICING: readonly ModelPricingProfile[] = [
         provider: "anthropic",
         apiModelId: "claude-opus-5",
         ...DIRECT_STANDARD,
-        tiers: flatTier(5, 25, 0.1),
+        // As above: 5-minute cache write; the 1-hour rate is US$10/MTok.
+        tiers: flatTier(5, 25, 0.1, 6.25),
         reasoningTokenBilling: "billed_as_output",
         nativeSearchCostMicroUsdPerQuery: 10_000,
         maxOutputTokens: 128_000,
