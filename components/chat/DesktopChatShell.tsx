@@ -71,6 +71,10 @@ type DesktopChatShellProps = {
   isModelSelectionReady: boolean;
   onNewChat: () => void;
   onNewImage?: (() => void) | null;
+  /** Set when image generation is visible to this viewer but not usable. */
+  imageLock?: "sign_in" | "upgrade" | null;
+  onLockedImageClick?: (lock: "sign_in" | "upgrade") => void;
+  onStartImageDraft?: (draftText: string, modelId?: string) => void;
   imageWorkspace?: React.ReactNode;
   onSelectConversation: (id: string) => void;
   onRename: (id: string, title: string) => void;
@@ -126,6 +130,9 @@ export function DesktopChatShell({
   isModelSelectionReady,
   onNewChat,
   onNewImage,
+  imageLock,
+  onLockedImageClick,
+  onStartImageDraft,
   imageWorkspace,
   onSelectConversation,
   onRename,
@@ -389,6 +396,8 @@ export function DesktopChatShell({
         currentChatId={currentChatId}
         onNewChat={onNewChat}
         onNewImage={onNewImage ?? null}
+        imageLock={imageLock ?? null}
+        onLockedImageClick={onLockedImageClick}
         onSelectConversation={onSelectConversation}
         onRename={onRename}
         onDelete={onDelete}
@@ -812,6 +821,9 @@ export function DesktopChatShell({
               onOpenDeepResearchSetup={onOpenDeepResearchSetup}
               isDeepResearchPending={isDeepResearchPending}
               onDismissDeepResearchChip={onDismissDeepResearchChip}
+              onStartImageDraft={onStartImageDraft}
+              imageGenerationLock={imageLock ?? null}
+              onLockedImageGenerationClick={onLockedImageClick}
               attachments={attachments}
               onAttachmentsChange={setAttachments}
               attachmentCapabilities={attachmentCapabilities}

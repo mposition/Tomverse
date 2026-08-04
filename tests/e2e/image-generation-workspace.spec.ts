@@ -238,10 +238,13 @@ const openNewImageEntry = async (page: Page) => {
   if (isMobileShell()) {
     await page.getByTestId("mobile-sidebar-open").click();
     await expect(page.getByTestId("mobile-sidebar-drawer")).toBeVisible();
-    await page.getByTestId("sidebar-new-image").click();
+  }
+  // The unified launcher: the primary click stays "new chat", so the image
+  // entry lives one caret away rather than in a second stacked button.
+  await page.getByTestId("sidebar-new-launcher-more").click();
+  await page.getByTestId("new-conversation-menu-image").click();
+  if (isMobileShell()) {
     await expect(page.getByTestId("mobile-sidebar-drawer")).not.toBeVisible();
-  } else {
-    await page.getByTestId("sidebar-new-image").click();
   }
 };
 
@@ -252,20 +255,30 @@ test("the entry point does not exist while the flag is off", async ({ page }) =>
     await page.getByTestId("mobile-sidebar-open").click();
     await expect(page.getByTestId("mobile-sidebar-drawer")).toBeVisible();
   }
-  await expect(page.getByTestId("sidebar-new-image")).toHaveCount(0);
-  await expect(page.getByTestId("sidebar-rail-new-image")).toHaveCount(0);
+  // Flag off: the launcher stays a plain new-chat button with no caret and
+  // no image entry anywhere.
+  await expect(page.getByTestId("sidebar-new-launcher-more")).toHaveCount(0);
+  await expect(page.getByTestId("new-conversation-menu-image")).toHaveCount(0);
 });
 
-test("a Free plan meets the upgrade gate instead of the composer", async ({ page }) => {
+test("a Free plan is routed to the upgrade, never into a composer it cannot submit", async ({
+  page,
+}) => {
   await enableImageGenerationFlag(page);
   await mockAuthenticatedApi(page);
   await installImageGenerationApi(page);
   await page.goto("/chat");
 
-  await openNewImageEntry(page);
-  const gate = page.getByTestId("image-generation-plan-gate");
-  await expect(gate).toBeVisible();
-  await expect(gate.getByRole("link")).toHaveAttribute("href", "/pricing");
+  if (isMobileShell()) {
+    await page.getByTestId("mobile-sidebar-open").click();
+    await expect(page.getByTestId("mobile-sidebar-drawer")).toBeVisible();
+  }
+  await page.getByTestId("sidebar-new-launcher-more").click();
+  await page.getByTestId("new-conversation-menu-image").click();
+
+  // The requirement is stated before entry and the click goes to the plan
+  // page: a Free viewer never lands in a prompt box that would refuse them.
+  await page.waitForURL(/\/pricing/);
   await expect(page.getByTestId("image-generation-prompt")).toHaveCount(0);
 });
 
@@ -475,4 +488,110 @@ test("a failed model retries in place while the group keeps its shape", async ({
   });
   await expect(page.getByTestId("image-generation-entry")).toHaveCount(1);
   await expect(page.getByTestId("image-comparison-card")).toHaveCount(1);
+});
+
+test("a Free plan sees the image entry locked, not hidden", async ({ page }) => {
+  await enableImageGenerationFlag(page);
+  await mockAuthenticatedApi(page);
+  await installImageGenerationApi(page);
+  await page.goto("/chat");
+
+  if (isMobileShell()) {
+    await page.getByTestId("mobile-sidebar-open").click();
+    await expect(page.getByTestId("mobile-sidebar-drawer")).toBeVisible();
+  }
+  await page.getByTestId("sidebar-new-launcher-more").click();
+  const entry = page.getByTestId("new-conversation-menu-image");
+  // Visible and stating the requirement up front -- never hidden, never a
+  // dead end at the last step.
+  await expect(entry).toBeVisible();
+  await expect(entry).toHaveAttribute("data-locked", "true");
+});
+
+test("the catalogue's image tab is its own list and seeds the picked model", async ({
+  page,
+}) => {
+  await enableImageGenerationFlag(page);
+  await mockAuthenticatedApi(page);
+  await mockUserUsage(page, { plan: "Pro" });
+  await installImageGenerationApi(page);
+  await page.goto("/chat");
+
+  await page.getByTestId("composer-model-select").click();
+  await page.getByTestId("model-picker-tab-image").click();
+
+  const panel = page.getByTestId("image-model-tab-panel");
+  await expect(panel).toBeVisible();
+  // A separate catalogue, not a filter over the chat list: no chat model row
+  // and no chat-selection count survive the switch.
+  await expect(page.getByTestId("recommended-model-option")).toHaveCount(0);
+  await expect(page.getByTestId("model-picker-selection-count")).toHaveCount(0);
+
+  // Every registered model is listed, including one held by the price
+  // verification rule -- stated as a hold, never silently absent.
+  const held = panel.getByTestId("image-model-option").filter({
+    has: page.getByTestId("image-model-hold-note"),
+  });
+  await expect(held).toHaveCount(1);
+  await expect(held).toBeDisabled();
+
+  await panel
+    .getByTestId("image-model-option")
+    .filter({ hasNot: page.getByTestId("image-model-hold-note") })
+    .first()
+    .click();
+
+  // The workspace opens on the model that was picked.
+  await expect(page.getByTestId("image-generation-prompt")).toBeVisible();
+  await expect(page.getByTestId("image-model-gpt-image-2")).toHaveAttribute(
+    "aria-pressed",
+    "true"
+  );
+});
+
+test("a Free plan sees the image tab locked, not hidden", async ({ page }) => {
+  await enableImageGenerationFlag(page);
+  await mockAuthenticatedApi(page);
+  await installImageGenerationApi(page);
+  await page.goto("/chat");
+
+  await page.getByTestId("composer-model-select").click();
+  await page.getByTestId("model-picker-tab-image").click();
+
+  const selectable = page
+    .getByTestId("image-model-tab-panel")
+    .getByTestId("image-model-option")
+    .filter({ hasNot: page.getByTestId("image-model-hold-note") })
+    .first();
+  await expect(selectable).toBeVisible();
+  await expect(selectable).toHaveAttribute("data-locked", "true");
+
+  await selectable.click();
+  await page.waitForURL(/\/pricing/);
+  await expect(page.getByTestId("image-generation-prompt")).toHaveCount(0);
+});
+
+test("the composer entry carries the chat draft and restores it on cancel", async ({
+  page,
+}) => {
+  await enableImageGenerationFlag(page);
+  await mockAuthenticatedApi(page);
+  await mockUserUsage(page, { plan: "Pro" });
+  await installImageGenerationApi(page);
+  await page.goto("/chat");
+
+  await page.getByTestId("chat-textarea").fill("a lighthouse at dusk");
+  await page.getByTestId("composer-tools-button").click();
+  await page.getByTestId("tools-image-generation-row").click();
+
+  // The typed text becomes the image prompt rather than being lost.
+  await expect(page.getByTestId("image-generation-prompt")).toHaveValue(
+    "a lighthouse at dusk"
+  );
+
+  // Going back restores the chat draft exactly.
+  await page.getByTestId("image-generation-cancel-draft").click();
+  await expect(page.getByTestId("chat-textarea")).toHaveValue(
+    "a lighthouse at dusk"
+  );
 });
