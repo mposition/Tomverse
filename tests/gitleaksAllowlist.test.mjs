@@ -54,6 +54,12 @@ const NON_SECRETS = [
   '        apiModel: "claude-haiku-4-5-20251001",',
   '        apiModelId: "mistral-medium-3-5",',
   '  assert.equal(mistral.apiModel, "mistral-medium-3-5");',
+  // The two lib/modelPricing.ts profiles that actually tripped gitleaks on
+  // PR #356: `apiModelId` had no field rule, so these were scanned as bare
+  // high-entropy strings. Pinned by line so the gap cannot reopen the next
+  // time a profile is added.
+  '        apiModelId: "claude-haiku-4-5-20251001",',
+  '        apiModelId: "qwen3.7-plus",',
 ];
 
 // Credential-shaped canaries. None of these is a real secret, but each is
