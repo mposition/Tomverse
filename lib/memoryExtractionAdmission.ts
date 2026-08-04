@@ -17,6 +17,7 @@ import {
     getUserChatUsageKey,
     type ChatAccess,
 } from "@/lib/chatSecurity";
+import { getBillingPlanByTier } from "@/lib/billingConfig";
 import { lockCreditAccount } from "@/lib/creditDebt";
 import {
     MEMORY_EXTRACTION_LEASE_TTL_MS,
@@ -147,9 +148,14 @@ export async function reserveMemoryExtractionAttempt(input: {
     }
     const user = await prisma.user.findUnique({
         where: { id: owner.userId },
-        select: { id: true, plan: true, planLimits: true },
+        select: { id: true, plan: true },
     });
     if (!user) return { admitted: false, reason: "owner_missing" };
+    // Per-account plan limits are configuration, not a User column: the same
+    // lookup chat uses, so the two read one monthly allowance rather than two.
+    const planConfig = await getBillingPlanByTier(
+        user.plan === "Pro" || user.plan === "Max" ? user.plan : "Free"
+    ).catch(() => null);
 
     try {
         return await prisma.$transaction(async (tx) => {
@@ -244,8 +250,11 @@ export async function reserveMemoryExtractionAttempt(input: {
             const monthlyLimit = getMonthlyPlanCreditLimit({
                 kind: "user",
                 plan: userPlan,
-                planLimits:
-                    (user.planLimits as ChatAccess["planLimits"]) ?? undefined,
+                planLimits: planConfig
+                    ? ({
+                          monthlyMessageLimit: planConfig.monthlyMessageLimit,
+                      } as ChatAccess["planLimits"])
+                    : undefined,
             });
 
             const monthUsed = await tx.chatUsageBucket.findUnique({
