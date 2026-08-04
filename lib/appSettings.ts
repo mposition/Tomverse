@@ -13,7 +13,9 @@ import {
 import {
   MEMORY_EXTRACTION_FLAG_KEY,
   MEMORY_EXTRACTION_REVOKED_PAIRS_KEY,
+  MEMORY_INJECTION_FLAG_KEY,
   memoryExtractionEnabledFromValue,
+  memoryInjectionEnabledFromValue,
   parseRevokedPairs,
   type RevokedPairsState,
 } from "@/lib/memoryAccess";
@@ -259,6 +261,24 @@ export async function isMemoryExtractionEnabled(): Promise<boolean> {
     select: { value: true },
   });
   return memoryExtractionEnabledFromValue(row?.value);
+}
+
+/**
+ * Memory injection (import/memory policy §15, §12.4).
+ *
+ * Separate from the extraction flag on purpose: extraction fills the store,
+ * injection puts it in front of a model, and they are approved by different
+ * procedures. §12.4 additionally forbids turning this on before the human
+ * eval activation, and an approved (model, promptVersion) pair being absent
+ * keeps injection fail-closed even when this reads true.
+ */
+export async function isMemoryInjectionEnabled(): Promise<boolean> {
+  if (e2eDatabaseDisabled()) return false;
+  const row = await prisma.appSetting.findUnique({
+    where: { key: MEMORY_INJECTION_FLAG_KEY },
+    select: { value: true },
+  });
+  return memoryInjectionEnabledFromValue(row?.value);
 }
 
 export class MemoryFeatureDisabledError extends Error {
