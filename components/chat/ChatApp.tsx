@@ -20,6 +20,10 @@ import {
   isComposingKeydown,
 } from "@/lib/chatKeyboardPolicy";
 import type { WebSearchMode } from "@/lib/appDefaults";
+import {
+  decideContextBundleRetry,
+  isContextBundleStale,
+} from "@/lib/chatContextBundleRetry";
 import { splitSearchMetadataTrailer } from "@/lib/webSearchStreamTrailer";
 import type { WebSearchExecution } from "@/lib/webSearchExecutionNormalizer";
 import { guestMessagesStorageKey } from "@/lib/guestConversationStorage";
@@ -65,6 +69,12 @@ type ChatAppProps = {
      * per-request admission path.
      */
     admissionToken?: string | null;
+    /**
+     * §10 memory-context snapshot this send was quoted against. Issued by the
+     * comparison preflight for the whole model set; a single-model send
+     * prepares its own below.
+     */
+    contextBundle?: string | null;
   } | null;
   isPanelDisabled?: boolean;
   isGuestMode?: boolean;
@@ -587,7 +597,8 @@ function ChatAppComponent({
     attachments: ChatAttachment[] = [],
     analyticsPromptId: string | null = null,
     deepResearchDepth?: "quick" | "standard" | "deep",
-    admissionToken?: string | null
+    admissionToken?: string | null,
+    contextBundle?: string | null
   ) => {
   	if ((!text && attachments.length === 0) || isSendingRef.current) return;
 
@@ -671,6 +682,10 @@ function ChatAppComponent({
         : undefined;
 
     try {
+      // §10: the snapshot this send is quoted against. Starts as whatever the
+      // comparison preflight issued, and is replaced once by the single-model
+      // re-preparation below.
+      let activeContextBundle = contextBundle ?? null;
       const sendChatRequest = async (turnstileToken?: string) => {
         const res = await fetch("/api/chat", {
           method: "POST",
@@ -699,6 +714,9 @@ function ChatAppComponent({
               : {}),
             ...(deepResearchDepth ? { deepResearchDepth } : {}),
             ...(admissionToken ? { admissionToken } : {}),
+            ...(activeContextBundle
+              ? { contextBundle: activeContextBundle }
+              : {}),
             ...(webSearchMode && webSearchMode !== "off" ? { webSearchMode } : {}),
           }),
           signal: controller.signal,
@@ -744,7 +762,45 @@ function ChatAppComponent({
           error && typeof error === "object"
             ? (error as { code?: string }).code
             : undefined;
-        if (isGuestMode && code === "TURNSTILE_REQUIRED") {
+        if (isContextBundleStale(error)) {
+          // §10. Nothing has streamed yet at this point — the failure came
+          // from a non-ok response — so `outputVisible` is false, and the
+          // decision turns on whether this is one panel of a comparison.
+          const decision = decideContextBundleRetry({
+            isComparison: Boolean(admissionToken),
+            staleRetries: 0,
+            outputVisible: false,
+          });
+          if (decision.action === "reprepare_and_retry") {
+            // The user message keeps its id, so this is the same turn: the
+            // server reserves once and stores one message, however many times
+            // the snapshot moved underneath it.
+            const prepared = await fetch("/api/chat/context", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                ...(isGuestMode ? {} : { conversationId: targetChatId }),
+                modelIds: [modelId],
+                prompt: text,
+              }),
+              signal: controller.signal,
+            })
+              .then((res) => (res.ok ? res.json() : null))
+              .catch(() => null);
+            activeContextBundle =
+              typeof prepared?.contextBundle === "string"
+                ? prepared.contextBundle
+                : null;
+            // Exactly once: a second stale falls through to the user, rather
+            // than looping a turn that keeps being re-quoted.
+            response = await sendChatRequest();
+          } else {
+            // A comparison panel never retries alone — panels are comparable
+            // because they share one snapshot. The whole comparison has to be
+            // re-preflighted, so this surfaces instead of quietly diverging.
+            throw error;
+          }
+        } else if (isGuestMode && code === "TURNSTILE_REQUIRED") {
           // The coordinator guarantees only one panel actually runs the
           // challenge; the rest wait for that panel's verified retry to finish
           // and then retry without a token, because the grant cookie it
@@ -1089,7 +1145,8 @@ function ChatAppComponent({
           modelId === "perplexity/sonar-deep-research"
             ? promptPayload.deepResearchDepth
             : undefined,
-          promptPayload.admissionToken
+          promptPayload.admissionToken,
+          promptPayload.contextBundle
         );
     });
     return () => {

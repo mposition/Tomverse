@@ -45,6 +45,8 @@ type PromptPayload = {
   attachments: ChatAttachment[];
   deepResearchDepth?: "quick" | "standard" | "deep";
   admissionToken?: string | null;
+  /** §10 memory snapshot every panel of this comparison shares. */
+  contextBundle?: string | null;
 };
 
 type DesktopChatShellProps = {

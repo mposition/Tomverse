@@ -520,6 +520,12 @@ export function ChatPageClient({
     attachments: ChatAttachment[];
     deepResearchDepth?: "quick" | "standard" | "deep";
     admissionToken?: string | null;
+    /**
+     * §10 memory snapshot every panel of this comparison shares. One bundle
+     * for the whole set is the point: panels are comparable because they were
+     * quoted against the same memories.
+     */
+    contextBundle?: string | null;
   } | null>(null);
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
   const [pendingRemoveModelId, setPendingRemoveModelId] = useState<string | null>(null);
@@ -1267,9 +1273,11 @@ export function ChatPageClient({
       // account's is, so its concurrency has to be admitted once for the whole
       // run -- otherwise the panels race each other and some are refused after
       // others have already started.
-      if (modelIds.length < 2) return { allowed: true, admissionToken: null };
+      if (modelIds.length < 2) {
+        return { allowed: true, admissionToken: null, contextBundle: null };
+      }
       if (comparisonPreflightInFlightRef.current) {
-        return { allowed: false, admissionToken: null };
+        return { allowed: false, admissionToken: null, contextBundle: null };
       }
 
       comparisonPreflightInFlightRef.current = true;
@@ -1323,7 +1331,7 @@ export function ChatPageClient({
               `${t("chat.comparisonPreflightFailed")} (${t("chat.traceId")}: ${clientTraceId})`,
               "error"
             );
-            return { allowed: false, admissionToken: null };
+            return { allowed: false, admissionToken: null, contextBundle: null };
           }
 
           if (response.ok) {
@@ -1333,6 +1341,12 @@ export function ChatPageClient({
               admissionToken:
                 typeof grant?.admissionToken === "string"
                   ? grant.admissionToken
+                  : null,
+              // Null is normal: this account currently contributes no memory,
+              // and every panel will reach the same conclusion server-side.
+              contextBundle:
+                typeof grant?.contextBundle === "string"
+                  ? grant.contextBundle
                   : null,
             };
           }
@@ -1366,7 +1380,7 @@ export function ChatPageClient({
             `${t("chat.comparisonPreflightFailed")} (${t("chat.traceId")}: ${clientTraceId})`,
             "error"
           );
-          return { allowed: false, admissionToken: null };
+          return { allowed: false, admissionToken: null, contextBundle: null };
         }
         if (
           (response.status === 500 &&
@@ -1396,7 +1410,7 @@ export function ChatPageClient({
             "tomverse_last_preflight_trace_id",
             traceId
           );
-          return { allowed: true, admissionToken: null };
+          return { allowed: true, admissionToken: null, contextBundle: null };
         }
         // A rate rejection is the one refusal here that resolves by itself, so
         // it is the one that has to say when. The server sends the wait twice
@@ -1465,7 +1479,7 @@ export function ChatPageClient({
           }`,
           "error"
         );
-        return { allowed: false, admissionToken: null };
+        return { allowed: false, admissionToken: null, contextBundle: null };
       } catch (error) {
         console.error(
           JSON.stringify({
@@ -1478,7 +1492,7 @@ export function ChatPageClient({
           `${t("chat.comparisonPreflightFailed")} (${t("chat.traceId")}: ${clientTraceId})`,
           "error"
         );
-        return { allowed: false, admissionToken: null };
+        return { allowed: false, admissionToken: null, contextBundle: null };
       } finally {
         comparisonPreflightInFlightRef.current = false;
       }
@@ -2972,6 +2986,9 @@ export function ChatPageClient({
           : {}),
         ...(preflight.admissionToken
           ? { admissionToken: preflight.admissionToken }
+          : {}),
+        ...(preflight.contextBundle
+          ? { contextBundle: preflight.contextBundle }
           : {}),
       });
       // The single point where a draft is cleared by sending: the prompt is
