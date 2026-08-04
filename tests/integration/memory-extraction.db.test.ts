@@ -11,6 +11,11 @@ import {
 import { MEMORY_EXTRACTION_FLAG_KEY } from "@/lib/memoryAccess";
 import { analyzeExtractionChunk } from "@/lib/memoryExtractionPipeline";
 import { reserveMemoryExtractionAttempt } from "@/lib/memoryExtractionAdmission";
+import {
+    releaseUnusedExtractionAttempt,
+    releaseUnusedExtractionAttemptsForRun,
+    settleExtractionAttempt,
+} from "@/lib/memoryExtractionSettlement";
 import type { MemoryExtractionEvalEntry } from "@/lib/memoryExtractionEvalRegister";
 import {
     cancelMemoryExtractionRun,
@@ -826,6 +831,181 @@ test("a disabled rollout admits nothing (§15)", async () => {
     if (admission.admitted) return;
     assert.equal(admission.reason, "feature_disabled");
     assert.deepEqual(await financialFootprint(user.id, run.id), before);
+});
+
+/** Admits an attempt and returns it, as the processor would before calling. */
+const admittedAttempt = async () => {
+    const { user, run } = await seedRun(1);
+    const { lease, chunk } = await admitFirstChunk(run.id);
+    const admission = await reserveMemoryExtractionAttempt({
+        runId: run.id,
+        chunkIndex: chunk.chunkIndex,
+        leaseGeneration: lease.leaseGeneration,
+        reservedCostMicroUsd: 1_000,
+        register: APPROVED_REGISTER,
+    });
+    assert.equal(admission.admitted, true);
+    if (!admission.admitted) throw new Error("unreachable");
+    return { user, run, lease, chunk, admission };
+};
+
+const reservationStatus = async (reservationId: string) =>
+    (
+        await prisma.chatCreditReservation.findUniqueOrThrow({
+            where: { id: reservationId },
+        })
+    ).status;
+
+test("§11 settlement ①: a failure before the call releases the reservation whole", async () => {
+    const { admission } = await admittedAttempt();
+    const released = await releaseUnusedExtractionAttempt({
+        attemptId: admission.attemptId,
+        reason: "failed_before_call",
+    });
+    assert.equal(released.released, true);
+
+    const attempt = await prisma.memoryExtractionAttempt.findUniqueOrThrow({
+        where: { id: admission.attemptId },
+    });
+    assert.equal(attempt.status, "failed_before_call");
+    assert.ok(attempt.settledAt);
+    // Nothing was spent, so nothing is charged.
+    assert.notEqual(await reservationStatus(admission.reservationId), "reserved");
+});
+
+test("§11 settlement ②: confirmed usage settles at what was actually used", async () => {
+    const { admission } = await admittedAttempt();
+    await prisma.memoryExtractionAttempt.update({
+        where: { id: admission.attemptId },
+        data: { providerCallIssued: true, status: "responded" },
+    });
+
+    const settled = await settleExtractionAttempt({
+        attemptId: admission.attemptId,
+        usage: {
+            inputTokens: 1_200,
+            outputTokens: 300,
+            usageFromProvider: true,
+        },
+        outcome: "completed",
+        commitAllowed: true,
+    });
+    assert.equal(settled.settled, true);
+    assert.equal(settled.status, "committed");
+
+    const attempt = await prisma.memoryExtractionAttempt.findUniqueOrThrow({
+        where: { id: admission.attemptId },
+    });
+    assert.equal(attempt.usageConfirmed, true);
+    const reservation = await prisma.chatCreditReservation.findUniqueOrThrow({
+        where: { id: admission.reservationId },
+    });
+    assert.equal(reservation.settledInputTokens, 1_200);
+    assert.equal(reservation.settledOutputTokens, 300);
+});
+
+test("§11 settlement ③: a settled attempt is never charged twice", async () => {
+    const { admission } = await admittedAttempt();
+    await prisma.memoryExtractionAttempt.update({
+        where: { id: admission.attemptId },
+        data: { providerCallIssued: true, status: "responded" },
+    });
+    const first = await settleExtractionAttempt({
+        attemptId: admission.attemptId,
+        usage: { inputTokens: 900, outputTokens: 100, usageFromProvider: true },
+        outcome: "completed",
+        commitAllowed: true,
+    });
+    assert.equal(first.settled, true);
+
+    // A replay after a crash between settling and recording must be a no-op.
+    const replay = await settleExtractionAttempt({
+        attemptId: admission.attemptId,
+        usage: { inputTokens: 900, outputTokens: 100, usageFromProvider: true },
+        outcome: "completed",
+        commitAllowed: true,
+    });
+    assert.equal(replay.settled, false);
+    const reservation = await prisma.chatCreditReservation.findUniqueOrThrow({
+        where: { id: admission.reservationId },
+    });
+    assert.equal(reservation.settledInputTokens, 900);
+});
+
+test("§11 settlement ④: a stale worker still pays, but its work is discarded", async () => {
+    const { run, lease, admission } = await admittedAttempt();
+    await prisma.memoryExtractionAttempt.update({
+        where: { id: admission.attemptId },
+        data: { providerCallIssued: true, status: "responded" },
+    });
+    // Superseded after the provider call.
+    await prisma.memoryExtractionRun.update({
+        where: { id: run.id },
+        data: { leaseGeneration: lease.leaseGeneration + 1 },
+    });
+
+    const settled = await settleExtractionAttempt({
+        attemptId: admission.attemptId,
+        usage: { inputTokens: 800, outputTokens: 200, usageFromProvider: true },
+        outcome: "completed",
+        // The caller's fencing verdict: it may not commit.
+        commitAllowed: false,
+    });
+    // Losing the lease removes the right to commit, never the duty to record
+    // a cost that was really incurred.
+    assert.equal(settled.settled, true);
+    assert.equal(settled.status, "discarded_stale");
+    const reservation = await prisma.chatCreditReservation.findUniqueOrThrow({
+        where: { id: admission.reservationId },
+    });
+    assert.equal(reservation.settledInputTokens, 800);
+});
+
+test("§11 settlement ⑤: a call with no reported usage is not settled as free", async () => {
+    const { admission } = await admittedAttempt();
+    await prisma.memoryExtractionAttempt.update({
+        where: { id: admission.attemptId },
+        data: { providerCallIssued: true, status: "responded" },
+    });
+    const settled = await settleExtractionAttempt({
+        attemptId: admission.attemptId,
+        usage: { usageFromProvider: false },
+        outcome: "failed",
+        commitAllowed: true,
+    });
+    assert.equal(settled.settled, true);
+    assert.equal(settled.status, "failed_after_call");
+    const attempt = await prisma.memoryExtractionAttempt.findUniqueOrThrow({
+        where: { id: admission.attemptId },
+    });
+    // Recorded as unconfirmed so reconciliation can revisit it, rather than
+    // silently treated as a zero-cost call.
+    assert.equal(attempt.usageConfirmed, false);
+});
+
+test("a reservation that reached a provider is never released as unused", async () => {
+    const { admission } = await admittedAttempt();
+    await prisma.memoryExtractionAttempt.update({
+        where: { id: admission.attemptId },
+        data: { providerCallIssued: true },
+    });
+    const released = await releaseUnusedExtractionAttempt({
+        attemptId: admission.attemptId,
+        reason: "cancelled",
+    });
+    // Releasing in full here would erase a cost that was really incurred.
+    assert.equal(released.released, false);
+    assert.equal(await reservationStatus(admission.reservationId), "reserved");
+});
+
+test("cancelling a run gives back only what was never spent (§11)", async () => {
+    const { run, admission } = await admittedAttempt();
+    const result = await releaseUnusedExtractionAttemptsForRun(run.id);
+    assert.equal(result.released, 1);
+    const attempt = await prisma.memoryExtractionAttempt.findUniqueOrThrow({
+        where: { id: admission.attemptId },
+    });
+    assert.equal(attempt.status, "cancelled");
 });
 
 test("an expired lease is reclaimed to pending with progress intact (§3)", async () => {
