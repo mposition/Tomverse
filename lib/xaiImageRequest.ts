@@ -1,4 +1,9 @@
 import type { ImageSize } from "@/lib/imageGenerationPricing";
+import {
+  optionForLegacyImageSize,
+  xaiRequestForOption,
+  type ImageResolutionTier,
+} from "@/lib/imageResolution";
 
 // Pure request/response shaping for xAI's image API, kept out of
 // lib/imageProviderAdapter.ts so it can be tested without a network and
@@ -15,25 +20,26 @@ export const XAI_IMAGES_URL = "https://api.x.ai/v1/images/generations";
 /**
  * The product's size value translated into xAI's two request fields.
  *
- * Only 1K square is mapped, and that is the whole launch scope
- * (docs/policy/image-generation.md section 12.1): 1024x1024 is byte-for-byte
- * the comparison against gpt-image-2's square, and xAI's 2K cannot be
- * expressed until `ImageSize` grows a resolution tier. An unmapped size
- * returns null and the caller must refuse -- guessing a resolution would
- * charge the approved 1K credits for an image the provider priced differently.
+ * The translation itself lives in lib/imageResolution.ts, which is the one
+ * place the tier/aspect vocabulary is defined; this only adds the launch
+ * scope on top (docs/policy/image-generation.md section 12.1): 1K square
+ * only, because 1024x1024 is byte-for-byte the comparison against
+ * gpt-image-2's square and 2K is approved but not yet sellable.
+ *
+ * A size outside that scope returns null and the caller must refuse. Guessing
+ * a resolution would charge the approved 1K credits for an image the provider
+ * priced differently.
  */
-export const XAI_SIZE_REQUEST: Partial<
-  Record<ImageSize, { resolution: string; aspectRatio: string }>
-> = {
-  "1024x1024": { resolution: "1k", aspectRatio: "1:1" },
-};
+const LAUNCH_TIERS = new Set<ImageResolutionTier>(["1k"]);
 
 export const buildXaiImageRequest = (input: {
   apiModelId: string;
   prompt: string;
   size: ImageSize;
 }): Record<string, unknown> | null => {
-  const mapped = XAI_SIZE_REQUEST[input.size];
+  const option = optionForLegacyImageSize(input.size);
+  if (!LAUNCH_TIERS.has(option.tier) || option.aspectRatio !== "1:1") return null;
+  const mapped = xaiRequestForOption(option);
   if (!mapped) return null;
   return {
     model: input.apiModelId,

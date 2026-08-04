@@ -416,6 +416,18 @@ OpenAI의 실제 픽셀 문자열을 한 값에 섞고 있다.** Google의 0.5K�
 비교 가능 여부는 같은 `resolutionTier + aspectRatio`로 판정하되, 결과 화면에는
 실제 픽셀 크기를 표시한다.
 
+**진행 상황(2026-08-04): 어휘와 변환 계층이 `lib/imageResolution.ts`에
+들어갔다.** tier·aspect 정의, 기존 `ImageSize`와의 양방향 매핑, provider별
+요청 변환(OpenAI 픽셀쌍 / xAI `resolution`+`aspect_ratio` / Google
+`imageSize`+`aspectRatio`)이 있고 xAI adapter가 이를 쓴다. 판매 가능한
+조합은 `SELLABLE_IMAGE_OPTIONS` 3종 그대로이며, **가격표 key와
+`ImageGeneration.size` 컬럼은 아직 legacy 문자열이다** — 그 둘은 migration과
+새 `pricingVersion`이 함께 움직이는 별도 변경이다.
+
+`legacyImageSizeForOption()`이 2K·4K에 `null`을 돌려주는 것은 표의 빈칸이
+아니라 계약이다. 값을 채워 근처 픽셀쌍으로 매핑하면 1K 가격으로 2K 이미지를
+청구하게 되고, 사용자는 그 차이를 볼 방법이 없다.
+
 
 ## 13. 진입점과 노출 정책 (v2)
 
