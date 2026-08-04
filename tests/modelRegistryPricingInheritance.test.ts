@@ -129,10 +129,15 @@ test("an unpriced model on an inherited row still reports as fallback-priced", (
   // depend on this: when the fallback price was stored in the row, the
   // fallback share measured 0% while models were in fact reserved at
   // US$15/US$60.
-  const unpriced = getModel("mistral-large-3");
-  assert.ok(unpriced);
+  // Named a real unpriced model until 2026-08-04, when the last of them got a
+  // profile and there were none left to borrow. The invariant is about a model
+  // lib/modelPricing.ts does not know, so the fixture now *is* one -- which
+  // also stops this test lapsing the next time the catalogue changes.
+  const template = getModel("mistral-large-3");
+  assert.ok(template);
   const pricing = resolveModelPricing({
-    ...unpriced,
+    ...template,
+    id: "qa-model-with-no-profile",
     inputUsdPerMillionTokens: undefined,
     outputUsdPerMillionTokens: undefined,
     cachedInputPriceMultiplier: undefined,

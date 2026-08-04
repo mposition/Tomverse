@@ -490,3 +490,32 @@ test("GLM-5.2's cached-input rate resolves to the published US$0.26, not a round
   );
   assert.equal(pricing.cachedInputPricingVerified, true);
 });
+
+test("Claude Sonnet 5's introductory price is replaced when it expires", () => {
+  // The profile carries Anthropic's introductory rate (US$2 / US$10), which is
+  // what is billed until 2026-08-31. From 2026-09-01 the standard US$3 / US$15
+  // applies, and a stored price that quietly outlives its term understates cost
+  // on every request -- exactly what an explicit profile exists to prevent.
+  //
+  // This is deliberately a date-triggered failure. There is no webhook for a
+  // price change and nothing else in the system notices one, so the reminder
+  // has to be the build. Fix it by moving the rates, not by moving the date.
+  const pricing = resolveModelPricing(model("claude-sonnet-5"));
+  const introductoryPeriodEnds = Date.parse("2026-09-01T00:00:00.000Z");
+  const stillIntroductory = Date.now() < introductoryPeriodEnds;
+
+  if (stillIntroductory) {
+    assert.equal(pricing.inputUsdPerMillionTokens, 2);
+    assert.equal(pricing.outputUsdPerMillionTokens, 10);
+    return;
+  }
+
+  assert.equal(
+    pricing.inputUsdPerMillionTokens,
+    3,
+    "Claude Sonnet 5's introductory pricing ended on 2026-08-31. Move the " +
+      "profile in lib/modelPricing.ts to the standard US$3 / US$15 with a " +
+      "cached-read multiplier of 0.1, and give it a new pricingVersion."
+  );
+  assert.equal(pricing.outputUsdPerMillionTokens, 15);
+});
