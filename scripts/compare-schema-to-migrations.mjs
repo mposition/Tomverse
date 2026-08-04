@@ -342,8 +342,10 @@ if (differences > 0) {
       "Do NOT hand-edit the source database or the baseline to make this pass.",
       "Classify each difference first -- manual drift, extension-owned object,",
       "or a migration nobody wrote -- then correct it with a NEW migration and",
-      "re-run this. Editing an applied migration changes its checksum and",
-      "breaks deploys on every environment that already ran it.",
+      "re-run this. Editing an applied migration changes its checksum, which",
+      "`migrate deploy` will not notice but `migrate status` reports as",
+      "`modified after it was applied` on every environment that already ran",
+      "it -- and the release checklist requires a clean status.",
     ].join("\n")
   );
   process.exit(1);
