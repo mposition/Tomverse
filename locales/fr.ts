@@ -332,6 +332,7 @@ export const fr = {
         searchStatusFailed: "Échec de la recherche web",
         searchStatusDeepResearch: "Deep Research",
         searchCitationsLabel: "Sources",
+        memoryUsedDisclosure: "Cette réponse a utilisé {count} mémoires du compte",
         modelsSelectedOne: "IA",
         modelsSelectedOther: "IA",
         maxModelsDescription: "Comparer jusqu'à 3 modèles",
@@ -371,6 +372,7 @@ export const fr = {
         internalMonthlyCostSafetyLimit: "Cette demande dépasse la limite d'utilisation du mois pour les réponses IA. Essayez moins de modèles ou des modèles moins coûteux, ou réessayez après la réinitialisation mensuelle.",
         providerCostSafetyLimit: "Un des fournisseurs IA sélectionnés est temporairement indisponible. Choisissez un modèle d'un autre fournisseur ou réessayez plus tard.",
         operationalCostGuardrail: "Une vérification de sécurité interne a mis cette demande en pause. Vos crédits n'ont pas été utilisés. Réessayez bientôt ou choisissez un modèle moins coûteux.",
+        contextBundleStale: "La mémoire de votre compte a changé pendant l'envoi de ce message, qui n'a donc pas été transmis. Renvoyez-le pour utiliser la mémoire mise à jour.",
         planEntitlementExhausted: "Les crédits du forfait pour ce mois sont épuisés. Achetez des crédits supplémentaires ou passez à un forfait supérieur pour continuer.",
         concurrentReservationConflict: "Votre solde de crédits a changé pendant le traitement d'une autre demande. Veuillez réessayer.",
         summarizeModelDifferences: "Résumer les différences entre modèles",
@@ -808,16 +810,23 @@ export const fr = {
         refundRequestSuccess: "Demande de remboursement reçue.",
         refundRequestFailed: "Impossible d'envoyer la demande de remboursement.",
     },
+    settingsNav: {
+        navLabel: "Navigation des réglages",
+        backToSettings: "Retour aux réglages",
+        settings: "Réglages",
+        dataAndPersonalization: "Données et personnalisation",
+        dataAndPersonalizationDescription: "Conversations importées et mémoire du compte. Chacune se gère sur sa propre page.",
+    },
     externalImport: {
         dataTabTitle: "Importer depuis un autre service d'IA",
         dataTabDescription:
             "Conservez dans votre compte Tomverse des conversations issues d'un fichier d'export ChatGPT ou Claude. Le fichier d'export n'est lu que dans votre navigateur.",
         dataTabUsage: "{conversations} conversations importées · {storage} stockés",
-        dataTabOpen: "Ouvrir les réglages d'import",
+        dataTabOpen: "Gérer les imports",
+        dataTabUsageEmpty: "Aucune conversation importée pour l'instant",
         pageTitle: "Importer des conversations depuis un autre service d'IA",
         pageDescription:
             "Téléversez un export officiel de données ChatGPT ou Claude, vérifiez son contenu, puis choisissez les conversations à conserver dans votre compte Tomverse.",
-        backToChat: "Retour au chat",
         backToImports: "Retour aux imports",
         signInRequired:
             "Connectez-vous pour importer des conversations depuis un autre service d'IA.",
@@ -998,14 +1007,25 @@ export const fr = {
         abandonImport: "Quitter cet import",
     },
     memoryReview: {
+        sourceDeleteDerivedImport:
+            "{count} souvenirs issus de cet import seront également supprimés.",
+        sourceDeleteDerivedConversation:
+            "{count} souvenirs issus de cette conversation seront également supprimés.",
+        sourceDeleteKeep: "Conserver les souvenirs, mais cesser de les utiliser",
+        sourceDeleteEdited:
+            "{count} souvenirs que vous avez modifiés sont conservés et simplement désactivés.",
+        sourceDeleteKept:
+            "{count} souvenirs appuyés par d'autres éléments restent inchangés.",
         dataTabTitle: "Mémoire du compte",
         dataTabDescription:
             "Examinez les souvenirs candidats extraits des conversations importées et choisissez si les souvenirs approuvés sont utilisés dans les nouvelles discussions.",
-        dataTabOpen: "Ouvrir les réglages de mémoire",
+        dataTabOpen: "Gérer la mémoire",
+        dataTabStatusOn: "Utilisée dans les nouvelles discussions",
+        dataTabStatusOff: "Non utilisée dans les nouvelles discussions",
+        dataTabStatusPending: "{count} en attente de vérification",
         pageTitle: "Mémoire du compte",
         pageDescription:
             "Approuvez ou refusez les souvenirs candidats en attente d'examen, et modifiez, épinglez ou supprimez les souvenirs en usage.",
-        backToChat: "Retour à la discussion",
         signInRequired: "Connectez-vous pour gérer la mémoire de votre compte.",
         privacyNote:
             "Seuls les souvenirs que vous avez examinés et approuvés sont utilisés dans les nouvelles discussions. Les souvenirs approuvés et les préférences de style de réponse sont transmis comme références au modèle Tomverse actuellement sélectionné, et vous pouvez les consulter, les modifier, les désactiver ou les supprimer à tout moment.",
@@ -1116,6 +1136,75 @@ export const fr = {
             explanation_depth: "Profondeur des explications",
             citation_preference: "Préférence de citation",
             code_style: "Style de code",
+        },
+    },
+    // Lancement de l'extraction (Release B, §11 confirmation préalable, §21).
+    memoryExtraction: {
+        launchTitle: "Extraire des souvenirs des conversations importées",
+        launchDescription:
+            "Choisissez les conversations importées à analyser. Les candidats ne sont jamais utilisés dans les réponses tant que vous ne les avez pas examinés et approuvés.",
+        modelTitle: "Modèle utilisé pour l'extraction",
+        modelUnavailable: "Aucun modèle d'extraction n'est disponible actuellement.",
+        modelUnavailableDescription:
+            "Un modèle d'extraction n'est ouvert qu'après avoir réussi une évaluation de qualité. Vous pourrez alors le choisir ici.",
+        modelCredits: "{credits} crédits par lot",
+        conversationsTitle: "Choisir les conversations",
+        conversationsDescription:
+            "Seules les conversations sélectionnées sont utilisées. Elles sont traitées par lots selon leur taille, et les crédits se comptent par lot.",
+        conversationsEmpty: "Vous n'avez encore importé aucune conversation.",
+        conversationsEmptyCta: "Importer des conversations",
+        selectAllVisible: "Tout sélectionner ici",
+        clearSelection: "Effacer la sélection",
+        selectionSummary: "{count} sélectionnées · environ {size}",
+        selectionHidden: "{count} conversations sélectionnées ne figurent pas dans cette liste.",
+        selectionTooLarge: "Vous pouvez sélectionner jusqu'à {max} conversations à la fois.",
+        conversationMeta: "{messages} messages · {size}",
+        loadMore: "Afficher plus",
+        estimate: "Voir les crédits nécessaires",
+        estimating: "Calcul en cours…",
+        estimateResult: "{chunks} lots · environ {credits} crédits",
+        estimateDescription:
+            "{conversations} conversations seront traitées en {chunks} lots. Le montant final est régularisé après l'exécution et ne dépasse jamais celui que vous avez confirmé.",
+        estimateStale: "La sélection a changé. Vérifiez à nouveau les crédits.",
+        start: "Lancer l'extraction pour {credits} crédits",
+        starting: "Démarrage…",
+        runInProgress: "Une extraction est déjà en cours.",
+        runInProgressOpen: "Voir la progression",
+        errorGeneric: "Une erreur est survenue. Veuillez réessayer.",
+        errorEstimateChanged:
+            "Les conversations sélectionnées ont changé, l'estimation ne correspond plus. Vérifiez-la avant de lancer.",
+        errorPairUnavailable: "Ce modèle n'est pas disponible actuellement.",
+        errorBudget:
+            "La capacité d'extraction est temporairement saturée. Réessayez sous peu.",
+        runTitle: "Progression de l'extraction",
+        runBack: "Retour aux réglages de mémoire",
+        runNotFound: "Cette extraction est introuvable.",
+        runModel: "Modèle",
+        runStarted: "Début : {date}",
+        runFinished: "Fin : {date}",
+        runProgress: "{completed} lots sur {total} terminés",
+        runPendingNote:
+            "En attente de démarrage. Vous pouvez fermer cette page : l'extraction continue et vous pourrez revenir ici.",
+        runRunningNote:
+            "Extraction en cours. Vous pouvez fermer cette page ; les candidats apparaissent dans la file d'examen au fur et à mesure.",
+        runCompletedNote:
+            "Extraction terminée. Examinez les candidats dans la file d'examen.",
+        runFailedNote:
+            "L'extraction n'a pas pu aboutir. Les résultats des lots terminés sont conservés.",
+        runCancelledNote:
+            "L'extraction a été annulée. Les résultats des lots terminés sont conservés.",
+        runReview: "Aller à la file d'examen",
+        cancel: "Annuler l'extraction",
+        cancelArmed: "Appuyez à nouveau pour annuler",
+        cancelling: "Annulation…",
+        recentRunsTitle: "Extractions récentes",
+        recentRunOpen: "Voir le détail",
+        status: {
+            pending: "En attente",
+            running: "En cours",
+            completed: "Terminée",
+            failed: "Échouée",
+            cancelled: "Annulée",
         },
     },
     privacyPolicy: {

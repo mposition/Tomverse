@@ -422,3 +422,21 @@ Non-negotiable requirements:
 - Any related change must keep `tests/e2e/image-generation-workspace.spec.ts` passing on desktop **and** mobile, and must re-run the mobile composer, sidebar drawer and model picker specs.
 - A change that violates this contract is a release blocker.
 <!-- END:image-generation-workspace-invariant -->
+<!-- BEGIN:settings-navigation-invariant -->
+## Settings navigation invariant
+
+Before changing the Data tab's entries in `AuthButton.tsx`, `lib/settingsNavigation.ts`, `lib/accountSettingsEvents.ts`, `components/settings/**`, or the top of `/settings/imports` and `/settings/memory`, read:
+
+- `docs/ui-contracts/settings-navigation.md`
+
+Non-negotiable requirements:
+
+- Settings is a closable panel, not a route. A detail page navigates up to settings by name (`settingsSectionHref()`), never with `router.back()`, and never grows a second link to the chat — leaving settings entirely is the panel's own close action.
+- "Back to settings" must work from a directly-opened detail-page URL, on every shell and in every sidebar state, and must not disturb the browser's own Back button (the deep link is dropped with `replaceState`, never a pushed entry).
+- External import and account memory stay separate features with separate detail pages and separate state, presented as separate rows under one group (`settingsNav.dataAndPersonalization`) — not merged, and not two stacked full-width cards.
+- Every entry's action label names its own purpose; a generic label repeated across entries ("Open settings") is a violation. A "back" label must name where the link actually goes, in every locale.
+- Desktop and mobile use the same hierarchy, order and wording; only the desktop breadcrumb trail is extra. Nothing here may be decided by `layout === "mobile"`, a UA string or a device name.
+- A row is one link with an explicit accessible name (title + action), its description and status in `aria-describedby`, a visible focus ring, and keyboard activation. Returning from a detail page restores that row's scroll position and focus.
+- Any related change must keep `tests/settingsNavigation.test.mjs` and `tests/e2e/settings-information-architecture.spec.ts` passing on the desktop *and* mobile projects.
+- A change that violates this contract is a release blocker.
+<!-- END:settings-navigation-invariant -->

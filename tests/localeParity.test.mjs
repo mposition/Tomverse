@@ -73,7 +73,10 @@ const ENGLISH_STRING_CEILING = {
   // translated.
   // fr +1 (233 -> 234): chat.modelPickerTabImage — "Image" is spelled
   // identically in French; the rest of the image tab is translated.
-  fr: 234,
+  // fr +1 (234 -> 235): memoryExtraction.conversationMeta — "{messages}
+  // messages · {size}" is spelled identically in French, the same case as
+  // externalImport.messagesCount above; the section is otherwise translated.
+  fr: 235,
   // de/es/pt +1 for the same saveAsDefaultHint key.
   // de +1 (233 -> 234): chat.modelPickerTabChat — "Chat" is the German word
   // too; the image tab's other strings are translated.

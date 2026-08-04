@@ -12,7 +12,12 @@ import { authOptions } from "@/lib/auth";
 import {
     deleteExternalConversationSnapshot,
     getExternalConversation,
+    previewExternalSourceDeletion,
 } from "@/lib/externalImportService";
+import {
+    readSourceDeletionDispositions,
+    wantsMemoryImpact,
+} from "@/lib/externalSourceDeletionRequest";
 
 const clampListParam = (
     value: string | null,
@@ -61,7 +66,14 @@ export async function GET(
                 }),
             }
         );
-        return NextResponse.json(conversation, {
+        // Only when asked for: the viewer's delete confirmation needs it,
+        // paging through messages does not (§13.1).
+        const memoryImpact = wantsMemoryImpact(url)
+            ? await previewExternalSourceDeletion(session.user.id, {
+                  conversationId: params.conversationId,
+              })
+            : undefined;
+        return NextResponse.json({ ...conversation, memoryImpact }, {
             headers: { "Cache-Control": "no-store" },
         });
     } catch (error) {
@@ -102,7 +114,8 @@ export async function DELETE(
         const params = await context.params;
         const result = await deleteExternalConversationSnapshot(
             session.user.id,
-            params.conversationId
+            params.conversationId,
+            readSourceDeletionDispositions(new URL(req.url))
         );
         return NextResponse.json(result, {
             headers: { "Cache-Control": "no-store" },

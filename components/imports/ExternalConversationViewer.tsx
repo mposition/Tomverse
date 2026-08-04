@@ -5,6 +5,10 @@ import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 import { AlertTriangle, ArrowLeft, Loader2, Trash2 } from "lucide-react";
 import { useLanguage } from "@/components/LanguageProvider";
+import {
+    SourceDeletionNotice,
+    type SourceDeletionImpactView,
+} from "@/components/imports/SourceDeletionNotice";
 
 /**
  * Account-private read-only viewer for one imported conversation (policy
@@ -73,6 +77,11 @@ export function ExternalConversationViewer({
     const [state, setState] = useState<ViewerState>({ kind: "loading" });
     const [deleteArmed, setDeleteArmed] = useState(false);
     const [isDeleting, setIsDeleting] = useState(false);
+    // Requested with the first page only: the delete confirmation needs it,
+    // paging through messages does not (§13.1).
+    const [memoryImpact, setMemoryImpact] =
+        useState<SourceDeletionImpactView | null>(null);
+    const [keepMemories, setKeepMemories] = useState(false);
 
     const fetchPage = useCallback(
         async (offset: number): Promise<
@@ -84,15 +93,19 @@ export function ExternalConversationViewer({
         > => {
             try {
                 const response = await fetch(
-                    `/api/external-conversations/${encodeURIComponent(conversationId)}?offset=${offset}&limit=${PAGE_SIZE}`,
+                    `/api/external-conversations/${encodeURIComponent(conversationId)}?offset=${offset}&limit=${PAGE_SIZE}${offset === 0 ? "&include=memoryImpact" : ""}`,
                     { cache: "no-store" }
                 );
                 if (response.status === 401) return { kind: "unauthenticated" };
                 if (response.status === 403) return { kind: "disabled" };
                 if (response.status === 404) return { kind: "not_found" };
                 if (!response.ok) return { kind: "error" };
-                const conversation =
-                    (await response.json()) as ViewerConversation;
+                const conversation = (await response.json()) as ViewerConversation & {
+                    memoryImpact?: SourceDeletionImpactView;
+                };
+                if (offset === 0 && conversation.memoryImpact) {
+                    setMemoryImpact(conversation.memoryImpact);
+                }
                 return { kind: "ok", conversation };
             } catch {
                 return { kind: "error" };
@@ -153,7 +166,9 @@ export function ExternalConversationViewer({
         setIsDeleting(true);
         try {
             const response = await fetch(
-                `/api/external-conversations/${encodeURIComponent(conversationId)}`,
+                `/api/external-conversations/${encodeURIComponent(conversationId)}?derivedMemories=${
+                    keepMemories ? "suspend" : "delete"
+                }`,
                 { method: "DELETE" }
             );
             if (response.ok) {
@@ -167,7 +182,7 @@ export function ExternalConversationViewer({
             setIsDeleting(false);
             setDeleteArmed(false);
         }
-    }, [conversationId, deleteArmed, router]);
+    }, [conversationId, deleteArmed, keepMemories, router]);
 
     return (
         <div className="mx-auto w-full max-w-3xl space-y-4 px-4 py-8">
@@ -323,6 +338,14 @@ export function ExternalConversationViewer({
                                   ? t("externalImport.deleteImportArmed")
                                   : t("externalImport.deleteSnapshot")}
                         </button>
+                        {deleteArmed ? (
+                            <SourceDeletionNotice
+                                impact={memoryImpact}
+                                scope="conversation"
+                                keepDerived={keepMemories}
+                                onKeepDerivedChange={setKeepMemories}
+                            />
+                        ) : null}
                     </section>
                 </div>
             )}

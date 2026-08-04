@@ -135,7 +135,9 @@ test("the launched and upgraded catalogue metadata reaches runtime rows", async 
 
   const fable = await getEnabledRuntimeModel("claude-fable-5");
   assert.ok(fable);
-  assert.equal(getModelUsageProfile(fable).credits, 16);
+  // Explicit creditWeight of 20 since the 2026-08-04 re-weighting; the class
+  // is still premium-reasoning, whose default would be 16.
+  assert.equal(getModelUsageProfile(fable).credits, 20);
 
   const opus = await getEnabledRuntimeModel("claude-opus-4-8");
   assert.ok(opus);

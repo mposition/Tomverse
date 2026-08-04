@@ -19,18 +19,18 @@ import {
 const profile = (modelId) => getModelUsageProfile(getModel(modelId));
 
 test("model usage profiles match the launch credit examples", () => {
-  assert.deepEqual(profile("gpt-5-5"), { category: "Premium", credits: 8 });
+  assert.deepEqual(profile("gpt-5-5"), { category: "Premium", credits: 16 });
   assert.deepEqual(profile("claude-sonnet-5"), {
     category: "Advanced",
     credits: 4,
   });
   assert.deepEqual(profile("claude-opus-4-8"), {
     category: "Premium",
-    credits: 8,
+    credits: 16,
   });
   assert.deepEqual(profile("claude-fable-5"), {
     category: "Reasoning",
-    credits: 16,
+    credits: 20,
   });
   assert.deepEqual(profile("kimi-k3"), {
     category: "Reasoning",
@@ -38,11 +38,11 @@ test("model usage profiles match the launch credit examples", () => {
   });
   assert.deepEqual(profile("minimax-m3"), {
     category: "Advanced",
-    credits: 4,
+    credits: 1,
   });
   assert.deepEqual(profile("perplexity/sonar-deep-research"), {
     category: "Research",
-    credits: 30,
+    credits: 16,
   });
   assert.deepEqual(profile("deepseek-v4-pro"), {
     category: "Standard",
@@ -102,16 +102,16 @@ test("Llama 4 Scout is a Standard vision model with explicit Groq limits", () =>
 
 test("new catalogue plans and credit weights follow their verified cost bands", () => {
   const expected = {
-    "gpt-5-6-sol": ["Pro", "Premium", 8],
+    "gpt-5-6-sol": ["Pro", "Premium", 16],
     "gpt-5-6-terra": ["Free", "Advanced", 4],
     "gpt-5-6-luna": ["Guest", "Standard", 1],
     "gemini-3-6-flash": ["Free", "Advanced", 4],
     "gemini-3-5-flash": ["Free", "Advanced", 4],
     "gemini-2-5-flash": ["Guest", "Standard", 1],
     "mistral-medium-3-1": ["Free", "Advanced", 4],
-    "claude-fable-5": ["Pro", "Reasoning", 16],
+    "claude-fable-5": ["Pro", "Reasoning", 20],
     "kimi-k3": ["Pro", "Reasoning", 16],
-    "minimax-m3": ["Free", "Advanced", 4],
+    "minimax-m3": ["Free", "Advanced", 1],
   };
 
   for (const [id, [minimumPlan, category, credits]] of Object.entries(expected)) {
@@ -174,7 +174,8 @@ test("long input applies the configured credit multiplier", () => {
   assert.equal(getInputCreditMultiplier(16_001), 1.5);
   assert.equal(getInputCreditMultiplier(50_001), 2);
   assert.equal(getInputCreditMultiplier(100_001), 3);
-  assert.equal(getWeightedUsageCredits(premium, 60_000), 16);
+  // gpt-5-5 now carries an explicit 16-credit weight; 2x at 60,000 tokens.
+  assert.equal(getWeightedUsageCredits(premium, 60_000), 32);
 });
 
 test("pricing examples are derived from the same launch credit weights", () => {

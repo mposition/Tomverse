@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -128,10 +129,15 @@ test("an unpriced model on an inherited row still reports as fallback-priced", (
   // depend on this: when the fallback price was stored in the row, the
   // fallback share measured 0% while models were in fact reserved at
   // US$15/US$60.
-  const unpriced = getModel("mistral-large-3");
-  assert.ok(unpriced);
+  // Named a real unpriced model until 2026-08-04, when the last of them got a
+  // profile and there were none left to borrow. The invariant is about a model
+  // lib/modelPricing.ts does not know, so the fixture now *is* one -- which
+  // also stops this test lapsing the next time the catalogue changes.
+  const template = getModel("mistral-large-3");
+  assert.ok(template);
   const pricing = resolveModelPricing({
-    ...unpriced,
+    ...template,
+    id: "qa-model-with-no-profile",
     inputUsdPerMillionTokens: undefined,
     outputUsdPerMillionTokens: undefined,
     cachedInputPriceMultiplier: undefined,
@@ -163,31 +169,37 @@ test("the price-clearing migration is a frozen record of what seeding once wrote
   // new pair has nothing to clear and does not belong here.
   //
   // Deriving it from the catalogue instead forced an edit to this file every
-  // time a profile changed -- and this migration is applied. Editing an applied
-  // migration changes its checksum and `prisma migrate deploy` refuses it on
-  // every environment that already ran it, which is the failure
-  // scripts/compare-schema-to-migrations.mjs and RELEASE_CHECKLIST.md §7.6 both
-  // warn about. So the expectation is frozen here rather than computed, and the
-  // file must not change again.
+  // time a profile changed -- and this migration is applied. That does not break
+  // a deploy: on Prisma 7 `migrate deploy` (`ApplyMigrations`) never compares
+  // checksums of already-applied migrations. It breaks `migrate status`, whose
+  // `diagnose_migration_history` reports `modified after it was applied` on
+  // every environment that ran the earlier bytes -- and §1 of
+  // RELEASE_CHECKLIST.md requires a clean status. It is also not repairable with
+  // `prisma migrate resolve`, which is for failed migrations, not successful
+  // ones. See §7.6 for how to decide when it has already happened.
+  //
+  // So the expectation is frozen, and it is the file's SHA-256 rather than a
+  // row count: an edit that swaps one allowlist row for another keeps the count
+  // identical and would otherwise pass. Prisma hashes these same bytes, so this
+  // constant is the checksum a database records when it applies this migration.
+  const digest = createHash("sha256").update(sql, "utf8").digest("hex");
+  assert.equal(
+    digest,
+    "02181d384565a17f54a8b72b3b2dec6499ea3c343f43f1bae51d3d95af9a3e1d",
+    "this migration is applied; its bytes are history and must not change. " +
+      "This digest is what production recorded in _prisma_migrations when it " +
+      "applied the migration on 2026-08-02. Changing the file makes " +
+      "`migrate status` report it as modified there."
+  );
+
+  // Kept as a readable statement of what those bytes have to contain, so a
+  // reviewer sees the invariant rather than only a hash.
   const allowlist = [...sql.matchAll(/\('([^']+)', ([0-9.]+), ([0-9.]+),/g)].map(
     (match) => `${match[1]}|${match[2]}|${match[3]}`
   );
-  assert.equal(
-    allowlist.length,
-    47,
-    "the applied migration's allowlist changed size; it is history and must not be edited"
-  );
-  // Spot-checks of the two shapes the allowlist has to keep: a model listed
-  // once at the value seeding wrote, and a model listed twice because its
-  // price changed while seeding still wrote resolved prices.
   assert.ok(
     allowlist.includes("glm-5.2|0.5|1"),
     "glm-5.2's seeded standard-class fallback must stay listed, or a stale row survives"
-  );
-  assert.ok(
-    allowlist.includes("claude-fable-5|15|60") &&
-      allowlist.includes("claude-fable-5|10|50"),
-    "a model seeded at two different prices must keep both rows"
   );
 
   assert.ok(

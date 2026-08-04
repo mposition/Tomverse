@@ -374,6 +374,7 @@ export const ko = {
         searchStatusFailed: "웹 검색 실패",
         searchStatusDeepResearch: "Deep Research",
         searchCitationsLabel: "출처",
+        memoryUsedDisclosure: "이 답변에 계정 기억 {count}개를 사용했습니다",
         modelsSelectedOne: "개 모델",
         modelsSelectedOther: "개 모델",
         maxModelsDescription: "최대 3개 모델 비교",
@@ -414,6 +415,7 @@ export const ko = {
         internalMonthlyCostSafetyLimit: "이 요청은 이번 달 처리할 수 있는 한도를 넘었습니다. 모델 수를 줄이거나 더 저렴한 모델을 선택해 보시고, 월간 초기화 후 다시 시도해 주세요.",
         providerCostSafetyLimit: "선택한 AI 제공사 중 하나를 지금 이용할 수 없습니다. 다른 제공사의 모델을 선택하거나 나중에 다시 시도해 주세요.",
         operationalCostGuardrail: "내부 안전 점검으로 이 요청이 잠시 중단되었습니다. 크레딧은 차감되지 않았습니다. 잠시 후 다시 시도하거나 더 저렴한 모델을 선택해 주세요.",
+        contextBundleStale: "메시지를 보내는 동안 계정 기억이 바뀌어 전송되지 않았습니다. 다시 보내면 변경된 기억으로 답변합니다.",
         planEntitlementExhausted: "이번 달 플랜 크레딧을 모두 사용했습니다. 크레딧을 추가로 구매하거나 플랜을 업그레이드하면 계속 사용할 수 있습니다.",
         concurrentReservationConflict: "동시에 처리 중인 다른 요청 때문에 크레딧 잔액이 변경되었습니다. 다시 시도해 주세요.",
         summarizeModelDifferences: "모델 답변 차이 요약",
@@ -1030,6 +1032,17 @@ export const ko = {
         refundRequestSuccess: "환불 요청이 접수되었습니다.",
         refundRequestFailed: "환불 요청을 접수하지 못했습니다.",
     },
+    // 설정 계층에서 공통으로 쓰는 표현. 설정은 route가 아니라 닫을 수 있는
+    // 패널이고, 상세 페이지는 그 패널을 이름으로 지목해 올라갑니다 — 그룹
+    // 이름과 breadcrumb은 두 shell과 패널에서 같은 문구여야 합니다
+    // (lib/settingsNavigation.ts).
+    settingsNav: {
+        navLabel: "설정 탐색",
+        backToSettings: "설정으로 돌아가기",
+        settings: "설정",
+        dataAndPersonalization: "데이터 및 개인화",
+        dataAndPersonalizationDescription: "가져온 대화와 계정 기억입니다. 각각은 별도 페이지에서 관리합니다.",
+    },
     // 외부 대화 Import (Release A). "다른 AI 서비스에서 가져오기"는 Data 탭의
     // "이 브라우저의 게스트 대화 가져오기"(auth.guestImportSectionTitle)와
     // 다른 기능이므로 명칭을 공유하지 않습니다 (policy §21).
@@ -1038,11 +1051,11 @@ export const ko = {
         dataTabDescription:
             "ChatGPT·Claude 내보내기 파일의 과거 대화를 Tomverse 계정에 저장합니다. 내보내기 파일은 브라우저 안에서만 읽습니다.",
         dataTabUsage: "가져온 대화 {conversations}개 · {storage} 저장됨",
-        dataTabOpen: "가져오기 설정 열기",
+        dataTabOpen: "가져오기 관리",
+        dataTabUsageEmpty: "아직 가져온 대화가 없습니다",
         pageTitle: "다른 AI 서비스에서 대화 가져오기",
         pageDescription:
             "ChatGPT 또는 Claude의 공식 데이터 내보내기 파일을 올리고, 내용을 확인한 뒤 Tomverse 계정에 보관할 대화를 선택하세요.",
-        backToChat: "채팅으로 돌아가기",
         backToImports: "가져오기 목록으로",
         signInRequired: "다른 AI 서비스의 대화를 가져오려면 로그인하세요.",
         disabledNotice: "외부 대화 가져오기는 지금 사용할 수 없습니다.",
@@ -1209,14 +1222,25 @@ export const ko = {
     // 계정 장기 기억 검토 (Release B, slice B3). 목록·삭제·설정은 flag와
     // 무관하게 항상 접근 가능하고, 검토·작성 동작만 rollout flag를 따릅니다.
     memoryReview: {
+        sourceDeleteDerivedImport:
+            "이 가져오기에서 만들어진 기억 {count}개도 함께 삭제됩니다.",
+        sourceDeleteDerivedConversation:
+            "이 대화에서 만들어진 기억 {count}개도 함께 삭제됩니다.",
+        sourceDeleteKeep: "기억은 삭제하지 않고 사용만 중지하기",
+        sourceDeleteEdited:
+            "직접 수정한 기억 {count}개는 삭제하지 않고 사용만 중지합니다.",
+        sourceDeleteKept:
+            "다른 근거가 남아 있는 기억 {count}개는 그대로 유지됩니다.",
         dataTabTitle: "계정 장기 기억",
         dataTabDescription:
             "가져온 대화에서 추출한 기억 후보를 검토하고, 승인한 기억을 새 대화에서 사용할지 설정합니다.",
-        dataTabOpen: "기억 설정 열기",
+        dataTabOpen: "기억 관리",
+        dataTabStatusOn: "새 대화에서 사용 중",
+        dataTabStatusOff: "새 대화에서 사용 안 함",
+        dataTabStatusPending: "검토 대기 {count}개",
         pageTitle: "계정 장기 기억",
         pageDescription:
             "검토를 기다리는 기억 후보를 승인하거나 거절하고, 사용 중인 기억을 수정·고정·삭제할 수 있습니다.",
-        backToChat: "채팅으로 돌아가기",
         signInRequired: "계정 장기 기억을 관리하려면 로그인하세요.",
         privacyNote:
             "기억은 사용자가 검토하고 승인한 것만 새 대화에서 사용됩니다. 승인한 기억과 답변 스타일은 현재 선택한 Tomverse 모델의 답변 생성에 참고 자료로 전달되며, 언제든지 조회·수정·비활성화·삭제할 수 있습니다.",
@@ -1324,6 +1348,76 @@ export const ko = {
             explanation_depth: "설명 깊이",
             citation_preference: "출처 표기 선호",
             code_style: "코드 스타일",
+        },
+    },
+    // 기억 추출 실행 (Release B, §11 사전 확인 계약 · §21 UI 경로).
+    // 실행 전 모델·묶음 수·크레딧을 보여주고 사용자가 명시적으로 확인해야
+    // 시작합니다. 승인된 pair가 없으면 시작 자체가 열리지 않습니다.
+    memoryExtraction: {
+        launchTitle: "가져온 대화에서 기억 추출",
+        launchDescription:
+            "가져온 대화를 골라 기억 후보를 추출합니다. 추출된 후보는 검토해서 승인하기 전까지 답변에 사용되지 않습니다.",
+        modelTitle: "추출에 사용할 모델",
+        modelUnavailable: "지금은 사용할 수 있는 추출 모델이 없습니다.",
+        modelUnavailableDescription:
+            "추출 모델은 품질 평가를 통과한 뒤에만 열립니다. 열리면 이 화면에서 선택할 수 있습니다.",
+        modelCredits: "묶음당 {credits} 크레딧",
+        conversationsTitle: "추출할 대화 선택",
+        conversationsDescription:
+            "선택한 대화의 내용만 추출에 사용됩니다. 대화는 크기에 따라 여러 묶음으로 나뉘어 처리되고, 크레딧은 묶음 수로 계산합니다.",
+        conversationsEmpty: "가져온 대화가 아직 없습니다.",
+        conversationsEmptyCta: "대화 가져오기",
+        selectAllVisible: "보이는 대화 모두 선택",
+        clearSelection: "선택 해제",
+        selectionSummary: "{count}개 선택 · 약 {size}",
+        selectionHidden: "선택한 {count}개는 지금 목록에 보이지 않습니다.",
+        selectionTooLarge: "한 번에 최대 {max}개까지 선택할 수 있습니다.",
+        conversationMeta: "메시지 {messages}개 · {size}",
+        loadMore: "더 보기",
+        estimate: "필요한 크레딧 확인",
+        estimating: "계산하는 중…",
+        estimateResult: "묶음 {chunks}개 · 약 {credits} 크레딧",
+        estimateDescription:
+            "대화 {conversations}개를 묶음 {chunks}개로 나눠 처리합니다. 실제 차감액은 실행 후 정산되며 확인한 금액을 넘지 않습니다.",
+        estimateStale: "선택이 바뀌었습니다. 크레딧을 다시 확인해 주세요.",
+        start: "{credits} 크레딧으로 추출 시작",
+        starting: "시작하는 중…",
+        runInProgress: "이미 진행 중인 추출이 있습니다.",
+        runInProgressOpen: "진행 상태 보기",
+        errorGeneric: "문제가 발생했습니다. 다시 시도해 주세요.",
+        errorEstimateChanged:
+            "선택한 대화가 바뀌어 견적이 달라졌습니다. 다시 확인한 뒤 시작해 주세요.",
+        errorPairUnavailable: "선택한 모델은 지금 사용할 수 없습니다.",
+        errorBudget:
+            "추출 용량이 일시적으로 가득 찼습니다. 잠시 후 다시 시도해 주세요.",
+        runTitle: "기억 추출 진행 상태",
+        runBack: "기억 설정으로 돌아가기",
+        runNotFound: "이 추출 작업을 찾을 수 없습니다.",
+        runModel: "모델",
+        runStarted: "시작: {date}",
+        runFinished: "종료: {date}",
+        runProgress: "묶음 {completed}/{total} 완료",
+        runPendingNote:
+            "차례를 기다리는 중입니다. 이 창을 닫아도 추출은 계속되고, 나중에 여기서 다시 확인할 수 있습니다.",
+        runRunningNote:
+            "추출이 진행 중입니다. 이 창을 닫아도 계속되며 완료되면 검토 목록에 후보가 나타납니다.",
+        runCompletedNote:
+            "추출이 끝났습니다. 검토 대기 목록에서 후보를 확인하세요.",
+        runFailedNote:
+            "추출을 끝내지 못했습니다. 완료된 묶음의 결과는 그대로 남아 있습니다.",
+        runCancelledNote: "추출이 취소되었습니다. 완료된 묶음의 결과는 남아 있습니다.",
+        runReview: "검토 대기 목록 보기",
+        cancel: "추출 취소",
+        cancelArmed: "한 번 더 누르면 취소됩니다",
+        cancelling: "취소하는 중…",
+        recentRunsTitle: "최근 추출 작업",
+        recentRunOpen: "자세히 보기",
+        status: {
+            pending: "대기 중",
+            running: "진행 중",
+            completed: "완료",
+            failed: "실패",
+            cancelled: "취소됨",
         },
     },
     privacyPolicy: {

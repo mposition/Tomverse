@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
+import { readdirSync, readFileSync } from "node:fs";
+import { extname, join, relative } from "node:path";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
 import {
+  ENCODING_MARKER_PATTERNS,
   findQuestionRunsInsideStrings,
   stringLikeRanges,
 } from "../scripts/text-encoding-check-core.mjs";
@@ -108,4 +112,92 @@ test("an unterminated string does not consume the rest of the file", () => {
   const ranges = stringLikeRanges(source, "fixture.ts");
   assert.ok(ranges.every((range) => range.end <= source.length));
   assert.ok(ranges.some((range) => range.end - range.start < source.length / 2));
+});
+
+// ---------------------------------------------------------------------------
+// Marker patterns.
+
+const markersIn = (text) =>
+  ENCODING_MARKER_PATTERNS.flatMap((pattern) => {
+    pattern.regex.lastIndex = 0;
+    return [...text.matchAll(pattern.regex)].map(() => pattern.name);
+  });
+
+test("a raw control character in a source file is a finding", () => {
+  // The regression this rule was added for: lib/memoryExtractionLaunch.ts held
+  // a literal NUL as a signature separator, which made git classify the whole
+  // module as binary. Every change to it rendered as "Binary files ... differ"
+  // -- no viewable diff in a pull request -- in the module that decides whether
+  // a credit-spending extraction run is a repeat of one already paid for.
+  // Assembled at runtime rather than written out: a literal NUL in this
+  // file would make the test that guards against literal NULs the one file
+  // nobody can review.
+  const source = `const SEPARATOR = "${String.fromCharCode(0)}";`;
+  assert.deepEqual(markersIn(source), ["control-character"]);
+});
+
+test("every C0 control except tab, LF and CR is caught, and DEL too", () => {
+  for (let code = 0; code < 0x20; code += 1) {
+    const expected = [0x09, 0x0a, 0x0d].includes(code) ? [] : ["control-character"];
+    assert.deepEqual(
+      markersIn(String.fromCharCode(code)),
+      expected,
+      `code point ${code}`
+    );
+  }
+  assert.deepEqual(markersIn(String.fromCharCode(0x7f)), ["control-character"]);
+});
+
+test("the escaped form the fix uses is not itself a finding", () => {
+  // The whole point of the rule is that it pushes the author to the escape.
+  // A rule that then flagged the escape would have no fix at all.
+  const source = 'const SEPARATOR = "\\u0000";';
+  assert.deepEqual(markersIn(source), []);
+});
+
+test("ordinary source text produces no marker", () => {
+  const source = [
+    `const greeting = "안녕하세요";`,
+    `const path = "a/b";`,
+    "\tconst indented = 1;",
+  ].join("\n");
+  assert.deepEqual(markersIn(source), []);
+});
+
+test("the mojibake markers still fire", () => {
+  assert.deepEqual(markersIn("\uFFFD"), ["replacement-character"]);
+  assert.ok(markersIn("\u00EC\u00A0").includes("korean-mojibake-marker"));
+});
+
+test("no file under the scanned roots carries a control character", () => {
+  // Run against the real tree: the rule exists to keep three files that had one
+  // from getting it back, and to catch the fourth before it is committed.
+  const roots = ["app", "components", "lib", "locales"];
+  const extensions = new Set([
+    ".ts",
+    ".tsx",
+    ".js",
+    ".jsx",
+    ".mjs",
+    ".cjs",
+    ".md",
+    ".json",
+  ]);
+  const repoRoot = fileURLToPath(new URL("..", import.meta.url));
+  const offenders = [];
+  const walk = (dir) => {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      if (entry.name === "node_modules" || entry.name === ".next") continue;
+      const full = join(dir, entry.name);
+      if (entry.isDirectory()) {
+        walk(full);
+      } else if (extensions.has(extname(entry.name))) {
+        if (markersIn(readFileSync(full, "utf8")).includes("control-character")) {
+          offenders.push(relative(repoRoot, full));
+        }
+      }
+    }
+  };
+  for (const root of roots) walk(join(repoRoot, root));
+  assert.deepEqual(offenders, []);
 });
