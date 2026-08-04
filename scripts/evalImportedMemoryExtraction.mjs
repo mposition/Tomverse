@@ -40,10 +40,13 @@ import {
 } from "../lib/memoryExtractionEvalRegister.ts";
 import {
     MEMORY_EVAL_CASES,
+    MEMORY_EVAL_DATASET_FROZEN,
+    MEMORY_EVAL_DATASET_PURPOSE,
     MEMORY_EVAL_DATASET_VERSION,
 } from "../lib/memoryExtractionEvalFixtures.ts";
 import {
     MEMORY_EVAL_MIN_SAMPLES_PER_CATEGORY_ARM,
+    decideEvalRunMode,
     findDuplicateCases,
     judgeEval,
     scoreCase,
@@ -103,24 +106,43 @@ if (!registerEntry) {
     process.exit(1);
 }
 
-if (live && !registerEntry.evalBudget) {
-    // §12.5. The budget line is a human approval with an amount, an approver
-    // and a ticket; without it there is nothing authorising provider spend on
-    // this pair, so the run refuses rather than spending first and asking
-    // later.
-    console.error(
-        `\n${modelId}::${MEMORY_EXTRACTION_PROMPT_VERSION} has no approved eval budget (§12.5).\n\n` +
-            "Smoke mode needs no budget:\n" +
-            "  npm run eval:memory-extraction\n\n" +
-            "A live run needs `evalBudget` filled in on this entry in\n" +
-            "lib/memoryExtractionEvalRegister.ts (approvedBy, maxUsd, ticket, approvedAt),\n" +
-            "merged as its own reviewed change. That record is the audit trail.\n"
-    );
-    process.exit(1);
-}
+// The single decision about whether a provider may be reached at all. It is
+// taken here, before anything that could call one is imported: the live
+// adapter's `import("ai")` is inside a function that only a `live` decision
+// ever reaches (tests/memoryExtractionEvalBoundary.test.mjs proves that with
+// the network blocked).
+const runMode = decideEvalRunMode({
+    live,
+    registerEntry,
+    hasApiKey: Boolean(process.env.OPENAI_API_KEY?.trim()),
+    datasetFrozen: MEMORY_EVAL_DATASET_FROZEN,
+    requestedRunCapUsd: maxCostUsd,
+});
 
-if (live && !process.env.OPENAI_API_KEY?.trim()) {
-    console.error("OPENAI_API_KEY is required for --live.");
+const REFUSAL_MESSAGES = {
+    unknown_pair: `No register entry for ${modelId}::${MEMORY_EXTRACTION_PROMPT_VERSION}.`,
+    no_eval_budget:
+        `${modelId}::${MEMORY_EXTRACTION_PROMPT_VERSION} has no approved eval budget (§12.5).\n\n` +
+        "Smoke mode needs no budget:\n" +
+        "  npm run eval:memory-extraction\n\n" +
+        "A live run needs `evalBudget` filled in on this entry in\n" +
+        "lib/memoryExtractionEvalRegister.ts (approvedBy, maxUsd, ticket, approvedAt),\n" +
+        "merged as its own reviewed change. That record is the audit trail.",
+    no_api_key: "OPENAI_API_KEY is required for --live.",
+    dataset_not_frozen:
+        `Dataset ${MEMORY_EVAL_DATASET_VERSION} (${MEMORY_EVAL_DATASET_PURPOSE}) is not frozen (§12.2).\n\n` +
+        "A decision-grade number computed against a sample that is still being\n" +
+        "edited cannot be cited. Freeze the dataset — every cell at or above the\n" +
+        "floor, authoring and independent review complete — then set\n" +
+        "MEMORY_EVAL_DATASET_FROZEN and bump MEMORY_EVAL_DATASET_VERSION.",
+    run_cap_above_approved_ceiling:
+        `--max-cost-usd=${maxCostUsd} is above the approved ceiling for this pair ` +
+        `(US$${registerEntry?.evalBudget?.maxUsd}).\n` +
+        "A per-run cap may narrow the approved budget, never widen it.",
+};
+
+if (runMode.mode === "refused") {
+    console.error(`\n${REFUSAL_MESSAGES[runMode.reason]}\n`);
     process.exit(1);
 }
 
@@ -165,6 +187,11 @@ const smokeAdapter = (testCase) => async () => {
 
 let accruedCostUsd = 0;
 let costStopped = false;
+let consecutiveFailures = 0;
+let abortedOnFailures = false;
+
+/** Consecutive scoreable-answer failures after which the run stops. */
+const MAX_CONSECUTIVE_FAILURES = 5;
 
 const liveAdapter = async ({ prompt }) => {
     const [{ generateText }, { getActiveAiModel }, { getModel }, { resolveModelPricing }] =
@@ -203,8 +230,17 @@ const outcomes = [];
 const records = [];
 
 for (const testCase of MEMORY_EVAL_CASES) {
-    if (maxCostUsd !== null && accruedCostUsd >= maxCostUsd) {
+    // The ceiling is the approved budget narrowed by any --max-cost-usd, so a
+    // runaway retry or an output-token anomaly stops here rather than being
+    // discovered on the invoice.
+    if (runMode.mode === "live" && accruedCostUsd >= runMode.ceilingUsd) {
         costStopped = true;
+        break;
+    }
+    if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
+        // A pair that fails this many times running is broken, not unlucky.
+        // Continuing would spend the rest of the budget proving it again.
+        abortedOnFailures = true;
         break;
     }
     const conversations = testCase.conversations.map((conversation) => ({
@@ -223,7 +259,8 @@ for (const testCase of MEMORY_EVAL_CASES) {
     try {
         analysis = await analyzeExtractionChunk({
             conversations,
-            adapter: live ? liveAdapter : smokeAdapter(testCase),
+            adapter:
+                runMode.mode === "live" ? liveAdapter : smokeAdapter(testCase),
         });
     } catch (error) {
         failure = redactSecrets(error?.message ?? "adapter threw");
@@ -245,6 +282,7 @@ for (const testCase of MEMORY_EVAL_CASES) {
         disposition: decision.validation.disposition,
     }));
 
+    consecutiveFailures = failure ? consecutiveFailures + 1 : 0;
     const outcome = scoreCase(testCase, candidates, failure);
     outcomes.push(outcome);
     records.push({
@@ -266,7 +304,7 @@ const verdict = judgeEval(outcomes);
 const line = (label, value) => console.log(`  ${label.padEnd(34)} ${value}`);
 
 console.log(`\nMemory extraction eval — ${modelId}::${MEMORY_EXTRACTION_PROMPT_VERSION}`);
-console.log(`  mode: ${live ? "LIVE" : "SMOKE"}   dataset: ${MEMORY_EVAL_DATASET_VERSION}   commit: ${commitSha}`);
+console.log(`  mode: ${runMode.mode === "live" ? "LIVE" : "SMOKE"}   dataset: ${MEMORY_EVAL_DATASET_VERSION}   commit: ${commitSha}`);
 
 console.log("\nAggregate");
 line("cases", verdict.aggregate.cases);
@@ -299,7 +337,7 @@ if (verdict.failures.length > 0) {
     console.log("\nEvery §12.3 rule passed on this sample.");
 }
 
-if (!live) {
+if (runMode.mode !== "live") {
     console.log(
         "\nSMOKE RUN — NOT an eval result. No provider was called; the answers were\n" +
             "produced by a deterministic stub, so these numbers say nothing about the\n" +
@@ -321,13 +359,21 @@ if (workingTreeDirty) {
         "\nWorking tree is dirty, so the commit above does not fully describe what ran."
     );
 }
+if (abortedOnFailures) {
+    console.log(
+        `\nABORTED — stopped after ${MAX_CONSECUTIVE_FAILURES} consecutive cases failed to ` +
+            `produce a scoreable answer, at ${outcomes.length}/${MEMORY_EVAL_CASES.length} cases.\n` +
+            "A pair failing that consistently is broken, not unlucky; the rest of the budget\n" +
+            "would only prove it again."
+    );
+}
 if (costStopped) {
     console.log(
         `\nTRUNCATED — stopped at the --max-cost-usd=${maxCostUsd} ceiling after ` +
             `${outcomes.length}/${MEMORY_EVAL_CASES.length} cases. The missing cases were planned, not absent.`
     );
 }
-if (live) {
+if (runMode.mode === "live") {
     line("\naccrued cost (USD, estimate)", accruedCostUsd.toFixed(4));
     if (registerEntry.evalBudget) {
         line("approved ceiling (USD)", registerEntry.evalBudget.maxUsd);
@@ -339,7 +385,7 @@ const artifact = {
         modelId,
         promptVersion: MEMORY_EXTRACTION_PROMPT_VERSION,
         datasetVersion: MEMORY_EVAL_DATASET_VERSION,
-        mode: live ? "live" : "smoke",
+        mode: runMode.mode,
         commitSha,
         workingTreeDirty,
         generatedAt: new Date().toISOString(),
@@ -347,8 +393,17 @@ const artifact = {
         plannedCaseCount: MEMORY_EVAL_CASES.length,
         truncatedByCostCeiling: costStopped,
         maxCostUsd,
-        accruedCostUsd: live ? accruedCostUsd : 0,
-        decisionGrade: verdict.adequacy.decisionGrade && live,
+        accruedCostUsd: runMode.mode === "live" ? accruedCostUsd : 0,
+        // Decision-grade needs all three: a live run, a sample at the §12.2
+        // floor, and a frozen dataset. Any one missing and the artifact says so.
+        decisionGrade:
+            verdict.adequacy.decisionGrade &&
+            runMode.mode === "live" &&
+            MEMORY_EVAL_DATASET_FROZEN,
+        datasetFrozen: MEMORY_EVAL_DATASET_FROZEN,
+        datasetPurpose: MEMORY_EVAL_DATASET_PURPOSE,
+        abortedOnConsecutiveFailures: abortedOnFailures,
+        runCeilingUsd: runMode.mode === "live" ? runMode.ceilingUsd : null,
     },
     verdict: {
         pass: verdict.pass,

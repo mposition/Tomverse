@@ -24,6 +24,32 @@ import type { MemoryEvalCase } from "@/lib/memoryExtractionEvalCore";
 
 export const MEMORY_EVAL_DATASET_VERSION = "mem-eval-seed-1";
 
+/**
+ * Whether this dataset is frozen for a decision-grade run (§12.2).
+ *
+ * `false` while cases are still being authored and reviewed, and the harness
+ * refuses `--live` on that basis alone: a number computed against a sample
+ * that is still moving cannot be cited, and re-running after an edit without
+ * a version bump is exactly how an eval loses its meaning.
+ *
+ * Freezing is a deliberate act that happens once, together with:
+ *   * every cell at or above the §12.2 floor;
+ *   * authoring and independent review complete, with the reviewer recorded;
+ *   * a version bump here and a manifest digest in the artifact.
+ *
+ * Editing a frozen dataset means a NEW version and invalidates any verdict
+ * computed against the old one.
+ */
+export const MEMORY_EVAL_DATASET_FROZEN = false;
+
+/**
+ * Which set this is. The cases used while tuning `mem-extract-v1` must not be
+ * the cases the final judgement is computed on — a prompt tuned against its
+ * own test set reports its own overfitting as quality.
+ */
+export const MEMORY_EVAL_DATASET_PURPOSE: "development" | "decision" =
+    "development";
+
 let sequence = 0;
 const nextId = (prefix: string) => `${prefix}-${(sequence += 1)}`;
 

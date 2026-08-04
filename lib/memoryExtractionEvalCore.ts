@@ -353,6 +353,66 @@ export function judgeEval(outcomes: readonly CaseOutcome[]): EvalVerdict {
     return { pass: failures.length === 0, failures, aggregate, byLanguage, adequacy };
 }
 
+/* -------------------------------------------------------------------------
+ * Run-mode gate
+ * ---------------------------------------------------------------------- */
+
+export type EvalRunModeDecision =
+    | { mode: "smoke" }
+    | { mode: "live"; ceilingUsd: number }
+    | {
+          mode: "refused";
+          reason:
+              | "unknown_pair"
+              | "no_eval_budget"
+              | "no_api_key"
+              | "dataset_not_frozen"
+              | "run_cap_above_approved_ceiling";
+      };
+
+/**
+ * Whether this invocation may call a provider, decided before anything is
+ * imported that could.
+ *
+ * Pure and exported so the boundary can be tested as a truth table rather
+ * than inferred from the runner's control flow. The runner's only job is to
+ * exit on a refusal *before* it dynamically imports the AI SDK — a static
+ * import check cannot see a dynamic one, so the guarantee has to come from
+ * here plus the behavioural test that runs the script with no budget and a
+ * network blocker armed.
+ *
+ * §12.5: a live run needs a human-approved budget on the pair. §12.2: it also
+ * needs a frozen dataset, because a decision-grade number computed against a
+ * sample that is still being edited cannot be cited.
+ */
+export function decideEvalRunMode(input: {
+    live: boolean;
+    registerEntry: { evalBudget: { maxUsd: number } | null } | null | undefined;
+    hasApiKey: boolean;
+    datasetFrozen: boolean;
+    /** Per-run ceiling requested on the command line, if any. */
+    requestedRunCapUsd?: number | null;
+}): EvalRunModeDecision {
+    if (!input.live) return { mode: "smoke" };
+    if (!input.registerEntry) return { mode: "refused", reason: "unknown_pair" };
+    const budget = input.registerEntry.evalBudget;
+    if (!budget) return { mode: "refused", reason: "no_eval_budget" };
+    if (!input.hasApiKey) return { mode: "refused", reason: "no_api_key" };
+    if (!input.datasetFrozen) {
+        return { mode: "refused", reason: "dataset_not_frozen" };
+    }
+    // A per-run cap may only narrow the approved programme ceiling. Letting a
+    // command-line flag widen it would make the approval meaningless.
+    const requested = input.requestedRunCapUsd;
+    if (requested != null && requested > budget.maxUsd) {
+        return { mode: "refused", reason: "run_cap_above_approved_ceiling" };
+    }
+    return {
+        mode: "live",
+        ceilingUsd: requested != null ? requested : budget.maxUsd,
+    };
+}
+
 /**
  * §12.2 forbids inflating the sample with copies or trivial variants, so the
  * harness refuses to count a dataset that contains them. Identity is the
