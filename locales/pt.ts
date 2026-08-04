@@ -406,6 +406,8 @@ export const pt = {
         fileErrorHelpLink: "Abrir ajuda de upload de arquivos",
     },
     share: {
+        personalizationNotice:
+            "Estas respostas podem ter sido moldadas pelas configurações de personalização de quem as gerou. As memórias em si não são compartilhadas.",
         eyebrow: "Tomverse shared conversation",
         publicDocumentDescription: "Snapshot público somente leitura criado no Tomverse. Atualizações posteriores da conversa não são adicionadas a esta página.",
         readOnly: "Somente leitura",

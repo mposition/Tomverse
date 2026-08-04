@@ -200,6 +200,20 @@ export function SharedConversationView({
               {t("share.expires")} {formatDate(expiresAt, lang)}
             </span>
           </div>
+          {/*
+            §13.3. Shown for every snapshot taken while memory injection was
+            available, whether or not this author has a single stored memory:
+            showing it only when they did would make its presence the
+            disclosure. It names no count, kind or statement.
+          */}
+          {loadedSnapshot.personalizationPossible ? (
+            <p
+              className="text-xs leading-5 text-zinc-500 dark:text-zinc-400"
+              data-testid="share-personalization-notice"
+            >
+              {t("share.personalizationNotice")}
+            </p>
+          ) : null}
           <div className="flex flex-col gap-3 rounded-2xl border border-zinc-200 bg-zinc-50 p-3 dark:border-zinc-800 dark:bg-zinc-900 sm:flex-row sm:items-center sm:justify-between">
             <div className="min-w-0">
               <p className="text-xs font-bold uppercase tracking-wide text-zinc-500">

@@ -559,6 +559,8 @@ export const ko = {
         fileErrorHelpLink: "파일 업로드 도움말 열기",
     },
     share: {
+        personalizationNotice:
+            "이 답변은 작성자의 개인화 설정의 영향을 받았을 수 있습니다. 기억된 내용 자체가 공유된 것은 아닙니다.",
         eyebrow: "Tomverse 공유 대화",
         publicDocumentDescription: "Tomverse에서 생성된 공개 읽기 전용 스냅샷입니다. 공유 이후의 대화 업데이트는 이 페이지에 추가되지 않습니다.",
         readOnly: "읽기 전용",

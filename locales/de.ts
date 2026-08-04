@@ -406,6 +406,8 @@ export const de = {
         fileErrorHelpLink: "Hilfe zum Datei-Upload öffnen",
     },
     share: {
+        personalizationNotice:
+            "Diese Antworten können durch die Personalisierungseinstellungen der Autorin oder des Autors geprägt sein. Die gespeicherten Erinnerungen selbst werden nicht geteilt.",
         eyebrow: "Tomverse shared conversation",
         publicDocumentDescription: "Ein öffentlicher schreibgeschützter Snapshot aus Tomverse. Spätere Chat-Updates werden dieser Seite nicht hinzugefügt.",
         readOnly: "Nur Lesen",
