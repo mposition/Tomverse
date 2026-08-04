@@ -4,6 +4,10 @@ import type { Prisma } from "@prisma/client";
 import { ApiSecurityError } from "@/lib/apiSecurity";
 import { manualEvidenceDigest } from "@/lib/memoryEvidenceValidation";
 import {
+    serializeMemoryExportItem,
+    type MemoryExportSource,
+} from "@/lib/memoryExportCore";
+import {
     memoryStatementKey,
     validateMemoryCandidate,
     type MemoryEvidenceInput,
@@ -506,6 +510,113 @@ export async function bulkApproveMemories(userId: string) {
         }
     }
     return { approved, skipped };
+}
+
+const EXPORT_PAGE_SIZE = 100;
+
+/**
+ * Streams every memory the account holds, oldest page first, for the §13.2
+ * export. Keyset pagination rather than offset: an account may hold many
+ * items, and the whole set must never be materialized at once.
+ *
+ * Every status is included — a candidate the user never reviewed and a
+ * rejected one are both things the account holds, and an export that showed
+ * only active memories would understate what is stored.
+ */
+export async function* iterateMemoryExportItems(userId: string) {
+    let cursor: { createdAt: Date; id: string } | null = null;
+    for (;;) {
+        // Annotated rather than inferred: the generator's yield type flows
+        // from these rows, and inferring them from the query inside it is
+        // circular (TS7022). Same reason iterateExternalExportConversations
+        // spells its row type out.
+        const rows: Array<MemoryExportSource & { id: string }> =
+            await prisma.memoryItem.findMany({
+                where: {
+                    userId,
+                    ...(cursor
+                        ? {
+                              OR: [
+                                  { createdAt: { lt: cursor.createdAt } },
+                                  {
+                                      createdAt: cursor.createdAt,
+                                      id: { lt: cursor.id },
+                                  },
+                              ],
+                          }
+                        : {}),
+                },
+                orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+                take: EXPORT_PAGE_SIZE,
+                select: {
+                    id: true,
+                    kind: true,
+                    statement: true,
+                    status: true,
+                    sensitivity: true,
+                    confidence: true,
+                    pinned: true,
+                    expiresAt: true,
+                    retrievalVersion: true,
+                    revision: true,
+                    createdAt: true,
+                    approvedAt: true,
+                    extractionModelId: true,
+                    promptVersion: true,
+                    evidences: {
+                        select: {
+                            sourceType: true,
+                            manualContent: true,
+                            externalMessage: {
+                                select: {
+                                    externalConversationId: true,
+                                    ordinal: true,
+                                    role: true,
+                                },
+                            },
+                        },
+                    },
+                },
+            });
+        if (rows.length === 0) return;
+        for (const row of rows) yield serializeMemoryExportItem(row);
+        if (rows.length < EXPORT_PAGE_SIZE) return;
+        const last = rows[rows.length - 1];
+        cursor = { createdAt: last.createdAt, id: last.id };
+    }
+}
+
+/**
+ * §13.1 delete-all. One transaction so a memory store is never half-emptied
+ * while an extraction is still running against it:
+ *
+ *  - active runs are cancelled first, which is what stops an in-flight
+ *    extraction re-populating what was just deleted — `completeMemoryExtraction
+ *    Chunk` only advances a `running` run, so a cancelled one cannot write
+ *    progress afterwards.
+ *  - deleting the items takes their evidence with them (DB cascade) and their
+ *    searchTerms with them (a column on the deleted row), so retrieval loses
+ *    them in the same instant.
+ *  - imported conversations are deliberately untouched: they are a separate
+ *    resource with a separate confirmation (§13.1), and deleting a user's
+ *    imports because they cleared their memories would destroy data they did
+ *    not ask to lose.
+ *
+ * Idempotent: on an already-empty store it deletes nothing and reports zero.
+ */
+export async function deleteAllMemories(userId: string) {
+    return prisma.$transaction(async (tx) => {
+        await acquireUserMemoryLock(tx, userId);
+        const cancelledRuns = await tx.memoryExtractionRun.updateMany({
+            where: { userId, status: { in: ["pending", "running"] } },
+            data: { status: "cancelled", leaseExpiresAt: null },
+        });
+        const deleted = await tx.memoryItem.deleteMany({ where: { userId } });
+        return {
+            deletedMemories: deleted.count,
+            cancelledRuns: cancelledRuns.count,
+        };
+    });
 }
 
 export async function getMemorySettings(userId: string) {

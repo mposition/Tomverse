@@ -1049,6 +1049,20 @@ export const pt = {
         createSensitiveLabel: "Marcar como informação sensível",
         createSubmit: "Adicionar memória",
         createSuccess: "Memória adicionada.",
+        reauthRequired:
+            "Por segurança, entre novamente para continuar.",
+        exportTitle: "Baixar suas memórias",
+        exportDescription:
+            "Baixe todas as memórias salvas na sua conta, com o estado e a procedência dos fundamentos, em um único arquivo JSON. O arquivo não é mantido em nossos servidores.",
+        exportDownload: "Baixar tudo (JSON)",
+        deleteAllTitle: "Excluir todas as memórias",
+        deleteAllDescription:
+            "Exclui todas as memórias salvas e seus fundamentos, e cancela qualquer extração em andamento. Não é possível desfazer.",
+        deleteAllImportsNote:
+            "As conversas importadas não são excluídas. Você pode excluí-las separadamente nas configurações de importação.",
+        deleteAllConfirmLabel: "Digite {phrase} para confirmar",
+        deleteAllSubmit: "Excluir todas as memórias",
+        deleteAllDone: "Todas as memórias foram excluídas.",
         status: {
             candidate: "Aguardando revisão",
             active: "Em uso",
@@ -1095,6 +1109,8 @@ export const pt = {
         attachments: "Anexos podem ser armazenados temporariamente em armazenamento de objetos criptografado para envio ao modelo e extração de documentos. Anexos temporários são atualmente excluídos após aproximadamente um dia pela política de ciclo de vida.",
         externalImportTitle: "Conversas importadas de outros serviços de IA",
         externalImport: "Você pode guardar na sua conta Tomverse as conversas anteriores que selecionar de um arquivo de exportação baixado de outro serviço de IA, como ChatGPT ou Claude. O arquivo de exportação é aberto apenas no seu navegador; o arquivo original nunca é enviado nem retido nos servidores ou no armazenamento da Tomverse. Somente o texto normalizado das conversas selecionadas, junto com os dados de origem (serviço de origem, horários originais, nomes de modelo apenas para exibição), é guardado como material privado da conta. Imagens, áudio e anexos não são importados. As conversas importadas podem conter dados pessoais de outras pessoas, portanto é sua responsabilidade confirmar que você tem direito de importar esses dados. Você pode consultar, excluir e exportar o material importado a qualquer momento, e ele é excluído junto com a sua conta. Excluí-lo da Tomverse não exclui os dados mantidos pelo serviço original.",
+        memoryTitle: "Memória de longo prazo da conta",
+        memory: "Se você optar por usar o recurso de memória, a Tomverse envia as partes das suas conversas importadas que você selecionar ao provedor de IA que você confirmar, para extrair memórias candidatas. A extração usa o modelo e a quantidade de créditos exibidos a você antes da execução. As candidatas extraídas não são usadas para gerar respostas até que você as revise e aprove. Candidatas classificadas como sensíveis e as que exigem revisão individual ficam fora da aprovação em massa e precisam ser confirmadas uma a uma. Candidatas, memórias aprovadas e seus fundamentos permanecem na sua conta até que você as exclua ou os dados da sua conta sejam excluídos. As memórias aprovadas e as preferências de estilo de resposta são enviadas como material de referência ao provedor de IA que gera cada nova resposta — ou seja, ao provedor de cada modelo quando você compara vários. Você pode consultar, editar e desativar as memórias salvas a qualquer momento, baixar a lista completa como arquivo ou excluir todas de uma vez. Ao desativar a memória, ela deixa de ser usada em novos chats.",
         analyticsTitle: "Análise de produto e atribuição de campanhas",
         analytics: "O Tomverse utiliza sempre o armazenamento essencial de sessão, segurança, idioma e preferências necessário ao serviço. Para análise de produto, visitantes da UE/EEE, Reino Unido, Suíça ou região não verificada têm de aceitar antes de iniciar o Google Analytics 4. Na Austrália e em regiões adicionadas após análise jurídica, a análise minimizada começa após um aviso claro e pode ser desativada de imediato ou mais tarde. Registamos eventos aprovados e metadados como origem UTM, idioma, país, número de modelos e plano. A Google também pode tratar endereço IP, navegador, URL da página e localização aproximada fora do país do visitante. Prompts, respostas, nomes ou conteúdos de ficheiros, e-mails e nomes de perfil nunca são incluídos. O armazenamento publicitário e a personalização permanecem desativados.",
         retentionTitle: "Retenção e exclusão",
