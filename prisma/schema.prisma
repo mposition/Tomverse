@@ -788,6 +788,16 @@ model ImageGeneration {
   // history, and a dimension nobody measured is absent rather than inferred.
   outputWidth    Int?
   outputHeight   Int?
+
+  // The parameters this attempt actually sent to the provider (policy §12.1).
+  // Reconstructing them from `size`/`quality` stopped being possible once each
+  // provider started translating a resolution tier its own way, and a price
+  // dispute turns on what was sent, not on what the row implies.
+  //
+  // The prompt is deliberately NOT in here: it is already on this row, and
+  // duplicating user content into an audit blob would create a second place
+  // every deletion path has to find.
+  providerRequestParams Json?
   backgroundMode String @default("opaque")
   outputFormat   String @default("png")
   moderationMode String @default("auto")

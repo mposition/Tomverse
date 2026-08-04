@@ -48,7 +48,13 @@ export class ImageProviderError extends Error {
     >,
     message: string,
     public readonly status: number | null = null,
-    public readonly providerRequestId: string | null = null
+    public readonly providerRequestId: string | null = null,
+    /**
+     * The parameters the failed call sent, prompt excluded. A failure is
+     * exactly when someone needs to know what was asked for, and after the
+     * throw the body is otherwise gone.
+     */
+    public readonly requestParams: Record<string, unknown> | null = null
   ) {
     super(message);
     this.name = "ImageProviderError";
@@ -116,6 +122,12 @@ export type ImageProviderResult = {
    */
   outputWidth: number | null;
   outputHeight: number | null;
+  /**
+   * Exactly the parameters this call sent, prompt excluded (policy §12.1).
+   * Taken from the body that was serialised rather than rebuilt, so the audit
+   * record cannot drift from the request it claims to describe.
+   */
+  requestParams: Record<string, unknown>;
 };
 
 const getXaiApiKey = () => {
@@ -144,6 +156,18 @@ const getImageApiKey = () => {
   }
   return key;
 };
+
+/**
+ * The audit view of a request body: everything except the prompt, which is
+ * already stored on the generation row and must not be duplicated into a blob
+ * that deletion would then have to find twice.
+ */
+const auditableRequestParams = (
+  body: Record<string, unknown>
+): Record<string, unknown> =>
+  Object.fromEntries(
+    Object.entries(body).filter(([key]) => key !== "prompt")
+  );
 
 const wait = (ms: number) =>
   new Promise((resolveWait) => setTimeout(resolveWait, ms));
@@ -180,6 +204,17 @@ export const generateImageWithProvider = async (input: {
       `No adapter is implemented for provider ${model.provider}.`
     );
   }
+  const openAiBody = {
+    model: model.apiModelId,
+    prompt: input.prompt,
+    size: input.size,
+    quality: input.quality,
+    background: "opaque",
+    output_format: "png",
+    moderation: "auto",
+    n: 1,
+  };
+  const requestParams = auditableRequestParams(openAiBody);
   const apiKey = getImageApiKey();
   let lastError: ImageProviderError | null = null;
 
@@ -196,16 +231,7 @@ export const generateImageWithProvider = async (input: {
           Authorization: `Bearer ${apiKey}`,
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({
-          model: model.apiModelId,
-          prompt: input.prompt,
-          size: input.size,
-          quality: input.quality,
-          background: "opaque",
-          output_format: "png",
-          moderation: "auto",
-          n: 1,
-        }),
+        body: JSON.stringify(openAiBody),
         signal: AbortSignal.timeout(PROVIDER_TIMEOUT_MS),
       });
     } catch (error) {
@@ -213,7 +239,10 @@ export const generateImageWithProvider = async (input: {
         "provider_failed",
         error instanceof Error && error.name === "TimeoutError"
           ? "Image provider request timed out."
-          : "Image provider request failed."
+          : "Image provider request failed.",
+        null,
+        null,
+        requestParams
       );
       continue;
     }
@@ -226,7 +255,8 @@ export const generateImageWithProvider = async (input: {
         failurePhase,
         `Image provider rejected the request (HTTP ${response.status}).`,
         response.status,
-        providerRequestId
+        providerRequestId,
+        requestParams
       );
       if (
         failurePhase === "provider_rate_limited" ||
@@ -248,7 +278,8 @@ export const generateImageWithProvider = async (input: {
         "provider_failed",
         "Image provider returned no image payload.",
         response.status,
-        providerRequestId
+        providerRequestId,
+        requestParams
       );
     }
     const inputTokens = Number.isSafeInteger(payload?.usage?.input_tokens)
@@ -272,6 +303,7 @@ export const generateImageWithProvider = async (input: {
       provenance: ["c2pa"],
       outputWidth: dimensions?.width ?? null,
       outputHeight: dimensions?.height ?? null,
+      requestParams,
     };
   }
 
@@ -309,6 +341,7 @@ const generateWithXai = async (
       `Image size ${input.size} has no xAI resolution mapping.`
     );
   }
+  const requestParams = auditableRequestParams(body);
   const apiKey = getXaiApiKey();
   let lastError: ImageProviderError | null = null;
 
@@ -333,7 +366,10 @@ const generateWithXai = async (
         "provider_failed",
         error instanceof Error && error.name === "TimeoutError"
           ? "Image provider request timed out."
-          : "Image provider request failed."
+          : "Image provider request failed.",
+        null,
+        null,
+        requestParams
       );
       continue;
     }
@@ -347,7 +383,8 @@ const generateWithXai = async (
         failurePhase,
         `Image provider rejected the request (HTTP ${response.status}).`,
         response.status,
-        providerRequestId
+        providerRequestId,
+        requestParams
       );
       if (
         failurePhase === "provider_rate_limited" ||
@@ -367,7 +404,8 @@ const generateWithXai = async (
         "provider_failed",
         "Image provider returned no usable image payload.",
         response.status,
-        providerRequestId
+        providerRequestId,
+        requestParams
       );
     }
     const imageBytes = Buffer.from(parsed.imageBase64, "base64");
@@ -385,6 +423,7 @@ const generateWithXai = async (
       provenance: [],
       outputWidth: dimensions?.width ?? null,
       outputHeight: dimensions?.height ?? null,
+      requestParams,
     };
   }
 

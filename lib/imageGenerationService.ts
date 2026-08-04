@@ -907,6 +907,12 @@ const finalizeFailure = async (input: {
   internalErrorDetail?: string;
   providerRequestId?: string | null;
   /**
+   * What the failed attempt sent, prompt excluded. A failure is exactly when
+   * someone needs to know what was asked for, so it is snapshotted on the
+   * losing path too, not only the winning one.
+   */
+  providerRequestParams?: Record<string, unknown> | null;
+  /**
    * Whether the reserved provider budget should be released. False on every
    * path where the provider was actually called (moderation blocks and
    * provider errors still cost money Tomverse absorbs -- policy section 5);
@@ -989,6 +995,7 @@ const finalizeFailure = async (input: {
         publicErrorCode: input.publicErrorCode,
         internalErrorDetail: input.internalErrorDetail?.slice(0, 1_000),
         providerRequestId: input.providerRequestId ?? undefined,
+        providerRequestParams: toJsonSnapshot(input.providerRequestParams),
         failedAt: new Date(),
       },
     });
@@ -1005,6 +1012,23 @@ const finalizeFailure = async (input: {
 
 const sha256Hex = (bytes: Buffer) =>
   createHash("sha256").update(bytes).digest("hex");
+
+/**
+ * Narrows an audit snapshot to Prisma's JSON input type without widening it to
+ * `any`. Round-tripping through JSON is also what guarantees the stored value
+ * is serialisable at all -- a body that cannot be represented is dropped here
+ * rather than throwing inside the settlement transaction.
+ */
+const toJsonSnapshot = (
+  params: Record<string, unknown> | null | undefined
+): Prisma.InputJsonValue | undefined => {
+  if (!params) return undefined;
+  try {
+    return JSON.parse(JSON.stringify(params)) as Prisma.InputJsonValue;
+  } catch {
+    return undefined;
+  }
+};
 
 const parseSize = (size: string): { width: number; height: number } => {
   const [width, height] = size.split("x").map((value) => Number(value));
@@ -1062,6 +1086,7 @@ export const processImageGeneration = async (
             : "IMAGE_GENERATION_FAILED",
         internalErrorDetail: providerError.message,
         providerRequestId: providerError.providerRequestId,
+        providerRequestParams: providerError.requestParams,
         // The provider was reached (or unreachable in a way that may still
         // have billed); keep the budget charge -- conservative direction.
         releaseProviderBudget: false,
@@ -1093,6 +1118,7 @@ export const processImageGeneration = async (
         publicErrorCode: "IMAGE_GENERATION_FAILED",
         internalErrorDetail: String(error).slice(0, 500),
         providerRequestId: result.providerRequestId,
+        providerRequestParams: result.requestParams,
         releaseProviderBudget: false,
       });
       return;
@@ -1236,6 +1262,7 @@ export const processImageGeneration = async (
           // inferred number would contradict the file it describes.
           outputWidth: result.outputWidth,
           outputHeight: result.outputHeight,
+          providerRequestParams: toJsonSnapshot(result.requestParams),
         },
       });
       await tx.conversation.update({

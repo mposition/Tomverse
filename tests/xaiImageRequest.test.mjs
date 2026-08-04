@@ -96,3 +96,26 @@ test("an empty or malformed payload is refused, never half-read", () => {
     assert.equal(parseXaiImageResponse(payload), null, JSON.stringify(payload ?? null));
   }
 });
+
+test("the audit snapshot of a request excludes the prompt", () => {
+  // The prompt is already on the generation row. A second copy inside a JSON
+  // blob is a second place every deletion path would have to reach, and the
+  // snapshot exists to answer "what did we ask for", not "what did they type".
+  const body = buildXaiImageRequest({
+    apiModelId: "grok-imagine-image-quality-20260403",
+    prompt: "something a user typed",
+    size: "1024x1024",
+  });
+  const audited = Object.fromEntries(
+    Object.entries(body).filter(([key]) => key !== "prompt")
+  );
+  assert.ok(!("prompt" in audited));
+  // Everything that decides what was billed survives.
+  assert.deepEqual(audited, {
+    model: "grok-imagine-image-quality-20260403",
+    resolution: "1k",
+    aspect_ratio: "1:1",
+    response_format: "b64_json",
+    n: 1,
+  });
+});

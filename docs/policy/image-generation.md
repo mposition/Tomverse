@@ -416,8 +416,23 @@ OpenAI의 실제 픽셀 문자열을 한 값에 섞고 있다.** Google의 0.5K�
 비교 가능 여부는 같은 `resolutionTier + aspectRatio`로 판정하되, 결과 화면에는
 실제 픽셀 크기를 표시한다.
 
-**진행 상황(2026-08-04): 어휘와 변환 계층이 `lib/imageResolution.ts`에
-들어갔다.** tier·aspect 정의, 기존 `ImageSize`와의 양방향 매핑, provider별
+**진행 상황(2026-08-04)**
+
+| 단계 | 상태 |
+|---|---|
+| tier·aspect 어휘와 provider 변환 (`lib/imageResolution.ts`) | 완료 |
+| 실제 디코딩된 `width`·`height` 기록 (`ImageGeneration.outputWidth/Height`) | 완료 |
+| 전송 파라미터 감사 snapshot (`ImageGeneration.providerRequestParams`) | 완료 |
+| 가격표를 (tier, aspect) key로 이전 | **미착수 — 새 `pricingVersion` 필요, 승인 사항** |
+| UI 크기 선택지 두 축 분리 | 미착수 |
+
+**감사 snapshot에 prompt는 넣지 않는다.** prompt는 이미 같은 행에 있고, JSON
+blob에 사본을 두면 삭제 경로가 찾아야 할 곳이 하나 더 생긴다. snapshot이
+답해야 하는 질문은 "무엇을 요청했는가"이지 "사용자가 무엇을 입력했는가"가
+아니다. 실패한 시도에도 기록한다 — 무엇을 보냈는지 알아야 하는 순간이 바로
+실패했을 때다.
+
+**어휘와 변환 계층이 `lib/imageResolution.ts`에 들어갔다.** tier·aspect 정의, 기존 `ImageSize`와의 양방향 매핑, provider별
 요청 변환(OpenAI 픽셀쌍 / xAI `resolution`+`aspect_ratio` / Google
 `imageSize`+`aspectRatio`)이 있고 xAI adapter가 이를 쓴다. 판매 가능한
 조합은 `SELLABLE_IMAGE_OPTIONS` 3종 그대로이며, **가격표 key와
