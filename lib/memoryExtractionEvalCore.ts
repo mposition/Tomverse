@@ -353,6 +353,50 @@ export function judgeEval(outcomes: readonly CaseOutcome[]): EvalVerdict {
     return { pass: failures.length === 0, failures, aggregate, byLanguage, adequacy };
 }
 
+/**
+ * A stable fingerprint of the sample a verdict was computed against.
+ *
+ * Freezing a dataset is only meaningful if "frozen" is checkable. The digest
+ * covers everything that can change a score — case identity, category,
+ * language, the expected memories and the message content — so an edit that
+ * kept the version string would still show up as a different digest in the
+ * archived artifact, and a verdict can be tied to the exact sample that
+ * produced it (§12.2).
+ *
+ * Order-independent: cases are sorted by id first, so reordering the file is
+ * not a dataset change.
+ *
+ * `hash` is injected rather than imported so this module stays free of
+ * `node:crypto` and can run anywhere the rest of the scoring does.
+ */
+export function datasetFingerprintInput(
+    cases: readonly MemoryEvalCase[]
+): string {
+    return [...cases]
+        .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
+        .map((testCase) =>
+            [
+                testCase.id,
+                testCase.category,
+                testCase.language,
+                testCase.expected
+                    .map(
+                        (expected) =>
+                            `${expected.kind}:${expected.mustInclude.join("|")}`
+                    )
+                    .join(";"),
+                testCase.conversations
+                    .map((conversation) =>
+                        conversation.messages
+                            .map((message) => `${message.role}:${message.content}`)
+                            .join("\n")
+                    )
+                    .join("\n--\n"),
+            ].join(" ")
+        )
+        .join("");
+}
+
 /* -------------------------------------------------------------------------
  * Run-mode gate
  * ---------------------------------------------------------------------- */
