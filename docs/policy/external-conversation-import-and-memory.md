@@ -672,6 +672,16 @@ zh/fr/de/es/pt는 첫 decision-grade eval 범위 밖의 known limitation으로
   1,600(범주 4 × 언어 2 × 200) × 독립 재실행 포함 최소 2회 전체 실행 +
   blind review 세트 생성 비용. 승인 기록(승인자·금액 상한·티켓)은 eval
   register entry와 함께 남깁니다. 예산 승인 전에는 smoke mode만 실행합니다.
+- **이 제약은 코드가 강제합니다.** `scripts/evalImportedMemoryExtraction.mjs`가
+  `--live` 실행 시 해당 pair의 `evalBudget`이 비어 있으면 provider를 호출하기
+  전에 거부합니다. smoke mode는 예산 없이도 실행되며, deterministic stub으로
+  prompt·parser·validator·scoring 경로만 확인하고 모델 품질에 대해서는 아무것도
+  주장하지 않습니다.
+- **첫 fixture 세트는 seed 규모입니다**(`lib/memoryExtractionEvalFixtures.ts`,
+  `datasetVersion` = `mem-eval-seed-1`). §12.2 하한(범주·언어 arm당 200)에
+  한참 못 미치며, harness는 이를 `UNDERPOWERED`로 보고하고 판정을 보류합니다.
+  나머지 표본 작성은 별도 데이터 작업이고, 복제·경미 변형으로 채우는 것은
+  §12.2가 금지하므로 `findDuplicateCases()`가 그런 dataset을 거부합니다.
 
 ## 13. 삭제 · export · share
 
