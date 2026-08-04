@@ -1010,6 +1010,17 @@ export const en = {
         refundRequestSuccess: "Refund request received.",
         refundRequestFailed: "Could not submit the refund request.",
     },
+    // Shared settings-hierarchy vocabulary. Settings is a closable panel,
+    // not a route, and its detail pages navigate back up to it by name --
+    // so the group and the trail have to read identically on both shells
+    // and in the panel itself (lib/settingsNavigation.ts).
+    settingsNav: {
+        navLabel: "Settings navigation",
+        backToSettings: "Back to settings",
+        settings: "Settings",
+        dataAndPersonalization: "Data & personalization",
+        dataAndPersonalizationDescription: "Imported conversations and account memory. Each is managed on its own page.",
+    },
     // External conversation import (Release A). "Import from another AI
     // service" is deliberately distinct from auth.guestImportSectionTitle
     // ("Import this browser's guest conversations") — two different features
@@ -1019,11 +1030,11 @@ export const en = {
         dataTabDescription:
             "Store past conversations from a ChatGPT or Claude export file in your Tomverse account. The export file is read only in your browser.",
         dataTabUsage: "{conversations} imported conversations · {storage} stored",
-        dataTabOpen: "Open import settings",
+        dataTabOpen: "Manage imports",
+        dataTabUsageEmpty: "No imported conversations yet",
         pageTitle: "Import conversations from another AI service",
         pageDescription:
             "Upload an official data export from ChatGPT or Claude, review what it contains, and choose which conversations to keep in your Tomverse account.",
-        backToChat: "Back to chat",
         backToImports: "Back to imports",
         signInRequired: "Sign in to import conversations from another AI service.",
         disabledNotice: "External conversation import is not available right now.",
@@ -1196,11 +1207,13 @@ export const en = {
         dataTabTitle: "Account memory",
         dataTabDescription:
             "Review memory candidates extracted from imported conversations, and choose whether approved memories are used in new chats.",
-        dataTabOpen: "Open memory settings",
+        dataTabOpen: "Manage memory",
+        dataTabStatusOn: "Used in new chats",
+        dataTabStatusOff: "Not used in new chats",
+        dataTabStatusPending: "{count} awaiting review",
         pageTitle: "Account memory",
         pageDescription:
             "Approve or reject memory candidates awaiting review, and edit, pin or delete the memories in use.",
-        backToChat: "Back to chat",
         signInRequired: "Sign in to manage your account memory.",
         privacyNote:
             "Only memories you have reviewed and approved are used in new chats. Approved memories and answer-style preferences are passed to your currently selected Tomverse model as reference material, and you can view, edit, disable or delete them at any time.",

@@ -786,16 +786,23 @@ export const fr = {
         refundRequestSuccess: "Demande de remboursement reçue.",
         refundRequestFailed: "Impossible d'envoyer la demande de remboursement.",
     },
+    settingsNav: {
+        navLabel: "Navigation des réglages",
+        backToSettings: "Retour aux réglages",
+        settings: "Réglages",
+        dataAndPersonalization: "Données et personnalisation",
+        dataAndPersonalizationDescription: "Conversations importées et mémoire du compte. Chacune se gère sur sa propre page.",
+    },
     externalImport: {
         dataTabTitle: "Importer depuis un autre service d'IA",
         dataTabDescription:
             "Conservez dans votre compte Tomverse des conversations issues d'un fichier d'export ChatGPT ou Claude. Le fichier d'export n'est lu que dans votre navigateur.",
         dataTabUsage: "{conversations} conversations importées · {storage} stockés",
-        dataTabOpen: "Ouvrir les réglages d'import",
+        dataTabOpen: "Gérer les imports",
+        dataTabUsageEmpty: "Aucune conversation importée pour l'instant",
         pageTitle: "Importer des conversations depuis un autre service d'IA",
         pageDescription:
             "Téléversez un export officiel de données ChatGPT ou Claude, vérifiez son contenu, puis choisissez les conversations à conserver dans votre compte Tomverse.",
-        backToChat: "Retour au chat",
         backToImports: "Retour aux imports",
         signInRequired:
             "Connectez-vous pour importer des conversations depuis un autre service d'IA.",
@@ -979,11 +986,13 @@ export const fr = {
         dataTabTitle: "Mémoire du compte",
         dataTabDescription:
             "Examinez les souvenirs candidats extraits des conversations importées et choisissez si les souvenirs approuvés sont utilisés dans les nouvelles discussions.",
-        dataTabOpen: "Ouvrir les réglages de mémoire",
+        dataTabOpen: "Gérer la mémoire",
+        dataTabStatusOn: "Utilisée dans les nouvelles discussions",
+        dataTabStatusOff: "Non utilisée dans les nouvelles discussions",
+        dataTabStatusPending: "{count} en attente de vérification",
         pageTitle: "Mémoire du compte",
         pageDescription:
             "Approuvez ou refusez les souvenirs candidats en attente d'examen, et modifiez, épinglez ou supprimez les souvenirs en usage.",
-        backToChat: "Retour à la discussion",
         signInRequired: "Connectez-vous pour gérer la mémoire de votre compte.",
         privacyNote:
             "Seuls les souvenirs que vous avez examinés et approuvés sont utilisés dans les nouvelles discussions. Les souvenirs approuvés et les préférences de style de réponse sont transmis comme références au modèle Tomverse actuellement sélectionné, et vous pouvez les consulter, les modifier, les désactiver ou les supprimer à tout moment.",

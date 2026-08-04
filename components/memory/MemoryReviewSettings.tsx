@@ -4,7 +4,6 @@ import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
     AlertTriangle,
-    ArrowLeft,
     Check,
     Download,
     Loader2,
@@ -15,6 +14,7 @@ import {
     X,
 } from "lucide-react";
 import { useLanguage } from "@/components/LanguageProvider";
+import { SettingsDetailNav } from "@/components/settings/SettingsDetailNav";
 import {
     FACTUAL_MEMORY_KINDS,
     MEMORY_STATEMENT_MAX_CODE_POINTS,
@@ -770,14 +770,11 @@ export function MemoryReviewSettings() {
     return (
         <div className="mx-auto w-full max-w-3xl space-y-4 px-4 py-8">
             <div>
-                <Link
-                    href="/chat"
-                    className="inline-flex items-center gap-1.5 text-sm font-semibold text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100"
-                    data-testid="memory-back"
-                >
-                    <ArrowLeft className="h-4 w-4" />
-                    {t("memoryReview.backToChat")}
-                </Link>
+                <SettingsDetailNav
+                    section="memory"
+                    currentLabel={t("memoryReview.dataTabTitle")}
+                    backTestId="memory-back"
+                />
                 <h1 className="mt-3 text-xl font-bold">
                     {t("memoryReview.pageTitle")}
                 </h1>

@@ -786,17 +786,24 @@ export const pt = {
         refundRequestSuccess: "Solicitação de reembolso recebida.",
         refundRequestFailed: "Não foi possível enviar a solicitação de reembolso.",
     },
+    settingsNav: {
+        navLabel: "Navegação das configurações",
+        backToSettings: "Voltar às configurações",
+        settings: "Configurações",
+        dataAndPersonalization: "Dados e personalização",
+        dataAndPersonalizationDescription: "Conversas importadas e memória da conta. Cada uma é gerida na sua própria página.",
+    },
     externalImport: {
         dataTabTitle: "Importar de outro serviço de IA",
         dataTabDescription:
             "Guarde na sua conta Tomverse conversas de um arquivo de exportação do ChatGPT ou do Claude. O arquivo de exportação é lido apenas no seu navegador.",
         dataTabUsage:
             "{conversations} conversas importadas · {storage} armazenados",
-        dataTabOpen: "Abrir configurações de importação",
+        dataTabOpen: "Gerir importações",
+        dataTabUsageEmpty: "Ainda não há conversas importadas",
         pageTitle: "Importar conversas de outro serviço de IA",
         pageDescription:
             "Envie uma exportação oficial de dados do ChatGPT ou do Claude, revise o conteúdo e escolha quais conversas manter na sua conta Tomverse.",
-        backToChat: "Voltar ao chat",
         backToImports: "Voltar às importações",
         signInRequired:
             "Entre na sua conta para importar conversas de outro serviço de IA.",
@@ -979,11 +986,13 @@ export const pt = {
         dataTabTitle: "Memória da conta",
         dataTabDescription:
             "Revise as memórias candidatas extraídas de conversas importadas e escolha se as memórias aprovadas são usadas em novos chats.",
-        dataTabOpen: "Abrir configurações de memória",
+        dataTabOpen: "Gerir memória",
+        dataTabStatusOn: "Usada em novos chats",
+        dataTabStatusOff: "Não usada em novos chats",
+        dataTabStatusPending: "{count} a aguardar revisão",
         pageTitle: "Memória da conta",
         pageDescription:
             "Aprove ou rejeite as memórias candidatas aguardando revisão, e edite, fixe ou exclua as memórias em uso.",
-        backToChat: "Voltar ao chat",
         signInRequired: "Faça login para gerenciar a memória da sua conta.",
         privacyNote:
             "Somente as memórias que você revisou e aprovou são usadas em novos chats. As memórias aprovadas e as preferências de estilo de resposta são enviadas como referência ao modelo Tomverse selecionado no momento, e você pode consultá-las, editá-las, desativá-las ou excluí-las a qualquer momento.",

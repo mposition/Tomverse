@@ -833,16 +833,23 @@ export const zh = {
         refundRequestSuccess: "退款请求已提交。",
         refundRequestFailed: "无法提交退款请求。",
     },
+    settingsNav: {
+        navLabel: "设置导航",
+        backToSettings: "返回设置",
+        settings: "设置",
+        dataAndPersonalization: "数据与个性化",
+        dataAndPersonalizationDescription: "已导入的对话和账户记忆。两者分别在各自的页面中管理。",
+    },
     externalImport: {
         dataTabTitle: "从其他 AI 服务导入",
         dataTabDescription:
             "将 ChatGPT 或 Claude 导出文件中的历史对话保存到您的 Tomverse 账户。导出文件仅在您的浏览器中读取。",
         dataTabUsage: "已导入 {conversations} 个对话 · 已存储 {storage}",
-        dataTabOpen: "打开导入设置",
+        dataTabOpen: "管理导入",
+        dataTabUsageEmpty: "尚未导入任何对话",
         pageTitle: "从其他 AI 服务导入对话",
         pageDescription:
             "上传 ChatGPT 或 Claude 的官方数据导出文件，查看其内容，然后选择要保存到 Tomverse 账户的对话。",
-        backToChat: "返回聊天",
         backToImports: "返回导入列表",
         signInRequired: "登录后即可从其他 AI 服务导入对话。",
         disabledNotice: "外部对话导入功能目前不可用。",
@@ -1002,11 +1009,13 @@ export const zh = {
         dataTabTitle: "账户长期记忆",
         dataTabDescription:
             "审核从导入对话中提取的记忆候选，并设置已批准的记忆是否用于新对话。",
-        dataTabOpen: "打开记忆设置",
+        dataTabOpen: "管理记忆",
+        dataTabStatusOn: "在新对话中使用",
+        dataTabStatusOff: "不在新对话中使用",
+        dataTabStatusPending: "{count} 条待审核",
         pageTitle: "账户长期记忆",
         pageDescription:
             "批准或拒绝等待审核的记忆候选，并可编辑、置顶或删除正在使用的记忆。",
-        backToChat: "返回聊天",
         signInRequired: "登录后即可管理账户长期记忆。",
         privacyNote:
             "只有经您审核并批准的记忆才会用于新对话。已批准的记忆和回答风格偏好会作为参考资料传递给您当前选择的 Tomverse 模型，您可以随时查看、修改、停用或删除它们。",
