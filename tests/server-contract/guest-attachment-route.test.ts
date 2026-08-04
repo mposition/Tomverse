@@ -333,7 +333,7 @@ test("an executable is refused however it is labelled", async () => {
     ["tool.exe", "text/plain"],
     ["run.sh", "text/plain"],
   ] as const) {
-    const response = await POST(upload(name, mediaType, "MZ  "));
+    const response = await POST(upload(name, mediaType, "MZ\u0000\u0000"));
     assert.equal(response.status, 400, name);
     assert.equal(
       (await readJson(response)).code,
@@ -557,7 +557,7 @@ test("no file content or extracted text is ever logged", async () => {
   try {
     const { POST } = await loadRoute();
     const secret = "CONFIDENTIAL-SALARY-FIGURE-42";
-    await POST(upload("payroll.txt", "text/plain", ` ${secret}`));
+    await POST(upload("payroll.txt", "text/plain", `\u0000${secret}`));
     await POST(upload("broken.pdf", "application/pdf", Buffer.from(`%PDF-1.4\n${secret}`, "latin1")));
   } finally {
     console.error = originalError;

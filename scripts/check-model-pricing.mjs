@@ -19,10 +19,10 @@ import {
   MODEL_PRICING,
   PENDING_VERIFIED_PRICE_MODEL_IDS,
   PENDING_VERIFIED_PRICE_REGISTER,
-  PROCESSING_TIER_REQUEST_ALLOWLIST,
 } from "../lib/modelPricing.ts";
 import {
   auditProcessingTierMentions,
+  PROCESSING_TIER_REQUEST_ALLOWLIST,
   PROCESSING_TIER_SELECTOR_PATTERN,
 } from "./check-processing-tier-core.mjs";
 
@@ -56,7 +56,9 @@ const tierGrep = spawnSync(
   [
     "grep",
     "--untracked",
-    "-lE",
+    // `-n` rather than `-l`: the allowlist pins the lines it covers, not the
+    // file, so an allowlisted file cannot quietly gain a line that sets a tier.
+    "-nE",
     PROCESSING_TIER_SELECTOR_PATTERN,
     "--",
     "app",
@@ -66,22 +68,33 @@ const tierGrep = spawnSync(
   ],
   { encoding: "utf8" }
 );
-const tierFiles = (tierGrep.stdout || "")
+
+// These three state the rule; they do not send one. The core module is listed
+// for the same reason as the other two: it holds the pattern itself, so it
+// always matches its own grep.
+const SELF_REFERENTIAL = new Set([
+  "lib/modelPricing.ts",
+  "scripts/check-model-pricing.mjs",
+  "scripts/check-processing-tier-core.mjs",
+]);
+
+// `git grep -n` prints `path:line:text`. The text can itself contain colons,
+// so only the first two separators are split on.
+const tierLines = (tierGrep.stdout || "")
   .split("\n")
-  .map((line) => line.trim())
   .filter(Boolean)
-  // These three state the rule; they do not send one. The core module is
-  // listed for the same reason as the other two: it holds the pattern itself,
-  // so it always matches its own grep.
-  .filter(
-    (file) =>
-      file !== "lib/modelPricing.ts" &&
-      file !== "scripts/check-model-pricing.mjs" &&
-      file !== "scripts/check-processing-tier-core.mjs"
-  );
+  .map((row) => {
+    const firstColon = row.indexOf(":");
+    const secondColon = row.indexOf(":", firstColon + 1);
+    return {
+      file: row.slice(0, firstColon),
+      text: row.slice(secondColon + 1),
+    };
+  })
+  .filter((entry) => !SELF_REFERENTIAL.has(entry.file));
 
 const tierAudit = auditProcessingTierMentions({
-  matchedFiles: tierFiles,
+  matchedLines: tierLines,
   allowlist: PROCESSING_TIER_REQUEST_ALLOWLIST,
 });
 

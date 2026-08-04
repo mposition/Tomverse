@@ -429,16 +429,34 @@ export function findQuestionRunsInsideStrings(text, fileName) {
   );
 }
 
-// The marker patterns scripts/check-text-encoding.mjs scans every source file
-// for. Kept here rather than inline in the script so each one can be exercised
-// directly -- the script walks a fixed set of roots, so a pattern declared
-// inside it can only be reached by corrupting a real file in the repository.
+/**
+ * Where a marker pattern applies. The two scopes answer different questions,
+ * so widening one to the other's roots is what makes the check noisy or blind:
+ *
+ * - `product_text` -- is shipped copy corrupted? Only meaningful where product
+ *   copy lives (app, components, lib, locales). Running it over tests and docs
+ *   reports fixtures that are *deliberately* mojibake-shaped, and a checker
+ *   whose output is mostly false is one nobody reads.
+ * - `every_source` -- can this file be reviewed at all? That has nothing to do
+ *   with whether the file ships text, so it applies to the whole repository.
+ *   Scoping it to the product roots left a literal NUL sitting in
+ *   tests/server-contract/guest-attachment-route.test.ts.
+ */
+export const MARKER_SCOPES = {
+  PRODUCT_TEXT: "product_text",
+  EVERY_SOURCE: "every_source",
+};
+
+// The marker patterns scripts/check-text-encoding.mjs scans for. Kept here
+// rather than inline in the script so each one can be exercised directly --
+// the script walks fixed roots, so a pattern declared inside it can only be
+// reached by corrupting a real file in the repository.
 export const ENCODING_MARKER_PATTERNS = [
-  { name: "replacement-character", regex: /\uFFFD/g },
-  { name: "latin1-mojibake-marker", regex: /[\u00C2\u00C3]/g },
-  { name: "smart-quote-mojibake", regex: /\u00E2[\u20AC\u201A\u201C\u201D\u201E\u2020\u2021\u02C6\u2030\u0160\u2039\u0152\u017D\u2018\u2019\u201A\u201C\u201D\u2022\u2013\u2014\u02DC\u2122\u0161\u203A\u0153\u017E\u0178]/g },
-  { name: "korean-mojibake-marker", regex: /[\u00EC\u00ED][\u00A0-\u00BF]/g },
-  { name: "cjk-mojibake-marker", regex: /[\u00E5\u00E6][\u00A0-\u00BF]/g },
+  { scope: MARKER_SCOPES.PRODUCT_TEXT, name: "replacement-character", regex: /\uFFFD/g },
+  { scope: MARKER_SCOPES.PRODUCT_TEXT, name: "latin1-mojibake-marker", regex: /[\u00C2\u00C3]/g },
+  { scope: MARKER_SCOPES.PRODUCT_TEXT, name: "smart-quote-mojibake", regex: /\u00E2[\u20AC\u201A\u201C\u201D\u201E\u2020\u2021\u02C6\u2030\u0160\u2039\u0152\u017D\u2018\u2019\u201A\u201C\u201D\u2022\u2013\u2014\u02DC\u2122\u0161\u203A\u0153\u017E\u0178]/g },
+  { scope: MARKER_SCOPES.PRODUCT_TEXT, name: "korean-mojibake-marker", regex: /[\u00EC\u00ED][\u00A0-\u00BF]/g },
+  { scope: MARKER_SCOPES.PRODUCT_TEXT, name: "cjk-mojibake-marker", regex: /[\u00E5\u00E6][\u00A0-\u00BF]/g },
   // A C0 control character, or DEL, outside the three that are ordinary
   // whitespace (tab, LF, CR). One of these makes git treat the whole file as
   // binary, and the cost lands at review time rather than at runtime:
@@ -451,5 +469,9 @@ export const ENCODING_MARKER_PATTERNS = [
   //
   // The fix is always the escape, never the raw character: the escape is the
   // same string at runtime and leaves the file readable as text.
-  { name: "control-character", regex: /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g },
+  {
+    scope: MARKER_SCOPES.EVERY_SOURCE,
+    name: "control-character",
+    regex: /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g,
+  },
 ];
