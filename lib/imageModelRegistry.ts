@@ -213,10 +213,79 @@ const XAI_GROK_IMAGINE_IMAGE_QUALITY: ImageModelProfile = {
     "Fixed per-image prices are reported as $0.05 (1K) and $0.07 (2K) by the product owner's 2026-08-04 review, but docs.x.ai returns HTTP 403 from this environment so nothing has been verified here. Enabling also needs an xAI adapter (imageProviderAdapter dispatches OpenAI only), IMAGE_PROVIDER_XAI_COST_MICROUSD_PER_DAY/_PER_MONTH, and an approved sale-credit figure at or above minimumCreditsForImageOption().",
 };
 
+// Registered, not enabled. The review's low-cost bulk candidate: 1K only, and
+// cheap enough that it is the natural Draft-tier model rather than a second
+// headline slot -- two Google models would fill both comparison seats with one
+// provider's failure modes, which is the opposite of what a comparison is for.
+//
+// Blocked by the same condition as every Google image model here: thinking
+// cannot be switched off and no official token cap is established, so the
+// worst case is not provably finite. The reported ~US$0.0336 image output is
+// in the note, not in `prices`.
+const GOOGLE_GEMINI_31_FLASH_LITE_IMAGE: ImageModelProfile = {
+  id: "gemini-3.1-flash-lite-image",
+  provider: "google",
+  apiModelId: "gemini-3.1-flash-lite-image",
+  name: "Gemini 3.1 Flash Lite Image",
+  lifecycle: "stable",
+  disabledReason: "price_unverified",
+  sizes: ["1024x1024"],
+  qualities: ["low"],
+  prices: [],
+  latencyClass: "fast",
+  provenance: ["synthid"],
+  outputMimeTypes: ["image/png", "image/jpeg", "image/webp"],
+  priceVerification: {
+    verifiedAt: null,
+    sources: [
+      "https://ai.google.dev/gemini-api/docs/pricing",
+      "https://ai.google.dev/gemini-api/docs/image-generation",
+    ],
+    thinkingCapMicroUsd: null,
+  },
+  disabledNote:
+    "Draft-tier candidate, 1K only. Image output reported at ~$0.0336 by the product owner's 2026-08-04 review; not read from Google's documentation here (HTTP 403 on 2026-08-03 and 2026-08-04). Blocked on the same thinking-token cap as every Google image model. The review's floor of 38 credits counts image output alone -- the policy minimum adds the full prompt budget and the cap.",
+};
+
+// Registered, not enabled. The professional-tier candidate.
+//
+// The review recommends holding this one back even after the Google cap is
+// established: its price band overlaps gpt-image-2 Final, so shipping it at
+// launch buys little, and the case for it is a Pro/Max Final-only slot decided
+// from real usage data showing Flash is not enough. Registered anyway, because
+// a candidate the product has decided about reads better as a stated hold than
+// as an absence -- that is what the catalogue's hold row is for.
+const GOOGLE_GEMINI_3_PRO_IMAGE: ImageModelProfile = {
+  id: "gemini-3-pro-image",
+  provider: "google",
+  apiModelId: "gemini-3-pro-image",
+  name: "Gemini 3 Pro Image",
+  lifecycle: "stable",
+  disabledReason: "price_unverified",
+  sizes: ["1024x1024"],
+  qualities: ["high"],
+  prices: [],
+  latencyClass: "slow",
+  provenance: ["synthid"],
+  outputMimeTypes: ["image/png", "image/jpeg", "image/webp"],
+  priceVerification: {
+    verifiedAt: null,
+    sources: [
+      "https://ai.google.dev/gemini-api/docs/pricing",
+      "https://ai.google.dev/gemini-api/docs/image-generation",
+    ],
+    thinkingCapMicroUsd: null,
+  },
+  disabledNote:
+    "Final-tier candidate. Reported at $0.134 (1K/2K) and $0.24 (4K) by the product owner's 2026-08-04 review; not read from Google's documentation here (HTTP 403). Blocked on the thinking-token cap, and separately held by product judgement: the price band overlaps gpt-image-2 Final, so the review defers it until usage shows Flash is insufficient.",
+};
+
 export const IMAGE_MODEL_REGISTRY: readonly ImageModelProfile[] = [
   OPENAI_GPT_IMAGE_2,
   GOOGLE_GEMINI_31_FLASH_IMAGE,
   XAI_GROK_IMAGINE_IMAGE_QUALITY,
+  GOOGLE_GEMINI_31_FLASH_LITE_IMAGE,
+  GOOGLE_GEMINI_3_PRO_IMAGE,
 ];
 
 /** The default single selection and the v1 compatibility model. */
