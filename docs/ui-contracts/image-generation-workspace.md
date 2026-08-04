@@ -102,16 +102,19 @@ Tab requirements:
 
 ## The image tab's rows
 
-- **Every registered model is listed**, including one the price-verification
-  rule holds disabled. A model the product has decided about but cannot yet run
-  is stated as a hold (`image-model-hold-note`), never silently absent —
-  otherwise the catalogue answers "why is this model missing?" with nothing.
+- **Every registered model is listed**, including the ones the
+  price-verification rule holds disabled. A model the product has decided about
+  but cannot yet run is stated as a hold (`image-model-hold-note`), never
+  silently absent — otherwise the catalogue answers "why is this model
+  missing?" with nothing. The e2e assertion counts holds from the registry
+  rather than hard-coding a number, so registering another candidate is not a
+  test failure.
 - A held row is `disabled` and carries no clickable path to a run. Only the
   verification state changes that; never a click.
 - Prices are quoted as **"from N credits"** — the cheapest option — because the
   tab does not know which quality and size the composer will land on. The
   composer, which does know, is the only place an exact price is stated.
-- Provider names are brands (`OpenAI`, `Google`) and are never translated.
+- Provider names are brands (`OpenAI`, `Google`, `xAI`) and are never translated.
 
 ## Workspace layout
 
@@ -217,7 +220,7 @@ Verified for **both** desktop and mobile projects:
 | 8 | over-limit prompt | submission disabled before any request is made |
 | 9 | reload | timeline rebuilt from the server, not from client memory |
 | 10 | image tab | separate list; no chat rows, no chat selection count |
-| 11 | held model | listed, disabled, hold stated |
+| 11 | held models | every one listed, disabled, hold stated |
 | 12 | picked from the image tab | workspace opens seeded with that model |
 | 13 | composer draft carry-over | text carried; cancel restores it exactly |
 

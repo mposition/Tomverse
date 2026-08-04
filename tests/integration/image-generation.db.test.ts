@@ -696,7 +696,7 @@ test("an unavailable model refuses the whole group and leaves no rows", async ()
       requestInput(user.id, {
         // Registered but held closed on price verification: all-or-nothing
         // admission means the enabled model must not run either.
-        modelIds: ["gpt-image-2", "gemini-3.1-flash-image-preview"],
+        modelIds: ["gpt-image-2", "gemini-3.1-flash-image"],
       })
     ),
     (error: { code?: string }) => error.code === "IMAGE_OPTION_NOT_SUPPORTED"
