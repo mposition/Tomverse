@@ -1005,6 +1005,15 @@ export const pt = {
         abandonImport: "Sair desta importação",
     },
     memoryReview: {
+        sourceDeleteDerivedImport:
+            "{count} memórias criadas a partir desta importação também serão excluídas.",
+        sourceDeleteDerivedConversation:
+            "{count} memórias criadas a partir desta conversa também serão excluídas.",
+        sourceDeleteKeep: "Manter as memórias, mas parar de usá-las",
+        sourceDeleteEdited:
+            "{count} memórias que você editou são mantidas e apenas deixam de ser usadas.",
+        sourceDeleteKept:
+            "{count} memórias apoiadas por outras evidências permanecem como estão.",
         dataTabTitle: "Memória da conta",
         dataTabDescription:
             "Revise as memórias candidatas extraídas de conversas importadas e escolha se as memórias aprovadas são usadas em novos chats.",

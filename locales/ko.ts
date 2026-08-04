@@ -1220,6 +1220,15 @@ export const ko = {
     // 계정 장기 기억 검토 (Release B, slice B3). 목록·삭제·설정은 flag와
     // 무관하게 항상 접근 가능하고, 검토·작성 동작만 rollout flag를 따릅니다.
     memoryReview: {
+        sourceDeleteDerivedImport:
+            "이 가져오기에서 만들어진 기억 {count}개도 함께 삭제됩니다.",
+        sourceDeleteDerivedConversation:
+            "이 대화에서 만들어진 기억 {count}개도 함께 삭제됩니다.",
+        sourceDeleteKeep: "기억은 삭제하지 않고 사용만 중지하기",
+        sourceDeleteEdited:
+            "직접 수정한 기억 {count}개는 삭제하지 않고 사용만 중지합니다.",
+        sourceDeleteKept:
+            "다른 근거가 남아 있는 기억 {count}개는 그대로 유지됩니다.",
         dataTabTitle: "계정 장기 기억",
         dataTabDescription:
             "가져온 대화에서 추출한 기억 후보를 검토하고, 승인한 기억을 새 대화에서 사용할지 설정합니다.",
