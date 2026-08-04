@@ -180,10 +180,11 @@ test("the price-clearing migration is a frozen record of what seeding once wrote
   const digest = createHash("sha256").update(sql, "utf8").digest("hex");
   assert.equal(
     digest,
-    "a388d8c0345a787d0b60bd742bbdfb59519e8ee1dcf7a4f7738290782a47ea82",
+    "02181d384565a17f54a8b72b3b2dec6499ea3c343f43f1bae51d3d95af9a3e1d",
     "this migration is applied; its bytes are history and must not change. " +
-      "If it is being restored to its pre-#320 content on purpose, update this " +
-      "digest in the same commit and say which environments were checked."
+      "This digest is what production recorded in _prisma_migrations when it " +
+      "applied the migration on 2026-08-02. Changing the file makes " +
+      "`migrate status` report it as modified there."
   );
 
   // Kept as a readable statement of what those bytes have to contain, so a
