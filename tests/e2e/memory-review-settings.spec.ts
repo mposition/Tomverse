@@ -79,6 +79,8 @@ type MemoryApiState = {
   deletes: string[];
   bulkApproveCalls: number;
   createBodies: Array<Record<string, unknown>>;
+  exportReads: number;
+  deleteAllBodies: Array<Record<string, unknown>>;
 };
 
 async function mockMemoryApi(
@@ -92,6 +94,10 @@ async function mockMemoryApi(
     /** The first approve PATCH per memory answers 409 MEMORY_ITEM_CONFLICT. */
     conflictOnFirstApprove?: boolean;
     bulkResult?: { approved: number; skipped: number };
+    /** GET /api/memories/export answers 428 (step-up required). */
+    exportReauthRequired?: boolean;
+    /** POST /api/memories/delete-all answers 428 (step-up required). */
+    deleteAllReauthRequired?: boolean;
   } = {}
 ): Promise<MemoryApiState> {
   const state: MemoryApiState = {
@@ -102,6 +108,8 @@ async function mockMemoryApi(
     deletes: [],
     bulkApproveCalls: 0,
     createBodies: [],
+    exportReads: 0,
+    deleteAllBodies: [],
   };
   const settings = {
     masterEnabled: true,
@@ -196,11 +204,66 @@ async function mockMemoryApi(
     }
   );
 
-  // Registered last, so it would win over the fixed-path routes above —
-  // the negative lookahead keeps settings/bulk-approve out of its reach.
+  await page.route(
+    (url) => url.pathname === "/api/memories/export",
+    (route) => {
+      if (options.exportReauthRequired) {
+        return route.fulfill({
+          status: 428,
+          contentType: "application/json",
+          body: JSON.stringify({
+            error: "Sign in again before exporting your memories.",
+            code: "ACCOUNT_REAUTHENTICATION_REQUIRED",
+          }),
+        });
+      }
+      state.exportReads += 1;
+      return route.fulfill({
+        status: 200,
+        contentType: "application/json; charset=utf-8",
+        headers: {
+          "Content-Disposition":
+            'attachment; filename="tomverse-memories.json"',
+        },
+        body: JSON.stringify({
+          format: "tomverse.memories.v1",
+          generatedAt: "2026-08-03T00:00:00.000Z",
+          items: [],
+          itemCount: 0,
+        }),
+      });
+    }
+  );
+
+  await page.route(
+    (url) => url.pathname === "/api/memories/delete-all",
+    (route) => {
+      if (options.deleteAllReauthRequired) {
+        return route.fulfill({
+          status: 428,
+          contentType: "application/json",
+          body: JSON.stringify({
+            error: "Sign in again before deleting all memories.",
+            code: "ACCOUNT_REAUTHENTICATION_REQUIRED",
+          }),
+        });
+      }
+      state.deleteAllBodies.push(
+        route.request().postDataJSON() as Record<string, unknown>
+      );
+      const deletedMemories = state.rows.length;
+      state.rows = [];
+      return route.fulfill(json({ deletedMemories, cancelledRuns: 0 }));
+    }
+  );
+
+  // Registered last, so it would win over the fixed-path routes above — the
+  // negative lookahead keeps every sibling collection out of its reach.
   await page.route(
     (url) =>
-      /^\/api\/memories\/(?!settings$|bulk-approve$)[^/]+$/.test(url.pathname),
+      /^\/api\/memories\/(?!settings$|bulk-approve$|export$|delete-all$)[^/]+$/.test(
+        url.pathname
+      ),
     (route) => {
       const memoryId = route.request().url().split("/").pop() ?? "";
       const row = state.rows.find((candidate) => candidate.id === memoryId);
@@ -512,6 +575,91 @@ test.describe("memory review settings", () => {
     await expect(page.getByTestId("memory-bulk-approve")).toBeDisabled();
     await expect(page.getByTestId("memory-create-submit")).toBeDisabled();
     await expect(page.getByTestId("memory-delete").first()).toBeEnabled();
+  });
+
+  test("the export downloads a file", async ({ page }) => {
+    await prepareGuestPage(page, "ko");
+    await mockAuthenticatedApi(page);
+    const api = await mockMemoryApi(page, {
+      rows: [memoryRow("active-1", { status: "active" })],
+    });
+    await openMemoryPage(page);
+
+    const [download] = await Promise.all([
+      page.waitForEvent("download"),
+      page.getByTestId("memory-export").click(),
+    ]);
+    expect(download.suggestedFilename()).toBe("tomverse-memories.json");
+    expect(api.exportReads).toBe(1);
+    await expect(page.getByTestId("memory-export-error")).toHaveCount(0);
+  });
+
+  test("an export that needs a fresh sign-in says so instead of downloading an error", async ({
+    page,
+  }) => {
+    await prepareGuestPage(page, "ko");
+    await mockAuthenticatedApi(page);
+    await mockMemoryApi(page, { exportReauthRequired: true });
+    await openMemoryPage(page);
+
+    await page.getByTestId("memory-export").click();
+    await expect(page.getByTestId("memory-export-error")).toContainText(
+      "다시 로그인"
+    );
+  });
+
+  test("delete-all stays disabled until the exact phrase is typed", async ({
+    page,
+  }) => {
+    await prepareGuestPage(page, "ko");
+    await mockAuthenticatedApi(page);
+    const api = await mockMemoryApi(page, {
+      rows: [
+        memoryRow("cand-1"),
+        memoryRow("active-1", { status: "active" }),
+      ],
+    });
+    await openMemoryPage(page);
+
+    const submit = page.getByTestId("memory-delete-all");
+    const confirmation = page.getByTestId("memory-delete-all-confirmation");
+    await expect(submit).toBeDisabled();
+    await confirmation.fill("delete all memories");
+    await expect(submit).toBeDisabled();
+    await confirmation.fill("DELETE ALL MEMORIES");
+    await expect(submit).toBeEnabled();
+
+    await submit.click();
+    await expect(page.getByTestId("memory-delete-all-done")).toBeVisible();
+    expect(api.deleteAllBodies).toEqual([
+      { confirm: true, confirmationText: "DELETE ALL MEMORIES" },
+    ]);
+    // The list is re-read, so the emptied store is what the page shows.
+    await expect(page.getByTestId("memory-review-row")).toHaveCount(0);
+    await expect(page.getByTestId("memory-active-row")).toHaveCount(0);
+  });
+
+  test("delete-all surfaces a step-up requirement without deleting anything", async ({
+    page,
+  }) => {
+    await prepareGuestPage(page, "ko");
+    await mockAuthenticatedApi(page);
+    const api = await mockMemoryApi(page, {
+      rows: [memoryRow("active-1", { status: "active" })],
+      deleteAllReauthRequired: true,
+    });
+    await openMemoryPage(page);
+
+    await page
+      .getByTestId("memory-delete-all-confirmation")
+      .fill("DELETE ALL MEMORIES");
+    await page.getByTestId("memory-delete-all").click();
+
+    await expect(page.getByTestId("memory-delete-all-error")).toContainText(
+      "다시 로그인"
+    );
+    expect(api.deleteAllBodies).toHaveLength(0);
+    await expect(page.getByTestId("memory-active-row")).toHaveCount(1);
   });
 
   test("signed-out visitors are asked to sign in", async ({ page }) => {

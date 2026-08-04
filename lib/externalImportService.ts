@@ -451,6 +451,28 @@ export async function getExternalImportStatus(userId: string, importId: string) 
             },
             orderBy: { importedAt: "asc" },
         });
+        // Per-conversation truncation counts, so a resumed confirmation
+        // screen can name the conversations that get shortened exactly as the
+        // wizard's own review did (§5.4) rather than only the import total.
+        const truncatedByConversation = new Map<string, number>();
+        if (staged.length > 0) {
+            const grouped = await tx.externalMessage.groupBy({
+                by: ["externalConversationId"],
+                where: {
+                    externalConversationId: {
+                        in: staged.map((conversation) => conversation.id),
+                    },
+                    truncated: true,
+                },
+                _count: { _all: true },
+            });
+            for (const entry of grouped) {
+                truncatedByConversation.set(
+                    entry.externalConversationId,
+                    entry._count._all
+                );
+            }
+        }
         const open = isOpenImportStatus(row.status);
         return {
             id: row.id,
@@ -478,6 +500,8 @@ export async function getExternalImportStatus(userId: string, importId: string) 
                 externalStableId: conversation.externalStableId,
                 messageCount: conversation.messageCount,
                 contentBytes: asSafeNumber(conversation.contentBytes),
+                truncatedMessageCount:
+                    truncatedByConversation.get(conversation.id) ?? 0,
                 finalized: conversation.finalized,
                 sourceCreatedAt:
                     conversation.sourceCreatedAt?.toISOString() ?? null,

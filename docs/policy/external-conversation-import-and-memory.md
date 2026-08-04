@@ -559,6 +559,44 @@ details.requiresPreflight: true
   (15분), idempotent settlement. 브라우저를 닫아도 완료 chunk와 승인 상태가
   손상되지 않습니다.
 
+### 11.1 실행 driver — 저지연 kick + 복구 dispatcher (2026-08-04 확정)
+
+이 절은 §11의 durable run 계약을 **무엇이 구동하는지**를 확정합니다. 계약을
+넓히지 않고 이행 방식만 정합니다.
+
+- **driver는 둘이고 역할이 다릅니다.**
+  - `after()` **post-response kick**: 저지연 시작 전용. Next.js `after()`는
+    route의 실행 시간과 프로세스 수명에 묶이고 종료 시 graceful drain에
+    의존하므로 **durable queue가 아닙니다**(`node_modules/next/dist/docs`의
+    `after` · self-hosting 문서). 이미지 생성 §7이 같은 결론입니다.
+  - **15분 maintenance**: 만료 lease 회수뿐 아니라 `pending` run을 다시
+    claim해 실제로 재구동하는 **recovery dispatcher**입니다. 회수만 하고
+    재구동하지 않으면 요청이 없는 한 run이 영원히 `pending`으로 남습니다.
+- **durable source of truth는 DB의 run·chunk 상태**이며, 두 driver는 상태를
+  읽고 쓰는 방법이 아니라 실행을 시작하는 계기일 뿐입니다.
+- **두 진입점은 반드시 같은 slice processor를 사용합니다.** claim·fencing·
+  경계 재검사·release가 두 벌 존재하면 반드시 어긋납니다.
+- **배타 claim은 lease 기한이 아니라 fencing token으로 성립합니다.**
+  claim마다 `leaseGeneration`을 증가시키고, heartbeat·chunk claim·chunk 결과
+  기록·정산은 **claim 당시의 generation이 일치할 때만** 성공합니다. 기한
+  비교만으로는 두 claimant가 모두 통과할 수 있고, 그 결과는 provider 중복
+  호출과 후보 이중 생성입니다.
+- **chunk 상태는 durable**합니다: chunk별 status·attemptCount·실패 코드와
+  그 chunk가 담당하는 대화 목록을 저장합니다. 계획은 저장하며 재계산하지
+  않습니다 — chunk 경계는 선택 집합의 *순서*에 의존하므로, 다른 순서로
+  재계획하면 사용자가 확인한 견적과 다른 chunk를 실행할 수 있습니다.
+- **한 번의 실행은 run 전체가 아니라 bounded slice**입니다: 최대 chunk 수와
+  wall-clock deadline, chunk별 provider timeout, chunk 사이 heartbeat, 예산
+  소진 시 명시적 lease 반납 후 `pending` 복귀. 프로세스가 강제 종료되면
+  lease 만료 후 maintenance가 회수합니다.
+- **chunk 경계마다 재검사**합니다: feature flag, 승인 pair와 revocation,
+  사용자 plan, provider 예산. run 생성 시점의 판정을 캐시하지 않습니다.
+- **취소·flag off·revocation은 즉시 정지 사유**이며, 정지한 slice는 lease를
+  반납하고 진행분을 보존합니다.
+- extraction provider 지연이 credit·refund·notification 같은 기존 maintenance
+  작업을 늦추지 않도록, dispatch는 기존 reconciliation 응답과 분리된 경로에서
+  수행하고 지표도 `memory_extraction_dispatch`로 분리합니다.
+
 ## 12. Eval 계약
 
 ### 12.1 승인 단위와 register
@@ -1066,7 +1104,10 @@ POST          /api/assistant-profiles/[profileId]/preview       (실제 credit·
 ```
 /settings/imports              관리 화면 (저장 공간·가져온 대화·이력·진행 중 작업)  (A)
 /settings/imports/new          전체 화면 Wizard (static segment, [importId]와 공존)  (A)
-/settings/imports/[importId]   완료 결과 · 작업 상태 상세                            (A)
+/settings/imports/[importId]   완료 결과 · 작업 상태 상세. `preview_ready`이고
+                               TTL 이내면 여기서 seal된 staged 집합을 확인하고
+                               (부분집합 가능) 최종 저장한다. seal되지 않은
+                               `staging`과 만료 건은 다시 시작·삭제만 제공한다  (A)
 /settings/imports/conversations/[id]   read-only viewer                              (A)
 /settings/memory, /settings/memory/runs/[runId]                    (B)
 /settings/assistants, /settings/assistants/new, /settings/assistants/[profileId]  (C)

@@ -74,6 +74,34 @@ const chatgptExportFile = (conversationCount: number) => ({
   ),
 });
 
+/** What GET /api/imports/external/[importId] returns to the owner. */
+type ImportDetail = {
+  id: string;
+  provider: string;
+  status: string;
+  counts: {
+    conversations: number;
+    messages: number;
+    normalizedBytes: number;
+    truncatedMessages: number;
+    duplicatesSkipped: number;
+  };
+  createdAt: string;
+  completedAt: string | null;
+  effectiveExpiresAt?: string | null;
+  expired?: boolean;
+  conversations: Array<{
+    id: string;
+    title: string;
+    conversationDigest: string;
+    messageCount: number;
+    contentBytes: number;
+    truncatedMessageCount: number;
+    finalized: boolean;
+    sourceUpdatedAt: string | null;
+  }>;
+};
+
 type ImportApiState = {
   createCount: number;
   batchBodies: Array<{
@@ -153,6 +181,8 @@ async function mockImportApi(
     failBatchAt?: { sequence: number; code: string | null; status: number };
     /** Fails the first N finalize calls with this code, then succeeds. */
     failFinalize?: { code: string; status: number; times: number };
+    /** Payload served by GET /api/imports/external/[importId]. */
+    importDetail?: ImportDetail;
   } = {}
 ): Promise<ImportApiState> {
   const state: ImportApiState = {
@@ -423,6 +453,7 @@ async function mockImportApi(
         state.deleteCount += 1;
         return route.fulfill(json({ outcome: "deleted" }));
       }
+      if (options.importDetail) return route.fulfill(json(options.importDetail));
       return route.fulfill({ status: 404, contentType: "application/json", body: JSON.stringify({ error: "Import not found." }) });
     }
   );
@@ -1224,5 +1255,277 @@ test.describe("external import settings", () => {
     await expect(
       page.getByTestId("external-import-guide-chatgpt")
     ).toContainText("ChatGPT");
+  });
+  test("a sealed import is finished from its detail page, as a subset", async ({
+    page,
+  }) => {
+    await prepareGuestPage(page, "ko");
+    await mockAuthenticatedApi(page);
+    const api = await mockImportApi(page, {
+      importDetail: {
+        id: "qa-sealed",
+        provider: "chatgpt",
+        status: "preview_ready",
+        counts: {
+          conversations: 2,
+          messages: 8,
+          normalizedBytes: 2048,
+          truncatedMessages: 1,
+          duplicatesSkipped: 1,
+        },
+        createdAt: "2026-08-03T00:00:00.000Z",
+        completedAt: null,
+        effectiveExpiresAt: "2026-08-04T00:00:00.000Z",
+        expired: false,
+        conversations: [
+          {
+            id: "staged-1",
+            title: "Sealed conversation one",
+            conversationDigest: "a".repeat(64),
+            messageCount: 4,
+            contentBytes: 1024,
+            truncatedMessageCount: 0,
+            finalized: false,
+            sourceUpdatedAt: null,
+          },
+          {
+            id: "staged-2",
+            title: "Sealed conversation two",
+            conversationDigest: "b".repeat(64),
+            messageCount: 4,
+            contentBytes: 1024,
+            truncatedMessageCount: 1,
+            finalized: false,
+            sourceUpdatedAt: null,
+          },
+        ],
+      },
+    });
+
+    await page.goto("/settings/imports/qa-sealed");
+    await expect(
+      page.getByTestId("external-import-detail-resume")
+    ).toBeVisible();
+
+    // Seal fixed completeness, not selection: both staged rows are offered
+    // and either can be dropped before saving.
+    const toggles = page.getByTestId("external-import-review-toggle");
+    await expect(toggles).toHaveCount(2);
+    await expect(toggles.nth(0)).toBeChecked();
+    await expect(toggles.nth(1)).toBeChecked();
+    await expect(
+      page.getByTestId("external-import-review-expiry")
+    ).toBeVisible();
+
+    await toggles.nth(1).uncheck();
+    await page.getByTestId("external-import-finalize").click();
+
+    await expect(
+      page.getByTestId("external-import-detail-completed")
+    ).toBeVisible();
+    expect(api.finalizeBody?.selectedConversationIds).toEqual(["staged-1"]);
+    // No re-upload happened, and the digest was recomputed for the subset
+    // rather than replayed from the sealed set.
+    expect(api.batchBodies).toHaveLength(0);
+    expect(api.sealBodies).toHaveLength(0);
+    expect(api.finalizeBody?.expectedImportDigest).toHaveLength(64);
+    expect(api.finalizeBody?.expectedImportDigest).not.toBe("a".repeat(64));
+  });
+
+  test("a quota refusal on a resumed import keeps the staged set for a smaller retry", async ({
+    page,
+  }) => {
+    await prepareGuestPage(page, "ko");
+    await mockAuthenticatedApi(page);
+    const api = await mockImportApi(page, {
+      failFinalize: {
+        code: "EXTERNAL_IMPORT_QUOTA_EXCEEDED",
+        status: 409,
+        times: 1,
+      },
+      importDetail: {
+        id: "qa-sealed",
+        provider: "chatgpt",
+        status: "preview_ready",
+        counts: {
+          conversations: 2,
+          messages: 8,
+          normalizedBytes: 2048,
+          truncatedMessages: 0,
+          duplicatesSkipped: 0,
+        },
+        createdAt: "2026-08-03T00:00:00.000Z",
+        completedAt: null,
+        effectiveExpiresAt: "2026-08-04T00:00:00.000Z",
+        expired: false,
+        conversations: [
+          {
+            id: "staged-1",
+            title: "Sealed conversation one",
+            conversationDigest: "a".repeat(64),
+            messageCount: 4,
+            contentBytes: 1024,
+            truncatedMessageCount: 0,
+            finalized: false,
+            sourceUpdatedAt: null,
+          },
+          {
+            id: "staged-2",
+            title: "Sealed conversation two",
+            conversationDigest: "b".repeat(64),
+            messageCount: 4,
+            contentBytes: 1024,
+            truncatedMessageCount: 0,
+            finalized: false,
+            sourceUpdatedAt: null,
+          },
+        ],
+      },
+    });
+
+    await page.goto("/settings/imports/qa-sealed");
+    await page.getByTestId("external-import-finalize").click();
+    await expect(page.getByTestId("external-import-detail-quota")).toBeVisible();
+
+    // The staged rows survive the refusal, so a narrowed retry needs no
+    // re-upload.
+    const toggles = page.getByTestId("external-import-review-toggle");
+    await expect(toggles).toHaveCount(2);
+    await toggles.nth(1).uncheck();
+    await page.getByTestId("external-import-finalize").click();
+    await expect(
+      page.getByTestId("external-import-detail-completed")
+    ).toBeVisible();
+    expect(api.finalizeBody?.selectedConversationIds).toEqual(["staged-1"]);
+    expect(api.batchBodies).toHaveLength(0);
+  });
+
+  test("an unsealed or expired import offers no confirmation on its detail page", async ({
+    page,
+  }) => {
+    const base = {
+      id: "qa-unfinished",
+      provider: "claude",
+      counts: {
+        conversations: 1,
+        messages: 4,
+        normalizedBytes: 512,
+        truncatedMessages: 0,
+        duplicatesSkipped: 0,
+      },
+      createdAt: "2026-08-03T00:00:00.000Z",
+      completedAt: null,
+      conversations: [
+        {
+          id: "staged-1",
+          title: "Partly uploaded",
+          conversationDigest: "c".repeat(64),
+          messageCount: 4,
+          contentBytes: 512,
+          truncatedMessageCount: 0,
+          finalized: false,
+          sourceUpdatedAt: null,
+        },
+      ],
+    };
+
+    // A partial upload nobody sealed: restart or delete, never "finish".
+    await prepareGuestPage(page, "ko");
+    await mockAuthenticatedApi(page);
+    await mockImportApi(page, {
+      importDetail: {
+        ...base,
+        status: "staging",
+        effectiveExpiresAt: "2026-08-04T00:00:00.000Z",
+        expired: false,
+      },
+    });
+    await page.goto("/settings/imports/qa-unfinished");
+    await expect(
+      page.getByTestId("external-import-detail-not-resumable")
+    ).toBeVisible();
+    await expect(page.getByTestId("external-import-finalize")).toHaveCount(0);
+    await expect(
+      page.getByTestId("external-import-detail-restart")
+    ).toHaveAttribute("href", "/settings/imports/new");
+
+    // A sealed import past its TTL is shown as expired, not resumable.
+    await page.unrouteAll({ behavior: "ignoreErrors" });
+    await mockAuthenticatedApi(page);
+    await mockImportApi(page, {
+      importDetail: {
+        ...base,
+        status: "preview_ready",
+        effectiveExpiresAt: "2026-08-01T00:00:00.000Z",
+        expired: true,
+      },
+    });
+    await page.goto("/settings/imports/qa-unfinished");
+    await expect(
+      page.getByTestId("external-import-detail-expired")
+    ).toBeVisible();
+    await expect(page.getByTestId("external-import-finalize")).toHaveCount(0);
+  });
+
+  test("the management screen's resume link opens the detail page", async ({
+    page,
+  }) => {
+    await prepareGuestPage(page, "ko");
+    await mockAuthenticatedApi(page);
+    await mockImportApi(page, {
+      history: [
+        {
+          id: "qa-sealed",
+          provider: "chatgpt",
+          status: "preview_ready",
+          failureCode: null,
+          conversationCount: 1,
+          messageCount: 4,
+          normalizedBytes: 512,
+          truncationCount: 0,
+          duplicateCount: 0,
+          createdAt: "2026-08-03T00:00:00.000Z",
+          completedAt: null,
+          expiresAt: "2026-08-04T00:00:00.000Z",
+          expired: false,
+          resumable: true,
+        },
+      ],
+      importDetail: {
+        id: "qa-sealed",
+        provider: "chatgpt",
+        status: "preview_ready",
+        counts: {
+          conversations: 1,
+          messages: 4,
+          normalizedBytes: 512,
+          truncatedMessages: 0,
+          duplicatesSkipped: 0,
+        },
+        createdAt: "2026-08-03T00:00:00.000Z",
+        completedAt: null,
+        effectiveExpiresAt: "2026-08-04T00:00:00.000Z",
+        expired: false,
+        conversations: [
+          {
+            id: "staged-1",
+            title: "Sealed conversation",
+            conversationDigest: "a".repeat(64),
+            messageCount: 4,
+            contentBytes: 512,
+            truncatedMessageCount: 0,
+            finalized: false,
+            sourceUpdatedAt: null,
+          },
+        ],
+      },
+    });
+
+    await page.goto("/settings/imports");
+    await page.getByTestId("external-import-resume").click();
+    await expect(page).toHaveURL(/\/settings\/imports\/qa-sealed$/);
+    await expect(
+      page.getByTestId("external-import-detail-resume")
+    ).toBeVisible();
   });
 });

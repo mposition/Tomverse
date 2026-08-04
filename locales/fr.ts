@@ -1072,6 +1072,20 @@ export const fr = {
         createSensitiveLabel: "Marquer comme information sensible",
         createSubmit: "Ajouter le souvenir",
         createSuccess: "Souvenir ajouté.",
+        reauthRequired:
+            "Pour votre sécurité, reconnectez-vous avant de poursuivre.",
+        exportTitle: "Télécharger vos souvenirs",
+        exportDescription:
+            "Téléchargez tous les souvenirs enregistrés dans votre compte, avec leur état et la provenance de leurs justifications, dans un seul fichier JSON. Le fichier n'est pas conservé sur nos serveurs.",
+        exportDownload: "Tout télécharger (JSON)",
+        deleteAllTitle: "Supprimer tous les souvenirs",
+        deleteAllDescription:
+            "Supprime tous les souvenirs enregistrés et leurs justifications, et annule toute extraction en cours. Cette action est irréversible.",
+        deleteAllImportsNote:
+            "Les conversations importées ne sont pas supprimées. Vous pouvez les supprimer séparément dans les réglages d'import.",
+        deleteAllConfirmLabel: "Saisissez {phrase} pour confirmer",
+        deleteAllSubmit: "Supprimer tous les souvenirs",
+        deleteAllDone: "Tous les souvenirs ont été supprimés.",
         status: {
             candidate: "En attente d'examen",
             active: "En usage",
@@ -1118,6 +1132,8 @@ export const fr = {
         attachments: "Les pièces jointes peuvent être stockées temporairement dans un stockage objet chiffré pour l'envoi au modèle et l'extraction de documents. Elles sont actuellement supprimées après environ un jour par la règle de cycle de vie.",
         externalImportTitle: "Conversations importées depuis d'autres services d'IA",
         externalImport: "Vous pouvez enregistrer dans votre compte Tomverse les conversations passées que vous sélectionnez dans un fichier d'export téléchargé depuis un autre service d'IA, tel que ChatGPT ou Claude. Le fichier d'export est ouvert uniquement dans votre navigateur ; l'archive d'origine n'est jamais transférée ni conservée sur les serveurs ou le stockage de Tomverse. Seuls le texte normalisé des conversations sélectionnées et les informations de provenance (service source, horodatages d'origine, noms de modèles à titre d'affichage) sont conservés comme données privées du compte. Les images, l'audio et les pièces jointes ne sont pas importés. Les conversations importées peuvent contenir des données personnelles de tiers ; il vous appartient donc de vérifier que vous êtes autorisé à les importer. Vous pouvez consulter, supprimer et exporter ces données à tout moment, et elles sont supprimées avec votre compte. Leur suppression sur Tomverse n'entraîne pas leur suppression chez le service d'origine.",
+        memoryTitle: "Mémoire à long terme du compte",
+        memory: "Si vous choisissez d'utiliser la fonction de mémoire, Tomverse envoie les parties de vos conversations importées que vous sélectionnez au fournisseur d'IA que vous confirmez, afin d'en extraire des souvenirs candidats. L'extraction utilise le modèle et le montant de crédits qui vous sont indiqués avant son exécution. Les candidats extraits ne servent pas à générer des réponses tant que vous ne les avez pas examinés et approuvés. Les candidats classés comme sensibles et ceux nécessitant un examen individuel sont exclus de l'approbation groupée et doivent être confirmés un par un. Les candidats, les souvenirs approuvés et leurs justifications sont conservés dans votre compte jusqu'à ce que vous les supprimiez ou que les données de votre compte soient supprimées. Les souvenirs approuvés et les préférences de style de réponse sont transmis comme références au fournisseur d'IA qui génère chaque nouvelle réponse, donc au fournisseur de chaque modèle lorsque vous en comparez plusieurs. Vous pouvez consulter, modifier et désactiver les souvenirs enregistrés à tout moment, télécharger la liste complète sous forme de fichier, ou tout supprimer en une fois. Si vous désactivez la mémoire, elle n'est plus utilisée dans les nouvelles discussions.",
         analyticsTitle: "Analyse produit et attribution des campagnes",
         analytics: "Tomverse utilise toujours le stockage essentiel de session, sécurité, langue et préférences nécessaire au service. Pour l’analyse produit, les visiteurs de l’UE/EEE, du Royaume-Uni, de Suisse ou d’une région non vérifiée doivent consentir avant le démarrage de Google Analytics 4. En Australie et dans toute région ajoutée après examen juridique, l’analyse minimisée démarre après un avis clair et peut être désactivée immédiatement ou plus tard. Nous enregistrons des événements approuvés et des métadonnées comme la source UTM, la langue, le pays, le nombre de modèles et le forfait. Google peut aussi traiter l’adresse IP, le navigateur, l’URL de page et la localisation approximative hors du pays du visiteur. Prompts, réponses, noms et contenus de fichiers, e-mails et noms de profil ne sont jamais inclus. Le stockage publicitaire et la personnalisation restent désactivés.",
         retentionTitle: "Conservation et suppression",

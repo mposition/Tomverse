@@ -1075,6 +1075,20 @@ export const de = {
         createSensitiveLabel: "Als sensible Information markieren",
         createSubmit: "Erinnerung hinzufügen",
         createSuccess: "Erinnerung hinzugefügt.",
+        reauthRequired:
+            "Melden Sie sich aus Sicherheitsgründen erneut an, um fortzufahren.",
+        exportTitle: "Erinnerungen herunterladen",
+        exportDescription:
+            "Laden Sie alle im Konto gespeicherten Erinnerungen mit Status und Herkunft ihrer Begründungen als eine JSON-Datei herunter. Die Datei wird auf unseren Servern nicht aufbewahrt.",
+        exportDownload: "Alle herunterladen (JSON)",
+        deleteAllTitle: "Alle Erinnerungen löschen",
+        deleteAllDescription:
+            "Löscht alle gespeicherten Erinnerungen samt Begründungen und bricht eine laufende Extraktion ab. Das lässt sich nicht rückgängig machen.",
+        deleteAllImportsNote:
+            "Importierte Unterhaltungen werden nicht gelöscht. Sie können sie separat in den Import-Einstellungen löschen.",
+        deleteAllConfirmLabel: "Geben Sie zur Bestätigung {phrase} ein",
+        deleteAllSubmit: "Alle Erinnerungen löschen",
+        deleteAllDone: "Alle Erinnerungen wurden gelöscht.",
         status: {
             candidate: "Wartet auf Prüfung",
             active: "In Verwendung",
@@ -1121,6 +1135,8 @@ export const de = {
         attachments: "Anhänge können vorübergehend in verschlüsseltem Objektspeicher für Modellzustellung und Dokumentextraktion gespeichert werden. Temporäre Anhänge werden derzeit nach etwa einem Tag per Lifecycle-Regel gelöscht.",
         externalImportTitle: "Aus anderen KI-Diensten importierte Unterhaltungen",
         externalImport: "Sie können frühere Unterhaltungen, die Sie aus einer bei einem anderen KI-Dienst wie ChatGPT oder Claude heruntergeladenen Exportdatei auswählen, in Ihrem Tomverse-Konto speichern. Die Exportdatei wird ausschließlich in Ihrem Browser geöffnet; das ursprüngliche Archiv wird niemals auf Server oder Speicher von Tomverse hochgeladen oder dort aufbewahrt. Gespeichert werden nur der normalisierte Text der ausgewählten Unterhaltungen sowie Herkunftsangaben (Ausgangsdienst, ursprüngliche Zeitstempel, Modellnamen nur zur Anzeige). Bilder, Audio und Anhänge werden nicht importiert. Importierte Unterhaltungen können personenbezogene Daten anderer Personen enthalten; Sie sind daher dafür verantwortlich sicherzustellen, dass Sie zum Import dieser Daten berechtigt sind. Sie können importierte Inhalte jederzeit einsehen, löschen und exportieren; sie werden mit Ihrem Konto gelöscht. Eine Löschung bei Tomverse löscht nicht die beim ursprünglichen Dienst gespeicherten Daten.",
+        memoryTitle: "Langzeitgedächtnis des Kontos",
+        memory: "Wenn Sie die Gedächtnisfunktion nutzen möchten, sendet Tomverse die von Ihnen ausgewählten Teile Ihrer importierten Unterhaltungen an den von Ihnen bestätigten KI-Anbieter, um daraus Gedächtnis-Kandidaten zu gewinnen. Für die Extraktion werden das Modell und der Credit-Betrag verwendet, die Ihnen vor der Ausführung angezeigt werden. Extrahierte Kandidaten werden erst zur Antworterzeugung genutzt, nachdem Sie sie geprüft und genehmigt haben. Als sensibel eingestufte Kandidaten sowie solche, die eine Einzelprüfung erfordern, sind von der Sammelgenehmigung ausgenommen und müssen einzeln bestätigt werden. Kandidaten, genehmigte Erinnerungen und deren Begründungen verbleiben in Ihrem Konto, bis Sie sie löschen oder Ihre Kontodaten gelöscht werden. Genehmigte Erinnerungen und Antwortstil-Präferenzen werden als Referenzmaterial an den KI-Anbieter übermittelt, der die jeweilige neue Antwort erzeugt — beim Vergleich mehrerer Modelle also an den Anbieter jedes Modells. Sie können gespeicherte Erinnerungen jederzeit einsehen, bearbeiten und deaktivieren, die vollständige Liste als Datei herunterladen oder alles auf einmal löschen. Wenn Sie das Gedächtnis ausschalten, wird es in neuen Chats nicht mehr verwendet.",
         analyticsTitle: "Produktanalyse und Kampagnenzuordnung",
         analytics: "Tomverse nutzt stets den für den Dienst erforderlichen Sitzungs-, Sicherheits-, Sprach- und Einstellungsspeicher. Für Produktanalysen müssen Besucher aus EU/EWR, Vereinigtem Königreich, Schweiz oder einer nicht verifizierten Region vor dem Start von Google Analytics 4 ausdrücklich zustimmen. In Australien und nach rechtlicher Prüfung freigegebenen Regionen startet die datensparsame Analyse nach einem klaren Hinweis und kann sofort oder später deaktiviert werden. Erfasst werden genehmigte Ereignisse und Metadaten wie UTM-Quelle, Sprache, Land, Modellanzahl und Tarif. Google kann zudem IP-Adresse, Browserdaten, Seiten-URL und ungefähren Standort außerhalb des Besucherlandes verarbeiten. Prompts, Modellantworten, Dateinamen, Dateiinhalte, E-Mail-Adressen und Profilnamen werden nie einbezogen. Werbespeicher und Personalisierung bleiben deaktiviert.",
         retentionTitle: "Aufbewahrung und Löschung",
