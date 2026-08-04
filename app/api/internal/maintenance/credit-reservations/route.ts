@@ -4,6 +4,7 @@ import { reconcileExpiredChatCreditReservations } from "@/lib/chatSecurity";
 import { reconcileExpiredChatRequestLeases } from "@/lib/chatRequestLease";
 import { reconcileExpiredExternalImportStaging } from "@/lib/externalImportService";
 import { dispatchPendingMemoryExtractionRunsQuietly } from "@/lib/memoryExtractionDispatch";
+import { backfillMemorySearchTerms } from "@/lib/memoryRetrieval";
 import { reconcileExpiredMemoryExtractionRuns } from "@/lib/memoryExtractionService";
 import { reportOperationalIncident } from "@/lib/operationalMonitoring";
 import {
@@ -88,6 +89,12 @@ export async function POST(request: Request) {
     // the sweep, so runs it just parked are dispatched in the same tick.
     const memoryExtractionDispatch =
       await dispatchPendingMemoryExtractionRunsQuietly();
+    // Retrieval v1 (policy §9) indexes at write, so this only ever has work
+    // for rows that predate it. Bounded per tick and self-terminating: once
+    // `remaining` reaches zero it stays there. Never throws.
+    const memorySearchTermsBackfill = await backfillMemorySearchTerms().catch(
+      () => ({ updated: 0, remaining: 0 })
+    );
     await completeScheduledJob({
       runId: run?.id,
       processedCount: result.examined,
@@ -101,6 +108,7 @@ export async function POST(request: Request) {
         externalImportStaging,
         memoryExtractionLeases,
         memoryExtractionDispatch,
+        memorySearchTermsBackfill,
       },
     });
     return Response.json(
@@ -115,6 +123,7 @@ export async function POST(request: Request) {
         externalImportStaging,
         memoryExtractionLeases,
         memoryExtractionDispatch,
+        memorySearchTermsBackfill,
       },
       { headers: { "Cache-Control": "no-store" } }
     );

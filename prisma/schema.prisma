@@ -1968,7 +1968,9 @@ model MemoryItem {
   /// index is created by raw SQL in the migration. Populated by the B4
   /// slice's tokenizer; empty until then.
   searchTerms      String[] @default([])
-  retrievalVersion Int      @default(1)
+  /// Which tokenizer produced `searchTerms`. 0 means "not computed yet", which
+  /// is what makes the §9 backfill able to find rows that were never indexed.
+  retrievalVersion Int      @default(0)
 
   revision   Int     @default(1)
   userEdited Boolean @default(false)

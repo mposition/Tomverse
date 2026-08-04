@@ -4,6 +4,10 @@ import type { Prisma } from "@prisma/client";
 import { ApiSecurityError } from "@/lib/apiSecurity";
 import { manualEvidenceDigest } from "@/lib/memoryEvidenceValidation";
 import {
+    MEMORY_RETRIEVAL_VERSION,
+    memorySearchTerms,
+} from "@/lib/memoryRetrievalCore";
+import {
     serializeMemoryExportItem,
     type MemoryExportSource,
 } from "@/lib/memoryExportCore";
@@ -270,6 +274,11 @@ export async function createManualMemory(input: {
                 confidence: 1,
                 conflictKey,
                 userEdited: true,
+                // Terms are written with the statement, in the same statement.
+                // A separate indexing pass would leave a window where an
+                // active memory exists and cannot be retrieved (§9).
+                searchTerms: memorySearchTerms({ kind: input.kind, statement }),
+                retrievalVersion: MEMORY_RETRIEVAL_VERSION,
                 expiresAt: input.expiresAt ? new Date(input.expiresAt) : null,
                 approvedAt: new Date(),
             },
@@ -408,6 +417,10 @@ export async function editMemory(input: {
             revision: { increment: 1 },
             userEdited: true,
             conflictKey: `${item.kind}:${memoryStatementKey(statement)}`,
+            // An edited statement is a different statement: retrieval must
+            // find it by what it says now, not by what it used to say.
+            searchTerms: memorySearchTerms({ kind: item.kind, statement }),
+            retrievalVersion: MEMORY_RETRIEVAL_VERSION,
             ...(stayActive
                 ? {}
                 : item.status === "active"

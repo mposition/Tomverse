@@ -16,6 +16,14 @@ import {
     rejectMemory,
     setMemoryPinned,
 } from "@/lib/memoryService";
+import {
+    backfillMemorySearchTerms,
+    retrieveMemoriesForRequest,
+} from "@/lib/memoryRetrieval";
+import {
+    MEMORY_RETRIEVAL_VERSION,
+    memorySearchTerms,
+} from "@/lib/memoryRetrievalCore";
 import { prisma } from "@/lib/prisma";
 
 /**
@@ -388,4 +396,237 @@ test("memory settings default on and round-trip (§8.1)", async () => {
     });
     assert.equal(updated.masterEnabled, false);
     assert.equal(updated.defaultConversationMode, "off");
+});
+
+/**
+ * §9 retrieval v1 against a real database. The GIN-backed candidate query,
+ * the write paths that keep `searchTerms` in step with the statement, and the
+ * backfill for rows written before retrieval existed.
+ */
+
+const activeMemory = async (
+    userId: string,
+    overrides: {
+        kind?: string;
+        statement?: string;
+        pinned?: boolean;
+        expiresAt?: Date | null;
+        status?: string;
+    } = {}
+) => {
+    const kind = overrides.kind ?? "preference";
+    const statement = overrides.statement ?? "사용자는 간결한 답변을 선호한다";
+    return prisma.memoryItem.create({
+        data: {
+            userId,
+            kind,
+            statement,
+            status: overrides.status ?? "active",
+            confidence: 0.9,
+            pinned: overrides.pinned ?? false,
+            expiresAt: overrides.expiresAt ?? null,
+            searchTerms: memorySearchTerms({ kind, statement }),
+            retrievalVersion: MEMORY_RETRIEVAL_VERSION,
+            approvedAt: new Date(),
+        },
+    });
+};
+
+test("retrieval finds an active memory by shared terms (§9)", async () => {
+    const user = await createUser();
+    await activeMemory(user.id, {
+        kind: "expertise",
+        statement: "The user maintains Postgres migration tooling",
+    });
+    await activeMemory(user.id, {
+        kind: "preference",
+        statement: "The user enjoys hiking on weekends",
+    });
+
+    const result = await retrieveMemoriesForRequest({
+        userId: user.id,
+        query: "help me review this postgres migration",
+    });
+    assert.equal(result.retrievalVersion, MEMORY_RETRIEVAL_VERSION);
+    assert.equal(result.selection.factual.length, 1);
+    assert.match(
+        result.selection.factual[0].memory.statement,
+        /Postgres migration tooling/
+    );
+});
+
+test("retrieval matches Korean across a spacing difference (§9 bigrams)", async () => {
+    const user = await createUser();
+    await activeMemory(user.id, {
+        kind: "preference",
+        statement: "사용자는 코드리뷰에서 간결한 설명을 선호한다",
+    });
+    const result = await retrieveMemoriesForRequest({
+        userId: user.id,
+        query: "코드 리뷰 어떻게 할까요",
+    });
+    assert.equal(result.selection.factual.length, 1);
+});
+
+test("only active, unexpired memories are retrievable (§8.3)", async () => {
+    const user = await createUser();
+    await activeMemory(user.id, {
+        status: "candidate",
+        statement: "The user prefers postgres tooling reviewed carefully",
+    });
+    await activeMemory(user.id, {
+        status: "suspended_by_source_delete",
+        statement: "The user prefers postgres migrations checked twice",
+    });
+    await activeMemory(user.id, {
+        expiresAt: new Date(Date.now() - 60_000),
+        statement: "The user prefers postgres upgrades scheduled early",
+    });
+    const result = await retrieveMemoriesForRequest({
+        userId: user.id,
+        query: "postgres",
+    });
+    assert.equal(result.candidateCount, 0);
+    assert.equal(result.selection.factual.length, 0);
+});
+
+test("retrieval never crosses accounts", async () => {
+    const [user, stranger] = await Promise.all([createUser(), createUser()]);
+    await activeMemory(stranger.id, {
+        kind: "expertise",
+        statement: "The stranger maintains Postgres migration tooling",
+    });
+    const result = await retrieveMemoriesForRequest({
+        userId: user.id,
+        query: "postgres migration",
+    });
+    assert.equal(result.candidateCount, 0);
+});
+
+test("a pinned memory is retrieved even with no shared term (§9)", async () => {
+    const user = await createUser();
+    await activeMemory(user.id, {
+        pinned: true,
+        statement: "The user enjoys hiking on weekends",
+    });
+    const result = await retrieveMemoriesForRequest({
+        userId: user.id,
+        query: "postgres migration",
+    });
+    assert.equal(result.selection.factual.length, 1);
+});
+
+test("style memories are excluded when the account turned style off (§21)", async () => {
+    const user = await createUser();
+    await activeMemory(user.id, {
+        kind: "verbosity",
+        statement: "The user prefers short answers",
+    });
+    const withStyle = await retrieveMemoriesForRequest({
+        userId: user.id,
+        query: "short answers please",
+    });
+    assert.equal(withStyle.selection.style.length, 1);
+
+    const withoutStyle = await retrieveMemoriesForRequest({
+        userId: user.id,
+        query: "short answers please",
+        includeStyle: false,
+    });
+    assert.equal(withoutStyle.selection.style.length, 0);
+    assert.equal(withoutStyle.candidateCount, 0);
+});
+
+test("manual creation indexes its terms in the same write (§9)", async () => {
+    const user = await createUser();
+    const memoryId = await createManualMemory({
+        userId: user.id,
+        kind: "expertise",
+        statement: "사용자는 Postgres 마이그레이션 도구를 관리한다",
+        groundsText: "사용자가 직접 알려준 내용입니다.",
+    });
+    const stored = await prisma.memoryItem.findUniqueOrThrow({
+        where: { id: memoryId },
+    });
+    assert.ok(stored.searchTerms.length > 0);
+    assert.equal(stored.retrievalVersion, MEMORY_RETRIEVAL_VERSION);
+
+    // Retrievable immediately: no separate indexing pass to wait for.
+    const result = await retrieveMemoriesForRequest({
+        userId: user.id,
+        query: "postgres 마이그레이션",
+    });
+    assert.equal(result.selection.factual.length, 1);
+});
+
+test("an edited statement is retrievable by what it says now (§9)", async () => {
+    const user = await createUser();
+    const memoryId = await createManualMemory({
+        userId: user.id,
+        kind: "expertise",
+        statement: "The user maintains Postgres tooling",
+        groundsText: "The user said so.",
+    });
+    await editMemory({
+        userId: user.id,
+        memoryId,
+        statement: "The user maintains Kubernetes tooling",
+    });
+
+    const stale = await retrieveMemoriesForRequest({
+        userId: user.id,
+        query: "postgres",
+    });
+    assert.equal(stale.selection.factual.length, 0);
+    const fresh = await retrieveMemoriesForRequest({
+        userId: user.id,
+        query: "kubernetes",
+    });
+    assert.equal(fresh.selection.factual.length, 1);
+});
+
+test("the backfill indexes rows written before retrieval existed (§9)", async () => {
+    const user = await createUser();
+    // Exactly what the schema produced before this slice: an active memory
+    // with no terms, which no query could ever reach.
+    const legacy = await prisma.memoryItem.create({
+        data: {
+            userId: user.id,
+            kind: "expertise",
+            statement: "The user maintains Postgres migration tooling",
+            status: "active",
+            confidence: 0.9,
+            approvedAt: new Date(),
+        },
+    });
+    assert.equal(legacy.retrievalVersion, 0);
+    assert.deepEqual(legacy.searchTerms, []);
+    assert.equal(
+        (
+            await retrieveMemoriesForRequest({
+                userId: user.id,
+                query: "postgres migration",
+            })
+        ).candidateCount,
+        0
+    );
+
+    const first = await backfillMemorySearchTerms();
+    assert.equal(first.updated, 1);
+    assert.equal(first.remaining, 0);
+    assert.equal(
+        (
+            await retrieveMemoriesForRequest({
+                userId: user.id,
+                query: "postgres migration",
+            })
+        ).selection.factual.length,
+        1
+    );
+
+    // Idempotent: a second pass has nothing left to do.
+    assert.deepEqual(await backfillMemorySearchTerms(), {
+        updated: 0,
+        remaining: 0,
+    });
 });
