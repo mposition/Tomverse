@@ -509,6 +509,28 @@ Context budget: core/pinned 우선, 관련 memory, style, 동일 source 다양�
 전체 token hard cap. 축소 순서: 낮은 importance → 중복 → 낮은 관련도 → style
 example. 현재 user request와 필수 output budget을 memory가 밀어내지 않습니다.
 
+구현: 점수·선택은 `lib/memoryRetrievalScoring.ts`(순수), DB 질의는
+`lib/memoryRetrievalService.ts`입니다.
+
+- **core·pinned·style은 관련도로 거르지 않습니다.** "사용자는 백엔드
+  엔지니어다"는 요청이 공학을 언급하든 말든 유효하고, 어조 선호는 모든 답변에
+  적용됩니다. **질의의 후보 집합도 이와 같아야 합니다** — SQL이 term 일치만
+  가져오면 scorer가 거르지 않을 memory가 애초에 도착하지 않고, 그 실패는
+  조용합니다(결과가 적어질 뿐이라 "그 계정에 기억이 적다"와 구분되지 않습니다).
+- **관련도 하한은 결합 점수가 아니라 term 일치 수로 판정합니다.** confidence와
+  recency는 모든 저장된 memory에서 0이 아니므로, 점수 임계값은 요청과 한 단어도
+  겹치지 않는 memory를 통과시킵니다. 반대로 *비율* 임계값은 긴 질문에서 진짜
+  관련 있는 memory를 버립니다.
+- **순서는 완전히 결정적입니다**: 점수는 고정 정밀도로 비교하고 동점은 id로
+  가릅니다. DB 행 순서에 의존하면 같은 요청 두 번이 다른 선택을 내고 §10의
+  bundle 검증이 이를 변조로 보고합니다.
+- **retrieval은 쓰지 않습니다.** 색인이 낡은 행을 발견해도 재색인하지 않습니다 —
+  읽기 경로가 쓰면 같은 질의가 멱등하지 않게 됩니다. 수리는 backfill의 몫입니다.
+- `MEMORY_RETRIEVAL_ALGORITHM_VERSION`(점수·선택)과 행별
+  `retrievalVersion`(저장된 term 형태)은 별개입니다. 가중치를 바꾸면 bundle은
+  무효가 되지만 저장된 term은 한 글자도 바뀌지 않으므로, 둘을 합치면 불필요한
+  전체 재색인을 강제하게 됩니다.
+
 ### 9.1 Prompt boundary
 
 1. Tomverse system·safety policy
