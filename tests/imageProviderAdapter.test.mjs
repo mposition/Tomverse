@@ -3,6 +3,7 @@ import { test } from "node:test";
 
 import {
   classifyImageProviderFailure,
+  generateImageWithProvider,
   ImageProviderError,
 } from "../lib/imageProviderAdapter.ts";
 
@@ -48,4 +49,33 @@ test("ImageProviderError carries phase, status and provider request id", () => {
   assert.equal(error.status, 429);
   assert.equal(error.providerRequestId, "req_123");
   assert.equal(error.name, "ImageProviderError");
+});
+
+test("a model on a fail-closed hold is refused by the adapter itself", async () => {
+  // The adapter is the last place a request could still reach a provider we
+  // cannot price, so it re-checks the registry rather than trusting admission.
+  await assert.rejects(
+    generateImageWithProvider({
+      prompt: "a red apple",
+      size: "1024x1024",
+      quality: "medium",
+      modelId: "gemini-3.1-flash-image-preview",
+    }),
+    (error) =>
+      error.name === "ImageProviderError" &&
+      error.failurePhase === "provider_failed" &&
+      /not available for requests/.test(error.message)
+  );
+});
+
+test("an unknown model never reaches a provider", async () => {
+  await assert.rejects(
+    generateImageWithProvider({
+      prompt: "a red apple",
+      size: "1024x1024",
+      quality: "low",
+      modelId: "not-a-registered-model",
+    }),
+    (error) => error.name === "ImageProviderError"
+  );
 });

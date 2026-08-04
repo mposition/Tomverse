@@ -4,6 +4,10 @@ import {
   listEnabledImagePricingEntries,
   maxRequestCostMicroUsd,
 } from "@/lib/imageGenerationPricing";
+import {
+  listActiveImageProviders,
+  type ImageModelProvider,
+} from "@/lib/imageModelRegistry";
 
 // The image provider budget: a separate namespace from the chat budgets,
 // with its own floor derivation. The chat floor comes from token-guardrail
@@ -15,10 +19,20 @@ import {
 // unit-testable with a fixed environment; the readiness wrapper lives in
 // lib/imageProviderBudgetReadiness.ts because it reads the feature flag.
 
-export const IMAGE_PROVIDER_BUDGET_ENV_NAMES = {
-  day: "IMAGE_PROVIDER_OPENAI_COST_MICROUSD_PER_DAY",
-  month: "IMAGE_PROVIDER_OPENAI_COST_MICROUSD_PER_MONTH",
-} as const;
+// Budgets are per PROVIDER, never per model (policy v2 section 8): several
+// models on one account draw from one spend pool, and splitting the pool by
+// model would refuse traffic while the provider's own budget is untouched.
+// Model-level cost stays an observation dimension.
+export const imageProviderBudgetEnvNames = (provider: ImageModelProvider) => {
+  const namespace = provider.toUpperCase();
+  return {
+    day: `IMAGE_PROVIDER_${namespace}_COST_MICROUSD_PER_DAY`,
+    month: `IMAGE_PROVIDER_${namespace}_COST_MICROUSD_PER_MONTH`,
+  } as const;
+};
+
+/** Kept for the OpenAI-only call sites that predate the multi-provider split. */
+export const IMAGE_PROVIDER_BUDGET_ENV_NAMES = imageProviderBudgetEnvNames("openai");
 
 export const IMAGE_BUDGET_HEADROOM_MULTIPLIER = 1.25;
 
@@ -82,15 +96,17 @@ const parseBudgetValue = (raw: string | undefined) => {
 
 export const resolveImageProviderBudget = (
   env: Record<string, string | undefined> = process.env,
-  options: { production?: boolean } = {}
+  options: { production?: boolean; provider?: ImageModelProvider } = {}
 ): ResolvedImageProviderBudget => {
   const production = options.production ?? env.NODE_ENV === "production";
+  const provider = options.provider ?? "openai";
+  const envNames = imageProviderBudgetEnvNames(provider);
   const floor = imageProviderBudgetFloorMicroUsd();
   const problems: ImageProviderBudgetProblem[] = [];
   const clamped: ImageProviderBudgetClamp[] = [];
 
-  const day = parseBudgetValue(env[IMAGE_PROVIDER_BUDGET_ENV_NAMES.day]);
-  const month = parseBudgetValue(env[IMAGE_PROVIDER_BUDGET_ENV_NAMES.month]);
+  const day = parseBudgetValue(env[envNames.day]);
+  const month = parseBudgetValue(env[envNames.month]);
 
   if (day.state === "invalid" || month.state === "invalid") {
     for (const [window, parsed] of [
@@ -101,7 +117,7 @@ export const resolveImageProviderBudget = (
         problems.push({
           window,
           reason: "not_a_positive_integer",
-          message: `${IMAGE_PROVIDER_BUDGET_ENV_NAMES[window]} must be a positive integer of micro-USD.`,
+          message: `${envNames[window]} must be a positive integer of micro-USD.`,
         });
       }
     }
@@ -117,7 +133,7 @@ export const resolveImageProviderBudget = (
         problems.push({
           window,
           reason: "missing_in_production",
-          message: `${IMAGE_PROVIDER_BUDGET_ENV_NAMES[window]} is required in production.`,
+          message: `${envNames[window]} is required in production.`,
         });
       }
       return { limits: null, floorMicroUsd: floor, problems, clamped, source: "unconfigured" };
@@ -141,7 +157,7 @@ export const resolveImageProviderBudget = (
     problems.push({
       window: missing,
       reason: "partial_configuration",
-      message: `${IMAGE_PROVIDER_BUDGET_ENV_NAMES[missing]} is missing while the other window is set; configure both.`,
+      message: `${envNames[missing]} is missing while the other window is set; configure both.`,
     });
     return { limits: null, floorMicroUsd: floor, problems, clamped, source: "unconfigured" };
   }
@@ -166,3 +182,23 @@ export const resolveImageProviderBudget = (
     source: "environment",
   };
 };
+
+export type ResolvedImageProviderBudgetByProvider = {
+  provider: ImageModelProvider;
+  resolved: ResolvedImageProviderBudget;
+};
+
+/**
+ * Every provider that has at least one ENABLED model must have a usable
+ * budget. A provider whose models are all on hold is not checked: it cannot
+ * receive a request, so demanding its budget would block a deploy over spend
+ * that cannot happen (policy section 8).
+ */
+export const resolveActiveImageProviderBudgets = (
+  env: Record<string, string | undefined> = process.env,
+  options: { production?: boolean } = {}
+): ResolvedImageProviderBudgetByProvider[] =>
+  listActiveImageProviders().map((provider) => ({
+    provider,
+    resolved: resolveImageProviderBudget(env, { ...options, provider }),
+  }));
