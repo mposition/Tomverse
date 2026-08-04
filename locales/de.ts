@@ -808,17 +808,24 @@ export const de = {
         refundRequestSuccess: "Rückerstattungsanfrage erhalten.",
         refundRequestFailed: "Rückerstattungsanfrage konnte nicht gesendet werden.",
     },
+    settingsNav: {
+        navLabel: "Einstellungsnavigation",
+        backToSettings: "Zurück zu den Einstellungen",
+        settings: "Einstellungen",
+        dataAndPersonalization: "Daten und Personalisierung",
+        dataAndPersonalizationDescription: "Importierte Unterhaltungen und Kontogedächtnis. Beides wird auf einer eigenen Seite verwaltet.",
+    },
     externalImport: {
         dataTabTitle: "Aus einem anderen KI-Dienst importieren",
         dataTabDescription:
             "Speichern Sie frühere Unterhaltungen aus einer ChatGPT- oder Claude-Exportdatei in Ihrem Tomverse-Konto. Die Exportdatei wird nur in Ihrem Browser gelesen.",
         dataTabUsage:
             "{conversations} importierte Unterhaltungen · {storage} gespeichert",
-        dataTabOpen: "Import-Einstellungen öffnen",
+        dataTabOpen: "Importe verwalten",
+        dataTabUsageEmpty: "Noch keine importierten Unterhaltungen",
         pageTitle: "Unterhaltungen aus einem anderen KI-Dienst importieren",
         pageDescription:
             "Laden Sie einen offiziellen Datenexport von ChatGPT oder Claude hoch, prüfen Sie den Inhalt und wählen Sie die Unterhaltungen aus, die Sie in Ihrem Tomverse-Konto behalten möchten.",
-        backToChat: "Zurück zum Chat",
         backToImports: "Zurück zu den Importen",
         signInRequired:
             "Melden Sie sich an, um Unterhaltungen aus einem anderen KI-Dienst zu importieren.",
@@ -1004,11 +1011,13 @@ export const de = {
         dataTabTitle: "Konto-Langzeitgedächtnis",
         dataTabDescription:
             "Prüfen Sie aus importierten Unterhaltungen extrahierte Gedächtnis-Kandidaten und legen Sie fest, ob genehmigte Erinnerungen in neuen Chats verwendet werden.",
-        dataTabOpen: "Gedächtnis-Einstellungen öffnen",
+        dataTabOpen: "Gedächtnis verwalten",
+        dataTabStatusOn: "Wird in neuen Chats verwendet",
+        dataTabStatusOff: "Wird in neuen Chats nicht verwendet",
+        dataTabStatusPending: "{count} warten auf Prüfung",
         pageTitle: "Konto-Langzeitgedächtnis",
         pageDescription:
             "Genehmigen oder lehnen Sie wartende Gedächtnis-Kandidaten ab und bearbeiten, fixieren oder löschen Sie verwendete Erinnerungen.",
-        backToChat: "Zurück zum Chat",
         signInRequired:
             "Melden Sie sich an, um das Gedächtnis Ihres Kontos zu verwalten.",
         privacyNote:

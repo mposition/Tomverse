@@ -808,17 +808,24 @@ export const es = {
         refundRequestSuccess: "Solicitud de reembolso recibida.",
         refundRequestFailed: "No se pudo enviar la solicitud de reembolso.",
     },
+    settingsNav: {
+        navLabel: "Navegación de ajustes",
+        backToSettings: "Volver a los ajustes",
+        settings: "Ajustes",
+        dataAndPersonalization: "Datos y personalización",
+        dataAndPersonalizationDescription: "Conversaciones importadas y memoria de la cuenta. Cada una se gestiona en su propia página.",
+    },
     externalImport: {
         dataTabTitle: "Importar desde otro servicio de IA",
         dataTabDescription:
             "Guarda en tu cuenta de Tomverse conversaciones de un archivo de exportación de ChatGPT o Claude. El archivo de exportación solo se lee en tu navegador.",
         dataTabUsage:
             "{conversations} conversaciones importadas · {storage} almacenados",
-        dataTabOpen: "Abrir ajustes de importación",
+        dataTabOpen: "Gestionar importaciones",
+        dataTabUsageEmpty: "Aún no hay conversaciones importadas",
         pageTitle: "Importar conversaciones desde otro servicio de IA",
         pageDescription:
             "Sube una exportación oficial de datos de ChatGPT o Claude, revisa su contenido y elige qué conversaciones conservar en tu cuenta de Tomverse.",
-        backToChat: "Volver al chat",
         backToImports: "Volver a las importaciones",
         signInRequired:
             "Inicia sesión para importar conversaciones desde otro servicio de IA.",
@@ -1001,11 +1008,13 @@ export const es = {
         dataTabTitle: "Memoria de la cuenta",
         dataTabDescription:
             "Revisa los recuerdos candidatos extraídos de conversaciones importadas y decide si los recuerdos aprobados se usan en los chats nuevos.",
-        dataTabOpen: "Abrir ajustes de memoria",
+        dataTabOpen: "Gestionar memoria",
+        dataTabStatusOn: "Se usa en los chats nuevos",
+        dataTabStatusOff: "No se usa en los chats nuevos",
+        dataTabStatusPending: "{count} pendientes de revisión",
         pageTitle: "Memoria de la cuenta",
         pageDescription:
             "Aprueba o rechaza los recuerdos candidatos pendientes de revisión, y edita, fija o elimina los recuerdos en uso.",
-        backToChat: "Volver al chat",
         signInRequired:
             "Inicia sesión para gestionar la memoria de tu cuenta.",
         privacyNote:

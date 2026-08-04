@@ -1030,6 +1030,17 @@ export const ko = {
         refundRequestSuccess: "환불 요청이 접수되었습니다.",
         refundRequestFailed: "환불 요청을 접수하지 못했습니다.",
     },
+    // 설정 계층에서 공통으로 쓰는 표현. 설정은 route가 아니라 닫을 수 있는
+    // 패널이고, 상세 페이지는 그 패널을 이름으로 지목해 올라갑니다 — 그룹
+    // 이름과 breadcrumb은 두 shell과 패널에서 같은 문구여야 합니다
+    // (lib/settingsNavigation.ts).
+    settingsNav: {
+        navLabel: "설정 탐색",
+        backToSettings: "설정으로 돌아가기",
+        settings: "설정",
+        dataAndPersonalization: "데이터 및 개인화",
+        dataAndPersonalizationDescription: "가져온 대화와 계정 기억입니다. 각각은 별도 페이지에서 관리합니다.",
+    },
     // 외부 대화 Import (Release A). "다른 AI 서비스에서 가져오기"는 Data 탭의
     // "이 브라우저의 게스트 대화 가져오기"(auth.guestImportSectionTitle)와
     // 다른 기능이므로 명칭을 공유하지 않습니다 (policy §21).
@@ -1038,11 +1049,11 @@ export const ko = {
         dataTabDescription:
             "ChatGPT·Claude 내보내기 파일의 과거 대화를 Tomverse 계정에 저장합니다. 내보내기 파일은 브라우저 안에서만 읽습니다.",
         dataTabUsage: "가져온 대화 {conversations}개 · {storage} 저장됨",
-        dataTabOpen: "가져오기 설정 열기",
+        dataTabOpen: "가져오기 관리",
+        dataTabUsageEmpty: "아직 가져온 대화가 없습니다",
         pageTitle: "다른 AI 서비스에서 대화 가져오기",
         pageDescription:
             "ChatGPT 또는 Claude의 공식 데이터 내보내기 파일을 올리고, 내용을 확인한 뒤 Tomverse 계정에 보관할 대화를 선택하세요.",
-        backToChat: "채팅으로 돌아가기",
         backToImports: "가져오기 목록으로",
         signInRequired: "다른 AI 서비스의 대화를 가져오려면 로그인하세요.",
         disabledNotice: "외부 대화 가져오기는 지금 사용할 수 없습니다.",
@@ -1212,11 +1223,13 @@ export const ko = {
         dataTabTitle: "계정 장기 기억",
         dataTabDescription:
             "가져온 대화에서 추출한 기억 후보를 검토하고, 승인한 기억을 새 대화에서 사용할지 설정합니다.",
-        dataTabOpen: "기억 설정 열기",
+        dataTabOpen: "기억 관리",
+        dataTabStatusOn: "새 대화에서 사용 중",
+        dataTabStatusOff: "새 대화에서 사용 안 함",
+        dataTabStatusPending: "검토 대기 {count}개",
         pageTitle: "계정 장기 기억",
         pageDescription:
             "검토를 기다리는 기억 후보를 승인하거나 거절하고, 사용 중인 기억을 수정·고정·삭제할 수 있습니다.",
-        backToChat: "채팅으로 돌아가기",
         signInRequired: "계정 장기 기억을 관리하려면 로그인하세요.",
         privacyNote:
             "기억은 사용자가 검토하고 승인한 것만 새 대화에서 사용됩니다. 승인한 기억과 답변 스타일은 현재 선택한 Tomverse 모델의 답변 생성에 참고 자료로 전달되며, 언제든지 조회·수정·비활성화·삭제할 수 있습니다.",
