@@ -12,7 +12,7 @@ import {
 import { authOptions } from "@/lib/auth";
 import { ChatAccessError, chatErrorResponse } from "@/lib/chatSecurity";
 import {
-  processImageGeneration,
+  processImageGenerationGroup,
   requestImageGeneration,
 } from "@/lib/imageGenerationService";
 
@@ -29,6 +29,11 @@ const createGenerationSchema = z
     quality: z.enum(["low", "medium", "high"]),
     conversationId: z.string().trim().min(1).max(100).optional(),
     idempotencyKey: z.string().regex(/^[A-Za-z0-9_-]{8,64}$/),
+    // The fan-out (policy v2 section 11). Absent means the default single
+    // model, so a v1-shaped client keeps working unchanged. The real cap is
+    // IMAGE_GROUP_MAX_MODELS, enforced in the service; this bound only stops
+    // an absurd payload before it reaches it.
+    modelIds: z.array(z.string().trim().min(1).max(120)).min(1).max(8).optional(),
   })
   .strict();
 
@@ -55,6 +60,7 @@ export async function POST(req: Request) {
       quality: body.quality,
       conversationId: body.conversationId ?? null,
       idempotencyKey: body.idempotencyKey,
+      modelIds: body.modelIds,
     });
 
     // Post-response execution in the same long-lived Node process: the 202
@@ -63,20 +69,27 @@ export async function POST(req: Request) {
     // to run alongside the reconciliation sweep (or a future dedicated
     // worker). A process death here is exactly the stale case the sweep
     // refunds.
-    if (!result.reused && result.status === "pending") {
-      after(() =>
-        processImageGeneration(result.generationId).catch((error) =>
-          console.error("Image generation processing failed:", error)
-        )
-      );
+    if (!result.reused) {
+      const pending = result.targets
+        .filter((target) => target.status === "pending")
+        .map((target) => target.generationId);
+      if (pending.length > 0) {
+        after(() =>
+          processImageGenerationGroup(pending).catch((error) =>
+            console.error("Image generation processing failed:", error)
+          )
+        );
+      }
     }
 
     return NextResponse.json(
       {
         generationId: result.generationId,
+        groupId: result.groupId,
         conversationId: result.conversationId,
         status: result.status,
         reservedCredits: result.reservedCredits,
+        targets: result.targets,
       },
       { status: result.reused ? 200 : 202 }
     );
