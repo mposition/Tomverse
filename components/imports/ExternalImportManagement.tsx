@@ -11,6 +11,10 @@ import {
     Trash2,
 } from "lucide-react";
 import { useLanguage } from "@/components/LanguageProvider";
+import {
+    SourceDeletionNotice,
+    type SourceDeletionImpactView,
+} from "@/components/imports/SourceDeletionNotice";
 import { SettingsDetailNav } from "@/components/settings/SettingsDetailNav";
 import {
     formatBytes,
@@ -138,6 +142,11 @@ export function ExternalImportManagement() {
         kind: "loading",
     });
     const [armedDeleteId, setArmedDeleteId] = useState<string | null>(null);
+    // Read when the delete is armed, not on every list render: the
+    // confirmation needs the number, the listing does not (§13.1).
+    const [memoryImpact, setMemoryImpact] =
+        useState<SourceDeletionImpactView | null>(null);
+    const [keepMemories, setKeepMemories] = useState(false);
     const [deletingId, setDeletingId] = useState<string | null>(null);
     const [conversationsState, setConversationsState] =
         useState<ConversationsState>({ kind: "loading" });
@@ -250,12 +259,31 @@ export function ExternalImportManagement() {
         async (importId: string) => {
             if (armedDeleteId !== importId) {
                 setArmedDeleteId(importId);
+                setMemoryImpact(null);
+                setKeepMemories(false);
+                try {
+                    const preview = await fetch(
+                        `/api/imports/external/${importId}?include=memoryImpact`,
+                        { cache: "no-store" }
+                    );
+                    if (preview.ok) {
+                        const body = (await preview.json()) as {
+                            memoryImpact?: SourceDeletionImpactView;
+                        };
+                        setMemoryImpact(body.memoryImpact ?? null);
+                    }
+                } catch {
+                    // No preview is not a reason to block the delete; the
+                    // server still applies the §13.1 defaults.
+                }
                 return;
             }
             setDeletingId(importId);
             try {
                 const response = await fetch(
-                    `/api/imports/external/${importId}`,
+                    `/api/imports/external/${importId}?derivedMemories=${
+                        keepMemories ? "suspend" : "delete"
+                    }`,
                     { method: "DELETE" }
                 );
                 if (response.ok) {
@@ -268,7 +296,13 @@ export function ExternalImportManagement() {
                 setArmedDeleteId(null);
             }
         },
-        [armedDeleteId, loadCapacity, loadConversations, loadHistory]
+        [
+            armedDeleteId,
+            keepMemories,
+            loadCapacity,
+            loadConversations,
+            loadHistory,
+        ]
     );
 
     if (capacityState.kind === "unauthenticated") {
@@ -624,6 +658,14 @@ export function ExternalImportManagement() {
                                               : t("externalImport.deleteImport")}
                                     </button>
                                 </div>
+                                {armedDeleteId === row.id ? (
+                                    <SourceDeletionNotice
+                                        impact={memoryImpact}
+                                        scope="import"
+                                        keepDerived={keepMemories}
+                                        onKeepDerivedChange={setKeepMemories}
+                                    />
+                                ) : null}
                             </li>
                         ))}
                     </ul>

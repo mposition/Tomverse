@@ -1005,6 +1005,15 @@ export const fr = {
         abandonImport: "Quitter cet import",
     },
     memoryReview: {
+        sourceDeleteDerivedImport:
+            "{count} souvenirs issus de cet import seront également supprimés.",
+        sourceDeleteDerivedConversation:
+            "{count} souvenirs issus de cette conversation seront également supprimés.",
+        sourceDeleteKeep: "Conserver les souvenirs, mais cesser de les utiliser",
+        sourceDeleteEdited:
+            "{count} souvenirs que vous avez modifiés sont conservés et simplement désactivés.",
+        sourceDeleteKept:
+            "{count} souvenirs appuyés par d'autres éléments restent inchangés.",
         dataTabTitle: "Mémoire du compte",
         dataTabDescription:
             "Examinez les souvenirs candidats extraits des conversations importées et choisissez si les souvenirs approuvés sont utilisés dans les nouvelles discussions.",

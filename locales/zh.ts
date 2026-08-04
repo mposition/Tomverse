@@ -1028,6 +1028,11 @@ export const zh = {
         abandonImport: "退出此次导入",
     },
     memoryReview: {
+        sourceDeleteDerivedImport: "由此次导入生成的 {count} 条记忆也会一并删除。",
+        sourceDeleteDerivedConversation: "由此对话生成的 {count} 条记忆也会一并删除。",
+        sourceDeleteKeep: "保留记忆，仅停止使用",
+        sourceDeleteEdited: "你亲自修改过的 {count} 条记忆不会删除，仅停止使用。",
+        sourceDeleteKept: "另有依据支持的 {count} 条记忆保持不变。",
         dataTabTitle: "账户长期记忆",
         dataTabDescription:
             "审核从导入对话中提取的记忆候选，并设置已批准的记忆是否用于新对话。",

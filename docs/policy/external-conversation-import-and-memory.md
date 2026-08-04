@@ -771,6 +771,26 @@ zh/fr/de/es/pt는 첫 decision-grade eval 범위 밖의 known limitation으로
   `manual_review_required`는 이 경로에 사용하지 않습니다(그 상태는 §8.4
   validator 강등 전용). 사용자가 직접 작성·편집한 memory(manual evidence
   보유)는 자동 삭제·자동 전환하지 않고 삭제 확인에서 별도 선택을 제공합니다.
+
+  구현: 분류는 `lib/memorySourceDeletion.ts`(순수), 적용은
+  `lib/externalImportService.ts`의 두 삭제 경로입니다.
+
+  - **삭제 *전에* 판정합니다.** FK cascade가 message와 함께 evidence를 가져가면
+    그 뒤에는 어떤 memory가 무엇에서 왔는지 남지 않습니다. 두 경로 모두 같은
+    transaction 안에서 source를 지우기 전에 분류합니다.
+  - **manual evidence는 살아남는 evidence입니다.** 따라서 사용자가 직접 쓴
+    memory는 import 삭제로 건드려지지 않으며, 이는 규칙이 아니라 분류의
+    결과입니다.
+  - **세 번째 경우는 `userEdited`이면서 남는 evidence가 없는 memory입니다.**
+    사용자가 문장을 고쳤으므로 추출기가 대신 지울 것이 아닙니다 — 기본은
+    `suspend`이고 삭제는 명시적으로 요청해야 합니다(정지된 memory는 evidence
+    재작성으로 되살릴 수 있지만 삭제된 memory는 아닙니다).
+  - **이미 보관 상태(`rejected`·`superseded`·`expired`)인 행의 status는 덮지
+    않습니다.** 어차피 retrieval에서 제외돼 있고, 덮으면 떠난 진짜 이유가
+    다른 이유로 바뀝니다.
+  - 삭제 확인은 `?include=memoryImpact`로 영향 건수를 **먼저** 조회합니다.
+    선택은 `?derivedMemories=`·`?editedMemories=`(`delete|suspend`)로 전달하며,
+    없거나 알 수 없는 값이면 위 기본값을 씁니다.
 - memory delete-all: 즉시 retrieval 제외, 진행 중 extraction 취소·차단,
   evidence·searchTerms 삭제, imported conversation은 별도 확인 없이 자동
   삭제하지 않음, content 없는 최소 audit만 보존, 실패 시 reconciliation, 멱등.
