@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth/next";
 import { prisma } from "@/lib/prisma";
 import { authOptions } from "@/lib/auth";
+import { isMemoryInjectionEnabled } from "@/lib/appSettings";
+import { conversationExportPersonalizationNotice } from "@/lib/memorySharingNotice";
 import {
     formatConversationHeader,
     formatExportMessage,
@@ -59,6 +61,14 @@ export async function GET(req: Request) {
             )
         );
         const lockedCount = conversations.length - exportable.length;
+        // §13.3: resolved once for the whole archive, and unconditional
+        // while injection is available — every conversation in the file
+        // carries it, so the line discloses nothing about which of them
+        // was actually personalised.
+        const personalizationNotice = (await isMemoryInjectionEnabled())
+            ? conversationExportPersonalizationNotice()
+            : undefined;
+
         const encoder = new TextEncoder();
         let conversationIndex = 0;
         let messageCursor: string | undefined;
@@ -98,7 +108,7 @@ export async function GET(req: Request) {
                     headerPending = false;
                     controller.enqueue(
                         encoder.encode(
-                            `${conversationIndex > 0 ? "\n\n##################################################\n\n\n" : ""}${formatConversationHeader(conversation)}\n`
+                            `${conversationIndex > 0 ? "\n\n##################################################\n\n\n" : ""}${formatConversationHeader(conversation, personalizationNotice)}\n`
                         )
                     );
                     return;

@@ -147,3 +147,24 @@ test("the notice is a header line, not something mixed into the transcript", () 
     assert.ok(header.includes("personalisation settings"));
     assert.ok(!body.includes("personalisation settings"));
 });
+
+test("every export path that prints a header can carry the notice", () => {
+    // Both the single-conversation export and the bulk archive render through
+    // formatConversationHeader. The gap this guards is one of them being
+    // wired and the other quietly not — the archive is the one a user
+    // downloads when they are leaving, which is the worst place to under-tell.
+    const conversation = {
+        title: "Exported",
+        createdAt: "2026-08-01T00:00:00.000Z",
+    };
+    const notice = conversationExportPersonalizationNotice();
+    const rendered = formatConversationHeader(conversation, notice);
+    assert.ok(rendered.includes(notice));
+    // The archive prefixes a separator before the header; the notice has to
+    // survive that concatenation as its own line.
+    const archiveEntry = `\n\n#####\n\n\n${rendered}\n`;
+    assert.ok(
+        archiveEntry.split("\n").some((line) => line === notice),
+        "the notice stays a line of its own inside the archive"
+    );
+});
