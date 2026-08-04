@@ -286,7 +286,7 @@ const DIRECT_STANDARD = {
     processingTier: "standard",
 } as const;
 
-/**
+/*
  * Source files allowed to name a processing tier at all, each with the reason
  * it does.
  *
@@ -317,38 +317,35 @@ const DIRECT_STANDARD = {
  * without the pricing profiles that describe that tier landing in the same
  * change.
  *
- * An entry is an exemption for a **whole file**, so it has to be withdrawn the
- * moment the file stops naming a selector. `app/api/chat/route.ts` was listed
- * here for a mention it no longer contains -- the classifier is reached
- * through an `observeServedProcessingTier` import, which names no tier -- and
- * that left a standing exemption over the one file in the tree that builds the
- * provider request. Adding `service_tier: "flex"` to its `streamText` call
- * would have passed this check in silence, which is the exact failure the
- * check exists to prevent. The listing was withdrawn, and a stale entry is now
- * a build failure rather than a warning: an exemption nobody needs is an
- * exemption nobody is reading, and it outlives the reason written next to it.
+ * An entry used to exempt a **whole file**, and that is the shape the guard
+ * failed in. `app/api/chat/route.ts` was listed here for a mention it no
+ * longer contains -- the classifier is reached through an
+ * `observeServedProcessingTier` import, which names no tier -- so the one file
+ * in the tree that builds the provider request held a standing exemption.
+ * Adding `service_tier: "flex"` to its `streamText` call would have passed in
+ * silence, which is the exact failure this check exists to prevent.
+ *
+ * So an entry now pins the **lines** it covers, not the file. A file listed
+ * for reading a tier off a response cannot quietly gain a line that sets one:
+ * an unpinned mention fails, and so does a pin whose line is gone. Both are
+ * build failures rather than warnings -- a licence nobody needs is a licence
+ * nobody is reading, and it outlives the reason written beside it.
+ *
+ * `mentions` is compared after trimming, so re-indenting a line is free and
+ * rewording it is not. That is the intended trade: the text is the thing a
+ * reviewer approved.
  */
-export type ProcessingTierMention = {
-    /** Repository-relative path. */
-    file: string;
-    /** Whether this file puts a tier into an outbound provider request. */
-    sendsATier: boolean;
-    reason: string;
-};
+// The allowlist itself lives in scripts/check-processing-tier-core.mjs.
+//
+// It is a build-time artifact -- nothing at runtime reads it -- and pinning it
+// by line means the entries quote source code verbatim. Quoted code in a `lib`
+// module is exactly what the mojibake heuristics in
+// scripts/check-text-encoding.mjs are built to be suspicious of, and a pinned
+// line containing `parsed?.service_tier ?? null` was read as corrupted prose.
+// The data belongs beside the check that consumes it; the reasoning stays
+// here, next to the profiles whose `processingTier: "standard"` claim depends
+// on it.
 
-export const PROCESSING_TIER_REQUEST_ALLOWLIST: readonly ProcessingTierMention[] =
-    [
-        {
-            file: "scripts/check-openai-model-access.mjs",
-            sendsATier: false,
-            reason: "Reads `service_tier` off the response and reports it. Its own optional --invoke request sets none, which is the point: the tier a request is *served at* is the only evidence that the Standard table was the right one.",
-        },
-        {
-            file: "lib/servedProcessingTier.ts",
-            sendsATier: false,
-            reason: "Classifies the tier a completed response reports, so a request served at a tier nobody priced is visible instead of silent. It reads provider metadata and returns a verdict and builds no request. app/api/chat/route.ts calls it once a stream has finished -- after the response exists, so it cannot influence the request it describes -- through an import that names no tier, which is why that file is deliberately not listed here.",
-        },
-    ];
 
 /**
  * Still recorded as a gap, now a narrower one: a pricing snapshot records the

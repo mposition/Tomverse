@@ -7,10 +7,10 @@ import {
   CACHE_WRITE_PRICING_IS_RECORDED_NOT_BILLED,
   MODEL_LIST_ENDPOINT_IS_NOT_A_PRICE_SOURCE,
   MODEL_PRICING,
-  PROCESSING_TIER_REQUEST_ALLOWLIST,
   RESPONSE_PROCESSING_TIER_IS_NOT_RECORDED,
   resolveModelPricing,
 } from "@/lib/modelPricing";
+import { PROCESSING_TIER_REQUEST_ALLOWLIST } from "../scripts/check-processing-tier-core.mjs";
 import { getModel } from "@/lib/models";
 
 // The published OpenAI Standard rates these two models are billed at, per
