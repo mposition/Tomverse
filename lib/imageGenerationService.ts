@@ -41,6 +41,13 @@ import {
   type AddOnCreditReservationEntry,
 } from "@/lib/creditLedger";
 import {
+  DEFAULT_IMAGE_MODEL_ID,
+  getImageModel,
+  getImageModelPrice,
+  maxImageRequestCostMicroUsd,
+  type ImageModelProvider,
+} from "@/lib/imageModelRegistry";
+import {
   generateImageWithProvider,
   ImageProviderError,
 } from "@/lib/imageProviderAdapter";
@@ -50,7 +57,6 @@ import {
   IMAGE_PRICING_VERSION,
   IMAGE_PROMPT_INPUT_USD_PER_MILLION_TOKENS,
   IMAGE_PROMPT_MAX_TOKENS,
-  maxRequestCostMicroUsd,
   type ImageQuality,
   type ImageSize,
 } from "@/lib/imageGenerationPricing";
@@ -80,14 +86,43 @@ const IMAGE_LEASE_MODEL_ID = IMAGE_GENERATION_MODEL_ID;
 const imageLeaseSubjectKey = (userId: string) =>
   `image:${getUserChatUsageKey(userId)}`;
 
-const IMAGE_PROVIDER_BUDGET_KEY = "image-provider:openai";
+const imageProviderBudgetKey = (provider: string) => `image-provider:${provider}`;
 
-const imageConcurrencyLimit = () => {
-  const parsed = Number(process.env.IMAGE_USER_CONCURRENT);
-  return Number.isSafeInteger(parsed) && parsed > 0 && parsed <= 10
+/** Kept for the settlement paths that still speak only OpenAI. */
+const IMAGE_PROVIDER_BUDGET_KEY = imageProviderBudgetKey("openai");
+
+const boundedEnvInt = (raw: string | undefined, fallback: number, max: number) => {
+  const parsed = Number(raw);
+  return Number.isSafeInteger(parsed) && parsed > 0 && parsed <= max
     ? parsed
-    : 1;
+    : fallback;
 };
+
+// Workflow concurrency (policy v2 §7): how many comparison GROUPS one user
+// may have active. IMAGE_USER_CONCURRENT keeps its meaning as the group
+// limit -- the old name predates groups and a 1-model request is a 1-target
+// group, so the number a deployment already sets still means the same thing
+// to a user.
+const imageConcurrencyLimit = () =>
+  boundedEnvInt(
+    process.env.IMAGE_USER_CONCURRENT_GROUPS ?? process.env.IMAGE_USER_CONCURRENT,
+    1,
+    10
+  );
+
+// The second layer: how many models one group may fan out to. Without it a
+// single workflow slot would authorize unbounded provider work.
+export const imageGroupMaxModels = () =>
+  boundedEnvInt(process.env.IMAGE_GROUP_MAX_MODELS, 2, 4);
+
+// Execution concurrency (policy v2 §7): provider-side job cap, counted per
+// provider so one slow provider cannot starve another.
+export const imageProviderJobLimit = (provider: string) =>
+  boundedEnvInt(
+    process.env[`IMAGE_PROVIDER_${provider.toUpperCase()}_CONCURRENT_JOBS`],
+    2,
+    16
+  );
 
 const imageConcurrencyScope = (userId: string): ChatConcurrencyScope => ({
   scope: "subject",
@@ -126,14 +161,99 @@ export type ImageGenerationRequestInput = {
   quality: ImageQuality;
   conversationId?: string | null;
   idempotencyKey: string;
+  /**
+   * The models to fan out to. Omitted means the default single model, so a
+   * v1-shaped caller keeps working: a single-model request is a 1-target
+   * group, not a separate path (policy v2 §11).
+   */
+  modelIds?: string[];
+};
+
+export type ImageGenerationTargetResult = {
+  targetId: string;
+  modelId: string;
+  provider: string;
+  generationId: string;
+  status: string;
+  reservedCredits: number;
 };
 
 export type ImageGenerationRequestResult = {
+  /** The first target's generation; kept so v1 callers still read one id. */
   generationId: string;
+  groupId: string;
   conversationId: string;
   status: string;
+  /** Total across every target -- what the user is actually charged. */
   reservedCredits: number;
+  targets: ImageGenerationTargetResult[];
   reused: boolean;
+};
+
+/**
+ * Idempotent replay: a repeat of the same request key answers with the group
+ * the winner created, never a second charge. Reads the whole group so a
+ * multi-model replay returns every target, not just the first.
+ */
+const readGroupByIdempotencyKey = async (
+  userId: string,
+  idempotencyKey: string
+): Promise<ImageGenerationRequestResult | null> => {
+  const group = await prisma.imageGenerationGroup.findUnique({
+    where: {
+      userId_groupIdempotencyKey: { userId, groupIdempotencyKey: idempotencyKey },
+    },
+    select: {
+      id: true,
+      conversationId: true,
+      targets: {
+        orderBy: { createdAt: "asc" },
+        select: {
+          id: true,
+          provider: true,
+          modelId: true,
+          currentGeneration: { select: { id: true, status: true } },
+        },
+      },
+    },
+  });
+  if (!group || group.targets.length === 0) return null;
+
+  const generationIds = group.targets
+    .map((target) => target.currentGeneration?.id)
+    .filter((id): id is string => Boolean(id));
+  const reservations = await prisma.imageCreditReservation.findMany({
+    where: { generationId: { in: generationIds } },
+    select: { generationId: true, reservedCredits: true },
+  });
+  const creditsByGeneration = new Map(
+    reservations.map((row) => [row.generationId, row.reservedCredits])
+  );
+
+  const targets: ImageGenerationTargetResult[] = group.targets
+    .filter((target) => target.currentGeneration)
+    .map((target) => ({
+      targetId: target.id,
+      modelId: target.modelId,
+      provider: target.provider,
+      generationId: target.currentGeneration!.id,
+      status: target.currentGeneration!.status,
+      reservedCredits: creditsByGeneration.get(target.currentGeneration!.id) ?? 0,
+    }));
+  if (targets.length === 0) return null;
+
+  return {
+    generationId: targets[0].generationId,
+    groupId: group.id,
+    conversationId: group.conversationId,
+    status: targets[0].status,
+    reservedCredits: targets.reduce(
+      (sum, target) => sum + target.reservedCredits,
+      0
+    ),
+    targets,
+    reused: true,
+  };
 };
 
 /**
@@ -173,6 +293,57 @@ export const requestImageGeneration = async (
     );
   }
 
+  // Resolve the fan-out before anything is charged. Duplicates collapse: a
+  // group holds one target per model by construction, and silently billing
+  // the same model twice would be the worst possible reading of a duplicate.
+  const requestedModelIds = [
+    ...new Set(
+      input.modelIds && input.modelIds.length > 0
+        ? input.modelIds
+        : [DEFAULT_IMAGE_MODEL_ID]
+    ),
+  ];
+  const groupLimit = imageGroupMaxModels();
+  if (requestedModelIds.length > groupLimit) {
+    throw new ChatAccessError(
+      400,
+      "IMAGE_MODEL_SELECTION_INVALID",
+      `Select at most ${groupLimit} models to compare.`,
+      undefined,
+      { maxModels: groupLimit, requestedModels: requestedModelIds.length }
+    );
+  }
+
+  // Every model priced up front, all-or-nothing (policy §11): a group whose
+  // second model is unavailable must not half-run, so the whole request is
+  // refused before any row exists.
+  const targetPlans = requestedModelIds.map((modelId) => {
+    const model = getImageModel(modelId);
+    const price = getImageModelPrice(modelId, input.quality, input.size);
+    return { modelId, model, price };
+  });
+  const unavailable = targetPlans.filter(
+    (plan) => !plan.model || plan.model.disabledReason !== null || !plan.price
+  );
+  if (unavailable.length > 0) {
+    throw new ChatAccessError(
+      400,
+      "IMAGE_OPTION_NOT_SUPPORTED",
+      "The requested image model, quality or size is not supported.",
+      undefined,
+      { unsupportedModels: unavailable.map((plan) => plan.modelId) }
+    );
+  }
+  const resolvedTargets = targetPlans.map((plan) => ({
+    modelId: plan.modelId,
+    model: plan.model!,
+    price: plan.price!,
+  }));
+  const totalCredits = resolvedTargets.reduce(
+    (sum, target) => sum + target.price.credits,
+    0
+  );
+
   const pricing = getImageGenerationPricing(input.quality, input.size);
   if (!pricing) {
     throw new ChatAccessError(
@@ -193,45 +364,61 @@ export const requestImageGeneration = async (
     );
   }
 
-  const existing = await prisma.imageGeneration.findUnique({
-    where: {
-      userId_idempotencyKey: {
-        userId: input.userId,
-        idempotencyKey: input.idempotencyKey,
-      },
-    },
-    select: { id: true, conversationId: true, status: true },
-  });
-  if (existing) {
-    const reservation = await prisma.imageCreditReservation.findUnique({
-      where: { generationId: existing.id },
-      select: { reservedCredits: true },
-    });
-    return {
-      generationId: existing.id,
-      conversationId: existing.conversationId,
-      status: existing.status,
-      reservedCredits: reservation?.reservedCredits ?? pricing.credits,
-      reused: true,
-    };
+  const replay = await readGroupByIdempotencyKey(
+    input.userId,
+    input.idempotencyKey
+  );
+  if (replay) return replay;
+
+  // Worst-case cost per target, then summed per provider: budgets are
+  // per-provider pools (policy §8), so two OpenAI targets draw from one.
+  const targetCosts = new Map<string, number>();
+  for (const target of resolvedTargets) {
+    const cost = maxImageRequestCostMicroUsd(target.model, target.price);
+    if (cost === null) {
+      // Unreachable while the registry keeps unbounded models disabled; the
+      // check stays because a fixed price without a finite worst case is the
+      // one thing that must never reach a provider.
+      throw new ChatAccessError(
+        400,
+        "IMAGE_OPTION_NOT_SUPPORTED",
+        "The requested image model is not available for requests.",
+        undefined,
+        { unsupportedModels: [target.modelId] }
+      );
+    }
+    targetCosts.set(target.modelId, cost);
+  }
+  const costByProvider = new Map<string, number>();
+  for (const target of resolvedTargets) {
+    costByProvider.set(
+      target.model.provider,
+      (costByProvider.get(target.model.provider) ?? 0) +
+        targetCosts.get(target.modelId)!
+    );
   }
 
-  const maxCost = maxRequestCostMicroUsd(pricing);
-  // Floor-clamped effective limits; null means the configuration is unusable
-  // (missing or partial in production) and the request fails closed.
-  const budget = resolveImageProviderBudget().limits;
-  if (!budget) {
-    throw new ChatAccessError(
-      503,
-      "PROVIDER_BUDGET_EXHAUSTED",
-      "Image generation is temporarily unavailable.",
-      300,
-      {
-        provider: "openai",
-        limitLayer: "operational_guardrail",
-        internalReason: "image_provider_budget_env_missing",
-      }
-    );
+  // Floor-clamped effective limits per provider; a null means that
+  // provider's configuration is unusable and the whole request fails closed.
+  const budgetByProvider = new Map<string, { day: number; month: number }>();
+  for (const provider of costByProvider.keys()) {
+    const limits = resolveImageProviderBudget(process.env, {
+      provider: provider as ImageModelProvider,
+    }).limits;
+    if (!limits) {
+      throw new ChatAccessError(
+        503,
+        "PROVIDER_BUDGET_EXHAUSTED",
+        "Image generation is temporarily unavailable.",
+        300,
+        {
+          provider,
+          limitLayer: "operational_guardrail",
+          internalReason: "image_provider_budget_env_missing",
+        }
+      );
+    }
+    budgetByProvider.set(provider, limits);
   }
 
   const scope = imageConcurrencyScope(input.userId);
@@ -261,25 +448,27 @@ export const requestImageGeneration = async (
         );
       }
 
-      for (const window of [
+      for (const [provider, providerCost] of costByProvider) {
+        const providerBudget = budgetByProvider.get(provider)!;
+        for (const window of [
         {
           period: "provider-cost-day",
           start: usagePeriodStart("day", now),
-          limit: budget.day,
+          limit: providerBudget.day,
         },
         {
           period: "provider-cost-month",
           start: usagePeriodStart("month", now),
-          limit: budget.month,
+          limit: providerBudget.month,
         },
       ]) {
         const charged = await incrementUsageBucket(
           tx,
-          IMAGE_PROVIDER_BUDGET_KEY,
+          imageProviderBudgetKey(provider),
           window.period,
           window.start,
           window.limit,
-          maxCost
+          providerCost
         );
         if (!charged) {
           throw new ChatAccessError(
@@ -288,7 +477,7 @@ export const requestImageGeneration = async (
             "Image generation is temporarily unavailable.",
             300,
             {
-              provider: "openai",
+              provider,
               limitLayer: "operational_guardrail",
               resetAt: futureIso(
                 window.period === "provider-cost-day"
@@ -296,10 +485,11 @@ export const requestImageGeneration = async (
                   : usageMonthlyResetAt(now),
                 now
               ),
-              internalRequiredCostMicroUsd: maxCost,
+              internalRequiredCostMicroUsd: providerCost,
               internalLimitCostMicroUsd: window.limit,
             }
           );
+        }
         }
       }
 
@@ -366,7 +556,7 @@ export const requestImageGeneration = async (
       });
 
       const allocation = getChatCreditAllocation({
-        requiredCredits: pricing.credits,
+        requiredCredits: totalCredits,
         monthlyPlanCreditsRemaining: Math.max(0, monthLimit - monthlyUsed),
         dailyPlanCreditsRemaining: dailyRemaining,
         purchasedCreditsRemaining: purchased._sum.remainingCredits ?? 0,
@@ -379,7 +569,7 @@ export const requestImageGeneration = async (
           "Not enough credits for this image.",
           undefined,
           {
-            requiredCredits: pricing.credits,
+            requiredCredits: totalCredits,
             availableCredits: allocation.totalCreditsAvailableNow,
             resetAt: futureIso(usageMonthlyResetAt(now), now),
           }
@@ -437,12 +627,20 @@ export const requestImageGeneration = async (
         }
       }
 
+      // Add-on credits are reserved once for the whole group and split
+      // across targets proportionally to what each one costs, so a per-target
+      // refund gives back exactly that target's share.
+      const totalMaxCost = [...targetCosts.values()].reduce(
+        (sum, cost) => sum + cost,
+        0
+      );
       const addOnFundedCostMicroUsd =
         allocation.addOnCreditsRequired > 0
           ? Math.ceil(
-              (maxCost * allocation.addOnCreditsRequired) / pricing.credits
+              (totalMaxCost * allocation.addOnCreditsRequired) / totalCredits
             )
           : 0;
+
       let entries: AddOnCreditReservationEntry[] = [];
       if (allocation.addOnCreditsRequired > 0) {
         entries = await reserveAddOnCredits(tx, {
@@ -454,10 +652,6 @@ export const requestImageGeneration = async (
         });
       }
 
-      // v2 (§11): every request is a comparison group; the single-model path
-      // is a 1-target group. The group inherits the request idempotency key,
-      // so the (userId, key) race behaves exactly as before -- the loser's
-      // P2002 (on either unique) replays the winner idempotently.
       const group = await tx.imageGenerationGroup.create({
         data: {
           userId: input.userId,
@@ -466,69 +660,130 @@ export const requestImageGeneration = async (
         },
         select: { id: true },
       });
-      const target = await tx.imageGenerationTarget.create({
-        data: {
-          groupId: group.id,
-          provider: "openai",
-          modelId: IMAGE_GENERATION_MODEL_ID,
-        },
-        select: { id: true },
-      });
 
-      const generation = await tx.imageGeneration.create({
-        data: {
-          id: generationId,
-          userId: input.userId,
-          conversationId,
-          idempotencyKey: input.idempotencyKey,
-          prompt: input.prompt,
-          preset: PRESET_BY_QUALITY[input.quality],
-          size: input.size,
-          quality: input.quality,
-          leaseId,
-          groupId: group.id,
-          targetId: target.id,
-        },
-        select: { id: true, conversationId: true, status: true },
-      });
-      await tx.imageGenerationTarget.update({
-        where: { id: target.id },
-        data: { currentGenerationId: generationId },
-      });
+      // Plan and add-on credits were allocated for the group as a whole;
+      // each target's reservation records its own slice so settlement and
+      // refunds stay per attempt (policy §11).
+      let planCreditsLeft = allocation.planReservedCredits;
+      let addOnCreditsLeft = allocation.addOnCreditsRequired;
+      const createdTargets: ImageGenerationTargetResult[] = [];
 
-      await tx.imageCreditReservation.create({
-        data: {
-          id: reservationIdFor(generationId),
-          userId: input.userId,
-          generationId,
-          conversationId,
-          preset: PRESET_BY_QUALITY[input.quality],
-          quality: input.quality,
-          size: input.size,
-          reservedCredits: pricing.credits,
-          planReservedCredits: allocation.planReservedCredits,
-          addOnReservedCredits: allocation.addOnCreditsRequired,
-          reservedCostMicroUsd: BigInt(maxCost),
-          reservedFundedCostMicroUsd: BigInt(addOnFundedCostMicroUsd),
-          // Identity snapshot (§12): written explicitly, never defaulted.
-          provider: "openai",
-          modelId: IMAGE_GENERATION_MODEL_ID,
-          groupId: group.id,
-          targetId: target.id,
-          identitySource: "recorded",
-          pricingVersion: IMAGE_PRICING_VERSION,
-          costSource: "fixed_estimate",
-          pricingSnapshot: {
-            credits: pricing.credits,
-            outputCostMicroUsd: pricing.outputCostMicroUsd,
-            maxRequestCostMicroUsd: maxCost,
-            promptTokenLimit: IMAGE_PROMPT_MAX_TOKENS,
-            provider: "openai",
-            modelId: IMAGE_GENERATION_MODEL_ID,
+      for (const [index, target] of resolvedTargets.entries()) {
+        const isLast = index === resolvedTargets.length - 1;
+        // The last target absorbs the rounding remainder so the per-target
+        // slices always sum back to exactly what was reserved.
+        const planShare = isLast
+          ? planCreditsLeft
+          : Math.min(
+              planCreditsLeft,
+              Math.round(
+                (allocation.planReservedCredits * target.price.credits) /
+                  totalCredits
+              )
+            );
+        planCreditsLeft -= planShare;
+        const addOnShare = isLast
+          ? addOnCreditsLeft
+          : Math.min(addOnCreditsLeft, target.price.credits - planShare);
+        addOnCreditsLeft -= addOnShare;
+
+        const targetMaxCost = targetCosts.get(target.modelId)!;
+        const targetGenerationId = randomUUID();
+        const targetFundedCost =
+          addOnShare > 0
+            ? Math.ceil((targetMaxCost * addOnShare) / target.price.credits)
+            : 0;
+
+        const targetRow = await tx.imageGenerationTarget.create({
+          data: {
+            groupId: group.id,
+            provider: target.model.provider,
+            modelId: target.modelId,
           },
-          reservationPayload: entries as unknown as Prisma.InputJsonValue,
-        },
-      });
+          select: { id: true },
+        });
+
+        const generation = await tx.imageGeneration.create({
+          data: {
+            id: targetGenerationId,
+            userId: input.userId,
+            conversationId,
+            // Only the first attempt carries the request key: the unique is
+            // (userId, idempotencyKey) and a group has one request identity.
+            idempotencyKey:
+              index === 0 ? input.idempotencyKey : `${input.idempotencyKey}:${index}`,
+            prompt: input.prompt,
+            preset: PRESET_BY_QUALITY[input.quality],
+            size: input.size,
+            quality: input.quality,
+            provider: target.model.provider,
+            modelId: target.modelId,
+            leaseId,
+            groupId: group.id,
+            targetId: targetRow.id,
+          },
+          select: { id: true, conversationId: true, status: true },
+        });
+        await tx.imageGenerationTarget.update({
+          where: { id: targetRow.id },
+          data: { currentGenerationId: generation.id },
+        });
+
+        await tx.imageCreditReservation.create({
+          data: {
+            id: reservationIdFor(targetGenerationId),
+            userId: input.userId,
+            generationId: targetGenerationId,
+            conversationId,
+            preset: PRESET_BY_QUALITY[input.quality],
+            quality: input.quality,
+            size: input.size,
+            provider: target.model.provider,
+            modelId: target.modelId,
+            groupId: group.id,
+            targetId: targetRow.id,
+            identitySource: "recorded",
+            reservedCredits: target.price.credits,
+            planReservedCredits: planShare,
+            addOnReservedCredits: addOnShare,
+            reservedCostMicroUsd: BigInt(targetMaxCost),
+            reservedFundedCostMicroUsd: BigInt(targetFundedCost),
+            pricingVersion: IMAGE_PRICING_VERSION,
+            costSource: "fixed_estimate",
+            pricingSnapshot: {
+              credits: target.price.credits,
+              outputCostMicroUsd: target.price.outputCostMicroUsd,
+              maxRequestCostMicroUsd: targetMaxCost,
+              promptTokenLimit: IMAGE_PROMPT_MAX_TOKENS,
+              provider: target.model.provider,
+              modelId: target.modelId,
+            },
+            // The per-lot payload belongs to the group's single add-on
+            // reservation; it is stored on the first target that holds
+            // add-on credits so crash recovery finds it exactly once.
+            reservationPayload: (addOnShare > 0 && index === 0
+              ? entries
+              : []) as unknown as Prisma.InputJsonValue,
+          },
+        });
+
+        createdTargets.push({
+          targetId: targetRow.id,
+          modelId: target.modelId,
+          provider: target.model.provider,
+          generationId: generation.id,
+          status: generation.status,
+          reservedCredits: target.price.credits,
+        });
+      }
+
+      const generation = {
+        id: createdTargets[0].generationId,
+        conversationId: conversationId!,
+        status: createdTargets[0].status,
+        groupId: group.id,
+        targets: createdTargets,
+      };
 
       await insertLeases(tx, [
         {
@@ -547,9 +802,11 @@ export const requestImageGeneration = async (
 
     return {
       generationId: created.id,
+      groupId: created.groupId,
       conversationId: created.conversationId,
       status: created.status,
-      reservedCredits: pricing.credits,
+      reservedCredits: totalCredits,
+      targets: created.targets,
       reused: false,
     };
   } catch (error) {
@@ -575,24 +832,14 @@ export const requestImageGeneration = async (
       error instanceof Prisma.PrismaClientKnownRequestError &&
       error.code === "P2002"
     ) {
-      const winner = await prisma.imageGeneration.findUnique({
-        where: {
-          userId_idempotencyKey: {
-            userId: input.userId,
-            idempotencyKey: input.idempotencyKey,
-          },
-        },
-        select: { id: true, conversationId: true, status: true },
-      });
-      if (winner) {
-        return {
-          generationId: winner.id,
-          conversationId: winner.conversationId,
-          status: winner.status,
-          reservedCredits: pricing.credits,
-          reused: true,
-        };
-      }
+      // The loser of the race reads the winner's whole group -- either
+      // unique (group key or first generation key) can be the one that
+      // tripped, and both identify the same request.
+      const winner = await readGroupByIdempotencyKey(
+        input.userId,
+        input.idempotencyKey
+      );
+      if (winner) return winner;
     }
     throw error;
   }
@@ -799,6 +1046,7 @@ export const processImageGeneration = async (
         prompt: generation.prompt,
         size: generation.size as ImageSize,
         quality: generation.quality as ImageQuality,
+        modelId: generation.modelId,
       });
     } catch (error) {
       const providerError =
@@ -1044,4 +1292,218 @@ export const reconcileStaleImageGenerations = async (
     if (finalized) refunded += 1;
   }
   return { examined: stale.length, refunded };
+};
+
+/**
+ * Run every pending attempt of a group, bounded by each provider's execution
+ * concurrency (policy v2 section 7). The two layers are distinct: one
+ * workflow slot authorized this group, and this cap is what stops that slot
+ * from turning into unbounded provider work. Each attempt still claims
+ * itself, so this is safe to run alongside the reconciliation sweep.
+ */
+export const processImageGenerationGroup = async (
+  generationIds: readonly string[]
+): Promise<void> => {
+  if (generationIds.length === 0) return;
+  const rows = await prisma.imageGeneration.findMany({
+    where: { id: { in: [...generationIds] } },
+    select: { id: true, provider: true },
+  });
+
+  const byProvider = new Map<string, string[]>();
+  for (const row of rows) {
+    const list = byProvider.get(row.provider) ?? [];
+    list.push(row.id);
+    byProvider.set(row.provider, list);
+  }
+
+  await Promise.all(
+    [...byProvider.entries()].map(async ([provider, ids]) => {
+      const limit = imageProviderJobLimit(provider);
+      const queue = [...ids];
+      const workers = Array.from(
+        { length: Math.min(limit, queue.length) },
+        async () => {
+          for (let next = queue.shift(); next; next = queue.shift()) {
+            // processImageGeneration never throws; a rejection here would
+            // mean a bug in the claim itself, and it must not abandon the
+            // other attempts of the same group.
+            await processImageGeneration(next).catch((error) =>
+              console.error("Image generation attempt failed:", {
+                errorName: error instanceof Error ? error.name : "UnknownError",
+              })
+            );
+          }
+        }
+      );
+      await Promise.all(workers);
+    })
+  );
+};
+
+export type ImageRetryInput = {
+  userId: string;
+  targetId: string;
+  retryIdempotencyKey: string;
+};
+
+/**
+ * Retry one failed target: a NEW attempt under the SAME target, never a new
+ * group (policy section 11). A succeeded target is refused -- re-running it
+ * would charge twice for a result the user already has. The new reservation
+ * and the target's current-attempt pointer move in one transaction.
+ */
+export const retryImageGenerationTarget = async (
+  input: ImageRetryInput,
+  now = new Date()
+): Promise<ImageGenerationRequestResult> => {
+  try {
+    await assertImageGenerationEnabled();
+  } catch (error) {
+    if (error instanceof ImageGenerationDisabledError) {
+      throw new ChatAccessError(
+        403,
+        "IMAGE_GENERATION_DISABLED",
+        "Image generation is not enabled."
+      );
+    }
+    throw error;
+  }
+
+  const target = await prisma.imageGenerationTarget.findUnique({
+    where: { id: input.targetId },
+    select: {
+      id: true,
+      groupId: true,
+      provider: true,
+      modelId: true,
+      group: { select: { userId: true, conversationId: true } },
+      currentGeneration: {
+        select: {
+          id: true,
+          status: true,
+          prompt: true,
+          quality: true,
+          size: true,
+          attemptNumber: true,
+          leaseId: true,
+        },
+      },
+    },
+  });
+  if (!target || target.group.userId !== input.userId) {
+    throw new ChatAccessError(
+      404,
+      "IMAGE_GENERATION_NOT_FOUND",
+      "Image generation not found."
+    );
+  }
+  const current = target.currentGeneration;
+  if (!current) {
+    throw new ChatAccessError(
+      404,
+      "IMAGE_GENERATION_NOT_FOUND",
+      "Image generation not found."
+    );
+  }
+  if (current.status !== "failed") {
+    throw new ChatAccessError(
+      409,
+      "IMAGE_RETRY_NOT_ALLOWED",
+      current.status === "succeeded"
+        ? "This model already produced an image."
+        : "This model is still generating."
+    );
+  }
+
+  // Retrying is a fresh request for one model: it goes through the same
+  // gates and the same charge as any other, expressed as a 1-model fan-out
+  // that lands in the existing group instead of a new one.
+  const replay = await prisma.imageGeneration.findFirst({
+    where: {
+      targetId: target.id,
+      retryIdempotencyKey: input.retryIdempotencyKey,
+    },
+    select: { id: true, status: true, conversationId: true },
+  });
+  if (replay) {
+    const reservation = await prisma.imageCreditReservation.findUnique({
+      where: { generationId: replay.id },
+      select: { reservedCredits: true },
+    });
+    return {
+      generationId: replay.id,
+      groupId: target.groupId,
+      conversationId: replay.conversationId,
+      status: replay.status,
+      reservedCredits: reservation?.reservedCredits ?? 0,
+      targets: [
+        {
+          targetId: target.id,
+          modelId: target.modelId,
+          provider: target.provider,
+          generationId: replay.id,
+          status: replay.status,
+          reservedCredits: reservation?.reservedCredits ?? 0,
+        },
+      ],
+      reused: true,
+    };
+  }
+
+  const result = await requestImageGeneration(
+    {
+      userId: input.userId,
+      prompt: current.prompt,
+      size: current.size as ImageSize,
+      quality: current.quality as ImageQuality,
+      conversationId: target.group.conversationId,
+      idempotencyKey: `retry-${input.retryIdempotencyKey}`.slice(0, 64),
+      modelIds: [target.modelId],
+    },
+    now
+  );
+
+  // Re-home the fresh attempt onto the existing target so the group keeps
+  // one slot per model and the UI shows the latest attempt in place.
+  const freshGenerationId = result.targets[0].generationId;
+  const freshTargetId = result.targets[0].targetId;
+  await prisma.$transaction(async (tx) => {
+    await tx.imageGeneration.update({
+      where: { id: freshGenerationId },
+      data: {
+        groupId: target.groupId,
+        targetId: target.id,
+        attemptNumber: current.attemptNumber + 1,
+        retryOfGenerationId: current.id,
+        retryIdempotencyKey: input.retryIdempotencyKey,
+      },
+    });
+    await tx.imageCreditReservation.updateMany({
+      where: { generationId: freshGenerationId },
+      data: { groupId: target.groupId, targetId: target.id },
+    });
+    // currentGenerationId is unique: the throwaway target still points at the
+    // fresh attempt, so it has to let go before the real target can claim it.
+    await tx.imageGenerationTarget.update({
+      where: { id: freshTargetId },
+      data: { currentGenerationId: null },
+    });
+    await tx.imageGenerationTarget.update({
+      where: { id: target.id },
+      data: { currentGenerationId: freshGenerationId },
+    });
+    // The throwaway target and group the fan-out created for this one model
+    // have no attempts left; removing them keeps the group count honest.
+    await tx.imageGenerationTarget.delete({ where: { id: freshTargetId } });
+    await tx.imageGenerationGroup.delete({ where: { id: result.groupId } });
+  });
+
+  return {
+    ...result,
+    groupId: target.groupId,
+    targets: [
+      { ...result.targets[0], targetId: target.id },
+    ],
+  };
 };
