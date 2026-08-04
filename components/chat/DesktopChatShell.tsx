@@ -107,6 +107,16 @@ type DesktopChatShellProps = {
   onGuestSignInPrompt: () => void;
   onResponseComplete: (promptId: string | null, modelId: string, responseText: string) => void;
   onFollowupSent: (modelId: string) => void;
+  /**
+   * Re-prepares the §10 context for a whole run after a panel's bundle was
+   * refused for drift. Passed straight through: the shell knows which models
+   * are in the run, and the coordination that keeps them on one snapshot
+   * belongs to whoever owns the send.
+   */
+  onContextBundleStale?: (input: {
+    promptId: string | null;
+    modelId: string;
+  }) => Promise<string | null>;
 };
 
 export function DesktopChatShell({
@@ -163,6 +173,7 @@ export function DesktopChatShell({
   onGuestSignInPrompt,
   onResponseComplete,
   onFollowupSent,
+  onContextBundleStale,
 }: DesktopChatShellProps) {
   const {
     models: AVAILABLE_MODELS,
@@ -753,6 +764,7 @@ export function DesktopChatShell({
                   onBeforeSend={onBeforeModelSend}
                   onResponseComplete={onResponseComplete}
                   onFollowupSent={onFollowupSent}
+                  onContextBundleStale={onContextBundleStale}
                   hideModelOnlyInput={selectedModels.length <= 1}
                   useCenteredWelcome
                   onEmptyStateChange={handleEmptyStateChange}
