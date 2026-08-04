@@ -709,6 +709,29 @@ export function ChatMessageList({
                         aria-hidden="true"
                       />
                     )}
+                    {/*
+                      §13.4: what this answer was given, shown to its owner
+                      and counted by the server. Rendered only above zero --
+                      the policy forbids a misleading indication, and
+                      "0 memories used" on an answer that never had any is
+                      one. It is a statement about this answer, so it sits
+                      with the answer rather than in any dock or rail, and
+                      touches neither the mobile composer contract nor the
+                      comparison rail's.
+                    */}
+                    {!isUser &&
+                      typeof msg.memoryUsedCount === "number" &&
+                      msg.memoryUsedCount > 0 && (
+                        <p
+                          data-testid="memory-usage-disclosure"
+                          className="mt-3 text-[11px] font-semibold text-zinc-400 dark:text-zinc-500"
+                        >
+                          {t("chat.memoryUsedDisclosure").replaceAll(
+                            "{count}",
+                            String(msg.memoryUsedCount)
+                          )}
+                        </p>
+                      )}
                     {msg.searchMetadata && msg.searchMetadata.citations.length > 0 && (
                       <div
                         data-testid="search-citation-list"

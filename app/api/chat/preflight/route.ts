@@ -36,6 +36,8 @@ import { WEB_SEARCH_MODES } from "@/lib/appDefaults";
 import { getWebSearchCapability } from "@/lib/webSearchCapability";
 import { getWebSearchSurchargeCredits } from "@/lib/webSearchCredits";
 import { estimatePromptTokens } from "@/lib/chatTokenEstimate";
+import { buildChatMemoryContext } from "@/lib/chatMemoryContext";
+import { issueChatContextBundle } from "@/lib/chatContextBundleService";
 
 const preflightSchema = z
     .object({
@@ -236,7 +238,18 @@ export async function POST(request: Request) {
             history = conversation.messages.reverse();
         }
 
-        const promptTokens = estimateTextTokens(payload.prompt);
+        // §10: the priced context and the sent context must be the same one,
+        // so the tokens the memory block contributes are part of every
+        // model's input estimate here — the figure the credit reservation and
+        // the context-window check are built on. A guest gets an empty
+        // context and the arithmetic below is unchanged for them.
+        const memoryContext = await buildChatMemoryContext({
+            userId: session?.user?.id ?? null,
+            query: payload.prompt,
+        });
+
+        const promptTokens =
+            estimateTextTokens(payload.prompt) + memoryContext.memoryTokens;
         const budgets = models.map((model) => {
             const historyTokens = history.reduce((sum, message) => {
                 const belongsToModel =
@@ -293,6 +306,22 @@ export async function POST(request: Request) {
         // model requests arrive.
         if (access.setCookie) headers.append("Set-Cookie", access.setCookie);
 
+        // One bundle for the whole comparison, carrying every model in the
+        // set: the panels are supposed to see one snapshot, and consumption
+        // is per (bundle, model) so each still spends its own (§10).
+        const contextBundle =
+            session?.user?.id && memoryContext.decision.allowed
+                ? issueChatContextBundle({
+                      subjectKey: session.user.id,
+                      conversationId:
+                          payload.conversationId === "private-chat"
+                              ? null
+                              : payload.conversationId,
+                      modelIds: uniqueModelIds,
+                      context: memoryContext,
+                  })
+                : null;
+
         return Response.json(
             {
                 ok: true,
@@ -304,6 +333,13 @@ export async function POST(request: Request) {
                 // model request occupies.
                 admissionToken: result.admission.token,
                 admissionExpiresAt: result.admission.expiresAt,
+                // A second opaque token with a different job entirely: this
+                // one attests which context snapshot was priced. Neither
+                // stands in for the other, and they are signed under
+                // different domains so neither can (§10).
+                contextBundle: contextBundle?.token ?? null,
+                contextBundleExpiresAt: contextBundle?.expiresAt ?? null,
+                memoryUsedCount: contextBundle?.memoryUsedCount ?? 0,
             },
             { headers }
         );

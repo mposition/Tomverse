@@ -3414,6 +3414,7 @@ export const validateChatPayload = (body: unknown) => {
         deepResearchDepth?: unknown;
         webSearchMode?: unknown;
         admissionToken?: unknown;
+        contextBundle?: unknown;
     };
     if (
         !Array.isArray(payload.messages) ||
@@ -3516,6 +3517,22 @@ export const validateChatPayload = (body: unknown) => {
             "Invalid admission token."
         );
     }
+    // Shape only, same as the admission token above and for the same reason:
+    // a well-formed bundle that is forged, expired, bound to another subject
+    // or already consumed is rejected where the context is built, which is
+    // the only place that can tell (§10).
+    if (
+        payload.contextBundle !== undefined &&
+        (typeof payload.contextBundle !== "string" ||
+            payload.contextBundle.length < 1 ||
+            payload.contextBundle.length > 8_192)
+    ) {
+        throw new ChatAccessError(
+            400,
+            "INVALID_CONTEXT_BUNDLE",
+            "Invalid chat context."
+        );
+    }
 
     let totalCharacters = 0;
     for (const message of payload.messages) {
@@ -3576,6 +3593,7 @@ export const validateChatPayload = (body: unknown) => {
         deepResearchDepth?: "quick" | "standard" | "deep";
         webSearchMode?: WebSearchMode;
         admissionToken?: string;
+        contextBundle?: string;
     };
 };
 
