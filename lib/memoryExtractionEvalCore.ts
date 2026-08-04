@@ -392,9 +392,9 @@ export function datasetFingerprintInput(
                             .join("\n")
                     )
                     .join("\n--\n"),
-            ].join(" ")
+            ].join("\u0000")
         )
-        .join("");
+        .join("\u0001");
 }
 
 /* -------------------------------------------------------------------------
@@ -475,7 +475,7 @@ export function findDuplicateCases(
                 .flatMap((conversation) =>
                     conversation.messages.map((message) => message.content)
                 )
-                .join(" ")
+                .join("\u0000")
         );
         const first = seen.get(signature);
         if (first) duplicates.push(`${testCase.id} duplicates ${first}`);

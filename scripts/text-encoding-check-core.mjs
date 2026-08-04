@@ -428,3 +428,28 @@ export function findQuestionRunsInsideStrings(text, fileName) {
     questionMatches(text.slice(range.start, range.end), range.start)
   );
 }
+
+// The marker patterns scripts/check-text-encoding.mjs scans every source file
+// for. Kept here rather than inline in the script so each one can be exercised
+// directly -- the script walks a fixed set of roots, so a pattern declared
+// inside it can only be reached by corrupting a real file in the repository.
+export const ENCODING_MARKER_PATTERNS = [
+  { name: "replacement-character", regex: /\uFFFD/g },
+  { name: "latin1-mojibake-marker", regex: /[\u00C2\u00C3]/g },
+  { name: "smart-quote-mojibake", regex: /\u00E2[\u20AC\u201A\u201C\u201D\u201E\u2020\u2021\u02C6\u2030\u0160\u2039\u0152\u017D\u2018\u2019\u201A\u201C\u201D\u2022\u2013\u2014\u02DC\u2122\u0161\u203A\u0153\u017E\u0178]/g },
+  { name: "korean-mojibake-marker", regex: /[\u00EC\u00ED][\u00A0-\u00BF]/g },
+  { name: "cjk-mojibake-marker", regex: /[\u00E5\u00E6][\u00A0-\u00BF]/g },
+  // A C0 control character, or DEL, outside the three that are ordinary
+  // whitespace (tab, LF, CR). One of these makes git treat the whole file as
+  // binary, and the cost lands at review time rather than at runtime:
+  // `git diff` prints "Binary files ... differ", `--stat` reports a byte delta
+  // with 0 insertions and 0 deletions, and a pull request touching the file
+  // shows no viewable diff at all. lib/memoryExtractionLaunch.ts carried a
+  // literal NUL as its signature separator until 2026-08-04 and was
+  // unreviewable for exactly that reason -- in the module that decides whether
+  // a credit-spending run is a repeat of one already paid for.
+  //
+  // The fix is always the escape, never the raw character: the escape is the
+  // same string at runtime and leaves the file readable as text.
+  { name: "control-character", regex: /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g },
+];
