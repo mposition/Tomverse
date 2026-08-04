@@ -56,23 +56,17 @@
 WITH seeded(id, input_usd, output_usd, cached_multiplier) AS (
   VALUES
     ('claude-fable-5', 15, 60, 1),
-    ('claude-fable-5', 10, 50, 0.1),
     ('claude-haiku-4-5', 0.5, 1, 1),
     ('claude-opus-4-8', 5, 25, 1),
-    ('claude-opus-4-8', 5, 25, 0.1),
     ('claude-sonnet-5', 3, 12, 1),
     ('codestral', 3, 12, 0.1),
-    ('codestral', 0.3, 0.9, 1),
     ('deepseek-r1', 0.14, 0.28, 0.02),
     ('deepseek-v4-flash', 0.14, 0.28, 0.02),
     ('deepseek-v4-pro', 0.435, 0.87, 0.008333333333333333),
     ('gemini-2-5-flash', 0.3, 2.5, 0.1),
     ('gemini-2-5-pro', 3, 12, 1),
     ('gemini-3-1-pro', 2, 12, 1),
-    -- Gemini 3.5 Flash first inherited the Standard fallback, then received
-    -- its published profile on 2026-08-03. Both are seed-derived values.
     ('gemini-3-5-flash', 0.5, 1, 1),
-    ('gemini-3-5-flash', 1.5, 9, 0.1),
     ('gemini-3-6-flash', 1.5, 7.5, 0.1),
     ('glm-5.2', 0.5, 1, 0.2),
     -- The pre-2026-08-01 standard-class fallback, and the profile that
@@ -91,14 +85,12 @@ WITH seeded(id, input_usd, output_usd, cached_multiplier) AS (
     ('grok-4-5', 2, 6, 0.15),
     ('kimi-k2.7-code', 3, 12, 1),
     ('kimi-k3', 15, 60, 1),
-    ('kimi-k3', 3, 15, 0.1),
     ('llama-3-1', 0.5, 1, 1),
     ('llama-3-3', 3, 12, 1),
     ('llama-4-scout', 0.11, 0.34, 1),
     ('mistral-large-3', 15, 60, 0.1),
     ('mistral-medium-3-1', 1.5, 7.5, 1),
     ('mistral-small-4', 0.5, 1, 0.1),
-    ('minimax-m3', 0.3, 1.2, 0.2),
     ('perplexity/sonar', 3, 12, 1),
     ('perplexity/sonar-deep-research', 15, 60, 1),
     ('perplexity/sonar-pro', 3, 12, 1),

@@ -210,7 +210,7 @@ test("recommended cards carry the cost and capabilities the card renders", () =>
   const research = recommendations.find(
     (item) => item.modelId === "perplexity/sonar"
   );
-  assert.equal(research.credits, 20);
+  assert.equal(research.credits, 16);
   assert.deepEqual(research.features, ["search"]);
   for (const recommendation of recommendations) {
     assert.ok(recommendation.credits > 0);

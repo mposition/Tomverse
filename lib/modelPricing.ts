@@ -870,6 +870,272 @@ export const MODEL_PRICING: readonly ModelPricingProfile[] = [
         effectiveDate: "2026-08-04",
     },
     {
+        modelId: "claude-sonnet-5",
+        provider: "anthropic",
+        apiModelId: "claude-sonnet-5",
+        ...DIRECT_STANDARD,
+        // Introductory pricing, and deliberately so: this is what Anthropic
+        // bills today, and the standard rate would overstate every Sonnet 5
+        // request by 50% until it starts. Overstating is not the free choice it
+        // looks like here -- provider budgets and the cost guardrails are spent
+        // against these numbers, so an inflated one refuses real requests.
+        //
+        // It reverts to 3 / 15 / 0.30 on 2026-09-01. A price that expires
+        // silently is the failure this file exists to prevent, so
+        // `tests/modelPricing.test.mjs` fails from that date until the rates
+        // here are moved. Do not "fix" that test by relaxing the date.
+        tiers: flatTier(2, 10, 0.1),
+        reasoningTokenBilling: "billed_as_output",
+        maxOutputTokens: 128_000,
+        reservationOutputTokens: 2_048,
+        reservationOutputBasis: "conservative_default",
+        cachedInputPricingVerified: true,
+        priceSource: "anthropic_claude_sonnet_5_introductory_price_to_2026_08_31",
+        pricingVersion: "anthropic-claude-sonnet-5-intro-2026-08-04",
+        effectiveDate: "2026-08-04",
+    },
+    {
+        modelId: "claude-haiku-4-5",
+        provider: "anthropic",
+        apiModelId: "claude-haiku-4-5-20251001",
+        ...DIRECT_STANDARD,
+        tiers: flatTier(1, 5, 0.1),
+        reasoningTokenBilling: "billed_as_output",
+        maxOutputTokens: 64_000,
+        reservationOutputTokens: 1_024,
+        reservationOutputBasis: "conservative_default",
+        cachedInputPricingVerified: true,
+        priceSource: "anthropic_claude_haiku_4_5_list_price",
+        pricingVersion: "anthropic-claude-haiku-4.5-2026-08-04",
+        effectiveDate: "2026-08-04",
+    },
+    {
+        modelId: "mistral-small-4",
+        provider: "mistral",
+        apiModelId: "mistral-small-latest",
+        ...DIRECT_STANDARD,
+        tiers: flatTier(0.15, 0.6, 0.1),
+        reasoningTokenBilling: "billed_as_output",
+        maxOutputTokens: 128_000,
+        reservationOutputTokens: 1_024,
+        reservationOutputBasis: "conservative_default",
+        cachedInputPricingVerified: true,
+        priceSource: "mistral_small_4_official_api_price_list",
+        pricingVersion: "mistral-small-4-2026-08-04",
+        effectiveDate: "2026-08-04",
+    },
+    {
+        modelId: "mistral-large-3",
+        provider: "mistral",
+        apiModelId: "mistral-large-latest",
+        ...DIRECT_STANDARD,
+        // Was reserved at the US$15 / US$60 premium fallback -- thirty times the
+        // real input rate. Leaves PENDING_VERIFIED_PRICE_REGISTER with this.
+        tiers: flatTier(0.5, 1.5, 0.1),
+        reasoningTokenBilling: "billed_as_output",
+        maxOutputTokens: 128_000,
+        reservationOutputTokens: 4_096,
+        reservationOutputBasis: "conservative_default",
+        cachedInputPricingVerified: true,
+        priceSource: "mistral_large_3_official_api_price_list",
+        pricingVersion: "mistral-large-3-2026-08-04",
+        effectiveDate: "2026-08-04",
+    },
+    {
+        modelId: "kimi-k2.7-code",
+        provider: "moonshot",
+        apiModelId: "kimi-k2.7-code",
+        ...DIRECT_STANDARD,
+        tiers: flatTier(0.95, 4, 0.2),
+        reasoningTokenBilling: "billed_as_output",
+        maxOutputTokens: 32_768,
+        reservationOutputTokens: 2_048,
+        reservationOutputBasis: "conservative_default",
+        cachedInputPricingVerified: true,
+        priceSource: "moonshot_kimi_k2_7_code_published_price",
+        pricingVersion: "moonshot-kimi-k2.7-code-2026-08-04",
+        effectiveDate: "2026-08-04",
+    },
+    {
+        modelId: "qwen3.7-plus",
+        provider: "qwen",
+        apiModelId: "qwen3.7-plus",
+        ...DIRECT_STANDARD,
+        // Qwen prices by input length, so the tiers are explicit: a 300K prompt
+        // costs three times a 200K one and a flat rate would under-charge it.
+        tiers: [
+            {
+                maxPromptTokens: 256_000,
+                inputUsdPerMillionTokens: 0.4,
+                outputUsdPerMillionTokens: 1.6,
+                // Implicit cache (US$0.08), not the explicit US$0.04 read: this
+                // application never creates explicit cache entries, so the
+                // cheaper rate is one it cannot earn.
+                cachedInputPriceMultiplier: 0.2,
+            },
+            {
+                maxPromptTokens: null,
+                inputUsdPerMillionTokens: 1.2,
+                outputUsdPerMillionTokens: 4.8,
+                // Qwen does not publish a consistent cache rate above 256K, so
+                // full price -- never understating is the conservative default,
+                // and `cachedInputPricingVerified` below says this is why.
+                cachedInputPriceMultiplier: 1,
+            },
+        ],
+        reasoningTokenBilling: "billed_as_output",
+        maxOutputTokens: 65_536,
+        reservationOutputTokens: 2_048,
+        reservationOutputBasis: "conservative_default",
+        cachedInputPricingVerified: false,
+        priceSource: "qwen_qwen3_7_plus_official_price_list_by_input_length",
+        pricingVersion: "qwen-qwen3.7-plus-2026-08-04",
+        effectiveDate: "2026-08-04",
+    },
+    {
+        modelId: "qwen3.6-flash",
+        provider: "qwen",
+        apiModelId: "qwen3.6-flash",
+        ...DIRECT_STANDARD,
+        tiers: [
+            {
+                maxPromptTokens: 256_000,
+                inputUsdPerMillionTokens: 0.25,
+                outputUsdPerMillionTokens: 1.5,
+                // Only an *explicit* cache-read rate (US$0.025) is published for
+                // this model, and nothing here creates explicit caches, so a
+                // cached token bills at full price as far as this can tell.
+                cachedInputPriceMultiplier: 1,
+            },
+            {
+                maxPromptTokens: null,
+                inputUsdPerMillionTokens: 1,
+                outputUsdPerMillionTokens: 4,
+                cachedInputPriceMultiplier: 1,
+            },
+        ],
+        reasoningTokenBilling: "billed_as_output",
+        maxOutputTokens: 65_536,
+        reservationOutputTokens: 1_024,
+        reservationOutputBasis: "conservative_default",
+        cachedInputPricingVerified: false,
+        priceSource: "qwen_qwen3_6_flash_official_price_list_by_input_length",
+        pricingVersion: "qwen-qwen3.6-flash-2026-08-04",
+        effectiveDate: "2026-08-04",
+    },
+    {
+        modelId: "qwen3.7-max",
+        provider: "qwen",
+        apiModelId: "qwen3.7-max",
+        ...DIRECT_STANDARD,
+        // Was reserved at the US$15 / US$60 premium fallback -- six times the
+        // real input rate. Leaves PENDING_VERIFIED_PRICE_REGISTER with this.
+        // One tier: the published price does not step below the 991K input
+        // ceiling, which is already above CHAT_USER_MAX_INPUT_TOKENS.
+        tiers: flatTier(2.5, 7.5, 0.2),
+        reasoningTokenBilling: "billed_as_output",
+        maxOutputTokens: 131_072,
+        reservationOutputTokens: 4_096,
+        reservationOutputBasis: "conservative_default",
+        cachedInputPricingVerified: true,
+        priceSource: "qwen_qwen3_7_max_official_price_list_implicit_cache",
+        pricingVersion: "qwen-qwen3.7-max-2026-08-04",
+        effectiveDate: "2026-08-04",
+    },
+    /*
+      Perplexity, all four. Two things are true of every one of them:
+
+        * No cache-read price is published, so the multiplier stays at 1 and
+          `cachedInputPricingVerified` is false. That is "unknown, charged in
+          full", not "no discount exists".
+        * Search is billed on top of tokens, and `perplexity` is absent from
+          NATIVE_SEARCH_COST_MICRO_USD_PER_QUERY -- so until now the search half
+          of a Sonar request cost nothing as far as this application knew. The
+          per-model figures below are what `resolveModelPricing` reads first.
+
+      For sonar, sonar-pro and sonar-reasoning-pro the fee is per *request* and
+      varies with search context size (low/medium/high). One number has to stand
+      for all three, so it is the high one: a request billed at high and priced
+      at low is an understatement, and the reverse is not.
+    */
+    {
+        modelId: "perplexity/sonar",
+        provider: "perplexity",
+        apiModelId: "sonar",
+        ...DIRECT_STANDARD,
+        tiers: flatTier(1, 1, 1),
+        reasoningTokenBilling: "billed_as_output",
+        nativeSearchCostMicroUsdPerQuery: 12_000,
+        maxOutputTokens: 128_000,
+        reservationOutputTokens: 2_048,
+        reservationOutputBasis: "conservative_default",
+        cachedInputPricingVerified: false,
+        priceSource: "perplexity_sonar_official_pricing_high_context_request_fee",
+        pricingVersion: "perplexity-sonar-2026-08-04",
+        effectiveDate: "2026-08-04",
+    },
+    {
+        modelId: "perplexity/sonar-pro",
+        provider: "perplexity",
+        apiModelId: "sonar-pro",
+        ...DIRECT_STANDARD,
+        tiers: flatTier(3, 15, 1),
+        reasoningTokenBilling: "billed_as_output",
+        nativeSearchCostMicroUsdPerQuery: 14_000,
+        maxOutputTokens: 128_000,
+        reservationOutputTokens: 2_048,
+        reservationOutputBasis: "conservative_default",
+        cachedInputPricingVerified: false,
+        priceSource: "perplexity_sonar_pro_official_pricing_high_context_request_fee",
+        pricingVersion: "perplexity-sonar-pro-2026-08-04",
+        effectiveDate: "2026-08-04",
+    },
+    {
+        modelId: "perplexity/sonar-reasoning-pro",
+        provider: "perplexity",
+        apiModelId: "sonar-reasoning-pro",
+        ...DIRECT_STANDARD,
+        tiers: flatTier(2, 8, 1),
+        reasoningTokenBilling: "billed_as_output",
+        nativeSearchCostMicroUsdPerQuery: 14_000,
+        maxOutputTokens: 128_000,
+        reservationOutputTokens: 2_048,
+        reservationOutputBasis: "conservative_default",
+        cachedInputPricingVerified: false,
+        priceSource: "perplexity_sonar_reasoning_pro_official_pricing_high_context_request_fee",
+        pricingVersion: "perplexity-sonar-reasoning-pro-2026-08-04",
+        effectiveDate: "2026-08-04",
+    },
+    {
+        modelId: "perplexity/sonar-deep-research",
+        provider: "perplexity",
+        apiModelId: "sonar-deep-research",
+        ...DIRECT_STANDARD,
+        // Was reserved at the US$15 / US$60 premium fallback. Leaves
+        // PENDING_VERIFIED_PRICE_REGISTER with this.
+        tiers: flatTier(2, 8, 1),
+        // Perplexity bills this model's reasoning tokens on their own line
+        // (US$3/M), not inside `outputTokens`. Recorded truthfully rather than
+        // folded into the output rate: nothing reads this field today, so the
+        // only thing a comfortable lie would buy is a wrong answer later.
+        //
+        // Two of its charges are still not modelled anywhere -- those reasoning
+        // tokens and citation tokens (US$2/M) -- because no usage adapter
+        // reports either count. Same reasoning as `cacheWriteUsdPerMillionTokens`
+        // above: a number that cannot be measured is not invented here.
+        reasoningTokenBilling: "billed_separately",
+        // US$5 per 1,000 search queries. Per *query* for this model, unlike the
+        // per-request fee the other three carry.
+        nativeSearchCostMicroUsdPerQuery: 5_000,
+        maxOutputTokens: 128_000,
+        reservationOutputTokens: 4_096,
+        reservationOutputBasis: "conservative_default",
+        cachedInputPricingVerified: false,
+        priceSource: "perplexity_sonar_deep_research_official_pricing",
+        pricingVersion: "perplexity-sonar-deep-research-2026-08-04",
+        effectiveDate: "2026-08-04",
+    },
+    {
         modelId: "deepseek-r1",
         provider: "deepseek",
         apiModelId: "deepseek-reasoner",
@@ -1169,56 +1435,23 @@ export type PendingVerifiedPriceEntry = {
  */
 export const PENDING_VERIFIED_PRICE_REGISTER: readonly PendingVerifiedPriceEntry[] =
     [
-        // grok-4-5 left this register once its real profile went in above, from
-        // xAI's published rates. grok-4 left it for the other reason an entry
-        // stops being needed: it is retired, so findUnpricedModels filters it
-        // out by `enabled` and there is nothing left to exempt.
-        {
-            modelId: "mistral-large-3",
-            owner: "@mposition",
-            verificationTicket:
-                "https://github.com/mposition/tomverse/issues/246",
-            registeredAt: "2026-08-01",
-            expiresAt: "2026-10-30",
-            productionApproval: {
-                approvedBy: "@mposition",
-                approvedAt: "2026-08-02T10:00:00.000Z",
-                rationale:
-                    "Approved temporary production use with conservative fallback pricing while the linked verification ticket is completed. Review is required before 2026-10-30.",
-            },
-            settlementSource: "reservation_pricing",
-        },
-        {
-            modelId: "qwen3.7-max",
-            owner: "@mposition",
-            verificationTicket:
-                "https://github.com/mposition/tomverse/issues/247",
-            registeredAt: "2026-08-01",
-            expiresAt: "2026-10-30",
-            productionApproval: {
-                approvedBy: "@mposition",
-                approvedAt: "2026-08-02T10:00:00.000Z",
-                rationale:
-                    "Approved temporary production use with conservative fallback pricing while the linked verification ticket is completed. Review is required before 2026-10-30.",
-            },
-            settlementSource: "reservation_pricing",
-        },
-        {
-            modelId: "perplexity/sonar-deep-research",
-            owner: "@mposition",
-            verificationTicket:
-                "https://github.com/mposition/tomverse/issues/248",
-            registeredAt: "2026-08-01",
-            expiresAt: "2026-10-30",
-            productionApproval: {
-                approvedBy: "@mposition",
-                approvedAt: "2026-08-02T10:00:00.000Z",
-                rationale:
-                    "Approved temporary production use with conservative fallback pricing while the linked verification ticket is completed. Review is required before 2026-10-30.",
-            },
-            settlementSource: "provider_reported_usage",
-            note: "Settles from the provider's own reported usage (lib/perplexityUsageCore.ts), so these rates only size the reservation. A deep-research turn issues many search queries and reasoning tokens, so a chat-shaped token reservation mis-sizes it in both directions; a dedicated reservation model is under review against the reserved/settled ratio this register reports.",
-        },
+        // Empty, and that is the point of the register rather than a gap in it.
+        //
+        // grok-4-5 left once its real profile went in from xAI's published
+        // rates. grok-4 left for the other reason an entry stops being needed:
+        // it is retired, so findUnpricedModels filters it out by `enabled`.
+        //
+        // mistral-large-3 (#246), qwen3.7-max (#247) and
+        // perplexity/sonar-deep-research (#248) left on 2026-08-04 when their
+        // published prices were recorded above, well inside the 2026-10-30
+        // review date this register was holding them to. All three had been
+        // reserving at the US$15 / US$60 premium fallback -- thirty times
+        // mistral-large-3's real input rate, six times qwen3.7-max's.
+        //
+        // A model belongs here only while it is enabled in production with no
+        // verified price. `npm run check:model-pricing` fails closed on any
+        // premium model that is unpriced and missing from this list, so leaving
+        // it empty is safe: the next one that appears cannot go unnoticed.
     ];
 
 /** The register's model IDs, in registration order. */
