@@ -25,7 +25,15 @@ import {
 const now = new Date();
 
 // ---------------------------------------------------------------------------
-// Processing tier.
+// Request-side price selectors.
+//
+// `inference_geo` is checked alongside the processing tier because it is the
+// same hazard wearing different clothes. On Claude 4.6 and later models --
+// which is every Anthropic model this application routes to -- sending
+// `inference_geo: "us"` multiplies input, output, cache-write and cache-read
+// pricing by 1.1x, while the default global routing is what the profiles
+// record. One added request field would put every Anthropic reservation 10%
+// under the real cost with nothing failing.
 //
 // Every profile claims `processingTier: "standard"`, which is only true while
 // no request selects a tier: OpenAI treats an omitted `service_tier` as
@@ -45,7 +53,7 @@ const tierGrep = spawnSync(
     "grep",
     "--untracked",
     "-lE",
-    "(service_tier|serviceTier)",
+    "(service_tier|serviceTier|inference_geo|inferenceGeo)",
     "--",
     "app",
     "lib",
@@ -74,17 +82,19 @@ const sendingTierFiles = tierFiles
 
 if (unexpectedTierFiles.length > 0 || sendingTierFiles.length > 0) {
   console.error(
-    `\n${unexpectedTierFiles.length + sendingTierFiles.length} file(s) name a provider processing tier without a matching price:\n` +
+    `\n${unexpectedTierFiles.length + sendingTierFiles.length} file(s) name a request-side price selector without a matching price:\n` +
       unexpectedTierFiles.map((file) => `  - ${file} (not in the allowlist)`).join("\n") +
       sendingTierFiles
         .map((entry) => `  - ${entry.file} (allowlisted, but sendsATier is true)`)
         .join("\n") +
-      "\n\nEvery profile in lib/modelPricing.ts records Standard pricing for a\n" +
-      "request that selects no tier -- an omitted OpenAI service_tier is served\n" +
-      "as `auto`, not necessarily as Standard. Flex, batch, priority and\n" +
-      "regional processing are priced differently, so a tier can only be\n" +
-      "introduced together with the profile entries that price it.\n\n" +
-      "A file that only *reads* the tier off a response belongs in\n" +
+      "\n\nEvery profile in lib/modelPricing.ts records Standard, globally\n" +
+      "routed pricing for a request that selects nothing -- an omitted OpenAI\n" +
+      "service_tier is served as `auto`, not necessarily as Standard, and\n" +
+      "Anthropic's inference_geo: \"us\" costs 1.1x on Claude 4.6 and later.\n" +
+      "Flex, batch, priority, regional processing and US-only inference are\n" +
+      "priced differently, so a selector can only be introduced together with\n" +
+      "the profile entries that price it.\n\n" +
+      "A file that only *reads* the selector off a response belongs in\n" +
       "PROCESSING_TIER_REQUEST_ALLOWLIST with sendsATier: false and a reason."
   );
   process.exit(1);
