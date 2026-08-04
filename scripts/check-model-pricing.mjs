@@ -21,6 +21,10 @@ import {
   PENDING_VERIFIED_PRICE_REGISTER,
   PROCESSING_TIER_REQUEST_ALLOWLIST,
 } from "../lib/modelPricing.ts";
+import {
+  auditProcessingTierMentions,
+  PROCESSING_TIER_SELECTOR_PATTERN,
+} from "./check-processing-tier-core.mjs";
 
 const now = new Date();
 
@@ -53,7 +57,7 @@ const tierGrep = spawnSync(
     "grep",
     "--untracked",
     "-lE",
-    "(service_tier|serviceTier|inference_geo|inferenceGeo)",
+    PROCESSING_TIER_SELECTOR_PATTERN,
     "--",
     "app",
     "lib",
@@ -62,31 +66,29 @@ const tierGrep = spawnSync(
   ],
   { encoding: "utf8" }
 );
-const allowedTierFiles = new Map(
-  PROCESSING_TIER_REQUEST_ALLOWLIST.map((entry) => [entry.file, entry])
-);
 const tierFiles = (tierGrep.stdout || "")
   .split("\n")
   .map((line) => line.trim())
   .filter(Boolean)
-  // This file and the check itself state the rule; they do not send one.
+  // These three state the rule; they do not send one. The core module is
+  // listed for the same reason as the other two: it holds the pattern itself,
+  // so it always matches its own grep.
   .filter(
     (file) =>
-      file !== "lib/modelPricing.ts" && file !== "scripts/check-model-pricing.mjs"
+      file !== "lib/modelPricing.ts" &&
+      file !== "scripts/check-model-pricing.mjs" &&
+      file !== "scripts/check-processing-tier-core.mjs"
   );
 
-const unexpectedTierFiles = tierFiles.filter((file) => !allowedTierFiles.has(file));
-const sendingTierFiles = tierFiles
-  .map((file) => allowedTierFiles.get(file))
-  .filter((entry) => entry?.sendsATier);
+const tierAudit = auditProcessingTierMentions({
+  matchedFiles: tierFiles,
+  allowlist: PROCESSING_TIER_REQUEST_ALLOWLIST,
+});
 
-if (unexpectedTierFiles.length > 0 || sendingTierFiles.length > 0) {
+if (tierAudit.errors.length > 0) {
   console.error(
-    `\n${unexpectedTierFiles.length + sendingTierFiles.length} file(s) name a request-side price selector without a matching price:\n` +
-      unexpectedTierFiles.map((file) => `  - ${file} (not in the allowlist)`).join("\n") +
-      sendingTierFiles
-        .map((entry) => `  - ${entry.file} (allowlisted, but sendsATier is true)`)
-        .join("\n") +
+    `\n${tierAudit.errors.length} problem(s) with the request-side price selector allowlist:\n` +
+      tierAudit.errors.map((message) => `  - ${message}`).join("\n") +
       "\n\nEvery profile in lib/modelPricing.ts records Standard, globally\n" +
       "routed pricing for a request that selects nothing -- an omitted OpenAI\n" +
       "service_tier is served as `auto`, not necessarily as Standard, and\n" +
@@ -98,14 +100,6 @@ if (unexpectedTierFiles.length > 0 || sendingTierFiles.length > 0) {
       "PROCESSING_TIER_REQUEST_ALLOWLIST with sendsATier: false and a reason."
   );
   process.exit(1);
-}
-
-for (const entry of PROCESSING_TIER_REQUEST_ALLOWLIST) {
-  if (!tierFiles.includes(entry.file)) {
-    console.warn(
-      `warning: ${entry.file} is allowlisted for naming a processing tier but no longer does. Remove the entry.`
-    );
-  }
 }
 
 const unpriced = findUnpricedModels(AVAILABLE_MODELS);
