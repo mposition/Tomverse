@@ -9,6 +9,7 @@ import {
     MEMORY_EXTRACTION_LEASE_TTL_MS,
 } from "@/lib/memoryExtractionCore";
 import { MEMORY_EXTRACTION_FLAG_KEY } from "@/lib/memoryAccess";
+import { analyzeExtractionChunk } from "@/lib/memoryExtractionPipeline";
 import type { MemoryExtractionEvalEntry } from "@/lib/memoryExtractionEvalRegister";
 import {
     cancelMemoryExtractionRun,
@@ -587,6 +588,87 @@ test("a chunk orphaned by a dead worker is reclaimed on the next claim (§11)", 
     assert.ok(retried);
     assert.equal(retried.chunkIndex, claimed.chunkIndex);
     assert.equal(retried.attemptCount, 2);
+});
+
+test("the offline pipeline composes with the processor under a fake adapter", async () => {
+    // Slice 1.5 smoke test: proves the pure pipeline fits the handler seam the
+    // processor already exposes, WITHOUT wiring it into production. The
+    // adapter returns canned JSON, so no provider is contacted, no credit is
+    // spent and no candidate is stored — storage and settlement are 1.6.
+    const { user, run } = await seedRun(1);
+    const analyses: Array<{ stored: number; discarded: number }> = [];
+
+    const result = await driveMemoryExtractionRunSlice({
+        runId: run.id,
+        owner: "worker-smoke",
+        register: APPROVED_REGISTER,
+        handler: async ({ chunk }) => {
+            const conversations = await prisma.externalConversation.findMany({
+                where: { id: { in: chunk.conversationIds }, userId: user.id },
+                select: { id: true, title: true },
+            });
+            const messages = await prisma.externalMessage.findMany({
+                where: { externalConversationId: { in: conversations.map((c) => c.id) } },
+                orderBy: { ordinal: "asc" },
+                select: {
+                    id: true,
+                    externalConversationId: true,
+                    role: true,
+                    content: true,
+                    contentDigest: true,
+                },
+            });
+            const analysis = await analyzeExtractionChunk({
+                conversations: conversations.map((conversation) => ({
+                    externalConversationId: conversation.id,
+                    title: conversation.title,
+                    messages: messages
+                        .filter(
+                            (message) =>
+                                message.externalConversationId === conversation.id
+                        )
+                        .map((message) => ({
+                            externalMessageId: message.id,
+                            role: message.role as "user" | "assistant",
+                            content: message.content,
+                            contentDigest: message.contentDigest,
+                        })),
+                })),
+                // Canned answer: one durable preference citing the seeded user
+                // turn, plus one credential the validator must discard.
+                adapter: async () => ({
+                    output: {
+                        candidates: [
+                            {
+                                kind: "preference",
+                                statement: "사용자는 간결한 답변을 선호한다",
+                                confidence: 0.9,
+                                evidence: ["m1"],
+                            },
+                            {
+                                kind: "constraint",
+                                statement:
+                                    "사용자의 API 키는 sk-live-ABCDEFGHIJKLMNOPQRSTUVWXYZ012345 이다",
+                                confidence: 0.9,
+                                evidence: ["m1"],
+                            },
+                        ],
+                    },
+                }),
+            });
+            analyses.push({
+                stored: analysis.counts.stored,
+                discarded: analysis.counts.discarded,
+            });
+            return { outcome: "completed" };
+        },
+    });
+
+    assert.equal(result.outcome, "completed");
+    assert.deepEqual(analyses, [{ stored: 1, discarded: 1 }]);
+
+    // Nothing was written: 1.5 analyses, it does not persist.
+    assert.equal(await prisma.memoryItem.count({ where: { userId: user.id } }), 0);
 });
 
 test("an expired lease is reclaimed to pending with progress intact (§3)", async () => {
