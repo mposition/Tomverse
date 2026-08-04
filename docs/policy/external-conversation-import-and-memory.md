@@ -1066,7 +1066,10 @@ POST          /api/assistant-profiles/[profileId]/preview       (실제 credit·
 ```
 /settings/imports              관리 화면 (저장 공간·가져온 대화·이력·진행 중 작업)  (A)
 /settings/imports/new          전체 화면 Wizard (static segment, [importId]와 공존)  (A)
-/settings/imports/[importId]   완료 결과 · 작업 상태 상세                            (A)
+/settings/imports/[importId]   완료 결과 · 작업 상태 상세. `preview_ready`이고
+                               TTL 이내면 여기서 seal된 staged 집합을 확인하고
+                               (부분집합 가능) 최종 저장한다. seal되지 않은
+                               `staging`과 만료 건은 다시 시작·삭제만 제공한다  (A)
 /settings/imports/conversations/[id]   read-only viewer                              (A)
 /settings/memory, /settings/memory/runs/[runId]                    (B)
 /settings/assistants, /settings/assistants/new, /settings/assistants/[profileId]  (C)
