@@ -144,8 +144,20 @@ const GOOGLE_GEMINI_31_FLASH_IMAGE: ImageModelProfile = {
   name: "Gemini 3.1 Flash Image",
   lifecycle: "stable",
   // Per-image prices verified 2026-08-04; the thinking cap is not established,
-  // so the worst case is not provably finite and no fixed credit price can be
-  // derived. That is what this reason states.
+// so the worst case is not provably finite and no fixed credit price can be
+// derived. That is what this reason states.
+//
+// A confirmation was relayed on 2026-08-04 that hidden thinking shares the
+// `max_output_tokens` budget with the response, which would settle this --
+// and settle it in the stronger direction, because a limit we set on the
+// request bounds the cost by construction rather than by trusting a model
+// card. The cited page (generate-content/tokens) is already in `sources`
+// below: it is the page whose two sentences made the derivation an inference
+// in the first place, so citing it again does not add the missing statement.
+// What would is the sentence itself, or -- better -- staging measurement
+// showing `totalOutputTokens + totalThoughtTokens` never exceeding a
+// `max_output_tokens` we set, which is evidence from the billing signal
+// rather than from prose.
   disabledReason: "worst_case_cost_unbounded",
   // 512, 2K and 4K are advertised upstream but have no representation in
   // ImageSize yet, and Google's 1K landscape is not 1536x1024 -- a provider
