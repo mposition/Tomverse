@@ -134,6 +134,22 @@ test("the registry price table agrees with the v1 flat table it replaces", () =>
   );
 });
 
+test("each model carries its own pricing version, and gpt-image-2 keeps the one already on disk", () => {
+  // A reservation freezes the version of the price list it was priced by. With
+  // one global string, adding xAI's price would have moved every gpt-image-2
+  // reservation onto a new version without a cent of its price changing --
+  // every cost report would show a boundary that corresponds to nothing.
+  const versions = IMAGE_MODEL_REGISTRY.map((model) => model.pricingVersion);
+  assert.equal(new Set(versions).size, versions.length);
+  for (const version of versions) assert.ok(version.length > 0);
+
+  // Not derived from IMAGE_PRICING_VERSION on purpose: coupling them would let
+  // a ceiling change bump this model's version, which is the same noise in the
+  // other direction. It is the literal string reservations already carry, and
+  // it moves only when gpt-image-2's own prices move.
+  assert.equal(getImageModel("gpt-image-2").pricingVersion, "2026-08-03-v1");
+});
+
 test("model ids are unique and every id equals its API model id today", () => {
   const ids = IMAGE_MODEL_REGISTRY.map((model) => model.id);
   assert.equal(new Set(ids).size, ids.length);
