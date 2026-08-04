@@ -1080,6 +1080,8 @@ export const ko = {
         viewDetail: "보기",
         deleteImport: "삭제",
         deleteImportArmed: "한 번 더 누르면 삭제됩니다",
+        deleteMemoryChoiceLabel: "이 대화에서만 만들어진 기억은 남겨두기",
+        deleteMemoryChoiceHint: "기본값은 대화와 함께 삭제입니다. 남겨두면 근거를 다시 붙일 때까지 답변에 쓰이지 않습니다. 직접 작성하거나 수정한 기억은 어느 쪽이든 그대로 유지됩니다.",
         deleting: "삭제 중…",
         deleteNote:
             "삭제하면 Tomverse에 가져온 사본만 제거되며, 원래 서비스에는 영향이 없습니다.",

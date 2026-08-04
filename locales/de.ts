@@ -866,6 +866,8 @@ export const de = {
         viewDetail: "Ansehen",
         deleteImport: "Löschen",
         deleteImportArmed: "Zum Löschen erneut klicken",
+        deleteMemoryChoiceLabel: "Erinnerungen behalten, die nur aus diesem Gespräch stammen",
+        deleteMemoryChoiceHint: "Standardmäßig werden sie mitgelöscht. Behaltene Erinnerungen werden erst wieder in Antworten verwendet, wenn du ihnen neue Belege gibst. Selbst geschriebene oder bearbeitete Erinnerungen bleiben in jedem Fall unberührt.",
         deleting: "Wird gelöscht…",
         deleteNote:
             "Das Löschen entfernt nur die nach Tomverse importierten Kopien; der ursprüngliche Dienst bleibt unberührt.",

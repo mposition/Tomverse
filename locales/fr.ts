@@ -863,6 +863,8 @@ export const fr = {
         viewDetail: "Voir",
         deleteImport: "Supprimer",
         deleteImportArmed: "Cliquez à nouveau pour supprimer",
+        deleteMemoryChoiceLabel: "Conserver les souvenirs issus uniquement de cette conversation",
+        deleteMemoryChoiceHint: "Par défaut, ils sont supprimés avec elle. Les souvenirs conservés ne sont plus utilisés dans les réponses tant que vous ne leur donnez pas de nouvelles preuves. Les souvenirs que vous avez écrits ou modifiés restent intacts dans tous les cas.",
         deleting: "Suppression…",
         deleteNote:
             "La suppression ne retire que les copies importées dans Tomverse ; le service d'origine n'est pas affecté.",

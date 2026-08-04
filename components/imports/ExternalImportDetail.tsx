@@ -97,6 +97,9 @@ export function ExternalImportDetail({ importId }: { importId: string }) {
     const router = useRouter();
     const [state, setState] = useState<DetailState>({ kind: "loading" });
     const [deleteArmed, setDeleteArmed] = useState(false);
+    // §13.1: keeping memories derived only from this source is an explicit
+    // per-confirmation choice, reset whenever the confirmation is dismissed.
+    const [keepDerivedMemories, setKeepDerivedMemories] = useState(false);
     const [isDeleting, setIsDeleting] = useState(false);
     const [review, setReview] = useState<ServerReview | null>(null);
     const [finalizeState, setFinalizeState] = useState<FinalizeState>({
@@ -178,12 +181,15 @@ export function ExternalImportDetail({ importId }: { importId: string }) {
     const deleteImport = useCallback(async () => {
         if (!deleteArmed) {
             setDeleteArmed(true);
+            setKeepDerivedMemories(false);
             return;
         }
         setIsDeleting(true);
         try {
             const response = await fetch(
-                `/api/imports/external/${encodeURIComponent(importId)}`,
+                `/api/imports/external/${encodeURIComponent(importId)}${
+                    keepDerivedMemories ? "?keepMemories=true" : ""
+                }`,
                 { method: "DELETE" }
             );
             if (response.ok) {
@@ -196,8 +202,9 @@ export function ExternalImportDetail({ importId }: { importId: string }) {
         } finally {
             setIsDeleting(false);
             setDeleteArmed(false);
+            setKeepDerivedMemories(false);
         }
-    }, [deleteArmed, importId, router]);
+    }, [deleteArmed, keepDerivedMemories, importId, router]);
 
     const toggleStaged = useCallback((stagedConversationId: string) => {
         setReview((current) => {
@@ -526,6 +533,35 @@ export function ExternalImportDetail({ importId }: { importId: string }) {
                             <p className="text-sm leading-6 text-red-700/90 dark:text-red-200/90">
                                 {t("externalImport.deleteNote")}
                             </p>
+                            {deleteArmed && (
+                                <label
+                                    className="mt-3 flex items-start gap-2 text-sm leading-6 text-red-700/90 dark:text-red-200/90"
+                                    data-testid="external-import-detail-keep-memories"
+                                >
+                                    <input
+                                        type="checkbox"
+                                        className="mt-1.5"
+                                        checked={keepDerivedMemories}
+                                        onChange={(event) =>
+                                            setKeepDerivedMemories(
+                                                event.target.checked
+                                            )
+                                        }
+                                    />
+                                    <span>
+                                        <span className="font-semibold">
+                                            {t(
+                                                "externalImport.deleteMemoryChoiceLabel"
+                                            )}
+                                        </span>
+                                        <span className="mt-0.5 block text-xs leading-5 text-red-700/70 dark:text-red-200/70">
+                                            {t(
+                                                "externalImport.deleteMemoryChoiceHint"
+                                            )}
+                                        </span>
+                                    </span>
+                                </label>
+                            )}
                             <button
                                 type="button"
                                 className="mt-3 inline-flex items-center gap-2 rounded-xl border border-red-200 bg-white px-4 py-2.5 text-sm font-semibold text-red-600 transition-colors hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-red-900/60 dark:bg-red-950/40 dark:text-red-200 dark:hover:bg-red-950/70"

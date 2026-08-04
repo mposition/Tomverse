@@ -139,6 +139,10 @@ export function ExternalImportManagement() {
     });
     const [armedDeleteId, setArmedDeleteId] = useState<string | null>(null);
     const [deletingId, setDeletingId] = useState<string | null>(null);
+    // §13.1: keeping memories derived only from the deleted source is an
+    // explicit, per-confirmation choice. Reset whenever the confirmation is
+    // dismissed, so it can never carry over to the next thing being deleted.
+    const [keepDerivedMemories, setKeepDerivedMemories] = useState(false);
     const [conversationsState, setConversationsState] =
         useState<ConversationsState>({ kind: "loading" });
     const [expandedLineages, setExpandedLineages] = useState<
@@ -250,12 +254,15 @@ export function ExternalImportManagement() {
         async (importId: string) => {
             if (armedDeleteId !== importId) {
                 setArmedDeleteId(importId);
+                setKeepDerivedMemories(false);
                 return;
             }
             setDeletingId(importId);
             try {
                 const response = await fetch(
-                    `/api/imports/external/${importId}`,
+                    `/api/imports/external/${importId}${
+                        keepDerivedMemories ? "?keepMemories=true" : ""
+                    }`,
                     { method: "DELETE" }
                 );
                 if (response.ok) {
@@ -266,9 +273,16 @@ export function ExternalImportManagement() {
             } finally {
                 setDeletingId(null);
                 setArmedDeleteId(null);
+                setKeepDerivedMemories(false);
             }
         },
-        [armedDeleteId, loadCapacity, loadConversations, loadHistory]
+        [
+            armedDeleteId,
+            keepDerivedMemories,
+            loadCapacity,
+            loadConversations,
+            loadHistory,
+        ]
     );
 
     if (capacityState.kind === "unauthenticated") {
@@ -598,7 +612,37 @@ export function ExternalImportManagement() {
                                         {formatBytes(row.normalizedBytes)}
                                     </p>
                                 </div>
-                                <div className="flex shrink-0 items-center gap-2">
+                                <div className="flex shrink-0 flex-col items-end gap-2">
+                                    {armedDeleteId === row.id && (
+                                        <label
+                                            className="flex max-w-xs items-start gap-2 text-left text-xs leading-5 text-zinc-600 dark:text-zinc-300"
+                                            data-testid="external-import-delete-keep-memories"
+                                        >
+                                            <input
+                                                type="checkbox"
+                                                className="mt-0.5"
+                                                checked={keepDerivedMemories}
+                                                onChange={(event) =>
+                                                    setKeepDerivedMemories(
+                                                        event.target.checked
+                                                    )
+                                                }
+                                            />
+                                            <span>
+                                                <span className="font-semibold">
+                                                    {t(
+                                                        "externalImport.deleteMemoryChoiceLabel"
+                                                    )}
+                                                </span>
+                                                <span className="mt-0.5 block text-zinc-500 dark:text-zinc-400">
+                                                    {t(
+                                                        "externalImport.deleteMemoryChoiceHint"
+                                                    )}
+                                                </span>
+                                            </span>
+                                        </label>
+                                    )}
+                                    <div className="flex shrink-0 items-center gap-2">
                                     {row.status === "completed" && (
                                         <Link
                                             href={`/settings/imports/${row.id}`}
@@ -626,6 +670,7 @@ export function ExternalImportManagement() {
                                                 )
                                               : t("externalImport.deleteImport")}
                                     </button>
+                                    </div>
                                 </div>
                             </li>
                         ))}

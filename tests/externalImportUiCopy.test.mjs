@@ -160,26 +160,52 @@ test("the components render the copy", () => {
 });
 
 test("the copy makes no promise the implementation does not keep", () => {
-    // Release A imports and stores; it does not extract memories, continue
-    // conversations, or lock imports behind a password (§1, §6, §7). And the
-    // marketing boundary (§17) forbids replication claims.
+    // Release B changed what is true here. Extraction, retrieval and the §13.1
+    // source-delete choice all exist now, so the delete confirmation MUST talk
+    // about memories — the old blanket ban on the word would today forbid
+    // telling the user what deleting an import does to their memories.
+    //
+    // What is still not implemented, and still must not be promised:
+    // continuing an imported conversation (§6, explicitly a non-goal), and the
+    // §17 replication claims that are a release blocker in any release.
     for (const [name, bundle] of Object.entries(LOCALES)) {
         const body = Object.values(bundle.externalImport)
             .join(" ")
             .toLowerCase();
         for (const forbidden of [
-            "memory",
-            "메모리",
-            "记忆",
-            "mémoire",
-            "gedächtnis",
-            "memoria",
-            "memória",
+            // §6: no continuation bridge exists.
+            "continue this conversation",
+            "이어서 대화",
+            "继续对话",
+            // §17: replication claims, in any release.
+            "exactly like",
+            "identical answers",
+            "똑같이",
+            "복제",
         ]) {
             assert.ok(
                 !body.includes(forbidden),
-                `${name} must not describe memory features in Release A copy`
+                `${name} must not promise ${forbidden}`
             );
         }
+    }
+});
+
+test("the §13.1 delete choice states the default in every locale", () => {
+    // The confirmation is where a person decides what happens to memories
+    // grounded only in what they are deleting, so the copy has to say which
+    // way the box being unchecked goes. A label alone would leave the default
+    // to be discovered by doing it.
+    for (const [name, bundle] of Object.entries(LOCALES)) {
+        const label = bundle.externalImport.deleteMemoryChoiceLabel;
+        const hint = bundle.externalImport.deleteMemoryChoiceHint;
+        assert.ok(
+            typeof label === "string" && label.length > 0,
+            `${name} is missing the §13.1 keep-memories label`
+        );
+        assert.ok(
+            typeof hint === "string" && hint.length > 20,
+            `${name} is missing the §13.1 keep-memories explanation`
+        );
     }
 });

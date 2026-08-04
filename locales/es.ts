@@ -865,6 +865,8 @@ export const es = {
         viewDetail: "Ver",
         deleteImport: "Eliminar",
         deleteImportArmed: "Haz clic de nuevo para eliminar",
+        deleteMemoryChoiceLabel: "Conservar los recuerdos que solo provienen de esta conversación",
+        deleteMemoryChoiceHint: "De forma predeterminada se eliminan con ella. Los recuerdos conservados no se usan en las respuestas hasta que les des nuevas pruebas. Los recuerdos que escribiste o editaste tú se mantienen en cualquier caso.",
         deleting: "Eliminando…",
         deleteNote:
             "Eliminar solo quita las copias importadas de Tomverse; el servicio original no se ve afectado.",

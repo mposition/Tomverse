@@ -900,6 +900,8 @@ export const zh = {
         viewDetail: "查看",
         deleteImport: "删除",
         deleteImportArmed: "再次点击即删除",
+        deleteMemoryChoiceLabel: "保留仅来自此对话的记忆",
+        deleteMemoryChoiceHint: "默认会随对话一起删除。保留的记忆在你重新提供依据之前不会用于回答。你自己撰写或编辑过的记忆无论如何都会保留。",
         deleting: "正在删除…",
         deleteNote: "删除只会移除导入到 Tomverse 的副本，不影响原服务。",
         detailTitle: "已导入的导出文件",

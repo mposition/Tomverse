@@ -865,6 +865,8 @@ export const pt = {
         viewDetail: "Ver",
         deleteImport: "Excluir",
         deleteImportArmed: "Clique novamente para excluir",
+        deleteMemoryChoiceLabel: "Manter as memórias que vieram apenas desta conversa",
+        deleteMemoryChoiceHint: "Por padrão elas são excluídas junto. Memórias mantidas não são usadas nas respostas até que você dê novas evidências a elas. Memórias que você escreveu ou editou permanecem intactas de qualquer forma.",
         deleting: "Excluindo…",
         deleteNote:
             "Excluir remove apenas as cópias importadas do Tomverse; o serviço original não é afetado.",

@@ -1085,6 +1085,8 @@ export const en = {
         viewDetail: "View",
         deleteImport: "Delete",
         deleteImportArmed: "Click again to delete",
+        deleteMemoryChoiceLabel: "Keep memories that came only from this conversation",
+        deleteMemoryChoiceHint: "By default they are deleted with it. Kept memories are not used in answers until you give them new grounds. Memories you wrote or edited yourself are left alone either way.",
         deleting: "Deleting…",
         deleteNote:
             "Deleting removes the imported copies from Tomverse only; the original service is not affected.",
