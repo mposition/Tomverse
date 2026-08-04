@@ -3,10 +3,15 @@
  *
  * §22 lists more than this release can honestly report. Rather than emitting
  * zeros that read as "nothing is happening", the summary carries an explicit
- * `unavailable` list naming each metric that has no source yet and why —
- * injection has no caller until the chat wiring lands, so an injection ratio
- * of 0% would be a measurement of nothing, and a dashboard cannot tell that
- * apart from a feature nobody uses.
+ * `unavailable` list naming each metric that has no source yet and why — an
+ * injection ratio of 0% would be a measurement of nothing, and a dashboard
+ * cannot tell that apart from a feature nobody uses.
+ *
+ * The reasons are part of the contract, not decoration: when a feature lands
+ * that changes one, the reason has to be re-checked. "No caller yet" stopped
+ * being true for injection the moment the §10 chat wiring merged, even though
+ * the metric is still unavailable — for a different reason, which is that
+ * nothing counts it.
  *
  * Everything here is a count, a rate or a closed enum label. Statements,
  * evidence text, conversation titles and ids never reach this module — they
@@ -66,15 +71,18 @@ export const emptyMemoryCounters = (): MemoryDayCounters => ({
 export const MEMORY_METRICS_UNAVAILABLE = [
     {
         metric: "injection_ratio",
-        reason: "no chat request builds a memory context yet (§10 wiring)",
+        reason:
+            "chat builds a memory context but records no counter for it, and answers are not counted either — there is neither a numerator nor a denominator",
     },
     {
         metric: "injected_token_buckets",
-        reason: "no chat request builds a memory context yet (§10 wiring)",
+        reason:
+            "the bundle carries the memory token count, but no request persists it",
     },
     {
         metric: "stale_bundle_ratio",
-        reason: "context bundles are minted by no route yet (§10 wiring)",
+        reason:
+            "CHAT_CONTEXT_BUNDLE_STALE refusals are returned but not counted",
     },
     {
         metric: "lock_suspension_restore",
