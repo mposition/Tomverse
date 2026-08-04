@@ -17,6 +17,7 @@ import {
     type MemoryEvidenceInput,
     type MemoryValidationResult,
 } from "@/lib/memoryValidatorCore";
+import { recordMemoryCounter } from "@/lib/memoryMetrics";
 import { prisma } from "@/lib/prisma";
 
 /**
@@ -65,6 +66,10 @@ const evidenceInputs = (
 
 const assertNotHardRejected = (result: MemoryValidationResult) => {
     if (result.disposition === "rejected") {
+        // A hard reject leaves no row, so the only place it can be counted is
+        // here (§22). Fire-and-forget: a metric must never become a second
+        // failure on top of the one being reported.
+        void recordMemoryCounter("validator_rejected");
         // The violation codes are state names from the validator, safe to
         // return; the statement itself is never echoed into an error.
         throw new ApiSecurityError(
