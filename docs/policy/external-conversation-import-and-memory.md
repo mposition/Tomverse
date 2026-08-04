@@ -624,6 +624,11 @@ details.requiresPreflight: true
 범주 4종: ① 지속 사실·선호 ② assistant 추측·역할극·충돌 정보 ③ 민감 정보·
 secret·credential ④ prompt injection·지시형·URL 유도.
 
+표본을 실제로 만들고 검수하고 동결하는 절차는
+`docs/ops/memory-extraction-eval-dataset.md`가 정합니다 — 8개 cell 관리,
+작성자·검수자 분리와 adjudication, critical negative 전건 독립 검수,
+개발용/decision set 분리, `datasetVersion`·digest 동결과 재작업 규칙.
+
 Decision-grade 표본: **범주별·언어별(ko/en) 최소 200개** — 범주별 총 400,
 전체 총 1,600, 언어 arm당 800. 동일 commit·고정 promptVersion, artifact 보존,
 blind qualitative review, 독립 재실행. 복제·경미 변형으로 표본을 부풀리지

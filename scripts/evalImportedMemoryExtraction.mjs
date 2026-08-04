@@ -46,6 +46,7 @@ import {
 } from "../lib/memoryExtractionEvalFixtures.ts";
 import {
     MEMORY_EVAL_MIN_SAMPLES_PER_CATEGORY_ARM,
+    datasetFingerprintInput,
     decideEvalRunMode,
     findDuplicateCases,
     judgeEval,
@@ -85,6 +86,11 @@ const redactSecrets = (message) => {
         .replace(/\b(sk|rk)-[A-Za-z0-9_-]{8,}/g, "[REDACTED_API_KEY]")
         .replace(/(authorization|api[-_]?key)(\s*[:=]\s*)\S+/gi, "$1$2[REDACTED]");
 };
+
+/** Ties an archived verdict to the exact sample it was computed from (§12.2). */
+const datasetDigest = createHash("sha256")
+    .update(datasetFingerprintInput(MEMORY_EVAL_CASES), "utf8")
+    .digest("hex");
 
 const contentDigest = (content) =>
     createHash("sha256")
@@ -304,7 +310,11 @@ const verdict = judgeEval(outcomes);
 const line = (label, value) => console.log(`  ${label.padEnd(34)} ${value}`);
 
 console.log(`\nMemory extraction eval — ${modelId}::${MEMORY_EXTRACTION_PROMPT_VERSION}`);
-console.log(`  mode: ${runMode.mode === "live" ? "LIVE" : "SMOKE"}   dataset: ${MEMORY_EVAL_DATASET_VERSION}   commit: ${commitSha}`);
+console.log(
+    `  mode: ${runMode.mode === "live" ? "LIVE" : "SMOKE"}   commit: ${commitSha}\n` +
+        `  dataset: ${MEMORY_EVAL_DATASET_VERSION} (${MEMORY_EVAL_DATASET_PURPOSE}, ` +
+        `${MEMORY_EVAL_DATASET_FROZEN ? "frozen" : "not frozen"})  digest: ${datasetDigest.slice(0, 16)}…`
+);
 
 console.log("\nAggregate");
 line("cases", verdict.aggregate.cases);
@@ -385,6 +395,7 @@ const artifact = {
         modelId,
         promptVersion: MEMORY_EXTRACTION_PROMPT_VERSION,
         datasetVersion: MEMORY_EVAL_DATASET_VERSION,
+        datasetDigest,
         mode: runMode.mode,
         commitSha,
         workingTreeDirty,
