@@ -10,6 +10,7 @@ import {
 } from "@/lib/memoryExtractionCore";
 import { MEMORY_EXTRACTION_FLAG_KEY } from "@/lib/memoryAccess";
 import { analyzeExtractionChunk } from "@/lib/memoryExtractionPipeline";
+import { reserveMemoryExtractionAttempt } from "@/lib/memoryExtractionAdmission";
 import type { MemoryExtractionEvalEntry } from "@/lib/memoryExtractionEvalRegister";
 import {
     cancelMemoryExtractionRun,
@@ -37,7 +38,9 @@ import { prisma } from "@/lib/prisma";
 const resetData = async () => {
     await prisma.$executeRawUnsafe(`
     TRUNCATE TABLE
+      "MemoryExtractionAttempt",
       "MemoryExtractionChunk",
+      "ChatCreditReservation",
       "MemoryExtractionRun",
       "MemoryEvidence",
       "MemoryItem",
@@ -669,6 +672,158 @@ test("the offline pipeline composes with the processor under a fake adapter", as
 
     // Nothing was written: 1.5 analyses, it does not persist.
     assert.equal(await prisma.memoryItem.count({ where: { userId: user.id } }), 0);
+});
+
+/** Admits one chunk attempt after claiming the run, as the processor would. */
+const admitFirstChunk = async (runId: string) => {
+    const lease = await claimMemoryExtractionRun({ runId, owner: "worker-a" });
+    assert.ok(lease);
+    const chunk = await claimNextExtractionChunk(lease);
+    assert.ok(chunk);
+    return { lease, chunk };
+};
+
+const financialFootprint = async (userId: string, runId: string) => {
+    const [reservations, attempts, buckets] = await Promise.all([
+        prisma.chatCreditReservation.count({ where: { userId } }),
+        prisma.memoryExtractionAttempt.count({
+            where: { chunk: { runId } },
+        }),
+        prisma.chatUsageBucket.count(),
+    ]);
+    return { reservations, attempts, buckets };
+};
+
+test("admission reserves credits, provider budget and the attempt atomically (§11)", async () => {
+    const { run } = await seedRun(1);
+    const { lease, chunk } = await admitFirstChunk(run.id);
+
+    const admission = await reserveMemoryExtractionAttempt({
+        runId: run.id,
+        chunkIndex: chunk.chunkIndex,
+        leaseGeneration: lease.leaseGeneration,
+        reservedCostMicroUsd: 1_000,
+        register: APPROVED_REGISTER,
+    });
+    assert.equal(admission.admitted, true);
+    if (!admission.admitted) return;
+
+    const reservation = await prisma.chatCreditReservation.findUniqueOrThrow({
+        where: { id: admission.reservationId },
+    });
+    // Recorded as its own workflow, on the shared ledger.
+    assert.equal(reservation.source, "memory_extraction");
+    assert.equal(reservation.status, "reserved");
+    // Bound to the attempt, so a replay collides instead of paying twice.
+    assert.equal(
+        reservation.idempotencyKey,
+        `memory-extraction:${run.id}:${chunk.chunkIndex}:0`
+    );
+
+    const attempt = await prisma.memoryExtractionAttempt.findFirstOrThrow({
+        where: { chunk: { runId: run.id } },
+    });
+    assert.equal(attempt.status, "reserved");
+    assert.equal(attempt.leaseGeneration, lease.leaseGeneration);
+    assert.equal(attempt.reservationId, admission.reservationId);
+
+    // No chat lease was created: extraction is a different concurrency layer.
+    assert.equal(
+        await prisma.chatRequestLease.count({ where: { subjectKey: { not: "" } } }),
+        0
+    );
+});
+
+test("a fenced-out worker reserves nothing at all (§11)", async () => {
+    const { user, run } = await seedRun(1);
+    const { lease, chunk } = await admitFirstChunk(run.id);
+
+    // Superseded between claiming the chunk and admitting the attempt.
+    await prisma.memoryExtractionRun.update({
+        where: { id: run.id },
+        data: { leaseGeneration: lease.leaseGeneration + 1 },
+    });
+    const before = await financialFootprint(user.id, run.id);
+
+    const admission = await reserveMemoryExtractionAttempt({
+        runId: run.id,
+        chunkIndex: chunk.chunkIndex,
+        leaseGeneration: lease.leaseGeneration,
+        reservedCostMicroUsd: 1_000,
+        register: APPROVED_REGISTER,
+    });
+    assert.equal(admission.admitted, false);
+    if (admission.admitted) return;
+    assert.equal(admission.reason, "lease_lost");
+
+    // Nothing survives the rollback: no credits, no provider bucket, no
+    // reservation row, no attempt.
+    assert.deepEqual(await financialFootprint(user.id, run.id), before);
+});
+
+test("a quote that outlived its window stops the run for a re-quote (§11)", async () => {
+    const { user, run } = await seedRun(1);
+    const { lease, chunk } = await admitFirstChunk(run.id);
+    await prisma.memoryExtractionRun.update({
+        where: { id: run.id },
+        data: { quoteExpiresAt: new Date(Date.now() - 1_000) },
+    });
+    const before = await financialFootprint(user.id, run.id);
+
+    const admission = await reserveMemoryExtractionAttempt({
+        runId: run.id,
+        chunkIndex: chunk.chunkIndex,
+        leaseGeneration: lease.leaseGeneration,
+        reservedCostMicroUsd: 1_000,
+        register: APPROVED_REGISTER,
+    });
+    assert.equal(admission.admitted, false);
+    if (admission.admitted) return;
+    assert.equal(admission.reason, "quote_expired");
+    assert.deepEqual(await financialFootprint(user.id, run.id), before);
+});
+
+test("reservations may never exceed the credit ceiling the user confirmed (§11)", async () => {
+    const { user, run } = await seedRun(1);
+    // The quote the owner agreed to is gone — a price or plan change since
+    // then must re-ask, never charge more.
+    await prisma.memoryExtractionRun.update({
+        where: { id: run.id },
+        data: { confirmedCreditCeiling: 0 },
+    });
+    const { lease, chunk } = await admitFirstChunk(run.id);
+    const before = await financialFootprint(user.id, run.id);
+
+    const admission = await reserveMemoryExtractionAttempt({
+        runId: run.id,
+        chunkIndex: chunk.chunkIndex,
+        leaseGeneration: lease.leaseGeneration,
+        reservedCostMicroUsd: 1_000,
+        register: APPROVED_REGISTER,
+    });
+    assert.equal(admission.admitted, false);
+    if (admission.admitted) return;
+    assert.equal(admission.reason, "requote_required");
+    assert.deepEqual(await financialFootprint(user.id, run.id), before);
+});
+
+test("a disabled rollout admits nothing (§15)", async () => {
+    const { user, run } = await seedRun(1);
+    const { lease, chunk } = await admitFirstChunk(run.id);
+    await setExtractionFlag(false);
+    const before = await financialFootprint(user.id, run.id);
+
+    const admission = await reserveMemoryExtractionAttempt({
+        runId: run.id,
+        chunkIndex: chunk.chunkIndex,
+        leaseGeneration: lease.leaseGeneration,
+        reservedCostMicroUsd: 1_000,
+        register: APPROVED_REGISTER,
+    });
+    assert.equal(admission.admitted, false);
+    if (admission.admitted) return;
+    assert.equal(admission.reason, "feature_disabled");
+    assert.deepEqual(await financialFootprint(user.id, run.id), before);
 });
 
 test("an expired lease is reclaimed to pending with progress intact (§3)", async () => {
