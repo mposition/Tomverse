@@ -49,6 +49,18 @@ type AdminImageGenerationReport = {
       averageSettledCostMicroUsd: number;
     }>;
   };
+  settledByProviderModel: Array<{
+    provider: string;
+    modelId: string;
+    settlements: number;
+    settledCredits: number;
+    settledCostMicroUsd: number;
+  }>;
+  dimensionCoverage: Array<{
+    provider: string;
+    succeeded: number;
+    measured: number;
+  }>;
   storage: {
     byRole: Record<string, { count: number; byteSize: number }>;
   };
@@ -307,6 +319,89 @@ export function AdminImageGenerationPanel() {
               )}
             </div>
           </div>
+
+          {/*
+            Budgets are enforced per provider, so spend is read per provider.
+            One combined total cannot answer "whose budget is this consuming",
+            which is the only question that matters once a second provider is
+            running.
+          */}
+          {report.settledByProviderModel.length > 0 && (
+            <div className="rounded-2xl border border-zinc-800 bg-zinc-900/40 p-4">
+              <h3 className="text-sm font-bold text-zinc-200">
+                Settled spend by provider
+              </h3>
+              <table className="mt-3 w-full text-left text-sm">
+                <thead>
+                  <tr className="text-[11px] uppercase tracking-[0.12em] text-zinc-500">
+                    <th className="py-1 font-bold">Provider · model</th>
+                    <th className="py-1 text-right font-bold">Settlements</th>
+                    <th className="py-1 text-right font-bold">Credits</th>
+                    <th className="py-1 text-right font-bold">Settled cost</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {report.settledByProviderModel.map((row) => (
+                    <tr
+                      key={`${row.provider}:${row.modelId}`}
+                      className="border-t border-zinc-800/60"
+                    >
+                      <td className="py-1.5 font-mono text-xs text-zinc-300">
+                        {row.provider} · {row.modelId}
+                      </td>
+                      <td className="py-1.5 text-right font-bold text-zinc-200">
+                        {row.settlements}
+                      </td>
+                      <td className="py-1.5 text-right text-zinc-300">
+                        {row.settledCredits}
+                      </td>
+                      <td className="py-1.5 text-right text-zinc-300">
+                        {usd(row.settledCostMicroUsd)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          {/*
+            A succeeded generation with no recorded dimensions means the
+            header could not be read. That is recorded honestly as null, which
+            makes it invisible unless it is counted -- so it is counted.
+          */}
+          {report.dimensionCoverage.length > 0 && (
+            <div className="rounded-2xl border border-zinc-800 bg-zinc-900/40 p-4">
+              <h3 className="text-sm font-bold text-zinc-200">
+                Measured output dimensions
+              </h3>
+              <ul className="mt-3 space-y-1.5 text-sm">
+                {report.dimensionCoverage.map((row) => {
+                  const missing = row.succeeded - row.measured;
+                  return (
+                    <li
+                      key={row.provider}
+                      className="flex items-center justify-between gap-3"
+                    >
+                      <span className="font-mono text-xs text-zinc-300">
+                        {row.provider}
+                      </span>
+                      <span
+                        className={
+                          missing > 0
+                            ? "font-bold text-amber-400"
+                            : "text-zinc-300"
+                        }
+                      >
+                        {row.measured}/{row.succeeded} measured
+                        {missing > 0 ? ` · ${missing} unreadable` : ""}
+                      </span>
+                    </li>
+                  );
+                })}
+              </ul>
+            </div>
+          )}
         </div>
       )}
     </section>

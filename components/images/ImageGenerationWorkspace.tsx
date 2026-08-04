@@ -92,6 +92,8 @@ type GenerationView = {
   // v2 identity: which comparison slot and model this attempt belongs to.
   provider?: string;
   modelId?: string;
+  outputWidth?: number | null;
+  outputHeight?: number | null;
   groupId?: string;
   targetId?: string;
   attemptNumber?: number;
@@ -674,7 +676,18 @@ export function ImageGenerationWorkspace({
           {generation.reservedCredits !== null && (
             <CreditCostBadge credits={generation.reservedCredits} size="xs" />
           )}
-          <span className="font-mono">{generation.size}</span>
+          {/*
+            The pixel size the file actually is, not the one requested. They
+            differ across providers for the same resolution tier (policy
+            §12.1), so a comparison that showed the request would be showing
+            the same number under two different images. Falls back to the
+            requested size only for rows written before the header was read.
+          */}
+          <span data-testid="image-result-dimensions" className="font-mono">
+            {generation.outputWidth && generation.outputHeight
+              ? `${generation.outputWidth}x${generation.outputHeight}`
+              : generation.size}
+          </span>
           <span className="min-w-0 flex-1" />
           <a
             href={original.url}

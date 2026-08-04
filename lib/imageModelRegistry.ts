@@ -144,8 +144,20 @@ const GOOGLE_GEMINI_31_FLASH_IMAGE: ImageModelProfile = {
   name: "Gemini 3.1 Flash Image",
   lifecycle: "stable",
   // Per-image prices verified 2026-08-04; the thinking cap is not established,
-  // so the worst case is not provably finite and no fixed credit price can be
-  // derived. That is what this reason states.
+// so the worst case is not provably finite and no fixed credit price can be
+// derived. That is what this reason states.
+//
+// A confirmation was relayed on 2026-08-04 that hidden thinking shares the
+// `max_output_tokens` budget with the response, which would settle this --
+// and settle it in the stronger direction, because a limit we set on the
+// request bounds the cost by construction rather than by trusting a model
+// card. The cited page (generate-content/tokens) is already in `sources`
+// below: it is the page whose two sentences made the derivation an inference
+// in the first place, so citing it again does not add the missing statement.
+// What would is the sentence itself, or -- better -- staging measurement
+// showing `totalOutputTokens + totalThoughtTokens` never exceeding a
+// `max_output_tokens` we set, which is evidence from the billing signal
+// rather than from prose.
   disabledReason: "worst_case_cost_unbounded",
   // 512, 2K and 4K are advertised upstream but have no representation in
   // ImageSize yet, and Google's 1K landscape is not 1536x1024 -- a provider
@@ -182,11 +194,14 @@ const GOOGLE_GEMINI_31_FLASH_IMAGE: ImageModelProfile = {
 // pin one: a moving target cannot carry a fixed price, because the price is
 // only meaningful for the model that was actually verified.
 //
-// `prices` stays empty because a sale credit figure is a product approval, not
-// a fact that can be read off a page. The verified worst-case floors are 62
-// credits (1K) and 84 (2K), computed over the whole request -- image output
-// plus the full prompt budget plus the zero thinking cap -- not over the image
-// price alone.
+// Sale credits approved 2026-08-04 at 75 (1K), against a policy floor of 62 --
+// 733 microUSD per credit worst case, 18.5% under the 900 ceiling. Only 1K
+// square ships: xAI's 2K (approved at 100 credits, floor 84) needs the size
+// system to grow a resolution tier first, and 1024x1024 is also the honest
+// comparison against gpt-image-2's square.
+//
+// The floors are computed over the whole request -- image output plus the full
+// prompt budget plus the zero thinking cap -- not over the image price alone.
 const XAI_GROK_IMAGINE_IMAGE_QUALITY: ImageModelProfile = {
   id: "grok-imagine-image-quality-20260403",
   provider: "xai",
@@ -196,7 +211,14 @@ const XAI_GROK_IMAGINE_IMAGE_QUALITY: ImageModelProfile = {
   disabledReason: "operational_hold",
   sizes: ["1024x1024"],
   qualities: ["medium"],
-  prices: [],
+  prices: [
+    {
+      quality: "medium",
+      size: "1024x1024",
+      credits: 75,
+      outputCostMicroUsd: 50_000,
+    },
+  ],
   latencyClass: "balanced",
   // Verified absent, not merely unread: the 2026-08-04 verification found no
   // watermark, C2PA or metadata guarantee anywhere in xAI's documentation.
@@ -217,7 +239,7 @@ const XAI_GROK_IMAGINE_IMAGE_QUALITY: ImageModelProfile = {
     thinkingCapMicroUsd: 0,
   },
   disabledNote:
-    "Price verified 2026-08-04: $0.05 (1K) and $0.07 (2K) per image, flat regardless of prompt length, with no prompt-token or reasoning-token charge. Worst-case floors are 62 credits (1K) and 84 (2K). Held on operational grounds only: an xAI adapter is needed (imageProviderAdapter dispatches OpenAI only), IMAGE_PROVIDER_XAI_COST_MICROUSD_PER_DAY/_PER_MONTH must be deployed before the code, the dated snapshot must be confirmed visible to the Tomverse key, and a sale-credit figure at or above the floor must be approved.",
+    "Price verified 2026-08-04: $0.05 (1K) and $0.07 (2K) per image, flat regardless of prompt length, with no prompt-token or reasoning-token charge. Worst-case floors are 62 credits (1K) and 84 (2K). Sale credits approved 2026-08-04: 75 for 1K (floor 62), and 100 for 2K (floor 84) which ships only once the size system grows a resolution tier. Held on operational grounds only: an xAI adapter is needed (imageProviderAdapter dispatches OpenAI only), IMAGE_PROVIDER_XAI_COST_MICROUSD_PER_DAY/_PER_MONTH must be deployed before the code, and the dated snapshot must be confirmed visible to the Tomverse key with one staging call.",
 };
 
 // Registered, not enabled. The review's low-cost bulk candidate: 1K only, and
