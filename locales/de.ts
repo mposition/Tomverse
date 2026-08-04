@@ -332,6 +332,7 @@ export const de = {
         searchStatusFailed: "Websuche fehlgeschlagen",
         searchStatusDeepResearch: "Deep Research",
         searchCitationsLabel: "Quellen",
+        memoryUsedDisclosure: "Diese Antwort hat {count} Kontogedächtnisse verwendet",
         modelsSelectedOne: "KI",
         modelsSelectedOther: "KIs",
         maxModelsDescription: "Bis zu 3 Modelle vergleichen",
@@ -371,6 +372,7 @@ export const de = {
         internalMonthlyCostSafetyLimit: "Diese Anfrage überschreitet das monatliche Nutzungslimit für KI-Antworten. Wählen Sie weniger oder günstigere Modelle, oder versuchen Sie es nach der monatlichen Zurücksetzung erneut.",
         providerCostSafetyLimit: "Einer der ausgewählten KI-Anbieter ist vorübergehend nicht verfügbar. Wählen Sie ein Modell eines anderen Anbieters oder versuchen Sie es später erneut.",
         operationalCostGuardrail: "Eine interne Sicherheitsprüfung hat diese Anfrage pausiert. Ihre Credits wurden nicht verbraucht. Versuchen Sie es in Kürze erneut oder wählen Sie ein günstigeres Modell.",
+        contextBundleStale: "Ihr Kontogedächtnis hat sich während des Sendens geändert, daher wurde diese Nachricht nicht zugestellt. Senden Sie sie erneut, um das aktualisierte Gedächtnis zu verwenden.",
         planEntitlementExhausted: "Die Plan-Credits dieses Monats sind aufgebraucht. Kaufen Sie zusätzliche Credits oder führen Sie ein Upgrade durch, um fortzufahren.",
         concurrentReservationConflict: "Ihr Credit-Guthaben hat sich während der Verarbeitung einer anderen Anfrage geändert. Bitte versuchen Sie es erneut.",
         summarizeModelDifferences: "Modellunterschiede zusammenfassen",
@@ -808,17 +810,24 @@ export const de = {
         refundRequestSuccess: "Rückerstattungsanfrage erhalten.",
         refundRequestFailed: "Rückerstattungsanfrage konnte nicht gesendet werden.",
     },
+    settingsNav: {
+        navLabel: "Einstellungsnavigation",
+        backToSettings: "Zurück zu den Einstellungen",
+        settings: "Einstellungen",
+        dataAndPersonalization: "Daten und Personalisierung",
+        dataAndPersonalizationDescription: "Importierte Unterhaltungen und Kontogedächtnis. Beides wird auf einer eigenen Seite verwaltet.",
+    },
     externalImport: {
         dataTabTitle: "Aus einem anderen KI-Dienst importieren",
         dataTabDescription:
             "Speichern Sie frühere Unterhaltungen aus einer ChatGPT- oder Claude-Exportdatei in Ihrem Tomverse-Konto. Die Exportdatei wird nur in Ihrem Browser gelesen.",
         dataTabUsage:
             "{conversations} importierte Unterhaltungen · {storage} gespeichert",
-        dataTabOpen: "Import-Einstellungen öffnen",
+        dataTabOpen: "Importe verwalten",
+        dataTabUsageEmpty: "Noch keine importierten Unterhaltungen",
         pageTitle: "Unterhaltungen aus einem anderen KI-Dienst importieren",
         pageDescription:
             "Laden Sie einen offiziellen Datenexport von ChatGPT oder Claude hoch, prüfen Sie den Inhalt und wählen Sie die Unterhaltungen aus, die Sie in Ihrem Tomverse-Konto behalten möchten.",
-        backToChat: "Zurück zum Chat",
         backToImports: "Zurück zu den Importen",
         signInRequired:
             "Melden Sie sich an, um Unterhaltungen aus einem anderen KI-Dienst zu importieren.",
@@ -1001,14 +1010,25 @@ export const de = {
         abandonImport: "Diesen Import verlassen",
     },
     memoryReview: {
+        sourceDeleteDerivedImport:
+            "{count} Erinnerungen aus diesem Import werden ebenfalls gelöscht.",
+        sourceDeleteDerivedConversation:
+            "{count} Erinnerungen aus dieser Unterhaltung werden ebenfalls gelöscht.",
+        sourceDeleteKeep: "Erinnerungen behalten, aber nicht mehr verwenden",
+        sourceDeleteEdited:
+            "{count} von Ihnen bearbeitete Erinnerungen bleiben erhalten und werden nur nicht mehr verwendet.",
+        sourceDeleteKept:
+            "{count} Erinnerungen mit anderen Belegen bleiben unverändert.",
         dataTabTitle: "Konto-Langzeitgedächtnis",
         dataTabDescription:
             "Prüfen Sie aus importierten Unterhaltungen extrahierte Gedächtnis-Kandidaten und legen Sie fest, ob genehmigte Erinnerungen in neuen Chats verwendet werden.",
-        dataTabOpen: "Gedächtnis-Einstellungen öffnen",
+        dataTabOpen: "Gedächtnis verwalten",
+        dataTabStatusOn: "Wird in neuen Chats verwendet",
+        dataTabStatusOff: "Wird in neuen Chats nicht verwendet",
+        dataTabStatusPending: "{count} warten auf Prüfung",
         pageTitle: "Konto-Langzeitgedächtnis",
         pageDescription:
             "Genehmigen oder lehnen Sie wartende Gedächtnis-Kandidaten ab und bearbeiten, fixieren oder löschen Sie verwendete Erinnerungen.",
-        backToChat: "Zurück zum Chat",
         signInRequired:
             "Melden Sie sich an, um das Gedächtnis Ihres Kontos zu verwalten.",
         privacyNote:
@@ -1119,6 +1139,75 @@ export const de = {
             explanation_depth: "Erklärtiefe",
             citation_preference: "Zitierpräferenz",
             code_style: "Code-Stil",
+        },
+    },
+    // Start der Extraktion (Release B, §11 Bestätigung vorab, §21).
+    memoryExtraction: {
+        launchTitle: "Erinnerungen aus importierten Unterhaltungen gewinnen",
+        launchDescription:
+            "Wählen Sie importierte Unterhaltungen aus, aus denen Kandidaten gewonnen werden. Kandidaten werden erst in Antworten verwendet, wenn Sie sie geprüft und freigegeben haben.",
+        modelTitle: "Modell für die Extraktion",
+        modelUnavailable: "Zurzeit ist kein Extraktionsmodell verfügbar.",
+        modelUnavailableDescription:
+            "Ein Extraktionsmodell wird erst nach bestandener Qualitätsbewertung freigegeben. Danach können Sie es hier auswählen.",
+        modelCredits: "{credits} Credits pro Bündel",
+        conversationsTitle: "Unterhaltungen auswählen",
+        conversationsDescription:
+            "Nur die ausgewählten Unterhaltungen werden verwendet. Sie werden nach Größe gebündelt verarbeitet, und Credits zählen pro Bündel.",
+        conversationsEmpty: "Sie haben noch keine Unterhaltungen importiert.",
+        conversationsEmptyCta: "Unterhaltungen importieren",
+        selectAllVisible: "Alle angezeigten auswählen",
+        clearSelection: "Auswahl aufheben",
+        selectionSummary: "{count} ausgewählt · etwa {size}",
+        selectionHidden: "{count} ausgewählte Unterhaltungen sind in dieser Liste nicht sichtbar.",
+        selectionTooLarge: "Sie können höchstens {max} Unterhaltungen auf einmal auswählen.",
+        conversationMeta: "{messages} Nachrichten · {size}",
+        loadMore: "Mehr anzeigen",
+        estimate: "Benötigte Credits prüfen",
+        estimating: "Wird berechnet…",
+        estimateResult: "{chunks} Bündel · etwa {credits} Credits",
+        estimateDescription:
+            "{conversations} Unterhaltungen werden in {chunks} Bündeln verarbeitet. Die endgültige Abrechnung erfolgt nach dem Lauf und übersteigt den bestätigten Betrag nie.",
+        estimateStale: "Die Auswahl hat sich geändert. Prüfen Sie die Credits erneut.",
+        start: "Extraktion für {credits} Credits starten",
+        starting: "Wird gestartet…",
+        runInProgress: "Es läuft bereits eine Extraktion.",
+        runInProgressOpen: "Fortschritt ansehen",
+        errorGeneric: "Etwas ist schiefgelaufen. Bitte erneut versuchen.",
+        errorEstimateChanged:
+            "Die ausgewählten Unterhaltungen haben sich geändert, die Schätzung passt nicht mehr. Bitte vor dem Start erneut prüfen.",
+        errorPairUnavailable: "Dieses Modell ist zurzeit nicht verfügbar.",
+        errorBudget:
+            "Die Extraktionskapazität ist vorübergehend erschöpft. Bitte kurz später erneut versuchen.",
+        runTitle: "Fortschritt der Extraktion",
+        runBack: "Zurück zu den Erinnerungseinstellungen",
+        runNotFound: "Dieser Extraktionslauf wurde nicht gefunden.",
+        runModel: "Modell",
+        runStarted: "Beginn: {date}",
+        runFinished: "Ende: {date}",
+        runProgress: "{completed} von {total} Bündeln fertig",
+        runPendingNote:
+            "Wartet auf den Start. Sie können diese Seite schließen — der Lauf läuft weiter und Sie können später hier nachsehen.",
+        runRunningNote:
+            "Die Extraktion läuft. Sie können diese Seite schließen; Kandidaten erscheinen nach und nach in der Prüfliste.",
+        runCompletedNote:
+            "Die Extraktion ist abgeschlossen. Prüfen Sie die Kandidaten in der Prüfliste.",
+        runFailedNote:
+            "Die Extraktion konnte nicht abgeschlossen werden. Ergebnisse fertiger Bündel bleiben erhalten.",
+        runCancelledNote:
+            "Die Extraktion wurde abgebrochen. Ergebnisse fertiger Bündel bleiben erhalten.",
+        runReview: "Zur Prüfliste",
+        cancel: "Extraktion abbrechen",
+        cancelArmed: "Zum Abbrechen erneut drücken",
+        cancelling: "Wird abgebrochen…",
+        recentRunsTitle: "Letzte Extraktionen",
+        recentRunOpen: "Details ansehen",
+        status: {
+            pending: "Wartet",
+            running: "Läuft",
+            completed: "Abgeschlossen",
+            failed: "Fehlgeschlagen",
+            cancelled: "Abgebrochen",
         },
     },
     privacyPolicy: {

@@ -1975,8 +1975,10 @@ model MemoryItem {
   conflictKey String?
 
   /// Lexical retrieval terms (§9, retrieval v1 — no embeddings). The GIN
-  /// index is created by raw SQL in the migration. Populated by the B4
-  /// slice's tokenizer; empty until then.
+  /// index is created by raw SQL in the migration. Written by
+  /// `memoryRetrievalTerms()` (lib/memoryRetrievalTerms.ts) on every path
+  /// that writes a statement; rows predating it are re-indexed by
+  /// `npm run maintenance:memory-search-terms`.
   searchTerms      String[] @default([])
   retrievalVersion Int      @default(1)
 
@@ -2150,4 +2152,34 @@ model UserMemorySettings {
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+}
+
+/// One consumed §10 context bundle, per (bundle, model).
+///
+/// The nonce contract cannot be held in memory: a replayed bundle has to be
+/// refused by whichever instance sees it second, and there is no shared
+/// process. The unique key IS the enforcement — an insert that violates it is
+/// the "already consumed" answer, so the check and the claim are one
+/// statement and two concurrent requests cannot both win.
+///
+/// Per (bundle, model) rather than per bundle, because a comparison's three
+/// requests legitimately present the same bundle
+/// (`bundleConsumptionKey()`, policy §10).
+model ChatContextBundleConsumption {
+  id String @id @default(cuid())
+
+  /// `bundleId:modelId`. Unique — this is the concurrency control.
+  consumptionKey String @unique
+
+  bundleId String
+  modelId  String
+  userId   String
+
+  /// The bundle's own expiry, carried so cleanup never has to decode a
+  /// token. Rows are only useful until the bundle they name expires.
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@index([expiresAt])
+  @@index([userId, createdAt])
 }

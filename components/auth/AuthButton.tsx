@@ -10,6 +10,7 @@ import { useModelCatalog } from "@/components/ModelCatalogProvider";
 import {
     Bot,
     BarChart3,
+    Brain,
     Check,
     ChevronDown,
     Clock3,
@@ -59,12 +60,20 @@ import {
 import { openAnalyticsPreferences } from "@/lib/analyticsPreferencesEvents";
 import {
     ACCOUNT_SETTINGS_OPEN_EVENT,
-    type AccountSettingsTab,
+    consumePendingAccountSettingsRequest,
+    readAccountSettingsOpenRequest,
 } from "@/lib/accountSettingsEvents";
+import { SettingsEntryRow } from "@/components/settings/SettingsEntryRow";
+import {
+    isSettingsSectionId,
+    parseSettingsDeepLink,
+    settingsSectionElementId,
+    stripSettingsDeepLink,
+    type SettingsSectionId,
+} from "@/lib/settingsNavigation";
 import { listImportableGuestConversations } from "@/lib/guestImport";
 import { openGuestImportModal } from "@/lib/guestImportModalEvents";
 import { useModalDialog } from "@/components/useModalDialog";
-import Link from "next/link";
 
 type LoginMethod =
     | { type: "oauth"; provider: "google" | "azure-ad"; linked: boolean }
@@ -92,6 +101,17 @@ export function AuthButton({
         | { kind: "hidden" }
         | { kind: "ready"; conversations: number; bytes: number }
     >({ kind: "hidden" });
+    // Status line for the memory row. Unlike the import entry this is never a
+    // visibility probe -- memory review is always reachable (policy §15) -- so
+    // an unavailable API only costs the row its status, never the row.
+    const [memoryEntryStatus, setMemoryEntryStatus] = useState<
+        { masterEnabled: boolean; candidates: number } | null
+    >(null);
+    // Settings-list row a detail page asked to return to, kept until the row
+    // it names has actually rendered: the import row only appears once the
+    // capacity probe answers, which is several frames after the tab paints.
+    const [pendingSettingsSection, setPendingSettingsSection] =
+        useState<SettingsSectionId | null>(null);
     const settingsButtonRef = useRef<HTMLButtonElement | null>(null);
     const settingsDialogRef = useRef<HTMLDivElement | null>(null);
     const deleteAccountButtonRef = useRef<HTMLButtonElement | null>(null);
@@ -246,9 +266,15 @@ export function AuthButton({
     }, []);
 
     const openSettingsTab = useCallback(
-        (tab: "account" | "preferences" | "data" | "plan") => {
+        (
+            tab: "account" | "preferences" | "data" | "plan",
+            section: string | null = null
+        ) => {
             setIsAccountMenuOpen(false);
             setActiveSettingsTab(tab);
+            setPendingSettingsSection(
+                isSettingsSectionId(section) ? section : null
+            );
             setIsModalOpen(true);
         },
         []
@@ -258,13 +284,78 @@ export function AuthButton({
     // room for the full settings modal) open this same modal remotely.
     useEffect(() => {
         const handleOpenAccountSettings = (event: Event) => {
-            const tab = (event as CustomEvent<AccountSettingsTab>).detail || "account";
-            openSettingsTab(tab);
+            const request = readAccountSettingsOpenRequest(
+                (event as CustomEvent<unknown>).detail
+            );
+            // Served here, so the copy kept for a not-yet-mounted modal must
+            // not be replayed by the next mount.
+            consumePendingAccountSettingsRequest();
+            openSettingsTab(request.tab, request.section);
         };
         window.addEventListener(ACCOUNT_SETTINGS_OPEN_EVENT, handleOpenAccountSettings);
         return () =>
             window.removeEventListener(ACCOUNT_SETTINGS_OPEN_EVENT, handleOpenAccountSettings);
     }, [openSettingsTab]);
+
+    // Two ways in that this modal cannot receive as an event, because it was
+    // not mounted when the request was made:
+    //
+    //   * a request raised while the sidebar was collapsed or the mobile
+    //     drawer closed -- mounting this modal is what those shells do *in
+    //     response*, so the event is always one step ahead of the listener;
+    //   * "Back to settings" on a detail page, which is a full navigation and
+    //     arrives as a deep link in the URL (lib/settingsNavigation.ts). It
+    //     has to work on a cold, directly-opened URL too, so the parameters
+    //     are the request -- no history, no prior in-page state.
+    //
+    // The deep link is then dropped from the address bar with replaceState:
+    // the request has been served, and rewriting the current entry (rather
+    // than pushing one) leaves the visitor's own Back button where it was.
+    useEffect(() => {
+        if (typeof window === "undefined") return;
+        const pending = consumePendingAccountSettingsRequest();
+        if (pending) {
+            queueMicrotask(() => openSettingsTab(pending.tab, pending.section));
+            return;
+        }
+        const deepLink = parseSettingsDeepLink(window.location.search);
+        if (!deepLink) return;
+        window.history.replaceState(
+            null,
+            "",
+            `${window.location.pathname}${stripSettingsDeepLink(window.location.search)}${window.location.hash}`
+        );
+        queueMicrotask(() => openSettingsTab(deepLink.tab, deepLink.section));
+    }, [openSettingsTab]);
+
+    // Scroll and focus restoration for the row the visitor came from. The
+    // dialog moves focus to its first control on the frame after it opens, so
+    // this waits a further frame rather than racing it, and keeps the request
+    // pending until the row exists.
+    useEffect(() => {
+        if (!isModalOpen || !pendingSettingsSection) return;
+        let secondFrame = 0;
+        const firstFrame = requestAnimationFrame(() => {
+            secondFrame = requestAnimationFrame(() => {
+                const row = document.getElementById(
+                    settingsSectionElementId(pendingSettingsSection)
+                );
+                if (!row) return;
+                row.scrollIntoView({ block: "center" });
+                row.focus({ preventScroll: true });
+                setPendingSettingsSection(null);
+            });
+        });
+        return () => {
+            cancelAnimationFrame(firstFrame);
+            cancelAnimationFrame(secondFrame);
+        };
+    }, [
+        isModalOpen,
+        pendingSettingsSection,
+        activeSettingsTab,
+        externalImportEntry,
+    ]);
 
     const fetchLoginMethods = useCallback(async () => {
         try {
@@ -314,6 +405,64 @@ export function AuthButton({
             cancelled = true;
         };
     }, [isModalOpen, activeSettingsTab, session?.user]);
+
+    // Status line for the memory row. Both endpoints stay reachable with the
+    // rollout flag off (policy §15), so a failure here is a network fact and
+    // not a feature probe: the row renders either way, just without a status.
+    useEffect(() => {
+        if (!isModalOpen || activeSettingsTab !== "data" || !session?.user) {
+            return;
+        }
+        let cancelled = false;
+        Promise.all([
+            fetch("/api/memories/settings", { cache: "no-store" }),
+            fetch("/api/memories?status=candidate&limit=1", {
+                cache: "no-store",
+            }),
+        ])
+            .then(async ([settingsResponse, candidateResponse]) => {
+                if (cancelled || !settingsResponse.ok || !candidateResponse.ok) {
+                    return;
+                }
+                const settings = (await settingsResponse.json()) as {
+                    masterEnabled?: boolean;
+                } | null;
+                const candidates = (await candidateResponse.json()) as {
+                    total?: number;
+                } | null;
+                if (cancelled) return;
+                setMemoryEntryStatus({
+                    masterEnabled: settings?.masterEnabled !== false,
+                    candidates:
+                        typeof candidates?.total === "number"
+                            ? candidates.total
+                            : 0,
+                });
+            })
+            .catch(() => {
+                // Unreachable API: the row keeps its name and description.
+            });
+        return () => {
+            cancelled = true;
+        };
+    }, [isModalOpen, activeSettingsTab, session?.user]);
+
+    // "Used in new chats · 3 awaiting review" -- the state first, then the
+    // thing that needs doing, and only when there is one.
+    const memoryEntryStatusText = memoryEntryStatus
+        ? [
+              memoryEntryStatus.masterEnabled
+                  ? t("memoryReview.dataTabStatusOn")
+                  : t("memoryReview.dataTabStatusOff"),
+              ...(memoryEntryStatus.candidates > 0
+                  ? [
+                        formatCopy("memoryReview.dataTabStatusPending", {
+                            count: String(memoryEntryStatus.candidates),
+                        }),
+                    ]
+                  : []),
+          ].join(" · ")
+        : null;
 
     // Picks up the redirect from /api/user/login-methods/oauth/callback (the
     // custom OAuth-provider-linking flow) and surfaces a toast, since that
@@ -1540,47 +1689,58 @@ export function AuthButton({
 
                                 {activeSettingsTab === "data" && (
                                     <div className="space-y-4">
-                                        {externalImportEntry.kind === "ready" && (
-                                            <section
-                                                className="rounded-2xl border border-zinc-200 bg-zinc-50 p-4 dark:border-zinc-800 dark:bg-zinc-950/60"
-                                                data-testid="external-import-entry"
-                                            >
-                                                <h3 className="text-sm font-bold">{t("externalImport.dataTabTitle")}</h3>
-                                                <p className="mt-1 text-sm leading-6 text-zinc-500">{t("externalImport.dataTabDescription")}</p>
-                                                {externalImportEntry.conversations > 0 && (
-                                                    <p className="mt-1 text-sm leading-6 text-zinc-500">
-                                                        {formatCopy("externalImport.dataTabUsage", {
-                                                            conversations: String(externalImportEntry.conversations),
-                                                            storage: `${(externalImportEntry.bytes / (1024 * 1024)).toFixed(1)} MB`,
-                                                        })}
-                                                    </p>
-                                                )}
-                                                <Link
-                                                    href="/settings/imports"
-                                                    onClick={closeSettingsModal}
-                                                    data-testid="external-import-entry-link"
-                                                    className="mt-4 flex w-full items-center justify-center gap-2 rounded-xl border border-zinc-200 bg-white px-3 py-3 text-sm font-semibold text-zinc-700 transition-colors hover:bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:bg-zinc-800"
-                                                >
-                                                    <Database className="h-4 w-4" />
-                                                    {t("externalImport.dataTabOpen")}
-                                                </Link>
-                                            </section>
-                                        )}
+                                        {/*
+                                          One group, two rows -- not two
+                                          full-width cards. Import and memory
+                                          stay separate features with separate
+                                          detail pages and separate state, but
+                                          on the settings list they are
+                                          siblings, and stacking a card each
+                                          made them read as two unrelated
+                                          headline destinations on a tab that
+                                          has five other things on it.
+                                        */}
                                         <section
                                             className="rounded-2xl border border-zinc-200 bg-zinc-50 p-4 dark:border-zinc-800 dark:bg-zinc-950/60"
-                                            data-testid="memory-entry"
+                                            data-testid="settings-data-personalization"
                                         >
-                                            <h3 className="text-sm font-bold">{t("memoryReview.dataTabTitle")}</h3>
-                                            <p className="mt-1 text-sm leading-6 text-zinc-500">{t("memoryReview.dataTabDescription")}</p>
-                                            <Link
-                                                href="/settings/memory"
-                                                onClick={closeSettingsModal}
-                                                data-testid="memory-entry-link"
-                                                className="mt-4 flex w-full items-center justify-center gap-2 rounded-xl border border-zinc-200 bg-white px-3 py-3 text-sm font-semibold text-zinc-700 transition-colors hover:bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:bg-zinc-800"
-                                            >
-                                                <Database className="h-4 w-4" />
-                                                {t("memoryReview.dataTabOpen")}
-                                            </Link>
+                                            <h3 className="text-sm font-bold">{t("settingsNav.dataAndPersonalization")}</h3>
+                                            <p className="mt-1 text-sm leading-6 text-zinc-500">{t("settingsNav.dataAndPersonalizationDescription")}</p>
+                                            <div className="mt-3">
+                                                {externalImportEntry.kind === "ready" && (
+                                                    <SettingsEntryRow
+                                                        section="external-import"
+                                                        href="/settings/imports"
+                                                        icon={Database}
+                                                        title={t("externalImport.dataTabTitle")}
+                                                        description={t("externalImport.dataTabDescription")}
+                                                        status={
+                                                            externalImportEntry.conversations > 0
+                                                                ? formatCopy("externalImport.dataTabUsage", {
+                                                                      conversations: String(externalImportEntry.conversations),
+                                                                      storage: `${(externalImportEntry.bytes / (1024 * 1024)).toFixed(1)} MB`,
+                                                                  })
+                                                                : t("externalImport.dataTabUsageEmpty")
+                                                        }
+                                                        actionLabel={t("externalImport.dataTabOpen")}
+                                                        onNavigate={closeSettingsModal}
+                                                        testId="external-import-entry"
+                                                        linkTestId="external-import-entry-link"
+                                                    />
+                                                )}
+                                                <SettingsEntryRow
+                                                    section="memory"
+                                                    href="/settings/memory"
+                                                    icon={Brain}
+                                                    title={t("memoryReview.dataTabTitle")}
+                                                    description={t("memoryReview.dataTabDescription")}
+                                                    status={memoryEntryStatusText}
+                                                    actionLabel={t("memoryReview.dataTabOpen")}
+                                                    onNavigate={closeSettingsModal}
+                                                    testId="memory-entry"
+                                                    linkTestId="memory-entry-link"
+                                                />
+                                            </div>
                                         </section>
                                         {listImportableGuestConversations().length > 0 && (
                                             <section className="rounded-2xl border border-zinc-200 bg-zinc-50 p-4 dark:border-zinc-800 dark:bg-zinc-950/60">

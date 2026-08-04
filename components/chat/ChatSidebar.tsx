@@ -18,6 +18,8 @@ import { useUserUsage, type UserPlan } from "@/components/chat/useUserUsage";
 import { dispatchAppToast } from "@/lib/appToast";
 import { trackProductEvent } from "@/lib/productAnalyticsClient";
 import { chatWorkspaceGuideHref } from "@/lib/localizedHelpHref";
+import { ACCOUNT_SETTINGS_OPEN_EVENT } from "@/lib/accountSettingsEvents";
+import { parseSettingsDeepLink } from "@/lib/settingsNavigation";
 import { useSidebarCollapsePreference } from "@/components/chat/useSidebarCollapse";
 import { useShortViewport } from "@/components/chat/useVisualViewport";
 import { BuildInfoMenuItem, BuildStagingBadge } from "@/components/chat/BuildInfoMenu";
@@ -210,6 +212,35 @@ export function ChatSidebar({
     const toggleSidebarCollapsed = () => {
         setSidebarCollapsePreference(isSidebarCollapsed ? "expanded" : "collapsed");
     };
+    // The settings panel is part of the *expanded* sidebar's account card, so
+    // while the rail is collapsed there is nothing for a settings request to
+    // open -- neither the rail's own account button nor "Back to settings"
+    // arriving from a detail page as a deep link (lib/settingsNavigation.ts).
+    // Expanding is what mounts the panel; the request waits for it in
+    // lib/accountSettingsEvents.ts and is claimed on mount.
+    const expandSidebarIfCollapsed = useCallback(() => {
+        if (!isSidebarCollapsed || isMobileDrawer) return;
+        setSidebarCollapsePreference("expanded");
+    }, [isMobileDrawer, isSidebarCollapsed, setSidebarCollapsePreference]);
+    useEffect(() => {
+        window.addEventListener(
+            ACCOUNT_SETTINGS_OPEN_EVENT,
+            expandSidebarIfCollapsed
+        );
+        return () =>
+            window.removeEventListener(
+                ACCOUNT_SETTINGS_OPEN_EVENT,
+                expandSidebarIfCollapsed
+            );
+    }, [expandSidebarIfCollapsed]);
+    useEffect(() => {
+        if (typeof window === "undefined") return;
+        if (!parseSettingsDeepLink(window.location.search)) return;
+        queueMicrotask(() => expandSidebarIfCollapsed());
+        // Mount only: the deep link is a one-time request, and re-running it
+        // would fight a visitor who collapsed the sidebar afterwards.
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
     const { t, lang } = useLanguage();
     const helpCopy = chatHelpCopy[lang];
     const tooltipIdPrefix = useId();

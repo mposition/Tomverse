@@ -23,6 +23,14 @@ import {
     utf8ByteLength,
 } from "@/lib/externalImportLimits";
 import { recordExternalImportCounter } from "@/lib/externalImportMetrics";
+import {
+    SOURCE_DELETE_SUSPENDED_STATUS,
+    planSourceDeletion,
+    summarizeSourceDeletionImpact,
+    type MemoryDeletionFacts,
+    type SourceDeletionDisposition,
+    type SourceDeletionImpact,
+} from "@/lib/memorySourceDeletion";
 import { prisma } from "@/lib/prisma";
 
 /**
@@ -401,9 +409,177 @@ export async function getExternalConversation(
  * same transaction so the history rows stay truthful; `duplicateCount` is a
  * record of what the import run itself skipped and is left alone.
  */
+/**
+ * Statuses a suspension is meaningful for (§8.3).
+ *
+ * A memory that is already rejected, superseded or expired is out of
+ * retrieval by definition, and overwriting its status with
+ * `suspended_by_source_delete` would replace the true reason it left with a
+ * different one. Those rows keep the status they have.
+ */
+const SUSPENDABLE_MEMORY_STATUSES = [
+    "active",
+    "candidate",
+    "manual_review_required",
+] as const;
+
+const NO_MEMORY_IMPACT = {
+    derivedCount: 0,
+    userTouchedCount: 0,
+    keptCount: 0,
+    deletedMemories: 0,
+    suspendedMemories: 0,
+} as const;
+
+/**
+ * The memories a source delete would strand, with the facts §13.1 classifies
+ * on. Must run *before* the rows go: once the cascade removes the evidence,
+ * nothing records which memories came from what.
+ */
+async function memoriesFacingSourceDeletion(
+    tx: Prisma.TransactionClient,
+    userId: string,
+    doomedConversationIds: string[]
+): Promise<(MemoryDeletionFacts & { status: string })[]> {
+    if (doomedConversationIds.length === 0) return [];
+    const doomed = new Set(doomedConversationIds);
+
+    const affected = await tx.memoryEvidence.findMany({
+        where: {
+            userId,
+            externalMessage: {
+                externalConversationId: { in: doomedConversationIds },
+            },
+        },
+        select: { memoryItemId: true },
+        distinct: ["memoryItemId"],
+    });
+    if (affected.length === 0) return [];
+
+    const memoryIds = affected.map((row) => row.memoryItemId);
+    const items = await tx.memoryItem.findMany({
+        where: { id: { in: memoryIds }, userId },
+        select: {
+            id: true,
+            status: true,
+            userEdited: true,
+            evidences: {
+                select: {
+                    sourceType: true,
+                    externalMessage: {
+                        select: { externalConversationId: true },
+                    },
+                },
+            },
+        },
+    });
+
+    return items.map((item) => ({
+        id: item.id,
+        status: item.status,
+        userEdited: item.userEdited,
+        // Manual grounds and evidence from conversations that are staying are
+        // both survivors; only evidence inside the doomed set disappears.
+        hasSurvivingEvidence: item.evidences.some(
+            (evidence) =>
+                evidence.externalMessage === null ||
+                !doomed.has(evidence.externalMessage.externalConversationId)
+        ),
+    }));
+}
+
+async function applySourceDeletionToMemories(
+    tx: Prisma.TransactionClient,
+    userId: string,
+    doomedConversationIds: string[],
+    dispositions: {
+        derived?: SourceDeletionDisposition;
+        userTouched?: SourceDeletionDisposition;
+    }
+): Promise<SourceDeletionImpact & { deletedMemories: number; suspendedMemories: number }> {
+    const memories = await memoriesFacingSourceDeletion(
+        tx,
+        userId,
+        doomedConversationIds
+    );
+    const plan = planSourceDeletion({
+        memories,
+        derivedDisposition: dispositions.derived,
+        userTouchedDisposition: dispositions.userTouched,
+    });
+
+    let deletedMemories = 0;
+    if (plan.deleteIds.length > 0) {
+        const removed = await tx.memoryItem.deleteMany({
+            where: { id: { in: plan.deleteIds }, userId },
+        });
+        deletedMemories = removed.count;
+    }
+    let suspendedMemories = 0;
+    if (plan.suspendIds.length > 0) {
+        const suspended = await tx.memoryItem.updateMany({
+            where: {
+                id: { in: plan.suspendIds },
+                userId,
+                status: { in: [...SUSPENDABLE_MEMORY_STATUSES] },
+            },
+            data: {
+                status: SOURCE_DELETE_SUSPENDED_STATUS,
+                suspendedReason: SOURCE_DELETE_SUSPENDED_STATUS,
+            },
+        });
+        suspendedMemories = suspended.count;
+    }
+    return {
+        ...summarizeSourceDeletionImpact(memories),
+        deletedMemories,
+        suspendedMemories,
+    };
+}
+
+/**
+ * What deleting this source would do to the account's memories, so the
+ * confirmation states it before the user commits rather than after (§13.1).
+ */
+export async function previewExternalSourceDeletion(
+    userId: string,
+    scope: { importId: string } | { conversationId: string }
+): Promise<SourceDeletionImpact> {
+    const conversationIds = await conversationIdsForScope(prisma, userId, scope);
+    const memories = await memoriesFacingSourceDeletion(
+        prisma,
+        userId,
+        conversationIds
+    );
+    return summarizeSourceDeletionImpact(memories);
+}
+
+async function conversationIdsForScope(
+    tx: Prisma.TransactionClient | typeof prisma,
+    userId: string,
+    scope: { importId: string } | { conversationId: string }
+): Promise<string[]> {
+    if ("conversationId" in scope) {
+        const row = await tx.externalConversation.findFirst({
+            where: { id: scope.conversationId, userId },
+            select: { id: true },
+        });
+        return row ? [row.id] : [];
+    }
+    const rows = await tx.externalConversation.findMany({
+        where: { importId: scope.importId, userId },
+        select: { id: true },
+    });
+    return rows.map((row) => row.id);
+}
+
 export async function deleteExternalConversationSnapshot(
     userId: string,
-    conversationId: string
+    conversationId: string,
+    dispositions: {
+        derived?: SourceDeletionDisposition;
+        userTouched?: SourceDeletionDisposition;
+    } = {}
 ) {
     return prisma.$transaction(async (tx) => {
         const row = await tx.externalConversation.findUnique({
@@ -419,6 +595,15 @@ export async function deleteExternalConversationSnapshot(
         const truncatedMessages = await tx.externalMessage.count({
             where: { externalConversationId: row.id, truncated: true },
         });
+        // Before the delete, not after: the cascade takes the evidence rows
+        // with the messages, and afterwards nothing records which memories
+        // came from this conversation (§13.1).
+        const memoryImpact = await applySourceDeletionToMemories(
+            tx,
+            userId,
+            [row.id],
+            dispositions
+        );
         await tx.externalConversation.delete({ where: { id: row.id } });
         await tx.externalImport.updateMany({
             where: { id: row.importId },
@@ -429,7 +614,7 @@ export async function deleteExternalConversationSnapshot(
                 truncationCount: { decrement: truncatedMessages },
             },
         });
-        return { outcome: "deleted" as const };
+        return { outcome: "deleted" as const, memory: memoryImpact };
     });
 }
 
@@ -1101,7 +1286,14 @@ export async function finalizeExternalImport(input: {
     });
 }
 
-export async function deleteExternalImport(userId: string, importId: string) {
+export async function deleteExternalImport(
+    userId: string,
+    importId: string,
+    dispositions: {
+        derived?: SourceDeletionDisposition;
+        userTouched?: SourceDeletionDisposition;
+    } = {}
+) {
     return prisma.$transaction(async (tx) => {
         const row = await loadOwnedImport(tx, userId, importId, {
             forUpdate: true,
@@ -1110,6 +1302,9 @@ export async function deleteExternalImport(userId: string, importId: string) {
         // unsealed one: seal is a completeness statement about the upload,
         // not a commitment to save anything (§5.5).
         if (isOpenImportStatus(row.status)) {
+            // No memory can be derived from this branch's rows: extraction
+            // only ever selects finalized conversations, and these are the
+            // ones that never got there.
             await tx.externalConversation.deleteMany({
                 where: { importId: row.id, finalized: false },
             });
@@ -1117,12 +1312,29 @@ export async function deleteExternalImport(userId: string, importId: string) {
                 where: { id: row.id },
                 data: { status: "cancelled" },
             });
-            return { outcome: "cancelled" as const };
+            // Reported as zeros rather than omitted: "cancelling touched no
+            // memory" is a fact the caller should be able to state, and a
+            // uniform shape spares every caller a narrowing branch.
+            return { outcome: "cancelled" as const, memory: NO_MEMORY_IMPACT };
         }
         // Completed (or failed/cancelled) imports delete whole: the FK
-        // cascade removes every conversation and message (§13.1).
+        // cascade removes every conversation and message (§13.1). The
+        // memories derived from them are decided first, for the same reason
+        // as the single-conversation path — after the cascade there is
+        // nothing left to attribute them to.
+        const doomedConversationIds = await conversationIdsForScope(
+            tx,
+            userId,
+            { importId: row.id }
+        );
+        const memoryImpact = await applySourceDeletionToMemories(
+            tx,
+            userId,
+            doomedConversationIds,
+            dispositions
+        );
         await tx.externalImport.delete({ where: { id: row.id } });
-        return { outcome: "deleted" as const };
+        return { outcome: "deleted" as const, memory: memoryImpact };
     });
 }
 

@@ -3,6 +3,7 @@ import { after } from "next/server";
 import { reconcileExpiredChatCreditReservations } from "@/lib/chatSecurity";
 import { reconcileExpiredChatRequestLeases } from "@/lib/chatRequestLease";
 import { reconcileExpiredExternalImportStaging } from "@/lib/externalImportService";
+import { reconcileExpiredMemories } from "@/lib/memoryExpiryService";
 import { reconcileExpiredMemoryExtractionRuns } from "@/lib/memoryExtractionService";
 import { reportOperationalIncident } from "@/lib/operationalMonitoring";
 import {
@@ -80,6 +81,15 @@ export async function POST(request: Request) {
       await reconcileExpiredMemoryExtractionRuns().catch(() => ({
         reclaimedRuns: 0,
       }));
+    // Memory expiry (policy §8.6): retrieval already refuses an expired
+    // memory whichever status it holds, so this is about the row saying so —
+    // the owner sees it as expired, and the account's memory fingerprint
+    // moves, which retires any §10 bundle priced against the old set. Never
+    // throws, so it cannot turn a successful reconciliation into a failed one.
+    const memoryExpiry = await reconcileExpiredMemories().catch(() => ({
+      expiredMemories: 0,
+      truncated: false,
+    }));
     await completeScheduledJob({
       runId: run?.id,
       processedCount: result.examined,
@@ -92,6 +102,7 @@ export async function POST(request: Request) {
         imageAssets,
         externalImportStaging,
         memoryExtractionLeases,
+        memoryExpiry,
       },
     });
     return Response.json(

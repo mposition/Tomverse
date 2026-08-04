@@ -12,7 +12,12 @@ import { authOptions } from "@/lib/auth";
 import {
     deleteExternalImport,
     getExternalImportStatus,
+    previewExternalSourceDeletion,
 } from "@/lib/externalImportService";
+import {
+    readSourceDeletionDispositions,
+    wantsMemoryImpact,
+} from "@/lib/externalSourceDeletionRequest";
 
 const disabledResponse = (error: ExternalImportDisabledError) =>
     NextResponse.json(
@@ -40,7 +45,14 @@ export async function GET(
             session.user.id,
             params.importId
         );
-        return NextResponse.json(status, {
+        // Only when asked for: the delete confirmation needs it, an ordinary
+        // status poll does not, and it costs a second query (§13.1).
+        const memoryImpact = wantsMemoryImpact(new URL(req.url))
+            ? await previewExternalSourceDeletion(session.user.id, {
+                  importId: params.importId,
+              })
+            : undefined;
+        return NextResponse.json({ ...status, memoryImpact }, {
             headers: { "Cache-Control": "no-store" },
         });
     } catch (error) {
@@ -74,7 +86,8 @@ export async function DELETE(
         const params = await context.params;
         const result = await deleteExternalImport(
             session.user.id,
-            params.importId
+            params.importId,
+            readSourceDeletionDispositions(new URL(req.url))
         );
         return NextResponse.json(result, {
             headers: { "Cache-Control": "no-store" },

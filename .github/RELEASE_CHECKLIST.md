@@ -362,9 +362,49 @@ onto a generated column.
 **Do not correct anything found here by hand, and never with `db push`.**
 Classify each difference — manual drift, extension-owned object, or a migration
 nobody wrote — then fix it with a **new forward migration** and re-run. Editing
-an applied migration changes its checksum and breaks deploys on every
-environment that already ran it. The schema dump is not a CI artifact and no
-connection string goes into the ticket.
+an applied migration changes its checksum, and every environment that already
+ran it then disagrees with the repository. The schema dump is not a CI artifact
+and no connection string goes into the ticket.
+
+### What an edited applied migration actually costs
+
+Not a failed deploy. On Prisma 7 `migrate deploy` (`ApplyMigrations`) does not
+compare checksums of already-applied migrations — it applies what is pending and
+carries on. The check lives in `diagnose_migration_history`, which is what
+`migrate status` runs, and it reports `<name> was modified after it was applied`.
+So the damage is to release integrity, not to availability: §1 asks for a clean
+`migrate status`, and this makes it dirty on every environment that ran the
+earlier bytes. It also means the drift is silent in a deploy log and has to be
+looked for.
+
+It cannot be repaired with `prisma migrate resolve` — that is for failed and
+rolled-back migrations, not successful ones — and rewriting `checksum` in
+`_prisma_migrations` by hand is not a supported recovery path. A staging
+database that can be recreated should be recreated; production needs a decision
+of its own.
+
+Decide from the recorded checksums, not from the file, because staging and
+production can disagree and the repository can only hold one version:
+
+```sql
+SELECT id, migration_name, checksum, started_at, finished_at,
+       rolled_back_at, applied_steps_count
+FROM "_prisma_migrations"
+WHERE migration_name = '<name>'
+ORDER BY started_at;
+```
+
+| Production | Staging | Action |
+|---|---|---|
+| original | original / unapplied | restore the original file |
+| edited | edited / unapplied | keep the edited file |
+| original | edited | restore the original, then recreate staging |
+| edited | original | keep the edited, then recreate staging |
+| unapplied | unapplied | choose the version that is semantically right |
+
+Where an edited version was applied first, also check the edit against a
+pre-migration backup: a widened allowlist can have cleared a value an operator
+had set deliberately.
 
 ## 8. Unverified items and waivers
 

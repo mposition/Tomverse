@@ -1,7 +1,10 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { findQuestionRunsInsideStrings } from "./text-encoding-check-core.mjs";
+import {
+  ENCODING_MARKER_PATTERNS,
+  findQuestionRunsInsideStrings,
+} from "./text-encoding-check-core.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(__dirname, "..");
@@ -19,13 +22,7 @@ const extensions = new Set([
   ".json",
 ]);
 
-const patterns = [
-  { name: "replacement-character", regex: /\uFFFD/g },
-  { name: "latin1-mojibake-marker", regex: /[\u00C2\u00C3]/g },
-  { name: "smart-quote-mojibake", regex: /\u00E2[\u20AC\u201A\u201C\u201D\u201E\u2020\u2021\u02C6\u2030\u0160\u2039\u0152\u017D\u2018\u2019\u201A\u201C\u201D\u2022\u2013\u2014\u02DC\u2122\u0161\u203A\u0153\u017E\u0178]/g },
-  { name: "korean-mojibake-marker", regex: /[\u00EC\u00ED][\u00A0-\u00BF]/g },
-  { name: "cjk-mojibake-marker", regex: /[\u00E5\u00E6][\u00A0-\u00BF]/g },
-];
+const patterns = ENCODING_MARKER_PATTERNS;
 
 function walk(dir, files = []) {
   if (!fs.existsSync(dir)) return files;
