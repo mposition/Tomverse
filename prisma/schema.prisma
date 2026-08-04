@@ -1974,6 +1974,17 @@ model MemoryItem {
   extractionModelId String?
   promptVersion     String?
 
+  /// Which extraction chunk produced this item (§11). Provenance, and the
+  /// idempotency key the persistence step needs: a chunk that is retried
+  /// after its worker died must replace the rows of its previous attempt
+  /// rather than add a second copy of every candidate. Null for
+  /// user-authored items and for anything predating the write path.
+  ///
+  /// Deliberately not a relation: a run is operational state that may be
+  /// pruned, and an approved memory must outlive the run that proposed it.
+  extractionRunId    String?
+  extractionChunkIndex Int?
+
   createdAt  DateTime  @default(now())
   updatedAt  DateTime  @updatedAt
   approvedAt DateTime?
@@ -1982,6 +1993,9 @@ model MemoryItem {
 
   @@index([userId, status])
   @@index([userId, conflictKey])
+  /// The idempotent replace in the extraction persistence step reads exactly
+  /// this pair.
+  @@index([extractionRunId, extractionChunkIndex])
   /// §9 retrieval v1 — lexical GIN over the term array. Declared here so the
   /// db-integration drift check sees schema and migration agree; the mapped
   /// name matches the migration's hand-written CREATE INDEX.
