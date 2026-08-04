@@ -400,7 +400,28 @@ Non-negotiable requirements:
 - Any related change must keep `tests/typographyPolicy.test.mjs` and `tests/e2e/font-system.spec.ts` passing, and must re-run the mobile composer contract specs.
 - A change that violates this contract is a release blocker.
 <!-- END:typography-invariant -->
+<!-- BEGIN:image-generation-workspace-invariant -->
+## Image generation workspace invariant
 
+Before changing `components/images/ImageGenerationWorkspace.tsx`, `components/chat/NewConversationLauncher.tsx`, `components/chat/ImageModelTabPanel.tsx`, the `Chat | Image` tabs in `ModelPickerPanel.tsx`, or the image entry points in `ChatInput.tsx`/`ChatSidebar.tsx`/`ChatPageClient.tsx`, read:
+
+- `docs/ui-contracts/image-generation-workspace.md`
+
+Non-negotiable requirements:
+
+- There are exactly four entry points (sidebar split button, mobile drawer rows, composer tools menu, catalogue image tab) and no standalone "new image" button. Switching to the image draft creates no server row.
+- Guest and Free see every entry point locked, with the requirement stated up front and the click routed to sign-in or `/pricing` — never hidden, never blocked only at the last step. With the flag off nothing renders at all.
+- Image generation models are their own catalogue tab. They are never mixed into the chat model list, and the chat list's `modelSupportsImageInput` filter (image *input*) is never reused to mean generation.
+- Every registered image model is listed, including one held by the price-verification rule; a held row is stated as a hold and is not selectable. The tab quotes "from N credits"; only the composer quotes an exact price.
+- The workspace follows the mobile composer contract's shape: the textarea owns a dedicated full-width row and no control shares, overlaps or floats above it.
+- An image conversation never mounts `ChatInput`, `ChatApp` or the comparison action rail, never enables AI Review, and never imports `ComparisonActionRail`/`shouldShowVisualStatus()` — only their principles.
+- Group state is derived from the latest attempt per target, never stored: one card per target, a retry replaces its card in place, and a succeeded target offers no re-run.
+- Prices are quoted before submission, per model and in total; a model with no resolvable price cannot be submitted.
+- Generated images always carry the AI-generated label; signed asset URLs are never persisted and R2 keys never reach the client.
+- Visual role is `accent-image-*` only; the AI Review gradient is reserved.
+- Any related change must keep `tests/e2e/image-generation-workspace.spec.ts` passing on desktop **and** mobile, and must re-run the mobile composer, sidebar drawer and model picker specs.
+- A change that violates this contract is a release blocker.
+<!-- END:image-generation-workspace-invariant -->
 <!-- BEGIN:settings-navigation-invariant -->
 ## Settings navigation invariant
 

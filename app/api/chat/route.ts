@@ -91,6 +91,7 @@ import {
     recordProviderFailure,
     recordProviderSuccess,
 } from "@/lib/providerMonitoring";
+import { observeServedProcessingTier } from "@/lib/servedProcessingTier";
 import { z } from "zod";
 import {
     apiSecurityResponse,
@@ -1912,6 +1913,7 @@ async function handleChatPost(
                             result.finishReason,
                             result.rawFinishReason,
                             result.content,
+                            result.providerMetadata,
                         ] as const);
                         const [
                             responseResult,
@@ -1919,7 +1921,31 @@ async function handleChatPost(
                             finishReasonResult,
                             rawFinishReasonResult,
                             contentResult,
+                            providerMetadataResult,
                         ] = completionResults;
+                        // Observation only: the tier a response was actually
+                        // served at, checked against the Standard table every
+                        // pricing profile claims. Nothing here settles, prices
+                        // or reserves -- see lib/servedProcessingTier.ts.
+                        const servedTier = observeServedProcessingTier(
+                            modelConfig.provider,
+                            providerMetadataResult.status === "fulfilled"
+                                ? providerMetadataResult.value
+                                : undefined
+                        );
+                        if (servedTier.mismatchesAssumedStandard) {
+                            console.warn(
+                                JSON.stringify({
+                                    event: "chat_served_processing_tier_mismatch",
+                                    traceId,
+                                    provider: servedTier.provider,
+                                    modelId: requestedModelId,
+                                    servedTier: servedTier.servedTier,
+                                    classification: servedTier.classification,
+                                    timestamp: new Date().toISOString(),
+                                })
+                            );
+                        }
                         const rejectedCompletion = completionResults.find(
                             (item): item is PromiseRejectedResult =>
                                 item.status === "rejected"

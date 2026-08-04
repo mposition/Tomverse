@@ -2,15 +2,23 @@ import "server-only";
 
 import type { Prisma } from "@prisma/client";
 import { ApiSecurityError } from "@/lib/apiSecurity";
-import { getMemoryExtractionRevokedPairs } from "@/lib/appSettings";
+import {
+    getMemoryExtractionRevokedPairs,
+    isMemoryExtractionEnabled,
+} from "@/lib/appSettings";
 import { usageBucketCount } from "@/lib/chatUsageBucketCount";
 import {
+    MEMORY_EXTRACTION_CHUNK_TIMEOUT_MS,
     MEMORY_EXTRACTION_LEASE_TTL_MS,
+    chunkFailureDisposition,
     decideMemoryExtractionBudget,
     estimateExtraction,
+    extractionSliceBudget,
     isRunLeaseExpired,
+    mayStartAnotherChunk,
     planExtractionChunks,
     resolveMemoryExtractionSubBudget,
+    type ExtractionChunkPlan,
     type ExtractionEstimate,
 } from "@/lib/memoryExtractionCore";
 import {
@@ -128,7 +136,13 @@ export async function estimateMemoryExtraction(input: {
     plan: ModelTier | "Guest";
     selectedConversationIds: string[];
     register?: readonly MemoryExtractionEvalEntry[];
-}): Promise<ExtractionEstimate & { conversationCount: number }> {
+}): Promise<
+    ExtractionEstimate & {
+        conversationCount: number;
+        /** The exact plan the run stores, so create never re-plans. */
+        chunks: ExtractionChunkPlan[];
+    }
+> {
     const { pricing, model } = await resolveEffectiveExtractionPair(input);
 
     const selected = await prisma.externalConversation.findMany({
@@ -146,12 +160,18 @@ export async function estimateMemoryExtraction(input: {
         throw new ApiSecurityError(404, "NOT_FOUND", "Conversation not found.");
     }
 
+    // Sorted by id before planning. Chunk boundaries depend on the order the
+    // conversations arrive in, and `findMany` makes no ordering promise, so
+    // without this the estimate the user confirms and the plan the run stores
+    // could disagree between two calls over the same selection.
     const chunks = planExtractionChunks(
-        selected.map((conversation) => ({
-            id: conversation.id,
-            messageCount: conversation.messageCount,
-            contentBytes: Number(conversation.contentBytes),
-        }))
+        [...selected]
+            .sort((left, right) => (left.id < right.id ? -1 : 1))
+            .map((conversation) => ({
+                id: conversation.id,
+                messageCount: conversation.messageCount,
+                contentBytes: Number(conversation.contentBytes),
+            }))
     );
     const tier = pricing.tiers[0];
     const estimate = estimateExtraction(chunks, {
@@ -159,7 +179,7 @@ export async function estimateMemoryExtraction(input: {
         outputMicroUsdPerMTokens: tier.outputUsdPerMillionTokens * 1_000_000,
         creditsPerCall: getModelUsageCredits(model),
     });
-    return { ...estimate, conversationCount: selected.length };
+    return { ...estimate, conversationCount: selected.length, chunks };
 }
 
 async function readBudgetUsage(provider: string, now: Date) {
@@ -317,7 +337,7 @@ export async function createMemoryExtractionRun(input: {
                 "An extraction run is already active for this account."
             );
         }
-        return tx.memoryExtractionRun.create({
+        const run = await tx.memoryExtractionRun.create({
             data: {
                 userId: input.userId,
                 status: "pending",
@@ -328,6 +348,18 @@ export async function createMemoryExtractionRun(input: {
                 pricingVersion: `${estimate.basis}:${pricing.modelId}`,
             },
         });
+        // The chunk rows are the run's durable work list, written in the same
+        // transaction so a run can never exist without one. Storing each
+        // chunk's conversations here is what lets a later dispatch pick the
+        // work up without re-planning (and possibly re-planning differently).
+        await tx.memoryExtractionChunk.createMany({
+            data: estimate.chunks.map((chunk, chunkIndex) => ({
+                runId: run.id,
+                chunkIndex,
+                conversationIds: chunk.conversationIds,
+            })),
+        });
+        return run;
     });
 }
 
@@ -355,85 +387,292 @@ export async function getMemoryExtractionRun(userId: string, runId: string) {
     };
 }
 
+export type MemoryExtractionLease = {
+    runId: string;
+    userId: string;
+    /** The fencing token every subsequent write must present. */
+    leaseGeneration: number;
+    extractionModelId: string;
+    promptVersion: string;
+    chunkTotal: number;
+};
+
+const leaseDeadline = (now: Date) =>
+    new Date(now.getTime() + MEMORY_EXTRACTION_LEASE_TTL_MS);
+
 /**
- * Claims or renews the run lease (§3 heartbeat). The pipeline calls this
- * before each chunk; a conditional update makes concurrent claimants lose
- * deterministically instead of double-driving one run.
+ * Takes exclusive ownership of a run (§11).
+ *
+ * A run is claimable when it is `pending`, or `running` with a lease that has
+ * already lapsed — that second case is a worker that died, and taking over is
+ * exactly the recovery the fifteen-minute dispatcher exists for. The claim
+ * increments `leaseGeneration` in the same statement that flips the status,
+ * so the winner learns a token the loser cannot guess or reuse.
+ *
+ * Postgres row locking under READ COMMITTED serializes two concurrent
+ * claimants: the second re-evaluates the predicate after the first commits,
+ * finds a live lease, and matches nothing. Returns null for the loser rather
+ * than throwing — losing a claim is the normal outcome when two drivers race,
+ * not an error anyone needs to see.
  */
-export async function heartbeatMemoryExtractionRun(
-    userId: string,
-    runId: string,
-    now: Date = new Date()
-) {
-    const run = await loadOwnedRun(userId, runId);
-    if (run.status === "running" && isRunLeaseExpired(run, now)) {
-        throw new ApiSecurityError(
-            410,
-            "MEMORY_EXTRACTION_LEASE_EXPIRED",
-            "The run lease expired; resume the run."
-        );
-    }
-    const claimed = await prisma.memoryExtractionRun.updateMany({
-        where: {
-            id: run.id,
-            status: { in: [...ACTIVE_RUN_STATUSES] },
-        },
-        data: {
-            status: "running",
-            leaseExpiresAt: new Date(
-                now.getTime() + MEMORY_EXTRACTION_LEASE_TTL_MS
-            ),
-        },
+export async function claimMemoryExtractionRun(input: {
+    runId: string;
+    owner: string;
+    now?: Date;
+}): Promise<MemoryExtractionLease | null> {
+    const now = input.now ?? new Date();
+    return prisma.$transaction(async (tx) => {
+        const rows = await tx.$queryRaw<
+            Array<{
+                id: string;
+                userId: string;
+                leaseGeneration: number;
+                extractionModelId: string;
+                promptVersion: string;
+                chunkTotal: number;
+            }>
+        >`
+            UPDATE "MemoryExtractionRun"
+            SET "status" = 'running',
+                "leaseGeneration" = "leaseGeneration" + 1,
+                "leaseExpiresAt" = ${leaseDeadline(now)},
+                "leaseOwner" = ${input.owner},
+                "updatedAt" = ${now}
+            WHERE "id" = ${input.runId}
+              AND (
+                    "status" = 'pending'
+                    OR ("status" = 'running'
+                        AND ("leaseExpiresAt" IS NULL
+                             OR "leaseExpiresAt" <= ${now}))
+                  )
+            RETURNING "id", "userId", "leaseGeneration",
+                      "extractionModelId", "promptVersion", "chunkTotal"
+        `;
+        const row = rows[0];
+        if (!row) return null;
+
+        // A worker that died between claiming a chunk and reporting it leaves
+        // that chunk stuck in `running` under a generation nobody holds. Only
+        // pending chunks are claimable, so without this the run could never
+        // finish — reclaiming the run would not reclaim its work. `attemptCount`
+        // is deliberately NOT rolled back: the attempt really was spent, and a
+        // chunk that keeps killing its worker has to reach the retry cap
+        // instead of retrying forever.
+        await tx.memoryExtractionChunk.updateMany({
+            where: {
+                runId: row.id,
+                status: "running",
+                NOT: { leaseGeneration: row.leaseGeneration },
+            },
+            data: { status: "pending", leaseGeneration: null, updatedAt: now },
+        });
+
+        return {
+            runId: row.id,
+            userId: row.userId,
+            leaseGeneration: row.leaseGeneration,
+            extractionModelId: row.extractionModelId,
+            promptVersion: row.promptVersion,
+            chunkTotal: row.chunkTotal,
+        };
     });
-    if (claimed.count !== 1) {
-        throw new ApiSecurityError(
-            410,
-            "MEMORY_EXTRACTION_LEASE_EXPIRED",
-            "The run is no longer active."
-        );
-    }
 }
 
 /**
- * Idempotent chunk progress: completing chunk N only advances the counter
- * when N is the next chunk, so a retried settlement cannot double-count
- * (§11 idempotent settlement).
+ * Renews the lease held by this generation. Returns false when the holder has
+ * been fenced out — superseded, cancelled or finished — which tells the caller
+ * to stop rather than to retry.
  */
-export async function completeMemoryExtractionChunk(
-    userId: string,
-    runId: string,
-    chunkIndex: number,
+export async function heartbeatMemoryExtractionRun(
+    lease: Pick<MemoryExtractionLease, "runId" | "leaseGeneration">,
     now: Date = new Date()
-) {
-    const run = await loadOwnedRun(userId, runId);
-    const advanced = await prisma.memoryExtractionRun.updateMany({
-        where: { id: run.id, status: "running", chunkCompleted: chunkIndex },
-        data: {
-            chunkCompleted: { increment: 1 },
-            leaseExpiresAt: new Date(
-                now.getTime() + MEMORY_EXTRACTION_LEASE_TTL_MS
-            ),
+): Promise<boolean> {
+    const renewed = await prisma.memoryExtractionRun.updateMany({
+        where: {
+            id: lease.runId,
+            status: "running",
+            leaseGeneration: lease.leaseGeneration,
         },
+        data: { leaseExpiresAt: leaseDeadline(now) },
     });
-    if (advanced.count === 0) {
-        // Replay of an already-counted chunk: idempotent no-op.
-        return { advanced: false as const };
-    }
-    const after = await prisma.memoryExtractionRun.findUniqueOrThrow({
-        where: { id: run.id },
-        select: { chunkCompleted: true, chunkTotal: true },
+    return renewed.count === 1;
+}
+
+/**
+ * Hands the lease back with progress intact: the run returns to `pending` so
+ * the next dispatch continues it. Fenced, so a worker that has already been
+ * superseded cannot park a run somebody else is now driving.
+ */
+export async function releaseMemoryExtractionRun(
+    lease: Pick<MemoryExtractionLease, "runId" | "leaseGeneration">
+): Promise<boolean> {
+    const released = await prisma.memoryExtractionRun.updateMany({
+        where: {
+            id: lease.runId,
+            status: "running",
+            leaseGeneration: lease.leaseGeneration,
+        },
+        data: { status: "pending", leaseExpiresAt: null, leaseOwner: null },
     });
-    if (after.chunkCompleted >= after.chunkTotal) {
-        await prisma.memoryExtractionRun.update({
-            where: { id: run.id },
+    return released.count === 1;
+}
+
+export type ClaimedExtractionChunk = {
+    chunkIndex: number;
+    attemptCount: number;
+    conversationIds: string[];
+};
+
+/**
+ * Claims the lowest-numbered pending chunk, fenced on the run lease.
+ *
+ * The join to the run inside the statement is the fence: a worker whose
+ * generation no longer matches cannot claim work, even if the chunk itself
+ * looks free. `SKIP LOCKED` keeps a concurrent claimant from blocking on a
+ * row it is not going to win anyway.
+ */
+export async function claimNextExtractionChunk(
+    lease: Pick<MemoryExtractionLease, "runId" | "leaseGeneration">,
+    now: Date = new Date()
+): Promise<ClaimedExtractionChunk | null> {
+    const rows = await prisma.$queryRaw<
+        Array<{
+            chunkIndex: number;
+            attemptCount: number;
+            conversationIds: unknown;
+        }>
+    >`
+        UPDATE "MemoryExtractionChunk" AS target
+        SET "status" = 'running',
+            "attemptCount" = target."attemptCount" + 1,
+            "leaseGeneration" = ${lease.leaseGeneration},
+            "startedAt" = ${now},
+            "updatedAt" = ${now}
+        WHERE target."id" = (
+            SELECT c."id"
+            FROM "MemoryExtractionChunk" c
+            JOIN "MemoryExtractionRun" r ON r."id" = c."runId"
+            WHERE c."runId" = ${lease.runId}
+              AND c."status" = 'pending'
+              AND r."status" = 'running'
+              AND r."leaseGeneration" = ${lease.leaseGeneration}
+            ORDER BY c."chunkIndex" ASC
+            LIMIT 1
+            FOR UPDATE OF c SKIP LOCKED
+        )
+        RETURNING target."chunkIndex", target."attemptCount",
+                  target."conversationIds"
+    `;
+    const row = rows[0];
+    if (!row) return null;
+    return {
+        chunkIndex: row.chunkIndex,
+        attemptCount: row.attemptCount,
+        conversationIds: Array.isArray(row.conversationIds)
+            ? (row.conversationIds as string[])
+            : [],
+    };
+}
+
+/**
+ * Records a finished chunk and re-derives the run's progress from the chunk
+ * rows. Deriving rather than incrementing is what makes a replayed or
+ * duplicated report harmless: the counter is a function of durable state, so
+ * it cannot be double-counted into a wrong number.
+ *
+ * Returns whether the run reached a terminal state, so the caller knows to
+ * stop without re-reading it.
+ */
+export async function completeExtractionChunk(
+    lease: Pick<MemoryExtractionLease, "runId" | "leaseGeneration">,
+    chunkIndex: number,
+    result: { outcome: "completed" } | { outcome: "failed"; code: string },
+    now: Date = new Date()
+): Promise<{ applied: boolean; runStatus: string; chunkStatus?: string }> {
+    return prisma.$transaction(async (tx) => {
+        const chunk = await tx.memoryExtractionChunk.findUnique({
+            where: { runId_chunkIndex: { runId: lease.runId, chunkIndex } },
+            select: { attemptCount: true },
+        });
+        if (!chunk) return { applied: false, runStatus: "unknown" };
+
+        const disposition =
+            result.outcome === "completed"
+                ? ({ status: "completed" } as const)
+                : chunkFailureDisposition({ attemptCount: chunk.attemptCount });
+
+        const updated = await tx.memoryExtractionChunk.updateMany({
+            where: {
+                runId: lease.runId,
+                chunkIndex,
+                status: "running",
+                leaseGeneration: lease.leaseGeneration,
+            },
             data: {
-                status: "completed",
-                leaseExpiresAt: null,
-                completedAt: now,
+                status: disposition.status,
+                failureCode: result.outcome === "failed" ? result.code : null,
+                completedAt:
+                    disposition.status === "completed" ? now : null,
+                // A chunk going back to pending releases its fence so the next
+                // slice — possibly a different worker — can claim it.
+                leaseGeneration:
+                    disposition.status === "pending"
+                        ? null
+                        : lease.leaseGeneration,
+                updatedAt: now,
             },
         });
-    }
-    return { advanced: true as const };
+        if (updated.count !== 1) {
+            const run = await tx.memoryExtractionRun.findUnique({
+                where: { id: lease.runId },
+                select: { status: true },
+            });
+            return { applied: false, runStatus: run?.status ?? "unknown" };
+        }
+
+        const [completed, failed] = await Promise.all([
+            tx.memoryExtractionChunk.count({
+                where: { runId: lease.runId, status: "completed" },
+            }),
+            tx.memoryExtractionChunk.count({
+                where: { runId: lease.runId, status: "failed" },
+            }),
+        ]);
+        const run = await tx.memoryExtractionRun.findUniqueOrThrow({
+            where: { id: lease.runId },
+            select: { chunkTotal: true },
+        });
+
+        const terminal =
+            failed > 0
+                ? ("failed" as const)
+                : completed >= run.chunkTotal
+                  ? ("completed" as const)
+                  : null;
+        await tx.memoryExtractionRun.updateMany({
+            where: {
+                id: lease.runId,
+                status: "running",
+                leaseGeneration: lease.leaseGeneration,
+            },
+            data: {
+                chunkCompleted: completed,
+                ...(terminal
+                    ? {
+                          status: terminal,
+                          leaseExpiresAt: null,
+                          leaseOwner: null,
+                          completedAt: now,
+                      }
+                    : { leaseExpiresAt: leaseDeadline(now) }),
+            },
+        });
+        return {
+            applied: true,
+            runStatus: terminal ?? "running",
+            chunkStatus: disposition.status,
+        };
+    });
 }
 
 /** User cancel: deterministic release, terminal state, idempotent. */
@@ -454,10 +693,233 @@ export async function cancelMemoryExtractionRun(userId: string, runId: string) {
     return { outcome: "cancelled" as const };
 }
 
+export type ExtractionChunkHandler = (input: {
+    lease: MemoryExtractionLease;
+    chunk: ClaimedExtractionChunk;
+}) => Promise<{ outcome: "completed" } | { outcome: "failed"; code: string }>;
+
+export type ExtractionSliceResult = {
+    chunksProcessed: number;
+    outcome:
+        | "not_claimed"
+        | "completed"
+        | "paused"
+        | "lease_lost"
+        | "blocked"
+        | "cancelled"
+        | "failed";
+    reason?: string;
+};
+
+/**
+ * Re-checks, at every chunk boundary, everything that could have changed
+ * since the run was created (§11, §12.1, §15).
+ *
+ * A run is durable and a slice may be picked up minutes or hours later, so
+ * none of these can be decided once at creation: the rollout flag may have
+ * been turned off, the (model, promptVersion) pair may have been revoked
+ * without a deploy, the user's plan may have changed, and the batch
+ * sub-budget may have been spent by other runs. Each is re-read immediately
+ * before a provider call, never cached across chunks.
+ */
+async function extractionDispatchBlocker(
+    lease: MemoryExtractionLease,
+    now: Date,
+    environment: Record<string, string | undefined>,
+    register?: readonly MemoryExtractionEvalEntry[]
+): Promise<string | null> {
+    if (!(await isMemoryExtractionEnabled())) return "feature_disabled";
+    const user = await prisma.user.findUnique({
+        where: { id: lease.userId },
+        select: { plan: true },
+    });
+    if (!user) return "owner_missing";
+    let pricing;
+    try {
+        ({ pricing } = await resolveEffectiveExtractionPair({
+            extractionModelId: lease.extractionModelId,
+            promptVersion: lease.promptVersion,
+            plan: (user.plan as ModelTier) ?? "Free",
+            register,
+        }));
+    } catch {
+        return "pair_unavailable";
+    }
+    try {
+        // Zero incremental cost: this asks whether the batch sub-budget has
+        // any room left at all, before committing to a call whose cost is
+        // only known afterwards.
+        await assertExtractionBudget(pricing.provider, 0, now, environment);
+    } catch {
+        return "provider_budget_exhausted";
+    }
+    return null;
+}
+
+const withTimeout = async <T>(
+    work: Promise<T>,
+    timeoutMs: number,
+    onTimeout: () => T
+): Promise<T> => {
+    let timer: NodeJS.Timeout | undefined;
+    try {
+        return await Promise.race([
+            work,
+            new Promise<T>((resolve) => {
+                timer = setTimeout(() => resolve(onTimeout()), timeoutMs);
+            }),
+        ]);
+    } finally {
+        if (timer) clearTimeout(timer);
+    }
+}
+
+/**
+ * Drives one bounded slice of a run, and is the ONLY way a run advances.
+ *
+ * Both drivers call this — the post-response kick for low latency and the
+ * fifteen-minute dispatcher for recovery — precisely so there is one
+ * implementation of claiming, fencing, boundary re-checks and release, rather
+ * than two that drift apart. `after()` is a latency optimisation, not a
+ * durable queue: it is bound to its request's lifetime and dies with the
+ * process, which is why the durable state here (and the dispatcher that reads
+ * it) is what actually guarantees a run finishes.
+ *
+ * Never throws for an expected condition. Losing a claim, being fenced out,
+ * running out of budget and hitting a disabled flag are all ordinary outcomes
+ * a caller reports as metrics, not failures to retry.
+ */
+export async function driveMemoryExtractionRunSlice(input: {
+    runId: string;
+    owner: string;
+    handler: ExtractionChunkHandler;
+    now?: Date;
+    maxChunks?: number;
+    budgetMs?: number;
+    chunkTimeoutMs?: number;
+    environment?: Record<string, string | undefined>;
+    register?: readonly MemoryExtractionEvalEntry[];
+}): Promise<ExtractionSliceResult> {
+    const startedAt = input.now ?? new Date();
+    const environment = input.environment ?? process.env;
+    const budget = extractionSliceBudget(startedAt, {
+        maxChunks: input.maxChunks,
+        budgetMs: input.budgetMs,
+    });
+    const chunkTimeoutMs =
+        input.chunkTimeoutMs ?? MEMORY_EXTRACTION_CHUNK_TIMEOUT_MS;
+
+    const lease = await claimMemoryExtractionRun({
+        runId: input.runId,
+        owner: input.owner,
+        now: startedAt,
+    });
+    if (!lease) return { chunksProcessed: 0, outcome: "not_claimed" };
+
+    let chunksProcessed = 0;
+    const stop = async (
+        outcome: ExtractionSliceResult["outcome"],
+        reason?: string
+    ): Promise<ExtractionSliceResult> => {
+        // Progress is already durable; handing the lease back just means the
+        // next dispatch does not have to wait for the TTL to lapse.
+        await releaseMemoryExtractionRun(lease).catch(() => false);
+        return { chunksProcessed, outcome, reason };
+    };
+
+    for (;;) {
+        const now = new Date();
+        const gate = mayStartAnotherChunk({ chunksProcessed, budget, now });
+        if (!gate.start) return stop("paused", gate.reason);
+
+        const blocker = await extractionDispatchBlocker(
+            lease,
+            now,
+            environment,
+            input.register
+        );
+        if (blocker) return stop("blocked", blocker);
+
+        if (!(await heartbeatMemoryExtractionRun(lease, now))) {
+            // Superseded, cancelled or already finished. Whichever it is, this
+            // worker no longer owns the run and must not release it either.
+            const run = await prisma.memoryExtractionRun.findUnique({
+                where: { id: lease.runId },
+                select: { status: true },
+            });
+            return {
+                chunksProcessed,
+                outcome:
+                    run?.status === "cancelled" ? "cancelled" : "lease_lost",
+            };
+        }
+
+        const chunk = await claimNextExtractionChunk(lease, now);
+        if (!chunk) {
+            // No pending work under a live lease: either the run just finished
+            // or another slice is holding the remaining chunks.
+            const run = await prisma.memoryExtractionRun.findUnique({
+                where: { id: lease.runId },
+                select: { status: true },
+            });
+            if (run?.status === "completed") {
+                return { chunksProcessed, outcome: "completed" };
+            }
+            if (run?.status === "failed") {
+                return { chunksProcessed, outcome: "failed" };
+            }
+            return stop("paused", "no_pending_chunk");
+        }
+
+        const result = await withTimeout(
+            input.handler({ lease, chunk }).catch((error) => {
+                console.error("memory extraction chunk handler failed", error);
+                return { outcome: "failed" as const, code: "handler_error" };
+            }),
+            chunkTimeoutMs,
+            () => ({ outcome: "failed" as const, code: "chunk_timeout" })
+        );
+        chunksProcessed += 1;
+
+        const applied = await completeExtractionChunk(
+            lease,
+            chunk.chunkIndex,
+            result,
+            new Date()
+        );
+        if (!applied.applied) {
+            return {
+                chunksProcessed,
+                outcome:
+                    applied.runStatus === "cancelled"
+                        ? "cancelled"
+                        : "lease_lost",
+            };
+        }
+        if (applied.runStatus === "completed") {
+            return { chunksProcessed, outcome: "completed" };
+        }
+        if (applied.runStatus === "failed") {
+            return { chunksProcessed, outcome: "failed" };
+        }
+        if (applied.chunkStatus === "pending") {
+            // The chunk failed but has attempts left. Ending the slice here is
+            // the backoff: retrying immediately inside the same loop would burn
+            // the whole retry budget within seconds of a provider outage, and
+            // the chunk is durably pending for the next dispatch either way.
+            return stop("paused", "chunk_failed");
+        }
+    }
+}
+
 /**
  * The 15-minute orphan sweep (§3): a running run whose lease expired goes
  * back to pending with its completed-chunk progress intact — resumable, not
  * destroyed. Wired into the maintenance cycle beside the import sweep.
+ *
+ * Reclaiming is only half of recovery: a run parked here stays pending until
+ * something dispatches it. The recovery dispatcher that re-drives pending runs
+ * through `driveMemoryExtractionRunSlice` lands with the driver wiring.
  */
 export async function reconcileExpiredMemoryExtractionRuns(now = new Date()) {
     const reclaimed = await prisma.memoryExtractionRun.updateMany({

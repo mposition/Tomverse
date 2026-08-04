@@ -58,7 +58,6 @@ type DesktopChatShellProps = {
   personalizedPrompt?: string | null;
   attachments: ChatAttachment[];
   setAttachments: AttachmentsChangeHandler;
-  isSending: boolean;
   focusToken: number;
   isGuestMode: boolean;
   /** What this caller may do with the AI cross-review. */
@@ -71,6 +70,10 @@ type DesktopChatShellProps = {
   isModelSelectionReady: boolean;
   onNewChat: () => void;
   onNewImage?: (() => void) | null;
+  /** Set when image generation is visible to this viewer but not usable. */
+  imageLock?: "sign_in" | "upgrade" | null;
+  onLockedImageClick?: (lock: "sign_in" | "upgrade") => void;
+  onStartImageDraft?: (draftText: string, modelId?: string) => void;
   imageWorkspace?: React.ReactNode;
   onSelectConversation: (id: string) => void;
   onRename: (id: string, title: string) => void;
@@ -115,7 +118,6 @@ export function DesktopChatShell({
   personalizedPrompt,
   attachments,
   setAttachments,
-  isSending,
   focusToken,
   isGuestMode,
   aiReviewAccess,
@@ -126,6 +128,9 @@ export function DesktopChatShell({
   isModelSelectionReady,
   onNewChat,
   onNewImage,
+  imageLock,
+  onLockedImageClick,
+  onStartImageDraft,
   imageWorkspace,
   onSelectConversation,
   onRename,
@@ -389,6 +394,8 @@ export function DesktopChatShell({
         currentChatId={currentChatId}
         onNewChat={onNewChat}
         onNewImage={onNewImage ?? null}
+        imageLock={imageLock ?? null}
+        onLockedImageClick={onLockedImageClick}
         onSelectConversation={onSelectConversation}
         onRename={onRename}
         onDelete={onDelete}
@@ -800,7 +807,7 @@ export function DesktopChatShell({
               personalizedPrompt={personalizedPrompt}
               onSubmit={onSubmit}
               onCancel={() => setStopSignal((current) => current + 1)}
-              isSending={isSending || isAnyModelResponding}
+              isSending={isAnyModelResponding}
               focusToken={focusToken}
               currentChatId={currentChatId}
               selectedModels={selectedModels}
@@ -812,6 +819,9 @@ export function DesktopChatShell({
               onOpenDeepResearchSetup={onOpenDeepResearchSetup}
               isDeepResearchPending={isDeepResearchPending}
               onDismissDeepResearchChip={onDismissDeepResearchChip}
+              onStartImageDraft={onStartImageDraft}
+              imageGenerationLock={imageLock ?? null}
+              onLockedImageGenerationClick={onLockedImageClick}
               attachments={attachments}
               onAttachmentsChange={setAttachments}
               attachmentCapabilities={attachmentCapabilities}

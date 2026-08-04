@@ -126,7 +126,26 @@ export function PlatformSettingsPanel({
         | AdminAppSettingsResponse
         | null;
       if (!response.ok || !data?.settings) {
-        throw new Error(data?.error || "Settings save failed");
+        // The endpoint refuses for reasons the operator can act on, and each
+        // one needs a different action: sign in again (428), pick a different
+        // guest default (400), wait (429), get the permission (403). Telling
+        // all of them to "retry" sends the operator in a loop on the ones a
+        // retry cannot fix, which is what "nothing changed" used to do to a
+        // step-up prompt. So the server's own explanation is what gets shown.
+        if (response.status === 428) {
+          dispatchAppToast(
+            "Platform settings were not saved: this is a high-risk action, so sign in again and retry within the step-up window.",
+            "error"
+          );
+          return;
+        }
+        dispatchAppToast(
+          data?.error
+            ? `Platform settings were not saved. ${data.error} Nothing changed.`
+            : "Platform settings were not saved. Nothing changed -- retry, or reload to discard the edit.",
+          "error"
+        );
+        return;
       }
       applySettings(
         data.settings,
@@ -135,7 +154,8 @@ export function PlatformSettingsPanel({
       );
       dispatchAppToast("Platform settings saved and are live.", "success");
     } catch {
-      dispatchAppToast("Platform settings were not saved. Nothing changed -- retry, or reload to discard the edit.", "error");
+      // Only a transport failure reaches here now; a retry is the right advice.
+      dispatchAppToast("Platform settings could not be sent. Nothing changed -- check your connection and retry.", "error");
     } finally {
       setIsSaving(false);
     }

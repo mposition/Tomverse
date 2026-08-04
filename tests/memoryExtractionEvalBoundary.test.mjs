@@ -1,0 +1,229 @@
+import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import test from "node:test";
+import { MEMORY_EXTRACTION_EVAL_REGISTER } from "../lib/memoryExtractionEvalRegister.ts";
+import { findApprovedEvalPair } from "../lib/memoryExtractionEvalRegister.ts";
+import { decideEvalRunMode } from "../lib/memoryExtractionEvalCore.ts";
+
+/**
+ * The execution boundary: no provider is reached without every gate.
+ *
+ * tests/memoryExtractionOfflineBoundary.test.mjs checks the *import graph* of
+ * the offline modules, which is a different and weaker claim. The eval
+ * harness deliberately reaches an AI SDK, and it does so through a dynamic
+ * `import("ai")` that a static import scan cannot see at all. So the guarantee
+ * has to be established two other ways, and both are here:
+ *
+ *   * the gate is a pure function, checked as a truth table;
+ *   * the script is actually executed with `--live`, a plausible key, and
+ *     outbound network blocked, and must exit before anything connects.
+ *
+ * The second one is the part that would survive a refactor: whatever the
+ * control flow becomes, a run that reaches a socket fails this test.
+ */
+
+const REPO_ROOT = fileURLToPath(new URL("..", import.meta.url));
+const HARNESS = "scripts/evalImportedMemoryExtraction.mjs";
+const NETWORK_GUARD = fileURLToPath(
+    new URL("./e2e/block-external-network.cjs", import.meta.url)
+);
+
+const budgeted = { evalBudget: { maxUsd: 50 } };
+
+/* ------------------------------------------------------------ truth table -- */
+
+test("a run without --live is smoke, whatever else is present", () => {
+    assert.deepEqual(
+        decideEvalRunMode({
+            live: false,
+            registerEntry: budgeted,
+            hasApiKey: true,
+            datasetFrozen: true,
+        }),
+        { mode: "smoke" }
+    );
+    // …and still smoke when nothing at all is configured.
+    assert.deepEqual(
+        decideEvalRunMode({
+            live: false,
+            registerEntry: null,
+            hasApiKey: false,
+            datasetFrozen: false,
+        }),
+        { mode: "smoke" }
+    );
+});
+
+test("every missing precondition refuses a live run", () => {
+    const cases = [
+        [{ registerEntry: null, hasApiKey: true, datasetFrozen: true }, "unknown_pair"],
+        [
+            { registerEntry: { evalBudget: null }, hasApiKey: true, datasetFrozen: true },
+            "no_eval_budget",
+        ],
+        [
+            { registerEntry: budgeted, hasApiKey: false, datasetFrozen: true },
+            "no_api_key",
+        ],
+        [
+            { registerEntry: budgeted, hasApiKey: true, datasetFrozen: false },
+            "dataset_not_frozen",
+        ],
+    ];
+    for (const [input, reason] of cases) {
+        const decision = decideEvalRunMode({ live: true, ...input });
+        assert.equal(decision.mode, "refused", `${reason} must refuse`);
+        assert.equal(decision.reason, reason);
+    }
+});
+
+test("only every precondition together allows a live run", () => {
+    const decision = decideEvalRunMode({
+        live: true,
+        registerEntry: budgeted,
+        hasApiKey: true,
+        datasetFrozen: true,
+    });
+    assert.equal(decision.mode, "live");
+    assert.equal(decision.ceilingUsd, 50);
+});
+
+test("a per-run cap may narrow the approved ceiling but never widen it", () => {
+    const narrowed = decideEvalRunMode({
+        live: true,
+        registerEntry: budgeted,
+        hasApiKey: true,
+        datasetFrozen: true,
+        requestedRunCapUsd: 5,
+    });
+    assert.equal(narrowed.mode, "live");
+    assert.equal(narrowed.ceilingUsd, 5, "the tighter of the two wins");
+
+    const widened = decideEvalRunMode({
+        live: true,
+        registerEntry: budgeted,
+        hasApiKey: true,
+        datasetFrozen: true,
+        requestedRunCapUsd: 500,
+    });
+    assert.equal(widened.mode, "refused");
+    assert.equal(widened.reason, "run_cap_above_approved_ceiling");
+});
+
+/* ------------------------------------------------------- shipped register -- */
+
+test("no pair in the shipped register can run live today", () => {
+    // Both entries are candidates awaiting a human eval-budget approval, so
+    // the repository as merged cannot spend anything at a provider.
+    for (const entry of MEMORY_EXTRACTION_EVAL_REGISTER) {
+        const decision = decideEvalRunMode({
+            live: true,
+            registerEntry: entry,
+            hasApiKey: true,
+            datasetFrozen: true,
+        });
+        assert.equal(
+            decision.mode,
+            "refused",
+            `${entry.extractionModelId} must not be live-runnable as shipped`
+        );
+    }
+});
+
+test("no pair in the shipped register resolves as approved for runtime use", () => {
+    // The other half of the same contract: even with the flag on, the product
+    // runtime finds no approved pair, so extraction fails closed (§12.1).
+    for (const entry of MEMORY_EXTRACTION_EVAL_REGISTER) {
+        assert.equal(
+            findApprovedEvalPair(
+                {
+                    extractionModelId: entry.extractionModelId,
+                    promptVersion: entry.promptVersion,
+                },
+                { kind: "none" }
+            ),
+            null,
+            `${entry.extractionModelId} must not resolve as approved`
+        );
+    }
+});
+
+/* ------------------------------------------------------------- behaviour -- */
+
+const runHarness = (args, env = {}) => {
+    try {
+        const stdout = execFileSync(
+            process.execPath,
+            [
+                // The same blocker the E2E server runs under: any non-loopback
+                // connection throws instead of dialling out.
+                "--require",
+                NETWORK_GUARD,
+                "--import",
+                "tsx",
+                HARNESS,
+                ...args,
+            ],
+            {
+                cwd: REPO_ROOT,
+                encoding: "utf8",
+                env: { ...process.env, ...env },
+                stdio: ["ignore", "pipe", "pipe"],
+            }
+        );
+        return { status: 0, output: stdout };
+    } catch (error) {
+        return {
+            status: error.status ?? 1,
+            output: `${error.stdout ?? ""}${error.stderr ?? ""}`,
+        };
+    }
+};
+
+test("--live with a key but no approved budget never reaches the network", () => {
+    const result = runHarness(["--live"], {
+        // Plausible enough that a missing-key check could not be what stops it.
+        OPENAI_API_KEY: "sk-test-EXAMPLE-not-a-real-key-000000000000",
+    });
+    assert.equal(result.status, 1, "the run must refuse");
+    assert.match(result.output, /no approved eval budget/i);
+    assert.doesNotMatch(
+        result.output,
+        /QA_EXTERNAL_NETWORK_BLOCKED/,
+        "nothing may attempt an outbound connection before the refusal"
+    );
+});
+
+test("a smoke run completes without touching the network", () => {
+    const result = runHarness([]);
+    // Exit 1 because an underpowered sample is not a pass — that is the
+    // verdict, not a failure to run.
+    assert.equal(result.status, 1);
+    assert.match(result.output, /SMOKE RUN/);
+    assert.match(result.output, /UNDERPOWERED/);
+    assert.doesNotMatch(result.output, /QA_EXTERNAL_NETWORK_BLOCKED/);
+});
+
+/* ---------------------------------------------------------------- static -- */
+
+test("the harness imports no provider SDK at module load", () => {
+    const source = readFileSync(new URL(`../${HARNESS}`, import.meta.url), "utf8");
+    const staticImports = [
+        ...source.matchAll(/^\s*import\s[^;]*?from\s+["']([^"']+)["']/gm),
+    ].map((match) => match[1]);
+    for (const forbidden of ["ai", "@ai-sdk/openai", "openai", "@/lib/prisma"]) {
+        assert.ok(
+            !staticImports.includes(forbidden),
+            `${HARNESS} statically imports ${forbidden}; it must stay behind the live gate`
+        );
+    }
+    // And the dynamic one exists, so the behavioural test above is meaningful
+    // rather than passing because nothing could ever call a provider.
+    assert.match(
+        source,
+        /import\(\s*["']ai["']\s*\)/,
+        "the live adapter should reach the SDK dynamically"
+    );
+});

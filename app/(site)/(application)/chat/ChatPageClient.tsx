@@ -462,6 +462,20 @@ export function ChatPageClient({
   // server row, which is only created by the first successful generation
   // request (docs/policy/image-generation.md §6).
   const [isImageDraftActive, setIsImageDraftActive] = useState(false);
+  // What the chat composer held when the user switched to the image draft.
+  // Restored verbatim on the way back: attachments included, since image
+  // generation is text-only and silently dropping them would lose work
+  // (policy §13).
+  const [chatDraftBeforeImage, setChatDraftBeforeImage] = useState<{
+    scopeId: string | null;
+    text: string;
+  } | null>(null);
+  const [imageDraftSeedPrompt, setImageDraftSeedPrompt] = useState("");
+  // Set only when the user reached the draft by choosing a model in the
+  // catalogue's image tab; otherwise the workspace keeps its own default.
+  const [imageDraftSeedModelIds, setImageDraftSeedModelIds] = useState<
+    string[] | undefined
+  >(undefined);
   const { data: session, status } = useSession();
   const sessionUserId = session?.user?.id || null;
   // Declared before any model state below because the initial selected models
@@ -472,7 +486,6 @@ export function ChatPageClient({
   const [isMobileViewport, setIsMobileViewport] = useState(false);
   const [isViewportReady, setIsViewportReady] = useState(false);
 
-  const isSending = false;
   const [focusToken, setFocusToken] = useState(0);
 
     // The account's saved new-conversation combination (lead first). This is
@@ -2087,10 +2100,46 @@ export function ChatPageClient({
       setFocusToken((prev) => prev + 1);
   };
 
+    // From the composer: carry the typed text into the image prompt and
+    // remember the chat draft so cancelling restores it.
+    const handleStartImageDraft = (draftText: string, modelId?: string) => {
+        setChatDraftBeforeImage({
+            scopeId: currentChatIdRef.current,
+            text: draftText,
+        });
+        setImageDraftSeedPrompt(draftText);
+        setImageDraftSeedModelIds(modelId ? [modelId] : undefined);
+        setIsImageDraftActive(true);
+        currentChatIdRef.current = null;
+        setCurrentChatId(null);
+        setPromptPayload(null);
+        setIsDeepResearchPending(false);
+        setIsInitialConversationResolved(true);
+    };
+
+    // Leaving the image draft without generating: the chat draft comes back
+    // exactly as it was, in the conversation it belonged to.
+    const handleCancelImageDraft = () => {
+        const restore = chatDraftBeforeImage;
+        setIsImageDraftActive(false);
+        setImageDraftSeedPrompt("");
+        setImageDraftSeedModelIds(undefined);
+        setChatDraftBeforeImage(null);
+        if (restore) {
+            currentChatIdRef.current = restore.scopeId;
+            setCurrentChatId(restore.scopeId);
+            setInputValue(restore.text);
+        }
+        setFocusToken((prev) => prev + 1);
+    };
+
     const handleNewImage = () => {
         localComparisonResponsesRef.current.clear();
         latestLocalComparisonPromptRef.current = null;
         setIsImageDraftActive(true);
+        setImageDraftSeedPrompt("");
+        setImageDraftSeedModelIds(undefined);
+        setChatDraftBeforeImage(null);
         currentChatIdRef.current = null;
         setCurrentChatId(null);
         setPromptPayload(null);
@@ -2118,8 +2167,25 @@ export function ChatPageClient({
         setCurrentChatId(conversation.id);
     };
 
+    // UX-024. Switching conversations while a response is still streaming is
+    // allowed, deliberately. This used to open with `if (isSending) return;`
+    // against a `const isSending = false`, so the guard never ran once -- the
+    // behaviour below is what the product has always done, and the constant
+    // only made it look otherwise.
+    //
+    // Allowing it is also the right answer, not merely the incumbent one.
+    // Nothing is lost by leaving: the panel's request is not aborted here (only
+    // "stop all" and the per-panel stop button abort), and app/api/chat/route.ts
+    // persists the assistant message against the `conversationId` captured when
+    // the send started -- never the one on screen when it finishes. The client
+    // never writes an assistant message itself, so a stream cannot follow the
+    // user into the conversation they switched to; tests/e2e/
+    // conversation-switch-during-stream.spec.ts holds that invariant.
+    //
+    // Blocking would cost far more than it buys: a Deep Research run answers in
+    // minutes, and refusing every sidebar click for its duration would strand
+    // the user in one conversation with no indication why the click did nothing.
     const handleSelectConversation = async (id: string, skipLockCheck = false) => {
-        if (isSending) return;
         localComparisonResponsesRef.current.clear();
         latestLocalComparisonPromptRef.current = null;
 
@@ -3819,14 +3885,40 @@ export function ChatPageClient({
   );
   const isImageWorkspaceActive =
     !isGuestMode && (isImageDraftActive || Boolean(activeImageConversation));
-  const canOfferNewImage = imageGenerationEnabled && !isGuestMode;
+  // Visible for everyone the flag is on for; locked (never hidden, never
+  // dead-ended) for viewers who cannot use it yet (policy §13).
+  const imageEntitled =
+    !isGuestMode && planAllowsImageGeneration(accountUsage?.plan ?? "Free");
+  const canOfferNewImage = imageGenerationEnabled && imageEntitled;
+  const imageLock: "sign_in" | "upgrade" | null = !imageGenerationEnabled
+    ? null
+    : isGuestMode
+      ? "sign_in"
+      : imageEntitled
+        ? null
+        : "upgrade";
+  const handleLockedImageClick = (lock: "sign_in" | "upgrade") => {
+    if (lock === "sign_in") {
+      setShowGuestSignInPrompt(true);
+      return;
+    }
+    // Same destination the locked model rows use.
+    window.location.assign("/pricing");
+  };
   const imageWorkspaceElement = isImageWorkspaceActive ? (
     <ImageGenerationWorkspace
       // Remount on switch: the workspace's local timeline, draft prompt and
       // poll loop all belong to exactly one conversation.
-      key={isImageDraftActive ? "image-draft" : currentChatId ?? "image-draft"}
+      key={
+        isImageDraftActive
+          ? `image-draft:${(imageDraftSeedModelIds ?? []).join(",")}`
+          : currentChatId ?? "image-draft"
+      }
       conversationId={isImageDraftActive ? null : currentChatId}
       onConversationCreated={handleImageConversationCreated}
+      initialPrompt={imageDraftSeedPrompt}
+      initialModelIds={imageDraftSeedModelIds}
+      onCancelDraft={chatDraftBeforeImage ? handleCancelImageDraft : undefined}
       flagEnabled={imageGenerationEnabled}
       planAllowsImageGeneration={
         !isGuestMode && planAllowsImageGeneration(accountUsage?.plan ?? "Free")
@@ -3876,7 +3968,6 @@ export function ChatPageClient({
           personalizedPrompt={personalizedPrompt}
           attachments={attachments}
           setAttachments={handleAttachmentsChange}
-          isSending={isSending}
           focusToken={focusToken}
           isGuestMode={isGuestMode}
           guestPreviewMode={isGuestPreviewEntry}
@@ -3885,6 +3976,9 @@ export function ChatPageClient({
           isModelSelectionReady={isModelSelectionReady}
           onNewChat={handleNewChat}
           onNewImage={canOfferNewImage ? handleNewImage : null}
+          imageLock={imageLock}
+          onLockedImageClick={handleLockedImageClick}
+          onStartImageDraft={canOfferNewImage ? handleStartImageDraft : undefined}
           imageWorkspace={imageWorkspaceElement}
           onSelectConversation={handleSelectConversation}
           onRename={handleRename}
@@ -3930,7 +4024,6 @@ export function ChatPageClient({
           personalizedPrompt={personalizedPrompt}
           attachments={attachments}
           setAttachments={handleAttachmentsChange}
-          isSending={isSending}
           focusToken={focusToken}
           isGuestMode={isGuestMode}
           guestPreviewMode={isGuestPreviewEntry}
@@ -3939,6 +4032,9 @@ export function ChatPageClient({
           isModelSelectionReady={isModelSelectionReady}
           onNewChat={handleNewChat}
           onNewImage={canOfferNewImage ? handleNewImage : null}
+          imageLock={imageLock}
+          onLockedImageClick={handleLockedImageClick}
+          onStartImageDraft={canOfferNewImage ? handleStartImageDraft : undefined}
           imageWorkspace={imageWorkspaceElement}
           onSelectConversation={handleSelectConversation}
           onRename={handleRename}

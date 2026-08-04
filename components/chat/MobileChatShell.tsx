@@ -106,7 +106,6 @@ type MobileChatShellProps = {
   personalizedPrompt?: string | null;
   attachments: ChatAttachment[];
   setAttachments: AttachmentsChangeHandler;
-  isSending: boolean;
   focusToken: number;
   isGuestMode: boolean;
   /** What this caller may do with the AI cross-review. */
@@ -119,6 +118,10 @@ type MobileChatShellProps = {
   isModelSelectionReady: boolean;
   onNewChat: () => void;
   onNewImage?: (() => void) | null;
+  /** Set when image generation is visible to this viewer but not usable. */
+  imageLock?: "sign_in" | "upgrade" | null;
+  onLockedImageClick?: (lock: "sign_in" | "upgrade") => void;
+  onStartImageDraft?: (draftText: string, modelId?: string) => void;
   imageWorkspace?: ReactNode;
   onSelectConversation: (id: string) => void;
   onRename: (id: string, title: string) => void;
@@ -165,7 +168,6 @@ export function MobileChatShell({
   personalizedPrompt,
   attachments,
   setAttachments,
-  isSending,
   focusToken,
   isGuestMode,
   aiReviewAccess,
@@ -176,6 +178,9 @@ export function MobileChatShell({
   isModelSelectionReady,
   onNewChat,
   onNewImage,
+  imageLock,
+  onLockedImageClick,
+  onStartImageDraft,
   imageWorkspace,
   onSelectConversation,
   onRename,
@@ -1158,7 +1163,7 @@ export function MobileChatShell({
             personalizedPrompt={personalizedPrompt}
             onSubmit={onSubmit}
             onCancel={() => setStopSignal((current) => current + 1)}
-            isSending={isSending || isAnyModelResponding}
+            isSending={isAnyModelResponding}
             focusToken={focusToken}
             isNewConversation={isActiveConversationEmpty}
             currentChatId={currentChatId}
@@ -1171,6 +1176,9 @@ export function MobileChatShell({
             onOpenDeepResearchSetup={onOpenDeepResearchSetup}
             isDeepResearchPending={isDeepResearchPending}
             onDismissDeepResearchChip={onDismissDeepResearchChip}
+            onStartImageDraft={onStartImageDraft}
+            imageGenerationLock={imageLock ?? null}
+            onLockedImageGenerationClick={onLockedImageClick}
             attachments={attachments}
             onAttachmentsChange={setAttachments}
             attachmentCapabilities={attachmentCapabilities}
@@ -1235,6 +1243,11 @@ export function MobileChatShell({
                     }
                   : null
               }
+              imageLock={imageLock ?? null}
+              onLockedImageClick={(lock) => {
+                setIsDrawerOpen(false);
+                onLockedImageClick?.(lock);
+              }}
               onSelectConversation={(id) => {
                 setIsDrawerOpen(false);
                 drawerReturnFocusRef.current = null;

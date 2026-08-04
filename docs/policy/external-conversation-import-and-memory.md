@@ -559,6 +559,44 @@ details.requiresPreflight: true
   (15분), idempotent settlement. 브라우저를 닫아도 완료 chunk와 승인 상태가
   손상되지 않습니다.
 
+### 11.1 실행 driver — 저지연 kick + 복구 dispatcher (2026-08-04 확정)
+
+이 절은 §11의 durable run 계약을 **무엇이 구동하는지**를 확정합니다. 계약을
+넓히지 않고 이행 방식만 정합니다.
+
+- **driver는 둘이고 역할이 다릅니다.**
+  - `after()` **post-response kick**: 저지연 시작 전용. Next.js `after()`는
+    route의 실행 시간과 프로세스 수명에 묶이고 종료 시 graceful drain에
+    의존하므로 **durable queue가 아닙니다**(`node_modules/next/dist/docs`의
+    `after` · self-hosting 문서). 이미지 생성 §7이 같은 결론입니다.
+  - **15분 maintenance**: 만료 lease 회수뿐 아니라 `pending` run을 다시
+    claim해 실제로 재구동하는 **recovery dispatcher**입니다. 회수만 하고
+    재구동하지 않으면 요청이 없는 한 run이 영원히 `pending`으로 남습니다.
+- **durable source of truth는 DB의 run·chunk 상태**이며, 두 driver는 상태를
+  읽고 쓰는 방법이 아니라 실행을 시작하는 계기일 뿐입니다.
+- **두 진입점은 반드시 같은 slice processor를 사용합니다.** claim·fencing·
+  경계 재검사·release가 두 벌 존재하면 반드시 어긋납니다.
+- **배타 claim은 lease 기한이 아니라 fencing token으로 성립합니다.**
+  claim마다 `leaseGeneration`을 증가시키고, heartbeat·chunk claim·chunk 결과
+  기록·정산은 **claim 당시의 generation이 일치할 때만** 성공합니다. 기한
+  비교만으로는 두 claimant가 모두 통과할 수 있고, 그 결과는 provider 중복
+  호출과 후보 이중 생성입니다.
+- **chunk 상태는 durable**합니다: chunk별 status·attemptCount·실패 코드와
+  그 chunk가 담당하는 대화 목록을 저장합니다. 계획은 저장하며 재계산하지
+  않습니다 — chunk 경계는 선택 집합의 *순서*에 의존하므로, 다른 순서로
+  재계획하면 사용자가 확인한 견적과 다른 chunk를 실행할 수 있습니다.
+- **한 번의 실행은 run 전체가 아니라 bounded slice**입니다: 최대 chunk 수와
+  wall-clock deadline, chunk별 provider timeout, chunk 사이 heartbeat, 예산
+  소진 시 명시적 lease 반납 후 `pending` 복귀. 프로세스가 강제 종료되면
+  lease 만료 후 maintenance가 회수합니다.
+- **chunk 경계마다 재검사**합니다: feature flag, 승인 pair와 revocation,
+  사용자 plan, provider 예산. run 생성 시점의 판정을 캐시하지 않습니다.
+- **취소·flag off·revocation은 즉시 정지 사유**이며, 정지한 slice는 lease를
+  반납하고 진행분을 보존합니다.
+- extraction provider 지연이 credit·refund·notification 같은 기존 maintenance
+  작업을 늦추지 않도록, dispatch는 기존 reconciliation 응답과 분리된 경로에서
+  수행하고 지표도 `memory_extraction_dispatch`로 분리합니다.
+
 ## 12. Eval 계약
 
 ### 12.1 승인 단위와 register
@@ -585,6 +623,11 @@ details.requiresPreflight: true
 
 범주 4종: ① 지속 사실·선호 ② assistant 추측·역할극·충돌 정보 ③ 민감 정보·
 secret·credential ④ prompt injection·지시형·URL 유도.
+
+표본을 실제로 만들고 검수하고 동결하는 절차는
+`docs/ops/memory-extraction-eval-dataset.md`가 정합니다 — 8개 cell 관리,
+작성자·검수자 분리와 adjudication, critical negative 전건 독립 검수,
+개발용/decision set 분리, `datasetVersion`·digest 동결과 재작업 규칙.
 
 Decision-grade 표본: **범주별·언어별(ko/en) 최소 200개** — 범주별 총 400,
 전체 총 1,600, 언어 arm당 800. 동일 commit·고정 promptVersion, artifact 보존,
@@ -634,6 +677,16 @@ zh/fr/de/es/pt는 첫 decision-grade eval 범위 밖의 known limitation으로
   1,600(범주 4 × 언어 2 × 200) × 독립 재실행 포함 최소 2회 전체 실행 +
   blind review 세트 생성 비용. 승인 기록(승인자·금액 상한·티켓)은 eval
   register entry와 함께 남깁니다. 예산 승인 전에는 smoke mode만 실행합니다.
+- **이 제약은 코드가 강제합니다.** `scripts/evalImportedMemoryExtraction.mjs`가
+  `--live` 실행 시 해당 pair의 `evalBudget`이 비어 있으면 provider를 호출하기
+  전에 거부합니다. smoke mode는 예산 없이도 실행되며, deterministic stub으로
+  prompt·parser·validator·scoring 경로만 확인하고 모델 품질에 대해서는 아무것도
+  주장하지 않습니다.
+- **첫 fixture 세트는 seed 규모입니다**(`lib/memoryExtractionEvalFixtures.ts`,
+  `datasetVersion` = `mem-eval-seed-1`). §12.2 하한(범주·언어 arm당 200)에
+  한참 못 미치며, harness는 이를 `UNDERPOWERED`로 보고하고 판정을 보류합니다.
+  나머지 표본 작성은 별도 데이터 작업이고, 복제·경미 변형으로 채우는 것은
+  §12.2가 금지하므로 `findDuplicateCases()`가 그런 dataset을 거부합니다.
 
 ## 13. 삭제 · export · share
 
