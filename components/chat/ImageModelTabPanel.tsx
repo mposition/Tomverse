@@ -29,6 +29,7 @@ const interpolate = (template: string, values: Record<string, string | number>) 
 const PROVIDER_LABELS: Record<string, string> = {
   openai: "OpenAI",
   google: "Google",
+  xai: "xAI",
 };
 
 const LATENCY_LABEL_KEYS = {

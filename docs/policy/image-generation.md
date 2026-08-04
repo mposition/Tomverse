@@ -18,11 +18,11 @@ Google 모델 활성화는 공식 가격·thinking 상한의 수동 검증 통�
   보내고 결과를 나란히 비교한다(§11). 단일 모델 요청은 1-모델 그룹이라는
   특수한 경우일 뿐 별도 경로가 아니다.
 - 모델은 `AVAILABLE_MODELS`·`ModelRegistry` 밖의 **이미지 모델 registry**
-  (§12)에서만 관리한다. 초기 등록: `gpt-image-2`(활성),
-  `gemini-3.1-flash-image-preview`(Nano Banana 2 — 등록하되 §12의 가격
-  검증 통과 전까지 **비활성**), `gemini-3.1-flash-lite-image`(3순위 평가
-  후보). 비교 그룹의 모델 수 상한은 `IMAGE_GROUP_MAX_MODELS`(출시 기본 2)
-  이며 UI·데이터 모델에 상한값을 하드코딩하지 않는다.
+  (§12)에서만 관리한다. 등록 현황(2026-08-04): `gpt-image-2`(활성),
+  `gemini-3.1-flash-image`(등록-비활성), `grok-imagine-image-quality-20260403`
+  (등록-비활성). 나머지 평가 후보는 §12.1에 있다. 비교 그룹의 모델 수 상한은
+  `IMAGE_GROUP_MAX_MODELS`(출시 기본 2)이며 UI·데이터 모델에 상한값을
+  하드코딩하지 않는다.
 - text-to-image 전용, 모델당 요청 1장. `size=auto`·`quality=auto`·부분
   스트리밍·투명 배경·편집·참조 이미지는 여전히 범위 밖이다. 크기·품질
   선택지는 모델별 profile이 정의하되 provider 제약이 아니라 **Tomverse
@@ -285,13 +285,33 @@ gate 없이 노출되는 배포 창은 금지된다. UI 비노출은 보안 경�
   7. 성공 후 사용자에게 추가 청구하지 않는다. 실측 원가는 내부 정산·관측
      전용이다.
 - **공식 도메인 본문을 직접 읽고 기록한 가격만 `verified`다.** 검색
-  요약·제3자 출처로 대체하지 않는다. 2026-08-03 기준
-  `gemini-3.1-flash-image-preview`(Nano Banana 2)는 preview 상태이며 가격·
-  thinking 상한이 미검증이므로 **등록-비활성**이다. 수동 검증 통과와 판매
-  크레딧 승인 후에만 활성화한다.
+  요약·제3자 출처로 대체하지 않는다. 제품 책임자가 알려 준 수치도 마찬가지다 —
+  근거로 기록할 수는 있어도 `verified`로 승격하지 않는다.
 - adapter는 provider가 반환한 원본 bytes와 MIME을 무변형 저장하고(PNG
   가정 금지), 정규화된 usage(input/thinking/output)·moderation 분류·
   provider request ID·provenance 종류를 공통 형태로 보고한다.
+
+### 12.1 평가 후보 등록부 (2026-08-04 모델 검토)
+
+제품 책임자의 모델 검토 결과다. **여기 적힌 가격은 전부 미검증이다** — 이
+환경에서 `ai.google.dev`, `docs.x.ai`, `help.aliyun.com`, `ideogram.ai`가
+모두 HTTP 403이라 어느 것도 공식 문서 본문에서 읽지 못했다. 결정을 잃지
+않기 위해 기록하는 것이지 활성화 근거가 아니다.
+
+| 후보 | 상태 | 보고된 가격 | 활성화에 필요한 것 |
+|---|---|---|---|
+| `gemini-3.1-flash-image` | **registry 등록-비활성** | 1K $0.067 / 2K $0.101 / 4K $0.151 | thinking 토큰 상한(끌 수 없음) 공식 확인이 선행. 상한 없이는 최악 원가가 유한하지 않아 고정 가격 불가 |
+| `grok-imagine-image-quality-20260403` | **registry 등록-비활성** | 1K $0.05 / 2K $0.07 | 가격 공식 확인, xAI adapter, `IMAGE_PROVIDER_XAI_COST_*`, 판매 크레딧 승인 |
+| `gemini-3.1-flash-lite-image` | 미등록 | 이미지 출력 약 $0.0336 (1K 전용) | 위 Google 조건과 동일. Draft 전용 후보이며 Google 모델로 비교 두 자리를 채우는 것은 다양성이 낮다 |
+| `gemini-3-pro-image` | 미등록 | 1K·2K $0.134 / 4K $0.24 | 동일 조건. `gpt-image-2` Final과 가격대가 겹쳐 초기 출시 이득이 적다 |
+| `qwen-image-2.0-pro-2026-06-22` | 미등록 | 미확인 | 채팅용 OpenAI 호환 base URL을 쓸 수 없어 별도 endpoint·리전 검증 필요. 한국어 글자 정확도 확인 후 유료 벤치마크 대상 |
+| Ideogram 4.0 | 미등록 | Turbo $0.03 / Default $0.06 / Quality $0.10 | 신규 공급자 전체 온보딩(키·상태·비용 동기화·예산). 글자 렌더링 차별점이 그 비용을 정당화하는지가 판단 지점 |
+
+**보고된 최소 크레딧 수치를 그대로 쓰지 않는다.** 검토서의 56·78·38·149·
+34·67·112는 이미지 출력 가격만 ceiling으로 나눈 값이다. 정책 최소치는 요청
+전체의 최악 원가 — 이미지 출력 + `IMAGE_PROMPT_BUDGET_MICRO_USD` 전액 +
+thinking 상한 — 으로 계산하므로 실제 바닥은 더 높다. 검증 후
+`minimumCreditsForImageOption()`이 산출한 값을 쓴다.
 
 ## 13. 진입점과 노출 정책 (v2)
 

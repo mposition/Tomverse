@@ -1,6 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
 import { mockAuthenticatedApi } from "./support/app-fixtures";
 import { mockUserUsage } from "./support/chat-state-fixtures";
+import { listImageModels } from "../../lib/imageModelRegistry";
 
 // Image generation workspace regression coverage (PR 5 UI + PR 3 API shape).
 //
@@ -527,13 +528,24 @@ test("the catalogue's image tab is its own list and seeds the picked model", asy
   await expect(page.getByTestId("recommended-model-option")).toHaveCount(0);
   await expect(page.getByTestId("model-picker-selection-count")).toHaveCount(0);
 
-  // Every registered model is listed, including one held by the price
-  // verification rule -- stated as a hold, never silently absent.
+  // Every registered model is listed, including the ones held by the price
+  // verification rule -- stated as a hold, never silently absent. The count is
+  // asserted against the registry rather than hard-coded, so registering
+  // another candidate does not fail this test for the wrong reason.
+  const heldInRegistry = listImageModels().filter(
+    (model) => model.disabledReason !== null
+  ).length;
+  expect(heldInRegistry).toBeGreaterThan(0);
   const held = panel.getByTestId("image-model-option").filter({
     has: page.getByTestId("image-model-hold-note"),
   });
-  await expect(held).toHaveCount(1);
-  await expect(held).toBeDisabled();
+  await expect(held).toHaveCount(heldInRegistry);
+  for (let index = 0; index < heldInRegistry; index += 1) {
+    await expect(held.nth(index)).toBeDisabled();
+  }
+  await expect(panel.getByTestId("image-model-option")).toHaveCount(
+    listImageModels().length
+  );
 
   await panel
     .getByTestId("image-model-option")

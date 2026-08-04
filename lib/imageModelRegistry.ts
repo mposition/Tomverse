@@ -17,7 +17,7 @@ import {
   type ImageSize,
 } from "@/lib/imageGenerationPricing";
 
-export type ImageModelProvider = "openai" | "google";
+export type ImageModelProvider = "openai" | "google" | "xai";
 
 export type ImageModelLifecycle = "stable" | "preview";
 
@@ -116,21 +116,36 @@ const OPENAI_GPT_IMAGE_2: ImageModelProfile = {
 
 // Registered, deliberately NOT enabled (policy sections 12 and 15).
 //
-// On 2026-08-03 every attempt to read ai.google.dev and the Google Cloud
-// model documentation from this environment returned HTTP 403, so no price
-// on this profile has been read from Google's own documentation. Search
-// summaries attributed conflicting per-image figures to the same page, which
-// is exactly the situation the "official body text only" rule exists for.
-// The thinking cap is unknown, so the worst-case request cost is not provably
-// finite and no fixed credit price can be derived. `prices` stays empty on
-// purpose: an empty list cannot be mistaken for a verified one.
-const GOOGLE_NANO_BANANA_2: ImageModelProfile = {
-  id: "gemini-3.1-flash-image-preview",
+// The identifier was corrected on 2026-08-04: `gemini-3.1-flash-image-preview`
+// was retired on 2026-06-25 and replaced by the GA `gemini-3.1-flash-image`.
+// That correction came from the product owner's model review, not from a page
+// this environment could read -- every attempt to reach ai.google.dev returns
+// HTTP 403 here, on 2026-08-03 and again on 2026-08-04. Pointing a held entry
+// at a live GA id rather than a dead preview one is strictly better and
+// changes nothing that can execute: the model stays disabled either way.
+//
+// The same review reports that Google now publishes per-image prices
+// (1K US$0.067, 2K US$0.101, 4K US$0.151). They are NOT recorded below. A
+// price this repository has not read from the provider's own documentation
+// cannot be written into `prices` -- `check:image-pricing` enforces that a
+// disabled model carries none, precisely so a hold cannot decay into a launch
+// by leaving a table behind.
+//
+// Published prices would not be enough on their own in any case. Google's
+// thinking cannot be switched off and no official maximum for text/thinking
+// tokens has been established, so the worst-case cost of one request is not
+// provably finite and no fixed credit price can be derived from it
+// (section 12 condition 1). That is the blocking condition, and it survives
+// the price list being public.
+const GOOGLE_GEMINI_31_FLASH_IMAGE: ImageModelProfile = {
+  id: "gemini-3.1-flash-image",
   provider: "google",
-  apiModelId: "gemini-3.1-flash-image-preview",
-  name: "Nano Banana 2",
-  lifecycle: "preview",
+  apiModelId: "gemini-3.1-flash-image",
+  name: "Gemini 3.1 Flash Image",
+  lifecycle: "stable",
   disabledReason: "price_unverified",
+  // 2K and 4K are advertised upstream but have no representation in ImageSize
+  // yet; adding them is part of enabling this model, not of registering it.
   sizes: ["1024x1024"],
   qualities: ["medium"],
   prices: [],
@@ -142,16 +157,66 @@ const GOOGLE_NANO_BANANA_2: ImageModelProfile = {
     sources: [
       "https://ai.google.dev/gemini-api/docs/pricing",
       "https://ai.google.dev/gemini-api/docs/image-generation",
+      "https://ai.google.dev/gemini-api/docs/deprecations",
     ],
     thinkingCapMicroUsd: null,
   },
   disabledNote:
-    "Official pricing and the thinking-token cap could not be read from Google's documentation (HTTP 403 on 2026-08-03). Verify manually, then set prices, thinkingCapMicroUsd and disabledReason together.",
+    "GA id corrected from gemini-3.1-flash-image-preview (retired 2026-06-25) per the product owner's review. Prices are reported published (1K $0.067 / 2K $0.101 / 4K $0.151) but have not been read from Google's documentation here (HTTP 403 on 2026-08-03 and 2026-08-04), and thinking cannot be disabled with no documented token cap -- so the worst case is not provably finite. Establish the cap first, then set prices, thinkingCapMicroUsd and disabledReason together.",
+};
+
+// Registered, not enabled. The strongest fixed-price candidate in the
+// 2026-08-04 model review: xAI already has a chat provider here, so the API
+// key, provider health and cost sync all exist, and the image API is
+// OpenAI-shaped.
+//
+// A dated snapshot rather than `-latest`, for the same reason chat profiles
+// pin one: a moving target cannot carry a fixed price, because the price is
+// only meaningful for the model that was actually verified.
+//
+// The review reports fixed per-image prices of US$0.05 (1K) and US$0.07 (2K),
+// which is the shape a fixed success price needs. They are not recorded: this
+// environment cannot reach docs.x.ai (HTTP 403 on 2026-08-04), so nothing here
+// has been read from xAI's own documentation.
+//
+// Note also that the review's floors of 56 and 78 credits divide the image
+// price alone by the ceiling. The policy minimum is computed over the *whole*
+// worst-case request -- image output plus the full IMAGE_PROMPT_BUDGET_MICRO_USD
+// plus any thinking -- so the real floors are higher, and
+// minimumCreditsForImageOption() is what should produce them once the figures
+// are verified.
+const XAI_GROK_IMAGINE_IMAGE_QUALITY: ImageModelProfile = {
+  id: "grok-imagine-image-quality-20260403",
+  provider: "xai",
+  apiModelId: "grok-imagine-image-quality-20260403",
+  name: "Grok Imagine Image Quality",
+  lifecycle: "stable",
+  disabledReason: "price_unverified",
+  sizes: ["1024x1024"],
+  qualities: ["medium"],
+  prices: [],
+  latencyClass: "balanced",
+  // Left empty rather than guessed: what xAI embeds in the returned bytes has
+  // not been read from its documentation, and claiming provenance a file does
+  // not carry would be worse than claiming none.
+  provenance: [],
+  outputMimeTypes: ["image/jpeg", "image/png"],
+  priceVerification: {
+    verifiedAt: null,
+    sources: [
+      "https://docs.x.ai/developers/pricing",
+      "https://docs.x.ai/developers/model-capabilities/images/generation",
+    ],
+    thinkingCapMicroUsd: null,
+  },
+  disabledNote:
+    "Fixed per-image prices are reported as $0.05 (1K) and $0.07 (2K) by the product owner's 2026-08-04 review, but docs.x.ai returns HTTP 403 from this environment so nothing has been verified here. Enabling also needs an xAI adapter (imageProviderAdapter dispatches OpenAI only), IMAGE_PROVIDER_XAI_COST_MICROUSD_PER_DAY/_PER_MONTH, and an approved sale-credit figure at or above minimumCreditsForImageOption().",
 };
 
 export const IMAGE_MODEL_REGISTRY: readonly ImageModelProfile[] = [
   OPENAI_GPT_IMAGE_2,
-  GOOGLE_NANO_BANANA_2,
+  GOOGLE_GEMINI_31_FLASH_IMAGE,
+  XAI_GROK_IMAGINE_IMAGE_QUALITY,
 ];
 
 /** The default single selection and the v1 compatibility model. */
