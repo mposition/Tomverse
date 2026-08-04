@@ -316,6 +316,17 @@ const DIRECT_STANDARD = {
  * `sendsATier` is the field that matters: no entry may set it to `true`
  * without the pricing profiles that describe that tier landing in the same
  * change.
+ *
+ * An entry is an exemption for a **whole file**, so it has to be withdrawn the
+ * moment the file stops naming a selector. `app/api/chat/route.ts` was listed
+ * here for a mention it no longer contains -- the classifier is reached
+ * through an `observeServedProcessingTier` import, which names no tier -- and
+ * that left a standing exemption over the one file in the tree that builds the
+ * provider request. Adding `service_tier: "flex"` to its `streamText` call
+ * would have passed this check in silence, which is the exact failure the
+ * check exists to prevent. The listing was withdrawn, and a stale entry is now
+ * a build failure rather than a warning: an exemption nobody needs is an
+ * exemption nobody is reading, and it outlives the reason written next to it.
  */
 export type ProcessingTierMention = {
     /** Repository-relative path. */
@@ -335,12 +346,7 @@ export const PROCESSING_TIER_REQUEST_ALLOWLIST: readonly ProcessingTierMention[]
         {
             file: "lib/servedProcessingTier.ts",
             sendsATier: false,
-            reason: "Classifies the tier a completed response reports, so a request served at a tier nobody priced is visible instead of silent. It reads provider metadata and returns a verdict; it builds no request and is imported by no request-building code path.",
-        },
-        {
-            file: "app/api/chat/route.ts",
-            sendsATier: false,
-            reason: "Calls the classifier above once a stream completes and logs a mismatch. The streamText call a few hundred lines above sets no tier, and this observation runs after the response is finished, so it cannot influence the request it describes.",
+            reason: "Classifies the tier a completed response reports, so a request served at a tier nobody priced is visible instead of silent. It reads provider metadata and returns a verdict and builds no request. app/api/chat/route.ts calls it once a stream has finished -- after the response exists, so it cannot influence the request it describes -- through an import that names no tier, which is why that file is deliberately not listed here.",
         },
     ];
 
