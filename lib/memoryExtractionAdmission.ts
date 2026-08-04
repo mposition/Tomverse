@@ -389,15 +389,35 @@ export async function reserveMemoryExtractionAttempt(input: {
                 // the same attempt collides on this unique key instead of
                 // paying twice (§11).
                 idempotencyKey: `memory-extraction:${run.id}:${input.chunkIndex}:${attemptNumber}`,
+                // The canonical reservation payload, not an extraction-shaped
+                // one: settlement, release and the expiry sweep all parse this
+                // with the same strict schema, so a bespoke shape here would
+                // mean extraction could reserve but never settle (§9).
                 reservationPayload: {
-                    runId: run.id,
-                    chunkIndex: input.chunkIndex,
-                    attemptNumber,
+                    reservationId,
+                    userId: user.id,
+                    idempotencyKey: `memory-extraction:${run.id}:${input.chunkIndex}:${attemptNumber}`,
+                    traceId: `memory-extraction:${run.id}`,
+                    source: "memory_extraction",
+                    modelId: run.extractionModelId,
+                    provider: pricing.provider,
                     entries: entries.map((entry) => ({
                         ...entry,
                         periodStart: entry.periodStart.toISOString(),
                     })),
+                    usageCredits: chunk.estimatedCredits,
+                    inputTokens: 0,
+                    maxOutputTokens: 0,
+                    reservedOutputTokens: 0,
+                    inputUsdPerMillionTokens:
+                        pricing.tiers[0].inputUsdPerMillionTokens,
+                    outputUsdPerMillionTokens:
+                        pricing.tiers[0].outputUsdPerMillionTokens,
+                    cachedInputPriceMultiplier: 1,
                     pricingVersion: run.quotePricingVersion,
+                    planReservedCredits: allocation.planReservedCredits,
+                    addOnReservedCredits: 0,
+                    addOnReservations: [],
                 } satisfies Prisma.InputJsonValue,
                 reservedCredits: allocation.planReservedCredits,
                 reservedCostMicroUsd: input.reservedCostMicroUsd,
