@@ -301,7 +301,7 @@ gate 없이 노출되는 배포 창은 금지된다. UI 비노출은 보안 경�
 | 후보 | 상태 | 검증된 이미지 출력가 | 남은 조건 |
 |---|---|---|---|
 | `gpt-image-2` | **활성** | 표 §3 | — |
-| `grok-imagine-image-quality-20260403` | 등록-비활성 (`operational_hold`) | 1K $0.05 / 2K $0.07 · **가격 검증 완료** | 판매 크레딧 승인, xAI adapter, `IMAGE_PROVIDER_XAI_COST_*`, 계정 가시성 확인 |
+| `grok-imagine-image-quality-20260403` | 등록-비활성 (`operational_hold`) | 1K $0.05 / 2K $0.07 · **가격 검증·판매가 승인 완료** | xAI adapter, `IMAGE_PROVIDER_XAI_COST_*`, 계정 가시성 확인. **1K 정사각만 먼저 출시**하고 2K는 크기 체계 확장 후 |
 | `gemini-3.1-flash-image` | 등록-비활성 (`worst_case_cost_unbounded`) | 0.5K $0.045 / 1K $0.067 / 2K $0.101 / 4K $0.151 | **thinking 상한** — 아래 참조 |
 | `gemini-3.1-flash-lite-image` | 등록-비활성 (`worst_case_cost_unbounded`) | 1K $0.0336 (1K 전용) | 동일. Draft 후보이며 두 번째 비교 자리를 Google로 채우지 않는다 |
 | `gemini-3-pro-image` | 등록-비활성 (`worst_case_cost_unbounded`) | 1K·2K $0.134 / 4K $0.24 | 동일 + 제품 판단 보류(`gpt-image-2` Final과 중복) |
@@ -330,24 +330,61 @@ in the API"`), `thinking_level`의 `minimal`·`high`는 수준 선택이지 토�
 | Flash Lite | 4,096 | $1.50/1M | 6,144µUSD | 1K 50 |
 | Pro Image | 32,768 | $12.00/1M | 393,216µUSD | 1K·2K 592 / 4K 710 |
 
-**이 유도는 아직 채택하지 않았다.** 두 문서 문장(context window가 출력량을
-정한다 / 응답 가격은 output + thinking의 합이다)을 결합한 추론이며, "숨겨진
-thinking이 output token limit에 포함된다"고 한 문장으로 명시한 공식 문구는
-확인되지 않았다. 유도값을 `thinkingCapMicroUsd`에 기록하면 추론이 코드에서
-사실이 된다. 다음 중 하나가 필요하다.
+**결정(2026-08-04): 이 유도를 채택하지 않는다. 공급자 확인을 받는다.**
 
-1. 공급자가 한 문장으로 확인해 준 답변을 `sources`에 추가 — 가장 깔끔하다.
-2. 승인자가 이 유도를 명시적으로 채택하고 그 결정을 이 문서에 기록.
+결정적인 근거는 GenerateContent API 스키마다. `totalOutputTokens`와
+`totalThoughtTokens`가 **별도 필드**이고 `maxOutputTokens`는 response
+candidate의 한도로 설명된다. 즉 hidden thinking이 32,768 안에 포함된다는
+결론은 그럴듯할 뿐이고, **포함되지 않는다면 A-2는 "지나치게 보수적인 상한"이
+아니라 상한 자체가 아닌 계산이 된다.** 그 경우 유도값을
+`thinkingCapMicroUsd`에 기록하는 것은 안전한 과대 추정이 아니라 잘못된 값을
+증명된 값으로 기록하는 일이다.
 
-이 결정에는 제품 비용이 따른다. 유도 상한을 쓰면 Flash Image 1K가 최소
-190크레딧이 되어 `gpt-image-2` Standard 정사각(70크레딧)의 약 2.7배다. 비교
-UI에서 한쪽이 다른 쪽의 세 배 가격인 상태는 그 자체로 제품 결정 사항이다.
+제품 근거도 같은 방향이다. 유도 상한을 쓰면 Flash Image 1K가 최소
+190크레딧으로 `gpt-image-2` Standard 정사각(70)의 약 2.7배가 되어 비교
+모델로서 가격을 설명하기 어렵고, Pro Image의 592/710은 확인을 받더라도
+보류가 합리적이다.
+
+따라서 Google 3종의 상태는 **가격 확인 완료 / 요청당 상한 조건부**로
+분리해 유지한다.
+
+#### 공급자에게 보낼 질문
+
+`sources`에 추가할 답변을 받기 위한 질문은 좁고 명확해야 한다. "thinking은
+output으로 과금된다"는 답변은 **불충분**하다 — 그것은 과금 방식이지 상한이
+아니다.
+
+> For each of `gemini-3.1-flash-image`, `gemini-3.1-flash-lite-image`, and
+> `gemini-3-pro-image`, is the total number of billable hidden thinking tokens
+> in a single image-generation request hard-capped by the model's documented
+> `output_token_limit`, including image-only requests where thinking cannot be
+> disabled?
+
+API surface(Gemini Developer API)와 Standard tier를 함께 명시한다. 답변이
+"예"면 `thinkingCapMicroUsd`를 위 표대로 기록하고 `sources`에 답변을 추가한다.
+"아니오"거나 상한을 특정하지 못하면 Google 3종은 보류를 유지한다.
 
 #### 판매 크레딧은 별도 승인이다
 
 위 수치는 전부 `minimumCreditsForImageOption()`이 내는 **수학적 바닥값**이다.
-마진·가격 drift·환불 위험을 반영한 판매 크레딧은 제품 책임자가 승인해야
-하며, 승인 전에는 `prices`를 채우지 않는다.
+마진·가격 drift·환불 위험을 반영한 판매 크레딧은 제품 책임자가 승인한다.
+
+**승인 이력**
+
+| 모델·옵션 | 바닥값 | 승인 판매가 | 원가/크레딧 | 900µ 상한 대비 여유 | 승인일 |
+|---|---:|---:|---:|---:|---|
+| Grok Imagine 1K | 62 | **75** | 733µUSD | 18.5% | 2026-08-04 |
+| Grok Imagine 2K | 84 | **100** | 750µUSD | 16.7% | 2026-08-04 |
+
+1K 75크레딧은 `gpt-image-2` Standard 정사각(70)보다 7%만 높아 비교 화면에서
+설명 가능한 차이다. 운영 데이터가 쌓인 뒤(예: 30일 또는 성공 500건) 실패·
+환불률이 낮으면 70/95로 낮추는 재검토가 가능하다.
+
+**승인된 가격은 `operational_hold` 상태에서도 `prices`에 기록한다.** 가격
+질문이 끝났다는 것이 이 사유의 의미이고, `check:image-pricing`이 비활성
+상태에서도 바닥값을 검사한다. 승인 수치를 주석에 두었다가 출시일에 손으로
+옮기는 것이 더 위험하다. 나머지 두 사유(`price_unverified`,
+`worst_case_cost_unbounded`)는 여전히 `prices`가 비어 있어야 한다.
 
 #### 등록-비활성은 사용자에게 보인다
 
@@ -358,13 +395,26 @@ UI에서 한쪽이 다른 쪽의 세 배 가격인 상태는 그 자체로 제�
 바람직하지 않다면 그것은 registry에서 후보를 빼는 결정이지 탭에서 숨기는
 결정이 아니다.
 
-#### 크기 체계는 아직 1024 계열뿐이다
+#### 크기 체계 — 단계적 확장 (2026-08-04 결정)
 
-`ImageSize`는 `1024x1024`·`1536x1024`·`1024x1536` 세 값이다. Google의
-0.5K·2K·4K와 xAI의 2K는 표현할 수 없고, **Google의 1K landscape는
-`1536x1024`와 픽셀 규격이 다르다** — 문자열 치환이 아니라 provider별
-resolution·aspect 매핑이 필요하다. 크기 확장은 union·가격표·UI 선택지가
-함께 움직이는 별도 변경이다.
+`ImageSize`는 `1024x1024`·`1536x1024`·`1024x1536` 세 값이며, **제품 옵션과
+OpenAI의 실제 픽셀 문자열을 한 값에 섞고 있다.** Google의 0.5K·2K·4K와 xAI의
+2K는 표현할 수 없고, **Google의 1K landscape는 `1536x1024`와 픽셀 규격이
+다르다** — 문자열 치환으로는 해결되지 않는다.
+
+결정: **xAI는 1K 정사각만 먼저 출시한다.** 1024×1024는 현재 OpenAI 정사각과
+정확히 같아 cross-provider 비교가 가장 공정하다. Google 또는 xAI 2K를 열기
+전에 아래 구조로 확장한다.
+
+- 제품 선택은 `resolutionTier` + `aspectRatio` 두 축으로 표현한다.
+- provider adapter가 이를 provider별 `size` 또는 `resolution`·`aspect_ratio`로
+  변환한다.
+- 결과에는 실제 디코딩된 `width`·`height`를 기록한다.
+- 감사 snapshot에 provider로 전송한 실제 파라미터를 보존한다.
+- 기존 `size` 값은 과거 기록으로 유지하고 **소급 치환하지 않는다.**
+
+비교 가능 여부는 같은 `resolutionTier + aspectRatio`로 판정하되, 결과 화면에는
+실제 픽셀 크기를 표시한다.
 
 
 ## 13. 진입점과 노출 정책 (v2)

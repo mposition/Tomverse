@@ -45,7 +45,23 @@ test("a verified price does not by itself make a model runnable", () => {
   assert.equal(grok?.disabledReason, "operational_hold");
   assert.equal(grok?.priceVerification.verifiedAt, "2026-08-04");
   assert.equal(grok?.priceVerification.thinkingCapMicroUsd, 0);
-  assert.deepEqual(grok?.prices, []);
+  // An operational hold is the one state that may carry an approved price:
+  // the pricing question is settled, so keeping the approved credits here --
+  // where check:image-pricing validates them against the floor on every run --
+  // beats re-entering them by hand on launch day.
+  assert.deepEqual(grok?.prices, [
+    {
+      quality: "medium",
+      size: "1024x1024",
+      credits: 75,
+      outputCostMicroUsd: 50_000,
+    },
+  ]);
+  assert.ok(
+    grok.prices[0].credits >= minimumCreditsForImageOption(grok, grok.prices[0])
+  );
+  // Recorded is not sellable: the price lookup every request goes through
+  // still refuses a disabled model outright.
   assert.equal(
     getImageModelPrice("grok-imagine-image-quality-20260403", "medium", "1024x1024"),
     null

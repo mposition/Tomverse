@@ -114,9 +114,16 @@ for (const model of IMAGE_MODEL_REGISTRY) {
   const verification = model.priceVerification;
 
   if (model.disabledReason !== null) {
-    // A disabled model must not look priced: a stale price list left behind
-    // is how a hold silently becomes a launch.
-    if (model.prices.length > 0) {
+    // A model held because its price is unknown must not look priced: a stale
+    // table left behind is how a hold silently becomes a launch.
+    //
+    // `operational_hold` is the deliberate exception. It asserts the pricing
+    // question is settled -- verified figures and an approved sale credit --
+    // and that something else is missing. Forcing its approved credits to live
+    // in a comment until launch day would mean re-entering them by hand at the
+    // moment they matter most, unchecked. Carried here they are validated on
+    // every run, below, exactly as an enabled model's are.
+    if (model.disabledReason !== "operational_hold" && model.prices.length > 0) {
       failures.push(
         `${label}: disabled (${model.disabledReason}) but still carries ${model.prices.length} price entries`
       );
@@ -157,6 +164,23 @@ for (const model of IMAGE_MODEL_REGISTRY) {
         failures.push(
           `${label}: marked operational_hold without an official price source URL`
         );
+      }
+      // Any credits it does carry are held to the same floor an enabled model
+      // is, so an approved figure that is below the policy minimum fails now
+      // rather than on the day someone flips the reason to null.
+      for (const price of model.prices) {
+        const optionLabel = `${label} ${price.quality} ${price.size}`;
+        const minimum = minimumCreditsForImageOption(model, price);
+        const maxCost = maxImageRequestCostMicroUsd(model, price);
+        if (minimum === null || maxCost === null) {
+          failures.push(`${optionLabel}: worst-case cost could not be computed`);
+          continue;
+        }
+        if (price.credits < minimum) {
+          failures.push(
+            `${optionLabel}: ${price.credits} credits is below the policy minimum ${minimum} (worst case ${maxCost} microUSD at the ${IMAGE_COST_PER_CREDIT_CEILING_MICRO_USD} ceiling)`
+          );
+        }
       }
     }
     continue;
