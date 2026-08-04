@@ -4,17 +4,24 @@ import { after, beforeEach, test } from "node:test";
 import { ApiSecurityError } from "@/lib/apiSecurity";
 import { externalContentDigest } from "@/lib/externalImportDigest";
 import {
+    MEMORY_EXTRACTION_CHUNK_MAX_ATTEMPTS,
+    MEMORY_EXTRACTION_CHUNK_MAX_CONVERSATIONS,
     MEMORY_EXTRACTION_LEASE_TTL_MS,
 } from "@/lib/memoryExtractionCore";
+import { MEMORY_EXTRACTION_FLAG_KEY } from "@/lib/memoryAccess";
 import type { MemoryExtractionEvalEntry } from "@/lib/memoryExtractionEvalRegister";
 import {
     cancelMemoryExtractionRun,
-    completeMemoryExtractionChunk,
+    claimMemoryExtractionRun,
+    claimNextExtractionChunk,
+    completeExtractionChunk,
     createMemoryExtractionRun,
+    driveMemoryExtractionRunSlice,
     estimateMemoryExtraction,
     getMemoryExtractionRun,
     heartbeatMemoryExtractionRun,
     reconcileExpiredMemoryExtractionRuns,
+    type ExtractionChunkHandler,
 } from "@/lib/memoryExtractionService";
 import { prisma } from "@/lib/prisma";
 
@@ -29,6 +36,7 @@ import { prisma } from "@/lib/prisma";
 const resetData = async () => {
     await prisma.$executeRawUnsafe(`
     TRUNCATE TABLE
+      "MemoryExtractionChunk",
       "MemoryExtractionRun",
       "MemoryEvidence",
       "MemoryItem",
@@ -216,9 +224,21 @@ test("selection must be the owner's finalized conversations", async () => {
     );
 });
 
-test("heartbeat claims the lease and chunk completion is idempotent (§11)", async () => {
+const setExtractionFlag = (value: boolean) =>
+    prisma.appSetting.upsert({
+        where: { key: MEMORY_EXTRACTION_FLAG_KEY },
+        create: { key: MEMORY_EXTRACTION_FLAG_KEY, value: String(value) },
+        update: { value: String(value) },
+    });
+
+const completingHandler: ExtractionChunkHandler = async () => ({
+    outcome: "completed",
+});
+
+/** Creates a run with `count` chunks and returns it with the flag enabled. */
+const seedRun = async (conversationCount: number) => {
     const user = await createUser();
-    const conversationIds = await seedConversations(user.id, 2);
+    const conversationIds = await seedConversations(user.id, conversationCount);
     const estimate = await estimateMemoryExtraction(
         baseInput(user.id, conversationIds)
     );
@@ -226,44 +246,356 @@ test("heartbeat claims the lease and chunk completion is idempotent (§11)", asy
         ...baseInput(user.id, conversationIds),
         confirmedCredits: estimate.estimatedCredits,
     });
+    await setExtractionFlag(true);
+    return { user, run };
+};
 
-    await heartbeatMemoryExtractionRun(user.id, run.id);
-    const running = await prisma.memoryExtractionRun.findUniqueOrThrow({
+test("a run is created with its durable chunk work list (§11)", async () => {
+    const { run } = await seedRun(2);
+    const chunks = await prisma.memoryExtractionChunk.findMany({
+        where: { runId: run.id },
+        orderBy: { chunkIndex: "asc" },
+    });
+    assert.equal(chunks.length, run.chunkTotal);
+    assert.deepEqual(
+        chunks.map((chunk) => chunk.status),
+        chunks.map(() => "pending")
+    );
+    // The plan is stored, not re-derived later from a differently-ordered read.
+    assert.ok(
+        chunks.every(
+            (chunk) =>
+                Array.isArray(chunk.conversationIds) &&
+                (chunk.conversationIds as string[]).length > 0
+        )
+    );
+    assert.equal(chunks[0].attemptCount, 0);
+});
+
+test("only one claimant wins a run, and the loser gets null (§11 fencing)", async () => {
+    const { run } = await seedRun(1);
+    const [first, second] = await Promise.all([
+        claimMemoryExtractionRun({ runId: run.id, owner: "worker-a" }),
+        claimMemoryExtractionRun({ runId: run.id, owner: "worker-b" }),
+    ]);
+    const winners = [first, second].filter(Boolean);
+    assert.equal(winners.length, 1, "exactly one claimant may hold the lease");
+
+    const held = await prisma.memoryExtractionRun.findUniqueOrThrow({
         where: { id: run.id },
     });
-    assert.equal(running.status, "running");
-    assert.ok(running.leaseExpiresAt);
+    assert.equal(held.status, "running");
+    assert.equal(held.leaseGeneration, 1);
+    assert.ok(held.leaseExpiresAt);
+});
 
-    // Complete chunk 0 twice: the replay is a no-op, not a double count.
-    assert.deepEqual(
-        await completeMemoryExtractionChunk(user.id, run.id, 0),
-        { advanced: true }
+test("a superseded worker cannot heartbeat, claim or complete (§11 fencing)", async () => {
+    const { run } = await seedRun(2);
+    const stale = await claimMemoryExtractionRun({
+        runId: run.id,
+        owner: "worker-a",
+    });
+    assert.ok(stale);
+
+    // The lease lapses and the recovery path takes over, bumping the fence.
+    await prisma.memoryExtractionRun.update({
+        where: { id: run.id },
+        data: {
+            leaseExpiresAt: new Date(Date.now() - MEMORY_EXTRACTION_LEASE_TTL_MS),
+        },
+    });
+    const fresh = await claimMemoryExtractionRun({
+        runId: run.id,
+        owner: "worker-b",
+    });
+    assert.ok(fresh);
+    assert.equal(fresh.leaseGeneration, stale.leaseGeneration + 1);
+
+    // Everything the old worker might do after waking up late fails closed.
+    assert.equal(await heartbeatMemoryExtractionRun(stale), false);
+    assert.equal(await claimNextExtractionChunk(stale), null);
+
+    // Even a chunk the new worker is holding cannot be reported by the old one.
+    const claimed = await claimNextExtractionChunk(fresh);
+    assert.ok(claimed);
+    const staleReport = await completeExtractionChunk(
+        stale,
+        claimed.chunkIndex,
+        { outcome: "completed" }
     );
+    assert.equal(staleReport.applied, false);
+    const stillRunning = await prisma.memoryExtractionChunk.findFirstOrThrow({
+        where: { runId: run.id, chunkIndex: claimed.chunkIndex },
+    });
+    assert.equal(stillRunning.status, "running");
+});
+
+test("a slice drives the run to completion and derives progress (§11)", async () => {
+    const { user, run } = await seedRun(2);
+    const seen: number[] = [];
+    const result = await driveMemoryExtractionRunSlice({
+        runId: run.id,
+        owner: "worker-a",
+        register: APPROVED_REGISTER,
+        handler: async ({ chunk }) => {
+            seen.push(chunk.chunkIndex);
+            return { outcome: "completed" };
+        },
+    });
+    assert.equal(result.outcome, "completed");
+    assert.equal(result.chunksProcessed, run.chunkTotal);
     assert.deepEqual(
-        await completeMemoryExtractionChunk(user.id, run.id, 0),
-        { advanced: false }
+        seen,
+        Array.from({ length: run.chunkTotal }, (_, index) => index)
     );
 
-    for (let chunk = 1; chunk < run.chunkTotal; chunk += 1) {
-        await completeMemoryExtractionChunk(user.id, run.id, chunk);
+    const finished = await getMemoryExtractionRun(user.id, run.id);
+    assert.equal(finished.status, "completed");
+    assert.equal(finished.chunkCompleted, run.chunkTotal);
+    assert.ok(finished.completedAt);
+});
+
+test("a slice stops at its chunk budget and hands the lease back (§11)", async () => {
+    const { run } = await seedRun(MEMORY_EXTRACTION_CHUNK_MAX_CONVERSATIONS * 2);
+    assert.ok(run.chunkTotal > 1, "this test needs a multi-chunk run");
+
+    const result = await driveMemoryExtractionRunSlice({
+        runId: run.id,
+        owner: "worker-a",
+        register: APPROVED_REGISTER,
+        maxChunks: 1,
+        handler: completingHandler,
+    });
+    assert.equal(result.outcome, "paused");
+    assert.equal(result.reason, "chunk_budget");
+    assert.equal(result.chunksProcessed, 1);
+
+    // Parked, not held: the next dispatch continues without waiting for a TTL.
+    const parked = await prisma.memoryExtractionRun.findUniqueOrThrow({
+        where: { id: run.id },
+    });
+    assert.equal(parked.status, "pending");
+    assert.equal(parked.leaseExpiresAt, null);
+    assert.equal(parked.chunkCompleted, 1);
+
+    const resumed = await driveMemoryExtractionRunSlice({
+        runId: run.id,
+        owner: "worker-b",
+        register: APPROVED_REGISTER,
+        handler: completingHandler,
+    });
+    assert.equal(resumed.outcome, "completed");
+});
+
+test("an exhausted time budget stops the slice before starting a chunk", async () => {
+    const { run } = await seedRun(2);
+    const result = await driveMemoryExtractionRunSlice({
+        runId: run.id,
+        owner: "worker-a",
+        register: APPROVED_REGISTER,
+        budgetMs: 0,
+        handler: async () => {
+            assert.fail("no chunk may start once the budget is spent");
+        },
+    });
+    assert.equal(result.outcome, "paused");
+    assert.equal(result.reason, "time_budget");
+    assert.equal(result.chunksProcessed, 0);
+});
+
+test("the rollout flag is re-read at every chunk boundary (§15)", async () => {
+    const { run } = await seedRun(1);
+    await setExtractionFlag(false);
+    const result = await driveMemoryExtractionRunSlice({
+        runId: run.id,
+        owner: "worker-a",
+        register: APPROVED_REGISTER,
+        handler: async () => {
+            assert.fail("a disabled rollout must not reach a provider");
+        },
+    });
+    assert.equal(result.outcome, "blocked");
+    assert.equal(result.reason, "feature_disabled");
+    const parked = await prisma.memoryExtractionRun.findUniqueOrThrow({
+        where: { id: run.id },
+    });
+    assert.equal(parked.status, "pending");
+});
+
+test("an unapproved pair blocks dispatch without contacting a provider (§12.1)", async () => {
+    const { run } = await seedRun(1);
+    const result = await driveMemoryExtractionRunSlice({
+        runId: run.id,
+        owner: "worker-a",
+        // No register override: the shipped register has no approved pair.
+        handler: async () => {
+            assert.fail("an unapproved pair must never reach a provider");
+        },
+    });
+    assert.equal(result.outcome, "blocked");
+    assert.equal(result.reason, "pair_unavailable");
+});
+
+test("a cancelled run stops its driver at the next boundary (§11)", async () => {
+    const { user, run } = await seedRun(MEMORY_EXTRACTION_CHUNK_MAX_CONVERSATIONS * 2);
+    assert.ok(run.chunkTotal > 1);
+
+    const result = await driveMemoryExtractionRunSlice({
+        runId: run.id,
+        owner: "worker-a",
+        register: APPROVED_REGISTER,
+        handler: async ({ chunk }) => {
+            if (chunk.chunkIndex === 0) {
+                await cancelMemoryExtractionRun(user.id, run.id);
+            }
+            return { outcome: "completed" };
+        },
+    });
+    assert.equal(result.outcome, "cancelled");
+    // The in-flight chunk's report is refused: the run is no longer running,
+    // so its result cannot land after the user cancelled.
+    assert.equal(result.chunksProcessed, 1);
+    const cancelled = await prisma.memoryExtractionRun.findUniqueOrThrow({
+        where: { id: run.id },
+    });
+    assert.equal(cancelled.status, "cancelled");
+});
+
+test("a failing chunk is retried, then fails the run at its cap (§11)", async () => {
+    const { run } = await seedRun(1);
+    for (let attempt = 1; attempt < MEMORY_EXTRACTION_CHUNK_MAX_ATTEMPTS; attempt += 1) {
+        const retryable = await driveMemoryExtractionRunSlice({
+            runId: run.id,
+            owner: `worker-${attempt}`,
+            register: APPROVED_REGISTER,
+            handler: async () => ({ outcome: "failed", code: "provider_error" }),
+        });
+        // The slice ends on a retryable failure rather than looping: retrying
+        // in place would spend the whole budget during a provider outage.
+        assert.equal(retryable.outcome, "paused");
+        assert.equal(retryable.reason, "chunk_failed");
+        assert.equal(retryable.chunksProcessed, 1);
+        const parked = await prisma.memoryExtractionChunk.findFirstOrThrow({
+            where: { runId: run.id, chunkIndex: 0 },
+        });
+        assert.equal(parked.status, "pending", "below the cap a chunk retries");
+        assert.equal(parked.attemptCount, attempt);
     }
-    const completed = await getMemoryExtractionRun(user.id, run.id);
-    assert.equal(completed.status, "completed");
-    assert.equal(completed.chunkCompleted, run.chunkTotal);
-    assert.ok(completed.completedAt);
+
+    const terminal = await driveMemoryExtractionRunSlice({
+        runId: run.id,
+        owner: "worker-last",
+        register: APPROVED_REGISTER,
+        handler: async () => ({ outcome: "failed", code: "provider_error" }),
+    });
+    assert.equal(terminal.outcome, "failed");
+    const failed = await prisma.memoryExtractionRun.findUniqueOrThrow({
+        where: { id: run.id },
+    });
+    assert.equal(failed.status, "failed");
+    const chunk = await prisma.memoryExtractionChunk.findFirstOrThrow({
+        where: { runId: run.id, chunkIndex: 0 },
+    });
+    assert.equal(chunk.status, "failed");
+    assert.equal(chunk.failureCode, "provider_error");
+});
+
+test("a handler that hangs is timed out rather than holding the lease", async () => {
+    const { run } = await seedRun(1);
+    const result = await driveMemoryExtractionRunSlice({
+        runId: run.id,
+        owner: "worker-a",
+        register: APPROVED_REGISTER,
+        maxChunks: 1,
+        chunkTimeoutMs: 20,
+        handler: () => new Promise(() => {}),
+    });
+    assert.equal(result.chunksProcessed, 1);
+    const chunk = await prisma.memoryExtractionChunk.findFirstOrThrow({
+        where: { runId: run.id, chunkIndex: 0 },
+    });
+    assert.equal(chunk.failureCode, "chunk_timeout");
+});
+
+test("a run only one driver can claim is not driven twice concurrently", async () => {
+    const { run } = await seedRun(MEMORY_EXTRACTION_CHUNK_MAX_CONVERSATIONS * 2);
+    let concurrent = 0;
+    let maxConcurrent = 0;
+    const handler: ExtractionChunkHandler = async () => {
+        concurrent += 1;
+        maxConcurrent = Math.max(maxConcurrent, concurrent);
+        await new Promise((resolve) => setTimeout(resolve, 10));
+        concurrent -= 1;
+        return { outcome: "completed" };
+    };
+    const [a, b] = await Promise.all([
+        driveMemoryExtractionRunSlice({
+            runId: run.id,
+            owner: "worker-a",
+            register: APPROVED_REGISTER,
+            handler,
+        }),
+        driveMemoryExtractionRunSlice({
+            runId: run.id,
+            owner: "worker-b",
+            register: APPROVED_REGISTER,
+            handler,
+        }),
+    ]);
+    assert.equal(maxConcurrent, 1, "two drivers must never overlap on one run");
+    assert.ok(
+        [a.outcome, b.outcome].includes("not_claimed"),
+        "the second driver must lose the claim"
+    );
+});
+
+test("a chunk orphaned by a dead worker is reclaimed on the next claim (§11)", async () => {
+    const { run } = await seedRun(1);
+    const dead = await claimMemoryExtractionRun({
+        runId: run.id,
+        owner: "worker-dead",
+    });
+    assert.ok(dead);
+    const claimed = await claimNextExtractionChunk(dead);
+    assert.ok(claimed, "the dead worker took a chunk before dying");
+
+    // The process disappears mid-chunk: the chunk stays `running` under a
+    // generation nobody holds, and only pending chunks are claimable.
+    await prisma.memoryExtractionRun.update({
+        where: { id: run.id },
+        data: {
+            leaseExpiresAt: new Date(Date.now() - MEMORY_EXTRACTION_LEASE_TTL_MS),
+        },
+    });
+
+    const revived = await claimMemoryExtractionRun({
+        runId: run.id,
+        owner: "worker-next",
+    });
+    assert.ok(revived);
+    const reclaimedChunk = await prisma.memoryExtractionChunk.findFirstOrThrow({
+        where: { runId: run.id, chunkIndex: claimed.chunkIndex },
+    });
+    assert.equal(reclaimedChunk.status, "pending");
+    assert.equal(reclaimedChunk.leaseGeneration, null);
+    // The spent attempt is kept, so a chunk that kills its worker every time
+    // still reaches the retry cap instead of looping forever.
+    assert.equal(reclaimedChunk.attemptCount, 1);
+
+    // And the work is actually claimable again.
+    const retried = await claimNextExtractionChunk(revived);
+    assert.ok(retried);
+    assert.equal(retried.chunkIndex, claimed.chunkIndex);
+    assert.equal(retried.attemptCount, 2);
 });
 
 test("an expired lease is reclaimed to pending with progress intact (§3)", async () => {
-    const user = await createUser();
-    const conversationIds = await seedConversations(user.id, 2);
-    const estimate = await estimateMemoryExtraction(
-        baseInput(user.id, conversationIds)
-    );
-    const run = await createMemoryExtractionRun({
-        ...baseInput(user.id, conversationIds),
-        confirmedCredits: estimate.estimatedCredits,
+    const { run } = await seedRun(2);
+    const lease = await claimMemoryExtractionRun({
+        runId: run.id,
+        owner: "worker-a",
     });
-    await heartbeatMemoryExtractionRun(user.id, run.id);
+    assert.ok(lease);
     await prisma.memoryExtractionRun.update({
         where: { id: run.id },
         data: {
@@ -273,12 +605,6 @@ test("an expired lease is reclaimed to pending with progress intact (§3)", asyn
         },
     });
 
-    // A heartbeat against a dead lease reports the §18 410, not a claim.
-    await assert.rejects(
-        heartbeatMemoryExtractionRun(user.id, run.id),
-        expectCode("MEMORY_EXTRACTION_LEASE_EXPIRED")
-    );
-
     const sweep = await reconcileExpiredMemoryExtractionRuns();
     assert.equal(sweep.reclaimedRuns, 1);
     const reclaimed = await prisma.memoryExtractionRun.findUniqueOrThrow({
@@ -286,6 +612,9 @@ test("an expired lease is reclaimed to pending with progress intact (§3)", asyn
     });
     assert.equal(reclaimed.status, "pending");
     assert.equal(reclaimed.leaseExpiresAt, null);
+
+    // And the worker whose lease lapsed can no longer write.
+    assert.equal(await heartbeatMemoryExtractionRun(lease), false);
 });
 
 test("cancel is a deterministic, idempotent release (§11)", async () => {
