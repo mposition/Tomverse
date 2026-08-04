@@ -84,12 +84,47 @@ const EMPTY_RESULT: MemoryRetrievalResult = {
 const hashSignature = (signature: string) =>
     createHash("sha256").update(signature, "utf8").digest("hex");
 
+/**
+ * The §12.4 provenance restriction, expressed in the query rather than
+ * applied to the result.
+ *
+ * Filtering after the fetch would silently shrink the candidate set: rows
+ * produced by a revoked pair would still occupy their share of
+ * MAX_CANDIDATES and then be discarded, so an account with many revoked
+ * memories would retrieve less than one with none — for a reason nothing
+ * reports. Same argument as the always-considered union above.
+ */
+const provenanceFilter = (
+    approvedPairs: ReadonlyArray<{
+        extractionModelId: string;
+        promptVersion: string;
+    }>
+) => ({
+    OR: [
+        // User-authored: no extraction pair, not subject to eval approval.
+        { extractionModelId: null, promptVersion: null },
+        ...approvedPairs.map((pair) => ({
+            extractionModelId: pair.extractionModelId,
+            promptVersion: pair.promptVersion,
+        })),
+    ],
+});
+
 export async function retrieveMemoryContext(input: {
     userId: string;
     /** The current request text. */
     query: string;
     now?: Date;
     budget?: Partial<MemoryContextBudget>;
+    /**
+     * Extraction pairs whose memories may be injected (§12.4). Omit to
+     * consider every stored memory — which is right for diagnostics and for
+     * the account's own review screens, and never right for a prompt.
+     */
+    approvedPairs?: ReadonlyArray<{
+        extractionModelId: string;
+        promptVersion: string;
+    }>;
 }): Promise<MemoryRetrievalResult> {
     const now = input.now ?? new Date();
     const settings = await getMemorySettings(input.userId);
@@ -122,6 +157,9 @@ export async function retrieveMemoryContext(input: {
                               ],
                           },
                       ]
+                    : []),
+                ...(input.approvedPairs
+                    ? [provenanceFilter(input.approvedPairs)]
                     : []),
             ],
         },

@@ -12,6 +12,7 @@ import { AlertCircle, ArrowRight, CheckCircle2, Info, Loader2, Sparkles, X } fro
 import { useModalDialog } from "@/components/useModalDialog";
 import { DesktopChatShell } from "@/components/chat/DesktopChatShell";
 import { MobileChatShell } from "@/components/chat/MobileChatShell";
+import { prepareChatContextBundle } from "@/lib/chatContextBundleClient";
 import {
   ComparisonReviewDialog,
   QuoteBadge,
@@ -533,6 +534,8 @@ export function ChatPageClient({
     attachments: ChatAttachment[];
     deepResearchDepth?: "quick" | "standard" | "deep";
     admissionToken?: string | null;
+    contextBundle?: string | null;
+    contextLayout?: "single" | "comparison";
   } | null>(null);
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
   const [pendingRemoveModelId, setPendingRemoveModelId] = useState<string | null>(null);
@@ -1280,9 +1283,9 @@ export function ChatPageClient({
       // account's is, so its concurrency has to be admitted once for the whole
       // run -- otherwise the panels race each other and some are refused after
       // others have already started.
-      if (modelIds.length < 2) return { allowed: true, admissionToken: null };
+      if (modelIds.length < 2) return { allowed: true, admissionToken: null, contextBundle: null };
       if (comparisonPreflightInFlightRef.current) {
-        return { allowed: false, admissionToken: null };
+        return { allowed: false, admissionToken: null, contextBundle: null };
       }
 
       comparisonPreflightInFlightRef.current = true;
@@ -1336,7 +1339,7 @@ export function ChatPageClient({
               `${t("chat.comparisonPreflightFailed")} (${t("chat.traceId")}: ${clientTraceId})`,
               "error"
             );
-            return { allowed: false, admissionToken: null };
+            return { allowed: false, admissionToken: null, contextBundle: null };
           }
 
           if (response.ok) {
@@ -1346,6 +1349,16 @@ export function ChatPageClient({
               admissionToken:
                 typeof grant?.admissionToken === "string"
                   ? grant.admissionToken
+                  : null,
+              // A second opaque token with an unrelated job: the admission
+              // decides which concurrency slot each panel occupies, this one
+              // attests which context snapshot the whole comparison was
+              // priced against. Absent whenever the request had no memory
+              // context to price, which is every request while injection is
+              // off.
+              contextBundle:
+                typeof grant?.contextBundle === "string"
+                  ? grant.contextBundle
                   : null,
             };
           }
@@ -1379,7 +1392,7 @@ export function ChatPageClient({
             `${t("chat.comparisonPreflightFailed")} (${t("chat.traceId")}: ${clientTraceId})`,
             "error"
           );
-          return { allowed: false, admissionToken: null };
+          return { allowed: false, admissionToken: null, contextBundle: null };
         }
         if (
           (response.status === 500 &&
@@ -1409,7 +1422,7 @@ export function ChatPageClient({
             "tomverse_last_preflight_trace_id",
             traceId
           );
-          return { allowed: true, admissionToken: null };
+          return { allowed: true, admissionToken: null, contextBundle: null };
         }
         // A rate rejection is the one refusal here that resolves by itself, so
         // it is the one that has to say when. The server sends the wait twice
@@ -1478,7 +1491,7 @@ export function ChatPageClient({
           }`,
           "error"
         );
-        return { allowed: false, admissionToken: null };
+        return { allowed: false, admissionToken: null, contextBundle: null };
       } catch (error) {
         console.error(
           JSON.stringify({
@@ -1491,7 +1504,7 @@ export function ChatPageClient({
           `${t("chat.comparisonPreflightFailed")} (${t("chat.traceId")}: ${clientTraceId})`,
           "error"
         );
-        return { allowed: false, admissionToken: null };
+        return { allowed: false, admissionToken: null, contextBundle: null };
       } finally {
         comparisonPreflightInFlightRef.current = false;
       }
@@ -2980,6 +2993,25 @@ export function ChatPageClient({
         promptAttachments,
       });
       if (!preflight.allowed) return;
+      // The comparison preflight prices the whole set and hands back one
+      // bundle for it. A single-model send never had a preparation step, so
+      // this is where it gets one -- §10 requires the context to be priced
+      // before the request that sends it, whichever shape the send is.
+      const activeModelIds = selectedModels.filter(
+        (modelId) => !effectiveDisabledPanels.includes(modelId)
+      );
+      const contextLayout =
+        activeModelIds.length >= 2
+          ? ("comparison" as const)
+          : ("single" as const);
+      const contextBundle =
+        contextLayout === "comparison"
+          ? preflight.contextBundle
+          : await prepareChatContextBundle({
+              conversationId: isGuestMode ? null : activeChatId,
+              modelIds: activeModelIds,
+              prompt: trimmed,
+            });
 	  const userMsgId = crypto.randomUUID();
       const conversation = conversations.find((item) => item.id === activeChatId);
       const previousCount =
@@ -3039,6 +3071,13 @@ export function ChatPageClient({
         ...(preflight.admissionToken
           ? { admissionToken: preflight.admissionToken }
           : {}),
+        // The layout always travels, the bundle only when there is one: the
+        // layout describes the *send*, and it is what decides whether a stale
+        // refusal may be retried by one panel. Carrying it only alongside a
+        // bundle would leave a comparison looking like a single-model send
+        // whenever the context had nothing to price.
+        contextLayout,
+        ...(contextBundle ? { contextBundle } : {}),
       });
       // The single point where a draft is cleared by sending: the prompt is
       // now on its way, so this conversation's draft is spent. Every earlier

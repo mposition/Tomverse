@@ -24,7 +24,18 @@ export const THREE_MODELS = ["gpt-5-4-mini", "claude-sonnet-5", "gemini-3-6-flas
 export type Theme = "light" | "dark";
 
 export type StreamAttempt =
-  | { kind: "success"; chunks: string[]; intervalMs?: number; traceId?: string }
+  | {
+      kind: "success";
+      chunks: string[];
+      intervalMs?: number;
+      traceId?: string;
+      /**
+       * Sets `X-Chat-Memory-Used`, the §13.4 count. Omitted means the header
+       * is absent, which is what a request with no memory context produces --
+       * deliberately different from a header reading 0.
+       */
+      memoryUsedCount?: number;
+    }
   // Fetch never settles -- represents "still connecting, no token yet".
   // Bounded by the test/page lifetime, not an unbounded token generator.
   | { kind: "hold" }
@@ -154,7 +165,13 @@ function patchWindowFetchForChatStub(serializedSpec: string) {
       });
       return new Response(stream, {
         status: 200,
-        headers: { "Content-Type": "text/plain; charset=utf-8", "X-Request-ID": traceId },
+        headers: {
+          "Content-Type": "text/plain; charset=utf-8",
+          "X-Request-ID": traceId,
+          ...(typeof attempt.memoryUsedCount === "number"
+            ? { "X-Chat-Memory-Used": String(attempt.memoryUsedCount) }
+            : {}),
+        },
       });
     };
 
