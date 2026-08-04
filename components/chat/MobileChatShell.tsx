@@ -120,7 +120,7 @@ type MobileChatShellProps = {
   /** Set when image generation is visible to this viewer but not usable. */
   imageLock?: "sign_in" | "upgrade" | null;
   onLockedImageClick?: (lock: "sign_in" | "upgrade") => void;
-  onStartImageDraft?: (draftText: string) => void;
+  onStartImageDraft?: (draftText: string, modelId?: string) => void;
   imageWorkspace?: ReactNode;
   onSelectConversation: (id: string) => void;
   onRename: (id: string, title: string) => void;

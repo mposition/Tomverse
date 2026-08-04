@@ -508,6 +508,69 @@ test("a Free plan sees the image entry locked, not hidden", async ({ page }) => 
   await expect(entry).toHaveAttribute("data-locked", "true");
 });
 
+test("the catalogue's image tab is its own list and seeds the picked model", async ({
+  page,
+}) => {
+  await enableImageGenerationFlag(page);
+  await mockAuthenticatedApi(page);
+  await mockUserUsage(page, { plan: "Pro" });
+  await installImageGenerationApi(page);
+  await page.goto("/chat");
+
+  await page.getByTestId("composer-model-select").click();
+  await page.getByTestId("model-picker-tab-image").click();
+
+  const panel = page.getByTestId("image-model-tab-panel");
+  await expect(panel).toBeVisible();
+  // A separate catalogue, not a filter over the chat list: no chat model row
+  // and no chat-selection count survive the switch.
+  await expect(page.getByTestId("recommended-model-option")).toHaveCount(0);
+  await expect(page.getByTestId("model-picker-selection-count")).toHaveCount(0);
+
+  // Every registered model is listed, including one held by the price
+  // verification rule -- stated as a hold, never silently absent.
+  const held = panel.getByTestId("image-model-option").filter({
+    has: page.getByTestId("image-model-hold-note"),
+  });
+  await expect(held).toHaveCount(1);
+  await expect(held).toBeDisabled();
+
+  await panel
+    .getByTestId("image-model-option")
+    .filter({ hasNot: page.getByTestId("image-model-hold-note") })
+    .first()
+    .click();
+
+  // The workspace opens on the model that was picked.
+  await expect(page.getByTestId("image-generation-prompt")).toBeVisible();
+  await expect(page.getByTestId("image-model-gpt-image-2")).toHaveAttribute(
+    "aria-pressed",
+    "true"
+  );
+});
+
+test("a Free plan sees the image tab locked, not hidden", async ({ page }) => {
+  await enableImageGenerationFlag(page);
+  await mockAuthenticatedApi(page);
+  await installImageGenerationApi(page);
+  await page.goto("/chat");
+
+  await page.getByTestId("composer-model-select").click();
+  await page.getByTestId("model-picker-tab-image").click();
+
+  const selectable = page
+    .getByTestId("image-model-tab-panel")
+    .getByTestId("image-model-option")
+    .filter({ hasNot: page.getByTestId("image-model-hold-note") })
+    .first();
+  await expect(selectable).toBeVisible();
+  await expect(selectable).toHaveAttribute("data-locked", "true");
+
+  await selectable.click();
+  await page.waitForURL(/\/pricing/);
+  await expect(page.getByTestId("image-generation-prompt")).toHaveCount(0);
+});
+
 test("the composer entry carries the chat draft and restores it on cancel", async ({
   page,
 }) => {

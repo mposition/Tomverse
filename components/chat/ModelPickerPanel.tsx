@@ -20,12 +20,14 @@ import {
   Code2,
   Globe2,
   Image as ImageIcon,
+  ImagePlus,
   LockKeyhole,
   Search,
   SlidersHorizontal,
   X,
 } from "lucide-react";
 import { CreditCostBadge } from "@/components/credits/CreditCostBadge";
+import { ImageModelTabPanel } from "@/components/chat/ImageModelTabPanel";
 import { ModelLogo } from "@/components/chat/ModelLogo";
 import { ModelSelectionBadge } from "@/components/chat/ModelSelectionBadge";
 import { useHasCoarsePointer } from "@/components/chat/useHasCoarsePointer";
@@ -138,6 +140,14 @@ export type ModelPickerPanelProps = {
     properties?: { model_id?: string; recommendation_rank?: number }
   ) => void;
   comboFinderSlot?: React.ReactNode;
+  /**
+   * Image generation entry (policy v2 section 13). Absent when the feature flag
+   * is off: there is no image tab at all. Present but with `imageGenerationLock`
+   * set means the tab is visible and its rows route to sign-in or upgrade.
+   */
+  onSelectImageModel?: (modelId: string) => void;
+  imageGenerationLock?: "sign_in" | "upgrade" | null;
+  onLockedImageGenerationClick?: (lock: "sign_in" | "upgrade") => void;
 };
 
 export function ModelPickerPanel({
@@ -166,6 +176,9 @@ export function ModelPickerPanel({
   onDone,
   onTrackEvent,
   comboFinderSlot,
+  onSelectImageModel,
+  imageGenerationLock = null,
+  onLockedImageGenerationClick,
 }: ModelPickerPanelProps) {
   const { t, lang } = useLanguage();
   // Layout stays keyed on isMobileShell; touch hit area tracks the input device
@@ -181,6 +194,10 @@ export function ModelPickerPanel({
 
   const useIdSafe = useId();
   const [step, setStep] = useState<"recommended" | "all">("recommended");
+  // Chat models and image *generation* models are two catalogues, not one list
+  // with a filter: in the chat catalogue "image" already means image INPUT
+  // (policy v2 section 13). The tab is the separation.
+  const [tab, setTab] = useState<"chat" | "image">("chat");
   const [searchQuery, setSearchQuery] = useState("");
   const [filters, setFilters] = useState<ModelCatalogueFilters>(
     EMPTY_MODEL_CATALOGUE_FILTERS
@@ -188,13 +205,20 @@ export function ModelPickerPanel({
   const [isFilterSheetOpen, setIsFilterSheetOpen] = useState(false);
   const hasTrackedSearchRef = useRef(false);
   const openAllButtonRef = useRef<HTMLButtonElement | null>(null);
+  const chatTabRef = useRef<HTMLButtonElement | null>(null);
+  const imageTabRef = useRef<HTMLButtonElement | null>(null);
 
   const limitDescriptionId = `${useIdSafe}-model-limit`;
+  const chatTabId = `${useIdSafe}-tab-chat`;
+  const imageTabId = `${useIdSafe}-tab-image`;
+  const tabPanelId = `${useIdSafe}-tabpanel`;
+  const showImageTab = Boolean(onSelectImageModel) || Boolean(imageGenerationLock);
+  const isImageTab = showImageTab && tab === "image";
   const trimmedQuery = searchQuery.trim();
   // Searching is a shortcut into the catalogue, not a third screen: results
   // always render in the full list so the same filters and rows apply, and
   // clearing the box drops the user back exactly where they were.
-  const showCatalogue = step === "all" || trimmedQuery.length > 0;
+  const showCatalogue = !isImageTab && (step === "all" || trimmedQuery.length > 0);
   const selectionLimit = deriveModelSelectionLimit({
     selectedCount: selectedModelIds.length,
     maxCount: maxSelectableModels,
@@ -254,12 +278,25 @@ export function ModelPickerPanel({
         goBackToRecommended();
         return true;
       }
+      // The image tab is a sub-view of the picker, so Escape steps back to the
+      // chat tab before it closes the dialog -- the same level the back arrow
+      // returns to.
+      if (isImageTab) {
+        setTab("chat");
+        return true;
+      }
       return false;
     };
     return () => {
       escapeHandlerRef.current = null;
     };
-  }, [escapeHandlerRef, goBackToRecommended, isFilterSheetOpen, showCatalogue]);
+  }, [
+    escapeHandlerRef,
+    goBackToRecommended,
+    isFilterSheetOpen,
+    isImageTab,
+    showCatalogue,
+  ]);
 
   const openAllModels = () => {
     setStep("all");
@@ -320,11 +357,48 @@ export function ModelPickerPanel({
     onToggleModel(model.id);
   };
 
-  const screenTitle = trimmedQuery
-    ? stepCopy.searchResultsTitle
-    : showCatalogue
-      ? stepCopy.allModelsTitle
-      : stepCopy.recommendedTitle;
+  const screenTitle = isImageTab
+    ? t("chat.imageModelTabTitle")
+    : trimmedQuery
+      ? stepCopy.searchResultsTitle
+      : showCatalogue
+        ? stepCopy.allModelsTitle
+        : stepCopy.recommendedTitle;
+
+  // Automatic activation, roving tabindex: two tabs whose panels are cheap to
+  // render, which is exactly the case the pattern is written for. Focus follows
+  // the selection, otherwise the arrow key would leave the user on a control
+  // that has just become tabIndex -1.
+  const moveTab = (next: "chat" | "image") => {
+    setTab(next);
+    (next === "chat" ? chatTabRef : imageTabRef).current?.focus();
+  };
+
+  const handleTabKeyDown = (event: React.KeyboardEvent<HTMLButtonElement>) => {
+    if (event.key === "ArrowRight" || event.key === "ArrowLeft") {
+      event.preventDefault();
+      moveTab(tab === "chat" ? "image" : "chat");
+      return;
+    }
+    if (event.key === "Home") {
+      event.preventDefault();
+      moveTab("chat");
+      return;
+    }
+    if (event.key === "End") {
+      event.preventDefault();
+      moveTab("image");
+    }
+  };
+
+  const tabClass = (active: boolean) =>
+    `flex flex-1 items-center justify-center gap-1.5 rounded-lg px-3 text-xs font-bold transition ${
+      touchTarget ? "min-h-11" : "py-2"
+    } ${
+      active
+        ? "bg-white text-zinc-900 shadow-sm dark:bg-zinc-950 dark:text-zinc-100"
+        : "text-zinc-500 hover:text-zinc-800 dark:text-zinc-400 dark:hover:text-zinc-100"
+    }`;
 
   const openAllHint = `${interpolate(stepCopy.openAllModelsHint, {
     count: models.length,
@@ -396,9 +470,21 @@ export function ModelPickerPanel({
         <button
           type="button"
           data-testid="model-picker-back"
-          onClick={showCatalogue ? goBackToRecommended : onBackToActions}
+          onClick={
+            showCatalogue
+              ? goBackToRecommended
+              : isImageTab
+                ? () => moveTab("chat")
+                : onBackToActions
+          }
           className={`flex shrink-0 items-center justify-center rounded-lg text-zinc-500 transition hover:bg-zinc-100 hover:text-zinc-900 dark:hover:bg-zinc-800 dark:hover:text-white ${touchTarget ? "h-11 w-11" : "h-9 w-9"}`}
-          aria-label={showCatalogue ? stepCopy.backToRecommended : t("auth.cancel")}
+          aria-label={
+            showCatalogue
+              ? stepCopy.backToRecommended
+              : isImageTab
+                ? t("chat.modelPickerTabChat")
+                : t("auth.cancel")
+          }
         >
           <ArrowLeft className="h-4 w-4" aria-hidden="true" />
         </button>
@@ -413,15 +499,22 @@ export function ModelPickerPanel({
             The primary, neutral limit status. Reaching the cap is said here
             once -- not here plus a warning block plus the footer.
           */}
-          <span
-            data-testid="model-picker-selection-count"
-            className="block text-xs text-zinc-500"
-          >
-            {selectedModelIds.length}/{maxSelectableModels}{" "}
-            {selectedModelIds.length === 1
-              ? t("chat.modelsSelectedOne")
-              : t("chat.modelsSelectedOther")}
-          </span>
+          {/*
+            Only the chat tab has a comparison selection: repeating "0/3
+            models" over the image list would describe a limit that does not
+            apply to it.
+          */}
+          {!isImageTab && (
+            <span
+              data-testid="model-picker-selection-count"
+              className="block text-xs text-zinc-500"
+            >
+              {selectedModelIds.length}/{maxSelectableModels}{" "}
+              {selectedModelIds.length === 1
+                ? t("chat.modelsSelectedOne")
+                : t("chat.modelsSelectedOther")}
+            </span>
+          )}
         </div>
         {/*
           The compact sheet used to carry its own header above this one, and the
@@ -444,6 +537,53 @@ export function ModelPickerPanel({
         )}
       </div>
 
+      {showImageTab && (
+        <div
+          role="tablist"
+          aria-label={t("chat.modelPickerTabsLabel")}
+          data-testid="model-picker-tabs"
+          className="mb-2 flex shrink-0 gap-1 rounded-xl bg-zinc-100 p-1 dark:bg-zinc-900"
+        >
+          <button
+            ref={chatTabRef}
+            type="button"
+            role="tab"
+            id={chatTabId}
+            aria-controls={tabPanelId}
+            aria-selected={!isImageTab}
+            tabIndex={isImageTab ? -1 : 0}
+            data-testid="model-picker-tab-chat"
+            onClick={() => setTab("chat")}
+            onKeyDown={handleTabKeyDown}
+            className={tabClass(!isImageTab)}
+          >
+            <Boxes className="h-3.5 w-3.5" aria-hidden="true" />
+            {t("chat.modelPickerTabChat")}
+          </button>
+          <button
+            ref={imageTabRef}
+            type="button"
+            role="tab"
+            id={imageTabId}
+            aria-controls={tabPanelId}
+            aria-selected={isImageTab}
+            tabIndex={isImageTab ? 0 : -1}
+            data-testid="model-picker-tab-image"
+            data-locked={imageGenerationLock ? "true" : "false"}
+            onClick={() => setTab("image")}
+            onKeyDown={handleTabKeyDown}
+            className={tabClass(isImageTab)}
+          >
+            <ImagePlus
+              className={`h-3.5 w-3.5 ${isImageTab ? "text-accent-image-500" : ""}`}
+              aria-hidden="true"
+            />
+            {t("chat.modelPickerTabImage")}
+          </button>
+        </div>
+      )}
+
+      {!isImageTab && (
       <div className="mb-2 shrink-0 px-1">
         <div className="relative">
           <Search
@@ -475,6 +615,7 @@ export function ModelPickerPanel({
           )}
         </div>
       </div>
+      )}
 
       {/*
         UI-001. Everything between the search box and the footer becomes one
@@ -494,12 +635,29 @@ export function ModelPickerPanel({
       */}
       <div
         data-testid="model-picker-keyboard-scroll"
+        {...(showImageTab
+          ? {
+              role: "tabpanel" as const,
+              id: tabPanelId,
+              "aria-labelledby": isImageTab ? imageTabId : chatTabId,
+            }
+          : {})}
         className={
           isKeyboardCompact
             ? "min-h-0 flex-1 touch-pan-y overflow-x-hidden overflow-y-auto overscroll-y-contain [scroll-padding-block:0.5rem]"
             : "contents"
         }
       >
+      {isImageTab ? (
+        <ImageModelTabPanel
+          lock={imageGenerationLock}
+          onSelectModel={(modelId) => onSelectImageModel?.(modelId)}
+          onLockedClick={(lock) => onLockedImageGenerationClick?.(lock)}
+          touchTarget={touchTarget}
+          isKeyboardCompact={isKeyboardCompact}
+        />
+      ) : (
+      <>
       {selectedModelIds.length > 0 && (
         <div className="mb-2 shrink-0 px-1">
           <p className="mb-1 px-1 text-[11px] font-bold uppercase tracking-wide text-zinc-400">
@@ -696,12 +854,21 @@ export function ModelPickerPanel({
           </button>
         </div>
       )}
+      </>
+      )}
       </div>
 
       <div
         data-testid="model-selection-summary"
         className="mt-2 flex shrink-0 items-center gap-2 border-t border-zinc-200 px-1 pt-2 dark:border-zinc-700"
       >
+        {isImageTab ? (
+          // The chat comparison estimate is not the image price: quoting it
+          // here would put a number next to a list it does not describe.
+          <p className="min-w-0 flex-1 text-[11px] font-bold text-zinc-600 dark:text-zinc-300">
+            {t("chat.imageModelTabFooterHint")}
+          </p>
+        ) : (
         <p className="min-w-0 flex-1 text-[11px] font-bold text-zinc-600 dark:text-zinc-300">
           {activeSelectedCount}{" "}
           {activeSelectedCount === 1
@@ -718,6 +885,7 @@ export function ModelPickerPanel({
             }
           />
         </p>
+        )}
         <button
           type="button"
           data-testid="model-picker-done"

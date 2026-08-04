@@ -384,9 +384,11 @@ type ChatInputProps = {
   onOpenDeepResearchSetup?: () => void;
   /**
    * Switches to the image draft, carrying the composer's current text as the
-   * starting prompt. Absent when the image feature flag is off.
+   * starting prompt. Absent when the image feature flag is off. `modelId` is
+   * set when the user arrived from the catalogue's image tab and therefore
+   * already chose which model to start from.
    */
-  onStartImageDraft?: (draftText: string) => void;
+  onStartImageDraft?: (draftText: string, modelId?: string) => void;
   /** Set when image generation is visible to this viewer but not usable. */
   imageGenerationLock?: "sign_in" | "upgrade" | null;
   onLockedImageGenerationClick?: (lock: "sign_in" | "upgrade") => void;
@@ -3310,6 +3312,19 @@ export function ChatInput({
                         onDone={() => closeMenu(true, "done")}
                         onTrackEvent={trackModelPickerEvent}
                         comboFinderSlot={comboFinderSlot}
+                        onSelectImageModel={
+                          onStartImageDraft
+                            ? (modelId) => {
+                                closeMenu(false);
+                                onStartImageDraft(value, modelId);
+                              }
+                            : undefined
+                        }
+                        imageGenerationLock={imageGenerationLock}
+                        onLockedImageGenerationClick={(lock) => {
+                          closeMenu(false);
+                          onLockedImageGenerationClick?.(lock);
+                        }}
                       />
                     );
                   })()}

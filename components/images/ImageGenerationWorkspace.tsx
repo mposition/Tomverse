@@ -175,6 +175,12 @@ type ImageGenerationWorkspaceProps = {
   planAllowsImageGeneration: boolean;
   /** Text carried over from the chat composer when the user switched here. */
   initialPrompt?: string;
+  /**
+   * Set when the user arrived by picking a model in the catalogue's image tab.
+   * Unknown or held ids are dropped rather than trusted: the registry decides
+   * what is selectable, not the caller.
+   */
+  initialModelIds?: readonly string[];
   /** Present only when there is a chat draft to go back to. */
   onCancelDraft?: () => void;
 };
@@ -185,6 +191,7 @@ export function ImageGenerationWorkspace({
   flagEnabled,
   planAllowsImageGeneration,
   initialPrompt = "",
+  initialModelIds,
   onCancelDraft,
 }: ImageGenerationWorkspaceProps) {
   const { t } = useLanguage();
@@ -193,9 +200,13 @@ export function ImageGenerationWorkspace({
   const [prompt, setPrompt] = useState(initialPrompt);
   const [preset, setPreset] = useState<ImagePreset>("standard");
   const [size, setSize] = useState<ImageSize>("1024x1024");
-  const [selectedModelIds, setSelectedModelIds] = useState<string[]>([
-    DEFAULT_IMAGE_MODEL_ID,
-  ]);
+  const [selectedModelIds, setSelectedModelIds] = useState<string[]>(() => {
+    const enabled = new Set(listEnabledImageModels().map((model) => model.id));
+    const seeded = (initialModelIds ?? []).filter((modelId) =>
+      enabled.has(modelId)
+    );
+    return seeded.length > 0 ? [...new Set(seeded)] : [DEFAULT_IMAGE_MODEL_ID];
+  });
   const [retryingTargetIds, setRetryingTargetIds] = useState<string[]>([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);

@@ -471,6 +471,11 @@ export function ChatPageClient({
     text: string;
   } | null>(null);
   const [imageDraftSeedPrompt, setImageDraftSeedPrompt] = useState("");
+  // Set only when the user reached the draft by choosing a model in the
+  // catalogue's image tab; otherwise the workspace keeps its own default.
+  const [imageDraftSeedModelIds, setImageDraftSeedModelIds] = useState<
+    string[] | undefined
+  >(undefined);
   const { data: session, status } = useSession();
   const sessionUserId = session?.user?.id || null;
   // Declared before any model state below because the initial selected models
@@ -2098,12 +2103,13 @@ export function ChatPageClient({
 
     // From the composer: carry the typed text into the image prompt and
     // remember the chat draft so cancelling restores it.
-    const handleStartImageDraft = (draftText: string) => {
+    const handleStartImageDraft = (draftText: string, modelId?: string) => {
         setChatDraftBeforeImage({
             scopeId: currentChatIdRef.current,
             text: draftText,
         });
         setImageDraftSeedPrompt(draftText);
+        setImageDraftSeedModelIds(modelId ? [modelId] : undefined);
         setIsImageDraftActive(true);
         currentChatIdRef.current = null;
         setCurrentChatId(null);
@@ -2118,6 +2124,7 @@ export function ChatPageClient({
         const restore = chatDraftBeforeImage;
         setIsImageDraftActive(false);
         setImageDraftSeedPrompt("");
+        setImageDraftSeedModelIds(undefined);
         setChatDraftBeforeImage(null);
         if (restore) {
             currentChatIdRef.current = restore.scopeId;
@@ -2132,6 +2139,7 @@ export function ChatPageClient({
         latestLocalComparisonPromptRef.current = null;
         setIsImageDraftActive(true);
         setImageDraftSeedPrompt("");
+        setImageDraftSeedModelIds(undefined);
         setChatDraftBeforeImage(null);
         currentChatIdRef.current = null;
         setCurrentChatId(null);
@@ -3885,10 +3893,15 @@ export function ChatPageClient({
     <ImageGenerationWorkspace
       // Remount on switch: the workspace's local timeline, draft prompt and
       // poll loop all belong to exactly one conversation.
-      key={isImageDraftActive ? "image-draft" : currentChatId ?? "image-draft"}
+      key={
+        isImageDraftActive
+          ? `image-draft:${(imageDraftSeedModelIds ?? []).join(",")}`
+          : currentChatId ?? "image-draft"
+      }
       conversationId={isImageDraftActive ? null : currentChatId}
       onConversationCreated={handleImageConversationCreated}
       initialPrompt={imageDraftSeedPrompt}
+      initialModelIds={imageDraftSeedModelIds}
       onCancelDraft={chatDraftBeforeImage ? handleCancelImageDraft : undefined}
       flagEnabled={imageGenerationEnabled}
       planAllowsImageGeneration={
