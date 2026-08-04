@@ -18,9 +18,10 @@ Google 모델 활성화는 공식 가격·thinking 상한의 수동 검증 통�
   보내고 결과를 나란히 비교한다(§11). 단일 모델 요청은 1-모델 그룹이라는
   특수한 경우일 뿐 별도 경로가 아니다.
 - 모델은 `AVAILABLE_MODELS`·`ModelRegistry` 밖의 **이미지 모델 registry**
-  (§12)에서만 관리한다. 등록 현황(2026-08-04): `gpt-image-2`(활성),
-  `gemini-3.1-flash-image`(등록-비활성), `grok-imagine-image-quality-20260403`
-  (등록-비활성). 나머지 평가 후보는 §12.1에 있다. 비교 그룹의 모델 수 상한은
+  (§12)에서만 관리한다. 등록 현황(2026-08-04): `gpt-image-2`(활성) 1개,
+  `gemini-3.1-flash-image`·`grok-imagine-image-quality-20260403`·
+  `gemini-3.1-flash-lite-image`·`gemini-3-pro-image`(모두 등록-비활성) 4개.
+  미등록 평가 후보는 §12.1에 있다. 비교 그룹의 모델 수 상한은
   `IMAGE_GROUP_MAX_MODELS`(출시 기본 2)이며 UI·데이터 모델에 상한값을
   하드코딩하지 않는다.
 - text-to-image 전용, 모델당 요청 1장. `size=auto`·`quality=auto`·부분
@@ -302,10 +303,17 @@ gate 없이 노출되는 배포 창은 금지된다. UI 비노출은 보안 경�
 |---|---|---|---|
 | `gemini-3.1-flash-image` | **registry 등록-비활성** | 1K $0.067 / 2K $0.101 / 4K $0.151 | thinking 토큰 상한(끌 수 없음) 공식 확인이 선행. 상한 없이는 최악 원가가 유한하지 않아 고정 가격 불가 |
 | `grok-imagine-image-quality-20260403` | **registry 등록-비활성** | 1K $0.05 / 2K $0.07 | 가격 공식 확인, xAI adapter, `IMAGE_PROVIDER_XAI_COST_*`, 판매 크레딧 승인 |
-| `gemini-3.1-flash-lite-image` | 미등록 | 이미지 출력 약 $0.0336 (1K 전용) | 위 Google 조건과 동일. Draft 전용 후보이며 Google 모델로 비교 두 자리를 채우는 것은 다양성이 낮다 |
-| `gemini-3-pro-image` | 미등록 | 1K·2K $0.134 / 4K $0.24 | 동일 조건. `gpt-image-2` Final과 가격대가 겹쳐 초기 출시 이득이 적다 |
+| `gemini-3.1-flash-lite-image` | **registry 등록-비활성** | 이미지 출력 약 $0.0336 (1K 전용) | 위 Google 조건과 동일. Draft tier 후보이며, Google 모델로 비교 두 자리를 채우면 한 공급자의 실패 양상이 두 자리를 차지한다 |
+| `gemini-3-pro-image` | **registry 등록-비활성** | 1K·2K $0.134 / 4K $0.24 | 동일 조건 + 제품 판단 보류. `gpt-image-2` Final과 가격대가 겹쳐, 실사용 데이터가 Flash 부족을 보일 때 Pro·Max Final 전용으로 여는 것이 검토서의 권고다 |
 | `qwen-image-2.0-pro-2026-06-22` | 미등록 | 미확인 | 채팅용 OpenAI 호환 base URL을 쓸 수 없어 별도 endpoint·리전 검증 필요. 한국어 글자 정확도 확인 후 유료 벤치마크 대상 |
 | Ideogram 4.0 | 미등록 | Turbo $0.03 / Default $0.06 / Quality $0.10 | 신규 공급자 전체 온보딩(키·상태·비용 동기화·예산). 글자 렌더링 차별점이 그 비용을 정당화하는지가 판단 지점 |
+
+**등록-비활성은 사용자에게 보인다.** 카탈로그 이미지 탭은 등록된 모델을
+전부 표시하므로(§13, `docs/ui-contracts/image-generation-workspace.md`),
+지금 이미지 탭에는 활성 1개와 "준비 중" 4개가 함께 보인다. 이는 의도된
+노출이다 — 제품이 결정한 모델은 부재가 아니라 명시된 보류로 읽히는 편이
+낫다. 보류 행이 활성 모델보다 많아지는 상태가 바람직하지 않다고 판단되면,
+그것은 registry에서 후보를 빼는 결정이지 탭에서 숨기는 결정이 아니다.
 
 **보고된 최소 크레딧 수치를 그대로 쓰지 않는다.** 검토서의 56·78·38·149·
 34·67·112는 이미지 출력 가격만 ceiling으로 나눈 값이다. 정책 최소치는 요청
