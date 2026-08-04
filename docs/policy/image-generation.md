@@ -102,6 +102,25 @@ gate 없이 노출되는 배포 창은 금지된다. UI 비노출은 보안 경�
   경고를 단계적으로 발생시킨다(관측 PR).
 - 가격 변경은 소급 적용하지 않는다. `pricingVersion`·`costSource`·품질·
   크기·예약 크레딧을 예약 snapshot에 동결한다.
+- **정산은 예약 snapshot의 원가를 쓴다. 현재 가격표를 다시 조회하지 않는다.**
+  재조회는 예약과 정산 사이에 가격 코드가 배포되면 이미 가격이 정해진 요청의
+  기록을 덮어쓰고, 멀티 모델에서는 다른 provider가 만든 이미지에 gpt-image-2
+  표를 적용한다. snapshot이 원가를 주지 못하면 **0으로 완화하지 않는다** —
+  0은 비용 장부를 축소 기록하면서 provider budget을 과다 환급하고, 두 오류
+  모두 자기가 망가뜨린 숫자 안에서는 보이지 않는다. 예약된 최악 원가
+  (`reservedCostMicroUsd`)를 쓰고 `image_settlement_snapshot_cost_missing`으로
+  보고한다.
+- **표현 구조 변경은 `IMAGE_PRICING_VERSION`을 올리지 않는다.** 이 버전은 가격
+  계약을 가리킨다. `pricingSnapshot`에는 조회 key가 아니라 숫자
+  (`credits`·`outputCostMicroUsd`·`maxRequestCostMicroUsd`·`promptTokenLimit`)만
+  들어가고 품질·크기는 별도 컬럼에 동결되므로, 코드 내부 조회 key가 바뀌어도
+  감사 자료의 의미는 동일하다. 금액이 그대로인데 버전을 올리면 "가격 계약이
+  달라졌다"는 관측 노이즈만 만든다. snapshot의 **직렬화 구조**가 바뀌면 가격
+  버전이 아니라 snapshot 안의 `schemaVersion`으로 구분하고, 부재는 `1`로
+  해석한다.
+- 장기적으로 전역 `IMAGE_PRICING_VERSION`보다 **모델별 pricing version**이
+  적절하다. 전역 버전을 쓰면 xAI 가격을 추가할 때 OpenAI 가격이 그대로인데도
+  모든 OpenAI 지표가 새 버전으로 갈라진다.
 
 두 비율을 혼용하지 않는다: **판매가 기준 마진**은 `priceCents`가 분모이고
 (Starter 91.3% / Project 87.0% / Power 82.7%, 구독 56.8~82.7%),
@@ -411,7 +430,9 @@ OpenAI의 실제 픽셀 문자열을 한 값에 섞고 있다.** Google의 0.5K�
   변환한다.
 - 결과에는 실제 디코딩된 `width`·`height`를 기록한다.
 - 감사 snapshot에 provider로 전송한 실제 파라미터를 보존한다.
-- 기존 `size` 값은 과거 기록으로 유지하고 **소급 치환하지 않는다.**
+- 기존 `size` 값은 과거 기록으로 유지하고 **소급 치환하지 않는다.** 그 컬럼의
+  의미는 "실제 픽셀 규격"이므로, `1k|16:9` 같은 새 제품 옵션 의미를 그 컬럼에
+  넣어 재사용하지 않는다. 새 옵션은 snapshot 안에 별도로 보존한다.
 
 비교 가능 여부는 같은 `resolutionTier + aspectRatio`로 판정하되, 결과 화면에는
 실제 픽셀 크기를 표시한다.
@@ -423,7 +444,8 @@ OpenAI의 실제 픽셀 문자열을 한 값에 섞고 있다.** Google의 0.5K�
 | tier·aspect 어휘와 provider 변환 (`lib/imageResolution.ts`) | 완료 |
 | 실제 디코딩된 `width`·`height` 기록 (`ImageGeneration.outputWidth/Height`) | 완료 |
 | 전송 파라미터 감사 snapshot (`ImageGeneration.providerRequestParams`) | 완료 |
-| 가격표를 (tier, aspect) key로 이전 | **미착수 — 새 `pricingVersion` 필요, 승인 사항** |
+| 정산을 예약 snapshot에 고정 | 완료 (2026-08-04) |
+| 가격표를 (tier, aspect) key로 이전 | **미착수 — 첫 다중 해상도 모델 도입과 함께. `pricingVersion`은 올리지 않는다** |
 | UI 크기 선택지 두 축 분리 | 미착수 |
 
 **감사 snapshot에 prompt는 넣지 않는다.** prompt는 이미 같은 행에 있고, JSON
