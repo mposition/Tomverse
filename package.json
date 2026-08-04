@@ -54,6 +54,7 @@
     "maintenance:provider-model-catalog": "node scripts/run-provider-model-catalog-monitor.mjs",
     "maintenance:provider-probe": "node scripts/run-provider-probe.mjs",
     "maintenance:default-model-reconciliation": "node --import tsx scripts/run-default-model-reconciliation.mjs",
+    "maintenance:memory-search-terms": "node --import tsx scripts/backfill-memory-search-terms.mjs",
     "eval:default-model": "node --conditions=react-server --import tsx scripts/evalDefaultModel.mjs",
     "eval:memory-extraction": "node --conditions=react-server --import tsx scripts/evalImportedMemoryExtraction.mjs",
     "postinstall": "prisma generate",
