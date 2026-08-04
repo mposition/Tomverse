@@ -11,6 +11,7 @@ import {
 import { MEMORY_EXTRACTION_FLAG_KEY } from "@/lib/memoryAccess";
 import { analyzeExtractionChunk } from "@/lib/memoryExtractionPipeline";
 import { reserveMemoryExtractionAttempt } from "@/lib/memoryExtractionAdmission";
+import { commitExtractionChunkCandidates } from "@/lib/memoryExtractionCommit";
 import {
     releaseUnusedExtractionAttempt,
     releaseUnusedExtractionAttemptsForRun,
@@ -1083,5 +1084,302 @@ test("the batch sub-budget refuses with the dedicated 503 semantics (§3)", asyn
             error.status === 503 &&
             typeof error.retryAfter === "number" &&
             error.retryAfter > 0
+    );
+});
+
+/**
+ * Runs the offline pipeline over a user's seeded conversations with a canned
+ * answer, so a commit test can start from a real `ExtractionChunkAnalysis`
+ * rather than a hand-built one. The label map is still the server's, so a
+ * candidate can only cite messages that were actually shown.
+ */
+const analyzeSeeded = async (
+    conversationIds: string[],
+    candidates: unknown[]
+) => {
+    const conversations = await prisma.externalConversation.findMany({
+        where: { id: { in: conversationIds } },
+        select: { id: true, title: true },
+    });
+    const messages = await prisma.externalMessage.findMany({
+        where: { externalConversationId: { in: conversations.map((c) => c.id) } },
+        orderBy: { ordinal: "asc" },
+        select: {
+            id: true,
+            externalConversationId: true,
+            role: true,
+            content: true,
+            contentDigest: true,
+        },
+    });
+    return analyzeExtractionChunk({
+        conversations: conversations.map((conversation) => ({
+            externalConversationId: conversation.id,
+            title: conversation.title,
+            messages: messages
+                .filter((m) => m.externalConversationId === conversation.id)
+                .map((message) => ({
+                    externalMessageId: message.id,
+                    role: message.role as "user" | "assistant",
+                    content: message.content,
+                    contentDigest: message.contentDigest,
+                })),
+        })),
+        adapter: async () => ({ output: { candidates } }),
+    });
+};
+
+const PREFERENCE_CANDIDATE = {
+    kind: "preference",
+    statement: "사용자는 간결한 답변을 선호한다",
+    confidence: 0.9,
+    evidence: ["m1"],
+};
+
+/** A run claimed and ready to commit, with its conversation ids. */
+const claimedRun = async () => {
+    const user = await createUser();
+    const conversationIds = await seedConversations(user.id, 1);
+    const estimate = await estimateMemoryExtraction(
+        baseInput(user.id, conversationIds)
+    );
+    const run = await createMemoryExtractionRun({
+        ...baseInput(user.id, conversationIds),
+        confirmedCredits: estimate.estimatedCredits,
+    });
+    await setExtractionFlag(true);
+    const lease = await claimMemoryExtractionRun({
+        runId: run.id,
+        owner: "worker-a",
+    });
+    assert.ok(lease);
+    return { user, run, lease, conversationIds };
+};
+
+test("an accepted candidate is stored with its verified evidence (§8.3)", async () => {
+    const { user, run, lease, conversationIds } = await claimedRun();
+    const analysis = await analyzeSeeded(conversationIds, [
+        PREFERENCE_CANDIDATE,
+    ]);
+
+    const result = await commitExtractionChunkCandidates({
+        userId: user.id,
+        runId: run.id,
+        leaseGeneration: lease.leaseGeneration,
+        extractionModelId: run.extractionModelId,
+        analysis,
+    });
+    assert.equal(result.committed, true);
+    assert.equal(result.counts.stored, 1);
+
+    const items = await prisma.memoryItem.findMany({
+        where: { userId: user.id },
+        include: { evidences: true },
+    });
+    assert.equal(items.length, 1);
+    const [item] = items;
+    // Awaiting review, never active: extraction proposes, the user approves.
+    assert.equal(item.status, "candidate");
+    assert.equal(item.kind, "preference");
+    assert.ok(item.dedupeKey);
+    assert.ok(item.conflictKey);
+    // Provenance is recorded, so a later retirement can find what a model made.
+    assert.equal(item.extractionModelId, run.extractionModelId);
+    assert.equal(item.promptVersion, analysis.promptVersion);
+    assert.equal(item.evidences.length, 1);
+    assert.equal(item.evidences[0].sourceType, "external_message");
+    assert.ok(item.evidences[0].externalMessageId);
+});
+
+test("a retried chunk does not store the same candidate twice (§11)", async () => {
+    const { user, run, lease, conversationIds } = await claimedRun();
+    const analysis = await analyzeSeeded(conversationIds, [
+        PREFERENCE_CANDIDATE,
+    ]);
+    const commit = () =>
+        commitExtractionChunkCandidates({
+            userId: user.id,
+            runId: run.id,
+            leaseGeneration: lease.leaseGeneration,
+            extractionModelId: run.extractionModelId,
+            analysis,
+        });
+
+    const first = await commit();
+    const second = await commit();
+    assert.equal(first.counts.stored, 1);
+    assert.equal(second.counts.stored, 0);
+    assert.equal(second.counts.duplicate, 1);
+    assert.equal(
+        await prisma.memoryItem.count({ where: { userId: user.id } }),
+        1
+    );
+});
+
+test("a structurally rejected candidate is never stored, only counted (§8.4)", async () => {
+    const { user, run, lease, conversationIds } = await claimedRun();
+    const analysis = await analyzeSeeded(conversationIds, [
+        PREFERENCE_CANDIDATE,
+        {
+            kind: "constraint",
+            statement:
+                "사용자의 API 키는 sk-live-ABCDEFGHIJKLMNOPQRSTUVWXYZ012345 이다",
+            confidence: 0.9,
+            evidence: ["m1"],
+        },
+    ]);
+
+    const result = await commitExtractionChunkCandidates({
+        userId: user.id,
+        runId: run.id,
+        leaseGeneration: lease.leaseGeneration,
+        extractionModelId: run.extractionModelId,
+        analysis,
+    });
+    assert.equal(result.counts.stored, 1);
+    assert.equal(result.counts.discarded, 1);
+
+    const stored = await prisma.memoryItem.findMany({
+        where: { userId: user.id },
+        select: { statement: true },
+    });
+    assert.equal(stored.length, 1);
+    // The secret is absent from the store entirely — not parked for review.
+    assert.ok(!stored.some((item) => item.statement.includes("sk-live-")));
+});
+
+test("a candidate needing review is stored as reviewable, not active (§8.4)", async () => {
+    const { user, run, lease, conversationIds } = await claimedRun();
+    const analysis = await analyzeSeeded(conversationIds, [
+        {
+            kind: "preference",
+            // Imperative but not absolute: the validator demotes it for
+            // individual review rather than rejecting it outright.
+            statement: "존댓말로 답변해 주세요",
+            confidence: 0.9,
+            evidence: ["m1"],
+        },
+    ]);
+
+    const result = await commitExtractionChunkCandidates({
+        userId: user.id,
+        runId: run.id,
+        leaseGeneration: lease.leaseGeneration,
+        extractionModelId: run.extractionModelId,
+        analysis,
+    });
+    assert.equal(result.counts.storedForReview, 1);
+    const item = await prisma.memoryItem.findFirstOrThrow({
+        where: { userId: user.id },
+    });
+    assert.equal(item.status, "manual_review_required");
+    assert.equal(item.approvedAt, null);
+});
+
+test("evidence whose content changed since the chunk is not accepted (§8.4)", async () => {
+    const { user, run, lease, conversationIds } = await claimedRun();
+    const analysis = await analyzeSeeded(conversationIds, [
+        PREFERENCE_CANDIDATE,
+    ]);
+    // The source message is re-imported with different content between the
+    // model answering and the commit landing.
+    await prisma.externalMessage.updateMany({
+        where: { userId: user.id },
+        data: { contentDigest: externalContentDigest("something else") },
+    });
+
+    const result = await commitExtractionChunkCandidates({
+        userId: user.id,
+        runId: run.id,
+        leaseGeneration: lease.leaseGeneration,
+        extractionModelId: run.extractionModelId,
+        analysis,
+    });
+    assert.equal(result.counts.stored, 0);
+    assert.equal(result.counts.evidenceUnverified, 1);
+    assert.equal(
+        await prisma.memoryItem.count({ where: { userId: user.id } }),
+        0
+    );
+});
+
+test("a candidate citing another account's message stores nothing (§8.4)", async () => {
+    const { user, run, lease } = await claimedRun();
+    // The analysis is built over a DIFFERENT user's conversations, so every
+    // citation resolves to a message this run's owner does not own.
+    const stranger = await createUser();
+    const strangerConversations = await seedConversations(stranger.id, 1);
+    const analysis = await analyzeSeeded(strangerConversations, [
+        PREFERENCE_CANDIDATE,
+    ]);
+
+    const result = await commitExtractionChunkCandidates({
+        userId: user.id,
+        runId: run.id,
+        leaseGeneration: lease.leaseGeneration,
+        extractionModelId: run.extractionModelId,
+        analysis,
+    });
+    assert.equal(result.counts.stored, 0);
+    assert.equal(result.counts.evidenceUnverified, 1);
+    assert.equal(
+        await prisma.memoryItem.count({ where: { userId: user.id } }),
+        0
+    );
+    // And nothing was attached to the stranger either.
+    assert.equal(
+        await prisma.memoryItem.count({ where: { userId: stranger.id } }),
+        0
+    );
+});
+
+test("a worker that lost its lease commits nothing (§11 fencing)", async () => {
+    const { user, run, lease, conversationIds } = await claimedRun();
+    const analysis = await analyzeSeeded(conversationIds, [
+        PREFERENCE_CANDIDATE,
+    ]);
+    // Somebody else takes the run over while this worker was calling.
+    await prisma.memoryExtractionRun.update({
+        where: { id: run.id },
+        data: { leaseGeneration: lease.leaseGeneration + 1 },
+    });
+
+    const result = await commitExtractionChunkCandidates({
+        userId: user.id,
+        runId: run.id,
+        leaseGeneration: lease.leaseGeneration,
+        extractionModelId: run.extractionModelId,
+        analysis,
+    });
+    assert.equal(result.committed, false);
+    assert.equal(
+        result.committed === false ? result.reason : null,
+        "fenced_out"
+    );
+    assert.equal(
+        await prisma.memoryItem.count({ where: { userId: user.id } }),
+        0
+    );
+    assert.equal(await prisma.memoryEvidence.count(), 0);
+});
+
+test("a cancelled run cannot have candidates committed into it (§13.1)", async () => {
+    const { user, run, lease, conversationIds } = await claimedRun();
+    const analysis = await analyzeSeeded(conversationIds, [
+        PREFERENCE_CANDIDATE,
+    ]);
+    await cancelMemoryExtractionRun(user.id, run.id);
+
+    const result = await commitExtractionChunkCandidates({
+        userId: user.id,
+        runId: run.id,
+        leaseGeneration: lease.leaseGeneration,
+        extractionModelId: run.extractionModelId,
+        analysis,
+    });
+    assert.equal(result.committed, false);
+    assert.equal(
+        await prisma.memoryItem.count({ where: { userId: user.id } }),
+        0
     );
 });
