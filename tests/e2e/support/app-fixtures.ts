@@ -431,6 +431,14 @@ export type AuthenticatedQaState = {
   locked: boolean;
   shared: boolean;
   title: string;
+  /**
+   * The conversation's model selection as this mock has actually stored it --
+   * seeded from `options.selectedModels` and then updated by every
+   * PATCH /api/conversations/:id that carries one, exactly like the real
+   * endpoint. Exposed so a spec can assert what the "server" ended up with.
+   */
+  selectedModels: string[];
+  disabledPanels: string[];
   theme: "dark" | "light" | "system";
   timeZone: string;
   timeZoneInitializedAt: string | null;
@@ -499,6 +507,12 @@ export async function mockAuthenticatedApi(
     locked: false,
     shared: false,
     title: "QA conversation",
+    // Stands in for the compiled-in default selection, so it tracks
+    // DEFAULT_MODEL_ID rather than naming a model in its own right. Moved to
+    // gpt-5-6-luna with the app default on 2026-08-01; a spec that needs a
+    // specific model still passes `selectedModels` explicitly.
+    selectedModels: options.selectedModels || ["gpt-5-6-luna"],
+    disabledPanels: [],
     theme: "dark",
     timeZone: "UTC",
     timeZoneInitializedAt: "2026-05-01T00:00:00.000Z",
@@ -509,12 +523,8 @@ export async function mockAuthenticatedApi(
   const conversation = () => ({
     id: "qa-conversation",
     title: state.title,
-    // Stands in for the compiled-in default selection, so it tracks
-    // DEFAULT_MODEL_ID rather than naming a model in its own right. Moved to
-    // gpt-5-6-luna with the app default on 2026-08-01; a spec that needs a
-    // specific model still passes `selectedModels` explicitly.
-    selectedModels: options.selectedModels || ["gpt-5-6-luna"],
-    disabledPanels: [],
+    selectedModels: [...state.selectedModels],
+    disabledPanels: [...state.disabledPanels],
     webSearchMode: options.webSearchMode || "off",
     isLocked: state.locked,
     shareEnabled: state.shared,
@@ -782,6 +792,8 @@ export async function mockAuthenticatedApi(
         password?: string | null;
         title?: string;
         unlock?: boolean;
+        selectedModels?: string[];
+        disabledPanels?: string[];
       };
 
       if (typeof body.password === "string") {
@@ -792,6 +804,30 @@ export async function mockAuthenticatedApi(
       }
       if (typeof body.title === "string") {
         state.title = body.title;
+      }
+      // The model selection has to be *stored*, not echoed from the seed.
+      // ChatPageClient's send barrier (ensureModelSettingsReady) resolves only
+      // once the server has confirmed the exact selection the send is being
+      // made with, and it reads that confirmation out of this response. A mock
+      // that accepted the PATCH and then replied with the seeded selection
+      // told the app its change had never been saved: the send was abandoned,
+      // the screen was recovered to the seed and "모델 선택을 서버에 저장하지
+      // 못했습니다" was shown -- with the product behaving exactly as designed.
+      // Deep Research is where that showed up first, because it is the one
+      // flow that *changes* the selection and immediately sends against it.
+      // app/api/conversations/[conversationId]/route.ts persists both fields
+      // and returns the stored values; so does this.
+      if (Array.isArray(body.selectedModels)) {
+        state.selectedModels = Array.from(new Set(body.selectedModels));
+      }
+      if (Array.isArray(body.disabledPanels)) {
+        state.disabledPanels = Array.from(
+          new Set(
+            body.disabledPanels.filter((modelId) =>
+              state.selectedModels.includes(modelId)
+            )
+          )
+        );
       }
 
       await route.fulfill(json(conversation()));
