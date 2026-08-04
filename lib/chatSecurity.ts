@@ -50,6 +50,13 @@ import {
     type AddOnCreditReservationEntry,
 } from "@/lib/creditLedger";
 import { lockCreditAccount, offsetCreditDebt } from "@/lib/creditDebt";
+import {
+    incrementUsageBucket,
+    reserveProviderCostBudget,
+    usagePeriodStart,
+    type ReservationEntry,
+    type UsagePeriod,
+} from "@/lib/chatFinancePrimitives";
 import { calculateProviderUsageCost } from "@/lib/providerUsageCost";
 import type { PerplexityUsageCostSnapshot } from "@/lib/perplexityUsageCore";
 import { notifyProviderCreditIfNeeded } from "@/lib/providerMonitoring";
@@ -145,13 +152,7 @@ export type ChatBudget = {
     longContextThresholdTokens: number | null;
 };
 
-type ReservationEntry = {
-    key: string;
-    period: string;
-    periodStart: Date;
-    amount: number;
-    metric: "tokens" | "cost" | "credits" | "plan-credits" | "plan-cost" | "pro-response";
-};
+
 
 export type ChatUsageReservation = {
     reservationId: string;
@@ -649,25 +650,11 @@ export const getGuestUsageSnapshot = async (request: Request) => {
     };
 };
 
-const periodStart = (period: Period, now: Date) => {
-    if (period === "minute") {
-        return new Date(
-            Date.UTC(
-                now.getUTCFullYear(),
-                now.getUTCMonth(),
-                now.getUTCDate(),
-                now.getUTCHours(),
-                now.getUTCMinutes()
-            )
-        );
-    }
-    if (period === "day") {
-        return new Date(
-            Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate())
-        );
-    }
-    return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
-};
+// Moved to lib/chatFinancePrimitives.ts so a non-chat financial path can use
+// the same window arithmetic. Kept as a local alias so every call site in this
+// file stays exactly as it was (docs/policy/credit-and-cost-limits.md §9).
+const periodStart = (period: Period, now: Date) =>
+    usagePeriodStart(period as UsagePeriod, now);
 
 const retryAfterFor = (period: Period, now: Date, dailyEnd?: Date) => {
     let end: Date;
@@ -703,29 +690,10 @@ const safeDailyResetAt = (windowEnd: Date, now: Date) => {
     );
 };
 
-const incrementUsage = async (
-    tx: Prisma.TransactionClient,
-    key: string,
-    period: string,
-    start: Date,
-    limit: number,
-    amount = 1
-) => {
-    if (!Number.isSafeInteger(amount) || amount <= 0 || amount > limit) {
-        return false;
-    }
-    const rows = await tx.$queryRaw<Array<{ count: number }>>`
-        INSERT INTO "ChatUsageBucket" ("key", "period", "periodStart", "count", "updatedAt")
-        VALUES (${key}, ${period}, ${start}, ${amount}, NOW())
-        ON CONFLICT ("key", "period", "periodStart")
-        DO UPDATE SET
-            "count" = "ChatUsageBucket"."count" + ${amount},
-            "updatedAt" = NOW()
-        WHERE "ChatUsageBucket"."count" <= ${limit - amount}
-        RETURNING "count"
-    `;
-    return rows.length > 0;
-};
+// Moved to lib/chatFinancePrimitives.ts (§9). Local alias keeps call sites
+// unchanged; the conditional upsert that makes concurrent callers unable to
+// jointly exceed a limit lives there now.
+const incrementUsage = incrementUsageBucket;
 
 // A separate, feature-scoped guest cap (independent of the general
 // day/month chat-message quota from limitsFor/acquireChatAccess): guests
@@ -2750,78 +2718,41 @@ export const acquireChatAccess = async (
             }
         }
 
-        if (reservedCost > 0) {
-            const providerKey = `provider:${budget.provider}`;
-            const providerDayStart = periodStart("day", now);
-            const providerDayAllowed = await incrementUsage(
+        // Provider day/month cost budget, now taken through the shared
+        // primitive (docs/policy/credit-and-cost-limits.md §9) so the
+        // non-chat financial paths consume the same buckets by the same
+        // rules. The error stays chat's own: only this wrapper knows to
+        // offer alternative models on the same provider.
+        reservationEntries.push(
+            ...(await reserveProviderCostBudget(
                 tx,
-                providerKey,
-                "provider-cost-day",
-                providerDayStart,
-                providerDailyLimit,
-                reservedCost
-            );
-            if (!providerDayAllowed) {
-                throw new ChatAccessError(
-                    503,
-                    PROVIDER_BUDGET_EXHAUSTED,
-                    "This AI provider is temporarily unavailable.",
-                    undefined,
-                    {
-                        provider: budget.provider,
-                        scope: "provider_cost_day",
-                        limitLayer: "operational_guardrail",
-                        alternativeModelIds: alternativeModelsForProvider(
-                            budget.provider
-                        ),
-                        internalRequiredCostMicroUsd: reservedCost,
-                        internalLimitCostMicroUsd: providerDailyLimit,
-                    }
-                );
-            }
-            reservationEntries.push({
-                key: providerKey,
-                period: "provider-cost-day",
-                periodStart: providerDayStart,
-                amount: reservedCost,
-                metric: "cost",
-            });
-
-            const providerStart = periodStart("month", now);
-            const providerAllowed = await incrementUsage(
-                tx,
-                providerKey,
-                "provider-cost-month",
-                providerStart,
-                providerMonthlyLimit,
-                reservedCost
-            );
-            if (!providerAllowed) {
-                throw new ChatAccessError(
-                    503,
-                    PROVIDER_BUDGET_EXHAUSTED,
-                    "This AI provider is temporarily unavailable.",
-                    undefined,
-                    {
-                        provider: budget.provider,
-                        scope: "provider_cost_month",
-                        limitLayer: "operational_guardrail",
-                        alternativeModelIds: alternativeModelsForProvider(
-                            budget.provider
-                        ),
-                        internalRequiredCostMicroUsd: reservedCost,
-                        internalLimitCostMicroUsd: providerMonthlyLimit,
-                    }
-                );
-            }
-            reservationEntries.push({
-                key: providerKey,
-                period: "provider-cost-month",
-                periodStart: providerStart,
-                amount: reservedCost,
-                metric: "cost",
-            });
-        }
+                {
+                    provider: budget.provider,
+                    reservedCostMicroUsd: reservedCost,
+                    dailyLimit: providerDailyLimit,
+                    monthlyLimit: providerMonthlyLimit,
+                    now,
+                },
+                ({ scope, requiredCostMicroUsd, limitCostMicroUsd }) => {
+                    throw new ChatAccessError(
+                        503,
+                        PROVIDER_BUDGET_EXHAUSTED,
+                        "This AI provider is temporarily unavailable.",
+                        undefined,
+                        {
+                            provider: budget.provider,
+                            scope,
+                            limitLayer: "operational_guardrail",
+                            alternativeModelIds: alternativeModelsForProvider(
+                                budget.provider
+                            ),
+                            internalRequiredCostMicroUsd: requiredCostMicroUsd,
+                            internalLimitCostMicroUsd: limitCostMicroUsd,
+                        }
+                    );
+                }
+            ))
+        );
 
         // The slot itself was claimed at the top of this transaction, before
         // anything was charged. A request that claimed nothing takes the
