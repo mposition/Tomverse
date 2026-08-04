@@ -2042,19 +2042,74 @@ model MemoryExtractionRun {
   /// Selected ExternalConversation IDs (owner-verified at run creation).
   sourceSelection Json
 
-  chunkTotal     Int
+  chunkTotal Int
+  /// Derived from the chunk rows on every write — never incremented on its
+  /// own, so it cannot drift from the chunks it summarizes.
   chunkCompleted Int       @default(0)
   leaseExpiresAt DateTime?
   pricingVersion String?
+
+  /// Fencing token (§11 durability). Every successful claim increments it,
+  /// and every write a worker makes is conditioned on the generation it
+  /// claimed with. A worker that was superseded — because its lease expired
+  /// and the maintenance dispatcher took over — therefore cannot heartbeat,
+  /// finish a chunk or settle after waking up late. A lease deadline alone
+  /// cannot do this: two claimants can both pass a deadline check.
+  leaseGeneration Int @default(0)
+  /// Opaque worker identity, for observability only. Never a security check:
+  /// exclusivity comes from leaseGeneration, not from this string.
+  leaseOwner String?
 
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
   completedAt DateTime?
 
+  chunks MemoryExtractionChunk[]
+
   @@index([userId, status])
   /// Orphan reconciliation (§11): expired leases are found by status +
   /// lease deadline, mirroring the chat lease sweep.
   @@index([status, leaseExpiresAt])
+}
+
+/// One extraction model call (§11). Durable per-chunk state, created with the
+/// run so progress, retry budget and failure survive any executor dying.
+///
+/// `conversationIds` is stored rather than re-derived: chunk planning is a
+/// pure function of the selection *and its order*, so a re-plan under a
+/// different row order could hand a worker a different chunk than the one the
+/// user was quoted for. Storing the plan removes that class of drift.
+model MemoryExtractionChunk {
+  id    String              @id @default(cuid())
+  runId String
+  run   MemoryExtractionRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+
+  chunkIndex Int
+
+  /// pending | running | completed | failed — allowlist CHECK in the migration.
+  status String @default("pending")
+
+  /// ExternalConversation IDs this call covers, in plan order.
+  conversationIds Json
+
+  /// Bounded retry (§11). Incremented on claim, so a chunk that keeps killing
+  /// its worker cannot be retried forever.
+  attemptCount Int @default(0)
+
+  /// The run lease generation that last claimed this chunk. Writes are fenced
+  /// on it, so a superseded worker cannot report a result for a chunk that has
+  /// since been re-claimed.
+  leaseGeneration Int?
+
+  failureCode String?
+  startedAt   DateTime?
+  completedAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([runId, chunkIndex])
+  @@index([runId, status])
 }
 
 /// Account-level memory controls (§8.1). The master toggle is not an
