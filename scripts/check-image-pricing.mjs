@@ -121,10 +121,43 @@ for (const model of IMAGE_MODEL_REGISTRY) {
         `${label}: disabled (${model.disabledReason}) but still carries ${model.prices.length} price entries`
       );
     }
+    // Each reason states a different fact, so each has to be true. Without
+    // this the three are interchangeable labels and the admin panel reports a
+    // hold whose stated cause may not be the one actually blocking it.
     if (model.disabledReason === "price_unverified" && verification.verifiedAt) {
       failures.push(
         `${label}: marked price_unverified but priceVerification.verifiedAt is set`
       );
+    }
+    if (
+      model.disabledReason === "worst_case_cost_unbounded" &&
+      verification.thinkingCapMicroUsd !== null
+    ) {
+      failures.push(
+        `${label}: marked worst_case_cost_unbounded but a thinking cap is recorded -- ` +
+          `the worst case is bounded, so the hold needs a different reason`
+      );
+    }
+    if (model.disabledReason === "operational_hold") {
+      // An operational hold says the pricing question is settled and something
+      // else -- an adapter, a budget, an approval -- is missing. Using it while
+      // the price is still unknown would route around the verification rule.
+      if (!verification.verifiedAt) {
+        failures.push(
+          `${label}: marked operational_hold without a price verification date`
+        );
+      }
+      if (verification.thinkingCapMicroUsd === null) {
+        failures.push(
+          `${label}: marked operational_hold with an unknown thinking cap -- ` +
+            `that is worst_case_cost_unbounded, not an operational hold`
+        );
+      }
+      if (verification.sources.length === 0) {
+        failures.push(
+          `${label}: marked operational_hold without an official price source URL`
+        );
+      }
     }
     continue;
   }

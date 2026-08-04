@@ -292,34 +292,80 @@ gate 없이 노출되는 배포 창은 금지된다. UI 비노출은 보안 경�
   가정 금지), 정규화된 usage(input/thinking/output)·moderation 분류·
   provider request ID·provenance 종류를 공통 형태로 보고한다.
 
-### 12.1 평가 후보 등록부 (2026-08-04 모델 검토)
+### 12.1 후보 등록부와 검증 상태 (2026-08-04)
 
-제품 책임자의 모델 검토 결과다. **여기 적힌 가격은 전부 미검증이다** — 이
-환경에서 `ai.google.dev`, `docs.x.ai`, `help.aliyun.com`, `ideogram.ai`가
-모두 HTTP 403이라 어느 것도 공식 문서 본문에서 읽지 못했다. 결정을 잃지
-않기 위해 기록하는 것이지 활성화 근거가 아니다.
+가격 검증 결과는 `.github/audits/image-model-verification-worksheet.md`에
+공식 URL·확인일·원문 발췌와 함께 있다. **가격 검증이 끝났다는 사실과 실행
+준비가 끝났다는 사실은 서로 다른 gate다.**
 
-| 후보 | 상태 | 보고된 가격 | 활성화에 필요한 것 |
+| 후보 | 상태 | 검증된 이미지 출력가 | 남은 조건 |
 |---|---|---|---|
-| `gemini-3.1-flash-image` | **registry 등록-비활성** | 1K $0.067 / 2K $0.101 / 4K $0.151 | thinking 토큰 상한(끌 수 없음) 공식 확인이 선행. 상한 없이는 최악 원가가 유한하지 않아 고정 가격 불가 |
-| `grok-imagine-image-quality-20260403` | **registry 등록-비활성** | 1K $0.05 / 2K $0.07 | 가격 공식 확인, xAI adapter, `IMAGE_PROVIDER_XAI_COST_*`, 판매 크레딧 승인 |
-| `gemini-3.1-flash-lite-image` | **registry 등록-비활성** | 이미지 출력 약 $0.0336 (1K 전용) | 위 Google 조건과 동일. Draft tier 후보이며, Google 모델로 비교 두 자리를 채우면 한 공급자의 실패 양상이 두 자리를 차지한다 |
-| `gemini-3-pro-image` | **registry 등록-비활성** | 1K·2K $0.134 / 4K $0.24 | 동일 조건 + 제품 판단 보류. `gpt-image-2` Final과 가격대가 겹쳐, 실사용 데이터가 Flash 부족을 보일 때 Pro·Max Final 전용으로 여는 것이 검토서의 권고다 |
-| `qwen-image-2.0-pro-2026-06-22` | 미등록 | 미확인 | 채팅용 OpenAI 호환 base URL을 쓸 수 없어 별도 endpoint·리전 검증 필요. 한국어 글자 정확도 확인 후 유료 벤치마크 대상 |
-| Ideogram 4.0 | 미등록 | Turbo $0.03 / Default $0.06 / Quality $0.10 | 신규 공급자 전체 온보딩(키·상태·비용 동기화·예산). 글자 렌더링 차별점이 그 비용을 정당화하는지가 판단 지점 |
+| `gpt-image-2` | **활성** | 표 §3 | — |
+| `grok-imagine-image-quality-20260403` | 등록-비활성 (`operational_hold`) | 1K $0.05 / 2K $0.07 · **가격 검증 완료** | 판매 크레딧 승인, xAI adapter, `IMAGE_PROVIDER_XAI_COST_*`, 계정 가시성 확인 |
+| `gemini-3.1-flash-image` | 등록-비활성 (`worst_case_cost_unbounded`) | 0.5K $0.045 / 1K $0.067 / 2K $0.101 / 4K $0.151 | **thinking 상한** — 아래 참조 |
+| `gemini-3.1-flash-lite-image` | 등록-비활성 (`worst_case_cost_unbounded`) | 1K $0.0336 (1K 전용) | 동일. Draft 후보이며 두 번째 비교 자리를 Google로 채우지 않는다 |
+| `gemini-3-pro-image` | 등록-비활성 (`worst_case_cost_unbounded`) | 1K·2K $0.134 / 4K $0.24 | 동일 + 제품 판단 보류(`gpt-image-2` Final과 중복) |
+| `qwen-image-2.0-pro-2026-06-22` | 미등록 | 미확인 | 별도 endpoint·리전·한국어 글자 정확도 검증 |
+| Ideogram 4.0 | 미등록 | Turbo $0.03 / Default $0.06 / Quality $0.10 (미검증) | 신규 공급자 전체 온보딩 |
 
-**등록-비활성은 사용자에게 보인다.** 카탈로그 이미지 탭은 등록된 모델을
-전부 표시하므로(§13, `docs/ui-contracts/image-generation-workspace.md`),
-지금 이미지 탭에는 활성 1개와 "준비 중" 4개가 함께 보인다. 이는 의도된
-노출이다 — 제품이 결정한 모델은 부재가 아니라 명시된 보류로 읽히는 편이
-낫다. 보류 행이 활성 모델보다 많아지는 상태가 바람직하지 않다고 판단되면,
-그것은 registry에서 후보를 빼는 결정이지 탭에서 숨기는 결정이 아니다.
+**`disabledReason` 세 값은 서로 다른 사실을 말하며 `check:image-pricing`이
+각각을 강제한다.** `price_unverified`는 `verifiedAt`이 비어 있어야 하고,
+`worst_case_cost_unbounded`는 `thinkingCapMicroUsd`가 `null`이어야 하며,
+`operational_hold`는 `verifiedAt`·`thinkingCapMicroUsd`·`sources`가 모두
+채워져 있어야 한다. 세 값을 교체 가능한 라벨로 쓰면 관리자 화면이 실제
+차단 원인이 아닌 것을 보고하게 된다.
 
-**보고된 최소 크레딧 수치를 그대로 쓰지 않는다.** 검토서의 56·78·38·149·
-34·67·112는 이미지 출력 가격만 ceiling으로 나눈 값이다. 정책 최소치는 요청
-전체의 최악 원가 — 이미지 출력 + `IMAGE_PROMPT_BUDGET_MICRO_USD` 전액 +
-thinking 상한 — 으로 계산하므로 실제 바닥은 더 높다. 검증 후
-`minimumCreditsForImageOption()`이 산출한 값을 쓴다.
+#### Google 3종의 미결 쟁점 — thinking 상한
+
+thinking은 **API에서 끌 수 없고**(`"enabled by default and cannot be disabled
+in the API"`), `thinking_level`의 `minimal`·`high`는 수준 선택이지 토큰 상한이
+아니다. 따라서 요청에서 우리가 상한을 거는 방법은 없다.
+
+2026-08-04 워크시트는 대안으로 **모델 카드의 `Output token limit` 전체가
+과금 가능한 thinking·text 토큰이라고 가정하는 보수적 유도**를 제시한다.
+
+| 모델 | 최대 출력 토큰 | text·thinking 단가 | 유도된 상한 | 유도된 최소 크레딧 |
+|---|---:|---:|---:|---:|
+| Flash Image | 32,768 | $3.00/1M | 98,304µUSD | 1K 190 / 2K 228 / 4K 283 |
+| Flash Lite | 4,096 | $1.50/1M | 6,144µUSD | 1K 50 |
+| Pro Image | 32,768 | $12.00/1M | 393,216µUSD | 1K·2K 592 / 4K 710 |
+
+**이 유도는 아직 채택하지 않았다.** 두 문서 문장(context window가 출력량을
+정한다 / 응답 가격은 output + thinking의 합이다)을 결합한 추론이며, "숨겨진
+thinking이 output token limit에 포함된다"고 한 문장으로 명시한 공식 문구는
+확인되지 않았다. 유도값을 `thinkingCapMicroUsd`에 기록하면 추론이 코드에서
+사실이 된다. 다음 중 하나가 필요하다.
+
+1. 공급자가 한 문장으로 확인해 준 답변을 `sources`에 추가 — 가장 깔끔하다.
+2. 승인자가 이 유도를 명시적으로 채택하고 그 결정을 이 문서에 기록.
+
+이 결정에는 제품 비용이 따른다. 유도 상한을 쓰면 Flash Image 1K가 최소
+190크레딧이 되어 `gpt-image-2` Standard 정사각(70크레딧)의 약 2.7배다. 비교
+UI에서 한쪽이 다른 쪽의 세 배 가격인 상태는 그 자체로 제품 결정 사항이다.
+
+#### 판매 크레딧은 별도 승인이다
+
+위 수치는 전부 `minimumCreditsForImageOption()`이 내는 **수학적 바닥값**이다.
+마진·가격 drift·환불 위험을 반영한 판매 크레딧은 제품 책임자가 승인해야
+하며, 승인 전에는 `prices`를 채우지 않는다.
+
+#### 등록-비활성은 사용자에게 보인다
+
+카탈로그 이미지 탭은 등록된 모델을 전부 표시하므로(§13,
+`docs/ui-contracts/image-generation-workspace.md`), 현재 이미지 탭에는 활성
+1개와 "준비 중" 4개가 함께 보인다. 이는 의도된 노출이다 — 제품이 결정한
+모델은 부재가 아니라 명시된 보류로 읽히는 편이 낫다. 보류가 많아지는 상태가
+바람직하지 않다면 그것은 registry에서 후보를 빼는 결정이지 탭에서 숨기는
+결정이 아니다.
+
+#### 크기 체계는 아직 1024 계열뿐이다
+
+`ImageSize`는 `1024x1024`·`1536x1024`·`1024x1536` 세 값이다. Google의
+0.5K·2K·4K와 xAI의 2K는 표현할 수 없고, **Google의 1K landscape는
+`1536x1024`와 픽셀 규격이 다르다** — 문자열 치환이 아니라 provider별
+resolution·aspect 매핑이 필요하다. 크기 확장은 union·가격표·UI 선택지가
+함께 움직이는 별도 변경이다.
+
 
 ## 13. 진입점과 노출 정책 (v2)
 

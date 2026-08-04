@@ -725,17 +725,39 @@ const checks = [
       source.includes("imageProviderBudgetFloorMicroUsd"),
   },
   {
-    name: "Image model registry keeps an unverified model registered but disabled",
+    name: "Image model registry keeps an unrunnable model registered but disabled",
     file: "lib/imageModelRegistry.ts",
     test: (source) =>
-      // Policy section 12: a model whose official price could not be read is
+      // Policy section 12: a model that cannot be priced or cannot be run is
       // registered with an empty price list and a fail-closed hold, never
-      // priced from memory. maxImageRequestCostMicroUsd returns null when the
-      // thinking cap is unknown, so no fixed credit price can be derived.
-      source.includes('disabledReason: "price_unverified"') &&
+      // priced from memory. Pinned as the invariant rather than as one
+      // reason string -- the reasons are a union and which one applies moves
+      // as verification progresses, while these guards must not.
+      //
+      // maxImageRequestCostMicroUsd returns null when the thinking cap is
+      // unknown, so no fixed credit price can be derived from an unbounded
+      // worst case; getImageModelPrice refuses any disabled model outright.
+      source.includes('| "price_unverified"') &&
+      source.includes('| "worst_case_cost_unbounded"') &&
+      source.includes('| "operational_hold"') &&
       source.includes("thinkingCapMicroUsd: null") &&
       source.includes("if (thinkingCap === null) return null") &&
       source.includes("model.disabledReason !== null) return null"),
+  },
+  {
+    name: "Image pricing check enforces what each disabled reason claims",
+    file: "scripts/check-image-pricing.mjs",
+    test: (source) =>
+      // Three reasons that state three different facts. Without per-reason
+      // enforcement they degrade into interchangeable labels, and a model
+      // could be relabelled past the verification rule instead of satisfying
+      // it -- `operational_hold` in particular asserts that the price question
+      // is settled.
+      source.includes('model.disabledReason === "price_unverified" && verification.verifiedAt') &&
+      source.includes('model.disabledReason === "worst_case_cost_unbounded"') &&
+      source.includes("verification.thinkingCapMicroUsd !== null") &&
+      source.includes('model.disabledReason === "operational_hold"') &&
+      source.includes("marked operational_hold without a price verification date"),
   },
   {
     name: "Image provider budgets are per provider and cover every active one",

@@ -26,12 +26,31 @@ test("the registry ships GPT Image 2 enabled and Nano Banana 2 on a verification
   const google = getImageModel("gemini-3.1-flash-image");
   assert.equal(google?.provider, "google");
   assert.equal(google?.lifecycle, "stable");
-  // Policy section 12: registered, but no request may reach it until an
-  // official price has been read and the worst case proven finite.
-  assert.equal(google?.disabledReason, "price_unverified");
-  assert.equal(google?.priceVerification.verifiedAt, null);
+  // Policy section 12: the per-image price was read from Google's own
+  // documentation on 2026-08-04, but thinking cannot be disabled and no token
+  // cap is established -- so the worst case is not provably finite and the
+  // reason says exactly that rather than claiming the price is unknown.
+  assert.equal(google?.disabledReason, "worst_case_cost_unbounded");
+  assert.equal(google?.priceVerification.verifiedAt, "2026-08-04");
   assert.equal(google?.priceVerification.thinkingCapMicroUsd, null);
   assert.deepEqual(google?.prices, []);
+});
+
+test("a verified price does not by itself make a model runnable", () => {
+  // xAI's price question is settled -- flat per-image, no token charges -- so
+  // the hold is operational, not a pricing unknown. It must still be
+  // unselectable and unpriceable while the adapter, the budget and the sale
+  // credits are missing.
+  const grok = getImageModel("grok-imagine-image-quality-20260403");
+  assert.equal(grok?.disabledReason, "operational_hold");
+  assert.equal(grok?.priceVerification.verifiedAt, "2026-08-04");
+  assert.equal(grok?.priceVerification.thinkingCapMicroUsd, 0);
+  assert.deepEqual(grok?.prices, []);
+  assert.equal(
+    getImageModelPrice("grok-imagine-image-quality-20260403", "medium", "1024x1024"),
+    null
+  );
+  assert.ok(!listEnabledImageModels().some((model) => model.id === grok?.id));
 });
 
 test("a disabled model is invisible to every selection path", () => {
