@@ -15,6 +15,7 @@ import {
     X,
 } from "lucide-react";
 import { useLanguage } from "@/components/LanguageProvider";
+import { MemoryExtractionLauncher } from "@/components/memory/MemoryExtractionLauncher";
 import {
     FACTUAL_MEMORY_KINDS,
     MEMORY_STATEMENT_MAX_CODE_POINTS,
@@ -896,6 +897,12 @@ export function MemoryReviewSettings() {
                     </div>
                 )}
             </section>
+
+            {/* Extraction start sits between the settings and the queue it
+                fills: the launcher removes itself when the rollout flag is off
+                (its endpoint is gated), so a rollback leaves the review and
+                delete surfaces exactly as they were (§15). */}
+            <MemoryExtractionLauncher />
 
             <section className={sectionClass} data-testid="memory-review-queue">
                 <div className="flex flex-wrap items-center justify-between gap-2">

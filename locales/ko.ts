@@ -1326,6 +1326,76 @@ export const ko = {
             code_style: "코드 스타일",
         },
     },
+    // 기억 추출 실행 (Release B, §11 사전 확인 계약 · §21 UI 경로).
+    // 실행 전 모델·묶음 수·크레딧을 보여주고 사용자가 명시적으로 확인해야
+    // 시작합니다. 승인된 pair가 없으면 시작 자체가 열리지 않습니다.
+    memoryExtraction: {
+        launchTitle: "가져온 대화에서 기억 추출",
+        launchDescription:
+            "가져온 대화를 골라 기억 후보를 추출합니다. 추출된 후보는 검토해서 승인하기 전까지 답변에 사용되지 않습니다.",
+        modelTitle: "추출에 사용할 모델",
+        modelUnavailable: "지금은 사용할 수 있는 추출 모델이 없습니다.",
+        modelUnavailableDescription:
+            "추출 모델은 품질 평가를 통과한 뒤에만 열립니다. 열리면 이 화면에서 선택할 수 있습니다.",
+        modelCredits: "묶음당 {credits} 크레딧",
+        conversationsTitle: "추출할 대화 선택",
+        conversationsDescription:
+            "선택한 대화의 내용만 추출에 사용됩니다. 대화는 크기에 따라 여러 묶음으로 나뉘어 처리되고, 크레딧은 묶음 수로 계산합니다.",
+        conversationsEmpty: "가져온 대화가 아직 없습니다.",
+        conversationsEmptyCta: "대화 가져오기",
+        selectAllVisible: "보이는 대화 모두 선택",
+        clearSelection: "선택 해제",
+        selectionSummary: "{count}개 선택 · 약 {size}",
+        selectionHidden: "선택한 {count}개는 지금 목록에 보이지 않습니다.",
+        selectionTooLarge: "한 번에 최대 {max}개까지 선택할 수 있습니다.",
+        conversationMeta: "메시지 {messages}개 · {size}",
+        loadMore: "더 보기",
+        estimate: "필요한 크레딧 확인",
+        estimating: "계산하는 중…",
+        estimateResult: "묶음 {chunks}개 · 약 {credits} 크레딧",
+        estimateDescription:
+            "대화 {conversations}개를 묶음 {chunks}개로 나눠 처리합니다. 실제 차감액은 실행 후 정산되며 확인한 금액을 넘지 않습니다.",
+        estimateStale: "선택이 바뀌었습니다. 크레딧을 다시 확인해 주세요.",
+        start: "{credits} 크레딧으로 추출 시작",
+        starting: "시작하는 중…",
+        runInProgress: "이미 진행 중인 추출이 있습니다.",
+        runInProgressOpen: "진행 상태 보기",
+        errorGeneric: "문제가 발생했습니다. 다시 시도해 주세요.",
+        errorEstimateChanged:
+            "선택한 대화가 바뀌어 견적이 달라졌습니다. 다시 확인한 뒤 시작해 주세요.",
+        errorPairUnavailable: "선택한 모델은 지금 사용할 수 없습니다.",
+        errorBudget:
+            "추출 용량이 일시적으로 가득 찼습니다. 잠시 후 다시 시도해 주세요.",
+        runTitle: "기억 추출 진행 상태",
+        runBack: "기억 설정으로 돌아가기",
+        runNotFound: "이 추출 작업을 찾을 수 없습니다.",
+        runModel: "모델",
+        runStarted: "시작: {date}",
+        runFinished: "종료: {date}",
+        runProgress: "묶음 {completed}/{total} 완료",
+        runPendingNote:
+            "차례를 기다리는 중입니다. 이 창을 닫아도 추출은 계속되고, 나중에 여기서 다시 확인할 수 있습니다.",
+        runRunningNote:
+            "추출이 진행 중입니다. 이 창을 닫아도 계속되며 완료되면 검토 목록에 후보가 나타납니다.",
+        runCompletedNote:
+            "추출이 끝났습니다. 검토 대기 목록에서 후보를 확인하세요.",
+        runFailedNote:
+            "추출을 끝내지 못했습니다. 완료된 묶음의 결과는 그대로 남아 있습니다.",
+        runCancelledNote: "추출이 취소되었습니다. 완료된 묶음의 결과는 남아 있습니다.",
+        runReview: "검토 대기 목록 보기",
+        cancel: "추출 취소",
+        cancelArmed: "한 번 더 누르면 취소됩니다",
+        cancelling: "취소하는 중…",
+        recentRunsTitle: "최근 추출 작업",
+        recentRunOpen: "자세히 보기",
+        status: {
+            pending: "대기 중",
+            running: "진행 중",
+            completed: "완료",
+            failed: "실패",
+            cancelled: "취소됨",
+        },
+    },
     privacyPolicy: {
         title: "개인정보 처리방침",
         effective: "시행일: 2026년 7월 16일",
