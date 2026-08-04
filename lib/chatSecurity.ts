@@ -51,12 +51,14 @@ import {
 } from "@/lib/creditLedger";
 import { lockCreditAccount, offsetCreditDebt } from "@/lib/creditDebt";
 import {
+    RESERVATION_SOURCES,
     createDurableReservation,
     incrementUsageBucket,
     reservePlanCreditBuckets,
     reserveProviderCostBudget,
     usagePeriodStart,
     type ReservationEntry,
+    type ReservationSource,
     type UsagePeriod,
 } from "@/lib/chatFinancePrimitives";
 import { calculateProviderUsageCost } from "@/lib/providerUsageCost";
@@ -160,7 +162,12 @@ export type ChatUsageReservation = {
     reservationId: string;
     userId?: string;
     traceId: string;
-    source: "chat" | "comparison_review";
+    /**
+     * Which workflow committed the money. Audit metadata only — settlement,
+     * release and the expiry sweep behave identically for every value, and no
+     * branch in this file reads it (docs/policy/credit-and-cost-limits.md §9).
+     */
+    source: ReservationSource;
     modelId: string;
     provider: AiModel["provider"];
     entries: ReservationEntry[];
@@ -184,7 +191,7 @@ const durableReservationPayloadSchema = z
         reservationId: z.string().min(1).max(100),
         userId: z.string().min(1).max(100).optional(),
         traceId: z.string().min(1).max(120),
-        source: z.enum(["chat", "comparison_review"]),
+        source: z.enum(RESERVATION_SOURCES),
         modelId: z.string().min(1).max(160),
         provider: z.string().min(1).max(80),
         entries: z.array(
@@ -1790,7 +1797,7 @@ export const acquireChatAccess = async (
     budget: ChatBudget,
     options?: {
         traceId?: string;
-        source?: "chat" | "comparison_review";
+        source?: ReservationSource;
         /** Tool names enabled for this turn, recorded on the limit decision. */
         enabledTools?: string[];
         /**

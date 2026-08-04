@@ -31,6 +31,23 @@ import type { Prisma } from "@prisma/client";
 
 export type UsagePeriod = "minute" | "day" | "month";
 
+/**
+ * Every workflow that can commit money to a model call.
+ *
+ * Recorded on the reservation so an operator can tell a chat turn from a
+ * comparison review from a background extraction run. It is **not** a
+ * behaviour switch: reservation, settlement, release and the expiry sweep all
+ * treat these identically, and adding a value here must never require adding
+ * a branch anywhere (docs/policy/credit-and-cost-limits.md §9).
+ */
+export const RESERVATION_SOURCES = [
+    "chat",
+    "comparison_review",
+    "memory_extraction",
+] as const;
+
+export type ReservationSource = (typeof RESERVATION_SOURCES)[number];
+
 export type ReservationEntry = {
     key: string;
     period: string;
@@ -182,12 +199,8 @@ export type DurableReservationInput = {
     userId: string | null;
     subjectKey: string;
     traceId: string;
-    /**
-     * Audit metadata only. Which workflow reserved the money is recorded so an
-     * operator can tell them apart; it never changes what any of this does
-     * (docs/policy/credit-and-cost-limits.md §9).
-     */
-    source: string;
+    /** Audit metadata only — see RESERVATION_SOURCES. */
+    source: ReservationSource;
     provider: string;
     modelId: string;
     /**
