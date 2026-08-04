@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import {
   ENCODING_MARKER_PATTERNS,
   findQuestionRunsInsideStrings,
+  MARKER_SCOPES,
   stringLikeRanges,
 } from "../scripts/text-encoding-check-core.mjs";
 
@@ -169,10 +170,42 @@ test("the mojibake markers still fire", () => {
   assert.ok(markersIn("\u00EC\u00A0").includes("korean-mojibake-marker"));
 });
 
-test("no file under the scanned roots carries a control character", () => {
-  // Run against the real tree: the rule exists to keep three files that had one
-  // from getting it back, and to catch the fourth before it is committed.
-  const roots = ["app", "components", "lib", "locales"];
+test("each pattern declares which scope it belongs to", () => {
+  // The two scopes answer different questions, and each is wrong outside its
+  // own roots: the mojibake rules over tests and docs report fixtures that are
+  // deliberately mojibake-shaped, and the control-character rule confined to
+  // the product roots misses a NUL in a test. An untagged pattern would be
+  // silently dropped by the scope filter in the check script, so it is pinned
+  // here rather than defaulted there.
+  const scopes = new Set(Object.values(MARKER_SCOPES));
+  for (const pattern of ENCODING_MARKER_PATTERNS) {
+    assert.ok(scopes.has(pattern.scope), `${pattern.name} has no valid scope`);
+  }
+  assert.deepEqual(
+    ENCODING_MARKER_PATTERNS.filter(
+      (pattern) => pattern.scope === MARKER_SCOPES.EVERY_SOURCE
+    ).map((pattern) => pattern.name),
+    ["control-character"]
+  );
+});
+
+test("no source file anywhere in the repository carries a control character", () => {
+  // Run against the real tree, over every root the check walks -- not just the
+  // product roots. Confining this rule to app/components/lib/locales is what
+  // let a literal NUL sit in tests/server-contract/guest-attachment-route.test.ts,
+  // in the test asserting an executable payload is rejected: the assertion
+  // nobody could read was the one about a malicious upload.
+  const roots = [
+    "app",
+    "components",
+    "lib",
+    "locales",
+    "scripts",
+    "tests",
+    "prisma",
+    "docs",
+    ".github",
+  ];
   const extensions = new Set([
     ".ts",
     ".tsx",
