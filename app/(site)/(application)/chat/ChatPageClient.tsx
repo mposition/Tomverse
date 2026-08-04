@@ -486,7 +486,6 @@ export function ChatPageClient({
   const [isMobileViewport, setIsMobileViewport] = useState(false);
   const [isViewportReady, setIsViewportReady] = useState(false);
 
-  const isSending = false;
   const [focusToken, setFocusToken] = useState(0);
 
     // The account's saved new-conversation combination (lead first). This is
@@ -2168,8 +2167,25 @@ export function ChatPageClient({
         setCurrentChatId(conversation.id);
     };
 
+    // UX-024. Switching conversations while a response is still streaming is
+    // allowed, deliberately. This used to open with `if (isSending) return;`
+    // against a `const isSending = false`, so the guard never ran once -- the
+    // behaviour below is what the product has always done, and the constant
+    // only made it look otherwise.
+    //
+    // Allowing it is also the right answer, not merely the incumbent one.
+    // Nothing is lost by leaving: the panel's request is not aborted here (only
+    // "stop all" and the per-panel stop button abort), and app/api/chat/route.ts
+    // persists the assistant message against the `conversationId` captured when
+    // the send started -- never the one on screen when it finishes. The client
+    // never writes an assistant message itself, so a stream cannot follow the
+    // user into the conversation they switched to; tests/e2e/
+    // conversation-switch-during-stream.spec.ts holds that invariant.
+    //
+    // Blocking would cost far more than it buys: a Deep Research run answers in
+    // minutes, and refusing every sidebar click for its duration would strand
+    // the user in one conversation with no indication why the click did nothing.
     const handleSelectConversation = async (id: string, skipLockCheck = false) => {
-        if (isSending) return;
         localComparisonResponsesRef.current.clear();
         latestLocalComparisonPromptRef.current = null;
 
@@ -3952,7 +3968,6 @@ export function ChatPageClient({
           personalizedPrompt={personalizedPrompt}
           attachments={attachments}
           setAttachments={handleAttachmentsChange}
-          isSending={isSending}
           focusToken={focusToken}
           isGuestMode={isGuestMode}
           guestPreviewMode={isGuestPreviewEntry}
@@ -4009,7 +4024,6 @@ export function ChatPageClient({
           personalizedPrompt={personalizedPrompt}
           attachments={attachments}
           setAttachments={handleAttachmentsChange}
-          isSending={isSending}
           focusToken={focusToken}
           isGuestMode={isGuestMode}
           guestPreviewMode={isGuestPreviewEntry}

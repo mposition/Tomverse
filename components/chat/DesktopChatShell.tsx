@@ -58,7 +58,6 @@ type DesktopChatShellProps = {
   personalizedPrompt?: string | null;
   attachments: ChatAttachment[];
   setAttachments: AttachmentsChangeHandler;
-  isSending: boolean;
   focusToken: number;
   isGuestMode: boolean;
   /** What this caller may do with the AI cross-review. */
@@ -119,7 +118,6 @@ export function DesktopChatShell({
   personalizedPrompt,
   attachments,
   setAttachments,
-  isSending,
   focusToken,
   isGuestMode,
   aiReviewAccess,
@@ -809,7 +807,7 @@ export function DesktopChatShell({
               personalizedPrompt={personalizedPrompt}
               onSubmit={onSubmit}
               onCancel={() => setStopSignal((current) => current + 1)}
-              isSending={isSending || isAnyModelResponding}
+              isSending={isAnyModelResponding}
               focusToken={focusToken}
               currentChatId={currentChatId}
               selectedModels={selectedModels}
