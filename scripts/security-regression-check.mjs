@@ -716,11 +716,35 @@ const checks = [
     name: "Image provider budget has no silent production default",
     file: "lib/imageProviderBudget.ts",
     test: (source) =>
-      source.includes("IMAGE_PROVIDER_OPENAI_COST_MICROUSD_PER_DAY") &&
-      source.includes("IMAGE_PROVIDER_OPENAI_COST_MICROUSD_PER_MONTH") &&
+      // Names are derived per provider now (see the multi-provider check
+      // below); what this check pins is the fail-closed behaviour.
+      source.includes("IMAGE_PROVIDER_${namespace}_COST_MICROUSD_PER_DAY") &&
+      source.includes("IMAGE_PROVIDER_${namespace}_COST_MICROUSD_PER_MONTH") &&
       source.includes('"missing_in_production"') &&
       source.includes('"partial_configuration"') &&
       source.includes("imageProviderBudgetFloorMicroUsd"),
+  },
+  {
+    name: "Image model registry keeps an unverified model registered but disabled",
+    file: "lib/imageModelRegistry.ts",
+    test: (source) =>
+      // Policy section 12: a model whose official price could not be read is
+      // registered with an empty price list and a fail-closed hold, never
+      // priced from memory. maxImageRequestCostMicroUsd returns null when the
+      // thinking cap is unknown, so no fixed credit price can be derived.
+      source.includes('disabledReason: "price_unverified"') &&
+      source.includes("thinkingCapMicroUsd: null") &&
+      source.includes("if (thinkingCap === null) return null") &&
+      source.includes("model.disabledReason !== null) return null"),
+  },
+  {
+    name: "Image provider budgets are per provider and cover every active one",
+    file: "lib/imageProviderBudget.ts",
+    test: (source) =>
+      source.includes("imageProviderBudgetEnvNames") &&
+      source.includes("IMAGE_PROVIDER_${namespace}_COST_MICROUSD_PER_DAY") &&
+      source.includes("resolveActiveImageProviderBudgets") &&
+      source.includes("listActiveImageProviders"),
   },
   {
     name: "Readiness gates on the image provider budget while the flag is on",

@@ -819,8 +819,6 @@ export const pt = {
             "Não foi possível ler o arquivo como uma exportação compatível.",
         previewTitle: "Escolha as conversas a importar",
         previewProvider: "Exportação detectada: {provider}",
-        previewSummary:
-            "{selected} de {total} conversas selecionadas · cerca de {size}",
         warningsTitle: "Não incluído",
         warningSkippedMessages:
             "{count} mensagens de sistema ou de ferramentas ignoradas",
@@ -834,24 +832,17 @@ export const pt = {
         truncationTitle: "Algumas mensagens longas serão encurtadas",
         truncationExplain:
             "{conversations} conversas contêm mensagens acima do limite de armazenamento de {limit} caracteres. Se você aprovar, o início e o fim de cada mensagem longa são mantidos e o meio é substituído por um marcador.",
-        truncationApprove:
-            "Importar essas conversas com mensagens encurtadas",
         truncatedBadge: "Será encurtada",
         quotaExceededWarning:
             "A seleção é maior que o seu armazenamento de importação restante. Desmarque algumas conversas para continuar.",
         messagesCount: "{count} mensagens",
-        startImport: "Enviar seleção",
-        uploading: "Enviando lote {sent} de {total}…",
         uploadFailed:
             "O envio falhou. Você pode tentar novamente — lotes que já chegaram não são enviados duas vezes.",
         retryUpload: "Tentar enviar novamente",
-        stagedTitle: "Revisar e confirmar",
         stagedSummary:
             "{staged} conversas prontas para importar · {duplicates} duplicadas ignoradas",
         stagedTruncated: "{count} mensagens serão armazenadas encurtadas",
         allDuplicates: "Tudo nesta seleção já está na sua conta.",
-        finalize: "Confirmar importação",
-        finalizing: "Confirmando…",
         finalizeFailedQuota:
             "Sua conta não tem armazenamento de importação suficiente para esta seleção.",
         stagingExpired:
@@ -887,6 +878,222 @@ export const pt = {
             "Esta mensagem foi encurtada para respeitar o limite de armazenamento. O texto completo permanece apenas no serviço original.",
         viewerMessagesShown: "{shown} de {total} mensagens exibidas",
         deleteSnapshot: "Excluir esta versão",
+        // Etapa de preparação da exportação (etapa 1 do assistente)
+        guideTitle: "Primeiro, deixe o arquivo de exportação pronto",
+        guideDescription:
+            "Escolha o serviço de onde vai importar e mostraremos como obter o arquivo de exportação dele. Esta escolha serve apenas de orientação — o formato real é detectado a partir do próprio arquivo.",
+        guideEntryNeedsExport: "Ainda não tenho o arquivo de exportação",
+        guideEntryHasFile: "Já tenho o arquivo",
+        guideChatgptTitle: "Como obter uma exportação do ChatGPT",
+        guideChatgptStep1:
+            "No ChatGPT, abra Configurações → Controles de dados.",
+        guideChatgptStep2: "Solicite uma exportação dos seus dados.",
+        guideChatgptStep3:
+            "Baixe o ZIP pelo link recebido por e-mail. Não é preciso descompactar.",
+        guideClaudeTitle: "Como obter uma exportação do Claude",
+        guideClaudeStep1: "No Claude, abra Configurações → Privacidade.",
+        guideClaudeStep2: "Solicite uma exportação dos seus dados.",
+        guideClaudeStep3:
+            "Baixe o arquivo pelo link recebido por e-mail. Tanto ZIP quanto JSON funcionam como estão.",
+        guideFormats: "Arquivos ZIP e JSON são aceitos.",
+        guideStaysLocal:
+            "O arquivo de exportação nunca sai do seu dispositivo: ele é aberto dentro do navegador.",
+        guideMediaExcluded:
+            "Imagens, áudio e anexos não são importados.",
+        guidePrivacyDisclosure: "Ver como esses dados são tratados",
+        guideContinue: "Escolher o arquivo de exportação",
+        providerMismatchNotice:
+            "Este é um arquivo do {detected}, então vamos continuar com {detected}.",
+        // Estado de desktop recomendado
+        desktopRecommendedTitle:
+            "Este aparelho não consegue abrir o arquivo com segurança",
+        desktopRecommendedNoUpload: "O arquivo de exportação não foi enviado.",
+        desktopRecommendedNoData: "Nada foi guardado no Tomverse ainda.",
+        desktopRecommendedRetry:
+            "Tente novamente em um computador de mesa.",
+        // Indicador de etapas
+        stepIndicatorLabel: "Progresso da importação",
+        stepPrepareExport: "Preparar a exportação",
+        stepInspectFile: "Conferir o arquivo",
+        stepSelectConversations: "Escolher conversas",
+        stepConfirmImport: "Confirmar a importação",
+        stepDone: "Concluído",
+        stepPosition: "Etapa {current} de {total}, {name}",
+        back: "Voltar",
+        // Etapa de seleção de conversas
+        searchPlaceholder: "Pesquisar títulos de conversas",
+        filterFrom: "Data inicial",
+        filterTo: "Data final",
+        filterClear: "Limpar filtros",
+        selectAllNormal: "Selecionar todas as conversas normais",
+        clearAllNormal: "Limpar a seleção",
+        selectionHiddenNotice:
+            "{hidden} das {selected} selecionadas não aparecem com o filtro atual.",
+        selectionSummary:
+            "{selected} conversas selecionadas · cerca de {size}",
+        remainingSpace: "Sobram cerca de {remaining}",
+        rowTruncationConsent: "Incluir, guardada encurtada",
+        rowTruncationImpact:
+            "{count} mensagens serão guardadas mantendo apenas o começo e o fim.",
+        rowBlockedReason:
+            "{count} mensagens passam do limite de importação, então a conversa inteira fica de fora — não apenas essas mensagens.",
+        rowPosition: "Conversa {index} de {total}",
+        continueToReview: "Conferir a seleção",
+        preparingReviewTitle: "Preparando a importação",
+        preparingReviewProgress: "{sent} de {total} preparados",
+        preparingReviewNotSaved:
+            "Nada foi guardado na sua conta ainda: isso acontece depois da confirmação final.",
+        // Etapa de confirmação
+        reviewTitle: "Confira o que será importado",
+        reviewFinalizeCta: "Importar {count} conversas",
+        reviewBackToSelection: "Voltar à escolha de conversas",
+        reviewExpiresAt: "Esta confirmação vale até {time}.",
+        finalizingTitle: "Guardando na sua conta",
+        finalizingNotice:
+            "Mantenha esta tela aberta até terminar de guardar.",
+        // Recuperação por falta de espaço
+        quotaRevisionTitle: "Espaço de importação insuficiente",
+        quotaRevisionExplain:
+            "Tentar de novo com a mesma seleção vai falhar igual enquanto o total guardado na conta não mudar. Escolha menos conversas.",
+        quotaRevisionRestartNotice:
+            "Parte da seleção já foi enviada, então vamos começar uma importação nova. Suas escolhas e autorizações são mantidas.",
+        quotaRevisionAdjust: "Ajustar a seleção",
+        uploadRetryTransient:
+            "A preparação parou por um problema de conexão. Ela recomeça de onde parou, e o que já chegou não é enviado outra vez.",
+        expiredTitle: "Esta importação expirou",
+        diagnosticsToggle: "Detalhes técnicos",
+        // Tela de gerenciamento
+        newImportCta: "Começar uma nova importação",
+        inProgressTitle: "Importações em andamento",
+        inProgressResume: "Concluir esta importação",
+        inProgressRestart: "Começar de novo",
+        inProgressNotResumable:
+            "Esta importação não pode continuar. Comece de novo ou exclua.",
+        noServerDataYet: "Nada foi guardado no Tomverse.",
+        statusPreviewReady: "Aguardando confirmação",
+        statusExpired: "Expirada",
+        expiredCardNotice: "Expirou e precisa ser começada de novo.",
+        abandonImport: "Sair desta importação",
+    },
+    memoryReview: {
+        dataTabTitle: "Memória da conta",
+        dataTabDescription:
+            "Revise as memórias candidatas extraídas de conversas importadas e escolha se as memórias aprovadas são usadas em novos chats.",
+        dataTabOpen: "Abrir configurações de memória",
+        pageTitle: "Memória da conta",
+        pageDescription:
+            "Aprove ou rejeite as memórias candidatas aguardando revisão, e edite, fixe ou exclua as memórias em uso.",
+        backToChat: "Voltar ao chat",
+        signInRequired: "Faça login para gerenciar a memória da sua conta.",
+        privacyNote:
+            "Somente as memórias que você revisou e aprovou são usadas em novos chats. As memórias aprovadas e as preferências de estilo de resposta são enviadas como referência ao modelo Tomverse selecionado no momento, e você pode consultá-las, editá-las, desativá-las ou excluí-las a qualquer momento.",
+        disabledNotice:
+            "A revisão e a criação de memórias não estão disponíveis no momento. As memórias já salvas continuam visíveis e podem ser excluídas.",
+        settingsTitle: "Configurações de uso da memória",
+        masterToggleLabel: "Usar memórias aprovadas em novos chats",
+        masterToggleDescription:
+            "Quando desligado, nenhum chat usa memórias. As memórias salvas não são excluídas.",
+        styleToggleLabel: "Usar memórias de estilo de resposta",
+        styleToggleDescription:
+            "Permite que as respostas considerem as preferências de tom, extensão e estrutura deduzidas de conversas anteriores.",
+        defaultModeLabel: "Padrão para novos chats",
+        defaultModeOn: "Usar memória",
+        defaultModeOff: "Não usar memória",
+        reviewTitle: "Memórias aguardando revisão",
+        reviewDescription:
+            "As candidatas extraídas só são usadas em novos chats depois que você as aprova. Candidatas sensíveis e as que exigem revisão individual nunca entram na aprovação em massa.",
+        reviewEmpty: "Nenhuma memória aguarda revisão.",
+        bulkApprove: "Aprovar todas as candidatas não sensíveis",
+        bulkResult:
+            "{approved} aprovadas · {skipped} exigem revisão individual",
+        approve: "Aprovar",
+        reject: "Rejeitar",
+        edit: "Editar",
+        save: "Salvar",
+        cancel: "Cancelar",
+        needsIndividualReview: "Revisão individual necessária",
+        sensitiveBadge: "Sensível",
+        pinnedBadge: "Fixada",
+        expires: "Expira: {date}",
+        conflictNotice:
+            "Uma memória ativa já cobre o mesmo item. Você pode manter a memória existente ou substituí-la por esta.",
+        conflictReplace: "Substituir a memória existente",
+        activeTitle: "Memórias em uso",
+        activeEmpty: "Ainda não há memórias em uso.",
+        archivedTitle: "Memórias arquivadas",
+        pin: "Fixar",
+        unpin: "Desafixar",
+        delete: "Excluir",
+        deleteArmed: "Pressione novamente para excluir",
+        editParkedNotice:
+            "Sua edição precisa de nova revisão, então a memória voltou para a fila de revisão.",
+        validationFailed:
+            "Este conteúdo não pode ser salvo como memória. Escreva-o como uma afirmação declarativa de um fato, por exemplo, «O usuário prefere respostas concisas».",
+        errorGeneric: "Algo deu errado. Tente novamente.",
+        loadMore: "Mostrar mais",
+        evidenceManual: "Fundamento escrito por você:",
+        evidenceExternal: "Extraída de uma conversa importada",
+        evidenceViewSource: "Ver conversa de origem",
+        createTitle: "Adicionar uma memória manualmente",
+        createDescription:
+            "Adicione um fato ou uma preferência para lembrar como afirmação declarativa. Memórias adicionadas por você são usadas imediatamente.",
+        createKindLabel: "Tipo",
+        kindGroupFactual: "Fatos e preferências",
+        kindGroupStyle: "Estilo de resposta",
+        createStatementLabel: "Conteúdo da memória",
+        createStatementPlaceholder:
+            "ex.: O usuário prefere respostas concisas",
+        createGroundsLabel: "Fundamento",
+        createGroundsDescription:
+            "Descreva em que esta memória se baseia. O texto do fundamento é salvo junto com a memória.",
+        createSensitiveLabel: "Marcar como informação sensível",
+        createSubmit: "Adicionar memória",
+        createSuccess: "Memória adicionada.",
+        reauthRequired:
+            "Por segurança, entre novamente para continuar.",
+        exportTitle: "Baixar suas memórias",
+        exportDescription:
+            "Baixe todas as memórias salvas na sua conta, com o estado e a procedência dos fundamentos, em um único arquivo JSON. O arquivo não é mantido em nossos servidores.",
+        exportDownload: "Baixar tudo (JSON)",
+        deleteAllTitle: "Excluir todas as memórias",
+        deleteAllDescription:
+            "Exclui todas as memórias salvas e seus fundamentos, e cancela qualquer extração em andamento. Não é possível desfazer.",
+        deleteAllImportsNote:
+            "As conversas importadas não são excluídas. Você pode excluí-las separadamente nas configurações de importação.",
+        deleteAllConfirmLabel: "Digite {phrase} para confirmar",
+        deleteAllSubmit: "Excluir todas as memórias",
+        deleteAllDone: "Todas as memórias foram excluídas.",
+        status: {
+            candidate: "Aguardando revisão",
+            active: "Em uso",
+            rejected: "Rejeitada",
+            superseded: "Substituída",
+            expired: "Expirada",
+            suspended_by_source_lock: "Suspensa: origem bloqueada",
+            suspended_by_source_delete: "Suspensa: origem excluída",
+            manual_review_required: "Revisão individual necessária",
+        },
+        kind: {
+            identity: "Identidade",
+            preference: "Preferência",
+            occupation: "Ocupação",
+            expertise: "Especialidade",
+            long_term_goal: "Objetivo de longo prazo",
+            project: "Projeto",
+            constraint: "Restrição",
+            decision: "Decisão",
+            relationship: "Relacionamento",
+            recurring_context: "Contexto recorrente",
+            communication_style: "Estilo de comunicação",
+            tone: "Tom",
+            verbosity: "Extensão das respostas",
+            structure: "Estrutura",
+            formatting: "Formatação",
+            language: "Idioma",
+            explanation_depth: "Profundidade das explicações",
+            citation_preference: "Preferência de citação",
+            code_style: "Estilo de código",
+        },
     },
     privacyPolicy: {
         title: "Política de privacidade",
@@ -902,6 +1109,8 @@ export const pt = {
         attachments: "Anexos podem ser armazenados temporariamente em armazenamento de objetos criptografado para envio ao modelo e extração de documentos. Anexos temporários são atualmente excluídos após aproximadamente um dia pela política de ciclo de vida.",
         externalImportTitle: "Conversas importadas de outros serviços de IA",
         externalImport: "Você pode guardar na sua conta Tomverse as conversas anteriores que selecionar de um arquivo de exportação baixado de outro serviço de IA, como ChatGPT ou Claude. O arquivo de exportação é aberto apenas no seu navegador; o arquivo original nunca é enviado nem retido nos servidores ou no armazenamento da Tomverse. Somente o texto normalizado das conversas selecionadas, junto com os dados de origem (serviço de origem, horários originais, nomes de modelo apenas para exibição), é guardado como material privado da conta. Imagens, áudio e anexos não são importados. As conversas importadas podem conter dados pessoais de outras pessoas, portanto é sua responsabilidade confirmar que você tem direito de importar esses dados. Você pode consultar, excluir e exportar o material importado a qualquer momento, e ele é excluído junto com a sua conta. Excluí-lo da Tomverse não exclui os dados mantidos pelo serviço original.",
+        memoryTitle: "Memória de longo prazo da conta",
+        memory: "Se você optar por usar o recurso de memória, a Tomverse envia as partes das suas conversas importadas que você selecionar ao provedor de IA que você confirmar, para extrair memórias candidatas. A extração usa o modelo e a quantidade de créditos exibidos a você antes da execução. As candidatas extraídas não são usadas para gerar respostas até que você as revise e aprove. Candidatas classificadas como sensíveis e as que exigem revisão individual ficam fora da aprovação em massa e precisam ser confirmadas uma a uma. Candidatas, memórias aprovadas e seus fundamentos permanecem na sua conta até que você as exclua ou os dados da sua conta sejam excluídos. As memórias aprovadas e as preferências de estilo de resposta são enviadas como material de referência ao provedor de IA que gera cada nova resposta — ou seja, ao provedor de cada modelo quando você compara vários. Você pode consultar, editar e desativar as memórias salvas a qualquer momento, baixar a lista completa como arquivo ou excluir todas de uma vez. Ao desativar a memória, ela deixa de ser usada em novos chats.",
         analyticsTitle: "Análise de produto e atribuição de campanhas",
         analytics: "O Tomverse utiliza sempre o armazenamento essencial de sessão, segurança, idioma e preferências necessário ao serviço. Para análise de produto, visitantes da UE/EEE, Reino Unido, Suíça ou região não verificada têm de aceitar antes de iniciar o Google Analytics 4. Na Austrália e em regiões adicionadas após análise jurídica, a análise minimizada começa após um aviso claro e pode ser desativada de imediato ou mais tarde. Registamos eventos aprovados e metadados como origem UTM, idioma, país, número de modelos e plano. A Google também pode tratar endereço IP, navegador, URL da página e localização aproximada fora do país do visitante. Prompts, respostas, nomes ou conteúdos de ficheiros, e-mails e nomes de perfil nunca são incluídos. O armazenamento publicitário e a personalização permanecem desativados.",
         retentionTitle: "Retenção e exclusão",

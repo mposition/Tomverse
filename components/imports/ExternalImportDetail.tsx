@@ -2,36 +2,60 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useState } from "react";
-import { AlertTriangle, ArrowLeft, Loader2, Trash2 } from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { AlertTriangle, ArrowLeft, CheckCircle2, Clock, Loader2, Trash2 } from "lucide-react";
 import { useLanguage } from "@/components/LanguageProvider";
+import {
+    formatBytes,
+    interpolate,
+    primaryButtonClass,
+    providerLabel,
+    secondaryButtonClass,
+    sectionClass,
+} from "@/components/imports/importFormatting";
+import { ImportReviewStep } from "@/components/imports/wizard/ImportReviewStep";
+import { externalImportSelectionDigest } from "@/lib/externalImportSelectionDigest";
+import {
+    classifyExternalImportFailure,
+    type ServerReview,
+} from "@/lib/externalImportWizard";
 
 /**
- * /settings/imports/[importId] — read-only view of one import's outcome.
+ * /settings/imports/[importId] — one import's outcome, or the place a sealed
+ * one is finished.
  *
- * Shows what the status endpoint reports to the owner: provider, dates,
- * counts and the stored conversation titles. Message content stays behind
- * the (future) viewer; deletion here removes the whole import and cascades
- * to its conversations and messages (policy §13.1).
+ * docs/policy/external-conversation-import-and-memory.md §5.5, §13.1.
+ *
+ * A completed import shows what was stored. An unfinished one is where the
+ * seal contract pays off, because the three unfinished shapes need three
+ * different screens:
+ *
+ *   * `preview_ready` inside its TTL — the upload was declared complete and
+ *     verified against the server's own rows, so the staged set can be shown
+ *     and confirmed here. Seal fixed completeness, not selection: the user
+ *     may still drop conversations, and the import digest is recomputed for
+ *     whatever subset is actually saved;
+ *   * `staging` — a partial upload nobody sealed. The server cannot know
+ *     whether the rest was ever coming, so this offers start-over and delete
+ *     and no confirmation CTA. The parsed payload lives only in the tab that
+ *     produced it, and is deliberately not persisted anywhere to fake a
+ *     resume (§5.1);
+ *   * expired — shown as expired, never quietly hidden.
+ *
+ * Deletion removes the whole import and cascades to its conversations and
+ * messages; on an unfinished one it is the staging cancel (§5.5).
  */
 
-const interpolate = (
-    template: string,
-    values: Record<string, string | number>
-) =>
-    Object.entries(values).reduce(
-        (copy, [key, value]) => copy.replaceAll(`{${key}}`, String(value)),
-        template
-    );
-
-const formatBytes = (bytes: number): string => {
-    if (bytes < 1024) return `${bytes} B`;
-    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+type DetailConversation = {
+    id: string;
+    title: string;
+    conversationDigest: string;
+    messageCount: number;
+    contentBytes: number;
+    truncatedMessageCount: number;
+    finalized: boolean;
+    sourceUpdatedAt: string | null;
 };
-
-const providerLabel = (provider: string) =>
-    provider === "chatgpt" ? "ChatGPT" : provider === "claude" ? "Claude" : provider;
 
 type ImportDetail = {
     id: string;
@@ -46,14 +70,9 @@ type ImportDetail = {
     };
     createdAt: string;
     completedAt: string | null;
-    conversations: Array<{
-        id: string;
-        title: string;
-        messageCount: number;
-        contentBytes: number;
-        finalized: boolean;
-        sourceUpdatedAt: string | null;
-    }>;
+    effectiveExpiresAt?: string | null;
+    expired?: boolean;
+    conversations: DetailConversation[];
 };
 
 type DetailState =
@@ -64,8 +83,14 @@ type DetailState =
     | { kind: "not_found" }
     | { kind: "error" };
 
-const sectionClass =
-    "rounded-2xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-950/60";
+/** Mirrors the wizard's finalize outcome so the same review UI can drive it. */
+type FinalizeState =
+    | { kind: "idle" }
+    | { kind: "running" }
+    | { kind: "quota_revision" }
+    | { kind: "expired" }
+    | { kind: "failed" }
+    | { kind: "done"; finalizedConversations: number };
 
 export function ExternalImportDetail({ importId }: { importId: string }) {
     const { t } = useLanguage();
@@ -73,6 +98,14 @@ export function ExternalImportDetail({ importId }: { importId: string }) {
     const [state, setState] = useState<DetailState>({ kind: "loading" });
     const [deleteArmed, setDeleteArmed] = useState(false);
     const [isDeleting, setIsDeleting] = useState(false);
+    const [review, setReview] = useState<ServerReview | null>(null);
+    const [finalizeState, setFinalizeState] = useState<FinalizeState>({
+        kind: "idle",
+    });
+    // One key per subset. Reusing a key across a changed subset would be a
+    // digest conflict; minting a fresh one per attempt would turn a retry
+    // into a second import (§5.5 finalize idempotency).
+    const finalizeKeyRef = useRef({ signature: "", key: "" });
 
     useEffect(() => {
         let cancelled = false;
@@ -100,7 +133,38 @@ export function ExternalImportDetail({ importId }: { importId: string }) {
                     return;
                 }
                 const detail = (await response.json()) as ImportDetail;
+                if (cancelled) return;
                 setState({ kind: "ready", detail });
+                if (detail.status === "preview_ready" && !detail.expired) {
+                    const staged = detail.conversations.filter(
+                        (conversation) => !conversation.finalized
+                    );
+                    setReview({
+                        importId: detail.id,
+                        staged: staged.map((conversation) => ({
+                            stagedConversationId: conversation.id,
+                            // The raw provider id never leaves the browser that
+                            // parsed the archive, and the resume screen has no
+                            // use for it.
+                            rawExternalConversationId: "",
+                            title: conversation.title,
+                            conversationDigest: conversation.conversationDigest,
+                            messageCount: conversation.messageCount,
+                            contentBytes: conversation.contentBytes,
+                            truncatedMessageCount:
+                                conversation.truncatedMessageCount,
+                        })),
+                        duplicatesSkipped: detail.counts.duplicatesSkipped,
+                        truncatedMessages: detail.counts.truncatedMessages,
+                        selectedStagedIds: new Set(
+                            staged.map((conversation) => conversation.id)
+                        ),
+                        // Reaching preview_ready is what sealing means.
+                        sealed: true,
+                        sealedSelectionDigest: null,
+                        effectiveExpiresAt: detail.effectiveExpiresAt ?? null,
+                    });
+                }
             } catch {
                 if (!cancelled) setState({ kind: "error" });
             }
@@ -134,6 +198,89 @@ export function ExternalImportDetail({ importId }: { importId: string }) {
             setDeleteArmed(false);
         }
     }, [deleteArmed, importId, router]);
+
+    const toggleStaged = useCallback((stagedConversationId: string) => {
+        setReview((current) => {
+            if (!current) return current;
+            const next = new Set(current.selectedStagedIds);
+            if (next.has(stagedConversationId)) next.delete(stagedConversationId);
+            else next.add(stagedConversationId);
+            return { ...current, selectedStagedIds: next };
+        });
+    }, []);
+
+    const runFinalize = useCallback(async () => {
+        if (!review) return;
+        const selected = review.staged.filter((conversation) =>
+            review.selectedStagedIds.has(conversation.stagedConversationId)
+        );
+        if (selected.length === 0) return;
+
+        const signature = selected
+            .map((conversation) => conversation.stagedConversationId)
+            .sort()
+            .join(",");
+        if (finalizeKeyRef.current.signature !== signature) {
+            finalizeKeyRef.current = {
+                signature,
+                key: crypto.randomUUID(),
+            };
+        }
+
+        setFinalizeState({ kind: "running" });
+        try {
+            // Recomputed for the subset actually being saved, never replayed
+            // from the sealed set's digest.
+            const expectedImportDigest = await externalImportSelectionDigest(
+                selected.map((conversation) => conversation.conversationDigest)
+            );
+            const response = await fetch(
+                `/api/imports/external/${encodeURIComponent(review.importId)}/finalize`,
+                {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        idempotencyKey: finalizeKeyRef.current.key,
+                        selectedConversationIds: selected.map(
+                            (conversation) => conversation.stagedConversationId
+                        ),
+                        expectedImportDigest,
+                    }),
+                }
+            );
+            if (!response.ok) {
+                const body = (await response.json().catch(() => null)) as {
+                    code?: string;
+                } | null;
+                const failure = classifyExternalImportFailure(body?.code ?? null);
+                setFinalizeState({
+                    kind:
+                        failure === "quota"
+                            ? "quota_revision"
+                            : failure === "expired"
+                              ? "expired"
+                              : "failed",
+                });
+                return;
+            }
+            const body = (await response.json()) as {
+                finalizedConversations: number;
+            };
+            setFinalizeState({
+                kind: "done",
+                finalizedConversations: body.finalizedConversations,
+            });
+        } catch {
+            setFinalizeState({ kind: "failed" });
+        }
+    }, [review]);
+
+    const detail = state.kind === "ready" ? state.detail : null;
+    const unfinished =
+        detail?.status === "staging" || detail?.status === "preview_ready";
+    const expired = unfinished && detail?.expired === true;
+    const resumable =
+        detail?.status === "preview_ready" && !expired && review !== null;
 
     return (
         <div className="mx-auto w-full max-w-3xl space-y-4 px-4 py-8">
@@ -186,102 +333,215 @@ export function ExternalImportDetail({ importId }: { importId: string }) {
                 </section>
             )}
 
-            {state.kind === "ready" && (
+            {detail && (
                 <>
                     <section
                         className={sectionClass}
                         data-testid="external-import-detail-summary"
                     >
                         <p className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
-                            {providerLabel(state.detail.provider)}
+                            {providerLabel(detail.provider)}
                             <span className="ml-2 text-xs font-medium text-zinc-500">
                                 {new Date(
-                                    state.detail.completedAt ??
-                                        state.detail.createdAt
+                                    detail.completedAt ?? detail.createdAt
                                 ).toLocaleDateString()}
                             </span>
                         </p>
                         <p className="mt-1 text-sm leading-6 text-zinc-500">
                             {interpolate(
                                 t("externalImport.historyConversations"),
-                                { count: state.detail.counts.conversations }
+                                { count: detail.counts.conversations }
                             )}
                             {" · "}
                             {interpolate(t("externalImport.messagesCount"), {
-                                count: state.detail.counts.messages,
+                                count: detail.counts.messages,
                             })}
                             {" · "}
-                            {formatBytes(state.detail.counts.normalizedBytes)}
+                            {formatBytes(detail.counts.normalizedBytes)}
                         </p>
-                        {state.detail.counts.truncatedMessages > 0 && (
+                        {detail.counts.truncatedMessages > 0 && (
                             <p className="mt-1 text-sm leading-6 text-zinc-500">
                                 {interpolate(
                                     t("externalImport.stagedTruncated"),
-                                    {
-                                        count: state.detail.counts
-                                            .truncatedMessages,
-                                    }
+                                    { count: detail.counts.truncatedMessages }
                                 )}
                             </p>
                         )}
                     </section>
 
-                    <section className={sectionClass}>
-                        <h2 className="text-sm font-bold">
-                            {t("externalImport.detailConversations")}
-                        </h2>
-                        <ul className="mt-3 max-h-[28rem] space-y-1 overflow-y-auto pr-1">
-                            {state.detail.conversations.map((conversation) => (
-                                <li
-                                    key={conversation.id}
-                                    data-testid="external-import-detail-conversation"
-                                >
-                                    <Link
-                                        href={`/settings/imports/conversations/${conversation.id}`}
-                                        className="block rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-2 hover:bg-zinc-100 dark:border-zinc-800 dark:bg-zinc-950/60 dark:hover:bg-zinc-900"
-                                    >
-                                        <p className="truncate text-sm font-semibold text-zinc-900 dark:text-zinc-100">
-                                            {conversation.title}
-                                        </p>
-                                        <p className="mt-0.5 text-xs leading-5 text-zinc-500">
-                                            {interpolate(
-                                                t(
-                                                    "externalImport.messagesCount"
-                                                ),
-                                                {
-                                                    count: conversation.messageCount,
-                                                }
-                                            )}
-                                            {" · "}
-                                            {formatBytes(
-                                                conversation.contentBytes
-                                            )}
-                                        </p>
-                                    </Link>
-                                </li>
-                            ))}
-                        </ul>
-                    </section>
-
-                    <section className="rounded-2xl border border-red-200 bg-red-50 p-4 dark:border-red-950/70 dark:bg-red-950/20">
-                        <p className="text-sm leading-6 text-red-700/90 dark:text-red-200/90">
-                            {t("externalImport.deleteNote")}
-                        </p>
-                        <button
-                            type="button"
-                            className="mt-3 inline-flex items-center gap-2 rounded-xl border border-red-200 bg-white px-4 py-2.5 text-sm font-semibold text-red-600 transition-colors hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-red-900/60 dark:bg-red-950/40 dark:text-red-200 dark:hover:bg-red-950/70"
-                            data-testid="external-import-detail-delete"
-                            disabled={isDeleting}
-                            onClick={() => void deleteImport()}
+                    {finalizeState.kind === "done" ? (
+                        <section
+                            className={sectionClass}
+                            data-testid="external-import-detail-completed"
                         >
-                            <Trash2 className="h-4 w-4" />
-                            {isDeleting
-                                ? t("externalImport.deleting")
-                                : deleteArmed
-                                  ? t("externalImport.deleteImportArmed")
-                                  : t("externalImport.deleteImport")}
-                        </button>
-                    </section>
+                            <div className="flex items-start gap-3">
+                                <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0 text-status-success-500" />
+                                <p className="text-sm leading-6 text-zinc-600 dark:text-zinc-300">
+                                    {interpolate(
+                                        t("externalImport.importCompleted"),
+                                        {
+                                            count: finalizeState.finalizedConversations,
+                                        }
+                                    )}
+                                </p>
+                            </div>
+                            <Link
+                                href="/settings/imports"
+                                className={`${primaryButtonClass} mt-4`}
+                            >
+                                {t("externalImport.backToImports")}
+                            </Link>
+                        </section>
+                    ) : expired ? (
+                        <section
+                            className={sectionClass}
+                            data-testid="external-import-detail-expired"
+                        >
+                            <div className="flex items-start gap-3">
+                                <Clock className="mt-0.5 h-5 w-5 shrink-0 text-amber-500" />
+                                <div>
+                                    <h2 className="text-base font-bold">
+                                        {t("externalImport.expiredTitle")}
+                                    </h2>
+                                    <p className="mt-1 text-sm leading-6 text-zinc-500">
+                                        {t("externalImport.expiredCardNotice")}
+                                    </p>
+                                </div>
+                            </div>
+                            <Link
+                                href="/settings/imports/new"
+                                className={`${secondaryButtonClass} mt-4`}
+                                data-testid="external-import-detail-restart"
+                            >
+                                {t("externalImport.inProgressRestart")}
+                            </Link>
+                        </section>
+                    ) : resumable ? (
+                        <section
+                            className={sectionClass}
+                            data-testid="external-import-detail-resume"
+                        >
+                            {finalizeState.kind === "quota_revision" && (
+                                <div
+                                    className="mb-4 rounded-xl border border-red-200 bg-red-50 px-3 py-2.5 dark:border-red-900/60 dark:bg-red-950/20"
+                                    role="alert"
+                                    data-testid="external-import-detail-quota"
+                                >
+                                    <p className="text-sm font-semibold text-red-800 dark:text-red-200">
+                                        {t("externalImport.quotaRevisionTitle")}
+                                    </p>
+                                    <p className="mt-1 text-sm leading-6 text-red-800/90 dark:text-red-200/90">
+                                        {t(
+                                            "externalImport.finalizeFailedQuota"
+                                        )}
+                                    </p>
+                                </div>
+                            )}
+                            {finalizeState.kind === "failed" && (
+                                <p className="mb-4 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm leading-6 text-red-700 dark:border-red-900/60 dark:bg-red-950/20 dark:text-red-200">
+                                    {t("externalImport.errorGeneric")}
+                                </p>
+                            )}
+                            {finalizeState.kind === "expired" && (
+                                <p
+                                    className="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm leading-6 text-amber-800 dark:border-amber-900/60 dark:bg-amber-950/20 dark:text-amber-200"
+                                    data-testid="external-import-detail-expired-late"
+                                >
+                                    {t("externalImport.stagingExpired")}
+                                </p>
+                            )}
+                            <ImportReviewStep
+                                review={review}
+                                finalizing={finalizeState.kind === "running"}
+                                onToggleStaged={toggleStaged}
+                                onFinalize={() => void runFinalize()}
+                                onBackToSelection={() =>
+                                    router.push("/settings/imports")
+                                }
+                                onDiscard={() => void deleteImport()}
+                            />
+                        </section>
+                    ) : unfinished ? (
+                        <section
+                            className={sectionClass}
+                            data-testid="external-import-detail-not-resumable"
+                        >
+                            <div className="flex items-start gap-3">
+                                <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-amber-500" />
+                                <p className="text-sm leading-6 text-zinc-600 dark:text-zinc-300">
+                                    {t(
+                                        "externalImport.inProgressNotResumable"
+                                    )}
+                                </p>
+                            </div>
+                            <Link
+                                href="/settings/imports/new"
+                                className={`${secondaryButtonClass} mt-4`}
+                                data-testid="external-import-detail-restart"
+                            >
+                                {t("externalImport.inProgressRestart")}
+                            </Link>
+                        </section>
+                    ) : (
+                        <section className={sectionClass}>
+                            <h2 className="text-sm font-bold">
+                                {t("externalImport.detailConversations")}
+                            </h2>
+                            <ul className="mt-3 max-h-[28rem] space-y-1 overflow-y-auto pr-1">
+                                {detail.conversations.map((conversation) => (
+                                    <li
+                                        key={conversation.id}
+                                        data-testid="external-import-detail-conversation"
+                                    >
+                                        <Link
+                                            href={`/settings/imports/conversations/${conversation.id}`}
+                                            className="block rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-2 hover:bg-zinc-100 dark:border-zinc-800 dark:bg-zinc-950/60 dark:hover:bg-zinc-900"
+                                        >
+                                            <p className="truncate text-sm font-semibold text-zinc-900 dark:text-zinc-100">
+                                                {conversation.title}
+                                            </p>
+                                            <p className="mt-0.5 text-xs leading-5 text-zinc-500">
+                                                {interpolate(
+                                                    t(
+                                                        "externalImport.messagesCount"
+                                                    ),
+                                                    {
+                                                        count: conversation.messageCount,
+                                                    }
+                                                )}
+                                                {" · "}
+                                                {formatBytes(
+                                                    conversation.contentBytes
+                                                )}
+                                            </p>
+                                        </Link>
+                                    </li>
+                                ))}
+                            </ul>
+                        </section>
+                    )}
+
+                    {finalizeState.kind !== "done" && (
+                        <section className="rounded-2xl border border-red-200 bg-red-50 p-4 dark:border-red-950/70 dark:bg-red-950/20">
+                            <p className="text-sm leading-6 text-red-700/90 dark:text-red-200/90">
+                                {t("externalImport.deleteNote")}
+                            </p>
+                            <button
+                                type="button"
+                                className="mt-3 inline-flex items-center gap-2 rounded-xl border border-red-200 bg-white px-4 py-2.5 text-sm font-semibold text-red-600 transition-colors hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-red-900/60 dark:bg-red-950/40 dark:text-red-200 dark:hover:bg-red-950/70"
+                                data-testid="external-import-detail-delete"
+                                disabled={isDeleting}
+                                onClick={() => void deleteImport()}
+                            >
+                                <Trash2 className="h-4 w-4" />
+                                {isDeleting
+                                    ? t("externalImport.deleting")
+                                    : deleteArmed
+                                      ? t("externalImport.deleteImportArmed")
+                                      : t("externalImport.deleteImport")}
+                            </button>
+                        </section>
+                    )}
                 </>
             )}
         </div>

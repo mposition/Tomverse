@@ -15,6 +15,7 @@ export const AI_PROVIDERS = [
   "deepseek",
   "mistral",
   "moonshot",
+  "minimax",
   "qwen",
   "zhipu",
   "perplexity",
@@ -63,6 +64,13 @@ export const PROVIDER_API_CONFIGURATION: Record<
     baseUrl: "https://api.moonshot.ai/v1",
     apiKeyEnvName: "MOONSHOT_API_KEY",
     protocol: "openai-compatible",
+  },
+  minimax: {
+    // The Anthropic-compatible route keeps reasoning blocks separate from
+    // user-visible answer text; MiniMax's OpenAI route embeds <think> in it.
+    baseUrl: "https://api.minimax.io/anthropic/v1",
+    apiKeyEnvName: "MINIMAX_API_KEY",
+    protocol: "native",
   },
   qwen: {
     baseUrl: "https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
@@ -240,6 +248,12 @@ export const STATIC_CATALOG_RECONCILIATION_MODEL_IDS = [
   // earlier seed had stamped with the old US$0.50/US$1.00 fallback.
   "gpt-5-4-mini",
   "gemini-3-6-flash",
+  // Gemini 3.5 Flash was incorrectly left in the 1-credit Standard band even
+  // though its published $1.50/$9 rates are slightly dearer than 3.6 Flash.
+  // It is now also withdrawn from the public catalogue in favour of the
+  // cheaper successor. Reconcile both the corrected Advanced weight and the
+  // lifecycle transition without touching administrator-owned price fields.
+  "gemini-3-5-flash",
   "gemini-2-5-flash",
   "grok-4",
   "grok-4-3",
@@ -253,6 +267,11 @@ export const STATIC_CATALOG_RECONCILIATION_MODEL_IDS = [
   "deepseek-v4-pro",
   "deepseek-r1",
   "mistral-medium-3-1",
+  "claude-fable-5",
+  "claude-opus-4-8",
+  "codestral",
+  "kimi-k3",
+  "minimax-m3",
 ] as const;
 
 const reconciliationModelIds = new Set<string>(

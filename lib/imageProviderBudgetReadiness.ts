@@ -2,14 +2,15 @@ import "server-only";
 
 import { isImageGenerationEnabled } from "@/lib/appSettings";
 import {
-  resolveImageProviderBudget,
-  type ResolvedImageProviderBudget,
+  resolveActiveImageProviderBudgets,
+  type ResolvedImageProviderBudgetByProvider,
 } from "@/lib/imageProviderBudget";
 
 export type ImageProviderBudgetReadiness = {
   ready: boolean;
   flagEnabled: boolean;
-  resolved: ResolvedImageProviderBudget;
+  /** One entry per provider with an enabled model (policy section 8). */
+  providers: ResolvedImageProviderBudgetByProvider[];
 };
 
 /**
@@ -22,15 +23,17 @@ export type ImageProviderBudgetReadiness = {
  */
 export const getImageProviderBudgetReadiness =
   async (): Promise<ImageProviderBudgetReadiness> => {
-    const resolved = resolveImageProviderBudget(process.env, {
+    const providers = resolveActiveImageProviderBudgets(process.env, {
       production: process.env.NODE_ENV === "production",
     });
     // A database failure keeps the flag reading false here; the database
     // readiness check reports that failure on its own.
     const flagEnabled = await isImageGenerationEnabled().catch(() => false);
     return {
-      ready: !flagEnabled || resolved.limits !== null,
+      ready:
+        !flagEnabled ||
+        providers.every((entry) => entry.resolved.limits !== null),
       flagEnabled,
-      resolved,
+      providers,
     };
   };

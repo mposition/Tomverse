@@ -270,7 +270,7 @@ test("registry edits flow straight through to the recommendations", () => {
   );
   assert.equal(
     recommendations.find((item) => item.useCase === "multimodal").modelId,
-    "gemini-3-5-flash"
+    "gemini-2-5-flash"
   );
 });
 

@@ -819,8 +819,6 @@ export const de = {
             "Die Datei konnte nicht als unterstützter Export gelesen werden.",
         previewTitle: "Unterhaltungen zum Import auswählen",
         previewProvider: "Erkannter Export: {provider}",
-        previewSummary:
-            "{selected} von {total} Unterhaltungen ausgewählt · etwa {size}",
         warningsTitle: "Nicht enthalten",
         warningSkippedMessages:
             "{count} System- oder Tool-Nachrichten übersprungen",
@@ -834,25 +832,18 @@ export const de = {
         truncationTitle: "Einige lange Nachrichten werden gekürzt",
         truncationExplain:
             "{conversations} Unterhaltungen enthalten Nachrichten über der Speichergrenze von {limit} Zeichen. Wenn Sie zustimmen, bleiben Anfang und Ende jeder langen Nachricht erhalten, die Mitte wird durch eine Markierung ersetzt.",
-        truncationApprove:
-            "Diese Unterhaltungen mit gekürzten Nachrichten importieren",
         truncatedBadge: "Wird gekürzt",
         quotaExceededWarning:
             "Die Auswahl ist größer als Ihr verbleibender Import-Speicher. Wählen Sie einige Unterhaltungen ab, um fortzufahren.",
         messagesCount: "{count} Nachrichten",
-        startImport: "Auswahl hochladen",
-        uploading: "Stapel {sent} von {total} wird hochgeladen…",
         uploadFailed:
             "Das Hochladen ist fehlgeschlagen. Sie können es erneut versuchen — bereits angekommene Stapel werden nicht doppelt gesendet.",
         retryUpload: "Hochladen erneut versuchen",
-        stagedTitle: "Prüfen und bestätigen",
         stagedSummary:
             "{staged} Unterhaltungen bereit zum Import · {duplicates} Duplikate übersprungen",
         stagedTruncated: "{count} Nachrichten werden gekürzt gespeichert",
         allDuplicates:
             "Alles in dieser Auswahl ist bereits in Ihrem Konto vorhanden.",
-        finalize: "Import bestätigen",
-        finalizing: "Wird bestätigt…",
         finalizeFailedQuota:
             "Ihr Konto hat nicht mehr genug Import-Speicher für diese Auswahl.",
         stagingExpired:
@@ -888,6 +879,225 @@ export const de = {
             "Diese Nachricht wurde gekürzt gespeichert, um die Speichergrenze einzuhalten. Der vollständige Text existiert nur noch beim ursprünglichen Dienst.",
         viewerMessagesShown: "{shown} von {total} Nachrichten angezeigt",
         deleteSnapshot: "Diese Version löschen",
+        // Export-Vorbereitung (Schritt 1 des Assistenten)
+        guideTitle: "Halten Sie zuerst Ihre Exportdatei bereit",
+        guideDescription:
+            "Wählen Sie den Dienst, aus dem Sie importieren — wir zeigen Ihnen, wie Sie dessen Exportdatei erhalten. Diese Auswahl dient nur der Anleitung; das tatsächliche Format wird aus der Datei selbst erkannt.",
+        guideEntryNeedsExport: "Ich habe noch keine Exportdatei",
+        guideEntryHasFile: "Ich habe die Datei bereits",
+        guideChatgptTitle: "So erhalten Sie einen ChatGPT-Export",
+        guideChatgptStep1:
+            "Öffnen Sie in ChatGPT Einstellungen → Datenkontrollen.",
+        guideChatgptStep2: "Fordern Sie einen Datenexport an.",
+        guideChatgptStep3:
+            "Laden Sie die ZIP-Datei über den Link aus der E-Mail herunter. Entpacken ist nicht nötig.",
+        guideClaudeTitle: "So erhalten Sie einen Claude-Export",
+        guideClaudeStep1: "Öffnen Sie in Claude Einstellungen → Datenschutz.",
+        guideClaudeStep2: "Fordern Sie einen Datenexport an.",
+        guideClaudeStep3:
+            "Laden Sie die Datei über den Link aus der E-Mail herunter. ZIP und JSON funktionieren beide unverändert.",
+        guideFormats: "ZIP- und JSON-Dateien werden beide unterstützt.",
+        guideStaysLocal:
+            "Die Exportdatei verlässt Ihr Gerät nicht — sie wird nur im Browser geöffnet.",
+        guideMediaExcluded:
+            "Bilder, Audio und Anhänge werden nicht importiert.",
+        guidePrivacyDisclosure: "Umgang mit diesen Daten ansehen",
+        guideContinue: "Exportdatei auswählen",
+        providerMismatchNotice:
+            "Dies ist ein {detected}-Export, daher fahren wir mit {detected} fort.",
+        // Zustand „Desktop empfohlen“
+        desktopRecommendedTitle:
+            "Dieses Gerät kann die Datei nicht sicher öffnen",
+        desktopRecommendedNoUpload:
+            "Die Exportdatei wurde nicht hochgeladen.",
+        desktopRecommendedNoData:
+            "In Tomverse wurde noch nichts gespeichert.",
+        desktopRecommendedRetry:
+            "Bitte versuchen Sie es an einem Desktop-Computer erneut.",
+        // Schrittanzeige
+        stepIndicatorLabel: "Import-Fortschritt",
+        stepPrepareExport: "Export vorbereiten",
+        stepInspectFile: "Datei prüfen",
+        stepSelectConversations: "Unterhaltungen wählen",
+        stepConfirmImport: "Import bestätigen",
+        stepDone: "Fertig",
+        stepPosition: "Schritt {current} von {total}, {name}",
+        back: "Zurück",
+        // Auswahl der Unterhaltungen
+        searchPlaceholder: "Titel von Unterhaltungen suchen",
+        filterFrom: "Startdatum",
+        filterTo: "Enddatum",
+        filterClear: "Filter zurücksetzen",
+        selectAllNormal: "Alle normalen Unterhaltungen auswählen",
+        clearAllNormal: "Auswahl aufheben",
+        selectionHiddenNotice:
+            "{hidden} der {selected} ausgewählten werden vom aktuellen Filter nicht angezeigt.",
+        selectionSummary:
+            "{selected} Unterhaltungen ausgewählt · etwa {size}",
+        remainingSpace: "Noch etwa {remaining} frei",
+        rowTruncationConsent: "Gekürzt speichern und einschließen",
+        rowTruncationImpact:
+            "{count} Nachrichten werden nur mit Anfang und Ende gespeichert.",
+        rowBlockedReason:
+            "{count} Nachrichten überschreiten die Importgrenze, daher wird die gesamte Unterhaltung ausgeschlossen — nicht nur diese Nachrichten.",
+        rowPosition: "Unterhaltung {index} von {total}",
+        continueToReview: "Auswahl prüfen",
+        preparingReviewTitle: "Import wird vorbereitet",
+        preparingReviewProgress: "{sent} von {total} vorbereitet",
+        preparingReviewNotSaved:
+            "In Ihrem Konto ist noch nichts gespeichert — das geschieht erst nach der letzten Bestätigung.",
+        // Bestätigungsschritt
+        reviewTitle: "Prüfen Sie, was importiert wird",
+        reviewFinalizeCta: "{count} Unterhaltungen importieren",
+        reviewBackToSelection: "Zurück zur Auswahl der Unterhaltungen",
+        reviewExpiresAt: "Diese Bestätigung gilt bis {time}.",
+        finalizingTitle: "Wird in Ihrem Konto gespeichert",
+        finalizingNotice:
+            "Bitte lassen Sie dieses Fenster offen, bis das Speichern beendet ist.",
+        // Wiederherstellung bei zu wenig Platz
+        quotaRevisionTitle: "Nicht genug Importspeicher",
+        quotaRevisionExplain:
+            "Ein erneuter Versuch mit derselben Auswahl schlägt genauso fehl, solange Ihr gespeicherter Gesamtumfang gleich bleibt. Bitte wählen Sie weniger Unterhaltungen.",
+        quotaRevisionRestartNotice:
+            "Ein Teil der Auswahl wurde bereits gesendet, daher beginnt ein neuer Import. Ihre Auswahl und Zustimmungen bleiben erhalten.",
+        quotaRevisionAdjust: "Auswahl anpassen",
+        uploadRetryTransient:
+            "Die Vorbereitung wurde wegen eines Verbindungsproblems unterbrochen. Sie wird an der Abbruchstelle fortgesetzt; bereits Empfangenes wird nicht erneut gesendet.",
+        expiredTitle: "Dieser Import ist abgelaufen",
+        diagnosticsToggle: "Technische Details",
+        // Verwaltungsansicht
+        newImportCta: "Neuen Import starten",
+        inProgressTitle: "Laufende Importe",
+        inProgressResume: "Diesen Import abschließen",
+        inProgressRestart: "Neu beginnen",
+        inProgressNotResumable:
+            "Dieser Import kann nicht fortgesetzt werden. Beginnen Sie neu oder löschen Sie ihn.",
+        noServerDataYet: "In Tomverse wurde nichts gespeichert.",
+        statusPreviewReady: "Wartet auf Bestätigung",
+        statusExpired: "Abgelaufen",
+        expiredCardNotice: "Abgelaufen — er muss neu gestartet werden.",
+        abandonImport: "Diesen Import verlassen",
+    },
+    memoryReview: {
+        dataTabTitle: "Konto-Langzeitgedächtnis",
+        dataTabDescription:
+            "Prüfen Sie aus importierten Unterhaltungen extrahierte Gedächtnis-Kandidaten und legen Sie fest, ob genehmigte Erinnerungen in neuen Chats verwendet werden.",
+        dataTabOpen: "Gedächtnis-Einstellungen öffnen",
+        pageTitle: "Konto-Langzeitgedächtnis",
+        pageDescription:
+            "Genehmigen oder lehnen Sie wartende Gedächtnis-Kandidaten ab und bearbeiten, fixieren oder löschen Sie verwendete Erinnerungen.",
+        backToChat: "Zurück zum Chat",
+        signInRequired:
+            "Melden Sie sich an, um das Gedächtnis Ihres Kontos zu verwalten.",
+        privacyNote:
+            "Nur Erinnerungen, die Sie geprüft und genehmigt haben, werden in neuen Chats verwendet. Genehmigte Erinnerungen und Antwortstil-Präferenzen werden dem aktuell gewählten Tomverse-Modell als Referenz übergeben, und Sie können sie jederzeit einsehen, bearbeiten, deaktivieren oder löschen.",
+        disabledNotice:
+            "Prüfung und Erstellung von Erinnerungen sind derzeit nicht verfügbar. Bereits gespeicherte Erinnerungen bleiben einsehbar und löschbar.",
+        settingsTitle: "Einstellungen zur Gedächtnisnutzung",
+        masterToggleLabel: "Genehmigte Erinnerungen in neuen Chats verwenden",
+        masterToggleDescription:
+            "Wenn ausgeschaltet, verwendet kein Chat Erinnerungen. Gespeicherte Erinnerungen werden nicht gelöscht.",
+        styleToggleLabel: "Antwortstil-Erinnerungen verwenden",
+        styleToggleDescription:
+            "Lässt Antworten die aus früheren Unterhaltungen abgeleiteten Vorlieben zu Ton, Länge und Aufbau berücksichtigen.",
+        defaultModeLabel: "Standard für neue Chats",
+        defaultModeOn: "Gedächtnis verwenden",
+        defaultModeOff: "Gedächtnis nicht verwenden",
+        reviewTitle: "Erinnerungen zur Prüfung",
+        reviewDescription:
+            "Extrahierte Kandidaten werden erst nach Ihrer Genehmigung in neuen Chats verwendet. Sensible Kandidaten und solche mit Einzelprüfung sind nie Teil der Sammelgenehmigung.",
+        reviewEmpty: "Keine Erinnerungen warten auf Prüfung.",
+        bulkApprove: "Alle nicht sensiblen Kandidaten genehmigen",
+        bulkResult:
+            "{approved} genehmigt · {skipped} benötigen Einzelprüfung",
+        approve: "Genehmigen",
+        reject: "Ablehnen",
+        edit: "Bearbeiten",
+        save: "Speichern",
+        cancel: "Abbrechen",
+        needsIndividualReview: "Einzelprüfung erforderlich",
+        sensitiveBadge: "Sensibel",
+        pinnedBadge: "Fixiert",
+        expires: "Läuft ab: {date}",
+        conflictNotice:
+            "Eine aktive Erinnerung deckt denselben Punkt bereits ab. Sie können die bestehende Erinnerung behalten oder durch diese ersetzen.",
+        conflictReplace: "Bestehende Erinnerung ersetzen",
+        activeTitle: "Verwendete Erinnerungen",
+        activeEmpty: "Noch keine Erinnerungen in Verwendung.",
+        archivedTitle: "Archivierte Erinnerungen",
+        pin: "Fixieren",
+        unpin: "Fixierung lösen",
+        delete: "Löschen",
+        deleteArmed: "Zum Löschen erneut drücken",
+        editParkedNotice:
+            "Ihre Änderung muss erneut geprüft werden; die Erinnerung wurde zurück in die Prüfliste verschoben.",
+        validationFailed:
+            "Dieser Inhalt kann nicht als Erinnerung gespeichert werden. Formulieren Sie ihn als beschreibenden Aussagesatz, z. B. „Der Nutzer bevorzugt knappe Antworten“.",
+        errorGeneric: "Etwas ist schiefgelaufen. Bitte erneut versuchen.",
+        loadMore: "Mehr anzeigen",
+        evidenceManual: "Von Ihnen verfasste Begründung:",
+        evidenceExternal: "Aus einer importierten Unterhaltung extrahiert",
+        evidenceViewSource: "Quellunterhaltung ansehen",
+        createTitle: "Erinnerung selbst hinzufügen",
+        createDescription:
+            "Fügen Sie einen Fakt oder eine Vorliebe als Aussagesatz hinzu. Selbst hinzugefügte Erinnerungen werden sofort verwendet.",
+        createKindLabel: "Art",
+        kindGroupFactual: "Fakten & Vorlieben",
+        kindGroupStyle: "Antwortstil",
+        createStatementLabel: "Erinnerungstext",
+        createStatementPlaceholder:
+            "z. B. Der Nutzer bevorzugt knappe Antworten",
+        createGroundsLabel: "Begründung",
+        createGroundsDescription:
+            "Beschreiben Sie, worauf diese Erinnerung beruht. Der Begründungstext wird mit der Erinnerung gespeichert.",
+        createSensitiveLabel: "Als sensible Information markieren",
+        createSubmit: "Erinnerung hinzufügen",
+        createSuccess: "Erinnerung hinzugefügt.",
+        reauthRequired:
+            "Melden Sie sich aus Sicherheitsgründen erneut an, um fortzufahren.",
+        exportTitle: "Erinnerungen herunterladen",
+        exportDescription:
+            "Laden Sie alle im Konto gespeicherten Erinnerungen mit Status und Herkunft ihrer Begründungen als eine JSON-Datei herunter. Die Datei wird auf unseren Servern nicht aufbewahrt.",
+        exportDownload: "Alle herunterladen (JSON)",
+        deleteAllTitle: "Alle Erinnerungen löschen",
+        deleteAllDescription:
+            "Löscht alle gespeicherten Erinnerungen samt Begründungen und bricht eine laufende Extraktion ab. Das lässt sich nicht rückgängig machen.",
+        deleteAllImportsNote:
+            "Importierte Unterhaltungen werden nicht gelöscht. Sie können sie separat in den Import-Einstellungen löschen.",
+        deleteAllConfirmLabel: "Geben Sie zur Bestätigung {phrase} ein",
+        deleteAllSubmit: "Alle Erinnerungen löschen",
+        deleteAllDone: "Alle Erinnerungen wurden gelöscht.",
+        status: {
+            candidate: "Wartet auf Prüfung",
+            active: "In Verwendung",
+            rejected: "Abgelehnt",
+            superseded: "Ersetzt",
+            expired: "Abgelaufen",
+            suspended_by_source_lock: "Ausgesetzt: Quelle gesperrt",
+            suspended_by_source_delete: "Ausgesetzt: Quelle gelöscht",
+            manual_review_required: "Einzelprüfung erforderlich",
+        },
+        kind: {
+            identity: "Identität",
+            preference: "Vorliebe",
+            occupation: "Beruf",
+            expertise: "Fachgebiet",
+            long_term_goal: "Langfristiges Ziel",
+            project: "Projekt",
+            constraint: "Einschränkung",
+            decision: "Entscheidung",
+            relationship: "Beziehung",
+            recurring_context: "Wiederkehrender Kontext",
+            communication_style: "Kommunikationsstil",
+            tone: "Ton",
+            verbosity: "Antwortlänge",
+            structure: "Aufbau",
+            formatting: "Formatierung",
+            language: "Sprache",
+            explanation_depth: "Erklärtiefe",
+            citation_preference: "Zitierpräferenz",
+            code_style: "Code-Stil",
+        },
     },
     privacyPolicy: {
         title: "Datenschutzerklärung",
@@ -903,6 +1113,8 @@ export const de = {
         attachments: "Anhänge können vorübergehend in verschlüsseltem Objektspeicher für Modellzustellung und Dokumentextraktion gespeichert werden. Temporäre Anhänge werden derzeit nach etwa einem Tag per Lifecycle-Regel gelöscht.",
         externalImportTitle: "Aus anderen KI-Diensten importierte Unterhaltungen",
         externalImport: "Sie können frühere Unterhaltungen, die Sie aus einer bei einem anderen KI-Dienst wie ChatGPT oder Claude heruntergeladenen Exportdatei auswählen, in Ihrem Tomverse-Konto speichern. Die Exportdatei wird ausschließlich in Ihrem Browser geöffnet; das ursprüngliche Archiv wird niemals auf Server oder Speicher von Tomverse hochgeladen oder dort aufbewahrt. Gespeichert werden nur der normalisierte Text der ausgewählten Unterhaltungen sowie Herkunftsangaben (Ausgangsdienst, ursprüngliche Zeitstempel, Modellnamen nur zur Anzeige). Bilder, Audio und Anhänge werden nicht importiert. Importierte Unterhaltungen können personenbezogene Daten anderer Personen enthalten; Sie sind daher dafür verantwortlich sicherzustellen, dass Sie zum Import dieser Daten berechtigt sind. Sie können importierte Inhalte jederzeit einsehen, löschen und exportieren; sie werden mit Ihrem Konto gelöscht. Eine Löschung bei Tomverse löscht nicht die beim ursprünglichen Dienst gespeicherten Daten.",
+        memoryTitle: "Langzeitgedächtnis des Kontos",
+        memory: "Wenn Sie die Gedächtnisfunktion nutzen möchten, sendet Tomverse die von Ihnen ausgewählten Teile Ihrer importierten Unterhaltungen an den von Ihnen bestätigten KI-Anbieter, um daraus Gedächtnis-Kandidaten zu gewinnen. Für die Extraktion werden das Modell und der Credit-Betrag verwendet, die Ihnen vor der Ausführung angezeigt werden. Extrahierte Kandidaten werden erst zur Antworterzeugung genutzt, nachdem Sie sie geprüft und genehmigt haben. Als sensibel eingestufte Kandidaten sowie solche, die eine Einzelprüfung erfordern, sind von der Sammelgenehmigung ausgenommen und müssen einzeln bestätigt werden. Kandidaten, genehmigte Erinnerungen und deren Begründungen verbleiben in Ihrem Konto, bis Sie sie löschen oder Ihre Kontodaten gelöscht werden. Genehmigte Erinnerungen und Antwortstil-Präferenzen werden als Referenzmaterial an den KI-Anbieter übermittelt, der die jeweilige neue Antwort erzeugt — beim Vergleich mehrerer Modelle also an den Anbieter jedes Modells. Sie können gespeicherte Erinnerungen jederzeit einsehen, bearbeiten und deaktivieren, die vollständige Liste als Datei herunterladen oder alles auf einmal löschen. Wenn Sie das Gedächtnis ausschalten, wird es in neuen Chats nicht mehr verwendet.",
         analyticsTitle: "Produktanalyse und Kampagnenzuordnung",
         analytics: "Tomverse nutzt stets den für den Dienst erforderlichen Sitzungs-, Sicherheits-, Sprach- und Einstellungsspeicher. Für Produktanalysen müssen Besucher aus EU/EWR, Vereinigtem Königreich, Schweiz oder einer nicht verifizierten Region vor dem Start von Google Analytics 4 ausdrücklich zustimmen. In Australien und nach rechtlicher Prüfung freigegebenen Regionen startet die datensparsame Analyse nach einem klaren Hinweis und kann sofort oder später deaktiviert werden. Erfasst werden genehmigte Ereignisse und Metadaten wie UTM-Quelle, Sprache, Land, Modellanzahl und Tarif. Google kann zudem IP-Adresse, Browserdaten, Seiten-URL und ungefähren Standort außerhalb des Besucherlandes verarbeiten. Prompts, Modellantworten, Dateinamen, Dateiinhalte, E-Mail-Adressen und Profilnamen werden nie einbezogen. Werbespeicher und Personalisierung bleiben deaktiviert.",
         retentionTitle: "Aufbewahrung und Löschung",

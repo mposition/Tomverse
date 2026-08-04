@@ -15,6 +15,7 @@ import {
 } from "@/lib/externalImportDigest";
 import {
     EXTERNAL_IMPORT_STORAGE_LIMITS,
+    computeExternalImportExpiries,
     countCodePoints,
     externalImportQuotaExceeded,
     planExternalMessageTruncation,
@@ -87,6 +88,22 @@ const isStagingExpired = (
     const { idleBefore, createdBefore } = stagingDeadlines(now);
     return row.updatedAt < idleBefore || row.createdAt < createdBefore;
 };
+
+/**
+ * The two TTLs of §5.5 expressed as instants, plus the one that actually
+ * bites. Computed on the server so the client never has to add 24h to a
+ * timestamp itself and disagree about which limit applies.
+ *
+ * `preview_ready` is subject to exactly the same clocks as `staging`: sealing
+ * declares the upload complete, it does not buy the import more life.
+ */
+export const externalImportExpiries = computeExternalImportExpiries;
+
+/** Statuses that hold un-finalized staged rows and expire on the §5.5 clocks. */
+const OPEN_IMPORT_STATUSES = ["staging", "preview_ready"] as const;
+
+const isOpenImportStatus = (status: string): boolean =>
+    (OPEN_IMPORT_STATUSES as readonly string[]).includes(status);
 
 const asSafeNumber = (value: bigint | number | null | undefined): number => {
     const numeric = Number(value ?? 0);
@@ -229,22 +246,36 @@ export async function listExternalImports(userId: string) {
             truncationCount: true,
             duplicateCount: true,
             createdAt: true,
+            updatedAt: true,
             completedAt: true,
         },
     });
-    return rows.map((row) => ({
-        id: row.id,
-        provider: row.provider,
-        status: row.status,
-        failureCode: row.failureCode,
-        conversationCount: row.conversationCount,
-        messageCount: row.messageCount,
-        normalizedBytes: asSafeNumber(row.normalizedBytes),
-        truncationCount: row.truncationCount,
-        duplicateCount: row.duplicateCount,
-        createdAt: row.createdAt.toISOString(),
-        completedAt: row.completedAt?.toISOString() ?? null,
-    }));
+    const now = new Date();
+    return rows.map((row) => {
+        const open = isOpenImportStatus(row.status);
+        const expiries = open ? externalImportExpiries(row) : null;
+        return {
+            id: row.id,
+            provider: row.provider,
+            status: row.status,
+            failureCode: row.failureCode,
+            conversationCount: row.conversationCount,
+            messageCount: row.messageCount,
+            normalizedBytes: asSafeNumber(row.normalizedBytes),
+            truncationCount: row.truncationCount,
+            duplicateCount: row.duplicateCount,
+            createdAt: row.createdAt.toISOString(),
+            completedAt: row.completedAt?.toISOString() ?? null,
+            // Enough for the management screen to tell the three unfinished
+            // shapes apart without a second round trip: a sealed import that
+            // can be resumed, a partial upload that cannot, and one whose TTL
+            // has already run out. Expired work is shown as expired, never
+            // quietly hidden (§5.5).
+            expiresAt: expiries?.effectiveExpiresAt ?? null,
+            expired: open ? isStagingExpired(row, now) : false,
+            resumable: row.status === "preview_ready" && !isStagingExpired(row, now),
+        };
+    });
 }
 
 /**
@@ -420,6 +451,29 @@ export async function getExternalImportStatus(userId: string, importId: string) 
             },
             orderBy: { importedAt: "asc" },
         });
+        // Per-conversation truncation counts, so a resumed confirmation
+        // screen can name the conversations that get shortened exactly as the
+        // wizard's own review did (§5.4) rather than only the import total.
+        const truncatedByConversation = new Map<string, number>();
+        if (staged.length > 0) {
+            const grouped = await tx.externalMessage.groupBy({
+                by: ["externalConversationId"],
+                where: {
+                    externalConversationId: {
+                        in: staged.map((conversation) => conversation.id),
+                    },
+                    truncated: true,
+                },
+                _count: { _all: true },
+            });
+            for (const entry of grouped) {
+                truncatedByConversation.set(
+                    entry.externalConversationId,
+                    entry._count._all
+                );
+            }
+        }
+        const open = isOpenImportStatus(row.status);
         return {
             id: row.id,
             provider: row.provider,
@@ -427,6 +481,9 @@ export async function getExternalImportStatus(userId: string, importId: string) 
             failureCode: row.failureCode,
             digestVersion: row.digestVersion,
             parserVersion: row.parserVersion,
+            lastBatchSequence: row.lastBatchSequence,
+            ...(open ? externalImportExpiries(row) : {}),
+            expired: open ? isStagingExpired(row) : false,
             counts: {
                 conversations: row.conversationCount,
                 messages: row.messageCount,
@@ -443,6 +500,8 @@ export async function getExternalImportStatus(userId: string, importId: string) 
                 externalStableId: conversation.externalStableId,
                 messageCount: conversation.messageCount,
                 contentBytes: asSafeNumber(conversation.contentBytes),
+                truncatedMessageCount:
+                    truncatedByConversation.get(conversation.id) ?? 0,
                 finalized: conversation.finalized,
                 sourceCreatedAt:
                     conversation.sourceCreatedAt?.toISOString() ?? null,
@@ -471,6 +530,16 @@ export async function appendExternalImportBatch(input: {
                     409,
                     "EXTERNAL_IMPORT_ALREADY_FINALIZED",
                     "Import is already finalized."
+                );
+            }
+            if (row.status === "preview_ready") {
+                // Sealing declares the upload finished (§ seal contract), so
+                // appending after it would splice a second selection into a
+                // set the client has already been shown and verified.
+                throw new ApiSecurityError(
+                    409,
+                    "EXTERNAL_IMPORT_SELECTION_CHANGED",
+                    "The upload for this import was already sealed."
                 );
             }
             throw new ApiSecurityError(
@@ -730,6 +799,158 @@ export async function appendExternalImportBatch(input: {
     });
 }
 
+/**
+ * Seals a staging import: the client declares that its upload is complete,
+ * and the server checks that declaration against what it actually stored.
+ *
+ * What seal does and does not mean (§5.5, seal contract):
+ *
+ *   * it confirms two things only — the client sent every batch it meant to,
+ *     and the staged result the client is holding matches the server's rows.
+ *     That is what makes a later resume safe: a partially uploaded import can
+ *     never be mistaken for a complete one;
+ *   * it does **not** freeze the finalize selection. Finalize still accepts
+ *     any subset of the sealed set, and the import digest is recomputed from
+ *     whatever subset is finalized — never replayed from the sealed digest.
+ *
+ * The server does not know, and must not assume it knows, what the whole
+ * export contained or what the user originally ticked. The contract is
+ * "client declares completion, server cross-checks its own state" — every
+ * declared value below is compared against a row the server wrote itself.
+ *
+ * Idempotency needs no extra column: staged rows, `lastBatchSequence` and
+ * `duplicateCount` are all frozen once the status is `preview_ready`, so
+ * re-running the same verification against an already-sealed import either
+ * passes identically (200 replay) or fails as a conflicting declaration.
+ */
+export async function sealExternalImport(input: {
+    userId: string;
+    importId: string;
+    finalSequence: number;
+    expectedStagedConversationIds: string[];
+    expectedDuplicateCount: number;
+}) {
+    return prisma.$transaction(async (tx) => {
+        const row = await loadOwnedImport(tx, input.userId, input.importId, {
+            forUpdate: true,
+        });
+
+        if (row.status === "completed") {
+            throw new ApiSecurityError(
+                409,
+                "EXTERNAL_IMPORT_ALREADY_FINALIZED",
+                "Import is already finalized."
+            );
+        }
+        if (row.status !== "staging" && row.status !== "preview_ready") {
+            throw new ApiSecurityError(
+                410,
+                "EXTERNAL_IMPORT_STAGING_EXPIRED",
+                "Import staging is no longer active."
+            );
+        }
+        if (isStagingExpired(row)) {
+            await expireStagingImport(tx, row.id);
+            throw new ApiSecurityError(
+                410,
+                "EXTERNAL_IMPORT_STAGING_EXPIRED",
+                "Import staging has expired."
+            );
+        }
+
+        const mismatch = (message: string) =>
+            new ApiSecurityError(
+                409,
+                "EXTERNAL_IMPORT_SELECTION_CHANGED",
+                message
+            );
+
+        if (row.lastBatchSequence !== input.finalSequence) {
+            throw mismatch(
+                "The declared final batch does not match the accepted batches."
+            );
+        }
+        if (row.duplicateCount !== input.expectedDuplicateCount) {
+            throw mismatch(
+                "The declared duplicate count does not match the staged result."
+            );
+        }
+
+        const staged = await tx.externalConversation.findMany({
+            where: { importId: row.id, userId: input.userId, finalized: false },
+            select: {
+                id: true,
+                title: true,
+                conversationDigest: true,
+                externalStableId: true,
+                messageCount: true,
+                contentBytes: true,
+                sourceCreatedAt: true,
+                sourceUpdatedAt: true,
+            },
+            orderBy: { importedAt: "asc" },
+        });
+
+        const declared = new Set(input.expectedStagedConversationIds);
+        if (declared.size !== input.expectedStagedConversationIds.length) {
+            throw mismatch("The declared staged ids contain duplicates.");
+        }
+        if (declared.size !== staged.length) {
+            throw mismatch(
+                "The declared staged conversation count does not match the stored rows."
+            );
+        }
+        for (const conversation of staged) {
+            if (!declared.has(conversation.id)) {
+                throw mismatch(
+                    "The declared staged ids do not match the stored rows."
+                );
+            }
+        }
+
+        if (row.status === "staging") {
+            await tx.externalImport.update({
+                where: { id: row.id },
+                data: { status: "preview_ready" },
+            });
+        }
+
+        // Read the row back so the returned deadlines reflect the `updatedAt`
+        // this transaction just moved, not the pre-seal one.
+        const sealedRow = await tx.externalImport.findUniqueOrThrow({
+            where: { id: row.id },
+            select: { createdAt: true, updatedAt: true },
+        });
+
+        return {
+            idempotentReplay: row.status === "preview_ready",
+            status: "preview_ready" as const,
+            updatedAt: sealedRow.updatedAt.toISOString(),
+            ...externalImportExpiries(sealedRow),
+            duplicateCount: row.duplicateCount,
+            truncatedMessageCount: row.truncationCount,
+            // Digest of the WHOLE sealed set. Finalizing a subset recomputes
+            // its own digest — this value must never be replayed as the
+            // expectedImportDigest of a narrowed selection.
+            sealedSelectionDigest: externalImportDigest(
+                staged.map((conversation) => conversation.conversationDigest)
+            ),
+            conversations: staged.map((conversation) => ({
+                id: conversation.id,
+                title: conversation.title,
+                conversationDigest: conversation.conversationDigest,
+                externalStableId: conversation.externalStableId,
+                messageCount: conversation.messageCount,
+                contentBytes: asSafeNumber(conversation.contentBytes),
+                sourceCreatedAt:
+                    conversation.sourceCreatedAt?.toISOString() ?? null,
+                sourceUpdatedAt:
+                    conversation.sourceUpdatedAt?.toISOString() ?? null,
+            })),
+        };
+    });
+}
+
 export async function finalizeExternalImport(input: {
     userId: string;
     importId: string;
@@ -765,7 +986,11 @@ export async function finalizeExternalImport(input: {
                 "Import is already finalized."
             );
         }
-        if (row.status !== "staging") {
+        // `preview_ready` finalizes exactly like `staging`. Seal fixed that
+        // the upload is complete, not what gets saved, so a subset of the
+        // sealed set is a normal finalize — and old browser sessions that
+        // never sealed keep working from `staging` for the whole TTL window.
+        if (row.status !== "staging" && row.status !== "preview_ready") {
             throw new ApiSecurityError(
                 410,
                 "EXTERNAL_IMPORT_STAGING_EXPIRED",
@@ -881,7 +1106,10 @@ export async function deleteExternalImport(userId: string, importId: string) {
         const row = await loadOwnedImport(tx, userId, importId, {
             forUpdate: true,
         });
-        if (row.status === "staging") {
+        // A sealed-but-unfinalized import is cancelled exactly like an
+        // unsealed one: seal is a completeness statement about the upload,
+        // not a commitment to save anything (§5.5).
+        if (isOpenImportStatus(row.status)) {
             await tx.externalConversation.deleteMany({
                 where: { importId: row.id, finalized: false },
             });
@@ -1009,7 +1237,9 @@ export async function reconcileExpiredExternalImportStaging(now = new Date()) {
     const { idleBefore, createdBefore } = stagingDeadlines(now);
     const stale = await prisma.externalImport.findMany({
         where: {
-            status: "staging",
+            // Both open statuses expire on the same clocks: sealing an import
+            // does not extend its life (§5.5).
+            status: { in: [...OPEN_IMPORT_STATUSES] },
             OR: [
                 { updatedAt: { lt: idleBefore } },
                 { createdAt: { lt: createdBefore } },

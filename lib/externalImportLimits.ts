@@ -84,6 +84,40 @@ export const EXTERNAL_IMPORT_TRUNCATION_MARKER =
 /** Share of the retained budget kept from the head of an over-long message. */
 export const EXTERNAL_IMPORT_TRUNCATION_HEAD_RATIO = 0.75;
 
+export type ExternalImportExpiries = {
+    idleExpiresAt: string;
+    absoluteExpiresAt: string;
+    /** Whichever of the two comes first — the deadline that actually bites. */
+    effectiveExpiresAt: string;
+};
+
+/**
+ * The two staging clocks of §5.5 as instants: 24h since the last activity and
+ * 72h since creation. Pure, and shared by the API responses and the sweep so
+ * a client never has to add hours to a timestamp and disagree about which
+ * limit applied.
+ *
+ * `preview_ready` runs on exactly the same clocks as `staging`: sealing an
+ * import declares its upload complete, it does not extend its life.
+ */
+export function computeExternalImportExpiries(
+    row: { createdAt: Date; updatedAt: Date },
+    limits: Pick<
+        typeof EXTERNAL_IMPORT_STORAGE_LIMITS,
+        "stagingIdleTtlMs" | "stagingAbsoluteMaxLifetimeMs"
+    > = EXTERNAL_IMPORT_STORAGE_LIMITS
+): ExternalImportExpiries {
+    const idle = new Date(row.updatedAt.getTime() + limits.stagingIdleTtlMs);
+    const absolute = new Date(
+        row.createdAt.getTime() + limits.stagingAbsoluteMaxLifetimeMs
+    );
+    return {
+        idleExpiresAt: idle.toISOString(),
+        absoluteExpiresAt: absolute.toISOString(),
+        effectiveExpiresAt: (idle <= absolute ? idle : absolute).toISOString(),
+    };
+}
+
 export type ExternalImportUsage = {
     conversations: number;
     messages: number;

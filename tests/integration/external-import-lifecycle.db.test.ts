@@ -13,7 +13,9 @@ import {
     getExternalImportStatus,
     iterateExternalExportConversations,
     listExternalConversations,
+    listExternalImports,
     reconcileExpiredExternalImportStaging,
+    sealExternalImport,
 } from "@/lib/externalImportService";
 import {
     isExternalImportEnabled,
@@ -626,4 +628,492 @@ test("the rollout flag round-trips through the admin setter", async () => {
         // The flag lives in AppSetting, which resetData does not truncate.
         await setExternalImportEnabled(false);
     }
+});
+
+/* ---------------------------------------------------------------------------
+ * Seal and preview_ready (§5.5 seal contract).
+ *
+ * Seal fixes two things and only two things: that the client sent every batch
+ * it meant to, and that what the client is holding matches what the server
+ * stored. It does not fix WHAT gets saved — finalize still accepts a subset,
+ * which is why a quota refusal at finalize costs nothing but a second, smaller
+ * attempt.
+ * ------------------------------------------------------------------------ */
+
+/** Stages `payloads` in one batch and returns the import plus staged ids. */
+const stageOneBatch = async (
+    userId: string,
+    payloads: ReturnType<typeof conversationPayload>[]
+) => {
+    const created = await createExternalImport({
+        userId,
+        provider: "chatgpt",
+        parserVersion: "test-2",
+    });
+    const batch = await appendExternalImportBatch({
+        userId,
+        importId: created.id,
+        sequence: 0,
+        batchDigest: `seal-digest-${created.id}`,
+        conversations: payloads,
+    });
+    return {
+        importId: created.id,
+        stagedIds: batch.results
+            .filter((result) => result.outcome === "staged")
+            .map((result) => result.stagedConversationId!),
+        duplicates: batch.results.filter(
+            (result) => result.outcome === "duplicate"
+        ).length,
+    };
+};
+
+test("seal verifies the client declaration against the stored rows", async () => {
+    const user = await createUser();
+    const { importId, stagedIds } = await stageOneBatch(user.id, [
+        conversationPayload("seal-a"),
+        conversationPayload("seal-b"),
+    ]);
+
+    const sealed = await sealExternalImport({
+        userId: user.id,
+        importId,
+        finalSequence: 0,
+        expectedStagedConversationIds: stagedIds,
+        expectedDuplicateCount: 0,
+    });
+    assert.equal(sealed.idempotentReplay, false);
+    assert.equal(sealed.status, "preview_ready");
+    assert.equal(sealed.conversations.length, 2);
+    assert.equal(sealed.sealedSelectionDigest.length, 64);
+    // preview_ready inherits the staging clocks unchanged (§5.5).
+    assert.ok(
+        new Date(sealed.effectiveExpiresAt) <=
+            new Date(sealed.absoluteExpiresAt)
+    );
+    assert.ok(
+        new Date(sealed.effectiveExpiresAt) <= new Date(sealed.idleExpiresAt)
+    );
+
+    const row = await prisma.externalImport.findUniqueOrThrow({
+        where: { id: importId },
+    });
+    assert.equal(row.status, "preview_ready");
+});
+
+test("seal refuses a declaration that does not match the server state", async () => {
+    const user = await createUser();
+    const { importId, stagedIds } = await stageOneBatch(user.id, [
+        conversationPayload("seal-c"),
+        conversationPayload("seal-d"),
+    ]);
+
+    // Wrong final sequence.
+    await assert.rejects(
+        sealExternalImport({
+            userId: user.id,
+            importId,
+            finalSequence: 1,
+            expectedStagedConversationIds: stagedIds,
+            expectedDuplicateCount: 0,
+        }),
+        expectCode("EXTERNAL_IMPORT_SELECTION_CHANGED")
+    );
+
+    // Missing one staged id.
+    await assert.rejects(
+        sealExternalImport({
+            userId: user.id,
+            importId,
+            finalSequence: 0,
+            expectedStagedConversationIds: [stagedIds[0]],
+            expectedDuplicateCount: 0,
+        }),
+        expectCode("EXTERNAL_IMPORT_SELECTION_CHANGED")
+    );
+
+    // An id the server never staged.
+    await assert.rejects(
+        sealExternalImport({
+            userId: user.id,
+            importId,
+            finalSequence: 0,
+            expectedStagedConversationIds: [stagedIds[0], "not-a-real-id"],
+            expectedDuplicateCount: 0,
+        }),
+        expectCode("EXTERNAL_IMPORT_SELECTION_CHANGED")
+    );
+
+    // Wrong duplicate count.
+    await assert.rejects(
+        sealExternalImport({
+            userId: user.id,
+            importId,
+            finalSequence: 0,
+            expectedStagedConversationIds: stagedIds,
+            expectedDuplicateCount: 3,
+        }),
+        expectCode("EXTERNAL_IMPORT_SELECTION_CHANGED")
+    );
+
+    const row = await prisma.externalImport.findUniqueOrThrow({
+        where: { id: importId },
+    });
+    assert.equal(row.status, "staging", "a refused seal changes nothing");
+});
+
+test("seal is idempotent for the same declaration and conflicts on another", async () => {
+    const user = await createUser();
+    const { importId, stagedIds } = await stageOneBatch(user.id, [
+        conversationPayload("seal-e"),
+        conversationPayload("seal-f"),
+    ]);
+    const declaration = {
+        userId: user.id,
+        importId,
+        finalSequence: 0,
+        expectedStagedConversationIds: stagedIds,
+        expectedDuplicateCount: 0,
+    };
+
+    const first = await sealExternalImport(declaration);
+    assert.equal(first.idempotentReplay, false);
+
+    const replay = await sealExternalImport(declaration);
+    assert.equal(replay.idempotentReplay, true);
+    assert.equal(replay.sealedSelectionDigest, first.sealedSelectionDigest);
+
+    await assert.rejects(
+        sealExternalImport({ ...declaration, expectedDuplicateCount: 1 }),
+        expectCode("EXTERNAL_IMPORT_SELECTION_CHANGED")
+    );
+});
+
+test("expired staging cannot be sealed", async () => {
+    const user = await createUser();
+    const { importId, stagedIds } = await stageOneBatch(user.id, [
+        conversationPayload("seal-old"),
+    ]);
+    await prisma.$executeRaw`
+      UPDATE "ExternalImport"
+      SET "updatedAt" = NOW() - INTERVAL '25 hours'
+      WHERE id = ${importId}
+    `;
+
+    await assert.rejects(
+        sealExternalImport({
+            userId: user.id,
+            importId,
+            finalSequence: 0,
+            expectedStagedConversationIds: stagedIds,
+            expectedDuplicateCount: 0,
+        }),
+        expectCode("EXTERNAL_IMPORT_STAGING_EXPIRED")
+    );
+});
+
+test("a sealed import refuses further batch appends", async () => {
+    const user = await createUser();
+    const { importId, stagedIds } = await stageOneBatch(user.id, [
+        conversationPayload("seal-g"),
+    ]);
+    await sealExternalImport({
+        userId: user.id,
+        importId,
+        finalSequence: 0,
+        expectedStagedConversationIds: stagedIds,
+        expectedDuplicateCount: 0,
+    });
+
+    await assert.rejects(
+        appendExternalImportBatch({
+            userId: user.id,
+            importId,
+            sequence: 1,
+            batchDigest: "after-seal",
+            conversations: [conversationPayload("seal-late")],
+        }),
+        expectCode("EXTERNAL_IMPORT_SELECTION_CHANGED")
+    );
+});
+
+test("preview_ready finalizes whole, and as a subset", async () => {
+    const user = await createUser();
+    const whole = await stageOneBatch(user.id, [
+        conversationPayload("whole-a"),
+        conversationPayload("whole-b"),
+    ]);
+    await sealExternalImport({
+        userId: user.id,
+        importId: whole.importId,
+        finalSequence: 0,
+        expectedStagedConversationIds: whole.stagedIds,
+        expectedDuplicateCount: 0,
+    });
+    const finalizedWhole = await finalizeExternalImport({
+        userId: user.id,
+        importId: whole.importId,
+        idempotencyKey: "seal-finalize-whole",
+        selectedConversationIds: whole.stagedIds,
+    });
+    assert.equal(finalizedWhole.finalizedConversations, 2);
+
+    // A second, independent import finalized as a subset of its sealed set.
+    const partial = await stageOneBatch(user.id, [
+        conversationPayload("subset-a"),
+        conversationPayload("subset-b"),
+        conversationPayload("subset-c"),
+    ]);
+    const sealed = await sealExternalImport({
+        userId: user.id,
+        importId: partial.importId,
+        finalSequence: 0,
+        expectedStagedConversationIds: partial.stagedIds,
+        expectedDuplicateCount: 0,
+    });
+    const keep = partial.stagedIds.slice(0, 2);
+    const finalizedSubset = await finalizeExternalImport({
+        userId: user.id,
+        importId: partial.importId,
+        idempotencyKey: "seal-finalize-subset",
+        selectedConversationIds: keep,
+    });
+    assert.equal(finalizedSubset.finalizedConversations, 2);
+    assert.notEqual(
+        finalizedSubset.importDigest,
+        sealed.sealedSelectionDigest,
+        "the subset digest is recomputed, never the sealed set's"
+    );
+
+    // The staged row that was left out is gone, not orphaned.
+    const remaining = await prisma.externalConversation.findMany({
+        where: { importId: partial.importId },
+    });
+    assert.equal(remaining.length, 2);
+    assert.ok(remaining.every((row) => row.finalized));
+});
+
+test("a quota refusal on a sealed import preserves preview_ready and its rows", async () => {
+    const user = await createUser();
+    const { importId, stagedIds } = await stageOneBatch(user.id, [
+        conversationPayload("quota-a"),
+        conversationPayload("quota-b"),
+    ]);
+    await sealExternalImport({
+        userId: user.id,
+        importId,
+        finalSequence: 0,
+        expectedStagedConversationIds: stagedIds,
+        expectedDuplicateCount: 0,
+    });
+
+    // Park the account at the conversation cap so the finalize is refused
+    // whole (§5.3 all-or-nothing) with nothing written.
+    const filler = await stageOneBatch(user.id, [conversationPayload("filler")]);
+    await prisma.$executeRaw`
+      UPDATE "ExternalConversation"
+      SET "finalized" = true, "messageCount" = ${
+          EXTERNAL_IMPORT_STORAGE_LIMITS.maxExternalMessagesPerAccount
+      }
+      WHERE "importId" = ${filler.importId}
+    `;
+
+    await assert.rejects(
+        finalizeExternalImport({
+            userId: user.id,
+            importId,
+            idempotencyKey: "quota-finalize",
+            selectedConversationIds: stagedIds,
+        }),
+        expectCode("EXTERNAL_IMPORT_QUOTA_EXCEEDED")
+    );
+
+    const row = await prisma.externalImport.findUniqueOrThrow({
+        where: { id: importId },
+    });
+    assert.equal(row.status, "preview_ready", "the import survives the refusal");
+    const staged = await prisma.externalConversation.findMany({
+        where: { importId, finalized: false },
+    });
+    assert.equal(staged.length, 2, "staged rows survive for a smaller retry");
+});
+
+test("a batch quota refusal rolls the whole transaction back, ledger included", async () => {
+    const user = await createUser();
+    const created = await createExternalImport({
+        userId: user.id,
+        provider: "chatgpt",
+        parserVersion: "test-2",
+    });
+    await appendExternalImportBatch({
+        userId: user.id,
+        importId: created.id,
+        sequence: 0,
+        batchDigest: "ledger-0",
+        conversations: [conversationPayload("ledger-a")],
+    });
+
+    // Push the account past the message cap so the next batch is refused.
+    await prisma.$executeRaw`
+      UPDATE "ExternalConversation"
+      SET "messageCount" = ${
+          EXTERNAL_IMPORT_STORAGE_LIMITS.maxExternalMessagesPerAccount
+      }
+      WHERE "userId" = ${user.id}
+    `;
+
+    await assert.rejects(
+        appendExternalImportBatch({
+            userId: user.id,
+            importId: created.id,
+            sequence: 1,
+            batchDigest: "ledger-1",
+            conversations: [conversationPayload("ledger-b")],
+        }),
+        expectCode("EXTERNAL_IMPORT_QUOTA_EXCEEDED")
+    );
+
+    const row = await prisma.externalImport.findUniqueOrThrow({
+        where: { id: created.id },
+    });
+    assert.equal(row.lastBatchSequence, 0, "the ledger did not advance");
+    assert.equal(row.lastBatchDigest, "ledger-0");
+    const rows = await prisma.externalConversation.findMany({
+        where: { importId: created.id },
+    });
+    assert.equal(rows.length, 1, "the refused batch stored nothing");
+});
+
+test("preview_ready is deletable and swept like staging", async () => {
+    const user = await createUser();
+    const deletable = await stageOneBatch(user.id, [
+        conversationPayload("del-a"),
+    ]);
+    await sealExternalImport({
+        userId: user.id,
+        importId: deletable.importId,
+        finalSequence: 0,
+        expectedStagedConversationIds: deletable.stagedIds,
+        expectedDuplicateCount: 0,
+    });
+    const deleted = await deleteExternalImport(user.id, deletable.importId);
+    assert.equal(deleted.outcome, "cancelled");
+    assert.equal(
+        await prisma.externalConversation.count({
+            where: { importId: deletable.importId },
+        }),
+        0
+    );
+
+    const sweepable = await stageOneBatch(user.id, [
+        conversationPayload("sweep-a"),
+    ]);
+    await sealExternalImport({
+        userId: user.id,
+        importId: sweepable.importId,
+        finalSequence: 0,
+        expectedStagedConversationIds: sweepable.stagedIds,
+        expectedDuplicateCount: 0,
+    });
+    await prisma.$executeRaw`
+      UPDATE "ExternalImport"
+      SET "updatedAt" = NOW() - INTERVAL '25 hours'
+      WHERE id = ${sweepable.importId}
+    `;
+    const sweep = await reconcileExpiredExternalImportStaging();
+    assert.equal(sweep.expiredImports, 1);
+    const swept = await prisma.externalImport.findUniqueOrThrow({
+        where: { id: sweepable.importId },
+    });
+    assert.equal(swept.status, "failed");
+    assert.equal(swept.failureCode, "EXTERNAL_IMPORT_STAGING_EXPIRED");
+});
+
+test("the history row says whether an unfinished import can be resumed", async () => {
+    const user = await createUser();
+    const partial = await stageOneBatch(user.id, [
+        conversationPayload("hist-partial"),
+    ]);
+    const sealed = await stageOneBatch(user.id, [
+        conversationPayload("hist-sealed"),
+    ]);
+    await sealExternalImport({
+        userId: user.id,
+        importId: sealed.importId,
+        finalSequence: 0,
+        expectedStagedConversationIds: sealed.stagedIds,
+        expectedDuplicateCount: 0,
+    });
+
+    const history = await listExternalImports(user.id);
+    const partialRow = history.find((row) => row.id === partial.importId)!;
+    const sealedRow = history.find((row) => row.id === sealed.importId)!;
+
+    assert.equal(partialRow.status, "staging");
+    assert.equal(
+        partialRow.resumable,
+        false,
+        "an unsealed upload must never offer a resume"
+    );
+    assert.equal(sealedRow.status, "preview_ready");
+    assert.equal(sealedRow.resumable, true);
+    assert.ok(sealedRow.expiresAt);
+    assert.equal(sealedRow.expired, false);
+});
+
+test("the status endpoint gives a resumed screen what the wizard's review had", async () => {
+    const user = await createUser();
+    const longMessage = "z".repeat(
+        EXTERNAL_IMPORT_STORAGE_LIMITS.maxStoredMessageCodePoints + 50
+    );
+    const { importId, stagedIds } = await stageOneBatch(user.id, [
+        conversationPayload("resume-plain", ["hello", "world"]),
+        conversationPayload("resume-long", [longMessage, "reply"]),
+    ]);
+    await sealExternalImport({
+        userId: user.id,
+        importId,
+        finalSequence: 0,
+        expectedStagedConversationIds: stagedIds,
+        expectedDuplicateCount: 0,
+    });
+
+    const status = await getExternalImportStatus(user.id, importId);
+    assert.equal(status.status, "preview_ready");
+    assert.equal(status.expired, false);
+    // The deadlines a resumed screen shows are server-computed, and the
+    // effective one is whichever of the two clocks comes first (§5.5).
+    assert.ok(status.effectiveExpiresAt);
+    assert.ok(
+        new Date(status.effectiveExpiresAt!) <=
+            new Date(status.absoluteExpiresAt!)
+    );
+    assert.ok(
+        new Date(status.effectiveExpiresAt!) <= new Date(status.idleExpiresAt!)
+    );
+
+    // Per-conversation truncation counts, so the resumed confirmation can
+    // name the shortened conversations exactly as the wizard's review did.
+    const plain = status.conversations.find((row) =>
+        row.title.includes("resume-plain")
+    )!;
+    const long = status.conversations.find((row) =>
+        row.title.includes("resume-long")
+    )!;
+    assert.equal(plain.truncatedMessageCount, 0);
+    assert.equal(long.truncatedMessageCount, 1);
+    // And the digests the client needs to recompute a subset digest.
+    assert.equal(plain.conversationDigest.length, 64);
+
+    // A completed import reports no open-status deadlines at all.
+    await finalizeExternalImport({
+        userId: user.id,
+        importId,
+        idempotencyKey: "resume-finalize",
+        selectedConversationIds: [plain.id],
+    });
+    const done = await getExternalImportStatus(user.id, importId);
+    assert.equal(done.status, "completed");
+    assert.equal(done.expired, false);
+    assert.equal(done.effectiveExpiresAt, undefined);
 });

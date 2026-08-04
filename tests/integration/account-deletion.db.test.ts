@@ -143,3 +143,70 @@ test("the maintenance sweep claims and deletes an account whose grace period has
   const reloaded = await prisma.user.findUnique({ where: { id: user.id } });
   assert.equal(reloaded, null);
 });
+
+test("permanent deletion cascades imported external conversations (import policy §13.1)", async () => {
+  // deleteTomverseAccount ends in tx.user.delete, so the External* tables ride
+  // on the DB-level onDelete: Cascade chain (User -> ExternalImport ->
+  // ExternalConversation -> ExternalMessage). This pins that contract: a
+  // future refactor to explicit per-table deleteMany calls must include the
+  // import tables or fail here, not strand a deleted user's imported data.
+  const user = await createUser({
+    accountStatus: "pending_deletion",
+    stripeSubscriptionId: null,
+  });
+  const importRow = await prisma.externalImport.create({
+    data: {
+      userId: user.id,
+      provider: "chatgpt",
+      status: "completed",
+      parserVersion: "test-1",
+      digestVersion: 1,
+    },
+  });
+  const conversation = await prisma.externalConversation.create({
+    data: {
+      userId: user.id,
+      importId: importRow.id,
+      provider: "chatgpt",
+      externalStableId: "a".repeat(64),
+      title: "cascade fixture",
+      conversationDigest: "b".repeat(64),
+      digestVersion: 1,
+      messageCount: 1,
+      contentBytes: BigInt(5),
+      finalized: true,
+    },
+  });
+  await prisma.externalMessage.create({
+    data: {
+      userId: user.id,
+      externalConversationId: conversation.id,
+      externalStableId: "c".repeat(64),
+      role: "user",
+      content: "hello",
+      contentDigest: "d".repeat(64),
+      digestVersion: 1,
+      ordinal: 0,
+    },
+  });
+  await prisma.user.update({
+    where: { id: user.id },
+    data: { accountDeletionScheduledFor: new Date(Date.now() - 1_000) },
+  });
+
+  const deletedCount = await deleteScheduledAccounts(new Date());
+
+  assert.equal(deletedCount, 1);
+  assert.equal(
+    await prisma.externalImport.count({ where: { userId: user.id } }),
+    0
+  );
+  assert.equal(
+    await prisma.externalConversation.count({ where: { userId: user.id } }),
+    0
+  );
+  assert.equal(
+    await prisma.externalMessage.count({ where: { userId: user.id } }),
+    0
+  );
+});

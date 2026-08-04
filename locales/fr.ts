@@ -817,8 +817,6 @@ export const fr = {
         parseFailed: "Le fichier n'a pas pu être lu comme un export pris en charge.",
         previewTitle: "Choisir les conversations à importer",
         previewProvider: "Export détecté : {provider}",
-        previewSummary:
-            "{selected} conversations sélectionnées sur {total} · environ {size}",
         warningsTitle: "Non inclus",
         warningSkippedMessages: "{count} messages système ou outils ignorés",
         warningSkippedParts:
@@ -831,24 +829,18 @@ export const fr = {
         truncationTitle: "Certains messages longs seront raccourcis",
         truncationExplain:
             "{conversations} conversations contiennent des messages dépassant la limite de stockage de {limit} caractères. Si vous approuvez, le début et la fin de chaque message long sont conservés et le milieu est remplacé par un marqueur.",
-        truncationApprove: "Importer ces conversations avec des messages raccourcis",
         truncatedBadge: "Sera raccourci",
         quotaExceededWarning:
             "La sélection dépasse votre espace de stockage d'import restant. Désélectionnez des conversations pour continuer.",
         messagesCount: "{count} messages",
-        startImport: "Téléverser la sélection",
-        uploading: "Envoi du lot {sent} sur {total}…",
         uploadFailed:
             "Le téléversement a échoué. Vous pouvez réessayer — les lots déjà reçus ne sont pas renvoyés.",
         retryUpload: "Réessayer le téléversement",
-        stagedTitle: "Vérifier et confirmer",
         stagedSummary:
             "{staged} conversations prêtes à importer · {duplicates} doublons ignorés",
         stagedTruncated: "{count} messages seront stockés raccourcis",
         allDuplicates:
             "Tout le contenu de cette sélection est déjà dans votre compte.",
-        finalize: "Confirmer l'import",
-        finalizing: "Confirmation…",
         finalizeFailedQuota:
             "Votre compte n'a plus assez d'espace de stockage d'import pour cette sélection.",
         stagingExpired:
@@ -884,6 +876,225 @@ export const fr = {
             "Ce message a été raccourci pour respecter la limite de stockage. Le texte intégral ne subsiste que chez le service d'origine.",
         viewerMessagesShown: "{shown} messages affichés sur {total}",
         deleteSnapshot: "Supprimer cette version",
+        // Étape de préparation de l'export (étape 1 de l'assistant)
+        guideTitle: "Préparez d'abord votre fichier d'export",
+        guideDescription:
+            "Choisissez le service depuis lequel vous importez : nous vous indiquerons comment obtenir son fichier d'export. Ce choix sert uniquement de guide — le format réel est détecté à partir du fichier lui-même.",
+        guideEntryNeedsExport: "Je n'ai pas encore de fichier d'export",
+        guideEntryHasFile: "J'ai déjà le fichier",
+        guideChatgptTitle: "Obtenir un export ChatGPT",
+        guideChatgptStep1:
+            "Dans ChatGPT, ouvrez Paramètres → Contrôles des données.",
+        guideChatgptStep2: "Demandez un export de vos données.",
+        guideChatgptStep3:
+            "Téléchargez le ZIP depuis le lien reçu par e-mail. Inutile de le décompresser.",
+        guideClaudeTitle: "Obtenir un export Claude",
+        guideClaudeStep1:
+            "Dans Claude, ouvrez Paramètres → Confidentialité.",
+        guideClaudeStep2: "Demandez un export de vos données.",
+        guideClaudeStep3:
+            "Téléchargez le fichier depuis le lien reçu par e-mail. Le ZIP comme le JSON fonctionnent tels quels.",
+        guideFormats: "Les fichiers ZIP et JSON sont pris en charge.",
+        guideStaysLocal:
+            "Le fichier d'export ne quitte jamais votre appareil : il est ouvert dans votre navigateur.",
+        guideMediaExcluded:
+            "Les images, l'audio et les pièces jointes ne sont pas importés.",
+        guidePrivacyDisclosure: "Voir comment ces données sont traitées",
+        guideContinue: "Choisir le fichier d'export",
+        providerMismatchNotice:
+            "Il s'agit d'un export {detected} : nous continuons donc avec {detected}.",
+        // État « ordinateur recommandé »
+        desktopRecommendedTitle:
+            "Cet appareil ne peut pas ouvrir le fichier en toute sécurité",
+        desktopRecommendedNoUpload: "Le fichier d'export n'a pas été envoyé.",
+        desktopRecommendedNoData:
+            "Rien n'a encore été enregistré dans Tomverse.",
+        desktopRecommendedRetry:
+            "Veuillez réessayer depuis un ordinateur de bureau.",
+        // Indicateur d'étapes
+        stepIndicatorLabel: "Progression de l'import",
+        stepPrepareExport: "Préparer l'export",
+        stepInspectFile: "Vérifier le fichier",
+        stepSelectConversations: "Choisir les conversations",
+        stepConfirmImport: "Confirmer l'import",
+        stepDone: "Terminé",
+        stepPosition: "Étape {current} sur {total}, {name}",
+        back: "Retour",
+        // Étape de sélection des conversations
+        searchPlaceholder: "Rechercher un titre de conversation",
+        filterFrom: "Date de début",
+        filterTo: "Date de fin",
+        filterClear: "Effacer les filtres",
+        selectAllNormal: "Sélectionner toutes les conversations normales",
+        clearAllNormal: "Tout désélectionner",
+        selectionHiddenNotice:
+            "{hidden} des {selected} sélectionnées ne sont pas affichées par le filtre actuel.",
+        selectionSummary:
+            "{selected} conversations sélectionnées · environ {size}",
+        remainingSpace: "Environ {remaining} d'espace restant",
+        rowTruncationConsent: "Inclure, en version raccourcie",
+        rowTruncationImpact:
+            "{count} messages seront enregistrés avec seulement leur début et leur fin.",
+        rowBlockedReason:
+            "{count} messages dépassent la limite d'import : toute la conversation est donc exclue, pas seulement ces messages.",
+        rowPosition: "Conversation {index} sur {total}",
+        continueToReview: "Vérifier la sélection",
+        preparingReviewTitle: "Préparation de votre import",
+        preparingReviewProgress: "{sent} sur {total} préparés",
+        preparingReviewNotSaved:
+            "Rien n'est encore enregistré dans votre compte : cela se produit après la confirmation finale.",
+        // Étape de confirmation
+        reviewTitle: "Vérifiez ce qui sera importé",
+        reviewFinalizeCta: "Importer {count} conversations",
+        reviewBackToSelection: "Revenir au choix des conversations",
+        reviewExpiresAt: "Cette confirmation reste valable jusqu'à {time}.",
+        finalizingTitle: "Enregistrement dans votre compte",
+        finalizingNotice:
+            "Merci de garder cet écran ouvert jusqu'à la fin de l'enregistrement.",
+        // Récupération après manque d'espace
+        quotaRevisionTitle: "Espace d'import insuffisant",
+        quotaRevisionExplain:
+            "Réessayer la même sélection échouera de la même façon tant que votre total enregistré ne change pas. Choisissez moins de conversations.",
+        quotaRevisionRestartNotice:
+            "Une partie de la sélection a déjà été envoyée : un nouvel import va donc démarrer. Vos choix et vos accords sont conservés.",
+        quotaRevisionAdjust: "Ajuster la sélection",
+        uploadRetryTransient:
+            "La préparation s'est arrêtée à cause d'un problème de connexion. Elle reprend là où elle s'est arrêtée, et ce qui est déjà reçu n'est pas renvoyé.",
+        expiredTitle: "Cet import a expiré",
+        diagnosticsToggle: "Détails techniques",
+        // Écran de gestion
+        newImportCta: "Démarrer un nouvel import",
+        inProgressTitle: "Imports en cours",
+        inProgressResume: "Terminer cet import",
+        inProgressRestart: "Recommencer",
+        inProgressNotResumable:
+            "Cet import ne peut pas être poursuivi. Recommencez-le ou supprimez-le.",
+        noServerDataYet: "Rien n'a été enregistré dans Tomverse.",
+        statusPreviewReady: "En attente de confirmation",
+        statusExpired: "Expiré",
+        expiredCardNotice: "Expiré : il faut recommencer.",
+        abandonImport: "Quitter cet import",
+    },
+    memoryReview: {
+        dataTabTitle: "Mémoire du compte",
+        dataTabDescription:
+            "Examinez les souvenirs candidats extraits des conversations importées et choisissez si les souvenirs approuvés sont utilisés dans les nouvelles discussions.",
+        dataTabOpen: "Ouvrir les réglages de mémoire",
+        pageTitle: "Mémoire du compte",
+        pageDescription:
+            "Approuvez ou refusez les souvenirs candidats en attente d'examen, et modifiez, épinglez ou supprimez les souvenirs en usage.",
+        backToChat: "Retour à la discussion",
+        signInRequired: "Connectez-vous pour gérer la mémoire de votre compte.",
+        privacyNote:
+            "Seuls les souvenirs que vous avez examinés et approuvés sont utilisés dans les nouvelles discussions. Les souvenirs approuvés et les préférences de style de réponse sont transmis comme références au modèle Tomverse actuellement sélectionné, et vous pouvez les consulter, les modifier, les désactiver ou les supprimer à tout moment.",
+        disabledNotice:
+            "L'examen et la création de souvenirs sont indisponibles pour le moment. Les souvenirs déjà enregistrés restent consultables et supprimables.",
+        settingsTitle: "Réglages d'utilisation de la mémoire",
+        masterToggleLabel:
+            "Utiliser les souvenirs approuvés dans les nouvelles discussions",
+        masterToggleDescription:
+            "Une fois désactivé, aucune discussion n'utilise de souvenirs. Les souvenirs enregistrés ne sont pas supprimés.",
+        styleToggleLabel: "Utiliser les souvenirs de style de réponse",
+        styleToggleDescription:
+            "Permet aux réponses de tenir compte des préférences de ton, de longueur et de structure déduites des conversations passées.",
+        defaultModeLabel: "Valeur par défaut des nouvelles discussions",
+        defaultModeOn: "Utiliser la mémoire",
+        defaultModeOff: "Ne pas utiliser la mémoire",
+        reviewTitle: "Souvenirs en attente d'examen",
+        reviewDescription:
+            "Les candidats extraits ne sont utilisés dans les nouvelles discussions qu'après votre approbation. Les candidats sensibles et ceux nécessitant un examen individuel ne sont jamais inclus dans l'approbation groupée.",
+        reviewEmpty: "Aucun souvenir n'attend d'examen.",
+        bulkApprove: "Approuver tous les candidats non sensibles",
+        bulkResult:
+            "{approved} approuvé(s) · {skipped} nécessitent un examen individuel",
+        approve: "Approuver",
+        reject: "Refuser",
+        edit: "Modifier",
+        save: "Enregistrer",
+        cancel: "Annuler",
+        needsIndividualReview: "Examen individuel requis",
+        sensitiveBadge: "Sensible",
+        pinnedBadge: "Épinglé",
+        expires: "Expire : {date}",
+        conflictNotice:
+            "Un souvenir actif couvre déjà le même élément. Vous pouvez conserver le souvenir existant ou le remplacer par celui-ci.",
+        conflictReplace: "Remplacer le souvenir existant",
+        activeTitle: "Souvenirs en usage",
+        activeEmpty: "Aucun souvenir n'est encore en usage.",
+        archivedTitle: "Souvenirs archivés",
+        pin: "Épingler",
+        unpin: "Désépingler",
+        delete: "Supprimer",
+        deleteArmed: "Appuyez encore pour supprimer",
+        editParkedNotice:
+            "Votre modification doit être réexaminée : le souvenir est retourné dans la file d'examen.",
+        validationFailed:
+            "Ce contenu ne peut pas être enregistré comme souvenir. Rédigez-le comme un énoncé factuel déclaratif, par exemple « L'utilisateur préfère des réponses concises ».",
+        errorGeneric: "Un problème est survenu. Veuillez réessayer.",
+        loadMore: "Afficher plus",
+        evidenceManual: "Justification rédigée par vous :",
+        evidenceExternal: "Extrait d'une conversation importée",
+        evidenceViewSource: "Voir la conversation source",
+        createTitle: "Ajouter un souvenir vous-même",
+        createDescription:
+            "Ajoutez un fait ou une préférence à retenir sous forme d'énoncé déclaratif. Les souvenirs que vous ajoutez vous-même sont utilisés immédiatement.",
+        createKindLabel: "Type",
+        kindGroupFactual: "Faits et préférences",
+        kindGroupStyle: "Style de réponse",
+        createStatementLabel: "Énoncé du souvenir",
+        createStatementPlaceholder:
+            "ex. : L'utilisateur préfère des réponses concises",
+        createGroundsLabel: "Justification",
+        createGroundsDescription:
+            "Décrivez sur quoi repose ce souvenir. Le texte de justification est enregistré avec le souvenir.",
+        createSensitiveLabel: "Marquer comme information sensible",
+        createSubmit: "Ajouter le souvenir",
+        createSuccess: "Souvenir ajouté.",
+        reauthRequired:
+            "Pour votre sécurité, reconnectez-vous avant de poursuivre.",
+        exportTitle: "Télécharger vos souvenirs",
+        exportDescription:
+            "Téléchargez tous les souvenirs enregistrés dans votre compte, avec leur état et la provenance de leurs justifications, dans un seul fichier JSON. Le fichier n'est pas conservé sur nos serveurs.",
+        exportDownload: "Tout télécharger (JSON)",
+        deleteAllTitle: "Supprimer tous les souvenirs",
+        deleteAllDescription:
+            "Supprime tous les souvenirs enregistrés et leurs justifications, et annule toute extraction en cours. Cette action est irréversible.",
+        deleteAllImportsNote:
+            "Les conversations importées ne sont pas supprimées. Vous pouvez les supprimer séparément dans les réglages d'import.",
+        deleteAllConfirmLabel: "Saisissez {phrase} pour confirmer",
+        deleteAllSubmit: "Supprimer tous les souvenirs",
+        deleteAllDone: "Tous les souvenirs ont été supprimés.",
+        status: {
+            candidate: "En attente d'examen",
+            active: "En usage",
+            rejected: "Refusé",
+            superseded: "Remplacé",
+            expired: "Expiré",
+            suspended_by_source_lock: "Suspendu : source verrouillée",
+            suspended_by_source_delete: "Suspendu : source supprimée",
+            manual_review_required: "Examen individuel requis",
+        },
+        kind: {
+            identity: "Identité",
+            preference: "Préférence",
+            occupation: "Profession",
+            expertise: "Domaine d'expertise",
+            long_term_goal: "Objectif à long terme",
+            project: "Projet",
+            constraint: "Contrainte",
+            decision: "Décision",
+            relationship: "Relation",
+            recurring_context: "Contexte récurrent",
+            communication_style: "Style de communication",
+            tone: "Ton",
+            verbosity: "Longueur des réponses",
+            structure: "Structure",
+            formatting: "Mise en forme",
+            language: "Langue",
+            explanation_depth: "Profondeur des explications",
+            citation_preference: "Préférence de citation",
+            code_style: "Style de code",
+        },
     },
     privacyPolicy: {
         title: "Politique de confidentialité",
@@ -899,6 +1110,8 @@ export const fr = {
         attachments: "Les pièces jointes peuvent être stockées temporairement dans un stockage objet chiffré pour l'envoi au modèle et l'extraction de documents. Elles sont actuellement supprimées après environ un jour par la règle de cycle de vie.",
         externalImportTitle: "Conversations importées depuis d'autres services d'IA",
         externalImport: "Vous pouvez enregistrer dans votre compte Tomverse les conversations passées que vous sélectionnez dans un fichier d'export téléchargé depuis un autre service d'IA, tel que ChatGPT ou Claude. Le fichier d'export est ouvert uniquement dans votre navigateur ; l'archive d'origine n'est jamais transférée ni conservée sur les serveurs ou le stockage de Tomverse. Seuls le texte normalisé des conversations sélectionnées et les informations de provenance (service source, horodatages d'origine, noms de modèles à titre d'affichage) sont conservés comme données privées du compte. Les images, l'audio et les pièces jointes ne sont pas importés. Les conversations importées peuvent contenir des données personnelles de tiers ; il vous appartient donc de vérifier que vous êtes autorisé à les importer. Vous pouvez consulter, supprimer et exporter ces données à tout moment, et elles sont supprimées avec votre compte. Leur suppression sur Tomverse n'entraîne pas leur suppression chez le service d'origine.",
+        memoryTitle: "Mémoire à long terme du compte",
+        memory: "Si vous choisissez d'utiliser la fonction de mémoire, Tomverse envoie les parties de vos conversations importées que vous sélectionnez au fournisseur d'IA que vous confirmez, afin d'en extraire des souvenirs candidats. L'extraction utilise le modèle et le montant de crédits qui vous sont indiqués avant son exécution. Les candidats extraits ne servent pas à générer des réponses tant que vous ne les avez pas examinés et approuvés. Les candidats classés comme sensibles et ceux nécessitant un examen individuel sont exclus de l'approbation groupée et doivent être confirmés un par un. Les candidats, les souvenirs approuvés et leurs justifications sont conservés dans votre compte jusqu'à ce que vous les supprimiez ou que les données de votre compte soient supprimées. Les souvenirs approuvés et les préférences de style de réponse sont transmis comme références au fournisseur d'IA qui génère chaque nouvelle réponse, donc au fournisseur de chaque modèle lorsque vous en comparez plusieurs. Vous pouvez consulter, modifier et désactiver les souvenirs enregistrés à tout moment, télécharger la liste complète sous forme de fichier, ou tout supprimer en une fois. Si vous désactivez la mémoire, elle n'est plus utilisée dans les nouvelles discussions.",
         analyticsTitle: "Analyse produit et attribution des campagnes",
         analytics: "Tomverse utilise toujours le stockage essentiel de session, sécurité, langue et préférences nécessaire au service. Pour l’analyse produit, les visiteurs de l’UE/EEE, du Royaume-Uni, de Suisse ou d’une région non vérifiée doivent consentir avant le démarrage de Google Analytics 4. En Australie et dans toute région ajoutée après examen juridique, l’analyse minimisée démarre après un avis clair et peut être désactivée immédiatement ou plus tard. Nous enregistrons des événements approuvés et des métadonnées comme la source UTM, la langue, le pays, le nombre de modèles et le forfait. Google peut aussi traiter l’adresse IP, le navigateur, l’URL de page et la localisation approximative hors du pays du visiteur. Prompts, réponses, noms et contenus de fichiers, e-mails et noms de profil ne sont jamais inclus. Le stockage publicitaire et la personnalisation restent désactivés.",
         retentionTitle: "Conservation et suppression",

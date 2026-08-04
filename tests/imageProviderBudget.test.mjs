@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import {
+  imageProviderBudgetEnvNames,
+  resolveActiveImageProviderBudgets,
   IMAGE_BUDGET_HEADROOM_MULTIPLIER,
   IMAGE_PROVIDER_BUDGET_ENV_NAMES,
   imageCostCeilingHeadroomMicroUsd,
@@ -79,4 +81,48 @@ test("development defaults exist and never sit below the floor", () => {
   assert.ok(resolved.limits);
   assert.ok(resolved.limits.day >= imageProviderBudgetFloorMicroUsd());
   assert.ok(resolved.limits.month >= imageProviderBudgetFloorMicroUsd());
+});
+
+test("budget env names are per provider, never per model", () => {
+  assert.deepEqual(imageProviderBudgetEnvNames("openai"), {
+    day: "IMAGE_PROVIDER_OPENAI_COST_MICROUSD_PER_DAY",
+    month: "IMAGE_PROVIDER_OPENAI_COST_MICROUSD_PER_MONTH",
+  });
+  assert.deepEqual(imageProviderBudgetEnvNames("google"), {
+    day: "IMAGE_PROVIDER_GOOGLE_COST_MICROUSD_PER_DAY",
+    month: "IMAGE_PROVIDER_GOOGLE_COST_MICROUSD_PER_MONTH",
+  });
+});
+
+test("only providers with an enabled model are required to have a budget", () => {
+  const resolved = resolveActiveImageProviderBudgets(
+    {
+      IMAGE_PROVIDER_OPENAI_COST_MICROUSD_PER_DAY: "12000000",
+      IMAGE_PROVIDER_OPENAI_COST_MICROUSD_PER_MONTH: "12000000",
+    },
+    { production: true }
+  );
+  // Google is registered but on a price hold, so it cannot receive a request
+  // and its missing budget must not block a deploy.
+  assert.deepEqual(
+    resolved.map((entry) => entry.provider),
+    ["openai"]
+  );
+  assert.ok(resolved[0].resolved.limits);
+});
+
+test("a provider-scoped resolve reads that provider's variables only", () => {
+  const google = resolveImageProviderBudget(
+    {
+      IMAGE_PROVIDER_OPENAI_COST_MICROUSD_PER_DAY: "12000000",
+      IMAGE_PROVIDER_OPENAI_COST_MICROUSD_PER_MONTH: "12000000",
+    },
+    { production: true, provider: "google" }
+  );
+  assert.equal(google.limits, null);
+  assert.ok(
+    google.problems.every((problem) =>
+      problem.message.includes("IMAGE_PROVIDER_GOOGLE_")
+    )
+  );
 });

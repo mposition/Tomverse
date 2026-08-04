@@ -44,7 +44,16 @@ test("catalog reconciliation is exact-ID scoped and preserves operator-owned fie
   assert.equal(scout.data.enabled, false);
   assert.equal(scout.data.publiclyListed, false);
   assert.equal(scout.data.status, "disabled");
-  assert.equal(scout.data.replacementModelId, "gemini-3-5-flash");
+  assert.equal(scout.data.replacementModelId, "gemini-3-6-flash");
+
+  const legacyGemini = rows.find((row) => row.id === "gemini-3-5-flash");
+  assert.ok(legacyGemini);
+  assert.equal(legacyGemini.data.usageClass, "advanced");
+  assert.equal(legacyGemini.data.creditWeight, 4);
+  assert.equal(legacyGemini.data.enabled, false);
+  assert.equal(legacyGemini.data.publiclyListed, false);
+  assert.equal(legacyGemini.data.status, "disabled");
+  assert.equal(legacyGemini.data.replacementModelId, "gemini-3-6-flash");
 
   // Each retired Llama hands off to a live model at its own tier, from
   // another provider -- Groq has none left. Every replacement here must be a

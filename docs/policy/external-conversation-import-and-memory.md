@@ -3,6 +3,11 @@ status: approved
 implementationBlockedUntilApproved: true
 approvedScopes:
   - RELEASE_A_IMPORT
+  # 2026-08-03 @mposition 승인. 최초 기록은 "RELEASE_B_IMPORT"였으나 이
+  # 문서와 §24가 정의한 릴리스 B의 scope 토큰은 RELEASE_B_MEMORY이므로,
+  # 같은 날 승인자의 확인("frontmatter에 RELEASE_B_MEMORY 추가 — 완료")에
+  # 따라 정의된 토큰으로 표기를 맞춘다.
+  - RELEASE_B_MEMORY
 approvedBy: @mposition
 approvedAt: 2026-08-03
 approvalTicket: N/A
@@ -24,6 +29,9 @@ approvalTicket: N/A
 - 릴리스 B는 §23의 B 관련 미결정 항목(오류 HTTP 의미, manual evidence 구조,
   source 삭제 시 상태 등)을 이 문서에서 확정한 뒤 별도로
   `RELEASE_B_MEMORY`를 `approvedScopes`에 추가해야 시작할 수 있습니다.
+  (2026-08-03 확정 완료 — 각 결정은 §23에 기록되어 있습니다. 단, §23의
+  staging 체크리스트 실행·승인은 코드 착수와 별개로 릴리스 B의 staging
+  반영 전 완료 조건으로 남습니다.)
 - 릴리스 C도 같은 방식으로 `RELEASE_C_ASSISTANT_PROFILES` scope 승인이
   필요합니다.
 
@@ -95,6 +103,10 @@ MEMORY_EXTRACTION_PROVIDER_<PROVIDER>_COST_MICROUSD_PER_MONTH (절대값 overrid
 
 - extraction은 provider **총예산**을 계속 검사하고, 그 위에 batch sub-budget을
   추가로 검사합니다. batch는 interactive 몫을 추가로 빌릴 수 없습니다.
+- **sub-budget 값 확정(§23 항목 5, 2026-08-03)**: 일간·월간 모두 **기본
+  10%를 유지**합니다. interactive 우선 원칙의 가장 보수적인 시작값이며,
+  변경은 코드가 아니라 위 환경변수로만 하고 admin 지표(§22)의 소진율을
+  관찰한 뒤에 조정합니다.
 - entitlement 부족(`CREDIT_*`)과 batch 예산 소진은 오류 코드·문구를 분리합니다.
 - production에서는 관련 환경변수를 코드보다 먼저 배포합니다.
 
@@ -259,17 +271,64 @@ batch sequence·idempotency 계약이 동일하게 적용됩니다.
   대상이 아니라 선택 불가입니다(§5.3).
 - truncated content를 완전한 원문으로 표시하지 않습니다.
 
-### 5.5 staging → finalize
+### 5.5 staging → seal → finalize
 
 capacity 조회 → worker 파싱 → normalized chunk 전송 → 서버 재검증(schema·
-owner·quota·size) → 서버 digest 재계산 → 중복·idempotency 판정 → preview →
-명시적 finalize → transaction으로 원자 저장.
+owner·quota·size) → 서버 digest 재계산 → 중복·idempotency 판정 → **seal** →
+preview → 명시적 finalize → transaction으로 원자 저장.
 
 - staging row는 일반 목록·검색·export에 노출하지 않습니다.
 - staging TTL은 **마지막 활동 기준 24시간**, absolute maximum lifetime은
   **생성 기준 72시간**입니다(중앙 상수). 만료 시
   `EXTERNAL_IMPORT_STAGING_EXPIRED`를 반환하고 reconciliation이 payload를
-  자동 정리합니다.
+  자동 정리합니다. **`preview_ready`도 같은 두 시계를 그대로 적용받습니다** —
+  seal은 업로드 완료를 확정할 뿐 수명을 연장하지 않습니다. 서버가 idle·
+  absolute 중 먼저 도래하는 `effectiveExpiresAt`을 계산해 응답에 담습니다.
+
+#### seal — 업로드 완료 확정 (`POST .../[importId]/seal`)
+
+seal이 확정하는 것은 **오직 두 가지**입니다.
+
+1. 클라이언트가 의도한 batch 업로드가 끝났다.
+2. 클라이언트가 들고 있는 staged 결과가 서버가 저장한 상태와 일치한다.
+
+seal은 **무엇을 최종 저장할지 확정하거나 freeze하지 않습니다.** finalize는
+seal된 staged 집합의 **부분집합**을 받을 수 있고, `expectedImportDigest`는
+그때 선택된 subset으로 **다시 계산**합니다. seal이 반환하는 전체 집합
+digest(`sealedSelectionDigest`)를 subset finalize에 재사용하면 정상적인 부분
+저장이 `EXTERNAL_IMPORT_SELECTION_CHANGED`로 거절됩니다.
+
+- 클라이언트 선언: `finalSequence`, `expectedStagedConversationIds`,
+  `expectedDuplicateCount`.
+- 서버 검증(모두 서버가 직접 쓴 값과 대조): 인증·소유권, feature flag, rate
+  limit, strict schema, status가 `staging`(또는 이미 `preview_ready`), TTL
+  미만, `lastBatchSequence === finalSequence`, 실제 staged ID 집합과 선언된
+  집합의 정확한 일치, staged row 수 일치, `duplicateCount` 일치.
+- 서버는 전체 export나 사용자가 원래 선택한 항목 전체를 독립적으로 알지
+  못합니다. 계약은 "클라이언트 완료 선언 + 서버 저장 결과와 대조 검증"입니다.
+- 검증 실패는 `409 EXTERNAL_IMPORT_SELECTION_CHANGED` 계열이며 상태를 바꾸지
+  않습니다. 성공 시에만 `preview_ready`로 전환합니다.
+- **멱등**: staged row·`lastBatchSequence`·`duplicateCount`는 `preview_ready`
+  에서 더 이상 변하지 않으므로, 같은 선언의 재시도는 동일한 검증을 통과해
+  `200` replay가 되고 다른 선언은 같은 검증에서 409가 됩니다. 별도 seal
+  선언 컬럼을 두지 않는 이유입니다.
+
+#### `preview_ready` lifecycle
+
+- batch append는 계속 `staging`에서만 허용합니다. sealed import에 append하면
+  409 `EXTERNAL_IMPORT_SELECTION_CHANGED`입니다.
+- finalize는 `staging`과 `preview_ready`를 모두 처리하고, 양쪽 모두 subset을
+  받습니다. 성공 시 선택되지 않은 staged row는 기존 계약대로 삭제합니다.
+- quota 실패는 아무것도 쓰지 않으므로 `preview_ready` 상태와 staged row가
+  그대로 남고, 사용자는 선택을 줄여 재업로드 없이 다시 finalize합니다.
+- DELETE는 `preview_ready`를 staging 취소와 동일하게 처리합니다.
+- lazy expiry와 15분 reconciliation sweep은 `staging`·`preview_ready`를 모두
+  대상으로 합니다.
+- **배포 호환성**: seal 이전 버전 클라이언트가 이미 열어 둔 화면은 `staging`
+  에서 바로 finalize할 수 있어야 하므로, `staging` finalize 경로는 absolute
+  TTL(72시간) 동안 유지합니다. 새 UI는 `preview_ready`만 재개 가능으로
+  취급하며, seal되지 않은 부분 업로드에는 재개 CTA를 제공하지 않습니다.
+  클라이언트 계약 변경은 `EXTERNAL_IMPORT_PARSER_VERSION`으로 구분합니다.
 - **finalize 멱등 계약**:
   - 같은 idempotency key + 같은 import digest·selection의 재요청 →
     **`200`으로 기존 완료 결과를 반환**합니다(no-op). 오류가 아닙니다.
@@ -366,8 +425,13 @@ window·credit·privacy disclosure 적용. 릴리스 B의 memory 사용은 이 b
 ### 8.3 상태
 
 `candidate` → (`active` | `rejected`) / `superseded` / `expired` /
-`suspended_by_source_lock` / `suspended_by_source_delete`(정책상 필요 시) /
+`suspended_by_source_lock` / `suspended_by_source_delete` /
 `manual_review_required` / `deleted`
+
+- `suspended_by_source_delete`는 §23 항목 3의 확정으로 정식 상태입니다:
+  source 삭제 시 사용자가 memory 유지를 선택한 경우에만 진입하며(§13.1),
+  retrieval에서 즉시 제외되고, 사용자가 evidence를 직접 작성해 재승인해야
+  active로 복귀합니다. 자동 복귀는 없습니다.
 
 - 같은 conflict group(canonical key)의 값이 다르면 자동 덮어쓰지 않고 사용자가
   유지/교체/병기/만료/직접 병합을 선택합니다. 최신 날짜만으로 진위를 정하지
@@ -390,10 +454,23 @@ window·credit·privacy disclosure 적용. 릴리스 B의 memory 사용은 이 b
 ### 8.5 MemoryEvidence source 확장성
 
 처음부터 source discriminator를 둡니다:
-`external_message | tomverse_message | manual`. source type별 nullable FK 중
-정확히 하나만 설정(DB CHECK 또는 동등한 무결성 검사), owner 일치, lock·delete
-상태 전파. 릴리스 B는 `external_message`·`manual`을 사용하고
+`external_message | tomverse_message | manual`. source type별로 정해진 FK
+패턴을 DB CHECK(또는 동등한 무결성 검사)로 강제하고, owner 일치, lock·delete
+상태 전파를 지킵니다. 릴리스 B는 `external_message`·`manual`을 사용하고
 `tomverse_message`는 schema만 예약합니다.
+
+**manual evidence 구조 확정(§23 항목 2, 2026-08-03)**: "nullable FK 중
+정확히 하나" 규칙은 message 계열 sourceType에만 적용되는 표현이었고, 확정
+규칙은 다음과 같습니다.
+
+- `sourceType = external_message` → `externalMessageId`만 NOT NULL
+- `sourceType = tomverse_message` → `tomverseMessageId`만 NOT NULL (예약)
+- `sourceType = manual` → **두 FK 모두 NULL.** 사용자가 직접 입력한 근거
+  텍스트가 evidence 본체이며 `MemoryEvidence`에 저장되고,
+  `evidenceDigest`는 그 텍스트의 content digest입니다. 별도 리소스로
+  분리하지 않습니다. manual evidence는 source lock·source delete 전파
+  대상이 아니고(잠글 source가 없음), owner 검증·길이 한도·§8.4 validator
+  (credential·imperative·URL 패턴 등)는 동일하게 적용됩니다.
 
 ### 8.6 Expiry
 
@@ -544,15 +621,33 @@ zh/fr/de/es/pt는 첫 decision-grade eval 범위 밖의 known limitation으로
   `memoryInjectionEnabled=true`. 승인 pair가 없거나 revoke되면 flag가 켜져
   있어도 injection은 fail-closed입니다.
 
+### 12.5 첫 승인 후보 pair와 eval 예산 (§23 항목 4)
+
+- **첫 eval 대상 pair는 `(gpt-5-6-luna, mem-extract-v1)`입니다.** 선정 근거:
+  기본 모델로서 verified pricing profile이 이미 `lib/modelPricing.ts`에
+  있고(§ "가격 profile" 검사 대상), Standard 계층이라 batch 비용이 낮으며,
+  ko/en 양쪽에서 운영 실적이 가장 많습니다. 예비 후보는 `gpt-5-4-mini`
+  (관찰 기간 중, 동일하게 verified pricing 보유)입니다.
+- 후보 선정은 **eval 대상 지정일 뿐 승인이 아닙니다.** 운영 활성화는 §12.3
+  기준을 §12.4 절차로 통과한 pair에만 주어집니다.
+- **eval 실행 예산은 사람이 승인합니다.** 산정 기준: decision-grade 표본
+  1,600(범주 4 × 언어 2 × 200) × 독립 재실행 포함 최소 2회 전체 실행 +
+  blind review 세트 생성 비용. 승인 기록(승인자·금액 상한·티켓)은 eval
+  register entry와 함께 남깁니다. 예산 승인 전에는 smoke mode만 실행합니다.
+
 ## 13. 삭제 · export · share
 
 ### 13.1 삭제
 
-- source(ExternalConversation/Import) 삭제 시 evidence를 제거하고, 유일한
-  evidence가 사라진 자동 추출 memory는 삭제 또는 review-required로 전환합니다.
-  사용자가 직접 작성·편집한 memory는 자동 삭제하지 않고 삭제 확인에서 별도
-  선택을 제공합니다. 안전 기본값은 "source와 그 source에서만 파생된 memory
-  함께 삭제"입니다.
+- source(ExternalConversation/Import) 삭제 시 evidence를 제거합니다. 유일한
+  evidence가 사라진 자동 추출 memory의 상태는 **확정(§23 항목 3)**:
+  삭제 확인의 기본 선택은 "source와 그 source에서만 파생된 memory 함께
+  삭제"(= memory `deleted`)이고, 사용자가 memory 유지를 명시적으로 선택한
+  경우에만 `suspended_by_source_delete`로 전환합니다(§8.3 — retrieval 즉시
+  제외, 사용자 evidence 재작성·재승인으로만 복귀).
+  `manual_review_required`는 이 경로에 사용하지 않습니다(그 상태는 §8.4
+  validator 강등 전용). 사용자가 직접 작성·편집한 memory(manual evidence
+  보유)는 자동 삭제·자동 전환하지 않고 삭제 확인에서 별도 선택을 제공합니다.
 - memory delete-all: 즉시 retrieval 제외, 진행 중 extraction 취소·차단,
   evidence·searchTerms 삭제, imported conversation은 별도 확인 없이 자동
   삭제하지 않음, content 없는 최소 audit만 보존, 실패 시 reconciliation, 멱등.
@@ -565,6 +660,19 @@ zh/fr/de/es/pt는 첫 decision-grade eval 범위 밖의 known limitation으로
 secret 원문·잠긴 evidence는 무조건 노출하지 않음(잠긴 source evidence 처리:
 잠금 해제 전에는 evidence 원문 대신 존재 metadata만 포함), `no-store`, 생성·
 다운로드 audit. 일반 Conversation export와는 별개 기능입니다.
+
+**포맷·보존 확정(§23 항목 6, 2026-08-03)**:
+
+- 포맷은 릴리스 A의 imported-data export와 같은 계열의 단일 JSON 문서
+  `{"format":"tomverse.memories.v1", "generatedAt", "items":[...]}`로
+  하고, item에는 kind·statement·status·sensitivity·confidence·pinned·
+  `expiresAt`·`retrievalVersion`·revision·생성/승인 시각과 evidence
+  provenance(`sourceType`, source 참조 metadata — 잠긴 source는 존재
+  metadata만)를 포함합니다. `searchTerms`·내부 score·context bundle은
+  포함하지 않습니다. 스키마 상세는 B 구현에서 이 계약 안에서 확정합니다.
+- **서버는 export 파일을 보존하지 않습니다**(스트리밍 생성, `no-store`).
+  보존되는 것은 content 없는 생성·다운로드 audit뿐이며, 보존 기간은 기존
+  admin audit 관례를 따라 **90일**입니다.
 
 ### 13.3 share · Conversation export 제외
 
@@ -686,7 +794,7 @@ cross-user 정보는 오류에 포함하지 않습니다.
 | `EXTERNAL_IMPORT_BATCH_OUT_OF_ORDER` | 409 | 순서 복구 후 가능 | chunk sequence 위반 |
 | `EXTERNAL_IMPORT_BATCH_CONFLICT` | 409 | 불가 | 동일 sequence 상이 payload |
 | `EXTERNAL_IMPORT_QUOTA_EXCEEDED` | 409 | 선택 축소 후 가능 | all-or-nothing 거부 |
-| `EXTERNAL_IMPORT_SELECTION_CHANGED` | 409 | preview 재확인 후 가능 | staging과 finalize 선택 불일치 |
+| `EXTERNAL_IMPORT_SELECTION_CHANGED` | 409 | preview 재확인 후 가능 | staging과 finalize 선택 불일치. **seal 검증 실패(sequence·staged ID 집합·duplicate count 불일치)와 sealed import에 대한 batch append도 같은 코드**입니다 — 셋 다 "클라이언트가 들고 있는 선택 상태와 서버 상태가 어긋났다"는 같은 의미이고, 복구도 같습니다(§5.5) |
 | `EXTERNAL_IMPORT_ALREADY_FINALIZED` | 409 | 불필요 | **다른 key**의 재-finalize에만 사용. 같은 key·digest 재요청은 오류가 아니라 `200` 멱등 응답(§5.5) |
 | `EXTERNAL_IMPORT_STAGING_EXPIRED` | 410 | 재시작 필요 | staging TTL 만료(§5.5) |
 
@@ -699,13 +807,18 @@ cross-user 정보는 오류에 포함하지 않습니다.
 | `MEMORY_FEATURE_DISABLED` | 403 | — | 불가 | flag off |
 | `MEMORY_EXTRACTION_ALREADY_RUNNING` | 409 | `background_concurrency` | 완료 후 가능 | 사용자당 1 run |
 | `MEMORY_EXTRACTION_PAIR_UNAVAILABLE` | 403 | — | 불가 | 승인 pair 없음/revoked |
-| `MEMORY_EXTRACTION_PROVIDER_BUDGET_EXHAUSTED` | 429 | `operational_guardrail` | `resetAt` 이후 | batch sub-budget, `resetAt` 필수 |
+| `MEMORY_EXTRACTION_PROVIDER_BUDGET_EXHAUSTED` | 503 | `operational_guardrail` | `resetAt` 이후 | batch sub-budget, `resetAt` 필수 |
 | `MEMORY_EXTRACTION_LEASE_EXPIRED` | 410 | `background_concurrency` | run 재개로 가능 | lease/claim 만료 |
 | `CHAT_CONTEXT_BUNDLE_STALE` | 409 | — | 자동 1회 (`details.requiresPreflight: true`) | preflight-chat 불일치 |
 | `MEMORY_ITEM_CONFLICT` | 409 | — | 사용자 판정 필요 | canonical key 충돌 |
 
-릴리스 B의 오류 계약에는 §23에 기록된 미결정 항목이 남아 있습니다(HTTP 의미
-정합 등). **B scope 승인 전에 이 표를 확정본으로 갱신해야 합니다.**
+이 표는 **확정본**입니다(§23 항목 1, 2026-08-03).
+`MEMORY_EXTRACTION_PROVIDER_BUDGET_EXHAUSTED`는 기존
+`PROVIDER_BUDGET_EXHAUSTED`(503)와 같은 의미 계층 — 호출자 개별 rate가
+아니라 서비스 운영 예산의 소진 — 이므로 **503으로 통일**합니다. 429는
+호출자별 한도(`background_concurrency`의 409·rate limit의 429)와 혼동을
+만들고, 예산 소진은 호출자가 행동을 바꿔서 풀 수 있는 상태가 아니기
+때문입니다. `resetAt` 필수 규칙은 유지합니다.
 
 entitlement(`CREDIT_*`, `PLAN_*`)와 guardrail(`OPERATIONAL_*`, `PROVIDER_*`)
 오류는 기존 코드·문구를 그대로 사용하며 위 코드들과 섞지 않습니다.
@@ -907,7 +1020,8 @@ GET    /api/imports/external/capacity          잔여 quota (파싱 전 표시�
 POST   /api/imports/external                   import 생성 (staging 시작)
 GET    /api/imports/external/[importId]        상태 조회
 POST   /api/imports/external/[importId]/batches   normalized chunk 수신 (sequence + idempotency)
-POST   /api/imports/external/[importId]/finalize  all-or-nothing 확정
+POST   /api/imports/external/[importId]/seal      업로드 완료 선언의 서버 검증 → preview_ready (§5.5)
+POST   /api/imports/external/[importId]/finalize  all-or-nothing 확정 (sealed 집합의 부분집합 허용)
 DELETE /api/imports/external/[importId]        취소·staging 정리 / 완료분 삭제
 GET    /api/external-conversations             finalized 목록 (viewer)
 GET    /api/external-conversations/[id]        read-only 조회
@@ -950,7 +1064,13 @@ POST          /api/assistant-profiles/[profileId]/preview       (실제 credit·
 ### UI 경로
 
 ```
-/settings/imports, /settings/imports/[importId], external viewer   (A)
+/settings/imports              관리 화면 (저장 공간·가져온 대화·이력·진행 중 작업)  (A)
+/settings/imports/new          전체 화면 Wizard (static segment, [importId]와 공존)  (A)
+/settings/imports/[importId]   완료 결과 · 작업 상태 상세. `preview_ready`이고
+                               TTL 이내면 여기서 seal된 staged 집합을 확인하고
+                               (부분집합 가능) 최종 저장한다. seal되지 않은
+                               `staging`과 만료 건은 다시 시작·삭제만 제공한다  (A)
+/settings/imports/conversations/[id]   read-only viewer                              (A)
 /settings/memory, /settings/memory/runs/[runId]                    (B)
 /settings/assistants, /settings/assistants/new, /settings/assistants/[profileId]  (C)
 ```
@@ -964,6 +1084,22 @@ Data 탭(`AuthButton.tsx`)에는 진입점·요약만 두고 대형 UI를 modal�
 - **A**: provider별 parse 성공·실패, parserVersion 실패율, count/byte bucket,
   duplicate/truncation/quota 거부율, staging cleanup, finalize latency, mobile
   desktop recommendation. filename·title·content·외부 ID·digest 금지.
+- **A — Wizard 단계 이벤트**: `external_import_step_entered`와
+  `external_import_step_abandoned`. 속성은 닫힌 `import_step` enum
+  (`provider_guide` `file_selection` `parsing` `conversation_selection`
+  `server_review` `completed` `desktop_recommended`) 하나뿐이며 filename·
+  대화 제목·본문·외부 ID·fingerprint·digest를 넣지 않습니다.
+  **해석 한계 — 다음을 오류로 읽지 마세요.**
+  - `abandoned`는 취소·이전·명시적 라우트 이탈처럼 확실한 사용자 행동에만
+    기록합니다. **브라우저 탭·창을 그냥 닫는 이탈은 측정되지 않습니다.**
+  - 따라서 단계별 `entered` 수는 언제나 `abandoned` 수보다 크거나 같을 수
+    있고, 두 수의 합이 맞지 않는 것은 계측 오류가 아닙니다.
+  - 실질 이탈률은 `abandoned`가 아니라 **연속한 두 단계의 `entered` 수 차이**
+    로 읽습니다. `abandoned`는 "명시적으로 그만둔" 하한선일 뿐입니다.
+  - `preparing_review` `finalizing` `upload_failed` `expired` `parse_failed`
+    는 단계가 아니라 단계 안의 순간이므로 enum에 없습니다. `quota_revision`은
+    출처에 따라 `conversation_selection` 또는 `server_review`로 집계되며,
+    이벤트는 label이 **바뀔 때만** 발생하므로 중복 계수되지 않습니다.
 - **B**: run 성공·실패·취소, pair별 실패율, chunk당 credit p50/p95, batch
   sub-budget 소진, validator 거부율, sensitive review 비율, 승인·수정·거부율,
   injection 비율, 주입 token bucket, truncation 비율, stale bundle 비율, lock
@@ -994,22 +1130,27 @@ Data 탭(`AuthButton.tsx`)에는 진입점·요약만 두고 대형 UI를 modal�
    승인자, 티켓, 날짜와 함께. 릴리스 A의 계약(§4, §5, §18 릴리스 A 표)은
    이 문서에서 확정값으로 기록돼 있습니다.
 
-### 릴리스 B scope 승인 전에 이 문서에서 확정해야 하는 항목 (pending)
+### 릴리스 B scope 승인 관련 항목 (2026-08-03 확정)
 
-1. batch provider budget 오류의 HTTP 의미 정합 — 기존
-   `PROVIDER_BUDGET_EXHAUSTED`는 `503`이므로
-   `MEMORY_EXTRACTION_PROVIDER_BUDGET_EXHAUSTED`의 `429`를 기존
-   `docs/policy/credit-and-cost-limits.md` 계약과 맞춰 하나로 확정.
-2. `MemoryEvidence.sourceType=manual`의 구조 — manual evidence는 대응 FK가
-   없으므로 "nullable FK 중 정확히 하나" 규칙의 예외를 명시하거나 별도
-   리소스로 분리.
-3. source 삭제 시 파생 memory의 전환 상태를 `deleted` /
-   `manual_review_required` / `suspended_by_source_delete` 중 하나로 확정.
-4. extraction model 후보 확정과 verified pricing 등록(`lib/modelPricing.ts`
-   계약), eval 실행 예산 승인.
-5. provider별 batch sub-budget 실제 값(기본 10% 유지 여부).
-6. memory export 파일 포맷 상세(JSON 구조)와 보존 기간 수치.
-7. 릴리스 A 완료 후 staging 검증 체크리스트 승인(릴리스 B 전제 조건).
+1. **[확정]** batch provider budget 오류의 HTTP 의미 — **503으로 통일**,
+   §18 릴리스 B 표와 그 아래 근거 참조.
+2. **[확정]** `MemoryEvidence.sourceType=manual` 구조 — 같은 테이블 유지,
+   manual은 두 FK 모두 NULL + 사용자 입력 근거 텍스트가 evidence 본체.
+   §8.5 참조.
+3. **[확정]** source 삭제 시 파생 memory 상태 — 기본은 함께 삭제(`deleted`),
+   사용자가 유지를 선택하면 `suspended_by_source_delete`. §8.3·§13.1 참조.
+4. **[확정]** 첫 eval 대상 pair는 `(gpt-5-6-luna, mem-extract-v1)`
+   (예비 `gpt-5-4-mini`), 둘 다 verified pricing 보유. **eval 실행 예산
+   승인(승인자·상한·티켓)은 사람이 register entry와 함께 기입해야 하며
+   아직 미기입** — §12.5 참조.
+5. **[확정]** batch sub-budget은 기본 10%(일·월) 유지 — §3 참조.
+6. **[확정]** memory export는 `tomverse.memories.v1` JSON, 서버 미보존 +
+   audit 90일 — §13.2 참조.
+7. **[미완 · staging 반영 전 필수]** 릴리스 A staging 검증 체크리스트
+   실행·승인 — `docs/ops/external-import-staging-checklist.md`. scope 승인
+   (2026-08-03)은 이 항목이 미완인 상태에서 이루어졌으므로, B 코드
+   구현(B1~)은 시작할 수 있으나 **B 기능의 staging 배포·활성화 전에
+   체크리스트 승인 기록이 있어야 합니다.**
 
 ### 릴리스 C scope 승인 전에 확정해야 하는 항목 (pending)
 

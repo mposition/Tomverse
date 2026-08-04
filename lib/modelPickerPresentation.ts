@@ -57,6 +57,7 @@ const koreanDescriptions: Record<string, string> = {
   codestral: "코드 생성, 자동 완성과 저장소 질문",
   "kimi-k2.7-code": "코딩 작업과 긴 기술 문맥",
   "kimi-k3": "이미지까지 다루는 긴 문맥 추론",
+  "minimax-m3": "빠른 에이전트 추론과 긴 문맥·이미지 분석",
   "qwen3.7-max": "고난도 다국어 추론과 복잡한 지시",
   "qwen3.7-plus": "균형 잡힌 다국어 분석과 업무 글쓰기",
   "qwen3.6-flash": "빠른 다국어 질문과 번역",

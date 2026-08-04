@@ -1566,6 +1566,22 @@ export function AuthButton({
                                                 </Link>
                                             </section>
                                         )}
+                                        <section
+                                            className="rounded-2xl border border-zinc-200 bg-zinc-50 p-4 dark:border-zinc-800 dark:bg-zinc-950/60"
+                                            data-testid="memory-entry"
+                                        >
+                                            <h3 className="text-sm font-bold">{t("memoryReview.dataTabTitle")}</h3>
+                                            <p className="mt-1 text-sm leading-6 text-zinc-500">{t("memoryReview.dataTabDescription")}</p>
+                                            <Link
+                                                href="/settings/memory"
+                                                onClick={closeSettingsModal}
+                                                data-testid="memory-entry-link"
+                                                className="mt-4 flex w-full items-center justify-center gap-2 rounded-xl border border-zinc-200 bg-white px-3 py-3 text-sm font-semibold text-zinc-700 transition-colors hover:bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:bg-zinc-800"
+                                            >
+                                                <Database className="h-4 w-4" />
+                                                {t("memoryReview.dataTabOpen")}
+                                            </Link>
+                                        </section>
                                         {listImportableGuestConversations().length > 0 && (
                                             <section className="rounded-2xl border border-zinc-200 bg-zinc-50 p-4 dark:border-zinc-800 dark:bg-zinc-950/60">
                                                 <h3 className="text-sm font-bold">{t("auth.guestImportSectionTitle")}</h3>

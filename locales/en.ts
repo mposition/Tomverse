@@ -1043,7 +1043,6 @@ export const en = {
         parseFailed: "The file could not be read as a supported export.",
         previewTitle: "Choose conversations to import",
         previewProvider: "Detected export: {provider}",
-        previewSummary: "{selected} of {total} conversations selected · about {size}",
         warningsTitle: "Not included",
         warningSkippedMessages: "{count} system or tool messages were skipped",
         warningSkippedParts: "{count} non-text parts (images, audio, files) were skipped",
@@ -1054,23 +1053,17 @@ export const en = {
         truncationTitle: "Some long messages will be shortened",
         truncationExplain:
             "{conversations} conversations contain messages longer than the storage limit of {limit} characters. If you approve, the beginning and end of each long message are kept and the middle is replaced with a marker.",
-        truncationApprove: "Import these conversations with shortened messages",
         truncatedBadge: "Will be shortened",
         quotaExceededWarning:
             "The selection is larger than your remaining import storage. Deselect some conversations to continue.",
         messagesCount: "{count} messages",
-        startImport: "Upload selection",
-        uploading: "Uploading batch {sent} of {total}…",
         uploadFailed:
             "The upload failed. You can retry — batches that already arrived are not sent twice.",
         retryUpload: "Retry upload",
-        stagedTitle: "Review and confirm",
         stagedSummary:
             "{staged} conversations ready to import · {duplicates} duplicates skipped",
         stagedTruncated: "{count} messages will be stored shortened",
         allDuplicates: "Everything in this selection is already in your account.",
-        finalize: "Confirm import",
-        finalizing: "Confirming…",
         finalizeFailedQuota:
             "Your account does not have enough import storage left for this selection.",
         stagingExpired: "This import session expired. Start again from the export file.",
@@ -1105,6 +1098,217 @@ export const en = {
             "This message was shortened to fit the storage limit. The full text remains only at the original service.",
         viewerMessagesShown: "{shown} of {total} messages shown",
         deleteSnapshot: "Delete this version",
+        // Export guidance step (wizard step 1)
+        guideTitle: "First, get your export file ready",
+        guideDescription:
+            "Pick the service you are importing from and we will show you how to get its export file. This choice is guidance only — the actual format is detected from the file itself.",
+        guideEntryNeedsExport: "I don't have an export file yet",
+        guideEntryHasFile: "I already have the file",
+        guideChatgptTitle: "How to get a ChatGPT export",
+        guideChatgptStep1: "In ChatGPT, open Settings → Data controls.",
+        guideChatgptStep2: "Request a data export.",
+        guideChatgptStep3:
+            "Download the ZIP from the link you receive by email. There is no need to unzip it.",
+        guideClaudeTitle: "How to get a Claude export",
+        guideClaudeStep1: "In Claude, open Settings → Privacy.",
+        guideClaudeStep2: "Request a data export.",
+        guideClaudeStep3:
+            "Download the file from the link you receive by email. Both ZIP and JSON work as-is.",
+        guideFormats: "Both ZIP and JSON files are supported.",
+        guideStaysLocal:
+            "The export file never leaves your device — it is opened inside your browser.",
+        guideMediaExcluded: "Images, audio and attachments are not imported.",
+        guidePrivacyDisclosure: "See how this data is handled",
+        guideContinue: "Choose the export file",
+        providerMismatchNotice:
+            "This is a {detected} export, so we will continue with {detected}.",
+        // Desktop-recommended state
+        desktopRecommendedTitle: "This device cannot open the file safely",
+        desktopRecommendedNoUpload: "The export file was not uploaded.",
+        desktopRecommendedNoData: "Nothing has been stored in Tomverse yet.",
+        desktopRecommendedRetry: "Please try again on a desktop computer.",
+        // Step indicator
+        stepIndicatorLabel: "Import progress",
+        stepPrepareExport: "Prepare export",
+        stepInspectFile: "Check the file",
+        stepSelectConversations: "Choose conversations",
+        stepConfirmImport: "Confirm import",
+        stepDone: "Done",
+        stepPosition: "Step {current} of {total}, {name}",
+        back: "Back",
+        // Conversation selection step
+        searchPlaceholder: "Search conversation titles",
+        filterFrom: "From date",
+        filterTo: "To date",
+        filterClear: "Clear filters",
+        selectAllNormal: "Select all normal conversations",
+        clearAllNormal: "Clear selection",
+        selectionHiddenNotice:
+            "{hidden} of the {selected} selected are not shown by the current filter.",
+        selectionSummary: "{selected} conversations selected · about {size}",
+        remainingSpace: "About {remaining} of space left",
+        rowTruncationConsent: "Include, stored shortened",
+        rowTruncationImpact:
+            "{count} messages will be stored with only their beginning and end.",
+        rowBlockedReason:
+            "{count} messages are above the import limit, so the whole conversation is excluded — not just those messages.",
+        rowPosition: "Conversation {index} of {total}",
+        continueToReview: "Review the selection",
+        preparingReviewTitle: "Preparing your import",
+        preparingReviewProgress: "{sent} of {total} prepared",
+        preparingReviewNotSaved:
+            "Nothing is stored in your account yet — that happens after the final confirmation.",
+        // Import confirmation step
+        reviewTitle: "Check what will be imported",
+        reviewFinalizeCta: "Import {count} conversations",
+        reviewBackToSelection: "Back to choosing conversations",
+        reviewExpiresAt: "This confirmation stays valid until {time}.",
+        finalizingTitle: "Saving to your account",
+        finalizingNotice: "Please keep this screen open until saving finishes.",
+        // Storage-shortfall recovery
+        quotaRevisionTitle: "Not enough import storage",
+        quotaRevisionExplain:
+            "Retrying the same selection will fail the same way unless your stored total changes. Please choose fewer conversations.",
+        quotaRevisionRestartNotice:
+            "Part of the selection was already sent, so we will start a fresh import. Your choices and approvals are kept.",
+        quotaRevisionAdjust: "Adjust the selection",
+        uploadRetryTransient:
+            "Preparation stopped because of a connection problem. It resumes where it stopped, and anything already received is not sent again.",
+        expiredTitle: "This import expired",
+        diagnosticsToggle: "Technical details",
+        // Management screen
+        newImportCta: "Start a new import",
+        inProgressTitle: "Imports in progress",
+        inProgressResume: "Finish this import",
+        inProgressRestart: "Start over",
+        inProgressNotResumable:
+            "This import cannot be continued. Start over or delete it.",
+        noServerDataYet: "Nothing has been stored in Tomverse.",
+        statusPreviewReady: "Waiting for confirmation",
+        statusExpired: "Expired",
+        expiredCardNotice: "This expired and has to be started again.",
+        abandonImport: "Leave this import",
+    },
+    // Account long-term memory review (Release B, slice B3). The list,
+    // delete and settings stay reachable regardless of the rollout flag;
+    // only review and creation actions follow it.
+    memoryReview: {
+        dataTabTitle: "Account memory",
+        dataTabDescription:
+            "Review memory candidates extracted from imported conversations, and choose whether approved memories are used in new chats.",
+        dataTabOpen: "Open memory settings",
+        pageTitle: "Account memory",
+        pageDescription:
+            "Approve or reject memory candidates awaiting review, and edit, pin or delete the memories in use.",
+        backToChat: "Back to chat",
+        signInRequired: "Sign in to manage your account memory.",
+        privacyNote:
+            "Only memories you have reviewed and approved are used in new chats. Approved memories and answer-style preferences are passed to your currently selected Tomverse model as reference material, and you can view, edit, disable or delete them at any time.",
+        disabledNotice:
+            "Memory review and creation are not available right now. Memories you already stored remain viewable and deletable.",
+        settingsTitle: "Memory usage settings",
+        masterToggleLabel: "Use approved memories in new chats",
+        masterToggleDescription:
+            "When off, no chat uses memories. Stored memories are not deleted.",
+        styleToggleLabel: "Use answer-style memories",
+        styleToggleDescription:
+            "Lets answers take into account the tone, length and structure preferences inferred from past conversations.",
+        defaultModeLabel: "Default for new chats",
+        defaultModeOn: "Use memory",
+        defaultModeOff: "Don't use memory",
+        reviewTitle: "Memories awaiting review",
+        reviewDescription:
+            "Extracted candidates are only used in new chats after you approve them. Sensitive candidates and those needing individual review are never included in bulk approval.",
+        reviewEmpty: "No memories are waiting for review.",
+        bulkApprove: "Approve all non-sensitive candidates",
+        bulkResult: "{approved} approved · {skipped} need individual review",
+        approve: "Approve",
+        reject: "Reject",
+        edit: "Edit",
+        save: "Save",
+        cancel: "Cancel",
+        needsIndividualReview: "Individual review required",
+        sensitiveBadge: "Sensitive",
+        pinnedBadge: "Pinned",
+        expires: "Expires: {date}",
+        conflictNotice:
+            "An active memory already covers the same item. You can keep the existing memory or replace it with this one.",
+        conflictReplace: "Replace the existing memory",
+        activeTitle: "Memories in use",
+        activeEmpty: "No memories are in use yet.",
+        archivedTitle: "Archived memories",
+        pin: "Pin",
+        unpin: "Unpin",
+        delete: "Delete",
+        deleteArmed: "Press again to delete",
+        editParkedNotice:
+            "Your edit needs another review, so the memory moved back to the review queue.",
+        validationFailed:
+            "This can't be stored as a memory. Write it as a declarative statement of fact, like \"The user prefers concise answers\".",
+        errorGeneric: "Something went wrong. Please try again.",
+        loadMore: "Show more",
+        evidenceManual: "Grounds you wrote:",
+        evidenceExternal: "Extracted from an imported conversation",
+        evidenceViewSource: "View source conversation",
+        createTitle: "Add a memory yourself",
+        createDescription:
+            "Add a fact or preference to remember as a declarative statement. Memories you add yourself are used right away.",
+        createKindLabel: "Kind",
+        kindGroupFactual: "Facts & preferences",
+        kindGroupStyle: "Answer style",
+        createStatementLabel: "Memory statement",
+        createStatementPlaceholder:
+            "e.g. The user prefers concise answers",
+        createGroundsLabel: "Grounds",
+        createGroundsDescription:
+            "Describe what this memory is based on. The grounds text is stored with the memory.",
+        createSensitiveLabel: "Mark as sensitive information",
+        createSubmit: "Add memory",
+        createSuccess: "Memory added.",
+        reauthRequired: "For your security, sign in again to continue.",
+        exportTitle: "Download your memories",
+        exportDescription:
+            "Download every memory stored in your account, with its state and evidence provenance, as a single JSON file. The file is not retained on our servers.",
+        exportDownload: "Download all (JSON)",
+        deleteAllTitle: "Delete all memories",
+        deleteAllDescription:
+            "Deletes every stored memory and its evidence, and cancels any extraction in progress. This cannot be undone.",
+        deleteAllImportsNote:
+            "Imported conversations are not deleted. You can delete those separately in the import settings.",
+        deleteAllConfirmLabel: "Type {phrase} to confirm",
+        deleteAllSubmit: "Delete all memories",
+        deleteAllDone: "All memories have been deleted.",
+        status: {
+            candidate: "Awaiting review",
+            active: "In use",
+            rejected: "Rejected",
+            superseded: "Replaced",
+            expired: "Expired",
+            suspended_by_source_lock: "Suspended by source lock",
+            suspended_by_source_delete: "Suspended by source deletion",
+            manual_review_required: "Individual review required",
+        },
+        kind: {
+            identity: "Identity",
+            preference: "Preference",
+            occupation: "Occupation",
+            expertise: "Expertise",
+            long_term_goal: "Long-term goal",
+            project: "Project",
+            constraint: "Constraint",
+            decision: "Decision",
+            relationship: "Relationship",
+            recurring_context: "Recurring context",
+            communication_style: "Communication style",
+            tone: "Tone",
+            verbosity: "Answer length",
+            structure: "Structure",
+            formatting: "Formatting",
+            language: "Language",
+            explanation_depth: "Explanation depth",
+            citation_preference: "Citation preference",
+            code_style: "Code style",
+        },
     },
     privacyPolicy: {
         title: "Privacy Policy",
@@ -1120,6 +1324,8 @@ export const en = {
         attachments: "Attachments may be stored temporarily in encrypted object storage for model delivery and document extraction. Temporary attachments are currently deleted after approximately one day under the lifecycle policy.",
         externalImportTitle: "Conversations imported from other AI services",
         externalImport: "You can store past conversations you select from an export file downloaded from another AI service, such as ChatGPT or Claude, in your Tomverse account. The export file is opened only in your browser; the original archive is never uploaded to or retained by Tomverse servers or storage. Only the normalized text of the conversations you select, together with provenance details (source service, original timestamps, display-only model names), is stored as account-private material. Images, audio and attachments are not imported. Imported conversations may contain other people's personal information, so it is your responsibility to confirm that you are entitled to import that data. You can view, delete and export imported material at any time, and it is deleted with your account. Deleting it from Tomverse does not delete the data held by the original service.",
+        memoryTitle: "Account long-term memory",
+        memory: "If you choose to use the memory feature, Tomverse sends the parts of your imported conversations that you select to the AI provider you confirm, in order to extract memory candidates. Extraction uses the model and the credit amount shown to you before it runs. Extracted candidates are not used to generate answers until you review and approve them. Candidates classified as sensitive, and those that need individual review, are excluded from bulk approval and must be confirmed one at a time. Candidates, approved memories and their evidence are retained in your account until you delete them or your account data is deleted. Approved memories and answer-style preferences are sent as reference material to the AI provider that generates each new answer, which means to each model's provider when you compare several models. You can view, edit and disable stored memories at any time, download the full list as a file, or delete all of them at once. Turning memory off stops it being used in new chats.",
         analyticsTitle: "Product analytics and campaign attribution",
         analytics: "Tomverse always uses essential session, security, language, and preference storage needed to provide the service. For product analytics, EU/EEA, UK, Swiss, and unverified-region visitors must opt in before Google Analytics 4 starts. In Australia and any other region added only after legal review, privacy-minimized analytics starts after a clear notice and can be turned off immediately or later in Analytics settings. We record approved product events and metadata such as UTM source, language, country, model count, and plan. Google may also process connection and device data, including an IP address, browser information, page URL, and approximate location, potentially outside the visitor's country. Prompts, model responses, filenames, file contents, email addresses, and profile names are never included. Advertising storage and personalization remain disabled.",
         retentionTitle: "Retention and deletion",

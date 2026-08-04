@@ -389,7 +389,7 @@ test.describe("comparison readiness states", () => {
 // See docs/ui-contracts/comparison-action-rail.md.
 // ===========================================================================
 
-const AUTH_MODELS = ["gpt-5-4-mini", "claude-sonnet-5", "gemini-3-5-flash"];
+const AUTH_MODELS = ["gpt-5-4-mini", "claude-sonnet-5", "gemini-3-6-flash"];
 const MOBILE_VIEWPORT = { width: 390, height: 680 };
 const DESKTOP_VIEWPORT = { width: 1440, height: 900 };
 
@@ -648,7 +648,7 @@ for (const shell of SHELLS) {
     test("an excluded failure puts the sentence back on screen", async ({ page }) => {
       await enterAuthenticatedComparison(page, {
         viewport: shell.viewport,
-        statuses: { "gemini-3-5-flash": "error" },
+        statuses: { "gemini-3-6-flash": "error" },
       });
 
       await expect(rail(page)).toHaveAttribute("data-steady", "false");
@@ -663,7 +663,7 @@ for (const shell of SHELLS) {
     }) => {
       await enterAuthenticatedComparison(page, {
         viewport: shell.viewport,
-        statuses: { "claude-sonnet-5": "error", "gemini-3-5-flash": "error" },
+        statuses: { "claude-sonnet-5": "error", "gemini-3-6-flash": "error" },
       });
 
       await expect(rail(page)).toHaveAttribute("data-state", "needsMore");
@@ -680,7 +680,7 @@ for (const shell of SHELLS) {
         modelStub: {
           "gpt-5-4-mini": { kind: "success", chunks: ["Paris."], intervalMs: 15 },
           "claude-sonnet-5": { kind: "hold" },
-          "gemini-3-5-flash": { kind: "hold" },
+          "gemini-3-6-flash": { kind: "hold" },
         },
       });
 
@@ -911,7 +911,7 @@ test.describe("collapsed rail (keyboard/landscape)", () => {
     page,
   }) => {
     await enterAuthenticatedComparison(page, {
-      statuses: { "gemini-3-5-flash": "error" },
+      statuses: { "gemini-3-6-flash": "error" },
     });
     await expectStatusOnScreen(page);
 
@@ -977,7 +977,7 @@ test.describe("the two shells agree on the policy", () => {
 
       await enterAuthenticatedComparison(page, {
         viewport: shell.viewport,
-        statuses: { "gemini-3-5-flash": "error" },
+        statuses: { "gemini-3-6-flash": "error" },
       });
       seen[`${shell.name}-excluded`] = await captureRail();
     }
@@ -998,7 +998,7 @@ test.describe("the two shells agree on the policy", () => {
 
     await enterAuthenticatedComparison(page, {
       viewport: DESKTOP_VIEWPORT,
-      statuses: { "gemini-3-5-flash": "error" },
+      statuses: { "gemini-3-6-flash": "error" },
     });
     await expect(rail(page)).toHaveAttribute("data-status-hidden", "false");
     const explaining = await readRailGeometry(page);
@@ -1143,7 +1143,7 @@ test.describe("mobile rail geometry", () => {
     const steady = await rail(page).boundingBox();
 
     await enterAuthenticatedComparison(page, {
-      statuses: { "gemini-3-5-flash": "error" },
+      statuses: { "gemini-3-6-flash": "error" },
     });
     const explaining = await rail(page).boundingBox();
 

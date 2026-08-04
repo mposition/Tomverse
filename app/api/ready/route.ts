@@ -127,8 +127,12 @@ const readinessResponse = async (head = false) => {
         title: "Image provider spend budget is not configured correctly",
         error: imageProviderBudget
           ? "Image provider budget is configured (or the feature flag is off)."
-          : (imageBudgetStatus?.resolved.problems ?? [])
-              .map((problem) => problem.message)
+          : (imageBudgetStatus?.providers ?? [])
+              .flatMap((entry) =>
+                entry.resolved.problems.map(
+                  (problem) => `${entry.provider}: ${problem.message}`
+                )
+              )
               .join(" | ") ||
             "Image generation is enabled but its provider budget is unusable.",
         severity: "fatal",
@@ -136,6 +140,10 @@ const readinessResponse = async (head = false) => {
           component: "api-ready",
           route: "/api/ready",
           imageGenerationFlagEnabled: imageBudgetStatus?.flagEnabled ?? false,
+          imageProviders:
+            (imageBudgetStatus?.providers ?? [])
+              .map((entry) => entry.provider)
+              .join(",") || "none",
           traceId,
         },
       }),

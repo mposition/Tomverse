@@ -101,7 +101,14 @@ test("the feature's name never collides with the guest import", () => {
 
 test("the components render the copy", () => {
     const sources = [
-        "../components/imports/ExternalImportSettings.tsx",
+        "../components/imports/ExternalImportManagement.tsx",
+        "../components/imports/ExternalImportWizard.tsx",
+        "../components/imports/wizard/ProviderGuideStep.tsx",
+        "../components/imports/wizard/FileInspectionStep.tsx",
+        "../components/imports/wizard/ConversationSelectionStep.tsx",
+        "../components/imports/wizard/ImportReviewStep.tsx",
+        "../components/imports/wizard/ImportCompletedStep.tsx",
+        "../components/imports/wizard/ImportStepIndicator.tsx",
         "../components/imports/ExternalImportDetail.tsx",
         "../components/imports/ExternalConversationViewer.tsx",
         "../components/auth/AuthButton.tsx",
@@ -109,7 +116,35 @@ test("the components render the copy", () => {
     for (const key of [
         "externalImport.pageTitle",
         "externalImport.privacyNote",
-        "externalImport.truncationApprove",
+        // Truncation consent is per conversation (§5.4). The row-level
+        // consent control and its impact line are what must be rendered;
+        // there is deliberately no global "approve them all" string.
+        "externalImport.rowTruncationConsent",
+        "externalImport.rowTruncationImpact",
+        "externalImport.rowBlockedReason",
+        "externalImport.truncationExplain",
+        // Provider guidance is advisory: the mismatch notice has to exist.
+        "externalImport.guideChatgptTitle",
+        "externalImport.guideClaudeTitle",
+        "externalImport.providerMismatchNotice",
+        // The desktop-recommended state is a wizard state with three facts.
+        "externalImport.desktopRecommendedNoUpload",
+        "externalImport.desktopRecommendedNoData",
+        "externalImport.desktopRecommendedRetry",
+        // Step indicator and the user-facing rewording of transport terms.
+        "externalImport.stepIndicatorLabel",
+        "externalImport.stepPosition",
+        "externalImport.continueToReview",
+        "externalImport.preparingReviewTitle",
+        "externalImport.reviewFinalizeCta",
+        // Quota recovery must never read as "retry the same thing".
+        "externalImport.quotaRevisionExplain",
+        "externalImport.quotaRevisionRestartNotice",
+        // Management screen: resume, restart and expiry.
+        "externalImport.inProgressResume",
+        "externalImport.inProgressNotResumable",
+        "externalImport.expiredCardNotice",
+        "externalImport.noServerDataYet",
         "externalImport.detailTitle",
         "externalImport.dataTabTitle",
         "externalImport.viewerTruncatedNotice",

@@ -219,10 +219,21 @@ flex service tier, regional·data-residency endpoint를 쓰지 않습니다. 따
 |---|---|---|---|
 | GPT-5.5 / GPT-5.5 Thinking | US$5 | US$30 | 동일 upstream(`gpt-5.5`), reasoning token은 출력에 포함 |
 | Gemini 3.1 Pro Preview | US$2 (≤200K) / US$4 (>200K) | US$12 / US$18 | prompt 크기로 tier 선택 |
-| Claude Opus 4.8 | US$5 | US$25 | |
+| Gemini 3.6 Flash | US$1.50 | US$7.50 | cached US$0.15, 공개 Advanced 4크레딧 |
+| Gemini 3.5 Flash | US$1.50 | US$9 | cached US$0.15, historical 전용 Advanced 4크레딧 |
+| Claude Opus 5 (`claude-opus-4-8` stable ID) | US$5 | US$25 | cached US$0.50, 8 credits |
+| Claude Fable 5 | US$10 | US$50 | cached US$1, 16 credits |
+| Kimi K3 | US$3 | US$15 | cached US$0.30, 16 credits |
+| MiniMax M3 (≤512K) | US$0.30 | US$1.20 | cached US$0.06, 4 credits |
+| MiniMax M3 (>512K) | US$0.60 | US$2.40 | cached US$0.12, 4 credits |
 | GPT-5.6 Luna (≤272K) | US$0.20 | US$1.20 | cached US$0.02, cache write US$0.25(기록만) |
 | GPT-5.6 Luna (>272K) | US$0.40 | US$1.80 | cached US$0.04, cache write US$0.50(기록만) |
 | GPT-5.4 mini | US$0.75 | US$4.50 | cached US$0.075, 단일 tier, cache write 미확인 |
+
+Gemini 3.5 Flash와 3.6 Flash는 입력 단가가 같고 3.6의 출력 단가가 약 16.7%
+낮습니다. 기능 역할도 겹치므로 공개 카탈로그에는 3.6만 노출합니다. 3.5의 모델
+ID와 가격 profile은 과거 대화 표시와 비소급 정산을 위해 보존합니다. 1크레딧
+경량 역할은 별도 제품인 Gemini 3.5 Flash-Lite(`gemini-2-5-flash`)가 담당합니다.
 
 Luna의 장문 tier는 입력 상한(로그인 128,000 · 게스트 16,000 토큰) 때문에 chat
 경로에서 도달하지 않습니다. 계산은 검증돼 있으나 실제 과금 경로에서 발동한 적은

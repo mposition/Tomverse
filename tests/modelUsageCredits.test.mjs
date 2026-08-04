@@ -28,6 +28,18 @@ test("model usage profiles match the launch credit examples", () => {
     category: "Premium",
     credits: 8,
   });
+  assert.deepEqual(profile("claude-fable-5"), {
+    category: "Reasoning",
+    credits: 16,
+  });
+  assert.deepEqual(profile("kimi-k3"), {
+    category: "Reasoning",
+    credits: 16,
+  });
+  assert.deepEqual(profile("minimax-m3"), {
+    category: "Advanced",
+    credits: 4,
+  });
   assert.deepEqual(profile("perplexity/sonar-deep-research"), {
     category: "Research",
     credits: 30,
@@ -41,7 +53,7 @@ test("model usage profiles match the launch credit examples", () => {
 test("model usage classes are independent from subscription access", () => {
   const premium = getModel("gpt-5-5");
   const guestStandard = getModel("gpt-5-4-mini");
-  const freeStandard = getModel("gemini-3-5-flash");
+  const freeAdvanced = getModel("gemini-3-6-flash");
 
   assert.equal(premium.minimumPlan, "Pro");
   assert.equal(canUseModelWithPlan("Free", premium), false);
@@ -51,10 +63,11 @@ test("model usage classes are independent from subscription access", () => {
   assert.equal(canUseModelWithPlan("Guest", guestStandard), true);
   assert.equal(getModelUsageProfile(guestStandard).category, "Standard");
 
-  assert.equal(getModelUsageProfile(freeStandard).category, "Standard");
-  assert.equal(freeStandard.minimumPlan, "Free");
-  assert.equal(canUseModelWithPlan("Guest", freeStandard), false);
-  assert.equal(canUseModelWithPlan("Free", freeStandard), true);
+  assert.equal(getModelUsageProfile(freeAdvanced).category, "Advanced");
+  assert.equal(getModelUsageProfile(freeAdvanced).credits, 4);
+  assert.equal(freeAdvanced.minimumPlan, "Free");
+  assert.equal(canUseModelWithPlan("Guest", freeAdvanced), false);
+  assert.equal(canUseModelWithPlan("Free", freeAdvanced), true);
 });
 
 test("retired Gemini 2.5 Pro is not callable and points to its replacement", () => {
@@ -93,8 +106,12 @@ test("new catalogue plans and credit weights follow their verified cost bands", 
     "gpt-5-6-terra": ["Free", "Advanced", 4],
     "gpt-5-6-luna": ["Guest", "Standard", 1],
     "gemini-3-6-flash": ["Free", "Advanced", 4],
+    "gemini-3-5-flash": ["Free", "Advanced", 4],
     "gemini-2-5-flash": ["Guest", "Standard", 1],
     "mistral-medium-3-1": ["Free", "Advanced", 4],
+    "claude-fable-5": ["Pro", "Reasoning", 16],
+    "kimi-k3": ["Pro", "Reasoning", 16],
+    "minimax-m3": ["Free", "Advanced", 4],
   };
 
   for (const [id, [minimumPlan, category, credits]] of Object.entries(expected)) {
@@ -113,7 +130,7 @@ test("new catalogue models expose verified context, output and attachment capabi
     assert.equal(modelSupportsNativePdfInput(model), true, id);
   }
 
-  for (const id of ["gemini-3-6-flash", "gemini-2-5-flash"]) {
+  for (const id of ["gemini-3-6-flash", "gemini-3-5-flash", "gemini-2-5-flash"]) {
     const model = getModel(id);
     assert.equal(model.contextWindowTokens, 1_048_576, id);
     assert.equal(getModelBillingProfile(model).maxOutputTokens, 65_536, id);
@@ -138,6 +155,17 @@ test("new catalogue models expose verified context, output and attachment capabi
   assert.equal(mistral.contextWindowTokens, 262_144);
   assert.equal(modelSupportsImageInput(mistral), true);
   assert.equal(modelSupportsNativePdfInput(mistral), false);
+
+  const kimi = getModel("kimi-k3");
+  assert.equal(kimi.contextWindowTokens, 1_048_576);
+  assert.equal(getModelBillingProfile(kimi).maxOutputTokens, 1_048_576);
+  assert.equal(modelSupportsImageInput(kimi), true);
+
+  const minimax = getModel("minimax-m3");
+  assert.equal(minimax.apiModel, "MiniMax-M3");
+  assert.equal(minimax.contextWindowTokens, 1_000_000);
+  assert.equal(getModelBillingProfile(minimax).maxOutputTokens, 524_288);
+  assert.equal(modelSupportsImageInput(minimax), true);
 });
 
 test("long input applies the configured credit multiplier", () => {
@@ -322,5 +350,7 @@ test("cost reservations use realistic output while preserving provider output ca
     outputReservation("gpt-5-5-thinking") +
     outputReservation("claude-opus-4-8") +
     outputReservation("gemini-3-1-pro");
-  assert.equal(incidentOutputReservationMicroUsd, 184_320 + 102_400 + 49_152);
+  // Opus 5 reserves 8,192 tokens because adaptive thinking now shares its
+  // 128K output allowance; the stable Tomverse id remains claude-opus-4-8.
+  assert.equal(incidentOutputReservationMicroUsd, 184_320 + 204_800 + 49_152);
 });

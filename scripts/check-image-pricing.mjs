@@ -16,6 +16,12 @@ import {
   maxRequestCostMicroUsd,
   PRICE_VERIFICATION,
 } from "../lib/imageGenerationPricing.ts";
+import {
+  IMAGE_MODEL_REGISTRY,
+  listEnabledImageModels,
+  maxImageRequestCostMicroUsd,
+  minimumCreditsForImageOption,
+} from "../lib/imageModelRegistry.ts";
 
 const failures = [];
 const warnings = [];
@@ -96,6 +102,77 @@ if (PRICE_VERIFICATION.sources.length === 0) {
   failures.push("PRICE_VERIFICATION.sources must list at least one official URL");
 }
 
+// --- Image model registry (policy v2 section 12) ---
+//
+// The registry is the multi-model successor to the flat table above. Every
+// ENABLED model must carry a provably finite worst-case cost and credits at
+// or above the mathematical minimum; a model whose price could not be read
+// from official documentation must be registered DISABLED rather than priced
+// from memory.
+for (const model of IMAGE_MODEL_REGISTRY) {
+  const label = `${model.provider}/${model.id}`;
+  const verification = model.priceVerification;
+
+  if (model.disabledReason !== null) {
+    // A disabled model must not look priced: a stale price list left behind
+    // is how a hold silently becomes a launch.
+    if (model.prices.length > 0) {
+      failures.push(
+        `${label}: disabled (${model.disabledReason}) but still carries ${model.prices.length} price entries`
+      );
+    }
+    if (model.disabledReason === "price_unverified" && verification.verifiedAt) {
+      failures.push(
+        `${label}: marked price_unverified but priceVerification.verifiedAt is set`
+      );
+    }
+    continue;
+  }
+
+  if (!verification.verifiedAt) {
+    failures.push(`${label}: enabled without a price verification date`);
+  }
+  if (verification.sources.length === 0) {
+    failures.push(`${label}: enabled without an official price source URL`);
+  }
+  if (verification.thinkingCapMicroUsd === null) {
+    failures.push(
+      `${label}: enabled with an unknown thinking cap -- worst-case cost is not finite, so a fixed price cannot hold`
+    );
+  }
+  if (model.prices.length === 0) {
+    failures.push(`${label}: enabled with no price entries`);
+  }
+
+  for (const price of model.prices) {
+    const optionLabel = `${label} ${price.quality} ${price.size}`;
+    if (!model.qualities.includes(price.quality)) {
+      failures.push(`${optionLabel}: price for a quality the model does not advertise`);
+    }
+    if (!model.sizes.includes(price.size)) {
+      failures.push(`${optionLabel}: price for a size the model does not advertise`);
+    }
+    if (!Number.isSafeInteger(price.credits) || price.credits <= 0) {
+      failures.push(`${optionLabel}: credits must be a positive integer`);
+    }
+    const maxCost = maxImageRequestCostMicroUsd(model, price);
+    const minimum = minimumCreditsForImageOption(model, price);
+    if (maxCost === null || minimum === null) {
+      failures.push(`${optionLabel}: worst-case cost could not be computed`);
+      continue;
+    }
+    if (price.credits < minimum) {
+      failures.push(
+        `${optionLabel}: ${price.credits} credits is below the policy minimum ${minimum} (worst case ${maxCost} microUSD at the ${IMAGE_COST_PER_CREDIT_CEILING_MICRO_USD} ceiling)`
+      );
+    }
+  }
+}
+
+if (listEnabledImageModels().length === 0) {
+  failures.push("no image model is enabled -- the feature cannot serve any request");
+}
+
 for (const warning of warnings) console.warn(`WARNING: ${warning}`);
 
 if (failures.length > 0) {
@@ -104,7 +181,17 @@ if (failures.length > 0) {
   process.exit(1);
 }
 
+const disabledModels = IMAGE_MODEL_REGISTRY.filter(
+  (model) => model.disabledReason !== null
+);
+for (const model of disabledModels) {
+  console.log(
+    `NOTE: ${model.provider}/${model.id} is registered but disabled (${model.disabledReason}).`
+  );
+}
+
 console.log(
   `Image pricing check passed (${listEnabledImagePricingEntries().length} enabled entries, ` +
+    `${listEnabledImageModels().length} enabled model(s), ${disabledModels.length} on hold, ` +
     `ceiling ${IMAGE_COST_PER_CREDIT_CEILING_MICRO_USD} microUSD/credit, version ${IMAGE_PRICING_VERSION}).`
 );

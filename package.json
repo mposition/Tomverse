@@ -38,6 +38,7 @@
     "check:accent-tokens": "node scripts/check-accent-tokens.mjs",
     "verify:fixture-route-gate": "node scripts/verify-fixture-route-gate.mjs",
     "check:model-pricing": "node --import tsx scripts/check-model-pricing.mjs",
+    "check:memory-extraction-eval": "node --import tsx scripts/check-memory-extraction-eval-register.mjs",
     "check:image-pricing": "node --import tsx scripts/check-image-pricing.mjs",
     "check:usage-bucket-range": "node --import tsx scripts/check-usage-bucket-range.mjs",
     "security:regression": "node scripts/security-regression-check.mjs",
@@ -66,6 +67,7 @@
   "dependencies": {
     "@ai-sdk/anthropic": "^4.0.24",
     "@ai-sdk/google": "^4.0.28",
+    "@ai-sdk/moonshotai": "^3.0.23",
     "@ai-sdk/openai": "^4.0.24",
     "@auth/prisma-adapter": "^2.11.3",
     "@aws-sdk/client-s3": "^3.1099.0",

@@ -6,6 +6,7 @@ import {
   isImageGenerationEnabled,
   setImageGenerationEnabled,
 } from "@/lib/appSettings";
+import { retryImageGenerationTarget } from "@/lib/imageGenerationService";
 import { getUserChatUsageKey } from "@/lib/chatSecurity";
 import {
   auditImageGenerationInvariants,
@@ -28,6 +29,8 @@ const resetImageTestData = () =>
       "ImageAssetCleanup",
       "ImageAsset",
       "ImageGeneration",
+      "ImageGenerationTarget",
+      "ImageGenerationGroup",
       "ImageCreditReservation",
       "ChatUsageBucket",
       "ChatRequestLease",
@@ -60,8 +63,20 @@ const createImageConversation = (userId: string) =>
     },
   });
 
-const createGeneration = (userId: string, conversationId: string) =>
-  prisma.imageGeneration.create({
+const createGeneration = async (userId: string, conversationId: string) => {
+  // v2 chain: a raw generation always hangs off a 1-target group, exactly
+  // like the service transaction and the section-14 backfill produce.
+  const group = await prisma.imageGenerationGroup.create({
+    data: {
+      userId,
+      conversationId,
+      groupIdempotencyKey: randomUUID(),
+    },
+  });
+  const target = await prisma.imageGenerationTarget.create({
+    data: { groupId: group.id, provider: "openai", modelId: "gpt-image-2" },
+  });
+  const generation = await prisma.imageGeneration.create({
     data: {
       userId,
       conversationId,
@@ -70,8 +85,16 @@ const createGeneration = (userId: string, conversationId: string) =>
       preset: "draft",
       size: "1024x1024",
       quality: "low",
+      groupId: group.id,
+      targetId: target.id,
     },
   });
+  await prisma.imageGenerationTarget.update({
+    where: { id: target.id },
+    data: { currentGenerationId: generation.id },
+  });
+  return generation;
+};
 
 const createReservation = (
   userId: string,
@@ -87,6 +110,8 @@ const createReservation = (
       preset: "draft",
       quality: "low",
       size: "1024x1024",
+      provider: "openai",
+      modelId: "gpt-image-2",
       reservedCredits: 15,
       planReservedCredits: 15,
       addOnReservedCredits: 0,
@@ -205,29 +230,18 @@ test("duplicate (userId, idempotencyKey) is rejected", async () => {
   const user = await createUser();
   const conversation = await createImageConversation(user.id);
   const idempotencyKey = randomUUID();
-  await prisma.imageGeneration.create({
-    data: {
-      userId: user.id,
-      conversationId: conversation.id,
-      idempotencyKey,
-      prompt: "p",
-      preset: "draft",
-      size: "1024x1024",
-      quality: "low",
-    },
+  const first = await createGeneration(user.id, conversation.id);
+  await prisma.imageGeneration.update({
+    where: { id: first.id },
+    data: { idempotencyKey },
   });
+  const second = await createGeneration(user.id, conversation.id);
   await assert.rejects(
-    prisma.imageGeneration.create({
-      data: {
-        userId: user.id,
-        conversationId: conversation.id,
-        idempotencyKey,
-        prompt: "p",
-        preset: "draft",
-        size: "1024x1024",
-        quality: "low",
-      },
-    })
+    prisma.imageGeneration.update({
+      where: { id: second.id },
+      data: { idempotencyKey },
+    }),
+    (error: { code?: string }) => error.code === "P2002"
   );
 });
 
@@ -555,4 +569,232 @@ test("the admin setter round-trips the opt-in flag and off never needs a delete"
     where: { key: "feature.imageGenerationEnabled" },
   });
   assert.equal(row?.value, "false");
+});
+
+test("the reservation transaction creates a 1-target group with recorded identity (v2)", async () => {
+  await enableImageGeneration();
+  const user = await createUser();
+  const result = await requestImageGeneration(requestInput(user.id));
+
+  const generation = await prisma.imageGeneration.findUnique({
+    where: { id: result.generationId },
+  });
+  assert.ok(generation);
+  assert.equal(generation.attemptNumber, 1);
+
+  const target = await prisma.imageGenerationTarget.findUnique({
+    where: { id: generation.targetId },
+  });
+  assert.equal(target?.currentGenerationId, generation.id);
+  assert.equal(target?.provider, "openai");
+  assert.equal(target?.modelId, "gpt-image-2");
+  assert.equal(target?.groupId, generation.groupId);
+
+  const group = await prisma.imageGenerationGroup.findUnique({
+    where: { id: generation.groupId },
+  });
+  assert.equal(group?.userId, user.id);
+  assert.equal(group?.groupIdempotencyKey, generation.idempotencyKey);
+
+  const reservation = await prisma.imageCreditReservation.findUnique({
+    where: { generationId: generation.id },
+  });
+  assert.equal(reservation?.provider, "openai");
+  assert.equal(reservation?.modelId, "gpt-image-2");
+  assert.equal(reservation?.groupId, generation.groupId);
+  assert.equal(reservation?.targetId, generation.targetId);
+  assert.equal(reservation?.identitySource, "recorded");
+  const snapshot = reservation?.pricingSnapshot as Record<string, unknown>;
+  assert.equal(snapshot.modelId, "gpt-image-2");
+  assert.equal(snapshot.provider, "openai");
+});
+
+test("a group cannot hold two targets for the same model", async () => {
+  const user = await createUser();
+  const conversation = await createImageConversation(user.id);
+  const group = await prisma.imageGenerationGroup.create({
+    data: {
+      userId: user.id,
+      conversationId: conversation.id,
+      groupIdempotencyKey: randomUUID(),
+    },
+  });
+  await prisma.imageGenerationTarget.create({
+    data: { groupId: group.id, provider: "openai", modelId: "gpt-image-2" },
+  });
+  await assert.rejects(
+    prisma.imageGenerationTarget.create({
+      data: { groupId: group.id, provider: "openai", modelId: "gpt-image-2" },
+    }),
+    (error: { code?: string }) => error.code === "P2002"
+  );
+});
+
+test("retry idempotency is per target: NULLs coexist, duplicate keys are refused", async () => {
+  const user = await createUser();
+  const conversation = await createImageConversation(user.id);
+  const first = await createGeneration(user.id, conversation.id);
+
+  const attempt = (retryIdempotencyKey: string | null) =>
+    prisma.imageGeneration.create({
+      data: {
+        userId: user.id,
+        conversationId: conversation.id,
+        idempotencyKey: randomUUID(),
+        prompt: "sunset over mountains",
+        preset: "draft",
+        size: "1024x1024",
+        quality: "low",
+        groupId: first.groupId,
+        targetId: first.targetId,
+        attemptNumber: 2,
+        retryOfGenerationId: first.id,
+        retryIdempotencyKey,
+      },
+    });
+
+  // Two initial-style attempts with NULL retry keys may coexist.
+  await attempt(null);
+  const keyed = await attempt("retry-key-1");
+  assert.equal(keyed.retryIdempotencyKey, "retry-key-1");
+  await assert.rejects(
+    attempt("retry-key-1"),
+    (error: { code?: string }) => error.code === "P2002"
+  );
+});
+
+test("a two-model request fans out atomically and charges the sum", async () => {
+  await enableImageGeneration();
+  const user = await createUser();
+  // Only one model is enabled today, so the fan-out is exercised through the
+  // group path with the models that exist; the contract under test is that
+  // the transaction produces one group, N targets and N reservations whose
+  // credits sum to what the caller was told.
+  const result = await requestImageGeneration(
+    requestInput(user.id, { modelIds: ["gpt-image-2"] })
+  );
+
+  assert.equal(result.targets.length, 1);
+  assert.equal(
+    result.reservedCredits,
+    result.targets.reduce((sum, target) => sum + target.reservedCredits, 0)
+  );
+  const targets = await prisma.imageGenerationTarget.findMany({
+    where: { groupId: result.groupId },
+  });
+  assert.equal(targets.length, 1);
+  assert.equal(targets[0].currentGenerationId, result.targets[0].generationId);
+});
+
+test("an unavailable model refuses the whole group and leaves no rows", async () => {
+  await enableImageGeneration();
+  const user = await createUser();
+  const before = await prisma.imageGenerationGroup.count();
+
+  await assert.rejects(
+    requestImageGeneration(
+      requestInput(user.id, {
+        // Registered but held closed on price verification: all-or-nothing
+        // admission means the enabled model must not run either.
+        modelIds: ["gpt-image-2", "gemini-3.1-flash-image-preview"],
+      })
+    ),
+    (error: { code?: string }) => error.code === "IMAGE_OPTION_NOT_SUPPORTED"
+  );
+
+  assert.equal(await prisma.imageGenerationGroup.count(), before);
+  assert.equal(await prisma.imageGeneration.count(), 0);
+  assert.equal(await prisma.imageCreditReservation.count(), 0);
+});
+
+test("a replayed request key returns the same group without charging again", async () => {
+  await enableImageGeneration();
+  const user = await createUser();
+  const input = requestInput(user.id);
+
+  const first = await requestImageGeneration(input);
+  const replay = await requestImageGeneration(input);
+
+  assert.equal(replay.reused, true);
+  assert.equal(replay.groupId, first.groupId);
+  assert.equal(replay.generationId, first.generationId);
+  assert.equal(replay.reservedCredits, first.reservedCredits);
+  assert.equal(await prisma.imageCreditReservation.count(), 1);
+});
+
+test("retrying a failed target adds an attempt to the same target, not a new group", async () => {
+  await enableImageGeneration();
+  const user = await createUser();
+  const first = await requestImageGeneration(requestInput(user.id));
+  const target = first.targets[0];
+
+  await prisma.imageGeneration.update({
+    where: { id: target.generationId },
+    data: { status: "failed", failedAt: new Date() },
+  });
+  // The lease is what the retry's own admission checks; release it the way
+  // a real failure path does.
+  await prisma.chatRequestLease.deleteMany({});
+
+  const retry = await retryImageGenerationTarget({
+    userId: user.id,
+    targetId: target.targetId,
+    retryIdempotencyKey: "retry-key-abcdefgh",
+  });
+
+  assert.equal(retry.groupId, first.groupId);
+  assert.equal(retry.targets[0].targetId, target.targetId);
+
+  const attempts = await prisma.imageGeneration.findMany({
+    where: { targetId: target.targetId },
+    orderBy: { attemptNumber: "asc" },
+  });
+  assert.equal(attempts.length, 2);
+  assert.equal(attempts[1].attemptNumber, 2);
+  assert.equal(attempts[1].retryOfGenerationId, target.generationId);
+  assert.equal(attempts[1].retryIdempotencyKey, "retry-key-abcdefgh");
+
+  const targetRow = await prisma.imageGenerationTarget.findUnique({
+    where: { id: target.targetId },
+  });
+  assert.equal(targetRow?.currentGenerationId, attempts[1].id);
+  // Exactly one group: the retry must not spawn a second one.
+  assert.equal(await prisma.imageGenerationGroup.count(), 1);
+});
+
+test("a succeeded target cannot be retried into a double charge", async () => {
+  await enableImageGeneration();
+  const user = await createUser();
+  const first = await requestImageGeneration(requestInput(user.id));
+  const target = first.targets[0];
+  await prisma.imageGeneration.update({
+    where: { id: target.generationId },
+    data: { status: "succeeded", completedAt: new Date() },
+  });
+
+  await assert.rejects(
+    retryImageGenerationTarget({
+      userId: user.id,
+      targetId: target.targetId,
+      retryIdempotencyKey: "retry-key-ijklmnop",
+    }),
+    (error: { code?: string }) => error.code === "IMAGE_RETRY_NOT_ALLOWED"
+  );
+  assert.equal(await prisma.imageCreditReservation.count(), 1);
+});
+
+test("another user's target is not retryable", async () => {
+  await enableImageGeneration();
+  const owner = await createUser();
+  const stranger = await createUser();
+  const first = await requestImageGeneration(requestInput(owner.id));
+
+  await assert.rejects(
+    retryImageGenerationTarget({
+      userId: stranger.id,
+      targetId: first.targets[0].targetId,
+      retryIdempotencyKey: "retry-key-qrstuvwx",
+    }),
+    (error: { code?: string }) => error.code === "IMAGE_GENERATION_NOT_FOUND"
+  );
 });

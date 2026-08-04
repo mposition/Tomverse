@@ -26,11 +26,10 @@ export type ProviderUsageRecordInput = {
   /** Defaults to "internal" (non-billed internal calls, e.g. conversation
    *  titles). AUD-R001's synthetic provider probes pass "probe" so their
    *  cost stays queryable/cappable separately from other internal usage, and
-   *  STG-R002's administrator verification calls pass "admin_verification" for
-   *  the same reason -- operator-triggered spend is answerable separately from
-   *  both user traffic and the automated probe budget. None of these are ever
-   *  billed to a user or written to a credit ledger. */
-  source?: "internal" | "probe" | "admin_verification";
+   *  STG-R002's administrator verification calls pass "admin_verification";
+   *  backend document conversion passes "ocr". These are never billed to a
+   *  user or written to a credit ledger. */
+  source?: "internal" | "probe" | "admin_verification" | "ocr";
 };
 
 export async function recordInternalProviderUsage({
@@ -105,7 +104,7 @@ export async function getInternalProviderUsageSummary({
 }) {
   const usageDate = dayStartUtc(date);
   const aggregate = await prisma.providerDailyUsage.aggregate({
-    where: { provider, source: "internal", date: usageDate },
+    where: { provider, source: { in: ["internal", "ocr"] }, date: usageDate },
     _sum: {
       requestCount: true,
       inputTokens: true,

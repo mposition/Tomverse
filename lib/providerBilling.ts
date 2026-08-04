@@ -17,6 +17,7 @@ const DOCUMENTED_DEFAULTS: Record<AiProvider, ProviderBillingProfile> = {
   deepseek: defaultProfile("usage_based", "prepaid"),
   mistral: defaultProfile("usage_based", "hybrid"),
   moonshot: defaultProfile("unknown", "unknown"),
+  minimax: defaultProfile("usage_based", "prepaid"),
   qwen: defaultProfile("usage_based", "unknown"),
   zhipu: defaultProfile("usage_based", "prepaid"),
   perplexity: defaultProfile("usage_based", "prepaid"),
