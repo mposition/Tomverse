@@ -592,6 +592,28 @@ details.requiresPreflight: true
   knowledge 토큰을 입력 토큰 추정·context window 검사·credit reservation·
   operational guardrail 계산에 모두 포함합니다.
 
+구현: bundle의 발급·검증·stale 판정은 `lib/chatContextBundleCore.ts`(순수 +
+Node crypto)입니다.
+
+- **stale은 재계산으로 판정합니다.** bundle은 preflight가 본 context의
+  fingerprint를 담고, chat은 지금 보는 context의 fingerprint를 계산해 비교합니다.
+  bundle이 "아직 신선함"을 스스로 주장하면 그것을 들고 있는 client만큼만
+  신뢰할 수 있습니다.
+- **memory mode `off`는 없는 context가 아니라 다른 context입니다.** fingerprint에
+  포함하며, 없는 값으로 취급하면 memory 가격으로 예약된 요청이 memory 없이
+  실행됩니다.
+- **admission token과 bundle은 서명 domain이 다릅니다.** 같은 secret으로
+  서명되므로 domain을 분리하지 않으면 한쪽 body가 다른 쪽으로 검증될 수 있고,
+  §10의 역할 분리가 "검사하는 쪽이 기억하기"에 의존하게 됩니다. 양방향 모두
+  테스트로 고정합니다.
+- **소비(nonce)는 bundle이 아니라 (bundle, model) 단위입니다.** comparison의 세
+  요청은 정당하게 같은 bundle을 제시하므로, bundle당 1회 규칙은 자기 panel 둘을
+  거부합니다. `bundleConsumptionKey()`가 무엇을 세는지 정하고, 내구적 강제는
+  chat 연결 슬라이스에서 조건부 write로 수행합니다.
+- **stale 복구 판정은 순수 함수입니다**(`decideBundleStaleRecovery()`): 단일
+  모델은 노출 전 1회 자동 재시도, comparison은 panel 단위 재시도 없이 전체
+  재-preflight, 이미 노출된 뒤에는 어느 쪽도 자동 재시도하지 않습니다.
+
 ## 11. Extraction 실행 계약
 
 - Import 파싱·저장은 AI 호출 없이 수행합니다(credit 소비 없음).
