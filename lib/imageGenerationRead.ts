@@ -23,6 +23,8 @@ export const IMAGE_GENERATION_READ_SELECT = {
   quality: true,
   provider: true,
   modelId: true,
+  outputWidth: true,
+  outputHeight: true,
   groupId: true,
   targetId: true,
   attemptNumber: true,
@@ -47,6 +49,8 @@ export type ImageGenerationReadRow = {
   quality: string;
   provider: string;
   modelId: string;
+  outputWidth: number | null;
+  outputHeight: number | null;
   groupId: string;
   targetId: string;
   attemptNumber: number;
@@ -90,6 +94,10 @@ export async function serializeImageGeneration(
     // belongs to, so the workspace can group attempts without a second read.
     provider: generation.provider,
     modelId: generation.modelId,
+    // What the bytes actually are, not what was asked for. Null when the
+    // header could not be read (policy §12.1).
+    outputWidth: generation.outputWidth,
+    outputHeight: generation.outputHeight,
     groupId: generation.groupId,
     targetId: generation.targetId,
     attemptNumber: generation.attemptNumber,

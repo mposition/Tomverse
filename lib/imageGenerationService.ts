@@ -1098,7 +1098,14 @@ export const processImageGeneration = async (
       return;
     }
 
-    const { width, height } = parseSize(generation.size);
+    // The bytes' own header wins over the requested size. `parseSize` only
+    // reads the legacy `WxH` string, which describes what OpenAI was asked
+    // for -- it is not what another provider returns for the same resolution
+    // tier (policy section 12.1), and it is the fallback only so a header
+    // this parser could not read still leaves the asset row complete.
+    const requestedSize = parseSize(generation.size);
+    const width = result.outputWidth ?? requestedSize.width;
+    const height = result.outputHeight ?? requestedSize.height;
     await prisma.imageAsset.create({
       data: {
         generationId,
@@ -1225,6 +1232,10 @@ export const processImageGeneration = async (
           status: "succeeded",
           completedAt: new Date(),
           providerRequestId: result.providerRequestId ?? undefined,
+          // Null when the header could not be read: absent is a fact, an
+          // inferred number would contradict the file it describes.
+          outputWidth: result.outputWidth,
+          outputHeight: result.outputHeight,
         },
       });
       await tx.conversation.update({

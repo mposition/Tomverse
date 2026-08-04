@@ -780,6 +780,14 @@ model ImageGeneration {
   modelId        String @default("gpt-image-2")
   size           String // 1024x1024 | 1536x1024 | 1024x1536
   quality        String // low | medium | high
+
+  // What the returned bytes actually are, read from the file's own header
+  // (policy §12.1). Not deducible from `size`: each provider translates a
+  // resolution tier its own way, and Google's 1K landscape is not 1536x1024.
+  // Nullable and never backfilled -- rows written before this existed are
+  // history, and a dimension nobody measured is absent rather than inferred.
+  outputWidth    Int?
+  outputHeight   Int?
   backgroundMode String @default("opaque")
   outputFormat   String @default("png")
   moderationMode String @default("auto")

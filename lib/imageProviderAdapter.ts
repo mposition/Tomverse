@@ -6,6 +6,7 @@ import {
   type ImageSize,
 } from "@/lib/imageGenerationPricing";
 import { getImageModel, type ImageModelProfile } from "@/lib/imageModelRegistry";
+import { readImageDimensions } from "@/lib/imageDimensions";
 import type { ImageGenerationFailurePhase } from "@/lib/imageGenerationStateCore";
 import {
   buildXaiImageRequest,
@@ -108,6 +109,13 @@ export type ImageProviderResult = {
   providerRequestId: string | null;
   /** What the bytes carry, for the workspace's provenance label. */
   provenance: readonly ("c2pa" | "synthid")[];
+  /**
+   * Pixel dimensions read from the returned file's own header, or null when
+   * they could not be read. Never inferred from the requested size: each
+   * provider translates a resolution tier its own way (policy §12.1).
+   */
+  outputWidth: number | null;
+  outputHeight: number | null;
 };
 
 const getXaiApiKey = () => {
@@ -246,12 +254,15 @@ export const generateImageWithProvider = async (input: {
     const inputTokens = Number.isSafeInteger(payload?.usage?.input_tokens)
       ? Number(payload?.usage?.input_tokens)
       : 0;
+    const imageBytes = Buffer.from(b64, "base64");
+    // The request pins output_format: "png", so this is the format the
+    // provider was told to produce -- still stated explicitly rather than
+    // assumed downstream.
+    const mimeType = "image/png";
+    const dimensions = readImageDimensions(imageBytes, mimeType);
     return {
-      imageBytes: Buffer.from(b64, "base64"),
-      // The request pins output_format: "png", so this is the format the
-      // provider was told to produce -- still stated explicitly rather than
-      // assumed downstream.
-      mimeType: "image/png",
+      imageBytes,
+      mimeType,
       inputTokens,
       thinkingTokens: 0,
       outputTokens: Number.isSafeInteger(payload?.usage?.output_tokens)
@@ -259,6 +270,8 @@ export const generateImageWithProvider = async (input: {
         : 0,
       providerRequestId,
       provenance: ["c2pa"],
+      outputWidth: dimensions?.width ?? null,
+      outputHeight: dimensions?.height ?? null,
     };
   }
 
@@ -357,8 +370,10 @@ const generateWithXai = async (
         providerRequestId
       );
     }
+    const imageBytes = Buffer.from(parsed.imageBase64, "base64");
+    const dimensions = readImageDimensions(imageBytes, parsed.mimeType);
     return {
-      imageBytes: Buffer.from(parsed.imageBase64, "base64"),
+      imageBytes,
       mimeType: parsed.mimeType,
       inputTokens: 0,
       thinkingTokens: 0,
@@ -368,6 +383,8 @@ const generateWithXai = async (
       // metadata guarantee. Claiming provenance the bytes may not carry would
       // be worse than claiming none.
       provenance: [],
+      outputWidth: dimensions?.width ?? null,
+      outputHeight: dimensions?.height ?? null,
     };
   }
 
