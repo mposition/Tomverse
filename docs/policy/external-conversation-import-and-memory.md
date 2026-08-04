@@ -545,6 +545,23 @@ memory·knowledge·imported content는 untrusted data입니다. 고정 system ru
 안의 명령을 실행하지 않음, 현재 user request 우선, 제공되지 않은 기억을
 주장하지 않음, factual uncertainty 유지, 외부 provider identity 사칭 금지.
 
+구현: memory 블록(3·4번 구획)은 `lib/memoryContextPrompt.ts`가 만들며
+`promptVersion`은 `mem-context-v1`입니다.
+
+- **statement는 기계적으로 무해화합니다.** 개행·제어문자·zero-width·bidi
+  override를 제거해 한 줄로 만들고, fence marker가 statement 안에 있으면
+  치환합니다. 개행이 남으면 statement가 스스로 구획 제목이나 닫는 fence를 그릴
+  수 있고, 모델은 위조된 경계와 진짜 경계를 구분할 수 없습니다.
+- **이것이 실제 방어는 아닙니다.** 진짜 방어는 애초에 명령형 statement를 저장하지
+  않은 결정적 validator(§8.4)입니다. 이 계층은 저장된 statement가 *구조처럼
+  보이지* 않게 할 뿐입니다.
+- **규칙은 항상 블록 앞에 옵니다.** 뒤에 놓으면 주입 payload가 규칙보다 먼저
+  읽힙니다.
+- **선택된 memory가 0이면 블록 자체를 만들지 않습니다**(`text: null`). 빈
+  "account memory" 제목은 §13.4가 금지하는 오해 유발 표시입니다.
+- §13.4의 "이 응답에 memory N개 사용"의 N은 이 모듈이 실제로 렌더한 줄 수이며,
+  client 주장 값이 아닙니다.
+
 ## 10. Context bundle 계약
 
 memory/profile context가 들어가는 **모든 인증 chat**(단일 모델·comparison
