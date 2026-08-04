@@ -368,6 +368,7 @@ export const zh = {
         searchStatusFailed: "网页搜索失败",
         searchStatusDeepResearch: "Deep Research",
         searchCitationsLabel: "来源",
+        memoryUsedDisclosure: "本回答使用了 {count} 条账户记忆",
         modelsSelectedOne: "个模型",
         modelsSelectedOther: "个模型",
         maxModelsDescription: "最多比较 3 个模型",

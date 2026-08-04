@@ -332,6 +332,7 @@ export const de = {
         searchStatusFailed: "Websuche fehlgeschlagen",
         searchStatusDeepResearch: "Deep Research",
         searchCitationsLabel: "Quellen",
+        memoryUsedDisclosure: "Diese Antwort hat {count} Kontogedächtnisse verwendet",
         modelsSelectedOne: "KI",
         modelsSelectedOther: "KIs",
         maxModelsDescription: "Bis zu 3 Modelle vergleichen",

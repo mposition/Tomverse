@@ -332,6 +332,7 @@ export const pt = {
         searchStatusFailed: "Falha na pesquisa web",
         searchStatusDeepResearch: "Deep Research",
         searchCitationsLabel: "Fontes",
+        memoryUsedDisclosure: "Esta resposta usou {count} memórias da conta",
         modelsSelectedOne: "IA",
         modelsSelectedOther: "IAs",
         maxModelsDescription: "Comparar até 3 modelos",

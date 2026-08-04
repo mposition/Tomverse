@@ -374,6 +374,7 @@ export const ko = {
         searchStatusFailed: "웹 검색 실패",
         searchStatusDeepResearch: "Deep Research",
         searchCitationsLabel: "출처",
+        memoryUsedDisclosure: "이 답변에 계정 기억 {count}개를 사용했습니다",
         modelsSelectedOne: "개 모델",
         modelsSelectedOther: "개 모델",
         maxModelsDescription: "최대 3개 모델 비교",

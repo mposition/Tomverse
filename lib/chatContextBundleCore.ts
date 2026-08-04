@@ -286,41 +286,17 @@ export const verifyContextBundle = (
 };
 
 /**
- * What a stale bundle means for the request in flight (§10).
- *
- * A single-model request may re-preflight and retry **once**, and only while
- * nothing has been shown: the same idempotency key is kept so the retry
- * cannot double-reserve or write a second Message. Once any bytes have
- * reached the user, an automatic retry would replace an answer they are
- * already reading, so it becomes theirs to decide.
- *
- * A comparison never retries one panel. The panels share a bundle lineage
- * precisely so they see one snapshot; re-preflighting a single panel would
- * put it on a different context from its siblings, and the admission is
- * all-or-nothing anyway.
+ * The stale-recovery decision lives in `lib/chatContextBundleRecovery.ts` and
+ * is re-exported here so server callers still find it beside the rest of the
+ * bundle contract. It is a separate module because the *client* is what makes
+ * this decision — it holds the request and knows whether anything has been
+ * shown — and this module's `node:crypto` import can never reach a browser
+ * bundle.
  */
-export type BundleStaleRecovery =
-    | { action: "retry_after_preflight" }
-    | { action: "repreflight_all" }
-    | { action: "surface_to_user"; reason: "already_retried" | "stream_started" };
-
-export function decideBundleStaleRecovery(input: {
-    layout: "single" | "comparison";
-    /** How many automatic retries this request has already used. */
-    priorAutomaticRetries: number;
-    /** True once any part of a response has been exposed to the user. */
-    streamStarted: boolean;
-}): BundleStaleRecovery {
-    if (input.streamStarted) {
-        return { action: "surface_to_user", reason: "stream_started" };
-    }
-    if (input.priorAutomaticRetries >= 1) {
-        return { action: "surface_to_user", reason: "already_retried" };
-    }
-    return input.layout === "comparison"
-        ? { action: "repreflight_all" }
-        : { action: "retry_after_preflight" };
-}
+export {
+    decideBundleStaleRecovery,
+    type BundleStaleRecovery,
+} from "@/lib/chatContextBundleRecovery";
 
 /**
  * The consumption key for the nonce contract (§10).

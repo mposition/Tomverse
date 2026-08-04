@@ -370,6 +370,7 @@ export const en = {
         searchStatusFailed: "Web search failed",
         searchStatusDeepResearch: "Deep Research",
         searchCitationsLabel: "Sources",
+        memoryUsedDisclosure: "This answer used {count} account memories",
         modelsSelectedOne: "AI",
         modelsSelectedOther: "AIs",
         maxModelsDescription: "Compare up to 3 models",
