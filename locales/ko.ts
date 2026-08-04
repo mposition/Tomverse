@@ -108,6 +108,10 @@ export const ko = {
     chat: {
         // Image generation workspace (docs/policy/image-generation.md)
         imageGenerationTitle: "이미지 생성",
+        imageGenerationModelLabel: "모델",
+        imageGenerationModelCount: "모델 {count}개",
+        imageGenerationTotalCredits: "합계 {credits} 크레딧",
+        imageGenerationRetryModel: "이 모델만 다시 시도",
         imageGenerationIntroTitle: "설명으로 이미지를 만들어 보세요",
         imageGenerationIntroBody: "보고 싶은 장면을 설명해 주세요. 요청당 1장이 생성되며 초안·표준·최종 품질과 3가지 크기를 지원합니다.",
         imageGenerationAiLabel: "AI로 생성된 이미지",

@@ -107,6 +107,10 @@ export const de = {
         ...en.chat,
         // Image generation workspace (docs/policy/image-generation.md)
         imageGenerationTitle: "Bildgenerierung",
+        imageGenerationModelLabel: "Modelle",
+        imageGenerationModelCount: "{count} Modell(e)",
+        imageGenerationTotalCredits: "Gesamt {credits} Credits",
+        imageGenerationRetryModel: "Dieses Modell erneut versuchen",
         imageGenerationIntroTitle: "Erstelle ein Bild aus einer Beschreibung",
         imageGenerationIntroBody: "Beschreibe, was du sehen möchtest. Ein Bild pro Anfrage, mit den Qualitätsstufen Draft, Standard und Final in drei Größen.",
         imageGenerationAiLabel: "KI-generiertes Bild",

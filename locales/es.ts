@@ -107,6 +107,10 @@ export const es = {
         ...en.chat,
         // Image generation workspace (docs/policy/image-generation.md)
         imageGenerationTitle: "Generación de imágenes",
+        imageGenerationModelLabel: "Modelos",
+        imageGenerationModelCount: "{count} modelo(s)",
+        imageGenerationTotalCredits: "Total {credits} créditos",
+        imageGenerationRetryModel: "Reintentar este modelo",
         imageGenerationIntroTitle: "Crea una imagen a partir de una descripción",
         imageGenerationIntroBody: "Describe lo que quieres ver. Una imagen por solicitud, con calidades Draft, Standard y Final en tres tamaños.",
         imageGenerationAiLabel: "Imagen generada por IA",

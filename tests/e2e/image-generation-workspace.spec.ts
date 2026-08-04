@@ -41,6 +41,11 @@ type MockGeneration = {
   completedAt: string | null;
   failedAt: string | null;
   assets: Array<{ role: string; mimeType: string; url: string }>;
+  provider?: string;
+  modelId?: string;
+  groupId?: string;
+  targetId?: string;
+  attemptNumber?: number;
 };
 
 type ImageApiState = {
@@ -116,14 +121,39 @@ const installImageGenerationApi = async (page: Page): Promise<ImageApiState> => 
       failedAt: null,
       assets: [],
     };
+    const modelIds = Array.isArray(body.modelIds)
+      ? (body.modelIds as string[])
+      : ["gpt-image-2"];
+    const targets = modelIds.map((modelId, index) => {
+      const row: MockGeneration =
+        index === 0
+          ? generation
+          : { ...generation, generationId: `${generation.generationId}-${index}` };
+      row.modelId = modelId;
+      row.provider = "openai";
+      row.groupId = `qa-group-${state.sequence}`;
+      row.targetId = `qa-target-${state.sequence}-${index}`;
+      row.attemptNumber = 1;
+      if (index > 0) state.generations.push(row);
+      return {
+        targetId: row.targetId!,
+        modelId,
+        provider: "openai",
+        generationId: row.generationId,
+        status: "pending",
+        reservedCredits: 15,
+      };
+    });
     state.generations.push(generation);
     await route.fulfill(
       json(
         {
           generationId: generation.generationId,
+          groupId: `qa-group-${state.sequence}`,
           conversationId: generation.conversationId,
           status: "pending",
-          reservedCredits: 15,
+          reservedCredits: 15 * targets.length,
+          targets,
         },
         202
       )
@@ -141,6 +171,49 @@ const installImageGenerationApi = async (page: Page): Promise<ImageApiState> => 
       );
     }
     await route.fulfill(json(resolveGeneration(state, generation)));
+  });
+
+  await page.route("**/api/images/targets/*/retry", async (route) => {
+    const targetId = new URL(route.request().url()).pathname.split("/").at(-2);
+    const failed = state.generations.find((row) => row.targetId === targetId);
+    if (!failed) return route.fulfill(json({ error: "not found" }, 404));
+    state.sequence += 1;
+    const retried: MockGeneration = {
+      ...failed,
+      generationId: `qa-generation-retry-${state.sequence}`,
+      status: "pending",
+      publicErrorCode: null,
+      refunded: false,
+      failedAt: null,
+      attemptNumber: (failed.attemptNumber ?? 1) + 1,
+    };
+    state.generations = state.generations.filter(
+      (row) => row.targetId !== targetId
+    );
+    state.generations.push(retried);
+    state.nextOutcome = "succeeded";
+    await route.fulfill(
+      json(
+        {
+          generationId: retried.generationId,
+          groupId: retried.groupId,
+          conversationId: retried.conversationId,
+          status: "pending",
+          reservedCredits: 15,
+          targets: [
+            {
+              targetId: targetId!,
+              modelId: retried.modelId ?? "gpt-image-2",
+              provider: "openai",
+              generationId: retried.generationId,
+              status: "pending",
+              reservedCredits: 15,
+            },
+          ],
+        },
+        202
+      )
+    );
   });
 
   await page.route("**/api/conversations/*/generations", async (route) => {
@@ -353,4 +426,53 @@ test("an over-limit prompt disables generation before any request", async ({ pag
     "true"
   );
   expect(api.createBodies).toHaveLength(0);
+});
+
+test("the model picker drives the request and the quoted total", async ({ page }) => {
+  await enableImageGenerationFlag(page);
+  await mockAuthenticatedApi(page);
+  await mockUserUsage(page, { plan: "Pro" });
+  const api = await installImageGenerationApi(page);
+  await page.goto("/chat");
+
+  await openNewImageEntry(page);
+  const picker = page.getByTestId("image-model-picker");
+  await expect(picker).toBeVisible();
+  // The default model is pre-selected, and the last one cannot be removed:
+  // a composer that looks ready must not refuse on submit.
+  const defaultModel = page.getByTestId("image-model-gpt-image-2");
+  await expect(defaultModel).toHaveAttribute("aria-pressed", "true");
+  await defaultModel.click();
+  await expect(defaultModel).toHaveAttribute("aria-pressed", "true");
+
+  await page.getByTestId("image-generation-prompt").fill("a red apple");
+  await page.getByTestId("image-generation-submit").click();
+
+  await expect(page.getByTestId("image-generation-progress").first()).toBeVisible();
+  expect(api.createBodies).toHaveLength(1);
+  expect(api.createBodies[0].modelIds).toEqual(["gpt-image-2"]);
+});
+
+test("a failed model retries in place while the group keeps its shape", async ({ page }) => {
+  await enableImageGenerationFlag(page);
+  await mockAuthenticatedApi(page);
+  await mockUserUsage(page, { plan: "Pro" });
+  const api = await installImageGenerationApi(page);
+  api.nextOutcome = "moderation_failed";
+  await page.goto("/chat");
+
+  await openNewImageEntry(page);
+  await page.getByTestId("image-generation-prompt").fill("something declined");
+  await page.getByTestId("image-generation-submit").click();
+
+  const failed = page.getByTestId("image-generation-failed");
+  await expect(failed).toBeVisible({ timeout: 15_000 });
+
+  // Retrying replaces that target's attempt in place -- one entry, one card.
+  await page.getByTestId("image-generation-retry").click();
+  await expect(page.getByTestId("image-generation-result")).toBeVisible({
+    timeout: 15_000,
+  });
+  await expect(page.getByTestId("image-generation-entry")).toHaveCount(1);
+  await expect(page.getByTestId("image-comparison-card")).toHaveCount(1);
 });

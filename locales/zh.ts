@@ -124,6 +124,10 @@ export const zh = {
         ...en.chat,
         // Image generation workspace (docs/policy/image-generation.md)
         imageGenerationTitle: "图像生成",
+        imageGenerationModelLabel: "模型",
+        imageGenerationModelCount: "{count} 个模型",
+        imageGenerationTotalCredits: "合计 {credits} 积分",
+        imageGenerationRetryModel: "仅重试该模型",
         imageGenerationIntroTitle: "用文字描述生成图像",
         imageGenerationIntroBody: "描述你想看到的画面。每次请求生成一张图像，提供草稿、标准、精细三种质量与三种尺寸。",
         imageGenerationAiLabel: "AI 生成的图像",
