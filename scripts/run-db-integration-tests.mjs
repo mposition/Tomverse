@@ -165,6 +165,7 @@ run(
     "tests/integration/memory-extraction.db.test.ts",
     "tests/integration/memory-review.db.test.ts",
     "tests/integration/memory-retrieval.db.test.ts",
+    "tests/integration/chat-context-bundle.db.test.ts",
   ],
   "Running financial, credit, chat-concurrency, chat-rate-limit, fallback-pricing, model-registry, admin-security, admin-users, login-methods, account-deletion, conversation-title, conversation-lock-migration, provider-recovery, provider-failure-scope, subscription-sync-ordering, plan-change-reservation, image-generation, external-import, and memory transaction scenarios"
 );

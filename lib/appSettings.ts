@@ -13,7 +13,9 @@ import {
 import {
   MEMORY_EXTRACTION_FLAG_KEY,
   MEMORY_EXTRACTION_REVOKED_PAIRS_KEY,
+  MEMORY_INJECTION_FLAG_KEY,
   memoryExtractionEnabledFromValue,
+  memoryInjectionEnabledFromValue,
   parseRevokedPairs,
   type RevokedPairsState,
 } from "@/lib/memoryAccess";
@@ -249,9 +251,7 @@ export async function assertExternalImportEnabled() {
 }
 
 // Release B rollout flags (import/memory policy §15): the same default-off
-// opt-in shape as the two flags above. Injection is not surfaced anywhere
-// yet — §12.4 forbids turning it on before the human eval procedure — but
-// the reader exists so every consumer resolves it one way.
+// opt-in shape as the two flags above.
 export async function isMemoryExtractionEnabled(): Promise<boolean> {
   if (e2eDatabaseDisabled()) return false;
   const row = await prisma.appSetting.findUnique({
@@ -259,6 +259,25 @@ export async function isMemoryExtractionEnabled(): Promise<boolean> {
     select: { value: true },
   });
   return memoryExtractionEnabledFromValue(row?.value);
+}
+
+/**
+ * §15 injection flag. Read by the chat context builder and by nothing else —
+ * it is what decides whether an approved memory may reach a prompt at all.
+ *
+ * It is still off, and turning it on is a human procedure, not a code change:
+ * §12.4 requires a decision-grade eval, blind review, an independent re-run,
+ * a signed approval and a staging verification first. The wiring exists ahead
+ * of that on purpose, so the day it is turned on is a settings change against
+ * a path that has already been reviewed and tested — not a deploy.
+ */
+export async function isMemoryInjectionEnabled(): Promise<boolean> {
+  if (e2eDatabaseDisabled()) return false;
+  const row = await prisma.appSetting.findUnique({
+    where: { key: MEMORY_INJECTION_FLAG_KEY },
+    select: { value: true },
+  });
+  return memoryInjectionEnabledFromValue(row?.value);
 }
 
 export class MemoryFeatureDisabledError extends Error {

@@ -9,6 +9,7 @@ import {
 import { expireCreditLots } from "@/lib/creditLedger";
 import { reconcileExpiredChatCreditReservations } from "@/lib/chatSecurity";
 import { purgeExpiredChatLimitDecisions } from "@/lib/chatLimitDecisions";
+import { deleteExpiredContextBundleConsumptions } from "@/lib/chatContextBundleService";
 import { purgeExpiredTraceErrorEvidence } from "@/lib/traceErrorEvidence";
 import { purgeClosedAutoFixCases } from "@/lib/feedbackAutoFixShadow";
 import {
@@ -454,7 +455,16 @@ export async function cleanupExpiredData() {
   const creditLotsExpired = await expireCreditLots();
   const guestAttachments = await sweepExpiredGuestAttachments(now);
 
+  // A consumed §10 context bundle stops being worth remembering the moment
+  // the bundle itself expires: past that, verification refuses it before
+  // consumption is ever consulted. Swept here rather than on the request
+  // path, where a delete racing a claim is exactly what a nonce table must
+  // not do.
+  const contextBundleConsumptions =
+    await deleteExpiredContextBundleConsumptions(now);
+
   return {
+    contextBundleConsumptions,
     guestAttachments,
     sessions: sessions.count,
     usageBuckets: Number(usageBuckets),
