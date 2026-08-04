@@ -33,7 +33,12 @@ export type SecurityAuditEvent =
     // convention (90 days).
     | "memory.export.create"
     | "memory.export.download"
-    | "memory.delete_all";
+    | "memory.delete_all"
+    // Release B §7.1. The lock/unlock pair and the memory transitions they
+    // cause, so a memory that went quiet has a recorded reason. Content-free
+    // like the rest: hashed subject and resource, never a statement.
+    | "external_conversation.lock.set"
+    | "external_conversation.lock.remove";
 type AuditOutcome = "attempt" | "success" | "denied" | "rate_limited" | "failure";
 
 const auditValue = (

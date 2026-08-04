@@ -1885,6 +1885,10 @@ model ExternalConversation {
   finalized  Boolean  @default(false)
   importedAt DateTime @default(now())
 
+  /// scrypt hash, same format and verifier as `Conversation.password` (§7).
+  /// NULL when the snapshot is not locked.
+  password String?
+
   messages ExternalMessage[]
 
   @@unique([userId, conversationDigest])
@@ -1990,6 +1994,7 @@ model MemoryItem {
 
   @@index([userId, status])
   @@index([userId, conflictKey])
+  @@index([userId, suspendedReason])
   @@unique([userId, dedupeKey])
   /// §9 retrieval v1 — lexical GIN over the term array. Declared here so the
   /// db-integration drift check sees schema and migration agree; the mapped

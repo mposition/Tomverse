@@ -20,6 +20,12 @@ import {
     deleteExternalConversationSnapshot,
     deleteExternalImport,
 } from "@/lib/externalImportService";
+import { hashConversationPassword } from "@/lib/conversationLock";
+import {
+    lockExternalConversation,
+    reconcileLockedSourceMemories,
+    unlockExternalConversation,
+} from "@/lib/externalConversationLock";
 import { reconcileStrandedMemories } from "@/lib/memorySourceDelete";
 import { manualEvidenceDigest } from "@/lib/memoryEvidenceValidation";
 import {
@@ -1215,4 +1221,246 @@ test("the sweep leaves grounded memories alone", async () => {
     const user = await createUser();
     await seedSourcedMemory(user.id);
     assert.deepEqual(await reconcileStrandedMemories(), { suspended: 0 });
+});
+
+/**
+ * §7.1 source lock and memory suspension. A lock is a statement about
+ * reading, and a memory extracted from a locked conversation would keep
+ * speaking its contents into every answer — so these tests are about the two
+ * states staying in step, in both directions.
+ */
+
+const LOCK_PASSWORD = "qa-lock-password-1";
+
+test("locking a source suspends the memories only it grounded (§7.1)", async () => {
+    const user = await createUser();
+    const { memoryId, conversationId } = await seedSourcedMemory(user.id);
+
+    const outcome = await lockExternalConversation({
+        userId: user.id,
+        conversationId,
+        password: LOCK_PASSWORD,
+    });
+    assert.equal(outcome.suspendedMemories, 1);
+    const suspended = await prisma.memoryItem.findUniqueOrThrow({
+        where: { id: memoryId },
+    });
+    assert.equal(suspended.status, "suspended_by_source_lock");
+    // Not the delete reason: the source still exists and this comes back by
+    // itself, whereas a deleted source needs the user to write new grounds.
+    assert.notEqual(suspended.status, "suspended_by_source_delete");
+    assert.equal(suspended.suspendedReason, "source_locked");
+});
+
+test("a suspended memory leaves retrieval immediately (§7.1)", async () => {
+    const user = await createUser();
+    await setInjectionFlag(true);
+    const { memoryId, conversationId } = await seedSourcedMemory(user.id);
+    const statement = (
+        await prisma.memoryItem.findUniqueOrThrow({ where: { id: memoryId } })
+    ).statement;
+    await prisma.memoryItem.update({
+        where: { id: memoryId },
+        data: {
+            searchTerms: memorySearchTerms({ kind: "preference", statement }),
+            retrievalVersion: MEMORY_RETRIEVAL_VERSION,
+        },
+    });
+    assert.equal(
+        (
+            await retrieveMemoriesForRequest({
+                userId: user.id,
+                query: statement,
+            })
+        ).candidateCount,
+        1
+    );
+
+    await lockExternalConversation({
+        userId: user.id,
+        conversationId,
+        password: LOCK_PASSWORD,
+    });
+    assert.equal(
+        (
+            await retrieveMemoriesForRequest({
+                userId: user.id,
+                query: statement,
+            })
+        ).candidateCount,
+        0
+    );
+});
+
+test("a memory with unlocked evidence left stays active (§7.1)", async () => {
+    const user = await createUser();
+    const { memoryId, conversationId } = await seedSourcedMemory(user.id, {
+        manualEvidence: true,
+    });
+
+    const outcome = await lockExternalConversation({
+        userId: user.id,
+        conversationId,
+        password: LOCK_PASSWORD,
+    });
+    assert.equal(outcome.suspendedMemories, 0);
+    assert.equal(
+        (await prisma.memoryItem.findUniqueOrThrow({ where: { id: memoryId } }))
+            .status,
+        "active"
+    );
+});
+
+test("unlocking restores what the lock suspended (§7.1)", async () => {
+    const user = await createUser();
+    const { memoryId, conversationId } = await seedSourcedMemory(user.id);
+    await lockExternalConversation({
+        userId: user.id,
+        conversationId,
+        password: LOCK_PASSWORD,
+    });
+
+    const outcome = await unlockExternalConversation({
+        userId: user.id,
+        conversationId,
+        password: LOCK_PASSWORD,
+    });
+    assert.equal(outcome.restoredMemories, 1);
+    const restored = await prisma.memoryItem.findUniqueOrThrow({
+        where: { id: memoryId },
+    });
+    assert.equal(restored.status, "active");
+    assert.equal(restored.suspendedReason, null);
+});
+
+test("a wrong password neither unlocks nor restores (§7)", async () => {
+    const user = await createUser();
+    const { memoryId, conversationId } = await seedSourcedMemory(user.id);
+    await lockExternalConversation({
+        userId: user.id,
+        conversationId,
+        password: LOCK_PASSWORD,
+    });
+
+    await assert.rejects(
+        unlockExternalConversation({
+            userId: user.id,
+            conversationId,
+            password: "not-the-password",
+        }),
+        expectCode("INVALID_LOCK_PASSWORD")
+    );
+    assert.equal(
+        (await prisma.memoryItem.findUniqueOrThrow({ where: { id: memoryId } }))
+            .status,
+        "suspended_by_source_lock"
+    );
+});
+
+test("unlocking one of two locked sources does not un-hide a memory (§7.1)", async () => {
+    const user = await createUser();
+    const first = await seedSourcedMemory(user.id);
+    // A second memory grounded in a second conversation, both locked.
+    const second = await seedSourcedMemory(user.id);
+    for (const conversationId of [first.conversationId, second.conversationId]) {
+        await lockExternalConversation({
+            userId: user.id,
+            conversationId,
+            password: LOCK_PASSWORD,
+        });
+    }
+
+    await unlockExternalConversation({
+        userId: user.id,
+        conversationId: first.conversationId,
+        password: LOCK_PASSWORD,
+    });
+    assert.equal(
+        (
+            await prisma.memoryItem.findUniqueOrThrow({
+                where: { id: first.memoryId },
+            })
+        ).status,
+        "active"
+    );
+    // The other memory's only source is still locked.
+    assert.equal(
+        (
+            await prisma.memoryItem.findUniqueOrThrow({
+                where: { id: second.memoryId },
+            })
+        ).status,
+        "suspended_by_source_lock"
+    );
+});
+
+test("a memory whose source vanished while locked is not restored (§7.1)", async () => {
+    const user = await createUser();
+    const { memoryId, conversationId } = await seedSourcedMemory(user.id);
+    await lockExternalConversation({
+        userId: user.id,
+        conversationId,
+        password: LOCK_PASSWORD,
+    });
+    // The evidence disappears while the source is locked; restoring would put
+    // the memory back as active with nothing behind it.
+    await prisma.memoryEvidence.deleteMany({ where: { memoryItemId: memoryId } });
+
+    const outcome = await unlockExternalConversation({
+        userId: user.id,
+        conversationId,
+        password: LOCK_PASSWORD,
+    });
+    assert.equal(outcome.restoredMemories, 0);
+    assert.equal(
+        (await prisma.memoryItem.findUniqueOrThrow({ where: { id: memoryId } }))
+            .status,
+        "suspended_by_source_lock"
+    );
+});
+
+test("reconciliation repairs a lock and memory state that diverged (§7.1)", async () => {
+    const user = await createUser();
+    const { memoryId, conversationId } = await seedSourcedMemory(user.id);
+    // Exactly what a partial failure leaves: the source is locked, the memory
+    // never transitioned, and retrieval would keep quoting it.
+    await prisma.externalConversation.update({
+        where: { id: conversationId },
+        data: { password: await hashConversationPassword(LOCK_PASSWORD) },
+    });
+
+    const repaired = await reconcileLockedSourceMemories(user.id);
+    assert.equal(repaired.suspendedMemories, 1);
+    assert.equal(
+        (await prisma.memoryItem.findUniqueOrThrow({ where: { id: memoryId } }))
+            .status,
+        "suspended_by_source_lock"
+    );
+
+    // And the opposite direction: suspended for a source that is no longer
+    // locked would leave the memory silently unavailable forever.
+    await prisma.externalConversation.update({
+        where: { id: conversationId },
+        data: { password: null },
+    });
+    const second = await reconcileLockedSourceMemories(user.id);
+    assert.equal(second.restoredMemories, 1);
+    assert.equal(
+        (await prisma.memoryItem.findUniqueOrThrow({ where: { id: memoryId } }))
+            .status,
+        "active"
+    );
+});
+
+test("a lock never crosses accounts (§7)", async () => {
+    const [user, stranger] = await Promise.all([createUser(), createUser()]);
+    const { conversationId } = await seedSourcedMemory(user.id);
+    await assert.rejects(
+        lockExternalConversation({
+            userId: stranger.id,
+            conversationId,
+            password: LOCK_PASSWORD,
+        }),
+        expectCode("NOT_FOUND")
+    );
 });
