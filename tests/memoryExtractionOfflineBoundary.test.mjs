@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import test from "node:test";
 
 /**
@@ -94,23 +94,73 @@ test("the live provider adapter is reachable from exactly one module", () => {
     );
 });
 
-test("no production module wires the pipeline into a run driver yet", () => {
-    // The processor takes an injected handler (slice 1 / PR #341). Until 1.6
-    // supplies a real one, nothing outside tests may hand it the pipeline —
-    // that is what keeps a merged 1.5 incapable of spending money.
+test("exactly one module composes a paid chunk of extraction work", () => {
+    // Slice 1.6c wires the drivers, so the pipeline IS reachable from
+    // production now. What must stay true is that the composition lives in one
+    // place: the run service keeps taking an injected handler, and
+    // lib/memoryExtractionRunner.ts is the only module that hands it one built
+    // from the real provider. "What can spend money on extraction?" therefore
+    // stays a question about imports.
     const service = readFileSync(
         new URL("../lib/memoryExtractionService.ts", import.meta.url),
         "utf8"
     );
     assert.ok(
-        !service.includes("memoryExtractionPipeline"),
-        "the run service must not import the pipeline before slice 1.6"
+        !service.includes("memoryExtractionPipeline") &&
+            !service.includes("memoryExtractionProvider"),
+        "the run service drives runs; it must not know what a chunk costs"
     );
-    // The drivers (after() kick, maintenance dispatch) are wired only once
-    // settlement exists, so nothing may reach the provider through the run
-    // service yet.
-    assert.ok(
-        !service.includes("memoryExtractionProvider"),
-        "the run service must not reach the provider before settlement exists"
+
+    const runner = readFileSync(
+        new URL("../lib/memoryExtractionRunner.ts", import.meta.url),
+        "utf8"
     );
+    for (const required of [
+        // Reserve before calling, settle after — both in this one composition.
+        "reserveMemoryExtractionAttempt",
+        "settleExtractionAttempt",
+        "commitExtractionChunkCandidates",
+    ]) {
+        assert.ok(
+            runner.includes(required),
+            `the runner must compose ${required}: a call without a reservation and a settlement is the failure this ordering prevents`
+        );
+    }
+});
+
+test("no other production module reaches the extraction provider", () => {
+    // The provider adapter is imported by the runner (which reserves and
+    // settles around it) and, as a type only, by the dispatcher's test seam.
+    // Anything else importing it would be a paid call outside the accounting.
+    const allowed = new Set([
+        "lib/memoryExtractionRunner.ts",
+        "lib/memoryExtractionDispatch.ts",
+    ]);
+    const sources = [];
+    const walk = (relative) => {
+        for (const entry of readdirSync(new URL(`../${relative}`, import.meta.url), {
+            withFileTypes: true,
+        })) {
+            const child = `${relative}/${entry.name}`;
+            if (entry.isDirectory()) {
+                walk(child);
+                continue;
+            }
+            if (!/\.tsx?$/.test(entry.name)) continue;
+            if (child === "lib/memoryExtractionProvider.ts") continue;
+            const source = readFileSync(
+                new URL(`../${child}`, import.meta.url),
+                "utf8"
+            );
+            if (source.includes("memoryExtractionProvider")) sources.push(child);
+        }
+    };
+    walk("lib");
+    walk("app");
+    for (const path of sources) {
+        assert.ok(
+            allowed.has(path),
+            `${path} reaches the extraction provider; only the runner may`
+        );
+    }
 });

@@ -3,6 +3,7 @@ import { after } from "next/server";
 import { reconcileExpiredChatCreditReservations } from "@/lib/chatSecurity";
 import { reconcileExpiredChatRequestLeases } from "@/lib/chatRequestLease";
 import { reconcileExpiredExternalImportStaging } from "@/lib/externalImportService";
+import { dispatchPendingMemoryExtractionRunsQuietly } from "@/lib/memoryExtractionDispatch";
 import { reconcileExpiredMemoryExtractionRuns } from "@/lib/memoryExtractionService";
 import { reportOperationalIncident } from "@/lib/operationalMonitoring";
 import {
@@ -80,6 +81,13 @@ export async function POST(request: Request) {
       await reconcileExpiredMemoryExtractionRuns().catch(() => ({
         reclaimedRuns: 0,
       }));
+    // Reclaiming only makes an orphaned run claimable again — something has to
+    // claim it. This is the durable driver (policy §11): the post-response
+    // kick is a latency optimisation that dies with its request, so a run
+    // finishes because this runs, not because a kick did. Deliberately after
+    // the sweep, so runs it just parked are dispatched in the same tick.
+    const memoryExtractionDispatch =
+      await dispatchPendingMemoryExtractionRunsQuietly();
     await completeScheduledJob({
       runId: run?.id,
       processedCount: result.examined,
@@ -92,6 +100,7 @@ export async function POST(request: Request) {
         imageAssets,
         externalImportStaging,
         memoryExtractionLeases,
+        memoryExtractionDispatch,
       },
     });
     return Response.json(
@@ -105,6 +114,7 @@ export async function POST(request: Request) {
         imageAssets,
         externalImportStaging,
         memoryExtractionLeases,
+        memoryExtractionDispatch,
       },
       { headers: { "Cache-Control": "no-store" } }
     );

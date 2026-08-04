@@ -12,6 +12,8 @@ import { MEMORY_EXTRACTION_FLAG_KEY } from "@/lib/memoryAccess";
 import { analyzeExtractionChunk } from "@/lib/memoryExtractionPipeline";
 import { reserveMemoryExtractionAttempt } from "@/lib/memoryExtractionAdmission";
 import { commitExtractionChunkCandidates } from "@/lib/memoryExtractionCommit";
+import { dispatchPendingMemoryExtractionRuns } from "@/lib/memoryExtractionDispatch";
+import { createExtractionChunkHandler } from "@/lib/memoryExtractionRunner";
 import {
     releaseUnusedExtractionAttempt,
     releaseUnusedExtractionAttemptsForRun,
@@ -1382,4 +1384,137 @@ test("a cancelled run cannot have candidates committed into it (§13.1)", async 
         await prisma.memoryItem.count({ where: { userId: user.id } }),
         0
     );
+});
+
+/**
+ * Stands in for the provider adapter. Same seam the real one is built on, so
+ * what these tests exercise is the production composition with the network
+ * call replaced — not a parallel path.
+ */
+const fakeAdapterFactory =
+    (
+        answer: unknown,
+        usage: {
+            inputTokens?: number;
+            outputTokens?: number;
+            usageFromProvider: boolean;
+        } = { inputTokens: 900, outputTokens: 120, usageFromProvider: true }
+    ) =>
+    (options: { onResult: (result: unknown) => void }) =>
+    async () => {
+        const text = JSON.stringify(answer);
+        options.onResult({ output: text, usage, responseId: "resp-fake" });
+        return { text };
+    };
+
+const FAKE_ANSWER = { candidates: [PREFERENCE_CANDIDATE] };
+
+test("the live handler reserves, calls, stores and settles one chunk (§11)", async () => {
+    const { user, run } = await seedRun(1);
+
+    const result = await driveMemoryExtractionRunSlice({
+        runId: run.id,
+        owner: "worker-live",
+        register: APPROVED_REGISTER,
+        handler: createExtractionChunkHandler({
+            register: APPROVED_REGISTER,
+            adapterFactory: fakeAdapterFactory(FAKE_ANSWER) as never,
+        }),
+    });
+    assert.equal(result.outcome, "completed");
+
+    // The candidate landed, awaiting the owner's review.
+    const items = await prisma.memoryItem.findMany({
+        where: { userId: user.id },
+        include: { evidences: true },
+    });
+    assert.equal(items.length, 1);
+    assert.equal(items[0].status, "candidate");
+    assert.equal(items[0].evidences.length, 1);
+
+    // And the money is accounted for: one attempt, reserved then settled.
+    const attempts = await prisma.memoryExtractionAttempt.findMany({
+        where: { chunk: { runId: run.id } },
+    });
+    assert.equal(attempts.length, 1);
+    assert.equal(attempts[0].status, "committed");
+    assert.ok(attempts[0].providerCallIssued);
+    assert.ok(attempts[0].settledAt);
+    const reservation = await prisma.chatCreditReservation.findUniqueOrThrow({
+        where: { id: attempts[0].reservationId ?? "" },
+    });
+    assert.equal(reservation.status, "settled");
+    assert.equal(reservation.source, "memory_extraction");
+});
+
+test("the recovery dispatcher finishes a run nothing ever kicked (§11)", async () => {
+    const { user, run } = await seedRun(1);
+
+    const dispatched = await dispatchPendingMemoryExtractionRuns({
+        register: APPROVED_REGISTER,
+        adapterFactory: fakeAdapterFactory(FAKE_ANSWER) as never,
+    });
+    assert.equal(dispatched.dispatched, 1);
+    assert.equal(dispatched.outcomes.completed, 1);
+
+    const finished = await prisma.memoryExtractionRun.findUniqueOrThrow({
+        where: { id: run.id },
+    });
+    assert.equal(finished.status, "completed");
+    assert.equal(
+        await prisma.memoryItem.count({ where: { userId: user.id } }),
+        1
+    );
+});
+
+test("a provider failure still settles, and the chunk is retried (§11)", async () => {
+    const { user, run } = await seedRun(1);
+    const failingAdapter = (() => async () => {
+        throw new Error("provider unavailable");
+    }) as never;
+
+    const result = await driveMemoryExtractionRunSlice({
+        runId: run.id,
+        owner: "worker-failing",
+        register: APPROVED_REGISTER,
+        handler: createExtractionChunkHandler({
+            register: APPROVED_REGISTER,
+            adapterFactory: failingAdapter,
+        }),
+    });
+    assert.equal(result.outcome, "paused");
+
+    const attempt = await prisma.memoryExtractionAttempt.findFirstOrThrow({
+        where: { chunk: { runId: run.id } },
+    });
+    // The call went out, so the cost is recorded rather than released.
+    assert.ok(attempt.providerCallIssued);
+    // A failed call, not a lost lease: the two must not read the same in the
+    // attempt history.
+    assert.equal(attempt.status, "failed_after_call");
+    assert.ok(attempt.settledAt);
+    assert.equal(attempt.usageConfirmed, false);
+    assert.equal(
+        await prisma.memoryItem.count({ where: { userId: user.id } }),
+        0
+    );
+
+    // The chunk is durably retryable, not lost.
+    const chunk = await prisma.memoryExtractionChunk.findFirstOrThrow({
+        where: { runId: run.id },
+    });
+    assert.equal(chunk.status, "pending");
+    assert.equal(chunk.attemptCount, 1);
+});
+
+test("the dispatcher does nothing while the rollout flag is off (§15)", async () => {
+    await seedRun(1);
+    await setExtractionFlag(false);
+    const dispatched = await dispatchPendingMemoryExtractionRuns({
+        register: APPROVED_REGISTER,
+        adapterFactory: fakeAdapterFactory(FAKE_ANSWER) as never,
+    });
+    assert.equal(dispatched.dispatched, 0);
+    assert.equal(await prisma.memoryExtractionAttempt.count(), 0);
+    assert.equal(await prisma.chatCreditReservation.count(), 0);
 });
