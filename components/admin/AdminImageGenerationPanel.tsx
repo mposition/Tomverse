@@ -17,6 +17,17 @@ type AdminImageGenerationReport = {
     worstCostMicroUsdPerCredit: number;
     ceilingHeadroomMicroUsd: number;
   };
+  models: Array<{
+    id: string;
+    provider: string;
+    name: string;
+    lifecycle: string;
+    disabledReason: string | null;
+    disabledNote: string | null;
+    pricingVersion: string;
+    priceVerifiedAt: string | null;
+    optionCount: number;
+  }>;
   budget: {
     source: string;
     floorMicroUsd: number;
@@ -326,6 +337,49 @@ export function AdminImageGenerationPanel() {
             which is the only question that matters once a second provider is
             running.
           */}
+          {/*
+            The registry as an operator sees it. A held model states which of
+            the three holds applies and why -- the reasons are not
+            interchangeable labels, and the one that applies is what says what
+            has to happen next.
+          */}
+          <div className="rounded-2xl border border-zinc-800 bg-zinc-900/40 p-4">
+            <h3 className="text-sm font-bold text-zinc-200">Model registry</h3>
+            <ul className="mt-3 space-y-3">
+              {report.models.map((model) => (
+                <li key={model.id} className="border-t border-zinc-800/60 pt-3 first:border-0 first:pt-0">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="font-bold text-zinc-200">{model.name}</span>
+                    <span className="font-mono text-[11px] text-zinc-500">
+                      {model.provider}/{model.id}
+                    </span>
+                    <span
+                      className={`rounded-full px-2 py-0.5 text-[11px] font-bold ${
+                        model.disabledReason
+                          ? "bg-amber-500/10 text-amber-400"
+                          : "bg-emerald-500/10 text-emerald-400"
+                      }`}
+                    >
+                      {model.disabledReason ?? "enabled"}
+                    </span>
+                  </div>
+                  <p className="mt-1 font-mono text-[11px] text-zinc-500">
+                    {model.pricingVersion} ·{" "}
+                    {model.priceVerifiedAt
+                      ? `verified ${model.priceVerifiedAt}`
+                      : "price unverified"}{" "}
+                    · {model.optionCount} priced option(s)
+                  </p>
+                  {model.disabledNote && (
+                    <p className="mt-1 text-xs leading-5 text-zinc-400">
+                      {model.disabledNote}
+                    </p>
+                  )}
+                </li>
+              ))}
+            </ul>
+          </div>
+
           {report.settledByProviderModel.length > 0 && (
             <div className="rounded-2xl border border-zinc-800 bg-zinc-900/40 p-4">
               <h3 className="text-sm font-bold text-zinc-200">

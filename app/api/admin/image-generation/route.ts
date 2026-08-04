@@ -180,6 +180,7 @@ export async function GET(req: Request) {
         lifecycle: model.lifecycle,
         disabledReason: model.disabledReason,
         disabledNote: model.disabledNote ?? null,
+        pricingVersion: model.pricingVersion,
         priceVerifiedAt: model.priceVerification.verifiedAt,
         optionCount: model.prices.length,
       })),

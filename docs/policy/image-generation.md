@@ -118,9 +118,20 @@ gate 없이 노출되는 배포 창은 금지된다. UI 비노출은 보안 경�
   달라졌다"는 관측 노이즈만 만든다. snapshot의 **직렬화 구조**가 바뀌면 가격
   버전이 아니라 snapshot 안의 `schemaVersion`으로 구분하고, 부재는 `1`로
   해석한다.
-- 장기적으로 전역 `IMAGE_PRICING_VERSION`보다 **모델별 pricing version**이
-  적절하다. 전역 버전을 쓰면 xAI 가격을 추가할 때 OpenAI 가격이 그대로인데도
-  모든 OpenAI 지표가 새 버전으로 갈라진다.
+- **예약이 동결하는 버전은 모델별이다** (`ImageModelProfile.pricingVersion`).
+  전역 `IMAGE_PRICING_VERSION` 하나를 쓰면 xAI 가격을 추가할 때 OpenAI 가격이
+  그대로인데도 모든 OpenAI 지표가 새 버전으로 갈라진다. 명명은
+  `lib/modelPricing.ts`와 같은 `provider-model-date-vN` 형식이다.
+  - `gpt-image-2`만 예외로 `2026-08-03-v1`을 유지한다. 이미 그 문자열로 기록된
+    예약이 있고, 이 모델의 가격은 한 푼도 바뀌지 않았으므로 이력에 경계를
+    만들지 않는다.
+  - 이 값을 `IMAGE_PRICING_VERSION`에서 유도하지 않는다. 유도하면 상한 변경 같은
+    전역 사유가 모델 가격 버전을 끌고 올라가 같은 잡음이 반대 방향으로 생긴다.
+  - `npm run check:image-pricing`이 enabled 모델의 버전 존재와 **전 모델 간
+    유일성**을 강제한다. 두 모델이 한 문자열을 쓰면 동결된 예약이 어느 가격표를
+    가리키는지 판정할 수 없다.
+  - 전역 `IMAGE_PRICING_VERSION`은 v1 flat 가격표(`lib/imageGenerationPricing.ts`)
+    와 상한 정책의 버전으로 남는다. 예약 기록에는 더 이상 쓰지 않는다.
 
 두 비율을 혼용하지 않는다: **판매가 기준 마진**은 `priceCents`가 분모이고
 (Starter 91.3% / Project 87.0% / Power 82.7%, 구독 56.8~82.7%),

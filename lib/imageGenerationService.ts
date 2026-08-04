@@ -54,7 +54,6 @@ import {
 import {
   getImageGenerationPricing,
   IMAGE_GENERATION_MODEL_ID,
-  IMAGE_PRICING_VERSION,
   IMAGE_PROMPT_INPUT_USD_PER_MILLION_TOKENS,
   IMAGE_PROMPT_MAX_TOKENS,
   type ImageQuality,
@@ -748,7 +747,10 @@ export const requestImageGeneration = async (
             addOnReservedCredits: addOnShare,
             reservedCostMicroUsd: BigInt(targetMaxCost),
             reservedFundedCostMicroUsd: BigInt(targetFundedCost),
-            pricingVersion: IMAGE_PRICING_VERSION,
+            // The version of the model this target was priced by, not one
+            // global string: a price change to any model would otherwise
+            // start a new version for every model's reservations.
+            pricingVersion: target.model.pricingVersion,
             costSource: "fixed_estimate",
             pricingSnapshot: {
               credits: target.price.credits,
