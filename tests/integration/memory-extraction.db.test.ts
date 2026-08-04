@@ -715,9 +715,11 @@ test("admission reserves credits, provider budget and the attempt atomically (§
     assert.equal(reservation.source, "memory_extraction");
     assert.equal(reservation.status, "reserved");
     // Bound to the attempt, so a replay collides instead of paying twice.
+    // Attempts are 1-based: claiming the chunk is what starts attempt 1.
+    assert.equal(admission.attemptNumber, 1);
     assert.equal(
         reservation.idempotencyKey,
-        `memory-extraction:${run.id}:${chunk.chunkIndex}:0`
+        `memory-extraction:${run.id}:${chunk.chunkIndex}:1`
     );
 
     const attempt = await prisma.memoryExtractionAttempt.findFirstOrThrow({
