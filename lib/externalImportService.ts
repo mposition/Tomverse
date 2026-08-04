@@ -23,6 +23,7 @@ import {
     utf8ByteLength,
 } from "@/lib/externalImportLimits";
 import { recordExternalImportCounter } from "@/lib/externalImportMetrics";
+import { recordMemoryCounter } from "@/lib/memoryMetrics";
 import {
     SOURCE_DELETE_SUSPENDED_STATUS,
     planSourceDeletion,
@@ -529,6 +530,17 @@ async function applySourceDeletionToMemories(
             },
         });
         suspendedMemories = suspended.count;
+    }
+    // Counted here because the rows this describes are gone or changed by
+    // the time anything could aggregate them (§22).
+    if (deletedMemories > 0) {
+        void recordMemoryCounter("source_delete_memory_deleted", deletedMemories);
+    }
+    if (suspendedMemories > 0) {
+        void recordMemoryCounter(
+            "source_delete_memory_suspended",
+            suspendedMemories
+        );
     }
     return {
         ...summarizeSourceDeletionImpact(memories),

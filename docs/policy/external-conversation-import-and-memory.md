@@ -1266,6 +1266,27 @@ Data 탭(`AuthButton.tsx`)에는 진입점·요약만 두고 대형 UI를 modal�
   다음만 집계: memory 응답 후 120초 내 follow-up, 즉시 regenerate, 대화
   memory-off 전환, 명시적 feedback, 관련 memory 즉시 수정·삭제. 이를 "재질문률"
   등 직접 측정치로 표현하지 않고 proxy임을 Admin UI에 명시합니다.
+  구현: 순수 집계는 `lib/memoryMetricsCore.ts`, 질의는 `lib/memoryMetrics.ts`,
+  조회는 `GET /api/admin/memory`입니다.
+
+  - **content 배제는 응답 shape이 아니라 질의에서 합니다.** statement·evidence·
+    `sourceSelection`·id는 `select`에 없습니다. shape에서만 빼면 이미 읽어온
+    뒤이고, 다음 사람이 shape를 넓히면 그대로 새어 나갑니다. DB 테스트가 직렬화된
+    보고서 전체에 문장이 없는지 확인합니다.
+  - **아직 측정할 수 없는 지표는 0이 아니라 이유와 함께 이름을 남깁니다**
+    (`unavailable`). 주입 비율 0%는 "아무도 안 쓴다"와 구분되지 않으며, 그
+    혼동이 이 목록이 존재하는 이유입니다. 현재 목록: injection 비율·token
+    bucket·stale bundle 비율(§10 배선 전), lock suspension/restore(B5),
+    follow-up proxy(주입 필요), chunk당 credit·batch sub-budget(slice 1.6).
+  - **승인률의 분모는 검토를 마친 memory입니다.** 아직 큐에 남은 항목까지 나누면
+    "손대지 않은 검토 큐"가 "낮은 승인률"로 보고됩니다. 결정된 것이 없으면 0이
+    아니라 `null`입니다.
+  - **취소된 run은 pair 실패율 분모에 포함합니다.** 사용자가 그만둔 것도 그 run의
+    결과이고, 빼면 사용자가 계속 포기하는 pair가 좋아 보입니다.
+  - 행이 남지 않는 결과(validator 거절, source 삭제 처분)는
+    `ChatUsageBucket`의 `memory:` namespace 일일 counter로 기록하며,
+    기록 실패가 사용자 요청 실패가 되지 않습니다.
+
 - **C**: profile lifecycle, preview 성공·실패, version update, retired model
   차단 수, knowledge 처리 실패율, byte bucket, retrieval chunk 수, truncation,
   citation 검증 실패율, memory mode 분포. instructions·filename·knowledge
