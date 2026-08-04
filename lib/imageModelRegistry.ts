@@ -143,74 +143,81 @@ const GOOGLE_GEMINI_31_FLASH_IMAGE: ImageModelProfile = {
   apiModelId: "gemini-3.1-flash-image",
   name: "Gemini 3.1 Flash Image",
   lifecycle: "stable",
-  disabledReason: "price_unverified",
-  // 2K and 4K are advertised upstream but have no representation in ImageSize
-  // yet; adding them is part of enabling this model, not of registering it.
+  // Per-image prices verified 2026-08-04; the thinking cap is not established,
+  // so the worst case is not provably finite and no fixed credit price can be
+  // derived. That is what this reason states.
+  disabledReason: "worst_case_cost_unbounded",
+  // 512, 2K and 4K are advertised upstream but have no representation in
+  // ImageSize yet, and Google's 1K landscape is not 1536x1024 -- a provider
+  // resolution mapping is part of enabling this model, not of registering it.
   sizes: ["1024x1024"],
   qualities: ["medium"],
   prices: [],
   latencyClass: "fast",
   provenance: ["synthid"],
-  outputMimeTypes: ["image/png", "image/jpeg", "image/webp"],
+  outputMimeTypes: ["image/png", "image/jpeg"],
   priceVerification: {
-    verifiedAt: null,
+    verifiedAt: "2026-08-04",
     sources: [
       "https://ai.google.dev/gemini-api/docs/pricing",
       "https://ai.google.dev/gemini-api/docs/image-generation",
-      "https://ai.google.dev/gemini-api/docs/deprecations",
+      "https://ai.google.dev/gemini-api/docs/generate-content/tokens",
+      "https://ai.google.dev/gemini-api/docs/models/gemini-3.1-flash-image",
     ],
     thinkingCapMicroUsd: null,
   },
   disabledNote:
-    "GA id corrected from gemini-3.1-flash-image-preview (retired 2026-06-25) per the product owner's review. Prices are reported published (1K $0.067 / 2K $0.101 / 4K $0.151) but have not been read from Google's documentation here (HTTP 403 on 2026-08-03 and 2026-08-04), and thinking cannot be disabled with no documented token cap -- so the worst case is not provably finite. Establish the cap first, then set prices, thinkingCapMicroUsd and disabledReason together.",
+    "Per-image prices verified 2026-08-04: 0.5K $0.045 / 1K $0.067 / 2K $0.101 / 4K $0.151. GA id corrected from the preview retired 2026-06-25. BLOCKED ON THE CAP, NOT THE PRICE: thinking is enabled by default and cannot be disabled in the API, and thinking_level (minimal/high) is a level rather than a token limit. The 2026-08-04 worksheet proposes a conservative cap of 98,304 microUSD (32,768 output tokens x $3.00/1M text-and-thinking), which would put the floors at 190 / 228 / 283 credits -- but that combines two documented statements rather than quoting one that says hidden thinking counts against the output limit. Recording it as the cap would turn an inference into a fact. Needs an explicit provider confirmation, or an approver's decision to accept the derivation.",
 };
 
-// Registered, not enabled. The strongest fixed-price candidate in the
-// 2026-08-04 model review: xAI already has a chat provider here, so the API
-// key, provider health and cost sync all exist, and the image API is
-// OpenAI-shaped.
+// Price VERIFIED 2026-08-04, held on operational grounds.
+//
+// The strongest candidate in the model review, and the only one whose pricing
+// question is fully settled: flat per-image pricing with no prompt-token and
+// no reasoning-token charge, so `thinkingCapMicroUsd` is genuinely 0 rather
+// than unknown. What is missing is execution, not knowledge -- hence
+// `operational_hold` rather than `price_unverified`.
 //
 // A dated snapshot rather than `-latest`, for the same reason chat profiles
 // pin one: a moving target cannot carry a fixed price, because the price is
 // only meaningful for the model that was actually verified.
 //
-// The review reports fixed per-image prices of US$0.05 (1K) and US$0.07 (2K),
-// which is the shape a fixed success price needs. They are not recorded: this
-// environment cannot reach docs.x.ai (HTTP 403 on 2026-08-04), so nothing here
-// has been read from xAI's own documentation.
-//
-// Note also that the review's floors of 56 and 78 credits divide the image
-// price alone by the ceiling. The policy minimum is computed over the *whole*
-// worst-case request -- image output plus the full IMAGE_PROMPT_BUDGET_MICRO_USD
-// plus any thinking -- so the real floors are higher, and
-// minimumCreditsForImageOption() is what should produce them once the figures
-// are verified.
+// `prices` stays empty because a sale credit figure is a product approval, not
+// a fact that can be read off a page. The verified worst-case floors are 62
+// credits (1K) and 84 (2K), computed over the whole request -- image output
+// plus the full prompt budget plus the zero thinking cap -- not over the image
+// price alone.
 const XAI_GROK_IMAGINE_IMAGE_QUALITY: ImageModelProfile = {
   id: "grok-imagine-image-quality-20260403",
   provider: "xai",
   apiModelId: "grok-imagine-image-quality-20260403",
   name: "Grok Imagine Image Quality",
   lifecycle: "stable",
-  disabledReason: "price_unverified",
+  disabledReason: "operational_hold",
   sizes: ["1024x1024"],
   qualities: ["medium"],
   prices: [],
   latencyClass: "balanced",
-  // Left empty rather than guessed: what xAI embeds in the returned bytes has
-  // not been read from its documentation, and claiming provenance a file does
-  // not carry would be worse than claiming none.
+  // Verified absent, not merely unread: the 2026-08-04 verification found no
+  // watermark, C2PA or metadata guarantee anywhere in xAI's documentation.
+  // Claiming provenance a file does not carry would be worse than claiming
+  // none.
   provenance: [],
   outputMimeTypes: ["image/jpeg", "image/png"],
   priceVerification: {
-    verifiedAt: null,
+    verifiedAt: "2026-08-04",
     sources: [
-      "https://docs.x.ai/developers/pricing",
+      "https://docs.x.ai/developers/models/grok-imagine-image-quality",
+      "https://docs.x.ai/developers/model-capabilities/imagine",
       "https://docs.x.ai/developers/model-capabilities/images/generation",
+      "https://docs.x.ai/developers/rest-api-reference/inference/images",
     ],
-    thinkingCapMicroUsd: null,
+    // Flat per-image pricing regardless of prompt length, with no separate
+    // reasoning charge. Verified, not assumed.
+    thinkingCapMicroUsd: 0,
   },
   disabledNote:
-    "Fixed per-image prices are reported as $0.05 (1K) and $0.07 (2K) by the product owner's 2026-08-04 review, but docs.x.ai returns HTTP 403 from this environment so nothing has been verified here. Enabling also needs an xAI adapter (imageProviderAdapter dispatches OpenAI only), IMAGE_PROVIDER_XAI_COST_MICROUSD_PER_DAY/_PER_MONTH, and an approved sale-credit figure at or above minimumCreditsForImageOption().",
+    "Price verified 2026-08-04: $0.05 (1K) and $0.07 (2K) per image, flat regardless of prompt length, with no prompt-token or reasoning-token charge. Worst-case floors are 62 credits (1K) and 84 (2K). Held on operational grounds only: an xAI adapter is needed (imageProviderAdapter dispatches OpenAI only), IMAGE_PROVIDER_XAI_COST_MICROUSD_PER_DAY/_PER_MONTH must be deployed before the code, the dated snapshot must be confirmed visible to the Tomverse key, and a sale-credit figure at or above the floor must be approved.",
 };
 
 // Registered, not enabled. The review's low-cost bulk candidate: 1K only, and
@@ -228,23 +235,27 @@ const GOOGLE_GEMINI_31_FLASH_LITE_IMAGE: ImageModelProfile = {
   apiModelId: "gemini-3.1-flash-lite-image",
   name: "Gemini 3.1 Flash Lite Image",
   lifecycle: "stable",
-  disabledReason: "price_unverified",
+  disabledReason: "worst_case_cost_unbounded",
   sizes: ["1024x1024"],
   qualities: ["low"],
   prices: [],
   latencyClass: "fast",
-  provenance: ["synthid"],
-  outputMimeTypes: ["image/png", "image/jpeg", "image/webp"],
+  // Verified 2026-08-04: this model carries C2PA in addition to SynthID, which
+  // the other two do not.
+  provenance: ["synthid", "c2pa"],
+  outputMimeTypes: ["image/png", "image/jpeg"],
   priceVerification: {
-    verifiedAt: null,
+    verifiedAt: "2026-08-04",
     sources: [
       "https://ai.google.dev/gemini-api/docs/pricing",
       "https://ai.google.dev/gemini-api/docs/image-generation",
+      "https://ai.google.dev/gemini-api/docs/generate-content/tokens",
+      "https://ai.google.dev/gemini-api/docs/models/gemini-3.1-flash-lite-image",
     ],
     thinkingCapMicroUsd: null,
   },
   disabledNote:
-    "Draft-tier candidate, 1K only. Image output reported at ~$0.0336 by the product owner's 2026-08-04 review; not read from Google's documentation here (HTTP 403 on 2026-08-03 and 2026-08-04). Blocked on the same thinking-token cap as every Google image model. The review's floor of 38 credits counts image output alone -- the policy minimum adds the full prompt budget and the cap.",
+    "Draft-tier candidate. Image output verified 2026-08-04 at $0.0336, 1K only (2K and 4K unsupported). Blocked on the same cap as every Google image model here. The worksheet's conservative derivation is 6,144 microUSD (4,096 output tokens x $1.50/1M), giving a floor of 50 credits -- an inference, not a documented cap. Even once unblocked, the review advises against filling a second comparison seat with a second Google model.",
 };
 
 // Registered, not enabled. The professional-tier candidate.
@@ -261,23 +272,25 @@ const GOOGLE_GEMINI_3_PRO_IMAGE: ImageModelProfile = {
   apiModelId: "gemini-3-pro-image",
   name: "Gemini 3 Pro Image",
   lifecycle: "stable",
-  disabledReason: "price_unverified",
+  disabledReason: "worst_case_cost_unbounded",
   sizes: ["1024x1024"],
   qualities: ["high"],
   prices: [],
   latencyClass: "slow",
   provenance: ["synthid"],
-  outputMimeTypes: ["image/png", "image/jpeg", "image/webp"],
+  outputMimeTypes: ["image/png", "image/jpeg"],
   priceVerification: {
-    verifiedAt: null,
+    verifiedAt: "2026-08-04",
     sources: [
       "https://ai.google.dev/gemini-api/docs/pricing",
       "https://ai.google.dev/gemini-api/docs/image-generation",
+      "https://ai.google.dev/gemini-api/docs/generate-content/tokens",
+      "https://ai.google.dev/gemini-api/docs/models/gemini-3-pro-image",
     ],
     thinkingCapMicroUsd: null,
   },
   disabledNote:
-    "Final-tier candidate. Reported at $0.134 (1K/2K) and $0.24 (4K) by the product owner's 2026-08-04 review; not read from Google's documentation here (HTTP 403). Blocked on the thinking-token cap, and separately held by product judgement: the price band overlaps gpt-image-2 Final, so the review defers it until usage shows Flash is insufficient.",
+    "Final-tier candidate. Per-image prices verified 2026-08-04: $0.134 (1K/2K) and $0.24 (4K). Blocked on the cap like the other Google models -- the worksheet's derivation is 393,216 microUSD (32,768 x $12.00/1M), which would put floors at 592 and 710 credits, well past gpt-image-2 Final at 250. Held a second time by product judgement regardless of the cap: the band overlaps gpt-image-2 Final, so the review defers it until usage shows Flash is insufficient.",
 };
 
 export const IMAGE_MODEL_REGISTRY: readonly ImageModelProfile[] = [

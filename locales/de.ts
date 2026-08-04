@@ -1008,6 +1008,15 @@ export const de = {
         abandonImport: "Diesen Import verlassen",
     },
     memoryReview: {
+        sourceDeleteDerivedImport:
+            "{count} Erinnerungen aus diesem Import werden ebenfalls gelöscht.",
+        sourceDeleteDerivedConversation:
+            "{count} Erinnerungen aus dieser Unterhaltung werden ebenfalls gelöscht.",
+        sourceDeleteKeep: "Erinnerungen behalten, aber nicht mehr verwenden",
+        sourceDeleteEdited:
+            "{count} von Ihnen bearbeitete Erinnerungen bleiben erhalten und werden nur nicht mehr verwendet.",
+        sourceDeleteKept:
+            "{count} Erinnerungen mit anderen Belegen bleiben unverändert.",
         dataTabTitle: "Konto-Langzeitgedächtnis",
         dataTabDescription:
             "Prüfen Sie aus importierten Unterhaltungen extrahierte Gedächtnis-Kandidaten und legen Sie fest, ob genehmigte Erinnerungen in neuen Chats verwendet werden.",

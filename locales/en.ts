@@ -1226,6 +1226,15 @@ export const en = {
     // delete and settings stay reachable regardless of the rollout flag;
     // only review and creation actions follow it.
     memoryReview: {
+        sourceDeleteDerivedImport:
+            "{count} memories made from this import will be deleted too.",
+        sourceDeleteDerivedConversation:
+            "{count} memories made from this conversation will be deleted too.",
+        sourceDeleteKeep: "Keep the memories, but stop using them",
+        sourceDeleteEdited:
+            "{count} memories you edited are kept and only stopped from being used.",
+        sourceDeleteKept:
+            "{count} memories backed by other evidence stay as they are.",
         dataTabTitle: "Account memory",
         dataTabDescription:
             "Review memory candidates extracted from imported conversations, and choose whether approved memories are used in new chats.",
