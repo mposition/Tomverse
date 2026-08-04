@@ -472,3 +472,21 @@ test("every explicit profile has an unbounded final tier", () => {
     assert.equal(profile.tiers[profile.tiers.length - 1].maxPromptTokens, null);
   }
 });
+
+test("GLM-5.2's cached-input rate resolves to the published US$0.26, not a rounded multiplier", () => {
+  // The profile stores a multiplier, but Z.AI publishes the cache-read rate as
+  // an absolute US$0.26/1M. Writing a rounded 0.19 would charge US$0.266, and
+  // the stored multiplier is what later re-prices a snapshot -- so the
+  // reconstructed rate is the thing worth pinning, not the multiplier.
+  const pricing = resolveModelPricing(model("glm-5.2"));
+  assert.equal(pricing.costSource, "registry");
+  assert.equal(pricing.inputUsdPerMillionTokens, 1.4);
+  assert.equal(pricing.outputUsdPerMillionTokens, 4.4);
+  const cachedUsdPerMillion =
+    pricing.inputUsdPerMillionTokens * pricing.cachedInputPriceMultiplier;
+  assert.ok(
+    Math.abs(cachedUsdPerMillion - 0.26) < 1e-9,
+    `cached input resolved to ${cachedUsdPerMillion}, expected 0.26`
+  );
+  assert.equal(pricing.cachedInputPricingVerified, true);
+});
