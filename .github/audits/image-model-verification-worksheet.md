@@ -9,18 +9,27 @@
 
 ## 0. 결론
 
-이번 확인으로 네 후보의 공개 가격과 정적 사양은 공식 문서에서 확인됐다.
-Google 3종은 직접 thinking을 끌 수 없지만, 모델 카드의 출력 토큰 상한 전체를
-`text and thinking` 단가로 계산하는 보수적 방법을 쓰면 최악 원가를 유한하게
-잡을 수 있다. 이 계산은 이미지 출력 토큰과 겹치는 부분이 있더라도 이중으로
-잡는 fail-closed 방향이다.
+> **2026-08-04 승인자 결정 반영.** 아래 A-2 유도는 **채택하지 않았다.**
+> 결정 근거와 후속 절차는 `docs/policy/image-generation.md` §12.1에 있다.
+> 이 문서는 그날 확인한 사실의 기록으로 그대로 보존한다.
 
-| 모델 | 가격·상한 검증 | 수학적 최소 크레딧 | 활성화 판정 |
-|---|---|---:|---|
-| `grok-imagine-image-quality-20260403` | 완료 | 1K **62**, 2K **84** | **두 번째 비교 모델 1순위.** 판매 크레딧 승인, xAI adapter, provider budget, 계정별 alias 실호출 확인 후 가능 |
-| `gemini-3.1-flash-image` | 완료 | 1K **190**, 2K **228**, 4K **283** | 판매 크레딧 승인, Google adapter, provider budget, 크기 매핑, 실호출 확인 후 가능 |
-| `gemini-3.1-flash-lite-image` | 완료 | 1K **50** | Draft 후보. 첫 비교 슬롯을 같은 Google provider로 채우지 말고 xAI 이후 검토 |
-| `gemini-3-pro-image` | 완료 | 1K·2K **592**, 4K **710** | 가격 검증과 별개로 기존 제품 판단에 따라 보류 유지 |
+이번 확인으로 네 후보의 공개 가격과 정적 사양은 공식 문서에서 확인됐다.
+Google 3종은 직접 thinking을 끌 수 없다. 모델 카드의 출력 토큰 상한 전체를
+`text and thinking` 단가로 계산하는 보수적 방법이 §A-2에 있으나, **채택되지
+않았다** — GenerateContent API가 `totalOutputTokens`와 `totalThoughtTokens`를
+별도 필드로 두므로, hidden thinking이 그 상한 안에 포함되지 않는다면 이
+계산은 과대 추정이 아니라 상한 자체가 아니게 된다.
+
+| 모델 | 이미지 출력가 | 요청당 상한 | 수학적 최소 크레딧 | 상태 |
+|---|---|---|---:|---|
+| `grok-imagine-image-quality-20260403` | **확인 완료** | **확인 완료** (토큰 과금 없음) | 1K **62**, 2K **84** | 판매가 승인(75/100). adapter·budget·계정 가시성 확인 후 1K부터 출시 |
+| `gemini-3.1-flash-image` | **확인 완료** | **조건부 — 미확정** | (유도 시 1K 190) | 공급자 확인 대기 |
+| `gemini-3.1-flash-lite-image` | **확인 완료** | **조건부 — 미확정** | (유도 시 1K 50) | 공급자 확인 대기 |
+| `gemini-3-pro-image` | **확인 완료** | **조건부 — 미확정** | (유도 시 592/710) | 공급자 확인 대기 + 제품 판단 보류 |
+
+Google 3종의 상태는 **가격 확인 완료 / 요청당 상한 조건부**로 분리해 둔다.
+괄호 안 최소 크레딧은 미채택 유도에 근거한 값이므로 판매가 산정에 쓰지
+않는다.
 
 따라서 이 워크시트만으로 `disabledReason`을 즉시 `null`로 바꾸면 안 된다.
 §D의 운영·구현 gate와 판매 크레딧 승인이 모두 끝난 모델만 활성화한다.
@@ -98,9 +107,15 @@ prompt budget 5,000µUSD는 실제 최대 입력비 500µUSD, 250µUSD, 2,000µU
   “response pricing is the sum of output tokens and thinking tokens.”
 
 판정: 이 워크시트가 제시한 A-2 기준에서는 Google 3종의 최악 요청 원가를
-유한하게 계산할 수 있다. 배포 승인자가 위 결합 추론 대신 thinking 포함을 한
-문장으로 명시한 공급자 확인을 요구한다면 Google 3종은 보류를 유지하고 Google
-support 답변을 `priceVerification.sources`에 추가한다.
+유한하게 계산할 수 있다.
+
+> **승인자 결정(2026-08-04): 채택하지 않는다.** GenerateContent API 스키마가
+> `totalOutputTokens`와 `totalThoughtTokens`를 별도 필드로 두고
+> `maxOutputTokens`를 response candidate의 한도로 설명하므로, hidden thinking이
+> `output_token_limit` 안에 포함된다는 보장이 없다. 포함되지 않으면 이 계산은
+> 보수적 상한이 아니라 상한이 아니다. Google 3종은 보류를 유지하고, 공급자
+> 답변을 받아 `priceVerification.sources`에 추가한다. 질문 문구는 정책
+> §12.1에 있다.
 
 ---
 
