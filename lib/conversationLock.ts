@@ -10,6 +10,11 @@ import {
 import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { getAnonymousClientKey } from "@/lib/clientIp";
+import {
+    unlockCookieNameFor,
+    unlockGrantMaterial,
+    type LockResourceType,
+} from "@/lib/resourceLockCore";
 import { logSecurityAuditEvent } from "@/lib/securityAudit";
 
 const HASH_PREFIX = "scrypt";
@@ -23,7 +28,6 @@ const ATTEMPT_WINDOW_MS = 15 * 60 * 1000;
 const USER_ATTEMPT_LIMIT = 5;
 const IP_ATTEMPT_LIMIT = 20;
 const UNLOCK_GRANT_TTL_SECONDS = 30 * 60;
-const UNLOCK_COOKIE_PREFIX = "tomverse_unlock_";
 
 export class ConversationLockError extends Error {
     constructor(
@@ -163,20 +167,18 @@ const getSecret = () => {
     return process.env.NEXTAUTH_SECRET;
 };
 
-const unlockCookieName = (conversationId: string) =>
-    `${UNLOCK_COOKIE_PREFIX}${conversationId}`;
-
 const passwordFingerprint = (storedPassword: string) =>
     createHash("sha256").update(storedPassword).digest("base64url");
 
-const signUnlockGrant = (
-    userId: string,
-    conversationId: string,
-    expiresAt: number,
-    fingerprint: string
-) =>
+const signUnlockGrant = (input: {
+    resourceType: LockResourceType;
+    userId: string;
+    resourceId: string;
+    expiresAt: number;
+    fingerprint: string;
+}) =>
     createHmac("sha256", getSecret())
-        .update(`${userId}:${conversationId}:${expiresAt}:${fingerprint}`)
+        .update(unlockGrantMaterial(input))
         .digest("base64url");
 
 const readCookie = (request: Request, name: string) => {
@@ -191,37 +193,71 @@ const readCookie = (request: Request, name: string) => {
     return null;
 };
 
-export const createConversationUnlockCookie = (
-    userId: string,
-    conversationId: string,
-    storedPassword: string
-) => {
+/**
+ * Issues an unlock grant for any lockable resource (§7).
+ *
+ * The `conversation` type produces exactly the cookie Release A produced —
+ * same name, same signed material — so a browser holding one across this
+ * deploy keeps it.
+ */
+export const createResourceUnlockCookie = (input: {
+    resourceType: LockResourceType;
+    userId: string;
+    resourceId: string;
+    storedPassword: string;
+}) => {
     const expiresAt = Math.floor(Date.now() / 1000) + UNLOCK_GRANT_TTL_SECONDS;
-    const fingerprint = passwordFingerprint(storedPassword);
-    const signature = signUnlockGrant(
-        userId,
-        conversationId,
+    const fingerprint = passwordFingerprint(input.storedPassword);
+    const signature = signUnlockGrant({
+        resourceType: input.resourceType,
+        userId: input.userId,
+        resourceId: input.resourceId,
         expiresAt,
-        fingerprint
-    );
+        fingerprint,
+    });
     const secure = process.env.NODE_ENV === "production" ? "; Secure" : "";
-    return `${unlockCookieName(conversationId)}=${expiresAt}.${fingerprint}.${signature}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${UNLOCK_GRANT_TTL_SECONDS}; Priority=High${secure}`;
+    return `${unlockCookieNameFor(input.resourceType, input.resourceId)}=${expiresAt}.${fingerprint}.${signature}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${UNLOCK_GRANT_TTL_SECONDS}; Priority=High${secure}`;
 };
 
-export const clearConversationUnlockCookie = (conversationId: string) => {
-    const secure = process.env.NODE_ENV === "production" ? "; Secure" : "";
-    return `${unlockCookieName(conversationId)}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0; Priority=High${secure}`;
-};
-
-export const hasConversationUnlockGrant = (
-    request: Request,
-    userId: string,
-    conversationId: string,
-    storedPassword: string | null
+export const clearResourceUnlockCookie = (
+    resourceType: LockResourceType,
+    resourceId: string
 ) => {
-    if (!storedPassword) return true;
+    const secure = process.env.NODE_ENV === "production" ? "; Secure" : "";
+    return `${unlockCookieNameFor(resourceType, resourceId)}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0; Priority=High${secure}`;
+};
 
-    const token = readCookie(request, unlockCookieName(conversationId));
+export const hasResourceUnlockGrant = (
+    request: Request,
+    input: {
+        resourceType: LockResourceType;
+        userId: string;
+        resourceId: string;
+        storedPassword: string | null;
+    }
+) => {
+    if (!input.storedPassword) return true;
+
+    // An identifier the core refuses is a caller bug, but this is a *check*:
+    // answering "no grant" is the safe direction, and throwing here would turn
+    // a locked resource into a 500 instead of a 423. Issuing a grant still
+    // throws, because that path always has a database-loaded id and a bad one
+    // there is worth surfacing.
+    let cookieName: string;
+    try {
+        cookieName = unlockCookieNameFor(input.resourceType, input.resourceId);
+        unlockGrantMaterial({
+            resourceType: input.resourceType,
+            userId: input.userId,
+            resourceId: input.resourceId,
+            expiresAt: 0,
+            fingerprint: "",
+        });
+    } catch {
+        return false;
+    }
+
+    const token = readCookie(request, cookieName);
     if (!token) return false;
 
     const [expiresValue, fingerprint, signature, ...extra] = token.split(".");
@@ -230,17 +266,18 @@ export const hasConversationUnlockGrant = (
         extra.length > 0 ||
         !Number.isSafeInteger(expiresAt) ||
         expiresAt <= Math.floor(Date.now() / 1000) ||
-        fingerprint !== passwordFingerprint(storedPassword)
+        fingerprint !== passwordFingerprint(input.storedPassword)
     ) {
         return false;
     }
 
-    const expected = signUnlockGrant(
-        userId,
-        conversationId,
+    const expected = signUnlockGrant({
+        resourceType: input.resourceType,
+        userId: input.userId,
+        resourceId: input.resourceId,
         expiresAt,
-        fingerprint
-    );
+        fingerprint,
+    });
     const actualBuffer = Buffer.from(signature || "");
     const expectedBuffer = Buffer.from(expected);
     return (
@@ -248,6 +285,38 @@ export const hasConversationUnlockGrant = (
         timingSafeEqual(actualBuffer, expectedBuffer)
     );
 };
+
+// The conversation-shaped API every existing call site uses. Kept as thin
+// wrappers rather than migrated: the native lock paths are supposed to be
+// untouched by this slice, and a call-site sweep is exactly the kind of change
+// that turns "no behaviour difference" into a claim nobody can check.
+export const createConversationUnlockCookie = (
+    userId: string,
+    conversationId: string,
+    storedPassword: string
+) =>
+    createResourceUnlockCookie({
+        resourceType: "conversation",
+        userId,
+        resourceId: conversationId,
+        storedPassword,
+    });
+
+export const clearConversationUnlockCookie = (conversationId: string) =>
+    clearResourceUnlockCookie("conversation", conversationId);
+
+export const hasConversationUnlockGrant = (
+    request: Request,
+    userId: string,
+    conversationId: string,
+    storedPassword: string | null
+) =>
+    hasResourceUnlockGrant(request, {
+        resourceType: "conversation",
+        userId,
+        resourceId: conversationId,
+        storedPassword,
+    });
 
 export const conversationLockedResponse = () =>
     new Response(
