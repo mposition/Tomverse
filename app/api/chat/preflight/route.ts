@@ -16,9 +16,11 @@ import {
     ChatAccessError,
     chatErrorResponse,
     createChatBudget,
+    getChatSigningSecret,
     identifyChatCaller,
     preflightChatComparisonAccess,
 } from "@/lib/chatSecurity";
+import { issueChatContextBundle } from "@/lib/chatMemoryContext";
 import {
     conversationLockedResponse,
     hasConversationUnlockGrant,
@@ -283,6 +285,26 @@ export async function POST(request: Request) {
                 payload.webSearchMode === "always" ? ["web_search"] : [],
         });
 
+        // The §10 bundle rides along with the admission token rather than
+        // costing a second round trip. They are separate contracts and stay
+        // separate: admission decides which concurrency slot each panel
+        // occupies, the bundle decides which memory snapshot every panel was
+        // quoted against, and neither substitutes for the other's check
+        // (docs/policy/chat-concurrency-and-identity.md §3). One bundle for
+        // the whole model set is the point — panels sharing a snapshot is
+        // what makes their answers comparable.
+        const contextBundle = await issueChatContextBundle({
+            userId: session?.user?.id ?? null,
+            subjectKey: access.subjectKey,
+            conversationId:
+                session?.user?.id && payload.conversationId !== "private-chat"
+                    ? payload.conversationId
+                    : null,
+            modelIds: uniqueModelIds,
+            query: payload.prompt,
+            secret: getChatSigningSecret(),
+        });
+
         const headers = new Headers({
             "Cache-Control": "no-store",
             "X-Request-ID": traceId,
@@ -304,6 +326,12 @@ export async function POST(request: Request) {
                 // model request occupies.
                 admissionToken: result.admission.token,
                 admissionExpiresAt: result.admission.expiresAt,
+                // Null when this turn carries no memory; the panels then send
+                // no bundle and /api/chat reaches the same conclusion.
+                contextBundle: contextBundle.token,
+                contextBundleExpiresAt: contextBundle.expiresAt,
+                memoryItemCount:
+                    contextBundle.factualCount + contextBundle.styleCount,
             },
             { headers }
         );

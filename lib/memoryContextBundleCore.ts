@@ -76,6 +76,7 @@ export type ContextBundleVerification =
               | "subject_mismatch"
               | "conversation_mismatch"
               | "model_set_mismatch"
+              | "model_not_bound"
               | "snapshot_changed";
       };
 
@@ -237,7 +238,16 @@ export const verifyContextBundle = (
         secret: string;
         subjectKey: string;
         conversationId?: string | null;
+        /** Whole-set equality. Use when the caller knows every model. */
         modelIds?: readonly string[];
+        /**
+         * Membership. A comparison panel is one `POST /api/chat` out of
+         * several sharing one bundle, so it can only ask whether ITS model is
+         * in the bound set — equality would reject every panel of a
+         * comparison. Single-model turns bind a one-element set, where
+         * membership and equality say the same thing.
+         */
+        modelId?: string;
         now?: Date;
         current?: {
             memoryStateHash: string;
@@ -282,6 +292,9 @@ export const verifyContextBundle = (
     }
     if (options.modelIds && !sameModelSet(payload.modelIds, options.modelIds)) {
         return { ok: false, reason: "model_set_mismatch" };
+    }
+    if (options.modelId && !payload.modelIds.includes(options.modelId)) {
+        return { ok: false, reason: "model_not_bound" };
     }
     const now = options.now ?? new Date();
     if (payload.expiresAtMs <= now.getTime()) {

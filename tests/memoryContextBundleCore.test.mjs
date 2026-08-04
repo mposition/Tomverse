@@ -121,6 +121,25 @@ test("a bundle for a different model set is rejected", () => {
     assert.equal(result.reason, "model_set_mismatch");
 });
 
+test("a comparison panel checks membership, not the whole set", () => {
+    // One bundle serves every panel of a comparison, and each POST /api/chat
+    // knows only its own model. Equality would reject all of them.
+    const token = issueContextBundle(
+        payload({ modelIds: ["a-model", "b-model", "c-model"] }),
+        SECRET
+    );
+    for (const modelId of ["a-model", "b-model", "c-model"]) {
+        const result = verify(token, { modelIds: undefined, modelId });
+        assert.equal(result.ok, true, modelId);
+    }
+    const outsider = verify(token, {
+        modelIds: undefined,
+        modelId: "d-model",
+    });
+    assert.equal(outsider.ok, false);
+    assert.equal(outsider.reason, "model_not_bound");
+});
+
 test("model order never decides the match, so panels agree", () => {
     const token = issueContextBundle(
         payload({ modelIds: ["a-model", "b-model"] }),
@@ -250,6 +269,7 @@ test("only expiry and snapshot drift are re-preflightable", () => {
         "subject_mismatch",
         "conversation_mismatch",
         "model_set_mismatch",
+        "model_not_bound",
     ]) {
         assert.ok(!isRepreflightableBundleFailure(reason), reason);
     }

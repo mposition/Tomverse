@@ -525,6 +525,13 @@ const getSecret = () => {
     return secret;
 };
 
+/**
+ * The app secret, for signers that must match admission's (§10 context
+ * bundle). Exported rather than re-derived so a deployment cannot end up with
+ * two tokens signed by two different keys.
+ */
+export const getChatSigningSecret = () => getSecret();
+
 const signGuestId = (guestId: string) =>
     createHmac("sha256", getSecret()).update(guestId).digest("base64url");
 
@@ -3367,6 +3374,7 @@ export const validateChatPayload = (body: unknown) => {
         deepResearchDepth?: unknown;
         webSearchMode?: unknown;
         admissionToken?: unknown;
+        contextBundle?: unknown;
     };
     if (
         !Array.isArray(payload.messages) ||
@@ -3470,6 +3478,21 @@ export const validateChatPayload = (body: unknown) => {
         );
     }
 
+    // Shape only, like the admission token above. A bundle that is well-formed
+    // but forged, expired or stale is judged where it is used (§10).
+    if (
+        payload.contextBundle !== undefined &&
+        (typeof payload.contextBundle !== "string" ||
+            payload.contextBundle.length < 1 ||
+            payload.contextBundle.length > 4_096)
+    ) {
+        throw new ChatAccessError(
+            400,
+            "INVALID_CONTEXT_BUNDLE",
+            "Invalid context bundle."
+        );
+    }
+
     let totalCharacters = 0;
     for (const message of payload.messages) {
         if (!message || typeof message !== "object") {
@@ -3529,6 +3552,7 @@ export const validateChatPayload = (body: unknown) => {
         deepResearchDepth?: "quick" | "standard" | "deep";
         webSearchMode?: WebSearchMode;
         admissionToken?: string;
+        contextBundle?: string;
     };
 };
 

@@ -69,6 +69,7 @@ import {
     ChatAccessError,
     chatErrorResponse,
     createChatBudget,
+    getChatSigningSecret,
     identifyChatCaller,
     linkChatReservationProviderRequest,
     readChatJsonBody,
@@ -117,6 +118,8 @@ import {
 } from "@/lib/guestAttachments";
 import { isChatCostSafetyCode } from "@/lib/chatCostSafetyCore";
 import { estimatePromptTokens } from "@/lib/chatTokenEstimate";
+import { resolveChatMemoryContext } from "@/lib/chatMemoryContext";
+import { contextBundleStaleBody } from "@/lib/memoryContextBundleCore";
 import {
     providerDiagnosticCode,
     safeErrorMessage,
@@ -668,6 +671,7 @@ async function handleChatPost(
             deepResearchDepth,
             webSearchMode,
             admissionToken,
+            contextBundle,
         } = validateChatPayload(body);
         const requestedModelId = modelId || APP_DEFAULTS.defaultModelId;
         requestedModelIdForLog = requestedModelId;
@@ -1456,6 +1460,53 @@ async function handleChatPost(
                 ],
             });
         }
+        // Account memory (import/memory policy §10), before the budget is
+        // built: memory tokens are part of what gets reserved, checked against
+        // the context window and counted by the operational guardrail — never
+        // an untracked extra on top of a quoted request.
+        const memoryResolution = await resolveChatMemoryContext({
+            userId: session?.user?.id ?? null,
+            subjectKey: access.subjectKey,
+            conversationId: conversationId ?? null,
+            modelId: requestedModelId,
+            query: String(messages[messages.length - 1]?.content ?? ""),
+            contextBundle,
+            secret: getChatSigningSecret(),
+        });
+        if (memoryResolution.outcome === "stale") {
+            // §10: the snapshot moved between preflight and here. The client
+            // re-preflights and retries once, before any of the response has
+            // been shown. Nothing has been reserved at this point, so there is
+            // nothing to refund.
+            return Response.json(
+                contextBundleStaleBody(memoryResolution.reason),
+                {
+                    status: 409,
+                    headers: {
+                        "Cache-Control": "no-store",
+                        "X-Request-ID": traceId,
+                    },
+                }
+            );
+        }
+        if (memoryResolution.outcome === "rejected") {
+            return tracedJsonError(
+                "The memory context could not be verified.",
+                "INVALID_CONTEXT_BUNDLE",
+                400,
+                traceId
+            );
+        }
+        if (memoryResolution.outcome === "inject") {
+            // §9.1 puts memory above the conversation history, and its own
+            // untrusted-data rules travel with it.
+            formattedMessages.unshift({
+                role: "system",
+                content: memoryResolution.promptText,
+            });
+            estimatedInputTokens += memoryResolution.tokens;
+        }
+
         const budget = createChatBudget(
             access.kind,
             modelConfig,

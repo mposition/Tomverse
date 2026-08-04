@@ -12,6 +12,10 @@ import {
     issueContextBundle,
     verifyContextBundle,
 } from "@/lib/memoryContextBundleCore";
+import {
+    issueChatContextBundle,
+    resolveChatMemoryContext,
+} from "@/lib/chatMemoryContext";
 import { manualEvidenceDigest } from "@/lib/memoryEvidenceValidation";
 import {
     approveMemory,
@@ -862,4 +866,190 @@ test("the built context never carries a memory the user has not approved", async
     });
     assert.equal(context.active, false);
     assert.equal(context.inactiveReason, "no_memories");
+});
+
+/**
+ * §10 wiring: the resolver `POST /api/chat` calls, against a real store.
+ *
+ * The invariant under test is one-directional — memory is injected only under
+ * a valid bundle — so most of these assert a REFUSAL.
+ */
+
+const CHAT_SECRET = "chat-memory-context-db-secret-at-least-32-chars";
+
+const resolveFor = async (
+    userId: string,
+    options: {
+        contextBundle?: string;
+        conversationId?: string | null;
+        modelId?: string;
+        query?: string;
+    } = {}
+) =>
+    resolveChatMemoryContext({
+        userId,
+        subjectKey: `user:${userId}`,
+        conversationId: options.conversationId ?? null,
+        modelId: options.modelId ?? "gpt-5-6-luna",
+        query: options.query ?? "postgres migration",
+        contextBundle: options.contextBundle,
+        secret: CHAT_SECRET,
+    });
+
+const issueFor = async (userId: string, modelIds = ["gpt-5-6-luna"]) =>
+    issueChatContextBundle({
+        userId,
+        subjectKey: `user:${userId}`,
+        conversationId: null,
+        modelIds,
+        query: "postgres migration",
+        secret: CHAT_SECRET,
+    });
+
+test("a guest turn carries no account memory and needs no bundle (§10)", async () => {
+    const resolution = await resolveChatMemoryContext({
+        userId: null,
+        subjectKey: "guest:abc",
+        conversationId: null,
+        modelId: "gpt-5-6-luna",
+        query: "postgres migration",
+        secret: CHAT_SECRET,
+    });
+    assert.equal(resolution.outcome, "none");
+});
+
+test("with the flag off nothing is injected and no bundle is demanded", async () => {
+    const user = await createUser();
+    await setInjectionFlag(false);
+    await activeMemory(user.id, {
+        kind: "expertise",
+        statement: "The user maintains Postgres migration tooling",
+    });
+    const resolution = await resolveFor(user.id);
+    assert.equal(resolution.outcome, "none");
+    assert.equal(resolution.reason, "injection_disabled");
+});
+
+test("active memory with no bundle is refused, never sent unquoted (§10)", async () => {
+    const user = await createUser();
+    await setInjectionFlag(true);
+    await activeMemory(user.id, {
+        kind: "expertise",
+        statement: "The user maintains Postgres migration tooling",
+    });
+    const resolution = await resolveFor(user.id);
+    assert.equal(resolution.outcome, "stale");
+    assert.equal(resolution.reason, "bundle_missing");
+});
+
+test("a bundle issued for this snapshot lets the memory through", async () => {
+    const user = await createUser();
+    await setInjectionFlag(true);
+    await activeMemory(user.id, {
+        kind: "expertise",
+        statement: "The user maintains Postgres migration tooling",
+    });
+    const issued = await issueFor(user.id);
+    assert.ok(issued.token);
+    assert.equal(issued.factualCount, 1);
+
+    const resolution = await resolveFor(user.id, {
+        contextBundle: issued.token ?? undefined,
+    });
+    assert.equal(resolution.outcome, "inject");
+    assert.ok(resolution.outcome === "inject" && resolution.tokens > 0);
+    assert.match(
+        resolution.outcome === "inject" ? resolution.promptText : "",
+        /Postgres migration tooling/
+    );
+});
+
+test("approving another memory after issue makes the turn re-preflight (§10)", async () => {
+    const user = await createUser();
+    await setInjectionFlag(true);
+    await activeMemory(user.id, {
+        kind: "expertise",
+        statement: "The user maintains Postgres migration tooling",
+    });
+    const issued = await issueFor(user.id);
+    await activeMemory(user.id, {
+        kind: "preference",
+        statement: "The user prefers migration reviews in small batches",
+    });
+
+    const resolution = await resolveFor(user.id, {
+        contextBundle: issued.token ?? undefined,
+    });
+    assert.equal(resolution.outcome, "stale");
+    assert.equal(resolution.reason, "snapshot_changed");
+});
+
+test("another account's bundle is rejected, not re-preflighted", async () => {
+    const [user, stranger] = await Promise.all([createUser(), createUser()]);
+    await setInjectionFlag(true);
+    for (const owner of [user, stranger]) {
+        await activeMemory(owner.id, {
+            kind: "expertise",
+            statement: "The user maintains Postgres migration tooling",
+        });
+    }
+    const strangersBundle = await issueFor(stranger.id);
+
+    const resolution = await resolveFor(user.id, {
+        contextBundle: strangersBundle.token ?? undefined,
+    });
+    // A retry would not fix a borrowed token, so it must not read as stale.
+    assert.equal(resolution.outcome, "rejected");
+    assert.equal(resolution.reason, "subject_mismatch");
+});
+
+test("one comparison bundle admits every panel and no outsider (§10)", async () => {
+    const user = await createUser();
+    await setInjectionFlag(true);
+    await activeMemory(user.id, {
+        kind: "expertise",
+        statement: "The user maintains Postgres migration tooling",
+    });
+    const issued = await issueFor(user.id, [
+        "gpt-5-6-luna",
+        "claude-sonnet-5",
+    ]);
+
+    for (const modelId of ["gpt-5-6-luna", "claude-sonnet-5"]) {
+        const panel = await resolveFor(user.id, {
+            contextBundle: issued.token ?? undefined,
+            modelId,
+        });
+        assert.equal(panel.outcome, "inject", modelId);
+    }
+    const outsider = await resolveFor(user.id, {
+        contextBundle: issued.token ?? undefined,
+        modelId: "some-other-model",
+    });
+    assert.equal(outsider.outcome, "rejected");
+    assert.equal(outsider.reason, "model_not_bound");
+});
+
+test("turning memory off mid-flight refuses the bundled turn (§10)", async () => {
+    const user = await createUser();
+    await setInjectionFlag(true);
+    await activeMemory(user.id, {
+        kind: "expertise",
+        statement: "The user maintains Postgres migration tooling",
+    });
+    const issued = await issueFor(user.id);
+    await putMemorySettings(user.id, {
+        masterEnabled: false,
+        styleEnabled: true,
+        defaultConversationMode: "on",
+    });
+
+    // Memory is now inactive, so there is nothing to quote and nothing to
+    // refuse: the turn proceeds without memory rather than 409-ing the user
+    // over a setting they just changed themselves.
+    const resolution = await resolveFor(user.id, {
+        contextBundle: issued.token ?? undefined,
+    });
+    assert.equal(resolution.outcome, "none");
+    assert.equal(resolution.reason, "master_disabled");
 });
