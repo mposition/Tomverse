@@ -5,6 +5,7 @@ import {
   type ImageQuality,
   type ImageSize,
 } from "@/lib/imageGenerationPricing";
+import { getImageModel } from "@/lib/imageModelRegistry";
 import type { ImageGenerationFailurePhase } from "@/lib/imageGenerationStateCore";
 
 // The OpenAI Images API call, pinned to the parameter allowlist from
@@ -83,9 +84,25 @@ export const classifyImageProviderFailure = (
 
 export type ImageProviderResult = {
   imageBytes: Buffer;
+  /**
+   * The MIME type the provider actually returned. Never assumed: policy v2
+   * section 12 requires the original bytes to be stored unmodified, and a
+   * provider that answers WebP must not be filed as PNG.
+   */
+  mimeType: string;
   /** Provider-reported text input tokens; 0 when the response omits usage. */
   inputTokens: number;
+  /**
+   * Billable internal reasoning tokens, when the provider charges for them.
+   * 0 for models that do not (OpenAI images). Recorded so settlement can
+   * compare the fixed price against the real cost.
+   */
+  thinkingTokens: number;
+  /** Provider-reported output/image tokens; 0 when the response omits usage. */
+  outputTokens: number;
   providerRequestId: string | null;
+  /** What the bytes carry, for the workspace's provenance label. */
+  provenance: readonly ("c2pa" | "synthid")[];
 };
 
 const getImageApiKey = () => {
@@ -107,11 +124,35 @@ const getImageApiKey = () => {
 const wait = (ms: number) =>
   new Promise((resolveWait) => setTimeout(resolveWait, ms));
 
+/**
+ * Dispatch by registry model. A model on a fail-closed hold (an unverified
+ * price, an unbounded worst case) is refused here as well as at admission:
+ * the adapter is the last place a request could still reach a provider we
+ * cannot price, so it re-checks rather than trusting the caller.
+ */
 export const generateImageWithProvider = async (input: {
   prompt: string;
   size: ImageSize;
   quality: ImageQuality;
+  modelId?: string;
 }): Promise<ImageProviderResult> => {
+  const modelId = input.modelId ?? IMAGE_GENERATION_MODEL_ID;
+  const model = getImageModel(modelId);
+  if (!model || model.disabledReason !== null) {
+    throw new ImageProviderError(
+      "provider_failed",
+      `Image model ${modelId} is not available for requests.`
+    );
+  }
+  if (model.provider !== "openai") {
+    // Google's adapter lands with its price verification (policy section 12):
+    // shipping an executable path to a model whose cost is unbounded is
+    // exactly what the hold exists to prevent.
+    throw new ImageProviderError(
+      "provider_failed",
+      `No adapter is implemented for provider ${model.provider}.`
+    );
+  }
   const apiKey = getImageApiKey();
   let lastError: ImageProviderError | null = null;
 
@@ -129,7 +170,7 @@ export const generateImageWithProvider = async (input: {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          model: IMAGE_GENERATION_MODEL_ID,
+          model: model.apiModelId,
           prompt: input.prompt,
           size: input.size,
           quality: input.quality,
@@ -172,7 +213,7 @@ export const generateImageWithProvider = async (input: {
 
     const payload = (await response.json().catch(() => null)) as {
       data?: Array<{ b64_json?: string }>;
-      usage?: { input_tokens?: number };
+      usage?: { input_tokens?: number; output_tokens?: number };
     } | null;
     const b64 = payload?.data?.[0]?.b64_json;
     if (!b64) {
@@ -188,8 +229,17 @@ export const generateImageWithProvider = async (input: {
       : 0;
     return {
       imageBytes: Buffer.from(b64, "base64"),
+      // The request pins output_format: "png", so this is the format the
+      // provider was told to produce -- still stated explicitly rather than
+      // assumed downstream.
+      mimeType: "image/png",
       inputTokens,
+      thinkingTokens: 0,
+      outputTokens: Number.isSafeInteger(payload?.usage?.output_tokens)
+        ? Number(payload?.usage?.output_tokens)
+        : 0,
       providerRequestId,
+      provenance: ["c2pa"],
     };
   }
 

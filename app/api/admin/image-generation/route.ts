@@ -15,9 +15,11 @@ import {
 } from "@/lib/imageGenerationPricing";
 import {
   imageCostCeilingHeadroomMicroUsd,
+  resolveActiveImageProviderBudgets,
   resolveImageProviderBudget,
   worstImageCostPerCreditMicroUsd,
 } from "@/lib/imageProviderBudget";
+import { IMAGE_MODEL_REGISTRY } from "@/lib/imageModelRegistry";
 import { prisma } from "@/lib/prisma";
 
 // The image generation operations surface: budget configuration vs effective
@@ -113,6 +115,9 @@ export async function GET(req: Request) {
     const budget = resolveImageProviderBudget(process.env, {
       production: process.env.NODE_ENV === "production",
     });
+    const providerBudgets = resolveActiveImageProviderBudgets(process.env, {
+      production: process.env.NODE_ENV === "production",
+    });
 
     return NextResponse.json({
       flagEnabled,
@@ -123,6 +128,24 @@ export async function GET(req: Request) {
         worstCostMicroUsdPerCredit: worstImageCostPerCreditMicroUsd(),
         ceilingHeadroomMicroUsd: imageCostCeilingHeadroomMicroUsd(),
       },
+      models: IMAGE_MODEL_REGISTRY.map((model) => ({
+        id: model.id,
+        provider: model.provider,
+        name: model.name,
+        lifecycle: model.lifecycle,
+        disabledReason: model.disabledReason,
+        disabledNote: model.disabledNote ?? null,
+        priceVerifiedAt: model.priceVerification.verifiedAt,
+        optionCount: model.prices.length,
+      })),
+      providerBudgets: providerBudgets.map((entry) => ({
+        provider: entry.provider,
+        source: entry.resolved.source,
+        limits: entry.resolved.limits,
+        floorMicroUsd: entry.resolved.floorMicroUsd,
+        problems: entry.resolved.problems,
+        clamped: entry.resolved.clamped,
+      })),
       budget: {
         source: budget.source,
         floorMicroUsd: budget.floorMicroUsd,

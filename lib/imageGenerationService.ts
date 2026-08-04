@@ -830,7 +830,8 @@ export const processImageGeneration = async (
     try {
       // The provider's bytes go to R2 untouched: no normalization, no
       // re-encode -- C2PA/SynthID provenance survives (policy section 9).
-      await writeR2Object(originalKey, result.imageBytes, "image/png");
+      // Store what the provider actually returned, unmodified (policy §9/§12).
+      await writeR2Object(originalKey, result.imageBytes, result.mimeType);
     } catch (error) {
       await prisma.imageAssetCleanup
         .createMany({
@@ -856,7 +857,7 @@ export const processImageGeneration = async (
         role: "original",
         status: "ready",
         r2Key: originalKey,
-        mimeType: "image/png",
+        mimeType: result.mimeType,
         width,
         height,
         byteSize: result.imageBytes.byteLength,
