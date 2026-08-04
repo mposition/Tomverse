@@ -496,6 +496,15 @@ vector schema 즉흥 추가, 클라이언트 측 retrieval 계산·선택, embed
 `retrievalVersion` 이름으로 위장. 향후 embedding 도입은 별도 정책·개인정보·
 비용·provider budget·eval 승인을 거칩니다.
 
+구현: tokenizer는 `lib/memoryRetrievalTerms.ts`의 `memoryRetrievalTerms()`
+하나뿐이며 **색인과 질의가 같은 함수를 씁니다** — 서로 다른 tokenizer로 색인한
+index를 질의하면 결과가 조용히 비고, "관련 기억 없음"과 구분되지 않습니다.
+case fold는 locale 비의존(`toLowerCase()`)입니다. locale 의존 fold는 저장된
+term이 서버 locale에 따라 달라지게 만들어(터키어 `I`→`ı`) 같은 문장이 장비마다
+다르게 색인됩니다. statement를 쓰는 모든 경로가 write 시점에 색인하고,
+tokenizer 이전에 저장된 행은 `npm run maintenance:memory-search-terms`로
+재색인합니다(재시작 가능·멱등, 기본 dry run).
+
 Context budget: core/pinned 우선, 관련 memory, style, 동일 source 다양성 제한,
 전체 token hard cap. 축소 순서: 낮은 importance → 중복 → 낮은 관련도 → style
 example. 현재 user request와 필수 output budget을 memory가 밀어내지 않습니다.

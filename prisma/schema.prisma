@@ -1957,8 +1957,10 @@ model MemoryItem {
   conflictKey String?
 
   /// Lexical retrieval terms (§9, retrieval v1 — no embeddings). The GIN
-  /// index is created by raw SQL in the migration. Populated by the B4
-  /// slice's tokenizer; empty until then.
+  /// index is created by raw SQL in the migration. Written by
+  /// `memoryRetrievalTerms()` (lib/memoryRetrievalTerms.ts) on every path
+  /// that writes a statement; rows predating it are re-indexed by
+  /// `npm run maintenance:memory-search-terms`.
   searchTerms      String[] @default([])
   retrievalVersion Int      @default(1)
 

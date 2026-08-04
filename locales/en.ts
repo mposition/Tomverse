@@ -1345,6 +1345,75 @@ export const en = {
             code_style: "Code style",
         },
     },
+    // Extraction run launch (Release B, §11 pre-run confirmation, §21).
+    memoryExtraction: {
+        launchTitle: "Extract memories from imported conversations",
+        launchDescription:
+            "Choose imported conversations to extract memory candidates from. Candidates are never used in answers until you review and approve them.",
+        modelTitle: "Model used for extraction",
+        modelUnavailable: "No extraction model is available right now.",
+        modelUnavailableDescription:
+            "An extraction model only opens after it passes a quality evaluation. When one does, you will be able to choose it here.",
+        modelCredits: "{credits} credits per batch",
+        conversationsTitle: "Choose conversations",
+        conversationsDescription:
+            "Only the conversations you select are used. They are processed in batches sized by content, and credits are counted per batch.",
+        conversationsEmpty: "You have not imported any conversations yet.",
+        conversationsEmptyCta: "Import conversations",
+        selectAllVisible: "Select all shown",
+        clearSelection: "Clear selection",
+        selectionSummary: "{count} selected · about {size}",
+        selectionHidden: "{count} selected conversations are not shown in this list.",
+        selectionTooLarge: "You can select up to {max} conversations at a time.",
+        conversationMeta: "{messages} messages · {size}",
+        loadMore: "Show more",
+        estimate: "Check required credits",
+        estimating: "Calculating…",
+        estimateResult: "{chunks} batches · about {credits} credits",
+        estimateDescription:
+            "{conversations} conversations are processed as {chunks} batches. The final charge is settled after the run and never exceeds the amount you confirmed.",
+        estimateStale: "The selection changed. Check the credits again.",
+        start: "Start extraction for {credits} credits",
+        starting: "Starting…",
+        runInProgress: "An extraction is already running.",
+        runInProgressOpen: "View progress",
+        errorGeneric: "Something went wrong. Please try again.",
+        errorEstimateChanged:
+            "The selected conversations changed, so the estimate no longer matches. Check it again before starting.",
+        errorPairUnavailable: "That model is not available right now.",
+        errorBudget:
+            "Extraction capacity is temporarily full. Please try again shortly.",
+        runTitle: "Extraction progress",
+        runBack: "Back to memory settings",
+        runNotFound: "This extraction run could not be found.",
+        runModel: "Model",
+        runStarted: "Started: {date}",
+        runFinished: "Finished: {date}",
+        runProgress: "{completed} of {total} batches done",
+        runPendingNote:
+            "Waiting to start. You can close this page — the run continues and you can come back here to check it.",
+        runRunningNote:
+            "Extraction is running. You can close this page; candidates appear in the review queue as it finishes.",
+        runCompletedNote:
+            "Extraction finished. Review the candidates in the review queue.",
+        runFailedNote:
+            "The extraction could not finish. Results from completed batches are kept.",
+        runCancelledNote:
+            "The extraction was cancelled. Results from completed batches are kept.",
+        runReview: "Go to review queue",
+        cancel: "Cancel extraction",
+        cancelArmed: "Press again to cancel",
+        cancelling: "Cancelling…",
+        recentRunsTitle: "Recent extractions",
+        recentRunOpen: "View details",
+        status: {
+            pending: "Waiting",
+            running: "Running",
+            completed: "Finished",
+            failed: "Failed",
+            cancelled: "Cancelled",
+        },
+    },
     privacyPolicy: {
         title: "Privacy Policy",
         effective: "Effective: July 16, 2026",

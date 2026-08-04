@@ -1126,6 +1126,75 @@ export const pt = {
             code_style: "Estilo de código",
         },
     },
+    // Início da extração (Release B, §11 confirmação prévia, §21).
+    memoryExtraction: {
+        launchTitle: "Extrair memórias das conversas importadas",
+        launchDescription:
+            "Escolha as conversas importadas para extrair candidatos. Os candidatos só são usados nas respostas depois de você revisar e aprovar.",
+        modelTitle: "Modelo usado na extração",
+        modelUnavailable: "Nenhum modelo de extração está disponível no momento.",
+        modelUnavailableDescription:
+            "Um modelo de extração só é liberado depois de passar por uma avaliação de qualidade. Quando isso acontecer, você poderá escolhê-lo aqui.",
+        modelCredits: "{credits} créditos por lote",
+        conversationsTitle: "Escolher conversas",
+        conversationsDescription:
+            "Somente as conversas selecionadas são usadas. Elas são processadas em lotes conforme o tamanho, e os créditos são contados por lote.",
+        conversationsEmpty: "Você ainda não importou nenhuma conversa.",
+        conversationsEmptyCta: "Importar conversas",
+        selectAllVisible: "Selecionar tudo o que aparece",
+        clearSelection: "Limpar seleção",
+        selectionSummary: "{count} selecionadas · cerca de {size}",
+        selectionHidden: "{count} conversas selecionadas não aparecem nesta lista.",
+        selectionTooLarge: "Você pode selecionar até {max} conversas por vez.",
+        conversationMeta: "{messages} mensagens · {size}",
+        loadMore: "Ver mais",
+        estimate: "Ver créditos necessários",
+        estimating: "Calculando…",
+        estimateResult: "{chunks} lotes · cerca de {credits} créditos",
+        estimateDescription:
+            "{conversations} conversas serão processadas em {chunks} lotes. A cobrança final é acertada após a execução e nunca ultrapassa o valor que você confirmou.",
+        estimateStale: "A seleção mudou. Verifique os créditos novamente.",
+        start: "Iniciar extração por {credits} créditos",
+        starting: "Iniciando…",
+        runInProgress: "Já existe uma extração em andamento.",
+        runInProgressOpen: "Ver progresso",
+        errorGeneric: "Algo deu errado. Tente novamente.",
+        errorEstimateChanged:
+            "As conversas selecionadas mudaram e a estimativa não corresponde mais. Verifique antes de iniciar.",
+        errorPairUnavailable: "Esse modelo não está disponível no momento.",
+        errorBudget:
+            "A capacidade de extração está temporariamente esgotada. Tente novamente em instantes.",
+        runTitle: "Progresso da extração",
+        runBack: "Voltar às configurações de memória",
+        runNotFound: "Esta extração não foi encontrada.",
+        runModel: "Modelo",
+        runStarted: "Início: {date}",
+        runFinished: "Fim: {date}",
+        runProgress: "{completed} de {total} lotes concluídos",
+        runPendingNote:
+            "Aguardando para começar. Você pode fechar esta página — a extração continua e você pode voltar aqui para conferir.",
+        runRunningNote:
+            "A extração está em andamento. Você pode fechar esta página; os candidatos aparecem na fila de revisão conforme terminam.",
+        runCompletedNote:
+            "A extração terminou. Revise os candidatos na fila de revisão.",
+        runFailedNote:
+            "A extração não pôde ser concluída. Os resultados dos lotes concluídos são mantidos.",
+        runCancelledNote:
+            "A extração foi cancelada. Os resultados dos lotes concluídos são mantidos.",
+        runReview: "Ir para a fila de revisão",
+        cancel: "Cancelar extração",
+        cancelArmed: "Pressione de novo para cancelar",
+        cancelling: "Cancelando…",
+        recentRunsTitle: "Extrações recentes",
+        recentRunOpen: "Ver detalhes",
+        status: {
+            pending: "Aguardando",
+            running: "Em andamento",
+            completed: "Concluída",
+            failed: "Falhou",
+            cancelled: "Cancelada",
+        },
+    },
     privacyPolicy: {
         title: "Política de privacidade",
         effective: "Em vigor: 16 de julho de 2026",
