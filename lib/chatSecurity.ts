@@ -567,6 +567,22 @@ const hashKey = (scope: string, value: string) =>
         .update(`${scope}:${value}:${getSecret()}`)
         .digest("hex");
 
+/**
+ * The account's monthly plan credit ceiling.
+ *
+ * Exported because plan credits are one balance per account, not one per
+ * feature: a background extraction run spends from the same monthly window a
+ * chat turn does, so it has to read the same number rather than derive its
+ * own (docs/policy/credit-and-cost-limits.md §9). Reuses limitsFor so the two
+ * can never disagree about what a plan allows.
+ */
+export const getMonthlyPlanCreditLimit = (
+    account: Pick<ChatAccess, "kind" | "plan" | "planLimits">
+): number => {
+    const monthRule = limitsFor(account).find((rule) => rule.period === "month");
+    return monthRule?.limit ?? 0;
+};
+
 export const getUserChatUsageKey = (userId: string) =>
     `user:${hashKey("user", userId)}`;
 
