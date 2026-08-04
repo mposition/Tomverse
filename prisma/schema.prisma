@@ -1956,6 +1956,14 @@ model MemoryItem {
   /// different values are surfaced to the user, never auto-overwritten.
   conflictKey String?
 
+  /// Identity of an extracted candidate: kind + normalized statement + the
+  /// evidence it rests on. A retried chunk that produces the same candidate
+  /// again must not create a second row, and a unique index is the only
+  /// version of that guarantee which survives two workers racing. NULL for
+  /// user-authored memories, which are deduplicated by conflictKey instead
+  /// (Postgres treats NULLs as distinct, so they do not collide).
+  dedupeKey String?
+
   /// Lexical retrieval terms (§9, retrieval v1 — no embeddings). The GIN
   /// index is created by raw SQL in the migration. Populated by the B4
   /// slice's tokenizer; empty until then.
@@ -1980,6 +1988,7 @@ model MemoryItem {
 
   @@index([userId, status])
   @@index([userId, conflictKey])
+  @@unique([userId, dedupeKey])
   /// §9 retrieval v1 — lexical GIN over the term array. Declared here so the
   /// db-integration drift check sees schema and migration agree; the mapped
   /// name matches the migration's hand-written CREATE INDEX.
@@ -2060,6 +2069,23 @@ model MemoryExtractionRun {
   /// exclusivity comes from leaseGeneration, not from this string.
   leaseOwner String?
 
+  /// The §11 quote the user actually confirmed, frozen at creation.
+  ///
+  /// Reservations are taken just before each chunk runs, not for the whole
+  /// run up front — a run can sit pending for days, and holding a user's
+  /// credits that whole time would be wrong. The cost of deferring is that
+  /// prices or the chunk plan could move underneath the quote, so the amount
+  /// the user agreed to is stored here and the sum of just-in-time
+  /// reservations is checked against it. Exceeding it stops the run for a
+  /// re-quote; it never silently charges more than was confirmed.
+  confirmedCreditCeiling Int
+  confirmedAt            DateTime
+  /// Pricing identity behind the quote, so a later price change is visible
+  /// rather than silently re-settled at the new rate.
+  quotePricingVersion String
+  /// After this, the quote is stale and the run must be re-quoted.
+  quoteExpiresAt DateTime
+
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
   completedAt DateTime?
@@ -2105,11 +2131,78 @@ model MemoryExtractionChunk {
   startedAt   DateTime?
   completedAt DateTime?
 
+  /// This chunk's share of the confirmed quote, so just-in-time reservations
+  /// can be checked against the run's ceiling without re-planning.
+  estimatedCredits Int @default(0)
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  attempts MemoryExtractionAttempt[]
+
   @@unique([runId, chunkIndex])
   @@index([runId, status])
+}
+
+/// One deliberate provider call for one chunk (§11).
+///
+/// This table exists because two different identities were being conflated.
+/// The *logical* unit of work is the chunk (`runId:chunkIndex`) and it may be
+/// committed exactly once. An *attempt* (`runId:chunkIndex:attemptNumber`) is
+/// one paid call, and there may be several. Using one key for both cannot
+/// work: a key containing the attempt number is new every retry and so
+/// deduplicates nothing, while a key without it would make a deliberate
+/// second call look like a replay of the first.
+///
+/// So: the reservation binds to the attempt, and the commit binds to the
+/// chunk. That split is also what lets a worker which lost its lease still
+/// settle — money that was actually spent has to be recorded even though the
+/// candidates it produced must be thrown away.
+model MemoryExtractionAttempt {
+  id      String                @id @default(cuid())
+  chunkId String
+  chunk   MemoryExtractionChunk @relation(fields: [chunkId], references: [id], onDelete: Cascade)
+
+  attemptNumber Int
+
+  /// planned | reserved | calling | responded | committed |
+  /// failed_before_call | failed_after_call | discarded_stale | cancelled
+  /// — allowlist CHECK lives in the migration.
+  ///
+  /// `responded` is the state that makes crash recovery honest: once the
+  /// provider answer is durable, resuming commits it instead of paying for
+  /// the same answer twice.
+  status String @default("planned")
+
+  /// The run lease generation this attempt was started under. Candidates and
+  /// progress may only be committed while it still matches; settlement
+  /// deliberately does NOT depend on it.
+  leaseGeneration Int
+
+  /// ChatCreditReservation.id — the financial identity, independent of any
+  /// lease. Null only before the reservation is taken.
+  reservationId String? @unique
+
+  /// The provider's answer, stored before commit so a crash between
+  /// responding and committing does not require paying again.
+  providerResponse Json?
+  /// True when a provider call was actually issued. A crash after this point
+  /// with no usage means cost may have been incurred that we cannot confirm.
+  providerCallIssued Boolean @default(false)
+  /// Set when the provider (or a reconciliation) confirmed token usage.
+  usageConfirmed Boolean @default(false)
+
+  failureCode String?
+
+  startedAt   DateTime?
+  respondedAt DateTime?
+  settledAt   DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([chunkId, attemptNumber])
+  @@index([status])
 }
 
 /// Account-level memory controls (§8.1). The master toggle is not an

@@ -45,6 +45,14 @@ export const MEMORY_EXTRACTION_SLICE_MAX_CHUNKS = 4;
 export const MEMORY_EXTRACTION_SLICE_BUDGET_MS = 90 * 1000;
 export const MEMORY_EXTRACTION_CHUNK_TIMEOUT_MS = 60 * 1000;
 
+/**
+ * How long the confirmed quote stays usable. Reservations are taken per chunk
+ * just before it runs, so a run parked for days would otherwise start
+ * charging against pricing nobody agreed to. Past this the run stops for a
+ * re-quote rather than reserving at whatever the price is now.
+ */
+export const MEMORY_EXTRACTION_QUOTE_TTL_MS = 24 * 60 * 60 * 1000;
+
 /** Bounded retry (§11): a chunk that keeps killing its worker gives up. */
 export const MEMORY_EXTRACTION_CHUNK_MAX_ATTEMPTS = 3;
 
@@ -182,6 +190,9 @@ export type ExtractionEstimate = {
     estimatedCostMicroUsd: number;
     /** Entitlement figure the user confirms: chunk count × per-call credits. */
     estimatedCredits: number;
+    /** One chunk's share, stored per chunk so a just-in-time reservation can
+     * be checked against the confirmed ceiling without re-planning. */
+    creditsPerChunk: number;
     basis: typeof MEMORY_EXTRACTION_ESTIMATE_BASIS;
 };
 
@@ -212,6 +223,7 @@ export function estimateExtraction(
         estimatedOutputTokens: outputTokens,
         estimatedCostMicroUsd: costMicroUsd,
         estimatedCredits: chunks.length * pricing.creditsPerCall,
+        creditsPerChunk: pricing.creditsPerCall,
         basis: MEMORY_EXTRACTION_ESTIMATE_BASIS,
     };
 }
