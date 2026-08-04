@@ -994,6 +994,14 @@ function ChatAppComponent({
                 "{seconds}",
                 String(Math.max(1, retryAfterSeconds ?? 5))
               )
+            : errorCode === "CHAT_CONTEXT_BUNDLE_STALE"
+              // The terminal state of §10: this send was priced against a
+              // memory context that no longer matches, and the recovery was
+              // either already spent (a single-model retry) or is not this
+              // panel's to take (a comparison). The server's English sentence
+              // never reaches the panel -- the user is told what happened in
+              // their own language, and that sending again is what fixes it.
+              ? t("chat.contextBundleStale")
             : errorCode === "PLAN_ENTITLEMENT_EXHAUSTED"
               ? t("chat.planEntitlementExhausted")
             : errorCode === "CONCURRENT_RESERVATION_CONFLICT"

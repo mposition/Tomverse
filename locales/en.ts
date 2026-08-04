@@ -411,6 +411,7 @@ export const en = {
         internalMonthlyCostSafetyLimit: "This request is over this month's usage limit for AI responses. Try fewer or lower-cost models, or come back after the monthly reset.",
         providerCostSafetyLimit: "One of the selected AI providers is temporarily unavailable. Choose a model from another provider, or try again later.",
         operationalCostGuardrail: "An internal safety check paused this request. Your credits were not used. Try again shortly, or choose a lower-cost model.",
+        contextBundleStale: "Your account memory changed while this message was being sent, so it was not delivered. Send it again to use the updated memory.",
         planEntitlementExhausted: "This month's plan credits are used up. Buy additional credits or upgrade your plan to keep going.",
         concurrentReservationConflict: "Your credit balance changed while another request was being processed. Please try again.",
         summarizeModelDifferences: "Summarize model differences",

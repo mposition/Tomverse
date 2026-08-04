@@ -177,6 +177,10 @@ test.describe("chat memory context", () => {
       panel(page, 0).getByRole("button", { name: "Retry", exact: true })
     ).toBeVisible();
     await expect(panel(page, 0)).not.toContainText(PANEL_A_RETRY);
+    // The user is told what happened in their own language, and what fixes
+    // it. The server's English sentence never reaches the panel.
+    await expect(panel(page, 0)).toContainText("account memory changed");
+    await expect(panel(page, 0)).not.toContainText("QA fixture");
   });
 
   test("one comparison panel never re-prepares on its own @ui-risk", async ({
@@ -213,6 +217,7 @@ test.describe("chat memory context", () => {
     // The refused panel never answers: its second attempt is only reachable
     // through a retry it must not take.
     await expect(panel(page, 0)).not.toContainText(PANEL_A_RETRY);
+    await expect(panel(page, 0)).toContainText("account memory changed");
     // And it never re-prepares. A comparison's bundle comes from the
     // aggregate preflight, so this endpoint should not be reached at all --
     // not on the send, and not on the refusal. Any call here would be one

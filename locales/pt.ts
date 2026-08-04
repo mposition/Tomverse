@@ -372,6 +372,7 @@ export const pt = {
         internalMonthlyCostSafetyLimit: "Este pedido excede o limite de uso deste mês para respostas de IA. Tente menos modelos ou modelos mais económicos, ou tente novamente após a redefinição mensal.",
         providerCostSafetyLimit: "Um dos provedores de IA selecionados está temporariamente indisponível. Escolha um modelo de outro provedor ou tente novamente mais tarde.",
         operationalCostGuardrail: "Uma verificação de segurança interna pausou este pedido. Os seus créditos não foram usados. Tente novamente em breve ou escolha um modelo mais económico.",
+        contextBundleStale: "A memória da sua conta mudou enquanto esta mensagem estava a ser enviada, por isso não foi entregue. Envie-a novamente para usar a memória atualizada.",
         planEntitlementExhausted: "Os créditos do plano deste mês foram esgotados. Compre créditos adicionais ou faça upgrade do plano para continuar.",
         concurrentReservationConflict: "O seu saldo de créditos mudou enquanto outro pedido estava a ser processado. Tente novamente.",
         summarizeModelDifferences: "Resumir diferenças entre modelos",

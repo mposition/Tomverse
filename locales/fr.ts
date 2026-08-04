@@ -372,6 +372,7 @@ export const fr = {
         internalMonthlyCostSafetyLimit: "Cette demande dépasse la limite d'utilisation du mois pour les réponses IA. Essayez moins de modèles ou des modèles moins coûteux, ou réessayez après la réinitialisation mensuelle.",
         providerCostSafetyLimit: "Un des fournisseurs IA sélectionnés est temporairement indisponible. Choisissez un modèle d'un autre fournisseur ou réessayez plus tard.",
         operationalCostGuardrail: "Une vérification de sécurité interne a mis cette demande en pause. Vos crédits n'ont pas été utilisés. Réessayez bientôt ou choisissez un modèle moins coûteux.",
+        contextBundleStale: "La mémoire de votre compte a changé pendant l'envoi de ce message, qui n'a donc pas été transmis. Renvoyez-le pour utiliser la mémoire mise à jour.",
         planEntitlementExhausted: "Les crédits du forfait pour ce mois sont épuisés. Achetez des crédits supplémentaires ou passez à un forfait supérieur pour continuer.",
         concurrentReservationConflict: "Votre solde de crédits a changé pendant le traitement d'une autre demande. Veuillez réessayer.",
         summarizeModelDifferences: "Résumer les différences entre modèles",
