@@ -10,6 +10,15 @@ import {
 } from "@/lib/memoryExtractionCore";
 import { MEMORY_EXTRACTION_FLAG_KEY } from "@/lib/memoryAccess";
 import { analyzeExtractionChunk } from "@/lib/memoryExtractionPipeline";
+import { reserveMemoryExtractionAttempt } from "@/lib/memoryExtractionAdmission";
+import { commitExtractionChunkCandidates } from "@/lib/memoryExtractionCommit";
+import { dispatchPendingMemoryExtractionRuns } from "@/lib/memoryExtractionDispatch";
+import { createExtractionChunkHandler } from "@/lib/memoryExtractionRunner";
+import {
+    releaseUnusedExtractionAttempt,
+    releaseUnusedExtractionAttemptsForRun,
+    settleExtractionAttempt,
+} from "@/lib/memoryExtractionSettlement";
 import type { MemoryExtractionEvalEntry } from "@/lib/memoryExtractionEvalRegister";
 import {
     cancelMemoryExtractionRun,
@@ -37,7 +46,9 @@ import { prisma } from "@/lib/prisma";
 const resetData = async () => {
     await prisma.$executeRawUnsafe(`
     TRUNCATE TABLE
+      "MemoryExtractionAttempt",
       "MemoryExtractionChunk",
+      "ChatCreditReservation",
       "MemoryExtractionRun",
       "MemoryEvidence",
       "MemoryItem",
@@ -671,6 +682,335 @@ test("the offline pipeline composes with the processor under a fake adapter", as
     assert.equal(await prisma.memoryItem.count({ where: { userId: user.id } }), 0);
 });
 
+/** Admits one chunk attempt after claiming the run, as the processor would. */
+const admitFirstChunk = async (runId: string) => {
+    const lease = await claimMemoryExtractionRun({ runId, owner: "worker-a" });
+    assert.ok(lease);
+    const chunk = await claimNextExtractionChunk(lease);
+    assert.ok(chunk);
+    return { lease, chunk };
+};
+
+const financialFootprint = async (userId: string, runId: string) => {
+    const [reservations, attempts, buckets] = await Promise.all([
+        prisma.chatCreditReservation.count({ where: { userId } }),
+        prisma.memoryExtractionAttempt.count({
+            where: { chunk: { runId } },
+        }),
+        prisma.chatUsageBucket.count(),
+    ]);
+    return { reservations, attempts, buckets };
+};
+
+test("admission reserves credits, provider budget and the attempt atomically (§11)", async () => {
+    const { run } = await seedRun(1);
+    const { lease, chunk } = await admitFirstChunk(run.id);
+
+    const admission = await reserveMemoryExtractionAttempt({
+        runId: run.id,
+        chunkIndex: chunk.chunkIndex,
+        leaseGeneration: lease.leaseGeneration,
+        reservedCostMicroUsd: 1_000,
+        register: APPROVED_REGISTER,
+    });
+    assert.equal(admission.admitted, true);
+    if (!admission.admitted) return;
+
+    const reservation = await prisma.chatCreditReservation.findUniqueOrThrow({
+        where: { id: admission.reservationId },
+    });
+    // Recorded as its own workflow, on the shared ledger.
+    assert.equal(reservation.source, "memory_extraction");
+    assert.equal(reservation.status, "reserved");
+    // Bound to the attempt, so a replay collides instead of paying twice.
+    // Attempts are 1-based: claiming the chunk is what starts attempt 1.
+    assert.equal(admission.attemptNumber, 1);
+    assert.equal(
+        reservation.idempotencyKey,
+        `memory-extraction:${run.id}:${chunk.chunkIndex}:1`
+    );
+
+    const attempt = await prisma.memoryExtractionAttempt.findFirstOrThrow({
+        where: { chunk: { runId: run.id } },
+    });
+    assert.equal(attempt.status, "reserved");
+    assert.equal(attempt.leaseGeneration, lease.leaseGeneration);
+    assert.equal(attempt.reservationId, admission.reservationId);
+
+    // No chat lease was created: extraction is a different concurrency layer.
+    assert.equal(
+        await prisma.chatRequestLease.count({ where: { subjectKey: { not: "" } } }),
+        0
+    );
+});
+
+test("a fenced-out worker reserves nothing at all (§11)", async () => {
+    const { user, run } = await seedRun(1);
+    const { lease, chunk } = await admitFirstChunk(run.id);
+
+    // Superseded between claiming the chunk and admitting the attempt.
+    await prisma.memoryExtractionRun.update({
+        where: { id: run.id },
+        data: { leaseGeneration: lease.leaseGeneration + 1 },
+    });
+    const before = await financialFootprint(user.id, run.id);
+
+    const admission = await reserveMemoryExtractionAttempt({
+        runId: run.id,
+        chunkIndex: chunk.chunkIndex,
+        leaseGeneration: lease.leaseGeneration,
+        reservedCostMicroUsd: 1_000,
+        register: APPROVED_REGISTER,
+    });
+    assert.equal(admission.admitted, false);
+    if (admission.admitted) return;
+    assert.equal(admission.reason, "lease_lost");
+
+    // Nothing survives the rollback: no credits, no provider bucket, no
+    // reservation row, no attempt.
+    assert.deepEqual(await financialFootprint(user.id, run.id), before);
+});
+
+test("a quote that outlived its window stops the run for a re-quote (§11)", async () => {
+    const { user, run } = await seedRun(1);
+    const { lease, chunk } = await admitFirstChunk(run.id);
+    await prisma.memoryExtractionRun.update({
+        where: { id: run.id },
+        data: { quoteExpiresAt: new Date(Date.now() - 1_000) },
+    });
+    const before = await financialFootprint(user.id, run.id);
+
+    const admission = await reserveMemoryExtractionAttempt({
+        runId: run.id,
+        chunkIndex: chunk.chunkIndex,
+        leaseGeneration: lease.leaseGeneration,
+        reservedCostMicroUsd: 1_000,
+        register: APPROVED_REGISTER,
+    });
+    assert.equal(admission.admitted, false);
+    if (admission.admitted) return;
+    assert.equal(admission.reason, "quote_expired");
+    assert.deepEqual(await financialFootprint(user.id, run.id), before);
+});
+
+test("reservations may never exceed the credit ceiling the user confirmed (§11)", async () => {
+    const { user, run } = await seedRun(1);
+    // The quote the owner agreed to is gone — a price or plan change since
+    // then must re-ask, never charge more.
+    await prisma.memoryExtractionRun.update({
+        where: { id: run.id },
+        data: { confirmedCreditCeiling: 0 },
+    });
+    const { lease, chunk } = await admitFirstChunk(run.id);
+    const before = await financialFootprint(user.id, run.id);
+
+    const admission = await reserveMemoryExtractionAttempt({
+        runId: run.id,
+        chunkIndex: chunk.chunkIndex,
+        leaseGeneration: lease.leaseGeneration,
+        reservedCostMicroUsd: 1_000,
+        register: APPROVED_REGISTER,
+    });
+    assert.equal(admission.admitted, false);
+    if (admission.admitted) return;
+    assert.equal(admission.reason, "requote_required");
+    assert.deepEqual(await financialFootprint(user.id, run.id), before);
+});
+
+test("a disabled rollout admits nothing (§15)", async () => {
+    const { user, run } = await seedRun(1);
+    const { lease, chunk } = await admitFirstChunk(run.id);
+    await setExtractionFlag(false);
+    const before = await financialFootprint(user.id, run.id);
+
+    const admission = await reserveMemoryExtractionAttempt({
+        runId: run.id,
+        chunkIndex: chunk.chunkIndex,
+        leaseGeneration: lease.leaseGeneration,
+        reservedCostMicroUsd: 1_000,
+        register: APPROVED_REGISTER,
+    });
+    assert.equal(admission.admitted, false);
+    if (admission.admitted) return;
+    assert.equal(admission.reason, "feature_disabled");
+    assert.deepEqual(await financialFootprint(user.id, run.id), before);
+});
+
+/** Admits an attempt and returns it, as the processor would before calling. */
+const admittedAttempt = async () => {
+    const { user, run } = await seedRun(1);
+    const { lease, chunk } = await admitFirstChunk(run.id);
+    const admission = await reserveMemoryExtractionAttempt({
+        runId: run.id,
+        chunkIndex: chunk.chunkIndex,
+        leaseGeneration: lease.leaseGeneration,
+        reservedCostMicroUsd: 1_000,
+        register: APPROVED_REGISTER,
+    });
+    assert.equal(admission.admitted, true);
+    if (!admission.admitted) throw new Error("unreachable");
+    return { user, run, lease, chunk, admission };
+};
+
+const reservationStatus = async (reservationId: string) =>
+    (
+        await prisma.chatCreditReservation.findUniqueOrThrow({
+            where: { id: reservationId },
+        })
+    ).status;
+
+test("§11 settlement ①: a failure before the call releases the reservation whole", async () => {
+    const { admission } = await admittedAttempt();
+    const released = await releaseUnusedExtractionAttempt({
+        attemptId: admission.attemptId,
+        reason: "failed_before_call",
+    });
+    assert.equal(released.released, true);
+
+    const attempt = await prisma.memoryExtractionAttempt.findUniqueOrThrow({
+        where: { id: admission.attemptId },
+    });
+    assert.equal(attempt.status, "failed_before_call");
+    assert.ok(attempt.settledAt);
+    // Nothing was spent, so nothing is charged.
+    assert.notEqual(await reservationStatus(admission.reservationId), "reserved");
+});
+
+test("§11 settlement ②: confirmed usage settles at what was actually used", async () => {
+    const { admission } = await admittedAttempt();
+    await prisma.memoryExtractionAttempt.update({
+        where: { id: admission.attemptId },
+        data: { providerCallIssued: true, status: "responded" },
+    });
+
+    const settled = await settleExtractionAttempt({
+        attemptId: admission.attemptId,
+        usage: {
+            inputTokens: 1_200,
+            outputTokens: 300,
+            usageFromProvider: true,
+        },
+        outcome: "completed",
+        commitAllowed: true,
+    });
+    assert.equal(settled.settled, true);
+    assert.equal(settled.status, "committed");
+
+    const attempt = await prisma.memoryExtractionAttempt.findUniqueOrThrow({
+        where: { id: admission.attemptId },
+    });
+    assert.equal(attempt.usageConfirmed, true);
+    const reservation = await prisma.chatCreditReservation.findUniqueOrThrow({
+        where: { id: admission.reservationId },
+    });
+    assert.equal(reservation.settledInputTokens, 1_200);
+    assert.equal(reservation.settledOutputTokens, 300);
+});
+
+test("§11 settlement ③: a settled attempt is never charged twice", async () => {
+    const { admission } = await admittedAttempt();
+    await prisma.memoryExtractionAttempt.update({
+        where: { id: admission.attemptId },
+        data: { providerCallIssued: true, status: "responded" },
+    });
+    const first = await settleExtractionAttempt({
+        attemptId: admission.attemptId,
+        usage: { inputTokens: 900, outputTokens: 100, usageFromProvider: true },
+        outcome: "completed",
+        commitAllowed: true,
+    });
+    assert.equal(first.settled, true);
+
+    // A replay after a crash between settling and recording must be a no-op.
+    const replay = await settleExtractionAttempt({
+        attemptId: admission.attemptId,
+        usage: { inputTokens: 900, outputTokens: 100, usageFromProvider: true },
+        outcome: "completed",
+        commitAllowed: true,
+    });
+    assert.equal(replay.settled, false);
+    const reservation = await prisma.chatCreditReservation.findUniqueOrThrow({
+        where: { id: admission.reservationId },
+    });
+    assert.equal(reservation.settledInputTokens, 900);
+});
+
+test("§11 settlement ④: a stale worker still pays, but its work is discarded", async () => {
+    const { run, lease, admission } = await admittedAttempt();
+    await prisma.memoryExtractionAttempt.update({
+        where: { id: admission.attemptId },
+        data: { providerCallIssued: true, status: "responded" },
+    });
+    // Superseded after the provider call.
+    await prisma.memoryExtractionRun.update({
+        where: { id: run.id },
+        data: { leaseGeneration: lease.leaseGeneration + 1 },
+    });
+
+    const settled = await settleExtractionAttempt({
+        attemptId: admission.attemptId,
+        usage: { inputTokens: 800, outputTokens: 200, usageFromProvider: true },
+        outcome: "completed",
+        // The caller's fencing verdict: it may not commit.
+        commitAllowed: false,
+    });
+    // Losing the lease removes the right to commit, never the duty to record
+    // a cost that was really incurred.
+    assert.equal(settled.settled, true);
+    assert.equal(settled.status, "discarded_stale");
+    const reservation = await prisma.chatCreditReservation.findUniqueOrThrow({
+        where: { id: admission.reservationId },
+    });
+    assert.equal(reservation.settledInputTokens, 800);
+});
+
+test("§11 settlement ⑤: a call with no reported usage is not settled as free", async () => {
+    const { admission } = await admittedAttempt();
+    await prisma.memoryExtractionAttempt.update({
+        where: { id: admission.attemptId },
+        data: { providerCallIssued: true, status: "responded" },
+    });
+    const settled = await settleExtractionAttempt({
+        attemptId: admission.attemptId,
+        usage: { usageFromProvider: false },
+        outcome: "failed",
+        commitAllowed: true,
+    });
+    assert.equal(settled.settled, true);
+    assert.equal(settled.status, "failed_after_call");
+    const attempt = await prisma.memoryExtractionAttempt.findUniqueOrThrow({
+        where: { id: admission.attemptId },
+    });
+    // Recorded as unconfirmed so reconciliation can revisit it, rather than
+    // silently treated as a zero-cost call.
+    assert.equal(attempt.usageConfirmed, false);
+});
+
+test("a reservation that reached a provider is never released as unused", async () => {
+    const { admission } = await admittedAttempt();
+    await prisma.memoryExtractionAttempt.update({
+        where: { id: admission.attemptId },
+        data: { providerCallIssued: true },
+    });
+    const released = await releaseUnusedExtractionAttempt({
+        attemptId: admission.attemptId,
+        reason: "cancelled",
+    });
+    // Releasing in full here would erase a cost that was really incurred.
+    assert.equal(released.released, false);
+    assert.equal(await reservationStatus(admission.reservationId), "reserved");
+});
+
+test("cancelling a run gives back only what was never spent (§11)", async () => {
+    const { run, admission } = await admittedAttempt();
+    const result = await releaseUnusedExtractionAttemptsForRun(run.id);
+    assert.equal(result.released, 1);
+    const attempt = await prisma.memoryExtractionAttempt.findUniqueOrThrow({
+        where: { id: admission.attemptId },
+    });
+    assert.equal(attempt.status, "cancelled");
+});
+
 test("an expired lease is reclaimed to pending with progress intact (§3)", async () => {
     const { run } = await seedRun(2);
     const lease = await claimMemoryExtractionRun({
@@ -747,4 +1087,434 @@ test("the batch sub-budget refuses with the dedicated 503 semantics (§3)", asyn
             typeof error.retryAfter === "number" &&
             error.retryAfter > 0
     );
+});
+
+/**
+ * Runs the offline pipeline over a user's seeded conversations with a canned
+ * answer, so a commit test can start from a real `ExtractionChunkAnalysis`
+ * rather than a hand-built one. The label map is still the server's, so a
+ * candidate can only cite messages that were actually shown.
+ */
+const analyzeSeeded = async (
+    conversationIds: string[],
+    candidates: unknown[]
+) => {
+    const conversations = await prisma.externalConversation.findMany({
+        where: { id: { in: conversationIds } },
+        select: { id: true, title: true },
+    });
+    const messages = await prisma.externalMessage.findMany({
+        where: { externalConversationId: { in: conversations.map((c) => c.id) } },
+        orderBy: { ordinal: "asc" },
+        select: {
+            id: true,
+            externalConversationId: true,
+            role: true,
+            content: true,
+            contentDigest: true,
+        },
+    });
+    return analyzeExtractionChunk({
+        conversations: conversations.map((conversation) => ({
+            externalConversationId: conversation.id,
+            title: conversation.title,
+            messages: messages
+                .filter((m) => m.externalConversationId === conversation.id)
+                .map((message) => ({
+                    externalMessageId: message.id,
+                    role: message.role as "user" | "assistant",
+                    content: message.content,
+                    contentDigest: message.contentDigest,
+                })),
+        })),
+        adapter: async () => ({ output: { candidates } }),
+    });
+};
+
+const PREFERENCE_CANDIDATE = {
+    kind: "preference",
+    statement: "사용자는 간결한 답변을 선호한다",
+    confidence: 0.9,
+    evidence: ["m1"],
+};
+
+/** A run claimed and ready to commit, with its conversation ids. */
+const claimedRun = async () => {
+    const user = await createUser();
+    const conversationIds = await seedConversations(user.id, 1);
+    const estimate = await estimateMemoryExtraction(
+        baseInput(user.id, conversationIds)
+    );
+    const run = await createMemoryExtractionRun({
+        ...baseInput(user.id, conversationIds),
+        confirmedCredits: estimate.estimatedCredits,
+    });
+    await setExtractionFlag(true);
+    const lease = await claimMemoryExtractionRun({
+        runId: run.id,
+        owner: "worker-a",
+    });
+    assert.ok(lease);
+    return { user, run, lease, conversationIds };
+};
+
+test("an accepted candidate is stored with its verified evidence (§8.3)", async () => {
+    const { user, run, lease, conversationIds } = await claimedRun();
+    const analysis = await analyzeSeeded(conversationIds, [
+        PREFERENCE_CANDIDATE,
+    ]);
+
+    const result = await commitExtractionChunkCandidates({
+        userId: user.id,
+        runId: run.id,
+        leaseGeneration: lease.leaseGeneration,
+        extractionModelId: run.extractionModelId,
+        analysis,
+    });
+    assert.equal(result.committed, true);
+    assert.equal(result.counts.stored, 1);
+
+    const items = await prisma.memoryItem.findMany({
+        where: { userId: user.id },
+        include: { evidences: true },
+    });
+    assert.equal(items.length, 1);
+    const [item] = items;
+    // Awaiting review, never active: extraction proposes, the user approves.
+    assert.equal(item.status, "candidate");
+    assert.equal(item.kind, "preference");
+    assert.ok(item.dedupeKey);
+    assert.ok(item.conflictKey);
+    // Provenance is recorded, so a later retirement can find what a model made.
+    assert.equal(item.extractionModelId, run.extractionModelId);
+    assert.equal(item.promptVersion, analysis.promptVersion);
+    assert.equal(item.evidences.length, 1);
+    assert.equal(item.evidences[0].sourceType, "external_message");
+    assert.ok(item.evidences[0].externalMessageId);
+});
+
+test("a retried chunk does not store the same candidate twice (§11)", async () => {
+    const { user, run, lease, conversationIds } = await claimedRun();
+    const analysis = await analyzeSeeded(conversationIds, [
+        PREFERENCE_CANDIDATE,
+    ]);
+    const commit = () =>
+        commitExtractionChunkCandidates({
+            userId: user.id,
+            runId: run.id,
+            leaseGeneration: lease.leaseGeneration,
+            extractionModelId: run.extractionModelId,
+            analysis,
+        });
+
+    const first = await commit();
+    const second = await commit();
+    assert.equal(first.counts.stored, 1);
+    assert.equal(second.counts.stored, 0);
+    assert.equal(second.counts.duplicate, 1);
+    assert.equal(
+        await prisma.memoryItem.count({ where: { userId: user.id } }),
+        1
+    );
+});
+
+test("a structurally rejected candidate is never stored, only counted (§8.4)", async () => {
+    const { user, run, lease, conversationIds } = await claimedRun();
+    const analysis = await analyzeSeeded(conversationIds, [
+        PREFERENCE_CANDIDATE,
+        {
+            kind: "constraint",
+            statement:
+                "사용자의 API 키는 sk-live-ABCDEFGHIJKLMNOPQRSTUVWXYZ012345 이다",
+            confidence: 0.9,
+            evidence: ["m1"],
+        },
+    ]);
+
+    const result = await commitExtractionChunkCandidates({
+        userId: user.id,
+        runId: run.id,
+        leaseGeneration: lease.leaseGeneration,
+        extractionModelId: run.extractionModelId,
+        analysis,
+    });
+    assert.equal(result.counts.stored, 1);
+    assert.equal(result.counts.discarded, 1);
+
+    const stored = await prisma.memoryItem.findMany({
+        where: { userId: user.id },
+        select: { statement: true },
+    });
+    assert.equal(stored.length, 1);
+    // The secret is absent from the store entirely — not parked for review.
+    assert.ok(!stored.some((item) => item.statement.includes("sk-live-")));
+});
+
+test("a candidate needing review is stored as reviewable, not active (§8.4)", async () => {
+    const { user, run, lease, conversationIds } = await claimedRun();
+    const analysis = await analyzeSeeded(conversationIds, [
+        {
+            kind: "preference",
+            // Imperative but not absolute: the validator demotes it for
+            // individual review rather than rejecting it outright.
+            statement: "존댓말로 답변해 주세요",
+            confidence: 0.9,
+            evidence: ["m1"],
+        },
+    ]);
+
+    const result = await commitExtractionChunkCandidates({
+        userId: user.id,
+        runId: run.id,
+        leaseGeneration: lease.leaseGeneration,
+        extractionModelId: run.extractionModelId,
+        analysis,
+    });
+    assert.equal(result.counts.storedForReview, 1);
+    const item = await prisma.memoryItem.findFirstOrThrow({
+        where: { userId: user.id },
+    });
+    assert.equal(item.status, "manual_review_required");
+    assert.equal(item.approvedAt, null);
+});
+
+test("evidence whose content changed since the chunk is not accepted (§8.4)", async () => {
+    const { user, run, lease, conversationIds } = await claimedRun();
+    const analysis = await analyzeSeeded(conversationIds, [
+        PREFERENCE_CANDIDATE,
+    ]);
+    // The source message is re-imported with different content between the
+    // model answering and the commit landing.
+    await prisma.externalMessage.updateMany({
+        where: { userId: user.id },
+        data: { contentDigest: externalContentDigest("something else") },
+    });
+
+    const result = await commitExtractionChunkCandidates({
+        userId: user.id,
+        runId: run.id,
+        leaseGeneration: lease.leaseGeneration,
+        extractionModelId: run.extractionModelId,
+        analysis,
+    });
+    assert.equal(result.counts.stored, 0);
+    assert.equal(result.counts.evidenceUnverified, 1);
+    assert.equal(
+        await prisma.memoryItem.count({ where: { userId: user.id } }),
+        0
+    );
+});
+
+test("a candidate citing another account's message stores nothing (§8.4)", async () => {
+    const { user, run, lease } = await claimedRun();
+    // The analysis is built over a DIFFERENT user's conversations, so every
+    // citation resolves to a message this run's owner does not own.
+    const stranger = await createUser();
+    const strangerConversations = await seedConversations(stranger.id, 1);
+    const analysis = await analyzeSeeded(strangerConversations, [
+        PREFERENCE_CANDIDATE,
+    ]);
+
+    const result = await commitExtractionChunkCandidates({
+        userId: user.id,
+        runId: run.id,
+        leaseGeneration: lease.leaseGeneration,
+        extractionModelId: run.extractionModelId,
+        analysis,
+    });
+    assert.equal(result.counts.stored, 0);
+    assert.equal(result.counts.evidenceUnverified, 1);
+    assert.equal(
+        await prisma.memoryItem.count({ where: { userId: user.id } }),
+        0
+    );
+    // And nothing was attached to the stranger either.
+    assert.equal(
+        await prisma.memoryItem.count({ where: { userId: stranger.id } }),
+        0
+    );
+});
+
+test("a worker that lost its lease commits nothing (§11 fencing)", async () => {
+    const { user, run, lease, conversationIds } = await claimedRun();
+    const analysis = await analyzeSeeded(conversationIds, [
+        PREFERENCE_CANDIDATE,
+    ]);
+    // Somebody else takes the run over while this worker was calling.
+    await prisma.memoryExtractionRun.update({
+        where: { id: run.id },
+        data: { leaseGeneration: lease.leaseGeneration + 1 },
+    });
+
+    const result = await commitExtractionChunkCandidates({
+        userId: user.id,
+        runId: run.id,
+        leaseGeneration: lease.leaseGeneration,
+        extractionModelId: run.extractionModelId,
+        analysis,
+    });
+    assert.equal(result.committed, false);
+    assert.equal(
+        result.committed === false ? result.reason : null,
+        "fenced_out"
+    );
+    assert.equal(
+        await prisma.memoryItem.count({ where: { userId: user.id } }),
+        0
+    );
+    assert.equal(await prisma.memoryEvidence.count(), 0);
+});
+
+test("a cancelled run cannot have candidates committed into it (§13.1)", async () => {
+    const { user, run, lease, conversationIds } = await claimedRun();
+    const analysis = await analyzeSeeded(conversationIds, [
+        PREFERENCE_CANDIDATE,
+    ]);
+    await cancelMemoryExtractionRun(user.id, run.id);
+
+    const result = await commitExtractionChunkCandidates({
+        userId: user.id,
+        runId: run.id,
+        leaseGeneration: lease.leaseGeneration,
+        extractionModelId: run.extractionModelId,
+        analysis,
+    });
+    assert.equal(result.committed, false);
+    assert.equal(
+        await prisma.memoryItem.count({ where: { userId: user.id } }),
+        0
+    );
+});
+
+/**
+ * Stands in for the provider adapter. Same seam the real one is built on, so
+ * what these tests exercise is the production composition with the network
+ * call replaced — not a parallel path.
+ */
+const fakeAdapterFactory =
+    (
+        answer: unknown,
+        usage: {
+            inputTokens?: number;
+            outputTokens?: number;
+            usageFromProvider: boolean;
+        } = { inputTokens: 900, outputTokens: 120, usageFromProvider: true }
+    ) =>
+    (options: { onResult: (result: unknown) => void }) =>
+    async () => {
+        const text = JSON.stringify(answer);
+        options.onResult({ output: text, usage, responseId: "resp-fake" });
+        return { text };
+    };
+
+const FAKE_ANSWER = { candidates: [PREFERENCE_CANDIDATE] };
+
+test("the live handler reserves, calls, stores and settles one chunk (§11)", async () => {
+    const { user, run } = await seedRun(1);
+
+    const result = await driveMemoryExtractionRunSlice({
+        runId: run.id,
+        owner: "worker-live",
+        register: APPROVED_REGISTER,
+        handler: createExtractionChunkHandler({
+            register: APPROVED_REGISTER,
+            adapterFactory: fakeAdapterFactory(FAKE_ANSWER) as never,
+        }),
+    });
+    assert.equal(result.outcome, "completed");
+
+    // The candidate landed, awaiting the owner's review.
+    const items = await prisma.memoryItem.findMany({
+        where: { userId: user.id },
+        include: { evidences: true },
+    });
+    assert.equal(items.length, 1);
+    assert.equal(items[0].status, "candidate");
+    assert.equal(items[0].evidences.length, 1);
+
+    // And the money is accounted for: one attempt, reserved then settled.
+    const attempts = await prisma.memoryExtractionAttempt.findMany({
+        where: { chunk: { runId: run.id } },
+    });
+    assert.equal(attempts.length, 1);
+    assert.equal(attempts[0].status, "committed");
+    assert.ok(attempts[0].providerCallIssued);
+    assert.ok(attempts[0].settledAt);
+    const reservation = await prisma.chatCreditReservation.findUniqueOrThrow({
+        where: { id: attempts[0].reservationId ?? "" },
+    });
+    assert.equal(reservation.status, "settled");
+    assert.equal(reservation.source, "memory_extraction");
+});
+
+test("the recovery dispatcher finishes a run nothing ever kicked (§11)", async () => {
+    const { user, run } = await seedRun(1);
+
+    const dispatched = await dispatchPendingMemoryExtractionRuns({
+        register: APPROVED_REGISTER,
+        adapterFactory: fakeAdapterFactory(FAKE_ANSWER) as never,
+    });
+    assert.equal(dispatched.dispatched, 1);
+    assert.equal(dispatched.outcomes.completed, 1);
+
+    const finished = await prisma.memoryExtractionRun.findUniqueOrThrow({
+        where: { id: run.id },
+    });
+    assert.equal(finished.status, "completed");
+    assert.equal(
+        await prisma.memoryItem.count({ where: { userId: user.id } }),
+        1
+    );
+});
+
+test("a provider failure still settles, and the chunk is retried (§11)", async () => {
+    const { user, run } = await seedRun(1);
+    const failingAdapter = (() => async () => {
+        throw new Error("provider unavailable");
+    }) as never;
+
+    const result = await driveMemoryExtractionRunSlice({
+        runId: run.id,
+        owner: "worker-failing",
+        register: APPROVED_REGISTER,
+        handler: createExtractionChunkHandler({
+            register: APPROVED_REGISTER,
+            adapterFactory: failingAdapter,
+        }),
+    });
+    assert.equal(result.outcome, "paused");
+
+    const attempt = await prisma.memoryExtractionAttempt.findFirstOrThrow({
+        where: { chunk: { runId: run.id } },
+    });
+    // The call went out, so the cost is recorded rather than released.
+    assert.ok(attempt.providerCallIssued);
+    // A failed call, not a lost lease: the two must not read the same in the
+    // attempt history.
+    assert.equal(attempt.status, "failed_after_call");
+    assert.ok(attempt.settledAt);
+    assert.equal(attempt.usageConfirmed, false);
+    assert.equal(
+        await prisma.memoryItem.count({ where: { userId: user.id } }),
+        0
+    );
+
+    // The chunk is durably retryable, not lost.
+    const chunk = await prisma.memoryExtractionChunk.findFirstOrThrow({
+        where: { runId: run.id },
+    });
+    assert.equal(chunk.status, "pending");
+    assert.equal(chunk.attemptCount, 1);
+});
+
+test("the dispatcher does nothing while the rollout flag is off (§15)", async () => {
+    await seedRun(1);
+    await setExtractionFlag(false);
+    const dispatched = await dispatchPendingMemoryExtractionRuns({
+        register: APPROVED_REGISTER,
+        adapterFactory: fakeAdapterFactory(FAKE_ANSWER) as never,
+    });
+    assert.equal(dispatched.dispatched, 0);
+    assert.equal(await prisma.memoryExtractionAttempt.count(), 0);
+    assert.equal(await prisma.chatCreditReservation.count(), 0);
 });

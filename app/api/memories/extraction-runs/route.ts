@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { NextResponse, after } from "next/server";
 import { getServerSession } from "next-auth";
 import { z } from "zod";
 import {
@@ -11,6 +11,7 @@ import {
     MemoryFeatureDisabledError,
 } from "@/lib/appSettings";
 import { authOptions } from "@/lib/auth";
+import { kickMemoryExtractionRun } from "@/lib/memoryExtractionDispatch";
 import {
     createMemoryExtractionRun,
     estimateMemoryExtraction,
@@ -99,6 +100,11 @@ export async function POST(req: Request) {
             ...base,
             confirmedCredits: body.confirmedCredits,
         });
+        // Low-latency start, nothing more. This is bound to the lifetime of
+        // this request and dies with the process; the run is durable in the
+        // database and the fifteen-minute dispatcher is what actually
+        // guarantees it finishes (policy §11).
+        after(() => kickMemoryExtractionRun(run.id));
         return NextResponse.json(
             {
                 runId: run.id,

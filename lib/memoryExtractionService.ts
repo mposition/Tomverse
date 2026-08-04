@@ -10,6 +10,7 @@ import { usageBucketCount } from "@/lib/chatUsageBucketCount";
 import {
     MEMORY_EXTRACTION_CHUNK_TIMEOUT_MS,
     MEMORY_EXTRACTION_LEASE_TTL_MS,
+    MEMORY_EXTRACTION_QUOTE_TTL_MS,
     chunkFailureDisposition,
     decideMemoryExtractionBudget,
     estimateExtraction,
@@ -346,6 +347,16 @@ export async function createMemoryExtractionRun(input: {
                 sourceSelection,
                 chunkTotal: estimate.chunkCount,
                 pricingVersion: `${estimate.basis}:${pricing.modelId}`,
+                // The quote the user agreed to, frozen here. Reservations are
+                // taken per chunk just before it runs, so this ceiling is what
+                // stops a run parked for days from charging against pricing
+                // nobody confirmed (§11).
+                confirmedCreditCeiling: input.confirmedCredits,
+                confirmedAt: now,
+                quotePricingVersion: `${estimate.basis}:${pricing.modelId}`,
+                quoteExpiresAt: new Date(
+                    now.getTime() + MEMORY_EXTRACTION_QUOTE_TTL_MS
+                ),
             },
         });
         // The chunk rows are the run's durable work list, written in the same
@@ -357,6 +368,7 @@ export async function createMemoryExtractionRun(input: {
                 runId: run.id,
                 chunkIndex,
                 conversationIds: chunk.conversationIds,
+                estimatedCredits: estimate.creditsPerChunk,
             })),
         });
         return run;

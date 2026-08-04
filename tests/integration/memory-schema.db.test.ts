@@ -221,6 +221,11 @@ test("deletion cascades: user → items → evidence, and source message → evi
             promptVersion: "mem-extract-v1",
             sourceSelection: [],
             chunkTotal: 1,
+            // The §11 quote a run is created against (slice 1.6).
+            confirmedCreditCeiling: 1,
+            confirmedAt: new Date(),
+            quotePricingVersion: "conservative_default:gpt-5-6-luna",
+            quoteExpiresAt: new Date(Date.now() + 86_400_000),
         },
     });
 

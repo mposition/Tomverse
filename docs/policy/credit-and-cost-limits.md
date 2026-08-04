@@ -499,3 +499,38 @@ Console에만 남습니다.
   `tests/chatTokenEstimate.test.mjs`, `tests/chatCostSafetyCore.test.mjs`,
   `tests/integration/credit-finance.db.test.ts`,
   `tests/e2e/credit-entitlement-disclosure.spec.ts`.
+
+## 9. Canonical lock order (금융 트랜잭션)
+
+크레딧을 예약·정산하는 경로가 둘 이상이 되면서 필요해진 규칙입니다. Release B의
+memory extraction이 chat과 **같은 금융 primitive를 공유하되 다른 orchestration에서**
+호출하므로, 두 경로가 잠금을 다른 순서로 잡으면 교착이 생깁니다.
+
+`lib/chatSecurity.ts`의 `acquireChatAccess`가 이미 쓰고 있는 순서를 정본으로 삼습니다.
+새 금융 경로는 **이 순서를 뒤집지 않습니다.**
+
+1. **`lockCreditAccount(tx, userId)`** — 크레딧을 건드리는 트랜잭션은 언제나 이것을
+   가장 먼저 잡습니다. advisory 잠금을 먼저 잡고 나중에 크레딧 계정을 잡는 경로를
+   만들지 않습니다.
+2. **advisory 잠금** — 한 트랜잭션이 여럿을 잡아야 하면 아래 이름 순서대로 잡습니다.
+   - `<subjectKey>` (chat admission)
+   - `memory-extraction:<userId>` (extraction run 입장)
+   - `memory-items:<userId>` (memory 항목 쓰기)
+3. **lease row** — 만료 정리와 slot 확보.
+4. **사용량 버킷** — 크레딧(월/일·debt offset) → rate·token → **provider 비용**.
+   provider 비용 버킷은 항상 마지막 버킷 계층입니다. batch sub-budget은 provider
+   총예산과 **같은 트랜잭션·같은 단계**에서 잡습니다(§3의 두 층 검사).
+5. **reservation row 삽입** — 위 판정이 모두 통과한 뒤 마지막.
+
+규칙:
+
+- 크레딧을 예약하지 않는 경로(예: run 생성, memory 삭제)는 1을 건너뛸 수 있지만,
+  2 이후의 상대 순서는 동일하게 유지합니다.
+- **판정과 예약을 다른 트랜잭션으로 나누지 않습니다.** 조회 후 별도로 예약하면 동시
+  요청이 같은 잔여 예산을 보고 모두 통과합니다. provider 총예산·sub-budget·크레딧·
+  fencing 검증은 한 경계 안에 있어야 합니다.
+- 공유 금융 primitive는 **workflow에 중립**이어야 합니다. `source`는 기록용
+  metadata이며 **동작 분기에 쓰지 않습니다.** chat lease·IP admission·
+  `aiChatEnabled`처럼 chat 고유의 판정은 chat wrapper에 남습니다.
+- 예약만 공유하고 정산·해제를 복제하면 두 경로가 다시 갈라집니다. 공통 reservation
+  payload와 settlement·release primitive까지 공유 경계에 포함합니다.

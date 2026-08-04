@@ -50,6 +50,17 @@ import {
     type AddOnCreditReservationEntry,
 } from "@/lib/creditLedger";
 import { lockCreditAccount, offsetCreditDebt } from "@/lib/creditDebt";
+import {
+    RESERVATION_SOURCES,
+    createDurableReservation,
+    incrementUsageBucket,
+    reservePlanCreditBuckets,
+    reserveProviderCostBudget,
+    usagePeriodStart,
+    type ReservationEntry,
+    type ReservationSource,
+    type UsagePeriod,
+} from "@/lib/chatFinancePrimitives";
 import { calculateProviderUsageCost } from "@/lib/providerUsageCost";
 import type { PerplexityUsageCostSnapshot } from "@/lib/perplexityUsageCore";
 import { notifyProviderCreditIfNeeded } from "@/lib/providerMonitoring";
@@ -145,19 +156,18 @@ export type ChatBudget = {
     longContextThresholdTokens: number | null;
 };
 
-type ReservationEntry = {
-    key: string;
-    period: string;
-    periodStart: Date;
-    amount: number;
-    metric: "tokens" | "cost" | "credits" | "plan-credits" | "plan-cost" | "pro-response";
-};
+
 
 export type ChatUsageReservation = {
     reservationId: string;
     userId?: string;
     traceId: string;
-    source: "chat" | "comparison_review";
+    /**
+     * Which workflow committed the money. Audit metadata only — settlement,
+     * release and the expiry sweep behave identically for every value, and no
+     * branch in this file reads it (docs/policy/credit-and-cost-limits.md §9).
+     */
+    source: ReservationSource;
     modelId: string;
     provider: AiModel["provider"];
     entries: ReservationEntry[];
@@ -174,14 +184,22 @@ export type ChatUsageReservation = {
     pricingVersion?: string;
     costSource?: string;
     longContextThresholdTokens?: number | null;
+    /**
+     * What the caller considers "the same request". Chat derives it from the
+     * reservation id; memory extraction binds it to one chunk attempt. Left
+     * optional so reservations written before this existed still settle
+     * (docs/policy/credit-and-cost-limits.md §9).
+     */
+    idempotencyKey?: string;
 };
 
 const durableReservationPayloadSchema = z
     .object({
         reservationId: z.string().min(1).max(100),
         userId: z.string().min(1).max(100).optional(),
+        idempotencyKey: z.string().min(1).max(200).optional(),
         traceId: z.string().min(1).max(120),
-        source: z.enum(["chat", "comparison_review"]),
+        source: z.enum(RESERVATION_SOURCES),
         modelId: z.string().min(1).max(160),
         provider: z.string().min(1).max(80),
         entries: z.array(
@@ -557,6 +575,22 @@ const hashKey = (scope: string, value: string) =>
         .update(`${scope}:${value}:${getSecret()}`)
         .digest("hex");
 
+/**
+ * The account's monthly plan credit ceiling.
+ *
+ * Exported because plan credits are one balance per account, not one per
+ * feature: a background extraction run spends from the same monthly window a
+ * chat turn does, so it has to read the same number rather than derive its
+ * own (docs/policy/credit-and-cost-limits.md §9). Reuses limitsFor so the two
+ * can never disagree about what a plan allows.
+ */
+export const getMonthlyPlanCreditLimit = (
+    account: Pick<ChatAccess, "kind" | "plan" | "planLimits">
+): number => {
+    const monthRule = limitsFor(account).find((rule) => rule.period === "month");
+    return monthRule?.limit ?? 0;
+};
+
 export const getUserChatUsageKey = (userId: string) =>
     `user:${hashKey("user", userId)}`;
 
@@ -649,25 +683,11 @@ export const getGuestUsageSnapshot = async (request: Request) => {
     };
 };
 
-const periodStart = (period: Period, now: Date) => {
-    if (period === "minute") {
-        return new Date(
-            Date.UTC(
-                now.getUTCFullYear(),
-                now.getUTCMonth(),
-                now.getUTCDate(),
-                now.getUTCHours(),
-                now.getUTCMinutes()
-            )
-        );
-    }
-    if (period === "day") {
-        return new Date(
-            Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate())
-        );
-    }
-    return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
-};
+// Moved to lib/chatFinancePrimitives.ts so a non-chat financial path can use
+// the same window arithmetic. Kept as a local alias so every call site in this
+// file stays exactly as it was (docs/policy/credit-and-cost-limits.md §9).
+const periodStart = (period: Period, now: Date) =>
+    usagePeriodStart(period as UsagePeriod, now);
 
 const retryAfterFor = (period: Period, now: Date, dailyEnd?: Date) => {
     let end: Date;
@@ -703,29 +723,10 @@ const safeDailyResetAt = (windowEnd: Date, now: Date) => {
     );
 };
 
-const incrementUsage = async (
-    tx: Prisma.TransactionClient,
-    key: string,
-    period: string,
-    start: Date,
-    limit: number,
-    amount = 1
-) => {
-    if (!Number.isSafeInteger(amount) || amount <= 0 || amount > limit) {
-        return false;
-    }
-    const rows = await tx.$queryRaw<Array<{ count: number }>>`
-        INSERT INTO "ChatUsageBucket" ("key", "period", "periodStart", "count", "updatedAt")
-        VALUES (${key}, ${period}, ${start}, ${amount}, NOW())
-        ON CONFLICT ("key", "period", "periodStart")
-        DO UPDATE SET
-            "count" = "ChatUsageBucket"."count" + ${amount},
-            "updatedAt" = NOW()
-        WHERE "ChatUsageBucket"."count" <= ${limit - amount}
-        RETURNING "count"
-    `;
-    return rows.length > 0;
-};
+// Moved to lib/chatFinancePrimitives.ts (§9). Local alias keeps call sites
+// unchanged; the conditional upsert that makes concurrent callers unable to
+// jointly exceed a limit lives there now.
+const incrementUsage = incrementUsageBucket;
 
 // A separate, feature-scoped guest cap (independent of the general
 // day/month chat-message quota from limitsFor/acquireChatAccess): guests
@@ -1820,7 +1821,7 @@ export const acquireChatAccess = async (
     budget: ChatBudget,
     options?: {
         traceId?: string;
-        source?: "chat" | "comparison_review";
+        source?: ReservationSource;
         /** Tool names enabled for this turn, recorded on the limit decision. */
         enabledTools?: string[];
         /**
@@ -2363,58 +2364,40 @@ export const acquireChatAccess = async (
             planReservedCredits = creditAllocation.planReservedCredits;
             addOnReservedCredits = creditAllocation.addOnCreditsRequired;
             decisionState.availableCredits = creditAllocation.planCreditsAvailableNow;
-            if (planReservedCredits > 0) {
-                if (dailyRule) {
-                    const dailyAllowed = await incrementUsage(
-                        tx,
-                        access.subjectKey,
-                        "day",
-                        accessDayWindow.start,
-                        dailyRule.limit,
-                        planReservedCredits
-                    );
-                    if (!dailyAllowed) {
+            // Plan credit windows through the shared primitive (§9). The
+            // windows stay chat's own — a background run has no daily message
+            // rule — but the conditional increment that stops two concurrent
+            // reservations fitting into one balance is shared.
+            reservationEntries.push(
+                ...(await reservePlanCreditBuckets(
+                    tx,
+                    {
+                        subjectKey: access.subjectKey,
+                        credits: planReservedCredits,
+                        monthly: {
+                            start: monthStart,
+                            limit: monthRule.limit,
+                        },
+                        daily: dailyRule
+                            ? {
+                                  start: accessDayWindow.start,
+                                  limit: dailyRule.limit,
+                              }
+                            : null,
+                    },
+                    (scope) => {
                         throw new ChatAccessError(
                             409,
                             CONCURRENT_RESERVATION_CONFLICT,
-                            "Daily plan credit balance changed. Please retry.",
+                            scope === "daily_plan_credits"
+                                ? "Daily plan credit balance changed. Please retry."
+                                : "Credit balance changed. Please retry.",
                             undefined,
-                            { conflictScope: "daily_plan_credits" }
+                            { conflictScope: scope }
                         );
                     }
-                    reservationEntries.push({
-                        key: access.subjectKey,
-                        period: "day",
-                        periodStart: accessDayWindow.start,
-                        amount: planReservedCredits,
-                        metric: "plan-credits",
-                    });
-                }
-                const allowed = await incrementUsage(
-                    tx,
-                    access.subjectKey,
-                    "month",
-                    monthStart,
-                    monthRule.limit,
-                    planReservedCredits
-                );
-                if (!allowed) {
-                    throw new ChatAccessError(
-                        409,
-                        CONCURRENT_RESERVATION_CONFLICT,
-                        "Credit balance changed. Please retry.",
-                        undefined,
-                        { conflictScope: "monthly_plan_credits" }
-                    );
-                }
-                reservationEntries.push({
-                    key: access.subjectKey,
-                    period: "month",
-                    periodStart: monthStart,
-                    amount: planReservedCredits,
-                    metric: "plan-credits",
-                });
-            }
+                ))
+            );
             if (addOnReservedCredits > 0) {
                 addOnReservedCost = Math.ceil(
                     (reservedCost * addOnReservedCredits) / budget.usageCredits
@@ -2750,78 +2733,41 @@ export const acquireChatAccess = async (
             }
         }
 
-        if (reservedCost > 0) {
-            const providerKey = `provider:${budget.provider}`;
-            const providerDayStart = periodStart("day", now);
-            const providerDayAllowed = await incrementUsage(
+        // Provider day/month cost budget, now taken through the shared
+        // primitive (docs/policy/credit-and-cost-limits.md §9) so the
+        // non-chat financial paths consume the same buckets by the same
+        // rules. The error stays chat's own: only this wrapper knows to
+        // offer alternative models on the same provider.
+        reservationEntries.push(
+            ...(await reserveProviderCostBudget(
                 tx,
-                providerKey,
-                "provider-cost-day",
-                providerDayStart,
-                providerDailyLimit,
-                reservedCost
-            );
-            if (!providerDayAllowed) {
-                throw new ChatAccessError(
-                    503,
-                    PROVIDER_BUDGET_EXHAUSTED,
-                    "This AI provider is temporarily unavailable.",
-                    undefined,
-                    {
-                        provider: budget.provider,
-                        scope: "provider_cost_day",
-                        limitLayer: "operational_guardrail",
-                        alternativeModelIds: alternativeModelsForProvider(
-                            budget.provider
-                        ),
-                        internalRequiredCostMicroUsd: reservedCost,
-                        internalLimitCostMicroUsd: providerDailyLimit,
-                    }
-                );
-            }
-            reservationEntries.push({
-                key: providerKey,
-                period: "provider-cost-day",
-                periodStart: providerDayStart,
-                amount: reservedCost,
-                metric: "cost",
-            });
-
-            const providerStart = periodStart("month", now);
-            const providerAllowed = await incrementUsage(
-                tx,
-                providerKey,
-                "provider-cost-month",
-                providerStart,
-                providerMonthlyLimit,
-                reservedCost
-            );
-            if (!providerAllowed) {
-                throw new ChatAccessError(
-                    503,
-                    PROVIDER_BUDGET_EXHAUSTED,
-                    "This AI provider is temporarily unavailable.",
-                    undefined,
-                    {
-                        provider: budget.provider,
-                        scope: "provider_cost_month",
-                        limitLayer: "operational_guardrail",
-                        alternativeModelIds: alternativeModelsForProvider(
-                            budget.provider
-                        ),
-                        internalRequiredCostMicroUsd: reservedCost,
-                        internalLimitCostMicroUsd: providerMonthlyLimit,
-                    }
-                );
-            }
-            reservationEntries.push({
-                key: providerKey,
-                period: "provider-cost-month",
-                periodStart: providerStart,
-                amount: reservedCost,
-                metric: "cost",
-            });
-        }
+                {
+                    provider: budget.provider,
+                    reservedCostMicroUsd: reservedCost,
+                    dailyLimit: providerDailyLimit,
+                    monthlyLimit: providerMonthlyLimit,
+                    now,
+                },
+                ({ scope, requiredCostMicroUsd, limitCostMicroUsd }) => {
+                    throw new ChatAccessError(
+                        503,
+                        PROVIDER_BUDGET_EXHAUSTED,
+                        "This AI provider is temporarily unavailable.",
+                        undefined,
+                        {
+                            provider: budget.provider,
+                            scope,
+                            limitLayer: "operational_guardrail",
+                            alternativeModelIds: alternativeModelsForProvider(
+                                budget.provider
+                            ),
+                            internalRequiredCostMicroUsd: requiredCostMicroUsd,
+                            internalLimitCostMicroUsd: limitCostMicroUsd,
+                        }
+                    );
+                }
+            ))
+        );
 
         // The slot itself was claimed at the top of this transaction, before
         // anything was charged. A request that claimed nothing takes the
@@ -2847,6 +2793,7 @@ export const acquireChatAccess = async (
 
         durableReservation = {
             reservationId,
+            idempotencyKey: `chat-credit-reservation:${reservationId}:v1`,
             userId: access.userId,
             traceId,
             source: reservationSource,
@@ -2869,24 +2816,24 @@ export const acquireChatAccess = async (
             costSource: budget.costSource,
             longContextThresholdTokens: budget.longContextThresholdTokens,
         };
-        await tx.chatCreditReservation.create({
-            data: {
-                id: reservationId,
-                userId: access.userId || null,
-                subjectKey: access.subjectKey,
-                traceId,
-                source: reservationSource,
-                provider: budget.provider,
-                modelId: budget.modelId,
-                status: "reserved",
-                idempotencyKey: `chat-credit-reservation:${reservationId}:v1`,
-                reservationPayload: serializeReservation(durableReservation),
-                reservedCredits: budget.usageCredits,
-                reservedCostMicroUsd: BigInt(reservedCost),
-                planReservedCredits,
-                addOnReservedCredits,
-                expiresAt: reservationExpiresAt,
-            },
+        // Written through the shared primitive (§9): settlement, release and
+        // the expiry sweep all read this row, so every financial path has to
+        // create it identically regardless of the admission it came through.
+        await createDurableReservation(tx, {
+            reservationId,
+            userId: access.userId || null,
+            subjectKey: access.subjectKey,
+            traceId,
+            source: reservationSource,
+            provider: budget.provider,
+            modelId: budget.modelId,
+            idempotencyKey: `chat-credit-reservation:${reservationId}:v1`,
+            reservationPayload: serializeReservation(durableReservation),
+            reservedCredits: budget.usageCredits,
+            reservedCostMicroUsd: reservedCost,
+            planReservedCredits,
+            addOnReservedCredits,
+            expiresAt: reservationExpiresAt,
         });
     });
     } catch (error) {
@@ -2973,10 +2920,16 @@ export const settleChatUsage = async (
                 modelId: durable.modelId,
             };
         }
-        if (
-            durable.idempotencyKey !==
-            `chat-credit-reservation:${reservation.reservationId}:v1`
-        ) {
+        // What counts as "the same request" belongs to the caller, not to
+        // settlement: chat derives it from the reservation id, extraction
+        // binds it to one chunk attempt. Recomputing chat's format here made
+        // this a chat-only check inside otherwise workflow-neutral code (§9).
+        // The fallback keeps rows written before the field existed settling
+        // exactly as they did.
+        const expectedIdempotencyKey =
+            reservation.idempotencyKey ??
+            `chat-credit-reservation:${reservation.reservationId}:v1`;
+        if (durable.idempotencyKey !== expectedIdempotencyKey) {
             throw new Error("Chat credit reservation idempotency key mismatch.");
         }
 
