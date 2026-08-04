@@ -184,12 +184,20 @@ export type ChatUsageReservation = {
     pricingVersion?: string;
     costSource?: string;
     longContextThresholdTokens?: number | null;
+    /**
+     * What the caller considers "the same request". Chat derives it from the
+     * reservation id; memory extraction binds it to one chunk attempt. Left
+     * optional so reservations written before this existed still settle
+     * (docs/policy/credit-and-cost-limits.md §9).
+     */
+    idempotencyKey?: string;
 };
 
 const durableReservationPayloadSchema = z
     .object({
         reservationId: z.string().min(1).max(100),
         userId: z.string().min(1).max(100).optional(),
+        idempotencyKey: z.string().min(1).max(200).optional(),
         traceId: z.string().min(1).max(120),
         source: z.enum(RESERVATION_SOURCES),
         modelId: z.string().min(1).max(160),
@@ -2785,6 +2793,7 @@ export const acquireChatAccess = async (
 
         durableReservation = {
             reservationId,
+            idempotencyKey: `chat-credit-reservation:${reservationId}:v1`,
             userId: access.userId,
             traceId,
             source: reservationSource,
@@ -2911,10 +2920,16 @@ export const settleChatUsage = async (
                 modelId: durable.modelId,
             };
         }
-        if (
-            durable.idempotencyKey !==
-            `chat-credit-reservation:${reservation.reservationId}:v1`
-        ) {
+        // What counts as "the same request" belongs to the caller, not to
+        // settlement: chat derives it from the reservation id, extraction
+        // binds it to one chunk attempt. Recomputing chat's format here made
+        // this a chat-only check inside otherwise workflow-neutral code (§9).
+        // The fallback keeps rows written before the field existed settling
+        // exactly as they did.
+        const expectedIdempotencyKey =
+            reservation.idempotencyKey ??
+            `chat-credit-reservation:${reservation.reservationId}:v1`;
+        if (durable.idempotencyKey !== expectedIdempotencyKey) {
             throw new Error("Chat credit reservation idempotency key mismatch.");
         }
 

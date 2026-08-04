@@ -46,12 +46,25 @@ const loadAttempt = async (attemptId: string) =>
         select: {
             id: true,
             status: true,
+            attemptNumber: true,
             reservationId: true,
             providerCallIssued: true,
             settledAt: true,
-            chunk: { select: { run: { select: { userId: true } } } },
+            chunk: {
+                select: {
+                    chunkIndex: true,
+                    run: { select: { id: true, userId: true } },
+                },
+            },
         },
     });
+
+/** The key this attempt reserved under — see the admission module. */
+const attemptIdempotencyKey = (attempt: {
+    attemptNumber: number;
+    chunk: { chunkIndex: number; run: { id: string } };
+}) =>
+    `memory-extraction:${attempt.chunk.run.id}:${attempt.chunk.chunkIndex}:${attempt.attemptNumber}`;
 
 /**
  * Releases an attempt's reservation in full, for a failure or cancellation
@@ -77,6 +90,7 @@ export async function releaseUnusedExtractionAttempt(input: {
         {
             reservationId: attempt.reservationId,
             userId: attempt.chunk.run.userId,
+            idempotencyKey: attemptIdempotencyKey(attempt),
         } as Parameters<typeof settleChatUsage>[0],
         { outcome: "cancelled" },
         { reason: input.reason }
@@ -123,6 +137,7 @@ export async function settleExtractionAttempt(input: {
         {
             reservationId: attempt.reservationId,
             userId: attempt.chunk.run.userId,
+            idempotencyKey: attemptIdempotencyKey(attempt),
         } as Parameters<typeof settleChatUsage>[0],
         {
             inputTokens: input.usage.inputTokens,
