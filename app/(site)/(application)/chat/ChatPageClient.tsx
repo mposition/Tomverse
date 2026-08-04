@@ -13,6 +13,7 @@ import { useModalDialog } from "@/components/useModalDialog";
 import { DesktopChatShell } from "@/components/chat/DesktopChatShell";
 import { MobileChatShell } from "@/components/chat/MobileChatShell";
 import { prepareChatContextBundle } from "@/lib/chatContextBundleClient";
+import { createSharedPendingRequest } from "@/lib/sharedPendingRequest";
 import {
   ComparisonReviewDialog,
   QuoteBadge,
@@ -713,6 +714,49 @@ export function ChatPageClient({
   const comparisonPresetAppliedRef = useRef(false);
   const comparisonPresetRequestedRef = useRef(false);
   const comparisonPreflightInFlightRef = useRef(false);
+  /**
+   * What each run would need in order to re-prepare its §10 context, keyed by
+   * prompt id. A panel that is refused for drift knows only its own model, and
+   * the whole point of the recovery is that the run moves to one new snapshot
+   * together -- so the set, the conversation and the prompt live here, where
+   * the send that created them is.
+   */
+  const contextRepreflightInputsRef = useRef(
+    new Map<
+      string,
+      { conversationId: string | null; modelIds: string[]; prompt: string }
+    >()
+  );
+  /**
+   * One re-preparation per run, however many of its panels ask. Three
+   * concurrent preparations would hand the three panels three snapshots,
+   * which is precisely what sharing a bundle exists to prevent.
+   */
+  const contextRepreflightRef = useRef(
+    createSharedPendingRequest<string | null>()
+  );
+
+  /**
+   * §10's `repreflight_all`, and the single-model `retry_after_preflight`
+   * alongside it -- they are the same call once the set is known.
+   *
+   * This never re-runs the *admission* preflight. The refused request never
+   * reached `acquireChatAccess`, so the slot the aggregate preflight reserved
+   * for that panel is still unspent; asking for a fresh admission would
+   * reserve a second set of slots for a run that already has one. Only the
+   * context is prepared again.
+   */
+  const handleContextBundleStale = useCallback(
+    async ({ promptId }: { promptId: string | null; modelId: string }) => {
+      if (!promptId) return null;
+      const inputs = contextRepreflightInputsRef.current.get(promptId);
+      if (!inputs) return null;
+      return contextRepreflightRef.current.run(promptId, () =>
+        prepareChatContextBundle(inputs)
+      );
+    },
+    []
+  );
   // Auto-title generation: keyed by comparisonId (the promptId ChatApp
   // instances report back on completion) so handleResponseComplete can look
   // up which chat a first-turn response belongs to without needing its own
@@ -3057,6 +3101,14 @@ export function ChatPageClient({
       }
     }
 
+      // What re-preparing this run would need, kept because the panels that
+      // ask have only their own model: the shell is the only place that knows
+      // the whole set, and it is the set that has to move together.
+      contextRepreflightInputsRef.current.set(comparisonId, {
+        conversationId: isGuestMode ? null : activeChatId,
+        modelIds: activeModelIds,
+        prompt: trimmed,
+      });
       localComparisonQuestionsRef.current.set(comparisonId, trimmed);
       setCachedCompareSummaryChatId(null);
       setPromptPayload({
@@ -4050,6 +4102,7 @@ export function ChatPageClient({
           onGuestSignInPrompt={() => setShowGuestSignInPrompt(true)}
           onResponseComplete={handleResponseComplete}
           onFollowupSent={handleModelFollowupSent}
+          onContextBundleStale={handleContextBundleStale}
         />
       ) : (
         <DesktopChatShell
@@ -4106,6 +4159,7 @@ export function ChatPageClient({
           onGuestSignInPrompt={() => setShowGuestSignInPrompt(true)}
           onResponseComplete={handleResponseComplete}
           onFollowupSent={handleModelFollowupSent}
+          onContextBundleStale={handleContextBundleStale}
         />
       )}
     {showGuestSignInPrompt && isGuestMode && (
