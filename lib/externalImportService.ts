@@ -23,6 +23,7 @@ import {
     utf8ByteLength,
 } from "@/lib/externalImportLimits";
 import { recordExternalImportCounter } from "@/lib/externalImportMetrics";
+import { handleMemorySourceDelete } from "@/lib/memorySourceDelete";
 import { prisma } from "@/lib/prisma";
 
 /**
@@ -403,7 +404,13 @@ export async function getExternalConversation(
  */
 export async function deleteExternalConversationSnapshot(
     userId: string,
-    conversationId: string
+    conversationId: string,
+    /**
+     * §13.1: keeping memories derived only from this conversation is an
+     * explicit choice. The default deletes them with their source, which is
+     * what a person deleting a conversation means.
+     */
+    keepDerivedMemories = false
 ) {
     return prisma.$transaction(async (tx) => {
         const row = await tx.externalConversation.findUnique({
@@ -419,6 +426,15 @@ export async function deleteExternalConversationSnapshot(
         const truncatedMessages = await tx.externalMessage.count({
             where: { externalConversationId: row.id, truncated: true },
         });
+        // §13.1, and it has to happen HERE: the delete below cascades the
+        // evidence rows away, and afterwards nothing can tell which memories
+        // rested on this conversation. Same transaction, so a crash cannot
+        // leave the two halves disagreeing.
+        const memoryOutcome = await handleMemorySourceDelete(tx, {
+            userId,
+            conversationIds: [row.id],
+            keepDerivedMemories: keepDerivedMemories ?? false,
+        });
         await tx.externalConversation.delete({ where: { id: row.id } });
         await tx.externalImport.updateMany({
             where: { id: row.importId },
@@ -429,7 +445,7 @@ export async function deleteExternalConversationSnapshot(
                 truncationCount: { decrement: truncatedMessages },
             },
         });
-        return { outcome: "deleted" as const };
+        return { outcome: "deleted" as const, memory: memoryOutcome };
     });
 }
 
@@ -1101,7 +1117,12 @@ export async function finalizeExternalImport(input: {
     });
 }
 
-export async function deleteExternalImport(userId: string, importId: string) {
+export async function deleteExternalImport(
+    userId: string,
+    importId: string,
+    /** §13.1: see deleteExternalConversationSnapshot. */
+    keepDerivedMemories = false
+) {
     return prisma.$transaction(async (tx) => {
         const row = await loadOwnedImport(tx, userId, importId, {
             forUpdate: true,
@@ -1120,9 +1141,21 @@ export async function deleteExternalImport(userId: string, importId: string) {
             return { outcome: "cancelled" as const };
         }
         // Completed (or failed/cancelled) imports delete whole: the FK
-        // cascade removes every conversation and message (§13.1).
+        // cascade removes every conversation and message (§13.1). The
+        // memories they grounded are decided first, for the same reason as
+        // the single-conversation path — after the cascade there is nothing
+        // left to decide from.
+        const doomed = await tx.externalConversation.findMany({
+            where: { importId: row.id },
+            select: { id: true },
+        });
+        const memoryOutcome = await handleMemorySourceDelete(tx, {
+            userId,
+            conversationIds: doomed.map((conversation) => conversation.id),
+            keepDerivedMemories: keepDerivedMemories ?? false,
+        });
         await tx.externalImport.delete({ where: { id: row.id } });
-        return { outcome: "deleted" as const };
+        return { outcome: "deleted" as const, memory: memoryOutcome };
     });
 }
 

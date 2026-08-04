@@ -72,9 +72,14 @@ export async function DELETE(
         });
 
         const params = await context.params;
+        // §13.1: the confirmation dialog's non-default option. Absent means
+        // the default — memories derived only from this source go with it.
+        const keepDerivedMemories =
+            new URL(req.url).searchParams.get("keepMemories") === "true";
         const result = await deleteExternalImport(
             session.user.id,
-            params.importId
+            params.importId,
+            keepDerivedMemories
         );
         return NextResponse.json(result, {
             headers: { "Cache-Control": "no-store" },

@@ -16,6 +16,11 @@ import {
     issueChatContextBundle,
     resolveChatMemoryContext,
 } from "@/lib/chatMemoryContext";
+import {
+    deleteExternalConversationSnapshot,
+    deleteExternalImport,
+} from "@/lib/externalImportService";
+import { reconcileStrandedMemories } from "@/lib/memorySourceDelete";
 import { manualEvidenceDigest } from "@/lib/memoryEvidenceValidation";
 import {
     approveMemory,
@@ -1052,4 +1057,162 @@ test("turning memory off mid-flight refuses the bundled turn (§10)", async () =
     });
     assert.equal(resolution.outcome, "none");
     assert.equal(resolution.reason, "master_disabled");
+});
+
+/**
+ * §13.1 source delete. The schema cascades evidence away with its messages,
+ * which leaves an active memory with no grounds unless something decides the
+ * memories first — so these tests are about that decision, and about the
+ * sweep that catches whatever escapes it.
+ */
+
+const seedSourcedMemory = async (
+    userId: string,
+    overrides: { userEdited?: boolean; manualEvidence?: boolean } = {}
+) => {
+    const item = await seedCandidate(userId, { status: "active" });
+    if (overrides.userEdited) {
+        await prisma.memoryItem.update({
+            where: { id: item.id },
+            data: { userEdited: true },
+        });
+    }
+    if (overrides.manualEvidence) {
+        await prisma.memoryEvidence.create({
+            data: {
+                memoryItemId: item.id,
+                userId,
+                sourceType: "manual",
+                manualContent: "the user said so",
+                evidenceDigest: manualEvidenceDigest("the user said so"),
+            },
+        });
+    }
+    const evidence = await prisma.memoryEvidence.findFirstOrThrow({
+        where: { memoryItemId: item.id, sourceType: "external_message" },
+        select: { externalMessage: { select: { externalConversationId: true } } },
+    });
+    return {
+        memoryId: item.id,
+        conversationId: evidence.externalMessage!.externalConversationId,
+    };
+};
+
+test("deleting a source deletes the memories only it grounded (§13.1)", async () => {
+    const user = await createUser();
+    const { memoryId, conversationId } = await seedSourcedMemory(user.id);
+
+    const result = await deleteExternalConversationSnapshot(
+        user.id,
+        conversationId
+    );
+    assert.equal(result.memory.deletedMemories, 1);
+    assert.equal(
+        await prisma.memoryItem.count({ where: { id: memoryId } }),
+        0
+    );
+});
+
+test("keeping them is an explicit choice, and suspends rather than deletes", async () => {
+    const user = await createUser();
+    const { memoryId, conversationId } = await seedSourcedMemory(user.id);
+
+    const result = await deleteExternalConversationSnapshot(
+        user.id,
+        conversationId,
+        true
+    );
+    assert.equal(result.memory.suspendedMemories, 1);
+    const kept = await prisma.memoryItem.findUniqueOrThrow({
+        where: { id: memoryId },
+    });
+    assert.equal(kept.status, "suspended_by_source_delete");
+    // Not manual_review_required: that state means the validator demoted it,
+    // and reusing it would hide a deletion consequence in the review queue.
+    assert.notEqual(kept.status, "manual_review_required");
+    // And immediately out of retrieval.
+    await setInjectionFlag(true);
+    const retrieval = await retrieveMemoriesForRequest({
+        userId: user.id,
+        query: kept.statement,
+    });
+    assert.equal(retrieval.candidateCount, 0);
+});
+
+test("a memory the user edited is never transitioned automatically (§13.1)", async () => {
+    const user = await createUser();
+    const { memoryId, conversationId } = await seedSourcedMemory(user.id, {
+        userEdited: true,
+    });
+
+    const result = await deleteExternalConversationSnapshot(
+        user.id,
+        conversationId
+    );
+    assert.equal(result.memory.deletedMemories, 0);
+    assert.equal(result.memory.preservedUserAuthored, 1);
+    // Their own words are not collateral of deleting an import.
+    assert.equal(
+        (await prisma.memoryItem.findUniqueOrThrow({ where: { id: memoryId } }))
+            .status,
+        "active"
+    );
+});
+
+test("a memory with other surviving evidence is left alone (§13.1)", async () => {
+    const user = await createUser();
+    const { memoryId, conversationId } = await seedSourcedMemory(user.id, {
+        manualEvidence: true,
+    });
+
+    await deleteExternalConversationSnapshot(user.id, conversationId);
+    const kept = await prisma.memoryItem.findUniqueOrThrow({
+        where: { id: memoryId },
+    });
+    assert.equal(kept.status, "active");
+    assert.equal(
+        await prisma.memoryEvidence.count({ where: { memoryItemId: memoryId } }),
+        1
+    );
+});
+
+test("deleting a whole import decides its conversations' memories too", async () => {
+    const user = await createUser();
+    const { memoryId, conversationId } = await seedSourcedMemory(user.id);
+    const conversation = await prisma.externalConversation.findUniqueOrThrow({
+        where: { id: conversationId },
+        select: { importId: true },
+    });
+
+    const result = await deleteExternalImport(user.id, conversation.importId);
+    assert.equal(result.outcome, "deleted");
+    assert.equal(
+        await prisma.memoryItem.count({ where: { id: memoryId } }),
+        0
+    );
+});
+
+test("the sweep suspends a memory whose evidence vanished (§13.1)", async () => {
+    const user = await createUser();
+    const { memoryId } = await seedSourcedMemory(user.id);
+    // Exactly what a raw cascade leaves behind: evidence gone, memory active.
+    await prisma.memoryEvidence.deleteMany({ where: { memoryItemId: memoryId } });
+
+    const first = await reconcileStrandedMemories();
+    assert.equal(first.suspended, 1);
+    const repaired = await prisma.memoryItem.findUniqueOrThrow({
+        where: { id: memoryId },
+    });
+    // Suspended, not deleted: the strand happened by accident, and destroying
+    // data on the strength of a bug is worse than parking it.
+    assert.equal(repaired.status, "suspended_by_source_delete");
+    assert.equal(repaired.suspendedReason, "evidence_missing");
+
+    assert.deepEqual(await reconcileStrandedMemories(), { suspended: 0 });
+});
+
+test("the sweep leaves grounded memories alone", async () => {
+    const user = await createUser();
+    await seedSourcedMemory(user.id);
+    assert.deepEqual(await reconcileStrandedMemories(), { suspended: 0 });
 });

@@ -5,6 +5,7 @@ import { reconcileExpiredChatRequestLeases } from "@/lib/chatRequestLease";
 import { reconcileExpiredExternalImportStaging } from "@/lib/externalImportService";
 import { dispatchPendingMemoryExtractionRunsQuietly } from "@/lib/memoryExtractionDispatch";
 import { backfillMemorySearchTerms } from "@/lib/memoryRetrieval";
+import { reconcileStrandedMemories } from "@/lib/memorySourceDelete";
 import { reconcileExpiredMemoryExtractionRuns } from "@/lib/memoryExtractionService";
 import { reportOperationalIncident } from "@/lib/operationalMonitoring";
 import {
@@ -95,6 +96,14 @@ export async function POST(request: Request) {
     const memorySearchTermsBackfill = await backfillMemorySearchTerms().catch(
       () => ({ updated: 0, remaining: 0 })
     );
+    // §13.1 reconciliation: an active memory with no evidence left cannot
+    // exist under §8.4, and retrieval would keep serving it. A partial
+    // failure, an account cascade or a delete path nobody wired up all leave
+    // that same footprint. Suspends rather than deletes — the strand happened
+    // by accident, and destroying data on the strength of a bug is worse.
+    const strandedMemories = await reconcileStrandedMemories().catch(() => ({
+      suspended: 0,
+    }));
     await completeScheduledJob({
       runId: run?.id,
       processedCount: result.examined,
@@ -109,6 +118,7 @@ export async function POST(request: Request) {
         memoryExtractionLeases,
         memoryExtractionDispatch,
         memorySearchTermsBackfill,
+        strandedMemories,
       },
     });
     return Response.json(
@@ -124,6 +134,7 @@ export async function POST(request: Request) {
         memoryExtractionLeases,
         memoryExtractionDispatch,
         memorySearchTermsBackfill,
+        strandedMemories,
       },
       { headers: { "Cache-Control": "no-store" } }
     );
