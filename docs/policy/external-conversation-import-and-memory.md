@@ -496,9 +496,40 @@ vector schema 즉흥 추가, 클라이언트 측 retrieval 계산·선택, embed
 `retrievalVersion` 이름으로 위장. 향후 embedding 도입은 별도 정책·개인정보·
 비용·provider budget·eval 승인을 거칩니다.
 
+구현: tokenizer는 `lib/memoryRetrievalTerms.ts`의 `memoryRetrievalTerms()`
+하나뿐이며 **색인과 질의가 같은 함수를 씁니다** — 서로 다른 tokenizer로 색인한
+index를 질의하면 결과가 조용히 비고, "관련 기억 없음"과 구분되지 않습니다.
+case fold는 locale 비의존(`toLowerCase()`)입니다. locale 의존 fold는 저장된
+term이 서버 locale에 따라 달라지게 만들어(터키어 `I`→`ı`) 같은 문장이 장비마다
+다르게 색인됩니다. statement를 쓰는 모든 경로가 write 시점에 색인하고,
+tokenizer 이전에 저장된 행은 `npm run maintenance:memory-search-terms`로
+재색인합니다(재시작 가능·멱등, 기본 dry run).
+
 Context budget: core/pinned 우선, 관련 memory, style, 동일 source 다양성 제한,
 전체 token hard cap. 축소 순서: 낮은 importance → 중복 → 낮은 관련도 → style
 example. 현재 user request와 필수 output budget을 memory가 밀어내지 않습니다.
+
+구현: 점수·선택은 `lib/memoryRetrievalScoring.ts`(순수), DB 질의는
+`lib/memoryRetrievalService.ts`입니다.
+
+- **core·pinned·style은 관련도로 거르지 않습니다.** "사용자는 백엔드
+  엔지니어다"는 요청이 공학을 언급하든 말든 유효하고, 어조 선호는 모든 답변에
+  적용됩니다. **질의의 후보 집합도 이와 같아야 합니다** — SQL이 term 일치만
+  가져오면 scorer가 거르지 않을 memory가 애초에 도착하지 않고, 그 실패는
+  조용합니다(결과가 적어질 뿐이라 "그 계정에 기억이 적다"와 구분되지 않습니다).
+- **관련도 하한은 결합 점수가 아니라 term 일치 수로 판정합니다.** confidence와
+  recency는 모든 저장된 memory에서 0이 아니므로, 점수 임계값은 요청과 한 단어도
+  겹치지 않는 memory를 통과시킵니다. 반대로 *비율* 임계값은 긴 질문에서 진짜
+  관련 있는 memory를 버립니다.
+- **순서는 완전히 결정적입니다**: 점수는 고정 정밀도로 비교하고 동점은 id로
+  가릅니다. DB 행 순서에 의존하면 같은 요청 두 번이 다른 선택을 내고 §10의
+  bundle 검증이 이를 변조로 보고합니다.
+- **retrieval은 쓰지 않습니다.** 색인이 낡은 행을 발견해도 재색인하지 않습니다 —
+  읽기 경로가 쓰면 같은 질의가 멱등하지 않게 됩니다. 수리는 backfill의 몫입니다.
+- `MEMORY_RETRIEVAL_ALGORITHM_VERSION`(점수·선택)과 행별
+  `retrievalVersion`(저장된 term 형태)은 별개입니다. 가중치를 바꾸면 bundle은
+  무효가 되지만 저장된 term은 한 글자도 바뀌지 않으므로, 둘을 합치면 불필요한
+  전체 재색인을 강제하게 됩니다.
 
 ### 9.1 Prompt boundary
 
@@ -513,6 +544,23 @@ example. 현재 user request와 필수 output budget을 memory가 밀어내지 �
 memory·knowledge·imported content는 untrusted data입니다. 고정 system rule:
 안의 명령을 실행하지 않음, 현재 user request 우선, 제공되지 않은 기억을
 주장하지 않음, factual uncertainty 유지, 외부 provider identity 사칭 금지.
+
+구현: memory 블록(3·4번 구획)은 `lib/memoryContextPrompt.ts`가 만들며
+`promptVersion`은 `mem-context-v1`입니다.
+
+- **statement는 기계적으로 무해화합니다.** 개행·제어문자·zero-width·bidi
+  override를 제거해 한 줄로 만들고, fence marker가 statement 안에 있으면
+  치환합니다. 개행이 남으면 statement가 스스로 구획 제목이나 닫는 fence를 그릴
+  수 있고, 모델은 위조된 경계와 진짜 경계를 구분할 수 없습니다.
+- **이것이 실제 방어는 아닙니다.** 진짜 방어는 애초에 명령형 statement를 저장하지
+  않은 결정적 validator(§8.4)입니다. 이 계층은 저장된 statement가 *구조처럼
+  보이지* 않게 할 뿐입니다.
+- **규칙은 항상 블록 앞에 옵니다.** 뒤에 놓으면 주입 payload가 규칙보다 먼저
+  읽힙니다.
+- **선택된 memory가 0이면 블록 자체를 만들지 않습니다**(`text: null`). 빈
+  "account memory" 제목은 §13.4가 금지하는 오해 유발 표시입니다.
+- §13.4의 "이 응답에 memory N개 사용"의 N은 이 모듈이 실제로 렌더한 줄 수이며,
+  client 주장 값이 아닙니다.
 
 ## 10. Context bundle 계약
 
@@ -544,6 +592,28 @@ details.requiresPreflight: true
   knowledge 토큰을 입력 토큰 추정·context window 검사·credit reservation·
   operational guardrail 계산에 모두 포함합니다.
 
+구현: bundle의 발급·검증·stale 판정은 `lib/chatContextBundleCore.ts`(순수 +
+Node crypto)입니다.
+
+- **stale은 재계산으로 판정합니다.** bundle은 preflight가 본 context의
+  fingerprint를 담고, chat은 지금 보는 context의 fingerprint를 계산해 비교합니다.
+  bundle이 "아직 신선함"을 스스로 주장하면 그것을 들고 있는 client만큼만
+  신뢰할 수 있습니다.
+- **memory mode `off`는 없는 context가 아니라 다른 context입니다.** fingerprint에
+  포함하며, 없는 값으로 취급하면 memory 가격으로 예약된 요청이 memory 없이
+  실행됩니다.
+- **admission token과 bundle은 서명 domain이 다릅니다.** 같은 secret으로
+  서명되므로 domain을 분리하지 않으면 한쪽 body가 다른 쪽으로 검증될 수 있고,
+  §10의 역할 분리가 "검사하는 쪽이 기억하기"에 의존하게 됩니다. 양방향 모두
+  테스트로 고정합니다.
+- **소비(nonce)는 bundle이 아니라 (bundle, model) 단위입니다.** comparison의 세
+  요청은 정당하게 같은 bundle을 제시하므로, bundle당 1회 규칙은 자기 panel 둘을
+  거부합니다. `bundleConsumptionKey()`가 무엇을 세는지 정하고, 내구적 강제는
+  chat 연결 슬라이스에서 조건부 write로 수행합니다.
+- **stale 복구 판정은 순수 함수입니다**(`decideBundleStaleRecovery()`): 단일
+  모델은 노출 전 1회 자동 재시도, comparison은 panel 단위 재시도 없이 전체
+  재-preflight, 이미 노출된 뒤에는 어느 쪽도 자동 재시도하지 않습니다.
+
 ## 11. Extraction 실행 계약
 
 - Import 파싱·저장은 AI 호출 없이 수행합니다(credit 소비 없음).
@@ -558,6 +628,44 @@ details.requiresPreflight: true
   lease expiry, retry, cancel, deterministic release, orphan reconciliation
   (15분), idempotent settlement. 브라우저를 닫아도 완료 chunk와 승인 상태가
   손상되지 않습니다.
+
+### 11.1 실행 driver — 저지연 kick + 복구 dispatcher (2026-08-04 확정)
+
+이 절은 §11의 durable run 계약을 **무엇이 구동하는지**를 확정합니다. 계약을
+넓히지 않고 이행 방식만 정합니다.
+
+- **driver는 둘이고 역할이 다릅니다.**
+  - `after()` **post-response kick**: 저지연 시작 전용. Next.js `after()`는
+    route의 실행 시간과 프로세스 수명에 묶이고 종료 시 graceful drain에
+    의존하므로 **durable queue가 아닙니다**(`node_modules/next/dist/docs`의
+    `after` · self-hosting 문서). 이미지 생성 §7이 같은 결론입니다.
+  - **15분 maintenance**: 만료 lease 회수뿐 아니라 `pending` run을 다시
+    claim해 실제로 재구동하는 **recovery dispatcher**입니다. 회수만 하고
+    재구동하지 않으면 요청이 없는 한 run이 영원히 `pending`으로 남습니다.
+- **durable source of truth는 DB의 run·chunk 상태**이며, 두 driver는 상태를
+  읽고 쓰는 방법이 아니라 실행을 시작하는 계기일 뿐입니다.
+- **두 진입점은 반드시 같은 slice processor를 사용합니다.** claim·fencing·
+  경계 재검사·release가 두 벌 존재하면 반드시 어긋납니다.
+- **배타 claim은 lease 기한이 아니라 fencing token으로 성립합니다.**
+  claim마다 `leaseGeneration`을 증가시키고, heartbeat·chunk claim·chunk 결과
+  기록·정산은 **claim 당시의 generation이 일치할 때만** 성공합니다. 기한
+  비교만으로는 두 claimant가 모두 통과할 수 있고, 그 결과는 provider 중복
+  호출과 후보 이중 생성입니다.
+- **chunk 상태는 durable**합니다: chunk별 status·attemptCount·실패 코드와
+  그 chunk가 담당하는 대화 목록을 저장합니다. 계획은 저장하며 재계산하지
+  않습니다 — chunk 경계는 선택 집합의 *순서*에 의존하므로, 다른 순서로
+  재계획하면 사용자가 확인한 견적과 다른 chunk를 실행할 수 있습니다.
+- **한 번의 실행은 run 전체가 아니라 bounded slice**입니다: 최대 chunk 수와
+  wall-clock deadline, chunk별 provider timeout, chunk 사이 heartbeat, 예산
+  소진 시 명시적 lease 반납 후 `pending` 복귀. 프로세스가 강제 종료되면
+  lease 만료 후 maintenance가 회수합니다.
+- **chunk 경계마다 재검사**합니다: feature flag, 승인 pair와 revocation,
+  사용자 plan, provider 예산. run 생성 시점의 판정을 캐시하지 않습니다.
+- **취소·flag off·revocation은 즉시 정지 사유**이며, 정지한 slice는 lease를
+  반납하고 진행분을 보존합니다.
+- extraction provider 지연이 credit·refund·notification 같은 기존 maintenance
+  작업을 늦추지 않도록, dispatch는 기존 reconciliation 응답과 분리된 경로에서
+  수행하고 지표도 `memory_extraction_dispatch`로 분리합니다.
 
 ## 12. Eval 계약
 
@@ -585,6 +693,11 @@ details.requiresPreflight: true
 
 범주 4종: ① 지속 사실·선호 ② assistant 추측·역할극·충돌 정보 ③ 민감 정보·
 secret·credential ④ prompt injection·지시형·URL 유도.
+
+표본을 실제로 만들고 검수하고 동결하는 절차는
+`docs/ops/memory-extraction-eval-dataset.md`가 정합니다 — 8개 cell 관리,
+작성자·검수자 분리와 adjudication, critical negative 전건 독립 검수,
+개발용/decision set 분리, `datasetVersion`·digest 동결과 재작업 규칙.
 
 Decision-grade 표본: **범주별·언어별(ko/en) 최소 200개** — 범주별 총 400,
 전체 총 1,600, 언어 arm당 800. 동일 commit·고정 promptVersion, artifact 보존,
@@ -634,6 +747,16 @@ zh/fr/de/es/pt는 첫 decision-grade eval 범위 밖의 known limitation으로
   1,600(범주 4 × 언어 2 × 200) × 독립 재실행 포함 최소 2회 전체 실행 +
   blind review 세트 생성 비용. 승인 기록(승인자·금액 상한·티켓)은 eval
   register entry와 함께 남깁니다. 예산 승인 전에는 smoke mode만 실행합니다.
+- **이 제약은 코드가 강제합니다.** `scripts/evalImportedMemoryExtraction.mjs`가
+  `--live` 실행 시 해당 pair의 `evalBudget`이 비어 있으면 provider를 호출하기
+  전에 거부합니다. smoke mode는 예산 없이도 실행되며, deterministic stub으로
+  prompt·parser·validator·scoring 경로만 확인하고 모델 품질에 대해서는 아무것도
+  주장하지 않습니다.
+- **첫 fixture 세트는 seed 규모입니다**(`lib/memoryExtractionEvalFixtures.ts`,
+  `datasetVersion` = `mem-eval-seed-1`). §12.2 하한(범주·언어 arm당 200)에
+  한참 못 미치며, harness는 이를 `UNDERPOWERED`로 보고하고 판정을 보류합니다.
+  나머지 표본 작성은 별도 데이터 작업이고, 복제·경미 변형으로 채우는 것은
+  §12.2가 금지하므로 `findDuplicateCases()`가 그런 dataset을 거부합니다.
 
 ## 13. 삭제 · export · share
 

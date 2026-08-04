@@ -23,9 +23,9 @@ test("the registry ships GPT Image 2 enabled and Nano Banana 2 on a verification
   assert.equal(openai?.lifecycle, "stable");
   assert.equal(DEFAULT_IMAGE_MODEL_ID, "gpt-image-2");
 
-  const google = getImageModel("gemini-3.1-flash-image-preview");
+  const google = getImageModel("gemini-3.1-flash-image");
   assert.equal(google?.provider, "google");
-  assert.equal(google?.lifecycle, "preview");
+  assert.equal(google?.lifecycle, "stable");
   // Policy section 12: registered, but no request may reach it until an
   // official price has been read and the worst case proven finite.
   assert.equal(google?.disabledReason, "price_unverified");
@@ -40,14 +40,14 @@ test("a disabled model is invisible to every selection path", () => {
   assert.deepEqual(listActiveImageProviders(), ["openai"]);
   // Fail-closed price lookup: the model exists, but pricing it is refused.
   assert.equal(
-    getImageModelPrice("gemini-3.1-flash-image-preview", "medium", "1024x1024"),
+    getImageModelPrice("gemini-3.1-flash-image", "medium", "1024x1024"),
     null
   );
   assert.equal(getImageModelPrice("unknown-model", "low", "1024x1024"), null);
 });
 
 test("worst-case cost is null when the thinking cap is unknown", () => {
-  const google = getImageModel("gemini-3.1-flash-image-preview");
+  const google = getImageModel("gemini-3.1-flash-image");
   const hypotheticalPrice = {
     quality: "medium",
     size: "1024x1024",

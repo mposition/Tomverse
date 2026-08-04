@@ -400,3 +400,43 @@ Non-negotiable requirements:
 - Any related change must keep `tests/typographyPolicy.test.mjs` and `tests/e2e/font-system.spec.ts` passing, and must re-run the mobile composer contract specs.
 - A change that violates this contract is a release blocker.
 <!-- END:typography-invariant -->
+<!-- BEGIN:image-generation-workspace-invariant -->
+## Image generation workspace invariant
+
+Before changing `components/images/ImageGenerationWorkspace.tsx`, `components/chat/NewConversationLauncher.tsx`, `components/chat/ImageModelTabPanel.tsx`, the `Chat | Image` tabs in `ModelPickerPanel.tsx`, or the image entry points in `ChatInput.tsx`/`ChatSidebar.tsx`/`ChatPageClient.tsx`, read:
+
+- `docs/ui-contracts/image-generation-workspace.md`
+
+Non-negotiable requirements:
+
+- There are exactly four entry points (sidebar split button, mobile drawer rows, composer tools menu, catalogue image tab) and no standalone "new image" button. Switching to the image draft creates no server row.
+- Guest and Free see every entry point locked, with the requirement stated up front and the click routed to sign-in or `/pricing` — never hidden, never blocked only at the last step. With the flag off nothing renders at all.
+- Image generation models are their own catalogue tab. They are never mixed into the chat model list, and the chat list's `modelSupportsImageInput` filter (image *input*) is never reused to mean generation.
+- Every registered image model is listed, including one held by the price-verification rule; a held row is stated as a hold and is not selectable. The tab quotes "from N credits"; only the composer quotes an exact price.
+- The workspace follows the mobile composer contract's shape: the textarea owns a dedicated full-width row and no control shares, overlaps or floats above it.
+- An image conversation never mounts `ChatInput`, `ChatApp` or the comparison action rail, never enables AI Review, and never imports `ComparisonActionRail`/`shouldShowVisualStatus()` — only their principles.
+- Group state is derived from the latest attempt per target, never stored: one card per target, a retry replaces its card in place, and a succeeded target offers no re-run.
+- Prices are quoted before submission, per model and in total; a model with no resolvable price cannot be submitted.
+- Generated images always carry the AI-generated label; signed asset URLs are never persisted and R2 keys never reach the client.
+- Visual role is `accent-image-*` only; the AI Review gradient is reserved.
+- Any related change must keep `tests/e2e/image-generation-workspace.spec.ts` passing on desktop **and** mobile, and must re-run the mobile composer, sidebar drawer and model picker specs.
+- A change that violates this contract is a release blocker.
+<!-- END:image-generation-workspace-invariant -->
+<!-- BEGIN:settings-navigation-invariant -->
+## Settings navigation invariant
+
+Before changing the Data tab's entries in `AuthButton.tsx`, `lib/settingsNavigation.ts`, `lib/accountSettingsEvents.ts`, `components/settings/**`, or the top of `/settings/imports` and `/settings/memory`, read:
+
+- `docs/ui-contracts/settings-navigation.md`
+
+Non-negotiable requirements:
+
+- Settings is a closable panel, not a route. A detail page navigates up to settings by name (`settingsSectionHref()`), never with `router.back()`, and never grows a second link to the chat — leaving settings entirely is the panel's own close action.
+- "Back to settings" must work from a directly-opened detail-page URL, on every shell and in every sidebar state, and must not disturb the browser's own Back button (the deep link is dropped with `replaceState`, never a pushed entry).
+- External import and account memory stay separate features with separate detail pages and separate state, presented as separate rows under one group (`settingsNav.dataAndPersonalization`) — not merged, and not two stacked full-width cards.
+- Every entry's action label names its own purpose; a generic label repeated across entries ("Open settings") is a violation. A "back" label must name where the link actually goes, in every locale.
+- Desktop and mobile use the same hierarchy, order and wording; only the desktop breadcrumb trail is extra. Nothing here may be decided by `layout === "mobile"`, a UA string or a device name.
+- A row is one link with an explicit accessible name (title + action), its description and status in `aria-describedby`, a visible focus ring, and keyboard activation. Returning from a detail page restores that row's scroll position and focus.
+- Any related change must keep `tests/settingsNavigation.test.mjs` and `tests/e2e/settings-information-architecture.spec.ts` passing on the desktop *and* mobile projects.
+- A change that violates this contract is a release blocker.
+<!-- END:settings-navigation-invariant -->

@@ -21,6 +21,9 @@ export const en = {
         languageAndDisplay: "Language & display",
         newChat: "New Chat",
         newImage: "New Image",
+        newConversationMenu: "New…",
+        newImageSignInRequired: "Sign in",
+        newImageUpgradeRequired: "Pro",
         imageConversation: "Image",
         collapse: "Collapse sidebar",
         expand: "Expand sidebar",
@@ -104,6 +107,25 @@ export const en = {
     chat: {
         // Image generation workspace (docs/policy/image-generation.md)
         imageGenerationTitle: "Image generation",
+        imageGenerationBackToChat: "Back to chat",
+        toolsImageGeneration: "Image generation",
+        toolsImageGenerationDescription: "Compare images from several models",
+        imageGenerationModelLabel: "Models",
+        imageGenerationModelCount: "{count} model(s)",
+        // Catalogue image tab (policy v2 section 13)
+        modelPickerTabsLabel: "Model kind",
+        modelPickerTabChat: "Chat",
+        modelPickerTabImage: "Image",
+        imageModelTabTitle: "Image generation models",
+        imageModelTabSubtitle: "Models that create images from a description. Chat models that only read an image you attach stay on the Chat tab.",
+        imageModelTabFooterHint: "Picking one opens the image workspace.",
+        imageModelCreditsFrom: "From {credits} credits",
+        imageModelHoldPriceUnverified: "On hold until its official price is verified",
+        imageModelLatencyFast: "Fast",
+        imageModelLatencyBalanced: "Balanced",
+        imageModelLatencySlow: "Slower",
+        imageGenerationTotalCredits: "Total {credits} credits",
+        imageGenerationRetryModel: "Retry this model",
         imageGenerationIntroTitle: "Create an image from a description",
         imageGenerationIntroBody: "Describe what you want to see. One image per request, with Draft, Standard and Final quality presets in three sizes.",
         imageGenerationAiLabel: "AI-generated image",
@@ -1010,6 +1032,17 @@ export const en = {
         refundRequestSuccess: "Refund request received.",
         refundRequestFailed: "Could not submit the refund request.",
     },
+    // Shared settings-hierarchy vocabulary. Settings is a closable panel,
+    // not a route, and its detail pages navigate back up to it by name --
+    // so the group and the trail have to read identically on both shells
+    // and in the panel itself (lib/settingsNavigation.ts).
+    settingsNav: {
+        navLabel: "Settings navigation",
+        backToSettings: "Back to settings",
+        settings: "Settings",
+        dataAndPersonalization: "Data & personalization",
+        dataAndPersonalizationDescription: "Imported conversations and account memory. Each is managed on its own page.",
+    },
     // External conversation import (Release A). "Import from another AI
     // service" is deliberately distinct from auth.guestImportSectionTitle
     // ("Import this browser's guest conversations") — two different features
@@ -1019,11 +1052,11 @@ export const en = {
         dataTabDescription:
             "Store past conversations from a ChatGPT or Claude export file in your Tomverse account. The export file is read only in your browser.",
         dataTabUsage: "{conversations} imported conversations · {storage} stored",
-        dataTabOpen: "Open import settings",
+        dataTabOpen: "Manage imports",
+        dataTabUsageEmpty: "No imported conversations yet",
         pageTitle: "Import conversations from another AI service",
         pageDescription:
             "Upload an official data export from ChatGPT or Claude, review what it contains, and choose which conversations to keep in your Tomverse account.",
-        backToChat: "Back to chat",
         backToImports: "Back to imports",
         signInRequired: "Sign in to import conversations from another AI service.",
         disabledNotice: "External conversation import is not available right now.",
@@ -1196,11 +1229,13 @@ export const en = {
         dataTabTitle: "Account memory",
         dataTabDescription:
             "Review memory candidates extracted from imported conversations, and choose whether approved memories are used in new chats.",
-        dataTabOpen: "Open memory settings",
+        dataTabOpen: "Manage memory",
+        dataTabStatusOn: "Used in new chats",
+        dataTabStatusOff: "Not used in new chats",
+        dataTabStatusPending: "{count} awaiting review",
         pageTitle: "Account memory",
         pageDescription:
             "Approve or reject memory candidates awaiting review, and edit, pin or delete the memories in use.",
-        backToChat: "Back to chat",
         signInRequired: "Sign in to manage your account memory.",
         privacyNote:
             "Only memories you have reviewed and approved are used in new chats. Approved memories and answer-style preferences are passed to your currently selected Tomverse model as reference material, and you can view, edit, disable or delete them at any time.",
@@ -1308,6 +1343,75 @@ export const en = {
             explanation_depth: "Explanation depth",
             citation_preference: "Citation preference",
             code_style: "Code style",
+        },
+    },
+    // Extraction run launch (Release B, §11 pre-run confirmation, §21).
+    memoryExtraction: {
+        launchTitle: "Extract memories from imported conversations",
+        launchDescription:
+            "Choose imported conversations to extract memory candidates from. Candidates are never used in answers until you review and approve them.",
+        modelTitle: "Model used for extraction",
+        modelUnavailable: "No extraction model is available right now.",
+        modelUnavailableDescription:
+            "An extraction model only opens after it passes a quality evaluation. When one does, you will be able to choose it here.",
+        modelCredits: "{credits} credits per batch",
+        conversationsTitle: "Choose conversations",
+        conversationsDescription:
+            "Only the conversations you select are used. They are processed in batches sized by content, and credits are counted per batch.",
+        conversationsEmpty: "You have not imported any conversations yet.",
+        conversationsEmptyCta: "Import conversations",
+        selectAllVisible: "Select all shown",
+        clearSelection: "Clear selection",
+        selectionSummary: "{count} selected · about {size}",
+        selectionHidden: "{count} selected conversations are not shown in this list.",
+        selectionTooLarge: "You can select up to {max} conversations at a time.",
+        conversationMeta: "{messages} messages · {size}",
+        loadMore: "Show more",
+        estimate: "Check required credits",
+        estimating: "Calculating…",
+        estimateResult: "{chunks} batches · about {credits} credits",
+        estimateDescription:
+            "{conversations} conversations are processed as {chunks} batches. The final charge is settled after the run and never exceeds the amount you confirmed.",
+        estimateStale: "The selection changed. Check the credits again.",
+        start: "Start extraction for {credits} credits",
+        starting: "Starting…",
+        runInProgress: "An extraction is already running.",
+        runInProgressOpen: "View progress",
+        errorGeneric: "Something went wrong. Please try again.",
+        errorEstimateChanged:
+            "The selected conversations changed, so the estimate no longer matches. Check it again before starting.",
+        errorPairUnavailable: "That model is not available right now.",
+        errorBudget:
+            "Extraction capacity is temporarily full. Please try again shortly.",
+        runTitle: "Extraction progress",
+        runBack: "Back to memory settings",
+        runNotFound: "This extraction run could not be found.",
+        runModel: "Model",
+        runStarted: "Started: {date}",
+        runFinished: "Finished: {date}",
+        runProgress: "{completed} of {total} batches done",
+        runPendingNote:
+            "Waiting to start. You can close this page — the run continues and you can come back here to check it.",
+        runRunningNote:
+            "Extraction is running. You can close this page; candidates appear in the review queue as it finishes.",
+        runCompletedNote:
+            "Extraction finished. Review the candidates in the review queue.",
+        runFailedNote:
+            "The extraction could not finish. Results from completed batches are kept.",
+        runCancelledNote:
+            "The extraction was cancelled. Results from completed batches are kept.",
+        runReview: "Go to review queue",
+        cancel: "Cancel extraction",
+        cancelArmed: "Press again to cancel",
+        cancelling: "Cancelling…",
+        recentRunsTitle: "Recent extractions",
+        recentRunOpen: "View details",
+        status: {
+            pending: "Waiting",
+            running: "Running",
+            completed: "Finished",
+            failed: "Failed",
+            cancelled: "Cancelled",
         },
     },
     privacyPolicy: {

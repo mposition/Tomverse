@@ -168,13 +168,21 @@ export const getNativeSearchCostMicroUsdPerQuery = (provider: string) =>
 const flatTier = (
     inputUsdPerMillionTokens: number,
     outputUsdPerMillionTokens: number,
-    cachedInputPriceMultiplier = 1
+    cachedInputPriceMultiplier = 1,
+    cacheWriteUsdPerMillionTokens?: number
 ): readonly ModelPriceTier[] => [
     {
         maxPromptTokens: null,
         inputUsdPerMillionTokens,
         outputUsdPerMillionTokens,
         cachedInputPriceMultiplier,
+        // Omitted rather than guessed for a model whose cache-write rate has
+        // not been read off the provider's own price list: the value is audit
+        // data, so an absent one costs nothing and an invented one is a
+        // fabricated record.
+        ...(cacheWriteUsdPerMillionTokens === undefined
+            ? {}
+            : { cacheWriteUsdPerMillionTokens }),
     },
 ];
 
@@ -290,6 +298,12 @@ const DIRECT_STANDARD = {
  * Batch are cheaper, Priority/Fast is dearer, and a regional-processing
  * endpoint adds a surcharge on top of any of them.
  *
+ * Anthropic's `inference_geo` is guarded by the same list. It is not a
+ * processing tier, but it is the same kind of thing: on Claude 4.6 and later
+ * -- every Anthropic model routed to here -- `inference_geo: "us"` multiplies
+ * every pricing category by 1.1x, and the profiles record the global default.
+ * Verified 2026-08-04 against Anthropic's published pricing page.
+ *
  * `npm run check:model-pricing` greps the tree -- **including files not yet
  * committed** -- and fails on any occurrence outside this list. The check is
  * deliberately blunt rather than clever: telling "sets a tier on the request"
@@ -318,16 +332,34 @@ export const PROCESSING_TIER_REQUEST_ALLOWLIST: readonly ProcessingTierMention[]
             sendsATier: false,
             reason: "Reads `service_tier` off the response and reports it. Its own optional --invoke request sets none, which is the point: the tier a request is *served at* is the only evidence that the Standard table was the right one.",
         },
+        {
+            file: "lib/servedProcessingTier.ts",
+            sendsATier: false,
+            reason: "Classifies the tier a completed response reports, so a request served at a tier nobody priced is visible instead of silent. It reads provider metadata and returns a verdict; it builds no request and is imported by no request-building code path.",
+        },
+        {
+            file: "app/api/chat/route.ts",
+            sendsATier: false,
+            reason: "Calls the classifier above once a stream completes and logs a mismatch. The streamText call a few hundred lines above sets no tier, and this observation runs after the response is finished, so it cannot influence the request it describes.",
+        },
     ];
 
 /**
- * Recorded as a gap rather than solved here: nothing on the chat path reads
- * the `service_tier` a response came back on, so a pricing snapshot records
- * the tier this registry *assumes* rather than the tier the request was
- * *served at*. `npm run check:openai-model-access -- --invoke` can observe it
- * for one request; carrying it into every snapshot means plumbing the response
- * field through settlement, which is a separate change with its own
- * `pricingVersion`.
+ * Still recorded as a gap, now a narrower one: a pricing snapshot records the
+ * tier this registry *assumes* rather than the tier the request was *served
+ * at*.
+ *
+ * What changed is that the discrepancy is no longer invisible.
+ * `lib/servedProcessingTier.ts` classifies the tier every completed chat
+ * response reports and logs `chat_served_processing_tier_mismatch` when the
+ * Standard table was not the table the provider billed under. That is
+ * observation, not accounting: no reservation, settlement or snapshot reads
+ * it, so this constant stays `true`.
+ *
+ * Closing it the rest of the way means carrying the served tier into
+ * settlement, which changes what a snapshot means and therefore needs its own
+ * `pricingVersion` -- a separate change, and one that should be made with the
+ * mismatch data this observation produces rather than before it exists.
  */
 export const RESPONSE_PROCESSING_TIER_IS_NOT_RECORDED = true;
 
@@ -581,7 +613,10 @@ export const MODEL_PRICING: readonly ModelPricingProfile[] = [
         provider: "anthropic",
         apiModelId: "claude-fable-5",
         ...DIRECT_STANDARD,
-        tiers: flatTier(10, 50, 0.1),
+        // 5-minute cache write, recorded for audit and not billed. The 1-hour
+        // write is twice it (US$20/MTok); only the shorter duration is stored,
+        // matching the field's meaning for every other profile.
+        tiers: flatTier(10, 50, 0.1, 12.5),
         reasoningTokenBilling: "billed_as_output",
         nativeSearchCostMicroUsdPerQuery: 10_000,
         maxOutputTokens: 128_000,
@@ -599,7 +634,8 @@ export const MODEL_PRICING: readonly ModelPricingProfile[] = [
         provider: "anthropic",
         apiModelId: "claude-opus-5",
         ...DIRECT_STANDARD,
-        tiers: flatTier(5, 25, 0.1),
+        // As above: 5-minute cache write; the 1-hour rate is US$10/MTok.
+        tiers: flatTier(5, 25, 0.1, 6.25),
         reasoningTokenBilling: "billed_as_output",
         nativeSearchCostMicroUsdPerQuery: 10_000,
         maxOutputTokens: 128_000,

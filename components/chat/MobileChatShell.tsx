@@ -12,6 +12,8 @@ import {
 import { createPortal } from "react-dom";
 import { useChatConsentSlotRef } from "@/components/analytics/AnalyticsProvider";
 import { ANALYTICS_PREFERENCES_OPEN_EVENT } from "@/lib/analyticsPreferencesEvents";
+import { ACCOUNT_SETTINGS_OPEN_EVENT } from "@/lib/accountSettingsEvents";
+import { parseSettingsDeepLink } from "@/lib/settingsNavigation";
 import { AiDisclaimerNotice } from "@/components/chat/AiDisclaimerNotice";
 import { ChatApp } from "@/components/chat/ChatApp";
 import { ChatInput } from "@/components/chat/ChatInput";
@@ -116,6 +118,10 @@ type MobileChatShellProps = {
   isModelSelectionReady: boolean;
   onNewChat: () => void;
   onNewImage?: (() => void) | null;
+  /** Set when image generation is visible to this viewer but not usable. */
+  imageLock?: "sign_in" | "upgrade" | null;
+  onLockedImageClick?: (lock: "sign_in" | "upgrade") => void;
+  onStartImageDraft?: (draftText: string, modelId?: string) => void;
   imageWorkspace?: ReactNode;
   onSelectConversation: (id: string) => void;
   onRename: (id: string, title: string) => void;
@@ -172,6 +178,9 @@ export function MobileChatShell({
   isModelSelectionReady,
   onNewChat,
   onNewImage,
+  imageLock,
+  onLockedImageClick,
+  onStartImageDraft,
   imageWorkspace,
   onSelectConversation,
   onRename,
@@ -228,6 +237,29 @@ export function MobileChatShell({
     if (returnTarget && returnTarget.isConnected) {
       requestAnimationFrame(() => returnTarget.focus());
     }
+  }, []);
+  // The settings panel lives in the sidebar, which on this shell is the
+  // drawer -- so nothing can open settings while the drawer is closed, not
+  // even "Back to settings" arriving from a detail page as a deep link
+  // (lib/settingsNavigation.ts). Opening the drawer is what mounts the panel;
+  // the request itself is held for it in lib/accountSettingsEvents.ts, so the
+  // panel claims it as it mounts and the hierarchy matches the desktop one.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (!parseSettingsDeepLink(window.location.search)) return;
+    queueMicrotask(() => setIsDrawerOpen(true));
+  }, []);
+  useEffect(() => {
+    const openDrawerForAccountSettings = () => setIsDrawerOpen(true);
+    window.addEventListener(
+      ACCOUNT_SETTINGS_OPEN_EVENT,
+      openDrawerForAccountSettings
+    );
+    return () =>
+      window.removeEventListener(
+        ACCOUNT_SETTINGS_OPEN_EVENT,
+        openDrawerForAccountSettings
+      );
   }, []);
   const touchStartXRef = useRef<number | null>(null);
   const touchStartYRef = useRef<number | null>(null);
@@ -1144,6 +1176,9 @@ export function MobileChatShell({
             onOpenDeepResearchSetup={onOpenDeepResearchSetup}
             isDeepResearchPending={isDeepResearchPending}
             onDismissDeepResearchChip={onDismissDeepResearchChip}
+            onStartImageDraft={onStartImageDraft}
+            imageGenerationLock={imageLock ?? null}
+            onLockedImageGenerationClick={onLockedImageClick}
             attachments={attachments}
             onAttachmentsChange={setAttachments}
             attachmentCapabilities={attachmentCapabilities}
@@ -1208,6 +1243,11 @@ export function MobileChatShell({
                     }
                   : null
               }
+              imageLock={imageLock ?? null}
+              onLockedImageClick={(lock) => {
+                setIsDrawerOpen(false);
+                onLockedImageClick?.(lock);
+              }}
               onSelectConversation={(id) => {
                 setIsDrawerOpen(false);
                 drawerReturnFocusRef.current = null;

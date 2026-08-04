@@ -54,7 +54,9 @@
     "maintenance:provider-model-catalog": "node scripts/run-provider-model-catalog-monitor.mjs",
     "maintenance:provider-probe": "node scripts/run-provider-probe.mjs",
     "maintenance:default-model-reconciliation": "node --import tsx scripts/run-default-model-reconciliation.mjs",
+    "maintenance:memory-search-terms": "node --import tsx scripts/backfill-memory-search-terms.mjs",
     "eval:default-model": "node --conditions=react-server --import tsx scripts/evalDefaultModel.mjs",
+    "eval:memory-extraction": "node --conditions=react-server --import tsx scripts/evalImportedMemoryExtraction.mjs",
     "postinstall": "prisma generate",
     "check:default-models": "node --conditions=react-server --import tsx scripts/check-default-models.mjs",
     "check:openai-model-access": "node --conditions=react-server --import tsx scripts/check-openai-model-access.mjs",
@@ -98,7 +100,6 @@
     "zod": "^4.4.3"
   },
   "devDependencies": {
-    "@babel/parser": "^7.29.7",
     "@playwright/test": "^1.62.1",
     "@tailwindcss/postcss": "^4",
     "@types/node": "^26",

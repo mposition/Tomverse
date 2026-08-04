@@ -23,6 +23,9 @@ export const es = {
         languageAndDisplay: "Idioma y pantalla",
         newChat: "Nuevo chat",
         newImage: "Nueva imagen",
+        newConversationMenu: "Nuevo…",
+        newImageSignInRequired: "Iniciar sesión",
+        newImageUpgradeRequired: "Requiere Pro",
         imageConversation: "Imagen",
         collapse: "Contraer barra lateral",
         expand: "Expandir barra lateral",
@@ -107,6 +110,25 @@ export const es = {
         ...en.chat,
         // Image generation workspace (docs/policy/image-generation.md)
         imageGenerationTitle: "Generación de imágenes",
+        imageGenerationBackToChat: "Volver al chat",
+        toolsImageGeneration: "Generación de imágenes",
+        toolsImageGenerationDescription: "Compara imágenes de varios modelos",
+        imageGenerationModelLabel: "Modelos",
+        imageGenerationModelCount: "{count} modelo(s)",
+        // Catalogue image tab (policy v2 section 13)
+        modelPickerTabsLabel: "Tipo de modelo",
+        modelPickerTabChat: "Chat",
+        modelPickerTabImage: "Imagen",
+        imageModelTabTitle: "Modelos de generación de imágenes",
+        imageModelTabSubtitle: "Modelos que crean imágenes a partir de una descripción. Los modelos de chat que solo leen la imagen que adjuntas siguen en la pestaña Chat.",
+        imageModelTabFooterHint: "Al elegir uno se abre el espacio de imágenes.",
+        imageModelCreditsFrom: "Desde {credits} créditos",
+        imageModelHoldPriceUnverified: "En espera hasta verificar su precio oficial",
+        imageModelLatencyFast: "Rápido",
+        imageModelLatencyBalanced: "Equilibrado",
+        imageModelLatencySlow: "Más lento",
+        imageGenerationTotalCredits: "Total {credits} créditos",
+        imageGenerationRetryModel: "Reintentar este modelo",
         imageGenerationIntroTitle: "Crea una imagen a partir de una descripción",
         imageGenerationIntroBody: "Describe lo que quieres ver. Una imagen por solicitud, con calidades Draft, Standard y Final en tres tamaños.",
         imageGenerationAiLabel: "Imagen generada por IA",
@@ -786,17 +808,24 @@ export const es = {
         refundRequestSuccess: "Solicitud de reembolso recibida.",
         refundRequestFailed: "No se pudo enviar la solicitud de reembolso.",
     },
+    settingsNav: {
+        navLabel: "Navegación de ajustes",
+        backToSettings: "Volver a los ajustes",
+        settings: "Ajustes",
+        dataAndPersonalization: "Datos y personalización",
+        dataAndPersonalizationDescription: "Conversaciones importadas y memoria de la cuenta. Cada una se gestiona en su propia página.",
+    },
     externalImport: {
         dataTabTitle: "Importar desde otro servicio de IA",
         dataTabDescription:
             "Guarda en tu cuenta de Tomverse conversaciones de un archivo de exportación de ChatGPT o Claude. El archivo de exportación solo se lee en tu navegador.",
         dataTabUsage:
             "{conversations} conversaciones importadas · {storage} almacenados",
-        dataTabOpen: "Abrir ajustes de importación",
+        dataTabOpen: "Gestionar importaciones",
+        dataTabUsageEmpty: "Aún no hay conversaciones importadas",
         pageTitle: "Importar conversaciones desde otro servicio de IA",
         pageDescription:
             "Sube una exportación oficial de datos de ChatGPT o Claude, revisa su contenido y elige qué conversaciones conservar en tu cuenta de Tomverse.",
-        backToChat: "Volver al chat",
         backToImports: "Volver a las importaciones",
         signInRequired:
             "Inicia sesión para importar conversaciones desde otro servicio de IA.",
@@ -979,11 +1008,13 @@ export const es = {
         dataTabTitle: "Memoria de la cuenta",
         dataTabDescription:
             "Revisa los recuerdos candidatos extraídos de conversaciones importadas y decide si los recuerdos aprobados se usan en los chats nuevos.",
-        dataTabOpen: "Abrir ajustes de memoria",
+        dataTabOpen: "Gestionar memoria",
+        dataTabStatusOn: "Se usa en los chats nuevos",
+        dataTabStatusOff: "No se usa en los chats nuevos",
+        dataTabStatusPending: "{count} pendientes de revisión",
         pageTitle: "Memoria de la cuenta",
         pageDescription:
             "Aprueba o rechaza los recuerdos candidatos pendientes de revisión, y edita, fija o elimina los recuerdos en uso.",
-        backToChat: "Volver al chat",
         signInRequired:
             "Inicia sesión para gestionar la memoria de tu cuenta.",
         privacyNote:
@@ -1094,6 +1125,75 @@ export const es = {
             explanation_depth: "Profundidad de las explicaciones",
             citation_preference: "Preferencia de citas",
             code_style: "Estilo de código",
+        },
+    },
+    // Inicio de la extracción (Release B, §11 confirmación previa, §21).
+    memoryExtraction: {
+        launchTitle: "Extraer recuerdos de las conversaciones importadas",
+        launchDescription:
+            "Elige las conversaciones importadas de las que extraer candidatos. Los candidatos no se usan en las respuestas hasta que los revisas y apruebas.",
+        modelTitle: "Modelo usado para la extracción",
+        modelUnavailable: "Ahora mismo no hay ningún modelo de extracción disponible.",
+        modelUnavailableDescription:
+            "Un modelo de extracción solo se habilita tras superar una evaluación de calidad. Cuando ocurra, podrás elegirlo aquí.",
+        modelCredits: "{credits} créditos por lote",
+        conversationsTitle: "Elegir conversaciones",
+        conversationsDescription:
+            "Solo se usan las conversaciones que selecciones. Se procesan en lotes según su tamaño y los créditos se cuentan por lote.",
+        conversationsEmpty: "Todavía no has importado ninguna conversación.",
+        conversationsEmptyCta: "Importar conversaciones",
+        selectAllVisible: "Seleccionar todo lo mostrado",
+        clearSelection: "Quitar selección",
+        selectionSummary: "{count} seleccionadas · unos {size}",
+        selectionHidden: "{count} conversaciones seleccionadas no aparecen en esta lista.",
+        selectionTooLarge: "Puedes seleccionar hasta {max} conversaciones a la vez.",
+        conversationMeta: "{messages} mensajes · {size}",
+        loadMore: "Ver más",
+        estimate: "Ver créditos necesarios",
+        estimating: "Calculando…",
+        estimateResult: "{chunks} lotes · unos {credits} créditos",
+        estimateDescription:
+            "{conversations} conversaciones se procesarán en {chunks} lotes. El cargo final se liquida tras la ejecución y nunca supera el importe que confirmaste.",
+        estimateStale: "La selección ha cambiado. Vuelve a comprobar los créditos.",
+        start: "Iniciar extracción por {credits} créditos",
+        starting: "Iniciando…",
+        runInProgress: "Ya hay una extracción en curso.",
+        runInProgressOpen: "Ver progreso",
+        errorGeneric: "Algo ha salido mal. Inténtalo de nuevo.",
+        errorEstimateChanged:
+            "Las conversaciones seleccionadas han cambiado y la estimación ya no coincide. Compruébala antes de iniciar.",
+        errorPairUnavailable: "Ese modelo no está disponible ahora mismo.",
+        errorBudget:
+            "La capacidad de extracción está temporalmente completa. Inténtalo de nuevo en un momento.",
+        runTitle: "Progreso de la extracción",
+        runBack: "Volver a los ajustes de memoria",
+        runNotFound: "No se ha encontrado esta extracción.",
+        runModel: "Modelo",
+        runStarted: "Inicio: {date}",
+        runFinished: "Fin: {date}",
+        runProgress: "{completed} de {total} lotes terminados",
+        runPendingNote:
+            "Esperando a empezar. Puedes cerrar esta página: la extracción continúa y podrás volver aquí a consultarla.",
+        runRunningNote:
+            "La extracción está en curso. Puedes cerrar esta página; los candidatos van apareciendo en la lista de revisión.",
+        runCompletedNote:
+            "La extracción ha terminado. Revisa los candidatos en la lista de revisión.",
+        runFailedNote:
+            "La extracción no pudo terminar. Se conservan los resultados de los lotes completados.",
+        runCancelledNote:
+            "La extracción se ha cancelado. Se conservan los resultados de los lotes completados.",
+        runReview: "Ir a la lista de revisión",
+        cancel: "Cancelar extracción",
+        cancelArmed: "Pulsa otra vez para cancelar",
+        cancelling: "Cancelando…",
+        recentRunsTitle: "Extracciones recientes",
+        recentRunOpen: "Ver detalles",
+        status: {
+            pending: "En espera",
+            running: "En curso",
+            completed: "Terminada",
+            failed: "Fallida",
+            cancelled: "Cancelada",
         },
     },
     privacyPolicy: {

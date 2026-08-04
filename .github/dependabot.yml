@@ -7,18 +7,15 @@ updates:
     open-pull-requests-limit: 10
     ignore:
       # TypeScript 7 is the native port and no longer ships the JavaScript
-      # compiler API. Two things needed it; one still does.
+      # compiler API. `next build` refuses it ("TypeScript 7.0.2 does not
+      # provide the compiler API required by Next.js").
       #
-      #   * `next build` refuses TypeScript 7 outright ("TypeScript 7.0.2 does
-      #     not provide the compiler API required by Next.js"). Still true, and
-      #     Next.js's to fix, so this entry stays.
-      #   * scripts/text-encoding-check-core.mjs used ts.createSourceFile and
-      #     ts.SyntaxKind. **Resolved (#278)** -- it parses with @babel/parser
-      #     now and imports nothing from `typescript`.
-      #
-      # So the only remaining condition is Next.js. Remove this entry once
-      # `next build` accepts TypeScript 7; nothing else here is waiting on it.
-      # TypeScript 6 stays eligible.
+      # This hold had a second reason -- scripts/text-encoding-check-core.mjs
+      # used ts.createSourceFile and ts.SyntaxKind directly -- which is now
+      # resolved (#278): the checker scans for string ranges itself and imports
+      # nothing from typescript. Next.js is the only remaining blocker, and it
+      # is not ours to fix; remove this entry once it supports the TypeScript 7
+      # compiler API. TypeScript 6 stays eligible.
       - dependency-name: typescript
         versions: [">=7"]
       # ESLint 10 changed the rule context passed to a rule's create(), and the

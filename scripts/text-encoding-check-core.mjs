@@ -1,30 +1,48 @@
 import path from "node:path";
-import { parse, parseExpression } from "@babel/parser";
 
-/**
- * UX-278. This used to parse with `typescript`'s JavaScript compiler API
- * (`ts.createSourceFile` / `ts.forEachChild`). TypeScript 7 is the native port
- * and does not ship that API, so the import alone threw and took
- * `npm run check:encoding` -- a PR Fast Gate step -- down with it. That is why
- * `.github/dependabot.yml` holds `typescript` below 7.
- *
- * TypeScript 7 does expose `typescript/unstable/ast`, and it was worth checking
- * before assuming otherwise, but it carries a scanner and no parser: no
- * `createSourceFile`, no `forEachChild`. A scanner alone cannot tell JSX text
- * from the expressions around it without reimplementing the parser's context,
- * and JSX text is one of the two things this check has to see.
- *
- * Babel parses TS and TSX on a stable, published API, and it is already in the
- * dependency tree, so this costs no download -- only an explicit declaration of
- * something that was being relied on implicitly.
- *
- * Only positions are used. No type information is needed to answer "which byte
- * ranges are string literals or JSX text", which is the whole question here.
- */
-const STRING_LIKE_TYPES = new Set([
-  "StringLiteral",
-  "TemplateElement",
-  "JSXText",
+// Finds runs of `?` that are almost certainly mojibake -- text that lost its
+// encoding in a round-trip -- while ignoring the many legitimate `?` in source
+// code. Precision comes from knowing which byte ranges are string literals,
+// template text and JSX text; `??` in code is nullish coalescing, and a `?` in
+// a comment, an identifier or a URL is not corruption either.
+//
+// This used to ask the TypeScript compiler for that answer via
+// `ts.createSourceFile`. TypeScript 7 is the native port and no longer ships
+// the JavaScript compiler API (#278), which made a dependency on it a standing
+// block on the toolchain -- so the ranges are found by scanning here instead.
+//
+// A scanner, not a parser: it never builds a tree, resolves a type or cares
+// what the code means. It only has to know where a token starts and ends, which
+// is the whole question being asked. The one genuinely ambiguous case in the
+// grammar -- whether `<` opens a JSX element, `/` opens a regular expression --
+// is decided the way every lexer decides it, from whether the previous
+// significant token can be the left side of a binary operator.
+
+// Deliberately generous: an identifier only has to be told apart from
+// punctuation here, so accepting any non-ASCII letter costs nothing and
+// avoids splitting an identifier the scanner would then misread.
+const IDENT_START = /[A-Za-z_$\u00AA-\uFFFF]/;
+const IDENT_PART = /[A-Za-z0-9_$\u00AA-\uFFFF]/;
+
+// Keywords after which a `/` starts a regular expression rather than dividing,
+// and a `<` starts JSX rather than comparing. Everything else that ends a value
+// -- an identifier, a literal, `)`, `]` -- means the opposite.
+const OPERATOR_KEYWORDS = new Set([
+  "await",
+  "case",
+  "default",
+  "delete",
+  "do",
+  "else",
+  "in",
+  "instanceof",
+  "new",
+  "of",
+  "return",
+  "throw",
+  "typeof",
+  "void",
+  "yield",
 ]);
 
 function questionMatches(text, offset = 0) {
@@ -55,18 +73,19 @@ function questionMatches(text, offset = 0) {
   return matches;
 }
 
-/**
- * `.ts` cannot take the `jsx` plugin -- in a `.ts` file `<T>value` is a type
- * assertion, and enabling JSX turns it into an unterminated element. Every
- * other extension here is parsed with both, which is what lets a `.js` file
- * containing JSX still be read.
- */
-function babelPlugins(fileName) {
+// `.ts` has no JSX: there `<T>expr` is a type assertion, and reading it as an
+// element would swallow real code. Everything else the checker walks is parsed
+// in the JSX variant, matching how the compiler treats these extensions.
+function allowsJsx(fileName) {
   switch (path.extname(fileName).toLowerCase()) {
-    case ".ts":
-      return ["typescript"];
+    case ".tsx":
+    case ".jsx":
+    case ".js":
+    case ".mjs":
+    case ".cjs":
+      return true;
     default:
-      return ["typescript", "jsx"];
+      return false;
   }
 }
 
@@ -112,42 +131,290 @@ function markdownProseSegments(text) {
 }
 
 /**
- * Walks a Babel AST and reports `?` runs inside every string literal, template
- * chunk and JSX text node. Generic over node shape rather than keyed to a
- * visitor table, so a syntax Babel adds later is traversed rather than silently
- * skipped -- the cost of missing one is a string this check never looks at.
+ * Every string-literal, template-text and JSX-text range in a source file, as
+ * `{ start, end }` offsets. Ranges include their delimiters, the way the
+ * compiler's own token positions did, so a `?` next to a quote keeps the same
+ * neighbours it always had.
+ *
+ * Exported for the tests: the ranges are the contract this file has to get
+ * right, and asserting on them directly says more than asserting on the
+ * findings they happen to produce today.
  */
-function collectStringLikeMatches(root, text) {
-  const matches = [];
-  const seen = new Set();
-  const visit = (node) => {
-    if (!node || typeof node !== "object") return;
-    if (Array.isArray(node)) {
-      for (const child of node) visit(child);
-      return;
-    }
-    if (typeof node.type !== "string" || seen.has(node)) return;
-    seen.add(node);
+export function stringLikeRanges(text, fileName) {
+  const jsx = allowsJsx(fileName);
+  const ranges = [];
+  // What the scanner is reading right now. "code" is ordinary source; "jsxTag"
+  // is between `<` and the matching `>`, where quotes are attribute values;
+  // "jsxChildren" is between an opening and a closing tag, where everything up
+  // to the next `<` or `{` is text.
+  const modes = [{ kind: "code", braceDepth: 0, template: false }];
+  const mode = () => modes[modes.length - 1];
+  // Whether the previous significant token can end a value. It decides `/`
+  // (regex vs division) and `<` (JSX vs comparison) and nothing else.
+  let prevEndsValue = false;
+  let index = 0;
 
-    if (STRING_LIKE_TYPES.has(node.type)) {
-      // `start`/`end` span the raw source including the quotes or backticks,
-      // which is the range the reported offsets have always been relative to.
-      matches.push(
-        ...questionMatches(text.slice(node.start, node.end), node.start)
-      );
-    }
+  const readIdentifier = () => {
+    const start = index;
+    index += 1;
+    while (index < text.length && IDENT_PART.test(text[index])) index += 1;
+    return text.slice(start, index);
+  };
 
-    for (const key of Object.keys(node)) {
-      // Position metadata and comment back-references only lead back to nodes
-      // already visited, or to text this check deliberately ignores.
-      if (key === "loc" || key === "leadingComments" || key === "trailingComments") {
+  const readString = (quote) => {
+    const start = index;
+    index += 1;
+    while (index < text.length) {
+      const char = text[index];
+      if (char === "\\") {
+        index += 2;
         continue;
       }
-      visit(node[key]);
+      index += 1;
+      if (char === quote) break;
+      // An unterminated string ends at the newline rather than eating the rest
+      // of the file: a scanner that loses its place reports nonsense far away
+      // from the actual problem.
+      if (char === "\n") break;
     }
+    ranges.push({ start, end: index });
   };
-  visit(root);
-  return matches.sort((left, right) => left.index - right.index);
+
+  // Reads from a backtick or from the `}` that closes a substitution, up to
+  // and including whichever of `${` or the closing backtick comes first.
+  const readTemplatePart = () => {
+    const start = index;
+    index += 1;
+    while (index < text.length) {
+      const char = text[index];
+      if (char === "\\") {
+        index += 2;
+        continue;
+      }
+      if (char === "`") {
+        index += 1;
+        ranges.push({ start, end: index });
+        return "end";
+      }
+      if (char === "$" && text[index + 1] === "{") {
+        index += 2;
+        ranges.push({ start, end: index });
+        return "substitution";
+      }
+      index += 1;
+    }
+    ranges.push({ start, end: index });
+    return "end";
+  };
+
+  const readRegex = () => {
+    index += 1;
+    let inClass = false;
+    while (index < text.length) {
+      const char = text[index];
+      if (char === "\\") {
+        index += 2;
+        continue;
+      }
+      if (char === "\n") break;
+      index += 1;
+      if (char === "[") inClass = true;
+      else if (char === "]") inClass = false;
+      else if (char === "/" && !inClass) break;
+    }
+    while (index < text.length && IDENT_PART.test(text[index])) index += 1;
+  };
+
+  const skipComment = () => {
+    if (text[index + 1] === "/") {
+      while (index < text.length && text[index] !== "\n") index += 1;
+      return true;
+    }
+    if (text[index + 1] === "*") {
+      index += 2;
+      while (index < text.length) {
+        if (text[index] === "*" && text[index + 1] === "/") {
+          index += 2;
+          return true;
+        }
+        index += 1;
+      }
+      return true;
+    }
+    return false;
+  };
+
+  // `<` opens an element only where a value may begin and where a tag name,
+  // a fragment `>` or a closing `/` follows. `a < b` and `Array<string>` both
+  // fail one of those and stay operators.
+  const startsJsxElement = () => {
+    if (!jsx || prevEndsValue) return false;
+    const next = text[index + 1];
+    return next === ">" || (next !== undefined && IDENT_START.test(next));
+  };
+
+  while (index < text.length) {
+    const current = mode();
+
+    if (current.kind === "jsxChildren") {
+      const start = index;
+      while (
+        index < text.length &&
+        text[index] !== "<" &&
+        text[index] !== "{"
+      ) {
+        index += 1;
+      }
+      if (index > start) ranges.push({ start, end: index });
+      if (index >= text.length) break;
+      if (text[index] === "{") {
+        index += 1;
+        modes.push({ kind: "code", braceDepth: 0, template: false });
+        prevEndsValue = false;
+        continue;
+      }
+      if (text[index + 1] === "/") {
+        // Closing tag: consume it and leave this element's children.
+        index += 2;
+        while (index < text.length && text[index] !== ">") index += 1;
+        index += 1;
+        modes.pop();
+        prevEndsValue = true;
+        continue;
+      }
+      index += 1;
+      modes.push({ kind: "jsxTag" });
+      continue;
+    }
+
+    if (current.kind === "jsxTag") {
+      const char = text[index];
+      if (char === '"' || char === "'") {
+        readString(char);
+        continue;
+      }
+      if (char === "{") {
+        index += 1;
+        modes.push({ kind: "code", braceDepth: 0, template: false });
+        prevEndsValue = false;
+        continue;
+      }
+      if (char === "/" && text[index + 1] === ">") {
+        index += 2;
+        modes.pop();
+        prevEndsValue = true;
+        continue;
+      }
+      if (char === ">") {
+        index += 1;
+        modes.pop();
+        modes.push({ kind: "jsxChildren" });
+        continue;
+      }
+      if (char === "/" && (text[index + 1] === "/" || text[index + 1] === "*")) {
+        skipComment();
+        continue;
+      }
+      index += 1;
+      continue;
+    }
+
+    const char = text[index];
+
+    // Whitespace is not a token: letting it clear `prevEndsValue` would make
+    // `bytes / (1024 * 1024)` look like the start of a regular expression and
+    // swallow everything up to the next `/`.
+    if (char === " " || char === "\t" || char === "\n" || char === "\r") {
+      index += 1;
+      continue;
+    }
+
+    if (char === "/") {
+      if (skipComment()) continue;
+      if (!prevEndsValue) {
+        readRegex();
+        prevEndsValue = true;
+        continue;
+      }
+      index += 1;
+      prevEndsValue = false;
+      continue;
+    }
+
+    if (char === '"' || char === "'") {
+      readString(char);
+      prevEndsValue = true;
+      continue;
+    }
+
+    if (char === "`") {
+      if (readTemplatePart() === "substitution") {
+        // The substitution's own `}` is consumed by the mode pushed here, so
+        // the enclosing brace depth must not also count it.
+        modes.push({ kind: "code", braceDepth: 0, template: true });
+        prevEndsValue = false;
+      } else {
+        prevEndsValue = true;
+      }
+      continue;
+    }
+
+    if (char === "{") {
+      current.braceDepth += 1;
+      index += 1;
+      prevEndsValue = false;
+      continue;
+    }
+
+    if (char === "}") {
+      if (current.braceDepth === 0 && modes.length > 1) {
+        // Closes whatever opened this nested code region: a `${}` substitution
+        // resumes the template it interrupted, a JSX expression container
+        // resumes the element.
+        modes.pop();
+        if (current.template) {
+          if (readTemplatePart() === "substitution") {
+            modes.push({ kind: "code", braceDepth: 0, template: true });
+            prevEndsValue = false;
+          } else {
+            prevEndsValue = true;
+          }
+        } else {
+          index += 1;
+          prevEndsValue = true;
+        }
+        continue;
+      }
+      if (current.braceDepth > 0) current.braceDepth -= 1;
+      index += 1;
+      prevEndsValue = false;
+      continue;
+    }
+
+    if (char === "<" && startsJsxElement()) {
+      index += 1;
+      modes.push({ kind: "jsxTag" });
+      continue;
+    }
+
+    if (IDENT_START.test(char)) {
+      const word = readIdentifier();
+      prevEndsValue = !OPERATOR_KEYWORDS.has(word);
+      continue;
+    }
+
+    if (char >= "0" && char <= "9") {
+      index += 1;
+      while (index < text.length && /[0-9a-zA-Z._]/.test(text[index])) index += 1;
+      prevEndsValue = true;
+      continue;
+    }
+
+    index += 1;
+    prevEndsValue = char === ")" || char === "]";
+  }
+
+  return ranges;
 }
 
 export function findQuestionRunsInsideStrings(text, fileName) {
@@ -157,39 +424,7 @@ export function findQuestionRunsInsideStrings(text, fileName) {
     );
   }
 
-  // A JSON document's outermost `{` is an object in expression position, not a
-  // block statement, so it has to be parsed as an expression or every key and
-  // value is lost to a syntax error.
-  if (path.extname(fileName).toLowerCase() === ".json") {
-    try {
-      return collectStringLikeMatches(parseExpression(text, { errorRecovery: true }), text);
-    } catch {
-      return [];
-    }
-  }
-
-  let ast;
-  try {
-    ast = parse(text, {
-      sourceType: "unambiguous",
-      allowReturnOutsideFunction: true,
-      allowAwaitOutsideFunction: true,
-      allowSuperOutsideMethod: true,
-      allowUndeclaredExports: true,
-      errorRecovery: true,
-      ranges: false,
-      plugins: babelPlugins(fileName),
-    });
-  } catch {
-    // A file this cannot parse is reported as clean rather than as a finding.
-    // The previous implementation behaved the same way: the TypeScript parser
-    // recovers from syntax errors and simply yields no string nodes for the
-    // part it could not read. A checker for mojibake is the wrong place to
-    // fail a build over syntax -- typecheck and lint already do that, and
-    // making this throw would turn one broken file into a silent gap in the
-    // encoding check for the whole run.
-    return [];
-  }
-
-  return collectStringLikeMatches(ast.program ?? ast, text);
+  return stringLikeRanges(text, fileName).flatMap((range) =>
+    questionMatches(text.slice(range.start, range.end), range.start)
+  );
 }

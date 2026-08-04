@@ -71,10 +71,19 @@ const ENGLISH_STRING_CEILING = {
   // fr +1 (232 -> 233): memoryReview.kind.structure — "Structure" is spelled
   // identically in French; the memoryReview section is otherwise fully
   // translated.
-  fr: 233,
+  // fr +1 (233 -> 234): chat.modelPickerTabImage — "Image" is spelled
+  // identically in French; the rest of the image tab is translated.
+  // fr +1 (234 -> 235): memoryExtraction.conversationMeta — "{messages}
+  // messages · {size}" is spelled identically in French, the same case as
+  // externalImport.messagesCount above; the section is otherwise translated.
+  fr: 235,
   // de/es/pt +1 for the same saveAsDefaultHint key.
-  de: 233,
-  es: 229,
+  // de +1 (233 -> 234): chat.modelPickerTabChat — "Chat" is the German word
+  // too; the image tab's other strings are translated.
+  de: 234,
+  // es +1 (229 -> 230): chat.modelPickerTabChat — "Chat" is the Spanish word
+  // too; the image tab's other strings are translated.
+  es: 230,
   pt: 227,
 };
 

@@ -59,7 +59,7 @@ test("a model on a fail-closed hold is refused by the adapter itself", async () 
       prompt: "a red apple",
       size: "1024x1024",
       quality: "medium",
-      modelId: "gemini-3.1-flash-image-preview",
+      modelId: "gemini-3.1-flash-image",
     }),
     (error) =>
       error.name === "ImageProviderError" &&

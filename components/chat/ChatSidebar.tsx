@@ -7,8 +7,9 @@ import { SidebarAccountRailButton } from "@/components/chat/SidebarAccountRailBu
 import { useCallback, useState, useEffect, useId, useRef, useSyncExternalStore } from "react";
 import { createPortal } from "react-dom";
 import { useLanguage } from "@/components/LanguageProvider";
+import { NewConversationLauncher } from "@/components/chat/NewConversationLauncher";
 import Link from "next/link";
-import { AlertTriangle, Check, ChevronDown, CircleHelp, Crown, Download, Folder, FolderPlus, Image as ImageIcon, ImagePlus, Link2Off, Lock, MessageSquare, MoreVertical, PanelLeftClose, PanelLeftOpen, Pencil, Pin, Plus, Search, Share2, SlidersHorizontal, Sparkles, Star, Tag, Trash2, Unlock, X } from "lucide-react";
+import { AlertTriangle, Check, ChevronDown, CircleHelp, Crown, Download, Folder, FolderPlus, Image as ImageIcon, Link2Off, Lock, MessageSquare, MoreVertical, PanelLeftClose, PanelLeftOpen, Pencil, Pin, Search, Share2, SlidersHorizontal, Sparkles, Star, Tag, Trash2, Unlock, X } from "lucide-react";
 import { FeedbackButton } from "@/components/chat/FeedbackButton";
 import { UserUsageSummary } from "@/components/chat/UserUsageSummary";
 import { FeatureHelpPopover } from "@/components/chat/FeatureHelpPopover";
@@ -17,6 +18,8 @@ import { useUserUsage, type UserPlan } from "@/components/chat/useUserUsage";
 import { dispatchAppToast } from "@/lib/appToast";
 import { trackProductEvent } from "@/lib/productAnalyticsClient";
 import { chatWorkspaceGuideHref } from "@/lib/localizedHelpHref";
+import { ACCOUNT_SETTINGS_OPEN_EVENT } from "@/lib/accountSettingsEvents";
+import { parseSettingsDeepLink } from "@/lib/settingsNavigation";
 import { useSidebarCollapsePreference } from "@/components/chat/useSidebarCollapse";
 import { useShortViewport } from "@/components/chat/useVisualViewport";
 import { BuildInfoMenuItem, BuildStagingBadge } from "@/components/chat/BuildInfoMenu";
@@ -30,6 +33,9 @@ type ChatSidebarProps = {
     onNewChat: () => void;
     /** Absent while the image generation flag is off or for guests: no entry point renders. */
     onNewImage?: (() => void) | null;
+    /** Set when image generation is visible but not usable for this viewer. */
+    imageLock?: "sign_in" | "upgrade" | null;
+    onLockedImageClick?: (lock: "sign_in" | "upgrade") => void;
     onSelectConversation: (id: string) => void;
     onRename: (id: string, title: string) => void;
     onDelete: (id: string) => void;
@@ -104,6 +110,8 @@ export function ChatSidebar({
     maxGuestMessages,
     onNewChat,
     onNewImage,
+    imageLock,
+    onLockedImageClick,
     onSelectConversation,
     onRename,
     onDelete,
@@ -204,6 +212,35 @@ export function ChatSidebar({
     const toggleSidebarCollapsed = () => {
         setSidebarCollapsePreference(isSidebarCollapsed ? "expanded" : "collapsed");
     };
+    // The settings panel is part of the *expanded* sidebar's account card, so
+    // while the rail is collapsed there is nothing for a settings request to
+    // open -- neither the rail's own account button nor "Back to settings"
+    // arriving from a detail page as a deep link (lib/settingsNavigation.ts).
+    // Expanding is what mounts the panel; the request waits for it in
+    // lib/accountSettingsEvents.ts and is claimed on mount.
+    const expandSidebarIfCollapsed = useCallback(() => {
+        if (!isSidebarCollapsed || isMobileDrawer) return;
+        setSidebarCollapsePreference("expanded");
+    }, [isMobileDrawer, isSidebarCollapsed, setSidebarCollapsePreference]);
+    useEffect(() => {
+        window.addEventListener(
+            ACCOUNT_SETTINGS_OPEN_EVENT,
+            expandSidebarIfCollapsed
+        );
+        return () =>
+            window.removeEventListener(
+                ACCOUNT_SETTINGS_OPEN_EVENT,
+                expandSidebarIfCollapsed
+            );
+    }, [expandSidebarIfCollapsed]);
+    useEffect(() => {
+        if (typeof window === "undefined") return;
+        if (!parseSettingsDeepLink(window.location.search)) return;
+        queueMicrotask(() => expandSidebarIfCollapsed());
+        // Mount only: the deep link is a one-time request, and re-running it
+        // would fight a visitor who collapsed the sidebar afterwards.
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
     const { t, lang } = useLanguage();
     const helpCopy = chatHelpCopy[lang];
     const tooltipIdPrefix = useId();
@@ -774,27 +811,13 @@ export function ChatSidebar({
                 >
                     <PanelLeftOpen className="h-5 w-5" aria-hidden="true" />
                 </button>
-                <button
-                    type="button"
-                    onClick={onNewChat}
-                    title={t("sidebar.newChat")}
-                    aria-label={t("sidebar.newChat")}
-                    className="mt-2 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-zinc-900 text-white transition hover:bg-zinc-800 dark:bg-white dark:text-zinc-950 dark:hover:bg-zinc-200"
-                >
-                    <Plus className="h-4 w-4" aria-hidden="true" />
-                </button>
-                {onNewImage && (
-                    <button
-                        type="button"
-                        onClick={onNewImage}
-                        data-testid="sidebar-rail-new-image"
-                        title={t("sidebar.newImage")}
-                        aria-label={t("sidebar.newImage")}
-                        className="mt-2 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-accent-image-600/10 text-accent-image-600 transition hover:bg-accent-image-600/20 dark:bg-accent-image-500/15 dark:text-accent-image-400 dark:hover:bg-accent-image-500/25"
-                    >
-                        <ImagePlus className="h-4 w-4" aria-hidden="true" />
-                    </button>
-                )}
+                <NewConversationLauncher
+                    variant="rail"
+                    onNewChat={onNewChat}
+                    onNewImage={onNewImage ?? null}
+                    imageLock={imageLock ?? null}
+                    onLockedImageClick={onLockedImageClick}
+                />
                 <button
                     type="button"
                     onClick={toggleSidebarCollapsed}
@@ -947,25 +970,14 @@ export function ChatSidebar({
             </div>
 
             <div className={`${isMobileDrawer ? "p-2.5" : "p-3"} border-b border-zinc-200/60 dark:border-zinc-800/40`}>
-                <button
-                    type="button"
-                    data-testid="sidebar-new-chat"
-                    onClick={onNewChat}
-                    className={`w-full cursor-pointer flex items-center justify-center gap-2 rounded-lg bg-zinc-900 px-4 text-xs font-semibold text-white transition-all hover:bg-zinc-800 dark:bg-white dark:text-zinc-950 dark:hover:bg-zinc-200 ${isMobileDrawer ? "min-h-11 py-2" : "py-2.5"}`}
-                >
-                    <span className="text-sm">+</span> {t("sidebar.newChat")}
-                </button>
-                {onNewImage && (
-                    <button
-                        type="button"
-                        data-testid="sidebar-new-image"
-                        onClick={onNewImage}
-                        className={`mt-2 w-full cursor-pointer flex items-center justify-center gap-2 rounded-lg border border-accent-image-200 bg-accent-image-50 px-4 text-xs font-semibold text-accent-image-800 transition-all hover:bg-accent-image-100 dark:border-accent-image-900/60 dark:bg-accent-image-950/30 dark:text-accent-image-200 dark:hover:bg-accent-image-950/50 ${isMobileDrawer ? "min-h-11 py-2" : "py-2.5"}`}
-                    >
-                        <ImagePlus className="h-3.5 w-3.5" aria-hidden="true" />
-                        {t("sidebar.newImage")}
-                    </button>
-                )}
+                <NewConversationLauncher
+                    variant="expanded"
+                    isMobileDrawer={isMobileDrawer}
+                    onNewChat={onNewChat}
+                    onNewImage={onNewImage ?? null}
+                    imageLock={imageLock ?? null}
+                    onLockedImageClick={onLockedImageClick}
+                />
             </div>
 
             <div className={`shrink-0 border-b border-zinc-200/60 px-3 dark:border-zinc-800/40 ${isMobileDrawer ? "py-2" : "py-3"}`}>
