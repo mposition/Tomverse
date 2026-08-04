@@ -19,6 +19,7 @@ import {
 import {
     deleteExternalConversationSnapshot,
     deleteExternalImport,
+    iterateExternalExportConversations,
 } from "@/lib/externalImportService";
 import { hashConversationPassword } from "@/lib/conversationLock";
 import {
@@ -1463,4 +1464,34 @@ test("a lock never crosses accounts (§7)", async () => {
         }),
         expectCode("NOT_FOUND")
     );
+});
+
+test("a locked snapshot exports as metadata, never as content (§7)", async () => {
+    const user = await createUser();
+    const { conversationId } = await seedSourcedMemory(user.id);
+
+    const before = [];
+    for await (const entry of iterateExternalExportConversations(user.id)) {
+        before.push(entry);
+    }
+    assert.equal(before.length, 1);
+    assert.equal(before[0].locked, false);
+    assert.ok(before[0].messages.length > 0);
+
+    await lockExternalConversation({
+        userId: user.id,
+        conversationId,
+        password: LOCK_PASSWORD,
+    });
+
+    const after = [];
+    for await (const entry of iterateExternalExportConversations(user.id)) {
+        after.push(entry);
+    }
+    // Present but empty: omitting it would make the export quietly incomplete,
+    // and a user comparing counts could not tell locked from lost.
+    assert.equal(after.length, 1);
+    assert.equal(after[0].locked, true);
+    assert.equal(after[0].messages.length, 0);
+    assert.equal(after[0].conversationDigest, before[0].conversationDigest);
 });

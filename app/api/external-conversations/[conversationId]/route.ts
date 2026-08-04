@@ -10,6 +10,11 @@ import {
 } from "@/lib/appSettings";
 import { authOptions } from "@/lib/auth";
 import {
+    externalConversationLockState,
+    externalConversationLockedResponse,
+    hasExternalUnlockGrant,
+} from "@/lib/externalConversationLock";
+import {
     deleteExternalConversationSnapshot,
     getExternalConversation,
 } from "@/lib/externalImportService";
@@ -47,6 +52,26 @@ export async function GET(
 
         const url = new URL(req.url);
         const params = await context.params;
+        // §7: a locked snapshot answers 423 before any message is read. The
+        // check is here rather than inside the viewer service because the
+        // grant lives on the request, and threading a Request into a data
+        // reader is how a lock ends up enforced in some callers and not
+        // others.
+        const lockState = await externalConversationLockState(
+            session.user.id,
+            params.conversationId
+        );
+        if (
+            lockState.locked &&
+            !hasExternalUnlockGrant(
+                req,
+                session.user.id,
+                params.conversationId,
+                lockState.storedPassword
+            )
+        ) {
+            return externalConversationLockedResponse();
+        }
         const conversation = await getExternalConversation(
             session.user.id,
             params.conversationId,

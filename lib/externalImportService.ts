@@ -1180,6 +1180,7 @@ export async function* iterateExternalExportConversations(userId: string) {
             sourceCreatedAt: Date | null;
             sourceUpdatedAt: Date | null;
             importedAt: Date;
+            password: string | null;
         }> = await prisma.externalConversation.findMany({
             where: {
                 userId,
@@ -1209,11 +1210,18 @@ export async function* iterateExternalExportConversations(userId: string) {
                 sourceCreatedAt: true,
                 sourceUpdatedAt: true,
                 importedAt: true,
+                password: true,
             },
         });
         if (rows.length === 0) return;
         for (const row of rows) {
-            const messages = await prisma.externalMessage.findMany({
+            // §7: a locked snapshot exports as existence metadata, never as
+            // content. The alternative — omitting it entirely — would make the
+            // export quietly incomplete, and a user comparing counts would
+            // have no way to tell a locked conversation from a lost one.
+            const messages = row.password
+                ? []
+                : await prisma.externalMessage.findMany({
                 where: { externalConversationId: row.id },
                 orderBy: { ordinal: "asc" },
                 select: {
@@ -1230,6 +1238,7 @@ export async function* iterateExternalExportConversations(userId: string) {
                 },
             });
             yield {
+                locked: row.password !== null,
                 provider: row.provider,
                 title: row.title,
                 externalStableId: row.externalStableId,

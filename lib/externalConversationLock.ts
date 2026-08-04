@@ -278,6 +278,78 @@ export async function unlockExternalConversation(input: {
     return outcome;
 }
 
+/**
+ * Verifies a password WITHOUT removing the lock, so the caller can mint an
+ * unlock grant (§7).
+ *
+ * Separate from `unlockExternalConversation` because the two are different
+ * user intents: "let me read this now" and "this is not secret any more". A
+ * single endpoint doing both would silently disarm a lock whenever someone
+ * opened the conversation.
+ */
+export async function verifyExternalConversationAccess(input: {
+    userId: string;
+    conversationId: string;
+    password: string;
+}): Promise<{ storedPassword: string }> {
+    const row = await prisma.externalConversation.findUnique({
+        where: { id: input.conversationId },
+        select: { userId: true, password: true, finalized: true },
+    });
+    if (!row || row.userId !== input.userId || !row.finalized) {
+        throw new ApiSecurityError(404, "NOT_FOUND", "Conversation not found.");
+    }
+    if (!row.password) {
+        throw new ApiSecurityError(
+            409,
+            "EXTERNAL_CONVERSATION_NOT_LOCKED",
+            "This conversation is not locked."
+        );
+    }
+    const { matches } = await verifyConversationPassword(
+        input.password,
+        row.password
+    );
+    if (!matches) {
+        throw new ApiSecurityError(
+            403,
+            "INVALID_LOCK_PASSWORD",
+            "Incorrect password."
+        );
+    }
+    return { storedPassword: row.password };
+}
+
+/** The stored hash, for a caller that needs to test a grant against it. */
+export async function externalConversationLockState(
+    userId: string,
+    conversationId: string
+): Promise<{ locked: boolean; storedPassword: string | null }> {
+    const row = await prisma.externalConversation.findUnique({
+        where: { id: conversationId },
+        select: { userId: true, password: true, finalized: true },
+    });
+    if (!row || row.userId !== userId || !row.finalized) {
+        throw new ApiSecurityError(404, "NOT_FOUND", "Conversation not found.");
+    }
+    return { locked: row.password !== null, storedPassword: row.password };
+}
+
+export const externalConversationLockedResponse = () =>
+    new Response(
+        JSON.stringify({
+            error: "Conversation is locked.",
+            code: "EXTERNAL_CONVERSATION_LOCKED",
+        }),
+        {
+            status: 423,
+            headers: {
+                "Content-Type": "application/json",
+                "Cache-Control": "no-store",
+            },
+        }
+    );
+
 /** Grant helpers, bound to the external resource namespace (B5a). */
 export const createExternalUnlockCookie = (
     userId: string,
