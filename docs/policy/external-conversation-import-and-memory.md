@@ -842,6 +842,21 @@ statement, evidence, searchTerms, context bundle, profile knowledge chunk를
 수 있으며, 해당 memory 원문이 공유된 것은 아닙니다")를 포함합니다. 이 안내는
 구체적 memory의 존재·내용·개수를 제3자에게 노출하지 않습니다.
 
+구현 현황:
+
+- **제외는 `tests/memoryReleaseContracts.test.mjs`가 고정합니다.** share
+  snapshot schema의 키 집합과 message 키 집합을 허용 목록으로 못 박고, memory
+  형태의 필드를 밀어 넣은 snapshot이 parse 후 그것을 버리는지, conversation
+  export가 요청받지 않은 필드를 렌더하지 않는지 확인합니다. 지금 이것이 참인
+  이유는 shape가 좁기 때문이지 무언가 검사해서가 아니었고, 실패 모드는 누군가
+  shape를 넓히고 아무도 눈치채지 못한 채 제3자가 작성자의 기억을 읽게 되는
+  것입니다.
+- **안내 문구는 주입 배선과 함께 배포합니다.** 지금은 어떤 답변도 memory의
+  영향을 받을 수 없으므로, 모든 공유 화면에 "영향을 받았을 수 있다"고 적으면
+  동작하지 않는 기능에 대한 주장이 됩니다. 안내는 무조건 표시해야
+  하며(조건부로 표시하면 그 자체가 작성자의 memory 사용 여부를 노출합니다),
+  그 무조건이 참이 되는 시점이 주입이 열리는 시점입니다.
+
 ### 13.4 memory 사용 투명성
 
 memory 사용 응답에는 소유자 본인에게 "이 응답에 memory N개 사용"을 표시합니다.
