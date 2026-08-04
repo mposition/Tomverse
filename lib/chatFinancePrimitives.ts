@@ -237,3 +237,69 @@ export const createDurableReservation = async (
         },
     });
 };
+
+export type PlanCreditScope = "daily_plan_credits" | "monthly_plan_credits";
+
+/**
+ * Consumes plan credits from a subject's monthly window, and from its daily
+ * window when the caller enforces one.
+ *
+ * The windows themselves are the caller's: chat has a daily message rule that
+ * a background extraction run does not, and only the caller knows which
+ * subject key it is spending against. What is shared is the part that must
+ * never differ — that plan credits are consumed by a conditional increment, so
+ * two concurrent reservations cannot both fit into a balance that only holds
+ * one, and that the daily window is charged before the monthly one so a
+ * failure leaves the smaller of the two untouched.
+ */
+export const reservePlanCreditBuckets = async (
+    tx: Prisma.TransactionClient,
+    input: {
+        subjectKey: string;
+        credits: number;
+        monthly: { start: Date; limit: number };
+        daily?: { start: Date; limit: number } | null;
+    },
+    onConflict: (scope: PlanCreditScope) => never
+): Promise<ReservationEntry[]> => {
+    const entries: ReservationEntry[] = [];
+    if (input.credits <= 0) return entries;
+
+    if (input.daily) {
+        const dailyAllowed = await incrementUsageBucket(
+            tx,
+            input.subjectKey,
+            "day",
+            input.daily.start,
+            input.daily.limit,
+            input.credits
+        );
+        if (!dailyAllowed) onConflict("daily_plan_credits");
+        entries.push({
+            key: input.subjectKey,
+            period: "day",
+            periodStart: input.daily.start,
+            amount: input.credits,
+            metric: "plan-credits",
+        });
+    }
+
+    const monthlyAllowed = await incrementUsageBucket(
+        tx,
+        input.subjectKey,
+        "month",
+        input.monthly.start,
+        input.monthly.limit,
+        input.credits
+    );
+    if (!monthlyAllowed) onConflict("monthly_plan_credits");
+    entries.push({
+        key: input.subjectKey,
+        period: "month",
+        periodStart: input.monthly.start,
+        amount: input.credits,
+        metric: "plan-credits",
+    });
+
+    return entries;
+};

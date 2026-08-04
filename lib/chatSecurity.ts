@@ -53,6 +53,7 @@ import { lockCreditAccount, offsetCreditDebt } from "@/lib/creditDebt";
 import {
     createDurableReservation,
     incrementUsageBucket,
+    reservePlanCreditBuckets,
     reserveProviderCostBudget,
     usagePeriodStart,
     type ReservationEntry,
@@ -2332,58 +2333,40 @@ export const acquireChatAccess = async (
             planReservedCredits = creditAllocation.planReservedCredits;
             addOnReservedCredits = creditAllocation.addOnCreditsRequired;
             decisionState.availableCredits = creditAllocation.planCreditsAvailableNow;
-            if (planReservedCredits > 0) {
-                if (dailyRule) {
-                    const dailyAllowed = await incrementUsage(
-                        tx,
-                        access.subjectKey,
-                        "day",
-                        accessDayWindow.start,
-                        dailyRule.limit,
-                        planReservedCredits
-                    );
-                    if (!dailyAllowed) {
+            // Plan credit windows through the shared primitive (§9). The
+            // windows stay chat's own — a background run has no daily message
+            // rule — but the conditional increment that stops two concurrent
+            // reservations fitting into one balance is shared.
+            reservationEntries.push(
+                ...(await reservePlanCreditBuckets(
+                    tx,
+                    {
+                        subjectKey: access.subjectKey,
+                        credits: planReservedCredits,
+                        monthly: {
+                            start: monthStart,
+                            limit: monthRule.limit,
+                        },
+                        daily: dailyRule
+                            ? {
+                                  start: accessDayWindow.start,
+                                  limit: dailyRule.limit,
+                              }
+                            : null,
+                    },
+                    (scope) => {
                         throw new ChatAccessError(
                             409,
                             CONCURRENT_RESERVATION_CONFLICT,
-                            "Daily plan credit balance changed. Please retry.",
+                            scope === "daily_plan_credits"
+                                ? "Daily plan credit balance changed. Please retry."
+                                : "Credit balance changed. Please retry.",
                             undefined,
-                            { conflictScope: "daily_plan_credits" }
+                            { conflictScope: scope }
                         );
                     }
-                    reservationEntries.push({
-                        key: access.subjectKey,
-                        period: "day",
-                        periodStart: accessDayWindow.start,
-                        amount: planReservedCredits,
-                        metric: "plan-credits",
-                    });
-                }
-                const allowed = await incrementUsage(
-                    tx,
-                    access.subjectKey,
-                    "month",
-                    monthStart,
-                    monthRule.limit,
-                    planReservedCredits
-                );
-                if (!allowed) {
-                    throw new ChatAccessError(
-                        409,
-                        CONCURRENT_RESERVATION_CONFLICT,
-                        "Credit balance changed. Please retry.",
-                        undefined,
-                        { conflictScope: "monthly_plan_credits" }
-                    );
-                }
-                reservationEntries.push({
-                    key: access.subjectKey,
-                    period: "month",
-                    periodStart: monthStart,
-                    amount: planReservedCredits,
-                    metric: "plan-credits",
-                });
-            }
+                ))
+            );
             if (addOnReservedCredits > 0) {
                 addOnReservedCost = Math.ceil(
                     (reservedCost * addOnReservedCredits) / budget.usageCredits
