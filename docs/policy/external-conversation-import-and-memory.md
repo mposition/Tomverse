@@ -479,6 +479,22 @@ window·credit·privacy disclosure 적용. 릴리스 B의 memory 사용은 이 b
   무효화·audit·metric·retry를 수행. sweep 실패가 만료 memory 주입을 허용하지
   않습니다(lazy가 최종 안전장치).
 
+구현: `lib/memoryExpiryService.ts`의 `reconcileExpiredMemories()`가 15분 주기
+maintenance에 함께 실행됩니다.
+
+- **두 절반은 중복이 아닙니다.** lazy가 만료 memory의 프롬프트 도달을 막는
+  유일한 보증이고, sweep은 행이 스스로 만료를 *말하게* 하는 쪽입니다 — 사용자
+  화면에서 사용 중으로 보이지 않고, 계정 memory fingerprint가 움직여 옛 집합으로
+  가격이 매겨진 §10 bundle이 더 이상 검증되지 않습니다.
+- **따라서 sweep이 실행되지 않아도 만료 memory는 주입되지 않습니다.** 이
+  invariant를 DB 테스트가 직접 확인합니다 — 깨지면 sweep의 실행 주기가 정확성
+  의존성이 되고, 그것이 §8.6이 금지하는 상태입니다.
+- **보관 상태(`rejected`·`superseded`·`suspended_*`)의 status는 덮지 않습니다** —
+  §13.1과 같은 규칙입니다.
+- 멱등하고 중단 가능: 처리된 행은 조건에 더 이상 맞지 않고, 배치 상한에 걸리면
+  `truncated`로 보고한 뒤 다음 주기가 나머지를 처리합니다. 실패해도 함께 도는
+  reconciliation을 실패로 만들지 않습니다.
+
 ## 9. Retrieval v1 — 외부 embedding 없음 (확정)
 
 첫 릴리스(B와 C 모두)에서 외부 embedding API·embedding pipeline·vector column·
