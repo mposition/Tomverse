@@ -21,6 +21,11 @@ export const IMAGE_GENERATION_READ_SELECT = {
   preset: true,
   size: true,
   quality: true,
+  provider: true,
+  modelId: true,
+  groupId: true,
+  targetId: true,
+  attemptNumber: true,
   createdAt: true,
   completedAt: true,
   failedAt: true,
@@ -40,6 +45,11 @@ export type ImageGenerationReadRow = {
   preset: string;
   size: string;
   quality: string;
+  provider: string;
+  modelId: string;
+  groupId: string;
+  targetId: string;
+  attemptNumber: number;
   createdAt: Date;
   completedAt: Date | null;
   failedAt: Date | null;
@@ -76,6 +86,13 @@ export async function serializeImageGeneration(
     preset: generation.preset,
     size: generation.size,
     quality: generation.quality,
+    // v2: which model produced this attempt and which comparison slot it
+    // belongs to, so the workspace can group attempts without a second read.
+    provider: generation.provider,
+    modelId: generation.modelId,
+    groupId: generation.groupId,
+    targetId: generation.targetId,
+    attemptNumber: generation.attemptNumber,
     reservedCredits: reservation?.reservedCredits ?? null,
     refunded: Boolean(reservation?.refundedAt),
     publicErrorCode: generation.publicErrorCode,
