@@ -51,6 +51,7 @@ import {
 } from "@/lib/creditLedger";
 import { lockCreditAccount, offsetCreditDebt } from "@/lib/creditDebt";
 import {
+    createDurableReservation,
     incrementUsageBucket,
     reserveProviderCostBudget,
     usagePeriodStart,
@@ -2800,24 +2801,24 @@ export const acquireChatAccess = async (
             costSource: budget.costSource,
             longContextThresholdTokens: budget.longContextThresholdTokens,
         };
-        await tx.chatCreditReservation.create({
-            data: {
-                id: reservationId,
-                userId: access.userId || null,
-                subjectKey: access.subjectKey,
-                traceId,
-                source: reservationSource,
-                provider: budget.provider,
-                modelId: budget.modelId,
-                status: "reserved",
-                idempotencyKey: `chat-credit-reservation:${reservationId}:v1`,
-                reservationPayload: serializeReservation(durableReservation),
-                reservedCredits: budget.usageCredits,
-                reservedCostMicroUsd: BigInt(reservedCost),
-                planReservedCredits,
-                addOnReservedCredits,
-                expiresAt: reservationExpiresAt,
-            },
+        // Written through the shared primitive (§9): settlement, release and
+        // the expiry sweep all read this row, so every financial path has to
+        // create it identically regardless of the admission it came through.
+        await createDurableReservation(tx, {
+            reservationId,
+            userId: access.userId || null,
+            subjectKey: access.subjectKey,
+            traceId,
+            source: reservationSource,
+            provider: budget.provider,
+            modelId: budget.modelId,
+            idempotencyKey: `chat-credit-reservation:${reservationId}:v1`,
+            reservationPayload: serializeReservation(durableReservation),
+            reservedCredits: budget.usageCredits,
+            reservedCostMicroUsd: reservedCost,
+            planReservedCredits,
+            addOnReservedCredits,
+            expiresAt: reservationExpiresAt,
         });
     });
     } catch (error) {

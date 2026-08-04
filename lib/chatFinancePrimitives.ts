@@ -176,3 +176,64 @@ export const reserveProviderCostBudget = async (
 
     return entries;
 };
+
+export type DurableReservationInput = {
+    reservationId: string;
+    userId: string | null;
+    subjectKey: string;
+    traceId: string;
+    /**
+     * Audit metadata only. Which workflow reserved the money is recorded so an
+     * operator can tell them apart; it never changes what any of this does
+     * (docs/policy/credit-and-cost-limits.md §9).
+     */
+    source: string;
+    provider: string;
+    modelId: string;
+    /**
+     * Supplied by the caller, because what makes two requests "the same" is a
+     * workflow question. Chat derives it from the reservation id; memory
+     * extraction binds it to one chunk attempt, so a retried attempt cannot
+     * reserve twice.
+     */
+    idempotencyKey: string;
+    reservationPayload: Prisma.InputJsonValue;
+    reservedCredits: number;
+    reservedCostMicroUsd: number;
+    planReservedCredits: number;
+    addOnReservedCredits: number;
+    expiresAt: Date;
+};
+
+/**
+ * Writes the durable reservation row in the caller's transaction.
+ *
+ * The row is the record that money was committed to a call before the call
+ * happened, and it is what settlement, release and the expiry sweep all work
+ * from — so every financial path has to create it the same way, whatever
+ * admission it went through to get here.
+ */
+export const createDurableReservation = async (
+    tx: Prisma.TransactionClient,
+    input: DurableReservationInput
+) => {
+    await tx.chatCreditReservation.create({
+        data: {
+            id: input.reservationId,
+            userId: input.userId,
+            subjectKey: input.subjectKey,
+            traceId: input.traceId,
+            source: input.source,
+            provider: input.provider,
+            modelId: input.modelId,
+            status: "reserved",
+            idempotencyKey: input.idempotencyKey,
+            reservationPayload: input.reservationPayload,
+            reservedCredits: input.reservedCredits,
+            reservedCostMicroUsd: BigInt(input.reservedCostMicroUsd),
+            planReservedCredits: input.planReservedCredits,
+            addOnReservedCredits: input.addOnReservedCredits,
+            expiresAt: input.expiresAt,
+        },
+    });
+};
