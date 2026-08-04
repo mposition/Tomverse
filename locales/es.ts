@@ -1118,6 +1118,75 @@ export const es = {
             code_style: "Estilo de código",
         },
     },
+    // Inicio de la extracción (Release B, §11 confirmación previa, §21).
+    memoryExtraction: {
+        launchTitle: "Extraer recuerdos de las conversaciones importadas",
+        launchDescription:
+            "Elige las conversaciones importadas de las que extraer candidatos. Los candidatos no se usan en las respuestas hasta que los revisas y apruebas.",
+        modelTitle: "Modelo usado para la extracción",
+        modelUnavailable: "Ahora mismo no hay ningún modelo de extracción disponible.",
+        modelUnavailableDescription:
+            "Un modelo de extracción solo se habilita tras superar una evaluación de calidad. Cuando ocurra, podrás elegirlo aquí.",
+        modelCredits: "{credits} créditos por lote",
+        conversationsTitle: "Elegir conversaciones",
+        conversationsDescription:
+            "Solo se usan las conversaciones que selecciones. Se procesan en lotes según su tamaño y los créditos se cuentan por lote.",
+        conversationsEmpty: "Todavía no has importado ninguna conversación.",
+        conversationsEmptyCta: "Importar conversaciones",
+        selectAllVisible: "Seleccionar todo lo mostrado",
+        clearSelection: "Quitar selección",
+        selectionSummary: "{count} seleccionadas · unos {size}",
+        selectionHidden: "{count} conversaciones seleccionadas no aparecen en esta lista.",
+        selectionTooLarge: "Puedes seleccionar hasta {max} conversaciones a la vez.",
+        conversationMeta: "{messages} mensajes · {size}",
+        loadMore: "Ver más",
+        estimate: "Ver créditos necesarios",
+        estimating: "Calculando…",
+        estimateResult: "{chunks} lotes · unos {credits} créditos",
+        estimateDescription:
+            "{conversations} conversaciones se procesarán en {chunks} lotes. El cargo final se liquida tras la ejecución y nunca supera el importe que confirmaste.",
+        estimateStale: "La selección ha cambiado. Vuelve a comprobar los créditos.",
+        start: "Iniciar extracción por {credits} créditos",
+        starting: "Iniciando…",
+        runInProgress: "Ya hay una extracción en curso.",
+        runInProgressOpen: "Ver progreso",
+        errorGeneric: "Algo ha salido mal. Inténtalo de nuevo.",
+        errorEstimateChanged:
+            "Las conversaciones seleccionadas han cambiado y la estimación ya no coincide. Compruébala antes de iniciar.",
+        errorPairUnavailable: "Ese modelo no está disponible ahora mismo.",
+        errorBudget:
+            "La capacidad de extracción está temporalmente completa. Inténtalo de nuevo en un momento.",
+        runTitle: "Progreso de la extracción",
+        runBack: "Volver a los ajustes de memoria",
+        runNotFound: "No se ha encontrado esta extracción.",
+        runModel: "Modelo",
+        runStarted: "Inicio: {date}",
+        runFinished: "Fin: {date}",
+        runProgress: "{completed} de {total} lotes terminados",
+        runPendingNote:
+            "Esperando a empezar. Puedes cerrar esta página: la extracción continúa y podrás volver aquí a consultarla.",
+        runRunningNote:
+            "La extracción está en curso. Puedes cerrar esta página; los candidatos van apareciendo en la lista de revisión.",
+        runCompletedNote:
+            "La extracción ha terminado. Revisa los candidatos en la lista de revisión.",
+        runFailedNote:
+            "La extracción no pudo terminar. Se conservan los resultados de los lotes completados.",
+        runCancelledNote:
+            "La extracción se ha cancelado. Se conservan los resultados de los lotes completados.",
+        runReview: "Ir a la lista de revisión",
+        cancel: "Cancelar extracción",
+        cancelArmed: "Pulsa otra vez para cancelar",
+        cancelling: "Cancelando…",
+        recentRunsTitle: "Extracciones recientes",
+        recentRunOpen: "Ver detalles",
+        status: {
+            pending: "En espera",
+            running: "En curso",
+            completed: "Terminada",
+            failed: "Fallida",
+            cancelled: "Cancelada",
+        },
+    },
     privacyPolicy: {
         title: "Política de privacidad",
         effective: "Vigente desde: 16 de julio de 2026",

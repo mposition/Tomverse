@@ -1121,6 +1121,75 @@ export const de = {
             code_style: "Code-Stil",
         },
     },
+    // Start der Extraktion (Release B, §11 Bestätigung vorab, §21).
+    memoryExtraction: {
+        launchTitle: "Erinnerungen aus importierten Unterhaltungen gewinnen",
+        launchDescription:
+            "Wählen Sie importierte Unterhaltungen aus, aus denen Kandidaten gewonnen werden. Kandidaten werden erst in Antworten verwendet, wenn Sie sie geprüft und freigegeben haben.",
+        modelTitle: "Modell für die Extraktion",
+        modelUnavailable: "Zurzeit ist kein Extraktionsmodell verfügbar.",
+        modelUnavailableDescription:
+            "Ein Extraktionsmodell wird erst nach bestandener Qualitätsbewertung freigegeben. Danach können Sie es hier auswählen.",
+        modelCredits: "{credits} Credits pro Bündel",
+        conversationsTitle: "Unterhaltungen auswählen",
+        conversationsDescription:
+            "Nur die ausgewählten Unterhaltungen werden verwendet. Sie werden nach Größe gebündelt verarbeitet, und Credits zählen pro Bündel.",
+        conversationsEmpty: "Sie haben noch keine Unterhaltungen importiert.",
+        conversationsEmptyCta: "Unterhaltungen importieren",
+        selectAllVisible: "Alle angezeigten auswählen",
+        clearSelection: "Auswahl aufheben",
+        selectionSummary: "{count} ausgewählt · etwa {size}",
+        selectionHidden: "{count} ausgewählte Unterhaltungen sind in dieser Liste nicht sichtbar.",
+        selectionTooLarge: "Sie können höchstens {max} Unterhaltungen auf einmal auswählen.",
+        conversationMeta: "{messages} Nachrichten · {size}",
+        loadMore: "Mehr anzeigen",
+        estimate: "Benötigte Credits prüfen",
+        estimating: "Wird berechnet…",
+        estimateResult: "{chunks} Bündel · etwa {credits} Credits",
+        estimateDescription:
+            "{conversations} Unterhaltungen werden in {chunks} Bündeln verarbeitet. Die endgültige Abrechnung erfolgt nach dem Lauf und übersteigt den bestätigten Betrag nie.",
+        estimateStale: "Die Auswahl hat sich geändert. Prüfen Sie die Credits erneut.",
+        start: "Extraktion für {credits} Credits starten",
+        starting: "Wird gestartet…",
+        runInProgress: "Es läuft bereits eine Extraktion.",
+        runInProgressOpen: "Fortschritt ansehen",
+        errorGeneric: "Etwas ist schiefgelaufen. Bitte erneut versuchen.",
+        errorEstimateChanged:
+            "Die ausgewählten Unterhaltungen haben sich geändert, die Schätzung passt nicht mehr. Bitte vor dem Start erneut prüfen.",
+        errorPairUnavailable: "Dieses Modell ist zurzeit nicht verfügbar.",
+        errorBudget:
+            "Die Extraktionskapazität ist vorübergehend erschöpft. Bitte kurz später erneut versuchen.",
+        runTitle: "Fortschritt der Extraktion",
+        runBack: "Zurück zu den Erinnerungseinstellungen",
+        runNotFound: "Dieser Extraktionslauf wurde nicht gefunden.",
+        runModel: "Modell",
+        runStarted: "Beginn: {date}",
+        runFinished: "Ende: {date}",
+        runProgress: "{completed} von {total} Bündeln fertig",
+        runPendingNote:
+            "Wartet auf den Start. Sie können diese Seite schließen — der Lauf läuft weiter und Sie können später hier nachsehen.",
+        runRunningNote:
+            "Die Extraktion läuft. Sie können diese Seite schließen; Kandidaten erscheinen nach und nach in der Prüfliste.",
+        runCompletedNote:
+            "Die Extraktion ist abgeschlossen. Prüfen Sie die Kandidaten in der Prüfliste.",
+        runFailedNote:
+            "Die Extraktion konnte nicht abgeschlossen werden. Ergebnisse fertiger Bündel bleiben erhalten.",
+        runCancelledNote:
+            "Die Extraktion wurde abgebrochen. Ergebnisse fertiger Bündel bleiben erhalten.",
+        runReview: "Zur Prüfliste",
+        cancel: "Extraktion abbrechen",
+        cancelArmed: "Zum Abbrechen erneut drücken",
+        cancelling: "Wird abgebrochen…",
+        recentRunsTitle: "Letzte Extraktionen",
+        recentRunOpen: "Details ansehen",
+        status: {
+            pending: "Wartet",
+            running: "Läuft",
+            completed: "Abgeschlossen",
+            failed: "Fehlgeschlagen",
+            cancelled: "Abgebrochen",
+        },
+    },
     privacyPolicy: {
         title: "Datenschutzerklärung",
         effective: "Gültig ab: 16. Juli 2026",
