@@ -140,7 +140,7 @@ test("an unpriced model on an inherited row still reports as fallback-priced", (
   assert.equal(pricing.costSource, "conservative_fallback");
 });
 
-test("the price-clearing migration covers every value seeding could have written", () => {
+test("the price-clearing migration is a frozen record of what seeding once wrote", () => {
   const sql = readFileSync(
     join(
       process.cwd(),
@@ -149,21 +149,46 @@ test("the price-clearing migration covers every value seeding could have written
     "utf8"
   );
 
-  // The allowlist is what stops the migration from erasing an operator's
-  // price, so a model missing from it keeps a stale seeded number forever.
-  for (const model of AVAILABLE_MODELS) {
-    assert.ok(
-      sql.includes(`('${model.id}',`),
-      `${model.id} is not in the migration's seeded-value allowlist`
-    );
-    const resolved = resolveModelPricing(model);
-    assert.ok(
-      new RegExp(
-        `\\('${model.id.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&")}', ${resolved.inputUsdPerMillionTokens}, ${resolved.outputUsdPerMillionTokens},`
-      ).test(sql),
-      `${model.id}: the migration must list the ${resolved.inputUsdPerMillionTokens}/${resolved.outputUsdPerMillionTokens} pair seeding writes today`
-    );
-  }
+  // This used to derive the expectation from the current catalogue: for every
+  // model, the allowlist had to contain the pair `resolveModelPricing` returns
+  // *today*. That inverted the migration's purpose and made it unsafe to
+  // maintain.
+  //
+  // Seeding cannot write a price at all any more. `staticModelRegistrySeedRows`
+  // writes `model.inputUsdPerMillionTokens ?? null`, and no catalogue entry
+  // carries one, so every seeded row holds NULL and inherits lib/modelPricing.ts
+  // (that is what this migration exists to restore). The allowlist is therefore
+  // a record of what seeding wrote *before* that change -- history, and a fixed
+  // set. A model re-priced afterwards was never seeded at its new price, so the
+  // new pair has nothing to clear and does not belong here.
+  //
+  // Deriving it from the catalogue instead forced an edit to this file every
+  // time a profile changed -- and this migration is applied. Editing an applied
+  // migration changes its checksum and `prisma migrate deploy` refuses it on
+  // every environment that already ran it, which is the failure
+  // scripts/compare-schema-to-migrations.mjs and RELEASE_CHECKLIST.md §7.6 both
+  // warn about. So the expectation is frozen here rather than computed, and the
+  // file must not change again.
+  const allowlist = [...sql.matchAll(/\('([^']+)', ([0-9.]+), ([0-9.]+),/g)].map(
+    (match) => `${match[1]}|${match[2]}|${match[3]}`
+  );
+  assert.equal(
+    allowlist.length,
+    47,
+    "the applied migration's allowlist changed size; it is history and must not be edited"
+  );
+  // Spot-checks of the two shapes the allowlist has to keep: a model listed
+  // once at the value seeding wrote, and a model listed twice because its
+  // price changed while seeding still wrote resolved prices.
+  assert.ok(
+    allowlist.includes("glm-5.2|0.5|1"),
+    "glm-5.2's seeded standard-class fallback must stay listed, or a stale row survives"
+  );
+  assert.ok(
+    allowlist.includes("claude-fable-5|15|60") &&
+      allowlist.includes("claude-fable-5|10|50"),
+    "a model seeded at two different prices must keep both rows"
+  );
 
   assert.ok(
     sql.includes("abs(entry.\"cachedInputPriceMultiplier\""),

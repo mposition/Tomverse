@@ -347,19 +347,33 @@ reservation settlement and are stored in `ProviderDailyUsage`. The Admin Usage
 Reconciliation panel therefore labels Zhipu **Internal response accounting**
 instead of **Skipped** when no custom daily-cost endpoint is configured.
 
-Set the GLM model prices to the values that apply to the production account.
-The cached-input multiplier is snapshotted with every request so later pricing
-changes do not rewrite historical estimates:
+GLM-5.2's price lives in `lib/modelPricing.ts` (US$1.40 uncached input, US$4.40
+output, US$0.26 cached input per million tokens), so the registry is the single
+source of truth for it and code review can see what is charged. The cached-input
+multiplier is snapshotted with every request, so later pricing changes do not
+rewrite historical estimates.
+
+These environment variables still override the profile and are still read where
+they are set:
 
 ```text
-CHAT_MODEL_GLM_5_2_INPUT_USD_PER_MILLION=<current uncached input price>
-CHAT_MODEL_GLM_5_2_OUTPUT_USD_PER_MILLION=<current output price>
-CHAT_MODEL_GLM_5_2_CACHED_INPUT_PRICE_MULTIPLIER=0.2
+CHAT_MODEL_GLM_5_2_INPUT_USD_PER_MILLION
+CHAT_MODEL_GLM_5_2_OUTPUT_USD_PER_MILLION
+CHAT_MODEL_GLM_5_2_CACHED_INPUT_PRICE_MULTIPLIER
 ```
 
-The code uses `0.2` as the Zhipu cached-input fallback, but the production value
-must be verified against the current model price or account contract before
-launch.
+They are what the profile replaces. Remove them from staging first and confirm
+`pricingSnapshot.costSource` reads `registry` rather than
+`registry_env_override`, then remove them from production (issue #256). Until
+they are gone the profile changes nothing about what is charged — the override
+still wins — which is why the code ships before the variables are removed and
+not after.
+
+Do not re-add them to pin a price. A value set only in the environment is
+redacted in Railway, cannot be reviewed, and lets staging and production drift
+apart silently; a mistyped one used to drop GLM-5.2 to the standard class
+fallback (US$0.5 / US$1) with no error anywhere. Change the profile instead, with
+a new `pricingVersion`.
 
 Zhipu does not have a supported general-account balance API in the current
 integration. After a recharge, enter the verified USD balance with **Set

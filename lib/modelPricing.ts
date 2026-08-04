@@ -801,6 +801,39 @@ export const MODEL_PRICING: readonly ModelPricingProfile[] = [
         effectiveDate: "2026-08-03",
     },
     {
+        modelId: "glm-5.2",
+        provider: "zhipu",
+        apiModelId: "glm-5.2",
+        ...DIRECT_STANDARD,
+        // The cache-read rate is published as an absolute US$0.26/1M rather
+        // than as a discount, so the multiplier is written as the division
+        // that reproduces it exactly instead of a rounded 0.19 -- the stored
+        // number is what later re-prices a snapshot, and 0.19 would quietly
+        // charge US$0.266.
+        //
+        // This replaces a `conservative_fallback` resolution: with no profile
+        // here, GLM-5.2 priced at the standard class rate (US$0.5 / US$1) and
+        // took the zhipu provider-wide cached multiplier of 0.2, which is a
+        // default in this file and never was evidence about this model.
+        tiers: flatTier(1.4, 4.4, 0.26 / 1.4),
+        reasoningTokenBilling: "billed_as_output",
+        maxOutputTokens: 131_072,
+        // Not raised alongside the ceiling. This is the up-front credit hold,
+        // and it is what GLM-5.2 already reserved on the standard-class
+        // fallback -- moving it is a change to how much of a user's balance a
+        // single request locks, which is a decision about entitlement rather
+        // than about price, and it is not what issue #256 asked for. Sizing it
+        // properly needs this model's own answer-length distribution, which is
+        // also what `reservationOutputBasis` would need before it could say
+        // anything other than `conservative_default`.
+        reservationOutputTokens: 1_024,
+        reservationOutputBasis: "conservative_default",
+        cachedInputPricingVerified: true,
+        priceSource: "zhipu_glm_5_2_published_api_price_list",
+        pricingVersion: "zhipu-glm-5.2-2026-08-04",
+        effectiveDate: "2026-08-04",
+    },
+    {
         modelId: "deepseek-r1",
         provider: "deepseek",
         apiModelId: "deepseek-reasoner",
