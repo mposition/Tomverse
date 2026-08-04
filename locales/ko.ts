@@ -25,6 +25,9 @@ export const ko = {
         languageAndDisplay: "언어 및 화면 설정",
         newChat: "새 대화",
         newImage: "새 이미지",
+        newConversationMenu: "새로 만들기",
+        newImageSignInRequired: "로그인",
+        newImageUpgradeRequired: "Pro 필요",
         imageConversation: "이미지",
         collapse: "사이드바 접기",
         expand: "사이드바 펼치기",
@@ -108,6 +111,9 @@ export const ko = {
     chat: {
         // Image generation workspace (docs/policy/image-generation.md)
         imageGenerationTitle: "이미지 생성",
+        imageGenerationBackToChat: "채팅으로 돌아가기",
+        toolsImageGeneration: "이미지 생성",
+        toolsImageGenerationDescription: "여러 모델의 이미지를 비교합니다",
         imageGenerationModelLabel: "모델",
         imageGenerationModelCount: "모델 {count}개",
         imageGenerationTotalCredits: "합계 {credits} 크레딧",

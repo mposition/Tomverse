@@ -173,6 +173,10 @@ type ImageGenerationWorkspaceProps = {
   flagEnabled: boolean;
   /** Mirrors planAllowsImageGeneration; the server re-checks regardless. */
   planAllowsImageGeneration: boolean;
+  /** Text carried over from the chat composer when the user switched here. */
+  initialPrompt?: string;
+  /** Present only when there is a chat draft to go back to. */
+  onCancelDraft?: () => void;
 };
 
 export function ImageGenerationWorkspace({
@@ -180,11 +184,13 @@ export function ImageGenerationWorkspace({
   onConversationCreated,
   flagEnabled,
   planAllowsImageGeneration,
+  initialPrompt = "",
+  onCancelDraft,
 }: ImageGenerationWorkspaceProps) {
   const { t } = useLanguage();
   const [generations, setGenerations] = useState<GenerationView[]>([]);
   const [historyError, setHistoryError] = useState(false);
-  const [prompt, setPrompt] = useState("");
+  const [prompt, setPrompt] = useState(initialPrompt);
   const [preset, setPreset] = useState<ImagePreset>("standard");
   const [size, setSize] = useState<ImageSize>("1024x1024");
   const [selectedModelIds, setSelectedModelIds] = useState<string[]>([
@@ -719,6 +725,16 @@ export function ImageGenerationWorkspace({
         <h1 className="text-sm font-bold text-zinc-900 dark:text-zinc-100">
           {t("chat.imageGenerationTitle")}
         </h1>
+        {onCancelDraft && (
+          <button
+            type="button"
+            data-testid="image-generation-cancel-draft"
+            onClick={onCancelDraft}
+            className="inline-flex min-h-8 items-center gap-1 rounded-lg border border-zinc-200 px-2.5 py-1 text-xs font-semibold text-zinc-600 transition hover:bg-zinc-100 dark:border-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-900"
+          >
+            {t("chat.imageGenerationBackToChat")}
+          </button>
+        )}
         <span
           data-testid="image-generation-model-summary"
           className="rounded-full border border-zinc-200 px-2 py-0.5 text-[11px] font-semibold text-zinc-500 dark:border-zinc-800 dark:text-zinc-400"

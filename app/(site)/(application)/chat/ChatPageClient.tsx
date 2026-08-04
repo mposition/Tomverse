@@ -462,6 +462,15 @@ export function ChatPageClient({
   // server row, which is only created by the first successful generation
   // request (docs/policy/image-generation.md §6).
   const [isImageDraftActive, setIsImageDraftActive] = useState(false);
+  // What the chat composer held when the user switched to the image draft.
+  // Restored verbatim on the way back: attachments included, since image
+  // generation is text-only and silently dropping them would lose work
+  // (policy §13).
+  const [chatDraftBeforeImage, setChatDraftBeforeImage] = useState<{
+    scopeId: string | null;
+    text: string;
+  } | null>(null);
+  const [imageDraftSeedPrompt, setImageDraftSeedPrompt] = useState("");
   const { data: session, status } = useSession();
   const sessionUserId = session?.user?.id || null;
   // Declared before any model state below because the initial selected models
@@ -2087,10 +2096,43 @@ export function ChatPageClient({
       setFocusToken((prev) => prev + 1);
   };
 
+    // From the composer: carry the typed text into the image prompt and
+    // remember the chat draft so cancelling restores it.
+    const handleStartImageDraft = (draftText: string) => {
+        setChatDraftBeforeImage({
+            scopeId: currentChatIdRef.current,
+            text: draftText,
+        });
+        setImageDraftSeedPrompt(draftText);
+        setIsImageDraftActive(true);
+        currentChatIdRef.current = null;
+        setCurrentChatId(null);
+        setPromptPayload(null);
+        setIsDeepResearchPending(false);
+        setIsInitialConversationResolved(true);
+    };
+
+    // Leaving the image draft without generating: the chat draft comes back
+    // exactly as it was, in the conversation it belonged to.
+    const handleCancelImageDraft = () => {
+        const restore = chatDraftBeforeImage;
+        setIsImageDraftActive(false);
+        setImageDraftSeedPrompt("");
+        setChatDraftBeforeImage(null);
+        if (restore) {
+            currentChatIdRef.current = restore.scopeId;
+            setCurrentChatId(restore.scopeId);
+            setInputValue(restore.text);
+        }
+        setFocusToken((prev) => prev + 1);
+    };
+
     const handleNewImage = () => {
         localComparisonResponsesRef.current.clear();
         latestLocalComparisonPromptRef.current = null;
         setIsImageDraftActive(true);
+        setImageDraftSeedPrompt("");
+        setChatDraftBeforeImage(null);
         currentChatIdRef.current = null;
         setCurrentChatId(null);
         setPromptPayload(null);
@@ -3819,7 +3861,26 @@ export function ChatPageClient({
   );
   const isImageWorkspaceActive =
     !isGuestMode && (isImageDraftActive || Boolean(activeImageConversation));
-  const canOfferNewImage = imageGenerationEnabled && !isGuestMode;
+  // Visible for everyone the flag is on for; locked (never hidden, never
+  // dead-ended) for viewers who cannot use it yet (policy §13).
+  const imageEntitled =
+    !isGuestMode && planAllowsImageGeneration(accountUsage?.plan ?? "Free");
+  const canOfferNewImage = imageGenerationEnabled && imageEntitled;
+  const imageLock: "sign_in" | "upgrade" | null = !imageGenerationEnabled
+    ? null
+    : isGuestMode
+      ? "sign_in"
+      : imageEntitled
+        ? null
+        : "upgrade";
+  const handleLockedImageClick = (lock: "sign_in" | "upgrade") => {
+    if (lock === "sign_in") {
+      setShowGuestSignInPrompt(true);
+      return;
+    }
+    // Same destination the locked model rows use.
+    window.location.assign("/pricing");
+  };
   const imageWorkspaceElement = isImageWorkspaceActive ? (
     <ImageGenerationWorkspace
       // Remount on switch: the workspace's local timeline, draft prompt and
@@ -3827,6 +3888,8 @@ export function ChatPageClient({
       key={isImageDraftActive ? "image-draft" : currentChatId ?? "image-draft"}
       conversationId={isImageDraftActive ? null : currentChatId}
       onConversationCreated={handleImageConversationCreated}
+      initialPrompt={imageDraftSeedPrompt}
+      onCancelDraft={chatDraftBeforeImage ? handleCancelImageDraft : undefined}
       flagEnabled={imageGenerationEnabled}
       planAllowsImageGeneration={
         !isGuestMode && planAllowsImageGeneration(accountUsage?.plan ?? "Free")
@@ -3885,6 +3948,9 @@ export function ChatPageClient({
           isModelSelectionReady={isModelSelectionReady}
           onNewChat={handleNewChat}
           onNewImage={canOfferNewImage ? handleNewImage : null}
+          imageLock={imageLock}
+          onLockedImageClick={handleLockedImageClick}
+          onStartImageDraft={canOfferNewImage ? handleStartImageDraft : undefined}
           imageWorkspace={imageWorkspaceElement}
           onSelectConversation={handleSelectConversation}
           onRename={handleRename}
@@ -3939,6 +4005,9 @@ export function ChatPageClient({
           isModelSelectionReady={isModelSelectionReady}
           onNewChat={handleNewChat}
           onNewImage={canOfferNewImage ? handleNewImage : null}
+          imageLock={imageLock}
+          onLockedImageClick={handleLockedImageClick}
+          onStartImageDraft={canOfferNewImage ? handleStartImageDraft : undefined}
           imageWorkspace={imageWorkspaceElement}
           onSelectConversation={handleSelectConversation}
           onRename={handleRename}

@@ -26,6 +26,7 @@ import {
   Link2,
   Loader2,
   Lock,
+  ImagePlus,
   Microscope,
   Paperclip,
   Plus,
@@ -381,6 +382,14 @@ type ChatInputProps = {
   webSearchMode?: WebSearchMode;
   onWebSearchModeChange?: (mode: WebSearchMode) => void;
   onOpenDeepResearchSetup?: () => void;
+  /**
+   * Switches to the image draft, carrying the composer's current text as the
+   * starting prompt. Absent when the image feature flag is off.
+   */
+  onStartImageDraft?: (draftText: string) => void;
+  /** Set when image generation is visible to this viewer but not usable. */
+  imageGenerationLock?: "sign_in" | "upgrade" | null;
+  onLockedImageGenerationClick?: (lock: "sign_in" | "upgrade") => void;
   isDeepResearchPending?: boolean;
   onDismissDeepResearchChip?: () => void;
 };
@@ -487,6 +496,9 @@ export function ChatInput({
   webSearchMode = "off",
   onWebSearchModeChange,
   onOpenDeepResearchSetup,
+  onStartImageDraft,
+  imageGenerationLock = null,
+  onLockedImageGenerationClick,
   isDeepResearchPending = false,
   onDismissDeepResearchChip,
 }: ChatInputProps) {
@@ -2666,6 +2678,7 @@ export function ChatInput({
               trackProductEvent("chat_tool_menu_opened", selectedModels.length, {});
             }}
             className={`flex shrink-0 touch-manipulation items-center justify-center rounded-full border border-zinc-300 bg-zinc-50 text-zinc-600 transition hover:bg-zinc-100 hover:text-zinc-900 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-300 dark:hover:bg-zinc-800 dark:hover:text-white ${isMobileShell ? "h-11 w-11" : "h-10 w-10"}`}
+            data-testid="composer-tools-button"
             title={t("chat.moreActions")}
             aria-label={t("chat.moreActions")}
             aria-expanded={isMenuOpen && menuView === "actions"}
@@ -3061,6 +3074,52 @@ export function ChatInput({
                       </p>
                     )}
                   </div>
+                  {(onStartImageDraft || imageGenerationLock) && (
+                    <button
+                      type="button"
+                      data-testid="tools-image-generation-row"
+                      data-locked={imageGenerationLock ? "true" : "false"}
+                      onClick={() => {
+                        closeMenu(false);
+                        if (imageGenerationLock) {
+                          // Same routing the locked model rows use: state the
+                          // requirement, then hand off to the existing
+                          // sign-in / upgrade prompt rather than inventing a
+                          // second one.
+                          onLockedImageGenerationClick?.(imageGenerationLock);
+                          return;
+                        }
+                        // No server row is created here: switching to the
+                        // image draft is a client-side move, and the
+                        // conversation only exists once a generation is
+                        // actually reserved (policy section 6).
+                        onStartImageDraft?.(value);
+                      }}
+                      className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left transition hover:bg-zinc-100 dark:hover:bg-zinc-800"
+                    >
+                      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-accent-image-500/10 text-accent-image-500">
+                        <ImagePlus className="h-5 w-5" />
+                      </span>
+                      <span className="flex min-w-0 flex-col">
+                        <span className="text-sm font-medium text-zinc-900 dark:text-zinc-100">
+                          {t("chat.toolsImageGeneration")}
+                        </span>
+                        <span
+                          className={`text-xs ${
+                            imageGenerationLock
+                              ? "font-semibold text-amber-600 dark:text-amber-400"
+                              : "text-zinc-500"
+                          }`}
+                        >
+                          {imageGenerationLock === "sign_in"
+                            ? t("modelStatusReasons.loginRequired")
+                            : imageGenerationLock === "upgrade"
+                              ? t("modelStatusReasons.upgradeRequired")
+                              : t("chat.toolsImageGenerationDescription")}
+                        </span>
+                      </span>
+                    </button>
+                  )}
                   <div className="my-1 border-t border-zinc-200 dark:border-zinc-700" />
                   <button
                     type="button"

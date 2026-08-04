@@ -117,6 +117,10 @@ type MobileChatShellProps = {
   isModelSelectionReady: boolean;
   onNewChat: () => void;
   onNewImage?: (() => void) | null;
+  /** Set when image generation is visible to this viewer but not usable. */
+  imageLock?: "sign_in" | "upgrade" | null;
+  onLockedImageClick?: (lock: "sign_in" | "upgrade") => void;
+  onStartImageDraft?: (draftText: string) => void;
   imageWorkspace?: ReactNode;
   onSelectConversation: (id: string) => void;
   onRename: (id: string, title: string) => void;
@@ -174,6 +178,9 @@ export function MobileChatShell({
   isModelSelectionReady,
   onNewChat,
   onNewImage,
+  imageLock,
+  onLockedImageClick,
+  onStartImageDraft,
   imageWorkspace,
   onSelectConversation,
   onRename,
@@ -1146,6 +1153,9 @@ export function MobileChatShell({
             onOpenDeepResearchSetup={onOpenDeepResearchSetup}
             isDeepResearchPending={isDeepResearchPending}
             onDismissDeepResearchChip={onDismissDeepResearchChip}
+            onStartImageDraft={onStartImageDraft}
+            imageGenerationLock={imageLock ?? null}
+            onLockedImageGenerationClick={onLockedImageClick}
             attachments={attachments}
             onAttachmentsChange={setAttachments}
             attachmentCapabilities={attachmentCapabilities}
@@ -1210,6 +1220,11 @@ export function MobileChatShell({
                     }
                   : null
               }
+              imageLock={imageLock ?? null}
+              onLockedImageClick={(lock) => {
+                setIsDrawerOpen(false);
+                onLockedImageClick?.(lock);
+              }}
               onSelectConversation={(id) => {
                 setIsDrawerOpen(false);
                 drawerReturnFocusRef.current = null;

@@ -21,6 +21,9 @@ export const en = {
         languageAndDisplay: "Language & display",
         newChat: "New Chat",
         newImage: "New Image",
+        newConversationMenu: "New…",
+        newImageSignInRequired: "Sign in",
+        newImageUpgradeRequired: "Pro",
         imageConversation: "Image",
         collapse: "Collapse sidebar",
         expand: "Expand sidebar",
@@ -104,6 +107,9 @@ export const en = {
     chat: {
         // Image generation workspace (docs/policy/image-generation.md)
         imageGenerationTitle: "Image generation",
+        imageGenerationBackToChat: "Back to chat",
+        toolsImageGeneration: "Image generation",
+        toolsImageGenerationDescription: "Compare images from several models",
         imageGenerationModelLabel: "Models",
         imageGenerationModelCount: "{count} model(s)",
         imageGenerationTotalCredits: "Total {credits} credits",
