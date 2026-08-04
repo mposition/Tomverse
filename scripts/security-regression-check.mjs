@@ -745,6 +745,19 @@ const checks = [
       source.includes("model.disabledReason !== null) return null"),
   },
   {
+    name: "xAI image requests pin a mapped size and trust the returned MIME",
+    file: "lib/xaiImageRequest.ts",
+    test: (source) =>
+      // Two ways this path could silently overcharge or corrupt a stored
+      // asset: sending a resolution the approved credits did not price, and
+      // filing JPEG bytes under an assumed PNG. Both fail closed by returning
+      // null so the caller refuses and refunds.
+      source.includes("if (!mapped) return null") &&
+      source.includes("MIME_ALLOWLIST.has(reported.trim())") &&
+      source.includes("if (!mimeType) return null") &&
+      source.includes('response_format: "b64_json"'),
+  },
+  {
     name: "Image pricing check enforces what each disabled reason claims",
     file: "scripts/check-image-pricing.mjs",
     test: (source) =>
