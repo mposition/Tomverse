@@ -1904,6 +1904,12 @@ model ExternalConversation {
   finalized  Boolean  @default(false)
   importedAt DateTime @default(now())
 
+  /// Snapshot lock (§7, release B5). NULL means unlocked; otherwise the same
+  /// scrypt hash format `Conversation.password` uses, written and verified by
+  /// the same `lib/conversationLock.ts` helpers. Locking a snapshot suspends
+  /// the memories it is the last reachable evidence for (§7.1).
+  password String?
+
   messages ExternalMessage[]
 
   @@unique([userId, conversationDigest])

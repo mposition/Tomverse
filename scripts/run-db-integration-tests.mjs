@@ -168,6 +168,7 @@ run(
     "tests/integration/memory-review.db.test.ts",
     "tests/integration/memory-retrieval.db.test.ts",
     "tests/integration/memory-source-deletion.db.test.ts",
+    "tests/integration/external-conversation-lock.db.test.ts",
     "tests/integration/memory-expiry.db.test.ts",
     "tests/integration/chat-context-bundle.db.test.ts",
     "tests/integration/memory-metrics.db.test.ts",
