@@ -64,7 +64,8 @@
     "check:model-pricing-db": "node --conditions=react-server --import tsx scripts/check-model-pricing-db.mjs",
     "report:cost-bucket-corrections": "node --conditions=react-server --import tsx scripts/report-cost-bucket-corrections.mjs",
     "drill:railway-restore-preflight": "node scripts/railway-restore-preflight.mjs",
-    "drill:railway-restore-verify": "node scripts/railway-restore-verify.mjs"
+    "drill:railway-restore-verify": "node scripts/railway-restore-verify.mjs",
+    "verify:tomverse-chat-release-gates": "node scripts/verify-tomverse-chat-release-gates.mjs"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^4.0.24",
@@ -110,7 +111,8 @@
     "eslint-config-next": "16.2.12",
     "tailwindcss": "^4",
     "tsx": "^4.23.1",
-    "typescript": "^6"
+    "typescript": "^6",
+    "yaml": "^2.9.0"
   },
   "overrides": {
     "@eslint/config-array": {
