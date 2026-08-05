@@ -1,14 +1,19 @@
 import "server-only";
 
+import { createHash } from "node:crypto";
 import type { Prisma } from "@prisma/client";
 import {
+  imageAssetR2Key,
   IMAGE_ASSET_CLEANUP_MAX_ATTEMPTS,
+  IMAGE_ORIGINAL_MAX_READ_BYTES,
+  IMAGE_THUMBNAIL_MAX_RETRIES,
   STALE_IMAGE_GENERATION_AFTER_MS,
+  STALE_IMAGE_SETTLING_AFTER_MS,
   type ImageAssetCleanupReason,
 } from "@/lib/imageGenerationStateCore";
 import { reportOperationalIncident } from "@/lib/operationalMonitoring";
 import { prisma } from "@/lib/prisma";
-import { deleteR2Object } from "@/lib/r2";
+import { deleteR2Object, readOwnR2ObjectBytes, writeR2Object } from "@/lib/r2";
 
 // Storage lifecycle for generated images: DB-first deletion tombstones and
 // the fifteen-minute maintenance sweep. Policy:
@@ -105,10 +110,161 @@ export const drainImageAssetCleanupQueue = async (
   return { examined: pending.length, deleted, failed, exhausted };
 };
 
+export type ImageThumbnailRepairResult = {
+  examined: number;
+  repaired: number;
+  failed: number;
+  /** Rows past IMAGE_THUMBNAIL_MAX_RETRIES: no longer retried, still failed. */
+  exhausted: number;
+};
+
+/**
+ * The background thumbnail retry policy §9 promises.
+ *
+ * A thumbnail that failed to derive left a `failed` asset row and nothing
+ * that would ever try again, so the card rendered the full-size original for
+ * the life of the conversation. This re-reads the stored original -- with the
+ * non-destructive R2 read, since the original is the thing being protected --
+ * derives again, and fills the SAME row in. One thumbnail row per generation
+ * either way: creating a second one would put two rows in a role the readers
+ * assume is singular.
+ *
+ * The original is never touched. A repair that could damage it would defeat
+ * the rule it exists to serve.
+ */
+export const repairFailedImageThumbnails = async (
+  limit = 20,
+  now = new Date()
+): Promise<ImageThumbnailRepairResult> => {
+  const pending = await prisma.imageAsset.findMany({
+    where: {
+      role: "thumbnail",
+      status: "failed",
+      deletedAt: null,
+      thumbnailRetryCount: { lt: IMAGE_THUMBNAIL_MAX_RETRIES },
+      // Only for a generation that actually succeeded: a failed generation has
+      // no original to derive from, and repairing a deleted one would write an
+      // object the cleanup sweep has already passed.
+      generation: { status: "succeeded" },
+    },
+    orderBy: { id: "asc" },
+    take: limit,
+    select: {
+      id: true,
+      generationId: true,
+      generation: {
+        select: {
+          userId: true,
+          conversationId: true,
+          assets: {
+            where: { role: "original", status: "ready", deletedAt: null },
+            select: { r2Key: true },
+          },
+        },
+      },
+    },
+  });
+
+  let repaired = 0;
+  let failed = 0;
+  for (const row of pending) {
+    const originalKey = row.generation.assets[0]?.r2Key;
+    if (!originalKey) {
+      // No readable original. Burn an attempt rather than looping on it
+      // forever; the row is not repairable and should reach `exhausted`.
+      failed += 1;
+      await prisma.imageAsset
+        .update({
+          where: { id: row.id },
+          data: { thumbnailRetryCount: { increment: 1 } },
+        })
+        .catch(() => undefined);
+      continue;
+    }
+    // Recomputed rather than read off the row: a row written before the key
+    // was recorded honestly carries a `.thumb-failed` sentinel, and the repair
+    // must write the real key regardless of what the old row says.
+    const thumbKey = imageAssetR2Key({
+      userId: row.generation.userId,
+      conversationId: row.generation.conversationId,
+      generationId: row.generationId,
+      role: "thumbnail",
+    });
+    try {
+      const originalBytes = await readOwnR2ObjectBytes(originalKey, {
+        maxBytes: IMAGE_ORIGINAL_MAX_READ_BYTES,
+      });
+      const sharp = (await import("sharp")).default;
+      const thumbBytes = await sharp(originalBytes)
+        .resize(512, 512, { fit: "inside" })
+        .webp({ quality: 80 })
+        .toBuffer();
+      const metadata = await sharp(thumbBytes).metadata();
+      await writeR2Object(thumbKey, thumbBytes, "image/webp");
+      await prisma.imageAsset.update({
+        where: { id: row.id },
+        data: {
+          status: "ready",
+          r2Key: thumbKey,
+          mimeType: "image/webp",
+          width: metadata.width ?? 0,
+          height: metadata.height ?? 0,
+          byteSize: thumbBytes.byteLength,
+          sha256: createHash("sha256").update(thumbBytes).digest("hex"),
+          // Derived, so it never carries the original's C2PA/SynthID.
+          provenancePreserved: false,
+          thumbnailRetryCount: { increment: 1 },
+          updatedAt: now,
+        },
+      });
+      repaired += 1;
+    } catch (error) {
+      failed += 1;
+      // The key and the prompt stay out of the log (policy §10); the reason is
+      // the whole point and the identifier is the generation.
+      console.error("Image thumbnail repair failed:", {
+        generationId: row.generationId,
+        errorName: error instanceof Error ? error.name : "UnknownError",
+      });
+      await prisma.imageAsset
+        .update({
+          where: { id: row.id },
+          data: { thumbnailRetryCount: { increment: 1 } },
+        })
+        .catch(() => undefined);
+    }
+  }
+
+  const exhausted = await prisma.imageAsset.count({
+    where: {
+      role: "thumbnail",
+      status: "failed",
+      deletedAt: null,
+      thumbnailRetryCount: { gte: IMAGE_THUMBNAIL_MAX_RETRIES },
+    },
+  });
+
+  return { examined: pending.length, repaired, failed, exhausted };
+};
+
 export type ImageInvariantAuditResult = {
   emptyImageConversations: number;
   staleGenerations: number;
+  /**
+   * The subset of `staleGenerations` sitting in `settling`. Counted apart
+   * because it means something different: not a worker that never finished,
+   * but a settlement transaction that failed after the provider was paid.
+   */
+  strandedSettlements: number;
   cleanupBacklog: number;
+  /** Failed thumbnails the repair sweep will still try again. */
+  thumbnailBacklog: number;
+  /**
+   * Failed thumbnails past IMAGE_THUMBNAIL_MAX_RETRIES. These need a person:
+   * the original is intact and the card still renders it, but the derivation
+   * has refused the same bytes every time.
+   */
+  thumbnailsExhausted: number;
 };
 
 /**
@@ -122,21 +278,51 @@ export type ImageInvariantAuditResult = {
 export const auditImageGenerationInvariants = async (
   now = new Date()
 ): Promise<ImageInvariantAuditResult> => {
-  const [emptyImageConversations, staleGenerations, cleanupBacklog] =
-    await Promise.all([
-      prisma.conversation.count({
-        where: { kind: "image", imageGenerations: { none: {} } },
-      }),
-      prisma.imageGeneration.count({
-        where: {
-          status: { in: ["pending", "processing", "settling"] },
-          updatedAt: {
-            lt: new Date(now.getTime() - STALE_IMAGE_GENERATION_AFTER_MS),
-          },
+  const [
+    emptyImageConversations,
+    staleGenerations,
+    strandedSettlements,
+    cleanupBacklog,
+    thumbnailBacklog,
+    thumbnailsExhausted,
+  ] = await Promise.all([
+    prisma.conversation.count({
+      where: { kind: "image", imageGenerations: { none: {} } },
+    }),
+    prisma.imageGeneration.count({
+      where: {
+        status: { in: ["pending", "processing", "settling"] },
+        updatedAt: {
+          lt: new Date(now.getTime() - STALE_IMAGE_GENERATION_AFTER_MS),
         },
-      }),
-      prisma.imageAssetCleanup.count({ where: { completedAt: null } }),
-    ]);
+      },
+    }),
+    prisma.imageGeneration.count({
+      where: {
+        status: "settling",
+        updatedAt: {
+          lt: new Date(now.getTime() - STALE_IMAGE_SETTLING_AFTER_MS),
+        },
+      },
+    }),
+    prisma.imageAssetCleanup.count({ where: { completedAt: null } }),
+    prisma.imageAsset.count({
+      where: {
+        role: "thumbnail",
+        status: "failed",
+        deletedAt: null,
+        thumbnailRetryCount: { lt: IMAGE_THUMBNAIL_MAX_RETRIES },
+      },
+    }),
+    prisma.imageAsset.count({
+      where: {
+        role: "thumbnail",
+        status: "failed",
+        deletedAt: null,
+        thumbnailRetryCount: { gte: IMAGE_THUMBNAIL_MAX_RETRIES },
+      },
+    }),
+  ]);
 
   if (emptyImageConversations > 0) {
     reportOperationalIncident({
@@ -151,13 +337,26 @@ export const auditImageGenerationInvariants = async (
     });
   }
 
-  return { emptyImageConversations, staleGenerations, cleanupBacklog };
+  return {
+    emptyImageConversations,
+    staleGenerations,
+    strandedSettlements,
+    cleanupBacklog,
+    thumbnailBacklog,
+    thumbnailsExhausted,
+  };
 };
 
 export type ImageAssetMaintenanceResult = {
   cleanup: ImageAssetCleanupSweepResult;
+  thumbnails: ImageThumbnailRepairResult;
   invariants: ImageInvariantAuditResult;
-  staleRecovery: { examined: number; refunded: number };
+  staleRecovery: {
+    examined: number;
+    refunded: number;
+    /** Refunds that came from a settlement transaction that had failed. */
+    settlementStranded: number;
+  };
 };
 
 /**
@@ -173,24 +372,37 @@ export const runImageAssetMaintenanceQuietly = async (
 ): Promise<ImageAssetMaintenanceResult> => {
   try {
     const cleanup = await drainImageAssetCleanupQueue(200, now);
+    // Bounded well below the cleanup drain: each repair downloads a full
+    // original and re-encodes it, so this is the expensive arm of the sweep
+    // and must not be able to stretch a fifteen-minute cadence.
+    const thumbnails = await repairFailedImageThumbnails(20, now).catch(() => ({
+      examined: 0,
+      repaired: 0,
+      failed: 0,
+      exhausted: 0,
+    }));
     const { reconcileStaleImageGenerations } = await import(
       "@/lib/imageGenerationService"
     );
     const staleRecovery = await reconcileStaleImageGenerations(now).catch(
-      () => ({ examined: 0, refunded: 0 })
+      () => ({ examined: 0, refunded: 0, settlementStranded: 0 })
     );
     const invariants = await auditImageGenerationInvariants(now);
-    return { cleanup, invariants, staleRecovery };
+    return { cleanup, thumbnails, invariants, staleRecovery };
   } catch (error) {
     console.error("Image asset maintenance failed:", error);
     return {
       cleanup: { examined: 0, deleted: 0, failed: 0, exhausted: 0 },
+      thumbnails: { examined: 0, repaired: 0, failed: 0, exhausted: 0 },
       invariants: {
         emptyImageConversations: 0,
         staleGenerations: 0,
+        strandedSettlements: 0,
         cleanupBacklog: 0,
+        thumbnailBacklog: 0,
+        thumbnailsExhausted: 0,
       },
-      staleRecovery: { examined: 0, refunded: 0 },
+      staleRecovery: { examined: 0, refunded: 0, settlementStranded: 0 },
     };
   }
 };

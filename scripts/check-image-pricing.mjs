@@ -189,6 +189,9 @@ for (const model of IMAGE_MODEL_REGISTRY) {
   if (!verification.verifiedAt) {
     failures.push(`${label}: enabled without a price verification date`);
   }
+  if (!model.pricingVersion || typeof model.pricingVersion !== "string") {
+    failures.push(`${label}: enabled without a pricing version`);
+  }
   if (verification.sources.length === 0) {
     failures.push(`${label}: enabled without an official price source URL`);
   }
@@ -223,6 +226,25 @@ for (const model of IMAGE_MODEL_REGISTRY) {
         `${optionLabel}: ${price.credits} credits is below the policy minimum ${minimum} (worst case ${maxCost} microUSD at the ${IMAGE_COST_PER_CREDIT_CEILING_MICRO_USD} ceiling)`
       );
     }
+  }
+}
+
+// gpt-image-2 keeps the pre-split string so its history stays continuous; no
+// two *other* models may share one, because a version is what identifies which
+// price list a reservation was frozen against.
+const versionOwners = new Map();
+for (const model of IMAGE_MODEL_REGISTRY) {
+  if (!model.pricingVersion) continue;
+  const owners = versionOwners.get(model.pricingVersion) ?? [];
+  owners.push(`${model.provider}/${model.id}`);
+  versionOwners.set(model.pricingVersion, owners);
+}
+for (const [version, owners] of versionOwners) {
+  if (owners.length > 1) {
+    failures.push(
+      `pricingVersion ${version} is claimed by ${owners.length} models (${owners.join(", ")}) -- ` +
+        `a version identifies one price list, so a shared string makes a frozen reservation ambiguous`
+    );
   }
 }
 

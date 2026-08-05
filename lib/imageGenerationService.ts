@@ -54,7 +54,6 @@ import {
 import {
   getImageGenerationPricing,
   IMAGE_GENERATION_MODEL_ID,
-  IMAGE_PRICING_VERSION,
   IMAGE_PROMPT_INPUT_USD_PER_MILLION_TOKENS,
   IMAGE_PROMPT_MAX_TOKENS,
   type ImageQuality,
@@ -63,6 +62,7 @@ import {
 import {
   imageAssetR2Key,
   STALE_IMAGE_GENERATION_AFTER_MS,
+  STALE_IMAGE_SETTLING_AFTER_MS,
   type ImageGenerationFailurePhase,
 } from "@/lib/imageGenerationStateCore";
 import { resolveImageProviderBudget } from "@/lib/imageProviderBudget";
@@ -748,7 +748,10 @@ export const requestImageGeneration = async (
             addOnReservedCredits: addOnShare,
             reservedCostMicroUsd: BigInt(targetMaxCost),
             reservedFundedCostMicroUsd: BigInt(targetFundedCost),
-            pricingVersion: IMAGE_PRICING_VERSION,
+            // The version of the model this target was priced by, not one
+            // global string: a price change to any model would otherwise
+            // start a new version for every model's reservations.
+            pricingVersion: target.model.pricingVersion,
             costSource: "fixed_estimate",
             pricingSnapshot: {
               credits: target.price.credits,
@@ -919,11 +922,41 @@ const finalizeFailure = async (input: {
    * true when the provider was never reached or the cost is provably gone.
    */
   releaseProviderBudget: boolean;
+  /**
+   * Whether this caller may also claim a row already in `settling`, and on
+   * what grounds. Omitted means no -- the ordinary failure paths must never
+   * take a row another settler is holding.
+   *
+   * - `"owned"`: this process made the settling claim and its settlement
+   *   transaction then rolled back. It still owns the row, so there is
+   *   nothing to wait for.
+   * - a `Date`: reclaim only a row untouched since then. The sweep's grounds:
+   *   it cannot know who holds the row, so it waits out any transaction that
+   *   could still be open (STALE_IMAGE_SETTLING_AFTER_MS).
+   *
+   * Either way the reservation's own `reserved -> settling` claim below is
+   * what keeps the money exactly-once: a settlement that already committed
+   * moved the reservation out of `reserved` in the same transaction that
+   * moved the generation out of `settling`, so it cannot be settled twice.
+   */
+  reclaimSettling?: "owned" | Date;
 }) => {
   const claimed = await prisma.imageGeneration.updateMany({
     where: {
       id: input.generationId,
-      status: { in: ["pending", "processing"] },
+      ...(input.reclaimSettling
+        ? {
+            OR: [
+              { status: { in: ["pending", "processing"] } },
+              {
+                status: "settling",
+                ...(input.reclaimSettling === "owned"
+                  ? {}
+                  : { updatedAt: { lt: input.reclaimSettling } }),
+              },
+            ],
+          }
+        : { status: { in: ["pending", "processing"] } }),
     },
     data: { status: "settling" },
   });
@@ -1171,18 +1204,18 @@ export const processImageGeneration = async (
     // Thumbnail is a derived asset: its failure never demotes the original
     // (policy section 9). Derivation re-encodes on purpose -- only the
     // original carries provenance.
+    const thumbKey = imageAssetR2Key({
+      userId: generation.userId,
+      conversationId: generation.conversationId,
+      generationId,
+      role: "thumbnail",
+    });
     try {
       const sharp = (await import("sharp")).default;
       const thumbBytes = await sharp(result.imageBytes)
         .resize(512, 512, { fit: "inside" })
         .webp({ quality: 80 })
         .toBuffer();
-      const thumbKey = imageAssetR2Key({
-        userId: generation.userId,
-        conversationId: generation.conversationId,
-        generationId,
-        role: "thumbnail",
-      });
       await writeR2Object(thumbKey, thumbBytes, "image/webp");
       const thumbMeta = await sharp(thumbBytes).metadata();
       await prisma.imageAsset.create({
@@ -1200,13 +1233,19 @@ export const processImageGeneration = async (
         },
       });
     } catch (error) {
+      // The row records the key the thumbnail *will* occupy, not a
+      // `.thumb-failed` sentinel for an object nobody wrote. `status` already
+      // says it is not there; inventing a second key made the deletion sweep
+      // tombstone an object that never existed, and left the repair with no
+      // row to fill in -- it would have had to create a second thumbnail row
+      // for the same generation.
       await prisma.imageAsset
         .create({
           data: {
             generationId,
             role: "thumbnail",
             status: "failed",
-            r2Key: `${originalKey}.thumb-failed`,
+            r2Key: thumbKey,
             mimeType: "image/webp",
             width: 0,
             height: 0,
@@ -1320,12 +1359,17 @@ export const processImageGeneration = async (
       });
     });
   } catch (error) {
+    // `reclaimSettling: "owned"` because this catch also covers the settlement
+    // transaction rolling back, and that claim was made outside it: without
+    // this the row stays in `settling` with its credits reserved, refused by
+    // the very failure path meant to refund them and skipped by the sweep.
     await finalizeFailure({
       generationId,
       failurePhase: "provider_failed",
       publicErrorCode: "IMAGE_GENERATION_FAILED",
       internalErrorDetail: String(error).slice(0, 500),
       releaseProviderBudget: false,
+      reclaimSettling: "owned",
     }).catch(() => undefined);
     reportOperationalIncident({
       code: "IMAGE_GENERATION_PROCESSING_FAILED",
@@ -1355,30 +1399,71 @@ export const processImageGeneration = async (
 export const reconcileStaleImageGenerations = async (
   now = new Date(),
   limit = 25
-): Promise<{ examined: number; refunded: number }> => {
+): Promise<{
+  examined: number;
+  refunded: number;
+  settlementStranded: number;
+}> => {
   const staleBefore = new Date(now.getTime() - STALE_IMAGE_GENERATION_AFTER_MS);
+  const settlingStaleBefore = new Date(
+    now.getTime() - STALE_IMAGE_SETTLING_AFTER_MS
+  );
   const stale = await prisma.imageGeneration.findMany({
     where: {
-      status: { in: ["pending", "processing"] },
-      updatedAt: { lt: staleBefore },
+      OR: [
+        {
+          status: { in: ["pending", "processing"] },
+          updatedAt: { lt: staleBefore },
+        },
+        // `settling` is included on its own longer window. Leaving it out is
+        // what made the state a trap: the claim into `settling` is made
+        // outside the settlement transaction, so any rollback stranded the row
+        // there with its credits reserved -- and this sweep, the only thing
+        // that refunds an abandoned generation, could not see it.
+        { status: "settling", updatedAt: { lt: settlingStaleBefore } },
+      ],
     },
     orderBy: { updatedAt: "asc" },
     take: limit,
-    select: { id: true },
+    select: { id: true, status: true },
   });
   let refunded = 0;
+  let settlementStranded = 0;
   for (const generation of stale) {
+    const stranded = generation.status === "settling";
     const finalized = await finalizeFailure({
       generationId: generation.id,
-      failurePhase: "stale_job_reconciled",
+      // A stranded settlement is not a lost executor: the provider answered
+      // and the ledger write for its answer was lost. Saying so is what sends
+      // an operator to the database rather than to the provider's status page.
+      failurePhase: stranded ? "settlement_failed" : "stale_job_reconciled",
       publicErrorCode: "IMAGE_GENERATION_FAILED",
       // The executor died at an unknown point; the provider may have been
       // called, so the budget charge stays (conservative).
       releaseProviderBudget: false,
+      reclaimSettling: settlingStaleBefore,
     }).catch(() => false);
-    if (finalized) refunded += 1;
+    if (finalized) {
+      refunded += 1;
+      if (stranded) settlementStranded += 1;
+    }
   }
-  return { examined: stale.length, refunded };
+  if (settlementStranded > 0) {
+    // Distinct from a dead worker, and worth waking someone for: every one of
+    // these is a settlement transaction that failed after the provider was
+    // paid, so the cost is real and the credits had to be given back.
+    reportOperationalIncident({
+      code: "IMAGE_SETTLEMENT_STRANDED",
+      title: "Image generations were stranded mid-settlement and refunded",
+      severity: "error",
+      cooldownMs: 15 * 60 * 1_000,
+      context: {
+        component: "image-generation-service",
+        settlementStranded,
+      },
+    });
+  }
+  return { examined: stale.length, refunded, settlementStranded };
 };
 
 /**

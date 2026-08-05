@@ -177,6 +177,42 @@ test("healthy and unconfigured dependencies produce nothing", () => {
   );
 });
 
+test("a disabled railway monitor produces no incident and no advisory", () => {
+  const plan = planInfrastructureAlerts(
+    dashboard({
+      railway: {
+        status: "disabled",
+        message: "Railway usage monitoring is disabled for this environment.",
+      },
+    })
+  );
+  assert.equal(plan.incidents.length, 0);
+  assert.equal(plan.advisories.length, 0);
+  // The status stays visible on the dashboard rather than being downgraded to
+  // healthy, and it is not conflated with a missing-token unconfigured state.
+  assert.equal(plan.statuses.railway, "disabled");
+  const decision = plan.decisions.find((entry) => entry.dependency === "railway");
+  assert.equal(decision.classification, "none");
+  assert.equal(decision.incident, null);
+});
+
+test("switching one monitor off leaves the other dependencies alerting", () => {
+  const plan = planInfrastructureAlerts(
+    dashboard({
+      railway: {
+        status: "disabled",
+        message: "Railway usage monitoring is disabled for this environment.",
+      },
+      r2: { status: "warning", message: "R2 metric above 80%." },
+      database: { status: "error", message: "Database unreachable." },
+    })
+  );
+  assert.deepEqual(
+    plan.incidents.map((incident) => incident.code).sort(),
+    ["INFRASTRUCTURE_DATABASE_ERROR", "INFRASTRUCTURE_R2_WARNING"]
+  );
+});
+
 test("a suppressed advisory never counts toward reported incidents", () => {
   const plan = planInfrastructureAlerts(
     dashboard({

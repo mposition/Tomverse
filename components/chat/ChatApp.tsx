@@ -80,6 +80,20 @@ type ChatAppProps = {
      */
     contextLayout?: "single" | "comparison";
   } | null;
+  /**
+   * Asks the shell for a context the whole run can share, after this panel's
+   * bundle was refused for drift (§10). The shell prepares once per prompt
+   * however many panels ask, so the run ends up on one new snapshot rather
+   * than one per panel -- which is the difference between re-preparing the
+   * set and the per-panel retry the policy forbids.
+   *
+   * Resolves to `null` when there is no recovery to offer, and the refusal is
+   * then the user's to act on.
+   */
+  onContextBundleStale?: (input: {
+    promptId: string | null;
+    modelId: string;
+  }) => Promise<string | null>;
   isPanelDisabled?: boolean;
   isGuestMode?: boolean;
   webSearchMode?: WebSearchMode;
@@ -120,6 +134,7 @@ function ChatAppComponent({
   modelId,
   initialConversationId = null,
   promptPayload,
+  onContextBundleStale,
   isPanelDisabled = false,
   isGuestMode = false,
   webSearchMode,
@@ -801,20 +816,38 @@ function ChatAppComponent({
             priorAutomaticRetries: contextBundleRetries,
             streamStarted: false,
           });
-          if (recovery.action !== "retry_after_preflight") {
-            // A comparison never retries one panel -- its siblings are on the
-            // snapshot this one just lost, and putting it on a different one
-            // is exactly what sharing a bundle lineage exists to prevent.
-            throw error;
-          }
+          if (recovery.action === "surface_to_user") throw error;
+
+          // Both surviving actions re-prepare; they differ in *whose* context
+          // is prepared. A comparison must not put this panel on a snapshot
+          // its siblings are not on, so the shell prepares one context for the
+          // whole run and hands the same bundle to every panel that asks --
+          // which is re-preparing the set, not retrying a panel. A
+          // single-model send has no set, so the two collapse to the same
+          // call.
+          const refreshed = onContextBundleStale
+            ? await onContextBundleStale({
+                promptId: analyticsPromptId,
+                modelId,
+              })
+            : recovery.action === "retry_after_preflight"
+              ? await prepareChatContextBundle({
+                  conversationId: isGuestMode ? null : targetChatId,
+                  modelIds: [modelId],
+                  prompt: text,
+                })
+              : null;
+          // Nothing to retry with. Re-sending the bundle that was just
+          // refused would be a replay, and the server would refuse it again.
+          if (!refreshed) throw error;
+
           contextBundleRetries += 1;
-          activeContextBundle = await prepareChatContextBundle({
-            conversationId: isGuestMode ? null : targetChatId,
-            modelIds: [modelId],
-            prompt: text,
-          });
-          // Same assistant message id, same user message: the retry replaces
-          // the refused request rather than adding a second turn.
+          activeContextBundle = refreshed;
+          // Same assistant message id, same user message, same admission
+          // token: the retry replaces the refused request rather than adding a
+          // second turn or taking a second concurrency slot. The refused
+          // request never reached `acquireChatAccess`, so its slot is still
+          // this panel's to spend.
           response = await sendChatRequest();
         } else {
           throw error;
@@ -1089,6 +1122,7 @@ function ChatAppComponent({
     }
   }, [
     isGuestMode,
+    onContextBundleStale,
     messages,
     modelId,
     onResponseComplete,

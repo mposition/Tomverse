@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { after, beforeEach, test } from "node:test";
 import { reconcileExpiredMemories } from "@/lib/memoryExpiryService";
+import { getMemoryReport } from "@/lib/memoryMetrics";
 import { retrieveMemoryContext } from "@/lib/memoryRetrievalService";
 import { memoryRetrievalTerms } from "@/lib/memoryRetrievalTerms";
 import { prisma } from "@/lib/prisma";
@@ -21,7 +22,8 @@ const resetData = async () => {
     TRUNCATE TABLE
       "MemoryEvidence",
       "MemoryItem",
-      "UserMemorySettings"
+      "UserMemorySettings",
+      "ChatUsageBucket"
     RESTART IDENTITY CASCADE
   `);
 };
@@ -206,4 +208,16 @@ test("a memory expiring exactly now is expired, not left for the next pass", asy
 
     assert.equal((await reconcileExpiredMemories(NOW)).expiredMemories, 1);
     assert.equal(await statusOf(memory.id), "expired");
+});
+
+test("the sweep reports how many it expired, as a content-free counter", async () => {
+    // §22: the transition leaves no row to aggregate afterwards, so the count
+    // is only knowable at the moment of the sweep.
+    const user = await createUser();
+    await seedMemory(user.id, { expiresAt: PAST });
+    await seedMemory(user.id, { statement: "다른 문장", expiresAt: PAST });
+
+    await reconcileExpiredMemories(NOW);
+    const report = await getMemoryReport({ now: NOW });
+    assert.equal(report.counters.memory_expired, 2);
 });

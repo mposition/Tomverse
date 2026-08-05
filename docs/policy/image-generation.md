@@ -118,9 +118,20 @@ gate 없이 노출되는 배포 창은 금지된다. UI 비노출은 보안 경�
   달라졌다"는 관측 노이즈만 만든다. snapshot의 **직렬화 구조**가 바뀌면 가격
   버전이 아니라 snapshot 안의 `schemaVersion`으로 구분하고, 부재는 `1`로
   해석한다.
-- 장기적으로 전역 `IMAGE_PRICING_VERSION`보다 **모델별 pricing version**이
-  적절하다. 전역 버전을 쓰면 xAI 가격을 추가할 때 OpenAI 가격이 그대로인데도
-  모든 OpenAI 지표가 새 버전으로 갈라진다.
+- **예약이 동결하는 버전은 모델별이다** (`ImageModelProfile.pricingVersion`).
+  전역 `IMAGE_PRICING_VERSION` 하나를 쓰면 xAI 가격을 추가할 때 OpenAI 가격이
+  그대로인데도 모든 OpenAI 지표가 새 버전으로 갈라진다. 명명은
+  `lib/modelPricing.ts`와 같은 `provider-model-date-vN` 형식이다.
+  - `gpt-image-2`만 예외로 `2026-08-03-v1`을 유지한다. 이미 그 문자열로 기록된
+    예약이 있고, 이 모델의 가격은 한 푼도 바뀌지 않았으므로 이력에 경계를
+    만들지 않는다.
+  - 이 값을 `IMAGE_PRICING_VERSION`에서 유도하지 않는다. 유도하면 상한 변경 같은
+    전역 사유가 모델 가격 버전을 끌고 올라가 같은 잡음이 반대 방향으로 생긴다.
+  - `npm run check:image-pricing`이 enabled 모델의 버전 존재와 **전 모델 간
+    유일성**을 강제한다. 두 모델이 한 문자열을 쓰면 동결된 예약이 어느 가격표를
+    가리키는지 판정할 수 없다.
+  - 전역 `IMAGE_PRICING_VERSION`은 v1 flat 가격표(`lib/imageGenerationPricing.ts`)
+    와 상한 정책의 버전으로 남는다. 예약 기록에는 더 이상 쓰지 않는다.
 
 두 비율을 혼용하지 않는다: **판매가 기준 마진**은 `priceCents`가 분모이고
 (Starter 91.3% / Project 87.0% / Power 82.7%, 구독 56.8~82.7%),
@@ -139,6 +150,26 @@ gate 없이 노출되는 배포 창은 금지된다. UI 비노출은 보안 경�
 - **정산은 exactly-once**: `pending|processing → settling`(조건부 claim)
   `→ succeeded|failed`. handler와 15분 reconciliation이 같은 generation을
   중복 정산·환급하지 않는다.
+- **`settling`은 회수 가능해야 한다.** generation의 `settling` claim은 정산
+  transaction **밖**에서 이루어지므로, transaction이 rollback되면(deadlock,
+  connection 유실, 재배포) 행은 크레딧이 예약된 채 `settling`에 남는다.
+  회수 경로가 `pending|processing`만 보면 이 상태는 **누구도 도달하지 못하는
+  덫**이다 — 환급도, terminal 상태도, 폴링 종료도 영원히 오지 않는다.
+  - reconciliation은 `settling`을 **별도의 더 긴 창**
+    (`STALE_IMAGE_SETTLING_AFTER_MS`)으로 함께 회수한다. 창을 분리하는 이유는
+    `pending|processing` 회수는 아무것도 쓰지 않은 행을 되돌리는 것이지만
+    `settling` 회수는 열려 있을 수 있는 크레딧 write와 경합하기 때문이다.
+  - 회수를 안전하게 만드는 것은 창이 아니라 **예약 자신의
+    `reserved → settling` claim**이다. 이 claim은 정산 transaction 안에 있고
+    generation을 종결시키는 것과 같은 transaction이므로, 이미 커밋된 정산은
+    두 번째 시도를 거부한다.
+  - 자기 정산 transaction이 실패한 실행자는 이미 claim을 소유하므로 창을
+    기다리지 않고 즉시 회수한다.
+  - **`settlement_failed`는 `provider_failed`와 다른 실패 단계다.** 전자는
+    이미지가 도착했고 그 장부 기록을 잃은 것이고, 후자는 이미지가 오지
+    않은 것이다. 둘을 합치면 운영자가 공급자 상태 페이지를 보러 간다.
+    회수된 stranded 정산은 `IMAGE_SETTLEMENT_STRANDED`로 보고하고 Admin
+    Console의 invariant 줄에 별도 수치로 노출한다.
 - 전액 환급 조건: provider 거절, moderation 차단, provider 오류, 원본 저장
   실패, 처리 시간 초과, stale 작업 reconciliation. 크레딧과 funded cost를
   ledger 규칙(`settleAddOnCredits`)대로 함께 복원하고 플랜 사용량도
@@ -226,6 +257,21 @@ gate 없이 노출되는 배포 창은 금지된다. UI 비노출은 보안 경�
   provenance 보존을 위해서다. UI에는 "AI로 생성된 이미지" 표시를 별도로
   둔다(시각 + accessible text). 썸네일만 파생 자산으로 생성하고, 썸네일
   실패는 원본 성공을 되돌리지 않는다(배경 재시도).
+- **배경 재시도는 15분 maintenance sweep의 `repairFailedImageThumbnails`다.**
+  - **원본을 절대 건드리지 않는다.** 재시도는 저장된 원본을 **비파괴 읽기**
+    (`readOwnR2ObjectBytes`)로 읽는다. `readR2Object`는 metadata 불일치 시
+    객체를 삭제하는데 — 신뢰할 수 없는 업로드에는 옳지만 — 사용자가 결제했고
+    재생성할 수 없는 원본에 쓰면 복구가 복구 대상을 파괴한다.
+  - **실패 행은 썸네일이 놓일 실제 key를 기록한다.** 존재하지 않는 객체를
+    가리키는 sentinel key를 만들지 않는다. sentinel은 대화 삭제 시 쓰인 적
+    없는 객체의 tombstone을 남기고, 재시도가 채워 넣을 행을 없앤다 —
+    generation당 썸네일 행은 하나여야 한다.
+  - 시도 상한은 `IMAGE_THUMBNAIL_MAX_RETRIES`이며 cleanup 상한보다 **낮다**.
+    cleanup은 언젠가 성공할 삭제를 재시도하지만 썸네일 실패는 대개 결정적
+    (파생이 그 바이트를 거부)이고 매 시도가 원본을 다시 내려받는다.
+  - 상한 초과 행은 Admin invariant에 `thumbnailsExhausted`로 노출한다. 대기
+    중인 backlog는 issue로 세지 않는다 — sweep이 가져갈 것이고 카드는 그동안
+    원본을 렌더링한다.
 - R2 키 namespace에는 **이메일 해시를 쓰지 않는다**(변경 가능·추측 가능).
   opaque `userId` 또는 HMAC subject key 기반 prefix를 사용한다.
 - 삭제 순서는 **DB-first tombstone**이다: 트랜잭션에서 대상 자산을
@@ -275,8 +321,16 @@ gate 없이 노출되는 배포 창은 금지된다. UI 비노출은 보안 경�
   attempt 갱신은 같은 트랜잭션이며, succeeded target의 재실행은 거부한다
   (이중 과금 금지). UI는 target의 최신 attempt를 현재 상태로 보여주고
   과거 attempt는 감사 기록으로 보존한다.
-- 폴링은 그룹 단위 endpoint 하나로 그룹·target·attempt 상태를 함께
-  반환한다.
+- **폴링은 그룹 단위 endpoint 하나로 그룹·target·attempt 상태를 함께
+  반환한다** — `GET /api/images/groups/{groupId}`. generation별 폴링은
+  비교 관찰 비용을 모델 수에 비례시키며, client는 거절된 폴링을 "변화 없음"
+  으로 읽으므로 status rate limit 소진이 **조용히 갱신을 멈춘 화면**으로
+  나타난다. `GET /api/images/generations/{generationId}`는 만료된 signed
+  asset URL을 다시 발급받는 단일 카드 복구용이며 폴링 경로가 아니다.
+- **어느 attempt가 target의 현재 상태인지는 한 곳에서 정한다**
+  (`currentImageAttempt`, `deriveImageGroupStatusFromTargets` —
+  `lib/imageGenerationStateCore.ts`). 전체 attempt를 파생 함수에 넘기면
+  이미 재시도된 실패가 재시도 진행 중에도 `partial_success`를 보고한다.
 
 ## 12. 이미지 모델 registry와 가격 검증 (v2)
 

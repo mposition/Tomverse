@@ -6,7 +6,7 @@
 - Applies to: The image generation workspace, its four entry points, and the catalogue's image tab — desktop and mobile alike
 - Severity when violated: Release blocker
 - Owners: Product Design, Frontend, Accessibility, QA
-- Last reviewed: 2026-08-04
+- Last reviewed: 2026-08-05
 
 The product rules behind this contract live in
 `docs/policy/image-generation.md` (v2, §11–§15). This document is the UI
@@ -26,6 +26,8 @@ rendering, this contract is the answer.
 | Draft carry-over/restore, lock derivation, workspace mounting | `app/(site)/(application)/chat/ChatPageClient.tsx` |
 | Sidebar placement of the launcher | `components/chat/ChatSidebar.tsx` |
 | Which models exist, their prices and their holds | `lib/imageModelRegistry.ts` |
+| Group polling endpoint the timeline reads | `app/api/images/groups/[groupId]/route.ts` |
+| Current-attempt and group-status derivation | `lib/imageGenerationStateCore.ts`, `lib/imageGenerationRead.ts` |
 | Copy | `locales/*.ts` (`chat.imageGeneration*`, `chat.imageModel*`, `chat.modelPickerTab*`, `sidebar.newImage*`) |
 
 ## Purpose
@@ -161,6 +163,30 @@ The grid is two columns from `sm` upward when a group has more than one target,
 and stacked below that. Each card names its model when the group has more than
 one target.
 
+### Polling is per group, never per model
+
+The workspace polls `GET /api/images/groups/{groupId}` — one request per
+unsettled group, whatever the model count (policy §11). Polling per generation
+is a contract violation, not a style preference:
+
+- The read cost of watching a comparison would scale with the number of models
+  compared, which is the feature itself. At the 5s cadence a five-model group
+  spends its own 60/minute status allowance exactly, and a group stuck until
+  the stale sweep spends thousands of the daily allowance.
+- A refused poll reads to the client as "no update", so exhausting that
+  allowance surfaces as a workspace that silently stops refreshing — the user
+  is told nothing and the generation they paid for looks stuck.
+
+`GET /api/images/generations/{generationId}` stays, for one job only:
+re-reading a single card whose signed asset URLs expired. It is not a polling
+path.
+
+Which attempt is a target's current state is decided by
+`currentImageAttempt()` in `lib/imageGenerationStateCore.ts`, and the group's
+status by `deriveImageGroupStatusFromTargets()`. Neither the route nor the
+client may re-derive it: handing every attempt to the derivation would let an
+already-retried failure report `partial_success` while the retry is running.
+
 ## Price and credit display
 
 - Per-model price and the group total are shown **before** submitting, never
@@ -223,6 +249,7 @@ Verified for **both** desktop and mobile projects:
 | 11 | held models | every one listed, disabled, hold stated |
 | 12 | picked from the image tab | workspace opens seeded with that model |
 | 13 | composer draft carry-over | text carried; cancel restores it exactly |
+| 14 | multi-model group polling | one `/api/images/groups/*` request per tick, not one per model |
 
 ## Automated regression contract
 
@@ -261,6 +288,7 @@ rather than the behaviour.
 - [ ] The textarea still owns its own full-width row
 - [ ] No chat-only surface (ChatInput, ChatApp, comparison rail, AI Review) mounts
 - [ ] Group state is still derived from the latest attempt per target
+- [ ] Polling is still one request per group, through the group endpoint
 - [ ] A retry still replaces its card in place
 - [ ] Prices are quoted before submit, per model and in total
 - [ ] `accent-image-*` tokens only; no reserved gradient

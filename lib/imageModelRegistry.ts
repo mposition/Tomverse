@@ -75,6 +75,17 @@ export type ImageModelProfile = {
   provenance: readonly ("c2pa" | "synthid")[];
   /** MIME types the adapter may store unmodified. */
   outputMimeTypes: readonly string[];
+  /**
+   * The version of *this model's* price list.
+   *
+   * Per model rather than one global string, because a global one splits every
+   * model's metrics whenever any model's price moves: adding xAI would have
+   * started a new version for gpt-image-2 reservations whose price had not
+   * changed by a cent. A reservation freezes the version of the model it was
+   * priced by, so a price change to one model leaves every other model's
+   * history continuous.
+   */
+  pricingVersion: string;
   priceVerification: ImageModelPriceVerification;
   /** Free-text note surfaced in the admin panel for a disabled model. */
   disabledNote?: string;
@@ -103,6 +114,9 @@ const OPENAI_GPT_IMAGE_2: ImageModelProfile = {
   latencyClass: "balanced",
   provenance: ["c2pa"],
   outputMimeTypes: ["image/png"],
+  // Deliberately the string reservations already carry: this model's prices
+  // have not moved, so its metrics must not gain a boundary.
+  pricingVersion: "2026-08-03-v1",
   priceVerification: {
     verifiedAt: "2026-08-03",
     sources: [
@@ -168,6 +182,7 @@ const GOOGLE_GEMINI_31_FLASH_IMAGE: ImageModelProfile = {
   latencyClass: "fast",
   provenance: ["synthid"],
   outputMimeTypes: ["image/png", "image/jpeg"],
+  pricingVersion: "google-gemini-3-1-flash-image-2026-08-04-v1",
   priceVerification: {
     verifiedAt: "2026-08-04",
     sources: [
@@ -226,6 +241,7 @@ const XAI_GROK_IMAGINE_IMAGE_QUALITY: ImageModelProfile = {
   // none.
   provenance: [],
   outputMimeTypes: ["image/jpeg", "image/png"],
+  pricingVersion: "xai-grok-imagine-2026-08-04-v1",
   priceVerification: {
     verifiedAt: "2026-08-04",
     sources: [
@@ -266,6 +282,7 @@ const GOOGLE_GEMINI_31_FLASH_LITE_IMAGE: ImageModelProfile = {
   // the other two do not.
   provenance: ["synthid", "c2pa"],
   outputMimeTypes: ["image/png", "image/jpeg"],
+  pricingVersion: "google-gemini-3-1-flash-lite-image-2026-08-04-v1",
   priceVerification: {
     verifiedAt: "2026-08-04",
     sources: [
@@ -301,6 +318,7 @@ const GOOGLE_GEMINI_3_PRO_IMAGE: ImageModelProfile = {
   latencyClass: "slow",
   provenance: ["synthid"],
   outputMimeTypes: ["image/png", "image/jpeg"],
+  pricingVersion: "google-gemini-3-pro-image-2026-08-04-v1",
   priceVerification: {
     verifiedAt: "2026-08-04",
     sources: [
