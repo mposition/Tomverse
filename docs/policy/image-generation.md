@@ -257,6 +257,21 @@ gate 없이 노출되는 배포 창은 금지된다. UI 비노출은 보안 경�
   provenance 보존을 위해서다. UI에는 "AI로 생성된 이미지" 표시를 별도로
   둔다(시각 + accessible text). 썸네일만 파생 자산으로 생성하고, 썸네일
   실패는 원본 성공을 되돌리지 않는다(배경 재시도).
+- **배경 재시도는 15분 maintenance sweep의 `repairFailedImageThumbnails`다.**
+  - **원본을 절대 건드리지 않는다.** 재시도는 저장된 원본을 **비파괴 읽기**
+    (`readOwnR2ObjectBytes`)로 읽는다. `readR2Object`는 metadata 불일치 시
+    객체를 삭제하는데 — 신뢰할 수 없는 업로드에는 옳지만 — 사용자가 결제했고
+    재생성할 수 없는 원본에 쓰면 복구가 복구 대상을 파괴한다.
+  - **실패 행은 썸네일이 놓일 실제 key를 기록한다.** 존재하지 않는 객체를
+    가리키는 sentinel key를 만들지 않는다. sentinel은 대화 삭제 시 쓰인 적
+    없는 객체의 tombstone을 남기고, 재시도가 채워 넣을 행을 없앤다 —
+    generation당 썸네일 행은 하나여야 한다.
+  - 시도 상한은 `IMAGE_THUMBNAIL_MAX_RETRIES`이며 cleanup 상한보다 **낮다**.
+    cleanup은 언젠가 성공할 삭제를 재시도하지만 썸네일 실패는 대개 결정적
+    (파생이 그 바이트를 거부)이고 매 시도가 원본을 다시 내려받는다.
+  - 상한 초과 행은 Admin invariant에 `thumbnailsExhausted`로 노출한다. 대기
+    중인 backlog는 issue로 세지 않는다 — sweep이 가져갈 것이고 카드는 그동안
+    원본을 렌더링한다.
 - R2 키 namespace에는 **이메일 해시를 쓰지 않는다**(변경 가능·추측 가능).
   opaque `userId` 또는 HMAC subject key 기반 prefix를 사용한다.
 - 삭제 순서는 **DB-first tombstone**이다: 트랜잭션에서 대상 자산을

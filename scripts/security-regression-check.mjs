@@ -773,6 +773,41 @@ const checks = [
       source.includes("marked operational_hold without a price verification date"),
   },
   {
+    name: "The thumbnail repair cannot destroy the original it derives from",
+    file: "lib/imageAssetLifecycle.ts",
+    test: (source) =>
+      // readR2Object deletes an object whose metadata does not match what the
+      // caller claimed -- correct for an untrusted upload, catastrophic for a
+      // generated original the user paid for and cannot regenerate. The repair
+      // reads through the non-destructive path, and only ever writes the
+      // thumbnail key.
+      source.includes("readOwnR2ObjectBytes(originalKey") &&
+      !source.includes("readR2Object(") &&
+      source.includes('writeR2Object(thumbKey, thumbBytes, "image/webp")') &&
+      // Bounded, so one corrupt object cannot pull the maintenance process
+      // over, and bounded in attempts so it stops rather than re-downloading
+      // forever.
+      source.includes("IMAGE_ORIGINAL_MAX_READ_BYTES") &&
+      source.includes("thumbnailRetryCount: { lt: IMAGE_THUMBNAIL_MAX_RETRIES }"),
+  },
+  {
+    name: "A non-destructive R2 read exists and stays non-destructive",
+    file: "lib/r2.ts",
+    test: (source) => {
+      const start = source.indexOf("export async function readOwnR2ObjectBytes");
+      if (start === -1) return false;
+      const end = source.indexOf("export async function writeR2Object", start);
+      const body = source.slice(start, end === -1 ? undefined : end);
+      // The one thing this function must never grow: the delete-on-mismatch
+      // branch that makes readR2Object right for uploads and wrong here.
+      return (
+        !body.includes("deleteInvalidObject") &&
+        !body.includes("DeleteObjectCommand") &&
+        body.includes("options.maxBytes")
+      );
+    },
+  },
+  {
     name: "Stale image recovery can reclaim a stranded settlement",
     file: "lib/imageGenerationService.ts",
     test: (source) =>

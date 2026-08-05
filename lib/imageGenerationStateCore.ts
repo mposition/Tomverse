@@ -122,6 +122,20 @@ export type ImageAssetCleanupReason =
 // operator, not attempt one hundred.
 export const IMAGE_ASSET_CLEANUP_MAX_ATTEMPTS = 10;
 
+// Policy §9 promises the thumbnail retries in the background, because its
+// failure must not demote the original. Fewer attempts than a cleanup gets:
+// a cleanup retries a delete that will eventually succeed, while a thumbnail
+// failure is usually sharp refusing the bytes -- deterministic, and repeating
+// it forever would re-download the original on every sweep to learn the same
+// answer. Past this the row stays `failed`, the card keeps rendering the
+// original, and the count surfaces to an operator.
+export const IMAGE_THUMBNAIL_MAX_RETRIES = 4;
+
+// Bound on a single repair read. Generous next to any gpt-image-2 original
+// (a 1536x1024 PNG is single-digit MB) and it exists so a corrupt or
+// unexpectedly huge object cannot pull the maintenance process over.
+export const IMAGE_ORIGINAL_MAX_READ_BYTES = 32 * 1024 * 1024;
+
 // Group state is never stored (policy §11): it derives from each target's
 // CURRENT attempt only. Passing every attempt would let an already-retried
 // failure drag the derivation backwards -- callers must pass exactly one

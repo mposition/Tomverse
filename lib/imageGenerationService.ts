@@ -1204,18 +1204,18 @@ export const processImageGeneration = async (
     // Thumbnail is a derived asset: its failure never demotes the original
     // (policy section 9). Derivation re-encodes on purpose -- only the
     // original carries provenance.
+    const thumbKey = imageAssetR2Key({
+      userId: generation.userId,
+      conversationId: generation.conversationId,
+      generationId,
+      role: "thumbnail",
+    });
     try {
       const sharp = (await import("sharp")).default;
       const thumbBytes = await sharp(result.imageBytes)
         .resize(512, 512, { fit: "inside" })
         .webp({ quality: 80 })
         .toBuffer();
-      const thumbKey = imageAssetR2Key({
-        userId: generation.userId,
-        conversationId: generation.conversationId,
-        generationId,
-        role: "thumbnail",
-      });
       await writeR2Object(thumbKey, thumbBytes, "image/webp");
       const thumbMeta = await sharp(thumbBytes).metadata();
       await prisma.imageAsset.create({
@@ -1233,13 +1233,19 @@ export const processImageGeneration = async (
         },
       });
     } catch (error) {
+      // The row records the key the thumbnail *will* occupy, not a
+      // `.thumb-failed` sentinel for an object nobody wrote. `status` already
+      // says it is not there; inventing a second key made the deletion sweep
+      // tombstone an object that never existed, and left the repair with no
+      // row to fill in -- it would have had to create a second thumbnail row
+      // for the same generation.
       await prisma.imageAsset
         .create({
           data: {
             generationId,
             role: "thumbnail",
             status: "failed",
-            r2Key: `${originalKey}.thumb-failed`,
+            r2Key: thumbKey,
             mimeType: "image/webp",
             width: 0,
             height: 0,

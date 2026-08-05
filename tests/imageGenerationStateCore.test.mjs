@@ -3,6 +3,8 @@ import { test } from "node:test";
 
 import {
   IMAGE_ASSET_CLEANUP_MAX_ATTEMPTS,
+  IMAGE_ORIGINAL_MAX_READ_BYTES,
+  IMAGE_THUMBNAIL_MAX_RETRIES,
   IMAGE_ASSET_CLEANUP_REASONS,
   IMAGE_ASSET_KEY_PREFIX,
   IMAGE_GENERATION_FAILURE_PHASES,
@@ -188,4 +190,32 @@ test("settling is still terminal-adjacent, not a state anything transitions out 
     ),
     ["succeeded", "failed"]
   );
+});
+
+test("the thumbnail retry is bounded, and lower than a cleanup's", () => {
+  // A cleanup retries a delete that will eventually succeed. A thumbnail
+  // failure is usually the derivation refusing the bytes -- deterministic --
+  // and each attempt re-downloads the original to learn the same answer, so
+  // it gives up sooner and surfaces instead.
+  assert.ok(IMAGE_THUMBNAIL_MAX_RETRIES > 1);
+  assert.ok(IMAGE_THUMBNAIL_MAX_RETRIES < IMAGE_ASSET_CLEANUP_MAX_ATTEMPTS);
+  assert.ok(IMAGE_ORIGINAL_MAX_READ_BYTES >= 8 * 1024 * 1024);
+});
+
+test("the original and the thumbnail never share an R2 key", () => {
+  // The failed-thumbnail row records the key the thumbnail will occupy, so
+  // the repair can fill that row in rather than adding a second one. That is
+  // only safe while the two roles are distinct keys under the same prefix --
+  // otherwise the failure row would collide with the original it derives
+  // from, which r2Key's unique constraint makes a hard error.
+  const input = {
+    userId: "user-1",
+    conversationId: "conv-1",
+    generationId: "gen-1",
+  };
+  const original = imageAssetR2Key({ ...input, role: "original" });
+  const thumbnail = imageAssetR2Key({ ...input, role: "thumbnail" });
+  assert.notEqual(original, thumbnail);
+  assert.ok(original.startsWith(imageConversationR2Prefix("user-1", "conv-1")));
+  assert.ok(thumbnail.startsWith(imageConversationR2Prefix("user-1", "conv-1")));
 });
