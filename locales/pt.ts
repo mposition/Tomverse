@@ -219,6 +219,8 @@ export const pt = {
         responseCancelled: "A geração da resposta foi interrompida.",
         responseGenerating: "Gerando uma resposta.",
         responseComplete: "Resposta concluída.",
+        responseIncomplete: "A resposta parou no limite de comprimento de saída.",
+        responseIncompleteNotice: "A resposta foi interrompida pelo limite de comprimento de saída. Você pode continuar com uma pergunta de acompanhamento.",
         responseFailed: "A solicitação falhou.",
         traceId: "ID de rastreamento",
         retry: "Tentar novamente",
@@ -406,6 +408,8 @@ export const pt = {
         fileErrorHelpLink: "Abrir ajuda de upload de arquivos",
     },
     share: {
+        personalizationNotice:
+            "Estas respostas podem ter sido moldadas pelas configurações de personalização de quem as gerou. As memórias em si não são compartilhadas.",
         eyebrow: "Tomverse shared conversation",
         publicDocumentDescription: "Snapshot público somente leitura criado no Tomverse. Atualizações posteriores da conversa não são adicionadas a esta página.",
         readOnly: "Somente leitura",

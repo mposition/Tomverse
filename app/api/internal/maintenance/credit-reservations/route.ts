@@ -14,9 +14,10 @@ import { createHash, timingSafeEqual } from "node:crypto";
 import { after } from "next/server";
 import { reconcileExpiredChatCreditReservations } from "@/lib/chatSecurity";
 import { reconcileExpiredChatRequestLeases } from "@/lib/chatRequestLease";
+import { reconcileSourceLockedMemories } from "@/lib/externalConversationLockService";
 import { reconcileExpiredExternalImportStaging } from "@/lib/externalImportService";
 import { reconcileExpiredMemories } from "@/lib/memoryExpiryService";
-import { dispatchPendingMemoryExtractionRuns } from "@/lib/memoryExtractionDispatch";
+import { dispatchPendingMemoryExtractionRuns } from "@/lib/memoryExtractionWorker";
 import { reportOperationalIncident } from "@/lib/operationalMonitoring";
 import {
   completeScheduledJob,
@@ -95,6 +96,18 @@ export async function POST(request: Request) {
       expiredMemories: 0,
       truncated: false,
     }));
+    // Source-lock convergence (policy §7.1): the lock transition is atomic, so
+    // this exists for the drift the transaction cannot see -- evidence added
+    // to a memory after its source was locked, or a source unlocked while a
+    // memory was being edited. Same never-throws rule as the sweep above.
+    const memorySourceLocks = await reconcileSourceLockedMemories().catch(
+      () => ({
+        memoriesSuspended: 0,
+        memoriesRestored: 0,
+        memoriesExpired: 0,
+        truncated: false,
+      })
+    );
     // Memory extraction recovery (policy §11.1), deliberately last.
     //
     // This is the *dispatcher*, not only the lease sweep: reclaiming an expired
@@ -107,14 +120,13 @@ export async function POST(request: Request) {
     // well as a run cap -- a run count is not a time bound -- but ordering it
     // last means even a pathological provider cannot delay the credit, refund
     // and notification work, which is §11.1's actual requirement. Never throws.
-    const memoryExtractionDispatch = await dispatchPendingMemoryExtractionRuns().catch(
-      () => ({
+    const memoryExtractionDispatch =
+      await dispatchPendingMemoryExtractionRuns().catch(() => ({
         reclaimedRuns: 0,
-        dispatched: 0,
+        dispatchedRuns: 0,
+        chunksProcessed: 0,
         skippedForTime: 0,
-        outcomes: {},
-      })
-    );
+      }));
     await completeScheduledJob({
       runId: run?.id,
       processedCount: result.examined,
@@ -128,6 +140,7 @@ export async function POST(request: Request) {
         externalImportStaging,
         memoryExtractionDispatch,
         memoryExpiry,
+        memorySourceLocks,
       },
     });
     return Response.json(

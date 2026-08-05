@@ -1,8 +1,16 @@
+// `disabled` is deliberately distinct from `unconfigured`: the credentials are
+// present and correct, an operator has switched this monitor off for the
+// environment. Neither status alerts, but conflating them would make a real
+// missing-token misconfiguration look like an intentional opt-out.
 export type InfrastructureStatus =
   | "healthy"
   | "warning"
   | "unconfigured"
+  | "disabled"
   | "error";
+
+export const RAILWAY_USAGE_MONITOR_DISABLED_MESSAGE =
+  "Railway usage monitoring is disabled for this environment.";
 
 export type RailwayUsageMeasurement = {
   measurement: string;

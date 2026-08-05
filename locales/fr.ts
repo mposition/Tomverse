@@ -219,6 +219,8 @@ export const fr = {
         responseCancelled: "La génération de la réponse a été arrêtée.",
         responseGenerating: "Génération d'une réponse.",
         responseComplete: "Réponse terminée.",
+        responseIncomplete: "La réponse s’est arrêtée à la limite de longueur de sortie.",
+        responseIncompleteNotice: "La réponse a été interrompue par la limite de longueur de sortie. Vous pouvez poursuivre avec une question complémentaire.",
         responseFailed: "La requête a échoué.",
         traceId: "ID de suivi",
         retry: "Réessayer",
@@ -406,6 +408,8 @@ export const fr = {
         fileErrorHelpLink: "Ouvrir l'aide sur les fichiers",
     },
     share: {
+        personalizationNotice:
+            "Ces réponses ont pu être influencées par les réglages de personnalisation de l'auteur. Les souvenirs eux-mêmes ne sont pas partagés.",
         eyebrow: "Tomverse shared conversation",
         publicDocumentDescription: "Instantané public en lecture seule créé avec Tomverse. Les mises à jour ultérieures du chat ne sont pas ajoutées à cette page.",
         readOnly: "Lecture seule",

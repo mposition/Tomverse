@@ -1,0 +1,153 @@
+name: Review Parity (shadow)
+#
+# ############################################################################
+# # NOT a required check -- deliberately.                                    #
+# #                                                                          #
+# # This is the pre-refactor baseline for UI-01: the Tomverse Review chat    #
+# # contracts that the chat-core/chat-ui extraction must not break. It runs  #
+# # on every PR so its stability can be measured before it is allowed to     #
+# # block anyone. Only `fast-gate` is registered in branch protection, so a  #
+# # red run here is a signal, not a merge block.                             #
+# #                                                                          #
+# # Promotion criteria (docs/qa/review-parity-baseline.md):                  #
+# #   - 20 consecutive runs green on develop-bound PRs                       #
+# #   - zero flaky failures unrelated to the change under test               #
+# #   - wall-clock within the PR-tier budget                                 #
+# # Promotion means adding this job to branch protection, at which point the #
+# # manifest check should also move into pr-fast-gate's static tier.         #
+# ############################################################################
+#
+# The manifest check runs first and without a browser: if the baseline has
+# silently shrunk, that is worth knowing even when the tests themselves pass.
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: review-parity-shadow-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  review-parity:
+    name: Review parity baseline (shadow, non-blocking)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      NEXTAUTH_URL: http://127.0.0.1:3100
+      NEXT_PUBLIC_TURNSTILE_SITE_KEY: tomverse-playwright-turnstile-site-key
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      # Same documentation-only escape hatch the fast gate uses, so a docs PR
+      # does not pay for a build it cannot affect.
+      - name: Determine whether this PR touches anything but documentation
+        id: scope
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -uo pipefail
+          if ! changed=$(git diff --no-renames --name-only "$BASE_SHA"...HEAD); then
+            echo "Could not diff against $BASE_SHA; running the baseline."
+            echo "code=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [ -z "$changed" ]; then
+            echo "Diff reported no changed paths; running the baseline."
+            echo "code=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          code=false
+          while IFS= read -r path; do
+            case "$path" in
+              .github/audits/*) ;;
+              docs/*.md) ;;
+              */*) code=true ;;
+              *.md) ;;
+              *) code=true ;;
+            esac
+            if [ "$code" = "true" ]; then
+              echo "Non-documentation path found: $path"
+              break
+            fi
+          done <<< "$changed"
+          if [ "$code" = "false" ]; then
+            echo "Documentation-only PR: skipping the parity baseline."
+          fi
+          echo "code=$code" >> "$GITHUB_OUTPUT"
+
+      - name: Setup Node.js
+        if: steps.scope.outputs.code == 'true'
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Restore Next.js build cache
+        if: steps.scope.outputs.code == 'true'
+        continue-on-error: true
+        uses: actions/cache@v5
+        with:
+          path: .next/cache
+          key: ${{ runner.os }}-next-parity-${{ hashFiles('package-lock.json') }}-${{ hashFiles('app/**/*.ts', 'app/**/*.tsx', 'components/**/*.ts', 'components/**/*.tsx', 'lib/**/*.ts', 'lib/**/*.tsx', 'next.config.ts', 'tsconfig.json') }}
+          restore-keys: |
+            ${{ runner.os }}-next-parity-${{ hashFiles('package-lock.json') }}-
+            ${{ runner.os }}-next-
+
+      - name: Install dependencies
+        if: steps.scope.outputs.code == 'true'
+        timeout-minutes: 10
+        run: npm ci --no-audit --no-fund
+
+      # No browser needed: catches a renamed, deleted, untagged, or untracked
+      # contract, and @smoke overlap drift, before anything is built.
+      - name: Verify review parity manifest
+        if: steps.scope.outputs.code == 'true'
+        timeout-minutes: 5
+        run: npm run verify:review-parity-coverage
+
+      - name: Production build
+        if: steps.scope.outputs.code == 'true'
+        timeout-minutes: 15
+        run: npm run build
+
+      - name: Restore Playwright Chromium cache
+        if: steps.scope.outputs.code == 'true'
+        continue-on-error: true
+        uses: actions/cache@v5
+        with:
+          path: ~/.cache/ms-playwright
+          key: ${{ runner.os }}-playwright-${{ hashFiles('package-lock.json') }}-chromium
+          restore-keys: |
+            ${{ runner.os }}-playwright-${{ hashFiles('package-lock.json') }}-
+
+      - name: Install Chromium
+        if: steps.scope.outputs.code == 'true'
+        timeout-minutes: 10
+        run: npx playwright install --with-deps chromium
+
+      # Runs through scripts/run-review-parity.mjs, which also fails on a
+      # runtime skip -- a contract that stays tagged and listed but never
+      # executes is the same silent baseline shrink the manifest prevents.
+      - name: Run the review parity baseline
+        if: steps.scope.outputs.code == 'true'
+        timeout-minutes: 12
+        run: npm run test:e2e:review-parity
+
+      - name: Upload failed test evidence
+        if: failure()
+        timeout-minutes: 5
+        uses: actions/upload-artifact@v7
+        with:
+          name: review-parity-shadow-${{ github.run_id }}
+          path: |
+            test-results
+            playwright-report
+          if-no-files-found: ignore
+          retention-days: 14

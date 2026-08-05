@@ -1,19 +1,18 @@
 /**
  * The `after()` kick below runs inside this budget, not outside it: Next's
- * `after` reference is explicit that the callback "will run for the platform's
- * default or configured max duration of your route". Undeclared, the kick was
- * whatever the platform happened to allow, and a kick killed mid-chunk leaves
- * the run `running` under a lease that has to lapse before the maintenance
- * dispatcher can reclaim it -- so the driver that exists to reduce latency
- * could increase it.
+ * `after` reference states the callback "will run for the platform's default
+ * or configured max duration of your route". Undeclared, the kick got whatever
+ * the platform happened to allow, and a kick killed mid-chunk leaves the run
+ * `running` under a lease that has to lapse before the dispatcher can reclaim
+ * it -- so the driver that exists to reduce latency could increase it.
  *
- * 120s covers one chunk: the kick drives a single chunk (see
- * `kickMemoryExtractionRun`), the adapter aborts at just under the driver's
- * 60s chunk timeout, and a chunk already claimed is always allowed to finish.
+ * 120s covers what the kick attempts: one chunk, with the adapter aborting
+ * just under the driver's 60s chunk timeout, and a claimed chunk always
+ * allowed to finish.
  */
 export const maxDuration = 120;
 
-import { after, NextResponse } from "next/server";
+import { NextResponse, after } from "next/server";
 import { getServerSession } from "next-auth";
 import { z } from "zod";
 import {
@@ -27,11 +26,11 @@ import {
 } from "@/lib/appSettings";
 import { authOptions } from "@/lib/auth";
 import { listMemoryExtractionRuns } from "@/lib/memoryExtractionCatalogue";
-import { kickMemoryExtractionRun } from "@/lib/memoryExtractionDispatch";
 import {
     createMemoryExtractionRun,
     estimateMemoryExtraction,
 } from "@/lib/memoryExtractionService";
+import { kickMemoryExtractionRun } from "@/lib/memoryExtractionWorker";
 import type { ModelTier } from "@/lib/models";
 
 /**
@@ -150,14 +149,13 @@ export async function POST(req: Request) {
             ...base,
             confirmedCredits: body.confirmedCredits,
         });
-        // The low-latency half of §11.1. The run and its chunks are already
-        // durable, so this only decides whether the user waits seconds or up
-        // to a maintenance interval to see it move; `after()` is bound to this
-        // process and is explicitly not the thing that guarantees the run
-        // finishes. The fifteen-minute dispatcher is.
-        after(async () => {
-            await kickMemoryExtractionRun(run.id);
-        });
+        // The low-latency half of §11.1. `after()` runs once this response has
+        // been sent, so the user is not held while a background run starts --
+        // and it is explicitly *not* a durable queue: it is bound to this
+        // request's process and dies with it. What guarantees the run finishes
+        // is the fifteen-minute dispatcher, which is why this is allowed to be
+        // best-effort and why `kickMemoryExtractionRun` never throws.
+        after(() => kickMemoryExtractionRun(run.id));
         return NextResponse.json(
             {
                 runId: run.id,

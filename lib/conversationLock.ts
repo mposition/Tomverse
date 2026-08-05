@@ -25,6 +25,34 @@ const IP_ATTEMPT_LIMIT = 20;
 const UNLOCK_GRANT_TTL_SECONDS = 30 * 60;
 const UNLOCK_COOKIE_PREFIX = "tomverse_unlock_";
 
+/**
+ * What a lock can protect (policy §7, release B5).
+ *
+ * The lock began life owning exactly one kind of thing, so "conversation" is
+ * spelled into its cookie names, its grant signatures and its attempt keys.
+ * Generalising it has one hard requirement and one soft one:
+ *
+ *   * **hard** — a grant for one resource type must never verify for another,
+ *     even when the two ids are identical. Ids come from different tables and
+ *     nothing stops them colliding.
+ *   * **soft** — the native conversation path should not change at all. Every
+ *     existing unlock cookie stays valid, every existing attempt counter keeps
+ *     counting, and the eighteen call sites keep their current signatures.
+ *
+ * Both are met by leaving `conversation` byte-identical and giving every other
+ * type its own derived signing key, its own cookie name and its own attempt
+ * key. A derived *key* rather than a prefixed string, because a prefix is only
+ * a separator if no input can contain it — and `userId` is an input.
+ */
+export const LOCK_RESOURCE_TYPES = [
+    "conversation",
+    "external_conversation",
+] as const;
+
+export type LockResourceType = (typeof LOCK_RESOURCE_TYPES)[number];
+
+const NATIVE_RESOURCE: LockResourceType = "conversation";
+
 export class ConversationLockError extends Error {
     constructor(
         public readonly status: number,
@@ -163,20 +191,39 @@ const getSecret = () => {
     return process.env.NEXTAUTH_SECRET;
 };
 
-const unlockCookieName = (conversationId: string) =>
-    `${UNLOCK_COOKIE_PREFIX}${conversationId}`;
+const unlockCookieName = (
+    resourceType: LockResourceType,
+    resourceId: string
+) =>
+    resourceType === NATIVE_RESOURCE
+        ? `${UNLOCK_COOKIE_PREFIX}${resourceId}`
+        : `${UNLOCK_COOKIE_PREFIX}${resourceType}_${resourceId}`;
+
+/**
+ * The HMAC key for one resource type. Native uses the secret itself, which is
+ * what keeps existing cookies valid; every other type uses a key derived from
+ * it under a type-specific label, so a grant cannot be replayed across types
+ * however the ids line up.
+ */
+const grantKey = (resourceType: LockResourceType): string | Buffer =>
+    resourceType === NATIVE_RESOURCE
+        ? getSecret()
+        : createHmac("sha256", getSecret())
+              .update(`lock-resource.${resourceType}.v1`)
+              .digest();
 
 const passwordFingerprint = (storedPassword: string) =>
     createHash("sha256").update(storedPassword).digest("base64url");
 
 const signUnlockGrant = (
+    resourceType: LockResourceType,
     userId: string,
-    conversationId: string,
+    resourceId: string,
     expiresAt: number,
     fingerprint: string
 ) =>
-    createHmac("sha256", getSecret())
-        .update(`${userId}:${conversationId}:${expiresAt}:${fingerprint}`)
+    createHmac("sha256", grantKey(resourceType))
+        .update(`${userId}:${resourceId}:${expiresAt}:${fingerprint}`)
         .digest("base64url");
 
 const readCookie = (request: Request, name: string) => {
@@ -191,37 +238,60 @@ const readCookie = (request: Request, name: string) => {
     return null;
 };
 
-export const createConversationUnlockCookie = (
+export const createResourceUnlockCookie = (
+    resourceType: LockResourceType,
     userId: string,
-    conversationId: string,
+    resourceId: string,
     storedPassword: string
 ) => {
     const expiresAt = Math.floor(Date.now() / 1000) + UNLOCK_GRANT_TTL_SECONDS;
     const fingerprint = passwordFingerprint(storedPassword);
     const signature = signUnlockGrant(
+        resourceType,
         userId,
-        conversationId,
+        resourceId,
         expiresAt,
         fingerprint
     );
     const secure = process.env.NODE_ENV === "production" ? "; Secure" : "";
-    return `${unlockCookieName(conversationId)}=${expiresAt}.${fingerprint}.${signature}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${UNLOCK_GRANT_TTL_SECONDS}; Priority=High${secure}`;
+    return `${unlockCookieName(resourceType, resourceId)}=${expiresAt}.${fingerprint}.${signature}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${UNLOCK_GRANT_TTL_SECONDS}; Priority=High${secure}`;
 };
 
-export const clearConversationUnlockCookie = (conversationId: string) => {
-    const secure = process.env.NODE_ENV === "production" ? "; Secure" : "";
-    return `${unlockCookieName(conversationId)}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0; Priority=High${secure}`;
-};
-
-export const hasConversationUnlockGrant = (
-    request: Request,
+/** The native shape, unchanged, for the eighteen call sites that use it. */
+export const createConversationUnlockCookie = (
     userId: string,
     conversationId: string,
+    storedPassword: string
+) =>
+    createResourceUnlockCookie(
+        NATIVE_RESOURCE,
+        userId,
+        conversationId,
+        storedPassword
+    );
+
+export const clearResourceUnlockCookie = (
+    resourceType: LockResourceType,
+    resourceId: string
+) => {
+    const secure = process.env.NODE_ENV === "production" ? "; Secure" : "";
+    return `${unlockCookieName(resourceType, resourceId)}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0; Priority=High${secure}`;
+};
+
+export const clearConversationUnlockCookie = (conversationId: string) =>
+    clearResourceUnlockCookie(NATIVE_RESOURCE, conversationId);
+
+export const hasResourceUnlockGrant = (
+    resourceType: LockResourceType,
+    request: Request,
+    userId: string,
+    resourceId: string,
     storedPassword: string | null
 ) => {
     if (!storedPassword) return true;
 
-    const token = readCookie(request, unlockCookieName(conversationId));
+    const conversationId = resourceId;
+    const token = readCookie(request, unlockCookieName(resourceType, resourceId));
     if (!token) return false;
 
     const [expiresValue, fingerprint, signature, ...extra] = token.split(".");
@@ -236,6 +306,7 @@ export const hasConversationUnlockGrant = (
     }
 
     const expected = signUnlockGrant(
+        resourceType,
         userId,
         conversationId,
         expiresAt,
@@ -248,6 +319,21 @@ export const hasConversationUnlockGrant = (
         timingSafeEqual(actualBuffer, expectedBuffer)
     );
 };
+
+/** The native shape, unchanged. */
+export const hasConversationUnlockGrant = (
+    request: Request,
+    userId: string,
+    conversationId: string,
+    storedPassword: string | null
+) =>
+    hasResourceUnlockGrant(
+        NATIVE_RESOURCE,
+        request,
+        userId,
+        conversationId,
+        storedPassword
+    );
 
 export const conversationLockedResponse = () =>
     new Response(
@@ -296,15 +382,24 @@ const incrementAttempt = async (
 export const consumeLockVerificationAttempt = async (
     request: Request,
     userId: string,
-    conversationId: string
+    resourceId: string,
+    resourceType: LockResourceType = NATIVE_RESOURCE
 ) => {
     const now = new Date();
     const start = attemptWindowStart(now);
-    const userKey = rateKey("user", userId, conversationId);
+    // Native keeps its exact key so an in-flight 15-minute window is not reset
+    // by this change — resetting it would hand an attacker a fresh budget.
+    // Other types get a distinct key so their attempts are counted separately
+    // rather than sharing a budget with a conversation of the same id.
+    const attemptScope =
+        resourceType === NATIVE_RESOURCE
+            ? resourceId
+            : `${resourceType}:${resourceId}`;
+    const userKey = rateKey("user", userId, attemptScope);
     const ipKey = rateKey(
         "ip",
         getAnonymousClientKey(request),
-        conversationId
+        attemptScope
     );
 
     await prisma.$transaction(async (tx) => {
@@ -323,7 +418,10 @@ export const consumeLockVerificationAttempt = async (
         if (!userAllowed || !ipAllowed) {
             logSecurityAuditEvent("conversation.lock.verify", {
                 userId,
-                resourceId: conversationId,
+                resourceId:
+                    resourceType === NATIVE_RESOURCE
+                        ? resourceId
+                        : `${resourceType}:${resourceId}`,
                 request,
                 outcome: "rate_limited",
                 reason: "LOCK_RATE_LIMITED",

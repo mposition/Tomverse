@@ -26,6 +26,13 @@ export type SecurityAuditEvent =
     | "conversation.lock.remove"
     | "conversation.lock.verify"
     | "conversation.delete"
+    // Release B5 §7: the same lock, applied to an imported snapshot. Separate
+    // event names rather than a `resourceType` field, so an existing alert on
+    // `conversation.lock.*` keeps meaning what it meant.
+    | "external_conversation.lock.set"
+    | "external_conversation.lock.change"
+    | "external_conversation.lock.remove"
+    | "external_conversation.lock.verify"
     | "account.deletion.schedule"
     // Release B §13.1-§13.2. Content-free by construction: these carry the
     // hashed subject and an outcome, never a statement, evidence or count of

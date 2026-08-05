@@ -68,6 +68,26 @@ test("a model on a fail-closed hold is refused by the adapter itself", async () 
   );
 });
 
+test("an operational hold is refused at the adapter too, adapter or not", () => {
+  // xAI has an adapter and an approved price, and is still held while the
+  // budget and the account check are outstanding. The adapter re-checks the
+  // registry rather than trusting that admission got it right, so a hold that
+  // exists for operational reasons blocks the provider call just as hard as
+  // one that exists for pricing reasons.
+  return assert.rejects(
+    generateImageWithProvider({
+      prompt: "a red apple",
+      size: "1024x1024",
+      quality: "medium",
+      modelId: "grok-imagine-image-quality-20260403",
+    }),
+    (error) =>
+      error.name === "ImageProviderError" &&
+      error.failurePhase === "provider_failed" &&
+      /not available for requests/.test(error.message)
+  );
+});
+
 test("an unknown model never reaches a provider", async () => {
   await assert.rejects(
     generateImageWithProvider({

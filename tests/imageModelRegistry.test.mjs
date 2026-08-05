@@ -45,7 +45,23 @@ test("a verified price does not by itself make a model runnable", () => {
   assert.equal(grok?.disabledReason, "operational_hold");
   assert.equal(grok?.priceVerification.verifiedAt, "2026-08-04");
   assert.equal(grok?.priceVerification.thinkingCapMicroUsd, 0);
-  assert.deepEqual(grok?.prices, []);
+  // An operational hold is the one state that may carry an approved price:
+  // the pricing question is settled, so keeping the approved credits here --
+  // where check:image-pricing validates them against the floor on every run --
+  // beats re-entering them by hand on launch day.
+  assert.deepEqual(grok?.prices, [
+    {
+      quality: "medium",
+      size: "1024x1024",
+      credits: 75,
+      outputCostMicroUsd: 50_000,
+    },
+  ]);
+  assert.ok(
+    grok.prices[0].credits >= minimumCreditsForImageOption(grok, grok.prices[0])
+  );
+  // Recorded is not sellable: the price lookup every request goes through
+  // still refuses a disabled model outright.
   assert.equal(
     getImageModelPrice("grok-imagine-image-quality-20260403", "medium", "1024x1024"),
     null
@@ -116,6 +132,22 @@ test("the registry price table agrees with the v1 flat table it replaces", () =>
     getImageModelPrice("gpt-image-2", "high", "1024x1024").outputCostMicroUsd,
     211_000
   );
+});
+
+test("each model carries its own pricing version, and gpt-image-2 keeps the one already on disk", () => {
+  // A reservation freezes the version of the price list it was priced by. With
+  // one global string, adding xAI's price would have moved every gpt-image-2
+  // reservation onto a new version without a cent of its price changing --
+  // every cost report would show a boundary that corresponds to nothing.
+  const versions = IMAGE_MODEL_REGISTRY.map((model) => model.pricingVersion);
+  assert.equal(new Set(versions).size, versions.length);
+  for (const version of versions) assert.ok(version.length > 0);
+
+  // Not derived from IMAGE_PRICING_VERSION on purpose: coupling them would let
+  // a ceiling change bump this model's version, which is the same noise in the
+  // other direction. It is the literal string reservations already carry, and
+  // it moves only when gpt-image-2's own prices move.
+  assert.equal(getImageModel("gpt-image-2").pricingVersion, "2026-08-03-v1");
 });
 
 test("model ids are unique and every id equals its API model id today", () => {
