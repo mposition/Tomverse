@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { NextResponse, after } from "next/server";
 import { getServerSession } from "next-auth";
 import { z } from "zod";
 import {
@@ -16,6 +16,7 @@ import {
     createMemoryExtractionRun,
     estimateMemoryExtraction,
 } from "@/lib/memoryExtractionService";
+import { kickMemoryExtractionRun } from "@/lib/memoryExtractionWorker";
 import type { ModelTier } from "@/lib/models";
 
 /**
@@ -134,6 +135,13 @@ export async function POST(req: Request) {
             ...base,
             confirmedCredits: body.confirmedCredits,
         });
+        // The low-latency half of §11.1. `after()` runs once this response has
+        // been sent, so the user is not held while a background run starts --
+        // and it is explicitly *not* a durable queue: it is bound to this
+        // request's process and dies with it. What guarantees the run finishes
+        // is the fifteen-minute dispatcher, which is why this is allowed to be
+        // best-effort and why `kickMemoryExtractionRun` never throws.
+        after(() => kickMemoryExtractionRun(run.id));
         return NextResponse.json(
             {
                 runId: run.id,
