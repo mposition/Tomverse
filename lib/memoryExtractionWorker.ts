@@ -5,6 +5,7 @@ import {
     type ExtractionModelAdapter,
 } from "@/lib/memoryExtractionPipeline";
 import { commitExtractionChunk } from "@/lib/memoryExtractionCommit";
+import { recordMemoryCounter } from "@/lib/memoryMetrics";
 import {
     MEMORY_EXTRACTION_CHUNK_TIMEOUT_MS,
     estimateExtraction,
@@ -432,6 +433,17 @@ export async function handleMemoryExtractionChunk({
     });
     await closeCost(commit.committed ? undefined : "fenced_out");
 
+    if (commit.committed && commit.unsourced > 0) {
+        // Recorded after the transaction, never inside it: a counter written
+        // in a transaction that then rolls back reports work nothing did.
+        // §22 gets its own kind here because a dropped candidate leaves no row
+        // -- the whole point is that it was not stored.
+        void recordMemoryCounter(
+            "extraction_evidence_unverified",
+            commit.unsourced
+        );
+    }
+
     // Content-free, per §22: counts only, never a statement.
     console.info(
         JSON.stringify({
@@ -446,6 +458,7 @@ export async function handleMemoryExtractionChunk({
                       stored: commit.stored,
                       individualReview: commit.individualReview,
                       discarded: commit.discarded,
+                      unsourced: commit.unsourced,
                   }
                 : { reason: commit.reason }),
             parseProblems: analysis.problems.length,

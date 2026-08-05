@@ -5,6 +5,7 @@ import { reconcileExpiredChatRequestLeases } from "@/lib/chatRequestLease";
 import { reconcileSourceLockedMemories } from "@/lib/externalConversationLockService";
 import { reconcileExpiredExternalImportStaging } from "@/lib/externalImportService";
 import { reconcileExpiredMemories } from "@/lib/memoryExpiryService";
+import { reconcileUnsettledExtractionProviderCalls } from "@/lib/memoryExtractionProviderCost";
 import { dispatchPendingMemoryExtractionRuns } from "@/lib/memoryExtractionWorker";
 import { reportOperationalIncident } from "@/lib/operationalMonitoring";
 import {
@@ -96,6 +97,26 @@ export async function POST(request: Request) {
         truncated: false,
       })
     );
+    // Extraction provider calls that went out and never settled (policy §3,
+    // §11 "idempotent settlement"). A worker killed between issuing a request
+    // and recording what it cost leaves the attempt open forever: its
+    // reservation still holds the operational budget, but nothing says the
+    // call finished, so the settled figure any later audit reads is missing a
+    // call that really happened. The sweep settles it at the reservation --
+    // "we know it happened and not what it cost" -- which is the conservative
+    // direction and the only honest one.
+    //
+    // Before the dispatcher rather than after: this is a DB-only sweep, and
+    // the dispatcher is the one step here that waits on a provider. It is also
+    // the sweep that finalises the dead attempts of the very runs the
+    // dispatcher is about to retry. Its cutoff is fifteen minutes against a
+    // sixty-second chunk timeout, so no live call is ever inside the window.
+    // Never throws, so it cannot turn a successful reconciliation into a
+    // failed one.
+    const memoryExtractionProviderCalls =
+      await reconcileUnsettledExtractionProviderCalls().catch(() => ({
+        settled: 0,
+      }));
     // Memory extraction recovery (policy §11.1), deliberately last.
     //
     // This is the *dispatcher*, not only the lease sweep: reclaiming an expired
@@ -126,6 +147,7 @@ export async function POST(request: Request) {
         requestLeases,
         imageAssets,
         externalImportStaging,
+        memoryExtractionProviderCalls,
         memoryExtractionDispatch,
         memoryExpiry,
         memorySourceLocks,
@@ -141,6 +163,7 @@ export async function POST(request: Request) {
         requestLeases,
         imageAssets,
         externalImportStaging,
+        memoryExtractionProviderCalls,
         memoryExtractionDispatch,
       },
       { headers: { "Cache-Control": "no-store" } }

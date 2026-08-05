@@ -33,7 +33,19 @@ import type { MemoryExtractionLease } from "@/lib/memoryExtractionService";
  */
 
 export type ExtractionCommitResult =
-    | { committed: true; stored: number; individualReview: number; discarded: number }
+    | {
+          committed: true;
+          stored: number;
+          individualReview: number;
+          discarded: number;
+          /**
+           * Candidates whose evidence no longer verified at write time (§8.4).
+           * Reported rather than swallowed: nothing else records that they
+           * existed, and a run where this is not zero is a run whose sources
+           * moved underneath it.
+           */
+          unsourced: number;
+      }
     | { committed: false; reason: "fenced_out" };
 
 /**
@@ -101,6 +113,7 @@ export async function commitExtractionChunk(input: {
             stored: persisted.stored,
             individualReview: persisted.individualReview,
             discarded: persisted.discarded,
+            unsourced: persisted.unsourced,
         };
     });
 }

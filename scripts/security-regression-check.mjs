@@ -537,6 +537,29 @@ const checks = [
       source.includes("memoryExtractionDispatched"),
   },
   {
+    // §8.4 requires the server to establish evidence existence, ownership and
+    // a matching content digest. The check was written and never called: the
+    // label map is built when the chunk is claimed, and a source deleted
+    // during the provider call then fails the evidence insert's foreign key
+    // and takes the whole chunk down instead of dropping the candidate.
+    name: "Extraction evidence is re-verified at write time",
+    file: "lib/memoryExtractionPersistence.ts",
+    test: (source) =>
+      source.includes("verifyExternalMessageEvidence") &&
+      source.includes("unsourced"),
+  },
+  {
+    // An attempt whose request went out and never settled holds its
+    // reservation forever while nothing records that the call finished. The
+    // sweep lived unreferenced outside its tests until it was wired here
+    // (policy §3, §11 "idempotent settlement").
+    name: "Unsettled extraction provider calls are reconciled by maintenance",
+    file: "app/api/internal/maintenance/credit-reservations/route.ts",
+    test: (source) =>
+      source.includes("reconcileUnsettledExtractionProviderCalls") &&
+      source.includes("memoryExtractionProviderCalls"),
+  },
+  {
     name: "Provider error events expire through maintenance cleanup",
     file: "lib/maintenance.ts",
     test: (source) =>
