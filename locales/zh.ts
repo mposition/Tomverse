@@ -457,6 +457,8 @@ export const zh = {
         fileErrorHelpLink: "打开文件上传帮助",
     },
     share: {
+        personalizationNotice:
+            "这些回答可能受到作者个性化设置的影响。被记住的内容本身并未被分享。",
         eyebrow: "Tomverse 分享对话",
         publicDocumentDescription: "这是由 Tomverse 创建的公开只读快照。分享后的后续对话更新不会添加到此页面。",
         readOnly: "只读",

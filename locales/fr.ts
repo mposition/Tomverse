@@ -406,6 +406,8 @@ export const fr = {
         fileErrorHelpLink: "Ouvrir l'aide sur les fichiers",
     },
     share: {
+        personalizationNotice:
+            "Ces réponses ont pu être influencées par les réglages de personnalisation de l'auteur. Les souvenirs eux-mêmes ne sont pas partagés.",
         eyebrow: "Tomverse shared conversation",
         publicDocumentDescription: "Instantané public en lecture seule créé avec Tomverse. Les mises à jour ultérieures du chat ne sont pas ajoutées à cette page.",
         readOnly: "Lecture seule",

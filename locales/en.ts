@@ -555,6 +555,8 @@ export const en = {
         fileErrorHelpLink: "Open file upload help",
     },
     share: {
+        personalizationNotice:
+            "These answers may have been shaped by the author's personalisation settings. The remembered notes themselves are not shared.",
         eyebrow: "Tomverse shared conversation",
         publicDocumentDescription: "A public read-only snapshot created from Tomverse. Later chat updates are not added to this shared page.",
         readOnly: "Read only",
