@@ -787,8 +787,8 @@ model ImageGeneration {
   // resolution tier its own way, and Google's 1K landscape is not 1536x1024.
   // Nullable and never backfilled -- rows written before this existed are
   // history, and a dimension nobody measured is absent rather than inferred.
-  outputWidth    Int?
-  outputHeight   Int?
+  outputWidth  Int?
+  outputHeight Int?
 
   // The parameters this attempt actually sent to the provider (policy §12.1).
   // Reconstructing them from `size`/`quality` stopped being possible once each
@@ -799,9 +799,9 @@ model ImageGeneration {
   // duplicating user content into an audit blob would create a second place
   // every deletion path has to find.
   providerRequestParams Json?
-  backgroundMode String @default("opaque")
-  outputFormat   String @default("png")
-  moderationMode String @default("auto")
+  backgroundMode        String @default("opaque")
+  outputFormat          String @default("png")
+  moderationMode        String @default("auto")
 
   // pending -> processing -> settling -> succeeded | failed. `settling` is
   // the exactly-once claim: the worker or the reconciliation sweep moves a
@@ -2208,8 +2208,56 @@ model MemoryExtractionChunk {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  providerCalls MemoryExtractionProviderCall[]
+
   @@unique([runId, chunkIndex])
   @@index([runId, status])
+}
+
+/// Operational provider-cost accounting for one extraction attempt (§3, §11).
+///
+/// A DIFFERENT layer from the run's user-credit reservation. User credits are
+/// reserved per run and settled at a terminal state, charging only completed
+/// chunks — a failed chunk is refunded, because the user did not get it. But a
+/// request that was actually issued may have been billed by the provider, and
+/// erasing that from the provider budget would let a run that keeps failing
+/// consume an unbounded share of a budget that reads as untouched.
+model MemoryExtractionProviderCall {
+  id      String                @id @default(cuid())
+  chunkId String
+  chunk   MemoryExtractionChunk @relation(fields: [chunkId], references: [id], onDelete: Cascade)
+
+  /// With the chunk's (runId, chunkIndex), this is the §11 attempt identity.
+  attemptCount Int
+
+  provider String
+  modelId  String
+
+  /// Written BEFORE the request leaves, so a crash mid-flight is recoverable
+  /// as "may have cost something" rather than as "nothing happened".
+  callIssued           Boolean @default(false)
+  /// Consumed from the provider and extraction sub-budget buckets at
+  /// admission. Released in full only when no call went out.
+  reservedCostMicroUsd BigInt  @default(0)
+  /// What the call actually cost. NULL while unknown, which is why the
+  /// reservation stands as the conservative charge until then.
+  settledCostMicroUsd  BigInt?
+  /// False when the provider reported no usage: the reservation stands rather
+  /// than the call being recorded as free.
+  usageConfirmed       Boolean @default(false)
+  inputTokens          Int?
+  outputTokens         Int?
+  /// Provider-side response id, for reconciling a charge we cannot confirm.
+  responseId           String?
+  failureCode          String?
+
+  startedAt DateTime?
+  settledAt DateTime?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  @@unique([chunkId, attemptCount])
+  @@index([callIssued, settledAt])
 }
 
 /// Account-level memory controls (§8.1). The master toggle is not an
