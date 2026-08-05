@@ -38,6 +38,7 @@ type AdminImageGenerationReport = {
       effectiveMicroUsd: number;
     }>;
     problems: Array<{ window: string; reason: string; message: string }>;
+    advisories: Array<{ code: string; message: string }>;
     usedTodayMicroUsd: number;
     usedThisMonthMicroUsd: number;
   };
@@ -222,6 +223,10 @@ export function AdminImageGenerationPanel() {
                 report.budget.limits ? usd(report.budget.limits.month) : "unconfigured"
               }`}
               detail={`floor ${usd(report.budget.floorMicroUsd)}${
+                report.budget.advisories.length > 0
+                  ? ` · ${report.budget.advisories[0].code}`
+                  : ""
+              }${
                 report.budget.clamped.length > 0
                   ? ` · ${report.budget.clamped.length} override(s) raised to the floor`
                   : ""

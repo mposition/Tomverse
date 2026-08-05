@@ -126,3 +126,49 @@ test("a provider-scoped resolve reads that provider's variables only", () => {
     )
   );
 });
+
+test("a month budget that is not above the day budget is flagged, not blocked", () => {
+  // Both windows at the same number is legal and almost never intended: one
+  // day spent at the daily cap exhausts the month, so the monthly window stops
+  // being a second bound. It is deliberate in staging, where a small identical
+  // pair caps total spend -- which is exactly why this advises rather than
+  // refusing readiness. Refusing to start over an odd-but-conservative budget
+  // would be worse than the budget.
+  const equal = resolveImageProviderBudget(
+    {
+      IMAGE_PROVIDER_OPENAI_COST_MICROUSD_PER_DAY: "10800000",
+      IMAGE_PROVIDER_OPENAI_COST_MICROUSD_PER_MONTH: "10800000",
+    },
+    { production: true }
+  );
+  assert.ok(equal.limits, "still usable");
+  assert.deepEqual(equal.problems, []);
+  assert.deepEqual(
+    equal.advisories.map((entry) => entry.code),
+    ["month_not_above_day"]
+  );
+
+  // A month below the day is the same mistake, further along.
+  const inverted = resolveImageProviderBudget(
+    {
+      IMAGE_PROVIDER_OPENAI_COST_MICROUSD_PER_DAY: "50000000",
+      IMAGE_PROVIDER_OPENAI_COST_MICROUSD_PER_MONTH: "20000000",
+    },
+    { production: true }
+  );
+  assert.deepEqual(
+    inverted.advisories.map((entry) => entry.code),
+    ["month_not_above_day"]
+  );
+
+  // The approved production pair says nothing.
+  const approved = resolveImageProviderBudget(
+    {
+      IMAGE_PROVIDER_XAI_COST_MICROUSD_PER_DAY: "50000000",
+      IMAGE_PROVIDER_XAI_COST_MICROUSD_PER_MONTH: "500000000",
+    },
+    { production: true, provider: "xai" }
+  );
+  assert.deepEqual(approved.advisories, []);
+  assert.deepEqual(approved.limits, { day: 50_000_000, month: 500_000_000 });
+});

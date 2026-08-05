@@ -246,6 +246,27 @@ gate 없이 노출되는 배포 창은 금지된다. UI 비노출은 보안 경�
   `일·월 floor = Max 월 크레딧 × 최악 크레딧당 원가 × headroom`
   (참고치: headroom 25%에서 약 $10.80). 한 Max 계정이 월 크레딧을 하루에
   소진할 수 있으므로 일 floor = 월 floor다.
+  - **"최악 크레딧당 원가"는 provider별 값이 아니라 활성 이미지 상품 전체의
+    최대값**이다(`worstImageCostPerCreditMicroUsd()` — 현재 864µ/credit,
+    `gpt-image-2` Final 정사각에서 나온다). 따라서 floor는 특정 공급자의
+    실원가가 아니라 **전체 이미지 상품을 포괄하는 entitlement 안전 바닥**이다.
+    xAI budget의 floor를 "Grok 실원가"로 설명하면 틀린다.
+  - **floor는 바닥이지 권고치가 아니다.** 초기 production 승인값은
+    일 $50 / 월 $500(2026-08-05). staging은 일·월 모두 floor $10.80으로,
+    총 staging 지출을 캡하는 것이 의도다.
+- **`월 ≥ 일`만으로는 충분하지 않다.** 둘이 같으면 하루치 상한을 한 번
+  소진하는 순간 그달 예산도 끝나므로 월 창이 두 번째 bound가 되지 못한다.
+  `resolveImageProviderBudget`이 `month <= day`를 `month_not_above_day`
+  **advisory**로 보고한다 — `problems`와 달리 readiness를 막지 않는다.
+  단지 이상한 예산 때문에 기동을 거부하는 것이 그 예산보다 나쁘기 때문이고,
+  staging의 동일값 설정은 의도된 것이기 때문이다.
+- **예약액과 정산액을 구분한다.** provider budget은 예약 시 최악값으로 잡고
+  성공 정산에서 실비로 true-up하며 차액을 환급한다. Grok 1K는 예약
+  55,000µ(출력 50,000 + 공통 프롬프트 안전예산 5,000), 정산 50,000µ,
+  차액 5,000µ 환급이다 — xAI는 프롬프트 길이와 무관한 장당 정액 과금이라
+  `inputTokens`가 0이다. 용량을 셀 때 두 기준을 섞지 않는다: **미정산 예약
+  기준**은 동시에 승인 가능한 건수이고, **성공 정산 기준**은 이론상 완료
+  가능한 장수다(일 $50 → 909건 승인 / 1,000장 완료).
 - production에서 env 부재 시 `/api/ready` 실패. 조용한 fallback 기본값
   금지(`providerMonitoring`의 기존 silent fallback 모순은 budget 추가 전에
   정리). env를 먼저 배포하고 코드를 나중에 배포한다.
