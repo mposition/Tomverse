@@ -48,7 +48,7 @@ test("guest can change and persist language", async ({ page }) => {
   await expect(languageSelect(page)).toHaveValue("zh");
 });
 
-test("guest message appears immediately with mocked response", { tag: "@smoke" }, async ({ page }, testInfo) => {
+test("guest message appears immediately with mocked response", { tag: ["@smoke", "@review-parity"] }, async ({ page }, testInfo) => {
   await page.goto("/chat");
 
   await sendChatMessage(page, testInfo, "First QA message");

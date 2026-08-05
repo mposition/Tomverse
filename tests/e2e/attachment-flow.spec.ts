@@ -79,7 +79,7 @@ test.describe("attachment UX", () => {
     await expect(page.getByTestId("chat-input")).toBeVisible();
   });
 
-  test("selected image previews before and after send", { tag: "@smoke" }, async ({ page }) => {
+  test("selected image previews before and after send", { tag: ["@smoke", "@review-parity"] }, async ({ page }) => {
     await attachFromComputer(page, {
       name: "test-image.png",
       mimeType: "image/png",
@@ -99,7 +99,7 @@ test.describe("attachment UX", () => {
     expect(uploadState.finalizeCount).toBe(1);
   });
 
-  test("PDF remains a friendly file card and sends successfully", { tag: "@smoke" }, async ({ page }) => {
+  test("PDF remains a friendly file card and sends successfully", { tag: ["@smoke", "@review-parity"] }, async ({ page }) => {
     await attachFromComputer(page, {
       name: "test-file.pdf",
       mimeType: "application/pdf",
@@ -138,7 +138,7 @@ test.describe("attachment UX", () => {
     expect(uploadState.finalizeCount).toBe(1);
   });
 
-  test("image attachments disable text-only models and keep a vision model available", { tag: "@smoke" }, async ({ page }) => {
+  test("image attachments disable text-only models and keep a vision model available", { tag: ["@smoke", "@review-parity"] }, async ({ page }) => {
     await attachFromComputer(page, {
       name: "vision-model-check.png",
       mimeType: "image/png",
