@@ -456,7 +456,18 @@ export type QaConversationMessage = {
   role: "user" | "assistant";
   content: string;
   modelId?: string;
+  /**
+   * "normal" | "incomplete" | "error" | "cancelled", stored and replayed
+   * verbatim like the real column -- an answer the provider cut short at its
+   * output ceiling has to still read as cut short after a re-fetch.
+   */
   status?: string;
+  /**
+   * The turn's WebSearchExecution, exactly as the real endpoint returns the
+   * `searchMetadata` JSON column. Seeded so a spec can assert the source list
+   * a *stored* conversation renders, not only the streamed one.
+   */
+  searchMetadata?: unknown;
 };
 
 export async function mockAuthenticatedApi(

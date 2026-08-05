@@ -27,7 +27,13 @@ const importMessageSchema = z
   .object({
     role: z.enum(["user", "assistant"]),
     content: z.string().max(50_000),
-    status: z.enum(["normal", "error", "cancelled"]).optional().default("normal"),
+    // "incomplete" travels with the message like every other status: a guest
+    // answer the provider cut short must still read as cut short after the
+    // conversation is imported into an account.
+    status: z
+      .enum(["normal", "incomplete", "error", "cancelled"])
+      .optional()
+      .default("normal"),
     modelId: modelIdSchema.nullable().optional(),
     createdAt: z.string().datetime(),
   })

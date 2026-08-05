@@ -192,6 +192,8 @@ export const ko = {
         stop: "중지",
         responseGenerating: "응답을 생성하고 있습니다.",
         responseComplete: "응답이 완료되었습니다.",
+        responseIncomplete: "출력 길이 제한으로 답변이 중단되었습니다.",
+        responseIncompleteNotice: "출력 길이 제한으로 답변이 중단되었습니다. 후속 질문으로 이어서 요청할 수 있습니다.",
         responseFailed: "요청이 실패했습니다.",
         traceId: "추적 ID",
         retry: "다시 시도",

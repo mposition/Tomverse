@@ -197,6 +197,8 @@ export const es = {
         responseCancelled: "Se detuvo la generación de la respuesta.",
         responseGenerating: "Generando una respuesta.",
         responseComplete: "Respuesta completada.",
+        responseIncomplete: "La respuesta se detuvo por el límite de longitud de salida.",
+        responseIncompleteNotice: "La respuesta se cortó por el límite de longitud de salida. Puedes continuar con una pregunta de seguimiento.",
         responseFailed: "La solicitud falló.",
         traceId: "ID de seguimiento",
         retry: "Reintentar",

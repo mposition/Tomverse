@@ -15,7 +15,14 @@ export type Message = {
   id: string;
   role: "user" | "assistant";
   content: string;
-  status?: "normal" | "error" | "cancelled" | "pending";
+  /**
+   * "incomplete" is a *completed* answer that the provider cut short at its
+   * output-token ceiling: the body is real and kept verbatim, and only the
+   * "this finished" claim is withheld (lib/chatCompletionStatus.ts). It is
+   * not "cancelled" (the user stopped it) and not "error" (nothing failed),
+   * and it persists through storage and a re-fetch like any other status.
+   */
+  status?: "normal" | "incomplete" | "error" | "cancelled" | "pending";
   attachments?: ChatAttachment[];
   modelId?: string;
   errorCode?: string;
