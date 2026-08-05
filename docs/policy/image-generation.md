@@ -150,6 +150,26 @@ gate 없이 노출되는 배포 창은 금지된다. UI 비노출은 보안 경�
 - **정산은 exactly-once**: `pending|processing → settling`(조건부 claim)
   `→ succeeded|failed`. handler와 15분 reconciliation이 같은 generation을
   중복 정산·환급하지 않는다.
+- **`settling`은 회수 가능해야 한다.** generation의 `settling` claim은 정산
+  transaction **밖**에서 이루어지므로, transaction이 rollback되면(deadlock,
+  connection 유실, 재배포) 행은 크레딧이 예약된 채 `settling`에 남는다.
+  회수 경로가 `pending|processing`만 보면 이 상태는 **누구도 도달하지 못하는
+  덫**이다 — 환급도, terminal 상태도, 폴링 종료도 영원히 오지 않는다.
+  - reconciliation은 `settling`을 **별도의 더 긴 창**
+    (`STALE_IMAGE_SETTLING_AFTER_MS`)으로 함께 회수한다. 창을 분리하는 이유는
+    `pending|processing` 회수는 아무것도 쓰지 않은 행을 되돌리는 것이지만
+    `settling` 회수는 열려 있을 수 있는 크레딧 write와 경합하기 때문이다.
+  - 회수를 안전하게 만드는 것은 창이 아니라 **예약 자신의
+    `reserved → settling` claim**이다. 이 claim은 정산 transaction 안에 있고
+    generation을 종결시키는 것과 같은 transaction이므로, 이미 커밋된 정산은
+    두 번째 시도를 거부한다.
+  - 자기 정산 transaction이 실패한 실행자는 이미 claim을 소유하므로 창을
+    기다리지 않고 즉시 회수한다.
+  - **`settlement_failed`는 `provider_failed`와 다른 실패 단계다.** 전자는
+    이미지가 도착했고 그 장부 기록을 잃은 것이고, 후자는 이미지가 오지
+    않은 것이다. 둘을 합치면 운영자가 공급자 상태 페이지를 보러 간다.
+    회수된 stranded 정산은 `IMAGE_SETTLEMENT_STRANDED`로 보고하고 Admin
+    Console의 invariant 줄에 별도 수치로 노출한다.
 - 전액 환급 조건: provider 거절, moderation 차단, provider 오류, 원본 저장
   실패, 처리 시간 초과, stale 작업 reconciliation. 크레딧과 funded cost를
   ledger 규칙(`settleAddOnCredits`)대로 함께 복원하고 플랜 사용량도

@@ -773,6 +773,38 @@ const checks = [
       source.includes("marked operational_hold without a price verification date"),
   },
   {
+    name: "Stale image recovery can reclaim a stranded settlement",
+    file: "lib/imageGenerationService.ts",
+    test: (source) =>
+      // `settling` is claimed OUTSIDE the settlement transaction, so any
+      // rollback -- a deadlock, a dropped connection, a redeploy -- leaves the
+      // row there with the user's credits still reserved. While the recovery
+      // sweep and the failure path both matched only pending/processing, that
+      // state was unreachable by anything: no refund, no terminal status, and
+      // a client that polls it forever. Both halves of the fix are pinned
+      // because either one alone leaves a door open.
+      source.includes('{ status: "settling", updatedAt: { lt: settlingStaleBefore } }') &&
+      source.includes("reclaimSettling: settlingStaleBefore") &&
+      source.includes('reclaimSettling: "owned"') &&
+      // The reclaim stays bounded: an unconditional one would race a live
+      // settler, and only the caller that already owns the claim may skip the
+      // wait.
+      source.includes('input.reclaimSettling === "owned"') &&
+      source.includes("updatedAt: { lt: input.reclaimSettling }"),
+  },
+  {
+    name: "Image settlement claims the reservation before it moves any credit",
+    file: "lib/imageGenerationService.ts",
+    test: (source) =>
+      // What makes reclaiming a settling row safe at all: the money moves
+      // behind the reservation's own reserved -> settling claim, inside the
+      // transaction that also finishes the generation. A settlement that
+      // already committed refuses the second attempt instead of paying twice.
+      source.includes('where: { generationId, status: "reserved" },') &&
+      source.includes('data: { status: "settling" },') &&
+      source.includes("if (reservationClaim.count === 0) return"),
+  },
+  {
     name: "Image provider budgets are per provider and cover every active one",
     file: "lib/imageProviderBudget.ts",
     test: (source) =>

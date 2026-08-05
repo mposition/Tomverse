@@ -78,6 +78,7 @@ type AdminImageGenerationReport = {
   invariants: {
     emptyImageConversations: number;
     staleGenerations: number;
+    strandedSettlements: number;
     cleanupBacklog: number;
   };
 };
@@ -228,7 +229,7 @@ export function AdminImageGenerationPanel() {
             <Stat
               label="Invariants"
               value={invariantIssues === 0 ? "clean" : `${invariantIssues} issue(s)`}
-              detail={`${report.invariants.emptyImageConversations} empty conversations · ${report.invariants.staleGenerations} stale · ${report.invariants.cleanupBacklog} cleanup backlog`}
+              detail={`${report.invariants.emptyImageConversations} empty conversations · ${report.invariants.staleGenerations} stale (${report.invariants.strandedSettlements} stranded mid-settlement) · ${report.invariants.cleanupBacklog} cleanup backlog`}
             />
           </div>
 

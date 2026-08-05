@@ -8,6 +8,7 @@ import {
   IMAGE_GENERATION_FAILURE_PHASES,
   IMAGE_GENERATION_STATUSES,
   STALE_IMAGE_GENERATION_AFTER_MS,
+  STALE_IMAGE_SETTLING_AFTER_MS,
   canTransitionImageGenerationStatus,
   currentImageAttempt,
   deriveImageGroupStatus,
@@ -150,4 +151,41 @@ test("a retried failure does not drag the group backwards", () => {
 
   targets[1].generations[1].status = "failed";
   assert.equal(deriveImageGroupStatusFromTargets(targets), "partial_success");
+});
+
+test("settling has its own, longer stale window", () => {
+  // Reclaiming a pending/processing row costs nothing -- it has written no
+  // ledger. Reclaiming a settling row races a credit write, so it waits out
+  // any transaction that could still be open. Collapsing the two windows into
+  // one constant is how that distinction gets lost.
+  assert.ok(STALE_IMAGE_SETTLING_AFTER_MS > STALE_IMAGE_GENERATION_AFTER_MS);
+  assert.equal(STALE_IMAGE_SETTLING_AFTER_MS, 15 * 60 * 1_000);
+});
+
+test("a failed settlement is its own failure phase, not a provider failure", () => {
+  // The two send an operator to different places: provider_failed means the
+  // image never arrived, settlement_failed means it arrived and the ledger
+  // write for it was lost. Both refund; only one is the provider's problem.
+  assert.ok(IMAGE_GENERATION_FAILURE_PHASES.includes("settlement_failed"));
+  assert.ok(IMAGE_GENERATION_FAILURE_PHASES.includes("provider_failed"));
+  assert.notEqual("settlement_failed", "provider_failed");
+});
+
+test("settling is still terminal-adjacent, not a state anything transitions out of", () => {
+  // The trap this whole window exists for: nothing in the transition table
+  // moves a row out of settling except the settlement itself. That is by
+  // design -- it is the exactly-once claim -- which is exactly why a rollback
+  // needed an explicit reclaim rather than another edge here.
+  assert.deepEqual(
+    [...IMAGE_GENERATION_STATUSES].filter((status) =>
+      canTransitionImageGenerationStatus(status, "settling")
+    ),
+    ["pending", "processing"]
+  );
+  assert.deepEqual(
+    [...IMAGE_GENERATION_STATUSES].filter((status) =>
+      canTransitionImageGenerationStatus("settling", status)
+    ),
+    ["succeeded", "failed"]
+  );
 });

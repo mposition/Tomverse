@@ -4,6 +4,7 @@ import type { Prisma } from "@prisma/client";
 import {
   IMAGE_ASSET_CLEANUP_MAX_ATTEMPTS,
   STALE_IMAGE_GENERATION_AFTER_MS,
+  STALE_IMAGE_SETTLING_AFTER_MS,
   type ImageAssetCleanupReason,
 } from "@/lib/imageGenerationStateCore";
 import { reportOperationalIncident } from "@/lib/operationalMonitoring";
@@ -108,6 +109,12 @@ export const drainImageAssetCleanupQueue = async (
 export type ImageInvariantAuditResult = {
   emptyImageConversations: number;
   staleGenerations: number;
+  /**
+   * The subset of `staleGenerations` sitting in `settling`. Counted apart
+   * because it means something different: not a worker that never finished,
+   * but a settlement transaction that failed after the provider was paid.
+   */
+  strandedSettlements: number;
   cleanupBacklog: number;
 };
 
@@ -122,21 +129,33 @@ export type ImageInvariantAuditResult = {
 export const auditImageGenerationInvariants = async (
   now = new Date()
 ): Promise<ImageInvariantAuditResult> => {
-  const [emptyImageConversations, staleGenerations, cleanupBacklog] =
-    await Promise.all([
-      prisma.conversation.count({
-        where: { kind: "image", imageGenerations: { none: {} } },
-      }),
-      prisma.imageGeneration.count({
-        where: {
-          status: { in: ["pending", "processing", "settling"] },
-          updatedAt: {
-            lt: new Date(now.getTime() - STALE_IMAGE_GENERATION_AFTER_MS),
-          },
+  const [
+    emptyImageConversations,
+    staleGenerations,
+    strandedSettlements,
+    cleanupBacklog,
+  ] = await Promise.all([
+    prisma.conversation.count({
+      where: { kind: "image", imageGenerations: { none: {} } },
+    }),
+    prisma.imageGeneration.count({
+      where: {
+        status: { in: ["pending", "processing", "settling"] },
+        updatedAt: {
+          lt: new Date(now.getTime() - STALE_IMAGE_GENERATION_AFTER_MS),
         },
-      }),
-      prisma.imageAssetCleanup.count({ where: { completedAt: null } }),
-    ]);
+      },
+    }),
+    prisma.imageGeneration.count({
+      where: {
+        status: "settling",
+        updatedAt: {
+          lt: new Date(now.getTime() - STALE_IMAGE_SETTLING_AFTER_MS),
+        },
+      },
+    }),
+    prisma.imageAssetCleanup.count({ where: { completedAt: null } }),
+  ]);
 
   if (emptyImageConversations > 0) {
     reportOperationalIncident({
@@ -151,13 +170,23 @@ export const auditImageGenerationInvariants = async (
     });
   }
 
-  return { emptyImageConversations, staleGenerations, cleanupBacklog };
+  return {
+    emptyImageConversations,
+    staleGenerations,
+    strandedSettlements,
+    cleanupBacklog,
+  };
 };
 
 export type ImageAssetMaintenanceResult = {
   cleanup: ImageAssetCleanupSweepResult;
   invariants: ImageInvariantAuditResult;
-  staleRecovery: { examined: number; refunded: number };
+  staleRecovery: {
+    examined: number;
+    refunded: number;
+    /** Refunds that came from a settlement transaction that had failed. */
+    settlementStranded: number;
+  };
 };
 
 /**
@@ -177,7 +206,7 @@ export const runImageAssetMaintenanceQuietly = async (
       "@/lib/imageGenerationService"
     );
     const staleRecovery = await reconcileStaleImageGenerations(now).catch(
-      () => ({ examined: 0, refunded: 0 })
+      () => ({ examined: 0, refunded: 0, settlementStranded: 0 })
     );
     const invariants = await auditImageGenerationInvariants(now);
     return { cleanup, invariants, staleRecovery };
@@ -188,9 +217,10 @@ export const runImageAssetMaintenanceQuietly = async (
       invariants: {
         emptyImageConversations: 0,
         staleGenerations: 0,
+        strandedSettlements: 0,
         cleanupBacklog: 0,
       },
-      staleRecovery: { examined: 0, refunded: 0 },
+      staleRecovery: { examined: 0, refunded: 0, settlementStranded: 0 },
     };
   }
 };

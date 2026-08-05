@@ -20,6 +20,12 @@ export const IMAGE_GENERATION_FAILURE_PHASES = [
   "provider_failed",
   "original_storage_failed",
   "stale_job_reconciled",
+  // The provider succeeded and the *settlement* did not. Kept apart from
+  // `provider_failed` because the two are different operational problems:
+  // one says the image never arrived, this one says it arrived and the ledger
+  // write for it was lost. Reading the second as the first would send an
+  // operator to the provider's status page.
+  "settlement_failed",
 ] as const;
 
 export type ImageGenerationFailurePhase =
@@ -85,6 +91,22 @@ export const imageAssetR2Key = (input: {
 // pathologically slow worker that finishes after the sweep reclaimed its row
 // simply loses the claim and discards the result.
 export const STALE_IMAGE_GENERATION_AFTER_MS = 12 * 60 * 1_000;
+
+// `settling` gets its own, longer window, because reclaiming it is not the
+// same act. A `pending`/`processing` row has written nothing to the ledger, so
+// taking it back costs nothing; a `settling` row is one whose settlement
+// transaction may still be open, and taking that one back races a credit
+// write. What makes the reclaim safe is that the reservation carries its own
+// `reserved -> settling` claim *inside* that transaction, so a settlement that
+// already happened simply refuses the second attempt -- this window only has
+// to be longer than any transaction can live, which is seconds.
+//
+// It exists at all because `settling` was otherwise a trap: nothing reclaimed
+// it. The generation claim is made *outside* the settlement transaction, so a
+// rollback -- a deadlock, a lost connection, a redeploy between the two --
+// left the row in `settling` with its credits still reserved, invisible to the
+// recovery sweep and to the failure path, forever.
+export const STALE_IMAGE_SETTLING_AFTER_MS = 15 * 60 * 1_000;
 
 export const IMAGE_ASSET_CLEANUP_REASONS = [
   "conversation_deleted",
