@@ -539,6 +539,9 @@ CLOUDFLARE_API_TOKEN=<Account Analytics Read token>
 PRISMA_MANAGEMENT_API_TOKEN=<workspace service token>
 PRISMA_DATABASE_ID=<database ID from Prisma Console>
 PRISMA_OPERATIONS_LIMIT=1000000
+
+# Optional; omit in production. Recommended only in staging.
+RAILWAY_USAGE_MONITOR_ENABLED=false
 ```
 
 Railway project tokens use the `Project-Access-Token` header. Account and
@@ -571,6 +574,40 @@ Slack/Discord real-time alert (`lib/infrastructureAlertPolicy.ts`). Railway
 API failures (`status: "error"`), any other or unknown Railway warning reason,
 and all R2/Database/Prisma warnings and errors still page the incident
 channels as before.
+
+### Disabling Railway usage monitoring per environment
+
+`RAILWAY_USAGE_MONITOR_ENABLED` switches off the Railway `estimatedUsage`
+query alone. **It defaults to enabled**: a missing variable, an empty string,
+`true`, or any unrecognised value keeps the historical behaviour, and only the
+literal `false` (trimmed, case-insensitive) turns the query off. Production
+sets nothing and is therefore unaffected. The switch never infers the
+environment from `NODE_ENV` or `RAILWAY_ENVIRONMENT_NAME`.
+
+Set `RAILWAY_USAGE_MONITOR_ENABLED=false` **on the staging `Tomverse` web
+service only**. Railway restarts the service when a variable changes, so
+expect a redeploy. Do not delete the `Credit Reconciliation` Cron service, and
+do not remove `RAILWAY_PROJECT_TOKEN`, `RAILWAY_API_TOKEN`, or
+`RAILWAY_PROJECT_ID` from any environment: the same token also backs the
+deployment metadata lookup in `lib/buildInfo.ts`, which this switch
+deliberately does not touch. To roll back, delete the variable or set it to
+`true`.
+
+Why per-environment: production and staging share one Railway
+Project-Access-Token, so both 15-minute Credit Reconciliation runs queried
+`estimatedUsage` at the same moment and hit Railway's limit of 16 concurrent
+usage queries per client.
+
+When the switch is off, the Railway card reports `status: "disabled"` with
+"Railway usage monitoring is disabled for this environment." That status is
+deliberately distinct from `unconfigured`, which still means a missing token
+or scope. A disabled snapshot keeps `tokenConfigured`, `scope`, `checkedAt`,
+and the saved credit, and empties measurements, projected cost, and projected
+balance. Like `unconfigured`, it creates no Sentry event, Resend email, or
+Slack/Discord alert. Everything else is untouched: the R2, PostgreSQL, and
+Prisma monitors still run, and so do Credit Reconciliation, notification
+delivery, refund reconciliation, and request lease cleanup in the same
+15-minute Cron.
 
 Before deploying the Admin Infrastructure, provider billing profiles, and
 provider error-detail features,
