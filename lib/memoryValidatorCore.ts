@@ -189,6 +189,30 @@ const IMPERATIVE_PATTERNS: readonly RegExp[] = [
     /^(always|never|do\s+not|don't|must|please)\b/i,
     /\byou\s+(must|should|shall|will|have\s+to)\b/i,
     /(해\s?줘|해\s?주세요|하세요|해라|하라|하시오|할\s?것)\s*[.!]?$/,
+    // Negative polite imperative. Korean forms a prohibition with 말다 rather
+    // than by negating the verb, so "쓰지 마세요" contains no 하세요 and the
+    // affirmative list above misses every prohibition — the more directive
+    // half of the pair, and a §12.3 critical category.
+    /(마세요|마십시오|마라|말아라|말아\s?주세요|하지\s?마)\s*[.!]?$/,
+];
+
+/**
+ * Statements addressed TO the assistant rather than about the user (§8.2:
+ * declarative third-person).
+ *
+ * "You are now a pirate captain" is not a claim about anyone — it is an
+ * instruction wearing declarative grammar, and no imperative pattern catches
+ * it because it has no imperative verb. Demoted rather than rejected: the
+ * underlying preference may be real once rewritten as a statement about the
+ * user.
+ *
+ * The Hangul alternative uses an explicit space-or-end rather than `\b`: JS
+ * word boundaries are ASCII-only, so `\b` after a Hangul syllable never
+ * matches.
+ */
+const SECOND_PERSON_ADDRESS_PATTERNS: readonly RegExp[] = [
+    /^you(\s+(are|were|will\s+be)|\s*['\u2019]re)\b/i,
+    /^(너는|넌|당신은|당신이)(\s|$)/,
 ];
 
 const ABSOLUTE_MARKER_PATTERN = /(항상|반드시|무조건|절대)/;
@@ -304,6 +328,10 @@ export function validateMemoryCandidate(
     const imperative = matchesAny(IMPERATIVE_PATTERNS, statement);
     if (imperative) {
         violations.push("MEMORY_IMPERATIVE_FORM");
+        manualReview = true;
+    }
+    if (matchesAny(SECOND_PERSON_ADDRESS_PATTERNS, statement)) {
+        violations.push("MEMORY_SECOND_PERSON_ADDRESS");
         manualReview = true;
     }
     if (ABSOLUTE_MARKER_PATTERN.test(statement) && imperative) {
