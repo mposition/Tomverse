@@ -71,6 +71,8 @@ const seedMemory = async (
         status?: string;
         pinned?: boolean;
         expiresAt?: Date | null;
+        extractionModelId?: string | null;
+        promptVersion?: string | null;
         conversationId?: string;
         /** Unique within a conversation; the message table enforces it. */
         ordinal?: number;
@@ -88,6 +90,8 @@ const seedMemory = async (
             approvedAt: new Date("2026-08-01T00:00:00.000Z"),
             searchTerms: memoryRetrievalTerms(statement),
             retrievalVersion: 1,
+            extractionModelId: overrides.extractionModelId ?? null,
+            promptVersion: overrides.promptVersion ?? null,
         },
     });
     if (overrides.conversationId) {
@@ -307,4 +311,52 @@ test("retrieval never writes — a stale index stays stale until the backfill", 
     });
     assert.deepEqual(after.searchTerms, []);
     assert.equal(after.retrievalVersion, 0);
+});
+
+test("a revoked pair's memories are not retrieved, and its siblings still are", async () => {
+    // The bug this pins: the injectable-pair list was built from the register
+    // alone, so revoking one pair while another stayed approved left the
+    // account-level gate open AND kept admitting the revoked pair's memories.
+    // §12.4 revokes a pair, not an account.
+    const user = await createUser();
+    await seedMemory(user.id, "the user prefers formal Korean", {
+        extractionModelId: "revoked-model",
+        promptVersion: "mem-extract-v1",
+    });
+    await seedMemory(user.id, "the user writes Korean documentation", {
+        extractionModelId: "approved-model",
+        promptVersion: "mem-extract-v1",
+    });
+    // User-authored: no pair at all, and never subject to eval approval.
+    await seedMemory(user.id, "the user asked to remember Korean tone", {});
+
+    const result = await retrieveMemoryContext({
+        userId: user.id,
+        query: "Korean",
+        approvedPairs: [
+            { extractionModelId: "approved-model", promptVersion: "mem-extract-v1" },
+        ],
+    });
+    const statements = statementsOf(result);
+    assert.ok(statements.includes("the user writes Korean documentation"));
+    assert.ok(statements.includes("the user asked to remember Korean tone"));
+    assert.equal(statements.includes("the user prefers formal Korean"), false);
+});
+
+test("with no pair admitted, only user-authored memories are retrieved", async () => {
+    const user = await createUser();
+    await seedMemory(user.id, "the user prefers formal Korean", {
+        extractionModelId: "revoked-model",
+        promptVersion: "mem-extract-v1",
+    });
+    await seedMemory(user.id, "the user asked to remember Korean tone", {});
+
+    const result = await retrieveMemoryContext({
+        userId: user.id,
+        query: "Korean",
+        approvedPairs: [],
+    });
+    assert.deepEqual(statementsOf(result), [
+        "the user asked to remember Korean tone",
+    ]);
 });

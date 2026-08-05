@@ -86,37 +86,32 @@ export function hasApprovedExtractionPair(
 }
 
 /**
- * Per-item half of the same rule.
+ * The pairs whose memories may reach a prompt: approved by the eval procedure
+ * AND not operationally revoked.
  *
- * The account-level gate asks whether *any* approved pair exists; this asks
- * whether the pair that produced **this** memory is still approved. Both are
- * needed: revoking one pair must stop its memories from being injected
- * without stopping every other memory in the account, and an account-level
- * check alone cannot see which pair produced what.
+ * This is the per-item half of §12.4, and it is a *list* rather than a
+ * per-row predicate because that is the shape the retrieval query needs.
+ * Filtering rows after they are fetched would let a revoked pair's memories
+ * occupy candidate slots and then be discarded, which silently shrinks
+ * retrieval for accounts that have revocations — the same argument
+ * `lib/memoryRetrievalService.ts` makes about its always-considered union.
  *
- * A user-authored memory carries no extraction pair (§12, `extractionModelId`
+ * The account-level gate above cannot express this. It only knows whether
+ * *some* pair is approved, so on its own a revoked pair's memories would keep
+ * reaching prompts for as long as any other pair still stood.
+ *
+ * A user-authored memory carries no pair at all (§12, `extractionModelId`
  * null) and is not subject to extraction-quality approval — the user wrote it
- * and reviewed it themselves. A row carrying only one half of a pair is
- * malformed provenance and is excluded: fail-closed is the direction the rest
- * of this feature takes with unreadable provenance.
+ * and reviewed it themselves. The query admits those separately.
  */
-export function isInjectableProvenance(
-    memory: { extractionModelId: string | null; promptVersion: string | null },
+export function injectableExtractionPairs(
     revokedPairs: RevokedPairsState,
     register: readonly MemoryExtractionEvalEntry[] = MEMORY_EXTRACTION_EVAL_REGISTER
-): boolean {
-    if (memory.extractionModelId === null && memory.promptVersion === null) {
-        return true;
-    }
-    if (!memory.extractionModelId || !memory.promptVersion) return false;
-    return Boolean(
-        findApprovedEvalPair(
-            {
-                extractionModelId: memory.extractionModelId,
-                promptVersion: memory.promptVersion,
-            },
-            revokedPairs,
-            register
-        )
-    );
+): Array<{ extractionModelId: string; promptVersion: string }> {
+    return register
+        .map((entry) => ({
+            extractionModelId: entry.extractionModelId,
+            promptVersion: entry.promptVersion,
+        }))
+        .filter((pair) => Boolean(findApprovedEvalPair(pair, revokedPairs, register)));
 }
