@@ -2,6 +2,7 @@ import "server-only";
 
 import { generateText } from "ai";
 import { getActiveAiModel } from "@/lib/activeAiModel";
+import { MEMORY_EXTRACTION_CHUNK_TIMEOUT_MS } from "@/lib/memoryExtractionCore";
 import { getModelGenerationSettings } from "@/lib/modelGenerationCompatibility";
 import { getModel } from "@/lib/models";
 import { persistExtractionChunkDecisions } from "@/lib/memoryExtractionPersistence";
@@ -30,8 +31,22 @@ import { prisma } from "@/lib/prisma";
  * their conversations.
  */
 
-/** One chunk's provider call is bounded; a hung request must not hold a lease. */
-const CHUNK_PROVIDER_TIMEOUT_MS = 90_000;
+/**
+ * The provider call's own deadline, derived from the driver's rather than
+ * chosen next to it.
+ *
+ * `driveMemoryExtractionRunSlice()` already races every handler call against
+ * `MEMORY_EXTRACTION_CHUNK_TIMEOUT_MS`, so a larger number here is simply
+ * unreachable -- it was 90s against the driver's 60s and could never have
+ * fired. Cutting in slightly under the driver's bound is what makes the
+ * difference visible: the request is aborted at the provider, with a
+ * `provider_error` the retry budget can act on, instead of the driver
+ * abandoning a call that is still running.
+ */
+const CHUNK_PROVIDER_TIMEOUT_MS = Math.max(
+    5_000,
+    MEMORY_EXTRACTION_CHUNK_TIMEOUT_MS - 5_000
+);
 
 export const MEMORY_EXTRACTION_CHUNK_FAILURE_CODES = {
     modelUnavailable: "model_unavailable",

@@ -1,6 +1,7 @@
 import "server-only";
 
 import { memoryExtractionChunkHandler } from "@/lib/memoryExtractionChunkHandler";
+import { MEMORY_EXTRACTION_CHUNK_TIMEOUT_MS } from "@/lib/memoryExtractionCore";
 import type { MemoryExtractionEvalEntry } from "@/lib/memoryExtractionEvalRegister";
 import {
     driveMemoryExtractionRunSlice,
@@ -45,6 +46,42 @@ import { prisma } from "@/lib/prisma";
  */
 export const MEMORY_EXTRACTION_DISPATCH_MAX_RUNS = 3;
 
+/**
+ * And a wall-clock ceiling for the whole pass, because a run count is not a
+ * time bound.
+ *
+ * One slice is allowed `MEMORY_EXTRACTION_SLICE_BUDGET_MS` (90s), so three
+ * runs driven back to back is four and a half minutes inside a request that
+ * also reconciles credits, drains the notification queue and sweeps refunds.
+ * §11.1 requires extraction latency not to delay that work, and bounding the
+ * number of runs does not bound the time they take.
+ *
+ * The remaining budget is passed down as each run's own slice budget, so a run
+ * cannot keep starting chunks after the pass is out of time. Work not reached
+ * is durable and waits for the next pass, fifteen minutes later.
+ *
+ * Two minutes, and it has to exceed one chunk timeout by enough for a second
+ * run to qualify -- a ceiling equal to the timeout would silently cap every
+ * pass at one run. The bound is not exact: a chunk already claimed is always
+ * allowed to finish and report, so a pass can overrun by at most one chunk
+ * timeout. That is the reason this step is ordered last in the maintenance
+ * route -- an overrun then delays only the response, never the credit, refund
+ * and notification work §11.1 is protecting.
+ */
+export const MEMORY_EXTRACTION_DISPATCH_BUDGET_MS = 120_000;
+
+/**
+ * Below this there is no point starting *another* run: a slice that begins
+ * with less time than one chunk's timeout can only stop at its first boundary,
+ * having claimed and released a lease for nothing.
+ *
+ * It gates continuing, never starting. The first pending run is always
+ * dispatched, whatever the ceiling says, so a pass makes progress rather than
+ * deferring the same run forever -- and its slice still cannot outlive the
+ * pass, because the remaining time is handed down as its own budget.
+ */
+const MIN_CONTINUE_BUDGET_MS = MEMORY_EXTRACTION_CHUNK_TIMEOUT_MS;
+
 const workerId = (prefix: string) =>
     `${prefix}:${process.env.RAILWAY_REPLICA_ID ?? process.pid}`;
 
@@ -71,7 +108,7 @@ export type DispatchDeps = {
 export async function dispatchMemoryExtractionRun(
     runId: string,
     owner: string,
-    deps: DispatchDeps = {}
+    deps: DispatchDeps & { budgetMs?: number } = {}
 ): Promise<ExtractionSliceResult | null> {
     const handler = deps.handler ?? memoryExtractionChunkHandler();
     try {
@@ -80,6 +117,7 @@ export async function dispatchMemoryExtractionRun(
             owner,
             handler,
             register: deps.register,
+            budgetMs: deps.budgetMs,
         });
     } catch (error) {
         console.error(
@@ -113,6 +151,8 @@ export async function kickMemoryExtractionRun(
 export type MaintenanceDispatchResult = {
     reclaimedRuns: number;
     dispatched: number;
+    /** Pending runs this pass had no time left for; the next pass takes them. */
+    skippedForTime: number;
     outcomes: Record<string, number>;
 };
 
@@ -126,7 +166,7 @@ export type MaintenanceDispatchResult = {
  * still never finishes.
  */
 export async function dispatchPendingMemoryExtractionRuns(
-    deps: DispatchDeps & { maxRuns?: number; now?: Date } = {}
+    deps: DispatchDeps & { maxRuns?: number; budgetMs?: number; now?: Date } = {}
 ): Promise<MaintenanceDispatchResult> {
     const now = deps.now ?? new Date();
     const { reclaimedRuns } = await reconcileExpiredMemoryExtractionRuns(now);
@@ -140,20 +180,39 @@ export async function dispatchPendingMemoryExtractionRuns(
         select: { id: true },
     });
 
+    const deadline =
+        now.getTime() +
+        Math.max(1, deps.budgetMs ?? MEMORY_EXTRACTION_DISPATCH_BUDGET_MS);
+
     const outcomes: Record<string, number> = {};
     let dispatched = 0;
+    let skippedForTime = 0;
     for (const run of pending) {
+        const remaining = deadline - Date.now();
+        if (dispatched > 0 && remaining < MIN_CONTINUE_BUDGET_MS) {
+            // Reported rather than silently dropped: a pass that keeps running
+            // out of time is a signal that the interval, the run count or the
+            // slice budget is wrong, and a silent skip reads as "there was
+            // nothing to do".
+            skippedForTime += pending.length - dispatched;
+            break;
+        }
         const result = await dispatchMemoryExtractionRun(
             run.id,
             workerId("maintenance"),
-            deps
+            // The run's slice may not outlive the pass that started it.
+            // The run's slice may not outlive the pass that started it. The
+            // first run gets whatever is left even if that is little: a slice
+            // that stops at its first boundary parks the run cleanly, which is
+            // still better than never starting it.
+            { ...deps, budgetMs: Math.max(1, remaining) }
         );
         dispatched += 1;
         const key = result?.outcome ?? "error";
         outcomes[key] = (outcomes[key] ?? 0) + 1;
     }
 
-    if (reclaimedRuns > 0 || dispatched > 0) {
+    if (reclaimedRuns > 0 || dispatched > 0 || skippedForTime > 0) {
         // Reported under its own event name so extraction latency is never
         // read as credit or notification maintenance being slow (§11.1).
         console.info(
@@ -161,11 +220,12 @@ export async function dispatchPendingMemoryExtractionRuns(
                 event: "memory_extraction_dispatch",
                 reclaimedRuns,
                 dispatched,
+                skippedForTime,
                 outcomes,
                 at: now.toISOString(),
             })
         );
     }
 
-    return { reclaimedRuns, dispatched, outcomes };
+    return { reclaimedRuns, dispatched, skippedForTime, outcomes };
 }

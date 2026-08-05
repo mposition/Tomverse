@@ -74,16 +74,6 @@ export async function POST(request: Request) {
       await reconcileExpiredExternalImportStaging().catch(() => ({
         expiredImports: 0,
       }));
-    // Memory extraction recovery (policy §11.1). This is the *dispatcher*, not
-    // only the lease sweep: reclaiming an expired lease returns a run to
-    // `pending`, and §11.1 is explicit that a reclaimed run nobody re-drives
-    // sits there forever unless a request happens to arrive. So it reclaims
-    // and then drives what is pending, bounded so an extraction provider's
-    // latency cannot delay the credit, refund and notification work this same
-    // request performs. Never throws.
-    const memoryExtractionDispatch = await dispatchPendingMemoryExtractionRuns().catch(
-      () => ({ reclaimedRuns: 0, dispatched: 0, outcomes: {} })
-    );
     // Memory expiry (policy §8.6): retrieval already refuses an expired
     // memory whichever status it holds, so this is about the row saying so —
     // the owner sees it as expired, and the account's memory fingerprint
@@ -93,6 +83,26 @@ export async function POST(request: Request) {
       expiredMemories: 0,
       truncated: false,
     }));
+    // Memory extraction recovery (policy §11.1), deliberately last.
+    //
+    // This is the *dispatcher*, not only the lease sweep: reclaiming an expired
+    // lease returns a run to `pending`, and §11.1 is explicit that a reclaimed
+    // run nobody re-drives sits there forever unless a request happens to
+    // arrive. So it reclaims and then drives what is pending.
+    //
+    // It runs after everything above because it is the only step here that
+    // waits on a third-party model. It carries its own wall-clock ceiling as
+    // well as a run cap -- a run count is not a time bound -- but ordering it
+    // last means even a pathological provider cannot delay the credit, refund
+    // and notification work, which is §11.1's actual requirement. Never throws.
+    const memoryExtractionDispatch = await dispatchPendingMemoryExtractionRuns().catch(
+      () => ({
+        reclaimedRuns: 0,
+        dispatched: 0,
+        skippedForTime: 0,
+        outcomes: {},
+      })
+    );
     await completeScheduledJob({
       runId: run?.id,
       processedCount: result.examined,

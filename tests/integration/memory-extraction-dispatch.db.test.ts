@@ -412,3 +412,87 @@ test("the sweep is bounded so one slow provider cannot hold up maintenance", asy
     });
     assert.equal(stillPending, 2);
 });
+
+test("the pass stops at its wall-clock ceiling, not only its run cap (§11.1)", async () => {
+    // A run count is not a time bound. One slice may take
+    // MEMORY_EXTRACTION_SLICE_BUDGET_MS, so three runs back to back is minutes
+    // inside a request that also reconciles credits, drains notifications and
+    // sweeps refunds -- exactly what §11.1 says extraction must not delay.
+    const runs: string[] = [];
+    for (let index = 0; index < 3; index += 1) {
+        const { user, conversationIds } = await seed(1);
+        const { run } = await createRun(user.id, conversationIds);
+        runs.push(run.id);
+    }
+
+    const slow: ExtractionModelAdapter = async ({ prompt }) => {
+        await new Promise((resolve) => setTimeout(resolve, 400));
+        return {
+            text: JSON.stringify({
+                candidates: [
+                    {
+                        kind: "preference",
+                        statement: "the user prefers formal Korean",
+                        confidence: 0.9,
+                        sensitivity: "standard",
+                        expiresAt: null,
+                        evidence: [prompt.allowedMessageLabels[0]],
+                    },
+                ],
+            }),
+        };
+    };
+
+    // A ceiling below one chunk's timeout: the first run may start (the floor
+    // guarantees at least one gets a fair slice) and the rest are deferred
+    // rather than run past the deadline.
+    const result = await dispatchPendingMemoryExtractionRuns({
+        ...driving(slow),
+        budgetMs: 1,
+    });
+    assert.ok(result.dispatched >= 1, "at least one run gets a real slice");
+    assert.ok(result.dispatched < 3, "the pass stopped before draining the queue");
+    assert.equal(result.skippedForTime, 3 - result.dispatched);
+
+    // Deferred, not lost. All three are still `pending`: the two the pass had
+    // no time to reach, and the one it started -- a slice that runs out of
+    // budget before its first chunk hands the lease back and parks the run,
+    // which is the whole point of the budget being checked before claiming
+    // rather than after.
+    const stillPending = await prisma.memoryExtractionRun.count({
+        where: { id: { in: runs }, status: "pending" },
+    });
+    assert.equal(stillPending, 3);
+    assert.equal(
+        await prisma.memoryExtractionRun.count({
+            where: { id: { in: runs }, leaseExpiresAt: { not: null } },
+        }),
+        0,
+        "a parked run holds no lease"
+    );
+});
+
+test("a deferred run is picked up by the next pass", async () => {
+    const runs: string[] = [];
+    for (let index = 0; index < 2; index += 1) {
+        const { user, conversationIds } = await seed(1);
+        const { run } = await createRun(user.id, conversationIds);
+        runs.push(run.id);
+    }
+
+    const first = await dispatchPendingMemoryExtractionRuns({
+        ...driving(answeringAdapter({ count: 0 })),
+        maxRuns: 1,
+    });
+    assert.equal(first.dispatched, 1);
+
+    const second = await dispatchPendingMemoryExtractionRuns({
+        ...driving(answeringAdapter({ count: 0 })),
+    });
+    assert.equal(second.dispatched, 1);
+
+    const completed = await prisma.memoryExtractionRun.count({
+        where: { id: { in: runs }, status: "completed" },
+    });
+    assert.equal(completed, 2);
+});
