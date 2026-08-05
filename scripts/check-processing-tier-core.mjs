@@ -126,6 +126,15 @@ export const PROCESSING_TIER_REQUEST_ALLOWLIST = [
     ],
   },
   {
+    file: "lib/memoryExtractionChunkHandler.ts",
+    sendsATier: false,
+    reason:
+      "One comment line, on the adapter that builds the extraction request, recording that it selects no tier and no inference geography. The request below it passes system, prompt, the model's own generation settings and a timeout -- nothing else -- which is what makes the Standard pricing the run was quoted at true. The note is the reason a reviewer can check that claim without re-reading the whole call.",
+    mentions: [
+      "* No `service_tier` and no `inference_geo`, deliberately. Every profile in",
+    ],
+  },
+  {
     file: "lib/servedProcessingTier.ts",
     sendsATier: false,
     reason:

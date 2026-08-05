@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { after, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { z } from "zod";
 import {
@@ -12,6 +12,7 @@ import {
 } from "@/lib/appSettings";
 import { authOptions } from "@/lib/auth";
 import { listMemoryExtractionRuns } from "@/lib/memoryExtractionCatalogue";
+import { kickMemoryExtractionRun } from "@/lib/memoryExtractionDispatch";
 import {
     createMemoryExtractionRun,
     estimateMemoryExtraction,
@@ -133,6 +134,14 @@ export async function POST(req: Request) {
         const run = await createMemoryExtractionRun({
             ...base,
             confirmedCredits: body.confirmedCredits,
+        });
+        // The low-latency half of §11.1. The run and its chunks are already
+        // durable, so this only decides whether the user waits seconds or up
+        // to a maintenance interval to see it move; `after()` is bound to this
+        // process and is explicitly not the thing that guarantees the run
+        // finishes. The fifteen-minute dispatcher is.
+        after(async () => {
+            await kickMemoryExtractionRun(run.id);
         });
         return NextResponse.json(
             {

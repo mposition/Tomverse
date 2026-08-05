@@ -4,7 +4,7 @@ import { reconcileExpiredChatCreditReservations } from "@/lib/chatSecurity";
 import { reconcileExpiredChatRequestLeases } from "@/lib/chatRequestLease";
 import { reconcileExpiredExternalImportStaging } from "@/lib/externalImportService";
 import { reconcileExpiredMemories } from "@/lib/memoryExpiryService";
-import { reconcileExpiredMemoryExtractionRuns } from "@/lib/memoryExtractionService";
+import { dispatchPendingMemoryExtractionRuns } from "@/lib/memoryExtractionDispatch";
 import { reportOperationalIncident } from "@/lib/operationalMonitoring";
 import {
   completeScheduledJob,
@@ -74,13 +74,16 @@ export async function POST(request: Request) {
       await reconcileExpiredExternalImportStaging().catch(() => ({
         expiredImports: 0,
       }));
-    // Memory extraction leases (policy §3): a running run whose heartbeat
-    // stopped goes back to pending, progress intact, so the owner can resume
-    // instead of being blocked by their own orphan. Never throws.
-    const memoryExtractionLeases =
-      await reconcileExpiredMemoryExtractionRuns().catch(() => ({
-        reclaimedRuns: 0,
-      }));
+    // Memory extraction recovery (policy §11.1). This is the *dispatcher*, not
+    // only the lease sweep: reclaiming an expired lease returns a run to
+    // `pending`, and §11.1 is explicit that a reclaimed run nobody re-drives
+    // sits there forever unless a request happens to arrive. So it reclaims
+    // and then drives what is pending, bounded so an extraction provider's
+    // latency cannot delay the credit, refund and notification work this same
+    // request performs. Never throws.
+    const memoryExtractionDispatch = await dispatchPendingMemoryExtractionRuns().catch(
+      () => ({ reclaimedRuns: 0, dispatched: 0, outcomes: {} })
+    );
     // Memory expiry (policy §8.6): retrieval already refuses an expired
     // memory whichever status it holds, so this is about the row saying so —
     // the owner sees it as expired, and the account's memory fingerprint
@@ -101,7 +104,7 @@ export async function POST(request: Request) {
         requestLeases,
         imageAssets,
         externalImportStaging,
-        memoryExtractionLeases,
+        memoryExtractionDispatch,
         memoryExpiry,
       },
     });
@@ -115,7 +118,7 @@ export async function POST(request: Request) {
         requestLeases,
         imageAssets,
         externalImportStaging,
-        memoryExtractionLeases,
+        memoryExtractionDispatch,
       },
       { headers: { "Cache-Control": "no-store" } }
     );

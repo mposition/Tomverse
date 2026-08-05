@@ -165,6 +165,7 @@ run(
     "tests/integration/memory-extraction.db.test.ts",
     "tests/integration/memory-extraction-persistence.db.test.ts",
     "tests/integration/memory-extraction-credits.db.test.ts",
+    "tests/integration/memory-extraction-dispatch.db.test.ts",
     "tests/integration/memory-review.db.test.ts",
     "tests/integration/memory-retrieval.db.test.ts",
     "tests/integration/memory-source-deletion.db.test.ts",
