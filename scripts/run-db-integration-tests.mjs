@@ -237,3 +237,18 @@ run(
   ],
   "Running the feedback lifecycle notification transaction scenarios"
 );
+// Its own process for the same reason: it replaces next-auth to drive the
+// snapshot lock routes as a signed-in owner.
+run(
+  [
+    "--conditions=react-server",
+    "--experimental-test-module-mocks",
+    "--no-warnings=ExperimentalWarning",
+    "--import",
+    "tsx",
+    "--test",
+    "--test-concurrency=1",
+    "tests/integration/external-conversation-lock-route.db.test.ts",
+  ],
+  "Running the imported snapshot lock, unlock and attempt-limit scenarios"
+);
