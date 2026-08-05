@@ -1245,8 +1245,27 @@ GET/PUT /api/memories/settings                 master toggle·기본 mode
 GET    /api/memories/export                    전체 export (재인증, §13.2)
 POST   /api/memories/delete-all                (재인증, §13.1)
 PATCH  /api/conversations/[id]                 memoryMode 변경 (기존 route 확장)
-POST   /api/external-conversations/[id]/lock | /verify | /unlock   (B5)
+GET    /api/external-conversations/[id]/lock          잠금 여부 + 잠글 때의 memory 영향 (§7.1)
+PUT    /api/external-conversations/[id]/lock          설정·변경·해제 (변경·해제는 currentPassword 필수)
+POST   /api/external-conversations/[id]/lock/verify   비밀번호 확인 → unlock grant
 ```
+
+lock은 별도 route입니다. snapshot은 immutable(§4.2)이라 일반 PATCH route가
+없고, 만들면 두 번째 mutable 필드를 부르게 됩니다. 해제(`/unlock`)를 따로 두지
+않은 것은 그것이 상태 제거이지 별개 동작이 아니기 때문입니다 —
+`PUT { password: null }`이 같은 판정·같은 audit·같은 memory 전이를 씁니다.
+
+- **변경·해제는 현재 비밀번호를 증명합니다.** grant(cookie)로 대신하지
+  않습니다. 로그인된 기기에 접근한 사람이 잠금을 벗겨낼 수 있으면 잠금의
+  존재 이유가 사라집니다. 설정(잠기지 않은 snapshot)은 증명할 것이 없습니다.
+- **증명 실패는 verify와 같은 attempt 예산을 씁니다.** 두 경로가 다른 속도로
+  추측을 허용하면 느슨한 쪽이 실효 한도가 됩니다. 단 `currentPassword`가
+  아예 없는 요청은 추측이 아니므로 예산을 쓰지 않고 거절합니다.
+- **설정·변경 성공 시 grant를 함께 발급하고 해제 시 삭제합니다.** 방금 고른
+  비밀번호를 바로 다시 입력시키지 않기 위해서이고, 삭제는 TTL 안에 다른
+  비밀번호로 다시 잠근 snapshot이 옛 grant로 열리는 것을 막습니다.
+- 잠긴 snapshot 조회는 새 코드가 아니라 기존 423 `CONVERSATION_LOCKED`로
+  답합니다(§7의 호환 요구, §18 표는 확정본).
 
 context bundle은 기존 `/api/chat/preflight` 확장 + 단일 모델용 경량 context
 preparation으로 발급하고 `/api/chat`이 검증·소비합니다. 신설 여부는 기존

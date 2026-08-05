@@ -321,6 +321,7 @@ export async function listExternalConversations(
                 sourceCreatedAt: true,
                 sourceUpdatedAt: true,
                 importedAt: true,
+                password: true,
             },
         }),
     ]);
@@ -339,6 +340,10 @@ export async function listExternalConversations(
             sourceCreatedAt: row.sourceCreatedAt?.toISOString() ?? null,
             sourceUpdatedAt: row.sourceUpdatedAt?.toISOString() ?? null,
             importedAt: row.importedAt.toISOString(),
+            // Whether a lock is set, never the hash (§7). The owner needs the
+            // list to say which snapshots will ask for a password before they
+            // open one; nothing else about the lock belongs in a list.
+            locked: row.password != null,
         })),
     };
 }
@@ -437,6 +442,10 @@ export async function getExternalConversation(
         sourceCreatedAt: row.sourceCreatedAt?.toISOString() ?? null,
         sourceUpdatedAt: row.sourceUpdatedAt?.toISOString() ?? null,
         importedAt: row.importedAt.toISOString(),
+        // Reaching here means the grant was accepted, so this says "a lock is
+        // set and you are past it" -- which is what lets the viewer offer to
+        // change or remove it (§7).
+        locked: row.password != null,
         messageTotal: row.messageCount,
         offset,
         limit,

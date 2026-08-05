@@ -67,9 +67,44 @@ written to stop four surfaces carrying four different `byteLength / 4` copies,
 and for that job it is correct and worth keeping.
 
 It is not a per-model tokenizer. `ESTIMATE-01/02` require **tokenizer-stratified**
-median error ≤5% and p95 ≤15%, and one heuristic spanning the OpenAI,
-Anthropic and Google tokenizers is unlikely to hold the p95 without
-per-tokenizer correction.
+median error ≤5% and p95 ≤15%. That has now been measured rather than assumed —
+`npm run report:token-estimate-accuracy`:
+
+| Tokenizer | Median absolute error | p95 |
+| --- | --- | --- |
+| `o200k_base` (GPT-5 family) | 97.4% | 117.1% |
+| `cl100k_base` (GPT-4 family) | 25.0% | 52.2% |
+
+The error is systematic, one-directional, and worst in Korean. The heuristic
+assumes 1.5 tokens per CJK character; `o200k_base` actually spends about 0.74
+to 0.79, so Korean prose is overestimated by roughly 110%. English prose is
+overestimated by about 29% — the assumed 4 bytes per token measures closer to
+5.6. Only code and JSON land near the budget, and those undershoot.
+
+The constants are not so much wrong as *aged*: against `cl100k_base` the CJK
+ratio is 1.16 to 1.37, so 1.5 was a fair approximation when it was written.
+Newer tokenizers became far more efficient on CJK and the constant did not
+follow.
+
+Two consequences, one already live and one waiting on the Router:
+
+- **Today** the estimate drives credit reservation and the context-window
+  guard. Overestimating is the safe direction for billing, since reservations
+  settle at actual usage — but it means a Korean conversation can be refused
+  for credits it would not have spent, and can hit
+  `MODEL_CONTEXT_WINDOW_EXCEEDED` while it would still have fit.
+- **With Auto routing** the same overestimate inflates the Pass 1 context
+  estimate, so Korean conversations get routed to unnecessarily large-context
+  models and trigger the Pass 2 escape hatch spuriously, against `ROUTE-04`'s
+  5% cap.
+
+For a Korean-first product this is the gap that most directly mis-serves the
+primary language.
+
+The measurement covers the OpenAI families only. Anthropic and Google tokenize
+differently and expose counting over the network, so their error is still
+unmeasured; `ESTIMATE-01/02` evidence is not decision-grade until they are
+included.
 
 Needed: a tokenizer family per model, and a calibration factor per family that
 the measured `estimatedInputTokens` / `actualInputTokens` delta on
