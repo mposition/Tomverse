@@ -137,6 +137,16 @@ jobs:
         timeout-minutes: 5
         run: npm run check:memory-extraction-eval
 
+      # Tomverse Chat release thresholds live only in the canonical registry
+      # (docs/release-gates/tomverse-chat-v1.yaml); prose documents reference
+      # gate IDs and may not redefine numbers. A registry with duplicate IDs,
+      # missing required/approval fields, or invalid operators must not merge.
+      # Cheap, no browser, so it sits in the static tier with the other
+      # fail-closed checks.
+      - name: Tomverse Chat release gates
+        timeout-minutes: 5
+        run: npm run verify:tomverse-chat-release-gates
+
       # gpt-image-2 lives outside AVAILABLE_MODELS by design, so the model
       # pricing check above cannot see it. Same release contract -- every
       # enabled price is explicit and verified -- separate fail-closed net.
