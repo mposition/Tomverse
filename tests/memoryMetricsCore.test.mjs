@@ -183,6 +183,25 @@ test("injection metrics are declared unavailable while nothing injects", () => {
     }
 });
 
+test("a metric that gained a source is no longer declared unavailable", () => {
+    // The reasons are a contract, not decoration: the source-lock slice and
+    // extraction settlement both landed, so claiming these have no source
+    // would be the same lie in the other direction -- a reader told nothing
+    // measures something that now does.
+    const declared = MEMORY_METRICS_UNAVAILABLE.map((entry) => entry.metric);
+    for (const metric of [
+        "lock_suspension_restore",
+        "credit_per_chunk_percentiles",
+        "batch_subbudget_exhaustion",
+    ]) {
+        assert.equal(
+            declared.includes(metric),
+            false,
+            `${metric} has a source now and must not be declared unavailable`
+        );
+    }
+});
+
 /* ------------------------------------------------------------- counters  -- */
 
 test("counters pass through and start at zero", () => {
@@ -199,4 +218,66 @@ test("an empty window summarizes without dividing by zero", () => {
     assert.equal(summary.memories.total, 0);
     assert.equal(summary.memories.sensitiveRate, null);
     assert.deepEqual(summary.runs.byPair, []);
+});
+
+/* ------------------------------------------------- credits per chunk  -- */
+
+test("credits per chunk are reported at the median and the 90th", () => {
+    const summary = summarizeMemoryMetrics({
+        memories: [],
+        runs: [],
+        counters: emptyMemoryCounters(),
+        settlements: [
+            { chunksCharged: 1, settledCredits: 1 },
+            { chunksCharged: 2, settledCredits: 4 },
+            { chunksCharged: 4, settledCredits: 4 },
+            { chunksCharged: 5, settledCredits: 25 },
+        ],
+    });
+    // Per-chunk: 1, 2, 1, 5 -> sorted 1, 1, 2, 5.
+    assert.equal(summary.creditPerChunk.samples, 4);
+    assert.equal(summary.creditPerChunk.p50, 1);
+    assert.equal(summary.creditPerChunk.p90, 5);
+});
+
+test("a run that charged nothing is excluded, not counted as zero", () => {
+    // Cancelled before its first chunk. Averaging it in would drag the
+    // reported cost of a chunk toward zero exactly when runs are failing.
+    const summary = summarizeMemoryMetrics({
+        memories: [],
+        runs: [],
+        counters: emptyMemoryCounters(),
+        settlements: [
+            { chunksCharged: 0, settledCredits: 0 },
+            { chunksCharged: 2, settledCredits: 6 },
+        ],
+    });
+    assert.equal(summary.creditPerChunk.samples, 1);
+    assert.equal(summary.creditPerChunk.p50, 3);
+});
+
+test("no settled run reports null rather than zero", () => {
+    const summary = summarizeMemoryMetrics({
+        memories: [],
+        runs: [],
+        counters: emptyMemoryCounters(),
+        settlements: [],
+    });
+    assert.deepEqual(summary.creditPerChunk, { samples: 0, p50: null, p90: null });
+});
+
+test("percentiles land on a run someone actually had", () => {
+    // Nearest-rank, not interpolation: these are credits, and "1.5 credits per
+    // chunk" describes nobody.
+    const summary = summarizeMemoryMetrics({
+        memories: [],
+        runs: [],
+        counters: emptyMemoryCounters(),
+        settlements: [
+            { chunksCharged: 1, settledCredits: 1 },
+            { chunksCharged: 1, settledCredits: 2 },
+        ],
+    });
+    assert.equal(summary.creditPerChunk.p50, 1);
+    assert.equal(summary.creditPerChunk.p90, 2);
 });

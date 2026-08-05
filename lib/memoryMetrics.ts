@@ -181,6 +181,23 @@ export const getMemoryReport = async ({
         runsUnavailable = true;
     }
 
+    // Settled reservations, for the §22 credit-per-chunk distribution. Only
+    // the two numbers the percentile needs: no cost, no snapshot, no ids.
+    let settlements: Array<{ chunksCharged: number; settledCredits: number }> =
+        [];
+    try {
+        settlements = await prisma.memoryExtractionCreditReservation.findMany({
+            where: { status: "settled", settledAt: { gte: since } },
+            orderBy: { settledAt: "desc" },
+            take: MAX_ROWS,
+            select: { chunksCharged: true, settledCredits: true },
+        });
+    } catch (error) {
+        // Same posture as the two queries above: a schema that predates this
+        // table reports the section as absent rather than failing the report.
+        if (!isMissingDatabaseSchemaError(error)) throw error;
+    }
+
     const counters = await readCounters(since);
     return {
         windowDays: days,
@@ -188,6 +205,6 @@ export const getMemoryReport = async ({
         memoriesUnavailable,
         runsUnavailable,
         truncated: memoriesTruncated || runsTruncated,
-        ...summarizeMemoryMetrics({ memories, runs, counters }),
+        ...summarizeMemoryMetrics({ memories, runs, counters, settlements }),
     };
 };

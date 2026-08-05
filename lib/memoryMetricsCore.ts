@@ -45,6 +45,10 @@ export type MemoryDayCounters = {
     source_delete_memory_deleted: number;
     source_delete_memory_suspended: number;
     memory_expired: number;
+    source_lock_memory_suspended: number;
+    source_lock_memory_restored: number;
+    source_lock_memory_expired: number;
+    extraction_subbudget_exhausted: number;
 };
 
 export const MEMORY_COUNTER_KINDS = [
@@ -52,6 +56,16 @@ export const MEMORY_COUNTER_KINDS = [
     "source_delete_memory_deleted",
     "source_delete_memory_suspended",
     "memory_expired",
+    // §7.1 lock transitions. Deliberately separate from the source-*delete*
+    // counters above: a lock is reversible and a delete is not, so folding
+    // them together would report a temporary suspension as data loss.
+    "source_lock_memory_suspended",
+    "source_lock_memory_restored",
+    "source_lock_memory_expired",
+    // §22's batch sub-budget exhaustion. A refusal leaves no row of its own —
+    // the run is never created, or the dispatch simply stops — so the counter
+    // is the only record that it happened.
+    "extraction_subbudget_exhausted",
 ] as const;
 
 export type MemoryCounterKind = (typeof MEMORY_COUNTER_KINDS)[number];
@@ -61,7 +75,54 @@ export const emptyMemoryCounters = (): MemoryDayCounters => ({
     source_delete_memory_deleted: 0,
     source_delete_memory_suspended: 0,
     memory_expired: 0,
+    source_lock_memory_suspended: 0,
+    source_lock_memory_restored: 0,
+    source_lock_memory_expired: 0,
+    extraction_subbudget_exhausted: 0,
 });
+
+/** One settled extraction reservation, reduced to what §22 permits. */
+export type ExtractionSettlementSample = {
+    chunksCharged: number;
+    settledCredits: number;
+};
+
+export type CreditPerChunkPercentiles = {
+    /** Settled runs that charged at least one chunk. */
+    samples: number;
+    p50: number | null;
+    p90: number | null;
+};
+
+/**
+ * Credits per charged chunk, at the median and the 90th percentile.
+ *
+ * A settled run that charged nothing — cancelled before its first chunk,
+ * failed on chunk one — contributes no per-chunk figure and is excluded
+ * rather than counted as zero: dividing by no chunks is not a cheap run, it
+ * is an absent measurement, and averaging it in would drag the reported cost
+ * of a chunk toward zero exactly when runs are failing.
+ *
+ * Nearest-rank rather than interpolation: the numbers are credits, and a
+ * percentile that reports 1.5 credits describes a run nobody had.
+ */
+export function creditPerChunkPercentiles(
+    samples: readonly ExtractionSettlementSample[]
+): CreditPerChunkPercentiles {
+    const perChunk = samples
+        .filter((sample) => sample.chunksCharged > 0)
+        .map((sample) => sample.settledCredits / sample.chunksCharged)
+        .sort((left, right) => left - right);
+    if (perChunk.length === 0) return { samples: 0, p50: null, p90: null };
+    const at = (fraction: number) =>
+        perChunk[
+            Math.min(
+                perChunk.length - 1,
+                Math.max(0, Math.ceil(fraction * perChunk.length) - 1)
+            )
+        ];
+    return { samples: perChunk.length, p50: at(0.5), p90: at(0.9) };
+}
 
 /**
  * Metrics §22 asks for that nothing can supply yet. Named, with the reason,
@@ -85,20 +146,9 @@ export const MEMORY_METRICS_UNAVAILABLE = [
             "CHAT_CONTEXT_BUNDLE_STALE refusals are returned but not counted",
     },
     {
-        metric: "lock_suspension_restore",
-        reason: "external source lock is the B5 slice (§7.1)",
-    },
-    {
         metric: "followup_repair_proxy",
-        reason: "requires memory-attributed answers, which need injection",
-    },
-    {
-        metric: "credit_per_chunk_percentiles",
-        reason: "no settled extraction attempt exists yet (slice 1.6)",
-    },
-    {
-        metric: "batch_subbudget_exhaustion",
-        reason: "no settled extraction attempt exists yet (slice 1.6)",
+        reason:
+            "requires answers attributed to the memories they used; injection is wired but fail-closed, so no answer has been attributed yet",
     },
 ] as const;
 
@@ -133,6 +183,8 @@ export type MemorySummary = {
         byPair: MemoryPairBreakdown[];
     };
     counters: MemoryDayCounters;
+    /** §22's credit-per-chunk distribution, over settled runs. */
+    creditPerChunk: CreditPerChunkPercentiles;
     unavailable: typeof MEMORY_METRICS_UNAVAILABLE;
 };
 
@@ -154,6 +206,7 @@ export function summarizeMemoryMetrics(input: {
     memories: readonly MemoryMetricSample[];
     runs: readonly MemoryRunMetricSample[];
     counters: MemoryDayCounters;
+    settlements?: readonly ExtractionSettlementSample[];
 }): MemorySummary {
     const byStatus = tally(input.memories.map((row) => row.status));
 
@@ -227,6 +280,7 @@ export function summarizeMemoryMetrics(input: {
             byPair,
         },
         counters: input.counters,
+        creditPerChunk: creditPerChunkPercentiles(input.settlements ?? []),
         unavailable: MEMORY_METRICS_UNAVAILABLE,
     };
 }
