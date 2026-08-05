@@ -9,7 +9,9 @@ import {
   IMAGE_GENERATION_STATUSES,
   STALE_IMAGE_GENERATION_AFTER_MS,
   canTransitionImageGenerationStatus,
+  currentImageAttempt,
   deriveImageGroupStatus,
+  deriveImageGroupStatusFromTargets,
   imageAssetR2Key,
   imageConversationR2Prefix,
 } from "../lib/imageGenerationStateCore.ts";
@@ -87,4 +89,65 @@ test("group status derives from current attempts only (policy section 11)", () =
   );
   // No targets is an invariant violation; the derivation stays conservative.
   assert.equal(deriveImageGroupStatus([]), "in_progress");
+});
+
+const attempt = (id, attemptNumber, status) => ({ id, attemptNumber, status });
+
+test("the current attempt of a target is the one its pointer names", () => {
+  const target = {
+    currentGenerationId: "gen-2",
+    generations: [attempt("gen-1", 1, "failed"), attempt("gen-2", 2, "processing")],
+  };
+  assert.equal(currentImageAttempt(target).id, "gen-2");
+});
+
+test("without a pointer the highest attempt number wins, whatever the array order", () => {
+  // The fallback exists for the window between a row being written and its
+  // pointer being read, and for a v1 row backfilled without one. Trusting
+  // array position instead would make the answer depend on the query's
+  // orderBy -- a rule nobody states and every caller could get differently.
+  assert.equal(
+    currentImageAttempt({
+      currentGenerationId: null,
+      generations: [attempt("gen-2", 2, "pending"), attempt("gen-1", 1, "failed")],
+    }).id,
+    "gen-2"
+  );
+  // A pointer naming a row that is not in this target's attempts is not a
+  // licence to report nothing: fall back rather than drop the target out of
+  // the derivation, which would silently shrink the group.
+  assert.equal(
+    currentImageAttempt({
+      currentGenerationId: "gen-from-another-target",
+      generations: [attempt("gen-1", 1, "succeeded")],
+    }).id,
+    "gen-1"
+  );
+  assert.equal(
+    currentImageAttempt({ currentGenerationId: "gen-1", generations: [] }),
+    null
+  );
+});
+
+test("a retried failure does not drag the group backwards", () => {
+  // The failure this pins: handing every attempt to the derivation would let
+  // the superseded `failed` row report partial_success while the retry is
+  // still running -- the user would see a finished comparison that is not.
+  const targets = [
+    {
+      currentGenerationId: "a-1",
+      generations: [attempt("a-1", 1, "succeeded")],
+    },
+    {
+      currentGenerationId: "b-2",
+      generations: [attempt("b-1", 1, "failed"), attempt("b-2", 2, "processing")],
+    },
+  ];
+  assert.equal(deriveImageGroupStatusFromTargets(targets), "in_progress");
+
+  targets[1].generations[1].status = "succeeded";
+  assert.equal(deriveImageGroupStatusFromTargets(targets), "succeeded");
+
+  targets[1].generations[1].status = "failed";
+  assert.equal(deriveImageGroupStatusFromTargets(targets), "partial_success");
 });

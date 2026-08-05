@@ -136,3 +136,51 @@ export const deriveImageGroupStatus = (
   if (succeeded === 0) return "failed";
   return "partial_success";
 };
+
+/**
+ * Which of a target's attempts is its current state.
+ *
+ * `deriveImageGroupStatus` above refuses to be handed every attempt, which
+ * leaves each caller to pick the right one by hand -- and picking wrong is
+ * invisible: a group whose failed attempt was already retried would report
+ * `partial_success` while the retry is still running. The rule lives here so
+ * there is one of it.
+ *
+ * `currentGenerationId` is authoritative; it moves to the new attempt in the
+ * same transaction that creates it. The highest attempt number is the fallback
+ * for the window where a row exists and the pointer has not been read yet, and
+ * for a v1 row backfilled without one.
+ */
+export const currentImageAttempt = <
+  T extends { id: string; attemptNumber: number },
+>(target: {
+  currentGenerationId: string | null;
+  generations: readonly T[];
+}): T | null => {
+  if (target.generations.length === 0) return null;
+  const byPointer = target.generations.find(
+    (generation) => generation.id === target.currentGenerationId
+  );
+  if (byPointer) return byPointer;
+  return target.generations.reduce((newest, generation) =>
+    generation.attemptNumber >= newest.attemptNumber ? generation : newest
+  );
+};
+
+/** `deriveImageGroupStatus` over whole targets, current attempt picked here. */
+export const deriveImageGroupStatusFromTargets = (
+  targets: readonly {
+    currentGenerationId: string | null;
+    generations: readonly {
+      id: string;
+      attemptNumber: number;
+      status: ImageGenerationStatus;
+    }[];
+  }[]
+): ImageGroupStatus =>
+  deriveImageGroupStatus(
+    targets
+      .map((target) => currentImageAttempt(target))
+      .filter((attempt) => attempt !== null)
+      .map((attempt) => attempt.status)
+  );

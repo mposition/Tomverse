@@ -286,8 +286,16 @@ gate 없이 노출되는 배포 창은 금지된다. UI 비노출은 보안 경�
   attempt 갱신은 같은 트랜잭션이며, succeeded target의 재실행은 거부한다
   (이중 과금 금지). UI는 target의 최신 attempt를 현재 상태로 보여주고
   과거 attempt는 감사 기록으로 보존한다.
-- 폴링은 그룹 단위 endpoint 하나로 그룹·target·attempt 상태를 함께
-  반환한다.
+- **폴링은 그룹 단위 endpoint 하나로 그룹·target·attempt 상태를 함께
+  반환한다** — `GET /api/images/groups/{groupId}`. generation별 폴링은
+  비교 관찰 비용을 모델 수에 비례시키며, client는 거절된 폴링을 "변화 없음"
+  으로 읽으므로 status rate limit 소진이 **조용히 갱신을 멈춘 화면**으로
+  나타난다. `GET /api/images/generations/{generationId}`는 만료된 signed
+  asset URL을 다시 발급받는 단일 카드 복구용이며 폴링 경로가 아니다.
+- **어느 attempt가 target의 현재 상태인지는 한 곳에서 정한다**
+  (`currentImageAttempt`, `deriveImageGroupStatusFromTargets` —
+  `lib/imageGenerationStateCore.ts`). 전체 attempt를 파생 함수에 넘기면
+  이미 재시도된 실패가 재시도 진행 중에도 `partial_success`를 보고한다.
 
 ## 12. 이미지 모델 registry와 가격 검증 (v2)
 

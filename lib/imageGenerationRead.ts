@@ -1,5 +1,10 @@
 import "server-only";
 
+import {
+  currentImageAttempt,
+  deriveImageGroupStatus,
+  type ImageGenerationStatus,
+} from "@/lib/imageGenerationStateCore";
 import { createR2ReadUrl } from "@/lib/r2";
 
 // Shared read shape for image generation status responses. The by-id polling
@@ -108,5 +113,93 @@ export async function serializeImageGeneration(
     completedAt: generation.completedAt?.toISOString() ?? null,
     failedAt: generation.failedAt?.toISOString() ?? null,
     assets,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Group reads (policy §11).
+//
+// One comparison group is one poll. The workspace used to ask for each active
+// generation separately, which made the read cost of watching a comparison
+// scale with the number of models being compared -- the feature's whole point.
+// At a 5s cadence a five-model group spent its own 60/minute status budget
+// exactly, and a group stuck until the 12-minute stale sweep spent thousands
+// of the daily allowance; the client treats a rejected poll as "no update", so
+// the symptom would have been a workspace that quietly stopped refreshing.
+
+export const IMAGE_GROUP_READ_SELECT = {
+  id: true,
+  userId: true,
+  conversationId: true,
+  createdAt: true,
+  targets: {
+    select: {
+      id: true,
+      provider: true,
+      modelId: true,
+      currentGenerationId: true,
+      generations: {
+        orderBy: { attemptNumber: "asc" },
+        select: IMAGE_GENERATION_READ_SELECT,
+      },
+    },
+  },
+} as const;
+
+export type ImageGroupReadRow = {
+  id: string;
+  userId: string;
+  conversationId: string;
+  createdAt: Date;
+  targets: Array<{
+    id: string;
+    provider: string;
+    modelId: string;
+    currentGenerationId: string | null;
+    generations: ImageGenerationReadRow[];
+  }>;
+};
+
+export async function serializeImageGroup(
+  group: ImageGroupReadRow,
+  reservationByGeneration: Map<string, ImageGenerationReservationRow>
+) {
+  const attempts = group.targets.flatMap((target) => target.generations);
+
+  // The CURRENT attempt of each target, and only that one: a target whose
+  // failure has already been retried must not drag the group backwards. The
+  // rule is in imageGenerationStateCore so this route and any future caller
+  // cannot each pick differently.
+  const currentAttempts = group.targets.map((target) =>
+    currentImageAttempt(target)
+  );
+
+  return {
+    groupId: group.id,
+    conversationId: group.conversationId,
+    createdAt: group.createdAt.toISOString(),
+    status: deriveImageGroupStatus(
+      currentAttempts
+        .filter((attempt): attempt is ImageGenerationReadRow => attempt !== null)
+        .map((attempt) => attempt.status as ImageGenerationStatus)
+    ),
+    targets: group.targets.map((target, index) => ({
+      targetId: target.id,
+      provider: target.provider,
+      modelId: target.modelId,
+      currentGenerationId: currentAttempts[index]?.id ?? null,
+      attemptCount: target.generations.length,
+    })),
+    // Every attempt, current and superseded. Past attempts are the audit trail
+    // the policy keeps; they are all failures, because a succeeded target
+    // cannot be re-run, so this adds no signed-URL work to a poll.
+    generations: await Promise.all(
+      attempts.map((generation) =>
+        serializeImageGeneration(
+          generation,
+          reservationByGeneration.get(generation.id) ?? null
+        )
+      )
+    ),
   };
 }
