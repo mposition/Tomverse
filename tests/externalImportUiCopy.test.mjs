@@ -111,6 +111,7 @@ test("the components render the copy", () => {
         "../components/imports/wizard/ImportStepIndicator.tsx",
         "../components/imports/ExternalImportDetail.tsx",
         "../components/imports/ExternalConversationViewer.tsx",
+        "../components/imports/ConversationLockControls.tsx",
         "../components/auth/AuthButton.tsx",
     ].map((path) => readFileSync(new URL(path, import.meta.url), "utf8"));
     for (const key of [
@@ -151,6 +152,15 @@ test("the components render the copy", () => {
         "externalImport.previousSnapshots",
         "externalImport.exportAll",
         "externalImport.deleteSnapshot",
+        // §7: a locked snapshot has to say so where the owner meets it --
+        // in the list, and in place of the content it is withholding.
+        "externalImport.lockedBadge",
+        "externalImport.lockGateTitle",
+        "externalImport.lockSetCta",
+        "externalImport.lockRemoveCta",
+        // Losing the password is unrecoverable, so the warning is part of the
+        // contract rather than a nicety.
+        "externalImport.lockNoRecoveryWarning",
     ]) {
         assert.ok(
             sources.some((source) => source.includes(key)),
@@ -160,9 +170,10 @@ test("the components render the copy", () => {
 });
 
 test("the copy makes no promise the implementation does not keep", () => {
-    // Release A imports and stores; it does not extract memories, continue
-    // conversations, or lock imports behind a password (§1, §6, §7). And the
-    // marketing boundary (§17) forbids replication claims.
+    // Release A imports and stores; it does not extract memories or continue
+    // conversations (§1, §6). The lock arrived in B5 (§7), so lock copy is
+    // expected here now -- memory vocabulary still is not, which is why the
+    // lock's memory-impact sentences live under memoryReview instead.
     for (const [name, bundle] of Object.entries(LOCALES)) {
         const body = Object.values(bundle.externalImport)
             .join(" ")

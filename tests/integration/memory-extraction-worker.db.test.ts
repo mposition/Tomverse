@@ -352,3 +352,97 @@ test("one poisoned run does not stop the others from recovering", async () => {
         assert.notEqual(row.status, "running");
     }
 });
+
+test("the sweep is bounded so one slow provider cannot hold up maintenance", async () => {
+    const runIds: string[] = [];
+    for (let index = 0; index < 4; index += 1) {
+        const { run } = await seedRun();
+        runIds.push(run.id);
+    }
+
+    const result = await dispatchPendingMemoryExtractionRuns(new Date(), 2, {
+        adapterFactory: answeringAdapter("The user prefers formal Korean."),
+        register: APPROVED_REGISTER,
+    });
+    assert.equal(result.dispatchedRuns, 2);
+
+    // The rest are untouched and still durable, for the next pass.
+    assert.equal(
+        await prisma.memoryExtractionRun.count({
+            where: { id: { in: runIds }, status: "pending" },
+        }),
+        2
+    );
+});
+
+test("the pass stops at its wall-clock ceiling, not only its run cap (§11.1)", async () => {
+    // A run count is not a time bound. One slice may take
+    // MEMORY_EXTRACTION_SLICE_BUDGET_MS, so five runs back to back is minutes
+    // inside a request that also reconciles credits, drains notifications and
+    // sweeps refunds -- exactly what §11.1 says extraction must not delay.
+    const runIds: string[] = [];
+    for (let index = 0; index < 3; index += 1) {
+        const { run } = await seedRun();
+        runIds.push(run.id);
+    }
+
+    // A ceiling below one chunk's timeout: the first run may start (the floor
+    // guarantees at least one gets a fair slice) and the rest are deferred
+    // rather than run past the deadline.
+    const result = await dispatchPendingMemoryExtractionRuns(new Date(), 5, {
+        adapterFactory: answeringAdapter("The user prefers formal Korean."),
+        register: APPROVED_REGISTER,
+        budgetMs: 1,
+    });
+    assert.ok(
+        result.skippedForTime > 0,
+        "the pass stopped before draining the queue"
+    );
+
+    // Deferred, not lost: every run the pass did not finish is back at
+    // `pending` holding no lease, which is what makes the next pass able to
+    // take it. A slice that runs out of budget before its first chunk hands
+    // the lease back and parks the run -- the point of checking the budget
+    // before claiming rather than after.
+    assert.equal(
+        await prisma.memoryExtractionRun.count({
+            where: { id: { in: runIds }, status: "running" },
+        }),
+        0,
+        "no run is left claimed by a pass that has ended"
+    );
+    assert.equal(
+        await prisma.memoryExtractionRun.count({
+            where: { id: { in: runIds }, leaseExpiresAt: { not: null } },
+        }),
+        0,
+        "a parked run holds no lease"
+    );
+});
+
+test("a deferred run is picked up by the next pass", async () => {
+    const runIds: string[] = [];
+    for (let index = 0; index < 2; index += 1) {
+        const { run } = await seedRun();
+        runIds.push(run.id);
+    }
+
+    const first = await dispatchPendingMemoryExtractionRuns(new Date(), 1, {
+        adapterFactory: answeringAdapter("The user prefers formal Korean."),
+        register: APPROVED_REGISTER,
+    });
+    assert.equal(first.dispatchedRuns, 1);
+
+    const second = await dispatchPendingMemoryExtractionRuns(new Date(), 5, {
+        adapterFactory: answeringAdapter("The user prefers formal Korean."),
+        register: APPROVED_REGISTER,
+    });
+    assert.equal(second.dispatchedRuns, 1);
+
+    assert.equal(
+        await prisma.memoryExtractionRun.count({
+            where: { id: { in: runIds }, status: "completed" },
+        }),
+        2
+    );
+});
