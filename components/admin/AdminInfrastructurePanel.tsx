@@ -11,15 +11,17 @@ import {
   HardDrive,
   Gauge,
   Loader2,
+  PauseCircle,
   RefreshCw,
   Save,
   Server,
   XCircle,
 } from "lucide-react";
 import { dispatchAppToast } from "@/lib/appToast";
-import type {
-  InfrastructureDashboard,
-  InfrastructureStatus,
+import {
+  RAILWAY_USAGE_MONITOR_DISABLED_MESSAGE,
+  type InfrastructureDashboard,
+  type InfrastructureStatus,
 } from "@/lib/infrastructureTypes";
 
 const REFRESH_INTERVAL_MS = 10 * 60_000;
@@ -28,12 +30,14 @@ const statusStyle: Record<InfrastructureStatus, string> = {
   healthy: "border-emerald-500/30 bg-emerald-500/10 text-emerald-200",
   warning: "border-amber-500/30 bg-amber-500/10 text-amber-200",
   unconfigured: "border-zinc-700 bg-zinc-900 text-zinc-300",
+  disabled: "border-zinc-700 bg-zinc-900 text-zinc-300",
   error: "border-red-500/30 bg-red-500/10 text-red-200",
 };
 
 const statusIcon = (status: InfrastructureStatus) => {
   if (status === "healthy") return <CheckCircle2 className="h-3.5 w-3.5" />;
   if (status === "error") return <XCircle className="h-3.5 w-3.5" />;
+  if (status === "disabled") return <PauseCircle className="h-3.5 w-3.5" />;
   return <AlertTriangle className="h-3.5 w-3.5" />;
 };
 
@@ -237,6 +241,25 @@ export function AdminInfrastructurePanel({
             <p className="mt-4 text-xs leading-5 text-zinc-400">
               {data.railway.message}
             </p>
+            {data.railway.status === "disabled" ? (
+              <div
+                className="mt-3 rounded-xl border border-zinc-700 bg-zinc-900/60 p-3"
+                data-testid="railway-usage-monitor-disabled"
+              >
+                <p className="text-xs font-bold text-zinc-200">
+                  {RAILWAY_USAGE_MONITOR_DISABLED_MESSAGE}
+                </p>
+                <p className="mt-2 text-xs leading-5 text-zinc-400">
+                  No Railway usage query is sent from here, so projected cost and
+                  balance stay empty. Credentials are untouched and every other
+                  monitor keeps running. Remove{" "}
+                  <code className="text-[10px] font-bold text-zinc-300">
+                    RAILWAY_USAGE_MONITOR_ENABLED=false
+                  </code>{" "}
+                  from this environment&apos;s variables to resume monitoring.
+                </p>
+              </div>
+            ) : null}
             {data.railway.warningReasons.length > 0 ? (
               <div className="mt-3 rounded-xl border border-amber-500/25 bg-amber-500/5 p-3">
                 <p className="text-xs font-bold text-amber-200">Warning details</p>
