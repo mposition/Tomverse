@@ -8,6 +8,7 @@ import {
     releaseUnusedExtractionProviderCall,
     settleExtractionProviderCall,
 } from "@/lib/memoryExtractionProviderCost";
+import { getProviderCostBudget } from "@/lib/providerCostBudget";
 import { prisma } from "@/lib/prisma";
 
 /**
@@ -21,9 +22,13 @@ import { prisma } from "@/lib/prisma";
  * untouched.
  */
 
+// Configured well above the single-account floor: a provider budget below one
+// account's own plan guardrail is deliberately raised to it
+// (lib/providerCostBudget.ts), so a small number here would silently become a
+// large one and the ceiling assertions below would test nothing.
 const ENV = {
-    CHAT_PROVIDER_OPENAI_COST_MICROUSD_PER_DAY: "1000000",
-    CHAT_PROVIDER_OPENAI_COST_MICROUSD_PER_MONTH: "10000000",
+    CHAT_PROVIDER_OPENAI_COST_MICROUSD_PER_DAY: "100000000",
+    CHAT_PROVIDER_OPENAI_COST_MICROUSD_PER_MONTH: "1000000000",
     // 100%, so the sub-budget does not mask a provider-total assertion.
     MEMORY_EXTRACTION_PROVIDER_OPENAI_MAX_PERCENT_PER_DAY: "100",
     MEMORY_EXTRACTION_PROVIDER_OPENAI_MAX_PERCENT_PER_MONTH: "100",
@@ -212,7 +217,10 @@ test("settlement is idempotent, so a replay cannot move the budget twice", async
 
 test("an exhausted provider total admits nothing and leaves no trace", async () => {
     const { chunkId } = await seedChunk();
-    const result = await admit(chunkId, 2_000_000);
+    // Derived from the effective budget rather than hardcoded, so the floor
+    // above cannot quietly turn "over the limit" into "well within it".
+    const effective = getProviderCostBudget("openai", ENV);
+    const result = await admit(chunkId, effective.day + 1);
     assert.equal(result.admitted, false);
     assert.equal(
         result.admitted === false ? result.scope : null,
@@ -226,12 +234,14 @@ test("a sub-budget refusal gives the provider total back too", async () => {
     const { chunkId } = await seedChunk();
     // 10% of the day budget, so a cost above it clears the provider total but
     // not extraction's own share.
+    const effective = getProviderCostBudget("openai", ENV);
     const result = await admitExtractionProviderCall({
         chunkId,
         attemptCount: 1,
         provider: "openai",
         modelId: "gpt-5-6-luna",
-        estimatedCostMicroUsd: 500_000,
+        // Inside the provider total, outside extraction's 10% share of it.
+        estimatedCostMicroUsd: Math.floor(effective.day / 2),
         now: NOW,
         environment: {
             ...ENV,

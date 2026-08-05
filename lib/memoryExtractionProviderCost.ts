@@ -81,6 +81,14 @@ const consumeBucket = async (
     amount: number
 ): Promise<boolean> => {
     if (amount === 0) return true;
+    if (amount > 0 && (!Number.isSafeInteger(amount) || amount > limit)) {
+        // Checked before the statement, because `ON CONFLICT ... DO UPDATE ...
+        // WHERE` guards only the UPDATE path: on a bucket that does not exist
+        // yet the INSERT succeeds unconditionally, so the first spend of a
+        // period could otherwise blow the whole ceiling in one call. Chat's
+        // own primitive carries the same guard for the same reason.
+        return false;
+    }
     if (amount < 0) {
         await tx.$executeRaw`
             UPDATE "ChatUsageBucket"

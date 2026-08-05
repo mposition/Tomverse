@@ -10,6 +10,7 @@ import { expireCreditLots } from "@/lib/creditLedger";
 import { reconcileExpiredChatCreditReservations } from "@/lib/chatSecurity";
 import { purgeExpiredChatLimitDecisions } from "@/lib/chatLimitDecisions";
 import { deleteExpiredContextBundleConsumptions } from "@/lib/chatContextBundleService";
+import { dispatchPendingMemoryExtractionRunsQuietly } from "@/lib/memoryExtractionDispatch";
 import { reconcileExpiredMemoryExtractionRuns } from "@/lib/memoryExtractionService";
 import { purgeExpiredTraceErrorEvidence } from "@/lib/traceErrorEvidence";
 import { purgeClosedAutoFixCases } from "@/lib/feedbackAutoFixShadow";
@@ -471,19 +472,21 @@ export async function cleanupExpiredData() {
   // availability by itself. Reclaiming here is what makes the run claimable
   // again.
   //
-  // This is half of what §11.1 asks the fifteen-minute job to do. The other
-  // half -- re-driving the reclaimed run rather than only reclaiming it --
-  // needs the production chunk handler, which does not exist yet: today
-  // `driveMemoryExtractionRunSlice` has no caller outside the tests. Until it
-  // does, a reclaimed run waits for the next request-time kick instead of
-  // being restarted here, and that is a smaller gap than a run stuck
-  // `running` forever with no owner.
   const memoryExtractionRuns =
     await reconcileExpiredMemoryExtractionRuns(now);
+  // The other half of §11.1, and the half that actually finishes runs.
+  // Reclaiming only makes an orphaned run claimable; something has to claim
+  // it, and the post-response kick cannot be that something -- it is bound to
+  // a request and dies with the process. Deliberately after the reclaim, so a
+  // run this tick just parked is driven in the same tick rather than waiting
+  // another fifteen minutes. Never throws.
+  const memoryExtractionDispatch =
+    await dispatchPendingMemoryExtractionRunsQuietly();
 
   return {
     contextBundleConsumptions,
     memoryExtractionRuns: memoryExtractionRuns.reclaimedRuns,
+    memoryExtractionDispatched: memoryExtractionDispatch.dispatched,
     guestAttachments,
     sessions: sessions.count,
     usageBuckets: Number(usageBuckets),
