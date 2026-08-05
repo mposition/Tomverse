@@ -853,6 +853,56 @@ const checks = [
       source.includes("if (reservationClaim.count === 0) return"),
   },
   {
+    // The same claim-before-you-pay rule as the image settler above, on the
+    // other reservation table. Extraction runs in the background now: nothing
+    // is watching when a run reaches a terminal state, so a settlement that
+    // could run twice would refund twice with no one to notice (import/memory
+    // policy §11).
+    name: "Extraction settlement claims the reservation before it moves any credit",
+    file: "lib/memoryExtractionCredits.ts",
+    test: (source) =>
+      source.includes('where: { runId: input.runId, status: "reserved" }') &&
+      source.includes('data: { status: "settling" }') &&
+      source.includes("if (claim.count === 0)"),
+  },
+  {
+    // A run that exists without a reservation is a run nobody paid for, and it
+    // also blocks the account from starting another (one active run per user).
+    // Reserving inside the creation transaction is what makes both impossible:
+    // a refused reservation leaves no run, no chunks and no charge.
+    name: "An extraction run cannot exist without the reservation that paid for it",
+    file: "lib/memoryExtractionService.ts",
+    test: (source) =>
+      source.includes("reserveExtractionRunCredits({") &&
+      source.includes("tx,") &&
+      source.includes("await tx.memoryExtractionChunk.createMany"),
+  },
+  {
+    // Entitlement, not the operational guardrail. AGENTS.md keeps the two
+    // layers apart in names, codes and metrics, and the extraction reservation
+    // is entitlement: it allocates plan and add-on credits and must not read or
+    // write a provider budget.
+    name: "Extraction entitlement stays out of the provider budget layer",
+    file: "lib/memoryExtractionCredits.ts",
+    test: (source) =>
+      source.includes("getChatCreditAllocation") &&
+      source.includes("reserveAddOnCredits") &&
+      !source.includes("providerCostBudget") &&
+      !source.includes("PROVIDER_BUDGET_EXHAUSTED"),
+  },
+  {
+    // No raw internal USD in anything a user sees. The extraction reservation
+    // knows the run's estimated cost in micro-USD and must never put it in the
+    // error it throws when the balance is short.
+    name: "Extraction credit errors carry no internal cost figure",
+    file: "lib/memoryExtractionCredits.ts",
+    test: (source) =>
+      source.includes("CREDIT_BALANCE_INSUFFICIENT") &&
+      !/CREDIT_BALANCE_INSUFFICIENT[\s\S]{0,400}(costMicroUsd|MicroUsd)/.test(
+        source
+      ),
+  },
+  {
     name: "Image provider budgets are per provider and cover every active one",
     file: "lib/imageProviderBudget.ts",
     test: (source) =>
