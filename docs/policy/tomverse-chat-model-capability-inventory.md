@@ -115,10 +115,31 @@ delta; there is nowhere to write the correction it produces.
 
 `ProviderHealthState` has `provider String @id`, while `ProviderProbeResult`
 is per `(provider, modelId)`. Router candidate filtering is per model, so
-today it can only over-block (one model degraded blocks the whole provider) or
-under-block (a broken model stays eligible while its provider looks healthy).
-A per-model health read is needed, derived from the existing probe rows rather
-than a new evidence stream.
+without a rollup it can only over-block (one model degraded blocks the whole
+provider) or under-block (a broken model stays eligible while its provider
+looks healthy).
+
+**Closed** by `lib/modelHealthRollup.ts`. It derives a per-model verdict from
+the probe rows the existing health path already writes, and reuses
+`evaluateProviderFailureHealth` rather than inventing a second set of
+thresholds for the same judgement. Nothing in it reads routing outcomes, so it
+does not become the fourth evidence stream the routing policy forbids.
+
+Three rules the rollup encodes:
+
+- a provider outage takes every model with it, because a model cannot be
+  reachable through an unreachable provider;
+- a model can be individually unavailable while its provider is healthy, which
+  is the case the provider-keyed signal could never express;
+- a provider that is degraded but not out degrades its models too, because the
+  shared path between them is what is misbehaving and a model's own probes
+  cannot see it.
+
+`unknown` is a distinct status, not a synonym for healthy: a model that has
+never been probed, or whose probes are stale, is excluded from Auto while a
+deliberate manual choice still goes through. That is the same discipline
+`lib/webSearchCapability.ts` applies by leaving unconfirmed models
+`unverified` rather than assuming support.
 
 ### G3. No failure domain
 
@@ -127,6 +148,11 @@ domain* from the primary. `provider` is the only proxy available, which
 conflates same-vendor-different-region and any gateway shared across
 providers. An explicit failure domain per model is needed, or the fallback
 policy's diversity preference is unimplementable as written.
+
+Still open, but the proxy now has one home: `sharesFailureDomain` in
+`lib/modelHealthRollup.ts` states that provider is standing in for a failure
+domain, so `candidate.provider !== primary.provider` does not spread through
+the Router and quietly become the definition.
 
 ### G4. No regional availability
 
