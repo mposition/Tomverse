@@ -35,6 +35,13 @@ export type MemoryExportEvidence =
           externalConversationId: string | null;
           ordinal: number | null;
           role: string | null;
+          /**
+           * §7: the source is behind a password right now. The export never
+           * carried external evidence content, so nothing is being withheld
+           * that would otherwise be here — this says why the grounds cannot be
+           * read, instead of leaving an unexplained gap.
+           */
+          locked: boolean;
       }
     | { sourceType: string };
 
@@ -81,6 +88,8 @@ export type MemoryExportSource = {
             externalConversationId: string;
             ordinal: number;
             role: string;
+            /** §7: whether the source is currently behind a password. */
+            conversation?: { password: string | null } | null;
         } | null;
     }>;
 };
@@ -92,12 +101,17 @@ const serializeEvidence = (
         return { sourceType: "manual", grounds: evidence.manualContent ?? "" };
     }
     if (evidence.sourceType === "external_message") {
+        // Content was never included here, so a locked source needs no
+        // redaction — but the export should say WHY the grounds cannot be
+        // read, or a user comparing this to the conversation export sees an
+        // unexplained gap (§13.2, §7).
         return {
             sourceType: "external_message",
             externalConversationId:
                 evidence.externalMessage?.externalConversationId ?? null,
             ordinal: evidence.externalMessage?.ordinal ?? null,
             role: evidence.externalMessage?.role ?? null,
+            locked: Boolean(evidence.externalMessage?.conversation?.password),
         };
     }
     // An unexpected source type still gets an entry: the user should see that

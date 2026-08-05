@@ -5,6 +5,7 @@ import { reconcileExpiredChatRequestLeases } from "@/lib/chatRequestLease";
 import { reconcileExpiredExternalImportStaging } from "@/lib/externalImportService";
 import { dispatchPendingMemoryExtractionRunsQuietly } from "@/lib/memoryExtractionDispatch";
 import { backfillMemorySearchTerms } from "@/lib/memoryRetrieval";
+import { reconcileLockedSourceMemoriesSweep } from "@/lib/externalConversationLock";
 import { reconcileStrandedMemories } from "@/lib/memorySourceDelete";
 import { reconcileExpiredMemoryExtractionRuns } from "@/lib/memoryExtractionService";
 import { reportOperationalIncident } from "@/lib/operationalMonitoring";
@@ -104,6 +105,13 @@ export async function POST(request: Request) {
     const strandedMemories = await reconcileStrandedMemories().catch(() => ({
       suspended: 0,
     }));
+    // §7.1 reconciliation, and it fails in both directions: an unsuspended
+    // memory keeps quoting a locked source, and one suspended for a source
+    // that is no longer locked stays silently unavailable. Only accounts that
+    // could have diverged are touched. Never throws.
+    const lockedSourceMemories = await reconcileLockedSourceMemoriesSweep().catch(
+      () => ({ accounts: 0, suspended: 0, restored: 0 })
+    );
     await completeScheduledJob({
       runId: run?.id,
       processedCount: result.examined,
@@ -119,6 +127,7 @@ export async function POST(request: Request) {
         memoryExtractionDispatch,
         memorySearchTermsBackfill,
         strandedMemories,
+        lockedSourceMemories,
       },
     });
     return Response.json(
@@ -135,6 +144,7 @@ export async function POST(request: Request) {
         memoryExtractionDispatch,
         memorySearchTermsBackfill,
         strandedMemories,
+        lockedSourceMemories,
       },
       { headers: { "Cache-Control": "no-store" } }
     );

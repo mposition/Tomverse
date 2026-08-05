@@ -25,6 +25,7 @@ import { hashConversationPassword } from "@/lib/conversationLock";
 import {
     lockExternalConversation,
     reconcileLockedSourceMemories,
+    reconcileLockedSourceMemoriesSweep,
     unlockExternalConversation,
 } from "@/lib/externalConversationLock";
 import { reconcileStrandedMemories } from "@/lib/memorySourceDelete";
@@ -36,6 +37,7 @@ import {
     deleteMemory,
     editMemory,
     getMemorySettings,
+    iterateMemoryExportItems,
     listMemories,
     putMemorySettings,
     rejectMemory,
@@ -1494,4 +1496,82 @@ test("a locked snapshot exports as metadata, never as content (§7)", async () =
     assert.equal(after[0].locked, true);
     assert.equal(after[0].messages.length, 0);
     assert.equal(after[0].conversationDigest, before[0].conversationDigest);
+});
+
+test("the memory export says which grounds are behind a lock (§13.2)", async () => {
+    const user = await createUser();
+    const { conversationId } = await seedSourcedMemory(user.id);
+
+    const read = async () => {
+        const items = [];
+        for await (const item of iterateMemoryExportItems(user.id)) {
+            items.push(item);
+        }
+        return items;
+    };
+
+    // The export's evidence union has a catch-all `{ sourceType: string }`
+    // arm, so a `sourceType` comparison does not discriminate. Asserting the
+    // shape is what makes the fields readable here.
+    const externalEvidence = (items: Awaited<ReturnType<typeof read>>) => {
+        const entry = items[0].evidence.find(
+            (candidate) => candidate.sourceType === "external_message"
+        );
+        assert.ok(entry && "locked" in entry);
+        return entry as {
+            sourceType: "external_message";
+            externalConversationId: string | null;
+            locked: boolean;
+        };
+    };
+
+    const externalBefore = externalEvidence(await read());
+    assert.equal(externalBefore.locked, false);
+    // Content was never in here to begin with — only existence metadata.
+    assert.ok(!("content" in externalBefore));
+
+    await lockExternalConversation({
+        userId: user.id,
+        conversationId,
+        password: LOCK_PASSWORD,
+    });
+    const externalAfter = externalEvidence(await read());
+    assert.equal(externalAfter.locked, true);
+    assert.equal(
+        externalAfter.externalConversationId,
+        externalBefore.externalConversationId
+    );
+});
+
+test("the maintenance sweep repairs lock divergence account-wide (§7.1)", async () => {
+    const [first, second] = await Promise.all([createUser(), createUser()]);
+    const one = await seedSourcedMemory(first.id);
+    const two = await seedSourcedMemory(second.id);
+    // Two accounts, both diverged the same way a partial failure would leave
+    // them: source locked, memory never transitioned.
+    for (const conversationId of [one.conversationId, two.conversationId]) {
+        await prisma.externalConversation.update({
+            where: { id: conversationId },
+            data: { password: await hashConversationPassword(LOCK_PASSWORD) },
+        });
+    }
+
+    const swept = await reconcileLockedSourceMemoriesSweep();
+    assert.ok(swept.accounts >= 2);
+    assert.equal(swept.suspended, 2);
+    for (const memoryId of [one.memoryId, two.memoryId]) {
+        assert.equal(
+            (
+                await prisma.memoryItem.findUniqueOrThrow({
+                    where: { id: memoryId },
+                })
+            ).status,
+            "suspended_by_source_lock"
+        );
+    }
+
+    // Idempotent: a second pass over an account already in step does nothing.
+    const again = await reconcileLockedSourceMemoriesSweep();
+    assert.equal(again.suspended, 0);
+    assert.equal(again.restored, 0);
 });

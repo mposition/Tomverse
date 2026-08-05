@@ -148,12 +148,46 @@ test("external evidence carries a reference, never the source message text", () 
             externalConversationId: "ext-conv-1",
             ordinal: 4,
             role: "user",
+            // §7: the export never carried source content, so a locked source
+            // withholds nothing extra — this says why the grounds cannot be
+            // read rather than leaving an unexplained gap.
+            locked: false,
         },
     ]);
     assert.ok(
         !JSON.stringify(item).includes("content"),
         "the exported evidence must not carry source content"
     );
+});
+
+test("evidence behind a locked source is marked as such (§7, §13.2)", () => {
+    const item = serializeMemoryExportItem(
+        baseRow({
+            evidences: [
+                {
+                    sourceType: "external_message",
+                    manualContent: null,
+                    externalMessage: {
+                        externalConversationId: "ext-conv-1",
+                        ordinal: 4,
+                        role: "user",
+                        conversation: { password: "scrypt$1$..." },
+                    },
+                },
+            ],
+        })
+    );
+    assert.deepEqual(item.evidence, [
+        {
+            sourceType: "external_message",
+            externalConversationId: "ext-conv-1",
+            ordinal: 4,
+            role: "user",
+            locked: true,
+        },
+    ]);
+    // The hash is a credential-shaped value and must never reach an export.
+    assert.ok(!JSON.stringify(item).includes("scrypt"));
 });
 
 test("evidence whose source row is gone still reports its type", () => {
@@ -177,6 +211,8 @@ test("evidence whose source row is gone still reports its type", () => {
             externalConversationId: null,
             ordinal: null,
             role: null,
+            // A source that is gone is not a source behind a password.
+            locked: false,
         },
     ]);
 });

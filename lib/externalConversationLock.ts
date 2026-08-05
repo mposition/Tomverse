@@ -396,3 +396,64 @@ export async function reconcileLockedSourceMemories(
         restoredMemories: await restoreMemoriesForUnlockedSources(tx, userId),
     }));
 }
+
+/**
+ * The maintenance-cycle sweep (§7.1 "부분 실패로 lock과 memory 상태가
+ * 불일치하면 reconciliation이 탐지·복구합니다").
+ *
+ * Only accounts that could possibly have diverged are touched: one that holds
+ * a locked source, or one holding a memory suspended by a lock. Every other
+ * account has nothing for this to repair, and walking them all would make a
+ * fifteen-minute tick scale with the user table rather than with the problem.
+ */
+export async function reconcileLockedSourceMemoriesSweep(
+    limit = 200
+): Promise<{ accounts: number; suspended: number; restored: number }> {
+    const [lockedOwners, suspendedOwners] = await Promise.all([
+        prisma.externalConversation.findMany({
+            where: { password: { not: null } },
+            select: { userId: true },
+            distinct: ["userId"],
+            take: limit,
+        }),
+        prisma.memoryItem.findMany({
+            where: {
+                status: SUSPENDED_BY_LOCK,
+                suspendedReason: LOCK_SUSPENSION_REASON,
+            },
+            select: { userId: true },
+            distinct: ["userId"],
+            take: limit,
+        }),
+    ]);
+    const owners = [
+        ...new Set([
+            ...lockedOwners.map((row) => row.userId),
+            ...suspendedOwners.map((row) => row.userId),
+        ]),
+    ];
+
+    let suspended = 0;
+    let restored = 0;
+    for (const userId of owners) {
+        try {
+            const outcome = await reconcileLockedSourceMemories(userId);
+            suspended += outcome.suspendedMemories;
+            restored += outcome.restoredMemories;
+        } catch (error) {
+            // One account's failure must not stop the others being repaired.
+            console.error("locked source memory reconciliation failed", error);
+        }
+    }
+    if (suspended > 0 || restored > 0) {
+        console.warn(
+            JSON.stringify({
+                event: "memory_lock_state_reconciled",
+                accounts: owners.length,
+                suspended,
+                restored,
+            })
+        );
+    }
+    return { accounts: owners.length, suspended, restored };
+}

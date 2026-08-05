@@ -585,6 +585,11 @@ export async function* iterateMemoryExportItems(userId: string) {
                                     externalConversationId: true,
                                     ordinal: true,
                                     role: true,
+                                    // §7: so the export can say which grounds
+                                    // are behind a password.
+                                    conversation: {
+                                        select: { password: true },
+                                    },
                                 },
                             },
                         },
