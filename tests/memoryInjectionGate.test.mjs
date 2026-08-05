@@ -3,7 +3,7 @@ import test from "node:test";
 import {
   decideMemoryInjection,
   hasApprovedExtractionPair,
-  isInjectableProvenance,
+  injectableExtractionPairs,
 } from "../lib/memoryInjectionGate.ts";
 import { MEMORY_EXTRACTION_PROMPT_VERSION } from "../lib/memoryExtractionEvalRegister.ts";
 
@@ -111,15 +111,20 @@ test("revoking a pair closes the gate that pair was holding open", () => {
   assert.equal(hasApprovedExtractionPair({ kind: "revoke_all", reason: "malformed" }, REGISTER), false);
 });
 
-test("a memory is injectable only when its own producing pair is approved", () => {
-  assert.equal(isInjectableProvenance(APPROVED, NONE, REGISTER), true);
-  assert.equal(isInjectableProvenance(CANDIDATE, NONE, REGISTER), false);
+test("only an approved pair's memories may be retrieved", () => {
+  assert.deepEqual(injectableExtractionPairs(NONE, REGISTER), [APPROVED]);
+  // Candidate-only: the eval procedure has approved nothing, so nothing
+  // extraction-produced may reach a prompt.
+  assert.deepEqual(
+    injectableExtractionPairs(NONE, [{ ...CANDIDATE, status: "candidate" }]),
+    []
+  );
 });
 
 test("revoking one pair leaves the other pairs' memories injectable", () => {
-  // The account-level gate cannot express this: it only knows whether *some*
-  // pair is approved, so without the per-item rule a revoked pair's memories
-  // would keep reaching prompts for as long as any other pair stood.
+  // The regression this exists for: the account-level gate only knows whether
+  // *some* pair is approved, so a list built from the register alone kept
+  // admitting a revoked pair's memories for as long as any other pair stood.
   const second = {
     extractionModelId: "qa-second-model",
     promptVersion: MEMORY_EXTRACTION_PROMPT_VERSION,
@@ -127,27 +132,12 @@ test("revoking one pair leaves the other pairs' memories injectable", () => {
   const register = [...REGISTER, { ...second, status: "approved" }];
   const revoked = { kind: "revoked", pairs: [APPROVED] };
   assert.equal(hasApprovedExtractionPair(revoked, register), true);
-  assert.equal(isInjectableProvenance(APPROVED, revoked, register), false);
-  assert.equal(isInjectableProvenance(second, revoked, register), true);
+  assert.deepEqual(injectableExtractionPairs(revoked, register), [second]);
 });
 
-test("a user-authored memory carries no pair and is not eval-gated", () => {
-  assert.equal(
-    isInjectableProvenance(
-      { extractionModelId: null, promptVersion: null },
-      { kind: "revoke_all", reason: "malformed" },
-      REGISTER
-    ),
-    true
+test("revoke-all admits no pair at all", () => {
+  assert.deepEqual(
+    injectableExtractionPairs({ kind: "revoke_all", reason: "malformed" }, REGISTER),
+    []
   );
-});
-
-test("half-written provenance is unreadable, so it is excluded", () => {
-  for (const memory of [
-    { extractionModelId: "qa-approved-model", promptVersion: null },
-    { extractionModelId: null, promptVersion: MEMORY_EXTRACTION_PROMPT_VERSION },
-    { extractionModelId: "", promptVersion: "" },
-  ]) {
-    assert.equal(isInjectableProvenance(memory, NONE, REGISTER), false);
-  }
 });

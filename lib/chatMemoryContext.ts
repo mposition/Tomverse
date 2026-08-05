@@ -12,10 +12,10 @@ import {
     MEMORY_CONTEXT_PROMPT_VERSION,
     type MemoryContextPrompt,
 } from "@/lib/memoryContextPrompt";
-import { MEMORY_EXTRACTION_EVAL_REGISTER } from "@/lib/memoryExtractionEvalRegister";
 import {
     decideMemoryInjection,
     hasApprovedExtractionPair,
+    injectableExtractionPairs,
     type MemoryInjectionDecision,
 } from "@/lib/memoryInjectionGate";
 import { MEMORY_RETRIEVAL_ALGORITHM_VERSION } from "@/lib/memoryRetrievalScoring";
@@ -157,12 +157,11 @@ export async function buildChatMemoryContext(input: {
     });
     if (!decision.allowed) return buildEmpty(decision);
 
-    const approvedPairs = MEMORY_EXTRACTION_EVAL_REGISTER.filter(
-        (entry) => entry.status === "approved"
-    ).map((entry) => ({
-        extractionModelId: entry.extractionModelId,
-        promptVersion: entry.promptVersion,
-    }));
+    // Approved *and* not revoked. Reading the register alone was a real gap:
+    // revoking one pair while another stayed approved left the account-level
+    // gate open, and this list — the query's actual filter — still admitted
+    // the revoked pair's memories. §12.4 revokes a pair, not an account.
+    const approvedPairs = injectableExtractionPairs(revokedPairs);
 
     const [retrieval, memoryVersion, styleVersion] = await Promise.all([
         retrieveMemoryContext({
