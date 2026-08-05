@@ -48,7 +48,7 @@ test.describe("desktop chat keyboard policy", () => {
     await mockChatStream(page, "PC keyboard QA response");
   });
 
-  test("Enter sends the message exactly once", async ({ page }) => {
+  test("Enter sends the message exactly once", { tag: "@review-parity" }, async ({ page }) => {
     const textarea = page.getByTestId("chat-textarea");
     await textarea.fill("PC Enter send");
     await textarea.press("Enter");
@@ -87,7 +87,7 @@ test.describe("desktop chat keyboard policy", () => {
     await expect(userMessages(page, "Narrow PC window still sends")).toHaveCount(1);
   });
 
-  test("repeated Enter while sending does not duplicate the request", async ({ page }) => {
+  test("repeated Enter while sending does not duplicate the request", { tag: "@review-parity" }, async ({ page }) => {
     let chatRequestCount = 0;
     await page.unroute("**/api/chat");
     await page.route("**/api/chat", async (route) => {
