@@ -219,6 +219,8 @@ export const es = {
         responseCancelled: "Se detuvo la generación de la respuesta.",
         responseGenerating: "Generando una respuesta.",
         responseComplete: "Respuesta completada.",
+        responseIncomplete: "La respuesta se detuvo por el límite de longitud de salida.",
+        responseIncompleteNotice: "La respuesta se cortó por el límite de longitud de salida. Puedes continuar con una pregunta de seguimiento.",
         responseFailed: "La solicitud falló.",
         traceId: "ID de seguimiento",
         retry: "Reintentar",
@@ -406,6 +408,8 @@ export const es = {
         fileErrorHelpLink: "Abrir ayuda de carga de archivos",
     },
     share: {
+        personalizationNotice:
+            "Estas respuestas pueden haber estado influidas por los ajustes de personalización de quien las generó. Los recuerdos en sí no se comparten.",
         eyebrow: "Tomverse shared conversation",
         publicDocumentDescription: "Instantánea pública de solo lectura creada desde Tomverse. Las actualizaciones posteriores del chat no se añaden a esta página.",
         readOnly: "Solo lectura",

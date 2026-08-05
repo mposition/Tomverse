@@ -53,6 +53,8 @@ export async function GET(req: Request) {
       failureCounts,
       reservationTotals,
       settledByOption,
+      settledByProviderModel,
+      dimensionCoverage,
       storageByRole,
       invariants,
     ] = await Promise.all([
@@ -103,6 +105,28 @@ export async function GET(req: Request) {
         _count: { _all: true },
         _avg: { settledCostMicroUsd: true },
       }),
+      // Budgets are enforced per provider (policy section 8), so spend has to
+      // be readable per provider too. Without this the report shows one total
+      // and an operator cannot tell which provider's budget is being consumed
+      // -- which is precisely the question a second provider creates.
+      prisma.imageCreditReservation.groupBy({
+        by: ["provider", "modelId"],
+        where: { status: "settled" },
+        _count: { _all: true },
+        _sum: {
+          settledCredits: true,
+          settledCostMicroUsd: true,
+        },
+      }),
+      // Whether the decoded-dimension reader is actually working in
+      // production. A succeeded generation with no dimensions means the
+      // header could not be read, which is recorded honestly as null and is
+      // therefore invisible unless counted (policy section 12.1).
+      prisma.imageGeneration.groupBy({
+        by: ["provider"],
+        where: { status: "succeeded" },
+        _count: { _all: true },
+      }),
       prisma.imageAsset.groupBy({
         by: ["role"],
         where: { deletedAt: null },
@@ -111,6 +135,15 @@ export async function GET(req: Request) {
       }),
       auditImageGenerationInvariants(now),
     ]);
+
+    const succeededWithDimensions = await prisma.imageGeneration.groupBy({
+      by: ["provider"],
+      where: { status: "succeeded", outputWidth: { not: null } },
+      _count: { _all: true },
+    });
+    const measuredByProvider = new Map(
+      succeededWithDimensions.map((row) => [row.provider, row._count._all])
+    );
 
     const budget = resolveImageProviderBudget(process.env, {
       production: process.env.NODE_ENV === "production",
@@ -128,6 +161,18 @@ export async function GET(req: Request) {
         worstCostMicroUsdPerCredit: worstImageCostPerCreditMicroUsd(),
         ceilingHeadroomMicroUsd: imageCostCeilingHeadroomMicroUsd(),
       },
+      settledByProviderModel: settledByProviderModel.map((row) => ({
+        provider: row.provider,
+        modelId: row.modelId,
+        settlements: row._count._all,
+        settledCredits: row._sum.settledCredits ?? 0,
+        settledCostMicroUsd: Number(row._sum.settledCostMicroUsd ?? 0),
+      })),
+      dimensionCoverage: dimensionCoverage.map((row) => ({
+        provider: row.provider,
+        succeeded: row._count._all,
+        measured: measuredByProvider.get(row.provider) ?? 0,
+      })),
       models: IMAGE_MODEL_REGISTRY.map((model) => ({
         id: model.id,
         provider: model.provider,
@@ -135,6 +180,7 @@ export async function GET(req: Request) {
         lifecycle: model.lifecycle,
         disabledReason: model.disabledReason,
         disabledNote: model.disabledNote ?? null,
+        pricingVersion: model.pricingVersion,
         priceVerifiedAt: model.priceVerification.verifiedAt,
         optionCount: model.prices.length,
       })),

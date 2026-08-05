@@ -1,5 +1,6 @@
 import "server-only";
 
+import { recordMemoryCounter } from "@/lib/memoryMetrics";
 import { prisma } from "@/lib/prisma";
 
 /**
@@ -79,6 +80,9 @@ export async function reconcileExpiredMemories(now = new Date()): Promise<{
         if (batch === MAX_BATCHES - 1) truncated = true;
     }
 
+    if (expiredMemories > 0) {
+        await recordMemoryCounter("memory_expired", expiredMemories, now);
+    }
     if (expiredMemories > 0 || truncated) {
         // Content-free (§22): a count and a flag, never a statement or an id.
         console.info(

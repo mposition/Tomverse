@@ -5,8 +5,14 @@ import {
   type ImageQuality,
   type ImageSize,
 } from "@/lib/imageGenerationPricing";
-import { getImageModel } from "@/lib/imageModelRegistry";
+import { getImageModel, type ImageModelProfile } from "@/lib/imageModelRegistry";
+import { readImageDimensions } from "@/lib/imageDimensions";
 import type { ImageGenerationFailurePhase } from "@/lib/imageGenerationStateCore";
+import {
+  buildXaiImageRequest,
+  parseXaiImageResponse,
+  XAI_IMAGES_URL,
+} from "@/lib/xaiImageRequest";
 
 // The OpenAI Images API call, pinned to the parameter allowlist from
 // docs/policy/image-generation.md section 5: exact model, three sizes, three
@@ -42,7 +48,13 @@ export class ImageProviderError extends Error {
     >,
     message: string,
     public readonly status: number | null = null,
-    public readonly providerRequestId: string | null = null
+    public readonly providerRequestId: string | null = null,
+    /**
+     * The parameters the failed call sent, prompt excluded. A failure is
+     * exactly when someone needs to know what was asked for, and after the
+     * throw the body is otherwise gone.
+     */
+    public readonly requestParams: Record<string, unknown> | null = null
   ) {
     super(message);
     this.name = "ImageProviderError";
@@ -103,6 +115,30 @@ export type ImageProviderResult = {
   providerRequestId: string | null;
   /** What the bytes carry, for the workspace's provenance label. */
   provenance: readonly ("c2pa" | "synthid")[];
+  /**
+   * Pixel dimensions read from the returned file's own header, or null when
+   * they could not be read. Never inferred from the requested size: each
+   * provider translates a resolution tier its own way (policy §12.1).
+   */
+  outputWidth: number | null;
+  outputHeight: number | null;
+  /**
+   * Exactly the parameters this call sent, prompt excluded (policy §12.1).
+   * Taken from the body that was serialised rather than rebuilt, so the audit
+   * record cannot drift from the request it claims to describe.
+   */
+  requestParams: Record<string, unknown>;
+};
+
+const getXaiApiKey = () => {
+  const key = process.env.XAI_API_KEY?.trim();
+  if (!key) {
+    throw new ImageProviderError(
+      "provider_failed",
+      "Image provider is not configured."
+    );
+  }
+  return key;
 };
 
 const getImageApiKey = () => {
@@ -120,6 +156,18 @@ const getImageApiKey = () => {
   }
   return key;
 };
+
+/**
+ * The audit view of a request body: everything except the prompt, which is
+ * already stored on the generation row and must not be duplicated into a blob
+ * that deletion would then have to find twice.
+ */
+const auditableRequestParams = (
+  body: Record<string, unknown>
+): Record<string, unknown> =>
+  Object.fromEntries(
+    Object.entries(body).filter(([key]) => key !== "prompt")
+  );
 
 const wait = (ms: number) =>
   new Promise((resolveWait) => setTimeout(resolveWait, ms));
@@ -144,15 +192,29 @@ export const generateImageWithProvider = async (input: {
       `Image model ${modelId} is not available for requests.`
     );
   }
+  if (model.provider === "xai") {
+    return generateWithXai(model, input);
+  }
   if (model.provider !== "openai") {
-    // Google's adapter lands with its price verification (policy section 12):
-    // shipping an executable path to a model whose cost is unbounded is
-    // exactly what the hold exists to prevent.
+    // Google's adapter lands with its thinking cap (policy section 12):
+    // shipping an executable path to a model whose worst-case cost is not
+    // provably finite is exactly what the hold exists to prevent.
     throw new ImageProviderError(
       "provider_failed",
       `No adapter is implemented for provider ${model.provider}.`
     );
   }
+  const openAiBody = {
+    model: model.apiModelId,
+    prompt: input.prompt,
+    size: input.size,
+    quality: input.quality,
+    background: "opaque",
+    output_format: "png",
+    moderation: "auto",
+    n: 1,
+  };
+  const requestParams = auditableRequestParams(openAiBody);
   const apiKey = getImageApiKey();
   let lastError: ImageProviderError | null = null;
 
@@ -169,16 +231,7 @@ export const generateImageWithProvider = async (input: {
           Authorization: `Bearer ${apiKey}`,
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({
-          model: model.apiModelId,
-          prompt: input.prompt,
-          size: input.size,
-          quality: input.quality,
-          background: "opaque",
-          output_format: "png",
-          moderation: "auto",
-          n: 1,
-        }),
+        body: JSON.stringify(openAiBody),
         signal: AbortSignal.timeout(PROVIDER_TIMEOUT_MS),
       });
     } catch (error) {
@@ -186,7 +239,10 @@ export const generateImageWithProvider = async (input: {
         "provider_failed",
         error instanceof Error && error.name === "TimeoutError"
           ? "Image provider request timed out."
-          : "Image provider request failed."
+          : "Image provider request failed.",
+        null,
+        null,
+        requestParams
       );
       continue;
     }
@@ -199,7 +255,8 @@ export const generateImageWithProvider = async (input: {
         failurePhase,
         `Image provider rejected the request (HTTP ${response.status}).`,
         response.status,
-        providerRequestId
+        providerRequestId,
+        requestParams
       );
       if (
         failurePhase === "provider_rate_limited" ||
@@ -221,18 +278,22 @@ export const generateImageWithProvider = async (input: {
         "provider_failed",
         "Image provider returned no image payload.",
         response.status,
-        providerRequestId
+        providerRequestId,
+        requestParams
       );
     }
     const inputTokens = Number.isSafeInteger(payload?.usage?.input_tokens)
       ? Number(payload?.usage?.input_tokens)
       : 0;
+    const imageBytes = Buffer.from(b64, "base64");
+    // The request pins output_format: "png", so this is the format the
+    // provider was told to produce -- still stated explicitly rather than
+    // assumed downstream.
+    const mimeType = "image/png";
+    const dimensions = readImageDimensions(imageBytes, mimeType);
     return {
-      imageBytes: Buffer.from(b64, "base64"),
-      // The request pins output_format: "png", so this is the format the
-      // provider was told to produce -- still stated explicitly rather than
-      // assumed downstream.
-      mimeType: "image/png",
+      imageBytes,
+      mimeType,
       inputTokens,
       thinkingTokens: 0,
       outputTokens: Number.isSafeInteger(payload?.usage?.output_tokens)
@@ -240,6 +301,129 @@ export const generateImageWithProvider = async (input: {
         : 0,
       providerRequestId,
       provenance: ["c2pa"],
+      outputWidth: dimensions?.width ?? null,
+      outputHeight: dimensions?.height ?? null,
+      requestParams,
+    };
+  }
+
+  throw (
+    lastError ??
+    new ImageProviderError("provider_failed", "Image provider request failed.")
+  );
+};
+
+/**
+ * xAI's image API. Same retry and classification policy as the OpenAI path,
+ * different request shape and a different truth about the response MIME.
+ *
+ * Three things this path does that the OpenAI one does not:
+ *   * refuses a size it has no mapping for, rather than sending a resolution
+ *     the approved credits were not priced for;
+ *   * takes the MIME from the response, because xAI is not told which format
+ *     to produce and its documented example answers JPEG;
+ *   * reports zero tokens as a verified fact, not a gap -- xAI's pricing is
+ *     flat per image with no prompt-token or reasoning-token charge
+ *     (verified 2026-08-04), so there is nothing to normalise.
+ */
+const generateWithXai = async (
+  model: ImageModelProfile,
+  input: { prompt: string; size: ImageSize }
+): Promise<ImageProviderResult> => {
+  const body = buildXaiImageRequest({
+    apiModelId: model.apiModelId,
+    prompt: input.prompt,
+    size: input.size,
+  });
+  if (!body) {
+    throw new ImageProviderError(
+      "provider_failed",
+      `Image size ${input.size} has no xAI resolution mapping.`
+    );
+  }
+  const requestParams = auditableRequestParams(body);
+  const apiKey = getXaiApiKey();
+  let lastError: ImageProviderError | null = null;
+
+  for (let attempt = 0; attempt <= RETRY_DELAYS_MS.length; attempt += 1) {
+    if (attempt > 0) {
+      const base = RETRY_DELAYS_MS[attempt - 1];
+      await wait(base + Math.floor(Math.random() * 500));
+    }
+    let response: Response;
+    try {
+      response = await fetch(XAI_IMAGES_URL, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(body),
+        signal: AbortSignal.timeout(PROVIDER_TIMEOUT_MS),
+      });
+    } catch (error) {
+      lastError = new ImageProviderError(
+        "provider_failed",
+        error instanceof Error && error.name === "TimeoutError"
+          ? "Image provider request timed out."
+          : "Image provider request failed.",
+        null,
+        null,
+        requestParams
+      );
+      continue;
+    }
+
+    const providerRequestId =
+      response.headers.get("x-request-id") ?? response.headers.get("x-xai-request-id");
+    if (!response.ok) {
+      const errorBody = await response.json().catch(() => null);
+      const failurePhase = classifyImageProviderFailure(response.status, errorBody);
+      const error = new ImageProviderError(
+        failurePhase,
+        `Image provider rejected the request (HTTP ${response.status}).`,
+        response.status,
+        providerRequestId,
+        requestParams
+      );
+      if (
+        failurePhase === "provider_rate_limited" ||
+        failurePhase === "provider_failed"
+      ) {
+        lastError = error;
+        continue;
+      }
+      throw error;
+    }
+
+    const parsed = parseXaiImageResponse(
+      await response.json().catch(() => null)
+    );
+    if (!parsed) {
+      throw new ImageProviderError(
+        "provider_failed",
+        "Image provider returned no usable image payload.",
+        response.status,
+        providerRequestId,
+        requestParams
+      );
+    }
+    const imageBytes = Buffer.from(parsed.imageBase64, "base64");
+    const dimensions = readImageDimensions(imageBytes, parsed.mimeType);
+    return {
+      imageBytes,
+      mimeType: parsed.mimeType,
+      inputTokens: 0,
+      thinkingTokens: 0,
+      outputTokens: 0,
+      providerRequestId,
+      // Verified absent 2026-08-04: xAI documents no watermark, C2PA or
+      // metadata guarantee. Claiming provenance the bytes may not carry would
+      // be worse than claiming none.
+      provenance: [],
+      outputWidth: dimensions?.width ?? null,
+      outputHeight: dimensions?.height ?? null,
+      requestParams,
     };
   }
 

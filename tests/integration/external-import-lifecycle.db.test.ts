@@ -71,6 +71,9 @@ const conversationPayload = (
 const expectCode = (code: string) => (error: unknown) =>
     error instanceof ApiSecurityError && error.code === code;
 
+/** A request carrying no unlock grant, which is all an unlocked snapshot needs. */
+const anonymousRequest = () => new Request("https://tomverse.test/");
+
 beforeEach(resetData);
 
 after(async () => {
@@ -526,7 +529,7 @@ test("the viewer reads one conversation with message pages, owner-scoped", async
     const firstPage = await getExternalConversation(
         user.id,
         conversationIds[0],
-        { offset: 0, limit: 2 }
+        { request: anonymousRequest(), offset: 0, limit: 2 }
     );
     assert.equal(firstPage.messageTotal, 4);
     assert.deepEqual(
@@ -536,7 +539,7 @@ test("the viewer reads one conversation with message pages, owner-scoped", async
     const secondPage = await getExternalConversation(
         user.id,
         conversationIds[0],
-        { offset: 2, limit: 2 }
+        { request: anonymousRequest(), offset: 2, limit: 2 }
     );
     assert.deepEqual(
         secondPage.messages.map((message) => message.content),
@@ -545,7 +548,9 @@ test("the viewer reads one conversation with message pages, owner-scoped", async
 
     // Cross-user probes read as not-found, like every other import surface.
     await assert.rejects(
-        getExternalConversation(other.id, conversationIds[0], {}),
+        getExternalConversation(other.id, conversationIds[0], {
+            request: anonymousRequest(),
+        }),
         expectCode("NOT_FOUND")
     );
 });

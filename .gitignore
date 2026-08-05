@@ -64,9 +64,12 @@ next-env.d.ts
 # product policy that code and CI enforce (credit entitlement vs operational
 # cost guardrail). docs/ops/ holds runbooks the deployment path itself depends
 # on -- the migration baseline procedure is not reconstructable from the code.
+# docs/release-gates/ holds the canonical Tomverse Chat release-gate registry
+# that verify:tomverse-chat-release-gates enforces in the PR fast gate.
 docs/*
 !docs/ui-contracts/
 !docs/qa/
 !docs/policy/
 !docs/ops/
+!docs/release-gates/
 .playwright-mcp

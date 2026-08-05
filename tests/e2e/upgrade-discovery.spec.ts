@@ -166,7 +166,7 @@ test.describe("value-moment upgrade prompt", () => {
       .toBe("1");
   });
 
-  test("comparison preflight rejection prevents every provider request", { tag: "@smoke" }, async ({
+  test("comparison preflight rejection prevents every provider request", { tag: ["@smoke", "@review-parity"] }, async ({
     page,
   }) => {
     let providerRequestCount = 0;

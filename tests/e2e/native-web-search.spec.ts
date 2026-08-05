@@ -706,14 +706,15 @@ test.describe("native web search (webSearchMode: always)", () => {
     await selectModelsViaPicker(page, models);
     await expect(page.locator('[data-testid="desktop-model-panel"] select')).toHaveCount(2);
 
-    // Before enabling search: only the base model-response total (1 + 4 = 5,
-    // gpt-5-5 premium=8 and claude-sonnet-5 advanced=4 -- both Pro-tier).
+    // Before enabling search: only the base model-response total --
+    // gpt-5-5 carries an explicit creditWeight of 16 and claude-sonnet-5
+    // costs its advanced-class 4.
     const estimate = page.getByTestId("request-credit-estimate");
-    await expect(estimate).toContainText("12");
+    await expect(estimate).toContainText("20");
 
     await setWebSearchModeAlways(page);
-    // Both models are native-search-eligible: base 12 + 2 * 8 surcharge = 28.
-    await expect(estimate).toContainText("28");
+    // Both models are native-search-eligible: base 20 + 2 * 8 surcharge = 36.
+    await expect(estimate).toContainText("36");
 
     await estimate.click();
     const sheet = page.getByTestId("web-search-reservation-breakdown");
@@ -727,5 +728,162 @@ test.describe("native web search (webSearchMode: always)", () => {
         /Search credits are refunded for models that do not perform a web search\.|검색이 실행되지 않은 모델의 검색 크레딧은 자동 환불됩니다\./
       )
     ).toBeVisible();
+  });
+});
+
+/**
+ * Perplexity Sonar returns its sources as TOP-LEVEL `citations` /
+ * `search_results` response fields, not as `choices[].message.annotations`.
+ * The OpenAI-compatible chat adapter Perplexity runs through carries only
+ * annotations across, so the answer arrived with its "[1] [4] [7]" markers
+ * intact and no source list underneath. The server now reads those fields off
+ * the response body it already captures for billing and puts them in the
+ * stream trailer -- with the reference number each source has in the answer
+ * text, so "[4]" in the prose and "[4]" in the list are the same source.
+ *
+ * The same trailer also reports whether the provider actually finished: a
+ * `length` finish reason is HTTP 200 with real text, and used to be presented
+ * as a completed answer.
+ */
+test.describe("Perplexity citations and incomplete answers", () => {
+  test.beforeEach(async ({}, testInfo) => {
+    test.skip(
+      !testInfo.project.name.startsWith("desktop"),
+      "Uses the desktop per-panel model picker; the rendering under test is shell-agnostic (ChatMessageList.tsx)."
+    );
+  });
+
+  const PERPLEXITY_MODEL_ID = "perplexity/sonar";
+  const ANSWER_WITH_MARKERS =
+    "Google documents thought tokens separately[1], Vertex AI reports them in usage metadata[4], and the pricing page confirms billing[7].";
+  // Seven sources, exactly as `citations[]` ordered them. [1], [4] and [7] are
+  // the three the answer text actually cites.
+  const PERPLEXITY_CITATIONS = Array.from({ length: 7 }, (_, index) => ({
+    url: `https://example.com/source-${index + 1}`,
+    title: `Perplexity source ${index + 1}`,
+    referenceNumber: index + 1,
+    sourceProvider: "perplexity",
+  }));
+  const PERPLEXITY_SEARCH_METADATA = {
+    requested: true,
+    supported: true,
+    executed: true,
+    provider: "perplexity",
+    citations: PERPLEXITY_CITATIONS,
+  };
+
+  const citationRow = (page: Page, referenceNumber: number) =>
+    page
+      .locator(
+        `[data-testid="chat-message"][data-model-id="${PERPLEXITY_MODEL_ID}"][data-message-role="assistant"]`
+      )
+      .last()
+      .locator(
+        `[data-testid="search-citation-item"][data-reference-number="${referenceNumber}"]`
+      );
+
+  const expectCitationsAndNotice = async (page: Page) => {
+    const list = page
+      .locator(
+        `[data-testid="chat-message"][data-model-id="${PERPLEXITY_MODEL_ID}"][data-message-role="assistant"]`
+      )
+      .last()
+      .getByTestId("search-citation-list");
+    await expect(list).toBeVisible();
+    await expect(list.getByTestId("search-citation-item")).toHaveCount(7);
+
+    // Every number the answer text cites resolves to the source the provider
+    // numbered that way -- the body's markers are never rewritten.
+    for (const referenceNumber of [1, 4, 7]) {
+      const row = citationRow(page, referenceNumber);
+      await expect(row).toContainText(`[${referenceNumber}]`);
+      const link = row.getByRole("link");
+      await expect(link).toHaveAttribute(
+        "href",
+        `https://example.com/source-${referenceNumber}`
+      );
+      await expect(link).toHaveAttribute("target", "_blank");
+      await expect(link).toHaveAttribute("rel", "noopener noreferrer");
+      await expect(link).toHaveText(`Perplexity source ${referenceNumber}`);
+    }
+
+    // The body survives untouched, and the cut-off is stated rather than
+    // implied -- with no follow-up request sent on the user's behalf.
+    await expect(page.getByText(ANSWER_WITH_MARKERS)).toBeVisible();
+    await expect(page.getByTestId("response-incomplete-notice")).toBeVisible();
+    await expect(page.getByTestId("response-incomplete-notice")).toContainText(
+      /output length limit|출력 길이 제한/
+    );
+  };
+
+  test("sources and the incomplete notice render immediately after streaming", async ({
+    page,
+  }, testInfo) => {
+    await prepareGuestPage(page, "en");
+    await mockAuthenticatedApi(page);
+    await seedFreshAccount(page);
+
+    let chatRequestCount = 0;
+    await page.route("**/api/chat", async (route) => {
+      if (route.request().method() !== "POST") {
+        await route.fallback();
+        return;
+      }
+      chatRequestCount += 1;
+      await route.fulfill({
+        status: 200,
+        contentType: "text/plain; charset=utf-8",
+        headers: { "X-Request-ID": "qa-trace-perplexity" },
+        body: `${ANSWER_WITH_MARKERS}${SEARCH_METADATA_MARKER}${JSON.stringify({
+          searchMetadata: PERPLEXITY_SEARCH_METADATA,
+          completion: { status: "incomplete", incompleteReason: "length" },
+        })}`,
+      });
+    });
+
+    await page.goto("/chat");
+    await expect(
+      page.locator('[data-testid="desktop-model-panel"] select').first()
+    ).toBeEnabled();
+    await selectModelsViaPicker(page, [PERPLEXITY_MODEL_ID]);
+    await sendChatMessage(page, testInfo, "Are thought tokens counted separately?");
+
+    await expectCitationsAndNotice(page);
+    // Perplexity searches as part of normal completion, so the badge still
+    // reads as executed -- an incomplete answer is not a failed search.
+    await expect(assistantBadge(page, PERPLEXITY_MODEL_ID)).toHaveAttribute(
+      "data-search-status",
+      "executed"
+    );
+    // Nothing continues the answer automatically: exactly one request was
+    // made, so no second turn's credits were spent without being asked for.
+    expect(chatRequestCount).toBe(1);
+  });
+
+  test("sources and the incomplete notice survive re-opening the stored conversation", async ({
+    page,
+  }) => {
+    await prepareGuestPage(page, "en");
+    await mockAuthenticatedApi(page, {
+      selectedModels: [PERPLEXITY_MODEL_ID],
+      messages: [
+        { id: "u1", role: "user", content: "Are thought tokens counted separately?" },
+        {
+          id: "a1",
+          role: "assistant",
+          content: ANSWER_WITH_MARKERS,
+          modelId: PERPLEXITY_MODEL_ID,
+          // Persisted by app/api/chat/route.ts on a `length` finish reason.
+          status: "incomplete",
+          searchMetadata: PERPLEXITY_SEARCH_METADATA,
+        },
+      ],
+    });
+
+    await page.goto("/chat?lang=en");
+    await openRecentConversation(page, { title: "QA conversation" });
+    await expect(page.getByTestId("chat-empty-state")).toHaveCount(0);
+
+    await expectCitationsAndNotice(page);
   });
 });

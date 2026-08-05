@@ -35,7 +35,7 @@ const panel = (page: import("@playwright/test").Page, index: number) =>
   page.getByTestId("chat-message-list").nth(index);
 
 test.describe("multi-model failure and recovery", () => {
-  test("one failing model leaves the other panels' answers intact", async ({
+  test("one failing model leaves the other panels' answers intact", { tag: "@review-parity" }, async ({
     page,
   }) => {
     await enterConversation(page, {
@@ -71,7 +71,7 @@ test.describe("multi-model failure and recovery", () => {
     await expect(panel(page, 0)).not.toContainText(FIRST_B);
   });
 
-  test("retrying a failed model re-requests only that model and recovers the answer", async ({
+  test("retrying a failed model re-requests only that model and recovers the answer", { tag: "@review-parity" }, async ({
     page,
   }) => {
     await enterConversation(page, {
@@ -128,7 +128,7 @@ test.describe("multi-model failure and recovery", () => {
     await expect(page.getByTestId("chat-textarea")).toBeEnabled();
   });
 
-  test("an empty provider response is reported rather than left blank", async ({
+  test("an empty provider response is reported rather than left blank", { tag: "@review-parity" }, async ({
     page,
   }) => {
     await enterConversation(page, {

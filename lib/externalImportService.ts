@@ -3,6 +3,10 @@ import "server-only";
 import type { Prisma } from "@prisma/client";
 import { ApiSecurityError } from "@/lib/apiSecurity";
 import {
+    ConversationLockError,
+    hasResourceUnlockGrant,
+} from "@/lib/conversationLock";
+import {
     EXTERNAL_IMPORT_DIGEST_VERSION,
     externalContentDigest,
     externalConversationDigest,
@@ -23,6 +27,7 @@ import {
     utf8ByteLength,
 } from "@/lib/externalImportLimits";
 import { recordExternalImportCounter } from "@/lib/externalImportMetrics";
+import { recordMemoryCounter } from "@/lib/memoryMetrics";
 import {
     SOURCE_DELETE_SUSPENDED_STATUS,
     planSourceDeletion,
@@ -339,6 +344,47 @@ export async function listExternalConversations(
 }
 
 /**
+ * The §7.1 read gate, in the service rather than in the routes.
+ *
+ * `request` is a required parameter of every function that reaches snapshot
+ * content, not an optional one, so a reader added later cannot forget it and
+ * quietly serve a locked conversation. It reuses the existing 423
+ * `CONVERSATION_LOCKED` contract rather than minting a code: §7 requires
+ * compatibility with the conversation lock, and the §18 error table is
+ * settled.
+ *
+ * Deletion is deliberately *not* gated, which is where this departs from the
+ * native conversation routes. What §7.1 protects is content — reading the
+ * evidence, and reaching it through a new chat — and a delete exposes
+ * neither. Gating it would trade that non-benefit for a real harm: §13.1
+ * gives the owner an unconditional right to delete their imported data and
+ * §15 forbids leaving imported data beyond its owner's reach, and a forgotten
+ * lock password would do exactly that, permanently.
+ */
+const assertExternalConversationUnlocked = (
+    request: Request,
+    userId: string,
+    row: { id: string; password: string | null }
+) => {
+    if (
+        hasResourceUnlockGrant(
+            "external_conversation",
+            request,
+            userId,
+            row.id,
+            row.password
+        )
+    ) {
+        return;
+    }
+    throw new ConversationLockError(
+        423,
+        "CONVERSATION_LOCKED",
+        "Conversation is locked."
+    );
+};
+
+/**
  * One finalized conversation with a page of its messages, for the read-only
  * viewer. Content leaves this function as the stored plain text — rendering
  * it inertly (never as HTML) is the viewer's contract (§4, §19).
@@ -346,7 +392,11 @@ export async function listExternalConversations(
 export async function getExternalConversation(
     userId: string,
     conversationId: string,
-    { offset = 0, limit = 100 }: { offset?: number; limit?: number } = {}
+    {
+        request,
+        offset = 0,
+        limit = 100,
+    }: { request: Request; offset?: number; limit?: number }
 ) {
     const row = await prisma.externalConversation.findUnique({
         where: { id: conversationId },
@@ -357,6 +407,7 @@ export async function getExternalConversation(
     if (!row || row.userId !== userId || !row.finalized) {
         throw new ApiSecurityError(404, "NOT_FOUND", "Conversation not found.");
     }
+    assertExternalConversationUnlocked(request, userId, row);
     const messages = await prisma.externalMessage.findMany({
         where: { externalConversationId: row.id },
         orderBy: { ordinal: "asc" },
@@ -529,6 +580,17 @@ async function applySourceDeletionToMemories(
             },
         });
         suspendedMemories = suspended.count;
+    }
+    // Counted here because the rows this describes are gone or changed by
+    // the time anything could aggregate them (§22).
+    if (deletedMemories > 0) {
+        void recordMemoryCounter("source_delete_memory_deleted", deletedMemories);
+    }
+    if (suspendedMemories > 0) {
+        void recordMemoryCounter(
+            "source_delete_memory_suspended",
+            suspendedMemories
+        );
     }
     return {
         ...summarizeSourceDeletionImpact(memories),

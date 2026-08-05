@@ -20,6 +20,12 @@ export const IMAGE_GENERATION_FAILURE_PHASES = [
   "provider_failed",
   "original_storage_failed",
   "stale_job_reconciled",
+  // The provider succeeded and the *settlement* did not. Kept apart from
+  // `provider_failed` because the two are different operational problems:
+  // one says the image never arrived, this one says it arrived and the ledger
+  // write for it was lost. Reading the second as the first would send an
+  // operator to the provider's status page.
+  "settlement_failed",
 ] as const;
 
 export type ImageGenerationFailurePhase =
@@ -86,6 +92,22 @@ export const imageAssetR2Key = (input: {
 // simply loses the claim and discards the result.
 export const STALE_IMAGE_GENERATION_AFTER_MS = 12 * 60 * 1_000;
 
+// `settling` gets its own, longer window, because reclaiming it is not the
+// same act. A `pending`/`processing` row has written nothing to the ledger, so
+// taking it back costs nothing; a `settling` row is one whose settlement
+// transaction may still be open, and taking that one back races a credit
+// write. What makes the reclaim safe is that the reservation carries its own
+// `reserved -> settling` claim *inside* that transaction, so a settlement that
+// already happened simply refuses the second attempt -- this window only has
+// to be longer than any transaction can live, which is seconds.
+//
+// It exists at all because `settling` was otherwise a trap: nothing reclaimed
+// it. The generation claim is made *outside* the settlement transaction, so a
+// rollback -- a deadlock, a lost connection, a redeploy between the two --
+// left the row in `settling` with its credits still reserved, invisible to the
+// recovery sweep and to the failure path, forever.
+export const STALE_IMAGE_SETTLING_AFTER_MS = 15 * 60 * 1_000;
+
 export const IMAGE_ASSET_CLEANUP_REASONS = [
   "conversation_deleted",
   "account_deleted",
@@ -99,6 +121,20 @@ export type ImageAssetCleanupReason =
 // surface as an admin metric instead: a key that failed this often needs an
 // operator, not attempt one hundred.
 export const IMAGE_ASSET_CLEANUP_MAX_ATTEMPTS = 10;
+
+// Policy §9 promises the thumbnail retries in the background, because its
+// failure must not demote the original. Fewer attempts than a cleanup gets:
+// a cleanup retries a delete that will eventually succeed, while a thumbnail
+// failure is usually sharp refusing the bytes -- deterministic, and repeating
+// it forever would re-download the original on every sweep to learn the same
+// answer. Past this the row stays `failed`, the card keeps rendering the
+// original, and the count surfaces to an operator.
+export const IMAGE_THUMBNAIL_MAX_RETRIES = 4;
+
+// Bound on a single repair read. Generous next to any gpt-image-2 original
+// (a 1536x1024 PNG is single-digit MB) and it exists so a corrupt or
+// unexpectedly huge object cannot pull the maintenance process over.
+export const IMAGE_ORIGINAL_MAX_READ_BYTES = 32 * 1024 * 1024;
 
 // Group state is never stored (policy §11): it derives from each target's
 // CURRENT attempt only. Passing every attempt would let an already-retried
@@ -136,3 +172,51 @@ export const deriveImageGroupStatus = (
   if (succeeded === 0) return "failed";
   return "partial_success";
 };
+
+/**
+ * Which of a target's attempts is its current state.
+ *
+ * `deriveImageGroupStatus` above refuses to be handed every attempt, which
+ * leaves each caller to pick the right one by hand -- and picking wrong is
+ * invisible: a group whose failed attempt was already retried would report
+ * `partial_success` while the retry is still running. The rule lives here so
+ * there is one of it.
+ *
+ * `currentGenerationId` is authoritative; it moves to the new attempt in the
+ * same transaction that creates it. The highest attempt number is the fallback
+ * for the window where a row exists and the pointer has not been read yet, and
+ * for a v1 row backfilled without one.
+ */
+export const currentImageAttempt = <
+  T extends { id: string; attemptNumber: number },
+>(target: {
+  currentGenerationId: string | null;
+  generations: readonly T[];
+}): T | null => {
+  if (target.generations.length === 0) return null;
+  const byPointer = target.generations.find(
+    (generation) => generation.id === target.currentGenerationId
+  );
+  if (byPointer) return byPointer;
+  return target.generations.reduce((newest, generation) =>
+    generation.attemptNumber >= newest.attemptNumber ? generation : newest
+  );
+};
+
+/** `deriveImageGroupStatus` over whole targets, current attempt picked here. */
+export const deriveImageGroupStatusFromTargets = (
+  targets: readonly {
+    currentGenerationId: string | null;
+    generations: readonly {
+      id: string;
+      attemptNumber: number;
+      status: ImageGenerationStatus;
+    }[];
+  }[]
+): ImageGroupStatus =>
+  deriveImageGroupStatus(
+    targets
+      .map((target) => currentImageAttempt(target))
+      .filter((attempt) => attempt !== null)
+      .map((attempt) => attempt.status)
+  );

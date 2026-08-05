@@ -1,6 +1,7 @@
 import { notFound } from "next/navigation";
 import { AdminConsoleShell } from "@/components/admin/AdminConsoleShell";
 import { AdminNotesBox } from "@/components/admin/AdminNotesBox";
+import { AdminMemoryImportPanel } from "@/components/admin/AdminMemoryImportPanel";
 import { AdminOperationalReadinessPanel } from "@/components/admin/AdminOperationalReadinessPanel";
 import { AdminPrivacyRequestsPanel } from "@/components/admin/AdminPrivacyRequestsPanel";
 import { PlatformSettingsPanel } from "@/components/admin/PlatformSettingsPanel";
@@ -123,6 +124,9 @@ export default async function AdminConsoleFixturePage({
   //   settings           - the platform settings panel, whose save refusals
   //                        each need their own sentence. Its own view so the
   //                        toast-count assertions above stay undisturbed.
+  //   memory             - the §22 import/memory report reader, whose whole
+  //                        contract is how it renders unmeasured metrics and
+  //                        absent denominators.
   const view = single(params.view) || "security";
 
   return (
@@ -155,6 +159,11 @@ export default async function AdminConsoleFixturePage({
         <section className="mt-4 flex flex-col gap-4">
           <RefundRequestsPanel rows={REFUND_ROWS} />
           <AdminNotesBox targetType="User" targetId="qa-target-user" />
+        </section>
+      ) : null}
+      {view === "memory" ? (
+        <section className="mt-4 flex flex-col gap-4">
+          <AdminMemoryImportPanel />
         </section>
       ) : null}
       {view === "settings" ? (
