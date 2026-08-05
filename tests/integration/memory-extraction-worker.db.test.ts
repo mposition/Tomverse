@@ -200,6 +200,10 @@ test("a chunk's answer is stored with the pair that produced it", async () => {
     const result = await handleMemoryExtractionChunk({
         lease,
         chunk,
+        // The handler re-resolves the pair itself now, so a direct call has
+        // to supply the same register the run was created against -- the
+        // slice driver does exactly this on the production path.
+        register: APPROVED_REGISTER,
         adapterFactory: answeringAdapter("The user prefers formal Korean."),
     });
     assert.deepEqual(result, { outcome: "completed" });
@@ -232,6 +236,10 @@ test("a chunk reads only its own account's conversations", async () => {
     const result = await handleMemoryExtractionChunk({
         lease,
         chunk,
+        // The handler re-resolves the pair itself now, so a direct call has
+        // to supply the same register the run was created against -- the
+        // slice driver does exactly this on the production path.
+        register: APPROVED_REGISTER,
         adapterFactory: answeringAdapter("Should never be stored."),
     });
     assert.deepEqual(result, { outcome: "completed" });
@@ -245,6 +253,10 @@ test("a provider error is a retryable chunk failure, not a thrown request", asyn
     const result = await handleMemoryExtractionChunk({
         lease,
         chunk,
+        // The handler re-resolves the pair itself now, so a direct call has
+        // to supply the same register the run was created against -- the
+        // slice driver does exactly this on the production path.
+        register: APPROVED_REGISTER,
         adapterFactory: () => async () => {
             throw new Error("provider exploded");
         },
@@ -262,6 +274,10 @@ test("an unparseable answer fails instead of recording an empty chunk", async ()
     const result = await handleMemoryExtractionChunk({
         lease,
         chunk,
+        // The handler re-resolves the pair itself now, so a direct call has
+        // to supply the same register the run was created against -- the
+        // slice driver does exactly this on the production path.
+        register: APPROVED_REGISTER,
         adapterFactory: () => async () => ({ text: "not json at all" }),
     });
     assert.deepEqual(result, { outcome: "failed", code: "unparseable_answer" });

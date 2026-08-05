@@ -787,6 +787,16 @@ export async function cancelMemoryExtractionRun(userId: string, runId: string) {
 export type ExtractionChunkHandler = (input: {
     lease: MemoryExtractionLease;
     chunk: ClaimedExtractionChunk;
+    /**
+     * Cancelled when the chunk's wall-clock budget runs out.
+     *
+     * Best-effort, and deliberately not the accounting mechanism. A handler
+     * that ignores it cannot hang the slice — the race below still resolves —
+     * and a provider request that already reached the network may be billed
+     * whether or not the abort landed. What this saves is the work that had
+     * not started yet; what records the rest is the provider-call ledger.
+     */
+    signal: AbortSignal;
 }) => Promise<{ outcome: "completed" } | { outcome: "failed"; code: string }>;
 
 export type ExtractionSliceResult = {
@@ -962,20 +972,52 @@ export async function driveMemoryExtractionRunSlice(input: {
             return stop("paused", "no_pending_chunk");
         }
 
+        // One controller per chunk. Cancelling is best-effort: the bounded
+        // race below is what actually stops the slice waiting, and the abort
+        // is what stops work that has not started yet from starting.
+        const controller = new AbortController();
+        let timedOut = false;
         const result = await withTimeout(
-            input.handler({ lease, chunk }).catch((error) => {
-                console.error("memory extraction chunk handler failed", error);
-                return { outcome: "failed" as const, code: "handler_error" };
-            }),
+            input
+                .handler({ lease, chunk, signal: controller.signal })
+                .catch((error) => {
+                    if (controller.signal.aborted) {
+                        // An abort is not a handler bug. Classifying it as one
+                        // would hide every timeout inside `handler_error` and
+                        // make a slow provider look like broken code.
+                        return {
+                            outcome: "failed" as const,
+                            code: "chunk_timeout",
+                        };
+                    }
+                    console.error(
+                        "memory extraction chunk handler failed",
+                        error
+                    );
+                    return { outcome: "failed" as const, code: "handler_error" };
+                }),
             chunkTimeoutMs,
-            () => ({ outcome: "failed" as const, code: "chunk_timeout" })
+            () => {
+                timedOut = true;
+                // Abort FIRST, then decide. A handler that returns after this
+                // is describing work this slice has already written off.
+                controller.abort(new Error("chunk_timeout"));
+                return { outcome: "failed" as const, code: "chunk_timeout" };
+            }
         );
         chunksProcessed += 1;
+
+        // A late result must never reach the chunk's outcome. The handler may
+        // still be running, and whatever it eventually produces belongs to a
+        // chunk this slice has already recorded as timed out.
+        const applied0 = timedOut
+            ? { outcome: "failed" as const, code: "chunk_timeout" }
+            : result;
 
         const applied = await completeExtractionChunk(
             lease,
             chunk.chunkIndex,
-            result,
+            applied0,
             new Date()
         );
         if (!applied.applied) {
