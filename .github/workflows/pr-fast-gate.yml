@@ -147,6 +147,15 @@ jobs:
         timeout-minutes: 5
         run: npm run verify:tomverse-chat-release-gates
 
+      # The registry declares generatedMarkdownOnly, which was a claim with
+      # nothing behind it until this check: the committed readable view is
+      # re-rendered and compared byte for byte, so a threshold hand-edited into
+      # the Markdown -- or a registry change that never regenerated the view --
+      # fails here instead of shipping a table that disagrees with the gates.
+      - name: Tomverse Chat release gate view is generated
+        timeout-minutes: 5
+        run: npm run check:tomverse-chat-release-gate-view
+
       # gpt-image-2 lives outside AVAILABLE_MODELS by design, so the model
       # pricing check above cannot see it. Same release contract -- every
       # enabled price is explicit and verified -- separate fail-closed net.
