@@ -3,8 +3,10 @@ import { randomUUID } from "node:crypto";
 import { after, beforeEach, test } from "node:test";
 import { externalContentDigest } from "@/lib/externalImportDigest";
 import { MEMORY_EXTRACTION_FLAG_KEY } from "@/lib/memoryAccess";
-import { dispatchPendingMemoryExtractionRuns } from "@/lib/memoryExtractionDispatch";
-import { createExtractionChunkHandler } from "@/lib/memoryExtractionRunner";
+import {
+    dispatchPendingMemoryExtractionRuns,
+    handleMemoryExtractionChunk,
+} from "@/lib/memoryExtractionWorker";
 import type { MemoryExtractionEvalEntry } from "@/lib/memoryExtractionEvalRegister";
 import {
     claimMemoryExtractionRun,
@@ -215,11 +217,15 @@ const drive = (runId: string, adapter: unknown, overrides = {}) =>
         owner: "worker-exec",
         register: APPROVED_REGISTER,
         environment: ENV,
-        handler: createExtractionChunkHandler({
-            register: APPROVED_REGISTER,
-            environment: ENV,
-            adapterFactory: adapter as never,
-        }),
+        handler: ({ lease, chunk, signal }) =>
+            handleMemoryExtractionChunk({
+                lease,
+                chunk,
+                signal,
+                register: APPROVED_REGISTER,
+                environment: ENV,
+                adapterFactory: adapter as never,
+            }),
         ...overrides,
     });
 
@@ -362,21 +368,19 @@ test("a fenced-out worker settles its cost and commits nothing (§11)", async ()
     const chunk = await claimNextExtractionChunk(lease);
     assert.ok(chunk);
 
-    const handler = createExtractionChunkHandler({
-        register: APPROVED_REGISTER,
-        environment: ENV,
-        adapterFactory: fakeAdapter({}) as never,
-    });
     // Somebody else takes the run over while this worker is calling.
     await prisma.memoryExtractionRun.update({
         where: { id: run.id },
         data: { leaseGeneration: lease.leaseGeneration + 1 },
     });
 
-    const outcome = await handler({
+    const outcome = await handleMemoryExtractionChunk({
         lease,
         chunk,
         signal: new AbortController().signal,
+        register: APPROVED_REGISTER,
+        environment: ENV,
+        adapterFactory: fakeAdapter({}) as never,
     });
     assert.equal(outcome.outcome, "failed");
     assert.equal(
@@ -393,12 +397,16 @@ test("a fenced-out worker settles its cost and commits nothing (§11)", async ()
 
 test("the durable dispatcher finishes a run nothing ever kicked (§11.1)", async () => {
     const { user, run } = await seedRun();
-    const dispatched = await dispatchPendingMemoryExtractionRuns({
-        register: APPROVED_REGISTER,
-        environment: ENV,
-        adapterFactory: fakeAdapter({}) as never,
-    });
-    assert.equal(dispatched.dispatched, 1);
+    const dispatched = await dispatchPendingMemoryExtractionRuns(
+        new Date(),
+        5,
+        {
+            register: APPROVED_REGISTER,
+            environment: ENV,
+            adapterFactory: fakeAdapter({}) as never,
+        }
+    );
+    assert.equal(dispatched.dispatchedRuns, 1);
     assert.equal(
         (
             await prisma.memoryExtractionRun.findUniqueOrThrow({
@@ -416,11 +424,18 @@ test("the durable dispatcher finishes a run nothing ever kicked (§11.1)", async
 test("the dispatcher does nothing while the rollout flag is off (§15)", async () => {
     await seedRun();
     await setFlag(false);
-    const dispatched = await dispatchPendingMemoryExtractionRuns({
-        register: APPROVED_REGISTER,
-        environment: ENV,
-        adapterFactory: fakeAdapter({}) as never,
-    });
-    assert.equal(dispatched.dispatched, 0);
+    const dispatched = await dispatchPendingMemoryExtractionRuns(
+        new Date(),
+        5,
+        {
+            register: APPROVED_REGISTER,
+            environment: ENV,
+            adapterFactory: fakeAdapter({}) as never,
+        }
+    );
+    // The run is claimed and released without a chunk ever being handled, so
+    // the flag gate shows up as zero chunks and zero provider calls rather
+    // than as a run nobody picked up.
+    assert.equal(dispatched.chunksProcessed, 0);
     assert.equal(await prisma.memoryExtractionProviderCall.count(), 0);
 });

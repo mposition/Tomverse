@@ -173,3 +173,39 @@ test("Alibaba Cloud billing parser sums USD pretax amounts and rejects CNY", () 
     /exact micro-USD reconciliation/
   );
 });
+
+test("Perplexity billing capture is unaffected by the citation fields beside it", () => {
+  // The same response body now also yields the user-facing source list
+  // (lib/perplexitySearchMetadataCore.ts). The cost snapshot read out of it
+  // must be byte-for-byte what it was before that existed.
+  const withSources = parsePerplexityResponseBody(
+    JSON.stringify({
+      ...perplexityPayload(0.021763),
+      citations: ["https://example.com/a", "https://example.com/b"],
+      search_results: [{ title: "A", url: "https://example.com/a" }],
+    })
+  );
+  assert.deepEqual(withSources, parsePerplexityUsageCost(perplexityPayload(0.021763)));
+  assert.equal(withSources.totalCostMicroUsd, 21_763);
+  assert.equal(withSources.searchQueriesCostMicroUsd, 15_000);
+});
+
+test("a Perplexity SSE body with sources still settles on the final usage event", () => {
+  const parsed = parsePerplexityResponseBody(
+    [
+      'data: {"choices":[{"delta":{"content":"hello"}}]}',
+      "",
+      "data: {malformed",
+      "",
+      `data: ${JSON.stringify({
+        ...perplexityPayload(0.01),
+        citations: ["https://example.com/a"],
+      })}`,
+      "",
+      "data: [DONE]",
+      "",
+    ].join("\n")
+  );
+  assert.equal(parsed.totalCostMicroUsd, 10_000);
+  assert.equal(parsed.searchQueries, 3);
+});

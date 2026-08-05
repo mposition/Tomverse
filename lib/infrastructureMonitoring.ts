@@ -1,14 +1,16 @@
 import "server-only";
 
 import { prisma } from "@/lib/prisma";
-import type {
-  DatabaseInfrastructureSnapshot,
-  InfrastructureDashboard,
-  PrismaUsageInfrastructureSnapshot,
-  R2InfrastructureSnapshot,
-  RailwayInfrastructureSnapshot,
-  RailwayUsageMeasurement,
+import {
+  RAILWAY_USAGE_MONITOR_DISABLED_MESSAGE,
+  type DatabaseInfrastructureSnapshot,
+  type InfrastructureDashboard,
+  type PrismaUsageInfrastructureSnapshot,
+  type R2InfrastructureSnapshot,
+  type RailwayInfrastructureSnapshot,
+  type RailwayUsageMeasurement,
 } from "@/lib/infrastructureTypes";
+import { railwayUsageMonitorEnabled } from "@/lib/railwayUsageMonitorFlag";
 
 const RAILWAY_GRAPHQL_URL = "https://backboard.railway.com/graphql/v2";
 const CLOUDFLARE_GRAPHQL_URL = "https://api.cloudflare.com/client/v4/graphql";
@@ -138,6 +140,19 @@ const railwaySnapshot = async (
     apiRateLimit: { limit: null, remaining: null, resetAt: null },
     checkedAt,
   };
+
+  // Checked before the credential check so an environment that deliberately
+  // opted out is never reported as a missing-token misconfiguration, and
+  // before any fetch so the `estimatedUsage` query is not issued at all.
+  if (!railwayUsageMonitorEnabled()) {
+    return {
+      ...base,
+      status: "disabled",
+      message: RAILWAY_USAGE_MONITOR_DISABLED_MESSAGE,
+      projectedMonthCostMicroUsd: null,
+      projectedBalanceMicroUsd: null,
+    };
+  }
 
   if (!token || scope === "none") {
     return {

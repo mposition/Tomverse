@@ -387,6 +387,18 @@ window·credit·privacy disclosure 적용. 릴리스 B의 memory 사용은 이 b
 - 잠금 해제 시 evidence를 재검증한 뒤 다른 차단 사유가 없으면 이전 상태로
   복귀합니다. lock·unlock·suspension·restore는 audit를 남깁니다.
 - 잠금 상태에서 evidence 원문을 열람하거나 새 chat에서 우회 노출할 수 없습니다.
+- **삭제는 잠금으로 막지 않습니다.** lock이 지키는 것은 내용 노출이고 삭제는
+  내용을 드러내지 않습니다. 반대로 삭제를 막으면 비밀번호를 잊은 snapshot이
+  영구히 지워지지 않는 상태가 되어 §13.1의 무조건적 삭제 권리와 §15의
+  "imported data를 소유자 손이 닿지 않는 곳에 남기지 않는다"를 어깁니다.
+  native Conversation route와 다른 판단이며, 의도된 차이입니다.
+- **suspension 대상은 `active`뿐입니다.** `suspended_by_source_lock`은 이 경로만
+  쓰고 `active`만 덮으므로 상태 자체가 복귀 지점의 기록이 되고, 별도 이전 상태
+  컬럼이 필요 없습니다. `candidate`까지 정지시키면 복귀가 사용자가 승인한 적
+  없는 승격이 됩니다.
+- 복귀 시 만료가 이미 지난 memory는 `active`가 아니라 `expired`로 보냅니다
+  (§7.1의 "다른 차단 사유" 항). `active`로 되돌리면 §8.6 sweep이 다시 지날
+  때까지 만료된 memory가 retrieval에 남습니다.
 - 부분 실패로 lock과 memory 상태가 불일치하면 reconciliation이 탐지·복구합니다.
 
 ## 8. 계정 장기 메모리 계약
@@ -851,11 +863,27 @@ statement, evidence, searchTerms, context bundle, profile knowledge chunk를
   이유는 shape가 좁기 때문이지 무언가 검사해서가 아니었고, 실패 모드는 누군가
   shape를 넓히고 아무도 눈치채지 못한 채 제3자가 작성자의 기억을 읽게 되는
   것입니다.
-- **안내 문구는 주입 배선과 함께 배포합니다.** 지금은 어떤 답변도 memory의
-  영향을 받을 수 없으므로, 모든 공유 화면에 "영향을 받았을 수 있다"고 적으면
-  동작하지 않는 기능에 대한 주장이 됩니다. 안내는 무조건 표시해야
-  하며(조건부로 표시하면 그 자체가 작성자의 memory 사용 여부를 노출합니다),
-  그 무조건이 참이 되는 시점이 주입이 열리는 시점입니다.
+- **안내 문구는 주입 배선과 함께 배포합니다.** 주입이 열리기 전에는 어떤 답변도
+  memory의 영향을 받을 수 없어서, 그때 "영향을 받았을 수 있다"고 적으면 동작하지
+  않는 기능에 대한 주장이 됩니다. §10 주입이 배선되면서 이 조건이 충족됐고,
+  아래가 그 배포입니다.
+
+구현: 공유 화면은 `share.personalizationNotice`, export는
+`lib/memorySharingNotice.ts`의 영문 한 줄입니다(export 문서에는 볼 사람의
+locale이 없고 header가 이미 영문입니다).
+
+- **표시 여부는 snapshot의 `personalizationPossible`이 정합니다.** 조회 시점에
+  flag를 다시 읽지 않습니다 — 나중에 주입을 꺼도 이미 생성된 답변이 영향을 안
+  받게 되지는 않고, 나중에 켜도 이 답변들이 영향을 받게 되지는 않습니다. 이
+  값은 share 시점의 **전역** 사실이며 작성자별 사실이 아닙니다.
+- **조건부로 표시하면 안 됩니다.** 작성자가 실제로 memory를 썼을 때만 보여주면
+  문구의 존재 자체가 "이 사람은 개인화를 쓴다"는 노출이 됩니다. 주입이 가능한
+  동안에는 모든 공유·export가 무조건 답니다.
+- **문구가 채널이 되면 안 됩니다.** 개수·종류·statement를 담지 않고, snapshot
+  필드도 boolean 하나뿐입니다(문자열·숫자·배열은 schema가 거부).
+  `tests/memorySharingNotice.test.mjs`가 숫자 포함 여부까지 확인합니다.
+- 필드는 optional이라 이전 snapshot은 그대로 parse되고 부재는 false로 읽힙니다
+  — 주입이 존재하기 전 모든 snapshot에 대해 맞는 답입니다.
 
 ### 13.4 memory 사용 투명성
 

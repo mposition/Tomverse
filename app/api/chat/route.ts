@@ -27,14 +27,17 @@ import { getWebSearchCapability } from "@/lib/webSearchCapability";
 import { getWebSearchSurchargeCredits } from "@/lib/webSearchCredits";
 import { buildWebSearchToolConfig, WEB_SEARCH_TOOL_NAMES } from "@/lib/webSearchToolConfig";
 import { normalizeWebSearchExecution } from "@/lib/webSearchExecutionNormalizer";
-import { buildSearchMetadataTrailerChunk } from "@/lib/webSearchStreamTrailer";
+import { buildChatStreamTrailerChunk } from "@/lib/webSearchStreamTrailer";
+import { resolveChatCompletionOutcome } from "@/lib/chatCompletionStatus";
 import { ERROR_REPORT_TOKEN_HEADER } from "@/lib/errorReportContract";
 import { issueChatErrorReportGrant } from "@/lib/traceErrorEvidence";
 import {
+    consumePerplexityResponseCapture,
     consumePerplexityUsage,
     discardPerplexityUsage,
     perplexityUsageHeaders,
 } from "@/lib/perplexityUsageCapture";
+import type { PerplexityResponseCapture } from "@/lib/perplexityResponseCore";
 import {
     DEEP_RESEARCH_DEPTH_PARAMS,
     describeDeepResearchMessages,
@@ -1788,6 +1791,17 @@ async function handleChatPost(
         let sourceCancelled = false;
         let usageSettlement: Promise<void> | null = null;
         let streamState: "open" | "closed" | "cancelled" = "open";
+        // Perplexity's response body is captured once and answers two
+        // questions -- what this turn cost, and which sources the answer's
+        // "[n]" markers point at. Consuming the capture releases it, so both
+        // readers share this one memoized take rather than racing for it.
+        let perplexityCapture: Promise<PerplexityResponseCapture | null> | null =
+            null;
+        const takePerplexityCapture = () => {
+            if (modelConfig.provider !== "perplexity") return Promise.resolve(null);
+            perplexityCapture ??= consumePerplexityResponseCapture(traceId);
+            return perplexityCapture;
+        };
         const estimatedGeneratedOutputTokens = () =>
             generatedText
                 ? Math.max(
@@ -1825,9 +1839,7 @@ async function handleChatPost(
             usageSettlement = (async () => {
                 try {
                     const providerUsageSnapshot =
-                        modelConfig.provider === "perplexity"
-                            ? await consumePerplexityUsage(traceId)
-                            : null;
+                        (await takePerplexityCapture())?.usage ?? null;
                     await settleChatUsage(reservation, {
                         inputTokens:
                             usage?.inputTokens ?? reservation.inputTokens,
@@ -2088,6 +2100,14 @@ async function handleChatPost(
                             );
                         }
 
+                        // Perplexity publishes its sources as top-level
+                        // response fields, which the OpenAI-compatible chat
+                        // adapter never turns into AI SDK source parts --
+                        // read straight off the captured body instead, so
+                        // the "[n]" markers in the answer have a list to
+                        // point at. Every other provider is unaffected.
+                        const perplexitySearchCitations =
+                            (await takePerplexityCapture())?.search?.citations;
                         const webSearchExecution = normalizeWebSearchExecution({
                             capability: webSearchCapability,
                             searchRequested: webSearchRequested,
@@ -2099,7 +2119,32 @@ async function handleChatPost(
                                 contentResult.status === "fulfilled"
                                     ? contentResult.value
                                     : undefined,
+                            providerCitations: perplexitySearchCitations,
                         });
+                        // A provider that hit its output ceiling returns HTTP
+                        // 200 with real text and a `length` finish reason.
+                        // Recorded so the answer is never presented as
+                        // finished; settlement, cancellation and the
+                        // empty-response path are untouched by it.
+                        const completionOutcome = resolveChatCompletionOutcome({
+                            finishReason,
+                            rawFinishReason,
+                        });
+                        if (completionOutcome.status === "incomplete") {
+                            console.warn(
+                                JSON.stringify({
+                                    event: "chat_response_incomplete",
+                                    traceId,
+                                    provider: modelConfig.provider,
+                                    modelId: requestedModelId,
+                                    finishReason,
+                                    rawFinishReason: rawFinishReason ?? null,
+                                    incompleteReason:
+                                        completionOutcome.incompleteReason,
+                                    timestamp: new Date().toISOString(),
+                                })
+                            );
+                        }
                         const searchSettlementFields = {
                             searchSurchargeCredits: getWebSearchSurchargeCredits(
                                 webSearchMode ?? "off",
@@ -2190,7 +2235,7 @@ async function handleChatPost(
                                             conversationId,
                                             role: "assistant",
                                             content: storedContent,
-                                            status: "normal",
+                                            status: completionOutcome.status,
                                             modelId: requestedModelId,
                                             searchMetadata: webSearchExecution,
                                         },
@@ -2289,7 +2334,10 @@ async function handleChatPost(
                         // (their messages are never persisted for a re-fetch).
                         enqueueSafely(
                             controller,
-                            buildSearchMetadataTrailerChunk(webSearchExecution)
+                            buildChatStreamTrailerChunk({
+                                searchMetadata: webSearchExecution,
+                                completion: completionOutcome,
+                            })
                         );
                         closeSafely(controller);
                         await releaseSafely();

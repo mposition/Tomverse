@@ -163,4 +163,4 @@ Online Router evaluation links final assistant messages, manual model changes, r
 
 ## 11. Release evidence
 
-The generated release-gate view must link routing results to the IDs under `ROUTE-*`, `ESTIMATE-*`, `FALLBACK-*`, `PLANNER-*`, `BILLING-*`, `ABUSE-*`, `MODERATION-*`, `MEMORY-*`, and `MANIFEST-*` in the canonical YAML. This policy intentionally does not duplicate their numeric thresholds.
+The generated release-gate view (`docs/release-gates/tomverse-chat-v1.generated.md`, rendered from the canonical YAML by `npm run generate:tomverse-chat-release-gate-view`) must link routing results to the IDs under `ROUTE-*`, `ESTIMATE-*`, `FALLBACK-*`, `PLANNER-*`, `BILLING-*`, `ABUSE-*`, `MODERATION-*`, `MEMORY-*`, and `MANIFEST-*` in the canonical YAML. This policy intentionally does not duplicate their numeric thresholds.

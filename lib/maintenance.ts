@@ -10,8 +10,7 @@ import { expireCreditLots } from "@/lib/creditLedger";
 import { reconcileExpiredChatCreditReservations } from "@/lib/chatSecurity";
 import { purgeExpiredChatLimitDecisions } from "@/lib/chatLimitDecisions";
 import { deleteExpiredContextBundleConsumptions } from "@/lib/chatContextBundleService";
-import { dispatchPendingMemoryExtractionRunsQuietly } from "@/lib/memoryExtractionDispatch";
-import { reconcileExpiredMemoryExtractionRuns } from "@/lib/memoryExtractionService";
+import { dispatchPendingMemoryExtractionRuns } from "@/lib/memoryExtractionWorker";
 import { purgeExpiredTraceErrorEvidence } from "@/lib/traceErrorEvidence";
 import { purgeClosedAutoFixCases } from "@/lib/feedbackAutoFixShadow";
 import {
@@ -465,28 +464,22 @@ export async function cleanupExpiredData() {
   const contextBundleConsumptions =
     await deleteExpiredContextBundleConsumptions(now);
 
-  // Memory extraction's orphan reconciliation (import/memory policy §11,
-  // §11.1). A worker that died mid-run leaves the run `running` with a lease
-  // nobody holds, and nothing else ever looks at it: the claim is fenced on
-  // `leaseGeneration`, so a dead owner's lease does not lapse into
-  // availability by itself. Reclaiming here is what makes the run claimable
-  // again.
+  // Memory extraction's recovery dispatcher (import/memory policy §11, §11.1).
   //
-  const memoryExtractionRuns =
-    await reconcileExpiredMemoryExtractionRuns(now);
-  // The other half of §11.1, and the half that actually finishes runs.
-  // Reclaiming only makes an orphaned run claimable; something has to claim
-  // it, and the post-response kick cannot be that something -- it is bound to
-  // a request and dies with the process. Deliberately after the reclaim, so a
-  // run this tick just parked is driven in the same tick rather than waiting
-  // another fifteen minutes. Never throws.
-  const memoryExtractionDispatch =
-    await dispatchPendingMemoryExtractionRunsQuietly();
+  // Two steps, and the second is the one that matters. A worker that died
+  // mid-run leaves the run `running` with a lease nobody holds, and the claim
+  // is fenced on `leaseGeneration` rather than on a deadline, so it does not
+  // become claimable until this sweep moves it back to `pending`. Reclaiming
+  // alone was the gap §11.1 names: the run becomes claimable and then nothing
+  // claims it, so it waits for a request that may never come. Driving it here
+  // is what actually guarantees a run finishes.
+  const memoryExtraction = await dispatchPendingMemoryExtractionRuns(now);
 
   return {
     contextBundleConsumptions,
-    memoryExtractionRuns: memoryExtractionRuns.reclaimedRuns,
-    memoryExtractionDispatched: memoryExtractionDispatch.dispatched,
+    memoryExtractionRuns: memoryExtraction.reclaimedRuns,
+    memoryExtractionDispatched: memoryExtraction.dispatchedRuns,
+    memoryExtractionChunks: memoryExtraction.chunksProcessed,
     guestAttachments,
     sessions: sessions.count,
     usageBuckets: Number(usageBuckets),

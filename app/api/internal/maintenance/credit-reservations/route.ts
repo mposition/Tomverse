@@ -2,6 +2,7 @@ import { createHash, timingSafeEqual } from "node:crypto";
 import { after } from "next/server";
 import { reconcileExpiredChatCreditReservations } from "@/lib/chatSecurity";
 import { reconcileExpiredChatRequestLeases } from "@/lib/chatRequestLease";
+import { reconcileSourceLockedMemories } from "@/lib/externalConversationLockService";
 import { reconcileExpiredExternalImportStaging } from "@/lib/externalImportService";
 import { reconcileExpiredMemories } from "@/lib/memoryExpiryService";
 import { reconcileExpiredMemoryExtractionRuns } from "@/lib/memoryExtractionService";
@@ -90,6 +91,18 @@ export async function POST(request: Request) {
       expiredMemories: 0,
       truncated: false,
     }));
+    // Source-lock convergence (policy §7.1): the lock transition is atomic, so
+    // this exists for the drift the transaction cannot see -- evidence added
+    // to a memory after its source was locked, or a source unlocked while a
+    // memory was being edited. Same never-throws rule as the sweep above.
+    const memorySourceLocks = await reconcileSourceLockedMemories().catch(
+      () => ({
+        memoriesSuspended: 0,
+        memoriesRestored: 0,
+        memoriesExpired: 0,
+        truncated: false,
+      })
+    );
     await completeScheduledJob({
       runId: run?.id,
       processedCount: result.examined,
@@ -103,6 +116,7 @@ export async function POST(request: Request) {
         externalImportStaging,
         memoryExtractionLeases,
         memoryExpiry,
+        memorySourceLocks,
       },
     });
     return Response.json(

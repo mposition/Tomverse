@@ -23,7 +23,7 @@ export type GuestConversationSummary = {
 export type GuestImportPayloadMessage = {
   role: "user" | "assistant";
   content: string;
-  status: "normal" | "error" | "cancelled";
+  status: "normal" | "incomplete" | "error" | "cancelled";
   modelId: string | null;
   createdAt: string;
 };

@@ -12,11 +12,11 @@ import {
 } from "@/lib/appSettings";
 import { authOptions } from "@/lib/auth";
 import { listMemoryExtractionRuns } from "@/lib/memoryExtractionCatalogue";
-import { kickMemoryExtractionRun } from "@/lib/memoryExtractionDispatch";
 import {
     createMemoryExtractionRun,
     estimateMemoryExtraction,
 } from "@/lib/memoryExtractionService";
+import { kickMemoryExtractionRun } from "@/lib/memoryExtractionWorker";
 import type { ModelTier } from "@/lib/models";
 
 /**
@@ -135,10 +135,12 @@ export async function POST(req: Request) {
             ...base,
             confirmedCredits: body.confirmedCredits,
         });
-        // Low-latency start, nothing more. This is bound to the lifetime of
-        // this request and dies with the process; the run is durable in the
-        // database and the fifteen-minute dispatcher is what actually
-        // guarantees it finishes (§11.1).
+        // The low-latency half of §11.1. `after()` runs once this response has
+        // been sent, so the user is not held while a background run starts --
+        // and it is explicitly *not* a durable queue: it is bound to this
+        // request's process and dies with it. What guarantees the run finishes
+        // is the fifteen-minute dispatcher, which is why this is allowed to be
+        // best-effort and why `kickMemoryExtractionRun` never throws.
         after(() => kickMemoryExtractionRun(run.id));
         return NextResponse.json(
             {

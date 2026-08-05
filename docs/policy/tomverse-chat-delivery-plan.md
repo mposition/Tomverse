@@ -177,8 +177,11 @@ Guest and Free access remains useful but bounded. Server-side plan/model allowli
 - Add a YAML validator and generated Markdown view; fail CI on duplicate IDs, missing required fields, invalid operators, a hand-edited generated file, or an applicable blocking gate that lacks release-mode approval/evidence metadata.
 - Freeze Review's critical chat behavior with regression E2E tests.
 - Approve Router/Attempt/Manifest, mobile auth, privacy registry, and store credential ADRs.
-- Inventory provider/model capabilities, tokenizers, limits, price, regions, and health inputs.
-- Produce a versioned Router evaluation set and baseline fixed-model scores.
+- Inventory provider/model capabilities, tokenizers, limits, price, regions, and health inputs
+  (`docs/policy/tomverse-chat-model-capability-inventory.md`).
+- Produce a versioned Router evaluation set and baseline fixed-model scores, following
+  `docs/ops/tomverse-chat-router-evaluation-set.md`. Size it from a measured pilot: a
+  500-item set cannot clear `ROUTE-01`'s confidence-interval bound at parity.
 - Record workspace/package boundaries and framework-purity enforcement.
 - Exercise the review synthetic-login alert path and identify primary/backup owners.
 
