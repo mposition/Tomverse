@@ -7,6 +7,7 @@ import {
     analyzeExtractionChunk,
     type ExtractionModelAdapter,
 } from "@/lib/memoryExtractionPipeline";
+import { MEMORY_EXTRACTION_CHUNK_TIMEOUT_MS } from "@/lib/memoryExtractionCore";
 import { persistExtractionChunkDecisions } from "@/lib/memoryExtractionPersistence";
 import {
     driveMemoryExtractionRunSlice,
@@ -47,7 +48,43 @@ import { prisma } from "@/lib/prisma";
  * not fit are not lost: they stay `pending` and the next cycle takes them,
  * oldest first, so nothing starves behind a busy account.
  */
-const MAX_RUNS_PER_DISPATCH = 5;
+export const MAX_RUNS_PER_DISPATCH = 5;
+
+/**
+ * And a wall-clock ceiling for the whole pass, because a run count is not a
+ * time bound.
+ *
+ * One slice is allowed `MEMORY_EXTRACTION_SLICE_BUDGET_MS` (90s), so five runs
+ * driven back to back is seven and a half minutes inside a request that also
+ * reconciles credits, drains the notification queue and sweeps refunds. §11.1
+ * requires extraction latency not to delay that work, and bounding the number
+ * of runs does not bound the time they take.
+ *
+ * The remaining budget is handed down as each run's own slice budget, so a run
+ * cannot keep starting chunks after the pass is out of time. Work not reached
+ * is durable and waits for the next pass, fifteen minutes later.
+ *
+ * Two minutes, and it has to exceed one chunk timeout by enough for a second
+ * run to qualify -- a ceiling equal to the timeout would silently cap every
+ * pass at one run. The bound is not exact: a chunk already claimed is always
+ * allowed to finish and report, so a pass can overrun by at most one chunk
+ * timeout. That is why this step is ordered last in the maintenance route --
+ * an overrun then delays only the response, never the credit, refund and
+ * notification work §11.1 is protecting.
+ */
+export const MEMORY_EXTRACTION_DISPATCH_BUDGET_MS = 120_000;
+
+/**
+ * Below this there is no point starting *another* run: a slice that begins
+ * with less time than one chunk's timeout can only stop at its first boundary,
+ * having claimed and released a lease for nothing.
+ *
+ * It gates continuing, never starting. The first pending run is always
+ * dispatched, whatever the ceiling says, so a pass makes progress rather than
+ * deferring the same run forever -- and its slice still cannot outlive the
+ * pass, because the remaining time is handed down as its own budget.
+ */
+const MIN_CONTINUE_BUDGET_MS = MEMORY_EXTRACTION_CHUNK_TIMEOUT_MS;
 
 /**
  * Ceiling on what one chunk's answer may cost. The prompt asks for a small
@@ -252,6 +289,12 @@ export function driveMemoryExtractionRun(input: {
      * approved and revoked halfway through.
      */
     register?: readonly MemoryExtractionEvalEntry[];
+    /**
+     * Caps this slice below its own default, so a run started by a dispatch
+     * pass cannot outlive the pass. Omitted, the slice uses
+     * `MEMORY_EXTRACTION_SLICE_BUDGET_MS`.
+     */
+    budgetMs?: number;
 }): Promise<ExtractionSliceResult> {
     return driveMemoryExtractionRunSlice({
         runId: input.runId,
@@ -264,6 +307,7 @@ export function driveMemoryExtractionRun(input: {
             }),
         now: input.now,
         register: input.register,
+        budgetMs: input.budgetMs,
     });
 }
 
@@ -305,6 +349,8 @@ export type MemoryExtractionDispatchResult = {
     reclaimedRuns: number;
     dispatchedRuns: number;
     chunksProcessed: number;
+    /** Pending runs this pass had no time left for; the next pass takes them. */
+    skippedForTime: number;
 };
 
 /**
@@ -320,6 +366,10 @@ export type MemoryExtractionDispatchResult = {
  * One run's failure does not stop the cycle: each is driven independently and
  * a thrown error is logged and stepped over, because the alternative is one
  * poisoned run blocking every other account's recovery.
+ *
+ * The pass is bounded twice over, by `maxRuns` and by wall clock. Only the
+ * second bound is a statement about how long maintenance is held: five runs is
+ * five slice budgets, and the run count says nothing about that.
  */
 export async function dispatchPendingMemoryExtractionRuns(
     now: Date = new Date(),
@@ -327,6 +377,7 @@ export async function dispatchPendingMemoryExtractionRuns(
     overrides: {
         adapterFactory?: ExtractionAdapterFactory;
         register?: readonly MemoryExtractionEvalEntry[];
+        budgetMs?: number;
     } = {}
 ): Promise<MemoryExtractionDispatchResult> {
     const { reclaimedRuns } = await reconcileExpiredMemoryExtractionRuns(now);
@@ -341,9 +392,31 @@ export async function dispatchPendingMemoryExtractionRuns(
         select: { id: true },
     });
 
+    // Anchored on the real clock rather than on `now`: `now` is the sweep's
+    // logical timestamp and the tests move it freely, but the budget this
+    // guards is elapsed time inside one maintenance request.
+    const deadline =
+        Date.now() +
+        Math.max(
+            1,
+            overrides.budgetMs ?? MEMORY_EXTRACTION_DISPATCH_BUDGET_MS
+        );
+
+    let attemptedRuns = 0;
     let dispatchedRuns = 0;
     let chunksProcessed = 0;
+    let skippedForTime = 0;
     for (const run of pending) {
+        const remaining = deadline - Date.now();
+        if (attemptedRuns > 0 && remaining < MIN_CONTINUE_BUDGET_MS) {
+            // Reported rather than silently dropped: a pass that keeps running
+            // out of time is a signal that the interval, the run count or the
+            // slice budget is wrong, and a silent skip reads as "there was
+            // nothing to do".
+            skippedForTime = pending.length - attemptedRuns;
+            break;
+        }
+        attemptedRuns += 1;
         try {
             const result = await driveMemoryExtractionRun({
                 runId: run.id,
@@ -351,6 +424,11 @@ export async function dispatchPendingMemoryExtractionRuns(
                 now,
                 adapterFactory: overrides.adapterFactory,
                 register: overrides.register,
+                // A run's slice may not outlive the pass that started it. The
+                // first run gets whatever is left even if that is little: a
+                // slice that stops at its first boundary parks the run
+                // cleanly, which still beats never starting it.
+                budgetMs: Math.max(1, remaining),
             });
             if (result.outcome !== "not_claimed") dispatchedRuns += 1;
             chunksProcessed += result.chunksProcessed;
@@ -366,15 +444,16 @@ export async function dispatchPendingMemoryExtractionRuns(
         }
     }
 
-    if (reclaimedRuns > 0 || dispatchedRuns > 0) {
+    if (reclaimedRuns > 0 || dispatchedRuns > 0 || skippedForTime > 0) {
         console.info(
             JSON.stringify({
                 event: "memory_extraction_dispatch",
                 reclaimedRuns,
                 dispatchedRuns,
                 chunksProcessed,
+                skippedForTime,
             })
         );
     }
-    return { reclaimedRuns, dispatchedRuns, chunksProcessed };
+    return { reclaimedRuns, dispatchedRuns, chunksProcessed, skippedForTime };
 }
