@@ -156,6 +156,16 @@ jobs:
         timeout-minutes: 5
         run: npm run check:tomverse-chat-release-gate-view
 
+      # Declaring a context window is not a no-op: the chat route's guard only
+      # runs when contextWindowTokens is set, so a new value immediately starts
+      # rejecting long requests that used to pass. Windows are verified with a
+      # source, a date and a verifier in the register first. This fails when an
+      # unverified row carries a value, a verified row has no provenance, or the
+      # catalogue gains a window whose evidence was never recorded.
+      - name: Context-window register
+        timeout-minutes: 5
+        run: npm run check:context-window-register
+
       # gpt-image-2 lives outside AVAILABLE_MODELS by design, so the model
       # pricing check above cannot see it. Same release contract -- every
       # enabled price is explicit and verified -- separate fail-closed net.

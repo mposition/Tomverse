@@ -7,6 +7,7 @@ import {
     Clock,
     Download,
     Loader2,
+    Lock,
     Plus,
     Trash2,
 } from "lucide-react";
@@ -120,6 +121,8 @@ export type ViewerConversationRow = {
     messageCount: number;
     contentBytes: number;
     importedAt: string;
+    /** A password is set on this snapshot (§7) -- never the hash itself. */
+    locked?: boolean;
 };
 
 /** Hidden covers 401/403: the viewer list is flag-gated, unlike history. */
@@ -784,6 +787,18 @@ function ConversationRowLink({ row }: { row: ViewerConversationRow }) {
                 <span className="block truncate text-sm font-semibold text-zinc-900 dark:text-zinc-100">
                     {row.title}
                 </span>
+                {/* Said in the list, not only on the page it guards: opening a
+                    snapshot to find a password prompt is a worse answer than
+                    knowing before the click (§7). */}
+                {row.locked ? (
+                    <span
+                        className="mt-0.5 inline-flex items-center gap-1 rounded-md bg-zinc-100 px-1.5 py-0.5 text-xs font-semibold text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300"
+                        data-testid="external-import-conversation-locked"
+                    >
+                        <Lock className="h-3 w-3" />
+                        {t("externalImport.lockedBadge")}
+                    </span>
+                ) : null}
                 <span className="mt-0.5 block text-xs leading-5 text-zinc-500">
                     {providerLabel(row.provider)}
                     {" · "}
