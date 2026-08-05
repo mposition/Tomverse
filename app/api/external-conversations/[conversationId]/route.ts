@@ -9,6 +9,7 @@ import {
     ExternalImportDisabledError,
 } from "@/lib/appSettings";
 import { authOptions } from "@/lib/auth";
+import { lockErrorResponse } from "@/lib/conversationLock";
 import {
     deleteExternalConversationSnapshot,
     getExternalConversation,
@@ -56,6 +57,7 @@ export async function GET(
             session.user.id,
             params.conversationId,
             {
+                request: req,
                 offset: clampListParam(url.searchParams.get("offset"), {
                     fallback: 0,
                     max: 1_000_000,
@@ -85,6 +87,10 @@ export async function GET(
         }
         const securityResponse = apiSecurityResponse(error);
         if (securityResponse) return securityResponse;
+        // 423 CONVERSATION_LOCKED, the same contract the native conversation
+        // routes answer with (§7).
+        const lockError = lockErrorResponse(error);
+        if (lockError) return lockError;
         console.error("external conversation read failed", error);
         return NextResponse.json({ error: "서버 오류" }, { status: 500 });
     }
