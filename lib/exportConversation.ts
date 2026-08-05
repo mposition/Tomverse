@@ -40,12 +40,21 @@ export function formatConversationAsText(conversation: ExportConversation) {
 }
 
 export function formatConversationHeader(
-    conversation: Pick<ExportConversation, "title" | "createdAt">
+    conversation: Pick<ExportConversation, "title" | "createdAt">,
+    /**
+     * The §13.3 notice, when an answer here could have been influenced by the
+     * author's account memory. Passed in rather than read here: this module is
+     * pure, and the caller is the one that knows whether injection was
+     * available. Omitted entirely when it was not — a notice about a feature
+     * that could not have run is noise, not disclosure.
+     */
+    personalizationNotice?: string
 ) {
     return [
         "Tomverse Insight Export",
         `Conversation: ${conversation.title}`,
         `Created: ${formatDate(conversation.createdAt)}`,
+        ...(personalizationNotice ? [personalizationNotice] : []),
         "",
     ].join("\n");
 }

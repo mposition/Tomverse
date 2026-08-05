@@ -197,6 +197,7 @@ export function ChatMessageList({
     if (!lastMessage.content) return t("chat.responseGenerating");
     if (lastMessage.status === "error") return t("chat.responseFailed");
     if (lastMessage.status === "cancelled") return t("chat.responseCancelled");
+    if (lastMessage.status === "incomplete") return t("chat.responseIncomplete");
     return t("chat.responseComplete");
   })();
 
@@ -742,13 +743,31 @@ export function ChatMessageList({
                         </p>
                         <ul className="space-y-1">
                           {msg.searchMetadata.citations.map((citation, citationIndex) => (
-                            <li key={`${citation.url}-${citationIndex}`} className="truncate">
+                            <li
+                              key={`${citation.url}-${citationIndex}`}
+                              data-testid="search-citation-item"
+                              data-reference-number={citation.referenceNumber ?? ""}
+                              className="flex items-baseline gap-1.5"
+                            >
+                              {/*
+                                The number the answer text already used, shown
+                                as the provider numbered it. Providers that
+                                publish no citation order (OpenAI, Anthropic,
+                                Google inline annotations) leave it undefined
+                                and the row renders without one -- a made-up
+                                sequence would point at the wrong source.
+                              */}
+                              {citation.referenceNumber !== undefined && (
+                                <span className="shrink-0 text-[11px] font-bold tabular-nums text-zinc-400 dark:text-zinc-500">
+                                  [{citation.referenceNumber}]
+                                </span>
+                              )}
                               <a
                                 href={citation.url}
                                 target="_blank"
                                 rel="noopener noreferrer"
                                 title={citation.url}
-                                className="text-[11px] font-medium text-blue-600 underline underline-offset-2 dark:text-blue-400"
+                                className="truncate text-[11px] font-medium text-blue-600 underline underline-offset-2 dark:text-blue-400"
                               >
                                 {citation.title || citation.url}
                               </a>
@@ -884,6 +903,21 @@ export function ChatMessageList({
                       </div>
                     );
                   })()}
+                  {/*
+                    The provider stopped at its output-token ceiling. The
+                    answer above is kept exactly as it arrived -- this only
+                    says it is unfinished and how to continue. No follow-up
+                    is sent from here: another turn costs credits, so asking
+                    for one stays the user's action.
+                  */}
+                  {!isUser && msg.status === "incomplete" && (
+                    <p
+                      data-testid="response-incomplete-notice"
+                      className="mt-3 border-t border-zinc-200 pt-2 text-[11px] leading-4 font-semibold text-zinc-500 dark:border-zinc-700/60 dark:text-zinc-400"
+                    >
+                      {t("chat.responseIncompleteNotice")}
+                    </p>
+                  )}
                   {!isUser && msg.status === "cancelled" && (
                     <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-zinc-200 pt-3 dark:border-zinc-700">
                       <span className="inline-flex items-center rounded-full bg-zinc-200 px-2.5 py-1 text-[11px] font-bold text-zinc-600 dark:bg-zinc-700 dark:text-zinc-300">

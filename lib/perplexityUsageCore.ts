@@ -1,3 +1,9 @@
+import { forEachPerplexityResponsePayload } from "@/lib/perplexityResponseEvents";
+
+// Billing only. Everything a user sees about a Perplexity answer's sources
+// lives in lib/perplexitySearchMetadataCore.ts instead: a cost snapshot and a
+// citation list are read from the same response body but answer to different
+// owners, and no field of this type may ever reach the client.
 export type PerplexityUsageCostSnapshot = {
   source: "perplexity_response_usage";
   currency: "USD";
@@ -88,27 +94,10 @@ export const parsePerplexityUsageCost = (
 export const parsePerplexityResponseBody = (
   responseBody: string
 ): PerplexityUsageCostSnapshot | null => {
-  const trimmed = responseBody.trim();
-  if (!trimmed) return null;
-
-  try {
-    const parsed = parsePerplexityUsageCost(JSON.parse(trimmed));
-    if (parsed) return parsed;
-  } catch {
-    // Streaming responses are Server-Sent Events rather than one JSON object.
-  }
-
   let latest: PerplexityUsageCostSnapshot | null = null;
-  for (const line of responseBody.split(/\r?\n/)) {
-    if (!line.startsWith("data:")) continue;
-    const data = line.slice(5).trim();
-    if (!data || data === "[DONE]") continue;
-    try {
-      latest = parsePerplexityUsageCost(JSON.parse(data)) || latest;
-    } catch {
-      // Ignore incomplete/non-JSON SSE fields while preserving the latest usage.
-    }
-  }
+  forEachPerplexityResponsePayload(responseBody, (payload) => {
+    latest = parsePerplexityUsageCost(payload) || latest;
+  });
   return latest;
 };
 

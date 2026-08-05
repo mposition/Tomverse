@@ -36,6 +36,14 @@ const ALLOWED_SNAPSHOT_KEYS = [
     "conversationCreatedAt",
     "sharedAt",
     "messages",
+    // §13.3's notice flag. Admissible because it is a single boolean about the
+    // *service* — whether injection was possible at share time — and says
+    // nothing about this author: it is the same value for every share minted
+    // in that period, so a viewer learns nothing from it. Anything richer (a
+    // count, a kind, a per-author value) would turn the notice into the
+    // channel it exists to avoid, which is why the schema admits a boolean
+    // and nothing else.
+    "personalizationPossible",
 ];
 
 const ALLOWED_MESSAGE_KEYS = ["id", "role", "content", "modelId", "createdAt"];
