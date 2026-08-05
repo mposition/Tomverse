@@ -10,6 +10,7 @@ import { expireCreditLots } from "@/lib/creditLedger";
 import { reconcileExpiredChatCreditReservations } from "@/lib/chatSecurity";
 import { purgeExpiredChatLimitDecisions } from "@/lib/chatLimitDecisions";
 import { deleteExpiredContextBundleConsumptions } from "@/lib/chatContextBundleService";
+import { reconcileExpiredMemoryExtractionRuns } from "@/lib/memoryExtractionService";
 import { purgeExpiredTraceErrorEvidence } from "@/lib/traceErrorEvidence";
 import { purgeClosedAutoFixCases } from "@/lib/feedbackAutoFixShadow";
 import {
@@ -463,8 +464,26 @@ export async function cleanupExpiredData() {
   const contextBundleConsumptions =
     await deleteExpiredContextBundleConsumptions(now);
 
+  // Memory extraction's orphan reconciliation (import/memory policy §11,
+  // §11.1). A worker that died mid-run leaves the run `running` with a lease
+  // nobody holds, and nothing else ever looks at it: the claim is fenced on
+  // `leaseGeneration`, so a dead owner's lease does not lapse into
+  // availability by itself. Reclaiming here is what makes the run claimable
+  // again.
+  //
+  // This is half of what §11.1 asks the fifteen-minute job to do. The other
+  // half -- re-driving the reclaimed run rather than only reclaiming it --
+  // needs the production chunk handler, which does not exist yet: today
+  // `driveMemoryExtractionRunSlice` has no caller outside the tests. Until it
+  // does, a reclaimed run waits for the next request-time kick instead of
+  // being restarted here, and that is a smaller gap than a run stuck
+  // `running` forever with no owner.
+  const memoryExtractionRuns =
+    await reconcileExpiredMemoryExtractionRuns(now);
+
   return {
     contextBundleConsumptions,
+    memoryExtractionRuns: memoryExtractionRuns.reclaimedRuns,
     guestAttachments,
     sessions: sessions.count,
     usageBuckets: Number(usageBuckets),

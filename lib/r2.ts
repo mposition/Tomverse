@@ -184,6 +184,47 @@ export async function validateR2ObjectMetadata(
   };
 }
 
+/**
+ * Read an object we wrote ourselves, bounded, and **never** delete it.
+ *
+ * `readR2Object` above is for untrusted uploads: a metadata mismatch there is
+ * evidence the object is not what it claimed, so it removes it. That branch is
+ * the reason this second function exists rather than a flag. The thumbnail
+ * repair reads a generated original that the user paid for and cannot
+ * regenerate; a read path that can destroy its own subject is not a repair.
+ * Nothing here validates a claimed content type, because nothing here trusts a
+ * caller's claim about one -- the bound on bytes is the whole contract.
+ */
+export async function readOwnR2ObjectBytes(
+  key: string,
+  options: { maxBytes: number }
+) {
+  const { client, bucket } = getR2Client();
+  const abortController = new AbortController();
+  const response = await client.send(
+    new GetObjectCommand({ Bucket: bucket, Key: key }),
+    { abortSignal: abortController.signal }
+  );
+  if (!response.Body) throw new Error("R2 object has no body.");
+
+  const chunks: Buffer[] = [];
+  let totalBytes = 0;
+  try {
+    for await (const chunk of response.Body as AsyncIterable<Uint8Array>) {
+      totalBytes += chunk.byteLength;
+      if (totalBytes > options.maxBytes) {
+        abortController.abort();
+        throw new BoundedBufferError();
+      }
+      chunks.push(Buffer.from(chunk));
+    }
+  } catch (error) {
+    if (!(error instanceof BoundedBufferError)) abortController.abort();
+    throw error;
+  }
+  return Buffer.concat(chunks, totalBytes);
+}
+
 export async function writeR2Object(
   key: string,
   body: Buffer,

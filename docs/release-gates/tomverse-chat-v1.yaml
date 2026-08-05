@@ -1,0 +1,790 @@
+schemaVersion: 1
+
+metadata:
+  product: tomverse-chat
+  release: v1
+  status: draft
+  lastUpdated: "2026-08-05"
+  sourceOfTruth: true
+
+governance:
+  description: >-
+    Canonical release-gate registry for Tomverse Chat v1. Human-readable tables
+    must be generated from this file and must not be edited independently.
+  generatedMarkdownOnly: true
+  manualThresholdTablesForbidden: true
+  thresholdChangeRequires:
+    - product-owner
+    - independent-reviewer
+  validatorCommand: npm run verify:tomverse-chat-release-gates
+  implementationStatus: planned
+  approvalSystemOfRecord: this-file
+  approvalPolicy:
+    allowedStatuses:
+      - pending
+      - evidence-ready
+      - approved
+      - failed
+      - not-applicable
+    releaseModeRules:
+      - Every applicable blocking gate must have status approved.
+      - >-
+        approvedBy must contain an accountable gate-owner approval and an
+        independent-reviewer approval from different people.
+      - approvedAt must be a non-null RFC 3339 timestamp.
+      - evidenceRefs must contain immutable links or artifact identifiers.
+      - >-
+        not-applicable is allowed only when appliesWhen evaluates false and the
+        decision has independent approval and an applicability evidence reference.
+    approvedByEntrySchema:
+      required:
+        - subject
+        - role
+      roles:
+        - gate-owner
+        - independent-reviewer
+      subjectFormat: repository-or-corporate-identity
+    independentReviewerRule: >-
+      The independent reviewer must be a person who did not produce the
+      referenced evidence. Co-implementers of a feature may approve as
+      gate-owner but may not serve as the independent reviewer for gates whose
+      evidence they produced.
+  requiredFields:
+    - id
+    - rationale
+    - category
+    - title
+    - blocking
+    - owner
+    - criteria
+    - evidence
+    - status
+    - approvedBy
+    - approvedAt
+    - evidenceRefs
+
+ownerRoles:
+  backend-ai: Router, Planner, provider adapters, billing integration, and auth server
+  web-ui: shared chat UI, mobile web, PWA, and accessibility
+  mobile-release: native shell, deep links, store submission, and review operations
+  product-qa: evaluation sets, release evidence, regression, and gate sign-off
+  security-privacy: threat tests, privacy workflows, and data-domain registry
+  finance-ops: credit ledger reconciliation and refund policy
+
+gates:
+  - id: ROUTE-01
+    rationale: "A 95% confidence-interval lower bound prevents a noisy point estimate from approving a Router that may be materially worse than the fixed-model baseline."
+    status: pending
+    approvedBy: []
+    approvedAt: null
+    evidenceRefs: []
+    category: routing
+    title: Auto Router quality is non-inferior to the fixed-model baseline
+    blocking: true
+    owner: backend-ai
+    criteria:
+      - metric: evaluation_win_rate_delta_ci95_lower_pp
+        operator: gte
+        value: -2
+    evidence:
+      - >-
+        Versioned decision-grade evaluation report with fixed-model baseline,
+        sample size, paired evaluation unit, confidence-interval method, seed,
+        point estimate, and 95% confidence-interval bounds.
+
+  - id: ROUTE-02
+    rationale: "Deterministic routing must preserve mobile chat responsiveness and must not consume a material share of time to first token."
+    status: pending
+    approvedBy: []
+    approvedAt: null
+    evidenceRefs: []
+    category: routing
+    title: Fast-path routing latency remains within budget
+    blocking: true
+    owner: backend-ai
+    criteria:
+      - metric: fast_path_routing_latency_p95_ms
+        operator: lte
+        value: 300
+    evidence:
+      - production-like load-test trace grouped by router version
+
+  - id: ROUTE-03
+    rationale: "Model-assisted routing is acceptable only when both its own tail latency and the resulting end-to-end TTFT overhead remain bounded."
+    status: pending
+    approvedBy: []
+    approvedAt: null
+    evidenceRefs: []
+    category: routing
+    title: Model-assisted routing latency and TTFT overhead remain within budget
+    blocking: true
+    owner: backend-ai
+    criteria:
+      - metric: assisted_routing_latency_p95_ms
+        operator: lte
+        value: 800
+      - metric: end_to_end_ttft_increase_percent
+        operator: lte
+        value: 10
+    evidence:
+      - production-like load-test trace with assisted-routing cohort
+
+  - id: ROUTE-04
+    rationale: "Pass 2 is an escape hatch; frequent use indicates an inaccurate Estimator or an unsuitable Pass 1 model decision and doubles context work."
+    status: pending
+    approvedBy: []
+    approvedAt: null
+    evidenceRefs: []
+    category: routing
+    title: Pass 2 context rerouting is exceptional rather than routine
+    blocking: true
+    owner: backend-ai
+    criteria:
+      - metric: pass_2_occurrence_percent
+        operator: lte
+        value: 5
+        denominator: >-
+          Auto-mode RoutingRuns that complete an initial Context Builder fit
+          check, excluding user cancellation before that check.
+    evidence:
+      - RoutingRun report segmented by model and estimator version
+
+  - id: ROUTE-05
+    rationale: "A hard reroute bound prevents routing and context construction from forming an unbounded retry loop."
+    status: pending
+    approvedBy: []
+    approvedAt: null
+    evidenceRefs: []
+    category: routing
+    title: Context-limit rerouting never exceeds one escape-hatch pass
+    blocking: true
+    owner: backend-ai
+    criteria:
+      - metric: context_reroute_count_max
+        operator: lte
+        value: 1
+    evidence:
+      - RoutingRun invariant query and adversarial context tests
+
+  - id: ROUTE-06
+    rationale: "Attempt-scoped finalized manifests are required because fallback models can receive different context, tokenization, planning, and adapter output."
+    status: pending
+    approvedBy: []
+    approvedAt: null
+    evidenceRefs: []
+    category: routing
+    title: Every dispatched provider attempt references its own finalized manifest
+    blocking: true
+    owner: backend-ai
+    criteria:
+      - metric: dispatched_attempt_manifest_coverage_percent
+        operator: eq
+        value: 100
+    evidence:
+      - RoutingAttempt-to-ContextManifest integrity query
+
+  - id: ROUTE-07
+    rationale: "Routing quality, cost, regeneration, and model-switch analysis is trustworthy only when nearly every accepted logical execution has a RoutingRun."
+    status: pending
+    approvedBy: []
+    approvedAt: null
+    evidenceRefs: []
+    category: routing
+    title: RoutingRun observability is complete enough for evaluation and audit
+    blocking: true
+    owner: backend-ai
+    criteria:
+      - metric: routing_run_recording_percent
+        operator: gte
+        value: 99.9
+        denominator: >-
+          Logical assistant-response executions accepted into Chat Orchestrator
+          after authentication and idempotency validation, including terminal
+          not_dispatched outcomes; excludes requests rejected before that boundary.
+    evidence:
+      - sampled Message-to-RoutingRun reconciliation report
+
+  - id: ESTIMATE-01
+    rationale: "Low median token-estimate error keeps normal routing efficient and reduces unnecessary context rebuilds."
+    status: pending
+    approvedBy: []
+    approvedAt: null
+    evidenceRefs: []
+    category: context-estimation
+    title: Context token estimate median error remains within budget
+    blocking: true
+    owner: backend-ai
+    criteria:
+      - metric: absolute_token_estimate_error_percent_p50
+        operator: lte
+        value: 5
+    evidence:
+      - tokenizer-stratified estimate-versus-actual report
+
+  - id: ESTIMATE-02
+    rationale: "A bounded tail error protects long, attachment-heavy, and multilingual conversations that median accuracy can hide."
+    status: pending
+    approvedBy: []
+    approvedAt: null
+    evidenceRefs: []
+    category: context-estimation
+    title: Context token estimate tail error remains within budget
+    blocking: true
+    owner: backend-ai
+    criteria:
+      - metric: absolute_token_estimate_error_percent_p95
+        operator: lte
+        value: 15
+    evidence:
+      - tokenizer-stratified estimate-versus-actual report
+
+  - id: ESTIMATE-03
+    rationale: "The final actual-token guard is a zero-tolerance safety boundary even when estimation and rerouting metrics otherwise pass."
+    status: pending
+    approvedBy: []
+    approvedAt: null
+    evidenceRefs: []
+    category: context-estimation
+    title: No over-limit context request reaches a provider
+    blocking: true
+    owner: backend-ai
+    criteria:
+      - metric: provider_dispatches_over_model_context_limit
+        operator: eq
+        value: 0
+    evidence:
+      - provider-dispatch guard invariant test
+      - production RoutingAttempt audit comparing actualTokens with model limit
+
+  - id: FALLBACK-01
+    rationale: "Pre-token fallback must recover most eligible transient provider failures to justify its added execution complexity."
+    status: pending
+    approvedBy: []
+    approvedAt: null
+    evidenceRefs: []
+    category: fallback
+    title: Eligible pre-token provider failures recover automatically
+    blocking: true
+    owner: backend-ai
+    criteria:
+      - metric: eligible_pre_token_fallback_success_percent
+        operator: gte
+        value: 95
+        denominator: >-
+          Primary attempts that fail before any visible token, have at least one
+          healthy compatible candidate, and are not cancelled by the user.
+    evidence:
+      - injected-failure evaluation report with denominator breakdown
+
+  - id: FALLBACK-02
+    rationale: "Switching models after visible output risks duplicated or contradictory answers and ambiguous billing, so it is prohibited."
+    status: pending
+    approvedBy: []
+    approvedAt: null
+    evidenceRefs: []
+    category: fallback
+    title: Automatic fallback never starts after a visible token
+    blocking: true
+    owner: backend-ai
+    criteria:
+      - metric: automatic_fallbacks_after_visible_token
+        operator: eq
+        value: 0
+    evidence:
+      - stream-state invariant test and production audit
+
+  - id: FALLBACK-03
+    rationale: "A fallback is safe only when the selected candidate receives context validated for its own tokenizer, capabilities, and limits."
+    status: pending
+    approvedBy: []
+    approvedAt: null
+    evidenceRefs: []
+    category: fallback
+    title: Successful fallbacks use candidate-specific rebuilt context
+    blocking: true
+    owner: backend-ai
+    criteria:
+      - metric: successful_fallbacks_with_candidate_manifest_percent
+        operator: eq
+        value: 100
+    evidence:
+      - RoutingAttempt manifest and tokenizer compatibility query
+
+  - id: PLANNER-01
+    rationale: "A 95% confidence-interval lower bound ensures Planner rollout is supported by evidence rather than a favorable but uncertain point estimate."
+    status: pending
+    approvedBy: []
+    approvedAt: null
+    evidenceRefs: []
+    category: prompt-planner
+    title: Prompt Planner quality is non-inferior to pass-through
+    blocking: true
+    owner: backend-ai
+    criteria:
+      - metric: planner_win_rate_delta_ci95_lower_pp
+        operator: gte
+        value: -2
+    evidence:
+      - >-
+        Blinded planner-versus-pass-through evaluation report with sample size,
+        paired evaluation unit, confidence-interval method, seed, point estimate,
+        and 95% confidence-interval bounds.
+
+  - id: PLANNER-02
+    rationale: "Planner latency and token expansion are justified only by approved quality evidence when response cost rises materially."
+    status: pending
+    approvedBy: []
+    approvedAt: null
+    evidenceRefs: []
+    category: prompt-planner
+    title: Planner cost growth requires approved quality evidence
+    blocking: true
+    owner: backend-ai
+    criteria:
+      - metric: responses_with_cost_increase_gte_10_percent_without_approved_quality_evidence
+        operator: eq
+        value: 0
+    evidence:
+      - planner cohort cost report linked to evaluation approval
+
+  - id: PLANNER-03
+    rationale: "Memory and retrieved content cross a trust boundary and must remain data rather than instructions capable of overriding system policy."
+    status: pending
+    approvedBy: []
+    approvedAt: null
+    evidenceRefs: []
+    category: prompt-planner
+    title: Untrusted memory and retrieved content cannot override instruction precedence
+    blocking: true
+    owner: security-privacy
+    criteria:
+      - metric: adversarial_retrieved_content_instruction_precedence_violations
+        operator: eq
+        value: 0
+    evidence:
+      - memory, attachment, import, and project-content prompt-injection test report
+
+  - id: BILLING-01
+    rationale: "Retries, fallback, and idempotent client replays must never turn one logical response into multiple user charges."
+    status: pending
+    approvedBy: []
+    approvedAt: null
+    evidenceRefs: []
+    category: billing
+    title: A logical response cannot charge credits more than once
+    blocking: true
+    owner: finance-ops
+    criteria:
+      - metric: duplicate_user_credit_charges
+        operator: eq
+        value: 0
+    evidence:
+      - reservation and settlement idempotency test
+
+  - id: BILLING-02
+    rationale: "Every reservation must reach a terminal settlement or release state so credits cannot remain indefinitely locked."
+    status: pending
+    approvedBy: []
+    approvedAt: null
+    evidenceRefs: []
+    category: billing
+    title: Credit reservations reconcile after completion, failure, or cancellation
+    blocking: true
+    owner: finance-ops
+    criteria:
+      - metric: unreconciled_credit_reservations_after_reconciliation_window
+        operator: eq
+        value: 0
+    evidence:
+      - reservation reconciliation job report
+
+  - id: BILLING-03
+    rationale: "Unexpected negative balances signal ledger corruption or unsafe refund recovery and are a zero-tolerance financial invariant."
+    status: pending
+    approvedBy: []
+    approvedAt: null
+    evidenceRefs: []
+    category: billing
+    title: Credit-ledger invariants never produce unintended negative balances
+    blocking: true
+    owner: finance-ops
+    criteria:
+      - metric: unintended_negative_ledger_invariant_errors
+        operator: eq
+        value: 0
+    evidence:
+      - ledger invariant test and reconciliation report
+
+  - id: BILLING-04
+    rationale: "Goodwill refunds can be retried operationally, so they require their own idempotency guarantee."
+    status: pending
+    approvedBy: []
+    approvedAt: null
+    evidenceRefs: []
+    category: billing
+    title: Goodwill refunds remain idempotent
+    blocking: true
+    owner: finance-ops
+    criteria:
+      - metric: duplicate_goodwill_refunds
+        operator: eq
+        value: 0
+    evidence:
+      - refund idempotency and early-failure threshold tests
+
+  - id: ABUSE-01
+    rationale: "Auto routing and fallback must not become a path around plan entitlements, model limits, quotas, or server rate limits."
+    status: pending
+    approvedBy: []
+    approvedAt: null
+    evidenceRefs: []
+    category: abuse-prevention
+    title: Plan, model, quota, and rate-limit policy cannot be bypassed
+    blocking: true
+    owner: security-privacy
+    criteria:
+      - metric: unauthorized_or_over_quota_model_dispatches_in_adversarial_tests
+        operator: eq
+        value: 0
+    evidence:
+      - guest and Free account concurrency, replay, device, account, and IP abuse tests
+
+  - id: MODERATION-01
+    rationale: "Every dispatch path, including pass-through and fallback, must preserve the same required content-policy enforcement."
+    status: pending
+    approvedBy: []
+    approvedAt: null
+    evidenceRefs: []
+    category: moderation
+    title: Every request covered by moderation policy receives the required checks
+    blocking: true
+    owner: security-privacy
+    criteria:
+      - metric: policy_covered_requests_dispatched_without_required_moderation
+        operator: eq
+        value: 0
+    evidence:
+      - pre-dispatch policy enforcement coverage report
+
+  - id: MEMORY-01
+    rationale: "Korean-first retrieval requires measured recall because PostgreSQL language tooling does not provide equivalent morphology out of the box."
+    status: pending
+    approvedBy: []
+    approvedAt: null
+    evidenceRefs: []
+    category: memory
+    title: Korean memory retrieval reaches the target recall
+    blocking: true
+    owner: backend-ai
+    appliesWhen: memory-release-b-enabled
+    criteria:
+      - metric: korean_memory_recall_at_5_percent
+        operator: gte
+        value: 85
+    evidence:
+      - Korean-first retrieval set using NFC normalization and bigram ranking
+
+  - id: MEMORY-02
+    rationale: "Incorrect memory can silently distort every later answer, so relevance errors require an explicit quality ceiling."
+    status: pending
+    approvedBy: []
+    approvedAt: null
+    evidenceRefs: []
+    category: memory
+    title: Irrelevant memory injection remains below the safety threshold
+    blocking: true
+    owner: backend-ai
+    appliesWhen: memory-release-b-enabled
+    criteria:
+      - metric: incorrect_or_irrelevant_memory_injection_percent
+        operator: lte
+        value: 2
+    evidence:
+      - adjudicated memory injection evaluation report
+
+  - id: MEMORY-03
+    rationale: "Credential or sensitive-data injection from long-term memory is a zero-tolerance privacy and security failure."
+    status: pending
+    approvedBy: []
+    approvedAt: null
+    evidenceRefs: []
+    category: memory
+    title: Sensitive data and credentials are never injected from memory
+    blocking: true
+    owner: security-privacy
+    appliesWhen: memory-release-b-enabled
+    criteria:
+      - metric: sensitive_or_credential_memory_injections
+        operator: eq
+        value: 0
+    evidence:
+      - adversarial sensitive-memory evaluation report
+
+  - id: MEMORY-04
+    rationale: "Deletion and supersession promises are meaningful only when obsolete memory can never re-enter model context."
+    status: pending
+    approvedBy: []
+    approvedAt: null
+    evidenceRefs: []
+    category: memory
+    title: Deleted or superseded memory is never reused
+    blocking: true
+    owner: security-privacy
+    appliesWhen: memory-release-b-enabled
+    criteria:
+      - metric: deleted_or_superseded_memory_reuse_events
+        operator: eq
+        value: 0
+    evidence:
+      - deletion-priority and supersession invariant tests
+
+  - id: UI-01
+    rationale: "Shared-core and shared-UI extraction is allowed only when existing Tomverse Review behavior and critical visuals remain stable."
+    status: pending
+    approvedBy: []
+    approvedAt: null
+    evidenceRefs: []
+    category: shared-chat-ui
+    title: Tomverse Review behavior remains stable after headless extraction
+    blocking: true
+    owner: web-ui
+    criteria:
+      - metric: required_review_regression_e2e_pass_percent
+        operator: eq
+        value: 100
+    evidence:
+      - frozen Review regression suite on web and shared packages
+      - approved visual snapshot comparison for critical Review chat states
+
+  - id: UI-02
+    rationale: "Streaming, retry, cancellation, IME, and accessible fallback status are one user-visible state machine and must pass together."
+    status: pending
+    approvedBy: []
+    approvedAt: null
+    evidenceRefs: []
+    category: shared-chat-ui
+    title: Fallback status, cancellation, IME, streaming, and accessibility work end to end
+    blocking: true
+    owner: web-ui
+    criteria:
+      - metric: critical_chat_interaction_e2e_pass_percent
+        operator: eq
+        value: 100
+    evidence:
+      - mobile viewport and native-shell E2E report
+
+  - id: PACKAGE-01
+    rationale: "Framework-neutral packages are the mechanism that prevents Next.js and Capacitor clients from becoming duplicated products."
+    status: pending
+    approvedBy: []
+    approvedAt: null
+    evidenceRefs: []
+    category: shared-packages
+    title: Shared chat packages remain framework-neutral
+    blocking: true
+    owner: web-ui
+    criteria:
+      - metric: forbidden_nextjs_imports_in_shared_packages
+        operator: eq
+        value: 0
+    evidence:
+      - ESLint no-restricted-imports report
+      - Next.js and Vite build matrix
+
+  - id: AUTH-01
+    rationale: "Store-compliant identity lifecycle requires Apple or equivalent login to work with linking, unlinking, deletion, and revocation."
+    status: pending
+    approvedBy: []
+    approvedAt: null
+    evidenceRefs: []
+    category: authentication
+    title: Sign in with Apple and identity lifecycle work end to end
+    blocking: true
+    owner: mobile-release
+    criteria:
+      - metric: apple_login_link_unlink_delete_revoke_e2e_pass_percent
+        operator: eq
+        value: 100
+    evidence:
+      - physical-device authentication E2E report
+
+  - id: AUTH-02
+    rationale: "The mobile bearer path must preserve the abuse resistance and expiry guarantees of the existing email OTP and magic-link policy."
+    status: pending
+    approvedBy: []
+    approvedAt: null
+    evidenceRefs: []
+    category: authentication
+    title: Email OTP, magic link, and the isolated review code work through the mobile token path
+    blocking: true
+    owner: backend-ai
+    criteria:
+      - metric: email_otp_magic_link_lockout_turnstile_e2e_pass_percent
+        operator: eq
+        value: 100
+      - metric: submission_scoped_review_code_isolation_e2e_pass_percent
+        operator: eq
+        value: 100
+    evidence:
+      - >-
+        Abuse, expiry, lockout, cross-account, cross-submission/build,
+        rotation, terminal-revoke, and ordinary-account regression E2E report.
+
+  - id: AUTH-03
+    rationale: "Rotating refresh tokens, reuse detection, logout, and device revoke are required to contain stolen mobile credentials."
+    status: pending
+    approvedBy: []
+    approvedAt: null
+    evidenceRefs: []
+    category: authentication
+    title: Mobile bearer-token lifecycle resists replay and supports revocation
+    blocking: true
+    owner: backend-ai
+    criteria:
+      - metric: refresh_rotation_reuse_logout_device_revoke_e2e_pass_percent
+        operator: eq
+        value: 100
+    evidence:
+      - token rotation and reuse-detection security test report
+
+  - id: AUTH-04
+    rationale: "CORS bypass and deep-link hijacking are primary attack surfaces introduced by mobile bearer authentication and external browser return flows."
+    status: pending
+    approvedBy: []
+    approvedAt: null
+    evidenceRefs: []
+    category: authentication
+    title: CORS bypass and deep-link hijacking attack tests pass
+    blocking: true
+    owner: security-privacy
+    criteria:
+      - metric: unresolved_high_or_critical_cors_or_deep_link_findings
+        operator: eq
+        value: 0
+    evidence:
+      - hostile-origin CORS test report
+      - universal-link and app-link hijacking test report on physical devices
+
+  - id: PRIVACY-01
+    rationale: "Users and store reviewers must be able to complete account deletion inside the app without an external support workflow."
+    status: pending
+    approvedBy: []
+    approvedAt: null
+    evidenceRefs: []
+    category: privacy
+    title: Account deletion is complete inside the app
+    blocking: true
+    owner: security-privacy
+    criteria:
+      - metric: in_app_account_deletion_e2e_pass_percent
+        operator: eq
+        value: 100
+    evidence:
+      - deletion E2E covering reauthentication, completion, and token revocation
+
+  - id: PRIVACY-02
+    rationale: "A versioned data-domain registry prevents new product tables from silently escaping the shared account export."
+    status: pending
+    approvedBy: []
+    approvedAt: null
+    evidenceRefs: []
+    category: privacy
+    title: Account data export covers every registered Tomverse data domain
+    blocking: true
+    owner: security-privacy
+    criteria:
+      - metric: registered_data_domains_in_unified_export_percent
+        operator: eq
+        value: 100
+    evidence:
+      - versioned data-domain registry and export coverage test
+
+  - id: STORE-01
+    rationale: "A consumption-only app still needs a complete purchase-free Free-tier experience for new users and store reviewers."
+    status: pending
+    approvedBy: []
+    approvedAt: null
+    evidenceRefs: []
+    category: store-review
+    title: A new Free account can complete a useful flow without purchase
+    blocking: true
+    owner: mobile-release
+    criteria:
+      - metric: purchase_free_signup_chat_response_and_history_save_e2e_pass_percent
+        operator: eq
+        value: 100
+    evidence:
+      - clean-device review-path E2E with abuse limits enabled
+
+  - id: STORE-02
+    rationale: "Submission review can last for weeks, so review credentials require continuous synthetic verification and state-linked expiry management."
+    status: pending
+    approvedBy: []
+    approvedAt: null
+    evidenceRefs: []
+    category: store-review
+    title: Review credentials remain usable throughout an active submission
+    blocking: true
+    owner: mobile-release
+    criteria:
+      - metric: daily_review_credential_synthetic_login_success_percent
+        operator: eq
+        value: 100
+        measurementWindow: active-submission
+    evidence:
+      - daily synthetic-login history with alert acknowledgements
+      - credential state and rolling-expiration audit
+
+  - id: MANIFEST-01
+    rationale: "Bounded delta depth preserves deterministic reconstruction cost and prevents long conversations from creating unbounded chains."
+    status: pending
+    approvedBy: []
+    approvedAt: null
+    evidenceRefs: []
+    category: context-manifest
+    title: Delta manifests cannot form unbounded reconstruction chains
+    blocking: true
+    owner: backend-ai
+    criteria:
+      - metric: context_manifest_delta_depth_max
+        operator: lte
+        value: 20
+    evidence:
+      - reconstruction and checkpoint invariant test
+
+  - id: MANIFEST-02
+    rationale: "Audit detail must not override deletion rights or create indefinite retention growth."
+    status: pending
+    approvedBy: []
+    approvedAt: null
+    evidenceRefs: []
+    category: context-manifest
+    title: Manifest retention honors deletion first and compacts aged detail
+    blocking: true
+    owner: security-privacy
+    criteria:
+      - metric: deletion_and_aged_manifest_compaction_job_success_percent
+        operator: eq
+        value: 100
+      - metric: detailed_manifest_retention_days_max
+        operator: lte
+        value: 90
+    evidence:
+      - deletion propagation and retention-job audit
+
+  - id: PUSH-01
+    rationale: "Push infrastructure adds native and backend lifecycle cost and remains out of scope until a concrete approved use case exists."
+    status: pending
+    approvedBy: []
+    approvedAt: null
+    evidenceRefs: []
+    category: scope-control
+    title: Push-notification infrastructure remains out of v1 until a use case is approved
+    blocking: true
+    owner: product-qa
+    criteria:
+      - metric: unapproved_push_infrastructure_components_in_v1
+        operator: eq
+        value: 0
+    evidence:
+      - release bill of materials and scope review

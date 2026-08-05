@@ -524,6 +524,18 @@ const checks = [
     },
   },
   {
+    // A run whose worker died stays `running` with a lease nobody holds, and
+    // the claim is fenced on `leaseGeneration` -- so the lease does not lapse
+    // into availability on its own. Only this sweep makes the run claimable
+    // again, and it lived unreferenced outside the tests until it was wired
+    // here (import/memory policy §11, §11.1).
+    name: "Memory extraction leases are reclaimed by maintenance cleanup",
+    file: "lib/maintenance.ts",
+    test: (source) =>
+      source.includes("reconcileExpiredMemoryExtractionRuns") &&
+      source.includes("memoryExtractionRuns"),
+  },
+  {
     name: "Provider error events expire through maintenance cleanup",
     file: "lib/maintenance.ts",
     test: (source) =>
@@ -771,6 +783,73 @@ const checks = [
       source.includes("verification.thinkingCapMicroUsd !== null") &&
       source.includes('model.disabledReason === "operational_hold"') &&
       source.includes("marked operational_hold without a price verification date"),
+  },
+  {
+    name: "The thumbnail repair cannot destroy the original it derives from",
+    file: "lib/imageAssetLifecycle.ts",
+    test: (source) =>
+      // readR2Object deletes an object whose metadata does not match what the
+      // caller claimed -- correct for an untrusted upload, catastrophic for a
+      // generated original the user paid for and cannot regenerate. The repair
+      // reads through the non-destructive path, and only ever writes the
+      // thumbnail key.
+      source.includes("readOwnR2ObjectBytes(originalKey") &&
+      !source.includes("readR2Object(") &&
+      source.includes('writeR2Object(thumbKey, thumbBytes, "image/webp")') &&
+      // Bounded, so one corrupt object cannot pull the maintenance process
+      // over, and bounded in attempts so it stops rather than re-downloading
+      // forever.
+      source.includes("IMAGE_ORIGINAL_MAX_READ_BYTES") &&
+      source.includes("thumbnailRetryCount: { lt: IMAGE_THUMBNAIL_MAX_RETRIES }"),
+  },
+  {
+    name: "A non-destructive R2 read exists and stays non-destructive",
+    file: "lib/r2.ts",
+    test: (source) => {
+      const start = source.indexOf("export async function readOwnR2ObjectBytes");
+      if (start === -1) return false;
+      const end = source.indexOf("export async function writeR2Object", start);
+      const body = source.slice(start, end === -1 ? undefined : end);
+      // The one thing this function must never grow: the delete-on-mismatch
+      // branch that makes readR2Object right for uploads and wrong here.
+      return (
+        !body.includes("deleteInvalidObject") &&
+        !body.includes("DeleteObjectCommand") &&
+        body.includes("options.maxBytes")
+      );
+    },
+  },
+  {
+    name: "Stale image recovery can reclaim a stranded settlement",
+    file: "lib/imageGenerationService.ts",
+    test: (source) =>
+      // `settling` is claimed OUTSIDE the settlement transaction, so any
+      // rollback -- a deadlock, a dropped connection, a redeploy -- leaves the
+      // row there with the user's credits still reserved. While the recovery
+      // sweep and the failure path both matched only pending/processing, that
+      // state was unreachable by anything: no refund, no terminal status, and
+      // a client that polls it forever. Both halves of the fix are pinned
+      // because either one alone leaves a door open.
+      source.includes('{ status: "settling", updatedAt: { lt: settlingStaleBefore } }') &&
+      source.includes("reclaimSettling: settlingStaleBefore") &&
+      source.includes('reclaimSettling: "owned"') &&
+      // The reclaim stays bounded: an unconditional one would race a live
+      // settler, and only the caller that already owns the claim may skip the
+      // wait.
+      source.includes('input.reclaimSettling === "owned"') &&
+      source.includes("updatedAt: { lt: input.reclaimSettling }"),
+  },
+  {
+    name: "Image settlement claims the reservation before it moves any credit",
+    file: "lib/imageGenerationService.ts",
+    test: (source) =>
+      // What makes reclaiming a settling row safe at all: the money moves
+      // behind the reservation's own reserved -> settling claim, inside the
+      // transaction that also finishes the generation. A settlement that
+      // already committed refuses the second attempt instead of paying twice.
+      source.includes('where: { generationId, status: "reserved" },') &&
+      source.includes('data: { status: "settling" },') &&
+      source.includes("if (reservationClaim.count === 0) return"),
   },
   {
     name: "Image provider budgets are per provider and cover every active one",

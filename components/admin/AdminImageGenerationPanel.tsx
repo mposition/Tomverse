@@ -78,7 +78,10 @@ type AdminImageGenerationReport = {
   invariants: {
     emptyImageConversations: number;
     staleGenerations: number;
+    strandedSettlements: number;
     cleanupBacklog: number;
+    thumbnailBacklog: number;
+    thumbnailsExhausted: number;
   };
 };
 
@@ -140,9 +143,13 @@ export function AdminImageGenerationPanel() {
     queueMicrotask(() => void load());
   }, [load]);
 
+  // A queued thumbnail is not an issue -- the sweep is going to take it, and
+  // the card renders the original meanwhile. One that ran out of retries is:
+  // nothing will try again, so it stays that way until someone looks.
   const invariantIssues = report
     ? report.invariants.emptyImageConversations +
-      report.invariants.staleGenerations
+      report.invariants.staleGenerations +
+      report.invariants.thumbnailsExhausted
     : 0;
 
   return (
@@ -228,7 +235,7 @@ export function AdminImageGenerationPanel() {
             <Stat
               label="Invariants"
               value={invariantIssues === 0 ? "clean" : `${invariantIssues} issue(s)`}
-              detail={`${report.invariants.emptyImageConversations} empty conversations · ${report.invariants.staleGenerations} stale · ${report.invariants.cleanupBacklog} cleanup backlog`}
+              detail={`${report.invariants.emptyImageConversations} empty conversations · ${report.invariants.staleGenerations} stale (${report.invariants.strandedSettlements} stranded mid-settlement) · ${report.invariants.cleanupBacklog} cleanup backlog · ${report.invariants.thumbnailBacklog} thumbnails queued (${report.invariants.thumbnailsExhausted} exhausted)`}
             />
           </div>
 
