@@ -289,6 +289,9 @@ export function ImageGenerationWorkspace({
     };
   }, [conversationId]);
 
+  // Single-card recovery, not polling: re-reads one generation to mint fresh
+  // signed asset URLs after the ~5 minute TTL expires. Polling goes through
+  // refreshGroup below.
   const refreshGeneration = useCallback(
     async (generationId: string) => {
       try {
@@ -307,25 +310,58 @@ export function ImageGenerationWorkspace({
     [mergeGeneration]
   );
 
-  // Poll every active generation until it settles, then refresh the credit
-  // displays once. 45 minutes is the server's own stale ceiling; polling
-  // simply continues until the reconciliation sweep fails the row.
+  // One request per unsettled comparison group, not one per unsettled model
+  // (policy §11). Polling per generation made watching a comparison cost
+  // proportionally more the more models were being compared -- and because a
+  // refused poll reads here as "no update", exhausting the status rate limit
+  // would have shown up as a workspace that silently stopped refreshing.
+  const refreshGroup = useCallback(
+    async (groupId: string) => {
+      try {
+        const response = await fetch(`/api/images/groups/${groupId}`, {
+          cache: "no-store",
+        });
+        if (!response.ok) return null;
+        const payload = (await response.json()) as {
+          status: string;
+          generations: GenerationView[];
+        };
+        for (const generation of payload.generations) mergeGeneration(generation);
+        return payload;
+      } catch {
+        return null;
+      }
+    },
+    [mergeGeneration]
+  );
+
+  // Polling continues until every target settles; the server's own stale sweep
+  // is what eventually fails a generation whose worker died.
   useEffect(() => {
     if (!hasActiveGeneration) return;
     const timer = setInterval(async () => {
       setPollClockMs(Date.now());
-      const active = generations.filter(
-        (generation) => !isTerminal(generation.status)
+      const activeGroupIds = [
+        ...new Set(
+          generations
+            .filter((generation) => !isTerminal(generation.status))
+            // A group id is always present on a server row; the fallback
+            // covers the optimistic card written before the POST answered.
+            .map((generation) => generation.groupId ?? generation.generationId)
+        ),
+      ];
+      const results = await Promise.all(
+        activeGroupIds.map((groupId) => refreshGroup(groupId))
       );
-      for (const generation of active) {
-        const updated = await refreshGeneration(generation.generationId);
-        if (updated && isTerminal(updated.status)) {
-          notifyUserUsageChanged();
-        }
+      // One credit refresh per tick that settled something, not one per
+      // target: the balance is a single number and N models finishing
+      // together do not make it N different numbers.
+      if (results.some((result) => result && result.status !== "in_progress")) {
+        notifyUserUsageChanged();
       }
     }, POLL_INTERVAL_MS);
     return () => clearInterval(timer);
-  }, [generations, hasActiveGeneration, refreshGeneration]);
+  }, [generations, hasActiveGeneration, refreshGroup]);
 
   // Keep the newest card in view as the timeline grows or a result lands.
   const lastTimelineKey = `${generations.length}:${generations

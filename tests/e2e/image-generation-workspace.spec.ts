@@ -56,6 +56,8 @@ type ImageApiState = {
   nextOutcome: "succeeded" | "moderation_failed";
   conversationId: string;
   sequence: number;
+  /** How the timeline read state, split by endpoint (policy §11). */
+  reads: { groups: number; generations: number };
 };
 
 const succeededAssets = () => [
@@ -95,6 +97,7 @@ const installImageGenerationApi = async (page: Page): Promise<ImageApiState> => 
     nextOutcome: "succeeded",
     conversationId: "qa-image-conversation",
     sequence: 0,
+    reads: { groups: 0, generations: 0 },
   };
 
   await page.route("**/e2e-assets/**", (route) =>
@@ -161,9 +164,56 @@ const installImageGenerationApi = async (page: Page): Promise<ImageApiState> => 
     );
   });
 
-  // The 5s poll: the first read after creation resolves the row to the
+  // The 5s poll: one request per comparison group, whatever the model count
+  // (policy §11). The first read after creation resolves each row to the
   // configured outcome, exactly like the worker settling between two polls.
+  await page.route("**/api/images/groups/*", async (route) => {
+    state.reads.groups += 1;
+    const groupId = new URL(route.request().url()).pathname.split("/").pop();
+    const attempts = state.generations.filter((row) => row.groupId === groupId);
+    if (attempts.length === 0) {
+      return route.fulfill(
+        json(
+          {
+            error: "Image generation group not found.",
+            code: "IMAGE_GENERATION_GROUP_NOT_FOUND",
+          },
+          404
+        )
+      );
+    }
+    const generations = attempts.map((row) => resolveGeneration(state, row));
+    const live = generations.some(
+      (row) => row.status !== "succeeded" && row.status !== "failed"
+    );
+    const succeeded = generations.filter((row) => row.status === "succeeded");
+    await route.fulfill(
+      json({
+        groupId,
+        conversationId: state.conversationId,
+        createdAt: generations[0].createdAt,
+        status: live
+          ? "in_progress"
+          : succeeded.length === generations.length
+            ? "succeeded"
+            : succeeded.length === 0
+              ? "failed"
+              : "partial_success",
+        targets: generations.map((row) => ({
+          targetId: row.targetId,
+          provider: row.provider ?? "openai",
+          modelId: row.modelId ?? "gpt-image-2",
+          currentGenerationId: row.generationId,
+          attemptCount: row.attemptNumber ?? 1,
+        })),
+        generations,
+      })
+    );
+  });
+
+  // Single-card recovery: re-read one generation for fresh signed asset URLs.
   await page.route("**/api/images/generations/*", async (route) => {
+    state.reads.generations += 1;
     const id = new URL(route.request().url()).pathname.split("/").pop();
     const generation = state.generations.find((row) => row.generationId === id);
     if (!generation) {
@@ -465,6 +515,30 @@ test("the model picker drives the request and the quoted total", async ({ page }
   await expect(page.getByTestId("image-generation-progress").first()).toBeVisible();
   expect(api.createBodies).toHaveLength(1);
   expect(api.createBodies[0].modelIds).toEqual(["gpt-image-2"]);
+});
+
+test("the timeline polls the group, never one request per model", async ({ page }) => {
+  // Policy §11: one poll per comparison group. Per-generation polling makes the
+  // read cost of a comparison scale with the number of models compared -- and
+  // because the client reads a refused poll as "no update", spending the status
+  // rate limit shows up as a workspace that silently stops refreshing.
+  await enableImageGenerationFlag(page);
+  await mockAuthenticatedApi(page);
+  await mockUserUsage(page, { plan: "Pro" });
+  const api = await installImageGenerationApi(page);
+  await page.goto("/chat");
+
+  await openNewImageEntry(page);
+  await page.getByTestId("image-generation-prompt").fill("a red apple");
+  await page.getByTestId("image-generation-submit").click();
+
+  await expect(page.getByTestId("image-generation-result")).toBeVisible({
+    timeout: 15_000,
+  });
+  expect(api.reads.groups).toBeGreaterThan(0);
+  // The by-id route is single-card recovery for expired asset URLs, not a
+  // polling path: a settled run must not have used it at all.
+  expect(api.reads.generations).toBe(0);
 });
 
 test("a failed model retries in place while the group keeps its shape", async ({ page }) => {
