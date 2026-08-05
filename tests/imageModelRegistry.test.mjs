@@ -36,19 +36,16 @@ test("the registry ships GPT Image 2 enabled and Nano Banana 2 on a verification
   assert.deepEqual(google?.prices, []);
 });
 
-test("a verified price does not by itself make a model runnable", () => {
-  // xAI's price question is settled -- flat per-image, no token charges -- so
-  // the hold is operational, not a pricing unknown. It must still be
-  // unselectable and unpriceable while the adapter, the budget and the sale
-  // credits are missing.
+test("Grok Imagine ships enabled at the approved price, 1K square only", () => {
+  // Enabled 2026-08-05, after the operational hold was cleared in order: the
+  // adapter, then the provider budget deployed ahead of this code. The price
+  // question was already settled -- flat per-image, no token charges -- which
+  // is why the approved credits were recorded while it was still held rather
+  // than typed in by hand on launch day.
   const grok = getImageModel("grok-imagine-image-quality-20260403");
-  assert.equal(grok?.disabledReason, "operational_hold");
+  assert.equal(grok?.disabledReason, null);
   assert.equal(grok?.priceVerification.verifiedAt, "2026-08-04");
   assert.equal(grok?.priceVerification.thinkingCapMicroUsd, 0);
-  // An operational hold is the one state that may carry an approved price:
-  // the pricing question is settled, so keeping the approved credits here --
-  // where check:image-pricing validates them against the floor on every run --
-  // beats re-entering them by hand on launch day.
   assert.deepEqual(grok?.prices, [
     {
       quality: "medium",
@@ -60,19 +57,44 @@ test("a verified price does not by itself make a model runnable", () => {
   assert.ok(
     grok.prices[0].credits >= minimumCreditsForImageOption(grok, grok.prices[0])
   );
-  // Recorded is not sellable: the price lookup every request goes through
-  // still refuses a disabled model outright.
-  assert.equal(
+  assert.deepEqual(
     getImageModelPrice("grok-imagine-image-quality-20260403", "medium", "1024x1024"),
-    null
+    grok.prices[0]
   );
-  assert.ok(!listEnabledImageModels().some((model) => model.id === grok?.id));
+
+  // 2K is approved at 100 credits and deliberately absent: it needs the size
+  // system to grow a resolution tier first. Every other option prices to null,
+  // so the composer disables submission rather than quoting a guess.
+  assert.deepEqual(grok.sizes, ["1024x1024"]);
+  assert.deepEqual(grok.qualities, ["medium"]);
+  for (const [quality, size] of [
+    ["low", "1024x1024"],
+    ["high", "1024x1024"],
+    ["medium", "1536x1024"],
+    ["medium", "1024x1536"],
+  ]) {
+    assert.equal(
+      getImageModelPrice("grok-imagine-image-quality-20260403", quality, size),
+      null,
+      `${quality} ${size}`
+    );
+  }
+
+  // Verified absent, not unread: no watermark, C2PA or metadata guarantee
+  // anywhere in xAI's documentation. Claiming provenance a file may not carry
+  // would be worse than claiming none.
+  assert.deepEqual(grok.provenance, []);
 });
 
 test("a disabled model is invisible to every selection path", () => {
   const enabled = listEnabledImageModels().map((model) => model.id);
-  assert.deepEqual(enabled, ["gpt-image-2"]);
-  assert.deepEqual(listActiveImageProviders(), ["openai"]);
+  assert.deepEqual(enabled, [
+    "gpt-image-2",
+    "grok-imagine-image-quality-20260403",
+  ]);
+  // Two providers now, which is what makes the comparison cross-provider. The
+  // three Google models are registered and still contribute no provider here.
+  assert.deepEqual(listActiveImageProviders(), ["openai", "xai"]);
   // Fail-closed price lookup: the model exists, but pricing it is refused.
   assert.equal(
     getImageModelPrice("gemini-3.1-flash-image", "medium", "1024x1024"),

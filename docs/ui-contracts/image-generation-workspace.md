@@ -250,6 +250,8 @@ Verified for **both** desktop and mobile projects:
 | 12 | picked from the image tab | workspace opens seeded with that model |
 | 13 | composer draft carry-over | text carried; cancel restores it exactly |
 | 14 | multi-model group polling | one `/api/images/groups/*` request per tick, not one per model |
+| 15 | two providers in one group | both prices quoted, total is their sum, one POST carrying both ids |
+| 16 | option one selected model cannot price | submission disabled; re-enabled when the option changes back |
 
 ## Automated regression contract
 

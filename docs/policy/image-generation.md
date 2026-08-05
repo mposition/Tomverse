@@ -18,9 +18,10 @@ Google 모델 활성화는 공식 가격·thinking 상한의 수동 검증 통�
   보내고 결과를 나란히 비교한다(§11). 단일 모델 요청은 1-모델 그룹이라는
   특수한 경우일 뿐 별도 경로가 아니다.
 - 모델은 `AVAILABLE_MODELS`·`ModelRegistry` 밖의 **이미지 모델 registry**
-  (§12)에서만 관리한다. 등록 현황(2026-08-04): `gpt-image-2`(활성) 1개,
-  `gemini-3.1-flash-image`·`grok-imagine-image-quality-20260403`·
-  `gemini-3.1-flash-lite-image`·`gemini-3-pro-image`(모두 등록-비활성) 4개.
+  (§12)에서만 관리한다. 등록 현황(2026-08-05): `gpt-image-2`·
+  `grok-imagine-image-quality-20260403`(활성) 2개,
+  `gemini-3.1-flash-image`·`gemini-3.1-flash-lite-image`·
+  `gemini-3-pro-image`(등록-비활성) 3개.
   미등록 평가 후보는 §12.1에 있다. 비교 그룹의 모델 수 상한은
   `IMAGE_GROUP_MAX_MODELS`(출시 기본 2)이며 UI·데이터 모델에 상한값을
   하드코딩하지 않는다.
@@ -395,7 +396,7 @@ gate 없이 노출되는 배포 창은 금지된다. UI 비노출은 보안 경�
 | 후보 | 상태 | 검증된 이미지 출력가 | 남은 조건 |
 |---|---|---|---|
 | `gpt-image-2` | **활성** | 표 §3 | — |
-| `grok-imagine-image-quality-20260403` | 등록-비활성 (`operational_hold`) | 1K $0.05 / 2K $0.07 · **가격 검증·판매가 승인 완료** | xAI adapter, `IMAGE_PROVIDER_XAI_COST_*`, 계정 가시성 확인. **1K 정사각만 먼저 출시**하고 2K는 크기 체계 확장 후 |
+| `grok-imagine-image-quality-20260403` | **활성 (2026-08-05)** | 1K $0.05 · 판매가 75크레딧 | 1K 정사각만. 2K(승인 100크레딧)는 크기 체계 확장 후 |
 | `gemini-3.1-flash-image` | 등록-비활성 (`worst_case_cost_unbounded`) | 0.5K $0.045 / 1K $0.067 / 2K $0.101 / 4K $0.151 | **thinking 상한** — 아래 참조 |
 | `gemini-3.1-flash-lite-image` | 등록-비활성 (`worst_case_cost_unbounded`) | 1K $0.0336 (1K 전용) | 동일. Draft 후보이며 두 번째 비교 자리를 Google로 채우지 않는다 |
 | `gemini-3-pro-image` | 등록-비활성 (`worst_case_cost_unbounded`) | 1K·2K $0.134 / 4K $0.24 | 동일 + 제품 판단 보류(`gpt-image-2` Final과 중복) |
@@ -537,6 +538,21 @@ dispatch 전에 거부하므로 실행 경로가 없고, 위 실측 자체가 �
 상태에서도 바닥값을 검사한다. 승인 수치를 주석에 두었다가 출시일에 손으로
 옮기는 것이 더 위험하다. 나머지 두 사유(`price_unverified`,
 `worst_case_cost_unbounded`)는 여전히 `prices`가 비어 있어야 한다.
+
+Grok 활성화(2026-08-05)가 이 규칙의 결과다: hold 해제는 `disabledReason`
+한 줄 변경이었고 가격을 다시 입력하지 않았다. 현재 `operational_hold`를 쓰는
+모델은 없지만 사유와 그 검사는 그대로 유지한다.
+
+#### xAI 활성화 순서 (2026-08-05, 실행 기록)
+
+1. adapter(`lib/xaiImageRequest.ts`) 구현 — 활성화와 별개 결정.
+2. **환경변수를 코드보다 먼저 배포**: Railway `Tomverse` 서비스,
+   production `IMAGE_PROVIDER_XAI_COST_MICROUSD_PER_DAY=50000000` /
+   `_PER_MONTH=500000000`, staging 둘 다 floor `10800000`.
+   `disabledReason`이 `null`이 되는 순간 xAI가 활성 provider가 되므로,
+   flag가 켜진 환경에 예산이 없으면 `/api/ready`가 그때부터 실패한다.
+3. registry `disabledReason: null` 배포. production flag는 OFF 유지(§15).
+4. staging flag ON → 1K 정사각 1회 생성 + gpt-image-2와 2-모델 비교 1회.
 
 #### 등록-비활성은 사용자에게 보인다
 
