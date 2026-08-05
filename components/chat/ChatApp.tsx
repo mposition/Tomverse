@@ -20,7 +20,10 @@ import {
   isComposingKeydown,
 } from "@/lib/chatKeyboardPolicy";
 import type { WebSearchMode } from "@/lib/appDefaults";
-import { splitSearchMetadataTrailer } from "@/lib/webSearchStreamTrailer";
+import {
+  parseChatStreamTrailer,
+  splitSearchMetadataTrailer,
+} from "@/lib/webSearchStreamTrailer";
 import type { WebSearchExecution } from "@/lib/webSearchExecutionNormalizer";
 import { guestMessagesStorageKey } from "@/lib/guestConversationStorage";
 import {
@@ -800,14 +803,15 @@ function ChatAppComponent({
       }
 
       const { searchMetadataJson } = splitSearchMetadataTrailer(rawStreamText);
-      let searchMetadata: WebSearchExecution | null = null;
-      if (searchMetadataJson) {
-        try {
-          searchMetadata = JSON.parse(searchMetadataJson) as WebSearchExecution;
-        } catch {
-          searchMetadata = null;
-        }
-      }
+      const trailer = parseChatStreamTrailer(searchMetadataJson);
+      const searchMetadata =
+        (trailer?.searchMetadata as WebSearchExecution | null | undefined) ??
+        null;
+      // A `length` finish reason means the provider stopped at its output
+      // ceiling: the text is real and stays exactly as streamed, but the
+      // answer must not read as finished. No follow-up request is sent from
+      // here -- continuing costs credits and is the user's decision.
+      const completionStatus = trailer?.completion?.status ?? "normal";
 
 	  if (!assistantText.trim()) {
         if (requestTraceId && typeof window !== "undefined") {
@@ -839,9 +843,13 @@ function ChatAppComponent({
           }
         );
       } else {
-        setAssistantMessage(assistantMessageId, assistantText, "normal", undefined, {
-          searchMetadata,
-        });
+        setAssistantMessage(
+          assistantMessageId,
+          assistantText,
+          completionStatus,
+          undefined,
+          { searchMetadata }
+        );
         onResponseComplete?.(analyticsPromptId, modelId, assistantText, searchMetadata);
       }
     } catch (error: unknown) {
