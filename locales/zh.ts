@@ -228,6 +228,8 @@ export const zh = {
         deepResearchTakingLonger: "耗时比平时更长。深度研究报告可能需要几分钟才能完成。",
         responseGenerating: "正在生成回复。",
         responseComplete: "回复已完成。",
+        responseIncomplete: "回复因输出长度上限而中断。",
+        responseIncompleteNotice: "回复因输出长度上限而中断。你可以通过追问继续。",
         responseFailed: "请求失败。",
         traceId: "追踪 ID",
         retry: "重试",

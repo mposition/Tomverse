@@ -219,6 +219,8 @@ export const fr = {
         responseCancelled: "La génération de la réponse a été arrêtée.",
         responseGenerating: "Génération d'une réponse.",
         responseComplete: "Réponse terminée.",
+        responseIncomplete: "La réponse s’est arrêtée à la limite de longueur de sortie.",
+        responseIncompleteNotice: "La réponse a été interrompue par la limite de longueur de sortie. Vous pouvez poursuivre avec une question complémentaire.",
         responseFailed: "La requête a échoué.",
         traceId: "ID de suivi",
         retry: "Réessayer",

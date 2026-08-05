@@ -210,6 +210,8 @@ export const en = {
         stop: "Stop",
         responseGenerating: "Generating a response.",
         responseComplete: "Response complete.",
+        responseIncomplete: "The response stopped at the output length limit.",
+        responseIncompleteNotice: "The response was cut off by the output length limit. You can ask a follow-up question to continue.",
         responseFailed: "The request failed.",
         traceId: "Trace ID",
         retry: "Retry",

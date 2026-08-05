@@ -218,3 +218,93 @@ test("dangerous citation URLs never survive normalization", () => {
     ["https://safe.example.com"]
   );
 });
+
+test("Perplexity's own top-level citations are what the source list is built from", () => {
+  // The AI SDK content array is empty for Perplexity: its sources arrive as
+  // top-level `citations`/`search_results` response fields, which the
+  // OpenAI-compatible chat adapter never turns into `source` parts. Without
+  // providerCitations this list is empty while the answer still says "[1]".
+  const result = normalizeWebSearchExecution({
+    capability: perplexityCapability,
+    searchRequested: false,
+    provider: "perplexity",
+    content: [],
+    providerCitations: [
+      { url: "https://example.com/one", title: "One", referenceNumber: 1 },
+      { url: "https://example.com/four", title: "Four", referenceNumber: 4 },
+    ],
+  });
+  assert.equal(result.executed, true);
+  assert.deepEqual(
+    result.citations.map((citation) => [citation.referenceNumber, citation.url]),
+    [
+      [1, "https://example.com/one"],
+      [4, "https://example.com/four"],
+    ]
+  );
+  assert.equal(result.citations[0].sourceProvider, "perplexity");
+});
+
+test("provider citations keep their numbers when source parts repeat them", () => {
+  const result = normalizeWebSearchExecution({
+    capability: perplexityCapability,
+    searchRequested: true,
+    provider: "perplexity",
+    content: [
+      // A duplicate of the numbered citation, plus one the top-level field
+      // did not carry. Neither may renumber or displace the numbered rows.
+      { type: "source", sourceType: "url", url: "https://example.com/one" },
+      { type: "source", sourceType: "url", url: "https://example.com/extra" },
+    ],
+    providerCitations: [
+      { url: "https://example.com/one", title: "One", referenceNumber: 1 },
+    ],
+  });
+  assert.deepEqual(
+    result.citations.map((citation) => [citation.referenceNumber, citation.url]),
+    [
+      [1, "https://example.com/one"],
+      [undefined, "https://example.com/extra"],
+    ]
+  );
+});
+
+test("unsafe provider citation URLs are dropped without renumbering the rest", () => {
+  const result = normalizeWebSearchExecution({
+    capability: perplexityCapability,
+    searchRequested: true,
+    provider: "perplexity",
+    content: [],
+    providerCitations: [
+      { url: "javascript:alert(1)", referenceNumber: 1 },
+      { url: "https://safe.example.com", referenceNumber: 2 },
+    ],
+  });
+  assert.deepEqual(
+    result.citations.map((citation) => [citation.referenceNumber, citation.url]),
+    [[2, "https://safe.example.com"]]
+  );
+});
+
+test("providers other than Perplexity are unchanged by the new field", () => {
+  const openai = normalizeWebSearchExecution({
+    capability: openaiCapability,
+    searchRequested: true,
+    provider: "openai",
+    toolName: "web_search",
+    content: [
+      { type: "tool-result", toolName: "web_search" },
+      {
+        type: "source",
+        sourceType: "url",
+        url: "https://example.com/result",
+        title: "Example result",
+      },
+    ],
+  });
+  assert.equal(openai.citations.length, 1);
+  // Inline-annotation providers publish no citation order, so no number is
+  // invented for them.
+  assert.equal(openai.citations[0].referenceNumber, undefined);
+  assert.deepEqual(openai.costMetadata, { searchCostMicroUsd: 10_000 });
+});
