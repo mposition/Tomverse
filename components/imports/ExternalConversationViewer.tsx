@@ -6,6 +6,10 @@ import { useCallback, useEffect, useState } from "react";
 import { AlertTriangle, ArrowLeft, Loader2, Trash2 } from "lucide-react";
 import { useLanguage } from "@/components/LanguageProvider";
 import {
+    SnapshotLockPanel,
+    SnapshotUnlockGate,
+} from "@/components/imports/ConversationLockControls";
+import {
     SourceDeletionNotice,
     type SourceDeletionImpactView,
 } from "@/components/imports/SourceDeletionNotice";
@@ -50,6 +54,7 @@ type ViewerConversation = {
     sourceCreatedAt: string | null;
     sourceUpdatedAt: string | null;
     importedAt: string;
+    locked: boolean;
     messageTotal: number;
     messages: ViewerMessage[];
 };
@@ -59,6 +64,10 @@ type ViewerState =
     | { kind: "ready"; conversation: ViewerConversation; loadingMore: boolean }
     | { kind: "unauthenticated" }
     | { kind: "disabled" }
+    // A lock is set and this browser has no grant (§7). Distinct from
+    // `not_found` on purpose: the owner is being asked for a password, not
+    // told the conversation is gone.
+    | { kind: "locked" }
     | { kind: "not_found" }
     | { kind: "error" };
 
@@ -88,6 +97,7 @@ export function ExternalConversationViewer({
             | { kind: "ok"; conversation: ViewerConversation }
             | { kind: "unauthenticated" }
             | { kind: "disabled" }
+            | { kind: "locked" }
             | { kind: "not_found" }
             | { kind: "error" }
         > => {
@@ -99,6 +109,7 @@ export function ExternalConversationViewer({
                 if (response.status === 401) return { kind: "unauthenticated" };
                 if (response.status === 403) return { kind: "disabled" };
                 if (response.status === 404) return { kind: "not_found" };
+                if (response.status === 423) return { kind: "locked" };
                 if (!response.ok) return { kind: "error" };
                 const conversation = (await response.json()) as ViewerConversation & {
                     memoryImpact?: SourceDeletionImpactView;
@@ -113,6 +124,19 @@ export function ExternalConversationViewer({
         },
         [conversationId]
     );
+
+    const loadFirstPage = useCallback(async () => {
+        const result = await fetchPage(0);
+        if (result.kind === "ok") {
+            setState({
+                kind: "ready",
+                conversation: result.conversation,
+                loadingMore: false,
+            });
+        } else {
+            setState({ kind: result.kind });
+        }
+    }, [fetchPage]);
 
     useEffect(() => {
         let cancelled = false;
@@ -219,6 +243,19 @@ export function ExternalConversationViewer({
                 </section>
             )}
 
+            {state.kind === "locked" && (
+                <SnapshotUnlockGate
+                    conversationId={conversationId}
+                    // Re-reads rather than assuming: the grant is a cookie the
+                    // server issued, so the server is what decides whether it
+                    // opens anything.
+                    onUnlocked={() => {
+                        setState({ kind: "loading" });
+                        void loadFirstPage();
+                    }}
+                />
+            )}
+
             {(state.kind === "not_found" || state.kind === "error") && (
                 <section className={sectionClass}>
                     <div className="flex items-start gap-3">
@@ -319,6 +356,18 @@ export function ExternalConversationViewer({
                             {t("externalImport.loadMore")}
                         </button>
                     )}
+
+                    <SnapshotLockPanel
+                        conversationId={conversationId}
+                        locked={state.conversation.locked}
+                        // Locking suspends memories and unlocking restores
+                        // them, so the page is re-read rather than patched:
+                        // the server's answer is the only correct one.
+                        onChanged={() => {
+                            setState({ kind: "loading" });
+                            void loadFirstPage();
+                        }}
+                    />
 
                     <section className="mt-6 rounded-2xl border border-red-200 bg-red-50 p-4 dark:border-red-950/70 dark:bg-red-950/20">
                         <p className="text-sm leading-6 text-red-700/90 dark:text-red-200/90">
