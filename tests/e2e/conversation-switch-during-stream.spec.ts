@@ -97,7 +97,7 @@ test.describe("UX-024: switching conversations while a response streams", () => 
     await expect(page.getByText(OTHER_ANSWER)).toBeVisible();
   });
 
-  test("the switch is allowed mid-stream, and the stream does not follow", async ({ page }) => {
+  test("the switch is allowed mid-stream, and the stream does not follow", { tag: "@review-parity" }, async ({ page }) => {
     await openTwoConversationWorkspace(page);
 
     await installChatModelStub(page, {
@@ -144,7 +144,7 @@ test.describe("UX-024: switching conversations while a response streams", () => 
     );
   });
 
-  test("the composer is released once the abandoned stream finishes", async ({ page }) => {
+  test("the composer is released once the abandoned stream finishes", { tag: "@review-parity" }, async ({ page }) => {
     await openTwoConversationWorkspace(page);
 
     await installChatModelStub(page, {
