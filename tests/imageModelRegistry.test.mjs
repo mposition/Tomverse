@@ -159,3 +159,37 @@ test("model ids are unique and every id equals its API model id today", () => {
     assert.ok(model.priceVerification.sources.length > 0);
   }
 });
+
+test("a documented output limit is never mistaken for a proven cost cap", () => {
+  // The two facts look alike and are not. `maxOutputTokens` is what the model
+  // card publishes and what every request sends; `thinkingCapMicroUsd` is
+  // whether the worst case is provably finite. Google publishes the first and
+  // does not state the second -- the Interactions reference defines
+  // max_output_tokens and reports total_output_tokens and
+  // total_thought_tokens as separate counters, and nothing links them. So a
+  // model may carry an output limit and still be unbounded, and writing the
+  // limit in must not quietly enable anything.
+  const google = IMAGE_MODEL_REGISTRY.filter(
+    (model) => model.provider === "google"
+  );
+  assert.equal(google.length, 3);
+  for (const model of google) {
+    assert.ok(model.maxOutputTokens && model.maxOutputTokens > 0, model.id);
+    assert.equal(model.priceVerification.thinkingCapMicroUsd, null, model.id);
+    assert.equal(model.disabledReason, "worst_case_cost_unbounded", model.id);
+    assert.deepEqual(model.prices, [], model.id);
+  }
+  // Flash Lite's low ceiling is what makes it the first model worth measuring:
+  // a limit that never binds proves nothing about whether it is enforced.
+  assert.equal(getImageModel("gemini-3.1-flash-lite-image").maxOutputTokens, 4_096);
+});
+
+test("no model claims a thinking level nobody verified it accepts", () => {
+  // Support is per model. An unset field omits the parameter entirely, which
+  // is the fail-closed direction: a request that carries a parameter the model
+  // rejects fails in a way that reads like a provider outage.
+  for (const model of IMAGE_MODEL_REGISTRY) {
+    if (model.thinkingLevel === undefined) continue;
+    assert.ok(["low", "medium", "high"].includes(model.thinkingLevel), model.id);
+  }
+});

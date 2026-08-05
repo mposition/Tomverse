@@ -421,21 +421,79 @@ candidate의 한도로 설명된다. 즉 hidden thinking이 32,768 안에 포함
 따라서 Google 3종의 상태는 **가격 확인 완료 / 요청당 상한 조건부**로
 분리해 유지한다.
 
-#### 공급자에게 보낼 질문
+#### 2026-08-05 문서 재조사 — 상한은 **확인된 부재**다
 
-`sources`에 추가할 답변을 받기 위한 질문은 좁고 명확해야 한다. "thinking은
-output으로 과금된다"는 답변은 **불충분**하다 — 그것은 과금 방식이지 상한이
-아니다.
+공식 문서를 다시 훑은 결과, 이 쟁점은 "아직 안 읽은 페이지"가 아니라
+**읽었고 그 문장이 없다**로 확정한다.
 
-> For each of `gemini-3.1-flash-image`, `gemini-3.1-flash-lite-image`, and
-> `gemini-3-pro-image`, is the total number of billable hidden thinking tokens
-> in a single image-generation request hard-capped by the model's documented
-> `output_token_limit`, including image-only requests where thinking cannot be
-> disabled?
+- Interactions API reference는 `generation_config.max_output_tokens`를
+  "응답에 포함할 최대 토큰 수"로 정의하고, 사용량을
+  `usage.total_output_tokens`·`usage.total_thought_tokens`·`usage.total_tokens`
+  로 **분리 보고**한다. 둘의 합이 상한 이하라는 연결 문장은 없다.
+  (`https://ai.google.dev/api/interactions-api`)
+- thinking 문서도 비용을 output + thinking의 합으로 설명하고 두 사용량을
+  별도 필드로 보고할 뿐, `max_output_tokens`가 그 합을 제한한다고 명시하지
+  않는다. (`https://ai.google.dev/gemini-api/docs/thinking`)
+- 모델 카드의 출력 한도(Flash Image 32,768 / Flash Lite 4,096 /
+  Pro Image 32,768)는 **같은 미정의 수량에 대한 한도**이므로 연결을 대신
+  제공하지 못한다.
+- 포럼 답변·검색 요약·제품 책임자 전언은 §12의 공식 본문 요건을 충족하지
+  않으므로 근거에서 제외한다.
 
-API surface(Gemini Developer API)와 Standard tier를 함께 명시한다. 답변이
-"예"면 `thinkingCapMicroUsd`를 위 표대로 기록하고 `sources`에 답변을 추가한다.
-"아니오"거나 상한을 특정하지 못하면 Google 3종은 보류를 유지한다.
+> **판정**: 공식 페이지는 `max_output_tokens`와 thinking 사용량을 각각
+> 설명하지만 `total_output_tokens + total_thought_tokens`가 해당 상한 이하라고
+> 보장하지 않는다. 세 모델은 staging 실측 전까지
+> `worst_case_cost_unbounded`를 유지한다.
+
+#### 남은 증거는 산문이 아니라 과금 신호다 — staging 실측 계획
+
+`npm run measure:google-image-thinking-cap`이 이 절차를 수행한다. **매 실행이
+실제 유료 이미지 생성**이므로 `--i-accept-the-cost` 없이는 아무것도 보내지
+않고, §15의 eval 예산 승인이 선행돼야 한다.
+
+1. 모델별로 `1K`·`1:1`·image-only 요청을 실행한다.
+2. `max_output_tokens`를 **명시**한다.
+3. 지원 모델은 `thinking_level: "high"`로 thinking 발생 가능성을 높인다.
+4. 각 응답에서 `usage.total_output_tokens + usage.total_thought_tokens`를
+   계산한다.
+5. 그 값이 요청한 `max_output_tokens` 이하인지 확인한다.
+6. 복잡한 프롬프트 여러 개와 **둘 이상의 상한값**으로 반복한다.
+7. **낮은 상한에서 실제 제한 동작(`incomplete` 등)이 한 번 이상 나타나야
+   한다.** 항상 상한보다 한참 낮게 쓴 표본만으로는 상한 강제를 입증할 수
+   없다 — 스크립트는 이 경우를 `inconclusive_limit_never_bound`로 보고하며
+   통과로 세지 않는다. 카드 한도가 가장 낮은 `gemini-3.1-flash-lite-image`
+   (4,096)가 첫 측정 대상으로 가장 유용하다.
+8. 요청 JSON·원본 응답·모델 ID·응답 ID·실행 일시를 감사 증거로 보존한다.
+   API key와 사용자 프롬프트는 로그에 남기지 않는다(스크립트는 프롬프트를
+   sha256 앞자리로만 기록한다).
+
+**`usage.total_tokens`는 입력 토큰까지 포함하므로 `max_output_tokens`와 직접
+비교하지 않는다.** 코드에서는 `googleBillableOutputTokens()`가 비교 대상
+수량을 이름으로 고정한다.
+
+#### adapter는 선행하고 활성화는 하지 않는다
+
+Interactions API adapter(`lib/googleImageRequest.ts`,
+`imageProviderAdapter.ts`의 `generateWithGoogle`)는 **비활성 상태에서 선행
+구현**한다. `generateImageWithProvider`가 `disabledReason`이 있는 모델을
+dispatch 전에 거부하므로 실행 경로가 없고, 위 실측 자체가 이 코드를 통해야
+하기 때문이다. **adapter 구현은 활성화 승인도 판매가 확정도 아니다.**
+
+- 요청·응답 어휘는 **Interactions API 하나만** 쓴다. GenerateContent는 같은
+  요청을 다른 이름으로 표현하며(`generationConfig.maxOutputTokens`,
+  `candidates[].content.parts[].inlineData.data`,
+  `usageMetadata.thoughtsTokenCount`) `imageConfig`는 deprecated다. 두 어휘를
+  섞은 body는 그럴듯해 보이면서 틀린다 — security regression check가 강제한다.
+- 인증은 `x-goog-api-key`이며 OpenAI식 bearer token이 아니다.
+- **`model_output` step만 읽는다.** thinking 과정에서 중간 이미지가 나올 수
+  있고, 완성본 요금을 받으면서 습작을 저장하는 실패는 둘 다 그럴듯한 그림이라
+  아무도 눈치채지 못한다. 전달된 이미지가 1장이 아니면 fail-closed다.
+- `thinking_level`은 **모델별 profile**에 둔다. 지원 여부가 균일하지 않으므로
+  값이 없으면 필드를 아예 보내지 않는다.
+- `ImageModelProfile.maxOutputTokens`는 **비용 상한이 아니다.** 모델 카드가
+  공표한 수치이자 매 요청이 보내는 값일 뿐이고, 상한 성립 여부는 여전히
+  `priceVerification.thinkingCapMicroUsd`(현재 `null`)가 답한다. 이 둘을
+  혼동하지 않도록 unit test와 regression check가 함께 고정한다.
 
 #### 판매 크레딧은 별도 승인이다
 
