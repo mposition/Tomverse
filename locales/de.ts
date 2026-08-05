@@ -219,6 +219,8 @@ export const de = {
         responseCancelled: "Die Antwortgenerierung wurde gestoppt.",
         responseGenerating: "Antwort wird generiert.",
         responseComplete: "Antwort abgeschlossen.",
+        responseIncomplete: "Die Antwort wurde durch das Ausgabelängenlimit beendet.",
+        responseIncompleteNotice: "Die Antwort wurde durch das Ausgabelängenlimit abgeschnitten. Mit einer Anschlussfrage können Sie fortfahren.",
         responseFailed: "Die Anfrage ist fehlgeschlagen.",
         traceId: "Trace-ID",
         retry: "Erneut versuchen",

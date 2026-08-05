@@ -1,3 +1,9 @@
+import {
+  isChatCompletionStatus,
+  type ChatCompletionStatus,
+  type ChatIncompleteReason,
+} from "@/lib/chatCompletionStatus";
+
 // A provider-executed search tool call only resolves once the whole
 // streamText() turn settles (tool-result/source parts only exist in the
 // final AI SDK `content` array), so per-turn WebSearchExecution metadata
@@ -15,6 +21,67 @@ export const SEARCH_METADATA_TRAILER_MARKER = `${NUL}TOMVERSE_SEARCH_METADATA`;
 
 export function buildSearchMetadataTrailerChunk(execution: unknown): string {
   return `${SEARCH_METADATA_TRAILER_MARKER}${JSON.stringify(execution)}`;
+}
+
+/**
+ * What the trailer carries, for the same reason the trailer exists: neither
+ * the citations nor the finish reason is knowable before the last text token
+ * has already streamed.
+ */
+export type ChatStreamTrailer = {
+  searchMetadata: unknown;
+  completion?: {
+    status: ChatCompletionStatus;
+    incompleteReason?: ChatIncompleteReason;
+  };
+};
+
+export function buildChatStreamTrailerChunk(trailer: ChatStreamTrailer): string {
+  return buildSearchMetadataTrailerChunk(trailer);
+}
+
+/**
+ * Reads a trailer payload back.
+ *
+ * Accepts both the envelope above and a bare WebSearchExecution object, which
+ * is what the trailer carried before it also had to report completion status.
+ * A client can meet an old server (a rolling deploy) or a stored fixture, and
+ * a bare payload simply means "no completion information" -- never a wrong
+ * status.
+ */
+export function parseChatStreamTrailer(
+  searchMetadataJson: string | null
+): ChatStreamTrailer | null {
+  if (!searchMetadataJson) return null;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(searchMetadataJson);
+  } catch {
+    return null;
+  }
+  if (!parsed || typeof parsed !== "object") return null;
+  const record = parsed as Record<string, unknown>;
+  if (!("searchMetadata" in record) && !("completion" in record)) {
+    return { searchMetadata: parsed };
+  }
+  const completion = record.completion;
+  const completionRecord =
+    completion && typeof completion === "object"
+      ? (completion as Record<string, unknown>)
+      : null;
+  return {
+    searchMetadata: record.searchMetadata ?? null,
+    ...(completionRecord && isChatCompletionStatus(completionRecord.status)
+      ? {
+          completion: {
+            status: completionRecord.status,
+            ...(completionRecord.incompleteReason === "length"
+              ? { incompleteReason: "length" as const }
+              : {}),
+          },
+        }
+      : {}),
+  };
 }
 
 export function splitSearchMetadataTrailer(raw: string): {

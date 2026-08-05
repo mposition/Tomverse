@@ -52,8 +52,25 @@ export function normalizeWebSearchExecution(args: {
   provider: string;
   toolName?: string;
   content?: readonly unknown[];
+  /**
+   * Citations read straight off the provider's own response body, for
+   * providers whose sources never become AI SDK `source` parts. Perplexity
+   * returns `citations`/`search_results` as top-level response fields, which
+   * the OpenAI-compatible chat adapter it runs through does not carry over;
+   * without this the answer keeps its "[1]" markers and the source list under
+   * it is empty. These come first so their reference numbers survive
+   * de-duplication, and `source` parts still supplement them.
+   */
+  providerCitations?: readonly WebSearchCitation[];
 }): WebSearchExecution {
-  const { capability, searchRequested, provider, toolName, content } = args;
+  const {
+    capability,
+    searchRequested,
+    provider,
+    toolName,
+    content,
+    providerCitations,
+  } = args;
   const supported = capability.support === "native" || capability.support === "search-model";
 
   if (capability.support === "search-model") {
@@ -61,13 +78,17 @@ export function normalizeWebSearchExecution(args: {
     // part of normal completion, independent of the global webSearchMode
     // toggle -- selecting one of them always searches.
     const parts = Array.isArray(content) ? content : [];
-    const citations = sanitizeWebSearchCitations(
-      parts.filter(isUrlSourcePart).map((part) => ({
+    const citations = sanitizeWebSearchCitations([
+      ...(providerCitations || []).map((citation) => ({
+        ...citation,
+        sourceProvider: citation.sourceProvider || provider,
+      })),
+      ...parts.filter(isUrlSourcePart).map((part) => ({
         url: part.url,
         title: part.title,
         sourceProvider: provider,
-      }))
-    );
+      })),
+    ]);
     return { requested: true, supported: true, executed: true, provider, citations };
   }
 
