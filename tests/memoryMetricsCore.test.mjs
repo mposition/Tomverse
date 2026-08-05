@@ -4,6 +4,7 @@ import {
     MEMORY_COUNTER_KINDS,
     MEMORY_METRICS_UNAVAILABLE,
     emptyMemoryCounters,
+    injectedTokenBucket,
     summarizeMemoryMetrics,
 } from "../lib/memoryMetricsCore.ts";
 
@@ -172,27 +173,24 @@ test("the summary always carries the unavailable list, even when empty", () => {
     assert.deepEqual(summarize().unavailable, MEMORY_METRICS_UNAVAILABLE);
 });
 
-test("injection metrics are declared unavailable while nothing injects", () => {
+test("a follow-up proxy still needs answers nothing has attributed yet", () => {
     const declared = MEMORY_METRICS_UNAVAILABLE.map((entry) => entry.metric);
-    for (const metric of [
-        "injection_ratio",
-        "injected_token_buckets",
-        "stale_bundle_ratio",
-    ]) {
-        assert.ok(declared.includes(metric), `${metric} must be declared`);
-    }
+    assert.ok(declared.includes("followup_repair_proxy"));
 });
 
 test("a metric that gained a source is no longer declared unavailable", () => {
-    // The reasons are a contract, not decoration: the source-lock slice and
-    // extraction settlement both landed, so claiming these have no source
-    // would be the same lie in the other direction -- a reader told nothing
-    // measures something that now does.
+    // The reasons are a contract, not decoration: the source-lock slice,
+    // extraction settlement and the §10 chat counters all landed, so claiming
+    // these have no source would be the same lie in the other direction -- a
+    // reader told nothing measures something that now does.
     const declared = MEMORY_METRICS_UNAVAILABLE.map((entry) => entry.metric);
     for (const metric of [
         "lock_suspension_restore",
         "credit_per_chunk_percentiles",
         "batch_subbudget_exhaustion",
+        "injection_ratio",
+        "injected_token_buckets",
+        "stale_bundle_ratio",
     ]) {
         assert.equal(
             declared.includes(metric),
@@ -280,4 +278,101 @@ test("percentiles land on a run someone actually had", () => {
     });
     assert.equal(summary.creditPerChunk.p50, 1);
     assert.equal(summary.creditPerChunk.p90, 2);
+});
+
+/* ------------------------------------------------------------- injection -- */
+
+const withCounters = (overrides) =>
+    summarize([], [], { ...emptyMemoryCounters(), ...overrides });
+
+test("a fail-closed deployment reports 0 of N, not a bare zero", () => {
+    // The reason this metric left the unavailable list. "0%" alone cannot be
+    // told apart from a feature nobody uses; "0 of 12" is a measurement.
+    const summary = withCounters({ chat_memory_eligible: 12 });
+    assert.equal(summary.injection.eligible, 12);
+    assert.equal(summary.injection.injected, 0);
+    assert.equal(summary.injection.ratio, 0);
+});
+
+test("no eligible request reports null rather than a zero ratio", () => {
+    assert.equal(withCounters({}).injection.ratio, null);
+});
+
+test("truncation is measured over injected contexts, not eligible requests", () => {
+    // Dividing by eligible requests would make the §9 budget look generous on
+    // any deployment where most requests carry no memory at all.
+    const summary = withCounters({
+        chat_memory_eligible: 100,
+        chat_memory_injected: 4,
+        injected_context_truncated: 1,
+    });
+    assert.equal(summary.injection.ratio, 0.04);
+    assert.equal(summary.injection.truncationRatio, 0.25);
+});
+
+test("token buckets are reported as a distribution, not a total", () => {
+    const summary = withCounters({
+        injected_tokens_le_256: 5,
+        injected_tokens_le_1024: 2,
+        injected_tokens_gt_4096: 1,
+    });
+    assert.deepEqual(summary.injection.tokenBuckets, {
+        le256: 5,
+        le1024: 2,
+        le4096: 0,
+        gt4096: 1,
+    });
+});
+
+test("a block lands in the bucket named for the budget it exactly fills", () => {
+    assert.equal(injectedTokenBucket(1), "injected_tokens_le_256");
+    assert.equal(injectedTokenBucket(256), "injected_tokens_le_256");
+    assert.equal(injectedTokenBucket(257), "injected_tokens_le_1024");
+    assert.equal(injectedTokenBucket(1_024), "injected_tokens_le_1024");
+    assert.equal(injectedTokenBucket(4_096), "injected_tokens_le_4096");
+    assert.equal(injectedTokenBucket(4_097), "injected_tokens_gt_4096");
+});
+
+test("no block is no bucket", () => {
+    // Zero is what the injection ratio measures. Repeating it as a bucket
+    // would make the distribution of injected contexts look tiny on every
+    // account that mostly does not use memory.
+    assert.equal(injectedTokenBucket(0), null);
+    assert.equal(injectedTokenBucket(-1), null);
+    assert.equal(injectedTokenBucket(Number.NaN), null);
+});
+
+test("every bucket the function can return is a declared counter kind", () => {
+    for (const tokens of [1, 256, 257, 1_024, 4_096, 4_097]) {
+        assert.ok(MEMORY_COUNTER_KINDS.includes(injectedTokenBucket(tokens)));
+    }
+});
+
+/* --------------------------------------------------------- context bundle -- */
+
+test("the stale ratio is drawn from bundles presented, not from requests", () => {
+    const summary = withCounters({
+        chat_memory_eligible: 1_000,
+        context_bundle_presented: 20,
+        context_bundle_stale: 5,
+    });
+    assert.equal(summary.contextBundle.staleRatio, 0.25);
+});
+
+test("a replay is counted beside the stale ratio, never inside it", () => {
+    // Both are refused with CHAT_CONTEXT_BUNDLE_STALE, but only one of them
+    // says the context drifted.
+    const summary = withCounters({
+        context_bundle_presented: 10,
+        context_bundle_stale: 1,
+        context_bundle_replayed: 4,
+        context_bundle_rejected: 2,
+    });
+    assert.equal(summary.contextBundle.staleRatio, 0.1);
+    assert.equal(summary.contextBundle.replayed, 4);
+    assert.equal(summary.contextBundle.rejected, 2);
+});
+
+test("no bundle presented reports null rather than a clean stale rate", () => {
+    assert.equal(withCounters({}).contextBundle.staleRatio, null);
 });

@@ -58,6 +58,17 @@ export type ChatMemoryContext = {
     fingerprint: string;
     /** §22 observation, content-free. */
     consideredCount: number;
+    /**
+     * Whether the §9 budget cut a memory that had otherwise qualified — §22's
+     * truncation ratio.
+     *
+     * Only the two size caps count. `below_relevance`, `expired` and
+     * `duplicate` are the selection working as designed, and `source_cap` is a
+     * diversity rule rather than a size one; reporting any of them as
+     * truncation would say the context was too small for the request when it
+     * was not.
+     */
+    truncatedByBudget: boolean;
 };
 
 /**
@@ -99,6 +110,7 @@ const buildEmpty = (decision: MemoryInjectionDecision): ChatMemoryContext => {
         fingerprintInput,
         fingerprint: contextFingerprint(fingerprintInput),
         consideredCount: 0,
+        truncatedByBudget: false,
     };
 };
 
@@ -198,5 +210,7 @@ export async function buildChatMemoryContext(input: {
         fingerprintInput,
         fingerprint: contextFingerprint(fingerprintInput),
         consideredCount: retrieval.consideredCount,
+        truncatedByBudget:
+            retrieval.omitted.token_budget + retrieval.omitted.item_cap > 0,
     };
 }

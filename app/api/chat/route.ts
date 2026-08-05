@@ -127,6 +127,8 @@ import {
     consumeContextBundle,
     verifyChatContextBundle,
 } from "@/lib/chatContextBundleService";
+import { recordMemoryCounter } from "@/lib/memoryMetrics";
+import { injectedTokenBucket } from "@/lib/memoryMetricsCore";
 import {
     providerDiagnosticCode,
     safeErrorMessage,
@@ -1033,7 +1035,15 @@ async function handleChatPost(
         // whole branch is skipped.
         let memorySystemPrompt: string | null = null;
         let memoryUsedCount = 0;
+        if (session?.user?.id) {
+            // §22's injection denominator. Recorded before the bundle branch
+            // so it counts every authenticated request, including the ones
+            // that carry no bundle — the share of requests that had no memory
+            // to inject is the thing the ratio is for.
+            void recordMemoryCounter("chat_memory_eligible");
+        }
         if (contextBundle && session?.user?.id) {
+            void recordMemoryCounter("context_bundle_presented");
             // Built here rather than trusted from the bundle: staleness is
             // decided by recomputing, and a bundle that asserted its own
             // freshness would be exactly as trustworthy as the client holding
@@ -1062,6 +1072,13 @@ async function handleChatPost(
                 const drifted =
                     verification.reason === "stale" ||
                     verification.reason === "expired";
+                // Awaited rather than fired and forgotten: the response is
+                // about to be returned, and a refusal that is never counted
+                // is exactly the observation §22 wants. One upsert, on a path
+                // that is rare by construction.
+                await recordMemoryCounter(
+                    drifted ? "context_bundle_stale" : "context_bundle_rejected"
+                );
                 return drifted
                     ? tracedJsonError(
                           "The conversation context changed while this message was being sent.",
@@ -1089,6 +1106,12 @@ async function handleChatPost(
                 // that its context was priced, and a fresh preparation is what
                 // fixes it. Reusing the code keeps one client path instead of
                 // adding a second that would do the same thing.
+                //
+                // Counted apart from staleness even so: the user-facing code
+                // is shared, but "the context drifted" and "this bundle was
+                // presented twice" are different operational facts, and only
+                // the first belongs in the stale ratio.
+                await recordMemoryCounter("context_bundle_replayed");
                 return tracedJsonError(
                     "The conversation context changed while this message was being sent.",
                     "CHAT_CONTEXT_BUNDLE_STALE",
@@ -1099,6 +1122,21 @@ async function handleChatPost(
             }
             memorySystemPrompt = memoryContext.prompt.text;
             memoryUsedCount = memoryContext.prompt.usedCount;
+            if (memorySystemPrompt) {
+                // A bundle that passed but selected nothing is not an
+                // injection: no block reaches the prompt, so counting it would
+                // report memory as used on a request the model never saw it in.
+                void recordMemoryCounter("chat_memory_injected");
+                if (memoryContext.truncatedByBudget) {
+                    void recordMemoryCounter("injected_context_truncated");
+                }
+                // The priced figure, not a fresh estimate, so the bucket
+                // describes the same block the reservation was taken against.
+                const bucket = injectedTokenBucket(
+                    verification.payload.memoryTokens
+                );
+                if (bucket) void recordMemoryCounter(bucket);
+            }
             // The figure that was reserved against, not a fresh estimate: the
             // two agree here by construction, and if they ever stop agreeing
             // the user should be billed the number they were quoted.
