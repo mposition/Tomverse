@@ -26,9 +26,13 @@ const percent = (value: number | null) =>
 const marker = (status: InfrastructureStatus) =>
   status === "healthy"
     ? ":large_green_circle:"
-    : status === "warning" || status === "unconfigured"
-      ? ":large_orange_circle:"
-      : ":red_circle:";
+    : // An operator switched this monitor off for the environment; it is not a
+      // degraded state, so it must not read as one in the daily report.
+      status === "disabled"
+      ? ":white_circle:"
+      : status === "warning" || status === "unconfigured"
+        ? ":large_orange_circle:"
+        : ":red_circle:";
 
 export const infrastructureSlackVariables = (
   dashboard: InfrastructureDashboard
