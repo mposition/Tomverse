@@ -1231,6 +1231,8 @@ export const zh = {
         runCompletedNote: "提取已完成。请在审核列表中查看候选。",
         runFailedNote: "提取未能完成。已完成批次的结果会保留。",
         runCancelledNote: "提取已取消。已完成批次的结果会保留。",
+        runStalledNote:
+            "提取暂时停顿。目前完成的结果都会保留，稍后会自动继续。你也可以选择取消，不必等待。",
         runReview: "前往审核列表",
         cancel: "取消提取",
         cancelArmed: "再按一次即取消",

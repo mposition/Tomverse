@@ -1434,6 +1434,8 @@ export const ko = {
         runFailedNote:
             "추출을 끝내지 못했습니다. 완료된 묶음의 결과는 그대로 남아 있습니다.",
         runCancelledNote: "추출이 취소되었습니다. 완료된 묶음의 결과는 남아 있습니다.",
+        runStalledNote:
+            "추출이 잠시 멈췄습니다. 여기까지의 결과는 그대로 있고, 곧 자동으로 이어서 진행됩니다. 기다리지 않으려면 취소해도 됩니다.",
         runReview: "검토 대기 목록 보기",
         cancel: "추출 취소",
         cancelArmed: "한 번 더 누르면 취소됩니다",

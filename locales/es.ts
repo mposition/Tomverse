@@ -1221,6 +1221,8 @@ export const es = {
             "La extracción no pudo terminar. Se conservan los resultados de los lotes completados.",
         runCancelledNote:
             "La extracción se ha cancelado. Se conservan los resultados de los lotes completados.",
+        runStalledNote:
+            "La extracción está en pausa entre ejecuciones. Se conserva todo lo completado y se reanuda automáticamente. Puedes cancelar en lugar de esperar.",
         runReview: "Ir a la lista de revisión",
         cancel: "Cancelar extracción",
         cancelArmed: "Pulsa otra vez para cancelar",

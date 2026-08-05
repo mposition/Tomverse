@@ -443,7 +443,31 @@ async function loadOwnedRun(userId: string, runId: string) {
     return run;
 }
 
-export async function getMemoryExtractionRun(userId: string, runId: string) {
+/**
+ * Whether a run that still reads `running` currently has nobody driving it.
+ *
+ * Derived, never stored. `status` stays `running` on purpose: the run is not
+ * failed, its progress is intact, and the reclaim sweep will hand it to a new
+ * worker. Writing a `stalled` status would add a state every claim, settlement
+ * and metric would have to learn, to describe something the lease already
+ * says.
+ *
+ * A `pending` run is not stalled — it is waiting to start, which is a normal
+ * few seconds between the create response and the post-response kick, and
+ * calling that "stalled" would alarm every user who watches a run begin.
+ */
+const runIsStalled = (
+    run: { status: string; leaseExpiresAt: Date | null },
+    now: Date
+) =>
+    run.status === "running" &&
+    (!run.leaseExpiresAt || run.leaseExpiresAt.getTime() <= now.getTime());
+
+export async function getMemoryExtractionRun(
+    userId: string,
+    runId: string,
+    now: Date = new Date()
+) {
     const run = await loadOwnedRun(userId, runId);
     return {
         id: run.id,
@@ -454,6 +478,12 @@ export async function getMemoryExtractionRun(userId: string, runId: string) {
         chunkCompleted: run.chunkCompleted,
         createdAt: run.createdAt.toISOString(),
         completedAt: run.completedAt?.toISOString() ?? null,
+        // The owner is told, rather than left watching a progress bar that
+        // will not move for up to fifteen minutes with no explanation. The
+        // lease deadline itself is not returned: it is a worker-coordination
+        // detail, and a countdown to a sweep the user cannot influence would
+        // read as a promise about when work resumes.
+        stalled: runIsStalled(run, now),
     };
 }
 
