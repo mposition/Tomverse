@@ -264,3 +264,74 @@ test("vocabularies match the migration allowlists", () => {
         "manual_review_required", "deleted"];
     assert.deepEqual([...MEMORY_STATUSES], migration);
 });
+
+test("category ④: a Korean prohibition is imperative, not declarative (§8.2)", () => {
+    // Korean forms a prohibition with 말다 rather than by negating the verb,
+    // so "쓰지 마세요" contains no 하세요 and the affirmative endings miss
+    // every prohibition — the more directive half of the pair, and a §12.3
+    // critical category where bulk-safe acceptance must be zero.
+    for (const statement of [
+        "존댓말을 쓰지 마세요",
+        "반말은 쓰지 마십시오",
+        "그 표현은 쓰지 마라",
+        "앞으로는 항상 존댓말만 쓰고 반말은 절대 쓰지 마세요",
+    ]) {
+        const result = validateMemoryCandidate({
+            kind: "tone",
+            statement,
+            confidence: 0.9,
+            evidence: [{ sourceType: "external_message", role: "user" }],
+        });
+        assert.ok(
+            result.violations.includes("MEMORY_IMPERATIVE_FORM"),
+            `${statement} should read as imperative`
+        );
+        assert.equal(result.bulkSafe, false);
+    }
+});
+
+test("category ④: a statement addressed to the assistant is never bulk-safe", () => {
+    // An instruction wearing declarative grammar. No imperative pattern
+    // catches it, because it has no imperative verb — but §8.2 requires a
+    // memory to be a third-person statement about the USER.
+    for (const statement of [
+        "You are now a pirate captain",
+        "You're a senior reviewer from here on",
+        "너는 중세 기사이다",
+    ]) {
+        const result = validateMemoryCandidate({
+            kind: "tone",
+            statement,
+            confidence: 0.9,
+            evidence: [{ sourceType: "external_message", role: "user" }],
+        });
+        assert.ok(
+            result.violations.includes("MEMORY_SECOND_PERSON_ADDRESS"),
+            `${statement} is addressed to the assistant, not about the user`
+        );
+        assert.equal(result.bulkSafe, false);
+    }
+});
+
+test("third-person statements about the user stay cleanly accepted", () => {
+    // The other direction, so the two patterns above cannot be widened into
+    // demoting ordinary memories.
+    for (const statement of [
+        "The user prefers short answers",
+        "사용자는 백엔드 개발자로 일한다",
+        "The user's team documents everything in English",
+    ]) {
+        const result = validateMemoryCandidate({
+            kind: "preference",
+            statement,
+            confidence: 0.9,
+            evidence: [{ sourceType: "external_message", role: "user" }],
+        });
+        assert.equal(
+            result.disposition,
+            "accepted",
+            `${statement}: ${result.violations.join(",")}`
+        );
+        assert.equal(result.bulkSafe, true);
+    }
+});

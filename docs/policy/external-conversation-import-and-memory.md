@@ -387,6 +387,18 @@ window·credit·privacy disclosure 적용. 릴리스 B의 memory 사용은 이 b
 - 잠금 해제 시 evidence를 재검증한 뒤 다른 차단 사유가 없으면 이전 상태로
   복귀합니다. lock·unlock·suspension·restore는 audit를 남깁니다.
 - 잠금 상태에서 evidence 원문을 열람하거나 새 chat에서 우회 노출할 수 없습니다.
+- **삭제는 잠금으로 막지 않습니다.** lock이 지키는 것은 내용 노출이고 삭제는
+  내용을 드러내지 않습니다. 반대로 삭제를 막으면 비밀번호를 잊은 snapshot이
+  영구히 지워지지 않는 상태가 되어 §13.1의 무조건적 삭제 권리와 §15의
+  "imported data를 소유자 손이 닿지 않는 곳에 남기지 않는다"를 어깁니다.
+  native Conversation route와 다른 판단이며, 의도된 차이입니다.
+- **suspension 대상은 `active`뿐입니다.** `suspended_by_source_lock`은 이 경로만
+  쓰고 `active`만 덮으므로 상태 자체가 복귀 지점의 기록이 되고, 별도 이전 상태
+  컬럼이 필요 없습니다. `candidate`까지 정지시키면 복귀가 사용자가 승인한 적
+  없는 승격이 됩니다.
+- 복귀 시 만료가 이미 지난 memory는 `active`가 아니라 `expired`로 보냅니다
+  (§7.1의 "다른 차단 사유" 항). `active`로 되돌리면 §8.6 sweep이 다시 지날
+  때까지 만료된 memory가 retrieval에 남습니다.
 - 부분 실패로 lock과 memory 상태가 불일치하면 reconciliation이 탐지·복구합니다.
 
 ## 8. 계정 장기 메모리 계약

@@ -67,6 +67,9 @@ export const classifyInfrastructureDependency = (
     status: signal.status,
     suppressedReasonCodes: [] as string[],
   };
+  // `healthy`, `unconfigured` and `disabled` are all non-events: an operator
+  // switching a monitor off for an environment must not page Sentry, Resend or
+  // Slack/Discord, and must not be re-routed through the warning path below.
   if (signal.status !== "warning" && signal.status !== "error") {
     return { ...base, classification: "none", incident: null };
   }
