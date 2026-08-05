@@ -40,6 +40,7 @@ import {
 import { getBillingPlanByTier } from "@/lib/billingConfig";
 import { prisma } from "@/lib/prisma";
 import { getProviderCostBudget } from "@/lib/providerCostBudget";
+import { recordMemoryCounter } from "@/lib/memoryMetrics";
 
 /**
  * Extraction run lifecycle (Release B, slice B2): creation with the §11
@@ -269,6 +270,12 @@ async function assertExtractionBudget(
         },
     });
     if (!decision.allowed) {
+        // The only record that this happened. A refusal creates no run and
+        // stops no existing row, so without the counter §22's sub-budget
+        // exhaustion metric has nothing to read — which is exactly why it was
+        // listed as unavailable. Fire-and-forget: a metric must never turn a
+        // refusal into a second failure.
+        void recordMemoryCounter("extraction_subbudget_exhausted", 1, now);
         throw new ApiSecurityError(
             503,
             "MEMORY_EXTRACTION_PROVIDER_BUDGET_EXHAUSTED",

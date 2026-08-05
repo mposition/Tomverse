@@ -1337,9 +1337,24 @@ Data 탭(`AuthButton.tsx`)에는 진입점·요약만 두고 대형 UI를 modal�
     보고서 전체에 문장이 없는지 확인합니다.
   - **아직 측정할 수 없는 지표는 0이 아니라 이유와 함께 이름을 남깁니다**
     (`unavailable`). 주입 비율 0%는 "아무도 안 쓴다"와 구분되지 않으며, 그
-    혼동이 이 목록이 존재하는 이유입니다. 현재 목록: injection 비율·token
-    bucket·stale bundle 비율(§10 배선 전), lock suspension/restore(B5),
-    follow-up proxy(주입 필요), chunk당 credit·batch sub-budget(slice 1.6).
+    혼동이 이 목록이 존재하는 이유입니다. **현재 목록: follow-up proxy 하나**
+    (memory를 사용한 답변에 귀속이 필요한데, 주입이 fail-closed라 귀속된 답변이
+    아직 없음). lock suspension/restore(B5), chunk당 credit·batch
+    sub-budget(slice 1.6), injection 비율·token bucket·stale bundle 비율(§10
+    배선)은 모두 출처가 생겨 목록에서 빠졌습니다.
+  - **injection 비율의 분모는 인증된 chat 요청 전체입니다.** "주입이 허용된
+    요청"으로 잡으면 fail-closed 상태에서 분모가 0이 되어 비율이 정의되지 않고,
+    그것은 이 목록이 설명하려던 상태로 되돌아가는 것입니다. 지금 방식이면
+    fail-closed 배포도 "N건 중 0건"이라는 측정값을 보고합니다. 게스트는 주입할
+    계정 memory 자체가 없으므로 분모에서 제외합니다 — 넣으면 이 지표가 주입이
+    아니라 게스트/회원 비율을 추적하게 됩니다.
+  - **stale bundle 비율의 분모는 제시된 bundle 수**이고, replay는 비율 밖에
+    따로 셉니다. 둘 다 `CHAT_CONTEXT_BUNDLE_STALE`로 거절되지만 context가
+    변했다고 말하는 것은 한쪽뿐입니다.
+  - **truncation 비율의 분모는 주입된 context**이며, §9 예산이 잘라낸 경우
+    (`token_budget`·`item_cap`)만 truncation입니다. `below_relevance`·
+    `expired`·`duplicate`는 선택이 설계대로 동작한 것이고 `source_cap`은 크기가
+    아니라 다양성 규칙이므로 포함하지 않습니다.
   - **승인률의 분모는 검토를 마친 memory입니다.** 아직 큐에 남은 항목까지 나누면
     "손대지 않은 검토 큐"가 "낮은 승인률"로 보고됩니다. 결정된 것이 없으면 0이
     아니라 `null`입니다.

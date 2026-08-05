@@ -12,6 +12,7 @@ import {
     type MemoryLockFacts,
     type SourceLockImpact,
 } from "@/lib/memorySourceLock";
+import { recordMemoryCounter } from "@/lib/memoryMetrics";
 import { prisma } from "@/lib/prisma";
 import { logSecurityAuditEvent } from "@/lib/securityAudit";
 
@@ -429,5 +430,24 @@ function logMemoryLockTransitions(
                 ? {}
                 : { truncated: counts.truncated }),
         })
+    );
+    // The durable half of the same observation. A log line answers "what
+    // happened just now"; §22's lock suspension/restore metric needs a figure
+    // that survives log rotation, and a transition leaves no row of its own to
+    // aggregate — the memory it moved simply has a different status now.
+    //
+    // Recorded here rather than at each call site so the direct lock change
+    // and the reconciliation sweep cannot start counting differently.
+    void recordMemoryCounter(
+        "source_lock_memory_suspended",
+        counts.memoriesSuspended
+    );
+    void recordMemoryCounter(
+        "source_lock_memory_restored",
+        counts.memoriesRestored
+    );
+    void recordMemoryCounter(
+        "source_lock_memory_expired",
+        counts.memoriesExpired
     );
 }
