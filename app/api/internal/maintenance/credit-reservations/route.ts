@@ -1,3 +1,15 @@
+/**
+ * Long enough for the extraction dispatch this route now ends with.
+ *
+ * That pass is bounded at `MEMORY_EXTRACTION_DISPATCH_BUDGET_MS` (120s) and
+ * may overrun by at most one chunk timeout (60s), because a chunk already
+ * claimed is always allowed to finish -- 180s for the dispatch, plus the
+ * reconciliation, queue drains and sweeps above it. Undeclared, the platform
+ * default decided this, and a truncated pass would abandon leases it had just
+ * claimed.
+ */
+export const maxDuration = 300;
+
 import { createHash, timingSafeEqual } from "node:crypto";
 import { after } from "next/server";
 import { reconcileExpiredChatCreditReservations } from "@/lib/chatSecurity";

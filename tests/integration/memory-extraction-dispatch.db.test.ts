@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { after, beforeEach, test } from "node:test";
 import { externalContentDigest } from "@/lib/externalImportDigest";
+import { MEMORY_EXTRACTION_CHUNK_MAX_CONVERSATIONS } from "@/lib/memoryExtractionCore";
 import { MEMORY_EXTRACTION_FLAG_KEY } from "@/lib/memoryAccess";
 import { memoryExtractionChunkHandler } from "@/lib/memoryExtractionChunkHandler";
 import {
@@ -206,7 +207,39 @@ const driving = (adapter: ExtractionModelAdapter) => ({
     register: APPROVED_REGISTER,
 });
 
-test("the post-response kick drives a created run to completion (§11.1)", async () => {
+test("the kick drives one chunk and parks; the dispatcher finishes the rest (§11.1)", async () => {
+    // The kick borrows time from a request that has already answered -- Next's
+    // `after` runs within the route's max duration -- so it deliberately
+    // attempts one chunk rather than the whole run. A kick that tried to
+    // finish would routinely be killed mid-chunk, leaving the run `running`
+    // under a lease that has to lapse before anything can reclaim it.
+    const { user, conversationIds } = await seed(
+        MEMORY_EXTRACTION_CHUNK_MAX_CONVERSATIONS * 2
+    );
+    const { run } = await createRun(user.id, conversationIds);
+    assert.ok(run.chunkTotal > 1, "this test needs a multi-chunk run");
+
+    const calls = { count: 0 };
+    await kickMemoryExtractionRun(run.id, driving(answeringAdapter(calls)));
+    assert.equal(calls.count, 1);
+
+    const parked = await getMemoryExtractionRun(user.id, run.id);
+    assert.equal(parked.status, "pending");
+    assert.equal(parked.chunkCompleted, 1);
+    // Parked, not held: the next pass does not wait for a lease to lapse.
+    const row = await prisma.memoryExtractionRun.findUniqueOrThrow({
+        where: { id: run.id },
+    });
+    assert.equal(row.leaseExpiresAt, null);
+
+    await dispatchPendingMemoryExtractionRuns(
+        driving(answeringAdapter({ count: 0 }))
+    );
+    const finished = await getMemoryExtractionRun(user.id, run.id);
+    assert.equal(finished.status, "completed");
+});
+
+test("the post-response kick drives a single-chunk run to completion (§11.1)", async () => {
     const { user, conversationIds } = await seed();
     const { run } = await createRun(user.id, conversationIds);
     assert.equal(run.status, "pending");

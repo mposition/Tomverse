@@ -1,3 +1,18 @@
+/**
+ * The `after()` kick below runs inside this budget, not outside it: Next's
+ * `after` reference is explicit that the callback "will run for the platform's
+ * default or configured max duration of your route". Undeclared, the kick was
+ * whatever the platform happened to allow, and a kick killed mid-chunk leaves
+ * the run `running` under a lease that has to lapse before the maintenance
+ * dispatcher can reclaim it -- so the driver that exists to reduce latency
+ * could increase it.
+ *
+ * 120s covers one chunk: the kick drives a single chunk (see
+ * `kickMemoryExtractionRun`), the adapter aborts at just under the driver's
+ * 60s chunk timeout, and a chunk already claimed is always allowed to finish.
+ */
+export const maxDuration = 120;
+
 import { after, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { z } from "zod";

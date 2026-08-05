@@ -108,7 +108,7 @@ export type DispatchDeps = {
 export async function dispatchMemoryExtractionRun(
     runId: string,
     owner: string,
-    deps: DispatchDeps & { budgetMs?: number } = {}
+    deps: DispatchDeps & { budgetMs?: number; maxChunks?: number } = {}
 ): Promise<ExtractionSliceResult | null> {
     const handler = deps.handler ?? memoryExtractionChunkHandler();
     try {
@@ -118,6 +118,7 @@ export async function dispatchMemoryExtractionRun(
             handler,
             register: deps.register,
             budgetMs: deps.budgetMs,
+            maxChunks: deps.maxChunks,
         });
     } catch (error) {
         console.error(
@@ -134,6 +135,24 @@ export async function dispatchMemoryExtractionRun(
 }
 
 /**
+ * How much of a run the post-response kick attempts: one chunk.
+ *
+ * Next's `after` reference states the callback "will run for the platform's
+ * default or configured max duration of your route", so this is not a
+ * background worker with its own lifetime -- it is time borrowed from a
+ * request that has already answered. A kick that tried to finish the run
+ * would routinely be killed part-way, and a kick killed mid-chunk leaves the
+ * run `running` under a lease that has to lapse before the maintenance
+ * dispatcher can reclaim it. The driver meant to reduce latency would then be
+ * adding a lease TTL to it.
+ *
+ * One chunk is the useful amount: the user sees the run move immediately, and
+ * finishing it is the fifteen-minute dispatcher's job, which is the division
+ * of labour §11.1 describes.
+ */
+const KICK_MAX_CHUNKS = 1;
+
+/**
  * The low-latency kick, called from `after()` once the creation response has
  * been sent.
  *
@@ -143,9 +162,12 @@ export async function dispatchMemoryExtractionRun(
  */
 export async function kickMemoryExtractionRun(
     runId: string,
-    deps: DispatchDeps = {}
+    deps: DispatchDeps & { maxChunks?: number } = {}
 ): Promise<void> {
-    await dispatchMemoryExtractionRun(runId, workerId("kick"), deps);
+    await dispatchMemoryExtractionRun(runId, workerId("kick"), {
+        maxChunks: KICK_MAX_CHUNKS,
+        ...deps,
+    });
 }
 
 export type MaintenanceDispatchResult = {
