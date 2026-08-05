@@ -32,6 +32,14 @@ import { type TokenizerFamily } from "@/lib/chatTokenEstimate";
 export const isTokenEstimateShadowEnabled = () =>
   process.env.TOKEN_ESTIMATE_SHADOW_ENABLED === "true";
 
+/**
+ * The calibration under evaluation. Named here rather than at the call sites so
+ * one edit moves every recorder, and so a candidate can never be mistaken for
+ * the active calibration -- that one is ACTIVE_ESTIMATOR_VERSION, and it is the
+ * only one anything acts on.
+ */
+export const SHADOW_CANDIDATE_ESTIMATOR_VERSION = "hangul_segment_v2";
+
 export type ShadowReservationRecord = {
   attemptId: string;
   modelId: string;
@@ -46,6 +54,7 @@ export type ShadowReservationRecord = {
   hangulCharacters: number;
   hanKanaCharacters: number;
   nonCjkBytes: number;
+  nonCjkSymbolRatio: number;
   isFallbackAttempt?: boolean;
 };
 

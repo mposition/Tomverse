@@ -121,6 +121,16 @@ import {
 } from "@/lib/guestAttachments";
 import { isChatCostSafetyCode } from "@/lib/chatCostSafetyCore";
 import { estimatePromptTokens } from "@/lib/chatTokenEstimate";
+import {
+    ACTIVE_ESTIMATOR_VERSION,
+    getCalibration,
+} from "@/lib/chatTokenEstimate";
+import { createShadowAccumulator } from "@/lib/tokenEstimateShadow";
+import {
+    isTokenEstimateShadowEnabled,
+    recordShadowReservation,
+    SHADOW_CANDIDATE_ESTIMATOR_VERSION,
+} from "@/lib/tokenEstimateShadowRecorder";
 import { buildChatMemoryContext } from "@/lib/chatMemoryContext";
 import { latestUserPromptText } from "@/lib/chatMemoryContextCore";
 import {
@@ -977,8 +987,21 @@ async function handleChatPost(
         // Shared with the composer estimate and the comparison preflight so a
         // Korean conversation is not reserved several times too small here and
         // correctly elsewhere -- see lib/chatTokenEstimate.ts.
-        const estimateTextTokens = (text: string) =>
-            Math.max(1, estimatePromptTokens(text));
+        //
+        // The shadow accumulator hangs off this alias rather than off each call
+        // site: every text-derived contribution to estimatedInputTokens already
+        // passes through here, so one wrapper captures them all and none can be
+        // forgotten later. It only observes -- the returned value is unchanged.
+        const shadowAccumulator = isTokenEstimateShadowEnabled()
+            ? createShadowAccumulator({
+                  controlVersion: ACTIVE_ESTIMATOR_VERSION,
+                  candidateVersion: SHADOW_CANDIDATE_ESTIMATOR_VERSION,
+              })
+            : null;
+        const estimateTextTokens = (text: string) => {
+            shadowAccumulator?.add(text);
+            return Math.max(1, estimatePromptTokens(text));
+        };
 
         const providerContextQueues = new Map<string, ModelMessage[][]>();
         if (
@@ -1590,6 +1613,22 @@ async function handleChatPost(
         });
         leaseId = accessGrant.leaseId;
         usageReservation = accessGrant.usageReservation;
+        // Shadow only, and awaited so the settlement update cannot race the
+        // insert it depends on. The recorder is inert unless the flag is set
+        // and swallows its own failures, so this cannot fail a paid request.
+        if (shadowAccumulator?.hasText) {
+            await recordShadowReservation({
+                attemptId: usageReservation.reservationId,
+                modelId: modelConfig.id,
+                providerId: modelConfig.provider,
+                controlRawEstimatedInputTokens: estimatedInputTokens,
+                candidateRawEstimatedInputTokens:
+                    shadowAccumulator.candidateTotalFrom(estimatedInputTokens),
+                reservedInputTokens: budget.inputTokens,
+                tokenizerFamily: getCalibration(ACTIVE_ESTIMATOR_VERSION).family,
+                ...shadowAccumulator.snapshot(),
+            });
+        }
         try {
             await notifyProviderBudgetIfNeeded(modelConfig.provider);
         } catch (error) {

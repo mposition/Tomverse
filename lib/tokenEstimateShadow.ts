@@ -24,6 +24,7 @@
 
 import {
   estimateTokenBreakdown,
+  getCalibration,
   type TokenEstimateBreakdown,
   type TokenizerFamily,
 } from "@/lib/chatTokenEstimate";
@@ -228,5 +229,95 @@ export const buildShadowEstimate = (
     hanKanaCharacters: control.hanKanaCharacters,
     nonCjkBytes: control.nonCjkBytes,
     nonCjkSymbolRatio,
+  };
+};
+
+/**
+ * Accumulates a shadow estimate across the many pieces of text one turn is
+ * built from, so the caller does not have to concatenate a whole conversation
+ * just to measure it.
+ *
+ * Not every token in a turn comes from text the caller can hand over: memory
+ * tokens arrive as an already-reserved figure, and native attachments are
+ * priced by count. Those contribute identically to both arms, which is why
+ * `candidateTotalFrom` derives the candidate by substituting only the
+ * text-derived part of a known control total rather than recomputing it.
+ */
+export const createShadowAccumulator = ({
+  controlVersion,
+  candidateVersion,
+}: {
+  controlVersion: string;
+  candidateVersion: string;
+}) => {
+  let controlTextTokens = 0;
+  let candidateTextTokens = 0;
+  let hangulCharacters = 0;
+  let hanKanaCharacters = 0;
+  let nonCjkBytes = 0;
+  let symbolCharacters = 0;
+  let nonCjkCharacters = 0;
+
+  return {
+    /** Feed every piece of text that contributes to the control estimate. */
+    add(text: string) {
+      if (!text) return;
+      const control = estimateTokenBreakdown(text, controlVersion);
+      const candidate = estimateTokenBreakdown(text, candidateVersion);
+      controlTextTokens += control.rawTotal;
+      candidateTextTokens += candidate.rawTotal;
+      hangulCharacters += control.hangulCharacters;
+      hanKanaCharacters += control.hanKanaCharacters;
+      nonCjkBytes += control.nonCjkBytes;
+
+      const nonCjk = [...text].filter((character) => (character.codePointAt(0) ?? 0) < 0x3000);
+      nonCjkCharacters += nonCjk.length;
+      symbolCharacters += nonCjk.filter((character) => /[^\p{L}\p{N}\s]/u.test(character)).length;
+    },
+
+    /** True once any text has been seen; a turn with none is not worth recording. */
+    get hasText() {
+      return controlTextTokens > 0;
+    },
+
+    /**
+     * The candidate equivalent of a control total that may also include
+     * non-text tokens. Those are carried across unchanged, because no
+     * calibration of character segments can move them.
+     */
+    candidateTotalFrom(controlTotal: number) {
+      return Math.max(0, controlTotal - controlTextTokens + candidateTextTokens);
+    },
+
+    snapshot() {
+      const nonCjkSymbolRatio = nonCjkCharacters === 0 ? 0 : symbolCharacters / nonCjkCharacters;
+      return {
+        controlEstimatorVersion: controlVersion,
+        candidateEstimatorVersion: candidateVersion,
+        hangulCharacters,
+        hanKanaCharacters,
+        nonCjkBytes,
+        nonCjkSymbolRatio,
+        contentCohort: resolveContentCohort(
+          {
+            version: controlVersion,
+            hangulCharacters,
+            hanKanaCharacters,
+            nonCjkBytes,
+            tokensBySegment: {
+              hangul: Math.ceil(
+                hangulCharacters * getCalibration(controlVersion).hangulTokensPerCharacter
+              ),
+              hanKana: Math.ceil(
+                hanKanaCharacters * getCalibration(controlVersion).hanKanaTokensPerCharacter
+              ),
+              nonCjk: Math.ceil(nonCjkBytes / getCalibration(controlVersion).nonCjkBytesPerToken),
+            },
+            rawTotal: controlTextTokens,
+          },
+          { nonCjkSymbolRatio }
+        ),
+      };
+    },
   };
 };

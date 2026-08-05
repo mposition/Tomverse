@@ -5,6 +5,7 @@ import { estimateTokenBreakdown } from "../lib/chatTokenEstimate.ts";
 import {
   buildShadowEstimate,
   calibrationExclusionReason,
+  createShadowAccumulator,
   isCalibrationEligible,
   measureNonCjkSymbolRatio,
   resolveContentCohort,
@@ -185,4 +186,69 @@ test("the control estimate is the one that reflects shipped behaviour", () => {
   });
   assert.equal(built.controlRawEstimatedInputTokens, 150);
   assert.equal(built.candidateRawEstimatedInputTokens, 80);
+});
+
+// --- accumulator (the wiring the chat route uses) -----------------------------
+
+test("the accumulator sums text-derived tokens across a whole turn", () => {
+  const accumulator = createShadowAccumulator({
+    controlVersion: "generic_multilingual_v1",
+    candidateVersion: "hangul_segment_v2",
+  });
+  assert.equal(accumulator.hasText, false, "an empty turn is not worth recording");
+
+  accumulator.add("한".repeat(100));
+  accumulator.add("a".repeat(400));
+  assert.equal(accumulator.hasText, true);
+
+  const snapshot = accumulator.snapshot();
+  assert.equal(snapshot.hangulCharacters, 100);
+  assert.equal(snapshot.nonCjkBytes, 400);
+  // Control text total is 150 + 100; the candidate replaces only the Hangul
+  // term, giving 80 + 100.
+  assert.equal(accumulator.candidateTotalFrom(250), 180);
+});
+
+// Memory tokens arrive as an already-reserved figure and native attachments are
+// priced by count, so neither passes through the text path. No calibration of
+// character segments can move them, and they must survive into both arms
+// unchanged rather than being dropped from the candidate.
+test("non-text tokens carry across to the candidate unchanged", () => {
+  const accumulator = createShadowAccumulator({
+    controlVersion: "generic_multilingual_v1",
+    candidateVersion: "hangul_segment_v2",
+  });
+  accumulator.add("한".repeat(100));
+
+  // 150 text tokens plus 500 that never came from text.
+  assert.equal(accumulator.candidateTotalFrom(650), 580);
+  assert.equal(
+    accumulator.candidateTotalFrom(650) - 500,
+    80,
+    "only the text-derived part changes"
+  );
+});
+
+test("the accumulator never returns a negative candidate total", () => {
+  const accumulator = createShadowAccumulator({
+    controlVersion: "generic_multilingual_v1",
+    candidateVersion: "hangul_segment_v2",
+  });
+  accumulator.add("한".repeat(100));
+  assert.equal(accumulator.candidateTotalFrom(0), 0);
+});
+
+test("a turn of pure Latin produces an identical candidate total", () => {
+  const accumulator = createShadowAccumulator({
+    controlVersion: "generic_multilingual_v1",
+    candidateVersion: "hangul_segment_v2",
+  });
+  accumulator.add("what's the weather in Seoul today?");
+  accumulator.add('{"a":1,"b":[2,3]}');
+  const control = 40;
+  assert.equal(
+    accumulator.candidateTotalFrom(control),
+    control,
+    "a Hangul-only calibration must not move a request with no Hangul"
+  );
 });
