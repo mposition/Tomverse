@@ -80,6 +80,8 @@ export type TokenEstimateShadowSample = {
   hangulCharacters: number;
   hanKanaCharacters: number;
   nonCjkBytes: number;
+  /** Kept so a cohort threshold can be revisited without the original text. */
+  nonCjkSymbolRatio: number;
 
   /**
    * Null unless the provider itself reported input tokens. Never filled from a
@@ -151,16 +153,43 @@ export const resolveInputUsageSource = ({
 // flattering the Hangul numbers.
 const CJK_DOMINANCE_TOKEN_SHARE = 0.6;
 const CJK_PRESENCE_TOKEN_SHARE = 0.1;
-// Code and JSON tokenize far denser than prose. Bytes per token on the control
-// estimate is a rough but text-free way to tell them apart.
-const CODE_JSON_BYTES_PER_TOKEN_CEILING = 3.6;
 
 /**
- * Classifies a sample from its breakdown alone. Deliberately count-based: the
- * cohort has to be derivable without keeping the text it describes.
+ * Share of non-CJK characters that are neither letters, digits nor whitespace.
+ * Measured, not guessed: English prose runs 2-6%, source code 14-17% and JSON
+ * around 64%, so 10% separates them cleanly.
+ *
+ * Bytes-per-token cannot do this job. The control estimate *is* bytes divided
+ * by a constant, so its ratio is that constant by construction and carries no
+ * information about the text.
  */
-export const resolveContentCohort = (breakdown: TokenEstimateBreakdown): ContentCohort => {
-  const { tokensBySegment, rawTotal, nonCjkBytes } = breakdown;
+const CODE_JSON_SYMBOL_RATIO_FLOOR = 0.1;
+
+/**
+ * Symbol density of the non-CJK part of a request. Derived here and stored as a
+ * number, so a sample keeps the signal without keeping the text.
+ */
+export const measureNonCjkSymbolRatio = (text: string) => {
+  if (!text) return 0;
+  const nonCjk = [...text].filter((character) => (character.codePointAt(0) ?? 0) < 0x3000);
+  if (nonCjk.length === 0) return 0;
+  const symbols = nonCjk.filter((character) => /[^\p{L}\p{N}\s]/u.test(character)).length;
+  return symbols / nonCjk.length;
+};
+
+/**
+ * Classifies a sample from derived numbers alone -- segment token shares and
+ * the symbol ratio -- so the cohort never requires keeping the text.
+ *
+ * The ratio is stored alongside the label because a label bakes in today's
+ * threshold: keeping the number lets the harness re-derive cohorts later
+ * without re-running against text it no longer has.
+ */
+export const resolveContentCohort = (
+  breakdown: TokenEstimateBreakdown,
+  { nonCjkSymbolRatio = 0 }: { nonCjkSymbolRatio?: number } = {}
+): ContentCohort => {
+  const { tokensBySegment, rawTotal } = breakdown;
   if (rawTotal === 0) return "latin_prose";
 
   const hangulShare = tokensBySegment.hangul / rawTotal;
@@ -171,11 +200,7 @@ export const resolveContentCohort = (breakdown: TokenEstimateBreakdown): Content
   if (hanKanaShare >= CJK_DOMINANCE_TOKEN_SHARE) return "han_kana_dominant";
   if (cjkShare >= CJK_PRESENCE_TOKEN_SHARE) return "mixed_cjk_latin";
 
-  const nonCjkTokens = tokensBySegment.nonCjk;
-  const bytesPerToken = nonCjkTokens > 0 ? nonCjkBytes / nonCjkTokens : 0;
-  return bytesPerToken > 0 && bytesPerToken <= CODE_JSON_BYTES_PER_TOKEN_CEILING
-    ? "code_json"
-    : "latin_prose";
+  return nonCjkSymbolRatio >= CODE_JSON_SYMBOL_RATIO_FLOOR ? "code_json" : "latin_prose";
 };
 
 /**
@@ -192,14 +217,16 @@ export const buildShadowEstimate = (
 ) => {
   const control = estimateTokenBreakdown(text, controlVersion);
   const candidate = estimateTokenBreakdown(text, candidateVersion);
+  const nonCjkSymbolRatio = measureNonCjkSymbolRatio(text);
   return {
     controlEstimatorVersion: control.version,
     controlRawEstimatedInputTokens: control.rawTotal,
     candidateEstimatorVersion: candidate.version,
     candidateRawEstimatedInputTokens: candidate.rawTotal,
-    contentCohort: resolveContentCohort(control),
+    contentCohort: resolveContentCohort(control, { nonCjkSymbolRatio }),
     hangulCharacters: control.hangulCharacters,
     hanKanaCharacters: control.hanKanaCharacters,
     nonCjkBytes: control.nonCjkBytes,
+    nonCjkSymbolRatio,
   };
 };

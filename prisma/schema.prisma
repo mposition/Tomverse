@@ -787,8 +787,8 @@ model ImageGeneration {
   // resolution tier its own way, and Google's 1K landscape is not 1536x1024.
   // Nullable and never backfilled -- rows written before this existed are
   // history, and a dimension nobody measured is absent rather than inferred.
-  outputWidth    Int?
-  outputHeight   Int?
+  outputWidth  Int?
+  outputHeight Int?
 
   // The parameters this attempt actually sent to the provider (policy §12.1).
   // Reconstructing them from `size`/`quality` stopped being possible once each
@@ -799,9 +799,9 @@ model ImageGeneration {
   // duplicating user content into an audit blob would create a second place
   // every deletion path has to find.
   providerRequestParams Json?
-  backgroundMode String @default("opaque")
-  outputFormat   String @default("png")
-  moderationMode String @default("auto")
+  backgroundMode        String @default("opaque")
+  outputFormat          String @default("png")
+  moderationMode        String @default("auto")
 
   // pending -> processing -> settling -> succeeded | failed. `settling` is
   // the exactly-once claim: the worker or the reconciliation sweep moves a
@@ -2268,4 +2268,70 @@ model ChatContextBundleConsumption {
 
   @@index([expiresAt])
   @@index([userId, createdAt])
+}
+
+/// One dual-estimate observation for prompt-token estimator calibration (G1 in
+/// docs/policy/tomverse-chat-model-capability-inventory.md).
+///
+/// Shadow only. The candidate estimate is recorded and compared; it never
+/// reaches credit reservation, request rejection, routing or a provider call.
+/// No prompt text is stored either -- only derived counts and a cohort label,
+/// so a sample can be analysed without the conversation it came from.
+///
+/// `inputUsageSource` is deliberately its own field rather than reused from the
+/// settlement snapshot: that one is decided by whether the provider reported
+/// *output* tokens, while the input figure independently falls back to the
+/// reserved value. Calibrating on a fallback sample compares an estimate with a
+/// copy of itself and reports an error near zero.
+model TokenEstimateShadowSample {
+  id String @id @default(cuid())
+
+  /// The provider attempt this observation belongs to. Unique so the
+  /// reservation-time insert and the settlement-time update address one row,
+  /// and so a retry is a separate sample rather than an overwrite.
+  attemptId  String @unique
+  modelId    String
+  providerId String
+
+  /// The estimate that actually drove reservation and limits.
+  controlEstimatorVersion        String
+  controlRawEstimatedInputTokens Int
+
+  /// The estimate under evaluation. Recorded only.
+  candidateEstimatorVersion        String
+  candidateRawEstimatedInputTokens Int
+
+  /// What was really reserved, control-derived, including tool overhead.
+  reservedInputTokens Int
+
+  tokenizerFamily   String
+  contentCohort     String
+  hangulCharacters  Int
+  hanKanaCharacters Int
+  nonCjkBytes       Int
+  /// Symbol density of the non-CJK part. Stored because a cohort label bakes in
+  /// today's threshold; the ratio lets it be re-derived without the text.
+  nonCjkSymbolRatio Float  @default(0)
+
+  /// Null unless the provider itself reported input tokens. Never filled from a
+  /// reservation fallback.
+  providerReportedInputTokens Int?
+  /// `provider_reported` | `fallback_estimator` | `missing`.
+  inputUsageSource            String @default("missing")
+
+  /// `completed` | `failed` | `cancelled`.
+  outcome           String  @default("failed")
+  isPartial         Boolean @default(false)
+  isCancelled       Boolean @default(false)
+  isFallbackAttempt Boolean @default(false)
+
+  createdAt DateTime  @default(now())
+  settledAt DateTime?
+
+  /// The calibration query's own filter: eligible samples are provider-reported
+  /// and completed.
+  @@index([inputUsageSource, outcome, createdAt])
+  /// Family and cohort are how the harness segments its report.
+  @@index([tokenizerFamily, contentCohort, createdAt])
+  @@index([modelId, createdAt])
 }
