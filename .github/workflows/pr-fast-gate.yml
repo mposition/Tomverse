@@ -124,6 +124,14 @@ jobs:
         timeout-minutes: 5
         run: npm run check:release-gate-coverage
 
+      # The @ui-risk tier blocks merges and is selected by a tag, so a spec
+      # joins it by being tagged and the document that records the tier does
+      # not notice. It had drifted to 25 tagged files against a table naming
+      # five, which is the wrong input to "should this be tagged too?".
+      - name: UI tier coverage
+        timeout-minutes: 5
+        run: npm run check:ui-tier-coverage
+
       # UI-012: semantic accent colours must stay addressed by role inside the
       # guarded components. Cheap, no browser, so it sits with the other static
       # checks rather than in the browser tier.

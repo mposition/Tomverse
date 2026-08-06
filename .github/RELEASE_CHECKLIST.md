@@ -36,6 +36,8 @@ Date / timezone:    ____________________
 - [ ] `npm run check:tomverse-chat-release-gate-view`
 - [ ] `npm run verify:tomverse-chat-release-gates`
 - [ ] `npm run verify:review-parity-coverage`
+- [ ] `npm run check:ui-tier-coverage` — proves the merge-blocking `@ui-risk`
+      tier and the document that records it still describe the same set
 - [ ] `npm run check:release-gate-coverage` — proves this list still matches
       what CI enforces. It is the reason the list above can be trusted: the
       repository grew to twelve CI-enforced checks while this section named
