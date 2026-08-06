@@ -387,6 +387,18 @@ window·credit·privacy disclosure 적용. 릴리스 B의 memory 사용은 이 b
 - 잠금 해제 시 evidence를 재검증한 뒤 다른 차단 사유가 없으면 이전 상태로
   복귀합니다. lock·unlock·suspension·restore는 audit를 남깁니다.
 - 잠금 상태에서 evidence 원문을 열람하거나 새 chat에서 우회 노출할 수 없습니다.
+- **삭제는 잠금으로 막지 않습니다.** lock이 지키는 것은 내용 노출이고 삭제는
+  내용을 드러내지 않습니다. 반대로 삭제를 막으면 비밀번호를 잊은 snapshot이
+  영구히 지워지지 않는 상태가 되어 §13.1의 무조건적 삭제 권리와 §15의
+  "imported data를 소유자 손이 닿지 않는 곳에 남기지 않는다"를 어깁니다.
+  native Conversation route와 다른 판단이며, 의도된 차이입니다.
+- **suspension 대상은 `active`뿐입니다.** `suspended_by_source_lock`은 이 경로만
+  쓰고 `active`만 덮으므로 상태 자체가 복귀 지점의 기록이 되고, 별도 이전 상태
+  컬럼이 필요 없습니다. `candidate`까지 정지시키면 복귀가 사용자가 승인한 적
+  없는 승격이 됩니다.
+- 복귀 시 만료가 이미 지난 memory는 `active`가 아니라 `expired`로 보냅니다
+  (§7.1의 "다른 차단 사유" 항). `active`로 되돌리면 §8.6 sweep이 다시 지날
+  때까지 만료된 memory가 retrieval에 남습니다.
 - 부분 실패로 lock과 memory 상태가 불일치하면 reconciliation이 탐지·복구합니다.
 
 ## 8. 계정 장기 메모리 계약
@@ -397,6 +409,17 @@ window·credit·privacy disclosure 적용. 릴리스 B의 memory 사용은 이 b
    기본값, `off`는 해당 대화에서 retrieval·injection 금지. 계정 master toggle이
    꺼져 있으면 `on`도 우회하지 못하고, mode가 feature flag·revocation·인증·
    소유권 검사를 우회하지 못합니다. mode는 서버 저장·서버 판정입니다.
+   구현: 해석은 `lib/conversationMemoryMode.ts`의 순수 resolver 한 곳이고,
+   저장은 `PATCH /api/conversations/[id]`, 적용은 `/api/chat`과
+   `/api/chat/preflight` **양쪽**입니다.
+   - **`inherit`는 저장 값으로 남습니다.** 저장 시점의 계정 기본값을 복사해
+     넣으면 이후 계정 설정을 바꿔도 그 대화만 옛 값에 묶입니다. 사용자가 고른
+     것은 "기본값을 따른다"이지 "그때의 기본값"이 아닙니다.
+   - **정확히 `off` 문자열만 끕니다.** 컬럼이 문자열이므로 예상 못 한 값이
+     사용자가 켜져 있다고 믿는 기능을 조용히 꺼서는 안 됩니다. 반대 실수는 위의
+     flag·revocation·계정 toggle이 여전히 막으므로 봉쇄됩니다.
+   - **양쪽 경로가 모두 읽어야 합니다.** preflight만 읽으면 memory가 꺼진 대화가
+     memory block 없이 가격이 매겨지고 block이 담겨 전송되거나 그 반대가 됩니다.
 2. **Guest 제외** — guest에는 extraction·candidate 생성·retrieval·injection·
    profile memory를 적용하지 않고, guest identity를 memory owner로 승격하지
    않으며, 로그인 전 guest local state를 memory로 자동 변환하지 않습니다.
@@ -444,6 +467,19 @@ window·credit·privacy disclosure 적용. 릴리스 B의 memory 사용은 이 b
 형식, URL, credential·secret 패턴, imperative/system 지시형, prompt injection
 표현, assistant 추측 채택 패턴, source mismatch, 중복·near-duplicate·conflict.
 
+구현: 순수 검사는 `lib/memoryValidatorCore.ts`, DB가 필요한 검사(evidence
+존재·소유권·digest)는 `lib/memoryEvidenceValidation.ts`입니다.
+
+- **evidence 재검증은 읽기 시점이 아니라 쓰기 시점에 합니다.** label map은
+  chunk를 claim할 때 만들어지고 provider 호출은 그 뒤에 일어나므로, 그 사이에
+  import를 삭제한 사용자는 더 이상 없는 message를 인용하는 후보를 남깁니다.
+  검증을 저장 transaction 안에서 하지 않으면 evidence insert가 FK를 위반해
+  chunk 전체가 알 수 없는 DB 오류로 실패합니다.
+- **검증에 실패한 참조는 버리고, 남은 참조가 없으면 후보를 저장하지 않습니다**
+  (§8.2는 evidence를 요구합니다). 이는 validator 거절과 다른 결과이므로
+  `unsourced`로 따로 셉니다 — 문장이 부적합했던 것이 아니라 근거가 사라진
+  것입니다.
+
 **Bulk-safe 계약**: 일괄 승인에는 서술형 사실·선호만 포함합니다. URL, redirect
 지시, imperative, "항상·반드시·무조건" + 행동 명령, system/developer/tool 명령
 형태, 외부 파일·명령 실행 요구, credential 패턴, 현재 지시 무시, model identity
@@ -479,6 +515,22 @@ window·credit·privacy disclosure 적용. 릴리스 B의 memory 사용은 이 b
   무효화·audit·metric·retry를 수행. sweep 실패가 만료 memory 주입을 허용하지
   않습니다(lazy가 최종 안전장치).
 
+구현: `lib/memoryExpiryService.ts`의 `reconcileExpiredMemories()`가 15분 주기
+maintenance에 함께 실행됩니다.
+
+- **두 절반은 중복이 아닙니다.** lazy가 만료 memory의 프롬프트 도달을 막는
+  유일한 보증이고, sweep은 행이 스스로 만료를 *말하게* 하는 쪽입니다 — 사용자
+  화면에서 사용 중으로 보이지 않고, 계정 memory fingerprint가 움직여 옛 집합으로
+  가격이 매겨진 §10 bundle이 더 이상 검증되지 않습니다.
+- **따라서 sweep이 실행되지 않아도 만료 memory는 주입되지 않습니다.** 이
+  invariant를 DB 테스트가 직접 확인합니다 — 깨지면 sweep의 실행 주기가 정확성
+  의존성이 되고, 그것이 §8.6이 금지하는 상태입니다.
+- **보관 상태(`rejected`·`superseded`·`suspended_*`)의 status는 덮지 않습니다** —
+  §13.1과 같은 규칙입니다.
+- 멱등하고 중단 가능: 처리된 행은 조건에 더 이상 맞지 않고, 배치 상한에 걸리면
+  `truncated`로 보고한 뒤 다음 주기가 나머지를 처리합니다. 실패해도 함께 도는
+  reconciliation을 실패로 만들지 않습니다.
+
 ## 9. Retrieval v1 — 외부 embedding 없음 (확정)
 
 첫 릴리스(B와 C 모두)에서 외부 embedding API·embedding pipeline·vector column·
@@ -496,9 +548,40 @@ vector schema 즉흥 추가, 클라이언트 측 retrieval 계산·선택, embed
 `retrievalVersion` 이름으로 위장. 향후 embedding 도입은 별도 정책·개인정보·
 비용·provider budget·eval 승인을 거칩니다.
 
+구현: tokenizer는 `lib/memoryRetrievalTerms.ts`의 `memoryRetrievalTerms()`
+하나뿐이며 **색인과 질의가 같은 함수를 씁니다** — 서로 다른 tokenizer로 색인한
+index를 질의하면 결과가 조용히 비고, "관련 기억 없음"과 구분되지 않습니다.
+case fold는 locale 비의존(`toLowerCase()`)입니다. locale 의존 fold는 저장된
+term이 서버 locale에 따라 달라지게 만들어(터키어 `I`→`ı`) 같은 문장이 장비마다
+다르게 색인됩니다. statement를 쓰는 모든 경로가 write 시점에 색인하고,
+tokenizer 이전에 저장된 행은 `npm run maintenance:memory-search-terms`로
+재색인합니다(재시작 가능·멱등, 기본 dry run).
+
 Context budget: core/pinned 우선, 관련 memory, style, 동일 source 다양성 제한,
 전체 token hard cap. 축소 순서: 낮은 importance → 중복 → 낮은 관련도 → style
 example. 현재 user request와 필수 output budget을 memory가 밀어내지 않습니다.
+
+구현: 점수·선택은 `lib/memoryRetrievalScoring.ts`(순수), DB 질의는
+`lib/memoryRetrievalService.ts`입니다.
+
+- **core·pinned·style은 관련도로 거르지 않습니다.** "사용자는 백엔드
+  엔지니어다"는 요청이 공학을 언급하든 말든 유효하고, 어조 선호는 모든 답변에
+  적용됩니다. **질의의 후보 집합도 이와 같아야 합니다** — SQL이 term 일치만
+  가져오면 scorer가 거르지 않을 memory가 애초에 도착하지 않고, 그 실패는
+  조용합니다(결과가 적어질 뿐이라 "그 계정에 기억이 적다"와 구분되지 않습니다).
+- **관련도 하한은 결합 점수가 아니라 term 일치 수로 판정합니다.** confidence와
+  recency는 모든 저장된 memory에서 0이 아니므로, 점수 임계값은 요청과 한 단어도
+  겹치지 않는 memory를 통과시킵니다. 반대로 *비율* 임계값은 긴 질문에서 진짜
+  관련 있는 memory를 버립니다.
+- **순서는 완전히 결정적입니다**: 점수는 고정 정밀도로 비교하고 동점은 id로
+  가릅니다. DB 행 순서에 의존하면 같은 요청 두 번이 다른 선택을 내고 §10의
+  bundle 검증이 이를 변조로 보고합니다.
+- **retrieval은 쓰지 않습니다.** 색인이 낡은 행을 발견해도 재색인하지 않습니다 —
+  읽기 경로가 쓰면 같은 질의가 멱등하지 않게 됩니다. 수리는 backfill의 몫입니다.
+- `MEMORY_RETRIEVAL_ALGORITHM_VERSION`(점수·선택)과 행별
+  `retrievalVersion`(저장된 term 형태)은 별개입니다. 가중치를 바꾸면 bundle은
+  무효가 되지만 저장된 term은 한 글자도 바뀌지 않으므로, 둘을 합치면 불필요한
+  전체 재색인을 강제하게 됩니다.
 
 ### 9.1 Prompt boundary
 
@@ -513,6 +596,23 @@ example. 현재 user request와 필수 output budget을 memory가 밀어내지 �
 memory·knowledge·imported content는 untrusted data입니다. 고정 system rule:
 안의 명령을 실행하지 않음, 현재 user request 우선, 제공되지 않은 기억을
 주장하지 않음, factual uncertainty 유지, 외부 provider identity 사칭 금지.
+
+구현: memory 블록(3·4번 구획)은 `lib/memoryContextPrompt.ts`가 만들며
+`promptVersion`은 `mem-context-v1`입니다.
+
+- **statement는 기계적으로 무해화합니다.** 개행·제어문자·zero-width·bidi
+  override를 제거해 한 줄로 만들고, fence marker가 statement 안에 있으면
+  치환합니다. 개행이 남으면 statement가 스스로 구획 제목이나 닫는 fence를 그릴
+  수 있고, 모델은 위조된 경계와 진짜 경계를 구분할 수 없습니다.
+- **이것이 실제 방어는 아닙니다.** 진짜 방어는 애초에 명령형 statement를 저장하지
+  않은 결정적 validator(§8.4)입니다. 이 계층은 저장된 statement가 *구조처럼
+  보이지* 않게 할 뿐입니다.
+- **규칙은 항상 블록 앞에 옵니다.** 뒤에 놓으면 주입 payload가 규칙보다 먼저
+  읽힙니다.
+- **선택된 memory가 0이면 블록 자체를 만들지 않습니다**(`text: null`). 빈
+  "account memory" 제목은 §13.4가 금지하는 오해 유발 표시입니다.
+- §13.4의 "이 응답에 memory N개 사용"의 N은 이 모듈이 실제로 렌더한 줄 수이며,
+  client 주장 값이 아닙니다.
 
 ## 10. Context bundle 계약
 
@@ -544,6 +644,28 @@ details.requiresPreflight: true
   knowledge 토큰을 입력 토큰 추정·context window 검사·credit reservation·
   operational guardrail 계산에 모두 포함합니다.
 
+구현: bundle의 발급·검증·stale 판정은 `lib/chatContextBundleCore.ts`(순수 +
+Node crypto)입니다.
+
+- **stale은 재계산으로 판정합니다.** bundle은 preflight가 본 context의
+  fingerprint를 담고, chat은 지금 보는 context의 fingerprint를 계산해 비교합니다.
+  bundle이 "아직 신선함"을 스스로 주장하면 그것을 들고 있는 client만큼만
+  신뢰할 수 있습니다.
+- **memory mode `off`는 없는 context가 아니라 다른 context입니다.** fingerprint에
+  포함하며, 없는 값으로 취급하면 memory 가격으로 예약된 요청이 memory 없이
+  실행됩니다.
+- **admission token과 bundle은 서명 domain이 다릅니다.** 같은 secret으로
+  서명되므로 domain을 분리하지 않으면 한쪽 body가 다른 쪽으로 검증될 수 있고,
+  §10의 역할 분리가 "검사하는 쪽이 기억하기"에 의존하게 됩니다. 양방향 모두
+  테스트로 고정합니다.
+- **소비(nonce)는 bundle이 아니라 (bundle, model) 단위입니다.** comparison의 세
+  요청은 정당하게 같은 bundle을 제시하므로, bundle당 1회 규칙은 자기 panel 둘을
+  거부합니다. `bundleConsumptionKey()`가 무엇을 세는지 정하고, 내구적 강제는
+  chat 연결 슬라이스에서 조건부 write로 수행합니다.
+- **stale 복구 판정은 순수 함수입니다**(`decideBundleStaleRecovery()`): 단일
+  모델은 노출 전 1회 자동 재시도, comparison은 panel 단위 재시도 없이 전체
+  재-preflight, 이미 노출된 뒤에는 어느 쪽도 자동 재시도하지 않습니다.
+
 ## 11. Extraction 실행 계약
 
 - Import 파싱·저장은 AI 호출 없이 수행합니다(credit 소비 없음).
@@ -558,6 +680,44 @@ details.requiresPreflight: true
   lease expiry, retry, cancel, deterministic release, orphan reconciliation
   (15분), idempotent settlement. 브라우저를 닫아도 완료 chunk와 승인 상태가
   손상되지 않습니다.
+
+### 11.1 실행 driver — 저지연 kick + 복구 dispatcher (2026-08-04 확정)
+
+이 절은 §11의 durable run 계약을 **무엇이 구동하는지**를 확정합니다. 계약을
+넓히지 않고 이행 방식만 정합니다.
+
+- **driver는 둘이고 역할이 다릅니다.**
+  - `after()` **post-response kick**: 저지연 시작 전용. Next.js `after()`는
+    route의 실행 시간과 프로세스 수명에 묶이고 종료 시 graceful drain에
+    의존하므로 **durable queue가 아닙니다**(`node_modules/next/dist/docs`의
+    `after` · self-hosting 문서). 이미지 생성 §7이 같은 결론입니다.
+  - **15분 maintenance**: 만료 lease 회수뿐 아니라 `pending` run을 다시
+    claim해 실제로 재구동하는 **recovery dispatcher**입니다. 회수만 하고
+    재구동하지 않으면 요청이 없는 한 run이 영원히 `pending`으로 남습니다.
+- **durable source of truth는 DB의 run·chunk 상태**이며, 두 driver는 상태를
+  읽고 쓰는 방법이 아니라 실행을 시작하는 계기일 뿐입니다.
+- **두 진입점은 반드시 같은 slice processor를 사용합니다.** claim·fencing·
+  경계 재검사·release가 두 벌 존재하면 반드시 어긋납니다.
+- **배타 claim은 lease 기한이 아니라 fencing token으로 성립합니다.**
+  claim마다 `leaseGeneration`을 증가시키고, heartbeat·chunk claim·chunk 결과
+  기록·정산은 **claim 당시의 generation이 일치할 때만** 성공합니다. 기한
+  비교만으로는 두 claimant가 모두 통과할 수 있고, 그 결과는 provider 중복
+  호출과 후보 이중 생성입니다.
+- **chunk 상태는 durable**합니다: chunk별 status·attemptCount·실패 코드와
+  그 chunk가 담당하는 대화 목록을 저장합니다. 계획은 저장하며 재계산하지
+  않습니다 — chunk 경계는 선택 집합의 *순서*에 의존하므로, 다른 순서로
+  재계획하면 사용자가 확인한 견적과 다른 chunk를 실행할 수 있습니다.
+- **한 번의 실행은 run 전체가 아니라 bounded slice**입니다: 최대 chunk 수와
+  wall-clock deadline, chunk별 provider timeout, chunk 사이 heartbeat, 예산
+  소진 시 명시적 lease 반납 후 `pending` 복귀. 프로세스가 강제 종료되면
+  lease 만료 후 maintenance가 회수합니다.
+- **chunk 경계마다 재검사**합니다: feature flag, 승인 pair와 revocation,
+  사용자 plan, provider 예산. run 생성 시점의 판정을 캐시하지 않습니다.
+- **취소·flag off·revocation은 즉시 정지 사유**이며, 정지한 slice는 lease를
+  반납하고 진행분을 보존합니다.
+- extraction provider 지연이 credit·refund·notification 같은 기존 maintenance
+  작업을 늦추지 않도록, dispatch는 기존 reconciliation 응답과 분리된 경로에서
+  수행하고 지표도 `memory_extraction_dispatch`로 분리합니다.
 
 ## 12. Eval 계약
 
@@ -585,6 +745,11 @@ details.requiresPreflight: true
 
 범주 4종: ① 지속 사실·선호 ② assistant 추측·역할극·충돌 정보 ③ 민감 정보·
 secret·credential ④ prompt injection·지시형·URL 유도.
+
+표본을 실제로 만들고 검수하고 동결하는 절차는
+`docs/ops/memory-extraction-eval-dataset.md`가 정합니다 — 8개 cell 관리,
+작성자·검수자 분리와 adjudication, critical negative 전건 독립 검수,
+개발용/decision set 분리, `datasetVersion`·digest 동결과 재작업 규칙.
 
 Decision-grade 표본: **범주별·언어별(ko/en) 최소 200개** — 범주별 총 400,
 전체 총 1,600, 언어 arm당 800. 동일 commit·고정 promptVersion, artifact 보존,
@@ -634,6 +799,16 @@ zh/fr/de/es/pt는 첫 decision-grade eval 범위 밖의 known limitation으로
   1,600(범주 4 × 언어 2 × 200) × 독립 재실행 포함 최소 2회 전체 실행 +
   blind review 세트 생성 비용. 승인 기록(승인자·금액 상한·티켓)은 eval
   register entry와 함께 남깁니다. 예산 승인 전에는 smoke mode만 실행합니다.
+- **이 제약은 코드가 강제합니다.** `scripts/evalImportedMemoryExtraction.mjs`가
+  `--live` 실행 시 해당 pair의 `evalBudget`이 비어 있으면 provider를 호출하기
+  전에 거부합니다. smoke mode는 예산 없이도 실행되며, deterministic stub으로
+  prompt·parser·validator·scoring 경로만 확인하고 모델 품질에 대해서는 아무것도
+  주장하지 않습니다.
+- **첫 fixture 세트는 seed 규모입니다**(`lib/memoryExtractionEvalFixtures.ts`,
+  `datasetVersion` = `mem-eval-seed-1`). §12.2 하한(범주·언어 arm당 200)에
+  한참 못 미치며, harness는 이를 `UNDERPOWERED`로 보고하고 판정을 보류합니다.
+  나머지 표본 작성은 별도 데이터 작업이고, 복제·경미 변형으로 채우는 것은
+  §12.2가 금지하므로 `findDuplicateCases()`가 그런 dataset을 거부합니다.
 
 ## 13. 삭제 · export · share
 
@@ -648,6 +823,26 @@ zh/fr/de/es/pt는 첫 decision-grade eval 범위 밖의 known limitation으로
   `manual_review_required`는 이 경로에 사용하지 않습니다(그 상태는 §8.4
   validator 강등 전용). 사용자가 직접 작성·편집한 memory(manual evidence
   보유)는 자동 삭제·자동 전환하지 않고 삭제 확인에서 별도 선택을 제공합니다.
+
+  구현: 분류는 `lib/memorySourceDeletion.ts`(순수), 적용은
+  `lib/externalImportService.ts`의 두 삭제 경로입니다.
+
+  - **삭제 *전에* 판정합니다.** FK cascade가 message와 함께 evidence를 가져가면
+    그 뒤에는 어떤 memory가 무엇에서 왔는지 남지 않습니다. 두 경로 모두 같은
+    transaction 안에서 source를 지우기 전에 분류합니다.
+  - **manual evidence는 살아남는 evidence입니다.** 따라서 사용자가 직접 쓴
+    memory는 import 삭제로 건드려지지 않으며, 이는 규칙이 아니라 분류의
+    결과입니다.
+  - **세 번째 경우는 `userEdited`이면서 남는 evidence가 없는 memory입니다.**
+    사용자가 문장을 고쳤으므로 추출기가 대신 지울 것이 아닙니다 — 기본은
+    `suspend`이고 삭제는 명시적으로 요청해야 합니다(정지된 memory는 evidence
+    재작성으로 되살릴 수 있지만 삭제된 memory는 아닙니다).
+  - **이미 보관 상태(`rejected`·`superseded`·`expired`)인 행의 status는 덮지
+    않습니다.** 어차피 retrieval에서 제외돼 있고, 덮으면 떠난 진짜 이유가
+    다른 이유로 바뀝니다.
+  - 삭제 확인은 `?include=memoryImpact`로 영향 건수를 **먼저** 조회합니다.
+    선택은 `?derivedMemories=`·`?editedMemories=`(`delete|suspend`)로 전달하며,
+    없거나 알 수 없는 값이면 위 기본값을 씁니다.
 - memory delete-all: 즉시 retrieval 제외, 진행 중 extraction 취소·차단,
   evidence·searchTerms 삭제, imported conversation은 별도 확인 없이 자동
   삭제하지 않음, content 없는 최소 audit만 보존, 실패 시 reconciliation, 멱등.
@@ -670,6 +865,14 @@ secret 원문·잠긴 evidence는 무조건 노출하지 않음(잠긴 source ev
   provenance(`sourceType`, source 참조 metadata — 잠긴 source는 존재
   metadata만)를 포함합니다. `searchTerms`·내부 score·context bundle은
   포함하지 않습니다. 스키마 상세는 B 구현에서 이 계약 안에서 확정합니다.
+- **잠긴 source의 evidence는 존재 metadata로만 내보냅니다** — `sourceType`과
+  잠겨 있다는 사실뿐이고, conversation ID·ordinal·role은 넣지 않습니다. ID만
+  빼는 것으로는 부족합니다: 위치와 role은 계정의 릴리스 A export를 가진 사람에게
+  대상을 좁혀 줍니다. review 화면과 다른 규칙인 이유는 export가 **계정 밖으로
+  나가는 문서**이기 때문입니다 — review 화면의 ID는 lock이 스스로 거부하는
+  페이지로 이어질 뿐이지만, export의 참조는 lock 바깥에서 그대로 남습니다.
+  **memory 자체는 계속 내보냅니다.** 참조를 감추는 것과 기억을 감추는 것은
+  다르고, 사용자는 어떤 문장이 보관돼 있는지 알 권리가 있습니다.
 - **서버는 export 파일을 보존하지 않습니다**(스트리밍 생성, `no-store`).
   보존되는 것은 content 없는 생성·다운로드 audit뿐이며, 보존 기간은 기존
   admin audit 관례를 따라 **90일**입니다.
@@ -682,6 +885,37 @@ statement, evidence, searchTerms, context bundle, profile knowledge chunk를
 공유 화면·export에 일반 안내("이 답변은 작성자의 개인화 설정의 영향을 받았을
 수 있으며, 해당 memory 원문이 공유된 것은 아닙니다")를 포함합니다. 이 안내는
 구체적 memory의 존재·내용·개수를 제3자에게 노출하지 않습니다.
+
+구현 현황:
+
+- **제외는 `tests/memoryReleaseContracts.test.mjs`가 고정합니다.** share
+  snapshot schema의 키 집합과 message 키 집합을 허용 목록으로 못 박고, memory
+  형태의 필드를 밀어 넣은 snapshot이 parse 후 그것을 버리는지, conversation
+  export가 요청받지 않은 필드를 렌더하지 않는지 확인합니다. 지금 이것이 참인
+  이유는 shape가 좁기 때문이지 무언가 검사해서가 아니었고, 실패 모드는 누군가
+  shape를 넓히고 아무도 눈치채지 못한 채 제3자가 작성자의 기억을 읽게 되는
+  것입니다.
+- **안내 문구는 주입 배선과 함께 배포합니다.** 주입이 열리기 전에는 어떤 답변도
+  memory의 영향을 받을 수 없어서, 그때 "영향을 받았을 수 있다"고 적으면 동작하지
+  않는 기능에 대한 주장이 됩니다. §10 주입이 배선되면서 이 조건이 충족됐고,
+  아래가 그 배포입니다.
+
+구현: 공유 화면은 `share.personalizationNotice`, export는
+`lib/memorySharingNotice.ts`의 영문 한 줄입니다(export 문서에는 볼 사람의
+locale이 없고 header가 이미 영문입니다).
+
+- **표시 여부는 snapshot의 `personalizationPossible`이 정합니다.** 조회 시점에
+  flag를 다시 읽지 않습니다 — 나중에 주입을 꺼도 이미 생성된 답변이 영향을 안
+  받게 되지는 않고, 나중에 켜도 이 답변들이 영향을 받게 되지는 않습니다. 이
+  값은 share 시점의 **전역** 사실이며 작성자별 사실이 아닙니다.
+- **조건부로 표시하면 안 됩니다.** 작성자가 실제로 memory를 썼을 때만 보여주면
+  문구의 존재 자체가 "이 사람은 개인화를 쓴다"는 노출이 됩니다. 주입이 가능한
+  동안에는 모든 공유·export가 무조건 답니다.
+- **문구가 채널이 되면 안 됩니다.** 개수·종류·statement를 담지 않고, snapshot
+  필드도 boolean 하나뿐입니다(문자열·숫자·배열은 schema가 거부).
+  `tests/memorySharingNotice.test.mjs`가 숫자 포함 여부까지 확인합니다.
+- 필드는 optional이라 이전 snapshot은 그대로 parse되고 부재는 false로 읽힙니다
+  — 주입이 존재하기 전 모든 snapshot에 대해 맞는 답입니다.
 
 ### 13.4 memory 사용 투명성
 
@@ -758,8 +992,11 @@ ko/en 대표 렌더링만. 7개 locale 전체 privacy E2E matrix를 만들지 �
 
 ## 17. 마케팅 표현 경계 (릴리스 차단 계약)
 
-단일 정책 소스 `lib/marketingMemoryClaims.ts`(또는 동등하게 검사 가능한 구조)
-+ 정적 테스트로 보호합니다.
+단일 정책 소스 + 정적 테스트로 보호합니다. **아직 만들어지지 않았습니다** —
+`lib/marketingMemoryClaims.ts`라는 이름으로 계획했으나 그 파일도, 동등한 구조도
+현재 없습니다. 릴리스 B·C의 마케팅 문구를 내보내기 전에 이 절이 요구하는 단일
+소스와 정적 테스트를 먼저 만들어야 하며, 그때까지 아래 허용·금지 목록은 사람이
+읽고 지키는 규칙입니다.
 
 허용: "다른 AI 서비스의 과거 대화를 가져오세요", "검토하고 승인한 기억을 새
 대화에 활용합니다", "과거 대화에서 선호하는 답변 방식을 참고합니다", "현재
@@ -1043,8 +1280,27 @@ GET/PUT /api/memories/settings                 master toggle·기본 mode
 GET    /api/memories/export                    전체 export (재인증, §13.2)
 POST   /api/memories/delete-all                (재인증, §13.1)
 PATCH  /api/conversations/[id]                 memoryMode 변경 (기존 route 확장)
-POST   /api/external-conversations/[id]/lock | /verify | /unlock   (B5)
+GET    /api/external-conversations/[id]/lock          잠금 여부 + 잠글 때의 memory 영향 (§7.1)
+PUT    /api/external-conversations/[id]/lock          설정·변경·해제 (변경·해제는 currentPassword 필수)
+POST   /api/external-conversations/[id]/lock/verify   비밀번호 확인 → unlock grant
 ```
+
+lock은 별도 route입니다. snapshot은 immutable(§4.2)이라 일반 PATCH route가
+없고, 만들면 두 번째 mutable 필드를 부르게 됩니다. 해제(`/unlock`)를 따로 두지
+않은 것은 그것이 상태 제거이지 별개 동작이 아니기 때문입니다 —
+`PUT { password: null }`이 같은 판정·같은 audit·같은 memory 전이를 씁니다.
+
+- **변경·해제는 현재 비밀번호를 증명합니다.** grant(cookie)로 대신하지
+  않습니다. 로그인된 기기에 접근한 사람이 잠금을 벗겨낼 수 있으면 잠금의
+  존재 이유가 사라집니다. 설정(잠기지 않은 snapshot)은 증명할 것이 없습니다.
+- **증명 실패는 verify와 같은 attempt 예산을 씁니다.** 두 경로가 다른 속도로
+  추측을 허용하면 느슨한 쪽이 실효 한도가 됩니다. 단 `currentPassword`가
+  아예 없는 요청은 추측이 아니므로 예산을 쓰지 않고 거절합니다.
+- **설정·변경 성공 시 grant를 함께 발급하고 해제 시 삭제합니다.** 방금 고른
+  비밀번호를 바로 다시 입력시키지 않기 위해서이고, 삭제는 TTL 안에 다른
+  비밀번호로 다시 잠근 snapshot이 옛 grant로 열리는 것을 막습니다.
+- 잠긴 snapshot 조회는 새 코드가 아니라 기존 423 `CONVERSATION_LOCKED`로
+  답합니다(§7의 호환 요구, §18 표는 확정본).
 
 context bundle은 기존 `/api/chat/preflight` 확장 + 단일 모델용 경량 context
 preparation으로 발급하고 `/api/chat`이 검증·소비합니다. 신설 여부는 기존
@@ -1107,6 +1363,68 @@ Data 탭(`AuthButton.tsx`)에는 진입점·요약만 두고 대형 UI를 modal�
   다음만 집계: memory 응답 후 120초 내 follow-up, 즉시 regenerate, 대화
   memory-off 전환, 명시적 feedback, 관련 memory 즉시 수정·삭제. 이를 "재질문률"
   등 직접 측정치로 표현하지 않고 proxy임을 Admin UI에 명시합니다.
+  구현: 순수 집계는 `lib/memoryMetricsCore.ts`, 질의는 `lib/memoryMetrics.ts`,
+  조회는 `GET /api/admin/memory`입니다.
+
+  - **content 배제는 응답 shape이 아니라 질의에서 합니다.** statement·evidence·
+    `sourceSelection`·id는 `select`에 없습니다. shape에서만 빼면 이미 읽어온
+    뒤이고, 다음 사람이 shape를 넓히면 그대로 새어 나갑니다. DB 테스트가 직렬화된
+    보고서 전체에 문장이 없는지 확인합니다.
+  - **아직 측정할 수 없는 지표는 0이 아니라 이유와 함께 이름을 남깁니다**
+    (`unavailable`). 주입 비율 0%는 "아무도 안 쓴다"와 구분되지 않으며, 그
+    혼동이 이 목록이 존재하는 이유입니다. **현재 목록: follow-up proxy의 feedback
+    신호 하나**(`Feedback`에 대상 답변으로 가는 연결이 없음). lock
+    suspension/restore(B5), chunk당 credit·batch sub-budget(slice 1.6),
+    injection 비율·token bucket·stale bundle 비율(§10 배선), follow-up·regenerate
+    (답변별 귀속)은 모두 출처가 생겨 목록에서 빠졌습니다.
+  - **답변별 memory 귀속은 `Message`에 저장합니다**(`memoryUsedCount`,
+    `memoryTokens`). §8.1 불변식 4가 금지하는 것은 주입된 **context 본문**이고
+    "사용 개수·비민감 aggregate metadata"는 명시적으로 허용합니다. 일일 counter가
+    이미 주입 **비율**을 보고하므로 이것은 counter가 만들 수 없는 것 —
+    **어느 답변이** memory를 담았는가 — 만 담당하며, follow-up proxy가 그것을
+    필요로 합니다. `NULL`은 bundle이 없어 주입이 불가능했던 요청이고 `0`은
+    bundle이 검증됐지만 retrieval이 아무것도 고르지 않은 경우입니다.
+  - **injection 비율의 분모는 인증된 chat 요청 전체입니다.** "주입이 허용된
+    요청"으로 잡으면 fail-closed 상태에서 분모가 0이 되어 비율이 정의되지 않고,
+    그것은 이 목록이 설명하려던 상태로 되돌아가는 것입니다. 지금 방식이면
+    fail-closed 배포도 "N건 중 0건"이라는 측정값을 보고합니다. 게스트는 주입할
+    계정 memory 자체가 없으므로 분모에서 제외합니다 — 넣으면 이 지표가 주입이
+    아니라 게스트/회원 비율을 추적하게 됩니다.
+  - **stale bundle 비율의 분모는 제시된 bundle 수**이고, replay는 비율 밖에
+    따로 셉니다. 둘 다 `CHAT_CONTEXT_BUNDLE_STALE`로 거절되지만 context가
+    변했다고 말하는 것은 한쪽뿐입니다.
+  - **truncation 비율의 분모는 주입된 context**이며, §9 예산이 잘라낸 경우
+    (`token_budget`·`item_cap`)만 truncation입니다. `below_relevance`·
+    `expired`·`duplicate`는 선택이 설계대로 동작한 것이고 `source_cap`은 크기가
+    아니라 다양성 규칙이므로 포함하지 않습니다.
+  - **follow-up proxy는 단일 비율이 아니라 두 arm의 비교입니다.** memory가 형성한
+    답변과 그렇지 않은 답변에 같은 측정을 하고 그 **차이**만 판단에 씁니다.
+    "memory 답변의 12%에 follow-up이 있었다"는 그 자체로 해석 불가입니다 —
+    첫 답변이 좋아서 두 번째 질문을 하는 경우가 흔하기 때문입니다. 한쪽 arm이
+    비어 있으면 차이는 0이 아니라 `null`입니다(비교하지 않았다는 뜻).
+    Admin UI는 이것이 proxy이며 "재질문률"이 아니라는 것을 **읽는 자리에서**
+    밝힙니다.
+  - **follow-up 관계는 SQL에서 집계합니다.** 필요한 관계가 "같은 대화에서 다음에
+    온 것"이라 대화별 정렬이 필요하고, 애플리케이션에서 하려면 conversation ID를
+    지표 모듈로 읽어와야 합니다. §22는 ID를 응답이 아니라 **select에서** 배제하므로
+    grouping을 DB에 두고 두 행의 count만 받습니다.
+  - **memory-off 전환은 발생 시점에 기록합니다.** `Conversation.memoryMode`에는
+    변경 이력이 없어 사후 유도가 불가능합니다 — update가 커밋되는 순간 이전 값이
+    사라집니다. counter는 좁은 결합에서만 올라갑니다: `off`로 바뀌었고, 이미
+    `off`가 아니었으며, 그 대화의 최근 답변이 memory가 형성한 것이고 120초
+    이내입니다. 대화를 열자마자 끄는 것은 불만이 아니라 선호이며, 둘을 함께 세면
+    §22가 원하는 신호가 묻힙니다.
+  - **승인률의 분모는 검토를 마친 memory입니다.** 아직 큐에 남은 항목까지 나누면
+    "손대지 않은 검토 큐"가 "낮은 승인률"로 보고됩니다. 결정된 것이 없으면 0이
+    아니라 `null`입니다.
+  - **취소된 run은 pair 실패율 분모에 포함합니다.** 사용자가 그만둔 것도 그 run의
+    결과이고, 빼면 사용자가 계속 포기하는 pair가 좋아 보입니다.
+  - 행이 남지 않는 결과(validator 거절, source 삭제 처분, 쓰기 시점 evidence
+    재검증 탈락)는 `ChatUsageBucket`의 `memory:` namespace 일일 counter로
+    기록하며, 기록 실패가 사용자 요청 실패가 되지 않습니다. counter는
+    transaction 밖에서 기록합니다 — rollback된 transaction 안에서 기록하면
+    일어나지 않은 일을 보고하게 됩니다.
+
 - **C**: profile lifecycle, preview 성공·실패, version update, retired model
   차단 수, knowledge 처리 실패율, byte bucket, retrieval chunk 수, truncation,
   citation 검증 실패율, memory mode 분포. instructions·filename·knowledge

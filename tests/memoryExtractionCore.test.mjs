@@ -5,11 +5,18 @@ import {
     parseRevokedPairs,
 } from "../lib/memoryAccess.ts";
 import {
+    MEMORY_EXTRACTION_CHUNK_MAX_ATTEMPTS,
     MEMORY_EXTRACTION_CHUNK_MAX_BYTES,
     MEMORY_EXTRACTION_CHUNK_MAX_CONVERSATIONS,
+    MEMORY_EXTRACTION_CHUNK_TIMEOUT_MS,
+    MEMORY_EXTRACTION_LEASE_TTL_MS,
+    MEMORY_EXTRACTION_SLICE_BUDGET_MS,
+    chunkFailureDisposition,
     decideMemoryExtractionBudget,
     estimateExtraction,
+    extractionSliceBudget,
     isRunLeaseExpired,
+    mayStartAnotherChunk,
     planExtractionChunks,
     resolveMemoryExtractionSubBudget,
 } from "../lib/memoryExtractionCore.ts";
@@ -316,5 +323,76 @@ test("lease expiry is a strict clock comparison", () => {
             now
         ),
         true
+    );
+});
+
+// --- slice budget and retry disposition (§11 durability) ---
+
+test("a slice budget is bounded by both a chunk count and a wall clock", () => {
+    const startedAt = new Date("2026-08-03T12:00:00.000Z");
+    const budget = extractionSliceBudget(startedAt, {
+        maxChunks: 2,
+        budgetMs: 30_000,
+    });
+    assert.equal(budget.maxChunks, 2);
+    assert.equal(budget.deadline.toISOString(), "2026-08-03T12:00:30.000Z");
+
+    // Room on both axes.
+    assert.deepEqual(
+        mayStartAnotherChunk({ chunksProcessed: 1, budget, now: startedAt }),
+        { start: true }
+    );
+    // Chunk count is spent.
+    assert.deepEqual(
+        mayStartAnotherChunk({ chunksProcessed: 2, budget, now: startedAt }),
+        { start: false, reason: "chunk_budget" }
+    );
+    // Time is spent, and the deadline is inclusive: at the deadline, stop.
+    assert.deepEqual(
+        mayStartAnotherChunk({
+            chunksProcessed: 0,
+            budget,
+            now: budget.deadline,
+        }),
+        { start: false, reason: "time_budget" }
+    );
+});
+
+test("the slice defaults leave lease headroom to release cleanly", () => {
+    // A slice that runs to the very end of its budget must still hold a live
+    // lease, or it could not hand the run back and would have to wait for the
+    // TTL to lapse instead.
+    assert.ok(
+        MEMORY_EXTRACTION_SLICE_BUDGET_MS < MEMORY_EXTRACTION_LEASE_TTL_MS,
+        "the slice budget must fit inside one lease"
+    );
+    assert.ok(
+        MEMORY_EXTRACTION_CHUNK_TIMEOUT_MS <= MEMORY_EXTRACTION_SLICE_BUDGET_MS,
+        "a single chunk must not outlast the whole slice"
+    );
+});
+
+test("a failed chunk retries below its cap and is terminal at it", () => {
+    assert.deepEqual(chunkFailureDisposition({ attemptCount: 1 }), {
+        status: "pending",
+    });
+    assert.deepEqual(
+        chunkFailureDisposition({
+            attemptCount: MEMORY_EXTRACTION_CHUNK_MAX_ATTEMPTS - 1,
+        }),
+        { status: "pending" }
+    );
+    assert.deepEqual(
+        chunkFailureDisposition({
+            attemptCount: MEMORY_EXTRACTION_CHUNK_MAX_ATTEMPTS,
+        }),
+        { status: "failed" }
+    );
+    // Past the cap stays terminal rather than wrapping back to retryable.
+    assert.deepEqual(
+        chunkFailureDisposition({
+            attemptCount: MEMORY_EXTRACTION_CHUNK_MAX_ATTEMPTS + 5,
+        }),
+        { status: "failed" }
     );
 });

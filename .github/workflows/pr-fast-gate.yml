@@ -115,6 +115,31 @@ jobs:
         timeout-minutes: 5
         run: npm run test:server-contract
 
+      # The release checklist is the only place the whole gate is written down
+      # in one list, and it drifted: the repository grew to twelve CI-enforced
+      # checks while its §1 named five, so a release manager who followed the
+      # checklist had not run the gate. This keeps the two in step, in both
+      # directions.
+      - name: Release gate coverage
+        timeout-minutes: 5
+        run: npm run check:release-gate-coverage
+
+      # The @ui-risk tier blocks merges and is selected by a tag, so a spec
+      # joins it by being tagged and the document that records the tier does
+      # not notice. It had drifted to 25 tagged files against a table naming
+      # five, which is the wrong input to "should this be tagged too?".
+      - name: UI tier coverage
+        timeout-minutes: 5
+        run: npm run check:ui-tier-coverage
+
+      # AGENTS.md and the contracts under it are read as instructions that
+      # override default behaviour. A reference to a file that moved or was
+      # never built fails nothing -- it just sends someone to an empty path,
+      # and what they learn is that the instructions are unreliable.
+      - name: Instruction document references
+        timeout-minutes: 5
+        run: npm run check:doc-references
+
       # UI-012: semantic accent colours must stay addressed by role inside the
       # guarded components. Cheap, no browser, so it sits with the other static
       # checks rather than in the browser tier.
@@ -137,12 +162,82 @@ jobs:
         timeout-minutes: 5
         run: npm run check:memory-extraction-eval
 
+      # Tomverse Chat release thresholds live only in the canonical registry
+      # (docs/release-gates/tomverse-chat-v1.yaml); prose documents reference
+      # gate IDs and may not redefine numbers. A registry with duplicate IDs,
+      # missing required/approval fields, or invalid operators must not merge.
+      # Cheap, no browser, so it sits in the static tier with the other
+      # fail-closed checks.
+      - name: Tomverse Chat release gates
+        timeout-minutes: 5
+        run: npm run verify:tomverse-chat-release-gates
+
+      # The registry declares generatedMarkdownOnly, which was a claim with
+      # nothing behind it until this check: the committed readable view is
+      # re-rendered and compared byte for byte, so a threshold hand-edited into
+      # the Markdown -- or a registry change that never regenerated the view --
+      # fails here instead of shipping a table that disagrees with the gates.
+      - name: Tomverse Chat release gate view is generated
+        timeout-minutes: 5
+        run: npm run check:tomverse-chat-release-gate-view
+
+      # The chat route's context guard short-circuits on an undeclared window
+      # (`modelConfig.contextWindowTokens && ...`), so a model without one is
+      # not clamped to a safe default -- it is not checked at all, and an
+      # over-limit request reaches the provider. ESTIMATE-03 forbids that at
+      # zero tolerance. A ratchet rather than a cliff: today's gap is recorded
+      # as a baseline that may only shrink, while any newly added or enabled
+      # model must declare a window.
+      - name: Router context-window declarations
+        timeout-minutes: 5
+        run: npm run check:router-context-window
+
+      # Declaring a context window is not a no-op: the chat route's guard only
+      # runs when contextWindowTokens is set, so a new value immediately starts
+      # rejecting long requests that used to pass. Windows are verified with a
+      # source, a date and a verifier in the register first. This fails when an
+      # unverified row carries a value, a verified row has no provenance, or the
+      # catalogue gains a window whose evidence was never recorded.
+      - name: Context-window register
+        timeout-minutes: 5
+        run: npm run check:context-window-register
+
+      # The delivery plan promises a new product table cannot silently escape
+      # account deletion and export. A registry alone does not deliver that --
+      # someone adds a table, forgets the registry, and the promise is quietly
+      # untrue. The user-linked set and the cascade closure are derived from
+      # schema.prisma here, so an unregistered table, or a row claiming a
+      # cascade the schema no longer has, fails the build.
+      - name: Data-domain registry
+        timeout-minutes: 5
+        run: npm run check:data-domain-registry
+
       # gpt-image-2 lives outside AVAILABLE_MODELS by design, so the model
       # pricing check above cannot see it. Same release contract -- every
       # enabled price is explicit and verified -- separate fail-closed net.
       - name: Image pricing coverage
         timeout-minutes: 5
         run: npm run check:image-pricing
+
+      # One provider timeout and one backoff schedule decide three deadlines:
+      # the worst legitimate attempt, the stale threshold the sweep refunds
+      # against, and the route budget the post-response executor runs inside.
+      # They were three literals related only in prose. A stale threshold below
+      # the worst attempt refunds live work; a route budget below what the
+      # executor needs loses the request, because nothing re-drives a pending
+      # generation.
+      - name: Image executor budget
+        timeout-minutes: 5
+        run: npm run check:image-executor-budget
+
+      # The DB integration runner names its suites one by one, because they are
+      # split across processes for module-mock isolation and a glob cannot make
+      # that decision. What a hand-written list cannot do is notice a file
+      # nobody added to it: provider-probe.db.test.ts sat unlisted from #245
+      # and had been failing since STG-R002, invisibly, because nothing ran it.
+      - name: DB integration coverage
+        timeout-minutes: 5
+        run: npm run check:db-integration-coverage
 
       # The cost guardrails are derived from plan credits and stored in
       # ChatUsageBucket.count. When that product outgrew int4, PostgreSQL threw
@@ -298,8 +393,8 @@ jobs:
 
       - name: Install Chromium
         if: steps.scope.outputs.code == 'true'
-        timeout-minutes: 10
-        run: npx playwright install --with-deps chromium
+        timeout-minutes: 20
+        run: scripts/ci/install-playwright.sh chromium
 
       # The @smoke tier only. Every other desktop-chromium test still runs --
       # on main push via Main Chromium Regression, and nightly via Daily
@@ -462,8 +557,8 @@ jobs:
 
       - name: Install Chromium
         if: steps.scope.outputs.code == 'true'
-        timeout-minutes: 10
-        run: npx playwright install --with-deps chromium
+        timeout-minutes: 20
+        run: scripts/ci/install-playwright.sh chromium
 
       - name: Run the high-risk UI regression checks
         if: steps.scope.outputs.code == 'true'

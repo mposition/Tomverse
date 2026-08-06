@@ -16,6 +16,7 @@ import {
     ChatAccessError,
     chatErrorResponse,
     createChatBudget,
+    rollbackChatAdmission,
     identifyChatCaller,
     preflightChatComparisonAccess,
 } from "@/lib/chatSecurity";
@@ -35,7 +36,13 @@ import { isChatCostSafetyCode } from "@/lib/chatCostSafetyCore";
 import { WEB_SEARCH_MODES } from "@/lib/appDefaults";
 import { getWebSearchCapability } from "@/lib/webSearchCapability";
 import { getWebSearchSurchargeCredits } from "@/lib/webSearchCredits";
-import { estimatePromptTokens } from "@/lib/chatTokenEstimate";
+import {
+    atLeastOneToken,
+    createTokenEstimateAccumulator,
+} from "@/lib/chatTokenEstimate";
+import { buildChatMemoryContext } from "@/lib/chatMemoryContext";
+import { fitChatOutputToContextWindow } from "@/lib/chatContextWindow";
+import { issueChatContextBundle } from "@/lib/chatContextBundleService";
 
 const preflightSchema = z
     .object({
@@ -71,7 +78,6 @@ const parseStoredModelIds = (value: unknown) => {
         : [];
 };
 
-const estimateTextTokens = (text: string) => estimatePromptTokens(text);
 
 const comparisonTraceId = (request: Request) => {
     const suppliedTraceId = request.headers
@@ -84,6 +90,18 @@ const comparisonTraceId = (request: Request) => {
 export async function POST(request: Request) {
     const traceId = comparisonTraceId(request);
     let modelIdsForLog: string[] = [];
+    /**
+     * Set once the aggregate admission has reserved this subject's slots.
+     *
+     * The concurrency policy (§3 step 4) requires the unclaimed slots back the
+     * moment an approved comparison stops, by name: `rollbackChatAdmission()`.
+     * Nothing called it. The admission TTL is the backstop, not the plan --
+     * a preflight that reserves and then fails to answer leaves the client
+     * retrying (§3 step 6 tells it to, once) into a subject whose slots are
+     * still held, so the retry is refused for concurrency on a subject that is
+     * running nothing at all.
+     */
+    let grantedAdmissionId: string | null = null;
     const inputTokensByModelForLog: Array<{
         modelId: string;
         inputTokens: number;
@@ -173,6 +191,9 @@ export async function POST(request: Request) {
             content: string;
             modelId: string | null;
         }> = [];
+        // §8.1 invariant 1: null until the conversation row is read, which is
+        // also the "no conversation" case — both inherit the account default.
+        let conversationMemoryMode: string | null = null;
         // A guest's transcript lives in their browser, so there is no server
         // conversation to read history from -- and no ownership question to
         // answer. Signed-in callers keep the full check below unchanged.
@@ -184,6 +205,7 @@ export async function POST(request: Request) {
                     password: true,
                     selectedModels: true,
                     kind: true,
+                    memoryMode: true,
                     messages: {
                         orderBy: { createdAt: "desc" },
                         take: 100,
@@ -234,36 +256,55 @@ export async function POST(request: Request) {
                 );
             }
             history = conversation.messages.reverse();
+            conversationMemoryMode = conversation.memoryMode;
         }
 
-        const promptTokens = estimateTextTokens(payload.prompt);
+        // §10: the priced context and the sent context must be the same one,
+        // so the tokens the memory block contributes are part of every
+        // model's input estimate here — the figure the credit reservation and
+        // the context-window check are built on. A guest gets an empty
+        // context and the arithmetic below is unchanged for them.
+        const memoryContext = await buildChatMemoryContext({
+            userId: session?.user?.id ?? null,
+            query: payload.prompt,
+            // Priced under the same mode the chat route will send under. If
+            // only one side read it, a conversation with memory off would be
+            // charged for a memory block it never receives, or the reverse.
+            conversationMode: conversationMemoryMode,
+        });
+
         const budgets = models.map((model) => {
-            const historyTokens = history.reduce((sum, message) => {
+            // Per model, because history is filtered per model: a comparison
+            // turn charges each model for the branch it can actually see.
+            const estimate = createTokenEstimateAccumulator()
+                .addText(payload.prompt)
+                // The memory block's own text, not its token count -- counting
+                // the text is what lets a Hangul recalibration reach it.
+                .addText(memoryContext.prompt.text ?? "");
+            for (const message of history) {
                 const belongsToModel =
                     message.role === "user"
                         ? !message.modelId || message.modelId === model.id
                         : message.role === "assistant" && message.modelId === model.id;
-                return belongsToModel
-                    ? sum + estimateTextTokens(message.content)
-                    : sum;
-            }, 0);
+                if (belongsToModel) estimate.addText(message.content);
+            }
             const attachmentTokens = estimatePreflightAttachmentTokens(
                 model,
                 payload.attachments
             );
+            // Attachment cost is a per-model estimate, not text.
+            estimate.addTokens(attachmentTokens);
+            const breakdown = atLeastOneToken(estimate.breakdown());
             inputTokensByModelForLog.push({
                 modelId: model.id,
-                inputTokens: Math.max(
-                    1,
-                    historyTokens + promptTokens + attachmentTokens
-                ),
+                inputTokens: breakdown.rawTotal,
                 attachmentTokens,
             });
             const capability = getWebSearchCapability(model.id);
             return createChatBudget(
                 access.kind,
                 model,
-                Math.max(1, historyTokens + promptTokens + attachmentTokens),
+                breakdown,
                 {
                     webSearchSurchargeCredits: getWebSearchSurchargeCredits(
                         payload.webSearchMode ?? "off",
@@ -276,12 +317,47 @@ export async function POST(request: Request) {
             );
         });
         modelIdsForLog = models.map((model) => model.id);
+
+        // The same context check the chat route applies, on the same shared
+        // rule, and applied here for the reason §10 gives for sharing a
+        // context builder at all: preflight prices what chat sends. Without
+        // it, preflight quoted credits and reserved a concurrency slot for a
+        // model the chat route was always going to refuse -- and on a
+        // comparison that is the partial execution the aggregate admission
+        // exists to prevent, arrived at after admission rather than before it.
+        //
+        // A whole-request refusal, matching every other per-model check above
+        // (MODEL_NOT_AVAILABLE, MODEL_NOT_SELECTED, MODEL_ACCESS_FORBIDDEN):
+        // admitting the subset that fits is exactly what all-or-nothing
+        // forbids. Thrown before preflightChatComparisonAccess, so a refused
+        // comparison reserves nothing.
+        models.forEach((model, index) => {
+            const budget = budgets[index];
+            const outputBudget = fitChatOutputToContextWindow({
+                contextWindowTokens: model.contextWindowTokens,
+                reservedInputTokens: budget.inputTokens,
+                requestOutputCapTokens: budget.maxOutputTokens,
+                providerMaxOutputTokens: budget.providerMaxOutputTokens,
+            });
+            if (outputBudget.kind === "exceeded") {
+                throw new ChatAccessError(
+                    400,
+                    "MODEL_CONTEXT_WINDOW_EXCEEDED",
+                    `${model.name} holds ${outputBudget.limitTokens.toLocaleString("en-US")} tokens of conversation and answer together, and this conversation already fills it. Start a new conversation or shorten the attachments.`
+                );
+            }
+        });
         const result = await preflightChatComparisonAccess(access, budgets, {
             traceId,
             comparisonId: payload.comparisonId,
             enabledTools:
                 payload.webSearchMode === "always" ? ["web_search"] : [],
         });
+        // From here the subject's slots are held. Anything that throws below
+        // means the client never receives the token that would claim them, so
+        // the catch gives them back rather than leaving the allowance spent on
+        // a comparison that was never admitted to the client.
+        grantedAdmissionId = result.admission.admissionId;
 
         const headers = new Headers({
             "Cache-Control": "no-store",
@@ -292,6 +368,22 @@ export async function POST(request: Request) {
         // that cookie names, so the browser has to be holding it before the
         // model requests arrive.
         if (access.setCookie) headers.append("Set-Cookie", access.setCookie);
+
+        // One bundle for the whole comparison, carrying every model in the
+        // set: the panels are supposed to see one snapshot, and consumption
+        // is per (bundle, model) so each still spends its own (§10).
+        const contextBundle =
+            session?.user?.id && memoryContext.decision.allowed
+                ? issueChatContextBundle({
+                      subjectKey: session.user.id,
+                      conversationId:
+                          payload.conversationId === "private-chat"
+                              ? null
+                              : payload.conversationId,
+                      modelIds: uniqueModelIds,
+                      context: memoryContext,
+                  })
+                : null;
 
         return Response.json(
             {
@@ -304,10 +396,25 @@ export async function POST(request: Request) {
                 // model request occupies.
                 admissionToken: result.admission.token,
                 admissionExpiresAt: result.admission.expiresAt,
+                // A second opaque token with a different job entirely: this
+                // one attests which context snapshot was priced. Neither
+                // stands in for the other, and they are signed under
+                // different domains so neither can (§10).
+                contextBundle: contextBundle?.token ?? null,
+                contextBundleExpiresAt: contextBundle?.expiresAt ?? null,
+                memoryUsedCount: contextBundle?.memoryUsedCount ?? 0,
             },
             { headers }
         );
     } catch (error) {
+        // Best-effort and never rethrown: this runs while another failure is
+        // already being reported, and turning a 500 into a different 500
+        // would only lose the original reason.
+        if (grantedAdmissionId) {
+            await rollbackChatAdmission(grantedAdmissionId, { traceId }).catch(
+                () => undefined
+            );
+        }
         const securityResponse = apiSecurityResponse(error);
         if (securityResponse) {
             securityResponse.headers.set("X-Request-ID", traceId);
@@ -337,7 +444,8 @@ export async function POST(request: Request) {
                 error instanceof ChatAccessError &&
                 (error.code === "MODEL_NOT_SELECTED" ||
                     error.code === "MODEL_NOT_AVAILABLE" ||
-                    error.code === "MODEL_ACCESS_FORBIDDEN")
+                    error.code === "MODEL_ACCESS_FORBIDDEN" ||
+                    error.code === "MODEL_CONTEXT_WINDOW_EXCEEDED")
             ) {
                 console.warn(
                     JSON.stringify({

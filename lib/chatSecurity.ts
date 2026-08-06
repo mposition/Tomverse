@@ -37,8 +37,17 @@ import {
     PLAN_ENTITLEMENT_EXHAUSTED,
     PROVIDER_BUDGET_EXHAUSTED,
 } from "@/lib/chatCostSafetyCore";
-import { estimateToolInputTokenOverhead } from "@/lib/chatTokenEstimate";
-import { futureResetAt } from "@/lib/chatLimitDecisionCore";
+import {
+    estimateToolInputTokenOverhead,
+    toReservedInputTokens,
+    type TokenEstimateBreakdown,
+} from "@/lib/chatTokenEstimate";
+import { resolveInputUsageSource } from "@/lib/tokenEstimateShadow";
+import { recordShadowSettlement } from "@/lib/tokenEstimateShadowRecorder";
+import {
+    safeDailyResetAt,
+    withFutureResetAt,
+} from "@/lib/chatLimitDecisionCore";
 import { recordChatLimitDecision } from "@/lib/chatLimitDecisions";
 import { isWebSearchMode, type WebSearchMode } from "@/lib/appDefaults";
 import { getAnonymousClientKey } from "@/lib/clientIp";
@@ -132,7 +141,14 @@ export type ChatBudget = {
     modelUsageClass: ModelUsageClass;
     usageCredits: number;
     inputTokens: number;
+    /**
+     * The output cap this application asks for, before it is fitted to the
+     * room the context window has left (`lib/chatContextWindow.ts`). Not what
+     * the request ends up sending.
+     */
     maxOutputTokens: number;
+    /** The provider's absolute settable ceiling, where verified. */
+    providerMaxOutputTokens: number | null;
     reservedOutputTokens: number;
     inputUsdPerMillionTokens: number;
     outputUsdPerMillionTokens: number;
@@ -274,6 +290,25 @@ export class ChatAccessError extends Error {
     }
 }
 
+/**
+ * Whether a thrown value is one of this module's own refusals.
+ *
+ * Exported as a predicate rather than left to `instanceof` at the call site
+ * because `instanceof` compares class identity, and class identity is a
+ * property of the module *instance*: a bundler or a test harness that
+ * evaluates this file twice produces two `ChatAccessError` classes, and a
+ * refusal raised by one is not an instance of the other. Asking the module
+ * that owns the class means the comparison always happens against the copy
+ * that raised the error.
+ *
+ * That distinction is load-bearing wherever getting it wrong is silent.
+ * `chatErrorResponse` below can use `instanceof` directly -- it lives in this
+ * file -- but a caller in another module that mistakes a local refusal for a
+ * provider failure writes bad data into provider health and says nothing.
+ */
+export const isChatAccessError = (error: unknown): error is ChatAccessError =>
+    error instanceof ChatAccessError;
+
 const positiveInteger = (value: string | undefined, fallback: number) => {
     const parsed = Number(value);
     return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : fallback;
@@ -356,7 +391,14 @@ export const getChatBudgetReservedCostMicroUsd = (budget: ChatBudget) =>
 export const createChatBudget = (
     kind: AccessKind,
     model: AiModel,
-    estimatedInputTokens: number,
+    /**
+     * The turn's raw input estimate. Prefer a breakdown, built with
+     * `createTokenEstimateAccumulator`: it carries the segment mix, and the
+     * reservation margins are per segment, so a bare total leaves
+     * `toReservedInputTokens` nothing to widen accurately and it has to fall
+     * back to the largest margin any segment carries.
+     */
+    estimatedInput: number | TokenEstimateBreakdown,
     options?: {
         webSearchSurchargeCredits?: number;
         /**
@@ -373,6 +415,15 @@ export const createChatBudget = (
             ? positiveInteger(process.env.CHAT_GUEST_MAX_INPUT_TOKENS, 16_000)
             : positiveInteger(process.env.CHAT_USER_MAX_INPUT_TOKENS, 128_000);
 
+    // The limit is checked against the raw estimate, deliberately: it bounds
+    // the conversation the user sent, not the margin and tool overhead the
+    // reservation adds on top. Charging someone a rejection for overhead they
+    // did not write would move the limit without anyone changing it.
+    const estimatedInputTokens =
+        typeof estimatedInput === "number"
+            ? estimatedInput
+            : estimatedInput.rawTotal;
+
     if (
         !Number.isSafeInteger(estimatedInputTokens) ||
         estimatedInputTokens <= 0 ||
@@ -388,12 +439,22 @@ export const createChatBudget = (
     // Credits are weighted by the conversation the user actually sent, so tool
     // overhead never inflates what they are charged -- it only widens the
     // internal cost reservation, which is refunded down at settlement.
+    //
+    // Computed by `toReservedInputTokens` rather than by adding the overhead
+    // here, because that function is where the active estimator calibration's
+    // safety multiplier and framing overhead live. Under
+    // `generic_multilingual_v1` both are the identity and this is exactly what
+    // the hand-written sum produced; under a calibration that is not, a
+    // reservation that skipped them would be short by the margin the
+    // calibration exists to provide, and the reason would be that this one
+    // caller did its own arithmetic.
     const reservedInputTokens = Math.min(
         maxInputTokens,
-        estimatedInputTokens +
-            estimateToolInputTokenOverhead({
+        toReservedInputTokens(estimatedInput, {
+            toolOverheadTokens: estimateToolInputTokenOverhead({
                 nativeSearchEnabled: options?.nativeSearchEnabled === true,
-            })
+            }),
+        })
     );
     const pricing = resolveModelRequestPricing(model, {
         estimatedPromptTokens: reservedInputTokens,
@@ -408,6 +469,7 @@ export const createChatBudget = (
             (options?.webSearchSurchargeCredits || 0),
         inputTokens: reservedInputTokens,
         maxOutputTokens: pricing.maxOutputTokens,
+        providerMaxOutputTokens: pricing.providerMaxOutputTokens,
         reservedOutputTokens: pricing.reservationOutputTokens,
         inputUsdPerMillionTokens: pricing.inputUsdPerMillionTokens,
         outputUsdPerMillionTokens: pricing.outputUsdPerMillionTokens,
@@ -683,25 +745,6 @@ const retryAfterFor = (period: Period, now: Date, dailyEnd?: Date) => {
 
 const monthlyResetAt = (now: Date) =>
     new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1));
-
-/**
- * A reset instant that is always in the future.
- *
- * A day window's end is normally ahead of `now`, but it is derived from stored
- * settings and can go stale -- for instance in the moments around a DST shift
- * or right after a time-zone change moved the current bucket. Telling a blocked
- * user to wait for an instant that has already passed is worse than useless, so
- * a stale boundary is rolled forward whole days until it is ahead of now.
- */
-const safeDailyResetAt = (windowEnd: Date, now: Date) => {
-    const future = futureResetAt(windowEnd, now);
-    if (future) return future;
-    const dayMs = 86_400_000;
-    const elapsed = now.getTime() - windowEnd.getTime();
-    return new Date(
-        windowEnd.getTime() + (Math.floor(elapsed / dayMs) + 1) * dayMs
-    );
-};
 
 const incrementUsage = async (
     tx: Prisma.TransactionClient,
@@ -1468,7 +1511,13 @@ export const preflightChatComparisonAccess = async (
                     dailyPlanRemaining: dailyPlanCreditsRemaining ?? 0,
                     monthlyPlanRemaining: planCreditsRemaining,
                     purchasedCreditsAvailable,
-                    resetAt: userDayWindow.end.toISOString(),
+                    // The same instant the decision record carries. A stale
+                    // stored time zone rolls it forward here too, so the audit
+                    // trail and the message the user reads agree.
+                    resetAt: safeDailyResetAt(
+                        userDayWindow.end,
+                        now
+                    ).toISOString(),
                 }
             );
         }
@@ -2464,7 +2513,12 @@ export const acquireChatAccess = async (
                                     monthlyPlanRemaining: planRemaining,
                                     purchasedCreditsAvailable:
                                         error.availableCredits,
-                                    resetAt: accessDayWindow.end.toISOString(),
+                                    // Rolled forward for the same reason as
+                                    // the account path above.
+                                    resetAt: safeDailyResetAt(
+                                        accessDayWindow.end,
+                                        now
+                                    ).toISOString(),
                                 }
                             );
                         }
@@ -3163,6 +3217,33 @@ export const settleChatUsage = async (
             },
         });
 
+        // Shadow only. Provenance is decided from the provider's *input* count
+        // alone -- deliberately not from `usageSource` above, which is decided
+        // by whether output tokens arrived. A turn that reported output but not
+        // input has an input figure that is the estimate itself, and
+        // calibrating on it would compare an estimate with a copy of itself.
+        await recordShadowSettlement({
+            attemptId: reservation.reservationId,
+            providerReportedInputTokens: Number.isSafeInteger(usage.inputTokens)
+                ? Math.max(0, usage.inputTokens!)
+                : null,
+            inputUsageSource: resolveInputUsageSource({
+                providerReportedInputTokens: usage.inputTokens,
+                providerReturnedUsage: usage.usageFromProvider !== false,
+            }),
+            outcome:
+                usage.outcome === "completed"
+                    ? "completed"
+                    : usage.outcome === "cancelled"
+                      ? "cancelled"
+                      : "failed",
+            // The settlement path receives no partial-stream signal, so this
+            // stays false until it does. A cancelled turn is already excluded
+            // from calibration on its own flag.
+            isPartial: false,
+            isCancelled: usage.outcome === "cancelled",
+        });
+
         return {
             applied: true,
             status: terminalStatus,
@@ -3414,6 +3495,7 @@ export const validateChatPayload = (body: unknown) => {
         deepResearchDepth?: unknown;
         webSearchMode?: unknown;
         admissionToken?: unknown;
+        contextBundle?: unknown;
     };
     if (
         !Array.isArray(payload.messages) ||
@@ -3516,6 +3598,22 @@ export const validateChatPayload = (body: unknown) => {
             "Invalid admission token."
         );
     }
+    // Shape only, same as the admission token above and for the same reason:
+    // a well-formed bundle that is forged, expired, bound to another subject
+    // or already consumed is rejected where the context is built, which is
+    // the only place that can tell (§10).
+    if (
+        payload.contextBundle !== undefined &&
+        (typeof payload.contextBundle !== "string" ||
+            payload.contextBundle.length < 1 ||
+            payload.contextBundle.length > 8_192)
+    ) {
+        throw new ChatAccessError(
+            400,
+            "INVALID_CONTEXT_BUNDLE",
+            "Invalid chat context."
+        );
+    }
 
     let totalCharacters = 0;
     for (const message of payload.messages) {
@@ -3576,6 +3674,7 @@ export const validateChatPayload = (body: unknown) => {
         deepResearchDepth?: "quick" | "standard" | "deep";
         webSearchMode?: WebSearchMode;
         admissionToken?: string;
+        contextBundle?: string;
     };
 };
 
@@ -3585,11 +3684,22 @@ export const validateChatPayload = (body: unknown) => {
  * showing an end user and is exactly the kind of figure that made the previous
  * guardrail error read like a billing statement.
  */
+/**
+ * Everything a rejected caller is allowed to see, in one place.
+ *
+ * Two rules, both of which have to hold for *every* error response rather than
+ * for the call sites that remembered: raw internal USD never leaves the server
+ * (it goes to the limit-decision event and the Admin Console), and a reset
+ * instant is either in the future or absent. `now` defaults to the moment the
+ * response is built, which is the "creation time" the second rule is measured
+ * against.
+ */
 export const publicChatErrorDetails = (
-    details: ChatErrorDetails | undefined
+    details: ChatErrorDetails | undefined,
+    now: Date = new Date()
 ) => {
     if (!details) return undefined;
-    const entries = Object.entries(details).filter(
+    const entries = Object.entries(withFutureResetAt(details, now)).filter(
         ([key]) => !key.startsWith("internal")
     );
     return entries.length > 0 ? Object.fromEntries(entries) : undefined;

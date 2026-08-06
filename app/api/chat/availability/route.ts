@@ -30,7 +30,10 @@ import { getRuntimeModels } from "@/lib/modelRegistry";
 import { getPurchasedCreditSummary } from "@/lib/creditLedger";
 import { getZonedDayWindow } from "@/lib/userTimeZone";
 import { estimatePreflightAttachmentTokens } from "@/lib/chatAttachmentTokens";
-import { estimatePromptTokens } from "@/lib/chatTokenEstimate";
+import {
+    atLeastOneToken,
+    createTokenEstimateAccumulator,
+} from "@/lib/chatTokenEstimate";
 import { WEB_SEARCH_MODES } from "@/lib/appDefaults";
 import { getWebSearchCapability } from "@/lib/webSearchCapability";
 import { getWebSearchSurchargeCredits } from "@/lib/webSearchCredits";
@@ -130,7 +133,6 @@ export async function POST(request: Request) {
             return model;
         });
 
-        const promptTokens = estimatePromptTokens(payload.prompt ?? "");
         const webSearchMode = payload.webSearchMode ?? "off";
         const budgets = models.map((model) => {
             const capability = getWebSearchCapability(model.id);
@@ -141,7 +143,14 @@ export async function POST(request: Request) {
             return createChatBudget(
                 access.kind,
                 model,
-                Math.max(1, promptTokens + attachmentTokens),
+                atLeastOneToken(
+                    createTokenEstimateAccumulator()
+                        .addText(payload.prompt ?? "")
+                        // Attachment cost is a per-model estimate, not text, so
+                        // it stays out of the segment terms.
+                        .addTokens(attachmentTokens)
+                        .breakdown()
+                ),
                 {
                     webSearchSurchargeCredits: getWebSearchSurchargeCredits(
                         webSearchMode,

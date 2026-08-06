@@ -90,7 +90,7 @@ jobs:
             ${{ runner.os }}-playwright-${{ hashFiles('package-lock.json') }}-
 
       - name: Install Chromium
-        run: npx playwright install --with-deps chromium
+        run: scripts/ci/install-playwright.sh chromium
 
       # Goldens are captured on desktop-chromium only, which is also the one
       # project this suite does not skip itself on.

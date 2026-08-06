@@ -22,10 +22,12 @@ import {
   File as FileIcon,
   FileText,
   HardDrive,
+  BookMarked,
   Globe2,
   Link2,
   Loader2,
   Lock,
+  ImagePlus,
   Microscope,
   Paperclip,
   Plus,
@@ -49,6 +51,10 @@ import { FeatureHelpPopover } from "@/components/chat/FeatureHelpPopover";
 import { chatHelpCopy } from "@/components/chat/chatHelpCopy";
 import { dispatchAppToast } from "@/lib/appToast";
 import { APP_DEFAULTS, WEB_SEARCH_MODES, type WebSearchMode } from "@/lib/appDefaults";
+import {
+  CONVERSATION_MEMORY_MODES,
+  type ConversationMemoryMode,
+} from "@/lib/conversationMemoryMode";
 import {
   canUseModelWithPlan,
   getModel as getStaticModel,
@@ -379,8 +385,27 @@ type ChatInputProps = {
   // this one, which always sits directly under the input box.
   hideDisclaimer?: boolean;
   webSearchMode?: WebSearchMode;
+  /**
+   * This conversation's stored memory mode (§8.1 invariant 1), or undefined
+   * when the control does not apply — a guest, who has no account memory at
+   * all, or a draft with no conversation to store a mode on.
+   */
+  memoryMode?: ConversationMemoryMode;
+  onMemoryModeChange?: (mode: ConversationMemoryMode) => void;
+  /** The account default `inherit` resolves to, for describing that choice. */
+  accountMemoryDefault?: "on" | "off";
   onWebSearchModeChange?: (mode: WebSearchMode) => void;
   onOpenDeepResearchSetup?: () => void;
+  /**
+   * Switches to the image draft, carrying the composer's current text as the
+   * starting prompt. Absent when the image feature flag is off. `modelId` is
+   * set when the user arrived from the catalogue's image tab and therefore
+   * already chose which model to start from.
+   */
+  onStartImageDraft?: (draftText: string, modelId?: string) => void;
+  /** Set when image generation is visible to this viewer but not usable. */
+  imageGenerationLock?: "sign_in" | "upgrade" | null;
+  onLockedImageGenerationClick?: (lock: "sign_in" | "upgrade") => void;
   isDeepResearchPending?: boolean;
   onDismissDeepResearchChip?: () => void;
 };
@@ -485,8 +510,14 @@ export function ChatInput({
   hideTopBorder = false,
   hideDisclaimer = false,
   webSearchMode = "off",
+  memoryMode,
+  onMemoryModeChange,
+  accountMemoryDefault = "on",
   onWebSearchModeChange,
   onOpenDeepResearchSetup,
+  onStartImageDraft,
+  imageGenerationLock = null,
+  onLockedImageGenerationClick,
   isDeepResearchPending = false,
   onDismissDeepResearchChip,
 }: ChatInputProps) {
@@ -816,7 +847,9 @@ export function ChatInput({
       : null;
   
   const [isMenuOpen, setIsMenuOpen] = useState(false);
-  const [menuView, setMenuView] = useState<"actions" | "models" | "webSearch">("actions");
+  const [menuView, setMenuView] = useState<
+    "actions" | "models" | "webSearch" | "memory"
+  >("actions");
   const [personalizedRecommendationIds, setPersonalizedRecommendationIds] = useState<string[]>([]);
   const hasRequestedPickerRecommendationsRef = useRef(false);
   const [liveModelStatuses, setLiveModelStatuses] = useState<Record<string, PublicModelStatusRecord>>({});
@@ -2666,6 +2699,7 @@ export function ChatInput({
               trackProductEvent("chat_tool_menu_opened", selectedModels.length, {});
             }}
             className={`flex shrink-0 touch-manipulation items-center justify-center rounded-full border border-zinc-300 bg-zinc-50 text-zinc-600 transition hover:bg-zinc-100 hover:text-zinc-900 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-300 dark:hover:bg-zinc-800 dark:hover:text-white ${isMobileShell ? "h-11 w-11" : "h-10 w-10"}`}
+            data-testid="composer-tools-button"
             title={t("chat.moreActions")}
             aria-label={t("chat.moreActions")}
             aria-expanded={isMenuOpen && menuView === "actions"}
@@ -2977,6 +3011,35 @@ export function ChatInput({
                       </span>
                     </span>
                   </button>
+                  {/* §8.1 invariant 1. Absent for a guest rather than shown
+                      disabled: a guest has no account memory for a control to
+                      act on, and offering one would imply otherwise. */}
+                  {memoryMode && onMemoryModeChange && (
+                    <button
+                      type="button"
+                      data-testid="tools-memory-row"
+                      onClick={() => setMenuView("memory")}
+                      className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left transition hover:bg-zinc-100 dark:hover:bg-zinc-800"
+                    >
+                      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-accent-account-memory-500/10 text-accent-account-memory-500">
+                        <BookMarked className="h-5 w-5" />
+                      </span>
+                      <span className="flex min-w-0 flex-col">
+                        <span className="text-sm font-medium text-zinc-900 dark:text-zinc-100">
+                          {t("chat.toolsMemory")}
+                        </span>
+                        <span className="text-xs text-zinc-500">
+                          {memoryMode === "on"
+                            ? t("chat.toolsMemoryOn")
+                            : memoryMode === "off"
+                              ? t("chat.toolsMemoryOff")
+                              : accountMemoryDefault === "off"
+                                ? t("chat.toolsMemoryInheritOff")
+                                : t("chat.toolsMemoryInheritOn")}
+                        </span>
+                      </span>
+                    </button>
+                  )}
                   {(() => {
                     const deepResearchModel = AVAILABLE_MODELS.find(
                       (model) => model.id === "perplexity/sonar-deep-research"
@@ -3061,6 +3124,52 @@ export function ChatInput({
                       </p>
                     )}
                   </div>
+                  {(onStartImageDraft || imageGenerationLock) && (
+                    <button
+                      type="button"
+                      data-testid="tools-image-generation-row"
+                      data-locked={imageGenerationLock ? "true" : "false"}
+                      onClick={() => {
+                        closeMenu(false);
+                        if (imageGenerationLock) {
+                          // Same routing the locked model rows use: state the
+                          // requirement, then hand off to the existing
+                          // sign-in / upgrade prompt rather than inventing a
+                          // second one.
+                          onLockedImageGenerationClick?.(imageGenerationLock);
+                          return;
+                        }
+                        // No server row is created here: switching to the
+                        // image draft is a client-side move, and the
+                        // conversation only exists once a generation is
+                        // actually reserved (policy section 6).
+                        onStartImageDraft?.(value);
+                      }}
+                      className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left transition hover:bg-zinc-100 dark:hover:bg-zinc-800"
+                    >
+                      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-accent-image-500/10 text-accent-image-500">
+                        <ImagePlus className="h-5 w-5" />
+                      </span>
+                      <span className="flex min-w-0 flex-col">
+                        <span className="text-sm font-medium text-zinc-900 dark:text-zinc-100">
+                          {t("chat.toolsImageGeneration")}
+                        </span>
+                        <span
+                          className={`text-xs ${
+                            imageGenerationLock
+                              ? "font-semibold text-amber-600 dark:text-amber-400"
+                              : "text-zinc-500"
+                          }`}
+                        >
+                          {imageGenerationLock === "sign_in"
+                            ? t("modelStatusReasons.loginRequired")
+                            : imageGenerationLock === "upgrade"
+                              ? t("modelStatusReasons.upgradeRequired")
+                              : t("chat.toolsImageGenerationDescription")}
+                        </span>
+                      </span>
+                    </button>
+                  )}
                   <div className="my-1 border-t border-zinc-200 dark:border-zinc-700" />
                   <button
                     type="button"
@@ -3131,6 +3240,62 @@ export function ChatInput({
                       </span>
                       {webSearchMode === mode && (
                         <Check className="h-4 w-4 shrink-0 text-accent-web-search-500" aria-hidden="true" />
+                      )}
+                    </button>
+                  ))}
+                </div>
+              ) : menuView === "memory" ? (
+                <div className="space-y-1">
+                  <button
+                    type="button"
+                    onClick={() => setMenuView("actions")}
+                    className={`mb-1 flex items-center justify-center rounded-lg text-zinc-500 hover:bg-zinc-100 hover:text-zinc-900 dark:hover:bg-zinc-800 dark:hover:text-white ${isMobileShell ? "h-11 w-11" : "h-8 w-8"}`}
+                    aria-label={t("auth.cancel")}
+                  >
+                    <ArrowLeft className="h-4 w-4" />
+                  </button>
+                  {CONVERSATION_MEMORY_MODES.map((mode) => (
+                    <button
+                      key={mode}
+                      type="button"
+                      data-testid={`memory-mode-option-${mode}`}
+                      aria-pressed={memoryMode === mode}
+                      onClick={() => {
+                        onMemoryModeChange?.(mode);
+                        closeMenu(false);
+                      }}
+                      className={`flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left transition hover:bg-zinc-100 dark:hover:bg-zinc-800 ${
+                        memoryMode === mode
+                          ? "bg-accent-account-memory-500/10"
+                          : ""
+                      }`}
+                    >
+                      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-accent-account-memory-500/10 text-accent-account-memory-500">
+                        <BookMarked className="h-5 w-5" />
+                      </span>
+                      <span className="flex min-w-0 flex-1 flex-col">
+                        <span className="text-sm font-medium text-zinc-900 dark:text-zinc-100">
+                          {mode === "on"
+                            ? t("chat.toolsMemoryOn")
+                            : mode === "off"
+                              ? t("chat.toolsMemoryOff")
+                              : t("chat.toolsMemoryInherit")}
+                        </span>
+                        <span className="text-xs text-zinc-500">
+                          {mode === "on"
+                            ? t("chat.toolsMemoryOnDescription")
+                            : mode === "off"
+                              ? t("chat.toolsMemoryOffDescription")
+                              : accountMemoryDefault === "off"
+                                ? t("chat.toolsMemoryInheritOffDescription")
+                                : t("chat.toolsMemoryInheritOnDescription")}
+                        </span>
+                      </span>
+                      {memoryMode === mode && (
+                        <Check
+                          className="h-4 w-4 shrink-0 text-accent-account-memory-500"
+                          aria-hidden="true"
+                        />
                       )}
                     </button>
                   ))}
@@ -3251,6 +3416,19 @@ export function ChatInput({
                         onDone={() => closeMenu(true, "done")}
                         onTrackEvent={trackModelPickerEvent}
                         comboFinderSlot={comboFinderSlot}
+                        onSelectImageModel={
+                          onStartImageDraft
+                            ? (modelId) => {
+                                closeMenu(false);
+                                onStartImageDraft(value, modelId);
+                              }
+                            : undefined
+                        }
+                        imageGenerationLock={imageGenerationLock}
+                        onLockedImageGenerationClick={(lock) => {
+                          closeMenu(false);
+                          onLockedImageGenerationClick?.(lock);
+                        }}
                       />
                     );
                   })()}

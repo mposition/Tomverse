@@ -14,7 +14,7 @@
 | --- | --- |
 | Font loading and preload policy | `lib/fonts.ts` |
 | Locale font routing, semantic roles | `app/globals.css` |
-| Root layout font variables | `app/layout.tsx` |
+| Root layout font variables | `components/DocumentShell.tsx` |
 | `lang` attribute source of truth | `components/LanguageProvider.tsx` |
 | Email font policy | `lib/emailTypography.ts` |
 | Preload measurement | `scripts/report-font-preload.mjs` |

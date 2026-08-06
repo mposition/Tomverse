@@ -94,6 +94,7 @@ import {
     recordProviderFailure,
     recordProviderSuccess,
 } from "@/lib/providerMonitoring";
+import { observeServedProcessingTier } from "@/lib/servedProcessingTier";
 import { z } from "zod";
 import {
     apiSecurityResponse,
@@ -119,7 +120,36 @@ import {
     GUEST_MAX_ATTACHMENTS_PER_MESSAGE,
 } from "@/lib/guestAttachments";
 import { isChatCostSafetyCode } from "@/lib/chatCostSafetyCore";
+import {
+    chatLeaseAcquired,
+    chatLeaseReleased,
+    chatLeaseStreamPublished,
+    chatLeaseTakenByStream,
+    chatLeaseToReleaseOnUnwind,
+    NO_CHAT_LEASE,
+    type ChatLeaseOwnership,
+} from "@/lib/chatLeaseOwnershipCore";
 import { estimatePromptTokens } from "@/lib/chatTokenEstimate";
+import { fitChatOutputToContextWindow } from "@/lib/chatContextWindow";
+import {
+    ACTIVE_ESTIMATOR_VERSION,
+    createTokenEstimateAccumulator,
+    getCalibration,
+} from "@/lib/chatTokenEstimate";
+import { createShadowAccumulator } from "@/lib/tokenEstimateShadow";
+import {
+    isTokenEstimateShadowEnabled,
+    recordShadowReservation,
+    SHADOW_CANDIDATE_ESTIMATOR_VERSION,
+} from "@/lib/tokenEstimateShadowRecorder";
+import { buildChatMemoryContext } from "@/lib/chatMemoryContext";
+import { latestUserPromptText } from "@/lib/chatMemoryContextCore";
+import {
+    consumeContextBundle,
+    verifyChatContextBundle,
+} from "@/lib/chatContextBundleService";
+import { recordMemoryCounter } from "@/lib/memoryMetrics";
+import { injectedTokenBucket } from "@/lib/memoryMetricsCore";
 import {
     providerDiagnosticCode,
     safeErrorMessage,
@@ -650,7 +680,11 @@ async function handleChatPost(
     traceId: string,
     verificationGrant: { setCookie?: string }
 ): Promise<Response> {
-    let leaseId: string | null = null;
+    // Who holds the concurrency slot right now. The failure path at the bottom
+    // asks this rather than a boolean, because "the request no longer holds it"
+    // covers both a clean handoff to the stream and a stream that was built and
+    // never published -- and only the second is a slot nobody will free.
+    let leaseOwnership: ChatLeaseOwnership = NO_CHAT_LEASE;
     // Declared out here so the failure path can stop the renewal timer even
     // when the stream was never built: an interval left running would keep
     // renewing a lease no request owns any more.
@@ -671,8 +705,13 @@ async function handleChatPost(
             deepResearchDepth,
             webSearchMode,
             admissionToken,
+            contextBundle,
         } = validateChatPayload(body);
         const requestedModelId = modelId || APP_DEFAULTS.defaultModelId;
+        // §8.1 invariant 1: the conversation's stored mode, read from the row
+        // the ownership check loads below. Null for a request with no
+        // conversation, which inherits the account default like `inherit`.
+        let conversationMemoryMode: string | null = null;
         requestedModelIdForLog = requestedModelId;
         const runtimeModels = await getRuntimeModels({ includeCatalogDeleted: true });
         const runtimeModelMap = new Map(runtimeModels.map((model) => [model.id, model]));
@@ -875,8 +914,15 @@ async function handleChatPost(
             }
             const conversation = await prisma.conversation.findUnique({
                 where: { id: conversationId },
-                select: { userId: true, password: true, selectedModels: true, kind: true },
+                select: {
+                    userId: true,
+                    password: true,
+                    selectedModels: true,
+                    kind: true,
+                    memoryMode: true,
+                },
             });
+            conversationMemoryMode = conversation?.memoryMode ?? null;
             if (!conversation || conversation.userId !== session.user.id) {
                 return tracedJsonError(
                     "Conversation access denied.",
@@ -969,8 +1015,34 @@ async function handleChatPost(
         // Shared with the composer estimate and the comparison preflight so a
         // Korean conversation is not reserved several times too small here and
         // correctly elsewhere -- see lib/chatTokenEstimate.ts.
-        const estimateTextTokens = (text: string) =>
-            Math.max(1, estimatePromptTokens(text));
+        //
+        // The shadow accumulator hangs off this alias rather than off each call
+        // site: every text-derived contribution to estimatedInputTokens already
+        // passes through here, so one wrapper captures them all and none can be
+        // forgotten later. It only observes -- the returned value is unchanged.
+        const shadowAccumulator = isTokenEstimateShadowEnabled()
+            ? createShadowAccumulator({
+                  controlVersion: ACTIVE_ESTIMATOR_VERSION,
+                  candidateVersion: SHADOW_CANDIDATE_ESTIMATOR_VERSION,
+              })
+            : null;
+        // The segment-level companion to `estimatedInputTokens`. The number is
+        // what the rest of this handler reads; the breakdown is what the
+        // reservation needs, because the calibration widens each character
+        // segment by its own margin and a bare total has thrown that mix away.
+        // Both are fed from this one alias so neither can drift from the other
+        // -- `tests/chatBudgetBreakdown.test.mjs` pins that they agree.
+        const inputEstimate = createTokenEstimateAccumulator();
+        const estimateTextTokens = (text: string) => {
+            shadowAccumulator?.add(text);
+            const raw = estimatePromptTokens(text);
+            // The per-piece floor is a minimum, not a prediction: an empty
+            // message still costs the provider its role framing. It is counted
+            // as an opaque token so no tokenizer margin is applied to it.
+            if (raw > 0) inputEstimate.addText(text);
+            else inputEstimate.addTokens(1);
+            return Math.max(1, raw);
+        };
 
         const providerContextQueues = new Map<string, ModelMessage[][]>();
         if (
@@ -1014,7 +1086,157 @@ async function handleChatPost(
             }
         }
 
-        const formattedMessages: ModelMessage[] = [];
+        // The §10 context bundle: what memory this request may carry, and
+        // proof that it is the same context the request was priced against.
+        //
+        // No bundle means no memory, and that is not a degraded fallback: a
+        // request whose price did not include a memory block must not send
+        // one, or the user is charged for one prompt and shown another. It is
+        // also the ordinary path today — injection stays off until §12.4's
+        // procedure has been completed, so nothing issues a bundle and this
+        // whole branch is skipped.
+        let memorySystemPrompt: string | null = null;
+        let memoryUsedCount = 0;
+        // §22 attribution, written onto the answer rather than counted.
+        //
+        // The day counters beside this already report the injection *ratio*.
+        // What they cannot report is which answer carried memory, and the
+        // follow-up proxy is a comparison between the answers memory shaped
+        // and the ones it did not — so it needs the fact per answer. Null
+        // while no bundle accompanies the request, which is what "memory was
+        // not possible here" means; §8.1 invariant 4 permits the used count
+        // and forbids the context itself, which is never written.
+        let memoryAttribution: {
+            memoryUsedCount: number;
+            memoryTokens: number;
+        } | null = null;
+        if (session?.user?.id) {
+            // §22's injection denominator. Recorded before the bundle branch
+            // so it counts every authenticated request, including the ones
+            // that carry no bundle — the share of requests that had no memory
+            // to inject is the thing the ratio is for.
+            void recordMemoryCounter("chat_memory_eligible");
+        }
+        if (contextBundle && session?.user?.id) {
+            void recordMemoryCounter("context_bundle_presented");
+            // Built here rather than trusted from the bundle: staleness is
+            // decided by recomputing, and a bundle that asserted its own
+            // freshness would be exactly as trustworthy as the client holding
+            // it (§10). The query is the raw prompt, the same text the
+            // preparation step scored — not the attachment-augmented message
+            // assembled below, which would retrieve differently.
+            const memoryContext = await buildChatMemoryContext({
+                userId: session.user.id,
+                query: latestUserPromptText(messages),
+                // §8.1 invariant 1: this conversation's own mode decides, with
+                // `inherit` falling back to the account default. Read here
+                // rather than trusted from the client, and read on the chat
+                // side as well as the preflight side so a mode changed between
+                // the two is caught by the freshness check instead of being
+                // priced one way and sent the other.
+                conversationMode: conversationMemoryMode,
+            });
+            const verification = verifyChatContextBundle(contextBundle, {
+                subjectKey: session.user.id,
+                conversationId: conversationId ?? null,
+                modelId: requestedModelId,
+                currentFingerprint: memoryContext.fingerprint,
+            });
+            if (!verification.ok) {
+                // Two different failures with two different meanings. Drift is
+                // expected and recoverable — the user approved a memory while
+                // the send was in flight — so it names the recovery. Everything
+                // else is a token that never described this request: a bad
+                // signature, another subject, a model that was not priced. That
+                // is a client defect or tampering, and answering it with
+                // "re-preflight" would invite a retry loop against a token that
+                // can never pass.
+                const drifted =
+                    verification.reason === "stale" ||
+                    verification.reason === "expired";
+                // Awaited rather than fired and forgotten: the response is
+                // about to be returned, and a refusal that is never counted
+                // is exactly the observation §22 wants. One upsert, on a path
+                // that is rare by construction.
+                await recordMemoryCounter(
+                    drifted ? "context_bundle_stale" : "context_bundle_rejected"
+                );
+                return drifted
+                    ? tracedJsonError(
+                          "The conversation context changed while this message was being sent.",
+                          "CHAT_CONTEXT_BUNDLE_STALE",
+                          409,
+                          traceId,
+                          { requiresPreflight: true }
+                      )
+                    : tracedJsonError(
+                          "Invalid chat context.",
+                          "INVALID_CONTEXT_BUNDLE",
+                          400,
+                          traceId
+                      );
+            }
+            const consumption = await consumeContextBundle({
+                bundleId: verification.payload.bundleId,
+                modelId: requestedModelId,
+                userId: session.user.id,
+                expiresAt: new Date(verification.payload.expiresAtMs),
+            });
+            if (!consumption.consumed) {
+                // A replay, not drift — but the recovery is the same one, and
+                // §18's code table is settled: this request cannot establish
+                // that its context was priced, and a fresh preparation is what
+                // fixes it. Reusing the code keeps one client path instead of
+                // adding a second that would do the same thing.
+                //
+                // Counted apart from staleness even so: the user-facing code
+                // is shared, but "the context drifted" and "this bundle was
+                // presented twice" are different operational facts, and only
+                // the first belongs in the stale ratio.
+                await recordMemoryCounter("context_bundle_replayed");
+                return tracedJsonError(
+                    "The conversation context changed while this message was being sent.",
+                    "CHAT_CONTEXT_BUNDLE_STALE",
+                    409,
+                    traceId,
+                    { requiresPreflight: true }
+                );
+            }
+            memorySystemPrompt = memoryContext.prompt.text;
+            memoryUsedCount = memoryContext.prompt.usedCount;
+            memoryAttribution = {
+                memoryUsedCount,
+                memoryTokens: verification.payload.memoryTokens,
+            };
+            if (memorySystemPrompt) {
+                // A bundle that passed but selected nothing is not an
+                // injection: no block reaches the prompt, so counting it would
+                // report memory as used on a request the model never saw it in.
+                void recordMemoryCounter("chat_memory_injected");
+                if (memoryContext.truncatedByBudget) {
+                    void recordMemoryCounter("injected_context_truncated");
+                }
+                // The priced figure, not a fresh estimate, so the bucket
+                // describes the same block the reservation was taken against.
+                const bucket = injectedTokenBucket(
+                    verification.payload.memoryTokens
+                );
+                if (bucket) void recordMemoryCounter(bucket);
+            }
+            // The figure that was reserved against, not a fresh estimate: the
+            // two agree here by construction, and if they ever stop agreeing
+            // the user should be billed the number they were quoted.
+            estimatedInputTokens += verification.payload.memoryTokens;
+            // Quoted, not re-estimated -- so it enters as an opaque count.
+            inputEstimate.addTokens(verification.payload.memoryTokens);
+        }
+
+        // §9.1 places the memory block above the conversation and below the
+        // safety policy, so it is the first message and the rules that govern
+        // reading it are stated inside it, before the memories themselves.
+        const formattedMessages: ModelMessage[] = memorySystemPrompt
+            ? [{ role: "system", content: memorySystemPrompt }]
+            : [];
         for (const msg of messages) {
             if (msg.role === "assistant") {
                 const content = String(msg.content ?? "");
@@ -1447,9 +1669,14 @@ async function handleChatPost(
             const text = [String(msg.content ?? ""), ...textAttachments]
                 .filter(Boolean)
                 .join("\n\n");
+            const nativeAttachmentTokens = estimateNativeAttachmentTokens(
+                fileParts.length
+            );
+            // Not text: a per-part allowance for what the provider will charge
+            // for the attachment itself.
+            inputEstimate.addTokens(nativeAttachmentTokens);
             estimatedInputTokens +=
-                estimateTextTokens(text) +
-                estimateNativeAttachmentTokens(fileParts.length);
+                estimateTextTokens(text) + nativeAttachmentTokens;
 
             formattedMessages.push({
                 role: "user",
@@ -1462,7 +1689,7 @@ async function handleChatPost(
         const budget = createChatBudget(
             access.kind,
             modelConfig,
-            estimatedInputTokens,
+            inputEstimate.breakdown(),
             {
                 webSearchSurchargeCredits: getWebSearchSurchargeCredits(
                     webSearchMode ?? "off",
@@ -1471,17 +1698,39 @@ async function handleChatPost(
                 nativeSearchEnabled,
             }
         );
-        if (
-            modelConfig.contextWindowTokens &&
-            estimatedInputTokens + budget.maxOutputTokens >
-                modelConfig.contextWindowTokens
-        ) {
+        // `budget.inputTokens`, not the raw estimate: what this guard has to
+        // bound is what the request really sends, and a provider-native search
+        // adds 6,400 input tokens on top of the conversation (6,000 of
+        // retrieved result text, 400 of tool definition). Comparing the raw
+        // estimate let a searching turn sit that far over the very limit this
+        // exists to protect, and the request then failed at the provider --
+        // after a credit reservation and a dispatched call -- instead of here,
+        // for free. It is also the figure the reservation is sized on, so the
+        // two now agree about how big this turn is
+        // (docs/ops/tomverse-chat-context-window-rollout.md).
+        //
+        // That figure is clamped to the plan's input ceiling, so a request over
+        // *that* limit was already refused by `createChatBudget` with
+        // CHAT_INPUT_TOKEN_LIMIT before reaching here.
+        const outputBudget = fitChatOutputToContextWindow({
+            contextWindowTokens: modelConfig.contextWindowTokens,
+            reservedInputTokens: budget.inputTokens,
+            requestOutputCapTokens: budget.maxOutputTokens,
+            providerMaxOutputTokens: budget.providerMaxOutputTokens,
+        });
+        if (outputBudget.kind === "exceeded") {
             throw new ChatAccessError(
                 400,
                 "MODEL_CONTEXT_WINDOW_EXCEEDED",
-                `${modelConfig.name} supports up to ${modelConfig.contextWindowTokens.toLocaleString("en-US")} input and output tokens combined. Start a new conversation or shorten the attachments.`
+                `${modelConfig.name} holds ${outputBudget.limitTokens.toLocaleString("en-US")} tokens of conversation and answer together, and this conversation already fills it. Start a new conversation or shorten the attachments.`
             );
         }
+        // What the request actually asks the model to produce: the application
+        // cap, lowered to the provider's own ceiling and to the room the window
+        // has left. The credit and cost reservation deliberately keeps the
+        // unfitted figure -- over-reserving is refunded at settlement, and
+        // reserving less than the answer might cost protects nothing.
+        const requestMaxOutputTokens = outputBudget.outputTokens;
         const accessGrant = await acquireChatAccess(access, budget, {
             traceId,
             source: "chat",
@@ -1492,8 +1741,24 @@ async function handleChatPost(
             // admitted in part.
             admissionToken,
         });
-        leaseId = accessGrant.leaseId;
+        leaseOwnership = chatLeaseAcquired(accessGrant.leaseId);
         usageReservation = accessGrant.usageReservation;
+        // Shadow only, and awaited so the settlement update cannot race the
+        // insert it depends on. The recorder is inert unless the flag is set
+        // and swallows its own failures, so this cannot fail a paid request.
+        if (shadowAccumulator?.hasText) {
+            await recordShadowReservation({
+                attemptId: usageReservation.reservationId,
+                modelId: modelConfig.id,
+                providerId: modelConfig.provider,
+                controlRawEstimatedInputTokens: estimatedInputTokens,
+                candidateRawEstimatedInputTokens:
+                    shadowAccumulator.candidateTotalFrom(estimatedInputTokens),
+                reservedInputTokens: budget.inputTokens,
+                tokenizerFamily: getCalibration(ACTIVE_ESTIMATOR_VERSION).family,
+                ...shadowAccumulator.snapshot(),
+            });
+        }
         try {
             await notifyProviderBudgetIfNeeded(modelConfig.provider);
         } catch (error) {
@@ -1515,9 +1780,8 @@ async function handleChatPost(
             // Ownership of this turn moves to the polling job: the request
             // ends here, so its slot must end here too rather than being held
             // for a job that can outlive any lease.
-            const activeLeaseId = leaseId;
-            leaseId = null;
-            await releaseChatAccess(activeLeaseId, {
+            leaseOwnership = chatLeaseReleased();
+            await releaseChatAccess(accessGrant.leaseId, {
                 traceId,
                 reason: "deep_research_handoff",
                 subjectScope: access.kind,
@@ -1576,6 +1840,7 @@ async function handleChatPost(
                             status: "pending",
                             modelId: requestedModelId,
                             pendingJobId: perplexityJobId,
+                            ...memoryAttribution,
                         },
                     });
                     await tx.perplexityAsyncJob.create({
@@ -1677,7 +1942,7 @@ async function handleChatPost(
         const result = await streamText({
             model: activeModel,
             messages: formattedMessages,
-            maxOutputTokens: budget.maxOutputTokens,
+            maxOutputTokens: requestMaxOutputTokens,
             maxRetries: modelConfig.provider === "zhipu" ? 0 : undefined,
             headers:
                 modelConfig.provider === "perplexity"
@@ -1688,8 +1953,11 @@ async function handleChatPost(
         });
 
         const sourceReader = result.textStream.getReader();
-        const activeLeaseId = leaseId;
-        leaseId = null;
+        // The stream owns the slot from here, but it cannot release anything
+        // until it is pulled, and it is only pulled once the Response below is
+        // returned. Until then the failure path is still the owner of record.
+        const activeLeaseId = accessGrant.leaseId;
+        leaseOwnership = chatLeaseTakenByStream(leaseOwnership);
         let generatedText = "";
         let released = false;
         let sourceCancelled = false;
@@ -1924,6 +2192,7 @@ async function handleChatPost(
                             result.finishReason,
                             result.rawFinishReason,
                             result.content,
+                            result.providerMetadata,
                         ] as const);
                         const [
                             responseResult,
@@ -1931,7 +2200,31 @@ async function handleChatPost(
                             finishReasonResult,
                             rawFinishReasonResult,
                             contentResult,
+                            providerMetadataResult,
                         ] = completionResults;
+                        // Observation only: the tier a response was actually
+                        // served at, checked against the Standard table every
+                        // pricing profile claims. Nothing here settles, prices
+                        // or reserves -- see lib/servedProcessingTier.ts.
+                        const servedTier = observeServedProcessingTier(
+                            modelConfig.provider,
+                            providerMetadataResult.status === "fulfilled"
+                                ? providerMetadataResult.value
+                                : undefined
+                        );
+                        if (servedTier.mismatchesAssumedStandard) {
+                            console.warn(
+                                JSON.stringify({
+                                    event: "chat_served_processing_tier_mismatch",
+                                    traceId,
+                                    provider: servedTier.provider,
+                                    modelId: requestedModelId,
+                                    servedTier: servedTier.servedTier,
+                                    classification: servedTier.classification,
+                                    timestamp: new Date().toISOString(),
+                                })
+                            );
+                        }
                         const rejectedCompletion = completionResults.find(
                             (item): item is PromiseRejectedResult =>
                                 item.status === "rejected"
@@ -2117,6 +2410,10 @@ async function handleChatPost(
                                             status: completionOutcome.status,
                                             modelId: requestedModelId,
                                             searchMetadata: webSearchExecution,
+                                            // Spread, so an answer with no
+                                            // bundle writes neither column
+                                            // and both stay NULL (§22).
+                                            ...memoryAttribution,
                                         },
                                     });
                                     if (providerContext) {
@@ -2304,6 +2601,17 @@ async function handleChatPost(
             "Cache-Control": "no-cache, no-transform",
             "X-Request-ID": traceId,
         });
+        // §13.4: how many memories this answer was given, counted by the
+        // server. A header rather than something in the stream, because the
+        // stream is the answer itself and the count has to be available
+        // before the first token — and because a count folded into the body
+        // is a count the client could be talked into computing. Absent, not
+        // zero, when memory played no part: §13.4 forbids a misleading
+        // indication, and "0 memories used" on a request that never had any
+        // is one.
+        if (memoryUsedCount > 0) {
+            headers.set("X-Chat-Memory-Used", String(memoryUsedCount));
+        }
         if (accessGrant.setCookie) {
             headers.append("Set-Cookie", accessGrant.setCookie);
         }
@@ -2311,15 +2619,23 @@ async function handleChatPost(
         // path, success and failure alike -- adding it here as well would
         // send it twice.
 
-        return new Response(protectedStream.pipeThrough(new TextEncoderStream()), {
-            headers,
-        });
+        const response = new Response(
+            protectedStream.pipeThrough(new TextEncoderStream()),
+            { headers }
+        );
+        // Only once the Response exists, because everything above it can still
+        // throw and an unpublished stream is never pulled. After this the
+        // stream's own release paths are the ones that free the slot.
+        leaseOwnership = chatLeaseStreamPublished(leaseOwnership);
+        return response;
     } catch (error: unknown) {
         stopLeaseHeartbeat?.();
-        if (leaseId) {
-            await releaseChatAccess(leaseId, {
+        const orphanedLease = chatLeaseToReleaseOnUnwind(leaseOwnership);
+        if (orphanedLease) {
+            leaseOwnership = chatLeaseReleased();
+            await releaseChatAccess(orphanedLease.leaseId, {
                 traceId,
-                reason: "request_failed_before_stream",
+                reason: orphanedLease.reason,
             });
         }
         if (usageReservation) {

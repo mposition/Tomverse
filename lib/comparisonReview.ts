@@ -2,6 +2,11 @@ import "server-only";
 
 import { createHash, randomInt } from "node:crypto";
 import { z } from "zod";
+// Shared with the chat route and the composer estimate. This module carried a
+// byte-for-byte copy of the same 1.5/3/4 heuristic, so recalibrating one and
+// not the other would have split Chat's and Review's estimates apart again --
+// which is the divergence the shared module was created to end.
+import { createTokenEstimateAccumulator } from "@/lib/chatTokenEstimate";
 import { getEnabledModel, type AiModel } from "@/lib/models";
 import { PROVIDER_API_KEY_ENV } from "@/lib/providerMonitoring";
 import { assertModelAccess, type ChatAccess } from "@/lib/chatSecurity";
@@ -548,31 +553,27 @@ export const validateComparisonReviewInputSize = (
   }
 };
 
-const CJK_CHARACTER_PATTERN =
-  /[぀-ヿ㐀-䶿一-鿿가-힣豈-﫿]/gu;
-
-// Byte-length/4 approximates English-ish BPE tokenization reasonably well,
-// but badly underestimates CJK text: most multilingual tokenizers spend
-// roughly 1-1.5 tokens per Hangul/Han/Kana character, not one token per ~4
-// UTF-8 bytes (each of which is itself ~3 bytes for those code points) -- so
-// a 10,000-character Korean input comes out several times too low under a
-// pure byte-based estimate. Count CJK characters separately at ~1.5 tokens
-// each and fall back to the byte heuristic for the remaining text.
-const estimateTextTokens = (text: string) => {
-  const cjkMatches = text.match(CJK_CHARACTER_PATTERN);
-  const cjkCharacterCount = cjkMatches ? cjkMatches.length : 0;
-  const cjkByteLength = cjkCharacterCount * 3;
-  const totalBytes = Buffer.byteLength(text, "utf8");
-  const nonCjkBytes = Math.max(0, totalBytes - cjkByteLength);
-  return Math.ceil(cjkCharacterCount * 1.5) + Math.ceil(nonCjkBytes / 4);
-};
-
 export const estimateComparisonReviewTokens = (
   question: string,
   responses: ReviewSourceResponse[]
 ) => {
   const text = `${question}\n${responses.map((response) => response.content).join("\n")}`;
-  return Math.max(256, estimateTextTokens(text) + 1_200);
+  // A breakdown rather than a total, because the reservation widens each
+  // character segment by its own margin and a sum has already lost the mix.
+  // The two constants stay opaque: 1,200 is the review template's own framing
+  // and 256 a floor, and neither is a tokenizer prediction that could be
+  // mispredicted.
+  const estimate = createTokenEstimateAccumulator()
+    .addText(text)
+    .addTokens(1_200)
+    .breakdown();
+  return estimate.rawTotal >= 256
+    ? estimate
+    : {
+        ...estimate,
+        opaqueTokens: estimate.opaqueTokens + (256 - estimate.rawTotal),
+        rawTotal: 256,
+      };
 };
 
 export const createComparisonReviewHash = ({

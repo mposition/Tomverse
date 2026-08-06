@@ -116,3 +116,4 @@ never its own `tab`, which the lookup has already consumed.
 | `AdminRiskPanels` — one component forcing four unrelated panels onto any page that wanted one | four named exports, each mounted where it belongs; the duplicated administrator table is gone (`AdminAccessPanel` already renders it) |
 | `syncBillingDefaultsToDatabase()` on every admin page render | `/admin/billing` only (and `/api/admin/billing`, which already called it) |
 | `ALL_ITEMS.slice(0, 9)` in the empty palette | Pinned, Recent, and every page grouped exactly as the sidebar groups them |
+| `AdminMemoryImportPanel` stacked under the product funnel, so opening either fetched both | its own `?tab=imports` section |

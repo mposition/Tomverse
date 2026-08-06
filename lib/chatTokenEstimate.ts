@@ -5,37 +5,334 @@
 // `Buffer.byteLength(text) / 4` copy, which is why a Korean conversation could
 // be reserved several times too small on one surface and not another.
 //
-// Byte-length/4 approximates English-ish BPE tokenization reasonably well, but
-// badly underestimates CJK text: most multilingual tokenizers spend roughly
-// 1-1.5 tokens per Hangul/Han/Kana character, not one token per ~4 UTF-8 bytes
-// (each of those characters is itself ~3 bytes). Count CJK characters
-// separately at ~1.5 tokens each and fall back to the byte heuristic for the
-// rest.
+// Two things this module deliberately keeps apart, because conflating them is
+// what makes an accuracy target unmeasurable:
+//
+//   raw      -- an unbiased prediction of what the tokenizer will produce.
+//               This is what ESTIMATE-01/02 grade, and it must carry no safety
+//               margin: a value padded for safety cannot also be scored for
+//               accuracy, because the padding shows up as error.
+//   reserved -- raw, widened per segment by a safety multiplier and framing
+//               overhead. This is what credits, the provider budget and the
+//               input limit use.
+//
+// Calibration is per *character segment*, not per request. The estimator has
+// always summed a CJK-character term and a byte term separately, and keeping
+// that split means a correction to one segment cannot move the other: a
+// recalibrated Hangul coefficient leaves pure Latin, code and JSON requests
+// byte-for-byte identical to before.
+//
+// See docs/policy/tomverse-chat-model-capability-inventory.md G1 and
+// `npm run report:token-estimate-accuracy` for the measured error.
 
-const CJK_CHARACTER_PATTERN =
-  /[぀-ヿ㐀-䶿一-鿿가-힣豈-﫿]/gu;
+/**
+ * Which tokenizer's behaviour a calibration is trying to predict. Today every
+ * model shares one generic entry; naming the family now means per-family
+ * calibration becomes a lookup change rather than a rewrite once per-model
+ * tokenizer identity exists.
+ */
+export type TokenizerFamily = "generic_multilingual";
 
-const CJK_TOKENS_PER_CHARACTER = 1.5;
+/**
+ * The character segments the estimator prices separately. They are calibrated
+ * and reserved independently because their tokenizer behaviour differs and
+ * because the evidence for each arrives separately -- Korean samples say
+ * nothing about how Han or Kana tokenize.
+ */
+export type EstimateSegment = "hangul" | "hanKana" | "nonCjk";
+
+export type EstimatorCalibration = {
+  /** Stable identifier recorded alongside any estimate this produced. */
+  version: string;
+  family: TokenizerFamily;
+  /** Tokens per Hangul syllable. */
+  hangulTokensPerCharacter: number;
+  /** Tokens per Han ideograph, Hiragana or Katakana character. */
+  hanKanaTokensPerCharacter: number;
+  /** UTF-8 bytes per token for everything else. */
+  nonCjkBytesPerToken: number;
+  /**
+   * Applied only when turning raw into reserved, per segment. Never applied to
+   * the raw value, which would make the accuracy gates unmeasurable.
+   */
+  reservationMultiplierBySegment: Record<EstimateSegment, number>;
+  /**
+   * Why those multipliers are what they are. A provisional floor is a
+   * placeholder for a family with no provider-reported samples behind it yet;
+   * a measured value comes from Q99(actual / raw) + 0.05 on that family's
+   * provider-reported cohort.
+   */
+  reservationMultiplierSource: "identity" | "provisional_floor" | "measured_q99";
+  /** Flat per-request framing cost added to the reservation, in tokens. */
+  reservationFramingOverheadTokens: number;
+};
+
 const CJK_BYTES_PER_CHARACTER = 3;
-const NON_CJK_BYTES_PER_TOKEN = 4;
+
+/** Hangul syllables. */
+export const HANGUL_CHARACTER_PATTERN = /[가-힣]/gu;
+
+/**
+ * Every character priced by the CJK term. Kept exported because callers that
+ * need to count the same class -- the accuracy report, for one -- must not
+ * drift by keeping their own copy.
+ *
+ * Note the final range is U+8C48-U+FAFF, not the U+F900-U+FAFF compatibility
+ * block it reads as: the literal here is U+8C48, a unified ideograph that
+ * renders identically to U+F900. The union therefore also covers Yi, the
+ * Hangul Jamo extension blocks and the Private Use Area. That is harmless for
+ * real text and it is left exactly as shipped, because narrowing it would move
+ * which characters are priced at the CJK rate -- a billing change, not a
+ * cleanup. It is recorded rather than corrected here.
+ */
+export const CJK_CHARACTER_PATTERN = /[぀-ヿ㐀-䶿一-鿿가-힣豈-﫿]/gu;
+
+// Han/Kana is derived as "CJK minus Hangul" rather than written as its own
+// class. Because of the range above, a separate Han/Kana pattern would also
+// match Hangul and every Hangul character would be counted twice. Subtracting
+// keeps the split exact and keeps the total byte-for-byte identical to the
+// single-term estimator it replaces.
+
+const IDENTITY_MULTIPLIERS: Record<EstimateSegment, number> = {
+  hangul: 1,
+  hanKana: 1,
+  nonCjk: 1,
+};
+
+export const ESTIMATOR_CALIBRATIONS: Record<string, EstimatorCalibration> = {
+  // The shipped behaviour, unchanged. Its constants were a fair approximation
+  // of the GPT-4-era tokenizer, which spent 1.16-1.37 tokens per CJK
+  // character. Newer tokenizers are far more efficient -- o200k_base spends
+  // about 0.74-0.79 -- so this now overestimates Korean by roughly 110%.
+  generic_multilingual_v1: {
+    version: "generic_multilingual_v1",
+    family: "generic_multilingual",
+    hangulTokensPerCharacter: 1.5,
+    hanKanaTokensPerCharacter: 1.5,
+    nonCjkBytesPerToken: 4,
+    // Identity, so v1 reserves exactly what it estimates -- which is what the
+    // current reservation path does. Tool overhead stays in createChatBudget
+    // rather than moving here, keeping v1 byte-identical.
+    reservationMultiplierBySegment: IDENTITY_MULTIPLIERS,
+    reservationMultiplierSource: "identity",
+    reservationFramingOverheadTokens: 0,
+  },
+
+  // Hangul only. The 0.8 coefficient was measured against o200k_base on Korean
+  // samples, and Korean samples are not evidence about Han or Kana, so those
+  // stay on v1 until their own measurements exist. Non-CJK stays on v1 as
+  // well: 5.5 bytes/token holds for English prose but not for code or JSON,
+  // which tokenize far denser -- a global non-CJK change took json-payload to
+  // -42%, an underestimate, which is the dangerous direction for a
+  // reservation.
+  //
+  // Not active. Activating it changes credit reservation, the provider budget
+  // and the input-limit rejection rate, so it goes through dual-estimate
+  // shadow recording and a staged rollout rather than a constant swap.
+  //
+  // The 1.20 Hangul multiplier is a provisional floor, not a target. The raw
+  // estimate at 0.8 already runs about 18% above actual on the current corpus,
+  // so compounding 1.20 on top would over-reserve; the real value is
+  // max(1.00, Q99(actual / raw) + 0.05) computed on provider-reported samples
+  // for this family, which is what the calibration query exists to produce.
+  hangul_segment_v2: {
+    version: "hangul_segment_v2",
+    family: "generic_multilingual",
+    hangulTokensPerCharacter: 0.8,
+    hanKanaTokensPerCharacter: 1.5,
+    nonCjkBytesPerToken: 4,
+    reservationMultiplierBySegment: { hangul: 1.2, hanKana: 1, nonCjk: 1 },
+    reservationMultiplierSource: "provisional_floor",
+    reservationFramingOverheadTokens: 0,
+  },
+};
+
+/**
+ * The calibration every surface uses today. Changing this is a production
+ * billing change, not a refactor: it moves credits, the internal cost
+ * reservation and how often a request is refused for exceeding the input
+ * limit.
+ */
+export const ACTIVE_ESTIMATOR_VERSION = "generic_multilingual_v1";
+
+export const getCalibration = (version: string = ACTIVE_ESTIMATOR_VERSION) => {
+  const calibration = ESTIMATOR_CALIBRATIONS[version];
+  if (!calibration) {
+    throw new Error(`Unknown estimator calibration "${version}".`);
+  }
+  return calibration;
+};
 
 const utf8ByteLength = (text: string) =>
   typeof Buffer !== "undefined"
     ? Buffer.byteLength(text, "utf8")
     : new TextEncoder().encode(text).length;
 
-/** Estimated prompt tokens for one piece of text. Never negative. */
-export const estimateTextTokens = (text: string) => {
-  if (!text) return 0;
-  const cjkMatches = text.match(CJK_CHARACTER_PATTERN);
-  const cjkCharacterCount = cjkMatches ? cjkMatches.length : 0;
-  const cjkByteLength = cjkCharacterCount * CJK_BYTES_PER_CHARACTER;
-  const nonCjkBytes = Math.max(0, utf8ByteLength(text) - cjkByteLength);
-  return (
-    Math.ceil(cjkCharacterCount * CJK_TOKENS_PER_CHARACTER) +
-    Math.ceil(nonCjkBytes / NON_CJK_BYTES_PER_TOKEN)
-  );
+const countMatches = (text: string, pattern: RegExp) => {
+  const matches = text.match(pattern);
+  return matches ? matches.length : 0;
 };
+
+export type TokenEstimateBreakdown = {
+  version: string;
+  hangulCharacters: number;
+  hanKanaCharacters: number;
+  nonCjkBytes: number;
+  /** Raw, unpadded tokens contributed by each segment. */
+  tokensBySegment: Record<EstimateSegment, number>;
+  /**
+   * Tokens counted without reading any text: attachment estimates, a tool
+   * schema's flat cost, the fixed allowance a prompt template adds.
+   *
+   * Held apart from the segments because the reservation margins model
+   * *tokenizer* error, and there is no tokenizer prediction here to be wrong.
+   * Widening an image-tile count by a coefficient measured on Korean prose
+   * would be a category error, so these are reserved at face value -- see
+   * `toReservedInputTokens`.
+   */
+  opaqueTokens: number;
+  /**
+   * Sum of the segment terms and the opaque tokens. This is the value
+   * ESTIMATE-01/02 grade.
+   */
+  rawTotal: number;
+};
+
+/**
+ * Segment-level breakdown of the raw estimate. Callers that only need the
+ * total should use `estimateRawTextTokens`; the breakdown exists so the
+ * reservation can widen each segment by its own margin, and so shadow
+ * telemetry can record where an estimate came from without keeping the text.
+ */
+export const estimateTokenBreakdown = (
+  text: string,
+  version: string = ACTIVE_ESTIMATOR_VERSION
+): TokenEstimateBreakdown => {
+  const calibration = getCalibration(version);
+  if (!text) {
+    return {
+      version: calibration.version,
+      hangulCharacters: 0,
+      hanKanaCharacters: 0,
+      nonCjkBytes: 0,
+      tokensBySegment: { hangul: 0, hanKana: 0, nonCjk: 0 },
+      opaqueTokens: 0,
+      rawTotal: 0,
+    };
+  }
+
+  const cjkCharacters = countMatches(text, CJK_CHARACTER_PATTERN);
+  const hangulCharacters = countMatches(text, HANGUL_CHARACTER_PATTERN);
+  const hanKanaCharacters = Math.max(0, cjkCharacters - hangulCharacters);
+  const cjkByteLength = cjkCharacters * CJK_BYTES_PER_CHARACTER;
+  const nonCjkBytes = Math.max(0, utf8ByteLength(text) - cjkByteLength);
+
+  const tokensBySegment = {
+    hangul: Math.ceil(hangulCharacters * calibration.hangulTokensPerCharacter),
+    hanKana: Math.ceil(hanKanaCharacters * calibration.hanKanaTokensPerCharacter),
+    nonCjk: Math.ceil(nonCjkBytes / calibration.nonCjkBytesPerToken),
+  };
+
+  return {
+    version: calibration.version,
+    hangulCharacters,
+    hanKanaCharacters,
+    nonCjkBytes,
+    tokensBySegment,
+    opaqueTokens: 0,
+    rawTotal: tokensBySegment.hangul + tokensBySegment.hanKana + tokensBySegment.nonCjk,
+  };
+};
+
+/**
+ * Builds one request's breakdown from the pieces a caller actually has.
+ *
+ * Every reservation surface assembles its total the same way: some text (the
+ * prompt, the history, a rendered template) plus some counts that were never
+ * text at all (attachment estimates, a flat template allowance). Summing those
+ * into a bare number was what forced `toReservedInputTokens` to guess which
+ * margin applied -- the segment mix is exactly what the sum threw away.
+ *
+ * Accumulating instead keeps it. `addText` contributes real segment counts;
+ * `addTokens` contributes opaque tokens that stay opaque.
+ */
+export type TokenEstimateAccumulator = {
+  addText: (text: string) => TokenEstimateAccumulator;
+  /** A count that did not come from reading text. Never widened. */
+  addTokens: (tokens: number) => TokenEstimateAccumulator;
+  breakdown: () => TokenEstimateBreakdown;
+};
+
+export const createTokenEstimateAccumulator = (
+  version: string = ACTIVE_ESTIMATOR_VERSION
+): TokenEstimateAccumulator => {
+  const calibration = getCalibration(version);
+  const totals: TokenEstimateBreakdown = {
+    version: calibration.version,
+    hangulCharacters: 0,
+    hanKanaCharacters: 0,
+    nonCjkBytes: 0,
+    tokensBySegment: { hangul: 0, hanKana: 0, nonCjk: 0 },
+    opaqueTokens: 0,
+    rawTotal: 0,
+  };
+
+  const accumulator: TokenEstimateAccumulator = {
+    addText: (text) => {
+      if (!text) return accumulator;
+      const part = estimateTokenBreakdown(text, version);
+      totals.hangulCharacters += part.hangulCharacters;
+      totals.hanKanaCharacters += part.hanKanaCharacters;
+      totals.nonCjkBytes += part.nonCjkBytes;
+      // Per piece rather than once over the concatenation. The two differ:
+      // each segment term is rounded up, so summing rounds more often. Erring
+      // upward is the right direction for a reservation, and it is also what
+      // the surfaces already did by adding their pieces together.
+      for (const segment of ["hangul", "hanKana", "nonCjk"] as const) {
+        totals.tokensBySegment[segment] += part.tokensBySegment[segment];
+      }
+      totals.rawTotal += part.rawTotal;
+      return accumulator;
+    },
+    addTokens: (tokens) => {
+      if (!Number.isFinite(tokens) || tokens <= 0) return accumulator;
+      const whole = Math.ceil(tokens);
+      totals.opaqueTokens += whole;
+      totals.rawTotal += whole;
+      return accumulator;
+    },
+    breakdown: () => ({
+      ...totals,
+      tokensBySegment: { ...totals.tokensBySegment },
+    }),
+  };
+  return accumulator;
+};
+
+/**
+ * The `Math.max(1, ...)` every reservation surface applied to its total, kept
+ * as a breakdown operation so the floor does not silently become a segment
+ * token. `createChatBudget` refuses a non-positive estimate, and an empty
+ * prompt with no attachments really does estimate to zero.
+ */
+export const atLeastOneToken = (
+  breakdown: TokenEstimateBreakdown
+): TokenEstimateBreakdown =>
+  breakdown.rawTotal > 0
+    ? breakdown
+    : { ...breakdown, opaqueTokens: breakdown.opaqueTokens + 1, rawTotal: 1 };
+
+/**
+ * Unbiased prediction of the prompt tokens one piece of text will produce.
+ * Carries no safety margin -- this is the value ESTIMATE-01/02 grade.
+ */
+export const estimateRawTextTokens = (
+  text: string,
+  version: string = ACTIVE_ESTIMATOR_VERSION
+) => estimateTokenBreakdown(text, version).rawTotal;
+
+/** Estimated prompt tokens for one piece of text. Never negative. */
+export const estimateTextTokens = (text: string) => estimateRawTextTokens(text);
 
 /** Same estimate, floored at 1 for any non-empty text. */
 export const estimatePromptTokens = (text: string) =>
@@ -63,3 +360,56 @@ export const estimateToolInputTokenOverhead = ({
   nativeSearchEnabled
     ? WEB_SEARCH_INPUT_TOKEN_OVERHEAD + TOOL_DEFINITION_INPUT_TOKEN_OVERHEAD
     : 0;
+
+/**
+ * The value credits, the provider budget and the input limit should use: each
+ * raw segment widened by its own margin, plus framing and any tool overhead
+ * the turn will really send.
+ *
+ * Widening per segment rather than per request is what keeps a Hangul
+ * recalibration from touching a pure Latin, code or JSON request.
+ */
+export const toReservedInputTokens = (
+  estimate: TokenEstimateBreakdown | number,
+  {
+    version = ACTIVE_ESTIMATOR_VERSION,
+    toolOverheadTokens = 0,
+  }: { version?: string; toolOverheadTokens?: number } = {}
+) => {
+  const isBreakdown = typeof estimate !== "number";
+  const { reservationMultiplierBySegment, reservationFramingOverheadTokens } = getCalibration(
+    isBreakdown ? estimate.version : version
+  );
+  const segments: EstimateSegment[] = ["hangul", "hanKana", "nonCjk"];
+
+  // A caller holding only a total has thrown the segment mix away, and the
+  // margins are per segment precisely because the mix decides which one
+  // applies. Widening such a total by the largest margin any segment carries
+  // is the only choice that cannot under-reserve, and under-reserving is the
+  // dangerous direction: the reservation is refunded down at settlement, so an
+  // over-reservation costs the user nothing while a short one is a request
+  // that ran on credits nobody held.
+  //
+  // Nothing in the application reaches this branch any more -- every
+  // reservation surface builds a breakdown with
+  // `createTokenEstimateAccumulator` -- and `tests/chatBudgetBreakdown.test.mjs`
+  // holds that true. It stays as the floor for a caller that arrives later
+  // with a bare number, so the failure mode is over-reserving rather than
+  // silently escaping the margin.
+  const widened = isBreakdown
+    ? segments.reduce(
+        (total, segment) =>
+          total + Math.ceil(estimate.tokensBySegment[segment] * reservationMultiplierBySegment[segment]),
+        0
+      )
+    : Math.ceil(
+        estimate * Math.max(...segments.map((segment) => reservationMultiplierBySegment[segment]))
+      );
+
+  // Opaque tokens are added at face value. The multipliers above correct for
+  // tokenizer prediction error, and an attachment estimate or a flat template
+  // allowance carries none -- there was no text to mispredict.
+  const opaque = isBreakdown ? estimate.opaqueTokens : 0;
+
+  return widened + opaque + reservationFramingOverheadTokens + toolOverheadTokens;
+};

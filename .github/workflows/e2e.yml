@@ -134,7 +134,7 @@ jobs:
             ${{ runner.os }}-playwright-${{ hashFiles('package-lock.json') }}-
 
       - name: Install Chromium
-        run: npx playwright install --with-deps chromium
+        run: scripts/ci/install-playwright.sh chromium
 
       - name: Run Chromium desktop and mobile E2E tests
         run: npm run test:e2e:chromium -- --shard=${{ matrix.shard }}/${{ matrix.shards }}

@@ -1,12 +1,11 @@
 export const dynamic = "force-dynamic";
 
-import { AdminImportMetricsPanel } from "@/components/admin/AdminImportMetricsPanel";
+import { AdminMemoryImportPanel } from "@/components/admin/AdminMemoryImportPanel";
 import { AdminPageTabs } from "@/components/admin/AdminPageTabs";
 import { AdminProductAnalyticsPanel } from "@/components/admin/AdminProductAnalyticsPanel";
 import { LaunchFunnelPanel } from "@/components/admin/AdminRiskPanels";
 import { adminNavItemTabs, resolveAdminTab } from "@/lib/adminNavigation";
 import { getAdminUserStats } from "@/lib/adminUsers";
-import { getExternalImportReport } from "@/lib/externalImportMetrics";
 import { prisma } from "@/lib/prisma";
 import { getProductAnalyticsDashboard } from "@/lib/productAnalyticsDashboard";
 
@@ -16,11 +15,13 @@ const TABS = adminNavItemTabs("analytics");
  * Product analytics and import/memory metrics, as two separate tabs.
  *
  * They answer different questions from different sources -- one is the consented
- * event ledger, the other is content-free import telemetry -- and stacking them
- * on one page made a long scroll where the second half looked like a footnote
- * to the first. The account-level launch funnel moved here too: it used to be
- * rendered on the promotions workspace, which is not where anyone looks for a
- * conversion funnel.
+ * event ledger, the other is content-free import and memory telemetry -- and
+ * stacking them on one page made a long scroll where the second half looked
+ * like a footnote to the first. Splitting them also means opening the funnel
+ * does not issue the two report fetches, and vice versa.
+ *
+ * The account-level launch funnel moved here too: it used to be rendered on the
+ * promotions workspace, which is not where anyone looks for a conversion funnel.
  */
 export default async function AdminAnalyticsPage({
   searchParams,
@@ -28,18 +29,21 @@ export default async function AdminAnalyticsPage({
   const query = await searchParams;
   const tab = resolveAdminTab(TABS, query.tab);
 
+  const tabs = (
+    <AdminPageTabs
+      basePath="/admin/analytics"
+      tabs={TABS}
+      activeTabId={tab.id}
+      label="Analytics sections"
+      query={query}
+    />
+  );
+
   if (tab.id === "imports") {
-    const report = await getExternalImportReport();
     return (
       <div className="flex min-w-0 flex-col gap-5">
-        <AdminPageTabs
-          basePath="/admin/analytics"
-          tabs={TABS}
-          activeTabId={tab.id}
-          label="Analytics sections"
-          query={query}
-        />
-        <AdminImportMetricsPanel report={report} />
+        {tabs}
+        <AdminMemoryImportPanel />
       </div>
     );
   }
@@ -56,13 +60,7 @@ export default async function AdminAnalyticsPage({
 
   return (
     <div className="flex min-w-0 flex-col gap-5">
-      <AdminPageTabs
-        basePath="/admin/analytics"
-        tabs={TABS}
-        activeTabId={tab.id}
-        label="Analytics sections"
-        query={query}
-      />
+      {tabs}
       <AdminProductAnalyticsPanel dashboard={dashboard} />
       <LaunchFunnelPanel
         funnel={{

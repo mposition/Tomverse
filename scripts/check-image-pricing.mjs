@@ -114,23 +114,83 @@ for (const model of IMAGE_MODEL_REGISTRY) {
   const verification = model.priceVerification;
 
   if (model.disabledReason !== null) {
-    // A disabled model must not look priced: a stale price list left behind
-    // is how a hold silently becomes a launch.
-    if (model.prices.length > 0) {
+    // A model held because its price is unknown must not look priced: a stale
+    // table left behind is how a hold silently becomes a launch.
+    //
+    // `operational_hold` is the deliberate exception. It asserts the pricing
+    // question is settled -- verified figures and an approved sale credit --
+    // and that something else is missing. Forcing its approved credits to live
+    // in a comment until launch day would mean re-entering them by hand at the
+    // moment they matter most, unchecked. Carried here they are validated on
+    // every run, below, exactly as an enabled model's are.
+    if (model.disabledReason !== "operational_hold" && model.prices.length > 0) {
       failures.push(
         `${label}: disabled (${model.disabledReason}) but still carries ${model.prices.length} price entries`
       );
     }
+    // Each reason states a different fact, so each has to be true. Without
+    // this the three are interchangeable labels and the admin panel reports a
+    // hold whose stated cause may not be the one actually blocking it.
     if (model.disabledReason === "price_unverified" && verification.verifiedAt) {
       failures.push(
         `${label}: marked price_unverified but priceVerification.verifiedAt is set`
       );
+    }
+    if (
+      model.disabledReason === "worst_case_cost_unbounded" &&
+      verification.thinkingCapMicroUsd !== null
+    ) {
+      failures.push(
+        `${label}: marked worst_case_cost_unbounded but a thinking cap is recorded -- ` +
+          `the worst case is bounded, so the hold needs a different reason`
+      );
+    }
+    if (model.disabledReason === "operational_hold") {
+      // An operational hold says the pricing question is settled and something
+      // else -- an adapter, a budget, an approval -- is missing. Using it while
+      // the price is still unknown would route around the verification rule.
+      if (!verification.verifiedAt) {
+        failures.push(
+          `${label}: marked operational_hold without a price verification date`
+        );
+      }
+      if (verification.thinkingCapMicroUsd === null) {
+        failures.push(
+          `${label}: marked operational_hold with an unknown thinking cap -- ` +
+            `that is worst_case_cost_unbounded, not an operational hold`
+        );
+      }
+      if (verification.sources.length === 0) {
+        failures.push(
+          `${label}: marked operational_hold without an official price source URL`
+        );
+      }
+      // Any credits it does carry are held to the same floor an enabled model
+      // is, so an approved figure that is below the policy minimum fails now
+      // rather than on the day someone flips the reason to null.
+      for (const price of model.prices) {
+        const optionLabel = `${label} ${price.quality} ${price.size}`;
+        const minimum = minimumCreditsForImageOption(model, price);
+        const maxCost = maxImageRequestCostMicroUsd(model, price);
+        if (minimum === null || maxCost === null) {
+          failures.push(`${optionLabel}: worst-case cost could not be computed`);
+          continue;
+        }
+        if (price.credits < minimum) {
+          failures.push(
+            `${optionLabel}: ${price.credits} credits is below the policy minimum ${minimum} (worst case ${maxCost} microUSD at the ${IMAGE_COST_PER_CREDIT_CEILING_MICRO_USD} ceiling)`
+          );
+        }
+      }
     }
     continue;
   }
 
   if (!verification.verifiedAt) {
     failures.push(`${label}: enabled without a price verification date`);
+  }
+  if (!model.pricingVersion || typeof model.pricingVersion !== "string") {
+    failures.push(`${label}: enabled without a pricing version`);
   }
   if (verification.sources.length === 0) {
     failures.push(`${label}: enabled without an official price source URL`);
@@ -166,6 +226,25 @@ for (const model of IMAGE_MODEL_REGISTRY) {
         `${optionLabel}: ${price.credits} credits is below the policy minimum ${minimum} (worst case ${maxCost} microUSD at the ${IMAGE_COST_PER_CREDIT_CEILING_MICRO_USD} ceiling)`
       );
     }
+  }
+}
+
+// gpt-image-2 keeps the pre-split string so its history stays continuous; no
+// two *other* models may share one, because a version is what identifies which
+// price list a reservation was frozen against.
+const versionOwners = new Map();
+for (const model of IMAGE_MODEL_REGISTRY) {
+  if (!model.pricingVersion) continue;
+  const owners = versionOwners.get(model.pricingVersion) ?? [];
+  owners.push(`${model.provider}/${model.id}`);
+  versionOwners.set(model.pricingVersion, owners);
+}
+for (const [version, owners] of versionOwners) {
+  if (owners.length > 1) {
+    failures.push(
+      `pricingVersion ${version} is claimed by ${owners.length} models (${owners.join(", ")}) -- ` +
+        `a version identifies one price list, so a shared string makes a frozen reservation ambiguous`
+    );
   }
 }
 

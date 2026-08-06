@@ -20,6 +20,11 @@ import {
  */
 
 const NOT_FOUND_HEADING = "We couldn't find that page";
+const SWITCH_ACCOUNT_BUTTON = "Sign out and use another account";
+/** Where the refusal happened, query string included. */
+const REFUSED_URL = "/admin/refunds?status=pending";
+const REFUSED_SIGN_IN_URL =
+  "/auth/signin?callbackUrl=%2Fadmin%2Frefunds%3Fstatus%3Dpending&reason=switch-account";
 
 test.describe("admin access control", () => {
   test("a signed-out visitor is sent to sign-in with the admin destination preserved", async ({
@@ -47,6 +52,213 @@ test.describe("admin access control", () => {
     await expect(
       page.getByRole("navigation", { name: "Admin console navigation" })
     ).toHaveCount(0);
+  });
+
+  test("the refusal offers a way out of the current session without naming what was refused", async ({
+    page,
+    signInAs,
+  }) => {
+    await signInAs("member");
+    const response = await page.goto(REFUSED_URL);
+
+    expect(response?.status()).toBe(404);
+    // The recovery the page adds. It has to be reachable by keyboard alone,
+    // because it is the only control on the page that can change the outcome.
+    const switchAccount = page.getByRole("button", {
+      name: SWITCH_ACCOUNT_BUTTON,
+    });
+    await expect(switchAccount).toBeVisible();
+    await expect(switchAccount).toBeEnabled();
+    await switchAccount.focus();
+    await expect(switchAccount).toBeFocused();
+
+    await expect(
+      page.getByText(
+        "The link may be out of date, the page may have moved, or you may need to use a different account."
+      )
+    ).toBeVisible();
+    // The old copy blamed everything except the account, which was the one
+    // thing that could actually be wrong here.
+    await expect(page.getByText("Nothing is wrong with your account")).toHaveCount(0);
+
+    // Still nothing that would confirm what is behind the URL: no console
+    // chrome, no role, no navigation, and no mention of administration at all.
+    await expect(page.getByText("Admin Console", { exact: true })).toHaveCount(0);
+    await expect(
+      page.getByRole("navigation", { name: "Admin console navigation" })
+    ).toHaveCount(0);
+    await expect(page.getByText(/administrat/i)).toHaveCount(0);
+    await expect(page.getByText(/permission|allowlist|not authorized/i)).toHaveCount(0);
+
+    // The secondary routes out stay where they were.
+    for (const name of [
+      "Go to the homepage",
+      "Open the chat workspace",
+      "Contact support",
+    ]) {
+      await expect(page.getByRole("link", { name })).toBeVisible();
+    }
+  });
+
+  test("an unrouted admin URL is answered identically, so the 404 is no oracle", async ({
+    page,
+    signInAs,
+  }) => {
+    // If the account-switch offer appeared only on real console routes, the
+    // page would map the console's URL space for anyone who asked.
+    await signInAs("member");
+    const response = await page.goto("/admin/this-console-route-does-not-exist");
+
+    expect(response?.status()).toBe(404);
+    await expect(
+      page.getByRole("heading", { name: NOT_FOUND_HEADING })
+    ).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: SWITCH_ACCOUNT_BUTTON })
+    ).toBeVisible();
+  });
+
+  test("switching accounts really ends the session and preserves the destination", async ({
+    page,
+    signInAs,
+  }) => {
+    await signInAs("member");
+    await page.goto(REFUSED_URL);
+
+    // The button is disabled while the sign-out is in flight, so a second
+    // click cannot start a second one.
+    await page.route("**/api/auth/signout", async (route) => {
+      await new Promise((resolve) => setTimeout(resolve, 400));
+      await route.continue();
+    });
+    const switchAccount = page.getByRole("button", {
+      name: SWITCH_ACCOUNT_BUTTON,
+    });
+    // Keyboard activation, since that is how this control is reached without a
+    // pointer.
+    await switchAccount.focus();
+    await switchAccount.press("Enter");
+    const pending = page.getByRole("button", { name: "Signing out…" });
+    await expect(pending).toBeDisabled();
+    await expect(pending).toHaveAttribute("aria-busy", "true");
+
+    await expect(page).toHaveURL(REFUSED_SIGN_IN_URL);
+    await expect(
+      page.getByTestId("signin-account-switch-notice")
+    ).toHaveText("The previous session was ended. Choose an account to continue.");
+
+    // The session is gone from the browser and from the server's point of
+    // view -- the whole point on a shared computer.
+    const cookies = await page.context().cookies();
+    expect(
+      cookies.some((cookie) => cookie.name.endsWith("next-auth.session-token"))
+    ).toBe(false);
+    const session = await page.request.get("/api/auth/session");
+    expect(await session.json()).toEqual({});
+
+    // Signing in as an account that *is* on the allowlist lands on the
+    // original destination, query string intact.
+    await signInAs("owner");
+    await page.reload();
+
+    await expect(page).toHaveURL(REFUSED_URL);
+    await expect(consoleHeading(page)).toHaveText("Refunds");
+  });
+
+  test("a failed sign-out re-enables the button and says so", async ({
+    page,
+    signInAs,
+  }) => {
+    await signInAs("member");
+    await page.goto(REFUSED_URL);
+    await page.route("**/api/auth/signout", (route) => route.abort());
+
+    const switchAccount = page.getByRole("button", {
+      name: SWITCH_ACCOUNT_BUTTON,
+    });
+    await switchAccount.click();
+
+    // Announced, and named by the button that failed -- not just red text
+    // somewhere on the page. (`getByRole("alert")` alone would also match
+    // Next's route announcer.)
+    const error = page.locator("#not-found-switch-account-error");
+    await expect(error).toHaveAttribute("role", "alert");
+    await expect(error).toHaveText(
+      "Could not end the current session. Please try again."
+    );
+    await expect(switchAccount).toHaveAttribute(
+      "aria-describedby",
+      "not-found-switch-account-error"
+    );
+    await expect(switchAccount).toBeEnabled();
+    // Still on the 404: a sign-out that did not happen must not be reported as
+    // one by navigating away.
+    await expect(page).toHaveURL(REFUSED_URL);
+
+    // And the retry works once the endpoint does.
+    await page.unroute("**/api/auth/signout");
+    await switchAccount.click();
+    await expect(page).toHaveURL(REFUSED_SIGN_IN_URL);
+  });
+
+  test("account switching asks the identity provider for the account chooser", async ({
+    page,
+  }) => {
+    // Signed out, which is the state the sign-out above leaves behind: the
+    // sign-in page forwards an authenticated visitor instead of offering
+    // providers at all.
+    //
+    // The provider's own session is untouched; what changes is that this one
+    // authorization request carries `prompt=select_account`, so a shared
+    // computer cannot silently hand back the account that was just refused.
+    const authorizationUrls: string[] = [];
+    for (const provider of ["google", "azure-ad"]) {
+      await page.route(`**/api/auth/signin/${provider}*`, async (route) => {
+        authorizationUrls.push(route.request().url());
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({ url: "/auth/signin?provider-stub=1" }),
+        });
+      });
+    }
+    // `signIn()` refuses to post to a provider the server does not list, and
+    // the harness configures no Azure tenant. Listing it here is the only part
+    // of this test that is not the real server -- what is under test is that
+    // the page sends the same authorization parameter for both buttons, and
+    // NextAuth merges that parameter into the provider's authorization URL by
+    // one shared code path, which the Google leg exercises for real.
+    await page.route("**/api/auth/providers*", (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          google: { id: "google", name: "Google", type: "oauth" },
+          "azure-ad": { id: "azure-ad", name: "Azure Active Directory", type: "oauth" },
+        }),
+      })
+    );
+
+    await page.goto(REFUSED_SIGN_IN_URL);
+    await page.getByRole("button", { name: /google/i }).click();
+    await expect.poll(() => authorizationUrls.length).toBe(1);
+    expect(authorizationUrls[0]).toContain("prompt=select_account");
+    // The stub answers with a URL the client then navigates to; let that
+    // settle before driving the next case.
+    await page.waitForURL(/provider-stub=1/);
+
+    await page.goto(REFUSED_SIGN_IN_URL);
+    await page.getByRole("button", { name: /microsoft/i }).click();
+    await expect.poll(() => authorizationUrls.length).toBe(2);
+    expect(authorizationUrls[1]).toContain("/api/auth/signin/azure-ad");
+    expect(authorizationUrls[1]).toContain("prompt=select_account");
+    await page.waitForURL(/provider-stub=1/);
+
+    // An ordinary sign-in is unchanged: nothing forces the chooser there.
+    await page.goto("/auth/signin?callbackUrl=%2Fchat");
+    await page.getByRole("button", { name: /google/i }).click();
+    await expect.poll(() => authorizationUrls.length).toBe(3);
+    expect(authorizationUrls[2]).not.toContain("prompt");
   });
 
   test("the admin API answers a non-administrator with 404 rather than 403", async ({

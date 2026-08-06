@@ -1,4 +1,5 @@
-// Shape and redaction rules for limit-decision events.
+// Shape and redaction rules for limit-decision events, and the reset-instant
+// rule they share with the error responses those events describe.
 //
 // A request rejected during preflight used to leave nothing behind but a
 // console line, so an operator holding the user's Trace ID could not
@@ -112,6 +113,63 @@ export const futureResetAt = (
     const date = toDate(candidate);
     if (!date) return null;
     return date.getTime() > now.getTime() ? date : null;
+};
+
+/**
+ * A daily reset instant that is always in the future.
+ *
+ * A day window's end is normally ahead of `now`, but it is derived from stored
+ * settings and can go stale -- for instance in the moments around a DST shift
+ * or right after a time-zone change moved the current bucket. Telling a blocked
+ * user to wait for an instant that has already passed is worse than useless, so
+ * a stale boundary is rolled forward whole days until it is ahead of now.
+ *
+ * Whole days rather than a clamp to "in a moment": the boundary is a daily one,
+ * and the next one is a day later. It lives here with the other two reset-instant
+ * rules because a caller that knows the period is the only thing that can repair
+ * a stale instant rather than drop it.
+ */
+export const safeDailyResetAt = (windowEnd: Date, now: Date) => {
+    const future = futureResetAt(windowEnd, now);
+    if (future) return future;
+    const dayMs = 86_400_000;
+    const elapsed = now.getTime() - windowEnd.getTime();
+    return new Date(
+        windowEnd.getTime() + (Math.floor(elapsed / dayMs) + 1) * dayMs
+    );
+};
+
+/**
+ * The same rule applied to what the blocked caller is actually handed.
+ *
+ * `futureResetAt` above has always guarded the limit-decision *record*, and the
+ * error response describing the very same decision was left to whichever call
+ * site built it. Most of them derive an instant that cannot be stale -- the
+ * first of next month, the start of this minute plus sixty seconds. The daily
+ * ones are derived from a stored time zone, which is exactly the case the
+ * record-side guard was written for, so the audit trail could carry a rolled
+ * forward instant while the response for the same rejection carried the raw
+ * one.
+ *
+ * This is the last thing between a details bag and the wire, so it drops rather
+ * than repairs: a call site that knows the period can roll a stale boundary
+ * forward meaningfully, and this one cannot. "We are not telling you when"
+ * degrades to a message with no reset line, which the client already renders.
+ * "Wait until an instant that has passed" does not degrade at all.
+ */
+export const withFutureResetAt = <Details extends Record<string, unknown>>(
+    details: Details,
+    now: Date
+): Details => {
+    const candidate = details.resetAt;
+    if (candidate === undefined) return details;
+    const usable =
+        (typeof candidate === "string" || candidate instanceof Date) &&
+        futureResetAt(candidate, now) !== null;
+    if (usable) return details;
+    const rest = { ...details };
+    delete rest.resetAt;
+    return rest as Details;
 };
 
 export const buildChatLimitDecisionRecord = (

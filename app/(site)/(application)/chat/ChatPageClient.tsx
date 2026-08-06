@@ -12,6 +12,8 @@ import { AlertCircle, ArrowRight, CheckCircle2, Info, Loader2, Sparkles, X } fro
 import { useModalDialog } from "@/components/useModalDialog";
 import { DesktopChatShell } from "@/components/chat/DesktopChatShell";
 import { MobileChatShell } from "@/components/chat/MobileChatShell";
+import { prepareChatContextBundle } from "@/lib/chatContextBundleClient";
+import { createSharedPendingRequest } from "@/lib/sharedPendingRequest";
 import {
   ComparisonReviewDialog,
   QuoteBadge,
@@ -51,6 +53,11 @@ import {
   resolveGuestDefaultSelectedModels,
   type WebSearchMode,
 } from "@/lib/appDefaults";
+import {
+  DEFAULT_CONVERSATION_MEMORY_MODE,
+  isConversationMemoryMode,
+  type ConversationMemoryMode,
+} from "@/lib/conversationMemoryMode";
 import type { WebSearchExecution } from "@/lib/webSearchExecutionNormalizer";
 import {
   createGuestSelectionClamp,
@@ -462,6 +469,35 @@ export function ChatPageClient({
   // server row, which is only created by the first successful generation
   // request (docs/policy/image-generation.md §6).
   const [isImageDraftActive, setIsImageDraftActive] = useState(false);
+  // What the chat composer held when the user switched to the image draft.
+  // Restored verbatim on the way back: attachments included, since image
+  // generation is text-only and silently dropping them would lose work
+  // (policy §13).
+  const [chatDraftBeforeImage, setChatDraftBeforeImage] = useState<{
+    scopeId: string | null;
+    text: string;
+  } | null>(null);
+  // The image workspace's remount identity, held explicitly rather than
+  // derived from the conversation id.
+  //
+  // Remounting on a real conversation switch is deliberate -- the workspace
+  // owns a timeline and a poll loop that belong to exactly one conversation.
+  // But a draft being adopted as the conversation it just created is not a
+  // switch: it is the same workspace continuing, and remounting there threw
+  // away the model selection, quality, size and prompt the user had chosen,
+  // re-seeding them from the entry point instead.
+  const [imageWorkspaceKey, setImageWorkspaceKey] = useState("image-draft:0");
+  const imageDraftSerialRef = useRef(0);
+  const nextImageDraftKey = () => {
+    imageDraftSerialRef.current += 1;
+    return `image-draft:${imageDraftSerialRef.current}`;
+  };
+  const [imageDraftSeedPrompt, setImageDraftSeedPrompt] = useState("");
+  // Set only when the user reached the draft by choosing a model in the
+  // catalogue's image tab; otherwise the workspace keeps its own default.
+  const [imageDraftSeedModelIds, setImageDraftSeedModelIds] = useState<
+    string[] | undefined
+  >(undefined);
   const { data: session, status } = useSession();
   const sessionUserId = session?.user?.id || null;
   // Declared before any model state below because the initial selected models
@@ -472,7 +508,6 @@ export function ChatPageClient({
   const [isMobileViewport, setIsMobileViewport] = useState(false);
   const [isViewportReady, setIsViewportReady] = useState(false);
 
-  const isSending = false;
   const [focusToken, setFocusToken] = useState(0);
 
     // The account's saved new-conversation combination (lead first). This is
@@ -520,6 +555,8 @@ export function ChatPageClient({
     attachments: ChatAttachment[];
     deepResearchDepth?: "quick" | "standard" | "deep";
     admissionToken?: string | null;
+    contextBundle?: string | null;
+    contextLayout?: "single" | "comparison";
   } | null>(null);
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
   const [pendingRemoveModelId, setPendingRemoveModelId] = useState<string | null>(null);
@@ -655,6 +692,19 @@ export function ChatPageClient({
   const [webSearchMode, setWebSearchMode] = useState<WebSearchMode>(
     APP_DEFAULTS.defaultWebSearchMode
   );
+  // §8.1 invariant 1, per conversation exactly like webSearchMode above. The
+  // stored value, not the resolved one: `inherit` has to survive so the
+  // conversation keeps following a later change to the account default.
+  const [memoryMode, setMemoryMode] = useState<ConversationMemoryMode>(
+    DEFAULT_CONVERSATION_MEMORY_MODE
+  );
+  // What `inherit` currently resolves to, so the menu can say which way that
+  // choice points rather than only that it follows something. Fetched once
+  // per signed-in session; "on" until it answers, matching the server's own
+  // default so the label cannot briefly claim memory is off when it is not.
+  const [accountMemoryDefault, setAccountMemoryDefault] = useState<"on" | "off">(
+    "on"
+  );
   const [isDeepResearchSetupOpen, setIsDeepResearchSetupOpen] = useState(false);
   // Per-conversation, like webSearchMode -- reset on New Chat/conversation
   // switch so a job's status chip never appears to follow the user into a
@@ -697,6 +747,49 @@ export function ChatPageClient({
   const comparisonPresetAppliedRef = useRef(false);
   const comparisonPresetRequestedRef = useRef(false);
   const comparisonPreflightInFlightRef = useRef(false);
+  /**
+   * What each run would need in order to re-prepare its §10 context, keyed by
+   * prompt id. A panel that is refused for drift knows only its own model, and
+   * the whole point of the recovery is that the run moves to one new snapshot
+   * together -- so the set, the conversation and the prompt live here, where
+   * the send that created them is.
+   */
+  const contextRepreflightInputsRef = useRef(
+    new Map<
+      string,
+      { conversationId: string | null; modelIds: string[]; prompt: string }
+    >()
+  );
+  /**
+   * One re-preparation per run, however many of its panels ask. Three
+   * concurrent preparations would hand the three panels three snapshots,
+   * which is precisely what sharing a bundle exists to prevent.
+   */
+  const contextRepreflightRef = useRef(
+    createSharedPendingRequest<string | null>()
+  );
+
+  /**
+   * §10's `repreflight_all`, and the single-model `retry_after_preflight`
+   * alongside it -- they are the same call once the set is known.
+   *
+   * This never re-runs the *admission* preflight. The refused request never
+   * reached `acquireChatAccess`, so the slot the aggregate preflight reserved
+   * for that panel is still unspent; asking for a fresh admission would
+   * reserve a second set of slots for a run that already has one. Only the
+   * context is prepared again.
+   */
+  const handleContextBundleStale = useCallback(
+    async ({ promptId }: { promptId: string | null; modelId: string }) => {
+      if (!promptId) return null;
+      const inputs = contextRepreflightInputsRef.current.get(promptId);
+      if (!inputs) return null;
+      return contextRepreflightRef.current.run(promptId, () =>
+        prepareChatContextBundle(inputs)
+      );
+    },
+    []
+  );
   // Auto-title generation: keyed by comparisonId (the promptId ChatApp
   // instances report back on completion) so handleResponseComplete can look
   // up which chat a first-turn response belongs to without needing its own
@@ -1267,9 +1360,9 @@ export function ChatPageClient({
       // account's is, so its concurrency has to be admitted once for the whole
       // run -- otherwise the panels race each other and some are refused after
       // others have already started.
-      if (modelIds.length < 2) return { allowed: true, admissionToken: null };
+      if (modelIds.length < 2) return { allowed: true, admissionToken: null, contextBundle: null };
       if (comparisonPreflightInFlightRef.current) {
-        return { allowed: false, admissionToken: null };
+        return { allowed: false, admissionToken: null, contextBundle: null };
       }
 
       comparisonPreflightInFlightRef.current = true;
@@ -1323,7 +1416,7 @@ export function ChatPageClient({
               `${t("chat.comparisonPreflightFailed")} (${t("chat.traceId")}: ${clientTraceId})`,
               "error"
             );
-            return { allowed: false, admissionToken: null };
+            return { allowed: false, admissionToken: null, contextBundle: null };
           }
 
           if (response.ok) {
@@ -1333,6 +1426,16 @@ export function ChatPageClient({
               admissionToken:
                 typeof grant?.admissionToken === "string"
                   ? grant.admissionToken
+                  : null,
+              // A second opaque token with an unrelated job: the admission
+              // decides which concurrency slot each panel occupies, this one
+              // attests which context snapshot the whole comparison was
+              // priced against. Absent whenever the request had no memory
+              // context to price, which is every request while injection is
+              // off.
+              contextBundle:
+                typeof grant?.contextBundle === "string"
+                  ? grant.contextBundle
                   : null,
             };
           }
@@ -1366,7 +1469,7 @@ export function ChatPageClient({
             `${t("chat.comparisonPreflightFailed")} (${t("chat.traceId")}: ${clientTraceId})`,
             "error"
           );
-          return { allowed: false, admissionToken: null };
+          return { allowed: false, admissionToken: null, contextBundle: null };
         }
         if (
           (response.status === 500 &&
@@ -1396,7 +1499,7 @@ export function ChatPageClient({
             "tomverse_last_preflight_trace_id",
             traceId
           );
-          return { allowed: true, admissionToken: null };
+          return { allowed: true, admissionToken: null, contextBundle: null };
         }
         // A rate rejection is the one refusal here that resolves by itself, so
         // it is the one that has to say when. The server sends the wait twice
@@ -1465,7 +1568,7 @@ export function ChatPageClient({
           }`,
           "error"
         );
-        return { allowed: false, admissionToken: null };
+        return { allowed: false, admissionToken: null, contextBundle: null };
       } catch (error) {
         console.error(
           JSON.stringify({
@@ -1478,7 +1581,7 @@ export function ChatPageClient({
           `${t("chat.comparisonPreflightFailed")} (${t("chat.traceId")}: ${clientTraceId})`,
           "error"
         );
-        return { allowed: false, admissionToken: null };
+        return { allowed: false, admissionToken: null, contextBundle: null };
       } finally {
         comparisonPreflightInFlightRef.current = false;
       }
@@ -1600,6 +1703,7 @@ export function ChatPageClient({
         selectedModels?: unknown;
         disabledPanels?: unknown;
         webSearchMode?: unknown;
+        memoryMode?: unknown;
         messages?: Array<{ role?: string; modelId?: string | null }>;
     }, targetChatId?: string) => {
         const savedModels = normalizeStringArray(data.selectedModels, userDefaultModelIds);
@@ -1622,6 +1726,11 @@ export function ChatPageClient({
             isWebSearchMode(data.webSearchMode)
                 ? data.webSearchMode
                 : APP_DEFAULTS.defaultWebSearchMode
+        );
+        setMemoryMode(
+            isConversationMemoryMode(data.memoryMode)
+                ? data.memoryMode
+                : DEFAULT_CONVERSATION_MEMORY_MODE
         );
         if (targetChatId) {
           // A server read seeds the queue's confirmed state; markConfirmed
@@ -2078,6 +2187,7 @@ export function ChatPageClient({
 
     setDisabledPanels([]);
     setWebSearchMode(APP_DEFAULTS.defaultWebSearchMode);
+    setMemoryMode(DEFAULT_CONVERSATION_MEMORY_MODE);
     setIsDeepResearchPending(false);
     setIsImageDraftActive(false);
     discardDraft(blankedDraftScope);
@@ -2087,10 +2197,48 @@ export function ChatPageClient({
       setFocusToken((prev) => prev + 1);
   };
 
+    // From the composer: carry the typed text into the image prompt and
+    // remember the chat draft so cancelling restores it.
+    const handleStartImageDraft = (draftText: string, modelId?: string) => {
+        setChatDraftBeforeImage({
+            scopeId: currentChatIdRef.current,
+            text: draftText,
+        });
+        setImageDraftSeedPrompt(draftText);
+        setImageDraftSeedModelIds(modelId ? [modelId] : undefined);
+        setImageWorkspaceKey(nextImageDraftKey());
+        setIsImageDraftActive(true);
+        currentChatIdRef.current = null;
+        setCurrentChatId(null);
+        setPromptPayload(null);
+        setIsDeepResearchPending(false);
+        setIsInitialConversationResolved(true);
+    };
+
+    // Leaving the image draft without generating: the chat draft comes back
+    // exactly as it was, in the conversation it belonged to.
+    const handleCancelImageDraft = () => {
+        const restore = chatDraftBeforeImage;
+        setIsImageDraftActive(false);
+        setImageDraftSeedPrompt("");
+        setImageDraftSeedModelIds(undefined);
+        setChatDraftBeforeImage(null);
+        if (restore) {
+            currentChatIdRef.current = restore.scopeId;
+            setCurrentChatId(restore.scopeId);
+            setInputValue(restore.text);
+        }
+        setFocusToken((prev) => prev + 1);
+    };
+
     const handleNewImage = () => {
         localComparisonResponsesRef.current.clear();
         latestLocalComparisonPromptRef.current = null;
         setIsImageDraftActive(true);
+        setImageDraftSeedPrompt("");
+        setImageDraftSeedModelIds(undefined);
+        setImageWorkspaceKey(nextImageDraftKey());
+        setChatDraftBeforeImage(null);
         currentChatIdRef.current = null;
         setCurrentChatId(null);
         setPromptPayload(null);
@@ -2114,12 +2262,39 @@ export function ChatPageClient({
             ...prev,
         ]);
         setIsImageDraftActive(false);
+        // Deliberately NOT touching imageWorkspaceKey: this is the same
+        // workspace continuing, so its composer settings survive.
+        //
+        // The seed is cleared even though nothing reads it right now. It was
+        // the carried-over chat draft, and leaving it set meant a later, real
+        // remount re-filled the composer with the prompt the user had already
+        // paid to generate -- next to an enabled submit button.
+        setImageDraftSeedPrompt("");
+        setImageDraftSeedModelIds(undefined);
+        setChatDraftBeforeImage(null);
         currentChatIdRef.current = conversation.id;
         setCurrentChatId(conversation.id);
     };
 
+    // UX-024. Switching conversations while a response is still streaming is
+    // allowed, deliberately. This used to open with `if (isSending) return;`
+    // against a `const isSending = false`, so the guard never ran once -- the
+    // behaviour below is what the product has always done, and the constant
+    // only made it look otherwise.
+    //
+    // Allowing it is also the right answer, not merely the incumbent one.
+    // Nothing is lost by leaving: the panel's request is not aborted here (only
+    // "stop all" and the per-panel stop button abort), and app/api/chat/route.ts
+    // persists the assistant message against the `conversationId` captured when
+    // the send started -- never the one on screen when it finishes. The client
+    // never writes an assistant message itself, so a stream cannot follow the
+    // user into the conversation they switched to; tests/e2e/
+    // conversation-switch-during-stream.spec.ts holds that invariant.
+    //
+    // Blocking would cost far more than it buys: a Deep Research run answers in
+    // minutes, and refusing every sidebar click for its duration would strand
+    // the user in one conversation with no indication why the click did nothing.
     const handleSelectConversation = async (id: string, skipLockCheck = false) => {
-        if (isSending) return;
         localComparisonResponsesRef.current.clear();
         latestLocalComparisonPromptRef.current = null;
 
@@ -2139,6 +2314,9 @@ export function ChatPageClient({
         const selectedTarget = conversations.find((c) => c.id === id);
         if (selectedTarget?.kind === "image") {
             setIsImageDraftActive(false);
+            // A real switch, so a new workspace instance: the timeline and the
+            // poll loop of the conversation being left must not follow.
+            setImageWorkspaceKey(id);
             currentChatIdRef.current = id;
             setCurrentChatId(id);
             setPromptPayload(null);
@@ -2195,8 +2373,10 @@ export function ChatPageClient({
               ? targetConv.webSearchMode
               : APP_DEFAULTS.defaultWebSearchMode
           );
+          setMemoryMode(DEFAULT_CONVERSATION_MEMORY_MODE);
         } else {
           setWebSearchMode(APP_DEFAULTS.defaultWebSearchMode);
+          setMemoryMode(DEFAULT_CONVERSATION_MEMORY_MODE);
         }
       return;
     }
@@ -2914,6 +3094,25 @@ export function ChatPageClient({
         promptAttachments,
       });
       if (!preflight.allowed) return;
+      // The comparison preflight prices the whole set and hands back one
+      // bundle for it. A single-model send never had a preparation step, so
+      // this is where it gets one -- §10 requires the context to be priced
+      // before the request that sends it, whichever shape the send is.
+      const activeModelIds = selectedModels.filter(
+        (modelId) => !effectiveDisabledPanels.includes(modelId)
+      );
+      const contextLayout =
+        activeModelIds.length >= 2
+          ? ("comparison" as const)
+          : ("single" as const);
+      const contextBundle =
+        contextLayout === "comparison"
+          ? preflight.contextBundle
+          : await prepareChatContextBundle({
+              conversationId: isGuestMode ? null : activeChatId,
+              modelIds: activeModelIds,
+              prompt: trimmed,
+            });
 	  const userMsgId = crypto.randomUUID();
       const conversation = conversations.find((item) => item.id === activeChatId);
       const previousCount =
@@ -2959,6 +3158,14 @@ export function ChatPageClient({
       }
     }
 
+      // What re-preparing this run would need, kept because the panels that
+      // ask have only their own model: the shell is the only place that knows
+      // the whole set, and it is the set that has to move together.
+      contextRepreflightInputsRef.current.set(comparisonId, {
+        conversationId: isGuestMode ? null : activeChatId,
+        modelIds: activeModelIds,
+        prompt: trimmed,
+      });
       localComparisonQuestionsRef.current.set(comparisonId, trimmed);
       setCachedCompareSummaryChatId(null);
       setPromptPayload({
@@ -2973,6 +3180,13 @@ export function ChatPageClient({
         ...(preflight.admissionToken
           ? { admissionToken: preflight.admissionToken }
           : {}),
+        // The layout always travels, the bundle only when there is one: the
+        // layout describes the *send*, and it is what decides whether a stale
+        // refusal may be retried by one panel. Carrying it only alongside a
+        // bundle would leave a comparison looking like a single-model send
+        // whenever the context had nothing to price.
+        contextLayout,
+        ...(contextBundle ? { contextBundle } : {}),
       });
       // The single point where a draft is cleared by sending: the prompt is
       // now on its way, so this conversation's draft is spent. Every earlier
@@ -3330,8 +3544,58 @@ export function ChatPageClient({
   // for models with confirmed support, instead of forcing a Perplexity
   // model into the selection -- selectedModels and their order are never
   // touched by a web-search-mode change.
+  useEffect(() => {
+    if (!sessionUserId) return;
+    let cancelled = false;
+    void fetch("/api/memories/settings", { cache: "no-store" })
+      .then((response) => (response.ok ? response.json() : null))
+      .then((body: { defaultConversationMode?: unknown } | null) => {
+        if (cancelled) return;
+        // Only the explicit "off" moves it, the same direction the server
+        // resolver takes: an unreadable value must not make the menu say
+        // memory is off for conversations it is on for.
+        setAccountMemoryDefault(
+          body?.defaultConversationMode === "off" ? "off" : "on"
+        );
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [sessionUserId]);
+
   const handleWebSearchModeChange = (mode: WebSearchMode) => {
     updateWebSearchMode(mode);
+  };
+
+  /**
+   * §8.1 invariant 1. Guests never reach here — the control is not rendered
+   * for them, because a guest has no account memory for it to act on — so
+   * unlike webSearchMode there is no local-only branch to keep.
+   *
+   * Optimistic, then corrected: the mode is a display of server state, and a
+   * failed PATCH that left the menu showing the new value would tell the user
+   * memory is off for a conversation the server still injects into.
+   */
+  const handleMemoryModeChange = (mode: ConversationMemoryMode) => {
+    const targetId = accountConversationId(currentChatId);
+    if (!targetId || !sessionUserId) return;
+    const previous = memoryMode;
+    setMemoryMode(mode);
+    void fetch(`/api/conversations/${targetId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ memoryMode: mode }),
+    })
+      .then((response) => {
+        if (response.ok) return;
+        setMemoryMode(previous);
+        showToast(t("chat.memoryModeFailed"), "error");
+      })
+      .catch(() => {
+        setMemoryMode(previous);
+        showToast(t("chat.memoryModeFailed"), "error");
+      });
   };
 
   // handleGlobalSubmit is redefined every render (not memoized); a ref
@@ -3819,14 +4083,38 @@ export function ChatPageClient({
   );
   const isImageWorkspaceActive =
     !isGuestMode && (isImageDraftActive || Boolean(activeImageConversation));
-  const canOfferNewImage = imageGenerationEnabled && !isGuestMode;
+  // Visible for everyone the flag is on for; locked (never hidden, never
+  // dead-ended) for viewers who cannot use it yet (policy §13).
+  const imageEntitled =
+    !isGuestMode && planAllowsImageGeneration(accountUsage?.plan ?? "Free");
+  const canOfferNewImage = imageGenerationEnabled && imageEntitled;
+  const imageLock: "sign_in" | "upgrade" | null = !imageGenerationEnabled
+    ? null
+    : isGuestMode
+      ? "sign_in"
+      : imageEntitled
+        ? null
+        : "upgrade";
+  const handleLockedImageClick = (lock: "sign_in" | "upgrade") => {
+    if (lock === "sign_in") {
+      setShowGuestSignInPrompt(true);
+      return;
+    }
+    // Same destination the locked model rows use.
+    window.location.assign("/pricing");
+  };
   const imageWorkspaceElement = isImageWorkspaceActive ? (
     <ImageGenerationWorkspace
       // Remount on switch: the workspace's local timeline, draft prompt and
       // poll loop all belong to exactly one conversation.
-      key={isImageDraftActive ? "image-draft" : currentChatId ?? "image-draft"}
+      // Seed ids are deliberately NOT part of this: re-picking a model from
+      // the catalogue mid-draft used to remount and discard the typed prompt.
+      key={imageWorkspaceKey}
       conversationId={isImageDraftActive ? null : currentChatId}
       onConversationCreated={handleImageConversationCreated}
+      initialPrompt={imageDraftSeedPrompt}
+      initialModelIds={imageDraftSeedModelIds}
+      onCancelDraft={chatDraftBeforeImage ? handleCancelImageDraft : undefined}
       flagEnabled={imageGenerationEnabled}
       planAllowsImageGeneration={
         !isGuestMode && planAllowsImageGeneration(accountUsage?.plan ?? "Free")
@@ -3876,7 +4164,6 @@ export function ChatPageClient({
           personalizedPrompt={personalizedPrompt}
           attachments={attachments}
           setAttachments={handleAttachmentsChange}
-          isSending={isSending}
           focusToken={focusToken}
           isGuestMode={isGuestMode}
           guestPreviewMode={isGuestPreviewEntry}
@@ -3885,6 +4172,9 @@ export function ChatPageClient({
           isModelSelectionReady={isModelSelectionReady}
           onNewChat={handleNewChat}
           onNewImage={canOfferNewImage ? handleNewImage : null}
+          imageLock={imageLock}
+          onLockedImageClick={handleLockedImageClick}
+          onStartImageDraft={canOfferNewImage ? handleStartImageDraft : undefined}
           imageWorkspace={imageWorkspaceElement}
           onSelectConversation={handleSelectConversation}
           onRename={handleRename}
@@ -3899,6 +4189,18 @@ export function ChatPageClient({
           canSelectModel={canSelectModelForPlan}
           webSearchMode={webSearchMode}
           onWebSearchModeChange={handleWebSearchModeChange}
+          memoryMode={
+            // §8.1 invariant 2: a guest has no account memory, so the control
+            // is absent rather than shown inert. Also absent until a
+            // conversation exists to store the mode on.
+            !isGuestMode &&
+            currentChatId &&
+            !isGuestConversationId(currentChatId)
+              ? memoryMode
+              : undefined
+          }
+          onMemoryModeChange={handleMemoryModeChange}
+          accountMemoryDefault={accountMemoryDefault}
           onOpenDeepResearchSetup={() => setIsDeepResearchSetupOpen(true)}
           isDeepResearchPending={isDeepResearchPending}
           onDismissDeepResearchChip={dismissDeepResearchChip}
@@ -3917,6 +4219,7 @@ export function ChatPageClient({
           onGuestSignInPrompt={() => setShowGuestSignInPrompt(true)}
           onResponseComplete={handleResponseComplete}
           onFollowupSent={handleModelFollowupSent}
+          onContextBundleStale={handleContextBundleStale}
         />
       ) : (
         <DesktopChatShell
@@ -3930,7 +4233,6 @@ export function ChatPageClient({
           personalizedPrompt={personalizedPrompt}
           attachments={attachments}
           setAttachments={handleAttachmentsChange}
-          isSending={isSending}
           focusToken={focusToken}
           isGuestMode={isGuestMode}
           guestPreviewMode={isGuestPreviewEntry}
@@ -3939,6 +4241,9 @@ export function ChatPageClient({
           isModelSelectionReady={isModelSelectionReady}
           onNewChat={handleNewChat}
           onNewImage={canOfferNewImage ? handleNewImage : null}
+          imageLock={imageLock}
+          onLockedImageClick={handleLockedImageClick}
+          onStartImageDraft={canOfferNewImage ? handleStartImageDraft : undefined}
           imageWorkspace={imageWorkspaceElement}
           onSelectConversation={handleSelectConversation}
           onRename={handleRename}
@@ -3953,6 +4258,18 @@ export function ChatPageClient({
           canSelectModel={canSelectModelForPlan}
           webSearchMode={webSearchMode}
           onWebSearchModeChange={handleWebSearchModeChange}
+          memoryMode={
+            // §8.1 invariant 2: a guest has no account memory, so the control
+            // is absent rather than shown inert. Also absent until a
+            // conversation exists to store the mode on.
+            !isGuestMode &&
+            currentChatId &&
+            !isGuestConversationId(currentChatId)
+              ? memoryMode
+              : undefined
+          }
+          onMemoryModeChange={handleMemoryModeChange}
+          accountMemoryDefault={accountMemoryDefault}
           onOpenDeepResearchSetup={() => setIsDeepResearchSetupOpen(true)}
           isDeepResearchPending={isDeepResearchPending}
           onDismissDeepResearchChip={dismissDeepResearchChip}
@@ -3971,6 +4288,7 @@ export function ChatPageClient({
           onGuestSignInPrompt={() => setShowGuestSignInPrompt(true)}
           onResponseComplete={handleResponseComplete}
           onFollowupSent={handleModelFollowupSent}
+          onContextBundleStale={handleContextBundleStale}
         />
       )}
     {showGuestSignInPrompt && isGuestMode && (

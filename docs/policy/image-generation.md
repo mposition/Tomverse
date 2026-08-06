@@ -18,11 +18,13 @@ Google 모델 활성화는 공식 가격·thinking 상한의 수동 검증 통�
   보내고 결과를 나란히 비교한다(§11). 단일 모델 요청은 1-모델 그룹이라는
   특수한 경우일 뿐 별도 경로가 아니다.
 - 모델은 `AVAILABLE_MODELS`·`ModelRegistry` 밖의 **이미지 모델 registry**
-  (§12)에서만 관리한다. 초기 등록: `gpt-image-2`(활성),
-  `gemini-3.1-flash-image-preview`(Nano Banana 2 — 등록하되 §12의 가격
-  검증 통과 전까지 **비활성**), `gemini-3.1-flash-lite-image`(3순위 평가
-  후보). 비교 그룹의 모델 수 상한은 `IMAGE_GROUP_MAX_MODELS`(출시 기본 2)
-  이며 UI·데이터 모델에 상한값을 하드코딩하지 않는다.
+  (§12)에서만 관리한다. 등록 현황(2026-08-05): `gpt-image-2`·
+  `grok-imagine-image-quality-20260403`(활성) 2개,
+  `gemini-3.1-flash-image`·`gemini-3.1-flash-lite-image`·
+  `gemini-3-pro-image`(등록-비활성) 3개.
+  미등록 평가 후보는 §12.1에 있다. 비교 그룹의 모델 수 상한은
+  `IMAGE_GROUP_MAX_MODELS`(출시 기본 2)이며 UI·데이터 모델에 상한값을
+  하드코딩하지 않는다.
 - text-to-image 전용, 모델당 요청 1장. `size=auto`·`quality=auto`·부분
   스트리밍·투명 배경·편집·참조 이미지는 여전히 범위 밖이다. 크기·품질
   선택지는 모델별 profile이 정의하되 provider 제약이 아니라 **Tomverse
@@ -101,6 +103,36 @@ gate 없이 노출되는 배포 창은 금지된다. UI 비노출은 보안 경�
   경고를 단계적으로 발생시킨다(관측 PR).
 - 가격 변경은 소급 적용하지 않는다. `pricingVersion`·`costSource`·품질·
   크기·예약 크레딧을 예약 snapshot에 동결한다.
+- **정산은 예약 snapshot의 원가를 쓴다. 현재 가격표를 다시 조회하지 않는다.**
+  재조회는 예약과 정산 사이에 가격 코드가 배포되면 이미 가격이 정해진 요청의
+  기록을 덮어쓰고, 멀티 모델에서는 다른 provider가 만든 이미지에 gpt-image-2
+  표를 적용한다. snapshot이 원가를 주지 못하면 **0으로 완화하지 않는다** —
+  0은 비용 장부를 축소 기록하면서 provider budget을 과다 환급하고, 두 오류
+  모두 자기가 망가뜨린 숫자 안에서는 보이지 않는다. 예약된 최악 원가
+  (`reservedCostMicroUsd`)를 쓰고 `image_settlement_snapshot_cost_missing`으로
+  보고한다.
+- **표현 구조 변경은 `IMAGE_PRICING_VERSION`을 올리지 않는다.** 이 버전은 가격
+  계약을 가리킨다. `pricingSnapshot`에는 조회 key가 아니라 숫자
+  (`credits`·`outputCostMicroUsd`·`maxRequestCostMicroUsd`·`promptTokenLimit`)만
+  들어가고 품질·크기는 별도 컬럼에 동결되므로, 코드 내부 조회 key가 바뀌어도
+  감사 자료의 의미는 동일하다. 금액이 그대로인데 버전을 올리면 "가격 계약이
+  달라졌다"는 관측 노이즈만 만든다. snapshot의 **직렬화 구조**가 바뀌면 가격
+  버전이 아니라 snapshot 안의 `schemaVersion`으로 구분하고, 부재는 `1`로
+  해석한다.
+- **예약이 동결하는 버전은 모델별이다** (`ImageModelProfile.pricingVersion`).
+  전역 `IMAGE_PRICING_VERSION` 하나를 쓰면 xAI 가격을 추가할 때 OpenAI 가격이
+  그대로인데도 모든 OpenAI 지표가 새 버전으로 갈라진다. 명명은
+  `lib/modelPricing.ts`와 같은 `provider-model-date-vN` 형식이다.
+  - `gpt-image-2`만 예외로 `2026-08-03-v1`을 유지한다. 이미 그 문자열로 기록된
+    예약이 있고, 이 모델의 가격은 한 푼도 바뀌지 않았으므로 이력에 경계를
+    만들지 않는다.
+  - 이 값을 `IMAGE_PRICING_VERSION`에서 유도하지 않는다. 유도하면 상한 변경 같은
+    전역 사유가 모델 가격 버전을 끌고 올라가 같은 잡음이 반대 방향으로 생긴다.
+  - `npm run check:image-pricing`이 enabled 모델의 버전 존재와 **전 모델 간
+    유일성**을 강제한다. 두 모델이 한 문자열을 쓰면 동결된 예약이 어느 가격표를
+    가리키는지 판정할 수 없다.
+  - 전역 `IMAGE_PRICING_VERSION`은 v1 flat 가격표(`lib/imageGenerationPricing.ts`)
+    와 상한 정책의 버전으로 남는다. 예약 기록에는 더 이상 쓰지 않는다.
 
 두 비율을 혼용하지 않는다: **판매가 기준 마진**은 `priceCents`가 분모이고
 (Starter 91.3% / Project 87.0% / Power 82.7%, 구독 56.8~82.7%),
@@ -119,6 +151,26 @@ gate 없이 노출되는 배포 창은 금지된다. UI 비노출은 보안 경�
 - **정산은 exactly-once**: `pending|processing → settling`(조건부 claim)
   `→ succeeded|failed`. handler와 15분 reconciliation이 같은 generation을
   중복 정산·환급하지 않는다.
+- **`settling`은 회수 가능해야 한다.** generation의 `settling` claim은 정산
+  transaction **밖**에서 이루어지므로, transaction이 rollback되면(deadlock,
+  connection 유실, 재배포) 행은 크레딧이 예약된 채 `settling`에 남는다.
+  회수 경로가 `pending|processing`만 보면 이 상태는 **누구도 도달하지 못하는
+  덫**이다 — 환급도, terminal 상태도, 폴링 종료도 영원히 오지 않는다.
+  - reconciliation은 `settling`을 **별도의 더 긴 창**
+    (`STALE_IMAGE_SETTLING_AFTER_MS`)으로 함께 회수한다. 창을 분리하는 이유는
+    `pending|processing` 회수는 아무것도 쓰지 않은 행을 되돌리는 것이지만
+    `settling` 회수는 열려 있을 수 있는 크레딧 write와 경합하기 때문이다.
+  - 회수를 안전하게 만드는 것은 창이 아니라 **예약 자신의
+    `reserved → settling` claim**이다. 이 claim은 정산 transaction 안에 있고
+    generation을 종결시키는 것과 같은 transaction이므로, 이미 커밋된 정산은
+    두 번째 시도를 거부한다.
+  - 자기 정산 transaction이 실패한 실행자는 이미 claim을 소유하므로 창을
+    기다리지 않고 즉시 회수한다.
+  - **`settlement_failed`는 `provider_failed`와 다른 실패 단계다.** 전자는
+    이미지가 도착했고 그 장부 기록을 잃은 것이고, 후자는 이미지가 오지
+    않은 것이다. 둘을 합치면 운영자가 공급자 상태 페이지를 보러 간다.
+    회수된 stranded 정산은 `IMAGE_SETTLEMENT_STRANDED`로 보고하고 Admin
+    Console의 invariant 줄에 별도 수치로 노출한다.
 - 전액 환급 조건: provider 거절, moderation 차단, provider 오류, 원본 저장
   실패, 처리 시간 초과, stale 작업 reconciliation. 크레딧과 funded cost를
   ledger 규칙(`settleAddOnCredits`)대로 함께 복원하고 플랜 사용량도
@@ -165,6 +217,15 @@ gate 없이 노출되는 배포 창은 금지된다. UI 비노출은 보안 경�
   서비스와 안전하게 공존한다(저장소에 장기 실행 worker 선례가 없어 별도
   Railway 서비스 신설은 운영 PR에서 실측 후 결정). 프로세스 종료로 죽은
   실행은 정확히 stale 케이스이며 sweep이 `failed` 처리 후 전액 환급한다.
+- **`after()`의 실행 시간은 그 route의 max duration이다**(Next `after`
+  레퍼런스). proxy timeout이 아니라 이쪽이 실제 제약이므로 실행자를
+  구동하는 route는 예산을 명시한다. 값은
+  `IMAGE_EXECUTOR_MAX_DURATION_SECONDS`이고, provider timeout·재시도
+  backoff·그룹 상한·provider job 하한에서 유도한다
+  (`lib/imageGenerationStateCore.ts`). 잘린 실행자는 지연이 아니다 —
+  `pending` 생성을 다시 구동하는 것은 없고 sweep은 환급만 하므로 요청
+  자체가 사라진다. stale 임계값이 한 시도의 최악 소요보다 크다는 조건과
+  함께 `npm run check:image-executor-budget`이 PR Fast Gate에서 강제한다.
 - 배포·프로세스 종료로 회수 불가능해진 stale 작업은 reconciliation이
   `failed` 처리하고 전액 환급한다. Railway graceful shutdown 유예
   (`RAILWAY_DEPLOYMENT_DRAINING_SECONDS`)를 함께 설정한다.
@@ -195,6 +256,27 @@ gate 없이 노출되는 배포 창은 금지된다. UI 비노출은 보안 경�
   `일·월 floor = Max 월 크레딧 × 최악 크레딧당 원가 × headroom`
   (참고치: headroom 25%에서 약 $10.80). 한 Max 계정이 월 크레딧을 하루에
   소진할 수 있으므로 일 floor = 월 floor다.
+  - **"최악 크레딧당 원가"는 provider별 값이 아니라 활성 이미지 상품 전체의
+    최대값**이다(`worstImageCostPerCreditMicroUsd()` — 현재 864µ/credit,
+    `gpt-image-2` Final 정사각에서 나온다). 따라서 floor는 특정 공급자의
+    실원가가 아니라 **전체 이미지 상품을 포괄하는 entitlement 안전 바닥**이다.
+    xAI budget의 floor를 "Grok 실원가"로 설명하면 틀린다.
+  - **floor는 바닥이지 권고치가 아니다.** 초기 production 승인값은
+    일 $50 / 월 $500(2026-08-05). staging은 일·월 모두 floor $10.80으로,
+    총 staging 지출을 캡하는 것이 의도다.
+- **`월 ≥ 일`만으로는 충분하지 않다.** 둘이 같으면 하루치 상한을 한 번
+  소진하는 순간 그달 예산도 끝나므로 월 창이 두 번째 bound가 되지 못한다.
+  `resolveImageProviderBudget`이 `month <= day`를 `month_not_above_day`
+  **advisory**로 보고한다 — `problems`와 달리 readiness를 막지 않는다.
+  단지 이상한 예산 때문에 기동을 거부하는 것이 그 예산보다 나쁘기 때문이고,
+  staging의 동일값 설정은 의도된 것이기 때문이다.
+- **예약액과 정산액을 구분한다.** provider budget은 예약 시 최악값으로 잡고
+  성공 정산에서 실비로 true-up하며 차액을 환급한다. Grok 1K는 예약
+  55,000µ(출력 50,000 + 공통 프롬프트 안전예산 5,000), 정산 50,000µ,
+  차액 5,000µ 환급이다 — xAI는 프롬프트 길이와 무관한 장당 정액 과금이라
+  `inputTokens`가 0이다. 용량을 셀 때 두 기준을 섞지 않는다: **미정산 예약
+  기준**은 동시에 승인 가능한 건수이고, **성공 정산 기준**은 이론상 완료
+  가능한 장수다(일 $50 → 909건 승인 / 1,000장 완료).
 - production에서 env 부재 시 `/api/ready` 실패. 조용한 fallback 기본값
   금지(`providerMonitoring`의 기존 silent fallback 모순은 budget 추가 전에
   정리). env를 먼저 배포하고 코드를 나중에 배포한다.
@@ -206,6 +288,21 @@ gate 없이 노출되는 배포 창은 금지된다. UI 비노출은 보안 경�
   provenance 보존을 위해서다. UI에는 "AI로 생성된 이미지" 표시를 별도로
   둔다(시각 + accessible text). 썸네일만 파생 자산으로 생성하고, 썸네일
   실패는 원본 성공을 되돌리지 않는다(배경 재시도).
+- **배경 재시도는 15분 maintenance sweep의 `repairFailedImageThumbnails`다.**
+  - **원본을 절대 건드리지 않는다.** 재시도는 저장된 원본을 **비파괴 읽기**
+    (`readOwnR2ObjectBytes`)로 읽는다. `readR2Object`는 metadata 불일치 시
+    객체를 삭제하는데 — 신뢰할 수 없는 업로드에는 옳지만 — 사용자가 결제했고
+    재생성할 수 없는 원본에 쓰면 복구가 복구 대상을 파괴한다.
+  - **실패 행은 썸네일이 놓일 실제 key를 기록한다.** 존재하지 않는 객체를
+    가리키는 sentinel key를 만들지 않는다. sentinel은 대화 삭제 시 쓰인 적
+    없는 객체의 tombstone을 남기고, 재시도가 채워 넣을 행을 없앤다 —
+    generation당 썸네일 행은 하나여야 한다.
+  - 시도 상한은 `IMAGE_THUMBNAIL_MAX_RETRIES`이며 cleanup 상한보다 **낮다**.
+    cleanup은 언젠가 성공할 삭제를 재시도하지만 썸네일 실패는 대개 결정적
+    (파생이 그 바이트를 거부)이고 매 시도가 원본을 다시 내려받는다.
+  - 상한 초과 행은 Admin invariant에 `thumbnailsExhausted`로 노출한다. 대기
+    중인 backlog는 issue로 세지 않는다 — sweep이 가져갈 것이고 카드는 그동안
+    원본을 렌더링한다.
 - R2 키 namespace에는 **이메일 해시를 쓰지 않는다**(변경 가능·추측 가능).
   opaque `userId` 또는 HMAC subject key 기반 prefix를 사용한다.
 - 삭제 순서는 **DB-first tombstone**이다: 트랜잭션에서 대상 자산을
@@ -255,8 +352,16 @@ gate 없이 노출되는 배포 창은 금지된다. UI 비노출은 보안 경�
   attempt 갱신은 같은 트랜잭션이며, succeeded target의 재실행은 거부한다
   (이중 과금 금지). UI는 target의 최신 attempt를 현재 상태로 보여주고
   과거 attempt는 감사 기록으로 보존한다.
-- 폴링은 그룹 단위 endpoint 하나로 그룹·target·attempt 상태를 함께
-  반환한다.
+- **폴링은 그룹 단위 endpoint 하나로 그룹·target·attempt 상태를 함께
+  반환한다** — `GET /api/images/groups/{groupId}`. generation별 폴링은
+  비교 관찰 비용을 모델 수에 비례시키며, client는 거절된 폴링을 "변화 없음"
+  으로 읽으므로 status rate limit 소진이 **조용히 갱신을 멈춘 화면**으로
+  나타난다. `GET /api/images/generations/{generationId}`는 만료된 signed
+  asset URL을 다시 발급받는 단일 카드 복구용이며 폴링 경로가 아니다.
+- **어느 attempt가 target의 현재 상태인지는 한 곳에서 정한다**
+  (`currentImageAttempt`, `deriveImageGroupStatusFromTargets` —
+  `lib/imageGenerationStateCore.ts`). 전체 attempt를 파생 함수에 넘기면
+  이미 재시도된 실패가 재시도 진행 중에도 `partial_success`를 보고한다.
 
 ## 12. 이미지 모델 registry와 가격 검증 (v2)
 
@@ -285,15 +390,246 @@ gate 없이 노출되는 배포 창은 금지된다. UI 비노출은 보안 경�
   7. 성공 후 사용자에게 추가 청구하지 않는다. 실측 원가는 내부 정산·관측
      전용이다.
 - **공식 도메인 본문을 직접 읽고 기록한 가격만 `verified`다.** 검색
-  요약·제3자 출처로 대체하지 않는다. 2026-08-03 기준
-  `gemini-3.1-flash-image-preview`(Nano Banana 2)는 preview 상태이며 가격·
-  thinking 상한이 미검증이므로 **등록-비활성**이다. 수동 검증 통과와 판매
-  크레딧 승인 후에만 활성화한다.
+  요약·제3자 출처로 대체하지 않는다. 제품 책임자가 알려 준 수치도 마찬가지다 —
+  근거로 기록할 수는 있어도 `verified`로 승격하지 않는다.
 - adapter는 provider가 반환한 원본 bytes와 MIME을 무변형 저장하고(PNG
   가정 금지), 정규화된 usage(input/thinking/output)·moderation 분류·
   provider request ID·provenance 종류를 공통 형태로 보고한다.
 
+### 12.1 후보 등록부와 검증 상태 (2026-08-04)
+
+가격 검증 결과는 `.github/audits/image-model-verification-worksheet.md`에
+공식 URL·확인일·원문 발췌와 함께 있다. **가격 검증이 끝났다는 사실과 실행
+준비가 끝났다는 사실은 서로 다른 gate다.**
+
+| 후보 | 상태 | 검증된 이미지 출력가 | 남은 조건 |
+|---|---|---|---|
+| `gpt-image-2` | **활성** | 표 §3 | — |
+| `grok-imagine-image-quality-20260403` | **활성 (2026-08-05)** | 1K $0.05 · 판매가 75크레딧 | 1K 정사각만. 2K(승인 100크레딧)는 크기 체계 확장 후 |
+| `gemini-3.1-flash-image` | 등록-비활성 (`worst_case_cost_unbounded`) | 0.5K $0.045 / 1K $0.067 / 2K $0.101 / 4K $0.151 | **thinking 상한** — 아래 참조 |
+| `gemini-3.1-flash-lite-image` | 등록-비활성 (`worst_case_cost_unbounded`) | 1K $0.0336 (1K 전용) | 동일. Draft 후보이며 두 번째 비교 자리를 Google로 채우지 않는다 |
+| `gemini-3-pro-image` | 등록-비활성 (`worst_case_cost_unbounded`) | 1K·2K $0.134 / 4K $0.24 | 동일 + 제품 판단 보류(`gpt-image-2` Final과 중복) |
+| `qwen-image-2.0-pro-2026-06-22` | 미등록 | 미확인 | 별도 endpoint·리전·한국어 글자 정확도 검증 |
+| Ideogram 4.0 | 미등록 | Turbo $0.03 / Default $0.06 / Quality $0.10 (미검증) | 신규 공급자 전체 온보딩 |
+
+**`disabledReason` 세 값은 서로 다른 사실을 말하며 `check:image-pricing`이
+각각을 강제한다.** `price_unverified`는 `verifiedAt`이 비어 있어야 하고,
+`worst_case_cost_unbounded`는 `thinkingCapMicroUsd`가 `null`이어야 하며,
+`operational_hold`는 `verifiedAt`·`thinkingCapMicroUsd`·`sources`가 모두
+채워져 있어야 한다. 세 값을 교체 가능한 라벨로 쓰면 관리자 화면이 실제
+차단 원인이 아닌 것을 보고하게 된다.
+
+#### Google 3종의 미결 쟁점 — thinking 상한
+
+thinking은 **API에서 끌 수 없고**(`"enabled by default and cannot be disabled
+in the API"`), `thinking_level`의 `minimal`·`high`는 수준 선택이지 토큰 상한이
+아니다. 따라서 요청에서 우리가 상한을 거는 방법은 없다.
+
+2026-08-04 워크시트는 대안으로 **모델 카드의 `Output token limit` 전체가
+과금 가능한 thinking·text 토큰이라고 가정하는 보수적 유도**를 제시한다.
+
+| 모델 | 최대 출력 토큰 | text·thinking 단가 | 유도된 상한 | 유도된 최소 크레딧 |
+|---|---:|---:|---:|---:|
+| Flash Image | 32,768 | $3.00/1M | 98,304µUSD | 1K 190 / 2K 228 / 4K 283 |
+| Flash Lite | 4,096 | $1.50/1M | 6,144µUSD | 1K 50 |
+| Pro Image | 32,768 | $12.00/1M | 393,216µUSD | 1K·2K 592 / 4K 710 |
+
+**결정(2026-08-04): 이 유도를 채택하지 않는다. 공급자 확인을 받는다.**
+
+결정적인 근거는 GenerateContent API 스키마다. `totalOutputTokens`와
+`totalThoughtTokens`가 **별도 필드**이고 `maxOutputTokens`는 response
+candidate의 한도로 설명된다. 즉 hidden thinking이 32,768 안에 포함된다는
+결론은 그럴듯할 뿐이고, **포함되지 않는다면 A-2는 "지나치게 보수적인 상한"이
+아니라 상한 자체가 아닌 계산이 된다.** 그 경우 유도값을
+`thinkingCapMicroUsd`에 기록하는 것은 안전한 과대 추정이 아니라 잘못된 값을
+증명된 값으로 기록하는 일이다.
+
+제품 근거도 같은 방향이다. 유도 상한을 쓰면 Flash Image 1K가 최소
+190크레딧으로 `gpt-image-2` Standard 정사각(70)의 약 2.7배가 되어 비교
+모델로서 가격을 설명하기 어렵고, Pro Image의 592/710은 확인을 받더라도
+보류가 합리적이다.
+
+따라서 Google 3종의 상태는 **가격 확인 완료 / 요청당 상한 조건부**로
+분리해 유지한다.
+
+#### 2026-08-05 문서 재조사 — 상한은 **확인된 부재**다
+
+공식 문서를 다시 훑은 결과, 이 쟁점은 "아직 안 읽은 페이지"가 아니라
+**읽었고 그 문장이 없다**로 확정한다.
+
+- Interactions API reference는 `generation_config.max_output_tokens`를
+  "응답에 포함할 최대 토큰 수"로 정의하고, 사용량을
+  `usage.total_output_tokens`·`usage.total_thought_tokens`·`usage.total_tokens`
+  로 **분리 보고**한다. 둘의 합이 상한 이하라는 연결 문장은 없다.
+  (`https://ai.google.dev/api/interactions-api`)
+- thinking 문서도 비용을 output + thinking의 합으로 설명하고 두 사용량을
+  별도 필드로 보고할 뿐, `max_output_tokens`가 그 합을 제한한다고 명시하지
+  않는다. (`https://ai.google.dev/gemini-api/docs/thinking`)
+- 모델 카드의 출력 한도(Flash Image 32,768 / Flash Lite 4,096 /
+  Pro Image 32,768)는 **같은 미정의 수량에 대한 한도**이므로 연결을 대신
+  제공하지 못한다.
+- 포럼 답변·검색 요약·제품 책임자 전언은 §12의 공식 본문 요건을 충족하지
+  않으므로 근거에서 제외한다.
+
+> **판정**: 공식 페이지는 `max_output_tokens`와 thinking 사용량을 각각
+> 설명하지만 `total_output_tokens + total_thought_tokens`가 해당 상한 이하라고
+> 보장하지 않는다. 세 모델은 staging 실측 전까지
+> `worst_case_cost_unbounded`를 유지한다.
+
+#### 남은 증거는 산문이 아니라 과금 신호다 — staging 실측 계획
+
+`npm run measure:google-image-thinking-cap`이 이 절차를 수행한다. **매 실행이
+실제 유료 이미지 생성**이므로 `--i-accept-the-cost` 없이는 아무것도 보내지
+않고, §15의 eval 예산 승인이 선행돼야 한다.
+
+1. 모델별로 `1K`·`1:1`·image-only 요청을 실행한다.
+2. `max_output_tokens`를 **명시**한다.
+3. 지원 모델은 `thinking_level: "high"`로 thinking 발생 가능성을 높인다.
+4. 각 응답에서 `usage.total_output_tokens + usage.total_thought_tokens`를
+   계산한다.
+5. 그 값이 요청한 `max_output_tokens` 이하인지 확인한다.
+6. 복잡한 프롬프트 여러 개와 **둘 이상의 상한값**으로 반복한다.
+7. **낮은 상한에서 실제 제한 동작(`incomplete` 등)이 한 번 이상 나타나야
+   한다.** 항상 상한보다 한참 낮게 쓴 표본만으로는 상한 강제를 입증할 수
+   없다 — 스크립트는 이 경우를 `inconclusive_limit_never_bound`로 보고하며
+   통과로 세지 않는다. 카드 한도가 가장 낮은 `gemini-3.1-flash-lite-image`
+   (4,096)가 첫 측정 대상으로 가장 유용하다.
+8. 요청 JSON·원본 응답·모델 ID·응답 ID·실행 일시를 감사 증거로 보존한다.
+   API key와 사용자 프롬프트는 로그에 남기지 않는다(스크립트는 프롬프트를
+   sha256 앞자리로만 기록한다).
+
+**`usage.total_tokens`는 입력 토큰까지 포함하므로 `max_output_tokens`와 직접
+비교하지 않는다.** 코드에서는 `googleBillableOutputTokens()`가 비교 대상
+수량을 이름으로 고정한다.
+
+#### adapter는 선행하고 활성화는 하지 않는다
+
+Interactions API adapter(`lib/googleImageRequest.ts`,
+`imageProviderAdapter.ts`의 `generateWithGoogle`)는 **비활성 상태에서 선행
+구현**한다. `generateImageWithProvider`가 `disabledReason`이 있는 모델을
+dispatch 전에 거부하므로 실행 경로가 없고, 위 실측 자체가 이 코드를 통해야
+하기 때문이다. **adapter 구현은 활성화 승인도 판매가 확정도 아니다.**
+
+- 요청·응답 어휘는 **Interactions API 하나만** 쓴다. GenerateContent는 같은
+  요청을 다른 이름으로 표현하며(`generationConfig.maxOutputTokens`,
+  `candidates[].content.parts[].inlineData.data`,
+  `usageMetadata.thoughtsTokenCount`) `imageConfig`는 deprecated다. 두 어휘를
+  섞은 body는 그럴듯해 보이면서 틀린다 — security regression check가 강제한다.
+- 인증은 `x-goog-api-key`이며 OpenAI식 bearer token이 아니다.
+- **`model_output` step만 읽는다.** thinking 과정에서 중간 이미지가 나올 수
+  있고, 완성본 요금을 받으면서 습작을 저장하는 실패는 둘 다 그럴듯한 그림이라
+  아무도 눈치채지 못한다. 전달된 이미지가 1장이 아니면 fail-closed다.
+- `thinking_level`은 **모델별 profile**에 둔다. 지원 여부가 균일하지 않으므로
+  값이 없으면 필드를 아예 보내지 않는다.
+- `ImageModelProfile.maxOutputTokens`는 **비용 상한이 아니다.** 모델 카드가
+  공표한 수치이자 매 요청이 보내는 값일 뿐이고, 상한 성립 여부는 여전히
+  `priceVerification.thinkingCapMicroUsd`(현재 `null`)가 답한다. 이 둘을
+  혼동하지 않도록 unit test와 regression check가 함께 고정한다.
+
+#### 판매 크레딧은 별도 승인이다
+
+위 수치는 전부 `minimumCreditsForImageOption()`이 내는 **수학적 바닥값**이다.
+마진·가격 drift·환불 위험을 반영한 판매 크레딧은 제품 책임자가 승인한다.
+
+**승인 이력**
+
+| 모델·옵션 | 바닥값 | 승인 판매가 | 원가/크레딧 | 900µ 상한 대비 여유 | 승인일 |
+|---|---:|---:|---:|---:|---|
+| Grok Imagine 1K | 62 | **75** | 733µUSD | 18.5% | 2026-08-04 |
+| Grok Imagine 2K | 84 | **100** | 750µUSD | 16.7% | 2026-08-04 |
+
+1K 75크레딧은 `gpt-image-2` Standard 정사각(70)보다 7%만 높아 비교 화면에서
+설명 가능한 차이다. 운영 데이터가 쌓인 뒤(예: 30일 또는 성공 500건) 실패·
+환불률이 낮으면 70/95로 낮추는 재검토가 가능하다.
+
+**승인된 가격은 `operational_hold` 상태에서도 `prices`에 기록한다.** 가격
+질문이 끝났다는 것이 이 사유의 의미이고, `check:image-pricing`이 비활성
+상태에서도 바닥값을 검사한다. 승인 수치를 주석에 두었다가 출시일에 손으로
+옮기는 것이 더 위험하다. 나머지 두 사유(`price_unverified`,
+`worst_case_cost_unbounded`)는 여전히 `prices`가 비어 있어야 한다.
+
+Grok 활성화(2026-08-05)가 이 규칙의 결과다: hold 해제는 `disabledReason`
+한 줄 변경이었고 가격을 다시 입력하지 않았다. 현재 `operational_hold`를 쓰는
+모델은 없지만 사유와 그 검사는 그대로 유지한다.
+
+#### xAI 활성화 순서 (2026-08-05, 실행 기록)
+
+1. adapter(`lib/xaiImageRequest.ts`) 구현 — 활성화와 별개 결정.
+2. **환경변수를 코드보다 먼저 배포**: Railway `Tomverse` 서비스,
+   production `IMAGE_PROVIDER_XAI_COST_MICROUSD_PER_DAY=50000000` /
+   `_PER_MONTH=500000000`, staging 둘 다 floor `10800000`.
+   `disabledReason`이 `null`이 되는 순간 xAI가 활성 provider가 되므로,
+   flag가 켜진 환경에 예산이 없으면 `/api/ready`가 그때부터 실패한다.
+3. registry `disabledReason: null` 배포. production flag는 OFF 유지(§15).
+4. staging flag ON → 1K 정사각 1회 생성 + gpt-image-2와 2-모델 비교 1회.
+
+#### 등록-비활성은 사용자에게 보인다
+
+카탈로그 이미지 탭은 등록된 모델을 전부 표시하므로(§13,
+`docs/ui-contracts/image-generation-workspace.md`), 현재 이미지 탭에는 활성
+1개와 "준비 중" 4개가 함께 보인다. 이는 의도된 노출이다 — 제품이 결정한
+모델은 부재가 아니라 명시된 보류로 읽히는 편이 낫다. 보류가 많아지는 상태가
+바람직하지 않다면 그것은 registry에서 후보를 빼는 결정이지 탭에서 숨기는
+결정이 아니다.
+
+#### 크기 체계 — 단계적 확장 (2026-08-04 결정)
+
+`ImageSize`는 `1024x1024`·`1536x1024`·`1024x1536` 세 값이며, **제품 옵션과
+OpenAI의 실제 픽셀 문자열을 한 값에 섞고 있다.** Google의 0.5K·2K·4K와 xAI의
+2K는 표현할 수 없고, **Google의 1K landscape는 `1536x1024`와 픽셀 규격이
+다르다** — 문자열 치환으로는 해결되지 않는다.
+
+결정: **xAI는 1K 정사각만 먼저 출시한다.** 1024×1024는 현재 OpenAI 정사각과
+정확히 같아 cross-provider 비교가 가장 공정하다. Google 또는 xAI 2K를 열기
+전에 아래 구조로 확장한다.
+
+- 제품 선택은 `resolutionTier` + `aspectRatio` 두 축으로 표현한다.
+- provider adapter가 이를 provider별 `size` 또는 `resolution`·`aspect_ratio`로
+  변환한다.
+- 결과에는 실제 디코딩된 `width`·`height`를 기록한다.
+- 감사 snapshot에 provider로 전송한 실제 파라미터를 보존한다.
+- 기존 `size` 값은 과거 기록으로 유지하고 **소급 치환하지 않는다.** 그 컬럼의
+  의미는 "실제 픽셀 규격"이므로, `1k|16:9` 같은 새 제품 옵션 의미를 그 컬럼에
+  넣어 재사용하지 않는다. 새 옵션은 snapshot 안에 별도로 보존한다.
+
+비교 가능 여부는 같은 `resolutionTier + aspectRatio`로 판정하되, 결과 화면에는
+실제 픽셀 크기를 표시한다.
+
+**진행 상황(2026-08-04)**
+
+| 단계 | 상태 |
+|---|---|
+| tier·aspect 어휘와 provider 변환 (`lib/imageResolution.ts`) | 완료 |
+| 실제 디코딩된 `width`·`height` 기록 (`ImageGeneration.outputWidth/Height`) | 완료 |
+| 전송 파라미터 감사 snapshot (`ImageGeneration.providerRequestParams`) | 완료 |
+| 정산을 예약 snapshot에 고정 | 완료 (2026-08-04) |
+| 가격표를 (tier, aspect) key로 이전 | **미착수 — 첫 다중 해상도 모델 도입과 함께. `pricingVersion`은 올리지 않는다** |
+| UI 크기 선택지 두 축 분리 | 미착수 |
+
+**감사 snapshot에 prompt는 넣지 않는다.** prompt는 이미 같은 행에 있고, JSON
+blob에 사본을 두면 삭제 경로가 찾아야 할 곳이 하나 더 생긴다. snapshot이
+답해야 하는 질문은 "무엇을 요청했는가"이지 "사용자가 무엇을 입력했는가"가
+아니다. 실패한 시도에도 기록한다 — 무엇을 보냈는지 알아야 하는 순간이 바로
+실패했을 때다.
+
+**어휘와 변환 계층이 `lib/imageResolution.ts`에 들어갔다.** tier·aspect 정의, 기존 `ImageSize`와의 양방향 매핑, provider별
+요청 변환(OpenAI 픽셀쌍 / xAI `resolution`+`aspect_ratio` / Google
+`imageSize`+`aspectRatio`)이 있고 xAI adapter가 이를 쓴다. 판매 가능한
+조합은 `SELLABLE_IMAGE_OPTIONS` 3종 그대로이며, **가격표 key와
+`ImageGeneration.size` 컬럼은 아직 legacy 문자열이다** — 그 둘은 migration과
+새 `pricingVersion`이 함께 움직이는 별도 변경이다.
+
+`legacyImageSizeForOption()`이 2K·4K에 `null`을 돌려주는 것은 표의 빈칸이
+아니라 계약이다. 값을 채워 근처 픽셀쌍으로 매핑하면 1K 가격으로 2K 이미지를
+청구하게 되고, 사용자는 그 차이를 볼 방법이 없다.
+
+
 ## 13. 진입점과 노출 정책 (v2)
+
+이 절이 정하는 것을 화면 단위로 옮긴 UI 계약은
+`docs/ui-contracts/image-generation-workspace.md`에 있다. 렌더링 세부(테스트
+ID, 상태 매트릭스, 릴리스 차단 기준)는 그쪽이 정본이고, 두 문서가 어긋나면
+이 정책이 우선한다.
 
 - 진입점은 네 곳이다: ① 데스크톱 사이드바 **split-button**(기본 클릭 =
   새 채팅, 펼침 메뉴에 이미지 생성), ② 모바일 **"새로 만들기" bottom

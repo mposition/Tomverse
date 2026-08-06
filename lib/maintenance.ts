@@ -9,6 +9,9 @@ import {
 import { expireCreditLots } from "@/lib/creditLedger";
 import { reconcileExpiredChatCreditReservations } from "@/lib/chatSecurity";
 import { purgeExpiredChatLimitDecisions } from "@/lib/chatLimitDecisions";
+import { purgeExpiredAccountDataExportRequests } from "@/lib/accountDataExportTickets";
+import { deleteExpiredContextBundleConsumptions } from "@/lib/chatContextBundleService";
+import { dispatchPendingMemoryExtractionRuns } from "@/lib/memoryExtractionWorker";
 import { purgeExpiredTraceErrorEvidence } from "@/lib/traceErrorEvidence";
 import { purgeClosedAutoFixCases } from "@/lib/feedbackAutoFixShadow";
 import {
@@ -454,7 +457,39 @@ export async function cleanupExpiredData() {
   const creditLotsExpired = await expireCreditLots();
   const guestAttachments = await sweepExpiredGuestAttachments(now);
 
+  // A consumed §10 context bundle stops being worth remembering the moment
+  // the bundle itself expires: past that, verification refuses it before
+  // consumption is ever consulted. Swept here rather than on the request
+  // path, where a delete racing a claim is exactly what a nonce table must
+  // not do.
+  const contextBundleConsumptions =
+    await deleteExpiredContextBundleConsumptions(now);
+
+  // Memory extraction's recovery dispatcher (import/memory policy §11, §11.1).
+  //
+  // Two steps, and the second is the one that matters. A worker that died
+  // mid-run leaves the run `running` with a lease nobody holds, and the claim
+  // is fenced on `leaseGeneration` rather than on a deadline, so it does not
+  // become claimable until this sweep moves it back to `pending`. Reclaiming
+  // alone was the gap §11.1 names: the run becomes claimable and then nothing
+  // claims it, so it waits for a request that may never come. Driving it here
+  // is what actually guarantees a run finishes.
+  const memoryExtraction = await dispatchPendingMemoryExtractionRuns(now);
+
+  // The export ticket dies at its five-minute expiry; the row is what tells an
+  // account owner their data was downloaded last month, so it is kept for the
+  // same 90 days as the other security audit trails. Purging it on expiry
+  // would leave an audit covering only the last five minutes, which is the
+  // same as having none.
+  const accountDataExportRequests =
+    await purgeExpiredAccountDataExportRequests(now);
+
   return {
+    accountDataExportRequests,
+    contextBundleConsumptions,
+    memoryExtractionRuns: memoryExtraction.reclaimedRuns,
+    memoryExtractionDispatched: memoryExtraction.dispatchedRuns,
+    memoryExtractionChunks: memoryExtraction.chunksProcessed,
     guestAttachments,
     sessions: sessions.count,
     usageBuckets: Number(usageBuckets),

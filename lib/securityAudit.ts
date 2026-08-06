@@ -26,6 +26,13 @@ export type SecurityAuditEvent =
     | "conversation.lock.remove"
     | "conversation.lock.verify"
     | "conversation.delete"
+    // Release B5 §7: the same lock, applied to an imported snapshot. Separate
+    // event names rather than a `resourceType` field, so an existing alert on
+    // `conversation.lock.*` keeps meaning what it meant.
+    | "external_conversation.lock.set"
+    | "external_conversation.lock.change"
+    | "external_conversation.lock.remove"
+    | "external_conversation.lock.verify"
     | "account.deletion.schedule"
     // Release B §13.1-§13.2. Content-free by construction: these carry the
     // hashed subject and an outcome, never a statement, evidence or count of
@@ -33,7 +40,14 @@ export type SecurityAuditEvent =
     // convention (90 days).
     | "memory.export.create"
     | "memory.export.download"
-    | "memory.delete_all";
+    | "memory.delete_all"
+    // The unified account export (PRIVACY-02). Three events rather than two,
+    // because the refusal is the one that matters most: it means somebody
+    // presented a download link they should not have, and a trail recording
+    // only successes cannot show that.
+    | "account.data_export.request"
+    | "account.data_export.download"
+    | "account.data_export.refused";
 type AuditOutcome = "attempt" | "success" | "denied" | "rate_limited" | "failure";
 
 const auditValue = (

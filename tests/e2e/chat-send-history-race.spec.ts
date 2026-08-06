@@ -75,7 +75,7 @@ test.describe("chat send survives a late conversation-history response", () => {
     );
   });
 
-  test("a history response that lands after the send does not erase the message", async ({
+  test("a history response that lands after the send does not erase the message", { tag: "@review-parity" }, async ({
     page,
   }) => {
     await prepareSingleModelChat(page);
@@ -97,7 +97,7 @@ test.describe("chat send survives a late conversation-history response", () => {
     await expect(page.getByText("history race QA response").first()).toBeVisible();
   });
 
-  test("the same race in the narrowed (mobile-layout) window keeps the message", async ({
+  test("the same race in the narrowed (mobile-layout) window keeps the message", { tag: "@review-parity" }, async ({
     page,
   }) => {
     await prepareSingleModelChat(page);

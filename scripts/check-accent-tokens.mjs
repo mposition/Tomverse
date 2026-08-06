@@ -22,6 +22,7 @@ const GUARDED_FILES = [
   "components/chat/ComparisonReviewDialog.tsx",
   "components/chat/DeepResearchSetupSheet.tsx",
   "components/images/ImageGenerationWorkspace.tsx",
+  "components/chat/ImageModelTabPanel.tsx",
   "components/chat/ModelPickerPanel.tsx",
   "components/chat/ModelSelectionBadge.tsx",
   "components/chat/SidebarAccountRailButton.tsx",
@@ -68,6 +69,7 @@ const RAW_UTILITY = new RegExp(
 // rather than rendering as no colour at all.
 const KNOWN_ROLES = [
   "accent-account",
+  "accent-account-memory",
   "accent-ai-review-start",
   "accent-ai-review-mid",
   "accent-ai-review-end",

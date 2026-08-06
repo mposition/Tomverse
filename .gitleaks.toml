@@ -10,10 +10,20 @@ description = "Known false positives: public model identifiers and non-secret co
 regexTarget = "line"
 regexes = [
   # e.g. lib/models.ts, components/chat/*.tsx: apiModel: "claude-haiku-4-5-20251001"
+  # e.g. lib/modelPricing.ts: apiModelId: "claude-haiku-4-5-20251001"
   # A public provider model identifier, not a secret.
-  '''apiModel:\s*"[A-Za-z0-9._/-]+"''',
-  # Mistral's public fixed model ID. The default generic-api-key rule flags
-  # this exact hyphenated identifier in apiModelId fields and assertions.
+  #
+  # `apiModelId` is spelled out here because `apiModel:` does not match it --
+  # the next character is `I`, not `:`. lib/modelPricing.ts uses `apiModelId`
+  # throughout, so every profile added to it was scanned against the default
+  # generic-api-key rule with no field-level allowlist at all, and two of them
+  # tripped it on entropy alone. The `mistral-medium-3-5` line below is the
+  # scar from the first time that happened: one value pinned instead of the
+  # field, which fixed that model and left the next one to fail the same way.
+  '''apiModel(?:Id)?:\s*"[A-Za-z0-9._/-]+"''',
+  # Still needed after the rule above: this identifier also appears as an
+  # assertion argument (`mistral.apiModel, "mistral-medium-3-5"`), where there
+  # is no `field:` for a field rule to anchor to.
   '''mistral-medium-3-5''',
   # SEC-009. The two shapes that actually appear in this repo for a `*_KEY`
   # constant, and nothing wider. The previous rule was

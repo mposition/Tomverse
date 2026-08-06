@@ -98,17 +98,41 @@ test("only providers with an enabled model are required to have a budget", () =>
   const resolved = resolveActiveImageProviderBudgets(
     {
       IMAGE_PROVIDER_OPENAI_COST_MICROUSD_PER_DAY: "12000000",
-      IMAGE_PROVIDER_OPENAI_COST_MICROUSD_PER_MONTH: "12000000",
+      IMAGE_PROVIDER_OPENAI_COST_MICROUSD_PER_MONTH: "120000000",
+      IMAGE_PROVIDER_XAI_COST_MICROUSD_PER_DAY: "50000000",
+      IMAGE_PROVIDER_XAI_COST_MICROUSD_PER_MONTH: "500000000",
     },
     { production: true }
   );
-  // Google is registered but on a price hold, so it cannot receive a request
-  // and its missing budget must not block a deploy.
+  // OpenAI and xAI both have an enabled model. The three Google models are
+  // registered but on a price hold, so they cannot receive a request and their
+  // missing budget must not block a deploy.
   assert.deepEqual(
     resolved.map((entry) => entry.provider),
-    ["openai"]
+    ["openai", "xai"]
   );
-  assert.ok(resolved[0].resolved.limits);
+  for (const entry of resolved) assert.ok(entry.resolved.limits, entry.provider);
+});
+
+test("an enabled provider with no budget refuses readiness in production", () => {
+  // The other half of the same rule, and the reason the environment variables
+  // are deployed before the code that enables a model: the moment xAI has an
+  // enabled model, an environment running with the flag on and no xAI budget
+  // is a fatal misconfiguration rather than a quiet default.
+  const resolved = resolveActiveImageProviderBudgets(
+    {
+      IMAGE_PROVIDER_OPENAI_COST_MICROUSD_PER_DAY: "12000000",
+      IMAGE_PROVIDER_OPENAI_COST_MICROUSD_PER_MONTH: "120000000",
+    },
+    { production: true }
+  );
+  const xai = resolved.find((entry) => entry.provider === "xai");
+  assert.ok(xai, "xai is an active provider");
+  assert.equal(xai.resolved.limits, null);
+  assert.deepEqual(
+    xai.resolved.problems.map((problem) => problem.reason),
+    ["missing_in_production", "missing_in_production"]
+  );
 });
 
 test("a provider-scoped resolve reads that provider's variables only", () => {
@@ -125,4 +149,50 @@ test("a provider-scoped resolve reads that provider's variables only", () => {
       problem.message.includes("IMAGE_PROVIDER_GOOGLE_")
     )
   );
+});
+
+test("a month budget that is not above the day budget is flagged, not blocked", () => {
+  // Both windows at the same number is legal and almost never intended: one
+  // day spent at the daily cap exhausts the month, so the monthly window stops
+  // being a second bound. It is deliberate in staging, where a small identical
+  // pair caps total spend -- which is exactly why this advises rather than
+  // refusing readiness. Refusing to start over an odd-but-conservative budget
+  // would be worse than the budget.
+  const equal = resolveImageProviderBudget(
+    {
+      IMAGE_PROVIDER_OPENAI_COST_MICROUSD_PER_DAY: "10800000",
+      IMAGE_PROVIDER_OPENAI_COST_MICROUSD_PER_MONTH: "10800000",
+    },
+    { production: true }
+  );
+  assert.ok(equal.limits, "still usable");
+  assert.deepEqual(equal.problems, []);
+  assert.deepEqual(
+    equal.advisories.map((entry) => entry.code),
+    ["month_not_above_day"]
+  );
+
+  // A month below the day is the same mistake, further along.
+  const inverted = resolveImageProviderBudget(
+    {
+      IMAGE_PROVIDER_OPENAI_COST_MICROUSD_PER_DAY: "50000000",
+      IMAGE_PROVIDER_OPENAI_COST_MICROUSD_PER_MONTH: "20000000",
+    },
+    { production: true }
+  );
+  assert.deepEqual(
+    inverted.advisories.map((entry) => entry.code),
+    ["month_not_above_day"]
+  );
+
+  // The approved production pair says nothing.
+  const approved = resolveImageProviderBudget(
+    {
+      IMAGE_PROVIDER_XAI_COST_MICROUSD_PER_DAY: "50000000",
+      IMAGE_PROVIDER_XAI_COST_MICROUSD_PER_MONTH: "500000000",
+    },
+    { production: true, provider: "xai" }
+  );
+  assert.deepEqual(approved.advisories, []);
+  assert.deepEqual(approved.limits, { day: 50_000_000, month: 500_000_000 });
 });

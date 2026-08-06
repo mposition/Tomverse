@@ -17,6 +17,17 @@ type AdminImageGenerationReport = {
     worstCostMicroUsdPerCredit: number;
     ceilingHeadroomMicroUsd: number;
   };
+  models: Array<{
+    id: string;
+    provider: string;
+    name: string;
+    lifecycle: string;
+    disabledReason: string | null;
+    disabledNote: string | null;
+    pricingVersion: string;
+    priceVerifiedAt: string | null;
+    optionCount: number;
+  }>;
   budget: {
     source: string;
     floorMicroUsd: number;
@@ -27,6 +38,7 @@ type AdminImageGenerationReport = {
       effectiveMicroUsd: number;
     }>;
     problems: Array<{ window: string; reason: string; message: string }>;
+    advisories: Array<{ code: string; message: string }>;
     usedTodayMicroUsd: number;
     usedThisMonthMicroUsd: number;
   };
@@ -49,13 +61,28 @@ type AdminImageGenerationReport = {
       averageSettledCostMicroUsd: number;
     }>;
   };
+  settledByProviderModel: Array<{
+    provider: string;
+    modelId: string;
+    settlements: number;
+    settledCredits: number;
+    settledCostMicroUsd: number;
+  }>;
+  dimensionCoverage: Array<{
+    provider: string;
+    succeeded: number;
+    measured: number;
+  }>;
   storage: {
     byRole: Record<string, { count: number; byteSize: number }>;
   };
   invariants: {
     emptyImageConversations: number;
     staleGenerations: number;
+    strandedSettlements: number;
     cleanupBacklog: number;
+    thumbnailBacklog: number;
+    thumbnailsExhausted: number;
   };
 };
 
@@ -117,9 +144,13 @@ export function AdminImageGenerationPanel() {
     queueMicrotask(() => void load());
   }, [load]);
 
+  // A queued thumbnail is not an issue -- the sweep is going to take it, and
+  // the card renders the original meanwhile. One that ran out of retries is:
+  // nothing will try again, so it stays that way until someone looks.
   const invariantIssues = report
     ? report.invariants.emptyImageConversations +
-      report.invariants.staleGenerations
+      report.invariants.staleGenerations +
+      report.invariants.thumbnailsExhausted
     : 0;
 
   return (
@@ -192,6 +223,10 @@ export function AdminImageGenerationPanel() {
                 report.budget.limits ? usd(report.budget.limits.month) : "unconfigured"
               }`}
               detail={`floor ${usd(report.budget.floorMicroUsd)}${
+                report.budget.advisories.length > 0
+                  ? ` · ${report.budget.advisories[0].code}`
+                  : ""
+              }${
                 report.budget.clamped.length > 0
                   ? ` · ${report.budget.clamped.length} override(s) raised to the floor`
                   : ""
@@ -205,7 +240,7 @@ export function AdminImageGenerationPanel() {
             <Stat
               label="Invariants"
               value={invariantIssues === 0 ? "clean" : `${invariantIssues} issue(s)`}
-              detail={`${report.invariants.emptyImageConversations} empty conversations · ${report.invariants.staleGenerations} stale · ${report.invariants.cleanupBacklog} cleanup backlog`}
+              detail={`${report.invariants.emptyImageConversations} empty conversations · ${report.invariants.staleGenerations} stale (${report.invariants.strandedSettlements} stranded mid-settlement) · ${report.invariants.cleanupBacklog} cleanup backlog · ${report.invariants.thumbnailBacklog} thumbnails queued (${report.invariants.thumbnailsExhausted} exhausted)`}
             />
           </div>
 
@@ -307,6 +342,132 @@ export function AdminImageGenerationPanel() {
               )}
             </div>
           </div>
+
+          {/*
+            Budgets are enforced per provider, so spend is read per provider.
+            One combined total cannot answer "whose budget is this consuming",
+            which is the only question that matters once a second provider is
+            running.
+          */}
+          {/*
+            The registry as an operator sees it. A held model states which of
+            the three holds applies and why -- the reasons are not
+            interchangeable labels, and the one that applies is what says what
+            has to happen next.
+          */}
+          <div className="rounded-2xl border border-zinc-800 bg-zinc-900/40 p-4">
+            <h3 className="text-sm font-bold text-zinc-200">Model registry</h3>
+            <ul className="mt-3 space-y-3">
+              {report.models.map((model) => (
+                <li key={model.id} className="border-t border-zinc-800/60 pt-3 first:border-0 first:pt-0">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="font-bold text-zinc-200">{model.name}</span>
+                    <span className="font-mono text-[11px] text-zinc-500">
+                      {model.provider}/{model.id}
+                    </span>
+                    <span
+                      className={`rounded-full px-2 py-0.5 text-[11px] font-bold ${
+                        model.disabledReason
+                          ? "bg-amber-500/10 text-amber-400"
+                          : "bg-emerald-500/10 text-emerald-400"
+                      }`}
+                    >
+                      {model.disabledReason ?? "enabled"}
+                    </span>
+                  </div>
+                  <p className="mt-1 font-mono text-[11px] text-zinc-500">
+                    {model.pricingVersion} ·{" "}
+                    {model.priceVerifiedAt
+                      ? `verified ${model.priceVerifiedAt}`
+                      : "price unverified"}{" "}
+                    · {model.optionCount} priced option(s)
+                  </p>
+                  {model.disabledNote && (
+                    <p className="mt-1 text-xs leading-5 text-zinc-400">
+                      {model.disabledNote}
+                    </p>
+                  )}
+                </li>
+              ))}
+            </ul>
+          </div>
+
+          {report.settledByProviderModel.length > 0 && (
+            <div className="rounded-2xl border border-zinc-800 bg-zinc-900/40 p-4">
+              <h3 className="text-sm font-bold text-zinc-200">
+                Settled spend by provider
+              </h3>
+              <table className="mt-3 w-full text-left text-sm">
+                <thead>
+                  <tr className="text-[11px] uppercase tracking-[0.12em] text-zinc-500">
+                    <th className="py-1 font-bold">Provider · model</th>
+                    <th className="py-1 text-right font-bold">Settlements</th>
+                    <th className="py-1 text-right font-bold">Credits</th>
+                    <th className="py-1 text-right font-bold">Settled cost</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {report.settledByProviderModel.map((row) => (
+                    <tr
+                      key={`${row.provider}:${row.modelId}`}
+                      className="border-t border-zinc-800/60"
+                    >
+                      <td className="py-1.5 font-mono text-xs text-zinc-300">
+                        {row.provider} · {row.modelId}
+                      </td>
+                      <td className="py-1.5 text-right font-bold text-zinc-200">
+                        {row.settlements}
+                      </td>
+                      <td className="py-1.5 text-right text-zinc-300">
+                        {row.settledCredits}
+                      </td>
+                      <td className="py-1.5 text-right text-zinc-300">
+                        {usd(row.settledCostMicroUsd)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          {/*
+            A succeeded generation with no recorded dimensions means the
+            header could not be read. That is recorded honestly as null, which
+            makes it invisible unless it is counted -- so it is counted.
+          */}
+          {report.dimensionCoverage.length > 0 && (
+            <div className="rounded-2xl border border-zinc-800 bg-zinc-900/40 p-4">
+              <h3 className="text-sm font-bold text-zinc-200">
+                Measured output dimensions
+              </h3>
+              <ul className="mt-3 space-y-1.5 text-sm">
+                {report.dimensionCoverage.map((row) => {
+                  const missing = row.succeeded - row.measured;
+                  return (
+                    <li
+                      key={row.provider}
+                      className="flex items-center justify-between gap-3"
+                    >
+                      <span className="font-mono text-xs text-zinc-300">
+                        {row.provider}
+                      </span>
+                      <span
+                        className={
+                          missing > 0
+                            ? "font-bold text-amber-400"
+                            : "text-zinc-300"
+                        }
+                      >
+                        {row.measured}/{row.succeeded} measured
+                        {missing > 0 ? ` · ${missing} unreadable` : ""}
+                      </span>
+                    </li>
+                  );
+                })}
+              </ul>
+            </div>
+          )}
         </div>
       )}
     </section>

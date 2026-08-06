@@ -59,12 +59,59 @@ test("a model on a fail-closed hold is refused by the adapter itself", async () 
       prompt: "a red apple",
       size: "1024x1024",
       quality: "medium",
-      modelId: "gemini-3.1-flash-image-preview",
+      modelId: "gemini-3.1-flash-image",
     }),
     (error) =>
       error.name === "ImageProviderError" &&
       error.failurePhase === "provider_failed" &&
       /not available for requests/.test(error.message)
+  );
+});
+
+test("having an adapter is not what makes a model callable", async () => {
+  // Every Google model has a working Interactions adapter and is still held,
+  // because the hold is about whether the worst-case cost is finite, not about
+  // whether the code to call it exists. The dispatch refuses on disabledReason
+  // before it ever reaches a provider branch, so writing an adapter can never
+  // be the thing that ships a model.
+  for (const modelId of [
+    "gemini-3.1-flash-lite-image",
+    "gemini-3-pro-image",
+  ]) {
+    await assert.rejects(
+      generateImageWithProvider({
+        prompt: "a red apple",
+        size: "1024x1024",
+        quality: "medium",
+        modelId,
+      }),
+      (error) =>
+        error.name === "ImageProviderError" &&
+        error.failurePhase === "provider_failed" &&
+        /not available for requests/.test(error.message),
+      modelId
+    );
+  }
+});
+
+test("an enabled model still refuses a size it has no mapping for", async () => {
+  // Grok is enabled at 1K square only. A landscape passes the disabledReason
+  // check and must still be refused by the request builder rather than sent as
+  // though it were the priced request -- the approved credits are for one
+  // resolution, and the user would never see the difference.
+  //
+  // Reaching this error at all proves the dispatch let an enabled model
+  // through, which is the other half of the test above.
+  await assert.rejects(
+    generateImageWithProvider({
+      prompt: "a red apple",
+      size: "1536x1024",
+      quality: "medium",
+      modelId: "grok-imagine-image-quality-20260403",
+    }),
+    (error) =>
+      error.name === "ImageProviderError" &&
+      /no xAI resolution mapping/.test(error.message)
   );
 });
 

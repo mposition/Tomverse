@@ -20,6 +20,8 @@ import {
   isComposingKeydown,
 } from "@/lib/chatKeyboardPolicy";
 import type { WebSearchMode } from "@/lib/appDefaults";
+import { prepareChatContextBundle } from "@/lib/chatContextBundleClient";
+import { decideBundleStaleRecovery } from "@/lib/chatContextBundleRecovery";
 import {
   parseChatStreamTrailer,
   splitSearchMetadataTrailer,
@@ -68,7 +70,33 @@ type ChatAppProps = {
      * per-request admission path.
      */
     admissionToken?: string | null;
+    /**
+     * The §10 context bundle this send was priced against. Opaque and
+     * single-use per (bundle, model); absent means the request was priced
+     * with no memory context, and the server then sends none.
+     */
+    contextBundle?: string | null;
+    /**
+     * Whether that bundle covers this panel alone or a whole comparison.
+     * It decides what a stale bundle may do about itself, and only the step
+     * that prepared the context knows which it issued.
+     */
+    contextLayout?: "single" | "comparison";
   } | null;
+  /**
+   * Asks the shell for a context the whole run can share, after this panel's
+   * bundle was refused for drift (§10). The shell prepares once per prompt
+   * however many panels ask, so the run ends up on one new snapshot rather
+   * than one per panel -- which is the difference between re-preparing the
+   * set and the per-panel retry the policy forbids.
+   *
+   * Resolves to `null` when there is no recovery to offer, and the refusal is
+   * then the user's to act on.
+   */
+  onContextBundleStale?: (input: {
+    promptId: string | null;
+    modelId: string;
+  }) => Promise<string | null>;
   isPanelDisabled?: boolean;
   isGuestMode?: boolean;
   webSearchMode?: WebSearchMode;
@@ -109,6 +137,7 @@ function ChatAppComponent({
   modelId,
   initialConversationId = null,
   promptPayload,
+  onContextBundleStale,
   isPanelDisabled = false,
   isGuestMode = false,
   webSearchMode,
@@ -590,7 +619,9 @@ function ChatAppComponent({
     attachments: ChatAttachment[] = [],
     analyticsPromptId: string | null = null,
     deepResearchDepth?: "quick" | "standard" | "deep",
-    admissionToken?: string | null
+    admissionToken?: string | null,
+    contextBundle?: string | null,
+    contextLayout: "single" | "comparison" = "single"
   ) => {
   	if ((!text && attachments.length === 0) || isSendingRef.current) return;
 
@@ -673,6 +704,13 @@ function ChatAppComponent({
           }
         : undefined;
 
+    // The bundle actually presented, which a stale-recovery retry replaces.
+    // `contextBundle` is what this send was prepared with; after one refusal
+    // for drift the request is re-prepared and this becomes the new one.
+    let activeContextBundle = contextBundle ?? null;
+    let contextBundleRetries = 0;
+    let memoryUsedCount = 0;
+
     try {
       const sendChatRequest = async (turnstileToken?: string) => {
         const res = await fetch("/api/chat", {
@@ -702,12 +740,23 @@ function ChatAppComponent({
               : {}),
             ...(deepResearchDepth ? { deepResearchDepth } : {}),
             ...(admissionToken ? { admissionToken } : {}),
+            ...(activeContextBundle ? { contextBundle: activeContextBundle } : {}),
             ...(webSearchMode && webSearchMode !== "off" ? { webSearchMode } : {}),
           }),
           signal: controller.signal,
         });
         resetIdleTimeout();
         requestTraceId = res.headers.get("X-Request-ID");
+        // §13.4: the server's own count, taken from the response rather than
+        // derived here. Absent means memory played no part -- which is not
+        // the same as zero, and must not be shown as one.
+        const reportedMemoryUsed = Number(
+          res.headers.get("X-Chat-Memory-Used")
+        );
+        memoryUsedCount =
+          Number.isSafeInteger(reportedMemoryUsed) && reportedMemoryUsed > 0
+            ? reportedMemoryUsed
+            : 0;
         // Always this response's own header (or null): the token must never
         // outlive the trace it was signed for, or a retried request would
         // pair a stale token with a fresh trace and verify as a mismatch.
@@ -756,6 +805,53 @@ function ChatAppComponent({
             sendWithToken: (turnstileToken) => sendChatRequest(turnstileToken),
             sendAfterGrant: () => sendChatRequest(),
           });
+        } else if (code === "CHAT_CONTEXT_BUNDLE_STALE") {
+          // The user changed their memory while this send was in flight, so
+          // the context that was priced is not the context that would be
+          // sent. §10 decides what may be done about it, and the decision is
+          // a pure function rather than an `if` written twice.
+          //
+          // `streamStarted: false` is a fact about where this code sits, not
+          // an assumption: this catch runs before the response body is read,
+          // so nothing has reached the user yet.
+          const recovery = decideBundleStaleRecovery({
+            layout: contextLayout,
+            priorAutomaticRetries: contextBundleRetries,
+            streamStarted: false,
+          });
+          if (recovery.action === "surface_to_user") throw error;
+
+          // Both surviving actions re-prepare; they differ in *whose* context
+          // is prepared. A comparison must not put this panel on a snapshot
+          // its siblings are not on, so the shell prepares one context for the
+          // whole run and hands the same bundle to every panel that asks --
+          // which is re-preparing the set, not retrying a panel. A
+          // single-model send has no set, so the two collapse to the same
+          // call.
+          const refreshed = onContextBundleStale
+            ? await onContextBundleStale({
+                promptId: analyticsPromptId,
+                modelId,
+              })
+            : recovery.action === "retry_after_preflight"
+              ? await prepareChatContextBundle({
+                  conversationId: isGuestMode ? null : targetChatId,
+                  modelIds: [modelId],
+                  prompt: text,
+                })
+              : null;
+          // Nothing to retry with. Re-sending the bundle that was just
+          // refused would be a replay, and the server would refuse it again.
+          if (!refreshed) throw error;
+
+          contextBundleRetries += 1;
+          activeContextBundle = refreshed;
+          // Same assistant message id, same user message, same admission
+          // token: the retry replaces the refused request rather than adding a
+          // second turn or taking a second concurrency slot. The refused
+          // request never reached `acquireChatAccess`, so its slot is still
+          // this panel's to spend.
+          response = await sendChatRequest();
         } else {
           throw error;
         }
@@ -848,7 +944,10 @@ function ChatAppComponent({
           assistantText,
           completionStatus,
           undefined,
-          { searchMetadata }
+          {
+            searchMetadata,
+            ...(memoryUsedCount > 0 ? { memoryUsedCount } : {}),
+          }
         );
         onResponseComplete?.(analyticsPromptId, modelId, assistantText, searchMetadata);
       }
@@ -938,6 +1037,14 @@ function ChatAppComponent({
                 "{seconds}",
                 String(Math.max(1, retryAfterSeconds ?? 5))
               )
+            : errorCode === "CHAT_CONTEXT_BUNDLE_STALE"
+              // The terminal state of §10: this send was priced against a
+              // memory context that no longer matches, and the recovery was
+              // either already spent (a single-model retry) or is not this
+              // panel's to take (a comparison). The server's English sentence
+              // never reaches the panel -- the user is told what happened in
+              // their own language, and that sending again is what fixes it.
+              ? t("chat.contextBundleStale")
             : errorCode === "PLAN_ENTITLEMENT_EXHAUSTED"
               ? t("chat.planEntitlementExhausted")
             : errorCode === "CONCURRENT_RESERVATION_CONFLICT"
@@ -1025,6 +1132,7 @@ function ChatAppComponent({
     }
   }, [
     isGuestMode,
+    onContextBundleStale,
     messages,
     modelId,
     onResponseComplete,
@@ -1097,7 +1205,9 @@ function ChatAppComponent({
           modelId === "perplexity/sonar-deep-research"
             ? promptPayload.deepResearchDepth
             : undefined,
-          promptPayload.admissionToken
+          promptPayload.admissionToken,
+          promptPayload.contextBundle,
+          promptPayload.contextLayout
         );
     });
     return () => {

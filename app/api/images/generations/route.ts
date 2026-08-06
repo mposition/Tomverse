@@ -1,5 +1,21 @@
 export const dynamic = "force-dynamic";
 
+/**
+ * The budget the post-response executor below actually has.
+ *
+ * `after()` runs "for the platform's default or configured max duration of
+ * your route", so this number -- not the proxy read timeout -- is what decides
+ * where `processImageGenerationGroup` is cut off. It is
+ * `IMAGE_EXECUTOR_MAX_DURATION_SECONDS` (lib/imageGenerationStateCore.ts),
+ * kept as a literal because route segment config is read statically;
+ * `npm run check:image-executor-budget` is what keeps the two in step.
+ *
+ * A cut-off executor is not a delay. Nothing re-drives a `pending` generation
+ * -- the sweep only refunds one -- so the request is lost and its owner waits
+ * out the stale window for the credits back.
+ */
+export const maxDuration = 968;
+
 import { NextResponse } from "next/server";
 import { after } from "next/server";
 import { getServerSession } from "next-auth/next";
@@ -65,10 +81,12 @@ export async function POST(req: Request) {
 
     // Post-response execution in the same long-lived Node process: the 202
     // is already on the wire, so the Cloudflare proxy read timeout no longer
-    // applies, and the claim inside processImageGeneration keeps this safe
-    // to run alongside the reconciliation sweep (or a future dedicated
-    // worker). A process death here is exactly the stale case the sweep
-    // refunds.
+    // applies -- but that was never the binding constraint. `after()` runs
+    // for this route's max duration, declared above, which is why the number
+    // is stated rather than inherited. The claim inside processImageGeneration
+    // keeps this safe to run alongside the reconciliation sweep (or a future
+    // dedicated worker). A process death here is exactly the stale case the
+    // sweep refunds.
     if (!result.reused) {
       const pending = result.targets
         .filter((target) => target.status === "pending")

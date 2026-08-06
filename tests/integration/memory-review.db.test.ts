@@ -16,6 +16,10 @@ import {
     rejectMemory,
     setMemoryPinned,
 } from "@/lib/memoryService";
+import {
+    MEMORY_RETRIEVAL_VERSION,
+    memoryRetrievalTerms,
+} from "@/lib/memoryRetrievalTerms";
 import { prisma } from "@/lib/prisma";
 
 /**
@@ -388,4 +392,77 @@ test("memory settings default on and round-trip (§8.1)", async () => {
     });
     assert.equal(updated.masterEnabled, false);
     assert.equal(updated.defaultConversationMode, "off");
+});
+
+test("write paths index the statement for retrieval, and re-index on edit (§9)", async () => {
+    const user = await createUser();
+    const memoryId = await createManualMemory({
+        userId: user.id,
+        kind: "preference",
+        statement: "사용자는 커피를 좋아한다",
+        groundsText: "직접 입력",
+    });
+
+    const created = await prisma.memoryItem.findUniqueOrThrow({
+        where: { id: memoryId },
+        select: { searchTerms: true, retrievalVersion: true, statement: true },
+    });
+    assert.equal(created.retrievalVersion, MEMORY_RETRIEVAL_VERSION);
+    assert.deepEqual(
+        created.searchTerms,
+        memoryRetrievalTerms("사용자는 커피를 좋아한다")
+    );
+    // The property retrieval actually depends on: a query for the bare noun
+    // meets the stored form that carries a particle.
+    for (const term of memoryRetrievalTerms("커피")) {
+        assert.ok(
+            created.searchTerms.includes(term),
+            `${term} missing from the index`
+        );
+    }
+
+    await editMemory({
+        userId: user.id,
+        memoryId,
+        statement: "사용자는 녹차를 좋아한다",
+    });
+    const edited = await prisma.memoryItem.findUniqueOrThrow({
+        where: { id: memoryId },
+        select: { searchTerms: true },
+    });
+    assert.deepEqual(
+        edited.searchTerms,
+        memoryRetrievalTerms("사용자는 녹차를 좋아한다")
+    );
+    assert.ok(
+        !edited.searchTerms.some((term) => term.includes("커피")),
+        "the old statement's terms must not survive the edit"
+    );
+});
+
+test("the GIN index answers a term query over stored memories (§9)", async () => {
+    const user = await createUser();
+    await createManualMemory({
+        userId: user.id,
+        kind: "preference",
+        statement: "사용자는 커피를 좋아한다",
+        groundsText: "근거",
+    });
+    await createManualMemory({
+        userId: user.id,
+        kind: "occupation",
+        statement: "사용자는 백엔드 엔지니어로 일한다",
+        groundsText: "근거",
+    });
+
+    const terms = memoryRetrievalTerms("커피");
+    const matched = await prisma.memoryItem.findMany({
+        where: { userId: user.id, searchTerms: { hasSome: terms } },
+        select: { statement: true },
+    });
+    assert.deepEqual(
+        matched.map((row) => row.statement),
+        ["사용자는 커피를 좋아한다"],
+        "a lexical term query must select exactly the relevant row"
+    );
 });

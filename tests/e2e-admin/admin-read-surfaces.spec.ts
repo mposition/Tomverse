@@ -176,19 +176,21 @@ test.describe("admin read surfaces", () => {
     await expect(page.getByText(FIXTURE_ANALYTICS.eventName)).toBeVisible();
   });
 
-  test("analytics' imports tab renders the content-free import report", async ({
+  test("analytics' imports tab renders the content-free import and memory report", async ({
     page,
   }) => {
     await page.goto("/admin/analytics?tab=imports");
 
-    // `/api/admin/external-imports` had no console surface at all before this.
+    // The panel reads /api/admin/memory and /api/admin/external-imports after
+    // mount, and it is the only place in the console that reads either.
+    await expect(page.getByTestId("admin-memory-import-panel")).toBeVisible();
     await expect(
-      page.getByRole("heading", { name: "Conversation import and memory" })
+      page.getByRole("heading", { name: "Review outcomes and extraction runs" })
     ).toBeVisible();
+    // The product funnel belongs to the other tab and is not fetched here.
     await expect(
-      page.getByRole("heading", { name: "Completed imports by conversation count" })
-    ).toBeVisible();
-    await expect(page.getByText("Duplicate share")).toBeVisible();
+      page.getByRole("heading", { name: "Go-live funnel and activation" })
+    ).toHaveCount(0);
   });
 
   test("users lists seeded accounts with their plan and risk state", async ({
@@ -355,6 +357,12 @@ test.describe("admin read surfaces", () => {
       page.getByRole("heading", { name: "Model catalogue and API configuration" })
     ).toBeVisible();
     await expect(page.getByText(FIXTURE_MODEL.enabled.name).first()).toBeVisible();
+    // The list opens on the Operational lifecycle view, so the blocked row is
+    // one explicit selection away rather than on screen by default.
+    await expect(page.getByText(FIXTURE_MODEL.disabled.name)).toHaveCount(0);
+    await page
+      .getByTestId("model-registry-lifecycle-filter")
+      .selectOption("all");
     await expect(page.getByText(FIXTURE_MODEL.disabled.name).first()).toBeVisible();
     await expect(
       page.getByRole("button", { name: `Edit ${FIXTURE_MODEL.enabled.name}` })

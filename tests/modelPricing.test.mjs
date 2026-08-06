@@ -239,7 +239,9 @@ test("new catalogue models use their exact provider prices and output caps", () 
     "grok-4-5": [2, 6, 16_384],
     "mistral-medium-3-1": [1.5, 7.5, 16_384],
     "claude-fable-5": [10, 50, 128_000],
-    "kimi-k3": [3, 15, 1_048_576],
+    // 131,072 is the documented request default; the 1,048,576 ceiling is a
+    // capability and is carried separately as providerMaxOutputTokens.
+    "kimi-k3": [3, 15, 131_072],
     "minimax-m3": [0.3, 1.2, 524_288],
   };
 
@@ -471,4 +473,51 @@ test("every explicit profile has an unbounded final tier", () => {
     assert.ok(profile);
     assert.equal(profile.tiers[profile.tiers.length - 1].maxPromptTokens, null);
   }
+});
+
+test("GLM-5.2's cached-input rate resolves to the published US$0.26, not a rounded multiplier", () => {
+  // The profile stores a multiplier, but Z.AI publishes the cache-read rate as
+  // an absolute US$0.26/1M. Writing a rounded 0.19 would charge US$0.266, and
+  // the stored multiplier is what later re-prices a snapshot -- so the
+  // reconstructed rate is the thing worth pinning, not the multiplier.
+  const pricing = resolveModelPricing(model("glm-5.2"));
+  assert.equal(pricing.costSource, "registry");
+  assert.equal(pricing.inputUsdPerMillionTokens, 1.4);
+  assert.equal(pricing.outputUsdPerMillionTokens, 4.4);
+  const cachedUsdPerMillion =
+    pricing.inputUsdPerMillionTokens * pricing.cachedInputPriceMultiplier;
+  assert.ok(
+    Math.abs(cachedUsdPerMillion - 0.26) < 1e-9,
+    `cached input resolved to ${cachedUsdPerMillion}, expected 0.26`
+  );
+  assert.equal(pricing.cachedInputPricingVerified, true);
+});
+
+test("Claude Sonnet 5's introductory price is replaced when it expires", () => {
+  // The profile carries Anthropic's introductory rate (US$2 / US$10), which is
+  // what is billed until 2026-08-31. From 2026-09-01 the standard US$3 / US$15
+  // applies, and a stored price that quietly outlives its term understates cost
+  // on every request -- exactly what an explicit profile exists to prevent.
+  //
+  // This is deliberately a date-triggered failure. There is no webhook for a
+  // price change and nothing else in the system notices one, so the reminder
+  // has to be the build. Fix it by moving the rates, not by moving the date.
+  const pricing = resolveModelPricing(model("claude-sonnet-5"));
+  const introductoryPeriodEnds = Date.parse("2026-09-01T00:00:00.000Z");
+  const stillIntroductory = Date.now() < introductoryPeriodEnds;
+
+  if (stillIntroductory) {
+    assert.equal(pricing.inputUsdPerMillionTokens, 2);
+    assert.equal(pricing.outputUsdPerMillionTokens, 10);
+    return;
+  }
+
+  assert.equal(
+    pricing.inputUsdPerMillionTokens,
+    3,
+    "Claude Sonnet 5's introductory pricing ended on 2026-08-31. Move the " +
+      "profile in lib/modelPricing.ts to the standard US$3 / US$15 with a " +
+      "cached-read multiplier of 0.1, and give it a new pricingVersion."
+  );
+  assert.equal(pricing.outputUsdPerMillionTokens, 15);
 });

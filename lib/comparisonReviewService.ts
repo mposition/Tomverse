@@ -18,12 +18,14 @@ import {
 import {
   acquireChatAccess,
   createChatBudget,
+  isChatAccessError,
   linkChatReservationProviderRequest,
   releaseChatAccess,
   settleChatUsage,
   type ChatAccess,
   type ChatUsageReservation,
 } from "@/lib/chatSecurity";
+import { fitChatOutputToContextWindow } from "@/lib/chatContextWindow";
 import { getModelUsageProfile, type AiModel, type ModelTier } from "@/lib/models";
 import {
   consumePerplexityUsage,
@@ -215,6 +217,33 @@ export const runComparisonReview = async (
         candidate,
         inputTokens
       );
+      // The same check the chat route applies, on the same shared rule: a
+      // review prompt carries several complete answers, so it is exactly the
+      // kind of request that outgrows a window. Run before acquireChatAccess
+      // so a candidate that cannot hold this review costs no reservation and
+      // no provider call -- and returns null, which moves the loop on to the
+      // next reviewer instead of failing the review outright.
+      const outputBudget = fitChatOutputToContextWindow({
+        contextWindowTokens: candidate.contextWindowTokens,
+        reservedInputTokens: budget.inputTokens,
+        requestOutputCapTokens: budget.maxOutputTokens,
+        providerMaxOutputTokens: budget.providerMaxOutputTokens,
+      });
+      if (outputBudget.kind === "exceeded") {
+        // Not a failure of the model, and deliberately not recorded as one:
+        // nothing was sent, so there is nothing for provider or model health
+        // to learn.
+        console.warn(
+          JSON.stringify({
+            event: "comparison_review_candidate_over_context",
+            traceId,
+            reviewerModelId: candidate.id,
+            reservedInputTokens: budget.inputTokens,
+            contextWindowTokens: outputBudget.limitTokens,
+          })
+        );
+        return null;
+      }
       const grant = await acquireChatAccess(subject.access, budget, {
         traceId,
         source: "comparison_review",
@@ -246,7 +275,7 @@ export const runComparisonReview = async (
             prompt: reviewPrompt.prompt,
             output: Output.object({ schema: comparisonReviewResultSchema }),
             ...getModelGenerationSettings(candidate, { temperature: 0.1 }),
-            maxOutputTokens: budget.maxOutputTokens,
+            maxOutputTokens: outputBudget.outputTokens,
             maxRetries: 1,
             abortSignal: AbortSignal.timeout(45_000),
             headers:
@@ -324,22 +353,39 @@ export const runComparisonReview = async (
           })
         );
       }
-      await Promise.allSettled([
-        recordProviderFailure(candidate.provider, "COMPARISON_REVIEW_FAILED", {
-          modelId: candidate.id,
-          phase: "request",
-          traceId,
-          errorName: safeErrorMetadata(error).name,
-          errorCode: safeErrorMetadata(error).code,
-          httpStatus: safeErrorMetadata(error).statusCode,
-          retryable: safeErrorMetadata(error).isRetryable,
-        }),
-        recordModelFailure(
-          candidate.id,
-          candidate.provider,
-          "COMPARISON_REVIEW_FAILED"
-        ),
-      ]);
+      // Health evidence, but only for failures that are evidence of anything.
+      //
+      // `acquireChatAccess` and `createChatBudget` throw ChatAccessError for
+      // Tomverse's own refusals -- the user is out of credits, the review is
+      // longer than their plan allows, a concurrency slot was not free. None of
+      // those describes the reviewer model, and `recordModelFailure` does not
+      // filter them the way `recordProviderFailure` does: it counts whatever it
+      // is given, so a run of credit exhaustions was marking a perfectly
+      // healthy reviewer as failing. Nothing was sent, so nothing is recorded.
+      //
+      // Asked of the module that owns the class, not `instanceof` here: class
+      // identity belongs to the module instance, and a second evaluation of
+      // chatSecurity would make a real refusal fail the check and land in the
+      // health counters exactly as before.
+      const isLocalRefusal = isChatAccessError(error);
+      if (!isLocalRefusal) {
+        await Promise.allSettled([
+          recordProviderFailure(candidate.provider, "COMPARISON_REVIEW_FAILED", {
+            modelId: candidate.id,
+            phase: "request",
+            traceId,
+            errorName: safeErrorMetadata(error).name,
+            errorCode: safeErrorMetadata(error).code,
+            httpStatus: safeErrorMetadata(error).statusCode,
+            retryable: safeErrorMetadata(error).isRetryable,
+          }),
+          recordModelFailure(
+            candidate.id,
+            candidate.provider,
+            "COMPARISON_REVIEW_FAILED"
+          ),
+        ]);
+      }
       console.error("Comparison reviewer attempt failed:", {
         traceId,
         reviewerModelId: candidate.id,

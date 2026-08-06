@@ -205,7 +205,7 @@ held in place: a panel that comes back in a second location fails the spec.
 | `work-queue?tab=approvals` | approval queue and its empty state |
 | `providers?tab=incidents` | open and resolved incidents; exactly one `Resolve`; readiness tests; incident mode |
 | `analytics` | three funnel sections, the seeded campaign and event, plus the account-level launch funnel that moved here from promotions |
-| `analytics?tab=imports` | the external-import report, which had no console surface at all before |
+| `analytics?tab=imports` | `AdminMemoryImportPanel`, the only reader of `/api/admin/memory` and `/api/admin/external-imports`, on its own tab rather than stacked under the funnel |
 | `users` | seeded names, per-row detail link, `AI access held`, `Debt 640 credits` |
 | `users/:id` | plan, Stripe ids, credit purchases, recent conversations |
 | `support?tab=feedback` | open + resolved entries, the status filter, and the stated row limit |

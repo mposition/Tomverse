@@ -12,6 +12,8 @@ import {
 import { createPortal } from "react-dom";
 import { useChatConsentSlotRef } from "@/components/analytics/AnalyticsProvider";
 import { ANALYTICS_PREFERENCES_OPEN_EVENT } from "@/lib/analyticsPreferencesEvents";
+import { ACCOUNT_SETTINGS_OPEN_EVENT } from "@/lib/accountSettingsEvents";
+import { parseSettingsDeepLink } from "@/lib/settingsNavigation";
 import { AiDisclaimerNotice } from "@/components/chat/AiDisclaimerNotice";
 import { ChatApp } from "@/components/chat/ChatApp";
 import { ChatInput } from "@/components/chat/ChatInput";
@@ -45,6 +47,7 @@ import {
 } from "@/components/chat/types";
 import { useLanguage } from "@/components/LanguageProvider";
 import { useModelCatalog } from "@/components/ModelCatalogProvider";
+import type { ConversationMemoryMode } from "@/lib/conversationMemoryMode";
 import type { WebSearchMode } from "@/lib/appDefaults";
 import {
   Check,
@@ -65,6 +68,8 @@ type PromptPayload = {
   attachments: ChatAttachment[];
   deepResearchDepth?: "quick" | "standard" | "deep";
   admissionToken?: string | null;
+  contextBundle?: string | null;
+  contextLayout?: "single" | "comparison";
 };
 
 type ModelRuntimeStatus = "idle" | "loading" | "responding" | "error" | "cancelled" | "paused";
@@ -104,7 +109,6 @@ type MobileChatShellProps = {
   personalizedPrompt?: string | null;
   attachments: ChatAttachment[];
   setAttachments: AttachmentsChangeHandler;
-  isSending: boolean;
   focusToken: number;
   isGuestMode: boolean;
   /** What this caller may do with the AI cross-review. */
@@ -117,6 +121,10 @@ type MobileChatShellProps = {
   isModelSelectionReady: boolean;
   onNewChat: () => void;
   onNewImage?: (() => void) | null;
+  /** Set when image generation is visible to this viewer but not usable. */
+  imageLock?: "sign_in" | "upgrade" | null;
+  onLockedImageClick?: (lock: "sign_in" | "upgrade") => void;
+  onStartImageDraft?: (draftText: string, modelId?: string) => void;
   imageWorkspace?: ReactNode;
   onSelectConversation: (id: string) => void;
   onRename: (id: string, title: string) => void;
@@ -132,6 +140,9 @@ type MobileChatShellProps = {
   canSelectModel?: (modelId: string) => boolean;
   webSearchMode: WebSearchMode;
   onWebSearchModeChange: (mode: WebSearchMode) => void;
+  memoryMode?: ConversationMemoryMode;
+  onMemoryModeChange?: (mode: ConversationMemoryMode) => void;
+  accountMemoryDefault?: "on" | "off";
   onOpenDeepResearchSetup: () => void;
   isDeepResearchPending: boolean;
   onDismissDeepResearchChip: () => void;
@@ -146,6 +157,16 @@ type MobileChatShellProps = {
   onGuestSignInPrompt: () => void;
   onResponseComplete: (promptId: string | null, modelId: string, responseText: string) => void;
   onFollowupSent: (modelId: string) => void;
+  /**
+   * Re-prepares the §10 context for a whole run after a panel's bundle was
+   * refused for drift. Passed straight through: the shell knows which models
+   * are in the run, and the coordination that keeps them on one snapshot
+   * belongs to whoever owns the send.
+   */
+  onContextBundleStale?: (input: {
+    promptId: string | null;
+    modelId: string;
+  }) => Promise<string | null>;
 };
 
 const mobileModelTabId = (modelId: string) => `mobile-model-tab-${modelId}`;
@@ -163,7 +184,6 @@ export function MobileChatShell({
   personalizedPrompt,
   attachments,
   setAttachments,
-  isSending,
   focusToken,
   isGuestMode,
   aiReviewAccess,
@@ -174,6 +194,9 @@ export function MobileChatShell({
   isModelSelectionReady,
   onNewChat,
   onNewImage,
+  imageLock,
+  onLockedImageClick,
+  onStartImageDraft,
   imageWorkspace,
   onSelectConversation,
   onRename,
@@ -188,6 +211,9 @@ export function MobileChatShell({
   canSelectModel,
   webSearchMode,
   onWebSearchModeChange,
+  memoryMode,
+  onMemoryModeChange,
+  accountMemoryDefault,
   onOpenDeepResearchSetup,
   isDeepResearchPending,
   onDismissDeepResearchChip,
@@ -202,6 +228,7 @@ export function MobileChatShell({
   onGuestSignInPrompt,
   onResponseComplete,
   onFollowupSent,
+  onContextBundleStale,
 }: MobileChatShellProps) {
   const { models: AVAILABLE_MODELS } = useModelCatalog();
   const { t, lang } = useLanguage();
@@ -230,6 +257,29 @@ export function MobileChatShell({
     if (returnTarget && returnTarget.isConnected) {
       requestAnimationFrame(() => returnTarget.focus());
     }
+  }, []);
+  // The settings panel lives in the sidebar, which on this shell is the
+  // drawer -- so nothing can open settings while the drawer is closed, not
+  // even "Back to settings" arriving from a detail page as a deep link
+  // (lib/settingsNavigation.ts). Opening the drawer is what mounts the panel;
+  // the request itself is held for it in lib/accountSettingsEvents.ts, so the
+  // panel claims it as it mounts and the hierarchy matches the desktop one.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (!parseSettingsDeepLink(window.location.search)) return;
+    queueMicrotask(() => setIsDrawerOpen(true));
+  }, []);
+  useEffect(() => {
+    const openDrawerForAccountSettings = () => setIsDrawerOpen(true);
+    window.addEventListener(
+      ACCOUNT_SETTINGS_OPEN_EVENT,
+      openDrawerForAccountSettings
+    );
+    return () =>
+      window.removeEventListener(
+        ACCOUNT_SETTINGS_OPEN_EVENT,
+        openDrawerForAccountSettings
+      );
   }, []);
   const touchStartXRef = useRef<number | null>(null);
   const touchStartYRef = useRef<number | null>(null);
@@ -1067,6 +1117,7 @@ export function MobileChatShell({
                   onStatusChange={handleModelStatusChange}
                   onResponseComplete={onResponseComplete}
                   onFollowupSent={onFollowupSent}
+                  onContextBundleStale={onContextBundleStale}
                   onRequestCloseModel={() => onToggleModel(modelId)}
                   hasMultipleActiveModels={selectedModels.length > 1}
                   stopSignal={stopSignal}
@@ -1133,7 +1184,7 @@ export function MobileChatShell({
             personalizedPrompt={personalizedPrompt}
             onSubmit={onSubmit}
             onCancel={() => setStopSignal((current) => current + 1)}
-            isSending={isSending || isAnyModelResponding}
+            isSending={isAnyModelResponding}
             focusToken={focusToken}
             isNewConversation={isActiveConversationEmpty}
             currentChatId={currentChatId}
@@ -1143,9 +1194,15 @@ export function MobileChatShell({
             onSwapModel={onSwapModel}
             webSearchMode={webSearchMode}
             onWebSearchModeChange={onWebSearchModeChange}
+            memoryMode={memoryMode}
+            onMemoryModeChange={onMemoryModeChange}
+            accountMemoryDefault={accountMemoryDefault}
             onOpenDeepResearchSetup={onOpenDeepResearchSetup}
             isDeepResearchPending={isDeepResearchPending}
             onDismissDeepResearchChip={onDismissDeepResearchChip}
+            onStartImageDraft={onStartImageDraft}
+            imageGenerationLock={imageLock ?? null}
+            onLockedImageGenerationClick={onLockedImageClick}
             attachments={attachments}
             onAttachmentsChange={setAttachments}
             attachmentCapabilities={attachmentCapabilities}
@@ -1210,6 +1267,11 @@ export function MobileChatShell({
                     }
                   : null
               }
+              imageLock={imageLock ?? null}
+              onLockedImageClick={(lock) => {
+                setIsDrawerOpen(false);
+                onLockedImageClick?.(lock);
+              }}
               onSelectConversation={(id) => {
                 setIsDrawerOpen(false);
                 drawerReturnFocusRef.current = null;

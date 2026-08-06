@@ -3,6 +3,8 @@ import test from "node:test";
 import {
   buildChatLimitDecisionRecord,
   futureResetAt,
+  safeDailyResetAt,
+  withFutureResetAt,
 } from "../lib/chatLimitDecisionCore.ts";
 import { getZonedDayWindow } from "../lib/userTimeZone.ts";
 
@@ -114,6 +116,79 @@ test("futureResetAt only accepts instants strictly ahead of now", () => {
   );
   assert.equal(futureResetAt(null, now), null);
   assert.equal(futureResetAt("not a date", now), null);
+});
+
+test("a details bag keeps a reset instant that is still ahead of now", () => {
+  const now = new Date("2026-08-01T04:00:00.000Z");
+  const details = {
+    requiredCredits: 12,
+    resetAt: "2026-08-02T00:00:00.000Z",
+    timeZone: "Asia/Seoul",
+  };
+  const guarded = withFutureResetAt(details, now);
+  assert.equal(guarded.resetAt, "2026-08-02T00:00:00.000Z");
+  assert.equal(guarded.requiredCredits, 12);
+  assert.equal(guarded.timeZone, "Asia/Seoul");
+});
+
+test("a details bag drops a reset instant that has already passed", () => {
+  const now = new Date("2026-08-01T04:00:00.000Z");
+  for (const stale of [
+    // Strictly past, exactly now, and the millisecond before now: the record
+    // side treats all three as unusable, so the response side has to as well.
+    "2026-07-31T14:00:00.000Z",
+    "2026-08-01T04:00:00.000Z",
+    "2026-08-01T03:59:59.999Z",
+    new Date("2026-08-01T03:00:00.000Z"),
+    // Neither an instant nor absent. A details bag is typed loosely enough to
+    // carry these, and "unparseable" is not a reason to show it.
+    "not a date",
+    null,
+    42,
+    ["2026-08-02T00:00:00.000Z"],
+  ]) {
+    const guarded = withFutureResetAt(
+      { requiredCredits: 12, resetAt: stale },
+      now
+    );
+    assert.equal(
+      "resetAt" in guarded,
+      false,
+      `${String(stale)} survived the guard`
+    );
+    // Dropping the instant must not take the rest of the rejection with it.
+    assert.equal(guarded.requiredCredits, 12);
+  }
+});
+
+test("a stale daily boundary is rolled forward whole days, not clamped", () => {
+  const windowEnd = new Date("2026-08-01T15:00:00.000Z");
+  // A minute past the boundary, three days past it, and exactly on it.
+  const cases = [
+    ["2026-08-01T15:01:00.000Z", "2026-08-02T15:00:00.000Z"],
+    ["2026-08-04T09:00:00.000Z", "2026-08-04T15:00:00.000Z"],
+    ["2026-08-01T15:00:00.000Z", "2026-08-02T15:00:00.000Z"],
+    // Already ahead: returned unchanged rather than pushed out a day.
+    ["2026-08-01T14:59:59.999Z", "2026-08-01T15:00:00.000Z"],
+  ];
+  for (const [instant, expected] of cases) {
+    const now = new Date(instant);
+    const rolled = safeDailyResetAt(windowEnd, now);
+    assert.equal(rolled.toISOString(), expected, `from ${instant}`);
+    assert.ok(rolled.getTime() > now.getTime());
+    // And what it produces survives the guard on the way out, which is the
+    // point: the record and the response carry the same instant.
+    assert.equal(
+      withFutureResetAt({ resetAt: rolled.toISOString() }, now).resetAt,
+      expected
+    );
+  }
+});
+
+test("a details bag with no reset instant is passed through untouched", () => {
+  const now = new Date("2026-08-01T04:00:00.000Z");
+  const details = { requiredCredits: 12, shortfallCredits: 3 };
+  assert.equal(withFutureResetAt(details, now), details);
 });
 
 test("day-window ends are in the future for Brisbane, a DST zone and UTC", () => {

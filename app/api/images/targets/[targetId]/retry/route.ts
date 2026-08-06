@@ -1,6 +1,14 @@
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
+/**
+ * Same budget, same reason as POST /api/images/generations: a retry drives a
+ * group through `after()` too, and `IMAGE_EXECUTOR_MAX_DURATION_SECONDS` is
+ * what that group needs. Kept as a literal because route segment config is
+ * read statically; `npm run check:image-executor-budget` links the two.
+ */
+export const maxDuration = 968;
+
 import { after } from "next/server";
 import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth/next";

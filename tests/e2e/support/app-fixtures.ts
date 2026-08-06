@@ -439,6 +439,8 @@ export type AuthenticatedQaState = {
    */
   selectedModels: string[];
   disabledPanels: string[];
+  /** The conversation's stored memory mode, updated by PATCH like the rest. */
+  memoryMode: "inherit" | "on" | "off";
   theme: "dark" | "light" | "system";
   timeZone: string;
   timeZoneInitializedAt: string | null;
@@ -494,6 +496,28 @@ export async function mockAuthenticatedApi(
      * into its partial-support state.
      */
     webSearchMode?: "off" | "auto" | "always";
+    /** The conversation's stored memory mode (§8.1 invariant 1). */
+    memoryMode?: "inherit" | "on" | "off";
+    /** What `inherit` resolves to, served by /api/memories/settings. */
+    accountMemoryDefault?: "on" | "off";
+    /**
+     * UX-024. Additional conversations in the sidebar, each with its own
+     * transcript and its own detail/messages routes. Opt-in and additive: with
+     * this absent the mock registers exactly the routes it always has and
+     * behaves identically, so the 50 specs that do not ask for a second
+     * conversation are untouched.
+     *
+     * A second conversation is what makes switching *between* conversations
+     * reproducible at all. Without one, `handleSelectConversation` has no
+     * other id to be called with, so nothing it does — or fails to do — can be
+     * measured.
+     */
+    extraConversations?: Array<{
+      id: string;
+      title?: string;
+      selectedModels?: string[];
+      messages?: QaConversationMessage[];
+    }>;
   } = {}
 ): Promise<AuthenticatedQaState> {
   await page.addInitScript((showSidebarTour) => {
@@ -524,6 +548,7 @@ export async function mockAuthenticatedApi(
     // specific model still passes `selectedModels` explicitly.
     selectedModels: options.selectedModels || ["gpt-5-6-luna"],
     disabledPanels: [],
+    memoryMode: options.memoryMode || "inherit",
     theme: "dark",
     timeZone: "UTC",
     timeZoneInitializedAt: "2026-05-01T00:00:00.000Z",
@@ -537,10 +562,25 @@ export async function mockAuthenticatedApi(
     selectedModels: [...state.selectedModels],
     disabledPanels: [...state.disabledPanels],
     webSearchMode: options.webSearchMode || "off",
+    // §8.1 invariant 1. Stored, not resolved: the fixture has to be able to
+    // show the difference between "follows the account" and an override.
+    memoryMode: state.memoryMode,
     isLocked: state.locked,
     shareEnabled: state.shared,
     shareExpiresAt: state.shared ? "2099-01-01T00:00:00.000Z" : null,
   });
+
+  // What `inherit` resolves to. The chat page reads this once to describe the
+  // inherit option; without it the description would silently claim "in use".
+  await page.route("**/api/memories/settings", (route) =>
+    route.fulfill(
+      json({
+        masterEnabled: true,
+        styleEnabled: true,
+        defaultConversationMode: options.accountMemoryDefault || "on",
+      })
+    )
+  );
 
   await page.unroute("**/api/auth/session**");
   await page.route("**/api/auth/session**", (route) =>
@@ -721,10 +761,39 @@ export async function mockAuthenticatedApi(
     route.fulfill(json({ pendingRequest: null }))
   );
 
+  // UX-024. Each extra conversation keeps its own transcript, exactly like the
+  // primary one below, so a switch between them is a switch between two real
+  // histories rather than between two views of the same array.
+  const extras = (options.extraConversations || []).map((extra) => ({
+    id: extra.id,
+    title: extra.title || extra.id,
+    selectedModels: extra.selectedModels ||
+      options.selectedModels || ["gpt-5-6-luna"],
+    savedMessages: [...(extra.messages || [])],
+  }));
+  const extraBody = (extra: (typeof extras)[number]) => ({
+    id: extra.id,
+    title: extra.title,
+    selectedModels: [...extra.selectedModels],
+    disabledPanels: [],
+    webSearchMode: options.webSearchMode || "off",
+    isLocked: false,
+    shareEnabled: false,
+    shareExpiresAt: null,
+  });
+
   await page.route("**/api/conversations", async (route) => {
     if (route.request().method() === "GET") {
       state.conversationListReads += 1;
-      await route.fulfill(json(state.deleted ? [] : [conversation()]));
+      // `state.deleted` is about the primary conversation only, so deleting it
+      // must not take the extras with it.
+      await route.fulfill(
+        json(
+          state.deleted
+            ? extras.map(extraBody)
+            : [conversation(), ...extras.map(extraBody)]
+        )
+      );
       return;
     }
 
@@ -805,6 +874,7 @@ export async function mockAuthenticatedApi(
         unlock?: boolean;
         selectedModels?: string[];
         disabledPanels?: string[];
+        memoryMode?: "inherit" | "on" | "off";
       };
 
       if (typeof body.password === "string") {
@@ -828,6 +898,9 @@ export async function mockAuthenticatedApi(
       // flow that *changes* the selection and immediately sends against it.
       // app/api/conversations/[conversationId]/route.ts persists both fields
       // and returns the stored values; so does this.
+      if (typeof body.memoryMode === "string") {
+        state.memoryMode = body.memoryMode;
+      }
       if (Array.isArray(body.selectedModels)) {
         state.selectedModels = Array.from(new Set(body.selectedModels));
       }
@@ -859,6 +932,63 @@ export async function mockAuthenticatedApi(
       })
     );
   });
+
+  // UX-024. One pair of routes per extra conversation, each id-scoped so it
+  // cannot shadow the primary conversation's routes above.
+  for (const extra of extras) {
+    await page.route(
+      `**/api/conversations/${extra.id}/messages**`,
+      async (route) => {
+        if (route.request().method() === "POST") {
+          const body = route.request().postDataJSON() as {
+            messages?: QaConversationMessage[];
+          };
+          for (const message of body?.messages ?? []) {
+            if (
+              !message?.id ||
+              extra.savedMessages.some((saved) => saved.id === message.id)
+            ) {
+              continue;
+            }
+            extra.savedMessages.push(message);
+          }
+          await route.fulfill(json({}, 201));
+          return;
+        }
+        await route.fulfill(json({}));
+      }
+    );
+
+    await page.route(
+      new RegExp(`.*/api/conversations/${extra.id}(\\?.*)?$`),
+      async (route) => {
+        const method = route.request().method();
+        if (method === "PATCH") {
+          const body = route.request().postDataJSON() as {
+            title?: string;
+            selectedModels?: string[];
+          };
+          if (typeof body.title === "string") extra.title = body.title;
+          if (Array.isArray(body.selectedModels)) {
+            extra.selectedModels = Array.from(new Set(body.selectedModels));
+          }
+          await route.fulfill(json(extraBody(extra)));
+          return;
+        }
+        if (method === "DELETE") {
+          await route.fulfill({ status: 204, body: "" });
+          return;
+        }
+        await route.fulfill(
+          json({
+            ...extraBody(extra),
+            messages: extra.savedMessages as unknown as JsonValue,
+            nextCursor: null,
+          })
+        );
+      }
+    );
+  }
 
   return state;
 }

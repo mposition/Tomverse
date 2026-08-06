@@ -55,6 +55,24 @@ export function UsageLimitModal({
   const panelRef = useRef<HTMLDivElement | null>(null);
   const closeButtonRef = useRef<HTMLButtonElement | null>(null);
 
+  // Opening and closing: body scroll lock, initial focus, focus return.
+  //
+  // Keyed on `open` alone, deliberately. This used to live in one effect with
+  // the key handler below, whose dependency list has to include `onClose` --
+  // and the caller passes `onClose={() => setIsUsageLimitModalOpen(false)}`,
+  // a new function on every `ChatInput` render. So every re-render while this
+  // dialog was open tore the effect down and rebuilt it, and each cycle fired
+  // two focus moves: the cleanup returned focus to whatever opened the dialog,
+  // and the re-run pulled it back to this close button.
+  //
+  // Harmless while nothing sat on top. The credit-pack purchase dialog opens
+  // from inside this one, and `ChatInput` re-renders constantly -- typing,
+  // streaming, model-status polling -- so a keyboard visitor who opened the
+  // purchase dialog could have focus yanked out of it and back down into the
+  // dialog underneath, on no input of their own. It also made the nightly
+  // visual regression flip on identical commits: run 6 passed and run 7 failed
+  // on 18d1e891, on `expect(purchaseDialog.locator("button").first())
+  // .toBeFocused()`, decided by which requestAnimationFrame landed last.
   useEffect(() => {
     if (!open) return;
 
@@ -65,6 +83,21 @@ export function UsageLimitModal({
     const focusFrame = requestAnimationFrame(() => {
       closeButtonRef.current?.focus();
     });
+    return () => {
+      cancelAnimationFrame(focusFrame);
+      document.body.style.overflow = previousOverflow;
+      requestAnimationFrame(() => {
+        if (returnTarget?.isConnected) returnTarget.focus({ preventScroll: true });
+      });
+    };
+  }, [open]);
+
+  // Escape and the Tab cycle. This one has to see the current `onClose`, so it
+  // re-subscribes whenever the caller re-renders -- which costs nothing,
+  // because adding and removing a listener moves no focus.
+  useEffect(() => {
+    if (!open) return;
+
     const handleKeyDown = (event: KeyboardEvent) => {
       const dialog = dialogRef.current;
       const panel = panelRef.current;
@@ -113,12 +146,7 @@ export function UsageLimitModal({
     };
     document.addEventListener("keydown", handleKeyDown, true);
     return () => {
-      cancelAnimationFrame(focusFrame);
       document.removeEventListener("keydown", handleKeyDown, true);
-      document.body.style.overflow = previousOverflow;
-      requestAnimationFrame(() => {
-        if (returnTarget?.isConnected) returnTarget.focus({ preventScroll: true });
-      });
     };
   }, [open, onClose]);
 

@@ -210,8 +210,17 @@ const checks = [
         decisions.includes("subjectKey") &&
         !decisions.includes("promptText") &&
         // A reset instant handed to a blocked user is always in the future.
+        // The record side has always been guarded; so is the response side,
+        // at the one exit point every ChatAccessError passes through, which
+        // re-checks the instant against the moment the response is built.
         decisions.includes("futureResetAt") &&
-        source.includes("safeDailyResetAt")
+        decisions.includes("withFutureResetAt") &&
+        source.includes("withFutureResetAt(details, now)") &&
+        // Daily boundaries come from a stored time zone and can go stale, so
+        // they reach the caller rolled forward rather than raw -- the same
+        // instant the decision record carries.
+        source.includes("safeDailyResetAt") &&
+        !/resetAt:\s*\w*[Dd]ayWindow\.end\.toISOString\(\)/.test(source)
       );
     },
   },
@@ -524,6 +533,173 @@ const checks = [
     },
   },
   {
+    // A run whose worker died stays `running` with a lease nobody holds, and
+    // the claim is fenced on `leaseGeneration` -- so the lease does not lapse
+    // into availability on its own. Only this sweep makes the run claimable
+    // again, and it lived unreferenced outside the tests until it was wired
+    // here (import/memory policy §11, §11.1).
+    name: "Memory extraction leases are reclaimed and re-driven by maintenance",
+    file: "lib/maintenance.ts",
+    test: (source) =>
+      source.includes("dispatchPendingMemoryExtractionRuns") &&
+      source.includes("memoryExtractionRuns") &&
+      source.includes("memoryExtractionDispatched"),
+  },
+  {
+    // The guard has to bound what the request really sends. A provider-native
+    // search adds 6,400 input tokens the raw estimate does not carry, so
+    // comparing the estimate let a searching turn sit that far over the limit
+    // and fail at the provider -- after a reservation and a dispatched call --
+    // instead of here, for free
+    // (docs/ops/tomverse-chat-context-window-rollout.md).
+    name: "The context-window guard measures the reserved input, not the raw estimate",
+    file: "app/api/chat/route.ts",
+    test: (source) => {
+      const guard = source.slice(
+        source.indexOf("fitChatOutputToContextWindow({"),
+        source.indexOf("MODEL_CONTEXT_WINDOW_EXCEEDED")
+      );
+      return (
+        guard.includes("reservedInputTokens: budget.inputTokens") &&
+        !guard.includes("estimatedInputTokens")
+      );
+    },
+  },
+  {
+    // The concurrency slot is released deterministically on every unwind, not
+    // left to a TTL (docs/policy/chat-concurrency-and-identity.md). Ownership
+    // moves once, at the source reader, and the stream cannot free anything
+    // until it is pulled -- which only happens once the Response is returned.
+    // Anything that throws in between leaves a slot nobody will ever free, and
+    // its owner is told a response is already being generated until it lapses.
+    name: "A stream that is never published still frees its concurrency slot",
+    file: "app/api/chat/route.ts",
+    test: (source) => {
+      const ownership = read("lib/chatLeaseOwnershipCore.ts");
+      return (
+        // The failure path asks who holds the slot, rather than reading "the
+        // request no longer holds it" as "someone else will free it".
+        source.includes("chatLeaseToReleaseOnUnwind(leaseOwnership)") &&
+        source.includes("reason: orphanedLease.reason") &&
+        !source.includes('reason: "request_failed_before_stream",') &&
+        // Published after the Response is constructed, so a throw while
+        // building it still unwinds through the branch above.
+        /const response = new Response\([\s\S]{0,600}?chatLeaseStreamPublished\(leaseOwnership\);\s*\n\s*return response;/.test(
+          source
+        ) &&
+        ownership.includes('reason: "stream_never_started"')
+      );
+    },
+  },
+  {
+    // A plan change moves money and credits, and only one of them was quoted.
+    // The credit arithmetic has one home (lib/planChangeCredits.ts) so the
+    // preview and the steady-state balance cannot drift; nothing imported it.
+    // Null for a scheduled downgrade on purpose: it changes nothing about this
+    // month, so any number here would be true for nobody yet.
+    name: "A plan-change quote states what happens to this month's credits",
+    file: "lib/planChangeService.ts",
+    test: (source) =>
+      source.includes("planCreditsAfterPlanChange") &&
+      source.includes('decision.plan.execution === "immediate_upgrade"\n      ? await quoteCredits'),
+  },
+  {
+    // The concurrency policy names rollbackChatAdmission() in step 4 of the
+    // admission lifecycle and nothing called it. A preflight that reserves and
+    // then fails to answer left every slot held until the admission TTL, so
+    // the retry step 6 asks the client to make was refused for concurrency on
+    // a subject running nothing.
+    name: "A preflight that fails after admission gives the slots back",
+    file: "app/api/chat/preflight/route.ts",
+    test: (source) =>
+      source.includes("grantedAdmissionId = result.admission.admissionId") &&
+      source.includes("if (grantedAdmissionId)") &&
+      source.includes("rollbackChatAdmission(grantedAdmissionId"),
+  },
+  {
+    // §10's reason for one shared context builder applies to the guard too:
+    // preflight prices what chat sends. Without this check preflight quoted
+    // credits and reserved a concurrency slot for a model the chat route was
+    // always going to refuse, which on a comparison is the partial execution
+    // the aggregate admission exists to prevent.
+    name: "Preflight refuses a model whose context window cannot hold the request",
+    file: "app/api/chat/preflight/route.ts",
+    test: (source) => {
+      const check = source.indexOf("fitChatOutputToContextWindow({");
+      const reserve = source.indexOf("preflightChatComparisonAccess(access, budgets");
+      return (
+        check !== -1 &&
+        reserve !== -1 &&
+        // Before the reservation, or a refused comparison still holds slots.
+        check < reserve &&
+        source.includes("MODEL_CONTEXT_WINDOW_EXCEEDED")
+      );
+    },
+  },
+  {
+    // A model's settable output ceiling is a capability, not this request's
+    // budget. Kimi K3's ceiling is its whole context window, so using it as
+    // the fixed output cap refused every request at every input size. The
+    // request cap is fitted to the room the window has left, and the fitted
+    // figure -- not the profile's -- is what reaches the provider.
+    name: "The dispatched output cap is the one fitted to the context window",
+    file: "app/api/chat/route.ts",
+    test: (source) =>
+      source.includes("const requestMaxOutputTokens = outputBudget.outputTokens") &&
+      source.includes("maxOutputTokens: requestMaxOutputTokens,") &&
+      !source.includes("maxOutputTokens: budget.maxOutputTokens,"),
+  },
+  {
+    // One function owns the reserved-input figure, so the estimator
+    // calibration's safety margin and framing overhead cannot be skipped by a
+    // caller that adds the tool overhead itself.
+    name: "The chat budget derives its reserved input from the active calibration",
+    file: "lib/chatSecurity.ts",
+    test: (source) =>
+      // `estimatedInput`, not `estimatedInputTokens`: the reservation is
+      // computed from the whole breakdown, because the calibration widens each
+      // character segment by its own margin. Passing the flattened total here
+      // would be the same skip this check exists to catch -- it would silently
+      // fall back to the largest margin for every request.
+      source.includes("toReservedInputTokens(estimatedInput,") &&
+      source.includes("toolOverheadTokens: estimateToolInputTokenOverhead"),
+  },
+  {
+    // Class identity belongs to the module instance. A second evaluation of
+    // chatSecurity (a bundler boundary, a test harness) gives a second
+    // ChatAccessError class, and `instanceof` against the wrong one silently
+    // files our own refusal as a provider failure -- bad health data, no
+    // error. The owning module answers instead.
+    name: "AI Review asks chatSecurity whether a failure was its own refusal",
+    file: "lib/comparisonReviewService.ts",
+    test: (source) =>
+      source.includes("isChatAccessError(error)") &&
+      !source.includes("instanceof ChatAccessError"),
+  },
+  {
+    // §8.4 requires the server to establish evidence existence, ownership and
+    // a matching content digest. The check was written and never called: the
+    // label map is built when the chunk is claimed, and a source deleted
+    // during the provider call then fails the evidence insert's foreign key
+    // and takes the whole chunk down instead of dropping the candidate.
+    name: "Extraction evidence is re-verified at write time",
+    file: "lib/memoryExtractionPersistence.ts",
+    test: (source) =>
+      source.includes("verifyExternalMessageEvidence") &&
+      source.includes("unsourced"),
+  },
+  {
+    // An attempt whose request went out and never settled holds its
+    // reservation forever while nothing records that the call finished. The
+    // sweep lived unreferenced outside its tests until it was wired here
+    // (policy §3, §11 "idempotent settlement").
+    name: "Unsettled extraction provider calls are reconciled by maintenance",
+    file: "app/api/internal/maintenance/credit-reservations/route.ts",
+    test: (source) =>
+      source.includes("reconcileUnsettledExtractionProviderCalls") &&
+      source.includes("memoryExtractionProviderCalls"),
+  },
+  {
     name: "Provider error events expire through maintenance cleanup",
     file: "lib/maintenance.ts",
     test: (source) =>
@@ -725,17 +901,231 @@ const checks = [
       source.includes("imageProviderBudgetFloorMicroUsd"),
   },
   {
-    name: "Image model registry keeps an unverified model registered but disabled",
+    name: "Image model registry keeps an unrunnable model registered but disabled",
     file: "lib/imageModelRegistry.ts",
     test: (source) =>
-      // Policy section 12: a model whose official price could not be read is
+      // Policy section 12: a model that cannot be priced or cannot be run is
       // registered with an empty price list and a fail-closed hold, never
-      // priced from memory. maxImageRequestCostMicroUsd returns null when the
-      // thinking cap is unknown, so no fixed credit price can be derived.
-      source.includes('disabledReason: "price_unverified"') &&
+      // priced from memory. Pinned as the invariant rather than as one
+      // reason string -- the reasons are a union and which one applies moves
+      // as verification progresses, while these guards must not.
+      //
+      // maxImageRequestCostMicroUsd returns null when the thinking cap is
+      // unknown, so no fixed credit price can be derived from an unbounded
+      // worst case; getImageModelPrice refuses any disabled model outright.
+      source.includes('| "price_unverified"') &&
+      source.includes('| "worst_case_cost_unbounded"') &&
+      source.includes('| "operational_hold"') &&
       source.includes("thinkingCapMicroUsd: null") &&
       source.includes("if (thinkingCap === null) return null") &&
       source.includes("model.disabledReason !== null) return null"),
+  },
+  {
+    name: "xAI image requests pin a mapped size and trust the returned MIME",
+    file: "lib/xaiImageRequest.ts",
+    test: (source) =>
+      // Two ways this path could silently overcharge or corrupt a stored
+      // asset: sending a resolution the approved credits did not price, and
+      // filing JPEG bytes under an assumed PNG. Both fail closed by returning
+      // null so the caller refuses and refunds.
+      source.includes("if (!mapped) return null") &&
+      source.includes("MIME_ALLOWLIST.has(reported.trim())") &&
+      source.includes("if (!mimeType) return null") &&
+      source.includes('response_format: "b64_json"'),
+  },
+  {
+    name: "Image pricing check enforces what each disabled reason claims",
+    file: "scripts/check-image-pricing.mjs",
+    test: (source) =>
+      // Three reasons that state three different facts. Without per-reason
+      // enforcement they degrade into interchangeable labels, and a model
+      // could be relabelled past the verification rule instead of satisfying
+      // it -- `operational_hold` in particular asserts that the price question
+      // is settled.
+      source.includes('model.disabledReason === "price_unverified" && verification.verifiedAt') &&
+      source.includes('model.disabledReason === "worst_case_cost_unbounded"') &&
+      source.includes("verification.thinkingCapMicroUsd !== null") &&
+      source.includes('model.disabledReason === "operational_hold"') &&
+      source.includes("marked operational_hold without a price verification date"),
+  },
+  {
+    name: "The Google image path speaks Interactions, never GenerateContent",
+    file: "lib/googleImageRequest.ts",
+    test: (source) => {
+      // GenerateContent's vocabulary is allowed in prose -- the header comment
+      // names it precisely so the boundary is legible -- and forbidden in
+      // code, because a body that mixes the two is valid-looking and wrong.
+      const code = source
+        .split("\n")
+        .filter((line) => !/^\s*(\/\/|\*|\/\*)/.test(line))
+        .join("\n");
+      return (
+        source.includes("/v1beta/interactions") &&
+        source.includes('"x-goog-api-key"') &&
+        source.includes("max_output_tokens: input.maxOutputTokens") &&
+        source.includes("total_thought_tokens") &&
+        !code.includes("generationConfig") &&
+        !code.includes("inlineData") &&
+        !code.includes("usageMetadata") &&
+        // Only the delivered answer is read. A thinking model emits images
+        // while reasoning, and storing a working sketch as the paid result is
+        // the failure nobody would notice -- both are plausible pictures.
+        source.includes('=== "model_output"') &&
+        source.includes("if (images.length !== 1) return null") &&
+        // An open-ended request is refused rather than sent (§12 cond. 2).
+        source.includes(
+          "if (!input.maxOutputTokens || input.maxOutputTokens <= 0) return null"
+        )
+      );
+    },
+  },
+  {
+    name: "A request audit snapshot strips every provider's prompt field",
+    file: "lib/imageProviderAdapter.ts",
+    test: (source) =>
+      // OpenAI and xAI name it `prompt`; Google's Interactions API names it
+      // `input`. Filtering only `prompt` was correct until it silently stopped
+      // being: the Google body would have copied the user's prompt into the
+      // stored audit blob, a second place every deletion path has to reach.
+      source.includes('PROMPT_FIELD_NAMES = new Set(["prompt", "input"])') &&
+      source.includes("!PROMPT_FIELD_NAMES.has(key)") &&
+      !source.includes('([key]) => key !== "prompt"'),
+  },
+  {
+    name: "A documented output limit never doubles as a proven cost cap",
+    file: "lib/imageModelRegistry.ts",
+    test: (source) => {
+      // maxOutputTokens is what the model card publishes; thinkingCapMicroUsd
+      // is whether the worst case is provably finite. Google states the first
+      // and not the second, so the field must never be read as the cap -- and
+      // maxImageRequestCostMicroUsd must keep deriving from the cap alone.
+      const derivation = source.slice(
+        source.indexOf("export const maxImageRequestCostMicroUsd")
+      );
+      const body = derivation.slice(0, derivation.indexOf("\n};"));
+      return (
+        source.includes("maxOutputTokens?: number") &&
+        body.includes("thinkingCapMicroUsd") &&
+        !body.includes("maxOutputTokens")
+      );
+    },
+  },
+  {
+    name: "The thumbnail repair cannot destroy the original it derives from",
+    file: "lib/imageAssetLifecycle.ts",
+    test: (source) =>
+      // readR2Object deletes an object whose metadata does not match what the
+      // caller claimed -- correct for an untrusted upload, catastrophic for a
+      // generated original the user paid for and cannot regenerate. The repair
+      // reads through the non-destructive path, and only ever writes the
+      // thumbnail key.
+      source.includes("readOwnR2ObjectBytes(originalKey") &&
+      !source.includes("readR2Object(") &&
+      source.includes('writeR2Object(thumbKey, thumbBytes, "image/webp")') &&
+      // Bounded, so one corrupt object cannot pull the maintenance process
+      // over, and bounded in attempts so it stops rather than re-downloading
+      // forever.
+      source.includes("IMAGE_ORIGINAL_MAX_READ_BYTES") &&
+      source.includes("thumbnailRetryCount: { lt: IMAGE_THUMBNAIL_MAX_RETRIES }"),
+  },
+  {
+    name: "A non-destructive R2 read exists and stays non-destructive",
+    file: "lib/r2.ts",
+    test: (source) => {
+      const start = source.indexOf("export async function readOwnR2ObjectBytes");
+      if (start === -1) return false;
+      const end = source.indexOf("export async function writeR2Object", start);
+      const body = source.slice(start, end === -1 ? undefined : end);
+      // The one thing this function must never grow: the delete-on-mismatch
+      // branch that makes readR2Object right for uploads and wrong here.
+      return (
+        !body.includes("deleteInvalidObject") &&
+        !body.includes("DeleteObjectCommand") &&
+        body.includes("options.maxBytes")
+      );
+    },
+  },
+  {
+    name: "Stale image recovery can reclaim a stranded settlement",
+    file: "lib/imageGenerationService.ts",
+    test: (source) =>
+      // `settling` is claimed OUTSIDE the settlement transaction, so any
+      // rollback -- a deadlock, a dropped connection, a redeploy -- leaves the
+      // row there with the user's credits still reserved. While the recovery
+      // sweep and the failure path both matched only pending/processing, that
+      // state was unreachable by anything: no refund, no terminal status, and
+      // a client that polls it forever. Both halves of the fix are pinned
+      // because either one alone leaves a door open.
+      source.includes('{ status: "settling", updatedAt: { lt: settlingStaleBefore } }') &&
+      source.includes("reclaimSettling: settlingStaleBefore") &&
+      source.includes('reclaimSettling: "owned"') &&
+      // The reclaim stays bounded: an unconditional one would race a live
+      // settler, and only the caller that already owns the claim may skip the
+      // wait.
+      source.includes('input.reclaimSettling === "owned"') &&
+      source.includes("updatedAt: { lt: input.reclaimSettling }"),
+  },
+  {
+    name: "Image settlement claims the reservation before it moves any credit",
+    file: "lib/imageGenerationService.ts",
+    test: (source) =>
+      // What makes reclaiming a settling row safe at all: the money moves
+      // behind the reservation's own reserved -> settling claim, inside the
+      // transaction that also finishes the generation. A settlement that
+      // already committed refuses the second attempt instead of paying twice.
+      source.includes('where: { generationId, status: "reserved" },') &&
+      source.includes('data: { status: "settling" },') &&
+      source.includes("if (reservationClaim.count === 0) return"),
+  },
+  {
+    // The same claim-before-you-pay rule as the image settler above, on the
+    // other reservation table. Extraction runs in the background now: nothing
+    // is watching when a run reaches a terminal state, so a settlement that
+    // could run twice would refund twice with no one to notice (import/memory
+    // policy §11).
+    name: "Extraction settlement claims the reservation before it moves any credit",
+    file: "lib/memoryExtractionCredits.ts",
+    test: (source) =>
+      source.includes('where: { runId: input.runId, status: "reserved" }') &&
+      source.includes('data: { status: "settling" }') &&
+      source.includes("if (claim.count === 0)"),
+  },
+  {
+    // A run that exists without a reservation is a run nobody paid for, and it
+    // also blocks the account from starting another (one active run per user).
+    // Reserving inside the creation transaction is what makes both impossible:
+    // a refused reservation leaves no run, no chunks and no charge.
+    name: "An extraction run cannot exist without the reservation that paid for it",
+    file: "lib/memoryExtractionService.ts",
+    test: (source) =>
+      source.includes("reserveExtractionRunCredits({") &&
+      source.includes("tx,") &&
+      source.includes("await tx.memoryExtractionChunk.createMany"),
+  },
+  {
+    // Entitlement, not the operational guardrail. AGENTS.md keeps the two
+    // layers apart in names, codes and metrics, and the extraction reservation
+    // is entitlement: it allocates plan and add-on credits and must not read or
+    // write a provider budget.
+    name: "Extraction entitlement stays out of the provider budget layer",
+    file: "lib/memoryExtractionCredits.ts",
+    test: (source) =>
+      source.includes("getChatCreditAllocation") &&
+      source.includes("reserveAddOnCredits") &&
+      !source.includes("providerCostBudget") &&
+      !source.includes("PROVIDER_BUDGET_EXHAUSTED"),
+  },
+  {
+    // No raw internal USD in anything a user sees. The extraction reservation
+    // knows the run's estimated cost in micro-USD and must never put it in the
+    // error it throws when the balance is short.
+    name: "Extraction credit errors carry no internal cost figure",
+    file: "lib/memoryExtractionCredits.ts",
+    test: (source) =>
+      source.includes("CREDIT_BALANCE_INSUFFICIENT") &&
+      !/CREDIT_BALANCE_INSUFFICIENT[\s\S]{0,400}(costMicroUsd|MicroUsd)/.test(
+        source
+      ),
   },
   {
     name: "Image provider budgets are per provider and cover every active one",
@@ -2043,7 +2433,11 @@ const checks = [
         source.includes("npm audit --omit=dev --json") &&
         source.includes("npm run typecheck") &&
         source.includes("npm run check") &&
-        source.includes("playwright install --with-deps chromium webkit") &&
+        // Both browsers, through the retry wrapper. The literal command was
+        // pinned here until 2026-08-05, when an apt transaction that nothing
+        // retried started costing whole jobs; what this guard cares about is
+        // unchanged -- this workflow installs the two browsers it runs.
+        source.includes("scripts/ci/install-playwright.sh chromium webkit") &&
         source.includes("npm run test:e2e:run") &&
         source.includes("node scripts/send-security-audit-report.mjs") &&
         source.includes('check_result "Unit and API policy tests"') &&
@@ -2198,7 +2592,7 @@ const checks = [
         packageSource.includes(
           '"check:accent-tokens": "node scripts/check-accent-tokens.mjs"'
         ) &&
-        prWorkflow.includes("playwright install --with-deps chromium") &&
+        prWorkflow.includes("scripts/ci/install-playwright.sh chromium") &&
         !prWorkflow.includes("chromium webkit") &&
         // No tier that *judges* a golden may rewrite one.
         !prWorkflow.includes("--update-snapshots") &&

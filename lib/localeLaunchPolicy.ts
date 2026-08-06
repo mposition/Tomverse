@@ -35,12 +35,16 @@ export const localeLaunchPolicy = {
     paidMarketingEligible: false,
     selectorLabel: "中文 · 有限支持",
     badge: "中文有限支持",
-    // UX-020. This used to claim Chinese covered the product interface. It did
-    // not: the chat interface and the model finder answer in English, and had
-    // done since they were added. `tests/localeParity.test.mjs` now measures
-    // that number, so the notice and the strings cannot disagree again.
+    // UX-020. This once claimed Chinese covered the product interface when it
+    // did not, and was corrected to say the chat interface and model finder
+    // answer in English. Both are translated now, so the correction had become
+    // the inaccuracy -- understating coverage misleads a reader exactly as
+    // overstating it does. `tests/localeParity.test.mjs` measures the number
+    // this sentence describes, which is what keeps the two in step in either
+    // direction. The market tier is a separate, commercial decision and is
+    // deliberately unchanged.
     scopeNotice:
-      "中文目前涵盖营销页面、价格、已翻译的法律和帮助页面。聊天界面与模型推荐目前仍显示英文。客户支持仅提供书面渠道，回复可能使用英语，暂不提供电话支持。",
+      "中文目前涵盖营销页面、价格、聊天界面、模型推荐，以及已翻译的法律和帮助页面。尚未审校的少数页面仍会显示英文。客户支持仅提供书面渠道，回复可能使用英语，暂不提供电话支持。",
     englishFallbackNotice:
       "此页面尚无经过审核的中文版本，因此当前显示英文内容。完整支持请使用 English 或 한국어。",
   },
