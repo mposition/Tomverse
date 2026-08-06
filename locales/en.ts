@@ -1439,6 +1439,8 @@ export const en = {
             "The extraction could not finish. Results from completed batches are kept.",
         runCancelledNote:
             "The extraction was cancelled. Results from completed batches are kept.",
+        runStalledNote:
+            "The extraction is paused between workers. Everything finished so far is kept and it resumes automatically. You can cancel instead of waiting.",
         runReview: "Go to review queue",
         cancel: "Cancel extraction",
         cancelArmed: "Press again to cancel",

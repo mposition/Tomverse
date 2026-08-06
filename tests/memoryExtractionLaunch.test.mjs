@@ -186,8 +186,53 @@ test("progress reports a percentage and whether to keep polling", () => {
             terminal: false,
             cancellable: true,
             polling: true,
+            stalled: false,
         }
     );
+});
+
+test("a stalled run stays running, keeps polling and keeps cancel", () => {
+    // The progress bar has not moved and will not for up to fifteen minutes.
+    // The screen has to say why, without claiming the run failed: the chunks
+    // already done are kept and the reclaim sweep hands it to a new worker.
+    const progress = runProgress({
+        status: "running",
+        chunkTotal: 4,
+        chunkCompleted: 1,
+        stalled: true,
+    });
+    assert.equal(progress.stalled, true);
+    assert.equal(progress.status, "running");
+    assert.equal(progress.terminal, false);
+    // Polling is what ends the stall on screen -- the recovery is server-side,
+    // so stopping would freeze the page on the one state that resolves itself.
+    assert.equal(progress.polling, true);
+    assert.equal(progress.cancellable, true);
+});
+
+test("a response without the field is not reported as stalled", () => {
+    // An older server, or a cached response, must leave the screen saying
+    // exactly what it said before this field existed.
+    assert.equal(
+        runProgress({ status: "running", chunkTotal: 4, chunkCompleted: 1 })
+            .stalled,
+        false
+    );
+});
+
+test("a terminal run is never described as paused", () => {
+    // A run that finished between two polls can still be reported stalled by
+    // the response in flight; "paused, resuming shortly" beside "Finished"
+    // would be the screen contradicting itself.
+    for (const status of ["completed", "failed", "cancelled"]) {
+        const progress = runProgress({
+            status,
+            chunkTotal: 4,
+            chunkCompleted: 4,
+            stalled: true,
+        });
+        assert.equal(progress.stalled, false, `${status} is not paused`);
+    }
 });
 
 test("terminal runs stop polling and stop offering cancel", () => {

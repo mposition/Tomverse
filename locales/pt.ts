@@ -1220,6 +1220,8 @@ export const pt = {
             "A extração não pôde ser concluída. Os resultados dos lotes concluídos são mantidos.",
         runCancelledNote:
             "A extração foi cancelada. Os resultados dos lotes concluídos são mantidos.",
+        runStalledNote:
+            "A extração está pausada entre execuções. Tudo o que já foi concluído é mantido e ela recomeça automaticamente. Você pode cancelar em vez de esperar.",
         runReview: "Ir para a fila de revisão",
         cancel: "Cancelar extração",
         cancelArmed: "Pressione de novo para cancelar",
