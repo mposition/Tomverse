@@ -44,7 +44,10 @@ import {
 } from "@/lib/chatTokenEstimate";
 import { resolveInputUsageSource } from "@/lib/tokenEstimateShadow";
 import { recordShadowSettlement } from "@/lib/tokenEstimateShadowRecorder";
-import { futureResetAt } from "@/lib/chatLimitDecisionCore";
+import {
+    safeDailyResetAt,
+    withFutureResetAt,
+} from "@/lib/chatLimitDecisionCore";
 import { recordChatLimitDecision } from "@/lib/chatLimitDecisions";
 import { isWebSearchMode, type WebSearchMode } from "@/lib/appDefaults";
 import { getAnonymousClientKey } from "@/lib/clientIp";
@@ -286,6 +289,25 @@ export class ChatAccessError extends Error {
         super(message);
     }
 }
+
+/**
+ * Whether a thrown value is one of this module's own refusals.
+ *
+ * Exported as a predicate rather than left to `instanceof` at the call site
+ * because `instanceof` compares class identity, and class identity is a
+ * property of the module *instance*: a bundler or a test harness that
+ * evaluates this file twice produces two `ChatAccessError` classes, and a
+ * refusal raised by one is not an instance of the other. Asking the module
+ * that owns the class means the comparison always happens against the copy
+ * that raised the error.
+ *
+ * That distinction is load-bearing wherever getting it wrong is silent.
+ * `chatErrorResponse` below can use `instanceof` directly -- it lives in this
+ * file -- but a caller in another module that mistakes a local refusal for a
+ * provider failure writes bad data into provider health and says nothing.
+ */
+export const isChatAccessError = (error: unknown): error is ChatAccessError =>
+    error instanceof ChatAccessError;
 
 const positiveInteger = (value: string | undefined, fallback: number) => {
     const parsed = Number(value);
@@ -723,25 +745,6 @@ const retryAfterFor = (period: Period, now: Date, dailyEnd?: Date) => {
 
 const monthlyResetAt = (now: Date) =>
     new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1));
-
-/**
- * A reset instant that is always in the future.
- *
- * A day window's end is normally ahead of `now`, but it is derived from stored
- * settings and can go stale -- for instance in the moments around a DST shift
- * or right after a time-zone change moved the current bucket. Telling a blocked
- * user to wait for an instant that has already passed is worse than useless, so
- * a stale boundary is rolled forward whole days until it is ahead of now.
- */
-const safeDailyResetAt = (windowEnd: Date, now: Date) => {
-    const future = futureResetAt(windowEnd, now);
-    if (future) return future;
-    const dayMs = 86_400_000;
-    const elapsed = now.getTime() - windowEnd.getTime();
-    return new Date(
-        windowEnd.getTime() + (Math.floor(elapsed / dayMs) + 1) * dayMs
-    );
-};
 
 const incrementUsage = async (
     tx: Prisma.TransactionClient,
@@ -1508,7 +1511,13 @@ export const preflightChatComparisonAccess = async (
                     dailyPlanRemaining: dailyPlanCreditsRemaining ?? 0,
                     monthlyPlanRemaining: planCreditsRemaining,
                     purchasedCreditsAvailable,
-                    resetAt: userDayWindow.end.toISOString(),
+                    // The same instant the decision record carries. A stale
+                    // stored time zone rolls it forward here too, so the audit
+                    // trail and the message the user reads agree.
+                    resetAt: safeDailyResetAt(
+                        userDayWindow.end,
+                        now
+                    ).toISOString(),
                 }
             );
         }
@@ -2504,7 +2513,12 @@ export const acquireChatAccess = async (
                                     monthlyPlanRemaining: planRemaining,
                                     purchasedCreditsAvailable:
                                         error.availableCredits,
-                                    resetAt: accessDayWindow.end.toISOString(),
+                                    // Rolled forward for the same reason as
+                                    // the account path above.
+                                    resetAt: safeDailyResetAt(
+                                        accessDayWindow.end,
+                                        now
+                                    ).toISOString(),
                                 }
                             );
                         }
@@ -3670,11 +3684,22 @@ export const validateChatPayload = (body: unknown) => {
  * showing an end user and is exactly the kind of figure that made the previous
  * guardrail error read like a billing statement.
  */
+/**
+ * Everything a rejected caller is allowed to see, in one place.
+ *
+ * Two rules, both of which have to hold for *every* error response rather than
+ * for the call sites that remembered: raw internal USD never leaves the server
+ * (it goes to the limit-decision event and the Admin Console), and a reset
+ * instant is either in the future or absent. `now` defaults to the moment the
+ * response is built, which is the "creation time" the second rule is measured
+ * against.
+ */
 export const publicChatErrorDetails = (
-    details: ChatErrorDetails | undefined
+    details: ChatErrorDetails | undefined,
+    now: Date = new Date()
 ) => {
     if (!details) return undefined;
-    const entries = Object.entries(details).filter(
+    const entries = Object.entries(withFutureResetAt(details, now)).filter(
         ([key]) => !key.startsWith("internal")
     );
     return entries.length > 0 ? Object.fromEntries(entries) : undefined;

@@ -71,6 +71,58 @@ export type ExtractionQueueHealth = {
     expiredLeases: number;
 };
 
+/**
+ * One extraction-produced memory item, reduced to the four facts that decide
+ * whether the pair that proposed it is good enough (§12).
+ *
+ * Never the statement. Whether a proposal was accepted is a count; what it
+ * said is content, and §22 keeps content out of metrics.
+ */
+export type ExtractionReviewSample = {
+    extractionModelId: string;
+    promptVersion: string;
+    status: string;
+    sensitivity: string;
+    userEdited: boolean;
+};
+
+export type ExtractionReviewBreakdown = {
+    extractionModelId: string;
+    promptVersion: string;
+    proposed: number;
+    approved: number;
+    rejected: number;
+    /** Still waiting on a human: `candidate` or `manual_review_required`. */
+    awaitingReview: number;
+    /** Held back for individual review by the validator (§8.4). */
+    individualReview: number;
+    sensitive: number;
+    /** Approved items the user changed before or after accepting. */
+    edited: number;
+    /**
+     * Approved over decided. Undecided proposals are excluded: a rate that
+     * climbs while a queue of unreviewed candidates builds is measuring the
+     * user's attention, not the model's precision.
+     */
+    approvalRate: number | null;
+    /**
+     * Edited over approved. A pair whose output is accepted but always
+     * rewritten is not the same as one accepted as-is, and an approval rate
+     * alone cannot tell them apart.
+     */
+    editRate: number | null;
+};
+
+export type ExtractionReviewSummary = {
+    proposed: number;
+    approved: number;
+    rejected: number;
+    awaitingReview: number;
+    approvalRate: number | null;
+    editRate: number | null;
+    byPair: ExtractionReviewBreakdown[];
+};
+
 export type ExtractionMetricsSummary = {
     windowDays: number;
     runs: {
@@ -91,6 +143,13 @@ export type ExtractionMetricsSummary = {
         retryRate: number | null;
     };
     queue: ExtractionQueueHealth;
+    /**
+     * What humans did with what the pairs proposed (§22, §12.3). Read from the
+     * stored items, so it counts only what was stored: a candidate the
+     * validator discarded outright (§8.4) leaves no row by design, and its
+     * rate has to come from the chunk-completion events instead.
+     */
+    review: ExtractionReviewSummary;
     credits: {
         reservations: number;
         reservedCredits: number;
@@ -125,11 +184,89 @@ const percentile = (values: number[], fraction: number): number | null => {
 
 const TERMINAL_RUN_STATUSES = new Set(["completed", "failed", "cancelled"]);
 
+/** Statuses that mean a human has not decided about this proposal yet. */
+const AWAITING_REVIEW_STATUSES = new Set(["candidate", "manual_review_required"]);
+/** Statuses that mean the proposal was accepted into the account's memory. */
+const APPROVED_STATUSES = new Set([
+    "active",
+    // Superseded and expired were accepted once. Excluding them would make a
+    // pair look worse the longer its output has been in use.
+    "superseded",
+    "expired",
+    // Suspension is about the source, not the proposal.
+    "suspended_by_source_lock",
+    "suspended_by_source_delete",
+]);
+
+const summarizeReview = (
+    items: readonly ExtractionReviewSample[]
+): ExtractionReviewSummary => {
+    const byPair = new Map<string, ExtractionReviewBreakdown>();
+    for (const item of items) {
+        const key = `${item.extractionModelId}\u0000${item.promptVersion}`;
+        const entry =
+            byPair.get(key) ??
+            {
+                extractionModelId: item.extractionModelId,
+                promptVersion: item.promptVersion,
+                proposed: 0,
+                approved: 0,
+                rejected: 0,
+                awaitingReview: 0,
+                individualReview: 0,
+                sensitive: 0,
+                edited: 0,
+                approvalRate: null,
+                editRate: null,
+            };
+        entry.proposed += 1;
+        if (APPROVED_STATUSES.has(item.status)) {
+            entry.approved += 1;
+            if (item.userEdited) entry.edited += 1;
+        }
+        if (item.status === "rejected") entry.rejected += 1;
+        if (AWAITING_REVIEW_STATUSES.has(item.status)) entry.awaitingReview += 1;
+        if (item.status === "manual_review_required") entry.individualReview += 1;
+        if (item.sensitivity === "sensitive") entry.sensitive += 1;
+        byPair.set(key, entry);
+    }
+
+    let proposed = 0;
+    let approved = 0;
+    let rejected = 0;
+    let awaitingReview = 0;
+    let edited = 0;
+    for (const entry of byPair.values()) {
+        const decided = entry.approved + entry.rejected;
+        entry.approvalRate = decided === 0 ? null : entry.approved / decided;
+        entry.editRate =
+            entry.approved === 0 ? null : entry.edited / entry.approved;
+        proposed += entry.proposed;
+        approved += entry.approved;
+        rejected += entry.rejected;
+        awaitingReview += entry.awaitingReview;
+        edited += entry.edited;
+    }
+    const decided = approved + rejected;
+    return {
+        proposed,
+        approved,
+        rejected,
+        awaitingReview,
+        approvalRate: decided === 0 ? null : approved / decided,
+        editRate: approved === 0 ? null : edited / approved,
+        byPair: [...byPair.values()].sort((left, right) =>
+            left.extractionModelId < right.extractionModelId ? -1 : 1
+        ),
+    };
+};
+
 export function summarizeMemoryExtraction(input: {
     windowDays: number;
     runs: readonly ExtractionRunSample[];
     chunks: readonly ExtractionChunkSample[];
     reservations: readonly ExtractionReservationSample[];
+    reviewItems?: readonly ExtractionReviewSample[];
     /** Queue health is a live count, not a windowed one. */
     queue: ExtractionQueueHealth;
     truncated?: boolean;
@@ -231,6 +368,7 @@ export function summarizeMemoryExtraction(input: {
                 chunksAttempted === 0 ? null : chunksRetried / chunksAttempted,
         },
         queue: input.queue,
+        review: summarizeReview(input.reviewItems ?? []),
         credits: {
             reservations: input.reservations.length,
             reservedCredits,

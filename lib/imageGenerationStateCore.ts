@@ -79,18 +79,61 @@ export const imageAssetR2Key = (input: {
     input.role === "original" ? "original.png" : "thumb.webp"
   }`;
 
+// How long one provider call may take before it is aborted, and the jittered
+// backoff between the initial attempt and its two retries. Owned here rather
+// than in the adapter because three separate deadlines are derived from them
+// -- the stale threshold below, the post-response executor's budget, and the
+// route budget that executor runs inside -- and a change to either number has
+// to move all three or the sweep starts refunding live work.
+export const IMAGE_PROVIDER_TIMEOUT_MS = 150_000;
+export const IMAGE_PROVIDER_RETRY_DELAYS_MS = [1_000, 3_000] as const;
+
+// Downloading the result, deriving the thumbnail and writing both to R2. Not
+// measured from a provider deadline, so it is a stated allowance rather than
+// a derived figure.
+const IMAGE_STORAGE_ALLOWANCE_MS = 30_000;
+
+/** The worst legitimate end-to-end time for one image attempt. */
+export const IMAGE_ATTEMPT_WORST_CASE_MS =
+  (IMAGE_PROVIDER_RETRY_DELAYS_MS.length + 1) * IMAGE_PROVIDER_TIMEOUT_MS +
+  IMAGE_PROVIDER_RETRY_DELAYS_MS.reduce((total, delay) => total + delay, 0) +
+  IMAGE_STORAGE_ALLOWANCE_MS;
+
 // A generation still pending/processing/settling after this long has lost
-// its worker. Worst legitimate run is bounded: at most three provider
-// attempts of ~2 minutes each plus ~4s of backoff (imageProviderAdapter),
-// plus storage and thumbnail derivation -- under 8 minutes end to end; 12
-// keeps a comfortable margin. Reclaiming earlier matters because the v1
-// executor dies with its process on a redeploy (observed on staging during
-// the beta rollout), and this window plus the 15-minute sweep cadence is
-// exactly how long a user waits for the automatic refund. Correctness does
+// its worker. The worst legitimate run above is a little over eight minutes,
+// so 12 keeps a comfortable margin -- and the margin is the point: a
+// threshold at or below `IMAGE_ATTEMPT_WORST_CASE_MS` would have the sweep
+// refunding work that is still running. Reclaiming earlier matters because
+// the v1 executor dies with its process on a redeploy (observed on staging
+// during the beta rollout), and this window plus the 15-minute sweep cadence
+// is exactly how long a user waits for the automatic refund. Correctness does
 // not depend on the value: the `settling` claim is exactly-once, so a
 // pathologically slow worker that finishes after the sweep reclaimed its row
 // simply loses the claim and discards the result.
 export const STALE_IMAGE_GENERATION_AFTER_MS = 12 * 60 * 1_000;
+
+// The largest group the service will admit, and the smallest per-provider job
+// cap it will run one with (lib/imageGenerationService.ts bounds both). A
+// group whose targets all sit on one provider therefore runs in at most two
+// serial rounds, which is what the executor's budget has to cover.
+const IMAGE_GROUP_MAX_MODELS_CEILING = 4;
+const IMAGE_PROVIDER_JOB_LIMIT_FLOOR = 2;
+
+/**
+ * How long the post-response executor may need, in seconds.
+ *
+ * `after()` runs "for the platform's default or configured max duration of
+ * your route" (next/dist/docs .../functions/after.md), so a route that drives
+ * a generation group from `after()` has to state a budget at least this large
+ * -- otherwise an unstated platform default decides where the executor is cut
+ * off, and a cut-off executor is not a delay: nothing re-drives a `pending`
+ * generation, so the sweep refunds it and the request is lost.
+ */
+export const IMAGE_EXECUTOR_MAX_DURATION_SECONDS = Math.ceil(
+  (Math.ceil(IMAGE_GROUP_MAX_MODELS_CEILING / IMAGE_PROVIDER_JOB_LIMIT_FLOOR) *
+    IMAGE_ATTEMPT_WORST_CASE_MS) /
+    1_000
+);
 
 // `settling` gets its own, longer window, because reclaiming it is not the
 // same act. A `pending`/`processing` row has written nothing to the ledger, so

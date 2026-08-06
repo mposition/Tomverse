@@ -53,6 +53,15 @@ const EMPTY = (windowDays: number): ExtractionMetricsSummary => ({
         oldestPendingAgeSeconds: null,
         expiredLeases: 0,
     },
+    review: {
+        proposed: 0,
+        approved: 0,
+        rejected: 0,
+        awaitingReview: 0,
+        approvalRate: null,
+        editRate: null,
+        byPair: [],
+    },
     credits: {
         reservations: 0,
         reservedCredits: 0,
@@ -110,6 +119,30 @@ export async function getMemoryExtractionReport(
                 },
             });
 
+        // What humans did with what the pairs proposed (§22, §12.3), which is
+        // the input to the approval decision that currently keeps extraction
+        // closed. Windowed by when the item was proposed, and selecting only
+        // the four columns that decide the rates -- never the statement.
+        const reviewItems = await prisma.memoryItem.findMany({
+            where: {
+                createdAt: { gte: since },
+                extractionRunId: { not: null },
+                extractionModelId: { not: null },
+                promptVersion: { not: null },
+                // Deleted items are the user removing memory, not judging a
+                // proposal, so they are neither an approval nor a rejection.
+                status: { not: "deleted" },
+            },
+            take: MAX_ROWS,
+            select: {
+                extractionModelId: true,
+                promptVersion: true,
+                status: true,
+                sensitivity: true,
+                userEdited: true,
+            },
+        });
+
         // Queue health is deliberately *not* windowed. A run stuck since
         // before the window would otherwise disappear from the one number an
         // operator would use to notice it.
@@ -132,6 +165,15 @@ export async function getMemoryExtractionReport(
             runs,
             chunks,
             reservations,
+            reviewItems: reviewItems.map((item) => ({
+                // Non-null by the query's own filter; narrowed here rather
+                // than asserted so a change to that filter is a type error.
+                extractionModelId: item.extractionModelId ?? "unknown",
+                promptVersion: item.promptVersion ?? "unknown",
+                status: item.status,
+                sensitivity: item.sensitivity,
+                userEdited: item.userEdited,
+            })),
             queue: {
                 pendingRuns,
                 runningRuns,
@@ -149,7 +191,8 @@ export async function getMemoryExtractionReport(
             truncated:
                 runs.length >= MAX_ROWS ||
                 chunks.length >= MAX_ROWS ||
-                reservations.length >= MAX_ROWS,
+                reservations.length >= MAX_ROWS ||
+                reviewItems.length >= MAX_ROWS,
         });
     } catch (error) {
         // A deployment whose migrations have not landed yet answers "nothing
