@@ -56,6 +56,10 @@ export const MEMORY_COUNTER_KINDS = [
     // the run is never created, or the dispatch simply stops — so the counter
     // is the only record that it happened.
     "extraction_subbudget_exhausted",
+    // §8.4's evidence re-verification at write time. A candidate whose source
+    // was deleted between the chunk being read and its result being stored is
+    // dropped, and dropping it is exactly why no row records that it existed.
+    "extraction_evidence_unverified",
     // §22's injection ratio. Policy §7 forbids storing the injected context as
     // a Message row, so an answered request leaves nothing behind that says
     // whether it carried memory. Both halves of the ratio therefore have to be

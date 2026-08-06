@@ -78,10 +78,17 @@ const seed = async () => {
     return { user, message };
 };
 
+type EvidenceSource = { id: string; contentDigest: string };
+
+/**
+ * The digest is the *message's* stored one, which is what the real label map
+ * supplies: §8.4 re-verifies evidence against the row, so a fixture that
+ * digested the statement instead would describe evidence the server rejects.
+ */
 const decision = (
     statement: string,
     outcome: ExtractionDecision["outcome"],
-    messageId: string,
+    source: EvidenceSource,
     overrides: {
         sensitivity?: "standard" | "sensitive";
         candidateSensitivity?: "standard" | "sensitive";
@@ -96,8 +103,8 @@ const decision = (
             expiresAt: null,
             evidence: [
                 {
-                    externalMessageId: messageId,
-                    evidenceDigest: externalContentDigest(statement),
+                    externalMessageId: source.id,
+                    evidenceDigest: source.contentDigest,
                     role: "user" as const,
                 },
             ],
@@ -132,7 +139,7 @@ const persist = (
 test("stored candidates carry their provenance, terms and evidence (§9, §12)", async () => {
     const { user, message } = await seed();
     const result = await persist(user.id, [
-        decision("the user prefers formal Korean", "store_candidate", message.id),
+        decision("the user prefers formal Korean", "store_candidate", message),
     ]);
     assert.equal(result.stored, 1);
     assert.equal(result.discarded, 0);
@@ -164,8 +171,8 @@ test("stored candidates carry their provenance, terms and evidence (§9, §12)",
 test("a discarded candidate is not stored at all (§8.4)", async () => {
     const { user, message } = await seed();
     const result = await persist(user.id, [
-        decision("api key sk-live-abc", "discard", message.id),
-        decision("the user prefers formal Korean", "store_candidate", message.id),
+        decision("api key sk-live-abc", "discard", message),
+        decision("the user prefers formal Korean", "store_candidate", message),
     ]);
     assert.equal(result.stored, 1);
     assert.equal(result.discarded, 1);
@@ -182,7 +189,7 @@ test("a discarded candidate is not stored at all (§8.4)", async () => {
 test("a demoted candidate lands in manual_review_required (§8.3)", async () => {
     const { user, message } = await seed();
     const result = await persist(user.id, [
-        decision("the user takes medication daily", "store_for_individual_review", message.id, {
+        decision("the user takes medication daily", "store_for_individual_review", message, {
             sensitivity: "sensitive",
         }),
     ]);
@@ -199,7 +206,7 @@ test("the validator's sensitivity wins over the candidate's claim (§8.4)", asyn
     // itself out of individual review and into bulk approval.
     const { user, message } = await seed();
     await persist(user.id, [
-        decision("the user takes medication daily", "store_for_individual_review", message.id, {
+        decision("the user takes medication daily", "store_for_individual_review", message, {
             candidateSensitivity: "standard",
             sensitivity: "sensitive",
         }),
@@ -213,13 +220,13 @@ test("the validator's sensitivity wins over the candidate's claim (§8.4)", asyn
 test("a retried chunk replaces its own rows rather than duplicating them (§11)", async () => {
     const { user, message } = await seed();
     await persist(user.id, [
-        decision("the user prefers formal Korean", "store_candidate", message.id),
+        decision("the user prefers formal Korean", "store_candidate", message),
     ]);
     // The worker died after the provider answered; the chunk is re-claimed and
     // re-run, and the model's second answer is not identical.
     const second = await persist(user.id, [
-        decision("the user prefers formal Korean", "store_candidate", message.id),
-        decision("the user works in Seoul", "store_candidate", message.id),
+        decision("the user prefers formal Korean", "store_candidate", message),
+        decision("the user works in Seoul", "store_candidate", message),
     ]);
     assert.equal(second.replaced, 1);
     assert.equal(second.stored, 2);
@@ -233,8 +240,8 @@ test("a retried chunk replaces its own rows rather than duplicating them (§11)"
 test("a retry never takes back a row the user already acted on (§8.1)", async () => {
     const { user, message } = await seed();
     await persist(user.id, [
-        decision("the user prefers formal Korean", "store_candidate", message.id),
-        decision("the user works in Seoul", "store_candidate", message.id),
+        decision("the user prefers formal Korean", "store_candidate", message),
+        decision("the user works in Seoul", "store_candidate", message),
     ]);
     const approved = await prisma.memoryItem.findFirstOrThrow({
         where: { userId: user.id, statement: "the user prefers formal Korean" },
@@ -252,7 +259,7 @@ test("a retry never takes back a row the user already acted on (§8.1)", async (
     });
 
     const retry = await persist(user.id, [
-        decision("something else entirely", "store_candidate", message.id),
+        decision("something else entirely", "store_candidate", message),
     ]);
     // Neither of the user's rows was replaced.
     assert.equal(retry.replaced, 0);
@@ -265,14 +272,14 @@ test("a retry never takes back a row the user already acted on (§8.1)", async (
 test("another chunk of the same run is untouched by a retry (§11)", async () => {
     const { user, message } = await seed();
     await persist(user.id, [
-        decision("chunk zero statement", "store_candidate", message.id),
+        decision("chunk zero statement", "store_candidate", message),
     ], 0);
     await persist(user.id, [
-        decision("chunk one statement", "store_candidate", message.id),
+        decision("chunk one statement", "store_candidate", message),
     ], 1);
 
     const retry = await persist(user.id, [
-        decision("chunk zero rewritten", "store_candidate", message.id),
+        decision("chunk zero rewritten", "store_candidate", message),
     ], 0);
     assert.equal(retry.replaced, 1);
 
@@ -301,4 +308,116 @@ test("the provenance columns are set together or not at all", async () => {
             },
         })
     );
+});
+
+/* ------------------------------------------- §8.4 evidence re-verification -- */
+
+test("a candidate whose source was deleted mid-run is dropped, not stored", async () => {
+    // The failure this exists for: the chunk is read, the provider is called,
+    // and the user deletes the import while that call is in flight. Without
+    // the re-verification the evidence insert violates its foreign key and
+    // takes the whole chunk down with an opaque database error, so tidying up
+    // an import turns a running extraction into a failing one.
+    const { user, message } = await seed();
+    const gone = await prisma.externalMessage.create({
+        data: {
+            userId: user.id,
+            externalConversationId: message.externalConversationId,
+            externalStableId: randomUUID().replaceAll("-", ""),
+            role: "user",
+            content: "a message about to be deleted",
+            contentDigest: externalContentDigest("a message about to be deleted"),
+            digestVersion: 1,
+            ordinal: 1,
+        },
+    });
+    await prisma.externalMessage.delete({ where: { id: gone.id } });
+
+    const result = await persist(user.id, [
+        decision("grounded in a deleted message", "store_candidate", gone),
+        decision("the user prefers formal Korean", "store_candidate", message),
+    ]);
+    assert.equal(result.unsourced, 1);
+    assert.equal(result.stored, 1);
+    // Not counted as a validator rejection: the statement was never judged
+    // unacceptable, it simply has nothing left to stand on.
+    assert.equal(result.discarded, 0);
+
+    const items = await prisma.memoryItem.findMany({ where: { userId: user.id } });
+    assert.equal(items.length, 1);
+    assert.equal(items[0].statement, "the user prefers formal Korean");
+});
+
+test("evidence pinned to content whose digest moved does not re-attach (§8.4)", async () => {
+    const { user, message } = await seed();
+    const stale = { id: message.id, contentDigest: externalContentDigest("different content") };
+    const result = await persist(user.id, [
+        decision("the user prefers formal Korean", "store_candidate", stale),
+    ]);
+    assert.equal(result.unsourced, 1);
+    assert.equal(result.stored, 0);
+    assert.equal(
+        await prisma.memoryEvidence.count({ where: { userId: user.id } }),
+        0
+    );
+});
+
+test("another account's message never verifies, whatever digest is claimed", async () => {
+    // Ownership is the server's to establish. A cross-account reference is the
+    // same outcome as a missing one, so nothing learns that the id is real.
+    const mine = await seed();
+    const theirs = await seed();
+    const result = await persist(mine.user.id, [
+        decision("borrowed from another account", "store_candidate", theirs.message),
+    ]);
+    assert.equal(result.unsourced, 1);
+    assert.equal(result.stored, 0);
+});
+
+test("losing one reference of several keeps the candidate on what remains", async () => {
+    const { user, message } = await seed();
+    const second = await prisma.externalMessage.create({
+        data: {
+            userId: user.id,
+            externalConversationId: message.externalConversationId,
+            externalStableId: randomUUID().replaceAll("-", ""),
+            role: "user",
+            content: "a second supporting message",
+            contentDigest: externalContentDigest("a second supporting message"),
+            digestVersion: 1,
+            ordinal: 2,
+        },
+    });
+    await prisma.externalMessage.delete({ where: { id: second.id } });
+
+    const twoSources = decision(
+        "the user prefers formal Korean",
+        "store_candidate",
+        message
+    );
+    const result = await persist(user.id, [
+        {
+            ...twoSources,
+            candidate: {
+                ...twoSources.candidate,
+                evidence: [
+                    ...twoSources.candidate.evidence,
+                    {
+                        externalMessageId: second.id,
+                        evidenceDigest: second.contentDigest,
+                        role: "user" as const,
+                    },
+                ],
+            },
+        } as ExtractionDecision,
+    ]);
+    assert.equal(result.stored, 1);
+    assert.equal(result.unsourced, 0);
+
+    const item = await prisma.memoryItem.findFirstOrThrow({
+        where: { userId: user.id },
+        include: { evidences: true },
+    });
+    assert.equal(item.evidences.length, 1);
+    assert.equal(item.evidences[0].externalMessageId, message.id);
 });

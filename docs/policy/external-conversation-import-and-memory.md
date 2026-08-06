@@ -456,6 +456,19 @@ window·credit·privacy disclosure 적용. 릴리스 B의 memory 사용은 이 b
 형식, URL, credential·secret 패턴, imperative/system 지시형, prompt injection
 표현, assistant 추측 채택 패턴, source mismatch, 중복·near-duplicate·conflict.
 
+구현: 순수 검사는 `lib/memoryValidatorCore.ts`, DB가 필요한 검사(evidence
+존재·소유권·digest)는 `lib/memoryEvidenceValidation.ts`입니다.
+
+- **evidence 재검증은 읽기 시점이 아니라 쓰기 시점에 합니다.** label map은
+  chunk를 claim할 때 만들어지고 provider 호출은 그 뒤에 일어나므로, 그 사이에
+  import를 삭제한 사용자는 더 이상 없는 message를 인용하는 후보를 남깁니다.
+  검증을 저장 transaction 안에서 하지 않으면 evidence insert가 FK를 위반해
+  chunk 전체가 알 수 없는 DB 오류로 실패합니다.
+- **검증에 실패한 참조는 버리고, 남은 참조가 없으면 후보를 저장하지 않습니다**
+  (§8.2는 evidence를 요구합니다). 이는 validator 거절과 다른 결과이므로
+  `unsourced`로 따로 셉니다 — 문장이 부적합했던 것이 아니라 근거가 사라진
+  것입니다.
+
 **Bulk-safe 계약**: 일괄 승인에는 서술형 사실·선호만 포함합니다. URL, redirect
 지시, imperative, "항상·반드시·무조건" + 행동 명령, system/developer/tool 명령
 형태, 외부 파일·명령 실행 요구, credential 패턴, 현재 지시 무시, model identity
@@ -1360,9 +1373,11 @@ Data 탭(`AuthButton.tsx`)에는 진입점·요약만 두고 대형 UI를 modal�
     아니라 `null`입니다.
   - **취소된 run은 pair 실패율 분모에 포함합니다.** 사용자가 그만둔 것도 그 run의
     결과이고, 빼면 사용자가 계속 포기하는 pair가 좋아 보입니다.
-  - 행이 남지 않는 결과(validator 거절, source 삭제 처분)는
-    `ChatUsageBucket`의 `memory:` namespace 일일 counter로 기록하며,
-    기록 실패가 사용자 요청 실패가 되지 않습니다.
+  - 행이 남지 않는 결과(validator 거절, source 삭제 처분, 쓰기 시점 evidence
+    재검증 탈락)는 `ChatUsageBucket`의 `memory:` namespace 일일 counter로
+    기록하며, 기록 실패가 사용자 요청 실패가 되지 않습니다. counter는
+    transaction 밖에서 기록합니다 — rollback된 transaction 안에서 기록하면
+    일어나지 않은 일을 보고하게 됩니다.
 
 - **C**: profile lifecycle, preview 성공·실패, version update, retired model
   차단 수, knowledge 처리 실패율, byte bucket, retrieval chunk 수, truncation,
