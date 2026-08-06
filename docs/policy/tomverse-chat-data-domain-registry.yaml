@@ -80,12 +80,19 @@ rules:
     lib/accountDataExportDomains.ts. The registry describes the export that
     exists, not the one that was intended.
 
-# Measured against develop on 2026-08-06: 31 user-linked models, of which 22 are
-# reachable from User by cascade. Of the other 9: Feedback and RefundRequest are
-# anonymised explicitly in lib/accountDeletion.ts; ChatContextBundleConsumption
-# is deleted explicitly there; BillingTransaction and PrivacyRequest are
-# retained; and the three credit reservations plus ChatLimitDecisionEvent are
-# decided-but-not-yet-built anonymisations.
+# Measured against develop on 2026-08-06: 33 registered models. User is the root
+# and is deleted explicitly last; 23 are reachable from it by cascade. Of the
+# remaining 9, ChatContextBundleConsumption is deleted explicitly in
+# lib/accountDeletion.ts, six are anonymised there (Feedback and RefundRequest
+# inline, the three credit reservations and ChatLimitDecisionEvent through
+# lib/accountDataAnonymisation.ts), and BillingTransaction and PrivacyRequest
+# are retained.
+#
+# The anonymisationFields below are also the column list
+# lib/accountDataAnonymisation.ts writes, and tests/accountDataAnonymisation.test.mjs
+# fails if the two drift. Writing it twice is the point: this file is the
+# decision, that file is the implementation, and neither can quietly stop
+# matching the other.
 domains:
   # --- the account itself ---------------------------------------------------
   - domain: user
@@ -407,8 +414,7 @@ domains:
     deletionMechanism: explicit_deletion
     retentionPolicy: ttl
     ttlDays: 90
-    implementationStatus: planned
-    plannedWorkRef: "PRIVACY-01: anonymise rate-limit telemetry at account deletion"
+    implementationStatus: implemented
     anonymisationFields:
       - userId
       - subjectKey
@@ -416,13 +422,25 @@ domains:
     anonymisationReplacements:
       subjectKey: "deleted-account"
       traceId: "deleted-account"
+    reidentificationReview:
+      reviewedBy: security-privacy
+      reviewedAt: "2026-08-06"
+      joinRisksConsidered:
+        - >-
+          Closed. userId is nullable but carries no relation, so neither a
+          cascade nor a SetNull touched this table; the row kept naming the user
+          until purgeExpiredChatLimitDecisions reached it up to 90 days later.
+          anonymiseAccountData now clears it at deletion, and the TTL is the
+          backstop it was always meant to be.
+        - >-
+          Closed. subjectKey and traceId both re-join the row to the chat logs
+          and are NOT NULL, so each takes the shared "deleted-account"
+          placeholder rather than a value that still resolves.
+        - >-
+          Accepted. modelIds, enabledTools, the token and cost estimates and the
+          limit thresholds remain. They describe a refused request, not a
+          person, and the row exists to answer "why was this blocked".
     inUnifiedExport: excluded
-    note: >-
-      Today nothing happens to this table at account deletion: userId is
-      nullable but carries no relation, so there is no SetNull and no cascade,
-      and the row keeps naming the user until purgeExpiredChatLimitDecisions
-      removes it up to 90 days later. The TTL is the backstop, not the
-      deletion path.
 
   - domain: chatCreditReservation
     prismaModel: ChatCreditReservation
@@ -430,8 +448,7 @@ domains:
     deletionAction: anonymise
     deletionMechanism: explicit_deletion
     retentionPolicy: immediate
-    implementationStatus: planned
-    plannedWorkRef: "PRIVACY-01: scrub reservation identifiers beyond the SetNull"
+    implementationStatus: implemented
     anonymisationFields:
       - userId
       - subjectKey
@@ -444,6 +461,26 @@ domains:
       subjectKey: "deleted-account"
       traceId: "deleted-account"
       reservationPayload: "{}"
+    reidentificationReview:
+      reviewedBy: security-privacy
+      reviewedAt: "2026-08-06"
+      joinRisksConsidered:
+        - >-
+          Closed. subjectKey and traceId join this row to the chat logs and
+          providerRequestId and providerResponseId join it to the provider's own
+          records, which are held by somebody else and outlive anything decided
+          here. All four are cleared; the two NOT NULL columns take the shared
+          placeholder.
+        - >-
+          Closed. reservationPayload and providerUsageSnapshot are snapshots of
+          the request and the provider's reply. The credit lots they would let a
+          reconciliation sweep refund cascade away with the account, so there is
+          nothing left to refund and nothing lost by emptying them.
+        - >-
+          Accepted. provider, modelId, the credit and token counts and the
+          timings remain. This is the financial record the row exists to be, and
+          without a subject key or a trace it describes a transaction rather
+          than a person.
     inUnifiedExport: included_filtered
     note: >-
       The relation is onDelete: SetNull, so userId clears itself today and
@@ -458,8 +495,7 @@ domains:
     deletionAction: anonymise
     deletionMechanism: explicit_deletion
     retentionPolicy: immediate
-    implementationStatus: planned
-    plannedWorkRef: "PRIVACY-01: scrub reservation identifiers beyond the SetNull"
+    implementationStatus: implemented
     anonymisationFields:
       - userId
       - generationId
@@ -470,6 +506,27 @@ domains:
     anonymisationReplacements:
       generationId: "anonymised:{id}"
       reservationPayload: "{}"
+    reidentificationReview:
+      reviewedBy: security-privacy
+      reviewedAt: "2026-08-06"
+      joinRisksConsidered:
+        - >-
+          Closed. generationId is UNIQUE, so a shared placeholder would collide
+          across every anonymised row; it takes "anonymised:" plus the row's own
+          primary key instead. It points at an ImageGeneration that cascades
+          away, but the identifier is what other logs recorded, so the join is
+          what mattered rather than the row it used to reach.
+        - >-
+          Closed. conversationId and targetId reach the user's own conversations
+          and earlier generations, and providerRequestId reaches the provider's
+          records. All three are cleared, along with the reservationPayload
+          snapshot.
+        - >-
+          Accepted. preset, quality, size, provider, modelId and the credit
+          amounts remain, as the financial record. identitySource is deliberately
+          NOT anonymised -- it says whether the row's identity was recorded or
+          inferred by the v1 backfill, which is a fact about Tomverse's own data
+          quality and names nobody.
     inUnifiedExport: included_filtered
     note: >-
       generationId is unique, so it cannot take a shared placeholder; the
@@ -483,8 +540,7 @@ domains:
     deletionAction: anonymise
     deletionMechanism: explicit_deletion
     retentionPolicy: immediate
-    implementationStatus: planned
-    plannedWorkRef: "PRIVACY-01: scrub reservation identifiers beyond the SetNull"
+    implementationStatus: implemented
     anonymisationFields:
       - userId
       - runId
@@ -492,6 +548,22 @@ domains:
     anonymisationReplacements:
       runId: "anonymised:{id}"
       reservationPayload: "{}"
+    reidentificationReview:
+      reviewedBy: security-privacy
+      reviewedAt: "2026-08-06"
+      joinRisksConsidered:
+        - >-
+          Closed. runId is UNIQUE and reaches the MemoryExtractionRun, which
+          reaches the memories themselves; it takes "anonymised:" plus the row's
+          own primary key. The run cascades away with the account, so the
+          identifier is again the join rather than the destination.
+        - >-
+          Closed. reservationPayload held the per-lot refund entries, whose lots
+          cascade away with the account.
+        - >-
+          Accepted. provider, extractionModelId, promptVersion, the chunk counts
+          and the credit amounts remain. promptVersion is Tomverse's own prompt
+          revision, not anything the user wrote.
     inUnifiedExport: included_filtered
 
   # --- retained -------------------------------------------------------------

@@ -177,8 +177,15 @@ run(
     "tests/integration/chat-context-bundle.db.test.ts",
     "tests/integration/memory-metrics.db.test.ts",
     "tests/integration/conversation-memory-mode.db.test.ts",
+    // PRIVACY-01/02. These settle what a source scan cannot: that no withheld
+    // column reaches the export, that no identifier survives an account
+    // deletion, and that a download ticket is spent exactly once under
+    // concurrency.
+    "tests/integration/account-data-export.db.test.ts",
+    "tests/integration/account-data-export-ticket.db.test.ts",
+    "tests/integration/account-anonymisation.db.test.ts",
   ],
-  "Running financial, credit, chat-concurrency, chat-rate-limit, fallback-pricing, model-registry, admin-security, admin-users, login-methods, account-deletion, conversation-title, conversation-lock-migration, provider-recovery, provider-failure-scope, subscription-sync-ordering, plan-change-reservation, image-generation, external-import, and memory transaction scenarios"
+  "Running financial, credit, chat-concurrency, chat-rate-limit, fallback-pricing, model-registry, admin-security, admin-users, login-methods, account-deletion, account export and anonymisation, conversation-title, conversation-lock-migration, provider-recovery, provider-failure-scope, subscription-sync-ordering, plan-change-reservation, image-generation, external-import, and memory transaction scenarios"
 );
 // Runs apart from the batch above: it drives the real route handlers, which
 // needs mock.module (--experimental-test-module-mocks) to replace the session

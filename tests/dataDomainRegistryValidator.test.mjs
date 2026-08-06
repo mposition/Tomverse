@@ -145,12 +145,34 @@ test("a ttl policy without a period is rejected", () => {
   assert.match(output, /needs a positive integer ttlDays/);
 });
 
+// Nothing is `planned` in the committed registry any more, so these two build
+// the state rather than borrowing a row that happens to be in it. The state is
+// still the honest one for the next decided-but-unbuilt deletion path, and it
+// stays graded whether or not anything currently occupies it.
 test("a planned row without a work reference is rejected", () => {
   const { code, output } = run((_registry, find) => {
-    delete find("chatCreditReservation").plannedWorkRef;
+    find("comparisonReview").implementationStatus = "planned";
   });
   assert.equal(code, 1);
   assert.match(output, /needs a plannedWorkRef/);
+});
+
+test("a planned row with a work reference is accepted", () => {
+  const { code, output } = run((_registry, find) => {
+    const row = find("comparisonReview");
+    row.implementationStatus = "planned";
+    row.plannedWorkRef = "PRIVACY-01: trace the comparison review deletion path";
+  });
+  assert.equal(code, 0, output);
+  assert.match(output, /1 domain\(s\) are decided but not yet built/);
+});
+
+test("an implemented row cannot carry a work reference", () => {
+  const { code, output } = run((_registry, find) => {
+    find("comparisonReview").plannedWorkRef = "PRIVACY-01: something already done";
+  });
+  assert.equal(code, 1);
+  assert.match(output, /plannedWorkRef only applies to a planned row/);
 });
 
 // The promise the registry exists to keep.
