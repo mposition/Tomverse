@@ -273,6 +273,12 @@ test.describe("admin read surfaces", () => {
       page.getByRole("heading", { name: "Model catalogue and API configuration" })
     ).toBeVisible();
     await expect(page.getByText(FIXTURE_MODEL.enabled.name).first()).toBeVisible();
+    // The list opens on the Operational lifecycle view, so the blocked row is
+    // one explicit selection away rather than on screen by default.
+    await expect(page.getByText(FIXTURE_MODEL.disabled.name)).toHaveCount(0);
+    await page
+      .getByTestId("model-registry-lifecycle-filter")
+      .selectOption("all");
     await expect(page.getByText(FIXTURE_MODEL.disabled.name).first()).toBeVisible();
     await expect(
       page.getByRole("button", { name: `Edit ${FIXTURE_MODEL.enabled.name}` })
