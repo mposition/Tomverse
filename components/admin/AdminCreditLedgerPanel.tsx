@@ -16,20 +16,27 @@ export type AdminCreditLedgerRow = {
 const dateLabel = (value: string) =>
   new Date(value).toISOString().replace("T", " ").slice(0, 16);
 
-export function AdminCreditLedgerPanel({ rows }: { rows: AdminCreditLedgerRow[] }) {
+export function AdminCreditLedgerPanel({
+  rows,
+  rowLimit,
+}: {
+  rows: AdminCreditLedgerRow[];
+  /** How many rows the server read, so "Latest N" is not read as a total. */
+  rowLimit?: number;
+}) {
   return (
     <section className="rounded-2xl border border-zinc-800 bg-zinc-950/70 p-5">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-[0.18em] text-blue-300"><CircleDollarSign className="h-4 w-4" /> Credit ledger</div>
           <h2 className="mt-2 text-xl font-black text-white">Recent credit movements</h2>
-          <p className="mt-1 text-sm text-zinc-500">Reserve, settlement, refund, purchase, expiry, and administrative entries. Open a customer for the complete account timeline.</p>
+          <p className="mt-1 text-sm text-zinc-400">Reserve, settlement, refund, purchase, expiry, and administrative entries.{rowLimit ? ` The ${rowLimit} newest entries only, not a period total.` : ""} Open a customer for the complete account timeline.</p>
         </div>
-        <span className="rounded-full border border-zinc-800 bg-zinc-900 px-3 py-1.5 text-xs font-bold text-zinc-400">Latest {rows.length}</span>
+        <span className="rounded-full border border-zinc-800 bg-zinc-900 px-3 py-1.5 text-xs font-bold text-zinc-300">Latest {rows.length}</span>
       </div>
       <div className="mt-5 overflow-x-auto">
         <table className="w-full min-w-[840px] text-left text-sm">
-          <thead className="text-[10px] uppercase tracking-[0.16em] text-zinc-600">
+          <thead className="text-xs uppercase tracking-[0.16em] text-zinc-400">
             <tr>{["Created", "Customer", "Type", "Change", "Balance", "Funded cost", "Reservation"].map((label) => <th key={label} className="px-3 py-2">{label}</th>)}</tr>
           </thead>
           <tbody>

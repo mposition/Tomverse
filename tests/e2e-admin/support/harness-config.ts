@@ -12,7 +12,7 @@
  * `E2E_DISABLE_DATABASE=true`, and `app/(site)/(application)/layout.tsx`
  * fabricates a session from the `__tomverse_e2e_auth` cookie. That is enough
  * for the chat shell, which reads its session from React context -- but the
- * admin console does not. `AdminLayout`, `AdminWorkspace` and all 41
+ * admin console does not. `AdminLayout`, its per-route pages and all 41
  * `/api/admin/**` route handlers call `getServerSession(authOptions)`
  * themselves and then hit Prisma directly, so neither the cookie nor a
  * `page.route()` interception reaches them.
