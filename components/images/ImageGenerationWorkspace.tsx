@@ -22,6 +22,11 @@ import { CreditCostBadge } from "@/components/credits/CreditCostBadge";
 import { useLanguage } from "@/components/LanguageProvider";
 import { notifyUserUsageChanged } from "@/components/chat/useUserUsage";
 import { estimatePromptTokens } from "@/lib/chatTokenEstimate";
+import { useIsMobileShell } from "@/components/chat/useIsMobileShell";
+import {
+  getChatEnterKeyAction,
+  isComposingKeydown,
+} from "@/lib/chatKeyboardPolicy";
 import { mergeImageTimelineRow } from "@/lib/imageTimelineMerge";
 import {
   getImageGenerationPricing,
@@ -33,6 +38,7 @@ import {
 import {
   DEFAULT_IMAGE_MODEL_ID,
   getImageModelPrice,
+  imageModelChipLabel,
   listEnabledImageModels,
 } from "@/lib/imageModelRegistry";
 
@@ -198,6 +204,7 @@ export function ImageGenerationWorkspace({
   onCancelDraft,
 }: ImageGenerationWorkspaceProps) {
   const { t } = useLanguage();
+  const isMobileShell = useIsMobileShell();
   const [generations, setGenerations] = useState<GenerationView[]>([]);
   const [historyError, setHistoryError] = useState(false);
   const [prompt, setPrompt] = useState(initialPrompt);
@@ -906,7 +913,13 @@ export function ImageGenerationWorkspace({
                       : "border-zinc-200 bg-white text-zinc-600 hover:bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-300 dark:hover:bg-zinc-900"
                   }`}
                 >
-                  {model.name}
+                  {/*
+                    The chip shows the short label and the accessible name
+                    keeps the full one: abbreviating the visual label must not
+                    abbreviate the model's identity.
+                  */}
+                  <span aria-hidden>{imageModelChipLabel(model)}</span>
+                  <span className="sr-only">{model.name}</span>
                   {price && (
                     <CreditCostBadge credits={price.credits} size="xs" tone="plain" />
                   )}
@@ -930,14 +943,27 @@ export function ImageGenerationWorkspace({
               data-testid="image-generation-prompt"
               value={prompt}
               onChange={(event) => setPrompt(event.target.value)}
+              // The same Enter contract as every chat textarea, through the
+              // same helper (policy §1 keeps ChatInput itself out of an image
+              // conversation, but the keyboard rule is not chat-specific).
+              // Desktop Enter submits, Shift+Enter breaks the line, mobile
+              // Enter always breaks and only Ctrl/Cmd+Enter submits.
+              //
+              // Ctrl/Cmd+Enter already submitted here, and still does, so no
+              // existing habit breaks -- desktop Enter is the only addition.
+              // What is genuinely new is the IME guard: this composer was safe
+              // only by accident, because a Korean composition-confirming
+              // Enter carries no modifier. Enter submitting makes that
+              // accident load-bearing, so it stops being an accident.
               onKeyDown={(event) => {
-                if (
-                  event.key === "Enter" &&
-                  (event.metaKey || event.ctrlKey)
-                ) {
-                  event.preventDefault();
-                  void handleSubmit();
-                }
+                const action = getChatEnterKeyAction(
+                  event,
+                  isComposingKeydown(event),
+                  isMobileShell
+                );
+                if (action !== "submit") return;
+                event.preventDefault();
+                void handleSubmit();
               }}
               placeholder={t("chat.imageGenerationPromptPlaceholder")}
               disabled={!flagEnabled}

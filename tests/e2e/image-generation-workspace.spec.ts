@@ -577,6 +577,91 @@ test("an option one selected model cannot be priced blocks submission", async ({
   await expect(page.getByTestId("image-generation-submit")).toBeEnabled();
 });
 
+test("promoting a draft keeps the composer settings and clears the prompt", async ({ page }) => {
+  // The draft becoming the conversation it just created is not a conversation
+  // switch. Remounting there discarded the model selection, quality and size
+  // the user had chosen -- so a two-model comparison silently became a
+  // one-model request on the very next submit.
+  await enableImageGenerationFlag(page);
+  await mockAuthenticatedApi(page);
+  await mockUserUsage(page, { plan: "Pro" });
+  const api = await installImageGenerationApi(page);
+  await page.goto("/chat");
+
+  await openNewImageEntry(page);
+  await page.getByTestId("image-model-grok-imagine-image-quality-20260403").click();
+  await page.getByTestId("image-preset-draft").click();
+  await page.getByTestId("image-size-1536x1024").click();
+  // Draft + landscape has no Grok price, so put it back where both models can
+  // be priced; the point here is that the *choice* survives, not the price.
+  await page.getByTestId("image-preset-standard").click();
+  await page.getByTestId("image-size-1024x1024").click();
+
+  await page.getByTestId("image-generation-prompt").fill("a red apple");
+  await page.getByTestId("image-generation-submit").click();
+  await expect(page.getByTestId("image-generation-result").first()).toBeVisible({
+    timeout: 15_000,
+  });
+
+  // Still two models selected, and the prompt did not come back.
+  await expect(
+    page.getByTestId("image-model-grok-imagine-image-quality-20260403")
+  ).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByTestId("image-model-gpt-image-2")).toHaveAttribute(
+    "aria-pressed",
+    "true"
+  );
+  await expect(page.getByTestId("image-generation-prompt")).toHaveValue("");
+
+  // ...and the next request really does carry both.
+  await page.getByTestId("image-generation-prompt").fill("a green pear");
+  await page.getByTestId("image-generation-submit").click();
+  await expect.poll(() => api.createBodies.length).toBe(2);
+  expect(api.createBodies[1].modelIds).toEqual([
+    "gpt-image-2",
+    "grok-imagine-image-quality-20260403",
+  ]);
+});
+
+test("Enter submits on desktop and breaks the line on mobile", async ({ page }) => {
+  // The shared chat contract, through the shared helper. Ctrl/Cmd+Enter kept
+  // working either way -- desktop Enter is the only behaviour this adds.
+  await enableImageGenerationFlag(page);
+  await mockAuthenticatedApi(page);
+  await mockUserUsage(page, { plan: "Pro" });
+  const api = await installImageGenerationApi(page);
+  await page.goto("/chat");
+
+  await openNewImageEntry(page);
+  const textarea = page.getByTestId("image-generation-prompt");
+  await textarea.fill("a red apple");
+  await textarea.press("Enter");
+
+  if (isMobileShell()) {
+    await expect(textarea).toHaveValue("a red apple\n");
+    expect(api.createBodies).toHaveLength(0);
+    await textarea.press("Control+Enter");
+    await expect.poll(() => api.createBodies.length).toBe(1);
+  } else {
+    await expect.poll(() => api.createBodies.length).toBe(1);
+  }
+});
+
+test("Shift+Enter never submits, on either shell", async ({ page }) => {
+  await enableImageGenerationFlag(page);
+  await mockAuthenticatedApi(page);
+  await mockUserUsage(page, { plan: "Pro" });
+  const api = await installImageGenerationApi(page);
+  await page.goto("/chat");
+
+  await openNewImageEntry(page);
+  const textarea = page.getByTestId("image-generation-prompt");
+  await textarea.fill("a red apple");
+  await textarea.press("Shift+Enter");
+  await expect(textarea).toHaveValue("a red apple\n");
+  expect(api.createBodies).toHaveLength(0);
+});
+
 test("the timeline polls the group, never one request per model", async ({ page }) => {
   // Policy §11: one poll per comparison group. Per-generation polling makes the
   // read cost of a comparison scale with the number of models compared -- and

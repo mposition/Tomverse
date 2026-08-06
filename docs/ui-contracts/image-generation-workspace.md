@@ -135,6 +135,37 @@ component:
 - Model selection sits **above** the textarea: the price the composer quotes is
   decided before the prompt is written.
 
+### Model disclosure threshold
+
+With **three or fewer** enabled image generation models the composer exposes
+every one of them as an inline choice. From **four**, only the selected models
+stay inline and the unselected ones move into the model picker
+(`shouldUseCompactImageModelPicker()`, `IMAGE_INLINE_MODEL_DISCOVERY_LIMIT`).
+
+In **either** mode the composer keeps, uncollapsed and outside any picker:
+
+- each submitted model's own label and its **exact** credit price;
+- the group total;
+- in compact mode, the fact that more models exist and how many.
+
+The switch is decided by the **number of enabled models**. Never by viewport,
+never by how many are selected, never by measuring wrapped lines. A
+viewport-driven switch gives one account a different information structure per
+device and re-shapes the composer mid-rotation; a selection-driven one changes
+structure while the user is still choosing; a measurement-driven one makes the
+same state render differently for reasons no test can pin. Desktop and mobile
+get the same structure.
+
+The threshold is three because at two and three a viewer discovers the second
+and third model without a click, and multi-model comparison is the product — a
+feature nobody is shown is a feature nobody uses. It is **not**
+`IMAGE_GROUP_MAX_MODELS`: that bounds how much provider work one request may
+start and is deployment-tunable, this bounds one row of UI. Neither may be
+derived from the other.
+
+A chip may show `shortName`; the accessible name always carries the full
+`name`. Abbreviating the label must not abbreviate the model's identity.
+
 ## Chat surfaces stay out
 
 An image conversation must never mount `ChatInput`, `ChatApp`, or the
@@ -263,6 +294,10 @@ Verified for **both** desktop and mobile projects:
 | 14 | multi-model group polling | one `/api/images/groups/*` request per tick, not one per model |
 | 15 | two providers in one group | both prices quoted, total is their sum, one POST carrying both ids |
 | 16 | option one selected model cannot price | submission disabled; re-enabled when the option changes back |
+| 17 | draft promoted to a conversation | model selection, quality and size survive; the prompt clears and does not come back |
+| 18 | switch to a different image conversation | timeline and poll loop do not follow |
+| 19 | Enter on desktop / mobile / mid-IME | submit / newline / never submit |
+| 20 | enabled model count 2, 3, 4 | inline, inline, compact — with every selected price still visible |
 
 ## Automated regression contract
 
@@ -303,6 +338,9 @@ rather than the behaviour.
 - [ ] Group state is still derived from the latest attempt per target
 - [ ] Polling is still one request per group, through the group endpoint
 - [ ] A settled card still keeps its asset URLs across polls
+- [ ] Composer settings survive draft promotion, and remount still isolates a real conversation switch
+- [ ] Enter behaviour comes from `getChatEnterKeyAction()` with the IME guard
+- [ ] Selected models' exact prices are inline in both disclosure modes
 - [ ] A retry still replaces its card in place
 - [ ] Prices are quoted before submit, per model and in total
 - [ ] `accent-image-*` tokens only; no reserved gradient
