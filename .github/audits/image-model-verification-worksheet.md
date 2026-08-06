@@ -394,3 +394,48 @@ minimumCredits
   그대로 기록하므로).
 - ~~provider adapter 구현~~ → Google·xAI 모두 구현 완료. 남은 것은
   **유료 호출**이며 이는 예산 승인 항목이다.
+
+
+---
+
+## G. 2026-08-06 첫 실측 시도 — 요청 형식 결함 발견 (과금 $0)
+
+`gemini-3.1-flash-lite-image`, `--limit=4096 --repeats=3`. **세 표본 모두 HTTP 400,
+이미지 생성 없음 — 과금되지 않았습니다.**
+
+```
+The value 'image/png' is not supported for 'response_format.mime_type'.
+Supported values: 'image/jpeg'.
+```
+
+### 이것이 알려준 사실
+
+`response_format.mime_type`에 Google Interactions API가 받는 값은 **`image/jpeg`
+뿐입니다.** 이 환경에서 읽을 수 없는 문서 대신 **API 자신이 답한 것**이므로,
+동작에 관한 한 문서보다 강한 근거입니다.
+
+`sources`에 URL을 추가하지는 않습니다 — 이건 문서 인용이 아니라 관측입니다.
+가격 검증(§12의 `verified`)과는 다른 층의 사실이며, 요청 형식에만 적용됩니다.
+
+### 드러난 결함
+
+adapter가 `model.outputMimeTypes[0]`을 요청 MIME으로 사용하고 있었습니다.
+그 필드는 **"무변형 저장이 허용되는 MIME 목록"**이지 "요청할 형식"이 아닙니다.
+Google profile의 배열이 `["image/png", "image/jpeg"]`라 **모든 Google 요청이
+PNG를 요청했고, 따라서 전부 실패했을 것입니다.**
+
+두 개념을 `ImageModelProfile.deliveryMimeType`으로 분리했습니다. 저장 허용목록은
+공급자가 낼 수 있는 것만큼 넓게 두고, 요청은 명시적으로 지정합니다. 응답의
+MIME을 그대로 기록하는 규칙은 그대로입니다 — 요청은 요청일 뿐 가정이 아닙니다.
+
+### 부수 사항
+
+실행 시 API key가 대화에 노출돼 **폐기·재발급이 필요합니다.** 스크립트의 redact
+패턴이 `AIza` 형식만 알고 있었고 이 키는 `AQ.` 형식이었습니다(실제 키 값으로도
+치환하므로 스크립트 출력에는 노출되지 않았으나, 패턴은 두 형식 모두 처리하도록
+보완했습니다).
+
+### 다음
+
+키 재발급 후 같은 3단계(`4096` / `2048` / `1024`)를 재실행합니다. 이번 시도는
+과금이 없었으므로 예산 소모는 여전히 $0입니다.

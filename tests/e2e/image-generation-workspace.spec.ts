@@ -797,6 +797,48 @@ test("the timeline polls the group, never one request per model", async ({ page 
   expect(api.reads.generations).toBe(0);
 });
 
+test("while a comparison runs the button is the progress, and it is disabled", async ({
+  page,
+}) => {
+  // A separate "already generating" sentence beside a button still reading
+  // "Generate" at full contrast said the same thing twice and left it
+  // ambiguous whether the button could be clicked.
+  await enableImageGenerationFlag(page);
+  await mockAuthenticatedApi(page);
+  await mockUserUsage(page, { plan: "Pro" });
+  // The mock state is not read here: this test asserts what the composer
+  // shows, and the request it makes is already covered elsewhere.
+  await installImageGenerationApi(page);
+  await page.goto("/chat");
+
+  await openNewImageEntry(page);
+  const submit = page.getByTestId("image-generation-submit");
+  await expect(submit).toHaveAttribute("data-generating", "false");
+
+  await page.getByTestId("image-generation-prompt").fill("a red apple");
+  await expect(submit).toBeEnabled();
+  await submit.click();
+
+  await expect(submit).toHaveAttribute("data-generating", "true");
+  await expect(submit).toBeDisabled();
+  // The sentence stays for assistive technology -- a spinner is no signal at
+  // all to a screen reader -- but must not occupy the row.
+  // Visually hidden means it paints no row -- sr-only clips rather than
+  // display:none, so it is still "visible" to Playwright and to the
+  // accessibility tree, which is exactly the point.
+  const busy = page.getByTestId("image-generation-busy-status");
+  await expect(busy).toHaveCount(1);
+  await expect(busy).toHaveAttribute("role", "status");
+  const box = await busy.boundingBox();
+  expect(box!.height, "the busy sentence still paints a row").toBeLessThanOrEqual(1);
+
+  // ...and it hands the row back once the comparison settles.
+  await expect(page.getByTestId("image-generation-result")).toBeVisible({
+    timeout: 15_000,
+  });
+  await expect(submit).toHaveAttribute("data-generating", "false");
+});
+
 test("a failed model retries in place while the group keeps its shape", async ({ page }) => {
   await enableImageGenerationFlag(page);
   await mockAuthenticatedApi(page);
