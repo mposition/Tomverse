@@ -260,3 +260,18 @@ run(
   ],
   "Running the imported snapshot lock, unlock and attempt-limit scenarios"
 );
+// Its own process for the same reason: it replaces next-auth to read a
+// conversation back as its signed-in owner.
+run(
+  [
+    "--conditions=react-server",
+    "--experimental-test-module-mocks",
+    "--no-warnings=ExperimentalWarning",
+    "--import",
+    "tsx",
+    "--test",
+    "--test-concurrency=1",
+    "tests/integration/memory-usage-disclosure-route.db.test.ts",
+  ],
+  "Running the §13.4 memory disclosure read scenarios"
+);

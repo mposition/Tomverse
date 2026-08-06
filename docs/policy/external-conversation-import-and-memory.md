@@ -948,6 +948,25 @@ N은 서버 계산이며 client 주장 count를 쓰지 않습니다. 0이면 오
 하지 않고, 상세 열람 시 인증·소유권·source lock을 재검증하며, 표시는 mobile
 composer·comparison rail contract를 침범하지 않습니다.
 
+구현: 표시는 `ChatMessageList`의 `memory-usage-disclosure`이고, 값의 출처는
+두 곳입니다 — 생성 중에는 `/api/chat`의 `X-Chat-Memory-Used` header, 다시
+열었을 때는 `GET /api/conversations/[conversationId]`가 돌려주는
+`Message.memoryUsedCount`입니다.
+
+- **두 경로는 같은 조건에서만 값을 보냅니다**(`> 0`). `null`은 주입 자체가
+  불가능했던 요청이고 `0`은 bundle은 있었지만 retrieval이 아무것도 고르지 않은
+  경우이며, §13.4는 둘 다 표시를 금지합니다. 둘 다 필드를 **빼서** 보냅니다 —
+  받은 숫자를 안 보여줘야 하는 renderer는 한 번의 수정으로 보여주게 됩니다.
+- **재조회가 없으면 이 계약은 절반만 참입니다.** header만 있던 동안 표시는
+  답변이 쓰이는 중에만 참이었고 다음 방문에는 조용히 사라졌습니다.
+- **읽는 쪽은 소유자 자신의 조회뿐입니다.** 같은 route가 소유권과 lock grant를
+  먼저 확인하며, share snapshot과 conversation export는 각자의 select를 쓰고
+  이 컬럼을 이름조차 대지 않습니다(§13.3). `memoryTokens`는 §22의 집계용이라
+  어디서도 이 경로에 실리지 않습니다.
+- 검증: `tests/integration/memory-usage-disclosure-route.db.test.ts`(읽기),
+  `tests/memoryReleaseContracts.test.mjs`(제3자 경로 배제),
+  `tests/e2e/chat-memory-context.spec.ts`(생성 중·재조회 양쪽 표시).
+
 ## 14. Assistant Profile (릴리스 C)
 
 - private only. public marketplace·공유·판매·Actions·OAuth·코드 실행·외부
