@@ -44,11 +44,19 @@ CREATE UNIQUE INDEX "TokenEstimateShadowSample_attemptId_key"
 
 -- The calibration query's own filter: eligible samples are provider-reported
 -- and completed.
-CREATE INDEX "TokenEstimateShadowSample_inputUsageSource_outcome_createdAt_idx"
+-- Both names below are truncated the way Prisma truncates an implicit index
+-- name, not the way Postgres truncates an over-long identifier. The untruncated
+-- forms are 64 and 69 bytes against the 63-byte limit, and the two truncations
+-- disagree: Postgres cuts the tail, losing "_idx", while Prisma shortens the
+-- last column so the suffix survives. Writing the long form here created
+-- "..._outcome_createdAt_id" in the database against the "..._createdA_idx"
+-- schema.prisma implies, which the migrate-diff drift check fails on -- with
+-- nothing wrong with the index itself.
+CREATE INDEX "TokenEstimateShadowSample_inputUsageSource_outcome_createdA_idx"
     ON "TokenEstimateShadowSample"("inputUsageSource", "outcome", "createdAt");
 
 -- Family and cohort are how the harness segments its report.
-CREATE INDEX "TokenEstimateShadowSample_tokenizerFamily_contentCohort_createdAt_idx"
+CREATE INDEX "TokenEstimateShadowSample_tokenizerFamily_contentCohort_cre_idx"
     ON "TokenEstimateShadowSample"("tokenizerFamily", "contentCohort", "createdAt");
 
 CREATE INDEX "TokenEstimateShadowSample_modelId_createdAt_idx"
