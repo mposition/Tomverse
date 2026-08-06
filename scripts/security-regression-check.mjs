@@ -576,7 +576,12 @@ const checks = [
     name: "The chat budget derives its reserved input from the active calibration",
     file: "lib/chatSecurity.ts",
     test: (source) =>
-      source.includes("toReservedInputTokens(estimatedInputTokens") &&
+      // `estimatedInput`, not `estimatedInputTokens`: the reservation is
+      // computed from the whole breakdown, because the calibration widens each
+      // character segment by its own margin. Passing the flattened total here
+      // would be the same skip this check exists to catch -- it would silently
+      // fall back to the largest margin for every request.
+      source.includes("toReservedInputTokens(estimatedInput,") &&
       source.includes("toolOverheadTokens: estimateToolInputTokenOverhead"),
   },
   {

@@ -124,6 +124,7 @@ import { estimatePromptTokens } from "@/lib/chatTokenEstimate";
 import { fitChatOutputToContextWindow } from "@/lib/chatContextWindow";
 import {
     ACTIVE_ESTIMATOR_VERSION,
+    createTokenEstimateAccumulator,
     getCalibration,
 } from "@/lib/chatTokenEstimate";
 import { createShadowAccumulator } from "@/lib/tokenEstimateShadow";
@@ -1012,9 +1013,22 @@ async function handleChatPost(
                   candidateVersion: SHADOW_CANDIDATE_ESTIMATOR_VERSION,
               })
             : null;
+        // The segment-level companion to `estimatedInputTokens`. The number is
+        // what the rest of this handler reads; the breakdown is what the
+        // reservation needs, because the calibration widens each character
+        // segment by its own margin and a bare total has thrown that mix away.
+        // Both are fed from this one alias so neither can drift from the other
+        // -- `tests/chatBudgetBreakdown.test.mjs` pins that they agree.
+        const inputEstimate = createTokenEstimateAccumulator();
         const estimateTextTokens = (text: string) => {
             shadowAccumulator?.add(text);
-            return Math.max(1, estimatePromptTokens(text));
+            const raw = estimatePromptTokens(text);
+            // The per-piece floor is a minimum, not a prediction: an empty
+            // message still costs the provider its role framing. It is counted
+            // as an opaque token so no tokenizer margin is applied to it.
+            if (raw > 0) inputEstimate.addText(text);
+            else inputEstimate.addTokens(1);
+            return Math.max(1, raw);
         };
 
         const providerContextQueues = new Map<string, ModelMessage[][]>();
@@ -1200,6 +1214,8 @@ async function handleChatPost(
             // two agree here by construction, and if they ever stop agreeing
             // the user should be billed the number they were quoted.
             estimatedInputTokens += verification.payload.memoryTokens;
+            // Quoted, not re-estimated -- so it enters as an opaque count.
+            inputEstimate.addTokens(verification.payload.memoryTokens);
         }
 
         // §9.1 places the memory block above the conversation and below the
@@ -1640,9 +1656,14 @@ async function handleChatPost(
             const text = [String(msg.content ?? ""), ...textAttachments]
                 .filter(Boolean)
                 .join("\n\n");
+            const nativeAttachmentTokens = estimateNativeAttachmentTokens(
+                fileParts.length
+            );
+            // Not text: a per-part allowance for what the provider will charge
+            // for the attachment itself.
+            inputEstimate.addTokens(nativeAttachmentTokens);
             estimatedInputTokens +=
-                estimateTextTokens(text) +
-                estimateNativeAttachmentTokens(fileParts.length);
+                estimateTextTokens(text) + nativeAttachmentTokens;
 
             formattedMessages.push({
                 role: "user",
@@ -1655,7 +1676,7 @@ async function handleChatPost(
         const budget = createChatBudget(
             access.kind,
             modelConfig,
-            estimatedInputTokens,
+            inputEstimate.breakdown(),
             {
                 webSearchSurchargeCredits: getWebSearchSurchargeCredits(
                     webSearchMode ?? "off",

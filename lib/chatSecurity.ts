@@ -40,6 +40,7 @@ import {
 import {
     estimateToolInputTokenOverhead,
     toReservedInputTokens,
+    type TokenEstimateBreakdown,
 } from "@/lib/chatTokenEstimate";
 import { resolveInputUsageSource } from "@/lib/tokenEstimateShadow";
 import { recordShadowSettlement } from "@/lib/tokenEstimateShadowRecorder";
@@ -368,7 +369,14 @@ export const getChatBudgetReservedCostMicroUsd = (budget: ChatBudget) =>
 export const createChatBudget = (
     kind: AccessKind,
     model: AiModel,
-    estimatedInputTokens: number,
+    /**
+     * The turn's raw input estimate. Prefer a breakdown, built with
+     * `createTokenEstimateAccumulator`: it carries the segment mix, and the
+     * reservation margins are per segment, so a bare total leaves
+     * `toReservedInputTokens` nothing to widen accurately and it has to fall
+     * back to the largest margin any segment carries.
+     */
+    estimatedInput: number | TokenEstimateBreakdown,
     options?: {
         webSearchSurchargeCredits?: number;
         /**
@@ -384,6 +392,15 @@ export const createChatBudget = (
         kind === "guest"
             ? positiveInteger(process.env.CHAT_GUEST_MAX_INPUT_TOKENS, 16_000)
             : positiveInteger(process.env.CHAT_USER_MAX_INPUT_TOKENS, 128_000);
+
+    // The limit is checked against the raw estimate, deliberately: it bounds
+    // the conversation the user sent, not the margin and tool overhead the
+    // reservation adds on top. Charging someone a rejection for overhead they
+    // did not write would move the limit without anyone changing it.
+    const estimatedInputTokens =
+        typeof estimatedInput === "number"
+            ? estimatedInput
+            : estimatedInput.rawTotal;
 
     if (
         !Number.isSafeInteger(estimatedInputTokens) ||
@@ -411,7 +428,7 @@ export const createChatBudget = (
     // caller did its own arithmetic.
     const reservedInputTokens = Math.min(
         maxInputTokens,
-        toReservedInputTokens(estimatedInputTokens, {
+        toReservedInputTokens(estimatedInput, {
             toolOverheadTokens: estimateToolInputTokenOverhead({
                 nativeSearchEnabled: options?.nativeSearchEnabled === true,
             }),
