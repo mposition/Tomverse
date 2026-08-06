@@ -666,7 +666,7 @@ gates:
       - universal-link and app-link hijacking test report on physical devices
 
   - id: PRIVACY-01
-    rationale: "Users and store reviewers must be able to complete account deletion inside the app without an external support workflow."
+    rationale: "Users and store reviewers must be able to complete account deletion inside the app without an external support workflow, and every table holding their data needs a traced and implemented deletion path rather than a decided one."
     status: pending
     approvedBy: []
     approvedAt: null
@@ -679,11 +679,22 @@ gates:
       - metric: in_app_account_deletion_e2e_pass_percent
         operator: eq
         value: 100
+      # A row whose deletion path nobody has traced is not evidence of safety.
+      - metric: data_domains_with_unverified_deletion_action_count
+        operator: eq
+        value: 0
+      # A decided-but-unbuilt anonymisation leaves every identifier in place.
+      # The registry records the intent precisely so it cannot be mistaken for
+      # the implementation.
+      - metric: data_domains_with_planned_deletion_action_count
+        operator: eq
+        value: 0
     evidence:
       - deletion E2E covering reauthentication, completion, and token revocation
+      - two-axis data-domain registry passing scripts/check-data-domain-registry.mjs, with every anonymise row carrying a re-identification review and every retain row a legal basis, period, owner and review date
 
   - id: PRIVACY-02
-    rationale: "A versioned data-domain registry prevents new product tables from silently escaping the shared account export."
+    rationale: "A versioned data-domain registry prevents new product tables from silently escaping the shared account export, and the export tells the user what it withheld instead of presenting a projection as the whole answer."
     status: pending
     approvedBy: []
     approvedAt: null
@@ -693,11 +704,41 @@ gates:
     blocking: true
     owner: security-privacy
     criteria:
-      - metric: registered_data_domains_in_unified_export_percent
+      # Not "every domain is exported" -- credentials and internal telemetry are
+      # deliberately withheld. What must be zero is domains nobody has decided
+      # about, because an undecided domain is a gap that reads like a decision.
+      - metric: data_domains_with_undecided_export_state_count
+        operator: eq
+        value: 0
+      # Every exported domain has a fetcher, every fetcher a declaration, every
+      # projection its withheld reason and every exclusion its reason.
+      - metric: account_export_wiring_problem_count
+        operator: eq
+        value: 0
+      # The sentinel test: a unique value planted in every withheld column must
+      # not appear anywhere in the serialised export. A source scan cannot see a
+      # helper, a custom serializer or a raw query; this can.
+      - metric: withheld_field_sentinels_present_in_export_count
+        operator: eq
+        value: 0
+      # Producing the file is half the problem. The download is step-up
+      # authenticated, the link is single-use and expires in five minutes, the
+      # response is uncacheable, nothing is written to disk, and every issue,
+      # download and refusal is audited.
+      - metric: account_export_download_security_e2e_pass_percent
         operator: eq
         value: 100
+      # A ticket redeemed twice under concurrency would mean a leaked link
+      # stays live, which is the whole property the ticket buys.
+      - metric: concurrent_export_ticket_double_redemption_count
+        operator: eq
+        value: 0
     evidence:
       - versioned data-domain registry and export coverage test
+      - tests/integration/account-data-export.db.test.ts planting a sentinel in every withheld column and asserting none survives JSON.stringify of the export
+      - export manifest recording schemaVersion, generatedAt, and the included, filtered, excluded, undecided and truncated domains with their reasons
+      - tests/integration/account-data-export-ticket.db.test.ts covering single-use redemption under concurrency, refusal of a link presented by another account, expiry, and the ninety-day audit retention
+      - tests/accountDataExportTicket.test.mjs pinning the keyed token hash, the no-store and no-referrer download headers, and the single refusal message shared by every refusal reason
 
   - id: STORE-01
     rationale: "A consumption-only app still needs a complete purchase-free Free-tier experience for new users and store reviewers."
