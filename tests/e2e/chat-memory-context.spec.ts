@@ -27,8 +27,16 @@ const [MODEL_A, MODEL_B, MODEL_C] = THREE_MODELS;
 
 const ANSWER = "The answer that used memories.";
 const RETRIED_ANSWER = "The answer after the context was prepared again.";
-/** Only reachable if a comparison panel wrongly retried by itself. */
-const PANEL_A_RETRY = "Panel A retried on its own.";
+/** Only reachable through a retry: the first attempt is always refused. */
+const PANEL_A_RECOVERED = "Panel A recovered answer.";
+
+const STALE = {
+  kind: "error" as const,
+  status: 409,
+  code: "CHAT_CONTEXT_BUNDLE_STALE",
+  message: "QA fixture: the context changed.",
+  details: { requiresPreflight: true },
+};
 
 const panel = (page: Page, index: number) =>
   page.getByTestId("chat-message-list").nth(index);
@@ -166,7 +174,7 @@ test.describe("chat memory context", () => {
         [MODEL_A]: [
           stale,
           stale,
-          { kind: "success", chunks: [PANEL_A_RETRY], intervalMs: 5 },
+          { kind: "success", chunks: [PANEL_A_RECOVERED], intervalMs: 5 },
         ],
       },
     });
@@ -176,14 +184,14 @@ test.describe("chat memory context", () => {
     await expect(
       panel(page, 0).getByRole("button", { name: "Retry", exact: true })
     ).toBeVisible();
-    await expect(panel(page, 0)).not.toContainText(PANEL_A_RETRY);
+    await expect(panel(page, 0)).not.toContainText(PANEL_A_RECOVERED);
     // The user is told what happened in their own language, and what fixes
     // it. The server's English sentence never reaches the panel.
     await expect(panel(page, 0)).toContainText("account memory changed");
     await expect(panel(page, 0)).not.toContainText("QA fixture");
   });
 
-  test("one comparison panel never re-prepares on its own @ui-risk", async ({
+  test("a stale comparison re-prepares once, as a set @ui-risk", async ({
     page,
   }) => {
     const preparation = await mockContextPreparation(page);
@@ -192,36 +200,37 @@ test.describe("chat memory context", () => {
       lang: "en",
       viewport: DESKTOP_VIEWPORT,
       modelStub: {
+        // Every panel is refused, which is what actually happens: they present
+        // one bundle against one server state, so they get one verdict. Each
+        // then answers from its second attempt.
         [MODEL_A]: [
-          {
-            kind: "error",
-            status: 409,
-            code: "CHAT_CONTEXT_BUNDLE_STALE",
-            message: "QA fixture: the context changed.",
-            details: { requiresPreflight: true },
-          },
-          { kind: "success", chunks: [PANEL_A_RETRY], intervalMs: 5 },
+          STALE,
+          { kind: "success", chunks: [PANEL_A_RECOVERED], intervalMs: 5 },
         ],
-        [MODEL_B]: { kind: "success", chunks: ["Panel B answer."], intervalMs: 5 },
-        [MODEL_C]: { kind: "success", chunks: ["Panel C answer."], intervalMs: 5 },
+        [MODEL_B]: [
+          STALE,
+          { kind: "success", chunks: ["Panel B answer."], intervalMs: 5 },
+        ],
+        [MODEL_C]: [
+          STALE,
+          { kind: "success", chunks: ["Panel C answer."], intervalMs: 5 },
+        ],
       },
     });
     await page.setViewportSize(DESKTOP_VIEWPORT);
     await submitComposer(page, "Compare three models.", DESKTOP_VIEWPORT.width);
 
-    // The panels share one bundle lineage so that they see one snapshot.
-    // Re-preparing this panel alone would put it on a different context from
-    // its siblings, which is the thing sharing the lineage exists to prevent.
+    // The run recovers, and it recovers together: every panel answers, and
+    // none of them is left showing the refusal.
+    await expect(panel(page, 0)).toContainText(PANEL_A_RECOVERED);
     await expect(panel(page, 1)).toContainText("Panel B answer.");
     await expect(panel(page, 2)).toContainText("Panel C answer.");
-    // The refused panel never answers: its second attempt is only reachable
-    // through a retry it must not take.
-    await expect(panel(page, 0)).not.toContainText(PANEL_A_RETRY);
-    await expect(panel(page, 0)).toContainText("account memory changed");
-    // And it never re-prepares. A comparison's bundle comes from the
-    // aggregate preflight, so this endpoint should not be reached at all --
-    // not on the send, and not on the refusal. Any call here would be one
-    // panel moving to a snapshot its siblings are not on.
-    expect(preparation.calls).toBe(0);
+    await expect(page.getByText("account memory changed")).toHaveCount(0);
+
+    // Once, for the whole set. Three preparations would put the three panels
+    // on three snapshots -- the per-panel retry §10 forbids, wearing the
+    // recovery's clothes. The send itself takes its bundle from the aggregate
+    // preflight, so this count is the re-preparation and nothing else.
+    expect(preparation.calls).toBe(1);
   });
 });

@@ -9,6 +9,15 @@ export type WebSearchCitation = {
   startIndex?: number;
   endIndex?: number;
   sourceProvider?: string;
+  /**
+   * The number this source has in the answer text -- the "4" of a "[4]" the
+   * model wrote. Set only by providers that publish an explicit citation
+   * order (Perplexity does; OpenAI/Anthropic/Google inline annotations do
+   * not, and stay undefined). Explicit rather than derived from array
+   * position, because sanitizing drops entries and the survivors must keep
+   * the numbers the answer already used.
+   */
+  referenceNumber?: number;
 };
 
 const isSafeHttpUrl = (value: unknown): value is string => {
@@ -21,11 +30,20 @@ const isSafeHttpUrl = (value: unknown): value is string => {
   }
 };
 
+const safeReferenceNumber = (value: unknown) =>
+  typeof value === "number" && Number.isInteger(value) && value > 0
+    ? value
+    : undefined;
+
 // Drops unsafe schemes, de-duplicates by exact URL (first occurrence wins,
 // merging any start/end index range so multiple citations of the same
 // source don't become multiple list entries), and never touches title/url
 // text beyond that -- rendering as raw HTML is the caller's responsibility
 // to avoid, not this function's.
+//
+// De-duplication keeps the *first* reference number a URL was given, which
+// is what the answer text points at: if a provider cites the same URL as
+// both [2] and [6], the list shows it once, as [2].
 export const sanitizeWebSearchCitations = (
   citations: Array<Partial<WebSearchCitation> & { url?: unknown }>
 ): WebSearchCitation[] => {
@@ -41,11 +59,15 @@ export const sanitizeWebSearchCitations = (
         endIndex: typeof raw.endIndex === "number" ? raw.endIndex : undefined,
         sourceProvider:
           typeof raw.sourceProvider === "string" ? raw.sourceProvider : undefined,
+        referenceNumber: safeReferenceNumber(raw.referenceNumber),
       });
       continue;
     }
     if (!existing.title && typeof raw.title === "string") {
       existing.title = raw.title;
+    }
+    if (existing.referenceNumber === undefined) {
+      existing.referenceNumber = safeReferenceNumber(raw.referenceNumber);
     }
     if (
       typeof raw.startIndex === "number" &&

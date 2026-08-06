@@ -1,0 +1,19 @@
+# Review routing for protected areas. Enforcement requires the
+# "Require review from Code Owners" branch-protection setting on develop/main;
+# until that is enabled this file only suggests reviewers.
+#
+# TODO: add engineer A/B/C GitHub handles once confirmed, per the ownership
+# matrix in docs/policy/tomverse-chat-delivery-plan.md §11:
+#   - auth server + mobile token boundary (A + C, two-person review)
+#   - packages/ and shared chat UI (B)
+#   - apps/mobile/ and store submission (C, backup B)
+
+# Release-gate registry: thresholds change only through YAML diff review
+# (governance.thresholdChangeRequires).
+/docs/release-gates/ @mposition
+/scripts/verify-tomverse-chat-release-gates.mjs @mposition
+
+# Tomverse Chat binding policy and operations documents.
+/docs/policy/tomverse-chat-routing.md @mposition
+/docs/policy/tomverse-chat-delivery-plan.md @mposition
+/docs/ops/tomverse-chat-store-review.md @mposition

@@ -57,32 +57,33 @@ model User {
   sessionsInvalidatedAt         DateTime?
   settings                      UserSettings?
 
-  accounts                Account[]
-  sessions                Session[]
-  projects                ConversationProject[]
-  refundRequests          RefundRequest[]
-  promotionRedemptions    BillingPromotionRedemption[]
-  billingTransactions     BillingTransaction[]
-  creditPurchases         CreditPurchase[]
-  creditLots              CreditLot[]
-  creditLedgerEntries     CreditLedgerEntry[]
-  creditDebtEntries       CreditDebtEntry[]
-  chatCreditReservations  ChatCreditReservation[]
-  imageGenerations        ImageGeneration[]
-  imageGenerationGroups   ImageGenerationGroup[]
-  imageCreditReservations ImageCreditReservation[]
-  adminAuditLogs          AdminAuditLog[]
-  adminNotes              AdminNote[]
-  modelOverrides          ModelOverride[]
-  conversations           Conversation[]
-  comparisonReviews       ComparisonReview[]
-  productAnalyticsEvents  ProductAnalyticsEvent[]
-  privacyRequests         PrivacyRequest[]
-  planChangeRequests      PlanChangeRequest[]
-  externalImports         ExternalImport[]
-  memoryItems             MemoryItem[]
-  memoryExtractionRuns    MemoryExtractionRun[]
-  memorySettings          UserMemorySettings?
+  accounts                           Account[]
+  sessions                           Session[]
+  projects                           ConversationProject[]
+  refundRequests                     RefundRequest[]
+  promotionRedemptions               BillingPromotionRedemption[]
+  billingTransactions                BillingTransaction[]
+  creditPurchases                    CreditPurchase[]
+  creditLots                         CreditLot[]
+  creditLedgerEntries                CreditLedgerEntry[]
+  creditDebtEntries                  CreditDebtEntry[]
+  chatCreditReservations             ChatCreditReservation[]
+  imageGenerations                   ImageGeneration[]
+  imageGenerationGroups              ImageGenerationGroup[]
+  imageCreditReservations            ImageCreditReservation[]
+  memoryExtractionCreditReservations MemoryExtractionCreditReservation[]
+  adminAuditLogs                     AdminAuditLog[]
+  adminNotes                         AdminNote[]
+  modelOverrides                     ModelOverride[]
+  conversations                      Conversation[]
+  comparisonReviews                  ComparisonReview[]
+  productAnalyticsEvents             ProductAnalyticsEvent[]
+  privacyRequests                    PrivacyRequest[]
+  planChangeRequests                 PlanChangeRequest[]
+  externalImports                    ExternalImport[]
+  memoryItems                        MemoryItem[]
+  memoryExtractionRuns               MemoryExtractionRun[]
+  memorySettings                     UserMemorySettings?
 
   @@index([plan, id])
   @@index([createdAt])
@@ -786,8 +787,8 @@ model ImageGeneration {
   // resolution tier its own way, and Google's 1K landscape is not 1536x1024.
   // Nullable and never backfilled -- rows written before this existed are
   // history, and a dimension nobody measured is absent rather than inferred.
-  outputWidth    Int?
-  outputHeight   Int?
+  outputWidth  Int?
+  outputHeight Int?
 
   // The parameters this attempt actually sent to the provider (policy §12.1).
   // Reconstructing them from `size`/`quality` stopped being possible once each
@@ -798,9 +799,9 @@ model ImageGeneration {
   // duplicating user content into an audit blob would create a second place
   // every deletion path has to find.
   providerRequestParams Json?
-  backgroundMode String @default("opaque")
-  outputFormat   String @default("png")
-  moderationMode String @default("auto")
+  backgroundMode        String @default("opaque")
+  outputFormat          String @default("png")
+  moderationMode        String @default("auto")
 
   // pending -> processing -> settling -> succeeded | failed. `settling` is
   // the exactly-once claim: the worker or the reconciliation sweep moves a
@@ -1903,6 +1904,12 @@ model ExternalConversation {
   finalized  Boolean  @default(false)
   importedAt DateTime @default(now())
 
+  /// Snapshot lock (§7, release B5). NULL means unlocked; otherwise the same
+  /// scrypt hash format `Conversation.password` uses, written and verified by
+  /// the same `lib/conversationLock.ts` helpers. Locking a snapshot suspends
+  /// the memories it is the last reachable evidence for (§7.1).
+  password String?
+
   messages ExternalMessage[]
 
   @@unique([userId, conversationDigest])
@@ -1992,6 +1999,17 @@ model MemoryItem {
   extractionModelId String?
   promptVersion     String?
 
+  /// Which extraction chunk produced this item (§11). Provenance, and the
+  /// idempotency key the persistence step needs: a chunk that is retried
+  /// after its worker died must replace the rows of its previous attempt
+  /// rather than add a second copy of every candidate. Null for
+  /// user-authored items and for anything predating the write path.
+  ///
+  /// Deliberately not a relation: a run is operational state that may be
+  /// pruned, and an approved memory must outlive the run that proposed it.
+  extractionRunId      String?
+  extractionChunkIndex Int?
+
   createdAt  DateTime  @default(now())
   updatedAt  DateTime  @updatedAt
   approvedAt DateTime?
@@ -2000,6 +2018,9 @@ model MemoryItem {
 
   @@index([userId, status])
   @@index([userId, conflictKey])
+  /// The idempotent replace in the extraction persistence step reads exactly
+  /// this pair.
+  @@index([extractionRunId, extractionChunkIndex])
   /// §9 retrieval v1 — lexical GIN over the term array. Declared here so the
   /// db-integration drift check sees schema and migration agree; the mapped
   /// name matches the migration's hand-written CREATE INDEX.
@@ -2062,7 +2083,7 @@ model MemoryExtractionRun {
   /// Selected ExternalConversation IDs (owner-verified at run creation).
   sourceSelection Json
 
-  chunkTotal Int
+  chunkTotal     Int
   /// Derived from the chunk rows on every write — never incremented on its
   /// own, so it cannot drift from the chunks it summarizes.
   chunkCompleted Int       @default(0)
@@ -2075,10 +2096,10 @@ model MemoryExtractionRun {
   /// and the maintenance dispatcher took over — therefore cannot heartbeat,
   /// finish a chunk or settle after waking up late. A lease deadline alone
   /// cannot do this: two claimants can both pass a deadline check.
-  leaseGeneration Int @default(0)
+  leaseGeneration Int     @default(0)
   /// Opaque worker identity, for observability only. Never a security check:
   /// exclusivity comes from leaseGeneration, not from this string.
-  leaseOwner String?
+  leaseOwner      String?
 
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
@@ -2090,6 +2111,71 @@ model MemoryExtractionRun {
   /// Orphan reconciliation (§11): expired leases are found by status +
   /// lease deadline, mirroring the chat lease sweep.
   @@index([status, leaseExpiresAt])
+}
+
+/// The credit reservation for one extraction run (§11).
+///
+/// One row per run, not per chunk, because one run is what the user confirmed:
+/// §11 shows the chunk plan and its credit total before the run starts and
+/// refuses a stale confirmation. Reserving per chunk instead would let a run
+/// the user agreed to pay N credits for stop halfway because the balance moved
+/// underneath it, which is a worse promise than the one they were shown.
+///
+/// Provider budget is re-checked per chunk regardless. That is the operational
+/// guardrail layer and it is deliberately not this: entitlement is reserved
+/// once, up front, from what the user actually holds.
+///
+/// Plain strings, never foreign keys, for everything it describes: this
+/// financial record has to survive deletion of the run, the model catalogue
+/// entry and the conversations the run read.
+model MemoryExtractionCreditReservation {
+  id     String  @id // caller-supplied: memory-extraction-credit-reservation:{runId}:v1
+  userId String?
+  runId  String  @unique
+
+  /// reserved | settling | settled -- allowlist CHECK in the migration. The
+  /// intermediate state is what makes settlement idempotent under a retry: a
+  /// second settle finds no `reserved` row to claim and does nothing.
+  status  String  @default("reserved")
+  /// completed | failed | cancelled
+  outcome String?
+
+  provider          String
+  extractionModelId String
+  promptVersion     String
+
+  chunkTotal    Int
+  /// Chunks that actually reached `completed`. What the run is charged for:
+  /// a run that failed or was cancelled after two of five chunks keeps two.
+  chunksCharged Int @default(0)
+
+  reservedCredits           Int
+  planReservedCredits       Int
+  addOnReservedCredits      Int
+  reservedCostMicroUsd      BigInt
+  settledCredits            Int    @default(0)
+  settledCostMicroUsd       BigInt @default(0)
+  settledFundedCostMicroUsd BigInt @default(0)
+
+  /// Frozen at reservation: a later price change must never re-settle an
+  /// existing reservation at the new rate.
+  pricingVersion     String
+  costSource         String
+  pricingSnapshot    Json
+  /// AddOnCreditReservationEntry[] -- the per-lot credits and funded cost
+  /// reserved by reserveAddOnCredits, kept so a sweep after a crash can refund
+  /// lot by lot without the in-memory entries.
+  reservationPayload Json
+
+  refundedAt DateTime?
+  settledAt  DateTime?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([status, createdAt])
+  @@index([userId, createdAt])
 }
 
 /// One extraction model call (§11). Durable per-chunk state, created with the
@@ -2128,8 +2214,56 @@ model MemoryExtractionChunk {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  providerCalls MemoryExtractionProviderCall[]
+
   @@unique([runId, chunkIndex])
   @@index([runId, status])
+}
+
+/// Operational provider-cost accounting for one extraction attempt (§3, §11).
+///
+/// A DIFFERENT layer from the run's user-credit reservation. User credits are
+/// reserved per run and settled at a terminal state, charging only completed
+/// chunks — a failed chunk is refunded, because the user did not get it. But a
+/// request that was actually issued may have been billed by the provider, and
+/// erasing that from the provider budget would let a run that keeps failing
+/// consume an unbounded share of a budget that reads as untouched.
+model MemoryExtractionProviderCall {
+  id      String                @id @default(cuid())
+  chunkId String
+  chunk   MemoryExtractionChunk @relation(fields: [chunkId], references: [id], onDelete: Cascade)
+
+  /// With the chunk's (runId, chunkIndex), this is the §11 attempt identity.
+  attemptCount Int
+
+  provider String
+  modelId  String
+
+  /// Written BEFORE the request leaves, so a crash mid-flight is recoverable
+  /// as "may have cost something" rather than as "nothing happened".
+  callIssued           Boolean @default(false)
+  /// Consumed from the provider and extraction sub-budget buckets at
+  /// admission. Released in full only when no call went out.
+  reservedCostMicroUsd BigInt  @default(0)
+  /// What the call actually cost. NULL while unknown, which is why the
+  /// reservation stands as the conservative charge until then.
+  settledCostMicroUsd  BigInt?
+  /// False when the provider reported no usage: the reservation stands rather
+  /// than the call being recorded as free.
+  usageConfirmed       Boolean @default(false)
+  inputTokens          Int?
+  outputTokens         Int?
+  /// Provider-side response id, for reconciling a charge we cannot confirm.
+  responseId           String?
+  failureCode          String?
+
+  startedAt DateTime?
+  settledAt DateTime?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  @@unique([chunkId, attemptCount])
+  @@index([callIssued, settledAt])
 }
 
 /// Account-level memory controls (§8.1). The master toggle is not an

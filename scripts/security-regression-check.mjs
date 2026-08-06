@@ -524,6 +524,19 @@ const checks = [
     },
   },
   {
+    // A run whose worker died stays `running` with a lease nobody holds, and
+    // the claim is fenced on `leaseGeneration` -- so the lease does not lapse
+    // into availability on its own. Only this sweep makes the run claimable
+    // again, and it lived unreferenced outside the tests until it was wired
+    // here (import/memory policy §11, §11.1).
+    name: "Memory extraction leases are reclaimed and re-driven by maintenance",
+    file: "lib/maintenance.ts",
+    test: (source) =>
+      source.includes("dispatchPendingMemoryExtractionRuns") &&
+      source.includes("memoryExtractionRuns") &&
+      source.includes("memoryExtractionDispatched"),
+  },
+  {
     name: "Provider error events expire through maintenance cleanup",
     file: "lib/maintenance.ts",
     test: (source) =>

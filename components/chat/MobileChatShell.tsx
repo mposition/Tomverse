@@ -153,6 +153,16 @@ type MobileChatShellProps = {
   onGuestSignInPrompt: () => void;
   onResponseComplete: (promptId: string | null, modelId: string, responseText: string) => void;
   onFollowupSent: (modelId: string) => void;
+  /**
+   * Re-prepares the §10 context for a whole run after a panel's bundle was
+   * refused for drift. Passed straight through: the shell knows which models
+   * are in the run, and the coordination that keeps them on one snapshot
+   * belongs to whoever owns the send.
+   */
+  onContextBundleStale?: (input: {
+    promptId: string | null;
+    modelId: string;
+  }) => Promise<string | null>;
 };
 
 const mobileModelTabId = (modelId: string) => `mobile-model-tab-${modelId}`;
@@ -211,6 +221,7 @@ export function MobileChatShell({
   onGuestSignInPrompt,
   onResponseComplete,
   onFollowupSent,
+  onContextBundleStale,
 }: MobileChatShellProps) {
   const { models: AVAILABLE_MODELS } = useModelCatalog();
   const { t, lang } = useLanguage();
@@ -1099,6 +1110,7 @@ export function MobileChatShell({
                   onStatusChange={handleModelStatusChange}
                   onResponseComplete={onResponseComplete}
                   onFollowupSent={onFollowupSent}
+                  onContextBundleStale={onContextBundleStale}
                   onRequestCloseModel={() => onToggleModel(modelId)}
                   hasMultipleActiveModels={selectedModels.length > 1}
                   stopSignal={stopSignal}

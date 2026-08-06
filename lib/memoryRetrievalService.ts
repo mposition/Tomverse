@@ -110,6 +110,40 @@ const provenanceFilter = (
     ],
 });
 
+/**
+ * The §7.1 source-lock exclusion, also expressed in the query.
+ *
+ * `setExternalConversationLock()` already moves these rows out of `active`, so
+ * in a consistent database this filter matches everything and costs a join.
+ * It is here for the window where the database is *not* consistent — evidence
+ * added to a memory after its source was locked, a reconciliation sweep that
+ * has not run yet — because the two halves fail in opposite directions: the
+ * status transition is what the user sees on their review screen, and this is
+ * what decides whether a locked conversation's content can shape an answer.
+ * Only one of those is worth being lazy about.
+ *
+ * A memory with no evidence rows at all is deliberately kept: that is the
+ * §13.1 source-delete situation, which has its own status, and a lock
+ * elsewhere in the account must not claim it.
+ */
+const reachableEvidenceFilter = {
+    OR: [
+        { evidences: { none: {} } },
+        {
+            evidences: {
+                some: {
+                    OR: [
+                        // Manual grounds the user typed, and (later, §8.5)
+                        // Tomverse messages: no source lock hides either.
+                        { externalMessageId: null },
+                        { externalMessage: { conversation: { password: null } } },
+                    ],
+                },
+            },
+        },
+    ],
+};
+
 export async function retrieveMemoryContext(input: {
     userId: string;
     /** The current request text. */
@@ -161,6 +195,7 @@ export async function retrieveMemoryContext(input: {
                 ...(input.approvedPairs
                     ? [provenanceFilter(input.approvedPairs)]
                     : []),
+                reachableEvidenceFilter,
             ],
         },
         orderBy: [{ pinned: "desc" }, { importance: "desc" }, { id: "asc" }],
@@ -183,7 +218,14 @@ export async function retrieveMemoryContext(input: {
             // from the same conversation are one source.
             evidences: {
                 select: {
-                    externalMessage: { select: { externalConversationId: true } },
+                    externalMessage: {
+                        select: {
+                            externalConversationId: true,
+                            // Read so a locked snapshot can be dropped from the
+                            // source set below.
+                            conversation: { select: { password: true } },
+                        },
+                    },
                 },
             },
         },
@@ -203,12 +245,18 @@ export async function retrieveMemoryContext(input: {
         // extraction.
         effectiveAt: row.approvedAt ?? row.createdAt,
         expiresAt: row.expiresAt,
+        // A locked snapshot is not a source for this purpose: the cap exists so
+        // one conversation cannot supply the whole context, and a conversation
+        // that contributes nothing should not spend a slot for the memory that
+        // survived it on other evidence.
         sourceIds: [
             ...new Set(
                 row.evidences
-                    .map(
-                        (evidence) =>
-                            evidence.externalMessage?.externalConversationId ?? null
+                    .map((evidence) =>
+                        evidence.externalMessage &&
+                        evidence.externalMessage.conversation.password == null
+                            ? evidence.externalMessage.externalConversationId
+                            : null
                     )
                     .filter((id): id is string => Boolean(id))
             ),

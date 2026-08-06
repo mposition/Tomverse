@@ -33,8 +33,14 @@ import {
     getModelUsageCredits,
     type ModelTier,
 } from "@/lib/models";
+import {
+    reserveExtractionRunCredits,
+    settleExtractionRunCredits,
+} from "@/lib/memoryExtractionCredits";
+import { getBillingPlanByTier } from "@/lib/billingConfig";
 import { prisma } from "@/lib/prisma";
 import { getProviderCostBudget } from "@/lib/providerCostBudget";
+import { recordMemoryCounter } from "@/lib/memoryMetrics";
 
 /**
  * Extraction run lifecycle (Release B, slice B2): creation with the §11
@@ -264,6 +270,12 @@ async function assertExtractionBudget(
         },
     });
     if (!decision.allowed) {
+        // The only record that this happened. A refusal creates no run and
+        // stops no existing row, so without the counter §22's sub-budget
+        // exhaustion metric has nothing to read — which is exactly why it was
+        // listed as unavailable. Fire-and-forget: a metric must never turn a
+        // refusal into a second failure.
+        void recordMemoryCounter("extraction_subbudget_exhausted", 1, now);
         throw new ApiSecurityError(
             503,
             "MEMORY_EXTRACTION_PROVIDER_BUDGET_EXHAUSTED",
@@ -276,6 +288,24 @@ async function assertExtractionBudget(
             )
         );
     }
+}
+
+/**
+ * The monthly and daily plan credit limits the reservation allocates against.
+ *
+ * A Guest never reaches here -- §11 requires an approved pair on the account's
+ * plan and guests have no account -- but the type allows one, so it resolves
+ * to no plan credits rather than to a plan's limits by accident.
+ */
+async function extractionPlanLimits(plan: ModelTier | "Guest") {
+    if (plan === "Guest") {
+        return { monthlyMessageLimit: 0, dailyMessageLimit: 0 };
+    }
+    const billingPlan = await getBillingPlanByTier(plan);
+    return {
+        monthlyMessageLimit: billingPlan?.monthlyMessageLimit ?? 0,
+        dailyMessageLimit: billingPlan?.dailyMessageLimit ?? 0,
+    };
 }
 
 export async function createMemoryExtractionRun(input: {
@@ -308,6 +338,10 @@ export async function createMemoryExtractionRun(input: {
         now,
         input.environment ?? process.env
     );
+
+    // Read outside the transaction: it is configuration, and holding the run
+    // lock while querying it would widen the lock for no benefit.
+    const planLimits = await extractionPlanLimits(input.plan);
 
     const sourceSelection = [...new Set(input.selectedConversationIds)].sort();
     return prisma.$transaction(async (tx) => {
@@ -347,6 +381,42 @@ export async function createMemoryExtractionRun(input: {
                 chunkTotal: estimate.chunkCount,
                 pricingVersion: `${estimate.basis}:${pricing.modelId}`,
             },
+        });
+        // Entitlement, in the same transaction as the run and its chunks: a
+        // run can never exist without the reservation that paid for it, and a
+        // refused reservation leaves no run, no chunks and no charge. The
+        // provider budget checked above is the separate operational layer and
+        // stays a per-chunk re-check in the slice driver (AGENTS.md).
+        await reserveExtractionRunCredits({
+            tx,
+            userId: input.userId,
+            runId: run.id,
+            plan: planLimits,
+            credits: estimate.estimatedCredits,
+            costMicroUsd: estimate.estimatedCostMicroUsd,
+            chunkTotal: estimate.chunkCount,
+            provider: pricing.provider,
+            extractionModelId: input.extractionModelId,
+            promptVersion: input.promptVersion,
+            pricingVersion: `${estimate.basis}:${pricing.modelId}`,
+            // The profile is read straight from MODEL_PRICING here, not
+            // resolved against a registry row, so the source is the code
+            // profile by construction.
+            costSource: pricing.priceSource,
+            // Frozen here on purpose: a price change afterwards must not
+            // re-settle a run the user already confirmed at these numbers.
+            pricingSnapshot: {
+                basis: estimate.basis,
+                modelId: pricing.modelId,
+                provider: pricing.provider,
+                inputUsdPerMillionTokens: pricing.tiers[0].inputUsdPerMillionTokens,
+                outputUsdPerMillionTokens: pricing.tiers[0].outputUsdPerMillionTokens,
+                estimatedInputTokens: estimate.estimatedInputTokens,
+                estimatedOutputTokens: estimate.estimatedOutputTokens,
+                estimatedCostMicroUsd: estimate.estimatedCostMicroUsd,
+                chunkCount: estimate.chunkCount,
+            },
+            now,
         });
         // The chunk rows are the run's durable work list, written in the same
         // transaction so a run can never exist without one. Storing each
@@ -667,6 +737,19 @@ export async function completeExtractionChunk(
                     : { leaseExpiresAt: leaseDeadline(now) }),
             },
         });
+        if (terminal) {
+            // Settled in the same transaction that made the run terminal, so
+            // a run can never come to rest with credits still reserved
+            // against it. `completed` is what the account is charged for: a
+            // run that failed after two of five chunks keeps two, because
+            // those two really did call the provider.
+            await settleExtractionRunCredits(tx, {
+                runId: lease.runId,
+                outcome: terminal,
+                chunksCharged: completed,
+                now,
+            });
+        }
         return {
             applied: true,
             runStatus: terminal ?? "running",
@@ -686,9 +769,24 @@ export async function cancelMemoryExtractionRun(userId: string, runId: string) {
             "The run already finished."
         );
     }
-    await prisma.memoryExtractionRun.updateMany({
-        where: { id: run.id, status: { in: [...ACTIVE_RUN_STATUSES] } },
-        data: { status: "cancelled", leaseExpiresAt: null },
+    await prisma.$transaction(async (tx) => {
+        const cancelled = await tx.memoryExtractionRun.updateMany({
+            where: { id: run.id, status: { in: [...ACTIVE_RUN_STATUSES] } },
+            data: { status: "cancelled", leaseExpiresAt: null },
+        });
+        // Only the transition that actually cancelled settles. A second cancel
+        // -- a double-clicked button, a retried request -- changes no row here
+        // and must not refund a second time; `settleExtractionRunCredits` is
+        // idempotent on its own, and this keeps the two agreeing.
+        if (cancelled.count === 0) return;
+        const completed = await tx.memoryExtractionChunk.count({
+            where: { runId: run.id, status: "completed" },
+        });
+        await settleExtractionRunCredits(tx, {
+            runId: run.id,
+            outcome: "cancelled",
+            chunksCharged: completed,
+        });
     });
     return { outcome: "cancelled" as const };
 }
@@ -696,6 +794,16 @@ export async function cancelMemoryExtractionRun(userId: string, runId: string) {
 export type ExtractionChunkHandler = (input: {
     lease: MemoryExtractionLease;
     chunk: ClaimedExtractionChunk;
+    /**
+     * Cancelled when the chunk's wall-clock budget runs out.
+     *
+     * Best-effort, and deliberately not the accounting mechanism. A handler
+     * that ignores it cannot hang the slice — the race below still resolves —
+     * and a provider request that already reached the network may be billed
+     * whether or not the abort landed. What this saves is the work that had
+     * not started yet; what records the rest is the provider-call ledger.
+     */
+    signal: AbortSignal;
 }) => Promise<{ outcome: "completed" } | { outcome: "failed"; code: string }>;
 
 export type ExtractionSliceResult = {
@@ -871,20 +979,52 @@ export async function driveMemoryExtractionRunSlice(input: {
             return stop("paused", "no_pending_chunk");
         }
 
+        // One controller per chunk. Cancelling is best-effort: the bounded
+        // race below is what actually stops the slice waiting, and the abort
+        // is what stops work that has not started yet from starting.
+        const controller = new AbortController();
+        let timedOut = false;
         const result = await withTimeout(
-            input.handler({ lease, chunk }).catch((error) => {
-                console.error("memory extraction chunk handler failed", error);
-                return { outcome: "failed" as const, code: "handler_error" };
-            }),
+            input
+                .handler({ lease, chunk, signal: controller.signal })
+                .catch((error) => {
+                    if (controller.signal.aborted) {
+                        // An abort is not a handler bug. Classifying it as one
+                        // would hide every timeout inside `handler_error` and
+                        // make a slow provider look like broken code.
+                        return {
+                            outcome: "failed" as const,
+                            code: "chunk_timeout",
+                        };
+                    }
+                    console.error(
+                        "memory extraction chunk handler failed",
+                        error
+                    );
+                    return { outcome: "failed" as const, code: "handler_error" };
+                }),
             chunkTimeoutMs,
-            () => ({ outcome: "failed" as const, code: "chunk_timeout" })
+            () => {
+                timedOut = true;
+                // Abort FIRST, then decide. A handler that returns after this
+                // is describing work this slice has already written off.
+                controller.abort(new Error("chunk_timeout"));
+                return { outcome: "failed" as const, code: "chunk_timeout" };
+            }
         );
         chunksProcessed += 1;
+
+        // A late result must never reach the chunk's outcome. The handler may
+        // still be running, and whatever it eventually produces belongs to a
+        // chunk this slice has already recorded as timed out.
+        const applied0 = timedOut
+            ? { outcome: "failed" as const, code: "chunk_timeout" }
+            : result;
 
         const applied = await completeExtractionChunk(
             lease,
             chunk.chunkIndex,
-            result,
+            applied0,
             new Date()
         );
         if (!applied.applied) {

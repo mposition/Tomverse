@@ -387,6 +387,18 @@ window·credit·privacy disclosure 적용. 릴리스 B의 memory 사용은 이 b
 - 잠금 해제 시 evidence를 재검증한 뒤 다른 차단 사유가 없으면 이전 상태로
   복귀합니다. lock·unlock·suspension·restore는 audit를 남깁니다.
 - 잠금 상태에서 evidence 원문을 열람하거나 새 chat에서 우회 노출할 수 없습니다.
+- **삭제는 잠금으로 막지 않습니다.** lock이 지키는 것은 내용 노출이고 삭제는
+  내용을 드러내지 않습니다. 반대로 삭제를 막으면 비밀번호를 잊은 snapshot이
+  영구히 지워지지 않는 상태가 되어 §13.1의 무조건적 삭제 권리와 §15의
+  "imported data를 소유자 손이 닿지 않는 곳에 남기지 않는다"를 어깁니다.
+  native Conversation route와 다른 판단이며, 의도된 차이입니다.
+- **suspension 대상은 `active`뿐입니다.** `suspended_by_source_lock`은 이 경로만
+  쓰고 `active`만 덮으므로 상태 자체가 복귀 지점의 기록이 되고, 별도 이전 상태
+  컬럼이 필요 없습니다. `candidate`까지 정지시키면 복귀가 사용자가 승인한 적
+  없는 승격이 됩니다.
+- 복귀 시 만료가 이미 지난 memory는 `active`가 아니라 `expired`로 보냅니다
+  (§7.1의 "다른 차단 사유" 항). `active`로 되돌리면 §8.6 sweep이 다시 지날
+  때까지 만료된 memory가 retrieval에 남습니다.
 - 부분 실패로 lock과 memory 상태가 불일치하면 reconciliation이 탐지·복구합니다.
 
 ## 8. 계정 장기 메모리 계약
@@ -842,6 +854,37 @@ statement, evidence, searchTerms, context bundle, profile knowledge chunk를
 수 있으며, 해당 memory 원문이 공유된 것은 아닙니다")를 포함합니다. 이 안내는
 구체적 memory의 존재·내용·개수를 제3자에게 노출하지 않습니다.
 
+구현 현황:
+
+- **제외는 `tests/memoryReleaseContracts.test.mjs`가 고정합니다.** share
+  snapshot schema의 키 집합과 message 키 집합을 허용 목록으로 못 박고, memory
+  형태의 필드를 밀어 넣은 snapshot이 parse 후 그것을 버리는지, conversation
+  export가 요청받지 않은 필드를 렌더하지 않는지 확인합니다. 지금 이것이 참인
+  이유는 shape가 좁기 때문이지 무언가 검사해서가 아니었고, 실패 모드는 누군가
+  shape를 넓히고 아무도 눈치채지 못한 채 제3자가 작성자의 기억을 읽게 되는
+  것입니다.
+- **안내 문구는 주입 배선과 함께 배포합니다.** 주입이 열리기 전에는 어떤 답변도
+  memory의 영향을 받을 수 없어서, 그때 "영향을 받았을 수 있다"고 적으면 동작하지
+  않는 기능에 대한 주장이 됩니다. §10 주입이 배선되면서 이 조건이 충족됐고,
+  아래가 그 배포입니다.
+
+구현: 공유 화면은 `share.personalizationNotice`, export는
+`lib/memorySharingNotice.ts`의 영문 한 줄입니다(export 문서에는 볼 사람의
+locale이 없고 header가 이미 영문입니다).
+
+- **표시 여부는 snapshot의 `personalizationPossible`이 정합니다.** 조회 시점에
+  flag를 다시 읽지 않습니다 — 나중에 주입을 꺼도 이미 생성된 답변이 영향을 안
+  받게 되지는 않고, 나중에 켜도 이 답변들이 영향을 받게 되지는 않습니다. 이
+  값은 share 시점의 **전역** 사실이며 작성자별 사실이 아닙니다.
+- **조건부로 표시하면 안 됩니다.** 작성자가 실제로 memory를 썼을 때만 보여주면
+  문구의 존재 자체가 "이 사람은 개인화를 쓴다"는 노출이 됩니다. 주입이 가능한
+  동안에는 모든 공유·export가 무조건 답니다.
+- **문구가 채널이 되면 안 됩니다.** 개수·종류·statement를 담지 않고, snapshot
+  필드도 boolean 하나뿐입니다(문자열·숫자·배열은 schema가 거부).
+  `tests/memorySharingNotice.test.mjs`가 숫자 포함 여부까지 확인합니다.
+- 필드는 optional이라 이전 snapshot은 그대로 parse되고 부재는 false로 읽힙니다
+  — 주입이 존재하기 전 모든 snapshot에 대해 맞는 답입니다.
+
 ### 13.4 memory 사용 투명성
 
 memory 사용 응답에는 소유자 본인에게 "이 응답에 memory N개 사용"을 표시합니다.
@@ -1202,8 +1245,27 @@ GET/PUT /api/memories/settings                 master toggle·기본 mode
 GET    /api/memories/export                    전체 export (재인증, §13.2)
 POST   /api/memories/delete-all                (재인증, §13.1)
 PATCH  /api/conversations/[id]                 memoryMode 변경 (기존 route 확장)
-POST   /api/external-conversations/[id]/lock | /verify | /unlock   (B5)
+GET    /api/external-conversations/[id]/lock          잠금 여부 + 잠글 때의 memory 영향 (§7.1)
+PUT    /api/external-conversations/[id]/lock          설정·변경·해제 (변경·해제는 currentPassword 필수)
+POST   /api/external-conversations/[id]/lock/verify   비밀번호 확인 → unlock grant
 ```
+
+lock은 별도 route입니다. snapshot은 immutable(§4.2)이라 일반 PATCH route가
+없고, 만들면 두 번째 mutable 필드를 부르게 됩니다. 해제(`/unlock`)를 따로 두지
+않은 것은 그것이 상태 제거이지 별개 동작이 아니기 때문입니다 —
+`PUT { password: null }`이 같은 판정·같은 audit·같은 memory 전이를 씁니다.
+
+- **변경·해제는 현재 비밀번호를 증명합니다.** grant(cookie)로 대신하지
+  않습니다. 로그인된 기기에 접근한 사람이 잠금을 벗겨낼 수 있으면 잠금의
+  존재 이유가 사라집니다. 설정(잠기지 않은 snapshot)은 증명할 것이 없습니다.
+- **증명 실패는 verify와 같은 attempt 예산을 씁니다.** 두 경로가 다른 속도로
+  추측을 허용하면 느슨한 쪽이 실효 한도가 됩니다. 단 `currentPassword`가
+  아예 없는 요청은 추측이 아니므로 예산을 쓰지 않고 거절합니다.
+- **설정·변경 성공 시 grant를 함께 발급하고 해제 시 삭제합니다.** 방금 고른
+  비밀번호를 바로 다시 입력시키지 않기 위해서이고, 삭제는 TTL 안에 다른
+  비밀번호로 다시 잠근 snapshot이 옛 grant로 열리는 것을 막습니다.
+- 잠긴 snapshot 조회는 새 코드가 아니라 기존 423 `CONVERSATION_LOCKED`로
+  답합니다(§7의 호환 요구, §18 표는 확정본).
 
 context bundle은 기존 `/api/chat/preflight` 확장 + 단일 모델용 경량 context
 preparation으로 발급하고 `/api/chat`이 검증·소비합니다. 신설 여부는 기존
@@ -1266,6 +1328,42 @@ Data 탭(`AuthButton.tsx`)에는 진입점·요약만 두고 대형 UI를 modal�
   다음만 집계: memory 응답 후 120초 내 follow-up, 즉시 regenerate, 대화
   memory-off 전환, 명시적 feedback, 관련 memory 즉시 수정·삭제. 이를 "재질문률"
   등 직접 측정치로 표현하지 않고 proxy임을 Admin UI에 명시합니다.
+  구현: 순수 집계는 `lib/memoryMetricsCore.ts`, 질의는 `lib/memoryMetrics.ts`,
+  조회는 `GET /api/admin/memory`입니다.
+
+  - **content 배제는 응답 shape이 아니라 질의에서 합니다.** statement·evidence·
+    `sourceSelection`·id는 `select`에 없습니다. shape에서만 빼면 이미 읽어온
+    뒤이고, 다음 사람이 shape를 넓히면 그대로 새어 나갑니다. DB 테스트가 직렬화된
+    보고서 전체에 문장이 없는지 확인합니다.
+  - **아직 측정할 수 없는 지표는 0이 아니라 이유와 함께 이름을 남깁니다**
+    (`unavailable`). 주입 비율 0%는 "아무도 안 쓴다"와 구분되지 않으며, 그
+    혼동이 이 목록이 존재하는 이유입니다. **현재 목록: follow-up proxy 하나**
+    (memory를 사용한 답변에 귀속이 필요한데, 주입이 fail-closed라 귀속된 답변이
+    아직 없음). lock suspension/restore(B5), chunk당 credit·batch
+    sub-budget(slice 1.6), injection 비율·token bucket·stale bundle 비율(§10
+    배선)은 모두 출처가 생겨 목록에서 빠졌습니다.
+  - **injection 비율의 분모는 인증된 chat 요청 전체입니다.** "주입이 허용된
+    요청"으로 잡으면 fail-closed 상태에서 분모가 0이 되어 비율이 정의되지 않고,
+    그것은 이 목록이 설명하려던 상태로 되돌아가는 것입니다. 지금 방식이면
+    fail-closed 배포도 "N건 중 0건"이라는 측정값을 보고합니다. 게스트는 주입할
+    계정 memory 자체가 없으므로 분모에서 제외합니다 — 넣으면 이 지표가 주입이
+    아니라 게스트/회원 비율을 추적하게 됩니다.
+  - **stale bundle 비율의 분모는 제시된 bundle 수**이고, replay는 비율 밖에
+    따로 셉니다. 둘 다 `CHAT_CONTEXT_BUNDLE_STALE`로 거절되지만 context가
+    변했다고 말하는 것은 한쪽뿐입니다.
+  - **truncation 비율의 분모는 주입된 context**이며, §9 예산이 잘라낸 경우
+    (`token_budget`·`item_cap`)만 truncation입니다. `below_relevance`·
+    `expired`·`duplicate`는 선택이 설계대로 동작한 것이고 `source_cap`은 크기가
+    아니라 다양성 규칙이므로 포함하지 않습니다.
+  - **승인률의 분모는 검토를 마친 memory입니다.** 아직 큐에 남은 항목까지 나누면
+    "손대지 않은 검토 큐"가 "낮은 승인률"로 보고됩니다. 결정된 것이 없으면 0이
+    아니라 `null`입니다.
+  - **취소된 run은 pair 실패율 분모에 포함합니다.** 사용자가 그만둔 것도 그 run의
+    결과이고, 빼면 사용자가 계속 포기하는 pair가 좋아 보입니다.
+  - 행이 남지 않는 결과(validator 거절, source 삭제 처분)는
+    `ChatUsageBucket`의 `memory:` namespace 일일 counter로 기록하며,
+    기록 실패가 사용자 요청 실패가 되지 않습니다.
+
 - **C**: profile lifecycle, preview 성공·실패, version update, retired model
   차단 수, knowledge 처리 실패율, byte bucket, retrieval chunk 수, truncation,
   citation 검증 실패율, memory mode 분포. instructions·filename·knowledge
