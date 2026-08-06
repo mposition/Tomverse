@@ -121,7 +121,7 @@ import {
 } from "@/lib/guestAttachments";
 import { isChatCostSafetyCode } from "@/lib/chatCostSafetyCore";
 import { estimatePromptTokens } from "@/lib/chatTokenEstimate";
-import { chatContextWindowDecision } from "@/lib/chatContextWindow";
+import { fitChatOutputToContextWindow } from "@/lib/chatContextWindow";
 import { buildChatMemoryContext } from "@/lib/chatMemoryContext";
 import { latestUserPromptText } from "@/lib/chatMemoryContextCore";
 import {
@@ -1620,18 +1620,25 @@ async function handleChatPost(
         // That figure is clamped to the plan's input ceiling, so a request over
         // *that* limit was already refused by `createChatBudget` with
         // CHAT_INPUT_TOKEN_LIMIT before reaching here.
-        const contextWindow = chatContextWindowDecision({
+        const outputBudget = fitChatOutputToContextWindow({
             contextWindowTokens: modelConfig.contextWindowTokens,
-            inputTokens: budget.inputTokens,
-            maxOutputTokens: budget.maxOutputTokens,
+            reservedInputTokens: budget.inputTokens,
+            requestOutputCapTokens: budget.maxOutputTokens,
+            providerMaxOutputTokens: budget.providerMaxOutputTokens,
         });
-        if (contextWindow.kind === "exceeded") {
+        if (outputBudget.kind === "exceeded") {
             throw new ChatAccessError(
                 400,
                 "MODEL_CONTEXT_WINDOW_EXCEEDED",
-                `${modelConfig.name} supports up to ${contextWindow.limitTokens.toLocaleString("en-US")} input and output tokens combined. Start a new conversation or shorten the attachments.`
+                `${modelConfig.name} holds ${outputBudget.limitTokens.toLocaleString("en-US")} tokens of conversation and answer together, and this conversation already fills it. Start a new conversation or shorten the attachments.`
             );
         }
+        // What the request actually asks the model to produce: the application
+        // cap, lowered to the provider's own ceiling and to the room the window
+        // has left. The credit and cost reservation deliberately keeps the
+        // unfitted figure -- over-reserving is refunded at settlement, and
+        // reserving less than the answer might cost protects nothing.
+        const requestMaxOutputTokens = outputBudget.outputTokens;
         const accessGrant = await acquireChatAccess(access, budget, {
             traceId,
             source: "chat",
@@ -1827,7 +1834,7 @@ async function handleChatPost(
         const result = await streamText({
             model: activeModel,
             messages: formattedMessages,
-            maxOutputTokens: budget.maxOutputTokens,
+            maxOutputTokens: requestMaxOutputTokens,
             maxRetries: modelConfig.provider === "zhipu" ? 0 : undefined,
             headers:
                 modelConfig.provider === "perplexity"

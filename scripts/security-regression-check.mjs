@@ -547,15 +547,27 @@ const checks = [
     file: "app/api/chat/route.ts",
     test: (source) => {
       const guard = source.slice(
-        source.indexOf("chatContextWindowDecision({"),
+        source.indexOf("fitChatOutputToContextWindow({"),
         source.indexOf("MODEL_CONTEXT_WINDOW_EXCEEDED")
       );
       return (
-        guard.includes("inputTokens: budget.inputTokens") &&
-        guard.includes("maxOutputTokens: budget.maxOutputTokens") &&
+        guard.includes("reservedInputTokens: budget.inputTokens") &&
         !guard.includes("estimatedInputTokens")
       );
     },
+  },
+  {
+    // A model's settable output ceiling is a capability, not this request's
+    // budget. Kimi K3's ceiling is its whole context window, so using it as
+    // the fixed output cap refused every request at every input size. The
+    // request cap is fitted to the room the window has left, and the fitted
+    // figure -- not the profile's -- is what reaches the provider.
+    name: "The dispatched output cap is the one fitted to the context window",
+    file: "app/api/chat/route.ts",
+    test: (source) =>
+      source.includes("const requestMaxOutputTokens = outputBudget.outputTokens") &&
+      source.includes("maxOutputTokens: requestMaxOutputTokens,") &&
+      !source.includes("maxOutputTokens: budget.maxOutputTokens,"),
   },
   {
     // One function owns the reserved-input figure, so the estimator
