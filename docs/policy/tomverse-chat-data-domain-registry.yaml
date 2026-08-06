@@ -1,4 +1,4 @@
-schemaVersion: 2
+schemaVersion: 3
 
 metadata:
   status: draft
@@ -76,17 +76,32 @@ rules:
     honest state for a row that has not been traced through the deletion path,
     and it blocks PRIVACY-01 rather than being read as safe.
   - >-
+    Every row says whose data its User link is. "This table relates to User"
+    answers nothing on its own: the relation can be the person the row
+    describes (userLinkageRole: subject) or the operator who wrote it
+    (userLinkageRole: actor), and the deletion obligations are completely
+    different. An actor row must also say how the person it is *about* is
+    reached, because in this schema that is an untyped targetType/targetId pair
+    with no foreign key -- a linkage no derivation over prisma/schema.prisma can
+    see, so nothing happens by default and "nothing" has to be a decision.
+  - >-
     inUnifiedExport must equal the state declared in
     lib/accountDataExportDomains.ts. The registry describes the export that
     exists, not the one that was intended.
 
-# Measured against develop on 2026-08-06: 33 registered models. User is the root
+# Measured against develop on 2026-08-06: 36 registered models. User is the root
 # and is deleted explicitly last; 23 are reachable from it by cascade. Of the
-# remaining 9, ChatContextBundleConsumption is deleted explicitly in
-# lib/accountDeletion.ts, six are anonymised there (Feedback and RefundRequest
-# inline, the three credit reservations and ChatLimitDecisionEvent through
-# lib/accountDataAnonymisation.ts), and BillingTransaction and PrivacyRequest
-# are retained.
+# remaining 12, ChatContextBundleConsumption is deleted explicitly in
+# lib/accountDeletion.ts, eight are anonymised (Feedback and RefundRequest
+# inline there, the three credit reservations, ChatLimitDecisionEvent, AdminNote
+# and ModelOverride through lib/accountDataAnonymisation.ts), and
+# BillingTransaction, PrivacyRequest and AdminAuditLog are retained.
+#
+# Three of those were invisible until schemaVersion 3. The derivation matched a
+# relation field literally named `user`; AdminAuditLog.actor, AdminNote.createdBy
+# and ModelOverride.updatedBy are all `X User? @relation` under another name, so
+# nothing graded them at all -- and all three are onDelete: SetNull, which
+# cleared the id and left the operator's email address beside it.
 #
 # The anonymisationFields below are also the column list
 # lib/accountDataAnonymisation.ts writes, and tests/accountDataAnonymisation.test.mjs
@@ -97,6 +112,7 @@ domains:
   # --- the account itself ---------------------------------------------------
   - domain: user
     prismaModel: User
+    userLinkageRole: subject
     owner: security-privacy
     deletionAction: delete
     deletionMechanism: explicit_deletion
@@ -112,6 +128,7 @@ domains:
   # --- cascade from User ----------------------------------------------------
   - domain: userSettings
     prismaModel: UserSettings
+    userLinkageRole: subject
     owner: security-privacy
     deletionAction: delete
     deletionMechanism: cascade_from_user
@@ -121,6 +138,7 @@ domains:
 
   - domain: userMemorySettings
     prismaModel: UserMemorySettings
+    userLinkageRole: subject
     owner: security-privacy
     deletionAction: delete
     deletionMechanism: cascade_from_user
@@ -130,6 +148,7 @@ domains:
 
   - domain: account
     prismaModel: Account
+    userLinkageRole: subject
     owner: security-privacy
     deletionAction: delete
     deletionMechanism: cascade_from_user
@@ -139,6 +158,7 @@ domains:
 
   - domain: session
     prismaModel: Session
+    userLinkageRole: subject
     owner: security-privacy
     deletionAction: delete
     deletionMechanism: cascade_from_user
@@ -148,6 +168,7 @@ domains:
 
   - domain: conversation
     prismaModel: Conversation
+    userLinkageRole: subject
     owner: security-privacy
     deletionAction: delete
     deletionMechanism: cascade_from_user
@@ -157,6 +178,7 @@ domains:
 
   - domain: conversationProject
     prismaModel: ConversationProject
+    userLinkageRole: subject
     owner: security-privacy
     deletionAction: delete
     deletionMechanism: cascade_from_user
@@ -166,6 +188,7 @@ domains:
 
   - domain: comparisonReview
     prismaModel: ComparisonReview
+    userLinkageRole: subject
     owner: security-privacy
     deletionAction: delete
     deletionMechanism: cascade_from_user
@@ -175,6 +198,7 @@ domains:
 
   - domain: productAnalyticsEvent
     prismaModel: ProductAnalyticsEvent
+    userLinkageRole: subject
     owner: security-privacy
     deletionAction: delete
     deletionMechanism: cascade_from_user
@@ -184,6 +208,7 @@ domains:
 
   - domain: billingPromotionRedemption
     prismaModel: BillingPromotionRedemption
+    userLinkageRole: subject
     owner: security-privacy
     deletionAction: delete
     deletionMechanism: cascade_from_user
@@ -193,6 +218,7 @@ domains:
 
   - domain: creditPurchase
     prismaModel: CreditPurchase
+    userLinkageRole: subject
     owner: security-privacy
     deletionAction: delete
     deletionMechanism: cascade_from_user
@@ -202,6 +228,7 @@ domains:
 
   - domain: creditLot
     prismaModel: CreditLot
+    userLinkageRole: subject
     owner: security-privacy
     deletionAction: delete
     deletionMechanism: cascade_from_user
@@ -211,6 +238,7 @@ domains:
 
   - domain: creditLedgerEntry
     prismaModel: CreditLedgerEntry
+    userLinkageRole: subject
     owner: security-privacy
     deletionAction: delete
     deletionMechanism: cascade_from_user
@@ -220,6 +248,7 @@ domains:
 
   - domain: creditDebtEntry
     prismaModel: CreditDebtEntry
+    userLinkageRole: subject
     owner: security-privacy
     deletionAction: delete
     deletionMechanism: cascade_from_user
@@ -229,6 +258,7 @@ domains:
 
   - domain: imageGeneration
     prismaModel: ImageGeneration
+    userLinkageRole: subject
     owner: security-privacy
     deletionAction: delete
     deletionMechanism: cascade_from_user
@@ -238,6 +268,7 @@ domains:
 
   - domain: imageGenerationGroup
     prismaModel: ImageGenerationGroup
+    userLinkageRole: subject
     owner: security-privacy
     deletionAction: delete
     deletionMechanism: cascade_from_user
@@ -247,6 +278,7 @@ domains:
 
   - domain: planChangeRequest
     prismaModel: PlanChangeRequest
+    userLinkageRole: subject
     owner: security-privacy
     deletionAction: delete
     deletionMechanism: cascade_from_user
@@ -256,6 +288,7 @@ domains:
 
   - domain: externalImport
     prismaModel: ExternalImport
+    userLinkageRole: subject
     owner: security-privacy
     deletionAction: delete
     deletionMechanism: cascade_from_user
@@ -265,6 +298,7 @@ domains:
 
   - domain: externalConversation
     prismaModel: ExternalConversation
+    userLinkageRole: subject
     owner: security-privacy
     deletionAction: delete
     deletionMechanism: cascade_from_user
@@ -274,6 +308,7 @@ domains:
 
   - domain: externalMessage
     prismaModel: ExternalMessage
+    userLinkageRole: subject
     owner: security-privacy
     deletionAction: delete
     deletionMechanism: cascade_from_user
@@ -283,6 +318,7 @@ domains:
 
   - domain: memoryItem
     prismaModel: MemoryItem
+    userLinkageRole: subject
     owner: security-privacy
     deletionAction: delete
     deletionMechanism: cascade_from_user
@@ -292,6 +328,7 @@ domains:
 
   - domain: memoryEvidence
     prismaModel: MemoryEvidence
+    userLinkageRole: subject
     owner: security-privacy
     deletionAction: delete
     deletionMechanism: cascade_from_user
@@ -301,6 +338,7 @@ domains:
 
   - domain: memoryExtractionRun
     prismaModel: MemoryExtractionRun
+    userLinkageRole: subject
     owner: security-privacy
     deletionAction: delete
     deletionMechanism: cascade_from_user
@@ -310,6 +348,7 @@ domains:
 
   - domain: accountDataExportRequest
     prismaModel: AccountDataExportRequest
+    userLinkageRole: subject
     owner: security-privacy
     deletionAction: delete
     deletionMechanism: cascade_from_user
@@ -327,6 +366,7 @@ domains:
   # --- deleted explicitly ---------------------------------------------------
   - domain: chatContextBundleConsumption
     prismaModel: ChatContextBundleConsumption
+    userLinkageRole: subject
     owner: security-privacy
     deletionAction: delete
     deletionMechanism: explicit_deletion
@@ -342,6 +382,7 @@ domains:
   # --- anonymised at deletion, implemented ----------------------------------
   - domain: feedback
     prismaModel: Feedback
+    userLinkageRole: subject
     owner: security-privacy
     deletionAction: anonymise
     deletionMechanism: explicit_deletion
@@ -378,6 +419,7 @@ domains:
 
   - domain: refundRequest
     prismaModel: RefundRequest
+    userLinkageRole: subject
     owner: security-privacy
     deletionAction: anonymise
     deletionMechanism: explicit_deletion
@@ -409,6 +451,7 @@ domains:
   # --- anonymised at deletion, decided but not yet built ---------------------
   - domain: chatLimitDecisionEvent
     prismaModel: ChatLimitDecisionEvent
+    userLinkageRole: subject
     owner: security-privacy
     deletionAction: anonymise
     deletionMechanism: explicit_deletion
@@ -444,6 +487,7 @@ domains:
 
   - domain: chatCreditReservation
     prismaModel: ChatCreditReservation
+    userLinkageRole: subject
     owner: security-privacy
     deletionAction: anonymise
     deletionMechanism: explicit_deletion
@@ -491,6 +535,7 @@ domains:
 
   - domain: imageCreditReservation
     prismaModel: ImageCreditReservation
+    userLinkageRole: subject
     owner: security-privacy
     deletionAction: anonymise
     deletionMechanism: explicit_deletion
@@ -536,6 +581,7 @@ domains:
 
   - domain: memoryExtractionCreditReservation
     prismaModel: MemoryExtractionCreditReservation
+    userLinkageRole: subject
     owner: security-privacy
     deletionAction: anonymise
     deletionMechanism: explicit_deletion
@@ -569,6 +615,7 @@ domains:
   # --- retained -------------------------------------------------------------
   - domain: billingTransaction
     prismaModel: BillingTransaction
+    userLinkageRole: subject
     owner: security-privacy
     deletionAction: retain
     retentionPolicy: statutory
@@ -600,6 +647,7 @@ domains:
 
   - domain: privacyRequest
     prismaModel: PrivacyRequest
+    userLinkageRole: subject
     owner: security-privacy
     deletionAction: retain
     retentionPolicy: legal_hold
@@ -629,3 +677,138 @@ domains:
       minimised once the request closes. handledByEmail names a Tomverse
       operator rather than the requester and is withheld from the export for
       that reason, not kept for this one.
+
+  # --- the User link is the operator, not the subject -----------------------
+  #
+  # These three escaped the registry entirely until schemaVersion 3. The
+  # derivation matched `user User @relation`; all three are `X User? @relation`
+  # under some other field name, so nothing graded them.
+  #
+  # Both of their linkages needed a decision, and they are different people:
+  # the operator who acted (a typed relation, onDelete: SetNull) and the person
+  # the record is about (an untyped targetType/targetId pair with no foreign
+  # key, which no derivation over the schema can see).
+  - domain: adminAuditLog
+    prismaModel: AdminAuditLog
+    userLinkageRole: actor
+    owner: security-privacy
+    deletionAction: retain
+    retentionPolicy: statutory
+    implementationStatus: implemented
+    retention:
+      retentionPolicyRef: "TBD-security-retention-schedule"
+      legalBasis: >-
+        Tamper-evident record of administrator action, kept for security
+        investigation and to demonstrate that access controls were enforced.
+        GDPR Article 17(3)(b) and (e) and the legitimate-interest basis for
+        security monitoring; the OAIC's APP 11.2 destruction obligation is
+        subject to a retention requirement under an Australian law.
+      retentionStartsFrom: "createdAt"
+      retentionPeriod: "TBD-pending-security-and-legal-approval"
+      owner: security-privacy
+      legalHoldOverridesPurge: true
+      nextReviewAt: "2026-11-05"
+    subjectReference:
+      kind: untyped_target
+      targetTypeColumn: targetType
+      targetIdColumn: targetId
+      subjectTargetType: "User"
+      deletionAction: retain
+      retention:
+        retentionPolicyRef: "TBD-security-retention-schedule"
+        legalBasis: >-
+          Same tamper-evident record, seen from the other side. An entry
+          recording that an account was suspended or deleted is evidence about
+          the subject as well as the operator, and removing it on the subject's
+          request would let the one action most worth auditing erase its own
+          audit.
+        retentionStartsFrom: "createdAt"
+        retentionPeriod: "TBD-pending-security-and-legal-approval"
+        owner: security-privacy
+        legalHoldOverridesPurge: true
+        nextReviewAt: "2026-11-05"
+    inUnifiedExport: excluded
+    note: >-
+      The actor's own address cannot be scrubbed here even though the relation
+      is onDelete: SetNull and leaves it behind: actorEmail, ipAddress,
+      userAgent, summary and metadata are all inputs to entryHash, and the
+      chain verified by lib/adminAuditIntegrity.ts is what makes this table
+      evidence rather than a log. Anonymising any of them would break every
+      subsequent link. That is a real cost of the design and the reason this
+      row is retain rather than anonymise -- not an oversight.
+      OPEN for legal: a subject access request plausibly reaches entries about
+      the requester. Automating that is not safe, because an entry names the
+      operator and can name third parties, so it is routed to the manual
+      PrivacyRequest path rather than the unified export.
+
+  - domain: adminNote
+    prismaModel: AdminNote
+    userLinkageRole: actor
+    owner: security-privacy
+    deletionAction: anonymise
+    deletionMechanism: explicit_deletion
+    retentionPolicy: immediate
+    implementationStatus: implemented
+    anonymisationFields:
+      - createdById
+      - createdByEmail
+    reidentificationReview:
+      reviewedBy: security-privacy
+      reviewedAt: "2026-08-06"
+      joinRisksConsidered:
+        - >-
+          Closed. The relation is onDelete: SetNull, so deleting the operator's
+          account cleared createdById and left createdByEmail sitting beside it
+          -- the exact shape the four reservation tables had. Both are cleared
+          now.
+        - >-
+          Accepted. The note body remains after the author's account is gone.
+          It is a record about the subject, not about the author, and the
+          subject's own deletion is handled by subjectReference below.
+    subjectReference:
+      kind: untyped_target
+      targetTypeColumn: targetType
+      targetIdColumn: targetId
+      subjectTargetType: "User"
+      deletionAction: delete
+      deletionMechanism: explicit_deletion
+    inUnifiedExport: excluded
+    note: >-
+      Free text written by staff about a customer. Nothing deleted it when that
+      customer deleted their account -- targetId is a bare string with no
+      foreign key, so no cascade could reach it and none did. It is deleted
+      explicitly now.
+      OPEN for legal: a subject access request plausibly reaches notes about the
+      requester, with third parties redacted. Redaction of free text cannot be
+      automated safely, so it is routed to the manual PrivacyRequest path rather
+      than the unified export.
+
+  - domain: modelOverride
+    prismaModel: ModelOverride
+    userLinkageRole: actor
+    owner: security-privacy
+    deletionAction: anonymise
+    deletionMechanism: explicit_deletion
+    retentionPolicy: immediate
+    implementationStatus: implemented
+    anonymisationFields:
+      - updatedById
+      - updatedByEmail
+    reidentificationReview:
+      reviewedBy: security-privacy
+      reviewedAt: "2026-08-06"
+      joinRisksConsidered:
+        - >-
+          Closed. Same SetNull-leaves-the-address shape as adminNote; both
+          columns are cleared.
+        - >-
+          Accepted. status, reason and visibleNote remain. They describe a
+          model, not a person -- this row is keyed by modelId and is global
+          configuration, not anybody's setting.
+    subjectReference:
+      kind: none
+    inUnifiedExport: excluded
+    note: >-
+      Global per-model configuration, keyed by modelId. It appears here only
+      because an operator's identity is stamped on it; there is no data subject
+      for it to be about.

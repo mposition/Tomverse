@@ -8,6 +8,7 @@ import {
   ACCOUNT_ANONYMISATIONS,
   ANONYMISED_SUBJECT,
   buildAnonymisationStatement,
+  SUBJECT_TARGET_DELETIONS,
 } from "../lib/accountDataAnonymisation.ts";
 
 const registry = parse(
@@ -110,10 +111,54 @@ test("the registry's replacements match what the implementation writes", () => {
 test("no anonymisation clears only the user link", () => {
   for (const entry of ACCOUNT_ANONYMISATIONS) {
     const columns = Object.keys(entry.columns);
-    assert.ok(columns.includes("userId"), `${entry.prismaModel} does not clear userId`);
+    // Whatever the link column is called -- userId on a subject table,
+    // createdById or updatedById where the linked user is the operator.
+    assert.ok(
+      columns.includes(entry.userColumn),
+      `${entry.prismaModel} does not clear its own link column ${entry.userColumn}`
+    );
     assert.ok(
       columns.length > 1,
-      `${entry.prismaModel} clears only userId, which renames the row rather than anonymising it`
+      `${entry.prismaModel} clears only ${entry.userColumn}, which renames the row rather than anonymising it`
+    );
+  }
+});
+
+// The linkage no schema derivation can see. AdminNote.targetId points at a user
+// by convention with no foreign key, so nothing cascaded and nothing did:
+// notes written about a customer outlived that customer's account entirely.
+test("every untyped subject reference the registry declares is followed by the code", () => {
+  const declared = registry.domains
+    .filter((row) => row.subjectReference?.kind === "untyped_target")
+    .filter((row) => row.subjectReference.deletionAction === "delete");
+  assert.ok(declared.length > 0, "no untyped subject deletion is declared");
+
+  const implemented = new Set(SUBJECT_TARGET_DELETIONS.map((entry) => entry.prismaModel));
+  for (const row of declared) {
+    assert.ok(
+      implemented.has(row.prismaModel),
+      `${row.prismaModel} declares its subject rows are deleted, but nothing deletes them`
+    );
+    const entry = SUBJECT_TARGET_DELETIONS.find((e) => e.prismaModel === row.prismaModel);
+    assert.equal(
+      entry.subjectTargetType,
+      row.subjectReference.subjectTargetType,
+      `${row.prismaModel}: the target type the code matches is not the one declared`
+    );
+  }
+});
+
+test("nothing deletes subject rows the registry says are retained", () => {
+  const retained = new Set(
+    registry.domains
+      .filter((row) => row.subjectReference?.deletionAction === "retain")
+      .map((row) => row.prismaModel)
+  );
+  for (const entry of SUBJECT_TARGET_DELETIONS) {
+    assert.equal(
+      retained.has(entry.prismaModel),
+      false,
+      `${entry.prismaModel} is deleted by subject, but the registry says those rows are retained`
     );
   }
 });

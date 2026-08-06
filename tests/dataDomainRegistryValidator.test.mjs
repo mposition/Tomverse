@@ -199,3 +199,66 @@ test("a one-axis schemaVersion is refused rather than half-read", () => {
   assert.equal(code, 1);
   assert.match(output, /unsupported schemaVersion 1/);
 });
+
+// "This table relates to User" answers nothing on its own.
+test("a row that does not say whose data its user link is is rejected", () => {
+  const { code, output } = run((_registry, find) => {
+    delete find("adminNote").userLinkageRole;
+  });
+  assert.equal(code, 1);
+  assert.match(output, /userLinkageRole "undefined" must be one of/);
+});
+
+// The linkage no derivation over the schema can see: an untyped
+// targetType/targetId pair with no foreign key. Nothing happens by default, so
+// "nothing" has to be written down as a decision.
+test("an actor row without a subject reference is rejected", () => {
+  const { code, output } = run((_registry, find) => {
+    delete find("adminAuditLog").subjectReference;
+  });
+  assert.equal(code, 1);
+  assert.match(output, /needs a subjectReference/);
+});
+
+test("an untyped subject reference must say what deletion does to it", () => {
+  const { code, output } = run((_registry, find) => {
+    delete find("adminNote").subjectReference.deletionAction;
+  });
+  assert.equal(code, 1);
+  assert.match(output, /nothing happens by default and 'nothing' has to be a decision/);
+});
+
+test("a subject reference naming a column that does not exist is rejected", () => {
+  const { code, output } = run((_registry, find) => {
+    find("adminNote").subjectReference.targetIdColumn = "notAColumn";
+  });
+  assert.equal(code, 1);
+  assert.match(output, /names "notAColumn", which is not a column/);
+});
+
+test("a retained subject reference needs the same retention block as any retention", () => {
+  const { code, output } = run((_registry, find) => {
+    delete find("adminAuditLog").subjectReference.retention.legalBasis;
+  });
+  assert.equal(code, 1);
+  assert.match(output, /subjectReference\.retention\.legalBasis is missing/);
+});
+
+test("a subject row cannot carry a subject reference", () => {
+  const { code, output } = run((_registry, find) => {
+    find("memoryItem").subjectReference = { kind: "none" };
+  });
+  assert.equal(code, 1);
+  assert.match(output, /subjectReference only applies to an "actor" row/);
+});
+
+// The rule that caught three tables keeping an operator's address after that
+// operator deleted their own account.
+test("an anonymisation that leaves any email column behind is rejected", () => {
+  const { code, output } = run((_registry, find) => {
+    const row = find("adminNote");
+    row.anonymisationFields = row.anonymisationFields.filter((f) => f !== "createdByEmail");
+  });
+  assert.equal(code, 1);
+  assert.match(output, /omits "createdByEmail", which still names the person/);
+});

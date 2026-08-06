@@ -28,7 +28,8 @@ const reset = () =>
   prisma.$executeRawUnsafe(`
     TRUNCATE TABLE
       "ChatLimitDecisionEvent", "ChatCreditReservation", "ImageCreditReservation",
-      "MemoryExtractionCreditReservation", "Feedback", "RefundRequest", "User"
+      "MemoryExtractionCreditReservation", "Feedback", "RefundRequest",
+      "AdminNote", "ModelOverride", "User"
     RESTART IDENTITY CASCADE
   `);
 
@@ -149,6 +150,38 @@ const seedUser = async () => {
     },
   });
 
+  // The two tables where the linked user is the operator. Both relations are
+  // onDelete: SetNull, which cleared the id and left the address beside it.
+  await prisma.adminNote.create({
+    data: {
+      targetType: "Feedback",
+      targetId: "some-other-record",
+      body: "a note this operator wrote about something else",
+      createdById: userId,
+      createdByEmail: sentinel("adminNote-createdByEmail"),
+    },
+  });
+  await prisma.modelOverride.create({
+    data: {
+      modelId: `model-${randomUUID()}`,
+      status: "disabled",
+      updatedById: userId,
+      updatedByEmail: sentinel("modelOverride-updatedByEmail"),
+    },
+  });
+
+  // A note written *about* this user, reached only through the untyped
+  // targetType/targetId pair. No foreign key connects it to anything.
+  await prisma.adminNote.create({
+    data: {
+      targetType: "User",
+      targetId: userId,
+      body: sentinel("adminNote-subjectBody"),
+      createdById: null,
+      createdByEmail: sentinel("adminNote-subjectAuthorEmail"),
+    },
+  });
+
   return userId;
 };
 
@@ -162,7 +195,11 @@ const survivingRows = async () => {
     prisma.feedback.findMany(),
     prisma.refundRequest.findMany(),
   ]);
-  return { limitDecisions, chat, image, memory, feedback, refunds };
+  const [adminNotes, modelOverrides] = await Promise.all([
+    prisma.adminNote.findMany(),
+    prisma.modelOverride.findMany(),
+  ]);
+  return { limitDecisions, chat, image, memory, feedback, refunds, adminNotes, modelOverrides };
 };
 
 const serialise = (value: unknown) =>
@@ -250,4 +287,49 @@ test("deleting one account leaves another account's rows untouched", async () =>
   );
   assert.equal(keptRowsAfter, keptRowsBefore);
   assert.equal((await prisma.chatCreditReservation.findMany({ where: { userId: kept } })).length, 1);
+});
+
+// The linkage no derivation over the schema can find.
+//
+// AdminNote.targetId points at a user by convention with no foreign key, so no
+// cascade could reach it and none did: free-text notes written by staff about a
+// customer outlived that customer's account entirely. Nothing in
+// prisma/schema.prisma expresses the connection, which is why the registry has
+// to declare it and why this has to be tested against a real deletion.
+test("notes written about the user are deleted with the account", async () => {
+  const userId = await seedUser();
+  assert.equal(
+    await prisma.adminNote.count({ where: { targetType: "User", targetId: userId } }),
+    1
+  );
+
+  await deleteTomverseAccount(userId, { cancelSubscription: false });
+
+  assert.equal(
+    await prisma.adminNote.count({ where: { targetType: "User", targetId: userId } }),
+    0
+  );
+});
+
+// The other half of the same tables: the operator's own address, which the
+// SetNull relation left sitting beside the id it cleared.
+test("an operator's address does not survive their own account deletion", async () => {
+  const userId = await seedUser();
+  await deleteTomverseAccount(userId, { cancelSubscription: false });
+
+  const notes = await prisma.adminNote.findMany();
+  const overrides = await prisma.modelOverride.findMany();
+
+  // The note about something else survives -- it is a record about that thing,
+  // not about its author -- but carries neither the author's id nor address.
+  assert.equal(notes.length, 1);
+  assert.equal(notes[0].createdById, null);
+  assert.equal(notes[0].createdByEmail, null);
+  assert.match(notes[0].body, /about something else/);
+
+  // The override is global configuration and stays; only the operator stamp goes.
+  assert.equal(overrides.length, 1);
+  assert.equal(overrides[0].updatedById, null);
+  assert.equal(overrides[0].updatedByEmail, null);
+  assert.equal(overrides[0].status, "disabled");
 });

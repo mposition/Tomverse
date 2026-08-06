@@ -105,7 +105,48 @@ export const ACCOUNT_ANONYMISATIONS: AccountAnonymisation[] = [
       reservationPayload: { kind: "emptyJson" },
     },
   },
+
+  // The two tables where the linked user is the operator rather than the
+  // subject. Both relations are onDelete: SetNull, which cleared the id and
+  // left the address beside it -- so an administrator who deleted their own
+  // account kept their email address in both tables indefinitely. The note
+  // body and the override itself are about something else and stay.
+  {
+    prismaModel: "AdminNote",
+    table: "AdminNote",
+    userColumn: "createdById",
+    columns: {
+      createdById: { kind: "null" },
+      createdByEmail: { kind: "null" },
+    },
+  },
+  {
+    prismaModel: "ModelOverride",
+    table: "ModelOverride",
+    userColumn: "updatedById",
+    columns: {
+      updatedById: { kind: "null" },
+      updatedByEmail: { kind: "null" },
+    },
+  },
 ];
+
+/**
+ * Tables that name their data subject with an untyped targetType/targetId pair
+ * instead of a foreign key.
+ *
+ * No cascade can reach these and none did: a note written about a customer
+ * outlived that customer's account entirely, because `targetId` is a bare
+ * string as far as the database is concerned. The link exists only by
+ * convention, so it has to be followed by hand.
+ *
+ * AdminAuditLog is deliberately absent: its subject-side rows are retained
+ * under the registry's security-audit basis, and its hash chain could not
+ * survive the edit anyway.
+ */
+export const SUBJECT_TARGET_DELETIONS = [
+  { prismaModel: "AdminNote", table: "AdminNote", subjectTargetType: "User" },
+] as const;
 
 // Identifiers are interpolated into the statement, so they are checked even
 // though they come from the literal above rather than from a request. A
@@ -184,5 +225,18 @@ export const anonymiseAccountData = async (
       ...values
     );
   }
+
+  // The other half: rows that are *about* this user through an untyped target
+  // pair. Nothing in the schema connects them, so nothing removes them unless
+  // it is done here.
+  for (const target of SUBJECT_TARGET_DELETIONS) {
+    const table = assertIdentifier(target.table, "table name");
+    anonymised[`${target.prismaModel}:subject`] = await tx.$executeRawUnsafe(
+      `DELETE FROM "${table}" WHERE "targetType" = $1 AND "targetId" = $2`,
+      target.subjectTargetType,
+      userId
+    );
+  }
+
   return anonymised;
 };

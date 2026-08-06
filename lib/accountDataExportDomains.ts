@@ -150,6 +150,37 @@ export const EXPORT_DOMAIN_DECLARATIONS: ExportDomainDeclaration[] = [
     exclusionReason:
       "Internal enforcement telemetry: limit thresholds and cost estimates, with no content the user wrote. Anonymised on account deletion and purged on its own 90-day retention.",
   },
+  // Records where the linked user is the operator who acted, not the person
+  // the row is about. The subject is referenced by an untyped targetType and
+  // targetId pair with no foreign key, so a subject access request cannot be
+  // answered by joining -- it has to be answered by the manual PrivacyRequest
+  // path, where the rights of the operator and of any third party named in the
+  // text can actually be weighed.
+  {
+    domain: "adminAuditLog",
+    publicName: "admin_actions",
+    prismaModel: "AdminAuditLog",
+    state: "excluded",
+    exclusionReason:
+      "A tamper-evident record of administrator action. Each entry names the operator and carries their address, IP and the internal action metadata, and entries can name third parties. A subject access request plausibly reaches entries about the requester, but automating that would publish the operator's identity, so it is answered through the manual PrivacyRequest path instead. Retained rather than deleted: the entry recording an account's suspension or deletion is the one most worth auditing.",
+  },
+  {
+    domain: "adminNote",
+    publicName: "admin_notes",
+    prismaModel: "AdminNote",
+    state: "excluded",
+    exclusionReason:
+      "Free text written by staff, which can name the operator and third parties as readily as the subject. Redacting free text cannot be automated safely, so a request for notes about a requester is answered through the manual PrivacyRequest path. Notes about a user are deleted with that user's account.",
+  },
+  {
+    domain: "modelOverride",
+    publicName: "model_overrides",
+    prismaModel: "ModelOverride",
+    state: "excluded",
+    exclusionReason:
+      "Global per-model configuration keyed by modelId, not anybody's setting. It carries a user link only because the operator who last changed it is stamped on it.",
+  },
+
   {
     domain: "chatContextBundleConsumption",
     publicName: "context_bundle_nonces",
