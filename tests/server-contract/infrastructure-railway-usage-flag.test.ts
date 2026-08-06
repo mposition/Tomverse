@@ -24,7 +24,11 @@ const mod = (relativePath: string) =>
 
 const RAILWAY_USAGE_URL = "https://backboard.railway.com/graphql/v2";
 const CLOUDFLARE_URL = "https://api.cloudflare.com/client/v4/graphql";
-const PRISMA_USAGE_HOST = "api.prisma.io";
+// A full origin prefix rather than a bare host, matched with startsWith like
+// the two above: a host substring would also match a URL that merely mentions
+// it (https://evil.test/?x=api.prisma.io), which is both weaker as a test and
+// the pattern CodeQL's js/incomplete-url-substring-sanitization flags.
+const PRISMA_USAGE_URL_PREFIX = "https://api.prisma.io/";
 
 // A value that must never appear in a snapshot, a message or this test's own
 // output. Distinctive so a substring assertion is meaningful.
@@ -86,7 +90,7 @@ const installFetchStub = () => {
         },
       });
     }
-    if (url.includes(PRISMA_USAGE_HOST)) {
+    if (url.startsWith(PRISMA_USAGE_URL_PREFIX)) {
       return jsonResponse({
         period: { start: "2026-08-01T00:00:00.000Z", end: "2026-08-04T00:00:00.000Z" },
         metrics: { operations: { used: 1_000 }, storage: { used: 0.5 } },
@@ -237,7 +241,7 @@ test("disabling Railway usage leaves R2, database and Prisma monitors running", 
     true
   );
   assert.equal(
-    requestedUrls.some((url) => url.includes(PRISMA_USAGE_HOST)),
+    requestedUrls.some((url) => url.startsWith(PRISMA_USAGE_URL_PREFIX)),
     true
   );
   assert.equal(dashboard.r2.status, "healthy");
