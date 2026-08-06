@@ -200,7 +200,7 @@ test.describe("billing journeys", () => {
   test("a promotion change is saved to the database and survives a reload", async ({
     page,
   }) => {
-    await page.goto("/admin/promotions");
+    await page.goto("/admin/billing?tab=promotions");
     const promotion = page
       .locator("article")
       .filter({ hasText: FIXTURE_PROMOTION.code });
@@ -237,7 +237,7 @@ test.describe("billing journeys", () => {
   test("a promotion with no discount at all is refused and nothing is written", async ({
     page,
   }) => {
-    await page.goto("/admin/promotions");
+    await page.goto("/admin/billing?tab=promotions");
     const promotion = page
       .locator("article")
       .filter({ hasText: FIXTURE_PROMOTION.code });
