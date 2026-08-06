@@ -46,21 +46,21 @@ domains:
     prismaModel: UserSettings
     deletionMechanism: cascade_from_user
     retentionReason: null
-    inUnifiedExport: unverified
+    inUnifiedExport: included
     owner: security-privacy
 
   - domain: account
     prismaModel: Account
     deletionMechanism: cascade_from_user
     retentionReason: null
-    inUnifiedExport: unverified
+    inUnifiedExport: excluded
     owner: security-privacy
 
   - domain: session
     prismaModel: Session
     deletionMechanism: cascade_from_user
     retentionReason: null
-    inUnifiedExport: unverified
+    inUnifiedExport: excluded
     owner: security-privacy
 
   - domain: conversation
@@ -74,7 +74,7 @@ domains:
     prismaModel: ConversationProject
     deletionMechanism: cascade_from_user
     retentionReason: null
-    inUnifiedExport: unverified
+    inUnifiedExport: included
     owner: security-privacy
 
   - domain: comparisonReview
@@ -95,7 +95,7 @@ domains:
     prismaModel: ChatLimitDecisionEvent
     deletionMechanism: unverified
     retentionReason: null
-    inUnifiedExport: unverified
+    inUnifiedExport: excluded
     owner: security-privacy
 
   - domain: billingPromotionRedemption
@@ -109,14 +109,14 @@ domains:
     prismaModel: BillingTransaction
     deletionMechanism: unverified
     retentionReason: null
-    inUnifiedExport: unverified
+    inUnifiedExport: included
     owner: security-privacy
 
   - domain: creditPurchase
     prismaModel: CreditPurchase
     deletionMechanism: cascade_from_user
     retentionReason: null
-    inUnifiedExport: unverified
+    inUnifiedExport: included
     owner: security-privacy
 
   - domain: creditLot
@@ -144,7 +144,7 @@ domains:
     prismaModel: ChatCreditReservation
     deletionMechanism: unverified
     retentionReason: null
-    inUnifiedExport: unverified
+    inUnifiedExport: excluded
     owner: security-privacy
 
   - domain: imageGeneration
@@ -165,14 +165,14 @@ domains:
     prismaModel: ImageCreditReservation
     deletionMechanism: unverified
     retentionReason: null
-    inUnifiedExport: unverified
+    inUnifiedExport: excluded
     owner: security-privacy
 
   - domain: feedback
     prismaModel: Feedback
     deletionMechanism: explicit_deletion
     retentionReason: null
-    inUnifiedExport: unverified
+    inUnifiedExport: included
     owner: security-privacy
 
   - domain: refundRequest
@@ -193,7 +193,7 @@ domains:
     prismaModel: PrivacyRequest
     deletionMechanism: unverified
     retentionReason: null
-    inUnifiedExport: unverified
+    inUnifiedExport: included
     owner: security-privacy
 
   - domain: externalImport
@@ -221,7 +221,7 @@ domains:
     prismaModel: MemoryItem
     deletionMechanism: cascade_from_user
     retentionReason: null
-    inUnifiedExport: unverified
+    inUnifiedExport: included
     owner: security-privacy
 
   - domain: memoryEvidence
@@ -242,19 +242,19 @@ domains:
     prismaModel: MemoryExtractionCreditReservation
     deletionMechanism: unverified
     retentionReason: null
-    inUnifiedExport: unverified
+    inUnifiedExport: excluded
     owner: security-privacy
 
   - domain: userMemorySettings
     prismaModel: UserMemorySettings
     deletionMechanism: cascade_from_user
     retentionReason: null
-    inUnifiedExport: unverified
+    inUnifiedExport: included
     owner: security-privacy
 
   - domain: chatContextBundleConsumption
     prismaModel: ChatContextBundleConsumption
     deletionMechanism: unverified
     retentionReason: null
-    inUnifiedExport: unverified
+    inUnifiedExport: excluded
     owner: security-privacy

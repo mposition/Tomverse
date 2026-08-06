@@ -24,6 +24,8 @@ import { fileURLToPath } from "node:url";
 
 import { parse } from "yaml";
 
+import { EXPORT_DOMAIN_DECLARATIONS } from "../lib/accountDataExportDomains.ts";
+
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const SCHEMA = path.join(repoRoot, "prisma", "schema.prisma");
 const REGISTRY = path.join(repoRoot, "docs", "policy", "tomverse-chat-data-domain-registry.yaml");
@@ -138,6 +140,48 @@ for (const row of registry.domains) {
     fail(
       `${model}: inUnifiedExport "${row.inUnifiedExport}" must be one of ` +
         [...ALLOWED_EXPORT_STATES].join(", ")
+    );
+  }
+}
+
+// The export side has three places that must agree: this registry, the domain
+// declarations, and the fetchers keyed off them (checked in
+// lib/accountDataExport.ts by exportDomainWiringProblems). Two of the three are
+// compared here; a disagreement means the registry is describing an export that
+// does not exist, or hiding one that does.
+const declaredByDomain = new Map(
+  EXPORT_DOMAIN_DECLARATIONS.map((declaration) => [declaration.domain, declaration])
+);
+
+for (const [model, row] of registered) {
+  const declaration = declaredByDomain.get(row.domain);
+  if (!declaration) {
+    fail(
+      `${model}: domain "${row.domain}" has no export declaration in ` +
+        "lib/accountDataExportDomains.ts. Every data domain needs one, even if it is unverified."
+    );
+    continue;
+  }
+  if (declaration.prismaModel !== model) {
+    fail(
+      `${row.domain}: the registry maps it to ${model} but the export declaration says ` +
+        `${declaration.prismaModel}.`
+    );
+  }
+  if (declaration.state !== row.inUnifiedExport) {
+    fail(
+      `${row.domain}: registry says inUnifiedExport "${row.inUnifiedExport}" but the export ` +
+        `declares "${declaration.state}". The registry must describe the export that exists.`
+    );
+  }
+}
+
+for (const declaration of EXPORT_DOMAIN_DECLARATIONS) {
+  const registeredRow = [...registered.values()].find((row) => row.domain === declaration.domain);
+  if (!registeredRow) {
+    fail(
+      `${declaration.domain}: declared in the export but absent from the registry, so its ` +
+        "deletion path is unrecorded."
     );
   }
 }
