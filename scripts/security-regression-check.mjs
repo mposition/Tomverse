@@ -210,8 +210,17 @@ const checks = [
         decisions.includes("subjectKey") &&
         !decisions.includes("promptText") &&
         // A reset instant handed to a blocked user is always in the future.
+        // The record side has always been guarded; so is the response side,
+        // at the one exit point every ChatAccessError passes through, which
+        // re-checks the instant against the moment the response is built.
         decisions.includes("futureResetAt") &&
-        source.includes("safeDailyResetAt")
+        decisions.includes("withFutureResetAt") &&
+        source.includes("withFutureResetAt(details, now)") &&
+        // Daily boundaries come from a stored time zone and can go stale, so
+        // they reach the caller rolled forward rather than raw -- the same
+        // instant the decision record carries.
+        source.includes("safeDailyResetAt") &&
+        !/resetAt:\s*\w*[Dd]ayWindow\.end\.toISOString\(\)/.test(source)
       );
     },
   },

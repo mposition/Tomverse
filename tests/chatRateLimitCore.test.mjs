@@ -84,8 +84,9 @@ test("rejection details carry a positive wait and a future reset", () => {
     assert.equal(details.availableRequests, 2);
     assert.equal(details.rateLimit, 5);
     assert.equal(details.resetAt, resetAt.toISOString());
-    // Nothing internal: publicChatErrorDetails only strips `internal*`, so a
-    // field named here reaches the browser.
+    // Nothing internal: on the way out publicChatErrorDetails strips `internal*`
+    // and drops a reset instant that is no longer ahead of now, and nothing
+    // else -- so a field named here reaches the browser.
     for (const key of Object.keys(details)) {
         assert.doesNotMatch(key, /^internal/);
     }
