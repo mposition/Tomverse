@@ -77,11 +77,28 @@ a finding, not a blocker to record.
 
 ## Stage 2 — shadow impact analysis, before connecting values
 
-For each verified value, compute against recent traffic:
+Run `npm run report:context-window-impact` (`--days=`, `--limit=`, `--json`).
+It is read-only and computes, against real reservations:
 
 ```text
 budget.inputTokens + budget.maxOutputTokens > proposedContextWindowTokens
 ```
+
+Windows come from the register when a row is verified, and otherwise from what
+`lib/models.ts` declares today — labelled `catalogue`, because a number with no
+recorded source measures current behaviour rather than a verified limit. That
+fallback is what makes the report useful before stage 1 finishes: the 14 models
+whose guard is already live are the ones where the under-count below is not
+hypothetical.
+
+**What the report cannot tell you, and says so.** The reservation stores the
+estimate and the tool overhead as one `inputTokens` sum. For a blocked row it
+can therefore say "over the limit even with the whole 6,400-token overhead
+removed" — the current guard refuses it too — or "inside that band", where
+today's outcome depends on whether the turn carried search. The second number
+is an upper bound on new rejections, not a count of them. Closing the band
+means recording the estimate and the overhead separately in the reservation
+payload, which is a schema change and a separate decision.
 
 Report per model:
 

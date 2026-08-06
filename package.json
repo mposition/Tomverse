@@ -72,7 +72,8 @@
     "verify:review-parity-coverage": "node scripts/verify-review-parity-coverage.mjs",
     "test:e2e:review-parity": "node scripts/run-review-parity.mjs",
     "check:context-window-register": "node --import tsx scripts/check-context-window-register.mjs",
-    "report:token-estimate-accuracy": "node --import tsx scripts/report-token-estimate-accuracy.mjs"
+    "report:token-estimate-accuracy": "node --import tsx scripts/report-token-estimate-accuracy.mjs",
+    "report:context-window-impact": "node --conditions=react-server --import tsx scripts/report-context-window-impact.mjs"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^4.0.24",
