@@ -111,7 +111,7 @@ test("a write failure is swallowed rather than raised", async () => {
     assert.equal(await prisma.routingRun.count(), 0);
 });
 
-test("a run belonging to an account links to it, and survives its deletion", async () => {
+test("deleting the account deletes its routing observations", async () => {
     const user = await prisma.user.create({
         data: { email: `routing-${randomUUID()}@example.test` },
     });
@@ -121,9 +121,21 @@ test("a run belonging to an account links to it, and survives its deletion", asy
         user.id
     );
 
-    // `SetNull`, not cascade: the routing observation carries no content of
-    // the person's, and deleting the account must not silently rewrite what
-    // the Router was measured on.
+    // Cascade rather than SetNull. `subjectKey` and `traceId` would still name
+    // the person after a null userId, so keeping the row would be a
+    // half-anonymisation -- and a brand-new telemetry table has no claim on
+    // surviving its subject.
+    await prisma.user.delete({ where: { id: user.id } });
+    assert.equal(await prisma.routingRun.count(), 0);
+});
+
+test("a guest run is untouched by any account deletion", async () => {
+    // A guest row has no account to cascade from, so the nullable link must
+    // not take it with someone else's deletion.
+    const user = await prisma.user.create({
+        data: { email: `routing-${randomUUID()}@example.test` },
+    });
+    await recordRoutingShadowRun(input({ plan: "Guest" }), ON);
     await prisma.user.delete({ where: { id: user.id } });
     const row = await prisma.routingRun.findFirstOrThrow();
     assert.equal(row.userId, null);

@@ -1,0 +1,579 @@
+schemaVersion: 2
+
+metadata:
+  status: draft
+  lastUpdated: "2026-08-06"
+  owner: security-privacy
+  validatorCommand: npm run check:data-domain-registry
+  purpose: >-
+    Every table holding user data, and what account deletion and account export
+    do with it. The delivery plan promises that a new product table cannot
+    silently escape the privacy workflows; this registry plus its validator are
+    that promise, made checkable. PRIVACY-01 and PRIVACY-02 are graded against
+    it.
+
+# Why two axes instead of one enum.
+#
+# schemaVersion 1 had a single `deletionMechanism` that mixed two unrelated
+# questions -- what happens to the row when the account is deleted, and how long
+# whatever survives is kept. "retained" answered neither precisely: it did not
+# say whether the row keeps naming the person, and it did not say until when.
+#
+#   deletionAction   what happens to the row itself at account deletion.
+#     delete         the row is gone.
+#     anonymise      the row survives without pointing at the person. It is only
+#                    honest when the row cannot be re-joined to them through
+#                    another table, a log, or a third party -- setting userId to
+#                    NULL is the beginning of that, not the end of it.
+#     retain         the row survives, still attributable, under a stated legal
+#                    basis. A legitimate decision, and a recorded one.
+#
+#   retentionPolicy  how long whatever survives is kept.
+#     immediate      nothing survives past the deletion.
+#     ttl            a purge job removes it after ttlDays.
+#     statutory      a fixed period set by accounting or tax law.
+#     legal_hold     kept until a hold is lifted, which can outlast the statute.
+#
+# The two are independent: a row can be anonymised and still sit under a TTL
+# (ChatLimitDecisionEvent), or retained under a statute while its account is
+# gone (BillingTransaction).
+
+rules:
+  - >-
+    Every Prisma model carrying user data needs a row. The validator derives
+    that set from prisma/schema.prisma, so adding a table without registering
+    it fails the build rather than being noticed later.
+  - >-
+    deletionMechanism is pinned against the schema. "cascade_from_user" is only
+    accepted when the model really is reachable from User by cascading
+    relations, so removing a cascade cannot quietly leave data behind.
+  - >-
+    "anonymise" requires the field list, and the validator checks every field
+    against the schema. Any column that still names the person directly --
+    userId, ownerId, subjectKey, traceId, email -- must be in that list, because
+    a row that keeps one of them has not been anonymised.
+  - >-
+    A non-nullable column cannot be anonymised by setting NULL, so
+    anonymisationReplacements has to say what it becomes instead. A unique
+    column needs a per-row value; "{id}" interpolates the row's own primary key.
+  - >-
+    "anonymise" also requires a reidentificationReview once implemented. The
+    validator can check that the direct identifiers are handled; it cannot check
+    whether the row can be re-joined to the person through a child table, a log,
+    or Stripe. That is a human judgement, so the registry demands it in writing
+    with its open risks named rather than assuming it was made.
+  - >-
+    "retain" requires the full retention block. Keeping financial or audit
+    records past deletion is a legitimate decision; keeping them by omission is
+    not, and "we keep it" without a period, a basis and a review date is
+    indistinguishable from having forgotten.
+  - >-
+    implementationStatus separates what the code does from what has been
+    decided. A "planned" row is an honest gap with a work reference, not a
+    claim; PRIVACY-01 stays blocked while any row is planned or unverified.
+  - >-
+    "unverified" means nobody has established what happens yet. It is the
+    honest state for a row that has not been traced through the deletion path,
+    and it blocks PRIVACY-01 rather than being read as safe.
+  - >-
+    inUnifiedExport must equal the state declared in
+    lib/accountDataExportDomains.ts. The registry describes the export that
+    exists, not the one that was intended.
+
+# Measured against develop on 2026-08-06: 31 user-linked models, of which 22 are
+# reachable from User by cascade. Of the other 9: Feedback and RefundRequest are
+# anonymised explicitly in lib/accountDeletion.ts; ChatContextBundleConsumption
+# is deleted explicitly there; BillingTransaction and PrivacyRequest are
+# retained; and the three credit reservations plus ChatLimitDecisionEvent are
+# decided-but-not-yet-built anonymisations.
+domains:
+  # --- the account itself ---------------------------------------------------
+  - domain: user
+    prismaModel: User
+    owner: security-privacy
+    deletionAction: delete
+    deletionMechanism: explicit_deletion
+    retentionPolicy: immediate
+    implementationStatus: implemented
+    inUnifiedExport: included_filtered
+    note: >-
+      The root row, deleted last inside the same transaction so every cascade
+      above fires from it. Registered like any other domain because the export
+      side needs it: without this row a user asking for their data receives
+      their conversations and not their own name, email or plan.
+
+  # --- cascade from User ----------------------------------------------------
+  - domain: userSettings
+    prismaModel: UserSettings
+    owner: security-privacy
+    deletionAction: delete
+    deletionMechanism: cascade_from_user
+    retentionPolicy: immediate
+    implementationStatus: implemented
+    inUnifiedExport: included
+
+  - domain: userMemorySettings
+    prismaModel: UserMemorySettings
+    owner: security-privacy
+    deletionAction: delete
+    deletionMechanism: cascade_from_user
+    retentionPolicy: immediate
+    implementationStatus: implemented
+    inUnifiedExport: included
+
+  - domain: account
+    prismaModel: Account
+    owner: security-privacy
+    deletionAction: delete
+    deletionMechanism: cascade_from_user
+    retentionPolicy: immediate
+    implementationStatus: implemented
+    inUnifiedExport: included_filtered
+
+  - domain: session
+    prismaModel: Session
+    owner: security-privacy
+    deletionAction: delete
+    deletionMechanism: cascade_from_user
+    retentionPolicy: immediate
+    implementationStatus: implemented
+    inUnifiedExport: included_filtered
+
+  - domain: conversation
+    prismaModel: Conversation
+    owner: security-privacy
+    deletionAction: delete
+    deletionMechanism: cascade_from_user
+    retentionPolicy: immediate
+    implementationStatus: implemented
+    inUnifiedExport: included
+
+  - domain: conversationProject
+    prismaModel: ConversationProject
+    owner: security-privacy
+    deletionAction: delete
+    deletionMechanism: cascade_from_user
+    retentionPolicy: immediate
+    implementationStatus: implemented
+    inUnifiedExport: included
+
+  - domain: comparisonReview
+    prismaModel: ComparisonReview
+    owner: security-privacy
+    deletionAction: delete
+    deletionMechanism: cascade_from_user
+    retentionPolicy: immediate
+    implementationStatus: implemented
+    inUnifiedExport: unverified
+
+  - domain: productAnalyticsEvent
+    prismaModel: ProductAnalyticsEvent
+    owner: security-privacy
+    deletionAction: delete
+    deletionMechanism: cascade_from_user
+    retentionPolicy: immediate
+    implementationStatus: implemented
+    inUnifiedExport: unverified
+
+  - domain: billingPromotionRedemption
+    prismaModel: BillingPromotionRedemption
+    owner: security-privacy
+    deletionAction: delete
+    deletionMechanism: cascade_from_user
+    retentionPolicy: immediate
+    implementationStatus: implemented
+    inUnifiedExport: unverified
+
+  - domain: creditPurchase
+    prismaModel: CreditPurchase
+    owner: security-privacy
+    deletionAction: delete
+    deletionMechanism: cascade_from_user
+    retentionPolicy: immediate
+    implementationStatus: implemented
+    inUnifiedExport: included
+
+  - domain: creditLot
+    prismaModel: CreditLot
+    owner: security-privacy
+    deletionAction: delete
+    deletionMechanism: cascade_from_user
+    retentionPolicy: immediate
+    implementationStatus: implemented
+    inUnifiedExport: unverified
+
+  - domain: creditLedgerEntry
+    prismaModel: CreditLedgerEntry
+    owner: security-privacy
+    deletionAction: delete
+    deletionMechanism: cascade_from_user
+    retentionPolicy: immediate
+    implementationStatus: implemented
+    inUnifiedExport: unverified
+
+  - domain: creditDebtEntry
+    prismaModel: CreditDebtEntry
+    owner: security-privacy
+    deletionAction: delete
+    deletionMechanism: cascade_from_user
+    retentionPolicy: immediate
+    implementationStatus: implemented
+    inUnifiedExport: unverified
+
+  - domain: imageGeneration
+    prismaModel: ImageGeneration
+    owner: security-privacy
+    deletionAction: delete
+    deletionMechanism: cascade_from_user
+    retentionPolicy: immediate
+    implementationStatus: implemented
+    inUnifiedExport: unverified
+
+  - domain: imageGenerationGroup
+    prismaModel: ImageGenerationGroup
+    owner: security-privacy
+    deletionAction: delete
+    deletionMechanism: cascade_from_user
+    retentionPolicy: immediate
+    implementationStatus: implemented
+    inUnifiedExport: unverified
+
+  - domain: planChangeRequest
+    prismaModel: PlanChangeRequest
+    owner: security-privacy
+    deletionAction: delete
+    deletionMechanism: cascade_from_user
+    retentionPolicy: immediate
+    implementationStatus: implemented
+    inUnifiedExport: unverified
+
+  - domain: externalImport
+    prismaModel: ExternalImport
+    owner: security-privacy
+    deletionAction: delete
+    deletionMechanism: cascade_from_user
+    retentionPolicy: immediate
+    implementationStatus: implemented
+    inUnifiedExport: unverified
+
+  - domain: externalConversation
+    prismaModel: ExternalConversation
+    owner: security-privacy
+    deletionAction: delete
+    deletionMechanism: cascade_from_user
+    retentionPolicy: immediate
+    implementationStatus: implemented
+    inUnifiedExport: unverified
+
+  - domain: externalMessage
+    prismaModel: ExternalMessage
+    owner: security-privacy
+    deletionAction: delete
+    deletionMechanism: cascade_from_user
+    retentionPolicy: immediate
+    implementationStatus: implemented
+    inUnifiedExport: unverified
+
+  - domain: memoryItem
+    prismaModel: MemoryItem
+    owner: security-privacy
+    deletionAction: delete
+    deletionMechanism: cascade_from_user
+    retentionPolicy: immediate
+    implementationStatus: implemented
+    inUnifiedExport: included
+
+  - domain: memoryEvidence
+    prismaModel: MemoryEvidence
+    owner: security-privacy
+    deletionAction: delete
+    deletionMechanism: cascade_from_user
+    retentionPolicy: immediate
+    implementationStatus: implemented
+    inUnifiedExport: unverified
+
+  - domain: memoryExtractionRun
+    prismaModel: MemoryExtractionRun
+    owner: security-privacy
+    deletionAction: delete
+    deletionMechanism: cascade_from_user
+    retentionPolicy: immediate
+    implementationStatus: implemented
+    inUnifiedExport: unverified
+
+  - domain: accountDataExportRequest
+    prismaModel: AccountDataExportRequest
+    owner: security-privacy
+    deletionAction: delete
+    deletionMechanism: cascade_from_user
+    retentionPolicy: immediate
+    implementationStatus: implemented
+    inUnifiedExport: included_filtered
+    note: >-
+      The audit trail of who downloaded this account's data. Cascade rather
+      than an explicit delete on purpose: the validator can verify a cascade
+      against the schema, where a line in accountDeletion.ts is only a claim.
+      Live rows are also swept at 90 days by cleanupExpiredData -- the ticket
+      dies at its five-minute expiry, but an audit covering only the last five
+      minutes is the same as having none.
+
+  # --- deleted explicitly ---------------------------------------------------
+  - domain: chatContextBundleConsumption
+    prismaModel: ChatContextBundleConsumption
+    owner: security-privacy
+    deletionAction: delete
+    deletionMechanism: explicit_deletion
+    retentionPolicy: immediate
+    implementationStatus: implemented
+    inUnifiedExport: excluded
+    note: >-
+      Also swept by deleteExpiredContextBundleConsumptions on the bundle's own
+      expiry, which is minutes. The explicit delete in lib/accountDeletion.ts is
+      what makes deletion immediate rather than eventual: the userId column is
+      non-null and carries no relation, so nothing else would remove it.
+
+  - domain: routingRun
+    prismaModel: RoutingRun
+    owner: security-privacy
+    deletionAction: delete
+    deletionMechanism: cascade_from_user
+    retentionPolicy: immediate
+    implementationStatus: implemented
+    inUnifiedExport: excluded
+    note: >-
+      Shadow routing telemetry (docs/policy/tomverse-chat-routing.md §5): the
+      model the Router would have chosen, beside the one that actually ran, as
+      versions, labels and counts. Cascade rather than SetNull, deliberately.
+      subjectKey and traceId would still name the person after a null userId,
+      so a surviving row would be a half-anonymisation this registry would have
+      to carry as a gap -- and a new telemetry table has no claim on outliving
+      its subject. Shadow evaluation is an aggregate, so losing the rows of
+      accounts that delete is a sampling effect rather than a hole. A guest run
+      carries no userId and is untouched, which is why the column stays
+      nullable.
+
+  # --- anonymised at deletion, implemented ----------------------------------
+  - domain: feedback
+    prismaModel: Feedback
+    owner: security-privacy
+    deletionAction: anonymise
+    deletionMechanism: explicit_deletion
+    retentionPolicy: immediate
+    implementationStatus: implemented
+    anonymisationFields:
+      - userId
+      - email
+      - message
+      - traceId
+      - userAgent
+      - emailUpdatesConsent
+    anonymisationReplacements:
+      message: "[deleted account]"
+      emailUpdatesConsent: false
+    reidentificationReview:
+      reviewedBy: security-privacy
+      reviewedAt: "2026-08-06"
+      joinRisksConsidered:
+        - >-
+          OPEN. traceId is nulled here, but FeedbackAutoFixCase.traceId and
+          TraceErrorEvidence.traceId carry the same value and are not nulled, so
+          the trace can be recovered in reverse and re-linked to whatever else
+          logged it. Closing this needs those two scrubbed in the same
+          transaction.
+        - >-
+          OPEN. FeedbackLifecycleEvent rows hang off this report and hold the
+          submitter's address for the notification they rendered. The parent's
+          email is cleared and the children's is not.
+        - >-
+          Accepted. The report body is replaced wholesale rather than redacted,
+          so free text the submitter wrote about themselves does not survive.
+    inUnifiedExport: included
+
+  - domain: refundRequest
+    prismaModel: RefundRequest
+    owner: security-privacy
+    deletionAction: anonymise
+    deletionMechanism: explicit_deletion
+    retentionPolicy: immediate
+    implementationStatus: implemented
+    anonymisationFields:
+      - userId
+      - email
+      - stripeCustomerId
+      - stripeSubscriptionId
+      - reason
+    reidentificationReview:
+      reviewedBy: security-privacy
+      reviewedAt: "2026-08-06"
+      joinRisksConsidered:
+        - >-
+          OPEN. stripeRefundId and stripeChargeId survive, and Stripe holds the
+          customer behind both. The Tomverse-side identifiers are cleared while
+          the third-party ones that resolve to the same person are not.
+        - >-
+          OPEN. RefundRequestTimelineEvent.actorEmail survives on the child
+          rows, and the requester is the actor on the events they raised.
+        - >-
+          Accepted. subscriptionCurrentPeriodEnd, plan and the refund amount
+          remain. They are a financial shape, not an identifier, and the row is
+          kept so a refund dispute can still be answered.
+    inUnifiedExport: unverified
+
+  # --- anonymised at deletion, decided but not yet built ---------------------
+  - domain: chatLimitDecisionEvent
+    prismaModel: ChatLimitDecisionEvent
+    owner: security-privacy
+    deletionAction: anonymise
+    deletionMechanism: explicit_deletion
+    retentionPolicy: ttl
+    ttlDays: 90
+    implementationStatus: planned
+    plannedWorkRef: "PRIVACY-01: anonymise rate-limit telemetry at account deletion"
+    anonymisationFields:
+      - userId
+      - subjectKey
+      - traceId
+    anonymisationReplacements:
+      subjectKey: "deleted-account"
+      traceId: "deleted-account"
+    inUnifiedExport: excluded
+    note: >-
+      Today nothing happens to this table at account deletion: userId is
+      nullable but carries no relation, so there is no SetNull and no cascade,
+      and the row keeps naming the user until purgeExpiredChatLimitDecisions
+      removes it up to 90 days later. The TTL is the backstop, not the
+      deletion path.
+
+  - domain: chatCreditReservation
+    prismaModel: ChatCreditReservation
+    owner: security-privacy
+    deletionAction: anonymise
+    deletionMechanism: explicit_deletion
+    retentionPolicy: immediate
+    implementationStatus: planned
+    plannedWorkRef: "PRIVACY-01: scrub reservation identifiers beyond the SetNull"
+    anonymisationFields:
+      - userId
+      - subjectKey
+      - traceId
+      - providerRequestId
+      - providerResponseId
+      - reservationPayload
+      - providerUsageSnapshot
+    anonymisationReplacements:
+      subjectKey: "deleted-account"
+      traceId: "deleted-account"
+      reservationPayload: "{}"
+    inUnifiedExport: included_filtered
+    note: >-
+      The relation is onDelete: SetNull, so userId clears itself today and
+      nothing else does. subjectKey and traceId still join this row to the chat
+      logs, and providerRequestId joins it to the provider's own records --
+      which is exactly the case where userId = NULL looks like anonymisation
+      and is not.
+
+  - domain: imageCreditReservation
+    prismaModel: ImageCreditReservation
+    owner: security-privacy
+    deletionAction: anonymise
+    deletionMechanism: explicit_deletion
+    retentionPolicy: immediate
+    implementationStatus: planned
+    plannedWorkRef: "PRIVACY-01: scrub reservation identifiers beyond the SetNull"
+    anonymisationFields:
+      - userId
+      - generationId
+      - conversationId
+      - targetId
+      - providerRequestId
+      - reservationPayload
+    anonymisationReplacements:
+      generationId: "anonymised:{id}"
+      reservationPayload: "{}"
+    inUnifiedExport: included_filtered
+    note: >-
+      generationId is unique, so it cannot take a shared placeholder; the
+      replacement interpolates the row's own primary key. It points at an
+      ImageGeneration that cascades away, but the identifier itself is what
+      other logs recorded.
+
+  - domain: memoryExtractionCreditReservation
+    prismaModel: MemoryExtractionCreditReservation
+    owner: security-privacy
+    deletionAction: anonymise
+    deletionMechanism: explicit_deletion
+    retentionPolicy: immediate
+    implementationStatus: planned
+    plannedWorkRef: "PRIVACY-01: scrub reservation identifiers beyond the SetNull"
+    anonymisationFields:
+      - userId
+      - runId
+      - reservationPayload
+    anonymisationReplacements:
+      runId: "anonymised:{id}"
+      reservationPayload: "{}"
+    inUnifiedExport: included_filtered
+
+  # --- retained -------------------------------------------------------------
+  - domain: billingTransaction
+    prismaModel: BillingTransaction
+    owner: security-privacy
+    deletionAction: retain
+    retentionPolicy: statutory
+    implementationStatus: implemented
+    retention:
+      retentionPolicyRef: "TBD-finance-retention-schedule"
+      legalBasis: >-
+        Statutory accounting and tax records, and evidence for payment disputes
+        and refunds. Australian tax law requires records explaining a
+        transaction be kept for five years from the transaction; the OAIC's
+        APP 11.2 destruction obligation is expressly subject to a retention
+        requirement under an Australian law, and GDPR Article 17(3)(b) makes
+        the same carve-out for a legal obligation. Both are exemptions from
+        deletion, not from minimisation.
+      retentionStartsFrom: "paidAt"
+      retentionPeriod: "TBD-pending-finance-and-legal-approval"
+      owner: finance
+      legalHoldOverridesPurge: true
+      nextReviewAt: "2026-11-05"
+    inUnifiedExport: included_filtered
+    note: >-
+      OPEN, and it cuts both ways. The relation is onDelete: SetNull, so the
+      userId clears on deletion while the row is kept for a statutory purpose
+      that normally needs the record attributable. Either the retention basis
+      does not require attribution -- in which case the row is really
+      retain-and-anonymise and should say so -- or the SetNull defeats the
+      basis. Finance and legal have to answer that before the period below can
+      be filled in.
+
+  - domain: privacyRequest
+    prismaModel: PrivacyRequest
+    owner: security-privacy
+    deletionAction: retain
+    retentionPolicy: legal_hold
+    implementationStatus: implemented
+    minimisationFields:
+      - email
+      - note
+      - legalHoldReason
+      - handledByEmail
+    retention:
+      retentionPolicyRef: "TBD-compliance-retention-schedule"
+      legalBasis: >-
+        Evidence that a privacy request was received and answered, and defence
+        of related legal claims -- GDPR Article 17(3)(e). The record of a
+        deletion request is the one record a deletion request cannot itself
+        erase.
+      retentionStartsFrom: "completedAt"
+      retentionPeriod: "TBD-pending-legal-approval"
+      owner: legal-compliance
+      legalHoldOverridesPurge: true
+      nextReviewAt: "2026-11-05"
+    inUnifiedExport: included
+    note: >-
+      The retained row should be the fact of the request, not its contents.
+      email is what proves who asked, so it stays until the hold lifts; note and
+      legalHoldReason are free text that can name anyone and should be
+      minimised once the request closes. handledByEmail names a Tomverse
+      operator rather than the requester and is withheld from the export for
+      that reason, not kept for this one.

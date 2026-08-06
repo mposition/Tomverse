@@ -7,6 +7,7 @@ import { authOptions } from "@/lib/auth";
 import { conversationKindNotSupportedResponse } from "@/lib/conversationKindGuard";
 import {
   IMAGE_GENERATION_READ_SELECT,
+  readImageComposerRestore,
   serializeImageGeneration,
 } from "@/lib/imageGenerationRead";
 import { prisma } from "@/lib/prisma";
@@ -62,9 +63,17 @@ export async function GET(req: Request, { params }: Params) {
       reservations.map((row) => [row.generationId, row])
     );
 
+    // Carried on the history read rather than a second endpoint: the timeline
+    // and the composer's starting state then come from one server moment, and
+    // opening a conversation still costs one round trip.
+    const composerRestore = await readImageComposerRestore(
+      conversation.id
+    );
+
     return NextResponse.json(
       {
         conversationId: conversation.id,
+        composerRestore,
         generations: await Promise.all(
           generations.map((generation) =>
             serializeImageGeneration(

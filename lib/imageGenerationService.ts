@@ -65,6 +65,7 @@ import {
   STALE_IMAGE_SETTLING_AFTER_MS,
   type ImageGenerationFailurePhase,
 } from "@/lib/imageGenerationStateCore";
+import { safeDailyResetAt } from "@/lib/chatLimitDecisionCore";
 import { resolveImageProviderBudget } from "@/lib/imageProviderBudget";
 import { reportOperationalIncident } from "@/lib/operationalMonitoring";
 import { prisma } from "@/lib/prisma";
@@ -584,7 +585,10 @@ export const requestImageGeneration = async (
             1,
             Math.ceil((dayWindow.end.getTime() - now.getTime()) / 1000)
           ),
-          { resetAt: futureIso(dayWindow.end, now) }
+          // Rolled forward whole days rather than clamped to a few seconds:
+          // this is a daily boundary, and a stale one (a stored time zone
+          // moved, a DST shift) resets a day later, not in a moment.
+          { resetAt: safeDailyResetAt(dayWindow.end, now).toISOString() }
         );
       }
 

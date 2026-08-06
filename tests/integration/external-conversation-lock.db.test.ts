@@ -17,6 +17,7 @@ import {
     deleteExternalConversationSnapshot,
     getExternalConversation,
 } from "@/lib/externalImportService";
+import { iterateMemoryExportItems } from "@/lib/memoryService";
 import { retrieveMemoryContext } from "@/lib/memoryRetrievalService";
 import { memoryRetrievalTerms } from "@/lib/memoryRetrievalTerms";
 import { putMemorySettings } from "@/lib/memoryService";
@@ -738,5 +739,77 @@ test("the preview tells a non-owner nothing", async () => {
     assert.deepEqual(
         await previewExternalConversationLock(stranger.id, conversation.id),
         { blockedCount: 0, backedCount: 0 }
+    );
+});
+
+/* --------------------------------------------------------------- §13.2 export */
+
+test("the memory export withholds a locked source's reference", async () => {
+    // The self-documented gap this closes: until the lock column existed the
+    // export returned the reference unconditionally, and B5 is what made that
+    // wrong rather than merely pending.
+    const { user, conversation, message } = await seedSource();
+    await seedMemory(user.id, "잠긴 출처의 기억", {
+        messageIds: [message.id],
+    });
+    await setExternalConversationLock({
+        userId: user.id,
+        conversationId: conversation.id,
+        passwordHash: await hashConversationPassword(PASSWORD),
+    });
+
+    const items = [];
+    for await (const item of iterateMemoryExportItems(user.id)) items.push(item);
+
+    assert.equal(items.length, 1, "the memory itself is still exported");
+    assert.deepEqual(items[0].evidence, [
+        { sourceType: "external_message", locked: true },
+    ]);
+    const serialized = JSON.stringify(items);
+    assert.ok(!serialized.includes(conversation.id));
+    assert.ok(!serialized.includes(message.id));
+});
+
+test("an unlocked source still carries its reference", async () => {
+    const { user, conversation, message } = await seedSource();
+    await seedMemory(user.id, "열린 출처의 기억", {
+        messageIds: [message.id],
+    });
+
+    const items = [];
+    for await (const item of iterateMemoryExportItems(user.id)) items.push(item);
+
+    assert.deepEqual(items[0].evidence, [
+        {
+            sourceType: "external_message",
+            externalConversationId: conversation.id,
+            ordinal: 0,
+            role: "user",
+        },
+    ]);
+});
+
+test("unlocking gives the reference back", async () => {
+    const { user, conversation, message } = await seedSource();
+    await seedMemory(user.id, "잠갔다 푼 출처의 기억", {
+        messageIds: [message.id],
+    });
+    await setExternalConversationLock({
+        userId: user.id,
+        conversationId: conversation.id,
+        passwordHash: await hashConversationPassword(PASSWORD),
+    });
+    await setExternalConversationLock({
+        userId: user.id,
+        conversationId: conversation.id,
+        passwordHash: null,
+    });
+
+    const items = [];
+    for await (const item of iterateMemoryExportItems(user.id)) items.push(item);
+    assert.equal(
+        (items[0].evidence[0] as { externalConversationId?: string })
+            .externalConversationId,
+        conversation.id
     );
 });

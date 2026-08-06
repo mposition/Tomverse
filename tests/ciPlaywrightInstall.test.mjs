@@ -101,6 +101,39 @@ test("the wrapper retries both halves and bounds each attempt", () => {
     assert.match(script, /sleep "\$delay"/);
 });
 
+test("a retry clears the lock the attempt it retries is still holding", () => {
+    // The retry loop was not enough on its own. `timeout` signals the process
+    // group it made, but apt-get runs as root under Playwright's sudo and an
+    // unprivileged runner cannot signal a root process, so a timed-out attempt
+    // leaves apt-get alive holding /var/lib/dpkg/lock-frontend. The next two
+    // attempts then died in about a second each on "Could not get lock", and
+    // one slow mirror was reported as three failures (2026-08-06,
+    // review-parity-shadow).
+    const script = read(SCRIPT_PATH);
+    assert.match(script, /release_dpkg_lock/);
+    // Waiting first: a package that finishes installing is one the next
+    // attempt does not have to fetch again.
+    assert.match(script, /pgrep -x apt-get/);
+    assert.match(script, /PLAYWRIGHT_INSTALL_DPKG_LOCK_WAIT/);
+    // Escalation, because waiting forever inside a bounded step is just the
+    // step timeout with extra steps.
+    assert.match(script, /pkill -KILL -x apt-get/);
+    // A killed apt-get can leave a half-configured package that fails every
+    // later install until it is repaired.
+    assert.match(script, /dpkg --configure -a/);
+    // Wired to the half that takes the lock, and only that half.
+    assert.match(
+        script,
+        /retry "playwright install-deps" release_dpkg_lock/,
+        "the apt half must recover the lock between attempts"
+    );
+    assert.match(
+        script,
+        /retry "playwright install" ""/,
+        "the browser download holds no system lock and needs no recovery"
+    );
+});
+
 test("the wrapper is executable", () => {
     // A workflow `run:` of a non-executable path fails with "Permission
     // denied" on every job at once, which is a worse outage than the flake.

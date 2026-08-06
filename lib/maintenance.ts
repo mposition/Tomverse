@@ -9,6 +9,7 @@ import {
 import { expireCreditLots } from "@/lib/creditLedger";
 import { reconcileExpiredChatCreditReservations } from "@/lib/chatSecurity";
 import { purgeExpiredChatLimitDecisions } from "@/lib/chatLimitDecisions";
+import { purgeExpiredAccountDataExportRequests } from "@/lib/accountDataExportTickets";
 import { deleteExpiredContextBundleConsumptions } from "@/lib/chatContextBundleService";
 import { dispatchPendingMemoryExtractionRuns } from "@/lib/memoryExtractionWorker";
 import { purgeExpiredTraceErrorEvidence } from "@/lib/traceErrorEvidence";
@@ -475,7 +476,16 @@ export async function cleanupExpiredData() {
   // is what actually guarantees a run finishes.
   const memoryExtraction = await dispatchPendingMemoryExtractionRuns(now);
 
+  // The export ticket dies at its five-minute expiry; the row is what tells an
+  // account owner their data was downloaded last month, so it is kept for the
+  // same 90 days as the other security audit trails. Purging it on expiry
+  // would leave an audit covering only the last five minutes, which is the
+  // same as having none.
+  const accountDataExportRequests =
+    await purgeExpiredAccountDataExportRequests(now);
+
   return {
+    accountDataExportRequests,
     contextBundleConsumptions,
     memoryExtractionRuns: memoryExtraction.reclaimedRuns,
     memoryExtractionDispatched: memoryExtraction.dispatchedRuns,

@@ -41,4 +41,4 @@ CREATE INDEX "RoutingRun_mode_createdAt_idx" ON "RoutingRun"("mode", "createdAt"
 CREATE INDEX "RoutingRun_userId_createdAt_idx" ON "RoutingRun"("userId", "createdAt");
 
 -- AddForeignKey
-ALTER TABLE "RoutingRun" ADD CONSTRAINT "RoutingRun_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+ALTER TABLE "RoutingRun" ADD CONSTRAINT "RoutingRun_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;
