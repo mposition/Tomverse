@@ -133,6 +133,31 @@ export const EXPORT_DOMAIN_DECLARATIONS: ExportDomainDeclaration[] = [
     withheldReason: "Same provider cost basis as chat_credit_usage.",
   },
 
+  {
+    domain: "externalImport",
+    publicName: "imports",
+    prismaModel: "ExternalImport",
+    state: "included_filtered",
+    withheldReason:
+      "Which provider was imported, how it ended, how much it carried and when. The machinery that produced it is withheld: parser and digest versions, the content digests, the batch protocol's sequence numbers and idempotency key, and the client fingerprint -- a pseudonymous device identifier rather than anything the user wrote.",
+  },
+  {
+    domain: "externalConversation",
+    publicName: "imported_conversations",
+    prismaModel: "ExternalConversation",
+    state: "included_filtered",
+    withheldReason:
+      "The conversations the user imported, with their titles, source timestamps and counts. Integrity digests are withheld as internals, and the snapshot lock password is withheld because a copy of it is an offline attack on the one secret this table holds. A conversation the owner has locked is reduced to existence metadata -- that it exists, that it is locked, and when it arrived -- because an export is a document that leaves the account, where a title outlives the lock (policy §13.2).",
+  },
+  {
+    domain: "externalMessage",
+    publicName: "imported_messages",
+    prismaModel: "ExternalMessage",
+    state: "included_filtered",
+    withheldReason:
+      "The messages of the imported conversations, in order. Content digests and the provider's own stable identifiers are withheld as internals, and the messages of a locked conversation are withheld entirely, for the same reason their conversation's title is.",
+  },
+
   // --- nothing in the row is the user's data --------------------------------
   {
     domain: "chatLimitDecisionEvent",
@@ -165,9 +190,6 @@ export const EXPORT_DOMAIN_DECLARATIONS: ExportDomainDeclaration[] = [
   { domain: "imageGenerationGroup", publicName: "image_generation_groups", prismaModel: "ImageGenerationGroup", state: "unverified" },
   { domain: "refundRequest", publicName: "refund_requests", prismaModel: "RefundRequest", state: "unverified" },
   { domain: "planChangeRequest", publicName: "plan_changes", prismaModel: "PlanChangeRequest", state: "unverified" },
-  { domain: "externalImport", publicName: "imports", prismaModel: "ExternalImport", state: "unverified" },
-  { domain: "externalConversation", publicName: "imported_conversations", prismaModel: "ExternalConversation", state: "unverified" },
-  { domain: "externalMessage", publicName: "imported_messages", prismaModel: "ExternalMessage", state: "unverified" },
   { domain: "memoryEvidence", publicName: "memory_evidence", prismaModel: "MemoryEvidence", state: "unverified" },
   { domain: "memoryExtractionRun", publicName: "memory_extraction_runs", prismaModel: "MemoryExtractionRun", state: "unverified" },
 ];
