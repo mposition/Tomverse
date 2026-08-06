@@ -10,6 +10,9 @@ import {
   listEnabledImageModels,
   maxImageRequestCostMicroUsd,
   minimumCreditsForImageOption,
+  imageModelChipLabel,
+  shouldUseCompactImageModelPicker,
+  IMAGE_INLINE_MODEL_DISCOVERY_LIMIT,
 } from "../lib/imageModelRegistry.ts";
 import {
   IMAGE_COST_PER_CREDIT_CEILING_MICRO_USD,
@@ -213,5 +216,48 @@ test("no model claims a thinking level nobody verified it accepts", () => {
   for (const model of IMAGE_MODEL_REGISTRY) {
     if (model.thinkingLevel === undefined) continue;
     assert.ok(["low", "medium", "high"].includes(model.thinkingLevel), model.id);
+  }
+});
+
+test("the composer collapses the unselected models only past three enabled", () => {
+  // The boundary, pinned exactly: two and three stay inline so a viewer
+  // discovers the second and third model without a click -- multi-model
+  // comparison is the product, and a feature nobody is shown is a feature
+  // nobody uses. Four is where the model row starts outgrowing the quality,
+  // size and prompt rows above it.
+  assert.equal(IMAGE_INLINE_MODEL_DISCOVERY_LIMIT, 3);
+  assert.equal(shouldUseCompactImageModelPicker(1), false);
+  assert.equal(shouldUseCompactImageModelPicker(2), false);
+  assert.equal(shouldUseCompactImageModelPicker(3), false);
+  assert.equal(shouldUseCompactImageModelPicker(4), true);
+  assert.equal(shouldUseCompactImageModelPicker(9), true);
+});
+
+test("the disclosure limit does not read the execution limit's environment", () => {
+  // IMAGE_GROUP_MAX_MODELS bounds how much provider work one request starts
+  // and is deployment-tunable; this bounds one row of UI and is a literal.
+  // Deriving either from the other would let an execution decision restyle the
+  // composer, or a layout decision change what a request may cost -- so the
+  // decision must not move when that variable does.
+  const before = shouldUseCompactImageModelPicker(3);
+  process.env.IMAGE_GROUP_MAX_MODELS = "4";
+  try {
+    assert.equal(shouldUseCompactImageModelPicker(3), before);
+    assert.equal(IMAGE_INLINE_MODEL_DISCOVERY_LIMIT, 3);
+  } finally {
+    delete process.env.IMAGE_GROUP_MAX_MODELS;
+  }
+});
+
+test("a chip label may be shortened; the model's identity may not", () => {
+  const grok = getImageModel("grok-imagine-image-quality-20260403");
+  assert.equal(imageModelChipLabel(grok), "Grok Imagine");
+  assert.equal(grok.name, "Grok Imagine Image Quality");
+  // No short name means the full one already fits -- never an empty label.
+  const openai = getImageModel("gpt-image-2");
+  assert.equal(openai.shortName, undefined);
+  assert.equal(imageModelChipLabel(openai), "GPT Image 2");
+  for (const model of IMAGE_MODEL_REGISTRY) {
+    assert.ok(imageModelChipLabel(model).length > 0, model.id);
   }
 });

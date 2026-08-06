@@ -62,7 +62,9 @@ const ENGLISH_STRING_CEILING = {
   // Limited market. The chat interface and the model finder are English.
   // +1 (190 -> 191): modelFinder.saveAsDefaultHint arrived with the saved
   // new-conversation combination and zh takes modelFinder from en wholesale.
-  zh: 191,
+  // +2 (191 -> 193): the two imageGenerationRestore* notices, which zh takes
+  // from en wholesale like the rest of the image workspace copy.
+  zh: 193,
   // Preview markets, all of which spread `...en.chat` and `en.modelFinder`.
   // fr +1 (226 -> 227): modelFinder.saveAsDefaultHint, taken from en wholesale.
   // fr +2 (230 -> 232): externalImport.messagesCount and

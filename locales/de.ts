@@ -167,6 +167,8 @@ export const de = {
         imageGenerationErrorBudget: "Die Bildgenerierung ist vorübergehend pausiert. Versuche es gleich erneut.",
         imageGenerationErrorConflict: "Dein Credit-Guthaben hat sich während der Reservierung geändert. Versuche es erneut.",
         imageGenerationErrorGeneric: "Die Bildgenerierung konnte nicht gestartet werden. Versuche es erneut.",
+        imageGenerationRestoreExcluded: "{models} ist derzeit nicht verfügbar und wurde aus der wiederhergestellten Auswahl entfernt.",
+        imageGenerationRestoreOptionsUnavailable: "Qualität und Größe des letzten Vergleichs konnten nicht wiederhergestellt werden; es gelten die Standardwerte.",
         modelSelectionNotice: "Einige Modelle Ihrer gespeicherten Standardkombination sind nicht verfügbar; eine Ersatzkombination wird verwendet. Speichern Sie die Kombination in den Einstellungen erneut, um sie zu bestätigen.",
         guestVerificationTitle: "Bitte bestätigen Sie, um fortzufahren",
         guestVerificationDescription: "Eine kurze Prüfung, die automatisierte Anfragen reduziert. Meist läuft sie von selbst durch.",
