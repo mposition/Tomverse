@@ -557,6 +557,19 @@ const checks = [
     },
   },
   {
+    // The concurrency policy names rollbackChatAdmission() in step 4 of the
+    // admission lifecycle and nothing called it. A preflight that reserves and
+    // then fails to answer left every slot held until the admission TTL, so
+    // the retry step 6 asks the client to make was refused for concurrency on
+    // a subject running nothing.
+    name: "A preflight that fails after admission gives the slots back",
+    file: "app/api/chat/preflight/route.ts",
+    test: (source) =>
+      source.includes("grantedAdmissionId = result.admission.admissionId") &&
+      source.includes("if (grantedAdmissionId)") &&
+      source.includes("rollbackChatAdmission(grantedAdmissionId"),
+  },
+  {
     // §10's reason for one shared context builder applies to the guard too:
     // preflight prices what chat sends. Without this check preflight quoted
     // credits and reserved a concurrency slot for a model the chat route was
