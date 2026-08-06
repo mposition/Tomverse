@@ -41,6 +41,8 @@ import {
     estimateToolInputTokenOverhead,
     toReservedInputTokens,
 } from "@/lib/chatTokenEstimate";
+import { resolveInputUsageSource } from "@/lib/tokenEstimateShadow";
+import { recordShadowSettlement } from "@/lib/tokenEstimateShadowRecorder";
 import { futureResetAt } from "@/lib/chatLimitDecisionCore";
 import { recordChatLimitDecision } from "@/lib/chatLimitDecisions";
 import { isWebSearchMode, type WebSearchMode } from "@/lib/appDefaults";
@@ -3182,6 +3184,33 @@ export const settleChatUsage = async (
                 reconciledAt: options?.reconciled ? new Date() : null,
                 lastError: options?.reason?.slice(0, 500) || null,
             },
+        });
+
+        // Shadow only. Provenance is decided from the provider's *input* count
+        // alone -- deliberately not from `usageSource` above, which is decided
+        // by whether output tokens arrived. A turn that reported output but not
+        // input has an input figure that is the estimate itself, and
+        // calibrating on it would compare an estimate with a copy of itself.
+        await recordShadowSettlement({
+            attemptId: reservation.reservationId,
+            providerReportedInputTokens: Number.isSafeInteger(usage.inputTokens)
+                ? Math.max(0, usage.inputTokens!)
+                : null,
+            inputUsageSource: resolveInputUsageSource({
+                providerReportedInputTokens: usage.inputTokens,
+                providerReturnedUsage: usage.usageFromProvider !== false,
+            }),
+            outcome:
+                usage.outcome === "completed"
+                    ? "completed"
+                    : usage.outcome === "cancelled"
+                      ? "cancelled"
+                      : "failed",
+            // The settlement path receives no partial-stream signal, so this
+            // stays false until it does. A cancelled turn is already excluded
+            // from calibration on its own flag.
+            isPartial: false,
+            isCancelled: usage.outcome === "cancelled",
         });
 
         return {

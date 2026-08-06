@@ -548,7 +548,22 @@ export async function* iterateMemoryExportItems(userId: string) {
         // from these rows, and inferring them from the query inside it is
         // circular (TS7022). Same reason iterateExternalExportConversations
         // spells its row type out.
-        const rows: Array<MemoryExportSource & { id: string }> =
+        // The row shape the query returns, before the lock state is folded
+        // into the flag the export core reads.
+        type ExportRow = Omit<MemoryExportSource, "evidences"> & {
+            id: string;
+            evidences: Array<{
+                sourceType: string;
+                manualContent: string | null;
+                externalMessage: {
+                    externalConversationId: string;
+                    ordinal: number;
+                    role: string;
+                    conversation: { password: string | null };
+                } | null;
+            }>;
+        };
+        const rows: ExportRow[] =
             await prisma.memoryItem.findMany({
                 where: {
                     userId,
@@ -590,6 +605,12 @@ export async function* iterateMemoryExportItems(userId: string) {
                                     externalConversationId: true,
                                     ordinal: true,
                                     role: true,
+                                    // §13.2: a locked snapshot's reference is
+                                    // withheld, so the lock state has to be
+                                    // read here rather than assumed.
+                                    conversation: {
+                                        select: { password: true },
+                                    },
                                 },
                             },
                         },
@@ -597,7 +618,22 @@ export async function* iterateMemoryExportItems(userId: string) {
                 },
             });
         if (rows.length === 0) return;
-        for (const row of rows) yield serializeMemoryExportItem(row);
+        for (const row of rows) {
+            yield serializeMemoryExportItem({
+                ...row,
+                evidences: row.evidences.map((evidence) => ({
+                    ...evidence,
+                    externalMessage: evidence.externalMessage
+                        ? {
+                              ...evidence.externalMessage,
+                              sourceLocked:
+                                  evidence.externalMessage.conversation
+                                      .password != null,
+                          }
+                        : null,
+                })),
+            });
+        }
         if (rows.length < EXPORT_PAGE_SIZE) return;
         const last = rows[rows.length - 1];
         cursor = { createdAt: last.createdAt, id: last.id };

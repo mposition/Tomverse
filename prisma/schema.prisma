@@ -84,6 +84,7 @@ model User {
   memoryItems                        MemoryItem[]
   memoryExtractionRuns               MemoryExtractionRun[]
   memorySettings                     UserMemorySettings?
+  accountDataExportRequests          AccountDataExportRequest[]
 
   @@index([plan, id])
   @@index([createdAt])
@@ -2333,4 +2334,122 @@ model ChatContextBundleConsumption {
 
   @@index([expiresAt])
   @@index([userId, createdAt])
+}
+
+/// One dual-estimate observation for prompt-token estimator calibration (G1 in
+/// docs/policy/tomverse-chat-model-capability-inventory.md).
+///
+/// Shadow only. The candidate estimate is recorded and compared; it never
+/// reaches credit reservation, request rejection, routing or a provider call.
+/// No prompt text is stored either -- only derived counts and a cohort label,
+/// so a sample can be analysed without the conversation it came from.
+///
+/// `inputUsageSource` is deliberately its own field rather than reused from the
+/// settlement snapshot: that one is decided by whether the provider reported
+/// *output* tokens, while the input figure independently falls back to the
+/// reserved value. Calibrating on a fallback sample compares an estimate with a
+/// copy of itself and reports an error near zero.
+model TokenEstimateShadowSample {
+  id String @id @default(cuid())
+
+  /// The provider attempt this observation belongs to. Unique so the
+  /// reservation-time insert and the settlement-time update address one row,
+  /// and so a retry is a separate sample rather than an overwrite.
+  attemptId  String @unique
+  modelId    String
+  providerId String
+
+  /// The estimate that actually drove reservation and limits.
+  controlEstimatorVersion        String
+  controlRawEstimatedInputTokens Int
+
+  /// The estimate under evaluation. Recorded only.
+  candidateEstimatorVersion        String
+  candidateRawEstimatedInputTokens Int
+
+  /// What was really reserved, control-derived, including tool overhead.
+  reservedInputTokens Int
+
+  tokenizerFamily   String
+  contentCohort     String
+  hangulCharacters  Int
+  hanKanaCharacters Int
+  nonCjkBytes       Int
+  /// Symbol density of the non-CJK part. Stored because a cohort label bakes in
+  /// today's threshold; the ratio lets it be re-derived without the text.
+  nonCjkSymbolRatio Float  @default(0)
+
+  /// Null unless the provider itself reported input tokens. Never filled from a
+  /// reservation fallback.
+  providerReportedInputTokens Int?
+  /// `provider_reported` | `fallback_estimator` | `missing`.
+  inputUsageSource            String @default("missing")
+
+  /// `completed` | `failed` | `cancelled`.
+  outcome           String  @default("failed")
+  isPartial         Boolean @default(false)
+  isCancelled       Boolean @default(false)
+  isFallbackAttempt Boolean @default(false)
+
+  createdAt DateTime  @default(now())
+  settledAt DateTime?
+
+  /// The calibration query's own filter: eligible samples are provider-reported
+  /// and completed.
+  @@index([inputUsageSource, outcome, createdAt])
+  /// Family and cohort are how the harness segments its report.
+  @@index([tokenizerFamily, contentCohort, createdAt])
+  @@index([modelId, createdAt])
+}
+
+/// One row per account-data-export download request: the single-use ticket and
+/// the audit record are the same object.
+///
+/// Keeping them together is deliberate. A ticket table without an audit trail
+/// answers "can this link still be used" and nothing about who used it; an
+/// audit table separate from the ticket has to be written by a second call that
+/// a future edit can forget. One row, written at issue and claimed at
+/// redemption, cannot drift apart from itself.
+///
+/// The token is never stored -- only its HMAC -- so a copy of this table does
+/// not yield a working download link.
+model AccountDataExportRequest {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  /// HMAC-SHA256 of the single-use token, keyed by NEXTAUTH_SECRET.
+  tokenHash String @unique
+
+  /// issued | downloaded | refused
+  status String @default("issued")
+
+  expiresAt  DateTime
+  consumedAt DateTime?
+
+  /// Hashed request context. Enough to notice a download from somewhere the
+  /// account has never been; never enough to reconstruct where someone was.
+  issuedIpHash          String
+  issuedUserAgentHash   String
+  consumedIpHash        String?
+  consumedUserAgentHash String?
+
+  /// Why a redemption was refused: unknown_token | wrong_user | expired |
+  /// already_used. Recorded here and never told to the caller, who learns only
+  /// that the link is unusable.
+  refusalReason String?
+
+  /// What the download actually contained, so the audit answers "what did they
+  /// get" and not only "did they download". Never the data itself.
+  exportSchemaVersion Int?
+  includedDomainCount Int?
+  filteredDomainCount Int?
+  byteLength          Int?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId, createdAt])
+  @@index([expiresAt])
+  @@index([status, createdAt])
 }

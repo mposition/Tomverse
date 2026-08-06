@@ -65,7 +65,14 @@ const REASONING_SUGGESTION_ORDER = [
 // retirement, when its successor is cheaper and longer-context, is not a
 // recommendation this wizard should make. Two near-identical OpenAI Standard
 // models would also crowd the three-slot result and cost it provider spread.
-const STANDARD_CANDIDATE_ORDER = [
+/**
+ * Also read by the Router's shadow selection (lib/routerSelection.ts), which
+ * uses it only as a deterministic tie-break. Exported rather than copied so
+ * the repository holds one curated opinion about which models suit which task
+ * -- two would drift, and the second would be the one nobody remembered to
+ * update.
+ */
+export const STANDARD_CANDIDATE_ORDER = [
   "gpt-5-6-luna",
   "gemini-2-5-flash",
   "claude-haiku-4-5",
@@ -74,7 +81,8 @@ const STANDARD_CANDIDATE_ORDER = [
   "qwen3.6-flash",
 ] as const;
 
-const TASK_SCORES: Record<ModelFinderTask, Partial<Record<string, number>>> = {
+/** Curated task-to-model preference. Shared with the Router; see above. */
+export const TASK_SCORES: Record<ModelFinderTask, Partial<Record<string, number>>> = {
   documents: {
     "gemini-2-5-flash": 5,
     "gpt-5-6-luna": 4,
