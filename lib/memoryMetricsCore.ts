@@ -170,9 +170,9 @@ export function creditPerChunkPercentiles(
  */
 export const MEMORY_METRICS_UNAVAILABLE = [
     {
-        metric: "followup_repair_proxy",
+        metric: "followup_repair_proxy_feedback_signal",
         reason:
-            "requires answers attributed to the memories they used; injection is wired but fail-closed, so no answer has been attributed yet",
+            "the follow-up, regenerate and memory-off signals are measured; Feedback still carries no link to the answer it is about, so a report cannot be attributed to a memory-shaped answer",
     },
 ] as const;
 
@@ -215,6 +215,49 @@ export type MemoryPairBreakdown = {
     failureRate: number | null;
 };
 
+/**
+ * §22's follow-up / repair proxy, per arm.
+ *
+ * Aggregated in SQL so no conversation id and no message text ever reaches
+ * this module: the database returns two rows of counts and nothing else.
+ */
+export type FollowupArmSample = {
+    /** `memory` when the answer's prompt carried at least one memory. */
+    arm: "memory" | "plain";
+    answers: number;
+    /** Answers followed by a user message inside the §22 window. */
+    followups: number;
+    /** Answers followed by another answer inside it, i.e. a regenerate. */
+    regenerates: number;
+};
+
+/**
+ * §22 is explicit that this is a *proxy*, and the reason is worth restating
+ * where the numbers are built: a follow-up is not a complaint. People ask
+ * second questions because the first answer was good.
+ *
+ * That is why the shape is two arms and a difference, never a single rate. A
+ * bare "12% of memory answers got a follow-up" is uninterpretable — it is
+ * only informative against the same measurement for answers memory did not
+ * shape, and the difference is what §12.4 would ever act on. `null` when
+ * either arm is empty, so an absent comparison cannot be read as zero.
+ */
+export type FollowupProxySummary = {
+    memory: FollowupArmRates;
+    plain: FollowupArmRates;
+    /** memory − plain. Positive means memory answers drew more follow-ups. */
+    followupDifference: number | null;
+    regenerateDifference: number | null;
+};
+
+export type FollowupArmRates = {
+    answers: number;
+    followups: number;
+    regenerates: number;
+    followupRate: number | null;
+    regenerateRate: number | null;
+};
+
 export type MemorySummary = {
     memories: {
         total: number;
@@ -241,6 +284,8 @@ export type MemorySummary = {
     injection: MemoryInjectionRates;
     /** §22's stale bundle ratio and the refusals it is drawn from. */
     contextBundle: ContextBundleRates;
+    /** §22's follow-up / repair proxy, as a comparison between two arms. */
+    followupProxy: FollowupProxySummary;
     unavailable: typeof MEMORY_METRICS_UNAVAILABLE;
 };
 
@@ -322,11 +367,50 @@ export function contextBundleRates(
     };
 }
 
+export function summarizeFollowupProxy(
+    arms: readonly FollowupArmSample[]
+): FollowupProxySummary {
+    const armRates = (name: "memory" | "plain"): FollowupArmRates => {
+        const row = arms.find((entry) => entry.arm === name);
+        const answers = row?.answers ?? 0;
+        const followups = row?.followups ?? 0;
+        const regenerates = row?.regenerates ?? 0;
+        return {
+            answers,
+            followups,
+            regenerates,
+            followupRate: rate(followups, answers),
+            regenerateRate: rate(regenerates, answers),
+        };
+    };
+
+    const memory = armRates("memory");
+    const plain = armRates("plain");
+    const difference = (
+        left: number | null,
+        right: number | null
+    ): number | null =>
+        left === null || right === null
+            ? null
+            : Math.round((left - right) * 10_000) / 10_000;
+
+    return {
+        memory,
+        plain,
+        followupDifference: difference(memory.followupRate, plain.followupRate),
+        regenerateDifference: difference(
+            memory.regenerateRate,
+            plain.regenerateRate
+        ),
+    };
+}
+
 export function summarizeMemoryMetrics(input: {
     memories: readonly MemoryMetricSample[];
     runs: readonly MemoryRunMetricSample[];
     counters: MemoryDayCounters;
     settlements?: readonly ExtractionSettlementSample[];
+    followupArms?: readonly FollowupArmSample[];
 }): MemorySummary {
     const byStatus = tally(input.memories.map((row) => row.status));
 
@@ -403,6 +487,7 @@ export function summarizeMemoryMetrics(input: {
         creditPerChunk: creditPerChunkPercentiles(input.settlements ?? []),
         injection: injectionRates(input.counters),
         contextBundle: contextBundleRates(input.counters),
+        followupProxy: summarizeFollowupProxy(input.followupArms ?? []),
         unavailable: MEMORY_METRICS_UNAVAILABLE,
     };
 }

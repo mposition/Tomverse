@@ -1337,11 +1337,18 @@ Data 탭(`AuthButton.tsx`)에는 진입점·요약만 두고 대형 UI를 modal�
     보고서 전체에 문장이 없는지 확인합니다.
   - **아직 측정할 수 없는 지표는 0이 아니라 이유와 함께 이름을 남깁니다**
     (`unavailable`). 주입 비율 0%는 "아무도 안 쓴다"와 구분되지 않으며, 그
-    혼동이 이 목록이 존재하는 이유입니다. **현재 목록: follow-up proxy 하나**
-    (memory를 사용한 답변에 귀속이 필요한데, 주입이 fail-closed라 귀속된 답변이
-    아직 없음). lock suspension/restore(B5), chunk당 credit·batch
-    sub-budget(slice 1.6), injection 비율·token bucket·stale bundle 비율(§10
-    배선)은 모두 출처가 생겨 목록에서 빠졌습니다.
+    혼동이 이 목록이 존재하는 이유입니다. **현재 목록: follow-up proxy의 feedback
+    신호 하나**(`Feedback`에 대상 답변으로 가는 연결이 없음). lock
+    suspension/restore(B5), chunk당 credit·batch sub-budget(slice 1.6),
+    injection 비율·token bucket·stale bundle 비율(§10 배선), follow-up·regenerate
+    (답변별 귀속)은 모두 출처가 생겨 목록에서 빠졌습니다.
+  - **답변별 memory 귀속은 `Message`에 저장합니다**(`memoryUsedCount`,
+    `memoryTokens`). §8.1 불변식 4가 금지하는 것은 주입된 **context 본문**이고
+    "사용 개수·비민감 aggregate metadata"는 명시적으로 허용합니다. 일일 counter가
+    이미 주입 **비율**을 보고하므로 이것은 counter가 만들 수 없는 것 —
+    **어느 답변이** memory를 담았는가 — 만 담당하며, follow-up proxy가 그것을
+    필요로 합니다. `NULL`은 bundle이 없어 주입이 불가능했던 요청이고 `0`은
+    bundle이 검증됐지만 retrieval이 아무것도 고르지 않은 경우입니다.
   - **injection 비율의 분모는 인증된 chat 요청 전체입니다.** "주입이 허용된
     요청"으로 잡으면 fail-closed 상태에서 분모가 0이 되어 비율이 정의되지 않고,
     그것은 이 목록이 설명하려던 상태로 되돌아가는 것입니다. 지금 방식이면
@@ -1355,6 +1362,17 @@ Data 탭(`AuthButton.tsx`)에는 진입점·요약만 두고 대형 UI를 modal�
     (`token_budget`·`item_cap`)만 truncation입니다. `below_relevance`·
     `expired`·`duplicate`는 선택이 설계대로 동작한 것이고 `source_cap`은 크기가
     아니라 다양성 규칙이므로 포함하지 않습니다.
+  - **follow-up proxy는 단일 비율이 아니라 두 arm의 비교입니다.** memory가 형성한
+    답변과 그렇지 않은 답변에 같은 측정을 하고 그 **차이**만 판단에 씁니다.
+    "memory 답변의 12%에 follow-up이 있었다"는 그 자체로 해석 불가입니다 —
+    첫 답변이 좋아서 두 번째 질문을 하는 경우가 흔하기 때문입니다. 한쪽 arm이
+    비어 있으면 차이는 0이 아니라 `null`입니다(비교하지 않았다는 뜻).
+    Admin UI는 이것이 proxy이며 "재질문률"이 아니라는 것을 **읽는 자리에서**
+    밝힙니다.
+  - **follow-up 관계는 SQL에서 집계합니다.** 필요한 관계가 "같은 대화에서 다음에
+    온 것"이라 대화별 정렬이 필요하고, 애플리케이션에서 하려면 conversation ID를
+    지표 모듈로 읽어와야 합니다. §22는 ID를 응답이 아니라 **select에서** 배제하므로
+    grouping을 DB에 두고 두 행의 count만 받습니다.
   - **승인률의 분모는 검토를 마친 memory입니다.** 아직 큐에 남은 항목까지 나누면
     "손대지 않은 검토 큐"가 "낮은 승인률"로 보고됩니다. 결정된 것이 없으면 0이
     아니라 `null`입니다.
