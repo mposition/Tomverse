@@ -557,6 +557,26 @@ const checks = [
     },
   },
   {
+    // §10's reason for one shared context builder applies to the guard too:
+    // preflight prices what chat sends. Without this check preflight quoted
+    // credits and reserved a concurrency slot for a model the chat route was
+    // always going to refuse, which on a comparison is the partial execution
+    // the aggregate admission exists to prevent.
+    name: "Preflight refuses a model whose context window cannot hold the request",
+    file: "app/api/chat/preflight/route.ts",
+    test: (source) => {
+      const check = source.indexOf("fitChatOutputToContextWindow({");
+      const reserve = source.indexOf("preflightChatComparisonAccess(access, budgets");
+      return (
+        check !== -1 &&
+        reserve !== -1 &&
+        // Before the reservation, or a refused comparison still holds slots.
+        check < reserve &&
+        source.includes("MODEL_CONTEXT_WINDOW_EXCEEDED")
+      );
+    },
+  },
+  {
     // A model's settable output ceiling is a capability, not this request's
     // budget. Kimi K3's ceiling is its whole context window, so using it as
     // the fixed output cap refused every request at every input size. The

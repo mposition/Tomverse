@@ -1,12 +1,11 @@
 // Keeps the declared-context-window set from shrinking, and forces new models
 // to declare one.
 //
-// The chat route's context guard reads:
-//
-//     if (modelConfig.contextWindowTokens && estimated + maxOutput > limit)
-//
-// so a model with no declared window is not clamped to a safe default -- it is
-// not checked at all. An over-limit request for such a model reaches the
+// The chat route fits the request's output cap to the window
+// (lib/chatContextWindow.ts), and that fit runs only when the model declares
+// one: `fitChatOutputToContextWindow` returns `unbounded` for a model with no
+// window, so such a model is not clamped to a safe default -- it is not
+// checked at all. An over-limit request for such a model reaches the
 // provider, which is precisely what ESTIMATE-03 ("no over-limit context
 // request reaches a provider") forbids at zero tolerance, and what Auto
 // routing makes worse: today a person chooses those models deliberately, but a

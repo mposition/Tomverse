@@ -37,6 +37,7 @@ import { getWebSearchCapability } from "@/lib/webSearchCapability";
 import { getWebSearchSurchargeCredits } from "@/lib/webSearchCredits";
 import { estimatePromptTokens } from "@/lib/chatTokenEstimate";
 import { buildChatMemoryContext } from "@/lib/chatMemoryContext";
+import { fitChatOutputToContextWindow } from "@/lib/chatContextWindow";
 import { issueChatContextBundle } from "@/lib/chatContextBundleService";
 
 const preflightSchema = z
@@ -298,6 +299,35 @@ export async function POST(request: Request) {
             );
         });
         modelIdsForLog = models.map((model) => model.id);
+        // The same context check the chat route applies, on the same shared
+        // rule, and applied here for the reason §10 gives for sharing a
+        // context builder at all: preflight prices what chat sends. Without
+        // it, preflight quoted credits and reserved a concurrency slot for a
+        // model the chat route was always going to refuse -- and on a
+        // comparison that is the partial execution the aggregate admission
+        // exists to prevent, arrived at after admission rather than before it.
+        //
+        // A whole-request refusal, matching every other per-model check above
+        // (MODEL_NOT_AVAILABLE, MODEL_NOT_SELECTED, MODEL_ACCESS_FORBIDDEN):
+        // admitting the subset that fits is exactly what all-or-nothing
+        // forbids. Thrown before preflightChatComparisonAccess, so a refused
+        // comparison reserves nothing.
+        models.forEach((model, index) => {
+            const budget = budgets[index];
+            const outputBudget = fitChatOutputToContextWindow({
+                contextWindowTokens: model.contextWindowTokens,
+                reservedInputTokens: budget.inputTokens,
+                requestOutputCapTokens: budget.maxOutputTokens,
+                providerMaxOutputTokens: budget.providerMaxOutputTokens,
+            });
+            if (outputBudget.kind === "exceeded") {
+                throw new ChatAccessError(
+                    400,
+                    "MODEL_CONTEXT_WINDOW_EXCEEDED",
+                    `${model.name} holds ${outputBudget.limitTokens.toLocaleString("en-US")} tokens of conversation and answer together, and this conversation already fills it. Start a new conversation or shorten the attachments.`
+                );
+            }
+        });
         const result = await preflightChatComparisonAccess(access, budgets, {
             traceId,
             comparisonId: payload.comparisonId,
@@ -382,7 +412,8 @@ export async function POST(request: Request) {
                 error instanceof ChatAccessError &&
                 (error.code === "MODEL_NOT_SELECTED" ||
                     error.code === "MODEL_NOT_AVAILABLE" ||
-                    error.code === "MODEL_ACCESS_FORBIDDEN")
+                    error.code === "MODEL_ACCESS_FORBIDDEN" ||
+                    error.code === "MODEL_CONTEXT_WINDOW_EXCEEDED")
             ) {
                 console.warn(
                     JSON.stringify({
