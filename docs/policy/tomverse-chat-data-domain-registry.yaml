@@ -171,7 +171,7 @@ domains:
     deletionMechanism: cascade_from_user
     retentionPolicy: immediate
     implementationStatus: implemented
-    inUnifiedExport: unverified
+    inUnifiedExport: included_filtered
 
   - domain: productAnalyticsEvent
     prismaModel: ProductAnalyticsEvent
@@ -180,7 +180,7 @@ domains:
     deletionMechanism: cascade_from_user
     retentionPolicy: immediate
     implementationStatus: implemented
-    inUnifiedExport: unverified
+    inUnifiedExport: included_filtered
 
   - domain: billingPromotionRedemption
     prismaModel: BillingPromotionRedemption
@@ -189,7 +189,7 @@ domains:
     deletionMechanism: cascade_from_user
     retentionPolicy: immediate
     implementationStatus: implemented
-    inUnifiedExport: unverified
+    inUnifiedExport: included_filtered
 
   - domain: creditPurchase
     prismaModel: CreditPurchase
@@ -207,7 +207,7 @@ domains:
     deletionMechanism: cascade_from_user
     retentionPolicy: immediate
     implementationStatus: implemented
-    inUnifiedExport: unverified
+    inUnifiedExport: included_filtered
 
   - domain: creditLedgerEntry
     prismaModel: CreditLedgerEntry
@@ -216,7 +216,7 @@ domains:
     deletionMechanism: cascade_from_user
     retentionPolicy: immediate
     implementationStatus: implemented
-    inUnifiedExport: unverified
+    inUnifiedExport: included_filtered
 
   - domain: creditDebtEntry
     prismaModel: CreditDebtEntry
@@ -225,7 +225,7 @@ domains:
     deletionMechanism: cascade_from_user
     retentionPolicy: immediate
     implementationStatus: implemented
-    inUnifiedExport: unverified
+    inUnifiedExport: included_filtered
 
   - domain: imageGeneration
     prismaModel: ImageGeneration
@@ -234,7 +234,7 @@ domains:
     deletionMechanism: cascade_from_user
     retentionPolicy: immediate
     implementationStatus: implemented
-    inUnifiedExport: unverified
+    inUnifiedExport: included_filtered
 
   - domain: imageGenerationGroup
     prismaModel: ImageGenerationGroup
@@ -243,7 +243,7 @@ domains:
     deletionMechanism: cascade_from_user
     retentionPolicy: immediate
     implementationStatus: implemented
-    inUnifiedExport: unverified
+    inUnifiedExport: included_filtered
 
   - domain: planChangeRequest
     prismaModel: PlanChangeRequest
@@ -252,7 +252,7 @@ domains:
     deletionMechanism: cascade_from_user
     retentionPolicy: immediate
     implementationStatus: implemented
-    inUnifiedExport: unverified
+    inUnifiedExport: included_filtered
 
   - domain: externalImport
     prismaModel: ExternalImport
@@ -261,7 +261,7 @@ domains:
     deletionMechanism: cascade_from_user
     retentionPolicy: immediate
     implementationStatus: implemented
-    inUnifiedExport: unverified
+    inUnifiedExport: included_filtered
 
   - domain: externalConversation
     prismaModel: ExternalConversation
@@ -270,7 +270,7 @@ domains:
     deletionMechanism: cascade_from_user
     retentionPolicy: immediate
     implementationStatus: implemented
-    inUnifiedExport: unverified
+    inUnifiedExport: included_filtered
 
   - domain: externalMessage
     prismaModel: ExternalMessage
@@ -279,7 +279,7 @@ domains:
     deletionMechanism: cascade_from_user
     retentionPolicy: immediate
     implementationStatus: implemented
-    inUnifiedExport: unverified
+    inUnifiedExport: included_filtered
 
   - domain: memoryItem
     prismaModel: MemoryItem
@@ -297,7 +297,7 @@ domains:
     deletionMechanism: cascade_from_user
     retentionPolicy: immediate
     implementationStatus: implemented
-    inUnifiedExport: unverified
+    inUnifiedExport: included_filtered
 
   - domain: memoryExtractionRun
     prismaModel: MemoryExtractionRun
@@ -306,7 +306,7 @@ domains:
     deletionMechanism: cascade_from_user
     retentionPolicy: immediate
     implementationStatus: implemented
-    inUnifiedExport: unverified
+    inUnifiedExport: included_filtered
 
   - domain: accountDataExportRequest
     prismaModel: AccountDataExportRequest
@@ -404,7 +404,7 @@ domains:
           Accepted. subscriptionCurrentPeriodEnd, plan and the refund amount
           remain. They are a financial shape, not an identifier, and the row is
           kept so a refund dispute can still be answered.
-    inUnifiedExport: unverified
+    inUnifiedExport: included_filtered
 
   # --- anonymised at deletion, decided but not yet built ---------------------
   - domain: chatLimitDecisionEvent

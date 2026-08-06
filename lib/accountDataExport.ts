@@ -296,6 +296,293 @@ const FETCHERS: Record<string, (userId: string) => Promise<unknown[]>> = {
       select: { id: true, requestType: true, status: true, createdAt: true, completedAt: true },
       take: EXPORT_ROW_CAP,
     }),
+
+  comparisonReview: (userId) =>
+    prisma.comparisonReview.findMany({
+      where: { userId },
+      select: {
+        id: true,
+        conversationId: true,
+        reviewerModelId: true,
+        reviewMode: true,
+        result: true,
+        usageCredits: true,
+        isStale: true,
+        createdAt: true,
+      },
+      orderBy: { createdAt: "asc" },
+      take: EXPORT_ROW_CAP,
+    }),
+
+  // Behavioural data about the user, so theirs. `properties` is deliberately
+  // absent: it is a free-form Json bag whose keys are not enumerated anywhere,
+  // and passing an unreviewed field bag through is the one thing an allowlist
+  // is for. Giving it a declared shape is what would let it be exported.
+  productAnalyticsEvent: (userId) =>
+    prisma.productAnalyticsEvent.findMany({
+      where: { userId },
+      select: {
+        eventName: true,
+        source: true,
+        utmSource: true,
+        utmMedium: true,
+        utmCampaign: true,
+        language: true,
+        country: true,
+        modelCount: true,
+        plan: true,
+        occurredAt: true,
+      },
+      orderBy: { occurredAt: "asc" },
+      take: EXPORT_ROW_CAP,
+    }),
+
+  billingPromotionRedemption: (userId) =>
+    prisma.billingPromotionRedemption.findMany({
+      where: { userId },
+      select: {
+        promotionId: true,
+        planId: true,
+        billingInterval: true,
+        accessStartsAt: true,
+        accessEndsAt: true,
+        expiredAt: true,
+        redeemedAt: true,
+      },
+      orderBy: { redeemedAt: "asc" },
+      take: EXPORT_ROW_CAP,
+    }),
+
+  creditLot: (userId) =>
+    prisma.creditLot.findMany({
+      where: { userId },
+      select: {
+        id: true,
+        source: true,
+        originalCredits: true,
+        remainingCredits: true,
+        expiresAt: true,
+        status: true,
+        createdAt: true,
+      },
+      orderBy: { createdAt: "asc" },
+      take: EXPORT_ROW_CAP,
+    }),
+
+  creditLedgerEntry: (userId) =>
+    prisma.creditLedgerEntry.findMany({
+      where: { userId },
+      select: {
+        creditLotId: true,
+        type: true,
+        creditsDelta: true,
+        balanceAfterCredits: true,
+        createdAt: true,
+      },
+      orderBy: { createdAt: "asc" },
+      take: EXPORT_ROW_CAP,
+    }),
+
+  creditDebtEntry: (userId) =>
+    prisma.creditDebtEntry.findMany({
+      where: { userId },
+      select: {
+        type: true,
+        creditsDelta: true,
+        balanceAfterCredits: true,
+        createdAt: true,
+      },
+      orderBy: { createdAt: "asc" },
+      take: EXPORT_ROW_CAP,
+    }),
+
+  // The prompt is unambiguously the user's. The images are not here: they are
+  // binaries in object storage and a JSON file cannot carry them, so the asset
+  // rows describe what exists rather than pretending it was delivered.
+  imageGeneration: (userId) =>
+    prisma.imageGeneration.findMany({
+      where: { userId },
+      select: {
+        id: true,
+        conversationId: true,
+        groupId: true,
+        prompt: true,
+        preset: true,
+        provider: true,
+        modelId: true,
+        size: true,
+        quality: true,
+        outputWidth: true,
+        outputHeight: true,
+        backgroundMode: true,
+        outputFormat: true,
+        status: true,
+        failurePhase: true,
+        publicErrorCode: true,
+        attemptNumber: true,
+        createdAt: true,
+        completedAt: true,
+        failedAt: true,
+        assets: {
+          select: {
+            role: true,
+            status: true,
+            mimeType: true,
+            width: true,
+            height: true,
+            byteSize: true,
+            createdAt: true,
+            deletedAt: true,
+          },
+        },
+      },
+      orderBy: { createdAt: "asc" },
+      take: EXPORT_ROW_CAP,
+    }),
+
+  imageGenerationGroup: (userId) =>
+    prisma.imageGenerationGroup.findMany({
+      where: { userId },
+      select: { id: true, conversationId: true, createdAt: true },
+      orderBy: { createdAt: "asc" },
+      take: EXPORT_ROW_CAP,
+    }),
+
+  refundRequest: (userId) =>
+    prisma.refundRequest.findMany({
+      where: { userId },
+      select: {
+        id: true,
+        plan: true,
+        subscriptionBillingInterval: true,
+        reason: true,
+        status: true,
+        refundAmountCents: true,
+        refundCurrency: true,
+        requestedAt: true,
+        reviewedAt: true,
+      },
+      orderBy: { requestedAt: "asc" },
+      take: EXPORT_ROW_CAP,
+    }),
+
+  planChangeRequest: (userId) =>
+    prisma.planChangeRequest.findMany({
+      where: { userId },
+      select: {
+        id: true,
+        direction: true,
+        execution: true,
+        fromTier: true,
+        toTier: true,
+        billingInterval: true,
+        currency: true,
+        quotedAmountMinor: true,
+        status: true,
+        appliesAt: true,
+        confirmedAt: true,
+        settledAt: true,
+        failureCode: true,
+        createdAt: true,
+      },
+      orderBy: { createdAt: "asc" },
+      take: EXPORT_ROW_CAP,
+    }),
+
+  externalImport: (userId) =>
+    prisma.externalImport.findMany({
+      where: { userId },
+      select: {
+        id: true,
+        provider: true,
+        status: true,
+        conversationCount: true,
+        messageCount: true,
+        normalizedBytes: true,
+        truncationCount: true,
+        duplicateCount: true,
+        failureCode: true,
+        createdAt: true,
+        completedAt: true,
+      },
+      orderBy: { createdAt: "asc" },
+      take: EXPORT_ROW_CAP,
+    }),
+
+  // `password` is absent on purpose: it is the lock the user set on an imported
+  // conversation, and an export carrying it would unlock every conversation it
+  // protects for anyone the file reaches.
+  externalConversation: (userId) =>
+    prisma.externalConversation.findMany({
+      where: { userId },
+      select: {
+        id: true,
+        importId: true,
+        provider: true,
+        title: true,
+        sourceModelLabels: true,
+        sourceCreatedAt: true,
+        sourceUpdatedAt: true,
+        messageCount: true,
+        contentBytes: true,
+        finalized: true,
+        importedAt: true,
+      },
+      orderBy: { importedAt: "asc" },
+      take: EXPORT_ROW_CAP,
+    }),
+
+  externalMessage: (userId) =>
+    prisma.externalMessage.findMany({
+      where: { userId },
+      select: {
+        externalConversationId: true,
+        ordinal: true,
+        role: true,
+        content: true,
+        sourceModelLabel: true,
+        sourceTimestamp: true,
+        truncated: true,
+        originalCharacterCount: true,
+        retainedCharacterCount: true,
+      },
+      orderBy: [{ externalConversationId: "asc" }, { ordinal: "asc" }],
+      take: EXPORT_ROW_CAP,
+    }),
+
+  memoryEvidence: (userId) =>
+    prisma.memoryEvidence.findMany({
+      where: { userId },
+      select: {
+        memoryItemId: true,
+        sourceType: true,
+        externalMessageId: true,
+        tomverseMessageId: true,
+        manualContent: true,
+        createdAt: true,
+      },
+      orderBy: { createdAt: "asc" },
+      take: EXPORT_ROW_CAP,
+    }),
+
+  memoryExtractionRun: (userId) =>
+    prisma.memoryExtractionRun.findMany({
+      where: { userId },
+      select: {
+        id: true,
+        status: true,
+        extractionModelId: true,
+        // A sorted list of the conversation ids the user chose. Narrow and
+        // typed, unlike the analytics properties bag above.
+        sourceSelection: true,
+        chunkTotal: true,
+        chunkCompleted: true,
+        createdAt: true,
+        completedAt: true,
+      },
+      orderBy: { createdAt: "asc" },
+      take: EXPORT_ROW_CAP,
+    }),
 };
 
 /**
