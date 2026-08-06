@@ -286,6 +286,25 @@ export class ChatAccessError extends Error {
     }
 }
 
+/**
+ * Whether a thrown value is one of this module's own refusals.
+ *
+ * Exported as a predicate rather than left to `instanceof` at the call site
+ * because `instanceof` compares class identity, and class identity is a
+ * property of the module *instance*: a bundler or a test harness that
+ * evaluates this file twice produces two `ChatAccessError` classes, and a
+ * refusal raised by one is not an instance of the other. Asking the module
+ * that owns the class means the comparison always happens against the copy
+ * that raised the error.
+ *
+ * That distinction is load-bearing wherever getting it wrong is silent.
+ * `chatErrorResponse` below can use `instanceof` directly -- it lives in this
+ * file -- but a caller in another module that mistakes a local refusal for a
+ * provider failure writes bad data into provider health and says nothing.
+ */
+export const isChatAccessError = (error: unknown): error is ChatAccessError =>
+    error instanceof ChatAccessError;
+
 const positiveInteger = (value: string | undefined, fallback: number) => {
     const parsed = Number(value);
     return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : fallback;
