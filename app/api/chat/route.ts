@@ -120,6 +120,15 @@ import {
     GUEST_MAX_ATTACHMENTS_PER_MESSAGE,
 } from "@/lib/guestAttachments";
 import { isChatCostSafetyCode } from "@/lib/chatCostSafetyCore";
+import {
+    chatLeaseAcquired,
+    chatLeaseReleased,
+    chatLeaseStreamPublished,
+    chatLeaseTakenByStream,
+    chatLeaseToReleaseOnUnwind,
+    NO_CHAT_LEASE,
+    type ChatLeaseOwnership,
+} from "@/lib/chatLeaseOwnershipCore";
 import { estimatePromptTokens } from "@/lib/chatTokenEstimate";
 import { fitChatOutputToContextWindow } from "@/lib/chatContextWindow";
 import {
@@ -670,7 +679,11 @@ async function handleChatPost(
     traceId: string,
     verificationGrant: { setCookie?: string }
 ): Promise<Response> {
-    let leaseId: string | null = null;
+    // Who holds the concurrency slot right now. The failure path at the bottom
+    // asks this rather than a boolean, because "the request no longer holds it"
+    // covers both a clean handoff to the stream and a stream that was built and
+    // never published -- and only the second is a slot nobody will free.
+    let leaseOwnership: ChatLeaseOwnership = NO_CHAT_LEASE;
     // Declared out here so the failure path can stop the renewal timer even
     // when the stream was never built: an interval left running would keep
     // renewing a lease no request owns any more.
@@ -1707,7 +1720,7 @@ async function handleChatPost(
             // admitted in part.
             admissionToken,
         });
-        leaseId = accessGrant.leaseId;
+        leaseOwnership = chatLeaseAcquired(accessGrant.leaseId);
         usageReservation = accessGrant.usageReservation;
         // Shadow only, and awaited so the settlement update cannot race the
         // insert it depends on. The recorder is inert unless the flag is set
@@ -1746,9 +1759,8 @@ async function handleChatPost(
             // Ownership of this turn moves to the polling job: the request
             // ends here, so its slot must end here too rather than being held
             // for a job that can outlive any lease.
-            const activeLeaseId = leaseId;
-            leaseId = null;
-            await releaseChatAccess(activeLeaseId, {
+            leaseOwnership = chatLeaseReleased();
+            await releaseChatAccess(accessGrant.leaseId, {
                 traceId,
                 reason: "deep_research_handoff",
                 subjectScope: access.kind,
@@ -1920,8 +1932,11 @@ async function handleChatPost(
         });
 
         const sourceReader = result.textStream.getReader();
-        const activeLeaseId = leaseId;
-        leaseId = null;
+        // The stream owns the slot from here, but it cannot release anything
+        // until it is pulled, and it is only pulled once the Response below is
+        // returned. Until then the failure path is still the owner of record.
+        const activeLeaseId = accessGrant.leaseId;
+        leaseOwnership = chatLeaseTakenByStream(leaseOwnership);
         let generatedText = "";
         let released = false;
         let sourceCancelled = false;
@@ -2583,15 +2598,23 @@ async function handleChatPost(
         // path, success and failure alike -- adding it here as well would
         // send it twice.
 
-        return new Response(protectedStream.pipeThrough(new TextEncoderStream()), {
-            headers,
-        });
+        const response = new Response(
+            protectedStream.pipeThrough(new TextEncoderStream()),
+            { headers }
+        );
+        // Only once the Response exists, because everything above it can still
+        // throw and an unpublished stream is never pulled. After this the
+        // stream's own release paths are the ones that free the slot.
+        leaseOwnership = chatLeaseStreamPublished(leaseOwnership);
+        return response;
     } catch (error: unknown) {
         stopLeaseHeartbeat?.();
-        if (leaseId) {
-            await releaseChatAccess(leaseId, {
+        const orphanedLease = chatLeaseToReleaseOnUnwind(leaseOwnership);
+        if (orphanedLease) {
+            leaseOwnership = chatLeaseReleased();
+            await releaseChatAccess(orphanedLease.leaseId, {
                 traceId,
-                reason: "request_failed_before_stream",
+                reason: orphanedLease.reason,
             });
         }
         if (usageReservation) {
