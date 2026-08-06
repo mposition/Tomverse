@@ -36,6 +36,8 @@ Date / timezone:    ____________________
 - [ ] `npm run check:tomverse-chat-release-gate-view`
 - [ ] `npm run verify:tomverse-chat-release-gates`
 - [ ] `npm run verify:review-parity-coverage`
+- [ ] `npm run check:doc-references` — proves AGENTS.md and every contract and
+      policy document under it still point at files that exist
 - [ ] `npm run check:ui-tier-coverage` — proves the merge-blocking `@ui-risk`
       tier and the document that records it still describe the same set
 - [ ] `npm run check:release-gate-coverage` — proves this list still matches

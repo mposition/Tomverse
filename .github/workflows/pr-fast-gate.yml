@@ -132,6 +132,14 @@ jobs:
         timeout-minutes: 5
         run: npm run check:ui-tier-coverage
 
+      # AGENTS.md and the contracts under it are read as instructions that
+      # override default behaviour. A reference to a file that moved or was
+      # never built fails nothing -- it just sends someone to an empty path,
+      # and what they learn is that the instructions are unreliable.
+      - name: Instruction document references
+        timeout-minutes: 5
+        run: npm run check:doc-references
+
       # UI-012: semantic accent colours must stay addressed by role inside the
       # guarded components. Cheap, no browser, so it sits with the other static
       # checks rather than in the browser tier.

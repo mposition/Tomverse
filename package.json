@@ -64,6 +64,7 @@
     "check:model-pricing-db": "node --conditions=react-server --import tsx scripts/check-model-pricing-db.mjs",
     "check:release-gate-coverage": "node scripts/check-release-gate-coverage.mjs",
     "check:ui-tier-coverage": "node scripts/check-ui-tier-coverage.mjs",
+    "check:doc-references": "node scripts/check-doc-references.mjs",
     "report:cost-bucket-corrections": "node --conditions=react-server --import tsx scripts/report-cost-bucket-corrections.mjs",
     "drill:railway-restore-preflight": "node scripts/railway-restore-preflight.mjs",
     "drill:railway-restore-verify": "node scripts/railway-restore-verify.mjs",
