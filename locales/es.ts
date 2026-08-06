@@ -145,6 +145,7 @@ export const es = {
         imageGenerationSizeLandscape: "Horizontal",
         imageGenerationSizePortrait: "Vertical",
         imageGenerationGenerate: "Generar",
+        imageGenerationGeneratingModels: "Generando {count} modelo(s)",
         imageGenerationGenerating: "Generando imagen...",
         imageGenerationGeneratingHint: "Puede tardar hasta unos dos minutos. Salir de la página no cancela la generación.",
         imageGenerationTakingLong: "Está tardando más de lo habitual. Si no puede completarse, se marcará como fallida automáticamente y los créditos reservados se reembolsarán por completo.",

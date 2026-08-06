@@ -64,7 +64,8 @@ const ENGLISH_STRING_CEILING = {
   // new-conversation combination and zh takes modelFinder from en wholesale.
   // +2 (191 -> 193): the two imageGenerationRestore* notices, which zh takes
   // from en wholesale like the rest of the image workspace copy.
-  zh: 193,
+  // +1 (193 -> 194): imageGenerationGeneratingModels, same wholesale spread.
+  zh: 194,
   // Preview markets, all of which spread `...en.chat` and `en.modelFinder`.
   // fr +1 (226 -> 227): modelFinder.saveAsDefaultHint, taken from en wholesale.
   // fr +2 (230 -> 232): externalImport.messagesCount and
