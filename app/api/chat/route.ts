@@ -1035,6 +1035,19 @@ async function handleChatPost(
         // whole branch is skipped.
         let memorySystemPrompt: string | null = null;
         let memoryUsedCount = 0;
+        // §22 attribution, written onto the answer rather than counted.
+        //
+        // The day counters beside this already report the injection *ratio*.
+        // What they cannot report is which answer carried memory, and the
+        // follow-up proxy is a comparison between the answers memory shaped
+        // and the ones it did not — so it needs the fact per answer. Null
+        // while no bundle accompanies the request, which is what "memory was
+        // not possible here" means; §8.1 invariant 4 permits the used count
+        // and forbids the context itself, which is never written.
+        let memoryAttribution: {
+            memoryUsedCount: number;
+            memoryTokens: number;
+        } | null = null;
         if (session?.user?.id) {
             // §22's injection denominator. Recorded before the bundle branch
             // so it counts every authenticated request, including the ones
@@ -1122,6 +1135,10 @@ async function handleChatPost(
             }
             memorySystemPrompt = memoryContext.prompt.text;
             memoryUsedCount = memoryContext.prompt.usedCount;
+            memoryAttribution = {
+                memoryUsedCount,
+                memoryTokens: verification.payload.memoryTokens,
+            };
             if (memorySystemPrompt) {
                 // A bundle that passed but selected nothing is not an
                 // injection: no block reaches the prompt, so counting it would
@@ -1710,6 +1727,7 @@ async function handleChatPost(
                             status: "pending",
                             modelId: requestedModelId,
                             pendingJobId: perplexityJobId,
+                            ...memoryAttribution,
                         },
                     });
                     await tx.perplexityAsyncJob.create({
@@ -2276,6 +2294,10 @@ async function handleChatPost(
                                             status: completionOutcome.status,
                                             modelId: requestedModelId,
                                             searchMetadata: webSearchExecution,
+                                            // Spread, so an answer with no
+                                            // bundle writes neither column
+                                            // and both stay NULL (§22).
+                                            ...memoryAttribution,
                                         },
                                     });
                                     if (providerContext) {
