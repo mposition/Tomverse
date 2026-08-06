@@ -135,6 +135,38 @@ component:
 - Model selection sits **above** the textarea: the price the composer quotes is
   decided before the prompt is written.
 
+### Composer state lifecycle
+
+The composer's settings belong to the conversation, not to a React mount.
+
+- **A draft becoming the conversation it just created is not a switch.** The
+  model selection, quality and size survive it; only the prompt clears, and the
+  entry point's seed is dropped so it cannot re-fill the box with a prompt the
+  user has already paid to generate.
+- **A real conversation switch still remounts.** The workspace owns a timeline
+  and a poll loop that belong to one conversation, and neither may follow the
+  user. The remount key is explicit state, never derived from the conversation
+  id — deriving it is what made promotion look like a switch.
+- **Re-entering an image conversation restores its last comparison**, from
+  `composerRestore` on the history read (`deriveImageComposerRestore()`). One
+  round trip, one server moment: the timeline and the composer's starting state
+  must not come from two different reads.
+
+What restore may and may not do:
+
+| Rule | Why |
+| --- | --- |
+| The latest group is chosen by the **group's** `createdAt`, id as tiebreak | retrying an older group's failed target writes the newest generation row in the conversation |
+| A target's current attempt is `currentGenerationId`, falling back to the highest `attemptNumber` | the same contract `currentImageAttempt()` already owns |
+| Models come back in **registry order** | selection order is recorded nowhere and carries no product meaning |
+| Options come back **only if every current attempt agrees** | one request carries one quality and size, so a disagreement is a bug — picking one target's values would present corrupt data as the user's last choice |
+| A model that is now held, or has no price at the restored option, is excluded **and named** | a silently different selection is the failure this path exists to end |
+| The default model is the **last** resort | it is right only when nothing the user chose can be offered back |
+| The prompt is **never** restored | it is timeline history, not the next draft |
+
+A restore answer that arrives after the user has touched a model, quality or
+size is discarded. The user's newer choice wins a race with the network.
+
 ### Model disclosure threshold
 
 With **three or fewer** enabled image generation models the composer exposes
@@ -298,6 +330,8 @@ Verified for **both** desktop and mobile projects:
 | 18 | switch to a different image conversation | timeline and poll loop do not follow |
 | 19 | Enter on desktop / mobile / mid-IME | submit / newline / never submit |
 | 20 | enabled model count 2, 3, 4 | inline, inline, compact — with every selected price still visible |
+| 21 | re-entering a conversation | last comparison's models and options restored; prompt empty |
+| 22 | restore drops a model or cannot restore options | both stated on screen, never silently applied |
 
 ## Automated regression contract
 
@@ -339,6 +373,7 @@ rather than the behaviour.
 - [ ] Polling is still one request per group, through the group endpoint
 - [ ] A settled card still keeps its asset URLs across polls
 - [ ] Composer settings survive draft promotion, and remount still isolates a real conversation switch
+- [ ] Re-entry restores from the latest group, and says what it could not restore
 - [ ] Enter behaviour comes from `getChatEnterKeyAction()` with the IME guard
 - [ ] Selected models' exact prices are inline in both disclosure modes
 - [ ] A retry still replaces its card in place

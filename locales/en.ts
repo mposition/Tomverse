@@ -164,6 +164,8 @@ export const en = {
         imageGenerationErrorBudget: "Image generation is temporarily paused for maintenance. Try again shortly.",
         imageGenerationErrorConflict: "Your credit balance changed while reserving. Try again.",
         imageGenerationErrorGeneric: "Could not start the image generation. Try again.",
+        imageGenerationRestoreExcluded: "{models} is not available right now, so it was left out of the restored selection.",
+        imageGenerationRestoreOptionsUnavailable: "The quality and size from your last comparison could not be restored, so the defaults are selected.",
         modelSelectionNotice: "Some models in your saved default combination are unavailable, so a replacement combination is used. Re-save the combination in Settings to confirm it.",
         welcome: "Hello! How can I help you today?",
         welcomeBack: "Welcome back. What can I help with?",

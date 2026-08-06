@@ -168,6 +168,8 @@ export const ko = {
         imageGenerationErrorBudget: "이미지 생성이 일시적으로 중단되었습니다. 잠시 후 다시 시도해 주세요.",
         imageGenerationErrorConflict: "예약 중에 크레딧 잔액이 바뀌었습니다. 다시 시도해 주세요.",
         imageGenerationErrorGeneric: "이미지 생성을 시작하지 못했습니다. 다시 시도해 주세요.",
+        imageGenerationRestoreExcluded: "{models}은(는) 지금 사용할 수 없어 복원된 선택에서 제외했습니다.",
+        imageGenerationRestoreOptionsUnavailable: "직전 비교의 품질·크기를 복원하지 못해 기본값으로 두었습니다.",
         modelSelectionNotice: "저장된 기본 조합의 일부 모델을 사용할 수 없어 대체 조합으로 시작합니다. 설정에서 조합을 다시 저장하면 확정됩니다.",
         welcome: "안녕하세요! 무엇을 도와드릴까요?",
         welcomeBack: "다시 만나 반가워요. 무엇을 도와드릴까요?",

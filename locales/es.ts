@@ -167,6 +167,8 @@ export const es = {
         imageGenerationErrorBudget: "La generación de imágenes está pausada temporalmente. Inténtalo en breve.",
         imageGenerationErrorConflict: "Tu saldo de créditos cambió durante la reserva. Inténtalo de nuevo.",
         imageGenerationErrorGeneric: "No se pudo iniciar la generación de la imagen. Inténtalo de nuevo.",
+        imageGenerationRestoreExcluded: "{models} no está disponible ahora mismo, así que se excluyó de la selección restaurada.",
+        imageGenerationRestoreOptionsUnavailable: "No se pudieron restaurar la calidad y el tamaño de tu última comparación; se aplican los valores predeterminados.",
         modelSelectionNotice: "Algunos modelos de tu combinación predeterminada no están disponibles, así que se usa una combinación de reemplazo. Vuelve a guardar la combinación en Configuración para confirmarla.",
         guestVerificationTitle: "Confirma para continuar",
         guestVerificationDescription: "Una comprobación rápida que reduce las solicitudes automatizadas. Normalmente termina sola.",

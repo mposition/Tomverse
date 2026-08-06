@@ -58,6 +58,8 @@ type ImageApiState = {
   sequence: number;
   /** How the timeline read state, split by endpoint (policy §11). */
   reads: { groups: number; generations: number };
+  /** What the history read answers with, so restore can be driven per test. */
+  composerRestore: Record<string, unknown> | null;
 };
 
 const succeededAssets = () => [
@@ -98,6 +100,7 @@ const installImageGenerationApi = async (page: Page): Promise<ImageApiState> => 
     conversationId: "qa-image-conversation",
     sequence: 0,
     reads: { groups: 0, generations: 0 },
+    composerRestore: null,
   };
 
   await page.route("**/e2e-assets/**", (route) =>
@@ -269,7 +272,11 @@ const installImageGenerationApi = async (page: Page): Promise<ImageApiState> => 
 
   await page.route("**/api/conversations/*/generations", async (route) => {
     await route.fulfill(
-      json({ conversationId: state.conversationId, generations: state.generations })
+      json({
+        conversationId: state.conversationId,
+        generations: state.generations,
+        composerRestore: state.composerRestore,
+      })
     );
   });
 
@@ -660,6 +667,110 @@ test("Shift+Enter never submits, on either shell", async ({ page }) => {
   await textarea.press("Shift+Enter");
   await expect(textarea).toHaveValue("a red apple\n");
   expect(api.createBodies).toHaveLength(0);
+});
+
+/**
+ * Enter an existing image conversation the way a user does: from the sidebar.
+ * There is no deep link for a conversation, so the list route is served the
+ * way the real one does and the row is clicked.
+ */
+const openExistingImageConversation = async (
+  page: Page,
+  state: ImageApiState,
+  title: string
+) => {
+  await page.unroute("**/api/conversations");
+  await page.route("**/api/conversations", async (route) => {
+    if (route.request().method() !== "GET") return route.fallback();
+    await route.fulfill(
+      json([
+        {
+          id: state.conversationId,
+          title,
+          kind: "image",
+          projectId: null,
+          selectedModels: [],
+          disabledPanels: [],
+          webSearchMode: "auto",
+          isLocked: false,
+          shareEnabled: false,
+          shareExpiresAt: null,
+          messageCount: 0,
+        },
+      ])
+    );
+  });
+  await page.goto("/chat");
+  if (isMobileShell()) {
+    await page.getByTestId("mobile-sidebar-open").click();
+    await expect(page.getByTestId("mobile-sidebar-drawer")).toBeVisible();
+  }
+  const row = page
+    .getByTestId("sidebar-conversation-item")
+    .filter({ hasText: title });
+  await expect(row).toBeVisible();
+  await row.click();
+};
+
+test("re-entering a conversation restores the last comparison's models", async ({ page }) => {
+  // Fixing draft promotion alone left the same complaint reachable by another
+  // route: refresh, or open the conversation again, and the composer was back
+  // to one default model.
+  await enableImageGenerationFlag(page);
+  await mockAuthenticatedApi(page);
+  await mockUserUsage(page, { plan: "Pro" });
+  const api = await installImageGenerationApi(page);
+  api.composerRestore = {
+    sourceGroupId: "qa-group-1",
+    modelIds: ["gpt-image-2", "grok-imagine-image-quality-20260403"],
+    preset: "standard",
+    quality: "medium",
+    size: "1024x1024",
+    excludedModelIds: [],
+    optionsConsistent: true,
+  };
+  await openExistingImageConversation(page, api, "restored comparison");
+
+  await expect(page.getByTestId("image-model-gpt-image-2")).toHaveAttribute(
+    "aria-pressed",
+    "true"
+  );
+  await expect(
+    page.getByTestId("image-model-grok-imagine-image-quality-20260403")
+  ).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByTestId("image-total-credits")).toContainText("145");
+  // The previous prompt is timeline history, not the next draft.
+  await expect(page.getByTestId("image-generation-prompt")).toHaveValue("");
+});
+
+test("a restore that drops a model says so instead of quietly changing the selection", async ({
+  page,
+}) => {
+  await enableImageGenerationFlag(page);
+  await mockAuthenticatedApi(page);
+  await mockUserUsage(page, { plan: "Pro" });
+  const api = await installImageGenerationApi(page);
+  api.composerRestore = {
+    sourceGroupId: "qa-group-1",
+    modelIds: ["gpt-image-2"],
+    preset: null,
+    quality: null,
+    size: null,
+    excludedModelIds: ["gemini-3.1-flash-image"],
+    optionsConsistent: false,
+  };
+  await openExistingImageConversation(page, api, "partly restorable");
+
+  const notice = page.getByTestId("image-generation-restore-notice");
+  await expect(notice).toBeVisible();
+  // Both facts are stated: the model that was dropped, and that the options
+  // could not be restored. A selection that silently differs from the user's
+  // last one is what this whole path exists to end.
+  await expect(notice).toContainText("Gemini 3.1 Flash Image");
+  await expect(page.getByTestId("image-model-gpt-image-2")).toHaveAttribute(
+    "aria-pressed",
+    "true"
+  );
 });
 
 test("the timeline polls the group, never one request per model", async ({ page }) => {

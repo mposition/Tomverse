@@ -184,6 +184,8 @@ export const zh = {
         imageGenerationErrorBudget: "图像生成暂时不可用，请稍后重试。",
         imageGenerationErrorConflict: "预留期间积分余额发生变化，请重试。",
         imageGenerationErrorGeneric: "无法开始图像生成，请重试。",
+        imageGenerationRestoreExcluded: "{models} is not available right now, so it was left out of the restored selection.",
+        imageGenerationRestoreOptionsUnavailable: "The quality and size from your last comparison could not be restored, so the defaults are selected.",
         modelSelectionNotice: "您保存的默认组合中部分模型暂不可用，已改用替代组合。请在设置中重新保存组合以确认。",
         guestVerificationTitle: "请确认后继续",
         guestVerificationDescription: "这是为了减少自动化请求的快速确认，通常会自动完成。",
