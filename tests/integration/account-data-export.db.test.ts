@@ -472,6 +472,10 @@ const seedUser = async () => {
       finalizeIdempotencyKey: sentinel("externalImport-finalizeIdempotencyKey"),
     },
   });
+  // Unlocked, deliberately: this is the conversation whose content the user is
+  // owed, and §13.2 withholds a locked one's title and messages entirely. The
+  // locked sibling below carries the password sentinel instead, so both halves
+  // of the rule are covered -- what is exported, and what is not.
   const externalConversation = await prisma.externalConversation.create({
     data: {
       userId,
@@ -481,10 +485,40 @@ const seedUser = async () => {
       messageCount: 1,
       contentBytes: BigInt(64),
       digestVersion: 1,
-      // The lock the user set, and reconciliation digests.
-      password: sentinel("externalConversation-password"),
+      // Reconciliation digests, withheld as internals.
       conversationDigest: sentinel("externalConversation-conversationDigest"),
       externalStableId: sentinel("externalConversation-externalStableId"),
+    },
+  });
+
+  // The locked half of §13.2. Its password must never reach the file -- a copy
+  // is an offline attack on the one secret this table holds -- and neither may
+  // its title or its messages, which is what the two sentinels below assert
+  // without any test having to name the rule.
+  const lockedConversation = await prisma.externalConversation.create({
+    data: {
+      userId,
+      importId: externalImport.id,
+      provider: "chatgpt",
+      title: sentinel("externalConversation-lockedTitle"),
+      messageCount: 1,
+      contentBytes: BigInt(64),
+      digestVersion: 1,
+      password: sentinel("externalConversation-password"),
+      conversationDigest: sentinel("externalConversation-lockedDigest"),
+      externalStableId: sentinel("externalConversation-lockedStableId"),
+    },
+  });
+  await prisma.externalMessage.create({
+    data: {
+      userId,
+      externalConversationId: lockedConversation.id,
+      role: "user",
+      content: sentinel("externalMessage-lockedContent"),
+      ordinal: 0,
+      digestVersion: 1,
+      externalStableId: sentinel("externalMessage-lockedStableId"),
+      contentDigest: sentinel("externalMessage-lockedDigest"),
     },
   });
   await prisma.externalMessage.create({
@@ -657,6 +691,17 @@ test("the manifest names what is missing and why", async () => {
 // exists precisely because holding the session is not meant to be enough.
 // ---------------------------------------------------------------------------
 
+// The lock tests below count rows per domain, so they cannot run against the
+// everything-is-populated fixture above -- `seedUser` seeds its own imported
+// conversations, and a count of "1" would then mean "1 plus whatever the
+// fixture brought". They get a bare account and seed exactly what they assert.
+const seedBareUser = async () => {
+  const user = await prisma.user.create({
+    data: { email: `${randomUUID()}@example.test`, name: "Lock Subject", plan: "Pro" },
+  });
+  return user.id;
+};
+
 const seedImport = async (userId: string, locked: boolean) => {
   const importRow = await prisma.externalImport.create({
     data: {
@@ -712,7 +757,7 @@ const domainRows = (data: Record<string, unknown>, publicName: string) =>
   (data[publicName] as Array<Record<string, unknown>>) || [];
 
 test("an unlocked import is exported with its title and its messages", async () => {
-  const userId = await seedUser();
+  const userId = await seedBareUser();
   await seedImport(userId, false);
   const { data } = await buildAccountDataExport(userId);
 
@@ -733,7 +778,7 @@ test("an unlocked import is exported with its title and its messages", async () 
 });
 
 test("a locked import is reduced to existence metadata", async () => {
-  const userId = await seedUser();
+  const userId = await seedBareUser();
   await seedImport(userId, true);
   const { data } = await buildAccountDataExport(userId);
 
@@ -755,7 +800,7 @@ test("a lock on one conversation does not withhold another", async () => {
   // The filter has to be per conversation. A single locked import silently
   // emptying the whole domain would be a data-loss bug wearing a privacy
   // fix's clothes.
-  const userId = await seedUser();
+  const userId = await seedBareUser();
   await seedImport(userId, true);
   await seedImport(userId, false);
   const { data } = await buildAccountDataExport(userId);
