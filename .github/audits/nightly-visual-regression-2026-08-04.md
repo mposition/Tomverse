@@ -138,3 +138,92 @@ Nightly workflow의 zero-retry·fail-closed 정책은 변경하지 않았습니�
 - `chat-loading-desktop-*`이 허용치 바로 아래에서 통과하고 있습니다. 같은
   영역에 추가 변경이 생기면 이 이미지도 넘어갈 수 있으며, 그 자체는 회귀가
   아닙니다.
+
+---
+
+# 후속: 실행 #5–#8 (2026-08-06)
+
+위 분석과 그 수정(release #342)이 배포된 뒤의 이력입니다. 위 문서는 #4까지만
+다루고 있어서, 그 뒤로 한 번 더 빨간 밤이 있었다는 사실이 어디에도 기록되지
+않았습니다.
+
+| # | 일시 | commit | 결과 |
+|---|---|---|---|
+| 5 | 08-04 00:20 | `7ee5937d` (수정 브랜치) | success |
+| 6 | 08-04 03:20 | `18d1e891` | success |
+| 7 | 08-04 20:49 | `18d1e891` | **failure** |
+| 8 | 08-05 20:43 | `94e19842` | success |
+
+**#6과 #7은 같은 commit에서 갈렸습니다.** 골든 문제도 fixture 문제도 아닙니다 —
+픽셀 diff가 아니라 focus 경합입니다.
+
+    expect(purchaseDialog.locator("button").first()).toBeFocused()
+    Expected: focused / Received: inactive
+    14 x locator resolved to ... data-testid="credit-pack-modal-close"
+
+버튼은 5초 내내 거기 있었고 focus만 잡히지 않았습니다.
+
+## 원인과 조치
+
+`UsageLimitModal`이 scroll lock·초기 focus·Escape/Tab 핸들러를 **한 effect**에
+두고 있었고, 그 dependency 목록에는 `onClose`가 들어가야 합니다. 호출부
+`ChatInput`은 `onClose={() => setIsUsageLimitModalOpen(false)}`를 넘기므로 매
+render마다 새 함수입니다. 즉 이 dialog가 열려 있는 동안 `ChatInput`이 render될
+때마다 effect가 해체·재구성됐고, 매 주기마다 focus가 두 번 움직였습니다 —
+cleanup이 열기 전 요소로 되돌리고, 재실행이 자기 close 버튼으로 당겨왔습니다.
+
+위에 아무것도 없을 때는 무해합니다. 크레딧 팩 구매 dialog가 **이 dialog 안에서**
+열리고 `ChatInput`은 입력·스트리밍·모델 상태 폴링으로 끊임없이 render되므로,
+구매 dialog가 방금 잡은 focus를 지키는지는 어느 requestAnimationFrame이 마지막에
+착지하느냐로 결정됐습니다. 그것이 nightly가 잡아낸 동전 던지기이고, 키보드
+사용자에게는 flaky test보다 나쁩니다 — 자기가 연 dialog 밖으로, 아무 입력도 하지
+않았는데 focus가 떨어집니다.
+
+`DeepResearchSetupSheet`도 `ChatPageClient`에서 같은 모양입니다.
+
+두 component 모두 effect를 나눴습니다(commit `b20841c`). focus와 scroll lock은
+`open`만 보고, key 핸들러는 `onClose` dependency를 유지합니다 — listener를 붙였다
+떼는 것은 focus를 움직이지 않으므로 부모 render마다 재구독해도 비용이 없습니다.
+`tests/modalFocusEffectDeps.test.mjs`가 그 모양을 고정합니다: focus를 *예약하는*
+effect(rAF·timeout으로 focus하는)는 callback prop에 의존할 수 없습니다. event
+handler 안에서 옮기는 focus는 의도적으로 제외했습니다 — Tab trap은 focus를
+옮겨야 하고 현재 `onClose`를 봐야 합니다.
+
+## 아직 증명되지 않은 것
+
+**#8이 green인 것은 이 수정의 증거가 아닙니다.** #8은 `main`의 `94e19842`에서
+돌았고 `b20841c`는 아직 PR #400에 머물러 있어 그 commit에 없습니다. #6이 #7과
+같은 commit에서 통과했듯, flake는 원래 통과하는 밤이 있습니다.
+
+이 컨테이너에서는 해당 spec을 돌릴 수 없습니다. `skipUnlessCanonicalVisualBrowser()`가
+걸려 있어 `PLAYWRIGHT_CHROMIUM_EXECUTABLE` 없이는 브라우저가 뜨지 않고, 그것을
+지정하면 spec이 설계대로 skip합니다(gate가 정상 작동하는 것입니다). 따라서 진단은
+CI 로그와 코드에서 나온 것이고 재현이 아닙니다.
+
+**증거가 되는 것은 `b20841c`가 `main`에 들어간 뒤의 nightly입니다.** 그 전까지
+이 항목은 열려 있습니다.
+
+## 같은 계열의 미해결 flake
+
+`tests/e2e/source-grounding.spec.ts:347`("the explanation is reachable by keyboard
+and dismissed with Escape")이 daily security audit에서 flaky로 보고되며, 로컬
+substitute Chromium에서 2/10·4/12로 재현됩니다. 실패 양상은 두 가지입니다 —
+`info.focus()` 뒤 popover 요소가 없거나, Escape 뒤 `info`가 focus되지 않고
+`aria-expanded="false"`에 focus가 `<body>`에 있습니다.
+
+실험으로 배제한 가설:
+
+1. `onBlurCapture`의 rAF close 경로 — 비활성화해도 4/12로 동일
+2. dialog의 focus 탈취 — `ComparisonReviewDialog`와 `ChatPageClient`에 `.focus(`
+   호출이 **하나도 없음**
+3. test 쪽 settle 타이밍 — 값 텍스트 대기 추가 시 2/12로 감소하나 잔존
+4. `ComparisonReviewDialog`의 setup fetch effect가 불안정한 dependency로 매
+   render마다 abort·재요청 — `t`는 `useCallback([lang])`으로, `guestSource`는
+   `useState`로 각각 안정. 성립하지 않음
+
+probe로 확인된 사실: `info.focus()` 직후의 `await expect(info).toBeFocused()`는
+**한 번도 실패하지 않았습니다.** 즉 focus 시점의 node 교체와 focus 탈취는
+제외됩니다. 실패는 Escape 이후 구간에 있습니다.
+
+가설 네 개가 죽었으므로 다음 사람은 추측이 아니라 실패하는 실행의 DOM을 직접
+계측하는 것에서 시작하는 편이 낫습니다.
