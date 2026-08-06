@@ -209,6 +209,17 @@ jobs:
         timeout-minutes: 5
         run: npm run check:image-pricing
 
+      # One provider timeout and one backoff schedule decide three deadlines:
+      # the worst legitimate attempt, the stale threshold the sweep refunds
+      # against, and the route budget the post-response executor runs inside.
+      # They were three literals related only in prose. A stale threshold below
+      # the worst attempt refunds live work; a route budget below what the
+      # executor needs loses the request, because nothing re-drives a pending
+      # generation.
+      - name: Image executor budget
+        timeout-minutes: 5
+        run: npm run check:image-executor-budget
+
       # The cost guardrails are derived from plan credits and stored in
       # ChatUsageBucket.count. When that product outgrew int4, PostgreSQL threw
       # 22003 in the guard query instead of returning an allow/deny decision and

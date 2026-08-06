@@ -28,9 +28,11 @@ Date / timezone:    ____________________
 - [ ] `npm run check:accent-tokens`
 - [ ] `npm run check:model-pricing`
 - [ ] `npm run check:image-pricing`
+- [ ] `npm run check:image-executor-budget`
 - [ ] `npm run check:default-models`
 - [ ] `npm run check:encoding:strict`
 - [ ] `npm run check:context-window-register`
+- [ ] `npm run check:router-context-window`
 - [ ] `npm run check:usage-bucket-range`
 - [ ] `npm run check:memory-extraction-eval`
 - [ ] `npm run check:tomverse-chat-release-gate-view`
