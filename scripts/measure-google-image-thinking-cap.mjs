@@ -57,6 +57,36 @@ const googleModels = IMAGE_MODEL_REGISTRY.filter(
   (model) => model.provider === "google"
 );
 
+// `npm run <script> --model=x` without the `--` separator makes npm treat the
+// flags as its own config and pass the script nothing. That used to fall
+// through to the help text, which reads as "you forgot the arguments" to
+// someone who did not -- and this is a script people run having just arranged
+// to spend money. npm records what it swallowed in npm_config_*, so the
+// mistake is detectable and worth naming.
+const swallowedByNpm = ["model", "limit", "repeats", "thinking", "prompt"]
+  .filter((name) => process.env[`npm_config_${name}`] !== undefined);
+
+if (args.length === 0 && swallowedByNpm.length > 0) {
+  console.error(
+    [
+      "npm consumed the arguments instead of passing them on:",
+      ...swallowedByNpm.map((name) => `  --${name}`),
+      "",
+      "`npm run` needs `--` before the script's own flags:",
+      "",
+      "  npm run measure:google-image-thinking-cap -- --model=... --limit=...",
+      "",
+      "Or skip npm entirely:",
+      "",
+      "  node --conditions=react-server --import tsx \\",
+      "    scripts/measure-google-image-thinking-cap.mjs --model=... --limit=...",
+      "",
+      "Nothing was sent.",
+    ].join("\n")
+  );
+  process.exit(1);
+}
+
 if (flag("help") || args.length === 0) {
   console.log(
     [
