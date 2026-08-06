@@ -566,6 +566,32 @@ const checks = [
     },
   },
   {
+    // The concurrency slot is released deterministically on every unwind, not
+    // left to a TTL (docs/policy/chat-concurrency-and-identity.md). Ownership
+    // moves once, at the source reader, and the stream cannot free anything
+    // until it is pulled -- which only happens once the Response is returned.
+    // Anything that throws in between leaves a slot nobody will ever free, and
+    // its owner is told a response is already being generated until it lapses.
+    name: "A stream that is never published still frees its concurrency slot",
+    file: "app/api/chat/route.ts",
+    test: (source) => {
+      const ownership = read("lib/chatLeaseOwnershipCore.ts");
+      return (
+        // The failure path asks who holds the slot, rather than reading "the
+        // request no longer holds it" as "someone else will free it".
+        source.includes("chatLeaseToReleaseOnUnwind(leaseOwnership)") &&
+        source.includes("reason: orphanedLease.reason") &&
+        !source.includes('reason: "request_failed_before_stream",') &&
+        // Published after the Response is constructed, so a throw while
+        // building it still unwinds through the branch above.
+        /const response = new Response\([\s\S]{0,600}?chatLeaseStreamPublished\(leaseOwnership\);\s*\n\s*return response;/.test(
+          source
+        ) &&
+        ownership.includes('reason: "stream_never_started"')
+      );
+    },
+  },
+  {
     // A model's settable output ceiling is a capability, not this request's
     // budget. Kimi K3's ceiling is its whole context window, so using it as
     // the fixed output cap refused every request at every input size. The
