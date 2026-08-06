@@ -327,8 +327,8 @@ jobs:
 
       - name: Install Chromium
         if: steps.scope.outputs.code == 'true'
-        timeout-minutes: 10
-        run: npx playwright install --with-deps chromium
+        timeout-minutes: 20
+        run: scripts/ci/install-playwright.sh chromium
 
       # The @smoke tier only. Every other desktop-chromium test still runs --
       # on main push via Main Chromium Regression, and nightly via Daily
@@ -491,8 +491,8 @@ jobs:
 
       - name: Install Chromium
         if: steps.scope.outputs.code == 'true'
-        timeout-minutes: 10
-        run: npx playwright install --with-deps chromium
+        timeout-minutes: 20
+        run: scripts/ci/install-playwright.sh chromium
 
       - name: Run the high-risk UI regression checks
         if: steps.scope.outputs.code == 'true'
