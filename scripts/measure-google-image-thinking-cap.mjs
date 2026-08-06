@@ -191,7 +191,12 @@ if (!flag("i-accept-the-cost")) {
  */
 const redact = (text) =>
   String(text)
-    .replace(/AIza[A-Za-z0-9_-]{10,}/g, "[redacted-api-key]")
+    // Google issues more than one key shape (`AIza...`, `AQ....`), so the
+    // pattern is a backstop for keys OTHER than the one in hand -- the exact
+    // value is replaced below regardless, which is what actually guarantees
+    // this output can be pasted into a ticket.
+    .replace(/\bAIza[A-Za-z0-9_-]{10,}/g, "[redacted-api-key]")
+    .replace(/\bAQ\.[A-Za-z0-9_-]{10,}/g, "[redacted-api-key]")
     .replace(new RegExp(apiKey.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "g"), "[redacted-api-key]");
 
 const { createHash } = await import("node:crypto");

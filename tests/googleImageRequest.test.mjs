@@ -254,3 +254,18 @@ test("the audit snapshot of a request excludes the prompt", () => {
     "response_format",
   ]);
 });
+
+test("the delivery MIME is a request preference, not the storage allowlist's head", () => {
+  // Every Google request went out asking for PNG because the adapter read
+  // `outputMimeTypes[0]`, which is the list of types it may *store* -- and the
+  // API refuses PNG outright:
+  //
+  //   "The value 'image/png' is not supported for
+  //    'response_format.mime_type'. Supported values: 'image/jpeg'."
+  //
+  // So every one of them 400'd. The two ideas are separate fields now, and
+  // this pins that the request carries what it is given rather than a guess.
+  const body = request({ deliveryMimeType: "image/jpeg" });
+  assert.equal(body.response_format.mime_type, "image/jpeg");
+  assert.notEqual(body.response_format.mime_type, "image/png");
+});
