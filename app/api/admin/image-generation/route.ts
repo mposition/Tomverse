@@ -190,6 +190,7 @@ export async function GET(req: Request) {
         limits: entry.resolved.limits,
         floorMicroUsd: entry.resolved.floorMicroUsd,
         problems: entry.resolved.problems,
+        advisories: entry.resolved.advisories,
         clamped: entry.resolved.clamped,
       })),
       budget: {
@@ -198,6 +199,7 @@ export async function GET(req: Request) {
         limits: budget.limits,
         clamped: budget.clamped,
         problems: budget.problems,
+        advisories: budget.advisories,
         usedTodayMicroUsd: usageBucketCount(dayBudgetUsage?.count),
         usedThisMonthMicroUsd: usageBucketCount(monthBudgetUsage?.count),
       },

@@ -40,6 +40,7 @@ import {
 import { getBillingPlanByTier } from "@/lib/billingConfig";
 import { prisma } from "@/lib/prisma";
 import { getProviderCostBudget } from "@/lib/providerCostBudget";
+import { recordMemoryCounter } from "@/lib/memoryMetrics";
 
 /**
  * Extraction run lifecycle (Release B, slice B2): creation with the §11
@@ -269,6 +270,12 @@ async function assertExtractionBudget(
         },
     });
     if (!decision.allowed) {
+        // The only record that this happened. A refusal creates no run and
+        // stops no existing row, so without the counter §22's sub-budget
+        // exhaustion metric has nothing to read — which is exactly why it was
+        // listed as unavailable. Fire-and-forget: a metric must never turn a
+        // refusal into a second failure.
+        void recordMemoryCounter("extraction_subbudget_exhausted", 1, now);
         throw new ApiSecurityError(
             503,
             "MEMORY_EXTRACTION_PROVIDER_BUDGET_EXHAUSTED",
@@ -436,7 +443,31 @@ async function loadOwnedRun(userId: string, runId: string) {
     return run;
 }
 
-export async function getMemoryExtractionRun(userId: string, runId: string) {
+/**
+ * Whether a run that still reads `running` currently has nobody driving it.
+ *
+ * Derived, never stored. `status` stays `running` on purpose: the run is not
+ * failed, its progress is intact, and the reclaim sweep will hand it to a new
+ * worker. Writing a `stalled` status would add a state every claim, settlement
+ * and metric would have to learn, to describe something the lease already
+ * says.
+ *
+ * A `pending` run is not stalled — it is waiting to start, which is a normal
+ * few seconds between the create response and the post-response kick, and
+ * calling that "stalled" would alarm every user who watches a run begin.
+ */
+const runIsStalled = (
+    run: { status: string; leaseExpiresAt: Date | null },
+    now: Date
+) =>
+    run.status === "running" &&
+    (!run.leaseExpiresAt || run.leaseExpiresAt.getTime() <= now.getTime());
+
+export async function getMemoryExtractionRun(
+    userId: string,
+    runId: string,
+    now: Date = new Date()
+) {
     const run = await loadOwnedRun(userId, runId);
     return {
         id: run.id,
@@ -447,6 +478,12 @@ export async function getMemoryExtractionRun(userId: string, runId: string) {
         chunkCompleted: run.chunkCompleted,
         createdAt: run.createdAt.toISOString(),
         completedAt: run.completedAt?.toISOString() ?? null,
+        // The owner is told, rather than left watching a progress bar that
+        // will not move for up to fifteen minutes with no explanation. The
+        // lease deadline itself is not returned: it is a worker-coordination
+        // detail, and a countdown to a sweep the user cannot influence would
+        // read as a promise about when work resumes.
+        stalled: runIsStalled(run, now),
     };
 }
 
@@ -787,6 +824,16 @@ export async function cancelMemoryExtractionRun(userId: string, runId: string) {
 export type ExtractionChunkHandler = (input: {
     lease: MemoryExtractionLease;
     chunk: ClaimedExtractionChunk;
+    /**
+     * Cancelled when the chunk's wall-clock budget runs out.
+     *
+     * Best-effort, and deliberately not the accounting mechanism. A handler
+     * that ignores it cannot hang the slice — the race below still resolves —
+     * and a provider request that already reached the network may be billed
+     * whether or not the abort landed. What this saves is the work that had
+     * not started yet; what records the rest is the provider-call ledger.
+     */
+    signal: AbortSignal;
 }) => Promise<{ outcome: "completed" } | { outcome: "failed"; code: string }>;
 
 export type ExtractionSliceResult = {
@@ -962,20 +1009,52 @@ export async function driveMemoryExtractionRunSlice(input: {
             return stop("paused", "no_pending_chunk");
         }
 
+        // One controller per chunk. Cancelling is best-effort: the bounded
+        // race below is what actually stops the slice waiting, and the abort
+        // is what stops work that has not started yet from starting.
+        const controller = new AbortController();
+        let timedOut = false;
         const result = await withTimeout(
-            input.handler({ lease, chunk }).catch((error) => {
-                console.error("memory extraction chunk handler failed", error);
-                return { outcome: "failed" as const, code: "handler_error" };
-            }),
+            input
+                .handler({ lease, chunk, signal: controller.signal })
+                .catch((error) => {
+                    if (controller.signal.aborted) {
+                        // An abort is not a handler bug. Classifying it as one
+                        // would hide every timeout inside `handler_error` and
+                        // make a slow provider look like broken code.
+                        return {
+                            outcome: "failed" as const,
+                            code: "chunk_timeout",
+                        };
+                    }
+                    console.error(
+                        "memory extraction chunk handler failed",
+                        error
+                    );
+                    return { outcome: "failed" as const, code: "handler_error" };
+                }),
             chunkTimeoutMs,
-            () => ({ outcome: "failed" as const, code: "chunk_timeout" })
+            () => {
+                timedOut = true;
+                // Abort FIRST, then decide. A handler that returns after this
+                // is describing work this slice has already written off.
+                controller.abort(new Error("chunk_timeout"));
+                return { outcome: "failed" as const, code: "chunk_timeout" };
+            }
         );
         chunksProcessed += 1;
+
+        // A late result must never reach the chunk's outcome. The handler may
+        // still be running, and whatever it eventually produces belongs to a
+        // chunk this slice has already recorded as timed out.
+        const applied0 = timedOut
+            ? { outcome: "failed" as const, code: "chunk_timeout" }
+            : result;
 
         const applied = await completeExtractionChunk(
             lease,
             chunk.chunkIndex,
-            result,
+            applied0,
             new Date()
         );
         if (!applied.applied) {

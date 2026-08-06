@@ -103,6 +103,7 @@ const chatBudget = ({
   usageCredits: credits,
   inputTokens,
   maxOutputTokens: outputTokens,
+  providerMaxOutputTokens: null,
   reservedOutputTokens,
   inputUsdPerMillionTokens: inputRate,
   outputUsdPerMillionTokens: outputRate,

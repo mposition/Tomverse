@@ -360,18 +360,25 @@ models:
   - modelId: "kimi-k3"
     apiModel: "kimi-k3"
     provider: moonshot
-    status: unverified
-    contextWindowTokens: null
-    contextWindowIncludesOutput: null
+    status: verified
+    contextWindowTokens: 1048576
+    contextWindowIncludesOutput: true
     maxInputTokens: null
-    maxOutputTokens: null
-    aliasOrLatest: null
-    sourceUrl: null
-    sourceTitle: null
-    verifiedAt: null
-    verifiedBy: null
+    maxOutputTokens: 1048576
+    aliasOrLatest: false
+    sourceUrl: "https://platform.kimi.ai/docs/api/chat"
+    sourceTitle: "Moonshot AI Platform - Chat API"
+    verifiedAt: "2026-08-06"
+    verifiedBy: backend-ai
     catalogueDeclaredTokens: 1048576
-    notes: ""
+    notes: >-
+      maxOutputTokens here is the provider's absolute settable ceiling for
+      max_completion_tokens, not the value Tomverse sends. Moonshot's documented
+      default is 131,072, which lib/modelPricing.ts carries as the application
+      request cap. The distinction is load-bearing: the provider rejects a
+      request when input + max_completion_tokens exceeds the window, so using
+      the ceiling as every request's fixed output budget refused every request
+      at any input size.
 
   - modelId: "minimax-m3"
     apiModel: "MiniMax-M3"

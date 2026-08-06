@@ -276,17 +276,42 @@ export const estimateToolInputTokenOverhead = ({
  * recalibration from touching a pure Latin, code or JSON request.
  */
 export const toReservedInputTokens = (
-  breakdown: TokenEstimateBreakdown,
-  { toolOverheadTokens = 0 }: { toolOverheadTokens?: number } = {}
+  estimate: TokenEstimateBreakdown | number,
+  {
+    version = ACTIVE_ESTIMATOR_VERSION,
+    toolOverheadTokens = 0,
+  }: { version?: string; toolOverheadTokens?: number } = {}
 ) => {
+  const isBreakdown = typeof estimate !== "number";
   const { reservationMultiplierBySegment, reservationFramingOverheadTokens } = getCalibration(
-    breakdown.version
+    isBreakdown ? estimate.version : version
   );
   const segments: EstimateSegment[] = ["hangul", "hanKana", "nonCjk"];
-  const widened = segments.reduce(
-    (total, segment) =>
-      total + Math.ceil(breakdown.tokensBySegment[segment] * reservationMultiplierBySegment[segment]),
-    0
-  );
+
+  // A caller holding only a total has thrown the segment mix away, and the
+  // margins are per segment precisely because the mix decides which one
+  // applies. Widening such a total by the largest margin any segment carries
+  // is the only choice that cannot under-reserve, and under-reserving is the
+  // dangerous direction: the reservation is refunded down at settlement, so an
+  // over-reservation costs the user nothing while a short one is a request
+  // that ran on credits nobody held.
+  //
+  // Identity under `generic_multilingual_v1`, whose margins are all 1, so this
+  // path is byte-identical to the raw total today. It exists so a caller that
+  // cannot yet supply a breakdown -- `createChatBudget`, which takes a token
+  // count and is reached from eight call sites -- is not silently exempted
+  // from the margin once a calibration with real margins goes active. Threading
+  // the breakdown through those callers is the fix; this is the floor until
+  // then.
+  const widened = isBreakdown
+    ? segments.reduce(
+        (total, segment) =>
+          total + Math.ceil(estimate.tokensBySegment[segment] * reservationMultiplierBySegment[segment]),
+        0
+      )
+    : Math.ceil(
+        estimate * Math.max(...segments.map((segment) => reservationMultiplierBySegment[segment]))
+      );
+
   return widened + reservationFramingOverheadTokens + toolOverheadTokens;
 };

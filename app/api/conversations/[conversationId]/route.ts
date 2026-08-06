@@ -8,6 +8,12 @@ import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
 import { APP_DEFAULTS, WEB_SEARCH_MODES, isWebSearchMode } from "@/lib/appDefaults";
 import {
+  CONVERSATION_MEMORY_MODES,
+  DEFAULT_CONVERSATION_MEMORY_MODE,
+  isConversationMemoryMode,
+} from "@/lib/conversationMemoryMode";
+import { recordConversationMemoryOff } from "@/lib/memoryModeSignals";
+import {
   clampRuntimeSelectedModels,
   isEnabledRuntimeModelId,
 } from "@/lib/modelRegistry";
@@ -53,6 +59,7 @@ const updateConversationSchema = z
       .optional(),
     projectId: z.union([z.string().trim().min(1).max(100), z.null()]).optional(),
     webSearchMode: z.enum(WEB_SEARCH_MODES).optional(),
+    memoryMode: z.enum(CONVERSATION_MEMORY_MODES).optional(),
   })
   .strict()
   .refine(
@@ -62,7 +69,8 @@ const updateConversationSchema = z
       body.selectedModels !== undefined ||
       body.disabledPanels !== undefined ||
       body.projectId !== undefined ||
-      body.webSearchMode !== undefined,
+      body.webSearchMode !== undefined ||
+      body.memoryMode !== undefined,
     { message: "At least one update is required." }
   );
 const MESSAGE_PAGE_SIZE = 50;
@@ -161,6 +169,7 @@ export async function GET(
         selectedModels: true,
         disabledPanels: true,
         webSearchMode: true,
+        memoryMode: true,
         projectId: true,
         shareEnabled: true,
         shareExpiresAt: true,
@@ -229,6 +238,12 @@ export async function GET(
         disabledPanels: safeParse(conversation.disabledPanels, []).filter(
           (modelId: string) => selectedModels.includes(modelId)
         ),
+        // The stored value, `inherit` included: resolving it here would hide
+        // from the client whether this conversation follows the account
+        // default or overrides it (§8.1 invariant 1).
+        memoryMode: isConversationMemoryMode(conversation.memoryMode)
+          ? conversation.memoryMode
+          : DEFAULT_CONVERSATION_MEMORY_MODE,
         webSearchMode: isWebSearchMode(conversation.webSearchMode)
           ? conversation.webSearchMode
           : APP_DEFAULTS.defaultWebSearchMode,
@@ -284,7 +299,12 @@ export async function PATCH(
 
         const existingConv = await prisma.conversation.findUnique({
             where: { id: conversationId },
-            select: { userId: true, selectedModels: true, password: true }
+            select: {
+                userId: true,
+                selectedModels: true,
+                password: true,
+                memoryMode: true,
+            }
         });
 
         if (!existingConv) {
@@ -443,6 +463,10 @@ export async function PATCH(
       updateData.webSearchMode = body.webSearchMode;
     }
 
+    if (body.memoryMode !== undefined) {
+      updateData.memoryMode = body.memoryMode;
+    }
+
     if (body.projectId !== undefined) {
       if (body.projectId === null) {
         updateData.project = { disconnect: true };
@@ -469,6 +493,15 @@ export async function PATCH(
       where: { id: conversationId },
       data: updateData,
     });
+    if (body.memoryMode !== undefined) {
+      // After the write, and never allowed to fail it: the user's choice is
+      // already saved, and §22 observation must not be able to undo it.
+      await recordConversationMemoryOff({
+        conversationId,
+        previousMode: existingConv.memoryMode,
+        nextMode: body.memoryMode,
+      });
+    }
     if (lockAuditEvent) {
       logSecurityAuditEvent(lockAuditEvent, {
         userId,
@@ -488,6 +521,9 @@ export async function PATCH(
       disabledPanels: safeParse(updatedConversation.disabledPanels, []).filter(
         (modelId: string) => responseSelectedModels.includes(modelId)
       ),
+        memoryMode: isConversationMemoryMode(updatedConversation.memoryMode)
+          ? updatedConversation.memoryMode
+          : DEFAULT_CONVERSATION_MEMORY_MODE,
         webSearchMode: isWebSearchMode(updatedConversation.webSearchMode)
           ? updatedConversation.webSearchMode
           : APP_DEFAULTS.defaultWebSearchMode,

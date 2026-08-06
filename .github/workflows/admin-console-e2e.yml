@@ -134,8 +134,8 @@ jobs:
             ${{ runner.os }}-playwright-${{ hashFiles('package-lock.json') }}-
 
       - name: Install Chromium
-        timeout-minutes: 10
-        run: npx playwright install --with-deps chromium
+        timeout-minutes: 20
+        run: scripts/ci/install-playwright.sh chromium
 
       # `scripts/run-admin-e2e.mjs` validates the database URL and pushes the
       # Prisma schema before Playwright boots the server. The build above is

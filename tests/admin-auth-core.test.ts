@@ -8,6 +8,9 @@ import {
   type AdminRole,
 } from "../lib/adminAuthCore.ts";
 import {
+  ACCOUNT_SWITCH_REASON,
+  accountSwitchSignInHref,
+  isAdminPathname,
   normalizeAdminCallbackPath,
 } from "../lib/adminReauthenticationCore.ts";
 
@@ -157,4 +160,56 @@ test("administrator reauthentication callbacks remain on an admin route", () => 
   );
   assert.equal(normalizeAdminCallbackPath("//evil.example/admin"), "/admin/overview");
   assert.equal(normalizeAdminCallbackPath("/chat"), "/admin/overview");
+});
+
+test("the 404 recognises admin request paths without consulting a session", () => {
+  assert.equal(isAdminPathname("/admin"), true);
+  assert.equal(isAdminPathname("/admin/overview"), true);
+  // A path that resolves to no route at all still counts: the account-switch
+  // offer must not distinguish a real console URL from a typo, or it becomes
+  // an oracle for which admin routes exist.
+  assert.equal(isAdminPathname("/admin/does-not-exist"), true);
+
+  assert.equal(isAdminPathname("/chat"), false);
+  assert.equal(isAdminPathname("/administrators"), false);
+  assert.equal(isAdminPathname("/nested/admin/overview"), false);
+  // Protocol-relative and absolute forms name another origin even though the
+  // first character is a slash.
+  assert.equal(isAdminPathname("//evil.example/admin"), false);
+  assert.equal(isAdminPathname("https://evil.example/admin"), false);
+  assert.equal(isAdminPathname("javascript:alert(1)"), false);
+  assert.equal(isAdminPathname(""), false);
+  assert.equal(isAdminPathname(null), false);
+  assert.equal(isAdminPathname(undefined), false);
+  assert.equal(isAdminPathname(42), false);
+});
+
+test("account switching returns to the original admin destination", () => {
+  assert.equal(
+    accountSwitchSignInHref("/admin/refunds?status=pending"),
+    `/auth/signin?callbackUrl=%2Fadmin%2Frefunds%3Fstatus%3Dpending&reason=${ACCOUNT_SWITCH_REASON}`
+  );
+  assert.equal(
+    accountSwitchSignInHref("/admin"),
+    `/auth/signin?callbackUrl=%2Fadmin&reason=${ACCOUNT_SWITCH_REASON}`
+  );
+});
+
+test("account switching cannot be turned into an open redirect", () => {
+  const fallback = `/auth/signin?callbackUrl=%2Fadmin%2Foverview&reason=${ACCOUNT_SWITCH_REASON}`;
+  for (const hostile of [
+    "https://evil.example/admin/overview",
+    "//evil.example/admin",
+    "///evil.example/admin",
+    "javascript:alert(1)",
+    "data:text/html,<script>alert(1)</script>",
+    "/chat?next=https://evil.example",
+    "",
+    "   ",
+    null,
+    undefined,
+    { toString: () => "/admin/overview" },
+  ]) {
+    assert.equal(accountSwitchSignInHref(hostile), fallback, String(hostile));
+  }
 });

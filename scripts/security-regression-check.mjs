@@ -537,6 +537,72 @@ const checks = [
       source.includes("memoryExtractionDispatched"),
   },
   {
+    // The guard has to bound what the request really sends. A provider-native
+    // search adds 6,400 input tokens the raw estimate does not carry, so
+    // comparing the estimate let a searching turn sit that far over the limit
+    // and fail at the provider -- after a reservation and a dispatched call --
+    // instead of here, for free
+    // (docs/ops/tomverse-chat-context-window-rollout.md).
+    name: "The context-window guard measures the reserved input, not the raw estimate",
+    file: "app/api/chat/route.ts",
+    test: (source) => {
+      const guard = source.slice(
+        source.indexOf("fitChatOutputToContextWindow({"),
+        source.indexOf("MODEL_CONTEXT_WINDOW_EXCEEDED")
+      );
+      return (
+        guard.includes("reservedInputTokens: budget.inputTokens") &&
+        !guard.includes("estimatedInputTokens")
+      );
+    },
+  },
+  {
+    // A model's settable output ceiling is a capability, not this request's
+    // budget. Kimi K3's ceiling is its whole context window, so using it as
+    // the fixed output cap refused every request at every input size. The
+    // request cap is fitted to the room the window has left, and the fitted
+    // figure -- not the profile's -- is what reaches the provider.
+    name: "The dispatched output cap is the one fitted to the context window",
+    file: "app/api/chat/route.ts",
+    test: (source) =>
+      source.includes("const requestMaxOutputTokens = outputBudget.outputTokens") &&
+      source.includes("maxOutputTokens: requestMaxOutputTokens,") &&
+      !source.includes("maxOutputTokens: budget.maxOutputTokens,"),
+  },
+  {
+    // One function owns the reserved-input figure, so the estimator
+    // calibration's safety margin and framing overhead cannot be skipped by a
+    // caller that adds the tool overhead itself.
+    name: "The chat budget derives its reserved input from the active calibration",
+    file: "lib/chatSecurity.ts",
+    test: (source) =>
+      source.includes("toReservedInputTokens(estimatedInputTokens") &&
+      source.includes("toolOverheadTokens: estimateToolInputTokenOverhead"),
+  },
+  {
+    // §8.4 requires the server to establish evidence existence, ownership and
+    // a matching content digest. The check was written and never called: the
+    // label map is built when the chunk is claimed, and a source deleted
+    // during the provider call then fails the evidence insert's foreign key
+    // and takes the whole chunk down instead of dropping the candidate.
+    name: "Extraction evidence is re-verified at write time",
+    file: "lib/memoryExtractionPersistence.ts",
+    test: (source) =>
+      source.includes("verifyExternalMessageEvidence") &&
+      source.includes("unsourced"),
+  },
+  {
+    // An attempt whose request went out and never settled holds its
+    // reservation forever while nothing records that the call finished. The
+    // sweep lived unreferenced outside its tests until it was wired here
+    // (policy §3, §11 "idempotent settlement").
+    name: "Unsettled extraction provider calls are reconciled by maintenance",
+    file: "app/api/internal/maintenance/credit-reservations/route.ts",
+    test: (source) =>
+      source.includes("reconcileUnsettledExtractionProviderCalls") &&
+      source.includes("memoryExtractionProviderCalls"),
+  },
+  {
     name: "Provider error events expire through maintenance cleanup",
     file: "lib/maintenance.ts",
     test: (source) =>
@@ -784,6 +850,68 @@ const checks = [
       source.includes("verification.thinkingCapMicroUsd !== null") &&
       source.includes('model.disabledReason === "operational_hold"') &&
       source.includes("marked operational_hold without a price verification date"),
+  },
+  {
+    name: "The Google image path speaks Interactions, never GenerateContent",
+    file: "lib/googleImageRequest.ts",
+    test: (source) => {
+      // GenerateContent's vocabulary is allowed in prose -- the header comment
+      // names it precisely so the boundary is legible -- and forbidden in
+      // code, because a body that mixes the two is valid-looking and wrong.
+      const code = source
+        .split("\n")
+        .filter((line) => !/^\s*(\/\/|\*|\/\*)/.test(line))
+        .join("\n");
+      return (
+        source.includes("/v1beta/interactions") &&
+        source.includes('"x-goog-api-key"') &&
+        source.includes("max_output_tokens: input.maxOutputTokens") &&
+        source.includes("total_thought_tokens") &&
+        !code.includes("generationConfig") &&
+        !code.includes("inlineData") &&
+        !code.includes("usageMetadata") &&
+        // Only the delivered answer is read. A thinking model emits images
+        // while reasoning, and storing a working sketch as the paid result is
+        // the failure nobody would notice -- both are plausible pictures.
+        source.includes('=== "model_output"') &&
+        source.includes("if (images.length !== 1) return null") &&
+        // An open-ended request is refused rather than sent (§12 cond. 2).
+        source.includes(
+          "if (!input.maxOutputTokens || input.maxOutputTokens <= 0) return null"
+        )
+      );
+    },
+  },
+  {
+    name: "A request audit snapshot strips every provider's prompt field",
+    file: "lib/imageProviderAdapter.ts",
+    test: (source) =>
+      // OpenAI and xAI name it `prompt`; Google's Interactions API names it
+      // `input`. Filtering only `prompt` was correct until it silently stopped
+      // being: the Google body would have copied the user's prompt into the
+      // stored audit blob, a second place every deletion path has to reach.
+      source.includes('PROMPT_FIELD_NAMES = new Set(["prompt", "input"])') &&
+      source.includes("!PROMPT_FIELD_NAMES.has(key)") &&
+      !source.includes('([key]) => key !== "prompt"'),
+  },
+  {
+    name: "A documented output limit never doubles as a proven cost cap",
+    file: "lib/imageModelRegistry.ts",
+    test: (source) => {
+      // maxOutputTokens is what the model card publishes; thinkingCapMicroUsd
+      // is whether the worst case is provably finite. Google states the first
+      // and not the second, so the field must never be read as the cap -- and
+      // maxImageRequestCostMicroUsd must keep deriving from the cap alone.
+      const derivation = source.slice(
+        source.indexOf("export const maxImageRequestCostMicroUsd")
+      );
+      const body = derivation.slice(0, derivation.indexOf("\n};"));
+      return (
+        source.includes("maxOutputTokens?: number") &&
+        body.includes("thinkingCapMicroUsd") &&
+        !body.includes("maxOutputTokens")
+      );
+    },
   },
   {
     name: "The thumbnail repair cannot destroy the original it derives from",
@@ -2158,7 +2286,11 @@ const checks = [
         source.includes("npm audit --omit=dev --json") &&
         source.includes("npm run typecheck") &&
         source.includes("npm run check") &&
-        source.includes("playwright install --with-deps chromium webkit") &&
+        // Both browsers, through the retry wrapper. The literal command was
+        // pinned here until 2026-08-05, when an apt transaction that nothing
+        // retried started costing whole jobs; what this guard cares about is
+        // unchanged -- this workflow installs the two browsers it runs.
+        source.includes("scripts/ci/install-playwright.sh chromium webkit") &&
         source.includes("npm run test:e2e:run") &&
         source.includes("node scripts/send-security-audit-report.mjs") &&
         source.includes('check_result "Unit and API policy tests"') &&
@@ -2313,7 +2445,7 @@ const checks = [
         packageSource.includes(
           '"check:accent-tokens": "node scripts/check-accent-tokens.mjs"'
         ) &&
-        prWorkflow.includes("playwright install --with-deps chromium") &&
+        prWorkflow.includes("scripts/ci/install-playwright.sh chromium") &&
         !prWorkflow.includes("chromium webkit") &&
         // No tier that *judges* a golden may rewrite one.
         !prWorkflow.includes("--update-snapshots") &&

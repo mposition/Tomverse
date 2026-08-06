@@ -251,6 +251,51 @@ const seedRun = async (conversationCount: number) => {
     return { user, run };
 };
 
+/**
+ * A run whose worker died still reads `running`, with its progress intact and
+ * a lease nobody holds. Until the reclaim sweep runs -- up to fifteen minutes
+ * -- the owner's screen shows a bar that will not move, and the only thing
+ * that makes that honest is the run saying so.
+ */
+test("a run whose lease lapsed reports itself as stalled (§11)", async () => {
+    const { user, run } = await seedRun(1);
+    const claimed = await claimMemoryExtractionRun({
+        runId: run.id,
+        owner: "worker-that-died",
+    });
+    assert.ok(claimed);
+
+    const live = await getMemoryExtractionRun(user.id, run.id);
+    assert.equal(live.status, "running");
+    assert.equal(
+        live.stalled,
+        false,
+        "a lease still being held is not a stall"
+    );
+
+    await prisma.memoryExtractionRun.update({
+        where: { id: run.id },
+        data: {
+            leaseExpiresAt: new Date(Date.now() - MEMORY_EXTRACTION_LEASE_TTL_MS),
+        },
+    });
+    const stalled = await getMemoryExtractionRun(user.id, run.id);
+    // Derived, not stored: the run is not failed and its chunks are kept, so
+    // the status has to stay `running` for claim, settlement and metrics.
+    assert.equal(stalled.status, "running");
+    assert.equal(stalled.stalled, true);
+});
+
+test("a pending run is waiting, not stalled (§11)", async () => {
+    // A few seconds between the create response and the post-response kick is
+    // the normal path. Calling it stalled would alarm every user who watches
+    // a run start.
+    const { user, run } = await seedRun(1);
+    const view = await getMemoryExtractionRun(user.id, run.id);
+    assert.equal(view.status, "pending");
+    assert.equal(view.stalled, false);
+});
+
 test("a run is created with its durable chunk work list (§11)", async () => {
     const { run } = await seedRun(2);
     const chunks = await prisma.memoryExtractionChunk.findMany({

@@ -71,7 +71,7 @@ jobs:
         run: npm run build
 
       - name: Install Chromium
-        run: npx playwright install --with-deps chromium
+        run: scripts/ci/install-playwright.sh chromium
 
       # A first pass captures what the current baselines disagree about, so
       # the recording can be reviewed against evidence rather than accepted on
