@@ -135,7 +135,14 @@ export type ChatBudget = {
     modelUsageClass: ModelUsageClass;
     usageCredits: number;
     inputTokens: number;
+    /**
+     * The output cap this application asks for, before it is fitted to the
+     * room the context window has left (`lib/chatContextWindow.ts`). Not what
+     * the request ends up sending.
+     */
     maxOutputTokens: number;
+    /** The provider's absolute settable ceiling, where verified. */
+    providerMaxOutputTokens: number | null;
     reservedOutputTokens: number;
     inputUsdPerMillionTokens: number;
     outputUsdPerMillionTokens: number;
@@ -421,6 +428,7 @@ export const createChatBudget = (
             (options?.webSearchSurchargeCredits || 0),
         inputTokens: reservedInputTokens,
         maxOutputTokens: pricing.maxOutputTokens,
+        providerMaxOutputTokens: pricing.providerMaxOutputTokens,
         reservedOutputTokens: pricing.reservationOutputTokens,
         inputUsdPerMillionTokens: pricing.inputUsdPerMillionTokens,
         outputUsdPerMillionTokens: pricing.outputUsdPerMillionTokens,

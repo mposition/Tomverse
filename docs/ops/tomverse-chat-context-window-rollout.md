@@ -23,11 +23,12 @@ behaviour-preserving change is wrong.
 That is why verification, impact measurement and enforcement are three separate
 stages, and why the register exists apart from the executing code.
 
-Current position: 30 enabled models, **0 verified**. 16 declare no window at
-all; the other 14 declare one with no recorded source, so they are unverified
-too. The gap is larger than "16 missing".
+Current position: 30 enabled models, **1 verified** (`kimi-k3`, verified while
+fixing the fault below). 16 declare no window at all; another 13 declare one
+with no recorded source, so they are unverified too. The gap is larger than
+"16 missing".
 
-## A discrepancy to resolve in stage 2
+## A discrepancy resolved (was: to resolve in stage 2)
 
 The guard compares `estimatedInputTokens`, but the credit reservation uses
 `budget.inputTokens`, which `createChatBudget` sets to
@@ -36,10 +37,46 @@ The guard compares `estimatedInputTokens`, but the credit reservation uses
 6,400 tokens — 6,000 for the retrieved result text, 400 for the tool definition
 — and those tokens are really sent.
 
-So the guard today under-counts a searching turn by up to 6,400 tokens against
-the very limit it is protecting. The safety check should compare at least
-`budget.inputTokens + budget.maxOutputTokens`, and once a Context Builder
-exists, the actual built token count rather than an estimate.
+So the guard under-counted a searching turn by up to 6,400 tokens against the
+very limit it was protecting. It now measures `budget.inputTokens`, and
+`createChatBudget` derives that figure through `toReservedInputTokens` so the
+active calibration's safety margin and framing overhead cannot be skipped by a
+caller doing its own arithmetic. Once a Context Builder exists this becomes the
+actual built token count rather than an estimate.
+
+## A capability is not a request budget
+
+Fixing the comparison surfaced a second, worse fault in the same expression.
+
+`maxOutputTokens` was doing two jobs: the provider's settable ceiling and the
+cap this application asks for on a turn. For most models the two happen to be
+close enough that nothing showed. For Kimi K3 the ceiling **is** the entire
+1,048,576-token context window, and Moonshot refuses a request whose input plus
+its output cap exceeds that window — so asking for the ceiling every time meant
+`1 + 1,048,576 > 1,048,576` at one token of input. Every Kimi K3 request was
+refused, at every size, before it reached the provider. A shipped Pro model
+nobody could use, and no test said so.
+
+The two numbers are now separate. `providerMaxOutputTokens` records the
+verified ceiling; `maxOutputTokens` is what this application asks for (131,072
+for Kimi K3, Moonshot's documented default); and the request actually sends
+
+```text
+min(request cap, provider ceiling, contextWindowTokens - budget.inputTokens)
+```
+
+computed by `lib/chatContextWindow.ts`. A request is refused only when that
+leaves nothing — when the input alone fills the window — rather than because
+the model's own maximum would not have fitted beside it. The credit and cost
+reservation deliberately keeps the unfitted cap: over-reserving is refunded at
+settlement, and reserving less than the answer might cost protects nothing.
+
+Two catalogue-wide tests now stand where the missing one was: no enabled model
+may refuse a one-token request, and every enabled model with a declared window
+must leave a guest filling their whole input allowance at least 1,024 tokens to
+answer in. The shape of the mistake — a capability used as a request budget —
+is available to every future entry, so it is asserted over the catalogue rather
+than for the one model that hit it.
 
 Note the interaction with the estimator's own error
 (`npm run report:token-estimate-accuracy`): the estimate currently *over*-counts
