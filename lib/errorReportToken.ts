@@ -169,13 +169,26 @@ export const verifyErrorReportToken = (
       payload: null,
     };
   }
-  const expected = Buffer.from(sign(secret, payloadB64), "base64url");
   let provided: Buffer;
   try {
     provided = Buffer.from(signatureB64, "base64url");
   } catch {
     return invalid;
   }
+  // Base64 is not a canonical encoding, and Node's decoder is lenient. A
+  // 32-byte HMAC is 43 base64url characters whose last one carries only four
+  // meaningful bits -- the low two are padding the decoder discards. So a
+  // signature ending `zw` and the same signature ending `zz` decode to
+  // identical bytes, and comparing decoded bytes alone accepts a token string
+  // nobody issued.
+  //
+  // Checked against the input's own re-encoding rather than against the
+  // expected signature: this is a property of the string the caller sent, so
+  // it involves no secret and can be a plain comparison. Comparing against the
+  // real signature here would leak it through timing, which is the reason the
+  // byte comparison below is timing-safe in the first place.
+  if (provided.toString("base64url") !== signatureB64) return invalid;
+  const expected = Buffer.from(sign(secret, payloadB64), "base64url");
   if (
     expected.length !== provided.length ||
     !timingSafeEqual(expected, provided)
