@@ -439,6 +439,8 @@ export type AuthenticatedQaState = {
    */
   selectedModels: string[];
   disabledPanels: string[];
+  /** The conversation's stored memory mode, updated by PATCH like the rest. */
+  memoryMode: "inherit" | "on" | "off";
   theme: "dark" | "light" | "system";
   timeZone: string;
   timeZoneInitializedAt: string | null;
@@ -494,6 +496,10 @@ export async function mockAuthenticatedApi(
      * into its partial-support state.
      */
     webSearchMode?: "off" | "auto" | "always";
+    /** The conversation's stored memory mode (§8.1 invariant 1). */
+    memoryMode?: "inherit" | "on" | "off";
+    /** What `inherit` resolves to, served by /api/memories/settings. */
+    accountMemoryDefault?: "on" | "off";
     /**
      * UX-024. Additional conversations in the sidebar, each with its own
      * transcript and its own detail/messages routes. Opt-in and additive: with
@@ -542,6 +548,7 @@ export async function mockAuthenticatedApi(
     // specific model still passes `selectedModels` explicitly.
     selectedModels: options.selectedModels || ["gpt-5-6-luna"],
     disabledPanels: [],
+    memoryMode: options.memoryMode || "inherit",
     theme: "dark",
     timeZone: "UTC",
     timeZoneInitializedAt: "2026-05-01T00:00:00.000Z",
@@ -555,10 +562,25 @@ export async function mockAuthenticatedApi(
     selectedModels: [...state.selectedModels],
     disabledPanels: [...state.disabledPanels],
     webSearchMode: options.webSearchMode || "off",
+    // §8.1 invariant 1. Stored, not resolved: the fixture has to be able to
+    // show the difference between "follows the account" and an override.
+    memoryMode: state.memoryMode,
     isLocked: state.locked,
     shareEnabled: state.shared,
     shareExpiresAt: state.shared ? "2099-01-01T00:00:00.000Z" : null,
   });
+
+  // What `inherit` resolves to. The chat page reads this once to describe the
+  // inherit option; without it the description would silently claim "in use".
+  await page.route("**/api/memories/settings", (route) =>
+    route.fulfill(
+      json({
+        masterEnabled: true,
+        styleEnabled: true,
+        defaultConversationMode: options.accountMemoryDefault || "on",
+      })
+    )
+  );
 
   await page.unroute("**/api/auth/session**");
   await page.route("**/api/auth/session**", (route) =>
@@ -852,6 +874,7 @@ export async function mockAuthenticatedApi(
         unlock?: boolean;
         selectedModels?: string[];
         disabledPanels?: string[];
+        memoryMode?: "inherit" | "on" | "off";
       };
 
       if (typeof body.password === "string") {
@@ -875,6 +898,9 @@ export async function mockAuthenticatedApi(
       // flow that *changes* the selection and immediately sends against it.
       // app/api/conversations/[conversationId]/route.ts persists both fields
       // and returns the stored values; so does this.
+      if (typeof body.memoryMode === "string") {
+        state.memoryMode = body.memoryMode;
+      }
       if (Array.isArray(body.selectedModels)) {
         state.selectedModels = Array.from(new Set(body.selectedModels));
       }
