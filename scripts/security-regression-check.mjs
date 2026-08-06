@@ -2181,7 +2181,11 @@ const checks = [
         source.includes("npm audit --omit=dev --json") &&
         source.includes("npm run typecheck") &&
         source.includes("npm run check") &&
-        source.includes("playwright install --with-deps chromium webkit") &&
+        // Both browsers, through the retry wrapper. The literal command was
+        // pinned here until 2026-08-05, when an apt transaction that nothing
+        // retried started costing whole jobs; what this guard cares about is
+        // unchanged -- this workflow installs the two browsers it runs.
+        source.includes("scripts/ci/install-playwright.sh chromium webkit") &&
         source.includes("npm run test:e2e:run") &&
         source.includes("node scripts/send-security-audit-report.mjs") &&
         source.includes('check_result "Unit and API policy tests"') &&
@@ -2336,7 +2340,7 @@ const checks = [
         packageSource.includes(
           '"check:accent-tokens": "node scripts/check-accent-tokens.mjs"'
         ) &&
-        prWorkflow.includes("playwright install --with-deps chromium") &&
+        prWorkflow.includes("scripts/ci/install-playwright.sh chromium") &&
         !prWorkflow.includes("chromium webkit") &&
         // No tier that *judges* a golden may rewrite one.
         !prWorkflow.includes("--update-snapshots") &&

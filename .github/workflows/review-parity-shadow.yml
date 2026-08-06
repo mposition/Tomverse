@@ -129,8 +129,8 @@ jobs:
 
       - name: Install Chromium
         if: steps.scope.outputs.code == 'true'
-        timeout-minutes: 10
-        run: npx playwright install --with-deps chromium
+        timeout-minutes: 20
+        run: scripts/ci/install-playwright.sh chromium
 
       # Runs through scripts/run-review-parity.mjs, which also fails on a
       # runtime skip -- a contract that stays tagged and listed but never
