@@ -209,14 +209,3 @@ export const rollUpModelHealth = ({
     eligibleForAutoRouting: true,
   };
 };
-
-/**
- * Fallback wants a candidate in a different failure domain from the primary
- * (G3). Until an explicit domain exists, provider is the only proxy available,
- * and naming that here keeps the assumption in one place instead of spreading
- * `candidate.provider !== primary.provider` through the Router.
- */
-export const sharesFailureDomain = (
-  left: Pick<ModelHealthRollup, "provider">,
-  right: Pick<ModelHealthRollup, "provider">
-) => left.provider === right.provider;

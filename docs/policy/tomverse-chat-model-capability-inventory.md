@@ -149,10 +149,23 @@ conflates same-vendor-different-region and any gateway shared across
 providers. An explicit failure domain per model is needed, or the fallback
 policy's diversity preference is unimplementable as written.
 
-Still open, but the proxy now has one home: `sharesFailureDomain` in
-`lib/modelHealthRollup.ts` states that provider is standing in for a failure
-domain, so `candidate.provider !== primary.provider` does not spread through
-the Router and quietly become the definition.
+**Closed** by `lib/failureDomain.ts`, which derives the domain from the
+mechanism rather than the label: the host a model is reached through and the
+credential it authenticates with. Those are the two things a real outage runs
+along -- a shared endpoint fails as one endpoint, a shared credential fails as
+one account.
+
+Measured against today's catalogue, provider was already an accurate proxy: 11
+providers, 11 distinct hosts, 11 distinct credentials, no credential shared
+across providers. But it was *accidentally* accurate, with nothing keeping it
+that way. Two ordinary changes would have broken it silently — an
+OpenAI-compatible gateway put in front of several vendors, or one credential
+reused across them.
+
+Two tests state the property rather than enumerate the domains, so adding a
+model cannot fail them while merging two providers must. If they do fail, the
+derived domain has already done the right thing; the failure is the
+notification that a merge happened, not a bug.
 
 ### G4. No regional availability
 

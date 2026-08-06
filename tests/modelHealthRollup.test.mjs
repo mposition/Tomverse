@@ -1,11 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import {
-  PROBE_FRESHNESS_WINDOW_MS,
-  rollUpModelHealth,
-  sharesFailureDomain,
-} from "../lib/modelHealthRollup.ts";
+import { PROBE_FRESHNESS_WINDOW_MS, rollUpModelHealth } from "../lib/modelHealthRollup.ts";
 
 const NOW = new Date("2026-08-05T12:00:00Z");
 const minutesAgo = (minutes) => new Date(NOW.getTime() - minutes * 60_000);
@@ -127,12 +123,4 @@ test("observations arrive in any order and are still read newest-last", () => {
     rollUp({ observations: shuffled }).lastProbeAt,
     rollUp({ observations: ordered }).lastProbeAt
   );
-});
-
-// G3 has no explicit failure domain yet. Naming the proxy in one place keeps
-// `candidate.provider !== primary.provider` from spreading through the Router
-// and quietly becoming the definition.
-test("failure domain is provider, until an explicit one exists", () => {
-  assert.equal(sharesFailureDomain({ provider: "openai" }, { provider: "openai" }), true);
-  assert.equal(sharesFailureDomain({ provider: "openai" }, { provider: "anthropic" }), false);
 });
