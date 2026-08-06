@@ -9,6 +9,12 @@ import { getImageModel, type ImageModelProfile } from "@/lib/imageModelRegistry"
 import { readImageDimensions } from "@/lib/imageDimensions";
 import type { ImageGenerationFailurePhase } from "@/lib/imageGenerationStateCore";
 import {
+  buildGoogleImageRequest,
+  GOOGLE_API_KEY_HEADER,
+  GOOGLE_INTERACTIONS_URL,
+  parseGoogleImageResponse,
+} from "@/lib/googleImageRequest";
+import {
   buildXaiImageRequest,
   parseXaiImageResponse,
   XAI_IMAGES_URL,
@@ -130,6 +136,23 @@ export type ImageProviderResult = {
   requestParams: Record<string, unknown>;
 };
 
+const getGoogleApiKey = () => {
+  // The same key the chat Google provider uses. There is no image-scoped
+  // variable here the way OPENAI_IMAGE_API_KEY exists for OpenAI; splitting
+  // spend attribution is a separate operational decision, not something to
+  // invent an environment name for.
+  const key =
+    process.env.GOOGLE_GENERATIVE_AI_API_KEY?.trim() ||
+    process.env.GEMINI_API_KEY?.trim();
+  if (!key) {
+    throw new ImageProviderError(
+      "provider_failed",
+      "Image provider is not configured."
+    );
+  }
+  return key;
+};
+
 const getXaiApiKey = () => {
   const key = process.env.XAI_API_KEY?.trim();
   if (!key) {
@@ -158,15 +181,26 @@ const getImageApiKey = () => {
 };
 
 /**
+ * Every field name any provider here carries the user's prompt in.
+ *
+ * OpenAI and xAI call it `prompt`; Google's Interactions API calls it `input`.
+ * Filtering only `prompt` was correct until it silently stopped being -- the
+ * Google body would have passed its prompt straight through into the stored
+ * audit blob. The set is the guard, so adding a provider means adding its name
+ * here rather than remembering that this filter exists.
+ */
+const PROMPT_FIELD_NAMES = new Set(["prompt", "input"]);
+
+/**
  * The audit view of a request body: everything except the prompt, which is
  * already stored on the generation row and must not be duplicated into a blob
- * that deletion would then have to find twice.
+ * that deletion would then have to find twice (policy §10, §12.1).
  */
 const auditableRequestParams = (
   body: Record<string, unknown>
 ): Record<string, unknown> =>
   Object.fromEntries(
-    Object.entries(body).filter(([key]) => key !== "prompt")
+    Object.entries(body).filter(([key]) => !PROMPT_FIELD_NAMES.has(key))
   );
 
 const wait = (ms: number) =>
@@ -195,10 +229,10 @@ export const generateImageWithProvider = async (input: {
   if (model.provider === "xai") {
     return generateWithXai(model, input);
   }
+  if (model.provider === "google") {
+    return generateWithGoogle(model, input);
+  }
   if (model.provider !== "openai") {
-    // Google's adapter lands with its thinking cap (policy section 12):
-    // shipping an executable path to a model whose worst-case cost is not
-    // provably finite is exactly what the hold exists to prevent.
     throw new ImageProviderError(
       "provider_failed",
       `No adapter is implemented for provider ${model.provider}.`
@@ -301,6 +335,136 @@ export const generateImageWithProvider = async (input: {
         : 0,
       providerRequestId,
       provenance: ["c2pa"],
+      outputWidth: dimensions?.width ?? null,
+      outputHeight: dimensions?.height ?? null,
+      requestParams,
+    };
+  }
+
+  throw (
+    lastError ??
+    new ImageProviderError("provider_failed", "Image provider request failed.")
+  );
+};
+
+/**
+ * Google, over the Interactions API.
+ *
+ * Unreachable today and deliberately so: generateImageWithProvider refuses any
+ * model carrying a disabledReason before it dispatches, and all three Google
+ * image models are `worst_case_cost_unbounded` because the documentation does
+ * not state that `max_output_tokens` bounds hidden thinking. The adapter exists
+ * ahead of that answer because implementing it is not the same decision as
+ * shipping it, and because the staging measurement that would settle the
+ * question needs this code to make the call.
+ *
+ * Differences from the other two adapters, each of which is a way to get it
+ * wrong:
+ *   * authentication is `x-goog-api-key`, not an OpenAI-style bearer token;
+ *   * the request and response vocabulary is the Interactions API's, never
+ *     GenerateContent's -- lib/googleImageRequest.ts holds that boundary;
+ *   * usage is reported as separate output and thinking counters, and both are
+ *     carried through unsummed, because their relationship is the open
+ *     question rather than a detail to smooth over.
+ */
+const generateWithGoogle = async (
+  model: ImageModelProfile,
+  input: { prompt: string; size: ImageSize }
+): Promise<ImageProviderResult> => {
+  const body = buildGoogleImageRequest({
+    apiModelId: model.apiModelId,
+    prompt: input.prompt,
+    size: input.size,
+    maxOutputTokens: model.maxOutputTokens ?? null,
+    thinkingLevel: model.thinkingLevel ?? null,
+    deliveryMimeType: model.outputMimeTypes[0] ?? "image/png",
+  });
+  if (!body) {
+    throw new ImageProviderError(
+      "provider_failed",
+      `Image size ${input.size} has no Google request mapping for ${model.id}.`
+    );
+  }
+  const requestParams = auditableRequestParams(body);
+  const apiKey = getGoogleApiKey();
+  let lastError: ImageProviderError | null = null;
+
+  for (let attempt = 0; attempt <= RETRY_DELAYS_MS.length; attempt += 1) {
+    if (attempt > 0) {
+      const base = RETRY_DELAYS_MS[attempt - 1];
+      await wait(base + Math.floor(Math.random() * 500));
+    }
+    let response: Response;
+    try {
+      response = await fetch(GOOGLE_INTERACTIONS_URL, {
+        method: "POST",
+        headers: {
+          [GOOGLE_API_KEY_HEADER]: apiKey,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(body),
+        signal: AbortSignal.timeout(PROVIDER_TIMEOUT_MS),
+      });
+    } catch (error) {
+      lastError = new ImageProviderError(
+        "provider_failed",
+        error instanceof Error && error.name === "TimeoutError"
+          ? "Image provider request timed out."
+          : "Image provider request failed.",
+        null,
+        null,
+        requestParams
+      );
+      continue;
+    }
+
+    const providerRequestId =
+      response.headers.get("x-goog-request-id") ??
+      response.headers.get("x-request-id");
+    if (!response.ok) {
+      const errorBody = await response.json().catch(() => null);
+      const failurePhase = classifyImageProviderFailure(response.status, errorBody);
+      const error = new ImageProviderError(
+        failurePhase,
+        `Image provider rejected the request (HTTP ${response.status}).`,
+        response.status,
+        providerRequestId,
+        requestParams
+      );
+      if (
+        failurePhase === "provider_rate_limited" ||
+        failurePhase === "provider_failed"
+      ) {
+        lastError = error;
+        continue;
+      }
+      throw error;
+    }
+
+    const parsed = parseGoogleImageResponse(
+      await response.json().catch(() => null)
+    );
+    if (!parsed) {
+      throw new ImageProviderError(
+        "provider_failed",
+        "Image provider returned no usable image payload.",
+        response.status,
+        providerRequestId,
+        requestParams
+      );
+    }
+    const imageBytes = Buffer.from(parsed.imageBase64, "base64");
+    const dimensions = readImageDimensions(imageBytes, parsed.mimeType);
+    return {
+      imageBytes,
+      mimeType: parsed.mimeType,
+      inputTokens: parsed.usage.inputTokens,
+      thinkingTokens: parsed.usage.thinkingTokens,
+      outputTokens: parsed.usage.outputTokens,
+      providerRequestId,
+      // Google embeds SynthID. C2PA is claimed only where the model card says
+      // so, which is why this reads the profile rather than assuming.
+      provenance: [...model.provenance],
       outputWidth: dimensions?.width ?? null,
       outputHeight: dimensions?.height ?? null,
       requestParams,

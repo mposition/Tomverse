@@ -809,6 +809,68 @@ const checks = [
       source.includes("marked operational_hold without a price verification date"),
   },
   {
+    name: "The Google image path speaks Interactions, never GenerateContent",
+    file: "lib/googleImageRequest.ts",
+    test: (source) => {
+      // GenerateContent's vocabulary is allowed in prose -- the header comment
+      // names it precisely so the boundary is legible -- and forbidden in
+      // code, because a body that mixes the two is valid-looking and wrong.
+      const code = source
+        .split("\n")
+        .filter((line) => !/^\s*(\/\/|\*|\/\*)/.test(line))
+        .join("\n");
+      return (
+        source.includes("/v1beta/interactions") &&
+        source.includes('"x-goog-api-key"') &&
+        source.includes("max_output_tokens: input.maxOutputTokens") &&
+        source.includes("total_thought_tokens") &&
+        !code.includes("generationConfig") &&
+        !code.includes("inlineData") &&
+        !code.includes("usageMetadata") &&
+        // Only the delivered answer is read. A thinking model emits images
+        // while reasoning, and storing a working sketch as the paid result is
+        // the failure nobody would notice -- both are plausible pictures.
+        source.includes('=== "model_output"') &&
+        source.includes("if (images.length !== 1) return null") &&
+        // An open-ended request is refused rather than sent (§12 cond. 2).
+        source.includes(
+          "if (!input.maxOutputTokens || input.maxOutputTokens <= 0) return null"
+        )
+      );
+    },
+  },
+  {
+    name: "A request audit snapshot strips every provider's prompt field",
+    file: "lib/imageProviderAdapter.ts",
+    test: (source) =>
+      // OpenAI and xAI name it `prompt`; Google's Interactions API names it
+      // `input`. Filtering only `prompt` was correct until it silently stopped
+      // being: the Google body would have copied the user's prompt into the
+      // stored audit blob, a second place every deletion path has to reach.
+      source.includes('PROMPT_FIELD_NAMES = new Set(["prompt", "input"])') &&
+      source.includes("!PROMPT_FIELD_NAMES.has(key)") &&
+      !source.includes('([key]) => key !== "prompt"'),
+  },
+  {
+    name: "A documented output limit never doubles as a proven cost cap",
+    file: "lib/imageModelRegistry.ts",
+    test: (source) => {
+      // maxOutputTokens is what the model card publishes; thinkingCapMicroUsd
+      // is whether the worst case is provably finite. Google states the first
+      // and not the second, so the field must never be read as the cap -- and
+      // maxImageRequestCostMicroUsd must keep deriving from the cap alone.
+      const derivation = source.slice(
+        source.indexOf("export const maxImageRequestCostMicroUsd")
+      );
+      const body = derivation.slice(0, derivation.indexOf("\n};"));
+      return (
+        source.includes("maxOutputTokens?: number") &&
+        body.includes("thinkingCapMicroUsd") &&
+        !body.includes("maxOutputTokens")
+      );
+    },
+  },
+  {
     name: "The thumbnail repair cannot destroy the original it derives from",
     file: "lib/imageAssetLifecycle.ts",
     test: (source) =>
