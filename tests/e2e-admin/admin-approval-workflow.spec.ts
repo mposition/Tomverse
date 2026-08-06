@@ -132,8 +132,15 @@ test.describe("two-person approval", () => {
 
     // 3. A second administrator approves it from the queue.
     await signInAs("approver");
-    await page.goto("/admin/approvals");
-    await expect(consoleHeading(page)).toHaveText("Approvals");
+    await page.goto("/admin/work-queue?tab=approvals");
+    // The approval queue is a section of the work queue, so the page heading is
+    // the page's, and the tab strip is what states the section.
+    await expect(consoleHeading(page)).toHaveText("Work queue");
+    await expect(
+      page
+        .getByRole("navigation", { name: "Work queue sections" })
+        .getByRole("link", { name: "Approvals" })
+    ).toHaveAttribute("aria-current", "page");
     const queued = page
       .locator("article, li")
       .filter({ hasText: "user.plan_adjust" })
@@ -239,7 +246,7 @@ test.describe("two-person approval", () => {
     ).toBeVisible();
 
     await signInAs("approver");
-    await page.goto("/admin/approvals");
+    await page.goto("/admin/work-queue?tab=approvals");
     await page
       .locator("article, li")
       .filter({ hasText: "user.plan_adjust" })
