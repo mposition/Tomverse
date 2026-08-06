@@ -684,6 +684,10 @@ async function handleChatPost(
             contextBundle,
         } = validateChatPayload(body);
         const requestedModelId = modelId || APP_DEFAULTS.defaultModelId;
+        // §8.1 invariant 1: the conversation's stored mode, read from the row
+        // the ownership check loads below. Null for a request with no
+        // conversation, which inherits the account default like `inherit`.
+        let conversationMemoryMode: string | null = null;
         requestedModelIdForLog = requestedModelId;
         const runtimeModels = await getRuntimeModels({ includeCatalogDeleted: true });
         const runtimeModelMap = new Map(runtimeModels.map((model) => [model.id, model]));
@@ -886,8 +890,15 @@ async function handleChatPost(
             }
             const conversation = await prisma.conversation.findUnique({
                 where: { id: conversationId },
-                select: { userId: true, password: true, selectedModels: true, kind: true },
+                select: {
+                    userId: true,
+                    password: true,
+                    selectedModels: true,
+                    kind: true,
+                    memoryMode: true,
+                },
             });
+            conversationMemoryMode = conversation?.memoryMode ?? null;
             if (!conversation || conversation.userId !== session.user.id) {
                 return tracedJsonError(
                     "Conversation access denied.",
@@ -1036,6 +1047,19 @@ async function handleChatPost(
         // whole branch is skipped.
         let memorySystemPrompt: string | null = null;
         let memoryUsedCount = 0;
+        // §22 attribution, written onto the answer rather than counted.
+        //
+        // The day counters beside this already report the injection *ratio*.
+        // What they cannot report is which answer carried memory, and the
+        // follow-up proxy is a comparison between the answers memory shaped
+        // and the ones it did not — so it needs the fact per answer. Null
+        // while no bundle accompanies the request, which is what "memory was
+        // not possible here" means; §8.1 invariant 4 permits the used count
+        // and forbids the context itself, which is never written.
+        let memoryAttribution: {
+            memoryUsedCount: number;
+            memoryTokens: number;
+        } | null = null;
         if (session?.user?.id) {
             // §22's injection denominator. Recorded before the bundle branch
             // so it counts every authenticated request, including the ones
@@ -1054,6 +1078,13 @@ async function handleChatPost(
             const memoryContext = await buildChatMemoryContext({
                 userId: session.user.id,
                 query: latestUserPromptText(messages),
+                // §8.1 invariant 1: this conversation's own mode decides, with
+                // `inherit` falling back to the account default. Read here
+                // rather than trusted from the client, and read on the chat
+                // side as well as the preflight side so a mode changed between
+                // the two is caught by the freshness check instead of being
+                // priced one way and sent the other.
+                conversationMode: conversationMemoryMode,
             });
             const verification = verifyChatContextBundle(contextBundle, {
                 subjectKey: session.user.id,
@@ -1123,6 +1154,10 @@ async function handleChatPost(
             }
             memorySystemPrompt = memoryContext.prompt.text;
             memoryUsedCount = memoryContext.prompt.usedCount;
+            memoryAttribution = {
+                memoryUsedCount,
+                memoryTokens: verification.payload.memoryTokens,
+            };
             if (memorySystemPrompt) {
                 // A bundle that passed but selected nothing is not an
                 // injection: no block reaches the prompt, so counting it would
@@ -1726,6 +1761,7 @@ async function handleChatPost(
                             status: "pending",
                             modelId: requestedModelId,
                             pendingJobId: perplexityJobId,
+                            ...memoryAttribution,
                         },
                     });
                     await tx.perplexityAsyncJob.create({
@@ -2292,6 +2328,10 @@ async function handleChatPost(
                                             status: completionOutcome.status,
                                             modelId: requestedModelId,
                                             searchMetadata: webSearchExecution,
+                                            // Spread, so an answer with no
+                                            // bundle writes neither column
+                                            // and both stay NULL (§22).
+                                            ...memoryAttribution,
                                         },
                                     });
                                     if (providerContext) {
