@@ -239,7 +239,9 @@ test("new catalogue models use their exact provider prices and output caps", () 
     "grok-4-5": [2, 6, 16_384],
     "mistral-medium-3-1": [1.5, 7.5, 16_384],
     "claude-fable-5": [10, 50, 128_000],
-    "kimi-k3": [3, 15, 1_048_576],
+    // 131,072 is the documented request default; the 1,048,576 ceiling is a
+    // capability and is carried separately as providerMaxOutputTokens.
+    "kimi-k3": [3, 15, 131_072],
     "minimax-m3": [0.3, 1.2, 524_288],
   };
 
