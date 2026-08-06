@@ -64,8 +64,8 @@ Canonical release-gate registry for Tomverse Chat v1. Human-readable tables must
 | `AUTH-02` | Email OTP, magic link, and the isolated review code work through the mobile token path | backend-ai | yes | `email_otp_magic_link_lockout_turnstile_e2e_pass_percent` = 100; `submission_scoped_review_code_isolation_e2e_pass_percent` = 100 | pending |
 | `AUTH-03` | Mobile bearer-token lifecycle resists replay and supports revocation | backend-ai | yes | `refresh_rotation_reuse_logout_device_revoke_e2e_pass_percent` = 100 | pending |
 | `AUTH-04` | CORS bypass and deep-link hijacking attack tests pass | security-privacy | yes | `unresolved_high_or_critical_cors_or_deep_link_findings` = 0 | pending |
-| `PRIVACY-01` | Account deletion is complete inside the app | security-privacy | yes | `in_app_account_deletion_e2e_pass_percent` = 100 | pending |
-| `PRIVACY-02` | Account data export covers every registered Tomverse data domain | security-privacy | yes | `registered_data_domains_in_unified_export_percent` = 100 | pending |
+| `PRIVACY-01` | Account deletion is complete inside the app | security-privacy | yes | `in_app_account_deletion_e2e_pass_percent` = 100; `data_domains_with_unverified_deletion_action_count` = 0; `data_domains_with_planned_deletion_action_count` = 0 | pending |
+| `PRIVACY-02` | Account data export covers every registered Tomverse data domain | security-privacy | yes | `data_domains_with_undecided_export_state_count` = 0; `account_export_wiring_problem_count` = 0; `withheld_field_sentinels_present_in_export_count` = 0 | pending |
 | `STORE-01` | A new Free account can complete a useful flow without purchase | mobile-release | yes | `purchase_free_signup_chat_response_and_history_save_e2e_pass_percent` = 100 | pending |
 | `STORE-02` | Review credentials remain usable throughout an active submission | mobile-release | yes | `daily_review_credential_synthetic_login_success_percent` = 100 | pending |
 | `MANIFEST-01` | Delta manifests cannot form unbounded reconstruction chains | backend-ai | yes | `context_manifest_delta_depth_max` <= 20 | pending |
@@ -788,15 +788,18 @@ Evidence references: none recorded
 - Approved by: not yet approved
 - Approved at: not yet approved
 
-Why this gate exists: Users and store reviewers must be able to complete account deletion inside the app without an external support workflow.
+Why this gate exists: Users and store reviewers must be able to complete account deletion inside the app without an external support workflow, and every table holding their data needs a traced and implemented deletion path rather than a decided one.
 
 Criteria:
 
 - `in_app_account_deletion_e2e_pass_percent` = 100
+- `data_domains_with_unverified_deletion_action_count` = 0
+- `data_domains_with_planned_deletion_action_count` = 0
 
 Required evidence:
 
 - deletion E2E covering reauthentication, completion, and token revocation
+- two-axis data-domain registry passing scripts/check-data-domain-registry.mjs, with every anonymise row carrying a re-identification review and every retain row a legal basis, period, owner and review date
 
 Evidence references: none recorded
 
@@ -808,15 +811,19 @@ Evidence references: none recorded
 - Approved by: not yet approved
 - Approved at: not yet approved
 
-Why this gate exists: A versioned data-domain registry prevents new product tables from silently escaping the shared account export.
+Why this gate exists: A versioned data-domain registry prevents new product tables from silently escaping the shared account export, and the export tells the user what it withheld instead of presenting a projection as the whole answer.
 
 Criteria:
 
-- `registered_data_domains_in_unified_export_percent` = 100
+- `data_domains_with_undecided_export_state_count` = 0
+- `account_export_wiring_problem_count` = 0
+- `withheld_field_sentinels_present_in_export_count` = 0
 
 Required evidence:
 
 - versioned data-domain registry and export coverage test
+- tests/integration/account-data-export.db.test.ts planting a sentinel in every withheld column and asserting none survives JSON.stringify of the export
+- export manifest recording schemaVersion, generatedAt, and the included, filtered, excluded, undecided and truncated domains with their reasons
 
 Evidence references: none recorded
 

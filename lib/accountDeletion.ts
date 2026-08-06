@@ -187,6 +187,15 @@ export async function deleteTomverseAccount(
       },
     });
 
+    // Nothing else removes these. The userId column carries no relation, so
+    // there is neither a cascade nor a SetNull, and
+    // deleteExpiredContextBundleConsumptions only sweeps rows whose bundle has
+    // already lapsed. Short-lived either way, but "deleted" has to mean deleted
+    // now rather than deleted shortly.
+    await tx.chatContextBundleConsumption.deleteMany({
+      where: { userId: user.id },
+    });
+
     await tx.conversation.deleteMany({
       where: { userId: user.id },
     });
