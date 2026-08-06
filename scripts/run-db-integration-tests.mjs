@@ -175,6 +175,7 @@ run(
     "tests/integration/external-conversation-lock.db.test.ts",
     "tests/integration/memory-expiry.db.test.ts",
     "tests/integration/chat-context-bundle.db.test.ts",
+    "tests/integration/routing-shadow.db.test.ts",
     "tests/integration/memory-metrics.db.test.ts",
     "tests/integration/conversation-memory-mode.db.test.ts",
   ],
