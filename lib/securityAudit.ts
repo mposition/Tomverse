@@ -40,7 +40,14 @@ export type SecurityAuditEvent =
     // convention (90 days).
     | "memory.export.create"
     | "memory.export.download"
-    | "memory.delete_all";
+    | "memory.delete_all"
+    // The unified account export (PRIVACY-02). Three events rather than two,
+    // because the refusal is the one that matters most: it means somebody
+    // presented a download link they should not have, and a trail recording
+    // only successes cannot show that.
+    | "account.data_export.request"
+    | "account.data_export.download"
+    | "account.data_export.refused";
 type AuditOutcome = "attempt" | "success" | "denied" | "rate_limited" | "failure";
 
 const auditValue = (

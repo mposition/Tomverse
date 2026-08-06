@@ -41,6 +41,8 @@ import {
     estimateToolInputTokenOverhead,
     toReservedInputTokens,
 } from "@/lib/chatTokenEstimate";
+import { resolveInputUsageSource } from "@/lib/tokenEstimateShadow";
+import { recordShadowSettlement } from "@/lib/tokenEstimateShadowRecorder";
 import {
     safeDailyResetAt,
     withFutureResetAt,
@@ -286,6 +288,25 @@ export class ChatAccessError extends Error {
         super(message);
     }
 }
+
+/**
+ * Whether a thrown value is one of this module's own refusals.
+ *
+ * Exported as a predicate rather than left to `instanceof` at the call site
+ * because `instanceof` compares class identity, and class identity is a
+ * property of the module *instance*: a bundler or a test harness that
+ * evaluates this file twice produces two `ChatAccessError` classes, and a
+ * refusal raised by one is not an instance of the other. Asking the module
+ * that owns the class means the comparison always happens against the copy
+ * that raised the error.
+ *
+ * That distinction is load-bearing wherever getting it wrong is silent.
+ * `chatErrorResponse` below can use `instanceof` directly -- it lives in this
+ * file -- but a caller in another module that mistakes a local refusal for a
+ * provider failure writes bad data into provider health and says nothing.
+ */
+export const isChatAccessError = (error: unknown): error is ChatAccessError =>
+    error instanceof ChatAccessError;
 
 const positiveInteger = (value: string | undefined, fallback: number) => {
     const parsed = Number(value);
@@ -3177,6 +3198,33 @@ export const settleChatUsage = async (
                 reconciledAt: options?.reconciled ? new Date() : null,
                 lastError: options?.reason?.slice(0, 500) || null,
             },
+        });
+
+        // Shadow only. Provenance is decided from the provider's *input* count
+        // alone -- deliberately not from `usageSource` above, which is decided
+        // by whether output tokens arrived. A turn that reported output but not
+        // input has an input figure that is the estimate itself, and
+        // calibrating on it would compare an estimate with a copy of itself.
+        await recordShadowSettlement({
+            attemptId: reservation.reservationId,
+            providerReportedInputTokens: Number.isSafeInteger(usage.inputTokens)
+                ? Math.max(0, usage.inputTokens!)
+                : null,
+            inputUsageSource: resolveInputUsageSource({
+                providerReportedInputTokens: usage.inputTokens,
+                providerReturnedUsage: usage.usageFromProvider !== false,
+            }),
+            outcome:
+                usage.outcome === "completed"
+                    ? "completed"
+                    : usage.outcome === "cancelled"
+                      ? "cancelled"
+                      : "failed",
+            // The settlement path receives no partial-stream signal, so this
+            // stays false until it does. A cancelled turn is already excluded
+            // from calibration on its own flag.
+            isPartial: false,
+            isCancelled: usage.outcome === "cancelled",
         });
 
         return {

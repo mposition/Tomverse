@@ -22,6 +22,12 @@ import { CreditCostBadge } from "@/components/credits/CreditCostBadge";
 import { useLanguage } from "@/components/LanguageProvider";
 import { notifyUserUsageChanged } from "@/components/chat/useUserUsage";
 import { estimatePromptTokens } from "@/lib/chatTokenEstimate";
+import { useIsMobileShell } from "@/components/chat/useIsMobileShell";
+import {
+  getChatEnterKeyAction,
+  isComposingKeydown,
+} from "@/lib/chatKeyboardPolicy";
+import type { ImageComposerRestore } from "@/lib/imageComposerRestore";
 import { mergeImageTimelineRow } from "@/lib/imageTimelineMerge";
 import {
   getImageGenerationPricing,
@@ -32,7 +38,9 @@ import {
 } from "@/lib/imageGenerationPricing";
 import {
   DEFAULT_IMAGE_MODEL_ID,
+  getImageModel,
   getImageModelPrice,
+  imageModelChipLabel,
   listEnabledImageModels,
 } from "@/lib/imageModelRegistry";
 
@@ -147,10 +155,12 @@ const groupAttempts = (generations: GenerationView[]): GroupView[] => {
   });
 };
 
+// The whole registry, not just the enabled models: a card whose model was
+// held after it produced its image, and a restore notice naming the model it
+// had to drop, both need the name of something that is no longer selectable.
+// Falling back to the raw id there showed `gemini-3.1-flash-image` to a user.
 const imageModelName = (modelId: string | undefined) =>
-  (modelId && listEnabledImageModels().find((model) => model.id === modelId)?.name) ||
-  modelId ||
-  "";
+  (modelId && getImageModel(modelId)?.name) || modelId || "";
 
 const isTerminal = (status: string) =>
   status === "succeeded" || status === "failed";
@@ -198,6 +208,7 @@ export function ImageGenerationWorkspace({
   onCancelDraft,
 }: ImageGenerationWorkspaceProps) {
   const { t } = useLanguage();
+  const isMobileShell = useIsMobileShell();
   const [generations, setGenerations] = useState<GenerationView[]>([]);
   const [historyError, setHistoryError] = useState(false);
   const [prompt, setPrompt] = useState(initialPrompt);
@@ -210,6 +221,18 @@ export function ImageGenerationWorkspace({
     );
     return seeded.length > 0 ? [...new Set(seeded)] : [DEFAULT_IMAGE_MODEL_ID];
   });
+  // Set the moment the user touches a model, quality or size. A restore
+  // answer that arrives after that is discarded: the read describes the last
+  // comparison, and the user's newer choice is the one that should win a race
+  // with the network.
+  const composerTouchedRef = useRef(false);
+  // The restore's *outcome*, not its copy: rendering the sentences here would
+  // pull `t` into the history-load effect and re-run the fetch on a language
+  // change. Stored structurally, the notice simply follows the language.
+  const [restoreOutcome, setRestoreOutcome] = useState<{
+    excludedModelIds: string[];
+    optionsConsistent: boolean;
+  } | null>(null);
   const [retryingTargetIds, setRetryingTargetIds] = useState<string[]>([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
@@ -271,9 +294,26 @@ export function ImageGenerationWorkspace({
         if (!response.ok) throw new Error(`status ${response.status}`);
         const payload = (await response.json()) as {
           generations: GenerationView[];
+          composerRestore?: ImageComposerRestore | null;
         };
         if (cancelled) return;
         setGenerations(payload.generations);
+        // Applied once, on entering an existing conversation, and never over a
+        // choice the user has already made.
+        const restore = payload.composerRestore;
+        if (restore && !composerTouchedRef.current) {
+          setSelectedModelIds(restore.modelIds);
+          // Options come back only when every target of the last comparison
+          // agreed on them. A disagreement is a bug, not a preference, so the
+          // composer keeps its safe defaults and says the options were not
+          // restored rather than presenting one target's values as the user's.
+          if (restore.preset) setPreset(restore.preset);
+          if (restore.size) setSize(restore.size);
+          setRestoreOutcome({
+            excludedModelIds: restore.excludedModelIds,
+            optionsConsistent: restore.optionsConsistent,
+          });
+        }
       } catch {
         if (!cancelled) setHistoryError(true);
       }
@@ -411,7 +451,24 @@ export function ImageGenerationWorkspace({
     selectedModelIds.length > 0 &&
     !hasUnpricedSelection;
 
+  const restoreNotices = restoreOutcome
+    ? [
+        restoreOutcome.excludedModelIds.length > 0
+          ? interpolateCopy(t("chat.imageGenerationRestoreExcluded"), {
+              models: restoreOutcome.excludedModelIds
+                .map((modelId) => imageModelName(modelId))
+                .join(", "),
+            })
+          : null,
+        restoreOutcome.optionsConsistent
+          ? null
+          : t("chat.imageGenerationRestoreOptionsUnavailable"),
+      ].filter((notice): notice is string => notice !== null)
+    : [];
+
   const toggleModel = (modelId: string) => {
+    composerTouchedRef.current = true;
+    setRestoreOutcome(null);
     setSelectedModelIds((current) => {
       if (current.includes(modelId)) {
         // Never empty: deselecting the last model would leave a composer that
@@ -880,6 +937,20 @@ export function ImageGenerationWorkspace({
             </p>
           )}
           {/*
+            Why the composer did not come back exactly as the last comparison
+            left it. Stated rather than silently applied: a selection that
+            quietly differs from the one the user last made is the failure this
+            whole restore path exists to end.
+          */}
+          {restoreNotices.length > 0 && (
+            <p
+              data-testid="image-generation-restore-notice"
+              className="rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-2 text-xs leading-5 text-zinc-600 dark:border-zinc-800 dark:bg-zinc-900/60 dark:text-zinc-300"
+            >
+              {restoreNotices.join(" ")}
+            </p>
+          )}
+          {/*
             Model selection sits above the textarea so the price the composer
             quotes is decided before the prompt is written. Its own row --
             never sharing the textarea's row (mobile composer contract).
@@ -906,7 +977,13 @@ export function ImageGenerationWorkspace({
                       : "border-zinc-200 bg-white text-zinc-600 hover:bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-300 dark:hover:bg-zinc-900"
                   }`}
                 >
-                  {model.name}
+                  {/*
+                    The chip shows the short label and the accessible name
+                    keeps the full one: abbreviating the visual label must not
+                    abbreviate the model's identity.
+                  */}
+                  <span aria-hidden>{imageModelChipLabel(model)}</span>
+                  <span className="sr-only">{model.name}</span>
                   {price && (
                     <CreditCostBadge credits={price.credits} size="xs" tone="plain" />
                   )}
@@ -930,14 +1007,27 @@ export function ImageGenerationWorkspace({
               data-testid="image-generation-prompt"
               value={prompt}
               onChange={(event) => setPrompt(event.target.value)}
+              // The same Enter contract as every chat textarea, through the
+              // same helper (policy §1 keeps ChatInput itself out of an image
+              // conversation, but the keyboard rule is not chat-specific).
+              // Desktop Enter submits, Shift+Enter breaks the line, mobile
+              // Enter always breaks and only Ctrl/Cmd+Enter submits.
+              //
+              // Ctrl/Cmd+Enter already submitted here, and still does, so no
+              // existing habit breaks -- desktop Enter is the only addition.
+              // What is genuinely new is the IME guard: this composer was safe
+              // only by accident, because a Korean composition-confirming
+              // Enter carries no modifier. Enter submitting makes that
+              // accident load-bearing, so it stops being an accident.
               onKeyDown={(event) => {
-                if (
-                  event.key === "Enter" &&
-                  (event.metaKey || event.ctrlKey)
-                ) {
-                  event.preventDefault();
-                  void handleSubmit();
-                }
+                const action = getChatEnterKeyAction(
+                  event,
+                  isComposingKeydown(event),
+                  isMobileShell
+                );
+                if (action !== "submit") return;
+                event.preventDefault();
+                void handleSubmit();
               }}
               placeholder={t("chat.imageGenerationPromptPlaceholder")}
               disabled={!flagEnabled}
@@ -965,7 +1055,11 @@ export function ImageGenerationWorkspace({
                     aria-checked={selected}
                     data-testid={`image-preset-${option.preset}`}
                     title={t(option.hintKey)}
-                    onClick={() => setPreset(option.preset)}
+                    onClick={() => {
+                      composerTouchedRef.current = true;
+                      setRestoreOutcome(null);
+                      setPreset(option.preset);
+                    }}
                     className={`inline-flex min-h-9 items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-semibold transition ${
                       selected
                         ? "border-accent-image-400 bg-accent-image-50 text-accent-image-800 dark:border-accent-image-700 dark:bg-accent-image-950/30 dark:text-accent-image-200"
@@ -999,7 +1093,11 @@ export function ImageGenerationWorkspace({
                     role="radio"
                     aria-checked={selected}
                     data-testid={`image-size-${option.size}`}
-                    onClick={() => setSize(option.size)}
+                    onClick={() => {
+                      composerTouchedRef.current = true;
+                      setRestoreOutcome(null);
+                      setSize(option.size);
+                    }}
                     className={`inline-flex min-h-9 items-center rounded-full border px-3 py-1.5 text-xs font-semibold transition ${
                       selected
                         ? "border-accent-image-400 bg-accent-image-50 text-accent-image-800 dark:border-accent-image-700 dark:bg-accent-image-950/30 dark:text-accent-image-200"

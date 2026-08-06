@@ -29,7 +29,13 @@
  */
 
 import type Stripe from "stripe";
-import { getBillingPlans } from "@/lib/billingConfig";
+import { getBillingPlans, getBillingPlanByTier } from "@/lib/billingConfig";
+import { getUserChatUsageKey } from "@/lib/chatSecurity";
+import { usageBucketCount } from "@/lib/chatUsageBucketCount";
+import {
+  planCreditsAfterPlanChange,
+  type PlanChangeCreditOutcome,
+} from "@/lib/planChangeCredits";
 import { prisma } from "@/lib/prisma";
 import { getStripe } from "@/lib/stripe";
 import {
@@ -92,10 +98,71 @@ export type PlanChangeQuote = {
    * disagree with the invoice.
    */
   amountDueMinor: number | null;
+  /**
+   * What the change does to this month's plan credits, or null when it does
+   * nothing to them yet.
+   *
+   * Quoted because the money is not the whole story: an upgrade that costs a
+   * prorated amount also hands over the whole new monthly allowance
+   * immediately, and a dialog showing only the charge undersells it.
+   *
+   * **Null for a scheduled downgrade, and that is the point.** A downgrade
+   * lands at the period boundary, so this month's allowance is still the one
+   * the customer is on. Quoting the smaller plan's remaining balance now would
+   * be a number that is not true for anyone yet -- and by the time it becomes
+   * true the month has usually rolled over and the usage it was computed from
+   * is gone. Saying nothing is the only honest option; the effective date
+   * beside it already says when the change happens.
+   *
+   * The arithmetic is `lib/planChangeCredits.ts`, so the preview and the
+   * steady-state balance cannot drift apart.
+   */
+  credits: PlanChangeCreditOutcome | null;
   effectiveAt: string | null;
   renewal: PlanChangePlan["renewal"];
   expiresAt: string;
 };
+
+/** First instant of the current UTC month, which is when plan credits reset. */
+const monthStartUtc = (now: Date) =>
+  new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+
+/**
+ * This month's plan-credit position under the plan being moved *to*.
+ *
+ * Only meaningful for a change that takes effect immediately -- see the
+ * `credits` field on the quote.
+ *
+ * Reads the same bucket `/api/user/usage` reads, so "remaining after the
+ * change" is the number the account page will show once the change lands
+ * rather than a second estimate of it.
+ */
+async function quoteCredits(
+  userId: string,
+  toTier: PlanChangeTier,
+  now: Date
+): Promise<PlanChangeCreditOutcome> {
+  const [plan, monthBucket, user] = await Promise.all([
+    getBillingPlanByTier(toTier),
+    prisma.chatUsageBucket.findFirst({
+      where: {
+        key: getUserChatUsageKey(userId),
+        period: "month",
+        periodStart: monthStartUtc(now),
+      },
+      select: { count: true },
+    }),
+    prisma.user.findUnique({
+      where: { id: userId },
+      select: { creditDebtCredits: true },
+    }),
+  ]);
+  return planCreditsAfterPlanChange({
+    newMonthlyPlanCredits: plan.monthlyMessageLimit,
+    planCreditsUsedThisMonth: usageBucketCount(monthBucket?.count),
+    creditDebtCredits: user?.creditDebtCredits ?? 0,
+  });
+}
 
 /** A reserved change, as the account page needs to describe it. */
 export type PlanChangeReservationView = {
@@ -382,6 +449,12 @@ export async function previewPlanChange({
           targetPriceId: target.priceId,
         })
       : null;
+  // Only where "after the change" means now. A scheduled downgrade changes
+  // nothing about this month.
+  const credits =
+    decision.plan.execution === "immediate_upgrade"
+      ? await quoteCredits(userId, decision.plan.toTier, new Date())
+      : null;
 
   const created = await prisma.planChangeRequest.create({
     data: {
@@ -415,6 +488,7 @@ export async function previewPlanChange({
       billingInterval: decision.plan.interval,
       currency: decision.plan.currency,
       amountDueMinor,
+      credits,
       effectiveAt: decision.plan.effectiveAt?.toISOString() ?? null,
       renewal: decision.plan.renewal,
       expiresAt: new Date(

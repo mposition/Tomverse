@@ -28,6 +28,15 @@ export type PlanChangeCopy = {
   loadingStatus: string;
   /** The charge that happens the moment they confirm. */
   dueNow: string;
+  /** Plan credits are the other half of the change; money is not the whole. */
+  creditsLabel: string;
+  creditsRemaining: (remaining: number, total: number) => string;
+  /**
+   * Shown only when the month's usage already passed the new allowance, which
+   * a downgrade can cause. Says outright that nothing is clawed back, because
+   * "0 remaining" reads like a debt otherwise.
+   */
+  creditsOverageNotice: string;
   /** Says outright that the plan does not move until the charge clears. */
   upgradeBody: (plan: string) => string;
   /** Says the current plan runs to the end of the period, with no refund. */
@@ -128,6 +137,11 @@ export const planChangeCopy: Record<Language, PlanChangeCopy> = {
     loading: "Working out what this costs…",
     loadingStatus: "Asking the payment provider what this change costs.",
     dueNow: "Due today",
+    creditsLabel: "Plan credits this month",
+    creditsRemaining: (remaining, total) =>
+      `${remaining.toLocaleString("en-US")} of ${total.toLocaleString("en-US")} left after the change`,
+    creditsOverageNotice:
+      "This month's usage is already past the new allowance, so none are left until the reset. Nothing already used is charged back.",
     upgradeBody: (plan) =>
       `You are charged the amount above today. ${plan} starts as soon as that payment succeeds — if it fails or needs extra verification, you stay on your current plan and are not charged.`,
     downgradeBody: (plan, date) =>
@@ -196,6 +210,11 @@ export const planChangeCopy: Record<Language, PlanChangeCopy> = {
     loading: "결제 금액을 확인하고 있습니다…",
     loadingStatus: "결제사에 이번 변경의 금액을 확인하고 있습니다.",
     dueNow: "오늘 결제",
+    creditsLabel: "이번 달 플랜 크레딧",
+    creditsRemaining: (remaining, total) =>
+      `변경 후 ${total.toLocaleString("ko-KR")} 중 ${remaining.toLocaleString("ko-KR")} 남음`,
+    creditsOverageNotice:
+      "이번 달 사용량이 이미 새 플랜의 한도를 넘어, 다음 초기화까지 남는 크레딧이 없습니다. 이미 쓴 크레딧을 회수하지는 않습니다.",
     upgradeBody: (plan) =>
       `확인을 누르면 위 금액이 오늘 결제됩니다. 결제가 성공한 직후 ${plan}이 시작되며, 결제가 실패하거나 추가 인증이 필요하면 지금 플랜이 그대로 유지되고 결제도 되지 않습니다.`,
     downgradeBody: (plan, date) =>
@@ -263,6 +282,11 @@ export const planChangeCopy: Record<Language, PlanChangeCopy> = {
     loading: "正在确认费用…",
     loadingStatus: "正在向支付服务商确认本次变更的费用。",
     dueNow: "今日扣款",
+    creditsLabel: "本月方案额度",
+    creditsRemaining: (remaining, total) =>
+      `变更后剩余 ${remaining.toLocaleString("zh-CN")} / ${total.toLocaleString("zh-CN")}`,
+    creditsOverageNotice:
+      "本月用量已超过新方案的额度，因此在下次重置前没有剩余额度。已使用的额度不会被追回。",
     upgradeBody: (plan) =>
       `确认后将于今日扣除上述金额。扣款成功后立即启用 ${plan}；若扣款失败或需要额外验证，将保留当前方案且不会扣款。`,
     downgradeBody: (plan, date) =>
@@ -325,6 +349,11 @@ export const planChangeCopy: Record<Language, PlanChangeCopy> = {
     loading: "Calcul du montant…",
     loadingStatus: "Nous demandons le montant de ce changement au prestataire de paiement.",
     dueNow: "À payer aujourd'hui",
+    creditsLabel: "Crédits du forfait ce mois-ci",
+    creditsRemaining: (remaining, total) =>
+      `${remaining.toLocaleString("fr-FR")} sur ${total.toLocaleString("fr-FR")} restants après le changement`,
+    creditsOverageNotice:
+      "L'utilisation de ce mois dépasse déjà la nouvelle allocation : il n'en reste aucun jusqu'à la réinitialisation. Rien de déjà consommé n'est repris.",
     upgradeBody: (plan) =>
       `Le montant ci-dessus est prélevé aujourd'hui. ${plan} démarre dès que le paiement aboutit ; en cas d'échec ou de vérification supplémentaire, votre offre actuelle est conservée et rien n'est prélevé.`,
     downgradeBody: (plan, date) =>
@@ -394,6 +423,11 @@ export const planChangeCopy: Record<Language, PlanChangeCopy> = {
     loading: "Betrag wird ermittelt…",
     loadingStatus: "Wir fragen den Zahlungsanbieter nach dem Betrag für diesen Wechsel.",
     dueNow: "Heute fällig",
+    creditsLabel: "Plan-Credits in diesem Monat",
+    creditsRemaining: (remaining, total) =>
+      `${remaining.toLocaleString("de-DE")} von ${total.toLocaleString("de-DE")} nach der Änderung übrig`,
+    creditsOverageNotice:
+      "Der Verbrauch dieses Monats liegt bereits über dem neuen Kontingent, daher bleibt bis zur Zurücksetzung nichts übrig. Bereits Verbrauchtes wird nicht zurückgefordert.",
     upgradeBody: (plan) =>
       `Der obige Betrag wird heute abgebucht. ${plan} startet, sobald die Zahlung erfolgreich ist — schlägt sie fehl oder ist eine zusätzliche Bestätigung nötig, bleibt Ihr aktueller Tarif und es wird nichts abgebucht.`,
     downgradeBody: (plan, date) =>
@@ -463,6 +497,11 @@ export const planChangeCopy: Record<Language, PlanChangeCopy> = {
     loading: "Calculando el importe…",
     loadingStatus: "Estamos consultando el importe de este cambio al proveedor de pagos.",
     dueNow: "A pagar hoy",
+    creditsLabel: "Créditos del plan este mes",
+    creditsRemaining: (remaining, total) =>
+      `Quedan ${remaining.toLocaleString("es-ES")} de ${total.toLocaleString("es-ES")} tras el cambio`,
+    creditsOverageNotice:
+      "El consumo de este mes ya supera la nueva asignación, así que no queda ninguno hasta el reinicio. No se cobra nada de lo ya usado.",
     upgradeBody: (plan) =>
       `Hoy se cobrará el importe anterior. ${plan} empieza en cuanto el pago se complete; si falla o necesita verificación adicional, mantienes tu plan actual y no se cobra nada.`,
     downgradeBody: (plan, date) =>
@@ -532,6 +571,11 @@ export const planChangeCopy: Record<Language, PlanChangeCopy> = {
     loading: "A calcular o valor…",
     loadingStatus: "Estamos a consultar o valor desta alteração junto do fornecedor de pagamentos.",
     dueNow: "A pagar hoje",
+    creditsLabel: "Créditos do plano este mês",
+    creditsRemaining: (remaining, total) =>
+      `Restam ${remaining.toLocaleString("pt-PT")} de ${total.toLocaleString("pt-PT")} após a alteração`,
+    creditsOverageNotice:
+      "O consumo deste mês já ultrapassa a nova dotação, por isso não resta nenhum até à reposição. Nada do que já foi usado é cobrado de volta.",
     upgradeBody: (plan) =>
       `O valor acima é cobrado hoje. O ${plan} começa assim que o pagamento for concluído; se falhar ou exigir verificação adicional, mantém o plano atual e nada é cobrado.`,
     downgradeBody: (plan, date) =>

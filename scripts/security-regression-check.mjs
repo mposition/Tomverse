@@ -592,6 +592,51 @@ const checks = [
     },
   },
   {
+    // A plan change moves money and credits, and only one of them was quoted.
+    // The credit arithmetic has one home (lib/planChangeCredits.ts) so the
+    // preview and the steady-state balance cannot drift; nothing imported it.
+    // Null for a scheduled downgrade on purpose: it changes nothing about this
+    // month, so any number here would be true for nobody yet.
+    name: "A plan-change quote states what happens to this month's credits",
+    file: "lib/planChangeService.ts",
+    test: (source) =>
+      source.includes("planCreditsAfterPlanChange") &&
+      source.includes('decision.plan.execution === "immediate_upgrade"\n      ? await quoteCredits'),
+  },
+  {
+    // The concurrency policy names rollbackChatAdmission() in step 4 of the
+    // admission lifecycle and nothing called it. A preflight that reserves and
+    // then fails to answer left every slot held until the admission TTL, so
+    // the retry step 6 asks the client to make was refused for concurrency on
+    // a subject running nothing.
+    name: "A preflight that fails after admission gives the slots back",
+    file: "app/api/chat/preflight/route.ts",
+    test: (source) =>
+      source.includes("grantedAdmissionId = result.admission.admissionId") &&
+      source.includes("if (grantedAdmissionId)") &&
+      source.includes("rollbackChatAdmission(grantedAdmissionId"),
+  },
+  {
+    // §10's reason for one shared context builder applies to the guard too:
+    // preflight prices what chat sends. Without this check preflight quoted
+    // credits and reserved a concurrency slot for a model the chat route was
+    // always going to refuse, which on a comparison is the partial execution
+    // the aggregate admission exists to prevent.
+    name: "Preflight refuses a model whose context window cannot hold the request",
+    file: "app/api/chat/preflight/route.ts",
+    test: (source) => {
+      const check = source.indexOf("fitChatOutputToContextWindow({");
+      const reserve = source.indexOf("preflightChatComparisonAccess(access, budgets");
+      return (
+        check !== -1 &&
+        reserve !== -1 &&
+        // Before the reservation, or a refused comparison still holds slots.
+        check < reserve &&
+        source.includes("MODEL_CONTEXT_WINDOW_EXCEEDED")
+      );
+    },
+  },
+  {
     // A model's settable output ceiling is a capability, not this request's
     // budget. Kimi K3's ceiling is its whole context window, so using it as
     // the fixed output cap refused every request at every input size. The
@@ -613,6 +658,18 @@ const checks = [
     test: (source) =>
       source.includes("toReservedInputTokens(estimatedInputTokens") &&
       source.includes("toolOverheadTokens: estimateToolInputTokenOverhead"),
+  },
+  {
+    // Class identity belongs to the module instance. A second evaluation of
+    // chatSecurity (a bundler boundary, a test harness) gives a second
+    // ChatAccessError class, and `instanceof` against the wrong one silently
+    // files our own refusal as a provider failure -- bad health data, no
+    // error. The owning module answers instead.
+    name: "AI Review asks chatSecurity whether a failure was its own refusal",
+    file: "lib/comparisonReviewService.ts",
+    test: (source) =>
+      source.includes("isChatAccessError(error)") &&
+      !source.includes("instanceof ChatAccessError"),
   },
   {
     // §8.4 requires the server to establish evidence existence, ownership and

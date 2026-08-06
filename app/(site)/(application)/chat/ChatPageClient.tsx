@@ -53,6 +53,11 @@ import {
   resolveGuestDefaultSelectedModels,
   type WebSearchMode,
 } from "@/lib/appDefaults";
+import {
+  DEFAULT_CONVERSATION_MEMORY_MODE,
+  isConversationMemoryMode,
+  type ConversationMemoryMode,
+} from "@/lib/conversationMemoryMode";
 import type { WebSearchExecution } from "@/lib/webSearchExecutionNormalizer";
 import {
   createGuestSelectionClamp,
@@ -472,6 +477,21 @@ export function ChatPageClient({
     scopeId: string | null;
     text: string;
   } | null>(null);
+  // The image workspace's remount identity, held explicitly rather than
+  // derived from the conversation id.
+  //
+  // Remounting on a real conversation switch is deliberate -- the workspace
+  // owns a timeline and a poll loop that belong to exactly one conversation.
+  // But a draft being adopted as the conversation it just created is not a
+  // switch: it is the same workspace continuing, and remounting there threw
+  // away the model selection, quality, size and prompt the user had chosen,
+  // re-seeding them from the entry point instead.
+  const [imageWorkspaceKey, setImageWorkspaceKey] = useState("image-draft:0");
+  const imageDraftSerialRef = useRef(0);
+  const nextImageDraftKey = () => {
+    imageDraftSerialRef.current += 1;
+    return `image-draft:${imageDraftSerialRef.current}`;
+  };
   const [imageDraftSeedPrompt, setImageDraftSeedPrompt] = useState("");
   // Set only when the user reached the draft by choosing a model in the
   // catalogue's image tab; otherwise the workspace keeps its own default.
@@ -671,6 +691,19 @@ export function ChatPageClient({
   // conversations (see components/chat/ChatInput.tsx's tools sheet).
   const [webSearchMode, setWebSearchMode] = useState<WebSearchMode>(
     APP_DEFAULTS.defaultWebSearchMode
+  );
+  // §8.1 invariant 1, per conversation exactly like webSearchMode above. The
+  // stored value, not the resolved one: `inherit` has to survive so the
+  // conversation keeps following a later change to the account default.
+  const [memoryMode, setMemoryMode] = useState<ConversationMemoryMode>(
+    DEFAULT_CONVERSATION_MEMORY_MODE
+  );
+  // What `inherit` currently resolves to, so the menu can say which way that
+  // choice points rather than only that it follows something. Fetched once
+  // per signed-in session; "on" until it answers, matching the server's own
+  // default so the label cannot briefly claim memory is off when it is not.
+  const [accountMemoryDefault, setAccountMemoryDefault] = useState<"on" | "off">(
+    "on"
   );
   const [isDeepResearchSetupOpen, setIsDeepResearchSetupOpen] = useState(false);
   // Per-conversation, like webSearchMode -- reset on New Chat/conversation
@@ -1670,6 +1703,7 @@ export function ChatPageClient({
         selectedModels?: unknown;
         disabledPanels?: unknown;
         webSearchMode?: unknown;
+        memoryMode?: unknown;
         messages?: Array<{ role?: string; modelId?: string | null }>;
     }, targetChatId?: string) => {
         const savedModels = normalizeStringArray(data.selectedModels, userDefaultModelIds);
@@ -1692,6 +1726,11 @@ export function ChatPageClient({
             isWebSearchMode(data.webSearchMode)
                 ? data.webSearchMode
                 : APP_DEFAULTS.defaultWebSearchMode
+        );
+        setMemoryMode(
+            isConversationMemoryMode(data.memoryMode)
+                ? data.memoryMode
+                : DEFAULT_CONVERSATION_MEMORY_MODE
         );
         if (targetChatId) {
           // A server read seeds the queue's confirmed state; markConfirmed
@@ -2148,6 +2187,7 @@ export function ChatPageClient({
 
     setDisabledPanels([]);
     setWebSearchMode(APP_DEFAULTS.defaultWebSearchMode);
+    setMemoryMode(DEFAULT_CONVERSATION_MEMORY_MODE);
     setIsDeepResearchPending(false);
     setIsImageDraftActive(false);
     discardDraft(blankedDraftScope);
@@ -2166,6 +2206,7 @@ export function ChatPageClient({
         });
         setImageDraftSeedPrompt(draftText);
         setImageDraftSeedModelIds(modelId ? [modelId] : undefined);
+        setImageWorkspaceKey(nextImageDraftKey());
         setIsImageDraftActive(true);
         currentChatIdRef.current = null;
         setCurrentChatId(null);
@@ -2196,6 +2237,7 @@ export function ChatPageClient({
         setIsImageDraftActive(true);
         setImageDraftSeedPrompt("");
         setImageDraftSeedModelIds(undefined);
+        setImageWorkspaceKey(nextImageDraftKey());
         setChatDraftBeforeImage(null);
         currentChatIdRef.current = null;
         setCurrentChatId(null);
@@ -2220,6 +2262,16 @@ export function ChatPageClient({
             ...prev,
         ]);
         setIsImageDraftActive(false);
+        // Deliberately NOT touching imageWorkspaceKey: this is the same
+        // workspace continuing, so its composer settings survive.
+        //
+        // The seed is cleared even though nothing reads it right now. It was
+        // the carried-over chat draft, and leaving it set meant a later, real
+        // remount re-filled the composer with the prompt the user had already
+        // paid to generate -- next to an enabled submit button.
+        setImageDraftSeedPrompt("");
+        setImageDraftSeedModelIds(undefined);
+        setChatDraftBeforeImage(null);
         currentChatIdRef.current = conversation.id;
         setCurrentChatId(conversation.id);
     };
@@ -2262,6 +2314,9 @@ export function ChatPageClient({
         const selectedTarget = conversations.find((c) => c.id === id);
         if (selectedTarget?.kind === "image") {
             setIsImageDraftActive(false);
+            // A real switch, so a new workspace instance: the timeline and the
+            // poll loop of the conversation being left must not follow.
+            setImageWorkspaceKey(id);
             currentChatIdRef.current = id;
             setCurrentChatId(id);
             setPromptPayload(null);
@@ -2318,8 +2373,10 @@ export function ChatPageClient({
               ? targetConv.webSearchMode
               : APP_DEFAULTS.defaultWebSearchMode
           );
+          setMemoryMode(DEFAULT_CONVERSATION_MEMORY_MODE);
         } else {
           setWebSearchMode(APP_DEFAULTS.defaultWebSearchMode);
+          setMemoryMode(DEFAULT_CONVERSATION_MEMORY_MODE);
         }
       return;
     }
@@ -3487,8 +3544,58 @@ export function ChatPageClient({
   // for models with confirmed support, instead of forcing a Perplexity
   // model into the selection -- selectedModels and their order are never
   // touched by a web-search-mode change.
+  useEffect(() => {
+    if (!sessionUserId) return;
+    let cancelled = false;
+    void fetch("/api/memories/settings", { cache: "no-store" })
+      .then((response) => (response.ok ? response.json() : null))
+      .then((body: { defaultConversationMode?: unknown } | null) => {
+        if (cancelled) return;
+        // Only the explicit "off" moves it, the same direction the server
+        // resolver takes: an unreadable value must not make the menu say
+        // memory is off for conversations it is on for.
+        setAccountMemoryDefault(
+          body?.defaultConversationMode === "off" ? "off" : "on"
+        );
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [sessionUserId]);
+
   const handleWebSearchModeChange = (mode: WebSearchMode) => {
     updateWebSearchMode(mode);
+  };
+
+  /**
+   * §8.1 invariant 1. Guests never reach here — the control is not rendered
+   * for them, because a guest has no account memory for it to act on — so
+   * unlike webSearchMode there is no local-only branch to keep.
+   *
+   * Optimistic, then corrected: the mode is a display of server state, and a
+   * failed PATCH that left the menu showing the new value would tell the user
+   * memory is off for a conversation the server still injects into.
+   */
+  const handleMemoryModeChange = (mode: ConversationMemoryMode) => {
+    const targetId = accountConversationId(currentChatId);
+    if (!targetId || !sessionUserId) return;
+    const previous = memoryMode;
+    setMemoryMode(mode);
+    void fetch(`/api/conversations/${targetId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ memoryMode: mode }),
+    })
+      .then((response) => {
+        if (response.ok) return;
+        setMemoryMode(previous);
+        showToast(t("chat.memoryModeFailed"), "error");
+      })
+      .catch(() => {
+        setMemoryMode(previous);
+        showToast(t("chat.memoryModeFailed"), "error");
+      });
   };
 
   // handleGlobalSubmit is redefined every render (not memoized); a ref
@@ -4000,11 +4107,9 @@ export function ChatPageClient({
     <ImageGenerationWorkspace
       // Remount on switch: the workspace's local timeline, draft prompt and
       // poll loop all belong to exactly one conversation.
-      key={
-        isImageDraftActive
-          ? `image-draft:${(imageDraftSeedModelIds ?? []).join(",")}`
-          : currentChatId ?? "image-draft"
-      }
+      // Seed ids are deliberately NOT part of this: re-picking a model from
+      // the catalogue mid-draft used to remount and discard the typed prompt.
+      key={imageWorkspaceKey}
       conversationId={isImageDraftActive ? null : currentChatId}
       onConversationCreated={handleImageConversationCreated}
       initialPrompt={imageDraftSeedPrompt}
@@ -4084,6 +4189,18 @@ export function ChatPageClient({
           canSelectModel={canSelectModelForPlan}
           webSearchMode={webSearchMode}
           onWebSearchModeChange={handleWebSearchModeChange}
+          memoryMode={
+            // §8.1 invariant 2: a guest has no account memory, so the control
+            // is absent rather than shown inert. Also absent until a
+            // conversation exists to store the mode on.
+            !isGuestMode &&
+            currentChatId &&
+            !isGuestConversationId(currentChatId)
+              ? memoryMode
+              : undefined
+          }
+          onMemoryModeChange={handleMemoryModeChange}
+          accountMemoryDefault={accountMemoryDefault}
           onOpenDeepResearchSetup={() => setIsDeepResearchSetupOpen(true)}
           isDeepResearchPending={isDeepResearchPending}
           onDismissDeepResearchChip={dismissDeepResearchChip}
@@ -4141,6 +4258,18 @@ export function ChatPageClient({
           canSelectModel={canSelectModelForPlan}
           webSearchMode={webSearchMode}
           onWebSearchModeChange={handleWebSearchModeChange}
+          memoryMode={
+            // §8.1 invariant 2: a guest has no account memory, so the control
+            // is absent rather than shown inert. Also absent until a
+            // conversation exists to store the mode on.
+            !isGuestMode &&
+            currentChatId &&
+            !isGuestConversationId(currentChatId)
+              ? memoryMode
+              : undefined
+          }
+          onMemoryModeChange={handleMemoryModeChange}
+          accountMemoryDefault={accountMemoryDefault}
           onOpenDeepResearchSetup={() => setIsDeepResearchSetupOpen(true)}
           isDeepResearchPending={isDeepResearchPending}
           onDismissDeepResearchChip={dismissDeepResearchChip}
