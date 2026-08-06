@@ -107,7 +107,29 @@ export type ModelPricingProfile = {
      * executed query. Undefined when the model has no native search tool.
      */
     nativeSearchCostMicroUsdPerQuery?: number;
+    /**
+     * The output cap this application asks for. Not the model's capability —
+     * see `providerMaxOutputTokens` — and not a promise the request will fit:
+     * it is fitted down to the context window's remaining room before dispatch
+     * (`lib/chatContextWindow.ts`).
+     */
     maxOutputTokens: number;
+    /**
+     * The provider's absolute settable ceiling for the request's output cap,
+     * where it is verified and differs from what this app asks for.
+     *
+     * Kept apart from `maxOutputTokens` because collapsing the two is what
+     * broke Kimi K3: its ceiling equals its whole 1,048,576-token context
+     * window, and using a capability ceiling as every request's fixed output
+     * budget left no room for any input at all, so the guard refused every
+     * request at every size. A capability is what the model *can* do; a request
+     * cap is what this turn asks for; they are not the same number and the
+     * second is bounded by the first.
+     *
+     * Undefined where no ceiling has been verified. It never raises the request
+     * cap — only lowers it.
+     */
+    providerMaxOutputTokens?: number;
     /**
      * Output tokens reserved up front. Sized from the model's own answer-length
      * distribution rather than a shared constant, because a reservation that is
@@ -800,7 +822,14 @@ export const MODEL_PRICING: readonly ModelPricingProfile[] = [
         ...DIRECT_STANDARD,
         tiers: flatTier(3, 15, 0.1),
         reasoningTokenBilling: "billed_as_output",
-        maxOutputTokens: 1_048_576,
+        // Moonshot's documented default for max_completion_tokens. The
+        // provider will accept anything up to the full window, but it rejects
+        // a request whose input plus its output cap exceeds that window -- so
+        // asking for the ceiling every time made the model unusable rather
+        // than generous. The register records the ceiling and this source
+        // (docs/policy/tomverse-chat-context-window-register.yaml).
+        maxOutputTokens: 131_072,
+        providerMaxOutputTokens: 1_048_576,
         reservationOutputTokens: 16_384,
         reservationOutputBasis: "conservative_default",
         cachedInputPricingVerified: true,
@@ -1199,6 +1228,11 @@ export type ResolvedModelPricing = {
     outputUsdPerMillionTokens: number;
     cachedInputPriceMultiplier: number;
     maxOutputTokens: number;
+    /**
+     * The provider's absolute settable ceiling, where verified. Null when it
+     * is unknown, which is not the same as "equal to what we ask for".
+     */
+    providerMaxOutputTokens: number | null;
     reservationOutputTokens: number;
     reservationOutputBasis: ModelPricingProfile["reservationOutputBasis"];
     reasoningTokenBilling: ReasoningTokenBilling;
@@ -1360,6 +1394,7 @@ export const resolveModelPricing = (
         outputUsdPerMillionTokens,
         cachedInputPriceMultiplier,
         maxOutputTokens,
+        providerMaxOutputTokens: profile?.providerMaxOutputTokens ?? null,
         reservationOutputTokens,
         reservationOutputBasis:
             profile?.reservationOutputBasis ?? fallback.reservationOutputBasis,

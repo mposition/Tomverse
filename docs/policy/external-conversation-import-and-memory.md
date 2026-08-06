@@ -409,6 +409,17 @@ window·credit·privacy disclosure 적용. 릴리스 B의 memory 사용은 이 b
    기본값, `off`는 해당 대화에서 retrieval·injection 금지. 계정 master toggle이
    꺼져 있으면 `on`도 우회하지 못하고, mode가 feature flag·revocation·인증·
    소유권 검사를 우회하지 못합니다. mode는 서버 저장·서버 판정입니다.
+   구현: 해석은 `lib/conversationMemoryMode.ts`의 순수 resolver 한 곳이고,
+   저장은 `PATCH /api/conversations/[id]`, 적용은 `/api/chat`과
+   `/api/chat/preflight` **양쪽**입니다.
+   - **`inherit`는 저장 값으로 남습니다.** 저장 시점의 계정 기본값을 복사해
+     넣으면 이후 계정 설정을 바꿔도 그 대화만 옛 값에 묶입니다. 사용자가 고른
+     것은 "기본값을 따른다"이지 "그때의 기본값"이 아닙니다.
+   - **정확히 `off` 문자열만 끕니다.** 컬럼이 문자열이므로 예상 못 한 값이
+     사용자가 켜져 있다고 믿는 기능을 조용히 꺼서는 안 됩니다. 반대 실수는 위의
+     flag·revocation·계정 toggle이 여전히 막으므로 봉쇄됩니다.
+   - **양쪽 경로가 모두 읽어야 합니다.** preflight만 읽으면 memory가 꺼진 대화가
+     memory block 없이 가격이 매겨지고 block이 담겨 전송되거나 그 반대가 됩니다.
 2. **Guest 제외** — guest에는 extraction·candidate 생성·retrieval·injection·
    profile memory를 적용하지 않고, guest identity를 memory owner로 승격하지
    않으며, 로그인 전 guest local state를 memory로 자동 변환하지 않습니다.
@@ -455,6 +466,19 @@ window·credit·privacy disclosure 적용. 릴리스 B의 memory 사용은 이 b
 일치, evidence role과 statement 관계, 길이, 허용 kind, confidence 범위, expiry
 형식, URL, credential·secret 패턴, imperative/system 지시형, prompt injection
 표현, assistant 추측 채택 패턴, source mismatch, 중복·near-duplicate·conflict.
+
+구현: 순수 검사는 `lib/memoryValidatorCore.ts`, DB가 필요한 검사(evidence
+존재·소유권·digest)는 `lib/memoryEvidenceValidation.ts`입니다.
+
+- **evidence 재검증은 읽기 시점이 아니라 쓰기 시점에 합니다.** label map은
+  chunk를 claim할 때 만들어지고 provider 호출은 그 뒤에 일어나므로, 그 사이에
+  import를 삭제한 사용자는 더 이상 없는 message를 인용하는 후보를 남깁니다.
+  검증을 저장 transaction 안에서 하지 않으면 evidence insert가 FK를 위반해
+  chunk 전체가 알 수 없는 DB 오류로 실패합니다.
+- **검증에 실패한 참조는 버리고, 남은 참조가 없으면 후보를 저장하지 않습니다**
+  (§8.2는 evidence를 요구합니다). 이는 validator 거절과 다른 결과이므로
+  `unsourced`로 따로 셉니다 — 문장이 부적합했던 것이 아니라 근거가 사라진
+  것입니다.
 
 **Bulk-safe 계약**: 일괄 승인에는 서술형 사실·선호만 포함합니다. URL, redirect
 지시, imperative, "항상·반드시·무조건" + 행동 명령, system/developer/tool 명령
@@ -1337,17 +1361,58 @@ Data 탭(`AuthButton.tsx`)에는 진입점·요약만 두고 대형 UI를 modal�
     보고서 전체에 문장이 없는지 확인합니다.
   - **아직 측정할 수 없는 지표는 0이 아니라 이유와 함께 이름을 남깁니다**
     (`unavailable`). 주입 비율 0%는 "아무도 안 쓴다"와 구분되지 않으며, 그
-    혼동이 이 목록이 존재하는 이유입니다. 현재 목록: injection 비율·token
-    bucket·stale bundle 비율(§10 배선 전), lock suspension/restore(B5),
-    follow-up proxy(주입 필요), chunk당 credit·batch sub-budget(slice 1.6).
+    혼동이 이 목록이 존재하는 이유입니다. **현재 목록: follow-up proxy의 feedback
+    신호 하나**(`Feedback`에 대상 답변으로 가는 연결이 없음). lock
+    suspension/restore(B5), chunk당 credit·batch sub-budget(slice 1.6),
+    injection 비율·token bucket·stale bundle 비율(§10 배선), follow-up·regenerate
+    (답변별 귀속)은 모두 출처가 생겨 목록에서 빠졌습니다.
+  - **답변별 memory 귀속은 `Message`에 저장합니다**(`memoryUsedCount`,
+    `memoryTokens`). §8.1 불변식 4가 금지하는 것은 주입된 **context 본문**이고
+    "사용 개수·비민감 aggregate metadata"는 명시적으로 허용합니다. 일일 counter가
+    이미 주입 **비율**을 보고하므로 이것은 counter가 만들 수 없는 것 —
+    **어느 답변이** memory를 담았는가 — 만 담당하며, follow-up proxy가 그것을
+    필요로 합니다. `NULL`은 bundle이 없어 주입이 불가능했던 요청이고 `0`은
+    bundle이 검증됐지만 retrieval이 아무것도 고르지 않은 경우입니다.
+  - **injection 비율의 분모는 인증된 chat 요청 전체입니다.** "주입이 허용된
+    요청"으로 잡으면 fail-closed 상태에서 분모가 0이 되어 비율이 정의되지 않고,
+    그것은 이 목록이 설명하려던 상태로 되돌아가는 것입니다. 지금 방식이면
+    fail-closed 배포도 "N건 중 0건"이라는 측정값을 보고합니다. 게스트는 주입할
+    계정 memory 자체가 없으므로 분모에서 제외합니다 — 넣으면 이 지표가 주입이
+    아니라 게스트/회원 비율을 추적하게 됩니다.
+  - **stale bundle 비율의 분모는 제시된 bundle 수**이고, replay는 비율 밖에
+    따로 셉니다. 둘 다 `CHAT_CONTEXT_BUNDLE_STALE`로 거절되지만 context가
+    변했다고 말하는 것은 한쪽뿐입니다.
+  - **truncation 비율의 분모는 주입된 context**이며, §9 예산이 잘라낸 경우
+    (`token_budget`·`item_cap`)만 truncation입니다. `below_relevance`·
+    `expired`·`duplicate`는 선택이 설계대로 동작한 것이고 `source_cap`은 크기가
+    아니라 다양성 규칙이므로 포함하지 않습니다.
+  - **follow-up proxy는 단일 비율이 아니라 두 arm의 비교입니다.** memory가 형성한
+    답변과 그렇지 않은 답변에 같은 측정을 하고 그 **차이**만 판단에 씁니다.
+    "memory 답변의 12%에 follow-up이 있었다"는 그 자체로 해석 불가입니다 —
+    첫 답변이 좋아서 두 번째 질문을 하는 경우가 흔하기 때문입니다. 한쪽 arm이
+    비어 있으면 차이는 0이 아니라 `null`입니다(비교하지 않았다는 뜻).
+    Admin UI는 이것이 proxy이며 "재질문률"이 아니라는 것을 **읽는 자리에서**
+    밝힙니다.
+  - **follow-up 관계는 SQL에서 집계합니다.** 필요한 관계가 "같은 대화에서 다음에
+    온 것"이라 대화별 정렬이 필요하고, 애플리케이션에서 하려면 conversation ID를
+    지표 모듈로 읽어와야 합니다. §22는 ID를 응답이 아니라 **select에서** 배제하므로
+    grouping을 DB에 두고 두 행의 count만 받습니다.
+  - **memory-off 전환은 발생 시점에 기록합니다.** `Conversation.memoryMode`에는
+    변경 이력이 없어 사후 유도가 불가능합니다 — update가 커밋되는 순간 이전 값이
+    사라집니다. counter는 좁은 결합에서만 올라갑니다: `off`로 바뀌었고, 이미
+    `off`가 아니었으며, 그 대화의 최근 답변이 memory가 형성한 것이고 120초
+    이내입니다. 대화를 열자마자 끄는 것은 불만이 아니라 선호이며, 둘을 함께 세면
+    §22가 원하는 신호가 묻힙니다.
   - **승인률의 분모는 검토를 마친 memory입니다.** 아직 큐에 남은 항목까지 나누면
     "손대지 않은 검토 큐"가 "낮은 승인률"로 보고됩니다. 결정된 것이 없으면 0이
     아니라 `null`입니다.
   - **취소된 run은 pair 실패율 분모에 포함합니다.** 사용자가 그만둔 것도 그 run의
     결과이고, 빼면 사용자가 계속 포기하는 pair가 좋아 보입니다.
-  - 행이 남지 않는 결과(validator 거절, source 삭제 처분)는
-    `ChatUsageBucket`의 `memory:` namespace 일일 counter로 기록하며,
-    기록 실패가 사용자 요청 실패가 되지 않습니다.
+  - 행이 남지 않는 결과(validator 거절, source 삭제 처분, 쓰기 시점 evidence
+    재검증 탈락)는 `ChatUsageBucket`의 `memory:` namespace 일일 counter로
+    기록하며, 기록 실패가 사용자 요청 실패가 되지 않습니다. counter는
+    transaction 밖에서 기록합니다 — rollback된 transaction 안에서 기록하면
+    일어나지 않은 일을 보고하게 됩니다.
 
 - **C**: profile lifecycle, preview 성공·실패, version update, retired model
   차단 수, knowledge 처리 실패율, byte bucket, retrieval chunk 수, truncation,

@@ -319,3 +319,78 @@ minimumCredits
 이 항목들이 끝나기 전에는 후보를 `price_unverified`에서 바로 활성 상태로
 옮기지 않는다. 가격 검증이 끝났다는 사실과 실행 준비가 끝났다는 사실은
 서로 다른 gate다.
+
+---
+
+## F. 2026-08-05 재조사 — Google thinking 상한과 Interactions API 스펙
+
+이 절은 §D·§E가 미결로 남긴 두 항목을 갱신한다. 정책 반영은
+`docs/policy/image-generation.md` §12.1이다.
+
+### F-1. thinking 상한 — **확인된 부재**로 확정
+
+이전 상태는 "확인 필요"였다. 재조사 결과 **읽었고 그 문장이 없다**로
+확정한다. 이는 미조사보다 강한 근거이며, 보류 사유를 그대로 유지한다.
+
+| 확인한 페이지 | 무엇이 있고 무엇이 없는가 |
+|---|---|
+| `https://ai.google.dev/api/interactions-api` | `generation_config.max_output_tokens`를 "응답에 포함할 최대 토큰 수"로 정의. 사용량은 `usage.total_input_tokens`·`total_output_tokens`·`total_thought_tokens`·`total_tokens`로 **분리 보고**. 두 출력 계열의 합이 상한 이하라는 연결 문장 **없음** |
+| `https://ai.google.dev/gemini-api/docs/thinking` | 비용을 output + thinking의 합으로 설명하고 두 사용량을 별도 필드로 보고. `max_output_tokens`가 그 합을 제한한다는 명시 **없음** |
+| `https://ai.google.dev/gemini-api/docs/models/gemini-3.1-flash-image` | Output token limit 32,768 |
+| `https://ai.google.dev/gemini-api/docs/models/gemini-3.1-flash-lite-image` | Output token limit 4,096 |
+| `https://ai.google.dev/gemini-api/docs/models/gemini-3-pro-image` | Output token limit 32,768 |
+
+모델 카드의 출력 한도는 **같은 미정의 수량에 대한 한도**이므로 빠진 연결을
+대신 제공하지 못한다. 포럼 답변·검색 요약·전언은 정책 §12의 공식 본문 요건을
+충족하지 않아 근거에서 제외한다.
+
+**판정**: 세 모델 모두 `worst_case_cost_unbounded` 유지. §D의 보수적 유도
+(A-2)는 채택하지 않는다.
+
+**해소 경로**: 산문이 아니라 과금 신호. `npm run measure:google-image-thinking-cap`
+(정책 §12.1의 8단계 절차). 매 실행이 유료이므로 §15 eval 예산 승인이
+선행돼야 하고, `--i-accept-the-cost` 없이는 아무것도 전송하지 않는다.
+`gemini-3.1-flash-lite-image`(4,096)가 상한이 실제로 작동하는지 관찰하기에
+가장 유용한 첫 대상이다.
+
+### F-2. Interactions API 스펙 — 확정, adapter 선행 구현
+
+현재 이미지 생성 가이드가 사용하는 API는 **Interactions**이며 GenerateContent의
+`imageConfig`는 reference에서 deprecated로 표시된다.
+
+| 항목 | Interactions API |
+|---|---|
+| endpoint·method | `POST https://generativelanguage.googleapis.com/v1beta/interactions` |
+| 인증 | `x-goog-api-key` 헤더 (bearer token 아님) |
+| 이미지 출력 지정 | `response_format.type: "image"` |
+| 해상도·화면비 | `response_format.image_size`, `response_format.aspect_ratio` |
+| 응답 이미지 위치 | `steps[]` 중 `type === "model_output"`, 그 안의 `content[]` 중 `type === "image"` |
+| 바이트·MIME | `content.data`(Base64), `content.mime_type` |
+| usage | 최상위 `usage.total_input_tokens`·`total_output_tokens`·`total_thought_tokens`·`total_tokens` |
+| 출력 상한 위치 | `generation_config.max_output_tokens` |
+
+구현 시 지킨 것:
+
+- **`model_output` step만 읽는다.** thinking 과정의 중간 이미지가 응답에 있을
+  수 있고, 완성본 요금을 받으며 습작을 저장하는 실패는 둘 다 그럴듯한 그림이라
+  아무도 눈치채지 못한다. 전달 이미지가 1장이 아니면 fail-closed.
+- SDK의 `interaction.output_image` 편의 필드에 의존하지 않는다.
+- GenerateContent 어휘(`generationConfig`·`inlineData`·`usageMetadata`)를 코드에
+  쓰지 않는다 — security regression check가 강제한다.
+- `thinking_level`은 모델별 profile. 값이 없으면 필드를 보내지 않는다.
+- `max_output_tokens`가 없으면 요청을 **거부**한다(정책 §12 조건 2).
+- `ImageModelProfile.maxOutputTokens`는 **비용 상한이 아니다.** 카드 수치이자
+  요청값일 뿐이고, 상한 성립 여부는 `thinkingCapMicroUsd`(현재 `null`)가 답한다.
+
+**adapter 구현은 활성화 승인도 판매가 확정도 아니다.**
+`generateImageWithProvider`가 `disabledReason`이 있는 모델을 dispatch 전에
+거부하므로 실행 경로가 없다. 선행 구현하는 이유는 F-1의 실측 자체가 이 코드를
+통해야 하기 때문이다.
+
+### F-3. §E에서 갱신되는 항목
+
+- ~~Google `image/webp` 출력의 모델별 실호출 검증~~ → 여전히 미결이지만
+  F-1 실측과 같은 유료 호출에서 함께 확인 가능하다(응답의 `mime_type`을
+  그대로 기록하므로).
+- ~~provider adapter 구현~~ → Google·xAI 모두 구현 완료. 남은 것은
+  **유료 호출**이며 이는 예산 승인 항목이다.

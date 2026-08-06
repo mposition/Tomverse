@@ -259,11 +259,28 @@ model Message {
   searchMetadata  Json?
   providerContext MessageProviderContext?
 
+  /// How much account memory this answer's prompt carried. §8.1 invariant 4
+  /// forbids storing the injected context as a Message row and explicitly
+  /// permits the used count and non-sensitive aggregate metadata, which is
+  /// all this is — the memory text is never written here. NULL means no §10
+  /// context bundle accompanied the request, so memory was not possible;
+  /// 0 means a bundle was verified and retrieval selected nothing.
+  ///
+  /// The day counters in lib/memoryMetricsCore.ts already report the
+  /// injection ratio. This is the thing a counter cannot give: attribution
+  /// per answer, which §22's follow-up proxy needs to compare the answers
+  /// memory shaped against the ones it did not.
+  memoryUsedCount Int?
+  memoryTokens    Int?
+
   conversationId String
   conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
   createdAt      DateTime     @default(now())
 
   @@index([conversationId])
+  /// §22's follow-up proxy reads answers by time window across every
+  /// conversation; without this it scans the whole table.
+  @@index([createdAt])
 }
 
 // Provider-private assistant state needed to replay reasoning models exactly
@@ -2214,8 +2231,56 @@ model MemoryExtractionChunk {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  providerCalls MemoryExtractionProviderCall[]
+
   @@unique([runId, chunkIndex])
   @@index([runId, status])
+}
+
+/// Operational provider-cost accounting for one extraction attempt (§3, §11).
+///
+/// A DIFFERENT layer from the run's user-credit reservation. User credits are
+/// reserved per run and settled at a terminal state, charging only completed
+/// chunks — a failed chunk is refunded, because the user did not get it. But a
+/// request that was actually issued may have been billed by the provider, and
+/// erasing that from the provider budget would let a run that keeps failing
+/// consume an unbounded share of a budget that reads as untouched.
+model MemoryExtractionProviderCall {
+  id      String                @id @default(cuid())
+  chunkId String
+  chunk   MemoryExtractionChunk @relation(fields: [chunkId], references: [id], onDelete: Cascade)
+
+  /// With the chunk's (runId, chunkIndex), this is the §11 attempt identity.
+  attemptCount Int
+
+  provider String
+  modelId  String
+
+  /// Written BEFORE the request leaves, so a crash mid-flight is recoverable
+  /// as "may have cost something" rather than as "nothing happened".
+  callIssued           Boolean @default(false)
+  /// Consumed from the provider and extraction sub-budget buckets at
+  /// admission. Released in full only when no call went out.
+  reservedCostMicroUsd BigInt  @default(0)
+  /// What the call actually cost. NULL while unknown, which is why the
+  /// reservation stands as the conservative charge until then.
+  settledCostMicroUsd  BigInt?
+  /// False when the provider reported no usage: the reservation stands rather
+  /// than the call being recorded as free.
+  usageConfirmed       Boolean @default(false)
+  inputTokens          Int?
+  outputTokens         Int?
+  /// Provider-side response id, for reconciling a charge we cannot confirm.
+  responseId           String?
+  failureCode          String?
+
+  startedAt DateTime?
+  settledAt DateTime?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  @@unique([chunkId, attemptCount])
+  @@index([callIssued, settledAt])
 }
 
 /// Account-level memory controls (§8.1). The master toggle is not an

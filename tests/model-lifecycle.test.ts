@@ -320,7 +320,12 @@ test("Kimi K3 launches with explicit economics and reasoning capability", () => 
   assert.equal(pricing!.tiers[0].inputUsdPerMillionTokens, 3);
   assert.equal(pricing!.tiers[0].outputUsdPerMillionTokens, 15);
   assert.equal(pricing!.tiers[0].cachedInputPriceMultiplier, 0.1);
-  assert.equal(pricing!.maxOutputTokens, 1_048_576);
+  // The request cap, not the capability. Moonshot's documented default for
+  // max_completion_tokens is 131,072; the settable ceiling is the whole
+  // 1,048,576-token window, and asking for that on every turn left no room for
+  // any input at all, so the context guard refused every request.
+  assert.equal(pricing!.maxOutputTokens, 131_072);
+  assert.equal(pricing!.providerMaxOutputTokens, 1_048_576);
 });
 
 test("Codestral is withdrawn from Insight with a live Mistral replacement", () => {

@@ -1221,6 +1221,8 @@ export const fr = {
             "L'extraction n'a pas pu aboutir. Les résultats des lots terminés sont conservés.",
         runCancelledNote:
             "L'extraction a été annulée. Les résultats des lots terminés sont conservés.",
+        runStalledNote:
+            "L'extraction est en pause entre deux exécutions. Tout ce qui est terminé est conservé et elle reprend automatiquement. Vous pouvez annuler plutôt qu'attendre.",
         runReview: "Aller à la file d'examen",
         cancel: "Annuler l'extraction",
         cancelArmed: "Appuyez à nouveau pour annuler",

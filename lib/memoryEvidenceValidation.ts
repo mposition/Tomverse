@@ -1,5 +1,6 @@
 import "server-only";
 
+import type { Prisma } from "@prisma/client";
 import { externalContentDigest } from "@/lib/externalImportDigest";
 import { prisma } from "@/lib/prisma";
 
@@ -36,13 +37,19 @@ export type ExternalEvidenceVerification = {
  * evidence pinned to content that has since changed identity (different
  * snapshot, different truncation) reads as a mismatch, never silently
  * re-attaches (§8.4 "content digest 일치").
+ *
+ * Takes a client so a caller inside a transaction verifies against the same
+ * snapshot it is about to write in. Verifying on the global client and then
+ * writing in a transaction would answer a question about a moment that has
+ * already passed.
  */
 export async function verifyExternalMessageEvidence(
     userId: string,
-    refs: readonly ExternalEvidenceRef[]
+    refs: readonly ExternalEvidenceRef[],
+    client: Prisma.TransactionClient | typeof prisma = prisma
 ): Promise<ExternalEvidenceVerification[]> {
     if (refs.length === 0) return [];
-    const rows = await prisma.externalMessage.findMany({
+    const rows = await client.externalMessage.findMany({
         where: {
             id: { in: refs.map((ref) => ref.externalMessageId) },
             userId,

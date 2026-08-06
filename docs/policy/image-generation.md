@@ -18,9 +18,10 @@ Google 모델 활성화는 공식 가격·thinking 상한의 수동 검증 통�
   보내고 결과를 나란히 비교한다(§11). 단일 모델 요청은 1-모델 그룹이라는
   특수한 경우일 뿐 별도 경로가 아니다.
 - 모델은 `AVAILABLE_MODELS`·`ModelRegistry` 밖의 **이미지 모델 registry**
-  (§12)에서만 관리한다. 등록 현황(2026-08-04): `gpt-image-2`(활성) 1개,
-  `gemini-3.1-flash-image`·`grok-imagine-image-quality-20260403`·
-  `gemini-3.1-flash-lite-image`·`gemini-3-pro-image`(모두 등록-비활성) 4개.
+  (§12)에서만 관리한다. 등록 현황(2026-08-05): `gpt-image-2`·
+  `grok-imagine-image-quality-20260403`(활성) 2개,
+  `gemini-3.1-flash-image`·`gemini-3.1-flash-lite-image`·
+  `gemini-3-pro-image`(등록-비활성) 3개.
   미등록 평가 후보는 §12.1에 있다. 비교 그룹의 모델 수 상한은
   `IMAGE_GROUP_MAX_MODELS`(출시 기본 2)이며 UI·데이터 모델에 상한값을
   하드코딩하지 않는다.
@@ -246,6 +247,27 @@ gate 없이 노출되는 배포 창은 금지된다. UI 비노출은 보안 경�
   `일·월 floor = Max 월 크레딧 × 최악 크레딧당 원가 × headroom`
   (참고치: headroom 25%에서 약 $10.80). 한 Max 계정이 월 크레딧을 하루에
   소진할 수 있으므로 일 floor = 월 floor다.
+  - **"최악 크레딧당 원가"는 provider별 값이 아니라 활성 이미지 상품 전체의
+    최대값**이다(`worstImageCostPerCreditMicroUsd()` — 현재 864µ/credit,
+    `gpt-image-2` Final 정사각에서 나온다). 따라서 floor는 특정 공급자의
+    실원가가 아니라 **전체 이미지 상품을 포괄하는 entitlement 안전 바닥**이다.
+    xAI budget의 floor를 "Grok 실원가"로 설명하면 틀린다.
+  - **floor는 바닥이지 권고치가 아니다.** 초기 production 승인값은
+    일 $50 / 월 $500(2026-08-05). staging은 일·월 모두 floor $10.80으로,
+    총 staging 지출을 캡하는 것이 의도다.
+- **`월 ≥ 일`만으로는 충분하지 않다.** 둘이 같으면 하루치 상한을 한 번
+  소진하는 순간 그달 예산도 끝나므로 월 창이 두 번째 bound가 되지 못한다.
+  `resolveImageProviderBudget`이 `month <= day`를 `month_not_above_day`
+  **advisory**로 보고한다 — `problems`와 달리 readiness를 막지 않는다.
+  단지 이상한 예산 때문에 기동을 거부하는 것이 그 예산보다 나쁘기 때문이고,
+  staging의 동일값 설정은 의도된 것이기 때문이다.
+- **예약액과 정산액을 구분한다.** provider budget은 예약 시 최악값으로 잡고
+  성공 정산에서 실비로 true-up하며 차액을 환급한다. Grok 1K는 예약
+  55,000µ(출력 50,000 + 공통 프롬프트 안전예산 5,000), 정산 50,000µ,
+  차액 5,000µ 환급이다 — xAI는 프롬프트 길이와 무관한 장당 정액 과금이라
+  `inputTokens`가 0이다. 용량을 셀 때 두 기준을 섞지 않는다: **미정산 예약
+  기준**은 동시에 승인 가능한 건수이고, **성공 정산 기준**은 이론상 완료
+  가능한 장수다(일 $50 → 909건 승인 / 1,000장 완료).
 - production에서 env 부재 시 `/api/ready` 실패. 조용한 fallback 기본값
   금지(`providerMonitoring`의 기존 silent fallback 모순은 budget 추가 전에
   정리). env를 먼저 배포하고 코드를 나중에 배포한다.
@@ -374,7 +396,7 @@ gate 없이 노출되는 배포 창은 금지된다. UI 비노출은 보안 경�
 | 후보 | 상태 | 검증된 이미지 출력가 | 남은 조건 |
 |---|---|---|---|
 | `gpt-image-2` | **활성** | 표 §3 | — |
-| `grok-imagine-image-quality-20260403` | 등록-비활성 (`operational_hold`) | 1K $0.05 / 2K $0.07 · **가격 검증·판매가 승인 완료** | xAI adapter, `IMAGE_PROVIDER_XAI_COST_*`, 계정 가시성 확인. **1K 정사각만 먼저 출시**하고 2K는 크기 체계 확장 후 |
+| `grok-imagine-image-quality-20260403` | **활성 (2026-08-05)** | 1K $0.05 · 판매가 75크레딧 | 1K 정사각만. 2K(승인 100크레딧)는 크기 체계 확장 후 |
 | `gemini-3.1-flash-image` | 등록-비활성 (`worst_case_cost_unbounded`) | 0.5K $0.045 / 1K $0.067 / 2K $0.101 / 4K $0.151 | **thinking 상한** — 아래 참조 |
 | `gemini-3.1-flash-lite-image` | 등록-비활성 (`worst_case_cost_unbounded`) | 1K $0.0336 (1K 전용) | 동일. Draft 후보이며 두 번째 비교 자리를 Google로 채우지 않는다 |
 | `gemini-3-pro-image` | 등록-비활성 (`worst_case_cost_unbounded`) | 1K·2K $0.134 / 4K $0.24 | 동일 + 제품 판단 보류(`gpt-image-2` Final과 중복) |
@@ -421,21 +443,79 @@ candidate의 한도로 설명된다. 즉 hidden thinking이 32,768 안에 포함
 따라서 Google 3종의 상태는 **가격 확인 완료 / 요청당 상한 조건부**로
 분리해 유지한다.
 
-#### 공급자에게 보낼 질문
+#### 2026-08-05 문서 재조사 — 상한은 **확인된 부재**다
 
-`sources`에 추가할 답변을 받기 위한 질문은 좁고 명확해야 한다. "thinking은
-output으로 과금된다"는 답변은 **불충분**하다 — 그것은 과금 방식이지 상한이
-아니다.
+공식 문서를 다시 훑은 결과, 이 쟁점은 "아직 안 읽은 페이지"가 아니라
+**읽었고 그 문장이 없다**로 확정한다.
 
-> For each of `gemini-3.1-flash-image`, `gemini-3.1-flash-lite-image`, and
-> `gemini-3-pro-image`, is the total number of billable hidden thinking tokens
-> in a single image-generation request hard-capped by the model's documented
-> `output_token_limit`, including image-only requests where thinking cannot be
-> disabled?
+- Interactions API reference는 `generation_config.max_output_tokens`를
+  "응답에 포함할 최대 토큰 수"로 정의하고, 사용량을
+  `usage.total_output_tokens`·`usage.total_thought_tokens`·`usage.total_tokens`
+  로 **분리 보고**한다. 둘의 합이 상한 이하라는 연결 문장은 없다.
+  (`https://ai.google.dev/api/interactions-api`)
+- thinking 문서도 비용을 output + thinking의 합으로 설명하고 두 사용량을
+  별도 필드로 보고할 뿐, `max_output_tokens`가 그 합을 제한한다고 명시하지
+  않는다. (`https://ai.google.dev/gemini-api/docs/thinking`)
+- 모델 카드의 출력 한도(Flash Image 32,768 / Flash Lite 4,096 /
+  Pro Image 32,768)는 **같은 미정의 수량에 대한 한도**이므로 연결을 대신
+  제공하지 못한다.
+- 포럼 답변·검색 요약·제품 책임자 전언은 §12의 공식 본문 요건을 충족하지
+  않으므로 근거에서 제외한다.
 
-API surface(Gemini Developer API)와 Standard tier를 함께 명시한다. 답변이
-"예"면 `thinkingCapMicroUsd`를 위 표대로 기록하고 `sources`에 답변을 추가한다.
-"아니오"거나 상한을 특정하지 못하면 Google 3종은 보류를 유지한다.
+> **판정**: 공식 페이지는 `max_output_tokens`와 thinking 사용량을 각각
+> 설명하지만 `total_output_tokens + total_thought_tokens`가 해당 상한 이하라고
+> 보장하지 않는다. 세 모델은 staging 실측 전까지
+> `worst_case_cost_unbounded`를 유지한다.
+
+#### 남은 증거는 산문이 아니라 과금 신호다 — staging 실측 계획
+
+`npm run measure:google-image-thinking-cap`이 이 절차를 수행한다. **매 실행이
+실제 유료 이미지 생성**이므로 `--i-accept-the-cost` 없이는 아무것도 보내지
+않고, §15의 eval 예산 승인이 선행돼야 한다.
+
+1. 모델별로 `1K`·`1:1`·image-only 요청을 실행한다.
+2. `max_output_tokens`를 **명시**한다.
+3. 지원 모델은 `thinking_level: "high"`로 thinking 발생 가능성을 높인다.
+4. 각 응답에서 `usage.total_output_tokens + usage.total_thought_tokens`를
+   계산한다.
+5. 그 값이 요청한 `max_output_tokens` 이하인지 확인한다.
+6. 복잡한 프롬프트 여러 개와 **둘 이상의 상한값**으로 반복한다.
+7. **낮은 상한에서 실제 제한 동작(`incomplete` 등)이 한 번 이상 나타나야
+   한다.** 항상 상한보다 한참 낮게 쓴 표본만으로는 상한 강제를 입증할 수
+   없다 — 스크립트는 이 경우를 `inconclusive_limit_never_bound`로 보고하며
+   통과로 세지 않는다. 카드 한도가 가장 낮은 `gemini-3.1-flash-lite-image`
+   (4,096)가 첫 측정 대상으로 가장 유용하다.
+8. 요청 JSON·원본 응답·모델 ID·응답 ID·실행 일시를 감사 증거로 보존한다.
+   API key와 사용자 프롬프트는 로그에 남기지 않는다(스크립트는 프롬프트를
+   sha256 앞자리로만 기록한다).
+
+**`usage.total_tokens`는 입력 토큰까지 포함하므로 `max_output_tokens`와 직접
+비교하지 않는다.** 코드에서는 `googleBillableOutputTokens()`가 비교 대상
+수량을 이름으로 고정한다.
+
+#### adapter는 선행하고 활성화는 하지 않는다
+
+Interactions API adapter(`lib/googleImageRequest.ts`,
+`imageProviderAdapter.ts`의 `generateWithGoogle`)는 **비활성 상태에서 선행
+구현**한다. `generateImageWithProvider`가 `disabledReason`이 있는 모델을
+dispatch 전에 거부하므로 실행 경로가 없고, 위 실측 자체가 이 코드를 통해야
+하기 때문이다. **adapter 구현은 활성화 승인도 판매가 확정도 아니다.**
+
+- 요청·응답 어휘는 **Interactions API 하나만** 쓴다. GenerateContent는 같은
+  요청을 다른 이름으로 표현하며(`generationConfig.maxOutputTokens`,
+  `candidates[].content.parts[].inlineData.data`,
+  `usageMetadata.thoughtsTokenCount`) `imageConfig`는 deprecated다. 두 어휘를
+  섞은 body는 그럴듯해 보이면서 틀린다 — security regression check가 강제한다.
+- 인증은 `x-goog-api-key`이며 OpenAI식 bearer token이 아니다.
+- **`model_output` step만 읽는다.** thinking 과정에서 중간 이미지가 나올 수
+  있고, 완성본 요금을 받으면서 습작을 저장하는 실패는 둘 다 그럴듯한 그림이라
+  아무도 눈치채지 못한다. 전달된 이미지가 1장이 아니면 fail-closed다.
+- `thinking_level`은 **모델별 profile**에 둔다. 지원 여부가 균일하지 않으므로
+  값이 없으면 필드를 아예 보내지 않는다.
+- `ImageModelProfile.maxOutputTokens`는 **비용 상한이 아니다.** 모델 카드가
+  공표한 수치이자 매 요청이 보내는 값일 뿐이고, 상한 성립 여부는 여전히
+  `priceVerification.thinkingCapMicroUsd`(현재 `null`)가 답한다. 이 둘을
+  혼동하지 않도록 unit test와 regression check가 함께 고정한다.
 
 #### 판매 크레딧은 별도 승인이다
 
@@ -458,6 +538,21 @@ API surface(Gemini Developer API)와 Standard tier를 함께 명시한다. 답�
 상태에서도 바닥값을 검사한다. 승인 수치를 주석에 두었다가 출시일에 손으로
 옮기는 것이 더 위험하다. 나머지 두 사유(`price_unverified`,
 `worst_case_cost_unbounded`)는 여전히 `prices`가 비어 있어야 한다.
+
+Grok 활성화(2026-08-05)가 이 규칙의 결과다: hold 해제는 `disabledReason`
+한 줄 변경이었고 가격을 다시 입력하지 않았다. 현재 `operational_hold`를 쓰는
+모델은 없지만 사유와 그 검사는 그대로 유지한다.
+
+#### xAI 활성화 순서 (2026-08-05, 실행 기록)
+
+1. adapter(`lib/xaiImageRequest.ts`) 구현 — 활성화와 별개 결정.
+2. **환경변수를 코드보다 먼저 배포**: Railway `Tomverse` 서비스,
+   production `IMAGE_PROVIDER_XAI_COST_MICROUSD_PER_DAY=50000000` /
+   `_PER_MONTH=500000000`, staging 둘 다 floor `10800000`.
+   `disabledReason`이 `null`이 되는 순간 xAI가 활성 provider가 되므로,
+   flag가 켜진 환경에 예산이 없으면 `/api/ready`가 그때부터 실패한다.
+3. registry `disabledReason: null` 배포. production flag는 OFF 유지(§15).
+4. staging flag ON → 1K 정사각 1회 생성 + gpt-image-2와 2-모델 비교 1회.
 
 #### 등록-비활성은 사용자에게 보인다
 

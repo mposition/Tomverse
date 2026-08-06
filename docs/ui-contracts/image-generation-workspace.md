@@ -28,6 +28,7 @@ rendering, this contract is the answer.
 | Which models exist, their prices and their holds | `lib/imageModelRegistry.ts` |
 | Group polling endpoint the timeline reads | `app/api/images/groups/[groupId]/route.ts` |
 | Current-attempt and group-status derivation | `lib/imageGenerationStateCore.ts`, `lib/imageGenerationRead.ts` |
+| Timeline merge rules (stale answers, asset URL churn) | `lib/imageTimelineMerge.ts` |
 | Copy | `locales/*.ts` (`chat.imageGeneration*`, `chat.imageModel*`, `chat.modelPickerTab*`, `sidebar.newImage*`) |
 
 ## Purpose
@@ -181,6 +182,16 @@ is a contract violation, not a style preference:
 re-reading a single card whose signed asset URLs expired. It is not a polling
 path.
 
+**A settled card keeps the asset URLs it already has.** Signed URLs are minted
+fresh on every read, so a group poll answers with a *different* URL string for
+an image that has not changed — and taking it rewrites the `<img>` src, so the
+browser downloads the same bytes again on every tick, for every target that
+finished before the slowest one in its group. Per-generation polling never hit
+this because it only read unsettled rows; reading the whole group is what put
+finished cards in every answer. `mergeImageTimelineRow()` in
+`lib/imageTimelineMerge.ts` owns the rule, and the single-card recovery read is
+the only caller permitted to replace the URLs — it exists because they expire.
+
 Which attempt is a target's current state is decided by
 `currentImageAttempt()` in `lib/imageGenerationStateCore.ts`, and the group's
 status by `deriveImageGroupStatusFromTargets()`. Neither the route nor the
@@ -250,6 +261,8 @@ Verified for **both** desktop and mobile projects:
 | 12 | picked from the image tab | workspace opens seeded with that model |
 | 13 | composer draft carry-over | text carried; cancel restores it exactly |
 | 14 | multi-model group polling | one `/api/images/groups/*` request per tick, not one per model |
+| 15 | two providers in one group | both prices quoted, total is their sum, one POST carrying both ids |
+| 16 | option one selected model cannot price | submission disabled; re-enabled when the option changes back |
 
 ## Automated regression contract
 
@@ -289,6 +302,7 @@ rather than the behaviour.
 - [ ] No chat-only surface (ChatInput, ChatApp, comparison rail, AI Review) mounts
 - [ ] Group state is still derived from the latest attempt per target
 - [ ] Polling is still one request per group, through the group endpoint
+- [ ] A settled card still keeps its asset URLs across polls
 - [ ] A retry still replaces its card in place
 - [ ] Prices are quoted before submit, per model and in total
 - [ ] `accent-image-*` tokens only; no reserved gradient
