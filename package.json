@@ -72,7 +72,8 @@
     "test:e2e:review-parity": "node scripts/run-review-parity.mjs",
     "check:context-window-register": "node --import tsx scripts/check-context-window-register.mjs",
     "report:token-estimate-accuracy": "node --import tsx scripts/report-token-estimate-accuracy.mjs",
-    "report:token-estimate-calibration": "node --import tsx scripts/report-token-estimate-calibration.mjs"
+    "report:token-estimate-calibration": "node --import tsx scripts/report-token-estimate-calibration.mjs",
+    "check:data-domain-registry": "node scripts/check-data-domain-registry.mjs"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^4.0.24",

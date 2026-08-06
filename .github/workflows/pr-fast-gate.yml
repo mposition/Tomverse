@@ -166,6 +166,16 @@ jobs:
         timeout-minutes: 5
         run: npm run check:context-window-register
 
+      # The delivery plan promises a new product table cannot silently escape
+      # account deletion and export. A registry alone does not deliver that --
+      # someone adds a table, forgets the registry, and the promise is quietly
+      # untrue. The user-linked set and the cascade closure are derived from
+      # schema.prisma here, so an unregistered table, or a row claiming a
+      # cascade the schema no longer has, fails the build.
+      - name: Data-domain registry
+        timeout-minutes: 5
+        run: npm run check:data-domain-registry
+
       # gpt-image-2 lives outside AVAILABLE_MODELS by design, so the model
       # pricing check above cannot see it. Same release contract -- every
       # enabled price is explicit and verified -- separate fail-closed net.

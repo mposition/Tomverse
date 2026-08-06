@@ -1,0 +1,260 @@
+schemaVersion: 1
+
+metadata:
+  status: draft
+  lastUpdated: "2026-08-05"
+  owner: security-privacy
+  validatorCommand: npm run check:data-domain-registry
+  purpose: >-
+    Every table holding user data, and what account deletion and account export
+    do with it. The delivery plan promises that a new product table cannot
+    silently escape the privacy workflows; this registry plus its validator are
+    that promise, made checkable. PRIVACY-01 and PRIVACY-02 are graded against
+    it.
+
+rules:
+  - >-
+    Every Prisma model carrying user data needs a row. The validator derives
+    that set from prisma/schema.prisma, so adding a table without registering
+    it fails the build rather than being noticed later.
+  - >-
+    deletionMechanism is pinned against the schema. "cascade_from_user" is only
+    accepted when the model really is reachable from User by cascading
+    relations, so removing a cascade cannot quietly leave data behind.
+  - >-
+    "retained" requires a retentionReason. Keeping financial or audit records
+    past deletion is a legitimate decision and a recorded one; keeping them by
+    omission is not.
+  - >-
+    "unverified" means nobody has established what happens yet. It is the
+    honest state for a row that has not been traced through the deletion path,
+    and it blocks PRIVACY-01 rather than being read as safe.
+  - >-
+    inUnifiedExport starts "unverified" for everything the current export does
+    not demonstrably cover. Only conversations are exported today
+    (app/api/conversations/export-all), so the unified account export PRIVACY-02
+    requires is still to be built.
+
+# Measured against develop on 2026-08-05: 31 user-linked models, of which 22 are
+# reachable from User by cascade, 2 are deleted explicitly in
+# lib/accountDeletion.ts, and 7 are neither. Several of those 7 are financial or
+# request-of-record rows that should survive deletion -- but that has to be
+# stated per row, with a reason, rather than left as a gap that looks the same
+# as an oversight.
+domains:
+  - domain: userSettings
+    prismaModel: UserSettings
+    deletionMechanism: cascade_from_user
+    retentionReason: null
+    inUnifiedExport: unverified
+    owner: security-privacy
+
+  - domain: account
+    prismaModel: Account
+    deletionMechanism: cascade_from_user
+    retentionReason: null
+    inUnifiedExport: unverified
+    owner: security-privacy
+
+  - domain: session
+    prismaModel: Session
+    deletionMechanism: cascade_from_user
+    retentionReason: null
+    inUnifiedExport: unverified
+    owner: security-privacy
+
+  - domain: conversation
+    prismaModel: Conversation
+    deletionMechanism: cascade_from_user
+    retentionReason: null
+    inUnifiedExport: included
+    owner: security-privacy
+
+  - domain: conversationProject
+    prismaModel: ConversationProject
+    deletionMechanism: cascade_from_user
+    retentionReason: null
+    inUnifiedExport: unverified
+    owner: security-privacy
+
+  - domain: comparisonReview
+    prismaModel: ComparisonReview
+    deletionMechanism: cascade_from_user
+    retentionReason: null
+    inUnifiedExport: unverified
+    owner: security-privacy
+
+  - domain: productAnalyticsEvent
+    prismaModel: ProductAnalyticsEvent
+    deletionMechanism: cascade_from_user
+    retentionReason: null
+    inUnifiedExport: unverified
+    owner: security-privacy
+
+  - domain: chatLimitDecisionEvent
+    prismaModel: ChatLimitDecisionEvent
+    deletionMechanism: unverified
+    retentionReason: null
+    inUnifiedExport: unverified
+    owner: security-privacy
+
+  - domain: billingPromotionRedemption
+    prismaModel: BillingPromotionRedemption
+    deletionMechanism: cascade_from_user
+    retentionReason: null
+    inUnifiedExport: unverified
+    owner: security-privacy
+
+  - domain: billingTransaction
+    prismaModel: BillingTransaction
+    deletionMechanism: unverified
+    retentionReason: null
+    inUnifiedExport: unverified
+    owner: security-privacy
+
+  - domain: creditPurchase
+    prismaModel: CreditPurchase
+    deletionMechanism: cascade_from_user
+    retentionReason: null
+    inUnifiedExport: unverified
+    owner: security-privacy
+
+  - domain: creditLot
+    prismaModel: CreditLot
+    deletionMechanism: cascade_from_user
+    retentionReason: null
+    inUnifiedExport: unverified
+    owner: security-privacy
+
+  - domain: creditLedgerEntry
+    prismaModel: CreditLedgerEntry
+    deletionMechanism: cascade_from_user
+    retentionReason: null
+    inUnifiedExport: unverified
+    owner: security-privacy
+
+  - domain: creditDebtEntry
+    prismaModel: CreditDebtEntry
+    deletionMechanism: cascade_from_user
+    retentionReason: null
+    inUnifiedExport: unverified
+    owner: security-privacy
+
+  - domain: chatCreditReservation
+    prismaModel: ChatCreditReservation
+    deletionMechanism: unverified
+    retentionReason: null
+    inUnifiedExport: unverified
+    owner: security-privacy
+
+  - domain: imageGeneration
+    prismaModel: ImageGeneration
+    deletionMechanism: cascade_from_user
+    retentionReason: null
+    inUnifiedExport: unverified
+    owner: security-privacy
+
+  - domain: imageGenerationGroup
+    prismaModel: ImageGenerationGroup
+    deletionMechanism: cascade_from_user
+    retentionReason: null
+    inUnifiedExport: unverified
+    owner: security-privacy
+
+  - domain: imageCreditReservation
+    prismaModel: ImageCreditReservation
+    deletionMechanism: unverified
+    retentionReason: null
+    inUnifiedExport: unverified
+    owner: security-privacy
+
+  - domain: feedback
+    prismaModel: Feedback
+    deletionMechanism: explicit_deletion
+    retentionReason: null
+    inUnifiedExport: unverified
+    owner: security-privacy
+
+  - domain: refundRequest
+    prismaModel: RefundRequest
+    deletionMechanism: explicit_deletion
+    retentionReason: null
+    inUnifiedExport: unverified
+    owner: security-privacy
+
+  - domain: planChangeRequest
+    prismaModel: PlanChangeRequest
+    deletionMechanism: cascade_from_user
+    retentionReason: null
+    inUnifiedExport: unverified
+    owner: security-privacy
+
+  - domain: privacyRequest
+    prismaModel: PrivacyRequest
+    deletionMechanism: unverified
+    retentionReason: null
+    inUnifiedExport: unverified
+    owner: security-privacy
+
+  - domain: externalImport
+    prismaModel: ExternalImport
+    deletionMechanism: cascade_from_user
+    retentionReason: null
+    inUnifiedExport: unverified
+    owner: security-privacy
+
+  - domain: externalConversation
+    prismaModel: ExternalConversation
+    deletionMechanism: cascade_from_user
+    retentionReason: null
+    inUnifiedExport: unverified
+    owner: security-privacy
+
+  - domain: externalMessage
+    prismaModel: ExternalMessage
+    deletionMechanism: cascade_from_user
+    retentionReason: null
+    inUnifiedExport: unverified
+    owner: security-privacy
+
+  - domain: memoryItem
+    prismaModel: MemoryItem
+    deletionMechanism: cascade_from_user
+    retentionReason: null
+    inUnifiedExport: unverified
+    owner: security-privacy
+
+  - domain: memoryEvidence
+    prismaModel: MemoryEvidence
+    deletionMechanism: cascade_from_user
+    retentionReason: null
+    inUnifiedExport: unverified
+    owner: security-privacy
+
+  - domain: memoryExtractionRun
+    prismaModel: MemoryExtractionRun
+    deletionMechanism: cascade_from_user
+    retentionReason: null
+    inUnifiedExport: unverified
+    owner: security-privacy
+
+  - domain: memoryExtractionCreditReservation
+    prismaModel: MemoryExtractionCreditReservation
+    deletionMechanism: unverified
+    retentionReason: null
+    inUnifiedExport: unverified
+    owner: security-privacy
+
+  - domain: userMemorySettings
+    prismaModel: UserMemorySettings
+    deletionMechanism: cascade_from_user
+    retentionReason: null
+    inUnifiedExport: unverified
+    owner: security-privacy
+
+  - domain: chatContextBundleConsumption
+    prismaModel: ChatContextBundleConsumption
+    deletionMechanism: unverified
+    retentionReason: null
+    inUnifiedExport: unverified
+    owner: security-privacy
