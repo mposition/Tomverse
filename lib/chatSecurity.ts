@@ -37,7 +37,10 @@ import {
     PLAN_ENTITLEMENT_EXHAUSTED,
     PROVIDER_BUDGET_EXHAUSTED,
 } from "@/lib/chatCostSafetyCore";
-import { estimateToolInputTokenOverhead } from "@/lib/chatTokenEstimate";
+import {
+    estimateToolInputTokenOverhead,
+    toReservedInputTokens,
+} from "@/lib/chatTokenEstimate";
 import { futureResetAt } from "@/lib/chatLimitDecisionCore";
 import { recordChatLimitDecision } from "@/lib/chatLimitDecisions";
 import { isWebSearchMode, type WebSearchMode } from "@/lib/appDefaults";
@@ -388,12 +391,22 @@ export const createChatBudget = (
     // Credits are weighted by the conversation the user actually sent, so tool
     // overhead never inflates what they are charged -- it only widens the
     // internal cost reservation, which is refunded down at settlement.
+    //
+    // Computed by `toReservedInputTokens` rather than by adding the overhead
+    // here, because that function is where the active estimator calibration's
+    // safety multiplier and framing overhead live. Under
+    // `generic_multilingual_v1` both are the identity and this is exactly what
+    // the hand-written sum produced; under a calibration that is not, a
+    // reservation that skipped them would be short by the margin the
+    // calibration exists to provide, and the reason would be that this one
+    // caller did its own arithmetic.
     const reservedInputTokens = Math.min(
         maxInputTokens,
-        estimatedInputTokens +
-            estimateToolInputTokenOverhead({
+        toReservedInputTokens(estimatedInputTokens, {
+            toolOverheadTokens: estimateToolInputTokenOverhead({
                 nativeSearchEnabled: options?.nativeSearchEnabled === true,
-            })
+            }),
+        })
     );
     const pricing = resolveModelRequestPricing(model, {
         estimatedPromptTokens: reservedInputTokens,

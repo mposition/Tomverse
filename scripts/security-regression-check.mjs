@@ -537,6 +537,37 @@ const checks = [
       source.includes("memoryExtractionDispatched"),
   },
   {
+    // The guard has to bound what the request really sends. A provider-native
+    // search adds 6,400 input tokens the raw estimate does not carry, so
+    // comparing the estimate let a searching turn sit that far over the limit
+    // and fail at the provider -- after a reservation and a dispatched call --
+    // instead of here, for free
+    // (docs/ops/tomverse-chat-context-window-rollout.md).
+    name: "The context-window guard measures the reserved input, not the raw estimate",
+    file: "app/api/chat/route.ts",
+    test: (source) => {
+      const guard = source.slice(
+        source.indexOf("chatContextWindowDecision({"),
+        source.indexOf("MODEL_CONTEXT_WINDOW_EXCEEDED")
+      );
+      return (
+        guard.includes("inputTokens: budget.inputTokens") &&
+        guard.includes("maxOutputTokens: budget.maxOutputTokens") &&
+        !guard.includes("estimatedInputTokens")
+      );
+    },
+  },
+  {
+    // One function owns the reserved-input figure, so the estimator
+    // calibration's safety margin and framing overhead cannot be skipped by a
+    // caller that adds the tool overhead itself.
+    name: "The chat budget derives its reserved input from the active calibration",
+    file: "lib/chatSecurity.ts",
+    test: (source) =>
+      source.includes("toReservedInputTokens(estimatedInputTokens") &&
+      source.includes("toolOverheadTokens: estimateToolInputTokenOverhead"),
+  },
+  {
     // §8.4 requires the server to establish evidence existence, ownership and
     // a matching content digest. The check was written and never called: the
     // label map is built when the chunk is claimed, and a source deleted
