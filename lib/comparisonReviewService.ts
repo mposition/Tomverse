@@ -17,8 +17,8 @@ import {
 } from "@/lib/comparisonReview";
 import {
   acquireChatAccess,
-  ChatAccessError,
   createChatBudget,
+  isChatAccessError,
   linkChatReservationProviderRequest,
   releaseChatAccess,
   settleChatUsage,
@@ -362,7 +362,12 @@ export const runComparisonReview = async (
       // filter them the way `recordProviderFailure` does: it counts whatever it
       // is given, so a run of credit exhaustions was marking a perfectly
       // healthy reviewer as failing. Nothing was sent, so nothing is recorded.
-      const isLocalRefusal = error instanceof ChatAccessError;
+      //
+      // Asked of the module that owns the class, not `instanceof` here: class
+      // identity belongs to the module instance, and a second evaluation of
+      // chatSecurity would make a real refusal fail the check and land in the
+      // health counters exactly as before.
+      const isLocalRefusal = isChatAccessError(error);
       if (!isLocalRefusal) {
         await Promise.allSettled([
           recordProviderFailure(candidate.provider, "COMPARISON_REVIEW_FAILED", {

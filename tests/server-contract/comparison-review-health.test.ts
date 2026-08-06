@@ -54,11 +54,33 @@ let generateTextBehaviour: () => never = () => {
 };
 /** What `acquireChatAccess` does. Set per test. */
 let acquireBehaviour: (() => never) | null = null;
+/**
+ * How many times the mocked reservation actually ran.
+ *
+ * Asserted, because the alternative to a working mock is not "no refusal" but
+ * "a different error entirely": without a database the real
+ * `acquireChatAccess` throws a Prisma connection error, which is genuinely not
+ * a local refusal and is recorded as a provider failure. That would fail this
+ * test for a reason that has nothing to do with the contract, and the message
+ * would point at the wrong thing.
+ */
+let acquireCalls = 0;
 
 const original = (relativePath: string) =>
   require(resolve(ROOT, relativePath)) as Record<string, unknown>;
 
 const realChatSecurity = original("lib/chatSecurity.ts");
+/**
+ * The refusal class from the *same* module copy whose `isChatAccessError` is
+ * spread into the mock below. Importing it separately would compare one copy's
+ * class against another's predicate, which is the very fragility the predicate
+ * exists to remove -- and it would fail here while production was fine.
+ */
+const ChatAccessError = realChatSecurity.ChatAccessError as new (
+  status: number,
+  code: string,
+  message: string
+) => Error;
 const realMonitoring = original("lib/providerMonitoring.ts");
 
 // Mocks are installed once: mock.module replaces an ESM registry entry, and
@@ -73,6 +95,7 @@ mock.module(mod("lib/chatSecurity.ts"), {
   namedExports: {
     ...realChatSecurity,
     acquireChatAccess: async () => {
+      acquireCalls += 1;
       if (acquireBehaviour) acquireBehaviour();
       return {
         leaseId: "lease-health-test",
@@ -123,29 +146,19 @@ type Service = {
     options: { traceId: string; candidates?: unknown[] }
   ) => Promise<unknown>;
 };
-type ChatSecurityModule = {
-  ChatAccessError: new (status: number, code: string, message: string) => Error;
-};
 type ModelsModule = { getModel: (id: string) => unknown };
 
 // Loaded lazily rather than at the top level: this file is transformed to CJS,
 // where top-level await is not available.
-let loaded: {
-  service: Service;
-  chatSecurity: ChatSecurityModule;
-  reviewer: unknown;
-} | null = null;
+let loaded: { service: Service; reviewer: unknown } | null = null;
 
 const load = async () => {
   if (loaded) return loaded;
   const service = (await import(
     `${mod("lib/comparisonReviewService.ts")}?health=cached`
   )) as Service;
-  const chatSecurity = (await import(
-    mod("lib/chatSecurity.ts")
-  )) as ChatSecurityModule;
   const models = (await import(mod("lib/models.ts"))) as ModelsModule;
-  loaded = { service, chatSecurity, reviewer: models.getModel("gpt-5-6-luna") };
+  loaded = { service, reviewer: models.getModel("gpt-5-6-luna") };
   return loaded;
 };
 
@@ -193,14 +206,14 @@ const reset = () => {
   health.providerFailures = [];
   health.modelFailures = [];
   health.generateTextCalls = 0;
+  acquireCalls = 0;
   acquireBehaviour = null;
 };
 
 test("a credit refusal is not recorded against the reviewer's health", async () => {
   reset();
-  const { chatSecurity } = await load();
   acquireBehaviour = () => {
-    throw new chatSecurity.ChatAccessError(
+    throw new ChatAccessError(
       402,
       "CREDIT_BALANCE_INSUFFICIENT",
       "Not enough credits."
@@ -212,6 +225,7 @@ test("a credit refusal is not recorded against the reviewer's health", async () 
   // Nothing was sent, so there is nothing for either counter to learn. The
   // model counter is the one that matters here: it does not filter what it is
   // given, so this used to mark a healthy reviewer as failing.
+  assert.equal(acquireCalls, 1, "the reservation seam was not reached");
   assert.deepEqual(health.modelFailures, []);
   assert.deepEqual(health.providerFailures, []);
   assert.equal(health.generateTextCalls, 0);
@@ -219,9 +233,8 @@ test("a credit refusal is not recorded against the reviewer's health", async () 
 
 test("a concurrency refusal is likewise not the reviewer's fault", async () => {
   reset();
-  const { chatSecurity } = await load();
   acquireBehaviour = () => {
-    throw new chatSecurity.ChatAccessError(
+    throw new ChatAccessError(
       429,
       "CHAT_CONCURRENCY_EXCEEDED",
       "A response is already being generated."
@@ -229,6 +242,7 @@ test("a concurrency refusal is likewise not the reviewer's fault", async () => {
   };
 
   await assert.rejects(run());
+  assert.equal(acquireCalls, 1, "the reservation seam was not reached");
   assert.deepEqual(health.modelFailures, []);
   assert.deepEqual(health.providerFailures, []);
 });

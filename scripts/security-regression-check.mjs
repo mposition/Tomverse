@@ -625,6 +625,18 @@ const checks = [
       source.includes("toolOverheadTokens: estimateToolInputTokenOverhead"),
   },
   {
+    // Class identity belongs to the module instance. A second evaluation of
+    // chatSecurity (a bundler boundary, a test harness) gives a second
+    // ChatAccessError class, and `instanceof` against the wrong one silently
+    // files our own refusal as a provider failure -- bad health data, no
+    // error. The owning module answers instead.
+    name: "AI Review asks chatSecurity whether a failure was its own refusal",
+    file: "lib/comparisonReviewService.ts",
+    test: (source) =>
+      source.includes("isChatAccessError(error)") &&
+      !source.includes("instanceof ChatAccessError"),
+  },
+  {
     // §8.4 requires the server to establish evidence existence, ownership and
     // a matching content digest. The check was written and never called: the
     // label map is built when the chunk is claimed, and a source deleted
