@@ -82,6 +82,10 @@ export const MEMORY_COUNTER_KINDS = [
     "context_bundle_stale",
     "context_bundle_replayed",
     "context_bundle_rejected",
+    // §22's memory-off signal. Recorded as it happens because
+    // `Conversation.memoryMode` keeps no history: the previous value is gone
+    // the moment the update commits.
+    "memory_off_after_injection",
 ] as const;
 
 export type MemoryCounterKind = (typeof MEMORY_COUNTER_KINDS)[number];

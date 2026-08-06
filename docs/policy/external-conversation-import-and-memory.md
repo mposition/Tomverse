@@ -409,6 +409,17 @@ window·credit·privacy disclosure 적용. 릴리스 B의 memory 사용은 이 b
    기본값, `off`는 해당 대화에서 retrieval·injection 금지. 계정 master toggle이
    꺼져 있으면 `on`도 우회하지 못하고, mode가 feature flag·revocation·인증·
    소유권 검사를 우회하지 못합니다. mode는 서버 저장·서버 판정입니다.
+   구현: 해석은 `lib/conversationMemoryMode.ts`의 순수 resolver 한 곳이고,
+   저장은 `PATCH /api/conversations/[id]`, 적용은 `/api/chat`과
+   `/api/chat/preflight` **양쪽**입니다.
+   - **`inherit`는 저장 값으로 남습니다.** 저장 시점의 계정 기본값을 복사해
+     넣으면 이후 계정 설정을 바꿔도 그 대화만 옛 값에 묶입니다. 사용자가 고른
+     것은 "기본값을 따른다"이지 "그때의 기본값"이 아닙니다.
+   - **정확히 `off` 문자열만 끕니다.** 컬럼이 문자열이므로 예상 못 한 값이
+     사용자가 켜져 있다고 믿는 기능을 조용히 꺼서는 안 됩니다. 반대 실수는 위의
+     flag·revocation·계정 toggle이 여전히 막으므로 봉쇄됩니다.
+   - **양쪽 경로가 모두 읽어야 합니다.** preflight만 읽으면 memory가 꺼진 대화가
+     memory block 없이 가격이 매겨지고 block이 담겨 전송되거나 그 반대가 됩니다.
 2. **Guest 제외** — guest에는 extraction·candidate 생성·retrieval·injection·
    profile memory를 적용하지 않고, guest identity를 memory owner로 승격하지
    않으며, 로그인 전 guest local state를 memory로 자동 변환하지 않습니다.
@@ -1373,6 +1384,12 @@ Data 탭(`AuthButton.tsx`)에는 진입점·요약만 두고 대형 UI를 modal�
     온 것"이라 대화별 정렬이 필요하고, 애플리케이션에서 하려면 conversation ID를
     지표 모듈로 읽어와야 합니다. §22는 ID를 응답이 아니라 **select에서** 배제하므로
     grouping을 DB에 두고 두 행의 count만 받습니다.
+  - **memory-off 전환은 발생 시점에 기록합니다.** `Conversation.memoryMode`에는
+    변경 이력이 없어 사후 유도가 불가능합니다 — update가 커밋되는 순간 이전 값이
+    사라집니다. counter는 좁은 결합에서만 올라갑니다: `off`로 바뀌었고, 이미
+    `off`가 아니었으며, 그 대화의 최근 답변이 memory가 형성한 것이고 120초
+    이내입니다. 대화를 열자마자 끄는 것은 불만이 아니라 선호이며, 둘을 함께 세면
+    §22가 원하는 신호가 묻힙니다.
   - **승인률의 분모는 검토를 마친 memory입니다.** 아직 큐에 남은 항목까지 나누면
     "손대지 않은 검토 큐"가 "낮은 승인률"로 보고됩니다. 결정된 것이 없으면 0이
     아니라 `null`입니다.

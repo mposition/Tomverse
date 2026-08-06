@@ -683,6 +683,10 @@ async function handleChatPost(
             contextBundle,
         } = validateChatPayload(body);
         const requestedModelId = modelId || APP_DEFAULTS.defaultModelId;
+        // §8.1 invariant 1: the conversation's stored mode, read from the row
+        // the ownership check loads below. Null for a request with no
+        // conversation, which inherits the account default like `inherit`.
+        let conversationMemoryMode: string | null = null;
         requestedModelIdForLog = requestedModelId;
         const runtimeModels = await getRuntimeModels({ includeCatalogDeleted: true });
         const runtimeModelMap = new Map(runtimeModels.map((model) => [model.id, model]));
@@ -885,8 +889,15 @@ async function handleChatPost(
             }
             const conversation = await prisma.conversation.findUnique({
                 where: { id: conversationId },
-                select: { userId: true, password: true, selectedModels: true, kind: true },
+                select: {
+                    userId: true,
+                    password: true,
+                    selectedModels: true,
+                    kind: true,
+                    memoryMode: true,
+                },
             });
+            conversationMemoryMode = conversation?.memoryMode ?? null;
             if (!conversation || conversation.userId !== session.user.id) {
                 return tracedJsonError(
                     "Conversation access denied.",
@@ -1066,6 +1077,13 @@ async function handleChatPost(
             const memoryContext = await buildChatMemoryContext({
                 userId: session.user.id,
                 query: latestUserPromptText(messages),
+                // §8.1 invariant 1: this conversation's own mode decides, with
+                // `inherit` falling back to the account default. Read here
+                // rather than trusted from the client, and read on the chat
+                // side as well as the preflight side so a mode changed between
+                // the two is caught by the freshness check instead of being
+                // priced one way and sent the other.
+                conversationMode: conversationMemoryMode,
             });
             const verification = verifyChatContextBundle(contextBundle, {
                 subjectKey: session.user.id,
