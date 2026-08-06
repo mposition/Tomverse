@@ -19,11 +19,13 @@
  *     the grounds text the user typed *is* the evidence body, and returning
  *     a user their own words is the point of a data export.
  *
- * When B5 generalises conversation locks (§7, §7.1), a locked source must be
- * reduced to existence metadata here — `sourceType` and nothing that
- * identifies or reaches the locked conversation. There is no lock column to
- * read yet, so this release exports the reference unconditionally; adding the
- * lock is what adds the branch, and no placeholder is pre-added (§1).
+ * A locked source is reduced to existence metadata: `sourceType`, a flag
+ * saying it is locked, and nothing that identifies or reaches the
+ * conversation (§13.2). The export is a document that leaves the account, so
+ * unlike the review screen — where the id only leads to a page the lock
+ * itself refuses — a reference here survives outside the lock entirely. The
+ * memory is still listed: the user is entitled to know a statement rests on
+ * something, and that is exactly what "existence metadata" means.
  */
 
 export const MEMORY_EXPORT_FORMAT = "tomverse.memories.v1";
@@ -36,6 +38,13 @@ export type MemoryExportEvidence =
           ordinal: number | null;
           role: string | null;
       }
+    /**
+     * §13.2: a locked source, described only as existing. No conversation id,
+     * no position, no role — each of those describes the thing the lock is
+     * hiding, and the last two would still narrow it down for anyone holding
+     * the account's Release A export.
+     */
+    | { sourceType: "external_message"; locked: true }
     | { sourceType: string };
 
 export type MemoryExportItem = {
@@ -81,6 +90,8 @@ export type MemoryExportSource = {
             externalConversationId: string;
             ordinal: number;
             role: string;
+            /** True when the snapshot carries a lock password (§7). */
+            sourceLocked: boolean;
         } | null;
     }>;
 };
@@ -92,6 +103,9 @@ const serializeEvidence = (
         return { sourceType: "manual", grounds: evidence.manualContent ?? "" };
     }
     if (evidence.sourceType === "external_message") {
+        if (evidence.externalMessage?.sourceLocked) {
+            return { sourceType: "external_message", locked: true };
+        }
         return {
             sourceType: "external_message",
             externalConversationId:
