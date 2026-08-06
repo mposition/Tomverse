@@ -121,6 +121,7 @@ import {
 } from "@/lib/guestAttachments";
 import { isChatCostSafetyCode } from "@/lib/chatCostSafetyCore";
 import { estimatePromptTokens } from "@/lib/chatTokenEstimate";
+import { chatContextWindowDecision } from "@/lib/chatContextWindow";
 import { buildChatMemoryContext } from "@/lib/chatMemoryContext";
 import { latestUserPromptText } from "@/lib/chatMemoryContextCore";
 import {
@@ -1605,15 +1606,30 @@ async function handleChatPost(
                 nativeSearchEnabled,
             }
         );
-        if (
-            modelConfig.contextWindowTokens &&
-            estimatedInputTokens + budget.maxOutputTokens >
-                modelConfig.contextWindowTokens
-        ) {
+        // `budget.inputTokens`, not the raw estimate: what this guard has to
+        // bound is what the request really sends, and a provider-native search
+        // adds 6,400 input tokens on top of the conversation (6,000 of
+        // retrieved result text, 400 of tool definition). Comparing the raw
+        // estimate let a searching turn sit that far over the very limit this
+        // exists to protect, and the request then failed at the provider --
+        // after a credit reservation and a dispatched call -- instead of here,
+        // for free. It is also the figure the reservation is sized on, so the
+        // two now agree about how big this turn is
+        // (docs/ops/tomverse-chat-context-window-rollout.md).
+        //
+        // That figure is clamped to the plan's input ceiling, so a request over
+        // *that* limit was already refused by `createChatBudget` with
+        // CHAT_INPUT_TOKEN_LIMIT before reaching here.
+        const contextWindow = chatContextWindowDecision({
+            contextWindowTokens: modelConfig.contextWindowTokens,
+            inputTokens: budget.inputTokens,
+            maxOutputTokens: budget.maxOutputTokens,
+        });
+        if (contextWindow.kind === "exceeded") {
             throw new ChatAccessError(
                 400,
                 "MODEL_CONTEXT_WINDOW_EXCEEDED",
-                `${modelConfig.name} supports up to ${modelConfig.contextWindowTokens.toLocaleString("en-US")} input and output tokens combined. Start a new conversation or shorten the attachments.`
+                `${modelConfig.name} supports up to ${contextWindow.limitTokens.toLocaleString("en-US")} input and output tokens combined. Start a new conversation or shorten the attachments.`
             );
         }
         const accessGrant = await acquireChatAccess(access, budget, {
