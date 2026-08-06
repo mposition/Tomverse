@@ -115,6 +115,15 @@ jobs:
         timeout-minutes: 5
         run: npm run test:server-contract
 
+      # The release checklist is the only place the whole gate is written down
+      # in one list, and it drifted: the repository grew to twelve CI-enforced
+      # checks while its §1 named five, so a release manager who followed the
+      # checklist had not run the gate. This keeps the two in step, in both
+      # directions.
+      - name: Release gate coverage
+        timeout-minutes: 5
+        run: npm run check:release-gate-coverage
+
       # UI-012: semantic accent colours must stay addressed by role inside the
       # guarded components. Cheap, no browser, so it sits with the other static
       # checks rather than in the browser tier.

@@ -27,8 +27,19 @@ Date / timezone:    ____________________
 - [ ] `npm run security:regression`
 - [ ] `npm run check:accent-tokens`
 - [ ] `npm run check:model-pricing`
+- [ ] `npm run check:image-pricing`
 - [ ] `npm run check:default-models`
 - [ ] `npm run check:encoding:strict`
+- [ ] `npm run check:context-window-register`
+- [ ] `npm run check:usage-bucket-range`
+- [ ] `npm run check:memory-extraction-eval`
+- [ ] `npm run check:tomverse-chat-release-gate-view`
+- [ ] `npm run verify:tomverse-chat-release-gates`
+- [ ] `npm run verify:review-parity-coverage`
+- [ ] `npm run check:release-gate-coverage` — proves this list still matches
+      what CI enforces. It is the reason the list above can be trusted: the
+      repository grew to twelve CI-enforced checks while this section named
+      five, and nothing failed.
 - [ ] `npm run build`
 - [ ] `npm run verify:smoke-coverage`
 - [ ] `npm run test:e2e:ui-risk`
@@ -36,6 +47,13 @@ Date / timezone:    ____________________
       disposable database; the harness truncates every table between tests)
 - [ ] `npm run test:db:integration` (needs `TEST_DATABASE_URL`, whose name must
       carry a test marker and must differ from the application database URL)
+- [ ] `npm run check:model-pricing-db` (needs the deployed database) — proves a
+      `NULL` price column still means "inherit the code profile" rather than an
+      administrator override. No CI job can run this, so this line is the only
+      thing that does.
+- [ ] `npm run check:openai-model-access` (needs a production key) — per-account
+      model visibility only. It is **not** a price source; nothing in
+      `lib/modelPricing.ts` may be derived from its response.
 - [ ] Chromium E2E: `desktop-chromium`, `desktop-compact`, `mobile-chromium`
       — no unexplained failures
 
