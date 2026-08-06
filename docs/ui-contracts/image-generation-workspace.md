@@ -27,6 +27,7 @@ rendering, this contract is the answer.
 | Sidebar placement of the launcher | `components/chat/ChatSidebar.tsx` |
 | Which models exist, their prices and their holds | `lib/imageModelRegistry.ts` |
 | Group polling endpoint the timeline reads | `app/api/images/groups/[groupId]/route.ts` |
+| Operations view (budget, registry, invariants) | `components/admin/AdminImageGenerationPanel.tsx`, mounted at `/admin/providers` |
 | Current-attempt and group-status derivation | `lib/imageGenerationStateCore.ts`, `lib/imageGenerationRead.ts` |
 | Timeline merge rules (stale answers, asset URL churn) | `lib/imageTimelineMerge.ts` |
 | Copy | `locales/*.ts` (`chat.imageGeneration*`, `chat.imageModel*`, `chat.modelPickerTab*`, `sidebar.newImage*`) |
