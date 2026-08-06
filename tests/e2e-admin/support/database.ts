@@ -566,6 +566,45 @@ export const seedAdminFixtures = async () => {
         enabled: false,
         sortOrder: 2,
       },
+      {
+        id: FIXTURE_MODEL.retired.id,
+        name: FIXTURE_MODEL.retired.name,
+        apiModel: FIXTURE_MODEL.retired.apiModel,
+        provider: FIXTURE_MODEL.retired.provider,
+        apiBaseUrl: FIXTURE_MODEL.retired.apiBaseUrl,
+        apiKeyEnvName: "GOOGLE_GENERATIVE_AI_API_KEY",
+        bestFor: "Retired-state coverage",
+        minimumPlan: "Free",
+        usageClass: "standard",
+        creditWeight: 1,
+        // The exact shape `isRetiredModel()` recognises: delisted, disabled
+        // and status disabled. The disabled fixture above deliberately keeps
+        // publiclyListed at its default so the two stay distinguishable.
+        status: "disabled",
+        publiclyListed: false,
+        enabled: false,
+        operationalReason: "Seeded as retired for admin E2E coverage",
+        sortOrder: 3,
+      },
+      {
+        id: FIXTURE_MODEL.archived.id,
+        name: FIXTURE_MODEL.archived.name,
+        apiModel: FIXTURE_MODEL.archived.apiModel,
+        provider: FIXTURE_MODEL.archived.provider,
+        apiBaseUrl: FIXTURE_MODEL.archived.apiBaseUrl,
+        apiKeyEnvName: "OPENAI_API_KEY",
+        bestFor: "Archived-state coverage",
+        minimumPlan: "Free",
+        usageClass: "standard",
+        creditWeight: 1,
+        // Removed from the catalogue while otherwise runnable, so "archived"
+        // cannot be mistaken for "retired" or "disabled".
+        status: "enabled",
+        enabled: true,
+        catalogDeleted: true,
+        operationalReason: "Seeded as archived for admin E2E coverage",
+        sortOrder: 4,
+      },
     ],
   });
 
