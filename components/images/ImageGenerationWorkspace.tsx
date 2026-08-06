@@ -22,6 +22,7 @@ import { CreditCostBadge } from "@/components/credits/CreditCostBadge";
 import { useLanguage } from "@/components/LanguageProvider";
 import { notifyUserUsageChanged } from "@/components/chat/useUserUsage";
 import { estimatePromptTokens } from "@/lib/chatTokenEstimate";
+import { mergeImageTimelineRow } from "@/lib/imageTimelineMerge";
 import {
   getImageGenerationPricing,
   IMAGE_PROMPT_MAX_TOKENS,
@@ -246,21 +247,14 @@ export function ImageGenerationWorkspace({
     (generation) => !isTerminal(generation.status)
   );
 
-  const mergeGeneration = useCallback((incoming: GenerationView) => {
-    setGenerations((current) => {
-      const index = current.findIndex(
-        (generation) => generation.generationId === incoming.generationId
+  const mergeGeneration = useCallback(
+    (incoming: GenerationView, options?: { refreshAssets?: boolean }) => {
+      setGenerations((current) =>
+        mergeImageTimelineRow(current, incoming, options)
       );
-      if (index === -1) return [...current, incoming];
-      const next = [...current];
-      // A poll answer can race a fresher one; never move a terminal row back.
-      if (isTerminal(next[index].status) && !isTerminal(incoming.status)) {
-        return current;
-      }
-      next[index] = { ...next[index], ...incoming };
-      return next;
-    });
-  }, []);
+    },
+    []
+  );
 
   // History load. Conversation switches remount this component (the page
   // keys it on the conversation id), so mount state is always fresh and this
@@ -301,7 +295,9 @@ export function ImageGenerationWorkspace({
         );
         if (!response.ok) return null;
         const payload = (await response.json()) as GenerationView;
-        mergeGeneration(payload);
+        // The one caller allowed to replace signed asset URLs: this read exists
+        // because they expire.
+        mergeGeneration(payload, { refreshAssets: true });
         return payload;
       } catch {
         return null;
