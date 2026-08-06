@@ -36,7 +36,7 @@ const reset = () =>
       "Conversation", "ConversationProject", "MemoryItem",
       "BillingTransaction", "CreditPurchase", "Feedback", "PrivacyRequest",
       "ChatCreditReservation", "ImageCreditReservation",
-      "MemoryExtractionCreditReservation", "User"
+      "MemoryExtractionCreditReservation", "AccountDataExportRequest", "User"
     RESTART IDENTITY CASCADE
   `);
 
@@ -171,6 +171,22 @@ const seedUser = async () => {
       userAgent: sentinel("feedback-userAgent"),
       path: sentinel("feedback-path"),
       email: sentinel("feedback-email"),
+    },
+  });
+
+  // The audit trail of previous downloads. The token hash is the credential
+  // for one of them, and the context hashes identify a device.
+  await prisma.accountDataExportRequest.create({
+    data: {
+      userId,
+      tokenHash: sentinel("exportRequest-tokenHash"),
+      status: "downloaded",
+      expiresAt: new Date(Date.now() + 300_000),
+      consumedAt: new Date(),
+      issuedIpHash: sentinel("exportRequest-issuedIpHash"),
+      issuedUserAgentHash: sentinel("exportRequest-issuedUserAgentHash"),
+      consumedIpHash: sentinel("exportRequest-consumedIpHash"),
+      consumedUserAgentHash: sentinel("exportRequest-consumedUserAgentHash"),
     },
   });
 
@@ -312,6 +328,7 @@ test("the export still contains the data the user is owed", async () => {
   assert.equal(result.data.active_sessions?.length, 1);
   assert.equal(result.data.payments?.length, 1);
   assert.equal(result.data.chat_credit_usage?.length, 1);
+  assert.equal(result.data.data_export_history?.length, 1);
 });
 
 // Keys are the stable public names, and every exported domain appears even when

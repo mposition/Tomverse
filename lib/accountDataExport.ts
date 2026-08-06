@@ -265,6 +265,29 @@ const FETCHERS: Record<string, (userId: string) => Promise<unknown[]>> = {
       take: EXPORT_ROW_CAP,
     }),
 
+  // included_filtered. The user's own record of who downloaded their account
+  // data and when -- which is exactly the trail that has to survive an export
+  // being taken by someone who should not have had it. The token hash is the
+  // download credential and the request-context hashes identify a device, so
+  // neither belongs in a file the user may forward.
+  accountDataExportRequest: (userId) =>
+    prisma.accountDataExportRequest.findMany({
+      where: { userId },
+      select: {
+        status: true,
+        refusalReason: true,
+        expiresAt: true,
+        consumedAt: true,
+        exportSchemaVersion: true,
+        includedDomainCount: true,
+        filteredDomainCount: true,
+        byteLength: true,
+        createdAt: true,
+      },
+      orderBy: { createdAt: "asc" },
+      take: EXPORT_ROW_CAP,
+    }),
+
   privacyRequest: (userId) =>
     prisma.privacyRequest.findMany({
       where: { userId },

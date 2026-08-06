@@ -301,6 +301,22 @@ domains:
     implementationStatus: implemented
     inUnifiedExport: unverified
 
+  - domain: accountDataExportRequest
+    prismaModel: AccountDataExportRequest
+    owner: security-privacy
+    deletionAction: delete
+    deletionMechanism: cascade_from_user
+    retentionPolicy: immediate
+    implementationStatus: implemented
+    inUnifiedExport: included_filtered
+    note: >-
+      The audit trail of who downloaded this account's data. Cascade rather
+      than an explicit delete on purpose: the validator can verify a cascade
+      against the schema, where a line in accountDeletion.ts is only a claim.
+      Live rows are also swept at 90 days by cleanupExpiredData -- the ticket
+      dies at its five-minute expiry, but an audit covering only the last five
+      minutes is the same as having none.
+
   # --- deleted explicitly ---------------------------------------------------
   - domain: chatContextBundleConsumption
     prismaModel: ChatContextBundleConsumption

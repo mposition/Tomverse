@@ -721,10 +721,24 @@ gates:
       - metric: withheld_field_sentinels_present_in_export_count
         operator: eq
         value: 0
+      # Producing the file is half the problem. The download is step-up
+      # authenticated, the link is single-use and expires in five minutes, the
+      # response is uncacheable, nothing is written to disk, and every issue,
+      # download and refusal is audited.
+      - metric: account_export_download_security_e2e_pass_percent
+        operator: eq
+        value: 100
+      # A ticket redeemed twice under concurrency would mean a leaked link
+      # stays live, which is the whole property the ticket buys.
+      - metric: concurrent_export_ticket_double_redemption_count
+        operator: eq
+        value: 0
     evidence:
       - versioned data-domain registry and export coverage test
       - tests/integration/account-data-export.db.test.ts planting a sentinel in every withheld column and asserting none survives JSON.stringify of the export
       - export manifest recording schemaVersion, generatedAt, and the included, filtered, excluded, undecided and truncated domains with their reasons
+      - tests/integration/account-data-export-ticket.db.test.ts covering single-use redemption under concurrency, refusal of a link presented by another account, expiry, and the ninety-day audit retention
+      - tests/accountDataExportTicket.test.mjs pinning the keyed token hash, the no-store and no-referrer download headers, and the single refusal message shared by every refusal reason
 
   - id: STORE-01
     rationale: "A consumption-only app still needs a complete purchase-free Free-tier experience for new users and store reviewers."

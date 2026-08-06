@@ -95,6 +95,14 @@ export const EXPORT_DOMAIN_DECLARATIONS: ExportDomainDeclaration[] = [
       "When a session was created and when it expires is the user's own record. The session token is withheld, because a copy of it is a usable session.",
   },
   {
+    domain: "accountDataExportRequest",
+    publicName: "data_export_history",
+    prismaModel: "AccountDataExportRequest",
+    state: "included_filtered",
+    withheldReason:
+      "When the user requested a download of this file, whether it was collected, and how large it was. The token hash is withheld because it is the credential for that download, and the hashed request context is withheld because it is a pseudonymous identifier for the device rather than a record the user wrote.",
+  },
+  {
     domain: "billingTransaction",
     publicName: "payments",
     prismaModel: "BillingTransaction",

@@ -65,7 +65,7 @@ Canonical release-gate registry for Tomverse Chat v1. Human-readable tables must
 | `AUTH-03` | Mobile bearer-token lifecycle resists replay and supports revocation | backend-ai | yes | `refresh_rotation_reuse_logout_device_revoke_e2e_pass_percent` = 100 | pending |
 | `AUTH-04` | CORS bypass and deep-link hijacking attack tests pass | security-privacy | yes | `unresolved_high_or_critical_cors_or_deep_link_findings` = 0 | pending |
 | `PRIVACY-01` | Account deletion is complete inside the app | security-privacy | yes | `in_app_account_deletion_e2e_pass_percent` = 100; `data_domains_with_unverified_deletion_action_count` = 0; `data_domains_with_planned_deletion_action_count` = 0 | pending |
-| `PRIVACY-02` | Account data export covers every registered Tomverse data domain | security-privacy | yes | `data_domains_with_undecided_export_state_count` = 0; `account_export_wiring_problem_count` = 0; `withheld_field_sentinels_present_in_export_count` = 0 | pending |
+| `PRIVACY-02` | Account data export covers every registered Tomverse data domain | security-privacy | yes | `data_domains_with_undecided_export_state_count` = 0; `account_export_wiring_problem_count` = 0; `withheld_field_sentinels_present_in_export_count` = 0; `account_export_download_security_e2e_pass_percent` = 100; `concurrent_export_ticket_double_redemption_count` = 0 | pending |
 | `STORE-01` | A new Free account can complete a useful flow without purchase | mobile-release | yes | `purchase_free_signup_chat_response_and_history_save_e2e_pass_percent` = 100 | pending |
 | `STORE-02` | Review credentials remain usable throughout an active submission | mobile-release | yes | `daily_review_credential_synthetic_login_success_percent` = 100 | pending |
 | `MANIFEST-01` | Delta manifests cannot form unbounded reconstruction chains | backend-ai | yes | `context_manifest_delta_depth_max` <= 20 | pending |
@@ -818,12 +818,16 @@ Criteria:
 - `data_domains_with_undecided_export_state_count` = 0
 - `account_export_wiring_problem_count` = 0
 - `withheld_field_sentinels_present_in_export_count` = 0
+- `account_export_download_security_e2e_pass_percent` = 100
+- `concurrent_export_ticket_double_redemption_count` = 0
 
 Required evidence:
 
 - versioned data-domain registry and export coverage test
 - tests/integration/account-data-export.db.test.ts planting a sentinel in every withheld column and asserting none survives JSON.stringify of the export
 - export manifest recording schemaVersion, generatedAt, and the included, filtered, excluded, undecided and truncated domains with their reasons
+- tests/integration/account-data-export-ticket.db.test.ts covering single-use redemption under concurrency, refusal of a link presented by another account, expiry, and the ninety-day audit retention
+- tests/accountDataExportTicket.test.mjs pinning the keyed token hash, the no-store and no-referrer download headers, and the single refusal message shared by every refusal reason
 
 Evidence references: none recorded
 
