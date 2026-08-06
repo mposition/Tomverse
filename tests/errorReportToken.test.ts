@@ -105,8 +105,20 @@ test("rejects a tampered signature and malformed encodings", async () => {
     const { issueErrorReportToken, verifyErrorReportToken } =
       await importToken();
     const token = issueErrorReportToken({ traceId: "t-3", routeClass: "chat" })!;
+    // The tamper flips a bit in the decoded signature and re-encodes, rather
+    // than overwriting the last characters of the string. Overwriting them was
+    // not reliably a tamper at all: the final base64url character of a 32-byte
+    // HMAC carries only four meaningful bits, so roughly one signature in a
+    // thousand decoded to the same bytes after the edit and verified -- a test
+    // that passed almost always and failed for reasons that looked like
+    // nothing to do with it.
+    const [version, payload, signature] = token.split(".");
+    const bytes = Buffer.from(signature, "base64url");
+    bytes[0] ^= 0x01;
     assert.equal(
-      verifyErrorReportToken(`${token.slice(0, -2)}zz`).status,
+      verifyErrorReportToken(
+        `${version}.${payload}.${bytes.toString("base64url")}`
+      ).status,
       "invalid_signature"
     );
     assert.equal(verifyErrorReportToken("").status, "invalid_signature");
@@ -119,6 +131,42 @@ test("rejects a tampered signature and malformed encodings", async () => {
       verifyErrorReportToken(`terr1.${"a".repeat(4_000)}.sig`).status,
       "invalid_signature"
     );
+  });
+});
+
+test("a re-encoded signature is rejected even when its bytes match", async () => {
+  // Base64 is not canonical: the low bits of the last character are padding
+  // the decoder discards, so several strings decode to one signature. Without
+  // this check a token nobody issued verifies, and the token string stops
+  // being unique per grant -- which is the property anything treating a token
+  // as one-use depends on.
+  await withSecret(SECRET, async () => {
+    const { issueErrorReportToken, verifyErrorReportToken } =
+      await importToken();
+    const token = issueErrorReportToken({ traceId: "t-5", routeClass: "chat" })!;
+    const [version, payload, signature] = token.split(".");
+    const bytes = Buffer.from(signature, "base64url");
+
+    // Sanity: the honest encoding still verifies.
+    assert.equal(verifyErrorReportToken(token).status, "verified");
+
+    // Every alternative spelling of the final character that decodes to the
+    // same bytes must be refused.
+    const alphabet =
+      "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+    let checked = 0;
+    for (const character of alphabet) {
+      const variant = signature.slice(0, -1) + character;
+      if (variant === signature) continue;
+      if (!Buffer.from(variant, "base64url").equals(bytes)) continue;
+      checked += 1;
+      assert.equal(
+        verifyErrorReportToken(`${version}.${payload}.${variant}`).status,
+        "invalid_signature",
+        `variant ${character} decoded identically and was accepted`
+      );
+    }
+    assert.ok(checked > 0, "no alternative spelling existed to test");
   });
 });
 

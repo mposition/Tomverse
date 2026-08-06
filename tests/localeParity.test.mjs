@@ -59,35 +59,33 @@ const ENGLISH_STRING_CEILING = {
   // Primary market locales. The handful that match English are proper nouns
   // and shared technical labels ("Max", "GPT-5.4 mini"), not untranslated copy.
   ko: 8,
-  // Limited market. The chat interface and the model finder are English.
-  // +1 (190 -> 191): modelFinder.saveAsDefaultHint arrived with the saved
-  // new-conversation combination and zh takes modelFinder from en wholesale.
-  // +2 (191 -> 193): the two imageGenerationRestore* notices, which zh takes
-  // from en wholesale like the rest of the image workspace copy.
-  // +1 (193 -> 194): imageGenerationGeneratingModels, same wholesale spread.
-  zh: 194,
-  // Preview markets, all of which spread `...en.chat` and `en.modelFinder`.
-  // fr +1 (226 -> 227): modelFinder.saveAsDefaultHint, taken from en wholesale.
-  // fr +2 (230 -> 232): externalImport.messagesCount and
-  // .historyConversations — "{count} messages" / "{count} conversations" are
-  // spelled identically in French; the section is otherwise fully translated.
-  // fr +1 (232 -> 233): memoryReview.kind.structure — "Structure" is spelled
-  // identically in French; the memoryReview section is otherwise fully
-  // translated.
-  // fr +1 (233 -> 234): chat.modelPickerTabImage — "Image" is spelled
-  // identically in French; the rest of the image tab is translated.
-  // fr +1 (234 -> 235): memoryExtraction.conversationMeta — "{messages}
-  // messages · {size}" is spelled identically in French, the same case as
-  // externalImport.messagesCount above; the section is otherwise translated.
-  fr: 235,
-  // de/es/pt +1 for the same saveAsDefaultHint key.
-  // de +1 (233 -> 234): chat.modelPickerTabChat — "Chat" is the German word
-  // too; the image tab's other strings are translated.
-  de: 234,
-  // es +1 (229 -> 230): chat.modelPickerTabChat — "Chat" is the Spanish word
-  // too; the image tab's other strings are translated.
-  es: 230,
-  pt: 227,
+  // zh 191 -> 9, fr 235 -> 26, de 234 -> 20, es 230 -> 16, pt 227 -> 13.
+  //
+  // The 241 strings behind those numbers were translated in one pass: the whole
+  // AI Review surface, Deep Research setup and its status lines, guest import
+  // and the guest-save prompts, the comparison rail, the web-search chips, and
+  // every screen of the model finder. `...en.chat` and `...en.modelFinder` stay
+  // as the structural fallback -- they are what keeps a key from ever going
+  // missing -- but nothing reaches a reader through them any more.
+  //
+  // What is left in each locale is one of three things, and each was checked
+  // rather than assumed: a product name Tomverse does not translate anywhere
+  // ("Tomverse Insight", "Deep Research"), a format string with no words in it
+  // ("{count} / {max}"), or a true cognate. Cognates are per-locale, which is
+  // why these five numbers differ: French keeps "Portrait", "Sources", "Auto"
+  // and "{count} messages"; German keeps "Standard", "Status" and "Feedback";
+  // Spanish keeps "Plan", "Personal" and "General". None of them is English
+  // copy sitting in front of a reader.
+  // +3: the image workspace's imageGenerationRestoreExcluded,
+  // imageGenerationRestoreOptionsUnavailable and
+  // imageGenerationGeneratingModels, which zh takes from en wholesale like the
+  // rest of that surface. The other five locales carry real translations of
+  // all three, so only this number moves.
+  zh: 12,
+  fr: 26,
+  de: 20,
+  es: 16,
+  pt: 13,
 };
 
 test("every supported language is in the dictionary map", () => {

@@ -865,6 +865,14 @@ secret 원문·잠긴 evidence는 무조건 노출하지 않음(잠긴 source ev
   provenance(`sourceType`, source 참조 metadata — 잠긴 source는 존재
   metadata만)를 포함합니다. `searchTerms`·내부 score·context bundle은
   포함하지 않습니다. 스키마 상세는 B 구현에서 이 계약 안에서 확정합니다.
+- **잠긴 source의 evidence는 존재 metadata로만 내보냅니다** — `sourceType`과
+  잠겨 있다는 사실뿐이고, conversation ID·ordinal·role은 넣지 않습니다. ID만
+  빼는 것으로는 부족합니다: 위치와 role은 계정의 릴리스 A export를 가진 사람에게
+  대상을 좁혀 줍니다. review 화면과 다른 규칙인 이유는 export가 **계정 밖으로
+  나가는 문서**이기 때문입니다 — review 화면의 ID는 lock이 스스로 거부하는
+  페이지로 이어질 뿐이지만, export의 참조는 lock 바깥에서 그대로 남습니다.
+  **memory 자체는 계속 내보냅니다.** 참조를 감추는 것과 기억을 감추는 것은
+  다르고, 사용자는 어떤 문장이 보관돼 있는지 알 권리가 있습니다.
 - **서버는 export 파일을 보존하지 않습니다**(스트리밍 생성, `no-store`).
   보존되는 것은 content 없는 생성·다운로드 audit뿐이며, 보존 기간은 기존
   admin audit 관례를 따라 **90일**입니다.
@@ -984,8 +992,11 @@ ko/en 대표 렌더링만. 7개 locale 전체 privacy E2E matrix를 만들지 �
 
 ## 17. 마케팅 표현 경계 (릴리스 차단 계약)
 
-단일 정책 소스 `lib/marketingMemoryClaims.ts`(또는 동등하게 검사 가능한 구조)
-+ 정적 테스트로 보호합니다.
+단일 정책 소스 + 정적 테스트로 보호합니다. **아직 만들어지지 않았습니다** —
+`lib/marketingMemoryClaims.ts`라는 이름으로 계획했으나 그 파일도, 동등한 구조도
+현재 없습니다. 릴리스 B·C의 마케팅 문구를 내보내기 전에 이 절이 요구하는 단일
+소스와 정적 테스트를 먼저 만들어야 하며, 그때까지 아래 허용·금지 목록은 사람이
+읽고 지키는 규칙입니다.
 
 허용: "다른 AI 서비스의 과거 대화를 가져오세요", "검토하고 승인한 기억을 새
 대화에 활용합니다", "과거 대화에서 선호하는 답변 방식을 참고합니다", "현재

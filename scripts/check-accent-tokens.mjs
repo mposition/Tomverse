@@ -69,6 +69,7 @@ const RAW_UTILITY = new RegExp(
 // rather than rendering as no colour at all.
 const KNOWN_ROLES = [
   "accent-account",
+  "accent-account-memory",
   "accent-ai-review-start",
   "accent-ai-review-mid",
   "accent-ai-review-end",

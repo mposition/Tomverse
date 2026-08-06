@@ -39,6 +39,7 @@ UI-012에서 승인된 정책(B안)입니다. accent 색은 **hue가 아니라 �
 | Max plan | `accent-plan-max-*` | purple |
 | Promotion | `accent-promotion-*` | emerald |
 | Account identity | `accent-account-*` | teal |
+| Account memory 제어 | `accent-account-memory-*` | teal |
 | 성공·검증 상태 | `status-success-*` | emerald |
 
 ## 규칙
@@ -383,7 +384,7 @@ Non-negotiable requirements:
 <!-- BEGIN:typography-invariant -->
 ## Typography and font system invariant
 
-Before changing `lib/fonts.ts`, the font tokens or `@utility type-*` roles in `app/globals.css`, `app/layout.tsx`'s font wiring, or `lib/emailTypography.ts`, read:
+Before changing `lib/fonts.ts`, the font tokens or `@utility type-*` roles in `app/globals.css`, `components/DocumentShell.tsx`'s font wiring, or `lib/emailTypography.ts`, read:
 
 - `docs/ui-contracts/typography.md`
 

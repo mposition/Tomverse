@@ -144,9 +144,12 @@ test("quick summary claims are verified against the correct per-response source 
 
 test("CJK input is estimated at roughly 1.5 tokens per character instead of bytes/4", () => {
   const koreanText = "가".repeat(10_000);
+  // `.rawTotal`: the estimator returns a segment breakdown now, so the
+  // reservation can widen Hangul without touching Latin. The total it sums to
+  // is the same number this test has always asserted on.
   const tokens = estimateComparisonReviewTokens("", [
     { messageId: "a", modelId: "m", modelName: "M", provider: "openai", content: koreanText },
-  ]);
+  ]).rawTotal;
   // A naive utf8-bytes/4 estimate would land around 7,500 + 1,200 reserve;
   // the CJK-aware estimate should be well above that (close to 15,000+1,200).
   assert.ok(tokens >= 15_000, `expected >= 15000, got ${tokens}`);
@@ -156,7 +159,7 @@ test("English input still estimates close to the bytes/4 heuristic", () => {
   const englishText = "word ".repeat(1_000);
   const tokens = estimateComparisonReviewTokens("", [
     { messageId: "a", modelId: "m", modelName: "M", provider: "openai", content: englishText },
-  ]);
+  ]).rawTotal;
   assert.ok(tokens < 3_000, `expected a modest estimate for plain ASCII text, got ${tokens}`);
 });
 

@@ -46,49 +46,49 @@ const ENCODINGS = [
 const CORPUS = [
   {
     id: "ko-prose",
-    cohort: "cjk",
+    cohort: "hangul",
     text: "인공지능 모델을 선택할 때 가장 중요한 것은 질문의 성격입니다. 코딩 작업이라면 추론 능력이 강한 모델이 유리하고, 간단한 요약이라면 빠르고 저렴한 모델로 충분합니다. 사용자는 보통 이 차이를 알기 어렵기 때문에 서버가 대신 판단해 주는 편이 낫습니다.",
   },
-  { id: "ko-short", cohort: "cjk", text: "오늘 서울 날씨 어때?" },
+  { id: "ko-short", cohort: "hangul", text: "오늘 서울 날씨 어때?" },
   {
     id: "ko-technical",
-    cohort: "cjk",
+    cohort: "hangul",
     text: "PostgreSQL의 전문 검색은 형태소 분석기 구성에 의존하므로, 한국어 조사와 어미가 분리되지 않으면 재현율이 크게 떨어집니다. 따라서 bigram 색인을 별도로 생성해야 합니다.",
   },
   {
     id: "ko-en-mixed",
-    cohort: "cjk",
+    cohort: "hangul",
     text: "이번 Router는 sticky-auto를 기본값으로 하고, hard switch 조건에서만 모델을 변경합니다. fallback은 첫 visible token 이전에만 허용됩니다.",
   },
   {
     id: "ja-prose",
-    cohort: "cjk",
+    cohort: "han-kana",
     text: "モデルを選ぶときに最も重要なのは質問の性質です。コーディング作業であれば推論能力の高いモデルが有利です。",
   },
   {
     id: "zh-prose",
-    cohort: "cjk",
+    cohort: "han-kana",
     text: "选择模型时最重要的是问题的性质。如果是编程任务，推理能力更强的模型更有优势，而简单的摘要用快速且便宜的模型就足够了。",
   },
   {
     id: "en-prose",
-    cohort: "non-cjk",
+    cohort: "latin-prose",
     text: "When choosing a model, what matters most is the shape of the question. A coding task rewards a stronger reasoning model, while a short summary is well served by something fast and cheap. Users rarely know the difference, so the server should decide on their behalf.",
   },
-  { id: "en-short", cohort: "non-cjk", text: "what's the weather in Seoul today?" },
+  { id: "en-short", cohort: "latin-prose", text: "what's the weather in Seoul today?" },
   {
     id: "code-ts",
-    cohort: "non-cjk",
+    cohort: "code-json",
     text: "export const estimatePromptTokens = (text: string) =>\n  text ? Math.max(1, estimateTextTokens(text)) : 0;\n\nconst rows = await prisma.routingRun.findMany({\n  where: { conversationId },\n  orderBy: { createdAt: 'desc' },\n  take: 20,\n});\nif (!rows.length) throw new Error('no routing runs');",
   },
   {
     id: "json-payload",
-    cohort: "non-cjk",
+    cohort: "code-json",
     text: '{"routingRunId":"cuid_abc123","attempts":[{"sequence":1,"provider":"openai","modelId":"gpt-5-6-luna","outcome":"failed_pre_token"},{"sequence":2,"provider":"anthropic","modelId":"claude-fable-5","outcome":"succeeded"}]}',
   },
 ];
 
-const COHORTS = ["cjk", "non-cjk"];
+const COHORTS = ["hangul", "han-kana", "latin-prose", "code-json"];
 const ESTIMATE_01_MEDIAN_LIMIT = 5;
 const ESTIMATE_02_P95_LIMIT = 15;
 
@@ -116,7 +116,7 @@ for (const { name, note, encoder } of ENCODINGS) {
     console.log(
       "    " +
         "sample".padEnd(14) +
-        "cohort".padEnd(9) +
+        "cohort".padEnd(12) +
         "actual".padStart(8) +
         "raw".padStart(8) +
         "signed".padStart(10)
@@ -131,7 +131,7 @@ for (const { name, note, encoder } of ENCODINGS) {
       console.log(
         "    " +
           id.padEnd(14) +
-          cohort.padEnd(9) +
+          cohort.padEnd(12) +
           String(actual).padStart(8) +
           String(raw).padStart(8) +
           `${signed >= 0 ? "+" : ""}${signed.toFixed(1)}%`.padStart(10)
@@ -141,13 +141,13 @@ for (const { name, note, encoder } of ENCODINGS) {
     for (const cohort of COHORTS) {
       const stats = summarise(byCohort[cohort]);
       console.log(
-        `    ${cohort.padEnd(9)} median ${stats.median.toFixed(1).padStart(6)}%  ` +
+        `    ${cohort.padEnd(12)} median ${stats.median.toFixed(1).padStart(6)}%  ` +
           `p95 ${stats.p95.toFixed(1).padStart(6)}%   ${verdict(stats)}`
       );
     }
     const overall = summarise(COHORTS.flatMap((cohort) => byCohort[cohort]));
     console.log(
-      `    ${"overall".padEnd(9)} median ${overall.median.toFixed(1).padStart(6)}%  ` +
+      `    ${"overall".padEnd(12)} median ${overall.median.toFixed(1).padStart(6)}%  ` +
         `p95 ${overall.p95.toFixed(1).padStart(6)}%   ${verdict(overall)}`
     );
   }
@@ -155,7 +155,7 @@ for (const { name, note, encoder } of ENCODINGS) {
 
 // Where the gap comes from: the v1 constants were calibrated for the GPT-4-era
 // tokenizer, and the newer one is far more efficient on CJK.
-const cjkSamples = CORPUS.filter((sample) => sample.cohort === "cjk");
+const cjkSamples = CORPUS.filter((sample) => sample.cohort === "hangul" || sample.cohort === "han-kana");
 console.log("\n=== calibration constants versus measured behaviour ===");
 console.log(
   "  " +
@@ -171,10 +171,11 @@ for (const { id, text } of cjkSamples) {
   console.log("  " + id.padEnd(14) + String(chars).padStart(9) + ratios);
 }
 for (const version of versions) {
-  const { cjkTokensPerCharacter, nonCjkBytesPerToken } = ESTIMATOR_CALIBRATIONS[version];
+  const { hangulTokensPerCharacter, hanKanaTokensPerCharacter, nonCjkBytesPerToken } =
+    ESTIMATOR_CALIBRATIONS[version];
   console.log(
-    `  ${version} assumes ${cjkTokensPerCharacter} tokens per CJK character and ` +
-      `${nonCjkBytesPerToken} bytes per token elsewhere.`
+    `  ${version} assumes ${hangulTokensPerCharacter} tokens per Hangul character, ` +
+      `${hanKanaTokensPerCharacter} per Han/Kana, and ${nonCjkBytesPerToken} bytes per token elsewhere.`
   );
 }
 

@@ -22,6 +22,7 @@ import {
   File as FileIcon,
   FileText,
   HardDrive,
+  BookMarked,
   Globe2,
   Link2,
   Loader2,
@@ -50,6 +51,10 @@ import { FeatureHelpPopover } from "@/components/chat/FeatureHelpPopover";
 import { chatHelpCopy } from "@/components/chat/chatHelpCopy";
 import { dispatchAppToast } from "@/lib/appToast";
 import { APP_DEFAULTS, WEB_SEARCH_MODES, type WebSearchMode } from "@/lib/appDefaults";
+import {
+  CONVERSATION_MEMORY_MODES,
+  type ConversationMemoryMode,
+} from "@/lib/conversationMemoryMode";
 import {
   canUseModelWithPlan,
   getModel as getStaticModel,
@@ -380,6 +385,15 @@ type ChatInputProps = {
   // this one, which always sits directly under the input box.
   hideDisclaimer?: boolean;
   webSearchMode?: WebSearchMode;
+  /**
+   * This conversation's stored memory mode (§8.1 invariant 1), or undefined
+   * when the control does not apply — a guest, who has no account memory at
+   * all, or a draft with no conversation to store a mode on.
+   */
+  memoryMode?: ConversationMemoryMode;
+  onMemoryModeChange?: (mode: ConversationMemoryMode) => void;
+  /** The account default `inherit` resolves to, for describing that choice. */
+  accountMemoryDefault?: "on" | "off";
   onWebSearchModeChange?: (mode: WebSearchMode) => void;
   onOpenDeepResearchSetup?: () => void;
   /**
@@ -496,6 +510,9 @@ export function ChatInput({
   hideTopBorder = false,
   hideDisclaimer = false,
   webSearchMode = "off",
+  memoryMode,
+  onMemoryModeChange,
+  accountMemoryDefault = "on",
   onWebSearchModeChange,
   onOpenDeepResearchSetup,
   onStartImageDraft,
@@ -830,7 +847,9 @@ export function ChatInput({
       : null;
   
   const [isMenuOpen, setIsMenuOpen] = useState(false);
-  const [menuView, setMenuView] = useState<"actions" | "models" | "webSearch">("actions");
+  const [menuView, setMenuView] = useState<
+    "actions" | "models" | "webSearch" | "memory"
+  >("actions");
   const [personalizedRecommendationIds, setPersonalizedRecommendationIds] = useState<string[]>([]);
   const hasRequestedPickerRecommendationsRef = useRef(false);
   const [liveModelStatuses, setLiveModelStatuses] = useState<Record<string, PublicModelStatusRecord>>({});
@@ -2992,6 +3011,35 @@ export function ChatInput({
                       </span>
                     </span>
                   </button>
+                  {/* §8.1 invariant 1. Absent for a guest rather than shown
+                      disabled: a guest has no account memory for a control to
+                      act on, and offering one would imply otherwise. */}
+                  {memoryMode && onMemoryModeChange && (
+                    <button
+                      type="button"
+                      data-testid="tools-memory-row"
+                      onClick={() => setMenuView("memory")}
+                      className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left transition hover:bg-zinc-100 dark:hover:bg-zinc-800"
+                    >
+                      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-accent-account-memory-500/10 text-accent-account-memory-500">
+                        <BookMarked className="h-5 w-5" />
+                      </span>
+                      <span className="flex min-w-0 flex-col">
+                        <span className="text-sm font-medium text-zinc-900 dark:text-zinc-100">
+                          {t("chat.toolsMemory")}
+                        </span>
+                        <span className="text-xs text-zinc-500">
+                          {memoryMode === "on"
+                            ? t("chat.toolsMemoryOn")
+                            : memoryMode === "off"
+                              ? t("chat.toolsMemoryOff")
+                              : accountMemoryDefault === "off"
+                                ? t("chat.toolsMemoryInheritOff")
+                                : t("chat.toolsMemoryInheritOn")}
+                        </span>
+                      </span>
+                    </button>
+                  )}
                   {(() => {
                     const deepResearchModel = AVAILABLE_MODELS.find(
                       (model) => model.id === "perplexity/sonar-deep-research"
@@ -3192,6 +3240,62 @@ export function ChatInput({
                       </span>
                       {webSearchMode === mode && (
                         <Check className="h-4 w-4 shrink-0 text-accent-web-search-500" aria-hidden="true" />
+                      )}
+                    </button>
+                  ))}
+                </div>
+              ) : menuView === "memory" ? (
+                <div className="space-y-1">
+                  <button
+                    type="button"
+                    onClick={() => setMenuView("actions")}
+                    className={`mb-1 flex items-center justify-center rounded-lg text-zinc-500 hover:bg-zinc-100 hover:text-zinc-900 dark:hover:bg-zinc-800 dark:hover:text-white ${isMobileShell ? "h-11 w-11" : "h-8 w-8"}`}
+                    aria-label={t("auth.cancel")}
+                  >
+                    <ArrowLeft className="h-4 w-4" />
+                  </button>
+                  {CONVERSATION_MEMORY_MODES.map((mode) => (
+                    <button
+                      key={mode}
+                      type="button"
+                      data-testid={`memory-mode-option-${mode}`}
+                      aria-pressed={memoryMode === mode}
+                      onClick={() => {
+                        onMemoryModeChange?.(mode);
+                        closeMenu(false);
+                      }}
+                      className={`flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left transition hover:bg-zinc-100 dark:hover:bg-zinc-800 ${
+                        memoryMode === mode
+                          ? "bg-accent-account-memory-500/10"
+                          : ""
+                      }`}
+                    >
+                      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-accent-account-memory-500/10 text-accent-account-memory-500">
+                        <BookMarked className="h-5 w-5" />
+                      </span>
+                      <span className="flex min-w-0 flex-1 flex-col">
+                        <span className="text-sm font-medium text-zinc-900 dark:text-zinc-100">
+                          {mode === "on"
+                            ? t("chat.toolsMemoryOn")
+                            : mode === "off"
+                              ? t("chat.toolsMemoryOff")
+                              : t("chat.toolsMemoryInherit")}
+                        </span>
+                        <span className="text-xs text-zinc-500">
+                          {mode === "on"
+                            ? t("chat.toolsMemoryOnDescription")
+                            : mode === "off"
+                              ? t("chat.toolsMemoryOffDescription")
+                              : accountMemoryDefault === "off"
+                                ? t("chat.toolsMemoryInheritOffDescription")
+                                : t("chat.toolsMemoryInheritOnDescription")}
+                        </span>
+                      </span>
+                      {memoryMode === mode && (
+                        <Check
+                          className="h-4 w-4 shrink-0 text-accent-account-memory-500"
+                          aria-hidden="true"
+                        />
                       )}
                     </button>
                   ))}

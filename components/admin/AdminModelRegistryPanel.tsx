@@ -7,6 +7,7 @@ import {
   CheckCircle2,
   Copy,
   Database,
+  FilterX,
   KeyRound,
   Loader2,
   Pencil,
@@ -19,6 +20,19 @@ import {
 } from "lucide-react";
 import { dispatchAppToast } from "@/lib/appToast";
 import type { AiModel, AiProvider, ModelMinimumPlan, ModelStatus, ModelUsageClass } from "@/lib/models";
+import {
+  DEFAULT_MODEL_LIFECYCLE_FILTER,
+  MODEL_LIFECYCLE_FILTERS,
+  MODEL_LIFECYCLE_LABELS,
+  countModelsInLifecycleView,
+  filterRegistryModels,
+  lifecycleHiddenNote,
+  modelLifecycleState,
+  normalizeModelLifecycleFilter,
+  registryEmptyStateMessage,
+  registryResultSummary,
+  type ModelLifecycleFilter,
+} from "@/lib/adminModelRegistryFilters";
 import { AI_PROVIDERS, PROVIDER_API_CONFIGURATION } from "@/lib/modelRegistryShared";
 import { ModelLogo } from "@/components/chat/ModelLogo";
 
@@ -155,6 +169,11 @@ export function AdminModelRegistryPanel() {
       ? (requestedProvider as AiProvider)
       : "all"
   );
+  // An unknown or stale ?lifecycle= value fails safe to the default view
+  // rather than erroring or rendering an empty registry.
+  const [lifecycle, setLifecycle] = useState<ModelLifecycleFilter>(() =>
+    normalizeModelLifecycleFilter(searchParams.get("lifecycle"))
+  );
   const [editingId, setEditingId] = useState<string | "new" | null>(null);
   const [copySourceId, setCopySourceId] = useState<string | null>(null);
   const [form, setForm] = useState<FormState>(emptyForm);
@@ -185,26 +204,42 @@ export function AdminModelRegistryPanel() {
     queueMicrotask(() => void load());
   }, [load]);
 
-  const filtered = useMemo(() => {
-    const normalized = query.trim().toLowerCase();
-    return models.filter((model) => {
-      if (provider !== "all" && model.provider !== provider) return false;
-      if (!normalized) return true;
-      return [model.id, model.name, model.apiModel, model.provider, model.bestFor]
-        .join(" ")
-        .toLowerCase()
-        .includes(normalized);
-    });
-  }, [models, provider, query]);
+  // Display only. `models` stays the complete registry, so editing,
+  // duplicating, archiving and the replacement-model selector keep seeing
+  // every row whatever the list is currently showing.
+  const filtered = useMemo(
+    () => filterRegistryModels(models, { lifecycle, provider, query }),
+    [models, lifecycle, provider, query]
+  );
+  const hiddenByLifecycle = useMemo(
+    () => models.length - countModelsInLifecycleView(models, lifecycle),
+    [models, lifecycle]
+  );
+  const hiddenNote = lifecycleHiddenNote(lifecycle, hiddenByLifecycle);
 
-  const updateLocation = (nextQuery: string, nextProvider: typeof provider) => {
+  const updateLocation = (
+    nextQuery: string,
+    nextProvider: typeof provider,
+    nextLifecycle: ModelLifecycleFilter
+  ) => {
     const params = new URLSearchParams(searchParams.toString());
     if (nextQuery.trim()) params.set("q", nextQuery);
     else params.delete("q");
     if (nextProvider === "all") params.delete("provider");
     else params.set("provider", nextProvider);
+    // The default view is the absent value, so a plain /admin/models link and
+    // an explicit ?lifecycle=operational mean the same thing.
+    if (nextLifecycle === DEFAULT_MODEL_LIFECYCLE_FILTER) params.delete("lifecycle");
+    else params.set("lifecycle", nextLifecycle);
     const suffix = params.toString();
     router.replace(suffix ? `${pathname}?${suffix}` : pathname, { scroll: false });
+  };
+
+  const clearFilters = () => {
+    setQuery("");
+    setProvider("all");
+    setLifecycle(DEFAULT_MODEL_LIFECYCLE_FILTER);
+    updateLocation("", "all", DEFAULT_MODEL_LIFECYCLE_FILTER);
   };
 
   const setField = <K extends keyof FormState>(key: K, value: FormState[K]) => {
@@ -321,7 +356,7 @@ export function AdminModelRegistryPanel() {
   };
 
   return (
-    <section className="overflow-hidden rounded-3xl border border-zinc-800 bg-zinc-950/80">
+    <section className="overflow-hidden rounded-3xl border border-zinc-800 bg-zinc-950/80" data-testid="model-registry-panel">
       <div className="flex flex-col gap-4 border-b border-zinc-800 bg-zinc-900/50 p-5 xl:flex-row xl:items-center xl:justify-between">
         <div>
           <p className="text-xs font-bold uppercase tracking-[0.2em] text-blue-300">DB Model Registry</p>
@@ -356,75 +391,116 @@ export function AdminModelRegistryPanel() {
         </div>
       ) : null}
 
-      <div className="grid gap-3 border-b border-zinc-800 p-4 md:grid-cols-[1fr_220px]">
-        <label className="relative">
+      <div className="grid items-end gap-3 border-b border-zinc-800 p-4 md:grid-cols-2 xl:grid-cols-[minmax(0,1fr)_220px_220px]">
+        <label className="relative md:col-span-2 xl:col-span-1">
+          <span className="sr-only">Search models</span>
           <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-500" />
           <input
             value={query}
             onChange={(event) => {
               const value = event.target.value;
               setQuery(value);
-              updateLocation(value, provider);
+              updateLocation(value, provider, lifecycle);
             }}
             placeholder="Search name, model ID, API ID, provider, or purpose"
             className={`${inputClass} pl-10`}
           />
         </label>
-        <select
-          value={provider}
-          onChange={(event) => {
-            const value = event.target.value as "all" | AiProvider;
-            setProvider(value);
-            updateLocation(query, value);
-          }}
-          className={inputClass}
+        <label className={labelClass}>
+          Provider
+          <select
+            value={provider}
+            onChange={(event) => {
+              const value = event.target.value as "all" | AiProvider;
+              setProvider(value);
+              updateLocation(query, value, lifecycle);
+            }}
+            className={inputClass}
+            data-testid="model-registry-provider-filter"
+          >
+            <option value="all">All providers</option>
+            {AI_PROVIDERS.map((item) => <option key={item} value={item}>{item}</option>)}
+          </select>
+        </label>
+        <label className={labelClass}>
+          Lifecycle
+          <select
+            value={lifecycle}
+            onChange={(event) => {
+              const value = normalizeModelLifecycleFilter(event.target.value);
+              setLifecycle(value);
+              updateLocation(query, provider, value);
+            }}
+            className={inputClass}
+            data-testid="model-registry-lifecycle-filter"
+          >
+            {MODEL_LIFECYCLE_FILTERS.map((item) => (
+              <option key={item} value={item}>{MODEL_LIFECYCLE_LABELS[item]}</option>
+            ))}
+          </select>
+        </label>
+      </div>
+
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-zinc-800 px-4 py-3">
+        <p className="text-xs text-zinc-400" role="status" data-testid="model-registry-result-summary">
+          <span className="font-bold text-zinc-300">{registryResultSummary(filtered.length, models.length)}</span>
+          {hiddenNote ? <span className="ml-2 text-zinc-500">{hiddenNote}</span> : null}
+        </p>
+        <button
+          type="button"
+          onClick={clearFilters}
+          className="inline-flex items-center gap-2 rounded-xl border border-zinc-700 px-3 py-1.5 text-xs font-bold text-zinc-200 hover:bg-zinc-900"
         >
-          <option value="all">All providers</option>
-          {AI_PROVIDERS.map((item) => <option key={item} value={item}>{item}</option>)}
-        </select>
+          <FilterX className="h-3.5 w-3.5" /> Clear filters
+        </button>
       </div>
 
       <div className="grid gap-3 p-4 xl:grid-cols-2">
-        {filtered.map((model) => (
-          <article key={model.id} className={`rounded-2xl border p-4 ${model.catalogDeleted ? "border-zinc-800 bg-zinc-950/40 opacity-70" : "border-zinc-800 bg-zinc-900/50"}`}>
-            <div className="flex items-start gap-3">
-              <ModelLogo provider={model.provider} size="md" />
-              <div className="min-w-0 flex-1">
-                <div className="flex flex-wrap items-center gap-2">
-                  <h3 className="font-black text-white">{model.name}</h3>
-                  <span className={`rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase ${model.status === "limited" ? "border-amber-500/30 bg-amber-500/10 text-amber-200" : model.enabled && !model.catalogDeleted ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-300" : "border-zinc-700 bg-zinc-950 text-zinc-400"}`}>
-                    {model.catalogDeleted ? "Archived" : model.status}
-                  </span>
-                  <span className="rounded-full border border-amber-500/30 bg-amber-500/10 px-2 py-0.5 text-[10px] font-bold text-amber-200">{model.creditWeight || 1} credits</span>
+        {filtered.map((model) => {
+          // Same classification the filter uses, so the badge can never say
+          // "disabled" about a row the Retired view just returned.
+          const state = modelLifecycleState(model);
+          return (
+            <article key={model.id} className={`rounded-2xl border p-4 ${model.catalogDeleted ? "border-zinc-800 bg-zinc-950/40 opacity-70" : "border-zinc-800 bg-zinc-900/50"}`}>
+              <div className="flex items-start gap-3">
+                <ModelLogo provider={model.provider} size="md" />
+                <div className="min-w-0 flex-1">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <h3 className="font-black text-white">{model.name}</h3>
+                    <span className={`rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase ${state === "limited" ? "border-amber-500/30 bg-amber-500/10 text-amber-200" : state === "active" ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-300" : "border-zinc-700 bg-zinc-950 text-zinc-400"}`} data-testid={`model-registry-lifecycle-badge-${model.id}`}>
+                      {MODEL_LIFECYCLE_LABELS[state]}
+                    </span>
+                    <span className="rounded-full border border-amber-500/30 bg-amber-500/10 px-2 py-0.5 text-[10px] font-bold text-amber-200">{model.creditWeight || 1} credits</span>
+                  </div>
+                  <p className="mt-1 break-all font-mono text-xs text-zinc-500">{model.id} → {model.apiModel}</p>
+                  <p className="mt-2 truncate text-xs text-zinc-400">{model.apiBaseUrl}</p>
+                  <div className="mt-3 flex flex-wrap gap-2 text-[11px] font-bold">
+                    <span className="rounded-lg bg-zinc-950 px-2 py-1 text-zinc-300">{model.provider}</span>
+                    <span className="rounded-lg bg-zinc-950 px-2 py-1 text-zinc-300">{model.minimumPlan}+</span>
+                    <span className="rounded-lg bg-zinc-950 px-2 py-1 text-zinc-300">{model.usageClass}</span>
+                    <span className={`inline-flex items-center gap-1 rounded-lg px-2 py-1 ${model.environment.apiKeyConfigured ? "bg-emerald-500/10 text-emerald-300" : "bg-red-500/10 text-red-300"}`}>
+                      <KeyRound className="h-3 w-3" /> {model.environment.apiKeyEnvName}
+                    </span>
+                  </div>
+                  {model.operationalReason ? (
+                    <p className="mt-3 line-clamp-2 text-xs text-amber-200/80">
+                      Internal: {model.operationalReason}
+                    </p>
+                  ) : null}
                 </div>
-                <p className="mt-1 break-all font-mono text-xs text-zinc-500">{model.id} → {model.apiModel}</p>
-                <p className="mt-2 truncate text-xs text-zinc-400">{model.apiBaseUrl}</p>
-                <div className="mt-3 flex flex-wrap gap-2 text-[11px] font-bold">
-                  <span className="rounded-lg bg-zinc-950 px-2 py-1 text-zinc-300">{model.provider}</span>
-                  <span className="rounded-lg bg-zinc-950 px-2 py-1 text-zinc-300">{model.minimumPlan}+</span>
-                  <span className="rounded-lg bg-zinc-950 px-2 py-1 text-zinc-300">{model.usageClass}</span>
-                  <span className={`inline-flex items-center gap-1 rounded-lg px-2 py-1 ${model.environment.apiKeyConfigured ? "bg-emerald-500/10 text-emerald-300" : "bg-red-500/10 text-red-300"}`}>
-                    <KeyRound className="h-3 w-3" /> {model.environment.apiKeyEnvName}
-                  </span>
+                <div className="flex shrink-0 gap-2">
+                  <button type="button" onClick={() => beginDuplicate(model)} className="inline-flex items-center gap-2 rounded-xl border border-zinc-700 p-2 text-zinc-300 hover:bg-zinc-800" aria-label={`Duplicate ${model.name}`} title="Duplicate as a new disabled model">
+                    <Copy className="h-4 w-4" />
+                    <span className="hidden text-xs font-bold 2xl:inline">Copy</span>
+                  </button>
+                  <button type="button" onClick={() => beginEdit(model)} className="rounded-xl border border-zinc-700 p-2 text-zinc-300 hover:bg-zinc-800" aria-label={`Edit ${model.name}`}>
+                    <Pencil className="h-4 w-4" />
+                  </button>
                 </div>
-                {model.operationalReason ? (
-                  <p className="mt-3 line-clamp-2 text-xs text-amber-200/80">
-                    Internal: {model.operationalReason}
-                  </p>
-                ) : null}
               </div>
-              <div className="flex shrink-0 gap-2">
-                <button type="button" onClick={() => beginDuplicate(model)} className="inline-flex items-center gap-2 rounded-xl border border-zinc-700 p-2 text-zinc-300 hover:bg-zinc-800" aria-label={`Duplicate ${model.name}`} title="Duplicate as a new disabled model">
-                  <Copy className="h-4 w-4" />
-                  <span className="hidden text-xs font-bold 2xl:inline">Copy</span>
-                </button>
-                <button type="button" onClick={() => beginEdit(model)} className="rounded-xl border border-zinc-700 p-2 text-zinc-300 hover:bg-zinc-800" aria-label={`Edit ${model.name}`}>
-                  <Pencil className="h-4 w-4" />
-                </button>
-              </div>
-            </div>
-          </article>
-        ))}
+            </article>
+          );
+        })}
       </div>
 
       {editingId ? (
@@ -517,7 +593,7 @@ export function AdminModelRegistryPanel() {
       ) : null}
 
       {!loading && filtered.length === 0 ? (
-        <div className="p-10 text-center text-sm text-zinc-500"><Database className="mx-auto mb-3 h-6 w-6" />No models match this filter.</div>
+        <div className="p-10 text-center text-sm text-zinc-500" data-testid="model-registry-empty-state"><Database className="mx-auto mb-3 h-6 w-6" />{registryEmptyStateMessage(lifecycle)}</div>
       ) : null}
     </section>
   );
