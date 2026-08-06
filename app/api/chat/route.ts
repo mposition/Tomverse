@@ -13,10 +13,13 @@ import {
 import { conversationKindNotSupportedResponse, isChatConversationKind } from "@/lib/conversationKindGuard";
 import { prisma } from "@/lib/prisma";
 import {
+    AVAILABLE_MODELS,
     modelSupportsImageInput,
     modelSupportsNativePdfInput,
     type AiModel,
 } from "@/lib/models";
+import { buildTaskProfile } from "@/lib/taskProfileCore";
+import { scheduleRoutingShadowRun } from "@/lib/routingShadow";
 import { getRuntimeModels } from "@/lib/modelRegistry";
 import { getActiveAiModel } from "@/lib/activeAiModel";
 import {
@@ -1731,6 +1734,54 @@ async function handleChatPost(
         // unfitted figure -- over-reserving is refunded at settlement, and
         // reserving less than the answer might cost protects nothing.
         const requestMaxOutputTokens = outputBudget.outputTokens;
+        // Shadow routing (docs/policy/tomverse-chat-delivery-plan.md §6 step 3).
+        // The Router's rules run on this turn and the decision is recorded; the
+        // model the user selected is what executes. Handed to `after()` and
+        // never awaited: an experiment that can delay or fail a chat is not an
+        // experiment. Off unless TOMVERSE_ROUTER_SHADOW_ENABLED says otherwise.
+        scheduleRoutingShadowRun(() => {
+            const lastUserTurn = [...formattedMessages]
+                .reverse()
+                .find((message) => message.role === "user");
+            const parts = Array.isArray(lastUserTurn?.content)
+                ? lastUserTurn.content
+                : [];
+            const profileText =
+                typeof lastUserTurn?.content === "string"
+                    ? lastUserTurn.content
+                    : parts
+                          .filter((part) => part.type === "text")
+                          .map((part) => ("text" in part ? part.text : ""))
+                          .join("\n");
+            return {
+                traceId,
+                userId: access.userId ?? null,
+                subjectKey: access.subjectKey,
+                // A signed-in account with no resolved plan reads as Guest
+                // rather than as a paid one: the filters use this to decide
+                // what the account may reach, and guessing upwards would let a
+                // shadow decision consider a model the person cannot use.
+                plan: access.kind === "guest" ? "Guest" : (access.plan ?? "Free"),
+                profile: buildTaskProfile({
+                    text: profileText,
+                    attachments: parts
+                        .filter((part) => part.type === "file")
+                        .map((part) => ({
+                            mediaType:
+                                "mediaType" in part ? part.mediaType : undefined,
+                        })),
+                    webSearchRequested: nativeSearchEnabled,
+                }),
+                userSelectedModelId: modelConfig.id,
+                estimatedInputTokens,
+                reservedInputTokens: budget.inputTokens,
+                // The unfitted cap on purpose: the filters fit it to each
+                // candidate's own window, and handing them the figure already
+                // fitted to the user's model would bias every other candidate.
+                requestOutputCapTokens: budget.maxOutputTokens,
+                models: AVAILABLE_MODELS,
+            };
+        });
         const accessGrant = await acquireChatAccess(access, budget, {
             traceId,
             source: "chat",

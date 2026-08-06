@@ -150,6 +150,14 @@ export const EXPORT_DOMAIN_DECLARATIONS: ExportDomainDeclaration[] = [
     exclusionReason:
       "A short-lived concurrency nonce with no user-meaningful content, deleted with the account.",
   },
+  {
+    domain: "routingRun",
+    publicName: "routing_observations",
+    prismaModel: "RoutingRun",
+    state: "excluded",
+    exclusionReason:
+      "Shadow routing telemetry: which model the Router would have chosen, as versions, labels and counts. It holds nothing the user wrote -- no message text, no memory content, not even a message id -- and is deleted with the account.",
+  },
 
   // --- not yet decided ------------------------------------------------------
   // Each needs a field-level decision about which columns are the user's own
