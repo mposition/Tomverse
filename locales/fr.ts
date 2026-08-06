@@ -167,6 +167,8 @@ export const fr = {
         imageGenerationErrorBudget: "La génération d'images est temporairement suspendue. Réessayez sous peu.",
         imageGenerationErrorConflict: "Votre solde de crédits a changé pendant la réservation. Réessayez.",
         imageGenerationErrorGeneric: "Impossible de démarrer la génération de l'image. Réessayez.",
+        imageGenerationRestoreExcluded: "{models} n'est pas disponible actuellement et a été exclu de la sélection restaurée.",
+        imageGenerationRestoreOptionsUnavailable: "La qualité et la taille de votre dernière comparaison n'ont pas pu être restaurées ; les valeurs par défaut sont sélectionnées.",
         modelSelectionNotice: "Certains modèles de votre combinaison par défaut ne sont pas disponibles ; une combinaison de remplacement est utilisée. Réenregistrez la combinaison dans les paramètres pour la confirmer.",
         guestVerificationTitle: "Confirmez pour continuer",
         guestVerificationDescription: "Une vérification rapide qui limite les requêtes automatisées. Elle se termine généralement toute seule.",

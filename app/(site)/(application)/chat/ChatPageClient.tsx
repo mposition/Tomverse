@@ -477,6 +477,21 @@ export function ChatPageClient({
     scopeId: string | null;
     text: string;
   } | null>(null);
+  // The image workspace's remount identity, held explicitly rather than
+  // derived from the conversation id.
+  //
+  // Remounting on a real conversation switch is deliberate -- the workspace
+  // owns a timeline and a poll loop that belong to exactly one conversation.
+  // But a draft being adopted as the conversation it just created is not a
+  // switch: it is the same workspace continuing, and remounting there threw
+  // away the model selection, quality, size and prompt the user had chosen,
+  // re-seeding them from the entry point instead.
+  const [imageWorkspaceKey, setImageWorkspaceKey] = useState("image-draft:0");
+  const imageDraftSerialRef = useRef(0);
+  const nextImageDraftKey = () => {
+    imageDraftSerialRef.current += 1;
+    return `image-draft:${imageDraftSerialRef.current}`;
+  };
   const [imageDraftSeedPrompt, setImageDraftSeedPrompt] = useState("");
   // Set only when the user reached the draft by choosing a model in the
   // catalogue's image tab; otherwise the workspace keeps its own default.
@@ -2191,6 +2206,7 @@ export function ChatPageClient({
         });
         setImageDraftSeedPrompt(draftText);
         setImageDraftSeedModelIds(modelId ? [modelId] : undefined);
+        setImageWorkspaceKey(nextImageDraftKey());
         setIsImageDraftActive(true);
         currentChatIdRef.current = null;
         setCurrentChatId(null);
@@ -2221,6 +2237,7 @@ export function ChatPageClient({
         setIsImageDraftActive(true);
         setImageDraftSeedPrompt("");
         setImageDraftSeedModelIds(undefined);
+        setImageWorkspaceKey(nextImageDraftKey());
         setChatDraftBeforeImage(null);
         currentChatIdRef.current = null;
         setCurrentChatId(null);
@@ -2245,6 +2262,16 @@ export function ChatPageClient({
             ...prev,
         ]);
         setIsImageDraftActive(false);
+        // Deliberately NOT touching imageWorkspaceKey: this is the same
+        // workspace continuing, so its composer settings survive.
+        //
+        // The seed is cleared even though nothing reads it right now. It was
+        // the carried-over chat draft, and leaving it set meant a later, real
+        // remount re-filled the composer with the prompt the user had already
+        // paid to generate -- next to an enabled submit button.
+        setImageDraftSeedPrompt("");
+        setImageDraftSeedModelIds(undefined);
+        setChatDraftBeforeImage(null);
         currentChatIdRef.current = conversation.id;
         setCurrentChatId(conversation.id);
     };
@@ -2287,6 +2314,9 @@ export function ChatPageClient({
         const selectedTarget = conversations.find((c) => c.id === id);
         if (selectedTarget?.kind === "image") {
             setIsImageDraftActive(false);
+            // A real switch, so a new workspace instance: the timeline and the
+            // poll loop of the conversation being left must not follow.
+            setImageWorkspaceKey(id);
             currentChatIdRef.current = id;
             setCurrentChatId(id);
             setPromptPayload(null);
@@ -4077,11 +4107,9 @@ export function ChatPageClient({
     <ImageGenerationWorkspace
       // Remount on switch: the workspace's local timeline, draft prompt and
       // poll loop all belong to exactly one conversation.
-      key={
-        isImageDraftActive
-          ? `image-draft:${(imageDraftSeedModelIds ?? []).join(",")}`
-          : currentChatId ?? "image-draft"
-      }
+      // Seed ids are deliberately NOT part of this: re-picking a model from
+      // the catalogue mid-draft used to remount and discard the typed prompt.
+      key={imageWorkspaceKey}
       conversationId={isImageDraftActive ? null : currentChatId}
       onConversationCreated={handleImageConversationCreated}
       initialPrompt={imageDraftSeedPrompt}

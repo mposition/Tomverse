@@ -63,8 +63,17 @@ export type ImageModelProfile = {
   provider: ImageModelProvider;
   /** Exactly the string sent to the provider. */
   apiModelId: string;
-  /** Display name for the picker. */
+  /** Display name for the picker and every place with room for it. */
   name: string;
+  /**
+   * A shorter label for the composer's selection chips, where the name sits
+   * beside a credit badge and competes with the quality and size rows for one
+   * line. Omitted means the full name already fits.
+   *
+   * The full name is what the picker shows and what the accessible name uses:
+   * this abbreviates the visual label, never the identity.
+   */
+  shortName?: string;
   lifecycle: ImageModelLifecycle;
   disabledReason: ImageModelDisabledReason | null;
   sizes: readonly ImageSize[];
@@ -263,6 +272,7 @@ const XAI_GROK_IMAGINE_IMAGE_QUALITY: ImageModelProfile = {
   provider: "xai",
   apiModelId: "grok-imagine-image-quality-20260403",
   name: "Grok Imagine Image Quality",
+  shortName: "Grok Imagine",
   lifecycle: "stable",
   disabledReason: null,
   sizes: ["1024x1024"],
@@ -379,6 +389,42 @@ const GOOGLE_GEMINI_3_PRO_IMAGE: ImageModelProfile = {
   disabledNote:
     "Final-tier candidate. Per-image prices verified 2026-08-04: $0.134 (1K/2K) and $0.24 (4K). Blocked on the cap like the other Google models, confirmed absent from the official documentation on 2026-08-05. The derivation is 393,216 microUSD (32,768 x $12.00/1M), which would put floors at 592 and 710 credits, well past gpt-image-2 Final at 250. Held a second time by product judgement regardless of the cap: the band overlaps gpt-image-2 Final, so the review defers it until usage shows Flash is insufficient.",
 };
+
+/**
+ * How many enabled models the composer will lay out inline before the
+ * unselected ones move behind a picker.
+ *
+ * Deliberately separate from IMAGE_GROUP_MAX_MODELS, which bounds how much
+ * provider work one request may start. This is an information-density
+ * decision about one row of UI, and conflating the two would let an execution
+ * limit silently restyle the composer.
+ *
+ * Three, because at two or three the second and third models are discoverable
+ * without a click -- and multi-model comparison is the product, so a viewer
+ * who never learns a second model exists has not been shown the feature. From
+ * four the model row starts taking more space than the quality, size and
+ * prompt rows it sits above.
+ */
+export const IMAGE_INLINE_MODEL_DISCOVERY_LIMIT = 3;
+
+/**
+ * Whether the composer collapses the *unselected* models into a picker.
+ *
+ * Decided by the number of enabled models, never by viewport, never by how
+ * many are selected, and never by measuring wrapped lines. A viewport-driven
+ * switch gives the same account a different information structure per device
+ * and re-shapes the composer mid-rotation; a selection-driven one changes
+ * structure while the user is choosing. The selected models and their exact
+ * credits are inline in **both** modes -- only the editing list moves.
+ */
+export const shouldUseCompactImageModelPicker = (
+  enabledModelCount: number
+): boolean =>
+  enabledModelCount > IMAGE_INLINE_MODEL_DISCOVERY_LIMIT;
+
+/** The composer's visual label for a model; identity stays `name`. */
+export const imageModelChipLabel = (model: ImageModelProfile): string =>
+  model.shortName ?? model.name;
 
 export const IMAGE_MODEL_REGISTRY: readonly ImageModelProfile[] = [
   OPENAI_GPT_IMAGE_2,
