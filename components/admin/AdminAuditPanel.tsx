@@ -21,6 +21,8 @@ export type AdminAuditRow = {
 
 type Props = {
   rows: AdminAuditRow[];
+  /** How many entries the server read, stated so the list is not read as all. */
+  rowLimit?: number;
 };
 
 const dateTimeLabel = (value: string) => {
@@ -39,7 +41,7 @@ const actionTone = (action: string) => {
   return "border-blue-500/30 bg-blue-500/10 text-blue-200";
 };
 
-export function AdminAuditPanel({ rows }: Props) {
+export function AdminAuditPanel({ rows, rowLimit }: Props) {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -175,6 +177,9 @@ export function AdminAuditPanel({ rows }: Props) {
           <p className="mt-2 max-w-3xl text-sm leading-6 text-zinc-400">
             Search sensitive operational actions, copy incident context, and review
             billing or user-impacting changes from the console.
+            {rowLimit
+              ? ` The ${rowLimit} most recent entries; filters below search within them.`
+              : ""}
           </p>
         </div>
         <div className="grid gap-2 sm:grid-cols-3">

@@ -52,7 +52,7 @@ change, or every pull request that misses the filter becomes unmergeable.
 ### Why it exists
 
 The user-platform bypass does not reach the admin console. `AdminLayout`,
-`AdminWorkspace` and all 41 `/api/admin/**` route handlers call
+its per-route pages and all 41 `/api/admin/**` route handlers call
 `getServerSession(authOptions)` themselves and then query Prisma directly, so
 neither the `__tomverse_e2e_auth` cookie (which only fabricates a session for
 the React tree in `app/(site)/(application)/layout.tsx`) nor a browser-side
@@ -144,32 +144,49 @@ Role column = the fixture identity the test signs in as. All rows run on the
 
 ### 2.2 Shell, routing and navigation — `admin-shell-navigation.spec.ts`
 
+The console's information architecture is described in
+`docs/ui-contracts/admin-console-ia.md`: six groups, seventeen entries, and a
+redirect for every route the old twenty-four-entry sidebar had.
+
 | Journey | Risk | Success state | Failure state |
 |---|---|---|---|
-| Sidebar lists exactly the 24 `ADMIN_CONSOLE_NAVIGATION` entries, in their 6 groups | Med | every label maps to its declared href | — |
-| Each of the 24 workspaces opens (24 parameterised tests) | Med | correct `<h1>`, exactly one active nav item | — |
-| `/admin/search` (the 25th `ADMIN_WORKSPACE_VIEWS` member, which has no nav entry) | Low | global search panel renders | — |
-| Unknown section `/admin/not-a-real-section` | Med | — | root not-found UI, no console chrome, bare `noindex` marker |
-| Legacy `/admin` and `/admin?tab=refunds` | Low | forward to `/admin/overview` and `/admin/refunds` | — |
+| Sidebar lists exactly the 17 `ADMIN_NAVIGATION` entries, in their 6 groups | Med | every label maps to its declared href; each group is a real toggle button | — |
+| Each of the 17 workspaces opens (17 parameterised tests) | Med | correct `<h1>`, exactly one active nav item | — |
+| `/admin/search`, which has no nav entry | Med | headed **"Global search"**; no nav entry claims to be current | previously headed "Overview" — finding 2, now fixed |
+| All 8 retired routes still resolve (8 parameterised tests) | High | each lands on its declared `?tab=`, with that tab marked `aria-current` | — |
+| A retired route's own query survives the redirect | High | `/admin/feedback?status=resolved` → `/admin/support?tab=feedback&status=resolved`, opened on that filter | — |
+| Unknown section `/admin/not-a-real-section` | Med | — | **HTTP 404**, root not-found UI, no console chrome |
+| Legacy `/admin`, `/admin?tab=refunds`, `/admin?tab=feedback` | Low | forward to `/admin/overview`, `/admin/refunds`, `/admin/support?tab=feedback` | — |
 | Breadcrumb on `/admin/users/:id` | Low | `Admin Console / Users / Customer detail`, parent nav still active | — |
 | Header identity and role badge | Low | name, role chip, `Role: owner`, no read-only chip for owner | — |
-| Command palette: `Ctrl/Cmd+K`, page filter, record search, `Escape` | Med | finds the seeded customer through `/api/admin/search` | — |
-| Command palette navigation | Med | selecting "Audit log" routes to `/admin/audit` and closes | — |
-| Notification centre | Med | `aria-expanded` toggles, seeded failed delivery listed, "View all" → `/admin/alerts` | — |
-| Manual refresh and the auto-refresh toggle | Low | `aria-pressed` reflects state; refresh re-reads the server | — |
+| Group collapse by pointer **and** by keyboard | Med | `aria-expanded` tracks state; the group's entries leave and re-enter the DOM | — |
+| The current route's group opens even when collapsed | Med | navigating into a collapsed group expands it without rewriting the stored preference | — |
+| Current entry in view at **1280x720** without scrolling | High | the active entry's own centre point resolves to itself via `elementFromPoint` | — |
+| Action counts on the entries that need them | Med | `Refunds, N awaiting action` in the entry's accessible name; reference pages carry none | — |
+| Pin / unpin a page | Med | the pin appears in the sidebar's Quick access **and** in the palette's Pinned section, and unpinning sticks | — |
+| Empty palette reaches every page, grouped | High | all 17 entries under their own group heading, plus Global search | previously `ALL_ITEMS.slice(0, 9)` — 8 pages unreachable |
+| Palette separates Pages from Records | Med | both section headings render; "no record matched" is scoped to Records and says page results are unaffected | previously a bare "No matching records." under the page hits |
+| Palette keyboard: ↑ ↓ Enter Escape | Med | exactly one `aria-selected` option, Enter opens it | — |
+| Palette → global search | Med | "View all results" opens `/admin/search?q=…` | — |
+| Notification centre | Med | `aria-expanded` toggles, seeded failed delivery listed, "View all" → `/admin/alerts?tab=deliveries` | — |
+| Manual refresh and the auto-refresh toggle | Med | `aria-pressed` reflects state; the label reads **"Auto 3m"**, derived from the same 180000ms constant as the timer | previously labelled "Auto 60s" |
 
 ### 2.3 Narrow viewport — `admin-shell-responsive.spec.ts` (`admin-mobile`, Pixel 5)
 
 | Journey | Risk | Success state |
 |---|---|---|
 | Drawer stays closed until asked for | Med | navigation landmark hidden; open button visible |
-| All 24 workspaces reachable in the drawer | High | each link's **centre point** resolves to itself via `elementFromPoint` — attachment alone is not accepted |
+| All 17 workspaces reachable in the drawer, at **390px and 320px** | High | each link's **centre point** resolves to itself via `elementFromPoint` — attachment alone is not accepted |
+| Each entry explains itself in visible text | Med | the drawer carries no `title`; the description renders as text, because a hover hint is unreachable on touch |
+| The drawer opens on the current entry | High | the active entry's centre point resolves to itself without scrolling first |
+| Groups collapse in the drawer and report their state | Med | all six start expanded; `aria-expanded` tracks the toggle |
 | Choosing a workspace navigates and closes the drawer | Med | URL, heading, drawer closed |
 | `Escape` and the backdrop both close it | Med | drawer closed, page intact |
-| Header controls and horizontal overflow at 412px **and 320px** | High | search, notifications and menu visible; `scrollWidth <= clientWidth + 1` |
+| Header controls and horizontal overflow at 412px, **390px and 320px** | High | search, notifications and menu visible; `scrollWidth <= clientWidth + 1` |
+| A consolidated page's tab strip at 320px | High | the active tab is `aria-current`, another tab navigates, and nothing overflows sideways |
 | Command palette without a hardware keyboard | Med | opens by tap, closes by its own button |
 
-### 2.4 Read surfaces — `admin-read-surfaces.spec.ts` (26 tests, one per area)
+### 2.4 Read surfaces — `admin-read-surfaces.spec.ts` (one test per surface, tabs included)
 
 Every area asserts a heading **plus** a seeded record, an empty state, or a
 status badge — never a bare HTTP 200, which would pass with an empty panel or
@@ -177,34 +194,39 @@ a swallowed fetch error. Client-rendered panels (jobs, alerts, webhooks,
 retention, models, privacy requests, approvals, infrastructure) are exercised
 in a browser precisely because their data arrives after mount.
 
-| Workspace | What is asserted |
+Several rows also assert an **absence**, which is how the de-duplication is
+held in place: a panel that comes back in a second location fails the spec.
+
+| Surface | What is asserted |
 |---|---|
-| `overview` | launch-readiness and revenue sections; `2 feedback / 1 refund` counter; seeded audit summary |
-| `work-queue` | approvals + jobs sections; pending refund and open feedback present, resolved feedback absent |
-| `incidents` | open and resolved incidents; exactly one `Resolve` action; readiness-test panel |
-| `analytics` | three funnel sections; seeded `landing_view` event and its campaign |
+| `overview` | operations snapshot, launch-readiness and revenue sections; `2 feedback / 1 refund` counter; seeded audit summary; each of those sections exactly **once** |
+| `overview` quick access | "Quick access" panel present; no "Set default" control |
+| `work-queue` | ranked queue; the pending refund links to `/admin/refunds` and the open feedback to `/admin/support?tab=feedback`; resolved feedback absent; **no** stacked jobs/refund management panels |
+| `work-queue?tab=approvals` | approval queue and its empty state |
+| `providers?tab=incidents` | open and resolved incidents; exactly one `Resolve`; readiness tests; incident mode |
+| `analytics` | three funnel sections, the seeded campaign and event, plus the account-level launch funnel that moved here from promotions |
+| `analytics?tab=imports` | the external-import report, which had no console surface at all before |
 | `users` | seeded names, per-row detail link, `AI access held`, `Debt 640 credits` |
 | `users/:id` | plan, Stripe ids, credit purchases, recent conversations |
-| `feedback` | open + resolved entries and the status filter |
-| `support` | privacy-request queue plus the feedback inbox |
+| `support?tab=feedback` | open + resolved entries, the status filter, and the stated row limit |
+| `support?tab=privacy` | data-rights queue with its seeded request |
 | `billing` | lifecycle split and the Free/Pro/Max catalogue |
+| `billing?tab=promotions` | promotion code, risk monitor with abuse signals; **no** role matrix (that lives only on admin access) |
 | `refunds` | Pending/Approved/Rejected/All counters, credit-review notice, reviewed request under "All" |
-| `credit-ledger` | `purchase_grant` and `settlement` rows with the owning customer |
-| `promotions` | promotion code, risk monitor with abuse signals, SLA-breach panel |
-| `providers` | health, usage-sync and model-metric panels |
+| `credit-ledger` | `purchase_grant` and `settlement` rows with the owning customer, plus the stated row limit |
+| `providers` | health, usage-sync and model-metric panels; **no** second copy of the model registry |
 | `models` | seeded enabled and disabled models, per-row Edit control |
-| `usage-cost` | latency watch and model metrics |
-| `fallback-policies` | incident mode and readiness tests |
+| `providers?tab=usage-cost` | usage sync, latency watch and model metrics |
 | `infrastructure` | operations panel |
-| `jobs` | the two seeded runs joined onto their job cards |
-| `alerts` | policy (by field value), templates, delivery log, `failed 1` filter |
-| `webhooks` | failed Stripe event id and its Reprocess control; operations report |
+| `automation?tab=jobs` | the two seeded runs joined onto their job cards |
+| `automation?tab=webhooks` | failed Stripe event id and its Reprocess control |
+| `automation?tab=reports` | the operations report, which previously had no navigation entry of its own |
+| `alerts` (3 tabs) | policy by field value; templates; delivery log with the `failed 1` filter |
 | `platform` | product defaults, feature controls, save control |
-| `approvals` | empty state |
-| `audit` | seeded entry and its actor |
+| `audit` | seeded entry, its actor, and the stated row limit |
 | `retention` | cleanup controls, `Execute cleanup` disabled by default |
-| `admin-access` | all five configured administrators; audit-integrity panel |
-| `search` | finds a seeded customer end to end |
+| `admin-access` (3 tabs) | all five configured administrators; audit integrity; operational readiness |
+| `search` | headed "Global search"; finds a seeded customer end to end |
 
 ### 2.5 Recovery eligibility — `admin-recovery-eligibility.spec.ts`
 
@@ -342,21 +364,19 @@ Judge goldens only on the canonical runner described in
 
 ## 6. Known findings
 
-1. **An unknown admin section answers HTTP 200, not 404.**
-   `app/(site)/(application)/admin/loading.tsx` opens a Suspense boundary, so
-   Next.js has already committed the response status by the time
-   `notFound()` throws in the `[section]` segment. This is documented
-   behaviour — `node_modules/next/dist/docs/01-app/03-api-reference/03-file-conventions/loading.md`,
-   "Status Codes" — and the not-found signal travels as a `noindex` meta tag
-   instead. It is not a security issue (the admin console is `noindex` anyway
-   and the not-found page leaks nothing), but a crawler or an uptime check
-   would read it as a soft 404. The spec asserts the user-visible contract
-   (not-found UI, no console chrome, the `noindex` marker). Fixing the status
-   would mean validating the section in `proxy.ts` before the body streams.
-2. **`/admin/search` is titled "Overview".** It is the only
-   `ADMIN_WORKSPACE_VIEWS` member with no `ADMIN_CONSOLE_NAVIGATION` entry, so
-   `titleFromPath()` falls through to the first navigation item. The spec
-   asserts the current behaviour and this note records the discrepancy.
+1. ~~**An unknown admin section answers HTTP 200, not 404.**~~ **Fixed.** The
+   cause was the `[section]` catch-all: `admin/loading.tsx` opens a Suspense
+   boundary, so the status was already committed by the time the segment called
+   `notFound()`. Every workspace now has its own route segment and there is no
+   catch-all left to match, so the router answers a real 404 before anything
+   streams. `admin-shell-navigation.spec.ts` asserts the status directly.
+   (`/admin/**` is still `noindex` from the layout's own metadata.)
+2. ~~**`/admin/search` is titled "Overview".**~~ **Fixed.** It had no navigation
+   entry, and `titleFromPath()` fell through to the first item.
+   `resolveAdminPageMeta()` in `lib/adminNavigation.ts` now lists it under
+   `ADMIN_UNLISTED_PAGES` — it is headed "Global search" — and any route the
+   table does not describe resolves to a neutral "Admin Console" heading rather
+   than borrowing the first entry's title.
 3. **The model registry bootstrap is once-per-process.**
    `ensureModelRegistrySeeded()` memoises its promise, so it can never refill
    `ModelRegistryEntry` after the table is emptied. The fixture seeder

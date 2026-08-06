@@ -8,6 +8,7 @@ import {
   type RefundRequestRow,
 } from "@/components/admin/RefundRequestsPanel";
 import type { AdminSecurityUser } from "@/components/admin/AdminUserSecurityControls";
+import { EMPTY_ADMIN_NAVIGATION_COUNTS } from "@/lib/adminNavigationBadges";
 import { isE2EFixtureMode } from "@/lib/e2eTestMode";
 import { AdminUserSecurityHarness } from "./AdminUserSecurityHarness";
 
@@ -128,15 +129,14 @@ export default async function AdminConsoleFixturePage({
       environment="E2E"
       version="e2e"
       apiStatus="healthy"
-      delayedJobCount={0}
-      unacknowledgedAlertCount={0}
+      counts={EMPTY_ADMIN_NAVIGATION_COUNTS}
     >
       {/*
         Each panel is mounted in the same layout context the real console gives
         it, or the fixture would manufacture overflow that production does not
         have -- and hide overflow that it does. The security controls sit in
         AdminUsersPanel's two-column grid; the privacy and readiness panels sit
-        in a `flex flex-col` stack on /admin (see app/(site)/(application)/admin/page.tsx).
+        in a `flex flex-col` stack on the console's own routes.
       */}
       <div className="grid gap-4 lg:grid-cols-2">
         <AdminUserSecurityHarness initialUser={initialUser} />

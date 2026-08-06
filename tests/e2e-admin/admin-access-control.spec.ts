@@ -104,11 +104,13 @@ test.describe("admin access control", () => {
       name: "Admin console navigation",
     });
     await expect(activeNavLink(page)).toHaveAttribute("href", "/admin/users");
+    // The marker is part of each entry's accessible name, so a screen reader
+    // hears it rather than only seeing the "Read" chip.
     await expect(
-      navigation.getByRole("link", { name: "Users Read" })
+      navigation.getByRole("link", { name: "Users, read-only" })
     ).toBeVisible();
     await expect(
-      navigation.getByRole("link", { name: "Refunds Read" })
+      navigation.getByRole("link", { name: /^Refunds,.*read-only$/ })
     ).toBeVisible();
     // Entries with no write restriction stay unmarked.
     await expect(
