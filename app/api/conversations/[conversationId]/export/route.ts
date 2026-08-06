@@ -3,6 +3,8 @@ import { getServerSession } from "next-auth/next";
 import { conversationKindNotSupportedResponse, isChatConversationKind } from "@/lib/conversationKindGuard";
 import { prisma } from "@/lib/prisma";
 import { authOptions } from "@/lib/auth";
+import { isMemoryInjectionEnabled } from "@/lib/appSettings";
+import { conversationExportPersonalizationNotice } from "@/lib/memorySharingNotice";
 import {
     formatConversationHeader,
     formatExportMessage,
@@ -76,6 +78,12 @@ export async function GET(
             return conversationKindNotSupportedResponse();
         }
 
+        // §13.3: unconditional for every export while injection is available,
+        // so the line itself discloses nothing about this author.
+        const personalizationNotice = (await isMemoryInjectionEnabled())
+            ? conversationExportPersonalizationNotice()
+            : undefined;
+
         const encoder = new TextEncoder();
         let cursor: string | undefined;
         let headerPending = true;
@@ -84,7 +92,7 @@ export async function GET(
                 if (headerPending) {
                     headerPending = false;
                     controller.enqueue(
-                        encoder.encode(`${formatConversationHeader(conversation)}\n`)
+                        encoder.encode(`${formatConversationHeader(conversation, personalizationNotice)}\n`)
                     );
                     return;
                 }

@@ -219,6 +219,8 @@ export const fr = {
         responseCancelled: "La génération de la réponse a été arrêtée.",
         responseGenerating: "Génération d'une réponse.",
         responseComplete: "Réponse terminée.",
+        responseIncomplete: "La réponse s’est arrêtée à la limite de longueur de sortie.",
+        responseIncompleteNotice: "La réponse a été interrompue par la limite de longueur de sortie. Vous pouvez poursuivre avec une question complémentaire.",
         responseFailed: "La requête a échoué.",
         traceId: "ID de suivi",
         retry: "Réessayer",
@@ -406,6 +408,8 @@ export const fr = {
         fileErrorHelpLink: "Ouvrir l'aide sur les fichiers",
     },
     share: {
+        personalizationNotice:
+            "Ces réponses ont pu être influencées par les réglages de personnalisation de l'auteur. Les souvenirs eux-mêmes ne sont pas partagés.",
         eyebrow: "Tomverse shared conversation",
         publicDocumentDescription: "Instantané public en lecture seule créé avec Tomverse. Les mises à jour ultérieures du chat ne sont pas ajoutées à cette page.",
         readOnly: "Lecture seule",
@@ -907,6 +911,27 @@ export const fr = {
             "Ce message a été raccourci pour respecter la limite de stockage. Le texte intégral ne subsiste que chez le service d'origine.",
         viewerMessagesShown: "{shown} messages affichés sur {total}",
         deleteSnapshot: "Supprimer cette version",
+        lockedBadge: "Verrouillée",
+        lockGateTitle: "Cette conversation est verrouillée",
+        lockGateDescription: "Saisissez le mot de passe que vous avez défini pour la lire.",
+        lockPasswordLabel: "Mot de passe",
+        lockUnlockCta: "Déverrouiller",
+        lockWrongPassword: "Ce mot de passe ne correspond pas.",
+        lockTooManyAttempts: "Trop de tentatives. Réessayez dans un moment.",
+        lockFailed: "L'opération n'a pas abouti. Veuillez réessayer.",
+        lockSectionTitle: "Verrouillage de la conversation",
+        lockStatusLocked: "Cette conversation est verrouillée par un mot de passe.",
+        lockStatusUnlocked: "Cette conversation n'est pas verrouillée.",
+        lockSetCta: "Verrouiller avec un mot de passe",
+        lockChangeCta: "Changer le mot de passe",
+        lockRemoveCta: "Retirer le verrou",
+        lockRemoveConfirm: "Retirer le verrou",
+        lockSaveCta: "Enregistrer",
+        lockCancel: "Annuler",
+        lockCurrentPasswordLabel: "Mot de passe actuel",
+        lockNewPasswordLabel: "Nouveau mot de passe",
+        lockPasswordHint: "Au moins {count} caractères.",
+        lockNoRecoveryWarning: "Si vous oubliez ce mot de passe, vous ne pourrez plus ouvrir cette conversation. Aucune réinitialisation n'est possible.",
         // Étape de préparation de l'export (étape 1 de l'assistant)
         guideTitle: "Préparez d'abord votre fichier d'export",
         guideDescription:
@@ -1016,6 +1041,9 @@ export const fr = {
             "{count} souvenirs que vous avez modifiés sont conservés et simplement désactivés.",
         sourceDeleteKept:
             "{count} souvenirs appuyés par d'autres éléments restent inchangés.",
+        sourceLockBlocked: "{count} souvenirs qui ne reposent que sur cette conversation cessent d'être utilisés jusqu'au déverrouillage.",
+        sourceLockBacked: "{count} souvenirs appuyés par d'autres éléments restent utilisés.",
+        sourceLockRestoreNote: "Retirer le verrou remet en service les souvenirs suspendus à cause de cette conversation.",
         dataTabTitle: "Mémoire du compte",
         dataTabDescription:
             "Examinez les souvenirs candidats extraits des conversations importées et choisissez si les souvenirs approuvés sont utilisés dans les nouvelles discussions.",
@@ -1193,6 +1221,8 @@ export const fr = {
             "L'extraction n'a pas pu aboutir. Les résultats des lots terminés sont conservés.",
         runCancelledNote:
             "L'extraction a été annulée. Les résultats des lots terminés sont conservés.",
+        runStalledNote:
+            "L'extraction est en pause entre deux exécutions. Tout ce qui est terminé est conservé et elle reprend automatiquement. Vous pouvez annuler plutôt qu'attendre.",
         runReview: "Aller à la file d'examen",
         cancel: "Annuler l'extraction",
         cancelArmed: "Appuyez à nouveau pour annuler",

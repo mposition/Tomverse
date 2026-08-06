@@ -60,6 +60,7 @@
     "postinstall": "prisma generate",
     "check:default-models": "node --conditions=react-server --import tsx scripts/check-default-models.mjs",
     "check:openai-model-access": "node --conditions=react-server --import tsx scripts/check-openai-model-access.mjs",
+    "measure:google-image-thinking-cap": "node --conditions=react-server --import tsx scripts/measure-google-image-thinking-cap.mjs",
     "report:output-token-telemetry": "node --conditions=react-server --import tsx scripts/report-output-token-telemetry.mjs",
     "check:model-pricing-db": "node --conditions=react-server --import tsx scripts/check-model-pricing-db.mjs",
     "report:cost-bucket-corrections": "node --conditions=react-server --import tsx scripts/report-cost-bucket-corrections.mjs",
@@ -70,7 +71,9 @@
     "check:tomverse-chat-release-gate-view": "node scripts/generate-tomverse-chat-release-gate-view.mjs --check",
     "verify:review-parity-coverage": "node scripts/verify-review-parity-coverage.mjs",
     "test:e2e:review-parity": "node scripts/run-review-parity.mjs",
-    "check:router-context-window": "node --import tsx scripts/check-router-context-window.mjs"
+    "check:router-context-window": "node --import tsx scripts/check-router-context-window.mjs",
+    "check:context-window-register": "node --import tsx scripts/check-context-window-register.mjs",
+    "report:token-estimate-accuracy": "node --import tsx scripts/report-token-estimate-accuracy.mjs"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^4.0.24",
@@ -114,6 +117,7 @@
     "@types/react-dom": "^19",
     "eslint": "^9",
     "eslint-config-next": "16.2.12",
+    "js-tiktoken": "^1.0.21",
     "tailwindcss": "^4",
     "tsx": "^4.23.1",
     "typescript": "^6",

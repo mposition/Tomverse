@@ -10,6 +10,7 @@
 // Pure and client-safe (no server-only import, no Prisma): the workspace model
 // picker renders straight from these profiles.
 
+import type { GoogleThinkingLevel } from "@/lib/googleImageRequest";
 import {
   IMAGE_COST_PER_CREDIT_CEILING_MICRO_USD,
   IMAGE_PROMPT_BUDGET_MICRO_USD,
@@ -87,6 +88,24 @@ export type ImageModelProfile = {
    */
   pricingVersion: string;
   priceVerification: ImageModelPriceVerification;
+  /**
+   * The model's documented output-token limit, sent on every request that
+   * takes one.
+   *
+   * **Not a cost bound.** It is the number the provider publishes for the
+   * model, and sending it is how the server avoids leaving a billable
+   * parameter unset. Whether it also bounds hidden thinking is a separate
+   * question, answered by `priceVerification.thinkingCapMicroUsd` -- which is
+   * null for every model here that has one of these. Reading this field as
+   * the cap is the mistake it is worded to prevent.
+   */
+  maxOutputTokens?: number;
+  /**
+   * Google's thinking level, per model because support is not uniform.
+   * Absent omits the field: sending a parameter to a model whose acceptance of
+   * it has not been verified fails in a way that reads like an outage.
+   */
+  thinkingLevel?: GoogleThinkingLevel;
   /** Free-text note surfaced in the admin panel for a disabled model. */
   disabledNote?: string;
 };
@@ -158,20 +177,25 @@ const GOOGLE_GEMINI_31_FLASH_IMAGE: ImageModelProfile = {
   name: "Gemini 3.1 Flash Image",
   lifecycle: "stable",
   // Per-image prices verified 2026-08-04; the thinking cap is not established,
-// so the worst case is not provably finite and no fixed credit price can be
-// derived. That is what this reason states.
-//
-// A confirmation was relayed on 2026-08-04 that hidden thinking shares the
-// `max_output_tokens` budget with the response, which would settle this --
-// and settle it in the stronger direction, because a limit we set on the
-// request bounds the cost by construction rather than by trusting a model
-// card. The cited page (generate-content/tokens) is already in `sources`
-// below: it is the page whose two sentences made the derivation an inference
-// in the first place, so citing it again does not add the missing statement.
-// What would is the sentence itself, or -- better -- staging measurement
-// showing `totalOutputTokens + totalThoughtTokens` never exceeding a
-// `max_output_tokens` we set, which is evidence from the billing signal
-// rather than from prose.
+  // so the worst case is not provably finite and no fixed credit price can be
+  // derived. That is what this reason states.
+  //
+  // As of the 2026-08-05 documentation review this is a **checked absence**,
+  // not an unchecked gap. The Interactions API reference defines
+  // `generation_config.max_output_tokens` as the maximum tokens to include in
+  // the response, and reports `usage.total_output_tokens` and
+  // `usage.total_thought_tokens` as separate counters. The thinking guide
+  // likewise describes the charge as output plus thinking and reports the two
+  // apart. Neither states that the limit covers their sum -- and the model
+  // card's output limit is a limit on the same undefined quantity, so it
+  // cannot supply the link either. A forum answer or a search summary does not
+  // meet policy §12's official-body requirement and is not admissible here.
+  //
+  // What settles it is the billing signal, not more prose: a staging run that
+  // sets `max_output_tokens` and shows `total_output_tokens +
+  // total_thought_tokens` staying at or under it, including at a limit low
+  // enough to actually bite. That run costs money and needs the §15 budget
+  // approval first.
   disabledReason: "worst_case_cost_unbounded",
   // 512, 2K and 4K are advertised upstream but have no representation in
   // ImageSize yet, and Google's 1K landscape is not 1536x1024 -- a provider
@@ -183,6 +207,10 @@ const GOOGLE_GEMINI_31_FLASH_IMAGE: ImageModelProfile = {
   provenance: ["synthid"],
   outputMimeTypes: ["image/png", "image/jpeg"],
   pricingVersion: "google-gemini-3-1-flash-image-2026-08-04-v1",
+  // The model card's own output limit, sent on every request. It bounds
+  // what is asked for; whether it also bounds hidden thinking is the open
+  // question that keeps this model disabled -- see thinkingCapMicroUsd.
+  maxOutputTokens: 32_768,
   priceVerification: {
     verifiedAt: "2026-08-04",
     sources: [
@@ -194,7 +222,7 @@ const GOOGLE_GEMINI_31_FLASH_IMAGE: ImageModelProfile = {
     thinkingCapMicroUsd: null,
   },
   disabledNote:
-    "Per-image prices verified 2026-08-04: 0.5K $0.045 / 1K $0.067 / 2K $0.101 / 4K $0.151. GA id corrected from the preview retired 2026-06-25. BLOCKED ON THE CAP, NOT THE PRICE: thinking is enabled by default and cannot be disabled in the API, and thinking_level (minimal/high) is a level rather than a token limit. The 2026-08-04 worksheet proposes a conservative cap of 98,304 microUSD (32,768 output tokens x $3.00/1M text-and-thinking), which would put the floors at 190 / 228 / 283 credits -- but that combines two documented statements rather than quoting one that says hidden thinking counts against the output limit. Recording it as the cap would turn an inference into a fact. Needs an explicit provider confirmation, or an approver's decision to accept the derivation.",
+    "Per-image prices verified 2026-08-04: 0.5K $0.045 / 1K $0.067 / 2K $0.101 / 4K $0.151. GA id corrected from the preview retired 2026-06-25. BLOCKED ON THE CAP, NOT THE PRICE. The 2026-08-05 documentation review closed this as a checked absence rather than an unread page: the Interactions API reference defines max_output_tokens as the maximum tokens to include in the response and reports total_output_tokens and total_thought_tokens as separate counters, and the thinking guide describes the charge as their sum without stating that the limit covers it. The model card's 32,768 output limit bounds the same undefined quantity, so it cannot supply the link either. The conservative derivation (32,768 x $3.00/1M = 98,304 microUSD, floors 190 / 228 / 283 credits) therefore stays an inference. Unblocked by measurement, not by more prose: a staging run that sets max_output_tokens and shows total_output_tokens + total_thought_tokens staying under it, including at a limit low enough to bite. That run is billable and needs the section 15 budget approval. The Interactions adapter is implemented and unreachable while this hold stands.",
 };
 
 // Price VERIFIED 2026-08-04, held on operational grounds.
@@ -205,25 +233,38 @@ const GOOGLE_GEMINI_31_FLASH_IMAGE: ImageModelProfile = {
 // than unknown. What is missing is execution, not knowledge -- hence
 // `operational_hold` rather than `price_unverified`.
 //
+// ENABLED 2026-08-05. The second provider, and the first real cross-provider
+// comparison the feature was built for.
+//
 // A dated snapshot rather than `-latest`, for the same reason chat profiles
 // pin one: a moving target cannot carry a fixed price, because the price is
 // only meaningful for the model that was actually verified.
 //
+// Price verified 2026-08-04: $0.05 (1K) and $0.07 (2K) per image, flat
+// regardless of prompt length, with no prompt-token or reasoning-token charge.
 // Sale credits approved 2026-08-04 at 75 (1K), against a policy floor of 62 --
-// 733 microUSD per credit worst case, 18.5% under the 900 ceiling. Only 1K
-// square ships: xAI's 2K (approved at 100 credits, floor 84) needs the size
-// system to grow a resolution tier first, and 1024x1024 is also the honest
-// comparison against gpt-image-2's square.
+// 733 microUSD per credit worst case, 18.5% under the 900 ceiling. The floors
+// are computed over the whole request (image output + full prompt budget +
+// the zero thinking cap), not over the image price alone.
 //
-// The floors are computed over the whole request -- image output plus the full
-// prompt budget plus the zero thinking cap -- not over the image price alone.
+// Only 1K square ships. xAI's 2K is approved at 100 credits (floor 84) and
+// stays out until the size system grows a resolution tier: buildXaiImageRequest
+// refuses every size it has no mapping for rather than sending a resolution the
+// approved credits were not priced for. 1024x1024 is also the honest comparison
+// against gpt-image-2's square.
+//
+// The operational hold this replaces was cleared by, in order: the adapter
+// (lib/xaiImageRequest.ts), then IMAGE_PROVIDER_XAI_COST_MICROUSD_PER_DAY and
+// _PER_MONTH deployed to both environments ahead of this commit -- env first,
+// code second, because /api/ready fails a flag-on environment whose active
+// provider has no budget the moment this line changes.
 const XAI_GROK_IMAGINE_IMAGE_QUALITY: ImageModelProfile = {
   id: "grok-imagine-image-quality-20260403",
   provider: "xai",
   apiModelId: "grok-imagine-image-quality-20260403",
   name: "Grok Imagine Image Quality",
   lifecycle: "stable",
-  disabledReason: "operational_hold",
+  disabledReason: null,
   sizes: ["1024x1024"],
   qualities: ["medium"],
   prices: [
@@ -254,8 +295,6 @@ const XAI_GROK_IMAGINE_IMAGE_QUALITY: ImageModelProfile = {
     // reasoning charge. Verified, not assumed.
     thinkingCapMicroUsd: 0,
   },
-  disabledNote:
-    "Price verified 2026-08-04: $0.05 (1K) and $0.07 (2K) per image, flat regardless of prompt length, with no prompt-token or reasoning-token charge. Worst-case floors are 62 credits (1K) and 84 (2K). Sale credits approved 2026-08-04: 75 for 1K (floor 62), and 100 for 2K (floor 84) which ships only once the size system grows a resolution tier. Held on operational grounds only: an xAI adapter is needed (imageProviderAdapter dispatches OpenAI only), IMAGE_PROVIDER_XAI_COST_MICROUSD_PER_DAY/_PER_MONTH must be deployed before the code, and the dated snapshot must be confirmed visible to the Tomverse key with one staging call.",
 };
 
 // Registered, not enabled. The review's low-cost bulk candidate: 1K only, and
@@ -283,6 +322,10 @@ const GOOGLE_GEMINI_31_FLASH_LITE_IMAGE: ImageModelProfile = {
   provenance: ["synthid", "c2pa"],
   outputMimeTypes: ["image/png", "image/jpeg"],
   pricingVersion: "google-gemini-3-1-flash-lite-image-2026-08-04-v1",
+  // The model card's own output limit, sent on every request. It bounds
+  // what is asked for; whether it also bounds hidden thinking is the open
+  // question that keeps this model disabled -- see thinkingCapMicroUsd.
+  maxOutputTokens: 4_096,
   priceVerification: {
     verifiedAt: "2026-08-04",
     sources: [
@@ -294,7 +337,7 @@ const GOOGLE_GEMINI_31_FLASH_LITE_IMAGE: ImageModelProfile = {
     thinkingCapMicroUsd: null,
   },
   disabledNote:
-    "Draft-tier candidate. Image output verified 2026-08-04 at $0.0336, 1K only (2K and 4K unsupported). Blocked on the same cap as every Google image model here. The worksheet's conservative derivation is 6,144 microUSD (4,096 output tokens x $1.50/1M), giving a floor of 50 credits -- an inference, not a documented cap. Even once unblocked, the review advises against filling a second comparison seat with a second Google model.",
+    "Draft-tier candidate. Image output verified 2026-08-04 at $0.0336, 1K only (2K and 4K unsupported). Blocked on the same cap as every Google image model here, confirmed absent from the official documentation on 2026-08-05 rather than merely unread. The conservative derivation is 6,144 microUSD (4,096 output tokens x $1.50/1M), giving a floor of 50 credits -- an inference, not a documented cap. Its 4,096 limit makes it the most informative model to measure first: a low ceiling is the one likely to actually bite, and a run that never approaches the limit proves nothing about whether the limit is enforced. Even once unblocked, the review advises against filling a second comparison seat with a second Google model.",
 };
 
 // Registered, not enabled. The professional-tier candidate.
@@ -319,6 +362,10 @@ const GOOGLE_GEMINI_3_PRO_IMAGE: ImageModelProfile = {
   provenance: ["synthid"],
   outputMimeTypes: ["image/png", "image/jpeg"],
   pricingVersion: "google-gemini-3-pro-image-2026-08-04-v1",
+  // The model card's own output limit, sent on every request. It bounds
+  // what is asked for; whether it also bounds hidden thinking is the open
+  // question that keeps this model disabled -- see thinkingCapMicroUsd.
+  maxOutputTokens: 32_768,
   priceVerification: {
     verifiedAt: "2026-08-04",
     sources: [
@@ -330,7 +377,7 @@ const GOOGLE_GEMINI_3_PRO_IMAGE: ImageModelProfile = {
     thinkingCapMicroUsd: null,
   },
   disabledNote:
-    "Final-tier candidate. Per-image prices verified 2026-08-04: $0.134 (1K/2K) and $0.24 (4K). Blocked on the cap like the other Google models -- the worksheet's derivation is 393,216 microUSD (32,768 x $12.00/1M), which would put floors at 592 and 710 credits, well past gpt-image-2 Final at 250. Held a second time by product judgement regardless of the cap: the band overlaps gpt-image-2 Final, so the review defers it until usage shows Flash is insufficient.",
+    "Final-tier candidate. Per-image prices verified 2026-08-04: $0.134 (1K/2K) and $0.24 (4K). Blocked on the cap like the other Google models, confirmed absent from the official documentation on 2026-08-05. The derivation is 393,216 microUSD (32,768 x $12.00/1M), which would put floors at 592 and 710 credits, well past gpt-image-2 Final at 250. Held a second time by product judgement regardless of the cap: the band overlaps gpt-image-2 Final, so the review defers it until usage shows Flash is insufficient.",
 };
 
 export const IMAGE_MODEL_REGISTRY: readonly ImageModelProfile[] = [

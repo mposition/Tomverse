@@ -219,6 +219,8 @@ export const es = {
         responseCancelled: "Se detuvo la generación de la respuesta.",
         responseGenerating: "Generando una respuesta.",
         responseComplete: "Respuesta completada.",
+        responseIncomplete: "La respuesta se detuvo por el límite de longitud de salida.",
+        responseIncompleteNotice: "La respuesta se cortó por el límite de longitud de salida. Puedes continuar con una pregunta de seguimiento.",
         responseFailed: "La solicitud falló.",
         traceId: "ID de seguimiento",
         retry: "Reintentar",
@@ -406,6 +408,8 @@ export const es = {
         fileErrorHelpLink: "Abrir ayuda de carga de archivos",
     },
     share: {
+        personalizationNotice:
+            "Estas respuestas pueden haber estado influidas por los ajustes de personalización de quien las generó. Los recuerdos en sí no se comparten.",
         eyebrow: "Tomverse shared conversation",
         publicDocumentDescription: "Instantánea pública de solo lectura creada desde Tomverse. Las actualizaciones posteriores del chat no se añaden a esta página.",
         readOnly: "Solo lectura",
@@ -909,6 +913,27 @@ export const es = {
             "Este mensaje se guardó acortado para respetar el límite de almacenamiento. El texto completo solo permanece en el servicio original.",
         viewerMessagesShown: "{shown} de {total} mensajes mostrados",
         deleteSnapshot: "Eliminar esta versión",
+        lockedBadge: "Bloqueada",
+        lockGateTitle: "Esta conversación está bloqueada",
+        lockGateDescription: "Introduce la contraseña que configuraste para leerla.",
+        lockPasswordLabel: "Contraseña",
+        lockUnlockCta: "Desbloquear",
+        lockWrongPassword: "Esa contraseña no coincide.",
+        lockTooManyAttempts: "Demasiados intentos. Vuelve a intentarlo en un rato.",
+        lockFailed: "No se pudo completar. Inténtalo de nuevo.",
+        lockSectionTitle: "Bloqueo de la conversación",
+        lockStatusLocked: "Esta conversación está bloqueada con una contraseña.",
+        lockStatusUnlocked: "Esta conversación no está bloqueada.",
+        lockSetCta: "Bloquear con una contraseña",
+        lockChangeCta: "Cambiar la contraseña",
+        lockRemoveCta: "Quitar el bloqueo",
+        lockRemoveConfirm: "Quitar el bloqueo",
+        lockSaveCta: "Guardar",
+        lockCancel: "Cancelar",
+        lockCurrentPasswordLabel: "Contraseña actual",
+        lockNewPasswordLabel: "Nueva contraseña",
+        lockPasswordHint: "Al menos {count} caracteres.",
+        lockNoRecoveryWarning: "Si olvidas esta contraseña no podrás volver a abrir esta conversación. No hay forma de restablecerla.",
         // Paso de preparación de la exportación (paso 1 del asistente)
         guideTitle: "Primero, ten lista tu copia exportada",
         guideDescription:
@@ -1016,6 +1041,9 @@ export const es = {
             "{count} recuerdos que editaste se conservan y solo se dejan de usar.",
         sourceDeleteKept:
             "{count} recuerdos respaldados por otras pruebas se mantienen igual.",
+        sourceLockBlocked: "{count} recuerdos que solo se apoyan en esta conversación dejan de usarse hasta que la desbloquees.",
+        sourceLockBacked: "{count} recuerdos respaldados por otras pruebas se siguen usando.",
+        sourceLockRestoreNote: "Al quitar el bloqueo vuelven a usarse los recuerdos que se detuvieron por esta conversación.",
         dataTabTitle: "Memoria de la cuenta",
         dataTabDescription:
             "Revisa los recuerdos candidatos extraídos de conversaciones importadas y decide si los recuerdos aprobados se usan en los chats nuevos.",
@@ -1193,6 +1221,8 @@ export const es = {
             "La extracción no pudo terminar. Se conservan los resultados de los lotes completados.",
         runCancelledNote:
             "La extracción se ha cancelado. Se conservan los resultados de los lotes completados.",
+        runStalledNote:
+            "La extracción está en pausa entre ejecuciones. Se conserva todo lo completado y se reanuda automáticamente. Puedes cancelar en lugar de esperar.",
         runReview: "Ir a la lista de revisión",
         cancel: "Cancelar extracción",
         cancelArmed: "Pulsa otra vez para cancelar",

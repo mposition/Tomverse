@@ -22,6 +22,7 @@ const resetData = async () => {
       "MemoryItem",
       "MemoryExtractionChunk",
       "MemoryExtractionRun",
+      "MemoryExtractionCreditReservation",
       "UserMemorySettings",
       "ChatUsageBucket"
     RESTART IDENTITY CASCADE
@@ -158,6 +159,128 @@ test("the unavailable list ships with the report", async () => {
     const report = await getMemoryReport();
     assert.ok(report.unavailable.length > 0);
     assert.ok(
-        report.unavailable.some((entry) => entry.metric === "injection_ratio")
+        report.unavailable.some(
+            (entry) => entry.metric === "followup_repair_proxy"
+        )
     );
+    // Every entry names a reason. An unexplained gap is only marginally more
+    // useful than the zero it replaced.
+    assert.ok(report.unavailable.every((entry) => entry.reason.length > 0));
+});
+
+test("the injection ratio reports a denominator, not a bare zero", async () => {
+    // The whole point of moving this off the unavailable list: fail-closed
+    // injection now reads as "0 of N", which is a measurement, rather than as
+    // a 0% a dashboard cannot tell apart from a feature nobody uses.
+    await recordMemoryCounter("chat_memory_eligible", 8);
+    const report = await getMemoryReport();
+    assert.deepEqual(
+        {
+            eligible: report.injection.eligible,
+            injected: report.injection.injected,
+            ratio: report.injection.ratio,
+        },
+        { eligible: 8, injected: 0, ratio: 0 }
+    );
+});
+
+test("injected contexts carry a token distribution and a truncation share", async () => {
+    await recordMemoryCounter("chat_memory_eligible", 4);
+    await recordMemoryCounter("chat_memory_injected", 4);
+    await recordMemoryCounter("injected_context_truncated", 1);
+    await recordMemoryCounter("injected_tokens_le_256", 3);
+    await recordMemoryCounter("injected_tokens_gt_4096", 1);
+
+    const report = await getMemoryReport();
+    assert.equal(report.injection.ratio, 1);
+    // Over injected contexts, not eligible requests.
+    assert.equal(report.injection.truncationRatio, 0.25);
+    assert.deepEqual(report.injection.tokenBuckets, {
+        le256: 3,
+        le1024: 0,
+        le4096: 0,
+        gt4096: 1,
+    });
+});
+
+test("the stale bundle ratio is drawn from bundles presented", async () => {
+    await recordMemoryCounter("context_bundle_presented", 10);
+    await recordMemoryCounter("context_bundle_stale", 2);
+    await recordMemoryCounter("context_bundle_replayed", 1);
+    await recordMemoryCounter("context_bundle_rejected", 1);
+
+    const report = await getMemoryReport();
+    assert.equal(report.contextBundle.presented, 10);
+    // A replay is not drift, so it stays out of the ratio while staying
+    // visible beside it.
+    assert.equal(report.contextBundle.staleRatio, 0.2);
+    assert.equal(report.contextBundle.replayed, 1);
+    assert.equal(report.contextBundle.rejected, 1);
+});
+
+test("lock transitions are counted per direction, not folded together", async () => {
+    // A lock is reversible and a delete is not, so a shared counter would
+    // report a temporary suspension as data loss.
+    await recordMemoryCounter("source_lock_memory_suspended", 4);
+    await recordMemoryCounter("source_lock_memory_restored", 3);
+    await recordMemoryCounter("source_lock_memory_expired", 1);
+
+    const report = await getMemoryReport();
+    assert.equal(report.counters.source_lock_memory_suspended, 4);
+    assert.equal(report.counters.source_lock_memory_restored, 3);
+    assert.equal(report.counters.source_lock_memory_expired, 1);
+    // The delete counters are a different observation and stay at zero.
+    assert.equal(report.counters.source_delete_memory_suspended, 0);
+});
+
+test("a refused batch sub-budget is counted, having left no row", async () => {
+    await recordMemoryCounter("extraction_subbudget_exhausted", 2);
+    const report = await getMemoryReport();
+    assert.equal(report.counters.extraction_subbudget_exhausted, 2);
+});
+
+test("credits per chunk are read from settled reservations only", async () => {
+    const user = await createUser();
+    const reservation = (
+        runId: string,
+        status: string,
+        chunksCharged: number,
+        settledCredits: number
+    ) =>
+        prisma.memoryExtractionCreditReservation.create({
+            data: {
+                id: `memory-extraction-credit-reservation:${runId}:v1`,
+                userId: user.id,
+                runId,
+                status,
+                outcome: status === "settled" ? "completed" : null,
+                provider: "openai",
+                extractionModelId: "gpt-5-6-luna",
+                promptVersion: "mem-extract-v1",
+                chunkTotal: 4,
+                chunksCharged,
+                reservedCredits: 8,
+                planReservedCredits: 8,
+                addOnReservedCredits: 0,
+                reservedCostMicroUsd: BigInt(1000),
+                settledCredits,
+                settledCostMicroUsd: BigInt(500),
+                settledFundedCostMicroUsd: BigInt(500),
+                pricingVersion: "qa-1",
+                costSource: "code_profile",
+                pricingSnapshot: {},
+                reservationPayload: [],
+                settledAt: status === "settled" ? new Date() : null,
+            },
+        });
+
+    await reservation("run-a", "settled", 2, 6);
+    await reservation("run-b", "settled", 1, 1);
+    // Still reserved: nothing has been charged, so it is not a measurement.
+    await reservation("run-c", "reserved", 0, 0);
+
+    const report = await getMemoryReport();
+    assert.equal(report.creditPerChunk.samples, 2);
+    assert.equal(report.creditPerChunk.p50, 1);
+    assert.equal(report.creditPerChunk.p90, 3);
 });

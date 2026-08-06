@@ -219,6 +219,8 @@ export const de = {
         responseCancelled: "Die Antwortgenerierung wurde gestoppt.",
         responseGenerating: "Antwort wird generiert.",
         responseComplete: "Antwort abgeschlossen.",
+        responseIncomplete: "Die Antwort wurde durch das Ausgabelängenlimit beendet.",
+        responseIncompleteNotice: "Die Antwort wurde durch das Ausgabelängenlimit abgeschnitten. Mit einer Anschlussfrage können Sie fortfahren.",
         responseFailed: "Die Anfrage ist fehlgeschlagen.",
         traceId: "Trace-ID",
         retry: "Erneut versuchen",
@@ -406,6 +408,8 @@ export const de = {
         fileErrorHelpLink: "Hilfe zum Datei-Upload öffnen",
     },
     share: {
+        personalizationNotice:
+            "Diese Antworten können durch die Personalisierungseinstellungen der Autorin oder des Autors geprägt sein. Die gespeicherten Erinnerungen selbst werden nicht geteilt.",
         eyebrow: "Tomverse shared conversation",
         publicDocumentDescription: "Ein öffentlicher schreibgeschützter Snapshot aus Tomverse. Spätere Chat-Updates werden dieser Seite nicht hinzugefügt.",
         readOnly: "Nur Lesen",
@@ -910,6 +914,27 @@ export const de = {
             "Diese Nachricht wurde gekürzt gespeichert, um die Speichergrenze einzuhalten. Der vollständige Text existiert nur noch beim ursprünglichen Dienst.",
         viewerMessagesShown: "{shown} von {total} Nachrichten angezeigt",
         deleteSnapshot: "Diese Version löschen",
+        lockedBadge: "Gesperrt",
+        lockGateTitle: "Diese Unterhaltung ist gesperrt",
+        lockGateDescription: "Gib das von dir gesetzte Passwort ein, um sie zu lesen.",
+        lockPasswordLabel: "Passwort",
+        lockUnlockCta: "Entsperren",
+        lockWrongPassword: "Dieses Passwort stimmt nicht.",
+        lockTooManyAttempts: "Zu viele Versuche. Bitte versuche es später erneut.",
+        lockFailed: "Das hat nicht geklappt. Bitte versuche es erneut.",
+        lockSectionTitle: "Sperre der Unterhaltung",
+        lockStatusLocked: "Diese Unterhaltung ist mit einem Passwort gesperrt.",
+        lockStatusUnlocked: "Diese Unterhaltung ist nicht gesperrt.",
+        lockSetCta: "Mit Passwort sperren",
+        lockChangeCta: "Passwort ändern",
+        lockRemoveCta: "Sperre aufheben",
+        lockRemoveConfirm: "Sperre aufheben",
+        lockSaveCta: "Speichern",
+        lockCancel: "Abbrechen",
+        lockCurrentPasswordLabel: "Aktuelles Passwort",
+        lockNewPasswordLabel: "Neues Passwort",
+        lockPasswordHint: "Mindestens {count} Zeichen.",
+        lockNoRecoveryWarning: "Wenn du dieses Passwort vergisst, kannst du diese Unterhaltung nicht mehr öffnen. Ein Zurücksetzen gibt es nicht.",
         // Export-Vorbereitung (Schritt 1 des Assistenten)
         guideTitle: "Halten Sie zuerst Ihre Exportdatei bereit",
         guideDescription:
@@ -1019,6 +1044,9 @@ export const de = {
             "{count} von Ihnen bearbeitete Erinnerungen bleiben erhalten und werden nur nicht mehr verwendet.",
         sourceDeleteKept:
             "{count} Erinnerungen mit anderen Belegen bleiben unverändert.",
+        sourceLockBlocked: "{count} Erinnerungen, die sich nur auf diese Unterhaltung stützen, werden bis zum Entsperren nicht mehr verwendet.",
+        sourceLockBacked: "{count} Erinnerungen mit anderen Belegen werden weiterhin verwendet.",
+        sourceLockRestoreNote: "Wird die Sperre aufgehoben, werden die wegen dieser Unterhaltung ausgesetzten Erinnerungen wieder verwendet.",
         dataTabTitle: "Konto-Langzeitgedächtnis",
         dataTabDescription:
             "Prüfen Sie aus importierten Unterhaltungen extrahierte Gedächtnis-Kandidaten und legen Sie fest, ob genehmigte Erinnerungen in neuen Chats verwendet werden.",
@@ -1196,6 +1224,8 @@ export const de = {
             "Die Extraktion konnte nicht abgeschlossen werden. Ergebnisse fertiger Bündel bleiben erhalten.",
         runCancelledNote:
             "Die Extraktion wurde abgebrochen. Ergebnisse fertiger Bündel bleiben erhalten.",
+        runStalledNote:
+            "Die Extraktion pausiert zwischen zwei Durchläufen. Alles bisher Fertige bleibt erhalten und sie wird automatisch fortgesetzt. Sie können stattdessen abbrechen.",
         runReview: "Zur Prüfliste",
         cancel: "Extraktion abbrechen",
         cancelArmed: "Zum Abbrechen erneut drücken",

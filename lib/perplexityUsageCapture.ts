@@ -1,29 +1,28 @@
 import "server-only";
 
 import {
-  combinePerplexityUsageCosts,
-  parsePerplexityResponseBody,
-  type PerplexityUsageCostSnapshot,
-} from "@/lib/perplexityUsageCore";
+  combinePerplexityResponseCaptures,
+  parsePerplexityResponseCapture,
+  EMPTY_PERPLEXITY_RESPONSE_CAPTURE,
+  type PerplexityResponseCapture,
+} from "@/lib/perplexityResponseCore";
 
 export const PERPLEXITY_USAGE_TRACE_HEADER =
   "x-tomverse-perplexity-usage-trace";
 
 type Capture = {
-  promise: Promise<PerplexityUsageCostSnapshot | null>;
-  resolve: (value: PerplexityUsageCostSnapshot | null) => void;
+  promise: Promise<PerplexityResponseCapture>;
+  resolve: (value: PerplexityResponseCapture) => void;
 };
 
 const captures = new Map<string, Capture[]>();
 const MAX_CAPTURE_CHARACTERS = 2_000_000;
 
 const createCapture = (traceId: string) => {
-  let resolve!: (value: PerplexityUsageCostSnapshot | null) => void;
-  const promise = new Promise<PerplexityUsageCostSnapshot | null>(
-    (resolver) => {
-      resolve = resolver;
-    }
-  );
+  let resolve!: (value: PerplexityResponseCapture) => void;
+  const promise = new Promise<PerplexityResponseCapture>((resolver) => {
+    resolve = resolver;
+  });
   const capture = { promise, resolve };
   const entries = captures.get(traceId) || [];
   entries.push(capture);
@@ -35,20 +34,39 @@ export const perplexityUsageHeaders = (traceId: string) => ({
   [PERPLEXITY_USAGE_TRACE_HEADER]: traceId,
 });
 
-export const consumePerplexityUsage = async (traceId: string) => {
+/**
+ * The canonical read of this trace's Perplexity responses: billing usage and
+ * user-facing sources from the one body each response was already captured
+ * as. Consuming is destructive (the trace's buffers are released), so a
+ * request that needs both must take the capture once and use both halves --
+ * see the memoized takePerplexityCapture() in app/api/chat/route.ts.
+ */
+export const consumePerplexityResponseCapture = async (
+  traceId: string
+): Promise<PerplexityResponseCapture | null> => {
   const entries = captures.get(traceId);
   if (!entries) return null;
   captures.delete(traceId);
-  return combinePerplexityUsageCosts(
+  return combinePerplexityResponseCaptures(
     await Promise.all(entries.map((capture) => capture.promise))
   );
 };
+
+/**
+ * Billing-only view of the same capture, kept so existing settlement call
+ * sites read exactly as before. Identical semantics to the original: the
+ * combined cost snapshot for the trace, or null when nothing was captured.
+ */
+export const consumePerplexityUsage = async (traceId: string) =>
+  (await consumePerplexityResponseCapture(traceId))?.usage ?? null;
 
 export const discardPerplexityUsage = (traceId: string) => {
   const entries = captures.get(traceId);
   if (!entries) return;
   captures.delete(traceId);
-  for (const capture of entries) capture.resolve(null);
+  for (const capture of entries) {
+    capture.resolve(EMPTY_PERPLEXITY_RESPONSE_CAPTURE);
+  }
 };
 
 export const perplexityUsageFetch: typeof fetch = async (input, init) => {
@@ -73,7 +91,7 @@ export const perplexityUsageFetch: typeof fetch = async (input, init) => {
     if (captured.length < MAX_CAPTURE_CHARACTERS) {
       captured += tail.slice(0, MAX_CAPTURE_CHARACTERS - captured.length);
     }
-    capture.resolve(parsePerplexityResponseBody(captured));
+    capture.resolve(parsePerplexityResponseCapture(captured));
   };
 
   const body = new ReadableStream<Uint8Array>({

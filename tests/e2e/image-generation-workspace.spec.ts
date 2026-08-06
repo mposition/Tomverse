@@ -517,6 +517,66 @@ test("the model picker drives the request and the quoted total", async ({ page }
   expect(api.createBodies[0].modelIds).toEqual(["gpt-image-2"]);
 });
 
+test("two providers can be compared in one request, priced per model and in total", async ({ page }) => {
+  // The first cross-provider comparison the feature was built for: OpenAI and
+  // xAI in one group. Both prices are quoted before submission and the total is
+  // their sum -- a comparison whose cost only appears afterwards is the thing
+  // the pricing rules exist to prevent.
+  await enableImageGenerationFlag(page);
+  await mockAuthenticatedApi(page);
+  await mockUserUsage(page, { plan: "Pro" });
+  const api = await installImageGenerationApi(page);
+  await page.goto("/chat");
+
+  await openNewImageEntry(page);
+  const openai = page.getByTestId("image-model-gpt-image-2");
+  const grok = page.getByTestId("image-model-grok-imagine-image-quality-20260403");
+  await expect(openai).toHaveAttribute("aria-pressed", "true");
+  await expect(grok).toBeVisible();
+  await grok.click();
+  await expect(grok).toHaveAttribute("aria-pressed", "true");
+
+  // Standard square: 70 + 75. The total only renders once more than one model
+  // is selected, since a single model already states its own price.
+  await expect(page.getByTestId("image-total-credits")).toContainText("145");
+
+  await page.getByTestId("image-generation-prompt").fill("a red apple");
+  await page.getByTestId("image-generation-submit").click();
+
+  expect(api.createBodies).toHaveLength(1);
+  expect(api.createBodies[0].modelIds).toEqual([
+    "gpt-image-2",
+    "grok-imagine-image-quality-20260403",
+  ]);
+  await expect(page.getByTestId("image-comparison-card")).toHaveCount(2);
+  await expect(page.getByTestId("image-generation-entry")).toHaveCount(1);
+});
+
+test("an option one selected model cannot be priced blocks submission", async ({ page }) => {
+  // Grok ships 1K square Standard only. Rather than quoting a guess for Final,
+  // or silently dropping the model from a group the user asked for, the
+  // composer refuses -- the price has to be true before anything is spent.
+  await enableImageGenerationFlag(page);
+  await mockAuthenticatedApi(page);
+  await mockUserUsage(page, { plan: "Pro" });
+  const api = await installImageGenerationApi(page);
+  await page.goto("/chat");
+
+  await openNewImageEntry(page);
+  await page.getByTestId("image-model-grok-imagine-image-quality-20260403").click();
+  await page.getByTestId("image-generation-prompt").fill("a red apple");
+  await expect(page.getByTestId("image-generation-submit")).toBeEnabled();
+
+  await page.getByTestId("image-preset-final").click();
+  await expect(page.getByTestId("image-generation-submit")).toBeDisabled();
+  expect(api.createBodies).toHaveLength(0);
+
+  // Back to an option every selected model can price, and it is submittable
+  // again -- the block is about the combination, not about the model.
+  await page.getByTestId("image-preset-standard").click();
+  await expect(page.getByTestId("image-generation-submit")).toBeEnabled();
+});
+
 test("the timeline polls the group, never one request per model", async ({ page }) => {
   // Policy §11: one poll per comparison group. Per-generation polling makes the
   // read cost of a comparison scale with the number of models compared -- and

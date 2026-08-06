@@ -12,10 +12,10 @@ import {
     MEMORY_CONTEXT_PROMPT_VERSION,
     type MemoryContextPrompt,
 } from "@/lib/memoryContextPrompt";
-import { MEMORY_EXTRACTION_EVAL_REGISTER } from "@/lib/memoryExtractionEvalRegister";
 import {
     decideMemoryInjection,
     hasApprovedExtractionPair,
+    injectableExtractionPairs,
     type MemoryInjectionDecision,
 } from "@/lib/memoryInjectionGate";
 import { MEMORY_RETRIEVAL_ALGORITHM_VERSION } from "@/lib/memoryRetrievalScoring";
@@ -58,6 +58,17 @@ export type ChatMemoryContext = {
     fingerprint: string;
     /** §22 observation, content-free. */
     consideredCount: number;
+    /**
+     * Whether the §9 budget cut a memory that had otherwise qualified — §22's
+     * truncation ratio.
+     *
+     * Only the two size caps count. `below_relevance`, `expired` and
+     * `duplicate` are the selection working as designed, and `source_cap` is a
+     * diversity rule rather than a size one; reporting any of them as
+     * truncation would say the context was too small for the request when it
+     * was not.
+     */
+    truncatedByBudget: boolean;
 };
 
 /**
@@ -99,6 +110,7 @@ const buildEmpty = (decision: MemoryInjectionDecision): ChatMemoryContext => {
         fingerprintInput,
         fingerprint: contextFingerprint(fingerprintInput),
         consideredCount: 0,
+        truncatedByBudget: false,
     };
 };
 
@@ -157,12 +169,11 @@ export async function buildChatMemoryContext(input: {
     });
     if (!decision.allowed) return buildEmpty(decision);
 
-    const approvedPairs = MEMORY_EXTRACTION_EVAL_REGISTER.filter(
-        (entry) => entry.status === "approved"
-    ).map((entry) => ({
-        extractionModelId: entry.extractionModelId,
-        promptVersion: entry.promptVersion,
-    }));
+    // Approved *and* not revoked. Reading the register alone was a real gap:
+    // revoking one pair while another stayed approved left the account-level
+    // gate open, and this list — the query's actual filter — still admitted
+    // the revoked pair's memories. §12.4 revokes a pair, not an account.
+    const approvedPairs = injectableExtractionPairs(revokedPairs);
 
     const [retrieval, memoryVersion, styleVersion] = await Promise.all([
         retrieveMemoryContext({
@@ -199,5 +210,7 @@ export async function buildChatMemoryContext(input: {
         fingerprintInput,
         fingerprint: contextFingerprint(fingerprintInput),
         consideredCount: retrieval.consideredCount,
+        truncatedByBudget:
+            retrieval.omitted.token_budget + retrieval.omitted.item_cap > 0,
     };
 }
