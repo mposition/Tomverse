@@ -806,7 +806,9 @@ test("while a comparison runs the button is the progress, and it is disabled", a
   await enableImageGenerationFlag(page);
   await mockAuthenticatedApi(page);
   await mockUserUsage(page, { plan: "Pro" });
-  const api = await installImageGenerationApi(page);
+  // The mock state is not read here: this test asserts what the composer
+  // shows, and the request it makes is already covered elsewhere.
+  await installImageGenerationApi(page);
   await page.goto("/chat");
 
   await openNewImageEntry(page);
