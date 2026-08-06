@@ -557,6 +557,18 @@ const checks = [
     },
   },
   {
+    // A plan change moves money and credits, and only one of them was quoted.
+    // The credit arithmetic has one home (lib/planChangeCredits.ts) so the
+    // preview and the steady-state balance cannot drift; nothing imported it.
+    // Null for a scheduled downgrade on purpose: it changes nothing about this
+    // month, so any number here would be true for nobody yet.
+    name: "A plan-change quote states what happens to this month's credits",
+    file: "lib/planChangeService.ts",
+    test: (source) =>
+      source.includes("planCreditsAfterPlanChange") &&
+      source.includes('decision.plan.execution === "immediate_upgrade"\n      ? await quoteCredits'),
+  },
+  {
     // The concurrency policy names rollbackChatAdmission() in step 4 of the
     // admission lifecycle and nothing called it. A preflight that reserves and
     // then fails to answer left every slot held until the admission TTL, so

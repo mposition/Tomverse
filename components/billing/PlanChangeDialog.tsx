@@ -53,6 +53,11 @@ type Quote = {
   billingInterval: "monthly" | "annual";
   currency: string;
   amountDueMinor: number | null;
+  credits: {
+    monthlyPlanCredits: number;
+    remainingPlanCredits: number;
+    overageCredits: number;
+  } | null;
   effectiveAt: string | null;
   renewal:
     | "unaffected"
@@ -365,6 +370,34 @@ export function PlanChangeDialog({
                   {formatAmount(quote.amountDueMinor, quote.currency)}
                 </p>
               </div>
+            ) : null}
+
+            {/* Present only when the change lands now. A scheduled downgrade
+                leaves this month's allowance alone, so there is no honest
+                number to put here -- see the quote's `credits` field. */}
+            {quote.credits ? (
+            <div
+              data-testid="plan-change-credits"
+              className="mt-3 rounded-2xl border border-zinc-200 p-4 dark:border-zinc-800"
+            >
+              <p className="text-xs font-bold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+                {text.creditsLabel}
+              </p>
+              <p className="mt-1 text-sm font-semibold text-zinc-950 dark:text-white">
+                {text.creditsRemaining(
+                  quote.credits.remainingPlanCredits,
+                  quote.credits.monthlyPlanCredits
+                )}
+              </p>
+              {quote.credits.overageCredits > 0 ? (
+                <p
+                  data-testid="plan-change-credits-overage"
+                  className="mt-2 text-xs leading-5 text-zinc-500 dark:text-zinc-400"
+                >
+                  {text.creditsOverageNotice}
+                </p>
+              ) : null}
+            </div>
             ) : null}
 
             <p
