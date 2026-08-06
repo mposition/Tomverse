@@ -1,5 +1,9 @@
 import { expect, test, type Page } from "@playwright/test";
 import {
+  mockAuthenticatedApi,
+  openRecentConversation,
+} from "./support/app-fixtures";
+import {
   DESKTOP_VIEWPORT,
   THREE_MODELS,
   enterConversation,
@@ -18,7 +22,9 @@ import {
  * feature:
  *
  *   * the count is shown only when the server sent one. Absent is not zero,
- *     and §13.4 forbids a misleading indication;
+ *     and §13.4 forbids a misleading indication. Both halves of "the server
+ *     sent one" are driven: the streaming header, and the stored answer read
+ *     back when the conversation is reopened;
  *   * a stale bundle is retried once for a single-model send and never for
  *     one panel of a comparison, whose panels share a snapshot on purpose.
  */
@@ -112,6 +118,56 @@ test.describe("chat memory context", () => {
     });
     await page.setViewportSize(DESKTOP_VIEWPORT);
     await submitComposer(page, "An ordinary question.", DESKTOP_VIEWPORT.width);
+
+    await expect(panel(page, 0)).toContainText(ANSWER);
+    await expect(page.getByTestId("memory-usage-disclosure")).toHaveCount(0);
+  });
+
+  test("reopening the conversation states it again", async ({ page }) => {
+    // The disclosure used to live only in the streaming response header, so
+    // it was true while the answer was being written and gone the next time
+    // the conversation was opened. This drives the other path: a stored
+    // answer, read back through the conversation endpoint, with nothing
+    // streaming at all.
+    await mockAuthenticatedApi(page, {
+      selectedModels: ["gpt-5-4-mini"],
+      messages: [
+        { id: "stored-user", role: "user", content: "What do you know about me?" },
+        {
+          id: "stored-answer",
+          role: "assistant",
+          content: ANSWER,
+          modelId: "gpt-5-4-mini",
+          memoryUsedCount: 3,
+        },
+      ],
+    });
+    await page.goto("/chat?lang=en");
+    await openRecentConversation(page);
+
+    await expect(panel(page, 0)).toContainText(ANSWER);
+    const disclosure = page.getByTestId("memory-usage-disclosure");
+    await expect(disclosure).toBeVisible();
+    await expect(disclosure).toContainText("3");
+  });
+
+  test("a reopened answer with no stored count still says nothing", async ({
+    page,
+  }) => {
+    await mockAuthenticatedApi(page, {
+      selectedModels: ["gpt-5-4-mini"],
+      messages: [
+        { id: "stored-user", role: "user", content: "An ordinary question." },
+        {
+          id: "stored-answer",
+          role: "assistant",
+          content: ANSWER,
+          modelId: "gpt-5-4-mini",
+        },
+      ],
+    });
+    await page.goto("/chat?lang=en");
+    await openRecentConversation(page);
 
     await expect(panel(page, 0)).toContainText(ANSWER);
     await expect(page.getByTestId("memory-usage-disclosure")).toHaveCount(0);

@@ -214,12 +214,37 @@ export async function GET(
         pendingJobId: true,
         searchMetadata: true,
         createdAt: true,
+        // §13.4. The count only, never `memoryTokens`: the disclosure states
+        // how many memories an answer was given, and a token figure would
+        // say something about their length without being asked for.
+        memoryUsedCount: true,
       },
     });
     const hasMoreMessages = messagePage.length > MESSAGE_PAGE_SIZE;
-    const messages = hasMoreMessages
-      ? messagePage.slice(0, MESSAGE_PAGE_SIZE)
-      : messagePage;
+    const messages = (
+      hasMoreMessages ? messagePage.slice(0, MESSAGE_PAGE_SIZE) : messagePage
+    ).map(({ memoryUsedCount, ...message }) => ({
+      ...message,
+      /*
+        §13.4: a durable fact about the answer, so reopening the conversation
+        has to state it again. Until this it lived only in the streaming
+        response header, which meant the disclosure was true while the answer
+        was being written and silently gone on the next visit.
+
+        Sent on exactly the condition the header uses, so the two paths cannot
+        disagree: `null` is a request that could not inject at all and `0` is
+        one where retrieval chose nothing, and §13.4 forbids indicating
+        either. Both leave the field off rather than sending a number the
+        renderer has to know not to show.
+
+        Ownership and the lock grant are re-checked above, and this route is
+        the owner's own read -- the share snapshot and the conversation export
+        keep their own selects, which do not name this column (§13.3).
+      */
+      ...(typeof memoryUsedCount === "number" && memoryUsedCount > 0
+        ? { memoryUsedCount }
+        : {}),
+    }));
 
     const selectedModels = await clampRuntimeSelectedModels(
       safeParse(conversation.selectedModels, [defaultEngine])
