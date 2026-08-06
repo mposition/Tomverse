@@ -313,6 +313,11 @@ export const createShadowAccumulator = ({
               ),
               nonCjk: Math.ceil(nonCjkBytes / getCalibration(controlVersion).nonCjkBytesPerToken),
             },
+            // The cohort is decided by what the text looks like, and opaque
+            // tokens are by definition not text. Zero here keeps an attachment
+            // -heavy turn classified by its prose rather than by its
+            // attachments.
+            opaqueTokens: 0,
             rawTotal: controlTextTokens,
           },
           { nonCjkSymbolRatio }

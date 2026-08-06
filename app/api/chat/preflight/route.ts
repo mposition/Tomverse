@@ -36,7 +36,10 @@ import { isChatCostSafetyCode } from "@/lib/chatCostSafetyCore";
 import { WEB_SEARCH_MODES } from "@/lib/appDefaults";
 import { getWebSearchCapability } from "@/lib/webSearchCapability";
 import { getWebSearchSurchargeCredits } from "@/lib/webSearchCredits";
-import { estimatePromptTokens } from "@/lib/chatTokenEstimate";
+import {
+    atLeastOneToken,
+    createTokenEstimateAccumulator,
+} from "@/lib/chatTokenEstimate";
 import { buildChatMemoryContext } from "@/lib/chatMemoryContext";
 import { fitChatOutputToContextWindow } from "@/lib/chatContextWindow";
 import { issueChatContextBundle } from "@/lib/chatContextBundleService";
@@ -75,7 +78,6 @@ const parseStoredModelIds = (value: unknown) => {
         : [];
 };
 
-const estimateTextTokens = (text: string) => estimatePromptTokens(text);
 
 const comparisonTraceId = (request: Request) => {
     const suppliedTraceId = request.headers
@@ -271,35 +273,38 @@ export async function POST(request: Request) {
             conversationMode: conversationMemoryMode,
         });
 
-        const promptTokens =
-            estimateTextTokens(payload.prompt) + memoryContext.memoryTokens;
         const budgets = models.map((model) => {
-            const historyTokens = history.reduce((sum, message) => {
+            // Per model, because history is filtered per model: a comparison
+            // turn charges each model for the branch it can actually see.
+            const estimate = createTokenEstimateAccumulator()
+                .addText(payload.prompt)
+                // The memory block's own text, not its token count -- counting
+                // the text is what lets a Hangul recalibration reach it.
+                .addText(memoryContext.prompt.text ?? "");
+            for (const message of history) {
                 const belongsToModel =
                     message.role === "user"
                         ? !message.modelId || message.modelId === model.id
                         : message.role === "assistant" && message.modelId === model.id;
-                return belongsToModel
-                    ? sum + estimateTextTokens(message.content)
-                    : sum;
-            }, 0);
+                if (belongsToModel) estimate.addText(message.content);
+            }
             const attachmentTokens = estimatePreflightAttachmentTokens(
                 model,
                 payload.attachments
             );
+            // Attachment cost is a per-model estimate, not text.
+            estimate.addTokens(attachmentTokens);
+            const breakdown = atLeastOneToken(estimate.breakdown());
             inputTokensByModelForLog.push({
                 modelId: model.id,
-                inputTokens: Math.max(
-                    1,
-                    historyTokens + promptTokens + attachmentTokens
-                ),
+                inputTokens: breakdown.rawTotal,
                 attachmentTokens,
             });
             const capability = getWebSearchCapability(model.id);
             return createChatBudget(
                 access.kind,
                 model,
-                Math.max(1, historyTokens + promptTokens + attachmentTokens),
+                breakdown,
                 {
                     webSearchSurchargeCredits: getWebSearchSurchargeCredits(
                         payload.webSearchMode ?? "off",
