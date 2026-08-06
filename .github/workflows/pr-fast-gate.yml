@@ -220,6 +220,15 @@ jobs:
         timeout-minutes: 5
         run: npm run check:image-executor-budget
 
+      # The DB integration runner names its suites one by one, because they are
+      # split across processes for module-mock isolation and a glob cannot make
+      # that decision. What a hand-written list cannot do is notice a file
+      # nobody added to it: provider-probe.db.test.ts sat unlisted from #245
+      # and had been failing since STG-R002, invisibly, because nothing ran it.
+      - name: DB integration coverage
+        timeout-minutes: 5
+        run: npm run check:db-integration-coverage
+
       # The cost guardrails are derived from plan credits and stored in
       # ChatUsageBucket.count. When that product outgrew int4, PostgreSQL threw
       # 22003 in the guard query instead of returning an allow/deny decision and

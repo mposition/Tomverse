@@ -77,7 +77,13 @@ test("real-traffic recording never touches the probe-specific fields (reverse di
   });
 
   await recordProviderSuccess("groq");
-  await recordProviderFailure("groq", "TEST_FAILURE_CODE");
+  // A code from PROVIDER_CALL_DIAGNOSTIC_ROOTS, not an invented one. STG-R002
+  // made `recordProviderFailure` classify before it writes: a code that does
+  // not describe a completed provider round trip is a local rejection, is
+  // scoped `none`, and deliberately writes no health state at all. This test
+  // is about probe fields surviving *real traffic*, so it has to send real
+  // traffic -- with a made-up code it asserted nothing and failed.
+  await recordProviderFailure("groq", "AI_REQUEST_FAILED.503");
 
   const afterRealTraffic = await prisma.providerHealthState.findUniqueOrThrow({
     where: { provider: "groq" },

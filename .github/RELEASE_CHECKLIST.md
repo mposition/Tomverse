@@ -29,6 +29,7 @@ Date / timezone:    ____________________
 - [ ] `npm run check:model-pricing`
 - [ ] `npm run check:image-pricing`
 - [ ] `npm run check:image-executor-budget`
+- [ ] `npm run check:db-integration-coverage`
 - [ ] `npm run check:default-models`
 - [ ] `npm run check:encoding:strict`
 - [ ] `npm run check:context-window-register`
