@@ -59,3 +59,52 @@ export const adminReauthenticationHref = (callbackPath: unknown) => {
   url.searchParams.set("callbackUrl", normalizeAdminCallbackPath(callbackPath));
   return `${url.pathname}${url.search}`;
 };
+
+/**
+ * The `reason` the sign-in page reads to offer an account chooser.
+ *
+ * Distinct from `admin-session-expired`: that one asks the *same* administrator
+ * to authenticate again, this one says the previous session was ended on
+ * purpose because the visitor needs a different account.
+ */
+export const ACCOUNT_SWITCH_REASON = "switch-account";
+
+/**
+ * Whether a request path belongs to the admin console's URL space.
+ *
+ * Used by the 404 page to decide whether to offer account switching, so it has
+ * to answer the same way for every visitor: it reads the path only, never the
+ * session, and never whether the path resolves to a real route. A signed-in
+ * non-administrator, a signed-out visitor and a typo under `/admin/` therefore
+ * all get one identical page, which is what keeps the 404 from confirming that
+ * anything is behind these URLs.
+ */
+export const isAdminPathname = (value: unknown) => {
+  if (typeof value !== "string" || !value.startsWith("/")) return false;
+  try {
+    const parsed = new URL(value, PUBLIC_ORIGIN);
+    // `//evil.example/admin` also starts with a slash and parses as a
+    // protocol-relative URL onto another origin; the origin check is what
+    // rejects it.
+    if (parsed.origin !== PUBLIC_ORIGIN) return false;
+    return parsed.pathname === "/admin" || parsed.pathname.startsWith("/admin/");
+  } catch {
+    return false;
+  }
+};
+
+/**
+ * Where the "sign out and use another account" button sends the browser once
+ * the session cookie is gone.
+ *
+ * The destination is normalized by `normalizeAdminCallbackPath`, so an external
+ * origin, a protocol-relative host or a `javascript:` scheme can never survive
+ * into the `callbackUrl` the sign-in page later navigates to -- they all fall
+ * back to `/admin/overview`.
+ */
+export const accountSwitchSignInHref = (callbackPath: unknown) => {
+  const url = new URL("/auth/signin", PUBLIC_ORIGIN);
+  url.searchParams.set("callbackUrl", normalizeAdminCallbackPath(callbackPath));
+  url.searchParams.set("reason", ACCOUNT_SWITCH_REASON);
+  return `${url.pathname}${url.search}`;
+};
