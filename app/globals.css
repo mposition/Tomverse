@@ -167,6 +167,12 @@
   --color-accent-account-400: var(--color-teal-400);
   --color-accent-account-700: var(--color-teal-700);
 
+  /* accent-account-memory: the account long-term memory control (policy §8.1).
+     Teal like accent-account because both are about the account rather than a
+     feature, but a separate role: memory is a privacy control the user turns
+     on and off, and changing how the avatar looks must not move it. */
+  --color-accent-account-memory-500: var(--color-teal-500);
+
   /* accent-ai-review: AI Review only. The cyan -> blue -> purple sequence is reserved for it; no other role may use the full gradient. */
   --color-accent-ai-review-end-50: var(--color-violet-50);
   --color-accent-ai-review-mid-50: var(--color-blue-50);
