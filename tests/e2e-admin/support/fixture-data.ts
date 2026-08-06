@@ -156,6 +156,31 @@ export const FIXTURE_MODEL = {
     /** `lib/modelRegistryShared.ts` allow-lists this exact base URL. */
     apiBaseUrl: "https://api.anthropic.com",
   },
+  /**
+   * Retired exactly as `isRetiredModel()` defines it -- delisted, disabled and
+   * status disabled -- so the registry's lifecycle filter has a row that must
+   * not be confused with the merely disabled one above.
+   */
+  retired: {
+    id: "e2e-model-retired",
+    name: "E2E Retired Model",
+    provider: "google",
+    apiModel: "e2e-retired",
+    /** `lib/modelRegistryShared.ts` allow-lists this exact base URL. */
+    apiBaseUrl: "https://generativelanguage.googleapis.com/v1beta",
+  },
+  /**
+   * Removed from the catalogue by an administrator (`catalogDeleted`). A
+   * separate state from retirement, and still runnable-looking otherwise.
+   */
+  archived: {
+    id: "e2e-model-archived",
+    name: "E2E Archived Model",
+    provider: "openai",
+    apiModel: "e2e-archived",
+    /** `lib/modelRegistryShared.ts` allow-lists this exact base URL. */
+    apiBaseUrl: "https://api.openai.com/v1",
+  },
 } as const;
 
 export const FIXTURE_INCIDENT = {
