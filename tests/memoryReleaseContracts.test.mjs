@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 import { formatConversationAsText } from "../lib/exportConversation.ts";
 import {
@@ -252,4 +253,27 @@ test("a well-formed list revokes exactly what it names", () => {
         false,
         "a different prompt version is a different pair"
     );
+});
+
+/* ------------------------------------- §8.1 invariant 1: mode is read ----- */
+
+test("both chat entry points pass the conversation's memory mode", () => {
+    // This is a source check on purpose, and the reason is the bug it exists
+    // for: `Conversation.memoryMode` was stored, the gate consulted it, and
+    // nothing in between ever passed it — so the column had no effect and
+    // every type checked. Nothing at runtime can catch an argument that is
+    // simply never supplied, and §8.1 requires *both* sides to read it: if
+    // only preflight did, a conversation with memory off would be priced
+    // without a memory block and then sent one.
+    for (const path of [
+        "../app/api/chat/route.ts",
+        "../app/api/chat/preflight/route.ts",
+    ]) {
+        const source = readFileSync(new URL(path, import.meta.url), "utf8");
+        const call = source.slice(source.indexOf("buildChatMemoryContext({"));
+        assert.ok(
+            call.slice(0, 600).includes("conversationMode:"),
+            `${path} must pass conversationMode to buildChatMemoryContext`
+        );
+    }
 });

@@ -50,8 +50,22 @@ type MemoryReport = {
             failureRate: number | null;
         }>;
     };
+    followupProxy: {
+        memory: FollowupArm;
+        plain: FollowupArm;
+        followupDifference: number | null;
+        regenerateDifference: number | null;
+    };
     counters: Record<string, number>;
     unavailable: Unavailable;
+};
+
+type FollowupArm = {
+    answers: number;
+    followups: number;
+    regenerates: number;
+    followupRate: number | null;
+    regenerateRate: number | null;
 };
 
 type ImportReport = {
@@ -265,6 +279,39 @@ export function AdminMemoryImportPanel() {
                             testId="admin-memory-counter-list"
                         />
                     </div>
+
+                    <section
+                        className="rounded-xl border border-zinc-800 p-4"
+                        data-testid="admin-memory-followup-proxy"
+                    >
+                        <h3 className="text-sm font-semibold text-zinc-200">
+                            Follow-up and regenerate proxy
+                        </h3>
+                        {/* §22 requires this to be labelled as a proxy where
+                            it is read, not only where it is computed. A
+                            follow-up is not a complaint — people ask second
+                            questions because the first answer was good. Only
+                            the difference between the arms carries a signal,
+                            and even that is indirect. */}
+                        <p className="mt-1 text-xs leading-5 text-zinc-500">
+                            A proxy, not a measurement of answer quality. A
+                            follow-up often means the answer was useful. Read
+                            the difference between the two arms, never either
+                            rate on its own, and never as a re-ask rate.
+                        </p>
+                        <div className="mt-3 grid gap-3 md:grid-cols-2">
+                            <Stat
+                                label="Follow-up within 120s"
+                                value={`${rate(memory.followupProxy.memory.followupRate)} vs ${rate(memory.followupProxy.plain.followupRate)}`}
+                                detail={`memory-shaped (${memory.followupProxy.memory.answers}) vs other answers (${memory.followupProxy.plain.answers}) · difference ${rate(memory.followupProxy.followupDifference)}`}
+                            />
+                            <Stat
+                                label="Regenerate within 120s"
+                                value={`${rate(memory.followupProxy.memory.regenerateRate)} vs ${rate(memory.followupProxy.plain.regenerateRate)}`}
+                                detail={`difference ${rate(memory.followupProxy.regenerateDifference)}`}
+                            />
+                        </div>
+                    </section>
 
                     {memory.runs.byPair.length > 0 && (
                         <div className="overflow-x-auto rounded-xl border border-zinc-800">

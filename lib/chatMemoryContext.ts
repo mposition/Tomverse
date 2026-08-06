@@ -7,6 +7,7 @@ import {
     type ContextBundleFingerprintInput,
 } from "@/lib/chatContextBundleCore";
 import { estimatePromptTokens } from "@/lib/chatTokenEstimate";
+import { resolveConversationMemoryMode } from "@/lib/conversationMemoryMode";
 import {
     buildMemoryContextPrompt,
     MEMORY_CONTEXT_PROMPT_VERSION,
@@ -136,11 +137,13 @@ export async function buildChatMemoryContext(input: {
     /** The request text retrieval is scored against. */
     query: string;
     /**
-     * This conversation's memory mode. Callers that have no per-conversation
-     * value pass the account default, which is what `UserMemorySettings`
-     * already resolves.
+     * The conversation's *stored* mode (§8.1 invariant 1), including
+     * `inherit`. Resolution happens here rather than at the caller because
+     * this is where the account default is already loaded, and one resolution
+     * site is what keeps the two chat entry points from disagreeing.
+     * Undefined for a request with no conversation, which inherits too.
      */
-    conversationMode?: "on" | "off";
+    conversationMode?: string | null;
     now?: Date;
 }): Promise<ChatMemoryContext> {
     if (!input.userId) {
@@ -158,14 +161,10 @@ export async function buildChatMemoryContext(input: {
         injectionFlagEnabled,
         hasApprovedExtractionPair: hasApprovedExtractionPair(revokedPairs),
         accountMasterEnabled: settings.masterEnabled,
-        // Anything that is not the stored "off" reads as on: the column is a
-        // string, and an unreadable value must not silently disable a
-        // control the user believes is on. "off" is the explicit choice.
-        conversationMode:
-            (input.conversationMode ?? settings.defaultConversationMode) ===
-            "off"
-                ? "off"
-                : "on",
+        conversationMode: resolveConversationMemoryMode(
+            input.conversationMode,
+            settings.defaultConversationMode
+        ),
     });
     if (!decision.allowed) return buildEmpty(decision);
 

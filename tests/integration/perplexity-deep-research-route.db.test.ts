@@ -98,6 +98,8 @@ console.error = (...args: unknown[]) => {
 // place before the route modules (and their next-auth import) are evaluated.
 type RouteModule = { POST: (request: Request) => Promise<Response> };
 let prisma: (typeof import("@/lib/prisma"))["prisma"];
+let buildChatMemoryContext: (typeof import("@/lib/chatMemoryContext"))["buildChatMemoryContext"];
+let issueChatContextBundle: (typeof import("@/lib/chatContextBundleService"))["issueChatContextBundle"];
 let chatRoute: RouteModule;
 let statusRoute: RouteModule;
 
@@ -107,6 +109,12 @@ before(async () => {
   statusRoute = (await import(
     mod("app/api/chat/deep-research/status/route.ts")
   )) as RouteModule;
+  ({ buildChatMemoryContext } = (await import(
+    mod("lib/chatMemoryContext.ts")
+  )) as typeof import("@/lib/chatMemoryContext"));
+  ({ issueChatContextBundle } = (await import(
+    mod("lib/chatContextBundleService.ts")
+  )) as typeof import("@/lib/chatContextBundleService"));
 });
 
 const resetDeepResearchTestData = () =>
@@ -176,6 +184,7 @@ const submitDeepResearch = async (
   options: {
     assistantMessageId?: string;
     messages?: Array<{ role: "user" | "assistant"; content: string }>;
+    contextBundle?: string;
   } = {}
 ) => {
   const assistantMessageId = options.assistantMessageId ?? randomUUID();
@@ -191,6 +200,9 @@ const submitDeepResearch = async (
         conversationId,
         assistantMessageId,
         deepResearchDepth: "standard",
+        ...(options.contextBundle
+          ? { contextBundle: options.contextBundle }
+          : {}),
       }),
     })
   );
@@ -733,4 +745,63 @@ test("two concurrent terminal polls settle the job once and agree on the final s
     await prisma.perplexityAsyncJob.count({ where: { status: "completed" } }),
     1
   );
+});
+
+/* -------------------------------------------------- §22 memory attribution */
+
+const persistedAnswer = (assistantMessageId: string) =>
+  prisma.message.findUnique({
+    where: { id: assistantMessageId },
+    select: { memoryUsedCount: true, memoryTokens: true },
+  });
+
+test("an answer with no context bundle records no memory attribution", async () => {
+  // NULL is the honest reading: memory was never possible for this request.
+  // §22's injection ratio depends on it being distinguishable from an answer
+  // that could have carried memory and did not.
+  const user = await seedProUser();
+  const conversation = await seedConversation(user.id);
+
+  const { assistantMessageId, response } = await submitDeepResearch(
+    conversation.id
+  );
+  assert.equal(response.status, 200);
+  assert.deepEqual(await persistedAnswer(assistantMessageId), {
+    memoryUsedCount: null,
+    memoryTokens: null,
+  });
+});
+
+test("an answer that carried a bundle records zero, not nothing", async () => {
+  // The distinction the whole metric rests on. A verified bundle whose
+  // retrieval selected nothing must persist 0 — recording NULL here would
+  // move the answer out of the denominator and quietly flatter the ratio.
+  //
+  // Injection is gated off today (no approved §12.4 pair), so the context the
+  // route builds is the empty one. Issuing the bundle from that same context
+  // is what makes it verify: the bundle asserts the context it was priced
+  // against, and here that context is "no memory".
+  const user = await seedProUser();
+  const conversation = await seedConversation(user.id);
+  const prompt = "2026년 전고체 배터리 시장을 조사해줘";
+  const context = await buildChatMemoryContext({
+    userId: user.id,
+    query: prompt,
+  });
+  const bundle = issueChatContextBundle({
+    subjectKey: user.id,
+    conversationId: conversation.id,
+    modelIds: [DEEP_RESEARCH_MODEL_ID],
+    context,
+  });
+
+  const { assistantMessageId, response } = await submitDeepResearch(
+    conversation.id,
+    { messages: [{ role: "user", content: prompt }], contextBundle: bundle.token }
+  );
+  assert.equal(response.status, 200);
+  assert.deepEqual(await persistedAnswer(assistantMessageId), {
+    memoryUsedCount: 0,
+    memoryTokens: 0,
+  });
 });

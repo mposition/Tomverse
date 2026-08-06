@@ -175,6 +175,9 @@ export async function POST(request: Request) {
             content: string;
             modelId: string | null;
         }> = [];
+        // §8.1 invariant 1: null until the conversation row is read, which is
+        // also the "no conversation" case — both inherit the account default.
+        let conversationMemoryMode: string | null = null;
         // A guest's transcript lives in their browser, so there is no server
         // conversation to read history from -- and no ownership question to
         // answer. Signed-in callers keep the full check below unchanged.
@@ -186,6 +189,7 @@ export async function POST(request: Request) {
                     password: true,
                     selectedModels: true,
                     kind: true,
+                    memoryMode: true,
                     messages: {
                         orderBy: { createdAt: "desc" },
                         take: 100,
@@ -236,6 +240,7 @@ export async function POST(request: Request) {
                 );
             }
             history = conversation.messages.reverse();
+            conversationMemoryMode = conversation.memoryMode;
         }
 
         // §10: the priced context and the sent context must be the same one,
@@ -246,6 +251,10 @@ export async function POST(request: Request) {
         const memoryContext = await buildChatMemoryContext({
             userId: session?.user?.id ?? null,
             query: payload.prompt,
+            // Priced under the same mode the chat route will send under. If
+            // only one side read it, a conversation with memory off would be
+            // charged for a memory block it never receives, or the reverse.
+            conversationMode: conversationMemoryMode,
         });
 
         const promptTokens =
