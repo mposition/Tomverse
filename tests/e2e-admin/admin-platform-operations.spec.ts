@@ -30,7 +30,7 @@ test.describe("platform operations", () => {
   test("an incident cannot be opened without a title and is refused client-side", async ({
     page,
   }) => {
-    await page.goto("/admin/incidents");
+    await page.goto("/admin/providers?tab=incidents");
     const enable = page.getByRole("button", { name: "Enable incident mode" });
 
     await expect(enable).toBeDisabled();
@@ -43,7 +43,7 @@ test.describe("platform operations", () => {
   test("opening and resolving a provider incident is reflected on screen and stored", async ({
     page,
   }) => {
-    await page.goto("/admin/incidents");
+    await page.goto("/admin/providers?tab=incidents");
 
     await page
       .getByPlaceholder("Provider outage, quota issue, degraded model")
@@ -182,7 +182,7 @@ test.describe("platform operations", () => {
   });
 
   test("a failed alert delivery can be acknowledged", async ({ page }) => {
-    await page.goto("/admin/alerts");
+    await page.goto("/admin/alerts?tab=deliveries");
     const log = page
       .locator("section")
       .filter({ hasText: "Notification delivery log" });
@@ -210,7 +210,7 @@ test.describe("platform operations", () => {
     expect(refusedForOps.status()).toBe(403);
 
     await signInAs("billing");
-    await page.goto("/admin/webhooks");
+    await page.goto("/admin/automation?tab=webhooks");
     const monitor = page
       .locator("section")
       .filter({ hasText: "Billing event monitor" });

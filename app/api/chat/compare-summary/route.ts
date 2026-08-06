@@ -1,5 +1,6 @@
 export const dynamic = "force-dynamic";
 
+import type { TokenEstimateBreakdown } from "@/lib/chatTokenEstimate";
 import { randomUUID } from "node:crypto";
 import { generateText, Output } from "ai";
 import { z } from "zod";
@@ -63,7 +64,7 @@ const jsonError = (
 
 const quickSummaryBudget = (
   candidate: Parameters<typeof getActiveAiModel>[0],
-  inputTokens: number
+  inputTokens: TokenEstimateBreakdown
 ) => {
   const baseBudget = createChatBudget("guest", candidate, inputTokens);
   return {

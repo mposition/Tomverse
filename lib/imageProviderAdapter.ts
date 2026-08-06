@@ -7,7 +7,11 @@ import {
 } from "@/lib/imageGenerationPricing";
 import { getImageModel, type ImageModelProfile } from "@/lib/imageModelRegistry";
 import { readImageDimensions } from "@/lib/imageDimensions";
-import type { ImageGenerationFailurePhase } from "@/lib/imageGenerationStateCore";
+import {
+  IMAGE_PROVIDER_RETRY_DELAYS_MS,
+  IMAGE_PROVIDER_TIMEOUT_MS,
+  type ImageGenerationFailurePhase,
+} from "@/lib/imageGenerationStateCore";
 import {
   buildGoogleImageRequest,
   GOOGLE_API_KEY_HEADER,
@@ -35,13 +39,15 @@ const OPENAI_IMAGES_URL = "https://api.openai.com/v1/images/generations";
 
 // A complex request can run up to ~2 minutes provider-side; the ceiling
 // leaves room for that plus network without letting a hung call outlive the
-// lease heartbeat forever.
-const PROVIDER_TIMEOUT_MS = 150_000;
-
-// Bounded: one initial attempt plus two retries on 429/5xx/network, with
-// jittered backoff. Anything still failing after that surfaces to the caller
-// for refund. User errors and moderation blocks are never retried.
-const RETRY_DELAYS_MS = [1_000, 3_000];
+// lease heartbeat forever. One initial attempt plus two retries on
+// 429/5xx/network, with jittered backoff; anything still failing after that
+// surfaces to the caller for refund, and user errors and moderation blocks
+// are never retried.
+//
+// Both numbers live in the state core, because the stale threshold and the
+// executor's route budget are derived from them and have to move together.
+const PROVIDER_TIMEOUT_MS = IMAGE_PROVIDER_TIMEOUT_MS;
+const RETRY_DELAYS_MS = IMAGE_PROVIDER_RETRY_DELAYS_MS;
 
 export class ImageProviderError extends Error {
   constructor(
@@ -377,7 +383,10 @@ const generateWithGoogle = async (
     size: input.size,
     maxOutputTokens: model.maxOutputTokens ?? null,
     thinkingLevel: model.thinkingLevel ?? null,
-    deliveryMimeType: model.outputMimeTypes[0] ?? "image/png",
+    // The profile's request preference, not the head of its storage
+    // allowlist: conflating the two sent every Google request asking for PNG,
+    // which its API refuses.
+    deliveryMimeType: model.deliveryMimeType ?? model.outputMimeTypes[0] ?? "image/png",
   });
   if (!body) {
     throw new ImageProviderError(

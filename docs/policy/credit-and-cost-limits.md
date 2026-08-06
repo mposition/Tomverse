@@ -105,7 +105,7 @@ Max 전체입니다(Pro는 3,000이라 아래에 머뭅니다).
 
 관련 파일:
 
-- `prisma/migrations/20260801130000_widen_chat_usage_bucket_count/migration.sql`
+- `prisma/migrations-archive/20260801130000_widen_chat_usage_bucket_count/migration.sql`
 - `lib/chatUsageBucketCount.ts`
 - `tests/usageBucketRange.test.mjs` (schema 자료형 + 플랜별 최대 저장값)
 - `tests/integration/credit-finance.db.test.ts`
@@ -493,7 +493,7 @@ Console에만 남습니다.
 - 관련 테스트: `tests/modelPricing.test.mjs`, `tests/chatCostGuardrails.test.mjs`,
   `tests/modelRegistryPricingInheritance.test.ts`,
   `tests/openAiPricingContract.test.ts`,
-  `tests/costBucketCorrectionCore.test.mjs`,
+  `tests/costBucketCorrectionCore.test.ts`,
   `tests/pendingModelPricing.test.mjs`, `tests/fallbackPricingMetrics.test.mjs`,
   `tests/chatAvailabilityCore.test.mjs`, `tests/chatLimitDecisionCore.test.mjs`,
   `tests/chatTokenEstimate.test.mjs`, `tests/chatCostSafetyCore.test.mjs`,

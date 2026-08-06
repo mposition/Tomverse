@@ -1,5 +1,6 @@
 export const dynamic = "force-dynamic";
 
+import type { TokenEstimateBreakdown } from "@/lib/chatTokenEstimate";
 import { randomUUID } from "node:crypto";
 import { generateText, Output } from "ai";
 import { getServerSession } from "next-auth/next";
@@ -92,7 +93,10 @@ const responseMapForCachedSummary = (
   return mapped.every(Boolean) ? mapped : null;
 };
 
-const quickSummaryBudget = (candidate: AiModel, inputTokens: number) => {
+const quickSummaryBudget = (
+  candidate: AiModel,
+  inputTokens: TokenEstimateBreakdown
+) => {
   const baseBudget = createChatBudget("user", candidate, inputTokens);
   return {
     ...baseBudget,

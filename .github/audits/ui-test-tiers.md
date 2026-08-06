@@ -31,7 +31,43 @@ browser coverage without rebuilding E2E" 항목이 이 문서의 존재와 workf
 | `korean-typography.spec.ts` | display heading 어절 보존 ×4 viewport, 150% zoom | UI-006 | 양쪽 |
 | `pricing-promotion-reflow.spec.ts` | 16개 viewport×zoom×언어 조합의 절대 overflow ≤1px + promotion 귀속 | UI-005 | desktop-chromium |
 
-검토 시점 실측: **76 test 통과 / 14 skip / 67초** (두 project 합계, 단일 worker).
+위 다섯 항목은 UI-001~UI-007 감사에서 tier가 만들어질 때 기록된 것입니다.
+그 뒤로 tier는 **표가 아니라 태그로** 정해지므로, spec은 `@ui-risk`를 붙이는
+것만으로 합류했고 이 문서는 따라오지 않았습니다. 2026-08-05 대조 시점에
+태그된 파일은 25개, 표에 적힌 것은 5개였습니다.
+
+나머지 태그된 spec은 다음과 같습니다. 상세 case 목록 없이 파일만 기록하는
+것은 태그가 진실이고 표가 뒤늦기 때문이며, 각 spec의 실제 case는 파일에
+있습니다. `npm run check:ui-tier-coverage`가 이 목록과 태그를 양방향으로
+맞춥니다.
+
+| Spec |
+|---|
+| `account-flow.spec.ts` |
+| `chat-analytics-settings-placement.spec.ts` |
+| `chat-memory-context.spec.ts` |
+| `comparison-panel-controls.spec.ts` |
+| `feedback-modal.spec.ts` |
+| `keyboard-and-heading-structure.spec.ts` |
+| `marketing-language-analytics.spec.ts` |
+| `marketing-language-focus.spec.ts` |
+| `marketing-toast-host.spec.ts` |
+| `menu-and-tab-semantics.spec.ts` |
+| `mobile-composer-banner-reflow.spec.ts` |
+| `mobile-short-viewport-drawer.spec.ts` |
+| `modal-focus-contract.spec.ts` |
+| `model-panel-tablet-reachability.spec.ts` |
+| `provider-status.spec.ts` |
+| `settings-information-architecture.spec.ts` |
+| `sidebar-context-menu-theme.spec.ts` |
+| `signin-analytics-placement.spec.ts` |
+| `skip-link-and-armed-delete.spec.ts` |
+| `ssr-root-language.spec.ts` |
+
+검토 시점 실측(2026-08-05, `--list`): **25개 파일 630 test** (두 project 합계).
+이전 기록 "76 test / 14 skip / 67초"는 표에 적힌 5개 파일만 세던 시점의
+값입니다. 이 tier는 merge를 차단하므로, PR tier 비용을 근거로 무언가를
+빼거나 넣는 판단은 위 숫자를 다시 재고 나서 합니다.
 
 ## PR tier에 두지 않는 것과 그 이유
 

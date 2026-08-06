@@ -261,3 +261,16 @@ test("a chip label may be shortened; the model's identity may not", () => {
     assert.ok(imageModelChipLabel(model).length > 0, model.id);
   }
 });
+
+test("every Google model asks for the one delivery MIME its API accepts", () => {
+  // Established by the API itself on 2026-08-06, which is stronger evidence
+  // than the documentation this environment cannot read: it rejected
+  // image/png and named image/jpeg as the supported value.
+  for (const model of IMAGE_MODEL_REGISTRY) {
+    if (model.provider !== "google") continue;
+    assert.equal(model.deliveryMimeType, "image/jpeg", model.id);
+    // The storage allowlist stays wider than the request: what may be written
+    // down unmodified is a different question from what is asked for.
+    assert.ok(model.outputMimeTypes.includes("image/jpeg"), model.id);
+  }
+});

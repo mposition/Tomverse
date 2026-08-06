@@ -27,6 +27,7 @@ rendering, this contract is the answer.
 | Sidebar placement of the launcher | `components/chat/ChatSidebar.tsx` |
 | Which models exist, their prices and their holds | `lib/imageModelRegistry.ts` |
 | Group polling endpoint the timeline reads | `app/api/images/groups/[groupId]/route.ts` |
+| Operations view (budget, registry, invariants) | `components/admin/AdminImageGenerationPanel.tsx`, mounted at `/admin/providers` |
 | Current-attempt and group-status derivation | `lib/imageGenerationStateCore.ts`, `lib/imageGenerationRead.ts` |
 | Timeline merge rules (stale answers, asset URL churn) | `lib/imageTimelineMerge.ts` |
 | Copy | `locales/*.ts` (`chat.imageGeneration*`, `chat.imageModel*`, `chat.modelPickerTab*`, `sidebar.newImage*`) |
@@ -166,6 +167,23 @@ What restore may and may not do:
 
 A restore answer that arrives after the user has touched a model, quality or
 size is discarded. The user's newer choice wins a race with the network.
+
+### The submit control is the progress
+
+While a comparison is running the button **is** the progress indicator: a
+spinner, "Generating N model(s)" counted by target rather than attempt, and
+disabled. A separate sentence beside a button still reading "Generate" at full
+contrast said the same thing twice and left it ambiguous whether the button
+could be clicked.
+
+- The price badge is dropped while a run is in flight — it describes a request
+  the user can still start, and there is none.
+- The busy sentence stays in the accessibility tree as a visually hidden
+  `role="status"` (the same idiom as the comparison action rail): a spinner is
+  no signal at all to a screen reader. Visually hidden means it paints no row —
+  `sr-only`, never `display: none`.
+- Per-model progress stays on the timeline cards. That is where a comparison's
+  state belongs; the composer says only whether a new run can start.
 
 ### Model disclosure threshold
 
@@ -332,6 +350,7 @@ Verified for **both** desktop and mobile projects:
 | 20 | enabled model count 2, 3, 4 | inline, inline, compact — with every selected price still visible |
 | 21 | re-entering a conversation | last comparison's models and options restored; prompt empty |
 | 22 | restore drops a model or cannot restore options | both stated on screen, never silently applied |
+| 23 | comparison running | button shows the spinner and the model count, is disabled, drops the price; busy sentence hidden but present |
 
 ## Automated regression contract
 
@@ -374,6 +393,7 @@ rather than the behaviour.
 - [ ] A settled card still keeps its asset URLs across polls
 - [ ] Composer settings survive draft promotion, and remount still isolates a real conversation switch
 - [ ] Re-entry restores from the latest group, and says what it could not restore
+- [ ] The running state lives on the button, not in a second sentence beside it
 - [ ] Enter behaviour comes from `getChatEnterKeyAction()` with the IME guard
 - [ ] Selected models' exact prices are inline in both disclosure modes
 - [ ] A retry still replaces its card in place

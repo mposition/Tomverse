@@ -13,10 +13,13 @@ import {
 import { conversationKindNotSupportedResponse, isChatConversationKind } from "@/lib/conversationKindGuard";
 import { prisma } from "@/lib/prisma";
 import {
+    AVAILABLE_MODELS,
     modelSupportsImageInput,
     modelSupportsNativePdfInput,
     type AiModel,
 } from "@/lib/models";
+import { buildTaskProfile } from "@/lib/taskProfileCore";
+import { scheduleRoutingShadowRun } from "@/lib/routingShadow";
 import { getRuntimeModels } from "@/lib/modelRegistry";
 import { getActiveAiModel } from "@/lib/activeAiModel";
 import {
@@ -120,10 +123,20 @@ import {
     GUEST_MAX_ATTACHMENTS_PER_MESSAGE,
 } from "@/lib/guestAttachments";
 import { isChatCostSafetyCode } from "@/lib/chatCostSafetyCore";
+import {
+    chatLeaseAcquired,
+    chatLeaseReleased,
+    chatLeaseStreamPublished,
+    chatLeaseTakenByStream,
+    chatLeaseToReleaseOnUnwind,
+    NO_CHAT_LEASE,
+    type ChatLeaseOwnership,
+} from "@/lib/chatLeaseOwnershipCore";
 import { estimatePromptTokens } from "@/lib/chatTokenEstimate";
 import { fitChatOutputToContextWindow } from "@/lib/chatContextWindow";
 import {
     ACTIVE_ESTIMATOR_VERSION,
+    createTokenEstimateAccumulator,
     getCalibration,
 } from "@/lib/chatTokenEstimate";
 import { createShadowAccumulator } from "@/lib/tokenEstimateShadow";
@@ -670,7 +683,11 @@ async function handleChatPost(
     traceId: string,
     verificationGrant: { setCookie?: string }
 ): Promise<Response> {
-    let leaseId: string | null = null;
+    // Who holds the concurrency slot right now. The failure path at the bottom
+    // asks this rather than a boolean, because "the request no longer holds it"
+    // covers both a clean handoff to the stream and a stream that was built and
+    // never published -- and only the second is a slot nobody will free.
+    let leaseOwnership: ChatLeaseOwnership = NO_CHAT_LEASE;
     // Declared out here so the failure path can stop the renewal timer even
     // when the stream was never built: an interval left running would keep
     // renewing a lease no request owns any more.
@@ -1012,9 +1029,22 @@ async function handleChatPost(
                   candidateVersion: SHADOW_CANDIDATE_ESTIMATOR_VERSION,
               })
             : null;
+        // The segment-level companion to `estimatedInputTokens`. The number is
+        // what the rest of this handler reads; the breakdown is what the
+        // reservation needs, because the calibration widens each character
+        // segment by its own margin and a bare total has thrown that mix away.
+        // Both are fed from this one alias so neither can drift from the other
+        // -- `tests/chatBudgetBreakdown.test.mjs` pins that they agree.
+        const inputEstimate = createTokenEstimateAccumulator();
         const estimateTextTokens = (text: string) => {
             shadowAccumulator?.add(text);
-            return Math.max(1, estimatePromptTokens(text));
+            const raw = estimatePromptTokens(text);
+            // The per-piece floor is a minimum, not a prediction: an empty
+            // message still costs the provider its role framing. It is counted
+            // as an opaque token so no tokenizer margin is applied to it.
+            if (raw > 0) inputEstimate.addText(text);
+            else inputEstimate.addTokens(1);
+            return Math.max(1, raw);
         };
 
         const providerContextQueues = new Map<string, ModelMessage[][]>();
@@ -1200,6 +1230,8 @@ async function handleChatPost(
             // two agree here by construction, and if they ever stop agreeing
             // the user should be billed the number they were quoted.
             estimatedInputTokens += verification.payload.memoryTokens;
+            // Quoted, not re-estimated -- so it enters as an opaque count.
+            inputEstimate.addTokens(verification.payload.memoryTokens);
         }
 
         // §9.1 places the memory block above the conversation and below the
@@ -1640,9 +1672,14 @@ async function handleChatPost(
             const text = [String(msg.content ?? ""), ...textAttachments]
                 .filter(Boolean)
                 .join("\n\n");
+            const nativeAttachmentTokens = estimateNativeAttachmentTokens(
+                fileParts.length
+            );
+            // Not text: a per-part allowance for what the provider will charge
+            // for the attachment itself.
+            inputEstimate.addTokens(nativeAttachmentTokens);
             estimatedInputTokens +=
-                estimateTextTokens(text) +
-                estimateNativeAttachmentTokens(fileParts.length);
+                estimateTextTokens(text) + nativeAttachmentTokens;
 
             formattedMessages.push({
                 role: "user",
@@ -1655,7 +1692,7 @@ async function handleChatPost(
         const budget = createChatBudget(
             access.kind,
             modelConfig,
-            estimatedInputTokens,
+            inputEstimate.breakdown(),
             {
                 webSearchSurchargeCredits: getWebSearchSurchargeCredits(
                     webSearchMode ?? "off",
@@ -1697,6 +1734,54 @@ async function handleChatPost(
         // unfitted figure -- over-reserving is refunded at settlement, and
         // reserving less than the answer might cost protects nothing.
         const requestMaxOutputTokens = outputBudget.outputTokens;
+        // Shadow routing (docs/policy/tomverse-chat-delivery-plan.md §6 step 3).
+        // The Router's rules run on this turn and the decision is recorded; the
+        // model the user selected is what executes. Handed to `after()` and
+        // never awaited: an experiment that can delay or fail a chat is not an
+        // experiment. Off unless TOMVERSE_ROUTER_SHADOW_ENABLED says otherwise.
+        scheduleRoutingShadowRun(() => {
+            const lastUserTurn = [...formattedMessages]
+                .reverse()
+                .find((message) => message.role === "user");
+            const parts = Array.isArray(lastUserTurn?.content)
+                ? lastUserTurn.content
+                : [];
+            const profileText =
+                typeof lastUserTurn?.content === "string"
+                    ? lastUserTurn.content
+                    : parts
+                          .filter((part) => part.type === "text")
+                          .map((part) => ("text" in part ? part.text : ""))
+                          .join("\n");
+            return {
+                traceId,
+                userId: access.userId ?? null,
+                subjectKey: access.subjectKey,
+                // A signed-in account with no resolved plan reads as Guest
+                // rather than as a paid one: the filters use this to decide
+                // what the account may reach, and guessing upwards would let a
+                // shadow decision consider a model the person cannot use.
+                plan: access.kind === "guest" ? "Guest" : (access.plan ?? "Free"),
+                profile: buildTaskProfile({
+                    text: profileText,
+                    attachments: parts
+                        .filter((part) => part.type === "file")
+                        .map((part) => ({
+                            mediaType:
+                                "mediaType" in part ? part.mediaType : undefined,
+                        })),
+                    webSearchRequested: nativeSearchEnabled,
+                }),
+                userSelectedModelId: modelConfig.id,
+                estimatedInputTokens,
+                reservedInputTokens: budget.inputTokens,
+                // The unfitted cap on purpose: the filters fit it to each
+                // candidate's own window, and handing them the figure already
+                // fitted to the user's model would bias every other candidate.
+                requestOutputCapTokens: budget.maxOutputTokens,
+                models: AVAILABLE_MODELS,
+            };
+        });
         const accessGrant = await acquireChatAccess(access, budget, {
             traceId,
             source: "chat",
@@ -1707,7 +1792,7 @@ async function handleChatPost(
             // admitted in part.
             admissionToken,
         });
-        leaseId = accessGrant.leaseId;
+        leaseOwnership = chatLeaseAcquired(accessGrant.leaseId);
         usageReservation = accessGrant.usageReservation;
         // Shadow only, and awaited so the settlement update cannot race the
         // insert it depends on. The recorder is inert unless the flag is set
@@ -1746,9 +1831,8 @@ async function handleChatPost(
             // Ownership of this turn moves to the polling job: the request
             // ends here, so its slot must end here too rather than being held
             // for a job that can outlive any lease.
-            const activeLeaseId = leaseId;
-            leaseId = null;
-            await releaseChatAccess(activeLeaseId, {
+            leaseOwnership = chatLeaseReleased();
+            await releaseChatAccess(accessGrant.leaseId, {
                 traceId,
                 reason: "deep_research_handoff",
                 subjectScope: access.kind,
@@ -1920,8 +2004,11 @@ async function handleChatPost(
         });
 
         const sourceReader = result.textStream.getReader();
-        const activeLeaseId = leaseId;
-        leaseId = null;
+        // The stream owns the slot from here, but it cannot release anything
+        // until it is pulled, and it is only pulled once the Response below is
+        // returned. Until then the failure path is still the owner of record.
+        const activeLeaseId = accessGrant.leaseId;
+        leaseOwnership = chatLeaseTakenByStream(leaseOwnership);
         let generatedText = "";
         let released = false;
         let sourceCancelled = false;
@@ -2583,15 +2670,23 @@ async function handleChatPost(
         // path, success and failure alike -- adding it here as well would
         // send it twice.
 
-        return new Response(protectedStream.pipeThrough(new TextEncoderStream()), {
-            headers,
-        });
+        const response = new Response(
+            protectedStream.pipeThrough(new TextEncoderStream()),
+            { headers }
+        );
+        // Only once the Response exists, because everything above it can still
+        // throw and an unpublished stream is never pulled. After this the
+        // stream's own release paths are the ones that free the slot.
+        leaseOwnership = chatLeaseStreamPublished(leaseOwnership);
+        return response;
     } catch (error: unknown) {
         stopLeaseHeartbeat?.();
-        if (leaseId) {
-            await releaseChatAccess(leaseId, {
+        const orphanedLease = chatLeaseToReleaseOnUnwind(leaseOwnership);
+        if (orphanedLease) {
+            leaseOwnership = chatLeaseReleased();
+            await releaseChatAccess(orphanedLease.leaseId, {
                 traceId,
-                reason: "request_failed_before_stream",
+                reason: orphanedLease.reason,
             });
         }
         if (usageReservation) {

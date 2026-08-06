@@ -288,6 +288,118 @@ const FETCHERS: Record<string, (userId: string) => Promise<unknown[]>> = {
       take: EXPORT_ROW_CAP,
     }),
 
+  // included_filtered. The user uploaded these themselves, so the import event
+  // is their own record. What stays internal is the machinery that produced
+  // it: parser and digest versions, the content digests, the batch protocol's
+  // sequence and idempotency keys, and the client fingerprint -- a pseudonymous
+  // device identifier rather than anything the user wrote, withheld on the same
+  // ground as the request context on a download request.
+  externalImport: (userId) =>
+    prisma.externalImport.findMany({
+      where: { userId },
+      select: {
+        id: true,
+        provider: true,
+        status: true,
+        failureCode: true,
+        conversationCount: true,
+        messageCount: true,
+        truncationCount: true,
+        duplicateCount: true,
+        createdAt: true,
+        completedAt: true,
+      },
+      orderBy: { createdAt: "asc" },
+      take: EXPORT_ROW_CAP,
+    }),
+
+  // included_filtered, and the filter is a lock rather than a column list.
+  //
+  // Policy §13.2, as applied to the memory export in #427: a locked source
+  // leaves the account as existence metadata and nothing more. The argument is
+  // the same here and stronger. A snapshot lock is a password the owner set on
+  // their own conversation, and the review screen honours it by refusing the
+  // page with 423 -- but an export is a document that leaves the account, so a
+  // title carried out in one survives the lock entirely. Whoever holds the
+  // session can request an export; the lock exists precisely because holding
+  // the session is not supposed to be enough.
+  //
+  // So a locked snapshot exports as: it exists, it is locked, and when it
+  // arrived. No title, no counts, no source timestamps -- each of those
+  // describes the thing the lock is hiding. The row is still listed, because a
+  // user is entitled to know what their account holds; that is what existence
+  // metadata means.
+  externalConversation: async (userId) => {
+    const rows = await prisma.externalConversation.findMany({
+      where: { userId },
+      select: {
+        id: true,
+        importId: true,
+        provider: true,
+        externalStableId: true,
+        title: true,
+        sourceModelLabels: true,
+        sourceCreatedAt: true,
+        sourceUpdatedAt: true,
+        messageCount: true,
+        importedAt: true,
+        // Read to decide, never emitted: it is a scrypt hash of the owner's
+        // lock password, and a copy of it in a downloadable file is an offline
+        // cracking target for the one secret this table has.
+        password: true,
+      },
+      orderBy: { importedAt: "asc" },
+      take: EXPORT_ROW_CAP,
+    });
+    // Both shapes are written out field by field. A spread of the select
+    // above would be correct today and wrong the moment somebody adds a
+    // column to it -- which is the whole reason this file forbids one.
+    return rows.map((row) =>
+      row.password
+        ? {
+              id: row.id,
+              importId: row.importId,
+              locked: Boolean(row.password),
+              importedAt: row.importedAt,
+          }
+        : {
+              id: row.id,
+              importId: row.importId,
+              provider: row.provider,
+              externalStableId: row.externalStableId,
+              title: row.title,
+              sourceModelLabels: row.sourceModelLabels,
+              sourceCreatedAt: row.sourceCreatedAt,
+              sourceUpdatedAt: row.sourceUpdatedAt,
+              messageCount: row.messageCount,
+              importedAt: row.importedAt,
+              locked: Boolean(row.password),
+          }
+    );
+  },
+
+  // included_filtered for the same reason, applied to the content itself: a
+  // locked conversation's messages do not leave the account at all. Filtered in
+  // the query rather than after it, so a locked conversation's text is never
+  // read into a process that is building a file for download.
+  externalMessage: (userId) =>
+    prisma.externalMessage.findMany({
+      where: { userId, conversation: { password: null } },
+      select: {
+        externalConversationId: true,
+        role: true,
+        content: true,
+        sourceModelLabel: true,
+        sourceTimestamp: true,
+        ordinal: true,
+        truncated: true,
+        originalCharacterCount: true,
+        retainedCharacterCount: true,
+      },
+      orderBy: [{ externalConversationId: "asc" }, { ordinal: "asc" }],
+      take: EXPORT_ROW_CAP,
+    }),
+
   privacyRequest: (userId) =>
     prisma.privacyRequest.findMany({
       where: { userId },
@@ -486,67 +598,6 @@ const FETCHERS: Record<string, (userId: string) => Promise<unknown[]>> = {
         createdAt: true,
       },
       orderBy: { createdAt: "asc" },
-      take: EXPORT_ROW_CAP,
-    }),
-
-  externalImport: (userId) =>
-    prisma.externalImport.findMany({
-      where: { userId },
-      select: {
-        id: true,
-        provider: true,
-        status: true,
-        conversationCount: true,
-        messageCount: true,
-        normalizedBytes: true,
-        truncationCount: true,
-        duplicateCount: true,
-        failureCode: true,
-        createdAt: true,
-        completedAt: true,
-      },
-      orderBy: { createdAt: "asc" },
-      take: EXPORT_ROW_CAP,
-    }),
-
-  // `password` is absent on purpose: it is the lock the user set on an imported
-  // conversation, and an export carrying it would unlock every conversation it
-  // protects for anyone the file reaches.
-  externalConversation: (userId) =>
-    prisma.externalConversation.findMany({
-      where: { userId },
-      select: {
-        id: true,
-        importId: true,
-        provider: true,
-        title: true,
-        sourceModelLabels: true,
-        sourceCreatedAt: true,
-        sourceUpdatedAt: true,
-        messageCount: true,
-        contentBytes: true,
-        finalized: true,
-        importedAt: true,
-      },
-      orderBy: { importedAt: "asc" },
-      take: EXPORT_ROW_CAP,
-    }),
-
-  externalMessage: (userId) =>
-    prisma.externalMessage.findMany({
-      where: { userId },
-      select: {
-        externalConversationId: true,
-        ordinal: true,
-        role: true,
-        content: true,
-        sourceModelLabel: true,
-        sourceTimestamp: true,
-        truncated: true,
-        originalCharacterCount: true,
-        retainedCharacterCount: true,
-      },
-      orderBy: [{ externalConversationId: "asc" }, { ordinal: "asc" }],
       take: EXPORT_ROW_CAP,
     }),
 

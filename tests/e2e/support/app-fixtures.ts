@@ -470,6 +470,13 @@ export type QaConversationMessage = {
    * a *stored* conversation renders, not only the streamed one.
    */
   searchMetadata?: unknown;
+  /**
+   * §13.4's disclosure as a *stored* fact. The real endpoint sends this only
+   * when the answer was given at least one memory, so a spec seeding it is
+   * asking the same question a reload asks: does the count come back, or did
+   * it only ever exist in the streaming response header?
+   */
+  memoryUsedCount?: number;
 };
 
 export async function mockAuthenticatedApi(

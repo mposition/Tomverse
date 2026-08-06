@@ -29,7 +29,7 @@ test.describe("trace observability", () => {
     signInAs,
   }) => {
     await signInAs("owner");
-    await page.goto("/admin/feedback");
+    await page.goto("/admin/support?tab=feedback");
 
     const entry = page
       .getByTestId("feedback-entry")
@@ -67,7 +67,7 @@ test.describe("trace observability", () => {
     signInAs,
   }) => {
     await signInAs("owner");
-    await page.goto("/admin/feedback");
+    await page.goto("/admin/support?tab=feedback");
 
     const entry = page
       .getByTestId("feedback-entry")
@@ -90,7 +90,7 @@ test.describe("trace observability", () => {
     signInAs,
   }) => {
     await signInAs("owner");
-    await page.goto("/admin/feedback");
+    await page.goto("/admin/support?tab=feedback");
     await expect(
       page
         .getByTestId("feedback-entry")

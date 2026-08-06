@@ -22,7 +22,7 @@ The message canvas may be optimized for additional vertical space, but the prima
 | Comparison action rail above the composer | `components/chat/ComparisonActionRail.tsx` |
 | Mobile AI/security disclosure below the composer | `components/chat/AiDisclaimerNotice.tsx` |
 | Guest verification bottom sheet | `components/chat/GuestVerificationSheet.tsx` |
-| Keyboard/landscape compaction signal | `components/chat/useCompactBottomDock.ts` |
+| Keyboard/landscape compaction signal | `components/chat/useVisualViewport.ts` (`useCompactBottomDock`) |
 | Mobile shell detection | `components/chat/useIsMobileShell.ts` |
 | Visible-viewport measurement (keyboard inset, visible height) | `components/chat/useVisualViewport.ts` |
 | Provider outage banner above the composer | `components/chat/ProviderStatusBanner.tsx` |
