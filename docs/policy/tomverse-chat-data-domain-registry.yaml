@@ -254,7 +254,7 @@ domains:
     deletionMechanism: cascade_from_user
     retentionPolicy: immediate
     implementationStatus: implemented
-    inUnifiedExport: unverified
+    inUnifiedExport: included_filtered
 
   - domain: externalConversation
     prismaModel: ExternalConversation
@@ -263,7 +263,7 @@ domains:
     deletionMechanism: cascade_from_user
     retentionPolicy: immediate
     implementationStatus: implemented
-    inUnifiedExport: unverified
+    inUnifiedExport: included_filtered
 
   - domain: externalMessage
     prismaModel: ExternalMessage
@@ -272,7 +272,7 @@ domains:
     deletionMechanism: cascade_from_user
     retentionPolicy: immediate
     implementationStatus: implemented
-    inUnifiedExport: unverified
+    inUnifiedExport: included_filtered
 
   - domain: memoryItem
     prismaModel: MemoryItem
