@@ -1224,6 +1224,8 @@ export const de = {
             "Die Extraktion konnte nicht abgeschlossen werden. Ergebnisse fertiger Bündel bleiben erhalten.",
         runCancelledNote:
             "Die Extraktion wurde abgebrochen. Ergebnisse fertiger Bündel bleiben erhalten.",
+        runStalledNote:
+            "Die Extraktion pausiert zwischen zwei Durchläufen. Alles bisher Fertige bleibt erhalten und sie wird automatisch fortgesetzt. Sie können stattdessen abbrechen.",
         runReview: "Zur Prüfliste",
         cancel: "Extraktion abbrechen",
         cancelArmed: "Zum Abbrechen erneut drücken",

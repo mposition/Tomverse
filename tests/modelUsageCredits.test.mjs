@@ -158,7 +158,10 @@ test("new catalogue models expose verified context, output and attachment capabi
 
   const kimi = getModel("kimi-k3");
   assert.equal(kimi.contextWindowTokens, 1_048_576);
-  assert.equal(getModelBillingProfile(kimi).maxOutputTokens, 1_048_576);
+  // The window and the request's output cap are different numbers. They were
+  // the same one, and the pair could never fit together, so every Kimi K3
+  // request was refused before it reached the provider.
+  assert.equal(getModelBillingProfile(kimi).maxOutputTokens, 131_072);
   assert.equal(modelSupportsImageInput(kimi), true);
 
   const minimax = getModel("minimax-m3");

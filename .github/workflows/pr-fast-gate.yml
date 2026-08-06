@@ -181,6 +181,17 @@ jobs:
         timeout-minutes: 5
         run: npm run check:tomverse-chat-release-gate-view
 
+      # The chat route's context guard short-circuits on an undeclared window
+      # (`modelConfig.contextWindowTokens && ...`), so a model without one is
+      # not clamped to a safe default -- it is not checked at all, and an
+      # over-limit request reaches the provider. ESTIMATE-03 forbids that at
+      # zero tolerance. A ratchet rather than a cliff: today's gap is recorded
+      # as a baseline that may only shrink, while any newly added or enabled
+      # model must declare a window.
+      - name: Router context-window declarations
+        timeout-minutes: 5
+        run: npm run check:router-context-window
+
       # Declaring a context window is not a no-op: the chat route's guard only
       # runs when contextWindowTokens is set, so a new value immediately starts
       # rejecting long requests that used to pass. Windows are verified with a
@@ -352,8 +363,8 @@ jobs:
 
       - name: Install Chromium
         if: steps.scope.outputs.code == 'true'
-        timeout-minutes: 10
-        run: npx playwright install --with-deps chromium
+        timeout-minutes: 20
+        run: scripts/ci/install-playwright.sh chromium
 
       # The @smoke tier only. Every other desktop-chromium test still runs --
       # on main push via Main Chromium Regression, and nightly via Daily
@@ -516,8 +527,8 @@ jobs:
 
       - name: Install Chromium
         if: steps.scope.outputs.code == 'true'
-        timeout-minutes: 10
-        run: npx playwright install --with-deps chromium
+        timeout-minutes: 20
+        run: scripts/ci/install-playwright.sh chromium
 
       - name: Run the high-risk UI regression checks
         if: steps.scope.outputs.code == 'true'

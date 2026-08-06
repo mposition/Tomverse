@@ -4,6 +4,8 @@ import {
     MEMORY_COUNTER_KINDS,
     MEMORY_METRICS_UNAVAILABLE,
     emptyMemoryCounters,
+    summarizeFollowupProxy,
+    injectedTokenBucket,
     summarizeMemoryMetrics,
 } from "../lib/memoryMetricsCore.ts";
 
@@ -172,14 +174,35 @@ test("the summary always carries the unavailable list, even when empty", () => {
     assert.deepEqual(summarize().unavailable, MEMORY_METRICS_UNAVAILABLE);
 });
 
-test("injection metrics are declared unavailable while nothing injects", () => {
+test("only the follow-up proxy's feedback signal is still unmeasured", () => {
+    // Answers now carry their attribution, so the follow-up and regenerate
+    // halves are measured. What is still missing is narrower and says so:
+    // Feedback has no link to the answer a report is about.
+    const declared = MEMORY_METRICS_UNAVAILABLE.map((entry) => entry.metric);
+    assert.ok(declared.includes("followup_repair_proxy_feedback_signal"));
+    assert.ok(!declared.includes("followup_repair_proxy"));
+});
+
+test("a metric that gained a source is no longer declared unavailable", () => {
+    // The reasons are a contract, not decoration: the source-lock slice,
+    // extraction settlement and the §10 chat counters all landed, so claiming
+    // these have no source would be the same lie in the other direction -- a
+    // reader told nothing measures something that now does.
     const declared = MEMORY_METRICS_UNAVAILABLE.map((entry) => entry.metric);
     for (const metric of [
+        "followup_repair_proxy",
+        "lock_suspension_restore",
+        "credit_per_chunk_percentiles",
+        "batch_subbudget_exhaustion",
         "injection_ratio",
         "injected_token_buckets",
         "stale_bundle_ratio",
     ]) {
-        assert.ok(declared.includes(metric), `${metric} must be declared`);
+        assert.equal(
+            declared.includes(metric),
+            false,
+            `${metric} has a source now and must not be declared unavailable`
+        );
     }
 });
 
@@ -199,4 +222,226 @@ test("an empty window summarizes without dividing by zero", () => {
     assert.equal(summary.memories.total, 0);
     assert.equal(summary.memories.sensitiveRate, null);
     assert.deepEqual(summary.runs.byPair, []);
+});
+
+/* ------------------------------------------------- credits per chunk  -- */
+
+test("credits per chunk are reported at the median and the 90th", () => {
+    const summary = summarizeMemoryMetrics({
+        memories: [],
+        runs: [],
+        counters: emptyMemoryCounters(),
+        settlements: [
+            { chunksCharged: 1, settledCredits: 1 },
+            { chunksCharged: 2, settledCredits: 4 },
+            { chunksCharged: 4, settledCredits: 4 },
+            { chunksCharged: 5, settledCredits: 25 },
+        ],
+    });
+    // Per-chunk: 1, 2, 1, 5 -> sorted 1, 1, 2, 5.
+    assert.equal(summary.creditPerChunk.samples, 4);
+    assert.equal(summary.creditPerChunk.p50, 1);
+    assert.equal(summary.creditPerChunk.p90, 5);
+});
+
+test("a run that charged nothing is excluded, not counted as zero", () => {
+    // Cancelled before its first chunk. Averaging it in would drag the
+    // reported cost of a chunk toward zero exactly when runs are failing.
+    const summary = summarizeMemoryMetrics({
+        memories: [],
+        runs: [],
+        counters: emptyMemoryCounters(),
+        settlements: [
+            { chunksCharged: 0, settledCredits: 0 },
+            { chunksCharged: 2, settledCredits: 6 },
+        ],
+    });
+    assert.equal(summary.creditPerChunk.samples, 1);
+    assert.equal(summary.creditPerChunk.p50, 3);
+});
+
+test("no settled run reports null rather than zero", () => {
+    const summary = summarizeMemoryMetrics({
+        memories: [],
+        runs: [],
+        counters: emptyMemoryCounters(),
+        settlements: [],
+    });
+    assert.deepEqual(summary.creditPerChunk, { samples: 0, p50: null, p90: null });
+});
+
+test("percentiles land on a run someone actually had", () => {
+    // Nearest-rank, not interpolation: these are credits, and "1.5 credits per
+    // chunk" describes nobody.
+    const summary = summarizeMemoryMetrics({
+        memories: [],
+        runs: [],
+        counters: emptyMemoryCounters(),
+        settlements: [
+            { chunksCharged: 1, settledCredits: 1 },
+            { chunksCharged: 1, settledCredits: 2 },
+        ],
+    });
+    assert.equal(summary.creditPerChunk.p50, 1);
+    assert.equal(summary.creditPerChunk.p90, 2);
+});
+
+/* ------------------------------------------------------------- injection -- */
+
+const withCounters = (overrides) =>
+    summarize([], [], { ...emptyMemoryCounters(), ...overrides });
+
+test("a fail-closed deployment reports 0 of N, not a bare zero", () => {
+    // The reason this metric left the unavailable list. "0%" alone cannot be
+    // told apart from a feature nobody uses; "0 of 12" is a measurement.
+    const summary = withCounters({ chat_memory_eligible: 12 });
+    assert.equal(summary.injection.eligible, 12);
+    assert.equal(summary.injection.injected, 0);
+    assert.equal(summary.injection.ratio, 0);
+});
+
+test("no eligible request reports null rather than a zero ratio", () => {
+    assert.equal(withCounters({}).injection.ratio, null);
+});
+
+test("truncation is measured over injected contexts, not eligible requests", () => {
+    // Dividing by eligible requests would make the §9 budget look generous on
+    // any deployment where most requests carry no memory at all.
+    const summary = withCounters({
+        chat_memory_eligible: 100,
+        chat_memory_injected: 4,
+        injected_context_truncated: 1,
+    });
+    assert.equal(summary.injection.ratio, 0.04);
+    assert.equal(summary.injection.truncationRatio, 0.25);
+});
+
+test("token buckets are reported as a distribution, not a total", () => {
+    const summary = withCounters({
+        injected_tokens_le_256: 5,
+        injected_tokens_le_1024: 2,
+        injected_tokens_gt_4096: 1,
+    });
+    assert.deepEqual(summary.injection.tokenBuckets, {
+        le256: 5,
+        le1024: 2,
+        le4096: 0,
+        gt4096: 1,
+    });
+});
+
+test("a block lands in the bucket named for the budget it exactly fills", () => {
+    assert.equal(injectedTokenBucket(1), "injected_tokens_le_256");
+    assert.equal(injectedTokenBucket(256), "injected_tokens_le_256");
+    assert.equal(injectedTokenBucket(257), "injected_tokens_le_1024");
+    assert.equal(injectedTokenBucket(1_024), "injected_tokens_le_1024");
+    assert.equal(injectedTokenBucket(4_096), "injected_tokens_le_4096");
+    assert.equal(injectedTokenBucket(4_097), "injected_tokens_gt_4096");
+});
+
+test("no block is no bucket", () => {
+    // Zero is what the injection ratio measures. Repeating it as a bucket
+    // would make the distribution of injected contexts look tiny on every
+    // account that mostly does not use memory.
+    assert.equal(injectedTokenBucket(0), null);
+    assert.equal(injectedTokenBucket(-1), null);
+    assert.equal(injectedTokenBucket(Number.NaN), null);
+});
+
+test("every bucket the function can return is a declared counter kind", () => {
+    for (const tokens of [1, 256, 257, 1_024, 4_096, 4_097]) {
+        assert.ok(MEMORY_COUNTER_KINDS.includes(injectedTokenBucket(tokens)));
+    }
+});
+
+/* --------------------------------------------------------- context bundle -- */
+
+test("the stale ratio is drawn from bundles presented, not from requests", () => {
+    const summary = withCounters({
+        chat_memory_eligible: 1_000,
+        context_bundle_presented: 20,
+        context_bundle_stale: 5,
+    });
+    assert.equal(summary.contextBundle.staleRatio, 0.25);
+});
+
+test("a replay is counted beside the stale ratio, never inside it", () => {
+    // Both are refused with CHAT_CONTEXT_BUNDLE_STALE, but only one of them
+    // says the context drifted.
+    const summary = withCounters({
+        context_bundle_presented: 10,
+        context_bundle_stale: 1,
+        context_bundle_replayed: 4,
+        context_bundle_rejected: 2,
+    });
+    assert.equal(summary.contextBundle.staleRatio, 0.1);
+    assert.equal(summary.contextBundle.replayed, 4);
+    assert.equal(summary.contextBundle.rejected, 2);
+});
+
+test("no bundle presented reports null rather than a clean stale rate", () => {
+    assert.equal(withCounters({}).contextBundle.staleRatio, null);
+});
+
+/* ------------------------------------------------------- follow-up proxy -- */
+
+const arm = (name, overrides = {}) => ({
+    arm: name,
+    answers: 100,
+    followups: 10,
+    regenerates: 2,
+    ...overrides,
+});
+
+test("the proxy is a comparison, and says nothing on its own", () => {
+    // A bare follow-up rate is uninterpretable — people ask second questions
+    // because the first answer was good. Only the gap against answers memory
+    // did not shape carries anything, so the difference is computed here
+    // rather than left for a reader to eyeball.
+    const proxy = summarizeFollowupProxy([
+        arm("memory", { answers: 200, followups: 40, regenerates: 10 }),
+        arm("plain", { answers: 100, followups: 10, regenerates: 2 }),
+    ]);
+    assert.equal(proxy.memory.followupRate, 0.2);
+    assert.equal(proxy.plain.followupRate, 0.1);
+    assert.equal(proxy.followupDifference, 0.1);
+    assert.equal(proxy.regenerateDifference, 0.03);
+});
+
+test("a missing arm makes the difference null, never zero", () => {
+    // Zero would read as "no effect", which is a claim. The honest answer
+    // when one arm is empty is that the comparison was not made.
+    const noMemory = summarizeFollowupProxy([arm("plain")]);
+    assert.equal(noMemory.memory.answers, 0);
+    assert.equal(noMemory.memory.followupRate, null);
+    assert.equal(noMemory.followupDifference, null);
+    assert.equal(noMemory.regenerateDifference, null);
+
+    const empty = summarizeFollowupProxy([]);
+    assert.equal(empty.followupDifference, null);
+    assert.equal(empty.plain.followupRate, null);
+});
+
+test("a negative difference survives, because it is the interesting one", () => {
+    // Memory answers drawing *fewer* follow-ups is the outcome §12.4 hopes
+    // for; clamping or flipping the sign would hide it.
+    const proxy = summarizeFollowupProxy([
+        arm("memory", { answers: 100, followups: 5 }),
+        arm("plain", { answers: 100, followups: 20 }),
+    ]);
+    assert.equal(proxy.followupDifference, -0.15);
+});
+
+test("both arms are always present in the shape", () => {
+    // The dashboard renders a fixed layout; an arm that vanishes when nothing
+    // landed in it reads as a broken panel rather than an empty window.
+    const proxy = summarizeFollowupProxy([]);
+    assert.deepEqual(Object.keys(proxy.memory).sort(), [
+        "answers",
+        "followupRate",
+        "followups",
+        "regenerateRate",
+        "regenerates",
+    ]);
+    assert.deepEqual(Object.keys(proxy.plain), Object.keys(proxy.memory));
 });

@@ -61,6 +61,8 @@ type RunRow = {
   chunkCompleted: number;
   createdAt: string;
   completedAt: string | null;
+  /** Server-derived: running, but no worker currently holds the lease. */
+  stalled?: boolean;
 };
 
 type ExtractionQaState = {
@@ -386,6 +388,32 @@ test("a finished run stops offering cancel and points at the review queue", asyn
   );
   await expect(page.getByTestId("memory-extraction-run-cancel")).toHaveCount(0);
   await expect(page.getByTestId("memory-extraction-run-review")).toBeVisible();
+});
+
+test("a stalled run explains the pause and still offers cancel", async ({
+  page,
+}) => {
+  // The bar has not moved and will not for up to fifteen minutes. Saying
+  // "extraction is running" there would be the screen contradicting what the
+  // user can see, so the note has to name the pause -- without implying the
+  // run failed or that the finished chunks were lost.
+  await mockExtractionApi(page, {
+    pairs: [approvedPair],
+    run: { status: "running", chunkCompleted: 1, stalled: true },
+  });
+  await page.goto("/settings/memory/runs/run-1");
+
+  // Still `running`: a stall is not a status of its own, and the screen must
+  // not promote it to one.
+  await expect(page.getByTestId("memory-extraction-run-status")).toHaveText(
+    "Running"
+  );
+  const note = page.getByTestId("memory-extraction-run-note");
+  await expect(note).toHaveAttribute("data-stalled", "true");
+  await expect(note).toContainText("paused");
+  await expect(note).toContainText("resumes automatically");
+  // Waiting is not the only option a paused run may offer.
+  await expect(page.getByTestId("memory-extraction-run-cancel")).toBeVisible();
 });
 
 test("cancelling takes two presses and keeps completed work", async ({

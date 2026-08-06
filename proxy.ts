@@ -195,6 +195,12 @@ export function proxy(request: NextRequest) {
     : "Content-Security-Policy-Report-Only";
   const requestHeaders = new Headers(request.headers);
   requestHeaders.set("x-tomverse-pathname", request.nextUrl.pathname);
+  // The query string travels beside the path because a server component cannot
+  // read either one. `app/not-found.tsx` needs both to hand a visitor back to
+  // exactly where they were -- `/admin/refunds?status=pending`, not
+  // `/admin/refunds` -- after they switch accounts. It is raw request input, so
+  // every consumer normalizes it before putting it in a URL.
+  requestHeaders.set("x-tomverse-search", request.nextUrl.search);
   // VAL-004. The root layout needs the document language before it renders
   // `<html>`, and it is the only place that can set that attribute. Only the
   // proxy sees the query string, the path prefix and `Accept-Language` at

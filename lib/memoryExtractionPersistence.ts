@@ -1,6 +1,7 @@
 import "server-only";
 
 import type { Prisma } from "@prisma/client";
+import { verifyExternalMessageEvidence } from "@/lib/memoryEvidenceValidation";
 import type { ExtractionDecision } from "@/lib/memoryExtractionPipeline";
 import {
     MEMORY_RETRIEVAL_VERSION,
@@ -39,6 +40,17 @@ import { memoryStatementKey } from "@/lib/memoryValidatorCore";
  * conflict key is computed but not asserted: §8.3 resolves conflicts at
  * approval, where the user chooses, rather than by refusing to record a
  * proposal.
+ *
+ * **Evidence is re-verified here, not only at analysis time.** The label map
+ * the analysis used was built when the chunk was claimed; the provider call
+ * happens after that, and a slice runs several chunks. A user who deletes the
+ * imported conversation in between leaves candidates citing messages that no
+ * longer exist — and because §8.4 requires existence, ownership and a matching
+ * content digest to be established by the server, the check belongs at the
+ * write rather than at the read that preceded it. Without it the evidence
+ * insert fails its foreign key and takes the whole chunk down with an opaque
+ * database error, so a user tidying up their imports turns a running
+ * extraction into a failing one.
  */
 export type PersistExtractionChunkInput = {
     userId: string;
@@ -57,6 +69,14 @@ export type PersistExtractionChunkResult = {
     individualReview: number;
     /** Candidates the validator rejected outright, which are never stored. */
     discarded: number;
+    /**
+     * Candidates dropped because none of their evidence survived §8.4's
+     * re-verification — the source was deleted, or its content digest moved.
+     * Distinct from `discarded`, which is the validator judging the statement:
+     * these candidates may well have been fine, and there is simply nothing
+     * left to ground them in.
+     */
+    unsourced: number;
     /** Rows from a previous attempt at this chunk that were replaced. */
     replaced: number;
 };
@@ -92,10 +112,59 @@ export async function persistExtractionChunkDecisions(
         (decision) => decision.outcome !== "discard"
     );
 
+    // One query for the whole chunk rather than one per candidate: the same
+    // message is normally cited by several of them, and the answer depends on
+    // the (id, digest) pair alone, so a shared set answers all of them.
+    const refKey = (reference: {
+        externalMessageId: string;
+        evidenceDigest: string;
+    }) => `${reference.externalMessageId} ${reference.evidenceDigest}`;
+    const refs = [
+        ...new Map(
+            keep
+                .flatMap((decision) => decision.candidate.evidence)
+                .map((reference) => [
+                    refKey(reference),
+                    {
+                        externalMessageId: reference.externalMessageId,
+                        evidenceDigest: reference.evidenceDigest,
+                    },
+                ])
+        ).values(),
+    ];
+    const outcomes = await verifyExternalMessageEvidence(input.userId, refs, tx);
+    // Keyed by the pair rather than by the id: a digest mismatch and a missing
+    // message are different outcomes, and a set of ids alone could not carry
+    // the difference.
+    const verified = new Set(
+        refs
+            .filter((_, index) => outcomes[index]?.outcome === "verified")
+            .map(refKey)
+    );
+
     let individualReview = 0;
+    let stored = 0;
+    let unsourced = 0;
     for (const decision of keep) {
+        // A candidate keeps the references that still verify. Losing one of
+        // several is not a reason to drop the rest: the statement is still
+        // grounded in what remains.
+        const evidence = decision.candidate.evidence.filter((reference) =>
+            verified.has(refKey(reference))
+        );
+        if (evidence.length === 0) {
+            // §8.2 requires evidence, so an ungrounded candidate is not stored
+            // at all rather than stored bare. Storing it and letting §13.1's
+            // source-delete flow clean it up afterwards would be the same
+            // outcome by a longer route -- and the evidence insert could not
+            // have succeeded anyway.
+            unsourced += 1;
+            continue;
+        }
+
         const status = statusFor(decision.outcome);
         if (status === "manual_review_required") individualReview += 1;
+        stored += 1;
 
         const statement = decision.candidate.statement;
         const item = await tx.memoryItem.create({
@@ -128,27 +197,26 @@ export async function persistExtractionChunkDecisions(
             select: { id: true },
         });
 
-        if (decision.candidate.evidence.length > 0) {
-            await tx.memoryEvidence.createMany({
-                data: decision.candidate.evidence.map((reference) => ({
-                    memoryItemId: item.id,
-                    userId: input.userId,
-                    sourceType: "external_message",
-                    externalMessageId: reference.externalMessageId,
-                    // The server's own digest of the stored message, carried
-                    // through from the label map. A digest the model supplied
-                    // would attest to nothing.
-                    evidenceDigest: reference.evidenceDigest,
-                    createdAt: now,
-                })),
-            });
-        }
+        await tx.memoryEvidence.createMany({
+            data: evidence.map((reference) => ({
+                memoryItemId: item.id,
+                userId: input.userId,
+                sourceType: "external_message",
+                externalMessageId: reference.externalMessageId,
+                // The server's own digest of the stored message, re-checked
+                // against the row just above. A digest the model supplied
+                // would attest to nothing.
+                evidenceDigest: reference.evidenceDigest,
+                createdAt: now,
+            })),
+        });
     }
 
     return {
-        stored: keep.length,
+        stored,
         individualReview,
         discarded: input.decisions.length - keep.length,
+        unsourced,
         replaced: previous.count,
     };
 }

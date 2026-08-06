@@ -70,6 +70,17 @@ export type ImageProviderBudgetProblem = {
   message: string;
 };
 
+/**
+ * A configuration that is legal but says something the operator probably did
+ * not mean. Separate from `problems` on purpose: a problem sets `limits` to
+ * null and refuses readiness, and refusing to start over a merely odd budget
+ * would be worse than the budget. These surface and do not block.
+ */
+export type ImageProviderBudgetAdvisory = {
+  code: "month_not_above_day";
+  message: string;
+};
+
 export type ImageProviderBudgetClamp = {
   window: "day" | "month";
   configuredMicroUsd: number;
@@ -81,6 +92,8 @@ export type ResolvedImageProviderBudget = {
   limits: { day: number; month: number } | null;
   floorMicroUsd: number;
   problems: ImageProviderBudgetProblem[];
+  /** Legal but probably unintended. Surfaces; never blocks readiness. */
+  advisories: ImageProviderBudgetAdvisory[];
   /** Overrides raised to the floor -- reported, never silently applied. */
   clamped: ImageProviderBudgetClamp[];
   source: "environment" | "development_default" | "unconfigured";
@@ -103,6 +116,7 @@ export const resolveImageProviderBudget = (
   const envNames = imageProviderBudgetEnvNames(provider);
   const floor = imageProviderBudgetFloorMicroUsd();
   const problems: ImageProviderBudgetProblem[] = [];
+  const advisories: ImageProviderBudgetAdvisory[] = [];
   const clamped: ImageProviderBudgetClamp[] = [];
 
   const day = parseBudgetValue(env[envNames.day]);
@@ -121,7 +135,14 @@ export const resolveImageProviderBudget = (
         });
       }
     }
-    return { limits: null, floorMicroUsd: floor, problems, clamped, source: "unconfigured" };
+    return {
+      limits: null,
+      floorMicroUsd: floor,
+      problems,
+      advisories,
+      clamped,
+      source: "unconfigured",
+    };
   }
 
   if (day.state === "missing" && month.state === "missing") {
@@ -136,7 +157,14 @@ export const resolveImageProviderBudget = (
           message: `${envNames[window]} is required in production.`,
         });
       }
-      return { limits: null, floorMicroUsd: floor, problems, clamped, source: "unconfigured" };
+      return {
+      limits: null,
+      floorMicroUsd: floor,
+      problems,
+      advisories,
+      clamped,
+      source: "unconfigured",
+    };
     }
     // Development/test fallback, never below the floor so local behaviour
     // matches what production would enforce.
@@ -147,6 +175,7 @@ export const resolveImageProviderBudget = (
       },
       floorMicroUsd: floor,
       problems,
+      advisories,
       clamped,
       source: "development_default",
     };
@@ -159,7 +188,14 @@ export const resolveImageProviderBudget = (
       reason: "partial_configuration",
       message: `${envNames[missing]} is missing while the other window is set; configure both.`,
     });
-    return { limits: null, floorMicroUsd: floor, problems, clamped, source: "unconfigured" };
+    return {
+      limits: null,
+      floorMicroUsd: floor,
+      problems,
+      advisories,
+      clamped,
+      source: "unconfigured",
+    };
   }
 
   const effective = { day: day.value, month: month.value };
@@ -174,10 +210,26 @@ export const resolveImageProviderBudget = (
     }
   }
 
+  // Both windows being at or near the same number is legal and almost never
+  // intended: a month equal to the day ceiling is exhausted by one day spent
+  // at the cap, so the monthly window stops being a second bound at all. It is
+  // deliberate in staging, where a small identical pair caps total spend; in
+  // production it usually means one of the two was copied.
+  if (effective.month <= effective.day) {
+    advisories.push({
+      code: "month_not_above_day",
+      message:
+        `${envNames.month} (${effective.month}) is not above ${envNames.day} ` +
+        `(${effective.day}): one day spent at the daily cap exhausts the ` +
+        `month, so the monthly window adds no second bound.`,
+    });
+  }
+
   return {
     limits: effective,
     floorMicroUsd: floor,
     problems,
+    advisories,
     clamped,
     source: "environment",
   };
