@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
+import path from "node:path";
 import {
   PROVIDER_CALL_DIAGNOSTIC_ROOTS,
   classifyProbeError,
@@ -199,21 +200,35 @@ test("an unclassifiable provider-call failure still counts against the provider"
   assert.equal(classification.scope, "provider");
 });
 
-test("every diagnostic code the route handlers record is a known provider-call root", () => {
-  // Guards the allowlist against drift: a new provider-call code that is not
-  // registered here would silently stop counting towards provider health,
-  // which is a monitoring regression rather than a visible failure.
-  const sources = [
-    "app/api/chat/route.ts",
-    "app/api/chat/deep-research/status/route.ts",
-    "app/api/conversations/[conversationId]/compare-summary/route.ts",
-    "app/api/conversations/[conversationId]/comparison-reviews/verify-item/route.ts",
-    "lib/providerProbe.ts",
-    "lib/providerVerification.ts",
-  ];
+const repoRoot = new URL("..", import.meta.url).pathname;
+
+/** Every .ts/.tsx file under app/ and lib/, walked rather than listed. */
+const sourceFiles = (relativeDir) => {
+  const found = [];
+  const walk = (dir) => {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const full = path.join(dir, entry.name);
+      if (entry.isDirectory()) walk(full);
+      else if (/\.tsx?$/.test(entry.name)) found.push(full);
+    }
+  };
+  walk(path.join(repoRoot, relativeDir));
+  return found;
+};
+
+test("every diagnostic code recorded as a provider failure is a known root", () => {
+  // Guards the allowlist against drift: a provider-call code that is not
+  // registered here silently stops counting towards provider health, which is
+  // a monitoring regression rather than a visible failure.
+  //
+  // The files are *discovered*, not listed. The list this replaced named six
+  // route handlers, and COMPARISON_REVIEW_FAILED sat unnoticed in a service
+  // outside it for as long as AI Review has existed -- so every AI Review
+  // failure, including a real outage, classified as a local rejection. A drift
+  // test that a new file can be added beside is not a drift test.
   const literals = new Set();
-  for (const path of sources) {
-    const source = readFileSync(new URL(`../${path}`, import.meta.url), "utf8");
+  for (const file of [...sourceFiles("app"), ...sourceFiles("lib")]) {
+    const source = readFileSync(file, "utf8");
     for (const match of source.matchAll(
       /(?:recordProviderFailure\(\s*[^,]+,\s*|providerDiagnosticCode\(\s*)"([A-Z][A-Z0-9_]*)"/g
     )) {
@@ -227,6 +242,15 @@ test("every diagnostic code the route handlers record is a known provider-call r
       `${literal} is recorded as a provider failure but is not in PROVIDER_CALL_DIAGNOSTIC_ROOTS`
     );
   }
+});
+
+test("the scan reaches services, not only route handlers", () => {
+  // The specific hole this closes. If the walk ever stops covering lib/, this
+  // fails before the allowlist silently goes stale again.
+  const found = sourceFiles("lib").some((file) =>
+    readFileSync(file, "utf8").includes('recordProviderFailure(candidate.provider, "COMPARISON_REVIEW_FAILED"')
+  );
+  assert.ok(found, "lib/ is no longer being scanned for provider-failure codes");
 });
 
 test("redactProviderText strips credentials a provider echoed back", () => {
