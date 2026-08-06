@@ -37,7 +37,12 @@ const reset = () =>
       "BillingTransaction", "CreditPurchase", "Feedback", "PrivacyRequest",
       "ChatCreditReservation", "ImageCreditReservation",
       "MemoryExtractionCreditReservation", "AccountDataExportRequest",
-      "ExternalMessage", "ExternalConversation", "ExternalImport", "User"
+      "ComparisonReview", "ProductAnalyticsEvent", "BillingPromotion",
+      "BillingPromotionRedemption", "CreditLot", "CreditLedgerEntry",
+      "CreditDebtEntry", "ImageGenerationGroup", "ImageGenerationTarget",
+      "ImageGeneration", "RefundRequest", "PlanChangeRequest",
+      "ExternalImport", "ExternalConversation", "ExternalMessage",
+      "MemoryEvidence", "MemoryExtractionRun", "User"
     RESTART IDENTITY CASCADE
   `);
 
@@ -278,6 +283,289 @@ const seedUser = async () => {
     },
   });
 
+  // --- the fifteen domains that were unverified until PRIVACY-02 closed them --
+
+  await prisma.comparisonReview.create({
+    data: {
+      userId,
+      conversationId: conversation.id,
+      // Internal identifiers and the dedupe hash for producing the review.
+      promptMessageId: sentinel("comparisonReview-promptMessageId"),
+      assistantMessageIds: [sentinel("comparisonReview-assistantMessageIds")],
+      promptVersion: sentinel("comparisonReview-promptVersion"),
+      inputHash: sentinel("comparisonReview-inputHash"),
+      reviewerModelId: "gpt-5",
+      reviewMode: "balanced",
+      result: { verdict: "the review the user read" },
+      usageCredits: 3,
+    },
+  });
+
+  await prisma.productAnalyticsEvent.create({
+    data: {
+      userId,
+      dedupeKey: sentinel("analytics-dedupeKey"),
+      eventName: "chat_started",
+      source: "client",
+      // Pseudonymous device identifiers, and an unenumerated field bag.
+      anonymousIdHash: sentinel("analytics-anonymousIdHash"),
+      sessionIdHash: sentinel("analytics-sessionIdHash"),
+      properties: { internal: sentinel("analytics-properties") },
+      utmSource: "google",
+      utmMedium: "cpc",
+      utmCampaign: "launch",
+      language: "ko",
+      country: "AU",
+      modelCount: 2,
+      plan: "Pro",
+    },
+  });
+
+  const promotion = await prisma.billingPromotion.create({
+    data: { code: `PROMO-${randomUUID()}`, durationMonths: 3 },
+  });
+  await prisma.billingPromotionRedemption.create({
+    data: {
+      userId,
+      promotionId: promotion.id,
+      planId: "pro",
+      billingInterval: "monthly",
+      // Abuse signals and Stripe identifiers.
+      clientIpHash: sentinel("promotion-clientIpHash"),
+      paymentMethodFingerprintHash: sentinel("promotion-paymentMethodFingerprintHash"),
+      riskFlags: sentinel("promotion-riskFlags"),
+      stripeCheckoutSessionId: sentinel("promotion-stripeCheckoutSessionId"),
+      stripeSubscriptionId: sentinel("promotion-stripeSubscriptionId"),
+    },
+  });
+
+  const lot = await prisma.creditLot.create({
+    data: {
+      userId,
+      source: "purchase",
+      originalCredits: 100,
+      remainingCredits: 60,
+      // Tomverse's cost of the credits, not the user's price.
+      originalFundedCostMicroUsd: BigInt(5_000_000),
+      remainingFundedCostMicroUsd: BigInt(3_000_000),
+      expiresAt: new Date(Date.now() + 365 * 86_400_000),
+    },
+  });
+
+  await prisma.creditLedgerEntry.create({
+    data: {
+      userId,
+      creditLotId: lot.id,
+      type: "debit",
+      creditsDelta: -40,
+      balanceAfterCredits: 60,
+      fundedCostMicroUsdDelta: BigInt(-2_000_000),
+      balanceAfterFundedCostMicroUsd: BigInt(3_000_000),
+      metadata: { internal: sentinel("creditLedger-metadata") },
+      reservationId: sentinel("creditLedger-reservationId"),
+    },
+  });
+
+  await prisma.creditDebtEntry.create({
+    data: {
+      userId,
+      type: "dispute",
+      creditsDelta: -10,
+      balanceAfterCredits: 50,
+      fundedCostMicroUsdDelta: BigInt(-500_000),
+      balanceAfterCostMicroUsd: BigInt(2_500_000),
+      metadata: { internal: sentinel("creditDebt-metadata") },
+    },
+  });
+
+  const imageGroup = await prisma.imageGenerationGroup.create({
+    data: {
+      userId,
+      conversationId: conversation.id,
+      groupIdempotencyKey: sentinel("imageGroup-groupIdempotencyKey"),
+    },
+  });
+  const imageTarget = await prisma.imageGenerationTarget.create({
+    data: { groupId: imageGroup.id, provider: "openai", modelId: "gpt-image-1" },
+  });
+  const generation = await prisma.imageGeneration.create({
+    data: {
+      userId,
+      conversationId: conversation.id,
+      groupId: imageGroup.id,
+      targetId: imageTarget.id,
+      prompt: "a picture the user asked for",
+      preset: "standard",
+      size: "1024x1024",
+      quality: "high",
+      status: "completed",
+      // Worker and provider internals.
+      idempotencyKey: sentinel("imageGeneration-idempotencyKey"),
+      retryIdempotencyKey: sentinel("imageGeneration-retryIdempotencyKey"),
+      internalErrorDetail: sentinel("imageGeneration-internalErrorDetail"),
+      providerRequestId: sentinel("imageGeneration-providerRequestId"),
+      leaseId: sentinel("imageGeneration-leaseId"),
+      providerRequestParams: { internal: sentinel("imageGeneration-providerRequestParams") },
+    },
+  });
+  await prisma.imageAsset.create({
+    data: {
+      generationId: generation.id,
+      role: "original",
+      status: "ready",
+      // The storage path and content digest are Tomverse's, not the user's.
+      r2Key: sentinel("imageAsset-r2Key"),
+      sha256: sentinel("imageAsset-sha256"),
+      mimeType: "image/png",
+      width: 1024,
+      height: 1024,
+      byteSize: 400_000,
+    },
+  });
+
+  await prisma.refundRequest.create({
+    data: {
+      userId,
+      email: sentinel("refundRequest-email"),
+      reason: "the reason the user gave",
+      status: "pending",
+      // Operator side of the same request.
+      adminNote: sentinel("refundRequest-adminNote"),
+      reviewedByUserId: sentinel("refundRequest-reviewedByUserId"),
+      stripeCustomerId: sentinel("refundRequest-stripeCustomerId"),
+      stripeRefundId: sentinel("refundRequest-stripeRefundId"),
+      stripeChargeId: sentinel("refundRequest-stripeChargeId"),
+    },
+  });
+
+  await prisma.planChangeRequest.create({
+    data: {
+      userId,
+      direction: "upgrade",
+      execution: "immediate_upgrade",
+      fromTier: "Pro",
+      toTier: "Max",
+      billingInterval: "monthly",
+      currency: "AUD",
+      status: "confirmed",
+      // Stripe object identifiers and the internal request fingerprint.
+      stripeSubscriptionId: sentinel("planChange-stripeSubscriptionId"),
+      stripeSubscriptionItemId: sentinel("planChange-stripeSubscriptionItemId"),
+      targetStripePriceId: sentinel("planChange-targetStripePriceId"),
+      stripeScheduleId: sentinel("planChange-stripeScheduleId"),
+      fingerprint: sentinel("planChange-fingerprint"),
+      renewalDecision: sentinel("planChange-renewalDecision"),
+    },
+  });
+
+  const externalImport = await prisma.externalImport.create({
+    data: {
+      userId,
+      provider: "chatgpt",
+      status: "completed",
+      digestVersion: 1,
+      // How the import was executed, not what it contained.
+      parserVersion: sentinel("externalImport-parserVersion"),
+      clientFingerprint: sentinel("externalImport-clientFingerprint"),
+      importDigest: sentinel("externalImport-importDigest"),
+      lastBatchDigest: sentinel("externalImport-lastBatchDigest"),
+      finalizeIdempotencyKey: sentinel("externalImport-finalizeIdempotencyKey"),
+    },
+  });
+  // Unlocked, deliberately: this is the conversation whose content the user is
+  // owed, and §13.2 withholds a locked one's title and messages entirely. The
+  // locked sibling below carries the password sentinel instead, so both halves
+  // of the rule are covered -- what is exported, and what is not.
+  const externalConversation = await prisma.externalConversation.create({
+    data: {
+      userId,
+      importId: externalImport.id,
+      provider: "chatgpt",
+      title: "an imported conversation the user receives",
+      messageCount: 1,
+      contentBytes: BigInt(64),
+      digestVersion: 1,
+      // Reconciliation digests, withheld as internals.
+      conversationDigest: sentinel("externalConversation-conversationDigest"),
+      externalStableId: sentinel("externalConversation-externalStableId"),
+    },
+  });
+
+  // The locked half of §13.2. Its password must never reach the file -- a copy
+  // is an offline attack on the one secret this table holds -- and neither may
+  // its title or its messages, which is what the two sentinels below assert
+  // without any test having to name the rule.
+  const lockedConversation = await prisma.externalConversation.create({
+    data: {
+      userId,
+      importId: externalImport.id,
+      provider: "chatgpt",
+      title: sentinel("externalConversation-lockedTitle"),
+      messageCount: 1,
+      contentBytes: BigInt(64),
+      digestVersion: 1,
+      password: sentinel("externalConversation-password"),
+      conversationDigest: sentinel("externalConversation-lockedDigest"),
+      externalStableId: sentinel("externalConversation-lockedStableId"),
+    },
+  });
+  await prisma.externalMessage.create({
+    data: {
+      userId,
+      externalConversationId: lockedConversation.id,
+      role: "user",
+      content: sentinel("externalMessage-lockedContent"),
+      ordinal: 0,
+      digestVersion: 1,
+      externalStableId: sentinel("externalMessage-lockedStableId"),
+      contentDigest: sentinel("externalMessage-lockedDigest"),
+    },
+  });
+  await prisma.externalMessage.create({
+    data: {
+      userId,
+      externalConversationId: externalConversation.id,
+      role: "user",
+      content: "an imported message the user receives",
+      ordinal: 0,
+      digestVersion: 1,
+      // Truncated on the way in, so the counts the user is owed are populated
+      // and the CHECK that ties them together is satisfied.
+      truncated: true,
+      originalCharacterCount: 100,
+      retainedCharacterCount: 36,
+      contentDigest: sentinel("externalMessage-contentDigest"),
+      originalContentDigest: sentinel("externalMessage-originalContentDigest"),
+      externalStableId: sentinel("externalMessage-externalStableId"),
+    },
+  });
+
+  const memory = await prisma.memoryItem.findFirstOrThrow({ where: { userId } });
+  await prisma.memoryEvidence.create({
+    data: {
+      userId,
+      memoryItemId: memory.id,
+      sourceType: "manual",
+      manualContent: "the note the user wrote themselves",
+      evidenceDigest: sentinel("memoryEvidence-evidenceDigest"),
+    },
+  });
+
+  await prisma.memoryExtractionRun.create({
+    data: {
+      userId,
+      status: "completed",
+      extractionModelId: "claude-haiku",
+      sourceSelection: [conversation.id],
+      chunkTotal: 2,
+      chunkCompleted: 2,
+      // How Tomverse executed it.
+      promptVersion: sentinel("memoryExtractionRun-promptVersion"),
+      pricingVersion: sentinel("memoryExtractionRun-pricingVersion"),
+      leaseOwner: sentinel("memoryExtractionRun-leaseOwner"),
+    },
+  });
+
   return userId;
 };
 
@@ -294,7 +582,7 @@ test("no withheld value reaches the serialised export", async () => {
     (_key, value) => (typeof value === "bigint" ? value.toString() : value)
   );
 
-  assert.ok(sentinels.length > 30, `only ${sentinels.length} sentinels were planted`);
+  assert.ok(sentinels.length > 60, `only ${sentinels.length} sentinels were planted`);
 
   const leaked = sentinels.filter((value) => serialised.includes(value));
   assert.deepEqual(
@@ -330,6 +618,15 @@ test("the export still contains the data the user is owed", async () => {
   assert.equal(result.data.payments?.length, 1);
   assert.equal(result.data.chat_credit_usage?.length, 1);
   assert.equal(result.data.data_export_history?.length, 1);
+  assert.ok(serialised.includes("a picture the user asked for"));
+  assert.ok(serialised.includes("an imported message the user receives"));
+  assert.ok(serialised.includes("the note the user wrote themselves"));
+  assert.ok(serialised.includes("the reason the user gave"));
+  assert.ok(serialised.includes("the review the user read"));
+  // The image binaries are not in the file, but their shape is -- so the user
+  // can see an image existed rather than finding nothing where one was.
+  assert.equal(result.data.image_generations?.length, 1);
+  assert.equal((result.data.image_generations as { assets: unknown[] }[])[0].assets.length, 1);
 });
 
 // Keys are the stable public names, and every exported domain appears even when
@@ -394,6 +691,17 @@ test("the manifest names what is missing and why", async () => {
 // exists precisely because holding the session is not meant to be enough.
 // ---------------------------------------------------------------------------
 
+// The lock tests below count rows per domain, so they cannot run against the
+// everything-is-populated fixture above -- `seedUser` seeds its own imported
+// conversations, and a count of "1" would then mean "1 plus whatever the
+// fixture brought". They get a bare account and seed exactly what they assert.
+const seedBareUser = async () => {
+  const user = await prisma.user.create({
+    data: { email: `${randomUUID()}@example.test`, name: "Lock Subject", plan: "Pro" },
+  });
+  return user.id;
+};
+
 const seedImport = async (userId: string, locked: boolean) => {
   const importRow = await prisma.externalImport.create({
     data: {
@@ -449,7 +757,7 @@ const domainRows = (data: Record<string, unknown>, publicName: string) =>
   (data[publicName] as Array<Record<string, unknown>>) || [];
 
 test("an unlocked import is exported with its title and its messages", async () => {
-  const userId = await seedUser();
+  const userId = await seedBareUser();
   await seedImport(userId, false);
   const { data } = await buildAccountDataExport(userId);
 
@@ -470,7 +778,7 @@ test("an unlocked import is exported with its title and its messages", async () 
 });
 
 test("a locked import is reduced to existence metadata", async () => {
-  const userId = await seedUser();
+  const userId = await seedBareUser();
   await seedImport(userId, true);
   const { data } = await buildAccountDataExport(userId);
 
@@ -492,7 +800,7 @@ test("a lock on one conversation does not withhold another", async () => {
   // The filter has to be per conversation. A single locked import silently
   // emptying the whole domain would be a data-loss bug wearing a privacy
   // fix's clothes.
-  const userId = await seedUser();
+  const userId = await seedBareUser();
   await seedImport(userId, true);
   await seedImport(userId, false);
   const { data } = await buildAccountDataExport(userId);

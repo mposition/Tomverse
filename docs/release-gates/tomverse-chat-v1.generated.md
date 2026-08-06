@@ -64,7 +64,7 @@ Canonical release-gate registry for Tomverse Chat v1. Human-readable tables must
 | `AUTH-02` | Email OTP, magic link, and the isolated review code work through the mobile token path | backend-ai | yes | `email_otp_magic_link_lockout_turnstile_e2e_pass_percent` = 100; `submission_scoped_review_code_isolation_e2e_pass_percent` = 100 | pending |
 | `AUTH-03` | Mobile bearer-token lifecycle resists replay and supports revocation | backend-ai | yes | `refresh_rotation_reuse_logout_device_revoke_e2e_pass_percent` = 100 | pending |
 | `AUTH-04` | CORS bypass and deep-link hijacking attack tests pass | security-privacy | yes | `unresolved_high_or_critical_cors_or_deep_link_findings` = 0 | pending |
-| `PRIVACY-01` | Account deletion is complete inside the app | security-privacy | yes | `in_app_account_deletion_e2e_pass_percent` = 100; `data_domains_with_unverified_deletion_action_count` = 0; `data_domains_with_planned_deletion_action_count` = 0 | pending |
+| `PRIVACY-01` | Account deletion is complete inside the app | security-privacy | yes | `in_app_account_deletion_e2e_pass_percent` = 100; `data_domains_with_unverified_deletion_action_count` = 0; `data_domains_with_planned_deletion_action_count` = 0; `identifier_sentinels_surviving_account_deletion_count` = 0 | pending |
 | `PRIVACY-02` | Account data export covers every registered Tomverse data domain | security-privacy | yes | `data_domains_with_undecided_export_state_count` = 0; `account_export_wiring_problem_count` = 0; `withheld_field_sentinels_present_in_export_count` = 0; `account_export_download_security_e2e_pass_percent` = 100; `concurrent_export_ticket_double_redemption_count` = 0 | pending |
 | `STORE-01` | A new Free account can complete a useful flow without purchase | mobile-release | yes | `purchase_free_signup_chat_response_and_history_save_e2e_pass_percent` = 100 | pending |
 | `STORE-02` | Review credentials remain usable throughout an active submission | mobile-release | yes | `daily_review_credential_synthetic_login_success_percent` = 100 | pending |
@@ -795,11 +795,14 @@ Criteria:
 - `in_app_account_deletion_e2e_pass_percent` = 100
 - `data_domains_with_unverified_deletion_action_count` = 0
 - `data_domains_with_planned_deletion_action_count` = 0
+- `identifier_sentinels_surviving_account_deletion_count` = 0
 
 Required evidence:
 
 - deletion E2E covering reauthentication, completion, and token revocation
 - two-axis data-domain registry passing scripts/check-data-domain-registry.mjs, with every anonymise row carrying a re-identification review and every retain row a legal basis, period, owner and review date
+- tests/integration/account-anonymisation.db.test.ts planting a sentinel in every column the registry says is anonymised, deleting the account for real, and asserting none survives
+- tests/accountDataAnonymisation.test.mjs pinning the implemented column list and replacements against the registry field for field, so neither side can drift
 
 Evidence references: none recorded
 

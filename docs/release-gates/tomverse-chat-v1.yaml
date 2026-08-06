@@ -689,9 +689,19 @@ gates:
       - metric: data_domains_with_planned_deletion_action_count
         operator: eq
         value: 0
+      # The deletion-side counterpart to the export's sentinel test. Clearing
+      # userId is where an anonymisation starts, not where it finishes: three
+      # of these tables relate to User with onDelete: SetNull, so the database
+      # performs half of it and a source scan sees an anonymisation that never
+      # touched subjectKey, traceId or the provider request identifiers.
+      - metric: identifier_sentinels_surviving_account_deletion_count
+        operator: eq
+        value: 0
     evidence:
       - deletion E2E covering reauthentication, completion, and token revocation
       - two-axis data-domain registry passing scripts/check-data-domain-registry.mjs, with every anonymise row carrying a re-identification review and every retain row a legal basis, period, owner and review date
+      - tests/integration/account-anonymisation.db.test.ts planting a sentinel in every column the registry says is anonymised, deleting the account for real, and asserting none survives
+      - tests/accountDataAnonymisation.test.mjs pinning the implemented column list and replacements against the registry field for field, so neither side can drift
 
   - id: PRIVACY-02
     rationale: "A versioned data-domain registry prevents new product tables from silently escaping the shared account export, and the export tells the user what it withheld instead of presenting a projection as the whole answer."

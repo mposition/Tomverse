@@ -19,6 +19,14 @@
 //   excluded          nothing in the row is the user's data.
 //   unverified        nobody has decided yet. Blocks PRIVACY-02 rather than
 //                     being read as safe, and must be zero at the release gate.
+//                     It is zero today; the state stays because the next table
+//                     somebody adds starts there.
+//
+// Of the 33 registered domains, 8 are wholly the user's own data, 23 are
+// projections and 2 hold nothing of theirs. That the filtered case is the
+// common one is the finding rather than a drafting accident: a table recording
+// something a person did almost always also records what it cost Tomverse,
+// which idempotency key deduplicated it, or which digest reconciles it.
 //
 // `publicName` is what appears in the export. Prisma model names are internal
 // and change with refactors; a file a user downloaded two years ago should
@@ -167,6 +175,37 @@ export const EXPORT_DOMAIN_DECLARATIONS: ExportDomainDeclaration[] = [
     exclusionReason:
       "Internal enforcement telemetry: limit thresholds and cost estimates, with no content the user wrote. Anonymised on account deletion and purged on its own 90-day retention.",
   },
+  // Records where the linked user is the operator who acted, not the person
+  // the row is about. The subject is referenced by an untyped targetType and
+  // targetId pair with no foreign key, so a subject access request cannot be
+  // answered by joining -- it has to be answered by the manual PrivacyRequest
+  // path, where the rights of the operator and of any third party named in the
+  // text can actually be weighed.
+  {
+    domain: "adminAuditLog",
+    publicName: "admin_actions",
+    prismaModel: "AdminAuditLog",
+    state: "excluded",
+    exclusionReason:
+      "A tamper-evident record of administrator action. Each entry names the operator and carries their address, IP and the internal action metadata, and entries can name third parties. A subject access request plausibly reaches entries about the requester, but automating that would publish the operator's identity, so it is answered through the manual PrivacyRequest path instead. Retained rather than deleted: the entry recording an account's suspension or deletion is the one most worth auditing.",
+  },
+  {
+    domain: "adminNote",
+    publicName: "admin_notes",
+    prismaModel: "AdminNote",
+    state: "excluded",
+    exclusionReason:
+      "Free text written by staff, which can name the operator and third parties as readily as the subject. Redacting free text cannot be automated safely, so a request for notes about a requester is answered through the manual PrivacyRequest path. Notes about a user are deleted with that user's account.",
+  },
+  {
+    domain: "modelOverride",
+    publicName: "model_overrides",
+    prismaModel: "ModelOverride",
+    state: "excluded",
+    exclusionReason:
+      "Global per-model configuration keyed by modelId, not anybody's setting. It carries a user link only because the operator who last changed it is stamped on it.",
+  },
+
   {
     domain: "chatContextBundleConsumption",
     publicName: "context_bundle_nonces",
@@ -184,22 +223,106 @@ export const EXPORT_DOMAIN_DECLARATIONS: ExportDomainDeclaration[] = [
       "Shadow routing telemetry: which model the Router would have chosen, as versions, labels and counts. It holds nothing the user wrote -- no message text, no memory content, not even a message id -- and is deleted with the account.",
   },
 
-  // --- not yet decided ------------------------------------------------------
-  // Each needs a field-level decision about which columns are the user's own
-  // data and which are internal signals about them. This list must be empty
-  // before the export can pass its release gate.
-  { domain: "comparisonReview", publicName: "comparison_reviews", prismaModel: "ComparisonReview", state: "unverified" },
-  { domain: "productAnalyticsEvent", publicName: "product_analytics", prismaModel: "ProductAnalyticsEvent", state: "unverified" },
-  { domain: "billingPromotionRedemption", publicName: "promotions", prismaModel: "BillingPromotionRedemption", state: "unverified" },
-  { domain: "creditLot", publicName: "credit_lots", prismaModel: "CreditLot", state: "unverified" },
-  { domain: "creditLedgerEntry", publicName: "credit_ledger", prismaModel: "CreditLedgerEntry", state: "unverified" },
-  { domain: "creditDebtEntry", publicName: "credit_debts", prismaModel: "CreditDebtEntry", state: "unverified" },
-  { domain: "imageGeneration", publicName: "image_generations", prismaModel: "ImageGeneration", state: "unverified" },
-  { domain: "imageGenerationGroup", publicName: "image_generation_groups", prismaModel: "ImageGenerationGroup", state: "unverified" },
-  { domain: "refundRequest", publicName: "refund_requests", prismaModel: "RefundRequest", state: "unverified" },
-  { domain: "planChangeRequest", publicName: "plan_changes", prismaModel: "PlanChangeRequest", state: "unverified" },
-  { domain: "memoryEvidence", publicName: "memory_evidence", prismaModel: "MemoryEvidence", state: "unverified" },
-  { domain: "memoryExtractionRun", publicName: "memory_extraction_runs", prismaModel: "MemoryExtractionRun", state: "unverified" },
+  // Every one of the remaining domains turned out to mix. Not one was wholly
+  // the user's data, which is the finding rather than an accident of drafting:
+  // a table that records something a person did almost always records what it
+  // cost Tomverse, which idempotency key deduplicated it, or which digest
+  // reconciles it. That is exactly why the state exists.
+  {
+    domain: "comparisonReview",
+    publicName: "comparison_reviews",
+    prismaModel: "ComparisonReview",
+    state: "included_filtered",
+    withheldReason:
+      "The review the user asked for and read, and what it cost them. The prompt version, the internal message identifiers and the dedupe hash are Tomverse's bookkeeping for producing it.",
+  },
+  {
+    domain: "productAnalyticsEvent",
+    publicName: "product_analytics",
+    prismaModel: "ProductAnalyticsEvent",
+    state: "included_filtered",
+    withheldReason:
+      "What the user did in the product, when, and which campaign brought them: behavioural data about them, so theirs to receive. The anonymous and session identifier hashes are withheld because they are pseudonymous identifiers for a device rather than anything the user did, and the free-form properties bag is withheld because its contents are not enumerated anywhere -- exporting an unreviewed field bag is the 'everything except' pattern a field allowlist exists to prevent. Giving it a declared shape is what would let it be exported.",
+  },
+  {
+    domain: "billingPromotionRedemption",
+    publicName: "promotions",
+    prismaModel: "BillingPromotionRedemption",
+    state: "included_filtered",
+    withheldReason:
+      "Which promotion was redeemed, for what plan, and the access period it bought. The client IP and payment-method fingerprint hashes and the risk flags are abuse signals: handing a user their own fraud assessment teaches whoever is abusing the promotion how the control works.",
+  },
+  {
+    domain: "creditLot",
+    publicName: "credit_lots",
+    prismaModel: "CreditLot",
+    state: "included_filtered",
+    withheldReason:
+      "How many credits the user has, where they came from, and when they expire. The funded-cost columns are what those credits cost Tomverse, not what the user paid.",
+  },
+  {
+    domain: "creditLedgerEntry",
+    publicName: "credit_ledger",
+    prismaModel: "CreditLedgerEntry",
+    state: "included_filtered",
+    withheldReason:
+      "Every movement of the user's credit balance and what it stood at afterwards. The funded-cost deltas are Tomverse's cost basis, and the metadata bag is an unenumerated field bag.",
+  },
+  {
+    domain: "creditDebtEntry",
+    publicName: "credit_debts",
+    prismaModel: "CreditDebtEntry",
+    state: "included_filtered",
+    withheldReason: "Same cost basis and metadata bag as credit_ledger.",
+  },
+  {
+    domain: "imageGeneration",
+    publicName: "image_generations",
+    prismaModel: "ImageGeneration",
+    state: "included_filtered",
+    withheldReason:
+      "The prompt the user wrote, the settings they chose, what came back and any error they were shown, with the shape of each image produced. The image files themselves are not in this file -- they are binaries in object storage, and a JSON export cannot carry them; that is a gap rather than a withholding. Also withheld: the internal error detail, the provider request identifier, the worker lease and the idempotency keys.",
+  },
+  {
+    domain: "imageGenerationGroup",
+    publicName: "image_generation_groups",
+    prismaModel: "ImageGenerationGroup",
+    state: "included_filtered",
+    withheldReason:
+      "The grouping that makes the groupId in image_generations resolvable, and nothing else. The group idempotency key is a client-supplied deduplication token.",
+  },
+  {
+    domain: "refundRequest",
+    publicName: "refund_requests",
+    prismaModel: "RefundRequest",
+    state: "included_filtered",
+    withheldReason:
+      "What the user asked to be refunded, why, and what was decided. The internal admin note, the reviewing operator and the Stripe object identifiers are Tomverse's side of the same request.",
+  },
+  {
+    domain: "planChangeRequest",
+    publicName: "plan_changes",
+    prismaModel: "PlanChangeRequest",
+    state: "included_filtered",
+    withheldReason:
+      "Which plan the user moved between, when it applies and what it was quoted at. The Stripe subscription, item, price and schedule identifiers and the internal request fingerprint are withheld.",
+  },
+  {
+    domain: "memoryEvidence",
+    publicName: "memory_evidence",
+    prismaModel: "MemoryEvidence",
+    state: "included_filtered",
+    withheldReason:
+      "Why each memory exists: what it was drawn from, and the text where the user wrote it themselves. The evidence digest is a deduplication value.",
+  },
+  {
+    domain: "memoryExtractionRun",
+    publicName: "memory_extraction_runs",
+    prismaModel: "MemoryExtractionRun",
+    state: "included_filtered",
+    withheldReason:
+      "Each extraction the user ran, which conversations they chose for it, and how far it got. The worker lease, the prompt version and the pricing version are how Tomverse executed it.",
+  },
 ];
 
 /** Domains whose data reaches the export at all. */
