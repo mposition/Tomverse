@@ -54,7 +54,9 @@
     "maintenance:provider-model-catalog": "node scripts/run-provider-model-catalog-monitor.mjs",
     "maintenance:provider-probe": "node scripts/run-provider-probe.mjs",
     "maintenance:default-model-reconciliation": "node --import tsx scripts/run-default-model-reconciliation.mjs",
+    "maintenance:memory-search-terms": "node --import tsx scripts/backfill-memory-search-terms.mjs",
     "eval:default-model": "node --conditions=react-server --import tsx scripts/evalDefaultModel.mjs",
+    "eval:memory-extraction": "node --conditions=react-server --import tsx scripts/evalImportedMemoryExtraction.mjs",
     "postinstall": "prisma generate",
     "check:default-models": "node --conditions=react-server --import tsx scripts/check-default-models.mjs",
     "check:openai-model-access": "node --conditions=react-server --import tsx scripts/check-openai-model-access.mjs",
@@ -62,7 +64,14 @@
     "check:model-pricing-db": "node --conditions=react-server --import tsx scripts/check-model-pricing-db.mjs",
     "report:cost-bucket-corrections": "node --conditions=react-server --import tsx scripts/report-cost-bucket-corrections.mjs",
     "drill:railway-restore-preflight": "node scripts/railway-restore-preflight.mjs",
-    "drill:railway-restore-verify": "node scripts/railway-restore-verify.mjs"
+    "drill:railway-restore-verify": "node scripts/railway-restore-verify.mjs",
+    "verify:tomverse-chat-release-gates": "node scripts/verify-tomverse-chat-release-gates.mjs",
+    "generate:tomverse-chat-release-gate-view": "node scripts/generate-tomverse-chat-release-gate-view.mjs",
+    "check:tomverse-chat-release-gate-view": "node scripts/generate-tomverse-chat-release-gate-view.mjs --check",
+    "verify:review-parity-coverage": "node scripts/verify-review-parity-coverage.mjs",
+    "test:e2e:review-parity": "node scripts/run-review-parity.mjs",
+    "check:context-window-register": "node --import tsx scripts/check-context-window-register.mjs",
+    "report:token-estimate-accuracy": "node --import tsx scripts/report-token-estimate-accuracy.mjs"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^4.0.24",
@@ -106,9 +115,11 @@
     "@types/react-dom": "^19",
     "eslint": "^9",
     "eslint-config-next": "16.2.12",
+    "js-tiktoken": "^1.0.21",
     "tailwindcss": "^4",
     "tsx": "^4.23.1",
-    "typescript": "^6"
+    "typescript": "^6",
+    "yaml": "^2.9.0"
   },
   "overrides": {
     "@eslint/config-array": {

@@ -1,13 +1,39 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { findQuestionRunsInsideStrings } from "./text-encoding-check-core.mjs";
+import {
+  ENCODING_MARKER_PATTERNS,
+  findQuestionRunsInsideStrings,
+  MARKER_SCOPES,
+} from "./text-encoding-check-core.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(__dirname, "..");
 const strict = process.argv.includes("--strict");
 
-const roots = ["app", "components", "lib", "locales"];
+// Where product copy lives. The mojibake markers and the question-mark rule
+// ask whether shipped text is corrupted, so these are the only roots where
+// their answer means anything -- over tests and docs they report fixtures that
+// are deliberately mojibake-shaped, 37 of them at the last count, and a
+// checker whose output is mostly false is one nobody reads.
+const PRODUCT_TEXT_ROOTS = ["app", "components", "lib", "locales"];
+
+// Everything with source in it. The control-character rule asks whether a file
+// can be reviewed at all, which has nothing to do with whether it ships text:
+// one unprintable byte makes git call the file binary and a pull request
+// touching it shows no diff. Scoping this rule to the roots above is what left
+// a literal NUL in tests/server-contract/guest-attachment-route.test.ts, in a
+// test asserting that an executable payload is rejected -- so the assertion
+// nobody could read was the one about a malicious upload.
+const EVERY_SOURCE_ROOTS = [
+  ...PRODUCT_TEXT_ROOTS,
+  "scripts",
+  "tests",
+  "prisma",
+  "docs",
+  ".github",
+];
+
 const extensions = new Set([
   ".ts",
   ".tsx",
@@ -18,14 +44,6 @@ const extensions = new Set([
   ".md",
   ".json",
 ]);
-
-const patterns = [
-  { name: "replacement-character", regex: /\uFFFD/g },
-  { name: "latin1-mojibake-marker", regex: /[\u00C2\u00C3]/g },
-  { name: "smart-quote-mojibake", regex: /\u00E2[\u20AC\u201A\u201C\u201D\u201E\u2020\u2021\u02C6\u2030\u0160\u2039\u0152\u017D\u2018\u2019\u201A\u201C\u201D\u2022\u2013\u2014\u02DC\u2122\u0161\u203A\u0153\u017E\u0178]/g },
-  { name: "korean-mojibake-marker", regex: /[\u00EC\u00ED][\u00A0-\u00BF]/g },
-  { name: "cjk-mojibake-marker", regex: /[\u00E5\u00E6][\u00A0-\u00BF]/g },
-];
 
 function walk(dir, files = []) {
   if (!fs.existsSync(dir)) return files;
@@ -48,39 +66,59 @@ function lineAndColumn(text, index) {
 }
 
 const findings = [];
+const full = () => findings.length >= 200;
 
-for (const rootName of roots) {
-  for (const file of walk(path.join(root, rootName))) {
-    const text = fs.readFileSync(file, "utf8");
-    for (const match of findQuestionRunsInsideStrings(text, file)) {
-      const position = lineAndColumn(text, match.index);
-      findings.push({
-        file: path.relative(root, file),
-        pattern: "question-mark-run-in-string",
-        sample: match.sample,
-        ...position,
-      });
-      if (findings.length >= 200) break;
-    }
-    if (findings.length >= 200) break;
-    for (const pattern of patterns) {
-      pattern.regex.lastIndex = 0;
-      for (const match of text.matchAll(pattern.regex)) {
-        const position = lineAndColumn(text, match.index ?? 0);
-        findings.push({
-          file: path.relative(root, file),
-          pattern: pattern.name,
-          sample: match[0],
-          ...position,
-        });
-        if (findings.length >= 200) break;
+// A file can be in both scopes, so it is read once and each scope's patterns
+// are applied to it. `seen` keeps the wider walk from re-reporting the
+// product roots.
+const seen = new Set();
+
+const scan = (rootNames, patterns, { questionRuns }) => {
+  for (const rootName of rootNames) {
+    for (const file of walk(path.join(root, rootName))) {
+      if (full()) return;
+      if (seen.has(file)) continue;
+      seen.add(file);
+      const text = fs.readFileSync(file, "utf8");
+      const relative = path.relative(root, file);
+
+      if (questionRuns) {
+        for (const match of findQuestionRunsInsideStrings(text, file)) {
+          if (full()) return;
+          findings.push({
+            file: relative,
+            pattern: "question-mark-run-in-string",
+            sample: match.sample,
+            ...lineAndColumn(text, match.index),
+          });
+        }
       }
-      if (findings.length >= 200) break;
+
+      for (const pattern of patterns) {
+        pattern.regex.lastIndex = 0;
+        for (const match of text.matchAll(pattern.regex)) {
+          if (full()) return;
+          findings.push({
+            file: relative,
+            pattern: pattern.name,
+            sample: match[0],
+            ...lineAndColumn(text, match.index ?? 0),
+          });
+        }
+      }
     }
-    if (findings.length >= 200) break;
   }
-  if (findings.length >= 200) break;
-}
+};
+
+const byScope = (scope) =>
+  ENCODING_MARKER_PATTERNS.filter((pattern) => pattern.scope === scope);
+
+// Product roots first, with every pattern that applies to them; then the wider
+// walk with only the rules that apply everywhere.
+scan(PRODUCT_TEXT_ROOTS, ENCODING_MARKER_PATTERNS, { questionRuns: true });
+scan(EVERY_SOURCE_ROOTS, byScope(MARKER_SCOPES.EVERY_SOURCE), {
+  questionRuns: false,
+});
 
 if (findings.length === 0) {
   console.log("Text encoding check passed. No mojibake markers found.");

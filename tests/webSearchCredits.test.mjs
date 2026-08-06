@@ -90,8 +90,8 @@ test("always mode + Perplexity Sonar never adds the native surcharge", () => {
   });
   assert.equal(estimate.webSearchReservationCredits, 0);
   assert.equal(estimate.models[0].nativeSearchEligible, false);
-  // The research base weight (20) is untouched -- no double charge.
-  assert.equal(estimate.models[0].weightedBaseCredits, 20);
+  // Sonar's own base weight is untouched -- no double charge.
+  assert.equal(estimate.models[0].weightedBaseCredits, 16);
 });
 
 test("always mode + Perplexity Deep Research never adds the native surcharge", () => {
@@ -101,7 +101,7 @@ test("always mode + Perplexity Deep Research never adds the native surcharge", (
     webSearchMode: "always",
   });
   assert.equal(estimate.webSearchReservationCredits, 0);
-  assert.equal(estimate.models[0].weightedBaseCredits, 30);
+  assert.equal(estimate.models[0].weightedBaseCredits, 16);
 });
 
 test("the input-length multiplier applies to base credits only, never to the surcharge", () => {
@@ -112,26 +112,26 @@ test("the input-length multiplier applies to base credits only, never to the sur
     webSearchMode: "always",
   });
   const entry = estimate.models[0];
-  // Premium base (8) * 3x = 24, plus a flat, unmultiplied 8-credit surcharge.
-  assert.equal(entry.weightedBaseCredits, 24);
+  // gpt-5-5 base (16) * 3x = 48, plus a flat, unmultiplied 8-credit surcharge.
+  assert.equal(entry.weightedBaseCredits, 48);
   assert.equal(entry.webSearchSurchargeCredits, 8);
-  assert.equal(entry.totalCredits, 32);
+  assert.equal(entry.totalCredits, 56);
 });
 
-test("the worked example from the spec: 1 + 4 + 8 base, +8 per searching model", () => {
+test("the worked example from the spec: 1 + 4 + 16 base, +8 per searching model", () => {
   // Standard/advanced/premium native-search-eligible models, matching the
   // spec's 1 + 4 + 8 = 13 base example exactly.
   const models = [
     getModel("claude-haiku-4-5"), // standard = 1, native
     getModel("claude-sonnet-5"), // advanced = 4, native
-    getModel("gpt-5-5"), // premium = 8, native
+    getModel("gpt-5-5"), // explicit weight = 16, native
   ];
   const estimate = estimateRequestCredits({
     models,
     estimatedInputTokens: 100,
     webSearchMode: "always",
   });
-  assert.equal(estimate.weightedBaseCredits, 1 + 4 + 8);
+  assert.equal(estimate.weightedBaseCredits, 1 + 4 + 16);
   assert.equal(estimate.webSearchReservationCredits, 24);
-  assert.equal(estimate.totalEstimatedCredits, 13 + 24);
+  assert.equal(estimate.totalEstimatedCredits, 21 + 24);
 });

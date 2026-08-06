@@ -94,6 +94,7 @@ import {
     recordProviderFailure,
     recordProviderSuccess,
 } from "@/lib/providerMonitoring";
+import { observeServedProcessingTier } from "@/lib/servedProcessingTier";
 import { z } from "zod";
 import {
     apiSecurityResponse,
@@ -120,6 +121,14 @@ import {
 } from "@/lib/guestAttachments";
 import { isChatCostSafetyCode } from "@/lib/chatCostSafetyCore";
 import { estimatePromptTokens } from "@/lib/chatTokenEstimate";
+import { buildChatMemoryContext } from "@/lib/chatMemoryContext";
+import { latestUserPromptText } from "@/lib/chatMemoryContextCore";
+import {
+    consumeContextBundle,
+    verifyChatContextBundle,
+} from "@/lib/chatContextBundleService";
+import { recordMemoryCounter } from "@/lib/memoryMetrics";
+import { injectedTokenBucket } from "@/lib/memoryMetricsCore";
 import {
     providerDiagnosticCode,
     safeErrorMessage,
@@ -671,6 +680,7 @@ async function handleChatPost(
             deepResearchDepth,
             webSearchMode,
             admissionToken,
+            contextBundle,
         } = validateChatPayload(body);
         const requestedModelId = modelId || APP_DEFAULTS.defaultModelId;
         requestedModelIdForLog = requestedModelId;
@@ -1014,7 +1024,131 @@ async function handleChatPost(
             }
         }
 
-        const formattedMessages: ModelMessage[] = [];
+        // The §10 context bundle: what memory this request may carry, and
+        // proof that it is the same context the request was priced against.
+        //
+        // No bundle means no memory, and that is not a degraded fallback: a
+        // request whose price did not include a memory block must not send
+        // one, or the user is charged for one prompt and shown another. It is
+        // also the ordinary path today — injection stays off until §12.4's
+        // procedure has been completed, so nothing issues a bundle and this
+        // whole branch is skipped.
+        let memorySystemPrompt: string | null = null;
+        let memoryUsedCount = 0;
+        if (session?.user?.id) {
+            // §22's injection denominator. Recorded before the bundle branch
+            // so it counts every authenticated request, including the ones
+            // that carry no bundle — the share of requests that had no memory
+            // to inject is the thing the ratio is for.
+            void recordMemoryCounter("chat_memory_eligible");
+        }
+        if (contextBundle && session?.user?.id) {
+            void recordMemoryCounter("context_bundle_presented");
+            // Built here rather than trusted from the bundle: staleness is
+            // decided by recomputing, and a bundle that asserted its own
+            // freshness would be exactly as trustworthy as the client holding
+            // it (§10). The query is the raw prompt, the same text the
+            // preparation step scored — not the attachment-augmented message
+            // assembled below, which would retrieve differently.
+            const memoryContext = await buildChatMemoryContext({
+                userId: session.user.id,
+                query: latestUserPromptText(messages),
+            });
+            const verification = verifyChatContextBundle(contextBundle, {
+                subjectKey: session.user.id,
+                conversationId: conversationId ?? null,
+                modelId: requestedModelId,
+                currentFingerprint: memoryContext.fingerprint,
+            });
+            if (!verification.ok) {
+                // Two different failures with two different meanings. Drift is
+                // expected and recoverable — the user approved a memory while
+                // the send was in flight — so it names the recovery. Everything
+                // else is a token that never described this request: a bad
+                // signature, another subject, a model that was not priced. That
+                // is a client defect or tampering, and answering it with
+                // "re-preflight" would invite a retry loop against a token that
+                // can never pass.
+                const drifted =
+                    verification.reason === "stale" ||
+                    verification.reason === "expired";
+                // Awaited rather than fired and forgotten: the response is
+                // about to be returned, and a refusal that is never counted
+                // is exactly the observation §22 wants. One upsert, on a path
+                // that is rare by construction.
+                await recordMemoryCounter(
+                    drifted ? "context_bundle_stale" : "context_bundle_rejected"
+                );
+                return drifted
+                    ? tracedJsonError(
+                          "The conversation context changed while this message was being sent.",
+                          "CHAT_CONTEXT_BUNDLE_STALE",
+                          409,
+                          traceId,
+                          { requiresPreflight: true }
+                      )
+                    : tracedJsonError(
+                          "Invalid chat context.",
+                          "INVALID_CONTEXT_BUNDLE",
+                          400,
+                          traceId
+                      );
+            }
+            const consumption = await consumeContextBundle({
+                bundleId: verification.payload.bundleId,
+                modelId: requestedModelId,
+                userId: session.user.id,
+                expiresAt: new Date(verification.payload.expiresAtMs),
+            });
+            if (!consumption.consumed) {
+                // A replay, not drift — but the recovery is the same one, and
+                // §18's code table is settled: this request cannot establish
+                // that its context was priced, and a fresh preparation is what
+                // fixes it. Reusing the code keeps one client path instead of
+                // adding a second that would do the same thing.
+                //
+                // Counted apart from staleness even so: the user-facing code
+                // is shared, but "the context drifted" and "this bundle was
+                // presented twice" are different operational facts, and only
+                // the first belongs in the stale ratio.
+                await recordMemoryCounter("context_bundle_replayed");
+                return tracedJsonError(
+                    "The conversation context changed while this message was being sent.",
+                    "CHAT_CONTEXT_BUNDLE_STALE",
+                    409,
+                    traceId,
+                    { requiresPreflight: true }
+                );
+            }
+            memorySystemPrompt = memoryContext.prompt.text;
+            memoryUsedCount = memoryContext.prompt.usedCount;
+            if (memorySystemPrompt) {
+                // A bundle that passed but selected nothing is not an
+                // injection: no block reaches the prompt, so counting it would
+                // report memory as used on a request the model never saw it in.
+                void recordMemoryCounter("chat_memory_injected");
+                if (memoryContext.truncatedByBudget) {
+                    void recordMemoryCounter("injected_context_truncated");
+                }
+                // The priced figure, not a fresh estimate, so the bucket
+                // describes the same block the reservation was taken against.
+                const bucket = injectedTokenBucket(
+                    verification.payload.memoryTokens
+                );
+                if (bucket) void recordMemoryCounter(bucket);
+            }
+            // The figure that was reserved against, not a fresh estimate: the
+            // two agree here by construction, and if they ever stop agreeing
+            // the user should be billed the number they were quoted.
+            estimatedInputTokens += verification.payload.memoryTokens;
+        }
+
+        // §9.1 places the memory block above the conversation and below the
+        // safety policy, so it is the first message and the rules that govern
+        // reading it are stated inside it, before the memories themselves.
+        const formattedMessages: ModelMessage[] = memorySystemPrompt
+            ? [{ role: "system", content: memorySystemPrompt }]
+            : [];
         for (const msg of messages) {
             if (msg.role === "assistant") {
                 const content = String(msg.content ?? "");
@@ -1924,6 +2058,7 @@ async function handleChatPost(
                             result.finishReason,
                             result.rawFinishReason,
                             result.content,
+                            result.providerMetadata,
                         ] as const);
                         const [
                             responseResult,
@@ -1931,7 +2066,31 @@ async function handleChatPost(
                             finishReasonResult,
                             rawFinishReasonResult,
                             contentResult,
+                            providerMetadataResult,
                         ] = completionResults;
+                        // Observation only: the tier a response was actually
+                        // served at, checked against the Standard table every
+                        // pricing profile claims. Nothing here settles, prices
+                        // or reserves -- see lib/servedProcessingTier.ts.
+                        const servedTier = observeServedProcessingTier(
+                            modelConfig.provider,
+                            providerMetadataResult.status === "fulfilled"
+                                ? providerMetadataResult.value
+                                : undefined
+                        );
+                        if (servedTier.mismatchesAssumedStandard) {
+                            console.warn(
+                                JSON.stringify({
+                                    event: "chat_served_processing_tier_mismatch",
+                                    traceId,
+                                    provider: servedTier.provider,
+                                    modelId: requestedModelId,
+                                    servedTier: servedTier.servedTier,
+                                    classification: servedTier.classification,
+                                    timestamp: new Date().toISOString(),
+                                })
+                            );
+                        }
                         const rejectedCompletion = completionResults.find(
                             (item): item is PromiseRejectedResult =>
                                 item.status === "rejected"
@@ -2304,6 +2463,17 @@ async function handleChatPost(
             "Cache-Control": "no-cache, no-transform",
             "X-Request-ID": traceId,
         });
+        // §13.4: how many memories this answer was given, counted by the
+        // server. A header rather than something in the stream, because the
+        // stream is the answer itself and the count has to be available
+        // before the first token — and because a count folded into the body
+        // is a count the client could be talked into computing. Absent, not
+        // zero, when memory played no part: §13.4 forbids a misleading
+        // indication, and "0 memories used" on a request that never had any
+        // is one.
+        if (memoryUsedCount > 0) {
+            headers.set("X-Chat-Memory-Used", String(memoryUsedCount));
+        }
         if (accessGrant.setCookie) {
             headers.append("Set-Cookie", accessGrant.setCookie);
         }

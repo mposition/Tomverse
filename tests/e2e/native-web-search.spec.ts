@@ -706,14 +706,15 @@ test.describe("native web search (webSearchMode: always)", () => {
     await selectModelsViaPicker(page, models);
     await expect(page.locator('[data-testid="desktop-model-panel"] select')).toHaveCount(2);
 
-    // Before enabling search: only the base model-response total (1 + 4 = 5,
-    // gpt-5-5 premium=8 and claude-sonnet-5 advanced=4 -- both Pro-tier).
+    // Before enabling search: only the base model-response total --
+    // gpt-5-5 carries an explicit creditWeight of 16 and claude-sonnet-5
+    // costs its advanced-class 4.
     const estimate = page.getByTestId("request-credit-estimate");
-    await expect(estimate).toContainText("12");
+    await expect(estimate).toContainText("20");
 
     await setWebSearchModeAlways(page);
-    // Both models are native-search-eligible: base 12 + 2 * 8 surcharge = 28.
-    await expect(estimate).toContainText("28");
+    // Both models are native-search-eligible: base 20 + 2 * 8 surcharge = 36.
+    await expect(estimate).toContainText("36");
 
     await estimate.click();
     const sheet = page.getByTestId("web-search-reservation-breakdown");

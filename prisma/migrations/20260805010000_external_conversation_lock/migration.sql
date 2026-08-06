@@ -1,0 +1,11 @@
+-- Release B5, policy §7: the lock now protects imported snapshots too.
+--
+-- Same column shape and same hash format as "Conversation"."password", because
+-- both are verified by the same helpers in lib/conversationLock.ts. NULL means
+-- unlocked, which is what every existing row is.
+--
+-- No index: every query that reads it already narrows by owner or arrives on
+-- the primary key, and Prisma cannot declare a partial index, so a hand-written
+-- one here would read as drift against schema.prisma on every db-integration
+-- run.
+ALTER TABLE "ExternalConversation" ADD COLUMN "password" TEXT;

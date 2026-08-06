@@ -38,6 +38,14 @@ export type Message = {
   createdAt?: string;
   pendingJobId?: string | null;
   searchMetadata?: WebSearchExecution | null;
+  /**
+   * How many account memories this answer was given (§13.4). Server-computed
+   * and read from the response header -- never counted here, and never sent
+   * back: the serializers in lib/chatMessageSerialization.ts are allowlists,
+   * so this runtime-only field stays out of transcripts and storage, where
+   * it could only ever be a stale claim.
+   */
+  memoryUsedCount?: number;
 };
 
 export type Conversation = {

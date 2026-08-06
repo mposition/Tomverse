@@ -2,8 +2,10 @@ import { createHash, timingSafeEqual } from "node:crypto";
 import { after } from "next/server";
 import { reconcileExpiredChatCreditReservations } from "@/lib/chatSecurity";
 import { reconcileExpiredChatRequestLeases } from "@/lib/chatRequestLease";
+import { reconcileSourceLockedMemories } from "@/lib/externalConversationLockService";
 import { reconcileExpiredExternalImportStaging } from "@/lib/externalImportService";
-import { reconcileExpiredMemoryExtractionRuns } from "@/lib/memoryExtractionService";
+import { reconcileExpiredMemories } from "@/lib/memoryExpiryService";
+import { dispatchPendingMemoryExtractionRuns } from "@/lib/memoryExtractionWorker";
 import { reportOperationalIncident } from "@/lib/operationalMonitoring";
 import {
   completeScheduledJob,
@@ -73,12 +75,45 @@ export async function POST(request: Request) {
       await reconcileExpiredExternalImportStaging().catch(() => ({
         expiredImports: 0,
       }));
-    // Memory extraction leases (policy §3): a running run whose heartbeat
-    // stopped goes back to pending, progress intact, so the owner can resume
-    // instead of being blocked by their own orphan. Never throws.
-    const memoryExtractionLeases =
-      await reconcileExpiredMemoryExtractionRuns().catch(() => ({
+    // Memory expiry (policy §8.6): retrieval already refuses an expired
+    // memory whichever status it holds, so this is about the row saying so —
+    // the owner sees it as expired, and the account's memory fingerprint
+    // moves, which retires any §10 bundle priced against the old set. Never
+    // throws, so it cannot turn a successful reconciliation into a failed one.
+    const memoryExpiry = await reconcileExpiredMemories().catch(() => ({
+      expiredMemories: 0,
+      truncated: false,
+    }));
+    // Source-lock convergence (policy §7.1): the lock transition is atomic, so
+    // this exists for the drift the transaction cannot see -- evidence added
+    // to a memory after its source was locked, or a source unlocked while a
+    // memory was being edited. Same never-throws rule as the sweep above.
+    const memorySourceLocks = await reconcileSourceLockedMemories().catch(
+      () => ({
+        memoriesSuspended: 0,
+        memoriesRestored: 0,
+        memoriesExpired: 0,
+        truncated: false,
+      })
+    );
+    // Memory extraction recovery (policy §11.1), deliberately last.
+    //
+    // This is the *dispatcher*, not only the lease sweep: reclaiming an expired
+    // lease returns a run to `pending`, and §11.1 is explicit that a reclaimed
+    // run nobody re-drives sits there forever unless a request happens to
+    // arrive. So it reclaims and then drives what is pending.
+    //
+    // It runs after everything above because it is the only step here that
+    // waits on a third-party model. It carries its own wall-clock ceiling as
+    // well as a run cap -- a run count is not a time bound -- but ordering it
+    // last means even a pathological provider cannot delay the credit, refund
+    // and notification work, which is §11.1's actual requirement. Never throws.
+    const memoryExtractionDispatch =
+      await dispatchPendingMemoryExtractionRuns().catch(() => ({
         reclaimedRuns: 0,
+        dispatchedRuns: 0,
+        chunksProcessed: 0,
+        skippedForTime: 0,
       }));
     await completeScheduledJob({
       runId: run?.id,
@@ -91,7 +126,9 @@ export async function POST(request: Request) {
         requestLeases,
         imageAssets,
         externalImportStaging,
-        memoryExtractionLeases,
+        memoryExtractionDispatch,
+        memoryExpiry,
+        memorySourceLocks,
       },
     });
     return Response.json(
@@ -104,7 +141,7 @@ export async function POST(request: Request) {
         requestLeases,
         imageAssets,
         externalImportStaging,
-        memoryExtractionLeases,
+        memoryExtractionDispatch,
       },
       { headers: { "Cache-Control": "no-store" } }
     );

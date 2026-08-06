@@ -124,6 +124,8 @@ type ImportApiState = {
     expectedDuplicateCount: number;
   }>;
   deleteCount: number;
+  deleteUrls: string[];
+  memoryImpactReads: number;
   historyReads: number;
   snapshotDeleteCount: number;
   exportCount: number;
@@ -183,6 +185,12 @@ async function mockImportApi(
     failFinalize?: { code: string; status: number; times: number };
     /** Payload served by GET /api/imports/external/[importId]. */
     importDetail?: ImportDetail;
+    /** §13.1 impact served to the delete confirmation. */
+    memoryImpact?: {
+      derivedCount: number;
+      userTouchedCount: number;
+      keptCount: number;
+    };
   } = {}
 ): Promise<ImportApiState> {
   const state: ImportApiState = {
@@ -192,6 +200,8 @@ async function mockImportApi(
     finalizeCount: 0,
     sealBodies: [],
     deleteCount: 0,
+    deleteUrls: [],
+    memoryImpactReads: 0,
     historyReads: 0,
     snapshotDeleteCount: 0,
     exportCount: 0,
@@ -451,7 +461,24 @@ async function mockImportApi(
     (route) => {
       if (route.request().method() === "DELETE") {
         state.deleteCount += 1;
-        return route.fulfill(json({ outcome: "deleted" }));
+        state.deleteUrls.push(route.request().url());
+        return route.fulfill(
+          json({ outcome: "deleted", memory: { derivedCount: 0 } })
+        );
+      }
+      // §13.1 preview: only answered when the confirmation asks for it.
+      if (new URL(route.request().url()).searchParams.get("include") === "memoryImpact") {
+        state.memoryImpactReads += 1;
+        return route.fulfill(
+          json({
+            ...(options.importDetail ?? {}),
+            memoryImpact: options.memoryImpact ?? {
+              derivedCount: 0,
+              userTouchedCount: 0,
+              keptCount: 0,
+            },
+          })
+        );
       }
       if (options.importDetail) return route.fulfill(json(options.importDetail));
       return route.fulfill({ status: 404, contentType: "application/json", body: JSON.stringify({ error: "Import not found." }) });
@@ -1527,5 +1554,113 @@ test.describe("external import settings", () => {
     await expect(
       page.getByTestId("external-import-detail-resume")
     ).toBeVisible();
+  });
+});
+
+test.describe("source deletion and account memory (§13.1)", () => {
+  test("the delete confirmation states the memory impact and offers to keep it", async ({
+    page,
+  }) => {
+    await prepareGuestPage(page, "en");
+    await mockAuthenticatedApi(page);
+    const api = await mockImportApi(page, {
+      history: [
+        {
+          id: "imp-1",
+          provider: "chatgpt",
+          status: "completed",
+          conversationCount: 2,
+          messageCount: 10,
+          normalizedBytes: 2048,
+          duplicateCount: 0,
+          truncationCount: 0,
+          createdAt: "2026-07-30T00:00:00.000Z",
+          completedAt: "2026-07-30T00:01:00.000Z",
+        },
+      ],
+      memoryImpact: { derivedCount: 3, userTouchedCount: 1, keptCount: 2 },
+    });
+
+    await page.goto("/settings/imports");
+    const deleteButton = page.getByTestId("external-import-history-delete");
+
+    // Nothing is read until the delete is armed: the listing must not pay for
+    // a preview nobody asked for.
+    expect(api.memoryImpactReads).toBe(0);
+
+    await deleteButton.click(); // arm
+    await expect(page.getByTestId("source-deletion-memory-notice")).toBeVisible();
+    await expect(page.getByTestId("source-deletion-derived")).toContainText("3");
+    await expect(page.getByTestId("source-deletion-edited")).toContainText("1");
+    await expect(page.getByTestId("source-deletion-kept")).toContainText("2");
+    expect(api.memoryImpactReads).toBe(1);
+
+    await deleteButton.click(); // confirm
+    await expect.poll(() => api.deleteCount).toBe(1);
+    expect(api.deleteUrls[0]).toContain("derivedMemories=delete");
+  });
+
+  test("keeping the memories sends suspend instead of delete", async ({
+    page,
+  }) => {
+    await prepareGuestPage(page, "en");
+    await mockAuthenticatedApi(page);
+    const api = await mockImportApi(page, {
+      history: [
+        {
+          id: "imp-1",
+          provider: "chatgpt",
+          status: "completed",
+          conversationCount: 1,
+          messageCount: 4,
+          normalizedBytes: 1024,
+          duplicateCount: 0,
+          truncationCount: 0,
+          createdAt: "2026-07-30T00:00:00.000Z",
+          completedAt: "2026-07-30T00:01:00.000Z",
+        },
+      ],
+      memoryImpact: { derivedCount: 2, userTouchedCount: 0, keptCount: 0 },
+    });
+
+    await page.goto("/settings/imports");
+    const deleteButton = page.getByTestId("external-import-history-delete");
+    await deleteButton.click();
+    await page.getByTestId("source-deletion-keep-memories").check();
+    await deleteButton.click();
+
+    await expect.poll(() => api.deleteCount).toBe(1);
+    expect(api.deleteUrls[0]).toContain("derivedMemories=suspend");
+  });
+
+  test("a source with no memories behind it shows no notice at all", async ({
+    page,
+  }) => {
+    await prepareGuestPage(page, "en");
+    await mockAuthenticatedApi(page);
+    await mockImportApi(page, {
+      history: [
+        {
+          id: "imp-1",
+          provider: "chatgpt",
+          status: "completed",
+          conversationCount: 1,
+          messageCount: 4,
+          normalizedBytes: 1024,
+          duplicateCount: 0,
+          truncationCount: 0,
+          createdAt: "2026-07-30T00:00:00.000Z",
+          completedAt: "2026-07-30T00:01:00.000Z",
+        },
+      ],
+      memoryImpact: { derivedCount: 0, userTouchedCount: 0, keptCount: 0 },
+    });
+
+    await page.goto("/settings/imports");
+    await page.getByTestId("external-import-history-delete").click();
+    // A notice reading "0 memories" is noise on the common path.
+    await expect(
+      page.getByTestId("source-deletion-memory-notice")
+    ).toHaveCount(0);
   });
 });

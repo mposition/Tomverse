@@ -137,6 +137,35 @@ jobs:
         timeout-minutes: 5
         run: npm run check:memory-extraction-eval
 
+      # Tomverse Chat release thresholds live only in the canonical registry
+      # (docs/release-gates/tomverse-chat-v1.yaml); prose documents reference
+      # gate IDs and may not redefine numbers. A registry with duplicate IDs,
+      # missing required/approval fields, or invalid operators must not merge.
+      # Cheap, no browser, so it sits in the static tier with the other
+      # fail-closed checks.
+      - name: Tomverse Chat release gates
+        timeout-minutes: 5
+        run: npm run verify:tomverse-chat-release-gates
+
+      # The registry declares generatedMarkdownOnly, which was a claim with
+      # nothing behind it until this check: the committed readable view is
+      # re-rendered and compared byte for byte, so a threshold hand-edited into
+      # the Markdown -- or a registry change that never regenerated the view --
+      # fails here instead of shipping a table that disagrees with the gates.
+      - name: Tomverse Chat release gate view is generated
+        timeout-minutes: 5
+        run: npm run check:tomverse-chat-release-gate-view
+
+      # Declaring a context window is not a no-op: the chat route's guard only
+      # runs when contextWindowTokens is set, so a new value immediately starts
+      # rejecting long requests that used to pass. Windows are verified with a
+      # source, a date and a verifier in the register first. This fails when an
+      # unverified row carries a value, a verified row has no provenance, or the
+      # catalogue gains a window whose evidence was never recorded.
+      - name: Context-window register
+        timeout-minutes: 5
+        run: npm run check:context-window-register
+
       # gpt-image-2 lives outside AVAILABLE_MODELS by design, so the model
       # pricing check above cannot see it. Same release contract -- every
       # enabled price is explicit and verified -- separate fail-closed net.

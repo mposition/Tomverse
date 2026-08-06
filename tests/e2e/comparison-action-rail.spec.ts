@@ -299,7 +299,7 @@ test.describe("comparison readiness states", () => {
     await expect(rail(page)).toHaveCount(0);
   });
 
-  test("three completed answers run against all three", async ({ page }) => {
+  test("three completed answers run against all three", { tag: "@review-parity" }, async ({ page }) => {
     await seedGuestComparison(page);
     await openSeeded(page);
 
@@ -311,7 +311,7 @@ test.describe("comparison readiness states", () => {
     );
   });
 
-  test("a failed answer is excluded, said so, and does not block the rest", async ({
+  test("a failed answer is excluded, said so, and does not block the rest", { tag: "@review-parity" }, async ({
     page,
   }) => {
     await seedGuestComparison(page, { "gemini-2-5-flash": "error" });

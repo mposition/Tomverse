@@ -7,6 +7,7 @@ import { useLanguage } from "@/components/LanguageProvider";
 import { useTurnstile } from "@/components/chat/useTurnstile";
 import Link from "next/link";
 import { withChatLanguage } from "@/lib/localizedCallbackUrl";
+import { ACCOUNT_SWITCH_REASON } from "@/lib/adminReauthenticationCore";
 import { isValidLoginEmail } from "@/lib/emailValidation";
 import { useAuthConsentSlotRef } from "@/components/analytics/AnalyticsProvider";
 import {
@@ -60,6 +61,18 @@ function SignInButtons() {
     const callbackUrl = withChatLanguage(searchParams.get("callbackUrl"), lang);
     const adminReauthentication =
         searchParams.get("reason") === "admin-session-expired";
+    // The visitor deliberately ended the previous session to use a different
+    // account. Whoever was signed in with the identity provider is still signed
+    // in *there*, so without this the next click would silently hand back the
+    // same account -- on a shared computer, someone else's.
+    const accountSwitch = searchParams.get("reason") === ACCOUNT_SWITCH_REASON;
+    // Only for that entry: an ordinary sign-in keeps going straight through
+    // with the provider's existing session, which is the whole point of it.
+    // Nothing is done to the provider's own session either way; forcing the
+    // chooser is a request for this one authorization, not a global sign-out.
+    const oauthAuthorizationParams = accountSwitch
+        ? { prompt: "select_account" }
+        : undefined;
     const providerError = searchParams.get("error");
     const pageViewTrackedRef = useRef(false);
     const emailInputRef = useRef<HTMLInputElement | null>(null);
@@ -237,6 +250,16 @@ function SignInButtons() {
                     to open the Tomverse Admin Console.
                 </div>
             ) : null}
+            {accountSwitch ? (
+                <div
+                    role="status"
+                    data-testid="signin-account-switch-notice"
+                    className="rounded-2xl border border-blue-200 bg-blue-50 p-4 text-sm leading-6 text-blue-900 dark:border-blue-500/30 dark:bg-blue-950/30 dark:text-blue-100"
+                >
+                    The previous session was ended. Choose an account to
+                    continue.
+                </div>
+            ) : null}
             {providerError && !adminReauthentication ? (
                 <div role="status" className="rounded-2xl border border-red-200 bg-red-50 p-4 text-sm leading-6 text-red-900 dark:border-red-500/30 dark:bg-red-950/30 dark:text-red-100">
                     {t(PROVIDER_ERROR_KEYS[providerError] || "auth.errorGeneric")}
@@ -268,7 +291,7 @@ function SignInButtons() {
                 type="button"
                 onClick={() => {
                     markSignupStarted("google");
-                    void signIn("google", { callbackUrl });
+                    void signIn("google", { callbackUrl }, oauthAuthorizationParams);
                 }}
                 className={providerButtonClass}
             >
@@ -282,7 +305,7 @@ function SignInButtons() {
                 type="button"
                 onClick={() => {
                     markSignupStarted("azure-ad");
-                    void signIn("azure-ad", { callbackUrl });
+                    void signIn("azure-ad", { callbackUrl }, oauthAuthorizationParams);
                 }}
                 className={providerButtonClass}
             >

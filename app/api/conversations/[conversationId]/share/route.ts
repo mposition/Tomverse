@@ -4,6 +4,7 @@ import { getServerSession } from "next-auth/next";
 import { conversationKindNotSupportedResponse, isChatConversationKind } from "@/lib/conversationKindGuard";
 import { prisma } from "@/lib/prisma";
 import { authOptions } from "@/lib/auth";
+import { isMemoryInjectionEnabled } from "@/lib/appSettings";
 import { createShareToken } from "@/lib/shareTokens";
 import {
   MAX_SHARE_SNAPSHOT_BYTES,
@@ -149,6 +150,9 @@ export async function POST(
   );
   const snapshot: ShareSnapshot = {
     version: SHARE_SNAPSHOT_VERSION,
+    // Recorded now, not read when the page is viewed (§13.3): turning
+    // injection off later does not un-influence answers already generated.
+    personalizationPossible: await isMemoryInjectionEnabled(),
     title: conversation.title,
     conversationCreatedAt: conversation.createdAt.toISOString(),
     sharedAt: sharedAt.toISOString(),

@@ -229,14 +229,24 @@ test("rows outside the window are excluded", async () => {
 });
 
 test("a fallback-priced model nobody registered is reported as drift", async () => {
-  // The control has to be a model that is actually registered today. Naming one
-  // fails the day its price is verified or the model is retired, which says
-  // nothing about drift detection.
-  const registered = PENDING_VERIFIED_PRICE_REGISTER[0].modelId;
+  // The control is a model that is actually registered today, there to show
+  // that registration is what suppresses the report rather than luck. Naming
+  // one by ID fails the day its price is verified, which says nothing about
+  // drift detection -- so it is read off the register instead.
+  //
+  // And the register can be empty: that is its goal state, reached on
+  // 2026-08-04 when the last three models were priced. Reading `[0].modelId`
+  // off it threw once it was. When there is no registered model the control
+  // half is vacuous -- there is nothing registration could be suppressing --
+  // and the half that matters, an unregistered fallback-priced model being
+  // reported as drift, still runs.
+  const registered = PENDING_VERIFIED_PRICE_REGISTER[0]?.modelId;
   await decision({
     decision: "allowed",
     models: [
-      { modelId: registered, costSource: FALLBACK_COST_SOURCE },
+      ...(registered
+        ? [{ modelId: registered, costSource: FALLBACK_COST_SOURCE }]
+        : []),
       { modelId: "brand-new-premium-model", costSource: FALLBACK_COST_SOURCE },
     ],
   });

@@ -4,14 +4,19 @@ import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import {
     AlertTriangle,
-    ArrowLeft,
     Clock,
     Download,
     Loader2,
+    Lock,
     Plus,
     Trash2,
 } from "lucide-react";
 import { useLanguage } from "@/components/LanguageProvider";
+import {
+    SourceDeletionNotice,
+    type SourceDeletionImpactView,
+} from "@/components/imports/SourceDeletionNotice";
+import { SettingsDetailNav } from "@/components/settings/SettingsDetailNav";
 import {
     formatBytes,
     interpolate,
@@ -116,6 +121,8 @@ export type ViewerConversationRow = {
     messageCount: number;
     contentBytes: number;
     importedAt: string;
+    /** A password is set on this snapshot (§7) -- never the hash itself. */
+    locked?: boolean;
 };
 
 /** Hidden covers 401/403: the viewer list is flag-gated, unlike history. */
@@ -138,6 +145,11 @@ export function ExternalImportManagement() {
         kind: "loading",
     });
     const [armedDeleteId, setArmedDeleteId] = useState<string | null>(null);
+    // Read when the delete is armed, not on every list render: the
+    // confirmation needs the number, the listing does not (§13.1).
+    const [memoryImpact, setMemoryImpact] =
+        useState<SourceDeletionImpactView | null>(null);
+    const [keepMemories, setKeepMemories] = useState(false);
     const [deletingId, setDeletingId] = useState<string | null>(null);
     const [conversationsState, setConversationsState] =
         useState<ConversationsState>({ kind: "loading" });
@@ -250,12 +262,31 @@ export function ExternalImportManagement() {
         async (importId: string) => {
             if (armedDeleteId !== importId) {
                 setArmedDeleteId(importId);
+                setMemoryImpact(null);
+                setKeepMemories(false);
+                try {
+                    const preview = await fetch(
+                        `/api/imports/external/${importId}?include=memoryImpact`,
+                        { cache: "no-store" }
+                    );
+                    if (preview.ok) {
+                        const body = (await preview.json()) as {
+                            memoryImpact?: SourceDeletionImpactView;
+                        };
+                        setMemoryImpact(body.memoryImpact ?? null);
+                    }
+                } catch {
+                    // No preview is not a reason to block the delete; the
+                    // server still applies the §13.1 defaults.
+                }
                 return;
             }
             setDeletingId(importId);
             try {
                 const response = await fetch(
-                    `/api/imports/external/${importId}`,
+                    `/api/imports/external/${importId}?derivedMemories=${
+                        keepMemories ? "suspend" : "delete"
+                    }`,
                     { method: "DELETE" }
                 );
                 if (response.ok) {
@@ -268,7 +299,13 @@ export function ExternalImportManagement() {
                 setArmedDeleteId(null);
             }
         },
-        [armedDeleteId, loadCapacity, loadConversations, loadHistory]
+        [
+            armedDeleteId,
+            keepMemories,
+            loadCapacity,
+            loadConversations,
+            loadHistory,
+        ]
     );
 
     if (capacityState.kind === "unauthenticated") {
@@ -308,14 +345,11 @@ export function ExternalImportManagement() {
     return (
         <div className="mx-auto w-full max-w-3xl space-y-4 px-4 py-8">
             <div>
-                <Link
-                    href="/chat"
-                    className="inline-flex items-center gap-1.5 text-sm font-semibold text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100"
-                    data-testid="external-import-back"
-                >
-                    <ArrowLeft className="h-4 w-4" />
-                    {t("externalImport.backToChat")}
-                </Link>
+                <SettingsDetailNav
+                    section="external-import"
+                    currentLabel={t("externalImport.dataTabTitle")}
+                    backTestId="external-import-back"
+                />
                 <h1 className="mt-3 text-xl font-bold">
                     {t("externalImport.pageTitle")}
                 </h1>
@@ -627,6 +661,14 @@ export function ExternalImportManagement() {
                                               : t("externalImport.deleteImport")}
                                     </button>
                                 </div>
+                                {armedDeleteId === row.id ? (
+                                    <SourceDeletionNotice
+                                        impact={memoryImpact}
+                                        scope="import"
+                                        keepDerived={keepMemories}
+                                        onKeepDerivedChange={setKeepMemories}
+                                    />
+                                ) : null}
                             </li>
                         ))}
                     </ul>
@@ -745,6 +787,18 @@ function ConversationRowLink({ row }: { row: ViewerConversationRow }) {
                 <span className="block truncate text-sm font-semibold text-zinc-900 dark:text-zinc-100">
                     {row.title}
                 </span>
+                {/* Said in the list, not only on the page it guards: opening a
+                    snapshot to find a password prompt is a worse answer than
+                    knowing before the click (§7). */}
+                {row.locked ? (
+                    <span
+                        className="mt-0.5 inline-flex items-center gap-1 rounded-md bg-zinc-100 px-1.5 py-0.5 text-xs font-semibold text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300"
+                        data-testid="external-import-conversation-locked"
+                    >
+                        <Lock className="h-3 w-3" />
+                        {t("externalImport.lockedBadge")}
+                    </span>
+                ) : null}
                 <span className="mt-0.5 block text-xs leading-5 text-zinc-500">
                     {providerLabel(row.provider)}
                     {" · "}

@@ -14,6 +14,7 @@ import {
   ExternalLink,
   Image as ImageIcon,
   Loader2,
+  RefreshCw,
   Sparkles,
 } from "lucide-react";
 import Link from "next/link";
@@ -23,12 +24,16 @@ import { notifyUserUsageChanged } from "@/components/chat/useUserUsage";
 import { estimatePromptTokens } from "@/lib/chatTokenEstimate";
 import {
   getImageGenerationPricing,
-  IMAGE_GENERATION_MODEL_ID,
   IMAGE_PROMPT_MAX_TOKENS,
   IMAGE_QUALITY_BY_PRESET,
   type ImagePreset,
   type ImageSize,
 } from "@/lib/imageGenerationPricing";
+import {
+  DEFAULT_IMAGE_MODEL_ID,
+  getImageModelPrice,
+  listEnabledImageModels,
+} from "@/lib/imageModelRegistry";
 
 // The image conversation surface: prompt composer, option pickers and the
 // generation timeline. Self-contained on purpose -- ChatInput, ChatApp and the
@@ -84,7 +89,67 @@ type GenerationView = {
   publicErrorCode: string | null;
   createdAt: string;
   assets: GenerationAsset[];
+  // v2 identity: which comparison slot and model this attempt belongs to.
+  provider?: string;
+  modelId?: string;
+  outputWidth?: number | null;
+  outputHeight?: number | null;
+  groupId?: string;
+  targetId?: string;
+  attemptNumber?: number;
 };
+
+/**
+ * One comparison group as the timeline renders it: the prompt once, then the
+ * latest attempt of each target. Derived from the attempts, never stored --
+ * the same rule the server follows (policy §11).
+ */
+type GroupView = {
+  groupId: string;
+  prompt: string;
+  createdAt: string;
+  targets: GenerationView[];
+};
+
+const groupAttempts = (generations: GenerationView[]): GroupView[] => {
+  const groups = new Map<string, Map<string, GenerationView>>();
+  const order: string[] = [];
+  for (const generation of generations) {
+    const groupId = generation.groupId ?? generation.generationId;
+    const targetId = generation.targetId ?? generation.generationId;
+    if (!groups.has(groupId)) {
+      groups.set(groupId, new Map());
+      order.push(groupId);
+    }
+    const targets = groups.get(groupId)!;
+    const existing = targets.get(targetId);
+    // Only the newest attempt of a target is the current state; older ones
+    // stay in the payload as audit history and must not render as extra
+    // cards.
+    if (
+      !existing ||
+      (generation.attemptNumber ?? 1) >= (existing.attemptNumber ?? 1)
+    ) {
+      targets.set(targetId, generation);
+    }
+  }
+  return order.map((groupId) => {
+    const targets = [...groups.get(groupId)!.values()].sort((a, b) =>
+      (a.modelId ?? "").localeCompare(b.modelId ?? "")
+    );
+    return {
+      groupId,
+      prompt: targets[0]?.prompt ?? "",
+      createdAt: targets[0]?.createdAt ?? "",
+      targets,
+    };
+  });
+};
+
+const imageModelName = (modelId: string | undefined) =>
+  (modelId && listEnabledImageModels().find((model) => model.id === modelId)?.name) ||
+  modelId ||
+  "";
 
 const isTerminal = (status: string) =>
   status === "succeeded" || status === "failed";
@@ -110,6 +175,16 @@ type ImageGenerationWorkspaceProps = {
   flagEnabled: boolean;
   /** Mirrors planAllowsImageGeneration; the server re-checks regardless. */
   planAllowsImageGeneration: boolean;
+  /** Text carried over from the chat composer when the user switched here. */
+  initialPrompt?: string;
+  /**
+   * Set when the user arrived by picking a model in the catalogue's image tab.
+   * Unknown or held ids are dropped rather than trusted: the registry decides
+   * what is selectable, not the caller.
+   */
+  initialModelIds?: readonly string[];
+  /** Present only when there is a chat draft to go back to. */
+  onCancelDraft?: () => void;
 };
 
 export function ImageGenerationWorkspace({
@@ -117,13 +192,24 @@ export function ImageGenerationWorkspace({
   onConversationCreated,
   flagEnabled,
   planAllowsImageGeneration,
+  initialPrompt = "",
+  initialModelIds,
+  onCancelDraft,
 }: ImageGenerationWorkspaceProps) {
   const { t } = useLanguage();
   const [generations, setGenerations] = useState<GenerationView[]>([]);
   const [historyError, setHistoryError] = useState(false);
-  const [prompt, setPrompt] = useState("");
+  const [prompt, setPrompt] = useState(initialPrompt);
   const [preset, setPreset] = useState<ImagePreset>("standard");
   const [size, setSize] = useState<ImageSize>("1024x1024");
+  const [selectedModelIds, setSelectedModelIds] = useState<string[]>(() => {
+    const enabled = new Set(listEnabledImageModels().map((model) => model.id));
+    const seeded = (initialModelIds ?? []).filter((modelId) =>
+      enabled.has(modelId)
+    );
+    return seeded.length > 0 ? [...new Set(seeded)] : [DEFAULT_IMAGE_MODEL_ID];
+  });
+  const [retryingTargetIds, setRetryingTargetIds] = useState<string[]>([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   // The poll loop's wall clock, read at render time in place of Date.now().
@@ -136,6 +222,21 @@ export function ImageGenerationWorkspace({
 
   const quality = IMAGE_QUALITY_BY_PRESET[preset];
   const pricing = getImageGenerationPricing(quality, size);
+  const availableModels = useMemo(() => listEnabledImageModels(), []);
+  // Per-model price for the current options, and the total the request will
+  // actually charge -- shown before submitting, never after (policy §12).
+  const selectedModelPrices = selectedModelIds.map((modelId) => ({
+    modelId,
+    credits: getImageModelPrice(modelId, quality, size)?.credits ?? null,
+  }));
+  const totalCredits = selectedModelPrices.reduce(
+    (sum, entry) => sum + (entry.credits ?? 0),
+    0
+  );
+  const hasUnpricedSelection = selectedModelPrices.some(
+    (entry) => entry.credits === null
+  );
+  const groups = useMemo(() => groupAttempts(generations), [generations]);
   const estimatedTokens = useMemo(
     () => (prompt.trim() ? estimatePromptTokens(prompt) : 0),
     [prompt]
@@ -188,6 +289,9 @@ export function ImageGenerationWorkspace({
     };
   }, [conversationId]);
 
+  // Single-card recovery, not polling: re-reads one generation to mint fresh
+  // signed asset URLs after the ~5 minute TTL expires. Polling goes through
+  // refreshGroup below.
   const refreshGeneration = useCallback(
     async (generationId: string) => {
       try {
@@ -206,25 +310,58 @@ export function ImageGenerationWorkspace({
     [mergeGeneration]
   );
 
-  // Poll every active generation until it settles, then refresh the credit
-  // displays once. 45 minutes is the server's own stale ceiling; polling
-  // simply continues until the reconciliation sweep fails the row.
+  // One request per unsettled comparison group, not one per unsettled model
+  // (policy §11). Polling per generation made watching a comparison cost
+  // proportionally more the more models were being compared -- and because a
+  // refused poll reads here as "no update", exhausting the status rate limit
+  // would have shown up as a workspace that silently stopped refreshing.
+  const refreshGroup = useCallback(
+    async (groupId: string) => {
+      try {
+        const response = await fetch(`/api/images/groups/${groupId}`, {
+          cache: "no-store",
+        });
+        if (!response.ok) return null;
+        const payload = (await response.json()) as {
+          status: string;
+          generations: GenerationView[];
+        };
+        for (const generation of payload.generations) mergeGeneration(generation);
+        return payload;
+      } catch {
+        return null;
+      }
+    },
+    [mergeGeneration]
+  );
+
+  // Polling continues until every target settles; the server's own stale sweep
+  // is what eventually fails a generation whose worker died.
   useEffect(() => {
     if (!hasActiveGeneration) return;
     const timer = setInterval(async () => {
       setPollClockMs(Date.now());
-      const active = generations.filter(
-        (generation) => !isTerminal(generation.status)
+      const activeGroupIds = [
+        ...new Set(
+          generations
+            .filter((generation) => !isTerminal(generation.status))
+            // A group id is always present on a server row; the fallback
+            // covers the optimistic card written before the POST answered.
+            .map((generation) => generation.groupId ?? generation.generationId)
+        ),
+      ];
+      const results = await Promise.all(
+        activeGroupIds.map((groupId) => refreshGroup(groupId))
       );
-      for (const generation of active) {
-        const updated = await refreshGeneration(generation.generationId);
-        if (updated && isTerminal(updated.status)) {
-          notifyUserUsageChanged();
-        }
+      // One credit refresh per tick that settled something, not one per
+      // target: the balance is a single number and N models finishing
+      // together do not make it N different numbers.
+      if (results.some((result) => result && result.status !== "in_progress")) {
+        notifyUserUsageChanged();
       }
     }, POLL_INTERVAL_MS);
     return () => clearInterval(timer);
-  }, [generations, hasActiveGeneration, refreshGeneration]);
+  }, [generations, hasActiveGeneration, refreshGroup]);
 
   // Keep the newest card in view as the timeline grows or a result lands.
   const lastTimelineKey = `${generations.length}:${generations
@@ -275,10 +412,24 @@ export function ImageGenerationWorkspace({
     !hasActiveGeneration &&
     !promptTooLong &&
     prompt.trim().length > 0 &&
-    pricing !== null;
+    selectedModelIds.length > 0 &&
+    !hasUnpricedSelection;
+
+  const toggleModel = (modelId: string) => {
+    setSelectedModelIds((current) => {
+      if (current.includes(modelId)) {
+        // Never empty: deselecting the last model would leave a composer that
+        // looks ready and refuses on submit.
+        return current.length === 1
+          ? current
+          : current.filter((id) => id !== modelId);
+      }
+      return [...current, modelId];
+    });
+  };
 
   const handleSubmit = async () => {
-    if (!canSubmit || !pricing) return;
+    if (!canSubmit) return;
     setIsSubmitting(true);
     setSubmitError(null);
     const requestPrompt = prompt.trim();
@@ -291,6 +442,7 @@ export function ImageGenerationWorkspace({
           size,
           quality,
           idempotencyKey: crypto.randomUUID(),
+          modelIds: selectedModelIds,
           ...(conversationIdRef.current
             ? { conversationId: conversationIdRef.current }
             : {}),
@@ -298,9 +450,18 @@ export function ImageGenerationWorkspace({
       });
       const payload = (await response.json().catch(() => null)) as {
         generationId?: string;
+        groupId?: string;
         conversationId?: string;
         status?: string;
         reservedCredits?: number;
+        targets?: Array<{
+          targetId: string;
+          modelId: string;
+          provider: string;
+          generationId: string;
+          status: string;
+          reservedCredits: number;
+        }>;
         code?: string;
         details?: unknown;
       } | null;
@@ -316,25 +477,111 @@ export function ImageGenerationWorkspace({
             requestPrompt.slice(0, 30) || t("chat.imageGenerationTitle"),
         });
       }
-      mergeGeneration({
-        generationId: payload.generationId,
-        conversationId: payload.conversationId,
-        status: payload.status ?? "pending",
-        prompt: requestPrompt,
-        preset,
-        size,
-        reservedCredits: payload.reservedCredits ?? pricing.credits,
-        refunded: false,
-        publicErrorCode: null,
-        createdAt: new Date().toISOString(),
-        assets: [],
-      });
+      // One optimistic card per target, so a two-model request shows two
+      // pending cards immediately rather than one that later splits.
+      const createdAt = new Date().toISOString();
+      const targets =
+        payload.targets && payload.targets.length > 0
+          ? payload.targets
+          : [
+              {
+                targetId: payload.generationId,
+                modelId: selectedModelIds[0],
+                provider: "openai",
+                generationId: payload.generationId,
+                status: payload.status ?? "pending",
+                reservedCredits: payload.reservedCredits ?? 0,
+              },
+            ];
+      for (const target of targets) {
+        mergeGeneration({
+          generationId: target.generationId,
+          conversationId: payload.conversationId,
+          status: target.status,
+          prompt: requestPrompt,
+          preset,
+          size,
+          reservedCredits: target.reservedCredits,
+          refunded: false,
+          publicErrorCode: null,
+          createdAt,
+          assets: [],
+          provider: target.provider,
+          modelId: target.modelId,
+          groupId: payload.groupId ?? target.generationId,
+          targetId: target.targetId,
+          attemptNumber: 1,
+        });
+      }
       setPrompt("");
       notifyUserUsageChanged();
     } catch {
       setSubmitError(t("chat.imageGenerationErrorGeneric"));
     } finally {
       setIsSubmitting(false);
+    }
+  };
+
+  const handleRetryTarget = async (generation: GenerationView) => {
+    const targetId = generation.targetId;
+    if (!targetId || retryingTargetIds.includes(targetId)) return;
+    setRetryingTargetIds((current) => [...current, targetId]);
+    setSubmitError(null);
+    try {
+      const response = await fetch(`/api/images/targets/${targetId}/retry`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ retryIdempotencyKey: crypto.randomUUID() }),
+      });
+      const payload = (await response.json().catch(() => null)) as {
+        targets?: Array<{
+          targetId: string;
+          modelId: string;
+          provider: string;
+          generationId: string;
+          status: string;
+          reservedCredits: number;
+        }>;
+        groupId?: string;
+        conversationId?: string;
+        code?: string;
+        details?: unknown;
+      } | null;
+      if (!response.ok || !payload?.targets?.length) {
+        setSubmitError(submitErrorMessage(payload?.code ?? null, payload?.details));
+        return;
+      }
+      const target = payload.targets[0];
+      // The fresh attempt replaces the failed one in place: same target slot,
+      // successes elsewhere in the group untouched (policy §11).
+      setGenerations((current) =>
+        current.filter((row) => row.targetId !== targetId)
+      );
+      mergeGeneration({
+        generationId: target.generationId,
+        conversationId: payload.conversationId ?? generation.conversationId,
+        status: target.status,
+        prompt: generation.prompt,
+        preset: generation.preset,
+        size: generation.size,
+        reservedCredits: target.reservedCredits,
+        refunded: false,
+        publicErrorCode: null,
+        createdAt: new Date().toISOString(),
+        assets: [],
+        provider: target.provider,
+        modelId: target.modelId,
+        groupId: payload.groupId ?? generation.groupId,
+        targetId: target.targetId,
+        attemptNumber: (generation.attemptNumber ?? 1) + 1,
+      });
+      notifyUserUsageChanged();
+    } catch {
+      setSubmitError(t("chat.imageGenerationErrorGeneric"));
+    } finally {
+      setRetryingTargetIds((current) =>
+        current.filter((id) => id !== targetId)
+      );
     }
   };
 
@@ -367,6 +614,32 @@ export function ImageGenerationWorkspace({
               <p className="mt-1 text-xs opacity-80">
                 {t("chat.imageGenerationRefunded")}
               </p>
+            )}
+            {generation.targetId && (
+              <button
+                type="button"
+                data-testid="image-generation-retry"
+                onClick={() => void handleRetryTarget(generation)}
+                disabled={
+                  retryingTargetIds.includes(generation.targetId) ||
+                  !planAllowsImageGeneration
+                }
+                className="mt-2 inline-flex min-h-9 items-center gap-1.5 rounded-xl border border-red-300 px-3 py-1.5 text-xs font-bold text-red-800 transition hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-red-800 dark:text-red-200 dark:hover:bg-red-950/50"
+              >
+                {retryingTargetIds.includes(generation.targetId) ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
+                ) : (
+                  <RefreshCw className="h-3.5 w-3.5" aria-hidden="true" />
+                )}
+                {t("chat.imageGenerationRetryModel")}
+                {generation.reservedCredits !== null && (
+                  <CreditCostBadge
+                    credits={generation.reservedCredits}
+                    size="xs"
+                    tone="plain"
+                  />
+                )}
+              </button>
             )}
           </div>
         </div>
@@ -439,7 +712,18 @@ export function ImageGenerationWorkspace({
           {generation.reservedCredits !== null && (
             <CreditCostBadge credits={generation.reservedCredits} size="xs" />
           )}
-          <span className="font-mono">{generation.size}</span>
+          {/*
+            The pixel size the file actually is, not the one requested. They
+            differ across providers for the same resolution tier (policy
+            §12.1), so a comparison that showed the request would be showing
+            the same number under two different images. Falls back to the
+            requested size only for rows written before the header was read.
+          */}
+          <span data-testid="image-result-dimensions" className="font-mono">
+            {generation.outputWidth && generation.outputHeight
+              ? `${generation.outputWidth}x${generation.outputHeight}`
+              : generation.size}
+          </span>
           <span className="min-w-0 flex-1" />
           <a
             href={original.url}
@@ -501,8 +785,23 @@ export function ImageGenerationWorkspace({
         <h1 className="text-sm font-bold text-zinc-900 dark:text-zinc-100">
           {t("chat.imageGenerationTitle")}
         </h1>
-        <span className="rounded-full border border-zinc-200 px-2 py-0.5 font-mono text-[11px] text-zinc-500 dark:border-zinc-800 dark:text-zinc-400">
-          {IMAGE_GENERATION_MODEL_ID}
+        {onCancelDraft && (
+          <button
+            type="button"
+            data-testid="image-generation-cancel-draft"
+            onClick={onCancelDraft}
+            className="inline-flex min-h-8 items-center gap-1 rounded-lg border border-zinc-200 px-2.5 py-1 text-xs font-semibold text-zinc-600 transition hover:bg-zinc-100 dark:border-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-900"
+          >
+            {t("chat.imageGenerationBackToChat")}
+          </button>
+        )}
+        <span
+          data-testid="image-generation-model-summary"
+          className="rounded-full border border-zinc-200 px-2 py-0.5 text-[11px] font-semibold text-zinc-500 dark:border-zinc-800 dark:text-zinc-400"
+        >
+          {interpolateCopy(t("chat.imageGenerationModelCount"), {
+            count: selectedModelIds.length,
+          })}
         </span>
       </header>
 
@@ -530,16 +829,44 @@ export function ImageGenerationWorkspace({
               </p>
             </div>
           )}
-          {generations.map((generation) => (
+          {groups.map((group) => (
             <article
-              key={generation.generationId}
+              key={group.groupId}
               data-testid="image-generation-entry"
+              data-target-count={group.targets.length}
               className="flex flex-col gap-2"
             >
               <p className="ml-auto max-w-[85%] whitespace-pre-wrap break-words rounded-2xl rounded-br-md bg-zinc-900 px-3.5 py-2.5 text-sm text-white dark:bg-zinc-100 dark:text-zinc-950">
-                {generation.prompt}
+                {group.prompt}
               </p>
-              {renderResult(generation)}
+              {/*
+                One column per model on a wide screen, stacked on a narrow
+                one. Stacking rather than tabbing keeps every result reachable
+                by one vertical scroll and avoids a second navigation model on
+                mobile; horizontal overflow is never introduced.
+              */}
+              <div
+                data-testid="image-comparison-grid"
+                className={`grid gap-3 ${
+                  group.targets.length > 1 ? "sm:grid-cols-2" : "grid-cols-1"
+                }`}
+              >
+                {group.targets.map((generation) => (
+                  <section
+                    key={generation.targetId ?? generation.generationId}
+                    data-testid="image-comparison-card"
+                    data-model-id={generation.modelId ?? ""}
+                    className="flex min-w-0 flex-col gap-1.5"
+                  >
+                    {group.targets.length > 1 && (
+                      <p className="truncate text-[11px] font-bold uppercase tracking-[0.12em] text-zinc-500 dark:text-zinc-400">
+                        {imageModelName(generation.modelId)}
+                      </p>
+                    )}
+                    {renderResult(generation)}
+                  </section>
+                ))}
+              </div>
             </article>
           ))}
         </div>
@@ -556,6 +883,51 @@ export function ImageGenerationWorkspace({
               {submitError ?? gateNotice}
             </p>
           )}
+          {/*
+            Model selection sits above the textarea so the price the composer
+            quotes is decided before the prompt is written. Its own row --
+            never sharing the textarea's row (mobile composer contract).
+          */}
+          <div
+            data-testid="image-model-picker"
+            role="group"
+            aria-label={t("chat.imageGenerationModelLabel")}
+            className="flex w-full flex-wrap items-center gap-1.5"
+          >
+            {availableModels.map((model) => {
+              const selected = selectedModelIds.includes(model.id);
+              const price = getImageModelPrice(model.id, quality, size);
+              return (
+                <button
+                  key={model.id}
+                  type="button"
+                  aria-pressed={selected}
+                  data-testid={`image-model-${model.id}`}
+                  onClick={() => toggleModel(model.id)}
+                  className={`inline-flex min-h-9 items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-semibold transition ${
+                    selected
+                      ? "border-accent-image-400 bg-accent-image-50 text-accent-image-800 dark:border-accent-image-700 dark:bg-accent-image-950/30 dark:text-accent-image-200"
+                      : "border-zinc-200 bg-white text-zinc-600 hover:bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-300 dark:hover:bg-zinc-900"
+                  }`}
+                >
+                  {model.name}
+                  {price && (
+                    <CreditCostBadge credits={price.credits} size="xs" tone="plain" />
+                  )}
+                </button>
+              );
+            })}
+            {selectedModelIds.length > 1 && (
+              <span
+                data-testid="image-total-credits"
+                className="text-[11px] font-semibold text-zinc-500 dark:text-zinc-400"
+              >
+                {interpolateCopy(t("chat.imageGenerationTotalCredits"), {
+                  credits: totalCredits,
+                })}
+              </span>
+            )}
+          </div>
           {/* Composer contract shape: the textarea owns this full-width row. */}
           <div data-testid="image-composer-textarea-row" className="w-full">
             <textarea
@@ -685,9 +1057,9 @@ export function ImageGenerationWorkspace({
                 <Sparkles className="h-4 w-4" aria-hidden="true" />
               )}
               {t("chat.imageGenerationGenerate")}
-              {pricing && (
+              {totalCredits > 0 && (
                 <CreditCostBadge
-                  credits={pricing.credits}
+                  credits={totalCredits}
                   size="xs"
                   tone="onColor"
                 />

@@ -93,3 +93,33 @@ test("a message without runtime-only fields round-trips unchanged", () => {
   };
   assert.deepEqual(toChatRequestMessage(plain), plain);
 });
+
+/**
+ * §13.4's count is server-computed and is never a client claim. Keeping it
+ * out of the transcript is what makes that true across a resend: a persisted
+ * count would come back as an assertion about an answer nobody re-counted,
+ * and the request would then carry the client's number.
+ */
+const memoryAnswer: Message = {
+  id: "m-2",
+  role: "assistant",
+  content: "답변입니다.",
+  status: "normal",
+  modelId: "gpt-5-6-luna",
+  createdAt: "2026-08-04T00:00:00.000Z",
+  memoryUsedCount: 3,
+};
+
+test("the /api/chat transcript never carries the memory-used count", () => {
+  const serialized = toChatRequestMessage(memoryAnswer);
+  assert.equal("memoryUsedCount" in serialized, false);
+  assert.equal(serialized.content, memoryAnswer.content);
+});
+
+test("the guest snapshot never carries the memory-used count", () => {
+  // A guest has no account memory at all, so a persisted count could only
+  // ever be wrong -- but the allowlist is what makes that structural rather
+  // than a thing to remember.
+  const persisted = toGuestPersistableMessage(memoryAnswer);
+  assert.equal("memoryUsedCount" in persisted, false);
+});

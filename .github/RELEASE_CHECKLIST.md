@@ -362,9 +362,49 @@ onto a generated column.
 **Do not correct anything found here by hand, and never with `db push`.**
 Classify each difference — manual drift, extension-owned object, or a migration
 nobody wrote — then fix it with a **new forward migration** and re-run. Editing
-an applied migration changes its checksum and breaks deploys on every
-environment that already ran it. The schema dump is not a CI artifact and no
-connection string goes into the ticket.
+an applied migration changes its checksum, and every environment that already
+ran it then disagrees with the repository. The schema dump is not a CI artifact
+and no connection string goes into the ticket.
+
+### What an edited applied migration actually costs
+
+Not a failed deploy. On Prisma 7 `migrate deploy` (`ApplyMigrations`) does not
+compare checksums of already-applied migrations — it applies what is pending and
+carries on. The check lives in `diagnose_migration_history`, which is what
+`migrate status` runs, and it reports `<name> was modified after it was applied`.
+So the damage is to release integrity, not to availability: §1 asks for a clean
+`migrate status`, and this makes it dirty on every environment that ran the
+earlier bytes. It also means the drift is silent in a deploy log and has to be
+looked for.
+
+It cannot be repaired with `prisma migrate resolve` — that is for failed and
+rolled-back migrations, not successful ones — and rewriting `checksum` in
+`_prisma_migrations` by hand is not a supported recovery path. A staging
+database that can be recreated should be recreated; production needs a decision
+of its own.
+
+Decide from the recorded checksums, not from the file, because staging and
+production can disagree and the repository can only hold one version:
+
+```sql
+SELECT id, migration_name, checksum, started_at, finished_at,
+       rolled_back_at, applied_steps_count
+FROM "_prisma_migrations"
+WHERE migration_name = '<name>'
+ORDER BY started_at;
+```
+
+| Production | Staging | Action |
+|---|---|---|
+| original | original / unapplied | restore the original file |
+| edited | edited / unapplied | keep the edited file |
+| original | edited | restore the original, then recreate staging |
+| edited | original | keep the edited, then recreate staging |
+| unapplied | unapplied | choose the version that is semantically right |
+
+Where an edited version was applied first, also check the edit against a
+pre-migration backup: a widened allowlist can have cleared a value an operator
+had set deliberately.
 
 ## 8. Unverified items and waivers
 
@@ -394,5 +434,5 @@ list as already accepted.
 | §7.5 SEC-011 production migration and its zero-row verification | The migration must run against the production database | Release manager | `npm run migrate:conversation-lock-passwords -- --dry-run`, then `--confirm-production`, then the count query in §7.5 |
 | WebKit (`mobile-safari`) E2E project | WebKit is absent from this container's Playwright bundle; only Chromium is installed | QA | `npx playwright install webkit && npx playwright test --project=mobile-safari` on a runner that has it |
 | UX-020 Chinese, French, German, Spanish and Portuguese translations | 182 Chinese keys and ~225 keys per preview locale answer in English. Translating them needs a reviewer per language, not a machine pass into the product's core interface | Localization owner | Lower the per-locale ceiling in `tests/localeParity.test.mjs` as strings land; the test measures the remaining gap |
-| UX-024 Conversation switching during a streaming response | `ChatPageClient`'s `isSending` is a hardcoded `false`, so the guard in `handleSelectConversation` is dead. What is actually lost on a switch could not be measured: the shared fixture seeds one conversation, so the switch itself is not reproducible without a two-conversation fixture | Chat owner | A two-conversation fixture, then decide block-vs-allow before hoisting `modelStatuses` out of the two shells |
+| ~~UX-024 Conversation switching during a streaming response~~ **Closed.** `mockAuthenticatedApi` gained `extraConversations`, which made the switch reproducible, and the measurement settled it: nothing is lost. The request is not aborted on a switch, `app/api/chat/route.ts` persists the assistant message against the `conversationId` captured at send time, and the client never writes one itself, so the stream cannot follow the user. Decided **allow**; the dead guard and the `isSending = false` constant behind it were removed rather than wired up, since blocking would refuse every sidebar click for the length of a response. Held by `tests/e2e/conversation-switch-during-stream.spec.ts`. Hoisting `modelStatuses` out of the two shells was not needed and was not done. | — | — | — |
 | Dependency currency (not vulnerabilities) | `npm audit` and `npm audit --omit=dev` both report **0** as of this review. `npm outdated` lists semver-compatible updates and three major jumps (eslint 10, openai 7, typescript 7) that are their own pieces of work | Platform owner | `npm audit --omit=dev` at the release SHA; schedule the majors separately |

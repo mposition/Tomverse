@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { NextResponse, after } from "next/server";
 import { getServerSession } from "next-auth";
 import { z } from "zod";
 import {
@@ -11,10 +11,12 @@ import {
     MemoryFeatureDisabledError,
 } from "@/lib/appSettings";
 import { authOptions } from "@/lib/auth";
+import { listMemoryExtractionRuns } from "@/lib/memoryExtractionCatalogue";
 import {
     createMemoryExtractionRun,
     estimateMemoryExtraction,
 } from "@/lib/memoryExtractionService";
+import { kickMemoryExtractionRun } from "@/lib/memoryExtractionWorker";
 import type { ModelTier } from "@/lib/models";
 
 /**
@@ -48,6 +50,40 @@ const disabledResponse = (error: MemoryFeatureDisabledError) =>
         { error: error.message, code: "MEMORY_FEATURE_DISABLED" },
         { status: 403 }
     );
+
+/**
+ * Recent runs and whichever one is still open (§21).
+ *
+ * The open run is the reason this exists: the launch screen has to say "a run
+ * is already going" before a selection is made, rather than after a create
+ * request comes back 409 MEMORY_EXTRACTION_ALREADY_RUNNING.
+ */
+export async function GET(req: Request) {
+    try {
+        const session = await getServerSession(authOptions);
+        if (!session?.user) {
+            return NextResponse.json({ error: "권한 없음" }, { status: 401 });
+        }
+        await assertMemoryExtractionEnabled();
+        await consumeApiRateLimit(req, session.user.id, "memory-extraction-list", {
+            minute: 60,
+            day: 2000,
+        });
+
+        const result = await listMemoryExtractionRuns(session.user.id);
+        return NextResponse.json(result, {
+            headers: { "Cache-Control": "no-store" },
+        });
+    } catch (error) {
+        if (error instanceof MemoryFeatureDisabledError) {
+            return disabledResponse(error);
+        }
+        const securityResponse = apiSecurityResponse(error);
+        if (securityResponse) return securityResponse;
+        console.error("memory extraction run list failed", error);
+        return NextResponse.json({ error: "서버 오류" }, { status: 500 });
+    }
+}
 
 export async function POST(req: Request) {
     try {
@@ -99,6 +135,13 @@ export async function POST(req: Request) {
             ...base,
             confirmedCredits: body.confirmedCredits,
         });
+        // The low-latency half of §11.1. `after()` runs once this response has
+        // been sent, so the user is not held while a background run starts --
+        // and it is explicitly *not* a durable queue: it is bound to this
+        // request's process and dies with it. What guarantees the run finishes
+        // is the fifteen-minute dispatcher, which is why this is allowed to be
+        // best-effort and why `kickMemoryExtractionRun` never throws.
+        after(() => kickMemoryExtractionRun(run.id));
         return NextResponse.json(
             {
                 runId: run.id,

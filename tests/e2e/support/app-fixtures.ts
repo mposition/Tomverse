@@ -494,6 +494,24 @@ export async function mockAuthenticatedApi(
      * into its partial-support state.
      */
     webSearchMode?: "off" | "auto" | "always";
+    /**
+     * UX-024. Additional conversations in the sidebar, each with its own
+     * transcript and its own detail/messages routes. Opt-in and additive: with
+     * this absent the mock registers exactly the routes it always has and
+     * behaves identically, so the 50 specs that do not ask for a second
+     * conversation are untouched.
+     *
+     * A second conversation is what makes switching *between* conversations
+     * reproducible at all. Without one, `handleSelectConversation` has no
+     * other id to be called with, so nothing it does — or fails to do — can be
+     * measured.
+     */
+    extraConversations?: Array<{
+      id: string;
+      title?: string;
+      selectedModels?: string[];
+      messages?: QaConversationMessage[];
+    }>;
   } = {}
 ): Promise<AuthenticatedQaState> {
   await page.addInitScript((showSidebarTour) => {
@@ -721,10 +739,39 @@ export async function mockAuthenticatedApi(
     route.fulfill(json({ pendingRequest: null }))
   );
 
+  // UX-024. Each extra conversation keeps its own transcript, exactly like the
+  // primary one below, so a switch between them is a switch between two real
+  // histories rather than between two views of the same array.
+  const extras = (options.extraConversations || []).map((extra) => ({
+    id: extra.id,
+    title: extra.title || extra.id,
+    selectedModels: extra.selectedModels ||
+      options.selectedModels || ["gpt-5-6-luna"],
+    savedMessages: [...(extra.messages || [])],
+  }));
+  const extraBody = (extra: (typeof extras)[number]) => ({
+    id: extra.id,
+    title: extra.title,
+    selectedModels: [...extra.selectedModels],
+    disabledPanels: [],
+    webSearchMode: options.webSearchMode || "off",
+    isLocked: false,
+    shareEnabled: false,
+    shareExpiresAt: null,
+  });
+
   await page.route("**/api/conversations", async (route) => {
     if (route.request().method() === "GET") {
       state.conversationListReads += 1;
-      await route.fulfill(json(state.deleted ? [] : [conversation()]));
+      // `state.deleted` is about the primary conversation only, so deleting it
+      // must not take the extras with it.
+      await route.fulfill(
+        json(
+          state.deleted
+            ? extras.map(extraBody)
+            : [conversation(), ...extras.map(extraBody)]
+        )
+      );
       return;
     }
 
@@ -859,6 +906,63 @@ export async function mockAuthenticatedApi(
       })
     );
   });
+
+  // UX-024. One pair of routes per extra conversation, each id-scoped so it
+  // cannot shadow the primary conversation's routes above.
+  for (const extra of extras) {
+    await page.route(
+      `**/api/conversations/${extra.id}/messages**`,
+      async (route) => {
+        if (route.request().method() === "POST") {
+          const body = route.request().postDataJSON() as {
+            messages?: QaConversationMessage[];
+          };
+          for (const message of body?.messages ?? []) {
+            if (
+              !message?.id ||
+              extra.savedMessages.some((saved) => saved.id === message.id)
+            ) {
+              continue;
+            }
+            extra.savedMessages.push(message);
+          }
+          await route.fulfill(json({}, 201));
+          return;
+        }
+        await route.fulfill(json({}));
+      }
+    );
+
+    await page.route(
+      new RegExp(`.*/api/conversations/${extra.id}(\\?.*)?$`),
+      async (route) => {
+        const method = route.request().method();
+        if (method === "PATCH") {
+          const body = route.request().postDataJSON() as {
+            title?: string;
+            selectedModels?: string[];
+          };
+          if (typeof body.title === "string") extra.title = body.title;
+          if (Array.isArray(body.selectedModels)) {
+            extra.selectedModels = Array.from(new Set(body.selectedModels));
+          }
+          await route.fulfill(json(extraBody(extra)));
+          return;
+        }
+        if (method === "DELETE") {
+          await route.fulfill({ status: 204, body: "" });
+          return;
+        }
+        await route.fulfill(
+          json({
+            ...extraBody(extra),
+            messages: extra.savedMessages as unknown as JsonValue,
+            nextCursor: null,
+          })
+        );
+      }
+    );
+  }
 
   return state;
 }

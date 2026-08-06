@@ -163,7 +163,19 @@ run(
     "tests/integration/external-import-lifecycle.db.test.ts",
     "tests/integration/memory-schema.db.test.ts",
     "tests/integration/memory-extraction.db.test.ts",
+    "tests/integration/memory-extraction-persistence.db.test.ts",
+    "tests/integration/memory-extraction-worker.db.test.ts",
+    "tests/integration/memory-extraction-credits.db.test.ts",
+    "tests/integration/memory-extraction-provider-cost.db.test.ts",
+    "tests/integration/memory-extraction-executor.db.test.ts",
+    "tests/integration/memory-extraction-metrics.db.test.ts",
     "tests/integration/memory-review.db.test.ts",
+    "tests/integration/memory-retrieval.db.test.ts",
+    "tests/integration/memory-source-deletion.db.test.ts",
+    "tests/integration/external-conversation-lock.db.test.ts",
+    "tests/integration/memory-expiry.db.test.ts",
+    "tests/integration/chat-context-bundle.db.test.ts",
+    "tests/integration/memory-metrics.db.test.ts",
   ],
   "Running financial, credit, chat-concurrency, chat-rate-limit, fallback-pricing, model-registry, admin-security, admin-users, login-methods, account-deletion, conversation-title, conversation-lock-migration, provider-recovery, provider-failure-scope, subscription-sync-ordering, plan-change-reservation, image-generation, external-import, and memory transaction scenarios"
 );
@@ -228,4 +240,19 @@ run(
     "tests/integration/feedback-lifecycle.db.test.ts",
   ],
   "Running the feedback lifecycle notification transaction scenarios"
+);
+// Its own process for the same reason: it replaces next-auth to drive the
+// snapshot lock routes as a signed-in owner.
+run(
+  [
+    "--conditions=react-server",
+    "--experimental-test-module-mocks",
+    "--no-warnings=ExperimentalWarning",
+    "--import",
+    "tsx",
+    "--test",
+    "--test-concurrency=1",
+    "tests/integration/external-conversation-lock-route.db.test.ts",
+  ],
+  "Running the imported snapshot lock, unlock and attempt-limit scenarios"
 );

@@ -8,11 +8,16 @@ import {
     type MemoryExportSource,
 } from "@/lib/memoryExportCore";
 import {
+    MEMORY_RETRIEVAL_VERSION,
+    memoryRetrievalTerms,
+} from "@/lib/memoryRetrievalTerms";
+import {
     memoryStatementKey,
     validateMemoryCandidate,
     type MemoryEvidenceInput,
     type MemoryValidationResult,
 } from "@/lib/memoryValidatorCore";
+import { recordMemoryCounter } from "@/lib/memoryMetrics";
 import { prisma } from "@/lib/prisma";
 
 /**
@@ -61,6 +66,10 @@ const evidenceInputs = (
 
 const assertNotHardRejected = (result: MemoryValidationResult) => {
     if (result.disposition === "rejected") {
+        // A hard reject leaves no row, so the only place it can be counted is
+        // here (§22). Fire-and-forget: a metric must never become a second
+        // failure on top of the one being reported.
+        void recordMemoryCounter("validator_rejected");
         // The violation codes are state names from the validator, safe to
         // return; the statement itself is never echoed into an error.
         throw new ApiSecurityError(
@@ -272,6 +281,11 @@ export async function createManualMemory(input: {
                 userEdited: true,
                 expiresAt: input.expiresAt ? new Date(input.expiresAt) : null,
                 approvedAt: new Date(),
+                // Indexed at write time, never lazily at read time: a row that
+                // is only indexed when something searches for it is a row that
+                // is missing from the first search (§9).
+                searchTerms: memoryRetrievalTerms(statement),
+                retrievalVersion: MEMORY_RETRIEVAL_VERSION,
             },
         });
         await tx.memoryEvidence.create({
@@ -408,6 +422,10 @@ export async function editMemory(input: {
             revision: { increment: 1 },
             userEdited: true,
             conflictKey: `${item.kind}:${memoryStatementKey(statement)}`,
+            // Re-indexed with the statement. Leaving the old terms would make
+            // the row findable by words it no longer contains.
+            searchTerms: memoryRetrievalTerms(statement),
+            retrievalVersion: MEMORY_RETRIEVAL_VERSION,
             ...(stayActive
                 ? {}
                 : item.status === "active"

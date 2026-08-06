@@ -28,6 +28,81 @@ export const MEMORY_EXTRACTION_CHUNK_MAX_CONVERSATIONS = 10;
 export const MEMORY_EXTRACTION_LEASE_TTL_MS = 5 * 60 * 1000;
 
 /**
+ * One dispatch drives a bounded *slice* of a run, never the whole run.
+ *
+ * Both drivers are hosted processes with a finite request lifetime — the
+ * post-response kick runs inside the request that spawned it, and the
+ * recovery dispatcher rides the fifteen-minute maintenance schedule — so a
+ * driver that tried to finish a 200-chunk run in one go would simply be
+ * killed mid-flight. Bounding the slice makes stopping normal: the worker
+ * hands the lease back, the run stays `pending` with its progress intact, and
+ * the next dispatch continues.
+ *
+ * The chunk deadline is well inside the lease TTL so a slice that runs to the
+ * end of its budget still has lease left to release itself cleanly.
+ */
+export const MEMORY_EXTRACTION_SLICE_MAX_CHUNKS = 4;
+export const MEMORY_EXTRACTION_SLICE_BUDGET_MS = 90 * 1000;
+export const MEMORY_EXTRACTION_CHUNK_TIMEOUT_MS = 60 * 1000;
+
+/** Bounded retry (§11): a chunk that keeps killing its worker gives up. */
+export const MEMORY_EXTRACTION_CHUNK_MAX_ATTEMPTS = 3;
+
+export type ExtractionSliceBudget = {
+    maxChunks: number;
+    /** Absolute wall-clock deadline for the whole slice. */
+    deadline: Date;
+};
+
+export function extractionSliceBudget(
+    startedAt: Date,
+    overrides: Partial<{ maxChunks: number; budgetMs: number }> = {}
+): ExtractionSliceBudget {
+    return {
+        maxChunks: overrides.maxChunks ?? MEMORY_EXTRACTION_SLICE_MAX_CHUNKS,
+        deadline: new Date(
+            startedAt.getTime() +
+                (overrides.budgetMs ?? MEMORY_EXTRACTION_SLICE_BUDGET_MS)
+        ),
+    };
+}
+
+/**
+ * Whether another chunk may start. Checked *before* claiming, so the budget
+ * bounds work started rather than work finished — a chunk already in flight
+ * is always allowed to finish and report, which is what keeps the durable
+ * state and the provider call in agreement.
+ */
+export function mayStartAnotherChunk(input: {
+    chunksProcessed: number;
+    budget: ExtractionSliceBudget;
+    now: Date;
+}): { start: true } | { start: false; reason: "chunk_budget" | "time_budget" } {
+    if (input.chunksProcessed >= input.budget.maxChunks) {
+        return { start: false, reason: "chunk_budget" };
+    }
+    if (input.now.getTime() >= input.budget.deadline.getTime()) {
+        return { start: false, reason: "time_budget" };
+    }
+    return { start: true };
+}
+
+/**
+ * What a failed chunk becomes. Below the cap it returns to `pending` and is
+ * retried by a later slice; at the cap it is terminal and fails the run,
+ * because a chunk that has burned its attempts is not going to succeed by
+ * being retried a fourth time — and a run that silently stalled would be
+ * worse than one that reports failure.
+ */
+export function chunkFailureDisposition(input: {
+    attemptCount: number;
+    maxAttempts?: number;
+}): { status: "pending" } | { status: "failed" } {
+    const max = input.maxAttempts ?? MEMORY_EXTRACTION_CHUNK_MAX_ATTEMPTS;
+    return input.attemptCount >= max ? { status: "failed" } : { status: "pending" };
+}
+
+/**
  * Conservative token arithmetic for the pre-run estimate (§11): UTF-8 bytes
  * over three per input token (safe for CJK-heavy content), a fixed prompt
  * overhead per call, and a conservative output allowance per chunk. The

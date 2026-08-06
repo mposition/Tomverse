@@ -23,6 +23,9 @@ export const pt = {
         languageAndDisplay: "Idioma e exibição",
         newChat: "Novo chat",
         newImage: "Nova imagem",
+        newConversationMenu: "Novo…",
+        newImageSignInRequired: "Entrar",
+        newImageUpgradeRequired: "Requer Pro",
         imageConversation: "Imagem",
         collapse: "Recolher barra lateral",
         expand: "Expandir barra lateral",
@@ -107,6 +110,25 @@ export const pt = {
         ...en.chat,
         // Image generation workspace (docs/policy/image-generation.md)
         imageGenerationTitle: "Geração de imagens",
+        imageGenerationBackToChat: "Voltar ao chat",
+        toolsImageGeneration: "Geração de imagens",
+        toolsImageGenerationDescription: "Compare imagens de vários modelos",
+        imageGenerationModelLabel: "Modelos",
+        imageGenerationModelCount: "{count} modelo(s)",
+        // Catalogue image tab (policy v2 section 13)
+        modelPickerTabsLabel: "Tipo de modelo",
+        modelPickerTabChat: "Conversa",
+        modelPickerTabImage: "Imagem",
+        imageModelTabTitle: "Modelos de geração de imagens",
+        imageModelTabSubtitle: "Modelos que criam imagens a partir de uma descrição. Modelos de conversa que apenas leem a imagem anexada continuam na aba Conversa.",
+        imageModelTabFooterHint: "Escolher um abre o espaço de imagens.",
+        imageModelCreditsFrom: "A partir de {credits} créditos",
+        imageModelHoldPriceUnverified: "Em espera até o preço oficial ser verificado",
+        imageModelLatencyFast: "Rápido",
+        imageModelLatencyBalanced: "Equilibrado",
+        imageModelLatencySlow: "Mais lento",
+        imageGenerationTotalCredits: "Total {credits} créditos",
+        imageGenerationRetryModel: "Repetir este modelo",
         imageGenerationIntroTitle: "Crie uma imagem a partir de uma descrição",
         imageGenerationIntroBody: "Descreva o que você quer ver. Uma imagem por solicitação, com qualidades Draft, Standard e Final em três tamanhos.",
         imageGenerationAiLabel: "Imagem gerada por IA",
@@ -312,6 +334,7 @@ export const pt = {
         searchStatusFailed: "Falha na pesquisa web",
         searchStatusDeepResearch: "Deep Research",
         searchCitationsLabel: "Fontes",
+        memoryUsedDisclosure: "Esta resposta usou {count} memórias da conta",
         modelsSelectedOne: "IA",
         modelsSelectedOther: "IAs",
         maxModelsDescription: "Comparar até 3 modelos",
@@ -351,6 +374,7 @@ export const pt = {
         internalMonthlyCostSafetyLimit: "Este pedido excede o limite de uso deste mês para respostas de IA. Tente menos modelos ou modelos mais económicos, ou tente novamente após a redefinição mensal.",
         providerCostSafetyLimit: "Um dos provedores de IA selecionados está temporariamente indisponível. Escolha um modelo de outro provedor ou tente novamente mais tarde.",
         operationalCostGuardrail: "Uma verificação de segurança interna pausou este pedido. Os seus créditos não foram usados. Tente novamente em breve ou escolha um modelo mais económico.",
+        contextBundleStale: "A memória da sua conta mudou enquanto esta mensagem estava a ser enviada, por isso não foi entregue. Envie-a novamente para usar a memória atualizada.",
         planEntitlementExhausted: "Os créditos do plano deste mês foram esgotados. Compre créditos adicionais ou faça upgrade do plano para continuar.",
         concurrentReservationConflict: "O seu saldo de créditos mudou enquanto outro pedido estava a ser processado. Tente novamente.",
         summarizeModelDifferences: "Resumir diferenças entre modelos",
@@ -384,6 +408,8 @@ export const pt = {
         fileErrorHelpLink: "Abrir ajuda de upload de arquivos",
     },
     share: {
+        personalizationNotice:
+            "Estas respostas podem ter sido moldadas pelas configurações de personalização de quem as gerou. As memórias em si não são compartilhadas.",
         eyebrow: "Tomverse shared conversation",
         publicDocumentDescription: "Snapshot público somente leitura criado no Tomverse. Atualizações posteriores da conversa não são adicionadas a esta página.",
         readOnly: "Somente leitura",
@@ -788,17 +814,24 @@ export const pt = {
         refundRequestSuccess: "Solicitação de reembolso recebida.",
         refundRequestFailed: "Não foi possível enviar a solicitação de reembolso.",
     },
+    settingsNav: {
+        navLabel: "Navegação das configurações",
+        backToSettings: "Voltar às configurações",
+        settings: "Configurações",
+        dataAndPersonalization: "Dados e personalização",
+        dataAndPersonalizationDescription: "Conversas importadas e memória da conta. Cada uma é gerida na sua própria página.",
+    },
     externalImport: {
         dataTabTitle: "Importar de outro serviço de IA",
         dataTabDescription:
             "Guarde na sua conta Tomverse conversas de um arquivo de exportação do ChatGPT ou do Claude. O arquivo de exportação é lido apenas no seu navegador.",
         dataTabUsage:
             "{conversations} conversas importadas · {storage} armazenados",
-        dataTabOpen: "Abrir configurações de importação",
+        dataTabOpen: "Gerir importações",
+        dataTabUsageEmpty: "Ainda não há conversas importadas",
         pageTitle: "Importar conversas de outro serviço de IA",
         pageDescription:
             "Envie uma exportação oficial de dados do ChatGPT ou do Claude, revise o conteúdo e escolha quais conversas manter na sua conta Tomverse.",
-        backToChat: "Voltar ao chat",
         backToImports: "Voltar às importações",
         signInRequired:
             "Entre na sua conta para importar conversas de outro serviço de IA.",
@@ -880,6 +913,27 @@ export const pt = {
             "Esta mensagem foi encurtada para respeitar o limite de armazenamento. O texto completo permanece apenas no serviço original.",
         viewerMessagesShown: "{shown} de {total} mensagens exibidas",
         deleteSnapshot: "Excluir esta versão",
+        lockedBadge: "Bloqueada",
+        lockGateTitle: "Esta conversa está bloqueada",
+        lockGateDescription: "Digite a senha que você definiu para lê-la.",
+        lockPasswordLabel: "Senha",
+        lockUnlockCta: "Desbloquear",
+        lockWrongPassword: "Essa senha não confere.",
+        lockTooManyAttempts: "Tentativas demais. Tente novamente daqui a pouco.",
+        lockFailed: "Não foi possível concluir. Tente novamente.",
+        lockSectionTitle: "Bloqueio da conversa",
+        lockStatusLocked: "Esta conversa está bloqueada com uma senha.",
+        lockStatusUnlocked: "Esta conversa não está bloqueada.",
+        lockSetCta: "Bloquear com uma senha",
+        lockChangeCta: "Alterar a senha",
+        lockRemoveCta: "Remover o bloqueio",
+        lockRemoveConfirm: "Remover o bloqueio",
+        lockSaveCta: "Salvar",
+        lockCancel: "Cancelar",
+        lockCurrentPasswordLabel: "Senha atual",
+        lockNewPasswordLabel: "Nova senha",
+        lockPasswordHint: "No mínimo {count} caracteres.",
+        lockNoRecoveryWarning: "Se você esquecer esta senha, não conseguirá abrir esta conversa novamente. Não há como redefini-la.",
         // Etapa de preparação da exportação (etapa 1 do assistente)
         guideTitle: "Primeiro, deixe o arquivo de exportação pronto",
         guideDescription:
@@ -978,14 +1032,28 @@ export const pt = {
         abandonImport: "Sair desta importação",
     },
     memoryReview: {
+        sourceDeleteDerivedImport:
+            "{count} memórias criadas a partir desta importação também serão excluídas.",
+        sourceDeleteDerivedConversation:
+            "{count} memórias criadas a partir desta conversa também serão excluídas.",
+        sourceDeleteKeep: "Manter as memórias, mas parar de usá-las",
+        sourceDeleteEdited:
+            "{count} memórias que você editou são mantidas e apenas deixam de ser usadas.",
+        sourceDeleteKept:
+            "{count} memórias apoiadas por outras evidências permanecem como estão.",
+        sourceLockBlocked: "{count} memórias apoiadas apenas nesta conversa deixam de ser usadas até você desbloqueá-la.",
+        sourceLockBacked: "{count} memórias apoiadas por outras evidências continuam sendo usadas.",
+        sourceLockRestoreNote: "Remover o bloqueio traz de volta as memórias que foram interrompidas por causa desta conversa.",
         dataTabTitle: "Memória da conta",
         dataTabDescription:
             "Revise as memórias candidatas extraídas de conversas importadas e escolha se as memórias aprovadas são usadas em novos chats.",
-        dataTabOpen: "Abrir configurações de memória",
+        dataTabOpen: "Gerir memória",
+        dataTabStatusOn: "Usada em novos chats",
+        dataTabStatusOff: "Não usada em novos chats",
+        dataTabStatusPending: "{count} a aguardar revisão",
         pageTitle: "Memória da conta",
         pageDescription:
             "Aprove ou rejeite as memórias candidatas aguardando revisão, e edite, fixe ou exclua as memórias em uso.",
-        backToChat: "Voltar ao chat",
         signInRequired: "Faça login para gerenciar a memória da sua conta.",
         privacyNote:
             "Somente as memórias que você revisou e aprovou são usadas em novos chats. As memórias aprovadas e as preferências de estilo de resposta são enviadas como referência ao modelo Tomverse selecionado no momento, e você pode consultá-las, editá-las, desativá-las ou excluí-las a qualquer momento.",
@@ -1095,6 +1163,75 @@ export const pt = {
             explanation_depth: "Profundidade das explicações",
             citation_preference: "Preferência de citação",
             code_style: "Estilo de código",
+        },
+    },
+    // Início da extração (Release B, §11 confirmação prévia, §21).
+    memoryExtraction: {
+        launchTitle: "Extrair memórias das conversas importadas",
+        launchDescription:
+            "Escolha as conversas importadas para extrair candidatos. Os candidatos só são usados nas respostas depois de você revisar e aprovar.",
+        modelTitle: "Modelo usado na extração",
+        modelUnavailable: "Nenhum modelo de extração está disponível no momento.",
+        modelUnavailableDescription:
+            "Um modelo de extração só é liberado depois de passar por uma avaliação de qualidade. Quando isso acontecer, você poderá escolhê-lo aqui.",
+        modelCredits: "{credits} créditos por lote",
+        conversationsTitle: "Escolher conversas",
+        conversationsDescription:
+            "Somente as conversas selecionadas são usadas. Elas são processadas em lotes conforme o tamanho, e os créditos são contados por lote.",
+        conversationsEmpty: "Você ainda não importou nenhuma conversa.",
+        conversationsEmptyCta: "Importar conversas",
+        selectAllVisible: "Selecionar tudo o que aparece",
+        clearSelection: "Limpar seleção",
+        selectionSummary: "{count} selecionadas · cerca de {size}",
+        selectionHidden: "{count} conversas selecionadas não aparecem nesta lista.",
+        selectionTooLarge: "Você pode selecionar até {max} conversas por vez.",
+        conversationMeta: "{messages} mensagens · {size}",
+        loadMore: "Ver mais",
+        estimate: "Ver créditos necessários",
+        estimating: "Calculando…",
+        estimateResult: "{chunks} lotes · cerca de {credits} créditos",
+        estimateDescription:
+            "{conversations} conversas serão processadas em {chunks} lotes. A cobrança final é acertada após a execução e nunca ultrapassa o valor que você confirmou.",
+        estimateStale: "A seleção mudou. Verifique os créditos novamente.",
+        start: "Iniciar extração por {credits} créditos",
+        starting: "Iniciando…",
+        runInProgress: "Já existe uma extração em andamento.",
+        runInProgressOpen: "Ver progresso",
+        errorGeneric: "Algo deu errado. Tente novamente.",
+        errorEstimateChanged:
+            "As conversas selecionadas mudaram e a estimativa não corresponde mais. Verifique antes de iniciar.",
+        errorPairUnavailable: "Esse modelo não está disponível no momento.",
+        errorBudget:
+            "A capacidade de extração está temporariamente esgotada. Tente novamente em instantes.",
+        runTitle: "Progresso da extração",
+        runBack: "Voltar às configurações de memória",
+        runNotFound: "Esta extração não foi encontrada.",
+        runModel: "Modelo",
+        runStarted: "Início: {date}",
+        runFinished: "Fim: {date}",
+        runProgress: "{completed} de {total} lotes concluídos",
+        runPendingNote:
+            "Aguardando para começar. Você pode fechar esta página — a extração continua e você pode voltar aqui para conferir.",
+        runRunningNote:
+            "A extração está em andamento. Você pode fechar esta página; os candidatos aparecem na fila de revisão conforme terminam.",
+        runCompletedNote:
+            "A extração terminou. Revise os candidatos na fila de revisão.",
+        runFailedNote:
+            "A extração não pôde ser concluída. Os resultados dos lotes concluídos são mantidos.",
+        runCancelledNote:
+            "A extração foi cancelada. Os resultados dos lotes concluídos são mantidos.",
+        runReview: "Ir para a fila de revisão",
+        cancel: "Cancelar extração",
+        cancelArmed: "Pressione de novo para cancelar",
+        cancelling: "Cancelando…",
+        recentRunsTitle: "Extrações recentes",
+        recentRunOpen: "Ver detalhes",
+        status: {
+            pending: "Aguardando",
+            running: "Em andamento",
+            completed: "Concluída",
+            failed: "Falhou",
+            cancelled: "Cancelada",
         },
     },
     privacyPolicy: {

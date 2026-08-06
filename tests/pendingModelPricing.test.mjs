@@ -11,18 +11,65 @@ import {
   PENDING_VERIFIED_PRICE_REGISTER,
 } from "../lib/modelPricing.ts";
 
-// Fixtures name their subject by position, not by model ID. Entries leave the
-// register for two ordinary reasons -- the price gets verified, or the model is
-// retired -- and a fixture that hard-codes an ID fails on the day either
-// happens, which says nothing about the code under test.
-const SAMPLE = PENDING_VERIFIED_PRICE_REGISTER[0]?.modelId;
-const OTHER = PENDING_VERIFIED_PRICE_REGISTER[1]?.modelId;
+// These fixtures used to be the shipped register's first two entries, on the
+// reasoning that naming a model ID would break whenever one left the register.
+// That was right about the hazard and a step short of the fix: on 2026-08-04
+// the last three entries left at once, `PENDING_VERIFIED_PRICE_REGISTER[0]`
+// became `undefined`, and four tests failed for a reason that says nothing
+// about `findPendingPriceRegisterProblems`.
+//
+// An empty register is the goal state, not an outage, so the tests that
+// exercise the validator now build their own register and their own catalogue.
+// They are about the rules; the shipped data is checked separately below, and
+// those checks pass vacuously when there is nothing registered -- which is
+// exactly what "every registered model is still unpriced" should say when
+// nothing is registered.
+const SAMPLE = "qa-pending-sample";
+const OTHER = "qa-pending-other";
+
+// Enabled, premium and deliberately absent from lib/modelPricing.ts, so
+// `findUnpricedModels` sees them the way it saw a real unpriced model before
+// every model had a profile.
+const templateModel =
+  AVAILABLE_MODELS.find((model) => model.usageClass === "premium") ??
+  AVAILABLE_MODELS[0];
+const fixtureModel = (id) => ({
+  ...templateModel,
+  id,
+  name: id,
+  apiModel: id,
+  enabled: true,
+  usageClass: "premium",
+  inputUsdPerMillionTokens: undefined,
+  outputUsdPerMillionTokens: undefined,
+  cachedInputPriceMultiplier: undefined,
+});
+const FIXTURE_MODELS = [
+  ...AVAILABLE_MODELS,
+  fixtureModel(SAMPLE),
+  fixtureModel(OTHER),
+];
+
+const fixtureEntry = (modelId) => ({
+  modelId,
+  owner: "@qa-owner",
+  verificationTicket: "https://example.invalid/verification",
+  registeredAt: "2026-08-01",
+  expiresAt: "2026-10-30",
+  productionApproval: {
+    approvedBy: "@qa-approver",
+    approvedAt: "2026-08-02T10:00:00.000Z",
+    rationale: "Fixture approval for the register validator's own tests.",
+  },
+  settlementSource: "reservation_pricing",
+});
+const FIXTURE_REGISTER = [fixtureEntry(SAMPLE), fixtureEntry(OTHER)];
 
 const entry = (modelId) =>
-  PENDING_VERIFIED_PRICE_REGISTER.find((item) => item.modelId === modelId);
+  FIXTURE_REGISTER.find((item) => item.modelId === modelId);
 
 const withEntry = (modelId, overrides) =>
-  PENDING_VERIFIED_PRICE_REGISTER.map((item) =>
+  FIXTURE_REGISTER.map((item) =>
     item.modelId === modelId ? { ...item, ...overrides } : item
   );
 
@@ -77,6 +124,9 @@ test("every registered model is still actually unpriced", () => {
 });
 
 test("the shipped register has no errors, and warns on exactly what is unfilled", () => {
+  // Deliberately the real catalogue and the real register: this one is about
+  // what ships, not about the validator. With the register empty it asserts
+  // that shipping nothing is clean, which is the correct reading.
   const problems = findPendingPriceRegisterProblems({
     models: AVAILABLE_MODELS,
     now: beforeAnyExpiry,
@@ -106,8 +156,9 @@ test("the shipped register has no errors, and warns on exactly what is unfilled"
 test("an expired entry is an error, not a warning", () => {
   const expiry = new Date(`${entry(SAMPLE).expiresAt}T00:00:00.000Z`);
   const problems = findPendingPriceRegisterProblems({
-    models: AVAILABLE_MODELS,
+    models: FIXTURE_MODELS,
     now: new Date(expiry.getTime() + 86_400_000),
+    register: FIXTURE_REGISTER,
   });
   const expired = problems.filter((problem) => problem.reason === "expired");
   assert.ok(expired.length > 0);
@@ -118,7 +169,7 @@ test("an expired entry is an error, not a warning", () => {
 test("an entry stays a warning right up to its deadline", () => {
   const expiry = new Date(`${entry(SAMPLE).expiresAt}T00:00:00.000Z`);
   const problems = findPendingPriceRegisterProblems({
-    models: AVAILABLE_MODELS,
+    models: FIXTURE_MODELS,
     now: new Date(expiry.getTime() - 1),
     register: withEntry(SAMPLE, {}),
   });
@@ -130,7 +181,7 @@ test("an entry stays a warning right up to its deadline", () => {
 
 test("a registered model that has since been priced is an error", () => {
   const problems = findPendingPriceRegisterProblems({
-    models: AVAILABLE_MODELS,
+    models: FIXTURE_MODELS,
     now: beforeAnyExpiry,
     register: [
       {
@@ -152,7 +203,7 @@ test("a registered model that has since been priced is an error", () => {
 test("duplicate and malformed entries are errors", () => {
   const base = entry(SAMPLE);
   const problems = findPendingPriceRegisterProblems({
-    models: AVAILABLE_MODELS,
+    models: FIXTURE_MODELS,
     now: beforeAnyExpiry,
     register: [base, base, { ...entry(OTHER), expiresAt: "not-a-date" }],
   });
@@ -165,7 +216,7 @@ test("duplicate and malformed entries are errors", () => {
 
 test("a fully assigned entry produces no warnings", () => {
   const problems = findPendingPriceRegisterProblems({
-    models: AVAILABLE_MODELS,
+    models: FIXTURE_MODELS,
     now: beforeAnyExpiry,
     register: withEntry(SAMPLE, {
       owner: "billing-oncall",

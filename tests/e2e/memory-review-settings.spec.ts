@@ -257,11 +257,24 @@ async function mockMemoryApi(
     }
   );
 
+  // The launcher mounted inside this page asks for both of these. Left
+  // unmocked they would fall through to the memory-id route below and be
+  // answered as if a run id were a memory id.
+  await page.route(
+    (url) => url.pathname === "/api/memories/extraction-models",
+    (route) => route.fulfill(json({ pairs: [] }))
+  );
+
+  await page.route(
+    (url) => url.pathname === "/api/memories/extraction-runs",
+    (route) => route.fulfill(json({ runs: [], activeRunId: null }))
+  );
+
   // Registered last, so it would win over the fixed-path routes above — the
   // negative lookahead keeps every sibling collection out of its reach.
   await page.route(
     (url) =>
-      /^\/api\/memories\/(?!settings$|bulk-approve$|export$|delete-all$)[^/]+$/.test(
+      /^\/api\/memories\/(?!settings$|bulk-approve$|export$|delete-all$|extraction-models$|extraction-runs$)[^/]+$/.test(
         url.pathname
       ),
     (route) => {

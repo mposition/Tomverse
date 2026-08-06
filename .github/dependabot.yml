@@ -8,11 +8,14 @@ updates:
     ignore:
       # TypeScript 7 is the native port and no longer ships the JavaScript
       # compiler API. `next build` refuses it ("TypeScript 7.0.2 does not
-      # provide the compiler API required by Next.js"), and
-      # scripts/text-encoding-check-core.mjs needs ts.createSourceFile and
-      # ts.SyntaxKind directly. Remove this entry once Next.js supports the
-      # TypeScript 7 compiler API and the encoding checker no longer depends
-      # on the JS API. TypeScript 6 stays eligible.
+      # provide the compiler API required by Next.js").
+      #
+      # This hold had a second reason -- scripts/text-encoding-check-core.mjs
+      # used ts.createSourceFile and ts.SyntaxKind directly -- which is now
+      # resolved (#278): the checker scans for string ranges itself and imports
+      # nothing from typescript. Next.js is the only remaining blocker, and it
+      # is not ours to fix; remove this entry once it supports the TypeScript 7
+      # compiler API. TypeScript 6 stays eligible.
       - dependency-name: typescript
         versions: [">=7"]
       # ESLint 10 changed the rule context passed to a rule's create(), and the
