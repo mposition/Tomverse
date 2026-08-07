@@ -324,11 +324,23 @@ digest(`sealedSelectionDigest`)를 subset finalize에 재사용하면 정상적�
 - DELETE는 `preview_ready`를 staging 취소와 동일하게 처리합니다.
 - lazy expiry와 15분 reconciliation sweep은 `staging`·`preview_ready`를 모두
   대상으로 합니다.
-- **배포 호환성**: seal 이전 버전 클라이언트가 이미 열어 둔 화면은 `staging`
-  에서 바로 finalize할 수 있어야 하므로, `staging` finalize 경로는 absolute
-  TTL(72시간) 동안 유지합니다. 새 UI는 `preview_ready`만 재개 가능으로
-  취급하며, seal되지 않은 부분 업로드에는 재개 CTA를 제공하지 않습니다.
-  클라이언트 계약 변경은 `EXTERNAL_IMPORT_PARSER_VERSION`으로 구분합니다.
+- **배포 호환성 창은 닫혔습니다.** seal 이전 버전 클라이언트가 이미 열어 둔
+  화면을 위해 `staging` finalize 경로를 absolute TTL(72시간) 동안 유지했고,
+  그 기간이 지나 finalize는 `preview_ready`만 받습니다.
+  - **창의 길이는 추정이 아니라 absolute TTL에서 나옵니다.** seal되지 않은
+    import는 `stagingAbsoluteMaxLifetimeMs`(72시간)를 넘겨 살아남을 수 없고
+    finalize가 그 전에 `isStagingExpired`로 거절하므로, seal 배포로부터 72시간
+    뒤에는 finalize 가능한 pre-seal 세션이 정의상 존재하지 않습니다. 그래서
+    닫을 때 migration도, 남은 행을 세는 절차도 필요하지 않습니다 — **필요한
+    사실은 production 배포 시각 하나뿐입니다.**
+  - **seal되지 않은 살아 있는 import는 409 `EXTERNAL_IMPORT_SELECTION_CHANGED`
+    입니다**(410이 아님). §18이 이미 그 의미 — "클라이언트가 들고 있는 선택
+    상태와 서버 상태가 어긋났다" — 를 갖고 있고 복구도 같습니다(seal 후
+    finalize). 410으로 답하면 한 번의 호출로 풀리는 상황에 처음부터 다시
+    하라고 말하게 됩니다. TTL이 지난 import는 계속 410입니다.
+  - 새 UI는 `preview_ready`만 재개 가능으로 취급하며, seal되지 않은 부분
+    업로드에는 재개 CTA를 제공하지 않습니다. 클라이언트 계약 변경은
+    `EXTERNAL_IMPORT_PARSER_VERSION`으로 구분합니다.
 - **finalize 멱등 계약**:
   - 같은 idempotency key + 같은 import digest·selection의 재요청 →
     **`200`으로 기존 완료 결과를 반환**합니다(no-op). 오류가 아닙니다.

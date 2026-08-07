@@ -1242,11 +1242,31 @@ export async function finalizeExternalImport(input: {
                 "Import is already finalized."
             );
         }
-        // `preview_ready` finalizes exactly like `staging`. Seal fixed that
-        // the upload is complete, not what gets saved, so a subset of the
-        // sealed set is a normal finalize — and old browser sessions that
-        // never sealed keep working from `staging` for the whole TTL window.
-        if (row.status !== "staging" && row.status !== "preview_ready") {
+        // Seal is now required (§5.5). It fixed that the upload is complete,
+        // not what gets saved, so a subset of the sealed set is still a
+        // normal finalize — but an unsealed import is one whose completeness
+        // nobody has attested, and finalizing it saves a set the server was
+        // never told was whole.
+        //
+        // The deployment-compatibility window this closes was bounded by the
+        // staging absolute TTL rather than by a guess: an unsealed import
+        // cannot outlive `stagingAbsoluteMaxLifetimeMs`, so 72 hours after
+        // the seal deploy there is no pre-seal session left whose import is
+        // still finalizable. The check below is what enforced that, and it is
+        // why closing the window needed no migration and strands nothing.
+        if (row.status !== "preview_ready") {
+            if (row.status === "staging" && !isStagingExpired(row)) {
+                // Not `STAGING_EXPIRED`: the import is alive and the client
+                // simply has not sealed. §18 already owns this meaning —
+                // "the selection state the client holds and the server's have
+                // diverged" — and the recovery is the same one: seal, then
+                // finalize.
+                throw new ApiSecurityError(
+                    409,
+                    "EXTERNAL_IMPORT_SELECTION_CHANGED",
+                    "Import must be sealed before it can be finalized."
+                );
+            }
             throw new ApiSecurityError(
                 410,
                 "EXTERNAL_IMPORT_STAGING_EXPIRED",

@@ -108,6 +108,17 @@ test("the full staging to finalize lifecycle works end to end", async () => {
     assert.equal(status.conversations.length, 2);
     assert.ok(status.conversations.every((row) => row.finalized === false));
 
+    // Seal declares the upload complete; §5.5 requires it before finalize.
+    await sealExternalImport({
+        userId: user.id,
+        importId: created.id,
+        finalSequence: 0,
+        expectedStagedConversationIds: batch.results.map(
+            (result) => result.stagedConversationId!
+        ),
+        expectedDuplicateCount: 0,
+    });
+
     // Select only conv-a; conv-b must be discarded, not half-kept.
     const selectedId = batch.results[0].stagedConversationId!;
     const finalized = await finalizeExternalImport({
@@ -215,6 +226,15 @@ test("an exact duplicate of an already-stored conversation is skipped", async ()
         sequence: 0,
         batchDigest: "digest-first",
         conversations: [conversationPayload("conv-dup")],
+    });
+    await sealExternalImport({
+        userId: user.id,
+        importId: first.id,
+        finalSequence: 0,
+        expectedStagedConversationIds: [
+            firstBatch.results[0].stagedConversationId!,
+        ],
+        expectedDuplicateCount: 0,
     });
     await finalizeExternalImport({
         userId: user.id,
@@ -398,6 +418,15 @@ test("cancel clears staging; deleting a completed import cascades", async () => 
         batchDigest: "digest-1",
         conversations: [conversationPayload("conv-keep")],
     });
+    await sealExternalImport({
+        userId: user.id,
+        importId: completed.id,
+        finalSequence: 0,
+        expectedStagedConversationIds: batch.results.map(
+            (result) => result.stagedConversationId!
+        ),
+        expectedDuplicateCount: 0,
+    });
     await finalizeExternalImport({
         userId: user.id,
         importId: completed.id,
@@ -475,6 +504,17 @@ const finalizeImport = async (
     const stagedIds = batch.results
         .filter((result) => result.outcome === "staged")
         .map((result) => result.stagedConversationId!);
+    // Seal, then finalize: §5.5's compatibility window has closed, so an
+    // unsealed import is no longer finalizable.
+    await sealExternalImport({
+        userId,
+        importId: created.id,
+        finalSequence: 0,
+        expectedStagedConversationIds: stagedIds,
+        expectedDuplicateCount: batch.results.filter(
+            (result) => result.outcome === "duplicate"
+        ).length,
+    });
     await finalizeExternalImport({
         userId,
         importId: created.id,
@@ -1121,4 +1161,99 @@ test("the status endpoint gives a resumed screen what the wizard's review had", 
     assert.equal(done.status, "completed");
     assert.equal(done.expired, false);
     assert.equal(done.effectiveExpiresAt, undefined);
+});
+
+test("an unsealed import can no longer be finalized", async () => {
+    // §5.5's deployment-compatibility window has closed. It was bounded by
+    // the staging absolute TTL rather than by a guess: an unsealed import
+    // cannot outlive `stagingAbsoluteMaxLifetimeMs`, so once that has elapsed
+    // since the seal deploy there is no pre-seal session left holding one.
+    const user = await createUser();
+    const created = await createExternalImport({
+        userId: user.id,
+        provider: "chatgpt",
+        parserVersion: "test-1",
+    });
+    const batch = await appendExternalImportBatch({
+        userId: user.id,
+        importId: created.id,
+        sequence: 0,
+        batchDigest: "digest-unsealed",
+        conversations: [conversationPayload("conv-unsealed")],
+    });
+    const stagedId = batch.results[0].stagedConversationId!;
+
+    // Not STAGING_EXPIRED: the import is alive and the client simply has not
+    // sealed. Answering 410 would tell the user to start over when the
+    // recovery is one call away.
+    await assert.rejects(
+        finalizeExternalImport({
+            userId: user.id,
+            importId: created.id,
+            idempotencyKey: "unsealed-key",
+            selectedConversationIds: [stagedId],
+        }),
+        expectCode("EXTERNAL_IMPORT_SELECTION_CHANGED")
+    );
+
+    // Nothing was written, and the import is still usable.
+    assert.equal(
+        (await prisma.externalConversation.count({
+            where: { userId: user.id, finalized: true },
+        })),
+        0
+    );
+
+    await sealExternalImport({
+        userId: user.id,
+        importId: created.id,
+        finalSequence: 0,
+        expectedStagedConversationIds: [stagedId],
+        expectedDuplicateCount: 0,
+    });
+    const finalized = await finalizeExternalImport({
+        userId: user.id,
+        importId: created.id,
+        idempotencyKey: "unsealed-key",
+        selectedConversationIds: [stagedId],
+    });
+    assert.equal(finalized.finalizedConversations, 1);
+});
+
+test("an expired unsealed import still reads as expired, not unsealed", async () => {
+    // The two refusals mean different things and have different recoveries:
+    // one is "seal first", the other is "start over". A row past its absolute
+    // TTL must keep saying the second.
+    const user = await createUser();
+    const created = await createExternalImport({
+        userId: user.id,
+        provider: "chatgpt",
+        parserVersion: "test-1",
+    });
+    const batch = await appendExternalImportBatch({
+        userId: user.id,
+        importId: created.id,
+        sequence: 0,
+        batchDigest: "digest-expired",
+        conversations: [conversationPayload("conv-expired")],
+    });
+    const stale = new Date(
+        Date.now() - EXTERNAL_IMPORT_STORAGE_LIMITS.stagingAbsoluteMaxLifetimeMs - 1000
+    );
+    await prisma.externalImport.update({
+        where: { id: created.id },
+        data: { createdAt: stale, updatedAt: stale },
+    });
+
+    await assert.rejects(
+        finalizeExternalImport({
+            userId: user.id,
+            importId: created.id,
+            idempotencyKey: "expired-key",
+            selectedConversationIds: [
+                batch.results[0].stagedConversationId!,
+            ],
+        }),
+        expectCode("EXTERNAL_IMPORT_STAGING_EXPIRED")
+    );
 });
