@@ -38,6 +38,7 @@ import { Conversation, type ChatAttachment } from "@/components/chat/types";
 import { useConversationDrafts } from "@/components/chat/useConversationDrafts";
 import { useModelCatalog } from "@/components/ModelCatalogProvider";
 import { useSession } from "next-auth/react";
+import { useRouter } from "next/navigation";
 import { ImageGenerationWorkspace } from "@/components/images/ImageGenerationWorkspace";
 import { planAllowsImageGeneration } from "@/lib/imageGenerationAccess";
 import {
@@ -449,6 +450,7 @@ export function ChatPageClient({
     getModel,
     isEnabledModelId,
   } = useModelCatalog();
+  const router = useRouter();
     const { t, setLang, lang } = useLanguage();
   const formatCopy = (key: string, values: Record<string, string>) =>
     Object.entries(values).reduce(
@@ -3631,6 +3633,10 @@ export function ChatPageClient({
   
     const handleDownloadConversation = (convId: string) => {
         if (isGuestMode) return;
+        // Not a page navigation: the route answers with a file download
+        // (Content-Disposition: attachment), so the browser keeps this page
+        // and saves the response. A router push would try to render it.
+        // eslint-disable-next-line @next/next/no-location-assign-relative-destination
         window.location.href = `/api/conversations/${convId}/export`;
     };
 
@@ -3994,7 +4000,7 @@ export function ChatPageClient({
       return;
     }
     // Same destination the locked model rows use.
-    window.location.assign("/pricing");
+    router.push("/pricing");
   };
   const imageWorkspaceElement = isImageWorkspaceActive ? (
     <ImageGenerationWorkspace
