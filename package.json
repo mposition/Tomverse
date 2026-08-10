@@ -149,7 +149,11 @@
       "brace-expansion": "^1.1.17"
     },
     "fast-uri": "3.1.5",
-    "postcss": "8.5.25",
+    "pdfjs-dist": "^6.2.108",
+    "postcss": {
+      ".": "8.5.25",
+      "nanoid": "^3.3.17"
+    },
     "sharp": "$sharp",
     "uuid": "11.1.1"
   }
