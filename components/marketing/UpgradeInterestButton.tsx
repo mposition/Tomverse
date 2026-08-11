@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import type { ReactNode } from "react";
 import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { dispatchAppToast } from "@/lib/appToast";
@@ -610,6 +611,7 @@ export function UpgradeInterestButton({
   trigger?: PurchaseAnalyticsTrigger;
 }) {
   const { lang, t } = useLanguage();
+  const router = useRouter();
   const copy = checkoutCopy[lang] || checkoutCopy.en;
   const legalCopy = checkoutLegalCopy[lang] || checkoutLegalCopy.en;
   const [isSending, setIsSending] = useState(false);
@@ -893,7 +895,7 @@ export function UpgradeInterestButton({
         }),
       });
       if (response.status === 401) {
-        window.location.assign(
+        router.push(
           `/auth/signin?callbackUrl=${encodeURIComponent(window.location.pathname)}`
         );
         return;

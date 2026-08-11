@@ -17,6 +17,13 @@ const CLOUDFLARE_GRAPHQL_URL = "https://api.cloudflare.com/client/v4/graphql";
 const PRISMA_MANAGEMENT_API_URL = "https://api.prisma.io/v1";
 const MAX_EXTERNAL_RESPONSE_BYTES = 1_000_000;
 const EXTERNAL_TIMEOUT_MS = 8_000;
+// One retry, not a loop. These are 15-minute-cadence billing-telemetry reads,
+// so a second attempt costs nothing anybody is waiting on, while a third would
+// only widen the window in which the maintenance route is blocked on a third
+// party. Before this existed a single flaky second on Railway's or Prisma's
+// usage endpoint raised a fatal INFRASTRUCTURE_*_ERROR incident.
+const EXTERNAL_ATTEMPTS = 2;
+const EXTERNAL_RETRY_DELAY_MS = 750;
 const R2_STORAGE_ALLOWANCE_BYTES = 10 * 1024 * 1024 * 1024;
 const R2_CLASS_A_ALLOWANCE = 1_000_000;
 const R2_CLASS_B_ALLOWANCE = 10_000_000;
@@ -30,6 +37,12 @@ const RAILWAY_MEASUREMENTS = [
   "NETWORK_RX_GB",
   "NETWORK_TX_GB",
 ] as const;
+// Railway reports its per-client usage-query concurrency limit as a GraphQL
+// error at HTTP 200: "Too many usage queries are running at once. Please retry
+// in 120 seconds. Limit: 16 concurrent usage queries per client." Matched on
+// the two stable phrases rather than the whole sentence, which carries a
+// changing retry window and limit.
+const RAILWAY_USAGE_THROTTLE = /too many usage queries|concurrent usage quer/i;
 const MINUTES_PER_30_DAY_MONTH = 30 * 24 * 60;
 const RAILWAY_CPU_USD_PER_VCPU_MINUTE = 20 / MINUTES_PER_30_DAY_MONTH;
 const RAILWAY_MEMORY_USD_PER_GB_MINUTE = 10 / MINUTES_PER_30_DAY_MONTH;
@@ -89,6 +102,59 @@ const safeExternalMessage = (value: unknown) =>
     ? value.replace(/\s+/g, " ").trim().slice(0, 240)
     : "External API request failed.";
 
+/**
+ * A usage read that did not land for a reason nobody can act on: the
+ * third-party API timed out, refused the connection, answered 5xx, or
+ * throttled us. It says nothing about Tomverse's own health -- only that this
+ * one billing-telemetry read failed -- so the probe reports it as `warning`
+ * (still an incident, at warning severity) instead of the `error` that pages
+ * as fatal.
+ *
+ * Credential, permission, query and response-shape failures are deliberately
+ * *not* transient: those stay `error`, because a person has to fix them.
+ */
+class TransientProbeFailure extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "TransientProbeFailure";
+  }
+}
+
+const transientStatus = (status: number) =>
+  status === 408 || status === 425 || status === 429 || status >= 500;
+
+// `fetch` rejects with TimeoutError for the AbortSignal budget above and with
+// TypeError for DNS, TLS and socket failures. Neither says the configuration
+// is wrong, only that this attempt did not complete.
+const transientTransportError = (error: unknown) =>
+  error instanceof Error &&
+  (error.name === "TimeoutError" ||
+    error.name === "AbortError" ||
+    error.name === "TypeError");
+
+const delay = (ms: number) =>
+  new Promise<void>((resolve) => {
+    setTimeout(resolve, ms);
+  });
+
+/**
+ * The message the upstream itself supplied, for both shapes these probes meet:
+ * Prisma's REST `{ error: { message } }` and the GraphQL `{ errors: [...] }`
+ * Railway and Cloudflare answer with. Returns null when neither is present so
+ * callers fall back to their own wording.
+ */
+const externalErrorMessage = (payload: unknown) => {
+  if (!payload || typeof payload !== "object") return null;
+  const record = payload as {
+    error?: { message?: unknown };
+    errors?: Array<{ message?: unknown } | null>;
+  };
+  const message = record.error?.message ?? record.errors?.[0]?.message;
+  return typeof message === "string" && message.trim()
+    ? safeExternalMessage(message)
+    : null;
+};
+
 const readBoundedJson = async (response: Response) => {
   const declaredLength = headerNumber(response.headers.get("content-length"));
   if (declaredLength !== null && declaredLength > MAX_EXTERNAL_RESPONSE_BYTES) {
@@ -112,6 +178,81 @@ const readBoundedJson = async (response: Response) => {
   }
   text += decoder.decode();
   return JSON.parse(text) as unknown;
+};
+
+/**
+ * One usage read, retried once when the failure was transient. The response
+ * is handed back unread-of-meaning: every probe still decides for itself what
+ * a 4xx, a GraphQL `errors` array or a missing field means, because only the
+ * probe knows which of those are actionable.
+ */
+const requestExternalJson = async (
+  label: string,
+  input: URL | string,
+  init: RequestInit
+): Promise<{ response: Response; payload: unknown }> => {
+  let lastFailure: TransientProbeFailure | null = null;
+  for (let attempt = 1; attempt <= EXTERNAL_ATTEMPTS; attempt += 1) {
+    let rateLimited = false;
+    try {
+      const response = await fetch(input, {
+        ...init,
+        cache: "no-store",
+        signal: AbortSignal.timeout(EXTERNAL_TIMEOUT_MS),
+      });
+      if (!transientStatus(response.status)) {
+        return { response, payload: await readBoundedJson(response) };
+      }
+      // Read separately from the success path: an error body is only wanted
+      // for its message, so a malformed or oversized one is discarded rather
+      // than replacing the status with a parse failure. `readBoundedJson`
+      // still enforces the 1 MB ceiling before it throws.
+      const failurePayload = await readBoundedJson(response).catch(() => null);
+      rateLimited = response.status === 429;
+      lastFailure = new TransientProbeFailure(
+        externalErrorMessage(failurePayload) ||
+          `${label} returned ${response.status}.`
+      );
+    } catch (error) {
+      // Anything else -- a JSON syntax error, the 1 MB guard, a programming
+      // fault -- is actionable and belongs to the caller unchanged.
+      if (!transientTransportError(error)) throw error;
+      lastFailure = new TransientProbeFailure(
+        safeExternalMessage(error instanceof Error ? error.message : error)
+      );
+    }
+    // A 429 states its own retry window in minutes -- Prisma's says 120
+    // seconds -- so asking again inside this request only deepens the limit
+    // it just reported.
+    if (rateLimited || attempt === EXTERNAL_ATTEMPTS) break;
+    await delay(EXTERNAL_RETRY_DELAY_MS);
+  }
+  throw lastFailure || new TransientProbeFailure(`${label} did not answer.`);
+};
+
+/**
+ * The status and reason code a failed probe reports. Transient failures stay
+ * off the fatal path: `planInfrastructureAlerts` turns a `warning` into an
+ * `INFRASTRUCTURE_*_WARNING` incident, which still reaches Sentry, Slack and
+ * email but does not claim the dependency is down.
+ */
+const probeFailure = (dependencyCode: string, error: unknown) => {
+  const transient = error instanceof TransientProbeFailure;
+  const message = safeExternalMessage(
+    error instanceof Error ? error.message : error
+  );
+  return {
+    status: (transient ? "warning" : "error") as "warning" | "error",
+    message,
+    warningReasons: [
+      {
+        code: transient
+          ? `${dependencyCode}_USAGE_API_UNAVAILABLE`
+          : `${dependencyCode}_API_ERROR`,
+        detail: message,
+      },
+    ],
+  };
 };
 
 const railwaySnapshot = async (
@@ -167,19 +308,20 @@ const railwaySnapshot = async (
   }
 
   try {
-    const response = await fetch(RAILWAY_GRAPHQL_URL, {
-      method: "POST",
-      cache: "no-store",
-      signal: AbortSignal.timeout(EXTERNAL_TIMEOUT_MS),
-      headers: {
-        Accept: "application/json",
-        ...(scope === "project" && projectToken
-          ? { "Project-Access-Token": projectToken }
-          : { Authorization: `Bearer ${token}` }),
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        query: `
+    const { response, payload: rawPayload } = await requestExternalJson(
+      "Railway API",
+      RAILWAY_GRAPHQL_URL,
+      {
+        method: "POST",
+        headers: {
+          Accept: "application/json",
+          ...(scope === "project" && projectToken
+            ? { "Project-Access-Token": projectToken }
+            : { Authorization: `Bearer ${token}` }),
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          query: `
           query TomverseInfrastructureUsage(
             $measurements: [MetricMeasurement!]!
             $workspaceId: String
@@ -197,23 +339,35 @@ const railwaySnapshot = async (
             }
           }
         `,
-        variables: {
-          measurements: RAILWAY_MEASUREMENTS,
-          workspaceId: scope === "workspace" ? workspaceId || null : null,
-          projectId: scope === "project" ? projectId || null : null,
-        },
-      }),
-    });
-    const payload = (await readBoundedJson(response)) as {
+          variables: {
+            measurements: RAILWAY_MEASUREMENTS,
+            workspaceId: scope === "workspace" ? workspaceId || null : null,
+            projectId: scope === "project" ? projectId || null : null,
+          },
+        }),
+      }
+    );
+    const payload = (rawPayload || {}) as {
       data?: { estimatedUsage?: unknown };
       errors?: Array<{ message?: unknown }>;
     };
+    // A GraphQL `errors` array or a 4xx is normally the query, the token or
+    // the scope being wrong -- an operator has to change something -- so
+    // unlike a 5xx or a timeout it is not retried and not downgraded.
+    //
+    // The one exception is Railway's own usage throttle, which arrives the
+    // same way: HTTP 200 with the limit in `errors`. That is the limit
+    // RAILWAY_USAGE_MONITOR_ENABLED exists for (two environments sharing one
+    // Project-Access-Token), it carries its own retry window in minutes, and
+    // it is not an outage -- so it reports as a warning and is never retried
+    // inside this request.
     if (!response.ok || payload.errors?.length) {
-      throw new Error(
-        safeExternalMessage(
-          payload.errors?.[0]?.message || `Railway API returned ${response.status}.`
-        )
-      );
+      const message =
+        externalErrorMessage(payload) ||
+        `Railway API returned ${response.status}.`;
+      throw RAILWAY_USAGE_THROTTLE.test(message)
+        ? new TransientProbeFailure(message)
+        : new Error(message);
     }
     const rawRows = Array.isArray(payload.data?.estimatedUsage)
       ? payload.data.estimatedUsage
@@ -349,12 +503,9 @@ const railwaySnapshot = async (
       },
     };
   } catch (error) {
-    const message = safeExternalMessage(error instanceof Error ? error.message : error);
     return {
       ...base,
-      status: "error",
-      message,
-      warningReasons: [{ code: "RAILWAY_API_ERROR", detail: message }],
+      ...probeFailure("RAILWAY", error),
       projectedMonthCostMicroUsd: null,
       projectedBalanceMicroUsd: null,
     };
@@ -401,15 +552,17 @@ const prismaUsageSnapshot = async (): Promise<PrismaUsageInfrastructureSnapshot>
     );
     url.searchParams.set("startDate", monthStart.toISOString());
     url.searchParams.set("endDate", now.toISOString());
-    const response = await fetch(url, {
-      cache: "no-store",
-      signal: AbortSignal.timeout(EXTERNAL_TIMEOUT_MS),
-      headers: {
-        Accept: "application/json",
-        Authorization: `Bearer ${token}`,
-      },
-    });
-    const payload = (await readBoundedJson(response)) as {
+    const { response, payload: rawPayload } = await requestExternalJson(
+      "Prisma Management API",
+      url,
+      {
+        headers: {
+          Accept: "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+      }
+    );
+    const payload = (rawPayload || {}) as {
       period?: { start?: unknown; end?: unknown };
       metrics?: {
         operations?: { used?: unknown };
@@ -417,11 +570,13 @@ const prismaUsageSnapshot = async (): Promise<PrismaUsageInfrastructureSnapshot>
       };
       error?: { message?: unknown };
     };
+    // Only 4xx reaches here: the retryable statuses never return from
+    // `requestExternalJson`. A rejected token or an unknown database id is
+    // somebody's job to fix, so it keeps reporting as an error.
     if (!response.ok) {
       throw new Error(
-        safeExternalMessage(
-          payload?.error?.message || `Prisma Management API returned ${response.status}.`
-        )
+        externalErrorMessage(payload) ||
+          `Prisma Management API returned ${response.status}.`
       );
     }
     const operationsUsed = numeric(payload.metrics?.operations?.used);
@@ -449,11 +604,7 @@ const prismaUsageSnapshot = async (): Promise<PrismaUsageInfrastructureSnapshot>
         typeof payload.period?.end === "string" ? payload.period.end : null,
     };
   } catch (error) {
-    return {
-      ...base,
-      status: "error",
-      message: safeExternalMessage(error instanceof Error ? error.message : error),
-    };
+    return { ...base, ...probeFailure("PRISMA", error) };
   }
 };
 
@@ -497,61 +648,63 @@ const r2Snapshot = async (): Promise<R2InfrastructureSnapshot> => {
   const now = new Date();
   const monthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
   try {
-    const response = await fetch(CLOUDFLARE_GRAPHQL_URL, {
-      method: "POST",
-      cache: "no-store",
-      signal: AbortSignal.timeout(EXTERNAL_TIMEOUT_MS),
-      headers: {
-        Accept: "application/json",
-        Authorization: `Bearer ${token}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        query: `
-          query TomverseR2Audit(
-            $accountTag: string!
-            $startDate: Time!
-            $endDate: Time!
-            $bucketName: string!
-          ) {
-            viewer {
-              accounts(filter: { accountTag: $accountTag }) {
-                storage: r2StorageAdaptiveGroups(
-                  limit: 1
-                  filter: {
-                    datetime_geq: $startDate
-                    datetime_leq: $endDate
-                    bucketName: $bucketName
+    const { response, payload: rawPayload } = await requestExternalJson(
+      "Cloudflare API",
+      CLOUDFLARE_GRAPHQL_URL,
+      {
+        method: "POST",
+        headers: {
+          Accept: "application/json",
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          query: `
+            query TomverseR2Audit(
+              $accountTag: string!
+              $startDate: Time!
+              $endDate: Time!
+              $bucketName: string!
+            ) {
+              viewer {
+                accounts(filter: { accountTag: $accountTag }) {
+                  storage: r2StorageAdaptiveGroups(
+                    limit: 1
+                    filter: {
+                      datetime_geq: $startDate
+                      datetime_leq: $endDate
+                      bucketName: $bucketName
+                    }
+                    orderBy: [datetime_DESC]
+                  ) {
+                    max { objectCount uploadCount payloadSize metadataSize }
+                    dimensions { datetime }
                   }
-                  orderBy: [datetime_DESC]
-                ) {
-                  max { objectCount uploadCount payloadSize metadataSize }
-                  dimensions { datetime }
-                }
-                operations: r2OperationsAdaptiveGroups(
-                  limit: 1000
-                  filter: {
-                    datetime_geq: $startDate
-                    datetime_leq: $endDate
-                    bucketName: $bucketName
+                  operations: r2OperationsAdaptiveGroups(
+                    limit: 1000
+                    filter: {
+                      datetime_geq: $startDate
+                      datetime_leq: $endDate
+                      bucketName: $bucketName
+                    }
+                  ) {
+                    sum { requests }
+                    dimensions { actionType }
                   }
-                ) {
-                  sum { requests }
-                  dimensions { actionType }
                 }
               }
             }
-          }
-        `,
-        variables: {
-          accountTag: accountId,
-          startDate: monthStart.toISOString(),
-          endDate: now.toISOString(),
-          bucketName,
-        },
-      }),
-    });
-    const payload = (await readBoundedJson(response)) as {
+          `,
+          variables: {
+            accountTag: accountId,
+            startDate: monthStart.toISOString(),
+            endDate: now.toISOString(),
+            bucketName,
+          },
+        }),
+      }
+    );
+    const payload = (rawPayload || {}) as {
       data?: {
         viewer?: {
           accounts?: Array<{
@@ -567,11 +720,12 @@ const r2Snapshot = async (): Promise<R2InfrastructureSnapshot> => {
       };
       errors?: Array<{ message?: unknown }>;
     };
+    // Same split as Railway: a GraphQL `errors` array or a 4xx is the token,
+    // the account tag or the query, none of which a retry fixes.
     if (!response.ok || payload.errors?.length) {
       throw new Error(
-        safeExternalMessage(
-          payload.errors?.[0]?.message || `Cloudflare API returned ${response.status}.`
-        )
+        externalErrorMessage(payload) ||
+          `Cloudflare API returned ${response.status}.`
       );
     }
     const account = payload.data?.viewer?.accounts?.[0];
@@ -633,11 +787,7 @@ const r2Snapshot = async (): Promise<R2InfrastructureSnapshot> => {
       classBAllowancePercent,
     };
   } catch (error) {
-    return {
-      ...base,
-      status: "error",
-      message: safeExternalMessage(error instanceof Error ? error.message : error),
-    };
+    return { ...base, ...probeFailure("R2", error) };
   }
 };
 
