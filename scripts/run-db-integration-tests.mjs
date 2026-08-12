@@ -256,6 +256,21 @@ run(
   ],
   "Running the administrator Stripe webhook replay and its mode boundary"
 );
+// Its own process for the same reason: it replaces the Stripe client and the
+// webhook processor to drive the signed webhook endpoint.
+run(
+  [
+    "--conditions=react-server",
+    "--experimental-test-module-mocks",
+    "--no-warnings=ExperimentalWarning",
+    "--import",
+    "tsx",
+    "--test",
+    "--test-concurrency=1",
+    "tests/integration/stripe-webhook-route.db.test.ts",
+  ],
+  "Running the Stripe webhook endpoint's at-least-once delivery rules"
+);
 // Its own process for the same reason as the refund decision suite: it wraps
 // the notification queue module to inject an enqueue failure, and it stubs the
 // session and admin-auth seams for the feedback routes.
