@@ -1047,6 +1047,7 @@ export const de = {
         expiredCardNotice: "Abgelaufen — er muss neu gestartet werden.",
         abandonImport: "Diesen Import verlassen",
     },
+    accountDataExport: { ...en.accountDataExport },
     memoryReview: {
         sourceDeleteDerivedImport:
             "{count} Erinnerungen aus diesem Import werden ebenfalls gelöscht.",

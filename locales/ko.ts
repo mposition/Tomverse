@@ -1259,6 +1259,37 @@ export const ko = {
     },
     // 계정 장기 기억 검토 (Release B, slice B3). 목록·삭제·설정은 flag와
     // 무관하게 항상 접근 가능하고, 검토·작성 동작만 rollout flag를 따릅니다.
+    accountDataExport: {
+        dataTabTitle: "내 계정 데이터",
+        dataTabDescription:
+            "Tomverse가 보관 중인 계정 데이터 전체 — 대화, 메모리, 가져온 기록, 결제, 사용량 — 를 파일 하나로 내려받습니다.",
+        dataTabOpen: "내 데이터 내려받기",
+        pageTitle: "계정 데이터 내려받기",
+        pageDescription:
+            "Tomverse가 보관 중인 계정 데이터 전체가 담긴 파일 하나입니다. 무엇이 들어 있고 무엇이 빠져 있는지, 그 이유까지 파일 안에 적혀 있습니다.",
+        securityNote:
+            "내려받으려면 최근에 다시 로그인해야 합니다. 발급된 링크는 한 번만 쓸 수 있고 5분 뒤 만료되므로, 링크가 다른 곳으로 새어나가도 이미 사용된 상태입니다.",
+        prepareDownload: "다운로드 준비",
+        requestAgain: "새로 준비하기",
+        downloadNow: "파일 내려받기",
+        linkExpiresIn: "이 링크는 한 번만 쓸 수 있고 {remaining} 뒤 만료됩니다.",
+        linkExpired: "링크가 만료되었습니다. 새로 준비해 주세요.",
+        reauthRequired:
+            "계정 데이터를 내려받기 전에 다시 로그인한 뒤 이 화면으로 돌아와 주세요.",
+        requestFailed: "다운로드를 준비하지 못했습니다. 다시 시도해 주세요.",
+        historyTitle: "다운로드 기록",
+        historyDescription:
+            "이 계정의 모든 요청·다운로드·거부 기록이며 90일간 보관됩니다. 거부는 이 계정의 다운로드 링크가 제시되었다가 거절되었다는 뜻입니다.",
+        historyLoading: "불러오는 중...",
+        historyEmpty: "아직 계정 데이터를 내려받은 적이 없습니다.",
+        refusedNote:
+            "이미 만료되었거나, 이미 사용되었거나, 다른 계정의 링크가 제시되었습니다.",
+        status: {
+            issued: "링크 발급됨",
+            downloaded: "내려받음",
+            refused: "거부됨",
+        },
+    },
     memoryReview: {
         sourceDeleteDerivedImport:
             "이 가져오기에서 만들어진 기억 {count}개도 함께 삭제됩니다.",

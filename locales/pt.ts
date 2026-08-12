@@ -1044,6 +1044,7 @@ export const pt = {
         expiredCardNotice: "Expirou e precisa ser começada de novo.",
         abandonImport: "Sair desta importação",
     },
+    accountDataExport: { ...en.accountDataExport },
     memoryReview: {
         sourceDeleteDerivedImport:
             "{count} memórias criadas a partir desta importação também serão excluídas.",

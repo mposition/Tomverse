@@ -64,7 +64,13 @@ const ENGLISH_STRING_CEILING = {
   // new-conversation combination and zh takes modelFinder from en wholesale.
   // +2 (191 -> 193): the two imageGenerationRestore* notices, which zh takes
   // from en wholesale like the rest of the image workspace copy.
-  zh: 193,
+  // +21 to zh/fr/de/es/pt (accountDataExport): the account-data download
+  // surface, taken from en wholesale like the other untranslated sections.
+  // Worth flagging rather than burying: this is privacy copy explaining a
+  // step-up, a single-use link and a refusal history, which is a worse thing
+  // to read in a second language than a model picker label. It should get a
+  // translation pass ahead of the sections above it.
+  zh: 214,
   // Preview markets, all of which spread `...en.chat` and `en.modelFinder`.
   // fr +1 (226 -> 227): modelFinder.saveAsDefaultHint, taken from en wholesale.
   // fr +2 (230 -> 232): externalImport.messagesCount and
@@ -78,15 +84,15 @@ const ENGLISH_STRING_CEILING = {
   // fr +1 (234 -> 235): memoryExtraction.conversationMeta — "{messages}
   // messages · {size}" is spelled identically in French, the same case as
   // externalImport.messagesCount above; the section is otherwise translated.
-  fr: 235,
+  fr: 256,
   // de/es/pt +1 for the same saveAsDefaultHint key.
   // de +1 (233 -> 234): chat.modelPickerTabChat — "Chat" is the German word
   // too; the image tab's other strings are translated.
-  de: 234,
+  de: 255,
   // es +1 (229 -> 230): chat.modelPickerTabChat — "Chat" is the Spanish word
   // too; the image tab's other strings are translated.
-  es: 230,
-  pt: 227,
+  es: 251,
+  pt: 248,
 };
 
 test("every supported language is in the dictionary map", () => {
