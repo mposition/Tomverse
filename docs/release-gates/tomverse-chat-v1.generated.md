@@ -59,7 +59,7 @@ Canonical release-gate registry for Tomverse Chat v1. Human-readable tables must
 | `MEMORY-04` | Deleted or superseded memory is never reused | security-privacy | yes (when `memory-release-b-enabled`) | `deleted_or_superseded_memory_reuse_events` = 0 | pending |
 | `UI-01` | Tomverse Review behavior remains stable after headless extraction | web-ui | yes | `required_review_regression_e2e_pass_percent` = 100 | pending |
 | `UI-02` | Fallback status, cancellation, IME, streaming, and accessibility work end to end | web-ui | yes | `critical_chat_interaction_e2e_pass_percent` = 100 | pending |
-| `PACKAGE-01` | Shared chat packages remain framework-neutral | web-ui | yes | `forbidden_nextjs_imports_in_shared_packages` = 0 | pending |
+| `PACKAGE-01` | Shared chat packages remain framework-neutral | web-ui | yes | `forbidden_nextjs_imports_in_shared_packages` = 0 | evidence-ready |
 | `AUTH-01` | Sign in with Apple and identity lifecycle work end to end | mobile-release | yes | `apple_login_link_unlink_delete_revoke_e2e_pass_percent` = 100 | pending |
 | `AUTH-02` | Email OTP, magic link, and the isolated review code work through the mobile token path | backend-ai | yes | `email_otp_magic_link_lockout_turnstile_e2e_pass_percent` = 100; `submission_scoped_review_code_isolation_e2e_pass_percent` = 100 | pending |
 | `AUTH-03` | Mobile bearer-token lifecycle resists replay and supports revocation | backend-ai | yes | `refresh_rotation_reuse_logout_device_revoke_e2e_pass_percent` = 100 | pending |
@@ -679,8 +679,8 @@ Evidence references: none recorded
 
 - Owner: web-ui
 - Blocking: yes
-- Status: pending
-- Approved by: not yet approved
+- Status: evidence-ready
+- Approved by: @mposition (gate-owner)
 - Approved at: not yet approved
 
 Why this gate exists: Framework-neutral packages are the mechanism that prevents Next.js and Capacitor clients from becoming duplicated products.
@@ -694,7 +694,7 @@ Required evidence:
 - ESLint no-restricted-imports report
 - Next.js and Vite build matrix
 
-Evidence references: none recorded
+Evidence references: `docs/release-gates/evidence/PACKAGE-01-2026-08-12.md`, `commit:b786a97db24b0177eddbc79efcb17df29205d03f`, `https://github.com/mposition/Tomverse/actions/runs/31604472342`, `https://github.com/mposition/Tomverse/actions/runs/31604472342/job/94139773729`, `https://github.com/mposition/Tomverse/actions/runs/31604472342/job/94139773711`
 
 ### Category: authentication
 
