@@ -174,3 +174,56 @@ test("undecided rows still count towards latency and reasons", () => {
     assert.equal(report.decisionMicrosP50, 900);
     assert.deepEqual(report.selectionReasons, { no_candidate: 1 });
 });
+
+// The ceiling on how much traffic Auto could serve even if every choice it
+// made were perfect. Easy to skip past as a restatement of "decided", and more
+// consequential than the agreement rate it sits beside.
+test("candidate availability is measured over every row, not over the decided ones", () => {
+    const report = buildShadowReport([
+        row({ selectedModelId: "a", eligibleCount: 3 }),
+        row({ selectedModelId: "b", eligibleCount: 2 }),
+        row({ selectedModelId: null, selectionReason: "no_candidate", eligibleCount: 0 }),
+        row({ selectedModelId: null, selectionReason: "no_candidate", eligibleCount: 0 }),
+    ]);
+
+    // Two of four rows had somewhere to go. Dividing by the decided rows would
+    // answer 100% every time and say nothing.
+    assert.equal(report.candidateAvailabilityRate, 0.5);
+    assert.equal(report.eligibleCountP50, 0);
+    assert.equal(report.eligibleCountP95, 3);
+});
+
+test("candidate availability is null rather than zero when nothing was observed", () => {
+    assert.equal(buildShadowReport([]).candidateAvailabilityRate, null);
+    assert.equal(buildShadowReport([]).stickyHeldRate, null);
+});
+
+// A Router collapsing onto one model shows up here and nowhere else: the
+// switch pairs would look busy while every arrow pointed at one destination.
+test("the destination distribution shows where Auto would land", () => {
+    const report = buildShadowReport([
+        row({ selectedModelId: "winner", userSelectedModelId: "a" }),
+        row({ selectedModelId: "winner", userSelectedModelId: "b" }),
+        row({ selectedModelId: "winner", userSelectedModelId: "winner" }),
+        row({ selectedModelId: "other", userSelectedModelId: "c" }),
+        row({ selectedModelId: null, selectionReason: "no_candidate" }),
+    ]);
+
+    // Counts every decided row, including the ones where the Router agreed --
+    // a model the Router keeps choosing is the point, whether or not the user
+    // had already chosen it.
+    assert.deepEqual(report.selectedModelCounts, { winner: 3, other: 1 });
+});
+
+test("the sticky-held rate is over decided turns, and counts only held ones", () => {
+    const report = buildShadowReport([
+        row({ selectedModelId: "a", selectionReason: "sticky" }),
+        row({ selectedModelId: "a", selectionReason: "sticky" }),
+        row({ selectedModelId: "b", selectionReason: "task_preference" }),
+        row({ selectedModelId: "b", selectionReason: "only_candidate" }),
+        row({ selectedModelId: null, selectionReason: "no_candidate" }),
+    ]);
+
+    assert.equal(report.stickyHeldRate, 0.5);
+    assert.equal(report.decided, 4);
+});

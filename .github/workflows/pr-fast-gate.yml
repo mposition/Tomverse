@@ -226,6 +226,15 @@ jobs:
         timeout-minutes: 5
         run: npm run check:data-domain-registry
 
+      # ROUTE-01 turns on one number, and the ways it goes wrong are all
+      # editorial: a set still being edited, a baseline named after the
+      # answers were already in, a pilot's numbers read as a decision run.
+      # None of those show up in the interval, so the committed set files are
+      # validated on every PR and a report has to pass the same check before
+      # anyone can attach it to the gate.
+      - name: Router quality evaluation evidence
+        timeout-minutes: 5
+        run: npm run check:router-quality-eval
       # PACKAGE-01. The shared packages are the mechanism that stops the web
       # app and the native shell from becoming two products; that only holds
       # while the shared half runs unchanged in all three environments. The

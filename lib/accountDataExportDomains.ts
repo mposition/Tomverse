@@ -207,6 +207,22 @@ export const EXPORT_DOMAIN_DECLARATIONS: ExportDomainDeclaration[] = [
   },
 
   {
+    domain: "routingAttempt",
+    publicName: "routing_attempts",
+    prismaModel: "RoutingAttempt",
+    state: "excluded",
+    exclusionReason:
+      "The per-attempt half of the routing record: which model was tried, whether it reached a provider, and how it ended. Operational reliability data about Tomverse's own infrastructure, holding nothing the user wrote. Deleted with the account.",
+  },
+  {
+    domain: "contextManifest",
+    publicName: "context_manifests",
+    prismaModel: "ContextManifest",
+    state: "excluded",
+    exclusionReason:
+      "The immutable proof of what one attempt sent to a provider: source references, versions, hashes and token counts. Deliberately not a copy of the prompt -- the policy forbids duplicating it here -- so there is no content of the user's to return, and the source references point at their conversations, which the export already carries in full. Deleted with the account.",
+  },
+  {
     domain: "chatContextBundleConsumption",
     publicName: "context_bundle_nonces",
     prismaModel: "ChatContextBundleConsumption",

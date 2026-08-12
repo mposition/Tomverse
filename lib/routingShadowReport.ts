@@ -82,6 +82,32 @@ export type ShadowReport = {
     rejectionReasons: Record<string, number>;
     decisionMicrosP50: number;
     decisionMicrosP95: number;
+
+    /**
+     * How often the filters left anything to choose from at all.
+     *
+     * Distinct from the agreement rate and more consequential: a request the
+     * Router could not answer is one Auto would have to refuse, so this is the
+     * ceiling on how much of the traffic Auto could serve even if every choice
+     * it made were perfect.
+     */
+    candidateAvailabilityRate: number | null;
+    /** Eligible-set size, so "one candidate" and "nine" are distinguishable. */
+    eligibleCountP50: number;
+    eligibleCountP95: number;
+    /**
+     * What the Router would pick, as a distribution. The switch pairs say what
+     * would move; this says where it would move *to*, which is the number that
+     * shows a Router collapsing onto one model.
+     */
+    selectedModelCounts: Record<string, number>;
+    /**
+     * Turns held on the current model by the margin-and-hysteresis rule.
+     * Every one is a turn where a challenger scored higher and the Router
+     * stayed put on purpose, so a rate near zero means stickiness is not doing
+     * anything and a rate near one means it is doing everything.
+     */
+    stickyHeldRate: number | null;
 };
 
 const percentile = (sorted: readonly number[], fraction: number) => {
@@ -133,10 +159,13 @@ export function buildShadowReport(
     const switchCounts = new Map<string, Map<string, number>>();
     const selectionReasons: Record<string, number> = {};
     const rejectionReasons: Record<string, number> = {};
+    const selectedModelCounts: Record<string, number> = {};
     const micros: number[] = [];
+    const eligibleCounts: number[] = [];
 
     for (const row of rows) {
         micros.push(row.decisionMicros);
+        eligibleCounts.push(row.eligibleCount);
         selectionReasons[row.selectionReason] =
             (selectionReasons[row.selectionReason] ?? 0) + 1;
         for (const [reason, count] of Object.entries(
@@ -146,6 +175,8 @@ export function buildShadowReport(
         }
         if (row.selectedModelId === null) continue;
         decided += 1;
+        selectedModelCounts[row.selectedModelId] =
+            (selectedModelCounts[row.selectedModelId] ?? 0) + 1;
         if (row.selectedModelId === row.userSelectedModelId) {
             agreed += 1;
             continue;
@@ -180,6 +211,7 @@ export function buildShadowReport(
         .slice(0, maxSwitches);
 
     const sortedMicros = [...micros].sort((left, right) => left - right);
+    const sortedEligible = [...eligibleCounts].sort((left, right) => left - right);
 
     return {
         rows: rows.length,
@@ -203,5 +235,14 @@ export function buildShadowReport(
         rejectionReasons,
         decisionMicrosP50: percentile(sortedMicros, 0.5),
         decisionMicrosP95: percentile(sortedMicros, 0.95),
+        // Over every row, not over the decided ones: the question is what
+        // fraction of real traffic had a candidate, and dividing by the rows
+        // that had one would answer 100% every time.
+        candidateAvailabilityRate: rows.length === 0 ? null : decided / rows.length,
+        eligibleCountP50: percentile(sortedEligible, 0.5),
+        eligibleCountP95: percentile(sortedEligible, 0.95),
+        selectedModelCounts,
+        stickyHeldRate:
+            decided === 0 ? null : (selectionReasons.sticky ?? 0) / decided,
     };
 }

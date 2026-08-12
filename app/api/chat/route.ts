@@ -20,6 +20,13 @@ import {
 } from "@/lib/models";
 import { buildTaskProfile } from "@/lib/taskProfileCore";
 import { scheduleRoutingShadowRun } from "@/lib/routingShadow";
+import {
+    authoriseDispatch,
+    beginInstrumentedDispatch,
+    completeInstrumentedDispatch,
+    recordDispatched,
+    type DispatchInstrumentation,
+} from "@/lib/routingDispatchInstrumentation";
 import { getRuntimeModels } from "@/lib/modelRegistry";
 import { getActiveAiModel } from "@/lib/activeAiModel";
 import {
@@ -707,6 +714,11 @@ async function handleChatPost(
     // renewing a lease no request owns any more.
     let stopLeaseHeartbeat: (() => void) | null = null;
     let usageReservation: ChatUsageReservation | null = null;
+    // Hoisted so the outer catch can close the attempt. A provider that
+    // refuses the call leaves an attempt that was prepared and never
+    // dispatched, and an attempt stuck at `pending` is one the reliability
+    // numbers cannot classify.
+    let dispatchRecord: DispatchInstrumentation = null;
     let requestedModelIdForLog: string | undefined;
     let requestedProviderForLog: AiModel["provider"] | undefined;
     try {
@@ -2004,6 +2016,79 @@ async function handleChatPost(
         const webSearchToolConfig = nativeSearchEnabled
             ? buildWebSearchToolConfig(webSearchCapability)
             : null;
+        const generationSettings = getModelGenerationSettings(modelConfig);
+        // Delivery plan §5, applied to the manual path first. The user's own
+        // model choice is untouched; what is being measured is whether the
+        // §5 records can be produced at all, and what they cost, before Auto
+        // is allowed to dispatch anything on that machinery.
+        //
+        // The shape handed to the manifest is derived from the messages, never
+        // the messages: text becomes a keyed digest and a byte count, a file
+        // becomes its media type and size. lib/routingManifestContent.ts holds
+        // that, and its tests plant a name in a filename to prove it.
+        const manifestMessages = formattedMessages.map((message) => ({
+            role: message.role,
+            parts: Array.isArray(message.content)
+                ? message.content.map((part) =>
+                      part.type === "text"
+                          ? { type: "text" as const, text: part.text }
+                          : part.type === "file"
+                            ? {
+                                  type: "file" as const,
+                                  mediaType:
+                                      "mediaType" in part
+                                          ? part.mediaType
+                                          : undefined,
+                                  bytes:
+                                      "data" in part &&
+                                      typeof part.data === "string"
+                                          ? part.data.length
+                                          : 0,
+                              }
+                            : { type: "other" as const, label: part.type }
+                  )
+                : [{ type: "text" as const, text: String(message.content ?? "") }],
+        }));
+        dispatchRecord = await beginInstrumentedDispatch({
+            traceId,
+            userId: access.userId ?? null,
+            subjectKey: access.subjectKey,
+            plan: access.kind === "guest" ? "Guest" : (access.plan ?? "Free"),
+            modelId: modelConfig.id,
+            provider: modelConfig.provider,
+            messages: manifestMessages,
+            tokenizerVersion: ACTIVE_ESTIMATOR_VERSION,
+            tokenCount: budget.inputTokens,
+            // An unbounded budget means the model declares no window. The
+            // manifest still needs a number for its within-window CHECK, and
+            // the honest one is the request itself: a request cannot exceed a
+            // limit that was never stated, and recording a fabricated ceiling
+            // would make the check pass by inventing headroom.
+            contextWindowTokens:
+                outputBudget.kind === "fitted"
+                    ? outputBudget.limitTokens
+                    : budget.inputTokens + requestMaxOutputTokens,
+            estimatedInputTokens,
+            reservedInputTokens: budget.inputTokens,
+            requestOutputCapTokens: budget.maxOutputTokens,
+            reservationId: usageReservation?.reservationId ?? null,
+            conversationId: conversationId ?? null,
+        });
+        // §5 step 4: the effective request is only known once the adapter has
+        // assembled it, so the manifest is finalized here and not a line
+        // earlier -- a hash taken before this would describe something else.
+        dispatchRecord = await authoriseDispatch(dispatchRecord, {
+            modelId: modelConfig.id,
+            provider: modelConfig.provider,
+            maxOutputTokens: requestMaxOutputTokens,
+            settings: generationSettings as Record<string, unknown>,
+            toolConfig: webSearchToolConfig,
+            messages: manifestMessages,
+            // No Planner yet, and saying so is more honest than a version
+            // number for a stage that did not run.
+            plannerVersion: "none",
+            adapterVersion: "vercel-ai-sdk-streamText-v1",
+        });
         const result = await streamText({
             model: activeModel,
             messages: formattedMessages,
@@ -2013,9 +2098,13 @@ async function handleChatPost(
                 modelConfig.provider === "perplexity"
                     ? perplexityUsageHeaders(traceId)
                     : undefined,
-            ...getModelGenerationSettings(modelConfig),
+            ...generationSettings,
             ...(webSearchToolConfig ?? {}),
         });
+        // The provider call has been made. Recorded after the fact on purpose:
+        // the CHECK behind this refuses a dispatch with no finalized manifest,
+        // so the order here is the order the constraint enforces.
+        await recordDispatched(dispatchRecord);
 
         const sourceReader = result.textStream.getReader();
         // The stream owns the slot from here, but it cannot release anything
@@ -2096,6 +2185,30 @@ async function handleChatPost(
                         providerUsageSnapshot,
                     });
                     usageReservation = null;
+                    // One funnel for every terminal outcome, so cancellation,
+                    // stream failure and completion all reach the attempt
+                    // record by the same path the settlement takes. Hooking
+                    // each call site instead would mean the outcomes that are
+                    // hardest to reproduce are the ones most likely to be
+                    // missed.
+                    await completeInstrumentedDispatch(dispatchRecord, {
+                        outcome:
+                            outcome === "completed"
+                                ? "succeeded"
+                                : outcome === "cancelled"
+                                  ? "cancelled"
+                                  : "failed_post_token",
+                        failureLayer:
+                            outcome === "completed" || outcome === "cancelled"
+                                ? "none"
+                                : "stream",
+                        actualInputTokens:
+                            usage?.inputTokens ?? reservation.inputTokens,
+                        actualOutputTokens:
+                            usage?.outputTokens ?? estimatedGeneratedOutputTokens(),
+                        errorClass: outcome === "empty" ? "empty_response" : null,
+                        settlementOutcome: outcome,
+                    });
                 } catch (error) {
                     logRequestError(
                         "chat_usage_settlement_failed",
@@ -2702,6 +2815,21 @@ async function handleChatPost(
                 traceId,
                 reason: orphanedLease.reason,
             });
+        }
+        // The request failed before the stream owned it, so the attempt was
+        // prepared and never produced an answer. `failed_pre_token` rather
+        // than `not_dispatched`: this path is reached both before and after
+        // the provider call, and claiming nothing was sent when it may have
+        // been is the misrepresentation §5 forbids. Left `pending` it would be
+        // an attempt the reliability numbers cannot classify at all.
+        if (dispatchRecord) {
+            await completeInstrumentedDispatch(dispatchRecord, {
+                outcome: "failed_pre_token",
+                failureLayer: "provider",
+                errorClass: "request_failed",
+                settlementOutcome: "failed",
+            });
+            dispatchRecord = null;
         }
         if (usageReservation) {
             try {

@@ -186,6 +186,9 @@ run(
     "tests/integration/account-data-export.db.test.ts",
     "tests/integration/account-data-export-ticket.db.test.ts",
     "tests/integration/account-anonymisation.db.test.ts",
+    // §5's dispatch boundary: attempt-scoped manifests, and ROUTE-06.
+    "tests/integration/routing-attempt-manifest.db.test.ts",
+    "tests/integration/routing-dispatch-instrumentation.db.test.ts",
     // Whether an account an administrator put out of bounds is refused by
     // every paid AI path, not only by chat.
     "tests/integration/account-operational-restriction.db.test.ts",
