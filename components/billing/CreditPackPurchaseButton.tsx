@@ -283,6 +283,18 @@ export function CreditPackPurchaseButton({
   // Modal semantics: Escape closes, Tab cycles inside, focus returns to
   // whatever opened it. Without the trap a keyboard visitor tabbed straight
   // out of the dialog into the pricing page behind it and lost the purchase.
+  //
+  // Two effects, for the reason `useModalDialog` is also two: this one places
+  // focus on open and returns it on teardown, so anything in its dependency
+  // list that changes on a caller render moves focus twice for free. `setOpen`
+  // reads like a state setter and is not one -- it is
+  // `useCallback(..., [controlledOpen, onOpenChange])`, so a caller wiring
+  // `onOpenChange` inline would make it new on every render. This dialog opens
+  // inside `UsageLimitModal`, which sits inside `ChatInput`, and it is the
+  // dialog whose "first button is focused" assertion flipped the nightly on
+  // identical commits (runs 6 and 7 on 18d1e891). No caller passes
+  // `onOpenChange` today, which made it safe by accident rather than by
+  // construction.
   useEffect(() => {
     if (!open) return;
     if (!returnFocusRef.current?.isConnected) {
@@ -294,6 +306,19 @@ export function CreditPackPurchaseButton({
     const focusFrame = requestAnimationFrame(() => {
       closeButtonRef.current?.focus();
     });
+    return () => {
+      cancelAnimationFrame(focusFrame);
+      document.body.style.overflow = previousOverflow;
+      const returnTarget = returnFocusRef.current;
+      returnFocusRef.current = null;
+      requestAnimationFrame(() => {
+        if (returnTarget?.isConnected) returnTarget.focus({ preventScroll: true });
+      });
+    };
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
 
     const handleKeyDown = (event: KeyboardEvent) => {
       const dialog = dialogRef.current;
@@ -330,14 +355,7 @@ export function CreditPackPurchaseButton({
 
     document.addEventListener("keydown", handleKeyDown, true);
     return () => {
-      cancelAnimationFrame(focusFrame);
       document.removeEventListener("keydown", handleKeyDown, true);
-      document.body.style.overflow = previousOverflow;
-      const returnTarget = returnFocusRef.current;
-      returnFocusRef.current = null;
-      requestAnimationFrame(() => {
-        if (returnTarget?.isConnected) returnTarget.focus({ preventScroll: true });
-      });
     };
   }, [open, setOpen]);
 
