@@ -37,9 +37,25 @@ export function DeepResearchSetupSheet({
   const panelRef = useRef<HTMLDivElement | null>(null);
   const closeButtonRef = useRef<HTMLButtonElement | null>(null);
 
+  // Initial focus, keyed on `open` alone.
+  //
+  // It used to share an effect with the key handler below, which must depend
+  // on `onClose` -- and `ChatPageClient` passes
+  // `onClose={() => setIsDeepResearchSetupOpen(false)}`, a new function on
+  // every one of its renders. So every parent re-render while this sheet was
+  // open re-ran the effect and pulled focus back to the close button. Someone
+  // who had tabbed to the depth control found themselves back at Close, on no
+  // input of their own, whenever the chat behind the sheet re-rendered.
   useEffect(() => {
     if (!open) return;
     const frame = requestAnimationFrame(() => closeButtonRef.current?.focus());
+    return () => cancelAnimationFrame(frame);
+  }, [open]);
+
+  // Escape and the Tab cycle, which do need the current `onClose`. Swapping a
+  // listener moves no focus, so re-subscribing on every parent render is free.
+  useEffect(() => {
+    if (!open) return;
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
         event.preventDefault();
@@ -63,7 +79,6 @@ export function DeepResearchSetupSheet({
     };
     document.addEventListener("keydown", handleKeyDown);
     return () => {
-      cancelAnimationFrame(frame);
       document.removeEventListener("keydown", handleKeyDown);
     };
   }, [open, onClose]);

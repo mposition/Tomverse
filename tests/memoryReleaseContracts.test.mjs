@@ -63,6 +63,12 @@ const FORBIDDEN = [
     "bundleId",
     "retrievalHash",
     "knowledgeChunks",
+    // §13.4's disclosure is for the owner and only the owner. The count is
+    // admissible on the owner's own read of their conversation and nowhere
+    // else: to a viewer it would say the author personalises and by how much,
+    // which is precisely what §13.3's notice is worded to avoid.
+    "memoryUsedCount",
+    "memoryTokens",
 ];
 
 const validSnapshot = () => ({
@@ -253,6 +259,39 @@ test("a well-formed list revokes exactly what it names", () => {
         false,
         "a different prompt version is a different pair"
     );
+});
+
+/* ----------------------- §13.4 vs §13.3: who the count is selected for ---- */
+
+test("the memory count is selected for the owner's read and for no one else", () => {
+    // A source check, because what is being pinned is which *query* names the
+    // column. The three paths read the same table and differ only in who is
+    // on the other end, so the mistake this guards is copying a select from
+    // one to another for consistency -- which would hand a share viewer the
+    // number §13.3 spends a paragraph keeping away from them.
+    const read = (path) =>
+        readFileSync(new URL(path, import.meta.url), "utf8");
+
+    assert.ok(
+        read("../app/api/conversations/[conversationId]/route.ts").includes(
+            "memoryUsedCount: true"
+        ),
+        "the owner's conversation read must select memoryUsedCount (§13.4)"
+    );
+
+    for (const path of [
+        "../app/api/conversations/[conversationId]/share/route.ts",
+        "../app/api/conversations/export-all/route.ts",
+        "../app/api/public/shares/[shareToken]/route.ts",
+    ]) {
+        const source = read(path);
+        for (const column of ["memoryUsedCount", "memoryTokens"]) {
+            assert.ok(
+                !source.includes(column),
+                `${path} must not read ${column} (§13.3)`
+            );
+        }
+    }
 });
 
 /* ------------------------------------- §8.1 invariant 1: mode is read ----- */

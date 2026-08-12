@@ -45,6 +45,14 @@ export type RailwayInfrastructureSnapshot = {
 export type R2InfrastructureSnapshot = {
   status: InfrastructureStatus;
   message: string;
+  // Set when a probe fails. `*_USAGE_API_UNAVAILABLE` marks the transient
+  // third-party read failures that report as a warning instead of paging as a
+  // fatal outage; `*_API_ERROR` marks the ones an operator has to fix. Absent
+  // on the threshold warnings, which the message already explains.
+  warningReasons?: Array<{
+    code: string;
+    detail: string;
+  }>;
   bucketName: string | null;
   objectCredentialsConfigured: boolean;
   analyticsTokenConfigured: boolean;
@@ -76,6 +84,11 @@ export type DatabaseInfrastructureSnapshot = {
 export type PrismaUsageInfrastructureSnapshot = {
   status: InfrastructureStatus;
   message: string;
+  /** See `R2InfrastructureSnapshot.warningReasons`. */
+  warningReasons?: Array<{
+    code: string;
+    detail: string;
+  }>;
   tokenConfigured: boolean;
   databaseIdConfigured: boolean;
   operationsUsed: number | null;

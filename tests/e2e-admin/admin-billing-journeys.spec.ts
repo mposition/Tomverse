@@ -143,6 +143,63 @@ test.describe("billing journeys", () => {
     );
   });
 
+  test("approving a refund moves the account counters the console renders", async ({
+    page,
+  }) => {
+    // The KPI counters used to be served from `unstable_cache(..., {
+    // revalidate: 60, tags: ["admin-user-stats"] })` with nothing in the
+    // repository invalidating that tag. Six server-rendered admin pages read
+    // them, so an approved refund could reset a customer to Free and leave
+    // every one of those pages reporting the old figures -- with the console's
+    // own Refresh control unable to clear it, because the entry lived on the
+    // server and was keyed by tag rather than by request. `getAdminUserStats()`
+    // now queries on each render; this is what holds that open.
+    const database = adminFixtureDatabase();
+
+    // Two things make this fail if the cache comes back, rather than passing
+    // against an empty one:
+    //
+    //   1. an entry must already exist by the time the write lands. The visit
+    //      below creates one. Its value is deliberately not asserted -- a cache
+    //      outlives the per-test reseed, so it could hold an earlier test's
+    //      figures, which is the very staleness under test.
+    //   2. the value expected afterwards must be one no earlier entry could
+    //      hold. The padding accounts below put the count far outside the range
+    //      any other test in the suite produces, so a stale render cannot pass
+    //      by coincidence.
+    await page.goto("/admin/users");
+    await expect(page.getByRole("button", { name: /^Free access/ })).toBeVisible();
+
+    const PADDING_ACCOUNTS = 7;
+    await database.user.createMany({
+      data: Array.from({ length: PADDING_ACCOUNTS }, (_, index) => ({
+        id: `e2e-stats-padding-${index}`,
+        email: `stats.padding.${index}@customer-e2e.tomverse.invalid`,
+        plan: "Free",
+      })),
+    });
+
+    await page.goto("/admin/refunds");
+    const card = refundCard(page, FIXTURE_REFUNDS.pending.reason);
+    await card
+      .getByLabel(
+        "I reviewed purchased credit balance, used credits, and funded AI cost."
+      )
+      .check();
+    await card.getByRole("button", { name: "Approve" }).click();
+    await expect(page.getByRole("button", { name: "Pending 0" })).toBeVisible();
+    await expect(card).toHaveCount(0);
+
+    // The refund really did move its customer to Free, on top of the padding.
+    const freeAfter = await database.user.count({ where: { plan: "Free" } });
+    expect(freeAfter).toBe(PADDING_ACCOUNTS + 10);
+
+    await page.goto("/admin/users");
+    await expect(
+      page.getByRole("button", { name: /^Free access/ })
+    ).toHaveAccessibleName(new RegExp(`^Free access ${freeAfter}\\b`));
+  });
+
   test("a refund can be rejected without any credit acknowledgement", async ({
     page,
   }) => {
@@ -200,7 +257,7 @@ test.describe("billing journeys", () => {
   test("a promotion change is saved to the database and survives a reload", async ({
     page,
   }) => {
-    await page.goto("/admin/promotions");
+    await page.goto("/admin/billing?tab=promotions");
     const promotion = page
       .locator("article")
       .filter({ hasText: FIXTURE_PROMOTION.code });
@@ -237,7 +294,7 @@ test.describe("billing journeys", () => {
   test("a promotion with no discount at all is refused and nothing is written", async ({
     page,
   }) => {
-    await page.goto("/admin/promotions");
+    await page.goto("/admin/billing?tab=promotions");
     const promotion = page
       .locator("article")
       .filter({ hasText: FIXTURE_PROMOTION.code });

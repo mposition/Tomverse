@@ -472,6 +472,10 @@ const seedUser = async () => {
       finalizeIdempotencyKey: sentinel("externalImport-finalizeIdempotencyKey"),
     },
   });
+  // Unlocked, deliberately: this is the conversation whose content the user is
+  // owed, and §13.2 withholds a locked one's title and messages entirely. The
+  // locked sibling below carries the password sentinel instead, so both halves
+  // of the rule are covered -- what is exported, and what is not.
   const externalConversation = await prisma.externalConversation.create({
     data: {
       userId,
@@ -481,10 +485,40 @@ const seedUser = async () => {
       messageCount: 1,
       contentBytes: BigInt(64),
       digestVersion: 1,
-      // The lock the user set, and reconciliation digests.
-      password: sentinel("externalConversation-password"),
+      // Reconciliation digests, withheld as internals.
       conversationDigest: sentinel("externalConversation-conversationDigest"),
       externalStableId: sentinel("externalConversation-externalStableId"),
+    },
+  });
+
+  // The locked half of §13.2. Its password must never reach the file -- a copy
+  // is an offline attack on the one secret this table holds -- and neither may
+  // its title or its messages, which is what the two sentinels below assert
+  // without any test having to name the rule.
+  const lockedConversation = await prisma.externalConversation.create({
+    data: {
+      userId,
+      importId: externalImport.id,
+      provider: "chatgpt",
+      title: sentinel("externalConversation-lockedTitle"),
+      messageCount: 1,
+      contentBytes: BigInt(64),
+      digestVersion: 1,
+      password: sentinel("externalConversation-password"),
+      conversationDigest: sentinel("externalConversation-lockedDigest"),
+      externalStableId: sentinel("externalConversation-lockedStableId"),
+    },
+  });
+  await prisma.externalMessage.create({
+    data: {
+      userId,
+      externalConversationId: lockedConversation.id,
+      role: "user",
+      content: sentinel("externalMessage-lockedContent"),
+      ordinal: 0,
+      digestVersion: 1,
+      externalStableId: sentinel("externalMessage-lockedStableId"),
+      contentDigest: sentinel("externalMessage-lockedDigest"),
     },
   });
   await prisma.externalMessage.create({
@@ -643,4 +677,136 @@ test("the manifest names what is missing and why", async () => {
     manifest.undecidedDomains.length,
     EXPORT_DOMAIN_DECLARATIONS.filter((d) => d.state === "unverified").length
   );
+});
+
+// ---------------------------------------------------------------------------
+// Imported conversations, and the lock that has to survive the download.
+//
+// Policy §13.2, as #427 applied it to the memory export: a locked source
+// leaves the account as existence metadata and nothing more. The reasoning
+// carries here and gets sharper. A snapshot lock is a password the owner set
+// on their own conversation; the review screen honours it by refusing the page
+// with 423, but an export is a file, and a title inside one outlives the lock
+// entirely. Whoever holds the session can ask for an export -- and the lock
+// exists precisely because holding the session is not meant to be enough.
+// ---------------------------------------------------------------------------
+
+// The lock tests below count rows per domain, so they cannot run against the
+// everything-is-populated fixture above -- `seedUser` seeds its own imported
+// conversations, and a count of "1" would then mean "1 plus whatever the
+// fixture brought". They get a bare account and seed exactly what they assert.
+const seedBareUser = async () => {
+  const user = await prisma.user.create({
+    data: { email: `${randomUUID()}@example.test`, name: "Lock Subject", plan: "Pro" },
+  });
+  return user.id;
+};
+
+const seedImport = async (userId: string, locked: boolean) => {
+  const importRow = await prisma.externalImport.create({
+    data: {
+      userId,
+      provider: "chatgpt",
+      status: "completed",
+      digestVersion: 1,
+      parserVersion: sentinel("externalImport-parserVersion"),
+      importDigest: sentinel("externalImport-importDigest"),
+      clientFingerprint: sentinel("externalImport-clientFingerprint"),
+      finalizeIdempotencyKey: sentinel("externalImport-finalizeIdempotencyKey"),
+      lastBatchDigest: sentinel("externalImport-lastBatchDigest"),
+      conversationCount: 1,
+      messageCount: 1,
+    },
+  });
+  const conversation = await prisma.externalConversation.create({
+    data: {
+      userId,
+      importId: importRow.id,
+      provider: "chatgpt",
+      externalStableId: randomUUID().replaceAll("-", ""),
+      title: locked ? sentinel("externalConversation-lockedTitle") : "An open import",
+      conversationDigest: sentinel("externalConversation-conversationDigest"),
+      digestVersion: 1,
+      messageCount: 1,
+      contentBytes: BigInt(64),
+      finalized: true,
+      // The scrypt hash of the owner's lock password. A copy of it in a
+      // downloadable file is an offline attack on the one secret here.
+      ...(locked ? { password: sentinel("externalConversation-password") } : {}),
+    },
+  });
+  const content = locked
+    ? sentinel("externalMessage-lockedContent")
+    : "the words of an unlocked import, which the user does receive";
+  await prisma.externalMessage.create({
+    data: {
+      userId,
+      externalConversationId: conversation.id,
+      externalStableId: randomUUID().replaceAll("-", ""),
+      role: "user",
+      content,
+      contentDigest: sentinel("externalMessage-contentDigest"),
+      digestVersion: 1,
+      ordinal: 0,
+    },
+  });
+  return { importId: importRow.id, conversationId: conversation.id };
+};
+
+const domainRows = (data: Record<string, unknown>, publicName: string) =>
+  (data[publicName] as Array<Record<string, unknown>>) || [];
+
+test("an unlocked import is exported with its title and its messages", async () => {
+  const userId = await seedBareUser();
+  await seedImport(userId, false);
+  const { data } = await buildAccountDataExport(userId);
+
+  const conversations = domainRows(data, "imported_conversations");
+  assert.equal(conversations.length, 1);
+  assert.equal(conversations[0].title, "An open import");
+  assert.equal(conversations[0].locked, false);
+
+  const messages = domainRows(data, "imported_messages");
+  assert.equal(messages.length, 1);
+  assert.match(String(messages[0].content), /the words of an unlocked import/);
+
+  // The import event itself is the user's record of what they uploaded.
+  const imports = domainRows(data, "imports");
+  assert.equal(imports.length, 1);
+  assert.equal(imports[0].provider, "chatgpt");
+  assert.equal(imports[0].conversationCount, 1);
+});
+
+test("a locked import is reduced to existence metadata", async () => {
+  const userId = await seedBareUser();
+  await seedImport(userId, true);
+  const { data } = await buildAccountDataExport(userId);
+
+  const conversations = domainRows(data, "imported_conversations");
+  assert.equal(conversations.length, 1, "the row is still listed");
+  assert.equal(conversations[0].locked, true);
+  // Existence metadata is the whole of it. A title, a count or a source
+  // timestamp each describes the thing the lock is hiding.
+  assert.equal(conversations[0].title, undefined);
+  assert.equal(conversations[0].messageCount, undefined);
+  assert.equal(conversations[0].sourceCreatedAt, undefined);
+  assert.ok(conversations[0].importedAt, "when it arrived is not what the lock hides");
+
+  // And none of its content leaves at all.
+  assert.deepEqual(domainRows(data, "imported_messages"), []);
+});
+
+test("a lock on one conversation does not withhold another", async () => {
+  // The filter has to be per conversation. A single locked import silently
+  // emptying the whole domain would be a data-loss bug wearing a privacy
+  // fix's clothes.
+  const userId = await seedBareUser();
+  await seedImport(userId, true);
+  await seedImport(userId, false);
+  const { data } = await buildAccountDataExport(userId);
+
+  assert.equal(domainRows(data, "imported_conversations").length, 2);
+  const messages = domainRows(data, "imported_messages");
+  assert.equal(messages.length, 1);
+  assert.match(String(messages[0].content), /unlocked import/);
 });

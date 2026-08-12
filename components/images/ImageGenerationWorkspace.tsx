@@ -269,6 +269,13 @@ export function ImageGenerationWorkspace({
   const hasActiveGeneration = generations.some(
     (generation) => !isTerminal(generation.status)
   );
+  // How many models the running comparison is waiting on. Counted by target,
+  // not by attempt: a retried target is one card still working, not two.
+  const activeTargetCount = new Set(
+    generations
+      .filter((generation) => !isTerminal(generation.status))
+      .map((generation) => generation.targetId ?? generation.generationId)
+  ).size;
 
   const mergeGeneration = useCallback(
     (incoming: GenerationView, options?: { refreshAssets?: boolean }) => {
@@ -1133,25 +1140,46 @@ export function ImageGenerationWorkspace({
               </span>
             )}
             <span className="min-w-0 flex-1" />
+            {/*
+              While a comparison is running the button IS the progress: a
+              separate sentence beside a button that still reads "Generate" at
+              full contrast said the same thing twice and left it ambiguous
+              whether the button could be clicked. The sentence stays in the
+              accessibility tree -- the same idiom the comparison action rail
+              uses -- because a screen reader gets no signal from a spinner.
+            */}
             {hasActiveGeneration && (
-              <span className="text-[11px] font-medium text-zinc-500 dark:text-zinc-400">
+              <span
+                data-testid="image-generation-busy-status"
+                className="sr-only"
+                role="status"
+              >
                 {t("chat.imageGenerationBusy")}
               </span>
             )}
             <button
               type="button"
               data-testid="image-generation-submit"
+              data-generating={hasActiveGeneration ? "true" : "false"}
               onClick={() => void handleSubmit()}
               disabled={!canSubmit}
               className="inline-flex min-h-10 items-center gap-2 rounded-xl bg-accent-image-600 px-4 py-2 text-sm font-bold text-white transition hover:bg-accent-image-500 disabled:cursor-not-allowed disabled:opacity-50"
             >
-              {isSubmitting ? (
+              {isSubmitting || hasActiveGeneration ? (
                 <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
               ) : (
                 <Sparkles className="h-4 w-4" aria-hidden="true" />
               )}
-              {t("chat.imageGenerationGenerate")}
-              {totalCredits > 0 && (
+              {hasActiveGeneration
+                ? interpolateCopy(t("chat.imageGenerationGeneratingModels"), {
+                    count: activeTargetCount,
+                  })
+                : t("chat.imageGenerationGenerate")}
+              {/*
+                The price belongs to a request the user can still start. While
+                one is running it describes nothing on screen.
+              */}
+              {!hasActiveGeneration && totalCredits > 0 && (
                 <CreditCostBadge
                   credits={totalCredits}
                   size="xs"

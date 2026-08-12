@@ -86,6 +86,24 @@ export type ImageModelProfile = {
   /** MIME types the adapter may store unmodified. */
   outputMimeTypes: readonly string[];
   /**
+   * What to ask the provider to deliver, when its API takes that as a request
+   * parameter.
+   *
+   * Deliberately NOT `outputMimeTypes[0]`. That list is the *storage*
+   * allowlist -- what the adapter may write down unmodified -- and reading it
+   * as a request preference is how every Google request went out asking for
+   * PNG, which its API rejects outright:
+   *
+   *   "The value 'image/png' is not supported for
+   *    'response_format.mime_type'. Supported values: 'image/jpeg'."
+   *   (observed from the API itself, 2026-08-06)
+   *
+   * A request, never an assumption: the response's own MIME is still what
+   * gets recorded, and the storage allowlist stays as permissive as the
+   * provider's documented outputs.
+   */
+  deliveryMimeType?: string;
+  /**
    * The version of *this model's* price list.
    *
    * Per model rather than one global string, because a global one splits every
@@ -215,6 +233,9 @@ const GOOGLE_GEMINI_31_FLASH_IMAGE: ImageModelProfile = {
   latencyClass: "fast",
   provenance: ["synthid"],
   outputMimeTypes: ["image/png", "image/jpeg"],
+  // The only value its API accepts for response_format.mime_type,
+  // established by the API rejecting image/png on 2026-08-06.
+  deliveryMimeType: "image/jpeg",
   pricingVersion: "google-gemini-3-1-flash-image-2026-08-04-v1",
   // The model card's own output limit, sent on every request. It bounds
   // what is asked for; whether it also bounds hidden thinking is the open
@@ -331,6 +352,9 @@ const GOOGLE_GEMINI_31_FLASH_LITE_IMAGE: ImageModelProfile = {
   // the other two do not.
   provenance: ["synthid", "c2pa"],
   outputMimeTypes: ["image/png", "image/jpeg"],
+  // The only value its API accepts for response_format.mime_type,
+  // established by the API rejecting image/png on 2026-08-06.
+  deliveryMimeType: "image/jpeg",
   pricingVersion: "google-gemini-3-1-flash-lite-image-2026-08-04-v1",
   // The model card's own output limit, sent on every request. It bounds
   // what is asked for; whether it also bounds hidden thinking is the open
@@ -371,6 +395,9 @@ const GOOGLE_GEMINI_3_PRO_IMAGE: ImageModelProfile = {
   latencyClass: "slow",
   provenance: ["synthid"],
   outputMimeTypes: ["image/png", "image/jpeg"],
+  // The only value its API accepts for response_format.mime_type,
+  // established by the API rejecting image/png on 2026-08-06.
+  deliveryMimeType: "image/jpeg",
   pricingVersion: "google-gemini-3-pro-image-2026-08-04-v1",
   // The model card's own output limit, sent on every request. It bounds
   // what is asked for; whether it also bounds hidden thinking is the open
@@ -421,6 +448,18 @@ export const shouldUseCompactImageModelPicker = (
   enabledModelCount: number
 ): boolean =>
   enabledModelCount > IMAGE_INLINE_MODEL_DISCOVERY_LIMIT;
+
+/**
+ * What to ask a provider to deliver for this model.
+ *
+ * One function rather than the expression written at each call site: the
+ * adapter and the thinking-cap measurement script both build a Google request,
+ * and when the adapter learned that Google only accepts `image/jpeg` the script
+ * kept asking for PNG -- so the next measurement run would have failed exactly
+ * as the first one did, for a reason already fixed.
+ */
+export const imageDeliveryMimeType = (model: ImageModelProfile): string =>
+  model.deliveryMimeType ?? model.outputMimeTypes[0] ?? "image/png";
 
 /** The composer's visual label for a model; identity stays `name`. */
 export const imageModelChipLabel = (model: ImageModelProfile): string =>

@@ -680,7 +680,7 @@ mini로 생성된 것이라면, 둘 중 하나만 허용됩니다.
    승인이 아무리 완전해도 쓰지 않습니다.** 스스로 도는 reconciliation은 은퇴를
    결정하기도 전에 모든 계정의 저장된 모델을 옮깁니다. 판정은
    `lib/reconciliationApprovalCore.ts`(순수)에 있고
-   `tests/reconciliationApprovalCore.test.mjs`가 전체 matrix를 검증하며, 같은
+   `tests/reconciliationApprovalCore.test.ts`가 전체 matrix를 검증하며, 같은
    테스트가 **저장소 안의 어떤 스크립트·workflow·package script도 이 명령을
    스스로 실행하지 않는지** 확인합니다.
 

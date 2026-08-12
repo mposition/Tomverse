@@ -498,6 +498,10 @@ export function AuthButton({
     }, []);
 
     const handleAddOAuthLoginMethod = useCallback((provider: "google" | "azure-ad") => {
+        // Not a page navigation: the route answers with a 302 to the identity
+        // provider, so the OAuth handshake needs a real document load. A
+        // router push would keep the user on this page.
+        // eslint-disable-next-line @next/next/no-location-assign-relative-destination
         window.location.href = `/api/user/login-methods/oauth/start?provider=${provider}`;
     }, []);
 
@@ -1780,6 +1784,10 @@ export function AuthButton({
                                             <button
                                                 type="button"
                                                 onClick={() => {
+                                                    // Not a page navigation: the route answers with a
+                                                    // file download, so the browser saves the response
+                                                    // and this page stays mounted.
+                                                    // eslint-disable-next-line @next/next/no-location-assign-relative-destination
                                                     window.location.href = "/api/conversations/export-all";
                                                 }}
                                                 disabled={accountUsage?.limits.allowDownloads === false}

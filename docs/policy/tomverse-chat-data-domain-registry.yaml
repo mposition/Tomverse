@@ -379,6 +379,30 @@ domains:
       what makes deletion immediate rather than eventual: the userId column is
       non-null and carries no relation, so nothing else would remove it.
 
+  - domain: routingRun
+    prismaModel: RoutingRun
+    # The row describes the person whose request was routed, not an operator
+    # who wrote it about someone else -- same reading as ProductAnalyticsEvent,
+    # and the reason the cascade below is the whole obligation.
+    userLinkageRole: subject
+    owner: security-privacy
+    deletionAction: delete
+    deletionMechanism: cascade_from_user
+    retentionPolicy: immediate
+    implementationStatus: implemented
+    inUnifiedExport: excluded
+    note: >-
+      Shadow routing telemetry (docs/policy/tomverse-chat-routing.md §5): the
+      model the Router would have chosen, beside the one that actually ran, as
+      versions, labels and counts. Cascade rather than SetNull, deliberately.
+      subjectKey and traceId would still name the person after a null userId,
+      so a surviving row would be a half-anonymisation this registry would have
+      to carry as a gap -- and a new telemetry table has no claim on outliving
+      its subject. Shadow evaluation is an aggregate, so losing the rows of
+      accounts that delete is a sampling effect rather than a hole. A guest run
+      carries no userId and is untouched, which is why the column stays
+      nullable.
+
   # --- anonymised at deletion, implemented ----------------------------------
   - domain: feedback
     prismaModel: Feedback

@@ -37,7 +37,11 @@
 //     prompts complex enough to provoke thinking, and its JSON kept as
 //     evidence.
 
-import { getImageModel, IMAGE_MODEL_REGISTRY } from "../lib/imageModelRegistry.ts";
+import {
+  getImageModel,
+  imageDeliveryMimeType,
+  IMAGE_MODEL_REGISTRY,
+} from "../lib/imageModelRegistry.ts";
 import {
   buildGoogleImageRequest,
   googleBillableOutputTokens,
@@ -56,6 +60,36 @@ const value = (name) => {
 const googleModels = IMAGE_MODEL_REGISTRY.filter(
   (model) => model.provider === "google"
 );
+
+// `npm run <script> --model=x` without the `--` separator makes npm treat the
+// flags as its own config and pass the script nothing. That used to fall
+// through to the help text, which reads as "you forgot the arguments" to
+// someone who did not -- and this is a script people run having just arranged
+// to spend money. npm records what it swallowed in npm_config_*, so the
+// mistake is detectable and worth naming.
+const swallowedByNpm = ["model", "limit", "repeats", "thinking", "prompt"]
+  .filter((name) => process.env[`npm_config_${name}`] !== undefined);
+
+if (args.length === 0 && swallowedByNpm.length > 0) {
+  console.error(
+    [
+      "npm consumed the arguments instead of passing them on:",
+      ...swallowedByNpm.map((name) => `  --${name}`),
+      "",
+      "`npm run` needs `--` before the script's own flags:",
+      "",
+      "  npm run measure:google-image-thinking-cap -- --model=... --limit=...",
+      "",
+      "Or skip npm entirely:",
+      "",
+      "  node --conditions=react-server --import tsx \\",
+      "    scripts/measure-google-image-thinking-cap.mjs --model=... --limit=...",
+      "",
+      "Nothing was sent.",
+    ].join("\n")
+  );
+  process.exit(1);
+}
 
 if (flag("help") || args.length === 0) {
   console.log(
@@ -133,7 +167,9 @@ const body = buildGoogleImageRequest({
   size: "1024x1024",
   maxOutputTokens: limit,
   thinkingLevel: thinkingLevel ?? model.thinkingLevel ?? null,
-  deliveryMimeType: model.outputMimeTypes[0] ?? "image/png",
+  // Through the shared helper, so this measures the request the adapter
+  // would actually make rather than one that drifted away from it.
+  deliveryMimeType: imageDeliveryMimeType(model),
 });
 if (!body) {
   console.error("The request builder refused these parameters.");
@@ -161,7 +197,12 @@ if (!flag("i-accept-the-cost")) {
  */
 const redact = (text) =>
   String(text)
-    .replace(/AIza[A-Za-z0-9_-]{10,}/g, "[redacted-api-key]")
+    // Google issues more than one key shape (`AIza...`, `AQ....`), so the
+    // pattern is a backstop for keys OTHER than the one in hand -- the exact
+    // value is replaced below regardless, which is what actually guarantees
+    // this output can be pasted into a ticket.
+    .replace(/\bAIza[A-Za-z0-9_-]{10,}/g, "[redacted-api-key]")
+    .replace(/\bAQ\.[A-Za-z0-9_-]{10,}/g, "[redacted-api-key]")
     .replace(new RegExp(apiKey.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "g"), "[redacted-api-key]");
 
 const { createHash } = await import("node:crypto");

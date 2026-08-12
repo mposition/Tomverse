@@ -180,7 +180,21 @@ export type TokenEstimateBreakdown = {
   nonCjkBytes: number;
   /** Raw, unpadded tokens contributed by each segment. */
   tokensBySegment: Record<EstimateSegment, number>;
-  /** Sum of the segment terms. This is the value ESTIMATE-01/02 grade. */
+  /**
+   * Tokens counted without reading any text: attachment estimates, a tool
+   * schema's flat cost, the fixed allowance a prompt template adds.
+   *
+   * Held apart from the segments because the reservation margins model
+   * *tokenizer* error, and there is no tokenizer prediction here to be wrong.
+   * Widening an image-tile count by a coefficient measured on Korean prose
+   * would be a category error, so these are reserved at face value -- see
+   * `toReservedInputTokens`.
+   */
+  opaqueTokens: number;
+  /**
+   * Sum of the segment terms and the opaque tokens. This is the value
+   * ESTIMATE-01/02 grade.
+   */
   rawTotal: number;
 };
 
@@ -202,6 +216,7 @@ export const estimateTokenBreakdown = (
       hanKanaCharacters: 0,
       nonCjkBytes: 0,
       tokensBySegment: { hangul: 0, hanKana: 0, nonCjk: 0 },
+      opaqueTokens: 0,
       rawTotal: 0,
     };
   }
@@ -224,9 +239,88 @@ export const estimateTokenBreakdown = (
     hanKanaCharacters,
     nonCjkBytes,
     tokensBySegment,
+    opaqueTokens: 0,
     rawTotal: tokensBySegment.hangul + tokensBySegment.hanKana + tokensBySegment.nonCjk,
   };
 };
+
+/**
+ * Builds one request's breakdown from the pieces a caller actually has.
+ *
+ * Every reservation surface assembles its total the same way: some text (the
+ * prompt, the history, a rendered template) plus some counts that were never
+ * text at all (attachment estimates, a flat template allowance). Summing those
+ * into a bare number was what forced `toReservedInputTokens` to guess which
+ * margin applied -- the segment mix is exactly what the sum threw away.
+ *
+ * Accumulating instead keeps it. `addText` contributes real segment counts;
+ * `addTokens` contributes opaque tokens that stay opaque.
+ */
+export type TokenEstimateAccumulator = {
+  addText: (text: string) => TokenEstimateAccumulator;
+  /** A count that did not come from reading text. Never widened. */
+  addTokens: (tokens: number) => TokenEstimateAccumulator;
+  breakdown: () => TokenEstimateBreakdown;
+};
+
+export const createTokenEstimateAccumulator = (
+  version: string = ACTIVE_ESTIMATOR_VERSION
+): TokenEstimateAccumulator => {
+  const calibration = getCalibration(version);
+  const totals: TokenEstimateBreakdown = {
+    version: calibration.version,
+    hangulCharacters: 0,
+    hanKanaCharacters: 0,
+    nonCjkBytes: 0,
+    tokensBySegment: { hangul: 0, hanKana: 0, nonCjk: 0 },
+    opaqueTokens: 0,
+    rawTotal: 0,
+  };
+
+  const accumulator: TokenEstimateAccumulator = {
+    addText: (text) => {
+      if (!text) return accumulator;
+      const part = estimateTokenBreakdown(text, version);
+      totals.hangulCharacters += part.hangulCharacters;
+      totals.hanKanaCharacters += part.hanKanaCharacters;
+      totals.nonCjkBytes += part.nonCjkBytes;
+      // Per piece rather than once over the concatenation. The two differ:
+      // each segment term is rounded up, so summing rounds more often. Erring
+      // upward is the right direction for a reservation, and it is also what
+      // the surfaces already did by adding their pieces together.
+      for (const segment of ["hangul", "hanKana", "nonCjk"] as const) {
+        totals.tokensBySegment[segment] += part.tokensBySegment[segment];
+      }
+      totals.rawTotal += part.rawTotal;
+      return accumulator;
+    },
+    addTokens: (tokens) => {
+      if (!Number.isFinite(tokens) || tokens <= 0) return accumulator;
+      const whole = Math.ceil(tokens);
+      totals.opaqueTokens += whole;
+      totals.rawTotal += whole;
+      return accumulator;
+    },
+    breakdown: () => ({
+      ...totals,
+      tokensBySegment: { ...totals.tokensBySegment },
+    }),
+  };
+  return accumulator;
+};
+
+/**
+ * The `Math.max(1, ...)` every reservation surface applied to its total, kept
+ * as a breakdown operation so the floor does not silently become a segment
+ * token. `createChatBudget` refuses a non-positive estimate, and an empty
+ * prompt with no attachments really does estimate to zero.
+ */
+export const atLeastOneToken = (
+  breakdown: TokenEstimateBreakdown
+): TokenEstimateBreakdown =>
+  breakdown.rawTotal > 0
+    ? breakdown
+    : { ...breakdown, opaqueTokens: breakdown.opaqueTokens + 1, rawTotal: 1 };
 
 /**
  * Unbiased prediction of the prompt tokens one piece of text will produce.
@@ -296,13 +390,12 @@ export const toReservedInputTokens = (
   // over-reservation costs the user nothing while a short one is a request
   // that ran on credits nobody held.
   //
-  // Identity under `generic_multilingual_v1`, whose margins are all 1, so this
-  // path is byte-identical to the raw total today. It exists so a caller that
-  // cannot yet supply a breakdown -- `createChatBudget`, which takes a token
-  // count and is reached from eight call sites -- is not silently exempted
-  // from the margin once a calibration with real margins goes active. Threading
-  // the breakdown through those callers is the fix; this is the floor until
-  // then.
+  // Nothing in the application reaches this branch any more -- every
+  // reservation surface builds a breakdown with
+  // `createTokenEstimateAccumulator` -- and `tests/chatBudgetBreakdown.test.mjs`
+  // holds that true. It stays as the floor for a caller that arrives later
+  // with a bare number, so the failure mode is over-reserving rather than
+  // silently escaping the margin.
   const widened = isBreakdown
     ? segments.reduce(
         (total, segment) =>
@@ -313,5 +406,10 @@ export const toReservedInputTokens = (
         estimate * Math.max(...segments.map((segment) => reservationMultiplierBySegment[segment]))
       );
 
-  return widened + reservationFramingOverheadTokens + toolOverheadTokens;
+  // Opaque tokens are added at face value. The multipliers above correct for
+  // tokenizer prediction error, and an attachment estimate or a flat template
+  // allowance carries none -- there was no text to mispredict.
+  const opaque = isBreakdown ? estimate.opaqueTokens : 0;
+
+  return widened + opaque + reservationFramingOverheadTokens + toolOverheadTokens;
 };

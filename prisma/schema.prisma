@@ -83,6 +83,7 @@ model User {
   externalImports                    ExternalImport[]
   memoryItems                        MemoryItem[]
   memoryExtractionRuns               MemoryExtractionRun[]
+  routingRuns                        RoutingRun[]
   memorySettings                     UserMemorySettings?
   accountDataExportRequests          AccountDataExportRequest[]
 
@@ -2333,6 +2334,84 @@ model ChatContextBundleConsumption {
   createdAt DateTime @default(now())
 
   @@index([expiresAt])
+  @@index([userId, createdAt])
+}
+
+/// One logical assistant response, as the Router saw it
+/// (docs/policy/tomverse-chat-routing.md §5).
+///
+/// `mode` is the discriminator rather than a second table. Today every row is
+/// `shadow`: the rules ran, the decision was recorded, and the user's own
+/// model selection is what actually executed. When routing becomes
+/// authoritative the same row grows attempts and a settlement outcome, and the
+/// mode says which kind of record it is -- a partially filled row that looked
+/// like a complete one is the failure this column prevents.
+///
+/// Content-free by construction (§2: raw effective prompts are not copied into
+/// routing telemetry). Every column is a version, an identifier, a count or a
+/// label; there is no message text, no memory content and no message id.
+model RoutingRun {
+  id         String   @id @default(cuid())
+  createdAt  DateTime @default(now())
+  /// `shadow` while the user's selection stays authoritative.
+  mode       String   @default("shadow")
+  traceId    String
+  /// Set for a signed-in account; a guest run carries only its subject key.
+  ///
+  /// Cascades. `subjectKey` and `traceId` would still name the person after a
+  /// SetNull, so keeping the row would be a half-anonymisation the privacy
+  /// registry has to carry as a gap. A brand-new telemetry table has no claim
+  /// on surviving its subject: shadow evaluation is an aggregate, and losing
+  /// the rows of accounts that delete is a sampling effect rather than a hole.
+  userId     String?
+  user       User?    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  subjectKey String
+  plan       String
+
+  /// The versions a decision must be attributable to.
+  taskProfileVersion     String
+  candidateFilterVersion String
+  selectionVersion       String
+  estimatorVersion       String
+
+  /// The task profile, as labels and booleans.
+  profileKind             String
+  profileConfidence       String
+  needsCurrentInformation Boolean
+  hasImageInput           Boolean
+  hasDocumentInput        Boolean
+  expectedOutputLength    String
+
+  /// What the turn was sized at. `reservedInputTokens` includes tool
+  /// overhead, and `requestOutputCapTokens` is the cap *before* it is fitted to
+  /// any one model's window -- the filters fit it per candidate, so storing an
+  /// already-fitted figure would record the user's model's answer to a question
+  /// asked of every candidate.
+  estimatedInputTokens   Int
+  reservedInputTokens    Int
+  requestOutputCapTokens Int
+
+  /// The candidate set, as counts. `rejectedByReason` maps a fixed rejection
+  /// identifier to how many models it refused -- never which request it was.
+  eligibleCount    Int
+  rejectedByReason Json
+
+  /// What the Router would have chosen, and why. Null when nothing was
+  /// eligible, which is a result rather than a missing value.
+  selectedModelId String?
+  selectionReason String
+  selectionMargin Int
+
+  /// What actually ran. The comparison between this and `selectedModelId` is
+  /// the whole point of a shadow run, and it is derived at read time rather
+  /// than stored so the two can never disagree.
+  userSelectedModelId String
+
+  /// How long the decision itself took, in microseconds.
+  decisionMicros Int
+
+  @@index([createdAt])
+  @@index([mode, createdAt])
   @@index([userId, createdAt])
 }
 

@@ -210,8 +210,17 @@ const checks = [
         decisions.includes("subjectKey") &&
         !decisions.includes("promptText") &&
         // A reset instant handed to a blocked user is always in the future.
+        // The record side has always been guarded; so is the response side,
+        // at the one exit point every ChatAccessError passes through, which
+        // re-checks the instant against the moment the response is built.
         decisions.includes("futureResetAt") &&
-        source.includes("safeDailyResetAt")
+        decisions.includes("withFutureResetAt") &&
+        source.includes("withFutureResetAt(details, now)") &&
+        // Daily boundaries come from a stored time zone and can go stale, so
+        // they reach the caller rolled forward rather than raw -- the same
+        // instant the decision record carries.
+        source.includes("safeDailyResetAt") &&
+        !/resetAt:\s*\w*[Dd]ayWindow\.end\.toISOString\(\)/.test(source)
       );
     },
   },
@@ -557,6 +566,32 @@ const checks = [
     },
   },
   {
+    // The concurrency slot is released deterministically on every unwind, not
+    // left to a TTL (docs/policy/chat-concurrency-and-identity.md). Ownership
+    // moves once, at the source reader, and the stream cannot free anything
+    // until it is pulled -- which only happens once the Response is returned.
+    // Anything that throws in between leaves a slot nobody will ever free, and
+    // its owner is told a response is already being generated until it lapses.
+    name: "A stream that is never published still frees its concurrency slot",
+    file: "app/api/chat/route.ts",
+    test: (source) => {
+      const ownership = read("lib/chatLeaseOwnershipCore.ts");
+      return (
+        // The failure path asks who holds the slot, rather than reading "the
+        // request no longer holds it" as "someone else will free it".
+        source.includes("chatLeaseToReleaseOnUnwind(leaseOwnership)") &&
+        source.includes("reason: orphanedLease.reason") &&
+        !source.includes('reason: "request_failed_before_stream",') &&
+        // Published after the Response is constructed, so a throw while
+        // building it still unwinds through the branch above.
+        /const response = new Response\([\s\S]{0,600}?chatLeaseStreamPublished\(leaseOwnership\);\s*\n\s*return response;/.test(
+          source
+        ) &&
+        ownership.includes('reason: "stream_never_started"')
+      );
+    },
+  },
+  {
     // A plan change moves money and credits, and only one of them was quoted.
     // The credit arithmetic has one home (lib/planChangeCredits.ts) so the
     // preview and the steady-state balance cannot drift; nothing imported it.
@@ -621,7 +656,12 @@ const checks = [
     name: "The chat budget derives its reserved input from the active calibration",
     file: "lib/chatSecurity.ts",
     test: (source) =>
-      source.includes("toReservedInputTokens(estimatedInputTokens") &&
+      // `estimatedInput`, not `estimatedInputTokens`: the reservation is
+      // computed from the whole breakdown, because the calibration widens each
+      // character segment by its own margin. Passing the flattened total here
+      // would be the same skip this check exists to catch -- it would silently
+      // fall back to the largest margin for every request.
+      source.includes("toReservedInputTokens(estimatedInput,") &&
       source.includes("toolOverheadTokens: estimateToolInputTokenOverhead"),
   },
   {
@@ -660,12 +700,36 @@ const checks = [
       source.includes("memoryExtractionProviderCalls"),
   },
   {
+    // The retention sweeps are independent, and awaiting them bare meant the
+    // first to throw skipped every one behind it -- on every run, since a step
+    // that fails for a persistent reason fails again tomorrow. The step that
+    // deletes accounts past their 30-day grace period is fifth in the order.
+    name: "Retention cleanup steps run in isolation and report which failed",
+    file: "lib/maintenance.ts",
+    test: (source) =>
+      source.includes("createMaintenanceStepRunner") &&
+      source.includes("failedSteps: failures") &&
+      source.includes('step("scheduled_account_deletions"'),
+  },
+  {
+    // Isolation must not turn a partial failure into a silent success: the
+    // alert has to fire and the run has to be recorded failed.
+    name: "A failed retention step still fails the scheduled job",
+    file: "app/api/internal/maintenance/cleanup/route.ts",
+    test: (source) =>
+      source.includes("deleted.failedSteps.length > 0") &&
+      source.includes("failScheduledJob") &&
+      source.includes("SCHEDULED_MAINTENANCE_CLEANUP_STEP_FAILED"),
+  },
+  {
     name: "Provider error events expire through maintenance cleanup",
     file: "lib/maintenance.ts",
     test: (source) =>
       source.includes("providerErrorEvent.deleteMany") &&
       source.includes("30 * 24 * 60 * 60 * 1000") &&
-      source.includes("providerErrorEvents.count"),
+      // Optional because the sweep runs as an isolated step now: a step that
+      // threw reports `null` rather than a count.
+      /providerErrorEvents\??\.count/.test(source),
   },
   {
     name: "Infrastructure metrics remain admin-only with bounded external responses",
@@ -952,6 +1016,28 @@ const checks = [
       !source.includes('([key]) => key !== "prompt"'),
   },
   {
+    name: "The adapter takes its delivery MIME type from the registry helper",
+    file: "lib/imageProviderAdapter.ts",
+    test: (source) =>
+      // `outputMimeTypes` is the storage allowlist; `deliveryMimeType` is what
+      // the request asks the provider for. Reading the head of the allowlist
+      // instead sent every Google request asking for PNG, which its API
+      // refuses -- and the two are only kept apart by going through one helper.
+      source.includes("imageDeliveryMimeType(model)") &&
+      !source.includes("outputMimeTypes["),
+  },
+  {
+    name: "The thinking-cap measurement sends the adapter's own request",
+    file: "scripts/measure-google-image-thinking-cap.mjs",
+    test: (source) =>
+      // This script exists to measure what production would be billed for, so
+      // a request it builds differently from the adapter measures nothing. It
+      // already drifted once: the adapter learned Google's delivery MIME type
+      // and the script kept its own copy of the old expression.
+      source.includes("imageDeliveryMimeType(model)") &&
+      !source.includes("outputMimeTypes["),
+  },
+  {
     name: "A documented output limit never doubles as a proven cost cap",
     file: "lib/imageModelRegistry.ts",
     test: (source) => {
@@ -1036,6 +1122,56 @@ const checks = [
       source.includes('where: { generationId, status: "reserved" },') &&
       source.includes('data: { status: "settling" },') &&
       source.includes("if (reservationClaim.count === 0) return"),
+  },
+  {
+    // The same claim-before-you-pay rule as the image settler above, on the
+    // other reservation table. Extraction runs in the background now: nothing
+    // is watching when a run reaches a terminal state, so a settlement that
+    // could run twice would refund twice with no one to notice (import/memory
+    // policy §11).
+    name: "Extraction settlement claims the reservation before it moves any credit",
+    file: "lib/memoryExtractionCredits.ts",
+    test: (source) =>
+      source.includes('where: { runId: input.runId, status: "reserved" }') &&
+      source.includes('data: { status: "settling" }') &&
+      source.includes("if (claim.count === 0)"),
+  },
+  {
+    // A run that exists without a reservation is a run nobody paid for, and it
+    // also blocks the account from starting another (one active run per user).
+    // Reserving inside the creation transaction is what makes both impossible:
+    // a refused reservation leaves no run, no chunks and no charge.
+    name: "An extraction run cannot exist without the reservation that paid for it",
+    file: "lib/memoryExtractionService.ts",
+    test: (source) =>
+      source.includes("reserveExtractionRunCredits({") &&
+      source.includes("tx,") &&
+      source.includes("await tx.memoryExtractionChunk.createMany"),
+  },
+  {
+    // Entitlement, not the operational guardrail. AGENTS.md keeps the two
+    // layers apart in names, codes and metrics, and the extraction reservation
+    // is entitlement: it allocates plan and add-on credits and must not read or
+    // write a provider budget.
+    name: "Extraction entitlement stays out of the provider budget layer",
+    file: "lib/memoryExtractionCredits.ts",
+    test: (source) =>
+      source.includes("getChatCreditAllocation") &&
+      source.includes("reserveAddOnCredits") &&
+      !source.includes("providerCostBudget") &&
+      !source.includes("PROVIDER_BUDGET_EXHAUSTED"),
+  },
+  {
+    // No raw internal USD in anything a user sees. The extraction reservation
+    // knows the run's estimated cost in micro-USD and must never put it in the
+    // error it throws when the balance is short.
+    name: "Extraction credit errors carry no internal cost figure",
+    file: "lib/memoryExtractionCredits.ts",
+    test: (source) =>
+      source.includes("CREDIT_BALANCE_INSUFFICIENT") &&
+      !/CREDIT_BALANCE_INSUFFICIENT[\s\S]{0,400}(costMicroUsd|MicroUsd)/.test(
+        source
+      ),
   },
   {
     name: "Image provider budgets are per provider and cover every active one",

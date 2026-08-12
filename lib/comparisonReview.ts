@@ -6,7 +6,7 @@ import { z } from "zod";
 // byte-for-byte copy of the same 1.5/3/4 heuristic, so recalibrating one and
 // not the other would have split Chat's and Review's estimates apart again --
 // which is the divergence the shared module was created to end.
-import { estimateTextTokens } from "@/lib/chatTokenEstimate";
+import { createTokenEstimateAccumulator } from "@/lib/chatTokenEstimate";
 import { getEnabledModel, type AiModel } from "@/lib/models";
 import { PROVIDER_API_KEY_ENV } from "@/lib/providerMonitoring";
 import { assertModelAccess, type ChatAccess } from "@/lib/chatSecurity";
@@ -558,7 +558,22 @@ export const estimateComparisonReviewTokens = (
   responses: ReviewSourceResponse[]
 ) => {
   const text = `${question}\n${responses.map((response) => response.content).join("\n")}`;
-  return Math.max(256, estimateTextTokens(text) + 1_200);
+  // A breakdown rather than a total, because the reservation widens each
+  // character segment by its own margin and a sum has already lost the mix.
+  // The two constants stay opaque: 1,200 is the review template's own framing
+  // and 256 a floor, and neither is a tokenizer prediction that could be
+  // mispredicted.
+  const estimate = createTokenEstimateAccumulator()
+    .addText(text)
+    .addTokens(1_200)
+    .breakdown();
+  return estimate.rawTotal >= 256
+    ? estimate
+    : {
+        ...estimate,
+        opaqueTokens: estimate.opaqueTokens + (256 - estimate.rawTotal),
+        rawTotal: 256,
+      };
 };
 
 export const createComparisonReviewHash = ({

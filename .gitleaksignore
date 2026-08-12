@@ -10,3 +10,23 @@
 # Scope: exactly these two findings in that one commit — nothing wider.
 e159b4ed85a3ba5e3f9c286b8a1f207933aa7254:tests/memoryValidatorCore.test.mjs:generic-api-key:121
 e159b4ed85a3ba5e3f9c286b8a1f207933aa7254:tests/memoryValidatorCore.test.mjs:jwt:123
+
+# Synthetic extraction-eval fixture, not a credential.
+#
+# Commit c5d6331 introduced tests/fixtures/memoryExtractionEval.mjs with an
+# AWS access key id SHAPE invented for the §12.2 extraction eval's category ③
+# fixtures: the prefix, then a body spelling FIXTURE and padded with zeros, so
+# it can never collide with an issued key. The fixture set later moved to
+# lib/memoryExtractionEvalFixtures.ts without it, so only the immutable
+# introducing commit still carries it.
+#
+# The value itself is deliberately not quoted here. Writing it out put the
+# same shape in this file, which the scan then reported against the commit
+# that added it -- pinning a finding we had just created.
+#
+# This is why the scheduled full-history scan failed while every PR and push
+# scan passed: those scan a commit range that does not include c5d6331.
+#
+# Scope: exactly these two findings in that one commit — nothing wider.
+c5d63312a625450918df5bf8f4a0c32e575243b1:tests/fixtures/memoryExtractionEval.mjs:aws-access-token:501
+c5d63312a625450918df5bf8f4a0c32e575243b1:tests/fixtures/memoryExtractionEval.mjs:aws-access-token:511

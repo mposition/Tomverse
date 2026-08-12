@@ -217,6 +217,15 @@ gate 없이 노출되는 배포 창은 금지된다. UI 비노출은 보안 경�
   서비스와 안전하게 공존한다(저장소에 장기 실행 worker 선례가 없어 별도
   Railway 서비스 신설은 운영 PR에서 실측 후 결정). 프로세스 종료로 죽은
   실행은 정확히 stale 케이스이며 sweep이 `failed` 처리 후 전액 환급한다.
+- **`after()`의 실행 시간은 그 route의 max duration이다**(Next `after`
+  레퍼런스). proxy timeout이 아니라 이쪽이 실제 제약이므로 실행자를
+  구동하는 route는 예산을 명시한다. 값은
+  `IMAGE_EXECUTOR_MAX_DURATION_SECONDS`이고, provider timeout·재시도
+  backoff·그룹 상한·provider job 하한에서 유도한다
+  (`lib/imageGenerationStateCore.ts`). 잘린 실행자는 지연이 아니다 —
+  `pending` 생성을 다시 구동하는 것은 없고 sweep은 환급만 하므로 요청
+  자체가 사라진다. stale 임계값이 한 시도의 최악 소요보다 크다는 조건과
+  함께 `npm run check:image-executor-budget`이 PR Fast Gate에서 강제한다.
 - 배포·프로세스 종료로 회수 불가능해진 stale 작업은 reconciliation이
   `failed` 처리하고 전액 환급한다. Railway graceful shutdown 유예
   (`RAILWAY_DEPLOYMENT_DRAINING_SECONDS`)를 함께 설정한다.
@@ -486,6 +495,15 @@ candidate의 한도로 설명된다. 즉 hidden thinking이 32,768 안에 포함
    통과로 세지 않는다. 카드 한도가 가장 낮은 `gemini-3.1-flash-lite-image`
    (4,096)가 첫 측정 대상으로 가장 유용하다.
 8. 요청 JSON·원본 응답·모델 ID·응답 ID·실행 일시를 감사 증거로 보존한다.
+
+**스크립트는 adapter와 같은 request builder·같은 registry helper를 통해서만
+요청을 만든다.** 측정 대상은 production이 실제로 과금당하는 요청이므로, 한쪽만
+바뀐 요청으로 얻은 수치는 근거가 되지 않는다. 실제로 한 번 어긋난 적이 있다 —
+adapter가 Google의 delivery MIME(`image/jpeg`)을 반영한 뒤에도 스크립트는 자체
+표현식으로 PNG를 요청해 같은 HTTP 400을 다시 냈다. 지금은 delivery MIME을
+`imageDeliveryMimeType()` 한 곳에서 정하고,
+`scripts/security-regression-check.mjs`가 두 호출부 모두 그 helper를 쓰는지
+검사한다.
    API key와 사용자 프롬프트는 로그에 남기지 않는다(스크립트는 프롬프트를
    sha256 앞자리로만 기록한다).
 

@@ -35,12 +35,37 @@ const REQUESTS_PER_WINDOW = 120;
  * limiter into the resource-exhaustion primitive it exists to prevent. On
  * overflow the whole window is dropped, which fails *open* (callers get a fresh
  * allowance) rather than closed.
+ *
+ * Nothing evicts on a timer, so an entry outlives its window until that same
+ * key comes back. Ordinary traffic is mostly one-shot visitors and the key
+ * carries the scope, so a caller reading two public endpoints occupies two
+ * entries: the map fills with *expired* entries long before it holds anything
+ * like this many live ones. Reaching the cap that way and clearing everything
+ * would hand a fresh allowance to whoever was being limited at that moment --
+ * a limiter that resets itself on a schedule set by unrelated traffic. So the
+ * expired entries go first, and the blunt clear is what happens only when they
+ * were not the problem.
  */
 const MAX_TRACKED_CLIENTS = 5_000;
 
 type Window = { count: number; resetAt: number };
 
 const windows = new Map<string, Window>();
+
+/**
+ * Makes room at the cap, preferring the entries that are already meaningless.
+ *
+ * Only reached when the map is full, so the cost is paid once per fill rather
+ * than per request. Clearing outright stays the fallback for the case it was
+ * written for -- more live windows than the cap allows -- where there is no
+ * dead weight to drop and fail-open is the deliberate choice.
+ */
+const evictAtCapacity = (now: number) => {
+  for (const [trackedKey, window] of windows) {
+    if (window.resetAt <= now) windows.delete(trackedKey);
+  }
+  if (windows.size >= MAX_TRACKED_CLIENTS) windows.clear();
+};
 
 export type PublicReadRateLimitResult = {
   allowed: boolean;
@@ -50,14 +75,19 @@ export type PublicReadRateLimitResult = {
 
 export const consumePublicReadBudget = (
   request: Request,
-  scope: string
+  scope: string,
+  /**
+   * Injected only by tests. The window and the eviction below are both defined
+   * against elapsed time, and neither can be exercised by a suite that can
+   * only move the clock by however long it takes to run.
+   */
+  now: number = Date.now()
 ): PublicReadRateLimitResult => {
-  const now = Date.now();
   const key = `${scope}:${getAnonymousClientKey(request)}`;
   const existing = windows.get(key);
 
   if (!existing || existing.resetAt <= now) {
-    if (windows.size >= MAX_TRACKED_CLIENTS) windows.clear();
+    if (windows.size >= MAX_TRACKED_CLIENTS) evictAtCapacity(now);
     windows.set(key, { count: 1, resetAt: now + WINDOW_MS });
     return { allowed: true, retryAfter: 0 };
   }

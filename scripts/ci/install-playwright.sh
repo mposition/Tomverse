@@ -22,6 +22,12 @@
 # is additionally configured to retry an individual stalled download so one bad
 # package does not cost a whole attempt.
 #
+# A retry also has to clean up after the attempt it is retrying. The apt half
+# runs as root under Playwright's own sudo, so an unprivileged runner cannot
+# signal it when the attempt times out; it keeps running and keeps the dpkg
+# lock. Retrying straight into that lock is how the 2026-08-06 review-parity job
+# reported three failures for one slow mirror -- see release_dpkg_lock below.
+#
 # The fonts are not optional, which is why the fix is retries rather than
 # dropping `--with-deps`. They are what renders CJK text in the UI, and this
 # repository pins both a typography contract and screenshot baselines -- a
@@ -55,12 +61,57 @@ ATTEMPTS="${PLAYWRIGHT_INSTALL_ATTEMPTS:-3}"
 # reports which half failed instead of dying as a bare step timeout.
 ATTEMPT_TIMEOUT="${PLAYWRIGHT_INSTALL_ATTEMPT_TIMEOUT:-300}"
 
+# How long to wait for a timed-out attempt's apt-get to finish on its own before
+# taking it down, in seconds. Generous, because letting it complete is always
+# better than killing it: a package that finishes installing is one the next
+# attempt does not fetch again.
+DPKG_LOCK_WAIT="${PLAYWRIGHT_INSTALL_DPKG_LOCK_WAIT:-120}"
+
+# What makes a retry actually retry, rather than fail faster.
+#
+# `timeout` signals the process group it created, but the process holding the
+# lock is `apt-get`, running as root under Playwright's own `sudo`. An
+# unprivileged runner cannot signal a root process -- the TERM is refused with
+# EPERM -- so the abandoned apt-get outlives the attempt that started it and
+# keeps /var/lib/dpkg/lock-frontend.
+#
+# The next attempt then dies on "Could not get lock ... held by process N
+# (apt-get)" in about a second, and so does the one after it. That is what
+# happened on 2026-08-06: three attempts, two of them spent losing a race
+# against our own orphan, reported as if the mirror had failed three times.
+#
+# So each retry waits for the lock to clear, and only escalates if it will not.
+# `dpkg --configure -a` afterwards because a killed apt-get can leave a
+# half-configured package that fails every later install until it is repaired.
+release_dpkg_lock() {
+  local waited=0
+  while pgrep -x apt-get >/dev/null 2>&1 || pgrep -x dpkg >/dev/null 2>&1; do
+    if [ "$waited" -ge "$DPKG_LOCK_WAIT" ]; then
+      echo "::warning::apt is still running after ${waited}s; terminating it so the retry can proceed."
+      sudo pkill -TERM -x apt-get >/dev/null 2>&1 || true
+      sleep 5
+      sudo pkill -KILL -x apt-get >/dev/null 2>&1 || true
+      sudo pkill -KILL -x dpkg >/dev/null 2>&1 || true
+      break
+    fi
+    [ "$waited" -eq 0 ] && echo "Waiting for the previous apt run to release the dpkg lock."
+    sleep 5
+    waited=$((waited + 5))
+  done
+  sudo dpkg --configure -a >/dev/null 2>&1 || true
+}
+
 # Backoff, not a tight loop: the failure being retried is a mirror or CDN
 # having a bad minute, and asking again immediately mostly asks the same bad
 # minute.
+#
+# `$3` names an optional recovery step run before each retry. The browser
+# download half passes none -- it holds no system-wide lock, so there is
+# nothing for a later attempt to collide with.
 retry() {
   local label="$1"
-  shift
+  local recover="$2"
+  shift 2
   local attempt=1
   while true; do
     if timeout --signal=TERM --kill-after=30s "$ATTEMPT_TIMEOUT" "$@"; then
@@ -73,6 +124,7 @@ retry() {
     local delay=$((attempt * 30))
     echo "::warning::${label} failed (attempt ${attempt}/${ATTEMPTS}). Retrying in ${delay}s."
     sleep "$delay"
+    [ -n "$recover" ] && "$recover"
     attempt=$((attempt + 1))
   done
 }
@@ -86,9 +138,9 @@ if [ -d /etc/apt/apt.conf.d ]; then
     echo "::warning::Could not write apt retry config; continuing without it."
 fi
 
-retry "playwright install-deps" npx playwright install-deps "${BROWSERS[@]}" || exit 1
+retry "playwright install-deps" release_dpkg_lock npx playwright install-deps "${BROWSERS[@]}" || exit 1
 # Second, and separately: on a cache hit this is a no-op that costs a second,
 # which is the whole reason the two are not one command.
-retry "playwright install" npx playwright install "${BROWSERS[@]}" || exit 1
+retry "playwright install" "" npx playwright install "${BROWSERS[@]}" || exit 1
 
 echo "Playwright ready: ${BROWSERS[*]}"
