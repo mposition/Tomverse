@@ -727,6 +727,34 @@ const checks = [
       source.includes("memoryExtractionProviderCalls"),
   },
   {
+    // `enforceUserOperationalSecurity` lived in chatSecurity.ts and nowhere
+    // else, so an account an administrator had suspended, restricted or
+    // scheduled for deletion was still free to generate images and run memory
+    // extractions -- both of which call a provider and charge credits. Every
+    // paid AI entry point goes through the one gate.
+    name: "Every paid AI entry point refuses an account put out of bounds",
+    file: "lib/chatSecurity.ts",
+    test: (source) => {
+      const image = read("lib/imageGenerationService.ts");
+      const extraction = read("lib/memoryExtractionService.ts");
+      return (
+        source.includes("export const assertUserOperationalAccess") &&
+        source.includes("enforceUserOperationalSecurity") &&
+        // Both the first request and the retry: a retry is a fresh provider
+        // call on a fresh reservation, not an inherited permission.
+        image.split("assertUserOperationalAccess(input.userId)").length === 3 &&
+        extraction.includes("assertUserOperationalAccess(input.userId)")
+      );
+    },
+  },
+  {
+    // The refusal carries its own 403 and code. Falling through to the route's
+    // generic handler would tell a suspended account the server broke.
+    name: "The extraction route answers an account refusal with its own status",
+    file: "app/api/memories/extraction-runs/route.ts",
+    test: (source) => source.includes("chatErrorResponse(error)"),
+  },
+  {
     // The retention sweeps are independent, and awaiting them bare meant the
     // first to throw skipped every one behind it -- on every run, since a step
     // that fails for a persistent reason fails again tomorrow. The step that
