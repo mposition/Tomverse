@@ -75,10 +75,35 @@ export async function GET(req: Request) {
       });
       const defaultEngine = userSettings?.defaultModel || APP_DEFAULTS.defaultModelId;
 
+    // Named columns, not `include`. This route returns the whole conversation
+    // list, so `include` fetched every column of every conversation the account
+    // has ever had -- including `shareSnapshot`, which is a full serialised
+    // copy of a shared conversation and is allowed to reach 5 MB
+    // (MAX_SHARE_SNAPSHOT_BYTES), and `password`, the lock hash. Neither is
+    // returned: the snapshot was dropped on the floor and the hash was blanked
+    // at the response layer with `password: undefined`, one line away from
+    // being emitted by a later edit.
+    //
+    // Withholding a column is a property of the query, not of the mapping over
+    // its result. That is also what keeps the memory bounded: an account with a
+    // hundred shared conversations pulled hundreds of megabytes into the
+    // process to answer a request that sends back a title and a count.
     const conversations = await prisma.conversation.findMany({
       where: { userId },
       orderBy: { updatedAt: "desc" },
-      include: {
+      select: {
+        id: true,
+        title: true,
+        kind: true,
+        projectId: true,
+        selectedModels: true,
+        disabledPanels: true,
+        webSearchMode: true,
+        shareEnabled: true,
+        shareExpiresAt: true,
+        // Read to derive `isLocked`, never emitted. Selecting it is the point
+        // at which that decision is visible.
+        password: true,
         _count: { select: { messages: true } },
       },
     });
@@ -118,7 +143,6 @@ export async function GET(req: Request) {
           conv.shareExpiresAt > new Date(),
         shareExpiresAt: conv.shareExpiresAt?.toISOString() || null,
         messageCount: conv._count.messages,
-        password: undefined,
       };
     });
 

@@ -554,6 +554,38 @@ Console에만 남습니다.
 | 크레딧 구매·분쟁 | `lib/creditPurchase.ts` |
 | extraction run 생성·chunk 종료·취소 | `lib/memoryExtractionService.ts` |
 
+### DB 제약 — 잠금의 대체물이 아니라 그 아래 그물
+
+`CreditLot`에 non-negative CHECK 제약이 있습니다
+(`20260812070000_credit_lot_non_negative`).
+
+- `CreditLot_remainingCredits_non_negative_check`
+- `CreditLot_remainingFundedCost_non_negative_check`
+
+**잠금을 대신하지 않습니다.** CHECK는 직렬화를 못 하므로 잠금 없는 경로를
+안전하게 만들지 못합니다. 하는 일은 *조용히 틀린 잔액*을 *실패한 트랜잭션*으로
+바꾸는 것 — 몇 달 뒤 ledger 대사에서 발견되는 버그와 그날 발견되는 버그의
+차이입니다. 위의 잠금 규칙은 그대로 지킵니다.
+
+**`NOT VALID`로 추가했습니다.** 이후의 모든 INSERT·UPDATE는 강제되고(위험한 것은
+아직 쓰이지 않은 행이므로 이것이 필요한 coverage 전부입니다), 전체 스캔과
+ACCESS EXCLUSIVE 잠금은 건너뛰며, 아무도 조사하지 않은 과거 데이터로 배포가
+실패하지 않습니다. validate는 **별도 migration**이고 순서가 있습니다.
+
+1. 이 migration 배포
+2. `npm run report:credit-lot-invariants`를 production에 실행 — 위반 행 보고
+3. 0이 되면 후속 migration에서 `VALIDATE CONSTRAINT`
+
+**(1)과 (3) 사이에 production에서 손으로 validate하지 않습니다.**
+`scripts/compare-schema-to-migrations.mjs`가 `pg_get_constraintdef()`를
+비교하는데 그 출력에 `NOT VALID`가 붙으므로, 손으로 validate하면 후속
+migration이 들어올 때까지 schema drift로 보고됩니다.
+
+위반 행은 잔액만 고치지 않습니다 — 보정 `CreditLedgerEntry`를 써서 행과 이력이
+계속 일치하게 합니다.
+
 - 관련 테스트: `tests/integration/credit-finance.db.test.ts`(동시 예약이 잔액을
-  초과하지 않음), `tests/integration/memory-extraction-credits.db.test.ts`
-  (extraction의 예약·환급이 계정 잠금을 기다림).
+  초과하지 않음, DB가 음수 잔액을 거부함),
+  `tests/integration/memory-extraction-credits.db.test.ts`(extraction의 예약·
+  환급이 계정 잠금을 기다림), `tests/creditLockOrder.test.mjs`(잠금 없는 네
+  번째 caller 차단).

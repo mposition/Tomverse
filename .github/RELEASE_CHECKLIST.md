@@ -40,6 +40,9 @@ Date / timezone:    ____________________
 - [ ] `npm run check:encoding:strict`
 - [ ] `npm run check:locale-translation` — proves no locale is still showing an
       English sentence where a translation is owed
+- [ ] `npm run check:enum-constraints` — proves every closed list the schema
+      enforces still matches the list the application validates against, and
+      that a new one was registered rather than left undecided
 - [ ] `npm run check:context-window-register`
 - [ ] `npm run check:router-context-window`
 - [ ] `npm run check:usage-bucket-range`
@@ -69,6 +72,11 @@ Date / timezone:    ____________________
 - [ ] `npm run check:openai-model-access` (needs a production key) — per-account
       model visibility only. It is **not** a price source; nothing in
       `lib/modelPricing.ts` may be derived from its response.
+- [ ] `npm run report:credit-lot-invariants` (needs the deployed database) —
+      read-only survey of purchased-credit lots against the §9 non-negative
+      invariant. Not a gate: the constraints ship `NOT VALID`, so a violating
+      row blocks nothing. It is the input to validating them, and a count that
+      moves off zero means a caller reached the lots without the account lock.
 - [ ] Chromium E2E: `desktop-chromium`, `desktop-compact`, `mobile-chromium`
       — no unexplained failures
 
