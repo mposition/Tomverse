@@ -101,6 +101,17 @@ gates:
         -- the blast radius -- and nothing about whether the change would be an
         improvement. npm run report:routing-shadow prints that distinction
         beside its own numbers so the two cannot be read as one result.
+      - >-
+        Produced by npm run eval:router-quality -- --mode=decision, which makes
+        real billed calls and emits the report above. npm run
+        check:router-quality-eval validates a report before it may be cited: it
+        refuses a pilot or judge-bias run, a run against the development set, a
+        run that stopped at its cost ceiling, a second use of an already-used
+        decision set, a baseline pre-registered after the run started, and a
+        routable judge with no bias measurement. The procedure the harness
+        implements is docs/ops/tomverse-chat-router-evaluation-set.md; a
+        passing check means the report is citable, not that the gate is
+        approved.
 
   - id: ROUTE-02
     rationale: "Deterministic routing must preserve mobile chat responsiveness and must not consume a material share of time to first token."

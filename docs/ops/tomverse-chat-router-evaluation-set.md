@@ -198,7 +198,65 @@ them rather than leaving them to a write-up:
 Absent any of these, the run is not decision-grade evidence, whatever number it
 produced.
 
-## 10. Sign-off
+## 10. The harness
+
+The procedure above is implemented by `npm run eval:router-quality`, and the
+arithmetic by `lib/routerQualityEvalCore.ts`. Three modes, kept apart on
+purpose — "run it and see, then decide how big it should have been" is how a
+sample size becomes an outcome that was chosen rather than measured:
+
+```
+# §3. Measure the discordance rate so `n` is computed, not guessed.
+npm run eval:router-quality -- --mode=pilot \
+  --set=docs/ops/router-evaluation-set/development-v0.json \
+  --baseline=<model id> --judge=<model id> --seed=<integer> --json=pilot.json
+
+# §5. Only where the judge is itself one of the routable models.
+npm run eval:router-quality -- --mode=judge-bias \
+  --set=<development set> --baseline=<other model> --judge=<routable judge> \
+  --seed=<integer> --json=judge-bias.json
+
+# The run ROUTE-01 cites.
+npm run eval:router-quality -- --mode=decision \
+  --set=<frozen decision set> --baseline=<pre-registered model> \
+  --judge=<model id> --seed=<integer> --preregistered-n=<n> --use-index=1 \
+  --judge-bias=judge-bias.json --json=decision.json
+```
+
+`npm run check:router-quality-eval` validates what came out. It runs on every
+PR against the committed set files, and takes `--report=<path>` for a run.
+What it refuses, and why each one would otherwise read as a pass:
+
+| Refusal | Why it matters |
+| --- | --- |
+| a pilot or bias report cited as evidence | a pilot's numbers are formatted identically to a decision run's |
+| a run against the development set | §7's split is the entire reason the decision set is worth anything |
+| a run truncated by `--max-cost-usd` | a partial set still produces a real-looking interval |
+| `--use-index` above 1 | §7: a reused decision set reports Router fit to its own test set |
+| a baseline pre-registered after the run started | §4, and the dates are in the record, so it is checkable |
+| a routable judge with no bias measurement | §5 |
+| exclusions above 5% of pairs | they land on the Auto arm, so the survivors are the items Auto managed to answer |
+| a judge preferring the first answer above 65% of the time | that is a judge reading position, not quality |
+
+Two things the harness will not do, because neither is its decision: it never
+touches the gate registry, and a `measured` run that misses the margin exits
+zero. It measured what it set out to measure; whether that clears -2pp is
+`ROUTE-01`'s call, and whether Auto ships is a separate one again.
+
+Reported beside the delta, never subtracted from it: the share of judged pairs
+where the Router chose something other than the baseline. A Router that picked
+the baseline every time would score exactly zero with a tight interval and
+clear the gate honestly — its answers really are non-inferior — but "Auto
+passed the quality gate" would then be read as "its choices are good" when it
+means "it hardly makes any". The number keeps the two readings apart.
+
+`docs/ops/router-evaluation-set/development-v0.json` is a drafted candidate
+pool covering every cell in §2. It exists so the harness can be run at all. It
+is not a set: nothing in it is adopted, §8 forbids an agent adopting anything,
+and `lib/routerQualityEvalSet.ts` refuses to let a development file stand in
+for a decision one.
+
+## 11. Sign-off
 
 An agent may draft candidates, run the harness, and update this procedure. An
 agent may not adopt items into the decision set, act as the adjudicating judge
