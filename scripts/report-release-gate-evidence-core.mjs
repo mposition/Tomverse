@@ -290,9 +290,9 @@ export const GATE_EVIDENCE = {
     },
 
     "PUSH-01": {
-        capability: [],
+        capability: ["scripts/check-push-scope.mjs"],
         measurement: [],
-        note: "Inverted by design: this gate is met by push infrastructure being *absent*, so it lands in this group for the opposite of the usual reason -- there is correctly nothing to point at. What could exist is a check asserting the absence, the way check:shared-packages asserts forbidden imports are absent; today the scope review is the only thing holding it.",
+        note: "Inverted by design: the gate is met by push infrastructure being *absent*, so what gets built for it is the assertion rather than a feature. check:push-scope now runs in the PR Fast Gate over dependencies, sources, the Prisma schema, routes and server credentials, and tests/pushScope.test.mjs pins its false positives as deliberately as its true ones -- the email NotificationDelivery queue and a Stripe getSubscription must not trip it, or the gate gets switched off. Deliberately NOT counted as the gate's evidence: it names a release bill of materials and a scope review, and neither exists. This states what the tree contains; approving a use case stays a decision recorded on the gate.",
     },
 };
 
