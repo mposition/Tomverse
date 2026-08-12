@@ -247,6 +247,17 @@ jobs:
         timeout-minutes: 5
         run: npm run check:shared-packages
 
+      # The other half of PACKAGE-01's evidence. `next build` proves the shared
+      # packages compile inside this app and cannot prove the thing the gate is
+      # about: that they build where Next.js is not the one building. Vite
+      # externalizes a Node builtin with a warning rather than an error, so
+      # this fails on the warning and then executes the bundle -- a build that
+      # resolved everything and behaves differently outside Next.js is the
+      # failure worth catching.
+      - name: Package build matrix (Vite)
+        timeout-minutes: 10
+        run: npm run verify:package-build-matrix
+
       # gpt-image-2 lives outside AVAILABLE_MODELS by design, so the model
       # pricing check above cannot see it. Same release contract -- every
       # enabled price is explicit and verified -- separate fail-closed net.
