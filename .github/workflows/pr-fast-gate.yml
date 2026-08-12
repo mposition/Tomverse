@@ -239,6 +239,16 @@ jobs:
         timeout-minutes: 5
         run: npm run check:db-integration-coverage
 
+      # publicChatErrorDetails strips keys beginning with `internal`, so the
+      # spelling of the key IS the mechanism that keeps provider spend out of a
+      # user-facing response. A micro-USD field named anything else ships in the
+      # body and nothing notices, because the stripper is doing exactly what it
+      # was written to do. CREDIT_COST_ALLOWANCE_INSUFFICIENT did that from two
+      # throw sites.
+      - name: Error detail cost exposure
+        timeout-minutes: 5
+        run: npm run check:error-detail-cost
+
       # The cost guardrails are derived from plan credits and stored in
       # ChatUsageBucket.count. When that product outgrew int4, PostgreSQL threw
       # 22003 in the guard query instead of returning an allow/deny decision and
