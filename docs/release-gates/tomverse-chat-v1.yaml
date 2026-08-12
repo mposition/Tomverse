@@ -596,10 +596,18 @@ gates:
 
   - id: PACKAGE-01
     rationale: "Framework-neutral packages are the mechanism that prevents Next.js and Capacitor clients from becoming duplicated products."
-    status: pending
-    approvedBy: []
+    status: evidence-ready
+    approvedBy:
+      - subject: "@mposition"
+        role: gate-owner
+        approvedAt: "2026-08-12T23:21:58Z"
     approvedAt: null
-    evidenceRefs: []
+    evidenceRefs:
+      - "docs/release-gates/evidence/PACKAGE-01-2026-08-12.md"
+      - "commit:b786a97db24b0177eddbc79efcb17df29205d03f"
+      - "https://github.com/mposition/Tomverse/actions/runs/31604472342"
+      - "https://github.com/mposition/Tomverse/actions/runs/31604472342/job/94139773729"
+      - "https://github.com/mposition/Tomverse/actions/runs/31604472342/job/94139773711"
     category: shared-packages
     title: Shared chat packages remain framework-neutral
     blocking: true
