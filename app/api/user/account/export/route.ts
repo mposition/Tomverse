@@ -9,8 +9,50 @@ import {
 } from "@/lib/adminReauthentication";
 import { apiSecurityResponse, consumeApiRateLimit } from "@/lib/apiSecurity";
 import { authOptions } from "@/lib/auth";
-import { issueAccountDataExportTicket } from "@/lib/accountDataExportTickets";
+import {
+    issueAccountDataExportTicket,
+    listAccountDataExportHistory,
+} from "@/lib/accountDataExportTickets";
 import { logSecurityAuditEvent } from "@/lib/securityAudit";
+
+/**
+ * The account's own record of who downloaded its data and when.
+ *
+ * Deliberately not behind the step-up: it is the trail a user consults when
+ * they suspect somebody else has been in the account, and requiring a fresh
+ * sign-in to look would put the check behind the same door the attacker
+ * already opened. Nothing here is a credential -- no token hash, no request
+ * context, only what happened and when.
+ */
+export async function GET(req: Request) {
+    try {
+        const session = await getServerSession(authOptions);
+        if (!session?.user?.id) {
+            return NextResponse.json(
+                { error: "Authentication required." },
+                { status: 401, headers: { "Cache-Control": "no-store" } }
+            );
+        }
+
+        await consumeApiRateLimit(req, session.user.id, "account-data-export-history", {
+            minute: 20,
+            day: 200,
+        });
+
+        return NextResponse.json(
+            { requests: await listAccountDataExportHistory(session.user.id) },
+            { headers: { "Cache-Control": "no-store" } }
+        );
+    } catch (error) {
+        const securityResponse = apiSecurityResponse(error);
+        if (securityResponse) return securityResponse;
+        console.error("account data export history failed", error);
+        return NextResponse.json(
+            { error: "Failed to load the export history." },
+            { status: 500, headers: { "Cache-Control": "no-store" } }
+        );
+    }
+}
 
 /**
  * Step one of the unified account export (PRIVACY-02): issue a download link.

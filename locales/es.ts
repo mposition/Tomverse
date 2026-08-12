@@ -1267,6 +1267,7 @@ export const es = {
         expiredCardNotice: "Ha caducado y hay que empezar de nuevo.",
         abandonImport: "Salir de esta importación",
     },
+    accountDataExport: { ...en.accountDataExport },
     memoryReview: {
         sourceDeleteDerivedImport:
             "También se eliminarán {count} recuerdos creados a partir de esta importación.",

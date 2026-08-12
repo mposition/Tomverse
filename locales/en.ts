@@ -1266,6 +1266,37 @@ export const en = {
     // Account long-term memory review (Release B, slice B3). The list,
     // delete and settings stay reachable regardless of the rollout flag;
     // only review and creation actions follow it.
+    accountDataExport: {
+        dataTabTitle: "Your account data",
+        dataTabDescription:
+            "Download everything Tomverse holds for your account -- conversations, memories, imports, payments and usage -- as a single file.",
+        dataTabOpen: "Download your data",
+        pageTitle: "Download your account data",
+        pageDescription:
+            "One file with everything Tomverse holds for your account. It names what it contains and what it leaves out, and says why.",
+        securityNote:
+            "Downloading requires a recent sign-in. The link you get back works once and stops working after five minutes, so a link that ends up somewhere else is already spent.",
+        prepareDownload: "Prepare a download",
+        requestAgain: "Prepare a new download",
+        downloadNow: "Download the file",
+        linkExpiresIn: "This link works once and expires in {remaining}.",
+        linkExpired: "The link expired. Prepare a new one.",
+        reauthRequired:
+            "Sign in again before downloading your account data, then come back to this page.",
+        requestFailed: "The download could not be prepared. Try again.",
+        historyTitle: "Download history",
+        historyDescription:
+            "Every request, download and refusal on this account, kept for ninety days. A refusal means a download link for your account was presented and turned away.",
+        historyLoading: "Loading...",
+        historyEmpty: "You have not downloaded your account data yet.",
+        refusedNote:
+            "A link was presented after it had expired, had already been used, or belonged to a different account.",
+        status: {
+            issued: "Link prepared",
+            downloaded: "Downloaded",
+            refused: "Refused",
+        },
+    },
     memoryReview: {
         sourceDeleteDerivedImport:
             "{count} memories made from this import will be deleted too.",

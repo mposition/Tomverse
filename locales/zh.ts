@@ -1261,6 +1261,7 @@ export const zh = {
         expiredCardNotice: "已过期，需要重新开始。",
         abandonImport: "退出此次导入",
     },
+    accountDataExport: { ...en.accountDataExport },
     memoryReview: {
         sourceDeleteDerivedImport: "由此次导入生成的 {count} 条记忆也会一并删除。",
         sourceDeleteDerivedConversation: "由此对话生成的 {count} 条记忆也会一并删除。",

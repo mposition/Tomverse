@@ -81,11 +81,18 @@ const ENGLISH_STRING_CEILING = {
   // imageGenerationGeneratingModels, which zh takes from en wholesale like the
   // rest of that surface. The other five locales carry real translations of
   // all three, so only this number moves.
-  zh: 12,
-  fr: 26,
-  de: 20,
-  es: 16,
-  pt: 13,
+  //
+  // +21 to all five (accountDataExport): the account-data download surface,
+  // taken from en wholesale like the other untranslated sections. Worth
+  // flagging rather than burying -- this is privacy copy explaining a step-up,
+  // a single-use link and a refusal history, which is a worse thing to read in
+  // a second language than a model picker label. It should get a translation
+  // pass ahead of the sections above it.
+  zh: 31,
+  fr: 47,
+  de: 41,
+  es: 37,
+  pt: 34,
 };
 
 test("every supported language is in the dictionary map", () => {
