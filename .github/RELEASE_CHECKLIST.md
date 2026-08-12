@@ -40,6 +40,8 @@ Date / timezone:    ____________________
 - [ ] `npm run check:encoding:strict`
 - [ ] `npm run check:locale-translation` — proves no locale is still showing an
       English sentence where a translation is owed
+- [ ] `npm run check:api-cache-control` — proves the proxy's `/api/*` default
+      does not silently replace a route's own caching decision
 - [ ] `npm run check:enum-constraints` — proves every closed list the schema
       enforces still matches the list the application validates against, and
       that a new one was registered rather than left undecided
