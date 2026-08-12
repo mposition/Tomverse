@@ -1192,11 +1192,22 @@ const checks = [
         source.includes("env.APP_ENV") &&
         source.includes("env.RAILWAY_ENVIRONMENT_NAME") &&
         files.every((file) => {
-          const consumer = read(file);
+          // Comments are stripped: these files explain why they do not read
+          // the Sentry alias, naming it to do so.
+          const consumer = read(file)
+            .replace(/\/\*[\s\S]*?\*\//g, "")
+            .replace(/^[ \t]*\/\/.*$/gm, "");
+          const resolves = file.startsWith("sentry.")
+            ? consumer.includes("resolveSentryEnvironmentTag")
+            : // Which deployment produced a record, and which rules apply to
+              // it, are facts. A Sentry display alias must not answer either,
+              // so these read the deployment and never SENTRY_ENVIRONMENT.
+              consumer.includes("resolveDeploymentEnvironment") &&
+              !consumer.includes("SENTRY_ENVIRONMENT");
           return (
-            consumer.includes("resolveDeploymentEnvironment") &&
-            // SENTRY_ENVIRONMENT stays a legitimate explicit override; a bare
-            // RAILWAY_ENVIRONMENT_NAME read is a second chain starting again.
+            resolves &&
+            // A bare RAILWAY_ENVIRONMENT_NAME read is a second chain starting
+            // again.
             !consumer.includes("process.env.RAILWAY_ENVIRONMENT_NAME")
           );
         })

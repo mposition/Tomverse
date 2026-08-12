@@ -1,6 +1,6 @@
 import * as Sentry from "@sentry/nextjs";
 
-import { resolveDeploymentEnvironment } from "@/lib/deploymentEnvironment";
+import { resolveSentryEnvironmentTag } from "@/lib/deploymentEnvironment";
 import {
   isNextNoFallbackError,
   isNextNoFallbackSentryEvent,
@@ -15,12 +15,11 @@ Sentry.init({
   enabled: Boolean(
     process.env.SENTRY_DSN || process.env.NEXT_PUBLIC_SENTRY_DSN
   ),
-  // SENTRY_ENVIRONMENT stays an explicit override; everything else is the one
-  // shared answer. This used to skip APP_ENV, which is the variable staging
-  // actually sets -- so every staging error arrived tagged `production` while
-  // the same deployment's /api/build-info reported `staging`.
-  environment:
-    process.env.SENTRY_ENVIRONMENT || resolveDeploymentEnvironment(),
+  // SENTRY_ENVIRONMENT may still label this deployment's events, but it may
+  // no longer contradict what the deployment is: staging carried
+  // `SENTRY_ENVIRONMENT=production` and every staging error arrived filed
+  // under production while the same process answered "staging".
+  environment: resolveSentryEnvironmentTag(),
   release: process.env.SENTRY_RELEASE || process.env.RAILWAY_GIT_COMMIT_SHA,
   sendDefaultPii: false,
   enableLogs: true,
