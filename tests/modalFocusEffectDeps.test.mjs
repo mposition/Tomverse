@@ -70,6 +70,40 @@ const SCHEDULES_FOCUS =
   /(?:requestAnimationFrame|setTimeout)\(\s*\(\)\s*=>[\s\S]{0,200}?\.focus\(/;
 const CALLBACK_PROP = /^on[A-Z]/;
 
+/** `const NAME = useCallback(..., [a, b])`, paired with its dependency list. */
+const memoizedCallbacks = (source) => {
+  const found = new Map();
+  for (const match of source.matchAll(
+    /const (\w+) = useCallback\(([\s\S]*?)\n {2}\s*\[([^\]]*)\]\s*\n? {0,2}\);/g
+  )) {
+    found.set(
+      match[1],
+      match[3].split(",").map((dep) => dep.trim()).filter(Boolean)
+    );
+  }
+  return found;
+};
+
+/**
+ * A dependency is unstable-on-caller-render if it is a callback prop, or a
+ * `useCallback` that (transitively) depends on one.
+ *
+ * The indirection is not hypothetical. `CreditPackPurchaseButton` lists
+ * `setOpen`, which reads as a state setter and is not one: it is
+ * `useCallback(..., [controlledOpen, onOpenChange])`, so a caller passing
+ * `onOpenChange={(open) => ...}` makes it a new function every render and the
+ * effect re-runs. A rule that only looked at the dependency's own name would
+ * call that file clean while it carried exactly the defect the rule is for.
+ */
+const isUnstableDep = (dep, callbacks, seen = new Set()) => {
+  if (CALLBACK_PROP.test(dep)) return true;
+  if (seen.has(dep)) return false;
+  seen.add(dep);
+  const inner = callbacks.get(dep);
+  if (!inner) return false;
+  return inner.some((next) => isUnstableDep(next, callbacks, seen));
+};
+
 test("no effect that schedules focus depends on a callback prop", () => {
   const offenders = [];
   for (const file of [
@@ -77,14 +111,17 @@ test("no effect that schedules focus depends on a callback prop", () => {
     ...reactSources(join(root, "app")),
   ]) {
     const source = readFileSync(file, "utf8");
+    const callbacks = memoizedCallbacks(source);
     for (const effect of effects(source)) {
       if (!SCHEDULES_FOCUS.test(effect.body)) continue;
-      const callbacks = effect.deps
+      const unstable = effect.deps
         .split(",")
         .map((dep) => dep.trim())
-        .filter((dep) => CALLBACK_PROP.test(dep));
-      if (callbacks.length > 0) {
-        offenders.push(`${relative(root, file)} — [${effect.deps.trim()}]`);
+        .filter((dep) => dep && isUnstableDep(dep, callbacks));
+      if (unstable.length > 0) {
+        offenders.push(
+          `${relative(root, file)} — [${effect.deps.trim()}] via ${unstable.join(", ")}`
+        );
       }
     }
   }
@@ -96,6 +133,24 @@ test("no effect that schedules focus depends on a callback prop", () => {
       "handler keeping the callback.\n" +
       offenders.join("\n")
   );
+});
+
+test("the rule follows a callback through a useCallback, not just by name", () => {
+  // A negative control for the scan itself. Without this, a rename is enough to
+  // hide the defect from the check, and `setOpen` is exactly that rename.
+  const callbacks = new Map([
+    ["setOpen", ["controlledOpen", "onOpenChange"]],
+    ["requestClose", ["onClose", "running"]],
+    ["reset", ["packs"]],
+    ["loop", ["loop"]],
+  ]);
+  assert.equal(isUnstableDep("onClose", callbacks), true);
+  assert.equal(isUnstableDep("setOpen", callbacks), true);
+  assert.equal(isUnstableDep("requestClose", callbacks), true);
+  assert.equal(isUnstableDep("reset", callbacks), false);
+  assert.equal(isUnstableDep("open", callbacks), false);
+  // A callback listing itself must terminate rather than recurse forever.
+  assert.equal(isUnstableDep("loop", callbacks), false);
 });
 
 test("the shared modal hook keeps focus and keys in separate effects", () => {
@@ -140,13 +195,21 @@ test("the shared modal hook keeps focus and keys in separate effects", () => {
   );
 });
 
-test("the two dialogs that had it still keep focus and keys apart", () => {
-  // Named explicitly, because the scan above can only see the shape. If either
-  // file is rewritten into one effect again, the scan catches it -- but this
+test("the dialogs that had it still keep focus and keys apart", () => {
+  // Named explicitly, because the scan above can only see the shape. If any of
+  // these is rewritten into one effect again, the scan catches it -- but this
   // says which files the rule was written for and why they matter.
+  //
+  // `CreditPackPurchaseButton` is the third and the reason the scan had to
+  // follow indirection: it listed `setOpen`, not `onClose`, and `setOpen` is a
+  // useCallback over the `onOpenChange` prop. It is also the dialog whose
+  // focus assertion flipped the nightly on identical commits, so it is the
+  // last place that should be safe only because no caller happens to pass that
+  // prop.
   for (const file of [
     "components/chat/UsageLimitModal.tsx",
     "components/chat/DeepResearchSetupSheet.tsx",
+    "components/billing/CreditPackPurchaseButton.tsx",
   ]) {
     const source = readFileSync(join(root, file), "utf8");
     const focusEffects = effects(source).filter((effect) =>
