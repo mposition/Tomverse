@@ -54,6 +54,7 @@ Date / timezone:    ____________________
 - [ ] `npm run check:context-window-register`
 - [ ] `npm run check:router-context-window`
 - [ ] `npm run check:router-quality-eval`
+- [ ] `npm run check:auto-rollout-readiness`
 - [ ] `npm run check:usage-bucket-range`
 - [ ] `npm run check:memory-extraction-eval`
 - [ ] `npm run check:tomverse-chat-release-gate-view`
