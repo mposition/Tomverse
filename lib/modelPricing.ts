@@ -1505,11 +1505,18 @@ export type UnpricedModel = {
 };
 
 /**
- * Enabled models with no explicit pricing profile and no registry/environment
- * price override. A premium-class model in this state is an error: it is the
- * exact condition that mispriced GPT-5.5 / Gemini 3.1 Pro / Claude Opus 4.8 at
- * US$15/US$60. Cheaper classes are warnings, because their fallback is close
- * enough to real list prices to be safe while a profile is added.
+ * Enabled models with no explicit pricing profile and no complete
+ * registry/environment price override. A premium-class model in this state is
+ * an error: it is the exact condition that mispriced GPT-5.5 / Gemini 3.1 Pro /
+ * Claude Opus 4.8 at US$15/US$60. Cheaper classes are warnings, because their
+ * fallback is close enough to real list prices to be safe while a profile is
+ * added.
+ *
+ * "Complete" is load-bearing. `resolveModelPricing` falls back to the class
+ * price for each side independently, so a row carrying only an input price
+ * bills its *output* on the conservative fallback -- and output is the
+ * expensive half. Asking for both ends together, from either source, is what
+ * makes "this model is priced" mean what it says.
  */
 export const findUnpricedModels = (
     models: readonly Pick<
@@ -1525,13 +1532,17 @@ export const findUnpricedModels = (
     models
         .filter((model) => model.enabled)
         .filter((model) => !pricingById.has(model.id))
-        .filter(
-            (model) =>
-                model.inputUsdPerMillionTokens === undefined &&
-                model.outputUsdPerMillionTokens === undefined &&
-                !process.env[modelEnvKey(model.id, "INPUT_USD_PER_MILLION")] &&
-                !process.env[modelEnvKey(model.id, "OUTPUT_USD_PER_MILLION")]
-        )
+        .filter((model) => {
+            // Per side, from either source: a registry column and an
+            // environment override are interchangeable, a missing pair is not.
+            const inputPriced =
+                model.inputUsdPerMillionTokens !== undefined ||
+                Boolean(process.env[modelEnvKey(model.id, "INPUT_USD_PER_MILLION")]);
+            const outputPriced =
+                model.outputUsdPerMillionTokens !== undefined ||
+                Boolean(process.env[modelEnvKey(model.id, "OUTPUT_USD_PER_MILLION")]);
+            return !(inputPriced && outputPriced);
+        })
         .map((model) => {
             const costClass = getModelCostClass(model.usageClass);
             return {

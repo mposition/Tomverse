@@ -727,6 +727,55 @@ const checks = [
       source.includes("memoryExtractionProviderCalls"),
   },
   {
+    // `npm run check:model-pricing` proves the priced-premium rule about the
+    // compiled catalogue at CI time, but ModelRegistryEntry is what prices a
+    // real request and an administrator writes to it long after CI ran. The
+    // rule is enforced in the shared zod refinement, so create, update and the
+    // validate endpoint all get it from one place.
+    name: "An unpriced premium model cannot be enabled through the registry",
+    file: "lib/modelRegistryAdmin.ts",
+    test: (source) => {
+      const pricingDbCheck = read("scripts/check-model-pricing-db.mjs");
+      return (
+        source.includes("findUnpricedModels") &&
+        source.includes("unpricedPremiumMessage(candidate)") &&
+        // Both schemas go through refineModelInput, which is where the rule
+        // lives; a per-route check is how a fourth write path escapes it.
+        source.includes("createModelRegistrySchema = refineModelInput") &&
+        source.includes("updateModelRegistrySchema = refineModelInput") &&
+        pricingDbCheck.includes("assertPricedPremiumModels")
+      );
+    },
+  },
+  {
+    // `enforceUserOperationalSecurity` lived in chatSecurity.ts and nowhere
+    // else, so an account an administrator had suspended, restricted or
+    // scheduled for deletion was still free to generate images and run memory
+    // extractions -- both of which call a provider and charge credits. Every
+    // paid AI entry point goes through the one gate.
+    name: "Every paid AI entry point refuses an account put out of bounds",
+    file: "lib/chatSecurity.ts",
+    test: (source) => {
+      const image = read("lib/imageGenerationService.ts");
+      const extraction = read("lib/memoryExtractionService.ts");
+      return (
+        source.includes("export const assertUserOperationalAccess") &&
+        source.includes("enforceUserOperationalSecurity") &&
+        // Both the first request and the retry: a retry is a fresh provider
+        // call on a fresh reservation, not an inherited permission.
+        image.split("assertUserOperationalAccess(input.userId)").length === 3 &&
+        extraction.includes("assertUserOperationalAccess(input.userId)")
+      );
+    },
+  },
+  {
+    // The refusal carries its own 403 and code. Falling through to the route's
+    // generic handler would tell a suspended account the server broke.
+    name: "The extraction route answers an account refusal with its own status",
+    file: "app/api/memories/extraction-runs/route.ts",
+    test: (source) => source.includes("chatErrorResponse(error)"),
+  },
+  {
     // The retention sweeps are independent, and awaiting them bare meant the
     // first to throw skipped every one behind it -- on every run, since a step
     // that fails for a persistent reason fails again tomorrow. The step that
