@@ -78,6 +78,7 @@
     "check:enum-constraints": "node --conditions=react-server --import tsx scripts/check-enum-constraints.mjs",
     "report:cost-bucket-corrections": "node --conditions=react-server --import tsx scripts/report-cost-bucket-corrections.mjs",
     "report:credit-lot-invariants": "node --conditions=react-server --import tsx scripts/report-credit-lot-invariants.mjs",
+    "report:api-cache-control": "node scripts/report-api-cache-control.mjs",
     "report:issue-backlog": "node --import tsx scripts/report-issue-backlog.mjs",
     "report:release-gate-evidence": "node scripts/report-release-gate-evidence.mjs",
     "drill:railway-restore-preflight": "node scripts/railway-restore-preflight.mjs",
