@@ -24,7 +24,6 @@ import {
   suppressTransientUi,
   type Theme,
 } from "./support/chat-state-fixtures";
-import { skipUnlessCanonicalVisualBrowser } from "./support/canonical-visual";
 import {
   mockComparisonReview,
   mockConversationHistory,
@@ -54,10 +53,27 @@ test.beforeEach(async ({}, testInfo) => {
     testInfo.project.name !== "desktop-chromium",
     "Visual-regression goldens are maintained on a single engine (desktop-chromium) to keep them deterministic; run with --project=desktop-chromium."
   );
-  // Every test in this file is a golden, so the whole file is gated. The same
-  // Chromium mismatch that costs mobile-composer-contract two tests costs this
-  // one 49 of 74 (docs/qa/canonical-visual-baseline.md).
-  skipUnlessCanonicalVisualBrowser();
+  // The canonical-browser gate is NOT here. It used to be, on the claim that
+  // "every test in this file is a golden" -- and 18 of the 81 are not. They
+  // take no screenshot at all: the comparison breakpoints and model-slot
+  // counts, attachment upload and failure states, the unsupported and oversized
+  // file rejections, the 44px touch targets, the 320px clipping check, Deep
+  // Research gating for a Free plan, and the account/guest limit modals. Gating
+  // the file skipped those too, in exactly the environments the fallback exists
+  // for, which is the opposite of what the gate's own contract says
+  // ("Behavioural assertions in the same spec are untouched").
+  //
+  // That is not a small loss. One of the ten is the focus assertion on the
+  // credit-pack dialog -- the one the nightly used to catch the focus race on
+  // 18d1e891 -- so the check most likely to notice a regression here was the
+  // one silently not running.
+  //
+  // The gate now lives in `expectStableScreenshot`, the single choke point for
+  // every capture in this suite. A golden still reports `Not verified` on a
+  // substitute browser, and it gets there having run its behavioural
+  // assertions first; a test with no capture runs to completion. A new
+  // behavioural test added to this file is covered by construction rather than
+  // by remembering.
 });
 
 // useIsMobileShell() (components/chat/useIsMobileShell.ts) requires both a

@@ -78,6 +78,43 @@ const composerGateIsScopedToTheVisualBlock = () => {
 };
 
 /**
+ * The chat-state goldens reach the gate through their capture helper, not
+ * through a `test.beforeEach`.
+ *
+ * Same rule as `composerGateIsScopedToTheVisualBlock`, arrived at the other way
+ * round: that spec keeps its behavioural tests outside a gated describe block,
+ * this one has them interleaved with goldens, so the only placement that can
+ * gate captures without gating behaviour is the capture itself.
+ *
+ * Asserted as "in the capture and in no beforeEach" rather than as a substring
+ * anywhere, because the file-wide `beforeEach` this replaced satisfied a
+ * substring check perfectly while skipping 18 behavioural tests.
+ */
+const chatStateGateIsAtTheCapture = () => {
+  const fixtures = read("tests/e2e/support/chat-state-fixtures.ts");
+  const captureAt = fixtures.indexOf(
+    "export async function expectStableScreenshot"
+  );
+  if (captureAt < 0) return false;
+  if (!fixtures.slice(captureAt).includes("skipUnlessCanonicalVisualBrowser()")) {
+    console.error(
+      "expectStableScreenshot no longer calls skipUnlessCanonicalVisualBrowser -- the chat-state goldens are ungated."
+    );
+    return false;
+  }
+  const spec = read("tests/e2e/chat-state-visual-regression.spec.ts");
+  for (const match of spec.matchAll(/test\.beforeEach\(([\s\S]*?)\n\}\);/g)) {
+    if (match[1].includes("skipUnlessCanonicalVisualBrowser(")) {
+      console.error(
+        "chat-state-visual-regression.spec.ts gates the whole file in beforeEach again -- that skips its 18 screenshot-free tests too."
+      );
+      return false;
+    }
+  }
+  return true;
+};
+
+/**
  * The back-merge fallback step must refuse a conflict before it can push
  * anything: an unresolved index means bail out and fail, and only a clean
  * replay reaches `git push`. Expressed as an ordering rather than a presence
@@ -2934,9 +2971,16 @@ const checks = [
         !source.includes("--update-snapshots") &&
         // Both golden surfaces are wired to it. A guard nothing calls is
         // indistinguishable from no guard.
-        read("tests/e2e/chat-state-visual-regression.spec.ts").includes(
-          "skipUnlessCanonicalVisualBrowser()"
-        ) &&
+        //
+        // For the chat-state suite the wiring is `expectStableScreenshot`, the
+        // single choke point every golden in that file captures through. It
+        // used to be a `test.beforeEach` on the file, which is the same
+        // mistake this entry already refuses one line down for the composer
+        // spec -- and it cost more here: 18 of that file's 81 tests take no
+        // screenshot, and all 18 were skipped on any substitute browser,
+        // including the credit-pack dialog's focus assertion the nightly used
+        // to catch the focus race on 18d1e891.
+        chatStateGateIsAtTheCapture() &&
         // Scoped to the visual-record block, not the file. Hoisting the gate
         // to the top level would read identically as a substring while
         // silently taking the 30 geometry and behaviour tests out of every
