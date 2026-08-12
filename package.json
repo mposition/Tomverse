@@ -81,6 +81,7 @@
     "report:token-estimate-accuracy": "node --import tsx scripts/report-token-estimate-accuracy.mjs",
     "report:token-estimate-calibration": "node --import tsx scripts/report-token-estimate-calibration.mjs",
     "report:context-window-impact": "node --conditions=react-server --import tsx scripts/report-context-window-impact.mjs",
+    "report:routing-shadow": "node --conditions=react-server --import tsx scripts/report-routing-shadow.mjs",
     "check:data-domain-registry": "node --import tsx scripts/check-data-domain-registry.mjs"
   },
   "dependencies": {
