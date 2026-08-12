@@ -244,3 +244,79 @@ test("clearing one type does not clear the other", () => {
     assert.ok(cleared.startsWith(`tomverse_unlock_external_conversation_${ID}=;`));
     assert.ok(clearConversationUnlockCookie(ID).startsWith(`tomverse_unlock_${ID}=;`));
 });
+
+/* ------------------------------------- the names are not what separates them */
+
+test("a resource id that forges the other type's cookie name still opens nothing", () => {
+    // The cookie names are `tomverse_unlock_<id>` and
+    // `tomverse_unlock_<type>_<id>`, both joined with `_`, and ids may contain
+    // `_`. So the two namespaces are NOT structurally disjoint: a conversation
+    // whose id is `external_conversation_X` produces the exact cookie name an
+    // external conversation `X` reads.
+    //
+    // Today no id can be chosen -- both are cuids -- so this is not reachable
+    // from outside. What it pins is that the guarantee does not rest on that
+    // staying true: the separation is the per-type signing key, so the
+    // collision is a name clash and never an escalation. The existing
+    // relabelling test moves a value onto the other name by hand; this one
+    // makes the collision happen naturally, which is the direction an id
+    // format change would take.
+    const collidingNativeId = `external_conversation_${ID}`;
+    const native = createConversationUnlockCookie(USER, collidingNativeId, PASSWORD_HASH);
+    const external = createResourceUnlockCookie(
+        "external_conversation",
+        USER,
+        ID,
+        PASSWORD_HASH
+    );
+    assert.equal(
+        cookieValue(native).split("=")[0],
+        cookieValue(external).split("=")[0],
+        "the premise of this test is that the names collide"
+    );
+
+    // Neither direction verifies as the other.
+    assert.equal(
+        hasResourceUnlockGrant(
+            "external_conversation",
+            requestWith(cookieValue(native)),
+            USER,
+            ID,
+            PASSWORD_HASH
+        ),
+        false,
+        "a conversation grant must not open the external conversation it collides with"
+    );
+    assert.equal(
+        hasConversationUnlockGrant(
+            requestWith(cookieValue(external)),
+            USER,
+            collidingNativeId,
+            PASSWORD_HASH
+        ),
+        false,
+        "an external grant must not open the conversation it collides with"
+    );
+
+    // And each still opens its own, so the collision costs nothing but the
+    // cookie slot the browser can hold for one of them at a time.
+    assert.equal(
+        hasConversationUnlockGrant(
+            requestWith(cookieValue(native)),
+            USER,
+            collidingNativeId,
+            PASSWORD_HASH
+        ),
+        true
+    );
+    assert.equal(
+        hasResourceUnlockGrant(
+            "external_conversation",
+            requestWith(cookieValue(external)),
+            USER,
+            ID,
+            PASSWORD_HASH
+        ),
+        true
+    );
+});

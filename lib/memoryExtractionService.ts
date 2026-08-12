@@ -38,6 +38,7 @@ import {
     settleExtractionRunCredits,
 } from "@/lib/memoryExtractionCredits";
 import { getBillingPlanByTier } from "@/lib/billingConfig";
+import { lockCreditAccount } from "@/lib/creditDebt";
 import { prisma } from "@/lib/prisma";
 import { getProviderCostBudget } from "@/lib/providerCostBudget";
 import { recordMemoryCounter } from "@/lib/memoryMetrics";
@@ -63,6 +64,26 @@ const acquireUserRunLock = (
     userId: string
 ) =>
     tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${"memory-extraction:" + userId}))`;
+
+/**
+ * The credit account, locked before anything else in a transaction that will
+ * reserve or refund credits (credit-and-cost-limits.md §9).
+ *
+ * `reserveAddOnCredits` decides sufficiency from a read and then decrements
+ * the lots. The decrement is atomic; the decision is not, and there is no
+ * CHECK constraint behind it, so two callers that read the same balance both
+ * pass and `remainingCredits` goes negative. Chat and image generation hold
+ * this lock for exactly that reason; extraction is the third caller of the
+ * same primitive from a different orchestration.
+ *
+ * Taken *before* the run lock, not after. Chat takes the credit account first
+ * and then its own advisory lock, and a second path that inverted the pair
+ * would deadlock against it.
+ */
+const acquireCreditAccountLock = (
+    tx: Prisma.TransactionClient,
+    userId: string
+) => lockCreditAccount(tx, userId);
 
 const utcDayStart = (now: Date) =>
     new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
@@ -345,6 +366,9 @@ export async function createMemoryExtractionRun(input: {
 
     const sourceSelection = [...new Set(input.selectedConversationIds)].sort();
     return prisma.$transaction(async (tx) => {
+        // §9 order: the credit account first, then the run lock. This
+        // transaction ends in reserveExtractionRunCredits().
+        await acquireCreditAccountLock(tx, input.userId);
         await acquireUserRunLock(tx, input.userId);
         const active = await tx.memoryExtractionRun.findFirst({
             where: {
@@ -684,12 +708,17 @@ export async function claimNextExtractionChunk(
  * stop without re-reading it.
  */
 export async function completeExtractionChunk(
-    lease: Pick<MemoryExtractionLease, "runId" | "leaseGeneration">,
+    lease: Pick<MemoryExtractionLease, "runId" | "userId" | "leaseGeneration">,
     chunkIndex: number,
     result: { outcome: "completed" } | { outcome: "failed"; code: string },
     now: Date = new Date()
 ): Promise<{ applied: boolean; runStatus: string; chunkStatus?: string }> {
     return prisma.$transaction(async (tx) => {
+        // §9 order, and unconditionally: whether this chunk is the terminal
+        // one is only known further down, and taking the credit lock after
+        // that branch would mean a transaction that sometimes reserves
+        // credits without it.
+        await acquireCreditAccountLock(tx, lease.userId);
         const chunk = await tx.memoryExtractionChunk.findUnique({
             where: { runId_chunkIndex: { runId: lease.runId, chunkIndex } },
             select: { attemptCount: true },
@@ -800,6 +829,11 @@ export async function cancelMemoryExtractionRun(userId: string, runId: string) {
         );
     }
     await prisma.$transaction(async (tx) => {
+        // §9 order: a cancel refunds, so it holds the credit account too. A
+        // refund only increments, which is atomic on its own -- but a refund
+        // that interleaved with a concurrent reservation's read would let that
+        // reservation decide against a balance that no longer exists.
+        await acquireCreditAccountLock(tx, userId);
         const cancelled = await tx.memoryExtractionRun.updateMany({
             where: { id: run.id, status: { in: [...ACTIVE_RUN_STATUSES] } },
             data: { status: "cancelled", leaseExpiresAt: null },
