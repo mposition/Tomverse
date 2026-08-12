@@ -7,15 +7,27 @@ updates:
     open-pull-requests-limit: 10
     ignore:
       # TypeScript 7 is the native port and no longer ships the JavaScript
-      # compiler API. `next build` refuses it ("TypeScript 7.0.2 does not
-      # provide the compiler API required by Next.js").
+      # compiler API. Both of this hold's original reasons are now gone, and
+      # neither is why it is still here -- measured on typescript@7.0.2 with
+      # next@16.3.0 on 2026-08-12:
       #
-      # This hold had a second reason -- scripts/text-encoding-check-core.mjs
-      # used ts.createSourceFile and ts.SyntaxKind directly -- which is now
-      # resolved (#278): the checker scans for string ranges itself and imports
-      # nothing from typescript. Next.js is the only remaining blocker, and it
-      # is not ours to fix; remove this entry once it supports the TypeScript 7
-      # compiler API. TypeScript 6 stays eligible.
+      #   next build     passes. Next.js runs the project-local tsc CLI by
+      #                  default now (experimental.useTypeScriptCli), which is
+      #                  documented as the way to enable TypeScript 7.
+      #   tsc --noEmit   passes, no errors.
+      #   test:unit      2495 pass. scripts/text-encoding-check-core.mjs scans
+      #                  for string ranges itself and imports nothing from
+      #                  typescript (#278).
+      #   eslint .       dies before linting one file: "typescript-eslint does
+      #                  not support TS 7.0."
+      #
+      # So the blocker is typescript-eslint, which eslint-config-next bundles
+      # and which throws on any major >= 7 -- not Next.js, and not ours. Its
+      # own tracking issue (typescript-eslint#10940) targets TS >= 7.1, so keep
+      # the range at >=7 rather than excluding 7.0 alone: a 7.1 bump that
+      # arrives before that support does would break every lint run again.
+      # Remove this entry once the bundled typescript-eslint accepts TS 7.
+      # TypeScript 6 stays eligible.
       - dependency-name: typescript
         versions: [">=7"]
       # ESLint 10 changed the rule context passed to a rule's create(), and the
