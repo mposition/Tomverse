@@ -1043,6 +1043,23 @@ const checks = [
       !source.includes('([key]) => key !== "prompt"'),
   },
   {
+    name: "The image group creation guard decides kind through the helper",
+    file: "lib/imageGenerationService.ts",
+    test: (source) =>
+      // Same answer as `kind !== "image"` today, and not the same decision: a
+      // third conversation kind would leave every open-coded comparison
+      // silently picking a side, in the transaction that reserves credits.
+      source.includes("!isImageConversationKind(conversation.kind)") &&
+      !/conversation\.kind\s*!==\s*"image"/.test(source),
+  },
+  {
+    name: "The image history endpoint decides kind through the helper",
+    file: "app/api/conversations/[conversationId]/generations/route.ts",
+    test: (source) =>
+      source.includes("!isImageConversationKind(conversation.kind)") &&
+      !/conversation\.kind\s*!==\s*"image"/.test(source),
+  },
+  {
     name: "An image asset reaches the client as a signed URL, never as a key",
     file: "lib/imageGenerationRead.ts",
     test: (source) =>

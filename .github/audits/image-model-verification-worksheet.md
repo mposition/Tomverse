@@ -292,6 +292,40 @@ minimumCredits
 - [ ] 인증된 provider key로 날짜 snapshot/model ID 가시성 확인
 - [ ] 1회 staging 생성으로 원본 MIME, provenance, usage, 정산 원가 확인
 - [ ] `npm run check:image-pricing`과 관련 registry/adapter 테스트 통과
+- [ ] **budget floor가 새 모델을 실제로 반영하는지 확인.**
+      `worstImageCostPerCreditMicroUsd()`는 2026-08-12까지 `gpt-image-2`의
+      가격표만 순회했고, 그동안 enabled였던 xAI는 유도에 들어가지 않았다.
+      지금은 registry 가격도 함께 읽으므로, 새 모델의 크레딧당 원가가 기존
+      최대값(864µ)보다 크면 floor가 오른다 — 활성화 후 실제 floor 값을 읽어
+      배포한 예산이 여전히 그 위인지 확인한다.
+- [ ] **`/api/ready`를 활성화 후 직접 호출해 확인.** readiness 차단은
+      "이미지 flag ON **그리고** 해당 provider의 enabled 모델 존재"일 때만
+      발동한다. 모델만 등록돼 있거나 flag가 꺼져 있으면 예산이 없어도 통과하므로,
+      활성화 전의 `ok:true`는 예산이 맞다는 증거가 아니다.
+- [ ] **네 번째 모델이 켜지면 컴포저가 compact picker로 전환되는지 육안 확인.**
+      임계값은 활성 모델 3개이고(`imageComposerModelLayout()`), Google 3종을
+      켜면 2→5로 건너뛴다. 규칙은 unit test로 고정돼 있으나 이 배포는 e2e로
+      그 분기에 닿을 수 없다(`docs/ui-contracts/image-generation-workspace.md`).
+
+### provider 예산 승인은 한도 이전이 아니라 신규 노출이다
+
+Google `IMAGE_PROVIDER_GOOGLE_COST_MICROUSD_PER_DAY/_PER_MONTH`에 값을 넣는
+것은 기존 한도를 옮기는 작업이 아니라, **회사가 Google에 대해 그만큼의 월
+노출을 새로 승인하는 결정**이다. 초기값으로 논의된 일 $50 / 월 $500은
+2026-08-05에 xAI 이미지 provider에 승인된 것과 동일한 초기 envelope이며,
+채팅 provider(MiniMax 등)의 승인과는 다른 층이다 — 같은 숫자라도 같은 결정이
+아니다.
+
+- **예산은 provider별 총액이다.** Google 모델 3종은 하나의 pool을 공유하고,
+  모델별 값은 관측 차원일 뿐이다. 3종을 켜는 것은 세 개의 예산이 아니라 하나의
+  예산을 세 배 빠르게 쓸 수 있게 하는 것이다.
+- **승인되지 않은 숫자를 적느니 모델을 비활성으로 둔다.** floor($10.80)는
+  거절당하지 않을 최소값이지 권고치가 아니며, 회사가 승인하지 않은 상한을
+  적는 것은 예산이 없는 것보다 나쁘다.
+- **`month <= day`는 차단 조건이 아니라 advisory다**(`month_not_above_day`).
+  production에서는 월 > 일을 운영 원칙으로 하되, 코드는 위반 시 경고만 하고
+  readiness는 통과시킨다. staging의 `$10.80 / $10.80`은 총 지출을 캡하려는
+  의도된 예외다.
 
 ### 권장 활성화 순서
 
