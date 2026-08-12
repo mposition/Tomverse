@@ -44,33 +44,35 @@ export const documentReferences = (markdown) => {
  * what the reader has already been told.
  */
 export const PLANNED_REFERENCES = {
-    "lib/marketingMemoryClaims.ts": {
-        document: "docs/policy/external-conversation-import-and-memory.md",
-        reason:
-            "§17's release-blocking marketing-claim boundary names this module as the single policy source, " +
-            "and neither it nor an equivalent structure has been built. The document says so where the reader " +
-            "is, and states that until it exists the allowed/forbidden lists are a rule people follow by hand.",
-    },
+    // Empty, and that is the healthy state: an entry here is a document
+    // telling the reader about something that does not exist yet.
+    // `lib/marketingMemoryClaims.ts` was the last one and now exists, so §17's
+    // boundary is guarded by the check again rather than exempt from it.
 };
 
 /**
  * @param {{
  *   references: Map<string, Set<string>>,
  *   exists: (path: string) => boolean,
+ *   planned?: Record<string, { document: string, reason: string }>,
  * }} input
  * @returns {{ errors: string[] }}
  */
-export function auditDocumentReferences({ references, exists }) {
+export function auditDocumentReferences({
+    references,
+    exists,
+    planned = PLANNED_REFERENCES,
+}) {
     const errors = [];
     for (const [path, sources] of references) {
         if (exists(path)) continue;
-        if (path in PLANNED_REFERENCES) continue;
+        if (path in planned) continue;
         errors.push(
             `${path} does not exist, and is referenced by ${[...sources].sort().join(", ")}. ` +
                 `An instruction that sends someone to a missing file teaches them the instructions are unreliable.`
         );
     }
-    for (const path of Object.keys(PLANNED_REFERENCES)) {
+    for (const path of Object.keys(planned)) {
         if (exists(path)) {
             errors.push(
                 `${path} is listed as planned but now exists. Remove the entry so the check guards it again.`
