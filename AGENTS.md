@@ -65,6 +65,37 @@ UI-012에서 승인된 정책(B안)입니다. accent 색은 **hue가 아니라 �
 
 예외가 필요하면 이 문서에 근거를 적고 나서 추가합니다.
 
+# 다음 작업 고를 때 — 열린 이슈를 그대로 믿지 않습니다
+
+이슈가 **열려 있다**는 것과 **아직 안 됐다**는 것은 다른 사실입니다. 이 저장소는
+수정을 먼저 넣고 이슈를 나중에 닫으므로, 열린 목록을 그대로 후보로 쓰면 이미
+끝난 일을 다시 제안하게 됩니다. 2026-08-12에 열린 이슈 6건이 전부 이미
+해결된 상태였습니다.
+
+작업 후보를 고르기 전에 실행합니다.
+
+```
+npm run report:issue-backlog -- --issues-file <열린 이슈 JSON>
+```
+
+`GITHUB_TOKEN`이 있으면 `--issues-file` 없이 API에서 직접 읽습니다.
+
+- 판정 근거는 `scripts/report-issue-backlog-core.mjs`에 있습니다. 세 신호를
+  각각 따로 보고하며 하나의 boolean으로 합치지 않습니다 — `pricing`(profile
+  존재 + pending register 이탈), `probe`(이슈별 손으로 쓴 완료 조건),
+  `commits`(이슈 번호를 언급한 commit, 셋 중 가장 약한 신호).
+- **내용 검사는 release branch마다 따로** 합니다. `develop`과 `main`의 간격은
+  이슈마다 다르게 걸치므로, 한쪽만 읽고 "고쳐졌다"고 답하면 반대쪽에 대해
+  틀립니다.
+- 착수해도 되는 것은 `candidates`(= `open_work`)뿐입니다.
+  `landed_but_unverified`는 사람이 확인할 대상이지 시작할 작업이 아닙니다.
+- 새 이슈의 완료 조건이 generic 신호에 안 잡히면 `ISSUE_PROBES`에 추가합니다.
+  증명하지 못하는 부분은 `remainder`에 적습니다 — 그래야 부분 완료가 완료로
+  보고되지 않습니다.
+- 이 script는 보고 전용이라 gate가 아닙니다. 단 하나의 비정상 종료는
+  `lib/modelPricing.ts` 해석이 실제 module과 어긋날 때이며, 그때는 출력 전체를
+  믿을 수 없다는 뜻입니다.
+
 # Credit entitlement vs operational guardrail
 
 크레딧·비용 한도를 건드리기 전에 읽습니다.

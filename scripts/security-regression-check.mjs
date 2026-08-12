@@ -727,12 +727,36 @@ const checks = [
       source.includes("memoryExtractionProviderCalls"),
   },
   {
+    // The retention sweeps are independent, and awaiting them bare meant the
+    // first to throw skipped every one behind it -- on every run, since a step
+    // that fails for a persistent reason fails again tomorrow. The step that
+    // deletes accounts past their 30-day grace period is fifth in the order.
+    name: "Retention cleanup steps run in isolation and report which failed",
+    file: "lib/maintenance.ts",
+    test: (source) =>
+      source.includes("createMaintenanceStepRunner") &&
+      source.includes("failedSteps: failures") &&
+      source.includes('step("scheduled_account_deletions"'),
+  },
+  {
+    // Isolation must not turn a partial failure into a silent success: the
+    // alert has to fire and the run has to be recorded failed.
+    name: "A failed retention step still fails the scheduled job",
+    file: "app/api/internal/maintenance/cleanup/route.ts",
+    test: (source) =>
+      source.includes("deleted.failedSteps.length > 0") &&
+      source.includes("failScheduledJob") &&
+      source.includes("SCHEDULED_MAINTENANCE_CLEANUP_STEP_FAILED"),
+  },
+  {
     name: "Provider error events expire through maintenance cleanup",
     file: "lib/maintenance.ts",
     test: (source) =>
       source.includes("providerErrorEvent.deleteMany") &&
       source.includes("30 * 24 * 60 * 60 * 1000") &&
-      source.includes("providerErrorEvents.count"),
+      // Optional because the sweep runs as an isolated step now: a step that
+      // threw reports `null` rather than a count.
+      /providerErrorEvents\??\.count/.test(source),
   },
   {
     name: "Infrastructure metrics remain admin-only with bounded external responses",
@@ -1017,6 +1041,28 @@ const checks = [
       source.includes('PROMPT_FIELD_NAMES = new Set(["prompt", "input"])') &&
       source.includes("!PROMPT_FIELD_NAMES.has(key)") &&
       !source.includes('([key]) => key !== "prompt"'),
+  },
+  {
+    name: "The adapter takes its delivery MIME type from the registry helper",
+    file: "lib/imageProviderAdapter.ts",
+    test: (source) =>
+      // `outputMimeTypes` is the storage allowlist; `deliveryMimeType` is what
+      // the request asks the provider for. Reading the head of the allowlist
+      // instead sent every Google request asking for PNG, which its API
+      // refuses -- and the two are only kept apart by going through one helper.
+      source.includes("imageDeliveryMimeType(model)") &&
+      !source.includes("outputMimeTypes["),
+  },
+  {
+    name: "The thinking-cap measurement sends the adapter's own request",
+    file: "scripts/measure-google-image-thinking-cap.mjs",
+    test: (source) =>
+      // This script exists to measure what production would be billed for, so
+      // a request it builds differently from the adapter measures nothing. It
+      // already drifted once: the adapter learned Google's delivery MIME type
+      // and the script kept its own copy of the old expression.
+      source.includes("imageDeliveryMimeType(model)") &&
+      !source.includes("outputMimeTypes["),
   },
   {
     name: "A documented output limit never doubles as a proven cost cap",

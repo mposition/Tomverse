@@ -1,7 +1,6 @@
 import "server-only";
 
 import type { Prisma } from "@prisma/client";
-import { unstable_cache } from "next/cache";
 import { FOUNDING_TESTER_PASS_STATUS, INTERNAL_PASS_FULFILLMENT } from "@/lib/foundingTesterPassCore";
 import { getUserChatUsageKey } from "@/lib/chatSecurity";
 import { prisma } from "@/lib/prisma";
@@ -260,7 +259,37 @@ const getDailyMetricsByUserId = async (
   );
 };
 
-const queryAdminUserStats = async (
+/**
+ * The Admin Console KPI counters, read straight from the database.
+ *
+ * These were previously served from `unstable_cache(..., { revalidate: 60,
+ * tags: ["admin-user-stats"] })`, and nothing in the repository ever
+ * invalidated that tag — so the counters were only ever refreshed by the timer.
+ * Wiring the tag up to the writes did not fix it either. Measured on this
+ * codebase against Next.js 16.2.12:
+ *
+ * - `revalidate: 60` is stale-while-revalidate, so a render always serves the
+ *   previous entry and starts the refresh behind it. A probe rendered `17`
+ *   while the database held `9`, then rendered `9` while the database held
+ *   `16`: the screen is a page-load behind, and can show a figure from a run
+ *   that no longer exists.
+ * - `revalidateTag(tag, { expire: 0 })` was a silent no-op here — the counters
+ *   did not move and nothing was logged. Only the deprecated single-argument
+ *   `revalidateTag(tag)` actually expired the entry.
+ * - Invalidation could not have been complete in any case. Sign-ups and Stripe
+ *   subscription changes move these counts from paths that are not admin
+ *   writes, and stale-while-revalidate would still hand the operator the old
+ *   number on the first render after each of them.
+ *
+ * Meanwhile Overview renders a *fresh* plan mix next to what was a *cached*
+ * paid-conversion rate, so one screen could contradict itself. The Admin
+ * Console is an internal, low-traffic surface and this is ten `count()`
+ * queries; paying for them on each render is cheaper than counters an operator
+ * cannot trust. If they ever need caching again, cache them with `use cache`
+ * plus `cacheTag()` and invalidate from every path that moves a plan — not
+ * from the admin writes alone.
+ */
+export const getAdminUserStats = async (
   now = new Date()
 ): Promise<AdminUserStats> => {
   const sevenDaysAgo = new Date(now.getTime() - 7 * 86_400_000);
@@ -307,22 +336,6 @@ const queryAdminUserStats = async (
         : 0,
   };
 };
-
-const getCachedAdminUserStats = unstable_cache(
-  async () => queryAdminUserStats(new Date()),
-  ["admin-user-stats-v1"],
-  {
-    revalidate: 60,
-    tags: ["admin-user-stats"],
-  }
-);
-
-export const getAdminUserStats = (): Promise<AdminUserStats> =>
-  getCachedAdminUserStats();
-
-export const getFreshAdminUserStats = (
-  now = new Date()
-): Promise<AdminUserStats> => queryAdminUserStats(now);
 
 export const getAdminUsersPage = async ({
   query = "",
