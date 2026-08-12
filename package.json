@@ -2,6 +2,9 @@
   "name": "ai-chat-hub",
   "version": "0.1.0",
   "private": true,
+  "workspaces": [
+    "packages/*"
+  ],
   "scripts": {
     "dev": "next dev --webpack",
     "predev": "node scripts/generate-build-info.mjs",
@@ -83,7 +86,8 @@
     "report:token-estimate-calibration": "node --import tsx scripts/report-token-estimate-calibration.mjs",
     "report:context-window-impact": "node --conditions=react-server --import tsx scripts/report-context-window-impact.mjs",
     "report:routing-shadow": "node --conditions=react-server --import tsx scripts/report-routing-shadow.mjs",
-    "check:data-domain-registry": "node --import tsx scripts/check-data-domain-registry.mjs"
+    "check:data-domain-registry": "node --import tsx scripts/check-data-domain-registry.mjs",
+    "check:shared-packages": "node scripts/check-shared-packages.mjs"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^4.0.30",

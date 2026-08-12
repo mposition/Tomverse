@@ -212,6 +212,18 @@ jobs:
         timeout-minutes: 5
         run: npm run check:data-domain-registry
 
+      # PACKAGE-01. The shared packages are the mechanism that stops the web
+      # app and the native shell from becoming two products; that only holds
+      # while the shared half runs unchanged in all three environments. The
+      # metric is counted through ESLint's own API, so it cannot disagree with
+      # the ESLint step below about what "forbidden" means, and each package
+      # is type-checked under its own tsconfig -- no DOM, no Node types, no
+      # `@/*` alias -- which catches a forbidden global that no import rule
+      # can see.
+      - name: Shared package framework purity
+        timeout-minutes: 5
+        run: npm run check:shared-packages
+
       # gpt-image-2 lives outside AVAILABLE_MODELS by design, so the model
       # pricing check above cannot see it. Same release contract -- every
       # enabled price is explicit and verified -- separate fail-closed net.

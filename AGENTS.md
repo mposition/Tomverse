@@ -280,6 +280,37 @@ npm run report:issue-backlog -- --issues-file <열린 이슈 JSON>
   echo가 아니라 실제 DB 저장값만 반환합니다. UI 계약은
   `docs/ui-contracts/account-model-settings.md`.
 
+# 공유 package와 framework 순수성
+
+`packages/**`, workspace 설정, `transpilePackages`, `eslint.config.mjs`의
+`no-restricted-imports` 규칙을 건드리기 전에 읽습니다.
+
+- `docs/policy/shared-packages.md`
+
+절대 조건:
+
+- **`packages/*`는 세 환경에서 그대로 돌아야 합니다** — Next.js 서버, 브라우저
+  번들, Capacitor shell. 한 곳에서만 해석되는 import 하나가 공유 package를
+  "디렉터리만 다른 app 코드"로 되돌립니다.
+- **금지 import**: `next`·`next/*`, `server-only`·`@/*`·`@prisma/client`·
+  `next-auth`, `node:*`와 bare Node builtin, `@capacitor/*`·`react-native`.
+  플랫폼 의존은 port로 주입합니다.
+- **package는 `dependencies`·`peerDependencies`를 선언하지 않습니다.**
+  dependency block은 어떤 소스 파일도 이름을 대지 않은 채 framework가 돌아오는
+  경로입니다. `"type": "module"`은 필수입니다.
+- **package tsconfig는 root를 `extends`하지 않습니다.** `lib`는 `["ES2022"]`,
+  `types`는 `[]`, `paths` 없음 — `window`·`process`·`Buffer`가 해석되지 않는
+  것이 요점입니다. ESLint는 금지된 *import*를, 이쪽은 금지된 *global*을
+  잡습니다.
+- **PACKAGE-01 지표는 ESLint 자체 API로 셉니다**
+  (`npm run check:shared-packages`). 별도 scanner를 만들어 두 숫자가 어긋나게
+  하지 않습니다.
+- **seed는 이동이지 재export shim이 아닙니다.** `lib/`에 shim을 남기면 예전
+  import 경로가 계속 동작하므로 경계를 강제하는 것이 아무것도 없습니다.
+- **PACKAGE-01은 아직 `pending`입니다.** Vite build matrix 증거가 없으며
+  `apps/mobile`과 함께 옵니다. 표준 `tsc` project를 build matrix라고 부르지
+  않습니다.
+
 <!-- BEGIN:mobile-chat-composer-invariant -->
 # 이미지 생성 (v2: 멀티 모델 비교)
 

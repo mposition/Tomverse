@@ -4,7 +4,7 @@ import {
   isChatCompletionStatus,
   isLengthRawFinishReason,
   resolveChatCompletionOutcome,
-} from "../lib/chatCompletionStatus.ts";
+} from "@tomverse/chat-core";
 
 test("a normal stop is a normal completion", () => {
   assert.deepEqual(
