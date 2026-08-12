@@ -1,0 +1,96 @@
+/*
+ * Platform-neutral design tokens (docs/policy/shared-packages.md).
+ *
+ * Plain CSS custom properties with literal values and nothing else. No
+ * Tailwind at-rule, no `@apply`, no import of anything outside this file, and
+ * no `var()` that this file does not itself define -- so a Vite bundle or the
+ * Capacitor shell can load it exactly as the Next.js app does.
+ *
+ * What is deliberately NOT here:
+ *
+ *   - `--font-ui` / `--font-code`. They resolve `next/font` variables the
+ *     Next.js app injects on <html>, which is the definition of not being
+ *     platform-neutral. Font wiring, the Korean metric-matched @font-face and
+ *     the `:lang()` rules stay in app/globals.css.
+ *   - the `@theme inline` block. `@theme` is a Tailwind directive; naming a
+ *     colour there is how a Tailwind utility gets generated, which is a
+ *     web-app build concern rather than a token.
+ *
+ * ## The two dark blocks
+ *
+ * UI-001: `dark` resolves from two places -- an explicit `.dark` class, and
+ * `prefers-color-scheme` where no explicit choice exists -- so the dark tokens
+ * are written twice. A media query cannot appear inside a selector list, and
+ * rewriting every token as `light-dark()` would be a larger change than the
+ * problem warrants.
+ *
+ * The duplication is enforced rather than trusted: tests/themeCssContract
+ * .test.mjs parses both blocks and fails if a property or value exists in one
+ * and not the other. Change them together.
+ */
+
+:root {
+    color-scheme: light;
+    --background: #ffffff;
+    --foreground: #171717;
+
+    /*
+     * Tomverse brand accent -- reserved for AI Review and the "Tomverse
+     * generated this" selected state. Mirrors the cyan/blue/purple logo
+     * gradient, anchored on the app's existing primary blue-600 as the middle
+     * stop so it reads as an extension of the primary palette, not a
+     * competing one. Never use these for primary CTAs, provider branding, or
+     * success/warning/error state -- see AGENTS.md "Accent colour roles".
+     */
+    --tomverse-accent-start: #0e7490; /* cyan-700 */
+    --tomverse-accent-mid: #2563eb; /* blue-600, same as primary CTA blue */
+    --tomverse-accent-end: #9333ea; /* purple-600 */
+
+    /* Review container identity: flat indigo (blue+purple blend), deliberately
+       not plain blue (primary) and not violet (already owned by Deep
+       Research). */
+    --tomverse-review-surface: #eef2ff; /* indigo-50 */
+    --tomverse-review-border: #6366f1; /* indigo-500 */
+    --tomverse-review-selected: #e0e7ff; /* indigo-100 */
+    --tomverse-review-selected-border: #4f46e5; /* indigo-600 */
+    --tomverse-review-selected-text: #3730a3; /* indigo-800 */
+}
+
+/* An explicit dark choice. */
+:root.dark {
+    color-scheme: dark;
+    --background: #0a0a0a;
+    --foreground: #ededed;
+
+    --tomverse-accent-start: #22d3ee; /* cyan-400 */
+    --tomverse-accent-mid: #60a5fa; /* blue-400 */
+    --tomverse-accent-end: #c084fc; /* purple-400 */
+
+    --tomverse-review-surface: #14152a;
+    --tomverse-review-border: #4f46e5; /* indigo-600 */
+    --tomverse-review-selected: #1e1b4b; /* indigo-950 */
+    --tomverse-review-selected-border: #818cf8; /* indigo-400 */
+    --tomverse-review-selected-text: #c7d2fe; /* indigo-200 */
+}
+
+/* The same tokens for a visitor whose OS asks for dark and who has made no
+   explicit choice. This is what a `force-static` marketing page can honour on
+   its first paint: it depends on nothing but the media query, so it is correct
+   in prerendered HTML that no cookie ever reached. */
+@media (prefers-color-scheme: dark) {
+    :root:not(.light):not(.dark) {
+        color-scheme: dark;
+        --background: #0a0a0a;
+        --foreground: #ededed;
+
+        --tomverse-accent-start: #22d3ee; /* cyan-400 */
+        --tomverse-accent-mid: #60a5fa; /* blue-400 */
+        --tomverse-accent-end: #c084fc; /* purple-400 */
+
+        --tomverse-review-surface: #14152a;
+        --tomverse-review-border: #4f46e5; /* indigo-600 */
+        --tomverse-review-selected: #1e1b4b; /* indigo-950 */
+        --tomverse-review-selected-border: #818cf8; /* indigo-400 */
+        --tomverse-review-selected-text: #c7d2fe; /* indigo-200 */
+    }
+}

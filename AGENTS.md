@@ -96,6 +96,50 @@ npm run report:issue-backlog -- --issues-file <열린 이슈 JSON>
   `lib/modelPricing.ts` 해석이 실제 module과 어긋날 때이며, 그때는 출력 전체를
   믿을 수 없다는 뜻입니다.
 
+# 릴리스 게이트에서 일감을 고를 때
+
+`docs/release-gates/tomverse-chat-v1.yaml`의 40개 게이트가 전부 `status: pending`
+입니다. **이는 정상이며 고칠 대상이 아닙니다** — registry는 `metadata.status:
+draft`이고 `governance.implementationStatus: planned`이며, 검증기는 `--release`
+에서만 승인과 증거를 강제합니다(PR Fast Gate는 `--release` 없이 실행).
+
+다만 draft 상태에서는 "pending"이라는 한 단어가 서로 다른 세 상황을 덮습니다.
+구분해서 보려면 실행합니다.
+
+```
+npm run report:release-gate-evidence
+npm run report:release-gate-evidence -- --condition memory-release-b-enabled=false
+```
+
+- 판정 근거는 `scripts/report-release-gate-evidence-core.mjs`의 `GATE_EVIDENCE`
+  이며 **손으로 쓴 매핑**입니다. 게이트의 `evidence` 문구에서 파일을 추측하지
+  않습니다 — 아무도 안 본 게이트에 대해 확신을 지어내는 것이 이 도구가 막으려는
+  실패입니다. 매핑 없는 게이트는 `unmapped`으로 보고합니다.
+- **`evidence_present`는 통과가 아닙니다.** 게이트가 이름 댄 산출물이 트리에
+  있다는 뜻일 뿐이고, 대부분의 기준은 이 저장소에 없는 production·부하 데이터
+  위에서 정의됩니다. 임계값 판단은 사람이 합니다.
+- **이 도구는 registry에 쓰지 않습니다.** status 전환도 `evidenceRefs` 채우기도
+  하지 않습니다. 승인은 registry에 기록되는 사람의 행위이고, 보고서가 자기
+  대상을 편집하면 registry가 존재하는 이유인 감사 기록이 사라집니다.
+- **`appliesWhen`은 저장소 사실이 아니라 런타임 조건입니다.** MEMORY 4건은
+  `AppSetting`의 `feature.memoryExtractionEnabled`·`feature.memoryInjectionEnabled`
+  에 달려 있으므로, 조건을 주지 않으면 `applicability_unknown`으로 남깁니다.
+  꺼져 있다고 가정하면 blocking 프라이버시·안전 게이트 4건을 조용히 면제하게
+  됩니다.
+- 착수 후보는 `nothing built yet`입니다. `built, nothing measures it`은 보통
+  기능이 아니라 테스트나 리포트 한 건입니다.
+
+`nothing built yet` 11건 중 **BILLING-04만 다른 작업에 막혀 있지 않습니다.**
+Planner·context manifest·moderation은 선행 작업 대기이고, store·native auth는 이
+저장소에서 만들 수 없습니다. BILLING-04에 착수하기 전에 읽습니다.
+
+- `docs/policy/goodwill-credit-grants.md`
+
+goodwill 지급은 Stripe 환불도 구매 취소도 아닌 **세 번째 것**이며, 대응 결제가
+없으므로 멱등성을 빌려올 수 없습니다. 설계 문서 §8의 여섯 가지(1회·기간 상한,
+이중 승인 임계값, 만료, 소진 순서, 환불 상호작용, 사용자 가시성)는 finance-ops의
+결정이며 **정해지기 전에는 구현하지 않습니다.**
+
 # Credit entitlement vs operational guardrail
 
 크레딧·비용 한도를 건드리기 전에 읽습니다.
@@ -142,6 +186,18 @@ npm run report:issue-backlog -- --issues-file <열린 이슈 JSON>
   `publicChatErrorDetails()`가 제거하고, Admin Console과 구조화 로그에만
   남깁니다.
 - 모든 오류 응답의 `resetAt`은 생성 시점보다 미래여야 합니다.
+- **크레딧을 예약·환급하는 트랜잭션은 `lockCreditAccount(tx, userId)`를 가장
+  먼저 잡습니다**(정책 문서 §9). `reserveAddOnCredits()`는 읽어서 판정하고
+  차감하는데 `CreditLot.remainingCredits`에 CHECK도 사후 검사도 없어서, 잠금이
+  없으면 같은 잔액을 읽은 두 경로가 모두 통과해 잔액이 음수가 됩니다. 순서도
+  계약입니다 — workflow advisory 잠금(`memory-extraction:*` 등)보다 **앞**이며,
+  종료 여부 같은 조건 분기 **안**에서 잠그지 않습니다.
+- **`CreditLot`의 non-negative CHECK는 그 잠금의 대체물이 아닙니다.** CHECK는
+  직렬화를 못 하므로 잠금 없는 경로를 안전하게 만들지 못하고, 조용히 틀린
+  잔액을 실패한 트랜잭션으로 바꿀 뿐입니다. `NOT VALID`로 배포했으므로
+  validate는 `npm run report:credit-lot-invariants`가 0을 보고한 뒤 **별도
+  migration**으로 합니다 — production에서 손으로 validate하면 schema 비교가
+  drift로 잡습니다.
 - 이 계약을 어기는 변경은 릴리스 차단 사유입니다.
 
 # Chat concurrency and identity namespace
@@ -279,6 +335,37 @@ npm run report:issue-backlog -- --issues-file <열린 이슈 JSON>
   또는 승인된 retirement reconciliation뿐입니다. 저장 성공 응답은 요청
   echo가 아니라 실제 DB 저장값만 반환합니다. UI 계약은
   `docs/ui-contracts/account-model-settings.md`.
+
+# 공유 package와 framework 순수성
+
+`packages/**`, workspace 설정, `transpilePackages`, `eslint.config.mjs`의
+`no-restricted-imports` 규칙을 건드리기 전에 읽습니다.
+
+- `docs/policy/shared-packages.md`
+
+절대 조건:
+
+- **`packages/*`는 세 환경에서 그대로 돌아야 합니다** — Next.js 서버, 브라우저
+  번들, Capacitor shell. 한 곳에서만 해석되는 import 하나가 공유 package를
+  "디렉터리만 다른 app 코드"로 되돌립니다.
+- **금지 import**: `next`·`next/*`, `server-only`·`@/*`·`@prisma/client`·
+  `next-auth`, `node:*`와 bare Node builtin, `@capacitor/*`·`react-native`.
+  플랫폼 의존은 port로 주입합니다.
+- **package는 `dependencies`·`peerDependencies`를 선언하지 않습니다.**
+  dependency block은 어떤 소스 파일도 이름을 대지 않은 채 framework가 돌아오는
+  경로입니다. `"type": "module"`은 필수입니다.
+- **package tsconfig는 root를 `extends`하지 않습니다.** `lib`는 `["ES2022"]`,
+  `types`는 `[]`, `paths` 없음 — `window`·`process`·`Buffer`가 해석되지 않는
+  것이 요점입니다. ESLint는 금지된 *import*를, 이쪽은 금지된 *global*을
+  잡습니다.
+- **PACKAGE-01 지표는 ESLint 자체 API로 셉니다**
+  (`npm run check:shared-packages`). 별도 scanner를 만들어 두 숫자가 어긋나게
+  하지 않습니다.
+- **seed는 이동이지 재export shim이 아닙니다.** `lib/`에 shim을 남기면 예전
+  import 경로가 계속 동작하므로 경계를 강제하는 것이 아무것도 없습니다.
+- **PACKAGE-01은 아직 `pending`입니다.** Vite build matrix 증거가 없으며
+  `apps/mobile`과 함께 옵니다. 표준 `tsc` project를 build matrix라고 부르지
+  않습니다.
 
 <!-- BEGIN:mobile-chat-composer-invariant -->
 # 이미지 생성 (v2: 멀티 모델 비교)
@@ -472,3 +559,21 @@ Non-negotiable requirements:
 - Any related change must keep `tests/settingsNavigation.test.mjs` and `tests/e2e/settings-information-architecture.spec.ts` passing on the desktop *and* mobile projects.
 - A change that violates this contract is a release blocker.
 <!-- END:settings-navigation-invariant -->
+<!-- BEGIN:admin-console-ia-invariant -->
+## Admin Console information architecture invariant
+
+Before changing `lib/adminNavigation.ts`, `components/admin/adminNavigationIcons.ts`, `lib/adminNavigationBadges.ts`, `components/admin/AdminConsoleShell.tsx`, `AdminSidebar.tsx`, `AdminCommandPalette.tsx`, `AdminPageTabs.tsx`, or any route under `app/(site)/(application)/admin/**`, read:
+
+- `docs/ui-contracts/admin-console-ia.md`
+
+Non-negotiable requirements:
+
+- **Every retired `/admin/*` URL keeps a redirect.** Bookmarks, runbooks and `href`s already written into audit summaries point at them, so deleting a route without leaving one behind is a release blocker. A redirect carries the request's own query to the destination but never its own stale `tab`.
+- A section lives in `?tab=`, not in component state. Tabs are `<Link>`s, the page's server component reads `searchParams`, and only the open section's data is loaded.
+- Adding an entry means adding it in three places at once: the route table in `lib/adminNavigation.ts`, an icon in `adminNavigationIcons.ts`, and a real route segment. There is no catch-all `[section]` route — an unknown admin URL must answer 404, not 200.
+- A badge is for work, not decoration: only entries an operator acts on carry one, and an unknown count renders nothing rather than zero.
+- The layout loads counts; a page loads its own data. Nothing that only one workspace displays may move into `admin/layout.tsx`. A panel showing the newest N rows states N on screen and does not present its own counters as totals.
+- Authorization is out of this contract's scope and was not changed by it: `writeRoles` in the route table drives the sidebar's "Read" marker only, and access is still decided server-side by `lib/adminAuth.ts` and each `/api/admin/**` handler.
+- Any related change must keep `tests/adminNavigation.test.mjs` and the `tests/e2e-admin/**` suite (`npm run test:e2e:admin`, the "Admin Console E2E (PostgreSQL)" workflow) passing.
+- A change that violates the redirect rule is a release blocker; the rest is ordinary review.
+<!-- END:admin-console-ia-invariant -->

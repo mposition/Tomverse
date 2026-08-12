@@ -20,7 +20,13 @@
       }
     ],
     "paths": {
-      "@/*": ["./*"]
+      "@/*": ["./*"],
+      // The workspace symlink under node_modules resolves this at runtime;
+      // this entry is what makes `tsc` and the editor read the package's
+      // TypeScript source rather than a build output it does not have. The
+      // package is published to nothing and built by nothing -- consumers
+      // compile it themselves (`transpilePackages` in next.config.ts).
+      "@tomverse/chat-core": ["./packages/chat-core/src/index.ts"]
     }
   },
   "include": [

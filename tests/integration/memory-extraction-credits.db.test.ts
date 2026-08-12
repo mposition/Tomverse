@@ -344,3 +344,126 @@ test("settlement can never charge more than was reserved", async () => {
         })
     );
 });
+
+/* ---------------------------------------------- canonical lock order (§9) */
+
+/**
+ * Every path that reserves or refunds credits takes `credit-account:<userId>`
+ * first (credit-and-cost-limits.md §9).
+ *
+ * `reserveAddOnCredits` reads the account's lots, decides sufficiency from
+ * that read, and then decrements them. The decrement is atomic but the
+ * *decision* is not, so two transactions that both read the same balance both
+ * pass and `CreditLot.remainingCredits` goes negative -- there is no CHECK
+ * constraint and no post-update guard behind it. What makes it safe is that
+ * every caller holds the account's advisory lock, which serialises them.
+ *
+ * Chat and image generation take it. Extraction is the third caller of the
+ * same primitive from a different orchestration, so it has to take the same
+ * lock, and take it *first*: acquiring the run lock before the credit lock
+ * would invert chat's order and deadlock the pair.
+ *
+ * The test holds the lock from outside and asserts the run blocks. Asserting
+ * on a raced balance instead would only fail some of the time; blocking is
+ * the property, so blocking is what is measured.
+ */
+/** Comfortably longer than an unblocked run creation, which measures ~300ms. */
+const BLOCKED_OBSERVATION_MS = 2_000;
+
+/**
+ * Runs `body` while `credit-account:<userId>` is held by another transaction,
+ * and reports whether it was still pending after BLOCKED_OBSERVATION_MS. The
+ * lock is released afterwards either way, so the caller can also assert that
+ * the work then completes -- the property is a wait, not a refusal.
+ */
+const whileCreditAccountLocked = async <T>(
+    userId: string,
+    body: () => Promise<T>
+): Promise<{ blocked: boolean; result: T }> => {
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => {
+        release = resolve;
+    });
+    const holder = prisma.$transaction(
+        async (tx) => {
+            await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`credit-account:${userId}`}))`;
+            await held;
+        },
+        { timeout: 30_000, maxWait: 30_000 }
+    );
+    // Let the holder actually acquire before the body races it.
+    await new Promise((resolve) => setTimeout(resolve, 250));
+
+    let settled = false;
+    const running = body();
+    // Attached before the wait so a rejection is never unhandled; the real
+    // outcome is awaited below.
+    void running.then(
+        () => {
+            settled = true;
+        },
+        () => {
+            settled = true;
+        }
+    );
+    await new Promise((resolve) => setTimeout(resolve, BLOCKED_OBSERVATION_MS));
+    const blocked = !settled;
+
+    release();
+    await holder;
+    return { blocked, result: await running };
+};
+
+test("creating a run waits for the account's credit lock (§9 lock order)", async () => {
+    const { user, conversationIds } = await seed();
+    const estimate = await estimateMemoryExtraction(
+        baseInput(user.id, conversationIds)
+    );
+
+    const { blocked, result: run } = await whileCreditAccountLocked(
+        user.id,
+        () =>
+            createMemoryExtractionRun({
+                ...baseInput(user.id, conversationIds),
+                confirmedCredits: estimate.estimatedCredits,
+            })
+    );
+
+    assert.equal(
+        blocked,
+        true,
+        "the reservation reached the credit lots without holding credit-account:<userId>"
+    );
+    // And once released it completes normally: the lock is a wait, not a
+    // refusal, so an account is never told it cannot start a run because
+    // something else was briefly touching its credits.
+    const reservation =
+        await prisma.memoryExtractionCreditReservation.findUniqueOrThrow({
+            where: { runId: run.id },
+        });
+    assert.equal(reservation.status, "reserved");
+});
+
+test("cancelling a run waits for the account's credit lock (§9 lock order)", async () => {
+    // The refund half of the same rule. A refund only increments, which is
+    // atomic by itself -- but a refund landing between a concurrent
+    // reservation's read and its decrement lets that reservation decide
+    // against a balance that was never there.
+    const { user, conversationIds } = await seed();
+    const { run } = await createRun(user.id, conversationIds);
+
+    const { blocked } = await whileCreditAccountLocked(user.id, () =>
+        cancelMemoryExtractionRun(user.id, run.id)
+    );
+
+    assert.equal(
+        blocked,
+        true,
+        "the refund reached the credit lots without holding credit-account:<userId>"
+    );
+    const reservation =
+        await prisma.memoryExtractionCreditReservation.findUniqueOrThrow({
+            where: { runId: run.id },
+        });
+    assert.equal(reservation.status, "settled");
+});

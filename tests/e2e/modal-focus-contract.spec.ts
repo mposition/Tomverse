@@ -121,6 +121,87 @@ test.describe("first-run onboarding dialog", () => {
   );
 });
 
+/**
+ * Types into the composer behind the open dialog without touching focus.
+ *
+ * React tracks the input's value on the DOM node, so assigning `.value`
+ * directly and dispatching `input` is ignored; going through the prototype's
+ * own setter is what makes React see a change. The point is a state update in
+ * the component that renders the dialog -- not the text.
+ */
+async function pumpParentRenders(page: Page, times: number) {
+  await page.evaluate((count) => {
+    const textarea = document.querySelector<HTMLTextAreaElement>(
+      '[data-testid="chat-textarea"]'
+    );
+    if (!textarea) throw new Error("composer textarea is not mounted");
+    const setValue = Object.getOwnPropertyDescriptor(
+      HTMLTextAreaElement.prototype,
+      "value"
+    )?.set;
+    if (!setValue) throw new Error("no native value setter");
+    for (let index = 0; index < count; index += 1) {
+      setValue.call(textarea, "x".repeat(index + 1));
+      textarea.dispatchEvent(new Event("input", { bubbles: true }));
+    }
+  }, times);
+}
+
+test.describe("focus survives the page behind the dialog re-rendering", () => {
+  test(
+    "a re-render of the component that owns the dialog does not move focus",
+    { tag: "@ui-risk" },
+    async ({ page }) => {
+      // The defect this pins had no user-visible trigger: `ChatPageClient`
+      // passes `onCancel={() => setPendingDeleteId(null)}`, a new function on
+      // every one of its renders, and the shared hook's single effect listed
+      // `onClose`. So every render of the page behind the dialog tore that
+      // effect down and rebuilt it -- teardown returning focus to the trigger,
+      // setup placing it on the dialog's first control -- and a keyboard user
+      // was moved off whatever they had selected, having pressed nothing. The
+      // chat page re-renders on typing, streaming and status polling, so this
+      // happened constantly.
+      //
+      // The static rule in tests/modalFocusEffectDeps.test.mjs pins the shape
+      // that fixes it. This pins the behaviour, because a differently-wrong
+      // implementation can satisfy the shape.
+      await mockAuthenticatedApi(page);
+      await page.setViewportSize({ width: 1366, height: 768 });
+      await page.goto("/chat?lang=en");
+
+      await page.getByTestId("conversation-menu").first().click();
+      await expect(page.getByTestId("conversation-menu-panel")).toBeVisible();
+      await page
+        .getByTestId("conversation-menu-panel")
+        .getByRole("button", { name: /delete/i })
+        .first()
+        .click();
+
+      const dialog = page
+        .locator('[role="dialog"][aria-modal="true"]')
+        .filter({ hasText: /delete/i })
+        .last();
+      await expect(dialog).toBeVisible();
+      await expectFocusEntersDialog(page);
+
+      // Move off the initial-focus target on purpose. Cancel is where the hook
+      // puts focus, so a test that stayed there could not tell "focus never
+      // moved" from "focus was put back".
+      const confirm = dialog.getByRole("button", { name: /delete/i }).last();
+      await confirm.focus();
+      await expect(confirm).toBeFocused();
+
+      await pumpParentRenders(page, 12);
+
+      // No assertion about *where* focus went if it moved -- the contract is
+      // that it did not move at all.
+      await expect(confirm).toBeFocused();
+      expect(await focusIsInsideDialog(page)).toBe(true);
+      await expect(dialog).toBeVisible();
+    }
+  );
+});
+
 test(
   "every aria-modal surface declares a dialog role",
   { tag: "@ui-risk" },

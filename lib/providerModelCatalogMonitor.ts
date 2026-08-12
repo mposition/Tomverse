@@ -5,7 +5,8 @@ import type { AiProvider } from "@/lib/models";
 import { prisma } from "@/lib/prisma";
 import {
   AI_PROVIDERS,
-  PROVIDER_API_CONFIGURATION,
+  PROVIDER_API_KEY_ENV_NAMES,
+  resolveProviderApiKey,
 } from "@/lib/modelRegistryShared";
 import {
   catalogNextCursor,
@@ -95,12 +96,13 @@ const fetchJson = async (provider: AiProvider, apiKey: string, cursor: string | 
 };
 
 const fetchProviderCatalog = async (provider: AiProvider) => {
-  const configuration = PROVIDER_API_CONFIGURATION[provider];
-  const apiKey = process.env[configuration.apiKeyEnvName]?.trim();
+  const apiKey = resolveProviderApiKey(provider);
   if (!apiKey) {
+    // Names every accepted spelling: reporting only the canonical one sent an
+    // operator to set a variable they had already set under another name.
     throw new CatalogRequestError(
       "PROVIDER_MODEL_CATALOG_KEY_MISSING",
-      `${configuration.apiKeyEnvName} is not configured.`
+      `${PROVIDER_API_KEY_ENV_NAMES[provider].join(" / ")} is not configured.`
     );
   }
 

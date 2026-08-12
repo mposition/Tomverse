@@ -1,5 +1,9 @@
 import { streamText, type FilePart, type ModelMessage } from "ai";
 import { APP_DEFAULTS } from "@/lib/appDefaults";
+import {
+    buildAttachmentPromptText,
+    type ExtractedAttachment,
+} from "@/lib/attachmentContextPrompt";
 import { createHash, randomUUID } from "node:crypto";
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
@@ -38,7 +42,7 @@ import { getWebSearchSurchargeCredits } from "@/lib/webSearchCredits";
 import { buildWebSearchToolConfig, WEB_SEARCH_TOOL_NAMES } from "@/lib/webSearchToolConfig";
 import { normalizeWebSearchExecution } from "@/lib/webSearchExecutionNormalizer";
 import { buildChatStreamTrailerChunk } from "@/lib/webSearchStreamTrailer";
-import { resolveChatCompletionOutcome } from "@/lib/chatCompletionStatus";
+import { resolveChatCompletionOutcome } from "@tomverse/chat-core";
 import { ERROR_REPORT_TOKEN_HEADER } from "@/lib/errorReportContract";
 import { issueChatErrorReportGrant } from "@/lib/traceErrorEvidence";
 import {
@@ -1285,7 +1289,7 @@ async function handleChatPost(
             const attachments = (
                 Array.isArray(msg.attachments) ? msg.attachments : []
             ) as IncomingAttachment[];
-            const textAttachments: string[] = [];
+            const textAttachments: ExtractedAttachment[] = [];
             const fileParts: FilePart[] = [];
 
             for (const attachment of attachments) {
@@ -1602,9 +1606,11 @@ async function handleChatPost(
                             );
                         }
 
-                        textAttachments.push(
-                            `[Attached PDF file: ${attachment.name}]\n${pdfText}`
-                        );
+                        textAttachments.push({
+                            name: attachment.name,
+                            kind: "PDF file",
+                            text: pdfText,
+                        });
                     }
                 } else if (OFFICE_ATTACHMENT_TYPES.has(attachment.mediaType)) {
                     const officeBuffer =
@@ -1640,9 +1646,11 @@ async function handleChatPost(
                         );
                     }
 
-                    textAttachments.push(
-                        `[Attached office file: ${attachment.name}]\n${extractedText}`
-                    );
+                    textAttachments.push({
+                        name: attachment.name,
+                        kind: "office file",
+                        text: extractedText,
+                    });
                 } else if (attachment.kind === "text") {
                     totalExtractedCharacters += attachmentData.length;
                     if (
@@ -1655,9 +1663,11 @@ async function handleChatPost(
                             "Extracted attachment text exceeds the request limit."
                         );
                     }
-                    textAttachments.push(
-                        `[Attached file: ${attachment.name}]\n${attachmentData}`
-                    );
+                    textAttachments.push({
+                        name: attachment.name,
+                        kind: "file",
+                        text: attachmentData,
+                    });
                 } else {
                     const binaryData =
                         attachmentBuffer || Buffer.from(attachmentData, "base64");
@@ -1695,9 +1705,15 @@ async function handleChatPost(
                 continue;
             }
 
-            const text = [String(msg.content ?? ""), ...textAttachments]
-                .filter(Boolean)
-                .join("\n\n");
+            // Extracted file text is data the user did not write, so it is
+            // fenced and the rules are stated once before it -- the same
+            // treatment lib/memoryContextPrompt.ts gives account memory, for
+            // the same reason. Built before the estimate below so the
+            // reservation is taken against the bytes actually sent.
+            const text = buildAttachmentPromptText({
+                userText: String(msg.content ?? ""),
+                attachments: textAttachments,
+            });
             const nativeAttachmentTokens = estimateNativeAttachmentTokens(
                 fileParts.length
             );

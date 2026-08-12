@@ -509,6 +509,14 @@ test("the model picker drives the request and the quoted total", async ({ page }
   await openNewImageEntry(page);
   const picker = page.getByTestId("image-model-picker");
   await expect(picker).toBeVisible();
+  // Two models are enabled and the disclosure threshold is three, so every one
+  // of them is an inline choice and the compact affordance must not appear at
+  // all. The compact branch itself is unreachable here until a fourth model is
+  // activated, and is pinned in tests/imageModelRegistry.test.mjs instead --
+  // the rule is what can be tested today, the rendering is not.
+  await expect(page.getByTestId("image-model-picker-toggle")).toHaveCount(0);
+  await expect(page.getByTestId("image-model-picker-panel")).toHaveCount(0);
+  await expect(page.getByTestId("image-model-grok-imagine-image-quality-20260403")).toBeVisible();
   // The default model is pre-selected, and the last one cannot be removed:
   // a composer that looks ready must not refuse on submit.
   const defaultModel = page.getByTestId("image-model-gpt-image-2");

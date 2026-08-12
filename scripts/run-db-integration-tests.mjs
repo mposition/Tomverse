@@ -190,6 +190,9 @@ run(
     // §5's dispatch boundary: attempt-scoped manifests, and ROUTE-06.
     "tests/integration/routing-attempt-manifest.db.test.ts",
     "tests/integration/routing-dispatch-instrumentation.db.test.ts",
+    // Whether an account an administrator put out of bounds is refused by
+    // every paid AI path, not only by chat.
+    "tests/integration/account-operational-restriction.db.test.ts",
   ],
   "Running financial, credit, chat-concurrency, chat-rate-limit, fallback-pricing, model-registry, admin-security, admin-users, login-methods, account-deletion, account export and anonymisation, conversation-title, conversation-lock-migration, provider-recovery, provider-failure-scope, provider-probe, subscription-sync-ordering, plan-change-reservation, image-generation, external-import, and memory transaction scenarios"
 );
@@ -238,6 +241,21 @@ run(
     "tests/integration/refund-decision-route.db.test.ts",
   ],
   "Running the administrator refund decision transaction and its outbox"
+);
+// Its own process for the same reason: it replaces next-auth, the Stripe
+// client and the webhook processor to drive the administrator replay route.
+run(
+  [
+    "--conditions=react-server",
+    "--experimental-test-module-mocks",
+    "--no-warnings=ExperimentalWarning",
+    "--import",
+    "tsx",
+    "--test",
+    "--test-concurrency=1",
+    "tests/integration/webhook-reprocess-route.db.test.ts",
+  ],
+  "Running the administrator Stripe webhook replay and its mode boundary"
 );
 // Its own process for the same reason as the refund decision suite: it wraps
 // the notification queue module to inject an enqueue failure, and it stubs the

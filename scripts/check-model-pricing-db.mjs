@@ -16,12 +16,17 @@
 // in production; migration 20260802020000 cleared the rows that had been
 // stamped that way. This is how to confirm an environment is clean.
 //
-// Exits non-zero when a row overrides a price that the registry already
-// prices identically -- an override that changes no number is not a decision,
-// it is a leftover, and it silently disables the tiers underneath it.
+// Exits non-zero on either half of the same invariant: a row that overrides a
+// price the registry already prices identically -- an override that changes no
+// number is not a decision, it is a leftover, and it silently disables the
+// tiers underneath it -- and an enabled premium-class row with neither a
+// profile nor an override, which bills on the conservative class fallback.
 
 import { AVAILABLE_MODELS } from "../lib/models.ts";
-import { resolveModelPricing } from "../lib/modelPricing.ts";
+import {
+  assertPricedPremiumModels,
+  resolveModelPricing,
+} from "../lib/modelPricing.ts";
 
 const json = process.argv.includes("--json");
 const databaseUrl = process.env.DATABASE_URL?.trim();
@@ -158,4 +163,23 @@ if (redundant.length > 0) {
   process.exit(1);
 }
 
-console.log("\nNo redundant price overrides.");
+// The other direction, and the one that under-charges rather than misleads: an
+// enabled premium-class row with no profile and no override bills on the
+// conservative class fallback. `npm run check:model-pricing` proves this about
+// the compiled catalogue, but the registry is what prices a real request and an
+// administrator writes to it long after CI ran. `assertPricedPremiumModels`
+// documents itself as the gate for exactly this; until now nothing called it.
+try {
+  assertPricedPremiumModels(models);
+} catch (error) {
+  console.error(
+    `\n${error instanceof Error ? error.message : String(error)}\n\n` +
+      `Source: ${source}. A model registered in PENDING_VERIFIED_PRICE_REGISTER is\n` +
+      "exempt -- that register is how an unverified price is allowed to run, with an\n" +
+      "owner and a deadline attached. Everything else has to be priced before it is\n" +
+      "enabled, because the fallback is a conservative guess, not this model's price."
+  );
+  process.exit(1);
+}
+
+console.log("\nNo redundant price overrides, and every enabled premium model is priced.");

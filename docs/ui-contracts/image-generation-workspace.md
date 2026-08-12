@@ -213,6 +213,23 @@ feature nobody is shown is a feature nobody uses. It is **not**
 start and is deployment-tunable, this bounds one row of UI. Neither may be
 derived from the other.
 
+The rule lives in `imageComposerModelLayout()` in the registry, not in the
+component, and it is tested there. **This deployment cannot render the compact
+mode**: two models are enabled and the threshold is three, so an end-to-end
+test has no way to reach it — and activating the three held Google models takes
+the count from 2 straight to 5, skipping 4 entirely. A branch first exercised
+on the day it starts mattering is a branch nobody can trust on that day. What
+the browser tests instead is the reachable half: at two enabled models the
+picker toggle and panel are absent from the DOM, not merely hidden.
+
+The picker panel renders in normal flow, in its own row. It is never absolutely
+positioned, floated or overlaid — the mobile composer contract forbids any
+control overlapping the textarea's row, and a panel opening over it would do
+exactly that. A chip is the same control in both containers: same price, same
+accessible name, same target size. Selecting a model moves which container it
+is in and changes nothing else, registry order preserved in both lists, so a
+chip never jumps position under the pointer that just picked it.
+
 A chip may show `shortName`; the accessible name always carries the full
 `name`. Abbreviating the label must not abbreviate the model's identity.
 
@@ -347,7 +364,8 @@ Verified for **both** desktop and mobile projects:
 | 17 | draft promoted to a conversation | model selection, quality and size survive; the prompt clears and does not come back |
 | 18 | switch to a different image conversation | timeline and poll loop do not follow |
 | 19 | Enter on desktop / mobile / mid-IME | submit / newline / never submit |
-| 20 | enabled model count 2, 3, 4 | inline, inline, compact — with every selected price still visible |
+| 20 | enabled model count 2, 3, 4, 5 | inline, inline, compact, compact — with every selected price still visible (`imageComposerModelLayout()`, unit) |
+| 20b | today's two enabled models, in the browser | every model inline; no picker toggle and no picker panel in the DOM at all (e2e) |
 | 21 | re-entering a conversation | last comparison's models and options restored; prompt empty |
 | 22 | restore drops a model or cannot restore options | both stated on screen, never silently applied |
 | 23 | comparison running | button shows the spinner and the model count, is disabled, drops the price; busy sentence hidden but present |

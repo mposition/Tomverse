@@ -33,7 +33,39 @@ import { useEffect, type RefObject } from "react";
  *   focus lands a frame after open, so a fast Tab can still start from the
  *   trigger underneath, and the topmost dialog claims it rather than letting
  *   focus walk the inert dialog below.
+ *
+ * These are two effects on purpose, and the split is load-bearing.
+ *
+ * Everything above was one effect whose dependency list included `onClose`.
+ * Callers write `onClose={() => setOpen(false)}`, a new function on every
+ * render of the caller, so the whole effect tore down and rebuilt on each of
+ * those renders -- and this effect's teardown *returns focus to the trigger*
+ * while its setup *puts focus in the panel*. Two focus moves per parent
+ * render, on a page that re-renders constantly.
+ *
+ * That is not a test artefact. `ComparisonReviewDialog` gets its `onClose`
+ * from `ChatPageClient`, which re-renders on typing, streaming and model-status
+ * polling; a keyboard user who focused the source-grounding info control was
+ * thrown back to Close roughly 50ms later, having pressed nothing. It is the
+ * same defect the nightly caught in `UsageLimitModal` and
+ * `DeepResearchSetupSheet`, except here it sat in the hook all ten modal
+ * surfaces share.
+ *
+ * So: focus and scroll lock key on `open` and the refs, never on a callback.
+ * The key handlers keep `onClose` -- swapping a listener moves no focus, and
+ * the Tab trap has to see the current one. `tests/modalFocusEffectDeps.test.mjs`
+ * pins the split.
  */
+
+const focusableWithin = (panel: HTMLElement) =>
+  Array.from(
+    panel.querySelectorAll<HTMLElement>(
+      'button:not([disabled]), a[href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+    )
+    // `offsetParent === null` also covers `display: none` ancestors, which is
+    // what a collapsed section inside an open dialog looks like.
+  ).filter((element) => element.offsetParent !== null);
+
 export function useModalDialog({
   open,
   onClose,
@@ -65,15 +97,6 @@ export function useModalDialog({
     const previousOverflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
 
-    const focusableWithin = (panel: HTMLElement) =>
-      Array.from(
-        panel.querySelectorAll<HTMLElement>(
-          'button:not([disabled]), a[href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
-        )
-        // `offsetParent === null` also covers `display: none` ancestors, which is
-        // what a collapsed section inside an open dialog looks like.
-      ).filter((element) => element.offsetParent !== null);
-
     const focusFrame = requestAnimationFrame(() => {
       const preferred = initialFocusRef?.current;
       if (preferred?.isConnected) {
@@ -84,6 +107,26 @@ export function useModalDialog({
       if (!panel) return;
       focusableWithin(panel)[0]?.focus();
     });
+
+    return () => {
+      cancelAnimationFrame(focusFrame);
+      document.body.style.overflow = previousOverflow;
+      requestAnimationFrame(() => {
+        // The trigger can be gone by now (a row that was just deleted, a menu
+        // that closed with the dialog); focusing a detached node would silently
+        // drop focus to <body>.
+        if (!returnTarget?.isConnected) return;
+        returnTarget.focus({ preventScroll: true });
+        // WebKit can ignore the focus-options overload while a nested fixed
+        // dialog is being removed. Retry with the baseline focus API so the
+        // trigger contract is still kept on iOS/Safari.
+        if (document.activeElement !== returnTarget) returnTarget.focus();
+      });
+    };
+  }, [open, panelRef, initialFocusRef, returnFocusRef]);
+
+  useEffect(() => {
+    if (!open) return;
 
     const ownsEvent = (
       event: KeyboardEvent,
@@ -160,21 +203,8 @@ export function useModalDialog({
     document.addEventListener("keydown", handleKeyDown, true);
     document.addEventListener("keydown", handleEscape);
     return () => {
-      cancelAnimationFrame(focusFrame);
       document.removeEventListener("keydown", handleKeyDown, true);
       document.removeEventListener("keydown", handleEscape);
-      document.body.style.overflow = previousOverflow;
-      requestAnimationFrame(() => {
-        // The trigger can be gone by now (a row that was just deleted, a menu
-        // that closed with the dialog); focusing a detached node would silently
-        // drop focus to <body>.
-        if (!returnTarget?.isConnected) return;
-        returnTarget.focus({ preventScroll: true });
-        // WebKit can ignore the focus-options overload while a nested fixed
-        // dialog is being removed. Retry with the baseline focus API so the
-        // trigger contract is still kept on iOS/Safari.
-        if (document.activeElement !== returnTarget) returnTarget.focus();
-      });
     };
-  }, [open, onClose, dialogRef, panelRef, initialFocusRef, returnFocusRef]);
+  }, [open, onClose, dialogRef, panelRef]);
 }

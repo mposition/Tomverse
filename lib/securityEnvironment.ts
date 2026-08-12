@@ -1,5 +1,6 @@
 import "server-only";
 
+import { resolveDeploymentEnvironment } from "@/lib/deploymentEnvironment";
 import { stripeKeyLiveMode } from "@/lib/stripeMode";
 
 const strongSecret = (value: string | undefined) =>
@@ -48,7 +49,13 @@ export const getSecurityEnvironmentStatus = () => {
     configured(azureClientId) ||
     configured(azureClientSecret) ||
     configured(azureTenant);
+  // Two different questions, and only one of them used to be asked here.
+  // `production` is the build mode: it decides whether a rule applies at all,
+  // and staging answers yes to it because staging is a production build.
+  // `deployment` is which environment this actually is, which is what a rule
+  // about live payment credentials has to be written against.
   const production = process.env.NODE_ENV === "production";
+  const deployment = resolveDeploymentEnvironment();
   const turnstileConfigured =
     configured(process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY) &&
     configured(process.env.TURNSTILE_SECRET_KEY) &&
@@ -88,8 +95,24 @@ export const getSecurityEnvironmentStatus = () => {
       !production || configured(process.env.STRIPE_WEBHOOK_SECRET),
     // A test-mode key in production turns Stripe's test cards into real app
     // entitlements. Readiness must fail before the load balancer sends traffic.
+    //
+    // The mirror image is just as bad and used to be unasked: a *live* key in
+    // staging bills real cards from throwaway test flows. This was written as
+    // `!production || live`, where `production` meant NODE_ENV -- and staging
+    // is a production build, so it inherited "must be live", a rule it must
+    // never satisfy. Staging's readiness was therefore 503 forever, which cost
+    // more than the endpoint: a check that is always failing cannot report
+    // that something else broke, and every /api/ready emitted a fatal
+    // operational incident nobody could act on.
+    //
+    // Each deployment now asserts the mode it is supposed to have. An unknown
+    // key shape (null) satisfies neither, so it fails both ways.
     stripeLiveMode:
-      !production || stripeKeyLiveMode(process.env.STRIPE_SECRET_KEY) === true,
+      deployment === "production"
+        ? stripeKeyLiveMode(process.env.STRIPE_SECRET_KEY) === true
+        : deployment === "staging"
+          ? stripeKeyLiveMode(process.env.STRIPE_SECRET_KEY) === false
+          : true,
     providerUsageSyncSecret:
       !production || strongSecret(process.env.PROVIDER_USAGE_SYNC_SECRET),
     cloudflareOriginProtection:

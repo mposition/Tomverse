@@ -4,7 +4,10 @@ import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth/next";
 import { apiSecurityResponse, consumeApiRateLimit } from "@/lib/apiSecurity";
 import { authOptions } from "@/lib/auth";
-import { conversationKindNotSupportedResponse } from "@/lib/conversationKindGuard";
+import {
+  conversationKindNotSupportedResponse,
+  isImageConversationKind,
+} from "@/lib/conversationKindGuard";
 import {
   IMAGE_GENERATION_READ_SELECT,
   readImageComposerRestore,
@@ -46,7 +49,7 @@ export async function GET(req: Request, { params }: Params) {
         { status: 404, headers: { "Cache-Control": "no-store" } }
       );
     }
-    if (conversation.kind !== "image") {
+    if (!isImageConversationKind(conversation.kind)) {
       return conversationKindNotSupportedResponse();
     }
 

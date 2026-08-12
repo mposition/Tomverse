@@ -78,6 +78,43 @@ const composerGateIsScopedToTheVisualBlock = () => {
 };
 
 /**
+ * The chat-state goldens reach the gate through their capture helper, not
+ * through a `test.beforeEach`.
+ *
+ * Same rule as `composerGateIsScopedToTheVisualBlock`, arrived at the other way
+ * round: that spec keeps its behavioural tests outside a gated describe block,
+ * this one has them interleaved with goldens, so the only placement that can
+ * gate captures without gating behaviour is the capture itself.
+ *
+ * Asserted as "in the capture and in no beforeEach" rather than as a substring
+ * anywhere, because the file-wide `beforeEach` this replaced satisfied a
+ * substring check perfectly while skipping 18 behavioural tests.
+ */
+const chatStateGateIsAtTheCapture = () => {
+  const fixtures = read("tests/e2e/support/chat-state-fixtures.ts");
+  const captureAt = fixtures.indexOf(
+    "export async function expectStableScreenshot"
+  );
+  if (captureAt < 0) return false;
+  if (!fixtures.slice(captureAt).includes("skipUnlessCanonicalVisualBrowser()")) {
+    console.error(
+      "expectStableScreenshot no longer calls skipUnlessCanonicalVisualBrowser -- the chat-state goldens are ungated."
+    );
+    return false;
+  }
+  const spec = read("tests/e2e/chat-state-visual-regression.spec.ts");
+  for (const match of spec.matchAll(/test\.beforeEach\(([\s\S]*?)\n\}\);/g)) {
+    if (match[1].includes("skipUnlessCanonicalVisualBrowser(")) {
+      console.error(
+        "chat-state-visual-regression.spec.ts gates the whole file in beforeEach again -- that skips its 18 screenshot-free tests too."
+      );
+      return false;
+    }
+  }
+  return true;
+};
+
+/**
  * The back-merge fallback step must refuse a conflict before it can push
  * anything: an unresolved index means bail out and fail, and only a clean
  * replay reaches `git push`. Expressed as an ordering rather than a presence
@@ -727,6 +764,75 @@ const checks = [
       source.includes("memoryExtractionProviderCalls"),
   },
   {
+    // `npm run check:model-pricing` proves the priced-premium rule about the
+    // compiled catalogue at CI time, but ModelRegistryEntry is what prices a
+    // real request and an administrator writes to it long after CI ran. The
+    // rule is enforced in the shared zod refinement, so create, update and the
+    // validate endpoint all get it from one place.
+    name: "An unpriced premium model cannot be enabled through the registry",
+    file: "lib/modelRegistryAdmin.ts",
+    test: (source) => {
+      const pricingDbCheck = read("scripts/check-model-pricing-db.mjs");
+      return (
+        source.includes("findUnpricedModels") &&
+        source.includes("unpricedPremiumMessage(candidate)") &&
+        // Both schemas go through refineModelInput, which is where the rule
+        // lives; a per-route check is how a fourth write path escapes it.
+        source.includes("createModelRegistrySchema = refineModelInput") &&
+        source.includes("updateModelRegistrySchema = refineModelInput") &&
+        pricingDbCheck.includes("assertPricedPremiumModels")
+      );
+    },
+  },
+  {
+    // `enforceUserOperationalSecurity` lived in chatSecurity.ts and nowhere
+    // else, so an account an administrator had suspended, restricted or
+    // scheduled for deletion was still free to generate images and run memory
+    // extractions -- both of which call a provider and charge credits. Every
+    // paid AI entry point goes through the one gate.
+    name: "Every paid AI entry point refuses an account put out of bounds",
+    file: "lib/chatSecurity.ts",
+    test: (source) => {
+      const image = read("lib/imageGenerationService.ts");
+      const extraction = read("lib/memoryExtractionService.ts");
+      return (
+        source.includes("export const assertUserOperationalAccess") &&
+        source.includes("enforceUserOperationalSecurity") &&
+        // Both the first request and the retry: a retry is a fresh provider
+        // call on a fresh reservation, not an inherited permission.
+        image.split("assertUserOperationalAccess(input.userId)").length === 3 &&
+        extraction.includes("assertUserOperationalAccess(input.userId)")
+      );
+    },
+  },
+  {
+    // The refusal carries its own 403 and code. Falling through to the route's
+    // generic handler would tell a suspended account the server broke.
+    name: "The extraction route answers an account refusal with its own status",
+    file: "app/api/memories/extraction-runs/route.ts",
+    test: (source) => source.includes("chatErrorResponse(error)"),
+  },
+  {
+    // Deleting one conversation enqueued its generated images for removal from
+    // object storage; deleting the account did not. The cascade runs
+    // User -> Conversation -> ImageGeneration -> ImageAsset, and ImageAsset
+    // holds the only record of the R2 key, so the tombstone has to be written
+    // before the cascade and inside the same transaction -- afterwards the
+    // object has no name anywhere in the system and no sweep can find it.
+    name: "Account deletion enqueues its images before the cascade takes their keys",
+    file: "lib/accountDeletion.ts",
+    test: (source) => {
+      const enqueue = source.indexOf("enqueueImageAssetCleanupForConversations(");
+      const deleteConversations = source.indexOf("tx.conversation.deleteMany(");
+      return (
+        enqueue !== -1 &&
+        deleteConversations !== -1 &&
+        enqueue < deleteConversations &&
+        source.includes('"account_deleted"')
+      );
+    },
+  },
+  {
     // The retention sweeps are independent, and awaiting them bare meant the
     // first to throw skipped every one behind it -- on every run, since a step
     // that fails for a persistent reason fails again tomorrow. The step that
@@ -1041,6 +1147,133 @@ const checks = [
       source.includes('PROMPT_FIELD_NAMES = new Set(["prompt", "input"])') &&
       source.includes("!PROMPT_FIELD_NAMES.has(key)") &&
       !source.includes('([key]) => key !== "prompt"'),
+  },
+  {
+    name: "A CSP violation is excused only for extension schemes",
+    file: "lib/cspReportCore.ts",
+    test: (source) => {
+      // The tempting shortcut is "not http(s)", and it would make the endpoint
+      // silent about `data:` and `blob:` sources -- which is what injected
+      // script looks like, and the case this endpoint exists for.
+      const start = source.indexOf("BROWSER_EXTENSION_SOURCE_SCHEMES");
+      const block = source.slice(start, source.indexOf("\n]", start));
+      return (
+        start > -1 &&
+        block.includes("chrome-extension:") &&
+        !block.includes("data:") &&
+        !block.includes("blob:") &&
+        // A set membership test, never a scheme comparison that could invert.
+        /BROWSER_EXTENSION_SOURCE_SCHEMES\.has\(/.test(source)
+      );
+    },
+  },
+  {
+    name: "Only one module decides which deployment this is",
+    file: "lib/deploymentEnvironment.ts",
+    test: (source) => {
+      // Five call sites each had their own chain, and the four that skipped
+      // APP_ENV -- the variable staging actually sets -- disagreed with the
+      // one that read it. Staging errors arrived in Sentry tagged
+      // `environment: production`, error-report evidence was stamped
+      // production on staging, and the admin console told an operator on
+      // staging that they were in production. Verified from the outside:
+      // staging's /api/build-info said "staging" while its own Sentry events
+      // said "production" (2026-08-12).
+      const files = [
+        "sentry.server.config.ts",
+        "sentry.edge.config.ts",
+        "lib/traceErrorEvidence.ts",
+        "lib/errorReportToken.ts",
+        "lib/buildInfo.ts",
+        "lib/securityEnvironment.ts",
+        "app/(site)/(application)/admin/layout.tsx",
+      ];
+      return (
+        source.includes("env.APP_ENV") &&
+        source.includes("env.RAILWAY_ENVIRONMENT_NAME") &&
+        files.every((file) => {
+          const consumer = read(file);
+          return (
+            consumer.includes("resolveDeploymentEnvironment") &&
+            // SENTRY_ENVIRONMENT stays a legitimate explicit override; a bare
+            // RAILWAY_ENVIRONMENT_NAME read is a second chain starting again.
+            !consumer.includes("process.env.RAILWAY_ENVIRONMENT_NAME")
+          );
+        })
+      );
+    },
+  },
+  {
+    name: "Stripe key mode is required per deployment, not per build mode",
+    file: "lib/securityEnvironment.ts",
+    test: (source) => {
+      // Staging is a production build, so `!production || live` demanded a
+      // live key there -- unsatisfiable, and the wrong thing to want. Its
+      // readiness sat at 503 permanently, which meant it could no longer
+      // report anything else breaking. Both directions are asserted now, so
+      // this must keep reading the deployment.
+      const check = source.slice(source.indexOf("stripeLiveMode:"));
+      const body = check.slice(0, check.indexOf("\n    providerUsageSyncSecret"));
+      return (
+        source.includes("resolveDeploymentEnvironment()") &&
+        body.includes('deployment === "production"') &&
+        body.includes('deployment === "staging"') &&
+        // The production branch still demands live, and staging still refuses
+        // it: a live key in staging bills real cards from test flows.
+        body.includes("=== true") &&
+        body.includes("=== false") &&
+        !/!production\s*\|\|\s*stripeKeyLiveMode/.test(source)
+      );
+    },
+  },
+  {
+    name: "The image group creation guard decides kind through the helper",
+    file: "lib/imageGenerationService.ts",
+    test: (source) =>
+      // Same answer as `kind !== "image"` today, and not the same decision: a
+      // third conversation kind would leave every open-coded comparison
+      // silently picking a side, in the transaction that reserves credits.
+      source.includes("!isImageConversationKind(conversation.kind)") &&
+      !/conversation\.kind\s*!==\s*"image"/.test(source),
+  },
+  {
+    name: "The image history endpoint decides kind through the helper",
+    file: "app/api/conversations/[conversationId]/generations/route.ts",
+    test: (source) =>
+      source.includes("!isImageConversationKind(conversation.kind)") &&
+      !/conversation\.kind\s*!==\s*"image"/.test(source),
+  },
+  {
+    name: "An image asset reaches the client as a signed URL, never as a key",
+    file: "lib/imageGenerationRead.ts",
+    test: (source) =>
+      // r2Key is a storage path into a bucket the user has no business naming,
+      // and the edit that leaks it is the one that reads as harmless:
+      // `{...asset, url}` instead of naming the three fields. The mapping is a
+      // pure function now so the shape is pinned by a test as well.
+      source.includes("serializeImageAssets(") &&
+      !/\.\.\.asset\b/.test(source) &&
+      // The select still reads r2Key -- it has to, to mint the URL -- so the
+      // check is that nothing hands the row itself onward.
+      !/assets:\s*generation\.assets\b/.test(source),
+  },
+  {
+    name: "The image workspace borrows the rail's principles, not its code",
+    file: "components/images/ImageGenerationWorkspace.tsx",
+    test: (source) => {
+      // Policy §1: an image conversation never mounts ChatInput, ChatApp or
+      // the comparison action rail, and never enables AI Review. Importing
+      // shouldShowVisualStatus would couple the two disclosure policies, so
+      // the next change to the chat comparison would silently re-shape the
+      // image composer. Comments may name them; imports may not.
+      const imports = source
+        .split("\n")
+        .filter((line) => /^\s*(import|}?\s*from)\b/.test(line))
+        .join("\n");
+      return !/(ComparisonActionRail|shouldShowVisualStatus|comparisonReadiness|components\/chat\/ChatInput|components\/chat\/ChatApp)/.test(
+        imports
+      );
+    },
   },
   {
     name: "A thrown image-budget check reads as not ready, never as healthy",
@@ -2813,9 +3046,16 @@ const checks = [
         !source.includes("--update-snapshots") &&
         // Both golden surfaces are wired to it. A guard nothing calls is
         // indistinguishable from no guard.
-        read("tests/e2e/chat-state-visual-regression.spec.ts").includes(
-          "skipUnlessCanonicalVisualBrowser()"
-        ) &&
+        //
+        // For the chat-state suite the wiring is `expectStableScreenshot`, the
+        // single choke point every golden in that file captures through. It
+        // used to be a `test.beforeEach` on the file, which is the same
+        // mistake this entry already refuses one line down for the composer
+        // spec -- and it cost more here: 18 of that file's 81 tests take no
+        // screenshot, and all 18 were skipped on any substitute browser,
+        // including the credit-pack dialog's focus assertion the nightly used
+        // to catch the focus race on 18d1e891.
+        chatStateGateIsAtTheCapture() &&
         // Scoped to the visual-record block, not the file. Hoisting the gate
         // to the top level would read identically as a substring while
         // silently taking the 30 geometry and behaviour tests out of every
@@ -2980,6 +3220,38 @@ const checks = [
         !prStep.includes("ANTHROPIC") &&
         !prStep.includes("FEEDBACK_AUTOFIX_SYNC_SECRET") &&
         !prStep.includes("--auto")
+      );
+    },
+  },
+  {
+    // The auto-PR guard decides whether a branch gets a pull request at all,
+    // and it used to answer that question from a measurement it had broken
+    // itself: a `--depth=1` fetch re-shallowed the full history
+    // actions/checkout had just fetched, `merge-base` then had nothing to
+    // walk once develop moved on, and the three-dot diff failed rather than
+    // reporting "no changes". The `if` read the failure as a diff and opened
+    // PR #467 for work already merged.
+    //
+    // Pinned as three separate properties, because dropping any one of them
+    // brings the same false positive back: no shallow fetch of develop, an
+    // explicit containment test, and an unanswerable merge-base treated as an
+    // error instead of as a yes.
+    name: "Auto PR guard cannot mistake a broken merge-base for a diff",
+    file: ".github/workflows/auto-pr-to-develop.yml",
+    test: (source) => {
+      // Comment lines are stripped first: the comment above the step quotes
+      // the old `--depth=1` command on purpose, and a check that read it
+      // would fail on the very explanation of what it is guarding.
+      const script = source
+        .split("\n")
+        .filter((line) => !/^\s*#/.test(line))
+        .join("\n");
+      return (
+        !/git fetch origin develop\s+--depth/.test(script) &&
+        script.includes("git merge-base --is-ancestor HEAD origin/develop") &&
+        script.includes(
+          "if ! git merge-base origin/develop HEAD >/dev/null 2>&1; then"
+        )
       );
     },
   },

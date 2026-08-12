@@ -91,8 +91,17 @@
 - [ ] TTL이 지난 작업은 조용히 사라지지 않고 "만료되어 다시 시작해야 함"으로
       표시된다. 15분 maintenance sweep이 `staging`과 `preview_ready`를 모두
       정리한다.
-- [ ] 배포 직후, seal 이전 버전 화면을 열어 둔 탭에서 `staging` finalize가
-      여전히 성공한다(72시간 호환 기간).
+- [ ] seal 없이 `staging`에서 바로 finalize를 호출하면 409
+      `EXTERNAL_IMPORT_SELECTION_CHANGED`로 거부되고, 같은 요청이 seal 이후에는
+      성공한다. TTL이 지난 import는 계속 410
+      `EXTERNAL_IMPORT_STAGING_EXPIRED`이며, 두 거절은 복구 방법이 다르므로
+      화면 문구도 달라야 한다(전자는 "확인 후 완료", 후자는 "다시 시작").
+
+  > **호환 기간 종료됨.** seal 이전 버전 화면을 열어 둔 탭이
+  > `staging`에서 바로 finalize할 수 있던 72시간 창은 닫혔습니다. 기준은
+  > seal 코드의 production 배포 시각 2026-08-04T01:38:42Z이며, 그 뒤로 seal
+  > 없는 finalize는 위와 같이 거부됩니다. 이 항목은 더 이상 "여전히 성공한다"를
+  > 확인하지 않습니다 — 정책 §5.5 참조.
 
 ## C3. 용량 부족 복구 (§5.3)
 

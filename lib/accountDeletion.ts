@@ -3,6 +3,7 @@ import "server-only";
 import { prisma } from "@/lib/prisma";
 import { anonymiseAccountData } from "@/lib/accountDataAnonymisation";
 import { getUserChatUsageKey } from "@/lib/chatSecurity";
+import { enqueueImageAssetCleanupForConversations } from "@/lib/imageAssetLifecycle";
 import { getStripe, isStripeConfigured } from "@/lib/stripe";
 import { revokeAllUserSessions } from "@/lib/sessionSecurity";
 
@@ -196,6 +197,32 @@ export async function deleteTomverseAccount(
     await tx.chatContextBundleConsumption.deleteMany({
       where: { userId: user.id },
     });
+
+    // Before the conversations go, not after, and inside this transaction.
+    //
+    // Deleting one conversation already enqueues its generated images for
+    // removal from object storage; deleting the account did not. The cascade
+    // takes Conversation, then ImageGeneration, then ImageAsset -- and
+    // ImageAsset holds the only record of the R2 key. Once it is gone the
+    // object has no name anywhere in the system, so nothing can ever reap it:
+    // the sweep drains tombstones, and the only storage-side listing sweep
+    // walks the guest attachment prefix. The user's generated images outlived
+    // the account that made them, permanently.
+    //
+    // `account_deleted` has been one of the three declared cleanup reasons
+    // since the table was added (ImageAssetCleanup.reason). Nothing had ever
+    // written it.
+    const conversationIds = (
+      await tx.conversation.findMany({
+        where: { userId: user.id },
+        select: { id: true },
+      })
+    ).map((conversation) => conversation.id);
+    await enqueueImageAssetCleanupForConversations(
+      tx,
+      conversationIds,
+      "account_deleted"
+    );
 
     await tx.conversation.deleteMany({
       where: { userId: user.id },

@@ -2,10 +2,13 @@
   "name": "ai-chat-hub",
   "version": "0.1.0",
   "private": true,
+  "workspaces": [
+    "packages/*"
+  ],
   "scripts": {
     "dev": "next dev --webpack",
     "predev": "node scripts/generate-build-info.mjs",
-    "prebuild": "node scripts/generate-build-info.mjs",
+    "prebuild": "node scripts/check-native-swc.mjs && node scripts/generate-build-info.mjs",
     "build": "next build",
     "start": "next start",
     "start:e2e": "next start -H 127.0.0.1 -p 3100",
@@ -44,6 +47,7 @@
     "check:image-pricing": "node --import tsx scripts/check-image-pricing.mjs",
     "check:image-executor-budget": "node --import tsx scripts/check-image-executor-budget.mjs",
     "check:db-integration-coverage": "node scripts/check-db-integration-coverage.mjs",
+    "check:error-detail-cost": "node scripts/check-error-detail-cost.mjs",
     "check:usage-bucket-range": "node --import tsx scripts/check-usage-bucket-range.mjs",
     "security:regression": "node scripts/security-regression-check.mjs",
     "billing:reconcile-promotion": "node --import tsx scripts/reconcile-promotion.mjs",
@@ -71,8 +75,12 @@
     "check:release-gate-coverage": "node scripts/check-release-gate-coverage.mjs",
     "check:ui-tier-coverage": "node scripts/check-ui-tier-coverage.mjs",
     "check:doc-references": "node scripts/check-doc-references.mjs",
+    "check:locale-translation": "node --import tsx scripts/check-locale-translation.mjs",
+    "check:enum-constraints": "node --conditions=react-server --import tsx scripts/check-enum-constraints.mjs",
     "report:cost-bucket-corrections": "node --conditions=react-server --import tsx scripts/report-cost-bucket-corrections.mjs",
+    "report:credit-lot-invariants": "node --conditions=react-server --import tsx scripts/report-credit-lot-invariants.mjs",
     "report:issue-backlog": "node --import tsx scripts/report-issue-backlog.mjs",
+    "report:release-gate-evidence": "node scripts/report-release-gate-evidence.mjs",
     "drill:railway-restore-preflight": "node scripts/railway-restore-preflight.mjs",
     "drill:railway-restore-verify": "node scripts/railway-restore-verify.mjs",
     "verify:tomverse-chat-release-gates": "node scripts/verify-tomverse-chat-release-gates.mjs",
@@ -87,6 +95,8 @@
     "report:context-window-impact": "node --conditions=react-server --import tsx scripts/report-context-window-impact.mjs",
     "report:routing-shadow": "node --conditions=react-server --import tsx scripts/report-routing-shadow.mjs",
     "check:data-domain-registry": "node --import tsx scripts/check-data-domain-registry.mjs",
+    "check:shared-packages": "node scripts/check-shared-packages.mjs",
+    "check:push-scope": "node scripts/check-push-scope.mjs",
     "report:routing-dispatch-readiness": "node --import tsx scripts/report-routing-dispatch-readiness.mjs"
   },
   "dependencies": {

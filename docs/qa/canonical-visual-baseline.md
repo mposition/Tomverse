@@ -139,6 +139,34 @@ Only the goldens are gated. `mobile-composer-contract.spec.ts` keeps measuring
 overlap, widths, line boxes and overflow on the substitute browser; those
 answers do not depend on the rasteriser.
 
+#### Where the gate is called decides whether that table is true
+
+Call it from the capture, never from a `test.beforeEach` over a whole spec file.
+A `beforeEach` skips the test before a line of it runs, screenshot or not, so
+the right-hand column above becomes a claim the code does not keep.
+
+`chat-state-visual-regression.spec.ts` gated its whole file this way, on the
+comment "every test in this file is a golden". 18 of its 81 are not: the
+comparison breakpoints and model-slot counts, attachment upload, failure and
+retry, the unsupported and oversized file rejections, removing an attachment,
+the 44px touch targets, the 320px clipping check, Deep Research gating for a
+Free plan, and the account and guest limit modals. All 18 were skipped on every
+substitute browser -- which is exactly the environment the fallback exists to
+buy coverage back in. One of them is the credit-pack dialog's focus assertion,
+the check that caught the focus race on `18d1e891`, so the assertion most
+likely to notice a regression was the one silently not running.
+
+The gate is now in `expectStableScreenshot`, the single choke point every
+golden in that suite captures through, and it is called *after* the theme and
+transient-overlay checks: those hold on any browser, and reporting them beats
+reporting a skip. `mobile-composer-contract.spec.ts` reaches the same place from
+the other direction -- its goldens live in their own describe block, so the
+gate scopes to the block rather than the file.
+
+Both placements are enforced: `scripts/security-regression-check.mjs`
+(`chatStateGateIsAtTheCapture`, `composerGateIsScopedToTheVisualBlock`) and
+`tests/canonicalVisualGate.test.mjs`.
+
 #### The signature, for whoever meets it next
 
 On a substitute Chromium the diff is invariant to the product, which is how you
