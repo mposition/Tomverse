@@ -40,6 +40,7 @@
     "check:model-pricing": "node --import tsx scripts/check-model-pricing.mjs",
     "check:memory-extraction-eval": "node --import tsx scripts/check-memory-extraction-eval-register.mjs",
     "check:router-quality-eval": "node --import tsx scripts/check-router-quality-eval.mjs",
+    "check:auto-rollout-readiness": "node --conditions=react-server --import tsx scripts/check-auto-rollout-readiness.mjs",
     "check:image-pricing": "node --import tsx scripts/check-image-pricing.mjs",
     "check:image-executor-budget": "node --import tsx scripts/check-image-executor-budget.mjs",
     "check:db-integration-coverage": "node scripts/check-db-integration-coverage.mjs",

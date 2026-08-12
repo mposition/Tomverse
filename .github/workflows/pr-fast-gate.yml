@@ -222,6 +222,17 @@ jobs:
         timeout-minutes: 5
         run: npm run check:router-quality-eval
 
+      # The readiness register is the only thing standing between "Auto works
+      # in shadow" and "Auto answers a real person", which makes it worth
+      # attacking, and the attack is one word: pending -> passed. So a passed
+      # gate has to carry a person, a date, an artefact, a commit, a summary,
+      # a re-attestation deadline and its known limitations, or the build
+      # fails. It also prints which gates are outstanding, because that is the
+      # question everyone asks about this rollout.
+      - name: Auto rollout readiness
+        timeout-minutes: 5
+        run: npm run check:auto-rollout-readiness
+
       # gpt-image-2 lives outside AVAILABLE_MODELS by design, so the model
       # pricing check above cannot see it. Same release contract -- every
       # enabled price is explicit and verified -- separate fail-closed net.
