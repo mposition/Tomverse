@@ -193,3 +193,48 @@ test("the report never proposes a registry status", () => {
     );
   }
 });
+
+test("a gate met by an absence is judged on its check, not on a capability", () => {
+  // PUSH-01 is met by push infrastructure *not* existing, so it has no
+  // capability to point at and never will. Read the ordinary way, an empty
+  // capability list means "nothing built yet" -- which parked it in the
+  // work-candidate group permanently, and proposing work that is already done
+  // is the exact failure this report exists to prevent.
+  const mapping = {
+    "X-01": {
+      invertedScope: true,
+      capability: [],
+      measurement: ["scripts/check-thing.mjs"],
+    },
+  };
+  assert.equal(
+    classifyGate({ id: "X-01" }, { exists: has("scripts/check-thing.mjs"), mapping })
+      .verdict,
+    GATE_VERDICTS.EVIDENCE_PRESENT
+  );
+  // Without the check it is backlog again: the absence is asserted by the
+  // check or by nothing.
+  assert.equal(
+    classifyGate({ id: "X-01" }, { exists: () => false, mapping }).verdict,
+    GATE_VERDICTS.NOT_IMPLEMENTED
+  );
+  assert.equal(
+    classifyGate(
+      { id: "X-01" },
+      { exists: () => true, mapping: { "X-01": { invertedScope: true, capability: [], measurement: [] } } }
+    ).verdict,
+    GATE_VERDICTS.NOT_IMPLEMENTED
+  );
+});
+
+test("evidence_present still is not passing, inverted or not", () => {
+  // Same caveat as every other gate: the artefacts the gate names exist. The
+  // release bill of materials and the scope review are human artefacts and
+  // are not in this tree.
+  const result = classifyGate(
+    { id: "PUSH-01" },
+    { exists: () => true, mapping: GATE_EVIDENCE }
+  );
+  assert.equal(result.verdict, GATE_VERDICTS.EVIDENCE_PRESENT);
+  assert.match(result.note, /scope review/);
+});

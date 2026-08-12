@@ -290,9 +290,12 @@ export const GATE_EVIDENCE = {
     },
 
     "PUSH-01": {
+        // Met by an absence: there is no capability to build, only a check
+        // that the absence is still true.
+        invertedScope: true,
         capability: [],
-        measurement: [],
-        note: "Inverted by design: this gate is met by push infrastructure being *absent*, so it lands in this group for the opposite of the usual reason -- there is correctly nothing to point at. What could exist is a check asserting the absence, the way check:shared-packages asserts forbidden imports are absent; today the scope review is the only thing holding it.",
+        measurement: ["scripts/check-push-scope.mjs"],
+        note: "Inverted by design: this gate is met by push infrastructure being *absent*, so there is correctly no capability to point at. The absence is now measured rather than reviewed -- check:push-scope counts push SDKs in the dependency blocks and push APIs in the tree, reports the gate's own metric name on every run, and fails PR Fast Gate on any finding. What the check cannot supply is the other half of the gate's evidence: the release bill of materials and the scope review are human artefacts, and an approved component is recorded by a person in APPROVED_PUSH_COMPONENTS.",
     },
 };
 
@@ -384,7 +387,18 @@ export const classifyGate = (gate, { exists, conditions = {}, mapping = GATE_EVI
     const missing = [...capability.missing, ...measurement.missing];
 
     let verdict;
-    if (entry.capability.length === 0 || capability.present.length === 0) {
+    // A scope-control gate is met by something being *absent*, so it has no
+    // capability to point at and never will. Reading an empty capability list
+    // as "nothing built yet" put PUSH-01 in the work-candidate group forever,
+    // which is the failure this whole report exists to prevent -- proposing
+    // work that is already done. For these, the measurement is the whole of
+    // what the repository can supply.
+    if (entry.invertedScope) {
+        verdict =
+            entry.measurement.length > 0 && measurement.missing.length === 0
+                ? GATE_VERDICTS.EVIDENCE_PRESENT
+                : GATE_VERDICTS.NOT_IMPLEMENTED;
+    } else if (entry.capability.length === 0 || capability.present.length === 0) {
         verdict = GATE_VERDICTS.NOT_IMPLEMENTED;
     } else if (entry.measurement.length === 0 || measurement.missing.length > 0) {
         verdict = GATE_VERDICTS.IMPLEMENTED_UNMEASURED;

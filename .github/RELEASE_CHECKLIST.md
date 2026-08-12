@@ -36,6 +36,11 @@ Date / timezone:    ____________________
       (`forbidden_nextjs_imports_in_shared_packages`) and proves every
       workspace package still type-checks with no DOM, no Node types and no
       app alias
+- [ ] `npm run check:push-scope` — reports PUSH-01's metric
+      (`unapproved_push_infrastructure_components_in_v1`). The gate is met by
+      push infrastructure being absent, so this is the half a repository can
+      prove; the release bill of materials and the scope review are still the
+      human half
 - [ ] `npm run check:default-models`
 - [ ] `npm run check:encoding:strict`
 - [ ] `npm run check:locale-translation` — proves no locale is still showing an

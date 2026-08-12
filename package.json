@@ -95,7 +95,8 @@
     "report:routing-shadow": "node --conditions=react-server --import tsx scripts/report-routing-shadow.mjs",
     "check:data-domain-registry": "node --import tsx scripts/check-data-domain-registry.mjs",
     "check:shared-packages": "node scripts/check-shared-packages.mjs",
-    "report:routing-dispatch-readiness": "node --import tsx scripts/report-routing-dispatch-readiness.mjs"
+    "report:routing-dispatch-readiness": "node --import tsx scripts/report-routing-dispatch-readiness.mjs",
+    "check:push-scope": "node scripts/check-push-scope.mjs"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^4.0.30",

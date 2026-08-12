@@ -247,6 +247,14 @@ jobs:
         timeout-minutes: 5
         run: npm run check:shared-packages
 
+      # PUSH-01 is met by push infrastructure being absent, and an absence is
+      # the easiest thing to lose without noticing: nobody reviews an arriving
+      # dependency against a scope decision made months earlier. Measured here
+      # so the gate's number exists on every PR instead of only at review time.
+      - name: Push scope control
+        timeout-minutes: 5
+        run: npm run check:push-scope
+
       # gpt-image-2 lives outside AVAILABLE_MODELS by design, so the model
       # pricing check above cannot see it. Same release contract -- every
       # enabled price is explicit and verified -- separate fail-closed net.
