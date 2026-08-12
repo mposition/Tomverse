@@ -24,6 +24,7 @@ import {
   touchChatRequestLease,
 } from "@/lib/chatRequestLease";
 import {
+  assertUserOperationalAccess,
   ChatAccessError,
   getUserChatUsageKey,
   incrementUsageBucket,
@@ -285,6 +286,12 @@ export const requestImageGeneration = async (
     }
     throw error;
   }
+
+  // An account an administrator has suspended, restricted from AI usage, or
+  // scheduled for deletion is refused here for the same reason chat refuses it:
+  // "cannot use AI services" has to mean every AI service, and this one both
+  // calls a provider and charges credits.
+  await assertUserOperationalAccess(input.userId);
 
   const plan = await getUserBillingPlan(input.userId);
   if (!planAllowsFeature(plan, "imageGeneration")) {
@@ -1548,6 +1555,11 @@ export const retryImageGenerationTarget = async (
     }
     throw error;
   }
+
+  // A retry is a fresh attempt against the provider on a fresh reservation, so
+  // it is gated exactly like a first request rather than inheriting the
+  // permission the original request had.
+  await assertUserOperationalAccess(input.userId);
 
   const target = await prisma.imageGenerationTarget.findUnique({
     where: { id: input.targetId },

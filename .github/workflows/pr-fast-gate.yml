@@ -147,6 +147,13 @@ jobs:
         timeout-minutes: 5
         run: npm run check:accent-tokens
 
+      # Every locale carries every key, so a missing translation never fails
+      # the build -- it ships the English sentence as the value. That is how the
+      # account-data-export UI reached five locales in English.
+      - name: Locale translation coverage
+        timeout-minutes: 5
+        run: npm run check:locale-translation
+
       # An enabled premium model with no explicit billing profile falls back to
       # generic US$15/US$60 pricing, which is what mispriced GPT-5.5, Gemini
       # 3.1 Pro and Claude Opus 4.8 by 3x-7.5x in production. Fail closed.

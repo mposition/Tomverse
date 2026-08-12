@@ -142,6 +142,12 @@ npm run report:issue-backlog -- --issues-file <열린 이슈 JSON>
   `publicChatErrorDetails()`가 제거하고, Admin Console과 구조화 로그에만
   남깁니다.
 - 모든 오류 응답의 `resetAt`은 생성 시점보다 미래여야 합니다.
+- **크레딧을 예약·환급하는 트랜잭션은 `lockCreditAccount(tx, userId)`를 가장
+  먼저 잡습니다**(정책 문서 §9). `reserveAddOnCredits()`는 읽어서 판정하고
+  차감하는데 `CreditLot.remainingCredits`에 CHECK도 사후 검사도 없어서, 잠금이
+  없으면 같은 잔액을 읽은 두 경로가 모두 통과해 잔액이 음수가 됩니다. 순서도
+  계약입니다 — workflow advisory 잠금(`memory-extraction:*` 등)보다 **앞**이며,
+  종료 여부 같은 조건 분기 **안**에서 잠그지 않습니다.
 - 이 계약을 어기는 변경은 릴리스 차단 사유입니다.
 
 # Chat concurrency and identity namespace
@@ -503,3 +509,21 @@ Non-negotiable requirements:
 - Any related change must keep `tests/settingsNavigation.test.mjs` and `tests/e2e/settings-information-architecture.spec.ts` passing on the desktop *and* mobile projects.
 - A change that violates this contract is a release blocker.
 <!-- END:settings-navigation-invariant -->
+<!-- BEGIN:admin-console-ia-invariant -->
+## Admin Console information architecture invariant
+
+Before changing `lib/adminNavigation.ts`, `components/admin/adminNavigationIcons.ts`, `lib/adminNavigationBadges.ts`, `components/admin/AdminConsoleShell.tsx`, `AdminSidebar.tsx`, `AdminCommandPalette.tsx`, `AdminPageTabs.tsx`, or any route under `app/(site)/(application)/admin/**`, read:
+
+- `docs/ui-contracts/admin-console-ia.md`
+
+Non-negotiable requirements:
+
+- **Every retired `/admin/*` URL keeps a redirect.** Bookmarks, runbooks and `href`s already written into audit summaries point at them, so deleting a route without leaving one behind is a release blocker. A redirect carries the request's own query to the destination but never its own stale `tab`.
+- A section lives in `?tab=`, not in component state. Tabs are `<Link>`s, the page's server component reads `searchParams`, and only the open section's data is loaded.
+- Adding an entry means adding it in three places at once: the route table in `lib/adminNavigation.ts`, an icon in `adminNavigationIcons.ts`, and a real route segment. There is no catch-all `[section]` route — an unknown admin URL must answer 404, not 200.
+- A badge is for work, not decoration: only entries an operator acts on carry one, and an unknown count renders nothing rather than zero.
+- The layout loads counts; a page loads its own data. Nothing that only one workspace displays may move into `admin/layout.tsx`. A panel showing the newest N rows states N on screen and does not present its own counters as totals.
+- Authorization is out of this contract's scope and was not changed by it: `writeRoles` in the route table drives the sidebar's "Read" marker only, and access is still decided server-side by `lib/adminAuth.ts` and each `/api/admin/**` handler.
+- Any related change must keep `tests/adminNavigation.test.mjs` and the `tests/e2e-admin/**` suite (`npm run test:e2e:admin`, the "Admin Console E2E (PostgreSQL)" workflow) passing.
+- A change that violates the redirect rule is a release blocker; the rest is ordinary review.
+<!-- END:admin-console-ia-invariant -->

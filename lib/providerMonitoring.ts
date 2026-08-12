@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { usageBucketCount } from "@/lib/chatUsageBucketCount";
 import { AVAILABLE_MODELS, type AiProvider, type ModelTier } from "@/lib/models";
 import { getRuntimeModel, getRuntimeModels } from "@/lib/modelRegistry";
+import { PROVIDER_API_KEY_ENV_NAMES } from "@/lib/modelRegistryShared";
 import { sendManagedSlackMessage } from "@/lib/managedSlack";
 import {
   getProviderCreditSummaries,
@@ -194,20 +195,14 @@ export const PROVIDER_DISPLAY_NAMES: Record<AiProvider, string> = {
   perplexity: "Perplexity",
 };
 
-export const PROVIDER_API_KEY_ENV: Record<AiProvider, string[]> = {
-  openai: ["OPENAI_API_KEY"],
-  anthropic: ["ANTHROPIC_API_KEY"],
-  google: ["GOOGLE_GENERATIVE_AI_API_KEY", "GOOGLE_API_KEY"],
-  groq: ["GROQ_API_KEY"],
-  xai: ["XAI_API_KEY"],
-  deepseek: ["DEEPSEEK_API_KEY"],
-  mistral: ["MISTRAL_API_KEY"],
-  moonshot: ["MOONSHOT_API_KEY"],
-  minimax: ["MINIMAX_API_KEY"],
-  qwen: ["DASHSCOPE_API_KEY"],
-  zhipu: ["ZHIPU_API_KEY"],
-  perplexity: ["PERPLEXITY_API_KEY"],
-};
+/**
+ * Re-exported rather than declared, because this module's copy disagreed with
+ * the one the provider clients read: it listed GOOGLE_API_KEY, which nothing
+ * used for a call, and omitted GEMINI_API_KEY, which the image adapter did.
+ * Whatever answers "is this provider configured?" has to be the same list the
+ * call itself resolves from. See lib/modelRegistryShared.ts.
+ */
+export const PROVIDER_API_KEY_ENV = PROVIDER_API_KEY_ENV_NAMES;
 
 const NON_PROVIDER_HEALTH_DIAGNOSTIC_CODES = new Set([
   "AI_STREAM_FAILED.ERR_INVALID_STATE",
