@@ -495,6 +495,15 @@ candidate의 한도로 설명된다. 즉 hidden thinking이 32,768 안에 포함
    통과로 세지 않는다. 카드 한도가 가장 낮은 `gemini-3.1-flash-lite-image`
    (4,096)가 첫 측정 대상으로 가장 유용하다.
 8. 요청 JSON·원본 응답·모델 ID·응답 ID·실행 일시를 감사 증거로 보존한다.
+
+**스크립트는 adapter와 같은 request builder·같은 registry helper를 통해서만
+요청을 만든다.** 측정 대상은 production이 실제로 과금당하는 요청이므로, 한쪽만
+바뀐 요청으로 얻은 수치는 근거가 되지 않는다. 실제로 한 번 어긋난 적이 있다 —
+adapter가 Google의 delivery MIME(`image/jpeg`)을 반영한 뒤에도 스크립트는 자체
+표현식으로 PNG를 요청해 같은 HTTP 400을 다시 냈다. 지금은 delivery MIME을
+`imageDeliveryMimeType()` 한 곳에서 정하고,
+`scripts/security-regression-check.mjs`가 두 호출부 모두 그 helper를 쓰는지
+검사한다.
    API key와 사용자 프롬프트는 로그에 남기지 않는다(스크립트는 프롬프트를
    sha256 앞자리로만 기록한다).
 

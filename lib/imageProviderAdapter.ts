@@ -5,7 +5,11 @@ import {
   type ImageQuality,
   type ImageSize,
 } from "@/lib/imageGenerationPricing";
-import { getImageModel, type ImageModelProfile } from "@/lib/imageModelRegistry";
+import {
+  getImageModel,
+  imageDeliveryMimeType,
+  type ImageModelProfile,
+} from "@/lib/imageModelRegistry";
 import { readImageDimensions } from "@/lib/imageDimensions";
 import {
   IMAGE_PROVIDER_RETRY_DELAYS_MS,
@@ -383,10 +387,7 @@ const generateWithGoogle = async (
     size: input.size,
     maxOutputTokens: model.maxOutputTokens ?? null,
     thinkingLevel: model.thinkingLevel ?? null,
-    // The profile's request preference, not the head of its storage
-    // allowlist: conflating the two sent every Google request asking for PNG,
-    // which its API refuses.
-    deliveryMimeType: model.deliveryMimeType ?? model.outputMimeTypes[0] ?? "image/png",
+    deliveryMimeType: imageDeliveryMimeType(model),
   });
   if (!body) {
     throw new ImageProviderError(

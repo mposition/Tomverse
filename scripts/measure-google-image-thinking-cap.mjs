@@ -37,7 +37,11 @@
 //     prompts complex enough to provoke thinking, and its JSON kept as
 //     evidence.
 
-import { getImageModel, IMAGE_MODEL_REGISTRY } from "../lib/imageModelRegistry.ts";
+import {
+  getImageModel,
+  imageDeliveryMimeType,
+  IMAGE_MODEL_REGISTRY,
+} from "../lib/imageModelRegistry.ts";
 import {
   buildGoogleImageRequest,
   googleBillableOutputTokens,
@@ -163,7 +167,9 @@ const body = buildGoogleImageRequest({
   size: "1024x1024",
   maxOutputTokens: limit,
   thinkingLevel: thinkingLevel ?? model.thinkingLevel ?? null,
-  deliveryMimeType: model.outputMimeTypes[0] ?? "image/png",
+  // Through the shared helper, so this measures the request the adapter
+  // would actually make rather than one that drifted away from it.
+  deliveryMimeType: imageDeliveryMimeType(model),
 });
 if (!body) {
   console.error("The request builder refused these parameters.");
