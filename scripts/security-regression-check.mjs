@@ -1092,6 +1092,42 @@ const checks = [
       !source.includes('([key]) => key !== "prompt"'),
   },
   {
+    name: "Only one module decides which deployment this is",
+    file: "lib/deploymentEnvironment.ts",
+    test: (source) => {
+      // Five call sites each had their own chain, and the four that skipped
+      // APP_ENV -- the variable staging actually sets -- disagreed with the
+      // one that read it. Staging errors arrived in Sentry tagged
+      // `environment: production`, error-report evidence was stamped
+      // production on staging, and the admin console told an operator on
+      // staging that they were in production. Verified from the outside:
+      // staging's /api/build-info said "staging" while its own Sentry events
+      // said "production" (2026-08-12).
+      const files = [
+        "sentry.server.config.ts",
+        "sentry.edge.config.ts",
+        "lib/traceErrorEvidence.ts",
+        "lib/errorReportToken.ts",
+        "lib/buildInfo.ts",
+        "lib/securityEnvironment.ts",
+        "app/(site)/(application)/admin/layout.tsx",
+      ];
+      return (
+        source.includes("env.APP_ENV") &&
+        source.includes("env.RAILWAY_ENVIRONMENT_NAME") &&
+        files.every((file) => {
+          const consumer = read(file);
+          return (
+            consumer.includes("resolveDeploymentEnvironment") &&
+            // SENTRY_ENVIRONMENT stays a legitimate explicit override; a bare
+            // RAILWAY_ENVIRONMENT_NAME read is a second chain starting again.
+            !consumer.includes("process.env.RAILWAY_ENVIRONMENT_NAME")
+          );
+        })
+      );
+    },
+  },
+  {
     name: "Stripe key mode is required per deployment, not per build mode",
     file: "lib/securityEnvironment.ts",
     test: (source) => {
