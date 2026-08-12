@@ -40,6 +40,9 @@ Date / timezone:    ____________________
 - [ ] `npm run check:encoding:strict`
 - [ ] `npm run check:locale-translation` — proves no locale is still showing an
       English sentence where a translation is owed
+- [ ] `npm run check:enum-constraints` — proves every closed list the schema
+      enforces still matches the list the application validates against, and
+      that a new one was registered rather than left undecided
 - [ ] `npm run check:context-window-register`
 - [ ] `npm run check:router-context-window`
 - [ ] `npm run check:usage-bucket-range`
