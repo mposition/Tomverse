@@ -3140,6 +3140,38 @@ const checks = [
       );
     },
   },
+  {
+    // The auto-PR guard decides whether a branch gets a pull request at all,
+    // and it used to answer that question from a measurement it had broken
+    // itself: a `--depth=1` fetch re-shallowed the full history
+    // actions/checkout had just fetched, `merge-base` then had nothing to
+    // walk once develop moved on, and the three-dot diff failed rather than
+    // reporting "no changes". The `if` read the failure as a diff and opened
+    // PR #467 for work already merged.
+    //
+    // Pinned as three separate properties, because dropping any one of them
+    // brings the same false positive back: no shallow fetch of develop, an
+    // explicit containment test, and an unanswerable merge-base treated as an
+    // error instead of as a yes.
+    name: "Auto PR guard cannot mistake a broken merge-base for a diff",
+    file: ".github/workflows/auto-pr-to-develop.yml",
+    test: (source) => {
+      // Comment lines are stripped first: the comment above the step quotes
+      // the old `--depth=1` command on purpose, and a check that read it
+      // would fail on the very explanation of what it is guarding.
+      const script = source
+        .split("\n")
+        .filter((line) => !/^\s*#/.test(line))
+        .join("\n");
+      return (
+        !/git fetch origin develop\s+--depth/.test(script) &&
+        script.includes("git merge-base --is-ancestor HEAD origin/develop") &&
+        script.includes(
+          "if ! git merge-base origin/develop HEAD >/dev/null 2>&1; then"
+        )
+      );
+    },
+  },
 ];
 
 const failures = [];
