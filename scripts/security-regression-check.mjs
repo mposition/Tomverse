@@ -813,6 +813,20 @@ const checks = [
     test: (source) => source.includes("chatErrorResponse(error)"),
   },
   {
+    // The route makes two unguarded Stripe calls and one catch handles both.
+    // It assumed the Session, so a customers.create failure was reported as
+    // CHECKOUT_SESSION_CREATE_FAILED at stage "session" -- an operator sent to
+    // a call that never ran.
+    name: "A checkout failure names the Stripe call that actually failed",
+    file: "app/api/billing/checkout/route.ts",
+    test: (source) =>
+      source.includes("class CheckoutStripeCallError") &&
+      source.includes('throw new CheckoutStripeCallError("customer"') &&
+      source.includes("checkoutStripeCallFailure(") &&
+      // The assumption this replaced. Its return would be a silent regression.
+      !source.includes('stage: "session",'),
+  },
+  {
     // Deleting one conversation enqueued its generated images for removal from
     // object storage; deleting the account did not. The cascade runs
     // User -> Conversation -> ImageGeneration -> ImageAsset, and ImageAsset
