@@ -134,6 +134,80 @@ test("invalidation makes the next read observe the write", async () => {
   assert.equal((await readPublicSnapshot("app-settings", load)).value.value, "after");
 });
 
+test("a write during a load is not undone when that load lands", async () => {
+  // The admin write paths call invalidate precisely so the console does not
+  // show what it just changed as unchanged. That only works if the load which
+  // was already in flight -- and which read the database *before* the write --
+  // cannot put its result back into the cache afterwards with a fresh TTL.
+  let stored = "before";
+  let release: () => void = () => {};
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const slowLoad = async () => {
+    // Reads before the write, lands after it -- which is the whole race. A
+    // loader that read `stored` after the gate opened would see the new value
+    // and prove nothing.
+    const asRead = stored;
+    await gate;
+    return { value: asRead };
+  };
+
+  const inFlight = readPublicSnapshot("app-settings", slowLoad);
+  await Promise.resolve();
+
+  stored = "after";
+  invalidatePublicSnapshot("app-settings");
+
+  release();
+  // The caller that started before the write may legitimately see the old
+  // value; it asked before the change existed.
+  assert.equal((await inFlight).value.value, "before");
+
+  const next = await readPublicSnapshot("app-settings", async () => ({
+    value: stored,
+  }));
+  assert.equal(
+    next.value.value,
+    "after",
+    "the abandoned load must not have repopulated the cache"
+  );
+});
+
+test("a load abandoned by invalidation does not deregister its replacement", async () => {
+  // The single-flight slot is keyed, not owned. An abandoned load finishing
+  // late must not remove whichever load holds the slot now, or the next burst
+  // goes back to the database one query per request -- the amplification this
+  // module exists to close.
+  let loads = 0;
+  const gates: Array<() => void> = [];
+  const load = async () => {
+    loads += 1;
+    await new Promise<void>((resolve) => gates.push(resolve));
+    return { value: loads };
+  };
+
+  const abandoned = readPublicSnapshot("model-catalog", load);
+  await Promise.resolve();
+  invalidatePublicSnapshot("model-catalog");
+
+  const replacement = readPublicSnapshot("model-catalog", load);
+  await Promise.resolve();
+  assert.equal(loads, 2, "the invalidation must start a fresh load");
+
+  // The abandoned load lands first, and its cleanup must leave the
+  // replacement registered.
+  gates[0]();
+  await abandoned;
+
+  const joiner = readPublicSnapshot("model-catalog", load);
+  await Promise.resolve();
+  assert.equal(loads, 2, "a caller arriving now must join the load in flight");
+
+  gates[1]();
+  await Promise.all([replacement, joiner]);
+});
+
 test("the two snapshots do not share a cache slot", async () => {
   const settings = await readPublicSnapshot("app-settings", async () => ({
     kind: "settings",

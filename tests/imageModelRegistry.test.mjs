@@ -10,6 +10,7 @@ import {
   listEnabledImageModels,
   maxImageRequestCostMicroUsd,
   minimumCreditsForImageOption,
+  imageDeliveryMimeType,
   imageModelChipLabel,
   shouldUseCompactImageModelPicker,
   IMAGE_INLINE_MODEL_DISCOVERY_LIMIT,
@@ -272,5 +273,27 @@ test("every Google model asks for the one delivery MIME its API accepts", () => 
     // The storage allowlist stays wider than the request: what may be written
     // down unmodified is a different question from what is asked for.
     assert.ok(model.outputMimeTypes.includes("image/jpeg"), model.id);
+  }
+});
+
+test("what a request asks for is decided in one place, not per call site", () => {
+  const google = getImageModel("gemini-3-pro-image");
+  assert.equal(google.outputMimeTypes[0], "image/png");
+  // The declared preference wins over the head of the storage allowlist. Two
+  // call sites -- the adapter and the thinking-cap measurement script -- built
+  // this expression separately, and the script kept asking for PNG after the
+  // adapter had learned Google refuses it.
+  assert.equal(imageDeliveryMimeType(google), "image/jpeg");
+  // A model with no declared preference falls back to its allowlist, so
+  // adding the field is never required to register a model.
+  const openai = getImageModel("gpt-image-2");
+  assert.equal(openai.deliveryMimeType, undefined);
+  assert.equal(imageDeliveryMimeType(openai), openai.outputMimeTypes[0]);
+  for (const model of IMAGE_MODEL_REGISTRY) {
+    const delivered = imageDeliveryMimeType(model);
+    assert.ok(delivered.startsWith("image/"), model.id);
+    // Whatever is asked for must also be storable; otherwise a successful
+    // generation would be refused on the way to R2.
+    assert.ok(model.outputMimeTypes.includes(delivered), model.id);
   }
 });

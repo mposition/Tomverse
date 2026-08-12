@@ -7,9 +7,17 @@ import {
 } from "../lib/publicReadRateLimit.ts";
 
 /**
- * SEC-012's origin-side ceiling for the unauthenticated read endpoints had no
- * tests of its own, which is how the eviction below went unnoticed: nothing
- * exercised what happens at the cap.
+ * SEC-012's origin-side ceiling, continued.
+ *
+ * `tests/publicSnapshotCache.test.ts` already owns the limiter's basic
+ * behaviour -- the allowance, per-caller and per-scope separation, and that an
+ * overflow fails open rather than refusing everyone. Those are not repeated
+ * here.
+ *
+ * What is here is everything that needs the clock moved, which is why it did
+ * not exist before: a suite that can only advance time by however long it takes
+ * to run cannot reach a window's end, and therefore could not tell an eviction
+ * of expired entries apart from clearing the map.
  */
 
 const { requestsPerWindow, maxTrackedClients, windowMs } = PUBLIC_READ_RATE_LIMIT;
@@ -29,43 +37,7 @@ const clientRequest = (id) =>
 
 beforeEach(resetPublicReadRateLimitForTests);
 
-test("a caller is allowed up to the window's request count and refused after", () => {
-  const request = clientRequest("steady");
-  for (let attempt = 1; attempt <= requestsPerWindow; attempt += 1) {
-    assert.equal(
-      consumePublicReadBudget(request, "model-catalog").allowed,
-      true,
-      `request ${attempt} should be allowed`
-    );
-  }
-  const refused = consumePublicReadBudget(request, "model-catalog");
-  assert.equal(refused.allowed, false);
-  assert.ok(refused.retryAfter >= 1, "a refusal must name a wait");
-});
 
-test("the scope is part of the key, so one endpoint cannot exhaust another", () => {
-  const request = clientRequest("two-scopes");
-  for (let attempt = 0; attempt < requestsPerWindow + 1; attempt += 1) {
-    consumePublicReadBudget(request, "model-catalog");
-  }
-  assert.equal(
-    consumePublicReadBudget(request, "model-catalog").allowed,
-    false
-  );
-  assert.equal(consumePublicReadBudget(request, "app-settings").allowed, true);
-});
-
-test("callers do not share an allowance", () => {
-  const first = clientRequest("a");
-  for (let attempt = 0; attempt < requestsPerWindow + 1; attempt += 1) {
-    consumePublicReadBudget(first, "model-catalog");
-  }
-  assert.equal(consumePublicReadBudget(first, "model-catalog").allowed, false);
-  assert.equal(
-    consumePublicReadBudget(clientRequest("b"), "model-catalog").allowed,
-    true
-  );
-});
 
 test("a limited caller keeps its limit when the map fills with expired entries", () => {
   // The regression. Ordinary traffic is one-shot visitors whose entries stay
@@ -148,21 +120,3 @@ test("a window that has elapsed grants a fresh allowance", () => {
   );
 });
 
-test("the map never grows past its cap", () => {
-  for (let visitor = 0; visitor < maxTrackedClients * 2; visitor += 1) {
-    consumePublicReadBudget(clientRequest(`visitor-${visitor}`), "app-settings");
-  }
-  // Nothing exposes the size directly, so this asserts the property that
-  // matters instead: the limiter still answers, and still limits.
-  const request = clientRequest("after-overflow");
-  for (let attempt = 0; attempt < requestsPerWindow; attempt += 1) {
-    assert.equal(
-      consumePublicReadBudget(request, "model-catalog").allowed,
-      true
-    );
-  }
-  assert.equal(
-    consumePublicReadBudget(request, "model-catalog").allowed,
-    false
-  );
-});

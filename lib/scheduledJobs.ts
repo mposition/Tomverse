@@ -63,6 +63,15 @@ export async function completeScheduledJob(input: {
 export async function failScheduledJob(input: {
   runId: string | null | undefined;
   error: unknown;
+  /**
+   * What the run managed to do before, or despite, failing.
+   *
+   * A job whose steps run in isolation fails with most of its work done, and
+   * an operator reading only the error string cannot tell that from a job that
+   * failed on its first line.
+   */
+  result?: Prisma.InputJsonValue;
+  processedCount?: number;
 }) {
   if (!input.runId) return;
   try {
@@ -72,6 +81,10 @@ export async function failScheduledJob(input: {
         status: "failed",
         completedAt: new Date(),
         error: serializeError(input.error),
+        ...(input.result === undefined ? {} : { result: input.result }),
+        ...(input.processedCount === undefined
+          ? {}
+          : { processedCount: input.processedCount }),
       },
     });
   } catch (error) {

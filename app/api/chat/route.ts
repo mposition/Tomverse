@@ -671,9 +671,23 @@ export async function POST(req: Request) {
     const verificationGrant: { setCookie?: string } = {};
     const response = await handleChatPost(req, traceId, verificationGrant);
     if (verificationGrant.setCookie) {
-        // append, not set: the response may already carry the guest identity
-        // cookie (accessGrant.setCookie below), and both must survive.
-        response.headers.append("Set-Cookie", verificationGrant.setCookie);
+        try {
+            // append, not set: the response may already carry the guest
+            // identity cookie (accessGrant.setCookie below), and both must
+            // survive.
+            response.headers.append("Set-Cookie", verificationGrant.setCookie);
+        } catch (error) {
+            // This is the last statement standing between a finished response
+            // and its caller, and it is outside the handler's try -- so a
+            // throw here does not just lose the answer, it drops a stream that
+            // is still holding a concurrency slot, with nothing left to
+            // release it but the fifteen-minute reconciliation. The grant is
+            // built by the server from a signed token, so a value `Headers`
+            // refuses is a bug rather than a condition; the cost of that bug
+            // must not be the caller's answer and their slot. They solve one
+            // more challenge instead, and this line is how anyone finds out.
+            logRequestError("chat_verification_grant_cookie_rejected", traceId, error);
+        }
     }
     return response;
 }
