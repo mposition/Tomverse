@@ -47,6 +47,23 @@ type Snapshot<T> = {
 const snapshots = new Map<PublicSnapshotKey, Snapshot<unknown>>();
 const inFlight = new Map<PublicSnapshotKey, Promise<Snapshot<unknown>>>();
 
+/**
+ * Fences a load against the invalidation that happened while it was running.
+ *
+ * A load reads the database, then writes what it read into the cache. If a
+ * write lands between those two moments, deleting the snapshot achieves
+ * nothing: the load is still holding pre-write data and stores it afterwards
+ * with a full TTL, so the change the admin just made is reverted for up to ten
+ * seconds -- which is the exact failure invalidation exists to prevent, and it
+ * is invisible because the invalidate call did happen.
+ *
+ * So the load records the generation it started in and stores its result only
+ * if that generation is still current. Same shape as the extraction lease
+ * fence: a deadline cannot decide this, only an explicit token can.
+ */
+const generations = new Map<PublicSnapshotKey, number>();
+const generationOf = (key: PublicSnapshotKey) => generations.get(key) ?? 0;
+
 const weakEtag = (serialized: string) =>
   `W/"${createHash("sha256").update(serialized).digest("base64url").slice(0, 27)}"`;
 
@@ -57,6 +74,12 @@ const weakEtag = (serialized: string) =>
  */
 export const invalidatePublicSnapshot = (key: PublicSnapshotKey) => {
   snapshots.delete(key);
+  generations.set(key, generationOf(key) + 1);
+  // Also stops a caller arriving now from joining a load that already read
+  // stale data. That load still resolves for whoever was waiting on it before
+  // the write -- they asked before the change existed -- but it is no longer
+  // what anyone new gets.
+  inFlight.delete(key);
 };
 
 export const readPublicSnapshot = async <T>(
@@ -71,17 +94,26 @@ export const readPublicSnapshot = async <T>(
   const pending = inFlight.get(key);
   if (pending) return (await pending) as Snapshot<T>;
 
-  const load$ = (async () => {
+  const startedIn = generationOf(key);
+  const load$: Promise<Snapshot<unknown>> = (async () => {
     const value = await load();
     const snapshot: Snapshot<T> = {
       value,
       etag: weakEtag(JSON.stringify(value)),
       expiresAt: Date.now() + TTL_MS[key],
     };
-    snapshots.set(key, snapshot as Snapshot<unknown>);
+    // Invalidated while this was running: the value is already known to be
+    // out of date, so it is returned to the callers who are waiting on it and
+    // not written anywhere.
+    if (generationOf(key) === startedIn) {
+      snapshots.set(key, snapshot as Snapshot<unknown>);
+    }
     return snapshot as Snapshot<unknown>;
   })().finally(() => {
-    inFlight.delete(key);
+    // Only if this is still the entry it registered. An invalidation may have
+    // dropped it already and a newer load taken the slot, and deleting that
+    // one would send the next burst back to the database.
+    if (inFlight.get(key) === load$) inFlight.delete(key);
   });
 
   inFlight.set(key, load$);
