@@ -449,6 +449,18 @@ export const shouldUseCompactImageModelPicker = (
 ): boolean =>
   enabledModelCount > IMAGE_INLINE_MODEL_DISCOVERY_LIMIT;
 
+/**
+ * What to ask a provider to deliver for this model.
+ *
+ * One function rather than the expression written at each call site: the
+ * adapter and the thinking-cap measurement script both build a Google request,
+ * and when the adapter learned that Google only accepts `image/jpeg` the script
+ * kept asking for PNG -- so the next measurement run would have failed exactly
+ * as the first one did, for a reason already fixed.
+ */
+export const imageDeliveryMimeType = (model: ImageModelProfile): string =>
+  model.deliveryMimeType ?? model.outputMimeTypes[0] ?? "image/png";
+
 /** The composer's visual label for a model; identity stays `name`. */
 export const imageModelChipLabel = (model: ImageModelProfile): string =>
   model.shortName ?? model.name;

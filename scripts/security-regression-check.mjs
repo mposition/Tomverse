@@ -992,6 +992,28 @@ const checks = [
       !source.includes('([key]) => key !== "prompt"'),
   },
   {
+    name: "The adapter takes its delivery MIME type from the registry helper",
+    file: "lib/imageProviderAdapter.ts",
+    test: (source) =>
+      // `outputMimeTypes` is the storage allowlist; `deliveryMimeType` is what
+      // the request asks the provider for. Reading the head of the allowlist
+      // instead sent every Google request asking for PNG, which its API
+      // refuses -- and the two are only kept apart by going through one helper.
+      source.includes("imageDeliveryMimeType(model)") &&
+      !source.includes("outputMimeTypes["),
+  },
+  {
+    name: "The thinking-cap measurement sends the adapter's own request",
+    file: "scripts/measure-google-image-thinking-cap.mjs",
+    test: (source) =>
+      // This script exists to measure what production would be billed for, so
+      // a request it builds differently from the adapter measures nothing. It
+      // already drifted once: the adapter learned Google's delivery MIME type
+      // and the script kept its own copy of the old expression.
+      source.includes("imageDeliveryMimeType(model)") &&
+      !source.includes("outputMimeTypes["),
+  },
+  {
     name: "A documented output limit never doubles as a proven cost cap",
     file: "lib/imageModelRegistry.ts",
     test: (source) => {
