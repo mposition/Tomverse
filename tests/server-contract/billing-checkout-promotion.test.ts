@@ -5,8 +5,8 @@ import { pathToFileURL } from "node:url";
 import { resolve } from "node:path";
 
 /**
- * Server-side contract for /api/billing/checkout, with the promotion path in
- * focus.
+ * Server-side contract for /api/billing/checkout: the promotion path, and the
+ * three refusals that keep this endpoint from becoming a plan-change flow.
  *
  * The regression this exists for: a Max checkout with a valid promotion code
  * answered 500 for every customer, because the Session was created with both
@@ -26,7 +26,10 @@ import { resolve } from "node:path";
  *     500, and never carry a Stripe object id or message;
  *   - the promotion lease is released on every failure, so a customer is not
  *     locked out for 31 minutes by an attempt that never got anywhere;
- *   - a second concurrent checkout is refused with 409, not 500.
+ *   - a second concurrent checkout is refused with 409, not 500;
+ *   - buying the plan already held, downgrading, and upgrading while a
+ *     subscription is live are each refused with 409 and reach no Stripe, so a
+ *     plan change cannot be driven through new-subscription checkout.
  *
  * Only the session, rate limiter, Prisma, Stripe and the promotion security
  * layer are replaced. The route's own branching and its zod schema are real.
@@ -298,6 +301,27 @@ async function loadRoute(): Promise<{
             isActive: true,
             sortOrder: 3,
           },
+          // The lower tier exists so a downgrade has somewhere to point. The
+          // promotion tests above never reach it.
+          {
+            id: "pro",
+            name: "Pro",
+            tier: "Pro",
+            monthlyPriceCents: 1500,
+            annualPriceCents: 14400,
+            currency: "USD",
+            stripeProductId: "prod_pro",
+            stripePriceId: null,
+            stripeAnnualPriceId: null,
+            dailyMessageLimit: 0,
+            monthlyMessageLimit: 4000,
+            maxModels: 3,
+            allowAttachments: true,
+            allowSharing: true,
+            allowDownloads: true,
+            isActive: true,
+            sortOrder: 2,
+          },
         ],
       },
     });
@@ -551,4 +575,110 @@ test("a promotion checkout expires inside the window Stripe accepts", async () =
     `expires_at must be >= 30 minutes out, got ${seconds}s`
   );
   assert.ok(seconds <= 24 * 60 * 60, "expires_at must be <= 24 hours out");
+});
+
+/* --------------------------------------- the three plan-transition refusals */
+
+/**
+ * `/api/billing/checkout` creates *new* subscriptions and nothing else.
+ * docs/policy/plan-change.md and AGENTS.md both say the three 409s below stay
+ * exactly as they are, and give the reason: relax any of them and a plan
+ * change can be driven through new-subscription checkout, leaving one account
+ * paying for two plans at once.
+ *
+ * Until now the refusals were covered on either side of the route but not
+ * through it: tests/planChangeStateMachine.test.mjs exercises the dedicated
+ * plan-change module, and tests/purchaseIntent.test.mjs asserts how the client
+ * classifies a 409 it is handed. Neither makes the route emit one.
+ *
+ * The fourth case is the one a careless fix breaks in the opposite direction.
+ * The guard reads `effectivePlanForAccess`, not `user.plan`, because an
+ * expired Founding Tester Pass leaves the column at "Pro" while the account
+ * has nothing — and refusing that customer's purchase is as wrong as allowing
+ * a duplicate one.
+ */
+
+const FOUNDING_TESTER_PASS_STATUS = "founding_tester_pass";
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+test("buying the plan the account already holds is refused, and reaches no Stripe", async () => {
+  world.user = { ...world.user, plan: "Max" };
+
+  const response = await post({ planId: "max" });
+  assert.equal(response.status, 409);
+  assert.deepEqual(
+    { code: (await response.json()).code },
+    { code: "PLAN_CHANGE_NOT_SUPPORTED" }
+  );
+  assert.deepEqual(world.sessionCreateCalls, []);
+});
+
+test("a downgrade is refused rather than sold as a second subscription", async () => {
+  // Max buying Pro. Creating this Session would leave the customer paying for
+  // both, because nothing cancels the first one.
+  world.user = { ...world.user, plan: "Max" };
+
+  const response = await post({ planId: "pro" });
+  assert.equal(response.status, 409);
+  assert.equal((await response.json()).code, "PLAN_CHANGE_NOT_SUPPORTED");
+  assert.deepEqual(world.sessionCreateCalls, []);
+});
+
+test("an upgrade while a subscription is live is refused as a change, not sold", async () => {
+  world.user = {
+    ...world.user,
+    plan: "Pro",
+    stripeSubscriptionId: "sub_live",
+    subscriptionStatus: "active",
+  };
+
+  const response = await post({ planId: "max" });
+  assert.equal(response.status, 409);
+  assert.equal((await response.json()).code, "ACTIVE_SUBSCRIPTION_EXISTS");
+  assert.deepEqual(world.sessionCreateCalls, []);
+});
+
+test("past_due counts as live: the upgrade is still a change", async () => {
+  // A lapsed card is a payment problem, not an absent subscription. Selling a
+  // second one here would bill the customer twice for one product.
+  world.user = {
+    ...world.user,
+    plan: "Pro",
+    stripeSubscriptionId: "sub_live",
+    subscriptionStatus: "past_due",
+  };
+
+  const response = await post({ planId: "max" });
+  assert.equal(response.status, 409);
+  assert.equal((await response.json()).code, "ACTIVE_SUBSCRIPTION_EXISTS");
+});
+
+test("an expired Founding Tester Pass does not block the purchase it looks like", async () => {
+  // `plan` still reads "Pro" and the account has nothing. Reading the column
+  // instead of the effective plan would refuse a customer trying to pay.
+  world.user = {
+    ...world.user,
+    plan: "Pro",
+    subscriptionStatus: FOUNDING_TESTER_PASS_STATUS,
+    subscriptionCurrentPeriodEnd: new Date(Date.now() - DAY_MS),
+  };
+
+  const response = await post({ planId: "pro" });
+  assert.equal(response.status, 200);
+  assert.equal(world.sessionCreateCalls.length, 1);
+});
+
+test("a pass that has not expired still blocks buying the tier it grants", async () => {
+  // The complement of the case above: the guard is reading the effective plan,
+  // not ignoring the column.
+  world.user = {
+    ...world.user,
+    plan: "Pro",
+    subscriptionStatus: FOUNDING_TESTER_PASS_STATUS,
+    subscriptionCurrentPeriodEnd: new Date(Date.now() + DAY_MS),
+  };
+
+  const response = await post({ planId: "pro" });
+  assert.equal(response.status, 409);
+  assert.equal((await response.json()).code, "PLAN_CHANGE_NOT_SUPPORTED");
 });
