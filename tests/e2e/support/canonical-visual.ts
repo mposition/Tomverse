@@ -42,9 +42,21 @@ export const NON_CANONICAL_BROWSER_REASON =
   "evidence about the product. Do not re-record from here; see docs/qa/canonical-visual-baseline.md.";
 
 /**
- * Call inside a `beforeEach` (or at the top of a golden test) so a run on a
- * substitute browser reports the golden as `Not verified` rather than as a
- * product failure. Behavioural assertions in the same spec are untouched.
+ * Call it at the capture, not in a `beforeEach`.
+ *
+ * "Behavioural assertions in the same spec are untouched" is the contract, and
+ * a `beforeEach` cannot keep it: it skips the whole test before anything runs,
+ * including tests that take no screenshot at all. That is not theoretical --
+ * `chat-state-visual-regression.spec.ts` gated its file on the claim that every
+ * test in it was a golden, and 18 of its 81 are behavioural. Among them was the
+ * focus assertion on the credit-pack dialog, the one the nightly used to catch
+ * the focus race on 18d1e891, so on a substitute browser the check most likely
+ * to notice a regression was the one silently not running.
+ *
+ * Called from the capture instead, a golden still reports `Not verified` and
+ * gets there having run its behavioural assertions first, and a test with no
+ * capture runs to completion. `tests/canonicalVisualGate.test.mjs` holds the
+ * placement.
  */
 export function skipUnlessCanonicalVisualBrowser() {
   test.skip(!isCanonicalVisualBrowser(), NON_CANONICAL_BROWSER_REASON);
