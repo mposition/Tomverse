@@ -108,11 +108,11 @@ export const clampGuestSelectedModels = (models: string[]) =>
 // admin-configured guestDefaultModelId) only reorders which of the three
 // appears first, and is ignored if it names a model outside the trio.
 //
-// Deliberately pure and catalogue-injected: the server (app/(application)/
-// chat/page.tsx via lib/appSettings) and the client's very first render
-// (app/(application)/chat/ChatPageClient.tsx) both call this, so the guest
-// model count -- and therefore the estimated credits derived from it -- is
-// identical before and after hydration (STG-F006).
+// Deliberately pure and catalogue-injected: the server
+// (app/(site)/(application)/chat/page.tsx via lib/appSettings) and the client's
+// very first render (app/(site)/(application)/chat/ChatPageClient.tsx) both
+// call this, so the guest model count -- and therefore the estimated credits
+// derived from it -- is identical before and after hydration (STG-F006).
 export const resolveGuestDefaultSelectedModels = ({
   isEligible,
   leadModelId = APP_DEFAULTS.guestDefaultModelId,

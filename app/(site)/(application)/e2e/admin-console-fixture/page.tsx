@@ -33,8 +33,9 @@ export const dynamic = "force-dynamic";
  * - `isE2EFixtureMode()` is the same gate every other short-circuit uses: both
  *   flags AND a loopback `NEXTAUTH_URL` (`lib/e2eTestMode.ts`). It fails closed
  *   on every other combination -- see `tests/e2eTestMode.test.mjs` for the
- *   executed matrix, and `tests/e2e/admin-console-fixture-gate.spec.ts` for
- *   the real HTTP proof that a production-like server answers 404.
+ *   executed matrix, and `scripts/verify-fixture-route-gate.mjs`
+ *   (`npm run verify:fixture-route-gate`) for the real HTTP proof that a
+ *   production-like server answers 404.
  * - It renders fixture props only. It grants nothing: every write still goes
  *   to the real `/api/admin/**` routes, which keep their own session,
  *   permission, rate-limit, reauthentication and two-person approval checks.

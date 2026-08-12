@@ -13,7 +13,7 @@ import { resolve } from "node:path";
 // The refusal is the reason this file exists. `stripeEventMatchesKeyMode`
 // stops a live event being replayed against a test key and the reverse, and
 // today it is covered twice over as a pure function and once as a *source
-// order* assertion in tests/goLiveSecurityFixes.ts -- "the check appears
+// order* assertion in tests/goLiveSecurityFixes.test.ts -- "the check appears
 // before processStripeEvent in the file". Source order cannot show that the
 // route writes nothing when the check fails: an update placed before the
 // guard, or an audit entry written on the way out, would satisfy the ordering

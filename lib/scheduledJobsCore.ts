@@ -21,9 +21,9 @@
 // `provider_probe`, so it never showed the false state.)
 //
 // `CRON_CADENCE_MINUTES` below is the single place a cron-driven job's cadence
-// is written down, and tests/scheduledJobsCadence.test.mjs asserts it against
-// the Railway config files themselves, so the two cannot drift apart again
-// without a red test.
+// is written down, and tests/scheduledJobsCore.test.mjs asserts it against the
+// Railway config files themselves, so the two cannot drift apart again without
+// a red test.
 
 /** Cadence, in minutes, of each Railway cron service that drives a job here. */
 export const CRON_CADENCE_MINUTES = {
