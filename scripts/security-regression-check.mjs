@@ -1043,6 +1043,38 @@ const checks = [
       !source.includes('([key]) => key !== "prompt"'),
   },
   {
+    name: "An image asset reaches the client as a signed URL, never as a key",
+    file: "lib/imageGenerationRead.ts",
+    test: (source) =>
+      // r2Key is a storage path into a bucket the user has no business naming,
+      // and the edit that leaks it is the one that reads as harmless:
+      // `{...asset, url}` instead of naming the three fields. The mapping is a
+      // pure function now so the shape is pinned by a test as well.
+      source.includes("serializeImageAssets(") &&
+      !/\.\.\.asset\b/.test(source) &&
+      // The select still reads r2Key -- it has to, to mint the URL -- so the
+      // check is that nothing hands the row itself onward.
+      !/assets:\s*generation\.assets\b/.test(source),
+  },
+  {
+    name: "The image workspace borrows the rail's principles, not its code",
+    file: "components/images/ImageGenerationWorkspace.tsx",
+    test: (source) => {
+      // Policy §1: an image conversation never mounts ChatInput, ChatApp or
+      // the comparison action rail, and never enables AI Review. Importing
+      // shouldShowVisualStatus would couple the two disclosure policies, so
+      // the next change to the chat comparison would silently re-shape the
+      // image composer. Comments may name them; imports may not.
+      const imports = source
+        .split("\n")
+        .filter((line) => /^\s*(import|}?\s*from)\b/.test(line))
+        .join("\n");
+      return !/(ComparisonActionRail|shouldShowVisualStatus|comparisonReadiness|components\/chat\/ChatInput|components\/chat\/ChatApp)/.test(
+        imports
+      );
+    },
+  },
+  {
     name: "A thrown image-budget check reads as not ready, never as healthy",
     file: "app/api/ready/route.ts",
     test: (source) =>
