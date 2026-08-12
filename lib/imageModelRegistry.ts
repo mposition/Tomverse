@@ -449,6 +449,41 @@ export const shouldUseCompactImageModelPicker = (
 ): boolean =>
   enabledModelCount > IMAGE_INLINE_MODEL_DISCOVERY_LIMIT;
 
+export type ImageComposerModelLayout = {
+  compact: boolean;
+  /** Rendered in the composer's own row, uncollapsed, with exact prices. */
+  inline: readonly ImageModelProfile[];
+  /** Rendered inside the picker. Empty whenever `compact` is false. */
+  picker: readonly ImageModelProfile[];
+};
+
+/**
+ * Which enabled models the composer shows where.
+ *
+ * Pure, and separate from the component, because the branch it decides cannot
+ * be reached by an end-to-end test today: two models are enabled and the
+ * threshold is three, so the compact rendering only appears once a fourth is
+ * activated. A rule that ships untested until the day it matters is a rule
+ * nobody can trust on that day, and enabling the three held Google models
+ * would take the count straight from 2 to 5.
+ *
+ * Order follows the registry in both lists, so a model does not jump position
+ * when it is selected -- it moves container, and that is the only change.
+ */
+export const imageComposerModelLayout = (
+  models: readonly ImageModelProfile[],
+  selectedModelIds: readonly string[]
+): ImageComposerModelLayout => {
+  const compact = shouldUseCompactImageModelPicker(models.length);
+  if (!compact) return { compact, inline: models, picker: [] };
+  const selected = new Set(selectedModelIds);
+  return {
+    compact,
+    inline: models.filter((model) => selected.has(model.id)),
+    picker: models.filter((model) => !selected.has(model.id)),
+  };
+};
+
 /**
  * What to ask a provider to deliver for this model.
  *
