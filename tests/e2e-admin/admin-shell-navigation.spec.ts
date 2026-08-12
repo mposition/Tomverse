@@ -30,6 +30,7 @@ const NAVIGATION = [
   { group: "Revenue", label: "Credit ledger", href: "/admin/credit-ledger" },
   { group: "AI Platform", label: "Providers", href: "/admin/providers" },
   { group: "AI Platform", label: "Models", href: "/admin/models" },
+  { group: "AI Platform", label: "Routing", href: "/admin/routing" },
   { group: "Operations", label: "Infrastructure", href: "/admin/infrastructure" },
   { group: "Operations", label: "Automation", href: "/admin/automation" },
   { group: "Operations", label: "Alerts", href: "/admin/alerts" },

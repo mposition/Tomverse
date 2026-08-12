@@ -258,6 +258,14 @@ export const ADMIN_NAVIGATION: readonly AdminNavItem[] = [
     aliases: ["registry", "catalogue", "catalog", "gpt", "claude", "gemini"],
   },
   {
+    id: "routing",
+    label: "Routing",
+    href: "/admin/routing",
+    description: "Shadow Auto Router decisions against what actually ran",
+    group: "AI Platform",
+    aliases: ["auto", "router", "shadow", "task profile", "candidates"],
+  },
+  {
     id: "infrastructure",
     label: "Infrastructure",
     href: "/admin/infrastructure",
