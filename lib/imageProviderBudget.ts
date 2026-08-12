@@ -3,9 +3,13 @@ import {
   IMAGE_COST_PER_CREDIT_CEILING_MICRO_USD,
   listEnabledImagePricingEntries,
   maxRequestCostMicroUsd,
+  type ImageGenerationPricingEntry,
 } from "@/lib/imageGenerationPricing";
 import {
   listActiveImageProviders,
+  listEnabledImageModels,
+  maxImageRequestCostMicroUsd,
+  type ImageModelProfile,
   type ImageModelProvider,
 } from "@/lib/imageModelRegistry";
 
@@ -36,12 +40,51 @@ export const IMAGE_PROVIDER_BUDGET_ENV_NAMES = imageProviderBudgetEnvNames("open
 
 export const IMAGE_BUDGET_HEADROOM_MULTIPLIER = 1.25;
 
-/** Worst legitimate provider cost of one credit, prompt budget included. */
+/**
+ * Worst legitimate provider cost of one credit, prompt budget included, across
+ * everything a user can buy today.
+ *
+ * Both price lists, because there are two. `IMAGE_GENERATION_PRICING` is
+ * gpt-image-2's original table; every model added since carries its prices on
+ * its registry profile. Reading only the first was right when it was the only
+ * one and quietly stopped being: xAI shipped enabled and never entered this
+ * derivation, and a Google model would not have either. The number it returned
+ * stayed correct by luck -- gpt-image-2 Final happens to be the most expensive
+ * credit on offer -- which is the kind of correctness that ends without
+ * warning, on the deploy that adds a costlier model.
+ *
+ * An enabled model whose worst case is unknown throws rather than being
+ * skipped. Skipping it would understate the floor using the very models the
+ * floor exists to cover; `check:image-pricing` already forbids enabling one,
+ * so this is the in-process backstop for a registry edit that gets past it.
+ */
+export const worstImageCostPerCreditFrom = (
+  entries: readonly ImageGenerationPricingEntry[],
+  models: readonly ImageModelProfile[]
+): number => {
+  const fromLegacyTable = entries.map((entry) =>
+    Math.ceil(maxRequestCostMicroUsd(entry) / entry.credits)
+  );
+  const fromRegistry = models.flatMap((model) =>
+    model.prices.map((price) => {
+      const maxCost = maxImageRequestCostMicroUsd(model, price);
+      if (maxCost === null) {
+        throw new Error(
+          `${model.id} is enabled but its worst-case cost is unbounded, so no ` +
+            "image provider budget floor can be derived."
+        );
+      }
+      return Math.ceil(maxCost / price.credits);
+    })
+  );
+  return Math.max(...fromLegacyTable, ...fromRegistry);
+};
+
+/** The same derivation over what is actually enabled right now. */
 export const worstImageCostPerCreditMicroUsd = () =>
-  Math.max(
-    ...listEnabledImagePricingEntries().map((entry) =>
-      Math.ceil(maxRequestCostMicroUsd(entry) / entry.credits)
-    )
+  worstImageCostPerCreditFrom(
+    listEnabledImagePricingEntries(),
+    listEnabledImageModels()
   );
 
 /**

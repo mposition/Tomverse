@@ -63,11 +63,26 @@ const readinessResponse = async (head = false) => {
   const providerBudgets = budgetStatus.ready;
   // The image budget gates readiness only while the image generation flag is
   // ON: "flag off, budget absent" is the legal intermediate state of the
-  // env-first deploy order (docs/policy/image-generation.md section 8).
-  const imageBudgetStatus = await getImageProviderBudgetReadiness().catch(
-    () => null
+  // env-first deploy order (docs/policy/image-generation.md section 8). That
+  // state is decided inside the function, which returns ready, so a thrown
+  // error is never it -- it means the derivation itself failed, and the honest
+  // answer to "is the budget usable?" is that nobody knows.
+  //
+  // This used to read `status?.ready ?? true`, which answered that question
+  // with "yes". A missing environment variable was fatal while the check that
+  // finds missing environment variables blowing up was healthy, so the louder
+  // the failure the quieter the endpoint.
+  const imageBudgetStatus = await getImageProviderBudgetReadiness().then(
+    (status) => ({ status, error: null as string | null }),
+    (error: unknown) => ({
+      status: null,
+      error:
+        error instanceof Error
+          ? error.message
+          : "The image provider budget readiness check threw.",
+    })
   );
-  const imageProviderBudget = imageBudgetStatus?.ready ?? true;
+  const imageProviderBudget = imageBudgetStatus.status?.ready ?? false;
   const database = databaseResult.ready;
   const ready =
     database && securityEnvironment && providerBudgets && imageProviderBudget;
@@ -127,21 +142,24 @@ const readinessResponse = async (head = false) => {
         title: "Image provider spend budget is not configured correctly",
         error: imageProviderBudget
           ? "Image provider budget is configured (or the feature flag is off)."
-          : (imageBudgetStatus?.providers ?? [])
+          : imageBudgetStatus.error ??
+            ((imageBudgetStatus.status?.providers ?? [])
               .flatMap((entry) =>
                 entry.resolved.problems.map(
                   (problem) => `${entry.provider}: ${problem.message}`
                 )
               )
               .join(" | ") ||
-            "Image generation is enabled but its provider budget is unusable.",
+              "Image generation is enabled but its provider budget is unusable."),
         severity: "fatal",
         context: {
           component: "api-ready",
           route: "/api/ready",
-          imageGenerationFlagEnabled: imageBudgetStatus?.flagEnabled ?? false,
+          imageBudgetCheckThrew: imageBudgetStatus.error !== null,
+          imageGenerationFlagEnabled:
+            imageBudgetStatus.status?.flagEnabled ?? false,
           imageProviders:
-            (imageBudgetStatus?.providers ?? [])
+            (imageBudgetStatus.status?.providers ?? [])
               .map((entry) => entry.provider)
               .join(",") || "none",
           traceId,

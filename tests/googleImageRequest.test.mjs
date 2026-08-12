@@ -6,6 +6,7 @@ import {
   GOOGLE_API_KEY_HEADER,
   GOOGLE_INTERACTIONS_URL,
   parseGoogleImageResponse,
+  readGoogleImageInteraction,
 } from "../lib/googleImageRequest.ts";
 
 // Contract tests for the Google image path. The adapter itself is server-only
@@ -268,4 +269,80 @@ test("the delivery MIME is a request preference, not the storage allowlist's hea
   const body = request({ deliveryMimeType: "image/jpeg" });
   assert.equal(body.response_format.mime_type, "image/jpeg");
   assert.notEqual(body.response_format.mime_type, "image/png");
+});
+
+// Reading the same response for evidence rather than for an image.
+
+test("a response that ran out of room keeps its usage, having no image", () => {
+  // The sample the measurement most wants to buy is the one where the limit
+  // actually bit: thinking consumed the budget and no image was finished.
+  // parseGoogleImageResponse fails closed on it -- correctly, there is nothing
+  // to bill for -- and routing the measurement through that parser alone threw
+  // the usage away with it, filing the most informative sample as unreadable.
+  const payload = {
+    status: "incomplete",
+    steps: [{ type: "thinking", content: [] }],
+    usage: {
+      total_input_tokens: 12,
+      total_output_tokens: 400,
+      total_thought_tokens: 200,
+    },
+  };
+  assert.equal(parseGoogleImageResponse(payload), null);
+
+  const interaction = readGoogleImageInteraction(payload);
+  assert.deepEqual(interaction.usage, {
+    inputTokens: 12,
+    outputTokens: 400,
+    thinkingTokens: 200,
+  });
+  assert.equal(interaction.status, "incomplete");
+  assert.equal(interaction.modelOutputImageCount, 0);
+  assert.deepEqual(interaction.stepTypes, ["thinking"]);
+  // 600 against a limit of 512 is the counterexample the whole run is for.
+  assert.equal(googleBillableOutputTokens(interaction.usage), 600);
+});
+
+test("the evidence reader counts images without ever accepting one", () => {
+  const interaction = readGoogleImageInteraction({
+    steps: [imageStep("AAAA", "image/jpeg"), imageStep("BBBB", "image/jpeg")],
+    usage,
+  });
+  // Two images fail the strict parser. Here the count is reported so the
+  // anomaly is visible in the evidence rather than swallowed.
+  assert.equal(parseGoogleImageResponse({ steps: [imageStep("AAAA"), imageStep("BBBB")], usage }), null);
+  assert.equal(interaction.modelOutputImageCount, 2);
+  // No image, no MIME, no bytes: this reader never yields something storable,
+  // so it cannot become a back door around the strict parser.
+  assert.deepEqual(Object.keys(interaction).sort(), [
+    "modelOutputImageCount",
+    "status",
+    "stepTypes",
+    "usage",
+  ]);
+});
+
+test("only model output counts as a delivered image, in both readers", () => {
+  const thinkingOnly = {
+    steps: [{ type: "thinking", content: [{ type: "image", data: "AAAA", mime_type: "image/jpeg" }] }],
+    usage,
+  };
+  assert.equal(parseGoogleImageResponse(thinkingOnly), null);
+  assert.equal(readGoogleImageInteraction(thinkingOnly).modelOutputImageCount, 0);
+});
+
+test("a response with no usage is distinguishable from one billing zero", () => {
+  // Both read as zero counters, and the measurement treats zero as "nothing
+  // was measured" rather than as a very low sample -- paying for more of them
+  // is how a run spends its budget on nothing.
+  const interaction = readGoogleImageInteraction({ steps: [] });
+  assert.deepEqual(interaction.usage, {
+    inputTokens: 0,
+    outputTokens: 0,
+    thinkingTokens: 0,
+  });
+  assert.equal(interaction.status, null);
+  assert.deepEqual(interaction.stepTypes, []);
+  assert.equal(readGoogleImageInteraction(null), null);
+  assert.equal(readGoogleImageInteraction("{}"), null);
 });

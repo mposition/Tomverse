@@ -261,6 +261,17 @@ gate 없이 노출되는 배포 창은 금지된다. UI 비노출은 보안 경�
     `gpt-image-2` Final 정사각에서 나온다). 따라서 floor는 특정 공급자의
     실원가가 아니라 **전체 이미지 상품을 포괄하는 entitlement 안전 바닥**이다.
     xAI budget의 floor를 "Grok 실원가"로 설명하면 틀린다.
+  - **가격표는 두 개이고 유도는 둘 다 읽는다.** `IMAGE_GENERATION_PRICING`은
+    `gpt-image-2`의 원래 표이고, 이후 추가된 모델은 registry profile의
+    `prices`에 값을 싣는다. 2026-08-12까지 유도는 앞의 표만 순회했고, 결과
+    864µ는 **우연히** 맞았다 — `gpt-image-2` Final이 마침 가장 비싼
+    크레딧이었기 때문이다. 그 사이 xAI는 enabled 상태로 유도에 한 번도
+    들어가지 않았고, 더 비싼 모델을 추가해도 floor가 따라 오르지 않았을
+    것이다. `worstImageCostPerCreditFrom()`이 두 목록을 함께 읽고,
+    **worst case가 미확정인 enabled 모델은 건너뛰지 않고 throw**한다 —
+    건너뛰면 floor가 존재하는 이유인 바로 그 모델을 뺀 채 계산된다.
+    `tests/imageProviderBudget.test.mjs`가 "더 비싼 모델을 추가하면 floor가
+    오른다"를 고정한다.
   - **floor는 바닥이지 권고치가 아니다.** 초기 production 승인값은
     일 $50 / 월 $500(2026-08-05). staging은 일·월 모두 floor $10.80으로,
     총 staging 지출을 캡하는 것이 의도다.
@@ -280,6 +291,14 @@ gate 없이 노출되는 배포 창은 금지된다. UI 비노출은 보안 경�
 - production에서 env 부재 시 `/api/ready` 실패. 조용한 fallback 기본값
   금지(`providerMonitoring`의 기존 silent fallback 모순은 budget 추가 전에
   정리). env를 먼저 배포하고 코드를 나중에 배포한다.
+- **readiness 검사가 던지면 not ready다.** flag-off로 예산이 없어도 되는
+  합법 상태는 `getImageProviderBudgetReadiness()` **안에서** `ready: true`로
+  판정된다. 따라서 예외는 그 상태일 수 없고, 유도 자체가 실패했다는 뜻이다.
+  route는 2026-08-12까지 `status?.ready ?? true`로 읽어 **가장 시끄러운
+  실패를 가장 조용한 신호로** 바꿨다 — env 하나가 비면 fatal인데, 그 env를
+  찾는 검사가 터지면 healthy였다. 지금은 `?? false`이고 예외 메시지를
+  `IMAGE_PROVIDER_COST_BUDGET_NOT_READY`의 `error`로 싣는다.
+  `scripts/security-regression-check.mjs`가 이 기본값을 고정한다.
 
 ## 9. 자산 수명주기
 
@@ -495,6 +514,32 @@ candidate의 한도로 설명된다. 즉 hidden thinking이 32,768 안에 포함
    통과로 세지 않는다. 카드 한도가 가장 낮은 `gemini-3.1-flash-lite-image`
    (4,096)가 첫 측정 대상으로 가장 유용하다.
 8. 요청 JSON·원본 응답·모델 ID·응답 ID·실행 일시를 감사 증거로 보존한다.
+
+**이미지가 없는 응답도 표본이다.** 상한이 실제로 물린 표본은 정의상 완성된
+이미지가 없다. production parser(`parseGoogleImageResponse`)는 "정확히 한 장"이
+아니면 fail-closed로 거절하는데 — 과금할 대상이 없으니 옳다 — 측정을 그 parser
+하나로만 읽으면 **가장 비싸게 산 최고의 증거를 버린다.** 두 질문을 분리한다:
+과금 가능한 이미지인가(`parseGoogleImageResponse`)와 무엇이 과금됐고 왜
+멈췄는가(`readGoogleImageInteraction`). 후자는 이미지를 요구하지도 반환하지도
+않으므로 전자의 우회로가 될 수 없고, production 경로가 후자로 응답을 승격해서는
+안 된다.
+
+**한 프롬프트의 반복은 한 프롬프트의 증거다.** 모델이 얼마나 생각하는지는
+무엇을 물었는지의 함수이므로, `--repeats`를 올려도 §12의 "복잡한 프롬프트
+여러 개"는 충족되지 않는다. 스크립트는 서로 다른 비용 축(조밀한 라벨 기하 /
+다국어 문자 렌더링)을 가진 내장 프롬프트 2종을 `--prompts`로 제공하고,
+한 프롬프트의 표본만으로는 긍정 판정(`consistent_with_limit_bounding_thinking`)
+을 내지 않는다 — `consistent_but_single_prompt`로 보고한다. 반증은 한
+프롬프트로도 성립하므로 이 제약은 긍정 판정에만 적용한다.
+
+**첫 반증 또는 첫 판독 불능에서 즉시 멈춘다.** 상한을 넘긴 표본 하나가 질문을
+끝내고, 두 번째 표본이 그것을 더 참으로 만들지 못한다. 판독 불능·usage 미보고
+이후의 숫자도 신뢰할 수 없다. 스크립트가 `stoppedEarly`와 `sentCalls`를
+보고한다.
+
+**스크립트는 금액을 집행하지 않는다.** 호출 수(`--prompts x --repeats`)만
+제한하며, §15의 예산은 인자를 고르는 사람이 지킨다. "도구가 막아 줄 것"에
+기대지 않는다.
 
 **스크립트는 adapter와 같은 request builder·같은 registry helper를 통해서만
 요청을 만든다.** 측정 대상은 production이 실제로 과금당하는 요청이므로, 한쪽만

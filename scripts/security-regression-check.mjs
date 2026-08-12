@@ -1016,6 +1016,50 @@ const checks = [
       !source.includes('([key]) => key !== "prompt"'),
   },
   {
+    name: "A thrown image-budget check reads as not ready, never as healthy",
+    file: "app/api/ready/route.ts",
+    test: (source) =>
+      // `status?.ready ?? true` made the loudest failure the quietest signal:
+      // a missing environment variable was fatal, while the check that finds
+      // missing environment variables throwing was reported healthy.
+      source.includes("imageBudgetStatus.status?.ready ?? false") &&
+      !source.includes("getImageProviderBudgetReadiness().catch"),
+  },
+  {
+    name: "The image budget floor reads every enabled price, not one table",
+    file: "lib/imageProviderBudget.ts",
+    test: (source) => {
+      // Two price lists exist -- gpt-image-2's original table and each newer
+      // model's registry profile -- and reading only the first stayed correct
+      // by luck. An enabled model with no proven worst case throws rather than
+      // being skipped, because skipping computes the floor from everything
+      // except what the floor exists to cover.
+      const derivation = source.slice(
+        source.indexOf("export const worstImageCostPerCreditFrom")
+      );
+      const body = derivation.slice(0, derivation.indexOf("\n};"));
+      return (
+        body.includes("maxRequestCostMicroUsd") &&
+        body.includes("maxImageRequestCostMicroUsd") &&
+        body.includes("throw new Error") &&
+        source.includes("listEnabledImageModels()")
+      );
+    },
+  },
+  {
+    name: "The thinking-cap measurement keeps usage from an unfinished image",
+    file: "scripts/measure-google-image-thinking-cap.mjs",
+    test: (source) =>
+      // The sample where the limit actually bit has no finished image in it.
+      // Reading the response only through the production parser -- which fails
+      // closed on anything that is not exactly one image -- discarded exactly
+      // those, so the run paid for its best evidence and threw it away.
+      source.includes("readGoogleImageInteraction(payload)") &&
+      source.includes("measured_without_image") &&
+      // And it stops paying once the question is settled.
+      source.includes('stopReason = "counterexample_found"'),
+  },
+  {
     name: "The adapter takes its delivery MIME type from the registry helper",
     file: "lib/imageProviderAdapter.ts",
     test: (source) =>
