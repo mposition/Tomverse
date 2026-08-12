@@ -92,7 +92,8 @@
     "report:context-window-impact": "node --conditions=react-server --import tsx scripts/report-context-window-impact.mjs",
     "report:routing-shadow": "node --conditions=react-server --import tsx scripts/report-routing-shadow.mjs",
     "check:data-domain-registry": "node --import tsx scripts/check-data-domain-registry.mjs",
-    "check:shared-packages": "node scripts/check-shared-packages.mjs"
+    "check:shared-packages": "node scripts/check-shared-packages.mjs",
+    "check:push-scope": "node scripts/check-push-scope.mjs"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^4.0.30",
