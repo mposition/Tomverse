@@ -1,5 +1,10 @@
 import { streamText, type FilePart, type ModelMessage } from "ai";
 import { APP_DEFAULTS } from "@/lib/appDefaults";
+import {
+    buildAttachmentContextBlock,
+    type ExtractedAttachment,
+} from "@/lib/attachmentContextPrompt";
+
 import { createHash, randomUUID } from "node:crypto";
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
@@ -1285,7 +1290,7 @@ async function handleChatPost(
             const attachments = (
                 Array.isArray(msg.attachments) ? msg.attachments : []
             ) as IncomingAttachment[];
-            const textAttachments: string[] = [];
+            const textAttachments: ExtractedAttachment[] = [];
             const fileParts: FilePart[] = [];
 
             for (const attachment of attachments) {
@@ -1602,9 +1607,11 @@ async function handleChatPost(
                             );
                         }
 
-                        textAttachments.push(
-                            `[Attached PDF file: ${attachment.name}]\n${pdfText}`
-                        );
+                        textAttachments.push({
+                            kind: "pdf",
+                            name: attachment.name,
+                            text: pdfText,
+                        });
                     }
                 } else if (OFFICE_ATTACHMENT_TYPES.has(attachment.mediaType)) {
                     const officeBuffer =
@@ -1640,9 +1647,11 @@ async function handleChatPost(
                         );
                     }
 
-                    textAttachments.push(
-                        `[Attached office file: ${attachment.name}]\n${extractedText}`
-                    );
+                    textAttachments.push({
+                        kind: "office",
+                        name: attachment.name,
+                        text: extractedText,
+                    });
                 } else if (attachment.kind === "text") {
                     totalExtractedCharacters += attachmentData.length;
                     if (
@@ -1655,9 +1664,11 @@ async function handleChatPost(
                             "Extracted attachment text exceeds the request limit."
                         );
                     }
-                    textAttachments.push(
-                        `[Attached file: ${attachment.name}]\n${attachmentData}`
-                    );
+                    textAttachments.push({
+                        kind: "text",
+                        name: attachment.name,
+                        text: attachmentData,
+                    });
                 } else {
                     const binaryData =
                         attachmentBuffer || Buffer.from(attachmentData, "base64");
@@ -1695,7 +1706,14 @@ async function handleChatPost(
                 continue;
             }
 
-            const text = [String(msg.content ?? ""), ...textAttachments]
+            // PLANNER-03: extracted file text is fenced and labelled as data
+            // before it joins the user's own words. It used to be spliced in
+            // raw, so a line in a PDF reading like an instruction arrived
+            // indistinguishable from the user's request.
+            const text = [
+                String(msg.content ?? ""),
+                buildAttachmentContextBlock(textAttachments),
+            ]
                 .filter(Boolean)
                 .join("\n\n");
             const nativeAttachmentTokens = estimateNativeAttachmentTokens(
