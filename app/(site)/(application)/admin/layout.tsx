@@ -6,15 +6,22 @@ import { AdminConsoleShell } from "@/components/admin/AdminConsoleShell";
 import { authOptions } from "@/lib/auth";
 import { getAdminRole, getAdminSessionAccessState } from "@/lib/adminAuth";
 import { adminReauthenticationHref } from "@/lib/adminReauthenticationCore";
-import { prisma } from "@/lib/prisma";
-import { getScheduledJobsDashboard } from "@/lib/scheduledJobs";
+import { getAdminNavigationCounts } from "@/lib/adminNavigationCounts";
 
 export const metadata: Metadata = {
   title: "Administration",
   robots: { index: false, follow: false, nocache: true },
 };
 
-export default async function AdminLayout({ children }: { children: React.ReactNode }) {
+/**
+ * The shell, the access check, and the badge counts. Nothing else.
+ *
+ * Everything a workspace displays is loaded by that workspace's own page, so
+ * moving between them re-runs only the counts below -- eight small reads that
+ * every route genuinely uses, because they are what the sidebar badges and the
+ * footer's health line are made of.
+ */
+export default async function AdminLayout({ children }: LayoutProps<"/admin">) {
   const session = await getServerSession(authOptions);
   if (!session?.user?.id) redirect("/auth/signin?callbackUrl=/admin/overview");
   const accessState = getAdminSessionAccessState(session);
@@ -28,20 +35,8 @@ export default async function AdminLayout({ children }: { children: React.ReactN
     );
   }
   const role = getAdminRole(session) || "readonly";
-  const [jobsResult, alertsResult] = await Promise.allSettled([
-    getScheduledJobsDashboard(),
-    prisma.adminNotificationLog.count({
-      where: { status: "failed", acknowledgedAt: null },
-    }),
-  ]);
-  const delayedJobCount =
-    jobsResult.status === "fulfilled"
-      ? jobsResult.value.filter((job) => job.delayed || job.status === "stuck").length
-      : null;
-  const apiStatus =
-    jobsResult.status === "fulfilled" && alertsResult.status === "fulfilled"
-      ? "healthy"
-      : "degraded";
+  const { counts, healthy } = await getAdminNavigationCounts();
+
   const environment = (
     process.env.RAILWAY_ENVIRONMENT_NAME ||
     process.env.NEXT_PUBLIC_APP_ENV ||
@@ -64,9 +59,8 @@ export default async function AdminLayout({ children }: { children: React.ReactN
       }}
       environment={environment}
       version={version}
-      apiStatus={apiStatus}
-      delayedJobCount={delayedJobCount}
-      unacknowledgedAlertCount={alertsResult.status === "fulfilled" ? alertsResult.value : null}
+      apiStatus={healthy ? "healthy" : "degraded"}
+      counts={counts}
     >
       {children}
     </AdminConsoleShell>

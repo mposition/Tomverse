@@ -98,7 +98,7 @@ test.describe("support journeys", () => {
     signInAs,
   }) => {
     await signInAs("support");
-    await page.goto("/admin/feedback");
+    await page.goto("/admin/support?tab=feedback");
 
     const entry = page
       .locator("article")
@@ -142,7 +142,7 @@ test.describe("support journeys", () => {
     signInAs,
   }) => {
     await signInAs("support");
-    await page.goto("/admin/feedback");
+    await page.goto("/admin/support?tab=feedback");
 
     const entry = page
       .locator("article")
@@ -216,7 +216,7 @@ test.describe("support journeys", () => {
     signInAs,
   }) => {
     await signInAs("support");
-    await page.goto("/admin/support");
+    await page.goto("/admin/support?tab=privacy");
 
     const queue = page
       .locator("section")

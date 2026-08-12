@@ -150,7 +150,7 @@ export async function GET(req: Request) {
           id: item.id,
           title: item.email || item.traceId || item.id,
           detail: `${item.type} / ${item.status}`,
-          href: "/admin/feedback",
+          href: "/admin/support?tab=feedback",
           createdAt: toIso(item.createdAt),
         })),
         ...refunds.map((item) => ({

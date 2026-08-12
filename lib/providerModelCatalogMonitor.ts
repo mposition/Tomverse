@@ -11,6 +11,7 @@ import {
   catalogNextCursor,
   missingConfirmationRuns,
   parseProviderCatalogResponse,
+  providerCatalogUrl,
   type ProviderCatalogObservation,
 } from "@/lib/providerModelCatalogCore";
 
@@ -60,28 +61,6 @@ const providerHeaders = (
     return { Accept: "application/json", "x-goog-api-key": apiKey };
   }
   return { Accept: "application/json", Authorization: `Bearer ${apiKey}` };
-};
-
-const providerCatalogUrl = (
-  provider: AiProvider,
-  cursor: string | null
-) => {
-  const base = PROVIDER_API_CONFIGURATION[provider].baseUrl;
-  const path =
-    provider === "xai"
-      ? "language-models"
-      : provider === "perplexity"
-        ? "v1/models"
-        : "models";
-  const url = new URL(`${base.replace(/\/$/, "")}/${path}`);
-  if (provider === "google") {
-    url.searchParams.set("pageSize", "1000");
-    if (cursor) url.searchParams.set("pageToken", cursor);
-  } else if (provider === "anthropic" || provider === "minimax") {
-    url.searchParams.set("limit", "1000");
-    if (cursor) url.searchParams.set("after_id", cursor);
-  }
-  return url;
 };
 
 const fetchJson = async (provider: AiProvider, apiKey: string, cursor: string | null) => {

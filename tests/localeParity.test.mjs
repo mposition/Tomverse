@@ -76,7 +76,12 @@ const ENGLISH_STRING_CEILING = {
   // and "{count} messages"; German keeps "Standard", "Status" and "Feedback";
   // Spanish keeps "Plan", "Personal" and "General". None of them is English
   // copy sitting in front of a reader.
-  zh: 9,
+  // +3: the image workspace's imageGenerationRestoreExcluded,
+  // imageGenerationRestoreOptionsUnavailable and
+  // imageGenerationGeneratingModels, which zh takes from en wholesale like the
+  // rest of that surface. The other five locales carry real translations of
+  // all three, so only this number moves.
+  zh: 12,
   fr: 26,
   de: 20,
   es: 16,

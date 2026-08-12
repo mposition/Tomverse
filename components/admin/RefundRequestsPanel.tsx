@@ -51,6 +51,11 @@ export type RefundRequestRow = {
 
 type Props = {
   rows: RefundRequestRow[];
+  /**
+   * How many rows the server read. Named on screen so the status counters are
+   * read as "of the rows shown" rather than as totals.
+   */
+  rowLimit?: number;
 };
 
 const statusClass = (status: string) => {
@@ -78,7 +83,7 @@ const escapeCsv = (value: unknown) => {
   return `"${text.replace(/"/g, '""')}"`;
 };
 
-export function RefundRequestsPanel({ rows }: Props) {
+export function RefundRequestsPanel({ rows, rowLimit }: Props) {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -222,6 +227,9 @@ export function RefundRequestsPanel({ rows }: Props) {
           <p className="mt-2 max-w-3xl text-sm leading-6 text-zinc-400">
             Review customer refund requests, cancel Stripe subscriptions, reset paid
             membership to Free, and send transactional email updates.
+            {rowLimit
+              ? ` Showing the ${rowLimit} most recent requests; the status counts describe those requests only.`
+              : ""}
           </p>
         </div>
         <span className="inline-flex items-center gap-2 rounded-full border border-amber-500/30 bg-amber-500/10 px-3 py-1 text-xs font-bold text-amber-200">

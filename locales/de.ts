@@ -145,6 +145,7 @@ export const de = {
         imageGenerationSizeLandscape: "Querformat",
         imageGenerationSizePortrait: "Hochformat",
         imageGenerationGenerate: "Generieren",
+        imageGenerationGeneratingModels: "{count} Modell(e) werden erzeugt",
         imageGenerationGenerating: "Bild wird generiert...",
         imageGenerationGeneratingHint: "Das kann bis zu etwa zwei Minuten dauern. Das Verlassen der Seite bricht die Generierung nicht ab.",
         imageGenerationTakingLong: "Das dauert länger als üblich. Falls es nicht abgeschlossen werden kann, wird es automatisch als fehlgeschlagen markiert und die reservierten Credits werden vollständig erstattet.",

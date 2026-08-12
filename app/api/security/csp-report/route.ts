@@ -2,6 +2,7 @@ import { randomInt } from "node:crypto";
 import { after } from "next/server";
 import { getAnonymousClientKey } from "@/lib/clientIp";
 import {
+  cspSourcePosition,
   isTrustedCspDocumentUri,
   sanitizeCspReportedUrl,
 } from "@/lib/cspReportCore";
@@ -148,6 +149,16 @@ export async function POST(req: Request) {
         blockedUri: sanitizeCspReportedUrl(
           report["blocked-uri"] || report.blockedURL || ""
         ),
+        // Without this the recurring `script-src blocked eval` report on
+        // /chat was unactionable: the page it happened on says nothing about
+        // whether our own bundle, an allowed third-party tag, or a browser
+        // extension called eval. `sanitizeCspReportedUrl` reduces a
+        // non-http(s) source to its bare scheme, so an extension shows up as
+        // `chrome-extension:` without recording which extension it was.
+        sourceFile: sanitizeCspReportedUrl(
+          report["source-file"] || report.sourceFile || ""
+        ),
+        sourcePosition: cspSourcePosition(report),
         disposition: removeControlCharacters(report.disposition, 30),
       };
       if (!Object.values(normalized).some(Boolean)) continue;
@@ -163,6 +174,8 @@ export async function POST(req: Request) {
             documentUri: normalized.documentUri,
             violatedDirective: normalized.violatedDirective,
             blockedUri: normalized.blockedUri,
+            sourceFile: normalized.sourceFile,
+            sourcePosition: normalized.sourcePosition,
             disposition: normalized.disposition,
           },
         })

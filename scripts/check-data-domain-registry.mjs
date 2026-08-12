@@ -48,7 +48,19 @@ const DEFAULT_REGISTRY = path.join(
 const REGISTRY = process.argv[2] ? path.resolve(process.argv[2]) : DEFAULT_REGISTRY;
 const REGISTRY_RELATIVE = path.relative(repoRoot, REGISTRY);
 
-const REGISTRY_SCHEMA_VERSION = 2;
+const REGISTRY_SCHEMA_VERSION = 3;
+
+// Whose data the User link represents.
+//
+//   subject  the linked user is the person the row is about. Almost every row.
+//   actor    the linked user is the operator who did something. The person the
+//            row is *about* is somewhere else -- in this schema, an untyped
+//            targetType/targetId pair with no foreign key, which no derivation
+//            over the schema can see. Saying so in the registry is the only way
+//            that linkage gets graded at all.
+const ALLOWED_LINKAGE_ROLES = new Set(["subject", "actor"]);
+const ALLOWED_SUBJECT_REFERENCE_KINDS = new Set(["untyped_target", "none"]);
+const ALLOWED_SUBJECT_ACTIONS = new Set(["delete", "retain"]);
 
 const ALLOWED_ACTIONS = new Set(["delete", "anonymise", "retain", "unverified"]);
 const ALLOWED_MECHANISMS = new Set(["cascade_from_user", "explicit_deletion", "ttl_purge"]);
@@ -61,9 +73,18 @@ const ALLOWED_EXPORT_STATES = new Set([
   "unverified",
 ]);
 
-// Columns that name the person directly. An anonymised row that keeps one of
+// Columns that name a person directly. An anonymised row that keeps one of
 // these has not been anonymised, whatever else was scrubbed.
-const DIRECT_IDENTIFIER_COLUMNS = ["userId", "ownerId", "subjectKey", "traceId", "email"];
+//
+// The pattern catches `createdByEmail` and `actorEmail` as well as `email`.
+// Those were how three tables kept an operator's address after that operator
+// deleted their own account: the relation was onDelete: SetNull, which cleared
+// the id and left the address beside it.
+const DIRECT_IDENTIFIER_COLUMNS = ["userId", "ownerId", "subjectKey", "traceId"];
+const DIRECT_IDENTIFIER_PATTERN = /^(email|.*Email)$/;
+
+const isDirectIdentifier = (column) =>
+  DIRECT_IDENTIFIER_COLUMNS.includes(column) || DIRECT_IDENTIFIER_PATTERN.test(column);
 
 const RETENTION_FIELDS = [
   "retentionPolicyRef",
@@ -87,7 +108,14 @@ const models = [...schema.matchAll(/^model (\w+) \{([\s\S]*?)^\}/gm)].map(([, na
 }));
 
 // A model holds user data when it names a user column or relates to User.
-const USER_LINK = /\buserId\s+String|user\s+User\b|ownerId\s+String|User\s+@relation/;
+//
+// The relation half of this used to be `user\s+User\b|User\s+@relation`, which
+// required the relation field to be *named* `user` and to be non-optional.
+// Three models satisfied neither -- AdminAuditLog.actor, AdminNote.createdBy and
+// ModelOverride.updatedBy are all `X User? @relation` -- so they escaped the
+// registry entirely and were graded by nothing. Matching any field whose type
+// is User, optional or not, is what the rule was always supposed to say.
+const USER_LINK = /\buserId\s+String|\bownerId\s+String|\w+\s+User\??\s+@relation/;
 const userLinked = new Set(models.filter(({ body }) => USER_LINK.test(body)).map(({ name }) => name));
 // User does not point at a user; it is one. The derivation cannot see that, and
 // leaving the root out would let the account's own profile escape both
@@ -191,6 +219,83 @@ for (const row of registry.domains) {
     continue;
   }
 
+  // Whose data the User link is. Every row says, because "this table relates to
+  // User" answers nothing on its own: the relation can be the person the row
+  // describes or the operator who wrote it, and the deletion obligations are
+  // completely different.
+  if (!ALLOWED_LINKAGE_ROLES.has(row.userLinkageRole)) {
+    fail(
+      `${model}: userLinkageRole "${row.userLinkageRole}" must be one of ` +
+        [...ALLOWED_LINKAGE_ROLES].join(", ")
+    );
+    continue;
+  }
+
+  if (row.userLinkageRole === "actor") {
+    // An actor row's deletionAction covers the operator's own account. The
+    // person the row is *about* is reached some other way, and that way has to
+    // be written down -- the schema cannot express it, so nothing else can
+    // check that it was considered at all.
+    const reference = row.subjectReference;
+    if (typeof reference !== "object" || reference === null || Array.isArray(reference)) {
+      fail(
+        `${model}: an "actor" row needs a subjectReference. Its User relation is the operator, ` +
+          "so the registry has said nothing yet about the person the row describes."
+      );
+    } else if (!ALLOWED_SUBJECT_REFERENCE_KINDS.has(reference.kind)) {
+      fail(
+        `${model}: subjectReference.kind "${reference.kind}" must be one of ` +
+          [...ALLOWED_SUBJECT_REFERENCE_KINDS].join(", ")
+      );
+    } else if (reference.kind === "untyped_target") {
+      const columns = columnsByModel.get(model) ?? new Map();
+      for (const key of ["targetTypeColumn", "targetIdColumn"]) {
+        const column = reference[key];
+        if (!isFilledString(column)) {
+          fail(`${model}: subjectReference.${key} is missing.`);
+        } else if (!columns.has(column)) {
+          fail(`${model}: subjectReference.${key} names "${column}", which is not a column.`);
+        }
+      }
+      if (!isFilledString(reference.subjectTargetType)) {
+        fail(
+          `${model}: subjectReference.subjectTargetType is missing. Without the value that means ` +
+            "'this row is about a user', the reference cannot be resolved by anything."
+        );
+      }
+      if (!ALLOWED_SUBJECT_ACTIONS.has(reference.deletionAction)) {
+        fail(
+          `${model}: subjectReference.deletionAction "${reference.deletionAction}" must be one ` +
+            `of ${[...ALLOWED_SUBJECT_ACTIONS].join(", ")}. There is no foreign key here, so ` +
+            "nothing happens by default and 'nothing' has to be a decision."
+        );
+      }
+      if (reference.deletionAction === "delete" && !isFilledString(reference.deletionMechanism)) {
+        fail(`${model}: subjectReference.deletionAction "delete" needs a deletionMechanism.`);
+      }
+      if (reference.deletionAction === "retain") {
+        const retention = reference.retention;
+        if (typeof retention !== "object" || retention === null || Array.isArray(retention)) {
+          fail(`${model}: subjectReference retained without a retention block.`);
+        } else {
+          for (const field of RETENTION_FIELDS) {
+            const value = retention[field];
+            const filled =
+              field === "legalHoldOverridesPurge"
+                ? typeof value === "boolean"
+                : isFilledString(value);
+            if (!filled) fail(`${model}: subjectReference.retention.${field} is missing.`);
+          }
+        }
+      }
+    }
+  } else if (row.subjectReference !== undefined && row.subjectReference !== null) {
+    fail(
+      `${model}: subjectReference only applies to an "actor" row. On a "subject" row the User ` +
+        "link already is the person."
+    );
+  }
+
   if (!ALLOWED_ACTIONS.has(row.deletionAction)) {
     fail(
       `${model}: deletionAction "${row.deletionAction}" must be one of ` +
@@ -269,8 +374,8 @@ for (const row of registry.domains) {
     // The user's objection to a one-axis model, made checkable: setting userId
     // to NULL is not anonymisation while the row still carries another column
     // that names the same person.
-    for (const identifier of DIRECT_IDENTIFIER_COLUMNS) {
-      if (columns.has(identifier) && !listed.has(identifier)) {
+    for (const identifier of columns.keys()) {
+      if (isDirectIdentifier(identifier) && !listed.has(identifier)) {
         fail(
           `${model}: anonymisationFields omits "${identifier}", which still names the person. ` +
             "An anonymised row cannot keep a direct identifier."

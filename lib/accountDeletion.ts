@@ -1,6 +1,7 @@
 import "server-only";
 
 import { prisma } from "@/lib/prisma";
+import { anonymiseAccountData } from "@/lib/accountDataAnonymisation";
 import { getUserChatUsageKey } from "@/lib/chatSecurity";
 import { getStripe, isStripeConfigured } from "@/lib/stripe";
 import { revokeAllUserSessions } from "@/lib/sessionSecurity";
@@ -203,6 +204,14 @@ export async function deleteTomverseAccount(
     await tx.conversationProject.deleteMany({
       where: { userId: user.id },
     });
+
+    // Before the User row goes, not after. Three of the four tables this
+    // touches relate to User with onDelete: SetNull, so once the user is
+    // deleted their userId is already NULL and there is nothing left to match
+    // on -- the rows would keep their subject keys, trace identifiers and
+    // provider request identifiers indefinitely. SetNull on its own is not
+    // anonymisation; it renames the row and leaves every join intact.
+    await anonymiseAccountData(tx, user.id);
 
     await tx.user.delete({
       where: { id: user.id },

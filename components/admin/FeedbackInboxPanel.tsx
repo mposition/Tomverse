@@ -126,6 +126,12 @@ const evidenceAvailabilityLabel = (value: string | null) => {
 
 type Props = {
   rows: FeedbackRow[];
+  /**
+   * How many rows the server read. Stated on screen because the panel's "N
+   * open" counter counts only what it was given -- presenting a bounded read as
+   * a total is how a backlog goes unnoticed.
+   */
+  rowLimit?: number;
 };
 
 /** The server's account of what happened to the submitter email, verbatim. */
@@ -175,7 +181,7 @@ const escapeCsv = (value: unknown) => {
   return `"${text.replace(/"/g, '""')}"`;
 };
 
-export function FeedbackInboxPanel({ rows }: Props) {
+export function FeedbackInboxPanel({ rows, rowLimit }: Props) {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -377,6 +383,9 @@ export function FeedbackInboxPanel({ rows }: Props) {
           <p className="mt-2 max-w-3xl text-sm leading-6 text-zinc-400">
             Review user feedback, copy reproduction context, and move issues through
             support states without leaving the Admin console.
+            {rowLimit
+              ? ` Showing the ${rowLimit} most recent reports; the counters below describe those reports, not every report ever filed.`
+              : ""}
           </p>
         </div>
         <span className="inline-flex items-center gap-2 rounded-full border border-amber-500/30 bg-amber-500/10 px-3 py-1 text-xs font-bold text-amber-200">

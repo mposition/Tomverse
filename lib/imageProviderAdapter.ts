@@ -383,7 +383,10 @@ const generateWithGoogle = async (
     size: input.size,
     maxOutputTokens: model.maxOutputTokens ?? null,
     thinkingLevel: model.thinkingLevel ?? null,
-    deliveryMimeType: model.outputMimeTypes[0] ?? "image/png",
+    // The profile's request preference, not the head of its storage
+    // allowlist: conflating the two sent every Google request asking for PNG,
+    // which its API refuses.
+    deliveryMimeType: model.deliveryMimeType ?? model.outputMimeTypes[0] ?? "image/png",
   });
   if (!body) {
     throw new ImageProviderError(

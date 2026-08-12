@@ -149,8 +149,6 @@ run(
     "tests/integration/admin-users.db.test.ts",
     "tests/integration/login-methods.db.test.ts",
     "tests/integration/account-deletion.db.test.ts",
-    "tests/integration/account-data-export.db.test.ts",
-    "tests/integration/account-data-export-ticket.db.test.ts",
     "tests/integration/conversation-title.db.test.ts",
     "tests/integration/conversation-lock-migration.db.test.ts",
     "tests/integration/provider-recovery.db.test.ts",
@@ -178,10 +176,18 @@ run(
     "tests/integration/external-conversation-lock.db.test.ts",
     "tests/integration/memory-expiry.db.test.ts",
     "tests/integration/chat-context-bundle.db.test.ts",
+    "tests/integration/routing-shadow.db.test.ts",
     "tests/integration/memory-metrics.db.test.ts",
     "tests/integration/conversation-memory-mode.db.test.ts",
+    // PRIVACY-01/02. These settle what a source scan cannot: that no withheld
+    // column reaches the export, that no identifier survives an account
+    // deletion, and that a download ticket is spent exactly once under
+    // concurrency.
+    "tests/integration/account-data-export.db.test.ts",
+    "tests/integration/account-data-export-ticket.db.test.ts",
+    "tests/integration/account-anonymisation.db.test.ts",
   ],
-  "Running financial, credit, chat-concurrency, chat-rate-limit, fallback-pricing, model-registry, admin-security, admin-users, login-methods, account-deletion, account-data-export, conversation-title, conversation-lock-migration, provider-recovery, provider-failure-scope, provider-probe, subscription-sync-ordering, plan-change-reservation, image-generation, external-import, and memory transaction scenarios"
+  "Running financial, credit, chat-concurrency, chat-rate-limit, fallback-pricing, model-registry, admin-security, admin-users, login-methods, account-deletion, account export and anonymisation, conversation-title, conversation-lock-migration, provider-recovery, provider-failure-scope, provider-probe, subscription-sync-ordering, plan-change-reservation, image-generation, external-import, and memory transaction scenarios"
 );
 // Runs apart from the batch above: it drives the real route handlers, which
 // needs mock.module (--experimental-test-module-mocks) to replace the session
@@ -259,4 +265,19 @@ run(
     "tests/integration/external-conversation-lock-route.db.test.ts",
   ],
   "Running the imported snapshot lock, unlock and attempt-limit scenarios"
+);
+// Its own process for the same reason: it replaces next-auth to read a
+// conversation back as its signed-in owner.
+run(
+  [
+    "--conditions=react-server",
+    "--experimental-test-module-mocks",
+    "--no-warnings=ExperimentalWarning",
+    "--import",
+    "tsx",
+    "--test",
+    "--test-concurrency=1",
+    "tests/integration/memory-usage-disclosure-route.db.test.ts",
+  ],
+  "Running the §13.4 memory disclosure read scenarios"
 );

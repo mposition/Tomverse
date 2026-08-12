@@ -810,6 +810,30 @@ zh/fr/de/es/pt는 첫 decision-grade eval 범위 밖의 known limitation으로
   나머지 표본 작성은 별도 데이터 작업이고, 복제·경미 변형으로 채우는 것은
   §12.2가 금지하므로 `findDuplicateCases()`가 그런 dataset을 거부합니다.
 
+### 12.6 표본 작성 상태 — `BLOCKED_ON_HUMAN_AUTHORING_AND_REVIEW`
+
+**차단 범위: 실제 extraction pair 승인과 `memoryInjectionEnabled` 활성화.**
+릴리스 B 코드 완료와는 별개 축입니다(§12.4).
+
+`docs/ops/memory-extraction-eval-dataset.md`는 **절차만** 마련했고, 표본 작성·
+동결·예산·승인을 허가하지 않았습니다. 그 지침은 8개 cell 관리, 25~50개 batch,
+작성자·검수자 분리, critical negative 전건 독립 검수, 필요 시 제3 adjudicator를
+요구합니다. 따라서 **에이전트가 1,600개를 생성하고 스스로 승인해서 닫을 수
+없습니다.** 에이전트가 만든 것은 어떤 경우에도 candidate pool입니다.
+
+작성을 시작하기 전에 사람이 정해야 하는 것:
+
+1. 데이터셋 책임자와 8개 cell별 작성자 지정
+2. 작성자와 다른 검수자 지정
+3. adjudicator 지정
+4. AI 초안 도구 허용 범위와 기록 방식 확정
+5. 지침 자체의 사람 승인 기록 작성
+   (`docs/ops/memory-extraction-eval-dataset.md` 맨 아래)
+
+1,600개는 50개 단위로도 최소 32개 batch이므로 일반 코드 PR이 아니라 **별도 데이터
+프로그램**으로 관리합니다. 동결 전에는 live eval 예산도 승인하지 않는 §12.5의
+순서를 유지합니다.
+
 ## 13. 삭제 · export · share
 
 ### 13.1 삭제
@@ -923,6 +947,25 @@ memory 사용 응답에는 소유자 본인에게 "이 응답에 memory N개 사
 N은 서버 계산이며 client 주장 count를 쓰지 않습니다. 0이면 오해 유발 표시를
 하지 않고, 상세 열람 시 인증·소유권·source lock을 재검증하며, 표시는 mobile
 composer·comparison rail contract를 침범하지 않습니다.
+
+구현: 표시는 `ChatMessageList`의 `memory-usage-disclosure`이고, 값의 출처는
+두 곳입니다 — 생성 중에는 `/api/chat`의 `X-Chat-Memory-Used` header, 다시
+열었을 때는 `GET /api/conversations/[conversationId]`가 돌려주는
+`Message.memoryUsedCount`입니다.
+
+- **두 경로는 같은 조건에서만 값을 보냅니다**(`> 0`). `null`은 주입 자체가
+  불가능했던 요청이고 `0`은 bundle은 있었지만 retrieval이 아무것도 고르지 않은
+  경우이며, §13.4는 둘 다 표시를 금지합니다. 둘 다 필드를 **빼서** 보냅니다 —
+  받은 숫자를 안 보여줘야 하는 renderer는 한 번의 수정으로 보여주게 됩니다.
+- **재조회가 없으면 이 계약은 절반만 참입니다.** header만 있던 동안 표시는
+  답변이 쓰이는 중에만 참이었고 다음 방문에는 조용히 사라졌습니다.
+- **읽는 쪽은 소유자 자신의 조회뿐입니다.** 같은 route가 소유권과 lock grant를
+  먼저 확인하며, share snapshot과 conversation export는 각자의 select를 쓰고
+  이 컬럼을 이름조차 대지 않습니다(§13.3). `memoryTokens`는 §22의 집계용이라
+  어디서도 이 경로에 실리지 않습니다.
+- 검증: `tests/integration/memory-usage-disclosure-route.db.test.ts`(읽기),
+  `tests/memoryReleaseContracts.test.mjs`(제3자 경로 배제),
+  `tests/e2e/chat-memory-context.spec.ts`(생성 중·재조회 양쪽 표시).
 
 ## 14. Assistant Profile (릴리스 C)
 
@@ -1377,6 +1420,37 @@ Data 탭(`AuthButton.tsx`)에는 진입점·요약만 두고 대형 UI를 modal�
     suspension/restore(B5), chunk당 credit·batch sub-budget(slice 1.6),
     injection 비율·token bucket·stale bundle 비율(§10 배선), follow-up·regenerate
     (답변별 귀속)은 모두 출처가 생겨 목록에서 빠졌습니다.
+  - **`followup_repair_proxy_feedback_signal` = `POLICY_DECISION_REQUIRED /
+    METRIC_UNAVAILABLE`.** 이 하나가 비어 있다는 사실이 릴리스 B **코드**를
+    미완으로 만들지는 않습니다 — 위 규칙대로 `unavailable`로 표시되어 0으로
+    위장되지 않기 때문입니다. 초기 staging은 이 상태로 진행할 수 있고,
+    **production 확대와 효과 판정 전에 닫습니다.** 그때까지의 판정문은 이 신호를
+    제외했다고 명시하고, 확대 여부는 사람에게 다시 확인합니다.
+
+    닫는 방법은 "가장 최근 답변 추정"이 아니라 **명시적 answer attribution**입니다.
+    추정은 comparison·재생성·동시 요청에서 조용히 틀리고, 틀린 귀속은
+    `unavailable`보다 나쁩니다(0이 아닌 값을 보고하므로).
+
+    - `Feedback.answerMessageId`를 **nullable relation**으로 추가합니다. 특정
+      assistant 답변에서 연 피드백만 이 ID를 보내고, sidebar·support·billing
+      등 일반 진입점은 계속 `null`입니다.
+    - 서버가 인증 사용자·Conversation 소유권·`role=assistant`를 **재검증**합니다.
+      클라이언트가 보낸 ID를 그대로 믿지 않습니다.
+    - 답변 본문·memory 내용·bundle·memory ID는 Feedback으로 **복사하지 않습니다**.
+      지표는 FK로 SQL join하되 content와 ID를 결과 `select`에 넣지 않습니다
+      (이 절의 첫 규칙과 같습니다).
+    - Message 삭제 시 `SetNull` — 답변이 사라져도 Feedback 자체는 보존합니다.
+    - comparison에서는 panel의 **정확한** assistant Message에 결속합니다.
+    - **무엇을 repair 신호로 셀 것인가도 함께 정합니다.** 현재 `Feedback.type`은
+      bug·feature·billing 같은 **문의 분류**이지 답변 품질의 방향성이 아니므로,
+      answer-linked Feedback을 전부 부정 신호로 세면 안 됩니다. 답변 진입점에
+      폐쇄형 의미를 따로 둡니다 — `needs_improvement`는 proxy에 포함,
+      `helpful`은 별도 관측(첫 버전 미지원 가능), 일반 Feedback은 proxy 제외.
+    - **Trace와 answer attribution은 분리합니다.** Trace ID로 답변을 찾거나
+      `occurrenceId`를 답변 ID로 재사용하지 않습니다. Trace evidence는 검증된
+      token의 `occurrenceId`로만 연결하고, answer link는 소유권을 재검증한 별도
+      FK로 관리합니다. 원시 error token 저장 금지 계약은 그대로입니다
+      (`docs/policy/trace-feedback-automation.md`).
   - **답변별 memory 귀속은 `Message`에 저장합니다**(`memoryUsedCount`,
     `memoryTokens`). §8.1 불변식 4가 금지하는 것은 주입된 **context 본문**이고
     "사용 개수·비민감 aggregate metadata"는 명시적으로 허용합니다. 일일 counter가
@@ -1431,6 +1505,26 @@ Data 탭(`AuthButton.tsx`)에는 진입점·요약만 두고 대형 UI를 modal�
   text·starter 금지.
 
 ## 23. Known limitations · 사람 판단 필요 항목
+
+### 23.0 프로그램 상태 (2026-08-06)
+
+남은 두 항목은 **같은 종류의 "미완료"가 아닙니다.** 하나는 사람만 완료할 수 있는
+운영 승인 작업이고, 다른 하나는 설계가 필요한 관측성 보완입니다. 차단하는 대상이
+다르므로 상태도 따로 기록합니다.
+
+| 항목 | 상태 | 차단 범위 |
+|---|---|---|
+| `memory_eval_dataset` | `BLOCKED_ON_HUMAN_AUTHORING_AND_REVIEW` | 실제 extraction pair 승인과 `memoryInjectionEnabled` 활성화 (§12.6) |
+| `followup_repair_proxy_feedback_signal` | `POLICY_DECISION_REQUIRED / METRIC_UNAVAILABLE` | 없음 — production 확대·효과 판정 전에 닫습니다 (§22) |
+
+- **릴리스 B 코드 완료는 위 두 항목과 분리해 판단합니다.** 두 항목 중 어느 것도
+  코드 계약의 결함이 아니며, feedback 신호는 §22 규칙대로 `unavailable`로
+  표시되어 0으로 위장되지 않습니다.
+- **extraction·injection 운영 활성화는 eval 데이터셋과 §12.4 승인 절차 완료 전까지
+  차단**입니다. 이것이 데이터셋 항목의 실제 무게이며, 코드 완료로 대체되지
+  않습니다.
+- **production 효과 판정 시에는** feedback 신호를 제외했다고 판정문에 명시하고,
+  확대 여부를 사람에게 다시 확인합니다.
 
 기록된 한계:
 
