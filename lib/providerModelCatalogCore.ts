@@ -1,4 +1,39 @@
 import type { AiProvider } from "@/lib/models";
+import { PROVIDER_API_CONFIGURATION } from "@/lib/modelRegistryShared";
+
+/**
+ * The model-list path each provider serves, relative to its configured base
+ * URL. Most bases already end in the version segment, so `models` is right;
+ * the entries here are the providers whose base URL is the bare API origin
+ * because the chat client wants it that way.
+ *
+ * Anthropic is in this list because leaving it out cost a month of daily
+ * PROVIDER_MODEL_CATALOG_HTTP_404 failures: its base URL is
+ * `https://api.anthropic.com`, so the default produced
+ * `https://api.anthropic.com/models` while the catalogue lives at
+ * `/v1/models`. A 404 reads as "the provider dropped this endpoint", which is
+ * why nothing looked wrong for so long.
+ */
+const CATALOG_PATHS: Partial<Record<AiProvider, string>> = {
+  anthropic: "v1/models",
+  perplexity: "v1/models",
+  xai: "language-models",
+};
+
+export const providerCatalogUrl = (provider: AiProvider, cursor: string | null) => {
+  const base = PROVIDER_API_CONFIGURATION[provider].baseUrl;
+  const url = new URL(
+    `${base.replace(/\/$/, "")}/${CATALOG_PATHS[provider] || "models"}`
+  );
+  if (provider === "google") {
+    url.searchParams.set("pageSize", "1000");
+    if (cursor) url.searchParams.set("pageToken", cursor);
+  } else if (provider === "anthropic" || provider === "minimax") {
+    url.searchParams.set("limit", "1000");
+    if (cursor) url.searchParams.set("after_id", cursor);
+  }
+  return url;
+};
 
 export type ProviderCatalogObservation = {
   id: string;
