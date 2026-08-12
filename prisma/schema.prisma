@@ -2410,9 +2410,43 @@ model RoutingRun {
   /// How long the decision itself took, in microseconds.
   decisionMicros Int
 
+  /// --- aggregate state (§5) ------------------------------------------------
+  ///
+  /// Aggregate only. Anything that differs between attempts belongs on
+  /// RoutingAttempt, where the next attempt cannot overwrite it.
+
+  /// The model the first attempt used, and the one that finally answered.
+  /// Equal on the common path, different exactly when a fallback was taken --
+  /// which is what makes the pair worth storing rather than deriving.
+  initialModelId String?
+  finalModelId   String?
+  /// The attempt that produced the answer, so the manifest behind the visible
+  /// response is one join away. Unique: two runs cannot claim one attempt.
+  finalAttemptId String?         @unique
+  finalAttempt   RoutingAttempt? @relation("RunFinalAttempt", fields: [finalAttemptId], references: [id], onDelete: SetNull)
+
+  rerouteCount    Int     @default(0)
+  /// none | fallback_used | exhausted
+  fallbackState   String  @default("none")
+  /// §6: at most once per logical response, whichever attempt uses it.
+  passThroughUsed Boolean @default(false)
+
+  /// The assistant Message this run produced, so regeneration, model switch,
+  /// cost and quality can be compared by Router version (delivery plan §5).
+  assistantMessageId String?
+
+  totalLatencyMs    Int?
+  firstTokenMs      Int?
+  reservationId     String?
+  settlementOutcome String?
+
+  routingAttempts RoutingAttempt[] @relation("RunAttempts")
+  updatedAt       DateTime         @default(now()) @updatedAt
+
   @@index([createdAt])
   @@index([mode, createdAt])
   @@index([userId, createdAt])
+  @@index([finalModelId, createdAt])
 }
 
 /// One dual-estimate observation for prompt-token estimator calibration (G1 in
@@ -2531,4 +2565,133 @@ model AccountDataExportRequest {
   @@index([userId, createdAt])
   @@index([expiresAt])
   @@index([status, createdAt])
+}
+
+/// One preparation-or-dispatch attempt inside a RoutingRun
+/// (docs/policy/tomverse-chat-routing.md §5).
+///
+/// A separate table rather than columns on RoutingRun, because one logical
+/// response can produce several attempts and each has its own model,
+/// tokenizer, Planner mode, effective request and manifest:
+///
+///   Attempt 1  primary, provider failure before any visible token
+///   Attempt 2  fallback, Planner failure, never dispatched
+///   Attempt 3  fallback, pass-through, succeeded
+///
+/// Flattening that onto the run would overwrite the earlier attempts or bury
+/// them in a JSON array, and an array cannot carry the constraints below.
+/// RoutingRun keeps the aggregate; per-attempt facts live here.
+model RoutingAttempt {
+  id         String      @id @default(cuid())
+  runId      String
+  run        RoutingRun  @relation("RunAttempts", fields: [runId], references: [id], onDelete: Cascade)
+  /// Back-relation for RoutingRun.finalAttempt. The pair is what lets the
+  /// manifest behind the visible answer be reached in one join.
+  finalOfRun RoutingRun? @relation("RunFinalAttempt")
+  /// Denormalised from the run so this is a data domain in its own right: the
+  /// registry derives what it grades from a user column, and a child table
+  /// with none is a table nothing grades.
+  userId     String?
+
+  attemptIndex Int
+  modelId      String
+  provider     String
+
+  /// planned | pass_through
+  plannerMode  String @default("planned")
+  /// pending | not_dispatched | failed_pre_token | failed_post_token | cancelled | succeeded
+  ///
+  /// `pending` is deliberately not one of §5's outcomes: that section
+  /// enumerates how an attempt ended, and one in flight has not ended.
+  /// Starting life as `not_dispatched` would leave every dispatched attempt
+  /// labelled as one that never reached a provider -- erasing the distinction
+  /// §5 draws to keep such an attempt out of provider billing.
+  outcome      String @default("pending")
+  /// planner | adapter | manifest | billing | provider | stream | none
+  failureLayer String @default("none")
+
+  /// Copied from the manifest at finalization, in the same transaction.
+  ///
+  /// Denormalised on purpose: "a dispatched attempt has a finalized manifest,
+  /// finalized before dispatch" is then a single-row CHECK instead of a
+  /// cross-table assertion nothing enforces. ROUTE-06 grades exactly this.
+  manifestFinalizedAt DateTime?
+
+  dispatchedAt        DateTime?
+  providerRequestId   String?
+  firstVisibleTokenAt DateTime?
+  actualInputTokens   Int?
+  actualOutputTokens  Int?
+  /// A fixed classification, never provider error text.
+  errorClass          String?
+
+  manifest  ContextManifest?
+  createdAt DateTime         @default(now())
+  updatedAt DateTime         @updatedAt
+
+  @@unique([runId, attemptIndex])
+  @@index([outcome, createdAt])
+  @@index([modelId, createdAt])
+  @@index([userId, createdAt])
+}
+
+/// The immutable record of what one attempt actually sent (§5, manifest
+/// lifecycle).
+///
+/// One per attempt, and never shared: a fallback model may receive different
+/// context, different tokenization and a different effective request, so a
+/// manifest that two attempts both pointed at would describe neither.
+/// `attemptId` is unique, which is that rule rather than a comment about it.
+///
+/// Source references and hashes only. §5 and the delivery plan both say the
+/// raw prompt is not duplicated here -- the manifest exists to prove what was
+/// sent, and a copy of the prompt would make the proof a second copy of the
+/// thing being proved.
+///
+/// Finalization is one-way and total: once `finalizedAt` is set, a trigger
+/// refuses every further update. That is what makes the effective-request hash
+/// evidence rather than a field. The same trigger pins `attemptId` from
+/// creation, because a manifest's tokenizer and window were chosen for one
+/// attempt's model and moving even a draft would mis-size the next one.
+model ContextManifest {
+  id        String         @id @default(cuid())
+  attemptId String         @unique
+  attempt   RoutingAttempt @relation(fields: [attemptId], references: [id], onDelete: Cascade)
+  userId    String?
+
+  /// draft | finalized | not_dispatched
+  state String @default("draft")
+
+  /// Authorized source references: ids, versions and hashes. Never content.
+  sourceRefs       Json
+  summaryVersion   String?
+  /// Which slice of the conversation was included, as indices or ids.
+  inclusionRange   Json?
+  /// Where content was cut, so a truncation can be explained afterwards.
+  truncationPoints Json?
+
+  /// The tokenizer that produced tokenCount, and the window it was checked
+  /// against. Both live here rather than on the attempt because they are
+  /// per-attempt facts that must agree with each other, and agreeing is a
+  /// single-row CHECK only if they share a row.
+  tokenizerVersion    String
+  tokenCount          Int
+  contextWindowTokens Int
+
+  /// Added immediately before dispatch, in the same transaction that finalizes.
+  plannerVersion        String?
+  templateVersion       String?
+  adapterVersion        String?
+  structuredOptionsHash String?
+  effectiveRequestHash  String?
+
+  finalizedAt         DateTime?
+  /// Why a draft was abandoned. Required when the state says it was.
+  notDispatchedReason String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([state, createdAt])
+  @@index([userId, createdAt])
 }
