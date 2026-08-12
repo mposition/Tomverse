@@ -154,6 +154,13 @@ jobs:
         timeout-minutes: 5
         run: npm run check:locale-translation
 
+      # Nineteen columns carry a closed list as a CHECK constraint, and the
+      # application holds its own copy of most of them. Code accepting a value
+      # the constraint rejects is a 500 where a 400 belongs.
+      - name: Database enum constraint agreement
+        timeout-minutes: 5
+        run: npm run check:enum-constraints
+
       # An enabled premium model with no explicit billing profile falls back to
       # generic US$15/US$60 pricing, which is what mispriced GPT-5.5, Gemini
       # 3.1 Pro and Claude Opus 4.8 by 3x-7.5x in production. Fail closed.
