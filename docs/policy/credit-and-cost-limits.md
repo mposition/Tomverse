@@ -499,3 +499,61 @@ Console에만 남습니다.
   `tests/chatTokenEstimate.test.mjs`, `tests/chatCostSafetyCore.test.mjs`,
   `tests/integration/credit-finance.db.test.ts`,
   `tests/e2e/credit-entitlement-disclosure.spec.ts`.
+
+## 9. Canonical lock order (금융 트랜잭션)
+
+크레딧을 예약·환급하는 경로가 셋(chat, 이미지 생성, memory extraction)이 되면서
+필요해진 규칙입니다. 셋은 **같은 금융 primitive를 서로 다른 orchestration에서**
+호출하므로, 잠금 순서가 갈리면 교착이 생기고 잠금이 빠지면 잔액이 음수가 됩니다.
+
+### 왜 잠금이 필요한가
+
+`reserveAddOnCredits()`는 계정의 `CreditLot`을 **읽어서 충분한지 판정한 뒤**
+차감합니다. 차감(`{ decrement }` → `SET col = col - x`)은 행 단위로 원자적이지만
+**판정은 그렇지 않습니다.** `remainingCredits`에는 CHECK 제약도, 차감 후 검사도
+없으므로, 같은 잔액을 읽은 두 트랜잭션이 모두 통과해 음수가 됩니다. 이것을 막는
+유일한 장치가 계정 advisory 잠금입니다.
+
+### 순서
+
+`lib/chatSecurity.ts`의 `acquireChatAccess`가 이미 쓰고 있는 순서를 정본으로 삼고,
+새 금융 경로는 **이 순서를 뒤집지 않습니다.**
+
+1. **`lockCreditAccount(tx, userId)`** (`credit-account:<userId>`) — 크레딧을 예약·
+   정산·환급하는 트랜잭션은 언제나 이것을 **가장 먼저** 잡습니다. 다른 advisory
+   잠금을 먼저 잡고 나중에 크레딧 계정을 잡는 경로를 만들지 않습니다.
+2. **workflow advisory 잠금** — `<subjectKey>`(chat admission),
+   `chat-lease:<key>`, `memory-extraction:<userId>`(run 입장),
+   `memory-items:<userId>`(memory 항목 쓰기), `external-import:<userId>`,
+   이미지 생성의 `scope.key`.
+3. **lease row** — 만료 정리와 slot 확보.
+4. **사용량 버킷** — 크레딧(월/일·debt offset) → rate·token → **provider 비용**.
+   provider 비용 버킷은 항상 마지막 버킷 계층입니다.
+5. **reservation row 삽입 / lot 차감** — 위 판정이 모두 통과한 뒤 마지막.
+
+### 규칙
+
+- 크레딧을 전혀 건드리지 않는 경로(예: run 조회, memory 삭제)는 1을 건너뛸 수
+  있지만, 2 이후의 상대 순서는 동일하게 유지합니다.
+- **판정과 예약을 다른 트랜잭션으로 나누지 않습니다.** 조회 후 별도로 예약하면
+  동시 요청이 같은 잔여 예산을 보고 모두 통과합니다. provider 총예산·크레딧·
+  fencing 검증은 한 경계 안에 있어야 합니다.
+- **조건 분기 안에서 잠그지 않습니다.** 어떤 chunk가 종료 chunk인지는 트랜잭션
+  중간에야 알 수 있으므로, 그 분기 뒤에 잠그면 "가끔 잠금 없이 정산하는"
+  트랜잭션이 됩니다. 잠금은 트랜잭션 첫 문장입니다.
+- 환급은 증가만 하므로 그 자체로는 안전하지만, 동시 예약의 *읽기와 차감 사이*에
+  끼면 그 예약이 존재하지 않던 잔액을 근거로 판정합니다. 그래서 환급 경로도 같은
+  잠금을 잡습니다.
+
+### 현재 잠그는 곳
+
+| 경로 | 모듈 |
+|---|---|
+| chat 예약·정산 | `lib/chatSecurity.ts` |
+| 이미지 생성 예약·정산 | `lib/imageGenerationService.ts` |
+| 크레딧 구매·분쟁 | `lib/creditPurchase.ts` |
+| extraction run 생성·chunk 종료·취소 | `lib/memoryExtractionService.ts` |
+
+- 관련 테스트: `tests/integration/credit-finance.db.test.ts`(동시 예약이 잔액을
+  초과하지 않음), `tests/integration/memory-extraction-credits.db.test.ts`
+  (extraction의 예약·환급이 계정 잠금을 기다림).

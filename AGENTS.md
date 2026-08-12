@@ -142,6 +142,12 @@ npm run report:issue-backlog -- --issues-file <열린 이슈 JSON>
   `publicChatErrorDetails()`가 제거하고, Admin Console과 구조화 로그에만
   남깁니다.
 - 모든 오류 응답의 `resetAt`은 생성 시점보다 미래여야 합니다.
+- **크레딧을 예약·환급하는 트랜잭션은 `lockCreditAccount(tx, userId)`를 가장
+  먼저 잡습니다**(정책 문서 §9). `reserveAddOnCredits()`는 읽어서 판정하고
+  차감하는데 `CreditLot.remainingCredits`에 CHECK도 사후 검사도 없어서, 잠금이
+  없으면 같은 잔액을 읽은 두 경로가 모두 통과해 잔액이 음수가 됩니다. 순서도
+  계약입니다 — workflow advisory 잠금(`memory-extraction:*` 등)보다 **앞**이며,
+  종료 여부 같은 조건 분기 **안**에서 잠그지 않습니다.
 - 이 계약을 어기는 변경은 릴리스 차단 사유입니다.
 
 # Chat concurrency and identity namespace
