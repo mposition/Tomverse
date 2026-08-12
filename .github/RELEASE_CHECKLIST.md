@@ -32,6 +32,10 @@ Date / timezone:    ____________________
 - [ ] `npm run check:db-integration-coverage`
 - [ ] `npm run check:error-detail-cost`
 - [ ] `npm run check:data-domain-registry`
+- [ ] `npm run verify:package-build-matrix` — builds both shared packages with
+      Vite, with no Next.js anywhere, then runs the bundle. It is PACKAGE-01's
+      second piece of evidence; it does not by itself satisfy the gate, which
+      is approved by a person against recorded evidence.
 - [ ] `npm run check:shared-packages` — reports PACKAGE-01's metric
       (`forbidden_nextjs_imports_in_shared_packages`) and proves every
       workspace package still type-checks with no DOM, no Node types and no

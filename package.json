@@ -96,7 +96,8 @@
     "check:data-domain-registry": "node --import tsx scripts/check-data-domain-registry.mjs",
     "check:shared-packages": "node scripts/check-shared-packages.mjs",
     "check:push-scope": "node scripts/check-push-scope.mjs",
-    "report:routing-dispatch-readiness": "node --import tsx scripts/report-routing-dispatch-readiness.mjs"
+    "report:routing-dispatch-readiness": "node --import tsx scripts/report-routing-dispatch-readiness.mjs",
+    "verify:package-build-matrix": "node scripts/verify-package-build-matrix.mjs"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^4.0.30",
@@ -144,6 +145,7 @@
     "tailwindcss": "^4",
     "tsx": "^4.23.8",
     "typescript": "^6",
+    "vite": "^8.2.1",
     "yaml": "^2.9.0"
   },
   "overrides": {
