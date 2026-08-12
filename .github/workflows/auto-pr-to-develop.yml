@@ -54,10 +54,43 @@ jobs:
             exit 1
           fi
 
-      - name: Skip if branch has no diff against develop
+      # Two questions, not one: is this branch's work already on develop, and
+      # if not, does it change anything?
+      #
+      # This used to be a single `git diff origin/develop...HEAD` after a
+      # `git fetch origin develop --depth=1`, and that combination is what
+      # opened PR #467 for a branch whose work was already merged -- a pull
+      # request whose merge commit changed no file at all.
+      #
+      # `actions/checkout` above fetches the full history (`fetch-depth: 0`).
+      # Fetching develop again with `--depth=1` then re-shallowed the
+      # repository, cutting develop's tip off from its parents. Once develop
+      # had advanced past the point this branch last merged it, `merge-base`
+      # had nothing to walk, so the three-dot diff did not report "no changes"
+      # -- it failed outright:
+      #
+      #     fatal: origin/develop...HEAD: no merge base
+      #
+      # and the `if` read that failure as the "there is a diff" branch. A
+      # broken measurement became a positive answer.
+      #
+      # So: fetch develop with its history, ask the containment question
+      # directly, and treat an unanswerable merge-base as an error rather than
+      # as a yes.
+      - name: Skip if the branch has nothing to merge into develop
         id: diff-check
         run: |
-          git fetch origin develop --depth=1
+          set -uo pipefail
+          git fetch origin develop
+          if git merge-base --is-ancestor HEAD origin/develop; then
+            echo "HEAD is already contained in develop; nothing to open a PR for."
+            echo "has_diff=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if ! git merge-base origin/develop HEAD >/dev/null 2>&1; then
+            echo "::error::No merge base between origin/develop and HEAD. The repository is shallow or the branch is unrelated to develop; refusing to guess whether a PR is needed."
+            exit 1
+          fi
           if git diff --quiet origin/develop...HEAD; then
             echo "has_diff=false" >> "$GITHUB_OUTPUT"
           else

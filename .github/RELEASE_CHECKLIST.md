@@ -69,11 +69,6 @@ Date / timezone:    ____________________
 - [ ] `npm run check:openai-model-access` (needs a production key) — per-account
       model visibility only. It is **not** a price source; nothing in
       `lib/modelPricing.ts` may be derived from its response.
-- [ ] `npm run report:credit-lot-invariants` (needs the deployed database) —
-      read-only survey of purchased-credit lots against the §9 non-negative
-      invariant. Not a gate: the constraints ship `NOT VALID`, so a violating
-      row blocks nothing. It is the input to validating them, and a count that
-      moves off zero means a caller reached the lots without the account lock.
 - [ ] Chromium E2E: `desktop-chromium`, `desktop-compact`, `mobile-chromium`
       — no unexplained failures
 
@@ -443,6 +438,56 @@ ORDER BY started_at;
 Where an edited version was applied first, also check the edit against a
 pre-migration backup: a widened allowlist can have cleared a value an operator
 had set deliberately.
+
+### 7.7 Purchased-credit lot invariants (post-deploy, owned, time-boxed)
+
+`20260812070000_credit_lot_non_negative` added two CHECK constraints to
+`CreditLot` — `remainingCredits >= 0` and `remainingFundedCostMicroUsd >= 0` —
+as `NOT VALID`. From that deploy onward Postgres enforces both on every INSERT
+and UPDATE; what `NOT VALID` defers is only the check against rows that already
+existed, so that the deploy could not fail on data nobody had surveyed.
+
+`npm run report:credit-lot-invariants` is that survey. **It is not a gate.** It
+exits 0 whether it finds zero violating rows or fifty, so nothing anywhere will
+fail because this was skipped — it has to be run by a named person against a
+deadline, not left to be "caught by the next release".
+
+```
+Owner:              ____________________
+Due (within 7 days of the deploy): ____________________
+```
+
+Run **from the deployed release SHA**, against production on a read-only role.
+
+- [ ] Production deploy SHA and the timestamp of the run recorded
+- [ ] Both constraints exist and are reported `NOT VALID`
+- [ ] `violationCount` and `readyToValidate` recorded
+
+```
+Deploy SHA:         ____________________
+Ran at (UTC):       ____________________
+violationCount:     ____________________
+readyToValidate:    ____________________
+```
+
+**The full row output does not go in a pull request, an issue, or an ordinary
+log.** The report prints account identifiers alongside financial balances; only
+the two figures above are safe to circulate. Keep the rows themselves in the
+restricted operations store.
+
+Then, by outcome:
+
+- **Zero violations** — add a forward migration that runs
+  `ALTER TABLE "CreditLot" VALIDATE CONSTRAINT ...` for both. That is the only
+  way to validate them; hand-validating production leaves
+  `pg_get_constraintdef()` disagreeing with the migration history, which §7.6
+  then reports as drift.
+- **Any violations** — **do not raise the balance.** A negative lot is the
+  visible end of a specific reservation or settlement that went wrong; find it,
+  establish what the account was actually entitled to, and correct it with a
+  compensating `CreditLedgerEntry` so the lot and its ledger state the same
+  financial fact. The correction needs the same approval any credit adjustment
+  needs. Validation waits until the count reaches zero.
 
 ## 8. Unverified items and waivers
 
