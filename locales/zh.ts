@@ -165,7 +165,7 @@ export const zh = {
         imageGenerationSizeLandscape: "横向",
         imageGenerationSizePortrait: "纵向",
         imageGenerationGenerate: "生成",
-        imageGenerationGeneratingModels: "Generating {count} model(s)",
+        imageGenerationGeneratingModels: "正在生成 {count} 个模型",
         imageGenerationGenerating: "正在生成图像...",
         imageGenerationGeneratingHint: "最长可能需要约两分钟。离开页面不会取消生成。",
         imageGenerationTakingLong: "耗时比平时更长。如果无法完成，将自动标记为失败，并全额退还预留的积分。",

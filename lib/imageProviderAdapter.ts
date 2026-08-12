@@ -11,6 +11,7 @@ import {
   type ImageModelProfile,
 } from "@/lib/imageModelRegistry";
 import { readImageDimensions } from "@/lib/imageDimensions";
+import { resolveProviderApiKey } from "@/lib/modelRegistryShared";
 import {
   IMAGE_PROVIDER_RETRY_DELAYS_MS,
   IMAGE_PROVIDER_TIMEOUT_MS,
@@ -151,9 +152,12 @@ const getGoogleApiKey = () => {
   // variable here the way OPENAI_IMAGE_API_KEY exists for OpenAI; splitting
   // spend attribution is a separate operational decision, not something to
   // invent an environment name for.
-  const key =
-    process.env.GOOGLE_GENERATIVE_AI_API_KEY?.trim() ||
-    process.env.GEMINI_API_KEY?.trim();
+  //
+  // Resolved from the shared alias list rather than an inline pair: this
+  // module accepting GEMINI_API_KEY while the chat client and the status
+  // surface did not is how image generation came to work in a deployment
+  // that reported Google as unconfigured.
+  const key = resolveProviderApiKey("google");
   if (!key) {
     throw new ImageProviderError(
       "provider_failed",
@@ -164,7 +168,7 @@ const getGoogleApiKey = () => {
 };
 
 const getXaiApiKey = () => {
-  const key = process.env.XAI_API_KEY?.trim();
+  const key = resolveProviderApiKey("xai");
   if (!key) {
     throw new ImageProviderError(
       "provider_failed",
@@ -180,7 +184,7 @@ const getImageApiKey = () => {
   // the chat key is the fallback so development works with one key.
   const key =
     process.env.OPENAI_IMAGE_API_KEY?.trim() ||
-    process.env.OPENAI_API_KEY?.trim();
+    resolveProviderApiKey("openai");
   if (!key) {
     throw new ImageProviderError(
       "provider_failed",

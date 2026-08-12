@@ -30,12 +30,19 @@ import { fileURLToPath } from "node:url";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 
-const tsxFiles = (dir, found = []) => {
+/**
+ * `.ts` as well as `.tsx`: the rule is about effects, and a hook that owns a
+ * dialog's focus is a `.ts` file with no JSX in it. Scanning only components
+ * missed `useModalDialog`, which is the one place the bug reaches every modal
+ * at once.
+ */
+const reactSources = (dir, found = []) => {
   for (const entry of readdirSync(dir)) {
     if (entry === "node_modules" || entry === ".next") continue;
     const full = join(dir, entry);
-    if (statSync(full).isDirectory()) tsxFiles(full, found);
-    else if (extname(entry) === ".tsx") found.push(full);
+    if (statSync(full).isDirectory()) reactSources(full, found);
+    else if (extname(entry) === ".tsx" || extname(entry) === ".ts")
+      found.push(full);
   }
   return found;
 };
@@ -65,7 +72,10 @@ const CALLBACK_PROP = /^on[A-Z]/;
 
 test("no effect that schedules focus depends on a callback prop", () => {
   const offenders = [];
-  for (const file of tsxFiles(join(root, "components"))) {
+  for (const file of [
+    ...reactSources(join(root, "components")),
+    ...reactSources(join(root, "app")),
+  ]) {
     const source = readFileSync(file, "utf8");
     for (const effect of effects(source)) {
       if (!SCHEDULES_FOCUS.test(effect.body)) continue;
@@ -85,6 +95,48 @@ test("no effect that schedules focus depends on a callback prop", () => {
       "render and pulls focus back. Split it: focus keyed on `open`, the key " +
       "handler keeping the callback.\n" +
       offenders.join("\n")
+  );
+});
+
+test("the shared modal hook keeps focus and keys in separate effects", () => {
+  // Named because this one file decides the behaviour of every `aria-modal`
+  // surface in the product. Its single effect both *returned* focus to the
+  // trigger on teardown and *placed* focus in the panel on setup, so an
+  // unstable `onClose` moved focus twice per caller render -- measured on
+  // `ComparisonReviewDialog`, where focus left the source-grounding info
+  // control for the dialog's Close button ~50ms after landing, with no key
+  // pressed.
+  const source = readFileSync(join(root, "components/useModalDialog.ts"), "utf8");
+  const all = effects(source);
+  const focusEffects = all.filter((effect) => SCHEDULES_FOCUS.test(effect.body));
+  assert.equal(
+    focusEffects.length,
+    1,
+    "useModalDialog should schedule focus in exactly one effect"
+  );
+  assert.equal(
+    focusEffects[0].deps.includes("onClose"),
+    false,
+    "the focus effect must not depend on onClose"
+  );
+  // The other half has to still exist, and has to still see the current
+  // `onClose` -- an Escape handler pinned to a stale closure closes nothing.
+  const keyEffects = all.filter(
+    (effect) =>
+      effect.body.includes('addEventListener("keydown"') &&
+      !SCHEDULES_FOCUS.test(effect.body)
+  );
+  assert.equal(keyEffects.length, 1, "the key handlers should be their own effect");
+  assert.ok(
+    keyEffects[0].deps.includes("onClose"),
+    "the key effect must keep its onClose dependency"
+  );
+  // Focus return lives with focus placement, not with the listeners: it is the
+  // teardown half of the same pair, and separating them would restore the
+  // trigger on every caller render.
+  assert.ok(
+    focusEffects[0].body.includes("returnTarget.focus"),
+    "focus return belongs in the focus effect"
   );
 });
 

@@ -6,6 +6,7 @@ import {
     getMemoryExtractionRevokedPairs,
     isMemoryExtractionEnabled,
 } from "@/lib/appSettings";
+import { assertUserOperationalAccess } from "@/lib/chatSecurity";
 import { usageBucketCount } from "@/lib/chatUsageBucketCount";
 import {
     MEMORY_EXTRACTION_CHUNK_TIMEOUT_MS,
@@ -342,6 +343,11 @@ export async function createMemoryExtractionRun(input: {
     environment?: Record<string, string | undefined>;
 }) {
     const now = input.now ?? new Date();
+    // Extraction is a paid provider call like any other, so an account an
+    // administrator has suspended, restricted or scheduled for deletion is
+    // refused before anything is priced or reserved. The estimate is left
+    // ungated on purpose: it makes no provider call and charges nothing.
+    await assertUserOperationalAccess(input.userId);
     const { pricing } = await resolveEffectiveExtractionPair(input);
     const estimate = await estimateMemoryExtraction(input);
     if (estimate.estimatedCredits !== input.confirmedCredits) {

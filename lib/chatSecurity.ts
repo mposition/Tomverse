@@ -309,6 +309,33 @@ export class ChatAccessError extends Error {
 export const isChatAccessError = (error: unknown): error is ChatAccessError =>
     error instanceof ChatAccessError;
 
+/**
+ * Refuses an account an administrator has put out of bounds: suspended,
+ * already scheduled for deletion, or restricted from AI usage specifically.
+ *
+ * The check itself lives in lib/userOperationalSecurity.ts, which cannot raise
+ * a `ChatAccessError` without importing this module back. Every paid AI entry
+ * point should call *this*, so that a suspended account is refused the same way
+ * and with the same code wherever it asks -- chat, a model comparison, an image
+ * generation, a memory extraction. Enforced in the service rather than the
+ * route: a second caller of the service is exactly how a gate written once
+ * stops covering everything.
+ *
+ * The expiry half matters as much as the refusal: a suspension or restriction
+ * whose end date has passed is cleared here, so a fixed-term penalty ends on
+ * its own rather than waiting for an administrator to remember.
+ */
+export const assertUserOperationalAccess = async (userId: string) => {
+    try {
+        await enforceUserOperationalSecurity(userId);
+    } catch (error) {
+        if (error instanceof UserOperationalRestrictionError) {
+            throw new ChatAccessError(403, error.code, error.message);
+        }
+        throw error;
+    }
+};
+
 const positiveInteger = (value: string | undefined, fallback: number) => {
     const parsed = Number(value);
     return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : fallback;
@@ -1322,14 +1349,7 @@ export const preflightChatComparisonAccess = async (
             admission,
         };
     }
-    try {
-        await enforceUserOperationalSecurity(access.userId);
-    } catch (error) {
-        if (error instanceof UserOperationalRestrictionError) {
-            throw new ChatAccessError(403, error.code, error.message);
-        }
-        throw error;
-    }
+    await assertUserOperationalAccess(access.userId);
 
     const now = new Date();
     const plan = access.plan || "Free";
@@ -1905,14 +1925,7 @@ export const acquireChatAccess = async (
         throw error;
     }
     if (access.kind === "user" && access.userId) {
-        try {
-            await enforceUserOperationalSecurity(access.userId);
-        } catch (error) {
-            if (error instanceof UserOperationalRestrictionError) {
-                throw new ChatAccessError(403, error.code, error.message);
-            }
-            throw error;
-        }
+        await assertUserOperationalAccess(access.userId);
     }
     const now = new Date();
     let leaseId: string = randomUUID();

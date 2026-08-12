@@ -2,6 +2,10 @@ import "server-only";
 
 import { z } from "zod";
 import { readResponseToBuffer } from "@/lib/boundedBuffer";
+import {
+  isProviderApiKeyConfigured,
+  resolveProviderApiKey,
+} from "@/lib/modelRegistryShared";
 
 export const MISTRAL_OCR_MODEL_ID = "mistral-ocr-4-0";
 export const MISTRAL_OCR_ENDPOINT = "https://api.mistral.ai/v1/ocr";
@@ -38,7 +42,7 @@ export type MistralOcrResult = {
 };
 
 export const isMistralOcrConfigured = () =>
-  Boolean(process.env.MISTRAL_API_KEY?.trim());
+  isProviderApiKeyConfigured("mistral");
 
 /**
  * Converts a validated PDF to bounded Markdown with Mistral OCR 4.
@@ -56,7 +60,7 @@ export async function extractPdfTextWithMistralOcr(
     signal?: AbortSignal;
   } = {}
 ): Promise<MistralOcrResult | null> {
-  const apiKey = dependencies.apiKey ?? process.env.MISTRAL_API_KEY?.trim();
+  const apiKey = dependencies.apiKey ?? resolveProviderApiKey("mistral");
   if (!apiKey) return null;
   if (!Number.isSafeInteger(maxCharacters) || maxCharacters <= 0) {
     throw new MistralOcrError("Mistral OCR requires a positive text limit.");
