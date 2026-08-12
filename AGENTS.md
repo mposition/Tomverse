@@ -148,6 +148,12 @@ npm run report:issue-backlog -- --issues-file <열린 이슈 JSON>
   없으면 같은 잔액을 읽은 두 경로가 모두 통과해 잔액이 음수가 됩니다. 순서도
   계약입니다 — workflow advisory 잠금(`memory-extraction:*` 등)보다 **앞**이며,
   종료 여부 같은 조건 분기 **안**에서 잠그지 않습니다.
+- **`CreditLot`의 non-negative CHECK는 그 잠금의 대체물이 아닙니다.** CHECK는
+  직렬화를 못 하므로 잠금 없는 경로를 안전하게 만들지 못하고, 조용히 틀린
+  잔액을 실패한 트랜잭션으로 바꿀 뿐입니다. `NOT VALID`로 배포했으므로
+  validate는 `npm run report:credit-lot-invariants`가 0을 보고한 뒤 **별도
+  migration**으로 합니다 — production에서 손으로 validate하면 schema 비교가
+  drift로 잡습니다.
 - 이 계약을 어기는 변경은 릴리스 차단 사유입니다.
 
 # Chat concurrency and identity namespace

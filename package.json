@@ -74,6 +74,7 @@
     "check:doc-references": "node scripts/check-doc-references.mjs",
     "check:locale-translation": "node --import tsx scripts/check-locale-translation.mjs",
     "report:cost-bucket-corrections": "node --conditions=react-server --import tsx scripts/report-cost-bucket-corrections.mjs",
+    "report:credit-lot-invariants": "node --conditions=react-server --import tsx scripts/report-credit-lot-invariants.mjs",
     "report:issue-backlog": "node --import tsx scripts/report-issue-backlog.mjs",
     "drill:railway-restore-preflight": "node scripts/railway-restore-preflight.mjs",
     "drill:railway-restore-verify": "node scripts/railway-restore-verify.mjs",

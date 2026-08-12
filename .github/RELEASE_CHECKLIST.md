@@ -69,6 +69,11 @@ Date / timezone:    ____________________
 - [ ] `npm run check:openai-model-access` (needs a production key) — per-account
       model visibility only. It is **not** a price source; nothing in
       `lib/modelPricing.ts` may be derived from its response.
+- [ ] `npm run report:credit-lot-invariants` (needs the deployed database) —
+      read-only survey of purchased-credit lots against the §9 non-negative
+      invariant. Not a gate: the constraints ship `NOT VALID`, so a violating
+      row blocks nothing. It is the input to validating them, and a count that
+      moves off zero means a caller reached the lots without the account lock.
 - [ ] Chromium E2E: `desktop-chromium`, `desktop-compact`, `mobile-chromium`
       — no unexplained failures
 
