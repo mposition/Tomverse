@@ -1576,9 +1576,16 @@ export const preflightChatComparisonAccess = async (
                 "CREDIT_COST_ALLOWANCE_INSUFFICIENT",
                 "Purchased credits do not include enough remaining AI cost allowance for this comparison.",
                 undefined,
+                // `internal` prefixed so publicChatErrorDetails strips them.
+                // These are provider spend in micro-USD, which never belongs
+                // in a user-facing payload -- the figures live in the
+                // limit-decision event and the Admin Console. The neighbouring
+                // guardrail rejection says the same thing in a comment; these
+                // two simply were not spelled to match, so the one mechanism
+                // that enforces it could not see them.
                 {
-                    requiredCostMicroUsd: purchasedReservedCost,
-                    availableCostMicroUsd: purchasedCostAvailable,
+                    internalRequiredCostMicroUsd: purchasedReservedCost,
+                    internalAvailableCostMicroUsd: purchasedCostAvailable,
                 }
             );
         }
@@ -2484,9 +2491,12 @@ export const acquireChatAccess = async (
                                 "CREDIT_COST_ALLOWANCE_INSUFFICIENT",
                                 "Purchased credits do not include enough remaining AI cost allowance for this request.",
                                 undefined,
+                                // Same rejection, same reason as the
+                                // comparison path above: micro-USD is internal.
                                 {
-                                    requiredCostMicroUsd: addOnReservedCost,
-                                    availableCostMicroUsd:
+                                    internalRequiredCostMicroUsd:
+                                        addOnReservedCost,
+                                    internalAvailableCostMicroUsd:
                                         error.availableFundedCostMicroUsd,
                                 }
                             );

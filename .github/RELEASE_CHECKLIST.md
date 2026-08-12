@@ -30,6 +30,7 @@ Date / timezone:    ____________________
 - [ ] `npm run check:image-pricing`
 - [ ] `npm run check:image-executor-budget`
 - [ ] `npm run check:db-integration-coverage`
+- [ ] `npm run check:error-detail-cost`
 - [ ] `npm run check:data-domain-registry`
 - [ ] `npm run check:default-models`
 - [ ] `npm run check:encoding:strict`
