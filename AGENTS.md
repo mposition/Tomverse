@@ -129,6 +129,17 @@ npm run report:release-gate-evidence -- --condition memory-release-b-enabled=fal
 - 착수 후보는 `nothing built yet`입니다. `built, nothing measures it`은 보통
   기능이 아니라 테스트나 리포트 한 건입니다.
 
+`nothing built yet` 11건 중 **BILLING-04만 다른 작업에 막혀 있지 않습니다.**
+Planner·context manifest·moderation은 선행 작업 대기이고, store·native auth는 이
+저장소에서 만들 수 없습니다. BILLING-04에 착수하기 전에 읽습니다.
+
+- `docs/policy/goodwill-credit-grants.md`
+
+goodwill 지급은 Stripe 환불도 구매 취소도 아닌 **세 번째 것**이며, 대응 결제가
+없으므로 멱등성을 빌려올 수 없습니다. 설계 문서 §8의 여섯 가지(1회·기간 상한,
+이중 승인 임계값, 만료, 소진 순서, 환불 상호작용, 사용자 가시성)는 finance-ops의
+결정이며 **정해지기 전에는 구현하지 않습니다.**
+
 # Credit entitlement vs operational guardrail
 
 크레딧·비용 한도를 건드리기 전에 읽습니다.
