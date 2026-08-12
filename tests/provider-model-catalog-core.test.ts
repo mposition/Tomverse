@@ -7,7 +7,12 @@ import {
   missingConfirmationRuns,
   parseProviderCatalogResponse,
   planCatalogReconciliation,
+  providerCatalogUrl,
 } from "../lib/providerModelCatalogCore.ts";
+import {
+  AI_PROVIDERS,
+  PROVIDER_API_CONFIGURATION,
+} from "../lib/modelRegistryShared.ts";
 
 test("parses OpenAI-compatible model lists and excludes non-chat products", () => {
   assert.deepEqual(
@@ -256,5 +261,72 @@ test("restores only what this automation disabled", () => {
   assert.deepEqual(
     plan.restore.map((item) => item.modelId),
     ["llama-4-scout"]
+  );
+});
+
+/**
+ * The regression these guard: the catalogue path used to be derived with a
+ * two-provider special case and `models` for everyone else, which is only
+ * correct when the base URL already ends in the version segment. Anthropic's
+ * does not, so the monitor asked `https://api.anthropic.com/models` and got a
+ * 404 every scan for a month. A 404 reads as "the provider dropped this
+ * endpoint" rather than "we built the wrong URL", so nothing looked wrong.
+ *
+ * Every provider is pinned, not just Anthropic: the next base URL added with
+ * no version segment has to fail here rather than in production.
+ */
+test("each provider's catalogue URL is the one that provider actually serves", () => {
+  assert.deepEqual(
+    Object.fromEntries(
+      AI_PROVIDERS.map((provider) => [
+        provider,
+        providerCatalogUrl(provider, null).toString(),
+      ])
+    ),
+    {
+      openai: "https://api.openai.com/v1/models",
+      anthropic: "https://api.anthropic.com/v1/models?limit=1000",
+      google:
+        "https://generativelanguage.googleapis.com/v1beta/models?pageSize=1000",
+      groq: "https://api.groq.com/openai/v1/models",
+      xai: "https://api.x.ai/v1/language-models",
+      deepseek: "https://api.deepseek.com/models",
+      mistral: "https://api.mistral.ai/v1/models",
+      moonshot: "https://api.moonshot.ai/v1/models",
+      minimax: "https://api.minimax.io/anthropic/v1/models?limit=1000",
+      qwen: "https://dashscope-intl.aliyuncs.com/compatible-mode/v1/models",
+      zhipu: "https://api.z.ai/api/paas/v4/models",
+      perplexity: "https://api.perplexity.ai/v1/models",
+    }
+  );
+});
+
+test("a catalogue URL never leaves its provider's configured base URL", () => {
+  for (const provider of AI_PROVIDERS) {
+    const base = new URL(PROVIDER_API_CONFIGURATION[provider].baseUrl);
+    const url = providerCatalogUrl(provider, "cursor-value");
+    assert.equal(url.origin, base.origin, provider);
+    assert.ok(url.pathname.startsWith(base.pathname.replace(/\/$/, "")), provider);
+  }
+});
+
+test("only the paginating providers carry a cursor, each in its own parameter", () => {
+  assert.equal(
+    providerCatalogUrl("anthropic", "model_123").searchParams.get("after_id"),
+    "model_123"
+  );
+  assert.equal(
+    providerCatalogUrl("minimax", "model_123").searchParams.get("after_id"),
+    "model_123"
+  );
+  assert.equal(
+    providerCatalogUrl("google", "page_2").searchParams.get("pageToken"),
+    "page_2"
+  );
+  // An OpenAI-compatible list is a single response; a cursor would be a
+  // parameter the provider ignores at best.
+  assert.equal(
+    providerCatalogUrl("openai", "page_2").search,
+    ""
   );
 });

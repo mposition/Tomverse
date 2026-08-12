@@ -13,6 +13,10 @@ export const maxDuration = 300;
 import { createHash, timingSafeEqual } from "node:crypto";
 import { after } from "next/server";
 import { reconcileExpiredChatCreditReservations } from "@/lib/chatSecurity";
+import {
+  databaseErrorMetadata,
+  isRetryableDatabaseError,
+} from "@/lib/databaseError";
 import { reconcileExpiredChatRequestLeases } from "@/lib/chatRequestLease";
 import { reconcileSourceLockedMemories } from "@/lib/externalConversationLockService";
 import { reconcileExpiredExternalImportStaging } from "@/lib/externalImportService";
@@ -42,6 +46,34 @@ const isAuthorized = (request: Request) => {
   return timingSafeEqual(expectedDigest, providedDigest);
 };
 
+/**
+ * The reconciliation sweep, retried once when the database connection dropped
+ * under it.
+ *
+ * A managed Postgres restart severs in-flight connections, which Prisma
+ * surfaces as `08P01` / "server conn crashed?". The sweep is idempotent -- it
+ * moves expired reservations to a terminal state and counts the ones already
+ * there -- so a second attempt on a fresh connection is exactly what the next
+ * scheduled run would do fifteen minutes later, only sooner.
+ */
+const reconcileCreditReservationsWithRetry = async () => {
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      return await reconcileExpiredChatCreditReservations(new Date(), 1_000);
+    } catch (error) {
+      if (attempt > 0 || !isRetryableDatabaseError(error)) throw error;
+      console.warn(
+        JSON.stringify({
+          event: "credit_reservation_reconciliation_retry",
+          ...databaseErrorMetadata(error),
+          timestamp: new Date().toISOString(),
+        })
+      );
+      await new Promise((resolve) => setTimeout(resolve, 250));
+    }
+  }
+};
+
 export async function POST(request: Request) {
   if (!isAuthorized(request)) {
     return Response.json(
@@ -51,10 +83,7 @@ export async function POST(request: Request) {
   }
   const run = await startScheduledJob("credit_reservation_reconciliation");
   try {
-    const result = await reconcileExpiredChatCreditReservations(
-      new Date(),
-      1_000
-    );
+    const result = await reconcileCreditReservationsWithRetry();
     const infrastructureMonitor = await monitorInfrastructureThresholdsIfDue();
     // Rides along on the only fifteen-minute schedule this deployment already
     // has, so the operator-notification queue drains without a second cron
@@ -182,19 +211,44 @@ export async function POST(request: Request) {
     );
   } catch (error) {
     await failScheduledJob({ runId: run?.id, error });
+    // A dropped database connection that survived the retry above is a
+    // deferral, not a broken reconciliation: the sweep is idempotent and the
+    // next run is fifteen minutes away. It is reported -- so a database that
+    // stays unreachable is still loud -- but not as the fatal incident that
+    // says the reconciliation itself failed, and the caller is told to come
+    // back rather than being handed a 500 it will exit non-zero on.
+    const retryable = isRetryableDatabaseError(error);
     after(() =>
       reportOperationalIncident({
-        code: "CREDIT_RESERVATION_RECONCILIATION_FAILED",
-        title: "Credit reservation reconciliation failed",
+        code: retryable
+          ? "CREDIT_RESERVATION_RECONCILIATION_DEFERRED"
+          : "CREDIT_RESERVATION_RECONCILIATION_FAILED",
+        title: retryable
+          ? "Credit reservation reconciliation deferred by the database"
+          : "Credit reservation reconciliation failed",
         error,
-        severity: "fatal",
+        severity: retryable ? "error" : "fatal",
         cooldownMs: 15 * 60 * 1_000,
         context: {
           component: "maintenance-credit-reservations",
           route: "/api/internal/maintenance/credit-reservations",
+          ...(retryable ? databaseErrorMetadata(error) : {}),
         },
       })
     );
+    if (retryable) {
+      return Response.json(
+        {
+          error: "Credit reservation reconciliation is temporarily unavailable.",
+          code: "CREDIT_RESERVATION_RECONCILIATION_DEFERRED",
+          retryable: true,
+        },
+        {
+          status: 503,
+          headers: { "Cache-Control": "no-store", "Retry-After": "60" },
+        }
+      );
+    }
     return Response.json(
       { error: "Credit reservation reconciliation failed." },
       { status: 500, headers: { "Cache-Control": "no-store" } }
