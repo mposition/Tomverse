@@ -8,7 +8,7 @@
 
 import assert from "node:assert/strict";
 import test from "node:test";
-import { readFileSync, readdirSync, statSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -82,6 +82,138 @@ test("the rule does not apply outside packages/", async () => {
   );
 });
 
+/* ------------------------------------------------- CSS assets, same boundary */
+
+const cssFilesIn = (name) => {
+  const walk = (dir) => {
+    let entries;
+    try {
+      entries = readdirSync(dir, { withFileTypes: true });
+    } catch {
+      return [];
+    }
+    return entries.flatMap((entry) =>
+      entry.isDirectory()
+        ? walk(join(dir, entry.name))
+        : entry.name.endsWith(".css")
+          ? [join(dir, entry.name)]
+          : []
+    );
+  };
+  return walk(join(packagesDir, name, "src"));
+};
+
+const packageCss = packageNames.flatMap((name) =>
+  cssFilesIn(name).map((file) => ({ name, file }))
+);
+
+test("a package ships CSS, so the CSS rules are guarding something", () => {
+  // The ESLint rule and the standalone tsconfig only see TypeScript. A package
+  // can be entirely CSS -- ui-tokens is -- and this file's TypeScript-shaped
+  // assertions would then pass over a package nothing had read.
+  assert.ok(
+    packageCss.length > 0,
+    "no .css under packages/*/src; the CSS assertions below check nothing"
+  );
+});
+
+for (const { name, file } of packageCss) {
+  const relative = file.slice(root.length + 1);
+
+  test(`${relative} uses no Tailwind at-rule`, () => {
+    const css = file && readFileSync(file, "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
+    for (const atRule of [
+      "@theme",
+      "@apply",
+      "@utility",
+      "@variant",
+      "@custom-variant",
+      "@source",
+      "@plugin",
+      "@config",
+      "@reference",
+      "@tailwind",
+    ]) {
+      assert.ok(
+        !new RegExp(`${atRule}\\b`).test(css),
+        `${atRule} only resolves inside a Tailwind build`
+      );
+    }
+  });
+
+  test(`${relative} imports nothing outside its own package`, () => {
+    const css = readFileSync(file, "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
+    for (const match of css.matchAll(/@import\s+(?:url\()?["']([^"']+)["']/g)) {
+      assert.ok(
+        match[1].startsWith("."),
+        `${match[1]} is resolved by whatever build is around it`
+      );
+    }
+  });
+
+  test(`${relative} defines every custom property it reads`, () => {
+    // The CSS half of the tsconfig's forbidden-global rule. A
+    // `var(--font-geist-sans)` would load anywhere and render as nothing
+    // outside the Next.js app that injects it.
+    const css = readFileSync(file, "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
+    const defined = new Set(
+      [...css.matchAll(/(--[\w-]+)\s*:/g)].map((match) => match[1])
+    );
+    const referenced = [
+      ...css.matchAll(/var\(\s*(--[\w-]+)\s*\)/g),
+    ].map((match) => match[1]);
+    for (const token of referenced) {
+      assert.ok(
+        defined.has(token),
+        `${token} is read but never defined, and carries no fallback`
+      );
+    }
+  });
+
+  test(`${name} does not restate ${relative} in the app`, () => {
+    const owned = new Set(
+      [
+        ...readFileSync(file, "utf8")
+          .replace(/\/\*[\s\S]*?\*\//g, "")
+          .matchAll(/(--[\w-]+)\s*:/g),
+      ].map((match) => match[1])
+    );
+    const appCss = readFileSync(join(root, "app", "globals.css"), "utf8").replace(
+      /\/\*[\s\S]*?\*\//g,
+      ""
+    );
+    const redefined = new Set(
+      [...appCss.matchAll(/(--[\w-]+)\s*:/g)].map((match) => match[1])
+    );
+    const clashes = [...owned].filter((token) => redefined.has(token));
+    assert.deepEqual(
+      clashes,
+      [],
+      "app/globals.css redefines tokens the package owns; which one wins is " +
+        "decided by import order"
+    );
+  });
+}
+
+test("the app imports every CSS the packages export", () => {
+  for (const name of packageNames) {
+    const manifest = JSON.parse(
+      readFileSync(join(packagesDir, name, "package.json"), "utf8")
+    );
+    for (const [subpath, target] of Object.entries(manifest.exports ?? {})) {
+      if (typeof target !== "string" || !target.endsWith(".css")) continue;
+      const specifier = `${manifest.name}${subpath.replace(/^\./, "")}`;
+      const appCss = readFileSync(join(root, "app", "globals.css"), "utf8");
+      assert.ok(
+        appCss.includes(specifier),
+        `nothing imports ${specifier}; an asset no client loads is not shared`
+      );
+    }
+  }
+});
+
+/* ----------------------------------------------------------- manifest shape */
+
 for (const name of packageNames) {
   test(`packages/${name} declares no runtime dependencies`, () => {
     const manifest = JSON.parse(
@@ -92,7 +224,13 @@ for (const name of packageNames) {
     assert.equal(manifest.type, "module");
   });
 
-  test(`packages/${name} does not inherit the app's tsconfig`, () => {
+  test(`packages/${name} does not inherit the app's tsconfig`, (t) => {
+    // CSS-only packages have no tsconfig to inherit anything; their boundary
+    // is checked by the CSS rules above.
+    if (!existsSync(join(packagesDir, name, "tsconfig.json"))) {
+      t.skip("no TypeScript in this package");
+      return;
+    }
     const tsconfig = readFileSync(
       join(packagesDir, name, "tsconfig.json"),
       "utf8"
