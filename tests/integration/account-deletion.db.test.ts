@@ -19,7 +19,7 @@ import { deleteScheduledAccounts } from "@/lib/maintenance";
 
 const resetAccountDeletionData = () =>
   prisma.$executeRawUnsafe(`
-    TRUNCATE TABLE "Session", "User" RESTART IDENTITY CASCADE
+    TRUNCATE TABLE "Session", "ImageAssetCleanup", "User" RESTART IDENTITY CASCADE
   `);
 
 beforeEach(resetAccountDeletionData);
@@ -209,4 +209,91 @@ test("permanent deletion cascades imported external conversations (import policy
     await prisma.externalMessage.count({ where: { userId: user.id } }),
     0
   );
+});
+
+test("permanent deletion enqueues the account's generated images for storage removal", async () => {
+  // Deleting one conversation already enqueued its images; deleting the
+  // account did not. The cascade runs User -> Conversation -> ImageGeneration
+  // -> ImageAsset, and ImageAsset holds the only record of the R2 key, so once
+  // it is gone the object has no name anywhere in the system and no sweep can
+  // ever find it. The tombstone therefore has to be written before the
+  // cascade, in the same transaction -- which is what this pins.
+  const user = await createUser({
+    accountStatus: "pending_deletion",
+    stripeSubscriptionId: null,
+  });
+  const conversation = await prisma.conversation.create({
+    data: { userId: user.id, title: "a picture", kind: "image", selectedModels: "[]" },
+  });
+  const group = await prisma.imageGenerationGroup.create({
+    data: {
+      userId: user.id,
+      conversationId: conversation.id,
+      groupIdempotencyKey: randomUUID(),
+    },
+  });
+  const target = await prisma.imageGenerationTarget.create({
+    data: { groupId: group.id, provider: "openai", modelId: "gpt-image-2" },
+  });
+  const generation = await prisma.imageGeneration.create({
+    data: {
+      userId: user.id,
+      conversationId: conversation.id,
+      idempotencyKey: randomUUID(),
+      prompt: "a lighthouse at dusk",
+      preset: "draft",
+      size: "1024x1024",
+      quality: "low",
+      groupId: group.id,
+      targetId: target.id,
+    },
+  });
+  const r2Key = `images/${conversation.id}/${randomUUID()}.png`;
+  await prisma.imageAsset.create({
+    data: {
+      generationId: generation.id,
+      role: "original",
+      status: "ready",
+      r2Key,
+      mimeType: "image/png",
+      width: 1024,
+      height: 1024,
+      byteSize: 1_000,
+      sha256: "a".repeat(64),
+    },
+  });
+  await prisma.user.update({
+    where: { id: user.id },
+    data: { accountDeletionScheduledFor: new Date(Date.now() - 1_000) },
+  });
+
+  assert.equal(await deleteScheduledAccounts(new Date()), 1);
+
+  // The row that named the object is gone with the account...
+  assert.equal(await prisma.imageAsset.count({ where: { r2Key } }), 0);
+  // ...so the tombstone is the only thing that can still reach the object.
+  const tombstone = await prisma.imageAssetCleanup.findUnique({ where: { r2Key } });
+  assert.ok(tombstone, "the account's image was not enqueued for storage removal");
+  // Named as an account deletion rather than a conversation deletion: the two
+  // are different operator-facing facts, and `account_deleted` had been a
+  // declared cleanup reason that nothing ever wrote.
+  assert.equal(tombstone.reason, "account_deleted");
+  assert.equal(tombstone.completedAt, null);
+});
+
+test("deleting an account with no generated images enqueues nothing", async () => {
+  const user = await createUser({
+    accountStatus: "pending_deletion",
+    stripeSubscriptionId: null,
+  });
+  await prisma.conversation.create({
+    data: { userId: user.id, title: "just chat", selectedModels: "[]" },
+  });
+  await prisma.user.update({
+    where: { id: user.id },
+    data: { accountDeletionScheduledFor: new Date(Date.now() - 1_000) },
+  });
+
+  assert.equal(await deleteScheduledAccounts(new Date()), 1);
+  assert.equal(await prisma.imageAssetCleanup.count(), 0);
 });
