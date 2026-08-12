@@ -103,6 +103,32 @@ const REGISTRY = {
     reason:
       "ModelTier again, without Guest: an account row always has a real plan, and a guest has no row to carry one.",
   },
+  RoutingAttempt_plannerMode_check: {
+    owner: "type_only",
+    reason:
+      "PlannerMode in lib/routingAttemptStore.ts, two values. Whether the attempt's prompt went through the planner, recorded per attempt because the answer can differ between the attempts of one run.",
+  },
+  RoutingAttempt_outcome_check: {
+    owner: "type_only",
+    reason:
+      "RoutingAttemptOutcome in lib/routingAttemptStore.ts. The union is deliberately one value shorter than the constraint: it types the *completion* input, so it carries the five terminal outcomes and not 'pending', which only createAttempt writes as the initial state. A union that also accepted 'pending' would let a caller complete an attempt into the state it started in.",
+  },
+  RoutingAttempt_failureLayer_check: {
+    owner: "type_only",
+    reason:
+      "RoutingFailureLayer in lib/routingAttemptStore.ts, seven values including 'none'. Which layer refused or broke, which is what makes a failed attempt attributable rather than merely failed.",
+  },
+  ContextManifest_state_check: {
+    owner: "database",
+    reason:
+      "draft, finalized, not_dispatched. Written as bare literals in lib/routingAttemptStore.ts, where 'draft' also appears inside the compare-and-set predicate that makes finalization happen once; there is no runtime list and no union to compare against.",
+  },
+  RoutingRun_fallbackState_check: {
+    owner: "database",
+    reason:
+      "none, fallback_used, exhausted. Paired with RoutingRun_fallback_agreement_check, which is the constraint doing the real work -- this one only bounds the vocabulary that one reasons over.",
+  },
+
   ProductAnalyticsEvent_source_check: {
     owner: "database",
     reason:

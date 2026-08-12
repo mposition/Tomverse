@@ -836,3 +836,45 @@ domains:
       Global per-model configuration, keyed by modelId. It appears here only
       because an operator's identity is stamped on it; there is no data subject
       for it to be about.
+
+  # --- the routing record's per-attempt half (routing policy §5) ------------
+  #
+  # Both cascade from RoutingRun, which cascades from User. The registry
+  # verifies that transitively, so "deleted with the account" is a checked
+  # claim rather than a comment -- and both carry their own userId so they are
+  # data domains in their own right rather than child tables nothing grades.
+  - domain: routingAttempt
+    prismaModel: RoutingAttempt
+    userLinkageRole: subject
+    owner: backend-ai
+    deletionAction: delete
+    deletionMechanism: cascade_from_user
+    retentionPolicy: immediate
+    implementationStatus: implemented
+    inUnifiedExport: excluded
+    note: >-
+      A separate table rather than columns on RoutingRun because one logical
+      response can produce several attempts -- primary fails before any visible
+      token, the fallback's Planner fails and is never dispatched, the
+      fallback's pass-through succeeds -- each with its own model, tokenizer,
+      Planner mode and effective request. Flattened onto the run they overwrite
+      each other; in a JSON array they cannot carry the constraints that make
+      ROUTE-06 true.
+
+  - domain: contextManifest
+    prismaModel: ContextManifest
+    userLinkageRole: subject
+    owner: backend-ai
+    deletionAction: delete
+    deletionMechanism: cascade_from_user
+    retentionPolicy: immediate
+    implementationStatus: implemented
+    inUnifiedExport: excluded
+    note: >-
+      Immutable once finalized, enforced by a trigger rather than by
+      convention: that is what makes the effective-request hash evidence rather
+      than a field. Immutability stops at the account boundary, though --
+      the routing policy is explicit that user deletion takes priority over
+      audit retention, so the cascade removes it like anything else. It holds
+      references and hashes, never the prompt, so there is nothing here that
+      deletion would otherwise have to scrub.
