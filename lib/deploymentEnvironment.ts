@@ -50,3 +50,58 @@ export const resolveDeploymentEnvironment = (
   validateEnvironment(env.APP_ENV) ??
   validateEnvironment(env.RAILWAY_ENVIRONMENT_NAME) ??
   (env.NODE_ENV === "production" ? "production" : "development");
+
+/**
+ * The environment name Sentry tags events with.
+ *
+ * `SENTRY_ENVIRONMENT` exists so an operator can label a deployment's events
+ * for Sentry's own grouping without changing what the deployment is. What it
+ * must never do is *contradict* the deployment, and on 2026-08-12 that is
+ * exactly what it did: staging carried `SENTRY_ENVIRONMENT=production` -- the
+ * value the README's own example shows -- so every staging error arrived filed
+ * under production while the same process's /api/build-info answered
+ * "staging". Filtering Sentry by production returned staging noise, which is
+ * the one thing an environment tag is for.
+ *
+ * So the override is allowed to *name* something the resolver has no opinion
+ * about (`production-eu`, `canary`), and refused when it names one of the four
+ * canonical environments and picks a different one than this deployment is.
+ * That kills the observed failure without killing the feature.
+ *
+ * The refusal is loud. A silently ignored variable is its own confusion, and
+ * whoever set it needs to know it is doing nothing.
+ */
+let warnedAboutSentryEnvironment = false;
+
+export const resolveSentryEnvironmentTag = (
+  env: NodeJS.ProcessEnv = process.env,
+  warn: (message: string) => void = (message) => console.warn(message)
+): string => {
+  const deployment = resolveDeploymentEnvironment(env);
+  const override = env.SENTRY_ENVIRONMENT?.trim();
+  if (!override) return deployment;
+
+  const named = validateEnvironment(override);
+  if (named && named !== deployment) {
+    if (!warnedAboutSentryEnvironment) {
+      warnedAboutSentryEnvironment = true;
+      warn(
+        JSON.stringify({
+          event: "sentry_environment_override_ignored",
+          override: named,
+          deployment,
+          reason:
+            "SENTRY_ENVIRONMENT names a different canonical environment than this deployment resolves to. Remove it, or set it to a label that is not one of: " +
+            DEPLOYMENT_ENVIRONMENTS.join(", "),
+        })
+      );
+    }
+    return deployment;
+  }
+  return override;
+};
+
+/** Test seam: the warning is once per process, which a test has to reset. */
+export const resetSentryEnvironmentWarningForTests = () => {
+  warnedAboutSentryEnvironment = false;
+};
