@@ -188,6 +188,7 @@ run(
     "tests/integration/account-anonymisation.db.test.ts",
     // §5's dispatch boundary: attempt-scoped manifests, and ROUTE-06.
     "tests/integration/routing-attempt-manifest.db.test.ts",
+    "tests/integration/routing-dispatch-instrumentation.db.test.ts",
   ],
   "Running financial, credit, chat-concurrency, chat-rate-limit, fallback-pricing, model-registry, admin-security, admin-users, login-methods, account-deletion, account export and anonymisation, conversation-title, conversation-lock-migration, provider-recovery, provider-failure-scope, provider-probe, subscription-sync-ordering, plan-change-reservation, image-generation, external-import, and memory transaction scenarios"
 );

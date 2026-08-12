@@ -83,7 +83,8 @@
     "report:token-estimate-calibration": "node --import tsx scripts/report-token-estimate-calibration.mjs",
     "report:context-window-impact": "node --conditions=react-server --import tsx scripts/report-context-window-impact.mjs",
     "report:routing-shadow": "node --conditions=react-server --import tsx scripts/report-routing-shadow.mjs",
-    "check:data-domain-registry": "node --import tsx scripts/check-data-domain-registry.mjs"
+    "check:data-domain-registry": "node --import tsx scripts/check-data-domain-registry.mjs",
+    "report:routing-dispatch-readiness": "node --import tsx scripts/report-routing-dispatch-readiness.mjs"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^4.0.30",

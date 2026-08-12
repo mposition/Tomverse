@@ -95,6 +95,12 @@ if (asJson) {
   console.log(
     `Undecided      ${num(report.undecided)}  (no candidate survived the filters)`
   );
+  // The ceiling on how much traffic Auto could serve even if every choice it
+  // made were perfect. More consequential than the agreement rate, and easy to
+  // skip past because it looks like a restatement of "decided".
+  console.log(
+    `Had a candidate ${pct(report.candidateAvailabilityRate)}  (eligible set p50/p95: ${num(report.eligibleCountP50)} / ${num(report.eligibleCountP95)})`
+  );
   console.log(
     `Agreed         ${num(report.agreed)} of ${num(report.decided)}  (${pct(report.agreementRate)})`
   );
@@ -130,8 +136,25 @@ if (asJson) {
     }
     console.log("");
   };
+  // Where Auto would send traffic, not only what it would move. A Router
+  // collapsing onto one model shows up here and nowhere else -- the switch
+  // pairs above would look busy and healthy while every arrow pointed at the
+  // same destination.
+  printCounts("Where Auto would land (Router's own choice):", report.selectedModelCounts);
   printCounts("Selection reasons:", report.selectionReasons);
   printCounts("Models refused, by filter:", report.rejectionReasons);
+
+  console.log(
+    `Held by stickiness         ${pct(report.stickyHeldRate)} of decided turns`
+  );
+  console.log(
+    "  Every one is a turn where a challenger scored higher and the Router stayed"
+  );
+  console.log(
+    "  put on purpose. Near zero means the margin and hysteresis are doing nothing;"
+  );
+  console.log("  near one means they are deciding everything.");
+  console.log("");
 
   console.log(
     `Decision latency p50/p95   ${ms(report.decisionMicrosP50)} / ${ms(report.decisionMicrosP95)}   (ROUTE-02 bounds p95 at 300ms)`
@@ -143,6 +166,22 @@ if (asJson) {
   console.log("nothing; one that is right where the user was wrong appears here as");
   console.log("disagreement. What this measures is how much would change if Auto");
   console.log("were switched on, not whether the change would be an improvement.");
+  console.log("");
+  console.log("Not measured here, and not measurable from shadow data at all:");
+  console.log("  - answer quality. Shadow records the model the Router would have");
+  console.log("    chosen; it never generated that model's answer, so there is no");
+  console.log("    pair to compare. ROUTE-01 needs a paired evaluation set and a");
+  console.log("    95% confidence interval, run separately.");
+  console.log("  - regional bias. Region is an input to the filters but is not a");
+  console.log("    column on RoutingRun, so it cannot be grouped by here. Recording");
+  console.log("    it is a schema change, not a query change.");
+  console.log("");
+  console.log("A limited Auto cohort needs three separate passes, and this report is");
+  console.log("one of them:");
+  console.log("  [ this ] shadow operating figures acceptable");
+  console.log("  [  -   ] offline decision-grade quality evaluation passed (ROUTE-01)");
+  console.log("  [  -   ] attempt/manifest dispatch boundary passed (ROUTE-06)");
+  console.log("Any one missing means the answer is still shadow.");
 }
 
 await prisma.$disconnect();

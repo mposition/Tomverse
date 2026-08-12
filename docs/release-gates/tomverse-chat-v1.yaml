@@ -91,6 +91,16 @@ gates:
         Versioned decision-grade evaluation report with fixed-model baseline,
         sample size, paired evaluation unit, confidence-interval method, seed,
         point estimate, and 95% confidence-interval bounds.
+      - >-
+        NOT the shadow report. Shadow records the model the Router would have
+        chosen; it never generated that model's answer, so there is no pair to
+        compare and no win rate to compute. A Router that echoed the user would
+        agree with every shadow row and be worth nothing, and one that is right
+        where the user was wrong appears there as disagreement. The shadow
+        agreement rate measures how much would change if Auto were switched on
+        -- the blast radius -- and nothing about whether the change would be an
+        improvement. npm run report:routing-shadow prints that distinction
+        beside its own numbers so the two cannot be read as one result.
 
   - id: ROUTE-02
     rationale: "Deterministic routing must preserve mobile chat responsiveness and must not consume a material share of time to first token."
