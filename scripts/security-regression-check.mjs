@@ -592,6 +592,33 @@ const checks = [
     },
   },
   {
+    // The one unwind outside the handler's try. POST() appends the Turnstile
+    // grant cookie to whatever Response the handler produced, and a throw
+    // there does not merely lose the answer -- it drops a stream that is still
+    // holding a concurrency slot, leaving the fifteen-minute reconciliation as
+    // the only thing that frees it. The grant is server-built from a signed
+    // token, so a value `Headers` refuses is a bug, and its cost must not be
+    // the caller's answer and their slot.
+    name: "A rejected grant cookie does not cost the caller their response",
+    file: "app/api/chat/route.ts",
+    test: (source) => {
+      const wrapper = source.slice(
+        source.indexOf("export async function POST"),
+        source.indexOf("async function handleChatPost")
+      );
+      return (
+        wrapper.includes("try {") &&
+        wrapper.includes('response.headers.append("Set-Cookie"') &&
+        wrapper.includes("chat_verification_grant_cookie_rejected") &&
+        // The append must be inside the try, not merely near one.
+        wrapper.indexOf("try {") <
+          wrapper.indexOf('response.headers.append("Set-Cookie"') &&
+        wrapper.indexOf('response.headers.append("Set-Cookie"') <
+          wrapper.indexOf("} catch (error) {")
+      );
+    },
+  },
+  {
     // A plan change moves money and credits, and only one of them was quoted.
     // The credit arithmetic has one home (lib/planChangeCredits.ts) so the
     // preview and the steady-state balance cannot drift; nothing imported it.
