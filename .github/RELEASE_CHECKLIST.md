@@ -32,6 +32,10 @@ Date / timezone:    ____________________
 - [ ] `npm run check:db-integration-coverage`
 - [ ] `npm run check:error-detail-cost`
 - [ ] `npm run check:data-domain-registry`
+- [ ] `npm run check:shared-packages` — reports PACKAGE-01's metric
+      (`forbidden_nextjs_imports_in_shared_packages`) and proves every
+      workspace package still type-checks with no DOM, no Node types and no
+      app alias
 - [ ] `npm run check:default-models`
 - [ ] `npm run check:encoding:strict`
 - [ ] `npm run check:context-window-register`

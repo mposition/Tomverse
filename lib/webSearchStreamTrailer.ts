@@ -2,7 +2,7 @@ import {
   isChatCompletionStatus,
   type ChatCompletionStatus,
   type ChatIncompleteReason,
-} from "@/lib/chatCompletionStatus";
+} from "@tomverse/chat-core";
 
 // A provider-executed search tool call only resolves once the whole
 // streamText() turn settles (tool-result/source parts only exist in the
