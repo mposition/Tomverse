@@ -247,6 +247,17 @@ jobs:
         timeout-minutes: 5
         run: npm run check:shared-packages
 
+      # PUSH-01 is met by an absence, so until now the only thing holding it
+      # was a person reading a diff and remembering a decision written months
+      # earlier. A delivery SDK arrives in one line of package.json, and a
+      # device-token table outlives whatever feature motivated it. The word
+      # "push" is never the signal -- `Array.prototype.push` and `git push` are
+      # everywhere -- so this looks for the identifiers that appear only when
+      # push notifications do.
+      - name: Push infrastructure scope
+        timeout-minutes: 5
+        run: npm run check:push-scope
+
       # gpt-image-2 lives outside AVAILABLE_MODELS by design, so the model
       # pricing check above cannot see it. Same release contract -- every
       # enabled price is explicit and verified -- separate fail-closed net.
