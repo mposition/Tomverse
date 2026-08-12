@@ -1,5 +1,6 @@
 import "server-only";
 
+import { serializeImageAssets } from "@/lib/imageAssetPayload";
 import {
   deriveImageComposerRestore,
   type ImageComposerRestore,
@@ -80,17 +81,15 @@ export async function serializeImageGeneration(
   reservation: ImageGenerationReservationRow
 ) {
   // Assets are only minted for a succeeded generation: a failed original
-  // upload must not leak a partially-written object.
-  const assets =
-    generation.status === "succeeded"
-      ? await Promise.all(
-          generation.assets.map(async (asset) => ({
-            role: asset.role,
-            mimeType: asset.mimeType,
-            url: await createR2ReadUrl(asset.r2Key, IMAGE_ASSET_URL_TTL_SECONDS),
-          }))
-        )
-      : [];
+  // upload must not leak a partially-written object. The rule and the shape
+  // live in lib/imageAssetPayload.ts so they can be tested without a database
+  // or a bucket -- the thing being prevented is an edit that spreads the row
+  // and ships `r2Key` with it, which no test here would have caught.
+  const assets = await serializeImageAssets(
+    generation.status,
+    generation.assets,
+    (r2Key) => createR2ReadUrl(r2Key, IMAGE_ASSET_URL_TTL_SECONDS)
+  );
 
   return {
     generationId: generation.id,
