@@ -32,7 +32,10 @@ import {
   usagePeriodStart,
 } from "@/lib/chatSecurity";
 import { estimatePromptTokens } from "@/lib/chatTokenEstimate";
-import { CONVERSATION_KIND_NOT_SUPPORTED } from "@/lib/conversationKindGuard";
+import {
+  CONVERSATION_KIND_NOT_SUPPORTED,
+  isImageConversationKind,
+} from "@/lib/conversationKindGuard";
 import { lockCreditAccount } from "@/lib/creditDebt";
 import {
   reserveAddOnCredits,
@@ -507,7 +510,7 @@ export const requestImageGeneration = async (
             "Conversation not found."
           );
         }
-        if (conversation.kind !== "image") {
+        if (!isImageConversationKind(conversation.kind)) {
           throw new ChatAccessError(
             409,
             CONVERSATION_KIND_NOT_SUPPORTED,
