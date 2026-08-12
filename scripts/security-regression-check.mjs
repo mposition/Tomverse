@@ -1149,6 +1149,25 @@ const checks = [
       !source.includes('([key]) => key !== "prompt"'),
   },
   {
+    name: "A CSP violation is excused only for extension schemes",
+    file: "lib/cspReportCore.ts",
+    test: (source) => {
+      // The tempting shortcut is "not http(s)", and it would make the endpoint
+      // silent about `data:` and `blob:` sources -- which is what injected
+      // script looks like, and the case this endpoint exists for.
+      const start = source.indexOf("BROWSER_EXTENSION_SOURCE_SCHEMES");
+      const block = source.slice(start, source.indexOf("\n]", start));
+      return (
+        start > -1 &&
+        block.includes("chrome-extension:") &&
+        !block.includes("data:") &&
+        !block.includes("blob:") &&
+        // A set membership test, never a scheme comparison that could invert.
+        /BROWSER_EXTENSION_SOURCE_SCHEMES\.has\(/.test(source)
+      );
+    },
+  },
+  {
     name: "Only one module decides which deployment this is",
     file: "lib/deploymentEnvironment.ts",
     test: (source) => {

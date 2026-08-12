@@ -61,3 +61,35 @@ export const isTrustedCspDocumentUri = (value: unknown) => {
     return false;
   }
 };
+
+/**
+ * Schemes that mean "code a browser extension injected into the user's page".
+ *
+ * `sanitizeCspReportedUrl` reduces any non-http(s) source to its bare scheme,
+ * so this compares against that reduced form and never sees which extension it
+ * was -- which is the point: the identity of a user's extensions is theirs.
+ *
+ * Safari reports extension sources as `webkit-masked-url://hidden/`, already
+ * anonymised by the browser; it is included for the same reason.
+ */
+export const BROWSER_EXTENSION_SOURCE_SCHEMES = new Set([
+  "chrome-extension:",
+  "moz-extension:",
+  "safari-extension:",
+  "safari-web-extension:",
+  "ms-browser-extension:",
+  "webkit-masked-url:",
+]);
+
+/**
+ * Whether a violation came from an extension rather than from anything the
+ * deployment serves.
+ *
+ * Deliberately an allow-list of extension schemes rather than "not http(s)".
+ * `data:` and `blob:` sources are also non-http(s) and are exactly what an
+ * injected-script attack looks like, so they must keep reporting. An unknown
+ * or absent source keeps reporting too: silence about a violation nobody can
+ * attribute is the opposite of what this endpoint is for.
+ */
+export const isBrowserExtensionCspSource = (sanitizedSourceFile: string) =>
+  BROWSER_EXTENSION_SOURCE_SCHEMES.has(sanitizedSourceFile.trim().toLowerCase());
