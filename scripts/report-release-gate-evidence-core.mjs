@@ -119,8 +119,8 @@ export const GATE_EVIDENCE = {
     },
     "FALLBACK-02": {
         capability: ["lib/providerFallbackCandidates.ts"],
-        measurement: [],
-        note: "Wants a stream-state invariant test and a production audit. The invariant -- never fall back after a visible token -- is testable here and is not tested.",
+        measurement: ["tests/automaticFallbackAbsence.test.mjs"],
+        note: "The invariant is held in the stronger form: there is no automatic model substitution at all, so none can begin after a visible token. The scan pins one streamText call, one resolved model assigned once and not derived from the fallback table, and an allowlist of the surfaces that may name an alternative -- all of which only offer it. The production audit half is still owed, and would now be confirming a zero rather than discovering one.",
     },
     "FALLBACK-03": {
         capability: ["lib/providerFallbackCandidates.ts"],
