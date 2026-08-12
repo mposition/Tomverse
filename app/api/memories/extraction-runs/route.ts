@@ -25,6 +25,7 @@ import {
     MemoryFeatureDisabledError,
 } from "@/lib/appSettings";
 import { authOptions } from "@/lib/auth";
+import { chatErrorResponse } from "@/lib/chatSecurity";
 import { listMemoryExtractionRuns } from "@/lib/memoryExtractionCatalogue";
 import {
     createMemoryExtractionRun,
@@ -168,6 +169,12 @@ export async function POST(req: Request) {
         if (error instanceof MemoryFeatureDisabledError) {
             return disabledResponse(error);
         }
+        // An account-level refusal (suspended, restricted, pending deletion)
+        // carries its own status and code. Without this it would fall through
+        // to the generic 500 below, and a suspended account would be told the
+        // server broke rather than why it was refused.
+        const chatResponse = chatErrorResponse(error);
+        if (chatResponse) return chatResponse;
         const securityResponse = apiSecurityResponse(error);
         if (securityResponse) return securityResponse;
         console.error("memory extraction run create failed", error);

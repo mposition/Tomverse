@@ -82,17 +82,17 @@ const ENGLISH_STRING_CEILING = {
   // rest of that surface. The other five locales carry real translations of
   // all three, so only this number moves.
   //
-  // +21 to all five (accountDataExport): the account-data download surface,
-  // taken from en wholesale like the other untranslated sections. Worth
-  // flagging rather than burying -- this is privacy copy explaining a step-up,
-  // a single-use link and a refusal history, which is a worse thing to read in
-  // a second language than a model picker label. It should get a translation
-  // pass ahead of the sections above it.
-  zh: 31,
-  fr: 47,
-  de: 41,
-  es: 37,
-  pt: 34,
+  // -21 from all five (accountDataExport): the account-data download surface is
+  // translated. It was flagged here rather than buried because it is privacy
+  // copy -- a step-up sign-in, a link that works once, and a history whose
+  // "Refused" row means someone presented a link for this account and was
+  // turned away. Reading that in a second language is a worse experience than
+  // an untranslated picker label, so it went first.
+  zh: 10,
+  fr: 26,
+  de: 20,
+  es: 16,
+  pt: 13,
 };
 
 test("every supported language is in the dictionary map", () => {

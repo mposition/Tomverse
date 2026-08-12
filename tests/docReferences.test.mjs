@@ -40,14 +40,30 @@ test("a reference that resolves is not reported", () => {
 test("a planned reference stops being exempt once it exists", () => {
   // Otherwise the exemption outlives its reason and the path it covers stops
   // being checked -- the same failure mode as a stale allowlist entry.
-  const planned = Object.keys(PLANNED_REFERENCES);
-  assert.ok(planned.length > 0, "this test needs at least one planned entry");
+  //
+  // The registry it passes is synthetic on purpose. Reading the live one made
+  // this test depend on there being something unbuilt, so it went from proving
+  // the rule to asserting the backlog was non-empty -- and it broke the moment
+  // the last planned file was written, which is the one moment the rule works.
   const { errors } = auditDocumentReferences({
     references: new Map(),
-    exists: (path) => path === planned[0],
+    exists: (path) => path === "lib/nowBuilt.ts",
+    planned: {
+      "lib/nowBuilt.ts": { document: "docs/somewhere.md", reason: "planned" },
+    },
   });
   assert.equal(errors.length, 1);
   assert.match(errors[0], /listed as planned but now exists/);
+});
+
+test("nothing is exempt unless the registry says so", () => {
+  const { errors } = auditDocumentReferences({
+    references: new Map([["lib/missing.ts", new Set(["AGENTS.md"])]]),
+    exists: () => false,
+    planned: {},
+  });
+  assert.equal(errors.length, 1);
+  assert.match(errors[0], /does not exist/);
 });
 
 test("every planned entry says which document marks it unbuilt, and why", () => {

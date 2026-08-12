@@ -20,6 +20,7 @@ import {
   isApprovedProviderApiBaseUrl,
   isApprovedProviderApiKeyEnvName,
   isAiProvider,
+  isProviderApiKeyConfigured,
   staticModelRegistryReconciliationRows,
   staticModelRegistrySeedRows,
 } from "@/lib/modelRegistryShared";
@@ -398,7 +399,10 @@ export function modelRegistryEnvironmentStatus(model: AiModel) {
   const apiKeyEnvName = PROVIDER_API_CONFIGURATION[model.provider].apiKeyEnvName;
   return {
     apiKeyEnvName,
-    apiKeyConfigured: Boolean(process.env[apiKeyEnvName]?.trim()),
+    // Any accepted spelling counts as configured. Reporting "not configured"
+    // for a deployment whose calls succeed is the same contradiction from the
+    // other side.
+    apiKeyConfigured: isProviderApiKeyConfigured(model.provider),
     protocol: PROVIDER_API_CONFIGURATION[model.provider].protocol,
   };
 }

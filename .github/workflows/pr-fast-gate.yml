@@ -147,6 +147,20 @@ jobs:
         timeout-minutes: 5
         run: npm run check:accent-tokens
 
+      # Every locale carries every key, so a missing translation never fails
+      # the build -- it ships the English sentence as the value. That is how the
+      # account-data-export UI reached five locales in English.
+      - name: Locale translation coverage
+        timeout-minutes: 5
+        run: npm run check:locale-translation
+
+      # Nineteen columns carry a closed list as a CHECK constraint, and the
+      # application holds its own copy of most of them. Code accepting a value
+      # the constraint rejects is a 500 where a 400 belongs.
+      - name: Database enum constraint agreement
+        timeout-minutes: 5
+        run: npm run check:enum-constraints
+
       # An enabled premium model with no explicit billing profile falls back to
       # generic US$15/US$60 pricing, which is what mispriced GPT-5.5, Gemini
       # 3.1 Pro and Claude Opus 4.8 by 3x-7.5x in production. Fail closed.
@@ -221,6 +235,17 @@ jobs:
       - name: Router quality evaluation evidence
         timeout-minutes: 5
         run: npm run check:router-quality-eval
+      # PACKAGE-01. The shared packages are the mechanism that stops the web
+      # app and the native shell from becoming two products; that only holds
+      # while the shared half runs unchanged in all three environments. The
+      # metric is counted through ESLint's own API, so it cannot disagree with
+      # the ESLint step below about what "forbidden" means, and each package
+      # is type-checked under its own tsconfig -- no DOM, no Node types, no
+      # `@/*` alias -- which catches a forbidden global that no import rule
+      # can see.
+      - name: Shared package framework purity
+        timeout-minutes: 5
+        run: npm run check:shared-packages
 
       # gpt-image-2 lives outside AVAILABLE_MODELS by design, so the model
       # pricing check above cannot see it. Same release contract -- every
@@ -248,6 +273,16 @@ jobs:
       - name: DB integration coverage
         timeout-minutes: 5
         run: npm run check:db-integration-coverage
+
+      # publicChatErrorDetails strips keys beginning with `internal`, so the
+      # spelling of the key IS the mechanism that keeps provider spend out of a
+      # user-facing response. A micro-USD field named anything else ships in the
+      # body and nothing notices, because the stripper is doing exactly what it
+      # was written to do. CREDIT_COST_ALLOWANCE_INSUFFICIENT did that from two
+      # throw sites.
+      - name: Error detail cost exposure
+        timeout-minutes: 5
+        run: npm run check:error-detail-cost
 
       # The cost guardrails are derived from plan credits and stored in
       # ChatUsageBucket.count. When that product outgrew int4, PostgreSQL threw

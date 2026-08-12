@@ -1,6 +1,7 @@
 import "server-only";
 
 import type { ModelMessage } from "ai";
+import { resolveProviderApiKey } from "@/lib/modelRegistryShared";
 import {
   parsePerplexityUsageCost,
   type PerplexityUsageCostSnapshot,
@@ -253,7 +254,7 @@ export const DEEP_RESEARCH_DEPTH_PARAMS: Record<
 };
 
 const getApiKey = () => {
-  const apiKey = process.env.PERPLEXITY_API_KEY;
+  const apiKey = resolveProviderApiKey("perplexity");
   if (!apiKey) {
     throw new PerplexityDeepResearchError(
       "Perplexity API key is not configured."

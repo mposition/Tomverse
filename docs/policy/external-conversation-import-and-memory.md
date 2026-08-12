@@ -324,11 +324,42 @@ digest(`sealedSelectionDigest`)를 subset finalize에 재사용하면 정상적�
 - DELETE는 `preview_ready`를 staging 취소와 동일하게 처리합니다.
 - lazy expiry와 15분 reconciliation sweep은 `staging`·`preview_ready`를 모두
   대상으로 합니다.
-- **배포 호환성**: seal 이전 버전 클라이언트가 이미 열어 둔 화면은 `staging`
-  에서 바로 finalize할 수 있어야 하므로, `staging` finalize 경로는 absolute
-  TTL(72시간) 동안 유지합니다. 새 UI는 `preview_ready`만 재개 가능으로
-  취급하며, seal되지 않은 부분 업로드에는 재개 CTA를 제공하지 않습니다.
-  클라이언트 계약 변경은 `EXTERNAL_IMPORT_PARSER_VERSION`으로 구분합니다.
+- **배포 호환성 창은 닫혔습니다.** seal 이전 버전 클라이언트가 이미 열어 둔
+  화면을 위해 `staging` finalize 경로를 absolute TTL(72시간) 동안 유지했고,
+  그 기간이 지나 finalize는 `preview_ready`만 받습니다.
+  - **기준 시각**: seal 코드의 production 배포는 **2026-08-04T01:38:42Z**
+    입니다 — Railway production 환경의 배포 `4f0dda13`(commit `18d1e891`,
+    "Release: … external import Release A completion …")이 컨테이너를 시작한
+    시각이고, 그 직전 production 배포 `c266ea8d`(2026-08-03T12:36Z)의
+    `lib/externalImportService.ts`에는 `preview_ready`가 없습니다. 창 종료
+    가능 시각은 **2026-08-07T01:38:42Z**이며, 그 이후에 닫았습니다. 종료
+    시각 자체는 이 변경 commit의 날짜가 기록입니다 — 작업 환경의 시계를
+    분 단위 근거로 인용하지 않습니다.
+  - **develop 병합 시각(2026-08-03T23:24Z)이 기준이 아닙니다.** pre-seal
+    클라이언트가 존재할 수 있었던 마지막 순간은 새 코드가 서비스되기 시작한
+    시점이므로, 세어야 할 것은 배포 시각입니다.
+  - **창의 길이는 추정이 아니라 absolute TTL에서 나옵니다.** seal되지 않은
+    import는 `stagingAbsoluteMaxLifetimeMs`(72시간)를 넘겨 살아남을 수 없고
+    finalize가 그 전에 `isStagingExpired`로 거절하므로, seal 배포로부터 72시간
+    뒤에는 **pre-seal 세션이 이미 만들어 둔 import 중 finalize 가능한 것이
+    없습니다.** 그래서 닫을 때 migration도, 저장된 업로드를 옮기는 절차도
+    필요하지 않습니다 — **필요한 사실은 production 배포 시각 하나뿐입니다.**
+  - **이 경계는 import에 대한 것이지 세션에 대한 것이 아닙니다.** 창보다 오래
+    열려 있던 탭이 지금 *새* import를 시작해 seal 없이 finalize할 수는 있으며,
+    §5.5는 창의 길이를 세션 수명이 아니라 TTL로 정할 때 이 잔여를 받아들였습니다.
+    그런 탭이 받는 답은 아래 409이고, 저장된 업로드를 잃는 것이 아닙니다.
+  - **`status='staging'` 행 수를 세는 것은 이 판단을 바꾸지 못합니다.** 지금
+    남아 있는 `staging` 행은 대부분 seal 단계에 아직 도달하지 않은 정상 진행
+    중인 업로드이고, 그 사용자들은 seal을 거쳐 finalize하므로 영향을 받지
+    않습니다. 행 수는 영향받는 집단과 정상 집단을 구분하지 못합니다.
+  - **seal되지 않은 살아 있는 import는 409 `EXTERNAL_IMPORT_SELECTION_CHANGED`
+    입니다**(410이 아님). §18이 이미 그 의미 — "클라이언트가 들고 있는 선택
+    상태와 서버 상태가 어긋났다" — 를 갖고 있고 복구도 같습니다(seal 후
+    finalize). 410으로 답하면 한 번의 호출로 풀리는 상황에 처음부터 다시
+    하라고 말하게 됩니다. TTL이 지난 import는 계속 410입니다.
+  - 새 UI는 `preview_ready`만 재개 가능으로 취급하며, seal되지 않은 부분
+    업로드에는 재개 CTA를 제공하지 않습니다. 클라이언트 계약 변경은
+    `EXTERNAL_IMPORT_PARSER_VERSION`으로 구분합니다.
 - **finalize 멱등 계약**:
   - 같은 idempotency key + 같은 import digest·selection의 재요청 →
     **`200`으로 기존 완료 결과를 반환**합니다(no-op). 오류가 아닙니다.
@@ -1035,11 +1066,24 @@ ko/en 대표 렌더링만. 7개 locale 전체 privacy E2E matrix를 만들지 �
 
 ## 17. 마케팅 표현 경계 (릴리스 차단 계약)
 
-단일 정책 소스 + 정적 테스트로 보호합니다. **아직 만들어지지 않았습니다** —
-`lib/marketingMemoryClaims.ts`라는 이름으로 계획했으나 그 파일도, 동등한 구조도
-현재 없습니다. 릴리스 B·C의 마케팅 문구를 내보내기 전에 이 절이 요구하는 단일
-소스와 정적 테스트를 먼저 만들어야 하며, 그때까지 아래 허용·금지 목록은 사람이
-읽고 지키는 규칙입니다.
+단일 정책 소스 + 정적 테스트로 보호합니다. 구현: `lib/marketingMemoryClaims.ts`
+와 `tests/marketingMemoryClaims.test.mjs`. 릴리스 B·C 마케팅 문구가 나오기
+**전에** 만들었습니다 — 문구가 나온 뒤에 만드는 검사는 아무것도 막지 못합니다.
+
+- **두 층이며 도달 범위가 다릅니다.** 패턴 층은 이 절이 쓰인 두 언어(ko·en)의
+  금지 표현을 문구가 어디에 있든 잡습니다. 등록 층(`ALLOWED_MEMORY_CLAIMS`)은
+  언어와 무관합니다 — 등록되지 않은 주장은 id부터 얻어야 하므로 독일어 번역만
+  먼저 생길 수 없습니다. 이것이 zh·fr·de·es·pt를 덮는 방식이며, 패턴이 7개
+  locale을 다 커버하는 척하지 않습니다.
+- **부정문과 의문문은 주장이 아닙니다.** 마케팅 페이지에는 이미 "OpenAI 또는
+  Anthropic과 제휴하거나 보증받지 않았습니다" 같은 문장이 있고, 그것은 금지
+  주장을 *피하려고* 있는 문장입니다. 문장 단위로 부정·의문을 보지 않는 검사는
+  그 면책 문구를 페이지에서 몰아내게 되며, 이는 §17이 원하는 것의 반대입니다.
+- **필수 고지는 "언급"이 아니라 "주장"에 붙습니다.** 게스트 대화 가져오기(외부
+  provider도 memory도 없는 별개 기능)와 "직접 기억해야 합니다" 같은 동사 용법은
+  대상이 아닙니다.
+- 아래 허용·금지 목록은 여전히 사람이 읽는 규칙이고, 검사는 이 절이 지목한
+  문장을 잡을 뿐 페이지를 대신 읽지 않습니다.
 
 허용: "다른 AI 서비스의 과거 대화를 가져오세요", "검토하고 승인한 기억을 새
 대화에 활용합니다", "과거 대화에서 선호하는 답변 방식을 참고합니다", "현재

@@ -41,7 +41,9 @@ import {
   getImageModel,
   getImageModelPrice,
   imageModelChipLabel,
+  imageComposerModelLayout,
   listEnabledImageModels,
+  type ImageModelProfile,
 } from "@/lib/imageModelRegistry";
 
 // The image conversation surface: prompt composer, option pickers and the
@@ -243,10 +245,20 @@ export function ImageGenerationWorkspace({
   // The id may arrive mid-flight via onConversationCreated; the ref keeps the
   // poll loop reading the current value without re-arming the effect.
   const conversationIdRef = useRef<string | null>(conversationId);
+  const [pickerOpen, setPickerOpen] = useState(false);
 
   const quality = IMAGE_QUALITY_BY_PRESET[preset];
   const pricing = getImageGenerationPricing(quality, size);
   const availableModels = useMemo(() => listEnabledImageModels(), []);
+  // Decided by how many models are enabled, and by nothing else -- not the
+  // viewport, not the selection, not a measured line count. The rule itself
+  // lives in the registry so it can be tested at four and five enabled models,
+  // a state this deployment cannot reach until a fourth model is activated.
+  const {
+    compact: compactPicker,
+    inline: inlineModels,
+    picker: pickerModels,
+  } = imageComposerModelLayout(availableModels, selectedModelIds);
   // Per-model price for the current options, and the total the request will
   // actually charge -- shown before submitting, never after (policy §12).
   const selectedModelPrices = selectedModelIds.map((modelId) => ({
@@ -472,6 +484,37 @@ export function ImageGenerationWorkspace({
           : t("chat.imageGenerationRestoreOptionsUnavailable"),
       ].filter((notice): notice is string => notice !== null)
     : [];
+
+  // One chip, rendered identically whether it sits inline or inside the
+  // picker. The compact mode moves a model between two containers; it must not
+  // give it a different affordance, price or accessible name on the way.
+  const modelChip = (model: ImageModelProfile) => {
+    const selected = selectedModelIds.includes(model.id);
+    const price = getImageModelPrice(model.id, quality, size);
+    return (
+      <button
+        key={model.id}
+        type="button"
+        aria-pressed={selected}
+        data-testid={`image-model-${model.id}`}
+        onClick={() => toggleModel(model.id)}
+        className={`inline-flex min-h-9 items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-semibold transition ${
+          selected
+            ? "border-accent-image-400 bg-accent-image-50 text-accent-image-800 dark:border-accent-image-700 dark:bg-accent-image-950/30 dark:text-accent-image-200"
+            : "border-zinc-200 bg-white text-zinc-600 hover:bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-300 dark:hover:bg-zinc-900"
+        }`}
+      >
+        {/*
+          The chip shows the short label and the accessible name keeps the full
+          one: abbreviating the visual label must not abbreviate the model's
+          identity.
+        */}
+        <span aria-hidden>{imageModelChipLabel(model)}</span>
+        <span className="sr-only">{model.name}</span>
+        {price && <CreditCostBadge credits={price.credits} size="xs" tone="plain" />}
+      </button>
+    );
+  };
 
   const toggleModel = (modelId: string) => {
     composerTouchedRef.current = true;
@@ -968,35 +1011,23 @@ export function ImageGenerationWorkspace({
             aria-label={t("chat.imageGenerationModelLabel")}
             className="flex w-full flex-wrap items-center gap-1.5"
           >
-            {availableModels.map((model) => {
-              const selected = selectedModelIds.includes(model.id);
-              const price = getImageModelPrice(model.id, quality, size);
-              return (
-                <button
-                  key={model.id}
-                  type="button"
-                  aria-pressed={selected}
-                  data-testid={`image-model-${model.id}`}
-                  onClick={() => toggleModel(model.id)}
-                  className={`inline-flex min-h-9 items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-semibold transition ${
-                    selected
-                      ? "border-accent-image-400 bg-accent-image-50 text-accent-image-800 dark:border-accent-image-700 dark:bg-accent-image-950/30 dark:text-accent-image-200"
-                      : "border-zinc-200 bg-white text-zinc-600 hover:bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-300 dark:hover:bg-zinc-900"
-                  }`}
-                >
-                  {/*
-                    The chip shows the short label and the accessible name
-                    keeps the full one: abbreviating the visual label must not
-                    abbreviate the model's identity.
-                  */}
-                  <span aria-hidden>{imageModelChipLabel(model)}</span>
-                  <span className="sr-only">{model.name}</span>
-                  {price && (
-                    <CreditCostBadge credits={price.credits} size="xs" tone="plain" />
-                  )}
-                </button>
-              );
-            })}
+            {inlineModels.map((model) => modelChip(model))}
+            {compactPicker && pickerModels.length > 0 && (
+              <button
+                type="button"
+                data-testid="image-model-picker-toggle"
+                aria-expanded={pickerOpen}
+                aria-controls="image-model-picker-panel"
+                onClick={() => setPickerOpen((open) => !open)}
+                className="inline-flex min-h-9 items-center gap-1.5 rounded-full border border-dashed border-zinc-300 bg-white px-3 py-1.5 text-xs font-semibold text-zinc-600 transition hover:bg-zinc-50 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-300 dark:hover:bg-zinc-900"
+              >
+                {pickerOpen
+                  ? t("chat.imageGenerationMoreModelsHide")
+                  : interpolateCopy(t("chat.imageGenerationMoreModels"), {
+                      count: pickerModels.length,
+                    })}
+              </button>
+            )}
             {selectedModelIds.length > 1 && (
               <span
                 data-testid="image-total-credits"
@@ -1008,6 +1039,23 @@ export function ImageGenerationWorkspace({
               </span>
             )}
           </div>
+          {/*
+            The unselected models, in their own row in normal flow. Never
+            absolutely positioned or floated: the mobile composer contract
+            forbids any control overlapping the textarea's row, and a panel
+            that opens over it would do exactly that.
+          */}
+          {compactPicker && pickerOpen && pickerModels.length > 0 && (
+            <div
+              id="image-model-picker-panel"
+              data-testid="image-model-picker-panel"
+              role="group"
+              aria-label={t("chat.imageGenerationOtherModelsLabel")}
+              className="flex w-full flex-wrap items-center gap-1.5 rounded-xl border border-zinc-200 bg-zinc-50 p-2 dark:border-zinc-800 dark:bg-zinc-900/60"
+            >
+              {pickerModels.map((model) => modelChip(model))}
+            </div>
+          )}
           {/* Composer contract shape: the textarea owns this full-width row. */}
           <div data-testid="image-composer-textarea-row" className="w-full">
             <textarea
