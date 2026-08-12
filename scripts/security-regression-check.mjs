@@ -1129,6 +1129,42 @@ const checks = [
       !source.includes('([key]) => key !== "prompt"'),
   },
   {
+    name: "Only one module decides which deployment this is",
+    file: "lib/deploymentEnvironment.ts",
+    test: (source) => {
+      // Five call sites each had their own chain, and the four that skipped
+      // APP_ENV -- the variable staging actually sets -- disagreed with the
+      // one that read it. Staging errors arrived in Sentry tagged
+      // `environment: production`, error-report evidence was stamped
+      // production on staging, and the admin console told an operator on
+      // staging that they were in production. Verified from the outside:
+      // staging's /api/build-info said "staging" while its own Sentry events
+      // said "production" (2026-08-12).
+      const files = [
+        "sentry.server.config.ts",
+        "sentry.edge.config.ts",
+        "lib/traceErrorEvidence.ts",
+        "lib/errorReportToken.ts",
+        "lib/buildInfo.ts",
+        "lib/securityEnvironment.ts",
+        "app/(site)/(application)/admin/layout.tsx",
+      ];
+      return (
+        source.includes("env.APP_ENV") &&
+        source.includes("env.RAILWAY_ENVIRONMENT_NAME") &&
+        files.every((file) => {
+          const consumer = read(file);
+          return (
+            consumer.includes("resolveDeploymentEnvironment") &&
+            // SENTRY_ENVIRONMENT stays a legitimate explicit override; a bare
+            // RAILWAY_ENVIRONMENT_NAME read is a second chain starting again.
+            !consumer.includes("process.env.RAILWAY_ENVIRONMENT_NAME")
+          );
+        })
+      );
+    },
+  },
+  {
     name: "Stripe key mode is required per deployment, not per build mode",
     file: "lib/securityEnvironment.ts",
     test: (source) => {
@@ -3145,6 +3181,38 @@ const checks = [
         !prStep.includes("ANTHROPIC") &&
         !prStep.includes("FEEDBACK_AUTOFIX_SYNC_SECRET") &&
         !prStep.includes("--auto")
+      );
+    },
+  },
+  {
+    // The auto-PR guard decides whether a branch gets a pull request at all,
+    // and it used to answer that question from a measurement it had broken
+    // itself: a `--depth=1` fetch re-shallowed the full history
+    // actions/checkout had just fetched, `merge-base` then had nothing to
+    // walk once develop moved on, and the three-dot diff failed rather than
+    // reporting "no changes". The `if` read the failure as a diff and opened
+    // PR #467 for work already merged.
+    //
+    // Pinned as three separate properties, because dropping any one of them
+    // brings the same false positive back: no shallow fetch of develop, an
+    // explicit containment test, and an unanswerable merge-base treated as an
+    // error instead of as a yes.
+    name: "Auto PR guard cannot mistake a broken merge-base for a diff",
+    file: ".github/workflows/auto-pr-to-develop.yml",
+    test: (source) => {
+      // Comment lines are stripped first: the comment above the step quotes
+      // the old `--depth=1` command on purpose, and a check that read it
+      // would fail on the very explanation of what it is guarding.
+      const script = source
+        .split("\n")
+        .filter((line) => !/^\s*#/.test(line))
+        .join("\n");
+      return (
+        !/git fetch origin develop\s+--depth/.test(script) &&
+        script.includes("git merge-base --is-ancestor HEAD origin/develop") &&
+        script.includes(
+          "if ! git merge-base origin/develop HEAD >/dev/null 2>&1; then"
+        )
       );
     },
   },

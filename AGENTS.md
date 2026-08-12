@@ -96,6 +96,39 @@ npm run report:issue-backlog -- --issues-file <열린 이슈 JSON>
   `lib/modelPricing.ts` 해석이 실제 module과 어긋날 때이며, 그때는 출력 전체를
   믿을 수 없다는 뜻입니다.
 
+# 릴리스 게이트에서 일감을 고를 때
+
+`docs/release-gates/tomverse-chat-v1.yaml`의 40개 게이트가 전부 `status: pending`
+입니다. **이는 정상이며 고칠 대상이 아닙니다** — registry는 `metadata.status:
+draft`이고 `governance.implementationStatus: planned`이며, 검증기는 `--release`
+에서만 승인과 증거를 강제합니다(PR Fast Gate는 `--release` 없이 실행).
+
+다만 draft 상태에서는 "pending"이라는 한 단어가 서로 다른 세 상황을 덮습니다.
+구분해서 보려면 실행합니다.
+
+```
+npm run report:release-gate-evidence
+npm run report:release-gate-evidence -- --condition memory-release-b-enabled=false
+```
+
+- 판정 근거는 `scripts/report-release-gate-evidence-core.mjs`의 `GATE_EVIDENCE`
+  이며 **손으로 쓴 매핑**입니다. 게이트의 `evidence` 문구에서 파일을 추측하지
+  않습니다 — 아무도 안 본 게이트에 대해 확신을 지어내는 것이 이 도구가 막으려는
+  실패입니다. 매핑 없는 게이트는 `unmapped`으로 보고합니다.
+- **`evidence_present`는 통과가 아닙니다.** 게이트가 이름 댄 산출물이 트리에
+  있다는 뜻일 뿐이고, 대부분의 기준은 이 저장소에 없는 production·부하 데이터
+  위에서 정의됩니다. 임계값 판단은 사람이 합니다.
+- **이 도구는 registry에 쓰지 않습니다.** status 전환도 `evidenceRefs` 채우기도
+  하지 않습니다. 승인은 registry에 기록되는 사람의 행위이고, 보고서가 자기
+  대상을 편집하면 registry가 존재하는 이유인 감사 기록이 사라집니다.
+- **`appliesWhen`은 저장소 사실이 아니라 런타임 조건입니다.** MEMORY 4건은
+  `AppSetting`의 `feature.memoryExtractionEnabled`·`feature.memoryInjectionEnabled`
+  에 달려 있으므로, 조건을 주지 않으면 `applicability_unknown`으로 남깁니다.
+  꺼져 있다고 가정하면 blocking 프라이버시·안전 게이트 4건을 조용히 면제하게
+  됩니다.
+- 착수 후보는 `nothing built yet`입니다. `built, nothing measures it`은 보통
+  기능이 아니라 테스트나 리포트 한 건입니다.
+
 # Credit entitlement vs operational guardrail
 
 크레딧·비용 한도를 건드리기 전에 읽습니다.

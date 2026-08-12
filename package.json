@@ -77,6 +77,7 @@
     "report:cost-bucket-corrections": "node --conditions=react-server --import tsx scripts/report-cost-bucket-corrections.mjs",
     "report:credit-lot-invariants": "node --conditions=react-server --import tsx scripts/report-credit-lot-invariants.mjs",
     "report:issue-backlog": "node --import tsx scripts/report-issue-backlog.mjs",
+    "report:release-gate-evidence": "node scripts/report-release-gate-evidence.mjs",
     "drill:railway-restore-preflight": "node scripts/railway-restore-preflight.mjs",
     "drill:railway-restore-verify": "node scripts/railway-restore-verify.mjs",
     "verify:tomverse-chat-release-gates": "node scripts/verify-tomverse-chat-release-gates.mjs",
