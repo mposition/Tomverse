@@ -796,9 +796,15 @@ test("production readiness rejects Stripe test and unknown key modes", async () 
   );
   const originalNodeEnv = process.env.NODE_ENV;
   const originalStripeKey = process.env.STRIPE_SECRET_KEY;
+  const originalAppEnv = process.env.APP_ENV;
+  const originalRailwayEnv = process.env.RAILWAY_ENVIRONMENT_NAME;
   try {
     // @ts-expect-error NODE_ENV is typed as a literal union but is writable.
     process.env.NODE_ENV = "production";
+    // The check reads the deployment, not the build mode, so the deployment
+    // has to be pinned here rather than inherited from whatever ran this.
+    delete process.env.APP_ENV;
+    delete process.env.RAILWAY_ENVIRONMENT_NAME;
     for (const rejected of [undefined, "", "sk_test_fixture", "unknown_key"]) {
       if (rejected === undefined) delete process.env.STRIPE_SECRET_KEY;
       else process.env.STRIPE_SECRET_KEY = rejected;
@@ -808,11 +814,76 @@ test("production readiness rejects Stripe test and unknown key modes", async () 
     assert.equal(getSecurityEnvironmentStatus().checks.stripeLiveMode, true);
     process.env.STRIPE_SECRET_KEY = "rk_live_fixture";
     assert.equal(getSecurityEnvironmentStatus().checks.stripeLiveMode, true);
+
+    // An unlabelled production build keeps production's rule. A deployment
+    // gets the weaker requirement by saying it is staging, never by omission.
+    process.env.STRIPE_SECRET_KEY = "sk_test_fixture";
+    assert.equal(getSecurityEnvironmentStatus().checks.stripeLiveMode, false);
   } finally {
     // @ts-expect-error see above.
     process.env.NODE_ENV = originalNodeEnv;
     if (originalStripeKey === undefined) delete process.env.STRIPE_SECRET_KEY;
     else process.env.STRIPE_SECRET_KEY = originalStripeKey;
+    if (originalAppEnv === undefined) delete process.env.APP_ENV;
+    else process.env.APP_ENV = originalAppEnv;
+    if (originalRailwayEnv === undefined)
+      delete process.env.RAILWAY_ENVIRONMENT_NAME;
+    else process.env.RAILWAY_ENVIRONMENT_NAME = originalRailwayEnv;
+  }
+});
+
+test("staging readiness requires a test key, and rejects a live one", async () => {
+  // Staging is a production build, so every rule written as
+  // `NODE_ENV === "production"` applied to it -- including "the Stripe key
+  // must be live", which staging must never satisfy. Its /api/ready returned
+  // 503 permanently (observed 2026-08-12, `Failed checks: stripeLiveMode`),
+  // and a check that is always failing cannot report that anything else broke.
+  //
+  // The mirror image was never asked at all: a live key in staging bills real
+  // cards from throwaway test flows. Each deployment asserts the mode it is
+  // supposed to have.
+  const { getSecurityEnvironmentStatus } = await import(
+    "../lib/securityEnvironment.ts"
+  );
+  const originalNodeEnv = process.env.NODE_ENV;
+  const originalStripeKey = process.env.STRIPE_SECRET_KEY;
+  const originalAppEnv = process.env.APP_ENV;
+  const originalRailwayEnv = process.env.RAILWAY_ENVIRONMENT_NAME;
+  try {
+    // @ts-expect-error NODE_ENV is typed as a literal union but is writable.
+    process.env.NODE_ENV = "production";
+    delete process.env.APP_ENV;
+    process.env.RAILWAY_ENVIRONMENT_NAME = "staging";
+
+    process.env.STRIPE_SECRET_KEY = "sk_test_fixture";
+    assert.equal(getSecurityEnvironmentStatus().checks.stripeLiveMode, true);
+
+    for (const rejected of ["sk_live_fixture", "rk_live_fixture", "unknown_key", ""]) {
+      process.env.STRIPE_SECRET_KEY = rejected;
+      assert.equal(
+        getSecurityEnvironmentStatus().checks.stripeLiveMode,
+        false,
+        rejected
+      );
+    }
+    delete process.env.STRIPE_SECRET_KEY;
+    assert.equal(getSecurityEnvironmentStatus().checks.stripeLiveMode, false);
+
+    // APP_ENV wins over Railway's name, so a production deployment cannot be
+    // talked into staging's rule by the platform's own labelling.
+    process.env.APP_ENV = "production";
+    process.env.STRIPE_SECRET_KEY = "sk_test_fixture";
+    assert.equal(getSecurityEnvironmentStatus().checks.stripeLiveMode, false);
+  } finally {
+    // @ts-expect-error see above.
+    process.env.NODE_ENV = originalNodeEnv;
+    if (originalStripeKey === undefined) delete process.env.STRIPE_SECRET_KEY;
+    else process.env.STRIPE_SECRET_KEY = originalStripeKey;
+    if (originalAppEnv === undefined) delete process.env.APP_ENV;
+    else process.env.APP_ENV = originalAppEnv;
+    if (originalRailwayEnv === undefined)
+      delete process.env.RAILWAY_ENVIRONMENT_NAME;
+    else process.env.RAILWAY_ENVIRONMENT_NAME = originalRailwayEnv;
   }
 });
 

@@ -3,6 +3,13 @@ import "server-only";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
+import {
+  DEPLOYMENT_ENVIRONMENTS,
+  resolveDeploymentEnvironment,
+  validateEnvironment,
+  type DeploymentEnvironment,
+} from "@/lib/deploymentEnvironment";
+
 // Single source of truth for "what is actually running right now" (STG-F010,
 // extended by AUD-R002). commitSha/environment/deploymentId are read live
 // from process.env at call time, matching the existing
@@ -26,14 +33,15 @@ import { join } from "node:path";
 // FAILED_LOOKUP_COOLDOWN_MS and returns nulls rather than a stale guess or a
 // 500 -- this is a diagnostics affordance, never load-bearing.
 
-export const BUILD_ENVIRONMENTS = [
-  "development",
-  "staging",
-  "production",
-  "test",
-] as const;
+// The same list, resolved the same way, as every other caller that needs to
+// know which deployment this is. Kept as aliases rather than a second copy:
+// two definitions of "which environment am I" drift, and the one that drifted
+// last time gave staging production's Stripe rule.
+export const BUILD_ENVIRONMENTS = DEPLOYMENT_ENVIRONMENTS;
 
-export type BuildEnvironment = (typeof BUILD_ENVIRONMENTS)[number];
+export type BuildEnvironment = DeploymentEnvironment;
+
+export { validateEnvironment };
 
 export type DeploymentStatus = "success" | "in_progress" | "failed" | "unknown";
 
@@ -116,14 +124,6 @@ export function validateDeploymentTimestamp(
   return iso;
 }
 
-export function validateEnvironment(value: unknown): BuildEnvironment | null {
-  if (typeof value !== "string") return null;
-  const normalized = value.trim().toLowerCase();
-  return (BUILD_ENVIRONMENTS as readonly string[]).includes(normalized)
-    ? (normalized as BuildEnvironment)
-    : null;
-}
-
 export function mapRailwayDeploymentStatus(status: unknown): DeploymentStatus {
   if (typeof status !== "string") return "unknown";
   switch (status.toUpperCase()) {
@@ -146,15 +146,8 @@ export function mapRailwayDeploymentStatus(status: unknown): DeploymentStatus {
   }
 }
 
-const resolveEnvironment = (): BuildEnvironment => {
-  const explicit = validateEnvironment(process.env.APP_ENV);
-  if (explicit) return explicit;
-
-  const railway = validateEnvironment(process.env.RAILWAY_ENVIRONMENT_NAME);
-  if (railway) return railway;
-
-  return process.env.NODE_ENV === "production" ? "production" : "development";
-};
+const resolveEnvironment = (): BuildEnvironment =>
+  resolveDeploymentEnvironment();
 
 type DeploymentTimeline = {
   deploymentStartedAt: string | null;

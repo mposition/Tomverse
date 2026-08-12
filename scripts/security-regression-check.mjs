@@ -1043,6 +1043,29 @@ const checks = [
       !source.includes('([key]) => key !== "prompt"'),
   },
   {
+    name: "Stripe key mode is required per deployment, not per build mode",
+    file: "lib/securityEnvironment.ts",
+    test: (source) => {
+      // Staging is a production build, so `!production || live` demanded a
+      // live key there -- unsatisfiable, and the wrong thing to want. Its
+      // readiness sat at 503 permanently, which meant it could no longer
+      // report anything else breaking. Both directions are asserted now, so
+      // this must keep reading the deployment.
+      const check = source.slice(source.indexOf("stripeLiveMode:"));
+      const body = check.slice(0, check.indexOf("\n    providerUsageSyncSecret"));
+      return (
+        source.includes("resolveDeploymentEnvironment()") &&
+        body.includes('deployment === "production"') &&
+        body.includes('deployment === "staging"') &&
+        // The production branch still demands live, and staging still refuses
+        // it: a live key in staging bills real cards from test flows.
+        body.includes("=== true") &&
+        body.includes("=== false") &&
+        !/!production\s*\|\|\s*stripeKeyLiveMode/.test(source)
+      );
+    },
+  },
+  {
     name: "The image group creation guard decides kind through the helper",
     file: "lib/imageGenerationService.ts",
     test: (source) =>
