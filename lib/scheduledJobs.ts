@@ -15,7 +15,6 @@ import {
 // existing caller imports them from this module.
 export {
   SCHEDULED_JOB_DEFINITIONS,
-  CRON_CADENCE_MINUTES,
   silenceBudgetMsFor,
   nextScheduledAt,
 } from "@/lib/scheduledJobsCore";
