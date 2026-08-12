@@ -87,7 +87,7 @@ const generateImage = (userId: string) =>
     userId,
     prompt: "a lighthouse at dusk",
     size: "1024x1024",
-    quality: "standard",
+    quality: "medium",
     conversationId: null,
     idempotencyKey: randomUUID(),
     modelIds: ["gpt-image-1"],

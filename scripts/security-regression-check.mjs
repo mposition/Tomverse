@@ -727,6 +727,27 @@ const checks = [
       source.includes("memoryExtractionProviderCalls"),
   },
   {
+    // `npm run check:model-pricing` proves the priced-premium rule about the
+    // compiled catalogue at CI time, but ModelRegistryEntry is what prices a
+    // real request and an administrator writes to it long after CI ran. The
+    // rule is enforced in the shared zod refinement, so create, update and the
+    // validate endpoint all get it from one place.
+    name: "An unpriced premium model cannot be enabled through the registry",
+    file: "lib/modelRegistryAdmin.ts",
+    test: (source) => {
+      const pricingDbCheck = read("scripts/check-model-pricing-db.mjs");
+      return (
+        source.includes("findUnpricedModels") &&
+        source.includes("unpricedPremiumMessage(candidate)") &&
+        // Both schemas go through refineModelInput, which is where the rule
+        // lives; a per-route check is how a fourth write path escapes it.
+        source.includes("createModelRegistrySchema = refineModelInput") &&
+        source.includes("updateModelRegistrySchema = refineModelInput") &&
+        pricingDbCheck.includes("assertPricedPremiumModels")
+      );
+    },
+  },
+  {
     // `enforceUserOperationalSecurity` lived in chatSecurity.ts and nowhere
     // else, so an account an administrator had suspended, restricted or
     // scheduled for deletion was still free to generate images and run memory

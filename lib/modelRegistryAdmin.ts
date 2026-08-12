@@ -2,6 +2,7 @@ import "server-only";
 
 import { z } from "zod";
 import type { Prisma } from "@prisma/client";
+import { findUnpricedModels } from "@/lib/modelPricing";
 import type { AiModel } from "@/lib/models";
 import {
   AI_PROVIDERS,
@@ -60,9 +61,62 @@ const modelFields = {
   sortOrder: z.number().int().min(-100_000).max(100_000).default(0),
 };
 
+/**
+ * Whether this write would leave an enabled premium-class model billing on the
+ * conservative class fallback, and the message saying so.
+ *
+ * `npm run check:model-pricing` enforces the same invariant, but only over the
+ * static catalogue in `lib/models.ts` and only at CI time. The catalogue that
+ * actually prices a request is the database, and an administrator can create a
+ * model or flip one to enabled long after CI ran -- so the rule CI proves about
+ * one catalogue was never true of the other. `assertPricedPremiumModels` was
+ * written for exactly this and documented itself as the runtime gate; it had no
+ * caller.
+ *
+ * A model registered in `PENDING_VERIFIED_PRICE_REGISTER` is deliberately let
+ * through: that register is how a model is allowed to run on an unverified
+ * price with an owner and a deadline attached, and `findUnpricedModels` already
+ * downgrades it to a warning.
+ */
+const unpricedPremiumMessage = (candidate: Record<string, unknown>) => {
+  const status = candidate.status;
+  const unpriced = findUnpricedModels([
+    {
+      id: String(candidate.id ?? ""),
+      provider: candidate.provider as AiModel["provider"],
+      usageClass: candidate.usageClass as AiModel["usageClass"],
+      // Mirrors how both routes derive it from status. A model that is not
+      // being enabled bills nothing, so it is not this rule's business.
+      enabled: status === "enabled" || status === "limited",
+      inputUsdPerMillionTokens:
+        typeof candidate.inputUsdPerMillionTokens === "number"
+          ? candidate.inputUsdPerMillionTokens
+          : undefined,
+      outputUsdPerMillionTokens:
+        typeof candidate.outputUsdPerMillionTokens === "number"
+          ? candidate.outputUsdPerMillionTokens
+          : undefined,
+    },
+  ]);
+  const error = unpriced.find((entry) => entry.severity === "error");
+  return error
+    ? `A ${error.usageClass} model cannot be enabled without an explicit price. ` +
+        "Add a profile to lib/modelPricing.ts, or set the input and output " +
+        "prices on this entry, before enabling it."
+    : null;
+};
+
 const refineModelInput = <T extends z.ZodRawShape>(schema: z.ZodObject<T>) =>
   schema.superRefine((value, context) => {
     const candidate = value as Record<string, unknown>;
+    const unpricedPremium = unpricedPremiumMessage(candidate);
+    if (unpricedPremium) {
+      context.addIssue({
+        code: "custom",
+        path: ["usageClass"],
+        message: unpricedPremium,
+      });
+    }
     if (
       typeof candidate.maxOutputTokens === "number" &&
       typeof candidate.reservationOutputTokens === "number" &&
