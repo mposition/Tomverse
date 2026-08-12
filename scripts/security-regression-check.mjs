@@ -813,6 +813,26 @@ const checks = [
     test: (source) => source.includes("chatErrorResponse(error)"),
   },
   {
+    // Deleting one conversation enqueued its generated images for removal from
+    // object storage; deleting the account did not. The cascade runs
+    // User -> Conversation -> ImageGeneration -> ImageAsset, and ImageAsset
+    // holds the only record of the R2 key, so the tombstone has to be written
+    // before the cascade and inside the same transaction -- afterwards the
+    // object has no name anywhere in the system and no sweep can find it.
+    name: "Account deletion enqueues its images before the cascade takes their keys",
+    file: "lib/accountDeletion.ts",
+    test: (source) => {
+      const enqueue = source.indexOf("enqueueImageAssetCleanupForConversations(");
+      const deleteConversations = source.indexOf("tx.conversation.deleteMany(");
+      return (
+        enqueue !== -1 &&
+        deleteConversations !== -1 &&
+        enqueue < deleteConversations &&
+        source.includes('"account_deleted"')
+      );
+    },
+  },
+  {
     // The retention sweeps are independent, and awaiting them bare meant the
     // first to throw skipped every one behind it -- on every run, since a step
     // that fails for a persistent reason fails again tomorrow. The step that
