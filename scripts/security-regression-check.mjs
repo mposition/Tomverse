@@ -700,12 +700,36 @@ const checks = [
       source.includes("memoryExtractionProviderCalls"),
   },
   {
+    // The retention sweeps are independent, and awaiting them bare meant the
+    // first to throw skipped every one behind it -- on every run, since a step
+    // that fails for a persistent reason fails again tomorrow. The step that
+    // deletes accounts past their 30-day grace period is fifth in the order.
+    name: "Retention cleanup steps run in isolation and report which failed",
+    file: "lib/maintenance.ts",
+    test: (source) =>
+      source.includes("createMaintenanceStepRunner") &&
+      source.includes("failedSteps: failures") &&
+      source.includes('step("scheduled_account_deletions"'),
+  },
+  {
+    // Isolation must not turn a partial failure into a silent success: the
+    // alert has to fire and the run has to be recorded failed.
+    name: "A failed retention step still fails the scheduled job",
+    file: "app/api/internal/maintenance/cleanup/route.ts",
+    test: (source) =>
+      source.includes("deleted.failedSteps.length > 0") &&
+      source.includes("failScheduledJob") &&
+      source.includes("SCHEDULED_MAINTENANCE_CLEANUP_STEP_FAILED"),
+  },
+  {
     name: "Provider error events expire through maintenance cleanup",
     file: "lib/maintenance.ts",
     test: (source) =>
       source.includes("providerErrorEvent.deleteMany") &&
       source.includes("30 * 24 * 60 * 60 * 1000") &&
-      source.includes("providerErrorEvents.count"),
+      // Optional because the sweep runs as an isolated step now: a step that
+      // threw reports `null` rather than a count.
+      /providerErrorEvents\??\.count/.test(source),
   },
   {
     name: "Infrastructure metrics remain admin-only with bounded external responses",

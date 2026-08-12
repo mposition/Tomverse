@@ -16,6 +16,7 @@ import {
   readLimitedJson,
 } from "@/lib/apiSecurity";
 import { cleanupExpiredData } from "@/lib/maintenance";
+import { summarizeMaintenanceStepFailures } from "@/lib/maintenanceStepsCore";
 import { prisma } from "@/lib/prisma";
 
 const cleanupSchema = z
@@ -96,11 +97,20 @@ export async function POST(req: Request) {
             cleanupExpiredData
           )
         : await dryRunCleanup();
+    // An execution whose steps run in isolation can finish with some of them
+    // failed. Recording that as "completed" would tell the operator who typed
+    // RUN CLEANUP that the sweep ran, when part of it did not.
+    const failedSteps =
+      "failedSteps" in result ? result.failedSteps : [];
     const run = await prisma.adminRetentionRun.create({
       data: {
         mode: body.mode,
-        status: "completed",
+        status: failedSteps.length > 0 ? "partial" : "completed",
         result,
+        error:
+          failedSteps.length > 0
+            ? summarizeMaintenanceStepFailures(failedSteps).slice(0, 1_000)
+            : null,
         createdById: session.user.id,
         createdByEmail: session.user.email || null,
       },
