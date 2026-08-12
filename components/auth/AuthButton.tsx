@@ -1744,6 +1744,24 @@ export function AuthButton({
                                                     testId="memory-entry"
                                                     linkTestId="memory-entry-link"
                                                 />
+                                                {/* The unified export. The
+                                                    conversations-only download
+                                                    below is a different thing
+                                                    and keeps its own button:
+                                                    one is a readable archive of
+                                                    chats, this is everything the
+                                                    account holds. */}
+                                                <SettingsEntryRow
+                                                    section="account-data"
+                                                    href="/settings/data"
+                                                    icon={ShieldCheck}
+                                                    title={t("accountDataExport.dataTabTitle")}
+                                                    description={t("accountDataExport.dataTabDescription")}
+                                                    actionLabel={t("accountDataExport.dataTabOpen")}
+                                                    onNavigate={closeSettingsModal}
+                                                    testId="account-data-entry"
+                                                    linkTestId="account-data-entry-link"
+                                                />
                                             </div>
                                         </section>
                                         {listImportableGuestConversations().length > 0 && (

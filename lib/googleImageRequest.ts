@@ -186,6 +186,77 @@ export const parseGoogleImageResponse = (
   };
 };
 
+export type GoogleImageInteraction = {
+  usage: GoogleImageUsage;
+  /** Whatever Google called the stop condition, verbatim. */
+  status: string | null;
+  /** Images found in `model_output` steps -- 1 is the only priceable answer. */
+  modelOutputImageCount: number;
+  /** Step types present, for diagnosing a shape nothing was written against. */
+  stepTypes: (string | null)[];
+};
+
+/**
+ * The same response read for evidence rather than for an image.
+ *
+ * parseGoogleImageResponse fails closed on anything that is not exactly one
+ * delivered image, which is right for production and wrong for the staging
+ * measurement: a response that stopped because it ran out of room is the
+ * single most informative sample the measurement can get, and it is precisely
+ * the one with no finished image in it. Routing that through the strict parser
+ * threw its `usage` away and filed it as an unreadable payload -- the run
+ * would have paid for the answer and then discarded it.
+ *
+ * So the two questions are separated. This one never requires an image and
+ * never yields one; it reads counters and stop conditions. It is not a
+ * fallback for the strict parser and no production path may use it to accept
+ * a response the strict parser rejected.
+ */
+export const readGoogleImageInteraction = (
+  payload: unknown
+): GoogleImageInteraction | null => {
+  if (!payload || typeof payload !== "object") return null;
+  const record = payload as Record<string, unknown>;
+  const steps = Array.isArray(record.steps) ? record.steps : [];
+
+  const modelOutputImageCount = steps
+    .filter(
+      (step): step is { content?: unknown } =>
+        Boolean(step) &&
+        typeof step === "object" &&
+        (step as { type?: unknown }).type === "model_output"
+    )
+    .flatMap((step) => (Array.isArray(step.content) ? step.content : []))
+    .filter(
+      (content) =>
+        Boolean(content) &&
+        typeof content === "object" &&
+        (content as { type?: unknown }).type === "image"
+    ).length;
+
+  const usageRaw = record.usage;
+  const usage =
+    usageRaw && typeof usageRaw === "object"
+      ? (usageRaw as Record<string, unknown>)
+      : {};
+
+  const statusRaw = record.status ?? record.finish_reason ?? record.stop_reason;
+
+  return {
+    usage: {
+      inputTokens: finiteCount(usage.total_input_tokens),
+      outputTokens: finiteCount(usage.total_output_tokens),
+      thinkingTokens: finiteCount(usage.total_thought_tokens),
+    },
+    status: typeof statusRaw === "string" ? statusRaw : null,
+    modelOutputImageCount,
+    stepTypes: steps.map((step) => {
+      const type = (step as { type?: unknown } | null)?.type;
+      return typeof type === "string" ? type : null;
+    }),
+  };
+};
+
 /**
  * `usage.total_tokens` includes the input, so it can never be compared with
  * `max_output_tokens`. This is the quantity the staging measurement has to

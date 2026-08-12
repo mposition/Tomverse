@@ -1267,6 +1267,7 @@ export const fr = {
         expiredCardNotice: "Expiré : il faut recommencer.",
         abandonImport: "Quitter cet import",
     },
+    accountDataExport: { ...en.accountDataExport },
     memoryReview: {
         sourceDeleteDerivedImport:
             "{count} souvenirs issus de cet import seront également supprimés.",

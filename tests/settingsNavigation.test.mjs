@@ -27,18 +27,30 @@ test("every entry with a detail page addresses the settings list, not the chat",
   }
 });
 
-test("both entries live under the same settings tab but stay separate rows", () => {
-  assert.deepEqual(SETTINGS_SECTION_IDS, ["external-import", "memory"]);
-  assert.equal(SETTINGS_SECTION_TAB["external-import"], "data");
-  assert.equal(SETTINGS_SECTION_TAB.memory, "data");
-  assert.notEqual(
-    settingsSectionElementId("external-import"),
-    settingsSectionElementId("memory")
-  );
-  assert.notEqual(
-    settingsSectionHref("external-import"),
-    settingsSectionHref("memory")
-  );
+// The set is asserted explicitly so a section cannot quietly disappear, but the
+// row-level properties are derived: adding a fourth entry should not mean
+// hand-writing another pair of comparisons that somebody will forget.
+test("every entry lives under the same settings tab but stays a separate row", () => {
+  assert.deepEqual(SETTINGS_SECTION_IDS, ["external-import", "memory", "account-data"]);
+
+  const elementIds = new Set();
+  const hrefs = new Set();
+  for (const section of SETTINGS_SECTION_IDS) {
+    assert.equal(
+      SETTINGS_SECTION_TAB[section],
+      "data",
+      `${section} is not in the data tab, so the group heading above it would be wrong`
+    );
+
+    const elementId = settingsSectionElementId(section);
+    assert.equal(elementIds.has(elementId), false, `${section} shares a DOM id`);
+    elementIds.add(elementId);
+
+    // A shared href would restore the wrong row on the way back up.
+    const href = settingsSectionHref(section);
+    assert.equal(hrefs.has(href), false, `${section} shares an href`);
+    hrefs.add(href);
+  }
 });
 
 test("a directly opened detail-page link still resolves without any history", () => {

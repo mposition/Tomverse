@@ -30,6 +30,13 @@
 //     hit it. A run whose samples all finished far under the ceiling shows
 //     that the model is economical, not that the ceiling is enforced -- the
 //     report says so rather than counting it.
+//   * A sample with no finished image still counts. Running out of room before
+//     completing one is the clearest evidence the limit binds, and reading the
+//     response only through the production parser -- which fails closed on
+//     anything that is not exactly one image -- discarded exactly those.
+//   * Samples from a single prompt cannot support the affirmative verdict.
+//     How much a model thinks depends on what it was asked, so one prompt
+//     repeated is one prompt's evidence (policy §12).
 //   * `usage.total_tokens` includes the input and is never compared with the
 //     limit. It is printed only so the arithmetic can be checked by hand.
 //   * One passing run is not the verification. Policy §12 wants the worst
@@ -48,6 +55,7 @@ import {
   GOOGLE_API_KEY_HEADER,
   GOOGLE_INTERACTIONS_URL,
   parseGoogleImageResponse,
+  readGoogleImageInteraction,
 } from "../lib/googleImageRequest.ts";
 
 const args = process.argv.slice(2);
@@ -67,7 +75,7 @@ const googleModels = IMAGE_MODEL_REGISTRY.filter(
 // someone who did not -- and this is a script people run having just arranged
 // to spend money. npm records what it swallowed in npm_config_*, so the
 // mistake is detectable and worth naming.
-const swallowedByNpm = ["model", "limit", "repeats", "thinking", "prompt"]
+const swallowedByNpm = ["model", "limit", "repeats", "thinking", "prompt", "prompts"]
   .filter((name) => process.env[`npm_config_${name}`] !== undefined);
 
 if (args.length === 0 && swallowedByNpm.length > 0) {
@@ -101,14 +109,23 @@ if (flag("help") || args.length === 0) {
         (model) => `                            ${model.id} (card limit ${model.maxOutputTokens})`
       ),
       "  --limit=<n>             max_output_tokens to request (default: the card limit)",
-      "  --repeats=<n>           samples, 1-10 (default 3). EACH ONE IS A PAID IMAGE.",
+      "  --repeats=<n>           rounds, 1-10 (default 3)",
+      "  --prompts=<n>           built-in prompts to use, 1-2 (default 1)",
       "  --thinking=<level>      low|medium|high, omitted unless given",
-      "  --prompt=<text>         override the built-in provocative prompt",
+      "  --prompt=<text>         one custom prompt instead of the built-in set",
       "  --json                  machine-readable output for the evidence file",
       "  --i-accept-the-cost     required; without it nothing is sent",
       "",
-      "Start with the lowest card limit (gemini-3.1-flash-lite-image, 4096) and",
-      "a --limit well under it: a ceiling that never binds proves nothing.",
+      "PAID IMAGES = --prompts x --repeats. Each one is a real generation on a",
+      "real key. The run stops early on the first sample over the limit, or on",
+      "the first unreadable response.",
+      "",
+      "--limit is any positive integer, not a value from a table. The card limit",
+      "is only its default. The example uses --limit=512 against a 4,096 card",
+      "limit deliberately: the question is whether the parameter is enforced, and",
+      "a ceiling the model never comes near cannot answer it either way. Walk it",
+      "down (2048, 1024, 512) until a sample approaches or hits the ceiling, and",
+      "start with the lowest card limit (gemini-3.1-flash-lite-image, 4096).",
     ].join("\n")
   );
   process.exit(0);
@@ -141,15 +158,42 @@ if (thinkingLevel && !["low", "medium", "high"].includes(thinkingLevel)) {
   process.exit(1);
 }
 
-// Deliberately elaborate: a trivial prompt produces little thinking, and a run
-// that never approaches the ceiling cannot tell an enforced limit from a model
-// that simply did not need the room.
-const DEFAULT_PROMPT =
+// Deliberately elaborate, and deliberately more than one: a trivial prompt
+// produces little thinking, and a run that never approaches the ceiling cannot
+// tell an enforced limit from a model that simply did not need the room.
+// Policy §12 asks for "several complex prompts" -- one prompt repeated is one
+// prompt's worth of evidence however many times it is sent, because the
+// thinking a model does is a function of what it was asked. The two differ in
+// what they make expensive: the first is dense labelled geometry, the second
+// is multilingual text rendering with a counting constraint.
+const BUILT_IN_PROMPTS = [
   "A cutaway technical illustration of a mechanical wristwatch movement, " +
-  "labelled in English, showing the mainspring barrel, the going train, the " +
-  "escapement and the balance wheel, with each label connected to its part by " +
-  "a thin leader line, drawn in the style of a 1950s engineering manual.";
-const prompt = value("prompt") ?? DEFAULT_PROMPT;
+    "labelled in English, showing the mainspring barrel, the going train, the " +
+    "escapement and the balance wheel, with each label connected to its part by " +
+    "a thin leader line, drawn in the style of a 1950s engineering manual.",
+  "A vintage railway departure board photographed head-on, listing exactly six " +
+    "services with their platform numbers and departure times, every row " +
+    "written twice -- once in English and once in Korean -- with the third row " +
+    "marked as delayed and the board's split-flap characters mid-rotation.",
+];
+
+const customPrompt = value("prompt");
+const promptCount = Number(value("prompts") ?? 1);
+if (
+  !customPrompt &&
+  (!Number.isSafeInteger(promptCount) ||
+    promptCount < 1 ||
+    promptCount > BUILT_IN_PROMPTS.length)
+) {
+  console.error(
+    `--prompts must be between 1 and ${BUILT_IN_PROMPTS.length}. ` +
+      "Every prompt multiplies the number of paid images by --repeats."
+  );
+  process.exit(1);
+}
+const prompts = customPrompt
+  ? [customPrompt]
+  : BUILT_IN_PROMPTS.slice(0, promptCount);
 
 const apiKey =
   process.env.GOOGLE_GENERATIVE_AI_API_KEY?.trim() ||
@@ -161,26 +205,38 @@ if (!apiKey) {
   process.exit(1);
 }
 
-const body = buildGoogleImageRequest({
-  apiModelId: model.apiModelId,
-  prompt,
-  size: "1024x1024",
-  maxOutputTokens: limit,
-  thinkingLevel: thinkingLevel ?? model.thinkingLevel ?? null,
-  // Through the shared helper, so this measures the request the adapter
-  // would actually make rather than one that drifted away from it.
-  deliveryMimeType: imageDeliveryMimeType(model),
-});
-if (!body) {
+const bodies = prompts.map((text) =>
+  buildGoogleImageRequest({
+    apiModelId: model.apiModelId,
+    prompt: text,
+    size: "1024x1024",
+    maxOutputTokens: limit,
+    thinkingLevel: thinkingLevel ?? model.thinkingLevel ?? null,
+    // Through the shared helper, so this measures the request the adapter
+    // would actually make rather than one that drifted away from it.
+    deliveryMimeType: imageDeliveryMimeType(model),
+  })
+);
+if (bodies.some((entry) => !entry)) {
   console.error("The request builder refused these parameters.");
   process.exit(1);
 }
 
+// The ceiling on this run, not on the budget: the script cannot see prices and
+// does not enforce the §15 money limit. It bounds calls, and the human bounds
+// spend by choosing the arguments. Said plainly here because "the tool stopped
+// me before" is the wrong thing to rely on when the tool only counts requests.
+const plannedCalls = prompts.length * repeats;
+
 if (!flag("i-accept-the-cost")) {
   console.error(
     [
-      `Would send ${repeats} paid image generation(s) to ${model.id} at`,
+      `Would send up to ${plannedCalls} paid image generation(s) to ${model.id}`,
+      `(${prompts.length} prompt(s) x ${repeats} repeat(s)) at`,
       `max_output_tokens=${limit}. Nothing was sent.`,
+      "",
+      "This script counts requests, not money. The §15 budget is enforced by",
+      "whoever chooses --prompts, --repeats and the model.",
       "",
       "Re-run with --i-accept-the-cost once the evaluation budget is approved",
       "(policy docs/policy/image-generation.md §15).",
@@ -206,103 +262,158 @@ const redact = (text) =>
     .replace(new RegExp(apiKey.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "g"), "[redacted-api-key]");
 
 const { createHash } = await import("node:crypto");
-const promptHash = createHash("sha256").update(prompt).digest("hex").slice(0, 16);
+const promptHashes = prompts.map((text) =>
+  createHash("sha256").update(text).digest("hex").slice(0, 16)
+);
 
 const samples = [];
-for (let index = 0; index < repeats; index += 1) {
-  const startedAt = new Date().toISOString();
-  let response;
-  try {
-    response = await fetch(GOOGLE_INTERACTIONS_URL, {
-      method: "POST",
-      headers: {
-        [GOOGLE_API_KEY_HEADER]: apiKey,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(body),
-      signal: AbortSignal.timeout(150_000),
-    });
-  } catch (error) {
+// Set once a further paid call would buy nothing: either the question is
+// already answered (a counterexample settles it -- one sample over the limit
+// means the limit does not bound thinking, and a second one cannot make that
+// more true) or the responses stopped being readable at all, in which case
+// every number after it is suspect anyway.
+let stopReason = null;
+
+outer: for (let round = 0; round < repeats; round += 1) {
+  for (let promptIndex = 0; promptIndex < prompts.length; promptIndex += 1) {
+    const index = samples.length;
+    const startedAt = new Date().toISOString();
+    let response;
+    try {
+      response = await fetch(GOOGLE_INTERACTIONS_URL, {
+        method: "POST",
+        headers: {
+          [GOOGLE_API_KEY_HEADER]: apiKey,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(bodies[promptIndex]),
+        signal: AbortSignal.timeout(150_000),
+      });
+    } catch (error) {
+      samples.push({
+        index,
+        promptIndex,
+        startedAt,
+        outcome: "request_failed",
+        detail: redact(error instanceof Error ? error.message : String(error)),
+      });
+      stopReason = "request_failed";
+      break outer;
+    }
+
+    const text = await response.text();
+    if (!response.ok) {
+      samples.push({
+        index,
+        promptIndex,
+        startedAt,
+        outcome: "http_error",
+        status: response.status,
+        detail: redact(text).slice(0, 300),
+      });
+      stopReason = "http_error";
+      break outer;
+    }
+
+    let payload = null;
+    try {
+      payload = JSON.parse(text);
+    } catch {
+      samples.push({ index, promptIndex, startedAt, outcome: "unparseable_body" });
+      stopReason = "unparseable_body";
+      break outer;
+    }
+
+    // Two readings of the same response, asked separately. The strict parser
+    // answers "is this a priceable image?"; the interaction reader answers
+    // "what was billed and why did it stop?". They used to be one call, and a
+    // response that ran out of room before finishing an image -- the most
+    // informative sample this measurement can buy -- failed the first question
+    // and so had its answer to the second thrown away with it.
+    const parsed = parseGoogleImageResponse(payload);
+    const interaction = readGoogleImageInteraction(payload);
+
+    if (!interaction) {
+      samples.push({
+        index,
+        promptIndex,
+        startedAt,
+        outcome: "unreadable_payload",
+        // Enough to see the shape, never enough to reconstitute an image.
+        topLevelKeys: Object.keys(payload ?? {}),
+      });
+      stopReason = "unreadable_payload";
+      break outer;
+    }
+
+    const billable = googleBillableOutputTokens(interaction.usage);
+    // Usage counters are the whole measurement. A response that reports none
+    // is not a low sample, it is no sample -- and continuing to pay for more
+    // of them is how a run spends its budget on nothing.
+    const measured =
+      interaction.usage.outputTokens > 0 || interaction.usage.thinkingTokens > 0;
+
     samples.push({
       index,
+      promptIndex,
       startedAt,
-      outcome: "request_failed",
-      detail: redact(error instanceof Error ? error.message : String(error)),
+      outcome: measured
+        ? parsed
+          ? "ok"
+          : "measured_without_image"
+        : "no_usage_reported",
+      measured,
+      responseId: payload?.id ?? payload?.name ?? null,
+      inputTokens: interaction.usage.inputTokens,
+      outputTokens: interaction.usage.outputTokens,
+      thinkingTokens: interaction.usage.thinkingTokens,
+      billableOutputTokens: billable,
+      withinLimit: billable <= limit,
+      // Printed only so the arithmetic can be checked by hand. It includes the
+      // input, so it is never the number compared with the limit.
+      reportedTotalTokens: payload?.usage?.total_tokens ?? null,
+      // A response that stopped because it ran out of room is the sample that
+      // actually demonstrates enforcement.
+      finishReason: interaction.status,
+      modelOutputImageCount: interaction.modelOutputImageCount,
+      stepTypes: interaction.stepTypes,
+      mimeType: parsed?.mimeType ?? null,
     });
-    continue;
-  }
 
-  const text = await response.text();
-  if (!response.ok) {
-    samples.push({
-      index,
-      startedAt,
-      outcome: "http_error",
-      status: response.status,
-      detail: redact(text).slice(0, 300),
-    });
-    continue;
+    if (!measured) {
+      stopReason = "no_usage_reported";
+      break outer;
+    }
+    if (billable > limit) {
+      stopReason = "counterexample_found";
+      break outer;
+    }
   }
-
-  let payload = null;
-  try {
-    payload = JSON.parse(text);
-  } catch {
-    samples.push({ index, startedAt, outcome: "unparseable_body" });
-    continue;
-  }
-
-  const parsed = parseGoogleImageResponse(payload);
-  // A refusal here is itself a finding: it means the response shape is not the
-  // one the adapter was written against, which has to be resolved before any
-  // number from this run means anything.
-  if (!parsed) {
-    samples.push({
-      index,
-      startedAt,
-      outcome: "unreadable_payload",
-      // Enough to see the shape, never enough to reconstitute an image.
-      topLevelKeys: Object.keys(payload ?? {}),
-      stepTypes: Array.isArray(payload?.steps)
-        ? payload.steps.map((step) => step?.type ?? null)
-        : null,
-    });
-    continue;
-  }
-
-  const billable = googleBillableOutputTokens(parsed.usage);
-  samples.push({
-    index,
-    startedAt,
-    outcome: "ok",
-    responseId: payload?.id ?? payload?.name ?? null,
-    inputTokens: parsed.usage.inputTokens,
-    outputTokens: parsed.usage.outputTokens,
-    thinkingTokens: parsed.usage.thinkingTokens,
-    billableOutputTokens: billable,
-    withinLimit: billable <= limit,
-    // Printed only so the arithmetic can be checked by hand. It includes the
-    // input, so it is never the number compared with the limit.
-    reportedTotalTokens: payload?.usage?.total_tokens ?? null,
-    // A response that stopped because it ran out of room is the sample that
-    // actually demonstrates enforcement.
-    finishReason:
-      payload?.status ?? payload?.finish_reason ?? payload?.stop_reason ?? null,
-    mimeType: parsed.mimeType,
-  });
 }
 
-const ok = samples.filter((sample) => sample.outcome === "ok");
-const exceeded = ok.filter((sample) => !sample.withinLimit);
+// Evidence is usage, not imagery: a sample that reported what it billed counts
+// whether or not it also delivered a finished image.
+const measured = samples.filter((sample) => sample.measured);
+const exceeded = measured.filter((sample) => !sample.withinLimit);
 // "Bit" = a sample that got close enough to the ceiling that staying under it
 // is evidence of a limit rather than of modest usage. 90% is a judgement call
-// and is stated so the reader can disagree with it.
-const bit = ok.filter((sample) => sample.billableOutputTokens >= limit * 0.9);
+// and is stated so the reader can disagree with it. A response that stopped
+// without finishing its image is the same evidence arriving the other way.
+const bit = measured.filter(
+  (sample) =>
+    sample.billableOutputTokens >= limit * 0.9 ||
+    sample.outcome === "measured_without_image"
+);
+const promptsMeasured = new Set(measured.map((sample) => sample.promptIndex));
 
 const verdict = (() => {
-  if (ok.length === 0) return "inconclusive_no_samples";
+  if (measured.length === 0) return "inconclusive_no_samples";
   if (exceeded.length > 0) return "limit_does_not_bound_thinking";
   if (bit.length === 0) return "inconclusive_limit_never_bound";
+  // Policy §12 asks for several complex prompts. One prompt's samples can
+  // support the other conclusions -- a counterexample is a counterexample --
+  // but they cannot support the affirmative one on their own.
+  if (promptsMeasured.size < 2) return "consistent_but_single_prompt";
   return "consistent_with_limit_bounding_thinking";
 })();
 
@@ -313,8 +424,12 @@ const report = {
   cardOutputLimit: model.maxOutputTokens ?? null,
   requestedMaxOutputTokens: limit,
   thinkingLevel: thinkingLevel ?? model.thinkingLevel ?? null,
-  promptSha256Prefix: promptHash,
+  promptSha256Prefixes: promptHashes,
+  promptSource: customPrompt ? "custom" : "built_in",
   repeats,
+  plannedCalls,
+  sentCalls: samples.length,
+  stoppedEarly: stopReason,
   samples,
   verdict,
 };
@@ -324,26 +439,59 @@ if (flag("json")) {
 } else {
   console.log(`Model:      ${model.id}`);
   console.log(`Limit sent: ${limit} (card limit ${model.maxOutputTokens})`);
-  console.log(`Prompt:     sha256:${promptHash} (text withheld -- policy §10)`);
+  console.log(
+    `Prompts:    ${promptHashes
+      .map((hash) => `sha256:${hash}`)
+      .join(", ")} (text withheld -- policy §10)`
+  );
+  console.log(`Calls:      ${samples.length} sent of ${plannedCalls} planned`);
   console.log("");
   for (const sample of samples) {
-    if (sample.outcome !== "ok") {
-      console.log(`  #${sample.index}  ${sample.outcome}${sample.status ? ` (${sample.status})` : ""}`);
+    const label = `  #${sample.index} [p${sample.promptIndex}]`;
+    if (!sample.measured) {
+      console.log(
+        `${label}  ${sample.outcome}${sample.status ? ` (${sample.status})` : ""}`
+      );
       continue;
     }
     console.log(
-      `  #${sample.index}  output ${sample.outputTokens} + thinking ${sample.thinkingTokens}` +
+      `${label}  output ${sample.outputTokens} + thinking ${sample.thinkingTokens}` +
         ` = ${sample.billableOutputTokens} vs limit ${limit}` +
-        `  ${sample.withinLimit ? "within" : "OVER"}`
+        `  ${sample.withinLimit ? "within" : "OVER"}` +
+        (sample.outcome === "measured_without_image"
+          ? `  [no image; stopped: ${sample.finishReason ?? "unstated"}]`
+          : "")
     );
   }
   console.log("");
+  if (stopReason) {
+    console.log(
+      stopReason === "counterexample_found"
+        ? "Stopped after the first sample over the limit: it settles the question,\n" +
+            "and further paid calls would buy nothing."
+        : `Stopped after ${stopReason}: the remaining calls were not sent.`
+    );
+    console.log("");
+  }
   console.log(`Verdict: ${verdict}`);
+  if (verdict === "inconclusive_no_samples") {
+    console.log(
+      "  No response reported usage counters, so nothing was measured. Resolve" +
+        "\n  that before spending more of the budget."
+    );
+  }
   if (verdict === "inconclusive_limit_never_bound") {
     console.log(
       "  Every sample finished well under the ceiling. That shows the model is" +
         "\n  economical, not that the ceiling is enforced. Re-run with a lower" +
         "\n  --limit until some sample approaches it."
+    );
+  }
+  if (verdict === "consistent_but_single_prompt") {
+    console.log(
+      "  Samples from one prompt only. How much a model thinks depends on what" +
+        "\n  it was asked, so repeating one prompt is one prompt's evidence. Re-run" +
+        "\n  with --prompts=2 (policy §12)."
     );
   }
   if (verdict === "limit_does_not_bound_thinking") {

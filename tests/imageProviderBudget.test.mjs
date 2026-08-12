@@ -9,8 +9,11 @@ import {
   imageCostCeilingHeadroomMicroUsd,
   imageProviderBudgetFloorMicroUsd,
   resolveImageProviderBudget,
+  worstImageCostPerCreditFrom,
   worstImageCostPerCreditMicroUsd,
 } from "../lib/imageProviderBudget.ts";
+import { IMAGE_MODEL_REGISTRY } from "../lib/imageModelRegistry.ts";
+import { IMAGE_GENERATION_PRICING } from "../lib/imageGenerationPricing.ts";
 
 const DAY = IMAGE_PROVIDER_BUDGET_ENV_NAMES.day;
 const MONTH = IMAGE_PROVIDER_BUDGET_ENV_NAMES.month;
@@ -25,6 +28,58 @@ test("the floor derives from the image price list, not the chat guardrail", () =
   assert.equal(imageProviderBudgetFloorMicroUsd(), 10_800_000);
   // 900 ceiling - 864 worst = 36 microUSD of headroom (about 4.2%).
   assert.equal(imageCostCeilingHeadroomMicroUsd(), 36);
+});
+
+test("both price lists feed the floor, not only gpt-image-2's table", () => {
+  // There are two lists. IMAGE_GENERATION_PRICING is gpt-image-2's original
+  // table; every model added since carries its prices on its registry profile.
+  // Reading only the first kept returning the right number for the wrong
+  // reason -- gpt-image-2 Final simply happens to be the priciest credit -- so
+  // xAI shipped enabled without ever entering the derivation, and adding a
+  // costlier model would have left the floor where it was.
+  const enabled = IMAGE_MODEL_REGISTRY.filter(
+    (model) => model.disabledReason === null
+  );
+  assert.equal(worstImageCostPerCreditFrom(IMAGE_GENERATION_PRICING, enabled), 864);
+
+  // xAI today: (50,000 + 5,000 prompt budget + 0 thinking) / 75 = 734, under
+  // Final's 864 -- present in the derivation, just not the maximum.
+  const grok = enabled.find((model) => model.provider === "xai");
+  assert.equal(worstImageCostPerCreditFrom([], [grok]), 734);
+
+  // The regression this exists for: a model priced above the current worst
+  // must raise the floor. Same shape as Grok, twice the cost per credit.
+  const costlier = {
+    ...grok,
+    id: "hypothetical-expensive-image",
+    prices: [{ ...grok.prices[0], outputCostMicroUsd: 145_000 }],
+  };
+  assert.equal(
+    worstImageCostPerCreditFrom(IMAGE_GENERATION_PRICING, [...enabled, costlier]),
+    2_000
+  );
+  assert.ok(
+    worstImageCostPerCreditFrom(IMAGE_GENERATION_PRICING, [...enabled, costlier]) >
+      worstImageCostPerCreditMicroUsd()
+  );
+});
+
+test("an enabled model with an unbounded worst case refuses to derive a floor", () => {
+  // Skipping it would compute the floor from everything except the model the
+  // floor exists to cover. check:image-pricing forbids enabling one; this is
+  // the in-process backstop for a registry edit that gets past it.
+  const held = IMAGE_MODEL_REGISTRY.find(
+    (model) => model.priceVerification.thinkingCapMicroUsd === null
+  );
+  const wronglyEnabled = {
+    ...held,
+    disabledReason: null,
+    prices: [{ quality: "medium", size: "1024x1024", credits: 190, outputCostMicroUsd: 67_000 }],
+  };
+  assert.throws(
+    () => worstImageCostPerCreditFrom(IMAGE_GENERATION_PRICING, [wronglyEnabled]),
+    /worst-case cost is unbounded/
+  );
 });
 
 test("valid environment values pass through; below-floor values clamp up and are reported", () => {

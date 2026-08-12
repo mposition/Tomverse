@@ -171,6 +171,35 @@ export const recordAccountDataExportDelivery = async ({
   });
 };
 
+/** How many rows the history endpoint returns. Ninety days is the retention. */
+export const EXPORT_HISTORY_LIMIT = 50;
+
+/**
+ * The account's own view of its export history.
+ *
+ * The projection is the point. The token hash is the download credential and
+ * the request-context hashes identify a device, so neither leaves this file --
+ * the same allowlist reasoning as the export itself, applied to the table that
+ * records the export.
+ */
+export const listAccountDataExportHistory = async (userId: string) =>
+  prisma.accountDataExportRequest.findMany({
+    where: { userId },
+    select: {
+      id: true,
+      status: true,
+      refusalReason: true,
+      expiresAt: true,
+      consumedAt: true,
+      byteLength: true,
+      includedDomainCount: true,
+      filteredDomainCount: true,
+      createdAt: true,
+    },
+    orderBy: { createdAt: "desc" },
+    take: EXPORT_HISTORY_LIMIT,
+  });
+
 /**
  * Ninety days, not five minutes.
  *
