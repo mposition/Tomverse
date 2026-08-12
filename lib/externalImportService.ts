@@ -1242,11 +1242,37 @@ export async function finalizeExternalImport(input: {
                 "Import is already finalized."
             );
         }
-        // `preview_ready` finalizes exactly like `staging`. Seal fixed that
-        // the upload is complete, not what gets saved, so a subset of the
-        // sealed set is a normal finalize — and old browser sessions that
-        // never sealed keep working from `staging` for the whole TTL window.
-        if (row.status !== "staging" && row.status !== "preview_ready") {
+        // Seal is now required (§5.5). It fixed that the upload is complete,
+        // not what gets saved, so a subset of the sealed set is still a
+        // normal finalize — but an unsealed import is one whose completeness
+        // nobody has attested, and finalizing it saves a set the server was
+        // never told was whole.
+        //
+        // The deployment-compatibility window this closes was bounded by the
+        // staging absolute TTL rather than by a guess: an unsealed import
+        // cannot outlive `stagingAbsoluteMaxLifetimeMs`, so every import a
+        // pre-seal session had already created is expired by now and refused
+        // below on the expiry branch. That is why closing the window needed
+        // no migration and strands no stored upload.
+        //
+        // It is a bound on the import, not on the session. A tab left open
+        // past the window could still start a *fresh* import and finalize it
+        // without sealing; §5.5 accepted that residual when it set the window
+        // to the TTL rather than to a session lifetime, and the answer such a
+        // tab gets is the 409 below, not a lost upload.
+        if (row.status !== "preview_ready") {
+            if (row.status === "staging" && !isStagingExpired(row)) {
+                // Not `STAGING_EXPIRED`: the import is alive and the client
+                // simply has not sealed. §18 already owns this meaning —
+                // "the selection state the client holds and the server's have
+                // diverged" — and the recovery is the same one: seal, then
+                // finalize.
+                throw new ApiSecurityError(
+                    409,
+                    "EXTERNAL_IMPORT_SELECTION_CHANGED",
+                    "Import must be sealed before it can be finalized."
+                );
+            }
             throw new ApiSecurityError(
                 410,
                 "EXTERNAL_IMPORT_STAGING_EXPIRED",

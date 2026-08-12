@@ -10,6 +10,7 @@ import {
   listEnabledImageModels,
   maxImageRequestCostMicroUsd,
   minimumCreditsForImageOption,
+  imageComposerModelLayout,
   imageDeliveryMimeType,
   imageModelChipLabel,
   shouldUseCompactImageModelPicker,
@@ -296,4 +297,52 @@ test("what a request asks for is decided in one place, not per call site", () =>
     // generation would be refused on the way to R2.
     assert.ok(model.outputMimeTypes.includes(delivered), model.id);
   }
+});
+
+test("the composer layout keeps every selected model and its price inline", () => {
+  // This branch cannot be reached end to end today: two models are enabled and
+  // the threshold is three, so the compact rendering appears only once a
+  // fourth is activated -- and enabling the three held Google models takes the
+  // count from 2 straight to 5. The rule is pinned here so it is not first
+  // exercised on the day it starts mattering.
+  const model = (id) => ({ id, name: id, prices: [] });
+  const three = [model("a"), model("b"), model("c")];
+  const five = [...three, model("d"), model("e")];
+
+  const inline = imageComposerModelLayout(three, ["b"]);
+  assert.equal(inline.compact, false);
+  // Below the threshold every model stays inline, selected or not: at two and
+  // three a viewer discovers the others without a click, and multi-model
+  // comparison is the product.
+  assert.deepEqual(inline.inline.map((entry) => entry.id), ["a", "b", "c"]);
+  assert.deepEqual(inline.picker, []);
+
+  const compact = imageComposerModelLayout(five, ["b", "d"]);
+  assert.equal(compact.compact, true);
+  assert.deepEqual(compact.inline.map((entry) => entry.id), ["b", "d"]);
+  assert.deepEqual(compact.picker.map((entry) => entry.id), ["a", "c", "e"]);
+  // Every enabled model appears exactly once across the two lists -- a model
+  // that fell out of both would be unreachable rather than merely collapsed.
+  assert.deepEqual(
+    [...compact.inline, ...compact.picker].map((entry) => entry.id).sort(),
+    ["a", "b", "c", "d", "e"]
+  );
+});
+
+test("selecting a model moves its container, never its position", () => {
+  const model = (id) => ({ id, name: id, prices: [] });
+  const five = ["a", "b", "c", "d", "e"].map(model);
+  // Registry order within each list, so a chip does not jump along the row
+  // when it is picked -- it changes which container it is in, and nothing else.
+  const before = imageComposerModelLayout(five, ["c"]);
+  assert.deepEqual(before.picker.map((entry) => entry.id), ["a", "b", "d", "e"]);
+  const after = imageComposerModelLayout(five, ["c", "a"]);
+  assert.deepEqual(after.inline.map((entry) => entry.id), ["a", "c"]);
+  assert.deepEqual(after.picker.map((entry) => entry.id), ["b", "d", "e"]);
+
+  // The composer never lets the selection empty, but the layout must not
+  // assume it: an empty inline list is a rendering, not a crash.
+  const none = imageComposerModelLayout(five, []);
+  assert.deepEqual(none.inline, []);
+  assert.equal(none.picker.length, 5);
 });

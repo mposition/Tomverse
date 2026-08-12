@@ -18,7 +18,7 @@ export type Message = {
   /**
    * "incomplete" is a *completed* answer that the provider cut short at its
    * output-token ceiling: the body is real and kept verbatim, and only the
-   * "this finished" claim is withheld (lib/chatCompletionStatus.ts). It is
+   * "this finished" claim is withheld (@tomverse/chat-core). It is
    * not "cancelled" (the user stopped it) and not "error" (nothing failed),
    * and it persists through storage and a re-fetch like any other status.
    */
