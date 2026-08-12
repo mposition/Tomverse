@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import { after, before, beforeEach, mock, test } from "node:test";
 import { pathToFileURL } from "node:url";
 import { resolve } from "node:path";
+// Pure constants; nothing here is behind a module mock.
+import { REFUND_REQUEST_METADATA_KEY } from "@/lib/refundSagaCore";
 
 // The administrator refund decision route, driven end to end against a real
 // PostgreSQL.
@@ -67,6 +69,46 @@ let statusWhenProviderCalled: string | null = null;
 let providerSubscriptionId: string | null = null;
 let stripeConfigured = false;
 
+/**
+ * The charge the provider holds, or `null` for "no invoice at all".
+ *
+ * `null` is the offline default every pre-existing test in this file runs on:
+ * the approval path returns `no_payment_intent` and nothing can be refunded.
+ * Setting it is what opens the paths where money actually moves, and those are
+ * the ones the amount arithmetic lives on.
+ */
+let providerCharge:
+  | { id: string; amount: number; amount_refunded: number; currency: string }
+  | null = null;
+
+/** Refunds the provider already holds for that charge, as `refunds.list` returns them. */
+let providerExistingRefunds: Array<{
+  id: string;
+  status: string;
+  amount: number;
+  currency: string;
+  charge: string;
+  metadata: Record<string, string>;
+}> = [];
+
+/** Every `refunds.create` this file's double was asked to make. */
+let refundsCreated: Array<{
+  charge: unknown;
+  amount: unknown;
+  metadata: Record<string, string>;
+  idempotencyKey: string | undefined;
+}> = [];
+
+/**
+ * The audit actions on record at the instant `refunds.create` was called.
+ *
+ * Same shape of evidence as `statusWhenProviderCalled`, for the same reason:
+ * `refund.execution_started` is written *before* the provider call so that a
+ * crash mid-refund leaves a trail pointing at it. Read afterwards, an entry
+ * written before and an entry written after look identical.
+ */
+let auditActionsWhenRefundCreated: string[] = [];
+
 mock.module(mod("lib/stripe.ts"), {
   namedExports: {
     isStripeConfigured: () => stripeConfigured,
@@ -78,15 +120,39 @@ mock.module(mod("lib/stripe.ts"), {
             select: { status: true },
           });
           statusWhenProviderCalled = row?.status ?? null;
-          // No invoice: the approval path returns "no_payment_intent" and
-          // creates no refund, so nothing here can charge or refund anyone.
-          return { latest_invoice: null };
+          return {
+            latest_invoice: providerCharge
+              ? { payment_intent: `pi_for_${providerCharge.id}` }
+              : null,
+          };
         },
         cancel: async () => ({}),
       },
       invoices: { retrieve: async () => null },
-      charges: { list: async () => ({ data: [] }) },
-      refunds: { create: async () => ({ id: "re_stub", status: "succeeded" }) },
+      charges: {
+        list: async () => ({ data: providerCharge ? [providerCharge] : [] }),
+      },
+      refunds: {
+        list: async () => ({ data: providerExistingRefunds, has_more: false }),
+        create: async (
+          params: { charge: unknown; amount: unknown; metadata: Record<string, string> },
+          options?: { idempotencyKey?: string }
+        ) => {
+          auditActionsWhenRefundCreated = (
+            await prisma.adminAuditLog.findMany({ select: { action: true } })
+          ).map((row) => row.action);
+          refundsCreated.push({
+            charge: params.charge,
+            amount: params.amount,
+            metadata: params.metadata,
+            idempotencyKey: options?.idempotencyKey,
+          });
+          return {
+            id: `re_created_${refundsCreated.length}`,
+            status: "succeeded",
+          };
+        },
+      },
     }),
   },
 });
@@ -154,6 +220,10 @@ beforeEach(async () => {
   statusWhenProviderCalled = null;
   providerSubscriptionId = null;
   stripeConfigured = false;
+  providerCharge = null;
+  providerExistingRefunds = [];
+  refundsCreated = [];
+  auditActionsWhenRefundCreated = [];
 });
 
 after(async () => {
@@ -488,4 +558,162 @@ test("reconciliation leaves a claim that is still inside its window", async () =
   // No Stripe call is made for a request still in flight, which is also why a
   // healthy queue costs nothing.
   assert.deepEqual(unexpectedHostCalls, []);
+});
+
+/* ------------------------------------------- the path where money moves --- */
+
+/**
+ * Everything above this line runs with no charge at the provider, so the
+ * approval path returns `no_payment_intent` and the amount arithmetic is never
+ * reached. That arithmetic is the part that decides how much of a customer's
+ * money goes back, and it had no coverage at any tier: the admin E2E harness
+ * cannot reach it (docs/qa/e2e-coverage-matrix.md lists it as excluded, for
+ * want of a Stripe fixture boundary), and this file stopped short of it.
+ *
+ * The four cases below are the ones where being wrong costs money in a
+ * direction nobody notices from a green test: refunding too much, refunding
+ * twice, or refunding an already-refunded charge.
+ */
+
+const seedRefundableRequest = async (
+  charge: { amount: number; amount_refunded: number } = {
+    amount: 5_000,
+    amount_refunded: 0,
+  }
+) => {
+  const customer = await prisma.user.create({
+    data: { email: `refundable-${Date.now()}-${Math.trunc(performance.now())}@tomverse.test`, plan: "Pro" },
+  });
+  providerSubscriptionId = `sub_refundable_${customer.id}`;
+  providerCharge = {
+    id: `ch_${customer.id}`,
+    currency: "usd",
+    ...charge,
+  };
+  stripeConfigured = true;
+  return prisma.refundRequest.create({
+    data: {
+      userId: customer.id,
+      email: customer.email,
+      plan: "Pro",
+      stripeSubscriptionId: providerSubscriptionId,
+      status: "pending",
+    },
+  });
+};
+
+test("an approval refunds the outstanding amount and stores what the provider returned", async () => {
+  const { session } = await seedOwnerAdmin();
+  // Under ADMIN_REFUND_APPROVAL_THRESHOLD_CENTS' 10,000 default, so this is
+  // the ordinary single-approver path rather than the two-person one.
+  const request = await seedRefundableRequest();
+  sessionOverride = session;
+
+  assert.equal((await patch(request.id, { action: "approve" })).status, 200);
+
+  assert.equal(refundsCreated.length, 1, "exactly one refund is created");
+  const created = refundsCreated[0];
+  assert.equal(created.amount, 5_000);
+  assert.equal(created.charge, `ch_${request.userId}`);
+  // Without the request id in metadata, a refund that succeeded while the
+  // local write failed could not be matched back to anything, and
+  // reconciliation would have nothing to look for.
+  assert.equal(created.metadata[REFUND_REQUEST_METADATA_KEY], request.id);
+  // Scoped to the request: a retry inside Stripe's replay window is answered
+  // from the first call instead of issuing a second refund.
+  assert.ok(created.idempotencyKey, "the create carries an idempotency key");
+
+  // The trail exists *before* the money moves, which is the only ordering that
+  // helps someone reading it after a crash mid-refund.
+  assert.ok(
+    auditActionsWhenRefundCreated.includes("refund.execution_started"),
+    `refund.execution_started must precede the provider call; audit held ${auditActionsWhenRefundCreated.join(", ")}`
+  );
+
+  const stored = await prisma.refundRequest.findUniqueOrThrow({
+    where: { id: request.id },
+  });
+  assert.equal(stored.status, "approved");
+  assert.equal(stored.stripeRefundId, "re_created_1");
+  assert.equal(stored.stripeRefundStatus, "succeeded");
+  assert.equal(stored.stripeChargeId, `ch_${request.userId}`);
+  assert.equal(stored.refundAmountCents, 5_000);
+  // Stored uppercase, whatever case the provider reports.
+  assert.equal(stored.refundCurrency, "USD");
+  assert.equal(stored.processingStartedAt, null);
+
+  assert.equal((await deliveriesFor(request.id)).length, 1);
+  assert.deepEqual(unexpectedHostCalls, []);
+});
+
+test("a partly refunded charge is refunded only for the remainder", async () => {
+  const { session } = await seedOwnerAdmin();
+  const request = await seedRefundableRequest({
+    amount: 5_000,
+    amount_refunded: 2_000,
+  });
+  sessionOverride = session;
+
+  assert.equal((await patch(request.id, { action: "approve" })).status, 200);
+
+  // The arithmetic is `charge.amount - charge.amount_refunded`. Refunding the
+  // full charge here would hand back 2,000 cents the customer already has.
+  assert.equal(refundsCreated.length, 1);
+  assert.equal(refundsCreated[0].amount, 3_000);
+  assert.equal(
+    (await prisma.refundRequest.findUniqueOrThrow({ where: { id: request.id } }))
+      .refundAmountCents,
+    3_000
+  );
+});
+
+test("a fully refunded charge creates no refund at all", async () => {
+  const { session } = await seedOwnerAdmin();
+  const request = await seedRefundableRequest({
+    amount: 5_000,
+    amount_refunded: 5_000,
+  });
+  sessionOverride = session;
+
+  assert.equal((await patch(request.id, { action: "approve" })).status, 200);
+
+  assert.deepEqual(refundsCreated, [], "nothing is refunded twice");
+  const stored = await prisma.refundRequest.findUniqueOrThrow({
+    where: { id: request.id },
+  });
+  // The decision still stands and still says why no money moved; reporting a
+  // refund id here would be a claim the provider cannot corroborate.
+  assert.equal(stored.status, "approved");
+  assert.equal(stored.stripeRefundId, null);
+  assert.equal(stored.stripeRefundStatus, "already_refunded");
+  assert.equal(stored.refundAmountCents, 0);
+});
+
+test("a refund already at the provider for this request is adopted, not repeated", async () => {
+  const { session } = await seedOwnerAdmin();
+  const request = await seedRefundableRequest();
+  // What a retry after Stripe's 24-hour idempotency window looks like: the key
+  // has expired, so to Stripe the second call would be an ordinary new refund.
+  // Metadata does not expire, which is what makes the first one findable.
+  providerExistingRefunds = [
+    {
+      id: "re_already_there",
+      status: "pending",
+      amount: 5_000,
+      currency: "usd",
+      charge: `ch_${request.userId}`,
+      metadata: { [REFUND_REQUEST_METADATA_KEY]: request.id },
+    },
+  ];
+  sessionOverride = session;
+
+  assert.equal((await patch(request.id, { action: "approve" })).status, 200);
+
+  assert.deepEqual(refundsCreated, [], "the existing refund is adopted");
+  const stored = await prisma.refundRequest.findUniqueOrThrow({
+    where: { id: request.id },
+  });
+  assert.equal(stored.stripeRefundId, "re_already_there");
+  assert.equal(stored.stripeRefundStatus, "pending");
+  assert.equal(stored.refundAmountCents, 5_000);
 });
