@@ -89,6 +89,76 @@ export const PROVIDER_API_CONFIGURATION: Record<
   },
 };
 
+/**
+ * Every environment variable name a provider's key may be given under, in the
+ * order they are consulted. The first is canonical -- it is the name the admin
+ * console shows and the one a registry row is allowed to store.
+ *
+ * There is a list rather than a single name because Google's key has three
+ * spellings in the wild, and the code had picked a different subset in each
+ * place that asked. `PROVIDER_API_CONFIGURATION` read
+ * GOOGLE_GENERATIVE_AI_API_KEY only, so chat went out with no key under any
+ * other name. The image adapter accepted GEMINI_API_KEY as well, so image
+ * generation worked where chat did not. `PROVIDER_API_KEY_ENV` in
+ * lib/providerMonitoring.ts -- which is what /status, conversation titles, AI
+ * Review's reviewer filter and provider usage sync all consult to answer "is
+ * this provider configured?" -- listed GOOGLE_API_KEY, a name *nothing* reads
+ * for a call, and omitted GEMINI_API_KEY, a name one caller does.
+ *
+ * Both directions of that were wrong and the second is the worse one: a
+ * deployment holding only GOOGLE_API_KEY was reported as configured, offered
+ * Google reviewers and given Google titles, and every one of those calls left
+ * without a key. The release checklist has a manual step for exactly this
+ * contradiction ("no per-provider contradiction between /status and
+ * /api/models/status ... model picker, provider banner and chat send agree").
+ *
+ * So the names live here, once, and every reader resolves through them. Like
+ * the base URL beside them, they are deliberately hard-coded: a
+ * database-controlled environment variable name would turn a compromised
+ * operator account into arbitrary server-secret exfiltration.
+ */
+export const PROVIDER_API_KEY_ENV_NAMES: Record<AiProvider, readonly string[]> =
+  {
+    openai: ["OPENAI_API_KEY"],
+    anthropic: ["ANTHROPIC_API_KEY"],
+    // Google's own documentation, SDK samples and this repository's
+    // measurement script each use a different one of these three.
+    google: [
+      "GOOGLE_GENERATIVE_AI_API_KEY",
+      "GEMINI_API_KEY",
+      "GOOGLE_API_KEY",
+    ],
+    groq: ["GROQ_API_KEY"],
+    xai: ["XAI_API_KEY"],
+    deepseek: ["DEEPSEEK_API_KEY"],
+    mistral: ["MISTRAL_API_KEY"],
+    moonshot: ["MOONSHOT_API_KEY"],
+    minimax: ["MINIMAX_API_KEY"],
+    qwen: ["DASHSCOPE_API_KEY"],
+    zhipu: ["ZHIPU_API_KEY"],
+    perplexity: ["PERPLEXITY_API_KEY"],
+  };
+
+/**
+ * The key itself, or `undefined` when no accepted name holds one.
+ *
+ * Everything that makes a provider call and everything that reports whether a
+ * provider is usable must answer from this one function, or the two disagree
+ * and the disagreement is invisible until a request fails.
+ */
+export const resolveProviderApiKey = (
+  provider: AiProvider,
+  environment: Record<string, string | undefined> = process.env
+) =>
+  PROVIDER_API_KEY_ENV_NAMES[provider]
+    .map((name) => environment[name]?.trim())
+    .find((value) => Boolean(value));
+
+export const isProviderApiKeyConfigured = (
+  provider: AiProvider,
+  environment: Record<string, string | undefined> = process.env
+) => Boolean(resolveProviderApiKey(provider, environment));
+
 export const isAiProvider = (value: string): value is AiProvider =>
   (AI_PROVIDERS as readonly string[]).includes(value);
 

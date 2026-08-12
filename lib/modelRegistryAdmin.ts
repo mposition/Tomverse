@@ -9,6 +9,7 @@ import {
   PROVIDER_API_CONFIGURATION,
   isApprovedProviderApiBaseUrl,
   isApprovedProviderApiKeyEnvName,
+  isProviderApiKeyConfigured,
 } from "@/lib/modelRegistryShared";
 
 const nullablePositiveInt = (maximum: number) =>
@@ -222,7 +223,7 @@ export function validateProviderConfiguration(model: AiModel) {
       isApprovedProviderApiKeyEnvName(model.provider, model.apiKeyEnvName || defaults.apiKeyEnvName),
     protocol: defaults.protocol,
     apiKeyEnvName: defaults.apiKeyEnvName,
-    apiKeyConfigured: Boolean(process.env[defaults.apiKeyEnvName]?.trim()),
+    apiKeyConfigured: isProviderApiKeyConfigured(model.provider),
     warnings,
   };
 }

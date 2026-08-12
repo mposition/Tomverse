@@ -9,7 +9,7 @@ import {
   type AiModel,
   type AiProvider,
 } from "@/lib/models";
-import { PROVIDER_API_CONFIGURATION } from "@/lib/modelRegistryShared";
+import { isProviderApiKeyConfigured } from "@/lib/modelRegistryShared";
 import {
   classifyProbeError,
   providerDiagnosticCode,
@@ -163,11 +163,8 @@ export const getVerificationModelFor = (
   );
 };
 
-export const isVerificationApiKeyConfigured = (provider: AiProvider) => {
-  const envName = PROVIDER_API_CONFIGURATION[provider].apiKeyEnvName;
-  return typeof process.env[envName] === "string" &&
-    process.env[envName]!.trim().length > 0;
-};
+export const isVerificationApiKeyConfigured = (provider: AiProvider) =>
+  isProviderApiKeyConfigured(provider);
 
 /**
  * Whether a verification call bills the provider. Every live verification
