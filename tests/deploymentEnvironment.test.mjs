@@ -65,3 +65,48 @@ test("labels are matched case- and whitespace-insensitively, and nothing else is
     assert.equal(validateEnvironment(rejected), null, String(rejected));
   }
 });
+
+test("every consumer of the environment reads the same module", async () => {
+  // The regression this pins was visible from outside the process: staging's
+  // /api/build-info reported "staging" while its own Sentry events arrived
+  // tagged environment=production, because five call sites each had their own
+  // chain and only one of them read APP_ENV. The cost was not cosmetic --
+  // error-report evidence was stamped production on staging, which the
+  // feedback policy forbids, and the admin console told an operator standing
+  // in staging that they were in production.
+  const { readFileSync } = await import("node:fs");
+  const consumers = [
+    "sentry.server.config.ts",
+    "sentry.edge.config.ts",
+    "lib/traceErrorEvidence.ts",
+    "lib/errorReportToken.ts",
+    "lib/buildInfo.ts",
+    "lib/securityEnvironment.ts",
+    "app/(site)/(application)/admin/layout.tsx",
+  ];
+  for (const path of consumers) {
+    const source = readFileSync(new URL(`../${path}`, import.meta.url), "utf8");
+    assert.ok(
+      source.includes("resolveDeploymentEnvironment"),
+      `${path} must resolve the environment through the shared module`
+    );
+    assert.ok(
+      !source.includes("process.env.RAILWAY_ENVIRONMENT_NAME"),
+      `${path} must not start a second resolution chain`
+    );
+  }
+});
+
+test("an explicit SENTRY_ENVIRONMENT still wins where it is offered", () => {
+  // Kept because it is how an operator overrides the tag for one deployment
+  // without changing what the deployment *is* -- the security rules keep
+  // reading the resolver either way.
+  assert.equal(
+    resolveDeploymentEnvironment({
+      SENTRY_ENVIRONMENT: "whatever",
+      APP_ENV: "staging",
+      NODE_ENV: "production",
+    }),
+    "staging"
+  );
+});

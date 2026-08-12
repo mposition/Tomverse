@@ -1,4 +1,6 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
+
+import { resolveDeploymentEnvironment } from "@/lib/deploymentEnvironment";
 import {
   TOKEN_VERIFICATION_STATUS,
   TRACE_PROVENANCE,
@@ -122,10 +124,7 @@ export const issueErrorReportToken = (input: {
       process.env.RAILWAY_GIT_COMMIT_SHA ||
       null,
     environment:
-      process.env.SENTRY_ENVIRONMENT ||
-      process.env.RAILWAY_ENVIRONMENT_NAME ||
-      process.env.NODE_ENV ||
-      null,
+      process.env.SENTRY_ENVIRONMENT || resolveDeploymentEnvironment(),
     issuedAt,
     expiresAt: issuedAt + errorReportTokenTtlMs(),
     // undefined means "not classified at issuance"; an empty string is a
