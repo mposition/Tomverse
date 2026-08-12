@@ -162,8 +162,10 @@ export const ISSUE_PROBES = [
             );
         },
         remainder:
-            "The `typescript >=7` hold in .github/dependabot.yml stays until Next.js supports the " +
-            "TypeScript 7 compiler API. The issue names that as the other condition and as not ours to fix.",
+            "The `typescript >=7` hold in .github/dependabot.yml stays, but no longer for either reason " +
+            "the issue gives: Next.js 16.3 runs the project-local tsc CLI and no longer needs the compiler " +
+            "API. The blocker measured on 2026-08-12 is the typescript-eslint that eslint-config-next " +
+            "bundles, which throws on any major >= 7. Remove the entry once that accepts TypeScript 7.",
     },
     {
         issue: 256,
