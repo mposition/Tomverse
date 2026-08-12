@@ -363,9 +363,15 @@ goodwill 지급은 Stripe 환불도 구매 취소도 아닌 **세 번째 것**�
   하지 않습니다.
 - **seed는 이동이지 재export shim이 아닙니다.** `lib/`에 shim을 남기면 예전
   import 경로가 계속 동작하므로 경계를 강제하는 것이 아무것도 없습니다.
-- **PACKAGE-01은 아직 `pending`입니다.** Vite build matrix 증거가 없으며
-  `apps/mobile`과 함께 옵니다. 표준 `tsc` project를 build matrix라고 부르지
-  않습니다.
+- **PACKAGE-01은 아직 `pending`입니다.** gate가 이름 붙인 두 증거를 만드는
+  artefact는 둘 다 저장소에 있습니다 — ESLint 보고서(`check:shared-packages`)와
+  Next.js/Vite build matrix(`next build` + `verify:package-build-matrix`).
+  **artefact가 있다는 것과 승인 가능한 증거가 있다는 것은 다릅니다.** registry는
+  `evidenceRefs`에 immutable link 또는 artifact identifier를 요구하고, 승인은
+  gate owner와 **증거를 만들지 않은** independent reviewer 두 사람이 합니다
+  (`docs/release-gates/tomverse-chat-v1.yaml`의 `approvalPolicy`). 승인 없이
+  `status`·`approvedBy`·`approvedAt`·`evidenceRefs`를 건드리지 않습니다.
+- 표준 `tsc` project를 build matrix라고 부르지 않습니다. bundler가 아닙니다.
 
 <!-- BEGIN:mobile-chat-composer-invariant -->
 # 이미지 생성 (v2: 멀티 모델 비교)

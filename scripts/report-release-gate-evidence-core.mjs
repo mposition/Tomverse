@@ -222,8 +222,12 @@ export const GATE_EVIDENCE = {
 
     "PACKAGE-01": {
         capability: ["packages"],
-        measurement: ["scripts/check-shared-packages.mjs", "tests/sharedPackages.test.mjs"],
-        note: "The ESLint no-restricted-imports half is built and counted. AGENTS.md states the gate stays pending because the Vite build matrix evidence does not exist and arrives with apps/mobile.",
+        measurement: [
+            "scripts/check-shared-packages.mjs",
+            "tests/sharedPackages.test.mjs",
+            "scripts/verify-package-build-matrix.mjs",
+        ],
+        note: "Both named artefacts exist: the ESLint no-restricted-imports report (check:shared-packages, which counts the metric through ESLint's own API) and the Next.js/Vite build matrix (next build plus verify:package-build-matrix, which bundles the packages with no Next.js present and runs the result). Existence is not approval -- evidenceRefs needs immutable links to the CI runs, and the gate needs a gate-owner and an independent-reviewer approval from someone who did not produce the evidence.",
     },
 
     "AUTH-01": {

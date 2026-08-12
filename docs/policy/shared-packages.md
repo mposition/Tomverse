@@ -167,10 +167,23 @@ away, and an import that has been shaken away is never resolved, so a
 `node:crypto` added to a package built green.
 
 **PACKAGE-01 still stays `pending`, and this document does not change that.**
-The gate is approved by a person against recorded evidence
-(`approvedBy` / `evidenceRefs` in `docs/release-gates/tomverse-chat-v1.yaml`),
-and producing evidence is not the same as recording an approval. What has
-changed is that the evidence now exists to point at.
+
+What exists is the *artefacts* the gate names — a script that counts the metric
+and a matrix that builds the packages twice. An artefact is not evidence for an
+approval. The registry requires `evidenceRefs` to hold **immutable links or
+artifact identifiers**, which means a specific commit and specific CI runs, and
+it requires two approvals from different people, where the independent reviewer
+did not produce the evidence
+(`governance.approvalPolicy` in `docs/release-gates/tomverse-chat-v1.yaml`).
+
+An approval request is assembled as a packet, not as a claim in prose. The
+first one is `docs/release-gates/evidence/PACKAGE-01-2026-08-12.md`; it records
+the verified commit, the run that printed
+`forbidden_nextjs_imports_in_shared_packages = 0`, the successful Next.js build
+and Vite matrix jobs, the packages in scope, and — as much to the point — what
+that run does *not* establish. `status`, `approvedBy`, `approvedAt` and
+`evidenceRefs` are edited only after the two approvals exist, as their own
+change.
 
 ## 7. Adding a package
 
