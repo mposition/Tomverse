@@ -144,6 +144,11 @@ What that script does, and why each part is there:
 1. **Bundles the packages with Vite**, no plugins, browser target, nothing
    external. `next build` resolves `next/*`, Node builtins and app-injected
    variables perfectly well, so it cannot answer the question the gate asks.
+   **Every** package reaches the bundle: the generated entry is built from each
+   `packages/*/package.json`'s own `exports` map, so a package joins by
+   existing. A package that declares no exports fails the matrix instead of
+   passing, because "counted in the summary but imported by nothing" is a
+   coverage claim the report cannot honour.
 2. **Fails on Vite's warnings, not only on its errors.** A Node builtin in a
    browser build is externalized with a warning and the build *succeeds*,
    shipping an import no browser can resolve. Judging the exit code alone

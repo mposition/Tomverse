@@ -61,25 +61,87 @@ const scratch = mkdtempSync(join(root, ".package-build-matrix-"));
  * Written here rather than committed as a fixture so it cannot drift from the
  * package list: a new package under packages/ joins the matrix by existing.
  */
+/** A package's `exports` map, flattened to (subpath, target) pairs. */
+const declaredExports = (name) => {
+  let manifest;
+  try {
+    manifest = JSON.parse(
+      readFileSync(join(packagesDir, name, "package.json"), "utf8")
+    );
+  } catch (error) {
+    failures.push(
+      `packages/${name} has no readable package.json, so nothing here knows ` +
+        `what to bundle from it: ${error?.message ?? String(error)}`
+    );
+    return [];
+  }
+  const field = manifest.exports;
+  if (!field || typeof field !== "object" || Array.isArray(field)) return [];
+  return Object.entries(field).map(([subpath, target]) => ({
+    subpath,
+    target:
+      typeof target === "string"
+        ? target
+        : (target?.import ?? target?.default ?? null),
+  }));
+};
+
+/** `chat-core` -> `chatCore`, so the generated entry can name it. */
+const identifierFor = (value) =>
+  value
+    .replace(/[^A-Za-z0-9]+([A-Za-z0-9])/g, (_, character) => character.toUpperCase())
+    .replace(/[^A-Za-z0-9_$]/g, "");
+
 const buildEntry = () => {
   const lines = [];
-  if (packageNames.includes("chat-core")) {
-    // `export *`, not a named import list.
-    //
-    // Entry exports are bundle roots, so this pins every export of the
-    // package into the build. A named list looked equivalent and was not: an
-    // export the list did not mention was tree-shaken away, and an import
-    // that has been shaken away is never resolved -- so a `node:crypto` or a
-    // `next/server` added to the package built perfectly green. The matrix
-    // was reporting on the two functions it happened to name.
-    lines.push(
-      'export * from "@tomverse/chat-core";',
-      'import * as chatCoreNamespace from "@tomverse/chat-core";',
-      "export const chatCore = chatCoreNamespace;"
-    );
-  }
-  if (packageNames.includes("ui-tokens")) {
-    lines.push('import "@tomverse/ui-tokens/tokens.css";');
+  for (const name of packageNames) {
+    const entries = declaredExports(name);
+    if (entries.length === 0) {
+      // The blind spot this replaced: the entry named two packages, so a third
+      // was discovered by readdir, counted in the summary, and never imported
+      // -- bundled by nothing, verified by nothing, and reported as covered.
+      // A package that cannot be wired now fails instead of passing quietly.
+      failures.push(
+        `packages/${name} declares no exports, so the matrix has no specifier ` +
+          `to import and cannot say anything about whether it builds outside Next.js.`
+      );
+      continue;
+    }
+    for (const { subpath, target } of entries) {
+      const specifier =
+        subpath === "." ? `@tomverse/${name}` : `@tomverse/${name}${subpath.slice(1)}`;
+      if (!target) {
+        failures.push(
+          `packages/${name} exports ${subpath} with no import or default target.`
+        );
+        continue;
+      }
+      if (target.endsWith(".css")) {
+        lines.push(`import "${specifier}";`);
+        continue;
+      }
+      // `export *`, not a named import list.
+      //
+      // Entry exports are bundle roots, so this pins every export of the
+      // package into the build. A named list looked equivalent and was not: an
+      // export the list did not mention was tree-shaken away, and an import
+      // that has been shaken away is never resolved -- so a `node:crypto` or a
+      // `next/server` added to the package built perfectly green. The matrix
+      // was reporting on the two functions it happened to name.
+      //
+      // Two packages exporting the same name would make the star exports
+      // ambiguous and fail the build. That is the right outcome rather than a
+      // reason to weaken this: shared packages the app imports side by side
+      // cannot both own a public name.
+      const identifier =
+        identifierFor(name) +
+        (subpath === "." ? "" : identifierFor(subpath.replace(/^\.\//, "-")));
+      lines.push(
+        `export * from "${specifier}";`,
+        `import * as ${identifier}Namespace from "${specifier}";`,
+        `export const ${identifier} = ${identifier}Namespace;`
+      );
+    }
   }
   lines.push("export const packages = " + JSON.stringify(packageNames) + ";");
   return lines.join("\n") + "\n";
@@ -278,6 +340,12 @@ if (failures.length > 0) {
 // Names what actually ran. A fixed sentence would claim the CSS half even on
 // a checkout where no package ships any, which is the kind of report that gets
 // quoted as gate evidence.
+//
+// Every package reaches the bundle through its own `exports` map, so the count
+// above is a coverage claim rather than a directory listing. These two lines
+// are the extra, package-specific assertions on top of that -- behaviour for
+// chat-core, token values for ui-tokens -- and they stay named because they
+// assert things only those packages have.
 const covered = [
   packageNames.includes("chat-core") ? "executed the bundle" : null,
   packageNames.includes("ui-tokens") ? "checked the emitted CSS" : null,
