@@ -265,6 +265,16 @@ jobs:
       - name: Package build matrix (Vite)
         timeout-minutes: 10
         run: npm run verify:package-build-matrix
+
+      # PLANNER-03. Memory, imported content and uploaded documents already
+      # reach the prompt, and the defences that keep them data -- fences,
+      # rules stated first, inerting -- had nothing measuring them. This runs
+      # an adversarial corpus through each builder and fails on a payload that
+      # escapes its region, forges a boundary, gets ahead of the rules, or
+      # smuggles a control character through.
+      - name: Prompt-injection containment
+        timeout-minutes: 5
+        run: npm run check:prompt-injection
       # PUSH-01 is met by an absence, so until now the only thing holding it
       # was a person reading a diff and remembering a decision written months
       # earlier. A delivery SDK arrives in one line of package.json, and a

@@ -88,6 +88,33 @@ const SEARCH_VIEW = { href: "/admin/search", heading: "Global search" } as const
 const sidebarNav = (page: import("@playwright/test").Page) =>
   page.getByRole("navigation", { name: "Admin console navigation" });
 
+/**
+ * Opens the palette with its keyboard shortcut, and keeps pressing until it is
+ * actually open.
+ *
+ * `AdminConsoleShell` registers the shortcut with `window.addEventListener` in
+ * an effect, so a press that lands before hydration is not queued and not
+ * replayed by React -- it is simply lost. The next line then waits its full
+ * timeout for a dialog that will never appear, which is what happened to "the
+ * palette hands a query to the global search workspace": 30 seconds, then a
+ * `locator.fill` timeout, while the same test passes in about two seconds when
+ * it wins the race. Every `goto` followed straight by the shortcut had it.
+ *
+ * Pressing again is safe: the handler is `setCommandOpen(true)`, not a toggle,
+ * so a repeat while the palette is open is a no-op. Retrying rather than
+ * waiting a fixed time also keeps the shortcut itself under test -- which is
+ * the point of these four tests -- instead of routing around it through the
+ * header button.
+ */
+const openCommandPalette = async (page: import("@playwright/test").Page) => {
+  const palette = page.getByRole("dialog", { name: "Admin command palette" });
+  await expect(async () => {
+    await page.keyboard.press("ControlOrMeta+k");
+    await expect(palette).toBeVisible({ timeout: 1_000 });
+  }).toPass({ timeout: 15_000 });
+  return palette;
+};
+
 test.describe("admin console shell", () => {
   test.beforeEach(async ({ signInAs }) => {
     await signInAs("owner");
@@ -338,8 +365,7 @@ test.describe("admin console shell", () => {
     );
 
     // The palette reads the same list.
-    await page.keyboard.press("ControlOrMeta+k");
-    const palette = page.getByRole("dialog", { name: "Admin command palette" });
+    const palette = await openCommandPalette(page);
     const pinnedSection = palette
       .locator("section")
       .filter({ has: page.getByRole("heading", { name: "Pinned" }) });
@@ -359,8 +385,7 @@ test.describe("admin console shell", () => {
     page,
   }) => {
     await page.goto("/admin/overview");
-    await page.keyboard.press("ControlOrMeta+k");
-    const palette = page.getByRole("dialog", { name: "Admin command palette" });
+    const palette = await openCommandPalette(page);
     await expect(palette).toBeVisible();
 
     // Every navigation entry is listed under its own group heading -- the
@@ -383,8 +408,7 @@ test.describe("admin console shell", () => {
     page,
   }) => {
     await page.goto("/admin/overview");
-    await page.keyboard.press("ControlOrMeta+k");
-    const palette = page.getByRole("dialog", { name: "Admin command palette" });
+    const palette = await openCommandPalette(page);
 
     await palette.getByPlaceholder("Search records or type a page name").fill("refund");
     await expect(palette.getByRole("heading", { name: /^Pages \(/ })).toBeVisible();
@@ -450,8 +474,7 @@ test.describe("admin console shell", () => {
     page,
   }) => {
     await page.goto("/admin/overview");
-    await page.keyboard.press("ControlOrMeta+k");
-    const palette = page.getByRole("dialog", { name: "Admin command palette" });
+    const palette = await openCommandPalette(page);
     await palette
       .getByPlaceholder("Search records or type a page name")
       .fill(FIXTURE_CUSTOMERS.disputedHold.email);
