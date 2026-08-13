@@ -191,6 +191,16 @@ test.describe("admin read surfaces", () => {
     await expect(
       page.getByRole("heading", { name: "Go-live funnel and activation" })
     ).toHaveCount(0);
+
+    // The §12.1 revocation control shares this tab, and it states the current
+    // revocation state in a sentence rather than leaving it to be inferred
+    // from an empty checkbox list.
+    await expect(
+      page.getByTestId("admin-memory-revocation-panel")
+    ).toBeVisible();
+    await expect(page.getByTestId("admin-memory-revocation-state")).toHaveText(
+      /Nothing is revoked/
+    );
   });
 
   test("users lists seeded accounts with their plan and risk state", async ({

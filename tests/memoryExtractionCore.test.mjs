@@ -2,7 +2,10 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
     isPairRevoked,
+    memoryPairLabel,
     parseRevokedPairs,
+    revokedPairsRequestProblems,
+    serializeRevokedPairs,
 } from "../lib/memoryAccess.ts";
 import {
     MEMORY_EXTRACTION_CHUNK_MAX_ATTEMPTS,
@@ -64,6 +67,87 @@ test("a well-formed revocation revokes exactly the named pair", () => {
             promptVersion: "mem-extract-v1",
         }),
         false
+    );
+});
+
+// --- revocation writes (§12.1, the Admin Console half) ---
+
+test("a deliberate stop is distinguishable from an unreadable row", () => {
+    // Both revoke everything and always must. They are different situations:
+    // one is an operator having pulled the feature, the other is a corrupted
+    // setting nobody has noticed, and a screen that shows them identically
+    // sends the operator looking for the wrong problem.
+    const stopped = parseRevokedPairs('["*"]');
+    assert.deepEqual(stopped, { kind: "revoke_all", reason: "operator" });
+    assert.deepEqual(parseRevokedPairs("not json"), {
+        kind: "revoke_all",
+        reason: "malformed",
+    });
+    assert.equal(
+        isPairRevoked(stopped, {
+            extractionModelId: "gpt-5-6-luna",
+            promptVersion: "mem-extract-v1",
+        }),
+        true
+    );
+});
+
+test("every accepted request reads back as the state it asked for", () => {
+    // The property the admin control exists for. A hand-written UPDATE has no
+    // such guarantee: one typo and the row parses as revoke-everything, which
+    // is both the wrong action and indistinguishable afterwards from data
+    // corruption.
+    const requests = [
+        { mode: "none" },
+        { mode: "all" },
+        { mode: "pairs", labels: ["gpt-5-6-luna::mem-extract-v1"] },
+        {
+            mode: "pairs",
+            labels: ["gpt-5-6-luna::mem-extract-v1", "gpt-5-4-mini::mem-extract-v1"],
+        },
+    ];
+    for (const request of requests) {
+        assert.deepEqual(revokedPairsRequestProblems(request), [], request.mode);
+        const state = parseRevokedPairs(serializeRevokedPairs(request));
+        if (request.mode === "none") {
+            assert.deepEqual(state, { kind: "none" });
+        } else if (request.mode === "all") {
+            assert.deepEqual(state, { kind: "revoke_all", reason: "operator" });
+        } else {
+            assert.equal(state.kind, "revoked");
+            assert.deepEqual(state.pairs.map(memoryPairLabel), [...request.labels]);
+        }
+    }
+});
+
+test("a request that would read back as revoke-everything is refused", () => {
+    // Each of these round-trips as `revoke_all: malformed` -- a typo in one
+    // label stopping every pair, and reading afterwards as corruption.
+    for (const label of [
+        "",
+        "   ",
+        " gpt-5-6-luna::mem-extract-v1",
+        "no-separator",
+        "::mem-extract-v1",
+        "gpt-5-6-luna::",
+        "a::b::c",
+    ]) {
+        const problems = revokedPairsRequestProblems({ mode: "pairs", labels: [label] });
+        assert.equal(problems.length, 1, JSON.stringify(label));
+    }
+});
+
+test("the stop-everything entry is refused as a pair, and duplicates are named", () => {
+    assert.match(
+        revokedPairsRequestProblems({ mode: "pairs", labels: ["*"] })[0],
+        /stop-everything/
+    );
+    assert.match(
+        revokedPairsRequestProblems({
+            mode: "pairs",
+            labels: ["a::b", "a::b"],
+        })[0],
+        /listed twice/
     );
 });
 
