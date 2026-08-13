@@ -43,6 +43,10 @@ import {
   type RoutingAttemptOutcome,
   type RoutingFailureLayer,
 } from "@/lib/routingAttemptStore";
+import type {
+  RouterDecisionRecord,
+  RouterVersions,
+} from "@/lib/routerDecision";
 import {
   buildManifestSourceRefs,
   effectiveRequestHash,
@@ -124,8 +128,41 @@ const handleFailure = async (
   }
 };
 
+/**
+ * What the Router decided, when it decided anything.
+ *
+ * Absent on a manual turn, and the run records the `manual` sentinels instead.
+ * A run that filled the Router's version columns for a decision nobody made
+ * would put manual turns into the metrics that grade routing, which is the
+ * one thing the mode column exists to prevent.
+ */
+export type DispatchRouterDecision = {
+  versions: RouterVersions;
+  record: RouterDecisionRecord;
+  /** The model the user had selected, kept beside the one Auto chose. */
+  userSelectedModelId: string;
+};
+
+/**
+ * Rejections as counts per reason, the shape `RoutingRun.rejectedByReason`
+ * stores. Counts rather than the model ids that produced them: which models
+ * were rejected is derivable from the catalogue and the reason, and the column
+ * is read as a distribution.
+ */
+const rejectionCounts = (
+  rejections: RouterDecisionRecord["rejections"] | undefined
+): Record<string, number> => {
+  const counts: Record<string, number> = {};
+  for (const rejection of rejections ?? []) {
+    counts[rejection.reason] = (counts[rejection.reason] ?? 0) + 1;
+  }
+  return counts;
+};
+
 export type BeginDispatchInput = {
   traceId: string;
+  /** `manual` unless the Router chose this turn's model. */
+  routerDecision?: DispatchRouterDecision | null;
   userId?: string | null;
   subjectKey: string;
   plan: string;
@@ -160,35 +197,42 @@ export const beginInstrumentedDispatch = async (
   const startedAt = Date.now();
   counters.started += 1;
   try {
+    const decision = input.routerDecision ?? null;
+    const routed = decision !== null;
+    const record = decision?.record;
     const run = await prisma.routingRun.create({
       data: {
-        mode: "manual",
+        mode: routed ? "auto" : "manual",
         traceId: input.traceId,
         userId: input.userId ?? null,
         subjectKey: input.subjectKey,
         plan: input.plan,
-        // The Router did not run, so its versions would be a claim about a
-        // decision nobody made. The manual sentinel says which it was.
-        taskProfileVersion: "manual",
-        candidateFilterVersion: "manual",
-        selectionVersion: "manual",
+        // On a manual turn the Router did not run, so its versions would be a
+        // claim about a decision nobody made. The sentinel says which it was.
+        taskProfileVersion: record?.versions.taskProfile ?? "manual",
+        candidateFilterVersion: record?.versions.candidates ?? "manual",
+        selectionVersion: record?.versions.selection ?? "manual",
         estimatorVersion: input.tokenizerVersion,
-        profileKind: "manual",
-        profileConfidence: "none",
-        needsCurrentInformation: false,
+        profileKind: record?.taskKind ?? "manual",
+        profileConfidence: record?.taskConfidence ?? "none",
+        needsCurrentInformation: record?.needsCurrentInformation ?? false,
         hasImageInput: false,
         hasDocumentInput: false,
-        expectedOutputLength: "medium",
+        expectedOutputLength: record?.expectedOutputLength ?? "medium",
         estimatedInputTokens: input.estimatedInputTokens,
         reservedInputTokens: input.reservedInputTokens,
         requestOutputCapTokens: input.requestOutputCapTokens,
-        eligibleCount: 1,
-        rejectedByReason: {},
+        // One candidate on a manual turn, because exactly one model was ever
+        // in play -- the one the user picked.
+        eligibleCount: record?.eligibleModelIds.length ?? 1,
+        rejectedByReason: rejectionCounts(record?.rejections),
         selectedModelId: input.modelId,
-        selectionReason: "only_candidate",
-        selectionMargin: 0,
-        userSelectedModelId: input.modelId,
-        decisionMicros: 0,
+        selectionReason: record?.selectionReason ?? "only_candidate",
+        selectionMargin: record?.selectionMargin ?? 0,
+        // What the user had chosen. On a routed turn this is the model Auto
+        // did *not* use, which is what makes disagreement measurable.
+        userSelectedModelId: decision?.userSelectedModelId ?? input.modelId,
+        decisionMicros: record ? Math.round(record.decisionLatencyMs * 1_000) : 0,
         initialModelId: input.modelId,
         reservationId: input.reservationId ?? null,
       },

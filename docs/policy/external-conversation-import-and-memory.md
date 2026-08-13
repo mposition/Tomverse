@@ -1041,6 +1041,64 @@ composer·comparison rail contract를 침범하지 않습니다.
   preview 결과는 Save 전에 설정에 자동 반영되지 않습니다.
 - 응답에는 항상 실제 Tomverse model identity를 표시합니다.
 
+### 14.1 Knowledge quota 수치 — [제안 · 승인 대기]
+
+§23의 "릴리스 C scope 승인 전에 확정해야 하는 항목" 1번입니다. **승인 전까지
+확정값이 아니며, 이 표만으로 릴리스 C 구현을 시작하지 않습니다.**
+
+수치는 새로 지어내지 않고 저장소에 이미 있는 같은 종류의 한도에서 끌어옵니다.
+값이 같아도 **결정은 분리**합니다 — import의 50MB를 knowledge가 상속하는 것이
+아니라, 두 기능이 각자의 예산을 가지고 서로를 소비하지 않습니다. 한쪽을 올려도
+다른 쪽이 따라 움직여서는 안 됩니다(accent token과 같은 규칙).
+
+| 항목 | 제안값 | 어디서 왔는가 |
+|---|---|---|
+| 개별 파일 object byte | 32MiB | `IMAGE_ORIGINAL_MAX_READ_BYTES`. 추출은 object 전체를 읽어야 하므로 "서버가 한 번에 메모리로 읽는 R2 object의 상한"이라는 **같은 물리적 제약**입니다. 이미 있는 숫자를 두고 두 번째 숫자를 만들면 둘이 어긋납니다. |
+| 개별 파일 추출 텍스트 | 1,000,000 code point | `EXTERNAL_IMPORT_STORAGE_LIMITS.maxInboundMessageCodePoints`. "서버가 한 덩어리로 받는 최대 텍스트 단위"라는 같은 역할. |
+| profile당 파일 수 | 20 | lexical retrieval 상한. v1은 embedding이 없어 top-k가 chunk score 순이므로, 파일이 늘수록 관련 없는 chunk가 상위를 차지합니다. 이 수치는 **품질 한도이지 저장 한도가 아니며**, retrieval이 바뀌면 함께 재검토합니다. |
+| 계정당 profile 수 | 20 | UI 한도. `/settings/assistants` 목록이 한 화면에서 관리 가능한 규모. |
+| 계정당 knowledge 파일 수 | 100 | 20×20=400이 아니라 100입니다. profile마다 최대치를 채우는 사용자는 없고, 계정 한도는 chunk 테이블과 삭제 sweep이 감당할 규모여야 합니다. |
+| 계정당 knowledge object 총 byte | 500MiB | 파일 수(100)×개별 상한(32MiB)=3.2GiB보다 **의도적으로 낮습니다.** 두 한도가 막는 대상이 다릅니다 — 개수는 retrieval 품질과 UI를, byte는 저장 비용을 막습니다. 실제로는 byte 한도가 먼저 걸립니다. |
+| 계정당 knowledge 추출 텍스트 byte | 50MiB | import의 계정당 저장 텍스트와 같은 값이지만 **별개 예산**입니다. import를 가득 채운 계정도 knowledge 50MiB를 그대로 씁니다. |
+
+강제 지점:
+
+- 개별 파일 byte는 **업로드 승인 시점(pre-signed URL 발급 전)과 수신 후 실제
+  크기** 양쪽에서 검사합니다. 클라이언트가 신고한 크기를 신뢰하지 않습니다.
+- 계정·profile 한도는 **서버가 authoritative**하며, import quota와 같은 방식으로
+  파일 선택 전에 잔여량을 표시합니다.
+- 한도 초과는 부분 저장 없이 전체 거절입니다(§18 릴리스 C 표).
+- 이 수치들은 중앙 상수 module 한 곳에서 관리하고 — 릴리스 A가
+  `lib/externalImportLimits.ts`를 두는 것과 같은 방식으로 — UI는 표시용으로만
+  미러합니다.
+
+승인자가 결정해야 하는 것은 위 7개 숫자와, 이 값들을 plan별로 나눌지 여부입니다.
+제안은 **plan별로 나누지 않는 것**입니다 — 릴리스 C는 flag 뒤 비공개이고, 값을
+나중에 올리는 것보다 내리는 쪽이 사용자에게 훨씬 나쁩니다.
+
+### 14.2 Knowledge 보존과 R2 lifecycle — [제안 · 승인 대기]
+
+§23 항목 2입니다. 마찬가지로 **승인 전까지 확정값이 아닙니다.**
+
+**R2 bucket lifecycle rule을 쓰지 않습니다.** 저장소의 기존 두 사례가 모두
+애플리케이션 sweep입니다: guest attachment는 prefix + cutoff idle sweep
+(`listExpiredR2Objects`), 생성 이미지는 DB-first tombstone(`ImageAssetCleanup`)
++ 15분 maintenance sweep(`lib/imageAssetLifecycle.ts`). Knowledge는 **후자**를
+따릅니다. bucket rule을 쓰지 않는 이유는 셋입니다 — rule은 DB 상태를 모르므로
+아직 참조 중인 chunk의 원본을 지울 수 있고, 실패가 재시도되지 않으며, 삭제가
+audit에 남지 않습니다.
+
+| 대상 | 제안 보존 | 근거 |
+|---|---|---|
+| 활성 knowledge file | **기간 없음** | 시간 기반 만료를 두지 않는 것이 결정입니다. profile은 사용자가 계속 쓰는 도구이고, 90일 뒤 조용히 답이 나빠지는 profile은 버그와 구분되지 않습니다. 삭제는 사용자·profile 삭제·계정 삭제로만 일어납니다. |
+| 사용자 삭제 · profile 삭제 · 계정 삭제 | tombstone은 같은 transaction, object는 다음 sweep(≈15분) | DB가 먼저입니다. R2를 앞서 지우면 부분 실패가 "행은 있는데 object가 없는" 상태로 남습니다. 재시도 상한은 `IMAGE_ASSET_CLEANUP_MAX_ATTEMPTS`와 같은 방식이고, 소진되면 operator에게 보고합니다. |
+| 추출 실패·중단으로 참조가 끊긴 object | 24시간 idle | guest attachment의 60분보다 깁니다 — 추출 재시도가 그 안에 끝나야 하고, 짧게 잡으면 재시도가 자기 원본을 잃습니다. |
+| 삭제 audit metadata (content 없음) | 90일 | `EXPORT_AUDIT_RETENTION_MS`와 같은 값이지만 별개 결정입니다. |
+| 과거 version의 knowledge manifest | profile version과 함께 영구 | §14가 이미 정한 대로 manifest는 감사용 metadata입니다. 삭제된 파일을 manifest로 복원하지 않고, 과거 version에서는 `unavailable`로 표시합니다. |
+
+승인자가 결정해야 하는 것은 위 네 개의 기간과, **활성 파일에 만료를 두지 않는다**는
+방향입니다.
+
 ## 15. Feature flag와 롤아웃 · rollback
 
 AppSetting 기반, 기본값 전부 `false`, 설정 누락 시 fail-closed:
@@ -1624,8 +1682,17 @@ Data 탭(`AuthButton.tsx`)에는 진입점·요약만 두고 대형 UI를 modal�
 
 ### 릴리스 C scope 승인 전에 확정해야 하는 항목 (pending)
 
-1. knowledge quota 수치(파일 수·개별 크기·계정 총 byte).
-2. knowledge 보존 기간과 R2 lifecycle 정책 수치.
+1. **[제안 · 승인 대기]** knowledge quota 수치(파일 수·개별 크기·계정 총 byte)
+   — §14.1에 7개 수치와 각각의 근거, plan별 분리 여부 제안을 적었습니다.
+2. **[제안 · 승인 대기]** knowledge 보존 기간과 R2 lifecycle 정책 수치
+   — §14.2. bucket lifecycle rule 대신 DB-first tombstone + sweep, 활성 파일에는
+   만료를 두지 않는 방향입니다.
+
+두 항목 모두 **제안일 뿐 확정이 아닙니다.** `approvedScopes`에
+`RELEASE_C_ASSISTANT_PROFILES`가 없는 한 릴리스 C 코드·schema·migration은
+시작하지 않습니다(§2 fail-closed). 승인 시 `[제안 · 승인 대기]` 표시를 승인자·
+날짜와 함께 `[확정]`으로 바꾸는 것은 승인 기록을 남기는 사람의 몫이며, 이 문서를
+작성한 에이전트가 스스로 바꾸지 않습니다.
 
 ## 24. 참조
 

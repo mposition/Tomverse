@@ -12,6 +12,7 @@ import {
   finalizeManifest,
   markDispatched,
   openAttempt,
+  successfulFallbackCandidateManifestCoverage,
 } from "@/lib/routingAttemptStore";
 
 // The dispatch boundary (docs/policy/tomverse-chat-routing.md §5, ROUTE-06).
@@ -424,4 +425,147 @@ test("attempts and manifests do not outlive their run", async () => {
   await prisma.routingRun.delete({ where: { id: runId } });
   assert.equal(await prisma.routingAttempt.count(), 0);
   assert.equal(await prisma.contextManifest.count(), 0);
+});
+
+// FALLBACK-03: a successful fallback must have context rebuilt for the model
+// that actually ran, not the one that failed.
+//
+// The 1:1 attempt/manifest relation makes "has its own manifest" true by
+// construction, so these tests are about the part that is not structural: a
+// manifest copied from the first attempt carries the *first* model's window,
+// and that is what the query looks at.
+
+const MODEL_WITH_WINDOW = "gpt-5-6-terra";
+const TERRA_WINDOW = 1_050_000;
+
+test("a fallback whose manifest was rebuilt for its own model counts as covered", async () => {
+  const runId = await newRun();
+  const first = await openAttempt({
+    runId,
+    attemptIndex: 0,
+    modelId: "gpt-5-6-luna",
+    provider: "openai",
+  });
+  await newDraft(first);
+  const firstFinalized = await finalize(first);
+  await markDispatched({ attemptId: first, dispatchedAt: firstFinalized });
+  await closeAttempt({
+    attemptId: first,
+    outcome: "failed_pre_token",
+    failureLayer: "provider",
+  });
+
+  const fallback = await openAttempt({
+    runId,
+    attemptIndex: 1,
+    modelId: MODEL_WITH_WINDOW,
+    provider: "openai",
+  });
+  await newDraft(fallback, { contextWindowTokens: TERRA_WINDOW });
+  const finalized = await finalize(fallback);
+  await markDispatched({ attemptId: fallback, dispatchedAt: finalized });
+  await closeAttempt({ attemptId: fallback, outcome: "succeeded" });
+
+  const coverage = await successfulFallbackCandidateManifestCoverage();
+  assert.equal(coverage.successfulFallbacks, 1);
+  assert.equal(coverage.covered, 1);
+  assert.deepEqual(coverage.offenders, []);
+  assert.equal(coverage.coveragePercent, 100);
+});
+
+test("a fallback carrying the failed model's window is reported, not counted", async () => {
+  // The defect the gate exists for: context assembled for the first model and
+  // handed to the second. Structurally indistinguishable from a rebuild --
+  // except for the window it was cut to.
+  const runId = await newRun();
+  const first = await openAttempt({
+    runId,
+    attemptIndex: 0,
+    modelId: "gpt-5-6-luna",
+    provider: "openai",
+  });
+  await newDraft(first, { contextWindowTokens: 128_000 });
+  const firstFinalized = await finalize(first);
+  await markDispatched({ attemptId: first, dispatchedAt: firstFinalized });
+  await closeAttempt({
+    attemptId: first,
+    outcome: "failed_pre_token",
+    failureLayer: "provider",
+  });
+
+  const fallback = await openAttempt({
+    runId,
+    attemptIndex: 1,
+    modelId: MODEL_WITH_WINDOW,
+    provider: "openai",
+  });
+  // Inherited: the first model's window, on the second model's attempt.
+  await newDraft(fallback, { contextWindowTokens: 128_000 });
+  const finalized = await finalize(fallback);
+  await markDispatched({ attemptId: fallback, dispatchedAt: finalized });
+  await closeAttempt({ attemptId: fallback, outcome: "succeeded" });
+
+  const coverage = await successfulFallbackCandidateManifestCoverage();
+  assert.equal(coverage.covered, 0);
+  assert.equal(coverage.offenders.length, 1);
+  assert.match(coverage.offenders[0].reason, /is not this model's 1050000/);
+  assert.equal(coverage.coveragePercent, 0);
+});
+
+test("a model with no declared window is unverifiable, not covered", async () => {
+  // Counting it as covered would let the catalogue's undeclared models carry
+  // the gate to 100% with nothing checked; counting it as a failure would
+  // report a missing declaration as a fallback defect.
+  const runId = await newRun();
+  const first = await openAttempt({
+    runId,
+    attemptIndex: 0,
+    modelId: "gpt-5-6-luna",
+    provider: "openai",
+  });
+  await newDraft(first);
+  const firstFinalized = await finalize(first);
+  await markDispatched({ attemptId: first, dispatchedAt: firstFinalized });
+  await closeAttempt({ attemptId: first, outcome: "failed_pre_token", failureLayer: "provider" });
+
+  const fallback = await openAttempt({
+    runId,
+    attemptIndex: 1,
+    modelId: "grok-3-mini",
+    provider: "xai",
+  });
+  await newDraft(fallback);
+  const finalized = await finalize(fallback);
+  await markDispatched({ attemptId: fallback, dispatchedAt: finalized });
+  await closeAttempt({ attemptId: fallback, outcome: "succeeded" });
+
+  const coverage = await successfulFallbackCandidateManifestCoverage();
+  assert.equal(coverage.successfulFallbacks, 1);
+  assert.equal(coverage.unverifiable, 1);
+  assert.equal(coverage.covered, 0);
+  assert.deepEqual(coverage.offenders, []);
+  // Nothing decidable, so the percentage says so rather than reporting zero.
+  assert.equal(coverage.coveragePercent, 100);
+});
+
+test("the first attempt is never a fallback, however it ended", async () => {
+  const runId = await newRun();
+  const only = await openAttempt({
+    runId,
+    attemptIndex: 0,
+    modelId: MODEL_WITH_WINDOW,
+    provider: "openai",
+  });
+  // A window that is not this model's, to show the query ignores the first
+  // attempt entirely rather than passing it for the right reason by accident.
+  // Still above the draft's token count -- a manifest claiming otherwise
+  // cannot exist, and the CHECK refuses it.
+  await newDraft(only, { contextWindowTokens: 128_000 });
+  const finalized = await finalize(only);
+  await markDispatched({ attemptId: only, dispatchedAt: finalized });
+  await closeAttempt({ attemptId: only, outcome: "succeeded" });
+
+  const coverage = await successfulFallbackCandidateManifestCoverage();
+  assert.equal(coverage.successfulFallbacks, 0);
+  assert.equal(coverage.coveragePercent, 100);
 });
