@@ -171,6 +171,7 @@ run(
     "tests/integration/memory-extraction-executor.db.test.ts",
     "tests/integration/memory-extraction-metrics.db.test.ts",
     "tests/integration/memory-extraction-revocation.db.test.ts",
+    "tests/integration/retention-sweep.db.test.ts",
     "tests/integration/memory-review.db.test.ts",
     "tests/integration/memory-retrieval.db.test.ts",
     "tests/integration/memory-source-deletion.db.test.ts",

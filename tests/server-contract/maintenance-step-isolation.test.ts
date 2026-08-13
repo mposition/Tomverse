@@ -61,6 +61,8 @@ const prismaStub = {
   providerErrorEvent: { deleteMany: async () => ({ count: 6 }) },
   productAnalyticsEvent: { deleteMany: async () => ({ count: 7 }) },
   notificationDelivery: { deleteMany: async () => ({ count: 8 }) },
+  providerHealthCheck: { deleteMany: async () => ({ count: 21 }) },
+  adminNotificationLog: { deleteMany: async () => ({ count: 22 }) },
   $executeRaw: async () => 9,
   $transaction: async (run: (tx: unknown) => Promise<unknown>) => run(prismaStub),
 };
@@ -184,6 +186,10 @@ test("a step that throws does not skip the steps behind it", async () => {
   assert.equal(result.traceErrorEvidence, 18);
   assert.equal(result.autoFixCases, 19);
   assert.equal(result.notificationDeliveries, 8);
+  // The two steps that enforce policies /admin/retention had been publishing
+  // with nothing behind them.
+  assert.equal(result.providerHealthChecks, 21);
+  assert.equal(result.notificationLogs, 22);
 });
 
 test("a clean run reports no failed steps and every count", async () => {

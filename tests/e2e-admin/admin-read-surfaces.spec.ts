@@ -511,6 +511,20 @@ test.describe("admin read surfaces", () => {
     await expect(
       page.getByRole("button", { name: "Execute cleanup" })
     ).toBeDisabled();
+
+    // Every published policy is rendered, including the two that used to be
+    // stated here and performed by nothing.
+    await expect(
+      page.getByText("Delete provider check records older than 30 days.")
+    ).toBeVisible();
+    await expect(
+      page.getByText(/Delete alert delivery logs older than 90 days/)
+    ).toBeVisible();
+    // The audit log is a floor, not a queue: its number is history, and the
+    // card must not offer it as work the cleanup will do.
+    await expect(
+      page.getByText("Beyond the floor", { exact: true })
+    ).toBeVisible();
   });
 
   test("admin access lists the configured administrators and their roles", async ({
