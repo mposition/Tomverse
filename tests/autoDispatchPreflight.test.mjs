@@ -2,13 +2,15 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  attachmentTokensForModel,
+  measureTurnAttachments,
   preflightInputEstimate,
   profileTextFor,
   turnCarriesAttachments,
 } from "../lib/autoDispatchPreflight.ts";
 import { estimateRawTextTokens } from "../lib/chatTokenEstimate.ts";
 import { selectAutoModel } from "../lib/autoModelSelection.ts";
-import { AVAILABLE_MODELS } from "../lib/models.ts";
+import { AVAILABLE_MODELS, modelSupportsNativePdfInput } from "../lib/models.ts";
 
 // The chat route can only choose a model before it knows the input size if
 // something computes that size without a model. These tests are about the one
@@ -126,7 +128,7 @@ const selection = (overrides = {}) =>
     subjectKey: "user_abc",
     isGuest: false,
     plan: "Pro",
-    attachmentsPresent: false,
+    attachmentsUnmeasurable: false,
     text: "이 문장을 영어로 번역해 주세요.",
     attachments: [],
     webSearchRequested: false,
@@ -138,20 +140,108 @@ const selection = (overrides = {}) =>
     ...overrides,
   });
 
-test("an attachment turn falls back instead of routing on a guess", () => {
-  const refused = selection({ attachmentsPresent: true });
+test("an unmeasurable attachment turn falls back instead of routing on a guess", () => {
+  const refused = selection({ attachmentsUnmeasurable: true });
   assert.equal(refused.routed, false);
-  assert.equal(refused.reason, "attachments_present");
+  assert.equal(refused.reason, "attachments_unmeasurable");
   assert.equal(refused.fallbackModelId, "gpt-5-6-luna");
 });
 
 // Reported after the cohort, so the count means "turns that would otherwise
 // have routed" -- the number that says what the limitation costs.
-test("an attachment turn outside the cohort is a cohort refusal, not an attachment one", () => {
-  const refused = selection({ attachmentsPresent: true, plan: "Free" });
+test("an unmeasurable turn outside the cohort is a cohort refusal, not an attachment one", () => {
+  const refused = selection({ attachmentsUnmeasurable: true, plan: "Free" });
   assert.equal(refused.reason, "cohort_refused");
 });
 
-test("the same turn without the attachment routes", () => {
+test("a measured attachment turn routes", () => {
   assert.equal(selection().routed, true);
+});
+
+// --- measurement ---
+
+// The rule that stops this being an object-size oracle over the whole bucket.
+test("an attachment outside the caller's own prefix is refused, not measured", async () => {
+  const measured = await measureTurnAttachments(
+    [
+      {
+        role: "user",
+        content: "look at this",
+        attachments: [
+          { mediaType: "application/pdf", objectKey: "attachments/someone-else/a.pdf" },
+        ],
+      },
+    ],
+    "attachments/mine/"
+  );
+  assert.equal(measured.measurable, false);
+  assert.equal(measured.reason, "not_own_object");
+});
+
+test("a caller with no prefix of their own measures nothing", async () => {
+  const measured = await measureTurnAttachments(
+    [
+      {
+        role: "user",
+        content: "look",
+        attachments: [{ mediaType: "application/pdf", objectKey: "attachments/mine/a.pdf" }],
+      },
+    ],
+    null
+  );
+  assert.equal(measured.measurable, false);
+  assert.equal(measured.reason, "not_own_object");
+});
+
+test("an attachment with no object key cannot be measured", async () => {
+  const measured = await measureTurnAttachments(
+    [{ role: "user", content: "look", attachments: [{ mediaType: "image/png" }] }],
+    "attachments/mine/"
+  );
+  assert.equal(measured.measurable, false);
+  assert.equal(measured.reason, "no_object_key");
+});
+
+test("a turn with no attachment measures as an empty, measurable set", async () => {
+  const measured = await measureTurnAttachments([text("hello")], "attachments/mine/");
+  assert.equal(measured.measurable, true);
+  assert.deepEqual(measured.descriptors, []);
+});
+
+// --- per-model cost ---
+
+// A real catalogue entry rather than a hand-built object: the cost function
+// reads capability through the catalogue's own predicate, and a fixture that
+// spelled the field differently would test the fixture.
+const anyModel = AVAILABLE_MODELS[0];
+
+test("no attachments cost every model nothing", () => {
+  const cost = attachmentTokensForModel([]);
+  for (const entry of AVAILABLE_MODELS) assert.equal(cost(entry), 0);
+});
+
+// The whole reason the filter takes a callback: one figure would be wrong for
+// one side or the other.
+test("the same PDF costs a native reader and an extractor differently", () => {
+  const cost = attachmentTokensForModel([
+    { mediaType: "application/pdf", size: 2_000_000 },
+  ]);
+  // The catalogue's own predicate, not a guess at the field that carries it.
+  const native = AVAILABLE_MODELS.find(modelSupportsNativePdfInput);
+  const extractor = AVAILABLE_MODELS.find(
+    (entry) => !modelSupportsNativePdfInput(entry)
+  );
+  assert.ok(native && extractor, "the catalogue has both kinds of model");
+  assert.notEqual(
+    cost(native),
+    cost(extractor),
+    "one number was used for both, so the filter is wrong for one of them"
+  );
+});
+
+test("an extracted attachment's cost is bounded rather than proportional forever", () => {
+  const cost = attachmentTokensForModel([
+    { mediaType: "text/plain", size: 500_000_000 },
+  ]);
+  assert.ok(cost(anyModel) <= 75_000 + 1);
 });
