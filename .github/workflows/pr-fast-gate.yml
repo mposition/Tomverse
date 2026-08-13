@@ -154,6 +154,14 @@ jobs:
         timeout-minutes: 5
         run: npm run check:locale-translation
 
+      # Next.js sets no Cache-Control on a route handler response, and a
+      # response with none is heuristically cacheable by a shared cache. The
+      # proxy sets a default; this proves no route's own choice is silently
+      # replaced by it.
+      - name: API cache-control policy
+        timeout-minutes: 5
+        run: npm run check:api-cache-control
+
       # Nineteen columns carry a closed list as a CHECK constraint, and the
       # application holds its own copy of most of them. Code accepting a value
       # the constraint rejects is a 500 where a 400 belongs.

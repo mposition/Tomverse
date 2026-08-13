@@ -17,6 +17,9 @@ import {
   memoryExtractionEnabledFromValue,
   memoryInjectionEnabledFromValue,
   parseRevokedPairs,
+  revokedPairsRequestProblems,
+  serializeRevokedPairs,
+  type RevokedPairsRequest,
   type RevokedPairsState,
 } from "@/lib/memoryAccess";
 import {
@@ -306,6 +309,45 @@ export async function getMemoryExtractionRevokedPairs(): Promise<RevokedPairsSta
     select: { value: true },
   });
   return parseRevokedPairs(row?.value);
+}
+
+/**
+ * The §12.1 emergency revocation write path.
+ *
+ * The policy says this is changed "by an approved operator in the Admin
+ * Console, audit-logged, immediately fail-closed". Everything but the write
+ * existed: the read, the parser and the extraction-side check were all
+ * wired, and the only way to actually revoke a pair was a hand-typed
+ * `UPDATE` against production -- with no permission check, no audit record,
+ * and a format where one typo silently means "revoke everything" rather than
+ * "revoke this pair".
+ *
+ * The stored value is re-parsed and returned rather than echoed, so the
+ * caller sees the state the next extraction will read rather than the state
+ * it asked for. `serializeRevokedPairs` and `parseRevokedPairs` round-trip,
+ * so those agree -- and the day they do not, this is where it shows.
+ */
+export async function setMemoryExtractionRevokedPairs(
+  request: RevokedPairsRequest
+): Promise<RevokedPairsState> {
+  const problems = revokedPairsRequestProblems(request);
+  if (problems.length > 0) {
+    throw new MemoryRevocationRequestError(problems);
+  }
+  const value = serializeRevokedPairs(request);
+  await prisma.appSetting.upsert({
+    where: { key: MEMORY_EXTRACTION_REVOKED_PAIRS_KEY },
+    update: { value },
+    create: { key: MEMORY_EXTRACTION_REVOKED_PAIRS_KEY, value },
+  });
+  return parseRevokedPairs(value);
+}
+
+export class MemoryRevocationRequestError extends Error {
+  constructor(public readonly problems: string[]) {
+    super("The revocation request cannot be stored as written.");
+    this.name = "MemoryRevocationRequestError";
+  }
 }
 
 export class OperationalFeatureDisabledError extends Error {

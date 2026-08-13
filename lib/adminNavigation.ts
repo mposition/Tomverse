@@ -9,7 +9,7 @@ import type { AdminRole } from "@/lib/adminAuthCore";
  * (the layout's badge counts) and a client component (the sidebar) agree on the
  * same route table without either importing the other.
  *
- * Icons live in `components/admin/adminNavigationIcons.tsx`, keyed by item id,
+ * Icons live in `components/admin/adminNavigationIcons.ts`, keyed by item id,
  * because a `lucide-react` import would make this module unusable from a plain
  * Node test.
  */

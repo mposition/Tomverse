@@ -51,6 +51,8 @@ Date / timezone:    ____________________
 - [ ] `npm run check:encoding:strict`
 - [ ] `npm run check:locale-translation` — proves no locale is still showing an
       English sentence where a translation is owed
+- [ ] `npm run check:api-cache-control` — proves the proxy's `/api/*` default
+      does not silently replace a route's own caching decision
 - [ ] `npm run check:enum-constraints` — proves every closed list the schema
       enforces still matches the list the application validates against, and
       that a new one was registered rather than left undecided
@@ -64,7 +66,10 @@ Date / timezone:    ____________________
 - [ ] `npm run verify:tomverse-chat-release-gates`
 - [ ] `npm run verify:review-parity-coverage`
 - [ ] `npm run check:doc-references` — proves AGENTS.md and every contract and
-      policy document under it still point at files that exist
+      policy document under it, and every source comment that names a path,
+      still point at files that exist. A comment naming a test file is a claim
+      about coverage: one said its cadences were asserted against the Railway
+      cron files by a test that had never existed
 - [ ] `npm run check:ui-tier-coverage` — proves the merge-blocking `@ui-risk`
       tier and the document that records it still describe the same set
 - [ ] `npm run check:release-gate-coverage` — proves this list still matches

@@ -4,6 +4,7 @@ import {
   canAdoptStripePromotionCode,
   canUseStripePromotionCode,
   checkoutSessionIdempotencyKey,
+  checkoutStripeCallFailure,
   couponMismatches,
   describeMismatches,
   errorCodeForMismatches,
@@ -19,6 +20,8 @@ import {
   stripeCustomerIdempotencyKey,
   stripeErrorFacts,
   stripeKeyLiveMode,
+  PROVISIONING_STAGES,
+  STRIPE_PROMOTION_ERROR_CODES,
 } from "../lib/stripePromotionProvisioningCore.ts";
 
 /**
@@ -457,4 +460,62 @@ test("mismatch descriptions carry reason slugs only", () => {
   for (const entry of described) {
     assert.match(entry, /^(identity|usability|drift):[a-z_]+$/);
   }
+});
+
+// Which Stripe call failed, and what the failure is called.
+//
+// The checkout route makes two unguarded Stripe calls -- customers.create for
+// an account with no Stripe customer yet, then checkout.sessions.create -- and
+// one catch handles both. It assumed the Session ("Everything left is the
+// Session create itself"), so a customer-create failure was logged as
+// CHECKOUT_SESSION_CREATE_FAILED at stage "session": an operator sent to a
+// call that never ran. PROVISIONING_STAGES has carried a "customer" value for
+// exactly this since it was written, and nothing had ever emitted it.
+
+const outage = { type: "StripeConnectionError", code: null, param: null, requestId: null, statusCode: null };
+const refusal = { type: "invalid_request_error", code: "parameter_invalid_empty", param: "email", requestId: "req_1", statusCode: 400 };
+
+test("a customer-create refusal names the customer call, not the session", () => {
+  const failure = checkoutStripeCallFailure("customer", refusal);
+  assert.equal(failure.stage, "customer");
+  assert.equal(failure.internalCode, "CHECKOUT_CUSTOMER_CREATE_FAILED");
+  assert.equal(failure.retryable, false);
+});
+
+test("a session-create refusal is unchanged", () => {
+  const failure = checkoutStripeCallFailure("session", refusal);
+  assert.equal(failure.stage, "session");
+  assert.equal(failure.internalCode, "CHECKOUT_SESSION_CREATE_FAILED");
+  assert.equal(failure.retryable, false);
+});
+
+// Retryability comes first on purpose: a provider outage is the same answer
+// whichever call hit it, and it is the one an operator does not investigate.
+// The stage still records where it happened.
+test("a provider outage keeps its own code but still names the call", () => {
+  for (const stage of ["customer", "session"]) {
+    const failure = checkoutStripeCallFailure(stage, outage);
+    assert.equal(failure.internalCode, "CHECKOUT_PROVIDER_UNAVAILABLE");
+    assert.equal(failure.retryable, true);
+    assert.equal(failure.stage, stage);
+  }
+});
+
+test("the customer is told the same thing whichever call failed", () => {
+  // They cannot act on the difference, and naming our internal call sequence
+  // in a response body would tell an attacker where the seams are.
+  assert.deepEqual(
+    externalCheckoutError("CHECKOUT_CUSTOMER_CREATE_FAILED"),
+    externalCheckoutError("CHECKOUT_SESSION_CREATE_FAILED")
+  );
+});
+
+test("the new code is a declared internal classification", () => {
+  assert.ok(
+    STRIPE_PROMOTION_ERROR_CODES.includes("CHECKOUT_CUSTOMER_CREATE_FAILED"),
+    "the code is used but not declared"
+  );
+  // And the stage it reports is one the provisioning vocabulary already had,
+  // rather than a second name for the same thing.
+  assert.ok(PROVISIONING_STAGES.includes("customer"));
 });

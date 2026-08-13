@@ -70,10 +70,12 @@ import {
 } from "@/lib/stripePromotionProvisioning";
 import {
   checkoutSessionIdempotencyKey,
+  checkoutStripeCallFailure,
   externalCheckoutError,
-  isRetryableStripeError,
   stripeCustomerIdempotencyKey,
   stripeErrorFacts,
+  type ProvisioningStage,
+  type StripePromotionErrorCode,
 } from "@/lib/stripePromotionProvisioningCore";
 
 const checkoutSchema = z
@@ -247,6 +249,33 @@ async function createCheckoutSession(
  * customer's email, the payment method, the raw client IP. The account appears
  * only as the opaque hash the promotion layer already uses.
  */
+/**
+ * A Stripe call that threw, tagged with which call it was.
+ *
+ * The route makes two unguarded Stripe calls -- `customers.create` for an
+ * account with no Stripe customer yet, then `checkout.sessions.create` -- and
+ * one catch handles both. Without the tag that catch cannot tell them apart,
+ * so it assumed the Session and reported a customer failure under the Session's
+ * stage and code.
+ */
+class CheckoutStripeCallError extends Error {
+  constructor(
+    readonly stage: "customer",
+    readonly cause: unknown
+  ) {
+    super("A Stripe call failed during checkout.");
+    this.name = "CheckoutStripeCallError";
+  }
+}
+
+/**
+ * Where a checkout failed. `request` is everything before the first Stripe
+ * call; the rest are the Stripe calls themselves, named with the same
+ * vocabulary the promotion provisioning errors use so one log field means one
+ * thing across both.
+ */
+type CheckoutFailureStage = ProvisioningStage | "request";
+
 function logCheckoutFailure({
   traceId,
   stage,
@@ -259,8 +288,8 @@ function logCheckoutFailure({
   details,
 }: {
   traceId: string;
-  stage: string;
-  internalCode: string;
+  stage: CheckoutFailureStage;
+  internalCode: StripePromotionErrorCode;
   retryable: boolean;
   planId: string;
   billingInterval: string;
@@ -670,19 +699,26 @@ export async function POST(req: Request) {
       // the first one writes `stripeCustomerId` back would otherwise create two
       // customers -- and the subscription then lands on the one the account is
       // not pointing at.
-      const customer = await stripe.customers.create(
-        {
-          email: user.email || undefined,
-          name: user.name || undefined,
-          metadata: { userId: user.id },
-        },
-        {
-          idempotencyKey: stripeCustomerIdempotencyKey({
-            userId: user.id,
-            secret: idempotencySecret,
-          }),
-        }
-      );
+      let customer;
+      try {
+        customer = await stripe.customers.create(
+          {
+            email: user.email || undefined,
+            name: user.name || undefined,
+            metadata: { userId: user.id },
+          },
+          {
+            idempotencyKey: stripeCustomerIdempotencyKey({
+              userId: user.id,
+              secret: idempotencySecret,
+            }),
+          }
+        );
+      } catch (error) {
+        // Tagged, because the catch below cannot tell which Stripe call threw
+        // and used to assume the Session create. See CheckoutStripeCallError.
+        throw new CheckoutStripeCallError("customer", error);
+      }
       stripeCustomerId = customer.id;
       // Conditional, so the loser of that race does not overwrite the id the
       // winner already stored.
@@ -848,17 +884,24 @@ export async function POST(req: Request) {
           { status: external.status }
         );
       }
-      // Everything left is the Session create itself. A provider outage and a
-      // request Stripe will refuse identically forever are different answers:
-      // one is worth retrying, the other needs an operator.
-      const facts = stripeErrorFacts(error);
-      const retryable = isRetryableStripeError(facts);
-      const internalCode = retryable
-        ? "CHECKOUT_PROVIDER_UNAVAILABLE"
-        : "CHECKOUT_SESSION_CREATE_FAILED";
+      // Which Stripe call this was. Everything reaching here used to be
+      // treated as the Session create, which was true only while the Session
+      // was the only unguarded call -- the customer create above it is
+      // unguarded too, and its failures were reported as a Session failure at
+      // stage "session", sending an operator to a call that never ran.
+      //
+      // A provider outage and a request Stripe will refuse identically forever
+      // are still different answers: one is worth retrying, the other needs an
+      // operator.
+      const tagged = error instanceof CheckoutStripeCallError;
+      const facts = stripeErrorFacts(tagged ? error.cause : error);
+      const { stage, internalCode, retryable } = checkoutStripeCallFailure(
+        tagged ? error.stage : "session",
+        facts
+      );
       logCheckoutFailure({
         traceId,
-        stage: "session",
+        stage,
         internalCode,
         retryable,
         planId,

@@ -14,7 +14,8 @@ const measurementId =
  * The chrome every marketing page carries: the organisation / application
  * structured data, and the marketing provider stack.
  *
- * RECON-I18N-001. This used to live directly in `app/(marketing)/layout.tsx`.
+ * RECON-I18N-001. This used to live directly in
+ * `app/(site)/(marketing)/layout.tsx`.
  * The localized routes moved out of that group so they could have their own
  * root layout (see components/DocumentShell.tsx), and they need the same
  * chrome -- so it is a component now instead of being copied into the second

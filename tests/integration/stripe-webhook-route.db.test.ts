@@ -15,7 +15,7 @@ import { resolve } from "node:path";
 // Both halves are invisible from the outside. A route that skipped every event
 // it had a row for, and a route that skipped none, each answer 200 to the
 // second delivery; the difference is whether processing ran and what the row
-// says afterwards. tests/goLiveSecurityFixes.ts asserts the mode check's
+// says afterwards. tests/goLiveSecurityFixes.test.ts asserts the mode check's
 // position in the source, which is a different claim from what the endpoint
 // does with the database.
 //

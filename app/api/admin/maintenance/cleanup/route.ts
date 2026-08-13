@@ -18,6 +18,7 @@ import {
 import { cleanupExpiredData } from "@/lib/maintenance";
 import { summarizeMaintenanceStepFailures } from "@/lib/maintenanceStepsCore";
 import { prisma } from "@/lib/prisma";
+import { retentionCutoff } from "@/lib/retentionPolicyCore";
 
 const cleanupSchema = z
   .object({
@@ -28,18 +29,42 @@ const cleanupSchema = z
 
 async function dryRunCleanup() {
   const now = new Date();
-  const usageCutoff = new Date(Date.now() - 120 * 24 * 60 * 60 * 1000);
-  const providerErrorCutoff = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
-  const productAnalyticsCutoff = new Date(Date.now() - 400 * 24 * 60 * 60 * 1000);
-  const [sessions, usageBuckets, requestLeases, creditReservations, providerErrorEvents, productAnalyticsEvents, shareSnapshots] = await Promise.all([
+  // Cutoffs come from the published policy rather than a literal, so a dry run
+  // cannot promise a different date from the one the execution uses.
+  const [
+    sessions,
+    usageBuckets,
+    requestLeases,
+    creditReservations,
+    providerErrorEvents,
+    providerHealthChecks,
+    notificationLogs,
+    productAnalyticsEvents,
+    shareSnapshots,
+  ] = await Promise.all([
     prisma.session.count({ where: { expires: { lte: now } } }),
-    prisma.chatUsageBucket.count({ where: { updatedAt: { lt: usageCutoff } } }),
+    prisma.chatUsageBucket.count({
+      where: { updatedAt: { lt: retentionCutoff("usageBuckets", now) } },
+    }),
     prisma.chatRequestLease.count({ where: { expiresAt: { lte: now } } }),
     prisma.chatCreditReservation.count({
       where: { status: "reserved", expiresAt: { lte: now } },
     }),
-    prisma.providerErrorEvent.count({ where: { createdAt: { lt: providerErrorCutoff } } }),
-    prisma.productAnalyticsEvent.count({ where: { occurredAt: { lt: productAnalyticsCutoff } } }),
+    prisma.providerErrorEvent.count({
+      where: { createdAt: { lt: retentionCutoff("providerErrors", now) } },
+    }),
+    prisma.providerHealthCheck.count({
+      where: { createdAt: { lt: retentionCutoff("providerChecks", now) } },
+    }),
+    prisma.adminNotificationLog.count({
+      where: {
+        createdAt: { lt: retentionCutoff("notificationLogs", now) },
+        NOT: { status: "failed", acknowledgedAt: null },
+      },
+    }),
+    prisma.productAnalyticsEvent.count({
+      where: { occurredAt: { lt: retentionCutoff("productAnalytics", now) } },
+    }),
     prisma.$queryRaw<Array<{ count: bigint }>>`
       SELECT COUNT(*)::bigint AS "count"
       FROM "Conversation"
@@ -56,7 +81,17 @@ async function dryRunCleanup() {
         )
     `.then((rows) => Number(rows[0]?.count || 0)),
   ]);
-  return { sessions, usageBuckets, requestLeases, creditReservations, providerErrorEvents, productAnalyticsEvents, shareSnapshots };
+  return {
+    sessions,
+    usageBuckets,
+    requestLeases,
+    creditReservations,
+    providerErrorEvents,
+    providerHealthChecks,
+    notificationLogs,
+    productAnalyticsEvents,
+    shareSnapshots,
+  };
 }
 
 export async function POST(req: Request) {

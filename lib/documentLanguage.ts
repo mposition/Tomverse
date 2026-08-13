@@ -20,7 +20,7 @@ import { SUPPORTED_LANGUAGES, isLanguage, type Language } from "@/lib/language";
  * mismatch for another. `?lang=` wins because the routes that honour it pin
  * `LanguageProvider` to it (`forceInitialLang`); a `/ko` style path prefix is
  * next; `Accept-Language` last, because that is what
- * `app/(application)/layout.tsx` already feeds to `initialLang`.
+ * `app/(site)/(application)/layout.tsx` already feeds to `initialLang`.
  */
 
 export const DOCUMENT_LANGUAGE_HEADER = "x-tomverse-document-lang";

@@ -191,6 +191,16 @@ test.describe("admin read surfaces", () => {
     await expect(
       page.getByRole("heading", { name: "Go-live funnel and activation" })
     ).toHaveCount(0);
+
+    // The §12.1 revocation control shares this tab, and it states the current
+    // revocation state in a sentence rather than leaving it to be inferred
+    // from an empty checkbox list.
+    await expect(
+      page.getByTestId("admin-memory-revocation-panel")
+    ).toBeVisible();
+    await expect(page.getByTestId("admin-memory-revocation-state")).toHaveText(
+      /Nothing is revoked/
+    );
   });
 
   test("users lists seeded accounts with their plan and risk state", async ({
@@ -501,6 +511,20 @@ test.describe("admin read surfaces", () => {
     await expect(
       page.getByRole("button", { name: "Execute cleanup" })
     ).toBeDisabled();
+
+    // Every published policy is rendered, including the two that used to be
+    // stated here and performed by nothing.
+    await expect(
+      page.getByText("Delete provider check records older than 30 days.")
+    ).toBeVisible();
+    await expect(
+      page.getByText(/Delete alert delivery logs older than 90 days/)
+    ).toBeVisible();
+    // The audit log is a floor, not a queue: its number is history, and the
+    // card must not offer it as work the cleanup will do.
+    await expect(
+      page.getByText("Beyond the floor", { exact: true })
+    ).toBeVisible();
   });
 
   test("admin access lists the configured administrators and their roles", async ({

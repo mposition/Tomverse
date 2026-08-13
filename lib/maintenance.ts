@@ -24,6 +24,7 @@ import {
 } from "@/lib/foundingTesterPassCore";
 import { deleteTomverseAccount } from "@/lib/accountDeletion";
 import { createMaintenanceStepRunner } from "@/lib/maintenanceStepsCore";
+import { retentionCutoff } from "@/lib/retentionPolicyCore";
 import { deleteR2Object, listExpiredR2Objects } from "@/lib/r2";
 import {
   GUEST_ATTACHMENT_PREFIX,
@@ -398,10 +399,32 @@ export async function cleanupExpiredData() {
 
   const providerErrorEvents = await step("provider_error_events", () =>
     prisma.providerErrorEvent.deleteMany({
+      where: { createdAt: { lt: retentionCutoff("providerErrors", now) } },
+    })
+  );
+
+  // The two policies /admin/retention published and nothing performed.
+  //
+  // Provider check records are read newest-first everywhere they are read at
+  // all -- the verification cooldown wants the last attempt, the recovery
+  // evidence list takes the most recent hundred -- so a 30-day floor is far
+  // above anything that reads them, and matches the sanitized provider error
+  // diagnostics they sit beside.
+  const providerHealthChecks = await step("provider_health_checks", () =>
+    prisma.providerHealthCheck.deleteMany({
+      where: { createdAt: { lt: retentionCutoff("providerChecks", now) } },
+    })
+  );
+
+  // Alert delivery logs, with the same carve-out the notification queue below
+  // has and for the same reason: a failed delivery nobody has acknowledged is
+  // still on the work queue, oldest first. Sweeping it on age would take the
+  // one row an operator has not dealt with and leave the ones they have.
+  const notificationLogs = await step("notification_logs", () =>
+    prisma.adminNotificationLog.deleteMany({
       where: {
-        createdAt: {
-          lt: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000),
-        },
+        createdAt: { lt: retentionCutoff("notificationLogs", now) },
+        NOT: { status: "failed", acknowledgedAt: null },
       },
     })
   );
@@ -420,11 +443,7 @@ export async function cleanupExpiredData() {
 
   const productAnalyticsEvents = await step("product_analytics_events", () =>
     prisma.productAnalyticsEvent.deleteMany({
-      where: {
-        occurredAt: {
-          lt: new Date(Date.now() - 400 * 24 * 60 * 60 * 1000),
-        },
-      },
+      where: { occurredAt: { lt: retentionCutoff("productAnalytics", now) } },
     })
   );
 
@@ -540,6 +559,8 @@ export async function cleanupExpiredData() {
     usageBuckets: usageBuckets === null ? null : Number(usageBuckets),
     requestLeases: requestLeases === null ? null : Number(requestLeases),
     providerErrorEvents: providerErrorEvents?.count ?? null,
+    providerHealthChecks: providerHealthChecks?.count ?? null,
+    notificationLogs: notificationLogs?.count ?? null,
     traceErrorEvidence,
     autoFixCases,
     productAnalyticsEvents: productAnalyticsEvents?.count ?? null,

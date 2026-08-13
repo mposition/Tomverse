@@ -1,6 +1,7 @@
 export const dynamic = "force-dynamic";
 
 import { AdminMemoryImportPanel } from "@/components/admin/AdminMemoryImportPanel";
+import { AdminMemoryRevocationPanel } from "@/components/admin/AdminMemoryRevocationPanel";
 import { AdminPageTabs } from "@/components/admin/AdminPageTabs";
 import { AdminProductAnalyticsPanel } from "@/components/admin/AdminProductAnalyticsPanel";
 import { LaunchFunnelPanel } from "@/components/admin/AdminRiskPanels";
@@ -44,6 +45,13 @@ export default async function AdminAnalyticsPage({
       <div className="flex min-w-0 flex-col gap-5">
         {tabs}
         <AdminMemoryImportPanel />
+        {/*
+          The §12.1 revocation control sits under the report it reacts to: the
+          per-pair failure table above is where an operator sees one pair
+          failing, and stopping that pair is the next action. It is the only
+          write on this tab, and it only ever restricts.
+        */}
+        <AdminMemoryRevocationPanel />
       </div>
     );
   }

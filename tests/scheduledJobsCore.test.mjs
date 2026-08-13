@@ -1,13 +1,17 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
-  CRON_CADENCE_MINUTES,
+  CRON_TRIGGERS,
   SCHEDULED_JOB_DEFINITIONS,
   SILENCE_SLACK_MINUTES,
+  cronTriggerFor,
+  cronTriggerIntervalMs,
+  describeCronTrigger,
   evaluateScheduledJobTiming,
   nextScheduledAt,
+  parseCronSchedule,
   silenceBudgetMsFor,
 } from "../lib/scheduledJobsCore.ts";
 
@@ -15,6 +19,13 @@ import {
 // and lib/scheduledJobs.ts was not moved with it, so the credit-reconciliation
 // job carried a 12-minute silence budget against a 15-minute cadence and was
 // reported "delayed" for the last ~3 minutes of every cycle.
+//
+// SCHED-DRIFT-002. That fix covered the two every-N-minutes crons. The three
+// daily ones kept writing their time out in the prose, in the next-run estimate
+// and in the cron file separately, and the assertion below read neither of the
+// last two -- so the same drift was still available to them. It is the whole
+// table now, in both directions: every declared trigger against the file that
+// deploys it, and every deployed cron file against the table.
 //
 // Two kinds of test below. The first reads the Railway cron files themselves,
 // so the TypeScript catalogue cannot drift from the deployed schedule again
@@ -36,57 +47,59 @@ const readCronSchedule = (configFile) => {
   return cron;
 };
 
-/** Minutes between runs of a `*​/N * * * *` cron, which is all we declare here. */
-const cadenceMinutesFromCron = (cron, configFile) => {
-  const match = /^\*\/(\d+) \* \* \* \*$/.exec(cron.trim());
-  assert.ok(
-    match,
-    `${configFile} uses "${cron}", which this test cannot read. If the schedule ` +
-      `is no longer a simple every-N-minutes cron, teach CRON_CADENCE_MINUTES ` +
-      `and this parser about the new shape rather than deleting the check.`
-  );
-  return Number(match[1]);
-};
-
-test("the declared cadence matches the Railway cron that actually drives it", () => {
-  assert.equal(
-    cadenceMinutesFromCron(
-      readCronSchedule("railway.credit-reconciliation.json"),
-      "railway.credit-reconciliation.json"
-    ),
-    CRON_CADENCE_MINUTES.creditReconciliation
-  );
-  assert.equal(
-    cadenceMinutesFromCron(
-      readCronSchedule("railway.provider-probe.json"),
-      "railway.provider-probe.json"
-    ),
-    CRON_CADENCE_MINUTES.providerProbe
-  );
-});
-
-test("no cron-driven job has a silence budget shorter than its own cadence", () => {
-  // The defect in one assertion: a budget at or under the cadence reports a
-  // healthy run as late on every single cycle.
-  const cronDriven = [
-    ["credit_reservation_reconciliation", CRON_CADENCE_MINUTES.creditReconciliation],
-    ["notification_delivery_retry", CRON_CADENCE_MINUTES.creditReconciliation],
-    ["infrastructure_threshold_monitor", CRON_CADENCE_MINUTES.creditReconciliation],
-    ["provider_probe", CRON_CADENCE_MINUTES.providerProbe],
-  ];
-  for (const [key, cadenceMinutes] of cronDriven) {
-    const definition = jobByKey(key);
+test("every declared trigger matches the Railway cron that actually drives it", () => {
+  for (const [name, { configFile, trigger }] of Object.entries(CRON_TRIGGERS)) {
+    const cron = readCronSchedule(configFile);
+    const deployed = parseCronSchedule(cron);
     assert.ok(
-      definition.maximumSilenceMs > cadenceMinutes * MINUTE_MS,
-      `${key}: budget ${definition.maximumSilenceMs / MINUTE_MS}min must exceed ` +
-        `its ${cadenceMinutes}min cadence`
+      deployed,
+      `${configFile} uses "${cron}", which parseCronSchedule cannot read. If the ` +
+        `schedule is no longer one of the two shapes this repository deploys, ` +
+        `teach the parser the new shape rather than deleting the check.`
+    );
+    assert.deepEqual(
+      deployed,
+      { ...trigger },
+      `${name} declares ${describeCronTrigger(trigger)}, but ${configFile} ` +
+        `deploys "${cron}"`
     );
   }
 });
 
-test("the schedule a job displays states the cadence it actually runs at", () => {
+test("every deployed cron file is claimed by exactly one trigger", () => {
+  // The other direction. Without it a new cron service could be deployed with
+  // no catalogue entry, and the dashboard would simply never mention the job it
+  // runs -- which reads identically to a job that is healthy.
+  const deployedFiles = readdirSync(process.cwd())
+    .filter((entry) => /^railway\..+\.json$/.test(entry))
+    .filter((entry) => {
+      const raw = readFileSync(join(process.cwd(), entry), "utf8");
+      return typeof JSON.parse(raw)?.deploy?.cronSchedule === "string";
+    });
+  const claimed = Object.values(CRON_TRIGGERS).map((entry) => entry.configFile);
+  assert.deepEqual([...claimed].sort(), deployedFiles.sort());
+  assert.equal(new Set(claimed).size, claimed.length, "two triggers share a file");
+});
+
+test("every job's silence budget outlasts one cycle of its own trigger", () => {
+  // The defect in one assertion: a budget at or under the interval reports a
+  // healthy run as late on every single cycle. Derived from each job's trigger
+  // rather than a hand-written list, so a new job is covered by existing.
+  for (const definition of SCHEDULED_JOB_DEFINITIONS) {
+    const intervalMs = cronTriggerIntervalMs(cronTriggerFor(definition.key));
+    assert.ok(
+      definition.maximumSilenceMs > intervalMs,
+      `${definition.key}: budget ${definition.maximumSilenceMs / MINUTE_MS}min must ` +
+        `exceed its ${intervalMs / MINUTE_MS}min interval`
+    );
+  }
+});
+
+test("the schedule a job displays states the schedule it actually runs at", () => {
   // The string is what an operator reads on the admin Jobs screen, so it is
-  // held to the same standard as the numbers beside it.
+  // held to the same standard as the numbers beside it. Pinned here as well as
+  // derived in the catalogue, because a derivation that changed everything at
+  // once would move this copy without anyone reading it.
   assert.equal(jobByKey("credit_reservation_reconciliation").schedule, "Every 15 minutes");
   assert.equal(
     jobByKey("notification_delivery_retry").schedule,
@@ -97,6 +110,30 @@ test("the schedule a job displays states the cadence it actually runs at", () =>
     "Every 15 minutes via credit reconciliation cron"
   );
   assert.equal(jobByKey("provider_probe").schedule, "Every 10 minutes");
+  assert.equal(jobByKey("retention_cleanup").schedule, "Daily at 03:00 UTC");
+  assert.equal(
+    jobByKey("provider_model_catalog_monitor").schedule,
+    "Daily at 00:00 UTC (10:00 Australia/Brisbane)"
+  );
+  assert.equal(jobByKey("provider_usage_sync").schedule, "Daily at 00:30 UTC");
+});
+
+test("a cron shape this repository does not deploy is refused, not guessed", () => {
+  assert.deepEqual(parseCronSchedule("*/15 * * * *"), {
+    kind: "everyMinutes",
+    minutes: 15,
+  });
+  assert.deepEqual(parseCronSchedule(" 30 0 * * * "), {
+    kind: "dailyUtc",
+    hour: 0,
+    minute: 30,
+  });
+  // Weekly, hourly-with-offset and multi-value fields all mean something this
+  // catalogue cannot express, so reading them would produce a wrong estimate
+  // rather than a missing one.
+  for (const expression of ["0 3 * * 1", "0 */4 * * *", "0 0,12 * * *", "@daily", ""]) {
+    assert.equal(parseCronSchedule(expression), null, expression);
+  }
 });
 
 test("the credit reconciliation budget is one cadence plus the shared slack", () => {

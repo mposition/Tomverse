@@ -23,6 +23,7 @@ export const STRIPE_PROMOTION_ERROR_CODES = [
   "PROMOTION_COUPON_INVALID",
   "PROMOTION_PRODUCT_MISMATCH",
   "PROMOTION_PROVISIONING_FAILED",
+  "CHECKOUT_CUSTOMER_CREATE_FAILED",
   "CHECKOUT_SESSION_CREATE_FAILED",
   "CHECKOUT_PROVIDER_UNAVAILABLE",
 ] as const;
@@ -549,6 +550,11 @@ export const externalCheckoutError = (
         code: "CHECKOUT_TEMPORARILY_UNAVAILABLE",
         error: "Checkout is temporarily unavailable. Please try again shortly.",
       };
+    // Which Stripe call failed is an operator's question. The customer is told
+    // the same thing either way, and deliberately: they cannot act on the
+    // difference, and naming our internal call sequence in a response body
+    // tells an attacker where the seams are.
+    case "CHECKOUT_CUSTOMER_CREATE_FAILED":
     case "CHECKOUT_SESSION_CREATE_FAILED":
     default:
       return {
@@ -557,4 +563,36 @@ export const externalCheckoutError = (
         error: "Failed to start checkout.",
       };
   }
+};
+
+/**
+ * Which Stripe call the checkout route was making when it failed, and what to
+ * call the failure.
+ *
+ * The route used to assume that anything reaching its outer catch was the
+ * Session create -- "Everything left is the Session create itself" -- which was
+ * true only while the Session was the only unguarded Stripe call. It is not:
+ * `stripe.customers.create` runs above it for an account with no Stripe
+ * customer yet, unguarded, so a customer-create failure was logged as
+ * CHECKOUT_SESSION_CREATE_FAILED at stage "session". That sends an operator to
+ * a call that never ran, and `PROVISIONING_STAGES` has carried a "customer"
+ * value for this since it was written -- nothing had ever emitted it.
+ *
+ * Retryability still comes first: a provider outage is the same answer whatever
+ * call hit it, and it is the one an operator does not need to investigate.
+ */
+export const checkoutStripeCallFailure = (
+  stage: Extract<ProvisioningStage, "customer" | "session">,
+  facts: StripeErrorFacts
+): { stage: ProvisioningStage; internalCode: StripePromotionErrorCode; retryable: boolean } => {
+  const retryable = isRetryableStripeError(facts);
+  return {
+    stage,
+    retryable,
+    internalCode: retryable
+      ? "CHECKOUT_PROVIDER_UNAVAILABLE"
+      : stage === "customer"
+        ? "CHECKOUT_CUSTOMER_CREATE_FAILED"
+        : "CHECKOUT_SESSION_CREATE_FAILED",
+  };
 };

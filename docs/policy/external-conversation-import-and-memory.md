@@ -766,6 +766,20 @@ Node crypto)입니다.
 - **긴급 revocation은 배포 없이**: `AppSetting["memoryExtractionRevokedPairs"]`.
   Admin Console에서 승인된 운영자만 변경, audit 기록, 즉시 fail-closed. 코드
   register를 AppSetting으로 대체하지 않으며 AppSetting은 revocation만 담당합니다.
+- 이 control의 구현은 `app/api/admin/memory-extraction/revocations/route.ts`
+  (`ops:write` + 재인증 + audit)와 `components/admin/AdminMemoryRevocationPanel.tsx`
+  (`/admin/analytics?tab=imports`)입니다. **읽기만 있고 쓰기가 없던 기간이
+  있었고**, 그때 이 항목을 실행하는 유일한 방법은 production에 직접 `UPDATE`를
+  치는 것이었습니다 — 권한 검사도 audit도 없고, 저장 형식상 오타 하나가
+  "전체 revoke"로 읽히는 경로입니다. 저장 전 검증은
+  `revokedPairsRequestProblems`가 하며, 되읽었을 때 요청한 상태와 같은 값만
+  저장합니다.
+- **revocation surface는 중지만 합니다.** `feature.memoryExtractionEnabled`와
+  `feature.memoryInjectionEnabled`에는 의도적으로 admin 쓰기 경로가 없습니다 —
+  활성화는 §12.4의 사람 절차이고, 마지막 단계만 버튼으로 만들면 앞의 다섯
+  단계를 건너뛸 수 있게 됩니다. 이 결정은
+  `tests/appSettingWriters.test.mjs`의 registry에 이유와 함께 기록돼 있고,
+  누군가 쓰기 경로를 추가하면 그 테스트가 실패합니다.
 - Effective pair = 코드 register 승인 ∧ runtime enabled ∧ verified pricing ∧
   plan 허용 ∧ promptVersion 일치 ∧ 운영 revocation 없음.
 

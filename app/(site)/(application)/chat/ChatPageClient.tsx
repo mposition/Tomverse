@@ -175,6 +175,23 @@ const normalizeStringArray = (value: unknown, fallback: string[]) => {
 const uniqueStrings = (values: string[]) => Array.from(new Set(values));
 
 /**
+ * Reads a response body the page has no use for, and throws it away.
+ *
+ * `/api/*` answers `private, no-store` (lib/apiCacheControlPolicy.ts), so the
+ * browser writes no cache entry -- and writing that entry is what used to drain
+ * a body nobody read. Measured on Chromium: a `Response` dropped without
+ * `json()`/`text()`/`body.cancel()` keeps its request in flight for the life of
+ * the page under `no-store`, and settles under any directive that permits
+ * storage. Every fetch below therefore has to consume its body on the paths it
+ * does not care about too, not only on the one it parses.
+ */
+const discardResponseBody = (response: Response) =>
+  response.text().then(
+    () => undefined,
+    () => undefined
+  );
+
+/**
  * PATCHes one conversation's model settings and reports the server's
  * normalized answer back as the confirmed state. Module-level because it
  * closes over nothing from the component -- which is also what lets the
@@ -884,7 +901,13 @@ export function ChatPageClient({
   const refreshGuestUsage = useCallback(() => {
     if (!isGuestMode) return;
     fetch("/api/user/guest-usage", { cache: "no-store" })
-      .then((res) => (res.ok ? res.json() : null))
+      .then((res) =>
+        // The error body is read and discarded rather than left unread; see
+        // discardResponseBody. This is the call that made it visible: with the
+        // database unreachable this endpoint answers 500, and /chat then never
+        // reached network idle again.
+        res.ok ? res.json() : discardResponseBody(res).then(() => null)
+      )
       .then((data) => {
         if (data && typeof data.used === "number" && typeof data.limit === "number") {
           setGuestUsage({
@@ -2116,7 +2139,8 @@ export function ChatPageClient({
                                 timeZoneSource: "browser",
                             }),
                         })
-                            .then((response) => {
+                            .then(async (response) => {
+                                await discardResponseBody(response);
                                 if (response.ok) notifyUserUsageChanged();
                             })
                             .catch((error) => {
@@ -2783,9 +2807,11 @@ export function ChatPageClient({
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ webSearchMode: mode }),
-    }).catch((error) => {
-      console.error("Failed to sync web search mode:", error);
-    });
+    })
+      .then(discardResponseBody)
+      .catch((error) => {
+        console.error("Failed to sync web search mode:", error);
+      });
   };
 
   /**
@@ -3550,7 +3576,11 @@ export function ChatPageClient({
     if (!sessionUserId) return;
     let cancelled = false;
     void fetch("/api/memories/settings", { cache: "no-store" })
-      .then((response) => (response.ok ? response.json() : null))
+      .then((response) =>
+        response.ok
+          ? response.json()
+          : discardResponseBody(response).then(() => null)
+      )
       .then((body: { defaultConversationMode?: unknown } | null) => {
         if (cancelled) return;
         // Only the explicit "off" moves it, the same direction the server
@@ -3589,7 +3619,8 @@ export function ChatPageClient({
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ memoryMode: mode }),
     })
-      .then((response) => {
+      .then(async (response) => {
+        await discardResponseBody(response);
         if (response.ok) return;
         setMemoryMode(previous);
         showToast(t("chat.memoryModeFailed"), "error");

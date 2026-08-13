@@ -20,18 +20,111 @@
 // (The public /status page reads this dashboard too, but selects only
 // `provider_probe`, so it never showed the false state.)
 //
-// `CRON_CADENCE_MINUTES` below is the single place a cron-driven job's cadence
-// is written down, and tests/scheduledJobsCadence.test.mjs asserts it against
-// the Railway config files themselves, so the two cannot drift apart again
-// without a red test.
+// `CRON_TRIGGERS` below is the single place a job's schedule is written down,
+// and tests/scheduledJobsCore.test.mjs asserts every entry against the Railway
+// config file it names, so the two cannot drift apart again without a red test.
+//
+// SCHED-DRIFT-002, found while widening that assertion: the fix above covered
+// the two every-N-minutes crons and left the three daily ones exactly as they
+// were. Each of those wrote its time out three times -- in the prose an
+// operator reads, in the next-run estimate, and in the cron file that actually
+// runs it -- with nothing comparing them. `railway.maintenance.json` moving off
+// 03:00 would have shown the old hour on the admin Jobs screen and estimated
+// the next run against it, silently and indefinitely, which is the same defect
+// SCHED-DRIFT-001 was. Nothing had drifted yet; the gap that let it was still
+// open.
 
-/** Cadence, in minutes, of each Railway cron service that drives a job here. */
-export const CRON_CADENCE_MINUTES = {
-  /** railway.credit-reconciliation.json */
-  creditReconciliation: 15,
-  /** railway.provider-probe.json */
-  providerProbe: 10,
-} as const;
+/** What a cron expression means, once parsed. */
+export type CronTrigger =
+  | { readonly kind: "everyMinutes"; readonly minutes: number }
+  | { readonly kind: "dailyUtc"; readonly hour: number; readonly minute: number };
+
+/**
+ * Every Railway cron service that drives a job here, with the schedule it is
+ * deployed with. `configFile` is what makes the claim checkable: the test reads
+ * that file and parses its `cronSchedule` rather than trusting this table.
+ */
+export const CRON_TRIGGERS = {
+  creditReconciliation: {
+    configFile: "railway.credit-reconciliation.json",
+    trigger: { kind: "everyMinutes", minutes: 15 },
+  },
+  providerProbe: {
+    configFile: "railway.provider-probe.json",
+    trigger: { kind: "everyMinutes", minutes: 10 },
+  },
+  maintenance: {
+    configFile: "railway.maintenance.json",
+    trigger: { kind: "dailyUtc", hour: 3, minute: 0 },
+  },
+  providerModelCatalog: {
+    configFile: "railway.provider-model-catalog.json",
+    trigger: { kind: "dailyUtc", hour: 0, minute: 0 },
+  },
+  providerUsageSync: {
+    configFile: "railway.provider-usage-sync.json",
+    trigger: { kind: "dailyUtc", hour: 0, minute: 30 },
+  },
+} as const satisfies Record<
+  string,
+  { configFile: string; trigger: CronTrigger }
+>;
+
+export type CronTriggerKey = keyof typeof CRON_TRIGGERS;
+
+const pad = (value: number) => String(value).padStart(2, "0");
+
+/**
+ * The cron expression an operator would read, in the words the admin Jobs
+ * screen uses. Derived rather than typed out beside the numbers, because a
+ * schedule written twice is a schedule that can disagree with itself.
+ */
+export const describeCronTrigger = (trigger: CronTrigger) =>
+  trigger.kind === "everyMinutes"
+    ? `Every ${trigger.minutes} minutes`
+    : `Daily at ${pad(trigger.hour)}:${pad(trigger.minute)} UTC`;
+
+/** How long one full cycle of this trigger is. */
+export const cronTriggerIntervalMs = (trigger: CronTrigger) =>
+  trigger.kind === "everyMinutes"
+    ? trigger.minutes * 60 * 1_000
+    : 24 * 60 * 60 * 1_000;
+
+/**
+ * The two cron shapes this repository deploys, and nothing else. An expression
+ * it cannot read returns `null` rather than a guess: the test that calls this
+ * treats that as a failure, so a new shape has to be taught here instead of
+ * quietly falling out of the comparison.
+ */
+export const parseCronSchedule = (expression: string): CronTrigger | null => {
+  const cron = expression.trim();
+  const everyMinutes = /^\*\/(\d+) \* \* \* \*$/.exec(cron);
+  if (everyMinutes) {
+    return { kind: "everyMinutes", minutes: Number(everyMinutes[1]) };
+  }
+  const daily = /^(\d+) (\d+) \* \* \*$/.exec(cron);
+  if (daily) {
+    return {
+      kind: "dailyUtc",
+      hour: Number(daily[2]),
+      minute: Number(daily[1]),
+    };
+  }
+  return null;
+};
+
+/**
+ * Cadence in minutes of an every-N-minutes cron, for the silence budgets below.
+ * Throws on a daily trigger rather than inventing a number for it: a budget
+ * derived from the wrong shape of schedule is the failure this file exists for.
+ */
+const everyMinutesCadence = (cron: CronTriggerKey) => {
+  const { trigger } = CRON_TRIGGERS[cron];
+  if (trigger.kind !== "everyMinutes") {
+    throw new Error(`${cron} is not an every-N-minutes cron`);
+  }
+  return trigger.minutes;
+};
 
 /**
  * How much longer than one full cadence a job may stay quiet before the
@@ -54,29 +147,45 @@ const minutes = (value: number) => value * 60 * 1_000;
 export const silenceBudgetMsFor = (cadenceMinutes: number) =>
   minutes(cadenceMinutes + SILENCE_SLACK_MINUTES);
 
+/**
+ * The schedule sentence shown beside a job, built from the trigger it actually
+ * runs on plus whatever the operator additionally needs to know. The note is
+ * the only part written by hand, and it never states a time.
+ */
+const scheduleSentence = (cron: CronTriggerKey, note?: string) => {
+  const described = describeCronTrigger(CRON_TRIGGERS[cron].trigger);
+  return note ? `${described} ${note}` : described;
+};
+
 export const SCHEDULED_JOB_DEFINITIONS = [
   {
     key: "credit_reservation_reconciliation",
     name: "Credit reservation reconciliation",
-    schedule: "Every 15 minutes",
-    maximumSilenceMs: silenceBudgetMsFor(CRON_CADENCE_MINUTES.creditReconciliation),
+    cron: "creditReconciliation",
+    schedule: scheduleSentence("creditReconciliation"),
+    maximumSilenceMs: silenceBudgetMsFor(everyMinutesCadence("creditReconciliation")),
   },
   {
     key: "retention_cleanup",
     name: "Retention cleanup",
-    schedule: "Daily at 03:00 UTC",
+    cron: "maintenance",
+    schedule: scheduleSentence("maintenance"),
     maximumSilenceMs: minutes(26 * 60),
   },
   {
     key: "provider_model_catalog_monitor",
     name: "Provider model lifecycle and discovery monitor",
-    schedule: "Daily at 00:00 UTC (10:00 Australia/Brisbane)",
+    cron: "providerModelCatalog",
+    // The local time is what the operator who reads this actually works in;
+    // it is a restatement of the UTC time beside it, not a second schedule.
+    schedule: scheduleSentence("providerModelCatalog", "(10:00 Australia/Brisbane)"),
     maximumSilenceMs: minutes(26 * 60),
   },
   {
     key: "provider_usage_sync",
     name: "Provider usage and infrastructure report",
-    schedule: "Daily at 00:30 UTC",
+    cron: "providerUsageSync",
+    schedule: scheduleSentence("providerUsageSync"),
     maximumSilenceMs: minutes(26 * 60),
   },
   {
@@ -85,19 +194,22 @@ export const SCHEDULED_JOB_DEFINITIONS = [
     // Drained from the credit reconciliation cron as well as its own endpoint,
     // so the queue keeps moving without a second schedule having to exist --
     // which also means it inherits that cron's cadence, not one of its own.
-    schedule: "Every 15 minutes via credit reconciliation cron",
-    maximumSilenceMs: silenceBudgetMsFor(CRON_CADENCE_MINUTES.creditReconciliation),
+    cron: "creditReconciliation",
+    schedule: scheduleSentence("creditReconciliation", "via credit reconciliation cron"),
+    maximumSilenceMs: silenceBudgetMsFor(everyMinutesCadence("creditReconciliation")),
   },
   {
     key: "infrastructure_threshold_monitor",
     name: "Infrastructure threshold monitor",
-    schedule: "Every 15 minutes via credit reconciliation cron",
-    maximumSilenceMs: silenceBudgetMsFor(CRON_CADENCE_MINUTES.creditReconciliation),
+    cron: "creditReconciliation",
+    schedule: scheduleSentence("creditReconciliation", "via credit reconciliation cron"),
+    maximumSilenceMs: silenceBudgetMsFor(everyMinutesCadence("creditReconciliation")),
   },
   {
     key: "provider_probe",
     name: "Synthetic provider health probe (AUD-R001)",
-    schedule: "Every 10 minutes",
+    cron: "providerProbe",
+    schedule: scheduleSentence("providerProbe"),
     // Deliberately not `silenceBudgetMsFor` -- this is the one job with a
     // tighter constraint than the shared slack. Cadence is 10 minutes, but the
     // public status page's freshness window (see
@@ -107,49 +219,61 @@ export const SCHEDULED_JOB_DEFINITIONS = [
     // would be 30 and collide exactly.
     maximumSilenceMs: minutes(25),
   },
-] as const;
+] as const satisfies readonly {
+  key: string;
+  name: string;
+  cron: CronTriggerKey;
+  schedule: string;
+  maximumSilenceMs: number;
+}[];
 
 export type ScheduledJobKey = (typeof SCHEDULED_JOB_DEFINITIONS)[number]["key"];
 
-const nextBoundary = (now: Date, everyMinutes: number) => {
-  const result = new Date(now);
-  result.setUTCSeconds(0, 0);
-  result.setUTCMinutes(
-    Math.floor(result.getUTCMinutes() / everyMinutes) * everyMinutes + everyMinutes
-  );
-  return result;
+export const scheduledJobDefinition = (key: ScheduledJobKey) => {
+  const definition = SCHEDULED_JOB_DEFINITIONS.find((job) => job.key === key);
+  if (!definition) throw new Error(`Unknown scheduled job: ${key}`);
+  return definition;
 };
 
-const nextDailyUtc = (now: Date, hour: number, minute: number) => {
+/** The trigger a job runs on, whether it owns that cron or rides another's. */
+export const cronTriggerFor = (key: ScheduledJobKey) =>
+  CRON_TRIGGERS[scheduledJobDefinition(key).cron].trigger;
+
+/**
+ * The first moment this trigger fires strictly after `now`. On a boundary the
+ * answer is the next one: an estimate equal to `now` renders as "due now"
+ * forever.
+ */
+export const nextRunAfter = (trigger: CronTrigger, now: Date) => {
+  if (trigger.kind === "everyMinutes") {
+    const result = new Date(now);
+    result.setUTCSeconds(0, 0);
+    result.setUTCMinutes(
+      Math.floor(result.getUTCMinutes() / trigger.minutes) * trigger.minutes +
+        trigger.minutes
+    );
+    return result;
+  }
   const result = new Date(
-    Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), hour, minute)
+    Date.UTC(
+      now.getUTCFullYear(),
+      now.getUTCMonth(),
+      now.getUTCDate(),
+      trigger.hour,
+      trigger.minute
+    )
   );
   if (result <= now) result.setUTCDate(result.getUTCDate() + 1);
   return result;
 };
 
 /**
- * When this job is next expected to run. Every cron-driven entry derives its
- * boundary from `CRON_CADENCE_MINUTES` rather than a literal, so a cadence
- * change moves the estimate and the silence budget together.
+ * When this job is next expected to run. Every entry derives its boundary from
+ * the trigger it declares rather than from a literal, so a schedule change
+ * moves the estimate, the displayed sentence and the silence budget together.
  */
-export const nextScheduledAt = (key: ScheduledJobKey, now: Date) => {
-  if (
-    key === "credit_reservation_reconciliation" ||
-    key === "notification_delivery_retry" ||
-    key === "infrastructure_threshold_monitor"
-  ) {
-    return nextBoundary(now, CRON_CADENCE_MINUTES.creditReconciliation);
-  }
-  if (key === "provider_probe") {
-    return nextBoundary(now, CRON_CADENCE_MINUTES.providerProbe);
-  }
-  return key === "retention_cleanup"
-    ? nextDailyUtc(now, 3, 0)
-    : key === "provider_model_catalog_monitor"
-      ? nextDailyUtc(now, 0, 0)
-      : nextDailyUtc(now, 0, 30);
-};
+export const nextScheduledAt = (key: ScheduledJobKey, now: Date) =>
+  nextRunAfter(cronTriggerFor(key), now);
 
 export type ScheduledJobTimingInput = {
   now: Date;
