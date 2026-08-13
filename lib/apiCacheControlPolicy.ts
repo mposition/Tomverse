@@ -29,29 +29,51 @@
  * `no-store` variant needs no entry: `private, no-store` says the same thing or
  * more.
  *
- * ## What `no-store` costs a client that ignores a response body
+ * ## An observation about response bodies this application never reads
  *
- * `no-store` means the browser writes no cache entry -- and writing that entry
- * is what used to *drain* a response body the page never read. Measured on
- * Chromium against this server: a `fetch()` whose `Response` is dropped without
- * `json()`/`text()`/`body.cancel()` settles when the directive permits storage
- * (`private, no-cache`, `public, max-age=60`) and never settles under
- * `private, no-store` -- the request stays in flight for the life of the page,
- * on a 200 exactly as on a 500.
+ * What was measured, on Chromium against a `next start` build of this
+ * application at Next 16.3.0. A response whose body is never consumed -- no
+ * `json()`, `text()` or `body.cancel()` -- did not reach `requestfinished`
+ * under `private, no-store`. The same unconsumed body did reach it under
+ * `private, no-cache` and under `public, max-age=60`. Status did not matter: a
+ * 200 behaved the same as a 500.
  *
- * So a client fetch to `/api/*` must consume or cancel its body on *every*
- * path, not only the successful one. `res.ok ? res.json() : null` is the shape
- * that gets this wrong, and `app/(site)/(application)/chat/ChatPageClient.tsx`
- * had it: when the database was unreachable, `/api/user/guest-usage` answered
- * 500, the body was never read, and `/chat` never reached network idle again.
+ * Three things that observation is not.
  *
- * That file has been swept and `tests/e2e/guest-flow.spec.ts` holds the boot
- * path. The rest of the client has not: fire-and-forget writes and
- * `ok ? json() : null` reads exist elsewhere (the admin panels and the import
- * flows in particular), and each one leaks a request in flight while its screen
- * is open. That is a real but bounded cost, it is not what this change set is,
- * and it is written here so the next author does not read the sweep as
- * finished.
+ * It is not a `Cache-Control` contract. RFC 9111 §5.2.2.5 gives `no-store` one
+ * meaning -- do not store -- and says nothing about how long a request stays
+ * outstanding; Fetch handles updating the cache and terminating the body as
+ * separate steps. So this is behaviour of one browser and one server version,
+ * not something a directive promises.
+ *
+ * It is not an explained mechanism. "The cache write drains the body" fits the
+ * three data points and was not verified; nothing here rests on it being right.
+ *
+ * And it is not the `fetch()` promise hanging. That promise had already
+ * resolved -- status and headers arrived. What was outstanding is the body
+ * transfer and the request's own completion, which is what `networkidle`
+ * counts.
+ *
+ * The consequence for this repository is concrete either way, and it is
+ * something the client owes regardless of the cause: a fetch to `/api/*` has to
+ * consume or cancel its body on *every* path, not only the successful one.
+ * `res.ok ? res.json() : null` is the shape that gets it wrong, and
+ * `app/(site)/(application)/chat/ChatPageClient.tsx` had it: with the database
+ * unreachable, `/api/user/guest-usage` answered 500, the body was never read,
+ * and `/chat` never reached network idle again.
+ *
+ * ### What is and is not covered
+ *
+ * `ChatPageClient.tsx` has been swept -- all 26 of its fetch call sites, every
+ * branch. `tests/e2e/guest-flow.spec.ts` proves exactly one of them: the guest
+ * boot path's 500. No test yet covers a success path, a fire-and-forget write,
+ * or any other file.
+ *
+ * Everywhere else is unsurveyed. The same shapes exist in the admin panels and
+ * the import flows, and how much they actually cost is not known: a screen that
+ * retries, polls, or is driven repeatedly by a user accumulates outstanding
+ * requests rather than holding one. Sizing that needs the inventory, not a
+ * guess, and the inventory has not been done.
  */
 export type ApiCachingException = {
   /** Exact pathname, matched after the trailing slash is normalised away. */
