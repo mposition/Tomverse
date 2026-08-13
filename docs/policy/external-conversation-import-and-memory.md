@@ -8,8 +8,9 @@ approvedScopes:
   # 같은 날 승인자의 확인("frontmatter에 RELEASE_B_MEMORY 추가 — 완료")에
   # 따라 정의된 토큰으로 표기를 맞춘다.
   - RELEASE_B_MEMORY
+  - RELEASE_C_ASSISTANT_PROFILES
 approvedBy: @mposition
-approvedAt: 2026-08-03
+approvedAt: 2026-08-13
 approvalTicket: N/A
 ---
 
