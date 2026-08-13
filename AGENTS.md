@@ -592,3 +592,20 @@ Non-negotiable requirements:
 - Any related change must keep `tests/adminNavigation.test.mjs` and the `tests/e2e-admin/**` suite (`npm run test:e2e:admin`, the "Admin Console E2E (PostgreSQL)" workflow) passing.
 - A change that violates the redirect rule is a release blocker; the rest is ordinary review.
 <!-- END:admin-console-ia-invariant -->
+<!-- BEGIN:auto-model-selection-invariant -->
+## Auto model selection invariant
+
+Before changing `components/chat/AutoRoutingToggle.tsx`, `components/chat/AutoRoutedByBadge.tsx`, `lib/autoRoutingUi.ts`, `lib/autoRoutingCopy.ts`, or the `selectionMode` handling in `app/api/conversations/[conversationId]/route.ts`, read:
+
+- `docs/ui-contracts/auto-model-selection.md`
+
+Non-negotiable requirements:
+
+- **`offered` is the only input.** It already folds the feature flag together with cohort eligibility, so no surface may derive availability from the flag alone. There is no disabled state and no greyed row: a control that flips, saves and changes nothing cannot be told apart from Auto agreeing with the user every time.
+- No user-facing string may name a bucket, a percentage, a cohort salt or a readiness gate. A client that could read its own bucket could work out the rollout percentage.
+- No locale may promise a better, best, optimal or smartest model. `ROUTE-01` measures non-inferiority, which is a far weaker claim than that copy would be making, and `tests/autoRoutingUi.test.mjs` fails the build on the words.
+- The badge renders only on a turn Auto actually routed. A turn that fell back to the user's own model gets none, or it claims a routing decision that did not happen.
+- Returning a conversation to `manual` is accepted unconditionally, including when Auto is no longer offered — it is how a conversation leaves a mode the account can no longer act on, and how Auto's sticky state is cleared.
+- Auto never appears as a row in the model catalogue: it has no context window, price or provider, and the credit estimate would have nothing to show for it.
+- A change that violates this contract is a release blocker.
+<!-- END:auto-model-selection-invariant -->
