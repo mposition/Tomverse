@@ -15,8 +15,9 @@ import { resolve } from "node:path";
 //
 // The step that makes this concrete is `scheduled_account_deletions`, fifth in
 // the order. It is the sweep that keeps the promise made to someone who asked
-// for their account to be deleted 30 days ago, and it sat behind four sweeps
-// that have nothing to do with it.
+// for their account to be deleted -- seven days, per ACCOUNT_DELETION_GRACE_MS
+// in lib/accountDeletion.ts and per the sentence every locale shows them -- and
+// it sat behind four sweeps that have nothing to do with it.
 //
 // The unit test in tests/maintenanceStepsCore.test.mjs covers the runner. This
 // one covers the wiring: that `cleanupExpiredData` actually routes its steps
@@ -63,6 +64,9 @@ const prismaStub = {
   notificationDelivery: { deleteMany: async () => ({ count: 8 }) },
   providerHealthCheck: { deleteMany: async () => ({ count: 21 }) },
   adminNotificationLog: { deleteMany: async () => ({ count: 22 }) },
+  providerProbeResult: { deleteMany: async () => ({ count: 23 }) },
+  scheduledJobRun: { deleteMany: async () => ({ count: 24 }) },
+  providerModelCatalogRun: { deleteMany: async () => ({ count: 25 }) },
   $executeRaw: async () => 9,
   $transaction: async (run: (tx: unknown) => Promise<unknown>) => run(prismaStub),
 };
@@ -171,8 +175,8 @@ test("a step that throws does not skip the steps behind it", async () => {
   );
   assert.match(result.failedSteps[0].error, /the reservation table is unhappy/);
 
-  // The fifth step -- the 30-day account deletion promise -- still ran. This is
-  // the assertion the change exists for.
+  // The fifth step -- the seven-day account deletion promise -- still ran. This
+  // is the assertion the change exists for.
   assert.deepEqual(deletedAccountIds, ["user-past-its-grace-period"]);
   assert.equal(result.scheduledAccountsDeleted, 1);
 
@@ -190,6 +194,11 @@ test("a step that throws does not skip the steps behind it", async () => {
   // with nothing behind them.
   assert.equal(result.providerHealthChecks, 21);
   assert.equal(result.notificationLogs, 22);
+  // And the three tables the unswept-tables report found, which had no
+  // ceiling at all before they were given one.
+  assert.equal(result.providerProbeResults, 23);
+  assert.equal(result.scheduledJobRuns, 24);
+  assert.equal(result.providerModelCatalogRuns, 25);
 });
 
 test("a clean run reports no failed steps and every count", async () => {

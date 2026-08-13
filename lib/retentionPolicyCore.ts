@@ -136,6 +136,46 @@ export const RETENTION_POLICIES: readonly RetentionPolicy[] = [
         windowDays: 400,
         maintenanceStep: "product_analytics_events",
     },
+    // The three below were not published and not swept. They are written by
+    // cron on a fixed cadence and read newest-first or not at all, so nothing
+    // about them was ever going to stop growing -- see
+    // `npm run report:unswept-tables`, which is how they were found.
+    {
+        key: "providerProbeResults",
+        label: "Provider probe results",
+        // Every ten minutes, one row per probed model. Nothing reads the table:
+        // the probe's own failure path logs and updates the provider's health
+        // counters, and the comment at the write site says as much. Kept for
+        // the same 30 days as the other provider diagnostics so a person can
+        // still query it during an incident review.
+        policy: "Delete synthetic probe results older than 30 days.",
+        action: "delete",
+        windowDays: 30,
+        maintenanceStep: "provider_probe_results",
+    },
+    {
+        key: "scheduledJobRuns",
+        label: "Scheduled job runs",
+        // The Jobs screen reads the newest 150 across every job, the auto-fix
+        // queue reads unattended failures, and the threshold monitor reads the
+        // last cycle. 30 days is far above all three, and an unattended failure
+        // that old is not going to be auto-fixed.
+        policy: "Delete scheduled job run records older than 30 days.",
+        action: "delete",
+        windowDays: 30,
+        maintenanceStep: "scheduled_job_runs",
+    },
+    {
+        key: "providerModelCatalogRuns",
+        label: "Provider catalogue runs",
+        // Daily, and read by nothing. Longer than the others because it is one
+        // row a day: a year of it is cheaper than the question "when did the
+        // catalogue monitor last see this model" being unanswerable.
+        policy: "Delete provider catalogue monitor runs older than 365 days.",
+        action: "delete",
+        windowDays: 365,
+        maintenanceStep: "provider_model_catalog_runs",
+    },
 ];
 
 export const retentionPolicy = (key: string) => {

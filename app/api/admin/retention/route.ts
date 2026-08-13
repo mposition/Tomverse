@@ -60,6 +60,12 @@ export async function GET(req: Request) {
       oldProviderChecks,
       oldProviderErrors,
       oldProductAnalytics,
+      oldProbeResults,
+      oldJobRuns,
+      oldCatalogRuns,
+      oldestProbeResult,
+      oldestJobRun,
+      oldestCatalogRun,
       oldestUsage,
       oldestLease,
       oldestCreditReservation,
@@ -101,6 +107,26 @@ export async function GET(req: Request) {
       prisma.productAnalyticsEvent.count({
         where: { occurredAt: { lt: productAnalyticsCutoff } },
       }),
+      prisma.providerProbeResult.count({
+        where: { startedAt: { lt: retentionCutoff("providerProbeResults", now) } },
+      }),
+      prisma.scheduledJobRun.count({
+        where: { startedAt: { lt: retentionCutoff("scheduledJobRuns", now) } },
+      }),
+      prisma.providerModelCatalogRun.count({
+        where: {
+          startedAt: { lt: retentionCutoff("providerModelCatalogRuns", now) },
+        },
+      }),
+      prisma.providerProbeResult
+        .findFirst({ orderBy: { startedAt: "asc" }, select: { startedAt: true } })
+        .then((row) => row?.startedAt.toISOString() || null),
+      prisma.scheduledJobRun
+        .findFirst({ orderBy: { startedAt: "asc" }, select: { startedAt: true } })
+        .then((row) => row?.startedAt.toISOString() || null),
+      prisma.providerModelCatalogRun
+        .findFirst({ orderBy: { startedAt: "asc" }, select: { startedAt: true } })
+        .then((row) => row?.startedAt.toISOString() || null),
       oldestDate(
         () =>
           prisma.chatUsageBucket.findFirst({
@@ -200,6 +226,15 @@ export async function GET(req: Request) {
       productAnalytics: {
         staleCount: oldProductAnalytics,
         oldestAt: oldestProductAnalytics,
+      },
+      providerProbeResults: {
+        staleCount: oldProbeResults,
+        oldestAt: oldestProbeResult,
+      },
+      scheduledJobRuns: { staleCount: oldJobRuns, oldestAt: oldestJobRun },
+      providerModelCatalogRuns: {
+        staleCount: oldCatalogRuns,
+        oldestAt: oldestCatalogRun,
       },
     };
 

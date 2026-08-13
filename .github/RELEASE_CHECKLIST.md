@@ -510,6 +510,32 @@ Then, by outcome:
   financial fact. The correction needs the same approval any credit adjustment
   needs. Validation waits until the count reaches zero.
 
+### 7.8 Tables nothing removes rows from
+
+`npm run report:unswept-tables` lists every table the application writes and
+never deletes from, minus the ones registered as bounded by a key space or as
+deliberately retained. **It is not a gate.** It exits 0 with any number of
+findings, because whether a table should be swept, kept, or is bounded by
+something the script cannot see is a decision a person makes — the failure it
+prevents is nobody being asked.
+
+Three tables were found this way and now have policies: `ProviderProbeResult`
+(a row per probed model every ten minutes, read by nothing), `ScheduledJobRun`
+and `ProviderModelCatalogRun`. None of them broke anything, which is why they
+lasted: a table with no ceiling costs disk, backup time and query planning long
+before it costs an outage.
+
+- [ ] Run it and read the list. A new name on it is a table added since the
+      last release with no retention decision.
+- [ ] Anything acted on is either a policy in `lib/retentionPolicyCore.ts` or a
+      registry entry in `scripts/report-unswept-tables-core.mjs` with the reason
+
+The reservation tables (`ChatCreditReservation` and its image and memory
+siblings) are on the list deliberately and are **not** to be swept without a
+finance-ops decision: a settled reservation is the record linking a request to
+the credits it spent, so a sweep is a decision about billing evidence rather
+than about disk.
+
 ## 8. Unverified items and waivers
 
 Anything above that could not be verified from this environment goes here with
