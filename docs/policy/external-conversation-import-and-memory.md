@@ -49,7 +49,7 @@ approvalTicket: N/A
 | 릴리스 | 범위 | 명시적 비목표 |
 |---|---|---|
 | **A — Import** | ChatGPT·Claude 공식 export의 브라우저 파싱, 선택 대화의 정규화 저장, account-private read-only viewer, 삭제·export | Gemini, memory 추출·주입, 이어서 대화하기, password lock, 공유 링크, `Conversation` 변환 |
-| **A2 — Gemini Import** | Google Takeout(Gemini) parser. locale 의존 HTML 구조 때문에 별도 설계·fixture·eval 후 추가 | — |
+| **A2 — Gemini Import** | Google Takeout parser. 설계는 `docs/policy/external-import-gemini-a2.md` — 대화는 Takeout의 `Gemini` 항목이 아니라 `My Activity → Gemini Apps`에 있고 JSON 선택이 가능하므로, 여기 적힌 "locale 의존 HTML" 연기 사유는 A2 설계 §1에서 정정됐습니다. 남은 진행 조건은 활동 항목에 대화 식별자가 있는지입니다 | — |
 | **B — 계정 장기 메모리** | 메모리 후보 추출·검토·승인, 서버 주도 retrieval·주입, context bundle, external conversation lock 일반화 + memory suspension | Assistant Profile, knowledge, 외부 embedding |
 | **C — Assistant Profile** | private 프로필(지시문·모델·도구·memory 범위·지식 파일), 버전 고정, searchTerms 기반 knowledge RAG | public marketplace, 공유·판매, Actions, OAuth connector, 코드 실행, 외부 embedding |
 
