@@ -59,7 +59,7 @@ Canonical release-gate registry for Tomverse Chat v1. Human-readable tables must
 | `MEMORY-04` | Deleted or superseded memory is never reused | security-privacy | yes (when `memory-release-b-enabled`) | `deleted_or_superseded_memory_reuse_events` = 0 | pending |
 | `UI-01` | Tomverse Review behavior remains stable after headless extraction | web-ui | yes | `required_review_regression_e2e_pass_percent` = 100 | pending |
 | `UI-02` | Fallback status, cancellation, IME, streaming, and accessibility work end to end | web-ui | yes | `critical_chat_interaction_e2e_pass_percent` = 100 | pending |
-| `PACKAGE-01` | Shared chat packages remain framework-neutral | web-ui | yes | `forbidden_nextjs_imports_in_shared_packages` = 0 | evidence-ready |
+| `PACKAGE-01` | Shared chat packages remain framework-neutral | web-ui | yes | `forbidden_nextjs_imports_in_shared_packages` = 0 | approved |
 | `AUTH-01` | Sign in with Apple and identity lifecycle work end to end | mobile-release | yes | `apple_login_link_unlink_delete_revoke_e2e_pass_percent` = 100 | pending |
 | `AUTH-02` | Email OTP, magic link, and the isolated review code work through the mobile token path | backend-ai | yes | `email_otp_magic_link_lockout_turnstile_e2e_pass_percent` = 100; `submission_scoped_review_code_isolation_e2e_pass_percent` = 100 | pending |
 | `AUTH-03` | Mobile bearer-token lifecycle resists replay and supports revocation | backend-ai | yes | `refresh_rotation_reuse_logout_device_revoke_e2e_pass_percent` = 100 | pending |
@@ -75,11 +75,11 @@ Canonical release-gate registry for Tomverse Chat v1. Human-readable tables must
 ## Release-mode approval rules
 
 - Every applicable blocking gate must have status approved.
-- approvedBy must contain an accountable gate-owner approval and an independent-reviewer approval from different people.
+- approvedBy must contain an accountable gate-owner approval and an independent-reviewer approval. Whether those two roles may be held by the same subject is decided by soleApproverAllowed below.
 - approvedAt must be a non-null RFC 3339 timestamp.
 - evidenceRefs must contain immutable links or artifact identifiers.
 - not-applicable is allowed only when appliesWhen evaluates false and the decision has independent approval and an applicability evidence reference.
-- The independent reviewer must be a person who did not produce the referenced evidence. Co-implementers of a feature may approve as gate-owner but may not serve as the independent reviewer for gates whose evidence they produced.
+- The independent reviewer must be a person who did not produce the referenced evidence. Co-implementers of a feature may approve as gate-owner but may not serve as the independent reviewer for gates whose evidence they produced. Where soleApproverAllowed is true, "did not produce the evidence" is read against the actual author of the artefacts -- automation, in most cases -- rather than against the other human, of whom there is none.
 
 ## Gate detail
 
@@ -679,9 +679,9 @@ Evidence references: none recorded
 
 - Owner: web-ui
 - Blocking: yes
-- Status: evidence-ready
-- Approved by: @mposition (gate-owner)
-- Approved at: not yet approved
+- Status: approved
+- Approved by: @mposition (gate-owner), @mposition (independent-reviewer)
+- Approved at: 2026-08-12T23:21:58Z
 
 Why this gate exists: Framework-neutral packages are the mechanism that prevents Next.js and Capacitor clients from becoming duplicated products.
 

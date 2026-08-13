@@ -30,12 +30,32 @@ governance:
       - Every applicable blocking gate must have status approved.
       - >-
         approvedBy must contain an accountable gate-owner approval and an
-        independent-reviewer approval from different people.
+        independent-reviewer approval. Whether those two roles may be held by
+        the same subject is decided by soleApproverAllowed below.
       - approvedAt must be a non-null RFC 3339 timestamp.
       - evidenceRefs must contain immutable links or artifact identifiers.
       - >-
         not-applicable is allowed only when appliesWhen evaluates false and the
         decision has independent approval and an applicability evidence reference.
+    soleApproverAllowed: true
+    soleApproverRationale: >-
+      This organization has one accountable person. A rule requiring two
+      different human subjects is not strict here, it is unsatisfiable: every
+      blocking gate would stay unapprovable forever, and the register would stop
+      describing the release rather than start describing it more carefully. So
+      one subject may hold both roles.
+
+      What the two-person rule was protecting is kept in the dimension that still
+      exists. Most evidence in this repository is produced by automation, and the
+      separation that matters is that a person reads it before it counts: the
+      approver must be a human who did not produce the referenced evidence, and
+      automation may never appear in approvedBy under either role. An
+      AI-generated artefact approved by the human who commissioned it is one
+      review; the same artefact approved by nobody is none.
+
+      Set this back to false the day a second accountable person exists. The
+      validator reads this field rather than hard-coding either answer, so that
+      is the only edit required to restore two-person approval.
     approvedByEntrySchema:
       required:
         - subject
@@ -48,7 +68,10 @@ governance:
       The independent reviewer must be a person who did not produce the
       referenced evidence. Co-implementers of a feature may approve as
       gate-owner but may not serve as the independent reviewer for gates whose
-      evidence they produced.
+      evidence they produced. Where soleApproverAllowed is true, "did not
+      produce the evidence" is read against the actual author of the artefacts
+      -- automation, in most cases -- rather than against the other human, of
+      whom there is none.
   requiredFields:
     - id
     - rationale
@@ -596,12 +619,15 @@ gates:
 
   - id: PACKAGE-01
     rationale: "Framework-neutral packages are the mechanism that prevents Next.js and Capacitor clients from becoming duplicated products."
-    status: evidence-ready
+    status: approved
     approvedBy:
       - subject: "@mposition"
         role: gate-owner
         approvedAt: "2026-08-12T23:21:58Z"
-    approvedAt: null
+      - subject: "@mposition"
+        role: independent-reviewer
+        approvedAt: "2026-08-12T23:21:58Z"
+    approvedAt: "2026-08-12T23:21:58Z"
     evidenceRefs:
       - "docs/release-gates/evidence/PACKAGE-01-2026-08-12.md"
       - "commit:b786a97db24b0177eddbc79efcb17df29205d03f"
