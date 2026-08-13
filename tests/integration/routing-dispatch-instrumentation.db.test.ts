@@ -91,9 +91,12 @@ test("a manual dispatch produces a run, an attempt and a finalized manifest", as
   });
 
   // The user chose this model, so the run says so rather than claiming the
-  // Router picked it.
+  // Router picked it. `routerDecision` was not supplied, and the sentinels
+  // are what keeps a manual turn out of the metrics that grade routing.
   assert.equal(run.mode, "manual");
   assert.equal(run.selectionVersion, "manual");
+  assert.equal(run.taskProfileVersion, "manual");
+  assert.equal(run.candidateFilterVersion, "manual");
   assert.equal(run.userSelectedModelId, "gpt-5-6-luna");
   assert.equal(run.initialModelId, "gpt-5-6-luna");
 
@@ -211,6 +214,68 @@ test("authorising twice is refused rather than silently re-stamping", async () =
   });
   assert.equal(afterSecond.effectiveRequestHash, before.effectiveRequestHash);
   assert.equal(afterSecond.finalizedAt?.getTime(), before.finalizedAt?.getTime());
+});
+
+// A routed turn records the Router's own versions and the model the user did
+// *not* get, which is what makes disagreement measurable afterwards.
+test("a routed dispatch records the decision rather than the manual sentinels", async () => {
+  const record = await authorise(
+    await begin({
+      routerDecision: {
+        versions: {
+          decision: "router-decision-v1",
+          taskProfile: "task-profile-v1",
+          candidates: "router-candidates-v1",
+          selection: "router-selection-v1",
+        },
+        record: {
+          versions: {
+            decision: "router-decision-v1",
+            taskProfile: "task-profile-v1",
+            candidates: "router-candidates-v1",
+            selection: "router-selection-v1",
+          },
+          taskKind: "translation",
+          taskConfidence: "high",
+          needsCurrentInformation: false,
+          expectedOutputLength: "short",
+          scripts: ["hangul"],
+          signals: ["translation_verb"],
+          reservedInputTokens: 1_200,
+          requestOutputCapTokens: 4_000,
+          consideredModelCount: 6,
+          eligibleModelIds: ["gpt-5-6-luna", "deepseek-v4-flash"],
+          rejections: [
+            { modelId: "a", reason: "plan" },
+            { modelId: "b", reason: "plan" },
+            { modelId: "c", reason: "context_window" },
+          ],
+          selectedModelId: "gpt-5-6-luna",
+          selectionReason: "task_preference",
+          selectionMargin: 3,
+          challengerModelId: null,
+          turnsFavouringChallenger: 0,
+          decisionLatencyMs: 2,
+        },
+        userSelectedModelId: "deepseek-v4-flash",
+      },
+    })
+  );
+
+  const run = await prisma.routingRun.findUniqueOrThrow({
+    where: { id: record!.runId },
+  });
+  assert.equal(run.mode, "auto");
+  assert.equal(run.selectionVersion, "router-selection-v1");
+  assert.equal(run.taskProfileVersion, "task-profile-v1");
+  assert.equal(run.selectionReason, "task_preference");
+  assert.equal(run.eligibleCount, 2);
+  // The user's own choice, kept beside Auto's, so the two can be compared.
+  assert.equal(run.userSelectedModelId, "deepseek-v4-flash");
+  assert.equal(run.selectedModelId, "gpt-5-6-luna");
+  // Counts per reason, not the model ids that produced them.
+  assert.deepEqual(run.rejectedByReason, { plan: 2, context_window: 1 });
+  assert.equal(run.decisionMicros, 2_000);
 });
 
 test("off means off: nothing is written and nothing throws", async () => {

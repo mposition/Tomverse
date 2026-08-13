@@ -108,19 +108,68 @@ Returning a conversation to `manual` clears its sticky state, and the database
 enforces that — a manual row holding a router model or a challenger streak is
 refused by `Conversation_manual_has_no_sticky_state_check`.
 
-## 7. What is not built yet
+## 7. Where the decision is made
 
-- **Auto does not yet dispatch.** The seam, the cohort, the mode storage and
-  the sticky lifecycle are in place and tested; the chat route still answers
-  every turn with the requested model. Turning the dispatch on requires
-  reordering the request so the input estimate is computed before the model is
-  chosen — today the credit budget is built from `modelConfig`, so the model
-  has to be known first. That reordering touches the paid path and is its own
-  change.
-- **The Auto UI.** Deliberately last, and behind a disabled feature flag until
-  the server contract above is fixed and a cohort is actually running.
+The Router runs in `app/api/chat/route.ts` immediately after the retirement
+check on the model the user asked for, and before anything binds to a model.
+Everything downstream — the Gemini prefill rule, admin availability, the web
+search capability, the provider-context restore, the attachment shaping, the
+credit budget, the context-window fit and the manifest — then runs against the
+model that actually answers. There is no second pass, and nothing is checked
+against a model that was never dispatched.
 
-## 8. Record
+Three consequences worth knowing:
+
+- **The requested model still owns its own errors.** A user whose chosen model
+  was retired is told so, rather than having Auto quietly paper over it. That
+  branch runs first and unchanged.
+- **Provider reasoning context is model-specific.** The restore is keyed on the
+  routed model, so a turn Auto moved elsewhere restores nothing — which is
+  correct: another model's reasoning is not this model's context.
+- **`MODEL_NOT_SELECTED` is skipped on a routed turn, and only there.** In Auto
+  the user selected no model for the turn; the server did, and `selectedModels`
+  is the manual list it is not choosing from.
+
+A routed turn is recorded as `mode: "auto"` with the Router's own versions and
+the model the user did *not* get, so disagreement stays measurable. The shadow
+recorder is skipped on those turns — it records what Auto *would* have chosen,
+and there is nothing hypothetical left once Auto has chosen for real.
+
+## 8. Attachment turns are not routed
+
+A turn carrying an attachment falls back to the user's own model, recorded as
+`attachments_present`.
+
+Not a limitation of the Router — its filters already key on image and document
+capability. It is a limitation of *when* the decision can be made. The Router
+needs the input size; an attachment's size is only known once it has been
+fetched from object storage; and the fetch is interleaved with model-specific
+shaping, because whether a PDF is passed natively or converted to text depends
+on the model. So the bytes cannot be measured before the model is known, and
+the model cannot be chosen before the bytes are measured.
+
+The only available upper bound is the request limit — four megabytes of base64
+per turn — and feeding that to the candidate filter would rule out every model
+whose window cannot hold a maximal attachment, on every turn carrying a
+one-page PDF. Auto would answer `no_candidate` for most attachment turns and
+fall back anyway, having spent the filtering to get there. Refusing honestly is
+the same outcome without the pretence.
+
+Splitting that loop into a model-independent fetch and a model-dependent
+shaping pass is what would lift this, and it is its own change. The refusal is
+reported *after* the cohort refusal, so its count means "turns that would
+otherwise have been routed" — the number that says what the limitation costs.
+
+## 9. What is not built yet
+
+- **The Auto UI is behind a flag that is off**, and stays off until a cohort is
+  actually running: a toggle that saves and changes nothing is the failure
+  `docs/ui-contracts/auto-model-selection.md` §1 exists to prevent.
+- **No reroute on a failed dispatch.** §5's fallback and pass-through attempts
+  are what `RoutingAttempt` was built for, but nothing produces a second
+  attempt yet — a routed turn that fails fails, exactly as a manual one does.
+
+## 10. Record
 
 | Record | Entered by | Date |
 | --- | --- | --- |
