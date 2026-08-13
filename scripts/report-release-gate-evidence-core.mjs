@@ -77,9 +77,9 @@ export const GATE_EVIDENCE = {
         note: "Wants a RoutingRun invariant query plus adversarial context tests. Neither exists.",
     },
     "ROUTE-06": {
-        capability: ["lib/routerDecision.ts"],
-        measurement: [],
-        note: "Wants a RoutingAttempt-to-ContextManifest integrity query. No manifest module is in the tree yet.",
+        capability: ["lib/routerDecision.ts", "lib/routingAttemptStore.ts", "lib/routingManifestContent.ts"],
+        measurement: ["lib/routingAttemptStore.ts", "tests/integration/routing-attempt-manifest.db.test.ts"],
+        note: "The integrity query the gate names exists as dispatchedAttemptManifestCoverage(), and the database refuses a dispatch without a finalized manifest, so the figure should be 100% by construction -- running it is how a constraint dropped in a migration gets noticed. Needs a database, so it belongs in the release checklist beside the other deployed-database queries rather than in the PR gate.",
     },
     "ROUTE-07": {
         capability: ["lib/routingShadowReport.ts", "scripts/report-routing-shadow.mjs"],
@@ -123,9 +123,9 @@ export const GATE_EVIDENCE = {
         note: "The invariant is held in the stronger form: there is no automatic model substitution at all, so none can begin after a visible token. The scan pins one streamText call, one resolved model assigned once and not derived from the fallback table, and an allowlist of the surfaces that may name an alternative -- all of which only offer it. The production audit half is still owed, and would now be confirming a zero rather than discovering one.",
     },
     "FALLBACK-03": {
-        capability: ["lib/providerFallbackCandidates.ts"],
-        measurement: [],
-        note: "Depends on the context manifest that ROUTE-06 also waits on.",
+        capability: ["lib/providerFallbackCandidates.ts", "lib/routingAttemptStore.ts"],
+        measurement: ["lib/routingAttemptStore.ts", "tests/integration/routing-attempt-manifest.db.test.ts"],
+        note: "successfulFallbackCandidateManifestCoverage() answers the gate over the data. The 1:1 attempt/manifest relation makes \"has its own manifest\" structural, so the query looks at what distinguishes a rebuilt manifest from one copied off the failed attempt: the context window it was cut to must be this model's. Models with no declared window are reported as unverifiable rather than folded into either count. Needs a database.",
     },
 
     "PLANNER-01": {
