@@ -81,6 +81,7 @@
     "report:cost-bucket-corrections": "node --conditions=react-server --import tsx scripts/report-cost-bucket-corrections.mjs",
     "report:credit-lot-invariants": "node --conditions=react-server --import tsx scripts/report-credit-lot-invariants.mjs",
     "report:issue-backlog": "node --import tsx scripts/report-issue-backlog.mjs",
+    "report:unconsumed-response-bodies": "node scripts/report-unconsumed-response-bodies.mjs",
     "report:unswept-tables": "node scripts/report-unswept-tables.mjs",
     "report:release-gate-evidence": "node scripts/report-release-gate-evidence.mjs",
     "drill:railway-restore-preflight": "node scripts/railway-restore-preflight.mjs",

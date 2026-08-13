@@ -69,11 +69,13 @@
  * boot path's 500. No test yet covers a success path, a fire-and-forget write,
  * or any other file.
  *
- * Everywhere else is unsurveyed. The same shapes exist in the admin panels and
- * the import flows, and how much they actually cost is not known: a screen that
- * retries, polls, or is driven repeatedly by a user accumulates outstanding
- * requests rather than holding one. Sizing that needs the inventory, not a
- * guess, and the inventory has not been done.
+ * Everywhere else has been counted but not fixed:
+ * `.github/audits/unconsumed-response-bodies-2026-08-13.md`, produced by
+ * `npm run report:unconsumed-response-bodies`. 57 call sites outside that file
+ * reach an `/api/*` route on this default with a path that never reads the
+ * body; 8 of them were read by hand and all 8 were real. What the inventory
+ * deliberately does not have is a cost: how much any of them accumulates
+ * depends on how often the screen fires them, and nothing has measured that.
  */
 export type ApiCachingException = {
   /** Exact pathname, matched after the trailing slash is normalised away. */
