@@ -135,30 +135,51 @@ the model the user did *not* get, so disagreement stays measurable. The shadow
 recorder is skipped on those turns — it records what Auto *would* have chosen,
 and there is nothing hypothetical left once Auto has chosen for real.
 
-## 8. Attachment turns are not routed
+## 8. Attachment turns
 
-A turn carrying an attachment falls back to the user's own model, recorded as
-`attachments_present`.
+Attachment turns are routed, and the size that decides the routing is
+**measured, never declared**.
 
-Not a limitation of the Router — its filters already key on image and document
-capability. It is a limitation of *when* the decision can be made. The Router
-needs the input size; an attachment's size is only known once it has been
-fetched from object storage; and the fetch is interleaved with model-specific
-shaping, because whether a PDF is passed natively or converted to text depends
-on the model. So the bytes cannot be measured before the model is known, and
-the model cannot be chosen before the bytes are measured.
+The client knows how big its files are — it uploaded them — and
+`app/api/chat/preflight` accepts a declared size for its own estimate. Routing
+must not. A declared size is a claim, and an understated one would steer the
+Router to a model whose window the real content does not fit; the user would
+then get a context-window error for a model they never chose. So the chat route
+reads each object's size from storage with a HEAD before deciding.
 
-The only available upper bound is the request limit — four megabytes of base64
-per turn — and feeding that to the candidate filter would rule out every model
-whose window cannot hold a maximal attachment, on every turn carrying a
-one-page PDF. Auto would answer `no_candidate` for most attachment turns and
-fall back anyway, having spent the filtering to get there. Refusing honestly is
-the same outcome without the pretence.
+Two rules make that safe and cheap:
 
-Splitting that loop into a model-independent fetch and a model-dependent
-shaping pass is what would lift this, and it is its own change. The refusal is
-reported *after* the cohort refusal, so its count means "turns that would
-otherwise have been routed" — the number that says what the limitation costs.
+- **Only the caller's own objects.** The probe refuses any key outside the
+  prefix derived from the caller's signed identity. Without that rule it is an
+  object-size oracle over the whole bucket, answerable by anyone who can guess a
+  key. Guests never reach it — the cohort excludes them — so one prefix is
+  enough.
+- **Only when it could matter.** The probe runs only when the cohort would
+  admit the account, which today is nobody, so a turn that will not be routed
+  pays for no HEAD requests.
+
+An attachment that cannot be measured — no object key, a key outside the
+caller's prefix, or a store that will not answer — falls back to the user's own
+model, recorded as `attachments_unmeasurable`. Measurement is all-or-nothing per
+turn: a partial one would let the Router choose on the strength of the files it
+could see, and the one it could not is exactly the one likely to be a scanned
+PDF that does not fit.
+
+### What an attachment costs is per model
+
+A PDF a model reads natively is a flat per-file allowance; the same PDF on a
+model that cannot is its extracted text, bounded by a cap. One figure for every
+candidate would be wrong in one direction or the other — generous enough for
+the native readers admits a model the extracted text will not fit, and
+conservative enough for the extractors rules out the native readers for nothing.
+
+So `filterRouterCandidates` takes a per-model callback and fits each candidate's
+window against what *that* model would actually receive. It is a callback rather
+than a map so a model the filter considers and the caller did not answer for
+cannot read as free.
+
+The media types also reach the task profiler, which is what stops an image turn
+being routed to a model that cannot see one.
 
 ## 9. What is not built yet
 

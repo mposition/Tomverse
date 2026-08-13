@@ -38,10 +38,11 @@ const input = (overrides = {}) => ({
   subjectKey: "user_abc",
   isGuest: false,
   plan: "Pro",
-  // Stated rather than left undefined: an attachment turn is not routed, and
-  // a helper that omitted the field would test the default instead of the
-  // case. tests/autoDispatchPreflight.test.mjs covers the true side.
-  attachmentsPresent: false,
+  // Stated rather than left undefined: an attachment whose size could not be
+  // established is not routed, and a helper that omitted the field would test
+  // the default instead of the case. tests/autoDispatchPreflight.test.mjs
+  // covers the true side and the measurement itself.
+  attachmentsUnmeasurable: false,
   text: "이 문장을 영어로 번역해 주세요.",
   attachments: [],
   webSearchRequested: false,

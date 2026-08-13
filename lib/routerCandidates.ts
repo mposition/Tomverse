@@ -96,6 +96,16 @@ export type RouterCandidateInput = {
      */
     availableCredits?: number;
     creditsByModelId?: Readonly<Record<string, number>>;
+    /**
+     * What this turn's attachments would cost *this* model, in input tokens,
+     * on top of `reservedInputTokens`.
+     *
+     * Omitted on a turn with no attachment, where it would be zero for every
+     * candidate. It is a callback rather than a map so the caller cannot
+     * silently answer for a model the filter is considering and this file does
+     * not know about -- a missing entry would read as free.
+     */
+    attachmentTokensFor?: (model: AiModel) => number;
 };
 
 export type RouterCandidate = {
@@ -186,9 +196,19 @@ export function filterRouterCandidates(
             }
         }
 
+        // Attachments cost a different number of tokens on different models:
+        // a PDF a model can read natively is a flat per-file allowance, and
+        // the same PDF on a model that cannot is its extracted text. One
+        // figure for every candidate would therefore be wrong in one direction
+        // or the other -- generous enough for the native models admits a model
+        // whose window the extracted text will not fit, and conservative
+        // enough for the extracting models rules out the native ones for no
+        // reason. So the caller supplies the cost per model, and the window is
+        // fitted against what this candidate would actually receive.
+        const attachmentTokens = input.attachmentTokensFor?.(model) ?? 0;
         const budget = fitChatOutputToContextWindow({
             contextWindowTokens: model.contextWindowTokens,
-            reservedInputTokens: input.reservedInputTokens,
+            reservedInputTokens: input.reservedInputTokens + attachmentTokens,
             requestOutputCapTokens: input.requestOutputCapTokens,
         });
         if (budget.kind === "unbounded") {
