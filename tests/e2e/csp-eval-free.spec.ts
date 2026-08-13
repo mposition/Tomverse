@@ -126,32 +126,46 @@ const expectNoEvalViolation = async (page: Page) => {
   ).toEqual([]);
 };
 
+/**
+ * Tagged `@ui-risk` rather than left untagged, which would leave it to the
+ * unfiltered main-push run. What it catches -- a directive loosened in
+ * lib/csp.ts, the instrumentation entry deleted or renamed, a dependency
+ * reintroducing a probe -- arrives in a pull request, and a security contract
+ * that first speaks up after promotion speaks too late. Two tests over two
+ * Chromium projects, measured under seven seconds.
+ */
 test.describe("CSP: the client bundle never reaches for eval", () => {
-  test("chat loads and hydrates without a script-src violation", async ({
-    page,
-  }) => {
-    await recordViolations(page);
-    await prepareGuestPage(page);
-    const response = await page.goto("/chat");
+  test(
+    "chat loads and hydrates without a script-src violation",
+    { tag: "@ui-risk" },
+    async ({ page }) => {
+      await recordViolations(page);
+      await prepareGuestPage(page);
+      const response = await page.goto("/chat");
 
-    // Hydration, not just first paint: the probe fired while client modules
-    // evaluated, so the page has to have actually run them.
-    await expect(page.getByTestId("chat-textarea")).toBeVisible();
+      // Hydration, not just first paint: the probe fired while client modules
+      // evaluated, so the page has to have actually run them.
+      await expect(page.getByTestId("chat-textarea")).toBeVisible();
 
-    await expectNoEvalViolation(page);
-    expectEvalOutsidePolicy(response?.headers() ?? {});
-    await expectRecorderIsLive(page);
-  });
+      await expectNoEvalViolation(page);
+      expectEvalOutsidePolicy(response?.headers() ?? {});
+      await expectRecorderIsLive(page);
+    }
+  );
 
-  test("pricing loads without a script-src violation", async ({ page }) => {
-    await recordViolations(page);
-    await prepareGuestPage(page);
-    const response = await page.goto("/pricing");
+  test(
+    "pricing loads without a script-src violation",
+    { tag: "@ui-risk" },
+    async ({ page }) => {
+      await recordViolations(page);
+      await prepareGuestPage(page);
+      const response = await page.goto("/pricing");
 
-    await expect(page.getByRole("main").first()).toBeVisible();
+      await expect(page.getByRole("main").first()).toBeVisible();
 
-    await expectNoEvalViolation(page);
-    expectEvalOutsidePolicy(response?.headers() ?? {});
-    await expectRecorderIsLive(page);
-  });
+      await expectNoEvalViolation(page);
+      expectEvalOutsidePolicy(response?.headers() ?? {});
+      await expectRecorderIsLive(page);
+    }
+  );
 });
