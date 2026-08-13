@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { beforeEach, test } from "node:test";
+import { afterEach, beforeEach, test } from "node:test";
 import {
     getMemoryExtractionRevokedPairs,
     MemoryRevocationRequestError,
@@ -42,11 +42,19 @@ const storedValue = async () =>
         })
     )?.value ?? null;
 
-beforeEach(async () => {
-    await prisma.appSetting.deleteMany({
+const clearRevocations = () =>
+    prisma.appSetting.deleteMany({
         where: { key: MEMORY_EXTRACTION_REVOKED_PAIRS_KEY },
     });
-});
+
+beforeEach(clearRevocations);
+// Also *after*, which the before-hook alone does not cover. This row is
+// process-wide state that every other suite reads: `run-db-integration-tests`
+// runs them all in one process, and the last test here deliberately leaves an
+// unreadable value, which fails closed as "every pair revoked". Without this
+// the 31 memory-extraction tests that follow could not resolve an approved
+// pair, and reported it as their own failure.
+afterEach(clearRevocations);
 
 test("with no row at all, nothing is revoked", async () => {
     assert.deepEqual(await getMemoryExtractionRevokedPairs(), { kind: "none" });
