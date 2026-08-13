@@ -46,6 +46,26 @@
 아래에서 끝나면 그 모델이 검소하다는 뜻이지 상한이 강제된다는 뜻이 아니고,
 스크립트는 그 경우를 `inconclusive_limit_never_bound`로 보고한다.
 
+### 실행 위치와 준비
+
+명령은 **저장소 root**에서 실행한다(`scripts/`·`lib/`를 상대경로로 읽고, `tsx`가
+저장소의 `node_modules`에 있다). 출력은 **저장소 밖**에 쓴다 — §5의 키 검사를
+통과하기 전인 파일이 작업 트리 안에 있으면 확인 전에 commit될 수 있다.
+
+```
+cd /path/to/Tomverse
+export GEMINI_API_KEY=...                       # 이 shell에만 존재
+export EVIDENCE_DIR=~/tomverse-eval/google-image-thinking-cap
+mkdir -p "$EVIDENCE_DIR"
+```
+
+파일명은 `<model>-<limit>-<UTC timestamp>.json`으로 둔다. 같은 조합을 재실행할
+때 이전 결과를 덮어쓰지 않는 것이 요점이다 — 재실행은 대개 앞선 판정이 미결일
+때 하고, 그 미결 자체가 증거다.
+
+아래 네 단계는 **`--model`·`--limit`·`--repeats`만 다르고** 나머지 인자와
+리다이렉션은 1단계와 같다. 각 단계에는 달라지는 부분만 적었다.
+
 ### 1단계 — Flash Lite, 상한이 물리는 지점 찾기
 
 카드 한도가 가장 낮아(4,096) 가장 먼저 물릴 가능성이 높다.
@@ -56,7 +76,7 @@ node --conditions=react-server --import tsx \
   --model=gemini-3.1-flash-lite-image \
   --limit=512 --prompts=2 --repeats=2 \
   --thinking=high --json --i-accept-the-cost \
-  > evidence/flash-lite-512.json
+  > "$EVIDENCE_DIR/flash-lite-512-$(date -u +%Y%m%dT%H%M%SZ).json"
 ```
 
 4회, 계획 원가 178,976µ ≈ $0.18.
@@ -139,8 +159,8 @@ node --conditions=react-server --import tsx \
 검증 대상 수치(`max_output_tokens`, `thinking_level`, usage 카운터, `status`,
 step 종류·순서, `mime_type`)는 전부 원문 그대로다.
 
-파일명은 `google-image-thinking-cap/<model>-<limit>-<UTC timestamp>.json`으로
-두고, 판정이 끝나면 이 문서에 결과 표를 추가한다.
+판정이 끝나면 이 문서에 결과 표를 추가하고, §5를 통과한 JSON을 저장소로
+옮겨 함께 남긴다.
 
 ## 5. API 키 취급
 
@@ -152,12 +172,24 @@ step 종류·순서, `mime_type`)는 전부 원문 그대로다.
 - **그럼에도 전달 전에 손으로 한 번 더 검색한다.** 마스킹이 잡는 것은 알고 있는
   키 모양과 손에 쥔 키 값이다. 그 두 가지가 전부라는 보장은 없다.
 
+검사는 JSON을 쓴 그 shell에서, 증거 디렉터리를 대상으로 실행한다. `$GEMINI_API_KEY`
+가 살아 있는 shell이어야 두 번째 검사가 의미를 가진다.
+
 ```
-grep -c -E 'AIza[A-Za-z0-9_-]{10,}|AQ\.[A-Za-z0-9_-]{10,}' evidence/*.json
-grep -c "$GEMINI_API_KEY" evidence/*.json
+[ -n "$GEMINI_API_KEY" ] || echo "!! 키 변수가 비어 있음 -- 두 번째 검사는 무의미"
+
+grep -rEl 'AIza[A-Za-z0-9_-]{10,}|AQ\.[A-Za-z0-9_-]{10,}' "$EVIDENCE_DIR" \
+  && echo "!! 위 파일에 키 모양 문자열이 있음" || echo "OK: 키 모양 없음"
+
+grep -rlF -- "$GEMINI_API_KEY" "$EVIDENCE_DIR" \
+  && echo "!! 위 파일에 키 값이 그대로 있음" || echo "OK: 키 값 없음"
 ```
 
-둘 다 `0`이어야 전달한다.
+`grep -l`은 걸린 **파일명만** 출력하므로 출력이 없는 것이 통과다. `-c`를 쓰면
+파일마다 `0`이 줄줄이 나와 통과와 실패가 비슷하게 보인다. `-F`와 `--`는 키에
+`-`나 `.`이 들어 있어도 패턴이 아니라 문자열로 읽히게 한다.
+
+두 검사가 모두 `OK`일 때만 전달한다.
 
 ## 6. 판정 이후
 
