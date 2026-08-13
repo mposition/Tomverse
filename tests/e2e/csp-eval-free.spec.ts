@@ -105,13 +105,21 @@ const expectEvalOutsidePolicy = (headers: Record<string, string>) => {
 
 /**
  * Second control: the recorder is live and this browser really does report
- * violations to it. Provoked with a blocked fetch rather than an eval, for the
- * CDP reason above -- the directive differs, the reporting path is the same,
- * and `scriptViolations` keeps it out of the assertion it guards.
+ * violations to it. Provoked with a connect-src violation rather than an eval,
+ * for the CDP reason above -- the directive differs, the reporting path is the
+ * same, and `scriptViolations` keeps it out of the assertion it guards.
+ *
+ * The target is a dead local port on purpose. Under report-only -- which is
+ * what the e2e server serves, and what staging serves -- a violation is
+ * reported but *not* blocked, so the request is really attempted. An external
+ * hostname here had the test opening outbound connections on every run, which
+ * a control for a security contract should not be doing. Port 9 is discard: it
+ * is refused locally and immediately, and is a different origin from the page,
+ * which is all the violation needs.
  */
 const expectRecorderIsLive = async (page: Page) => {
   await page.evaluate(() =>
-    fetch("https://csp-control.invalid/probe").catch(() => undefined)
+    fetch("http://127.0.0.1:9/csp-control").catch(() => undefined)
   );
   await expect
     .poll(async () => (await readViolations(page)).length)
