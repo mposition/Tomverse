@@ -50,6 +50,10 @@ import {
   IMAGE_MODEL_REGISTRY,
 } from "../lib/imageModelRegistry.ts";
 import {
+  redactGoogleImageRequestBody,
+  redactGoogleImageResponseBody,
+} from "../lib/googleImageEvidence.ts";
+import {
   buildGoogleImageRequest,
   googleBillableOutputTokens,
   GOOGLE_API_KEY_HEADER,
@@ -262,9 +266,9 @@ const redact = (text) =>
     .replace(new RegExp(apiKey.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "g"), "[redacted-api-key]");
 
 const { createHash } = await import("node:crypto");
-const promptHashes = prompts.map((text) =>
-  createHash("sha256").update(text).digest("hex").slice(0, 16)
-);
+const sha256Prefix = (text) =>
+  createHash("sha256").update(text).digest("hex").slice(0, 16);
+const promptHashes = prompts.map((text) => sha256Prefix(text));
 
 const samples = [];
 // Set once a further paid call would buy nothing: either the question is
@@ -378,6 +382,11 @@ outer: for (let round = 0; round < repeats; round += 1) {
       modelOutputImageCount: interaction.modelOutputImageCount,
       stepTypes: interaction.stepTypes,
       mimeType: parsed?.mimeType ?? null,
+      // Policy §12 step 8 wants the raw response kept, and it is the only
+      // field here a later reader can check the rest against. The image bytes
+      // are the one part that cannot be read as text, so they arrive as a
+      // digest and a length; everything the verdict rests on is verbatim.
+      response: redactGoogleImageResponseBody(payload, sha256Prefix),
     });
 
     if (!measured) {
@@ -426,6 +435,12 @@ const report = {
   thinkingLevel: thinkingLevel ?? model.thinkingLevel ?? null,
   promptSha256Prefixes: promptHashes,
   promptSource: customPrompt ? "custom" : "built_in",
+  // The bodies as sent, one per prompt, with the prompt itself digested
+  // (policy §10). Kept rather than reconstructed: a report that re-derived its
+  // own request from its own fields would be evidence of nothing.
+  requestBodies: bodies.map((body) =>
+    redactGoogleImageRequestBody(body, sha256Prefix)
+  ),
   repeats,
   plannedCalls,
   sentCalls: samples.length,
@@ -435,7 +450,11 @@ const report = {
 };
 
 if (flag("json")) {
-  console.log(JSON.stringify(report, null, 2));
+  // Redacted as one string rather than field by field. Individual `detail`
+  // fields already go through `redact`, but this is the output a person pastes
+  // into a ticket, and a key reaching it through a field nobody thought about
+  // is exactly the failure that one pass over the finished text prevents.
+  console.log(redact(JSON.stringify(report, null, 2)));
 } else {
   console.log(`Model:      ${model.id}`);
   console.log(`Limit sent: ${limit} (card limit ${model.maxOutputTokens})`);

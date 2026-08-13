@@ -47,6 +47,7 @@ browser coverage without rebuilding E2E" 항목이 이 문서의 존재와 workf
 | `chat-analytics-settings-placement.spec.ts` |
 | `chat-memory-context.spec.ts` |
 | `comparison-panel-controls.spec.ts` |
+| `csp-eval-free.spec.ts` |
 | `feedback-modal.spec.ts` |
 | `keyboard-and-heading-structure.spec.ts` |
 | `marketing-language-analytics.spec.ts` |
@@ -68,6 +69,13 @@ browser coverage without rebuilding E2E" 항목이 이 문서의 존재와 workf
 이전 기록 "76 test / 14 skip / 67초"는 표에 적힌 5개 파일만 세던 시점의
 값입니다. 이 tier는 merge를 차단하므로, PR tier 비용을 근거로 무언가를
 빼거나 넣는 판단은 위 숫자를 다시 재고 나서 합니다.
+
+`csp-eval-free.spec.ts`는 2026-08-13에 합류했습니다(26개 파일, +4 test).
+이 tier의 다른 spec과 달리 UI 감사가 아니라 CSP 계약에서 왔습니다 — 클라이언트
+번들이 `eval`을 부르지 않는다는 것은 브라우저에서만 확인되는 사실이고, 이를
+깨뜨리는 변경(`lib/csp.ts`의 지시문 완화, `instrumentation-client.ts` 삭제,
+eval probe를 다시 들여오는 의존성)은 PR로 들어옵니다. 무태그로 두면 `main`
+push의 무필터 실행에서만 잡히는데, 승격 후에 말하는 보안 계약은 늦습니다.
 
 ## PR tier에 두지 않는 것과 그 이유
 
