@@ -166,6 +166,7 @@ export function decideRouterModel(
     profile,
     reservedInputTokens: input.reservedInputTokens,
     requestOutputCapTokens: input.requestOutputCapTokens,
+    attachmentTokensFor: input.attachmentTokensFor,
     unhealthyModelIds: input.unhealthyModelIds,
     regionBlockedModelIds: input.regionBlockedModelIds,
     availableCredits: input.availableCredits,

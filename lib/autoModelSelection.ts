@@ -51,23 +51,21 @@ export type AutoSelectionRefusal =
   | "no_conversation"
   | "cohort_refused"
   /**
-   * The turn carries an attachment, and routing one is not implemented.
+   * The turn carries an attachment whose size could not be established.
    *
-   * Not a limitation of the Router -- its filters already key on image and
-   * document capability. It is a limitation of *when* the decision can be
-   * made. The Router needs the input size, an attachment's size is only known
-   * once it has been fetched from object storage, and the fetch is interleaved
-   * with model-specific shaping: whether a PDF is passed natively or converted
-   * to text depends on the model, so the bytes cannot be measured before the
-   * model is known and the model cannot be chosen before the bytes are
-   * measured. Splitting that loop into a model-independent fetch and a
-   * model-dependent shaping pass is its own change.
+   * Routing needs the size, because what an attachment costs differs per
+   * model, and a size a client declared is a claim rather than a measurement:
+   * an understated one would steer the Router to a model whose window the real
+   * content does not fit, and the user would get a context-window error for a
+   * model they did not choose. So the size is read from object storage, and an
+   * attachment that cannot be read there -- no key, a key outside the caller's
+   * own prefix, or a store that will not answer -- is not routed.
    *
    * Deliberately reported *after* the cohort refusal, so this counts only
    * turns that would otherwise have been routed -- which is exactly the number
    * that says what the limitation costs.
    */
-  | "attachments_present"
+  | "attachments_unmeasurable"
   | "no_candidate";
 
 export type AutoSelection =
@@ -103,8 +101,12 @@ export type AutoSelectionInput = {
    * mistaken for a missing conversation.
    */
   conversation: ConversationRoutingState | null;
-  /** True when any message in the turn carries an attachment. See above. */
-  attachmentsPresent: boolean;
+  /**
+   * True when the turn carries an attachment whose size could not be
+   * established. False both for a turn with no attachment and for one whose
+   * attachments were measured -- see `measureTurnAttachments`.
+   */
+  attachmentsUnmeasurable: boolean;
   subjectKey: string;
   isGuest: boolean;
   /** The candidate filter's own plan type: a tier, or Guest. */
@@ -125,6 +127,8 @@ export type AutoSelectionInput = {
   regionBlockedModelIds?: readonly string[];
   availableCredits?: number;
   creditsByModelId?: Readonly<Record<string, number>>;
+  /** Per-model attachment cost. See `lib/routerCandidates.ts`. */
+  attachmentTokensFor?: (model: AiModel) => number;
   cohortConfig?: AutoCohortConfig;
   readiness?: ReturnType<typeof autoRolloutReadiness>;
   now?: () => number;
@@ -161,8 +165,8 @@ export const selectAutoModel = (input: AutoSelectionInput): AutoSelection => {
     return { routed: false, reason: "conversation_is_manual", fallbackModelId, cohort };
   }
 
-  if (input.attachmentsPresent) {
-    return { routed: false, reason: "attachments_present", fallbackModelId, cohort };
+  if (input.attachmentsUnmeasurable) {
+    return { routed: false, reason: "attachments_unmeasurable", fallbackModelId, cohort };
   }
 
   const decision = decideRouterModel(
@@ -180,6 +184,7 @@ export const selectAutoModel = (input: AutoSelectionInput): AutoSelection => {
       regionBlockedModelIds: input.regionBlockedModelIds,
       availableCredits: input.availableCredits,
       creditsByModelId: input.creditsByModelId,
+      attachmentTokensFor: input.attachmentTokensFor,
       sticky: stickyStateFor(input.conversation),
     },
     input.now

@@ -28,6 +28,8 @@ import { selectAutoModel } from "@/lib/autoModelSelection";
 import { decideAutoCohort } from "@/lib/autoCohort";
 import { stickyStateAfterRoutedTurn } from "@/lib/conversationSelectionMode";
 import {
+    attachmentTokensForModel,
+    measureTurnAttachments,
     preflightInputEstimate,
     profileTextFor,
     turnCarriesAttachments,
@@ -821,6 +823,18 @@ async function handleChatPost(
         // The retirement branch above deliberately still speaks about the
         // requested model: a user whose chosen model was retired is told so,
         // rather than having Auto quietly paper over it.
+        // The caller's own attachment scope, derived from their signed identity
+        // rather than compared against anything in the request, so a crafted
+        // objectKey can only ever resolve inside it. Hoisted above the routing
+        // probe below, which measures attachment sizes and must obey the same
+        // rule: a probe that measured any key would be an object-size oracle
+        // over the whole bucket.
+        const ownAttachmentPrefix = session?.user?.email
+            ? `attachments/${createHash("sha256")
+                .update(session.user.email.toLowerCase())
+                .digest("hex")
+                .slice(0, 20)}/`
+            : null;
         // Only read when the cohort would admit this account. `decideAutoCohort`
         // costs nothing -- the plan is already in hand and readiness is read
         // from memory -- so while the rollout is off this query never runs and
@@ -845,15 +859,35 @@ async function handleChatPost(
                       },
                   })
                 : null;
+        // Measured, not declared. A size the client stated is a claim, and an
+        // understated one would steer the Router to a model whose window the
+        // real content does not fit -- leaving the user with a context-window
+        // error for a model they did not choose. Skipped entirely when the
+        // cohort would refuse anyway, so a turn nobody routes pays for no HEAD
+        // requests.
+        const measuredAttachments =
+            autoCohort.eligible && turnCarriesAttachments(messages)
+                ? await measureTurnAttachments(messages, ownAttachmentPrefix)
+                : ({ measurable: true, descriptors: [] } as const);
         const autoSelection = selectAutoModel({
             requestedModelId,
             conversation: conversationRouting,
             subjectKey: session?.user?.id ?? "",
             isGuest: !session?.user?.id,
             plan: accountPlan?.tier ?? null,
-            attachmentsPresent: turnCarriesAttachments(messages),
+            attachmentsUnmeasurable: !measuredAttachments.measurable,
+            attachmentTokensFor: measuredAttachments.measurable
+                ? attachmentTokensForModel(measuredAttachments.descriptors)
+                : undefined,
             text: profileTextFor(messages),
-            attachments: [],
+            // The profiler reads these to set hasImageInput / hasDocumentInput,
+            // which is what stops an image turn being routed to a model that
+            // cannot see one. Media types only -- no name, no bytes.
+            attachments: measuredAttachments.measurable
+                ? measuredAttachments.descriptors.map((descriptor) => ({
+                      mediaType: descriptor.mediaType,
+                  }))
+                : [],
             webSearchRequested: webSearchMode === "always",
             // Runtime models, not the static catalogue: a model an operator has
             // disabled must not be chosen and then refused two lines later by
@@ -1140,12 +1174,7 @@ async function handleChatPost(
                 );
             }
         }
-        const userObjectPrefix = session?.user?.email
-            ? `attachments/${createHash("sha256")
-                .update(session.user.email.toLowerCase())
-                .digest("hex")
-                .slice(0, 20)}/`
-            : null;
+        const userObjectPrefix = ownAttachmentPrefix;
         // One guest's storage scope, derived from their own signed identity.
         // Computed here rather than compared against a value from the request,
         // so a crafted objectKey can only ever resolve inside the caller's own

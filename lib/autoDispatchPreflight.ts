@@ -2,30 +2,44 @@
  * What the Router needs to know about a turn, before a model is chosen.
  *
  * The chat route's ordering problem in one file. Everything downstream of the
- * model — the credit budget, the context-window fit, the attachment shaping,
- * the provider-context restore — is built from `modelConfig`, so the model has
- * to be known first. But the Router's candidate filter needs the input size to
- * decide which models the turn fits in, and the input size is computed by the
- * loop that does the model-dependent shaping.
+ * model -- the credit budget, the context-window fit, the attachment shaping,
+ * the provider-context restore -- is built from `modelConfig`, so the model
+ * has to be known first. But the Router's candidate filter needs the input
+ * size to decide which models the turn fits in, and the input size is computed
+ * by the loop that does the model-dependent shaping.
  *
- * The way out is to compute, before any of it, the part of the size that does
- * not depend on the model: the text. That is exact for a turn with no
- * attachment, and a turn with an attachment is not routed at all
- * (`attachments_present` in `lib/autoModelSelection.ts`) precisely because
- * this estimate could not be honest about it.
+ * The way out is to compute, before any of it, what the size is *for each
+ * candidate*. Text is model-independent and exact. Attachments are neither:
+ * a PDF costs a flat allowance on a model that reads it natively and its
+ * extracted text on a model that does not, so there is no single number, and
+ * `lib/routerCandidates.ts` takes a per-model callback instead.
  *
- * ## Why not just over-estimate the attachments
+ * ## Why the sizes are measured rather than taken
  *
- * Because the only available upper bound is the request limit — four megabytes
- * of base64 per turn — and feeding that to the candidate filter would filter
- * out every model whose window cannot hold a maximal attachment, on every turn
- * that carries a one-page PDF. Auto would answer `no_candidate` for the
- * majority of attachment turns and fall back anyway, having spent the
- * filtering to get there. Refusing the turn honestly is the same outcome
- * without the pretence.
+ * The client knows how big the files are -- it uploaded them -- and
+ * `app/api/chat/preflight` already accepts a declared size for its own
+ * estimate. Routing must not: a declared size is a claim, and a client that
+ * understated one would steer the Router to a model whose window the real
+ * content does not fit. The user would then get a context-window error for a
+ * model they did not choose. So the size comes from object storage, and an
+ * attachment that cannot be measured is not routed.
+ *
+ * ## What "cannot be measured" covers
+ *
+ * An attachment with no object key, one outside the caller's own prefix, and
+ * one the store cannot answer for. The ownership rule is the important one:
+ * a probe that measured any key would be an object-size oracle over the whole
+ * bucket. Guests never reach here at all -- the cohort excludes them -- which
+ * is why one prefix is enough.
  */
 
+import {
+  estimatePreflightAttachmentTokens,
+  type AttachmentTokenDescriptor,
+} from "@/lib/chatAttachmentTokens";
 import { estimateRawTextTokens } from "@/lib/chatTokenEstimate";
+import type { AiModel } from "@/lib/models";
+import { measureR2Object } from "@/lib/r2";
 
 /** The shape the chat payload validator has already guaranteed. */
 export type PreflightMessage = {
@@ -97,3 +111,71 @@ export const preflightInputEstimate = (
     exact: !turnCarriesAttachments(messages),
   };
 };
+
+export type MeasuredAttachments =
+  | { measurable: true; descriptors: readonly AttachmentTokenDescriptor[] }
+  | { measurable: false; reason: "no_object_key" | "not_own_object" | "unmeasurable" };
+
+type PreflightAttachment = {
+  mediaType?: unknown;
+  objectKey?: unknown;
+};
+
+/**
+ * Every attachment in the turn, as `{ mediaType, size }`, or a refusal.
+ *
+ * All or nothing on purpose. A partial measurement would let the Router
+ * choose a model on the strength of the files it could see, and the one it
+ * could not is exactly the one likely to be a scanned PDF that does not fit.
+ *
+ * `ownObjectPrefix` is the caller's own storage prefix. A key outside it is
+ * refused rather than measured: without that rule this is an object-size
+ * oracle over the whole bucket, answerable by anyone who can guess a key.
+ */
+export const measureTurnAttachments = async (
+  messages: readonly PreflightMessage[],
+  ownObjectPrefix: string | null
+): Promise<MeasuredAttachments> => {
+  const attachments = messages.flatMap((message) =>
+    Array.isArray(message?.attachments)
+      ? (message.attachments as PreflightAttachment[])
+      : []
+  );
+
+  const descriptors: AttachmentTokenDescriptor[] = [];
+  for (const attachment of attachments) {
+    const objectKey = attachment?.objectKey;
+    if (typeof objectKey !== "string" || objectKey === "") {
+      return { measurable: false, reason: "no_object_key" };
+    }
+    if (!ownObjectPrefix || !objectKey.startsWith(ownObjectPrefix)) {
+      return { measurable: false, reason: "not_own_object" };
+    }
+    const size = await measureR2Object(objectKey);
+    if (size === null) {
+      return { measurable: false, reason: "unmeasurable" };
+    }
+    descriptors.push({
+      mediaType: typeof attachment.mediaType === "string" ? attachment.mediaType : "",
+      size,
+    });
+  }
+
+  return { measurable: true, descriptors };
+};
+
+/**
+ * The per-model attachment cost the candidate filter asks for.
+ *
+ * A thin wrapper over `estimatePreflightAttachmentTokens`, which already knows
+ * that a natively-readable file is a flat allowance and everything else is its
+ * extracted text. Named here so the chat route hands the filter a function
+ * rather than assembling one inline, and so the zero case -- no attachments,
+ * every model free -- is one place rather than a conditional at the call site.
+ */
+export const attachmentTokensForModel =
+  (descriptors: readonly AttachmentTokenDescriptor[]) =>
+  (model: AiModel): number =>
+    descriptors.length === 0
+      ? 0
+      : estimatePreflightAttachmentTokens(model, [...descriptors]);
