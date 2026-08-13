@@ -247,6 +247,16 @@ jobs:
         timeout-minutes: 5
         run: npm run check:shared-packages
 
+      # The other half of PACKAGE-01's evidence. `next build` proves the shared
+      # packages compile inside this app and cannot prove the thing the gate is
+      # about: that they build where Next.js is not the one building. Vite
+      # externalizes a Node builtin with a warning rather than an error, so
+      # this fails on the warning and then executes the bundle -- a build that
+      # resolved everything and behaves differently outside Next.js is the
+      # failure worth catching.
+      - name: Package build matrix (Vite)
+        timeout-minutes: 10
+        run: npm run verify:package-build-matrix
       # PUSH-01 is met by an absence, so until now the only thing holding it
       # was a person reading a diff and remembering a decision written months
       # earlier. A delivery SDK arrives in one line of package.json, and a
@@ -257,6 +267,17 @@ jobs:
       - name: Push infrastructure scope
         timeout-minutes: 5
         run: npm run check:push-scope
+
+      # The readiness register is the only thing standing between "Auto works
+      # in shadow" and "Auto answers a real person", which makes it worth
+      # attacking, and the attack is one word: pending -> passed. So a passed
+      # gate has to carry a person, a date, an artefact, a commit, a summary,
+      # a re-attestation deadline and its known limitations, or the build
+      # fails. It also prints which gates are outstanding, because that is the
+      # question everyone asks about this rollout.
+      - name: Auto rollout readiness
+        timeout-minutes: 5
+        run: npm run check:auto-rollout-readiness
 
       # gpt-image-2 lives outside AVAILABLE_MODELS by design, so the model
       # pricing check above cannot see it. Same release contract -- every

@@ -689,7 +689,6 @@ separate server error path which never imports Prisma:
 
 ```text
 SENTRY_DSN=<Sentry Next.js project DSN>
-SENTRY_ENVIRONMENT=production
 SENTRY_TRACES_SAMPLE_RATE=0
 
 # Optional but recommended for readable production stack traces
@@ -703,6 +702,15 @@ OPS_ALERT_DISCORD_WEBHOOK_URL=<Discord webhook URL>
 OPS_ALERT_EMAIL=<operations email address>
 OPS_ALERT_COOLDOWN_SECONDS=600
 ```
+
+`SENTRY_ENVIRONMENT` is deliberately absent. The environment tag comes from the
+same resolver everything else uses (`APP_ENV`, then Railway's environment name,
+then the build mode), so it agrees with `/api/build-info` by construction.
+Copying `SENTRY_ENVIRONMENT=production` into a non-production environment is
+how staging spent weeks filing its errors under production; set it only to
+label events with something the resolver has no opinion about (`production-eu`,
+`canary`), never to name a different one of `development`, `staging`,
+`production` or `test` -- that value is ignored, with a warning.
 
 `instrumentation.ts` forwards unhandled App Router server errors to Sentry.
 Caught readiness and maintenance errors are reported explicitly, because a

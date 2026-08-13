@@ -222,8 +222,12 @@ export const GATE_EVIDENCE = {
 
     "PACKAGE-01": {
         capability: ["packages"],
-        measurement: ["scripts/check-shared-packages.mjs", "tests/sharedPackages.test.mjs"],
-        note: "The ESLint no-restricted-imports half is built and counted. AGENTS.md states the gate stays pending because the Vite build matrix evidence does not exist and arrives with apps/mobile.",
+        measurement: [
+            "scripts/check-shared-packages.mjs",
+            "tests/sharedPackages.test.mjs",
+            "scripts/verify-package-build-matrix.mjs",
+        ],
+        note: "Both named artefacts exist: the ESLint no-restricted-imports report (check:shared-packages, which counts the metric through ESLint's own API) and the Next.js/Vite build matrix (next build plus verify:package-build-matrix, which bundles the packages with no Next.js present and runs the result). Approved 2026-08-12 against docs/release-gates/evidence/PACKAGE-01-2026-08-12.md, which pins the commit and the CI runs. The approval covers the two packages that existed at that commit; chat-ui and api-client are not in the tree, so the gate is worth re-reading rather than inheriting when they arrive.",
     },
 
     "AUTH-01": {

@@ -215,6 +215,22 @@ model Conversation {
   disabledPanels String @default("[]")
   webSearchMode  String @default("off") // off | auto | always
 
+  /// "manual" | "auto" (routing policy §5; allowlist CHECK lives in the
+  /// migration). Server-stored and server-decided: a request may ask for a
+  /// mode, but cohort eligibility (lib/autoCohort.ts) decides whether Auto
+  /// actually routes. A conversation left on "auto" while the account leaves
+  /// the cohort falls back to its own model choice rather than failing.
+  selectionMode String @default("manual")
+
+  /// Auto's sticky state, from lib/routerSelection.ts. `routerModelId` is the
+  /// model this conversation is currently on and `routerChallengerTurns` the
+  /// consecutive turns a challenger has cleared the switch margin. Both are
+  /// cleared when the conversation returns to manual: a streak accumulated
+  /// under Auto would otherwise decide the first switch after it is turned
+  /// back on, using evidence from a period the user did not route.
+  routerModelId         String?
+  routerChallengerTurns Int     @default(0)
+
   shareToken     String?   @unique
   shareEnabled   Boolean   @default(false)
   sharedAt       DateTime?

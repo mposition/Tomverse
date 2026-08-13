@@ -43,6 +43,13 @@ const REGISTRY = {
     reason:
       "Eighty event names, recreated by a migration whenever one is added. Already covered by tests/productAnalyticsDatabaseConstraint.test.ts; covered again here so the whole set has one mechanism.",
   },
+  Conversation_selectionMode_check: {
+    owner: "list",
+    module: "lib/conversationSelectionMode.ts",
+    list: "SELECTION_MODES",
+    reason:
+      "Manual or Auto, per conversation (routing policy \u00a75). The application reads an unrecognised stored value as manual, so a mode the constraint allows but the list does not know would silently route nobody rather than fail loudly \u2014 which is exactly the drift this check exists to catch.",
+  },
   Conversation_memoryMode_check: {
     owner: "list",
     module: "lib/conversationMemoryMode.ts",

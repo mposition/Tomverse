@@ -91,8 +91,12 @@ export const resetTraceEvidenceWriteBudgetForTests = () => {
 
 const releaseSha = () =>
   process.env.SENTRY_RELEASE || process.env.RAILWAY_GIT_COMMIT_SHA || null;
-const environmentName = () =>
-  process.env.SENTRY_ENVIRONMENT || resolveDeploymentEnvironment();
+// Deliberately NOT SENTRY_ENVIRONMENT. This name is stored on evidence a
+// person later reads to decide where a reported error happened, and the
+// feedback-automation policy forbids marking a staging deployment as a
+// production resolution. A Sentry display alias must not be able to say which
+// deployment produced a record.
+const environmentName = () => resolveDeploymentEnvironment();
 
 export type ChatErrorReportGrantInput = {
   /** Must be a trace this route minted itself (randomUUID at request start).

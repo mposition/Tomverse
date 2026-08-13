@@ -98,7 +98,9 @@ Three independent nets, because each one misses something the others catch.
    forbidden *import*; this catches a forbidden *global*, which no import rule
    can see.
 3. **`scripts/check-shared-packages.mjs`**, which reports the metric, runs the
-   other two, and applies the CSS rules below. It counts violations through ESLint's own API rather than
+   other two, and applies the CSS rules below.
+4. **`scripts/verify-package-build-matrix.mjs`**, which builds the packages
+   with a bundler that is not Next.js and runs the result (§6). It counts violations through ESLint's own API rather than
    re-implementing the scan, so the number the gate is measured on and the
    number that fails `npm run lint` are the same number by construction. It
    also refuses to report a count for a package the rule does not actually
@@ -123,20 +125,72 @@ decisions, and the first thing to diverge would be exactly the chat behaviour
 these packages exist to keep identical. If a package ever does need one, that
 is a decision to record here first.
 
-## 6. What PACKAGE-01 still needs
+## 6. The build matrix, and what PACKAGE-01 still needs
 
-The gate lists two pieces of evidence. Only one of them exists today:
+Both of the gate's evidence items now exist:
 
-- **ESLint `no-restricted-imports` report** — satisfied. `npm run
-  check:shared-packages` prints the metric on every PR.
-- **Next.js and Vite build matrix** — *not yet*. There is no Vite application
-  in the repository, so there is nothing to build the packages into. The
-  standalone `tsc` project in §4.2 is a stronger check than nothing but it is
-  not a bundler, and calling it a build matrix would misreport the gate. This
-  half lands with `apps/mobile` (plan Phase 3).
+- **ESLint `no-restricted-imports` report** — `npm run check:shared-packages`
+  prints the metric on every PR.
+- **Next.js and Vite build matrix** — the Next.js half is `next build`, which
+  runs on every PR. The Vite half is `npm run verify:package-build-matrix`.
 
-PACKAGE-01 therefore stays `pending`. The mechanism is in place and measured;
-the evidence set is not complete.
+The Vite half is deliberately not an application. Plan §4 names the build
+matrix as one of the three enforcement mechanisms for the *packages*, beside
+ESLint and `transpilePackages`; `apps/mobile` is a Phase 3 deliverable with its
+own scope, and waiting for it would leave the packages unenforced in between.
+
+What that script does, and why each part is there:
+
+1. **Bundles the packages with Vite**, no plugins, browser target, nothing
+   external. `next build` resolves `next/*`, Node builtins and app-injected
+   variables perfectly well, so it cannot answer the question the gate asks.
+   **Every** package reaches the bundle: the generated entry is built from each
+   `packages/*/package.json`'s own `exports` map, so a package joins by
+   existing. A package that declares no exports fails the matrix instead of
+   passing, because "counted in the summary but imported by nothing" is a
+   coverage claim the report cannot honour.
+2. **Fails on Vite's warnings, not only on its errors.** A Node builtin in a
+   browser build is externalized with a warning and the build *succeeds*,
+   shipping an import no browser can resolve. Judging the exit code alone
+   would have passed that.
+3. **Executes the bundle and checks the values.** Built is not working: a
+   bundle that resolved everything and then behaves differently outside
+   Next.js is exactly the case worth catching.
+4. **Checks the emitted CSS carries its values**, including the
+   `prefers-color-scheme` block — a stylesheet that built to nothing satisfies
+   a file-exists check.
+
+The entry uses `export *` rather than a named import list. Entry exports are
+bundle roots, so this pins every export into the build; a named list was tried
+first and was not equivalent — an export it did not mention was tree-shaken
+away, and an import that has been shaken away is never resolved, so a
+`node:crypto` added to a package built green.
+
+**PACKAGE-01 is `approved`** — 2026-08-12, `@mposition`, recorded in
+`docs/release-gates/tomverse-chat-v1.yaml`.
+
+Getting there was two separate things, and conflating them is the mistake worth
+naming. The *artefacts* are a script that counts the metric and a matrix that
+builds the packages twice; an artefact in the tree is not evidence for an
+approval. The registry wants `evidenceRefs` holding immutable links — a
+specific commit and specific CI runs — so the request was assembled as a
+packet: `docs/release-gates/evidence/PACKAGE-01-2026-08-12.md` records the
+verified commit, the run that printed
+`forbidden_nextjs_imports_in_shared_packages = 0`, the successful Next.js build
+and Vite matrix jobs, the packages in scope, and what that run does *not*
+establish.
+
+Both approval roles are held by one subject, which the registry allows through
+`approvalPolicy.soleApproverAllowed` with its reason written down: a
+two-different-people rule in a one-person organization is unsatisfiable rather
+than strict. The separation that remains is that the approver did not produce
+the evidence — automation did.
+
+**Read the scope before treating the gate as settled.** It covers the two
+packages that existed at that commit. `chat-ui` and `api-client` are named in
+the delivery plan and are not in the tree; the criterion is measured over
+`packages/*` as it stands, so the gate is worth re-reading when they arrive
+rather than inherited.
 
 ## 7. Adding a package
 

@@ -179,6 +179,7 @@ run(
     "tests/integration/routing-shadow.db.test.ts",
     "tests/integration/memory-metrics.db.test.ts",
     "tests/integration/conversation-memory-mode.db.test.ts",
+    "tests/integration/conversation-selection-mode.db.test.ts",
     // PRIVACY-01/02. These settle what a source scan cannot: that no withheld
     // column reaches the export, that no identifier survives an account
     // deletion, and that a download ticket is spent exactly once under
@@ -256,6 +257,21 @@ run(
   ],
   "Running the administrator Stripe webhook replay and its mode boundary"
 );
+// Its own process for the same reason: it replaces the Stripe client and the
+// webhook processor to drive the signed webhook endpoint.
+run(
+  [
+    "--conditions=react-server",
+    "--experimental-test-module-mocks",
+    "--no-warnings=ExperimentalWarning",
+    "--import",
+    "tsx",
+    "--test",
+    "--test-concurrency=1",
+    "tests/integration/stripe-webhook-route.db.test.ts",
+  ],
+  "Running the Stripe webhook endpoint's at-least-once delivery rules"
+);
 // Its own process for the same reason as the refund decision suite: it wraps
 // the notification queue module to inject an enqueue failure, and it stubs the
 // session and admin-auth seams for the feedback routes.
@@ -301,4 +317,20 @@ run(
     "tests/integration/memory-usage-disclosure-route.db.test.ts",
   ],
   "Running the §13.4 memory disclosure read scenarios"
+);
+// Its own process again: it replaces both next-auth and the Auto readiness
+// register, and a module mock is process-global. The register mock is why it
+// cannot share a process with anything that reads the committed one.
+run(
+  [
+    "--conditions=react-server",
+    "--experimental-test-module-mocks",
+    "--no-warnings=ExperimentalWarning",
+    "--import",
+    "tsx",
+    "--test",
+    "--test-concurrency=1",
+    "tests/integration/conversation-auto-selection-route.db.test.ts",
+  ],
+  "Running the Auto selection-mode route scenarios"
 );
