@@ -3,10 +3,6 @@ status: approved
 implementationBlockedUntilApproved: true
 approvedScopes:
   - RELEASE_A_IMPORT
-  # 2026-08-03 @mposition 승인. 최초 기록은 "RELEASE_B_IMPORT"였으나 이
-  # 문서와 §24가 정의한 릴리스 B의 scope 토큰은 RELEASE_B_MEMORY이므로,
-  # 같은 날 승인자의 확인("frontmatter에 RELEASE_B_MEMORY 추가 — 완료")에
-  # 따라 정의된 토큰으로 표기를 맞춘다.
   - RELEASE_B_MEMORY
   - RELEASE_C_ASSISTANT_PROFILES
 approvedBy: @mposition
