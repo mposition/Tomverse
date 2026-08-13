@@ -28,6 +28,30 @@
  * permits storage or reuse and is not named here. A route that sets a
  * `no-store` variant needs no entry: `private, no-store` says the same thing or
  * more.
+ *
+ * ## What `no-store` costs a client that ignores a response body
+ *
+ * `no-store` means the browser writes no cache entry -- and writing that entry
+ * is what used to *drain* a response body the page never read. Measured on
+ * Chromium against this server: a `fetch()` whose `Response` is dropped without
+ * `json()`/`text()`/`body.cancel()` settles when the directive permits storage
+ * (`private, no-cache`, `public, max-age=60`) and never settles under
+ * `private, no-store` -- the request stays in flight for the life of the page,
+ * on a 200 exactly as on a 500.
+ *
+ * So a client fetch to `/api/*` must consume or cancel its body on *every*
+ * path, not only the successful one. `res.ok ? res.json() : null` is the shape
+ * that gets this wrong, and `app/(site)/(application)/chat/ChatPageClient.tsx`
+ * had it: when the database was unreachable, `/api/user/guest-usage` answered
+ * 500, the body was never read, and `/chat` never reached network idle again.
+ *
+ * That file has been swept and `tests/e2e/guest-flow.spec.ts` holds the boot
+ * path. The rest of the client has not: fire-and-forget writes and
+ * `ok ? json() : null` reads exist elsewhere (the admin panels and the import
+ * flows in particular), and each one leaks a request in flight while its screen
+ * is open. That is a real but bounded cost, it is not what this change set is,
+ * and it is written here so the next author does not read the sweep as
+ * finished.
  */
 export type ApiCachingException = {
   /** Exact pathname, matched after the trailing slash is normalised away. */

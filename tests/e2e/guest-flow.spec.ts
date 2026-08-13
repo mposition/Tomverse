@@ -48,6 +48,32 @@ test("guest can change and persist language", async ({ page }) => {
   await expect(languageSelect(page)).toHaveValue("zh");
 });
 
+test("a guest-usage read that fails still finishes its request", { tag: "@smoke" }, async ({ page }) => {
+  // `/api/*` answers `private, no-store` (lib/apiCacheControlPolicy.ts), so the
+  // browser writes no cache entry -- and writing that entry is what used to
+  // drain a response body the page never read. A `fetch()` whose Response is
+  // dropped unread therefore stays in flight for the life of the page, which is
+  // not a test artefact: it holds a connection open, and every wait for network
+  // idle on /chat runs to its timeout instead.
+  //
+  // The E2E server is configured with an unreachable database on purpose, so
+  // this endpoint really does answer 500 here and this really is the error
+  // path. Armed before the navigation, because the request is issued during
+  // the guest bootstrap.
+  const finished = page.waitForEvent("requestfinished", {
+    predicate: (request) => request.url().includes("/api/user/guest-usage"),
+    timeout: 20_000,
+  });
+
+  await page.goto("/chat");
+
+  const request = await finished;
+  const response = await request.response();
+  // The precondition, asserted rather than assumed: without `no-store` nothing
+  // above applies and this test would pass for the wrong reason.
+  expect(response?.headers()["cache-control"]).toBe("private, no-store");
+});
+
 test("guest message appears immediately with mocked response", { tag: ["@smoke", "@review-parity"] }, async ({ page }, testInfo) => {
   await page.goto("/chat");
 
