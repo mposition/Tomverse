@@ -39,13 +39,33 @@ test("a 1K square request speaks the Interactions API, not GenerateContent", () 
     input: "a single red apple",
     response_format: {
       type: "image",
-      delivery: "inline",
       mime_type: "image/png",
       aspect_ratio: "1:1",
       image_size: "1K",
     },
     generation_config: { max_output_tokens: 32_768 },
   });
+});
+
+test("response_format carries only the keys the API reference defines", () => {
+  // This is the assertion the deep-equal above could not make on its own. It
+  // pinned whatever the builder produced, so when `delivery: "inline"` was
+  // added on reasoning rather than on the reference, the test was updated to
+  // match and agreed with it all the way to a 400 on a paid run:
+  //
+  //   "Image delivery mode is not supported."
+  //
+  // The list here is the spec table in
+  // .github/audits/image-model-verification-worksheet.md §F-2. Adding a key
+  // means adding it there first, with where the reference says so -- which is
+  // the step that was skipped twice now, once for this field and once for
+  // `mime_type: "image/png"`.
+  assert.deepEqual(Object.keys(request().response_format).sort(), [
+    "aspect_ratio",
+    "image_size",
+    "mime_type",
+    "type",
+  ]);
 });
 
 test("none of GenerateContent's field names appear anywhere in a request", () => {

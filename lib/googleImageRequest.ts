@@ -85,12 +85,24 @@ export const buildGoogleImageRequest = (input: {
   return {
     model: input.apiModelId,
     input: input.prompt,
+    // Exactly the four keys the Interactions API reference defines, and no
+    // others. A fifth one -- `delivery: "inline"` -- used to sit here with a
+    // comment explaining why inline bytes were preferable to a fetchable
+    // reference. That reasoning was sound and the field was invented: it is
+    // absent from the spec table in
+    // .github/audits/image-model-verification-worksheet.md §F-2, and the API
+    // refuses the whole request over it:
+    //
+    //   HTTP 400 invalid_request
+    //   "Image delivery mode is not supported."
+    //
+    // Inline is what the API does anyway -- the response carries base64 in
+    // `content.data`, which is what parseGoogleImageResponse reads. So the
+    // preference was already satisfied, and stating it cost every Google
+    // request. Same failure as the `image/png` one before it: a plausible
+    // field, no documented basis, and nothing that would notice.
     response_format: {
       type: "image",
-      // Inline bytes rather than a fetchable reference: the original is stored
-      // server-side, and a second fetch is one more way a generation the user
-      // was already charged for can fail after the fact.
-      delivery: "inline",
       mime_type: input.deliveryMimeType,
       aspect_ratio: mapped.aspectRatio,
       image_size: mapped.imageSize,
