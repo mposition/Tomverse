@@ -49,17 +49,20 @@ test("guest can change and persist language", async ({ page }) => {
 });
 
 test("a guest-usage read that fails still finishes its request", { tag: "@smoke" }, async ({ page }) => {
-  // `/api/*` answers `private, no-store` (lib/apiCacheControlPolicy.ts), so the
-  // browser writes no cache entry -- and writing that entry is what used to
-  // drain a response body the page never read. A `fetch()` whose Response is
-  // dropped unread therefore stays in flight for the life of the page, which is
-  // not a test artefact: it holds a connection open, and every wait for network
-  // idle on /chat runs to its timeout instead.
+  // What this asserts is the request completing, not the `fetch()` promise
+  // resolving -- that resolves either way, as soon as status and headers
+  // arrive. Under `private, no-store` a response body this page never consumed
+  // did not reach `requestfinished` at all (see lib/apiCacheControlPolicy.ts
+  // for what was measured and what it does not establish), so /chat never
+  // reached network idle and the desktop UI regression shard ran to its
+  // twenty-minute step timeout.
   //
   // The E2E server is configured with an unreachable database on purpose, so
   // this endpoint really does answer 500 here and this really is the error
-  // path. Armed before the navigation, because the request is issued during
-  // the guest bootstrap.
+  // path. It is one path of one call site: nothing here says anything about
+  // the success paths, the fire-and-forget writes, or any other file. Armed
+  // before the navigation, because the request is issued during the guest
+  // bootstrap.
   const finished = page.waitForEvent("requestfinished", {
     predicate: (request) => request.url().includes("/api/user/guest-usage"),
     timeout: 20_000,
