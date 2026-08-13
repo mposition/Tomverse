@@ -50,6 +50,24 @@ export type AutoSelectionRefusal =
   /** No conversation row, so no mode and nowhere for sticky state to live. */
   | "no_conversation"
   | "cohort_refused"
+  /**
+   * The turn carries an attachment, and routing one is not implemented.
+   *
+   * Not a limitation of the Router -- its filters already key on image and
+   * document capability. It is a limitation of *when* the decision can be
+   * made. The Router needs the input size, an attachment's size is only known
+   * once it has been fetched from object storage, and the fetch is interleaved
+   * with model-specific shaping: whether a PDF is passed natively or converted
+   * to text depends on the model, so the bytes cannot be measured before the
+   * model is known and the model cannot be chosen before the bytes are
+   * measured. Splitting that loop into a model-independent fetch and a
+   * model-dependent shaping pass is its own change.
+   *
+   * Deliberately reported *after* the cohort refusal, so this counts only
+   * turns that would otherwise have been routed -- which is exactly the number
+   * that says what the limitation costs.
+   */
+  | "attachments_present"
   | "no_candidate";
 
 export type AutoSelection =
@@ -76,7 +94,17 @@ export type AutoSelection =
 export type AutoSelectionInput = {
   /** The model the request asked for; the fallback in every refusal. */
   requestedModelId: string;
+  /**
+   * The conversation's mode and Auto's memory of it.
+   *
+   * `null` when there is no conversation -- and legitimately `null` when the
+   * caller skipped the read because the cohort would refuse anyway. The cohort
+   * is checked first for exactly that reason, so a skipped read is never
+   * mistaken for a missing conversation.
+   */
   conversation: ConversationRoutingState | null;
+  /** True when any message in the turn carries an attachment. See above. */
+  attachmentsPresent: boolean;
   subjectKey: string;
   isGuest: boolean;
   /** The candidate filter's own plan type: a tier, or Guest. */
@@ -105,17 +133,12 @@ export type AutoSelectionInput = {
 export const selectAutoModel = (input: AutoSelectionInput): AutoSelection => {
   const fallbackModelId = input.requestedModelId;
 
-  // Checked before the cohort on purpose. A manual conversation is not a
-  // cohort refusal, and recording it as one would make the cohort look
-  // smaller than it is -- the account may well be in it, on other
-  // conversations, right now.
-  if (!input.conversation) {
-    return { routed: false, reason: "no_conversation", fallbackModelId };
-  }
-  if (storedSelectionMode(input.conversation.selectionMode) !== "auto") {
-    return { routed: false, reason: "conversation_is_manual", fallbackModelId };
-  }
-
+  // The cohort first, and it is the only check that costs nothing: the plan is
+  // already in hand and readiness is read from memory. Everything below it
+  // needs the conversation row, so a caller can skip that read entirely for an
+  // account the cohort would refuse -- which, while the rollout is off, is
+  // every account. A feature that is disabled should cost nothing, not merely
+  // do nothing.
   const cohort = decideAutoCohort({
     subjectKey: input.subjectKey,
     isGuest: input.isGuest,
@@ -125,6 +148,21 @@ export const selectAutoModel = (input: AutoSelectionInput): AutoSelection => {
   });
   if (!cohort.eligible) {
     return { routed: false, reason: "cohort_refused", fallbackModelId, cohort };
+  }
+
+  // Below here the account *is* in the cohort, so a manual conversation is
+  // reported as manual rather than as a cohort refusal. That distinction is
+  // what keeps the cohort's size honest: this account may be routing another
+  // conversation right now.
+  if (!input.conversation) {
+    return { routed: false, reason: "no_conversation", fallbackModelId, cohort };
+  }
+  if (storedSelectionMode(input.conversation.selectionMode) !== "auto") {
+    return { routed: false, reason: "conversation_is_manual", fallbackModelId, cohort };
+  }
+
+  if (input.attachmentsPresent) {
+    return { routed: false, reason: "attachments_present", fallbackModelId, cohort };
   }
 
   const decision = decideRouterModel(

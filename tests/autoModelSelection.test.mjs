@@ -38,6 +38,10 @@ const input = (overrides = {}) => ({
   subjectKey: "user_abc",
   isGuest: false,
   plan: "Pro",
+  // Stated rather than left undefined: an attachment turn is not routed, and
+  // a helper that omitted the field would test the default instead of the
+  // case. tests/autoDispatchPreflight.test.mjs covers the true side.
+  attachmentsPresent: false,
   text: "이 문장을 영어로 번역해 주세요.",
   attachments: [],
   webSearchRequested: false,
@@ -81,14 +85,34 @@ test("every refusal falls back to the model the user would have had", () => {
   }
 });
 
-// A manual conversation is not a cohort refusal: the account may be in the
-// cohort right now, on a different conversation.
-test("a manual conversation never consults the cohort", () => {
+// For an account inside the cohort, a manual conversation is reported as
+// manual rather than as a cohort refusal: the account may be routing another
+// conversation right now, and counting this as a refusal would understate the
+// cohort's size.
+test("an eligible account's manual conversation is reported as manual", () => {
   const selection = selectAutoModel(
     input({ conversation: autoConversation({ selectionMode: "manual" }) })
   );
+  assert.equal(selection.routed, false);
   assert.equal(selection.reason, "conversation_is_manual");
-  assert.equal(selection.cohort, undefined);
+  assert.equal(selection.cohort?.eligible, true);
+});
+
+// The cohort is checked first so a caller can skip the conversation read
+// entirely for an account it would refuse -- while the rollout is off, every
+// account. A disabled feature should cost nothing, not merely do nothing.
+test("an account the cohort refuses needs no conversation at all", () => {
+  const selection = selectAutoModel({
+    ...input({ plan: "Free" }),
+    // What the chat route passes when it skipped the read.
+    conversation: null,
+  });
+  assert.equal(selection.routed, false);
+  assert.equal(
+    selection.reason,
+    "cohort_refused",
+    "a skipped read was mistaken for a missing conversation"
+  );
 });
 
 test("an unknown stored mode reads as manual rather than as Auto", () => {

@@ -24,6 +24,15 @@ import {
 } from "@/lib/models";
 import { buildTaskProfile } from "@/lib/taskProfileCore";
 import { scheduleRoutingShadowRun } from "@/lib/routingShadow";
+import { selectAutoModel } from "@/lib/autoModelSelection";
+import { decideAutoCohort } from "@/lib/autoCohort";
+import { stickyStateAfterRoutedTurn } from "@/lib/conversationSelectionMode";
+import {
+    preflightInputEstimate,
+    profileTextFor,
+    turnCarriesAttachments,
+} from "@/lib/autoDispatchPreflight";
+import { resolveModelPricing } from "@/lib/modelPricing";
 import {
     authoriseDispatch,
     beginInstrumentedDispatch,
@@ -741,6 +750,12 @@ async function handleChatPost(
             contextBundle,
         } = validateChatPayload(body);
         const requestedModelId = modelId || APP_DEFAULTS.defaultModelId;
+        // Auto's inputs, gathered before the model is resolved because the
+        // model is what Auto decides. The plan is carried forward to the
+        // access check below so this is not a second query.
+        const accountPlan = session?.user?.id
+            ? await getUserBillingPlan(session.user.id)
+            : null;
         // §8.1 invariant 1: the conversation's stored mode, read from the row
         // the ownership check loads below. Null for a request with no
         // conversation, which inherits the account default like `inherit`.
@@ -782,10 +797,9 @@ async function handleChatPost(
                     : undefined
             );
         }
-        const modelConfig = catalogModel?.enabled && !catalogModel.catalogDeleted
-            ? catalogModel
-            : undefined;
-        if (!modelConfig) {
+        const requestedModelConfig =
+            catalogModel?.enabled && !catalogModel.catalogDeleted ? catalogModel : undefined;
+        if (!requestedModelConfig) {
             return tracedJsonError(
                 "Unknown or disabled model.",
                 "MODEL_NOT_AVAILABLE",
@@ -793,6 +807,102 @@ async function handleChatPost(
                 traceId
             );
         }
+
+        // ---- Auto routing (routing policy §5; delivery plan step 4) -------
+        //
+        // Placed here, after the retirement check on the model the user asked
+        // for and before anything downstream binds to a model. Everything past
+        // this line -- the Gemini prefill rule, admin availability, the web
+        // search capability, the provider-context restore, the attachment
+        // shaping, the credit budget, the window fit and the manifest -- then
+        // runs against the model that actually answers, with no second pass
+        // and nothing checked against a model that was never dispatched.
+        //
+        // The retirement branch above deliberately still speaks about the
+        // requested model: a user whose chosen model was retired is told so,
+        // rather than having Auto quietly paper over it.
+        // Only read when the cohort would admit this account. `decideAutoCohort`
+        // costs nothing -- the plan is already in hand and readiness is read
+        // from memory -- so while the rollout is off this query never runs and
+        // the chat path pays nothing for a feature nobody has.
+        const autoCohort = decideAutoCohort({
+            subjectKey: session?.user?.id ?? "",
+            isGuest: !session?.user?.id,
+            plan: accountPlan?.tier ?? null,
+        });
+        const conversationRouting =
+            autoCohort.eligible && conversationId && session?.user?.id
+                ? await prisma.conversation.findFirst({
+                      // The owner is in the `where`, not checked afterwards,
+                      // so this cannot read another account's mode. The real
+                      // ownership check still runs below and still answers 403;
+                      // a miss here simply reads as "not an Auto conversation".
+                      where: { id: conversationId, userId: session.user.id },
+                      select: {
+                          selectionMode: true,
+                          routerModelId: true,
+                          routerChallengerTurns: true,
+                      },
+                  })
+                : null;
+        const autoSelection = selectAutoModel({
+            requestedModelId,
+            conversation: conversationRouting,
+            subjectKey: session?.user?.id ?? "",
+            isGuest: !session?.user?.id,
+            plan: accountPlan?.tier ?? null,
+            attachmentsPresent: turnCarriesAttachments(messages),
+            text: profileTextFor(messages),
+            attachments: [],
+            webSearchRequested: webSearchMode === "always",
+            // Runtime models, not the static catalogue: a model an operator has
+            // disabled must not be chosen and then refused two lines later by
+            // `assertModelRuntimeAvailable`.
+            models: runtimeModels.filter(
+                (model) => model.enabled && !model.catalogDeleted
+            ),
+            reservedInputTokens: preflightInputEstimate(messages).estimatedInputTokens,
+            // The unfitted application cap. The filters fit it to each model's
+            // own window; a figure already fitted to the requested model's
+            // window would bias every other candidate against it.
+            requestOutputCapTokens: resolveModelPricing(requestedModelConfig)
+                .maxOutputTokens,
+        });
+        const effectiveModelId = autoSelection.routed
+            ? autoSelection.modelId
+            : requestedModelId;
+        if (autoSelection.routed) {
+            console.info(JSON.stringify({
+                event: "chat_auto_routed",
+                traceId,
+                conversationId,
+                requestedModelId,
+                selectedModelId: effectiveModelId,
+                selectionReason: autoSelection.record.selectionReason,
+                routerVersion: autoSelection.versions.decision,
+                timestamp: new Date().toISOString(),
+            }));
+        }
+        const routedCatalogModel = autoSelection.routed
+            ? runtimeModelMap.get(effectiveModelId)
+            : requestedModelConfig;
+        // The Router only ever considers runtime models that are enabled and
+        // not catalogue-deleted, so a miss here means the Router returned
+        // something outside the list it was given. Falling back to the
+        // requested model keeps the answer, and the log says it happened --
+        // silently answering from a model nobody chose is the one outcome
+        // worse than either.
+        if (autoSelection.routed && !routedCatalogModel) {
+            console.error(JSON.stringify({
+                event: "chat_auto_routed_model_missing",
+                traceId,
+                selectedModelId: effectiveModelId,
+                timestamp: new Date().toISOString(),
+            }));
+        }
+        const modelConfig = routedCatalogModel?.enabled && !routedCatalogModel.catalogDeleted
+            ? routedCatalogModel
+            : requestedModelConfig;
         if (hasUnsupportedGeminiPrefill(modelConfig, messages)) {
             return tracedJsonError(
                 "Gemini 3.6 and later requests must end with a user message.",
@@ -801,7 +911,9 @@ async function handleChatPost(
                 traceId
             );
         }
-        const adminModelAccess = await assertModelRuntimeAvailable(requestedModelId);
+        // The model that will answer, not the one that was asked for: Auto's
+        // choice passes the same operational gate as a manual one.
+        const adminModelAccess = await assertModelRuntimeAvailable(modelConfig.id);
         if (!adminModelAccess.allowed) {
             return tracedJsonError(
                 adminModelAccess.reason || "This model is temporarily unavailable.",
@@ -874,9 +986,10 @@ async function handleChatPost(
                 "This conversation has reached its attachment limit. Start a new chat to attach more files."
             );
         }
-        const billingPlan = session?.user?.id
-            ? await getUserBillingPlan(session.user.id)
-            : null;
+        // Resolved before the model, because Auto needs the plan to decide
+        // whether this account is routed at all. Reused here rather than
+        // fetched twice.
+        const billingPlan = accountPlan;
         const userPlan = billingPlan?.tier;
         const access = identifyChatCaller(
             req,
@@ -999,7 +1112,13 @@ async function handleChatPost(
                     traceId
                 );
             }
+            // Skipped on a routed turn, and only there. The check exists to
+            // stop a client asking for a model the conversation does not have
+            // selected; in Auto the user selected no model for this turn, the
+            // server did, and `selectedModels` is the manual list it is not
+            // choosing from.
             if (
+                !autoSelection.routed &&
                 selectedConversationModels.length > 0 &&
                 !selectedConversationModels.includes(requestedModelId)
             ) {
@@ -1087,7 +1206,12 @@ async function handleChatPost(
                 const storedContexts =
                     await prisma.messageProviderContext.findMany({
                         where: {
-                            modelId: requestedModelId,
+                            // Reasoning traces belong to the model that
+                            // produced them. On a turn Auto routed elsewhere
+                            // there is nothing stored for the new model, so
+                            // nothing is restored -- which is correct: another
+                            // model's reasoning is not this model's context.
+                            modelId: modelConfig.id,
                             message: { conversationId },
                         },
                         orderBy: { createdAt: "asc" },
@@ -1781,7 +1905,12 @@ async function handleChatPost(
         // model the user selected is what executes. Handed to `after()` and
         // never awaited: an experiment that can delay or fail a chat is not an
         // experiment. Off unless TOMVERSE_ROUTER_SHADOW_ENABLED says otherwise.
-        scheduleRoutingShadowRun(() => {
+        // Shadow records what Auto *would* have chosen while the user's model
+        // runs. On a turn Auto actually routed there is nothing hypothetical
+        // left to record, and a row here would enter the same decision twice
+        // -- once as a shadow prediction and once as the real run -- into
+        // metrics that read the two as independent.
+        if (!autoSelection.routed) scheduleRoutingShadowRun(() => {
             const lastUserTurn = [...formattedMessages]
                 .reverse()
                 .find((message) => message.role === "user");
@@ -2067,6 +2196,15 @@ async function handleChatPost(
         }));
         dispatchRecord = await beginInstrumentedDispatch({
             traceId,
+            // Present only on a routed turn, so a manual run cannot be
+            // counted in the metrics that grade routing.
+            routerDecision: autoSelection.routed
+                ? {
+                      versions: autoSelection.versions,
+                      record: autoSelection.record,
+                      userSelectedModelId: requestedModelId,
+                  }
+                : null,
             userId: access.userId ?? null,
             subjectKey: access.subjectKey,
             plan: access.kind === "guest" ? "Guest" : (access.plan ?? "Free"),
@@ -2225,6 +2363,36 @@ async function handleChatPost(
                         errorClass: outcome === "empty" ? "empty_response" : null,
                         settlementOutcome: outcome,
                     });
+                    // Auto's memory of this conversation, written only for a
+                    // turn it actually routed and only when that turn
+                    // produced an answer. A streak advanced by a cancelled or
+                    // failed turn would let hysteresis be decided by turns
+                    // that never reached the user.
+                    if (autoSelection.routed && outcome === "completed" && conversationId) {
+                        try {
+                            await prisma.conversation.updateMany({
+                                // `updateMany` with the mode in the filter, so
+                                // a conversation switched back to manual
+                                // mid-stream is not given sticky state the
+                                // CHECK forbids it to hold.
+                                where: {
+                                    id: conversationId,
+                                    selectionMode: "auto",
+                                },
+                                data: stickyStateAfterRoutedTurn(
+                                    autoSelection.modelId,
+                                    autoSelection.sticky.turnsFavouringChallenger
+                                ),
+                            });
+                        } catch (error) {
+                            logRequestError(
+                                "chat_auto_sticky_persist_failed",
+                                traceId,
+                                error,
+                                modelConfig.id
+                            );
+                        }
+                    }
                 } catch (error) {
                     logRequestError(
                         "chat_usage_settlement_failed",
@@ -2805,6 +2973,20 @@ async function handleChatPost(
         // is one.
         if (memoryUsedCount > 0) {
             headers.set("X-Chat-Memory-Used", String(memoryUsedCount));
+        }
+        // Which model answered, on a turn Auto routed. A header rather than
+        // something in the body for the same reason as the memory count: the
+        // client needs it before the first token, and the badge on the reply
+        // is what makes the toggle's promise -- "the one that answered is
+        // shown on the reply" -- keepable.
+        //
+        // Absent on a manual turn, and absent on an Auto turn that fell back:
+        // a header there would claim a routing decision that did not happen.
+        // The reason is the Router's own fixed identifier, so the client
+        // localises it and nothing derived from the turn crosses the wire.
+        if (autoSelection.routed) {
+            headers.set("X-Chat-Routed-Model", autoSelection.modelId);
+            headers.set("X-Chat-Routed-Reason", autoSelection.record.selectionReason);
         }
         if (accessGrant.setCookie) {
             headers.append("Set-Cookie", accessGrant.setCookie);
