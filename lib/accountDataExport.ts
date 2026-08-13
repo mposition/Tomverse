@@ -632,6 +632,39 @@ const FETCHERS: Record<string, (userId: string) => Promise<unknown[]>> = {
       orderBy: { createdAt: "asc" },
       take: EXPORT_ROW_CAP,
     }),
+
+  assistantProfile: (userId) =>
+    prisma.assistantProfile.findMany({
+      where: { userId },
+      select: {
+        id: true,
+        name: true,
+        icon: true,
+        description: true,
+        createdAt: true,
+        updatedAt: true,
+      },
+      orderBy: { createdAt: "asc" },
+      take: EXPORT_ROW_CAP,
+    }),
+
+  assistantProfileVersion: (userId) =>
+    prisma.assistantProfileVersion.findMany({
+      where: { userId },
+      select: {
+        id: true,
+        profileId: true,
+        revision: true,
+        instructions: true,
+        models: true,
+        toolPolicy: true,
+        memoryPolicy: true,
+        starters: true,
+        createdAt: true,
+      },
+      orderBy: [{ profileId: "asc" }, { revision: "asc" }],
+      take: EXPORT_ROW_CAP,
+    }),
 };
 
 /**

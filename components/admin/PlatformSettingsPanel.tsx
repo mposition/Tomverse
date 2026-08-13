@@ -16,6 +16,8 @@ type AdminAppSettingsResponse = {
   settings?: PublicAppSettings;
   imageGenerationEnabled?: boolean;
   externalConversationImportEnabled?: boolean;
+  assistantProfilesEnabled?: boolean;
+  assistantKnowledgeEnabled?: boolean;
   error?: string;
 };
 
@@ -25,12 +27,22 @@ type Props = {
   imageGenerationEnabled: boolean;
   /** Release A import rollout flag; same opt-in, fail-closed shape. */
   externalConversationImportEnabled: boolean;
+  /** Release C profile rollout flag; same opt-in, fail-closed shape. */
+  assistantProfilesEnabled: boolean;
+  /**
+   * Release C knowledge rollout flag. Read back from the server as the
+   * *effective* value, which is off whenever profiles are off (§15) -- so the
+   * checkbox shows what is actually in force rather than what is stored.
+   */
+  assistantKnowledgeEnabled: boolean;
 };
 
 export function PlatformSettingsPanel({
   settings,
   imageGenerationEnabled: initialImageGenerationEnabled,
   externalConversationImportEnabled: initialExternalImportEnabled,
+  assistantProfilesEnabled: initialAssistantProfilesEnabled,
+  assistantKnowledgeEnabled: initialAssistantKnowledgeEnabled,
 }: Props) {
   const { models } = useModelCatalog();
   const guestModels = useMemo(
@@ -56,6 +68,12 @@ export function PlatformSettingsPanel({
   const [externalImportEnabled, setExternalImportEnabled] = useState(
     initialExternalImportEnabled
   );
+  const [assistantProfilesEnabled, setAssistantProfilesEnabled] = useState(
+    initialAssistantProfilesEnabled
+  );
+  const [assistantKnowledgeEnabled, setAssistantKnowledgeEnabled] = useState(
+    initialAssistantKnowledgeEnabled
+  );
   const [lastSyncedAt, setLastSyncedAt] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
@@ -65,7 +83,9 @@ export function PlatformSettingsPanel({
   const applySettings = (
     nextSettings: PublicAppSettings,
     nextImageGenerationEnabled?: boolean,
-    nextExternalImportEnabled?: boolean
+    nextExternalImportEnabled?: boolean,
+    nextAssistantProfilesEnabled?: boolean,
+    nextAssistantKnowledgeEnabled?: boolean
   ) => {
     setGuestDefaultModelId(nextSettings.guestDefaultModelId);
     setAiChatEnabled(nextSettings.aiChatEnabled);
@@ -76,6 +96,12 @@ export function PlatformSettingsPanel({
     }
     if (typeof nextExternalImportEnabled === "boolean") {
       setExternalImportEnabled(nextExternalImportEnabled);
+    }
+    if (typeof nextAssistantProfilesEnabled === "boolean") {
+      setAssistantProfilesEnabled(nextAssistantProfilesEnabled);
+    }
+    if (typeof nextAssistantKnowledgeEnabled === "boolean") {
+      setAssistantKnowledgeEnabled(nextAssistantKnowledgeEnabled);
     }
     setLastSyncedAt(new Date().toLocaleTimeString());
   };
@@ -96,7 +122,9 @@ export function PlatformSettingsPanel({
       applySettings(
         data.settings,
         data.imageGenerationEnabled,
-        data.externalConversationImportEnabled
+        data.externalConversationImportEnabled,
+        data.assistantProfilesEnabled,
+        data.assistantKnowledgeEnabled
       );
       dispatchAppToast("Platform settings reloaded. The form now matches what is stored.", "success");
     } catch {
@@ -120,6 +148,8 @@ export function PlatformSettingsPanel({
           publicSharingEnabled,
           imageGenerationEnabled,
           externalConversationImportEnabled: externalImportEnabled,
+          assistantProfilesEnabled,
+          assistantKnowledgeEnabled,
         }),
       });
       const data = (await response.json().catch(() => null)) as
@@ -150,7 +180,9 @@ export function PlatformSettingsPanel({
       applySettings(
         data.settings,
         data.imageGenerationEnabled,
-        data.externalConversationImportEnabled
+        data.externalConversationImportEnabled,
+        data.assistantProfilesEnabled,
+        data.assistantKnowledgeEnabled
       );
       dispatchAppToast("Platform settings saved and are live.", "success");
     } catch {
@@ -294,6 +326,52 @@ export function PlatformSettingsPanel({
                 />
                 <span>External conversation import enabled</span>
               </label>
+            </div>
+          </div>
+        </div>
+        <div className="rounded-2xl border border-zinc-800 bg-zinc-950/70 p-5">
+          <div className="flex items-start gap-4">
+            <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-blue-500/30 bg-blue-500/10 text-blue-300">
+              <Bot className="h-5 w-5" />
+            </span>
+            <div className="min-w-0 flex-1">
+              <p className="text-xs font-bold uppercase tracking-[0.18em] text-blue-300">Opt-in rollout</p>
+              <h3 className="mt-2 text-xl font-black text-white">Assistant profiles</h3>
+              <p className="mt-2 text-sm leading-6 text-zinc-400">
+                Release C of the import/memory program: private assistant
+                profiles with their own instructions, model and versioned
+                snapshots. Default-off and fail-closed. Knowledge files are a
+                second switch and are only in force while profiles are on, so
+                the order in
+                docs/policy/external-conversation-import-and-memory.md §15 --
+                profiles first, then knowledge -- is what the two checkboxes
+                below enforce, not a note to follow by hand.
+              </p>
+              <label className="mt-4 flex w-fit cursor-pointer items-center gap-3 rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-3 text-sm font-bold text-white">
+                <input
+                  type="checkbox"
+                  data-testid="admin-assistant-profiles-flag"
+                  checked={assistantProfilesEnabled}
+                  onChange={(event) => setAssistantProfilesEnabled(event.target.checked)}
+                  className="h-5 w-5 accent-blue-600"
+                />
+                <span>Assistant profiles enabled</span>
+              </label>
+              <label className="mt-3 flex w-fit cursor-pointer items-center gap-3 rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-3 text-sm font-bold text-white">
+                <input
+                  type="checkbox"
+                  data-testid="admin-assistant-knowledge-flag"
+                  checked={assistantKnowledgeEnabled}
+                  onChange={(event) => setAssistantKnowledgeEnabled(event.target.checked)}
+                  className="h-5 w-5 accent-blue-600"
+                />
+                <span>Assistant knowledge files enabled</span>
+              </label>
+              {assistantKnowledgeEnabled && !assistantProfilesEnabled ? (
+                <p className="mt-3 text-sm font-bold text-amber-300">
+                  Knowledge stays off until assistant profiles are enabled.
+                </p>
+              ) : null}
             </div>
           </div>
         </div>
