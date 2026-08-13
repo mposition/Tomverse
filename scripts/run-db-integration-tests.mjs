@@ -319,3 +319,19 @@ run(
   ],
   "Running the §13.4 memory disclosure read scenarios"
 );
+// Its own process again: it replaces both next-auth and the Auto readiness
+// register, and a module mock is process-global. The register mock is why it
+// cannot share a process with anything that reads the committed one.
+run(
+  [
+    "--conditions=react-server",
+    "--experimental-test-module-mocks",
+    "--no-warnings=ExperimentalWarning",
+    "--import",
+    "tsx",
+    "--test",
+    "--test-concurrency=1",
+    "tests/integration/conversation-auto-selection-route.db.test.ts",
+  ],
+  "Running the Auto selection-mode route scenarios"
+);

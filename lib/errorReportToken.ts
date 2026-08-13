@@ -123,8 +123,10 @@ export const issueErrorReportToken = (input: {
       process.env.SENTRY_RELEASE ||
       process.env.RAILWAY_GIT_COMMIT_SHA ||
       null,
-    environment:
-      process.env.SENTRY_ENVIRONMENT || resolveDeploymentEnvironment(),
+    // Deliberately NOT SENTRY_ENVIRONMENT: this is signed into the token and
+    // read back as a fact about which deployment issued it, not as a label for
+    // a dashboard.
+    environment: resolveDeploymentEnvironment(),
     issuedAt,
     expiresAt: issuedAt + errorReportTokenTtlMs(),
     // undefined means "not classified at issuance"; an empty string is a

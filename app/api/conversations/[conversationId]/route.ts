@@ -42,6 +42,18 @@ import {
     getUserBillingPlan,
     modelLimitResponse,
 } from "@/lib/billingEntitlements";
+import {
+    SELECTION_MODES,
+    selectionModeTransition,
+    storedSelectionMode,
+} from "@/lib/conversationSelectionMode";
+import {
+    autoSelectionCapability,
+    autoUiAvailability,
+    isAutoRouterUiEnabled,
+    mayStoreSelectionMode,
+} from "@/lib/autoRoutingUi";
+import { describeAutoCohortRefusal } from "@/lib/autoCohort";
 
 const modelSchema = z.string().min(1).max(120);
 const updateConversationSchema = z
@@ -60,6 +72,7 @@ const updateConversationSchema = z
     projectId: z.union([z.string().trim().min(1).max(100), z.null()]).optional(),
     webSearchMode: z.enum(WEB_SEARCH_MODES).optional(),
     memoryMode: z.enum(CONVERSATION_MEMORY_MODES).optional(),
+    selectionMode: z.enum(SELECTION_MODES).optional(),
   })
   .strict()
   .refine(
@@ -70,7 +83,8 @@ const updateConversationSchema = z
       body.disabledPanels !== undefined ||
       body.projectId !== undefined ||
       body.webSearchMode !== undefined ||
-      body.memoryMode !== undefined,
+      body.memoryMode !== undefined ||
+      body.selectionMode !== undefined,
     { message: "At least one update is required." }
   );
 const MESSAGE_PAGE_SIZE = 50;
@@ -88,6 +102,31 @@ const safeParse = (data: unknown, fallback: string[]) => {
   return Array.isArray(parsed)
     ? parsed.filter((value): value is string => typeof value === "string")
     : fallback;
+};
+
+/**
+ * Whether this account would be offered Auto.
+ *
+ * The flag is checked before the plan is fetched, so a deployment with the
+ * rollout off pays nothing for it -- no extra query on a route that loads on
+ * every conversation open. That is the difference between a feature that is
+ * disabled and one that is merely hidden.
+ *
+ * Signed-in only: this route requires a session, so `isGuest` is always false
+ * here. Guests are excluded from the cohort anyway (their conversation-scoped
+ * sticky state does not survive), and saying so in one place beats threading
+ * a constant through.
+ */
+const autoAvailabilityFor = async (userId: string) => {
+  if (!isAutoRouterUiEnabled()) {
+    return { offered: false, reason: "ui_flag_off" as const, cohort: null };
+  }
+  const billingPlan = await getUserBillingPlan(userId);
+  return autoUiAvailability({
+    subjectKey: userId,
+    isGuest: false,
+    plan: billingPlan.tier,
+  });
 };
 
 type Params = {
@@ -170,6 +209,7 @@ export async function GET(
         disabledPanels: true,
         webSearchMode: true,
         memoryMode: true,
+        selectionMode: true,
         projectId: true,
         shareEnabled: true,
         shareExpiresAt: true,
@@ -272,6 +312,13 @@ export async function GET(
         webSearchMode: isWebSearchMode(conversation.webSearchMode)
           ? conversation.webSearchMode
           : APP_DEFAULTS.defaultWebSearchMode,
+        // The stored mode, and whether this account would be offered Auto at
+        // all. `offered` is one boolean by design: the refusals are internal
+        // rollout state (which bucket, what share, which gate), and a client
+        // that could read its own bucket could work out the rollout
+        // percentage. See lib/autoRoutingUi.ts.
+        selectionMode: storedSelectionMode(conversation.selectionMode),
+        autoSelection: autoSelectionCapability(await autoAvailabilityFor(userId)),
         isLocked: !!conversation.password,
         shareEnabled:
           conversation.shareEnabled &&
@@ -329,6 +376,9 @@ export async function PATCH(
                 selectedModels: true,
                 password: true,
                 memoryMode: true,
+                selectionMode: true,
+                routerModelId: true,
+                routerChallengerTurns: true,
             }
         });
 
@@ -490,6 +540,51 @@ export async function PATCH(
 
     if (body.memoryMode !== undefined) {
       updateData.memoryMode = body.memoryMode;
+    }
+
+    if (body.selectionMode !== undefined) {
+      // `auto` is refused unless this account would actually be routed.
+      // Storing it anyway would leave a conversation marked Auto that every
+      // turn answers manually, which the user cannot distinguish from Auto
+      // choosing their model every time. `manual` is always allowed --
+      // including for an account that has left the cohort, which must be able
+      // to leave the mode it can no longer act on (lib/autoRoutingUi.ts).
+      const availability = await autoAvailabilityFor(userId);
+      if (!mayStoreSelectionMode(body.selectionMode, availability)) {
+        console.warn(JSON.stringify({
+          event: "conversation_selection_mode_denied",
+          code: "AUTO_SELECTION_UNAVAILABLE",
+          conversationId,
+          reason: availability.reason,
+          detail: availability.cohort && !availability.cohort.eligible
+            ? describeAutoCohortRefusal(availability.cohort)
+            : null,
+          timestamp: new Date().toISOString(),
+        }));
+        return NextResponse.json(
+          {
+            error: "Automatic model selection is not available for this account.",
+            code: "AUTO_SELECTION_UNAVAILABLE",
+          },
+          { status: 403 }
+        );
+      }
+
+      // The transition, not a bare column write: returning to manual has to
+      // clear the sticky model and the challenger streak, and the database
+      // refuses the row if it does not
+      // (`Conversation_manual_has_no_sticky_state_check`).
+      const transition = selectionModeTransition(existingConv, body.selectionMode);
+      Object.assign(updateData, transition.patch);
+      if (transition.clearedStickyState) {
+        console.info(JSON.stringify({
+          event: "conversation_router_sticky_cleared",
+          conversationId,
+          previousModelId: existingConv.routerModelId,
+          previousChallengerTurns: existingConv.routerChallengerTurns,
+          timestamp: new Date().toISOString(),
+        }));
+      }
     }
 
     if (body.projectId !== undefined) {
