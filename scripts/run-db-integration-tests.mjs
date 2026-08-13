@@ -272,6 +272,21 @@ run(
   ],
   "Running the Stripe webhook endpoint's at-least-once delivery rules"
 );
+// Its own process for the same reason: it replaces the Stripe client and the
+// billing catalogue to capture what a confirmed upgrade sends.
+run(
+  [
+    "--conditions=react-server",
+    "--experimental-test-module-mocks",
+    "--no-warnings=ExperimentalWarning",
+    "--import",
+    "tsx",
+    "--test",
+    "--test-concurrency=1",
+    "tests/integration/plan-change-upgrade-request.db.test.ts",
+  ],
+  "Running the plan-change upgrade's Stripe request parameters"
+);
 // Its own process for the same reason as the refund decision suite: it wraps
 // the notification queue module to inject an enqueue failure, and it stubs the
 // session and admin-auth seams for the feedback routes.
