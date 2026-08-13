@@ -36,6 +36,9 @@ Date / timezone:    ____________________
       Vite, with no Next.js anywhere, then runs the bundle. It is PACKAGE-01's
       second piece of evidence; it does not by itself satisfy the gate, which
       is approved by a person against recorded evidence.
+- [ ] `npm run check:prompt-injection` — PLANNER-03's report. Runs the
+      adversarial corpus through every builder that puts untrusted text in a
+      prompt and fails on a non-zero violation count.
 - [ ] `npm run check:shared-packages` — reports PACKAGE-01's metric
       (`forbidden_nextjs_imports_in_shared_packages`) and proves every
       workspace package still type-checks with no DOM, no Node types and no
