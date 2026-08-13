@@ -3,10 +3,16 @@ import { randomUUID } from "node:crypto";
 import { after, beforeEach, test } from "node:test";
 
 import { prisma } from "@/lib/prisma";
-import { DispatchBoundaryError } from "@/lib/routingAttemptStore";
+import {
+  DispatchBoundaryError,
+  readFallbackState,
+  recordFallbackTransition,
+} from "@/lib/routingAttemptStore";
 import {
   authoriseDispatch,
   beginInstrumentedDispatch,
+  beginRetryAttempt,
+  recordFallbackRecovery,
   completeInstrumentedDispatch,
   dispatchInstrumentationCounters,
   dispatchInstrumentationMode,
@@ -322,6 +328,144 @@ test("the counters make the recording rate readable", async () => {
   assert.equal(afterOne.started, before.started + 1);
   assert.equal(afterOne.recorded, before.recorded + 1);
   assert.equal(afterOne.failed, before.failed);
+});
+
+// §6/§7: one logical response, two attempts, one run. Two runs would look like
+// two responses and the reroute rate would read as zero forever.
+test("a retry is a second attempt on the same run, with its own manifest", async () => {
+  const first = await authorise(await begin());
+  await recordDispatched(first);
+  await completeInstrumentedDispatch(first, {
+    outcome: "failed_pre_token",
+    failureLayer: "provider",
+  });
+
+  const second = await beginRetryAttempt(first, {
+    attemptIndex: 1,
+    modelId: "deepseek-v4-flash",
+    provider: "deepseek",
+    plannerMode: "planned",
+    failureLayer: "provider",
+    sourceRefs: [],
+    tokenizerVersion: "generic_multilingual_v1",
+    tokenCount: 1_200,
+    contextWindowTokens: 64_000,
+  });
+  assert.ok(second);
+  assert.equal(second!.runId, first!.runId, "the retry started a second run");
+  assert.notEqual(second!.attemptId, first!.attemptId);
+
+  const run = await prisma.routingRun.findUniqueOrThrow({
+    where: { id: first!.runId },
+    include: { routingAttempts: { include: { manifest: true }, orderBy: { attemptIndex: "asc" } } },
+  });
+  assert.equal(run.routingAttempts.length, 2);
+  assert.equal(run.rerouteCount, 1);
+  assert.equal(run.fallbackState, "fallback_used");
+  assert.equal(run.passThroughUsed, false);
+
+  // §5: a fallback creates a new attempt and its own manifest lifecycle. The
+  // first attempt's manifest described a different model's request.
+  assert.equal(run.routingAttempts[1].modelId, "deepseek-v4-flash");
+  assert.equal(run.routingAttempts[1].plannerMode, "planned");
+  assert.ok(run.routingAttempts[1].manifest);
+  assert.notEqual(
+    run.routingAttempts[1].manifest!.id,
+    run.routingAttempts[0].manifest!.id
+  );
+});
+
+// §6: the downgrade is available once per logical response, whichever attempt
+// uses it. The guard is a compare-and-set so a retry racing itself cannot
+// record two.
+test("the pass-through downgrade cannot be spent twice on one run", async () => {
+  const first = await authorise(await begin());
+  await completeInstrumentedDispatch(first, {
+    outcome: "not_dispatched",
+    failureLayer: "planner",
+  });
+
+  const second = await beginRetryAttempt(first, {
+    attemptIndex: 1,
+    modelId: "gpt-5-6-luna",
+    provider: "openai",
+    plannerMode: "pass_through",
+    failureLayer: "planner",
+    sourceRefs: [],
+    tokenizerVersion: "generic_multilingual_v1",
+    tokenCount: 1_200,
+    contextWindowTokens: 128_000,
+  });
+  assert.ok(second);
+
+  const afterFirst = await prisma.routingRun.findUniqueOrThrow({
+    where: { id: first!.runId },
+  });
+  assert.equal(afterFirst.passThroughUsed, true);
+  // A pass-through is the same model and reuses the built context, so it is
+  // not a reroute and does not spend the two-build budget.
+  assert.equal(afterFirst.rerouteCount, 0);
+
+  await assert.rejects(
+    recordFallbackTransition({
+      runId: first!.runId,
+      spentPassThrough: true,
+      spentModelFallback: false,
+      fallbackState: "fallback_used",
+    }),
+    (error: unknown) => error instanceof DispatchBoundaryError
+  );
+});
+
+// §8. Written when the retry produced an answer, so the next turn is never
+// sent back to a model that never worked.
+test("a successful fallback records where to go back to", async () => {
+  const first = await authorise(await begin());
+  const second = await beginRetryAttempt(first, {
+    attemptIndex: 1,
+    modelId: "deepseek-v4-flash",
+    provider: "deepseek",
+    plannerMode: "planned",
+    failureLayer: "provider",
+    sourceRefs: [],
+    tokenizerVersion: "generic_multilingual_v1",
+    tokenCount: 1_200,
+    contextWindowTokens: 64_000,
+  });
+
+  const beforeAnswer = await prisma.routingRun.findUniqueOrThrow({
+    where: { id: first!.runId },
+  });
+  assert.equal(beforeAnswer.recoveryCandidateModelId, null, "recorded before it worked");
+
+  await recordFallbackRecovery(second, {
+    switchReason: "temporary_hard_fallback",
+    recoveryCandidateModelId: "gpt-5-6-luna",
+    healthEvidence: "provider",
+  });
+
+  const run = await prisma.routingRun.findUniqueOrThrow({ where: { id: first!.runId } });
+  assert.equal(run.switchReason, "temporary_hard_fallback");
+  assert.equal(run.recoveryCandidateModelId, "gpt-5-6-luna");
+  assert.equal(run.fallbackHealthEvidence, "provider");
+});
+
+// The budgets a decision is made against have to survive a fresh read, or a
+// second process would decide it still had them.
+test("the run's budgets read back the way the policy expects them", async () => {
+  const first = await authorise(await begin());
+  const fresh = await readFallbackState(first!.runId);
+  assert.deepEqual(fresh, {
+    passThroughUsed: false,
+    rerouteCount: 0,
+    visibleTokenEmitted: false,
+  });
+
+  await completeInstrumentedDispatch(first, { outcome: "succeeded", firstTokenMs: 240 });
+  const afterStream = await readFallbackState(first!.runId);
+  // A recorded first-token time is the durable evidence that something
+  // reached the user, so a later decision cannot conclude nothing was shown.
+  assert.equal(afterStream!.visibleTokenEmitted, true);
 });
 
 // Deletion beats audit retention, and the cascade is what makes that true for

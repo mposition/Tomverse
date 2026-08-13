@@ -231,6 +231,13 @@ model Conversation {
   routerModelId         String?
   routerChallengerTurns Int     @default(0)
 
+  /// §8 recovery, carried to the next turn. Set only by a successful hard
+  /// fallback, and cleared with the rest of the sticky state whenever the
+  /// conversation returns to manual -- §8 is explicit that manual intent wins
+  /// over fallback recovery.
+  routerSwitchReason    String?
+  routerRecoveryModelId String?
+
   shareToken     String?   @unique
   shareEnabled   Boolean   @default(false)
   sharedAt       DateTime?
@@ -2446,6 +2453,20 @@ model RoutingRun {
   fallbackState   String  @default("none")
   /// §6: at most once per logical response, whichever attempt uses it.
   passThroughUsed Boolean @default(false)
+
+  /// §8. Why this run left the model it started on, when it did.
+  /// "temporary_hard_fallback" is the only value that earns the next turn's
+  /// hysteresis bypass; anything else is an ordinary switch.
+  switchReason String?
+
+  /// §8. The model a hard fallback displaced, kept so the conversation can be
+  /// restored to it. Without this, stickiness would defend the substitute
+  /// forever and a provider blip would become a permanent model change.
+  recoveryCandidateModelId String?
+
+  /// The failure layer that caused the displacement, which is what the
+  /// confirm-healthy check on the next turn is about.
+  fallbackHealthEvidence String?
 
   /// The assistant Message this run produced, so regeneration, model switch,
   /// cost and quality can be compared by Router version (delivery plan §5).

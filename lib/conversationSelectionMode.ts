@@ -50,6 +50,9 @@ export type ConversationRoutingState = {
   selectionMode: unknown;
   routerModelId: string | null;
   routerChallengerTurns: number;
+  /** §8 recovery, when a hard fallback left some. Absent on older readers. */
+  routerSwitchReason?: string | null;
+  routerRecoveryModelId?: string | null;
 };
 
 /**
@@ -78,6 +81,8 @@ export type SelectionModeTransition = {
     selectionMode?: SelectionMode;
     routerModelId?: string | null;
     routerChallengerTurns?: number;
+    routerSwitchReason?: string | null;
+    routerRecoveryModelId?: string | null;
   };
   /** True when sticky state was discarded, so the caller can say so. */
   clearedStickyState: boolean;
@@ -99,9 +104,21 @@ export const selectionModeTransition = (
 
   if (requested === "manual") {
     const hadState =
-      current.routerModelId !== null || (current.routerChallengerTurns ?? 0) > 0;
+      current.routerModelId !== null ||
+      (current.routerChallengerTurns ?? 0) > 0 ||
+      Boolean(current.routerRecoveryModelId);
+    // §8: "Manual intent always wins over fallback recovery." A pending
+    // recovery is a plan to move the conversation back to a model the user has
+    // just declined to be on; carrying it past a manual selection would undo
+    // that choice on some later turn, for reasons the user never sees.
     return {
-      patch: { selectionMode: "manual", routerModelId: null, routerChallengerTurns: 0 },
+      patch: {
+        selectionMode: "manual",
+        routerModelId: null,
+        routerChallengerTurns: 0,
+        routerSwitchReason: null,
+        routerRecoveryModelId: null,
+      },
       clearedStickyState: hadState,
     };
   }
@@ -109,7 +126,13 @@ export const selectionModeTransition = (
   // Into Auto with no history: the first routed turn decides from scratch,
   // which is what a conversation that has never been routed should do.
   return {
-    patch: { selectionMode: "auto", routerModelId: null, routerChallengerTurns: 0 },
+    patch: {
+      selectionMode: "auto",
+      routerModelId: null,
+      routerChallengerTurns: 0,
+      routerSwitchReason: null,
+      routerRecoveryModelId: null,
+    },
     clearedStickyState: false,
   };
 };
