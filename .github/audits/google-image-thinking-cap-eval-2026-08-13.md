@@ -66,37 +66,62 @@ mkdir -p "$EVIDENCE_DIR"
 아래 네 단계는 **`--model`·`--limit`·`--repeats`만 다르고** 나머지 인자와
 리다이렉션은 1단계와 같다. 각 단계에는 달라지는 부분만 적었다.
 
-#### PowerShell에서 실행할 때
+#### 증거 파일은 shell이 아니라 스크립트가 쓴다
 
-문법이 다른 것보다, 조용히 잘못되는 두 가지가 있어 따로 적는다.
+`--out=<path>`를 쓴다. 리다이렉션(`>`)은 쓰지 않는다. 이유가 세 가지다.
 
-**`>` 리다이렉션을 쓰지 않는다.** Windows PowerShell 5.1의 `>`는 UTF-16LE로
-쓰고, PowerShell 7의 `>`는 BOM 없는 UTF-8로 쓴다. 같은 명령이 버전에 따라 다른
-파일을 만들고, 둘 중 하나는 JSON parser가 거부한다. `[IO.File]::WriteAllLines`
-는 두 버전 모두에서 BOM 없는 UTF-8이다.
+- **표본마다 즉시 쓴다.** `>`로 받으면 JSON은 프로세스가 끝까지 살아남아 출력한
+  뒤에야 존재한다. 2026-08-13 Windows 실행에서 Node가 teardown 중 libuv에서
+  abort했고(`uv_async_send` on a closing handle), 그 시점에 이미 지불한 표본이
+  있었다면 전부 사라졌을 것이다. 지금은 매 표본 직후 파일이 갱신된다.
+- **인코딩을 shell이 정하지 않는다.** Windows PowerShell 5.1의 `>`는 UTF-16LE,
+  PowerShell 7의 `>`는 BOM 없는 UTF-8이다. 같은 명령이 열려 있는 shell에 따라
+  다른 파일을 만들고 한쪽은 JSON parser가 거부한다. `--out`은 프로세스 안에서
+  UTF-8로 쓴다.
+- **쓸 수 없는 경로를 첫 요청 전에 잡는다.** 증거를 남길 수 없는 실행은 아무것도
+  사지 않아야 한다.
 
 **stderr를 파일에 섞지 않는다.** `2>&1`을 붙이면 진단 출력이 JSON 안으로 들어가
-증거 파일이 파싱 불가가 된다. stdout만 변수로 받고 stderr는 화면에 둔다.
+파싱 불가가 된다. `--out`을 쓰면 애초에 이 문제가 없다.
 
 ```powershell
 Set-Location C:\path\to\Tomverse
-$env:GEMINI_API_KEY = '...'                      # 이 session에만 존재
+
+# 이력 파일에 키를 남기지 않으려면 직접 대입하지 말고 입력받는다
+$sec = Read-Host 'Gemini API key' -AsSecureString
+$env:GEMINI_API_KEY = [Runtime.InteropServices.Marshal]::PtrToStringBSTR(
+  [Runtime.InteropServices.Marshal]::SecureStringToBSTR($sec))
+$env:GEMINI_API_KEY.Length                       # 값이 아니라 길이만 확인
+
 $EvidenceDir = "$HOME\tomverse-eval\google-image-thinking-cap"
 New-Item -ItemType Directory -Force -Path $EvidenceDir | Out-Null
-
 $stamp = [DateTime]::UtcNow.ToString('yyyyMMddTHHmmssZ')
-$out = node --conditions=react-server --import tsx `
+
+node --conditions=react-server --import tsx `
   scripts/measure-google-image-thinking-cap.mjs `
   --model=gemini-3.1-flash-lite-image `
   --limit=512 --prompts=2 --repeats=2 `
-  --thinking=high --json --i-accept-the-cost
-[IO.File]::WriteAllLines("$EvidenceDir\flash-lite-512-$stamp.json", $out)
+  --thinking=high --json `
+  --out="$EvidenceDir\flash-lite-512-$stamp.json" `
+  --i-accept-the-cost
 "exit=$LASTEXITCODE"
 ```
+
+bash에서는 같은 명령을 `\`로 이어 쓰고 `$EVIDENCE_DIR`을 쓴다. `--out`은 동일하다.
+
+**`$env:GEMINI_API_KEY`를 직접 타이핑하지 않는다.** PSReadLine이 명령 이력을
+파일로 저장한다. 민감값 필터가 있지만 `apikey`·`secret`·`token` 같은 패턴을
+보므로 밑줄이 들어간 `GEMINI_API_KEY`가 걸린다고 장담할 수 없다. 끝나면
+`Remove-Item Env:\GEMINI_API_KEY`로 지운다.
 
 **종료 코드가 1이어도 파일을 버리지 않는다.** 스크립트는
 `limit_does_not_bound_thinking`에서 1로 끝나는데, 그것은 실패가 아니라 판정이고
 그 JSON이 이 측정에서 가장 값진 증거다.
+
+**`runComplete`를 먼저 본다.** 실행이 중간에 죽으면 파일은 남지만
+`runComplete: false`, `verdict: "run_incomplete"`가 된다. 크래시가 남긴 파일이
+결론처럼 읽히면 안 되므로 미완료 실행은 판정을 내지 않는다. 이때 `samples`에
+있는 것은 이미 지불한 표본이므로 버리지 말고 다음 실행 결과와 함께 보관한다.
 
 ### 1단계 — Flash Lite, 상한이 물리는 지점 찾기
 
@@ -108,7 +133,7 @@ node --conditions=react-server --import tsx \
   --model=gemini-3.1-flash-lite-image \
   --limit=512 --prompts=2 --repeats=2 \
   --thinking=high --json --i-accept-the-cost \
-  > "$EVIDENCE_DIR/flash-lite-512-$(date -u +%Y%m%dT%H%M%SZ).json"
+  --out="$EVIDENCE_DIR/flash-lite-512-$(date -u +%Y%m%dT%H%M%SZ).json"
 ```
 
 4회, 계획 원가 178,976µ ≈ $0.18.
@@ -184,6 +209,8 @@ node --conditions=react-server --import tsx \
 | 모델 ID | `modelId` · `apiModelId` |
 | 응답 ID | `samples[].responseId` |
 | 실행 일시 | `measuredAt` · `samples[].startedAt` |
+
+`runComplete`가 `false`면 그 파일은 중단된 실행의 부분 기록이며 판정이 없다.
 
 두 곳의 대체는 버리는 것이 아니라 읽을 수 있게 만드는 것이다. 프롬프트 텍스트는
 정책 §10이 저장을 금지하고, 이미지 base64는 1MB 안팎이라 텍스트로 감사할 수
