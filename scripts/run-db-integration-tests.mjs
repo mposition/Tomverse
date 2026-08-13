@@ -291,6 +291,21 @@ run(
   ],
   "Running the plan-change upgrade's Stripe request parameters"
 );
+// Its own process for the same reason: it replaces the readiness inputs, the
+// operational reporter and next/server's `after` to drive /api/ready.
+run(
+  [
+    "--conditions=react-server",
+    "--experimental-test-module-mocks",
+    "--no-warnings=ExperimentalWarning",
+    "--import",
+    "tsx",
+    "--test",
+    "--test-concurrency=1",
+    "tests/integration/readiness-route.db.test.ts",
+  ],
+  "Running the readiness endpoint's dependency conjunction"
+);
 // Its own process for the same reason as the refund decision suite: it wraps
 // the notification queue module to inject an enqueue failure, and it stubs the
 // session and admin-auth seams for the feedback routes.
