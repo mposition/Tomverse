@@ -34,6 +34,7 @@ import "server-only";
 
 import { Prisma } from "@prisma/client";
 
+import { getModel } from "@/lib/models";
 import { prisma } from "@/lib/prisma";
 
 export type PlannerMode = "planned" | "pass_through";
@@ -290,5 +291,103 @@ export const dispatchedAttemptManifestCoverage = async (since?: Date) => {
     dispatched,
     covered,
     coveragePercent: dispatched === 0 ? 100 : (covered / dispatched) * 100,
+  };
+};
+
+/**
+ * FALLBACK-03's evidence query: did each successful fallback get context
+ * rebuilt for the model that actually ran?
+ *
+ * A fallback is an attempt after the first (`attemptIndex > 0`). The gate's
+ * concern is that such an attempt might inherit the context assembled for the
+ * model that failed -- built against a different tokenizer, cut to a different
+ * window -- which is exactly the case a manifest per attempt exists to prevent.
+ *
+ * The 1:1 attempt/manifest relation makes "has its own manifest" structural, so
+ * that alone would report 100% for a manifest copied verbatim from the first
+ * attempt. What distinguishes a rebuilt manifest from a copied one, in data the
+ * database already holds, is the window it was checked against:
+ * `contextWindowTokens` must be the window of *this* attempt's model.
+ *
+ * Models with no declared window cannot answer that question either way, and
+ * are reported as `unverifiable` rather than folded into either count. Counting
+ * them as covered would let the 16 undeclared models in today's catalogue
+ * (`npm run check:router-context-window`) carry the gate to 100% without
+ * anything being checked; counting them as failures would report a defect that
+ * is really a missing declaration, which is ESTIMATE-03's business, not this
+ * gate's.
+ *
+ * Needs a database. Run from the release checklist against the deployed
+ * database, like the other integrity queries.
+ */
+export const successfulFallbackCandidateManifestCoverage = async (
+  since?: Date
+) => {
+  const attempts = await prisma.routingAttempt.findMany({
+    where: {
+      outcome: "succeeded",
+      attemptIndex: { gt: 0 },
+      ...(since ? { dispatchedAt: { gte: since } } : {}),
+    },
+    select: {
+      id: true,
+      modelId: true,
+      manifest: { select: { state: true, contextWindowTokens: true } },
+    },
+  });
+
+  // Read through `getModel` rather than by filtering the catalogue: the
+  // catalogue is a const-asserted union in which only some entries declare a
+  // window, so a narrowed `.filter()` does not typecheck and a cast would be
+  // asserting exactly the thing in question.
+  const declaredWindow = (modelId: string): number | undefined => {
+    const model = getModel(modelId) as
+      | { contextWindowTokens?: number }
+      | undefined;
+    return model?.contextWindowTokens;
+  };
+
+  let covered = 0;
+  let unverifiable = 0;
+  const offenders: {
+    attemptId: string;
+    modelId: string;
+    reason: string;
+  }[] = [];
+
+  for (const attempt of attempts) {
+    if (!attempt.manifest || attempt.manifest.state !== "finalized") {
+      offenders.push({
+        attemptId: attempt.id,
+        modelId: attempt.modelId,
+        reason: "no finalized manifest of its own",
+      });
+      continue;
+    }
+    const expected = declaredWindow(attempt.modelId);
+    if (expected === undefined) {
+      unverifiable += 1;
+      continue;
+    }
+    if (attempt.manifest.contextWindowTokens !== expected) {
+      offenders.push({
+        attemptId: attempt.id,
+        modelId: attempt.modelId,
+        reason: `manifest window ${attempt.manifest.contextWindowTokens} is not this model's ${expected}`,
+      });
+      continue;
+    }
+    covered += 1;
+  }
+
+  const decidable = covered + offenders.length;
+  return {
+    successfulFallbacks: attempts.length,
+    covered,
+    unverifiable,
+    offenders,
+    // Over what could be decided, so an undeclared window neither inflates nor
+    // deflates the figure the gate reads.
+    coveragePercent: decidable === 0 ? 100 : (covered / decidable) * 100,
   };
 };
