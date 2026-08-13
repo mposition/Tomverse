@@ -10,9 +10,13 @@ import { adminApprovalErrorResponse } from "@/lib/adminApproval";
 import { assertRecentAdminAuthentication } from "@/lib/adminReauthentication";
 import {
   getPublicAppSettings,
+  isAssistantKnowledgeEnabled,
+  isAssistantProfilesEnabled,
   isExternalImportEnabled,
   isImageGenerationEnabled,
   isValidGuestDefaultModel,
+  setAssistantKnowledgeEnabled,
+  setAssistantProfilesEnabled,
   setExternalImportEnabled,
   setImageGenerationEnabled,
   updatePublicAppSettings,
@@ -35,6 +39,11 @@ const updateAppSettingsSchema = z
     // Same opt-in shape (lib/externalImportAccess.ts): the Release A import
     // rollout flag, default-off and fail-closed.
     externalConversationImportEnabled: z.boolean(),
+    // Release C rollout flags (lib/assistantProfileAccess.ts). Two switches
+    // and not one: policy §15 enables profiles before knowledge, and the
+    // knowledge flag reads as off on its own while profiles are off.
+    assistantProfilesEnabled: z.boolean(),
+    assistantKnowledgeEnabled: z.boolean(),
   })
   .strict();
 
@@ -55,6 +64,8 @@ export async function GET(req: Request) {
       settings,
       imageGenerationEnabled: await isImageGenerationEnabled(),
       externalConversationImportEnabled: await isExternalImportEnabled(),
+      assistantProfilesEnabled: await isAssistantProfilesEnabled(),
+      assistantKnowledgeEnabled: await isAssistantKnowledgeEnabled(),
     });
   } catch (error) {
     const securityResponse = apiSecurityResponse(error);
@@ -102,11 +113,15 @@ export async function PATCH(req: Request) {
     const {
       imageGenerationEnabled,
       externalConversationImportEnabled,
+      assistantProfilesEnabled,
+      assistantKnowledgeEnabled,
       ...publicSettings
     } = body;
     const settings = await updatePublicAppSettings(publicSettings);
     await setImageGenerationEnabled(imageGenerationEnabled);
     await setExternalImportEnabled(externalConversationImportEnabled);
+    await setAssistantProfilesEnabled(assistantProfilesEnabled);
+    await setAssistantKnowledgeEnabled(assistantKnowledgeEnabled);
     await writeAdminAuditLog({
       session,
       request: req,
@@ -120,6 +135,8 @@ export async function PATCH(req: Request) {
       settings,
       imageGenerationEnabled: await isImageGenerationEnabled(),
       externalConversationImportEnabled: await isExternalImportEnabled(),
+      assistantProfilesEnabled: await isAssistantProfilesEnabled(),
+      assistantKnowledgeEnabled: await isAssistantKnowledgeEnabled(),
     });
   } catch (error) {
     const approvalResponse = adminApprovalErrorResponse(error);

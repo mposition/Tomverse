@@ -166,6 +166,23 @@ export const EXPORT_DOMAIN_DECLARATIONS: ExportDomainDeclaration[] = [
       "The messages of the imported conversations, in order. Content digests and the provider's own stable identifiers are withheld as internals, and the messages of a locked conversation are withheld entirely, for the same reason their conversation's title is.",
   },
 
+  {
+    domain: "assistantProfile",
+    publicName: "assistant_profiles",
+    prismaModel: "AssistantProfile",
+    state: "included_filtered",
+    withheldReason:
+      "The profiles the user created: name, icon, description and when each was last changed. The pointer to the currently published version is withheld as an internal identifier -- the versions themselves are exported beside this, each carrying its own revision number, which is what a reader needs to tell them apart.",
+  },
+  {
+    domain: "assistantProfileVersion",
+    publicName: "assistant_profile_versions",
+    prismaModel: "AssistantProfileVersion",
+    state: "included_filtered",
+    withheldReason:
+      "Every published revision of every profile, with its instructions and the model, tool and memory choices it was published with. The knowledge manifest is withheld: it names files by internal id and digest, and the files themselves are exported as their own domain, so including it would add identifiers without adding anything the user wrote. The retrieval and prompt format versions are withheld as internals.",
+  },
+
   // --- nothing in the row is the user's data --------------------------------
   {
     domain: "chatLimitDecisionEvent",

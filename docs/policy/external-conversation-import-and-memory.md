@@ -1038,10 +1038,10 @@ composer·comparison rail contract를 침범하지 않습니다.
   preview 결과는 Save 전에 설정에 자동 반영되지 않습니다.
 - 응답에는 항상 실제 Tomverse model identity를 표시합니다.
 
-### 14.1 Knowledge quota 수치 — [제안 · 승인 대기]
+### 14.1 Knowledge quota 수치 — [확정 · 2026-08-13 @mposition]
 
-§23의 "릴리스 C scope 승인 전에 확정해야 하는 항목" 1번입니다. **승인 전까지
-확정값이 아니며, 이 표만으로 릴리스 C 구현을 시작하지 않습니다.**
+§23의 "릴리스 C scope 승인 전에 확정해야 하는 항목" 1번이었고, frontmatter의
+`RELEASE_C_ASSISTANT_PROFILES` 승인(2026-08-13, @mposition)과 함께 확정됐습니다.
 
 수치는 새로 지어내지 않고 저장소에 이미 있는 같은 종류의 한도에서 끌어옵니다.
 값이 같아도 **결정은 분리**합니다 — import의 50MB를 knowledge가 상속하는 것이
@@ -1073,9 +1073,9 @@ composer·comparison rail contract를 침범하지 않습니다.
 제안은 **plan별로 나누지 않는 것**입니다 — 릴리스 C는 flag 뒤 비공개이고, 값을
 나중에 올리는 것보다 내리는 쪽이 사용자에게 훨씬 나쁩니다.
 
-### 14.2 Knowledge 보존과 R2 lifecycle — [제안 · 승인 대기]
+### 14.2 Knowledge 보존과 R2 lifecycle — [확정 · 2026-08-13 @mposition]
 
-§23 항목 2입니다. 마찬가지로 **승인 전까지 확정값이 아닙니다.**
+§23 항목 2였고, 같은 승인으로 확정됐습니다.
 
 **R2 bucket lifecycle rule을 쓰지 않습니다.** 저장소의 기존 두 사례가 모두
 애플리케이션 sweep입니다: guest attachment는 prefix + cutoff idle sweep
@@ -1677,19 +1677,18 @@ Data 탭(`AuthButton.tsx`)에는 진입점·요약만 두고 대형 UI를 modal�
    구현(B1~)은 시작할 수 있으나 **B 기능의 staging 배포·활성화 전에
    체크리스트 승인 기록이 있어야 합니다.**
 
-### 릴리스 C scope 승인 전에 확정해야 하는 항목 (pending)
+### 릴리스 C scope 승인 관련 항목 (2026-08-13 확정)
 
-1. **[제안 · 승인 대기]** knowledge quota 수치(파일 수·개별 크기·계정 총 byte)
-   — §14.1에 7개 수치와 각각의 근거, plan별 분리 여부 제안을 적었습니다.
-2. **[제안 · 승인 대기]** knowledge 보존 기간과 R2 lifecycle 정책 수치
-   — §14.2. bucket lifecycle rule 대신 DB-first tombstone + sweep, 활성 파일에는
-   만료를 두지 않는 방향입니다.
+1. **[확정]** knowledge quota 수치(파일 수·개별 크기·계정 총 byte) — §14.1.
+   7개 수치, 각각의 근거, plan별로 나누지 않는다는 결정.
+2. **[확정]** knowledge 보존 기간과 R2 lifecycle 정책 수치 — §14.2.
+   bucket lifecycle rule 대신 DB-first tombstone + sweep, 활성 파일에는 만료
+   없음.
 
-두 항목 모두 **제안일 뿐 확정이 아닙니다.** `approvedScopes`에
-`RELEASE_C_ASSISTANT_PROFILES`가 없는 한 릴리스 C 코드·schema·migration은
-시작하지 않습니다(§2 fail-closed). 승인 시 `[제안 · 승인 대기]` 표시를 승인자·
-날짜와 함께 `[확정]`으로 바꾸는 것은 승인 기록을 남기는 사람의 몫이며, 이 문서를
-작성한 에이전트가 스스로 바꾸지 않습니다.
+두 항목은 frontmatter의 `RELEASE_C_ASSISTANT_PROFILES` 승인(2026-08-13,
+@mposition)과 함께 확정됐고, 릴리스 C 코드·schema·migration을 시작할 수
+있습니다. 확정값을 바꾸려면 이 문서를 먼저 고치고 승인을 다시 받습니다 —
+구현에 맞춰 수치를 사후 조정하지 않습니다(§5).
 
 ## 24. 참조
 

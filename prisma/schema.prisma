@@ -86,6 +86,8 @@ model User {
   routingRuns                        RoutingRun[]
   memorySettings                     UserMemorySettings?
   accountDataExportRequests          AccountDataExportRequest[]
+  assistantProfiles                  AssistantProfile[]
+  assistantProfileVersions           AssistantProfileVersion[]
 
   @@index([plan, id])
   @@index([createdAt])
@@ -230,6 +232,18 @@ model Conversation {
   /// back on, using evidence from a period the user did not route.
   routerModelId         String?
   routerChallengerTurns Int     @default(0)
+
+  /// The assistant profile version this conversation is pinned to (release C,
+  /// policy §43). Set once when the conversation starts and never rewritten by
+  /// a later edit to the profile: a published revision is what this
+  /// conversation ran under, and moving it is an explicit user action.
+  ///
+  /// NULL for every conversation that started without a profile, which is all
+  /// of them before release C. `SetNull` on delete because deleting a profile
+  /// is a deletion request -- the conversation stays readable and simply
+  /// stops naming a profile.
+  assistantProfileVersionId String?
+  assistantProfileVersion   AssistantProfileVersion? @relation(fields: [assistantProfileVersionId], references: [id], onDelete: SetNull)
 
   shareToken     String?   @unique
   shareEnabled   Boolean   @default(false)
@@ -2321,6 +2335,114 @@ model UserMemorySettings {
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+}
+
+/// A private assistant profile (release C, policy §14, §20 릴리스 C).
+///
+/// Identity only. Everything that decides how the assistant behaves lives on
+/// AssistantProfileVersion, because §14 pins a conversation to the version it
+/// started on and a field kept here would be read at request time instead --
+/// which is exactly the retroactive application §14 forbids.
+///
+/// Private by construction: there is no share token, no visibility column and
+/// no public listing. §42's non-goals (marketplace, sharing, selling) are held
+/// by the absence of a column to set, not by a check somebody can forget.
+model AssistantProfile {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  name String
+
+  /// An emoji or a short token the UI renders; never a URL, so a profile list
+  /// cannot become a request to an attacker-chosen host.
+  icon String?
+
+  /// Presentation, not behaviour -- so it is not part of the version snapshot
+  /// (§43 lists what a version records, and this is not in it).
+  description String?
+
+  /// The version a new conversation pins to. Nullable because a profile row
+  /// exists before its first version is published, and a profile with no
+  /// published version is a draft that cannot start a conversation.
+  currentVersionId String? @unique
+
+  currentVersion AssistantProfileVersion? @relation("AssistantProfileCurrentVersion", fields: [currentVersionId], references: [id], onDelete: SetNull)
+
+  versions AssistantProfileVersion[] @relation("AssistantProfileVersions")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId, updatedAt])
+}
+
+/// One immutable published snapshot of a profile (§43).
+///
+/// Nothing here is ever updated after insert. Editing a profile publishes a
+/// new revision; the row a conversation pinned keeps saying what that
+/// conversation actually ran under. There is no `updatedAt` on purpose -- a
+/// column that can change is an invitation to change it.
+///
+/// `knowledgeManifest` is audit metadata and NOT a retrieval source (§14, §43).
+/// It can prove a file was listed at publish time; it cannot resurrect a
+/// deleted one, and retrieval only ever reads chunks that currently exist and
+/// are accessible. `lib/assistantProfileVersioning.ts` resolves a manifest
+/// against what exists today and marks the rest unavailable.
+model AssistantProfileVersion {
+  id        String           @id @default(cuid())
+  profileId String
+  profile   AssistantProfile @relation("AssistantProfileVersions", fields: [profileId], references: [id], onDelete: Cascade)
+
+  /// The account that owns this snapshot, and -- today -- the account that
+  /// published it, which is what §43's "created by" asks for. Carried here as
+  /// well as on the profile so ownership is a column rather than a join: the
+  /// account export scopes by it, the deletion cascade reaches it directly,
+  /// and the data-domain registry can see that this table holds user data.
+  /// A profile only its owner may edit makes the two readings identical; if
+  /// that ever changes, the publisher becomes a second column with its own
+  /// migration rather than a quiet reinterpretation of this one.
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  /// 1-based, per profile. Monotonic: a revision is never reused, so a stale
+  /// editor's `ASSISTANT_PROFILE_VERSION_STALE` (§18) is decided by comparing
+  /// numbers rather than timestamps.
+  revision Int
+
+  instructions String
+
+  /// Model selection, tool policy, memory policy and conversation starters,
+  /// each a JSON snapshot of what the user chose. Snapshots rather than
+  /// foreign keys: a model that is later retired must not silently change what
+  /// a past conversation is recorded as having run under. §45 refuses the
+  /// version at runtime instead (`ASSISTANT_PROFILE_MODEL_UNAVAILABLE`), and
+  /// never substitutes a different model.
+  models       Json
+  toolPolicy   Json
+  memoryPolicy Json
+  starters     Json
+
+  /// The files listed at publish time. Audit metadata -- see the model comment.
+  knowledgeManifest Json
+
+  /// Which retrieval algorithm and prompt shape this snapshot was built for,
+  /// so a version published under an older one is refused rather than
+  /// reinterpreted (§45).
+  retrievalVersion    Int
+  promptFormatVersion String
+
+  createdAt DateTime @default(now())
+
+  /// Back-relation for AssistantProfile.currentVersionId. Never read as a
+  /// list -- at most one profile points at a given version.
+  currentFor AssistantProfile[] @relation("AssistantProfileCurrentVersion")
+
+  conversations Conversation[]
+
+  @@unique([profileId, revision])
+  @@index([profileId, createdAt])
+  @@index([userId, createdAt])
 }
 
 /// One consumed §10 context bundle, per (bundle, model).
