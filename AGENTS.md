@@ -363,14 +363,23 @@ goodwill 지급은 Stripe 환불도 구매 취소도 아닌 **세 번째 것**�
   하지 않습니다.
 - **seed는 이동이지 재export shim이 아닙니다.** `lib/`에 shim을 남기면 예전
   import 경로가 계속 동작하므로 경계를 강제하는 것이 아무것도 없습니다.
-- **PACKAGE-01은 아직 `pending`입니다.** gate가 이름 붙인 두 증거를 만드는
-  artefact는 둘 다 저장소에 있습니다 — ESLint 보고서(`check:shared-packages`)와
-  Next.js/Vite build matrix(`next build` + `verify:package-build-matrix`).
-  **artefact가 있다는 것과 승인 가능한 증거가 있다는 것은 다릅니다.** registry는
-  `evidenceRefs`에 immutable link 또는 artifact identifier를 요구하고, 승인은
-  gate owner와 **증거를 만들지 않은** independent reviewer 두 사람이 합니다
-  (`docs/release-gates/tomverse-chat-v1.yaml`의 `approvalPolicy`). 승인 없이
-  `status`·`approvedBy`·`approvedAt`·`evidenceRefs`를 건드리지 않습니다.
+- **PACKAGE-01은 `approved`입니다**(2026-08-12, `@mposition`). 증거는
+  `docs/release-gates/evidence/PACKAGE-01-2026-08-12.md`에 commit SHA와 CI run
+  링크로 남아 있고, 그 승인이 덮는 범위는 **존재하는 두 package가 한 commit에서
+  framework-neutral했다**는 것까지입니다 — `chat-ui`·`api-client`가 생기면
+  다시 읽습니다.
+- **artefact가 있다는 것과 승인 가능한 증거가 있다는 것은 다릅니다.** registry는
+  `evidenceRefs`에 immutable link 또는 artifact identifier를 요구합니다. script가
+  tree에 있다는 사실은 그 어느 것도 아닙니다.
+- **한 사람이 두 역할을 겸하는 것은 registry에 기록된 허용입니다**
+  (`approvalPolicy.soleApproverAllowed`). 1인 조직에서 "서로 다른 두 사람"
+  규칙은 엄격한 것이 아니라 충족 불가능하며, 모든 blocking gate가 영원히
+  승인 불가가 됩니다. 남은 분리는 **증거를 만든 주체(대개 자동화)와 승인자가
+  다르다**는 것이고, 승인자는 사람이어야 합니다. 두 번째 담당자가 생기면
+  `soleApproverAllowed`를 `false`로 되돌리는 한 줄이면 됩니다 — validator가
+  그 field를 읽습니다.
+- 승인 없이 `status`·`approvedBy`·`approvedAt`·`evidenceRefs`를 건드리지
+  않습니다.
 - 표준 `tsc` project를 build matrix라고 부르지 않습니다. bundler가 아닙니다.
 
 <!-- BEGIN:mobile-chat-composer-invariant -->

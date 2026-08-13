@@ -73,6 +73,32 @@ if (!approverRoles.has('gate-owner') || !approverRoles.has('independent-reviewer
   where(null, 'approvedByEntrySchema.roles must include gate-owner and independent-reviewer');
 }
 
+// Whether one subject may hold both approval roles is a property of the
+// organization, so it is read from the registry rather than decided here. A
+// two-person rule in a one-person organization is not strict, it is
+// unsatisfiable -- every blocking gate stays unapprovable and the register
+// stops describing the release. `soleApproverRationale` is where the reason is
+// written down; flipping the flag back is the only edit needed to restore
+// two-person approval.
+//
+// Must be a real boolean. A typo or a missing field falls back to the stricter
+// answer rather than quietly opening the gate.
+const soleApproverAllowed = approvalPolicy.soleApproverAllowed === true;
+if ('soleApproverAllowed' in approvalPolicy) {
+  if (typeof approvalPolicy.soleApproverAllowed !== 'boolean') {
+    where(null, 'approvalPolicy.soleApproverAllowed must be a boolean');
+  }
+  if (
+    soleApproverAllowed &&
+    typeof approvalPolicy.soleApproverRationale !== 'string'
+  ) {
+    where(
+      null,
+      'approvalPolicy.soleApproverRationale must state why one subject may hold both roles'
+    );
+  }
+}
+
 const ownerRoles = new Set(Object.keys(doc.ownerRoles ?? {}));
 if (ownerRoles.size === 0) where(null, 'ownerRoles must define at least one owner');
 
@@ -179,7 +205,10 @@ for (const [index, gate] of (gates ?? []).entries()) {
     const reviewers = (gate.approvedBy ?? []).filter((e) => e?.role === 'independent-reviewer');
     if (owners.length === 0) where(label, 'release mode: missing gate-owner approval');
     if (reviewers.length === 0) where(label, 'release mode: missing independent-reviewer approval');
-    if (owners.some((o) => reviewers.some((r) => r.subject === o.subject))) {
+    if (
+      !soleApproverAllowed &&
+      owners.some((o) => reviewers.some((r) => r.subject === o.subject))
+    ) {
       where(label, 'release mode: gate-owner and independent-reviewer must be different people');
     }
     if (gate.approvedAt === null) where(label, 'release mode: approvedAt must be set');

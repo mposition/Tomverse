@@ -166,24 +166,31 @@ first and was not equivalent — an export it did not mention was tree-shaken
 away, and an import that has been shaken away is never resolved, so a
 `node:crypto` added to a package built green.
 
-**PACKAGE-01 still stays `pending`, and this document does not change that.**
+**PACKAGE-01 is `approved`** — 2026-08-12, `@mposition`, recorded in
+`docs/release-gates/tomverse-chat-v1.yaml`.
 
-What exists is the *artefacts* the gate names — a script that counts the metric
-and a matrix that builds the packages twice. An artefact is not evidence for an
-approval. The registry requires `evidenceRefs` to hold **immutable links or
-artifact identifiers**, which means a specific commit and specific CI runs, and
-it requires two approvals from different people, where the independent reviewer
-did not produce the evidence
-(`governance.approvalPolicy` in `docs/release-gates/tomverse-chat-v1.yaml`).
-
-An approval request is assembled as a packet, not as a claim in prose. The
-first one is `docs/release-gates/evidence/PACKAGE-01-2026-08-12.md`; it records
-the verified commit, the run that printed
+Getting there was two separate things, and conflating them is the mistake worth
+naming. The *artefacts* are a script that counts the metric and a matrix that
+builds the packages twice; an artefact in the tree is not evidence for an
+approval. The registry wants `evidenceRefs` holding immutable links — a
+specific commit and specific CI runs — so the request was assembled as a
+packet: `docs/release-gates/evidence/PACKAGE-01-2026-08-12.md` records the
+verified commit, the run that printed
 `forbidden_nextjs_imports_in_shared_packages = 0`, the successful Next.js build
-and Vite matrix jobs, the packages in scope, and — as much to the point — what
-that run does *not* establish. `status`, `approvedBy`, `approvedAt` and
-`evidenceRefs` are edited only after the two approvals exist, as their own
-change.
+and Vite matrix jobs, the packages in scope, and what that run does *not*
+establish.
+
+Both approval roles are held by one subject, which the registry allows through
+`approvalPolicy.soleApproverAllowed` with its reason written down: a
+two-different-people rule in a one-person organization is unsatisfiable rather
+than strict. The separation that remains is that the approver did not produce
+the evidence — automation did.
+
+**Read the scope before treating the gate as settled.** It covers the two
+packages that existed at that commit. `chat-ui` and `api-client` are named in
+the delivery plan and are not in the tree; the criterion is measured over
+`packages/*` as it stands, so the gate is worth re-reading when they arrive
+rather than inherited.
 
 ## 7. Adding a package
 
