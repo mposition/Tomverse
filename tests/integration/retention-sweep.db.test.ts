@@ -30,7 +30,10 @@ const resetData = async () => {
     await prisma.$executeRawUnsafe(`
     TRUNCATE TABLE
       "AdminNotificationLog",
-      "ProviderHealthCheck"
+      "ProviderHealthCheck",
+      "ProviderProbeResult",
+      "ScheduledJobRun",
+      "ProviderModelCatalogRun"
     RESTART IDENTITY CASCADE
   `);
 };
@@ -128,6 +131,65 @@ test("the boundary is the window the policy states, to the minute", async () => 
     assert.deepEqual(remaining.map((row) => row.id), [inside.id]);
 });
 
+test("the three tables nothing used to remove rows from now have a ceiling", async () => {
+    // Found by `npm run report:unswept-tables`. The probe one is the worst:
+    // one row per probed model every ten minutes, and no code reads the table
+    // at all -- it had neither a ceiling nor an audience.
+    const probeRow = (startedAt: Date) =>
+        prisma.providerProbeResult.create({
+            data: {
+                runId: `run-${startedAt.getTime()}`,
+                provider: "openai",
+                modelId: "gpt-5-6-luna",
+                environment: "test",
+                startedAt,
+                completedAt: startedAt,
+                success: true,
+            },
+        });
+    const keptProbe = await probeRow(daysAgo(29));
+    await probeRow(daysAgo(31));
+
+    const keptJobRun = await prisma.scheduledJobRun.create({
+        data: { jobKey: "provider_probe", status: "succeeded", startedAt: daysAgo(29) },
+    });
+    await prisma.scheduledJobRun.create({
+        data: { jobKey: "provider_probe", status: "succeeded", startedAt: daysAgo(31) },
+    });
+
+    const keptCatalogRun = await prisma.providerModelCatalogRun.create({
+        data: { provider: "openai", status: "succeeded", startedAt: daysAgo(364) },
+    });
+    await prisma.providerModelCatalogRun.create({
+        data: { provider: "openai", status: "succeeded", startedAt: daysAgo(366) },
+    });
+
+    const result = await cleanupExpiredData();
+
+    assert.deepEqual(result.failedSteps, []);
+    assert.equal(result.providerProbeResults, 1);
+    assert.equal(result.scheduledJobRuns, 1);
+    assert.equal(result.providerModelCatalogRuns, 1);
+    assert.deepEqual(
+        (await prisma.providerProbeResult.findMany({ select: { id: true } })).map(
+            (row) => row.id
+        ),
+        [keptProbe.id]
+    );
+    assert.deepEqual(
+        (await prisma.scheduledJobRun.findMany({ select: { id: true } })).map(
+            (row) => row.id
+        ),
+        [keptJobRun.id]
+    );
+    assert.deepEqual(
+        (
+            await prisma.providerModelCatalogRun.findMany({ select: { id: true } })
+        ).map((row) => row.id),
+        [keptCatalogRun.id]
+    );
+});
+
 test("the sweep reports a number for every policy that claims to delete", async () => {
     // A step that threw reports null, which is deliberately distinct from the
     // 0 of a step that ran and found nothing. A published policy whose step
@@ -138,6 +200,9 @@ test("the sweep reports a number for every policy that claims to delete", async 
         notificationLogs: "notificationLogs",
         providerErrors: "providerErrorEvents",
         productAnalytics: "productAnalyticsEvents",
+        providerProbeResults: "providerProbeResults",
+        scheduledJobRuns: "scheduledJobRuns",
+        providerModelCatalogRuns: "providerModelCatalogRuns",
     } as const;
     for (const [key, field] of Object.entries(reported)) {
         assert.ok(

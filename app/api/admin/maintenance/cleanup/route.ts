@@ -38,6 +38,9 @@ async function dryRunCleanup() {
     creditReservations,
     providerErrorEvents,
     providerHealthChecks,
+    providerProbeResults,
+    scheduledJobRuns,
+    providerModelCatalogRuns,
     notificationLogs,
     productAnalyticsEvents,
     shareSnapshots,
@@ -55,6 +58,17 @@ async function dryRunCleanup() {
     }),
     prisma.providerHealthCheck.count({
       where: { createdAt: { lt: retentionCutoff("providerChecks", now) } },
+    }),
+    prisma.providerProbeResult.count({
+      where: { startedAt: { lt: retentionCutoff("providerProbeResults", now) } },
+    }),
+    prisma.scheduledJobRun.count({
+      where: { startedAt: { lt: retentionCutoff("scheduledJobRuns", now) } },
+    }),
+    prisma.providerModelCatalogRun.count({
+      where: {
+        startedAt: { lt: retentionCutoff("providerModelCatalogRuns", now) },
+      },
     }),
     prisma.adminNotificationLog.count({
       where: {
@@ -88,6 +102,9 @@ async function dryRunCleanup() {
     creditReservations,
     providerErrorEvents,
     providerHealthChecks,
+    providerProbeResults,
+    scheduledJobRuns,
+    providerModelCatalogRuns,
     notificationLogs,
     productAnalyticsEvents,
     shareSnapshots,
