@@ -416,6 +416,33 @@ export async function cleanupExpiredData() {
     })
   );
 
+  // Written every probe cycle and read by nothing at all. Without this the
+  // table is pure accumulation: the failure path that matters already logs and
+  // moves the provider's health counters, and the row is only there for a
+  // person to query afterwards.
+  const providerProbeResults = await step("provider_probe_results", () =>
+    prisma.providerProbeResult.deleteMany({
+      where: { startedAt: { lt: retentionCutoff("providerProbeResults", now) } },
+    })
+  );
+
+  // Every reader of this table is newest-first or last-cycle, so the tail has
+  // no audience. An unattended failure older than the window is past being
+  // auto-fixable too.
+  const scheduledJobRuns = await step("scheduled_job_runs", () =>
+    prisma.scheduledJobRun.deleteMany({
+      where: { startedAt: { lt: retentionCutoff("scheduledJobRuns", now) } },
+    })
+  );
+
+  const providerModelCatalogRuns = await step("provider_model_catalog_runs", () =>
+    prisma.providerModelCatalogRun.deleteMany({
+      where: {
+        startedAt: { lt: retentionCutoff("providerModelCatalogRuns", now) },
+      },
+    })
+  );
+
   // Alert delivery logs, with the same carve-out the notification queue below
   // has and for the same reason: a failed delivery nobody has acknowledged is
   // still on the work queue, oldest first. Sweeping it on age would take the
@@ -560,6 +587,9 @@ export async function cleanupExpiredData() {
     requestLeases: requestLeases === null ? null : Number(requestLeases),
     providerErrorEvents: providerErrorEvents?.count ?? null,
     providerHealthChecks: providerHealthChecks?.count ?? null,
+    providerProbeResults: providerProbeResults?.count ?? null,
+    scheduledJobRuns: scheduledJobRuns?.count ?? null,
+    providerModelCatalogRuns: providerModelCatalogRuns?.count ?? null,
     notificationLogs: notificationLogs?.count ?? null,
     traceErrorEvidence,
     autoFixCases,
