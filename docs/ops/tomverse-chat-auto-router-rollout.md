@@ -58,6 +58,7 @@ missing variable is never mistaken for a deliberate rollout.
 | `AUTO_ROUTER_COHORT_SALT` | names this cohort partition. Unset routes nobody |
 | `MANIFEST_HASH_KEYS` | `keyId:secret` pairs. Required before any dispatch may be recorded |
 | `MANIFEST_HASH_ACTIVE_KEY_ID` | which of them new manifests are digested with |
+| `AUTO_ROUTER_FALLBACK_ENABLED` | `on` allows a second provider attempt after a pre-token failure. Anything else, including unset, allows none |
 
 **The manifest keyring is not optional and not the session secret.** Recording
 a dispatch refuses outright without it, because a manifest whose key nobody
@@ -290,11 +291,47 @@ call to another affordable. One transaction, reserve before release — a
 refusal leaves the primary's hold exactly as it was rather than opening a
 window where the turn holds nothing anywhere.
 
-**"Text-only turns" is still too wide** for a first cut. The safe initial scope
-is Auto mode, plain text, no tools, no web search, no deep research, and a
-candidate that passes its own filters, token check and a new manifest — §5
+**~~"Text-only turns" is still too wide~~ Done — step 3.** The safe initial
+scope is Auto mode, plain text, no tools, no web search, no deep research, and
+a candidate that passes its own filters, token check and a new manifest — §5
 requires an independent attempt and manifest per fallback, so reusing the
 primary's is not an option.
+
+`lib/autoFallbackGate.ts` is that scope, with every refusal named: `flag_off`,
+`not_routed`, `guest`, `deep_research`, `web_search`, `tools_offered`,
+`attachments`, `no_candidate`. The flag is checked first so a deployment with
+it off reports one reason for every turn rather than a distribution describing
+a feature nobody enabled. `AUTO_ROUTER_FALLBACK_ENABLED` defaults to off and
+only the exact string `on` turns it on.
+
+### 9.2 What the swap still needs, and one thing it does not
+
+Wiring the swap turned up a defect that had to be fixed before it, and a
+prerequisite §9.1 did not anticipate.
+
+**The stream named the wrong model, and Auto made it wrong.** Every log,
+health record, stored assistant message and `MessageProviderContext` row
+inside the stream read `requestedModelId` — the model the *user asked for*.
+On a manual turn that is the same id as the one that ran. On a routed turn
+they are different models: `recordModelSuccess`/`recordModelFailure` would
+credit or blame a model that was never dispatched, and §8's recovery decides
+whether to restore a displaced model from exactly those counters. Auto routes
+nobody yet, so it never happened; a fallback would have made it two models
+wrong within one turn instead of one. The stream now reads a `dispatched`
+holder — the per-attempt state of step 2, in place — and
+`tests/chatDispatchedModelAttribution.test.mjs` scans for a relapse.
+
+**The Router does not surface a fallback candidate.** `decideFallback` takes
+`nextCandidateModelIds`, and §6 requires that candidate to have passed the
+same filters as the primary — so the list has to come from the Router rather
+than be recomputed in the stream, where it would be a second and divergent
+filter. `AutoSelection` returns only `modelId`. `RouterDecision` holds
+`candidates.eligible`, which is the filtered set, but the *ranking* lives in
+`lib/routerSelection.ts` and is discarded once a winner is picked.
+`challengerModelId` is not the runner-up despite the name — it is the natural
+winner, equal to the selected model whenever stickiness is not overriding, so
+it cannot stand in. Surfacing the ranked eligible set is the remaining
+prerequisite, and it is the next thing to build.
 
 Order that keeps each step checkable:
 
@@ -303,7 +340,8 @@ Order that keeps each step checkable:
    provider~~ — done, above;
 2. ~~the per-attempt execution state and the multi-attempt settlement
    contract~~ — done, above;
-3. the swap, behind a flag that is off;
+3. the swap, behind a flag that is off — the scope gate and the per-attempt
+   stream state are in; the swap itself waits on §9.2's ranked candidates;
 4. staging fault injection on the first provider, confirming in the database
    and the logs: one run, one reservation, two attempts, one settlement, one
    lease release;
