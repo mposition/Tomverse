@@ -449,3 +449,60 @@ test("false positive 4: a read inside a returned object literal is consumed", ()
     "consumed"
   );
 });
+
+test("false positive 5: a local binding named `fetch` is not the global", () => {
+  // lib/accountDataExport.ts:814. `const fetch = FETCHERS[domain]` then
+  // `await fetch(userId)` is a database read: no network, no `Response`, no
+  // body to leave unread. Matching the identifier alone reported it as a leak,
+  // and it was counted among the server-side findings for a day.
+  assert.deepEqual(
+    kinds(
+      `async function collect(userId) {
+         const data = {};
+         for (const declaration of DECLARATIONS) {
+           const fetch = FETCHERS[declaration.domain];
+           if (!fetch) continue;
+           const rows = await fetch(userId);
+           data[declaration.name] = rows;
+         }
+         return data;
+       }`,
+      "lib/accountDataExport.ts"
+    ),
+    []
+  );
+});
+
+test("a parameter named `fetch` shadows the global too", () => {
+  assert.deepEqual(
+    kinds(
+      `async function load(fetch, url) {
+         const rows = await fetch(url);
+         return rows;
+       }`,
+      "lib/example.ts"
+    ),
+    []
+  );
+});
+
+test("shadowing in one scope does not exempt the real global in another", () => {
+  // The check walks enclosing scopes from the call, so a `const fetch` in one
+  // function cannot silence a genuine call site in the next one. A file-wide
+  // check would have done exactly that.
+  assert.deepEqual(
+    kinds(
+      `async function shadowed() {
+         const fetch = FETCHERS.a;
+         return await fetch("x");
+       }
+       async function real() {
+         const response = await fetch("/api/thing");
+         if (!response.ok) return null;
+         return response.json();
+       }`,
+      "lib/example.ts"
+    ),
+    ["leaks"]
+  );
+});

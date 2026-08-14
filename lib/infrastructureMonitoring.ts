@@ -163,6 +163,15 @@ const externalErrorMessage = (payload: unknown) => {
 const readBoundedJson = async (response: Response) => {
   const declaredLength = headerNumber(response.headers.get("content-length"));
   if (declaredLength !== null && declaredLength > MAX_EXTERNAL_RESPONSE_BYTES) {
+    // Released before throwing, and cancelled rather than read: this branch
+    // fires *because* the body is over 1 MB, which is far past the point where
+    // an unread body pins its connection (measured between 16 KiB and 64 KiB
+    // on Node 22 / undici 6 -- see
+    // .github/audits/unconsumed-response-bodies-2026-08-13.md §8). Refusing a
+    // response for being too large while continuing to hold it open is the one
+    // shape this guard must not have. The streaming ceiling below already
+    // cancels; only this early exit did not.
+    await response.body?.cancel().catch(() => undefined);
     throw new Error("External API response exceeded the 1 MB safety limit.");
   }
   if (!response.body) return null;

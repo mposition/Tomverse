@@ -462,10 +462,66 @@ export function classifyFile(ts, filePath, source) {
     record(call, "leaks", "fetch(…) with no handler and no binding");
   };
 
+  /**
+   * Whether a scope-introducing node binds the name `fetch` itself.
+   *
+   * `lib/accountDataExport.ts` writes `const fetch = FETCHERS[domain]` and then
+   * `await fetch(userId)` -- a database read, no network, no `Response`. Matching
+   * on the identifier alone filed it as an unread body, which is the same class
+   * of mistake as the four already pinned in the tests: a report that names
+   * correct code teaches reviewers to stop reading the report.
+   */
+  const bindsFetch = (node) => {
+    if (
+      node.parameters?.some(
+        (parameter) =>
+          ts.isIdentifier(parameter.name) && parameter.name.text === "fetch"
+      )
+    ) {
+      return true;
+    }
+    for (const statement of node.statements ?? []) {
+      if (ts.isVariableStatement(statement)) {
+        for (const declaration of statement.declarationList.declarations) {
+          if (
+            ts.isIdentifier(declaration.name) &&
+            declaration.name.text === "fetch"
+          ) {
+            return true;
+          }
+        }
+      }
+      if (ts.isFunctionDeclaration(statement) && statement.name?.text === "fetch") {
+        return true;
+      }
+      const bindings = ts.isImportDeclaration(statement)
+        ? statement.importClause?.namedBindings
+        : undefined;
+      if (
+        bindings &&
+        ts.isNamedImports(bindings) &&
+        bindings.elements.some((element) => element.name.text === "fetch")
+      ) {
+        return true;
+      }
+    }
+    return false;
+  };
+
+  /** True when the `fetch` being called is a local binding, not the global. */
+  const fetchIsShadowed = (call) => {
+    for (let node = call.parent; node; node = node.parent) {
+      if (bindsFetch(node)) return true;
+    }
+    return false;
+  };
+
   const visit = (node) => {
     if (
       ts.isCallExpression(node) &&
-      ((ts.isIdentifier(node.expression) && node.expression.text === "fetch") ||
+      ((ts.isIdentifier(node.expression) &&
+        node.expression.text === "fetch" &&
+        !fetchIsShadowed(node)) ||
         (ts.isPropertyAccessExpression(node.expression) &&
           node.expression.name.text === "fetch"))
     ) {
