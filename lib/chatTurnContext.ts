@@ -23,7 +23,8 @@ import {
 import type { ModelTier } from "@/lib/models";
 
 /**
- * The one context builder preflight and `/api/chat` both use (§10, §31, §32).
+ * Policy: docs/policy/external-conversation-import-and-memory.md.
+ * The one context builder preflight and `/api/chat` both use (§10, §9.1).
  *
  * `buildChatMemoryContext` used to be that builder, and still is for memory.
  * Release C added two more blocks to the same system message — a profile's
@@ -32,7 +33,7 @@ import type { ModelTier } from "@/lib/models";
  * against a prompt and chat sends one, so a block only one of them knows about
  * is a block the user is charged wrongly for.
  *
- * ## The order is §31's, and it is one message
+ * ## The order is §9.1's, and it is one message
  *
  * Instructions, then memory, then knowledge, assembled by
  * `buildProfileSystemPrompt` into a single system message. Three messages
@@ -51,13 +52,13 @@ import type { ModelTier } from "@/lib/models";
 export type ChatTurnContext = {
     memory: ChatMemoryContext;
     profile: ChatProfileContext;
-    /** The §31 system message, or null when there is nothing to say. */
+    /** The §9.1 system message, or null when there is nothing to say. */
     systemPrompt: string | null;
     /** Priced by preflight, booked by chat. Zero when memory did not run. */
     memoryTokens: number;
     /** The profile's own blocks, counted apart from memory's. */
     profileTokens: number;
-    /** Everything the §32 bundle binds. */
+    /** Everything the §10 bundle binds. */
     fingerprintInput: ContextBundleFingerprintInput;
     fingerprint: string;
     /** Completed once memory use is known. Null when no profile ran. */

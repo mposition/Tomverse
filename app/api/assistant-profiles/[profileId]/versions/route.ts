@@ -1,5 +1,6 @@
 /**
- * Publishing and listing profile versions (Release C, C3a; policy §43).
+ * Policy: docs/policy/external-conversation-import-and-memory.md.
+ * Publishing and listing profile versions (Release C, C3a; policy §14).
  *
  * POST is the only way a profile's behaviour changes, and it always produces a
  * new revision or nothing — never an edit to an existing one. The editor sends

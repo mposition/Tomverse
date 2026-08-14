@@ -27,7 +27,7 @@ import {
 /**
  * Uploading, listing and deleting knowledge files (Release C, C2).
  *
- * docs/policy/external-conversation-import-and-memory.md §14, §14.1, §14.2,
+ * docs/policy/external-conversation-import-and-memory.md §14.1, §14.2,
  * §18 (릴리스 C), §21.
  *
  * ## The upload shape, and why it is prepare/finalize

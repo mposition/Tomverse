@@ -1,7 +1,7 @@
 /**
  * Turning an extracted document into retrievable chunks (Release C, C2).
  *
- * docs/policy/external-conversation-import-and-memory.md §14, §44: chunking is
+ * docs/policy/external-conversation-import-and-memory.md §14: chunking is
  * deterministic, each chunk carries its own lexical `searchTerms`, and there
  * are no embeddings.
  *
@@ -34,7 +34,7 @@ import { memoryRetrievalTerms } from "@/lib/memoryRetrievalTerms";
  * identifiable and reprocessable rather than silently mixed in.
  *
  * Separate from `MEMORY_RETRIEVAL_VERSION` because they are separate
- * decisions, even though they move together today: §44 says knowledge uses the
+ * decisions, even though they move together today: §14 says knowledge uses the
  * same tokenising principles as memory, and `memoryRetrievalTerms()` is that
  * shared algorithm rather than a copy of it. A copy would drift, and the two
  * drifting apart silently is worse than them moving together on purpose.
@@ -44,7 +44,7 @@ export const KNOWLEDGE_RETRIEVAL_VERSION = 1;
 /**
  * The size a chunk is packed up to. Large enough that a paragraph group is a
  * self-contained answer, small enough that four of them plus memory and the
- * conversation still leave the model room — §31 puts knowledge fourth in the
+ * conversation still leave the model room — §9.1 puts knowledge fourth in the
  * prompt, below the profile's own instructions.
  */
 export const KNOWLEDGE_CHUNK_MAX_CHARACTERS = 1_200;

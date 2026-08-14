@@ -17,7 +17,7 @@ import { readOwnR2ObjectBytes } from "@/lib/r2";
 /**
  * Turning a stored knowledge file into retrievable chunks (Release C, C2).
  *
- * docs/policy/external-conversation-import-and-memory.md §14, §44.
+ * docs/policy/external-conversation-import-and-memory.md §14.
  *
  * Extraction reuses the hardened readers the chat attachment path already
  * uses: `extractPdfTextSafely` runs pdf.js in a resource-limited worker, and

@@ -2,7 +2,7 @@
  * Whether a profile version may run, and what it is allowed to bring (C3a).
  *
  * docs/policy/external-conversation-import-and-memory.md §14 ("runtime 검증"),
- * §45, and §8.1's invariants, which a profile is explicitly not allowed to
+ * §14, §8.1's invariants, which a profile is explicitly not allowed to
  * step around.
  *
  * Pure, in the `decideMemoryInjection` mould: every input is supplied, and the
@@ -12,7 +12,7 @@
  *
  * ## The one thing this module exists to make structural
  *
- * §45's sentence is that a profile cannot bypass plan and model entitlement,
+ * §14's sentence is that a profile cannot bypass plan and model entitlement,
  * the account master toggle, the conversation memory mode, the feature flag,
  * or a source lock. A profile is a *request*, and every function here is
  * shaped so the profile can only ever narrow:
@@ -80,7 +80,7 @@ const refuse = (reason: ProfileRuntimeRefusal): ProfileRuntimeDecision => ({
  * be a message about the wrong thing. Only then does the version's own content
  * get judged.
  *
- * Guests are excluded outright rather than degraded: §22.2's exclusion is
+ * Guests are excluded outright rather than degraded: §8.1's exclusion is
  * about memory, but a profile carries instructions, a model choice and
  * knowledge that all belong to an account, and there is no guest-shaped
  * version of that which is not a new feature.
@@ -159,7 +159,7 @@ export function resolveProfileTools(input: {
  * each file decides the rest, which is §14's rule that a manifest is audit
  * metadata: it can say a file was listed, and it cannot make a deleted one
  * readable. A locked or suspended source is excluded here for the same reason
- * §45 names source locks — the profile does not get to see through one.
+ * §14 names source locks — the profile does not get to see through one.
  */
 export function resolveProfileKnowledgeFiles(input: {
     manifestFileIds: readonly string[];
@@ -173,7 +173,7 @@ export function resolveProfileKnowledgeFiles(input: {
 }
 
 /**
- * Everything the runtime needs to bind into a §32 context bundle.
+ * Everything the runtime needs to bind into a §10 context bundle.
  *
  * Gathered into one shape so the bundle carries the *decisions* rather than
  * the inputs. A bundle that recorded "the profile asked for memory" would

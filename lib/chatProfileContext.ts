@@ -29,12 +29,12 @@ import { prisma } from "@/lib/prisma";
 /**
  * What an assistant profile contributes to one turn (C3c).
  *
- * docs/policy/external-conversation-import-and-memory.md §14, §31, §32, §44,
- * §45.
+ * docs/policy/external-conversation-import-and-memory.md §14, §9.1, §10,
+ * §14.
  *
  * Two blocks and an identity. The blocks are the version's instructions and
  * whichever knowledge excerpts this message retrieved; the identity is what
- * the §32 context bundle binds, so a profile that was republished or whose
+ * the §10 context bundle binds, so a profile that was republished or whose
  * files changed between preflight and send is a stale bundle rather than a
  * turn that quietly answers from a different assistant.
  *
@@ -44,7 +44,7 @@ import { prisma } from "@/lib/prisma";
  * through `resolveProfileMemoryUse`. Applying it here would mean this module
  * had to know whether the account, the flag, the eval pair and the
  * conversation mode already allow memory — a second implementation of
- * `decideMemoryInjection`, which is the one thing §45 asks not to happen.
+ * `decideMemoryInjection`, which is the one thing §14 asks not to happen.
  *
  * ## Refusals are reported, not thrown
  *
@@ -75,13 +75,13 @@ export type ChatProfileContext = {
     } | null;
     /** Why the profile did not run, or null when it did (or none was asked for). */
     refusal: ProfileRuntimeRefusal | null;
-    /** §31 step 2. */
+    /** §9.1 step 2. */
     instructionsPrompt: string | null;
-    /** §31 step 4. */
+    /** §9.1 step 4. */
     knowledgePrompt: string | null;
     /** Input tokens the two blocks contribute, priced and booked as one figure. */
     profileTokens: number;
-    /** `<versionId>:<revision>`, or null. Bound into the §32 bundle. */
+    /** `<versionId>:<revision>`, or null. Bound into the §10 bundle. */
     profileVersion: string | null;
     /** Identity of this turn's knowledge retrieval. `"none"` when empty. */
     knowledgeHash: string;
@@ -90,7 +90,7 @@ export type ChatProfileContext = {
      * answer; on its own it grants nothing.
      */
     memoryPolicy: AssistantMemoryPolicy | null;
-    /** Already intersected with the caller's entitlement (§45). */
+    /** Already intersected with the caller's entitlement (§14). */
     tools: AssistantToolPolicy | null;
     /** §22-shaped observation, content-free. */
     knowledgeChunkCount: number;
@@ -147,7 +147,7 @@ const storedMemoryPolicy = (value: unknown): AssistantMemoryPolicy => {
 };
 
 export async function buildChatProfileContext(input: {
-    /** Null for a guest, who has no profile of their own to run (§45). */
+    /** Null for a guest, who has no profile of their own to run (§14). */
     userId: string | null;
     /** The conversation's bound version, or null when it names none. */
     profileVersionId: string | null;

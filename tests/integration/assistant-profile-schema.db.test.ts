@@ -7,7 +7,7 @@ import { prisma } from "@/lib/prisma";
  * Release C storage invariants (slice C1) against a real database.
  *
  * docs/policy/external-conversation-import-and-memory.md §14, §20 (릴리스 C),
- * §43. `lib/assistantProfileVersioning.ts` decides what the next snapshot
+ * §14. `lib/assistantProfileVersioning.ts` decides what the next snapshot
  * should be; this file is about what the database refuses regardless of what
  * the application layer believed — the half that still holds when a second
  * writer, a retry, or a future code path gets it wrong.

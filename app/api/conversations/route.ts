@@ -232,8 +232,9 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "One or more selected models are unavailable." }, { status: 400 });
     }
     if (profileModels && normalizedModels.length === 0) {
+      // Policy: docs/policy/external-conversation-import-and-memory.md.
       // Every model this profile names is retired or delisted. Falling back
-      // to the account default would be the substitution §45 refuses -- the
+      // to the account default would be the substitution §14 refuses -- the
       // conversation would look like the profile's and answer on a model the
       // profile never chose -- so the create is refused where the owner can
       // still go and republish.

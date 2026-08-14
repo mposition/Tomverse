@@ -28,6 +28,7 @@ import { STYLE_MEMORY_KINDS } from "@/lib/memoryValidatorCore";
 import { prisma } from "@/lib/prisma";
 
 /**
+ * Policy: docs/policy/external-conversation-import-and-memory.md.
  * The one context builder preflight and `/api/chat` both use (policy §10).
  *
  * The policy requires it in those words — "preflight와 실제 chat은 동일한
@@ -152,7 +153,7 @@ export async function buildChatMemoryContext(input: {
      */
     conversationMode?: string | null;
     /**
-     * Release C (§45). What the running profile version asked for, or null
+     * Release C (§14). What the running profile version asked for, or null
      * when no profile ran.
      *
      * Applied through `resolveProfileMemoryUse` — the AND that lets a profile
@@ -186,7 +187,7 @@ export async function buildChatMemoryContext(input: {
     });
     if (!decision.allowed) return buildEmpty(decision);
 
-    // §45's AND, in its one implementation. Ordered after the account gate on
+    // §14's AND, in its one implementation. Ordered after the account gate on
     // purpose: `resolveProfileMemoryUse` takes the account's answer as an
     // input, so asking it first would mean deciding memory twice.
     if (

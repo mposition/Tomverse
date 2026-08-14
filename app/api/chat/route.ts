@@ -770,7 +770,8 @@ async function handleChatPost(
         // the ownership check loads below. Null for a request with no
         // conversation, which inherits the account default like `inherit`.
         let conversationMemoryMode: string | null = null;
-        // §32: the conversation's bound profile version. Read from the same
+        // Policy: docs/policy/external-conversation-import-and-memory.md.
+        // §10: the conversation's bound profile version. Read from the same
         // row as the memory mode so the context this request builds is the
         // one its bundle was priced against.
         let conversationProfileVersionId: string | null = null;
@@ -1292,6 +1293,7 @@ async function handleChatPost(
             }
         }
 
+        // Policy: docs/policy/external-conversation-import-and-memory.md.
         // The §10 context bundle: what memory this request may carry, and
         // proof that it is the same context the request was priced against.
         //
@@ -1306,7 +1308,7 @@ async function handleChatPost(
         // in the same block, under the same rule and for the same reason: they
         // are priced input tokens too. `/api/chat/context` issues a bundle
         // whenever either is non-empty, so a profile turn arrives with one.
-        // The §31 system block. Named for the context rather than for memory
+        // The §9.1 system block. Named for the context rather than for memory
         // because Release C put three things in it, and only one of them is
         // memory.
         let contextSystemPrompt: string | null = null;
@@ -1342,7 +1344,8 @@ async function handleChatPost(
             const turnContext = await buildChatTurnContext({
                 userId: session.user.id,
                 query: latestUserPromptText(messages),
-                // §32: bound into the fingerprint, so a profile republished or
+                // Policy: docs/policy/external-conversation-import-and-memory.md.
+                // §10: bound into the fingerprint, so a profile republished or
                 // detached between preflight and send is a stale bundle rather
                 // than a turn that answers as a different assistant.
                 profileVersionId: conversationProfileVersionId,
@@ -1421,7 +1424,8 @@ async function handleChatPost(
                     { requiresPreflight: true }
                 );
             }
-            // The whole §31 block -- profile instructions, then memory, then
+            // Policy: docs/policy/external-conversation-import-and-memory.md.
+            // The whole §9.1 block -- profile instructions, then memory, then
             // profile knowledge -- assembled as one system message by the
             // builder that priced it.
             contextSystemPrompt = turnContext.systemPrompt;
@@ -1459,7 +1463,8 @@ async function handleChatPost(
             inputEstimate.addTokens(quotedContextTokens);
         }
 
-        // §9.1 and §31 place this block above the conversation and below the
+        // Policy: docs/policy/external-conversation-import-and-memory.md.
+        // §9.1 place this block above the conversation and below the
         // safety policy, so it is the first message and the rules that govern
         // reading each part are stated inside it, before the part they govern.
         const formattedMessages: ModelMessage[] = contextSystemPrompt

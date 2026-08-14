@@ -1,7 +1,7 @@
 /**
  * Choosing which knowledge chunks reach the prompt (Release C, C2).
  *
- * docs/policy/external-conversation-import-and-memory.md §14, §44: lexical,
+ * docs/policy/external-conversation-import-and-memory.md §14, §9: lexical,
  * deterministic, no embeddings, and a `retrievalVersion` that says which
  * algorithm produced a result.
  *
@@ -33,7 +33,7 @@ import { memoryRetrievalTerms } from "@/lib/memoryRetrievalTerms";
 
 /**
  * Bumped when the ranking would order the same candidates differently.
- * Recorded on a result so a stale context bundle is detectable (§32).
+ * Recorded on a result so a stale context bundle is detectable (§10).
  */
 export const KNOWLEDGE_RETRIEVAL_ALGORITHM_VERSION = 1;
 
@@ -42,7 +42,7 @@ export const KNOWLEDGE_BYTES_PER_TOKEN = 3;
 
 export const KNOWLEDGE_CONTEXT_DEFAULTS = {
     /**
-     * The prompt share knowledge may take. §31 puts it fourth — below the
+     * The prompt share knowledge may take. §9.1 puts it fourth — below the
      * profile's own instructions and below approved memory — so this is a
      * slice of what is left, not a claim on the window.
      */
@@ -156,7 +156,7 @@ export function scoreChunk(
         termHits: hits,
         // Relevance alone, deliberately. There is no recency here (a document
         // does not get less true), no confidence (nobody scored the file), and
-        // no pin (§44 has explicit file selection, which the caller applies by
+        // no pin (§14 has explicit file selection, which the caller applies by
         // narrowing the candidates rather than by weighting them). A single
         // term is what the score means, and a second factor would be one
         // nobody could explain when a chunk lost.

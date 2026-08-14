@@ -78,7 +78,7 @@ test("the privacy page renders the section", () => {
 });
 
 test("the copy describes lexical retrieval, not an embedding service", () => {
-    // §44: retrieval v1 is a search index over the account's own rows. No
+    // §9: retrieval v1 is a search index over the account's own rows. No
     // embedding API, no vector database, so no third party sees a knowledge
     // file for indexing. Copy that said otherwise would describe a transfer
     // that does not happen -- and would pre-announce one that needs its own
@@ -97,7 +97,7 @@ test("the copy describes lexical retrieval, not an embedding service", () => {
         for (const forbidden of FORBIDDEN[name]) {
             assert.ok(
                 !body.includes(forbidden),
-                `${name} must not describe an embedding or vector service (§44)`
+                `${name} must not describe an embedding or vector service (§9)`
             );
         }
     }

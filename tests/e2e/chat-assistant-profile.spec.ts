@@ -5,6 +5,7 @@ import {
 } from "./support/app-fixtures";
 
 /**
+ * Policy: docs/policy/external-conversation-import-and-memory.md.
  * §14's version pinning, from the composer (Release C, slice C4).
  *
  * The server side is covered by unit and DB suites. What only a browser can
@@ -66,7 +67,7 @@ const openAssistantMenu = async (page: Page) => {
 };
 
 test("a guest is never offered an assistant", async ({ page }) => {
-    // A guest has no profile of their own for the control to act on (§45).
+    // A guest has no profile of their own for the control to act on (§14).
     await page.goto("/chat?lang=en");
 
     await toolsMenuTrigger(page).click();

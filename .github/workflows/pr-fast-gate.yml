@@ -140,6 +140,16 @@ jobs:
         timeout-minutes: 5
         run: npm run check:doc-references
 
+      # The same argument one level down. `check:doc-references` proves a path
+      # resolves; this proves the section number beside it does. Release C
+      # shipped 105 citations of sections that never existed -- each one next
+      # to a path that was correct, which is exactly why the path check could
+      # not see them. Separate script, separate failure message: "the file
+      # moved" and "the section is not in it" are different repairs.
+      - name: Policy section references
+        timeout-minutes: 5
+        run: npm run check:policy-section-references
+
       # The staging checklist holds items and never results, and a signed run
       # record is not edited afterwards. The previous shape put an approval
       # table inside the checklist, where it could not say which commit it

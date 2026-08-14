@@ -1,7 +1,7 @@
 /**
  * Assistant profile version snapshots (Release C, slice C1).
  *
- * docs/policy/external-conversation-import-and-memory.md §14, §14.1, §20
+ * docs/policy/external-conversation-import-and-memory.md §14.1, §20
  * (릴리스 C), §18 (릴리스 C 오류 코드).
  *
  * Pure and dependency-free: no Prisma, no clock, no R2. Everything here is a
@@ -38,14 +38,14 @@ export const ASSISTANT_PROFILE_MODEL_UNAVAILABLE =
 
 /**
  * The prompt shape a version was authored for. A version published under an
- * older format is refused at runtime rather than reinterpreted (§45), so this
+ * older format is refused at runtime rather than reinterpreted (§14), so this
  * is a stored fact and not a derived one.
  */
 export const ASSISTANT_PROMPT_FORMAT_VERSION = "assistant-profile-v1";
 
 /**
  * Retrieval v1 is lexical — searchTerms plus deterministic scoring, no
- * embeddings (§44). Bumping this is a retrieval change, and old versions keep
+ * embeddings (§9). Bumping this is a retrieval change, and old versions keep
  * the number they were built for.
  */
 export const ASSISTANT_RETRIEVAL_VERSION = 1;
@@ -66,7 +66,7 @@ export const ASSISTANT_PROFILE_LIMITS = {
     maxDescriptionCharacters: 300,
     /**
      * Long enough for a genuinely detailed persona, short enough that it
-     * cannot dominate a model's context window on its own: §31 puts profile
+     * cannot dominate a model's context window on its own: §9.1 puts profile
      * instructions second in the prompt, above memory and conversation
      * context, so an unbounded field here would crowd out the conversation
      * the user is actually having.
@@ -75,7 +75,7 @@ export const ASSISTANT_PROFILE_LIMITS = {
     maxStarters: 8,
     maxStarterCharacters: 200,
     /**
-     * §42 gives a profile a default model, and the picker allows a small set
+     * §14 gives a profile a default model, and the picker allows a small set
      * so a profile-started comparison stays within the same admission
      * contract every other comparison uses.
      */
@@ -86,13 +86,13 @@ export const ASSISTANT_PROFILE_LIMITS = {
 
 /* ----------------------------------------------------------- the draft */
 
-/** What the user's memory policy on a profile can say (§45). */
+/** What the user's memory policy on a profile can say (§14). */
 export type AssistantMemoryPolicy = {
     /**
      * Whether this profile *asks* to use account memory. It can only ever
      * narrow: the account master toggle, the conversation memory mode, the
      * injection flag and source locks all still apply, and a profile saying
-     * `true` does not override any of them (§45). Resolving that AND is the
+     * `true` does not override any of them (§14). Resolving that AND is the
      * runtime slice's job — this field is one input to it, never the answer.
      */
     useAccountMemory: boolean;
@@ -103,7 +103,7 @@ export type AssistantToolPolicy = {
     deepResearch: boolean;
 };
 
-/** One file as listed at publish time. Audit metadata (§14, §43). */
+/** One file as listed at publish time. Audit metadata (§14). */
 export type AssistantKnowledgeManifestEntry = {
     fileId: string;
     /** The name as it was at publish time, kept so a deleted file can still be named. */
@@ -121,7 +121,7 @@ export type AssistantProfileVersionDraft = {
     knowledgeManifest: readonly AssistantKnowledgeManifestEntry[];
 };
 
-/** The identity fields, which are not part of a version snapshot (§43). */
+/** The identity fields, which are not part of a version snapshot (§14). */
 export type AssistantProfileIdentityDraft = {
     name: string;
     icon: string | null;
@@ -228,7 +228,7 @@ export function profileIdentityProblems(
             });
         }
         // A URL here would make rendering a profile list a request to whatever
-        // host the icon names. §42 keeps profiles private and offline; an
+        // host the icon names. §14 keeps profiles private and offline; an
         // avatar is an emoji or a short token, never a fetch.
         if (/[:/]|^\s*data\b/iu.test(draft.icon)) {
             problems.push({
@@ -406,7 +406,7 @@ export type ResolvedManifestEntry = AssistantKnowledgeManifestEntry & {
 export type AvailableKnowledgeFile = {
     fileId: string;
     digest: string;
-    /** Only a fully processed file has chunks to retrieve from (§44). */
+    /** Only a fully processed file has chunks to retrieve from (§14). */
     processed: boolean;
 };
 

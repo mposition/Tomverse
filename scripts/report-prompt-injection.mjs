@@ -116,13 +116,14 @@ const SURFACE_COVERAGE = [
     },
     {
         // Release C added a fourth path the gate's four names predate: a
-        // knowledge file's excerpts. §44 makes an instruction inside one
+        // Policy: docs/policy/external-conversation-import-and-memory.md.
+        // knowledge file's excerpts. §9.1 makes an instruction inside one
         // untrusted content, so it is measured here rather than trusted for
         // having been uploaded by the account owner.
         source: "profile-knowledge",
         surface: "profile-knowledge",
         exercised: true,
-        note: "assistant profile knowledge excerpts (release C, §44)",
+        note: "assistant profile knowledge excerpts (release C, §14)",
     },
 ];
 
