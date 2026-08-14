@@ -1110,6 +1110,12 @@ export const ko = {
         warningBranches: "대체 대화 분기 {count}개는 가져오지 않음",
         warningNestedArchives:
             "첨부된 압축 파일(.zip 등) {count}개는 열지 않으므로 가져오지 않음",
+        warningMissingAttachments:
+            "내보내기가 이름만 남기고 아카이브에 넣지 않은 첨부 {count}개",
+        warningBranchDuplicates:
+            "분기 여러 개에 함께 있는 메시지 {count}개는 각 분기에 저장됩니다",
+        warningUnassignedTurns:
+            "어느 대화에 속하는지 내보내기에 없는 항목 {count}개는 가져오지 않음",
         notImportableBadge: "가져올 수 없음",
         notImportableExplain:
             "{count}개 대화에 가져오기 크기 한도를 넘는 메시지가 있어 가져올 수 없습니다.",
@@ -1196,6 +1202,14 @@ export const ko = {
         guideClaudeStep2: "데이터 내보내기를 요청합니다.",
         guideClaudeStep3:
             "메일로 받은 링크에서 파일을 내려받습니다. ZIP과 JSON 모두 그대로 쓸 수 있습니다.",
+        guideGeminiTitle:
+            "Gemini(Google Takeout)",
+        guideGeminiStep1:
+            "Google Takeout을 열고 전체 선택을 해제합니다",
+        guideGeminiStep2:
+            "내 활동을 선택한 뒤 그 안에서 Gemini 앱을 고르고 형식을 JSON으로 지정합니다 — Gemini 항목 자체에는 대화가 아니라 Gem이 들어 있습니다",
+        guideGeminiStep3:
+            "내보낸 뒤 Google이 보내 준 다운로드 링크로 받은 .zip을 올립니다",
         guideFormats: "ZIP 파일과 JSON 파일을 모두 지원합니다.",
         guideStaysLocal:
             "원본 파일은 기기를 벗어나지 않습니다. 브라우저 안에서만 열립니다.",

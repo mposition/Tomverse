@@ -1,5 +1,6 @@
 import { chatgptAdapter } from "@/lib/externalImportAdapters/chatgpt";
 import { claudeAdapter } from "@/lib/externalImportAdapters/claude";
+import { geminiAdapter } from "@/lib/externalImportAdapters/gemini";
 import type {
     ExternalAdapterProvider,
     ExternalConversationAdapter,
@@ -8,12 +9,14 @@ import type {
 export type {
     ExternalAdapterProvider,
     ExternalConversationAdapter,
+    ParsedExportExtras,
     ParsedExternalConversation,
     ParsedExternalMessage,
 } from "@/lib/externalImportAdapters/types";
+export { emptyExportExtras } from "@/lib/externalImportAdapters/types";
 
 export const EXTERNAL_IMPORT_ADAPTERS: readonly ExternalConversationAdapter[] =
-    [chatgptAdapter, claudeAdapter];
+    [chatgptAdapter, claudeAdapter, geminiAdapter];
 
 /**
  * Version label of the client-side parsing stack (adapters + archive walker +
@@ -27,7 +30,7 @@ export const EXTERNAL_IMPORT_ADAPTERS: readonly ExternalConversationAdapter[] =
  * `staging` for the whole 72h absolute TTL so those older tabs can complete,
  * but the wizard only ever offers to resume `preview_ready`.
  */
-export const EXTERNAL_IMPORT_PARSER_VERSION = "v2";
+export const EXTERNAL_IMPORT_PARSER_VERSION = "v3";
 
 /** First adapter whose detect() accepts the parsed export, or null. */
 export function detectExternalImportAdapter(

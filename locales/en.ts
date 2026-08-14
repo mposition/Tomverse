@@ -1113,6 +1113,12 @@ export const en = {
         warningBranches: "{count} alternate conversation branches are not imported",
         warningNestedArchives:
             "{count} attached archives (.zip and similar) are not opened, so they are not imported",
+        warningMissingAttachments:
+            "{count} attached files are named by the export but are not in the archive",
+        warningBranchDuplicates:
+            "{count} messages appear in more than one branch and are stored in each",
+        warningUnassignedTurns:
+            "{count} entries name no conversation in the export, so they are not imported",
         notImportableBadge: "Cannot be imported",
         notImportableExplain:
             "{count} conversations contain a message above the import size limit and cannot be imported.",
@@ -1201,6 +1207,14 @@ export const en = {
         guideClaudeStep2: "Request a data export.",
         guideClaudeStep3:
             "Download the file from the link you receive by email. Both ZIP and JSON work as-is.",
+        guideGeminiTitle:
+            "Gemini (Google Takeout)",
+        guideGeminiStep1:
+            "Open Google Takeout and deselect everything",
+        guideGeminiStep2:
+            "Select My Activity, then inside it choose Gemini Apps and set the format to JSON — the Gemini product itself holds Gems, not conversations",
+        guideGeminiStep3:
+            "Export, then upload the .zip once Google emails you the download link",
         guideFormats: "Both ZIP and JSON files are supported.",
         guideStaysLocal:
             "The export file never leaves your device — it is opened inside your browser.",
