@@ -611,6 +611,21 @@ export type PromotionLinkageReport = {
   policyViolation: string | null;
   expectLiveMode: boolean | null;
   storedCouponId: string | null;
+  /**
+   * Whether the stored coupon is still in Stripe, and how it compares.
+   *
+   * Absent from the first version of this report, which printed
+   * `storedCouponId` and never checked it. That is not a cosmetic gap: when the
+   * row points at a coupon somebody created by hand in the dashboard --
+   * `duration: once` where the policy says `repeating`, no metadata --
+   * `ensureCoupon()` retrieves it, fails it, and throws
+   * `PROMOTION_COUPON_INVALID`, which reaches the customer as "This promotion
+   * is not currently available." The report meanwhile said
+   * `create_missing_objects`, i.e. "nothing here, the next checkout will
+   * provision it", which is the opposite of what happens.
+   */
+  storedCouponExists: boolean;
+  storedCouponMismatches: string[];
   storedPromotionCodeId: string | null;
   storedPromotionCodeExists: boolean;
   storedPromotionCodeMismatches: string[];
@@ -658,12 +673,38 @@ export async function inspectStripePromotionLinkage({
     policyViolation,
     expectLiveMode,
     storedCouponId: promotion.stripeCouponId,
+    storedCouponExists: false,
+    storedCouponMismatches: [],
     storedPromotionCodeId: promotion.stripePromotionCodeId,
     storedPromotionCodeExists: false,
     storedPromotionCodeMismatches: [],
     exactCodeCandidates: [],
     recommendation: "manual_review",
   };
+
+  // Checked first, and independently of the promotion code, because
+  // `ensureCoupon()` reaches it first: a stored coupon that exists and no
+  // longer matches the policy is a hard stop before the promotion code is even
+  // considered, whatever the code-level state looks like.
+  let storedCouponBlocks = false;
+  if (promotion.stripeCouponId) {
+    const storedCoupon = await retrieveCoupon(stripe, promotion.stripeCouponId);
+    if (storedCoupon) {
+      report.storedCouponExists = true;
+      const mismatches = couponMismatches({
+        coupon: couponFacts(storedCoupon),
+        promotion,
+        planId,
+        expectLiveMode,
+        planProductId,
+      });
+      report.storedCouponMismatches = describeMismatches(mismatches);
+      storedCouponBlocks = !canUseStripePromotionCode(mismatches);
+    }
+    // A stored id Stripe does not know is not a blocker on its own: the coupon
+    // is ours to re-create, and `ensureCoupon()` does exactly that under a
+    // stable idempotency key.
+  }
 
   const evaluate = (promotionCode: Stripe.PromotionCode) =>
     evaluatePromotionCode({
@@ -686,7 +727,7 @@ export async function inspectStripePromotionLinkage({
       report.storedPromotionCodeExists = true;
       const { mismatches } = await evaluate(linked);
       report.storedPromotionCodeMismatches = describeMismatches(mismatches);
-      if (canUseStripePromotionCode(mismatches)) {
+      if (canUseStripePromotionCode(mismatches) && !storedCouponBlocks) {
         report.recommendation = "healthy";
         return report;
       }
@@ -709,7 +750,11 @@ export async function inspectStripePromotionLinkage({
   }
 
   const adoptable = report.exactCodeCandidates.filter((item) => item.adoptable);
-  if (policyViolation) {
+  if (policyViolation || storedCouponBlocks) {
+    // `storedCouponBlocks` outranks every other recommendation, including
+    // "create_missing_objects". Nothing a later step could do rescues a stored
+    // coupon that `ensureCoupon()` will refuse, and the object may be attached
+    // to live subscriptions, so it is never repaired or replaced here.
     report.recommendation = "manual_review";
   } else if (adoptable.length === 1) {
     report.recommendation =

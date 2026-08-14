@@ -14,6 +14,7 @@ import {
   promotionCodeIdempotencyKey,
   promotionCodeMismatches,
   promotionCouponIdempotencyKey,
+  planMetadataMismatch,
   promotionPolicyVersion,
   promotionStripePolicyViolation,
   stripeCustomerIdempotencyKey,
@@ -173,14 +174,18 @@ test("a code belonging to a different promotion or plan is never adoptable", () 
     ),
     ["identity:metadata_promotion_id"]
   );
-  assert.deepEqual(
-    describeMismatches(
-      codeMismatches({
-        metadata: { tomversePromotionId: "promo_1783819720812", planId: "pro" },
-      })
-    ),
-    ["identity:metadata_plan_id"]
-  );
+  // A plan stamp that does not match is reported as drift rather than identity
+  // -- ownership is asserted by `tomversePromotionId`, and the strict reading
+  // made a promotion eligible for two plans unusable on one of them (see
+  // `planMetadataMismatch`). Adoption is what the strict severity was
+  // protecting, and drift still blocks that.
+  const otherPlan = codeMismatches({
+    metadata: { tomversePromotionId: "promo_1783819720812", planId: "pro" },
+  });
+  assert.deepEqual(describeMismatches(otherPlan), [
+    "drift:metadata_plan_id_stale",
+  ]);
+  assert.equal(canAdoptStripePromotionCode(otherPlan), false);
   assert.deepEqual(
     describeMismatches(codeMismatches({ couponId: "cpn_someone_else" })),
     ["identity:coupon_id"]
@@ -457,4 +462,183 @@ test("mismatch descriptions carry reason slugs only", () => {
   for (const entry of described) {
     assert.match(entry, /^(identity|usability|drift):[a-z_]+$/);
   }
+});
+
+/**
+ * The plan stamped into a Stripe object's metadata.
+ *
+ * This is the rule behind the reported outage: EDDIEFRIEND100 validated, showed
+ * -100% and A$0.00 in the order summary, and then refused at Checkout with
+ * "This promotion is not currently available." A promotion eligible for two
+ * plans has one Stripe Coupon and Promotion Code between them -- the row has
+ * one linkage column pair and a Stripe promotion code string is unique across
+ * the account -- so the object is stamped with whichever plan checked out
+ * first, and treating that as an identity mismatch refuses the promotion on
+ * every other eligible plan, permanently.
+ */
+
+const multiPlanPromotion = (planIds) =>
+  promotion({ appliesToPlanIds: planIds });
+
+test("a code stamped for the other eligible plan is not an identity failure", () => {
+  const mismatches = promotionCodeMismatches({
+    promotionCode: promotionCode({
+      metadata: {
+        tomversePromotionId: "promo_1783819720812",
+        planId: "max",
+      },
+    }),
+    promotion: multiPlanPromotion(["pro", "max"]),
+    planId: "pro",
+    expectLiveMode: true,
+    expectedCouponId: "cpn_live",
+    nowSeconds: NOW_SECONDS,
+    customerId: null,
+  });
+  assert.deepEqual(describeMismatches(mismatches), []);
+  assert.equal(canUseStripePromotionCode(mismatches), true);
+});
+
+test("the same relaxation applies to the coupon behind it", () => {
+  const mismatches = couponMismatches({
+    coupon: coupon({
+      metadata: {
+        tomversePromotionId: "promo_1783819720812",
+        planId: "max",
+      },
+    }),
+    promotion: multiPlanPromotion(["pro", "max"]),
+    planId: "pro",
+    expectLiveMode: true,
+    planProductId: null,
+  });
+  assert.deepEqual(describeMismatches(mismatches), []);
+});
+
+test("the rule itself, branch by branch", () => {
+  // Matching stamp, and a stamp naming another plan the row is eligible for:
+  // both usable, because one Stripe object serves every plan on the row.
+  assert.equal(planMetadataMismatch("pro", "pro", ["pro", "max"]), null);
+  assert.equal(planMetadataMismatch("max", "pro", ["pro", "max"]), null);
+  // No stamp at all: not an object this system created.
+  assert.deepEqual(planMetadataMismatch(undefined, "pro", ["pro", "max"]), {
+    reason: "metadata_plan_id",
+    severity: "identity",
+  });
+  // A stamp naming a plan the row no longer covers: reported, not fatal.
+  assert.deepEqual(planMetadataMismatch("max", "pro", ["pro"]), {
+    reason: "metadata_plan_id_stale",
+    severity: "drift",
+  });
+  // With no eligible list to consult, the plan being asked about is the only
+  // one known to be eligible.
+  assert.deepEqual(planMetadataMismatch("max", "pro", undefined), {
+    reason: "metadata_plan_id_stale",
+    severity: "drift",
+  });
+});
+
+test("the reported outage: a missing stamp still produces the public error", () => {
+  // The customer-facing string is unchanged, and still says nothing about
+  // which of four internal causes produced it.
+  const mismatches = promotionCodeMismatches({
+    promotionCode: promotionCode({ metadata: {} }),
+    promotion: multiPlanPromotion(["pro", "max"]),
+    planId: "pro",
+    expectLiveMode: true,
+    expectedCouponId: "cpn_live",
+    nowSeconds: NOW_SECONDS,
+    customerId: null,
+  });
+  assert.equal(canUseStripePromotionCode(mismatches), false);
+  assert.equal(errorCodeForMismatches(mismatches), "PROMOTION_CODE_CONFLICT");
+  assert.equal(
+    externalCheckoutError(errorCodeForMismatches(mismatches)).error,
+    "This promotion is not currently available."
+  );
+});
+
+test("an object carrying no plan stamp is still not ours", () => {
+  const mismatches = promotionCodeMismatches({
+    promotionCode: promotionCode({
+      metadata: { tomversePromotionId: "promo_1783819720812" },
+    }),
+    promotion: multiPlanPromotion(["pro", "max"]),
+    planId: "pro",
+    expectLiveMode: true,
+    expectedCouponId: "cpn_live",
+    nowSeconds: NOW_SECONDS,
+    customerId: null,
+  });
+  assert.ok(describeMismatches(mismatches).includes("identity:metadata_plan_id"));
+});
+
+test("a stamp naming a plan the row no longer covers is drift, not identity", () => {
+  // The operator removed Max from the promotion after the object was created.
+  // Ownership is not in doubt -- tomversePromotionId still matches -- so the
+  // linked object keeps working while the disagreement is reported.
+  const mismatches = promotionCodeMismatches({
+    promotionCode: promotionCode({
+      metadata: {
+        tomversePromotionId: "promo_1783819720812",
+        planId: "max",
+      },
+    }),
+    promotion: multiPlanPromotion(["pro"]),
+    planId: "pro",
+    expectLiveMode: true,
+    expectedCouponId: "cpn_live",
+    nowSeconds: NOW_SECONDS,
+    customerId: null,
+  });
+  assert.deepEqual(describeMismatches(mismatches), [
+    "drift:metadata_plan_id_stale",
+  ]);
+  assert.equal(canUseStripePromotionCode(mismatches), true);
+  // Stricter for an unknown object: drift still blocks adoption.
+  assert.equal(canAdoptStripePromotionCode(mismatches), false);
+});
+
+test("the plan gate itself is untouched: a product restriction is still fatal", () => {
+  // Relaxing the metadata stamp must not relax which plan a discount may be
+  // charged against. `applies_to.products` is the Stripe-side restriction and
+  // it stays an identity mismatch.
+  const mismatches = couponMismatches({
+    coupon: coupon({
+      metadata: {
+        tomversePromotionId: "promo_1783819720812",
+        planId: "max",
+      },
+      appliesToProducts: ["prod_max_only"],
+    }),
+    promotion: multiPlanPromotion(["pro", "max"]),
+    planId: "pro",
+    expectLiveMode: true,
+    planProductId: "prod_pro",
+  });
+  assert.deepEqual(describeMismatches(mismatches), [
+    "identity:applies_to_products",
+  ]);
+  assert.equal(
+    errorCodeForMismatches(mismatches),
+    "PROMOTION_PRODUCT_MISMATCH"
+  );
+});
+
+test("a stranger's code is still refused whatever its plan stamp says", () => {
+  const mismatches = promotionCodeMismatches({
+    promotionCode: promotionCode({
+      metadata: { tomversePromotionId: "promo_someone_else", planId: "pro" },
+    }),
+    promotion: multiPlanPromotion(["pro", "max"]),
+    planId: "pro",
+    expectLiveMode: true,
+    expectedCouponId: "cpn_live",
+    nowSeconds: NOW_SECONDS,
+    customerId: null,
+  });
+  assert.ok(
+    describeMismatches(mismatches).includes("identity:metadata_promotion_id")
+  );
+  assert.equal(canUseStripePromotionCode(mismatches), false);
 });
