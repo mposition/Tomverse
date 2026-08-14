@@ -192,6 +192,10 @@ run(
     // deletion order, and that the GIN term index is actually queryable.
     "tests/integration/assistant-knowledge-schema.db.test.ts",
     "tests/integration/assistant-knowledge-pipeline.db.test.ts",
+    // Release C3c: which row the runtime reads for a profile-backed turn --
+    // owner boundary, superseded revisions, and the §32 identity the bundle
+    // binds.
+    "tests/integration/chat-profile-context.db.test.ts",
     // PRIVACY-01/02. These settle what a source scan cannot: that no withheld
     // column reaches the export, that no identifier survives an account
     // deletion, and that a download ticket is spent exactly once under

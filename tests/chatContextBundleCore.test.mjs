@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHmac } from "node:crypto";
 import test from "node:test";
 import {
     bundleConsumptionKey,
@@ -31,6 +32,7 @@ const fingerprintInput = (overrides = {}) => ({
     retrievalHash: "abc123",
     retrievalVersion: 1,
     promptVersion: "mem-context-v1",
+    knowledgeHash: "none",
     ...overrides,
 });
 
@@ -41,6 +43,7 @@ const payload = (overrides = {}) => ({
     conversationId: "conv-1",
     modelIds: ["gpt-5-6-luna"],
     memoryTokens: 120,
+    profileTokens: 0,
     expiresAtMs: NOW.getTime() + 60_000,
     ...fingerprintInput(),
     ...overrides,
@@ -175,6 +178,7 @@ test("every part of the context makes the bundle stale when it moves", () => {
         { retrievalHash: "def456" },
         { retrievalVersion: 2 },
         { promptVersion: "mem-context-v2" },
+        { knowledgeHash: "1|profile-context-v1|f-a:0" },
     ];
     for (const change of changes) {
         const result = verifyContextBundle(
@@ -189,6 +193,98 @@ test("every part of the context makes the bundle stale when it moves", () => {
             `${Object.keys(change)[0]} must invalidate the bundle`
         );
     }
+});
+
+test("a knowledge retrieval that returned different excerpts is stale", () => {
+    // Release C's own half of the same rule. Bound apart from `retrievalHash`
+    // so a changed knowledge file and a changed memory are distinguishable in
+    // the record of why a bundle stopped matching.
+    const token = issueContextBundle(
+        payload({ knowledgeHash: "1|profile-context-v1|f-a:0,f-b:2" }),
+        SECRET
+    );
+    const result = verifyContextBundle(
+        token,
+        verifyOptions({
+            currentFingerprint: contextFingerprint(
+                fingerprintInput({
+                    knowledgeHash: "1|profile-context-v1|f-a:0,f-c:1",
+                })
+            ),
+        })
+    );
+    assert.equal(result.reason, "stale");
+});
+
+test("a bundle issued before profiles were bound still verifies", () => {
+    // The rolling-deploy case. A bundle lives five minutes, so the two
+    // Release C fields are read tolerantly: absent means "no profile", which
+    // is the same context a turn without one has. Refusing it as malformed
+    // would answer an aged-out bundle with INVALID_CONTEXT_BUNDLE, telling the
+    // client its request was wrong rather than that its context expired.
+    const legacyFingerprint = fingerprintInput();
+    const legacyBody = Buffer.from(
+        JSON.stringify({
+            v: 1,
+            b: "bundle-1",
+            s: "user:u-1",
+            c: "conv-1",
+            m: ["gpt-5-6-luna"],
+            mode: legacyFingerprint.memoryMode,
+            mv: legacyFingerprint.memoryVersion,
+            sv: legacyFingerprint.styleVersion,
+            pv: legacyFingerprint.profileVersion,
+            rh: legacyFingerprint.retrievalHash,
+            rv: legacyFingerprint.retrievalVersion,
+            prv: legacyFingerprint.promptVersion,
+            t: 120,
+            e: NOW.getTime() + 60_000,
+        }),
+        "utf8"
+    ).toString("base64url");
+    const signature = createHmac("sha256", SECRET)
+        .update(`chat-context-bundle.v1.${legacyBody}`)
+        .digest("base64url");
+    const result = verifyContextBundle(
+        `${legacyBody}.${signature}`,
+        verifyOptions({
+            currentFingerprint: contextFingerprint(fingerprintInput()),
+        })
+    );
+    assert.equal(result.ok, true);
+    assert.equal(result.payload.knowledgeHash, "none");
+    assert.equal(result.payload.profileTokens, 0);
+});
+
+test("a present Release C field of the wrong type is still refused", () => {
+    // Tolerance is for the old shape, never for a forged one.
+    const body = Buffer.from(
+        JSON.stringify({
+            v: 1,
+            b: "bundle-1",
+            s: "user:u-1",
+            c: "conv-1",
+            m: ["gpt-5-6-luna"],
+            mode: "on",
+            mv: "12:1754265600000",
+            sv: "style-3",
+            pv: null,
+            rh: "abc123",
+            rv: 1,
+            prv: "mem-context-v1",
+            kh: 7,
+            t: 120,
+            e: NOW.getTime() + 60_000,
+        }),
+        "utf8"
+    ).toString("base64url");
+    const signature = createHmac("sha256", SECRET)
+        .update(`chat-context-bundle.v1.${body}`)
+        .digest("base64url");
+    assert.equal(
+        verifyContextBundle(`${body}.${signature}`, verifyOptions()).reason,
+        "malformed"
+    );
 });
 
 test("turning memory off is a different context, not an absent one", () => {
