@@ -527,6 +527,14 @@ export function PromotionDiagnosticsPanel({ promotions }: Props) {
                     label="Stored coupon"
                     value={report.stripe.facts.storedCouponId}
                   />
+                  {report.stripe.facts.storedCouponId ? (
+                    <p className="text-xs text-zinc-500">
+                      Stored coupon in Stripe:{" "}
+                      {report.stripe.facts.storedCouponExists
+                        ? "found"
+                        : "not found in this mode"}
+                    </p>
+                  ) : null}
                   <MaskedId
                     label="Stored promotion code"
                     value={report.stripe.facts.storedPromotionCodeId}
