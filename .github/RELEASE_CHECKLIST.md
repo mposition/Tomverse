@@ -27,6 +27,14 @@ Date / timezone:    ____________________
 - [ ] `npm run security:regression`
 - [ ] `npm run check:accent-tokens`
 - [ ] `npm run check:model-pricing`
+- [ ] `npm run check:fal-image-pricing` (needs `FAL_KEY`) — fal publishes
+      "Pricing is subject to change" beside the number `fal-ai/nano-banana-2`'s
+      fixed credit price was computed from. The **fal Price Drift** workflow
+      runs it daily against `main` and `develop`; this line is the re-check at
+      the release SHA. `matched` is the pass. `not_registered` is the correct
+      answer on a branch that does not carry the model — which is `main` until
+      the activation reaches it — and `lookup_failed` and `skipped` are neither
+      a pass nor a failure.
 - [ ] `npm run check:default-models`
 - [ ] `npm run check:api-cache-control` — proves the proxy's `/api/*` default
       does not silently replace a route's own caching decision

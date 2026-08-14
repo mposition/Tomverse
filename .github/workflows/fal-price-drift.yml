@@ -1,0 +1,94 @@
+name: fal Price Drift
+#
+# fal publishes "Pricing is subject to change" beside the number this
+# repository turned into a fixed 120-credit product. `check:fal-image-pricing`
+# compares the two, and until now nothing ran it: it needs FAL_KEY, so it sat
+# in the release checklist and ran when a person remembered. The fixed price
+# rests on that comparison, and a check that exists is not a check that runs.
+#
+# Deliberately its own scheduled workflow rather than a step in PR Fast Gate.
+# The check's own header says why: a price lookup that can block a merge makes
+# every PR depend on a third party's API being up, which is a single point of
+# failure wearing a safety feature's clothes. A drifted price is not something
+# a pull request caused and not something a pull request should be stopped for
+# -- it is something a person has to re-approve. This produces a standalone red
+# check for that, once a day.
+#
+# It is also deliberately NOT wired into /api/ready, for the same reason at a
+# higher cost: fal being slow must never take chat and the two working image
+# providers down with it.
+#
+# Both branches, because they answer different questions. `main` is what bills
+# real users and is the one that matters. `develop` is what staging runs and
+# what becomes main next, so checking it is how a drift is caught before a
+# deploy rather than after one -- which is the entire point of a drift check.
+# A branch where the model is still held reports `skipped` and passes, so the
+# matrix costs nothing until a branch actually has it enabled.
+
+on:
+  schedule:
+    # 22:00 UTC = 08:00 Australia/Brisbane, so a failure is waiting at the
+    # start of the day rather than arriving in the middle of one. An hour
+    # after Daily Security Audit (21:00 UTC) so the two do not interleave.
+    - cron: "0 22 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fal-price-drift-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  price-drift:
+    name: fal published price vs approved price (${{ matrix.branch }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      # Never cancel the sibling: "develop drifted" and "main drifted" are
+      # different facts and both are wanted.
+      fail-fast: false
+      matrix:
+        branch: [main, develop]
+
+    steps:
+      - name: Checkout ${{ matrix.branch }}
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ matrix.branch }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        timeout-minutes: 5
+        run: npm ci --no-audit --no-fund
+
+      # Said separately from the check's own failure. Without a key the check
+      # reports "the published price could not be read", which is true and
+      # reads like fal was unreachable. "The secret is not configured" is a
+      # different repair, and conflating the two is how a missing credential
+      # gets mistaken for a flaky provider for a week.
+      - name: Require the credential
+        env:
+          FAL_KEY: ${{ secrets.FAL_KEY }}
+        run: |
+          if [ -z "$FAL_KEY" ]; then
+            echo "::error::FAL_KEY is empty for this run. The repository secret is missing or not readable here, so no price comparison happened. This is a configuration failure, not a price change."
+            exit 1
+          fi
+
+      # `matched` is the only pass. `lookup_failed` and `skipped` both exit
+      # zero from the script -- correctly, since neither means the price is
+      # wrong -- but neither means it was compared either, and on a branch
+      # where the model is enabled the script already turns both into a
+      # failure. The step below is the whole gate; nothing parses its output.
+      - name: Compare fal's published price against the approved one
+        timeout-minutes: 5
+        env:
+          FAL_KEY: ${{ secrets.FAL_KEY }}
+        run: npm run check:fal-image-pricing
