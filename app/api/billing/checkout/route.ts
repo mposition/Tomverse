@@ -26,7 +26,11 @@ import {
   validatePromotionForCheckout,
   type PromotionRiskFlag,
 } from "@/lib/billingPromotionSecurity";
-import { promotionValidationError } from "@/lib/billingPromotionCore";
+import {
+  promotionDiscountedMinor,
+  promotionValidationError,
+} from "@/lib/billingPromotionCore";
+import { checkoutPlanEligibilityBlock } from "@/lib/checkoutPlanEligibilityCore";
 import { sendFoundingTesterPassStartedEmail } from "@/lib/billingEmails";
 import { prisma } from "@/lib/prisma";
 import { getPublicAppOrigin } from "@/lib/publicUrl";
@@ -96,8 +100,6 @@ const checkoutSchema = z
   })
   .strict();
 
-const activeSubscriptionStatuses = new Set(["active", "trialing", "past_due"]);
-
 /**
  * Keying material for the idempotency keys sent to Stripe.
  *
@@ -117,29 +119,13 @@ const idempotencyKeySecret = () => {
   return secret;
 };
 
-/**
- * Plan ordering, so "is this a new subscription, a change, or a downgrade" is
- * one comparison rather than a chain of plan-name conditionals.
- */
-const PLAN_RANK: Record<"Free" | "Pro" | "Max", number> = {
-  Free: 0,
-  Pro: 1,
-  Max: 2,
-};
-
 type CheckoutPromotion = BillingPromotionConfig;
 type CheckoutPlan = Awaited<ReturnType<typeof getBillingPlans>>[number];
 
 const calculateDiscountedCents = (
   cents: number,
   promotion: CheckoutPromotion | null
-) => {
-  if (!promotion) return cents;
-  if (promotion.discountPercent > 0) {
-    return Math.max(0, Math.round(cents * (1 - promotion.discountPercent / 100)));
-  }
-  return Math.max(0, cents - (promotion.discountAmountCents || 0));
-};
+) => promotionDiscountedMinor(cents, promotion);
 
 const priceCentsForInterval = (
   plan: CheckoutPlan,
@@ -456,49 +442,20 @@ export async function POST(req: Request) {
     });
     const targetTier = tierForPlanId(planId as BillingPlanId);
 
-    // Same plan. Previously this only failed if a Stripe subscription happened
-    // to be attached, so an account holding a plan by any other route could
-    // buy the plan it already had.
-    if (effectivePlan === targetTier) {
+    // The three plan-change refusals, decided by the shared pure function the
+    // Admin promotion diagnostics also reads. Same branches, same codes, same
+    // messages as before; see lib/checkoutPlanEligibilityCore.ts for why they
+    // exist and docs/policy/plan-change.md §5 for why they stay.
+    const planBlock = checkoutPlanEligibilityBlock({
+      effectivePlan,
+      targetTier,
+      hasStripeSubscription: Boolean(user.stripeSubscriptionId),
+      subscriptionStatus: user.subscriptionStatus,
+    });
+    if (planBlock) {
       return NextResponse.json(
-        {
-          code: "PLAN_CHANGE_NOT_SUPPORTED",
-          error: "This account is already on this plan.",
-        },
-        { status: 409 }
-      );
-    }
-
-    // A downgrade. There is no in-product subscription-change flow -- only
-    // cancel-at-period-end -- so creating a second, cheaper subscription here
-    // would leave the account paying for two plans at once.
-    if (PLAN_RANK[effectivePlan] > PLAN_RANK[targetTier]) {
-      return NextResponse.json(
-        {
-          code: "PLAN_CHANGE_NOT_SUPPORTED",
-          error:
-            "Moving to a lower plan is handled from account settings at the end of the paid period.",
-        },
-        { status: 409 }
-      );
-    }
-
-    // An upgrade while a Stripe subscription is live is a *change* to that
-    // subscription, which this product does not implement. The UI must not
-    // offer a checkout CTA here (see resolvePlanCtaState in
-    // lib/purchaseIntent.ts, which resolves this state to "manage_plan"); the
-    // code lets the client say so precisely if it ever gets here anyway.
-    if (
-      user.stripeSubscriptionId &&
-      user.subscriptionStatus &&
-      activeSubscriptionStatuses.has(user.subscriptionStatus)
-    ) {
-      return NextResponse.json(
-        {
-          code: "ACTIVE_SUBSCRIPTION_EXISTS",
-          error: "An active subscription already exists.",
-        },
-        { status: 409 }
+        { code: planBlock.code, error: planBlock.error },
+        { status: planBlock.status }
       );
     }
 

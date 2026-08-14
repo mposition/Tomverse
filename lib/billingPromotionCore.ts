@@ -67,6 +67,31 @@ export const promotionEligibilityFailure = ({
   return null;
 };
 
+/**
+ * The amount a promotion leaves to charge, in the currency's minor unit.
+ *
+ * Lives here rather than in the checkout route because the Admin promotion
+ * diagnostics quotes the same number without creating a Session. Two copies of
+ * a rounding rule is two answers to "what will the customer be charged", and
+ * the whole point of the preview is that it matches.
+ */
+export const promotionDiscountedMinor = (
+  amountMinor: number,
+  promotion: {
+    discountPercent: number;
+    discountAmountCents: number | null;
+  } | null
+) => {
+  if (!promotion) return amountMinor;
+  if (promotion.discountPercent > 0) {
+    return Math.max(
+      0,
+      Math.round(amountMinor * (1 - promotion.discountPercent / 100))
+    );
+  }
+  return Math.max(0, amountMinor - (promotion.discountAmountCents || 0));
+};
+
 export const promotionValidationError = (reason: PromotionValidationReason) => {
   switch (reason) {
     case "already_used":
