@@ -150,6 +150,14 @@ jobs:
         timeout-minutes: 5
         run: npm run check:policy-section-references
 
+      # The staging checklist holds items and never results, and a signed run
+      # record is not edited afterwards. The previous shape put an approval
+      # table inside the checklist, where it could not say which commit it
+      # covered -- and then did not, for eight days of surface changes.
+      - name: Staging verification records
+        timeout-minutes: 5
+        run: npm run check:staging-verification-records
+
       # UI-012: semantic accent colours must stay addressed by role inside the
       # guarded components. Cheap, no browser, so it sits with the other static
       # checks rather than in the browser tier.

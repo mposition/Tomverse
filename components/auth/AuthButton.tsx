@@ -428,7 +428,14 @@ export function AuthButton({
             }),
         ])
             .then(async ([settingsResponse, candidateResponse]) => {
+                // Both bodies, on every path out of here. `Promise.all` means
+                // one refusal used to strand the other response's body unread
+                // as well, and a cancelled effect stranded both -- the request
+                // then stays in flight for the life of the page (see
+                // lib/apiCacheControlPolicy.ts).
                 if (cancelled || !settingsResponse.ok || !candidateResponse.ok) {
+                    await discardResponseBody(settingsResponse);
+                    await discardResponseBody(candidateResponse);
                     return;
                 }
                 const settings = (await settingsResponse.json()) as {

@@ -80,6 +80,10 @@ Date / timezone:    ____________________
       shipped 105 citations of sections 31, 32 and 42 to 46, none of which any
       policy document has, each one beside a path the reference check found
       perfectly valid
+- [ ] `npm run check:staging-verification-records` — proves the staging
+      checklist still holds no results and every signed run record still
+      hashes to what it was signed as. The previous shape kept an approval
+      table inside the checklist, which could not say which commit it covered
 - [ ] `npm run check:ui-tier-coverage` — proves the merge-blocking `@ui-risk`
       tier and the document that records it still describe the same set
 - [ ] `npm run check:release-gate-coverage` — proves this list still matches
