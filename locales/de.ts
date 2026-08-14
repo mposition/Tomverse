@@ -1100,6 +1100,8 @@ export const de = {
             "{count} Nicht-Text-Inhalte (Bilder, Audio, Dateien) übersprungen",
         warningBranches:
             "{count} alternative Gesprächsverzweigungen werden nicht importiert",
+        warningNestedArchives:
+            "{count} angehängte Archive (.zip und ähnliche) werden nicht geöffnet und daher nicht importiert",
         notImportableBadge: "Import nicht möglich",
         notImportableExplain:
             "{count} Unterhaltungen enthalten eine Nachricht über der Import-Größengrenze und können nicht importiert werden.",

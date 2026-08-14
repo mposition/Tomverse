@@ -61,16 +61,122 @@ test("known metadata files are skipped, directories too", () => {
     assert.equal(decisionFor("empty.json", 0).reason, "empty");
 });
 
-test("traversal, absolute paths and nested archives are refused", () => {
-    assert.equal(decisionFor("../../etc/passwd.json").reason, "path_traversal");
-    assert.equal(decisionFor("a/../../b/conversations.json").reason, "path_traversal");
-    assert.equal(decisionFor("/etc/shadow.json").reason, "absolute_path");
-    assert.equal(decisionFor("C:\\Windows\\x.json").reason, "absolute_path");
-    assert.equal(decisionFor("inner.zip").reason, "nested_archive");
-    assert.equal(decisionFor("bundle.tgz").reason, "nested_archive");
+test("traversal, absolute paths and encrypted entries are refused", () => {
+    // `kind` is asserted alongside `reason` on purpose: a decision keeps its
+    // reason when it moves between refusing and skipping, so a test that reads
+    // only the reason cannot tell the two apart. That is how the nested-archive
+    // change below went unnoticed by this file until it was looked for.
+    assert.deepEqual(decisionFor("../../etc/passwd.json"), {
+        kind: "reject",
+        reason: "path_traversal",
+    });
+    assert.deepEqual(decisionFor("a/../../b/conversations.json"), {
+        kind: "reject",
+        reason: "path_traversal",
+    });
+    assert.deepEqual(decisionFor("/etc/shadow.json"), {
+        kind: "reject",
+        reason: "absolute_path",
+    });
+    assert.deepEqual(decisionFor("C:\\Windows\\x.json"), {
+        kind: "reject",
+        reason: "absolute_path",
+    });
+    assert.deepEqual(decisionFor("conversations.json", 1_000, { encrypted: true }), {
+        kind: "reject",
+        reason: "encrypted",
+    });
+});
+
+test("a nested archive is skipped, never opened and never refused", () => {
+    // §5.2, decided 2026-08-14. Extraction depth stays 0 — the entry is not
+    // opened, enumerated or inspected — but it no longer refuses the export it
+    // arrived in. A real Google Takeout carries one whenever the user attached
+    // a .zip to a chat, and refusing the entry refused the whole export.
+    assert.deepEqual(decisionFor("inner.zip"), {
+        kind: "skip",
+        reason: "nested_archive",
+    });
+    assert.deepEqual(decisionFor("bundle.tgz"), {
+        kind: "skip",
+        reason: "nested_archive",
+    });
+});
+
+test("a nested archive does not stop the conversation payload being parsed", () => {
+    // The case that motivated the change: an ordinary export with an attached
+    // archive beside the payload.
+    const plan = planArchiveEntries(
+        [
+            entry("Takeout/My Activity/Gemini Apps/attachment-1.zip", 5_000),
+            entry("conversations.json", 2_000),
+            entry("Takeout/My Activity/Gemini Apps/photo.jpg", 900_000),
+        ],
+        { archiveBytes: 1_000_000 }
+    );
+    assert.deepEqual(
+        plan.parse.map((planned) => planned.entry.name),
+        ["conversations.json"],
+        "the nested archive must never reach the parse list"
+    );
+    assert.equal(plan.skipped.nested_archive, 1);
     assert.equal(
-        decisionFor("conversations.json", 1_000, { encrypted: true }).reason,
-        "encrypted"
+        plan.skipped.unsupported_extension,
+        0,
+        "it must be counted under its own reason, not folded into another"
+    );
+});
+
+test("an archive of nothing but nested archives has no conversation data", () => {
+    // Skipping is not the same as accepting: with the payload gone, the export
+    // is still refused — with the reason that says what is actually wrong.
+    assert.throws(
+        () =>
+            planArchiveEntries(
+                [entry("one.zip", 5_000), entry("two.tar", 5_000)],
+                { archiveBytes: 20_000 }
+            ),
+        (error) =>
+            error instanceof ExternalImportArchiveError &&
+            error.reason === "no_conversation_data"
+    );
+});
+
+test("a nested archive does not soften the refusals around it", () => {
+    // Each of these still refuses the whole archive, and the nested entry
+    // beside them changes nothing.
+    for (const bad of [
+        entry("../../etc/passwd.json"),
+        entry("/etc/shadow.json"),
+        entry("conversations.json", 1_000, { encrypted: true }),
+    ]) {
+        assert.throws(
+            () =>
+                planArchiveEntries([entry("attachment.zip", 5_000), bad], {
+                    archiveBytes: 100_000,
+                }),
+            ExternalImportArchiveError,
+            `${bad.name} must still refuse the archive`
+        );
+    }
+});
+
+test("the container and entry-count limits are unchanged by the skip", () => {
+    assert.throws(
+        () =>
+            planArchiveEntries([entry("conversations.json", 1_000)], {
+                archiveBytes:
+                    EXTERNAL_IMPORT_CLIENT_ARCHIVE_LIMITS.maxArchiveContainerBytes + 1,
+            }),
+        (error) => error.reason === "archive_too_large"
+    );
+    const tooMany = Array.from(
+        { length: EXTERNAL_IMPORT_CLIENT_ARCHIVE_LIMITS.maxArchiveEntries + 1 },
+        (_, index) => entry(`attachment-${index}.zip`, 10)
+    );
+    assert.throws(
+        () => planArchiveEntries(tooMany, { archiveBytes: 1_000_000 }),
+        (error) => error.reason === "too_many_entries"
     );
 });
 

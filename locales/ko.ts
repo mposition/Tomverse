@@ -1100,6 +1100,8 @@ export const ko = {
         warningSkippedMessages: "시스템·도구 메시지 {count}개 제외",
         warningSkippedParts: "텍스트가 아닌 항목(이미지·오디오·파일) {count}개 제외",
         warningBranches: "대체 대화 분기 {count}개는 가져오지 않음",
+        warningNestedArchives:
+            "첨부된 압축 파일(.zip 등) {count}개는 열지 않으므로 가져오지 않음",
         notImportableBadge: "가져올 수 없음",
         notImportableExplain:
             "{count}개 대화에 가져오기 크기 한도를 넘는 메시지가 있어 가져올 수 없습니다.",
