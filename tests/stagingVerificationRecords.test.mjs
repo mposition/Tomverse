@@ -37,8 +37,10 @@ test("the checklist carries no approval table", () => {
 
 test("the checklist declares a template revision", () => {
     // A record says which revision it ran, and that is only meaningful if the
-    // template says which revision it is.
-    assert.match(read(CHECKLIST), /template revision.*?`\d{4}-\d{2}-\d{2}`/s);
+    // template says which revision it is. A suffix is allowed after the date:
+    // items can change twice in one day, and a bare date cannot tell those two
+    // versions apart -- which is the whole job of the revision.
+    assert.match(read(CHECKLIST), /template revision.*?`\d{4}-\d{2}-\d{2}[a-z]?`/s);
 });
 
 test("every record is named for a day and a full deploy SHA", () => {

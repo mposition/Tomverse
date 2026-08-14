@@ -70,6 +70,9 @@ const NESTED_ARCHIVE_EXTENSIONS = new Set([
 
 const PARSEABLE_EXTENSIONS = new Set(["json", "jsonl"]);
 
+/** Not parsed, but recognisable enough to explain what went wrong (§6). */
+const HTML_EXTENSIONS = new Set(["html", "htm"]);
+
 /** Conversation payload filenames, by provider export layout. */
 const CONVERSATION_FILENAMES = new Set([
     "conversations.json",
@@ -179,6 +182,7 @@ export class ExternalImportArchiveError extends Error {
             | "archive_too_large"
             | "parsed_budget_exceeded"
             | "no_conversation_data"
+            | "html_export_unsupported"
     ) {
         super(message);
         this.name = "ExternalImportArchiveError";
@@ -251,6 +255,18 @@ export function planArchiveEntries(
     }
 
     if (plan.parse.length === 0) {
+        // An export that holds HTML where the conversations should be is the
+        // one failure the user can fix themselves: Google Takeout offers JSON
+        // or HTML for My Activity, and only JSON is supported (A2 §6). Saying
+        // "unreadable" would send them to support for a re-export they could
+        // do in a minute. Detected by extension, never by a path segment --
+        // those are translated to the account's language (A2 §3.1).
+        if (entries.some((entry) => HTML_EXTENSIONS.has(extensionOf(entry.name)))) {
+            throw new ExternalImportArchiveError(
+                "The export contains HTML where the conversation data should be.",
+                "html_export_unsupported"
+            );
+        }
         throw new ExternalImportArchiveError(
             "The archive contains no conversation data.",
             "no_conversation_data"

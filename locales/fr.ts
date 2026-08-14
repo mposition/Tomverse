@@ -1097,6 +1097,8 @@ export const fr = {
         desktopRecommended:
             "Cet export est trop volumineux pour le navigateur de cet appareil. Le fichier étant ouvert localement, veuillez réessayer sur un ordinateur de bureau.",
         parseFailed: "Le fichier n'a pas pu être lu comme un export pris en charge.",
+        parseFailedHtmlExport:
+            "Cet export est au format HTML. Réexportez Mon activité en choisissant le format JSON, puis téléversez ce fichier.",
         previewTitle: "Choisir les conversations à importer",
         previewProvider: "Export détecté : {provider}",
         warningsTitle: "Non inclus",
@@ -1113,6 +1115,8 @@ export const fr = {
             "{count} messages figurent dans plusieurs branches et sont enregistrés dans chacune",
         warningUnassignedTurns:
             "{count} entrées ne désignent aucune conversation dans l'export et ne sont donc pas importées",
+        warningUnrecognizedAnswers:
+            "{count} réponses utilisent une mise en forme que cet import ne peut pas lire exactement et ont été omises",
         notImportableBadge: "Import impossible",
         notImportableExplain:
             "{count} conversations contiennent un message dépassant la limite de taille d'import et ne peuvent pas être importées.",

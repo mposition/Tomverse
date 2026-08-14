@@ -135,7 +135,9 @@ export function FileInspectionStep({
                     <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-red-500" />
                     <div>
                         <p className="text-sm leading-6 text-zinc-600 dark:text-zinc-300">
-                            {t("externalImport.parseFailed")}
+                            {status.reason === "html_export_unsupported"
+                                ? t("externalImport.parseFailedHtmlExport")
+                                : t("externalImport.parseFailed")}
                         </p>
                         {/* The worker's raw reason label is a diagnostic, not
                             product copy: it stays behind a disclosure so the
@@ -205,7 +207,7 @@ export function FileInspectionStep({
                 <input
                     ref={fileInputRef}
                     type="file"
-                    accept=".zip,.json,application/zip,application/json"
+                    accept=".zip,.json,.html,.htm,application/zip,application/json,text/html"
                     className="sr-only"
                     data-testid="external-import-file-input"
                     onChange={(event) => {

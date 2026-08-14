@@ -1105,6 +1105,8 @@ export const en = {
         desktopRecommended:
             "This export is too large for this device's browser. Because the file is opened locally, please try again on a desktop computer.",
         parseFailed: "The file could not be read as a supported export.",
+        parseFailedHtmlExport:
+            "This export is in HTML. Export My Activity again and choose the JSON format, then upload that file.",
         previewTitle: "Choose conversations to import",
         previewProvider: "Detected export: {provider}",
         warningsTitle: "Not included",
@@ -1119,6 +1121,8 @@ export const en = {
             "{count} messages appear in more than one branch and are stored in each",
         warningUnassignedTurns:
             "{count} entries name no conversation in the export, so they are not imported",
+        warningUnrecognizedAnswers:
+            "{count} answers use formatting this import cannot read exactly, so they were left out",
         notImportableBadge: "Cannot be imported",
         notImportableExplain:
             "{count} conversations contain a message above the import size limit and cannot be imported.",

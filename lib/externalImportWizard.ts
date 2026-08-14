@@ -64,6 +64,8 @@ export type ParseWarningTotals = {
     missingAttachments: number;
     /** Messages stored once per branch because the chat was branched (§2.2). */
     duplicatedBranchMessages: number;
+    /** Answers dropped because their markup could not be rendered (A2 §5). */
+    skippedUnrecognizedAnswers: number;
     requiresTruncationApproval: number;
     notImportable: number;
 };
@@ -76,6 +78,7 @@ export const emptyParseWarningTotals = (): ParseWarningTotals => ({
     unassignedTurns: 0,
     missingAttachments: 0,
     duplicatedBranchMessages: 0,
+    skippedUnrecognizedAnswers: 0,
     requiresTruncationApproval: 0,
     notImportable: 0,
 });
@@ -591,6 +594,7 @@ export function parseWarningTotalsFromPreview(
         unassignedTurns: preview.totals.unassignedTurns,
         missingAttachments: preview.totals.missingAttachments,
         duplicatedBranchMessages: preview.totals.duplicatedBranchMessages,
+        skippedUnrecognizedAnswers: preview.totals.skippedUnrecognizedAnswers,
         requiresTruncationApproval: preview.totals.requiresTruncationApproval,
         notImportable: preview.totals.notImportable,
     };

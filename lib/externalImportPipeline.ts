@@ -87,6 +87,14 @@ export type ImportPreview = {
          * every branch is imported (A2 §2.2). They cost quota once per branch.
          */
         duplicatedBranchMessages: number;
+        /**
+         * Answers dropped because their markup was outside what the adapter
+         * renders exactly (A2 §5). Counted rather than half-converted, and
+         * shown rather than counted in silence — a conversation arriving with
+         * an answer missing and nothing said about it is indistinguishable
+         * from one the model never answered.
+         */
+        skippedUnrecognizedAnswers: number;
     };
 };
 
@@ -180,6 +188,7 @@ export function buildImportPreview(
         unassignedTurns: exportTotals.unassignedTurns ?? 0,
         missingAttachments: exportTotals.missingAttachments ?? 0,
         duplicatedBranchMessages: 0,
+        skippedUnrecognizedAnswers: 0,
     };
     for (const row of rows) {
         if (row.importability.kind === "importable") {
@@ -199,6 +208,7 @@ export function buildImportPreview(
         totals.skippedNonTextParts += warnings.skippedNonTextParts;
         totals.additionalBranches += warnings.additionalBranchCount;
         totals.duplicatedBranchMessages += warnings.duplicatedPrefixMessages;
+        totals.skippedUnrecognizedAnswers += warnings.skippedUnrecognizedContent;
     }
 
     return { provider, conversations: rows, totals };

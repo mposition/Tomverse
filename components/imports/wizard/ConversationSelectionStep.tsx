@@ -404,6 +404,15 @@ function ParseWarnings({ warnings }: { warnings: ParseWarningTotals }) {
             })
         );
     }
+    if (warnings.skippedUnrecognizedAnswers > 0) {
+        // A conversation whose answer is simply absent, with nothing said
+        // about it, reads as a question the model never answered (A2 §5).
+        lines.push(
+            interpolate(t("externalImport.warningUnrecognizedAnswers"), {
+                count: warnings.skippedUnrecognizedAnswers,
+            })
+        );
+    }
     if (warnings.unassignedTurns > 0) {
         // The export named no conversation for these. Guessing one from
         // timing is forbidden (A2 §2), so the count is the whole disclosure.
