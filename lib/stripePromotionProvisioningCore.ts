@@ -49,6 +49,22 @@ export type PromotionPolicyInput = {
   durationMonths: number;
   maxRedemptions: number | null;
   endsAt: string | null;
+  /**
+   * Every plan this promotion is allowed on, from the policy row.
+   *
+   * Present because a Stripe promotion *code string* is globally unique among
+   * active codes, and `BillingPromotion` carries one `stripePromotionCodeId`
+   * for the whole row -- so a promotion eligible for both plans is served by
+   * one Stripe object, whichever plan's checkout provisioned it. Judging that
+   * object against the plan currently checking out would refuse the promotion
+   * on every plan except the one that happened to create it. See
+   * `planMetadataMismatch`.
+   *
+   * Optional so the shape stays constructible from a policy fragment; when it
+   * is absent the only plan known to be eligible is the one being asked about,
+   * and any other stamp is reported as drift.
+   */
+  appliesToPlanIds?: readonly string[];
 };
 
 /**
@@ -274,6 +290,54 @@ const usability = (reason: string): Mismatch => ({
 });
 const drift = (reason: string): Mismatch => ({ reason, severity: "drift" });
 
+/**
+ * Judges the `planId` stamped into a Stripe object's metadata.
+ *
+ * This used to be `metadata.planId !== planId -> identity`, and that is the
+ * defect behind "This promotion is not currently available." on a promotion
+ * whose own validation had just succeeded. Three facts make the strict form
+ * unsatisfiable:
+ *
+ *   - `appliesToPlanIds` accepts both plans (the admin schema allows a
+ *     two-element array), so one promotion row can be sold on Pro *and* Max;
+ *   - `BillingPromotion` has exactly one `stripeCouponId` /
+ *     `stripePromotionCodeId` pair for that row, not one per plan; and
+ *   - Stripe enforces one *active* promotion code per code string, so a second
+ *     object stamped with the other plan cannot be created even if there were
+ *     somewhere to store it.
+ *
+ * So the object is necessarily stamped with whichever plan checked out first,
+ * and the other plan was permanently refused: identity mismatch -> fatal ->
+ * `PROMOTION_CODE_CONFLICT` -> `PROMOTION_UNAVAILABLE`. Validation never saw it
+ * because validation never reads Stripe.
+ *
+ * What the stamp can still prove is unchanged. Ownership is asserted by
+ * `metadata.tomversePromotionId`, which is checked separately and stays fatal;
+ * an object carrying *no* stamp is still not one this system created. And
+ * nothing here decides which plan a discount may be charged against -- that is
+ * `promotionEligibilityFailure()` on `appliesToPlanIds` before any Stripe call,
+ * and the coupon's own `applies_to.products` against the plan's product below,
+ * both of which remain fatal.
+ *
+ * A stamp naming a plan the promotion no longer covers is reported as drift
+ * rather than identity: the row was edited after the object was provisioned,
+ * ownership is not in doubt, and turning an operator's policy edit into a
+ * customer-facing checkout failure is the behaviour this function exists to
+ * remove. Drift still blocks *adoption* of an unlinked object, which is the
+ * asymmetry `canAdoptStripePromotionCode` is built on.
+ */
+export const planMetadataMismatch = (
+  stampedPlanId: string | undefined | null,
+  planId: string,
+  eligiblePlanIds: readonly string[] | undefined
+): Mismatch | null => {
+  if (!stampedPlanId) return identity("metadata_plan_id");
+  if (stampedPlanId === planId) return null;
+  const eligible = eligiblePlanIds?.length ? eligiblePlanIds : [planId];
+  if (eligible.includes(stampedPlanId)) return null;
+  return drift("metadata_plan_id_stale");
+};
+
 export const couponMismatches = ({
   coupon,
   promotion,
@@ -297,9 +361,12 @@ export const couponMismatches = ({
   if (coupon.metadata?.tomversePromotionId !== promotion.id) {
     mismatches.push(identity("metadata_promotion_id"));
   }
-  if (coupon.metadata?.planId !== planId) {
-    mismatches.push(identity("metadata_plan_id"));
-  }
+  const couponPlanMismatch = planMetadataMismatch(
+    coupon.metadata?.planId,
+    planId,
+    promotion.appliesToPlanIds
+  );
+  if (couponPlanMismatch) mismatches.push(couponPlanMismatch);
   if ((coupon.percentOff ?? null) !== expected.percentOff) {
     mismatches.push(identity("percent_off"));
   }
@@ -366,9 +433,12 @@ export const promotionCodeMismatches = ({
   if (promotionCode.metadata?.tomversePromotionId !== promotion.id) {
     mismatches.push(identity("metadata_promotion_id"));
   }
-  if (promotionCode.metadata?.planId !== planId) {
-    mismatches.push(identity("metadata_plan_id"));
-  }
+  const codePlanMismatch = planMetadataMismatch(
+    promotionCode.metadata?.planId,
+    planId,
+    promotion.appliesToPlanIds
+  );
+  if (codePlanMismatch) mismatches.push(codePlanMismatch);
   if (expectedCouponId && promotionCode.couponId !== expectedCouponId) {
     mismatches.push(identity("coupon_id"));
   }

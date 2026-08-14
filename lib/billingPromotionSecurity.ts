@@ -15,6 +15,7 @@ import {
 } from "@/lib/billingPromotionCore";
 import { getAnonymousClientKey } from "@/lib/clientIp";
 import { prisma } from "@/lib/prisma";
+import { promotionStripePolicyViolation } from "@/lib/stripePromotionProvisioningCore";
 
 export type BillingInterval = "monthly" | "annual";
 export type PromotionRiskFlag = "shared_ip" | "shared_payment_method";
@@ -193,6 +194,22 @@ export async function validatePromotionForCheckout({
     now,
   });
   if (eligibilityFailure) return { valid: false, reason: eligibilityFailure };
+
+  // A promotion Stripe cannot represent at all -- no redemption cap, no expiry,
+  // a zero-month duration, a discount of nothing. `ensureStripePromotionDiscount`
+  // refuses these before any network call, so a checkout carrying one fails
+  // with PROMOTION_UNAVAILABLE after the order summary has already shown the
+  // customer a discount. The check is pure, both endpoints run this function,
+  // and running it here is what makes validation and Checkout agree on
+  // everything decidable without reading Stripe.
+  //
+  // Skipped for an internal pass, which is fulfilled by granting an access
+  // period and never reaches Stripe at all.
+  if (promotion.fulfillmentType !== "internal_pass") {
+    if (promotionStripePolicyViolation(promotion)) {
+      return { valid: false, reason: "unavailable" };
+    }
+  }
 
   if (userId) {
     const existingRedemption =
