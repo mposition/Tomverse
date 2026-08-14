@@ -405,16 +405,20 @@ test("a direct integration answers both questions the same way", () => {
   }
 });
 
-test("the gateway route is registered disabled, and on price grounds", () => {
+test("the gateway route is held on operations, not on price", () => {
   const model = getImageModel("fal-ai/nano-banana-2");
 
-  // Not `worst_case_cost_unbounded`: a per-image price has no thinking term,
-  // which is the reason for taking this route at all. Blocked purely on not
-  // having read fal's published price yet.
-  assert.equal(model.disabledReason, "price_unverified");
+  // Not `worst_case_cost_unbounded`, which is the direct Google route's
+  // problem and the reason this one exists: a per-image price has no unbounded
+  // thinking term. Not `price_unverified` either, since the price was read
+  // from fal's own published text on 2026-08-14.
+  assert.equal(model.disabledReason, "operational_hold");
+  assert.equal(model.priceVerification.verifiedAt, "2026-08-14");
+  assert.ok(model.priceVerification.sources.length > 0);
+
+  // Empty until a sale credit is approved. `operational_hold` is the one
+  // reason allowed to carry figures, so anything here would read as approved.
   assert.deepEqual(model.prices, []);
-  assert.equal(model.priceVerification.verifiedAt, "");
-  assert.deepEqual(model.priceVerification.sources, []);
 
   // One size, so there is one price to verify and one worst case to state.
   assert.deepEqual(model.sizes, ["1024x1024"]);
@@ -422,4 +426,29 @@ test("the gateway route is registered disabled, and on price grounds", () => {
   // No adapter exists yet, and the dispatch must refuse rather than guess.
   assert.ok(!listEnabledImageModels().some((entry) => entry.id === model.id));
   assert.ok(!listActiveImageProviders().includes("fal"));
+});
+
+test("the worst case is the published price plus a cap that always holds", () => {
+  const model = getImageModel("fal-ai/nano-banana-2");
+  // The price fal publishes for a 1K image, in micro-USD. Written here rather
+  // than read from `prices`, because `prices` is empty on purpose and this is
+  // the figure the credit floor has to be derived from when it is filled in.
+  const price = {
+    quality: "low",
+    size: "1024x1024",
+    credits: 97,
+    outputCostMicroUsd: 80_000,
+  };
+
+  // 80,000 image + 5,000 prompt budget + 2,000 high-thinking surcharge cap.
+  // The prompt budget is padding here rather than a fal charge -- fal bills
+  // per image and not per input token -- and it stays because every other
+  // model's floor carries it and a per-model exception is worth less than a
+  // consistent one.
+  assert.equal(maxImageRequestCostMicroUsd(model, price), 87_000);
+  assert.equal(minimumCreditsForImageOption(model, price), 97);
+
+  // Whatever is approved has to clear the floor, which is what the pricing
+  // check enforces the day `prices` stops being empty.
+  assert.ok(price.credits >= minimumCreditsForImageOption(model, price));
 });

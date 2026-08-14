@@ -806,19 +806,102 @@ bound하지 않음을 보였고, 유한한 최악 원가가 없으면 고정 가
 7. **판매 크레딧 승인.** `minimumCreditsForImageOption()`이 내는 수학적 바닥값은
    승인가가 아니다(§3·§4).
 
-### 16.3 이 문서가 아직 확인하지 못한 것
+### 16.3 확인된 원문 (2026-08-14)
 
-아래는 **제품 책임자가 제시한 사실이며 이 저장소가 원문으로 확인하지 못했다.**
-확인 전까지 가격·일정 판단의 근거로 쓰지 않는다.
+fal.ai와 ai.google.dev를 이 저장소의 실행 환경에서 직접 읽었다. 아래 인용은
+**본문 그대로**이며 요약이 아니다.
 
-- fal의 `fal-ai/nano-banana-2` 성공 이미지당 가격과 해상도 배수, high thinking·
-  web search 추가 요금
-- gateway의 재시도·입출력 보관 기본값과 이를 끄는 헤더의 정확한 이름
-- Imagen 4 종료 일정 — 종료 예정이라면 대안 후보에서 제외한다
-- `gemini-2.5-flash-image`(원본 Nano Banana)의 thinking 미지원·이미지당 가격·
-  종료 일정. 종료가 임박한 모델을 주력으로 개발하지 않으며, brige로서의 가치는
-  남은 기간에 비례한다.
+**가격** — `https://fal.ai/models/fal-ai/nano-banana-2`
 
-확인 방법은 둘 중 하나다 — 실행 환경에서 해당 도메인을 열어 주거나, 공식 페이지의
-해당 문단을 본문 그대로 전달한다. **요약·검색 결과·전언은 §12의 요건을 충족하지
-않는다.**
+> Your request will cost **$0.08** per image. For $1.00, you can run this model
+> 12 times. 2K and 4K outputs will be charged at 1.5 times and 2 times the
+> standard rate, respectively. 0.5K (512px) resolution outputs will be charged
+> at 0.75 times the standard rate. If web search is used, an additional $0.015
+> will be charged. If high thinking is used, an additional $0.002 will be
+> charged. **Note: Pricing is subject to change.**
+
+같은 페이지가 모델을 이렇게 설명한다.
+
+> Google's Gemini 3.1 Flash Image architecture
+
+**과금 방식** — `https://fal.ai/docs/documentation/model-apis/pricing`
+
+> You pay only for successful outputs, and you are never charged for server
+> errors or time spent waiting in the queue.
+
+> Server errors are never billed. If a request fails with an HTTP 500 or higher
+> status code, no charge is incurred.
+
+같은 페이지가 **가격 조회 API**를 제공한다. §16.2-6의 drift 대조는 스크래핑이
+아니라 이것으로 한다.
+
+> `curl "https://api.fal.ai/v1/models/pricing?endpoint_id=fal-ai/flux/dev" -H "Authorization: Key $FAL_KEY"`
+> … The response includes the billing unit and unit price for each endpoint:
+> `{"prices":[{"endpoint_id":"...","unit_price":0.025,"unit":"image","currency":"USD"}]}`
+
+**재시도** — `https://fal.ai/docs/documentation/model-apis/common-parameters`
+
+> X-Fal-No-Retry — Disable automatic retries for this request. **By default,
+> queue-based requests are retried for up to 10 total attempts on server errors
+> (503, 504, connection errors).** … Values `"1"`, `"true"`, `"yes"` to disable
+
+**재시도가 원가를 배수로 만든다는 서술은 정확하지 않다.** 재시도는 서버 오류에
+일어나고 서버 오류는 과금되지 않는다. 끄는 진짜 이유는 다른 것이다 — **성공한
+생성의 응답이 유실된 뒤의 재시도는 두 번째 이미지를 만들고 두 번 과금된다.**
+고정가 계약에서 사용자는 한 번 냈는데 우리는 두 번 낸다. 그래서 끈다.
+
+**입출력 보관** — 같은 페이지
+
+> X-Fal-Store-IO … **This only prevents storage of the JSON payloads. CDN files
+> generated during processing are still accessible (subject to media expiration
+> settings).**
+
+**자산 수명** — 같은 페이지
+
+> X-Fal-Object-Lifecycle-Preference — Control how long generated files are
+> stored on fal's CDN and who can access them. **Default: Your account setting
+> (forever and publicly readable if not configured)** … Format JSON:
+> `{"expiration_duration_seconds": <seconds>, "initial_acl": {...}}`
+
+**이것이 §16.2-4를 권고에서 필수로 만든다.** 기본값이 "영구 보관, 공개 접근"이다.
+`X-Fal-Store-IO: 0`은 JSON payload만 막고 **CDN 파일은 막지 않는다**고 같은 문서가
+명시한다. 따라서 요청마다 `X-Fal-Object-Lifecycle-Preference`로 짧은 만료를
+지정하고 자산을 즉시 사설 저장소로 복사한다. 둘 중 하나만 하면 사용자 이미지가
+공개 CDN에 남는다.
+
+**Google 종료 일정** — `https://ai.google.dev/gemini-api/docs/deprecations`
+
+| 모델 | 종료일 | 권고 대체 |
+|---|---|---|
+| `imagen-4.0-generate-001` · `-ultra-` · `-fast-` | **August 17, 2026** | `gemini-3.1-flash-image` |
+| `gemini-2.5-flash-image` | **October 2, 2026** | `gemini-3.1-flash-image-preview` |
+| `gemini-3.1-flash-image` | **No shutdown date announced** | — |
+| `gemini-3-pro-image` | **No shutdown date announced** | — |
+
+- **Imagen 4 경로는 폐기한다.** 3일 뒤 종료이고, Google 자신이 권고하는 대체가
+  `gemini-3.1-flash-image` — 즉 이 문서가 fal을 통해 사려는 바로 그 모델이다.
+- **`gemini-2.5-flash-image`(원본 Nano Banana) 브리지는 채택하지 않는다.** 남은
+  기간이 7주다. adapter·가격·크레딧 승인·UI를 갖춰 7주 쓰고 버리는 비용이 fal
+  연동을 기다리는 비용보다 크다. 마케팅 공백이 실제로 문제가 되면 그때 다시
+  판단하되, 기본은 만들지 않는 것이다.
+- **`gemini-3.1-flash-image`는 종료 예정이 없다.** fal 경로가 단명할 위험은 모델
+  쪽에는 없다.
+
+### 16.4 요청당 최악 원가와 크레딧 바닥값
+
+| 항목 | µUSD | 근거 |
+|---|---:|---|
+| fal 1K 이미지 | 80,000 | 위 인용, 성공 시에만 |
+| Tomverse 프롬프트 예산 | 5,000 | `IMAGE_PROMPT_BUDGET_MICRO_USD`. **fal의 과금 항목이 아니라 다른 모델과 같은 방식으로 얹는 여유분**이다 |
+| high thinking 상한 | 2,000 | 위 인용의 $0.002. 요청은 쓰지 않지만 **상한은 설정과 무관하게 참이어야 한다** |
+| web search | — | 요청이 켤 수 없으므로 제외. 숫자가 아니라 **adapter가 지켜야 할 성질**이다 |
+| **최악 요청 원가** | **87,000** | |
+| **수학적 최소 크레딧** | **97** | `ceil(87,000 / 900)` |
+
+`thinkingCapMicroUsd`를 0이 아니라 2,000으로 둔 이유는 레지스트리 주석에 있다 —
+0은 모델이 아니라 **설정**에 대해 참이고, 플래그 하나가 바뀌면 무너지는 상한은
+이 저장소가 이미 한 번 데인 종류다. 비용은 2크레딧이다.
+
+**판매 크레딧은 별도 승인이다.** 바닥값 97은 승인가가 아니다. Grok 1K가 바닥값
+62에 승인가 75(여유 21%)인 것과 같은 비율이면 후보는 115~120이고, 이는 결정안에
+올릴 범위이지 결정이 아니다. `prices`는 승인 전까지 비워 둔다.
