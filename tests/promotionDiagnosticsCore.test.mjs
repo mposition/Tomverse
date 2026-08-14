@@ -57,6 +57,8 @@ const checkFor = (section, id) =>
 const healthyStripe = (overrides = {}) => ({
   expectLiveMode: true,
   storedCouponId: "cpn_x",
+  storedCouponExists: true,
+  storedCouponMismatches: [],
   storedPromotionCodeId: "promo_x",
   storedPromotionCodeExists: true,
   storedPromotionCodeMismatches: [],
@@ -522,4 +524,57 @@ test("reason slugs collect every failure and warning, and nothing that passed", 
   assert.ok(slugs.includes("promotion_inactive"));
   assert.ok(slugs.includes("already_used"));
   assert.equal(new Set(slugs).size, slugs.length);
+});
+
+test("a hand-made stored coupon is a blocker, not a missing object", () => {
+  // The staging state on 2026-08-14: a coupon created in the Stripe dashboard
+  // with `duration: once` and no metadata, stored against the promotion. The
+  // linkage report used to call this "create_missing_objects".
+  const section = stripeSection({
+    storedPromotionCodeId: null,
+    storedPromotionCodeExists: false,
+    exactCodeCandidates: [],
+    recommendation: "manual_review",
+    storedCouponMismatches: [
+      "identity:duration",
+      "identity:duration_in_months",
+      "identity:metadata_promotion_id",
+    ],
+  });
+  assert.equal(section.status, "fail");
+  assert.equal(checkFor(section, "stored_coupon").reason, "stored_coupon_mismatch");
+  assert.ok(section.blockingReasons.includes("identity:duration"));
+  assert.ok(
+    recommendActions({
+      localPolicy: localPolicy(),
+      account: evaluateAccountEligibility({ account: null, planId: "pro" }),
+      stripe: section,
+      checkoutPreview: buildCheckoutRequestPreview({
+        promotion: promotion(),
+        currency: "USD",
+        baseAmountMinor: 1500,
+        discountResolvable: false,
+      }),
+    }).some(
+      (item) => item.id === "conflicting_active_code_requires_operator_review"
+    )
+  );
+});
+
+test("a stored coupon Stripe has forgotten is only a warning", () => {
+  const section = stripeSection({ storedCouponExists: false });
+  assert.equal(section.status, "warn");
+  assert.equal(
+    checkFor(section, "stored_coupon").reason,
+    "stored_coupon_missing_in_stripe"
+  );
+  assert.deepEqual(section.blockingReasons, []);
+});
+
+test("no stored coupon at all is a warning, not a failure", () => {
+  const section = stripeSection({
+    storedCouponId: null,
+    storedCouponExists: false,
+  });
+  assert.equal(checkFor(section, "stored_coupon").reason, "no_stored_coupon");
 });
