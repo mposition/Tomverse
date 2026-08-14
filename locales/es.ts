@@ -123,6 +123,7 @@ export const es = {
         imageModelTabSubtitle: "Modelos que crean imágenes a partir de una descripción. Los modelos de chat que solo leen la imagen que adjuntas siguen en la pestaña Chat.",
         imageModelTabFooterHint: "Al elegir uno se abre el espacio de imágenes.",
         imageModelCreditsFrom: "Desde {credits} créditos",
+        imageModelViaGateway: "vía {gateway}",
         imageModelHoldPriceUnverified: "En espera hasta verificar su precio oficial",
         imageModelLatencyFast: "Rápido",
         imageModelLatencyBalanced: "Equilibrado",

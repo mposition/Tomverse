@@ -109,11 +109,18 @@ const ENGLISH_STRING_CEILING = {
   // check allowlists for chat.toolsAssistantRevision. The rest of that block
   // -- the "no assistant" option, the superseded line and the empty state --
   // is translated in both.
+  //
+  // +1 fr and +1 pt from the image catalogue's gateway line
+  // (chat.imageModelViaGateway). "via" is the same Latin preposition in both,
+  // and the ordinary word for it: "par" is less precise and "atraves de" is
+  // too long for a subtitle already carrying a brand and a latency class.
+  // German, Spanish, Korean and Chinese all differ, so only these two moved.
+  // Allowlisted in check-locale-translation-core.mjs for the same reason.
   zh: 10,
-  fr: 29,
+  fr: 30,
   de: 24,
   es: 17,
-  pt: 14,
+  pt: 15,
 };
 
 test("every supported language is in the dictionary map", () => {

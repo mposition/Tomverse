@@ -37,6 +37,12 @@ export const MIN_TRANSLATABLE_LENGTH = 13;
  */
 export const SHARED_STRING_ALLOWLIST = [
   {
+    key: "chat.imageModelViaGateway",
+    locales: ["fr", "pt"],
+    reason:
+      "'via' is the same Latin preposition in French and Portuguese, and is the ordinary word for it in both -- 'par' and 'através de' are respectively less precise and too long for a row subtitle that already carries a brand and a latency. German, Spanish, Korean and Chinese all differ.",
+  },
+  {
     key: "externalImport.guideGeminiTitle",
     locales: ["de", "es", "fr", "pt"],
     reason:
