@@ -38,6 +38,7 @@
 import { createHash } from "node:crypto";
 
 import { autoRolloutReadiness, type AutoReadinessGateId } from "@/lib/autoRolloutReadiness";
+import { DRILL_OVERRIDE_REASON } from "@/lib/autoDrillOverride";
 
 /** Bump when bucketing, salt handling or the refusal set changes. */
 export const AUTO_COHORT_VERSION = "auto-cohort-v1";
@@ -54,7 +55,18 @@ export type AutoCohortRefusal =
   | "outside_cohort";
 
 export type AutoCohortDecision =
-  | { eligible: true; bucket: number; version: string; salt: string }
+  | {
+      eligible: true;
+      bucket: number;
+      /**
+       * Present only when a staging drill passed an outstanding readiness
+       * gate. Its absence is what makes an ordinary eligible decision
+       * readable as one that qualified on its own.
+       */
+      drillOverride?: typeof DRILL_OVERRIDE_REASON;
+      version: string;
+      salt: string;
+    }
   | {
       eligible: false;
       reason: AutoCohortRefusal;
@@ -134,6 +146,14 @@ export type AutoCohortInput = {
   config?: AutoCohortConfig;
   /** Injected so a test can vary readiness without editing the register. */
   readiness?: ReturnType<typeof autoRolloutReadiness>;
+  /**
+   * Whether this request may route while a readiness gate is outstanding.
+   *
+   * Decided by `lib/autoDrillOverride.ts`, which needs the request's own
+   * headers and therefore cannot be decided here. Absent and `false` are the
+   * same thing, which is what every request that is not a staging drill gets.
+   */
+  drillOverride?: boolean;
 };
 
 /**
@@ -155,7 +175,16 @@ export const decideAutoCohort = (input: AutoCohortInput): AutoCohortDecision => 
   }
 
   const readiness = input.readiness ?? autoRolloutReadiness();
-  if (!readiness.ready) {
+  // The staging fallback drill is the one thing that may pass an outstanding
+  // gate, and only because the alternative was worse: the register is static
+  // code with no environment dimension, so attesting a gate to make staging
+  // route would have committed the same `passed` to production. See
+  // lib/autoDrillOverride.ts for the four locks, the first of which is "not
+  // production" and fails closed.
+  //
+  // Below the kill switch, deliberately. An operator turning Auto off during a
+  // drill must not have to also remember to withdraw a credential.
+  if (!readiness.ready && !input.drillOverride) {
     return {
       eligible: false,
       reason: "readiness_incomplete",
@@ -164,6 +193,9 @@ export const decideAutoCohort = (input: AutoCohortInput): AutoCohortDecision => 
       ...shared,
     };
   }
+  // Recorded on the decision, so a routed turn that took this path is never
+  // mistaken for one that qualified.
+  const overridden = !readiness.ready && input.drillOverride === true;
 
   if (config.rolloutPercent <= 0 || config.eligiblePlans.length === 0) {
     return { eligible: false, reason: "rollout_disabled", bucket: null, ...shared };
@@ -188,7 +220,12 @@ export const decideAutoCohort = (input: AutoCohortInput): AutoCohortDecision => 
     return { eligible: false, reason: "outside_cohort", bucket, ...shared };
   }
 
-  return { eligible: true, bucket, ...shared };
+  return {
+    eligible: true,
+    bucket,
+    ...(overridden ? { drillOverride: DRILL_OVERRIDE_REASON } : {}),
+    ...shared,
+  };
 };
 
 /**

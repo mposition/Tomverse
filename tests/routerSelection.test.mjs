@@ -231,3 +231,53 @@ test("the same turn always selects the same way", () => {
     };
     assert.deepEqual(selectRouterModel(input), selectRouterModel(input));
 });
+
+// §6: an automatic fallback's candidate must pass the same compatibility
+// filters as the primary. The ranking is the only place a set that has is also
+// in a defensible order, so it has to leave this module rather than be
+// recomputed downstream by a second filter free to disagree.
+
+test("the ranking names every eligible model, best first", () => {
+  const result = selectRouterModel({
+    profile: { kind: "general", confidence: 1 },
+    eligible: [
+      { modelId: "deepseek-v4-flash", outputTokens: 1000 },
+      { modelId: "gpt-5-6-luna", outputTokens: 1000 },
+    ],
+  });
+  assert.equal(result.rankedModelIds.length, 2);
+  assert.equal(result.rankedModelIds[0], result.selectedModelId);
+  assert.deepEqual(new Set(result.rankedModelIds).size, 2);
+});
+
+test("nothing eligible ranks nothing", () => {
+  const result = selectRouterModel({
+    profile: { kind: "general", confidence: 1 },
+    eligible: [],
+  });
+  assert.deepEqual(result.rankedModelIds, []);
+});
+
+test("the ranking still holds the sticky winner, so the caller must remove it", () => {
+  // Stickiness can select a model the ranking did not put first. The list is
+  // the *ranking*, not "the alternatives" -- removing the chosen model is the
+  // caller's job precisely because which one was chosen is not always the top.
+  const eligible = [
+    { modelId: "deepseek-v4-flash", outputTokens: 1000 },
+    { modelId: "gpt-5-6-luna", outputTokens: 1000 },
+  ];
+  const natural = selectRouterModel({
+    profile: { kind: "general", confidence: 1 },
+    eligible,
+  });
+  const other = eligible.find(
+    (candidate) => candidate.modelId !== natural.selectedModelId
+  );
+  const sticky = selectRouterModel({
+    profile: { kind: "general", confidence: 1 },
+    eligible,
+    sticky: { modelId: other.modelId, turnsFavouringChallenger: 0 },
+  });
+  assert.equal(sticky.selectedModelId, other.modelId);
+  assert.ok(sticky.rankedModelIds.includes(other.modelId));
+});

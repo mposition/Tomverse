@@ -96,6 +96,8 @@
     "report:release-gate-evidence": "node scripts/report-release-gate-evidence.mjs",
     "drill:railway-restore-preflight": "node scripts/railway-restore-preflight.mjs",
     "drill:railway-restore-verify": "node scripts/railway-restore-verify.mjs",
+    "drill:fallback-verify": "node scripts/verify-fallback-drill.mjs",
+    "drill:fallback-disconnect": "node scripts/fallback-disconnect-drill.mjs",
     "verify:tomverse-chat-release-gates": "node scripts/verify-tomverse-chat-release-gates.mjs",
     "generate:tomverse-chat-release-gate-view": "node scripts/generate-tomverse-chat-release-gate-view.mjs",
     "check:tomverse-chat-release-gate-view": "node scripts/generate-tomverse-chat-release-gate-view.mjs --check",

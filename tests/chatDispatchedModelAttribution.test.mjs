@@ -27,7 +27,7 @@ import { join } from "node:path";
  * before the swap rather than after it.
  *
  * A source scan rather than a runtime assertion, for the same reason
- * `automaticFallbackAbsence` is one: the claim is about every path through a
+ * `automaticFallbackBoundary` is one: the claim is about every path through a
  * 3,000-line handler, and a runtime test only reports on the paths it drives.
  */
 
@@ -61,11 +61,33 @@ test("the stream names no model but the one it dispatched", () => {
       "model the user asked for and not the one answering; read `dispatched` " +
       "instead, which is replaced wholesale when an attempt is."
   );
+  // `modelConfig` is the primary's, captured once. A few reads of it are
+  // legitimate and each one is a decision, so they are listed with the reason
+  // rather than tolerated by a looser pattern. Anything else describing the
+  // answering model must come from `dispatched` or from a candidate's plan.
+  const ALLOWED_MODEL_CONFIG_READS = {
+    "`provider:${modelConfig.provider}`":
+      "the provider hold this turn took, which belongs to the primary by definition",
+    'modelConfig.usageClass === "deep-research"':
+      "a property of the request's own model, not of whichever attempt is running",
+    "plan.modelConfig.reasoning":
+      "the candidate's own config, reached through its plan",
+  };
+  let remaining = region;
+  for (const snippet of Object.keys(ALLOWED_MODEL_CONFIG_READS)) {
+    assert.ok(
+      remaining.includes(snippet),
+      `Allowlisted read \`${snippet}\` is gone. A stale permission is worse ` +
+        "than none: remove it here too."
+    );
+    remaining = remaining.split(snippet).join("");
+  }
   assert.equal(
-    region.includes("modelConfig."),
+    remaining.includes("modelConfig."),
     false,
-    "The stream reads `modelConfig` again. It is the primary's, captured " +
-      "once; a fallback attempt would inherit it silently."
+    "The stream reads `modelConfig` somewhere new. It is the primary's, " +
+      "captured once, so a fallback attempt would inherit it silently. If the " +
+      "read is legitimate, add it to ALLOWED_MODEL_CONFIG_READS with why."
   );
 });
 

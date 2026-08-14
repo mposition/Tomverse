@@ -74,6 +74,17 @@ export type AutoSelection =
       modelId: string;
       /** Carry into the conversation row after the turn completes. */
       sticky: RouterStickyState;
+      /**
+       * What §7's automatic fallback may try instead, best first.
+       *
+       * The Router's own eligible set with the chosen model removed, so a
+       * fallback candidate has passed exactly the filters the primary passed.
+       * The stream must not compute its own: a second filter is free to
+       * disagree with the one that made the decision, and the disagreement
+       * would only ever show as a model being dispatched that the Router had
+       * already refused.
+       */
+      fallbackCandidateModelIds: readonly string[];
       record: RouterDecisionRecord;
       versions: RouterVersions;
       cohort: Extract<AutoCohortDecision, { eligible: true }>;
@@ -207,6 +218,7 @@ export const selectAutoModel = (input: AutoSelectionInput): AutoSelection => {
     routed: true,
     modelId: decision.modelId,
     sticky: decision.sticky,
+    fallbackCandidateModelIds: decision.fallbackCandidateModelIds,
     record: decision.record,
     versions: ROUTER_VERSIONS,
     cohort,
