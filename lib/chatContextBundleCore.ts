@@ -41,7 +41,11 @@ export type ContextBundleFingerprintInput = {
     memoryVersion: string;
     /** Identity of the approved answer-style set. */
     styleVersion: string;
-    /** Release C. Null until Assistant Profiles exist. */
+    /**
+     * Release C: the profile version this turn runs under, as
+     * `<versionId>:<revision>`. Null when no profile is bound — which is every
+     * turn until a conversation names one.
+     */
     profileVersion: string | null;
     /** Hash of the §9 retrieval result for this request. */
     retrievalHash: string;
@@ -49,6 +53,17 @@ export type ContextBundleFingerprintInput = {
     retrievalVersion: number;
     /** Prompt assembly identity (§9.1), e.g. "mem-context-v1". */
     promptVersion: string;
+    /**
+     * Release C (§32): identity of this turn's profile knowledge retrieval —
+     * which excerpts came back, plus the algorithm and prompt shape that chose
+     * and rendered them. `"none"` when no knowledge was retrieved.
+     *
+     * Bound separately from `retrievalHash` rather than mixed into it because
+     * they answer for different sets under different rules, and a single field
+     * would make "a memory changed" and "a knowledge file changed"
+     * indistinguishable in a stale bundle's own record.
+     */
+    knowledgeHash: string;
 };
 
 export type ContextBundlePayload = ContextBundleFingerprintInput & {
@@ -66,6 +81,14 @@ export type ContextBundlePayload = ContextBundleFingerprintInput & {
      * than re-deriving a number the user never agreed to.
      */
     memoryTokens: number;
+    /**
+     * Release C: input tokens the profile's own blocks contributed — its
+     * instructions and its retrieved knowledge. Carried beside `memoryTokens`
+     * rather than folded into it so the booked figure keeps saying which
+     * context it paid for; a profile turn and a memory turn are priced by the
+     * same builder but are not the same charge.
+     */
+    profileTokens: number;
     expiresAtMs: number;
 };
 
@@ -124,6 +147,7 @@ export function contextFingerprint(
                 input.retrievalHash,
                 String(input.retrievalVersion),
                 input.promptVersion,
+                input.knowledgeHash,
             ].join("\n"),
             "utf8"
         )
@@ -145,7 +169,9 @@ const encode = (payload: ContextBundlePayload) =>
             rh: payload.retrievalHash,
             rv: payload.retrievalVersion,
             prv: payload.promptVersion,
+            kh: payload.knowledgeHash,
             t: payload.memoryTokens,
+            pt: payload.profileTokens,
             e: payload.expiresAtMs,
         }),
         "utf8"
@@ -204,6 +230,25 @@ const decode = (body: string): ContextBundlePayload | null => {
     ) {
         return null;
     }
+    // The two Release C fields are read tolerantly, and only these two.
+    //
+    // A bundle lives five minutes, so a deploy that added them strictly would
+    // spend that long turning every in-flight bundle into a malformed one --
+    // and `malformed` is answered with INVALID_CONTEXT_BUNDLE (400), which
+    // tells the client its request was wrong rather than that its context
+    // aged out. Absent means "issued before profiles were bound", which is
+    // exactly the same context a turn with no profile has. A *present* field
+    // of the wrong type is still refused: tolerance is for the old shape, not
+    // for a forged one.
+    if (record.kh !== undefined && typeof record.kh !== "string") return null;
+    if (
+        record.pt !== undefined &&
+        (typeof record.pt !== "number" ||
+            !Number.isSafeInteger(record.pt) ||
+            record.pt < 0)
+    ) {
+        return null;
+    }
     return {
         version: 1,
         bundleId: record.b,
@@ -217,7 +262,9 @@ const decode = (body: string): ContextBundlePayload | null => {
         retrievalHash: record.rh,
         retrievalVersion: record.rv,
         promptVersion: record.prv,
+        knowledgeHash: typeof record.kh === "string" ? record.kh : "none",
         memoryTokens: record.t,
+        profileTokens: typeof record.pt === "number" ? record.pt : 0,
         expiresAtMs: record.e,
     };
 };

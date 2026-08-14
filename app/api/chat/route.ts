@@ -167,7 +167,7 @@ import {
     recordShadowReservation,
     SHADOW_CANDIDATE_ESTIMATOR_VERSION,
 } from "@/lib/tokenEstimateShadowRecorder";
-import { buildChatMemoryContext } from "@/lib/chatMemoryContext";
+import { buildChatTurnContext } from "@/lib/chatTurnContext";
 import { latestUserPromptText } from "@/lib/chatMemoryContextCore";
 import {
     consumeContextBundle,
@@ -762,6 +762,10 @@ async function handleChatPost(
         // the ownership check loads below. Null for a request with no
         // conversation, which inherits the account default like `inherit`.
         let conversationMemoryMode: string | null = null;
+        // §32: the conversation's bound profile version. Read from the same
+        // row as the memory mode so the context this request builds is the
+        // one its bundle was priced against.
+        let conversationProfileVersionId: string | null = null;
         requestedModelIdForLog = requestedModelId;
         const runtimeModels = await getRuntimeModels({ includeCatalogDeleted: true });
         const runtimeModelMap = new Map(runtimeModels.map((model) => [model.id, model]));
@@ -1100,9 +1104,12 @@ async function handleChatPost(
                     selectedModels: true,
                     kind: true,
                     memoryMode: true,
+                    assistantProfileVersionId: true,
                 },
             });
             conversationMemoryMode = conversation?.memoryMode ?? null;
+            conversationProfileVersionId =
+                conversation?.assistantProfileVersionId ?? null;
             if (!conversation || conversation.userId !== session.user.id) {
                 return tracedJsonError(
                     "Conversation access denied.",
@@ -1281,7 +1288,15 @@ async function handleChatPost(
         // also the ordinary path today — injection stays off until §12.4's
         // procedure has been completed, so nothing issues a bundle and this
         // whole branch is skipped.
-        let memorySystemPrompt: string | null = null;
+        //
+        // Release C put a profile's instructions and its retrieved knowledge
+        // in the same block, under the same rule and for the same reason: they
+        // are priced input tokens too. `/api/chat/context` issues a bundle
+        // whenever either is non-empty, so a profile turn arrives with one.
+        // The §31 system block. Named for the context rather than for memory
+        // because Release C put three things in it, and only one of them is
+        // memory.
+        let contextSystemPrompt: string | null = null;
         let memoryUsedCount = 0;
         // §22 attribution, written onto the answer rather than counted.
         //
@@ -1311,9 +1326,14 @@ async function handleChatPost(
             // it (§10). The query is the raw prompt, the same text the
             // preparation step scored — not the attachment-augmented message
             // assembled below, which would retrieve differently.
-            const memoryContext = await buildChatMemoryContext({
+            const turnContext = await buildChatTurnContext({
                 userId: session.user.id,
                 query: latestUserPromptText(messages),
+                // §32: bound into the fingerprint, so a profile republished or
+                // detached between preflight and send is a stale bundle rather
+                // than a turn that answers as a different assistant.
+                profileVersionId: conversationProfileVersionId,
+                plan: accountPlan?.tier ?? null,
                 // §8.1 invariant 1: this conversation's own mode decides, with
                 // `inherit` falling back to the account default. Read here
                 // rather than trusted from the client, and read on the chat
@@ -1326,7 +1346,7 @@ async function handleChatPost(
                 subjectKey: session.user.id,
                 conversationId: conversationId ?? null,
                 modelId: requestedModelId,
-                currentFingerprint: memoryContext.fingerprint,
+                currentFingerprint: turnContext.fingerprint,
             });
             if (!verification.ok) {
                 // Two different failures with two different meanings. Drift is
@@ -1388,18 +1408,22 @@ async function handleChatPost(
                     { requiresPreflight: true }
                 );
             }
-            memorySystemPrompt = memoryContext.prompt.text;
-            memoryUsedCount = memoryContext.prompt.usedCount;
+            // The whole §31 block -- profile instructions, then memory, then
+            // profile knowledge -- assembled as one system message by the
+            // builder that priced it.
+            contextSystemPrompt = turnContext.systemPrompt;
+            memoryUsedCount = turnContext.memory.prompt.usedCount;
             memoryAttribution = {
                 memoryUsedCount,
                 memoryTokens: verification.payload.memoryTokens,
             };
-            if (memorySystemPrompt) {
-                // A bundle that passed but selected nothing is not an
-                // injection: no block reaches the prompt, so counting it would
-                // report memory as used on a request the model never saw it in.
+            // Memory's own presence, not the block's: a turn whose system
+            // message carries only a profile's instructions has no memory in
+            // it, and counting it as an injection would report memory as used
+            // on a request the model never saw it in.
+            if (turnContext.memory.prompt.text) {
                 void recordMemoryCounter("chat_memory_injected");
-                if (memoryContext.truncatedByBudget) {
+                if (turnContext.memory.truncatedByBudget) {
                     void recordMemoryCounter("injected_context_truncated");
                 }
                 // The priced figure, not a fresh estimate, so the bucket
@@ -1409,19 +1433,24 @@ async function handleChatPost(
                 );
                 if (bucket) void recordMemoryCounter(bucket);
             }
-            // The figure that was reserved against, not a fresh estimate: the
+            // The figures that were reserved against, not fresh estimates: the
             // two agree here by construction, and if they ever stop agreeing
-            // the user should be billed the number they were quoted.
-            estimatedInputTokens += verification.payload.memoryTokens;
+            // the user should be billed the numbers they were quoted. The
+            // profile's blocks are counted apart from memory's because they
+            // are a different context, priced by the same builder.
+            const quotedContextTokens =
+                verification.payload.memoryTokens +
+                verification.payload.profileTokens;
+            estimatedInputTokens += quotedContextTokens;
             // Quoted, not re-estimated -- so it enters as an opaque count.
-            inputEstimate.addTokens(verification.payload.memoryTokens);
+            inputEstimate.addTokens(quotedContextTokens);
         }
 
-        // §9.1 places the memory block above the conversation and below the
+        // §9.1 and §31 place this block above the conversation and below the
         // safety policy, so it is the first message and the rules that govern
-        // reading it are stated inside it, before the memories themselves.
-        const formattedMessages: ModelMessage[] = memorySystemPrompt
-            ? [{ role: "system", content: memorySystemPrompt }]
+        // reading each part are stated inside it, before the part they govern.
+        const formattedMessages: ModelMessage[] = contextSystemPrompt
+            ? [{ role: "system", content: contextSystemPrompt }]
             : [];
         for (const msg of messages) {
             if (msg.role === "assistant") {

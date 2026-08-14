@@ -8,8 +8,9 @@ import {
 } from "@/lib/apiSecurity";
 import { authOptions } from "@/lib/auth";
 import { chatErrorResponse } from "@/lib/chatSecurity";
-import { buildChatMemoryContext } from "@/lib/chatMemoryContext";
+import { buildChatTurnContext } from "@/lib/chatTurnContext";
 import { issueChatContextBundle } from "@/lib/chatContextBundleService";
+import { getUserBillingPlan } from "@/lib/billingEntitlements";
 import {
     conversationLockedResponse,
     hasConversationUnlockGrant,
@@ -99,10 +100,22 @@ export async function POST(request: Request) {
                 ? payload.conversationId
                 : null;
 
+        // §8.1 invariant 1 and §32: both are read from the row rather than
+        // defaulted, because the chat route reads them and a bundle priced
+        // under different values than the send is stale on arrival — for
+        // every message, not occasionally.
+        let conversationMemoryMode: string | null = null;
+        let profileVersionId: string | null = null;
         if (conversationId) {
             const conversation = await prisma.conversation.findUnique({
                 where: { id: conversationId },
-                select: { userId: true, password: true, kind: true },
+                select: {
+                    userId: true,
+                    password: true,
+                    kind: true,
+                    memoryMode: true,
+                    assistantProfileVersionId: true,
+                },
             });
             if (!conversation || conversation.userId !== userId) {
                 return Response.json(
@@ -127,18 +140,28 @@ export async function POST(request: Request) {
             if (!isChatConversationKind(conversation.kind)) {
                 return conversationKindNotSupportedResponse();
             }
+            conversationMemoryMode = conversation.memoryMode;
+            profileVersionId = conversation.assistantProfileVersionId;
         }
 
-        const context = await buildChatMemoryContext({
+        const context = await buildChatTurnContext({
             userId,
             query: payload.prompt,
+            conversationMode: conversationMemoryMode,
+            profileVersionId,
+            plan: (await getUserBillingPlan(userId))?.tier ?? null,
         });
 
         // Nothing to bind: issuing a bundle for an empty context would make
         // the chat route verify a snapshot that says "no memory" and then
         // build one that also says "no memory" — the same answer, at the cost
         // of a nonce row per request. The absent bundle is the honest signal.
-        if (!context.decision.allowed) {
+        //
+        // Release C narrows what "empty" means. A turn with no memory can
+        // still carry a profile's instructions and its retrieved knowledge,
+        // and those are priced input tokens: skipping the bundle for one of
+        // them would send a block nothing reserved against.
+        if (!context.memory.decision.allowed && context.profileTokens === 0) {
             return Response.json(
                 {
                     ok: true,
@@ -146,7 +169,7 @@ export async function POST(request: Request) {
                     memoryUsedCount: 0,
                     // Content-free, and useful: the client shows nothing
                     // either way, but the reason is what §22 counts.
-                    reason: context.decision.reason,
+                    reason: context.memory.decision.reason,
                 },
                 { headers }
             );
