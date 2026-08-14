@@ -113,6 +113,20 @@ test("a manual dispatch produces a run, an attempt and a finalized manifest", as
   assert.equal(attempt.manifest?.state, "finalized");
   assert.ok(attempt.manifest?.effectiveRequestHash);
 
+  // How the hash can be checked later. A commitment nobody can name the
+  // scheme, algorithm and key for cannot be verified once any of the three
+  // changes -- and the key rotates, which is the whole reason the manifest
+  // keyring is not the session secret.
+  assert.match(attempt.manifest!.contentHashVersion!, /^manifest-content-v\d+$/);
+  assert.equal(attempt.manifest?.hashAlgorithm, "hmac-sha256");
+  assert.equal(attempt.manifest?.hashKeyId, process.env.MANIFEST_HASH_ACTIVE_KEY_ID);
+  // The key itself is never stored: a record carrying its own verification
+  // key lets whoever reads the table forge a match.
+  assert.equal(
+    JSON.stringify(attempt.manifest).includes(process.env.MANIFEST_HASH_KEYS!.split(":")[1]),
+    false
+  );
+
   // The figures are the ones the request actually used, not defaults.
   assert.equal(attempt.manifest?.tokenizerVersion, "generic_multilingual_v1");
   assert.equal(attempt.manifest?.tokenCount, 1_200);

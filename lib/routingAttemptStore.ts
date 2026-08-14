@@ -151,6 +151,11 @@ export const finalizeManifest = async (input: {
   adapterVersion: string;
   structuredOptionsHash?: string | null;
   effectiveRequestHash: string;
+  /** How the hash above can be checked later. All three, or the row is
+   * a commitment nobody can verify once any of them changes. */
+  contentHashVersion: string;
+  hashAlgorithm: string;
+  hashKeyId: string;
   now?: Date;
 }): Promise<Date> => {
   const finalizedAt = input.now ?? new Date();
@@ -170,6 +175,9 @@ export const finalizeManifest = async (input: {
           adapterVersion: input.adapterVersion,
           structuredOptionsHash: input.structuredOptionsHash ?? null,
           effectiveRequestHash: input.effectiveRequestHash,
+          contentHashVersion: input.contentHashVersion,
+          hashAlgorithm: input.hashAlgorithm,
+          hashKeyId: input.hashKeyId,
         },
       });
       if (claimed.count !== 1) {

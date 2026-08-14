@@ -52,6 +52,17 @@ const testEnvironment = {
   DIRECT_DATABASE_URL: rawTestDatabaseUrl,
   NEXTAUTH_SECRET:
     process.env.NEXTAUTH_SECRET || "tomverse-db-integration-test-secret-2026",
+  // The manifest digests have their own keyring rather than the session
+  // secret, and lib/routingDispatchInstrumentation.ts refuses to digest
+  // without one. Supplied here beside NEXTAUTH_SECRET because it is the same
+  // kind of thing -- a secret the application needs to function at all -- and
+  // because a suite that had to remember it would be a suite that eventually
+  // forgot and reported the refusal as a product failure.
+  MANIFEST_HASH_KEYS:
+    process.env.MANIFEST_HASH_KEYS ||
+    "db-integration-test:tomverse-db-integration-manifest-key-2026",
+  MANIFEST_HASH_ACTIVE_KEY_ID:
+    process.env.MANIFEST_HASH_ACTIVE_KEY_ID || "db-integration-test",
   CHAT_USER_CONCURRENT: "50",
   CHAT_USER_PER_MINUTE: "500",
   CHAT_IP_PER_MINUTE: "500",

@@ -56,6 +56,17 @@ missing variable is never mistaken for a deliberate rollout.
 | `AUTO_ROUTER_ROLLOUT_PERCENT` | 0–100, the share of eligible subjects Auto routes |
 | `AUTO_ROUTER_ELIGIBLE_PLANS` | comma-separated plans, e.g. `Pro,Max`. Empty means none |
 | `AUTO_ROUTER_COHORT_SALT` | names this cohort partition. Unset routes nobody |
+| `MANIFEST_HASH_KEYS` | `keyId:secret` pairs. Required before any dispatch may be recorded |
+| `MANIFEST_HASH_ACTIVE_KEY_ID` | which of them new manifests are digested with |
+
+**The manifest keyring is not optional and not the session secret.** Recording
+a dispatch refuses outright without it, because a manifest whose key nobody
+can name is worse than one that was never written — the first looks like
+evidence. It is separate from `NEXTAUTH_SECRET` because that key rotates on
+authentication's schedule, and every rotation would leave the manifests
+written before it holding a commitment nothing could check. Old keys stay in
+the ring so a rotation does not strand what came before it; removing one is
+the deliberate decision that those records no longer need to be verifiable.
 
 **The kill switch is checked before everything else**, including readiness and
 the percentage. An operator reaching for it during an incident must not have

@@ -91,6 +91,39 @@ test("digests are keyed, so a leaked table is not a lookup away from the text", 
 
 // Per part rather than per message: an unchanged question with a different
 // attachment is a different request, and hashing them together hides that.
+// Type and size alone collided: two different documents of the same kind and
+// length produced one reference, so the manifest could not distinguish a
+// resend from a substitution -- the distinction it exists to make.
+test("two different files of the same type and size do not share a reference", () => {
+  const withOne = buildManifestSourceRefs(
+    [{ role: "user", parts: [{ type: "file", mediaType: "application/pdf", bytes: 900, content: "AAAA" }] }],
+    SECRET
+  );
+  const withOther = buildManifestSourceRefs(
+    [{ role: "user", parts: [{ type: "file", mediaType: "application/pdf", bytes: 900, content: "BBBB" }] }],
+    SECRET
+  );
+  assert.notEqual(withOne[0].parts[0].digest, withOther[0].parts[0].digest);
+
+  // The same document twice is the same reference, or a resend would look
+  // like a different request.
+  assert.equal(
+    withOne[0].parts[0].digest,
+    buildManifestSourceRefs(
+      [{ role: "user", parts: [{ type: "file", mediaType: "application/pdf", bytes: 900, content: "AAAA" }] }],
+      SECRET
+    )[0].parts[0].digest
+  );
+});
+
+test("the file's own bytes never reach the reference, only their digest", () => {
+  const refs = buildManifestSourceRefs(
+    [{ role: "user", parts: [{ type: "file", mediaType: "application/pdf", bytes: 9, content: "SECRETBYTES" }] }],
+    SECRET
+  );
+  assert.equal(JSON.stringify(refs).includes("SECRETBYTES"), false);
+});
+
 test("a changed attachment is visible even when the text is identical", () => {
   const withPdf = buildManifestSourceRefs(messages, SECRET);
   const withBigger = buildManifestSourceRefs(

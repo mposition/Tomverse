@@ -285,12 +285,19 @@ export const GATE_EVIDENCE = {
     "MANIFEST-01": {
         capability: [],
         measurement: [],
-        note: "No context manifest module; ROUTE-06 and FALLBACK-03 wait on the same thing.",
+        note: "Still nothing. The manifest module exists now (ROUTE-06, MANIFEST-02), but this gate is about delta chains and manifests are stored whole -- there is no checkpoint/delta mechanism for a depth cap to bound. Building one to satisfy a cap nobody is near would be inventing the risk to then measure it.",
     },
     "MANIFEST-02": {
-        capability: [],
-        measurement: [],
-        note: "Follows MANIFEST-01. Its retention half is separable and already has a neighbour to follow -- the ninety-day audit retention that account-data-export-ticket already implements and tests -- but there is no manifest for it to retain.",
+        capability: [
+            "lib/routingManifestRetention.ts",
+            "prisma/migrations/20260813120000_context_manifest_compaction/migration.sql",
+            "prisma/migrations/20260813150000_manifest_hash_provenance/migration.sql",
+        ],
+        measurement: [
+            "lib/routingManifestRetention.ts",
+            "tests/integration/context-manifest-retention.db.test.ts",
+        ],
+        note: "Three separable things, and only the first two are code. The capability exists: compaction keeps the hash and its provenance and clears the per-part detail, an allowlist test fails when a new column belongs to neither side, and the immutability trigger admits exactly this one transition and still refuses every other edit to a finalized manifest. Point-in-time measurement exists: manifestRetentionMetrics() reports worst completed and worst open retention in milliseconds and counts breaches, rather than a snapshot of the oldest uncompacted row -- which would forget a violation the moment it was compacted. What is NOT here is the gate's first criterion: a success *rate* needs scheduled runs to have happened, and manifestCompactionJobHealth() returns null over an empty window on purpose. Deletion priority is structural (cascade) rather than a job; memory deletion and supersession compact the account's detail immediately, scoped to the account because nothing links a manifest to a memory item. Human attestation remains a separate act.",
     },
 
     "PUSH-01": {
