@@ -42,6 +42,11 @@ import {
     toReservedInputTokens,
     type TokenEstimateBreakdown,
 } from "@/lib/chatTokenEstimate";
+import {
+    attemptSetProblems,
+    combineAttemptUsage,
+    type AttemptUsage,
+} from "@/lib/chatMultiAttemptSettlement";
 import { resolveInputUsageSource } from "@/lib/tokenEstimateShadow";
 import { recordShadowSettlement } from "@/lib/tokenEstimateShadowRecorder";
 import {
@@ -772,6 +777,25 @@ const retryAfterFor = (period: Period, now: Date, dailyEnd?: Date) => {
 
 const monthlyResetAt = (now: Date) =>
     new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1));
+
+/**
+ * The `ChatUsageBucket` key prefix a provider's spend budget lives under.
+ *
+ * A constant because settlement now has to recognise these keys among the
+ * user's own quota entries -- a provider bucket settles to what that provider
+ * was paid, and every other entry settles to what the user was charged. Those
+ * were the same number until a turn could dispatch to two providers.
+ */
+const PROVIDER_BUCKET_PREFIX = "provider:";
+
+const providerBucketKey = (provider: string) =>
+    `${PROVIDER_BUCKET_PREFIX}${provider}`;
+
+/** The two periods a provider's spend is bounded over. */
+const PROVIDER_BUDGET_PERIODS = [
+    "provider-cost-day",
+    "provider-cost-month",
+] as const;
 
 const incrementUsage = async (
     tx: Prisma.TransactionClient,
@@ -1782,7 +1806,7 @@ export const preflightChatComparisonAccess = async (
             providerGroups.set(budget.provider, current);
         }
         for (const [provider, required] of providerGroups) {
-            const providerKey = `provider:${provider}`;
+            const providerKey = providerBucketKey(provider);
             const providerLimits = getProviderCostGuardrailLimits(provider);
             const providerChecks = [
                 {
@@ -2828,7 +2852,7 @@ export const acquireChatAccess = async (
         }
 
         if (reservedCost > 0) {
-            const providerKey = `provider:${budget.provider}`;
+            const providerKey = providerBucketKey(budget.provider);
             const providerDayStart = periodStart("day", now);
             const providerDayAllowed = await incrementUsage(
                 tx,
@@ -3000,7 +3024,7 @@ export const acquireChatAccess = async (
 
 export const settleChatUsage = async (
     reservation: ChatUsageReservation,
-    usage: {
+    turnUsage: {
         inputTokens?: number;
         cachedInputTokens?: number;
         outputTokens?: number;
@@ -3025,8 +3049,35 @@ export const settleChatUsage = async (
         reconciled?: boolean;
         reason?: string;
         providerUsageSnapshot?: PerplexityUsageCostSnapshot | null;
+        /**
+         * Every dispatched attempt of this response, when there was more than
+         * one (routing policy §7's automatic fallback).
+         *
+         * Absent is the whole of today's traffic and settles exactly as it
+         * always has -- `turnUsage` above is the turn, priced at the reservation's
+         * own snapshot. Present splits the two ledgers §7 keeps apart: the
+         * user is charged from one accepted attempt, and every attempt's real
+         * cost lands on its own provider's budget at its own rates. See
+         * lib/chatMultiAttemptSettlement.ts for why that is two ledgers and
+         * not one number.
+         */
+        attempts?: readonly AttemptUsage[];
     }
 ) => {
+    const multiAttempt = options?.attempts?.length
+        ? combineAttemptUsage(options.attempts)
+        : null;
+    if (multiAttempt) {
+        // A malformed attempt set settles silently wrong -- a duplicate index
+        // overwrites an audit row, a gap means an attempt was lost between
+        // dispatch and here. Refuse rather than write the money down anyway.
+        const problems = attemptSetProblems(options!.attempts!);
+        if (problems.length > 0) {
+            throw new Error(
+                `Chat attempt set cannot be settled: ${problems.join(" ")}`
+            );
+        }
+    }
     const settlement = await prisma.$transaction(async (tx) => {
         if (reservation.userId) {
             await lockCreditAccount(tx, reservation.userId);
@@ -3058,6 +3109,29 @@ export const settleChatUsage = async (
         }
 
         const canonical = deserializeReservation(durable.reservationPayload);
+        // The user's half of §7's split. With one dispatched attempt this *is*
+        // the caller's `usage`; with two it is the accepted attempt's, because
+        // the user is charged for the answer that arrived and not for
+        // Tomverse's own decision to ask a second model. The other half --
+        // every attempt's real cost at its own provider -- is applied to the
+        // provider buckets further down and never passes through here.
+        const billedAttempt = multiAttempt?.billedAttempt ?? null;
+        const usage: typeof turnUsage = billedAttempt
+            ? {
+                  ...turnUsage,
+                  inputTokens: billedAttempt.inputTokens,
+                  cachedInputTokens: billedAttempt.cachedInputTokens,
+                  outputTokens: billedAttempt.outputTokens,
+                  reasoningTokens: billedAttempt.reasoningTokens,
+                  usageFromProvider: billedAttempt.usageFromProvider,
+                  outcome: multiAttempt!.outcome,
+                  // Taken from the billed attempt too: the search cost is a
+                  // per-call provider charge, and the primary's would be
+                  // charged for a search the user's answer never used.
+                  searchCostMicroUsd: billedAttempt.searchCostMicroUsd,
+                  searchQueryCount: billedAttempt.searchQueryCount,
+              }
+            : turnUsage;
         const actualInput = Number.isSafeInteger(usage.inputTokens)
             ? Math.max(0, usage.inputTokens!)
             : canonical.inputTokens;
@@ -3163,9 +3237,25 @@ export const settleChatUsage = async (
                 : 0;
         const planActualCost = Math.max(0, actualCost - addOnActualCost);
 
+        // A provider's spend bucket settles to what *that provider* was paid,
+        // which stops being `actualCost` the moment a turn dispatches twice.
+        // The primary's bucket is settled from the primary's own attempt and
+        // the fallback provider -- which the reservation never held anything
+        // against -- is incremented separately below.
+        const providerCostFor = (key: string): number | null => {
+            if (!multiAttempt || !key.startsWith(PROVIDER_BUCKET_PREFIX)) return null;
+            const provider = key.slice(PROVIDER_BUCKET_PREFIX.length);
+            return multiAttempt.costByProvider.get(
+                provider as AiModel["provider"]
+            ) ?? 0;
+        };
+
         for (const entry of canonical.entries) {
+            const providerCost = providerCostFor(entry.key);
             const actual =
-                entry.metric === "tokens"
+                providerCost !== null
+                    ? providerCost
+                    : entry.metric === "tokens"
                     ? actualTokens
                     : entry.metric === "cost"
                       ? actualCost
@@ -3199,6 +3289,78 @@ export const settleChatUsage = async (
                       AND "periodStart" = ${entry.periodStart}
                 `;
             }
+        }
+        if (multiAttempt) {
+            // The providers the reservation never held anything against.
+            // Their spend has to land somewhere or a fallback is free as far
+            // as the budget that is supposed to bound it can tell -- and a
+            // provider budget that cannot see its own spend keeps saying yes.
+            //
+            // The periods come from the held entries rather than from a clock
+            // read here: the attempts ran inside this request, so they belong
+            // to the day and month the hold was taken in, and reading "now"
+            // would put a turn that started at 23:59:59 in the wrong day.
+            const heldProviderEntries = canonical.entries.filter((entry) =>
+                entry.key.startsWith(PROVIDER_BUCKET_PREFIX)
+            );
+            const heldProviders = new Set(
+                heldProviderEntries.map((entry) =>
+                    entry.key.slice(PROVIDER_BUCKET_PREFIX.length)
+                )
+            );
+            for (const [provider, cost] of multiAttempt.costByProvider) {
+                if (heldProviders.has(provider) || cost <= 0) continue;
+                for (const period of PROVIDER_BUDGET_PERIODS) {
+                    const template = heldProviderEntries.find(
+                        (entry) => entry.period === period
+                    );
+                    if (!template) continue;
+                    await tx.$executeRaw`
+                        INSERT INTO "ChatUsageBucket" ("key", "period", "periodStart", "count", "updatedAt")
+                        VALUES (${providerBucketKey(provider)}, ${period}, ${template.periodStart}, ${cost}, NOW())
+                        ON CONFLICT ("key", "period", "periodStart")
+                        DO UPDATE SET
+                            "count" = "ChatUsageBucket"."count" + ${cost},
+                            "updatedAt" = NOW()
+                    `;
+                }
+            }
+
+            // One row per attempt, written once. The table refuses updates
+            // outright and holds a partial unique index on the billed one, so
+            // a second settlement of the same reservation cannot quietly
+            // rewrite what an attempt cost or move the user's charge.
+            await tx.chatAttemptUsage.createMany({
+                data: multiAttempt.attempts.map((attempt) => ({
+                    reservationId: durable.id,
+                    attemptIndex: attempt.attemptIndex,
+                    modelId: attempt.price.modelId,
+                    provider: attempt.price.provider,
+                    outcome: attempt.outcome,
+                    userBilled: attempt.userBilled,
+                    providerRequestId: boundedProviderIdentifier(
+                        attempt.providerRequestId
+                    ),
+                    providerResponseId: boundedProviderIdentifier(
+                        attempt.providerResponseId
+                    ),
+                    inputTokens: attempt.inputTokens,
+                    cachedInputTokens: Math.min(
+                        attempt.inputTokens,
+                        attempt.cachedInputTokens
+                    ),
+                    outputTokens: attempt.outputTokens,
+                    reasoningTokens: Number.isSafeInteger(attempt.reasoningTokens)
+                        ? Math.max(0, attempt.reasoningTokens!)
+                        : null,
+                    costMicroUsd: BigInt(attempt.costMicroUsd),
+                    pricingSnapshot: {
+                        ...attempt.price,
+                        costSource: attempt.costSource,
+                        settlementVersion: multiAttempt.version,
+                    },
+                })),
+            });
         }
         if (canonical.userId && canonical.addOnReservations.length > 0) {
             await settleAddOnCredits(tx, {
@@ -3280,7 +3442,54 @@ export const settleChatUsage = async (
         };
     });
 
-    if (
+    if (settlement.applied && multiAttempt) {
+        // Every attempt, under its own provider and model. The single-attempt
+        // branch below records the turn once because there the turn *is* the
+        // attempt; here recording it once would file the fallback's tokens
+        // against the primary's provider, and this ledger is what the
+        // provider budget and the cost dashboards read.
+        for (const attempt of multiAttempt.attempts) {
+            if (
+                attempt.inputTokens === 0 &&
+                attempt.outputTokens === 0 &&
+                attempt.costMicroUsd === 0
+            ) {
+                continue;
+            }
+            const breakdown = calculateProviderUsageCost({
+                inputTokens: attempt.inputTokens,
+                cachedInputTokens: attempt.cachedInputTokens,
+                outputTokens: attempt.outputTokens,
+                inputUsdPerMillionTokens: attempt.price.inputUsdPerMillionTokens,
+                outputUsdPerMillionTokens: attempt.price.outputUsdPerMillionTokens,
+                cachedInputPriceMultiplier:
+                    attempt.price.cachedInputPriceMultiplier,
+            });
+            await recordInternalProviderUsage({
+                provider: attempt.price.provider,
+                modelId: attempt.price.modelId,
+                inputTokens: attempt.inputTokens,
+                cachedInputTokens: Math.min(
+                    attempt.inputTokens,
+                    attempt.cachedInputTokens
+                ),
+                outputTokens: attempt.outputTokens,
+                estimatedCostMicroUsd: attempt.costMicroUsd,
+                uncachedInputCostMicroUsd: breakdown.uncachedInputCostMicroUsd,
+                cachedInputCostMicroUsd: breakdown.cachedInputCostMicroUsd,
+                outputCostMicroUsd: breakdown.outputCostMicroUsd,
+            });
+            if (attempt.price.provider === "zhipu") {
+                await notifyProviderCreditIfNeeded("zhipu").catch((error) =>
+                    console.error("Provider credit alert failed:", {
+                        provider: attempt.price.provider,
+                        modelId: attempt.price.modelId,
+                        error,
+                    })
+                );
+            }
+        }
+    } else if (
         settlement.applied &&
         settlement.costBreakdown &&
         (settlement.actualInput > 0 ||
@@ -3343,6 +3552,117 @@ const boundedProviderIdentifier = (value: string | null | undefined) => {
     if (!normalized) return null;
     return normalized.replace(/[^A-Za-z0-9._:/-]/g, "").slice(0, 240) || null;
 };
+
+/**
+ * Moves a turn's provider-budget hold from the primary's provider to the
+ * fallback's, or refuses.
+ *
+ * §10: every dispatch is authorized on the server "including fallback and
+ * Planner pass-through", and a provider budget is one of those
+ * authorizations. The hold this turn took belongs to the primary's provider,
+ * and money reserved at one provider does not make a call to another one
+ * affordable -- so the fallback needs its own hold before it is dispatched,
+ * not a settlement-time reckoning after the money is spent.
+ *
+ * One transaction, and the reserve happens before the release. If the
+ * fallback's provider is at its ceiling, the answer is no and the primary's
+ * hold is left exactly as it was: releasing first would open a window in
+ * which this turn holds nothing anywhere, and a concurrent request could take
+ * the room the primary was still occupying.
+ *
+ * Returns the entries the caller must fold into the reservation so settlement
+ * knows what was held where. Same provider is not a transfer at all: the hold
+ * already covers it, and re-reserving would count this turn against its own
+ * budget twice.
+ */
+export const transferProviderBudgetForFallback = async (input: {
+    heldProvider: string;
+    fallbackProvider: string;
+    heldMicroUsd: number;
+    fallbackReservedMicroUsd: number;
+    periodStarts: { day: Date; month: Date };
+}): Promise<
+    | { moved: false; reason: "same_provider" }
+    | { moved: false; reason: "fallback_budget_exhausted"; scope: string }
+    | { moved: true; entries: ReservationEntry[] }
+> => {
+    if (input.fallbackProvider === input.heldProvider) {
+        return { moved: false, reason: "same_provider" };
+    }
+    const limits = getProviderCostGuardrailLimits(input.fallbackProvider);
+    const amount = Math.max(0, Math.round(input.fallbackReservedMicroUsd));
+    const release = Math.max(0, Math.round(input.heldMicroUsd));
+    const checks = [
+        {
+            period: "provider-cost-day" as const,
+            start: input.periodStarts.day,
+            limit: limits.day,
+            scope: "provider_cost_day",
+        },
+        {
+            period: "provider-cost-month" as const,
+            start: input.periodStarts.month,
+            limit: limits.month,
+            scope: "provider_cost_month",
+        },
+    ];
+
+    return prisma.$transaction(async (tx) => {
+        const entries: ReservationEntry[] = [];
+        for (const check of checks) {
+            const allowed = await incrementUsage(
+                tx,
+                providerBucketKey(input.fallbackProvider),
+                check.period,
+                check.start,
+                check.limit,
+                amount
+            );
+            if (!allowed) {
+                // Nothing has been released yet, so rolling the transaction
+                // back leaves the primary's hold intact and this turn simply
+                // does not fall back.
+                throw new FallbackBudgetRefusal(check.scope);
+            }
+            entries.push({
+                key: providerBucketKey(input.fallbackProvider),
+                period: check.period,
+                periodStart: check.start,
+                amount,
+                metric: "cost",
+            });
+        }
+        if (release > 0) {
+            for (const check of checks) {
+                await tx.$executeRaw`
+                    UPDATE "ChatUsageBucket"
+                    SET "count" = GREATEST(0, "count" - ${release}),
+                        "updatedAt" = NOW()
+                    WHERE "key" = ${providerBucketKey(input.heldProvider)}
+                      AND "period" = ${check.period}
+                      AND "periodStart" = ${check.start}
+                `;
+            }
+        }
+        return { moved: true as const, entries };
+    }).catch((error) => {
+        if (error instanceof FallbackBudgetRefusal) {
+            return {
+                moved: false as const,
+                reason: "fallback_budget_exhausted" as const,
+                scope: error.scope,
+            };
+        }
+        throw error;
+    });
+};
+
+class FallbackBudgetRefusal extends Error {
+    constructor(readonly scope: string) {
+        super(`Fallback provider budget exhausted: ${scope}`);
+        this.name = "FallbackBudgetRefusal";
+    }
+}
 
 export const linkChatReservationProviderRequest = async (
     reservationId: string,

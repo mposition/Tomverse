@@ -177,6 +177,11 @@ const REGISTRY = {
     reason:
       "none, fallback_used, exhausted. Paired with RoutingRun_fallback_agreement_check, which is the constraint doing the real work -- this one only bounds the vocabulary that one reasons over.",
   },
+  ChatAttemptUsage_outcome_check: {
+    owner: "type_only",
+    reason:
+      "AttemptOutcome in lib/chatMultiAttemptSettlement.ts: completed, cancelled, failed, empty. Deliberately the same four words settleChatUsage already writes to ChatCreditReservation.outcome rather than a second vocabulary for the same fact -- two spellings of one outcome is how two reports about one turn disagree.",
+  },
 
   ProductAnalyticsEvent_source_check: {
     owner: "database",

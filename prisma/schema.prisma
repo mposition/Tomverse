@@ -815,11 +815,62 @@ model ChatCreditReservation {
   createdAt                DateTime  @default(now())
   updatedAt                DateTime  @updatedAt
 
+  attemptUsage             ChatAttemptUsage[]
+
   @@index([status, expiresAt])
   @@index([userId, createdAt])
   @@index([traceId])
   @@index([providerRequestId])
   @@index([providerResponseId])
+}
+
+// What one dispatched attempt cost, at its own provider's rates.
+//
+// The reservation above holds one modelId, one provider and one price
+// snapshot, which is the whole truth about a turn that dispatched once. A
+// fallback dispatches twice, and routing policy §7 keeps two ledgers apart:
+// the user's charge is the accepted usage of one attempt, while provider cost
+// accounting is every attempt and "must not" be rewritten by a goodwill
+// refund. One row per attempt is what lets the second sentence be true --
+// with the identifiers on the reservation alone, the primary's request id
+// wins and the fallback's is simply lost
+// (linkChatReservationProviderRequest only writes into null columns).
+//
+// Deliberately not user-scoped. It hangs off the reservation, which survives
+// account deletion with userId set to NULL because it is a financial record;
+// these rows carry model ids, token counts and costs, and nothing about what
+// was asked.
+model ChatAttemptUsage {
+  id            String                @id @default(cuid())
+  reservationId String
+  reservation   ChatCreditReservation @relation(fields: [reservationId], references: [id], onDelete: Cascade)
+  /// 0 for the primary. Matches RoutingAttempt.attemptIndex within the run.
+  attemptIndex  Int
+  modelId       String
+  provider      String
+  outcome       String
+  /// Whether the user's charge was computed from this attempt. At most one
+  /// row per reservation may carry true -- a partial unique index enforces it,
+  /// because "exactly one end-user settlement" is the rule a fallback is most
+  /// likely to break and the least likely to break loudly.
+  userBilled    Boolean               @default(false)
+
+  providerRequestId  String?
+  providerResponseId String?
+
+  inputTokens       Int    @default(0)
+  cachedInputTokens Int    @default(0)
+  outputTokens      Int    @default(0)
+  reasoningTokens   Int?
+  costMicroUsd      BigInt @default(0)
+  /// The rates this attempt was priced at, and where the figure came from.
+  pricingSnapshot   Json?
+
+  createdAt DateTime @default(now())
+
+  @@unique([reservationId, attemptIndex])
+  @@index([provider, createdAt])
+  @@index([providerRequestId])
 }
 
 // One image generation request in the image work mode: the operational

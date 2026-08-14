@@ -212,8 +212,8 @@ both sides of the wire.
 Not built: the swap itself, in `app/api/chat/route.ts`'s stream. An earlier
 note here said the `pull()` catch was the seam and that no extraction was
 required. The seam is right; the second half was wrong, and correcting it
-matters because it understates the work by a lot. Four things were open; the
-first is now closed and the other three are not.
+matters because it understates the work by a lot. Four things were open; three
+are now closed and the scope question is the one that remains.
 
 **~~The catch does not classify the failure.~~ Done — step 1.**
 `generatedText === ""` says the server has not read a text chunk yet. That is a
@@ -238,26 +238,57 @@ Neither module is wired into the chat route. That is step 3, and the scan in
 `tests/automaticFallbackAbsence.test.mjs` still holds: there is exactly one
 `streamText` call and its model is a single resolved identifier.
 
-**Swapping `sourceReader` and `result` is not enough.** The closure also holds
-`modelConfig`, `generationSettings`, `webSearchToolConfig`,
+**~~Swapping `sourceReader` and `result` is not enough.~~ Done — step 2.** The
+closure also holds `modelConfig`, `generationSettings`, `webSearchToolConfig`,
 `requestMaxOutputTokens`, `dispatchRecord`, the Perplexity usage capture, and
 the model id used by settlement, the logs and the stored message — all bound
 to the primary. Leaving any of them would record or bill the fallback as the
-primary. The realistic shape is per-attempt execution state: one object or
-factory that a dispatch is built from, rather than values captured once.
+primary.
 
-**Settlement cannot express two attempts.** `ChatUsageReservation` carries a
-single `modelId`, `provider` and price snapshot, and `settleChatUsage` prices
-actual usage from that snapshot (`canonical.inputUsdPerMillionTokens` and its
-siblings). A fallback model's tokens would be priced at the primary's rates,
-there is nowhere to add what the primary spent before it failed, and the
-provider budget hold belongs to the original provider. "Fallback cost ≤ the
-existing hold" is necessary but nowhere near sufficient. The contract needs:
-per-attempt provider usage and its own price snapshot; the two attempts summed
-and held under the original reservation; the fallback provider's budget
-reserved or transferred atomically; exactly one end-user settlement; and audit
-records where the primary's and the fallback's request ids and costs do not
-overwrite each other.
+`lib/chatAttemptExecution.ts` is that per-attempt state: one model in, one
+complete dispatch out, pure, so two models' plans can be compared in a test
+rather than in production. `ATTEMPT_BOUND_FIELDS` names what must come from a
+plan, and the test fails on a field nothing produces per attempt — the failure
+mode here is *forgetting* one, not writing the wrong one. Building it turned up
+one hazard nothing had noticed: `perplexityUsageHeaders` keys the response
+capture on the trace id alone, and consuming a capture releases it, so two
+Perplexity attempts under one trace would hand the second reader the first's
+body. Attempts after the primary now capture under their own key; the primary
+keeps the bare trace id so nothing existing moves.
+
+**~~Settlement cannot express two attempts.~~ Done — step 2.**
+`ChatUsageReservation` carries a single `modelId`, `provider` and price
+snapshot, and `settleChatUsage` prices actual usage from that snapshot. A
+fallback model's tokens would be priced at the primary's rates, the second
+provider's spend charged to the first provider's budget, and the fallback's
+request id dropped entirely — `linkChatReservationProviderRequest` writes only
+into a row whose identifier columns are still null, so the primary wins.
+
+The contract is `lib/chatMultiAttemptSettlement.ts`, and its shape comes from
+§7's own sentence: "Settlement uses actual accepted provider usage… but the
+rule must be idempotent and must not rewrite provider cost accounting." That
+separates two ledgers a single-attempt turn never had to distinguish.
+
+| Ledger | Covers | Where it lands |
+| --- | --- | --- |
+| Provider cost | every attempt, at its own provider's rates | that provider's `provider:` spend buckets, and `ProviderDailyUsage` per attempt |
+| The user's charge | one accepted attempt, never more | the reservation, settled once |
+
+`settleChatUsage` takes an optional `attempts`; absent is the whole of today's
+traffic and settles byte-for-byte as it always has, which a DB test asserts
+directly. Present, it prices each attempt at its own snapshot, settles the
+primary's provider bucket down to what the primary actually cost, increments
+the fallback provider's buckets — which the reservation never held anything
+against — and writes one `ChatAttemptUsage` row per attempt. That table takes
+no updates at all and holds a partial unique index on the billed row, so
+"exactly one end-user settlement" is a constraint rather than a promise, and a
+goodwill refund cannot reach back and rewrite what an attempt cost.
+
+`transferProviderBudgetForFallback` is the pre-dispatch half: §10 checks every
+dispatch including the fallback, and money held at one provider does not make a
+call to another affordable. One transaction, reserve before release — a
+refusal leaves the primary's hold exactly as it was rather than opening a
+window where the turn holds nothing anywhere.
 
 **"Text-only turns" is still too wide** for a first cut. The safe initial scope
 is Auto mode, plain text, no tools, no web search, no deep research, and a
@@ -270,7 +301,8 @@ Order that keeps each step checkable:
 1. ~~a deterministic test double where the first reader raises a pre-token
    error and the second succeeds, fails, or is cancelled — before any real
    provider~~ — done, above;
-2. the per-attempt execution state and the multi-attempt settlement contract;
+2. ~~the per-attempt execution state and the multi-attempt settlement
+   contract~~ — done, above;
 3. the swap, behind a flag that is off;
 4. staging fault injection on the first provider, confirming in the database
    and the logs: one run, one reservation, two attempts, one settlement, one
