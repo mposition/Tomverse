@@ -33,6 +33,7 @@ export const SETTINGS_SECTION_QUERY_PARAM = "settingsSection";
 export const SETTINGS_SECTION_IDS = [
     "external-import",
     "memory",
+    "assistants",
     "account-data",
 ] as const;
 
@@ -42,6 +43,12 @@ export const SETTINGS_SECTION_TAB: Record<SettingsSectionId, AccountSettingsTab>
     {
         "external-import": "data",
         memory: "data",
+        // A profile is personalisation the account owns, so it belongs in the
+        // same group rather than in a card beside it (settings-navigation
+        // contract §2). Placed after memory because that is the order the
+        // features build on each other -- a profile may use approved memory,
+        // and never the other way round.
+        assistants: "data",
         "account-data": "data",
     };
 
