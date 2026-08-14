@@ -29,6 +29,10 @@ Date / timezone:    ____________________
 - [ ] `npm run check:model-pricing`
 - [ ] `npm run check:image-pricing`
 - [ ] `npm run check:image-executor-budget`
+- [ ] `npm run check:fal-smoke-evidence` — recomputes the run that
+      `fal-ai/nano-banana-2` was enabled on, and compares the request it proves
+      against the one the builder produces now. Needs no credential; its
+      sibling `check:fal-image-pricing` does, and is listed below.
 - [ ] `npm run check:db-integration-coverage`
 - [ ] `npm run check:error-detail-cost`
 - [ ] `npm run check:data-domain-registry`
@@ -104,6 +108,13 @@ Date / timezone:    ____________________
 - [ ] `npm run check:openai-model-access` (needs a production key) — per-account
       model visibility only. It is **not** a price source; nothing in
       `lib/modelPricing.ts` may be derived from its response.
+- [ ] `npm run check:fal-image-pricing` (needs `FAL_KEY`) — fal publishes
+      "Pricing is subject to change" beside the number `fal-ai/nano-banana-2`'s
+      fixed 120 credits were computed from, so this is the only thing standing
+      between a price move at fal and a settlement report nobody reads weekly.
+      The **fal Price Drift** workflow runs it daily against `main` and
+      `develop`, so this line is a re-check at the release SHA rather than the
+      only run. `matched` is the pass; `lookup_failed` and `skipped` are not.
 - [ ] Chromium E2E: `desktop-chromium`, `desktop-compact`, `mobile-chromium`
       — no unexplained failures
 

@@ -110,6 +110,16 @@ export type RouterDecision =
       profile: TaskProfile;
       /** Carry into the next turn so hysteresis can accumulate. */
       sticky: RouterStickyState;
+      /**
+       * The other eligible models, best first, with the chosen one removed.
+       *
+       * §6: an automatic fallback's candidate must pass the same compatibility
+       * filters as the primary. These did -- they are the rest of the set this
+       * decision was made from, in the order it ranked them. Empty means the
+       * Router had exactly one model to offer, which is a refusal reason for a
+       * fallback rather than a reason to go looking elsewhere.
+       */
+      fallbackCandidateModelIds: readonly string[];
       record: RouterDecisionRecord;
     }
   | {
@@ -231,6 +241,12 @@ export function decideRouterModel(
       modelId: chosen.modelId,
       turnsFavouringChallenger: selection.turnsFavouringChallenger,
     },
+    // The chosen model is removed rather than assumed to be first: stickiness
+    // can select a model the ranking did not put at the top, and a list that
+    // still contained the primary would offer it as its own alternative.
+    fallbackCandidateModelIds: selection.rankedModelIds.filter(
+      (modelId) => modelId !== chosen.modelId
+    ),
     record,
   };
 }

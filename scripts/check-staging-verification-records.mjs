@@ -100,6 +100,39 @@ if (!revision) {
   );
 }
 
+/* ------------------------------------- the blank record matches the items */
+
+// The drift this catches actually happened: a Gemini section `H` was added to
+// the checklist and its revision was bumped, while `_record-template.md` still
+// said `A–G` and carried the previous revision. A run started from that
+// template would have recorded a revision the checklist no longer had, and
+// nobody could tell an execution from before the section was added from one
+// after it.
+const templatePath = join(RECORDS, TEMPLATE);
+const blank = readFileSync(templatePath, "utf8");
+const blankRevision = frontMatter(blank).get("templateRevision");
+if (revision && blankRevision !== revision[1]) {
+  problems.push(
+    `${templatePath}  declares templateRevision ${blankRevision ?? "(none)"} ` +
+      `while the checklist is at ${revision[1]}. A run started from it would ` +
+      `record a revision the checklist does not have.`
+  );
+}
+const sectionsInChecklist = [
+  ...checklist.matchAll(/^##\s+([A-Z])\.\s/gm),
+].map((match) => match[1]);
+if (sectionsInChecklist.length > 0) {
+  const first = sectionsInChecklist[0];
+  const last = sectionsInChecklist[sectionsInChecklist.length - 1];
+  const span = new RegExp(`${first}[–-]${last}\\s*구획`);
+  if (!span.test(blank)) {
+    problems.push(
+      `${templatePath}  does not tell the executor to copy ${first}–${last}, ` +
+        `which is what the checklist now has.`
+    );
+  }
+}
+
 /* ---------------------------------------------------- the records hold */
 
 const entries = readdirSync(RECORDS).filter((name) => name.endsWith(".md"));

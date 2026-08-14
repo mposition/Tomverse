@@ -18,6 +18,7 @@ import {
   IMAGE_INLINE_MODEL_DISCOVERY_LIMIT,
 } from "../lib/imageModelRegistry.ts";
 import { imageProviderBudgetEnvNames } from "../lib/imageProviderBudget.ts";
+import { evaluateFalPricing } from "../scripts/check-fal-image-pricing-core.mjs";
 import {
   IMAGE_COST_PER_CREDIT_CEILING_MICRO_USD,
   IMAGE_PROMPT_BUDGET_MICRO_USD,
@@ -98,10 +99,15 @@ test("a disabled model is invisible to every selection path", () => {
   assert.deepEqual(enabled, [
     "gpt-image-2",
     "grok-imagine-image-quality-20260403",
+    "fal-ai/nano-banana-2",
   ]);
-  // Two providers now, which is what makes the comparison cross-provider. The
-  // three Google models are registered and still contribute no provider here.
-  assert.deepEqual(listActiveImageProviders(), ["openai", "xai"]);
+  // Three providers now. The list is spelled out rather than counted because
+  // adding a provider is the change that turns budgets, concurrency buckets
+  // and readiness on for it, and that should never happen as a side effect of
+  // an edit somewhere else. The three Google models are registered and still
+  // contribute no provider here: `google` is the model *owner* of the fal row,
+  // and owner is not provider.
+  assert.deepEqual(listActiveImageProviders(), ["openai", "xai", "fal"]);
   // Fail-closed price lookup: the model exists, but pricing it is refused.
   assert.equal(
     getImageModelPrice("gemini-3.1-flash-image", "medium", "1024x1024"),
@@ -405,30 +411,73 @@ test("a direct integration answers both questions the same way", () => {
   }
 });
 
-test("the gateway route is held on operations, not on price", () => {
+test("the gateway route is enabled, and on the terms it was approved on", () => {
   const model = getImageModel("fal-ai/nano-banana-2");
 
-  // Not `worst_case_cost_unbounded`, which is the direct Google route's
-  // problem and the reason this one exists: a per-image price has no unbounded
-  // thinking term. Not `price_unverified` either, since the price was read
-  // from fal's own published text on 2026-08-14.
-  assert.equal(model.disabledReason, "operational_hold");
+  // The hold was `operational_hold` -- not `worst_case_cost_unbounded`, which
+  // is the direct Google route's problem and the reason this one exists, and
+  // not `price_unverified` either. What it was waiting for was an adapter, a
+  // budget and a real request; all three arrived, so the reason is gone rather
+  // than reworded.
+  assert.equal(model.disabledReason, null);
   assert.equal(model.priceVerification.verifiedAt, "2026-08-14");
   assert.ok(model.priceVerification.sources.length > 0);
 
-  // 120 approved 2026-08-14. `operational_hold` is the one reason allowed to
-  // carry figures precisely so an approved one is validated on every run
-  // rather than re-entered by hand on launch day.
+  // Unchanged by activation, and asserted here because these are the terms the
+  // 120 was approved against. Enabling a row is exactly the moment a price or
+  // a size could drift without anyone noticing it had.
   assert.deepEqual(model.prices, [
     { quality: "medium", size: "1024x1024", credits: 120, outputCostMicroUsd: 80_000 },
   ]);
-
-  // One size, so there is one price to verify and one worst case to state.
   assert.deepEqual(model.sizes, ["1024x1024"]);
+  assert.deepEqual(model.qualities, ["medium"]);
 
-  // No adapter exists yet, and the dispatch must refuse rather than guess.
-  assert.ok(!listEnabledImageModels().some((entry) => entry.id === model.id));
-  assert.ok(!listActiveImageProviders().includes("fal"));
+  // Enabled means dispatchable, so the provider must now be one the executor
+  // budgets and concurrency layers know about.
+  assert.ok(listEnabledImageModels().some((entry) => entry.id === model.id));
+  assert.ok(listActiveImageProviders().includes("fal"));
+
+  // Still Google's model bought through fal. Activation must not have quietly
+  // made the gateway the owner: the watermark, the model card and the answer
+  // to "whose model is this" all follow the owner, not the supplier.
+  assert.equal(model.provider, "fal");
+  assert.equal(model.modelOwner, "google");
+  assert.deepEqual(model.provenance, ["synthid"]);
+});
+
+test("an enabled model carries no note explaining why it is disabled", () => {
+  // `disabledNote` is documented as "surfaced in the admin panel for a disabled
+  // model", and the panel renders it whenever it is present -- it does not
+  // check the reason. So a note left behind by an activation keeps explaining a
+  // hold that was lifted, on the one screen an operator would consult to find
+  // out whether it had been.
+  //
+  // Nearly happened here: this row's note said "Held on operations... still
+  // needs a fal adapter, and IMAGE_PROVIDER_FAL_COST_* budgets plus a prepaid
+  // balance", all of which had been done by the time it was enabled. The
+  // history moved to policy section 16.8, where it is dated.
+  for (const model of listEnabledImageModels()) {
+    assert.equal(
+      model.disabledNote,
+      undefined,
+      `${model.id} is enabled but still carries a disabled note`
+    );
+  }
+  // And the notes that remain are on models that really are held, so the field
+  // is not simply going unused.
+  const held = IMAGE_MODEL_REGISTRY.filter((model) => model.disabledReason !== null);
+  assert.ok(held.some((model) => typeof model.disabledNote === "string"));
+});
+
+test("an enabled fal model is what arms the price drift check", () => {
+  // The check is inert while the model is held -- there is no live price to
+  // contradict -- and fail-closed the moment it is not. That transition is the
+  // entire design, so it is asserted at the transition rather than assumed.
+  const model = getImageModel("fal-ai/nano-banana-2");
+  const verdict = evaluateFalPricing({ model, response: null });
+
+  assert.equal(verdict.status, "failed");
+  assert.match(verdict.problems[0], /enabled but fal's published price could not be read/);
 });
 
 test("the approved credit clears the floor its own configuration implies", () => {

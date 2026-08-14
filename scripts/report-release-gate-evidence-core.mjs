@@ -118,9 +118,13 @@ export const GATE_EVIDENCE = {
         note: "Candidate selection is tested. The gate's 95% is an injected-failure evaluation with a denominator breakdown, which no harness produces.",
     },
     "FALLBACK-02": {
-        capability: ["lib/providerFallbackCandidates.ts"],
-        measurement: ["tests/automaticFallbackAbsence.test.mjs"],
-        note: "The invariant is held in the stronger form: there is no automatic model substitution at all, so none can begin after a visible token. The scan pins one streamText call, one resolved model assigned once and not derived from the fallback table, and an allowlist of the surfaces that may name an alternative -- all of which only offer it. The production audit half is still owed, and would now be confirming a zero rather than discovering one.",
+        capability: [
+            "lib/routingFallbackPolicy.ts",
+            "lib/autoFallbackGate.ts",
+            "app/api/chat/route.ts",
+        ],
+        measurement: ["tests/automaticFallbackBoundary.test.mjs"],
+        note: "There is an automatic substitution now -- routing policy §7's pre-token provider fallback -- so the invariant is no longer held by the absence of a mechanism. decideFallback refuses on visibleTokenEmitted before it reads a layer, the route hands it what it actually enqueued, and the scan pins both halves plus the rule that the second model comes from the Router's ranked candidates rather than the provider-suggestion table. It is behind AUTO_ROUTER_FALLBACK_ENABLED, which defaults off, so the production count is still zero for want of traffic rather than for want of a mechanism; the audit half is owed once the flag is on.",
     },
     "FALLBACK-03": {
         capability: ["lib/providerFallbackCandidates.ts", "lib/routingAttemptStore.ts"],

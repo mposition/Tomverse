@@ -1044,3 +1044,55 @@ registry의 `disabledNote`는 "high thinking 비활성"이라고 적고 있었�
 `tests/falImageRequest.test.mjs`가 두 파일을 가로질러 이 일치를 강제하고,
 `scripts/security-regression-check.mjs`가 필드 자체를 고정한다.
 
+
+### 16.8 활성화 기록 (2026-08-14)
+
+`fal-ai/nano-banana-2`의 `disabledReason`을 `null`로 바꿨다. §16.2가 요구한 네
+조건이 모두 충족됐고, 각각이 무엇으로 충족됐는지 아래에 적는다 — 활성화는
+"준비됐다는 판단"이 아니라 **조건별로 지목 가능한 증거**여야 한다.
+
+| §16.2 조건 | 충족 근거 |
+|---|---|
+| 가격 검증 | fal 공표 원문(§16.3) + `check:fal-image-pricing`이 live API에 대해 `matched` (`0.08 USD per images`) |
+| adapter | `lib/imageProviderAdapter.ts`의 `generateWithFal`, 실제 요청 1건으로 증명 |
+| 재시도·저장 헤더 | `X-Fal-No-Retry: 1`, `X-Fal-Store-IO: 0`, lifecycle 900초 — 실행 기록에 그대로 남음 |
+| 예산 | `IMAGE_PROVIDER_FAL_COST_*` 배포 및 prepaid 충전(§16.6) |
+
+증거는 `.github/audits/evidence/fal-nano-banana-2-smoke/`에 있고,
+`npm run check:fal-smoke-evidence`가 PR Fast Gate에서 결론을 **다시 계산한다.**
+
+#### 실측이 확정한 것
+
+`x-fal-billable-units: 1.025` → `1.025 × 80,000 = 82,000µUSD`. §16.4 표의 fal
+측 두 항목(80,000 이미지 + 2,000 high thinking)과 정확히 일치한다. 0.025 단위가
+곧 $0.002 할증이다. `check:fal-image-pricing`은 fal pricing API가 단가 하나만
+답하므로 이 할증을 비교하지 못한다고 스스로 적어 두는데, 그 공백을 이 실측이
+메웠다.
+
+배달 이미지는 실제로 1024×1024였다. `aspect_ratio` 기본값이 `"auto"`이므로
+§16.5에서 고정하지 않았다면 팔린 크기와 다른 모양이 조용히 배달됐을 것이다.
+
+#### 활성화가 켜는 것과 켜지 않는 것
+
+**켜지 않는 것.** 이미지 생성 전체는 여전히 `feature.imageGenerationEnabled`
+(`AppSetting`, 값이 정확히 `"true"`일 때만 참) 뒤에 있다. registry 행을 켠 것만으로
+사용자에게 노출되는 것은 없고, `/api/ready`도 이 flag가 켜져 있을 때만 이미지
+예산 부재를 실패로 취급한다(`lib/imageProviderBudgetReadiness.ts`).
+
+**켜는 것.** `listActiveImageProviders()`에 `fal`이 들어간다. 이때부터 fal은
+예산·동시성·readiness가 적용되는 provider이고, `check:fal-image-pricing`이
+`skipped`에서 **fail-closed**로 바뀐다 — 활성 상태에서 가격을 읽지 못하면 실패다.
+
+#### 남은 구멍 (의도적으로 기록)
+
+`check:fal-image-pricing`은 `FAL_KEY`가 필요해 **어느 workflow에서도 실행되지
+않는다.** `check:openai-model-access`와 같은 취급이며, 배포 전 사람이 돌린다.
+그 결과 고정가가 기대는 유일한 drift 장치가 자동으로는 돌지 않는다. 오늘의
+가격은 확인됐으므로 활성화를 막을 사유는 아니지만, **"검사가 존재한다"와 "검사가
+돌아간다"는 다른 사실이므로** 여기에 적는다. 자동화하려면 저장소 secret으로
+`FAL_KEY`가 필요하고, 그것은 별도 결정이다.
+
+`disabledNote`는 제거했다. 이 필드는 disabled 모델용인데 admin panel이 조건 없이
+렌더링하므로, 남겨 두면 이미 해제된 hold를 계속 설명한다 — 그것을 확인하러 오는
+바로 그 화면에서. `tests/imageModelRegistry.test.mjs`가 활성 모델의 note를
+금지한다.

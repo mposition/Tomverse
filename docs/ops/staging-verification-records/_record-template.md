@@ -1,7 +1,7 @@
 ---
 record: staging-verification
 checklist: docs/ops/external-import-staging-checklist.md
-templateRevision: 2026-08-14
+templateRevision: 2026-08-14b
 environment:
 deploySha:
 startedAtUtc:
@@ -21,7 +21,7 @@ digest:
 |---|---|
 | 환경 | staging / production / 기타 |
 | 배포 SHA (전체 40자리) | |
-| template revision | 2026-08-14 |
+| template revision | 2026-08-14b |
 | 시작 (UTC) | |
 | 종료 (UTC) | |
 | 실행자 | |
@@ -29,7 +29,7 @@ digest:
 
 ## 항목별 결과
 
-체크리스트의 A–G 구획을 그대로 옮기고, 각 항목에 다음 중 하나를 적습니다.
+체크리스트의 A–H 구획을 그대로 옮기고, 각 항목에 다음 중 하나를 적습니다.
 
 - `pass` — 확인함. 증거 참조를 함께 적습니다.
 - `fail` — 확인했고 실패했습니다. 후속 티켓을 적습니다.

@@ -26,6 +26,7 @@ import { buildTaskProfile } from "@/lib/taskProfileCore";
 import { scheduleRoutingShadowRun } from "@/lib/routingShadow";
 import { selectAutoModel } from "@/lib/autoModelSelection";
 import { decideAutoCohort } from "@/lib/autoCohort";
+import { decideDrillOverride } from "@/lib/autoDrillOverride";
 import { stickyStateAfterRoutedTurn } from "@/lib/conversationSelectionMode";
 import {
     attachmentTokensForModel,
@@ -38,6 +39,8 @@ import { resolveModelPricing } from "@/lib/modelPricing";
 import {
     authoriseDispatch,
     beginInstrumentedDispatch,
+    beginRetryAttempt,
+    recordFallbackRecovery,
     completeInstrumentedDispatch,
     recordDispatched,
     type DispatchInstrumentation,
@@ -97,6 +100,7 @@ import {
     ChatAccessError,
     chatErrorResponse,
     createChatBudget,
+    getChatBudgetReservedCostMicroUsd,
     identifyChatCaller,
     linkChatReservationProviderRequest,
     readChatJsonBody,
@@ -105,9 +109,34 @@ import {
     releaseChatAccess,
     resolveLeaseTtlSeconds,
     settleChatUsage,
+    transferProviderBudgetForFallback,
     type ChatUsageReservation,
     validateChatPayload,
 } from "@/lib/chatSecurity";
+import {
+    attemptDispatchOptions,
+    planAttemptExecution,
+} from "@/lib/chatAttemptExecution";
+import {
+    autoFallbackScope,
+    type FallbackScopeRefusal,
+} from "@/lib/autoFallbackGate";
+import type {
+    AttemptPriceSnapshot,
+    AttemptUsage,
+} from "@/lib/chatMultiAttemptSettlement";
+import {
+    decideFallback,
+    recoveryAfterFallback,
+} from "@/lib/routingFallbackPolicy";
+import { classifyStreamFailure } from "@/lib/routingStreamFailure";
+import {
+    FAULT_INJECTION_HEADER,
+    decideFaultInjection,
+    faultedReader,
+} from "@/lib/routingFaultInjection";
+import { resolveDeploymentEnvironment } from "@/lib/deploymentEnvironment";
+import { buildRoutingRetryChunk } from "@/lib/routingRetrySignal";
 import {
     conversationLockedResponse,
     hasConversationUnlockGrant,
@@ -856,11 +885,33 @@ async function handleChatPost(
         // costs nothing -- the plan is already in hand and readiness is read
         // from memory -- so while the rollout is off this query never runs and
         // the chat path pays nothing for a feature nobody has.
+        // The staging fallback drill's one exception, and the only path that
+        // routes a turn while a readiness gate is outstanding. Fails closed in
+        // production whatever the request carries -- see lib/autoDrillOverride.
+        const drillOverride = decideDrillOverride({
+            faultHeader: req.headers.get(FAULT_INJECTION_HEADER),
+            subjectKey: session?.user?.id ?? "",
+            isGuest: !session?.user?.id,
+        });
         const autoCohort = decideAutoCohort({
             subjectKey: session?.user?.id ?? "",
             isGuest: !session?.user?.id,
             plan: accountPlan?.tier ?? null,
+            drillOverride: drillOverride.allowed,
         });
+        if (autoCohort.eligible && autoCohort.drillOverride) {
+            // Loud, and every time. A routed turn that only routed because a
+            // drill said so must be legible as one in the record it produces,
+            // not inferred later from the absence of an attestation.
+            console.warn(JSON.stringify({
+                event: "chat_auto_readiness_overridden",
+                traceId,
+                conversationId,
+                reason: autoCohort.drillOverride,
+                environment: resolveDeploymentEnvironment(),
+                timestamp: new Date().toISOString(),
+            }));
+        }
         const conversationRouting =
             autoCohort.eligible && conversationId && session?.user?.id
                 ? await prisma.conversation.findFirst({
@@ -2340,6 +2391,26 @@ async function handleChatPost(
             ...generationSettings,
             ...(webSearchToolConfig ?? {}),
         });
+        // The fallback drill's deliberate failure, if this request asked for
+        // one and may have one (lib/routingFaultInjection.ts: not production,
+        // a configured secret, and this request's own header). Off in every
+        // other case, and decided once so a retry cannot re-roll it.
+        const faultInjection = decideFaultInjection(
+            req.headers.get(FAULT_INJECTION_HEADER)
+        );
+        const injectedFault = faultInjection.inject ? faultInjection.fault : null;
+        if (injectedFault) {
+            // Loud, and before anything fails: a drill must never be mistaken
+            // for an outage in the logs it is about to produce.
+            console.warn(JSON.stringify({
+                event: "chat_fault_injection_armed",
+                traceId,
+                conversationId,
+                fault: injectedFault,
+                environment: resolveDeploymentEnvironment(),
+                timestamp: new Date().toISOString(),
+            }));
+        }
         // The provider call has been made. Recorded after the fact on purpose:
         // the CHECK behind this refuses a dispatch with no finalized manifest,
         // so the order here is the order the constraint enforces.
@@ -2363,12 +2434,87 @@ async function handleChatPost(
             modelId: modelConfig.id,
             provider: modelConfig.provider,
             reasoning: modelConfig.reasoning,
-            reader: result.textStream.getReader(),
+            stream: result,
+            reader: faultedReader(result.textStream.getReader(), injectedFault, 0),
             // Perplexity buffers response bodies under this key and consuming
             // the capture releases it, so it is per attempt rather than per
             // trace. The primary keeps the bare trace id, which is what the
             // request headers already carried.
             usageCaptureKey: traceId,
+            // What this attempt is priced at. Carried per attempt because a
+            // fallback runs on another model at another provider's rates, and
+            // settling it against the reservation's single snapshot is the
+            // thing lib/chatMultiAttemptSettlement.ts exists to prevent.
+            price: {
+                provider: modelConfig.provider,
+                modelId: modelConfig.id,
+                inputUsdPerMillionTokens: budget.inputUsdPerMillionTokens,
+                outputUsdPerMillionTokens: budget.outputUsdPerMillionTokens,
+                cachedInputPriceMultiplier: budget.cachedInputPriceMultiplier,
+                pricingVersion: budget.pricingVersion ?? null,
+            } satisfies AttemptPriceSnapshot,
+        };
+        /**
+         * Attempts that have already ended, oldest first.
+         *
+         * Empty for the whole of today's traffic, and `settleSafely` passes
+         * nothing to `settleChatUsage` while it stays empty -- so a turn that
+         * dispatched once settles exactly as it always has. A swap pushes the
+         * attempt it is replacing, and settlement appends the one that ended.
+         */
+        const endedAttempts: AttemptUsage[] = [];
+        let rerouteCount = 0;
+        let displacedModelId: string | null = null;
+        /**
+         * What §7 may try instead, best first.
+         *
+         * The Router's own eligible set with the chosen model removed, so a
+         * candidate here has passed exactly the filters the primary passed.
+         * Empty on a manual turn, which the scope gate refuses on its own
+         * grounds before this is ever read.
+         */
+        const fallbackCandidates = autoSelection.routed
+            ? autoSelection.fallbackCandidateModelIds
+            : [];
+        /**
+         * The provider hold this turn took, and the periods it was taken in.
+         *
+         * Read from the reservation rather than recomputed: a fallback on
+         * another provider releases exactly what was held, and "exactly" has
+         * to mean the same rows the hold went into. A turn that reserved no
+         * cost holds nothing, and a fallback across providers is refused
+         * rather than granted a transfer of zero.
+         */
+        const providerHoldEntries = (usageReservation?.entries ?? []).filter(
+            (entry) => entry.key === `provider:${modelConfig.provider}`
+        );
+        const providerHoldDay = providerHoldEntries.find(
+            (entry) => entry.period === "provider-cost-day"
+        );
+        const providerHoldMonth = providerHoldEntries.find(
+            (entry) => entry.period === "provider-cost-month"
+        );
+        const heldProviderCostMicroUsd = providerHoldDay?.amount ?? 0;
+        /**
+         * Why no fallback happened, when it was a decision rather than the
+         * feature being off.
+         *
+         * `flag_off` is deliberately silent: with the flag off it is the
+         * answer for every failed turn, and a line per failure saying a
+         * disabled feature stayed disabled is noise that would bury the ones
+         * that mean something.
+         */
+        const reportFallbackRefusal = (reason: FallbackScopeRefusal | string) => {
+            if (reason === "flag_off") return;
+            console.info(JSON.stringify({
+                event: "chat_auto_fallback_refused",
+                traceId,
+                conversationId,
+                modelId: dispatched.modelId,
+                attemptIndex: dispatched.attemptIndex,
+                reason,
+                timestamp: new Date().toISOString(),
+            }));
         };
         // The stream owns the slot from here, but it cannot release anything
         // until it is pulled, and it is only pulled once the Response below is
@@ -2431,13 +2577,14 @@ async function handleChatPost(
                 try {
                     const providerUsageSnapshot =
                         (await takePerplexityCapture())?.usage ?? null;
+                    const settledInputTokens =
+                        usage?.inputTokens ?? reservation.inputTokens;
+                    const settledOutputTokens =
+                        usage?.outputTokens ?? estimatedGeneratedOutputTokens();
                     await settleChatUsage(reservation, {
-                        inputTokens:
-                            usage?.inputTokens ?? reservation.inputTokens,
+                        inputTokens: settledInputTokens,
                         cachedInputTokens: usage?.cachedInputTokens,
-                        outputTokens:
-                            usage?.outputTokens ??
-                            estimatedGeneratedOutputTokens(),
+                        outputTokens: settledOutputTokens,
                         reasoningTokens: usage?.reasoningTokens,
                         // Absent provider usage metadata, the output figure
                         // above is the documented fallback estimate rather
@@ -2448,6 +2595,31 @@ async function handleChatPost(
                         searchExecuted: usage?.searchExecuted,
                     }, {
                         providerUsageSnapshot,
+                        // Only when this turn actually dispatched more than
+                        // once. Empty leaves settleChatUsage on the path every
+                        // turn has always taken, which is the point: a turn
+                        // that ran one model settles as one model.
+                        attempts: endedAttempts.length
+                            ? [
+                                  ...endedAttempts,
+                                  {
+                                      attemptIndex: dispatched.attemptIndex,
+                                      price: dispatched.price,
+                                      inputTokens: settledInputTokens,
+                                      cachedInputTokens:
+                                          usage?.cachedInputTokens ?? 0,
+                                      outputTokens: settledOutputTokens,
+                                      reasoningTokens: usage?.reasoningTokens,
+                                      usageFromProvider:
+                                          usage?.usageFromProvider === true,
+                                      outcome,
+                                      searchCostMicroUsd: undefined,
+                                      providerReportedCostMicroUsd:
+                                          providerUsageSnapshot?.totalCostMicroUsd ??
+                                          null,
+                                  } satisfies AttemptUsage,
+                              ]
+                            : undefined,
                     });
                     usageReservation = null;
                     // One funnel for every terminal outcome, so cancellation,
@@ -2479,6 +2651,19 @@ async function handleChatPost(
                     // produced an answer. A streak advanced by a cancelled or
                     // failed turn would let hysteresis be decided by turns
                     // that never reached the user.
+                    // §8, and only once the answer exists. A recovery
+                    // candidate stored for a retry that then failed would send
+                    // the next turn back to a model that never worked.
+                    if (outcome === "completed") {
+                        await recordFallbackRecovery(
+                            dispatchRecord,
+                            recoveryAfterFallback({
+                                succeededModelId: dispatched.modelId,
+                                displacedModelId,
+                                failureLayer: "provider",
+                            })
+                        );
+                    }
                     if (autoSelection.routed && outcome === "completed" && conversationId) {
                         try {
                             await prisma.conversation.updateMany({
@@ -2490,9 +2675,20 @@ async function handleChatPost(
                                     id: conversationId,
                                     selectionMode: "auto",
                                 },
+                                // §8: the sticky model becomes the one that
+                                // worked. On a turn that fell back that is not
+                                // the model the Router chose, and writing the
+                                // Router's choice would put the conversation
+                                // back on a model that had just failed.
                                 data: stickyStateAfterRoutedTurn(
-                                    autoSelection.modelId,
-                                    autoSelection.sticky.turnsFavouringChallenger
+                                    dispatched.modelId,
+                                    // A fallback is not evidence about a
+                                    // challenger, so the hysteresis streak
+                                    // starts again rather than carrying a
+                                    // count that was about another comparison.
+                                    displacedModelId
+                                        ? 0
+                                        : autoSelection.sticky.turnsFavouringChallenger
                                 ),
                             });
                         } catch (error) {
@@ -2648,6 +2844,295 @@ async function handleChatPost(
                 return false;
             }
         };
+        /**
+         * §7's automatic fallback, or the named reason there was none.
+         *
+         * Reached only from the stream's failure path, and only before the
+         * first visible token -- both of which `decideFallback` re-checks
+         * rather than trusting the call site. Returns whether the response is
+         * now being served by another model; `false` means the caller carries
+         * on failing the turn exactly as it did before this existed.
+         *
+         * Everything here is off by default. `autoFallbackScope` reads
+         * AUTO_ROUTER_FALLBACK_ENABLED first, so a deployment that sets
+         * nothing gets one refusal for every turn and never a second provider
+         * call.
+         */
+        const attemptFallback = async (
+            controller: ReadableStreamDefaultController<string>,
+            error: unknown
+        ): Promise<boolean> => {
+            const classified = classifyStreamFailure({
+                error,
+                phase: "read",
+                visibleTokenEmitted: generatedText.length > 0,
+                downstreamOpen: streamState === "open",
+            });
+            const scope = autoFallbackScope({
+                routed: autoSelection.routed,
+                isGuest: access.kind === "guest",
+                toolsOffered: Boolean(webSearchToolConfig),
+                nativeSearchEnabled,
+                // Always false here: a deep-research turn returns from the
+                // submit-then-poll branch above and never reaches a stream.
+                // Stated anyway, because a gate that lists its exclusions is
+                // checkable and one that relies on an earlier return is not.
+                deepResearch: modelConfig.usageClass === "deep-research",
+                hasAttachments: requestAttachments.length > 0,
+                candidateCount: fallbackCandidates.length,
+            });
+            if (!scope.allowed) {
+                reportFallbackRefusal(scope.reason);
+                return false;
+            }
+            const decision = decideFallback({
+                attempt: {
+                    modelId: dispatched.modelId,
+                    outcome: classified.outcome,
+                    failureLayer: classified.failureLayer,
+                    providerRefusal: classified.providerRefusal,
+                },
+                run: {
+                    // The Planner is "none", so no attempt can have taken the
+                    // downgrade. See §9.1: pass-through stays held.
+                    passThroughUsed: false,
+                    rerouteCount,
+                    visibleTokenEmitted: generatedText.length > 0,
+                },
+                nextCandidateModelIds: fallbackCandidates,
+            });
+            if (decision.action !== "fallback") {
+                reportFallbackRefusal(
+                    decision.action === "terminate" ? decision.reason : "pass_through"
+                );
+                return false;
+            }
+
+            const candidate = runtimeModelMap.get(decision.modelId);
+            if (!candidate?.enabled || candidate.catalogDeleted) {
+                reportFallbackRefusal("candidate_unavailable");
+                return false;
+            }
+            // §6: the candidate needs its own draft, adapter serialization,
+            // actual-token check and manifest. A refusal here is one candidate
+            // that did not qualify, not the request failing -- the primary's
+            // failure is still what ends the turn.
+            const planned = planAttemptExecution(candidate, {
+                accessKind: access.kind,
+                inputBreakdown: inputEstimate.breakdown(),
+                webSearchMode: webSearchMode ?? null,
+                traceId,
+                attemptIndex: dispatched.attemptIndex + 1,
+            });
+            if (!planned.ok) {
+                reportFallbackRefusal(`candidate_${planned.refusal.kind}`);
+                return false;
+            }
+            const plan = planned.plan;
+
+            // §10: every dispatch is authorized on the server, including this
+            // one. Money held at the primary's provider does not make a call
+            // to another provider affordable.
+            if (plan.provider !== dispatched.provider) {
+                if (!providerHoldDay || !providerHoldMonth) {
+                    // Nothing was held for this turn, so there is nothing to
+                    // move and no evidence of which periods to move it into.
+                    reportFallbackRefusal("no_provider_hold");
+                    return false;
+                }
+                const moved = await transferProviderBudgetForFallback({
+                    heldProvider: dispatched.provider,
+                    fallbackProvider: plan.provider,
+                    heldMicroUsd: heldProviderCostMicroUsd,
+                    fallbackReservedMicroUsd:
+                        getChatBudgetReservedCostMicroUsd(plan.budget),
+                    periodStarts: {
+                        day: providerHoldDay!.periodStart,
+                        month: providerHoldMonth!.periodStart,
+                    },
+                }).catch((budgetError: unknown) => {
+                    logRequestError(
+                        "chat_fallback_budget_transfer_failed",
+                        traceId,
+                        budgetError,
+                        plan.modelId
+                    );
+                    return { moved: false as const, reason: "transfer_failed" as const };
+                });
+                if (!moved.moved && moved.reason !== "same_provider") {
+                    reportFallbackRefusal(`budget_${moved.reason}`);
+                    return false;
+                }
+            }
+
+            // The attempt being replaced is closed out before the next one
+            // opens, so the run never holds two open attempts and the record
+            // says pre-token rather than merely failed.
+            const failing = dispatchRecord;
+            try {
+                await completeInstrumentedDispatch(failing, {
+                    outcome: "failed_pre_token",
+                    failureLayer: classified.failureLayer,
+                    actualInputTokens: budget.inputTokens,
+                    actualOutputTokens: 0,
+                    errorClass: "provider_pre_token_failure",
+                    settlementOutcome: "failed",
+                });
+            } catch (recordError) {
+                logRequestError(
+                    "chat_fallback_attempt_close_failed",
+                    traceId,
+                    recordError,
+                    dispatched.modelId
+                );
+            }
+            // No usage metadata exists for a stream that failed before its
+            // first chunk, so the input is the reserved estimate and the
+            // output is zero, flagged as an estimate. Over-recording provider
+            // spend is the safe direction for a ledger whose job is to keep a
+            // budget from being exceeded; the user is not charged for it --
+            // §7 bills the accepted attempt only.
+            endedAttempts.push({
+                attemptIndex: dispatched.attemptIndex,
+                price: dispatched.price,
+                inputTokens: budget.inputTokens,
+                cachedInputTokens: 0,
+                outputTokens: 0,
+                usageFromProvider: false,
+                outcome: "failed",
+            });
+
+            // The replaced reader is cancelled here, directly, and not through
+            // `cancelSourceSafely`.
+            //
+            // That helper latches `sourceCancelled`, and the latch means "the
+            // current source has been cancelled" -- which stops being true the
+            // moment a different source is installed. Latching it here would
+            // leave a later disconnect with nothing to cancel, and the
+            // *fallback's* provider stream would stay open and billing after
+            // the user had gone. Cancelling before the next dispatch also means
+            // a dispatch that fails leaves nothing behind.
+            try {
+                await dispatched.reader.cancel(
+                    "replaced by a fallback attempt"
+                );
+            } catch (cancelError) {
+                if (!isClosedStreamControllerError(cancelError)) {
+                    logRequestError(
+                        "ai_source_stream_cancel_failed",
+                        traceId,
+                        cancelError,
+                        dispatched.modelId
+                    );
+                }
+            }
+
+            let nextRecord: DispatchInstrumentation;
+            let nextStream: Awaited<ReturnType<typeof streamText>>;
+            try {
+                // A second attempt on the *same* run, not a second run. One
+                // logical response is one RoutingRun with its attempts hanging
+                // off it; two runs would read as two responses and the reroute
+                // rate would be zero forever. `beginRetryAttempt` also spends
+                // §6's build budget itself, so a caller that forgot cannot
+                // produce a third.
+                nextRecord = await beginRetryAttempt(failing, {
+                    attemptIndex: dispatched.attemptIndex + 1,
+                    modelId: plan.modelId,
+                    provider: plan.provider,
+                    plannerMode: "planned",
+                    failureLayer: classified.failureLayer,
+                    messages: manifestMessages,
+                    tokenizerVersion: ACTIVE_ESTIMATOR_VERSION,
+                    tokenCount: plan.budget.inputTokens,
+                    contextWindowTokens:
+                        plan.outputBudget.kind === "fitted"
+                            ? plan.outputBudget.limitTokens
+                            : plan.budget.inputTokens + plan.maxOutputTokens,
+                    userId: access.userId ?? null,
+                });
+                // §5: its own manifest, finalized against its own effective
+                // request. Reusing the primary's would describe a request that
+                // was never sent to this model.
+                nextRecord = await authoriseDispatch(nextRecord, {
+                    modelId: plan.modelId,
+                    provider: plan.provider,
+                    maxOutputTokens: plan.maxOutputTokens,
+                    settings: plan.generationSettings as Record<string, unknown>,
+                    toolConfig: plan.webSearchToolConfig,
+                    messages: manifestMessages,
+                    plannerVersion: "none",
+                    adapterVersion: "vercel-ai-sdk-streamText-v1",
+                });
+                nextStream = await streamText({
+                    model: plan.activeModel,
+                    messages: formattedMessages,
+                    ...attemptDispatchOptions(plan),
+                });
+                await recordDispatched(nextRecord);
+            } catch (dispatchError) {
+                // The turn ends on the primary's failure, which is what the
+                // caller was already about to do. Nothing has been shown and
+                // nothing about the response has changed.
+                logRequestError(
+                    "chat_fallback_dispatch_failed",
+                    traceId,
+                    dispatchError,
+                    plan.modelId
+                );
+                reportFallbackRefusal("dispatch_failed");
+                return false;
+            }
+
+            // §7: the client is told before the next model's first token, and
+            // told a model id and nothing else. Out-of-band, so it is not a
+            // visible token and does not close the door it just opened.
+            if (!enqueueSafely(controller, buildRoutingRetryChunk(plan.modelId))) {
+                await nextStream.textStream.getReader().cancel("client is gone");
+                return false;
+            }
+
+            displacedModelId = dispatched.modelId;
+            rerouteCount += 1;
+            dispatchRecord = nextRecord;
+            dispatched.attemptIndex += 1;
+            dispatched.modelId = plan.modelId;
+            dispatched.provider = plan.provider;
+            dispatched.reasoning = plan.modelConfig.reasoning;
+            dispatched.stream = nextStream;
+            dispatched.reader = faultedReader(
+                nextStream.textStream.getReader(),
+                injectedFault,
+                dispatched.attemptIndex + 1
+            );
+            // A new source, so the "already cancelled" latch is about a stream
+            // that no longer exists. Leaving it set would make a disconnect
+            // during the fallback a no-op.
+            sourceCancelled = false;
+            dispatched.usageCaptureKey = plan.usageCaptureKey;
+            dispatched.price = {
+                provider: plan.provider,
+                modelId: plan.modelId,
+                inputUsdPerMillionTokens: plan.budget.inputUsdPerMillionTokens,
+                outputUsdPerMillionTokens: plan.budget.outputUsdPerMillionTokens,
+                cachedInputPriceMultiplier: plan.budget.cachedInputPriceMultiplier,
+                pricingVersion: plan.budget.pricingVersion ?? null,
+            };
+            // The next attempt captures under its own key, so the memo from
+            // the one it replaced must not answer for it.
+            perplexityCapture = null;
+            console.info(JSON.stringify({
+                event: "chat_auto_fallback_dispatched",
+                traceId,
+                conversationId,
+                fromModelId: displacedModelId,
+                toModelId: plan.modelId,
+                attemptIndex: dispatched.attemptIndex,
+                failureLayer: classified.failureLayer,
+                timestamp: new Date().toISOString(),
+            }));
+            return true;
+        };
         const protectedStream = new ReadableStream<string>({
             async pull(controller) {
                 if (streamState !== "open") return;
@@ -2660,12 +3145,12 @@ async function handleChatPost(
                     }
                     if (done) {
                         const completionResults = await Promise.allSettled([
-                            result.response,
-                            result.usage,
-                            result.finishReason,
-                            result.rawFinishReason,
-                            result.content,
-                            result.providerMetadata,
+                            dispatched.stream.response,
+                            dispatched.stream.usage,
+                            dispatched.stream.finishReason,
+                            dispatched.stream.rawFinishReason,
+                            dispatched.stream.content,
+                            dispatched.stream.providerMetadata,
                         ] as const);
                         const [
                             responseResult,
@@ -3055,6 +3540,17 @@ async function handleChatPost(
                             recordError,
                             dispatched.modelId
                         );
+                    }
+                    // §7's automatic fallback, and the last thing tried
+                    // before the turn ends. After the health records, so a
+                    // provider that failed is counted as having failed
+                    // whether or not another model rescued the answer -- the
+                    // fallback is a recovery for the user, not an amnesty for
+                    // the provider. Off by default; see lib/autoFallbackGate.
+                    if (await attemptFallback(controller, error)) {
+                        // The response is now being served by another model.
+                        // The next pull() reads from its stream.
+                        return;
                     }
                     await settleSafely("failed");
                     errorSafely(controller, error);

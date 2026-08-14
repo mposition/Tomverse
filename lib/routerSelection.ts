@@ -88,6 +88,20 @@ export type RouterSelectionResult = {
     /** The model that would have been chosen without stickiness. */
     challengerModelId: string | null;
     /**
+     * Every eligible model, best first.
+     *
+     * Surfaced because §6 requires an automatic fallback's candidate to have
+     * passed the same filters as the primary, and this is the only place where
+     * a set that has is also in a defensible order. Recomputing it downstream
+     * would be a second filter, free to disagree with the one that actually
+     * chose.
+     *
+     * Not to be confused with `challengerModelId`, which is the natural winner
+     * -- the same model as the selected one whenever stickiness is not
+     * overriding, and therefore never an alternative to it.
+     */
+    rankedModelIds: readonly string[];
+    /**
      * The streak to carry into the next turn. Reset to zero whenever the
      * challenger fails to clear the margin, so a switch needs consecutive
      * turns rather than an accumulation of unrelated ones.
@@ -122,6 +136,7 @@ export function selectRouterModel(input: {
             reason: "no_candidate",
             margin: 0,
             challengerModelId: null,
+            rankedModelIds: [],
         };
     }
 
@@ -138,6 +153,7 @@ export function selectRouterModel(input: {
             return left.modelId < right.modelId ? -1 : 1;
         });
 
+    const rankedModelIds = ranked.map((candidate) => candidate.modelId);
     const winner = ranked[0];
     const runnerUp = ranked[1];
     const margin = runnerUp ? winner.score - runnerUp.score : 0;
@@ -162,6 +178,7 @@ export function selectRouterModel(input: {
             reason: naturalReason,
             margin,
             challengerModelId: winner.modelId,
+            rankedModelIds,
         };
     }
 
@@ -182,6 +199,7 @@ export function selectRouterModel(input: {
             reason: naturalReason,
             margin: challengerMargin,
             challengerModelId: winner.modelId,
+            rankedModelIds,
             // The switch happened, so the streak has done its job and starts
             // again for the next comparison.
             turnsFavouringChallenger: 0,
@@ -194,6 +212,7 @@ export function selectRouterModel(input: {
         reason: "sticky",
         margin: challengerMargin,
         challengerModelId: winner.modelId,
+        rankedModelIds,
         turnsFavouringChallenger: streak,
     };
 }
