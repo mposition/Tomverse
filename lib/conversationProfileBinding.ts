@@ -47,6 +47,32 @@ export function profileBindingStatus(input: {
         : "superseded";
 }
 
+/**
+ * What a chat screen knows about the assistant a conversation runs under.
+ *
+ * Declared here rather than in a component because three layers pass it
+ * through — the page, both shells and the composer — and a shape re-declared
+ * per layer is a shape that drifts. Server-computed: the revision and the
+ * status are `readConversationProfile`'s answers, never a client's arithmetic.
+ */
+export type ChatAssistantProfile = {
+    profileId: string;
+    name: string;
+    icon: string | null;
+    revision: number;
+    latestRevision: number;
+    status: ProfileBindingStatus;
+};
+
+/** One selectable profile in the picker. Only published profiles appear. */
+export type ChatAssistantProfileOption = {
+    id: string;
+    name: string;
+    icon: string | null;
+    description: string | null;
+    revision: number;
+};
+
 export type ProfileBindingRefusal =
     | "flag_off"
     | "not_found"

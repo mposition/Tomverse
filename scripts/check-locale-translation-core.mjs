@@ -48,6 +48,12 @@ export const SHARED_STRING_ALLOWLIST = [
       "Deep Research is the feature's name, used untranslated in the UI and in the model catalogue.",
   },
   {
+    key: "chat.toolsAssistantRevision",
+    locales: ["de"],
+    reason:
+      "German uses the same word: \"Revision {revision}\" is the translation, not the English left in place.",
+  },
+  {
     key: "chat.deepResearchChipLabel",
     locales: "all",
     reason: "Same feature name as chat.toolsDeepResearch.",
