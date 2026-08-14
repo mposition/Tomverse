@@ -105,6 +105,59 @@ if (args.length === 0 && swallowedByNpm.length > 0) {
   process.exit(1);
 }
 
+// Every argument has to be one this script knows. An unrecognised one used to
+// be ignored, and on 2026-08-14 `-repeats=2` -- one hyphen instead of two --
+// was ignored exactly that way: `repeats` fell back to its default of 3 and the
+// run sent six paid requests where four were intended and budgeted. A flag that
+// silently does nothing is bad everywhere and worse here, because the feedback
+// is an invoice.
+const VALUELESS_FLAGS = new Set(["help", "json", "i-accept-the-cost"]);
+const VALUED_FLAGS = new Set([
+  "model",
+  "limit",
+  "repeats",
+  "prompts",
+  "thinking",
+  "prompt",
+  "out",
+]);
+
+const unknownArgs = args.filter((arg) => {
+  if (!arg.startsWith("--")) return true;
+  const name = arg.slice(2).split("=")[0];
+  return arg.includes("=")
+    ? !VALUED_FLAGS.has(name)
+    : !VALUELESS_FLAGS.has(name);
+});
+
+if (unknownArgs.length > 0) {
+  const singleHyphen = unknownArgs.filter(
+    (arg) => arg.startsWith("-") && !arg.startsWith("--")
+  );
+  console.error(
+    [
+      `Unrecognised argument(s): ${unknownArgs.join(" ")}`,
+      ...(singleHyphen.length > 0
+        ? [
+            "",
+            `Every flag here takes two hyphens. ${singleHyphen
+              .map((arg) => `\`${arg}\` should be \`-${arg}\``)
+              .join(", ")}.`,
+          ]
+        : []),
+      ...(VALUED_FLAGS.has(unknownArgs[0]?.replace(/^--/, ""))
+        ? ["", "That flag takes a value: write --name=value, not --name value."]
+        : []),
+      "",
+      "Refused rather than ignored: an argument that does nothing silently",
+      "changes how many paid requests this sends. Nothing was sent.",
+      "",
+      "Run with --help for the full list.",
+    ].join("\n")
+  );
+  process.exit(1);
+}
+
 if (flag("help") || args.length === 0) {
   console.log(
     [
