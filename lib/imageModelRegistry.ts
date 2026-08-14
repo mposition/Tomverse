@@ -18,7 +18,32 @@ import {
   type ImageSize,
 } from "@/lib/imageGenerationPricing";
 
-export type ImageModelProvider = "openai" | "google" | "xai";
+/**
+ * Who we call, who bills us, and whose outage it is when a request fails.
+ *
+ * Every existing consumer of `provider` already means this one: the budget env
+ * names (`IMAGE_PROVIDER_{P}_COST_*`), the adapter dispatch, the credential
+ * lookup, provider health and readiness. Keeping the name attached to that
+ * meaning is what makes adding a gateway safe -- nothing has to be re-read.
+ */
+export type ImageModelProvider = "openai" | "google" | "xai" | "fal";
+
+/**
+ * Who made the model, which is a different question and is about to stop having
+ * the same answer.
+ *
+ * Nano Banana 2 is Google's model bought through fal: the card should say
+ * Google, and the budget, credential, retry policy and failure attribution are
+ * all fal's. One field cannot answer both without one of them being wrong, and
+ * the wrong one would be silent -- a fal request drawing down
+ * `IMAGE_PROVIDER_GOOGLE_COST_*` still adds up, it just adds up somewhere with
+ * no money in it.
+ *
+ * The same alphabet as ImageModelProvider today. That is a coincidence of the
+ * current roster, not a relationship, and the two are separate aliases so the
+ * next reader has to decide which one they mean.
+ */
+export type ImageModelOwner = "openai" | "google" | "xai" | "fal";
 
 export type ImageModelLifecycle = "stable" | "preview";
 
@@ -60,7 +85,17 @@ export type ImageModelPriceVerification = {
 export type ImageModelProfile = {
   /** Stable internal id; equals the provider's API model id today. */
   id: string;
+  /** Who we call and who bills us. Drives budget, credential and readiness. */
   provider: ImageModelProvider;
+  /**
+   * Who made the model, when that is not the provider we buy it from.
+   *
+   * Omitted means they are the same, which is true of every direct integration
+   * and keeps those entries saying exactly what they said before. Read it
+   * through `imageModelOwner()` rather than directly, so the default lives in
+   * one place.
+   */
+  modelOwner?: ImageModelOwner;
   /** Exactly the string sent to the provider. */
   apiModelId: string;
   /** Display name for the picker and every place with room for it. */
@@ -218,11 +253,19 @@ const GOOGLE_GEMINI_31_FLASH_IMAGE: ImageModelProfile = {
   // cannot supply the link either. A forum answer or a search summary does not
   // meet policy §12's official-body requirement and is not admissible here.
   //
-  // What settles it is the billing signal, not more prose: a staging run that
-  // sets `max_output_tokens` and shows `total_output_tokens +
-  // total_thought_tokens` staying at or under it, including at a limit low
-  // enough to actually bite. That run costs money and needs the §15 budget
-  // approval first.
+  // That run happened on 2026-08-14, and the billing signal answered no. A
+  // request to gemini-3.1-flash-lite-image with `max_output_tokens: 2048`
+  // reported 1,602 output plus 931 thinking -- 2,533 -- as billable usage and
+  // returned a finished image. The parameter does not bound the quantity we are
+  // charged for. Measurement is therefore no longer a route out of this state:
+  // it was taken, and it closed the question negatively
+  // (.github/audits/image-model-verification-worksheet.md §I).
+  //
+  // Only one model was measured, so the other two are held for a weaker reason:
+  // the general case for treating this parameter as a cost ceiling is gone and
+  // no model-specific evidence replaces it. `worst_case_cost_unbounded` means
+  // the finite worst case policy §12 requires was not established -- not that
+  // no finite cost exists.
   disabledReason: "worst_case_cost_unbounded",
   // 512, 2K and 4K are advertised upstream but have no representation in
   // ImageSize yet, and Google's 1K landscape is not 1536x1024 -- a provider
@@ -374,6 +417,65 @@ const GOOGLE_GEMINI_31_FLASH_LITE_IMAGE: ImageModelProfile = {
     "Draft-tier candidate. Image output verified 2026-08-04 at $0.0336, 1K only (2K and 4K unsupported). Blocked on the same cap as every Google image model here, confirmed absent from the official documentation on 2026-08-05 rather than merely unread. The conservative derivation is 6,144 microUSD (4,096 output tokens x $1.50/1M), giving a floor of 50 credits -- an inference, not a documented cap. Its 4,096 limit makes it the most informative model to measure first: a low ceiling is the one likely to actually bite, and a run that never approaches the limit proves nothing about whether the limit is enforced. Even once unblocked, the review advises against filling a second comparison seat with a second Google model.",
 };
 
+// Nano Banana 2 -- Google's model, bought through fal rather than called
+// directly. Registered, not enabled, and blocked on price verification only.
+//
+// The direct route is closed and will stay closed. The 2026-08-14 measurement
+// showed `max_output_tokens` does not bound what Google bills
+// (.github/audits/image-model-verification-worksheet.md §I), so a fixed price
+// on a direct call would be a fixed price over an unbounded cost. Routing the
+// same model through a gateway that sells it per successful image moves the
+// variable part to someone whose business it is, and leaves Tomverse with the
+// bounded_fixed contract every other image model here already has.
+//
+// So `provider` is fal and `modelOwner` is google, and the difference is not
+// cosmetic. The budget this draws down is IMAGE_PROVIDER_FAL_COST_*, the
+// credential is fal's, readiness checks fal, and an outage here is fal's
+// gateway or Google's model and the two want telling apart. What the user sees
+// is Google's model, with fal named in the detail view rather than hidden.
+//
+// `price_unverified` rather than a number, because policy §12 wants the price
+// from the provider's own published text and this repository could not reach
+// fal.ai to read it (egress blocked, 2026-08-14). Everything else about the
+// entry can be settled without it; the price cannot be settled by being
+// plausible. What is needed before this can carry a price is in
+// docs/policy/image-generation.md §16.
+const FAL_NANO_BANANA_2: ImageModelProfile = {
+  id: "fal-ai/nano-banana-2",
+  provider: "fal",
+  modelOwner: "google",
+  apiModelId: "fal-ai/nano-banana-2",
+  name: "Nano Banana 2",
+  shortName: "Nano Banana 2",
+  lifecycle: "stable",
+  disabledReason: "price_unverified",
+  // 1K only, deliberately, and not because the gateway is limited: a single
+  // size is one price to verify, one worst case to state and one row to
+  // explain. 2K and 4K are sold at multiples and can be added as their own
+  // decisions once the first one is real.
+  sizes: ["1024x1024"],
+  qualities: ["low"],
+  prices: [],
+  latencyClass: "balanced",
+  // Inherited from the underlying Google model rather than asserted about the
+  // gateway. Worth re-reading against a real response before this is enabled,
+  // since what fal returns is what we would be storing and labelling.
+  provenance: ["synthid"],
+  outputMimeTypes: ["image/png", "image/jpeg"],
+  pricingVersion: "fal-nano-banana-2-unverified",
+  priceVerification: {
+    verifiedAt: "",
+    sources: [],
+    // Not applicable rather than unknown: a per-image price has no thinking
+    // term to cap. That is the entire reason this route exists, and it is why
+    // this entry is blocked on `price_unverified` and not on
+    // `worst_case_cost_unbounded` like the direct Google ones.
+    thinkingCapMicroUsd: null,
+  },
+  disabledNote:
+    "Google's Gemini 3.1 Flash Image, supplied through fal. Registered pending price verification against fal's own published pricing, which this environment cannot fetch (fal.ai is blocked by the egress proxy). The direct Google route stays disabled permanently: max_output_tokens was measured on 2026-08-14 and does not bound the billable output+thinking sum. Before this can be enabled it needs the verified per-image price, an approved sale price, a fal adapter that sets X-Fal-No-Retry and X-Fal-Store-IO: 0, IMAGE_PROVIDER_FAL_COST_* budgets, and the request pinned to 1K, one image, no web search and no high thinking. See docs/policy/image-generation.md §16.",
+};
+
 // Registered, not enabled. The professional-tier candidate.
 //
 // The review recommends holding this one back even after the Google cap is
@@ -506,6 +608,7 @@ export const IMAGE_MODEL_REGISTRY: readonly ImageModelProfile[] = [
   XAI_GROK_IMAGINE_IMAGE_QUALITY,
   GOOGLE_GEMINI_31_FLASH_LITE_IMAGE,
   GOOGLE_GEMINI_3_PRO_IMAGE,
+  FAL_NANO_BANANA_2,
 ];
 
 /** The default single selection and the v1 compatibility model. */
@@ -567,6 +670,16 @@ export const minimumCreditsForImageOption = (
   if (maxCost === null) return null;
   return Math.ceil(maxCost / IMAGE_COST_PER_CREDIT_CEILING_MICRO_USD);
 };
+
+/**
+ * The brand behind a model.
+ *
+ * Deliberately not defaulted at each call site: a missing owner means "same as
+ * the provider", and spelling that out repeatedly is how one call site ends up
+ * defaulting differently from the others.
+ */
+export const imageModelOwner = (model: ImageModelProfile): ImageModelOwner =>
+  model.modelOwner ?? model.provider;
 
 /** The providers that have at least one enabled model right now. */
 export const listActiveImageProviders = (): readonly ImageModelProvider[] => [

@@ -20,13 +20,15 @@ import {
 //    snake_case Interactions names are used throughout and the camelCase ones
 //    appear nowhere.
 //
-// 2. Nothing here establishes a cost bound. `max_output_tokens` is sent on
-//    every request because the server must not leave a billable parameter
-//    unset -- but the official documentation describes `max_output_tokens`
-//    and the thinking usage counters (`total_output_tokens`,
-//    `total_thought_tokens`) separately and never states that the limit
-//    covers their sum. Until a staging measurement shows it does, these
-//    models stay `worst_case_cost_unbounded` and this code is unreachable:
+// 2. Nothing here establishes a cost bound, and measurement has now shown
+//    that nothing can. `max_output_tokens` is sent on every request because
+//    the server must not leave a billable parameter unset. The documentation
+//    describes it and the usage counters (`total_output_tokens`,
+//    `total_thought_tokens`) separately and never states that the limit covers
+//    their sum -- and on 2026-08-14 a request at 2,048 reported 2,533 of them
+//    as billable usage and returned a finished image. So the limit is a
+//    request parameter, not a cost ceiling. These models stay
+//    `worst_case_cost_unbounded` and this code is unreachable:
 //    generateImageWithProvider refuses any model with a disabledReason before
 //    it dispatches. Policy: docs/policy/image-generation.md section 12.1.
 
@@ -59,10 +61,20 @@ export const buildGoogleImageRequest = (input: {
   /**
    * The model's documented output-token limit, sent on every request.
    *
-   * Deliberately NOT named a cap: it bounds what we ask for, and whether it
-   * also bounds thinking is the open question that keeps these models
-   * disabled. A profile without one cannot be requested at all -- an absent
-   * limit would mean sending a generation with no stated ceiling of any kind.
+   * Deliberately NOT named a cap, and measurement has now shown why. On
+   * 2026-08-14 a request with `max_output_tokens: 2048` came back `completed`,
+   * with a full image, having billed 1,602 output plus 931 thinking tokens --
+   * 2,533, over the limit by 485. It does bound thinking on its own (at 512 and
+   * 256 thinking stopped at limit minus three, every sample), but it does not
+   * bound what we are billed for, which is their sum.
+   *
+   * So this is a request parameter and not a cost ceiling.
+   * `priceVerification.thinkingCapMicroUsd` stays null and the Google image
+   * models stay disabled: policy §12 wants a bounded worst case, and one does
+   * not exist here. See .github/audits/image-model-verification-worksheet.md §I.
+   *
+   * A profile without one cannot be requested at all -- an absent limit would
+   * mean sending a generation with no stated ceiling of any kind.
    */
   maxOutputTokens: number | null;
   /**

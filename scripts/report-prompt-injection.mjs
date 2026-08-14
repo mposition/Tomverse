@@ -37,6 +37,11 @@
 // surface for it is registered -- see SURFACE_COVERAGE below.
 
 import {
+    KNOWLEDGE_CONTEXT_RULES,
+    KNOWLEDGE_MARKERS,
+    buildProfileKnowledgePrompt,
+} from "../lib/assistantProfilePrompt.ts";
+import {
     ATTACHMENT_CONTEXT_RULES,
     buildAttachmentPromptText,
 } from "../lib/attachmentContextPrompt.ts";
@@ -81,6 +86,14 @@ const BENIGN_ATTACHMENT_PROMPT = buildAttachmentPromptText({
     ],
 });
 
+const BENIGN_KNOWLEDGE_PROMPT = buildProfileKnowledgePrompt([
+    { fileName: "handbook.pdf", ordinal: 0, text: "Ordinary body." },
+].map((entry) => ({
+    fileName: entry.fileName,
+    ordinal: entry.ordinal,
+    content: entry.text,
+})));
+
 
 /**
  * Every untrusted source the gate names, and how it is exercised. A source
@@ -100,6 +113,16 @@ const SURFACE_COVERAGE = [
         surface: null,
         exercised: false,
         note: "ConversationProject has a name and no instruction text, so no prompt path exists",
+    },
+    {
+        // Release C added a fourth path the gate's four names predate: a
+        // knowledge file's excerpts. §44 makes an instruction inside one
+        // untrusted content, so it is measured here rather than trusted for
+        // having been uploaded by the account owner.
+        source: "profile-knowledge",
+        surface: "profile-knowledge",
+        exercised: true,
+        note: "assistant profile knowledge excerpts (release C, §44)",
     },
 ];
 
@@ -171,11 +194,33 @@ const filenameCase = (payload) => ({
     baselineAssembled: BENIGN_ATTACHMENT_PROMPT,
 });
 
+/** A knowledge excerpt is untrusted for the same reason a document is. */
+const knowledgeCase = (payload) => ({
+    surface: "profile-knowledge",
+    payloadId: payload.id,
+    payload: payload.text,
+    assembled: buildProfileKnowledgePrompt([
+        { fileName: "handbook.pdf", ordinal: 0, content: payload.text },
+    ]),
+    rules: KNOWLEDGE_CONTEXT_RULES,
+    openMarker: KNOWLEDGE_MARKERS.open,
+    closeMarker: KNOWLEDGE_MARKERS.close,
+    expectedRegions: 1,
+    flattensNewlines: false,
+    invisiblePolicy: "structural-only",
+    baselineAssembled: BENIGN_KNOWLEDGE_PROMPT,
+});
+
 const violations = [];
 const bySurface = new Map();
 
 for (const payload of PROMPT_INJECTION_CORPUS) {
-    for (const build of [memoryCase, attachmentCase, filenameCase]) {
+    for (const build of [
+        memoryCase,
+        attachmentCase,
+        filenameCase,
+        knowledgeCase,
+    ]) {
         const input = build(payload);
         const found = auditAssembledPrompt(input);
         bySurface.set(input.surface, (bySurface.get(input.surface) ?? 0) + 1);

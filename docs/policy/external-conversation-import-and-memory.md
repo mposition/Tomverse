@@ -199,13 +199,29 @@ MEMORY_EXTRACTION_PROVIDER_<PROVIDER>_COST_MICROUSD_PER_MONTH (절대값 overrid
 |---|---|
 | archive container | 1GB |
 | archive entry 수 | 50,000 |
-| nested archive | 0 (거부) |
+| nested archive | 해제 깊이 0 — 절대 열지 않음. 해당 entry만 skip하고 개수를 표시 |
 | 실제 파싱하는 단일 entry | 250MB |
 | 실제 파싱한 text 총량 | 300MB |
 | 실제 parsed entry 압축률 | 100:1 |
 
 - 전체 ZIP이 크다는 이유만으로 거부하지 않습니다 — media로 비대한 archive도
   필요한 conversation entry만 안전하게 읽을 수 있으면 진행합니다.
+- **중첩 archive는 archive 전체의 거부 사유가 아닙니다**(2026-08-14 결정).
+  사용자가 대화에 `.zip`을 첨부하면 그 파일이 export에 형제 entry로 들어오는데,
+  그것을 거부 사유로 삼으면 정상 export 전체를 받지 못합니다. 실제 Google
+  Takeout이 이 이유로 통째로 거부되는 것을 확인했습니다.
+
+  완화하는 것은 **거부 여부 하나뿐이며 보안 한도가 아닙니다.**
+
+  - 재귀 해제 깊이는 계속 **0**입니다. 중첩 archive 내부는 열지도, 열거하지도,
+    검사하지도 않습니다.
+  - 해당 entry만 skip하고, **`unsupported_extension`과 섞지 않고 자기 이유로**
+    셉니다. 한 숫자에 묻으면 첨부가 왜 빠졌는지 사용자가 알 수 없습니다.
+  - 최상위의 정상 conversation payload는 그대로 파싱합니다. 파싱할 대화
+    데이터가 하나도 없으면 `no_conversation_data`입니다 — 중첩 archive가 있다는
+    사실이 그 판정을 바꾸지 않습니다.
+  - **path traversal · absolute path · 암호화 entry는 기존대로 archive 전체
+    거부**입니다. container 크기·entry 수 한도도 그대로입니다.
 - 모바일 safe threshold 초과 시 crash를 감수하고 강행하지 않고 데스크톱 사용을
   안내합니다. `EXTERNAL_IMPORT_DESKTOP_RECOMMENDED`는 **서버 오류 코드가 아니라**
   클라이언트 상태 enum이자 content-free telemetry label입니다.

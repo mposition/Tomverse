@@ -98,7 +98,7 @@ console.error = (...args: unknown[]) => {
 // place before the route modules (and their next-auth import) are evaluated.
 type RouteModule = { POST: (request: Request) => Promise<Response> };
 let prisma: (typeof import("@/lib/prisma"))["prisma"];
-let buildChatMemoryContext: (typeof import("@/lib/chatMemoryContext"))["buildChatMemoryContext"];
+let buildChatTurnContext: (typeof import("@/lib/chatTurnContext"))["buildChatTurnContext"];
 let issueChatContextBundle: (typeof import("@/lib/chatContextBundleService"))["issueChatContextBundle"];
 let chatRoute: RouteModule;
 let statusRoute: RouteModule;
@@ -109,9 +109,9 @@ before(async () => {
   statusRoute = (await import(
     mod("app/api/chat/deep-research/status/route.ts")
   )) as RouteModule;
-  ({ buildChatMemoryContext } = (await import(
-    mod("lib/chatMemoryContext.ts")
-  )) as typeof import("@/lib/chatMemoryContext"));
+  ({ buildChatTurnContext } = (await import(
+    mod("lib/chatTurnContext.ts")
+  )) as typeof import("@/lib/chatTurnContext"));
   ({ issueChatContextBundle } = (await import(
     mod("lib/chatContextBundleService.ts")
   )) as typeof import("@/lib/chatContextBundleService"));
@@ -784,7 +784,7 @@ test("an answer that carried a bundle records zero, not nothing", async () => {
   const user = await seedProUser();
   const conversation = await seedConversation(user.id);
   const prompt = "2026년 전고체 배터리 시장을 조사해줘";
-  const context = await buildChatMemoryContext({
+  const context = await buildChatTurnContext({
     userId: user.id,
     query: prompt,
   });

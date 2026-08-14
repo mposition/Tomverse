@@ -57,6 +57,7 @@ export type ParseWarningTotals = {
     skippedNonConversationMessages: number;
     skippedNonTextParts: number;
     additionalBranches: number;
+    skippedNestedArchives: number;
     requiresTruncationApproval: number;
     notImportable: number;
 };
@@ -65,6 +66,7 @@ export const emptyParseWarningTotals = (): ParseWarningTotals => ({
     skippedNonConversationMessages: 0,
     skippedNonTextParts: 0,
     additionalBranches: 0,
+    skippedNestedArchives: 0,
     requiresTruncationApproval: 0,
     notImportable: 0,
 });
@@ -576,6 +578,7 @@ export function parseWarningTotalsFromPreview(
             preview.totals.skippedNonConversationMessages,
         skippedNonTextParts: preview.totals.skippedNonTextParts,
         additionalBranches: preview.totals.additionalBranches,
+        skippedNestedArchives: preview.totals.skippedNestedArchives,
         requiresTruncationApproval: preview.totals.requiresTruncationApproval,
         notImportable: preview.totals.notImportable,
     };

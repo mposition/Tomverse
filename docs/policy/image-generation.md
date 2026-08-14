@@ -492,10 +492,20 @@ candidate의 한도로 설명된다. 즉 hidden thinking이 32,768 안에 포함
 
 > **판정**: 공식 페이지는 `max_output_tokens`와 thinking 사용량을 각각
 > 설명하지만 `total_output_tokens + total_thought_tokens`가 해당 상한 이하라고
-> 보장하지 않는다. 세 모델은 staging 실측 전까지
-> `worst_case_cost_unbounded`를 유지한다.
+> 보장하지 않는다.
 
-#### 남은 증거는 산문이 아니라 과금 신호다 — staging 실측 계획
+**2026-08-14 실측이 이 질문을 부정으로 닫았다.** `gemini-3.1-flash-lite-image`에
+`max_output_tokens: 2048`을 보낸 요청이 output 1,602 + thinking 931 = **2,533**을
+과금 대상 usage로 보고하고 완성된 이미지를 반환했다. 이 파라미터는 요청 파라미터
+이지 비용 천장이 아니다. 아래 "staging 실측 계획"은 그 실행의 절차 기록으로
+남기며, **해소 경로가 아니다** — 실행됐고 답은 부정이다. 전체 결과와 표본은
+`.github/audits/image-model-verification-worksheet.md` §I.
+
+세 모델은 `worst_case_cost_unbounded`를 유지한다. 재검토 조건은 Google이 thinking
+토큰 상한을 거는 요청 파라미터를 제공하거나, 공식 문서가 과금 대상의 상한을
+명시하는 경우다.
+
+#### 남은 증거는 산문이 아니라 과금 신호다 — staging 실측 절차 (2026-08-14 실행 완료, 판정 부정)
 
 `npm run measure:google-image-thinking-cap`이 이 절차를 수행한다. **매 실행이
 실제 유료 이미지 생성**이므로 `--i-accept-the-cost` 없이는 아무것도 보내지
@@ -528,7 +538,7 @@ candidate의 한도로 설명된다. 즉 hidden thinking이 32,768 안에 포함
 무엇을 물었는지의 함수이므로, `--repeats`를 올려도 §12의 "복잡한 프롬프트
 여러 개"는 충족되지 않는다. 스크립트는 서로 다른 비용 축(조밀한 라벨 기하 /
 다국어 문자 렌더링)을 가진 내장 프롬프트 2종을 `--prompts`로 제공하고,
-한 프롬프트의 표본만으로는 긍정 판정(`consistent_with_limit_bounding_thinking`)
+한 프롬프트의 표본만으로는 긍정 판정(`consistent_with_limit_bounding_billable_output`)
 을 내지 않는다 — `consistent_but_single_prompt`로 보고한다. 반증은 한
 프롬프트로도 성립하므로 이 제약은 긍정 판정에만 적용한다.
 
@@ -739,3 +749,76 @@ ID, 상태 매트릭스, 릴리스 차단 기준)는 그쪽이 정본이고, 두
   인물/손 일관성·한국어 이해·latency·moderation 오탐·포맷 안정성·실측
   원가)은 별도 예산 승인 후 실행하고, 결과를 모델 활성화 결정에
   인용한다.
+
+## 16. 모델 소유자와 추론 공급자는 다른 질문이다 (2026-08-14)
+
+`gemini-3.1-flash-image`(Nano Banana 2)를 Google에 직접 호출하는 경로는
+**영구히 닫혔다.** §12.1의 실측이 `max_output_tokens`가 과금 대상 합계를
+bound하지 않음을 보였고, 유한한 최악 원가가 없으면 고정 가격을 붙일 수 없다.
+같은 모델을 **성공 이미지 단위로 파는 gateway**를 통해 사면 변동 부분이 그것을
+사업으로 하는 쪽으로 넘어가고, Tomverse는 다른 이미지 모델과 같은
+`bounded_fixed` 계약을 유지한다.
+
+### 16.1 두 필드를 분리한다
+
+| 필드 | 답하는 질문 | 따라오는 것 |
+|---|---|---|
+| `provider` | 누구를 호출하고 누가 우리에게 청구하는가 | 예산 `IMAGE_PROVIDER_{P}_COST_*`, credential, readiness, 재시도 정책, 장애 귀속 |
+| `modelOwner` | 누가 만든 모델인가 | 모델 카드 브랜딩, 마케팅 문구 |
+
+- **`modelOwner`가 없으면 `provider`와 같다는 뜻이다.** 직접 연동은 전부 그렇고,
+  필드가 생기기 전과 의미가 같다. 해석은 `imageModelOwner()` 한 곳에서만 한다.
+- **fal로 호출하면서 `IMAGE_PROVIDER_GOOGLE_*` 예산을 차감하지 않는다.** 그 숫자는
+  여전히 더해지지만 돈이 없는 봉투에 더해지고, 그동안 fal의 실제 지출은 아무도
+  보지 않는다. 모든 하위 지표가 그럴듯한 채로 틀린다.
+- `lib/imageProviderBudget.ts`는 `modelOwner`를 읽지 않는다.
+  `scripts/security-regression-check.mjs`가 강제한다.
+- 장애 관측은 **모델 장애와 gateway 장애를 구분**한다. 한 필드로는 구분할 수 없다.
+- 사용자에게는 소유자 브랜드를 보여주되 **상세에 gateway를 명시한다.** 숨기지
+  않는다.
+
+### 16.2 gateway 경유 모델의 활성화 조건
+
+`fal-ai/nano-banana-2`는 `price_unverified`로 등록돼 있다. **아래를 모두 충족하기
+전에는 어느 환경에서도 활성화하지 않는다.**
+
+1. **가격 원문 확인.** fal이 공표한 성공 이미지당 가격을 §12의 요건대로 공식
+   본문에서 확인하고 `priceVerification.sources`·`verifiedAt`를 채운다.
+   2026-08-14 현재 이 저장소의 실행 환경에서 `fal.ai`는 egress proxy에 차단돼
+   있어 확인하지 못했다. **읽지 않은 URL을 `sources`에 적지 않는다** — 적는 순간
+   그것은 "이 근거로 검증했다"는 진술이 된다.
+2. **요청 고정.** 1K, 정확히 1장, web search 비활성, high thinking 비활성.
+   각각이 별도 과금 항목이므로 최악 원가는 이 넷이 고정된 상태에서만 유한하다.
+3. **재시도·저장 헤더.** gateway 기본값이 서버 오류에 재시도하고 입출력을
+   보관한다면, 우리 요청은 그 둘을 명시적으로 끈다. 자동 재시도는 고정가 계약에서
+   원가를 배수로 만들고, 입출력 보관은 우리가 통제하지 않는 곳에 사용자 프롬프트를
+   남긴다.
+4. **자산 즉시 복사.** gateway가 돌려주는 CDN URL은 만료 전 공개 접근 가능하다고
+   보고, 즉시 사설 저장소로 복사한 뒤 짧은 만료를 적용한다. 그 URL을 저장하거나
+   클라이언트에 그대로 넘기지 않는다.
+5. **예산.** `IMAGE_PROVIDER_FAL_COST_MICROUSD_PER_DAY`·`_PER_MONTH`를 배포보다
+   **먼저** 설정한다. production에 활성 모델이 있는데 예산이 없으면 `/api/ready`가
+   실패한다.
+6. **가격 drift 차단.** 배포 전 승인 가격과 공급자 현재 가격을 대조하고, 응답이
+   과금 단위를 보고하면 저장한다. 실단가가 승인 snapshot과 다르면 즉시 차단한다.
+   "가격은 변경될 수 있다"고 공표된 공급자에 고정가를 붙이는 것이므로, 이 대조가
+   그 격차를 메우는 유일한 장치다.
+7. **판매 크레딧 승인.** `minimumCreditsForImageOption()`이 내는 수학적 바닥값은
+   승인가가 아니다(§3·§4).
+
+### 16.3 이 문서가 아직 확인하지 못한 것
+
+아래는 **제품 책임자가 제시한 사실이며 이 저장소가 원문으로 확인하지 못했다.**
+확인 전까지 가격·일정 판단의 근거로 쓰지 않는다.
+
+- fal의 `fal-ai/nano-banana-2` 성공 이미지당 가격과 해상도 배수, high thinking·
+  web search 추가 요금
+- gateway의 재시도·입출력 보관 기본값과 이를 끄는 헤더의 정확한 이름
+- Imagen 4 종료 일정 — 종료 예정이라면 대안 후보에서 제외한다
+- `gemini-2.5-flash-image`(원본 Nano Banana)의 thinking 미지원·이미지당 가격·
+  종료 일정. 종료가 임박한 모델을 주력으로 개발하지 않으며, brige로서의 가치는
+  남은 기간에 비례한다.
+
+확인 방법은 둘 중 하나다 — 실행 환경에서 해당 도메인을 열어 주거나, 공식 페이지의
+해당 문단을 본문 그대로 전달한다. **요약·검색 결과·전언은 §12의 요건을 충족하지
+않는다.**

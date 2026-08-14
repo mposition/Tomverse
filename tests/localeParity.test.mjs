@@ -88,9 +88,15 @@ const ENGLISH_STRING_CEILING = {
   // "Refused" row means someone presented a link for this account and was
   // turned away. Reading that in a second language is a worse experience than
   // an untranslated picker label, so it went first.
+  //
+  // +1 fr and +2 de from the assistant profile screens (release C): French
+  // spells "Description" the same way English does, and German spells both
+  // "Name" and "Revision" the same way. All three were checked against the
+  // rest of that block, which is translated -- they are cognates, not copy
+  // that got skipped.
   zh: 10,
-  fr: 26,
-  de: 20,
+  fr: 27,
+  de: 22,
   es: 16,
   pt: 13,
 };

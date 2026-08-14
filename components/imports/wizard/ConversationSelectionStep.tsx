@@ -375,6 +375,16 @@ function ParseWarnings({ warnings }: { warnings: ParseWarningTotals }) {
             })
         );
     }
+    if (warnings.skippedNestedArchives > 0) {
+        // Its own line rather than a share of "unsupported file type": the
+        // user attached these deliberately and would otherwise have no way to
+        // tell why they are absent (§5.2).
+        lines.push(
+            interpolate(t("externalImport.warningNestedArchives"), {
+                count: warnings.skippedNestedArchives,
+            })
+        );
+    }
 
     return (
         <>

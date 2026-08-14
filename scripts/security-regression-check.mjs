@@ -3280,6 +3280,42 @@ const checks = [
       );
     },
   },
+  {
+    name: "image provider budgets follow who bills us, never who made the model",
+    file: "lib/imageProviderBudget.ts",
+    // Nano Banana 2 is Google's model bought from fal, so those two answers
+    // came apart. The budget module must keep asking the first question: a fal
+    // request drawing down IMAGE_PROVIDER_GOOGLE_COST_* still adds up, it just
+    // adds up against an envelope with no money in it while fal's real spend
+    // goes unwatched -- and every number downstream stays plausible.
+    //
+    // Reading for the *absence* of the brand field rather than the presence of
+    // the right one, because the mistake is additive: someone reaches for
+    // `imageModelOwner()` here to make a metric read nicely, and nothing else
+    // in the system objects.
+    test: (source) => {
+      const code = source
+        .split("\n")
+        .filter((line) => !/^\s*(\/\/|\*|\/\*)/.test(line))
+        .join("\n");
+      return (
+        !code.includes("modelOwner") &&
+        !code.includes("imageModelOwner") &&
+        code.includes("ImageModelProvider")
+      );
+    },
+  },
+  {
+    name: "readiness checks the provider that holds the credential",
+    file: "lib/imageModelRegistry.ts",
+    // `listActiveImageProviders` is what readiness and the budget guard walk.
+    // It must map over `provider`; mapping over the owner would have readiness
+    // demand a Google budget for a model Google never bills us for.
+    test: (source) =>
+      /listActiveImageProviders[\s\S]{0,220}map\(\(model\) => model\.provider\)/.test(
+        source
+      ),
+  },
 ];
 
 const failures = [];
