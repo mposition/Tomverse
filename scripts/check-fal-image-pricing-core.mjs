@@ -48,6 +48,23 @@ export const falPricingRequest = (model) => ({
 export const evaluateFalPricing = ({ model, response, reachError = null }) => {
   const problems = [];
   const notes = [];
+
+  // A branch that does not carry the model at all. This is the ordinary state
+  // of `main` between the activation landing on `develop` and reaching it, and
+  // it must not be an error: the scheduled check runs against both branches,
+  // and a red run every night that means "this branch is older" is the same
+  // always-on alarm this repository keeps having to take back out.
+  //
+  // A skip rather than a pass, and named so: there is no approved price on
+  // this branch, so nothing was compared. Deleting the entry by accident is
+  // caught loudly elsewhere -- the registry tests name it directly.
+  if (!model) {
+    notes.push(
+      "This branch does not carry fal-ai/nano-banana-2, so it has no approved price to contradict."
+    );
+    return { status: "not_registered", problems, notes, enabled: false };
+  }
+
   const { endpointId, approvedUnitPriceUsd } = falPricingRequest(model);
 
   const enabled = model.disabledReason === null;
