@@ -10,6 +10,7 @@ import {
   isFalAssetUrl,
   parseFalImageResponse,
 } from "../lib/falImageRequest.ts";
+import { getImageModel } from "../lib/imageModelRegistry.ts";
 
 const request = (overrides = {}) =>
   buildFalImageRequest({
@@ -159,4 +160,30 @@ test("a declared length over the ceiling is refused before the body is read", ()
   // A missing or unparseable header is not a pass -- it just means the check
   // has to happen again on the bytes, which the adapter does.
   assert.equal(falAssetLengthRefused("banana"), false);
+});
+
+test("the priced thinking cap and the requested thinking level are one decision", () => {
+  // The cross-file version of the check that matters, because these two did
+  // drift: the cap was documented as a bound holding "whatever the request
+  // asks", the request had already been pinned to `high`, and the policy still
+  // said high thinking was off. Three statements, two of them wrong, and no
+  // test between them.
+  //
+  // 2,000 microUSD of an 87,000 worst case rests on this field being sent.
+  // Omitting it makes the honest cap 0 and the floor 95, not 97.
+  const model = getImageModel("fal-ai/nano-banana-2");
+  const asksForThinking = "thinking_level" in request();
+
+  assert.equal(
+    model.priceVerification.thinkingCapMicroUsd > 0,
+    asksForThinking,
+    asksForThinking
+      ? "the request asks for thinking, so the cap must price it"
+      : "the request does not ask for thinking, so the cap must not price it"
+  );
+  if (asksForThinking) {
+    // fal's published surcharge for high thinking is $0.002.
+    assert.equal(request().thinking_level, "high");
+    assert.ok(model.priceVerification.thinkingCapMicroUsd >= 2_000);
+  }
 });
