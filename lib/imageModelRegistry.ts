@@ -449,7 +449,18 @@ const FAL_NANO_BANANA_2: ImageModelProfile = {
   name: "Nano Banana 2",
   shortName: "Nano Banana 2",
   lifecycle: "stable",
-  disabledReason: "operational_hold",
+  // Enabled 2026-08-14, after one real generation through the adapter's own
+  // request builder and response parser proved the seven things this entry
+  // previously only believed: exactly one image, an asset on fal's CDN, a MIME
+  // we may store, no redirect off the allowed host, a body inside the ceiling,
+  // and -- the one that could not be assumed -- an image that is actually the
+  // 1024x1024 that was priced. Evidence and the billed figure are in
+  // .github/audits/evidence/fal-nano-banana-2-smoke/ and policy section 16.8.
+  //
+  // Enabling this row does not expose anything on its own: image generation as
+  // a whole sits behind `feature.imageGenerationEnabled`, an AppSetting that is
+  // off unless a row says exactly "true".
+  disabledReason: null,
   // 1K only, deliberately, and not because the gateway is limited: a single
   // size is one price to verify, one worst case to state and one row to
   // explain. 2K and 4K are sold at multiples and can be added as their own
@@ -496,8 +507,6 @@ const FAL_NANO_BANANA_2: ImageModelProfile = {
     // it a property the adapter has to keep true, not a number to carry.
     thinkingCapMicroUsd: 2_000,
   },
-  disabledNote:
-    "Google's Gemini 3.1 Flash Image, supplied through fal. Price verified 2026-08-14 at $0.08 per 1K image, billed only on success; worst case 87,000 microUSD (80,000 image + 5,000 prompt budget + 2,000 high-thinking surcharge) giving a floor of 97 credits, sale price 120 approved 2026-08-14. Held on operations, not price: still needs a fal adapter, and IMAGE_PROVIDER_FAL_COST_* budgets plus a prepaid balance, both separately approved and deployed first. The adapter must set X-Fal-No-Retry (fal retries up to 10 times by default, and a retry after an invisible success bills a second image), X-Fal-Store-IO: 0, and X-Fal-Object-Lifecycle-Preference -- whose default fal documents as forever and publicly readable. Request pinned to 1K, one image, no web search, and high thinking on -- the 2,000 microUSD in the worst case is that field, not a safety margin. The direct Google route stays disabled permanently: max_output_tokens was measured on 2026-08-14 and does not bound the billable sum. See docs/policy/image-generation.md §16.",
 };
 
 // Registered, not enabled. The professional-tier candidate.

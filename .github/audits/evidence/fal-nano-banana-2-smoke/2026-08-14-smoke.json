@@ -1,0 +1,88 @@
+{
+  "ranAt": "2026-08-14T11:41:34.250Z",
+  "modelId": "fal-ai/nano-banana-2",
+  "provider": "fal",
+  "size": "1024x1024",
+  "promptSha256": "sha256:3c96e5099c845e60",
+  "requestBody": {
+    "prompt": "sha256:3c96e5099c845e60",
+    "num_images": 1,
+    "resolution": "1K",
+    "aspect_ratio": "1:1",
+    "thinking_level": "high",
+    "enable_web_search": false,
+    "limit_generations": true,
+    "system_prompt": "",
+    "output_format": "png",
+    "safety_tolerance": "2"
+  },
+  "platformHeaders": {
+    "X-Fal-No-Retry": "1",
+    "X-Fal-Store-IO": "0",
+    "X-Fal-Object-Lifecycle-Preference": "{\"expiration_duration_seconds\":900}"
+  },
+  "elapsedMs": 18783,
+  "httpStatus": 200,
+  "responseHeaders": {
+    "x-fal-request-id": "01a00013-d5f4-7b63-b5b6-f36818070388",
+    "x-fal-billable-units": "1.025",
+    "x-fal-served-from": "69358461-d576-44b7-ac8a-797ed5dc3dde",
+    "x-fal-error-type": null
+  },
+  "responseShape": {
+    "keys": [
+      "images",
+      "description"
+    ],
+    "imageCount": 1,
+    "description": 0
+  },
+  "asset": {
+    "host": "v3b.fal.media",
+    "pathSegments": 4,
+    "mimeType": "image/png",
+    "reportedWidth": null,
+    "reportedHeight": null,
+    "byteLength": 1618675,
+    "sha256": "sha256:e936beb3f9ff9dea",
+    "measuredWidth": 1024,
+    "measuredHeight": 1024
+  },
+  "checks": [
+    {
+      "name": "response parses as exactly one image",
+      "ok": true
+    },
+    {
+      "name": "asset host is on fal's CDN",
+      "ok": true,
+      "detail": "v3b.fal.media"
+    },
+    {
+      "name": "delivered MIME is one we may store",
+      "ok": true,
+      "detail": "image/png"
+    },
+    {
+      "name": "asset is served without a redirect off the allowed host",
+      "ok": true,
+      "detail": "HTTP 200 from v3b.fal.media"
+    },
+    {
+      "name": "declared length is within the ceiling",
+      "ok": true,
+      "detail": "1618675 of 16777216"
+    },
+    {
+      "name": "downloaded size is within the ceiling",
+      "ok": true,
+      "detail": "1618675 bytes"
+    },
+    {
+      "name": "delivered image is the size that was priced",
+      "ok": true,
+      "detail": "1024x1024 vs 1024x1024"
+    }
+  ],
+  "outcome": "passed"
+}

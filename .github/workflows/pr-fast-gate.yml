@@ -334,6 +334,20 @@ jobs:
         timeout-minutes: 5
         run: npm run check:image-pricing
 
+      # fal-ai/nano-banana-2 was enabled on one paid generation, and that run is
+      # the only reason the request shape, the asset host and the delivered size
+      # are known rather than assumed. This recomputes the verdict from the
+      # recorded gates and compares the recorded request against what the
+      # builder produces now -- so changing a pinned field invalidates the proof
+      # here instead of leaving a stale artefact reading as a pass.
+      #
+      # No credential: it reads a committed file and this repository's own code.
+      # The sibling price check needs FAL_KEY and is still run by hand, as
+      # check:openai-model-access is.
+      - name: fal activation evidence
+        timeout-minutes: 5
+        run: npm run check:fal-smoke-evidence
+
       # One provider timeout and one backoff schedule decide three deadlines:
       # the worst legitimate attempt, the stale threshold the sweep refunds
       # against, and the route budget the post-response executor runs inside.
