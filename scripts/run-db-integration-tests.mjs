@@ -187,6 +187,7 @@ run(
     "tests/integration/public-share-route.db.test.ts",
     // Release C1: what the database refuses about a profile version snapshot.
     "tests/integration/assistant-profile-schema.db.test.ts",
+    "tests/integration/assistant-profile-service.db.test.ts",
     // Release C2: the knowledge processing state machine, the DB-first
     // deletion order, and that the GIN term index is actually queryable.
     "tests/integration/assistant-knowledge-schema.db.test.ts",
