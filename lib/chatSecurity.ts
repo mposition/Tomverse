@@ -47,6 +47,16 @@ import {
     combineAttemptUsage,
     type AttemptUsage,
 } from "@/lib/chatMultiAttemptSettlement";
+import {
+    MAX_ATTEMPT_INDEX,
+    PROVIDER_BUCKET_PREFIX,
+    PROVIDER_BUDGET_PERIODS,
+    deriveProviderEntries,
+    providerBucketKey,
+    providerHoldProblems,
+    withoutAttemptHolds,
+    type AttemptHold,
+} from "@/lib/chatProviderHolds";
 import { resolveInputUsageSource } from "@/lib/tokenEstimateShadow";
 import { recordShadowSettlement } from "@/lib/tokenEstimateShadowRecorder";
 import {
@@ -182,6 +192,16 @@ export type ChatUsageReservation = {
     modelId: string;
     provider: AiModel["provider"];
     entries: ReservationEntry[];
+    /**
+     * Which attempt holds what against which provider budget.
+     *
+     * The source of truth for the `provider:` rows in `entries`, which are
+     * derived from it -- see lib/chatProviderHolds.ts for why a provider hold
+     * cannot be expressed by the entries alone once a turn can dispatch twice.
+     * Absent on a reservation written before automatic fallback existed, and
+     * on those the entries stand as they always did.
+     */
+    attemptHolds?: AttemptHold[];
     usageCredits: number;
     inputTokens: number;
     maxOutputTokens: number;
@@ -223,6 +243,20 @@ const durableReservationPayloadSchema = z
                 })
                 .strict()
         ).max(40),
+        attemptHolds: z
+            .array(
+                z
+                    .object({
+                        attemptIndex: z.number().int().min(0).max(MAX_ATTEMPT_INDEX),
+                        key: z.string().min(1).max(240),
+                        period: z.string().min(1).max(80),
+                        periodStart: z.iso.datetime(),
+                        amount: z.number().int().nonnegative(),
+                    })
+                    .strict()
+            )
+            .max(8)
+            .optional(),
         usageCredits: z.number().int().positive(),
         inputTokens: z.number().int().nonnegative(),
         maxOutputTokens: z.number().int().nonnegative(),
@@ -250,31 +284,84 @@ const durableReservationPayloadSchema = z
     })
     .strict();
 
+/**
+ * The payload as it is stored, with the provider entries rebuilt from the
+ * holds.
+ *
+ * Rebuilt rather than trusted: `attemptHolds` is the source of truth, and a
+ * caller that changed one without the other would otherwise persist the
+ * disagreement. Deriving on the way out means the only way to change a
+ * provider entry is to change the hold that produced it.
+ *
+ * A reservation with no holds -- everything written before automatic fallback
+ * existed -- keeps its entries exactly as they are.
+ */
 const serializeReservation = (
     reservation: ChatUsageReservation
 ): Prisma.InputJsonValue => {
-    const { userId, ...rest } = reservation;
+    const { userId, attemptHolds, ...rest } = reservation;
+    const entries = attemptHolds
+        ? [
+              ...reservation.entries.filter(
+                  (entry) => !entry.key.startsWith(PROVIDER_BUCKET_PREFIX)
+              ),
+              ...deriveProviderEntries(attemptHolds),
+          ]
+        : reservation.entries;
     return {
         ...rest,
-        entries: reservation.entries.map((entry) => ({
+        entries: entries.map((entry) => ({
             ...entry,
             periodStart: entry.periodStart.toISOString(),
         })),
+        ...(attemptHolds
+            ? {
+                  attemptHolds: attemptHolds.map((hold) => ({
+                      ...hold,
+                      periodStart: hold.periodStart.toISOString(),
+                  })),
+              }
+            : {}),
         ...(userId ? { userId } : {}),
     };
 };
 
 export const deserializeReservation = (payload: Prisma.JsonValue) => {
     const parsed = durableReservationPayloadSchema.parse(payload);
+    const entries = parsed.entries.map((entry) => ({
+        ...entry,
+        periodStart: new Date(entry.periodStart),
+    }));
+    const attemptHolds = parsed.attemptHolds?.map((hold) => ({
+        ...hold,
+        periodStart: new Date(hold.periodStart),
+    }));
+    if (attemptHolds) {
+        // Checked on every read, not only on write. Two fields of one object
+        // commit together and can still be written disagreeing with each
+        // other, and every disagreement here is money moving without
+        // authorization: an entry above its holds releases budget nobody
+        // reserved, one below leaves a provider holding money for a call that
+        // finished long ago.
+        const problems = providerHoldProblems({ holds: attemptHolds, entries });
+        if (problems.length > 0) {
+            throw new Error(
+                `Chat reservation provider holds are inconsistent: ${problems.join(" ")}`
+            );
+        }
+    }
+    // `attemptHolds` is dropped from the spread and reattached with real
+    // dates: leaving the parsed one in would union a string-dated shape into
+    // the type and every caller would have to narrow it.
+    const rest = { ...parsed, attemptHolds: undefined };
+    delete (rest as { attemptHolds?: unknown }).attemptHolds;
     return {
-        ...parsed,
+        ...rest,
         reservedOutputTokens:
             parsed.reservedOutputTokens ?? parsed.maxOutputTokens,
         provider: parsed.provider as AiModel["provider"],
-        entries: parsed.entries.map((entry) => ({
-            ...entry,
-            periodStart: new Date(entry.periodStart),
-        })),
+        entries,
+        ...(attemptHolds ? { attemptHolds } : {}),
     } satisfies ChatUsageReservation;
 };
 
@@ -777,25 +864,6 @@ const retryAfterFor = (period: Period, now: Date, dailyEnd?: Date) => {
 
 const monthlyResetAt = (now: Date) =>
     new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1));
-
-/**
- * The `ChatUsageBucket` key prefix a provider's spend budget lives under.
- *
- * A constant because settlement now has to recognise these keys among the
- * user's own quota entries -- a provider bucket settles to what that provider
- * was paid, and every other entry settles to what the user was charged. Those
- * were the same number until a turn could dispatch to two providers.
- */
-const PROVIDER_BUCKET_PREFIX = "provider:";
-
-const providerBucketKey = (provider: string) =>
-    `${PROVIDER_BUCKET_PREFIX}${provider}`;
-
-/** The two periods a provider's spend is bounded over. */
-const PROVIDER_BUDGET_PERIODS = [
-    "provider-cost-day",
-    "provider-cost-month",
-] as const;
 
 const incrementUsage = async (
     tx: Prisma.TransactionClient,
@@ -2954,6 +3022,22 @@ export const acquireChatAccess = async (
             modelId: budget.modelId,
             provider: budget.provider,
             entries: reservationEntries,
+            // The primary's own provider hold, recorded as attempt 0's.
+            //
+            // Not bookkeeping for its own sake: `serializeReservation` derives
+            // the `provider:` entries from these, so a reservation that left
+            // the primary's hold out of them would lose that entry the first
+            // time a fallback added one of its own -- and settlement would
+            // then release nothing for the provider that actually ran.
+            attemptHolds: reservationEntries
+                .filter((entry) => entry.key.startsWith(PROVIDER_BUCKET_PREFIX))
+                .map((entry) => ({
+                    attemptIndex: 0,
+                    key: entry.key,
+                    period: entry.period,
+                    periodStart: entry.periodStart,
+                    amount: entry.amount,
+                })),
             usageCredits: budget.usageCredits,
             inputTokens: budget.inputTokens,
             maxOutputTokens: budget.maxOutputTokens,
@@ -3332,14 +3416,17 @@ export const settleChatUsage = async (
             // outright and holds a partial unique index on the billed one, so
             // a second settlement of the same reservation cannot quietly
             // rewrite what an attempt cost or move the user's charge.
-            await tx.chatAttemptUsage.createMany({
+            // Insert-if-absent, so a retried settlement adds nothing. The
+            // rollup below is driven by how many rows this actually created,
+            // and both commit together: a crash leaves neither.
+            const inserted = await tx.chatAttemptUsage.createMany({
+                skipDuplicates: true,
                 data: multiAttempt.attempts.map((attempt) => ({
                     reservationId: durable.id,
                     attemptIndex: attempt.attemptIndex,
                     modelId: attempt.price.modelId,
                     provider: attempt.price.provider,
                     outcome: attempt.outcome,
-                    userBilled: attempt.userBilled,
                     providerRequestId: boundedProviderIdentifier(
                         attempt.providerRequestId
                     ),
@@ -3363,6 +3450,56 @@ export const settleChatUsage = async (
                     },
                 })),
             });
+            if (inserted.count !== multiAttempt.attempts.length) {
+                // Some row already existed, so a previous settlement of this
+                // reservation already accrued the provider cost. Recording it
+                // again would double the day's rollup, which has no per-request
+                // key to dedupe on.
+                console.warn(JSON.stringify({
+                    event: "chat_attempt_usage_already_recorded",
+                    reservationId: durable.id,
+                    expected: multiAttempt.attempts.length,
+                    inserted: inserted.count,
+                }));
+            }
+            // The rollup, in the same transaction as the rows that dedupe it.
+            // ProviderDailyUsage has no per-request key, so a crash between an
+            // insert and its increment would leave the ledger and its evidence
+            // permanently disagreeing with no way to tell which was right.
+            for (const attempt of multiAttempt.attempts) {
+                if (
+                    inserted.count !== multiAttempt.attempts.length ||
+                    (attempt.inputTokens === 0 &&
+                        attempt.outputTokens === 0 &&
+                        attempt.costMicroUsd === 0)
+                ) {
+                    continue;
+                }
+                const breakdown = calculateProviderUsageCost({
+                    inputTokens: attempt.inputTokens,
+                    cachedInputTokens: attempt.cachedInputTokens,
+                    outputTokens: attempt.outputTokens,
+                    inputUsdPerMillionTokens: attempt.price.inputUsdPerMillionTokens,
+                    outputUsdPerMillionTokens: attempt.price.outputUsdPerMillionTokens,
+                    cachedInputPriceMultiplier:
+                        attempt.price.cachedInputPriceMultiplier,
+                });
+                await recordInternalProviderUsage({
+                    client: tx,
+                    provider: attempt.price.provider,
+                    modelId: attempt.price.modelId,
+                    inputTokens: attempt.inputTokens,
+                    cachedInputTokens: Math.min(
+                        attempt.inputTokens,
+                        attempt.cachedInputTokens
+                    ),
+                    outputTokens: attempt.outputTokens,
+                    estimatedCostMicroUsd: attempt.costMicroUsd,
+                    uncachedInputCostMicroUsd: breakdown.uncachedInputCostMicroUsd,
+                    cachedInputCostMicroUsd: breakdown.cachedInputCostMicroUsd,
+                    outputCostMicroUsd: breakdown.outputCostMicroUsd,
+                });
+            }
         }
         if (canonical.userId && canonical.addOnReservations.length > 0) {
             await settleAddOnCredits(tx, {
@@ -3398,6 +3535,15 @@ export const settleChatUsage = async (
                         : null,
                 },
                 providerUsageSnapshot: providerUsageSnapshot ?? undefined,
+                // The attempt the user's charge came from, written in the same
+                // transaction as the terminal status. Write-once at the
+                // database, so a later goodwill refund cannot re-attribute it.
+                ...(multiAttempt?.billedAttempt
+                    ? {
+                          settlementAttemptIndex:
+                              multiAttempt.billedAttempt.attemptIndex,
+                      }
+                    : {}),
                 settledAt: new Date(),
                 reconciledAt: options?.reconciled ? new Date() : null,
                 lastError: options?.reason?.slice(0, 500) || null,
@@ -3444,55 +3590,13 @@ export const settleChatUsage = async (
         };
     });
 
-    if (settlement.applied && multiAttempt) {
-        // Every attempt, under its own provider and model. The single-attempt
-        // branch below records the turn once because there the turn *is* the
-        // attempt; here recording it once would file the fallback's tokens
-        // against the primary's provider, and this ledger is what the
-        // provider budget and the cost dashboards read.
-        for (const attempt of multiAttempt.attempts) {
-            if (
-                attempt.inputTokens === 0 &&
-                attempt.outputTokens === 0 &&
-                attempt.costMicroUsd === 0
-            ) {
-                continue;
-            }
-            const breakdown = calculateProviderUsageCost({
-                inputTokens: attempt.inputTokens,
-                cachedInputTokens: attempt.cachedInputTokens,
-                outputTokens: attempt.outputTokens,
-                inputUsdPerMillionTokens: attempt.price.inputUsdPerMillionTokens,
-                outputUsdPerMillionTokens: attempt.price.outputUsdPerMillionTokens,
-                cachedInputPriceMultiplier:
-                    attempt.price.cachedInputPriceMultiplier,
-            });
-            await recordInternalProviderUsage({
-                provider: attempt.price.provider,
-                modelId: attempt.price.modelId,
-                inputTokens: attempt.inputTokens,
-                cachedInputTokens: Math.min(
-                    attempt.inputTokens,
-                    attempt.cachedInputTokens
-                ),
-                outputTokens: attempt.outputTokens,
-                estimatedCostMicroUsd: attempt.costMicroUsd,
-                uncachedInputCostMicroUsd: breakdown.uncachedInputCostMicroUsd,
-                cachedInputCostMicroUsd: breakdown.cachedInputCostMicroUsd,
-                outputCostMicroUsd: breakdown.outputCostMicroUsd,
-            });
-            if (attempt.price.provider === "zhipu") {
-                await notifyProviderCreditIfNeeded("zhipu").catch((error) =>
-                    console.error("Provider credit alert failed:", {
-                        provider: attempt.price.provider,
-                        modelId: attempt.price.modelId,
-                        error,
-                    })
-                );
-            }
-        }
-    } else if (
+    // Single-attempt only. A multi-attempt turn accrued each attempt inside
+    // the settlement transaction, against its own provider and model; running
+    // this as well would add the whole turn a second time under the
+    // reservation's canonical model.
+    if (
         settlement.applied &&
+        !multiAttempt &&
         settlement.costBreakdown &&
         (settlement.actualInput > 0 ||
             settlement.actualOutput > 0 ||
@@ -3519,6 +3623,16 @@ export const settleChatUsage = async (
                         modelId: settlement.modelId,
                         error,
                     })
+            );
+        }
+    }
+    if (settlement.applied && multiAttempt) {
+        // A notification, not accounting: fired after the transaction so a
+        // provider alert cannot roll settlement back.
+        for (const provider of multiAttempt.costByProvider.keys()) {
+            if (provider !== "zhipu") continue;
+            await notifyProviderCreditIfNeeded("zhipu").catch((error) =>
+                console.error("Provider credit alert failed:", { provider, error })
             );
         }
     }
@@ -3556,63 +3670,42 @@ const boundedProviderIdentifier = (value: string | null | undefined) => {
 };
 
 /**
- * Takes the fallback provider's own budget hold, and records it where
- * settlement will find it.
+ * Takes an attempt's own provider-budget hold, and records whose it is.
  *
  * §10: every dispatch is authorized on the server "including fallback and
  * Planner pass-through", and a provider budget is one of those
- * authorizations. Money held at the primary's provider does not make a call to
- * another one affordable, so the fallback needs its own hold before it is
- * dispatched -- not a settlement-time reckoning after the money is spent.
+ * authorizations.
  *
- * ## Why it reserves and does not transfer
+ * ## Every fallback reserves, including one on the same provider
  *
- * The first version of this released the primary's hold in the same
- * transaction, and returned the new entries for the caller to keep. The caller
- * never kept them, which was the bug: `settleChatUsage` re-reads
- * `reservationPayload` from the row, and that payload still described a hold
- * on the primary alone. Settlement would then have released a hold the
- * fallback provider never had and left the primary's unreleased.
+ * An earlier version returned early when the fallback ran on the provider the
+ * primary was already holding against, on the grounds that "the hold already
+ * covers it". It does not. A hold is sized for one attempt, and a second call
+ * -- same provider, different model -- costs more. Settlement increments a
+ * bucket past its hold without re-checking any limit, so the excess went
+ * through as spend the guardrail had never authorized. That the second model
+ * shares a bucket with the first is a fact about the key, not about the money.
  *
- * Fixing it by returning entries the caller must remember would have left the
- * same class of bug one forgetful call site away. So the hold is written into
- * the durable payload *here*, inside the transaction that takes it, and
- * nothing has to be remembered.
- *
- * Once the payload is the record, releasing the primary early stops being
- * worth its risk. Keeping both holds until settlement means this turn is
- * briefly counted against two providers -- conservative in the only direction
- * a budget guard should err, because the alternative is a window in which the
- * turn holds nothing anywhere and a concurrent request takes the room. It also
- * removes a deadlock: two simultaneous fallbacks in opposite directions would
- * each have locked the other's provider rows to release them, and this
- * transaction now touches one provider's rows and its own reservation.
- *
- * Settlement needs no special case for the second hold. Its entries loop
- * already settles any `provider:` entry to what that provider was actually
- * paid, so the primary's hold is released down to the primary's real cost and
- * the fallback's to the fallback's.
+ * The hold goes into `attemptHolds` under this attempt's index, and the
+ * provider entry is re-derived as the sum. See lib/chatProviderHolds.ts for
+ * why the entries alone cannot carry this.
  */
-export const reserveFallbackProviderBudget = async (input: {
+export const reserveAttemptProviderBudget = async (input: {
     reservationId: string;
     userId?: string | null;
-    heldProvider: string;
-    fallbackProvider: string;
-    fallbackReservedMicroUsd: number;
+    attemptIndex: number;
+    provider: string;
+    reservedMicroUsd: number;
     periodStarts: { day: Date; month: Date };
 }): Promise<
-    | { reserved: false; reason: "same_provider" }
     | { reserved: false; reason: "reservation_not_open" }
-    | { reserved: false; reason: "fallback_budget_exhausted"; scope: string }
+    | { reserved: false; reason: "already_held" }
+    | { reserved: false; reason: "budget_exhausted"; scope: string }
     | { reserved: true; entries: ReservationEntry[] }
 > => {
-    if (input.fallbackProvider === input.heldProvider) {
-        // The hold already covers it, and re-reserving would count this turn
-        // against its own provider's budget twice.
-        return { reserved: false, reason: "same_provider" };
-    }
-    const limits = getProviderCostGuardrailLimits(input.fallbackProvider);
-    const amount = Math.max(0, Math.round(input.fallbackReservedMicroUsd));
+    const limits = getProviderCostGuardrailLimits(input.provider);
+    const amount = Math.max(0, Math.round(input.reservedMicroUsd));
+    const key = providerBucketKey(input.provider);
     const checks = [
         {
             period: "provider-cost-day" as const,
@@ -3630,8 +3723,8 @@ export const reserveFallbackProviderBudget = async (input: {
 
     return prisma.$transaction(async (tx) => {
         // Same order as settlement: the credit account first, then the
-        // reservation's advisory lock. Two paths that take the same two locks
-        // in different orders is the deadlock this ordering exists to avoid.
+        // reservation's advisory lock. Two paths taking one pair of locks in
+        // different orders is the deadlock this ordering exists to avoid.
         if (input.userId) {
             await lockCreditAccount(tx, input.userId);
         }
@@ -3641,16 +3734,22 @@ export const reserveFallbackProviderBudget = async (input: {
         });
         if (!durable || durable.status !== "reserved") {
             // Settled, refunded or reconciled while this turn was running.
-            // Taking a hold against it would put money on a reservation that
-            // has already been closed out, and nothing would ever release it.
-            throw new FallbackBudgetRefusal("reservation_not_open");
+            // A hold against a closed reservation is one nothing would release.
+            throw new AttemptBudgetRefusal("reservation_not_open");
+        }
+        const canonical = deserializeReservation(durable.reservationPayload);
+        const existing = canonical.attemptHolds ?? [];
+        if (existing.some((hold) => hold.attemptIndex === input.attemptIndex)) {
+            // A retry of this call, or two dispatches claiming one index.
+            // Either way the second must not add a hold nothing will release.
+            throw new AttemptBudgetRefusal("already_held");
         }
 
         const entries: ReservationEntry[] = [];
         for (const check of checks) {
             const allowed = await incrementUsage(
                 tx,
-                providerBucketKey(input.fallbackProvider),
+                key,
                 check.period,
                 check.start,
                 check.limit,
@@ -3658,11 +3757,11 @@ export const reserveFallbackProviderBudget = async (input: {
             );
             if (!allowed) {
                 // Rolls the whole transaction back, including a day hold taken
-                // before the month check refused. Nothing is left half-held.
-                throw new FallbackBudgetRefusal(check.scope);
+                // before the month check refused.
+                throw new AttemptBudgetRefusal(check.scope);
             }
             entries.push({
-                key: providerBucketKey(input.fallbackProvider),
+                key,
                 period: check.period,
                 periodStart: check.start,
                 amount,
@@ -3670,27 +3769,38 @@ export const reserveFallbackProviderBudget = async (input: {
             });
         }
 
-        // The durable record of what this turn holds. Written here rather than
-        // handed back, because a caller that forgets is exactly how the
-        // previous version of this was wrong.
-        const canonical = deserializeReservation(durable.reservationPayload);
+        const holds: AttemptHold[] = [
+            ...existing,
+            ...entries.map((entry) => ({
+                attemptIndex: input.attemptIndex,
+                key: entry.key,
+                period: entry.period,
+                periodStart: entry.periodStart,
+                amount: entry.amount,
+            })),
+        ];
         await tx.chatCreditReservation.update({
             where: { id: durable.id },
             data: {
+                // `serializeReservation` re-derives the provider entries from
+                // the holds, so a same-provider hold lands as a larger amount
+                // on the one entry rather than a second row settlement would
+                // pay twice.
                 reservationPayload: serializeReservation({
                     ...canonical,
-                    entries: [...canonical.entries, ...entries],
+                    attemptHolds: holds,
                 }),
             },
         });
         return { reserved: true as const, entries };
     }).catch((error) => {
-        if (error instanceof FallbackBudgetRefusal) {
-            return error.scope === "reservation_not_open"
-                ? { reserved: false as const, reason: "reservation_not_open" as const }
+        if (error instanceof AttemptBudgetRefusal) {
+            return error.scope === "reservation_not_open" ||
+                error.scope === "already_held"
+                ? { reserved: false as const, reason: error.scope }
                 : {
                       reserved: false as const,
-                      reason: "fallback_budget_exhausted" as const,
+                      reason: "budget_exhausted" as const,
                       scope: error.scope,
                   };
         }
@@ -3699,24 +3809,27 @@ export const reserveFallbackProviderBudget = async (input: {
 };
 
 /**
- * Gives back a fallback hold whose dispatch never happened.
+ * Gives back one attempt's hold, and only that attempt's.
  *
- * The compensating half of the reservation above. A fallback that is
+ * By index, never by provider. Two attempts on one provider share a bucket, so
+ * releasing "the provider's hold" would take the primary's away with the
+ * fallback's -- the turn would then be holding nothing for a call that is
+ * still running.
+ *
+ * The compensating half of the reservation above: an attempt that is
  * authorized and then fails to build its manifest, serialize, or reach the
- * provider has spent nothing, and a hold left behind for it would count
- * against that provider's budget until the reservation expired -- for a call
- * that was never made.
+ * provider has spent nothing, and a hold left behind counts against that
+ * provider until the reservation expires for a call that was never made.
  *
- * Best-effort by design: the turn is already ending on the primary's failure,
- * and raising here would replace a diagnosable failure with a worse one. What
- * it must not do is leave the payload claiming a hold that has been released,
- * so both move together or neither does.
+ * Best-effort, and it says so by returning a boolean rather than raising. The
+ * turn is already ending on a failure, and replacing that failure with a
+ * worse one helps nobody. What it must not do is move one of the two without
+ * the other, which is why they move in one transaction.
  */
-export const releaseFallbackProviderBudget = async (input: {
+export const releaseAttemptProviderBudget = async (input: {
     reservationId: string;
     userId?: string | null;
-    fallbackProvider: string;
-    periodStarts: { day: Date; month: Date };
+    attemptIndex: number;
 }): Promise<boolean> =>
     prisma
         .$transaction(async (tx) => {
@@ -3730,18 +3843,20 @@ export const releaseFallbackProviderBudget = async (input: {
             if (!durable || durable.status !== "reserved") return false;
 
             const canonical = deserializeReservation(durable.reservationPayload);
-            const key = providerBucketKey(input.fallbackProvider);
-            const held = canonical.entries.filter((entry) => entry.key === key);
-            if (held.length === 0) return false;
+            const holds = canonical.attemptHolds ?? [];
+            const mine = holds.filter(
+                (hold) => hold.attemptIndex === input.attemptIndex
+            );
+            if (mine.length === 0) return false;
 
-            for (const entry of held) {
+            for (const hold of mine) {
                 await tx.$executeRaw`
                     UPDATE "ChatUsageBucket"
-                    SET "count" = GREATEST(0, "count" - ${entry.amount}),
+                    SET "count" = GREATEST(0, "count" - ${hold.amount}),
                         "updatedAt" = NOW()
-                    WHERE "key" = ${entry.key}
-                      AND "period" = ${entry.period}
-                      AND "periodStart" = ${entry.periodStart}
+                    WHERE "key" = ${hold.key}
+                      AND "period" = ${hold.period}
+                      AND "periodStart" = ${hold.periodStart}
                 `;
             }
             await tx.chatCreditReservation.update({
@@ -3749,8 +3864,9 @@ export const releaseFallbackProviderBudget = async (input: {
                 data: {
                     reservationPayload: serializeReservation({
                         ...canonical,
-                        entries: canonical.entries.filter(
-                            (entry) => entry.key !== key
+                        attemptHolds: withoutAttemptHolds(
+                            holds,
+                            input.attemptIndex
                         ),
                     }),
                 },
@@ -3759,10 +3875,10 @@ export const releaseFallbackProviderBudget = async (input: {
         })
         .catch(() => false);
 
-class FallbackBudgetRefusal extends Error {
+class AttemptBudgetRefusal extends Error {
     constructor(readonly scope: string) {
-        super(`Fallback provider budget refused: ${scope}`);
-        this.name = "FallbackBudgetRefusal";
+        super(`Attempt provider budget refused: ${scope}`);
+        this.name = "AttemptBudgetRefusal";
     }
 }
 

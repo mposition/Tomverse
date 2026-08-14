@@ -155,12 +155,12 @@ const REGISTRY = {
   RoutingAttempt_outcome_check: {
     owner: "type_only",
     reason:
-      "RoutingAttemptOutcome in lib/routingAttemptStore.ts. The union is deliberately one value shorter than the constraint: it types the *completion* input, so it carries the five terminal outcomes and not 'pending', which only createAttempt writes as the initial state. A union that also accepted 'pending' would let a caller complete an attempt into the state it started in.",
+      "RoutingAttemptOutcome in lib/routingAttemptStore.ts. The union is deliberately one value shorter than the constraint: it types the *completion* input, so it carries the six terminal outcomes and not 'pending', which only createAttempt writes as the initial state. A union that also accepted 'pending' would let a caller complete an attempt into the state it started in. 'unknown_after_dispatch' is the sweep's, for an attempt whose process stopped after dispatching -- named for what is known rather than guessed at as a provider failure.",
   },
   RoutingAttempt_failureLayer_check: {
     owner: "type_only",
     reason:
-      "RoutingFailureLayer in lib/routingAttemptStore.ts, seven values including 'none'. Which layer refused or broke, which is what makes a failed attempt attributable rather than merely failed.",
+      "RoutingFailureLayer in lib/routingAttemptStore.ts, eight values including 'none' and 'process'. Which layer refused or broke, which is what makes a failed attempt attributable rather than merely failed.",
   },
   ContextManifest_state_check: {
     owner: "database",
