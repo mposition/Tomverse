@@ -1,4 +1,5 @@
 import type { Conversation, Message } from "@/components/chat/types";
+import { discardResponseBody } from "./discardResponseBody";
 
 export const PENDING_GUEST_IMPORT_KEY = "tomverse_pending_guest_import";
 export const GUEST_IMPORT_SEEN_KEY = "tomverse_guest_import_prompted_v1";
@@ -238,6 +239,7 @@ export async function importGuestConversation(
       body: JSON.stringify(payload),
     });
     if (!response.ok) {
+      await discardResponseBody(response);
       return { success: false, error: `HTTP ${response.status}` };
     }
     const data = await response.json();

@@ -5,6 +5,7 @@ import { AlertTriangle, Check, Download, Loader2, ShieldCheck, X } from "lucide-
 
 import { useLanguage } from "@/components/LanguageProvider";
 import { SettingsDetailNav } from "@/components/settings/SettingsDetailNav";
+import { discardResponseBody } from "@/lib/discardResponseBody";
 
 /**
  * /settings/data -- the surface PRIVACY-02 was missing.
@@ -71,7 +72,10 @@ export function AccountDataDownload() {
   const loadHistory = useCallback(async () => {
     try {
       const response = await fetch("/api/user/account/export", { cache: "no-store" });
-      if (!response.ok) return;
+      if (!response.ok) {
+        await discardResponseBody(response);
+        return;
+      }
       const body = (await response.json()) as { requests?: ExportHistoryEntry[] };
       setHistory(body.requests ?? []);
     } catch {
@@ -110,6 +114,7 @@ export function AccountDataDownload() {
         cache: "no-store",
       });
       if (response.status === 428) {
+        await discardResponseBody(response);
         setPhase({ kind: "reauthRequired" });
         return;
       }

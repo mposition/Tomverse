@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { Loader2, RefreshCw, Route } from "lucide-react";
+import { discardResponseBody } from "@/lib/discardResponseBody";
 
 /**
  * The reader for `/api/admin/routing-shadow`.
@@ -169,7 +170,10 @@ export function AdminRoutingShadowPanel() {
             const response = await fetch("/api/admin/routing-shadow", {
                 cache: "no-store",
             });
-            if (!response.ok) throw new Error(String(response.status));
+            if (!response.ok) {
+                await discardResponseBody(response);
+                throw new Error(String(response.status));
+            }
             setReport((await response.json()) as ShadowReport);
         } catch {
             setError("Could not load the shadow routing report.");

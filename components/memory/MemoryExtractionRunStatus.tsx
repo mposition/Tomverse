@@ -6,6 +6,7 @@ import { ArrowLeft, Loader2 } from "lucide-react";
 import { useLanguage } from "@/components/LanguageProvider";
 import { interpolate } from "@/components/imports/importFormatting";
 import { runProgress, type RunProgress } from "@/lib/memoryExtractionLaunch";
+import { discardResponseBody } from "@/lib/discardResponseBody";
 
 /**
  * /settings/memory/runs/[runId] — one run's progress (policy §11, §21).
@@ -70,6 +71,7 @@ export function MemoryExtractionRunStatus({ runId }: { runId: string }) {
                 { cache: "no-store" }
             );
             if (!response.ok) {
+                await discardResponseBody(response);
                 // 404 and a disabled flag land in the same place: there is
                 // nothing to show, and the page says so rather than spinning.
                 setState({ kind: "missing" });
@@ -106,7 +108,7 @@ export function MemoryExtractionRunStatus({ runId }: { runId: string }) {
             await fetch(
                 `/api/memories/extraction-runs/${encodeURIComponent(runId)}/cancel`,
                 { method: "POST" }
-            );
+            ).then(discardResponseBody);
         } catch {
             // The reload below reports whatever actually happened.
         } finally {

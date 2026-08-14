@@ -19,6 +19,7 @@ import {
     classifyExternalImportFailure,
     type ServerReview,
 } from "@/lib/externalImportWizard";
+import { discardResponseBody } from "@/lib/discardResponseBody";
 
 /**
  * /settings/imports/[importId] — one import's outcome, or the place a sealed
@@ -115,20 +116,23 @@ export function ExternalImportDetail({ importId }: { importId: string }) {
                     `/api/imports/external/${encodeURIComponent(importId)}`,
                     { cache: "no-store" }
                 );
-                if (cancelled) return;
-                if (response.status === 401) {
-                    setState({ kind: "unauthenticated" });
-                    return;
-                }
-                if (response.status === 403) {
-                    setState({ kind: "disabled" });
-                    return;
-                }
-                if (response.status === 404) {
-                    setState({ kind: "not_found" });
-                    return;
-                }
-                if (!response.ok) {
+                if (cancelled || !response.ok) {
+                    // None of these branches parses the body, so it is
+                    // consumed once here rather than in five places.
+                    await discardResponseBody(response);
+                    if (cancelled) return;
+                    if (response.status === 401) {
+                        setState({ kind: "unauthenticated" });
+                        return;
+                    }
+                    if (response.status === 403) {
+                        setState({ kind: "disabled" });
+                        return;
+                    }
+                    if (response.status === 404) {
+                        setState({ kind: "not_found" });
+                        return;
+                    }
                     setState({ kind: "error" });
                     return;
                 }
@@ -186,6 +190,7 @@ export function ExternalImportDetail({ importId }: { importId: string }) {
                 `/api/imports/external/${encodeURIComponent(importId)}`,
                 { method: "DELETE" }
             );
+            await discardResponseBody(response);
             if (response.ok) {
                 router.push("/settings/imports");
                 return;

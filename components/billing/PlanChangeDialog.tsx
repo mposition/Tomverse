@@ -43,6 +43,7 @@ import {
   planChangeText,
   type PlanChangeCopyErrorCode,
 } from "@/components/billing/planChangeCopy";
+import { discardResponseBody } from "@/lib/discardResponseBody";
 
 type Quote = {
   requestId: string;
@@ -179,7 +180,9 @@ export function PlanChangeDialog({
         cache: "no-store",
         signal: controller.signal,
       })
-        .then((response) => (response.ok ? response.json() : null))
+        .then((response) =>
+        response.ok ? response.json() : discardResponseBody(response).then(() => null)
+      )
         .catch(() => null);
       if (cancelled) return;
       if (existing?.reservation) {

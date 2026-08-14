@@ -21,6 +21,7 @@ import {
     type ExtractionPairChoice,
     type LaunchEstimate,
 } from "@/lib/memoryExtractionLaunch";
+import { discardResponseBody } from "@/lib/discardResponseBody";
 
 /**
  * The §11 pre-run confirmation, as a screen (policy §21, slice B4).
@@ -131,8 +132,9 @@ export function MemoryExtractionLauncher() {
                 const response = await fetch("/api/memories/extraction-models", {
                     cache: "no-store",
                 });
-                if (cancelled) return;
-                if (!response.ok) {
+                if (cancelled || !response.ok) {
+                    await discardResponseBody(response);
+                    if (cancelled) return;
                     setPairsState({ kind: "unavailable" });
                     return;
                 }
@@ -159,7 +161,10 @@ export function MemoryExtractionLauncher() {
                 const response = await fetch("/api/memories/extraction-runs", {
                     cache: "no-store",
                 });
-                if (cancelled || !response.ok) return;
+                if (cancelled || !response.ok) {
+                    await discardResponseBody(response);
+                    return;
+                }
                 const body = (await response.json()) as {
                     activeRunId: string | null;
                     runs?: RunSummary[];
@@ -184,6 +189,7 @@ export function MemoryExtractionLauncher() {
                 { cache: "no-store" }
             );
             if (!response.ok) {
+                await discardResponseBody(response);
                 setListState((current) =>
                     current.kind === "ready"
                         ? current
@@ -321,7 +327,9 @@ export function MemoryExtractionLauncher() {
                 const runs = await fetch("/api/memories/extraction-runs", {
                     cache: "no-store",
                 })
-                    .then((result) => (result.ok ? result.json() : null))
+                    .then((result) =>
+        result.ok ? result.json() : discardResponseBody(result).then(() => null)
+      )
                     .catch(() => null);
                 setActiveRunId(
                     (runs as { activeRunId?: string } | null)?.activeRunId ?? null

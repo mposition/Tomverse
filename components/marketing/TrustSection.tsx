@@ -7,6 +7,7 @@ import { useLanguage } from "@/components/LanguageProvider";
 import { formatLocalizedInteger } from "@/lib/pricingFormat";
 import { getLandingCopy } from "./landingContent";
 import { ConditionLine, SectionHeading } from "./landingPrimitives";
+import { discardResponseBody } from "@/lib/discardResponseBody";
 
 type ProofMetrics = {
   periodDays: number;
@@ -37,7 +38,9 @@ export function TrustSection() {
   useEffect(() => {
     const controller = new AbortController();
     void fetch("/api/public/proof-metrics", { signal: controller.signal, cache: "no-store" })
-      .then((response) => (response.ok ? response.json() : null))
+      .then((response) =>
+        response.ok ? response.json() : discardResponseBody(response).then(() => null)
+      )
       .then((data: ProofMetrics | null) => data && setMetrics(data))
       .catch(() => undefined);
     return () => controller.abort();

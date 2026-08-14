@@ -1,13 +1,14 @@
 # 소비되지 않는 응답 본문 inventory (2026-08-13)
 
-> **상태: 조사 완료, 수정은 하지 않았습니다.** 이 문서는 목록이지 판정이
-> 아닙니다. 각 항목이 실제 결함인지, 얼마나 비싼지는 사람이 정합니다.
+> **상태: 조사 완료 → browser 측 정리 완료(2026-08-14).** 아래 1~3장은 조사
+> 시점의 기록으로 그대로 둡니다. 이후 조치와 현재 수치는 7장에 있습니다.
+> server runtime 21건은 손대지 않았습니다.
 
 기준 commit: `origin/develop` `f76ff97` 위의 branch
 `claude/pr-379-conflict-fix-b7wt9h`.
 도구: `npm run report:unconsumed-response-bodies`
 (`scripts/report-unconsumed-response-bodies*.mjs`,
-`tests/unconsumedResponseBodies.test.mjs` 20건).
+`tests/unconsumedResponseBodies.test.mjs`).
 
 ## 0. 왜 세는가 — 그리고 이 수치가 말하지 않는 것
 
@@ -213,3 +214,55 @@ closure)로 손으로 확인했습니다.
 
 이 보고서는 gate가 아닙니다. 어떤 결과에서도 exit 0이며 registry나 소스에
 쓰지 않습니다.
+
+## 7. 이후 조치 — browser 측 정리 (2026-08-14)
+
+3장의 목록을 전부 정리했습니다. **browser·`either` runtime의 `leaks`가 0이
+되었습니다.**
+
+| | 조사 시점 | 정리 후 |
+|---|---|---|
+| 호출 지점 | 239 | 239 |
+| `consumed` | 118 | **193** |
+| `leaks` | 97 | **21** (전부 server runtime) |
+| `escapes` | 24 | 25 |
+| browser + `either` `leaks` | 72 | **0** |
+
+31개 파일이 `lib/discardResponseBody.ts`를 쓰도록 바뀌었습니다. 형태는 셋뿐입니다.
+
+- `res.ok ? res.json() : null` → 다른 arm에서 `discardResponseBody(res)`
+- `if (!res.ok) { … return/throw }` → 그 분기 안에서 소비
+- 상태 코드 사다리(401·403·404·423 …)가 여러 갈래로 빠져나가는 경우 →
+  `if (!res.ok) { await discardResponseBody(res); … }`로 한 번만 소비하고
+  사다리를 그 안으로 옮김
+
+### 7-1. 조사 자체가 틀렸던 4가지 — 분류기를 고쳤습니다
+
+정리 도중 **도구가 잘못 지목한 형태 4종**을 발견했습니다. 손대기 전에 코드를
+읽었기 때문에 드러난 것이고, 넷 다 분류기를 고쳐 `consumed`/`escapes`로
+옮겼습니다. 이미 올바른 코드를 "고치는" 것은 리뷰어에게 목록을 믿지 말라고
+가르치는 일입니다.
+
+| 형태 | 예 | 고친 방식 |
+|---|---|---|
+| `Promise.all([fetch, fetch]).then(([a, b]) => …)` | `AuthButton.tsx:418` | promise가 scope 밖으로 나가면 `escapes` |
+| 삼항으로 고른 promise를 변수에 담아 뒤에서 소비 | `ComparisonReviewDialog.tsx:430` | 위와 같음 |
+| 미리 선언한 `let response`에 대입 | `feedbackClient.ts:123` | `x = await fetch(…)` 대입과 삼항 arm까지 binding으로 인식 |
+| `try` 안에서 대입하고 `try` **밖에서** 소비 | 같은 파일 | 바깥 statement list까지 이어서 탐색 |
+| `return { ok: true, body: await res.json() }` | `MemoryReviewSettings.tsx:145` | object·array·template literal 안의 읽기도 소비로 인정 |
+
+server runtime `leaks`도 25 → 21로 줄었는데, **코드를 고쳐서가 아니라 오탐
+4건이 사라져서**입니다.
+
+### 7-2. 여전히 하지 않은 것
+
+- **server runtime 21건.** undici 기준으로 따로 판단해야 하며 이 문서의 측정을
+  근거로 삼을 수 없습니다.
+- **`escapes` 25건.** 판정을 미룬 것이지 안전하다고 판정한 것이 아닙니다.
+- **빈도 측정.** 5장은 그대로 유효합니다 — 비용 크기는 여전히 모릅니다. 다만
+  이제는 정리가 끝났으므로 "얼마나 비쌌는가"는 사후 관심사입니다.
+- **회귀 gate.** 지금 browser leaks가 0이므로
+  `npm run report:unconsumed-response-bodies`를 fail-closed 검사로 승격할 수
+  있습니다. **하지 않았습니다** — 이 조사에서만 분류기 오탐 4종이 나왔고,
+  heuristic 분류기를 merge 차단 gate로 올리면 무관한 PR을 막을 수 있습니다.
+  승격 여부는 사람의 결정입니다.
