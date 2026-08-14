@@ -5,6 +5,7 @@ approvedScopes:
   - RELEASE_A_IMPORT
   - RELEASE_B_MEMORY
   - RELEASE_C_ASSISTANT_PROFILES
+  - RELEASE_A2_GEMINI_IMPORT
 approvedBy: @mposition
 approvedAt: 2026-08-13
 approvalTicket: N/A
