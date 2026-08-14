@@ -5,10 +5,12 @@ import { after, beforeEach, test } from "node:test";
 import {
   acquireChatAccess,
   settleChatUsage,
-  transferProviderBudgetForFallback,
+  releaseFallbackProviderBudget,
+  reserveFallbackProviderBudget,
   type ChatAccess,
   type ChatBudget,
 } from "@/lib/chatSecurity";
+import { getProviderCostGuardrailLimits } from "@/lib/providerCostBudget";
 import { prisma } from "@/lib/prisma";
 import { usageBucketCount } from "@/lib/chatUsageBucketCount";
 import type { AttemptUsage } from "@/lib/chatMultiAttemptSettlement";
@@ -390,53 +392,276 @@ test("a malformed attempt set is refused rather than settled anyway", async () =
   assert.equal(durable.status, "reserved", "the money must not have moved");
 });
 
-test("a fallback on another provider takes its own budget hold", async () => {
-  // The hold this creates is the primary's; the transfer has to move it.
-  await twoAttemptRun();
-  const heldDay = await bucket("provider:openai", "provider-cost-day");
+const periodStarts = async () => ({
+  day: (
+    await prisma.chatUsageBucket.findFirstOrThrow({
+      where: { key: "provider:openai", period: "provider-cost-day" },
+    })
+  ).periodStart,
+  month: (
+    await prisma.chatUsageBucket.findFirstOrThrow({
+      where: { key: "provider:openai", period: "provider-cost-month" },
+    })
+  ).periodStart,
+});
 
-  const moved = await transferProviderBudgetForFallback({
+const payloadEntries = async (reservationId: string) => {
+  const row = await prisma.chatCreditReservation.findUniqueOrThrow({
+    where: { id: reservationId },
+  });
+  return (row.reservationPayload as { entries: { key: string; amount: number }[] })
+    .entries;
+};
+
+test("a fallback on another provider takes its own hold, in the durable payload", async () => {
+  // The bug this replaced: the hold was taken and handed back to a caller who
+  // never kept it, so settleChatUsage re-read a payload that still described a
+  // hold on the primary alone.
+  const { acquired } = await twoAttemptRun();
+  const heldBefore = await bucket("provider:openai", "provider-cost-day");
+
+  const reserved = await reserveFallbackProviderBudget({
+    reservationId: acquired.usageReservation.reservationId,
+    userId: acquired.usageReservation.userId ?? null,
     heldProvider: "openai",
     fallbackProvider: "google",
-    heldMicroUsd: heldDay,
     fallbackReservedMicroUsd: 500_000,
-    periodStarts: {
-      day: (
-        await prisma.chatUsageBucket.findFirstOrThrow({
-          where: { key: "provider:openai", period: "provider-cost-day" },
-        })
-      ).periodStart,
-      month: (
-        await prisma.chatUsageBucket.findFirstOrThrow({
-          where: { key: "provider:openai", period: "provider-cost-month" },
-        })
-      ).periodStart,
-    },
+    periodStarts: await periodStarts(),
   });
 
-  assert.equal(moved.moved, true);
+  assert.equal(reserved.reserved, true);
   assert.equal(await bucket("provider:google", "provider-cost-day"), 500_000);
-  assert.equal(await bucket("provider:openai", "provider-cost-day"), 0);
+  // The primary's hold is kept until settlement releases it down to what the
+  // primary actually cost. Briefly counting the turn against two providers is
+  // the safe direction for a guard whose job is to prevent overspend.
+  assert.equal(await bucket("provider:openai", "provider-cost-day"), heldBefore);
+
+  const entries = await payloadEntries(acquired.usageReservation.reservationId);
   assert.equal(
-    moved.moved && moved.entries.length,
+    entries.filter((entry) => entry.key === "provider:google").length,
     2,
-    "the caller needs both periods to settle what it held"
+    "the payload must record both periods, or settlement cannot release them"
   );
 });
 
-test("a fallback on the same provider is not a transfer", async () => {
-  await twoAttemptRun();
+test("a fallback on the same provider is not reserved twice", async () => {
+  const { acquired } = await twoAttemptRun();
   const before = await bucket("provider:openai", "provider-cost-day");
-  const result = await transferProviderBudgetForFallback({
+  const result = await reserveFallbackProviderBudget({
+    reservationId: acquired.usageReservation.reservationId,
+    userId: acquired.usageReservation.userId ?? null,
     heldProvider: "openai",
     fallbackProvider: "openai",
-    heldMicroUsd: before,
     fallbackReservedMicroUsd: 500_000,
-    periodStarts: { day: new Date(), month: new Date() },
+    periodStarts: await periodStarts(),
   });
-  assert.equal(result.moved, false);
-  assert.equal(result.moved === false && result.reason, "same_provider");
-  // The hold already covers it, and re-reserving would count this turn
-  // against its own budget twice.
+  assert.equal(result.reserved, false);
+  assert.equal(result.reserved === false && result.reason, "same_provider");
   assert.equal(await bucket("provider:openai", "provider-cost-day"), before);
+});
+
+test("a refused day budget leaves the primary's hold untouched", async () => {
+  const { acquired } = await twoAttemptRun();
+  const heldBefore = await bucket("provider:openai", "provider-cost-day");
+  const result = await reserveFallbackProviderBudget({
+    reservationId: acquired.usageReservation.reservationId,
+    userId: acquired.usageReservation.userId ?? null,
+    heldProvider: "openai",
+    fallbackProvider: "google",
+    // Larger than any configured guardrail, so incrementUsage refuses.
+    fallbackReservedMicroUsd: Number.MAX_SAFE_INTEGER,
+    periodStarts: await periodStarts(),
+  });
+  assert.equal(result.reserved, false);
+  assert.equal(await bucket("provider:openai", "provider-cost-day"), heldBefore);
+  assert.equal(await bucket("provider:google", "provider-cost-day"), 0);
+  const entries = await payloadEntries(acquired.usageReservation.reservationId);
+  assert.equal(entries.some((entry) => entry.key === "provider:google"), false);
+});
+
+test("a month refusal rolls back the day hold taken moments before", async () => {
+  // The two checks run in one transaction precisely so this cannot leave a
+  // day hold behind for a call that was never authorized.
+  const { acquired } = await twoAttemptRun();
+  const guardrails = getProviderCostGuardrailLimits("google");
+  // Fill the month bucket to just under its limit, leaving the day bucket
+  // empty: the day check then passes and the month check refuses.
+  const starts = await periodStarts();
+  await prisma.chatUsageBucket.create({
+    data: {
+      key: "provider:google",
+      period: "provider-cost-month",
+      periodStart: starts.month,
+      count: guardrails.month - 1,
+    },
+  });
+  const result = await reserveFallbackProviderBudget({
+    reservationId: acquired.usageReservation.reservationId,
+    userId: acquired.usageReservation.userId ?? null,
+    heldProvider: "openai",
+    fallbackProvider: "google",
+    fallbackReservedMicroUsd: 1_000,
+    periodStarts: starts,
+  });
+  assert.equal(result.reserved, false);
+  assert.equal(
+    result.reserved === false && result.reason,
+    "fallback_budget_exhausted"
+  );
+  assert.equal(
+    await bucket("provider:google", "provider-cost-day"),
+    0,
+    "the day hold must roll back with the month refusal"
+  );
+  assert.equal(
+    await bucket("provider:google", "provider-cost-month"),
+    guardrails.month - 1
+  );
+});
+
+test("a reservation that already settled cannot be held against", async () => {
+  const { acquired } = await twoAttemptRun();
+  await settleChatUsage(acquired.usageReservation, {
+    inputTokens: 10_000,
+    outputTokens: 10_000,
+    outcome: "completed",
+  });
+  const result = await reserveFallbackProviderBudget({
+    reservationId: acquired.usageReservation.reservationId,
+    userId: acquired.usageReservation.userId ?? null,
+    heldProvider: "openai",
+    fallbackProvider: "google",
+    fallbackReservedMicroUsd: 500_000,
+    periodStarts: await periodStarts(),
+  });
+  assert.equal(result.reserved, false);
+  assert.equal(result.reserved === false && result.reason, "reservation_not_open");
+  assert.equal(await bucket("provider:google", "provider-cost-day"), 0);
+});
+
+test("a hold whose dispatch never happened is given back, payload included", async () => {
+  const { acquired } = await twoAttemptRun();
+  const starts = await periodStarts();
+  await reserveFallbackProviderBudget({
+    reservationId: acquired.usageReservation.reservationId,
+    userId: acquired.usageReservation.userId ?? null,
+    heldProvider: "openai",
+    fallbackProvider: "google",
+    fallbackReservedMicroUsd: 500_000,
+    periodStarts: starts,
+  });
+  const released = await releaseFallbackProviderBudget({
+    reservationId: acquired.usageReservation.reservationId,
+    userId: acquired.usageReservation.userId ?? null,
+    fallbackProvider: "google",
+    periodStarts: starts,
+  });
+  assert.equal(released, true);
+  assert.equal(await bucket("provider:google", "provider-cost-day"), 0);
+  assert.equal(await bucket("provider:google", "provider-cost-month"), 0);
+  const entries = await payloadEntries(acquired.usageReservation.reservationId);
+  assert.equal(
+    entries.some((entry) => entry.key === "provider:google"),
+    false,
+    "the payload must not keep claiming a hold that has been released"
+  );
+});
+
+test("a released hold leaves the turn settling as the single attempt it was", async () => {
+  // The path the route takes when the fallback's dispatch fails: one attempt,
+  // one settlement, and no trace of a provider that was never called.
+  const { acquired } = await twoAttemptRun();
+  const starts = await periodStarts();
+  await reserveFallbackProviderBudget({
+    reservationId: acquired.usageReservation.reservationId,
+    userId: acquired.usageReservation.userId ?? null,
+    heldProvider: "openai",
+    fallbackProvider: "google",
+    fallbackReservedMicroUsd: 500_000,
+    periodStarts: starts,
+  });
+  await releaseFallbackProviderBudget({
+    reservationId: acquired.usageReservation.reservationId,
+    userId: acquired.usageReservation.userId ?? null,
+    fallbackProvider: "google",
+    periodStarts: starts,
+  });
+  await settleChatUsage(acquired.usageReservation, {
+    inputTokens: 10_000,
+    outputTokens: 0,
+    outcome: "failed",
+  });
+  assert.equal(await bucket("provider:google", "provider-cost-day"), 0);
+  assert.equal(await bucket("provider:openai", "provider-cost-day"), 1_000_000);
+});
+
+test("reserve then settle lands each provider on its own actual cost", async () => {
+  // The end-to-end the previous version got wrong: the hold has to be in the
+  // durable payload, because settleChatUsage re-reads it from the row.
+  const { acquired } = await twoAttemptRun();
+  await reserveFallbackProviderBudget({
+    reservationId: acquired.usageReservation.reservationId,
+    userId: acquired.usageReservation.userId ?? null,
+    heldProvider: "openai",
+    fallbackProvider: "google",
+    fallbackReservedMicroUsd: 5_000_000,
+    periodStarts: await periodStarts(),
+  });
+  assert.equal(await bucket("provider:google", "provider-cost-day"), 5_000_000);
+
+  await settleChatUsage(
+    acquired.usageReservation,
+    { inputTokens: 10_000, outputTokens: 10_000, outcome: "completed" },
+    {
+      attempts: [
+        attempt({ attemptIndex: 0, outcome: "failed" }),
+        attempt({
+          attemptIndex: 1,
+          price: price("google", "fallback-model", 200, 200),
+          outputTokens: 10_000,
+          outcome: "completed",
+        }),
+      ],
+    }
+  );
+
+  // Each settles down to what it actually cost, from its own hold. The
+  // fallback's 5,000,000 hold is released to its real 4,000,000, and the
+  // primary's 2,000,000 hold to its real 1,000,000.
+  assert.equal(await bucket("provider:openai", "provider-cost-day"), 1_000_000);
+  assert.equal(await bucket("provider:openai", "provider-cost-month"), 1_000_000);
+  assert.equal(await bucket("provider:google", "provider-cost-day"), 4_000_000);
+  assert.equal(await bucket("provider:google", "provider-cost-month"), 4_000_000);
+});
+
+test("two concurrent fallbacks cannot both take the last of a budget", async () => {
+  const guardrails = getProviderCostGuardrailLimits("google");
+  const first = await twoAttemptRun();
+  const second = await twoAttemptRun();
+  const starts = await periodStarts();
+  // Room for exactly one of the two.
+  const amount = Math.floor(guardrails.day / 2) + 1;
+
+  const results = await Promise.all([
+    reserveFallbackProviderBudget({
+      reservationId: first.acquired.usageReservation.reservationId,
+      userId: first.acquired.usageReservation.userId ?? null,
+      heldProvider: "openai",
+      fallbackProvider: "google",
+      fallbackReservedMicroUsd: amount,
+      periodStarts: starts,
+    }),
+    reserveFallbackProviderBudget({
+      reservationId: second.acquired.usageReservation.reservationId,
+      userId: second.acquired.usageReservation.userId ?? null,
+      heldProvider: "openai",
+      fallbackProvider: "google",
+      fallbackReservedMicroUsd: amount,
+      periodStarts: starts,
+    }),
+  ]);
+
+  const taken = results.filter((result) => result.reserved);
+  assert.equal(taken.length, 1, "the budget admitted both requests");
+  assert.equal(await bucket("provider:google", "provider-cost-day"), amount);
 });
