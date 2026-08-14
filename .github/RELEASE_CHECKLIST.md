@@ -531,10 +531,29 @@ before it costs an outage.
       registry entry in `scripts/report-unswept-tables-core.mjs` with the reason
 
 The reservation tables (`ChatCreditReservation` and its image and memory
-siblings) are on the list deliberately and are **not** to be swept without a
-finance-ops decision: a settled reservation is the record linking a request to
-the credits it spent, so a sweep is a decision about billing evidence rather
-than about disk.
+siblings) are on the list deliberately and are **not** to be swept until the
+decision below is recorded. A settled reservation is the record linking a
+request to the credits it spent, so a sweep is a decision about billing
+evidence rather than about disk — but "billing evidence" justifies keeping a
+row for a stated period, never keeping it forever by default. The row also
+carries a user link, so how long it is kept is a privacy question as much as a
+finance one.
+
+**Both finance-ops and privacy/legal own this decision**, and it is not made
+until all three of these are written down:
+
+- [ ] **Retention period per status.** A `reserved` row that expired, a
+      `settled` row and a `refunded` row do not have the same evidential life;
+      one period for all three is a decision by omission
+- [ ] **What happens at the end of it** — deletion, or anonymisation that keeps
+      the aggregate and drops the user link. If anonymisation, name the columns
+- [ ] **Account deletion, disputes and backups.** Whether a deletion request
+      removes these rows or the retention period outlives it, what a live
+      chargeback or refund dispute freezes, and how far the period extends into
+      restorable backups
+
+Until then the tables stay on the report with no policy, which is the honest
+state: a table nobody has decided about should read as undecided, not as kept.
 
 ## 8. Unverified items and waivers
 
