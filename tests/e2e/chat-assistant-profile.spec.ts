@@ -66,7 +66,7 @@ const openAssistantMenu = async (page: Page) => {
 };
 
 test("a guest is never offered an assistant", async ({ page }) => {
-    // A guest has no profile of their own for the control to act on (§45).
+    // A guest has no profile of their own for the control to act on (§14).
     await page.goto("/chat?lang=en");
 
     await toolsMenuTrigger(page).click();

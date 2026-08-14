@@ -100,7 +100,7 @@ export async function POST(request: Request) {
                 ? payload.conversationId
                 : null;
 
-        // §8.1 invariant 1 and §32: both are read from the row rather than
+        // §8.1 invariant 1 and §10: both are read from the row rather than
         // defaulted, because the chat route reads them and a bundle priced
         // under different values than the send is stale on arrival — for
         // every message, not occasionally.

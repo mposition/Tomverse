@@ -1,4 +1,4 @@
-// Release C3a: the sentence §45 makes, held as code.
+// Release C3a: the sentence §14 makes, held as code.
 //
 // "profile은 plan·model·tool entitlement와 master toggle·memory mode·flag·
 // source lock을 우회할 수 없습니다." Every test here is one way a profile
@@ -93,7 +93,7 @@ test("a version published under an older prompt format is refused, not reinterpr
 /* ----------------------------------------------------- memory is an AND */
 
 test("a profile asking for memory gets none when the account says no", () => {
-    // The whole §45 sentence, in one assertion. If this ever becomes an OR, a
+    // The whole §14 sentence, in one assertion. If this ever becomes an OR, a
     // profile turns memory back on for an account that switched it off -- and
     // nothing else in the system would notice.
     assert.equal(

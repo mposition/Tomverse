@@ -233,7 +233,7 @@ export async function POST(req: Request) {
     }
     if (profileModels && normalizedModels.length === 0) {
       // Every model this profile names is retired or delisted. Falling back
-      // to the account default would be the substitution §45 refuses -- the
+      // to the account default would be the substitution §14 refuses -- the
       // conversation would look like the profile's and answer on a model the
       // profile never chose -- so the create is refused where the owner can
       // still go and republish.

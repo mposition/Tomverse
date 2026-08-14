@@ -1,5 +1,5 @@
 /**
- * One assistant profile (Release C, C3a; policy §14, §21, §43).
+ * One assistant profile (Release C, C3a; policy §14, §21).
  *
  * PATCH is identity only — name, icon, description. Instructions, models,
  * tools, memory policy and starters are a *version*, and editing them has to

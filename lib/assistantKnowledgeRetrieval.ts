@@ -11,7 +11,7 @@ import { prisma } from "@/lib/prisma";
 /**
  * Server-driven knowledge retrieval (Release C, C2).
  *
- * docs/policy/external-conversation-import-and-memory.md §44, and §8.1
+ * docs/policy/external-conversation-import-and-memory.md §14, §8.1
  * invariant 3, which this obeys for the same reason memory does: the client
  * never names what is retrieved. It sends its message; the server decides
  * which of the owner's chunks are relevant and which of them fit. There is no
@@ -25,7 +25,7 @@ import { prisma } from "@/lib/prisma";
 
 export type KnowledgeRetrievalInput = {
     userId: string;
-    /** The version's manifest decides which files are in scope (§43). */
+    /** The version's manifest decides which files are in scope (§14). */
     fileIds: readonly string[];
     /** The current user message. */
     query: string;

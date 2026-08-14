@@ -2,7 +2,7 @@
  * Binding a conversation to an assistant profile (C4).
  *
  * docs/policy/external-conversation-import-and-memory.md §14 ("버전 고정"),
- * §45.
+ * §14.
  *
  * §14 fixes the rule in one sentence: a new conversation pins to the latest
  * active version, an existing conversation keeps the version it started with,

@@ -38,10 +38,10 @@ export type MemoryInjectionRefusal =
     /**
      * Release C: an assistant profile whose version asked not to use account
      * memory. Deliberately NOT a branch of `decideMemoryInjection` — a profile
-     * is a request that can only narrow (§45), so the AND lives in
+     * is a request that can only narrow (§14), so the AND lives in
      * `resolveProfileMemoryUse` and this reason is what the caller records
      * once that AND has already said no. A second implementation of the same
-     * narrowing inside the gate is exactly what §45 asks not to happen.
+     * narrowing inside the gate is exactly what §14 asks not to happen.
      */
     | "profile_off";
 

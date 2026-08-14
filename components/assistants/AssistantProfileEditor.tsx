@@ -11,11 +11,11 @@ import { discardResponseBody } from "@/lib/discardResponseBody";
 /**
  * Creating and editing one profile (Release C, slice C3b).
  *
- * docs/policy/external-conversation-import-and-memory.md §14, §43, §46.
+ * docs/policy/external-conversation-import-and-memory.md §14, §21.
  *
  * ## Why identity and behaviour save separately
  *
- * §43 pins a conversation to the version it started on. Renaming a profile is
+ * §14 pins a conversation to the version it started on. Renaming a profile is
  * not a behaviour change and must not spend a revision; editing instructions
  * is and must. So this screen has two saves, and says so — one PATCH for the
  * name and one publish for everything else. Collapsing them into a single

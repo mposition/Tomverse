@@ -10,7 +10,7 @@ import { discardResponseBody } from "@/lib/discardResponseBody";
 /**
  * /settings/assistants — the profile list (Release C, slice C3b).
  *
- * docs/policy/external-conversation-import-and-memory.md §14, §46.
+ * docs/policy/external-conversation-import-and-memory.md §14, §21.
  *
  * Availability is resolved by the API rather than guessed here: the list
  * endpoint is the probe, and a 403 with `ASSISTANT_PROFILES_DISABLED` is what

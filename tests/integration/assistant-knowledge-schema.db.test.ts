@@ -7,7 +7,7 @@ import { prisma } from "@/lib/prisma";
 /**
  * Release C2 storage invariants against a real database.
  *
- * docs/policy/external-conversation-import-and-memory.md §14, §14.2, §20
+ * docs/policy/external-conversation-import-and-memory.md §14.2, §20
  * (릴리스 C). The pure modules decide what should be written; this is about
  * what the database refuses whatever the writer believed, and about the one
  * ordering that a comment cannot enforce — rows first, bytes second.

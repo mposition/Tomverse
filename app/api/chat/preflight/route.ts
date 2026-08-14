@@ -194,7 +194,7 @@ export async function POST(request: Request) {
         // §8.1 invariant 1: null until the conversation row is read, which is
         // also the "no conversation" case — both inherit the account default.
         let conversationMemoryMode: string | null = null;
-        // §32: the conversation's bound profile version, read here so the
+        // §10: the conversation's bound profile version, read here so the
         // priced context is the one the chat route will build.
         let profileVersionId: string | null = null;
         // A guest's transcript lives in their browser, so there is no server
@@ -287,7 +287,7 @@ export async function POST(request: Request) {
                 .addText(payload.prompt)
                 // The memory block's own text, not its token count -- counting
                 // the text is what lets a Hangul recalibration reach it.
-                // The whole §31 system block, not memory's share of it: a
+                // The whole §9.1 system block, not memory's share of it: a
                 // profile's instructions and its knowledge excerpts are input
                 // tokens too, and pricing one without the others reserves
                 // against a prompt that is not the one being sent.

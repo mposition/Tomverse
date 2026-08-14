@@ -169,7 +169,7 @@ test.describe("assistant profile settings", () => {
     test("renaming saves on its own and does not publish a revision", async ({
         page,
     }) => {
-        // §43: a rename is not a behaviour change. If it spent a revision,
+        // §14: a rename is not a behaviour change. If it spent a revision,
         // every typo in a description would become a snapshot a conversation
         // could pin to.
         await prepareGuestPage(page);

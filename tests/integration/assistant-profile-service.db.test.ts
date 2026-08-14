@@ -117,7 +117,7 @@ test("publishing moves the pointer and the version becomes active", async () => 
 });
 
 test("an edit publishes revision 2 and leaves revision 1 readable", async () => {
-    // §43's whole point: a conversation pinned to revision 1 keeps saying what
+    // §14's whole point: a conversation pinned to revision 1 keeps saying what
     // it ran under.
     const user = await createUser();
     const profile = await createAssistantProfile({

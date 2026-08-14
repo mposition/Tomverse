@@ -17,7 +17,7 @@ import { prisma } from "@/lib/prisma";
  * profile may run. What only a database settles is which row the runtime
  * actually reads: whether an owner boundary holds when a conversation names
  * another account's version, whether a superseded revision is refused rather
- * than silently upgraded to the current one, and whether the §32 identity the
+ * than silently upgraded to the current one, and whether the §10 identity the
  * bundle binds moves when the profile does.
  */
 
@@ -282,7 +282,7 @@ test("knowledge excerpts reach the block, fenced, and move the bundle identity",
 
 /* ------------------------------------------------- the assembled turn */
 
-test("the turn's system block is the profile's, in §31 order", async () => {
+test("the turn's system block is the profile's, in §9.1 order", async () => {
     const user = await createUser();
     const { version } = await publishProfile(user.id);
 

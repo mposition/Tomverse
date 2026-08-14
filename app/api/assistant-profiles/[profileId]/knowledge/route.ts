@@ -1,5 +1,5 @@
 /**
- * Knowledge files for one profile (Release C, C2; policy §14, §14.1, §21).
+ * Knowledge files for one profile (Release C, C2; policy §14.1, §21).
  *
  * Three verbs on one path, because they are three views of one resource:
  *

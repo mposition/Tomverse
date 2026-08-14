@@ -1,5 +1,5 @@
 /**
- * The owner's assistant profiles (Release C, C3a; policy §14, §21, §43).
+ * The owner's assistant profiles (Release C, C3a; policy §14, §21).
  *
  * List and create only. A profile's *behaviour* is a version, published
  * through `[profileId]/versions`, and keeping creation here identity-only is
@@ -76,7 +76,7 @@ const requireOwner = async () => {
     const session = await getServerSession(authOptions);
     const userId = session?.user?.id;
     if (!userId) return null;
-    // Guests are excluded outright (§22.2's shape, applied to profiles): a
+    // Guests are excluded outright (§8.1's shape, applied to profiles): a
     // profile carries instructions, a model choice and knowledge that all
     // belong to an account.
     if (!(await isAssistantProfilesEnabled())) {

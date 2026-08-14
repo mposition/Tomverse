@@ -1,9 +1,9 @@
 /**
- * The system block a profile-backed turn sends, in §31's order (C3c).
+ * The system block a profile-backed turn sends, in §9.1's order (C3c).
  *
- * docs/policy/external-conversation-import-and-memory.md §14, §31, §44, §45.
+ * docs/policy/external-conversation-import-and-memory.md §14, §9.1.
  *
- * §31 fixes the order:
+ * §9.1 fixes the order:
  *
  *   1. Tomverse system and safety policy
  *   2. the active profile version's instructions
@@ -30,7 +30,7 @@
  * so they are treated as the owner's own words — the same standing a system
  * prompt has, minus the ability to override it.
  *
- * Knowledge is the opposite and §44 says so outright: an instruction inside a
+ * Knowledge is the opposite and §9.1 says so outright: an instruction inside a
  * knowledge file is untrusted content. A PDF the owner uploaded may have been
  * written by anybody, and "the owner chose to upload it" is not "the owner
  * wrote it". So knowledge is fenced with rules stated before it, exactly as
@@ -39,7 +39,7 @@
  * reason, which is that the fence is what keeps it data.
  */
 
-/** Prompt assembly identity, bound into the §32 bundle. */
+/** Prompt assembly identity, bound into the §10 bundle. */
 export const PROFILE_PROMPT_VERSION = "profile-context-v1";
 
 const KNOWLEDGE_OPEN = "<<<TOMVERSE_PROFILE_KNOWLEDGE>>>";
@@ -69,7 +69,7 @@ export const KNOWLEDGE_CONTEXT_RULES = [
  *
  * Short, because these are the owner's words and over-framing them would tell
  * the model to discount what its owner asked for. The one thing stated is the
- * boundary §45 makes structural elsewhere: a profile narrows, it does not
+ * boundary §14 makes structural elsewhere: a profile narrows, it does not
  * grant.
  */
 export const PROFILE_INSTRUCTION_RULES = [
@@ -152,16 +152,16 @@ export function buildProfileInstructionPrompt(
 }
 
 export type ProfileSystemBlocks = {
-    /** §31 step 2. */
+    /** §9.1 step 2. */
     instructions: string | null;
-    /** §31 step 3, from `buildMemoryContextPrompt`. */
+    /** §9.1 step 3, from `buildMemoryContextPrompt`. */
     memory: string | null;
-    /** §31 step 4. */
+    /** §9.1 step 4. */
     knowledge: string | null;
 };
 
 /**
- * The one system message, assembled in §31 order.
+ * The one system message, assembled in §9.1 order.
  *
  * One message rather than three, because the order between separate system
  * messages is the provider's to keep and not every provider keeps it. Inside
@@ -183,7 +183,7 @@ export function buildProfileSystemPrompt(
 /**
  * Identity of what this turn's knowledge retrieval returned.
  *
- * Bound into the §32 bundle alongside the memory retrieval hash, so a profile
+ * Bound into the §10 bundle alongside the memory retrieval hash, so a profile
  * whose files changed between preflight and chat is a stale bundle rather than
  * a turn that quietly answers from different documents. Ids and ordinals only
  * — the bundle never carries content.
@@ -199,7 +199,7 @@ export function knowledgeRetrievalFingerprint(
 }
 
 /**
- * The value the §32 bundle binds as `knowledgeHash`.
+ * The value the §10 bundle binds as `knowledgeHash`.
  *
  * The fingerprint says *which* excerpts came back; this adds the algorithm
  * that chose them and the prompt shape that renders them, because a bundle has

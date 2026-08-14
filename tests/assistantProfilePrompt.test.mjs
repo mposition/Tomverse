@@ -1,9 +1,9 @@
-// Release C3c: §31's order, and the boundary between what the owner wrote and
+// Release C3c: §9.1's order, and the boundary between what the owner wrote and
 // what they merely uploaded.
 //
 // Two properties are under test. The order is one of them and is easy to state:
 // instructions, then memory, then knowledge, in one message. The other is the
-// one that matters more — a knowledge file is untrusted content (§44), and the
+// one that matters more — a knowledge file is untrusted content (§9.1), and the
 // fence around it is what keeps an instruction inside a PDF from becoming an
 // instruction to the model.
 

@@ -76,6 +76,7 @@
     "check:release-gate-coverage": "node scripts/check-release-gate-coverage.mjs",
     "check:ui-tier-coverage": "node scripts/check-ui-tier-coverage.mjs",
     "check:doc-references": "node scripts/check-doc-references.mjs",
+    "check:policy-section-references": "node scripts/check-policy-section-references.mjs",
     "check:locale-translation": "node --import tsx scripts/check-locale-translation.mjs",
     "check:api-cache-control": "node --conditions=react-server --import tsx scripts/check-api-cache-control.mjs",
     "check:enum-constraints": "node --conditions=react-server --import tsx scripts/check-enum-constraints.mjs",

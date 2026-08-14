@@ -21,7 +21,7 @@ import { prisma } from "@/lib/prisma";
  * Creating, editing and publishing assistant profiles (Release C, C3a).
  *
  * docs/policy/external-conversation-import-and-memory.md §14, §18 (릴리스 C),
- * §21, §43.
+ * §21, §14.
  *
  * The division of labour is the same one C1 set up and is worth keeping:
  * `lib/assistantProfileVersioning.ts` decides *what the next snapshot should
@@ -190,7 +190,7 @@ export const readAssistantProfile = async (
  * Deliberately cannot touch instructions, models, tools, memory policy or
  * starters: those are a version's, and changing one has to publish a revision
  * so the conversations pinned to the old one keep saying what they ran under
- * (§43). A PATCH that could edit them would be exactly the retroactive change
+ * (§14). A PATCH that could edit them would be exactly the retroactive change
  * the version table exists to prevent.
  */
 export const updateAssistantProfileIdentity = async (input: {

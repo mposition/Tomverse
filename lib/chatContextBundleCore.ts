@@ -54,7 +54,7 @@ export type ContextBundleFingerprintInput = {
     /** Prompt assembly identity (§9.1), e.g. "mem-context-v1". */
     promptVersion: string;
     /**
-     * Release C (§32): identity of this turn's profile knowledge retrieval —
+     * Release C (§10): identity of this turn's profile knowledge retrieval —
      * which excerpts came back, plus the algorithm and prompt shape that chose
      * and rendered them. `"none"` when no knowledge was retrieved.
      *

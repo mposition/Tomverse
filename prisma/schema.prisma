@@ -243,7 +243,7 @@ model Conversation {
   routerRecoveryModelId String?
 
   /// The assistant profile version this conversation is pinned to (release C,
-  /// policy §43). Set once when the conversation starts and never rewritten by
+  /// policy §14). Set once when the conversation starts and never rewritten by
   /// a later edit to the profile: a published revision is what this
   /// conversation ran under, and moving it is an explicit user action.
   ///
@@ -2405,7 +2405,7 @@ model UserMemorySettings {
 /// which is exactly the retroactive application §14 forbids.
 ///
 /// Private by construction: there is no share token, no visibility column and
-/// no public listing. §42's non-goals (marketplace, sharing, selling) are held
+/// no public listing. §14's non-goals (marketplace, sharing, selling) are held
 /// by the absence of a column to set, not by a check somebody can forget.
 model AssistantProfile {
   id     String @id @default(cuid())
@@ -2419,7 +2419,7 @@ model AssistantProfile {
   icon String?
 
   /// Presentation, not behaviour -- so it is not part of the version snapshot
-  /// (§43 lists what a version records, and this is not in it).
+  /// (§14 lists what a version records, and this is not in it).
   description String?
 
   /// The version a new conversation pins to. Nullable because a profile row
@@ -2438,14 +2438,14 @@ model AssistantProfile {
   @@index([userId, updatedAt])
 }
 
-/// One immutable published snapshot of a profile (§43).
+/// One immutable published snapshot of a profile (§14).
 ///
 /// Nothing here is ever updated after insert. Editing a profile publishes a
 /// new revision; the row a conversation pinned keeps saying what that
 /// conversation actually ran under. There is no `updatedAt` on purpose -- a
 /// column that can change is an invitation to change it.
 ///
-/// `knowledgeManifest` is audit metadata and NOT a retrieval source (§14, §43).
+/// `knowledgeManifest` is audit metadata and NOT a retrieval source (§14).
 /// It can prove a file was listed at publish time; it cannot resurrect a
 /// deleted one, and retrieval only ever reads chunks that currently exist and
 /// are accessible. `lib/assistantProfileVersioning.ts` resolves a manifest
@@ -2456,7 +2456,7 @@ model AssistantProfileVersion {
   profile   AssistantProfile @relation("AssistantProfileVersions", fields: [profileId], references: [id], onDelete: Cascade)
 
   /// The account that owns this snapshot, and -- today -- the account that
-  /// published it, which is what §43's "created by" asks for. Carried here as
+  /// published it, which is what §14's "created by" asks for. Carried here as
   /// well as on the profile so ownership is a column rather than a join: the
   /// account export scopes by it, the deletion cascade reaches it directly,
   /// and the data-domain registry can see that this table holds user data.
@@ -2476,7 +2476,7 @@ model AssistantProfileVersion {
   /// Model selection, tool policy, memory policy and conversation starters,
   /// each a JSON snapshot of what the user chose. Snapshots rather than
   /// foreign keys: a model that is later retired must not silently change what
-  /// a past conversation is recorded as having run under. §45 refuses the
+  /// a past conversation is recorded as having run under. §14 refuses the
   /// version at runtime instead (`ASSISTANT_PROFILE_MODEL_UNAVAILABLE`), and
   /// never substitutes a different model.
   models       Json
@@ -2489,7 +2489,7 @@ model AssistantProfileVersion {
 
   /// Which retrieval algorithm and prompt shape this snapshot was built for,
   /// so a version published under an older one is refused rather than
-  /// reinterpreted (§45).
+  /// reinterpreted (§14).
   retrievalVersion    Int
   promptFormatVersion String
 
@@ -2516,7 +2516,7 @@ model AssistantProfileVersion {
 /// and "delete the knowledge file" the same operation, which they are not.
 ///
 /// No embeddings and no vector column: retrieval v1 is lexical over
-/// `AssistantKnowledgeChunk.searchTerms` (§44). Adding one later is a separate
+/// `AssistantKnowledgeChunk.searchTerms` (§14). Adding one later is a separate
 /// policy, privacy, cost and eval decision, not a migration.
 model AssistantKnowledgeFile {
   id        String           @id @default(cuid())
@@ -2575,7 +2575,7 @@ model AssistantKnowledgeFile {
   @@index([processingStatus, createdAt])
 }
 
-/// One retrievable piece of a knowledge file (§44).
+/// One retrievable piece of a knowledge file (§14).
 ///
 /// Chunks are derived, not authored: deleting and re-processing a file
 /// replaces them wholesale, and nothing outside this table references a chunk
@@ -2596,7 +2596,7 @@ model AssistantKnowledgeChunk {
 
   content String
 
-  /// Lexical retrieval terms (§44, retrieval v1 -- no embeddings). The GIN
+  /// Lexical retrieval terms (§9, retrieval v1 -- no embeddings). The GIN
   /// index is created by raw SQL in the migration, mirroring MemoryItem.
   searchTerms      String[] @default([])
   retrievalVersion Int      @default(1)

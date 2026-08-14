@@ -1,6 +1,6 @@
 // Release C1: what a profile version snapshot promises.
 //
-// The three properties under test are the ones §14 and §43 make contractual,
+// The three properties under test are the ones §14 make contractual,
 // and each is a thing that degrades silently if it breaks: a published version
 // that can be edited, a stale editor that wins, and a manifest that appears to
 // still have a deleted file. None of those produce an error at the time --
