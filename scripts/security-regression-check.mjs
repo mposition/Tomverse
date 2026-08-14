@@ -3374,6 +3374,17 @@ const checks = [
         'system_prompt: ""',
       ].every((field) => source.includes(field)),
   },
+  {
+    name: "the fal thinking cap and the fal request agree about thinking",
+    file: "lib/falImageRequest.ts",
+    // These two drifted apart within a day of being written: the cap was
+    // described as a bound that held "whatever the request asks", while the
+    // request had already been pinned to ask for `high`, and the policy text
+    // still said high thinking was off. The number and the field are one
+    // decision -- 2,000 microUSD of a 87,000 worst case and a floor of 97 --
+    // and nothing but a check keeps them saying the same thing.
+    test: (source) => source.includes('thinking_level: "high"'),
+  },
 ];
 
 const failures = [];
