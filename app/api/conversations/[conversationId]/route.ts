@@ -14,6 +14,11 @@ import {
 } from "@/lib/conversationMemoryMode";
 import { recordConversationMemoryOff } from "@/lib/memoryModeSignals";
 import {
+  ConversationProfileError,
+  readConversationProfile,
+  resolveProfileBinding,
+} from "@/lib/conversationProfileService";
+import {
   clampRuntimeSelectedModels,
   isEnabledRuntimeModelId,
 } from "@/lib/modelRegistry";
@@ -73,6 +78,12 @@ const updateConversationSchema = z
     webSearchMode: z.enum(WEB_SEARCH_MODES).optional(),
     memoryMode: z.enum(CONVERSATION_MEMORY_MODES).optional(),
     selectionMode: z.enum(SELECTION_MODES).optional(),
+    // §14: a profile id, or null to detach. Never a version id -- the server
+    // decides which revision is current, and re-sending the same profile id
+    // is how the explicit move to a newer revision is expressed.
+    assistantProfileId: z
+      .union([z.string().trim().min(1).max(100), z.null()])
+      .optional(),
   })
   .strict()
   .refine(
@@ -84,7 +95,8 @@ const updateConversationSchema = z
       body.projectId !== undefined ||
       body.webSearchMode !== undefined ||
       body.memoryMode !== undefined ||
-      body.selectionMode !== undefined,
+      body.selectionMode !== undefined ||
+      body.assistantProfileId !== undefined,
     { message: "At least one update is required." }
   );
 const MESSAGE_PAGE_SIZE = 50;
@@ -216,6 +228,7 @@ export async function GET(
         createdAt: true,
         updatedAt: true,
         password: true,
+        assistantProfileVersionId: true,
       },
     });
 
@@ -325,6 +338,14 @@ export async function GET(
           !!conversation.shareExpiresAt &&
           conversation.shareExpiresAt > new Date(),
         shareExpiresAt: conversation.shareExpiresAt?.toISOString() || null,
+        // Server-computed (§14): which revision this conversation pinned to,
+        // and whether the profile has since published a newer one. A screen
+        // that worked this out for itself would be a second implementation of
+        // the pinning rule.
+        assistantProfile: await readConversationProfile({
+          userId,
+          profileVersionId: conversation.assistantProfileVersionId,
+        }),
         shareToken: undefined,
         shareSnapshot: undefined,
         password: undefined
@@ -379,6 +400,8 @@ export async function PATCH(
                 selectionMode: true,
                 routerModelId: true,
                 routerChallengerTurns: true,
+                assistantProfileVersionId: true,
+                assistantProfileVersion: { select: { profileId: true } },
             }
         });
 
@@ -542,6 +565,27 @@ export async function PATCH(
       updateData.memoryMode = body.memoryMode;
     }
 
+    // §14. Re-sending the same profile id is not a no-op: it is how the owner
+    // moves this conversation onto a revision they have since published. The
+    // pinned version id is what decides whether anything changed, which is
+    // why the comparison is here and not in the planner.
+    if (body.assistantProfileId !== undefined) {
+      const binding = await resolveProfileBinding({
+        userId,
+        requestedProfileId: body.assistantProfileId,
+        boundProfileId: existingConv.assistantProfileVersion?.profileId ?? null,
+      });
+      if (binding.outcome === "bind") {
+        if (binding.profileVersionId !== existingConv.assistantProfileVersionId) {
+          updateData.assistantProfileVersion = {
+            connect: { id: binding.profileVersionId },
+          };
+        }
+      } else if (binding.outcome === "detach") {
+        updateData.assistantProfileVersion = { disconnect: true };
+      }
+    }
+
     if (body.selectionMode !== undefined) {
       // `auto` is refused unless this account would actually be routed.
       // Storing it anyway would leave a conversation marked Auto that every
@@ -654,6 +698,10 @@ export async function PATCH(
           updatedConversation.shareExpiresAt > new Date(),
         shareExpiresAt:
           updatedConversation.shareExpiresAt?.toISOString() || null,
+        assistantProfile: await readConversationProfile({
+          userId,
+          profileVersionId: updatedConversation.assistantProfileVersionId,
+        }),
         shareToken: undefined,
         shareSnapshot: undefined,
         password: undefined
@@ -671,6 +719,13 @@ export async function PATCH(
 
     const lockError = lockErrorResponse(error);
     if (lockError) return lockError;
+
+    if (error instanceof ConversationProfileError) {
+      return NextResponse.json(
+        { error: error.message, code: error.code },
+        { status: error.status }
+      );
+    }
 
 	console.error("Failed to update conversation:", error);	  
     return NextResponse.json({ error: "Failed to update conversation." }, { status: 500 });

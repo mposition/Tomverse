@@ -208,6 +208,9 @@ run(
     // owner boundary, superseded revisions, and the §32 identity the bundle
     // binds.
     "tests/integration/chat-profile-context.db.test.ts",
+    // Release C4: §14's version pinning -- which rows the resolver reads, and
+    // what a conversation reports once the owner has published past it.
+    "tests/integration/conversation-profile-binding.db.test.ts",
     // PRIVACY-01/02. These settle what a source scan cannot: that no withheld
     // column reaches the export, that no identifier survives an account
     // deletion, and that a download ticket is spent exactly once under

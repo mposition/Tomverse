@@ -94,9 +94,16 @@ const ENGLISH_STRING_CEILING = {
   // "Name" and "Revision" the same way. All three were checked against the
   // rest of that block, which is translated -- they are cognates, not copy
   // that got skipped.
+  //
+  // +1 fr again from the conversation's assistant picker (release C4):
+  // French spells "Assistant" the same way English does, and German spells
+  // "Revision {revision}" the same way -- the same cognate the translation
+  // check allowlists for chat.toolsAssistantRevision. The rest of that block
+  // -- the "no assistant" option, the superseded line and the empty state --
+  // is translated in both.
   zh: 10,
-  fr: 27,
-  de: 22,
+  fr: 28,
+  de: 23,
   es: 16,
   pt: 13,
 };
