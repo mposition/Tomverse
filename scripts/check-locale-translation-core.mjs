@@ -75,6 +75,12 @@ export const SHARED_STRING_ALLOWLIST = [
     reason: "'Contradictions' is the French word as well.",
   },
   {
+    key: "assistantProfiles.historyEntry",
+    locales: ["de"],
+    reason:
+      "'Revision' is the German word too, and the rest of the string is the number. The other locales translate it (révision, revisión, revisão, 修订, 개정).",
+  },
+  {
     key: "externalImport.messagesCount",
     locales: ["fr"],
     reason: "'{count} messages' is identical in French.",

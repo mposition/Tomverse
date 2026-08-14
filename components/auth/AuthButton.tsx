@@ -1755,6 +1755,27 @@ export function AuthButton({
                                                     testId="memory-entry"
                                                     linkTestId="memory-entry-link"
                                                 />
+                                                {/* A profile is personalisation
+                                                    the account owns, so it is a
+                                                    row in this same group rather
+                                                    than a card beside it
+                                                    (settings-navigation contract
+                                                    §2). After memory because a
+                                                    profile may use approved
+                                                    memory and never the other
+                                                    way round. */}
+                                                <SettingsEntryRow
+                                                    section="assistants"
+                                                    href="/settings/assistants"
+                                                    icon={Bot}
+                                                    title={t("assistantProfiles.dataTabTitle")}
+                                                    description={t("assistantProfiles.dataTabDescription")}
+                                                    status={t("assistantProfiles.dataTabStatus")}
+                                                    actionLabel={t("assistantProfiles.dataTabOpen")}
+                                                    onNavigate={closeSettingsModal}
+                                                    testId="assistants-entry"
+                                                    linkTestId="assistants-entry-link"
+                                                />
                                                 {/* The unified export. The
                                                     conversations-only download
                                                     below is a different thing
