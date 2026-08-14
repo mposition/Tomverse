@@ -96,6 +96,19 @@ let world = freshWorld();
 let installed = false;
 
 /**
+ * The `ApiSecurityError` class the route will actually see, captured from the
+ * very object the mock is built out of.
+ *
+ * Not re-imported in the test body. A second `await import()` of a mocked
+ * module can hand back a different copy of the class than the one
+ * `apiSecurityResponse` closes over, and then its `instanceof` check fails, the
+ * 429 branch is skipped, and the assertion reads as "the route answered 500"
+ * when what actually happened is that the test built its error from the wrong
+ * realm. That is load-order dependent, so it passed locally and failed in CI.
+ */
+let apiSecurityErrorClass: typeof import("../../lib/apiSecurity").ApiSecurityError;
+
+/**
  * Any Prisma method that is not a read. Reached only if the feature grows a
  * write, which is the thing this route promises never to do.
  */
@@ -162,6 +175,8 @@ async function loadRoute(): Promise<{
       string,
       unknown
     >;
+    apiSecurityErrorClass =
+      realApiSecurity.ApiSecurityError as typeof apiSecurityErrorClass;
     mock.module(mod("lib/apiSecurity.ts"), {
       namedExports: {
         ...realApiSecurity,
@@ -335,17 +350,10 @@ test("an unknown promotion is 404 and writes no audit entry", async () => {
 });
 
 test("the rate limit is consumed before any read", async () => {
-  world.rateLimitError = Object.assign(new Error("rate limited"), {
-    name: "ApiSecurityError",
-  });
-  const { ApiSecurityError } = (await import(mod("lib/apiSecurity.ts"))) as {
-    ApiSecurityError: new (
-      status: number,
-      code: string,
-      message: string
-    ) => Error;
-  };
-  world.rateLimitError = new ApiSecurityError(
+  await loadRoute();
+  // `apiSecurityErrorClass`, never a fresh `await import()` of the mocked
+  // module: see the note where it is captured.
+  world.rateLimitError = new apiSecurityErrorClass(
     429,
     "RATE_LIMITED",
     "Too many requests."
