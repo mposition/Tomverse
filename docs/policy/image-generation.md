@@ -905,3 +905,81 @@ fal.ai와 ai.google.dev를 이 저장소의 실행 환경에서 직접 읽었다
 **판매 크레딧은 별도 승인이다.** 바닥값 97은 승인가가 아니다. Grok 1K가 바닥값
 62에 승인가 75(여유 21%)인 것과 같은 비율이면 후보는 115~120이고, 이는 결정안에
 올릴 범위이지 결정이 아니다. `prices`는 승인 전까지 비워 둔다.
+
+### 16.5 승인과 요청 계약 (2026-08-14)
+
+**승인 (제품 책임자, 2026-08-14)**
+
+> `fal-ai/nano-banana-2`, 1K, 1장, High thinking, Web Search 비활성 조건에서
+> 최대 원가 87,000µUSD, 정책 바닥 97크레딧을 확인하고 판매가 120크레딧을
+> 승인한다. 옵션 확대는 별도 가격 검증과 승인을 요구한다.
+
+120은 크레딧당 725µUSD다. Grok Imagine 1K가 55,000 ÷ 75 = 733µUSD이므로 두
+이웃 모델이 같은 여유를 갖는다. 115였다면 757µUSD로 여유가 줄고 화면에서
+설명하기도 어렵다.
+
+**바닥값 97은 설정에 딸린 숫자다.** `thinking_level`을 생략하면 최대 원가는
+85,000µUSD, 바닥은 95다. 가격을 97로 잡고 요청 모드를 적지 않으면 감사 산식과
+코드가 어긋난다. 그래서 아래 필드 목록이 가격 결정의 일부이지 구현 세부가
+아니다.
+
+#### 고정 요청 필드 — fal 공식 스키마에서 확인 (2026-08-14)
+
+`https://fal.ai/models/fal-ai/nano-banana-2/api`
+
+| 필드 | 고정값 | 스키마가 말하는 기본값 | 고정하는 이유 |
+|---|---|---|---|
+| `num_images` | `1` | `1` | 고정가는 한 장에 대한 것이다 |
+| `resolution` | `"1K"` | `"1K"` | 2K·4K는 1.5배·2배로 별도 가격·별도 승인 |
+| `aspect_ratio` | `"1:1"` | **`"auto"`** | **`auto`는 "let the model decide based on the prompt"** — 검증된 가격과 `sizes: ["1024x1024"]` 계약이 모델 판단에 달리게 된다 |
+| `thinking_level` | `"high"` | 없음(생략 시 비활성) | 승인된 원가 산식의 2,000µUSD가 이 값이다 |
+| `enable_web_search` | `false` | 문서에 명시 없음 | $0.015 별도 과금. 기본값에 기대지 않는다 |
+| `limit_generations` | `true` | `true` | 프롬프트가 여러 장을 지시해도 무시하고 중간 이미지도 버린다 |
+| `system_prompt` | `""` | `""` | 우리가 넣지 않은 지시가 결과와 원가에 개입하지 않게 한다 |
+| `output_format` | 명시 | `"png"` | 저장 MIME은 응답이 말한 것을 기록하되, 요청은 가정하지 않는다 |
+| `safety_tolerance` | 명시 | `"4"` (1이 가장 엄격, 6이 가장 느슨) | moderation 기본값을 조용히 물려받지 않는다 |
+
+**`aspect_ratio`는 제시된 목록에 없었고, 빠지면 계약이 깨진다.** 스키마 기본값이
+`auto`이므로 명시하지 않으면 1:1이 아닌 이미지가 올 수 있다.
+
+추가 요구사항:
+
+- **서버가 위 값을 사용자 입력으로 덮어쓸 수 없다.** 프롬프트만 사용자 것이다.
+- 반환 이미지가 정확히 1장이 아니면 실패 처리한다(직접 Google 경로와 같은 규칙).
+- 다운로드 URL은 host allowlist로 제한하고, MIME·파일 크기·실제 해상도를
+  저장 전에 검증한다.
+- `X-Fal-No-Retry`를 보낸다. 이유는 원가 배수가 아니라 **성공 후 응답 유실 뒤의
+  재시도가 두 번째 이미지를 만들고 두 번 과금**하기 때문이다(§16.3).
+- `X-Fal-Store-IO: 0`과 `X-Fal-Object-Lifecycle-Preference`를 **둘 다** 보낸다.
+  전자는 JSON payload만 막고 CDN 파일은 막지 않는다.
+- `sync_mode: true`는 검토 대상이다. 스키마상 "the media will be returned as a
+  data URI and the output data won't be available in the request history"이므로
+  공개 CDN 의존을 줄인다. 1K 이미지 크기가 서버 처리에 무리가 없을 때만 쓰고,
+  쓰더라도 `X-Fal-Store-IO: 0`은 유지한다.
+
+#### 가격 drift 검사의 범위
+
+fal이 "Pricing is subject to change"라고 공표하므로 대조가 유일한 안전장치다.
+다만 **fail-closed의 대상은 이 모델이지 서비스 전체가 아니다.**
+
+- 배포 전 `GET /v1/models/pricing?endpoint_id=fal-ai/nano-banana-2`로 승인
+  가격($0.08 + high $0.002)과 정확히 대조한다.
+- 불일치하면 **Nano Banana 2만** 활성화하지 않는다.
+- 런타임 billable unit을 정산 snapshot에 저장하고, 승인값을 넘으면 신규 fal
+  요청을 차단하고 경고한다.
+- **fal pricing API 장애가 `/api/ready`를 503으로 만들지 않는다.** 채팅과
+  OpenAI·xAI 이미지까지 함께 멈추면 그것은 안전장치가 아니라 단일 장애점이다.
+
+#### 활성화 순서
+
+승인이 필요한 금액은 판매가 하나가 아니다.
+
+1. 판매가 120크레딧 승인 — **완료 (2026-08-14)**
+2. adapter·테스트 구현. 모델은 `operational_hold` 유지
+3. **fal credential, prepaid 충전액과 자동충전 여부, 일간·월간 provider budget
+   승인** → 환경변수 **선배포**
+4. 가격 drift 대조 통과
+5. registry 활성화
+
+3번은 아직 승인되지 않았다. 2번은 그것과 무관하게 진행할 수 있다.
+

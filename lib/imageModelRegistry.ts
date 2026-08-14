@@ -455,8 +455,16 @@ const FAL_NANO_BANANA_2: ImageModelProfile = {
   // explain. 2K and 4K are sold at multiples and can be added as their own
   // decisions once the first one is real.
   sizes: ["1024x1024"],
-  qualities: ["low"],
-  prices: [],
+  // Same tier as Grok Imagine, which is the model it sits beside in the
+  // picker. A single-tier model still has to say which shelf it is on.
+  qualities: ["medium"],
+  // 120 approved 2026-08-14 against a floor of 97. That is 725 microUSD per
+  // credit, within a rounding error of Grok Imagine's 733 (55,000 over 75), so
+  // the two neighbours carry the same headroom rather than one quietly
+  // carrying less. 115 would have been 757 and harder to explain on screen.
+  prices: [
+    { quality: "medium", size: "1024x1024", credits: 120, outputCostMicroUsd: 80_000 },
+  ],
   latencyClass: "balanced",
   // Inherited from the underlying Google model rather than asserted about the
   // gateway. Worth re-reading against a real response before this is enabled,
@@ -470,23 +478,26 @@ const FAL_NANO_BANANA_2: ImageModelProfile = {
       "https://fal.ai/models/fal-ai/nano-banana-2",
       "https://fal.ai/docs/documentation/model-apis/pricing",
     ],
-    // 2,000, not 0, and the difference is the difference between a cap and an
-    // assumption. fal charges for reasoning only as a named surcharge -- "If
-    // high thinking is used, an additional $0.002 will be charged" -- and this
-    // integration does not ask for it, so today the figure billed is zero.
-    // Zero would then be true of the configuration rather than of the model,
-    // and a cap that holds only while nobody changes a flag is the kind of
-    // bound this repository has already been burned by. 2,000 is an upper
-    // bound on the surcharge whatever the request asks for, which is what the
-    // word means. It costs 2 credits at the ceiling.
+    // 2,000 because the request asks for it, not as a safety margin. fal's
+    // schema says of `thinking_level`: "When set, enables model thinking with
+    // the given level ('minimal' or 'high') ... Omit to disable", and its
+    // pricing says "If high thinking is used, an additional $0.002 will be
+    // charged". The approved configuration sends `high`, so 2,000 is the
+    // surcharge this integration intends to incur every time.
+    //
+    // Stated that way on purpose. A cap of 2,000 beside an adapter that omits
+    // the field would price a request the product does not make, and a cap of
+    // 0 beside an adapter that sends `high` would underprice the one it does.
+    // The number and the request have to be one decision, which is why the
+    // pinned field list lives in policy §16.5 rather than in the adapter alone.
     //
     // Web search is a separate surcharge ($0.015) and is deliberately not
-    // folded in here: it is not reasoning, and the request cannot enable it.
-    // That makes it a property the adapter has to keep true, not a number.
+    // folded in: it is not reasoning, and the request pins it off. That makes
+    // it a property the adapter has to keep true, not a number to carry.
     thinkingCapMicroUsd: 2_000,
   },
   disabledNote:
-    "Google's Gemini 3.1 Flash Image, supplied through fal. Price verified 2026-08-14 at $0.08 per 1K image, billed only on success; worst case 87,000 microUSD (80,000 image + 5,000 prompt budget + 2,000 high-thinking cap) giving a floor of 97 credits. Held on operations, not price: still needs an approved sale credit, a fal adapter, and IMAGE_PROVIDER_FAL_COST_* budgets deployed first. The adapter must set X-Fal-No-Retry (fal retries up to 10 times by default, and a retry after an invisible success bills a second image), X-Fal-Store-IO: 0, and X-Fal-Object-Lifecycle-Preference -- whose default fal documents as forever and publicly readable. Request pinned to 1K, one image, no web search, no high thinking. The direct Google route stays disabled permanently: max_output_tokens was measured on 2026-08-14 and does not bound the billable sum. See docs/policy/image-generation.md §16.",
+    "Google's Gemini 3.1 Flash Image, supplied through fal. Price verified 2026-08-14 at $0.08 per 1K image, billed only on success; worst case 87,000 microUSD (80,000 image + 5,000 prompt budget + 2,000 high-thinking surcharge) giving a floor of 97 credits, sale price 120 approved 2026-08-14. Held on operations, not price: still needs a fal adapter, and IMAGE_PROVIDER_FAL_COST_* budgets plus a prepaid balance, both separately approved and deployed first. The adapter must set X-Fal-No-Retry (fal retries up to 10 times by default, and a retry after an invisible success bills a second image), X-Fal-Store-IO: 0, and X-Fal-Object-Lifecycle-Preference -- whose default fal documents as forever and publicly readable. Request pinned to 1K, one image, no web search, no high thinking. The direct Google route stays disabled permanently: max_output_tokens was measured on 2026-08-14 and does not bound the billable sum. See docs/policy/image-generation.md §16.",
 };
 
 // Registered, not enabled. The professional-tier candidate.
