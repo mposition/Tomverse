@@ -8,6 +8,7 @@ import {
   type BillingCurrency,
 } from "@/lib/billingMarkets";
 import { getDefaultBillingPlan } from "@/lib/billingPlanDefaults";
+import { discardResponseBody } from "@/lib/discardResponseBody";
 
 type BillingPlan = {
   id: "free" | "pro" | "max";
@@ -88,7 +89,9 @@ export function usePublicBilling() {
 
   useEffect(() => {
     fetch(getBillingConfigUrl())
-      .then((response) => (response.ok ? response.json() : null))
+      .then((response) =>
+        response.ok ? response.json() : discardResponseBody(response).then(() => null)
+      )
       .then((data: BillingConfig | null) => {
         if (data) setConfig(data);
       })

@@ -6,6 +6,7 @@ import type {
   AccountPlanTier,
   PricingBillingInterval,
 } from "@/lib/purchaseIntent";
+import { discardResponseBody } from "@/lib/discardResponseBody";
 
 /**
  * What the pricing page needs to know about the visitor before it can render a
@@ -101,12 +102,15 @@ export function usePricingAccount(): PricingAccountState {
     })
       .then(async (response) => {
         if (response.status === 401) {
+          await discardResponseBody(response);
           if (!cancelled) {
             setAccount((current) => ({ ...current, sessionExpired: true }));
           }
           return null;
         }
-        return response.ok ? response.json() : null;
+        return response.ok
+          ? response.json()
+          : discardResponseBody(response).then(() => null);
       })
       .then((data) => {
         if (cancelled || !data) return;

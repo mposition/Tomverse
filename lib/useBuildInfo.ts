@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import type { PublicBuildInfo } from "@/lib/buildInfo";
+import { discardResponseBody } from "./discardResponseBody";
 
 // Client-side counterpart to lib/buildInfo.ts: fetches the same public
 // /api/build-info endpoint the server itself is built from, so the UI and
@@ -15,7 +16,9 @@ export function useBuildInfo() {
   useEffect(() => {
     let cancelled = false;
     fetch("/api/build-info", { cache: "no-store" })
-      .then((response) => (response.ok ? response.json() : null))
+      .then((response) =>
+        response.ok ? response.json() : discardResponseBody(response).then(() => null)
+      )
       .then((data: PublicBuildInfo | null) => {
         if (!cancelled && data) setBuildInfo(data);
       })

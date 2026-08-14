@@ -13,6 +13,7 @@ import { useModalDialog } from "@/components/useModalDialog";
 import { DesktopChatShell } from "@/components/chat/DesktopChatShell";
 import { MobileChatShell } from "@/components/chat/MobileChatShell";
 import { prepareChatContextBundle } from "@/lib/chatContextBundleClient";
+import { discardResponseBody } from "@/lib/discardResponseBody";
 import { createSharedPendingRequest } from "@/lib/sharedPendingRequest";
 import {
   ComparisonReviewDialog,
@@ -851,7 +852,13 @@ export function ChatPageClient({
   const refreshGuestUsage = useCallback(() => {
     if (!isGuestMode) return;
     fetch("/api/user/guest-usage", { cache: "no-store" })
-      .then((res) => (res.ok ? res.json() : null))
+      .then((res) =>
+        // The error body is read and discarded rather than left unread; see
+        // lib/discardResponseBody.ts. This is the call that made it visible:
+        // with the database unreachable this endpoint answers 500, and /chat
+        // then never reached network idle again.
+        res.ok ? res.json() : discardResponseBody(res).then(() => null)
+      )
       .then((data) => {
         if (data && typeof data.used === "number" && typeof data.limit === "number") {
           setGuestUsage({
@@ -1628,7 +1635,11 @@ export function ChatPageClient({
 
     if (!normalizeBillingPlanLabel(plan)) {
       fetch("/api/user/usage", { cache: "no-store" })
-        .then((response) => (response.ok ? response.json() : null))
+        .then((response) =>
+          response.ok
+            ? response.json()
+            : discardResponseBody(response).then(() => null)
+        )
         .then((usage) => {
           const accountPlan = normalizeBillingPlanLabel(usage?.plan);
           if (accountPlan && accountPlan !== "Free") {
@@ -1933,6 +1944,7 @@ export function ChatPageClient({
     try {
 	  const res = await fetch(`/api/conversations`, { cache: "no-store" });
       if (res.ok) setConversations(await res.json());
+      else await discardResponseBody(res);
     } catch (error) {
       console.error("Failed to load conversations:", error);
     } finally {
@@ -1980,8 +1992,11 @@ export function ChatPageClient({
                 : "/api/user/settings";
 
             fetch(settingsUrl)
-                .then((res) => {
-                    if (!res.ok) throw new Error(`Settings load failed: ${res.status}`);
+                .then(async (res) => {
+                    if (!res.ok) {
+                        await discardResponseBody(res);
+                        throw new Error(`Settings load failed: ${res.status}`);
+                    }
                     return res.json();
                 })
                 .then((data) => {
@@ -2077,7 +2092,8 @@ export function ChatPageClient({
                                 timeZoneSource: "browser",
                             }),
                         })
-                            .then((response) => {
+                            .then(async (response) => {
+                                await discardResponseBody(response);
                                 if (response.ok) notifyUserUsageChanged();
                             })
                             .catch((error) => {
@@ -2547,6 +2563,7 @@ export function ChatPageClient({
                 );
                 return;
             }
+            await discardResponseBody(response);
             setConversations((prev) =>
                 prev.map((c) => (c.id === id ? { ...c, isLocked: true } : c))
             );
@@ -2577,6 +2594,7 @@ export function ChatPageClient({
                 });
                 return;
             }
+            await discardResponseBody(response);
             setConversations((prev) =>
                 prev.map((c) => (c.id === id ? { ...c, isLocked: false } : c))
             );
@@ -2609,6 +2627,7 @@ export function ChatPageClient({
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ title: newTitle }),
         });
+        await discardResponseBody(response);
         if (!response.ok) throw new Error(`Rename failed: ${response.status}`);
         fetchConversations();
       } catch (error) {
@@ -2648,6 +2667,7 @@ export function ChatPageClient({
         // UX-015. Same reason as the rename above, and worse here: a refused
         // delete left the conversation in the list, which reads as the click
         // having missed rather than as the server saying no.
+        await discardResponseBody(response);
         if (!response.ok) throw new Error(`Delete failed: ${response.status}`);
 
         // A deleted conversation can never be PATCHed again -- drop any
@@ -2726,9 +2746,11 @@ export function ChatPageClient({
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ webSearchMode: mode }),
-    }).catch((error) => {
-      console.error("Failed to sync web search mode:", error);
-    });
+    })
+      .then(discardResponseBody)
+      .catch((error) => {
+        console.error("Failed to sync web search mode:", error);
+      });
   };
 
   /**
@@ -3014,6 +3036,8 @@ export function ChatPageClient({
           // visible in the conversation it now belongs to.
           migrateDraft(originScopeId, activeChatId);
           fetchConversations();
+        } else {
+          await discardResponseBody(res);
         }
       } catch (error) {
         console.error("Failed to create conversation:", error);
@@ -3095,6 +3119,7 @@ export function ChatPageClient({
             }]
           }),
         });
+        await discardResponseBody(saveResponse);
         if (!saveResponse.ok) {
           console.error("Failed to pre-save user message:", saveResponse.status);
         }
@@ -3238,6 +3263,8 @@ export function ChatPageClient({
           // title stays -- the server's own verification is untouched.
           if (response.ok) {
             result = await response.json();
+          } else {
+            await discardResponseBody(response);
           }
         } else {
           const response = await fetch(
@@ -3250,6 +3277,8 @@ export function ChatPageClient({
           );
           if (response.ok) {
             result = await response.json();
+          } else {
+            await discardResponseBody(response);
           }
         }
         // Re-checks the title still equals the interim value at apply time
@@ -3585,7 +3614,7 @@ export function ChatPageClient({
       try {
         await fetch(`/api/conversations/${historyTargetId}/messages?modelId=${modelId}`, {
           method: "DELETE"
-        });
+        }).then(discardResponseBody);
       } catch (error) {
         console.error("Failed to delete model history:", error);
         dispatchAppToast(t("chat.modelHistoryDeleteFailed"), "error");
@@ -3705,6 +3734,7 @@ export function ChatPageClient({
             `/api/conversations/${convId}/share`,
             { method: "DELETE" }
         );
+        await discardResponseBody(response);
         if (!response.ok) {
             showToast(t("sidebar.shareRevokeFailed"), "error");
             return;

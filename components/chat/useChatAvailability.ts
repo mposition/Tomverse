@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import type { WebSearchMode } from "@/lib/appDefaults";
+import { discardResponseBody } from "@/lib/discardResponseBody";
 
 /**
  * Server-authoritative "can this request run right now".
@@ -88,7 +89,9 @@ export function useChatAvailability({
           webSearchMode,
         }),
       })
-        .then((response) => (response.ok ? response.json() : null))
+        .then((response) =>
+        response.ok ? response.json() : discardResponseBody(response).then(() => null)
+      )
         .then((data) => {
           // A stale response must never overwrite a newer one.
           if (requestId !== latestRequest.current) return;

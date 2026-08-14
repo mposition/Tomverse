@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { discardResponseBody } from "@/lib/discardResponseBody";
 
 const USER_USAGE_CHANGED_EVENT = "tomverse:user-usage-changed";
 
@@ -100,7 +101,9 @@ export function useUserUsage(enabled: boolean) {
         signal: controller.signal,
         cache: "no-store",
       })
-        .then((response) => (response.ok ? response.json() : null))
+        .then((response) =>
+        response.ok ? response.json() : discardResponseBody(response).then(() => null)
+      )
         .then((data) => {
           if (!data) {
             setUsage(null);
