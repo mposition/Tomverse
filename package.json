@@ -50,6 +50,7 @@
     "check:image-pricing": "node --import tsx scripts/check-image-pricing.mjs",
     "check:image-eval-evidence": "node scripts/check-image-eval-evidence.mjs",
     "check:fal-image-pricing": "node --import tsx scripts/check-fal-image-pricing.mjs",
+    "check:fal-smoke-evidence": "node --import tsx scripts/check-fal-smoke-evidence.mjs",
     "smoke:fal-image": "node --import tsx scripts/smoke-fal-image-generation.mjs",
     "check:image-executor-budget": "node --import tsx scripts/check-image-executor-budget.mjs",
     "check:db-integration-coverage": "node scripts/check-db-integration-coverage.mjs",
