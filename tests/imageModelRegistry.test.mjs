@@ -13,9 +13,11 @@ import {
   imageComposerModelLayout,
   imageDeliveryMimeType,
   imageModelChipLabel,
+  imageModelOwner,
   shouldUseCompactImageModelPicker,
   IMAGE_INLINE_MODEL_DISCOVERY_LIMIT,
 } from "../lib/imageModelRegistry.ts";
+import { imageProviderBudgetEnvNames } from "../lib/imageProviderBudget.ts";
 import {
   IMAGE_COST_PER_CREDIT_CEILING_MICRO_USD,
   IMAGE_PROMPT_BUDGET_MICRO_USD,
@@ -183,7 +185,34 @@ test("model ids are unique and every id equals its API model id today", () => {
   for (const model of IMAGE_MODEL_REGISTRY) {
     assert.equal(model.id, model.apiModelId);
     assert.ok(model.outputMimeTypes.length > 0);
-    assert.ok(model.priceVerification.sources.length > 0);
+  }
+});
+
+test("sources and a verification date arrive together or not at all", () => {
+  // This used to read "every model names at least one source", which held only
+  // because every registered model had had its price read. A `price_unverified`
+  // entry is precisely the case where it cannot: listing URLs under
+  // `priceVerification.sources` says "this is what the price was checked
+  // against", and writing them down before reading them says it falsely.
+  //
+  // So the invariant is the pairing, which is the part that was actually load
+  // bearing, and it now catches the opposite error too -- sources cited with no
+  // date, which reads as verified and is not.
+  for (const model of IMAGE_MODEL_REGISTRY) {
+    const verified = model.priceVerification.verifiedAt !== "";
+    assert.equal(
+      model.priceVerification.sources.length > 0,
+      verified,
+      `${model.id}: sources and verifiedAt disagree`
+    );
+    if (!verified) {
+      assert.equal(
+        model.disabledReason,
+        "price_unverified",
+        `${model.id}: no verification date, so it may not be offered or held for another reason`
+      );
+      assert.deepEqual(model.prices, [], `${model.id}: unverified but priced`);
+    }
   }
 });
 
@@ -345,4 +374,52 @@ test("selecting a model moves its container, never its position", () => {
   const none = imageComposerModelLayout(five, []);
   assert.deepEqual(none.inline, []);
   assert.equal(none.picker.length, 5);
+});
+
+// --- who made it vs who bills us -----------------------------------------
+
+test("a gateway-supplied model bills its gateway, not its brand", () => {
+  const model = getImageModel("fal-ai/nano-banana-2");
+  assert.ok(model, "fal-ai/nano-banana-2 should be registered");
+
+  // The two answers differ, which is the whole point of the field existing.
+  assert.equal(imageModelOwner(model), "google");
+  assert.equal(model.provider, "fal");
+
+  // And money follows the provider. A fal request drawing down the Google
+  // budget still adds up -- it just adds up against an envelope with no money
+  // in it, while fal's own spend goes unwatched.
+  const envNames = imageProviderBudgetEnvNames(model.provider);
+  assert.equal(envNames.day, "IMAGE_PROVIDER_FAL_COST_MICROUSD_PER_DAY");
+  assert.equal(envNames.month, "IMAGE_PROVIDER_FAL_COST_MICROUSD_PER_MONTH");
+  assert.ok(!JSON.stringify(envNames).includes("GOOGLE"));
+});
+
+test("a direct integration answers both questions the same way", () => {
+  // Omitting modelOwner has to keep meaning what it meant before the field
+  // existed, or adding it silently rebranded four models.
+  for (const id of ["gpt-image-2", "gemini-3.1-flash-image"]) {
+    const model = getImageModel(id);
+    assert.equal(model.modelOwner, undefined);
+    assert.equal(imageModelOwner(model), model.provider);
+  }
+});
+
+test("the gateway route is registered disabled, and on price grounds", () => {
+  const model = getImageModel("fal-ai/nano-banana-2");
+
+  // Not `worst_case_cost_unbounded`: a per-image price has no thinking term,
+  // which is the reason for taking this route at all. Blocked purely on not
+  // having read fal's published price yet.
+  assert.equal(model.disabledReason, "price_unverified");
+  assert.deepEqual(model.prices, []);
+  assert.equal(model.priceVerification.verifiedAt, "");
+  assert.deepEqual(model.priceVerification.sources, []);
+
+  // One size, so there is one price to verify and one worst case to state.
+  assert.deepEqual(model.sizes, ["1024x1024"]);
+
+  // No adapter exists yet, and the dispatch must refuse rather than guess.
+  assert.ok(!listEnabledImageModels().some((entry) => entry.id === model.id));
+  assert.ok(!listActiveImageProviders().includes("fal"));
 });
