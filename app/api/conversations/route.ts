@@ -28,6 +28,12 @@ import {
   modelLimitResponse,
 } from "@/lib/billingEntitlements";
 import { resolveNewConversationModels } from "@/lib/newConversationModels";
+import {
+  ConversationProfileError,
+  readConversationProfile,
+  resolveProfileBinding,
+} from "@/lib/conversationProfileService";
+import { ASSISTANT_PROFILE_MODEL_UNAVAILABLE } from "@/lib/assistantProfileVersioning";
 
 const modelSchema = z.string().min(1).max(120);
 const createConversationSchema = z
@@ -37,6 +43,10 @@ const createConversationSchema = z
     disabledPanels: z.array(modelSchema).max(APP_DEFAULTS.maxSelectedModels).optional(),
     projectId: z.string().trim().min(1).max(100).optional(),
     webSearchMode: z.enum(WEB_SEARCH_MODES).optional(),
+    // §14: a profile, never a version. The server writes down which revision
+    // was current when it bound; a client that could name one could pin a
+    // conversation to a draft or to a revision the owner has replaced.
+    assistantProfileId: z.string().trim().min(1).max(100).optional(),
   })
   .strict();
 
@@ -193,11 +203,47 @@ export async function POST(req: Request) {
           plan: billingPlan.tier,
         }).effectiveModelIds;
 
+    // §14's pin, resolved before the models are clamped: a profile names the
+    // models this assistant answers on, and a conversation that adopted the
+    // profile and then ran on a different model would be one whose profile
+    // model choice does nothing.
+    const binding = await resolveProfileBinding({
+      userId,
+      requestedProfileId: body.assistantProfileId,
+      boundProfileId: null,
+    });
+    const profileModels =
+      binding.outcome === "bind" && binding.modelIds.length > 0
+        ? [...binding.modelIds]
+        : null;
+
     const normalizedModels = await clampRuntimeSelectedModels(
-      body.selectedModels || fallbackModels || [defaultEngine]
+      profileModels || body.selectedModels || fallbackModels || [defaultEngine]
     );
-    if (body.selectedModels && normalizedModels.length !== new Set(body.selectedModels).size) {
+    // Only when the client's own list is what was clamped. A profile's models
+    // come from a published version rather than from this request, so
+    // comparing them against `body.selectedModels` would refuse a valid
+    // create for a mismatch the caller did not cause.
+    if (
+      !profileModels &&
+      body.selectedModels &&
+      normalizedModels.length !== new Set(body.selectedModels).size
+    ) {
       return NextResponse.json({ error: "One or more selected models are unavailable." }, { status: 400 });
+    }
+    if (profileModels && normalizedModels.length === 0) {
+      // Every model this profile names is retired or delisted. Falling back
+      // to the account default would be the substitution §45 refuses -- the
+      // conversation would look like the profile's and answer on a model the
+      // profile never chose -- so the create is refused where the owner can
+      // still go and republish.
+      return NextResponse.json(
+        {
+          error: "The models this profile uses are no longer available.",
+          code: ASSISTANT_PROFILE_MODEL_UNAVAILABLE,
+        },
+        { status: 409 }
+      );
     }
     const activeModels =
       normalizedModels.length > 0 ? normalizedModels : [defaultEngine];
@@ -234,6 +280,8 @@ export async function POST(req: Request) {
           disabledPanels,
           webSearchMode,
           projectId: body.projectId || null,
+          assistantProfileVersionId:
+            binding.outcome === "bind" ? binding.profileVersionId : null,
         },
       });
     });
@@ -248,6 +296,12 @@ export async function POST(req: Request) {
             : APP_DEFAULTS.defaultWebSearchMode,
           isLocked: !!newConversation.password,
           messageCount: 0,
+          // Server-computed, so the screen never has to work out which
+          // revision it pinned to or whether a newer one exists (§14).
+          assistantProfile: await readConversationProfile({
+            userId,
+            profileVersionId: newConversation.assistantProfileVersionId,
+          }),
           password: undefined
       };
 
@@ -255,6 +309,12 @@ export async function POST(req: Request) {
   } catch (error) {
     const securityResponse = apiSecurityResponse(error);
     if (securityResponse) return securityResponse;
+    if (error instanceof ConversationProfileError) {
+      return NextResponse.json(
+        { error: error.message, code: error.code },
+        { status: error.status }
+      );
+    }
     console.error("Failed to create conversation:", error);
     return NextResponse.json(
       { error: "Failed to create conversation." },
