@@ -396,8 +396,12 @@ A2에서는 그 파일이 **저장소에 들어간다**는 점에서 더 엄격�
 - **scope 승인은 착수 허가일 뿐 배포 허가가 아닙니다.** 파서가 완성됐고
   테스트가 초록이지만, production 활성화는 그 자체로 승인 대상입니다.
 - **테스트 통과는 staging 증거가 아닙니다.** 이 저장소의 fixture는 합성이며,
-  실제 Takeout에 대해 무엇이 일어나는지는 `docs/ops/external-import-staging-checklist.md`
-  를 실행해야 알 수 있습니다. 그 실행 기록이 production 승인의 근거입니다.
+  실제 Takeout에 대해 무엇이 일어나는지는
+  `docs/ops/external-import-staging-checklist.md`의 **H절**을 실행해야 알 수
+  있습니다. 기록은 `docs/ops/staging-verification-records/`에 실행마다 따로
+  남으며, 그 기록이 production 승인의 근거입니다.
+- **2026-08-04 기록은 A2를 덮지 않습니다.** 그 실행은 Gemini import가 존재하기
+  전이고, 기록 자체가 전 항목 `미기록`이라고 적고 있습니다.
 
 ### 승인문이 갖춰야 하는 것
 

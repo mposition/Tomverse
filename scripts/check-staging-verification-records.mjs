@@ -90,7 +90,10 @@ if (/^\|\s*(검증 대상 커밋 SHA|승인자 서명)\s*\|/m.test(checklist)) {
     `${CHECKLIST}  still carries an approval table. That table is what could not say which commit it covered.`
   );
 }
-const revision = /template revision.*?`(\d{4}-\d{2}-\d{2})`/s.exec(checklist);
+// A date, optionally with a suffix: the items can change twice in a day, and
+// a bare date cannot tell those two versions apart -- which is the one thing
+// the revision exists to do.
+const revision = /template revision.*?`(\d{4}-\d{2}-\d{2}[a-z]?)`/s.exec(checklist);
 if (!revision) {
   problems.push(
     `${CHECKLIST}  declares no template revision, so a record cannot say which version of the items it ran.`
