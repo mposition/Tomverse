@@ -53,6 +53,17 @@ const USAGE = `Usage:
   --apply   Repair the database linkage only. Requires --reason, and only runs
             when exactly one Stripe object matches this promotion completely.
   --json    Emit the report as JSON instead of text.
+
+Running it against a deployed environment:
+
+  railway run --environment production --service Tomverse \\
+    node --conditions=react-server --import tsx scripts/reconcile-promotion.mjs \\
+    --code <CODE> --plan pro --dry-run --json
+
+  Call node directly there rather than going through npm. \`railway run\` consumes
+  the \`--\` separator, so \`npm run ... -- --code X\` arrives at npm without it,
+  npm reads --code and --plan as its own config, and the script receives only
+  the bare values -- which it then rejects as unknown arguments.
 `;
 
 const main = async () => {
