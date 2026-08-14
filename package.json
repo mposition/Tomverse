@@ -40,6 +40,7 @@
     "check:model-pricing": "node --import tsx scripts/check-model-pricing.mjs",
     "check:memory-extraction-eval": "node --import tsx scripts/check-memory-extraction-eval-register.mjs",
     "check:image-pricing": "node --import tsx scripts/check-image-pricing.mjs",
+    "check:fal-image-pricing": "node --import tsx scripts/check-fal-image-pricing.mjs",
     "check:usage-bucket-range": "node --import tsx scripts/check-usage-bucket-range.mjs",
     "security:regression": "node scripts/security-regression-check.mjs",
     "billing:reconcile-promotion": "node --import tsx scripts/reconcile-promotion.mjs",
