@@ -1,4 +1,5 @@
 /**
+ * Policy: docs/policy/external-conversation-import-and-memory.md.
  * The owner's assistant profiles (Release C, C3a; policy §14, §21).
  *
  * List and create only. A profile's *behaviour* is a version, published

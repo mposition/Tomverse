@@ -49,9 +49,9 @@
 //
 // A bare citation in a file naming several policy documents is reported when
 // more than one of them has that section, because the reader has no way to
-// tell which was meant. Those are listed as ambiguous and recorded in
-// AMBIGUOUS_BASELINE: existing ones are tolerated, new ones fail, which is the
-// same shape `tests/localeParity.test.mjs` uses for English left in a locale.
+// tell which was meant. That rule and the unscoped one are enforced on the
+// lines this change added, so they stop new ones without demanding a rewrite
+// of every comment that predates the check.
 
 import { readFileSync } from "node:fs";
 import { execSync } from "node:child_process";
@@ -68,6 +68,16 @@ const EXCLUDED_PREFIXES = [
 ];
 
 const EXCLUDED_FILES = new Set([
+  // This check's own fixtures. They contain deliberately wrong citations —
+  // that is what they test — and a checker that failed on its own negative
+  // cases could not have any.
+  //
+  // Note for whoever runs this before committing: the corpus is `git
+  // ls-files`, so an untracked file is invisible. A local pass on new files
+  // that have not been added yet is not a pass; this exclusion exists because
+  // that happened.
+  "scripts/check-policy-section-references-core.mjs",
+  "tests/policySectionReferences.test.mjs",
   // Past records at the repository root, in the same class as .github/audits:
   // they say what was believed when they were written.
   "FINAL_REMEDIATION_REPORT_KO.md",
@@ -100,28 +110,68 @@ const NON_POLICY_REFERENCES = [
 ];
 
 /**
- * The repository's existing bare citations, as recorded numbers.
+ * The two soft rules are enforced on lines this change actually added.
  *
- * Two of the four rules are absolute and have no baseline: an explicit
- * citation naming a section its document does not have, and a citation of a
- * section **no** policy document has. Both are wrong however the file is
- * written, and both are what Release C got wrong.
+ * They were briefly enforced as repository-wide totals, and that was wrong
+ * for a reason worth keeping: merging an unrelated day of develop moved the
+ * unscoped count from 991 to 1002, and the check failed on a branch whose
+ * diff touched none of them. A gate that fails for something the author did
+ * not do is a gate people learn to skip.
  *
- * The other two are about legibility rather than correctness. A bare `§8.1`
- * in a file that names no document resolves fine for anyone who knows which
- * document the file is about, and several hundred of them predate this check.
- * Failing them all would mean rewriting comments that are not wrong, so they
- * are counted instead: the totals below are what exists today, and the check
- * fails when either grows. New code writes the document beside the number.
+ * So the absolute rules — a section its document lacks, a section no document
+ * has — stay global, because those are wrong wherever they sit. The two
+ * legibility rules apply only to added lines, which is exactly "do not add a
+ * new one" and nothing more. The several hundred that predate this are left
+ * where they are until someone touches that line for another reason.
  *
- * Lower these when a file is touched for other reasons. Raising one is a
- * deliberate decision that belongs in the pull request that does it.
+ * With no base to compare against (a detached checkout, a first commit) the
+ * soft rules are reported and not enforced, and the summary says so.
  */
-const BASELINE = {
-  /** Bare citations in files that name no policy document. */
-  unscoped: 991,
-  /** Bare citations that could mean more than one document the file names. */
-  ambiguous: 81,
+const baseRef = () => {
+  const explicit = process.argv.indexOf("--since");
+  if (explicit !== -1 && process.argv[explicit + 1]) {
+    return process.argv[explicit + 1];
+  }
+  if (process.env.GITHUB_BASE_REF) return `origin/${process.env.GITHUB_BASE_REF}`;
+  return "origin/develop";
+};
+
+/** File -> set of line numbers this change added, or null when unknown. */
+const addedLines = (ref) => {
+  let base;
+  try {
+    base = execSync(`git merge-base HEAD ${ref}`, { stdio: ["ignore", "pipe", "ignore"] })
+      .toString()
+      .trim();
+  } catch {
+    return null;
+  }
+  let diff;
+  try {
+    diff = execSync(`git diff -U0 ${base} -- .`, {
+      stdio: ["ignore", "pipe", "ignore"],
+      maxBuffer: 64 * 1024 * 1024,
+    }).toString();
+  } catch {
+    return null;
+  }
+  const byFile = new Map();
+  let current = null;
+  for (const line of diff.split("\n")) {
+    const header = /^\+\+\+ b\/(.+)$/.exec(line);
+    if (header) {
+      current = header[1];
+      if (!byFile.has(current)) byFile.set(current, new Set());
+      continue;
+    }
+    const hunk = /^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@/.exec(line);
+    if (hunk && current) {
+      const start = Number(hunk[1]);
+      const count = hunk[2] === undefined ? 1 : Number(hunk[2]);
+      for (let i = 0; i < count; i += 1) byFile.get(current).add(start + i);
+    }
+  }
+  return byFile;
 };
 
 const SCANNED_EXTENSIONS = ["*.ts", "*.tsx", "*.mjs", "*.prisma", "*.md"];
@@ -181,47 +231,51 @@ for (const file of tracked(SCANNED_EXTENSIONS)) {
   ambiguous.push(...result.ambiguous);
 }
 
-const overBaseline = (kind, found) => found.length > BASELINE[kind];
+const added = addedLines(baseRef());
+const isNew = (entry) => {
+  if (!added) return false;
+  const match = /^(.+):(\d+)\s/.exec(entry);
+  if (!match) return false;
+  return added.get(match[1])?.has(Number(match[2])) === true;
+};
 
-const report = (label, entries, limit) => {
-  console.error(`${label} (${entries.length}, recorded ${limit}):`);
+const newUnscoped = unscoped.filter(isNew);
+const newAmbiguous = ambiguous.filter(isNew);
+
+const report = (label, entries) => {
+  console.error(`${label} (${entries.length}):`);
   for (const entry of entries.slice(0, 40)) console.error(`  ${entry}`);
-  if (entries.length > 40) {
-    console.error(`  ... and ${entries.length - 40} more`);
-  }
+  if (entries.length > 40) console.error(`  ... and ${entries.length - 40} more`);
   console.error("");
 };
 
-const failed =
-  failures.length > 0 ||
-  overBaseline("unscoped", unscoped) ||
-  overBaseline("ambiguous", ambiguous);
-
-if (failed) {
+if (failures.length > 0 || newUnscoped.length > 0 || newAmbiguous.length > 0) {
   console.error("Policy section reference check failed.\n");
   if (failures.length > 0) {
     console.error(`Sections that do not exist (${failures.length}):`);
     for (const failure of failures) console.error(`  ${failure}`);
     console.error("");
   }
-  if (overBaseline("unscoped", unscoped)) {
-    report("Bare citations with no document to resolve against", unscoped, BASELINE.unscoped);
+  if (newUnscoped.length > 0) {
+    report("Added lines whose citation has no document to resolve against", newUnscoped);
   }
-  if (overBaseline("ambiguous", ambiguous)) {
-    report("Bare citations that could mean more than one document", ambiguous, BASELINE.ambiguous);
+  if (newAmbiguous.length > 0) {
+    report("Added lines whose citation could mean more than one document", newAmbiguous);
   }
   console.error(
-    "Write the document beside the number — `docs/policy/external-conversation-import-and-memory.md §14` — or\n" +
-      "correct the number. A citation nobody can follow is worse than none."
+    "Write the document beside the number — `docs/policy/external-conversation-import-and-memory.md §14` —\n" +
+      "or correct the number. A citation nobody can follow is worse than none."
   );
   process.exit(1);
 }
 
 console.log(
   `Policy section reference check passed: ${checked} citation(s) against ` +
-    `${policyDocuments.length} policy document(s). ` +
-    `${resolved} resolve to a named document, none point at a section that ` +
-    `does not exist, and ${unscoped.length} unscoped / ${ambiguous.length} ` +
-    `ambiguous bare citation(s) are within the recorded baseline ` +
-    `(${BASELINE.unscoped} / ${BASELINE.ambiguous}).`
+    `${policyDocuments.length} policy document(s). ${resolved} resolve to a ` +
+    `named document and none point at a section that does not exist. ` +
+    (added
+      ? `No added line introduces an unscoped or ambiguous one ` +
+        `(${unscoped.length} and ${ambiguous.length} predate this change).`
+      : `No base to diff against, so the ${unscoped.length} unscoped and ` +
+        `${ambiguous.length} ambiguous bare citation(s) were reported only.`)
 );

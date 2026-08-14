@@ -23,6 +23,7 @@ import {
 import type { ModelTier } from "@/lib/models";
 
 /**
+ * Policy: docs/policy/external-conversation-import-and-memory.md.
  * The one context builder preflight and `/api/chat` both use (§10, §9.1).
  *
  * `buildChatMemoryContext` used to be that builder, and still is for memory.

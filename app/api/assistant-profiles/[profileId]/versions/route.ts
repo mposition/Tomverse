@@ -1,4 +1,5 @@
 /**
+ * Policy: docs/policy/external-conversation-import-and-memory.md.
  * Publishing and listing profile versions (Release C, C3a; policy §14).
  *
  * POST is the only way a profile's behaviour changes, and it always produces a

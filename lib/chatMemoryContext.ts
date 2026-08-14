@@ -28,6 +28,7 @@ import { STYLE_MEMORY_KINDS } from "@/lib/memoryValidatorCore";
 import { prisma } from "@/lib/prisma";
 
 /**
+ * Policy: docs/policy/external-conversation-import-and-memory.md.
  * The one context builder preflight and `/api/chat` both use (policy §10).
  *
  * The policy requires it in those words — "preflight와 실제 chat은 동일한

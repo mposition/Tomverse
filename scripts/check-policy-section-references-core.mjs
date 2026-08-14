@@ -60,6 +60,48 @@ export const policyDocumentsNamedIn = (source, known) => [
  *     file names.
  *   * `valid` — resolved.
  */
+const COMMENT_LINE = /^\s*(\/\/|\/\*|\*|\/\/\/|#|--)/;
+
+/**
+ * The policy documents in scope at each line.
+ *
+ * A comment block that names a document scopes the bare citations inside it,
+ * which is how these files are already written: a header block says which
+ * policy it implements and the paragraphs under it say `§14`. A `prisma`
+ * model's own `///` block does the same for that model, which matters in a
+ * schema covering several policies at once.
+ *
+ * Falls back to the whole file, so a file with one policy and no block
+ * structure still resolves.
+ */
+const scopeByLine = (source, known) => {
+  const lines = source.split("\n");
+  const fileScope = policyDocumentsNamedIn(source, known);
+  const scopes = new Array(lines.length).fill(null);
+  let block = [];
+  let inComment = false;
+
+  lines.forEach((line, index) => {
+    const isComment = COMMENT_LINE.test(line);
+    if (isComment) {
+      if (!inComment) block = [];
+      inComment = true;
+      for (const path of policyDocumentsNamedIn(line, known)) {
+        if (!block.includes(path)) block.push(path);
+      }
+    } else if (line.trim() === "") {
+      // A blank line inside a `/** ... */` run does not end it; a blank line
+      // between two `//` runs does. Treating both as continuations keeps a
+      // header block whole, which is the case that matters.
+    } else {
+      inComment = false;
+      block = [];
+    }
+    scopes[index] = block.length > 0 ? block : fileScope;
+  });
+  return scopes;
+};
+
 export const classifyFile = ({
   file,
   source,
@@ -69,7 +111,7 @@ export const classifyFile = ({
   isStandardsLine = (line) => /\bRFCs?\b/i.test(line),
 }) => {
   const known = new Set(sections.keys());
-  const named = policyDocumentsNamedIn(source, known);
+  const scopes = scopeByLine(source, known);
   const result = { valid: 0, missing: [], unscoped: [], ambiguous: [] };
 
   source.split("\n").forEach((line, index) => {
@@ -110,6 +152,7 @@ export const classifyFile = ({
         result.missing.push(`${at}  §${number} exists in no policy document`);
         continue;
       }
+      const named = scopes[index] ?? [];
       const holders = named.filter((path) => sections.get(path).has(number));
       if (holders.length === 0) {
         result.unscoped.push(

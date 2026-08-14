@@ -26,6 +26,7 @@ import {
 import { prisma } from "@/lib/prisma";
 
 /**
+ * Policy: docs/policy/external-conversation-import-and-memory.md.
  * Context preparation for a single-model chat request (policy §10).
  *
  * A comparison already has a preparation step — `/api/chat/preflight` — and it

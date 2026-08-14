@@ -1,3 +1,4 @@
+// Policy: docs/policy/external-conversation-import-and-memory.md.
 // Release C3c: §9.1's order, and the boundary between what the owner wrote and
 // what they merely uploaded.
 //

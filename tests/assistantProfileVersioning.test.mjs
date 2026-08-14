@@ -1,5 +1,6 @@
 // Release C1: what a profile version snapshot promises.
 //
+// Policy: docs/policy/external-conversation-import-and-memory.md.
 // The three properties under test are the ones §14 make contractual,
 // and each is a thing that degrades silently if it breaks: a published version
 // that can be edited, a stale editor that wins, and a manifest that appears to

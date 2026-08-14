@@ -169,3 +169,48 @@ test("only policy documents count as named", () => {
     );
     assert.deepEqual(named, [IMPORT]);
 });
+
+/* ------------------------------------------------------- block scope */
+
+test("a comment block that names a document scopes the citations inside it", () => {
+    // How these files are already written: a header names the policy and the
+    // paragraphs under it say §14. It also matters in prisma/schema.prisma,
+    // where one file covers several policies and each model's own block is
+    // the right scope.
+    const source = [
+        "model A {",
+        `  /// ${IMAGE} — image conversations.`,
+        "  /// §9 prices them.",
+        "}",
+        "model B {",
+        `  /// ${IMPORT} — the profile contract.`,
+        "  /// §9 is retrieval here.",
+        "}",
+    ].join("\n");
+    const result = classifyFile({ file: "prisma/schema.prisma", source, sections });
+    assert.deepEqual(result.missing, []);
+    assert.deepEqual(result.ambiguous, []);
+    assert.equal(result.valid, 2);
+});
+
+test("a block naming nothing falls back to the file", () => {
+    const source = [
+        `/** ${IMPORT} — the contract. */`,
+        "",
+        "/** A later block. §14 applies. */",
+    ].join("\n");
+    assert.deepEqual(classify(source).unscoped, []);
+});
+
+test("code between two blocks ends the first one's scope", () => {
+    // Otherwise a declaration at the top of a file would silently scope a
+    // comment five hundred lines below it that is about something else.
+    const source = [
+        `/** ${IMAGE} — images. */`,
+        "const x = 1;",
+        "/** §9.1 applies. */",
+    ].join("\n");
+    const result = classify(source);
+    // §9.1 is not in image-generation.md, and the file names nothing else.
+    assert.equal(result.unscoped.length, 1);
+});

@@ -242,6 +242,7 @@ model Conversation {
   routerSwitchReason    String?
   routerRecoveryModelId String?
 
+  /// Policy: docs/policy/external-conversation-import-and-memory.md.
   /// The assistant profile version this conversation is pinned to (release C,
   /// policy §14). Set once when the conversation starts and never rewritten by
   /// a later edit to the profile: a published revision is what this
@@ -2397,6 +2398,7 @@ model UserMemorySettings {
   updatedAt DateTime @updatedAt
 }
 
+/// Policy: docs/policy/external-conversation-import-and-memory.md.
 /// A private assistant profile (release C, policy §14, §20 릴리스 C).
 ///
 /// Identity only. Everything that decides how the assistant behaves lives on
@@ -2418,6 +2420,7 @@ model AssistantProfile {
   /// cannot become a request to an attacker-chosen host.
   icon String?
 
+  /// Policy: docs/policy/external-conversation-import-and-memory.md.
   /// Presentation, not behaviour -- so it is not part of the version snapshot
   /// (§14 lists what a version records, and this is not in it).
   description String?
@@ -2438,6 +2441,7 @@ model AssistantProfile {
   @@index([userId, updatedAt])
 }
 
+/// Policy: docs/policy/external-conversation-import-and-memory.md.
 /// One immutable published snapshot of a profile (§14).
 ///
 /// Nothing here is ever updated after insert. Editing a profile publishes a
@@ -2455,6 +2459,7 @@ model AssistantProfileVersion {
   profileId String
   profile   AssistantProfile @relation("AssistantProfileVersions", fields: [profileId], references: [id], onDelete: Cascade)
 
+  /// Policy: docs/policy/external-conversation-import-and-memory.md.
   /// The account that owns this snapshot, and -- today -- the account that
   /// published it, which is what §14's "created by" asks for. Carried here as
   /// well as on the profile so ownership is a column rather than a join: the
@@ -2473,6 +2478,7 @@ model AssistantProfileVersion {
 
   instructions String
 
+  /// Policy: docs/policy/external-conversation-import-and-memory.md.
   /// Model selection, tool policy, memory policy and conversation starters,
   /// each a JSON snapshot of what the user chose. Snapshots rather than
   /// foreign keys: a model that is later retired must not silently change what
@@ -2487,6 +2493,7 @@ model AssistantProfileVersion {
   /// The files listed at publish time. Audit metadata -- see the model comment.
   knowledgeManifest Json
 
+  /// Policy: docs/policy/external-conversation-import-and-memory.md.
   /// Which retrieval algorithm and prompt shape this snapshot was built for,
   /// so a version published under an older one is refused rather than
   /// reinterpreted (§14).
@@ -2506,6 +2513,7 @@ model AssistantProfileVersion {
   @@index([userId, createdAt])
 }
 
+/// Policy: docs/policy/external-conversation-import-and-memory.md.
 /// One durable knowledge file attached to a profile (release C, policy §14,
 /// §14.1, §14.2, §20 릴리스 C).
 ///
@@ -2575,6 +2583,7 @@ model AssistantKnowledgeFile {
   @@index([processingStatus, createdAt])
 }
 
+/// Policy: docs/policy/external-conversation-import-and-memory.md.
 /// One retrievable piece of a knowledge file (§14).
 ///
 /// Chunks are derived, not authored: deleting and re-processing a file
@@ -2596,6 +2605,7 @@ model AssistantKnowledgeChunk {
 
   content String
 
+  /// Policy: docs/policy/external-conversation-import-and-memory.md.
   /// Lexical retrieval terms (§9, retrieval v1 -- no embeddings). The GIN
   /// index is created by raw SQL in the migration, mirroring MemoryItem.
   searchTerms      String[] @default([])

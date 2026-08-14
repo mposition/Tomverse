@@ -1,6 +1,7 @@
 import { createHash, createHmac, timingSafeEqual } from "node:crypto";
 
 /**
+ * Policy: docs/policy/external-conversation-import-and-memory.md.
  * Context bundles (policy §10).
  *
  * Memory changes between the moment a chat request is priced and the moment

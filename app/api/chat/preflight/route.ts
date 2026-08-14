@@ -194,6 +194,7 @@ export async function POST(request: Request) {
         // §8.1 invariant 1: null until the conversation row is read, which is
         // also the "no conversation" case — both inherit the account default.
         let conversationMemoryMode: string | null = null;
+        // Policy: docs/policy/external-conversation-import-and-memory.md.
         // §10: the conversation's bound profile version, read here so the
         // priced context is the one the chat route will build.
         let profileVersionId: string | null = null;
@@ -285,6 +286,7 @@ export async function POST(request: Request) {
             // turn charges each model for the branch it can actually see.
             const estimate = createTokenEstimateAccumulator()
                 .addText(payload.prompt)
+                // Policy: docs/policy/external-conversation-import-and-memory.md.
                 // The memory block's own text, not its token count -- counting
                 // the text is what lets a Hangul recalibration reach it.
                 // The whole §9.1 system block, not memory's share of it: a

@@ -169,6 +169,7 @@ test.describe("assistant profile settings", () => {
     test("renaming saves on its own and does not publish a revision", async ({
         page,
     }) => {
+        // Policy: docs/policy/external-conversation-import-and-memory.md.
         // §14: a rename is not a behaviour change. If it spent a revision,
         // every typo in a description would become a snapshot a conversation
         // could pin to.

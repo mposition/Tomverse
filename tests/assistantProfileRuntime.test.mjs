@@ -1,3 +1,4 @@
+// Policy: docs/policy/external-conversation-import-and-memory.md.
 // Release C3a: the sentence §14 makes, held as code.
 //
 // "profile은 plan·model·tool entitlement와 master toggle·memory mode·flag·

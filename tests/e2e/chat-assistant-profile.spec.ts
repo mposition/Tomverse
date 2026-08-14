@@ -5,6 +5,7 @@ import {
 } from "./support/app-fixtures";
 
 /**
+ * Policy: docs/policy/external-conversation-import-and-memory.md.
  * §14's version pinning, from the composer (Release C, slice C4).
  *
  * The server side is covered by unit and DB suites. What only a browser can

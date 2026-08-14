@@ -205,6 +205,7 @@ run(
     "tests/integration/assistant-knowledge-schema.db.test.ts",
     "tests/integration/assistant-knowledge-pipeline.db.test.ts",
     // Release C3c: which row the runtime reads for a profile-backed turn --
+    // Policy: docs/policy/external-conversation-import-and-memory.md.
     // owner boundary, superseded revisions, and the §10 identity the bundle
     // binds.
     "tests/integration/chat-profile-context.db.test.ts",

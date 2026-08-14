@@ -17,6 +17,7 @@ import { prisma } from "@/lib/prisma";
  * profile may run. What only a database settles is which row the runtime
  * actually reads: whether an owner boundary holds when a conversation names
  * another account's version, whether a superseded revision is refused rather
+ * Policy: docs/policy/external-conversation-import-and-memory.md.
  * than silently upgraded to the current one, and whether the §10 identity the
  * bundle binds moves when the profile does.
  */

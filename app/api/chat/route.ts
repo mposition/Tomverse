@@ -770,6 +770,7 @@ async function handleChatPost(
         // the ownership check loads below. Null for a request with no
         // conversation, which inherits the account default like `inherit`.
         let conversationMemoryMode: string | null = null;
+        // Policy: docs/policy/external-conversation-import-and-memory.md.
         // §10: the conversation's bound profile version. Read from the same
         // row as the memory mode so the context this request builds is the
         // one its bundle was priced against.
@@ -1292,6 +1293,7 @@ async function handleChatPost(
             }
         }
 
+        // Policy: docs/policy/external-conversation-import-and-memory.md.
         // The §10 context bundle: what memory this request may carry, and
         // proof that it is the same context the request was priced against.
         //
@@ -1342,6 +1344,7 @@ async function handleChatPost(
             const turnContext = await buildChatTurnContext({
                 userId: session.user.id,
                 query: latestUserPromptText(messages),
+                // Policy: docs/policy/external-conversation-import-and-memory.md.
                 // §10: bound into the fingerprint, so a profile republished or
                 // detached between preflight and send is a stale bundle rather
                 // than a turn that answers as a different assistant.
@@ -1421,6 +1424,7 @@ async function handleChatPost(
                     { requiresPreflight: true }
                 );
             }
+            // Policy: docs/policy/external-conversation-import-and-memory.md.
             // The whole §9.1 block -- profile instructions, then memory, then
             // profile knowledge -- assembled as one system message by the
             // builder that priced it.
@@ -1459,6 +1463,7 @@ async function handleChatPost(
             inputEstimate.addTokens(quotedContextTokens);
         }
 
+        // Policy: docs/policy/external-conversation-import-and-memory.md.
         // §9.1 place this block above the conversation and below the
         // safety policy, so it is the first message and the rules that govern
         // reading each part are stated inside it, before the part they govern.

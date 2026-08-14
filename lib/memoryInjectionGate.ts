@@ -6,6 +6,7 @@ import {
 import type { RevokedPairsState } from "@/lib/memoryAccess";
 
 /**
+ * Policy: docs/policy/external-conversation-import-and-memory.md.
  * Whether an approved memory may reach a prompt at all (policy §8.1, §12.4,
  * §15).
  *

@@ -1,4 +1,5 @@
 /**
+ * Policy: docs/policy/external-conversation-import-and-memory.md.
  * One assistant profile (Release C, C3a; policy §14, §21).
  *
  * PATCH is identity only — name, icon, description. Instructions, models,
