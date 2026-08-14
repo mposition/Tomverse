@@ -143,6 +143,24 @@ mock.module(mod("lib/guestAttachments.ts"), {
     getGuestAttachmentTtlMinutes: () => 60,
   },
 });
+// Release C2's two knowledge steps. Mocked as a collaborator rather than by
+// teaching the Prisma stub two more tables, so the assertions below name the
+// step that produced each figure -- which is what the rest of this file does.
+mock.module(mod("lib/assistantKnowledgeLifecycle.ts"), {
+  namedExports: {
+    drainKnowledgeCleanupQueue: async () => ({
+      examined: 26,
+      deleted: 26,
+      failed: 0,
+      exhausted: 27,
+    }),
+    sweepAbandonedKnowledgeObjects: async () => ({
+      deleted: 28,
+      failed: 0,
+      listed: true,
+    }),
+  },
+});
 
 type CleanupResult = Record<string, unknown> & {
   failedSteps: { step: string; error: string }[];
@@ -199,6 +217,11 @@ test("a step that throws does not skip the steps behind it", async () => {
   assert.equal(result.providerProbeResults, 23);
   assert.equal(result.scheduledJobRuns, 24);
   assert.equal(result.providerModelCatalogRuns, 25);
+  // Release C2's storage sweeps. Two steps because they answer different
+  // questions: tombstoned bytes, and objects no row ever claimed.
+  assert.equal(result.assistantKnowledgeObjectsDeleted, 26);
+  assert.equal(result.assistantKnowledgeCleanupExhausted, 27);
+  assert.equal(result.assistantKnowledgeOrphansDeleted, 28);
 });
 
 test("a clean run reports no failed steps and every count", async () => {

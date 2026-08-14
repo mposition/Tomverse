@@ -88,6 +88,8 @@ model User {
   accountDataExportRequests          AccountDataExportRequest[]
   assistantProfiles                  AssistantProfile[]
   assistantProfileVersions           AssistantProfileVersion[]
+  assistantKnowledgeFiles            AssistantKnowledgeFile[]
+  assistantKnowledgeChunks           AssistantKnowledgeChunk[]
 
   @@index([plan, id])
   @@index([createdAt])
@@ -2369,7 +2371,8 @@ model AssistantProfile {
 
   currentVersion AssistantProfileVersion? @relation("AssistantProfileCurrentVersion", fields: [currentVersionId], references: [id], onDelete: SetNull)
 
-  versions AssistantProfileVersion[] @relation("AssistantProfileVersions")
+  versions       AssistantProfileVersion[] @relation("AssistantProfileVersions")
+  knowledgeFiles AssistantKnowledgeFile[]  @relation("AssistantProfileKnowledge")
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -2443,6 +2446,134 @@ model AssistantProfileVersion {
   @@unique([profileId, revision])
   @@index([profileId, createdAt])
   @@index([userId, createdAt])
+}
+
+/// One durable knowledge file attached to a profile (release C, policy §14,
+/// §14.1, §14.2, §20 릴리스 C).
+///
+/// Deliberately separate from a chat attachment. An attachment is transient
+/// -- it belongs to one turn and is swept -- while this is storage the owner
+/// manages, counts against a quota, and expects to still be there next month.
+/// Sharing the attachment tables would have made "delete the conversation"
+/// and "delete the knowledge file" the same operation, which they are not.
+///
+/// No embeddings and no vector column: retrieval v1 is lexical over
+/// `AssistantKnowledgeChunk.searchTerms` (§44). Adding one later is a separate
+/// policy, privacy, cost and eval decision, not a migration.
+model AssistantKnowledgeFile {
+  id        String           @id @default(cuid())
+  profileId String
+  profile   AssistantProfile @relation("AssistantProfileKnowledge", fields: [profileId], references: [id], onDelete: Cascade)
+
+  /// Ownership as a column rather than a join, for the same reason
+  /// AssistantProfileVersion carries one: the account export and the deletion
+  /// sweep both scope by it, and a row whose owner has to be derived is a row
+  /// the obvious query misses.
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  /// The name the owner sees. Normalised, never used to build a path.
+  name String
+
+  mime  String
+  bytes Int
+
+  /// SHA-256 of the stored object. This is what a version's knowledge
+  /// manifest records, and what `resolveKnowledgeManifest()` compares against
+  /// to decide whether the file a past version listed is still the same file.
+  /// NOT unique per profile: re-uploading the same bytes is a new file with a
+  /// new id, and §14 is explicit that it does not reconnect to a past version.
+  digest String
+
+  /// Private object key. Never leaves the server -- reads go through a
+  /// short-lived signed URL behind the ownership check, as image assets do.
+  r2Key String @unique
+
+  /// "pending" | "processing" | "ready" | "failed" -- allowlist CHECK in the
+  /// migration. Only "ready" has chunks, and only "ready" is retrievable.
+  processingStatus String @default("pending")
+
+  /// Why processing failed, from the §18 릴리스 C code set. Null while the
+  /// file is pending, processing, or ready.
+  failureCode String?
+
+  /// What the extractor produced, before chunking. Recorded so a file that
+  /// yielded nothing is distinguishable from one nobody has processed.
+  extractedCharacters Int?
+  chunkCount          Int  @default(0)
+
+  /// Which chunking and tokenising algorithm produced this file's chunks.
+  retrievalVersion Int @default(1)
+
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  processedAt DateTime?
+
+  chunks AssistantKnowledgeChunk[]
+
+  @@index([profileId, createdAt])
+  @@index([userId, createdAt])
+  /// The processing worker's claim query reads exactly this pair.
+  @@index([processingStatus, createdAt])
+}
+
+/// One retrievable piece of a knowledge file (§44).
+///
+/// Chunks are derived, not authored: deleting and re-processing a file
+/// replaces them wholesale, and nothing outside this table references a chunk
+/// id. `ordinal` is the chunk's position in the file, which is what lets a
+/// citation say where in the document an answer came from.
+model AssistantKnowledgeChunk {
+  id     String                 @id @default(cuid())
+  fileId String
+  file   AssistantKnowledgeFile @relation(fields: [fileId], references: [id], onDelete: Cascade)
+
+  /// Denormalised owner, as on the file. Retrieval filters by it before it
+  /// filters by anything else.
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  /// 0-based position in the file.
+  ordinal Int
+
+  content String
+
+  /// Lexical retrieval terms (§44, retrieval v1 -- no embeddings). The GIN
+  /// index is created by raw SQL in the migration, mirroring MemoryItem.
+  searchTerms      String[] @default([])
+  retrievalVersion Int      @default(1)
+
+  /// Where in the document this chunk came from -- character offsets, and the
+  /// page for a PDF. Metadata for a citation, never content.
+  sourceMetadata Json?
+
+  createdAt DateTime @default(now())
+
+  @@unique([fileId, ordinal])
+  @@index([userId])
+  @@index([searchTerms(ops: ArrayOps)], type: Gin, map: "AssistantKnowledgeChunk_searchTerms_gin_idx")
+}
+
+/// A stored object whose row is gone and whose bytes still have to go (§14.2).
+///
+/// The same DB-first shape ImageAssetCleanup uses, and for the same reason: R2
+/// is never deleted ahead of the database, so a partial failure retries from
+/// the tombstone instead of leaving rows that point at missing objects. §14.2
+/// settles that this is an application sweep rather than a bucket lifecycle
+/// rule -- a bucket rule cannot see the database, does not retry, and leaves
+/// no audit trail.
+model AssistantKnowledgeCleanup {
+  id          String    @id @default(cuid())
+  r2Key       String    @unique
+  /// file_deleted | profile_deleted | account_deleted | upload_abandoned
+  reason      String
+  attempts    Int       @default(0)
+  lastError   String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  completedAt DateTime?
+
+  @@index([completedAt, createdAt])
 }
 
 /// One consumed §10 context bundle, per (bundle, model).

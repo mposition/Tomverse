@@ -25,6 +25,10 @@ import {
 import { deleteTomverseAccount } from "@/lib/accountDeletion";
 import { createMaintenanceStepRunner } from "@/lib/maintenanceStepsCore";
 import { retentionCutoff } from "@/lib/retentionPolicyCore";
+import {
+  drainKnowledgeCleanupQueue,
+  sweepAbandonedKnowledgeObjects,
+} from "@/lib/assistantKnowledgeLifecycle";
 import { deleteR2Object, listExpiredR2Objects } from "@/lib/r2";
 import {
   GUEST_ATTACHMENT_PREFIX,
@@ -540,6 +544,18 @@ export async function cleanupExpiredData() {
     sweepExpiredGuestAttachments(now)
   );
 
+  // Assistant knowledge storage (import/memory policy §14.2). Two steps
+  // because they answer different questions: the queue deletes the bytes of
+  // rows that are already gone, and the orphan sweep takes objects no row ever
+  // claimed. An active knowledge file is deliberately not swept at all -- it
+  // has no expiry, which is the policy's decision rather than a gap here.
+  const knowledgeCleanup = await step("assistant_knowledge_cleanup", () =>
+    drainKnowledgeCleanupQueue(200, now)
+  );
+  const knowledgeOrphans = await step("assistant_knowledge_orphans", () =>
+    sweepAbandonedKnowledgeObjects(now)
+  );
+
   // A consumed §10 context bundle stops being worth remembering the moment
   // the bundle itself expires: past that, verification refuses it before
   // consumption is ever consulted. Swept here rather than on the request
@@ -582,6 +598,9 @@ export async function cleanupExpiredData() {
     memoryExtractionDispatched: memoryExtraction?.dispatchedRuns ?? null,
     memoryExtractionChunks: memoryExtraction?.chunksProcessed ?? null,
     guestAttachments,
+    assistantKnowledgeObjectsDeleted: knowledgeCleanup?.deleted ?? null,
+    assistantKnowledgeCleanupExhausted: knowledgeCleanup?.exhausted ?? null,
+    assistantKnowledgeOrphansDeleted: knowledgeOrphans?.deleted ?? null,
     sessions: sessions?.count ?? null,
     usageBuckets: usageBuckets === null ? null : Number(usageBuckets),
     requestLeases: requestLeases === null ? null : Number(requestLeases),
