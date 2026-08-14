@@ -370,10 +370,51 @@ pool(4개)로 바꾸면 64 KiB 이상 `unread`는 곧바로 굶습니다.
 올리게 됩니다. 8-1이 `cancel`도 connection을 놓아준다는 것을 보여주므로
 `asset.body.cancel()`을 씁니다.
 
-### 8-4. 하지 않은 것
+### 8-4. server `escapes` 11건 추적 — 호출부는 전부 옳았고, **공용 helper가 틀렸습니다**
 
-- **`escapes` server 11건.** 같은 방식으로 소비자를 따라가야 하며, 이 절은
-  `leaks`만 다뤘습니다.
+11건을 소비자까지 따라갔습니다. **호출부 자체는 11건 모두 정상**입니다.
+
+- **fetch wrapper 2건** — `lib/deepseekUsageAdapter.ts:54`,
+  `lib/perplexityUsageCapture.ts:79`. 둘 다 `typeof fetch` 미들웨어라 응답을
+  호출자(AI SDK)에게 넘깁니다. 감싸는 경우에도 새 stream의 `cancel`이 원본
+  reader로 전달됩니다. 소비 책임이 이동한 것이지 미소비가 아닙니다.
+- **bounded reader 경유 8건** — `lib/providerUsageSync.ts` 7건과
+  `lib/infrastructureMonitoring.ts:203`. 전부 직후에
+  `await readBoundedJson(response)`로 읽습니다.
+- **1건은 이미 모범 사례** — `app/api/chat/route.ts:473`(Google Drive export).
+  미소비 경로는 작은 오류 본문뿐이고, 성공 경로는 `lib/boundedBuffer.ts`의
+  `readResponseToBuffer`를 씁니다. 이 helper는 declared length 거부와 streaming
+  상한 **양쪽 모두에서 body를 cancel**합니다.
+
+그런데 8건이 쓰는 `readBoundedJson`은 **두 벌로 복제돼 있고 둘 다** declared
+length 거부 경로에서 body를 놓아주지 않은 채 throw했습니다.
+
+```
+if (declaredLength > MAX) {
+  throw new Error("... exceeded the ... limit.");   // body 손도 대지 않음
+}
+```
+
+streaming 상한 쪽은 `await reader.cancel()`이 있어서 옳았습니다. **틀린 것은
+early exit 하나뿐**이고, 하필 그 분기는 **본문이 크다는 이유로 발동합니다** —
+512 KB·1 MB 모두 8-1의 임계값을 한참 넘습니다. 즉 "너무 커서 거부한다"면서 그
+큰 본문으로 connection을 붙들고 있었습니다. `providerUsageSync`는 스케줄로
+돌고 재시도하므로 일회성이 아닙니다.
+
+`lib/boundedBuffer.ts`가 같은 일을 올바르게 하고 있었다는 점이 이 건의 성격을
+말해 줍니다 — 방법을 몰라서가 아니라, 같은 로직을 세 번 쓰면서 한 벌만 맞은
+것입니다.
+
+**정적 분석은 이것을 찾을 수 없습니다.** 호출부는 helper를 통해 본문을 읽으니
+전부 `consumed`로 분류되고, 틀린 곳은 helper 자신의 early exit입니다. 그래서
+gate가 아니라 test로 고정했습니다 — `tests/boundedResponseRelease.test.mjs`.
+`readResponseToBuffer`는 동작으로(refuse 시 `cancel`이 호출되는지) 검증하고,
+module-private인 두 벌은 소스 형태로 검증합니다. **후자가 더 약한 검사라는
+점을 그대로 적어 둡니다**: 해제가 *쓰여* 있다는 것을 증명할 뿐 *실행된다*는
+것을 증명하지 않습니다. 두 수정을 각각 되돌려 test가 실패하는 것까지 확인했습니다.
+
+### 8-5. 하지 않은 것
+
 - **production 관측.** 위는 전부 loopback 합성 측정입니다. 실제 provider와의
   RTT·연결 재사용률·소켓 수를 production에서 본 것이 아닙니다. 임계값은 클라이언트
   버퍼의 성질이라 옮겨 붙지만, "그래서 오늘 얼마나 비쌌는가"는 여전히 5장입니다.
