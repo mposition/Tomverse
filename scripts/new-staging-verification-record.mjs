@@ -1,11 +1,15 @@
 // Start a staging verification run: a blank record with every checklist item.
 //
-//   node scripts/new-staging-verification-record.mjs --sha <40 chars> [--date YYYY-MM-DD]
-//   node scripts/new-staging-verification-record.mjs --sha <40 chars> --preview
+//   node scripts/new-staging-verification-record.mjs --feature <key> --sha <40 chars> [--date YYYY-MM-DD]
+//   node scripts/new-staging-verification-record.mjs --feature <key> --sha <40 chars> --preview
 //
-// Reads `docs/ops/external-import-staging-checklist.md` and writes
-// `docs/ops/staging-verification-records/<date>__<sha>.md` with one row per
-// item, every result empty.
+// Reads the named feature's checklist (see
+// `scripts/staging-verification-features.mjs`) and writes one record under that
+// feature's records directory, with one row per item and every result empty.
+//
+// `--feature` is required rather than defaulted. There are two checklists now,
+// and a default would silently write a run of the wrong one -- a record that
+// names the right SHA and the wrong items reads as a completed verification.
 //
 // Generated rather than hand-copied for the reason the split exists at all:
 // the blank record told executors to copy "A–G" for eight days after section
@@ -24,10 +28,10 @@ import { readFileSync, writeFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 
 import { checklistItems, renderRecord } from "./staging-verification-record-core.mjs";
-
-const CHECKLIST = "docs/ops/external-import-staging-checklist.md";
-const RECORDS = "docs/ops/staging-verification-records";
-const TEMPLATE = join(RECORDS, "_record-template.md");
+import {
+  STAGING_VERIFICATION_FEATURES,
+  stagingVerificationFeature,
+} from "./staging-verification-features.mjs";
 
 const argument = (name) => {
   const index = process.argv.indexOf(`--${name}`);
@@ -38,6 +42,25 @@ const fail = (message) => {
   console.error(message);
   process.exit(1);
 };
+
+const featureKey = argument("feature");
+if (!featureKey) {
+  fail(
+    "--feature is required. Known features:\n" +
+      STAGING_VERIFICATION_FEATURES.map(
+        (entry) => `  ${entry.key}  -- ${entry.label}`
+      ).join("\n")
+  );
+}
+let feature;
+try {
+  feature = stagingVerificationFeature(featureKey);
+} catch (error) {
+  fail(error instanceof Error ? error.message : String(error));
+}
+const CHECKLIST = feature.checklist;
+const RECORDS = feature.records;
+const TEMPLATE = join(RECORDS, "_record-template.md");
 
 const sha = argument("sha");
 if (!sha || !/^[0-9a-f]{40}$/.test(sha)) {

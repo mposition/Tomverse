@@ -114,7 +114,10 @@ Date / timezone:    ____________________
       between a price move at fal and a settlement report nobody reads weekly.
       The **fal Price Drift** workflow runs it daily against `main` and
       `develop`, so this line is a re-check at the release SHA rather than the
-      only run. `matched` is the pass; `lookup_failed` and `skipped` are not.
+      only run. `matched` is the pass. `not_registered` is the correct answer
+      on a branch that does not carry the model -- which is `main` until the
+      activation reaches it -- and `lookup_failed` and `skipped` are neither a
+      pass nor a failure.
 - [ ] Chromium E2E: `desktop-chromium`, `desktop-compact`, `mobile-chromium`
       — no unexplained failures
 

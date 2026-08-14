@@ -109,8 +109,8 @@ import {
     releaseChatAccess,
     resolveLeaseTtlSeconds,
     settleChatUsage,
-    releaseFallbackProviderBudget,
-    reserveFallbackProviderBudget,
+    releaseAttemptProviderBudget,
+    reserveAttemptProviderBudget,
     type ChatUsageReservation,
     validateChatPayload,
 } from "@/lib/chatSecurity";
@@ -2932,52 +2932,46 @@ async function handleChatPost(
             // §10: every dispatch is authorized on the server, including this
             // one. Money held at the primary's provider does not make a call
             // to another provider affordable.
+            // §10 authorizes every dispatch, and that includes a fallback on
+            // the provider the primary is already holding against: the hold is
+            // sized for one attempt, and a second call costs more whether or
+            // not it shares a bucket.
             let fallbackHoldTaken = false;
-            if (plan.provider !== dispatched.provider) {
-                if (!providerHoldDay || !providerHoldMonth) {
-                    // Nothing was held for this turn, so there is no evidence
-                    // of which periods a second hold belongs in.
-                    reportFallbackRefusal("no_provider_hold");
-                    return false;
-                }
-                const reserved = await reserveFallbackProviderBudget({
-                    reservationId: usageReservation!.reservationId,
-                    userId: usageReservation!.userId ?? null,
-                    heldProvider: dispatched.provider,
-                    fallbackProvider: plan.provider,
-                    fallbackReservedMicroUsd:
-                        getChatBudgetReservedCostMicroUsd(plan.budget),
-                    periodStarts: {
-                        day: providerHoldDay.periodStart,
-                        month: providerHoldMonth.periodStart,
-                    },
-                }).catch((budgetError: unknown) => {
-                    logRequestError(
-                        "chat_fallback_budget_reserve_failed",
-                        traceId,
-                        budgetError,
-                        plan.modelId
-                    );
-                    return { reserved: false as const, reason: "reserve_failed" as const };
-                });
-                if (!reserved.reserved && reserved.reason !== "same_provider") {
-                    reportFallbackRefusal(`budget_${reserved.reason}`);
-                    return false;
-                }
-                if (reserved.reserved) {
-                    fallbackHoldTaken = true;
-                    // The hold is now in the durable payload, so settlement
-                    // will find it. What is not yet true is that a call was
-                    // made against it -- that is what the release below is for.
-                    usageReservation = {
-                        ...usageReservation!,
-                        entries: [
-                            ...usageReservation!.entries,
-                            ...reserved.entries,
-                        ],
-                    };
-                }
+            if (!providerHoldDay || !providerHoldMonth) {
+                // Nothing was held for this turn, so there is no evidence of
+                // which periods a second hold belongs in.
+                reportFallbackRefusal("no_provider_hold");
+                return false;
             }
+            const fallbackAttemptIndex = dispatched.attemptIndex + 1;
+            const reserved = await reserveAttemptProviderBudget({
+                reservationId: usageReservation!.reservationId,
+                userId: usageReservation!.userId ?? null,
+                attemptIndex: fallbackAttemptIndex,
+                provider: plan.provider,
+                reservedMicroUsd: getChatBudgetReservedCostMicroUsd(plan.budget),
+                periodStarts: {
+                    day: providerHoldDay.periodStart,
+                    month: providerHoldMonth.periodStart,
+                },
+            }).catch((budgetError: unknown) => {
+                logRequestError(
+                    "chat_fallback_budget_reserve_failed",
+                    traceId,
+                    budgetError,
+                    plan.modelId
+                );
+                return { reserved: false as const, reason: "reserve_failed" as const };
+            });
+            if (!reserved.reserved) {
+                reportFallbackRefusal(`budget_${reserved.reason}`);
+                return false;
+            }
+            fallbackHoldTaken = true;
+            usageReservation = {
+                ...usageReservation!,
+                entries: [...usageReservation!.entries, ...reserved.entries],
+            };
             /**
              * Gives the hold back when the dispatch it authorized never
              * happened.
@@ -2989,21 +2983,16 @@ async function handleChatPost(
              * exist until the reservation expires.
              */
             const abandonFallback = async (reason: string) => {
-                if (fallbackHoldTaken && providerHoldDay && providerHoldMonth) {
-                    await releaseFallbackProviderBudget({
+                if (fallbackHoldTaken) {
+                    await releaseAttemptProviderBudget({
                         reservationId: usageReservation!.reservationId,
                         userId: usageReservation!.userId ?? null,
-                        fallbackProvider: plan.provider,
-                        periodStarts: {
-                            day: providerHoldDay.periodStart,
-                            month: providerHoldMonth.periodStart,
-                        },
+                        attemptIndex: fallbackAttemptIndex,
                     });
                     usageReservation = {
                         ...usageReservation!,
                         entries: usageReservation!.entries.filter(
-                            (entry) =>
-                                entry.key !== `provider:${plan.provider}`
+                            (entry) => !reserved.entries.includes(entry)
                         ),
                     };
                 }

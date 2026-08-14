@@ -31,8 +31,8 @@ import { readFileSync, readdirSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { join } from "node:path";
 
-const CHECKLIST = "docs/ops/external-import-staging-checklist.md";
-const RECORDS = "docs/ops/staging-verification-records";
+import { STAGING_VERIFICATION_FEATURES } from "./staging-verification-features.mjs";
+
 const TEMPLATE = "_record-template.md";
 const README = "README.md";
 
@@ -72,6 +72,15 @@ if (digestArgument !== -1) {
 }
 
 const problems = [];
+const summaries = [];
+
+// One pass per feature. The paths used to be two constants here, which meant a
+// second feature could only get the same guarantee by copying the script -- and
+// a second copy is a second thing to keep in step, which is the exact failure
+// the split exists to prevent.
+for (const { label, checklist: CHECKLIST, records: RECORDS } of STAGING_VERIFICATION_FEATURES) {
+let records = 0;
+let frozen = 0;
 
 /* ------------------------------------------------ the template is empty */
 
@@ -136,8 +145,6 @@ if (sectionsInChecklist.length > 0) {
 /* ---------------------------------------------------- the records hold */
 
 const entries = readdirSync(RECORDS).filter((name) => name.endsWith(".md"));
-let records = 0;
-let frozen = 0;
 
 for (const name of entries) {
   if (name === TEMPLATE || name === README) continue;
@@ -191,16 +198,20 @@ for (const name of entries) {
   }
 }
 
+summaries.push(
+  `${label}: revision ${revision ? revision[1] : "(none)"}, ` +
+    `${records} record(s), ${frozen} frozen and matching their digest`
+);
+}
+
 if (problems.length > 0) {
   console.error("Staging verification record check failed.\n");
   for (const problem of problems) console.error(`  ${problem}`);
   console.error(
-    `\nSee ${RECORDS}/README.md. The checklist holds items; a run holds results.`
+    "\nEach feature's records/README.md says how. The checklist holds items; a run holds results."
   );
   process.exit(1);
 }
 
-console.log(
-  `Staging verification record check passed: template revision ${revision[1]}, ` +
-    `${records} record(s), ${frozen} frozen and matching their digest.`
-);
+console.log("Staging verification record check passed.");
+for (const summary of summaries) console.log(`  ${summary}`);

@@ -15,7 +15,7 @@ import { fileURLToPath } from "node:url";
  * anywhere in a 4,000-line module satisfies it.
  *
  * Two paths now take the same two locks. `settleChatUsage` has always taken
- * them; `reserveFallbackProviderBudget` was added for §7's automatic fallback
+ * them; `reserveAttemptProviderBudget` was added for §7's automatic fallback
  * and can run against the same reservation while a turn is in flight. Two
  * functions taking one pair of locks in different orders is a deadlock that
  * appears under concurrency and nowhere else — which is to say, in production
@@ -52,8 +52,8 @@ const RESERVATION_READ = "chatCreditReservation.findUnique";
 /** Every function that takes both locks. Adding one means adding it here. */
 const LOCKING_FUNCTIONS = [
   "settleChatUsage",
-  "reserveFallbackProviderBudget",
-  "releaseFallbackProviderBudget",
+  "reserveAttemptProviderBudget",
+  "releaseAttemptProviderBudget",
 ];
 
 for (const name of LOCKING_FUNCTIONS) {
