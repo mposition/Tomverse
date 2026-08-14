@@ -43,7 +43,7 @@ export function checklistItems(markdown) {
     current = null;
   };
 
-  for (const raw of markdown.split("\n")) {
+  for (const raw of markdown.replace(/\r\n?/g, "\n").split("\n")) {
     const line = raw.replace(/\s+$/, "");
     const heading = SECTION.exec(line);
     if (heading) {

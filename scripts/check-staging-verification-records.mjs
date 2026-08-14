@@ -28,37 +28,22 @@
 // thing that needs to be visible.
 
 import { readFileSync, readdirSync } from "node:fs";
-import { createHash } from "node:crypto";
 import { join } from "node:path";
 
 import { STAGING_VERIFICATION_FEATURES } from "./staging-verification-features.mjs";
+import {
+  frontMatter,
+  normalizeLineEndings,
+  recordDigest,
+} from "./check-staging-verification-records-core.mjs";
+
+export { recordDigest };
 
 const TEMPLATE = "_record-template.md";
 const README = "README.md";
 
 const RECORD_NAME = /^(\d{4}-\d{2}-\d{2})__([0-9a-f]{40})\.md$/;
 
-/** Everything after the front matter, which is what a digest covers. */
-const bodyOf = (text) => {
-  if (!text.startsWith("---")) return text;
-  const end = text.indexOf("---", 3);
-  return end === -1 ? text : text.slice(end + 4);
-};
-
-export const recordDigest = (text) =>
-  createHash("sha256").update(bodyOf(text), "utf8").digest("hex").slice(0, 32);
-
-const frontMatter = (text) => {
-  const fields = new Map();
-  if (!text.startsWith("---")) return fields;
-  const end = text.indexOf("---", 3);
-  if (end === -1) return fields;
-  for (const line of text.slice(4, end).split("\n")) {
-    const match = /^([A-Za-z][A-Za-z0-9]*):\s*(.*)$/.exec(line);
-    if (match) fields.set(match[1], match[2].trim().replace(/^"|"$/g, ""));
-  }
-  return fields;
-};
 
 const digestArgument = process.argv.indexOf("--digest");
 if (digestArgument !== -1) {
@@ -84,7 +69,7 @@ let frozen = 0;
 
 /* ------------------------------------------------ the template is empty */
 
-const checklist = readFileSync(CHECKLIST, "utf8");
+const checklist = normalizeLineEndings(readFileSync(CHECKLIST, "utf8"));
 const ticked = checklist
   .split("\n")
   .map((line, index) => ({ line, index }))
@@ -118,7 +103,7 @@ if (!revision) {
 // nobody could tell an execution from before the section was added from one
 // after it.
 const templatePath = join(RECORDS, TEMPLATE);
-const blank = readFileSync(templatePath, "utf8");
+const blank = normalizeLineEndings(readFileSync(templatePath, "utf8"));
 const blankRevision = frontMatter(blank).get("templateRevision");
 if (revision && blankRevision !== revision[1]) {
   problems.push(
