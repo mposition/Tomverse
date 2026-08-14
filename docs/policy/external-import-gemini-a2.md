@@ -181,6 +181,35 @@ Takeout/내 활동/Gemini 앱/내활동.json
   Gem 사용 여부는 문장이 아니라 `subtitles[].url`이 `gemini.google.com/gems/`
   인지로 판정합니다.
 
+### 3.2 오늘의 규칙은 실제 Takeout을 통째로 거절합니다
+
+2026-08-14, 실제 아카이브의 디렉터리 목록을 `planArchiveEntries()`에 그대로
+넣어 실행했습니다. 결과는 **거절**입니다.
+
+```
+ExternalImportArchiveError nested_archive
+entry decisions: skip:media 128, skip:unsupported_extension 47,
+                 parse:candidate 1, reject:nested_archive 4
+```
+
+사용자가 대화에 **`.zip` 파일을 첨부했기 때문**입니다. 첨부는 형제 파일로 함께
+내보내지고, `lib/externalImportArchive.ts`는 `.zip` 확장자를 `nested_archive`로
+거절하며 `planArchiveEntries()`는 첫 거절에서 아카이브 전체를 던집니다. 대화
+JSON은 정상적으로 `parse:candidate`로 잡히는데도 그 앞에서 멈춥니다.
+
+이것은 A2가 아니라 상위 정책 §5.2의 규칙이므로 **여기서 바꾸지 않고 결정
+항목으로 올립니다**(§8-6). 판단에 필요한 사실만 적습니다.
+
+- 우리는 첨부를 **복제하지 않습니다**(§4). 즉 이 `.zip`을 열 계획이 애초에
+  없습니다. `nested_archive` 거절이 막으려는 것은 *펼치는 것*인데, 펼치지 않는
+  경로에서는 막을 대상이 없습니다.
+- 압축 폭탄 방어는 팽창시킬 때만 의미가 있고, media를 `skip`으로 처리하는 지금
+  규칙이 이미 같은 원리를 씁니다 — 열지 않으면 크기가 무해합니다.
+- 반면 **대화 payload 자체가 중첩 아카이브인 경우**는 계속 거절해야 합니다.
+  둘은 다른 상황이며, 완화한다면 그 구분을 유지해야 합니다.
+
+이 결정이 나기 전에는 A2 파서를 만들어도 실제 export에서 동작하지 않습니다.
+
 digest·stable id 함수는 이미 `provider`를 입력으로 받으므로 **바뀌지 않습니다**
 (`externalConversationStableId`, `externalMessageStableId`). 새 provider 값이
 해시 입력에 들어가므로 다른 provider와 id가 충돌하지 않고, 계정별 scope도
@@ -277,6 +306,9 @@ A2에서는 그 파일이 **저장소에 들어간다**는 점에서 더 엄격�
 3. HTML 전용 사용자를 첫 릴리스에서 거절하는 것이 맞는지(§6).
 4. Gems를 A2에서 명시적 비목표로 유지할지, 릴리스 C로 넘길지(§4).
 5. A2 scope 승인 기록 — 상위 정책 §23의 다른 릴리스와 같은 형식.
+6. **첨부로 들어온 중첩 아카이브를 거절이 아니라 skip으로 바꿀지**(§3.2).
+   상위 정책 §5.2의 규칙이므로 A2 단독으로 정하지 않습니다. 바꾸지 않으면
+   실제 Gemini Takeout은 대부분 거절됩니다.
 
 ## 9. 착수 조건
 
@@ -284,8 +316,10 @@ A2에서는 그 파일이 **저장소에 들어간다**는 점에서 더 엄격�
 
 - [x] 활동 항목의 대화 식별자 확인 (2026-08-14, `details[].url`)
 - [x] 분기 대화 처리 결정 (2026-08-14, §2.2 — 분기별 독립 대화)
-- [ ] 합성 `MyActivity.json` fixture가 저장소에 있음 — 분기 대화, 첨부 누락,
-      대화 ID 없는 항목을 모두 포함해야 §2.2·§4.1·§5를 검증할 수 있습니다
+- [x] 합성 fixture가 저장소에 있음 — `tests/fixtures/geminiTakeout/`.
+      `tests/geminiTakeoutFixture.test.mjs`가 분기(중첩·교차 둘 다), 첨부 누락,
+      대화 ID 없는 항목, ko/en 구조 동일성을 강제합니다
+- [ ] §8의 6번이 답변됨 (첨부 중첩 아카이브 — 없으면 실제 export가 거절됩니다)
 - [ ] A2 scope 승인이 기록됨
 
 증명할 수 없는 구조에 대해 파서를 쓰면, 그것이 §4.1·§5.6을 만족하는지 아무도

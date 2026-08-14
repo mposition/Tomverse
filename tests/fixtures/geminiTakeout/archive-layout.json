@@ -1,0 +1,21 @@
+{
+  "ko": {
+    "activityPath": "Takeout/내 활동/Gemini 앱/내활동.json",
+    "gemsPath": "Takeout/Gemini/gemini_gems_data.html",
+    "scheduledActionsPath": "Takeout/Gemini/gemini_scheduled_actions_data.html"
+  },
+  "en": {
+    "activityPath": "Takeout/My Activity/Gemini Apps/MyActivity.json",
+    "gemsPath": "Takeout/Gemini/gemini_gems_data.html",
+    "scheduledActionsPath": "Takeout/Gemini/gemini_scheduled_actions_data.html"
+  },
+  "siblingFiles": [
+    "report-draft-1f2e3d4c5b6a7988.txt",
+    "layout-2f3e4d5c6b7a8990.csv",
+    "1000000001-4f5e6d7c8b9a0112.jpg",
+    "attachment-bundle-5f6e7d8c9b0a1223.zip"
+  ],
+  "missingAttachments": [
+    "never-exported-3f4e5d6c7b8a9901.tsx"
+  ]
+}
