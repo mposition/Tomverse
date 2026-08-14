@@ -765,7 +765,7 @@ test.describe("external import settings", () => {
     ).toBeVisible();
   });
 
-  test("an HTML export is told how to fix it, not that it is unreadable", async ({
+  test("an HTML export is told how to fix it, not that it is unreadable", { tag: "@ui-risk" }, async ({
     page,
   }) => {
     // A2 §6. Takeout offers My Activity as JSON or HTML, and only JSON is
