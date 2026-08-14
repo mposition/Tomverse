@@ -162,6 +162,18 @@ jobs:
         timeout-minutes: 5
         run: npm run check:api-cache-control
 
+      # The other half of that default. `private, no-store` means the browser
+      # writes no cache entry, and a response body nothing consumes then did not
+      # reach `requestfinished` on Chromium at Next 16.3.0 -- so a client fetch
+      # that ignores an error body leaves the request in flight for the life of
+      # the page. That is what ran the desktop UI regression shard out to its
+      # twenty-minute step timeout. Blocks only browser-capable code on the one
+      # target that was measured; scripts/check-unconsumed-response-bodies-core.mjs
+      # explains every edge of that scope, including what it lets through.
+      - name: Unconsumed API response bodies
+        timeout-minutes: 5
+        run: npm run check:unconsumed-response-bodies
+
       # Nineteen columns carry a closed list as a CHECK constraint, and the
       # application holds its own copy of most of them. Code accepting a value
       # the constraint rejects is a 500 where a 400 belongs.

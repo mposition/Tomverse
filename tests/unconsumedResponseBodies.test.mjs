@@ -319,3 +319,133 @@ test("a read inside a returned object literal counts as consumed", () => {
     "consumed"
   );
 });
+
+/**
+ * The four shapes this scanner once reported as leaking, on code that consumed
+ * its body perfectly well.
+ *
+ * They are grouped here because they share a job: a gate is only worth
+ * blocking a merge with if the shapes it has already been wrong about stay
+ * fixed. Two of them were pinned as a side effect of other tests — the
+ * pre-declared variable and the returned object literal, above — and two were
+ * not pinned at all until this block. `Promise.all` appeared nowhere in this
+ * file, and the ternary test above only fixed the *leaking* case, so the
+ * ComparisonReviewDialog shape could have regressed with every test green.
+ */
+
+test("false positive 1: a fetch inside Promise.all escapes rather than leaking", () => {
+  // components/auth/AuthButton.tsx:418. Both responses are consumed in the
+  // destructuring handler, which this walk cannot follow -- so the honest
+  // answer is `escapes`, and it must never drift back to `leaks`.
+  assert.deepEqual(
+    kinds(
+      `async function go() {
+         Promise.all([
+           fetch("/api/memories/settings", { cache: "no-store" }),
+           fetch("/api/memories?status=candidate&limit=1"),
+         ]).then(async ([settings, candidates]) => {
+           if (!settings.ok || !candidates.ok) return;
+           apply(await settings.json(), await candidates.json());
+         });
+       }`
+    ),
+    ["escapes", "escapes"]
+  );
+});
+
+test("false positive 2: a ternary-chosen promise consumed later is not a leak", () => {
+  // components/chat/ComparisonReviewDialog.tsx:430. Both promises are chosen by
+  // a ternary, stored, and consumed through the variable. `escapes` is the
+  // honest answer -- the consumer is a step this walk does not follow -- and
+  // the point of pinning it is that it must never drift back to `leaks`.
+  assert.deepEqual(
+    kinds(
+      `async function go(guest) {
+         const request = guest
+           ? fetch("/api/chat/comparison-review/preview", { method: "POST" })
+           : fetch("/api/conversations/1/comparison-reviews");
+         void request.then(async (response) => {
+           apply(await response.json().catch(() => ({})));
+         });
+       }`
+    ),
+    ["escapes", "escapes"]
+  );
+});
+
+test("false positive 2b: a ternary-chosen response read on every path is consumed", () => {
+  // The awaited form of the same shape, and the one that must say `consumed`
+  // rather than `escapes`: the body really is read, on both arms.
+  assert.equal(
+    one(
+      `async function go(guest) {
+         let response = guest ? await sendGuestRun() : await fetch("/api/x");
+         const data = await response.json().catch(() => ({}));
+         return data;
+       }`
+    ),
+    "consumed"
+  );
+});
+
+test("false positive 3: assigned in a try and used after it is not a leak", () => {
+  // lib/feedbackClient.ts:123, as written: the body is read on both paths, but
+  // through a helper. So the answer is `escapes` -- this walk declines to judge
+  // rather than claiming either way -- and what was fixed is that it is no
+  // longer reported as leaking a body it demonstrably consumes.
+  assert.equal(
+    one(
+      `async function go(payload) {
+         let response;
+         try {
+           response = await fetch("/api/feedback", { method: "POST" });
+         } catch {
+           return { ok: false };
+         }
+         if (response.ok) return { ok: true, body: await readJsonSafely(response) };
+         const body = await readJsonSafely(response);
+         return { ok: false, body };
+       }`
+    ),
+    "escapes"
+  );
+});
+
+test("false positive 3b: the same shape reading inline is consumed", () => {
+  // Without the helper there is nothing to decline to judge, and this is the
+  // capability the fix actually added: the walk continues out of the `try` into
+  // the statements that follow it.
+  assert.equal(
+    one(
+      `async function go(payload) {
+         let response;
+         try {
+           response = await fetch("/api/feedback", { method: "POST" });
+         } catch {
+           return { ok: false };
+         }
+         const body = await response.json().catch(() => null);
+         return { ok: response.ok, body };
+       }`
+    ),
+    "consumed"
+  );
+});
+
+test("false positive 4: a read inside a returned object literal is consumed", () => {
+  // components/memory/MemoryReviewSettings.tsx:145.
+  assert.equal(
+    one(
+      `async function apiRequest(input, init) {
+         const response = await fetch(input, init);
+         if (response.ok) {
+           return { ok: true, body: await response.json().catch(() => null) };
+         }
+         const body = await response.json().catch(() => null);
+         return { ok: false, failure: { status: response.status, body } };
+       }`,
+      "components/Example.tsx"
+    ),
+    "consumed"
+  );
+});

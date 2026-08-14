@@ -53,6 +53,11 @@ Date / timezone:    ____________________
       English sentence where a translation is owed
 - [ ] `npm run check:api-cache-control` — proves the proxy's `/api/*` default
       does not silently replace a route's own caching decision
+- [ ] `npm run check:unconsumed-response-bodies` — the other half of that
+      default: `private, no-store` leaves the browser no cache entry to write,
+      so a client fetch that ignores an error body keeps the request in flight.
+      Blocks browser-capable code on the one target that was measured, and says
+      so; the server-side candidates are reported, not gated
 - [ ] `npm run check:enum-constraints` — proves every closed list the schema
       enforces still matches the list the application validates against, and
       that a new one was registered rather than left undecided
