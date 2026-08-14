@@ -3,7 +3,8 @@
 - 대상 정책: `docs/policy/image-generation.md` §12(가격 검증)·§15(eval 예산)
 - 실행 도구: `scripts/measure-google-image-thinking-cap.mjs`
 - 작성일: 2026-08-13
-- 상태: **실행 대기.** 이 문서는 계획이며, 아직 어떤 유료 호출도 발생하지 않았다.
+- 상태: **1단계 완료(2026-08-14), 1b단계 대기.** 실제 사용 예산 약 3,300µUSD
+  (승인 $10의 0.03%).
 
 ## 0. 승인된 것과 승인되지 않은 것
 
@@ -142,16 +143,86 @@ node --conditions=react-server --import tsx \
   닫히고, 세 모델 모두 `worst_case_cost_unbounded`를 유지한다. 2단계를 실행하지
   않는다.
 - `inconclusive_limit_never_bound` → 상한을 더 낮춰 재실행(`--limit=256`).
-- `consistent_with_limit_bounding_thinking` → 2단계로.
+- `consistent_with_limit_bounding_thinking` → **1b단계로.** 아래 결과가 그
+  이유다 — 2단계로 바로 가지 않는다.
+
+#### 1단계 결과 (2026-08-14, 실제 원가 약 3,300µUSD)
+
+`--limit=512 --prompts=2 --repeats=2 --thinking=high`, 4회 전부 전송,
+`stoppedEarly: null`, `verdict: consistent_with_limit_bounding_thinking`.
+
+| # | prompt | input | output | thinking | 합계 vs 512 | status | 이미지 |
+|---:|---:|---:|---:|---:|---|---|---:|
+| 0 | 0 | 62 | 0 | **509** | within | `completed` | 0 |
+| 1 | 1 | 56 | 0 | **509** | within | `completed` | 0 |
+| 2 | 0 | 62 | 0 | **509** | within | `completed` | 0 |
+| 3 | 1 | 56 | 0 | **509** | within | `completed` | 0 |
+
+**이미지가 한 장도 나오지 않았다.** 네 번 모두 thinking이 예산을 다 쓰고
+`total_output_tokens: 0`으로 끝났으며 `steps`가 비어 있다. 그래서 이미지 출력가
+33,600µ는 청구되지 않았고, 실제 원가는 thinking 2,036 토큰(약 3,054µ)과 입력
+236 토큰뿐이다 — 계획 178,976µ의 **1.8%**. (입력 토큰 단가는 우리 표에 검증된
+값이 없다. thinking이 지배적이므로 이 결론은 바뀌지 않는다.)
+
+**`status`가 `completed`인데 이미지가 없다.** 예산 소진을 `incomplete`로
+보고하지 않으므로 adapter는 status가 아니라 parser로 판정해야 한다.
+`generateWithGoogle`은 실제로 그렇게 하며, `parseGoogleImageResponse`가 null이면
+재시도 없이 `provider_failed`로 끝낸다. 재시도하지 않는 것이 옳다 — 결정적으로
+같은 결과를 다시 사게 된다.
+
+**이 표본들은 예전 설계였다면 전부 버려졌다.** 이미지 없는 응답을 production
+parser 하나로만 읽었다면 네 건이 모두 "판독 불능"으로 기록되고 실행은 1회에서
+멈췄을 것이다. 이미지 판정과 usage 판정을 분리한 이유가 이것이다.
+
+### 1b단계 — 509가 정말 *우리* 상한 때문인지 (필수)
+
+**긍정 판정을 그대로 받으면 안 되는 이유가 하나 있다.** 509가 서로 다른 두
+프롬프트에서 네 번 **완전히 동일**하다. 자연스러운 변동이 아니라 천장의
+지문인데, 그 천장이 둘 중 어느 것인지를 이 실행은 구별하지 못한다.
+
+- (A) 우리가 보낸 `max_output_tokens: 512`
+- (B) `thinking_level: "high"`에 대한 모델 자체의 내부 thinking 상한
+
+(B)라면 숫자는 똑같이 나오면서 `max_output_tokens`는 아무것도 bound하지 않는다.
+즉 **같은 관측이 정반대 결론과 양립한다.**
+
+상한을 낮춰 숫자가 따라오는지 보면 갈린다.
+
+```
+  --model=gemini-3.1-flash-lite-image \
+  --limit=256 --prompts=2 --repeats=2
+```
+
+- thinking ≈ 253 → 숫자가 상한을 따라온다. (A)이며 긍정 근거가 성립한다.
+- thinking = 509 → 256을 넘겼다. **반증이다.** `limit_does_not_bound_thinking`
+  으로 질문이 닫히고 세 모델 모두 `worst_case_cost_unbounded`를 유지한다.
+
+4회, 이미지가 나오지 않을 것이므로 실제 원가는 1단계보다 낮다(약 1,600µ).
+**2단계보다 먼저 실행한다.** 2단계(4,096)는 상한 근처에 가지 않을 것이라
+`inconclusive_limit_never_bound`가 나오기 쉽고, 두 가설을 구별하지 못한다.
 
 ### 2단계 — Flash Lite, 카드 한도에서의 실제 최악
+
+1b가 (A)일 때만 실행한다.
 
 ```
   --model=gemini-3.1-flash-lite-image \
   --limit=4096 --prompts=2 --repeats=3
 ```
 
-6회, 계획 원가 268,464µ ≈ $0.27.
+6회, 계획 원가 268,464µ ≈ $0.27. **여기서는 이미지가 나올 것이므로 이 단계가
+예산의 대부분을 쓴다.**
+
+두 가지를 함께 본다. 첫째, §12가 **둘 이상의 상한값**을 요구하므로 이 단계 없이
+절차가 끝나지 않는다. 둘째, production이 실제로 보내는 값이 4,096이므로 **이
+상한에서 이미지가 나오는지 자체가 제품 질문이다** — 1단계에서 본 것은 "상한이
+낮으면 thinking이 예산을 다 쓰고 아무것도 안 나온다"이고, 4,096에서도 그렇다면
+그 모델은 가격 이전에 동작하지 않는 것이다.
+
+여기서 `inconclusive_limit_never_bound`가 나오는 것은 정상이다. 스크립트의 판정은
+**실행 단위**이고 §12의 "둘 이상의 상한값"은 실행을 가로지르므로, 어떤 단일
+실행도 그 조건을 혼자 충족할 수 없다. 최종 판단은 증거 파일들을 놓고 사람이
+조립한다.
 
 ### 3단계 — Flash Image, 상한이 물리는 지점
 
