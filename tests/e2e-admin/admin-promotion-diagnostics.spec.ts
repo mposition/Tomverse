@@ -277,4 +277,73 @@ test.describe("promotion diagnostics", () => {
       )
       .toBe(before + 1);
   });
+
+  test("a Stripe blocker names the field, not just the object", async ({
+    page,
+  }) => {
+    // Stripe is unconfigured on this harness, so the linkage verdict is reached
+    // by patching the real response rather than by standing up Stripe. What is
+    // under test is the rendering: the panel printed drift from the start and
+    // never printed the blocking reasons, which is backwards -- a check that
+    // says `stored_coupon_mismatch` names the object but not the field, and the
+    // field is what tells an operator whether to repair or replace.
+    await page.route("**/api/admin/billing/promotions/diagnose", async (route) => {
+      const response = await route.fetch();
+      const body = await response.json();
+      body.report.stripe = {
+        ...body.report.stripe,
+        status: "fail",
+        checks: [
+          { id: "stored_coupon", status: "fail", reason: "stored_coupon_mismatch" },
+          { id: "stripe_mode", status: "pass", reason: null },
+          { id: "product_restriction", status: "pass", reason: null },
+        ],
+        blockingReasons: ["identity:duration", "identity:metadata_promotion_id"],
+        driftReasons: ["drift:expires_at"],
+        facts: {
+          expectLiveMode: true,
+          storedCouponId: "cpn_stub_coupon",
+          storedCouponExists: true,
+          storedCouponMismatches: [
+            "identity:duration",
+            "identity:metadata_promotion_id",
+          ],
+          storedPromotionCodeId: "promo_stub_code",
+          storedPromotionCodeExists: true,
+          storedPromotionCodeMismatches: [],
+          exactCodeCandidates: [
+            {
+              id: "promo_stub_stranger",
+              active: true,
+              livemode: true,
+              mismatches: ["identity:metadata_promotion_id"],
+              adoptable: false,
+            },
+          ],
+          recommendation: "manual_review",
+        },
+      };
+      await route.fulfill({ response, json: body });
+    });
+
+    await openPromotions(page);
+    await runDiagnostics(page);
+
+    const blocking = page.getByTestId("promotion-diagnostics-blocking-reasons");
+    await expect(blocking).toBeVisible();
+    await expect(blocking).toContainText("identity:duration");
+    await expect(blocking).toContainText("identity:metadata_promotion_id");
+
+    // The objects holding the code string are listed, with why each was refused.
+    const candidates = page.getByTestId("promotion-diagnostics-candidates");
+    await expect(candidates).toContainText("Active");
+    await expect(candidates).toContainText("identity:metadata_promotion_id");
+
+    // A Stripe object id stays masked until it is asked for, blocker or not.
+    await expect(candidates).not.toContainText("promo_stub_stranger");
+    await candidates
+      .getByRole("button", { name: /^Reveal Active/ })
+      .click();
+    await expect(candidates).toContainText("promo_stub_stranger");
+  });
 });
