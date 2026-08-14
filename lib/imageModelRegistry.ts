@@ -434,12 +434,13 @@ const GOOGLE_GEMINI_31_FLASH_LITE_IMAGE: ImageModelProfile = {
 // gateway or Google's model and the two want telling apart. What the user sees
 // is Google's model, with fal named in the detail view rather than hidden.
 //
-// `price_unverified` rather than a number, because policy §12 wants the price
-// from the provider's own published text and this repository could not reach
-// fal.ai to read it (egress blocked, 2026-08-14). Everything else about the
-// entry can be settled without it; the price cannot be settled by being
-// plausible. What is needed before this can carry a price is in
-// docs/policy/image-generation.md §16.
+// Price read from fal's own published text on 2026-08-14, quoted in policy
+// §16.4. The hold is `operational_hold` rather than `price_unverified`: the
+// pricing question is closed, and what is missing is an adapter, a budget and
+// an approved sale credit. `prices` stays empty until that credit is approved
+// -- the reason is allowed to carry figures precisely so approved ones are
+// validated, and putting an unapproved candidate there would be the entry
+// asserting a decision nobody made.
 const FAL_NANO_BANANA_2: ImageModelProfile = {
   id: "fal-ai/nano-banana-2",
   provider: "fal",
@@ -448,32 +449,55 @@ const FAL_NANO_BANANA_2: ImageModelProfile = {
   name: "Nano Banana 2",
   shortName: "Nano Banana 2",
   lifecycle: "stable",
-  disabledReason: "price_unverified",
+  disabledReason: "operational_hold",
   // 1K only, deliberately, and not because the gateway is limited: a single
   // size is one price to verify, one worst case to state and one row to
   // explain. 2K and 4K are sold at multiples and can be added as their own
   // decisions once the first one is real.
   sizes: ["1024x1024"],
-  qualities: ["low"],
-  prices: [],
+  // Same tier as Grok Imagine, which is the model it sits beside in the
+  // picker. A single-tier model still has to say which shelf it is on.
+  qualities: ["medium"],
+  // 120 approved 2026-08-14 against a floor of 97. That is 725 microUSD per
+  // credit, within a rounding error of Grok Imagine's 733 (55,000 over 75), so
+  // the two neighbours carry the same headroom rather than one quietly
+  // carrying less. 115 would have been 757 and harder to explain on screen.
+  prices: [
+    { quality: "medium", size: "1024x1024", credits: 120, outputCostMicroUsd: 80_000 },
+  ],
   latencyClass: "balanced",
   // Inherited from the underlying Google model rather than asserted about the
   // gateway. Worth re-reading against a real response before this is enabled,
   // since what fal returns is what we would be storing and labelling.
   provenance: ["synthid"],
   outputMimeTypes: ["image/png", "image/jpeg"],
-  pricingVersion: "fal-nano-banana-2-unverified",
+  pricingVersion: "fal-nano-banana-2-2026-08-14-v1",
   priceVerification: {
-    verifiedAt: "",
-    sources: [],
-    // Not applicable rather than unknown: a per-image price has no thinking
-    // term to cap. That is the entire reason this route exists, and it is why
-    // this entry is blocked on `price_unverified` and not on
-    // `worst_case_cost_unbounded` like the direct Google ones.
-    thinkingCapMicroUsd: null,
+    verifiedAt: "2026-08-14",
+    sources: [
+      "https://fal.ai/models/fal-ai/nano-banana-2",
+      "https://fal.ai/docs/documentation/model-apis/pricing",
+    ],
+    // 2,000 because the request asks for it, not as a safety margin. fal's
+    // schema says of `thinking_level`: "When set, enables model thinking with
+    // the given level ('minimal' or 'high') ... Omit to disable", and its
+    // pricing says "If high thinking is used, an additional $0.002 will be
+    // charged". The approved configuration sends `high`, so 2,000 is the
+    // surcharge this integration intends to incur every time.
+    //
+    // Stated that way on purpose. A cap of 2,000 beside an adapter that omits
+    // the field would price a request the product does not make, and a cap of
+    // 0 beside an adapter that sends `high` would underprice the one it does.
+    // The number and the request have to be one decision, which is why the
+    // pinned field list lives in policy §16.5 rather than in the adapter alone.
+    //
+    // Web search is a separate surcharge ($0.015) and is deliberately not
+    // folded in: it is not reasoning, and the request pins it off. That makes
+    // it a property the adapter has to keep true, not a number to carry.
+    thinkingCapMicroUsd: 2_000,
   },
   disabledNote:
-    "Google's Gemini 3.1 Flash Image, supplied through fal. Registered pending price verification against fal's own published pricing, which this environment cannot fetch (fal.ai is blocked by the egress proxy). The direct Google route stays disabled permanently: max_output_tokens was measured on 2026-08-14 and does not bound the billable output+thinking sum. Before this can be enabled it needs the verified per-image price, an approved sale price, a fal adapter that sets X-Fal-No-Retry and X-Fal-Store-IO: 0, IMAGE_PROVIDER_FAL_COST_* budgets, and the request pinned to 1K, one image, no web search and no high thinking. See docs/policy/image-generation.md §16.",
+    "Google's Gemini 3.1 Flash Image, supplied through fal. Price verified 2026-08-14 at $0.08 per 1K image, billed only on success; worst case 87,000 microUSD (80,000 image + 5,000 prompt budget + 2,000 high-thinking surcharge) giving a floor of 97 credits, sale price 120 approved 2026-08-14. Held on operations, not price: still needs a fal adapter, and IMAGE_PROVIDER_FAL_COST_* budgets plus a prepaid balance, both separately approved and deployed first. The adapter must set X-Fal-No-Retry (fal retries up to 10 times by default, and a retry after an invisible success bills a second image), X-Fal-Store-IO: 0, and X-Fal-Object-Lifecycle-Preference -- whose default fal documents as forever and publicly readable. Request pinned to 1K, one image, no web search, no high thinking. The direct Google route stays disabled permanently: max_output_tokens was measured on 2026-08-14 and does not bound the billable sum. See docs/policy/image-generation.md §16.",
 };
 
 // Registered, not enabled. The professional-tier candidate.

@@ -405,16 +405,23 @@ test("a direct integration answers both questions the same way", () => {
   }
 });
 
-test("the gateway route is registered disabled, and on price grounds", () => {
+test("the gateway route is held on operations, not on price", () => {
   const model = getImageModel("fal-ai/nano-banana-2");
 
-  // Not `worst_case_cost_unbounded`: a per-image price has no thinking term,
-  // which is the reason for taking this route at all. Blocked purely on not
-  // having read fal's published price yet.
-  assert.equal(model.disabledReason, "price_unverified");
-  assert.deepEqual(model.prices, []);
-  assert.equal(model.priceVerification.verifiedAt, "");
-  assert.deepEqual(model.priceVerification.sources, []);
+  // Not `worst_case_cost_unbounded`, which is the direct Google route's
+  // problem and the reason this one exists: a per-image price has no unbounded
+  // thinking term. Not `price_unverified` either, since the price was read
+  // from fal's own published text on 2026-08-14.
+  assert.equal(model.disabledReason, "operational_hold");
+  assert.equal(model.priceVerification.verifiedAt, "2026-08-14");
+  assert.ok(model.priceVerification.sources.length > 0);
+
+  // 120 approved 2026-08-14. `operational_hold` is the one reason allowed to
+  // carry figures precisely so an approved one is validated on every run
+  // rather than re-entered by hand on launch day.
+  assert.deepEqual(model.prices, [
+    { quality: "medium", size: "1024x1024", credits: 120, outputCostMicroUsd: 80_000 },
+  ]);
 
   // One size, so there is one price to verify and one worst case to state.
   assert.deepEqual(model.sizes, ["1024x1024"]);
@@ -422,4 +429,32 @@ test("the gateway route is registered disabled, and on price grounds", () => {
   // No adapter exists yet, and the dispatch must refuse rather than guess.
   assert.ok(!listEnabledImageModels().some((entry) => entry.id === model.id));
   assert.ok(!listActiveImageProviders().includes("fal"));
+});
+
+test("the approved credit clears the floor its own configuration implies", () => {
+  const model = getImageModel("fal-ai/nano-banana-2");
+  const [price] = model.prices;
+
+  // 80,000 image + 5,000 prompt budget + 2,000 high-thinking surcharge. The
+  // prompt budget is padding rather than a fal charge -- fal bills per image,
+  // not per input token -- and it stays because every other model's floor
+  // carries it and a per-model exception is worth less than a consistent one.
+  assert.equal(maxImageRequestCostMicroUsd(model, price), 87_000);
+  assert.equal(minimumCreditsForImageOption(model, price), 97);
+  assert.ok(price.credits >= 97);
+
+  // The floor is a fact about the request, not just the price list. Omitting
+  // `thinking_level` would make it 95, and a sale price justified by a 97 that
+  // the adapter does not actually incur is an audit trail that disagrees with
+  // the code. Policy §16.5 pins the field for that reason.
+  assert.equal(model.priceVerification.thinkingCapMicroUsd, 2_000);
+
+  // Headroom, stated so a future price move is visibly compared rather than
+  // silently absorbed: 725 microUSD per credit against Grok Imagine's 733.
+  const perCredit = maxImageRequestCostMicroUsd(model, price) / price.credits;
+  const grok = getImageModel("grok-imagine-image-quality-20260403");
+  const grokPrice = grok.prices.find((entry) => entry.size === "1024x1024");
+  const grokPerCredit =
+    maxImageRequestCostMicroUsd(grok, grokPrice) / grokPrice.credits;
+  assert.ok(Math.abs(perCredit - grokPerCredit) < 20, `${perCredit} vs ${grokPerCredit}`);
 });

@@ -11,6 +11,16 @@ import {
   type ImageModelProfile,
 } from "@/lib/imageModelRegistry";
 import { readImageDimensions } from "@/lib/imageDimensions";
+import {
+  buildFalImageRequest,
+  falAuthorizationHeader,
+  falPlatformHeaders,
+  falAssetLengthRefused,
+  FAL_MAX_ASSET_BYTES,
+  FAL_RUN_URL_BASE,
+  isFalAssetUrl,
+  parseFalImageResponse,
+} from "@/lib/falImageRequest";
 import { resolveProviderApiKey } from "@/lib/modelRegistryShared";
 import {
   IMAGE_PROVIDER_RETRY_DELAYS_MS,
@@ -167,6 +177,27 @@ const getGoogleApiKey = () => {
   return key;
 };
 
+/**
+ * fal's key, deliberately not in PROVIDER_API_KEY_ENV_NAMES.
+ *
+ * That table is the chat providers': everything in it appears in the model
+ * catalogue, in provider status and in chat readiness. fal serves no chat
+ * model, and adding it there to save a function would have it reported as an
+ * unconfigured chat provider on every deployment that does not use images.
+ *
+ * `FAL_KEY` is the name fal's own documentation uses.
+ */
+const getFalApiKey = () => {
+  const key = process.env.FAL_KEY?.trim();
+  if (!key) {
+    throw new ImageProviderError(
+      "provider_failed",
+      "Image provider is not configured."
+    );
+  }
+  return key;
+};
+
 const getXaiApiKey = () => {
   const key = resolveProviderApiKey("xai");
   if (!key) {
@@ -245,6 +276,9 @@ export const generateImageWithProvider = async (input: {
   }
   if (model.provider === "google") {
     return generateWithGoogle(model, input);
+  }
+  if (model.provider === "fal") {
+    return generateWithFal(model, input);
   }
   if (model.provider !== "openai") {
     throw new ImageProviderError(
@@ -489,6 +523,183 @@ const generateWithGoogle = async (
     lastError ??
     new ImageProviderError("provider_failed", "Image provider request failed.")
   );
+};
+
+/**
+ * Nano Banana 2 through fal: Google's model, fal's invoice.
+ *
+ * Three ways this path is deliberately unlike the other three.
+ *
+ * **It never retries.** The others retry a rate limit or a transport failure
+ * because a second attempt costs nothing when the first was not billed. Here
+ * the danger is the attempt that *was* billed: a generation that succeeded and
+ * whose response was lost looks exactly like a transport failure, and retrying
+ * it buys a second image at a second charge while the user pays one fixed
+ * price. `X-Fal-No-Retry` says the same thing to fal's own machinery.
+ *
+ * **The response is a link, not bytes.** So the link is checked before it is
+ * followed -- https, a fal CDN host, an allowlisted MIME -- and again on the
+ * redirect-resolved response. A URL out of a provider's response body is a
+ * request we would be making on its behalf, and the only thing standing
+ * between that and an SSRF is this check.
+ *
+ * **The delivered image is measured against what was priced.** The fixed 120
+ * credits are for a 1024x1024 image; a response of another size means the
+ * request did not do what its price says it did, and storing it would settle a
+ * different product than the one that was sold.
+ */
+const generateWithFal = async (
+  model: ImageModelProfile,
+  input: { prompt: string; size: ImageSize }
+): Promise<ImageProviderResult> => {
+  const body = buildFalImageRequest({
+    prompt: input.prompt,
+    size: input.size,
+    // PNG for the same reason gpt-image-2 stores PNG: it is lossless, and the
+    // response's own content type is still what gets recorded.
+    outputFormat: "png",
+  });
+  if (!body) {
+    throw new ImageProviderError(
+      "provider_failed",
+      `Image size ${input.size} has no approved fal price for ${model.id}.`
+    );
+  }
+  const requestParams = auditableRequestParams(body);
+  const apiKey = getFalApiKey();
+
+  let response: Response;
+  try {
+    response = await fetch(`${FAL_RUN_URL_BASE}/${model.apiModelId}`, {
+      method: "POST",
+      headers: {
+        Authorization: falAuthorizationHeader(apiKey),
+        "Content-Type": "application/json",
+        ...falPlatformHeaders(),
+      },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(PROVIDER_TIMEOUT_MS),
+    });
+  } catch (error) {
+    throw new ImageProviderError(
+      "provider_failed",
+      error instanceof Error && error.name === "TimeoutError"
+        ? "Image provider request timed out."
+        : "Image provider request failed.",
+      null,
+      null,
+      requestParams
+    );
+  }
+
+  const providerRequestId = response.headers.get("x-fal-request-id");
+  if (!response.ok) {
+    const errorBody = await response.json().catch(() => null);
+    throw new ImageProviderError(
+      classifyImageProviderFailure(response.status, errorBody),
+      `Image provider rejected the request (HTTP ${response.status}).`,
+      response.status,
+      providerRequestId,
+      requestParams
+    );
+  }
+
+  const parsed = parseFalImageResponse(
+    await response.json().catch(() => null)
+  );
+  if (!parsed) {
+    throw new ImageProviderError(
+      "provider_failed",
+      "Image provider returned no usable image payload.",
+      response.status,
+      providerRequestId,
+      requestParams
+    );
+  }
+
+  let asset: Response;
+  try {
+    asset = await fetch(parsed.url, {
+      // Followed manually so the final host is checked too: an allowlisted URL
+      // that redirects elsewhere would otherwise walk straight past the check
+      // it just passed.
+      redirect: "manual",
+      signal: AbortSignal.timeout(PROVIDER_TIMEOUT_MS),
+    });
+  } catch {
+    throw new ImageProviderError(
+      "provider_failed",
+      "Image provider asset could not be downloaded.",
+      null,
+      providerRequestId,
+      requestParams
+    );
+  }
+  if (!asset.ok || !isFalAssetUrl(asset.url)) {
+    throw new ImageProviderError(
+      "provider_failed",
+      "Image provider asset was not served from the expected location.",
+      asset.status,
+      providerRequestId,
+      requestParams
+    );
+  }
+  // Before the body is read, not after: a limit enforced once the bytes are
+  // already in memory has not limited anything.
+  if (falAssetLengthRefused(asset.headers.get("content-length"))) {
+    throw new ImageProviderError(
+      "provider_failed",
+      "Image provider asset declared a size larger than the accepted limit.",
+      null,
+      providerRequestId,
+      requestParams
+    );
+  }
+
+  const imageBytes = Buffer.from(await asset.arrayBuffer());
+  if (imageBytes.byteLength === 0 || imageBytes.byteLength > FAL_MAX_ASSET_BYTES) {
+    throw new ImageProviderError(
+      "provider_failed",
+      "Image provider asset was empty or larger than the accepted limit.",
+      null,
+      providerRequestId,
+      requestParams
+    );
+  }
+
+  const dimensions = readImageDimensions(imageBytes, parsed.mimeType);
+  const [expectedWidth, expectedHeight] = input.size.split("x").map(Number);
+  if (
+    !dimensions ||
+    dimensions.width !== expectedWidth ||
+    dimensions.height !== expectedHeight
+  ) {
+    throw new ImageProviderError(
+      "provider_failed",
+      "Image provider returned a different size than the one that was priced.",
+      null,
+      providerRequestId,
+      requestParams
+    );
+  }
+
+  return {
+    imageBytes,
+    mimeType: parsed.mimeType,
+    // fal bills per image and reports no token counts. Zero here is the honest
+    // reading -- there is no usage to record, not a usage of nothing -- and the
+    // fixed price is what settlement compares against.
+    inputTokens: 0,
+    thinkingTokens: 0,
+    outputTokens: 0,
+    providerRequestId,
+    // Google's model, so Google's watermark. Read from the profile rather than
+    // asserted about the gateway.
+    provenance: [...model.provenance],
+    outputWidth: dimensions.width,
+    outputHeight: dimensions.height,
+    requestParams,
+  };
 };
 
 /**
