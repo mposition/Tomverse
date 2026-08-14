@@ -66,6 +66,63 @@ mkdir -p "$EVIDENCE_DIR"
 아래 네 단계는 **`--model`·`--limit`·`--repeats`만 다르고** 나머지 인자와
 리다이렉션은 1단계와 같다. 각 단계에는 달라지는 부분만 적었다.
 
+#### 증거 파일은 shell이 아니라 스크립트가 쓴다
+
+`--out=<path>`를 쓴다. 리다이렉션(`>`)은 쓰지 않는다. 이유가 세 가지다.
+
+- **표본마다 즉시 쓴다.** `>`로 받으면 JSON은 프로세스가 끝까지 살아남아 출력한
+  뒤에야 존재한다. 2026-08-13 Windows 실행에서 Node가 teardown 중 libuv에서
+  abort했고(`uv_async_send` on a closing handle), 그 시점에 이미 지불한 표본이
+  있었다면 전부 사라졌을 것이다. 지금은 매 표본 직후 파일이 갱신된다.
+- **인코딩을 shell이 정하지 않는다.** Windows PowerShell 5.1의 `>`는 UTF-16LE,
+  PowerShell 7의 `>`는 BOM 없는 UTF-8이다. 같은 명령이 열려 있는 shell에 따라
+  다른 파일을 만들고 한쪽은 JSON parser가 거부한다. `--out`은 프로세스 안에서
+  UTF-8로 쓴다.
+- **쓸 수 없는 경로를 첫 요청 전에 잡는다.** 증거를 남길 수 없는 실행은 아무것도
+  사지 않아야 한다.
+
+**stderr를 파일에 섞지 않는다.** `2>&1`을 붙이면 진단 출력이 JSON 안으로 들어가
+파싱 불가가 된다. `--out`을 쓰면 애초에 이 문제가 없다.
+
+```powershell
+Set-Location C:\path\to\Tomverse
+
+# 이력 파일에 키를 남기지 않으려면 직접 대입하지 말고 입력받는다
+$sec = Read-Host 'Gemini API key' -AsSecureString
+$env:GEMINI_API_KEY = [Runtime.InteropServices.Marshal]::PtrToStringBSTR(
+  [Runtime.InteropServices.Marshal]::SecureStringToBSTR($sec))
+$env:GEMINI_API_KEY.Length                       # 값이 아니라 길이만 확인
+
+$EvidenceDir = "$HOME\tomverse-eval\google-image-thinking-cap"
+New-Item -ItemType Directory -Force -Path $EvidenceDir | Out-Null
+$stamp = [DateTime]::UtcNow.ToString('yyyyMMddTHHmmssZ')
+
+node --conditions=react-server --import tsx `
+  scripts/measure-google-image-thinking-cap.mjs `
+  --model=gemini-3.1-flash-lite-image `
+  --limit=512 --prompts=2 --repeats=2 `
+  --thinking=high --json `
+  --out="$EvidenceDir\flash-lite-512-$stamp.json" `
+  --i-accept-the-cost
+"exit=$LASTEXITCODE"
+```
+
+bash에서는 같은 명령을 `\`로 이어 쓰고 `$EVIDENCE_DIR`을 쓴다. `--out`은 동일하다.
+
+**`$env:GEMINI_API_KEY`를 직접 타이핑하지 않는다.** PSReadLine이 명령 이력을
+파일로 저장한다. 민감값 필터가 있지만 `apikey`·`secret`·`token` 같은 패턴을
+보므로 밑줄이 들어간 `GEMINI_API_KEY`가 걸린다고 장담할 수 없다. 끝나면
+`Remove-Item Env:\GEMINI_API_KEY`로 지운다.
+
+**종료 코드가 1이어도 파일을 버리지 않는다.** 스크립트는
+`limit_does_not_bound_thinking`에서 1로 끝나는데, 그것은 실패가 아니라 판정이고
+그 JSON이 이 측정에서 가장 값진 증거다.
+
+**`runComplete`를 먼저 본다.** 실행이 중간에 죽으면 파일은 남지만
+`runComplete: false`, `verdict: "run_incomplete"`가 된다. 크래시가 남긴 파일이
+결론처럼 읽히면 안 되므로 미완료 실행은 판정을 내지 않는다. 이때 `samples`에
+있는 것은 이미 지불한 표본이므로 버리지 말고 다음 실행 결과와 함께 보관한다.
+
 ### 1단계 — Flash Lite, 상한이 물리는 지점 찾기
 
 카드 한도가 가장 낮아(4,096) 가장 먼저 물릴 가능성이 높다.
@@ -76,7 +133,7 @@ node --conditions=react-server --import tsx \
   --model=gemini-3.1-flash-lite-image \
   --limit=512 --prompts=2 --repeats=2 \
   --thinking=high --json --i-accept-the-cost \
-  > "$EVIDENCE_DIR/flash-lite-512-$(date -u +%Y%m%dT%H%M%SZ).json"
+  --out="$EVIDENCE_DIR/flash-lite-512-$(date -u +%Y%m%dT%H%M%SZ).json"
 ```
 
 4회, 계획 원가 178,976µ ≈ $0.18.
@@ -153,6 +210,8 @@ node --conditions=react-server --import tsx \
 | 응답 ID | `samples[].responseId` |
 | 실행 일시 | `measuredAt` · `samples[].startedAt` |
 
+`runComplete`가 `false`면 그 파일은 중단된 실행의 부분 기록이며 판정이 없다.
+
 두 곳의 대체는 버리는 것이 아니라 읽을 수 있게 만드는 것이다. 프롬프트 텍스트는
 정책 §10이 저장을 금지하고, 이미지 base64는 1MB 안팎이라 텍스트로 감사할 수
 없다. 같은 프롬프트는 같은 digest를 내므로 두 실행의 비교 가능성은 유지된다.
@@ -188,6 +247,29 @@ grep -rlF -- "$GEMINI_API_KEY" "$EVIDENCE_DIR" \
 `grep -l`은 걸린 **파일명만** 출력하므로 출력이 없는 것이 통과다. `-c`를 쓰면
 파일마다 `0`이 줄줄이 나와 통과와 실패가 비슷하게 보인다. `-F`와 `--`는 키에
 `-`나 `.`이 들어 있어도 패턴이 아니라 문자열로 읽히게 한다.
+
+PowerShell에서는 같은 검사를 이렇게 한다. `-List`와 `Path`만 뽑는 것이 요점이다
+— `Select-String`은 기본적으로 **걸린 줄을 그대로 출력**하므로, 키가 정말 새어
+있으면 그 검사가 키를 화면에 한 번 더 찍는다.
+
+```powershell
+$shape = Select-String -Path "$EvidenceDir\*.json" -List `
+  -Pattern 'AIza[A-Za-z0-9_-]{10,}|AQ\.[A-Za-z0-9_-]{10,}' |
+  Select-Object -ExpandProperty Path
+if ($shape) { Write-Warning "!! 키 모양 문자열: $shape" } else { "OK: 키 모양 없음" }
+
+if ($env:GEMINI_API_KEY) {
+  $exact = Select-String -Path "$EvidenceDir\*.json" -List -SimpleMatch `
+    -Pattern $env:GEMINI_API_KEY |
+    Select-Object -ExpandProperty Path
+  if ($exact) { Write-Warning "!! 키 값: $exact" } else { "OK: 키 값 없음" }
+} else {
+  Write-Warning "!! 키 변수가 비어 있음 -- 두 번째 검사를 건너뛰었다"
+}
+```
+
+빈 변수는 검사를 건너뛰고 경고한다. 빈 pattern으로 검사를 돌리면 전 파일이
+걸리거나 오류가 나는데, 어느 쪽이든 답이 아니면서 답처럼 보인다.
 
 두 검사가 모두 `OK`일 때만 전달한다.
 
