@@ -99,6 +99,11 @@ mock.module(mod("lib/chatLimitDecisions.ts"), {
 mock.module(mod("lib/accountDataExportTickets.ts"), {
   namedExports: { purgeExpiredAccountDataExportRequests: async () => 13 },
 });
+mock.module(mod("lib/routingManifestRetention.ts"), {
+  namedExports: {
+    compactAgedContextManifests: async () => ({ compacted: 21, remaining: 3 }),
+  },
+});
 mock.module(mod("lib/chatContextBundleService.ts"), {
   namedExports: { deleteExpiredContextBundleConsumptions: async () => 14 },
 });
@@ -185,6 +190,11 @@ test("a step that throws does not skip the steps behind it", async () => {
   assert.equal(result.creditLotsExpired, 11);
   assert.equal(result.limitDecisions, 12);
   assert.equal(result.accountDataExportRequests, 13);
+  assert.equal(result.contextManifestsCompacted, 21);
+  // The backlog is reported beside the count: a sweep that compacted its whole
+  // batch and left work behind is the signal the batch is too small, and it is
+  // only visible if the step says so.
+  assert.equal(result.contextManifestsAwaitingCompaction, 3);
   assert.equal(result.contextBundleConsumptions, 14);
   assert.equal(result.memoryExtractionDispatched, 16);
   assert.equal(result.traceErrorEvidence, 18);

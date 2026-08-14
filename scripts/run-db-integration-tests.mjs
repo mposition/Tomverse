@@ -182,6 +182,7 @@ run(
     "tests/integration/memory-metrics.db.test.ts",
     "tests/integration/conversation-memory-mode.db.test.ts",
     "tests/integration/conversation-selection-mode.db.test.ts",
+    "tests/integration/context-manifest-retention.db.test.ts",
     // PRIVACY-01/02. These settle what a source scan cannot: that no withheld
     // column reaches the export, that no identifier survives an account
     // deletion, and that a download ticket is spent exactly once under

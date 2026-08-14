@@ -2726,6 +2726,12 @@ model ContextManifest {
   /// Why a draft was abandoned. Required when the state says it was.
   notDispatchedReason String?
 
+  /// MANIFEST-02. When the per-part detail was dropped and only the aggregate
+  /// kept. A marker rather than an inference: without it a compacted manifest
+  /// would read as a dispatch that described no sources at all, which is the
+  /// misrepresentation §5 forbids.
+  compactedAt DateTime?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
