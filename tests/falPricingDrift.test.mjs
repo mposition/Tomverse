@@ -185,3 +185,32 @@ test("an enabled model with no price cannot be verified either way", () => {
   assert.equal(verdict.status, "cannot_verify");
   assert.match(verdict.problems[0], /nothing to compare/);
 });
+
+test("a branch without the model is skipped, not failed", () => {
+  // `main` legitimately has no fal entry between the activation landing on
+  // `develop` and reaching it, and the scheduled drift check runs against both.
+  // Treating that as an error is a red run every night whose meaning is "this
+  // branch is older", which is the always-on alarm this repository keeps having
+  // to take back out.
+  const verdict = evaluateFalPricing({ model: null, response: null });
+  assert.equal(verdict.status, "not_registered");
+  assert.deepEqual(verdict.problems, []);
+  assert.equal(verdict.enabled, false);
+  assert.ok(verdict.notes.some((note) => note.includes("no approved price")));
+});
+
+test("not_registered is distinguishable from every other quiet outcome", () => {
+  // Four things exit zero and only one of them means the price was compared.
+  // They are separate words because they need separate repairs: add the
+  // credential, wait for the branch, enable the model, or do nothing.
+  const quiet = new Set([
+    evaluateFalPricing({ model: null, response: null }).status,
+    evaluateFalPricing({ model: held, response: null }).status,
+    evaluateFalPricing({ model: held, response: null, reachError: "boom" }).status,
+    evaluateFalPricing({ model: enabled, response: priced() }).status,
+  ]);
+  assert.deepEqual(
+    [...quiet].sort(),
+    ["lookup_failed", "matched", "not_registered", "skipped"]
+  );
+});

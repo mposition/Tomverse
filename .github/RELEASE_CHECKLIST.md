@@ -112,8 +112,9 @@ Date / timezone:    ____________________
       "Pricing is subject to change" beside the number `fal-ai/nano-banana-2`'s
       fixed 120 credits were computed from, so this is the only thing standing
       between a price move at fal and a settlement report nobody reads weekly.
-      No CI job can run it, which makes this line the only thing that does.
-      `matched` is the pass; `lookup_failed` and `skipped` are not.
+      The **fal Price Drift** workflow runs it daily against `main` and
+      `develop`, so this line is a re-check at the release SHA rather than the
+      only run. `matched` is the pass; `lookup_failed` and `skipped` are not.
 - [ ] Chromium E2E: `desktop-chromium`, `desktop-compact`, `mobile-chromium`
       — no unexplained failures
 
