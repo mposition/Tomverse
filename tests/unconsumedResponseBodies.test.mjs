@@ -271,3 +271,51 @@ test("only a same-origin /api/* route on the proxy default is the measured case"
     "api_default_no_store"
   );
 });
+
+test("a response assigned to a variable declared earlier is still tracked", () => {
+  // lib/feedbackClient.ts's shape: `let response: Response` above, assigned
+  // inside a try. Reading only `const x = await fetch()` reported this as
+  // dropping a body it consumes on both paths.
+  assert.equal(
+    one(
+      `async function go() {
+         let response;
+         try {
+           response = await fetch("/api/x");
+         } catch {
+           return null;
+         }
+         return response.json();
+       }`
+    ),
+    "consumed"
+  );
+});
+
+test("a response chosen by a ternary is still tracked", () => {
+  assert.equal(
+    one(
+      `async function go(guest) {
+         const response = guest ? await other() : await fetch("/api/x");
+         if (!response.ok) return null;
+         return response.json();
+       }`
+    ),
+    "leaks"
+  );
+});
+
+test("a read inside a returned object literal counts as consumed", () => {
+  assert.equal(
+    one(
+      `async function go() {
+         const response = await fetch("/api/x");
+         if (response.ok) {
+           return { ok: true, body: await response.json() };
+         }
+         return { ok: false, body: await response.text() };
+       }`
+    ),
+    "consumed"
+  );
+});

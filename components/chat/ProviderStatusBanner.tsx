@@ -6,6 +6,7 @@ import { useLanguage } from "@/components/LanguageProvider";
 import { useModelCatalog } from "@/components/ModelCatalogProvider";
 import { useIsMobileShell } from "@/components/chat/useIsMobileShell";
 import { openChatModelPicker } from "@/lib/chatModelPickerEvents";
+import { discardResponseBody } from "@/lib/discardResponseBody";
 
 type PublicModelStatus = "available" | "limited" | "unavailable";
 
@@ -152,7 +153,10 @@ export function ProviderStatusBanner({
       const response = await fetch("/api/models/status", {
         cache: "no-store",
       });
-      if (!response.ok) return;
+      if (!response.ok) {
+        await discardResponseBody(response);
+        return;
+      }
       const data = (await response.json()) as { models?: unknown };
       if (!Array.isArray(data.models)) return;
 

@@ -45,6 +45,7 @@ import {
   listEnabledImageModels,
   type ImageModelProfile,
 } from "@/lib/imageModelRegistry";
+import { discardResponseBody } from "@/lib/discardResponseBody";
 
 // The image conversation surface: prompt composer, option pickers and the
 // generation timeline. Self-contained on purpose -- ChatInput, ChatApp and the
@@ -310,7 +311,10 @@ export function ImageGenerationWorkspace({
           `/api/conversations/${conversationId}/generations`,
           { cache: "no-store" }
         );
-        if (!response.ok) throw new Error(`status ${response.status}`);
+        if (!response.ok) {
+          await discardResponseBody(response);
+          throw new Error(`status ${response.status}`);
+        }
         const payload = (await response.json()) as {
           generations: GenerationView[];
           composerRestore?: ImageComposerRestore | null;
@@ -352,7 +356,10 @@ export function ImageGenerationWorkspace({
           `/api/images/generations/${generationId}`,
           { cache: "no-store" }
         );
-        if (!response.ok) return null;
+        if (!response.ok) {
+          await discardResponseBody(response);
+          return null;
+        }
         const payload = (await response.json()) as GenerationView;
         // The one caller allowed to replace signed asset URLs: this read exists
         // because they expire.
@@ -376,7 +383,10 @@ export function ImageGenerationWorkspace({
         const response = await fetch(`/api/images/groups/${groupId}`, {
           cache: "no-store",
         });
-        if (!response.ok) return null;
+        if (!response.ok) {
+          await discardResponseBody(response);
+          return null;
+        }
         const payload = (await response.json()) as {
           status: string;
           generations: GenerationView[];
