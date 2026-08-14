@@ -3416,62 +3416,66 @@ export const settleChatUsage = async (
             // outright and holds a partial unique index on the billed one, so
             // a second settlement of the same reservation cannot quietly
             // rewrite what an attempt cost or move the user's charge.
-            // Insert-if-absent, so a retried settlement adds nothing. The
-            // rollup below is driven by how many rows this actually created,
-            // and both commit together: a crash leaves neither.
-            const inserted = await tx.chatAttemptUsage.createMany({
-                skipDuplicates: true,
-                data: multiAttempt.attempts.map((attempt) => ({
-                    reservationId: durable.id,
-                    attemptIndex: attempt.attemptIndex,
-                    modelId: attempt.price.modelId,
-                    provider: attempt.price.provider,
-                    outcome: attempt.outcome,
-                    providerRequestId: boundedProviderIdentifier(
-                        attempt.providerRequestId
-                    ),
-                    providerResponseId: boundedProviderIdentifier(
-                        attempt.providerResponseId
-                    ),
-                    inputTokens: attempt.inputTokens,
-                    cachedInputTokens: Math.min(
-                        attempt.inputTokens,
-                        attempt.cachedInputTokens
-                    ),
-                    outputTokens: attempt.outputTokens,
-                    reasoningTokens: Number.isSafeInteger(attempt.reasoningTokens)
-                        ? Math.max(0, attempt.reasoningTokens!)
-                        : null,
-                    costMicroUsd: BigInt(attempt.costMicroUsd),
-                    pricingSnapshot: {
-                        ...attempt.price,
-                        costSource: attempt.costSource,
-                        settlementVersion: multiAttempt.version,
-                    },
-                })),
-            });
-            if (inserted.count !== multiAttempt.attempts.length) {
-                // Some row already existed, so a previous settlement of this
-                // reservation already accrued the provider cost. Recording it
-                // again would double the day's rollup, which has no per-request
-                // key to dedupe on.
-                console.warn(JSON.stringify({
-                    event: "chat_attempt_usage_already_recorded",
-                    reservationId: durable.id,
-                    expected: multiAttempt.attempts.length,
-                    inserted: inserted.count,
-                }));
-            }
-            // The rollup, in the same transaction as the rows that dedupe it.
-            // ProviderDailyUsage has no per-request key, so a crash between an
-            // insert and its increment would leave the ledger and its evidence
-            // permanently disagreeing with no way to tell which was right.
+            // One attempt at a time, each row and its rollup together.
+            //
+            // Not `createMany` gated on "did all of them insert": that gate is
+            // correct only while every row is written here at once. The moment
+            // an attempt's cost is recorded when the *attempt* ends -- which is
+            // what a crash after dispatch needs -- a settlement would find one
+            // row present and one absent, and an all-or-nothing gate would drop
+            // the new one's rollup. Per attempt, it cannot.
             for (const attempt of multiAttempt.attempts) {
+                const written = await tx.chatAttemptUsage.createMany({
+                    skipDuplicates: true,
+                    data: [
+                        {
+                            reservationId: durable.id,
+                            attemptIndex: attempt.attemptIndex,
+                            modelId: attempt.price.modelId,
+                            provider: attempt.price.provider,
+                            outcome: attempt.outcome,
+                            providerRequestId: boundedProviderIdentifier(
+                                attempt.providerRequestId
+                            ),
+                            providerResponseId: boundedProviderIdentifier(
+                                attempt.providerResponseId
+                            ),
+                            inputTokens: attempt.inputTokens,
+                            cachedInputTokens: Math.min(
+                                attempt.inputTokens,
+                                attempt.cachedInputTokens
+                            ),
+                            outputTokens: attempt.outputTokens,
+                            reasoningTokens: Number.isSafeInteger(
+                                attempt.reasoningTokens
+                            )
+                                ? Math.max(0, attempt.reasoningTokens!)
+                                : null,
+                            costMicroUsd: BigInt(attempt.costMicroUsd),
+                            pricingSnapshot: {
+                                ...attempt.price,
+                                costSource: attempt.costSource,
+                                settlementVersion: multiAttempt.version,
+                            },
+                        },
+                    ],
+                });
+                if (written.count !== 1) {
+                    // The row was already there, so its cost was already
+                    // accrued. ProviderDailyUsage is a daily rollup with no
+                    // per-request identity, so this row is the only thing that
+                    // can tell a repeat from a new one.
+                    console.warn(JSON.stringify({
+                        event: "chat_attempt_usage_already_recorded",
+                        reservationId: durable.id,
+                        attemptIndex: attempt.attemptIndex,
+                    }));
+                    continue;
+                }
                 if (
-                    inserted.count !== multiAttempt.attempts.length ||
-                    (attempt.inputTokens === 0 &&
-                        attempt.outputTokens === 0 &&
-                        attempt.costMicroUsd === 0)
+                    attempt.inputTokens === 0 &&
+                    attempt.outputTokens === 0 &&
+                    attempt.costMicroUsd === 0
                 ) {
                     continue;
                 }
@@ -3690,6 +3694,26 @@ const boundedProviderIdentifier = (value: string | null | undefined) => {
  * provider entry is re-derived as the sum. See lib/chatProviderHolds.ts for
  * why the entries alone cannot carry this.
  */
+/**
+ * The provider entries of a pre-`attemptHolds` reservation, read as attempt
+ * 0's holds.
+ *
+ * The primary is the only thing that can have put them there: the holds list
+ * arrived with automatic fallback, and before it a turn dispatched once.
+ */
+const adoptLegacyProviderHolds = (
+    reservation: ChatUsageReservation
+): AttemptHold[] =>
+    reservation.entries
+        .filter((entry) => entry.key.startsWith(PROVIDER_BUCKET_PREFIX))
+        .map((entry) => ({
+            attemptIndex: 0,
+            key: entry.key,
+            period: entry.period,
+            periodStart: entry.periodStart,
+            amount: entry.amount,
+        }));
+
 export const reserveAttemptProviderBudget = async (input: {
     reservationId: string;
     userId?: string | null;
@@ -3738,7 +3762,14 @@ export const reserveAttemptProviderBudget = async (input: {
             throw new AttemptBudgetRefusal("reservation_not_open");
         }
         const canonical = deserializeReservation(durable.reservationPayload);
-        const existing = canonical.attemptHolds ?? [];
+        // A reservation written before `attemptHolds` existed carries its
+        // primary hold only in `entries`. Adopting it as attempt 0's is not
+        // bookkeeping: `serializeReservation` derives the provider entries
+        // from the holds, so writing a fallback hold onto an empty list would
+        // rebuild the entries from that hold alone and the primary's would
+        // vanish -- leaving a hold in the bucket that nothing would ever
+        // release.
+        const existing = canonical.attemptHolds ?? adoptLegacyProviderHolds(canonical);
         if (existing.some((hold) => hold.attemptIndex === input.attemptIndex)) {
             // A retry of this call, or two dispatches claiming one index.
             // Either way the second must not add a hold nothing will release.

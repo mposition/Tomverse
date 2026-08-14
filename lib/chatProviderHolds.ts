@@ -116,8 +116,9 @@ export const deriveProviderEntries = (
  *   double-counts on release;
  * - **an attempt index outside 0..1** — §6's build budget was exceeded
  *   somewhere upstream and the money is where it shows;
- * - **more than one period pair per attempt** — a hold in a period the
- *   reservation never took, which nothing would ever release.
+ * - **a hold that is not one provider, one day and one month at one amount**
+ *   — every other shape leaves a bucket that release cannot fully give back,
+ *   because release subtracts what the holds say was put there.
  */
 export const providerHoldProblems = (input: {
     holds: readonly AttemptHold[];
@@ -130,7 +131,7 @@ export const providerHoldProblems = (input: {
 }): readonly string[] => {
     const problems: string[] = [];
     const seen = new Set<string>();
-    const periodsByAttempt = new Map<number, Set<string>>();
+    const holdsByAttempt = new Map<number, AttemptHold[]>();
 
     for (const hold of input.holds) {
         if (
@@ -158,15 +159,40 @@ export const providerHoldProblems = (input: {
             );
         }
         seen.add(identity);
-        const periods = periodsByAttempt.get(hold.attemptIndex) ?? new Set();
-        periods.add(hold.period);
-        periodsByAttempt.set(hold.attemptIndex, periods);
+        holdsByAttempt.set(hold.attemptIndex, [
+            ...(holdsByAttempt.get(hold.attemptIndex) ?? []),
+            hold,
+        ]);
     }
 
-    for (const [attemptIndex, periods] of periodsByAttempt) {
-        if (periods.size > PROVIDER_BUDGET_PERIODS.length) {
+    // A hold is one provider, one day, one month, both the same amount.
+    //
+    // The looser "no more than two periods" this replaces was nearly vacuous:
+    // there are only two allowed periods, so almost nothing could fail it. The
+    // shapes it let through are all reachable and all wrong -- a day hold on
+    // one provider and a month hold on another, a day hold with no month, two
+    // periods holding different amounts. Each leaves a bucket that release
+    // cannot fully give back, because release subtracts what the holds say.
+    for (const [attemptIndex, holds] of holdsByAttempt) {
+        const keys = new Set(holds.map((hold) => hold.key));
+        if (keys.size > 1) {
             problems.push(
-                `attempt ${attemptIndex} holds ${periods.size} periods; a hold is one day and one month`
+                `attempt ${attemptIndex} holds ${keys.size} providers; an attempt runs on one`
+            );
+        }
+        for (const period of PROVIDER_BUDGET_PERIODS) {
+            const count = holds.filter((hold) => hold.period === period).length;
+            if (count !== 1) {
+                problems.push(
+                    `attempt ${attemptIndex} holds ${count} ${period} rows; a hold is exactly one of each`
+                );
+            }
+        }
+        const amounts = new Set(holds.map((hold) => hold.amount));
+        if (amounts.size > 1) {
+            problems.push(
+                `attempt ${attemptIndex} holds ${[...amounts].join(" and ")}; ` +
+                    "the day and month holds are the same reservation"
             );
         }
     }

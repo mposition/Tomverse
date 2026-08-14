@@ -4,6 +4,7 @@ import { after, beforeEach, test } from "node:test";
 
 import {
   acquireChatAccess,
+  reconcileExpiredChatCreditReservations,
   settleChatUsage,
   releaseAttemptProviderBudget,
   reserveAttemptProviderBudget,
@@ -11,6 +12,7 @@ import {
   type ChatBudget,
 } from "@/lib/chatSecurity";
 import { getProviderCostGuardrailLimits } from "@/lib/providerCostBudget";
+import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { usageBucketCount } from "@/lib/chatUsageBucketCount";
 import type { AttemptUsage } from "@/lib/chatMultiAttemptSettlement";
@@ -773,4 +775,197 @@ test("two concurrent fallbacks cannot both take the last of a budget", async () 
   const taken = results.filter((result) => result.reserved);
   assert.equal(taken.length, 1, "the budget admitted both requests");
   assert.equal(await bucket("provider:google", "provider-cost-day"), amount);
+});
+
+// Reservations written before `attemptHolds` existed. Rare in production —
+// the fallback flag is off — but a reservation created before a deploy is
+// still open after it, and reconciliation will read it.
+
+/** Strips `attemptHolds`, leaving the payload as the old code wrote it. */
+const makeLegacy = async (reservationId: string) => {
+  const row = await prisma.chatCreditReservation.findUniqueOrThrow({
+    where: { id: reservationId },
+  });
+  const payload = row.reservationPayload as Record<string, unknown>;
+  delete payload.attemptHolds;
+  await prisma.chatCreditReservation.update({
+    where: { id: reservationId },
+    data: { reservationPayload: payload as Prisma.InputJsonValue },
+  });
+};
+
+test("a legacy reservation settles exactly as it always did", async () => {
+  const { acquired } = await twoAttemptRun();
+  await makeLegacy(acquired.usageReservation.reservationId);
+
+  await settleChatUsage(acquired.usageReservation, {
+    inputTokens: 10_000,
+    outputTokens: 10_000,
+    outcome: "completed",
+  });
+
+  const durable = await prisma.chatCreditReservation.findUniqueOrThrow({
+    where: { id: acquired.usageReservation.reservationId },
+  });
+  assert.equal(durable.status, "settled");
+  assert.equal(durable.settlementAttemptIndex, null);
+  // 10K in and 10K out at $100/M: the whole turn on one provider.
+  assert.equal(await bucket("provider:openai", "provider-cost-day"), 2_000_000);
+});
+
+test("a legacy reservation reconciles when it expires", async () => {
+  const { acquired } = await twoAttemptRun();
+  await makeLegacy(acquired.usageReservation.reservationId);
+  await prisma.chatCreditReservation.update({
+    where: { id: acquired.usageReservation.reservationId },
+    data: { expiresAt: new Date(Date.now() - 60_000) },
+  });
+
+  const result = await reconcileExpiredChatCreditReservations();
+  assert.equal(result.failed, 0);
+  assert.equal(result.refunded, 1);
+  // The hold is given back in full: nothing was spent.
+  assert.equal(await bucket("provider:openai", "provider-cost-day"), 0);
+});
+
+test("a legacy reservation's primary hold survives its first fallback", async () => {
+  // The bug this pins: with no `attemptHolds` to start from, writing the
+  // fallback's hold rebuilt the provider entries from that hold alone and the
+  // primary's vanished — leaving money in the bucket that nothing would ever
+  // release.
+  const { acquired } = await twoAttemptRun();
+  await makeLegacy(acquired.usageReservation.reservationId);
+  const primaryHold = await bucket("provider:openai", "provider-cost-day");
+  assert.ok(primaryHold > 0);
+
+  const reserved = await reserveAttemptProviderBudget({
+    reservationId: acquired.usageReservation.reservationId,
+    userId: acquired.usageReservation.userId ?? null,
+    attemptIndex: 1,
+    provider: "google",
+    reservedMicroUsd: 500_000,
+    periodStarts: await periodStarts(),
+  });
+  assert.equal(reserved.reserved, true);
+
+  const entries = await payloadEntries(acquired.usageReservation.reservationId);
+  const primaryDay = entries.find(
+    (entry) =>
+      entry.key === "provider:openai" && entry.period === "provider-cost-day"
+  );
+  assert.ok(primaryDay, "the primary's entry must survive the adoption");
+  assert.equal(primaryDay.amount, primaryHold);
+
+  // And it settles back down rather than being stranded.
+  await settleChatUsage(
+    acquired.usageReservation,
+    { inputTokens: 10_000, outputTokens: 10_000, outcome: "completed" },
+    {
+      attempts: [
+        attempt({ attemptIndex: 0, outcome: "failed" }),
+        attempt({
+          attemptIndex: 1,
+          price: price("google", "fallback-model", 200, 200),
+          outputTokens: 10_000,
+          outcome: "completed",
+        }),
+      ],
+    }
+  );
+  assert.equal(await bucket("provider:openai", "provider-cost-day"), 1_000_000);
+  assert.equal(await bucket("provider:google", "provider-cost-day"), 4_000_000);
+});
+
+// The deferred constraint trigger. What makes it worth having is that it is
+// evaluated at COMMIT against the row's final state — not at the statement
+// that queued it.
+
+test("a temporary violation inside the transaction survives to COMMIT", async () => {
+  const { acquired } = await twoAttemptRun();
+  const id = acquired.usageReservation.reservationId;
+
+  await prisma.$transaction(async (tx) => {
+    // Settled with attempt rows and no pointer: a violation, right now.
+    await tx.chatAttemptUsage.create({
+      data: {
+        reservationId: id,
+        attemptIndex: 0,
+        modelId: "primary-model",
+        provider: "openai",
+        outcome: "failed",
+      },
+    });
+    await tx.chatCreditReservation.update({
+      where: { id },
+      data: { status: "settled", settledAt: new Date() },
+    });
+    // Repaired before the transaction ends, in a separate statement — which
+    // is the case a trigger reading its queued NEW would have failed.
+    await tx.chatCreditReservation.update({
+      where: { id },
+      data: { settlementAttemptIndex: 0 },
+    });
+  });
+
+  const durable = await prisma.chatCreditReservation.findUniqueOrThrow({
+    where: { id },
+  });
+  assert.equal(durable.settlementAttemptIndex, 0);
+});
+
+test("a violation left standing fails the whole transaction", async () => {
+  const { acquired } = await twoAttemptRun();
+  const id = acquired.usageReservation.reservationId;
+
+  await assert.rejects(
+    prisma.$transaction(async (tx) => {
+      await tx.chatAttemptUsage.create({
+        data: {
+          reservationId: id,
+          attemptIndex: 0,
+          modelId: "primary-model",
+          provider: "openai",
+          outcome: "failed",
+        },
+      });
+      await tx.chatCreditReservation.update({
+        where: { id },
+        data: { status: "settled", settledAt: new Date() },
+      });
+    }),
+    /no settlementAttemptIndex/
+  );
+
+  const durable = await prisma.chatCreditReservation.findUniqueOrThrow({
+    where: { id },
+  });
+  assert.equal(durable.status, "reserved", "the transaction must have rolled back");
+});
+
+test("the pointer may be set before the attempt row it names exists", async () => {
+  // The deferred foreign key: at COMMIT both are there, and the order they
+  // arrived in is not the constraint's business.
+  const { acquired } = await twoAttemptRun();
+  const id = acquired.usageReservation.reservationId;
+
+  await prisma.$transaction(async (tx) => {
+    await tx.chatCreditReservation.update({
+      where: { id },
+      data: { settlementAttemptIndex: 1, status: "settled", settledAt: new Date() },
+    });
+    await tx.chatAttemptUsage.create({
+      data: {
+        reservationId: id,
+        attemptIndex: 1,
+        modelId: "fallback-model",
+        provider: "google",
+        outcome: "completed",
+      },
+    });
+  });
+
+  const durable = await prisma.chatCreditReservation.findUniqueOrThrow({
+    where: { id },
+  });
+  assert.equal(durable.settlementAttemptIndex, 1);
 });

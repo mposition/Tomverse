@@ -180,3 +180,48 @@ test("non-provider entries are none of this module's business", () => {
   ];
   assert.deepEqual(providerHoldProblems({ holds, entries }), []);
 });
+
+// A hold is one provider, one day, one month, both the same amount. The
+// looser rule these replace let every shape below through, and each leaves a
+// bucket that release cannot fully give back — release subtracts what the
+// holds say was put there.
+
+test("an attempt holding two providers is refused", () => {
+  const holds = [hold(0, "openai", "day", 10), hold(0, "google", "month", 10)];
+  assert.match(
+    providerHoldProblems({ holds, entries: entriesFor(holds) }).join(" "),
+    /holds 2 providers; an attempt runs on one/
+  );
+});
+
+test("a hold missing its month is refused", () => {
+  const holds = [hold(0, "openai", "day", 10)];
+  assert.match(
+    providerHoldProblems({ holds, entries: entriesFor(holds) }).join(" "),
+    /holds 0 provider-cost-month rows/
+  );
+});
+
+test("a hold missing its day is refused", () => {
+  const holds = [hold(0, "openai", "month", 10)];
+  assert.match(
+    providerHoldProblems({ holds, entries: entriesFor(holds) }).join(" "),
+    /holds 0 provider-cost-day rows/
+  );
+});
+
+test("day and month holding different amounts is refused", () => {
+  // They are one reservation seen through two windows, so they cannot differ.
+  const holds = [hold(0, "openai", "day", 10), hold(0, "openai", "month", 40)];
+  assert.match(
+    providerHoldProblems({ holds, entries: entriesFor(holds) }).join(" "),
+    /the day and month holds are the same reservation/
+  );
+});
+
+test("two well-formed attempts on one provider are still accepted", () => {
+  // The rules are per attempt, not per provider: sharing a bucket is the
+  // normal same-provider fallback and must not be caught by them.
+  const holds = [...pair(0, "openai", 100), ...pair(1, "openai", 40)];
+  assert.deepEqual(providerHoldProblems({ holds, entries: entriesFor(holds) }), []);
+});
