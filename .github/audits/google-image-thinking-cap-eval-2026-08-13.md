@@ -3,8 +3,10 @@
 - 대상 정책: `docs/policy/image-generation.md` §12(가격 검증)·§15(eval 예산)
 - 실행 도구: `scripts/measure-google-image-thinking-cap.mjs`
 - 작성일: 2026-08-13
-- 상태: **1·1b·2단계 완료(2026-08-14), 3단계 대기.** 누적 실제 사용 약
-  223,400µUSD (승인 $10의 2.2%).
+- 상태: **완료(2026-08-14). 판정은 반증** — `max_output_tokens`는 과금 대상을
+  bound하지 않는다. 결론과 근거는
+  `.github/audits/image-model-verification-worksheet.md` §I. 누적 실제 사용
+  약 262,000~287,000µUSD (승인 $10의 2.6~2.9%). **남은 단계는 실행하지 않는다.**
 
 ## 0. 승인된 것과 승인되지 않은 것
 
@@ -312,6 +314,27 @@ content를 훑어 이미지만 고르므로 정상 동작하며, "첫/마지막 
 
 4회. 이미지가 나오면 약 145,000µ, 눌려서 안 나오면 그보다 훨씬 싸다.
 
+#### 3단계 결과 (2026-08-14) — **반증. 여기서 끝난다**
+
+2회 전송 후 `stoppedEarly: counterexample_found`.
+
+| # | output | thinking | 합계 vs 2,048 | status | 이미지 |
+|---:|---:|---:|---:|---|---:|
+| 0 | 891 | 981 | 1,872 | `incomplete` | 0 |
+| 1 | **1,602** | **931** | **2,533 (+485 초과)** | `completed` | **1** |
+
+표본 1이 상한을 485토큰 넘겼고 잘리지도 실패하지도 않았다 — 완성된 이미지를
+받고 초과분까지 청구됐다. `max_output_tokens`는 thinking을 단독으로는 bound
+하지만 우리가 과금당하는 `output + thinking`을 bound하지 않는다.
+
+세 Google 이미지 모델은 `worst_case_cost_unbounded`를 유지하고
+`thinkingCapMicroUsd`는 `null`을 유지한다. **허위 상한을 넣지 않는다.**
+4단계(Flash Image)는 실행하지 않는다 — 같은 파라미터에 대한 질문이고 답이
+나왔다.
+
+전체 결론과 부수 관측은 `.github/audits/image-model-verification-worksheet.md`
+§I에 있다.
+
 ### 3단계 — Flash Image, 상한이 물리는 지점
 
 1·2단계가 긍정일 때만 실행한다.
@@ -323,7 +346,11 @@ content를 훑어 이미지만 고르므로 정상 동작하며, "첫/마지막 
 
 4회, 계획 원가 681,216µ ≈ $0.68.
 
-### 4단계 — Flash Image, 카드 한도
+### 4단계 — Flash Image, 카드 한도 (실행하지 않음)
+
+3단계의 반증으로 취소됐다. 같은 요청 파라미터에 대한 같은 질문이고, 한 모델에서
+bound하지 않는 것이 다른 모델에서 bound한다고 볼 근거가 없다. 필요해지면 그때
+다시 계획한다.
 
 ```
   --model=gemini-3.1-flash-image \
