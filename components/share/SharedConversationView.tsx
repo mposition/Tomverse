@@ -7,6 +7,7 @@ import { useModelCatalog } from "@/components/ModelCatalogProvider";
 import type { ShareSnapshot } from "@/lib/shareSnapshot";
 import { useLanguage, type Language } from "@/components/LanguageProvider";
 import { localeLaunchPolicy } from "@/lib/localeLaunchPolicy";
+import { discardResponseBody } from "@/lib/discardResponseBody";
 
 type SharedConversationData = {
   snapshot: ShareSnapshot;
@@ -80,6 +81,7 @@ export function SharedConversationView({
     })
       .then(async (response) => {
         if (!response.ok) {
+          await discardResponseBody(response);
           throw new Error(
             response.status === 429
               ? t("share.tooManyRequests")
