@@ -6,6 +6,7 @@ import { Suspense, useEffect, useRef, useState } from "react";
 import { useLanguage } from "@/components/LanguageProvider";
 import { useTurnstile } from "@/components/chat/useTurnstile";
 import Link from "next/link";
+import { discardResponseBody } from "@/lib/discardResponseBody";
 import { withChatLanguage } from "@/lib/localizedCallbackUrl";
 import { ACCOUNT_SWITCH_REASON } from "@/lib/adminReauthenticationCore";
 import { isValidLoginEmail } from "@/lib/emailValidation";
@@ -190,6 +191,12 @@ function SignInButtons() {
                 );
                 return;
             }
+            // The success path reads nothing out of the body -- the next step
+            // is a screen change -- so it is drained rather than abandoned.
+            // Every refusal above already reads it; this was the one path that
+            // did not, and an unread body holds the request open for the life
+            // of the page (see lib/apiCacheControlPolicy.ts).
+            await discardResponseBody(response);
             markSignupStarted("email-code");
             setStep("code");
         } catch {

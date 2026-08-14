@@ -254,11 +254,41 @@ closure)로 손으로 확인했습니다.
 server runtime `leaks`도 25 → 21로 줄었는데, **코드를 고쳐서가 아니라 오탐
 4건이 사라져서**입니다.
 
-### 7-2. 여전히 하지 않은 것
+### 7-2. browser·`either` `escapes` 14건 추적 (2026-08-14, `9b74bc2`)
 
-- **server runtime 21건.** undici 기준으로 따로 판단해야 하며 이 문서의 측정을
-  근거로 삼을 수 없습니다.
-- **`escapes` 25건.** 판정을 미룬 것이지 안전하다고 판정한 것이 아닙니다.
+`escapes`는 **판정을 미룬 것이지 안전하다고 판정한 것이 아닙니다.** browser
+runtime 13건과 `either` 1건을 하나씩 읽어 소비자를 따라갔습니다. 결과는 반반이
+아니었습니다 — **10건은 모든 경로에서 소비되고 있었고, 4건은 실제로 미소비**
+였습니다.
+
+미소비 4건. 전부 `discardResponseBody`로 고쳤습니다.
+
+| 위치 | 미소비 경로 |
+|---|---|
+| `auth/signin/SignInPageContent.tsx:149` | **성공 경로**(`response.ok`). 거절 경로는 전부 읽고 있었고 2xx만 빠져 있었습니다 |
+| `components/admin/AdminMemoryImportPanel.tsx:161` | `!importResponse.ok`일 때, 그리고 memory 쪽이 먼저 `throw`할 때 |
+| `components/auth/AuthButton.tsx:425` | `cancelled`이거나 **둘 중 하나라도** `!ok`이면 조기 return |
+| `components/auth/AuthButton.tsx:426` | 위와 같은 경로 |
+
+소비되고 있던 10건: `ChatPageClient.tsx`의 `preflight`·`conversation-title`·
+`compare-summary`, `AdminMemoryImportPanel.tsx:160`, `ChatApp.tsx:724`(`/api/chat`,
+자체 caching이라 측정 대상 밖이기도 합니다), `ChatInput.tsx:1648`,
+`ComparisonReviewDialog.tsx`의 3건, `lib/feedbackClient.ts:123`.
+
+**7-1의 오탐 4종과는 성격이 다릅니다.** 그때는 도구가 틀렸고 코드가 옳았지만,
+여기서는 도구가 "모르겠다"고 말한 것이 맞았고 그중 4건은 실제 결함이었습니다.
+`escapes`를 gate에서 차단하지 않기로 한 결정(§7-3)은 그래서 "안전하다"가 아니라
+"사람이 읽어야 한다"는 뜻이며, 이 절이 그 읽기입니다.
+
+### 7-3. 여전히 하지 않은 것
+
+- **server runtime 23건.** undici 기준으로 따로 판단해야 하며 이 문서의 측정을
+  근거로 삼을 수 없습니다. 앱·라이브러리 17건과 `scripts/` 6건은 실행 환경이
+  달라 따로 셉니다. (7-1 시점의 21건에서 늘어난 것은 코드가 나빠져서가 아니라
+  이후 merge된 변경이 새 호출 지점을 들여왔기 때문입니다 — 정확한 수는
+  `npm run report:unconsumed-response-bodies`로 그때그때 읽습니다.)
+- **server·`either` 밖의 `escapes` 11건.** server runtime 몫이라 위 항목과
+  함께 판단합니다.
 - **빈도 측정.** 5장은 그대로 유효합니다 — 비용 크기는 여전히 모릅니다. 다만
   이제는 정리가 끝났으므로 "얼마나 비쌌는가"는 사후 관심사입니다.
 - **회귀 gate.** 지금 browser leaks가 0이므로
