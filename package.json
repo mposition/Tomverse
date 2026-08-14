@@ -56,7 +56,7 @@
     "check:error-detail-cost": "node scripts/check-error-detail-cost.mjs",
     "check:usage-bucket-range": "node --import tsx scripts/check-usage-bucket-range.mjs",
     "security:regression": "node scripts/security-regression-check.mjs",
-    "billing:reconcile-promotion": "node --import tsx scripts/reconcile-promotion.mjs",
+    "billing:reconcile-promotion": "node --conditions=react-server --import tsx scripts/reconcile-promotion.mjs",
     "db:migrate": "node scripts/require-direct-database-url.mjs && node scripts/baseline-existing-database.mjs && prisma migrate deploy",
     "db:compare-schema": "node scripts/compare-schema-to-migrations.mjs",
     "db:refresh-test": "node scripts/refresh-test-database.mjs",
