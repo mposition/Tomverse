@@ -13,6 +13,7 @@ import {
   imageComposerModelLayout,
   imageDeliveryMimeType,
   imageModelChipLabel,
+  imageModelBrandParts,
   imageModelOwner,
   shouldUseCompactImageModelPicker,
   IMAGE_INLINE_MODEL_DISCOVERY_LIMIT,
@@ -506,4 +507,57 @@ test("the approved credit clears the floor its own configuration implies", () =>
   const grokPerCredit =
     maxImageRequestCostMicroUsd(grok, grokPrice) / grokPrice.credits;
   assert.ok(Math.abs(perCredit - grokPerCredit) < 20, `${perCredit} vs ${grokPerCredit}`);
+});
+
+test("a row's subtitle credits the model's owner, not whoever bills us", () => {
+  // The bug this pins, seen on staging 2026-08-14: the catalogue row printed
+  // `provider`, which is right for every direct integration because owner and
+  // provider are the same string there. Nano Banana 2 is the first model where
+  // they differ, and the row showed no brand at all -- the label table was
+  // keyed by provider and had no `fal` entry, so it rendered `undefined` and
+  // the line began with its own separator.
+  //
+  // Two failures in one: the wrong field, and a lookup that could miss without
+  // the type noticing. This covers the field; `Record<ImageModelOwner, string>`
+  // in the panel covers the lookup.
+  const fal = getImageModel("fal-ai/nano-banana-2");
+  assert.deepEqual(imageModelBrandParts(fal), {
+    owner: "google",
+    gateway: "fal",
+  });
+
+  // `docs/policy/image-generation.md` §16.1: the owner is shown and the
+  // gateway is named, never hidden.
+  // A row that said only "fal" would credit the wrong company for the model,
+  // and one that said only "Google" would hide who the request goes to.
+  assert.notEqual(imageModelBrandParts(fal).owner, fal.provider);
+});
+
+test("a direct integration says one thing, not the same thing twice", () => {
+  // `gateway` is null rather than equal to the owner, so no caller can render
+  // "OpenAI via OpenAI". Every model that predates the split must read exactly
+  // as it did before.
+  for (const model of IMAGE_MODEL_REGISTRY) {
+    const brand = imageModelBrandParts(model);
+    if (model.modelOwner === undefined) {
+      assert.equal(brand.gateway, null, model.id);
+      assert.equal(brand.owner, model.provider, model.id);
+    } else {
+      assert.equal(brand.owner, model.modelOwner, model.id);
+    }
+  }
+});
+
+test("every registered model resolves to an owner that can be labelled", () => {
+  // The label table lives in the component and is typed exhaustively, so this
+  // asserts the other half: that no registry entry produces an owner outside
+  // the union the table is keyed by.
+  const known = new Set(["openai", "google", "xai", "fal"]);
+  for (const model of IMAGE_MODEL_REGISTRY) {
+    const { owner, gateway } = imageModelBrandParts(model);
+    assert.ok(known.has(owner), `${model.id} owner ${owner} has no brand label`);
+    if (gateway !== null) {
+      assert.ok(known.has(gateway), `${model.id} gateway ${gateway} has no brand label`);
+    }
+  }
 });

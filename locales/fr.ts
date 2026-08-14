@@ -123,6 +123,7 @@ export const fr = {
         imageModelTabSubtitle: "Modèles qui créent des images à partir d'une description. Les modèles de discussion qui se contentent de lire une image jointe restent dans l'onglet Discussion.",
         imageModelTabFooterHint: "En choisir un ouvre l'espace image.",
         imageModelCreditsFrom: "À partir de {credits} crédits",
+        imageModelViaGateway: "via {gateway}",
         imageModelHoldPriceUnverified: "En attente de la vérification de son prix officiel",
         imageModelLatencyFast: "Rapide",
         imageModelLatencyBalanced: "Équilibré",

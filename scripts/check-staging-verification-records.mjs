@@ -28,37 +28,22 @@
 // thing that needs to be visible.
 
 import { readFileSync, readdirSync } from "node:fs";
-import { createHash } from "node:crypto";
 import { join } from "node:path";
 
-const CHECKLIST = "docs/ops/external-import-staging-checklist.md";
-const RECORDS = "docs/ops/staging-verification-records";
+import { STAGING_VERIFICATION_FEATURES } from "./staging-verification-features.mjs";
+import {
+  frontMatter,
+  normalizeLineEndings,
+  recordDigest,
+} from "./check-staging-verification-records-core.mjs";
+
+export { recordDigest };
+
 const TEMPLATE = "_record-template.md";
 const README = "README.md";
 
 const RECORD_NAME = /^(\d{4}-\d{2}-\d{2})__([0-9a-f]{40})\.md$/;
 
-/** Everything after the front matter, which is what a digest covers. */
-const bodyOf = (text) => {
-  if (!text.startsWith("---")) return text;
-  const end = text.indexOf("---", 3);
-  return end === -1 ? text : text.slice(end + 4);
-};
-
-export const recordDigest = (text) =>
-  createHash("sha256").update(bodyOf(text), "utf8").digest("hex").slice(0, 32);
-
-const frontMatter = (text) => {
-  const fields = new Map();
-  if (!text.startsWith("---")) return fields;
-  const end = text.indexOf("---", 3);
-  if (end === -1) return fields;
-  for (const line of text.slice(4, end).split("\n")) {
-    const match = /^([A-Za-z][A-Za-z0-9]*):\s*(.*)$/.exec(line);
-    if (match) fields.set(match[1], match[2].trim().replace(/^"|"$/g, ""));
-  }
-  return fields;
-};
 
 const digestArgument = process.argv.indexOf("--digest");
 if (digestArgument !== -1) {
@@ -72,10 +57,19 @@ if (digestArgument !== -1) {
 }
 
 const problems = [];
+const summaries = [];
+
+// One pass per feature. The paths used to be two constants here, which meant a
+// second feature could only get the same guarantee by copying the script -- and
+// a second copy is a second thing to keep in step, which is the exact failure
+// the split exists to prevent.
+for (const { label, checklist: CHECKLIST, records: RECORDS } of STAGING_VERIFICATION_FEATURES) {
+let records = 0;
+let frozen = 0;
 
 /* ------------------------------------------------ the template is empty */
 
-const checklist = readFileSync(CHECKLIST, "utf8");
+const checklist = normalizeLineEndings(readFileSync(CHECKLIST, "utf8"));
 const ticked = checklist
   .split("\n")
   .map((line, index) => ({ line, index }))
@@ -100,11 +94,42 @@ if (!revision) {
   );
 }
 
+/* ------------------------------------- the blank record matches the items */
+
+// The drift this catches actually happened: a Gemini section `H` was added to
+// the checklist and its revision was bumped, while `_record-template.md` still
+// said `A–G` and carried the previous revision. A run started from that
+// template would have recorded a revision the checklist no longer had, and
+// nobody could tell an execution from before the section was added from one
+// after it.
+const templatePath = join(RECORDS, TEMPLATE);
+const blank = normalizeLineEndings(readFileSync(templatePath, "utf8"));
+const blankRevision = frontMatter(blank).get("templateRevision");
+if (revision && blankRevision !== revision[1]) {
+  problems.push(
+    `${templatePath}  declares templateRevision ${blankRevision ?? "(none)"} ` +
+      `while the checklist is at ${revision[1]}. A run started from it would ` +
+      `record a revision the checklist does not have.`
+  );
+}
+const sectionsInChecklist = [
+  ...checklist.matchAll(/^##\s+([A-Z])\.\s/gm),
+].map((match) => match[1]);
+if (sectionsInChecklist.length > 0) {
+  const first = sectionsInChecklist[0];
+  const last = sectionsInChecklist[sectionsInChecklist.length - 1];
+  const span = new RegExp(`${first}[–-]${last}\\s*구획`);
+  if (!span.test(blank)) {
+    problems.push(
+      `${templatePath}  does not tell the executor to copy ${first}–${last}, ` +
+        `which is what the checklist now has.`
+    );
+  }
+}
+
 /* ---------------------------------------------------- the records hold */
 
 const entries = readdirSync(RECORDS).filter((name) => name.endsWith(".md"));
-let records = 0;
-let frozen = 0;
 
 for (const name of entries) {
   if (name === TEMPLATE || name === README) continue;
@@ -131,9 +156,18 @@ for (const name of entries) {
       `${path}  declares no templateRevision, so a later checklist item cannot be told from one it skipped.`
     );
   }
+  // Required whether or not the record is frozen. A blank record in the
+  // repository looks official and says nothing, which is the state this whole
+  // split exists to prevent -- so a run in progress stays uncommitted until
+  // there is something to report. `npm run new:staging-verification-record`
+  // writes one; committing it before it is filled in is the mistake.
   for (const required of ["executor", "result"]) {
     if (!fields.get(required)) {
-      problems.push(`${path}  has no ${required}.`);
+      problems.push(
+        `${path}  has no ${required}. A record with none is a blank page that ` +
+          `reads as a completed run; keep it out of the repository until the ` +
+          `run has an executor and an outcome.`
+      );
     }
   }
 
@@ -149,16 +183,20 @@ for (const name of entries) {
   }
 }
 
+summaries.push(
+  `${label}: revision ${revision ? revision[1] : "(none)"}, ` +
+    `${records} record(s), ${frozen} frozen and matching their digest`
+);
+}
+
 if (problems.length > 0) {
   console.error("Staging verification record check failed.\n");
   for (const problem of problems) console.error(`  ${problem}`);
   console.error(
-    `\nSee ${RECORDS}/README.md. The checklist holds items; a run holds results.`
+    "\nEach feature's records/README.md says how. The checklist holds items; a run holds results."
   );
   process.exit(1);
 }
 
-console.log(
-  `Staging verification record check passed: template revision ${revision[1]}, ` +
-    `${records} record(s), ${frozen} frozen and matching their digest.`
-);
+console.log("Staging verification record check passed.");
+for (const summary of summaries) console.log(`  ${summary}`);

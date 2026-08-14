@@ -43,6 +43,36 @@ test("the checklist declares a template revision", () => {
     assert.match(read(CHECKLIST), /template revision.*?`\d{4}-\d{2}-\d{2}[a-z]?`/s);
 });
 
+test("the blank record carries the checklist's current revision", () => {
+    // This drift happened: a Gemini section H was added and the revision
+    // bumped to `2026-08-14b`, while the blank record still declared
+    // `2026-08-14`. A run started from it would have recorded a revision the
+    // checklist no longer had, and nobody could tell an execution from before
+    // the section was added from one after it.
+    const declared = /template revision.*?`(\d{4}-\d{2}-\d{2}[a-z]?)`/s.exec(
+        read(CHECKLIST)
+    )?.[1];
+    assert.ok(declared);
+    const blank = read(`${RECORDS}/_record-template.md`);
+    assert.match(blank, new RegExp(`templateRevision: ${declared}`));
+    // And in the table the executor fills in, not only the front matter a
+    // machine reads.
+    assert.match(blank, new RegExp(`\\| template revision \\| ${declared} \\|`));
+});
+
+test("the blank record spans every section the checklist has", () => {
+    // `A–G` while the checklist runs to H is an instruction to skip a section.
+    const sections = [...read(CHECKLIST).matchAll(/^##\s+([A-Z])\.\s/gm)].map(
+        (match) => match[1]
+    );
+    assert.ok(sections.length > 0);
+    const span = `${sections[0]}–${sections[sections.length - 1]}`;
+    assert.match(
+        read(`${RECORDS}/_record-template.md`),
+        new RegExp(`${span}\\s*구획`)
+    );
+});
+
 test("every record is named for a day and a full deploy SHA", () => {
     const records = readdirSync(RECORDS).filter(
         (name) => name.endsWith(".md") && !name.startsWith("_") && name !== "README.md"

@@ -41,17 +41,19 @@ const PROMOTION_ROW = {
   updatedAt: new Date("2026-07-01T00:00:00.000Z"),
 };
 
-const HEALTHY_LINKAGE = {
+const HEALTHY_LINKAGE: import("../../lib/stripePromotionProvisioning").PromotionLinkageReport = {
   promotionId: PROMOTION_ROW.id,
   code: PROMOTION_ROW.code,
   policyViolation: null,
   expectLiveMode: true,
   storedCouponId: PROMOTION_ROW.stripeCouponId,
+  storedCouponExists: true,
+  storedCouponMismatches: [] as string[],
   storedPromotionCodeId: PROMOTION_ROW.stripePromotionCodeId,
   storedPromotionCodeExists: true,
   storedPromotionCodeMismatches: [] as string[],
-  exactCodeCandidates: [] as unknown[],
-  recommendation: "healthy" as const,
+  exactCodeCandidates: [],
+  recommendation: "healthy",
 };
 
 type World = {
@@ -529,4 +531,41 @@ test("the audit entry names the account by internal id and nothing else", async 
   assert.equal(serialized.includes("cpn_live_secret"), false);
   assert.equal(serialized.includes("promo_live_secret"), false);
   assert.equal(serialized.includes("localPolicy"), false);
+});
+
+test("a stored coupon that no longer matches is reported as a blocker", async () => {
+  // The state found in staging: a coupon created by hand in the Stripe
+  // dashboard, stored against the promotion. The linkage report used to answer
+  // "create_missing_objects" here, so the console said there was nothing in
+  // Stripe over an object that refuses every checkout.
+  world.linkage = {
+    ...HEALTHY_LINKAGE,
+    storedCouponExists: true,
+    storedCouponMismatches: [
+      "identity:duration",
+      "identity:duration_in_months",
+      "identity:metadata_promotion_id",
+    ],
+    storedPromotionCodeId: null,
+    storedPromotionCodeExists: false,
+    recommendation: "manual_review",
+  };
+  const body = (await (await post(VALID_BODY)).json()) as {
+    report: {
+      status: string;
+      stripe: { checks: { id: string; reason: string | null }[] };
+      recommendedActions: { id: string }[];
+    };
+  };
+  assert.equal(body.report.status, "blocked");
+  assert.equal(
+    body.report.stripe.checks.find((item) => item.id === "stored_coupon")
+      ?.reason,
+    "stored_coupon_mismatch"
+  );
+  assert.ok(
+    body.report.recommendedActions.some(
+      (item) => item.id === "conflicting_active_code_requires_operator_review"
+    )
+  );
 });

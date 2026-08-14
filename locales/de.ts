@@ -123,6 +123,7 @@ export const de = {
         imageModelTabSubtitle: "Modelle, die aus einer Beschreibung Bilder erzeugen. Chat-Modelle, die ein angehängtes Bild nur lesen, bleiben im Chat-Tab.",
         imageModelTabFooterHint: "Bei Auswahl öffnet sich der Bildbereich.",
         imageModelCreditsFrom: "Ab {credits} Credits",
+        imageModelViaGateway: "über {gateway}",
         imageModelHoldPriceUnverified: "Pausiert, bis der offizielle Preis geprüft ist",
         imageModelLatencyFast: "Schnell",
         imageModelLatencyBalanced: "Ausgewogen",

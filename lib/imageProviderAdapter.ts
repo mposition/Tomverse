@@ -635,7 +635,17 @@ const generateWithFal = async (
       requestParams
     );
   }
+  // Cancelled, not drained. Both refusals below can be holding a whole image,
+  // and this is the one server-side call site where that is true: measured on
+  // Node 22.22 / undici 6.24, a response body left unread pins its connection
+  // once the body exceeds undici's receive buffer -- the threshold sits between
+  // 16 KiB and 64 KiB, so an error body passes through unnoticed and an image
+  // does not. `discardResponseBody` is the wrong tool here precisely because it
+  // reads: on the size-limit path that would pull the megabytes into memory
+  // that the limit exists to refuse.
+  const releaseAsset = () => asset.body?.cancel().catch(() => undefined);
   if (!asset.ok || !isFalAssetUrl(asset.url)) {
+    await releaseAsset();
     throw new ImageProviderError(
       "provider_failed",
       "Image provider asset was not served from the expected location.",
@@ -647,6 +657,7 @@ const generateWithFal = async (
   // Before the body is read, not after: a limit enforced once the bytes are
   // already in memory has not limited anything.
   if (falAssetLengthRefused(asset.headers.get("content-length"))) {
+    await releaseAsset();
     throw new ImageProviderError(
       "provider_failed",
       "Image provider asset declared a size larger than the accepted limit.",

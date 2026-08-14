@@ -120,6 +120,7 @@ export const en = {
         imageModelTabSubtitle: "Models that create images from a description. Chat models that only read an image you attach stay on the Chat tab.",
         imageModelTabFooterHint: "Picking one opens the image workspace.",
         imageModelCreditsFrom: "From {credits} credits",
+        imageModelViaGateway: "via {gateway}",
         imageModelHoldPriceUnverified: "On hold until its official price is verified",
         imageModelLatencyFast: "Fast",
         imageModelLatencyBalanced: "Balanced",

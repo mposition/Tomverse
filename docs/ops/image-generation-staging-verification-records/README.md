@@ -1,6 +1,6 @@
-# Staging 검증 실행 기록
+# 이미지 생성 v2 staging 검증 실행 기록
 
-`../external-import-staging-checklist.md`는 항목만 가진 template입니다. 실행
+`../image-generation-staging-checklist.md`는 항목만 가진 template입니다. 실행
 결과는 여기에 **실행 1회 = 파일 1개**로 남습니다.
 
 ## 파일 이름
@@ -33,7 +33,7 @@ YYYY-MM-DD__<40자리 deploy SHA>.md
 기록은 손으로 복사하지 말고 생성합니다.
 
 ```
-npm run new:staging-verification-record -- --sha <staging에 실제 배포된 40자리 SHA>
+npm run new:staging-verification-record -- --feature image-generation --sha <staging에 실제 배포된 40자리 SHA>
 ```
 
 체크리스트의 전 구획을 읽어 항목마다 한 행씩 펼친 빈 기록을 만듭니다.

@@ -265,6 +265,8 @@ export async function runPromotionDiagnostics(
     stripeFacts = {
       expectLiveMode: linkage.expectLiveMode,
       storedCouponId: linkage.storedCouponId,
+      storedCouponExists: linkage.storedCouponExists,
+      storedCouponMismatches: linkage.storedCouponMismatches,
       storedPromotionCodeId: linkage.storedPromotionCodeId,
       storedPromotionCodeExists: linkage.storedPromotionCodeExists,
       storedPromotionCodeMismatches: linkage.storedPromotionCodeMismatches,

@@ -1,7 +1,7 @@
 ---
 record: staging-verification
-checklist: docs/ops/external-import-staging-checklist.md
-templateRevision: 2026-08-14b
+checklist: docs/ops/image-generation-staging-checklist.md
+templateRevision: 2026-08-14
 environment:
 deploySha:
 startedAtUtc:
@@ -13,7 +13,7 @@ frozen: false
 digest:
 ---
 
-# Staging 검증 실행 — <날짜> / <deploy SHA>
+# 이미지 생성 v2 staging 검증 실행 — <날짜> / <deploy SHA>
 
 ## 실행 환경
 
@@ -21,7 +21,7 @@ digest:
 |---|---|
 | 환경 | staging / production / 기타 |
 | 배포 SHA (전체 40자리) | |
-| template revision | 2026-08-14b |
+| template revision | 2026-08-14 |
 | 시작 (UTC) | |
 | 종료 (UTC) | |
 | 실행자 | |
