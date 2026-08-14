@@ -11,6 +11,8 @@ import {
   type ChatAccess,
   type ChatBudget,
 } from "@/lib/chatSecurity";
+import { closeAttemptWithCost } from "@/lib/chatAttemptCostLedger";
+import { closeAttempt } from "@/lib/routingAttemptStore";
 import { getProviderCostGuardrailLimits } from "@/lib/providerCostBudget";
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
@@ -32,7 +34,11 @@ import type { AttemptUsage } from "@/lib/chatMultiAttemptSettlement";
 const reset = () =>
   prisma.$executeRawUnsafe(`
     TRUNCATE TABLE
+      "ContextManifest",
+      "RoutingAttempt",
+      "RoutingRun",
       "ProviderDailyUsage",
+      "ChatAttemptUsageAdjustment",
       "ChatAttemptUsage",
       "ChatCreditReservation",
       "ChatRequestLease",
@@ -107,10 +113,95 @@ const attempt = (overrides: Partial<AttemptUsage> = {}): AttemptUsage => ({
   ...overrides,
 });
 
+/** The rates and estimate a fallback attempt would run at. */
+const fallbackIntent = {
+  modelId: "fallback-model",
+  provider: "google",
+  estimatedInputTokens: 10_000,
+  reservedOutputTokens: 10_000,
+  inputUsdPerMillionTokens: 200,
+  outputUsdPerMillionTokens: 200,
+  cachedInputPriceMultiplier: 1,
+  pricingVersion: "attempt-usage-test",
+};
+
 const bucket = (key: string, period: string) =>
   prisma.chatUsageBucket
     .findFirst({ where: { key, period } })
     .then((row) => usageBucketCount(row?.count));
+
+/**
+ * A dispatched attempt, as the routing boundary would have left it.
+ *
+ * Dispatched rather than merely open, because `closeAttemptWithCost` is about
+ * an attempt that reached a provider -- and ROUTE-06's constraint refuses a
+ * dispatch that has no finalized manifest, which is the whole point of it.
+ */
+const routingAttempt = async () => {
+  const run = await prisma.routingRun.create({
+    data: {
+      traceId: `trace-${randomUUID()}`,
+      subjectKey: `attempt-cost:${randomUUID()}`,
+      mode: "auto",
+      plan: "Pro",
+      initialModelId: "primary-model",
+      taskProfileVersion: "attempt-usage-test",
+      candidateFilterVersion: "attempt-usage-test",
+      selectionVersion: "attempt-usage-test",
+      estimatorVersion: "attempt-usage-test",
+      profileKind: "general",
+      profileConfidence: "high",
+      needsCurrentInformation: false,
+      hasImageInput: false,
+      hasDocumentInput: false,
+      expectedOutputLength: "short",
+      estimatedInputTokens: 100,
+      reservedInputTokens: 100,
+      requestOutputCapTokens: 100,
+      eligibleCount: 1,
+      rejectedByReason: {},
+      selectionReason: "task_preference",
+      selectionMargin: 0,
+      userSelectedModelId: "primary-model",
+      decisionMicros: 1_000,
+    },
+    select: { id: true },
+  });
+  const attemptRow = await prisma.routingAttempt.create({
+    data: {
+      runId: run.id,
+      attemptIndex: 0,
+      modelId: "primary-model",
+      provider: "openai",
+      outcome: "pending",
+      failureLayer: "none",
+    },
+    select: { id: true },
+  });
+  const finalizedAt = new Date();
+  await prisma.contextManifest.create({
+    data: {
+      attemptId: attemptRow.id,
+      state: "finalized",
+      sourceRefs: [],
+      tokenizerVersion: "attempt-usage-test",
+      tokenCount: 100,
+      contextWindowTokens: 1_000,
+      plannerVersion: "none",
+      adapterVersion: "attempt-usage-test",
+      effectiveRequestHash: "attempt-usage-hash",
+      contentHashVersion: "attempt-usage-test",
+      hashAlgorithm: "hmac-sha256",
+      hashKeyId: "test-key",
+      finalizedAt,
+    },
+  });
+  await prisma.routingAttempt.update({
+    where: { id: attemptRow.id },
+    data: { manifestFinalizedAt: finalizedAt, dispatchedAt: finalizedAt },
+  });
+  return attemptRow.id;
+};
 
 const twoAttemptRun = async () => {
   const user = await createUser();
@@ -282,6 +373,8 @@ test("an attempt's recorded cost cannot be edited afterwards", async () => {
       modelId: "primary-model",
       provider: "openai",
       outcome: "failed",
+      inputTokens: 0,
+      outputTokens: 0,
       costMicroUsd: BigInt(1_000_000),
     },
   });
@@ -305,6 +398,8 @@ test("a third attempt cannot be recorded at all", async () => {
         modelId: "third-model",
         provider: "google",
         outcome: "completed",
+        inputTokens: 0,
+        outputTokens: 0,
       },
     }),
     /constraint/i
@@ -472,6 +567,7 @@ test("a fallback on another provider takes its own hold, in the durable payload"
     userId: acquired.usageReservation.userId ?? null,
     attemptIndex: 1,
     provider: "google",
+    costIntent: fallbackIntent,
     reservedMicroUsd: 500_000,
     periodStarts: await periodStarts(),
   });
@@ -502,6 +598,7 @@ test("a fallback on the same provider takes its own hold too", async () => {
     userId: acquired.usageReservation.userId ?? null,
     attemptIndex: 1,
     provider: "openai",
+    costIntent: fallbackIntent,
     reservedMicroUsd: 500_000,
     periodStarts: await periodStarts(),
   });
@@ -529,6 +626,7 @@ test("one attempt cannot hold the same budget twice", async () => {
     userId: acquired.usageReservation.userId ?? null,
     attemptIndex: 1,
     provider: "google",
+    costIntent: fallbackIntent,
     reservedMicroUsd: 500_000,
     periodStarts: starts,
   });
@@ -538,6 +636,7 @@ test("one attempt cannot hold the same budget twice", async () => {
     userId: acquired.usageReservation.userId ?? null,
     attemptIndex: 1,
     provider: "google",
+    costIntent: fallbackIntent,
     reservedMicroUsd: 500_000,
     periodStarts: starts,
   });
@@ -557,6 +656,7 @@ test("releasing one attempt leaves the other's hold on a shared provider", async
     userId: acquired.usageReservation.userId ?? null,
     attemptIndex: 1,
     provider: "openai",
+    costIntent: fallbackIntent,
     reservedMicroUsd: 500_000,
     periodStarts: await periodStarts(),
   });
@@ -582,6 +682,7 @@ test("a refused day budget leaves the primary's hold untouched", async () => {
     attemptIndex: 1,
     provider: "google",
     // Larger than any configured guardrail, so incrementUsage refuses.
+    costIntent: fallbackIntent,
     reservedMicroUsd: Number.MAX_SAFE_INTEGER,
     periodStarts: await periodStarts(),
   });
@@ -613,6 +714,7 @@ test("a month refusal rolls back the day hold taken moments before", async () =>
     userId: acquired.usageReservation.userId ?? null,
     attemptIndex: 1,
     provider: "google",
+    costIntent: fallbackIntent,
     reservedMicroUsd: 1_000,
     periodStarts: starts,
   });
@@ -644,6 +746,7 @@ test("a reservation that already settled cannot be held against", async () => {
     userId: acquired.usageReservation.userId ?? null,
     attemptIndex: 1,
     provider: "google",
+    costIntent: fallbackIntent,
     reservedMicroUsd: 500_000,
     periodStarts: await periodStarts(),
   });
@@ -660,6 +763,7 @@ test("a hold whose dispatch never happened is given back, payload included", asy
     userId: acquired.usageReservation.userId ?? null,
     attemptIndex: 1,
     provider: "google",
+    costIntent: fallbackIntent,
     reservedMicroUsd: 500_000,
     periodStarts: starts,
   });
@@ -689,6 +793,7 @@ test("a released hold leaves the turn settling as the single attempt it was", as
     userId: acquired.usageReservation.userId ?? null,
     attemptIndex: 1,
     provider: "google",
+    costIntent: fallbackIntent,
     reservedMicroUsd: 500_000,
     periodStarts: starts,
   });
@@ -715,6 +820,7 @@ test("reserve then settle lands each provider on its own actual cost", async () 
     userId: acquired.usageReservation.userId ?? null,
     attemptIndex: 1,
     provider: "google",
+    costIntent: fallbackIntent,
     reservedMicroUsd: 5_000_000,
     periodStarts: await periodStarts(),
   });
@@ -759,7 +865,8 @@ test("two concurrent fallbacks cannot both take the last of a budget", async () 
       userId: first.acquired.usageReservation.userId ?? null,
       attemptIndex: 1,
       provider: "google",
-      reservedMicroUsd: amount,
+      costIntent: fallbackIntent,
+    reservedMicroUsd: amount,
       periodStarts: starts,
     }),
     reserveAttemptProviderBudget({
@@ -767,7 +874,8 @@ test("two concurrent fallbacks cannot both take the last of a budget", async () 
       userId: second.acquired.usageReservation.userId ?? null,
       attemptIndex: 1,
       provider: "google",
-      reservedMicroUsd: amount,
+      costIntent: fallbackIntent,
+    reservedMicroUsd: amount,
       periodStarts: starts,
     }),
   ]);
@@ -843,6 +951,7 @@ test("a legacy reservation's primary hold survives its first fallback", async ()
     userId: acquired.usageReservation.userId ?? null,
     attemptIndex: 1,
     provider: "google",
+    costIntent: fallbackIntent,
     reservedMicroUsd: 500_000,
     periodStarts: await periodStarts(),
   });
@@ -893,11 +1002,15 @@ test("a temporary violation inside the transaction survives to COMMIT", async ()
         modelId: "primary-model",
         provider: "openai",
         outcome: "failed",
+        inputTokens: 0,
+        outputTokens: 0,
       },
     });
     await tx.chatCreditReservation.update({
       where: { id },
-      data: { status: "settled", settledAt: new Date() },
+      // Charged credits, because a full refund is allowed to name no attempt
+      // and would not put the trigger in play at all.
+      data: { status: "settled", settledCredits: 5, settledAt: new Date() },
     });
     // Repaired before the transaction ends, in a separate statement — which
     // is the case a trigger reading its queued NEW would have failed.
@@ -926,20 +1039,58 @@ test("a violation left standing fails the whole transaction", async () => {
           modelId: "primary-model",
           provider: "openai",
           outcome: "failed",
+          inputTokens: 0,
+          outputTokens: 0,
         },
       });
       await tx.chatCreditReservation.update({
         where: { id },
-        data: { status: "settled", settledAt: new Date() },
+        data: { status: "settled", settledCredits: 5, settledAt: new Date() },
       });
     }),
-    /no settlementAttemptIndex/
+    /charged 5 credits across 1 attempt\(s\) and names none/
   );
 
   const durable = await prisma.chatCreditReservation.findUniqueOrThrow({
     where: { id },
   });
   assert.equal(durable.status, "reserved", "the transaction must have rolled back");
+});
+
+test("a full refund may name no attempt, even with cost rows against it", async () => {
+  // The relaxation crash reconciliation needed. The user is refunded in full
+  // and the provider's cost is kept, so no attempt was the basis of a charge
+  // -- and demanding a pointer would force a claim that one was.
+  const { acquired } = await twoAttemptRun();
+  const id = acquired.usageReservation.reservationId;
+
+  await prisma.$transaction(async (tx) => {
+    await tx.chatAttemptUsage.create({
+      data: {
+        reservationId: id,
+        attemptIndex: 0,
+        modelId: "primary-model",
+        provider: "openai",
+        outcome: "unknown_after_dispatch",
+        usageSource: "crash_reconciliation",
+        costSource: "reserved_upper_bound",
+        costMicroUsd: BigInt(2_000_000),
+      },
+    });
+    await tx.chatCreditReservation.update({
+      where: { id },
+      data: { status: "refunded", settledCredits: 0, settledAt: new Date() },
+    });
+  });
+
+  const durable = await prisma.chatCreditReservation.findUniqueOrThrow({
+    where: { id },
+  });
+  assert.equal(durable.settlementAttemptIndex, null);
+  assert.equal(
+    await prisma.chatAttemptUsage.count({ where: { reservationId: id } }),
+    1
+  );
 });
 
 test("the pointer may be set before the attempt row it names exists", async () => {
@@ -951,7 +1102,12 @@ test("the pointer may be set before the attempt row it names exists", async () =
   await prisma.$transaction(async (tx) => {
     await tx.chatCreditReservation.update({
       where: { id },
-      data: { settlementAttemptIndex: 1, status: "settled", settledAt: new Date() },
+      data: {
+        settlementAttemptIndex: 1,
+        status: "settled",
+        settledCredits: 5,
+        settledAt: new Date(),
+      },
     });
     await tx.chatAttemptUsage.create({
       data: {
@@ -960,12 +1116,219 @@ test("the pointer may be set before the attempt row it names exists", async () =
         modelId: "fallback-model",
         provider: "google",
         outcome: "completed",
+        inputTokens: 0,
+        outputTokens: 0,
       },
     });
   });
 
   const durable = await prisma.chatCreditReservation.findUniqueOrThrow({
     where: { id },
+  });
+  assert.equal(durable.settlementAttemptIndex, 1);
+});
+
+// An attempt's cost, recorded when that attempt ends rather than when the turn
+// does. The primary of a fallback is terminal long before settlement, so the
+// stale-attempt sweep never looks at it again -- and until this existed, a
+// process dying during the fallback lost the primary's provider spend
+// outright.
+
+test("an attempt that ends mid-turn records its cost with its close", async () => {
+  const { acquired } = await twoAttemptRun();
+  const reservationId = acquired.usageReservation.reservationId;
+  const attemptId = await routingAttempt();
+
+  const result = await closeAttemptWithCost({
+    attemptId,
+    outcome: "failed_pre_token",
+    failureLayer: "provider",
+    cost: {
+      reservationId,
+      attempt: {
+        ...attempt({ attemptIndex: 0, outcome: "failed" }),
+        costMicroUsd: 1_000_000,
+        costSource: "token_estimate",
+        userBilled: false,
+      },
+    },
+  });
+  assert.deepEqual(result, { closed: true, cost: "inserted" });
+
+  const row = await prisma.chatAttemptUsage.findUniqueOrThrow({
+    where: { reservationId_attemptIndex: { reservationId, attemptIndex: 0 } },
+  });
+  assert.equal(row.costMicroUsd, BigInt(1_000_000));
+  // The provenance says the numbers were observed, not reserved: this attempt
+  // ended in a place where somebody was watching.
+  assert.equal(row.usageSource, "provider_usage_metadata");
+  assert.equal(row.costSource, "token_estimate");
+  // And the rollup moved with it, in the same transaction.
+  const rollup = await prisma.providerDailyUsage.findFirstOrThrow({
+    where: { provider: "openai", modelId: "primary-model" },
+  });
+  assert.equal(rollup.estimatedCostMicroUsd, 1_000_000);
+});
+
+test("a close that loses the compare-and-set records no cost either", async () => {
+  // The cost row belongs to whoever established the attempt was over. A loser
+  // that wrote one anyway would be recording spend against an outcome it did
+  // not set -- and the winner's row would be the one skipped as a duplicate.
+  const { acquired } = await twoAttemptRun();
+  const reservationId = acquired.usageReservation.reservationId;
+  const attemptId = await routingAttempt();
+  assert.equal(await closeAttempt({ attemptId, outcome: "succeeded" }), true);
+
+  const result = await closeAttemptWithCost({
+    attemptId,
+    outcome: "failed_pre_token",
+    cost: {
+      reservationId,
+      attempt: {
+        ...attempt({ attemptIndex: 0, outcome: "failed" }),
+        costMicroUsd: 1_000_000,
+        costSource: "token_estimate",
+        userBilled: false,
+      },
+    },
+  });
+  assert.deepEqual(result, { closed: false, cost: "skipped" });
+  assert.equal(
+    await prisma.chatAttemptUsage.count({ where: { reservationId } }),
+    0
+  );
+  assert.equal(await prisma.providerDailyUsage.count(), 0);
+});
+
+test("settlement does not charge again for an attempt that already recorded itself", async () => {
+  const { acquired } = await twoAttemptRun();
+  const reservationId = acquired.usageReservation.reservationId;
+  const attemptId = await routingAttempt();
+  const primary = attempt({ attemptIndex: 0, outcome: "failed" });
+
+  await closeAttemptWithCost({
+    attemptId,
+    outcome: "failed_pre_token",
+    cost: {
+      reservationId,
+      attempt: { ...primary, costMicroUsd: 1_000_000, costSource: "token_estimate", userBilled: false },
+    },
+  });
+
+  await settleChatUsage(
+    acquired.usageReservation,
+    { inputTokens: 10_000, outputTokens: 10_000, outcome: "completed" },
+    {
+      attempts: [
+        primary,
+        attempt({
+          attemptIndex: 1,
+          price: price("google", "fallback-model", 200, 200),
+          outputTokens: 10_000,
+          outcome: "completed",
+        }),
+      ],
+    }
+  );
+
+  // Two rows, one each, and no adjustment: the second writer of an observed
+  // row is a replay, not a correction.
+  assert.equal(
+    await prisma.chatAttemptUsage.count({ where: { reservationId } }),
+    2
+  );
+  assert.equal(
+    await prisma.chatAttemptUsageAdjustment.count({ where: { reservationId } }),
+    0
+  );
+  const primaryRollup = await prisma.providerDailyUsage.findFirstOrThrow({
+    where: { provider: "openai", modelId: "primary-model" },
+  });
+  assert.equal(
+    primaryRollup.estimatedCostMicroUsd,
+    1_000_000,
+    "the primary's spend must be counted once, not once per writer"
+  );
+  assert.equal(primaryRollup.requestCount, 1);
+});
+
+// A fallback that stays on the provider it started on. Sharing a bucket is
+// what makes these worth pinning: the hold, the limit and the settlement all
+// have to keep two attempts apart inside one key.
+
+test("a same-provider fallback is refused when the two holds exceed the limit", async () => {
+  const { acquired } = await twoAttemptRun();
+  const guardrails = getProviderCostGuardrailLimits("openai");
+  const starts = await periodStarts();
+  // Fill the shared bucket to one under the day limit. The primary's own hold
+  // is part of that total, which is the point: a same-provider fallback is
+  // measured against everything already in the bucket, its own turn included.
+  await prisma.chatUsageBucket.updateMany({
+    where: { key: "provider:openai", period: "provider-cost-day", periodStart: starts.day },
+    data: { count: guardrails.day - 1 },
+  });
+
+  const result = await reserveAttemptProviderBudget({
+    reservationId: acquired.usageReservation.reservationId,
+    userId: acquired.usageReservation.userId ?? null,
+    attemptIndex: 1,
+    provider: "openai",
+    costIntent: { ...fallbackIntent, provider: "openai", modelId: "sibling-model" },
+    reservedMicroUsd: 1_000,
+    periodStarts: starts,
+  });
+  assert.equal(result.reserved, false);
+  assert.equal(result.reserved === false && result.reason, "budget_exhausted");
+  // The primary's hold is still exactly where it was: a refused fallback must
+  // not take, or give back, budget that belongs to the attempt that ran.
+  assert.equal(
+    await bucket("provider:openai", "provider-cost-day"),
+    guardrails.day - 1
+  );
+  const entries = await payloadEntries(acquired.usageReservation.reservationId);
+  assert.equal(
+    entries.filter((entry) => entry.key === "provider:openai" && entry.period === "provider-cost-day")
+      .length,
+    1
+  );
+});
+
+test("a same-provider fallback settles the shared bucket to the sum of both actual costs", async () => {
+  const { acquired } = await twoAttemptRun();
+  await reserveAttemptProviderBudget({
+    reservationId: acquired.usageReservation.reservationId,
+    userId: acquired.usageReservation.userId ?? null,
+    attemptIndex: 1,
+    provider: "openai",
+    costIntent: { ...fallbackIntent, provider: "openai", modelId: "sibling-model" },
+    reservedMicroUsd: 5_000_000,
+    periodStarts: await periodStarts(),
+  });
+
+  await settleChatUsage(
+    acquired.usageReservation,
+    { inputTokens: 10_000, outputTokens: 10_000, outcome: "completed" },
+    {
+      attempts: [
+        attempt({ attemptIndex: 0, outcome: "failed" }),
+        attempt({
+          attemptIndex: 1,
+          price: price("openai", "sibling-model", 100, 100),
+          outputTokens: 10_000,
+          outcome: "completed",
+        }),
+      ],
+    }
+  );
+
+  // 1,000,000 for the primary and 2,000,000 for the fallback, in one bucket.
+  // Not one of them, which is what a release keyed by provider would leave,
+  // and not the 7,000,000 of holds either.
+  assert.equal(await bucket("provider:openai", "provider-cost-day"), 3_000_000);
+  assert.equal(await bucket("provider:openai", "provider-cost-month"), 3_000_000);
+  // The user pays for the one attempt that answered.
+  const durable = await prisma.chatCreditReservation.findUniqueOrThrow({
+    where: { id: acquired.usageReservation.reservationId },
   });
   assert.equal(durable.settlementAttemptIndex, 1);
 });

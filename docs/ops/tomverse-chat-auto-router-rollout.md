@@ -368,7 +368,7 @@ Four things it does that are easy to get wrong:
   manifest hash key.
 - **The budget is held before the call, and the hold is durable.** §10
   authorizes every dispatch including this one, and money held at one provider
-  does not make a call to another affordable. `reserveFallbackProviderBudget`
+  does not make a call to another affordable. `reserveAttemptProviderBudget`
   takes the fallback provider's own hold and writes it into the reservation's
   payload in the same transaction — because `settleChatUsage` re-reads that
   payload, and an earlier version handed the entries back to a caller who
@@ -377,7 +377,7 @@ Four things it does that are easy to get wrong:
   safe direction for a guard against overspend, and it removes both the
   no-hold window and the deadlock two opposite-direction fallbacks would have
   had. A fallback that is authorized and then fails to dispatch gives its hold
-  back through `releaseFallbackProviderBudget`.
+  back through `releaseAttemptProviderBudget`.
 - **The primary joins `endedAttempts` only once the swap commits.** It used to
   be added before the dispatch, so a dispatch that then failed left the turn
   settling attempt 0 twice — which `attemptSetProblems` refuses, so the whole
@@ -396,6 +396,12 @@ Four things it does that are easy to get wrong:
   metadata exists for a stream that failed before its first chunk, and
   over-recording provider spend is the safe direction for a ledger whose job is
   to stop a budget being exceeded.
+- **The primary's cost is recorded when the primary ends, not when the turn
+  does.** `closeAttemptWithCost` writes the attempt's terminal outcome and its
+  `ChatAttemptUsage` row in one transaction. The reason is §9.5: from the
+  moment the primary is closed it is terminal, so the stale-attempt sweep will
+  never look at it again, and a process that died during the fallback used to
+  lose that attempt's provider spend outright.
 
 The scan that used to prove there was no substitution at all is now
 `tests/automaticFallbackBoundary.test.mjs`, renamed and rewritten. It used to prove
@@ -461,6 +467,63 @@ from a real judgement forever after.
 
 Order that keeps each step checkable:
 
+### 9.5 What a crashed attempt cost
+
+A dispatch is recorded before the provider's stream is read and the outcome
+after it. Between those two the process can die — a deploy, an OOM, a host
+going away — and until this section existed the money simply vanished: the
+provider had been called and paid, the attempt stayed `pending` for ever, and
+no ledger anywhere carried the spend. Not a wrong number; no number.
+
+Four pieces, and each answers a different question.
+
+**What was it allowed to spend?** The hold alone does not say — it is a number
+in a bucket shared with every other attempt on that provider. So the
+reservation payload now carries an *attempt cost intent* per attempt, written
+at the moment the hold is taken: model, provider, the estimate and reservation
+it was sized from, the price snapshot with its version, and the reserved
+provider cost. `lib/chatProviderHolds.ts` validates it against the holds on
+every read and write, so a payload whose intents and holds disagree is refused
+rather than settled.
+
+**Who writes the cost, and when?** Whoever closes the attempt, in the same
+transaction. `closeAttemptWithCost` compare-and-sets `RoutingAttempt` from
+`pending` to its terminal outcome and writes `ChatAttemptUsage` together; the
+writer that loses the CAS writes nothing at all, so a cost row can never be
+recorded against an outcome its writer did not set. The attempt that ends the
+turn is the exception, and only because its usage is not known any earlier —
+settlement writes that one.
+
+**What may the sweep conclude?** `lib/routingAttemptSweep.ts` closes attempts
+that are dispatched, old, unleased and whose reservation is finished or
+expired. It records `outcome: unknown_after_dispatch` — not `failed_pre_token`,
+because nobody observed the provider call — and `failureLayer: process`,
+because filing a host restart under `provider` would move conversations off a
+model that did nothing wrong. Its cost row is the attempt's own reserved upper
+bound, marked `costSource: reserved_upper_bound` and `usageSource:
+crash_reconciliation`, with the token columns NULL. Zero would be a claim that
+a call which demonstrably happened used nothing; invented token counts would be
+numbers nobody measured. A database CHECK restricts NULL tokens to exactly that
+provenance.
+
+**What happens when the truth arrives late?** It is appended, never applied.
+`ChatAttemptUsage` is immutable and unique per `(reservationId, attemptIndex)`,
+so a later insert is skipped — and skipping is right for a replay and wrong for
+a real observation, which would leave the estimate standing for ever while the
+truth was known and discarded. `ChatAttemptUsageAdjustment` takes the
+observation with the signed difference it makes, unique on its `observationId`
+so a reconciliation file replayed twice moves the ledger once, and the delta
+reaches `ProviderDailyUsage` in the same transaction that appends it. Resolved
+cost is base plus adjustments — `resolvedAttemptCosts` — and it reports whether
+a figure is still an unmeasured upper bound, because an estimate that reads
+like measured spend is one somebody will plan against.
+
+The two ledgers stay separated at their furthest apart here: a crash refunds
+the user in full, keeps the provider's cost, and names no billed attempt.
+`ChatCreditReservation.settlementAttemptIndex` is therefore allowed to be NULL
+on a refund, and the deferred trigger demands a pointer only from a settlement
+that actually charged credits.
+
 1. ~~a deterministic test double where the first reader raises a pre-token
    error and the second succeeds, fails, or is cancelled — before any real
    provider~~ — done, above;
@@ -471,6 +534,12 @@ Order that keeps each step checkable:
    and the logs: one run, one reservation, two attempts, one settlement, one
    lease release;
 5. fallback failure and disconnect-during-fallback, then enable.
+
+Prerequisite to all of them, and now done: crash provider cost accrual, §9.5.
+The branch was held merge-blocked until it landed, because a fallback doubles
+the window in which a process can die between a dispatch and its outcome, and
+enabling one without the accrual would have made provider spend quietly
+unaccountable at exactly the rate the feature succeeds.
 
 This is its own change and should not ride along with the pieces above.
 

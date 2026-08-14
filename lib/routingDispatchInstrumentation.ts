@@ -33,9 +33,12 @@ import { after } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { reportOperationalIncident } from "@/lib/operationalMonitoring";
 import {
+  closeAttemptWithCost,
+  type AttemptCostRecord,
+} from "@/lib/chatAttemptCostLedger";
+import {
   DispatchBoundaryError,
   abandonDraft,
-  closeAttempt,
   createDraftManifest,
   finalizeManifest,
   markDispatched,
@@ -526,6 +529,14 @@ export const recordNotDispatched = async (
  * `overheadMs` is stored as the run's own decision cost, because "what did the
  * instrumentation add to time-to-first-token" is one of the questions this
  * exercise exists to answer, and an answer nobody recorded is an opinion.
+ *
+ * `cost` records what the attempt spent, in the same transaction as the close.
+ * It is passed for an attempt whose turn keeps running after it -- the primary
+ * of a fallback -- because such an attempt is terminal long before settlement,
+ * so the stale-attempt sweep will never look at it again, and a crash in
+ * between would lose its provider spend entirely rather than mis-state it. The
+ * attempt that ends the turn passes none: its usage is not known until
+ * settlement, which is where its row is written.
  */
 export const completeInstrumentedDispatch = async (
   instrumentation: DispatchInstrumentation,
@@ -539,11 +550,12 @@ export const completeInstrumentedDispatch = async (
     assistantMessageId?: string | null;
     settlementOutcome?: string | null;
     firstTokenMs?: number | null;
+    cost?: AttemptCostRecord | null;
   }
 ) => {
   if (!instrumentation) return;
   try {
-    await closeAttempt({
+    await closeAttemptWithCost({
       attemptId: instrumentation.attemptId,
       outcome: close.outcome,
       failureLayer: close.failureLayer,
@@ -551,6 +563,7 @@ export const completeInstrumentedDispatch = async (
       actualInputTokens: close.actualInputTokens,
       actualOutputTokens: close.actualOutputTokens,
       errorClass: close.errorClass,
+      cost: close.cost ?? null,
     });
     await prisma.routingRun.update({
       where: { id: instrumentation.runId },

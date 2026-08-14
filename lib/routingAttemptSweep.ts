@@ -41,11 +41,18 @@
  * wrong the sweep and the live request cannot both win.
  */
 
+import { costIntentFor } from "@/lib/chatProviderHolds";
+import { deserializeReservation } from "@/lib/chatSecurity";
+import type { AiModel } from "@/lib/models";
 import { prisma } from "@/lib/prisma";
+import { recordInternalProviderUsage } from "@/lib/providerUsageAccounting";
 import { closeAttempt } from "@/lib/routingAttemptStore";
 
 /** How long an attempt may stay open before the sweep will consider it. */
 export const STALE_ATTEMPT_AFTER_MS = 30 * 60 * 1000;
+
+/** Recorded on every row this sweep writes, so a later fix is attributable. */
+export const SWEEP_VERSION = "attempt-sweep-v1";
 
 /** Bounded so one sweep cannot hold a connection for an unbounded time. */
 export const STALE_ATTEMPT_SWEEP_BATCH = 200;
@@ -55,12 +62,15 @@ export type StaleAttemptSweepResult = {
     closed: number;
     /** Lost the compare-and-set: the live request closed it first. */
     alreadyClosed: number;
+    /** Cost rows written at the reserved upper bound. */
+    costRecorded: number;
     failed: number;
 };
 
 type SweepRow = {
     id: string;
     runId: string;
+    attemptIndex: number;
     subjectKey: string | null;
     reservationId: string | null;
 };
@@ -76,7 +86,7 @@ export const sweepStaleRoutingAttempts = async (
     // Written as one query so the three conditions are evaluated against one
     // snapshot rather than three reads that can disagree between them.
     const rows = await prisma.$queryRaw<SweepRow[]>`
-        SELECT a."id", a."runId", r."subjectKey", r."reservationId"
+        SELECT a."id", a."runId", a."attemptIndex", r."subjectKey", r."reservationId"
         FROM "RoutingAttempt" a
         JOIN "RoutingRun" r ON r."id" = a."runId"
         LEFT JOIN "ChatCreditReservation" c ON c."id" = r."reservationId"
@@ -98,6 +108,7 @@ export const sweepStaleRoutingAttempts = async (
 
     let closed = 0;
     let alreadyClosed = 0;
+    let costRecorded = 0;
     let failed = 0;
     for (const row of rows) {
         try {
@@ -107,8 +118,12 @@ export const sweepStaleRoutingAttempts = async (
                 failureLayer: "process",
                 errorClass: "process_stopped_after_dispatch",
             });
-            if (won) closed += 1;
-            else alreadyClosed += 1;
+            if (!won) {
+                alreadyClosed += 1;
+                continue;
+            }
+            closed += 1;
+            if (await recordCrashCost(row)) costRecorded += 1;
         } catch (error) {
             failed += 1;
             console.error(
@@ -121,7 +136,101 @@ export const sweepStaleRoutingAttempts = async (
         }
     }
 
-    return { examined: rows.length, closed, alreadyClosed, failed };
+    return { examined: rows.length, closed, alreadyClosed, costRecorded, failed };
+};
+
+/**
+ * What a crashed attempt cost, as far as anyone can honestly say.
+ *
+ * Not zero. The dispatch was recorded, so the provider was called and was
+ * paid; writing 0 would be a claim that a call which demonstrably happened
+ * used nothing, and provider budgets and cost dashboards read this ledger.
+ *
+ * What is written instead is the attempt's own reserved cost -- the upper
+ * bound it was authorized to spend -- with `costSource: reserved_upper_bound`
+ * and `usageSource: crash_reconciliation` saying exactly that. Token counts
+ * stay NULL rather than being invented: an estimate of the cost is defensible
+ * because the money was really committed, and an estimate of the tokens is
+ * just a number nobody measured.
+ *
+ * Silent when there is no reservation (nothing was committed), no cost intent
+ * (a payload written before intents existed, which cannot be reconstructed),
+ * or a row already exists (the settlement got there first).
+ */
+const recordCrashCost = async (row: SweepRow): Promise<boolean> => {
+    if (!row.reservationId) return false;
+    try {
+        const reservation = await prisma.chatCreditReservation.findUnique({
+            where: { id: row.reservationId },
+        });
+        if (!reservation) return false;
+        const canonical = deserializeReservation(reservation.reservationPayload);
+        const intent = costIntentFor(canonical.attemptCostIntents, row.attemptIndex);
+        if (!intent) return false;
+
+        const reservationId = row.reservationId;
+        return await prisma.$transaction(async (tx) => {
+            const written = await tx.chatAttemptUsage.createMany({
+                skipDuplicates: true,
+                data: [
+                    {
+                        reservationId,
+                        attemptIndex: row.attemptIndex,
+                        modelId: intent.modelId,
+                        provider: intent.provider,
+                        outcome: "unknown_after_dispatch",
+                        inputTokens: null,
+                        cachedInputTokens: null,
+                        outputTokens: null,
+                        costMicroUsd: BigInt(intent.reservedCostMicroUsd),
+                        usageSource: "crash_reconciliation",
+                        costSource: "reserved_upper_bound",
+                        pricingSnapshot: {
+                            ...intent,
+                            sweptBy: SWEEP_VERSION,
+                            reconciledAt: new Date().toISOString(),
+                        },
+                    },
+                ],
+            });
+            if (written.count !== 1) return false;
+
+            // The rollup moves with the row, in the same transaction.
+            //
+            // Not optional, and not deferrable to whoever finds the real usage
+            // later: a correction is applied as a *delta* against what this row
+            // already claimed, so a rollup that never received the estimate
+            // would be short by it for ever once the delta landed.
+            //
+            // Zero tokens and a zero component breakdown, with the whole figure
+            // in the total. The money is known -- it was committed -- and the
+            // split between cached input, uncached input and output is not.
+            // Apportioning it would be inventing three numbers to make one look
+            // complete.
+            await recordInternalProviderUsage({
+                client: tx,
+                provider: intent.provider as AiModel["provider"],
+                modelId: intent.modelId,
+                inputTokens: 0,
+                cachedInputTokens: 0,
+                outputTokens: 0,
+                estimatedCostMicroUsd: intent.reservedCostMicroUsd,
+                uncachedInputCostMicroUsd: 0,
+                cachedInputCostMicroUsd: 0,
+                outputCostMicroUsd: 0,
+            });
+            return true;
+        });
+    } catch (error) {
+        console.error(
+            JSON.stringify({
+                event: "routing_attempt_sweep_cost_failed",
+                attemptId: row.id,
+                error: error instanceof Error ? error.message.slice(0, 300) : "unknown",
+            })
+        );
+        return false;
+    }
 };
 
 /**

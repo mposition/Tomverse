@@ -243,3 +243,72 @@ export const withoutAttemptHolds = (
     holds: readonly AttemptHold[],
     attemptIndex: number
 ): AttemptHold[] => holds.filter((hold) => hold.attemptIndex !== attemptIndex);
+
+/**
+ * What an attempt was authorized to spend, and at what rates.
+ *
+ * Written when the hold is taken, which is before the provider is called.
+ * That order is what makes a crash recoverable: the sweep that finds a
+ * `pending` attempt half an hour later has no memory of the request, and the
+ * only honest thing it can record is what the attempt was allowed to spend.
+ * Without this it would have to write 0, which is a claim that a call which
+ * demonstrably happened used nothing.
+ *
+ * Not the same as the hold. The hold is the money reserved in the bucket; this
+ * is how to turn that reservation back into a cost row -- which model, which
+ * provider, at which rates, against which estimate.
+ */
+export type AttemptCostIntent = {
+    attemptIndex: number;
+    modelId: string;
+    provider: string;
+    /** The estimate the reservation was sized on. */
+    estimatedInputTokens: number;
+    reservedOutputTokens: number;
+    inputUsdPerMillionTokens: number;
+    outputUsdPerMillionTokens: number;
+    cachedInputPriceMultiplier: number;
+    pricingVersion?: string | null;
+    /** What the hold put in the bucket. The upper bound a crash records. */
+    reservedCostMicroUsd: number;
+};
+
+/**
+ * Whether the intents and the holds describe the same set of attempts.
+ *
+ * They are written in the same transaction and can still disagree, the same
+ * way the holds and the entries can. An intent with no hold would let a crash
+ * record a cost against budget nobody reserved; a hold with no intent would
+ * leave a crash unable to record anything at all, which is the gap this whole
+ * mechanism exists to close.
+ */
+export const attemptCostIntentProblems = (input: {
+    holds: readonly AttemptHold[];
+    intents: readonly AttemptCostIntent[];
+}): readonly string[] => {
+    const problems: string[] = [];
+    const heldAttempts = new Set(input.holds.map((hold) => hold.attemptIndex));
+    const intentAttempts = new Set(input.intents.map((intent) => intent.attemptIndex));
+
+    if (intentAttempts.size !== input.intents.length) {
+        problems.push("two cost intents share an attemptIndex");
+    }
+    for (const attemptIndex of intentAttempts) {
+        if (!heldAttempts.has(attemptIndex)) {
+            problems.push(`attempt ${attemptIndex} has a cost intent and no hold`);
+        }
+    }
+    for (const attemptIndex of heldAttempts) {
+        if (!intentAttempts.has(attemptIndex)) {
+            problems.push(`attempt ${attemptIndex} has a hold and no cost intent`);
+        }
+    }
+    return problems;
+};
+
+/** The intent for one attempt, or null when the payload predates them. */
+export const costIntentFor = (
+    intents: readonly AttemptCostIntent[] | undefined,
+    attemptIndex: number
+): AttemptCostIntent | null =>
+    intents?.find((intent) => intent.attemptIndex === attemptIndex) ?? null;

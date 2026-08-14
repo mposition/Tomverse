@@ -50,6 +50,8 @@ import {
 import {
     MAX_ATTEMPT_INDEX,
     PROVIDER_BUCKET_PREFIX,
+    attemptCostIntentProblems,
+    type AttemptCostIntent,
     PROVIDER_BUDGET_PERIODS,
     deriveProviderEntries,
     providerBucketKey,
@@ -67,6 +69,10 @@ import { recordChatLimitDecision } from "@/lib/chatLimitDecisions";
 import { isWebSearchMode, type WebSearchMode } from "@/lib/appDefaults";
 import { getAnonymousClientKey } from "@/lib/clientIp";
 import { recordInternalProviderUsage } from "@/lib/providerUsageAccounting";
+import {
+    boundedProviderIdentifier,
+    recordAttemptCost,
+} from "@/lib/chatAttemptCostLedger";
 import {
     AddOnCreditError,
     reserveAddOnCredits,
@@ -202,6 +208,15 @@ export type ChatUsageReservation = {
      * on those the entries stand as they always did.
      */
     attemptHolds?: AttemptHold[];
+    /**
+     * What each attempt was authorized to spend, and at what rates.
+     *
+     * Written beside the hold, before the provider is called, because a sweep
+     * that finds a crashed attempt half an hour later has no other way to know
+     * what the call was allowed to cost -- and 0 would be a claim that a call
+     * which happened used nothing.
+     */
+    attemptCostIntents?: AttemptCostIntent[];
     usageCredits: number;
     inputTokens: number;
     maxOutputTokens: number;
@@ -256,6 +271,25 @@ const durableReservationPayloadSchema = z
                     .strict()
             )
             .max(8)
+            .optional(),
+        attemptCostIntents: z
+            .array(
+                z
+                    .object({
+                        attemptIndex: z.number().int().min(0).max(MAX_ATTEMPT_INDEX),
+                        modelId: z.string().min(1).max(160),
+                        provider: z.string().min(1).max(80),
+                        estimatedInputTokens: z.number().int().nonnegative(),
+                        reservedOutputTokens: z.number().int().nonnegative(),
+                        inputUsdPerMillionTokens: z.number().nonnegative(),
+                        outputUsdPerMillionTokens: z.number().nonnegative(),
+                        cachedInputPriceMultiplier: z.number().min(0).max(1),
+                        pricingVersion: z.string().min(1).max(120).nullable().optional(),
+                        reservedCostMicroUsd: z.number().int().nonnegative(),
+                    })
+                    .strict()
+            )
+            .max(4)
             .optional(),
         usageCredits: z.number().int().positive(),
         inputTokens: z.number().int().nonnegative(),
@@ -343,7 +377,13 @@ export const deserializeReservation = (payload: Prisma.JsonValue) => {
         // authorization: an entry above its holds releases budget nobody
         // reserved, one below leaves a provider holding money for a call that
         // finished long ago.
-        const problems = providerHoldProblems({ holds: attemptHolds, entries });
+        const problems = [
+            ...providerHoldProblems({ holds: attemptHolds, entries }),
+            ...attemptCostIntentProblems({
+                holds: attemptHolds,
+                intents: parsed.attemptCostIntents ?? [],
+            }),
+        ];
         if (problems.length > 0) {
             throw new Error(
                 `Chat reservation provider holds are inconsistent: ${problems.join(" ")}`
@@ -3038,6 +3078,37 @@ export const acquireChatAccess = async (
                     periodStart: entry.periodStart,
                     amount: entry.amount,
                 })),
+            // What attempt 0 was authorized to spend, and at what rates. The
+            // only thing a sweep can honestly record about a call nobody
+            // observed, so it has to exist before the call is made.
+            //
+            // Written only when a hold was taken, which is the same condition
+            // (`reservedCost > 0`) the hold itself is under. The intent and
+            // the hold are two halves of one authorization and the validator
+            // compares them as a pair; an intent whose reserved cost is zero
+            // would also give a sweep nothing to record but a zero cost row,
+            // and a zero is the one figure this ledger must never invent.
+            ...(reservedCost > 0
+                ? {
+                      attemptCostIntents: [
+                          {
+                              attemptIndex: 0,
+                              modelId: budget.modelId,
+                              provider: budget.provider,
+                              estimatedInputTokens: budget.inputTokens,
+                              reservedOutputTokens: budget.reservedOutputTokens,
+                              inputUsdPerMillionTokens:
+                                  budget.inputUsdPerMillionTokens,
+                              outputUsdPerMillionTokens:
+                                  budget.outputUsdPerMillionTokens,
+                              cachedInputPriceMultiplier:
+                                  budget.cachedInputPriceMultiplier,
+                              pricingVersion: budget.pricingVersion ?? null,
+                              reservedCostMicroUsd: reservedCost,
+                          },
+                      ],
+                  }
+                : {}),
             usageCredits: budget.usageCredits,
             inputTokens: budget.inputTokens,
             maxOutputTokens: budget.maxOutputTokens,
@@ -3412,96 +3483,19 @@ export const settleChatUsage = async (
                 }
             }
 
-            // One row per attempt, written once. The table refuses updates
-            // outright and holds a partial unique index on the billed one, so
-            // a second settlement of the same reservation cannot quietly
-            // rewrite what an attempt cost or move the user's charge.
-            // One attempt at a time, each row and its rollup together.
+            // One row per attempt, written once, each with its own rollup.
             //
-            // Not `createMany` gated on "did all of them insert": that gate is
-            // correct only while every row is written here at once. The moment
-            // an attempt's cost is recorded when the *attempt* ends -- which is
-            // what a crash after dispatch needs -- a settlement would find one
-            // row present and one absent, and an all-or-nothing gate would drop
-            // the new one's rollup. Per attempt, it cannot.
+            // Most of these are already here: an attempt records its own cost
+            // when it ends (`closeAttemptWithCost`), which is what a crash
+            // between one attempt's end and the turn's needs. Settlement runs
+            // the same writer for whichever rows are missing -- normally just
+            // the attempt that answered, whose usage is not known any earlier
+            // -- and `recordAttemptCost` is idempotent on the rest.
             for (const attempt of multiAttempt.attempts) {
-                const written = await tx.chatAttemptUsage.createMany({
-                    skipDuplicates: true,
-                    data: [
-                        {
-                            reservationId: durable.id,
-                            attemptIndex: attempt.attemptIndex,
-                            modelId: attempt.price.modelId,
-                            provider: attempt.price.provider,
-                            outcome: attempt.outcome,
-                            providerRequestId: boundedProviderIdentifier(
-                                attempt.providerRequestId
-                            ),
-                            providerResponseId: boundedProviderIdentifier(
-                                attempt.providerResponseId
-                            ),
-                            inputTokens: attempt.inputTokens,
-                            cachedInputTokens: Math.min(
-                                attempt.inputTokens,
-                                attempt.cachedInputTokens
-                            ),
-                            outputTokens: attempt.outputTokens,
-                            reasoningTokens: Number.isSafeInteger(
-                                attempt.reasoningTokens
-                            )
-                                ? Math.max(0, attempt.reasoningTokens!)
-                                : null,
-                            costMicroUsd: BigInt(attempt.costMicroUsd),
-                            pricingSnapshot: {
-                                ...attempt.price,
-                                costSource: attempt.costSource,
-                                settlementVersion: multiAttempt.version,
-                            },
-                        },
-                    ],
-                });
-                if (written.count !== 1) {
-                    // The row was already there, so its cost was already
-                    // accrued. ProviderDailyUsage is a daily rollup with no
-                    // per-request identity, so this row is the only thing that
-                    // can tell a repeat from a new one.
-                    console.warn(JSON.stringify({
-                        event: "chat_attempt_usage_already_recorded",
-                        reservationId: durable.id,
-                        attemptIndex: attempt.attemptIndex,
-                    }));
-                    continue;
-                }
-                if (
-                    attempt.inputTokens === 0 &&
-                    attempt.outputTokens === 0 &&
-                    attempt.costMicroUsd === 0
-                ) {
-                    continue;
-                }
-                const breakdown = calculateProviderUsageCost({
-                    inputTokens: attempt.inputTokens,
-                    cachedInputTokens: attempt.cachedInputTokens,
-                    outputTokens: attempt.outputTokens,
-                    inputUsdPerMillionTokens: attempt.price.inputUsdPerMillionTokens,
-                    outputUsdPerMillionTokens: attempt.price.outputUsdPerMillionTokens,
-                    cachedInputPriceMultiplier:
-                        attempt.price.cachedInputPriceMultiplier,
-                });
-                await recordInternalProviderUsage({
-                    client: tx,
-                    provider: attempt.price.provider,
-                    modelId: attempt.price.modelId,
-                    inputTokens: attempt.inputTokens,
-                    cachedInputTokens: Math.min(
-                        attempt.inputTokens,
-                        attempt.cachedInputTokens
-                    ),
-                    outputTokens: attempt.outputTokens,
-                    estimatedCostMicroUsd: attempt.costMicroUsd,
-                    uncachedInputCostMicroUsd: breakdown.uncachedInputCostMicroUsd,
-                    cachedInputCostMicroUsd: breakdown.cachedInputCostMicroUsd,
-                    outputCostMicroUsd: breakdown.outputCostMicroUsd,
+                await recordAttemptCost(tx, {
+                    reservationId: durable.id,
+                    attempt,
+                    snapshot: { settlementVersion: multiAttempt.version },
                 });
             }
         }
@@ -3667,12 +3661,6 @@ export const extendChatReservationExpiry = async (
     });
 };
 
-const boundedProviderIdentifier = (value: string | null | undefined) => {
-    const normalized = value?.trim();
-    if (!normalized) return null;
-    return normalized.replace(/[^A-Za-z0-9._:/-]/g, "").slice(0, 240) || null;
-};
-
 /**
  * Takes an attempt's own provider-budget hold, and records whose it is.
  *
@@ -3721,6 +3709,14 @@ export const reserveAttemptProviderBudget = async (input: {
     provider: string;
     reservedMicroUsd: number;
     periodStarts: { day: Date; month: Date };
+    /**
+     * What this attempt is authorized to spend, at its own rates.
+     *
+     * Required, and stored in the same transaction as the hold: a hold with no
+     * intent leaves a crash unable to record anything at all, which is the gap
+     * this mechanism exists to close.
+     */
+    costIntent: Omit<AttemptCostIntent, "attemptIndex" | "reservedCostMicroUsd">;
 }): Promise<
     | { reserved: false; reason: "reservation_not_open" }
     | { reserved: false; reason: "already_held" }
@@ -3770,6 +3766,25 @@ export const reserveAttemptProviderBudget = async (input: {
         // vanish -- leaving a hold in the bucket that nothing would ever
         // release.
         const existing = canonical.attemptHolds ?? adoptLegacyProviderHolds(canonical);
+        if (!canonical.attemptHolds && existing.length > 0) {
+            // Adopted holds need adopted intents, or the payload fails its own
+            // consistency check on the next read. The rates are the
+            // reservation's own, which is what the primary ran at.
+            canonical.attemptCostIntents = [
+                {
+                    attemptIndex: 0,
+                    modelId: canonical.modelId,
+                    provider: canonical.provider,
+                    estimatedInputTokens: canonical.inputTokens,
+                    reservedOutputTokens: canonical.reservedOutputTokens,
+                    inputUsdPerMillionTokens: canonical.inputUsdPerMillionTokens,
+                    outputUsdPerMillionTokens: canonical.outputUsdPerMillionTokens,
+                    cachedInputPriceMultiplier: canonical.cachedInputPriceMultiplier,
+                    pricingVersion: canonical.pricingVersion ?? null,
+                    reservedCostMicroUsd: existing[0]?.amount ?? 0,
+                },
+            ];
+        }
         if (existing.some((hold) => hold.attemptIndex === input.attemptIndex)) {
             // A retry of this call, or two dispatches claiming one index.
             // Either way the second must not add a hold nothing will release.
@@ -3820,6 +3835,14 @@ export const reserveAttemptProviderBudget = async (input: {
                 reservationPayload: serializeReservation({
                     ...canonical,
                     attemptHolds: holds,
+                    attemptCostIntents: [
+                        ...(canonical.attemptCostIntents ?? []),
+                        {
+                            ...input.costIntent,
+                            attemptIndex: input.attemptIndex,
+                            reservedCostMicroUsd: amount,
+                        },
+                    ],
                 }),
             },
         });
@@ -3898,6 +3921,12 @@ export const releaseAttemptProviderBudget = async (input: {
                         attemptHolds: withoutAttemptHolds(
                             holds,
                             input.attemptIndex
+                        ),
+                        // The intent goes with the hold. An intent left behind
+                        // would let a sweep record a cost against budget that
+                        // has already been given back.
+                        attemptCostIntents: (canonical.attemptCostIntents ?? []).filter(
+                            (intent) => intent.attemptIndex !== input.attemptIndex
                         ),
                     }),
                 },

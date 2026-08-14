@@ -2,10 +2,19 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { after, beforeEach, test } from "node:test";
 
+import {
+  acquireChatAccess,
+  settleChatUsage,
+  type ChatAccess,
+  type ChatBudget,
+  type ChatUsageReservation,
+} from "@/lib/chatSecurity";
+import { resolvedAttemptCosts } from "@/lib/chatAttemptCostLedger";
 import { prisma } from "@/lib/prisma";
 import { closeAttempt } from "@/lib/routingAttemptStore";
 import {
   STALE_ATTEMPT_AFTER_MS,
+  SWEEP_VERSION,
   staleAttemptBacklog,
   sweepStaleRoutingAttempts,
 } from "@/lib/routingAttemptSweep";
@@ -26,9 +35,14 @@ const reset = () =>
       "ContextManifest",
       "RoutingAttempt",
       "RoutingRun",
+      "ProviderDailyUsage",
+      "ChatAttemptUsageAdjustment",
+      "ChatAttemptUsage",
       "ChatCreditReservation",
       "ChatRequestLease",
       "ChatUsageBucket",
+      "CreditLedgerEntry",
+      "CreditLot",
       "User"
     RESTART IDENTITY CASCADE
   `);
@@ -41,12 +55,15 @@ after(async () => {
 
 const ancient = () => new Date(Date.now() - STALE_ATTEMPT_AFTER_MS - 60_000);
 
-const makeRun = async (overrides: { subjectKey?: string } = {}) => {
+const makeRun = async (
+  overrides: { subjectKey?: string; reservationId?: string } = {}
+) => {
   const subjectKey = overrides.subjectKey ?? `sweep:${randomUUID()}`;
   const run = await prisma.routingRun.create({
     data: {
       traceId: `trace-${randomUUID()}`,
       subjectKey,
+      reservationId: overrides.reservationId ?? null,
       mode: "auto",
       plan: "Pro",
       initialModelId: "gpt-5-6-luna",
@@ -74,6 +91,61 @@ const makeRun = async (overrides: { subjectKey?: string } = {}) => {
   });
   return { runId: run.id, subjectKey };
 };
+
+/**
+ * A reservation as a real turn would have left it: money committed, an attempt
+ * cost intent recorded at dispatch, and the request gone.
+ *
+ * Built through `acquireChatAccess` rather than by hand because the payload is
+ * signed -- a hand-written one would not deserialize, and the intent it has to
+ * carry is written there and nowhere else. The lease is deleted and the
+ * expiry moved into the past because that is the state a crashed request
+ * leaves behind: no process renewing anything, and money nobody settled.
+ */
+const makeCrashedReservation = async (): Promise<ChatUsageReservation> => {
+  const user = await prisma.user.create({
+    data: { email: `sweep-${randomUUID()}@example.test`, plan: "Pro" },
+  });
+  const access: ChatAccess = {
+    kind: "user",
+    userId: user.id,
+    plan: "Pro",
+    subjectKey: `integration:user:${user.id}`,
+    ipKey: `integration:ip:${user.id}`,
+    planLimits: { dailyMessageLimit: 10_000, monthlyMessageLimit: 10_000 },
+  };
+  const budget: ChatBudget = {
+    modelId: "gpt-5-6-luna",
+    minimumPlan: "Guest",
+    modelUsageClass: "standard",
+    usageCredits: 5,
+    inputTokens: 10_000,
+    maxOutputTokens: 10_000,
+    providerMaxOutputTokens: null,
+    reservedOutputTokens: 10_000,
+    inputUsdPerMillionTokens: 100,
+    outputUsdPerMillionTokens: 100,
+    cachedInputPriceMultiplier: 1,
+    provider: "openai",
+    pricingVersion: "sweep-test",
+    costSource: "sweep-test",
+    longContextThresholdTokens: null,
+  };
+  const acquired = await acquireChatAccess(access, budget, {
+    traceId: `trace-${randomUUID()}`,
+  });
+  await prisma.chatRequestLease.deleteMany({});
+  await prisma.chatCreditReservation.update({
+    where: { id: acquired.usageReservation.reservationId },
+    data: { expiresAt: new Date(Date.now() - 60_000) },
+  });
+  return acquired.usageReservation;
+};
+
+const attemptCostRow = (reservationId: string, attemptIndex = 0) =>
+  prisma.chatAttemptUsage.findUnique({
+    where: { reservationId_attemptIndex: { reservationId, attemptIndex } },
+  });
 
 const makeAttempt = async (
   runId: string,
@@ -268,4 +340,344 @@ test("an unknown_after_dispatch outcome requires a dispatch", async () => {
     }),
     /constraint/i
   );
+});
+
+// What a crashed attempt cost.
+//
+// The sweep closing the attempt was only half of it: a dispatch was recorded,
+// so the provider was called and was paid, and until these rows existed the
+// money left no trace anywhere. Not a wrong number -- no number.
+
+test("a crashed attempt's provider cost is recorded, at what it was allowed to spend", async () => {
+  const reservation = await makeCrashedReservation();
+  const { runId } = await makeRun({ reservationId: reservation.reservationId });
+  await makeAttempt(runId, { createdAt: ancient() });
+
+  const result = await sweepStaleRoutingAttempts();
+  assert.equal(result.closed, 1);
+  assert.equal(result.costRecorded, 1);
+
+  const row = await attemptCostRow(reservation.reservationId);
+  assert.ok(row, "the sweep must leave a cost row");
+  // The upper bound the attempt was authorized to spend. Not 0, which would
+  // claim a call that demonstrably happened used nothing.
+  assert.ok(row.costMicroUsd > BigInt(0));
+  assert.equal(row.costSource, "reserved_upper_bound");
+  assert.equal(row.usageSource, "crash_reconciliation");
+  assert.equal(row.outcome, "unknown_after_dispatch");
+  // Tokens stay unknown rather than invented: the cost is defensible because
+  // the money was really committed, and a token count nobody measured is not.
+  assert.equal(row.inputTokens, null);
+  assert.equal(row.outputTokens, null);
+  assert.equal(
+    (row.pricingSnapshot as { sweptBy?: string } | null)?.sweptBy,
+    SWEEP_VERSION,
+    "a later fix has to be able to find the rows this version wrote"
+  );
+});
+
+test("the crash estimate reaches the provider rollup, and its correction nets out", async () => {
+  // The whole reason the sweep moves the rollup itself. A correction is a
+  // *delta* against what the row already claimed, so a rollup that never
+  // received the estimate would be short by it for ever once the delta landed.
+  const reservation = await makeCrashedReservation();
+  const { runId } = await makeRun({ reservationId: reservation.reservationId });
+  await makeAttempt(runId, { createdAt: ancient() });
+  await sweepStaleRoutingAttempts();
+
+  const estimate = (await attemptCostRow(reservation.reservationId))!;
+  const afterSweep = await prisma.providerDailyUsage.findFirstOrThrow({
+    where: { provider: "openai", modelId: "gpt-5-6-luna", source: "internal" },
+  });
+  assert.equal(
+    BigInt(afterSweep.estimatedCostMicroUsd),
+    estimate.costMicroUsd,
+    "the reserved upper bound has to reach the ledger budgets read"
+  );
+  // Tokens stay zero and the component split stays zero: the money is known
+  // and how it divides is not.
+  assert.equal(afterSweep.inputTokens, 0);
+  assert.equal(afterSweep.outputTokens, 0);
+  assert.equal(afterSweep.requestCount, 1);
+
+  await settleChatUsage(
+    reservation,
+    { inputTokens: 10_000, outputTokens: 0, outcome: "failed" },
+    {
+      attempts: [
+        {
+          attemptIndex: 0,
+          price: {
+            provider: "openai",
+            modelId: "gpt-5-6-luna",
+            inputUsdPerMillionTokens: 100,
+            outputUsdPerMillionTokens: 100,
+            cachedInputPriceMultiplier: 1,
+            pricingVersion: "sweep-test",
+          },
+          inputTokens: 10_000,
+          cachedInputTokens: 0,
+          outputTokens: 0,
+          usageFromProvider: true,
+          outcome: "failed",
+        },
+      ],
+    }
+  );
+
+  const afterCorrection = await prisma.providerDailyUsage.findFirstOrThrow({
+    where: { provider: "openai", modelId: "gpt-5-6-luna", source: "internal" },
+  });
+  // Rollup and per-attempt ledger agree on the observed figure. They would
+  // not if either the estimate or the delta were missing from the rollup.
+  assert.equal(BigInt(afterCorrection.estimatedCostMicroUsd), BigInt(1_000_000));
+  const [resolved] = await resolvedAttemptCosts(reservation.reservationId);
+  assert.equal(resolved.costMicroUsd, BigInt(1_000_000));
+});
+
+test("only a crash-reconciled row may leave its tokens unknown", async () => {
+  // Enforced by the database, so no future writer can file an unmeasured
+  // estimate as if somebody had observed it.
+  const reservation = await makeCrashedReservation();
+  await assert.rejects(
+    prisma.chatAttemptUsage.create({
+      data: {
+        reservationId: reservation.reservationId,
+        attemptIndex: 0,
+        modelId: "gpt-5-6-luna",
+        provider: "openai",
+        outcome: "completed",
+        usageSource: "provider_usage_metadata",
+      },
+    }),
+    /unknown_tokens_check/
+  );
+});
+
+test("sweeping twice records the cost once", async () => {
+  const reservation = await makeCrashedReservation();
+  const { runId } = await makeRun({ reservationId: reservation.reservationId });
+  await makeAttempt(runId, { createdAt: ancient() });
+
+  await sweepStaleRoutingAttempts();
+  const first = await attemptCostRow(reservation.reservationId);
+  // Nothing is pending any more, so the second pass finds nothing at all --
+  // and even if it did, the unique key would refuse a second row.
+  const again = await sweepStaleRoutingAttempts();
+  assert.equal(again.examined, 0);
+  assert.equal(again.costRecorded, 0);
+
+  const rows = await prisma.chatAttemptUsage.findMany({
+    where: { reservationId: reservation.reservationId },
+  });
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].costMicroUsd, first!.costMicroUsd);
+});
+
+test("a crash refunds the user in full and keeps the provider's cost", async () => {
+  // The two ledgers §7 separates, at their furthest apart. Nobody saw an
+  // answer, so there is nothing to charge for; the provider was still called,
+  // so there is something to account for.
+  const reservation = await makeCrashedReservation();
+  const { runId } = await makeRun({ reservationId: reservation.reservationId });
+  await makeAttempt(runId, { createdAt: ancient() });
+  await sweepStaleRoutingAttempts();
+
+  await settleChatUsage(reservation, {
+    inputTokens: 0,
+    outputTokens: 0,
+    outcome: "failed",
+  });
+
+  const durable = await prisma.chatCreditReservation.findUniqueOrThrow({
+    where: { id: reservation.reservationId },
+  });
+  assert.equal(durable.settledCredits, 0, "the user pays for no answer");
+  assert.equal(durable.status, "refunded");
+  // A full refund charged for no attempt, so naming one would be a claim that
+  // some attempt was billed when none was.
+  assert.equal(durable.settlementAttemptIndex, null);
+
+  const row = await attemptCostRow(reservation.reservationId);
+  assert.ok(row, "the provider's cost survives the user's refund");
+  assert.equal(row.usageSource, "crash_reconciliation");
+});
+
+test("real usage arriving late is appended, and the estimate it corrects is left standing", async () => {
+  const reservation = await makeCrashedReservation();
+  const { runId } = await makeRun({ reservationId: reservation.reservationId });
+  await makeAttempt(runId, { createdAt: ancient() });
+  await sweepStaleRoutingAttempts();
+  const estimate = (await attemptCostRow(reservation.reservationId))!;
+
+  // The turn's own settlement finally runs, carrying what the attempt really
+  // used. 10K in at $100/M is 1,000,000 micro-USD, well under the bound.
+  await settleChatUsage(
+    reservation,
+    { inputTokens: 10_000, outputTokens: 0, outcome: "failed" },
+    {
+      attempts: [
+        {
+          attemptIndex: 0,
+          price: {
+            provider: "openai",
+            modelId: "gpt-5-6-luna",
+            inputUsdPerMillionTokens: 100,
+            outputUsdPerMillionTokens: 100,
+            cachedInputPriceMultiplier: 1,
+            pricingVersion: "sweep-test",
+          },
+          inputTokens: 10_000,
+          cachedInputTokens: 0,
+          outputTokens: 0,
+          usageFromProvider: true,
+          outcome: "failed",
+        },
+      ],
+    }
+  );
+
+  const base = (await attemptCostRow(reservation.reservationId))!;
+  assert.equal(
+    base.costMicroUsd,
+    estimate.costMicroUsd,
+    "the base row is immutable; a correction may not rewrite it"
+  );
+  assert.equal(base.usageSource, "crash_reconciliation");
+
+  const adjustments = await prisma.chatAttemptUsageAdjustment.findMany({
+    where: { reservationId: reservation.reservationId },
+  });
+  assert.equal(adjustments.length, 1);
+  assert.equal(adjustments[0].kind, "late_provider_actual");
+  assert.equal(adjustments[0].observedCostMicroUsd, BigInt(1_000_000));
+  // Signed: what the truth is, minus what the estimate claimed.
+  assert.equal(
+    adjustments[0].costDeltaMicroUsd,
+    BigInt(1_000_000) - estimate.costMicroUsd
+  );
+  // Resolved cost is base plus adjustments, and it is the observed figure.
+  assert.equal(
+    base.costMicroUsd + adjustments[0].costDeltaMicroUsd,
+    BigInt(1_000_000)
+  );
+  // Which is what the reader reports, so nothing downstream has to know that
+  // a correction happened in order to get the right number.
+  const [resolved] = await resolvedAttemptCosts(reservation.reservationId);
+  assert.equal(resolved.costMicroUsd, BigInt(1_000_000));
+  assert.equal(resolved.recordedCostMicroUsd, estimate.costMicroUsd);
+  assert.equal(resolved.estimated, false);
+});
+
+test("an uncorrected crash estimate reports as the estimate it is", async () => {
+  // A figure nobody measured has to be legible as one. Reporting it beside
+  // measured spend without saying which is which is how an upper bound turns
+  // into a number somebody plans against.
+  const reservation = await makeCrashedReservation();
+  const { runId } = await makeRun({ reservationId: reservation.reservationId });
+  await makeAttempt(runId, { createdAt: ancient() });
+  await sweepStaleRoutingAttempts();
+
+  const [resolved] = await resolvedAttemptCosts(reservation.reservationId);
+  assert.equal(resolved.estimated, true);
+  assert.equal(resolved.correctionMicroUsd, BigInt(0));
+  assert.equal(resolved.costMicroUsd, resolved.recordedCostMicroUsd);
+});
+
+test("an adjustment is append-only, like the row it corrects", async () => {
+  const reservation = await makeCrashedReservation();
+  const { runId } = await makeRun({ reservationId: reservation.reservationId });
+  await makeAttempt(runId, { createdAt: ancient() });
+  await sweepStaleRoutingAttempts();
+
+  const adjustment = await prisma.chatAttemptUsageAdjustment.create({
+    data: {
+      reservationId: reservation.reservationId,
+      attemptIndex: 0,
+      kind: "late_provider_actual",
+      observedCostMicroUsd: BigInt(7),
+      costDeltaMicroUsd: BigInt(7),
+      observationId: `obs-${randomUUID()}`,
+    },
+  });
+  await assert.rejects(
+    prisma.chatAttemptUsageAdjustment.update({
+      where: { id: adjustment.id },
+      data: { costDeltaMicroUsd: BigInt(999) },
+    }),
+    /append-only/
+  );
+  // The one door: unapplied to applied, once.
+  await prisma.chatAttemptUsageAdjustment.update({
+    where: { id: adjustment.id },
+    data: { appliedAt: new Date() },
+  });
+  await assert.rejects(
+    prisma.chatAttemptUsageAdjustment.update({
+      where: { id: adjustment.id },
+      data: { appliedAt: new Date() },
+    }),
+    /append-only/
+  );
+});
+
+test("the same observation twice is one adjustment", async () => {
+  // A provider reconciliation file replayed must move the ledger once.
+  const reservation = await makeCrashedReservation();
+  const { runId } = await makeRun({ reservationId: reservation.reservationId });
+  await makeAttempt(runId, { createdAt: ancient() });
+  await sweepStaleRoutingAttempts();
+
+  const observationId = `obs-${randomUUID()}`;
+  const write = () =>
+    prisma.chatAttemptUsageAdjustment.createMany({
+      skipDuplicates: true,
+      data: [
+        {
+          reservationId: reservation.reservationId,
+          attemptIndex: 0,
+          kind: "late_provider_actual",
+          observedCostMicroUsd: BigInt(1_000_000),
+          costDeltaMicroUsd: BigInt(-500_000),
+          observationId,
+        },
+      ],
+    });
+  assert.equal((await write()).count, 1);
+  assert.equal((await write()).count, 0, "the replay must write nothing");
+  assert.equal(
+    await prisma.chatAttemptUsageAdjustment.count({
+      where: { reservationId: reservation.reservationId },
+    }),
+    1
+  );
+});
+
+test("a payload whose cost intent is missing is swept without one", async () => {
+  // Two things at once, and both matter. The payload is refused on read --
+  // holds and intents are one authorization and a hold without its intent is
+  // a payload somebody tampered with or a writer left half-finished. And the
+  // sweep still closes the attempt: classifying a dead attempt does not
+  // depend on knowing its price, and leaving it `pending` for ever because
+  // the money is unreadable would trade one lost fact for two.
+  const reservation = await makeCrashedReservation();
+  const durable = await prisma.chatCreditReservation.findUniqueOrThrow({
+    where: { id: reservation.reservationId },
+  });
+  const payload = durable.reservationPayload as Record<string, unknown>;
+  delete payload.attemptCostIntents;
+  await prisma.$executeRaw`
+    UPDATE "ChatCreditReservation"
+    SET "reservationPayload" = ${payload}::jsonb
+    WHERE "id" = ${reservation.reservationId}
+  `;
+
+  const { runId } = await makeRun({ reservationId: reservation.reservationId });
+  const id = await makeAttempt(runId, { createdAt: ancient() });
+
+  const result = await sweepStaleRoutingAttempts();
+  assert.equal(result.closed, 1);
+  assert.equal(result.costRecorded, 0);
+  assert.equal(await outcomeOf(id), "unknown_after_dispatch");
+  assert.equal(await attemptCostRow(reservation.reservationId), null);
 });
