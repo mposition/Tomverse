@@ -10,7 +10,7 @@ import test from "node:test";
  * `server-only` is a package with two export conditions: under `react-server`
  * it is an empty module, and under anything else it throws "This module cannot
  * be imported from a Client Component module." Next.js sets that condition;
- * a bare `node --import tsx scripts/x.mjs` does not. So a script that imports
+ * a bare `node --import tsx` invocation does not. So a script that imports
  * `lib/billingConfig.ts` or `lib/stripePromotionProvisioning.ts` dies on its
  * first line with a message about Client Components, which is not a hint that
  * a node flag is missing.
