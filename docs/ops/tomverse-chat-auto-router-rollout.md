@@ -212,15 +212,31 @@ both sides of the wire.
 Not built: the swap itself, in `app/api/chat/route.ts`'s stream. An earlier
 note here said the `pull()` catch was the seam and that no extraction was
 required. The seam is right; the second half was wrong, and correcting it
-matters because it understates the work by a lot. Four things are open.
+matters because it understates the work by a lot. Four things were open; the
+first is now closed and the other three are not.
 
-**The catch does not classify the failure.** `generatedText === ""` says the
-server has not read a text chunk yet. That is a safe *necessary* condition and
-nothing more: `pull()`'s catch also receives cancellation, client disconnect
-and failures from the completion handling below it. §7 excludes cancellation,
-client disconnect, policy rejection and insufficient credits from automatic
-fallback by name, so the error has to be classified into a `failureLayer`
-before `decideFallback` is consulted at all. Today nothing does that.
+**~~The catch does not classify the failure.~~ Done — step 1.**
+`generatedText === ""` says the server has not read a text chunk yet. That is a
+safe *necessary* condition and nothing more: `pull()`'s catch also receives
+cancellation, client disconnect and failures from the completion handling below
+it. §7 excludes cancellation, client disconnect, policy rejection and
+insufficient credits from automatic fallback by name, so the error has to be
+classified before `decideFallback` is consulted at all.
+
+`lib/routingStreamFailure.ts` does that classification, and
+`lib/routingAttemptSequence.ts` is the loop that runs an attempt, hands its
+failure to the classifier and then to `decideFallback`, and runs the next one.
+Both are pure over injected effects, so the whole thing is driven by a scripted
+reader in `tests/routingAttemptSequence.test.mjs` — the first reader raises a
+pre-token error and the second succeeds, fails, is cancelled, is refused before
+dispatch, or is never reached. Two additions to `decideFallback` came out of
+it: §7 names policy rejection and insufficient credits as non-candidates and
+the function had no way to say so, so `FailedAttempt` now carries a
+`providerRefusal` and there are two more named refusals for it.
+
+Neither module is wired into the chat route. That is step 3, and the scan in
+`tests/automaticFallbackAbsence.test.mjs` still holds: there is exactly one
+`streamText` call and its model is a single resolved identifier.
 
 **Swapping `sourceReader` and `result` is not enough.** The closure also holds
 `modelConfig`, `generationSettings`, `webSearchToolConfig`,
@@ -251,8 +267,9 @@ primary's is not an option.
 
 Order that keeps each step checkable:
 
-1. a deterministic test double where the first reader raises a pre-token error
-   and the second succeeds, fails, or is cancelled — before any real provider;
+1. ~~a deterministic test double where the first reader raises a pre-token
+   error and the second succeeds, fails, or is cancelled — before any real
+   provider~~ — done, above;
 2. the per-attempt execution state and the multi-attempt settlement contract;
 3. the swap, behind a flag that is off;
 4. staging fault injection on the first provider, confirming in the database
