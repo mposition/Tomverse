@@ -296,23 +296,42 @@ test("the memory count is selected for the owner's read and for no one else", ()
 
 /* ------------------------------------- §8.1 invariant 1: mode is read ----- */
 
-test("both chat entry points pass the conversation's memory mode", () => {
+test("every chat entry point passes the conversation's memory mode", () => {
     // This is a source check on purpose, and the reason is the bug it exists
     // for: `Conversation.memoryMode` was stored, the gate consulted it, and
     // nothing in between ever passed it — so the column had no effect and
     // every type checked. Nothing at runtime can catch an argument that is
-    // simply never supplied, and §8.1 requires *both* sides to read it: if
-    // only preflight did, a conversation with memory off would be priced
-    // without a memory block and then sent one.
+    // simply never supplied, and §8.1 requires *every* pricing side to read
+    // it: a side that does not would price a conversation with memory off as
+    // though it were on, and then disagree with the side that read it — which
+    // is a bundle that is stale on arrival, on every message.
+    //
+    // `/api/chat/context` is in this list because it was the third such bug:
+    // it priced single-model requests with the account default while the chat
+    // route priced with the conversation's own mode.
     for (const path of [
         "../app/api/chat/route.ts",
         "../app/api/chat/preflight/route.ts",
+        "../app/api/chat/context/route.ts",
     ]) {
         const source = readFileSync(new URL(path, import.meta.url), "utf8");
-        const call = source.slice(source.indexOf("buildChatMemoryContext({"));
+        // Comments are stripped before the window is measured. The assertion
+        // is about the argument list, and a rule that a paragraph of prose
+        // above one argument can break is a rule that fails for the wrong
+        // reason.
+        const code = source
+            .split("\n")
+            .filter((line) => !line.trim().startsWith("//"))
+            .join("\n");
+        const index = code.indexOf("buildChatTurnContext({");
+        assert.notEqual(
+            index,
+            -1,
+            `${path} must build its context with the one turn-context builder`
+        );
         assert.ok(
-            call.slice(0, 600).includes("conversationMode:"),
-            `${path} must pass conversationMode to buildChatMemoryContext`
+            code.slice(index, index + 600).includes("conversationMode:"),
+            `${path} must pass conversationMode to buildChatTurnContext`
         );
     }
 });
