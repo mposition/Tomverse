@@ -1,6 +1,6 @@
 ﻿"use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   AlertTriangle,
   CheckCircle2,
@@ -28,6 +28,7 @@ import {
   type BillingCurrency,
 } from "@/lib/billingMarkets";
 import { dispatchAppToast } from "@/lib/appToast";
+import { publishPromotionDraftState } from "@/lib/promotionDiagnosticsEvents";
 
 type BillingConfigPayload = {
   plans: BillingPlanConfig[];
@@ -775,6 +776,31 @@ export function BillingAdminPanel({
       ).length,
     [baselinePromotions, draftPromotions, promotions]
   );
+  /**
+   * Which promotions carry unsaved edits, published for the diagnostics panel.
+   *
+   * Diagnostics read the saved row, so running one against a dirty draft would
+   * answer a question the operator did not ask. The ids go out rather than a
+   * count: the panel has to disable exactly the selected promotion, not every
+   * promotion whenever any one of them is dirty.
+   */
+  const dirtyPromotionIds = useMemo(
+    () =>
+      draftPromotions
+        .filter((promotion) => {
+          const original = promotions.find((item) => item.id === promotion.id);
+          const baseline = baselinePromotions.find(
+            (item) => item.id === promotion.id
+          );
+          return JSON.stringify(baseline || original) !== JSON.stringify(promotion);
+        })
+        .map((promotion) => promotion.id),
+    [baselinePromotions, draftPromotions, promotions]
+  );
+  useEffect(() => {
+    publishPromotionDraftState({ dirtyPromotionIds });
+  }, [dirtyPromotionIds]);
+
   const dirtyPriceCount = useMemo(
     () =>
       JSON.stringify(draftPriceCatalog) === JSON.stringify(baselinePriceCatalog)

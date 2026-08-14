@@ -630,3 +630,124 @@ test("the read-only inspection reports state and mutates nothing", async () => {
   });
   assert.equal(empty.recommendation, "create_missing_objects");
 });
+
+/**
+ * The reported outage, driven end to end through the real provisioner.
+ *
+ * EDDIEFRIEND100 is eligible for Pro *and* Max. Its Stripe objects were stamped
+ * `planId: max` by whichever checkout provisioned them, because `BillingPromotion`
+ * has one `stripeCouponId`/`stripePromotionCodeId` pair for the whole row and a
+ * Stripe promotion code string is unique across the account -- there is nowhere
+ * to put a second, Pro-stamped object and no way to create one. A Pro checkout
+ * then failed the strict `metadata.planId` equality, which is an identity
+ * mismatch, which is fatal, which surfaces as
+ * "This promotion is not currently available." Validation never saw it because
+ * validation never reads Stripe.
+ */
+test("a promotion eligible for both plans checks out on the plan its objects were not stamped with", async () => {
+  const stripe = new FakeStripe();
+  healthyObjects(stripe);
+  const db = new FakeDb({
+    id: "promo_db",
+    code: "EDDIEFRIEND100",
+    stripeCouponId: "cpn_live",
+    stripePromotionCodeId: "promo_live",
+  });
+  const result = await ensure(
+    stripe,
+    db,
+    promotionConfig({
+      appliesToPlanIds: ["pro", "max"],
+      stripeCouponId: "cpn_live",
+      stripePromotionCodeId: "promo_live",
+    }),
+    { planId: "pro", planProductId: "prod_pro" }
+  );
+  assert.deepEqual(result.discount, { promotion_code: "promo_live" });
+  assert.equal(result.resolution, "linked");
+  assert.deepEqual(result.driftReasons, []);
+  // And it did not try to repair the situation by creating a second object,
+  // which Stripe would refuse as a duplicate code string.
+  assert.deepEqual(stripe.promotionCodeCreateKeys, []);
+  assert.deepEqual(stripe.couponCreateKeys, []);
+});
+
+test("the same promotion is still adoptable on the other plan after a lost linkage", async () => {
+  // The partial-success repair has to work on both plans too, or the promotion
+  // is stuck the moment a database write is lost.
+  const stripe = new FakeStripe();
+  healthyObjects(stripe);
+  const db = new FakeDb({
+    id: "promo_db",
+    code: "EDDIEFRIEND100",
+    stripeCouponId: null,
+    stripePromotionCodeId: null,
+  });
+  const result = await ensure(
+    stripe,
+    db,
+    promotionConfig({ appliesToPlanIds: ["pro", "max"] }),
+    { planId: "pro", planProductId: "prod_pro" }
+  );
+  assert.equal(result.resolution, "adopted");
+  assert.equal(db.row.stripePromotionCodeId, "promo_live");
+  assert.deepEqual(stripe.promotionCodeCreateKeys, []);
+});
+
+test("a plan the promotion does not cover is still refused by the product restriction", async () => {
+  // Relaxing the metadata stamp must not relax which plan a discount may be
+  // charged against. A coupon restricted to the Max product fails a Pro
+  // checkout, loudly, rather than quietly charging full price.
+  const stripe = new FakeStripe();
+  healthyObjects(stripe);
+  stripe.coupons[0].applies_to = { products: ["prod_max"] };
+  const db = new FakeDb({
+    id: "promo_db",
+    code: "EDDIEFRIEND100",
+    stripeCouponId: "cpn_live",
+    stripePromotionCodeId: "promo_live",
+  });
+  await assert.rejects(
+    ensure(
+      stripe,
+      db,
+      promotionConfig({
+        appliesToPlanIds: ["pro", "max"],
+        stripeCouponId: "cpn_live",
+        stripePromotionCodeId: "promo_live",
+      }),
+      { planId: "pro", planProductId: "prod_pro" }
+    ),
+    (error: unknown) => {
+      assert.ok(error instanceof StripePromotionProvisioningError);
+      assert.equal(error.code, "PROMOTION_PRODUCT_MISMATCH");
+      return true;
+    }
+  );
+});
+
+test("an object stamped for a plan the row no longer covers still works, and says so", async () => {
+  const stripe = new FakeStripe();
+  healthyObjects(stripe);
+  const db = new FakeDb({
+    id: "promo_db",
+    code: "EDDIEFRIEND100",
+    stripeCouponId: "cpn_live",
+    stripePromotionCodeId: "promo_live",
+  });
+  const result = await ensure(
+    stripe,
+    db,
+    promotionConfig({
+      appliesToPlanIds: ["pro"],
+      stripeCouponId: "cpn_live",
+      stripePromotionCodeId: "promo_live",
+    }),
+    { planId: "pro", planProductId: "prod_pro" }
+  );
+  assert.equal(result.resolution, "linked");
+  assert.deepEqual(result.driftReasons, [
+    "drift:metadata_plan_id_stale",
+    "drift:metadata_plan_id_stale",
+  ]);
+});

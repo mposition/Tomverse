@@ -7,6 +7,7 @@ import {
   PromotionRiskPanel,
   type PromoRiskRow,
 } from "@/components/admin/AdminRiskPanels";
+import { PromotionDiagnosticsPanel } from "@/components/admin/PromotionDiagnosticsPanel";
 import { adminNavItemTabs, resolveAdminTab } from "@/lib/adminNavigation";
 import { getAdminUserStats } from "@/lib/adminUsers";
 import {
@@ -127,6 +128,12 @@ export default async function AdminBillingPage({
           activeSubscriptionCount={userStats.activePaidSubscriptions}
           initialTab="promotions"
         />
+        {/*
+          Diagnostics sit under the catalogue editor, in the section that owns
+          promotions. They are read-only and load nothing of their own here --
+          the promotion list is already in hand for the editor above.
+        */}
+        <PromotionDiagnosticsPanel promotions={promotions} />
         <PromotionRiskPanel promoRisks={promoRisks} />
       </div>
     );

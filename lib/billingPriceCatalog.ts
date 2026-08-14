@@ -111,6 +111,33 @@ export async function getBillingPriceCatalog() {
   return (await getBillingPriceCatalogWithMeta()).catalog;
 }
 
+/**
+ * The catalogue as stored, without creating it.
+ *
+ * `getBillingPriceCatalogWithMeta()` upserts the defaults when the row is
+ * missing, which is right for the bootstrap paths that call it and wrong for a
+ * read that has promised to change nothing -- the Admin promotion diagnostics
+ * would create an `AppSetting` row as a side effect of an operator pressing
+ * "Run diagnostics". The defaults are returned in memory instead, so the quoted
+ * amount is the same one checkout would use without the row being written on
+ * the way past.
+ */
+export async function readBillingPriceCatalog(): Promise<BillingPriceCatalog> {
+  const row = await prisma.appSetting.findUnique({
+    where: { key: BILLING_PRICE_CATALOG_KEY },
+    select: { value: true },
+  });
+  if (!row) return cloneDefaultCatalog();
+  try {
+    const parsed = billingPriceCatalogSchema.safeParse(JSON.parse(row.value));
+    if (parsed.success) return parsed.data;
+  } catch {
+    // An unreadable stored value is reported by the admin catalogue editor, not
+    // repaired from here.
+  }
+  return cloneDefaultCatalog();
+}
+
 export async function saveBillingPriceCatalog(catalog: BillingPriceCatalog) {
   const validated = billingPriceCatalogSchema.parse(catalog);
   return prisma.appSetting.upsert({
