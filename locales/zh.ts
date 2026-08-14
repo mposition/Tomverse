@@ -140,6 +140,7 @@ export const zh = {
         imageModelTabSubtitle: "根据描述生成图像的模型。只能读取所附图片的聊天模型仍在“聊天”标签页中。",
         imageModelTabFooterHint: "选择后将进入图像工作区。",
         imageModelCreditsFrom: "{credits} 积分起",
+        imageModelViaGateway: "经由 {gateway}",
         imageModelHoldPriceUnverified: "官方价格核实前暂不开放",
         imageModelLatencyFast: "快速",
         imageModelLatencyBalanced: "均衡",

@@ -123,6 +123,7 @@ export const pt = {
         imageModelTabSubtitle: "Modelos que criam imagens a partir de uma descrição. Modelos de conversa que apenas leem a imagem anexada continuam na aba Conversa.",
         imageModelTabFooterHint: "Escolher um abre o espaço de imagens.",
         imageModelCreditsFrom: "A partir de {credits} créditos",
+        imageModelViaGateway: "via {gateway}",
         imageModelHoldPriceUnverified: "Em espera até o preço oficial ser verificado",
         imageModelLatencyFast: "Rápido",
         imageModelLatencyBalanced: "Equilibrado",

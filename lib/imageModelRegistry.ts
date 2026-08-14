@@ -714,6 +714,29 @@ export const minimumCreditsForImageOption = (
 export const imageModelOwner = (model: ImageModelProfile): ImageModelOwner =>
   model.modelOwner ?? model.provider;
 
+/**
+ * What a model's subtitle has to say: whose model it is, and -- only when that
+ * differs -- who supplies it.
+ *
+ * Split out from the rendering because the presentational bug it exists to
+ * prevent is not about labels being missing. The catalogue row showed
+ * `provider`, which reads correctly for every direct integration because owner
+ * and provider are the same string there, and became wrong the moment they
+ * were not: Nano Banana 2 is Google's model bought through fal, and the row
+ * either credited the wrong company or -- as it actually did -- printed
+ * nothing at all.
+ *
+ * `gateway` is null when there is nothing extra to say, so a caller cannot
+ * render "OpenAI via OpenAI".
+ */
+export const imageModelBrandParts = (model: ImageModelProfile) => {
+  const owner = imageModelOwner(model);
+  return {
+    owner,
+    gateway: owner === model.provider ? null : model.provider,
+  } as const;
+};
+
 /** The providers that have at least one enabled model right now. */
 export const listActiveImageProviders = (): readonly ImageModelProvider[] => [
   ...new Set(listEnabledImageModels().map((model) => model.provider)),
