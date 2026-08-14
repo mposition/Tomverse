@@ -36,7 +36,7 @@ export const falPricingRequest = (model) => ({
  * is kept in `status` rather than collapsed into a boolean. A check that
  * reports success when it did not run is worse than one that fails.
  */
-export const evaluateFalPricing = ({ model, response }) => {
+export const evaluateFalPricing = ({ model, response, reachError = null }) => {
   const problems = [];
   const notes = [];
   const { endpointId, approvedUnitPriceUsd } = falPricingRequest(model);
@@ -63,10 +63,24 @@ export const evaluateFalPricing = ({ model, response }) => {
       // Enabled and unverifiable is the fail-closed case. The price is live,
       // and "we could not look" is not a reason to let it stand.
       problems.push(
-        `${model.id} is enabled but fal's published price could not be read. ` +
-          `Set FAL_KEY and re-run before deploying, or disable the model.`
+        `${model.id} is enabled but fal's published price could not be read` +
+          (reachError ? ` (${reachError})` : "") +
+          `. Set FAL_KEY and re-run before deploying, or disable the model.`
       );
       return { status: "failed", problems, notes, enabled };
+    }
+    // Three states, not two. A lookup that was attempted and refused is not a
+    // lookup that was skipped, and reporting the second while the first
+    // happened is how a broken credential goes unnoticed for weeks and then
+    // surfaces on the day someone enables the model. Still exit zero -- there
+    // is no live price to be wrong about -- but the word says what happened.
+    if (reachError) {
+      notes.push(
+        `The lookup was attempted and failed: ${reachError}. ` +
+          "Nothing is enabled, so nothing is blocked -- but this will fail the " +
+          "day the model is enabled, and it is cheaper to fix now."
+      );
+      return { status: "lookup_failed", problems, notes, enabled };
     }
     notes.push("No pricing lookup was made, and none was required.");
     return { status: "skipped", problems, notes, enabled };

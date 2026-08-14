@@ -52,10 +52,9 @@ if (apiKey) {
   }
 }
 
-const verdict = evaluateFalPricing({ model, response });
+const verdict = evaluateFalPricing({ model, response, reachError });
 
 console.log(`fal image pricing check: ${MODEL_ID} -- ${verdict.status}`);
-if (reachError) console.log(`  ${reachError}`);
 if (!apiKey) console.log("  FAL_KEY is not set, so no lookup was attempted.");
 for (const note of verdict.notes) console.log(`  ${note}`);
 

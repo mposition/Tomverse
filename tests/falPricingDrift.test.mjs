@@ -45,12 +45,39 @@ test("a held model with no lookup is skipped, not passed", () => {
   assert.deepEqual(verdict.problems, []);
 });
 
+test("a refused lookup is not a skipped one", () => {
+  // Verified against the live endpoint on 2026-08-14: an invalid key answers
+  // HTTP 403, and the check used to headline that as `skipped`. "We chose not
+  // to look" and "we looked and were refused" are different facts, and
+  // reporting the first while the second happened is how a broken credential
+  // goes unnoticed until the day someone enables the model.
+  const verdict = evaluateFalPricing({
+    model: held,
+    response: null,
+    reachError: "fal's pricing API answered HTTP 403",
+  });
+  assert.equal(verdict.status, "lookup_failed");
+  // Still not a failure: nothing is enabled, so there is no live price to be
+  // wrong about. The word carries the news, not the exit code.
+  assert.deepEqual(verdict.problems, []);
+  assert.ok(verdict.notes.some((note) => note.includes("403")));
+});
+
 test("an enabled model with no lookup fails", () => {
   // The fail-closed case. The price is live, and "we could not look" is not a
   // reason to let it stand.
   const verdict = evaluateFalPricing({ model: enabled, response: null });
   assert.equal(verdict.status, "failed");
   assert.match(verdict.problems[0], /enabled but fal's published price could not be read/);
+
+  // And when there was a reason, it is carried into the failure rather than
+  // leaving the reader to go looking for it.
+  const withReason = evaluateFalPricing({
+    model: enabled,
+    response: null,
+    reachError: "fal's pricing API answered HTTP 403",
+  });
+  assert.match(withReason.problems[0], /HTTP 403/);
 });
 
 test("a matching price matches", () => {
