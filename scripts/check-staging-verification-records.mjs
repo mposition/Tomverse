@@ -164,9 +164,18 @@ for (const name of entries) {
       `${path}  declares no templateRevision, so a later checklist item cannot be told from one it skipped.`
     );
   }
+  // Required whether or not the record is frozen. A blank record in the
+  // repository looks official and says nothing, which is the state this whole
+  // split exists to prevent -- so a run in progress stays uncommitted until
+  // there is something to report. `npm run new:staging-verification-record`
+  // writes one; committing it before it is filled in is the mistake.
   for (const required of ["executor", "result"]) {
     if (!fields.get(required)) {
-      problems.push(`${path}  has no ${required}.`);
+      problems.push(
+        `${path}  has no ${required}. A record with none is a blank page that ` +
+          `reads as a completed run; keep it out of the repository until the ` +
+          `run has an executor and an outcome.`
+      );
     }
   }
 
