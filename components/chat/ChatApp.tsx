@@ -39,6 +39,7 @@ import {
   TRACE_PROVENANCE,
   type MessageErrorReportContext,
 } from "@/lib/errorReportContract";
+import { discardResponseBody } from "@/lib/discardResponseBody";
 
 const processedPromptKeys = new Set<string>();
 const CHAT_STREAM_IDLE_TIMEOUT_MS = 90_000;
@@ -339,6 +340,8 @@ function ChatAppComponent({
             poll = await res.json();
             pollTraceId = res.headers.get("X-Request-ID");
             pollErrorReportToken = res.headers.get(ERROR_REPORT_TOKEN_HEADER);
+          } else {
+            await discardResponseBody(res);
           }
         } catch {
           // Transient network error talking to our own status endpoint --
@@ -504,7 +507,10 @@ function ChatAppComponent({
                   headers: { "Cache-Control": "no-cache" },
                 }
               );
-              if (!pageResponse.ok) break;
+              if (!pageResponse.ok) {
+                await discardResponseBody(pageResponse);
+                break;
+              }
               const pageData = await pageResponse.json();
               if (Array.isArray(pageData.messages)) {
                 data.messages.push(...pageData.messages);
@@ -547,6 +553,7 @@ function ChatAppComponent({
               setMessages([{ id: WELCOME_MESSAGE_ID, role: "assistant", content: t("chat.welcome"), status: "normal" }]);
           }
         } else {
+          await discardResponseBody(response);
           throw new Error(`Conversation message load failed: ${response.status}`);
         }
       } catch (error) {
@@ -1266,6 +1273,7 @@ function ChatAppComponent({
                         messages: [{ id: userMsgId, role: "user", content: trimmed, modelId }],
                     }),
                 });
+                await discardResponseBody(response);
                 if (!response.ok) {
                   throw new Error(`Model-only user message save failed: ${response.status}`);
                 }

@@ -13,6 +13,7 @@ import { useModalDialog } from "@/components/useModalDialog";
 import { DesktopChatShell } from "@/components/chat/DesktopChatShell";
 import { MobileChatShell } from "@/components/chat/MobileChatShell";
 import { prepareChatContextBundle } from "@/lib/chatContextBundleClient";
+import { discardResponseBody } from "@/lib/discardResponseBody";
 import { createSharedPendingRequest } from "@/lib/sharedPendingRequest";
 import {
   ComparisonReviewDialog,
@@ -173,28 +174,6 @@ const normalizeStringArray = (value: unknown, fallback: string[]) => {
 };
 
 const uniqueStrings = (values: string[]) => Array.from(new Set(values));
-
-/**
- * Reads a response body the page has no use for, and throws it away.
- *
- * `/api/*` answers `private, no-store` (lib/apiCacheControlPolicy.ts). What was
- * measured, on Chromium against this server: a response whose body is never
- * consumed does not reach `requestfinished` under `private, no-store`, and does
- * reach it under a directive that permits storage. The `fetch()` promise has
- * already resolved by then -- status and headers arrived -- so what is
- * outstanding is the body transfer and the request's own completion, not the
- * call. Why the cacheable case completes is not established here; a cache write
- * draining the body is a plausible explanation, not a verified one.
- *
- * Either way the fix is the same, and it is one this code owes regardless: a
- * body has to be consumed on the paths this page does not care about too, not
- * only on the one it parses.
- */
-const discardResponseBody = (response: Response) =>
-  response.text().then(
-    () => undefined,
-    () => undefined
-  );
 
 /**
  * PATCHes one conversation's model settings and reports the server's
@@ -908,9 +887,9 @@ export function ChatPageClient({
     fetch("/api/user/guest-usage", { cache: "no-store" })
       .then((res) =>
         // The error body is read and discarded rather than left unread; see
-        // discardResponseBody. This is the call that made it visible: with the
-        // database unreachable this endpoint answers 500, and /chat then never
-        // reached network idle again.
+        // lib/discardResponseBody.ts. This is the call that made it visible:
+        // with the database unreachable this endpoint answers 500, and /chat
+        // then never reached network idle again.
         res.ok ? res.json() : discardResponseBody(res).then(() => null)
       )
       .then((data) => {

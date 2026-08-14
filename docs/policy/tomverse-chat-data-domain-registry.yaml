@@ -326,6 +326,46 @@ domains:
     implementationStatus: implemented
     inUnifiedExport: included
 
+  - domain: assistantProfile
+    prismaModel: AssistantProfile
+    userLinkageRole: subject
+    owner: security-privacy
+    deletionAction: delete
+    deletionMechanism: cascade_from_user
+    retentionPolicy: immediate
+    implementationStatus: implemented
+    inUnifiedExport: included_filtered
+
+  - domain: assistantProfileVersion
+    prismaModel: AssistantProfileVersion
+    userLinkageRole: subject
+    owner: security-privacy
+    deletionAction: delete
+    deletionMechanism: cascade_from_user
+    retentionPolicy: immediate
+    implementationStatus: implemented
+    inUnifiedExport: included_filtered
+
+  - domain: assistantKnowledgeFile
+    prismaModel: AssistantKnowledgeFile
+    userLinkageRole: subject
+    owner: security-privacy
+    deletionAction: delete
+    deletionMechanism: cascade_from_user
+    retentionPolicy: immediate
+    implementationStatus: implemented
+    inUnifiedExport: included_filtered
+
+  - domain: assistantKnowledgeChunk
+    prismaModel: AssistantKnowledgeChunk
+    userLinkageRole: subject
+    owner: security-privacy
+    deletionAction: delete
+    deletionMechanism: cascade_from_user
+    retentionPolicy: immediate
+    implementationStatus: implemented
+    inUnifiedExport: included_filtered
+
   - domain: memoryEvidence
     prismaModel: MemoryEvidence
     userLinkageRole: subject

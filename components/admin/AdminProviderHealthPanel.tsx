@@ -31,6 +31,7 @@ import {
   canOfferRecovery,
   evaluateRecoveryEligibility,
 } from "@/lib/providerRecoveryCore";
+import { discardResponseBody } from "@/lib/discardResponseBody";
 
 const REFRESH_INTERVAL_MS = 120_000;
 
@@ -1319,6 +1320,7 @@ export function AdminProviderHealthPanel({
         headers: { Accept: "application/json" },
       });
       if (!response.ok) {
+        await discardResponseBody(response);
         throw new Error(`Provider API returned ${response.status}.`);
       }
       const nextDashboard = (await response.json()) as ProviderHealthDashboard;
@@ -1346,7 +1348,10 @@ export function AdminProviderHealthPanel({
         cache: "no-store",
         headers: { Accept: "application/json" },
       });
-      if (!response.ok) return;
+      if (!response.ok) {
+        await discardResponseBody(response);
+        return;
+      }
       const data = (await response.json()) as {
         providers?: Record<string, ProviderVerificationSummary>;
       };

@@ -148,6 +148,34 @@ mock.module(mod("lib/guestAttachments.ts"), {
     getGuestAttachmentTtlMinutes: () => 60,
   },
 });
+// Release C2's two knowledge steps. Mocked as a collaborator rather than by
+// teaching the Prisma stub two more tables, so the assertions below name the
+// step that produced each figure -- which is what the rest of this file does.
+mock.module(mod("lib/assistantKnowledgeLifecycle.ts"), {
+  namedExports: {
+    drainKnowledgeCleanupQueue: async () => ({
+      examined: 26,
+      deleted: 26,
+      failed: 0,
+      exhausted: 27,
+    }),
+    sweepAbandonedKnowledgeObjects: async () => ({
+      deleted: 28,
+      failed: 0,
+      listed: true,
+    }),
+  },
+});
+mock.module(mod("lib/assistantKnowledgeProcessor.ts"), {
+  namedExports: {
+    processPendingKnowledgeFiles: async () => ({
+      reclaimed: 29,
+      processed: 30,
+      ready: 30,
+      failed: 0,
+    }),
+  },
+});
 
 type CleanupResult = Record<string, unknown> & {
   failedSteps: { step: string; error: string }[];
@@ -209,6 +237,16 @@ test("a step that throws does not skip the steps behind it", async () => {
   assert.equal(result.providerProbeResults, 23);
   assert.equal(result.scheduledJobRuns, 24);
   assert.equal(result.providerModelCatalogRuns, 25);
+  // Release C2's storage sweeps. Two steps because they answer different
+  // questions: tombstoned bytes, and objects no row ever claimed.
+  assert.equal(result.assistantKnowledgeObjectsDeleted, 26);
+  assert.equal(result.assistantKnowledgeCleanupExhausted, 27);
+  assert.equal(result.assistantKnowledgeOrphansDeleted, 28);
+  // And the extraction driver, which reclaims a file whose worker died and
+  // then actually processes it -- reclaiming alone was the gap the memory
+  // extraction slice already paid for.
+  assert.equal(result.assistantKnowledgeReclaimed, 29);
+  assert.equal(result.assistantKnowledgeProcessed, 30);
 });
 
 test("a clean run reports no failed steps and every count", async () => {

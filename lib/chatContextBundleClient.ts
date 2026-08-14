@@ -13,6 +13,8 @@
  * whole point of §10. Blocking the send instead would turn a memory feature
  * that is switched off for almost everyone into a hard dependency of chat.
  */
+
+import { discardResponseBody } from "./discardResponseBody";
 export async function prepareChatContextBundle(input: {
     /** Null for a guest, or for a conversation that does not exist yet. */
     conversationId: string | null;
@@ -29,7 +31,10 @@ export async function prepareChatContextBundle(input: {
                 prompt: input.prompt,
             }),
         });
-        if (!response.ok) return null;
+        if (!response.ok) {
+            await discardResponseBody(response);
+            return null;
+        }
         const body = (await response.json().catch(() => null)) as {
             contextBundle?: unknown;
         } | null;

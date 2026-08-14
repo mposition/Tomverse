@@ -85,6 +85,20 @@ const REGISTRY = {
     list: "MEMORY_SENSITIVITIES",
     reason: "Whether a memory is sensitive decides whether it can be injected at all.",
   },
+  AssistantKnowledgeFile_processingStatus_allowed: {
+    owner: "list",
+    module: "lib/assistantKnowledgeLimits.ts",
+    list: "KNOWLEDGE_PROCESSING_STATUSES",
+    reason:
+      "The knowledge processing lifecycle. The status decides two different things in two different places -- the worker claims 'pending', retrieval reads 'ready' -- so a value in one and not the other is a row invisible to both while looking fine in a list.",
+  },
+  AssistantKnowledgeCleanup_reason_allowed: {
+    owner: "list",
+    module: "lib/assistantKnowledgeLimits.ts",
+    list: "KNOWLEDGE_CLEANUP_REASONS",
+    reason:
+      "Why a stored object is queued for deletion (import/memory policy §14.2). Deletion is DB-first and the tombstone is the audit trail, so the reason has to stay a closed vocabulary the code and the database agree on.",
+  },
   MemoryExtractionRun_status_check: {
     owner: "list",
     module: "lib/memoryExtractionLaunch.ts",

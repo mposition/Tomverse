@@ -1,6 +1,13 @@
 import "server-only";
 
 import { APP_DEFAULTS, guestDefaultLeadRejection } from "@/lib/appDefaults";
+import {
+  ASSISTANT_KNOWLEDGE_FLAG_KEY,
+  ASSISTANT_PROFILES_FLAG_KEY,
+  assistantKnowledgeEnabledFromValue,
+  assistantKnowledgeUsable,
+  assistantProfilesEnabledFromValue,
+} from "@/lib/assistantProfileAccess";
 import { isE2EDatabaseDisabled } from "@/lib/e2eTestMode";
 import {
   EXTERNAL_IMPORT_FLAG_KEY,
@@ -293,6 +300,75 @@ export class MemoryFeatureDisabledError extends Error {
 export async function assertMemoryExtractionEnabled() {
   if (!(await isMemoryExtractionEnabled())) {
     throw new MemoryFeatureDisabledError();
+  }
+}
+
+// Release C rollout flags (import/memory policy §15): the same default-off
+// opt-in shape. Knowledge is gated on profiles as well as on itself --
+// `assistantKnowledgeUsable()` says why.
+export async function isAssistantProfilesEnabled(): Promise<boolean> {
+  if (e2eDatabaseDisabled()) return false;
+  const row = await prisma.appSetting.findUnique({
+    where: { key: ASSISTANT_PROFILES_FLAG_KEY },
+    select: { value: true },
+  });
+  return assistantProfilesEnabledFromValue(row?.value);
+}
+
+export async function isAssistantKnowledgeEnabled(): Promise<boolean> {
+  if (e2eDatabaseDisabled()) return false;
+  const [profiles, knowledge] = await Promise.all([
+    isAssistantProfilesEnabled(),
+    prisma.appSetting
+      .findUnique({
+        where: { key: ASSISTANT_KNOWLEDGE_FLAG_KEY },
+        select: { value: true },
+      })
+      .then((row) => assistantKnowledgeEnabledFromValue(row?.value)),
+  ]);
+  return assistantKnowledgeUsable({
+    profilesEnabled: profiles,
+    knowledgeEnabled: knowledge,
+  });
+}
+
+// The admin write paths, mirroring setExternalImportEnabled. Unlike the two
+// Release B flags, these are ordinary rollout switches: §15 gates them on an
+// activation order, not on the §12.4 human eval procedure, so there is nothing
+// a screen could skip past. Separate setters rather than one, because §15
+// enables them separately and in order.
+export async function setAssistantProfilesEnabled(enabled: boolean) {
+  await prisma.appSetting.upsert({
+    where: { key: ASSISTANT_PROFILES_FLAG_KEY },
+    update: { value: enabled ? "true" : "false" },
+    create: {
+      key: ASSISTANT_PROFILES_FLAG_KEY,
+      value: enabled ? "true" : "false",
+    },
+  });
+}
+
+export async function setAssistantKnowledgeEnabled(enabled: boolean) {
+  await prisma.appSetting.upsert({
+    where: { key: ASSISTANT_KNOWLEDGE_FLAG_KEY },
+    update: { value: enabled ? "true" : "false" },
+    create: {
+      key: ASSISTANT_KNOWLEDGE_FLAG_KEY,
+      value: enabled ? "true" : "false",
+    },
+  });
+}
+
+export class AssistantProfilesDisabledError extends Error {
+  constructor() {
+    super("Assistant profiles are not enabled.");
+    this.name = "AssistantProfilesDisabledError";
+  }
+}
+
+export async function assertAssistantProfilesEnabled() {
+  if (!(await isAssistantProfilesEnabled())) {
+    throw new AssistantProfilesDisabledError();
   }
 }
 

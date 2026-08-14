@@ -49,6 +49,8 @@ import {
   imageDeliveryMimeType,
   IMAGE_MODEL_REGISTRY,
 } from "../lib/imageModelRegistry.ts";
+import { writeFileSync } from "node:fs";
+
 import {
   redactGoogleImageRequestBody,
   redactGoogleImageResponseBody,
@@ -118,6 +120,7 @@ if (flag("help") || args.length === 0) {
       "  --thinking=<level>      low|medium|high, omitted unless given",
       "  --prompt=<text>         one custom prompt instead of the built-in set",
       "  --json                  machine-readable output for the evidence file",
+      "  --out=<path>            write the evidence JSON here after every sample",
       "  --i-accept-the-cost     required; without it nothing is sent",
       "",
       "PAID IMAGES = --prompts x --repeats. Each one is a real generation on a",
@@ -199,6 +202,20 @@ const prompts = customPrompt
   ? [customPrompt]
   : BUILT_IN_PROMPTS.slice(0, promptCount);
 
+/**
+ * Where to write the evidence, if anywhere.
+ *
+ * Strongly preferred over a shell redirection. `>` means the JSON only exists
+ * once the process has printed and exited cleanly, and it means the shell
+ * chooses the encoding -- Windows PowerShell 5.1 writes UTF-16LE, which no
+ * JSON reader accepts. This writes UTF-8 from inside the process, as each
+ * sample lands.
+ */
+const outPath = value("out");
+
+/** Stamped once, so a file rewritten per sample keeps naming the same run. */
+const startedRunAt = new Date().toISOString();
+
 const apiKey =
   process.env.GOOGLE_GENERATIVE_AI_API_KEY?.trim() ||
   process.env.GEMINI_API_KEY?.trim();
@@ -270,6 +287,91 @@ const sha256Prefix = (text) =>
   createHash("sha256").update(text).digest("hex").slice(0, 16);
 const promptHashes = prompts.map((text) => sha256Prefix(text));
 
+/**
+ * The report, from whatever has been measured so far.
+ *
+ * A function rather than a value built at the end, because the end is not
+ * guaranteed. Every sample in here was paid for, and a process that dies after
+ * the last request but before printing loses them all -- which is exactly what
+ * happened on Windows, where Node aborted in libuv during teardown
+ * (`uv_async_send` on a closing handle) after the work was done.
+ *
+ * `runComplete` is the fail-closed part. An interrupted run states no verdict
+ * at all: a file left behind by a crash must not read like a conclusion, and
+ * `consistent_with_limit_bounding_thinking` computed over half the planned
+ * samples would read exactly like one.
+ */
+function buildReport(runComplete) {
+  // Evidence is usage, not imagery: a sample that reported what it billed
+  // counts whether or not it also delivered a finished image.
+  const measured = samples.filter((sample) => sample.measured);
+  const exceeded = measured.filter((sample) => !sample.withinLimit);
+  // "Bit" = a sample that got close enough to the ceiling that staying under
+  // it is evidence of a limit rather than of modest usage. 90% is a judgement
+  // call and is stated so the reader can disagree with it. A response that
+  // stopped without finishing its image is the same evidence arriving the
+  // other way.
+  const bit = measured.filter(
+    (sample) =>
+      sample.billableOutputTokens >= limit * 0.9 ||
+      sample.outcome === "measured_without_image"
+  );
+  const promptsMeasured = new Set(measured.map((sample) => sample.promptIndex));
+
+  const verdict = (() => {
+    if (!runComplete) return "run_incomplete";
+    if (measured.length === 0) return "inconclusive_no_samples";
+    if (exceeded.length > 0) return "limit_does_not_bound_thinking";
+    if (bit.length === 0) return "inconclusive_limit_never_bound";
+    // Policy §12 asks for several complex prompts. One prompt's samples can
+    // support the other conclusions -- a counterexample is a counterexample --
+    // but they cannot support the affirmative one on their own.
+    if (promptsMeasured.size < 2) return "consistent_but_single_prompt";
+    return "consistent_with_limit_bounding_thinking";
+  })();
+
+  return {
+    measuredAt: startedRunAt,
+    runComplete,
+    modelId: model.id,
+    apiModelId: model.apiModelId,
+    cardOutputLimit: model.maxOutputTokens ?? null,
+    requestedMaxOutputTokens: limit,
+    thinkingLevel: thinkingLevel ?? model.thinkingLevel ?? null,
+    promptSha256Prefixes: promptHashes,
+    promptSource: customPrompt ? "custom" : "built_in",
+    // The bodies as sent, one per prompt, with the prompt itself digested
+    // (policy §10). Kept rather than reconstructed: a report that re-derived
+    // its own request from its own fields would be evidence of nothing.
+    requestBodies: bodies.map((body) =>
+      redactGoogleImageRequestBody(body, sha256Prefix)
+    ),
+    repeats,
+    plannedCalls,
+    sentCalls: samples.length,
+    stoppedEarly: stopReason,
+    samples,
+    verdict,
+  };
+}
+
+/**
+ * Writes the evidence file, if one was asked for.
+ *
+ * Called after every sample rather than once at the end. Rewriting a small
+ * file a dozen times costs nothing; losing a paid image generation to a crash
+ * costs an image generation, and the sample most likely to be lost is the last
+ * one -- which in this measurement is the most informative, because the run
+ * stops on the first counterexample.
+ *
+ * The redaction pass is the same one the printed output gets. A file is worse
+ * than a paste for this: it sits on disk until someone attaches it somewhere.
+ */
+function writeEvidence(report) {
+  if (!outPath) return;
+  writeFileSync(outPath, `${redact(JSON.stringify(report, null, 2))}\n`, "utf8");
+}
+
 const samples = [];
 // Set once a further paid call would buy nothing: either the question is
 // already answered (a counterexample settles it -- one sample over the limit
@@ -277,6 +379,24 @@ const samples = [];
 // more true) or the responses stopped being readable at all, in which case
 // every number after it is suspect anyway.
 let stopReason = null;
+
+// Written before the first request so an unwritable path fails here rather
+// than after the money is spent. A run that cannot record its evidence should
+// not buy any.
+try {
+  writeEvidence(buildReport(false));
+} catch (error) {
+  console.error(
+    [
+      `--out cannot be written: ${outPath}`,
+      redact(error instanceof Error ? error.message : String(error)),
+      "",
+      "Checked before the first request, because a run that cannot record its",
+      "evidence should not buy any. Nothing was sent.",
+    ].join("\n")
+  );
+  process.exit(1);
+}
 
 outer: for (let round = 0; round < repeats; round += 1) {
   for (let promptIndex = 0; promptIndex < prompts.length; promptIndex += 1) {
@@ -302,6 +422,7 @@ outer: for (let round = 0; round < repeats; round += 1) {
         detail: redact(error instanceof Error ? error.message : String(error)),
       });
       stopReason = "request_failed";
+      writeEvidence(buildReport(false));
       break outer;
     }
 
@@ -316,6 +437,7 @@ outer: for (let round = 0; round < repeats; round += 1) {
         detail: redact(text).slice(0, 300),
       });
       stopReason = "http_error";
+      writeEvidence(buildReport(false));
       break outer;
     }
 
@@ -325,6 +447,7 @@ outer: for (let round = 0; round < repeats; round += 1) {
     } catch {
       samples.push({ index, promptIndex, startedAt, outcome: "unparseable_body" });
       stopReason = "unparseable_body";
+      writeEvidence(buildReport(false));
       break outer;
     }
 
@@ -347,6 +470,7 @@ outer: for (let round = 0; round < repeats; round += 1) {
         topLevelKeys: Object.keys(payload ?? {}),
       });
       stopReason = "unreadable_payload";
+      writeEvidence(buildReport(false));
       break outer;
     }
 
@@ -391,63 +515,21 @@ outer: for (let round = 0; round < repeats; round += 1) {
 
     if (!measured) {
       stopReason = "no_usage_reported";
+      writeEvidence(buildReport(false));
       break outer;
     }
     if (billable > limit) {
       stopReason = "counterexample_found";
+      writeEvidence(buildReport(false));
       break outer;
     }
+    writeEvidence(buildReport(false));
   }
 }
 
-// Evidence is usage, not imagery: a sample that reported what it billed counts
-// whether or not it also delivered a finished image.
-const measured = samples.filter((sample) => sample.measured);
-const exceeded = measured.filter((sample) => !sample.withinLimit);
-// "Bit" = a sample that got close enough to the ceiling that staying under it
-// is evidence of a limit rather than of modest usage. 90% is a judgement call
-// and is stated so the reader can disagree with it. A response that stopped
-// without finishing its image is the same evidence arriving the other way.
-const bit = measured.filter(
-  (sample) =>
-    sample.billableOutputTokens >= limit * 0.9 ||
-    sample.outcome === "measured_without_image"
-);
-const promptsMeasured = new Set(measured.map((sample) => sample.promptIndex));
-
-const verdict = (() => {
-  if (measured.length === 0) return "inconclusive_no_samples";
-  if (exceeded.length > 0) return "limit_does_not_bound_thinking";
-  if (bit.length === 0) return "inconclusive_limit_never_bound";
-  // Policy §12 asks for several complex prompts. One prompt's samples can
-  // support the other conclusions -- a counterexample is a counterexample --
-  // but they cannot support the affirmative one on their own.
-  if (promptsMeasured.size < 2) return "consistent_but_single_prompt";
-  return "consistent_with_limit_bounding_thinking";
-})();
-
-const report = {
-  measuredAt: new Date().toISOString(),
-  modelId: model.id,
-  apiModelId: model.apiModelId,
-  cardOutputLimit: model.maxOutputTokens ?? null,
-  requestedMaxOutputTokens: limit,
-  thinkingLevel: thinkingLevel ?? model.thinkingLevel ?? null,
-  promptSha256Prefixes: promptHashes,
-  promptSource: customPrompt ? "custom" : "built_in",
-  // The bodies as sent, one per prompt, with the prompt itself digested
-  // (policy §10). Kept rather than reconstructed: a report that re-derived its
-  // own request from its own fields would be evidence of nothing.
-  requestBodies: bodies.map((body) =>
-    redactGoogleImageRequestBody(body, sha256Prefix)
-  ),
-  repeats,
-  plannedCalls,
-  sentCalls: samples.length,
-  stoppedEarly: stopReason,
-  samples,
-  verdict,
-};
+const report = buildReport(true);
+const verdict = report.verdict;
+writeEvidence(report);
 
 if (flag("json")) {
   // Redacted as one string rather than field by field. Individual `detail`

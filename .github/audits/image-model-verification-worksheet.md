@@ -469,6 +469,58 @@ MIME을 그대로 기록하는 규칙은 그대로입니다 — 요청은 요청
 치환하므로 스크립트 출력에는 노출되지 않았으나, 패턴은 두 형식 모두 처리하도록
 보완했습니다).
 
+---
+
+## H. 2026-08-13 두 번째 실측 시도 — 같은 층위의 결함 하나 더 (과금 $0)
+
+`gemini-3.1-flash-lite-image`, `--limit=512 --prompts=2 --repeats=2
+--thinking=high`. **첫 요청이 HTTP 400, 이미지 생성 없음 — 과금되지 않았습니다.**
+스크립트가 첫 판독 불능에서 멈춰 나머지 3회는 보내지 않았습니다.
+
+```
+HTTP 400 invalid_request
+{"error":{"message":"Image delivery mode is not supported.","code":"invalid_request"}}
+```
+
+### 결함
+
+`buildGoogleImageRequest`가 `response_format.delivery: "inline"`을 보내고
+있었습니다. **§F-2의 스펙 표에 없는 필드입니다.**
+
+붙어 있던 주석은 제품 판단이었습니다 — "fetchable reference 대신 inline bytes를
+받는다. 원본은 서버에 저장되고, 두 번째 fetch는 이미 과금된 생성이 사후에
+실패할 수 있는 경로가 하나 더 늘어나는 것이다." 판단 자체는 옳습니다. 다만 그
+판단을 **API가 받는 파라미터로 표현할 수 있다는 것이 확인된 적이 없습니다.**
+
+그리고 그 선호는 이미 충족돼 있었습니다. Interactions API는 `content.data`에
+base64를 실어 보내고 `parseGoogleImageResponse`가 그것을 읽습니다. 즉 아무것도
+지정하지 않아도 inline입니다. **없어도 되는 필드를 말한 대가로 모든 Google
+요청이 거절됐습니다.**
+
+### 2026-08-06과 같은 부류입니다
+
+| | 2026-08-06 | 2026-08-13 |
+|---|---|---|
+| 필드 | `response_format.mime_type` | `response_format.delivery` |
+| 값 | `image/png` | `inline` |
+| 출처 | `outputMimeTypes[0]`을 요청값으로 오해 | 근거 문서 없이 추가 |
+| 결과 | 전 요청 400 | 전 요청 400 |
+
+두 번 다 **그럴듯한 필드, 문서 근거 없음, 알아챌 장치 없음**입니다.
+
+### 이번에 넣은 장치
+
+요청 전체 모양을 pin하는 unit test는 이미 있었지만, 그것은 **builder가 만드는
+것을 그대로 고정**하므로 근거 없이 추가된 필드도 함께 고정했습니다. 그래서
+`response_format`의 **key 집합을 §F-2 표와 맞추는** assertion을 따로 뒀습니다.
+key를 늘리려면 표를 먼저 고쳐야 하고, 표를 고치려면 reference의 어디에 그렇게
+적혀 있는지를 적어야 합니다 — 두 번 다 건너뛴 단계가 그것입니다.
+
+### 남은 것
+
+`--limit=512`에서의 측정은 아직 시작되지 않았습니다. 승인된 $10 예산은 그대로
+전액 남아 있습니다.
+
 ### 다음
 
 키 재발급 후 같은 3단계(`4096` / `2048` / `1024`)를 재실행합니다. 이번 시도는

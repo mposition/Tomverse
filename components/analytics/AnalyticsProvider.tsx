@@ -20,6 +20,7 @@ import {
   type ResolvedAnalyticsConsentPolicy,
 } from "@/lib/analyticsConsentPolicy";
 import { ANALYTICS_PREFERENCES_OPEN_EVENT } from "@/lib/analyticsPreferencesEvents";
+import { discardResponseBody } from "@/lib/discardResponseBody";
 
 type ConsentState = "loading" | "unset" | "accepted" | "declined";
 
@@ -353,7 +354,10 @@ export function AnalyticsProvider({
       signal: controller.signal,
     })
       .then(async (response) => {
-        if (!response.ok) throw new Error("Analytics consent policy unavailable");
+        if (!response.ok) {
+          await discardResponseBody(response);
+          throw new Error("Analytics consent policy unavailable");
+        }
         const body = (await response.json()) as Partial<ResolvedAnalyticsConsentPolicy>;
         if (
           (body.mode !== "opt_in" && body.mode !== "notice_opt_out") ||

@@ -13,6 +13,7 @@ import {
     SourceDeletionNotice,
     type SourceDeletionImpactView,
 } from "@/components/imports/SourceDeletionNotice";
+import { discardResponseBody } from "@/lib/discardResponseBody";
 
 /**
  * Account-private read-only viewer for one imported conversation (policy
@@ -106,11 +107,16 @@ export function ExternalConversationViewer({
                     `/api/external-conversations/${encodeURIComponent(conversationId)}?offset=${offset}&limit=${PAGE_SIZE}${offset === 0 ? "&include=memoryImpact" : ""}`,
                     { cache: "no-store" }
                 );
-                if (response.status === 401) return { kind: "unauthenticated" };
-                if (response.status === 403) return { kind: "disabled" };
-                if (response.status === 404) return { kind: "not_found" };
-                if (response.status === 423) return { kind: "locked" };
-                if (!response.ok) return { kind: "error" };
+                if (!response.ok) {
+                    // Every branch below leaves without parsing, so the body is
+                    // consumed once here rather than in five places.
+                    await discardResponseBody(response);
+                    if (response.status === 401) return { kind: "unauthenticated" };
+                    if (response.status === 403) return { kind: "disabled" };
+                    if (response.status === 404) return { kind: "not_found" };
+                    if (response.status === 423) return { kind: "locked" };
+                    return { kind: "error" };
+                }
                 const conversation = (await response.json()) as ViewerConversation & {
                     memoryImpact?: SourceDeletionImpactView;
                 };
@@ -195,6 +201,7 @@ export function ExternalConversationViewer({
                 }`,
                 { method: "DELETE" }
             );
+            await discardResponseBody(response);
             if (response.ok) {
                 router.push("/settings/imports");
                 return;

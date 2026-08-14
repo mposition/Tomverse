@@ -3,6 +3,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Loader2, Lock, LockOpen } from "lucide-react";
 import { useLanguage } from "@/components/LanguageProvider";
 import { interpolate } from "@/components/imports/importFormatting";
+import { discardResponseBody } from "@/lib/discardResponseBody";
 
 /**
  * The snapshot lock's two faces (policy §7, §7.1).
@@ -91,6 +92,7 @@ export function SnapshotUnlockGate({
                 headers: { "content-type": "application/json" },
                 body: JSON.stringify({ password }),
             });
+            await discardResponseBody(response);
             if (response.ok) {
                 setPassword("");
                 onUnlocked();
@@ -188,7 +190,9 @@ export function SnapshotLockPanel({
         let cancelled = false;
         queueMicrotask(() => {
             void fetch(lockUrl(conversationId), { cache: "no-store" })
-                .then((response) => (response.ok ? response.json() : null))
+                .then((response) =>
+        response.ok ? response.json() : discardResponseBody(response).then(() => null)
+      )
                 .then((body: { memoryImpact?: SourceLockImpactView } | null) => {
                     if (cancelled || !body?.memoryImpact) return;
                     setImpact(body.memoryImpact);
@@ -216,6 +220,7 @@ export function SnapshotLockPanel({
                         ...(locked ? { currentPassword } : {}),
                     }),
                 });
+                await discardResponseBody(response);
                 if (response.ok) {
                     setImpact(null);
                     reset();
