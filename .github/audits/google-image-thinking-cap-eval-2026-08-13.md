@@ -3,8 +3,31 @@
 - 대상 정책: `docs/policy/image-generation.md` §12(가격 검증)·§15(eval 예산)
 - 실행 도구: `scripts/measure-google-image-thinking-cap.mjs`
 - 작성일: 2026-08-13
-- 상태: **1단계 완료(2026-08-14), 1b단계 대기.** 실제 사용 예산 약 3,300µUSD
-  (승인 $10의 0.03%).
+- 상태: **종결(2026-08-14). 판정은 반증** — `max_output_tokens`는 과금 대상
+  합계를 bound하지 않는다. 결론과 근거는
+  `.github/audits/image-model-verification-worksheet.md` §I, 재계산 가능한 증거는
+  `.github/audits/evidence/google-image-thinking-cap/`
+  (`npm run check:image-eval-evidence`).
+
+## 예산 종결
+
+| | |
+|---|---|
+| 승인 | $10 (2026-08-12, 제품 책임자) |
+| 실사용 | 약 **262,000~287,000µUSD** (2.6~2.9%) — 표본 18건, 상한 4종 |
+| 미집행 | 약 **$9.71** |
+| 상태 | **종료.** 미집행분은 이월되지 않는다. |
+
+**이 승인으로 더 실행하지 않는다.** 승인은 "thinking 상한이 성립하는지 확인한다"는
+질문에 붙은 것이고 그 질문은 답이 나왔다. 남은 금액은 다른 질문에 쓸 수 있는
+잔액이 아니라, 목적이 끝난 승인의 미집행분이다. 새 유료 실행에는 새 승인이
+필요하다.
+
+실사용액이 범위인 이유: 상한 2,048 첫 표본의 891 출력 토큰에 modality 내역이
+없어 이미지 단가($30/1M)로 볼지 텍스트 단가($1.50/1M)로 볼지 확정할 수 없다.
+양끝을 모두 적었다.
+
+**미집행 예산이 남았다는 것이 재실행 사유가 아니다.**
 
 ## 0. 승인된 것과 승인되지 않은 것
 
@@ -116,7 +139,7 @@ bash에서는 같은 명령을 `\`로 이어 쓰고 `$EVIDENCE_DIR`을 쓴다. `
 `Remove-Item Env:\GEMINI_API_KEY`로 지운다.
 
 **종료 코드가 1이어도 파일을 버리지 않는다.** 스크립트는
-`limit_does_not_bound_thinking`에서 1로 끝나는데, 그것은 실패가 아니라 판정이고
+`limit_does_not_bound_billable_output`에서 1로 끝나는데, 그것은 실패가 아니라 판정이고
 그 JSON이 이 측정에서 가장 값진 증거다.
 
 **`runComplete`를 먼저 본다.** 실행이 중간에 죽으면 파일은 남지만
@@ -139,17 +162,18 @@ node --conditions=react-server --import tsx \
 
 4회, 계획 원가 178,976µ ≈ $0.18.
 
-- `limit_does_not_bound_thinking` → **여기서 끝난다.** 반증 하나면 질문이
+- `limit_does_not_bound_billable_output` → **여기서 끝난다.** 반증 하나면 질문이
   닫히고, 세 모델 모두 `worst_case_cost_unbounded`를 유지한다. 2단계를 실행하지
   않는다.
 - `inconclusive_limit_never_bound` → 상한을 더 낮춰 재실행(`--limit=256`).
-- `consistent_with_limit_bounding_thinking` → **1b단계로.** 아래 결과가 그
+- `consistent_with_limit_bounding_billable_output` → **1b단계로.** 아래 결과가 그
   이유다 — 2단계로 바로 가지 않는다.
 
 #### 1단계 결과 (2026-08-14, 실제 원가 약 3,300µUSD)
 
 `--limit=512 --prompts=2 --repeats=2 --thinking=high`, 4회 전부 전송,
-`stoppedEarly: null`, `verdict: consistent_with_limit_bounding_thinking`.
+`stoppedEarly: null`, `verdict: consistent_with_limit_bounding_thinking`
+(당시 이름. 2026-08-14에 `..._billable_output`으로 개명 — §개명 참조).
 
 | # | prompt | input | output | thinking | 합계 vs 512 | status | 이미지 |
 |---:|---:|---:|---:|---:|---|---|---:|
@@ -194,12 +218,41 @@ parser 하나로만 읽었다면 네 건이 모두 "판독 불능"으로 기록�
 ```
 
 - thinking ≈ 253 → 숫자가 상한을 따라온다. (A)이며 긍정 근거가 성립한다.
-- thinking = 509 → 256을 넘겼다. **반증이다.** `limit_does_not_bound_thinking`
+- thinking = 509 → 256을 넘겼다. **반증이다.** `limit_does_not_bound_billable_output`
   으로 질문이 닫히고 세 모델 모두 `worst_case_cost_unbounded`를 유지한다.
 
 4회, 이미지가 나오지 않을 것이므로 실제 원가는 1단계보다 낮다(약 1,600µ).
 **2단계보다 먼저 실행한다.** 2단계(4,096)는 상한 근처에 가지 않을 것이라
 `inconclusive_limit_never_bound`가 나오기 쉽고, 두 가설을 구별하지 못한다.
+
+#### 1b단계 결과 (2026-08-14, 실제 원가 약 2,600µUSD) — (A) 확정
+
+`--limit=256`, 6회 전부 전송(아래 참조), 전 표본 thinking **253**, output 0,
+이미지 0, `status: completed`.
+
+| 보낸 상한 | thinking | 차이 | 표본 |
+|---:|---:|---:|---:|
+| 512 | 509 | **3** | 4 |
+| 256 | 253 | **3** | 6 |
+
+**숫자가 상한을 정확히 따라온다.** 두 상한, 각 두 프롬프트, 표본 10건, 분산 0,
+일정한 3토큰 유보. 모델 내부 상한이라면 256에서도 509가 나왔어야 한다. 가설
+(B)는 반증됐고 `max_output_tokens`가 과금 대상 thinking을 bound한다.
+
+이로써 §12의 절차 요건 셋이 충족된다 — 복잡한 프롬프트 2종, **둘 이상의
+상한값**, 그리고 낮은 상한에서 제한이 실제로 물리는 장면(thinking이 예산을
+전부 소진하고 아무것도 산출하지 않음).
+
+**남은 것은 output이 같은 예산에서 나오는지다.** 10건 모두 `output_tokens: 0`
+이므로 지금까지 확인된 것은 *thinking 단독*의 천장이다. output이 별도 예산이면
+thinking이 상한에 걸리고 그 위에 이미지 토큰이 더해져 최악이 상한의 두 배 가까이
+된다. 2단계는 **thinking > 0이면서 output > 0인 표본에서 그 합이 4,096 이하인지**
+를 보러 간다. 그 표본 없이는 A-2 유도를 근거 있는 상한이라고 부를 수 없다.
+
+**6회가 나간 이유(4회 계획).** 명령에 `-repeats=2`로 하이픈이 하나 들어갔고,
+스크립트가 모르는 인자를 조용히 무시해 `repeats`가 기본값 3으로 떨어졌다.
+지금은 모르는 인자를 거부한다 — 아무 일도 하지 않는 flag가 유료 요청 수를 바꾸는
+것은 청구서로만 확인되는 오류다.
 
 ### 2단계 — Flash Lite, 카드 한도에서의 실제 최악
 
@@ -224,6 +277,90 @@ parser 하나로만 읽었다면 네 건이 모두 "판독 불능"으로 기록�
 실행도 그 조건을 혼자 충족할 수 없다. 최종 판단은 증거 파일들을 놓고 사람이
 조립한다.
 
+#### 2단계 결과 (2026-08-14, 실제 원가 약 217,500µUSD) — 이미지 6장, 판정 미결
+
+`--limit=4096`, 6회 전부 전송, 전 표본 `outcome: ok`, 이미지 1장씩,
+`image/jpeg`. `verdict: inconclusive_limit_never_bound`(예상대로).
+
+| # | prompt | output | thinking | 합계 vs 4,096 | model_output step |
+|---:|---:|---:|---:|---:|---|
+| 0 | 0 | 2,209 | 987 | 3,196 (78%) | text + image |
+| 1 | 1 | 2,189 | 986 | 3,175 (78%) | text + image |
+| 2 | 0 | 1,560 | 874 | 2,434 (59%) | image |
+| 3 | 1 | 1,638 | 1,096 | 2,734 (67%) | image |
+| 4 | 0 | 2,162 | 1,036 | 3,198 (78%) | text + image |
+| 5 | 1 | 1,634 | 948 | 2,582 (63%) | image |
+
+**검증된 이미지 가격의 구조가 드러났다.** `output_tokens_by_modality`가 매번
+`image: 1120` 토큰이고, 검증된 1K 가격 $0.0336을 1,120으로 나누면 정확히
+**$30.00/1M**이다. 이미지는 별도 항목이 아니라 **비싼 단가의 출력 토큰**이며,
+`total_output_tokens`가 그것을 포함한다. 우리 표의 33,600µ가 이렇게 구성된다.
+
+이 구조로 실측 원가를 계산하면(이미지 1,120 × $30/1M + 나머지 출력·thinking ×
+$1.50/1M) 6회 합계 **217,498µUSD** — 계획 268,464µ의 81%다.
+
+**모델이 시키지 않은 해설문을 낸다.** 절반의 표본에 `model_output` step이 둘
+있고 하나는 그림에 대한 문단이다(예: "라벨이 중복돼 의도보다 조밀합니다").
+그 문단은 출력 토큰으로 과금되고 우리는 버린다 — 표본당 약 1,000토큰,
+1,500µUSD쯤이다. `parseGoogleImageResponse`는 모든 `model_output` step의
+content를 훑어 이미지만 고르므로 정상 동작하며, "첫/마지막 model_output"을
+집었다면 산문을 골랐을 것이다. 이 모양을 unit test로 고정했다.
+
+**thought step의 `signature`가 표본당 2~3MB다.** 증거 redaction의 길이 규칙이
+없었다면 이 파일 하나가 수십 MB의 base64가 됐을 것이다.
+
+### 3단계 — 상한이 *합계*를 덮는지 (필수, 2단계보다 중요)
+
+**아직 증명되지 않은 것이 남아 있다.** 지금까지의 사실은 두 가지다.
+
+- 512·256에서 **thinking 단독**이 상한 − 3에서 멈췄다(output 0).
+- 4,096에서 output + thinking이 최대 3,198로 상한의 78%에 그쳤다.
+
+어느 표본도 **output이 있는 상태로 천장에 닿지 않았다.** 그래서 상한이
+`output + thinking` 합계를 덮는지, 아니면 thinking만 덮고 이미지 토큰이 그 위에
+얹히는지 구별되지 않는다. 후자라면 최악은 상한의 두 배 가까이가 되고 A-2는
+상한이 아니다.
+
+2,048로 가르면 된다. 2단계에서 관측된 합계(2,434~3,198)가 전부 2,048을 넘으므로,
+같은 생성이 2,048 아래로 눌리는지 아닌지가 그대로 답이 된다.
+
+```
+  --model=gemini-3.1-flash-lite-image \
+  --limit=2048 --prompts=2 --repeats=2
+```
+
+- 합계 ≈ 2,045 → **상한이 합계를 덮는다.** A-2가 근거 있는 상한이 되고, 실측
+  최악은 이미지 1,120 + 나머지 2,976 = **38,064µUSD**(최소 43크레딧)이다.
+- 합계 > 2,048 → **반증.** `limit_does_not_bound_billable_output`으로 질문이 닫히고
+  세 모델 모두 `worst_case_cost_unbounded`를 유지한다.
+
+4회. 이미지가 나오면 약 145,000µ, 눌려서 안 나오면 그보다 훨씬 싸다.
+
+#### 3단계 결과 (2026-08-14) — **반증. 여기서 끝난다**
+
+2회 전송 후 `stoppedEarly: counterexample_found`.
+
+| # | output | thinking | 합계 vs 2,048 | status | 이미지 |
+|---:|---:|---:|---:|---|---:|
+| 0 | 891 | 981 | 1,872 | `incomplete` | 0 |
+| 1 | **1,602** | **931** | **2,533 (+485 초과)** | `completed` | **1** |
+
+표본 1이 상한을 485토큰 넘겼고 잘리지도 실패하지도 않았다 — 완성된 이미지를
+받고 초과분까지 청구됐다. `max_output_tokens`는 thinking을 단독으로는 bound
+하지만 우리가 과금당하는 `output + thinking`을 bound하지 않는다.
+
+세 Google 이미지 모델은 `worst_case_cost_unbounded`를 유지하고
+`thinkingCapMicroUsd`는 `null`을 유지한다. **허위 상한을 넣지 않는다.**
+
+4단계(Flash Image)는 실행하지 않는다. 이는 "Flash Image도 반드시 같은 방식으로
+초과한다"는 과학적 결론이 **아니라**, 활성화 계획이 없어진 상황에서 긍정
+가능성을 추가 비용을 들여 조사하지 않겠다는 **운영 결정**이다. 측정은 Flash
+Lite에서만 했고, 나머지 두 모델은 "일반 근거가 사라졌고 모델별 긍정 증거도
+없음"을 이유로 보류를 유지한다.
+
+전체 결론과 부수 관측은 `.github/audits/image-model-verification-worksheet.md`
+§I에 있다.
+
 ### 3단계 — Flash Image, 상한이 물리는 지점
 
 1·2단계가 긍정일 때만 실행한다.
@@ -235,7 +372,11 @@ parser 하나로만 읽었다면 네 건이 모두 "판독 불능"으로 기록�
 
 4회, 계획 원가 681,216µ ≈ $0.68.
 
-### 4단계 — Flash Image, 카드 한도
+### 4단계 — Flash Image, 카드 한도 (실행하지 않음)
+
+3단계의 반증으로 취소됐다. 같은 요청 파라미터에 대한 같은 질문이고, 한 모델에서
+bound하지 않는 것이 다른 모델에서 bound한다고 볼 근거가 없다. 필요해지면 그때
+다시 계획한다.
 
 ```
   --model=gemini-3.1-flash-image \
@@ -346,9 +487,9 @@ if ($env:GEMINI_API_KEY) {
 
 ## 6. 판정 이후
 
-- `limit_does_not_bound_thinking` → 세 Google 모델 모두 `worst_case_cost_unbounded`
+- `limit_does_not_bound_billable_output` → 세 Google 모델 모두 `worst_case_cost_unbounded`
   유지. `thinkingCapMicroUsd`는 `null`로 둔다. **허위 상한을 넣지 않는다.**
-- `consistent_with_limit_bounding_thinking` (두 모델 모두, 두 상한 이상에서) →
+- `consistent_with_limit_bounding_billable_output` (두 모델 모두, 두 상한 이상에서) →
   §12의 상한 확인이 충족된다. 그 다음은 이 문서의 범위 밖인 별개 결정 두 개다:
   판매 크레딧 승인, 그리고 provider 노출 한도 승인 후 활성화.
 - 그 외 판정은 전부 미결이다. 미결을 긍정으로 반올림하지 않는다.

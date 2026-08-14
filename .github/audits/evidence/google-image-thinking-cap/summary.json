@@ -1,0 +1,313 @@
+{
+  "measurement": "google-image-thinking-cap",
+  "modelId": "gemini-3.1-flash-lite-image",
+  "apiModelId": "gemini-3.1-flash-lite-image",
+  "cardOutputLimit": 4096,
+  "thinkingLevel": "high",
+  "promptSha256Prefixes": [
+    "7a69077a9536e2f9",
+    "19de63828bbbc350"
+  ],
+  "promptSource": "built_in",
+  "requestShape": {
+    "model": "gemini-3.1-flash-lite-image",
+    "response_format": {
+      "type": "image",
+      "mime_type": "image/jpeg",
+      "aspect_ratio": "1:1",
+      "image_size": "1K"
+    },
+    "generation_config": {
+      "thinking_level": "high"
+    }
+  },
+  "provenance": "transcribed_from_run_stdout",
+  "verdictNamesRenamedOn": "2026-08-14",
+  "runs": [
+    {
+      "requestedMaxOutputTokens": 512,
+      "measuredAt": "2026-08-14T01:42:33.277Z",
+      "repeats": 2,
+      "plannedCalls": 4,
+      "sentCalls": 4,
+      "stoppedEarly": null,
+      "verdictAsEmitted": "consistent_with_limit_bounding_thinking",
+      "samples": [
+        {
+          "index": 0,
+          "promptIndex": 0,
+          "startedAt": "2026-08-14T01:42:33.278Z",
+          "responseId": "v1_ChdpM0otYXNtSEp1aWlxZmtQd3JDdHVRMBIXaTNKLWFzbUhKdWlpcWZrUHdyQ3R1UTA",
+          "inputTokens": 62,
+          "outputTokens": 0,
+          "thinkingTokens": 509,
+          "billableOutputTokens": 509,
+          "reportedTotalTokens": 571,
+          "finishReason": "completed",
+          "modelOutputImageCount": 0
+        },
+        {
+          "index": 1,
+          "promptIndex": 1,
+          "startedAt": "2026-08-14T01:42:38.137Z",
+          "responseId": "v1_ChdrSEotYW8tTURLdmRnOFVQeVpmQnNBTRIXa0hKLWFvLU1ES3ZkZzhVUHlaZkJzQU0",
+          "inputTokens": 56,
+          "outputTokens": 0,
+          "thinkingTokens": 509,
+          "billableOutputTokens": 509,
+          "reportedTotalTokens": 565,
+          "finishReason": "completed",
+          "modelOutputImageCount": 0
+        },
+        {
+          "index": 2,
+          "promptIndex": 0,
+          "startedAt": "2026-08-14T01:42:42.694Z",
+          "responseId": "v1_ChdsSEotYXBETk44cjlnOFVQOG8zWDJBOBIXbEhKLWFwRE5OOHI5ZzhVUDhvM1gyQTg",
+          "inputTokens": 62,
+          "outputTokens": 0,
+          "thinkingTokens": 509,
+          "billableOutputTokens": 509,
+          "reportedTotalTokens": 571,
+          "finishReason": "completed",
+          "modelOutputImageCount": 0
+        },
+        {
+          "index": 3,
+          "promptIndex": 1,
+          "startedAt": "2026-08-14T01:42:47.768Z",
+          "responseId": "v1_ChZtWEotYXZ6OUk2Q0U0LUVQaktyallBEhZtWEotYXZ6OUk2Q0U0LUVQaktyallB",
+          "inputTokens": 56,
+          "outputTokens": 0,
+          "thinkingTokens": 509,
+          "billableOutputTokens": 509,
+          "reportedTotalTokens": 565,
+          "finishReason": "completed",
+          "modelOutputImageCount": 0
+        }
+      ]
+    },
+    {
+      "requestedMaxOutputTokens": 256,
+      "measuredAt": "2026-08-14T02:08:31.472Z",
+      "repeats": 3,
+      "plannedCalls": 6,
+      "sentCalls": 6,
+      "stoppedEarly": null,
+      "verdictAsEmitted": "consistent_with_limit_bounding_thinking",
+      "samples": [
+        {
+          "index": 0,
+          "promptIndex": 0,
+          "startedAt": "2026-08-14T02:08:31.474Z",
+          "responseId": "v1_ChdvWGgtYW8tbEZKWFJqdU1QbU5tMHdBRRIXb1hoLWFvLWxGSlhSanVNUG1ObTB3QUU",
+          "inputTokens": 62,
+          "outputTokens": 0,
+          "thinkingTokens": 253,
+          "billableOutputTokens": 253,
+          "reportedTotalTokens": 315,
+          "finishReason": "completed",
+          "modelOutputImageCount": 0
+        },
+        {
+          "index": 1,
+          "promptIndex": 1,
+          "startedAt": "2026-08-14T02:08:36.070Z",
+          "responseId": "v1_ChdwWGgtYXBUOExMLThxZmtQd2R1RG9RSRIXcFhoLWFwVDhMTC04cWZrUHdkdURvUUk",
+          "inputTokens": 56,
+          "outputTokens": 0,
+          "thinkingTokens": 253,
+          "billableOutputTokens": 253,
+          "reportedTotalTokens": 309,
+          "finishReason": "completed",
+          "modelOutputImageCount": 0
+        },
+        {
+          "index": 2,
+          "promptIndex": 0,
+          "startedAt": "2026-08-14T02:08:40.234Z",
+          "responseId": "v1_ChdxbmgtYXBqM0M1VzJnOFVQdDY3cG1RVRIXcW5oLWFwajNDNVcyZzhVUHQ2N3BtUVU",
+          "inputTokens": 62,
+          "outputTokens": 0,
+          "thinkingTokens": 253,
+          "billableOutputTokens": 253,
+          "reportedTotalTokens": 315,
+          "finishReason": "completed",
+          "modelOutputImageCount": 0
+        },
+        {
+          "index": 3,
+          "promptIndex": 1,
+          "startedAt": "2026-08-14T02:08:45.599Z",
+          "responseId": "v1_ChdyM2gtYW91UkY3TEtqdU1QdkxmdmdROBIXcjNoLWFvdVJGN0xLanVNUHZMZnZnUTg",
+          "inputTokens": 56,
+          "outputTokens": 0,
+          "thinkingTokens": 253,
+          "billableOutputTokens": 253,
+          "reportedTotalTokens": 309,
+          "finishReason": "completed",
+          "modelOutputImageCount": 0
+        },
+        {
+          "index": 4,
+          "promptIndex": 0,
+          "startedAt": "2026-08-14T02:08:50.021Z",
+          "responseId": "v1_ChdzM2gtYXNUR0lxMk1qdU1QaExTTnlRURIXczNoLWFzVEdJcTJNanVNUGhMU055UVE",
+          "inputTokens": 62,
+          "outputTokens": 0,
+          "thinkingTokens": 253,
+          "billableOutputTokens": 253,
+          "reportedTotalTokens": 315,
+          "finishReason": "completed",
+          "modelOutputImageCount": 0
+        },
+        {
+          "index": 5,
+          "promptIndex": 1,
+          "startedAt": "2026-08-14T02:08:54.478Z",
+          "responseId": "v1_Chd1SGgtYXBxbERabk5qdU1QNVBPWDhBMBIXdUhoLWFwcWxEWm5OanVNUDVQT1g4QTA",
+          "inputTokens": 56,
+          "outputTokens": 0,
+          "thinkingTokens": 253,
+          "billableOutputTokens": 253,
+          "reportedTotalTokens": 309,
+          "finishReason": "completed",
+          "modelOutputImageCount": 0
+        }
+      ]
+    },
+    {
+      "requestedMaxOutputTokens": 4096,
+      "measuredAt": "2026-08-14T02:20:54.018Z",
+      "repeats": 3,
+      "plannedCalls": 6,
+      "sentCalls": 6,
+      "stoppedEarly": null,
+      "verdictAsEmitted": "inconclusive_limit_never_bound",
+      "samples": [
+        {
+          "index": 0,
+          "promptIndex": 0,
+          "startedAt": "2026-08-14T02:20:54.019Z",
+          "responseId": "v1_ChdtWHQtYXJLREdvZXBqdU1QbnZXanVRURIXbVh0LWFyS0RHb2VwanVNUG52V2p1UVE",
+          "inputTokens": 62,
+          "outputTokens": 2209,
+          "thinkingTokens": 987,
+          "billableOutputTokens": 3196,
+          "reportedTotalTokens": 3258,
+          "finishReason": "completed",
+          "modelOutputImageCount": 1,
+          "imageModalityTokens": 1120
+        },
+        {
+          "index": 1,
+          "promptIndex": 1,
+          "startedAt": "2026-08-14T02:21:18.158Z",
+          "responseId": "v1_ChdySHQtYXMybEI0YlRqdU1QcG9mcGtRNBIXckh0LWFzMmxCNGJUanVNUHBvZnBrUTQ",
+          "inputTokens": 56,
+          "outputTokens": 2189,
+          "thinkingTokens": 986,
+          "billableOutputTokens": 3175,
+          "reportedTotalTokens": 3231,
+          "finishReason": "completed",
+          "modelOutputImageCount": 1,
+          "imageModalityTokens": 1120
+        },
+        {
+          "index": 2,
+          "promptIndex": 0,
+          "startedAt": "2026-08-14T02:21:36.570Z",
+          "responseId": "v1_Chd0M3QtYXBpcENKWFJqdU1QbU5tMHdBRRIXdDN0LWFwaXBDSlhSanVNUG1ObTB3QUU",
+          "inputTokens": 62,
+          "outputTokens": 1560,
+          "thinkingTokens": 874,
+          "billableOutputTokens": 2434,
+          "reportedTotalTokens": 2496,
+          "finishReason": "completed",
+          "modelOutputImageCount": 1,
+          "imageModalityTokens": 1120
+        },
+        {
+          "index": 3,
+          "promptIndex": 1,
+          "startedAt": "2026-08-14T02:21:46.992Z",
+          "responseId": "v1_Chd4SHQtYW9fWkVfWEI0LUVQaEo3Z29RMBIXeEh0LWFvX1pFX1hCNC1FUGhKN2dvUTA",
+          "inputTokens": 56,
+          "outputTokens": 1638,
+          "thinkingTokens": 1096,
+          "billableOutputTokens": 2734,
+          "reportedTotalTokens": 2790,
+          "finishReason": "completed",
+          "modelOutputImageCount": 1,
+          "imageModalityTokens": 1120
+        },
+        {
+          "index": 4,
+          "promptIndex": 0,
+          "startedAt": "2026-08-14T02:22:00.313Z",
+          "responseId": "v1_ChcxWHQtYXR2Y0g3YjZqdU1QemEtQndRMBIXMVh0LWF0dmNIN2I2anVNUHphLUJ3UTA",
+          "inputTokens": 62,
+          "outputTokens": 2162,
+          "thinkingTokens": 1036,
+          "billableOutputTokens": 3198,
+          "reportedTotalTokens": 3260,
+          "finishReason": "completed",
+          "modelOutputImageCount": 1,
+          "imageModalityTokens": 1120
+        },
+        {
+          "index": 5,
+          "promptIndex": 1,
+          "startedAt": "2026-08-14T02:22:18.298Z",
+          "responseId": "v1_Chc0WHQtYXZLUURyenBqdU1QX0ozRGlBOBIXNFh0LWF2S1FEcnpwanVNUF9KM0RpQTg",
+          "inputTokens": 56,
+          "outputTokens": 1634,
+          "thinkingTokens": 948,
+          "billableOutputTokens": 2582,
+          "reportedTotalTokens": 2638,
+          "finishReason": "completed",
+          "modelOutputImageCount": 1,
+          "imageModalityTokens": 1120
+        }
+      ]
+    },
+    {
+      "requestedMaxOutputTokens": 2048,
+      "measuredAt": "2026-08-14T02:30:57.574Z",
+      "repeats": 2,
+      "plannedCalls": 4,
+      "sentCalls": 2,
+      "stoppedEarly": "counterexample_found",
+      "verdictAsEmitted": "limit_does_not_bound_thinking",
+      "samples": [
+        {
+          "index": 0,
+          "promptIndex": 0,
+          "startedAt": "2026-08-14T02:30:57.576Z",
+          "responseId": "v1_Chc2WDEtYXF1akE0SG9qdU1QOU1hc3FBMBIXNlgxLWFxdWpBNEhvanVNUDlNYXNxQTA",
+          "inputTokens": 62,
+          "outputTokens": 891,
+          "thinkingTokens": 981,
+          "billableOutputTokens": 1872,
+          "reportedTotalTokens": 1934,
+          "finishReason": "incomplete",
+          "modelOutputImageCount": 0
+        },
+        {
+          "index": 1,
+          "promptIndex": 1,
+          "startedAt": "2026-08-14T02:31:07.563Z",
+          "responseId": "v1_Chc4WDEtYXBqYkw2Q3NnOFVQek1qZ2lBMBIXOFgxLWFwamJMNkNzZzhVUHpNamdpQTA",
+          "inputTokens": 56,
+          "outputTokens": 1602,
+          "thinkingTokens": 931,
+          "billableOutputTokens": 2533,
+          "reportedTotalTokens": 2589,
+          "finishReason": "completed",
+          "modelOutputImageCount": 1,
+          "imageModalityTokens": 1120
+        }
+      ]
+    }
+  ]
+}
