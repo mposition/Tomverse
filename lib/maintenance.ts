@@ -10,6 +10,7 @@ import { expireCreditLots } from "@/lib/creditLedger";
 import { reconcileExpiredChatCreditReservations } from "@/lib/chatSecurity";
 import { purgeExpiredChatLimitDecisions } from "@/lib/chatLimitDecisions";
 import { purgeExpiredAccountDataExportRequests } from "@/lib/accountDataExportTickets";
+import { compactAgedContextManifests } from "@/lib/routingManifestRetention";
 import { deleteExpiredContextBundleConsumptions } from "@/lib/chatContextBundleService";
 import { dispatchPendingMemoryExtractionRuns } from "@/lib/memoryExtractionWorker";
 import { purgeExpiredTraceErrorEvidence } from "@/lib/traceErrorEvidence";
@@ -594,12 +595,24 @@ export async function cleanupExpiredData() {
     purgeExpiredAccountDataExportRequests(now)
   );
 
+  // MANIFEST-02. Aged manifests keep the hash an audit verifies with and lose
+  // the per-part detail that describes the request. Deletion is not this
+  // step's job and never waits for it: a manifest cascades away with the
+  // account the moment the account goes, retention window or not.
+  const contextManifests = await step("context_manifest_compaction", () =>
+    compactAgedContextManifests(now)
+  );
+
   // `null` reads as "this step did not report", which is what a step that threw
   // did. It is deliberately distinct from the `0` of a step that ran and found
   // nothing, and the callers that sum these numbers skip it rather than
   // counting a failure as no work.
   return {
     accountDataExportRequests,
+    contextManifestsCompacted: contextManifests?.compacted ?? null,
+    // A backlog that is not shrinking is the signal the batch size is too
+    // small for the volume, and it is only visible if the step reports it.
+    contextManifestsAwaitingCompaction: contextManifests?.remaining ?? null,
     contextBundleConsumptions,
     memoryExtractionRuns: memoryExtraction?.reclaimedRuns ?? null,
     memoryExtractionDispatched: memoryExtraction?.dispatchedRuns ?? null,

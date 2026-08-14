@@ -189,6 +189,67 @@ being routed to a model that cannot see one.
 - **No reroute on a failed dispatch.** §5's fallback and pass-through attempts
   are what `RoutingAttempt` was built for, but nothing produces a second
   attempt yet — a routed turn that fails fails, exactly as a manual one does.
+  What exists, and what is still open, is §9.1.
+
+### 9.1 The fallback swap: what is decided and what is not
+
+Built and covered: the decision (`lib/routingFallbackPolicy.ts`), the records
+and budgets (`RoutingAttempt`, `passThroughUsed`, `rerouteCount`), §8's
+recovery state, and §7's in-stream `retrying_with_another_model` signal on
+both sides of the wire.
+
+Not built: the swap itself, in `app/api/chat/route.ts`'s stream. An earlier
+note here said the `pull()` catch was the seam and that no extraction was
+required. The seam is right; the second half was wrong, and correcting it
+matters because it understates the work by a lot. Four things are open.
+
+**The catch does not classify the failure.** `generatedText === ""` says the
+server has not read a text chunk yet. That is a safe *necessary* condition and
+nothing more: `pull()`'s catch also receives cancellation, client disconnect
+and failures from the completion handling below it. §7 excludes cancellation,
+client disconnect, policy rejection and insufficient credits from automatic
+fallback by name, so the error has to be classified into a `failureLayer`
+before `decideFallback` is consulted at all. Today nothing does that.
+
+**Swapping `sourceReader` and `result` is not enough.** The closure also holds
+`modelConfig`, `generationSettings`, `webSearchToolConfig`,
+`requestMaxOutputTokens`, `dispatchRecord`, the Perplexity usage capture, and
+the model id used by settlement, the logs and the stored message — all bound
+to the primary. Leaving any of them would record or bill the fallback as the
+primary. The realistic shape is per-attempt execution state: one object or
+factory that a dispatch is built from, rather than values captured once.
+
+**Settlement cannot express two attempts.** `ChatUsageReservation` carries a
+single `modelId`, `provider` and price snapshot, and `settleChatUsage` prices
+actual usage from that snapshot (`canonical.inputUsdPerMillionTokens` and its
+siblings). A fallback model's tokens would be priced at the primary's rates,
+there is nowhere to add what the primary spent before it failed, and the
+provider budget hold belongs to the original provider. "Fallback cost ≤ the
+existing hold" is necessary but nowhere near sufficient. The contract needs:
+per-attempt provider usage and its own price snapshot; the two attempts summed
+and held under the original reservation; the fallback provider's budget
+reserved or transferred atomically; exactly one end-user settlement; and audit
+records where the primary's and the fallback's request ids and costs do not
+overwrite each other.
+
+**"Text-only turns" is still too wide** for a first cut. The safe initial scope
+is Auto mode, plain text, no tools, no web search, no deep research, and a
+candidate that passes its own filters, token check and a new manifest — §5
+requires an independent attempt and manifest per fallback, so reusing the
+primary's is not an option.
+
+Order that keeps each step checkable:
+
+1. a deterministic test double where the first reader raises a pre-token error
+   and the second succeeds, fails, or is cancelled — before any real provider;
+2. the per-attempt execution state and the multi-attempt settlement contract;
+3. the swap, behind a flag that is off;
+4. staging fault injection on the first provider, confirming in the database
+   and the logs: one run, one reservation, two attempts, one settlement, one
+   lease release;
+5. fallback failure and disconnect-during-fallback, then enable.
+
+This is its own change and should not ride along with the pieces above.
 
 ## 10. Record
 

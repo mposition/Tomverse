@@ -391,3 +391,80 @@ export const successfulFallbackCandidateManifestCoverage = async (
     coveragePercent: decidable === 0 ? 100 : (covered / decidable) * 100,
   };
 };
+
+/**
+ * §5/§6/§8: what the run has spent, and what it left for the next turn.
+ *
+ * A compare-and-set on the budgets rather than a blind write. Two attempts
+ * cannot both be the one that spent the single pass-through downgrade, and a
+ * retry loop that raced with itself would otherwise record two -- which is
+ * exactly the accounting the "once per logical response" rule exists to make
+ * checkable afterwards.
+ */
+export const recordFallbackTransition = async (input: {
+  runId: string;
+  /** True when this transition spent the one pass-through downgrade. */
+  spentPassThrough: boolean;
+  /** True when this transition moved to a different model. */
+  spentModelFallback: boolean;
+  /**
+   * Omitted leaves the run's own value alone.
+   *
+   * `fallbackState` is about model fallback and agrees with `rerouteCount` in
+   * the database (`RoutingRun_fallback_agreement_check`); a pass-through
+   * changes no model and spends no reroute, so writing `fallback_used` for one
+   * would violate that. The downgrade is recorded by `passThroughUsed`, which
+   * is the field that means it. Two fields because they are two facts.
+   */
+  fallbackState?: "none" | "fallback_used" | "exhausted";
+  switchReason?: string | null;
+  recoveryCandidateModelId?: string | null;
+  fallbackHealthEvidence?: string | null;
+}) => {
+  const updated = await prisma.routingRun.updateMany({
+    where: {
+      id: input.runId,
+      // The guard: a downgrade may only be spent by a run that still has it.
+      ...(input.spentPassThrough ? { passThroughUsed: false } : {}),
+    },
+    data: {
+      ...(input.fallbackState !== undefined
+        ? { fallbackState: input.fallbackState }
+        : {}),
+      ...(input.spentPassThrough ? { passThroughUsed: true } : {}),
+      ...(input.spentModelFallback ? { rerouteCount: { increment: 1 } } : {}),
+      ...(input.switchReason !== undefined ? { switchReason: input.switchReason } : {}),
+      ...(input.recoveryCandidateModelId !== undefined
+        ? { recoveryCandidateModelId: input.recoveryCandidateModelId }
+        : {}),
+      ...(input.fallbackHealthEvidence !== undefined
+        ? { fallbackHealthEvidence: input.fallbackHealthEvidence }
+        : {}),
+    },
+  });
+
+  if (updated.count === 0 && input.spentPassThrough) {
+    throw new DispatchBoundaryError(
+      `RoutingRun ${input.runId} has already spent its pass-through downgrade.`
+    );
+  }
+  return updated.count;
+};
+
+/** The budgets a fallback decision is made against, read back from the run. */
+export const readFallbackState = async (runId: string) => {
+  const run = await prisma.routingRun.findUnique({
+    where: { id: runId },
+    select: { passThroughUsed: true, rerouteCount: true, firstTokenMs: true },
+  });
+  return run
+    ? {
+        passThroughUsed: run.passThroughUsed,
+        rerouteCount: run.rerouteCount,
+        // A recorded first-token time is the only durable evidence that
+        // something reached the user, so a decision made from a fresh read
+        // cannot conclude "nothing was shown" about a run that streamed.
+        visibleTokenEmitted: run.firstTokenMs !== null,
+      }
+    : null;
+};

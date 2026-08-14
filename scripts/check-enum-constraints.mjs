@@ -114,6 +114,22 @@ const REGISTRY = {
   },
 
   // --- the union exists, but only at compile time -------------------------
+  AccountDataExportRequest_refusalReason_check: {
+    owner: "type_only",
+    reason:
+      "ExportTicketRefusal in lib/accountDataExportTicketCore.ts: unknown_token, wrong_user, expired, already_used. `classifyExportTicketRefusal` returns the union, so our own code cannot write a fifth value, and nothing rejects one that arrives as data. Surfaced only once this check learned to read a nullable allowlist -- the column has carried the constraint since 2026-08-06.",
+  },
+  RoutingRun_switchReason_check: {
+    owner: "type_only",
+    reason:
+      "temporary_hard_fallback, and deliberately nothing else (routing policy \u00a78). It is the one switch reason that earns the next turn's hysteresis bypass, so widening the list is widening that grant. `FallbackRecovery` in lib/routingFallbackPolicy.ts holds it as a literal type.",
+  },
+  Conversation_routerSwitchReason_check: {
+    owner: "type_only",
+    reason:
+      "The same one value, carried on the conversation so the next turn can act on it. Kept as a separate constraint rather than shared because the two columns are cleared on different events: the run's is a record, the conversation's is state that a manual selection wipes.",
+  },
+
   ProductAnalyticsEvent_plan_check: {
     owner: "type_only",
     reason:
@@ -143,6 +159,11 @@ const REGISTRY = {
     owner: "database",
     reason:
       "draft, finalized, not_dispatched. Written as bare literals in lib/routingAttemptStore.ts, where 'draft' also appears inside the compare-and-set predicate that makes finalization happen once; there is no runtime list and no union to compare against.",
+  },
+  MemoryExtractionCreditReservation_outcome_check: {
+    owner: "database",
+    reason:
+      "completed, failed, cancelled. Written as bare literals at the settlement sites; lib/memoryExtractionMetricsCore.ts holds a same-valued set for its own rollup but does not own the column. Surfaced only once this check learned to read a nullable allowlist -- the column has carried the constraint since 2026-08-05.",
   },
   RoutingRun_fallbackState_check: {
     owner: "database",

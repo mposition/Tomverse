@@ -40,6 +40,8 @@ import {
   finalizeManifest,
   markDispatched,
   openAttempt,
+  recordFallbackTransition,
+  type PlannerMode,
   type RoutingAttemptOutcome,
   type RoutingFailureLayer,
 } from "@/lib/routingAttemptStore";
@@ -49,6 +51,7 @@ import type {
 } from "@/lib/routerDecision";
 import {
   buildManifestSourceRefs,
+  type ManifestSourceRef,
   effectiveRequestHash,
   type EffectiveRequestInput,
   type ManifestMessage,
@@ -328,6 +331,120 @@ export const authoriseDispatch = async (
     }
     await handleFailure("finalize", error, mode);
     return null;
+  }
+};
+
+/**
+ * A second attempt on the same run, after the first failed (§6/§7).
+ *
+ * The run is not recreated: one logical response is one `RoutingRun`, and the
+ * attempts hang off it. That is what makes "how often does a response need a
+ * second model" answerable at all -- two runs would look like two responses,
+ * and the reroute rate would read as zero forever.
+ *
+ * The budget is spent here rather than by the caller, so a caller that forgot
+ * cannot produce a second downgrade. `recordFallbackTransition` refuses on a
+ * run that has already spent one, which is the guard against a retry racing
+ * itself.
+ */
+export const beginRetryAttempt = async (
+  previous: DispatchInstrumentation,
+  input: {
+    attemptIndex: number;
+    modelId: string;
+    provider: string;
+    plannerMode: PlannerMode;
+    /** The layer that caused the retry, kept as §8's health evidence. */
+    failureLayer: RoutingFailureLayer;
+    sourceRefs: ManifestSourceRef[];
+    tokenizerVersion: string;
+    tokenCount: number;
+    contextWindowTokens: number;
+    userId?: string | null;
+  }
+): Promise<DispatchInstrumentation> => {
+  if (!previous) return null;
+  const mode = dispatchInstrumentationMode();
+  try {
+    const passThrough = input.plannerMode === "pass_through";
+    await recordFallbackTransition({
+      runId: previous.runId,
+      spentPassThrough: passThrough,
+      spentModelFallback: !passThrough,
+      // Only a model fallback moves `fallbackState`. A pass-through is
+      // recorded by `passThroughUsed`; claiming a fallback for it would put a
+      // run that never changed model into the reroute statistics.
+      ...(passThrough ? {} : { fallbackState: "fallback_used" as const }),
+      // §8's record is written when the retry *succeeds*, not when it starts:
+      // a recovery candidate stored for a retry that also failed would send
+      // the next turn back to a model that never worked.
+      fallbackHealthEvidence: input.failureLayer,
+    });
+
+    const attemptId = await openAttempt({
+      runId: previous.runId,
+      attemptIndex: input.attemptIndex,
+      modelId: input.modelId,
+      provider: input.provider,
+      plannerMode: input.plannerMode,
+      userId: input.userId ?? null,
+    });
+
+    // §5: "A fallback or pass-through downgrade creates a new attempt and its
+    // own manifest lifecycle." Not a reuse of the first attempt's manifest --
+    // the effective request differs by at least the model, and a manifest that
+    // described the wrong request would be worse than none.
+    await createDraftManifest({
+      attemptId,
+      userId: input.userId ?? null,
+      sourceRefs: input.sourceRefs,
+      tokenizerVersion: input.tokenizerVersion,
+      tokenCount: input.tokenCount,
+      contextWindowTokens: input.contextWindowTokens,
+    });
+
+    return {
+      ...previous,
+      attemptId,
+      modelId: input.modelId,
+      overheadMs: previous.overheadMs,
+    };
+  } catch (error) {
+    await handleFailure("retry", error, mode);
+    return null;
+  }
+};
+
+/**
+ * §8, written once the retry has actually produced an answer.
+ *
+ * Deliberately not written when the retry begins. A recovery candidate stored
+ * for a retry that then failed would send the next turn back to a model that
+ * never worked on this conversation, on the strength of a fallback that did
+ * not work either.
+ */
+export const recordFallbackRecovery = async (
+  instrumentation: DispatchInstrumentation,
+  recovery: {
+    switchReason: string;
+    recoveryCandidateModelId: string;
+    healthEvidence: string;
+  } | null
+) => {
+  if (!instrumentation || !recovery) return;
+  try {
+    await recordFallbackTransition({
+      runId: instrumentation.runId,
+      spentPassThrough: false,
+      spentModelFallback: false,
+      switchReason: recovery.switchReason,
+      recoveryCandidateModelId: recovery.recoveryCandidateModelId,
+      fallbackHealthEvidence: recovery.healthEvidence,
+    });
+  } catch (error) {
+    // The answer has already been delivered. Recording where to go back to is
+    // diagnostics and a hint for the next turn, not part of this one.
+    await handleFailure("recovery", error, "observe");
   }
 };
 

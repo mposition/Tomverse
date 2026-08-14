@@ -231,7 +231,14 @@ test("a manifest belongs to exactly one attempt", async () => {
 
 // Finalization is what turns the effective-request hash into evidence. If the
 // row can still change afterwards, it is a field rather than a proof.
-test("a finalized manifest cannot be modified at all", async () => {
+//
+// The one exception is MANIFEST-02's retention compaction, which drops the
+// per-part detail and marks the row -- covered in
+// tests/integration/context-manifest-retention.db.test.ts, including every
+// edit that must still be refused once that door exists. Nothing this test
+// names is part of it: the hash, the counts, the versions and the lifecycle
+// are exactly what compaction leaves alone.
+test("a finalized manifest cannot be edited, compaction aside", async () => {
   const runId = await newRun();
   const attemptId = await newAttempt(runId);
   await newDraft(attemptId);
@@ -250,7 +257,7 @@ test("a finalized manifest cannot be modified at all", async () => {
   ]) {
     await assert.rejects(
       prisma.contextManifest.update({ where: { id: manifest.id }, data }),
-      /finalized and cannot be modified/i,
+      /only retention compaction may modify it/i,
       `${Object.keys(data)[0]} was editable after finalization`
     );
   }

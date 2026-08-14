@@ -205,10 +205,15 @@ test("switching to manual discards the model and the challenger streak", () => {
     { selectionMode: "auto", routerModelId: "deepseek-v4-flash", routerChallengerTurns: 2 },
     "manual"
   );
+  // §8's recovery state goes with it: "Manual intent always wins over
+  // fallback recovery", and a pending recovery is a plan to move the
+  // conversation back to a model the user has just declined.
   assert.deepEqual(transition.patch, {
     selectionMode: "manual",
     routerModelId: null,
     routerChallengerTurns: 0,
+    routerSwitchReason: null,
+    routerRecoveryModelId: null,
   });
   assert.equal(transition.clearedStickyState, true);
 });

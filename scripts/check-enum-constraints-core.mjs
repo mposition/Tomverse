@@ -47,7 +47,14 @@ export const readEnumConstraints = (migrations) => {
     // be altered above it. That misread User_plan_check as belonging to
     // ProviderCreditConfig.
     const addPattern =
-      /ALTER\s+TABLE\s+(?:ONLY\s+)?"([^"]+)"[^;]*?ADD\s+CONSTRAINT\s+"([^"]+)"\s+CHECK\s*\(\s*"([^"]+)"\s+IN\s*\(([^;]*?)\)\s*\)/gi;
+      // The optional `"col" IS NULL OR` prefix is how a *nullable* closed list
+      // is written, and without it this read straight past one: the memory
+      // extraction reservation's `outcome` has been a three-value allowlist
+      // since 2026-08-05 and never appeared in this check's output. A column
+      // that also permits NULL is still a closed list, and the failure it
+      // guards against -- code accepting a value the constraint rejects, so a
+      // 500 lands where a 400 belongs -- is the same one.
+      /ALTER\s+TABLE\s+(?:ONLY\s+)?"([^"]+)"[^;]*?ADD\s+CONSTRAINT\s+"([^"]+)"\s+CHECK\s*\(\s*(?:"[^"]+"\s+IS\s+NULL\s+OR\s+)?"([^"]+)"\s+IN\s*\(([^;]*?)\)\s*\)/gi;
     for (const match of sql.matchAll(addPattern)) {
       const values = Array.from(match[4].matchAll(/'([^']*)'/g), (item) => item[1]);
       if (values.length === 0) continue;

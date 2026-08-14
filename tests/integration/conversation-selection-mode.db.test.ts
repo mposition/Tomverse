@@ -156,6 +156,77 @@ test("the transition helper produces a write the database accepts", async () => 
   assert.equal(reopened.routerChallengerTurns, 0);
 });
 
+// §8: "Manual intent always wins over fallback recovery." A pending recovery
+// is a plan to move the conversation back to a model the user has just
+// declined; carrying it past a manual selection would undo that choice on some
+// later turn, for reasons the user never sees.
+test("a manual conversation cannot hold a pending fallback recovery", async () => {
+  const user = await createUser();
+
+  await assert.rejects(
+    seed(user.id, {
+      selectionMode: "manual",
+      routerSwitchReason: "temporary_hard_fallback",
+      routerRecoveryModelId: "gpt-5-6-luna",
+    }),
+    /manual_has_no_sticky_state_check/
+  );
+});
+
+test("the transition clears the recovery along with the streak", async () => {
+  const user = await createUser();
+  const conversation = await seed(user.id, {
+    selectionMode: "auto",
+    routerModelId: "deepseek-v4-flash",
+    routerChallengerTurns: 1,
+    routerSwitchReason: "temporary_hard_fallback",
+    routerRecoveryModelId: "gpt-5-6-luna",
+  });
+
+  const transition = selectionModeTransition(conversation, "manual");
+  assert.equal(transition.clearedStickyState, true);
+
+  const updated = await prisma.conversation.update({
+    where: { id: conversation.id },
+    data: transition.patch,
+  });
+  assert.equal(updated.routerSwitchReason, null);
+  assert.equal(updated.routerRecoveryModelId, null);
+});
+
+// Half a recovery is a plan nobody can act on, or a model kept for no stated
+// cause. Neither half means anything alone.
+test("a recovery candidate and its reason are stored together or not at all", async () => {
+  const user = await createUser();
+
+  await assert.rejects(
+    seed(user.id, { selectionMode: "auto", routerRecoveryModelId: "gpt-5-6-luna" }),
+    /router_recovery_pair_check/
+  );
+  await assert.rejects(
+    seed(user.id, {
+      selectionMode: "auto",
+      routerSwitchReason: "temporary_hard_fallback",
+    }),
+    /router_recovery_pair_check/
+  );
+});
+
+// §8 grants the bypass to one reason. A value nobody enumerated would be read
+// by the restoration check as "not temporary_hard_fallback" and silently deny
+// a restoration that should have happened.
+test("the database refuses a switch reason nobody enumerated", async () => {
+  const user = await createUser();
+  await assert.rejects(
+    seed(user.id, {
+      selectionMode: "auto",
+      routerSwitchReason: "vibes",
+      routerRecoveryModelId: "gpt-5-6-luna",
+    }),
+    /routerSwitchReason_check/
+  );
+});
+
 test("a streak cannot be negative, or exist without a model to be sticky about", async () => {
   const user = await createUser();
 
