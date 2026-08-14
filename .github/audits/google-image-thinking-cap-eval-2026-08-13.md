@@ -3,10 +3,31 @@
 - 대상 정책: `docs/policy/image-generation.md` §12(가격 검증)·§15(eval 예산)
 - 실행 도구: `scripts/measure-google-image-thinking-cap.mjs`
 - 작성일: 2026-08-13
-- 상태: **완료(2026-08-14). 판정은 반증** — `max_output_tokens`는 과금 대상을
-  bound하지 않는다. 결론과 근거는
-  `.github/audits/image-model-verification-worksheet.md` §I. 누적 실제 사용
-  약 262,000~287,000µUSD (승인 $10의 2.6~2.9%). **남은 단계는 실행하지 않는다.**
+- 상태: **종결(2026-08-14). 판정은 반증** — `max_output_tokens`는 과금 대상
+  합계를 bound하지 않는다. 결론과 근거는
+  `.github/audits/image-model-verification-worksheet.md` §I, 재계산 가능한 증거는
+  `.github/audits/evidence/google-image-thinking-cap/`
+  (`npm run check:image-eval-evidence`).
+
+## 예산 종결
+
+| | |
+|---|---|
+| 승인 | $10 (2026-08-12, 제품 책임자) |
+| 실사용 | 약 **262,000~287,000µUSD** (2.6~2.9%) — 표본 18건, 상한 4종 |
+| 미집행 | 약 **$9.71** |
+| 상태 | **종료.** 미집행분은 이월되지 않는다. |
+
+**이 승인으로 더 실행하지 않는다.** 승인은 "thinking 상한이 성립하는지 확인한다"는
+질문에 붙은 것이고 그 질문은 답이 나왔다. 남은 금액은 다른 질문에 쓸 수 있는
+잔액이 아니라, 목적이 끝난 승인의 미집행분이다. 새 유료 실행에는 새 승인이
+필요하다.
+
+실사용액이 범위인 이유: 상한 2,048 첫 표본의 891 출력 토큰에 modality 내역이
+없어 이미지 단가($30/1M)로 볼지 텍스트 단가($1.50/1M)로 볼지 확정할 수 없다.
+양끝을 모두 적었다.
+
+**미집행 예산이 남았다는 것이 재실행 사유가 아니다.**
 
 ## 0. 승인된 것과 승인되지 않은 것
 
@@ -118,7 +139,7 @@ bash에서는 같은 명령을 `\`로 이어 쓰고 `$EVIDENCE_DIR`을 쓴다. `
 `Remove-Item Env:\GEMINI_API_KEY`로 지운다.
 
 **종료 코드가 1이어도 파일을 버리지 않는다.** 스크립트는
-`limit_does_not_bound_thinking`에서 1로 끝나는데, 그것은 실패가 아니라 판정이고
+`limit_does_not_bound_billable_output`에서 1로 끝나는데, 그것은 실패가 아니라 판정이고
 그 JSON이 이 측정에서 가장 값진 증거다.
 
 **`runComplete`를 먼저 본다.** 실행이 중간에 죽으면 파일은 남지만
@@ -141,17 +162,18 @@ node --conditions=react-server --import tsx \
 
 4회, 계획 원가 178,976µ ≈ $0.18.
 
-- `limit_does_not_bound_thinking` → **여기서 끝난다.** 반증 하나면 질문이
+- `limit_does_not_bound_billable_output` → **여기서 끝난다.** 반증 하나면 질문이
   닫히고, 세 모델 모두 `worst_case_cost_unbounded`를 유지한다. 2단계를 실행하지
   않는다.
 - `inconclusive_limit_never_bound` → 상한을 더 낮춰 재실행(`--limit=256`).
-- `consistent_with_limit_bounding_thinking` → **1b단계로.** 아래 결과가 그
+- `consistent_with_limit_bounding_billable_output` → **1b단계로.** 아래 결과가 그
   이유다 — 2단계로 바로 가지 않는다.
 
 #### 1단계 결과 (2026-08-14, 실제 원가 약 3,300µUSD)
 
 `--limit=512 --prompts=2 --repeats=2 --thinking=high`, 4회 전부 전송,
-`stoppedEarly: null`, `verdict: consistent_with_limit_bounding_thinking`.
+`stoppedEarly: null`, `verdict: consistent_with_limit_bounding_thinking`
+(당시 이름. 2026-08-14에 `..._billable_output`으로 개명 — §개명 참조).
 
 | # | prompt | input | output | thinking | 합계 vs 512 | status | 이미지 |
 |---:|---:|---:|---:|---:|---|---|---:|
@@ -196,7 +218,7 @@ parser 하나로만 읽었다면 네 건이 모두 "판독 불능"으로 기록�
 ```
 
 - thinking ≈ 253 → 숫자가 상한을 따라온다. (A)이며 긍정 근거가 성립한다.
-- thinking = 509 → 256을 넘겼다. **반증이다.** `limit_does_not_bound_thinking`
+- thinking = 509 → 256을 넘겼다. **반증이다.** `limit_does_not_bound_billable_output`
   으로 질문이 닫히고 세 모델 모두 `worst_case_cost_unbounded`를 유지한다.
 
 4회, 이미지가 나오지 않을 것이므로 실제 원가는 1단계보다 낮다(약 1,600µ).
@@ -309,7 +331,7 @@ content를 훑어 이미지만 고르므로 정상 동작하며, "첫/마지막 
 
 - 합계 ≈ 2,045 → **상한이 합계를 덮는다.** A-2가 근거 있는 상한이 되고, 실측
   최악은 이미지 1,120 + 나머지 2,976 = **38,064µUSD**(최소 43크레딧)이다.
-- 합계 > 2,048 → **반증.** `limit_does_not_bound_thinking`으로 질문이 닫히고
+- 합계 > 2,048 → **반증.** `limit_does_not_bound_billable_output`으로 질문이 닫히고
   세 모델 모두 `worst_case_cost_unbounded`를 유지한다.
 
 4회. 이미지가 나오면 약 145,000µ, 눌려서 안 나오면 그보다 훨씬 싸다.
@@ -329,8 +351,12 @@ content를 훑어 이미지만 고르므로 정상 동작하며, "첫/마지막 
 
 세 Google 이미지 모델은 `worst_case_cost_unbounded`를 유지하고
 `thinkingCapMicroUsd`는 `null`을 유지한다. **허위 상한을 넣지 않는다.**
-4단계(Flash Image)는 실행하지 않는다 — 같은 파라미터에 대한 질문이고 답이
-나왔다.
+
+4단계(Flash Image)는 실행하지 않는다. 이는 "Flash Image도 반드시 같은 방식으로
+초과한다"는 과학적 결론이 **아니라**, 활성화 계획이 없어진 상황에서 긍정
+가능성을 추가 비용을 들여 조사하지 않겠다는 **운영 결정**이다. 측정은 Flash
+Lite에서만 했고, 나머지 두 모델은 "일반 근거가 사라졌고 모델별 긍정 증거도
+없음"을 이유로 보류를 유지한다.
 
 전체 결론과 부수 관측은 `.github/audits/image-model-verification-worksheet.md`
 §I에 있다.
@@ -461,9 +487,9 @@ if ($env:GEMINI_API_KEY) {
 
 ## 6. 판정 이후
 
-- `limit_does_not_bound_thinking` → 세 Google 모델 모두 `worst_case_cost_unbounded`
+- `limit_does_not_bound_billable_output` → 세 Google 모델 모두 `worst_case_cost_unbounded`
   유지. `thinkingCapMicroUsd`는 `null`로 둔다. **허위 상한을 넣지 않는다.**
-- `consistent_with_limit_bounding_thinking` (두 모델 모두, 두 상한 이상에서) →
+- `consistent_with_limit_bounding_billable_output` (두 모델 모두, 두 상한 이상에서) →
   §12의 상한 확인이 충족된다. 그 다음은 이 문서의 범위 밖인 별개 결정 두 개다:
   판매 크레딧 승인, 그리고 provider 노출 한도 승인 후 활성화.
 - 그 외 판정은 전부 미결이다. 미결을 긍정으로 반올림하지 않는다.

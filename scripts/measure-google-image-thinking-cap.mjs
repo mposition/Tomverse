@@ -1,13 +1,27 @@
-// Does `max_output_tokens` bound hidden thinking?
+// Does `max_output_tokens` bound what Google bills?
+//
+// ANSWERED, NEGATIVELY, ON 2026-08-14. A request to
+// gemini-3.1-flash-lite-image with `max_output_tokens: 2048` reported 1,602
+// output plus 931 thinking -- 2,533 -- as billable usage and returned a
+// finished image. The parameter is a request parameter, not a cost ceiling.
+// The three Google image models keep `worst_case_cost_unbounded` and
+// `thinkingCapMicroUsd` stays null. Full result and all eighteen samples:
+// .github/audits/image-model-verification-worksheet.md §I.
+//
+// This script is kept because the question can reopen -- a new model, a new
+// parameter, a documented bound -- and because rebuilding a measurement that
+// spends money is worse than keeping one that has been through four limits.
+// It is not a route out of the disabled state on its own: policy §12 wants a
+// finite worst case, and running this again against the same parameter would
+// re-measure a settled question.
 //
 //   node --import tsx scripts/measure-google-image-thinking-cap.mjs --help
 //   node --import tsx scripts/measure-google-image-thinking-cap.mjs \
 //     --model=gemini-3.1-flash-lite-image --limit=512 --repeats=3 \
 //     --i-accept-the-cost
 //
-// That is the entire question, and it is the one thing keeping all three
-// Google image models disabled. The 2026-08-05 documentation review closed it
-// as a checked absence: the Interactions API reference defines
+// The question it was built for, and how it came to be asked. The 2026-08-05
+// documentation review closed the documentary side as a checked absence: the Interactions API reference defines
 // `generation_config.max_output_tokens` as the maximum tokens to include in
 // the response and reports `usage.total_output_tokens` and
 // `usage.total_thought_tokens` as separate counters; the thinking guide
@@ -351,7 +365,7 @@ const promptHashes = prompts.map((text) => sha256Prefix(text));
  *
  * `runComplete` is the fail-closed part. An interrupted run states no verdict
  * at all: a file left behind by a crash must not read like a conclusion, and
- * `consistent_with_limit_bounding_thinking` computed over half the planned
+ * `consistent_with_limit_bounding_billable_output` computed over half the planned
  * samples would read exactly like one.
  */
 function buildReport(runComplete) {
@@ -371,16 +385,25 @@ function buildReport(runComplete) {
   );
   const promptsMeasured = new Set(measured.map((sample) => sample.promptIndex));
 
+  // The verdict names say "billable output", not "thinking", and the 2026-08-14
+  // run is why. `max_output_tokens` did track thinking on its own at 256 and
+  // 512 -- thinking stopped at limit minus three on every sample -- while a
+  // request at 2,048 reported 1,602 output plus 931 thinking as billable usage
+  // and returned a finished image. A verdict called
+  // `limit_does_not_bound_thinking` would have been reported on a run where
+  // thinking was, as far as anything here can tell, bounded. What is refuted is
+  // the bound on the quantity we pay for, which is the sum, and that is what
+  // `googleBillableOutputTokens` has always computed.
   const verdict = (() => {
     if (!runComplete) return "run_incomplete";
     if (measured.length === 0) return "inconclusive_no_samples";
-    if (exceeded.length > 0) return "limit_does_not_bound_thinking";
+    if (exceeded.length > 0) return "limit_does_not_bound_billable_output";
     if (bit.length === 0) return "inconclusive_limit_never_bound";
     // Policy §12 asks for several complex prompts. One prompt's samples can
     // support the other conclusions -- a counterexample is a counterexample --
     // but they cannot support the affirmative one on their own.
     if (promptsMeasured.size < 2) return "consistent_but_single_prompt";
-    return "consistent_with_limit_bounding_thinking";
+    return "consistent_with_limit_bounding_billable_output";
   })();
 
   return {
@@ -648,7 +671,7 @@ if (flag("json")) {
         "\n  with --prompts=2 (policy §12)."
     );
   }
-  if (verdict === "limit_does_not_bound_thinking") {
+  if (verdict === "limit_does_not_bound_billable_output") {
     console.log(
       "  A sample billed more output+thinking than the limit allowed. The" +
         "\n  worst case is not bounded by this parameter and the models stay" +
@@ -663,4 +686,4 @@ if (flag("json")) {
   );
 }
 
-process.exit(verdict === "limit_does_not_bound_thinking" ? 1 : 0);
+process.exit(verdict === "limit_does_not_bound_billable_output" ? 1 : 0);

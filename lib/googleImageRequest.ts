@@ -20,13 +20,15 @@ import {
 //    snake_case Interactions names are used throughout and the camelCase ones
 //    appear nowhere.
 //
-// 2. Nothing here establishes a cost bound. `max_output_tokens` is sent on
-//    every request because the server must not leave a billable parameter
-//    unset -- but the official documentation describes `max_output_tokens`
-//    and the thinking usage counters (`total_output_tokens`,
-//    `total_thought_tokens`) separately and never states that the limit
-//    covers their sum. Until a staging measurement shows it does, these
-//    models stay `worst_case_cost_unbounded` and this code is unreachable:
+// 2. Nothing here establishes a cost bound, and measurement has now shown
+//    that nothing can. `max_output_tokens` is sent on every request because
+//    the server must not leave a billable parameter unset. The documentation
+//    describes it and the usage counters (`total_output_tokens`,
+//    `total_thought_tokens`) separately and never states that the limit covers
+//    their sum -- and on 2026-08-14 a request at 2,048 reported 2,533 of them
+//    as billable usage and returned a finished image. So the limit is a
+//    request parameter, not a cost ceiling. These models stay
+//    `worst_case_cost_unbounded` and this code is unreachable:
 //    generateImageWithProvider refuses any model with a disabledReason before
 //    it dispatches. Policy: docs/policy/image-generation.md section 12.1.
 
