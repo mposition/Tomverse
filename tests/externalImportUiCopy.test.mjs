@@ -161,6 +161,9 @@ test("the components render the copy", () => {
         // Losing the password is unrecoverable, so the warning is part of the
         // contract rather than a nicety.
         "externalImport.lockNoRecoveryWarning",
+        // §5.2: an attached archive is skipped rather than refusing the whole
+        // export, so the preview has to say the attachment is not coming.
+        "externalImport.warningNestedArchives",
     ]) {
         assert.ok(
             sources.some((source) => source.includes(key)),

@@ -15,9 +15,12 @@ import {
  *   * media entries are skipped without inflating (a ChatGPT export is mostly
  *     images; the conversation JSON is a fraction of it, so gating on total
  *     archive size would reject exactly the heavy users who want this most);
- *   * traversal paths, nested archives, absolute paths and encrypted entries
- *     are refused rather than sanitized — the safe answer to "why does this
- *     export contain `../../etc/passwd`" is not to fix up the name;
+ *   * traversal paths, absolute paths and encrypted entries are refused rather
+ *     than sanitized — the safe answer to "why does this export contain
+ *     `../../etc/passwd`" is not to fix up the name;
+ *   * nested archives are never unpacked, but they are skipped rather than
+ *     refused: a user who attached a `.zip` to a chat has one sitting in an
+ *     otherwise ordinary export, and refusing that entry refuses the export;
  *   * per-entry and cumulative inflate budgets bound what parsing can cost,
  *     including the compression ratio of what actually gets inflated.
  *
@@ -34,12 +37,12 @@ export type ArchiveSkipReason =
     | "media"
     | "unsupported_extension"
     | "metadata"
-    | "empty";
+    | "empty"
+    | "nested_archive";
 
 export type ArchiveRejectReason =
     | "path_traversal"
     | "absolute_path"
-    | "nested_archive"
     | "encrypted"
     | "entry_too_large"
     | "suspicious_compression_ratio";
@@ -112,8 +115,13 @@ export function classifyArchiveEntry(
 
     const extension = extensionOf(name);
     if (NESTED_ARCHIVE_EXTENSIONS.has(extension)) {
-        // §5.2: nested archives are not unpacked at any depth.
-        return { kind: "reject", reason: "nested_archive" };
+        // §5.2: extraction depth stays 0 -- a nested archive is never opened,
+        // enumerated or inspected. It is skipped rather than refused because a
+        // user attaching a .zip to a chat puts one in an otherwise ordinary
+        // export, and refusing the entry refuses the whole export with it.
+        // Counted under its own reason: folded into unsupported_extension, the
+        // preview could not say why an attachment is missing.
+        return { kind: "skip", reason: "nested_archive" };
     }
 
     // Media is skipped before any size check: it is never inflated, so its
@@ -211,6 +219,7 @@ export function planArchiveEntries(
             unsupported_extension: 0,
             metadata: 0,
             empty: 0,
+            nested_archive: 0,
         },
         skippedMediaBytes: 0,
     };

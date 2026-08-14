@@ -1100,6 +1100,8 @@ export const es = {
             "Se omitieron {count} elementos no textuales (imágenes, audio, archivos)",
         warningBranches:
             "{count} ramas alternativas de conversación no se importan",
+        warningNestedArchives:
+            "{count} archivos comprimidos adjuntos (.zip y similares) no se abren, por lo que no se importan",
         notImportableBadge: "No se puede importar",
         notImportableExplain:
             "{count} conversaciones contienen un mensaje que supera el límite de tamaño de importación y no se pueden importar.",

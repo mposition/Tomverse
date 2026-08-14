@@ -85,6 +85,7 @@ const errorResponse = (error: unknown): WorkerResponse => {
 async function parseArchive(file: File): Promise<{
     conversations: ParsedExternalConversation[];
     provider: "chatgpt" | "claude";
+    archiveSkips: { nestedArchives: number };
 }> {
     if (
         file.size >
@@ -111,7 +112,11 @@ async function parseArchive(file: File): Promise<{
             adapter.provider,
             value as unknown[]
         );
-        return { conversations, provider: adapter.provider };
+        return {
+            conversations,
+            provider: adapter.provider,
+            archiveSkips: { nestedArchives: 0 },
+        };
     }
 
     const collected: ParsedExternalConversation[][] = [];
@@ -120,6 +125,7 @@ async function parseArchive(file: File): Promise<{
     let parsedBytes = 0;
     let bytesRead = 0;
     let conversationsFound = 0;
+    let nestedArchivesSkipped = 0;
 
     await new Promise<void>((resolve, reject) => {
         const decoder = new TextDecoder();
@@ -159,6 +165,11 @@ async function parseArchive(file: File): Promise<{
             }
             if (decision.kind === "skip") {
                 // Never call entry.start(): the data is not inflated at all.
+                // For a nested archive that is the whole guarantee -- depth
+                // stays 0 because nothing here ever opens it.
+                if (decision.reason === "nested_archive") {
+                    nestedArchivesSkipped += 1;
+                }
                 return;
             }
 
@@ -267,6 +278,7 @@ async function parseArchive(file: File): Promise<{
     return {
         conversations: mergeConversationSets(collected),
         provider,
+        archiveSkips: { nestedArchives: nestedArchivesSkipped },
     };
 }
 
@@ -281,14 +293,16 @@ scope.onmessage = async (event: MessageEvent<WorkerRequest>) => {
 
     cancelled = false;
     try {
-        const { conversations, provider } = await parseArchive(request.file);
+        const { conversations, provider, archiveSkips } = await parseArchive(
+            request.file
+        );
         if (cancelled) {
             post({ type: "cancelled" });
             return;
         }
         post({
             type: "preview",
-            preview: buildImportPreview(provider, conversations),
+            preview: buildImportPreview(provider, conversations, archiveSkips),
             conversations,
         });
     } catch (error) {

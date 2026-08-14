@@ -58,6 +58,13 @@ export type ImportPreview = {
         skippedNonConversationMessages: number;
         skippedNonTextParts: number;
         additionalBranches: number;
+        /**
+         * Attachments that are themselves archives (§5.2). Counted apart from
+         * every other skip: a user who attached a `.zip` to a chat needs to be
+         * told that file is not coming, and "unsupported file type" does not
+         * say it.
+         */
+        skippedNestedArchives: number;
     };
 };
 
@@ -119,7 +126,12 @@ export function estimateStoredBytes(
 
 export function buildImportPreview(
     provider: ExternalAdapterProvider,
-    conversations: readonly ParsedExternalConversation[]
+    conversations: readonly ParsedExternalConversation[],
+    /**
+     * Counts the archive scan produced, which no conversation can carry: a
+     * skipped entry never became one.
+     */
+    archiveSkips: { nestedArchives: number } = { nestedArchives: 0 }
 ): ImportPreview {
     const rows: PreviewConversation[] = conversations.map((conversation) => ({
         conversation,
@@ -137,6 +149,7 @@ export function buildImportPreview(
         skippedNonConversationMessages: 0,
         skippedNonTextParts: 0,
         additionalBranches: 0,
+        skippedNestedArchives: archiveSkips.nestedArchives,
     };
     for (const row of rows) {
         if (row.importability.kind === "importable") {
