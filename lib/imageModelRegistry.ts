@@ -218,11 +218,19 @@ const GOOGLE_GEMINI_31_FLASH_IMAGE: ImageModelProfile = {
   // cannot supply the link either. A forum answer or a search summary does not
   // meet policy §12's official-body requirement and is not admissible here.
   //
-  // What settles it is the billing signal, not more prose: a staging run that
-  // sets `max_output_tokens` and shows `total_output_tokens +
-  // total_thought_tokens` staying at or under it, including at a limit low
-  // enough to actually bite. That run costs money and needs the §15 budget
-  // approval first.
+  // That run happened on 2026-08-14, and the billing signal answered no. A
+  // request to gemini-3.1-flash-lite-image with `max_output_tokens: 2048`
+  // reported 1,602 output plus 931 thinking -- 2,533 -- as billable usage and
+  // returned a finished image. The parameter does not bound the quantity we are
+  // charged for. Measurement is therefore no longer a route out of this state:
+  // it was taken, and it closed the question negatively
+  // (.github/audits/image-model-verification-worksheet.md §I).
+  //
+  // Only one model was measured, so the other two are held for a weaker reason:
+  // the general case for treating this parameter as a cost ceiling is gone and
+  // no model-specific evidence replaces it. `worst_case_cost_unbounded` means
+  // the finite worst case policy §12 requires was not established -- not that
+  // no finite cost exists.
   disabledReason: "worst_case_cost_unbounded",
   // 512, 2K and 4K are advertised upstream but have no representation in
   // ImageSize yet, and Google's 1K landscape is not 1536x1024 -- a provider

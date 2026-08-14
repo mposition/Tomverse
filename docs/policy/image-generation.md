@@ -492,10 +492,20 @@ candidate의 한도로 설명된다. 즉 hidden thinking이 32,768 안에 포함
 
 > **판정**: 공식 페이지는 `max_output_tokens`와 thinking 사용량을 각각
 > 설명하지만 `total_output_tokens + total_thought_tokens`가 해당 상한 이하라고
-> 보장하지 않는다. 세 모델은 staging 실측 전까지
-> `worst_case_cost_unbounded`를 유지한다.
+> 보장하지 않는다.
 
-#### 남은 증거는 산문이 아니라 과금 신호다 — staging 실측 계획
+**2026-08-14 실측이 이 질문을 부정으로 닫았다.** `gemini-3.1-flash-lite-image`에
+`max_output_tokens: 2048`을 보낸 요청이 output 1,602 + thinking 931 = **2,533**을
+과금 대상 usage로 보고하고 완성된 이미지를 반환했다. 이 파라미터는 요청 파라미터
+이지 비용 천장이 아니다. 아래 "staging 실측 계획"은 그 실행의 절차 기록으로
+남기며, **해소 경로가 아니다** — 실행됐고 답은 부정이다. 전체 결과와 표본은
+`.github/audits/image-model-verification-worksheet.md` §I.
+
+세 모델은 `worst_case_cost_unbounded`를 유지한다. 재검토 조건은 Google이 thinking
+토큰 상한을 거는 요청 파라미터를 제공하거나, 공식 문서가 과금 대상의 상한을
+명시하는 경우다.
+
+#### 남은 증거는 산문이 아니라 과금 신호다 — staging 실측 절차 (2026-08-14 실행 완료, 판정 부정)
 
 `npm run measure:google-image-thinking-cap`이 이 절차를 수행한다. **매 실행이
 실제 유료 이미지 생성**이므로 `--i-accept-the-cost` 없이는 아무것도 보내지
@@ -528,7 +538,7 @@ candidate의 한도로 설명된다. 즉 hidden thinking이 32,768 안에 포함
 무엇을 물었는지의 함수이므로, `--repeats`를 올려도 §12의 "복잡한 프롬프트
 여러 개"는 충족되지 않는다. 스크립트는 서로 다른 비용 축(조밀한 라벨 기하 /
 다국어 문자 렌더링)을 가진 내장 프롬프트 2종을 `--prompts`로 제공하고,
-한 프롬프트의 표본만으로는 긍정 판정(`consistent_with_limit_bounding_thinking`)
+한 프롬프트의 표본만으로는 긍정 판정(`consistent_with_limit_bounding_billable_output`)
 을 내지 않는다 — `consistent_but_single_prompt`로 보고한다. 반증은 한
 프롬프트로도 성립하므로 이 제약은 긍정 판정에만 적용한다.
 

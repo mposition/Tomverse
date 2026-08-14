@@ -291,6 +291,39 @@ test("the delivery MIME is a request preference, not the storage allowlist's hea
   assert.notEqual(body.response_format.mime_type, "image/png");
 });
 
+test("a commentary step beside the image does not confuse the parser", () => {
+  // Observed on 2026-08-14: half the samples came back with *two*
+  // `model_output` steps -- an unsolicited paragraph about what the model drew,
+  // then the picture. The parser reads content across every model_output step
+  // and keeps the images, so this is one image and priceable; a parser that
+  // took "the last model_output" or "the first" would have picked prose.
+  const parsed = parseGoogleImageResponse({
+    status: "completed",
+    steps: [
+      { type: "thought", signature: "..." },
+      {
+        type: "model_output",
+        content: [{ type: "text", text: "I have generated this illustration." }],
+      },
+      { type: "thought", signature: "..." },
+      {
+        type: "model_output",
+        content: [{ type: "image", mime_type: "image/jpeg", data: "aGk=" }],
+      },
+    ],
+    usage: {
+      total_input_tokens: 62,
+      total_output_tokens: 2209,
+      total_thought_tokens: 987,
+    },
+  });
+  assert.equal(parsed?.mimeType, "image/jpeg");
+  assert.equal(parsed?.imageBase64, "aGk=");
+  // The commentary is billed as output tokens and thrown away, so the number
+  // that matters is the sum, not the image's own 1,120.
+  assert.equal(googleBillableOutputTokens(parsed.usage), 3_196);
+});
+
 // Reading the same response for evidence rather than for an image.
 
 test("a response that ran out of room keeps its usage, having no image", () => {
