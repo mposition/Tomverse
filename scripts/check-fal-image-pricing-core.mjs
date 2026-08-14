@@ -19,6 +19,15 @@
 // credential. The check gains teeth exactly when someone enables the model,
 // which is the only moment it matters.
 
+/**
+ * "image" and "images" are the same billing basis; "megapixel" is not.
+ *
+ * Only case and a single trailing "s". Anything cleverer starts guessing at
+ * what a unit means, and the whole point of reading it is that we do not.
+ */
+export const normalizeUnit = (unit) =>
+  String(unit ?? "").trim().toLowerCase().replace(/s$/, "");
+
 /** What the pricing API is asked about, derived from the registry entry. */
 export const falPricingRequest = (model) => ({
   endpointId: model.apiModelId,
@@ -103,9 +112,19 @@ export const evaluateFalPricing = ({ model, response, reachError = null }) => {
   // per-megapixel keeps `unit_price` looking small and makes every credit
   // calculation here wrong, because the approved worst case is arithmetic over
   // one image and not over an area.
-  if (entry.unit !== "image") {
+  //
+  // Compared after normalising, because the first live run failed on the
+  // difference between "image" and "images". fal's own documentation example
+  // uses the singular for another endpoint and this one answers with the
+  // plural; that is a label, not a billing basis, and a check that cannot tell
+  // those apart cries wolf on its first outing and gets ignored on its second.
+  //
+  // The normalisation is deliberately narrow -- case and a trailing "s" -- so
+  // "megapixel", "second" and "request" still fail. Widening it to "anything
+  // image-ish" would give back exactly the failure it exists to catch.
+  if (normalizeUnit(entry.unit) !== "image") {
     problems.push(
-      `fal now bills ${endpointId} per ${entry.unit}, not per image. ` +
+      `fal bills ${endpointId} per ${entry.unit}, which is not a per-image basis. ` +
         `The approved worst case is arithmetic over one image and does not survive that change.`
     );
   }
@@ -128,6 +147,13 @@ export const evaluateFalPricing = ({ model, response, reachError = null }) => {
           : "A drop still needs re-approval: the credit was set against the old number.")
     );
   }
+
+  // Printed on every run, not only on failure. A green check that says only
+  // "matched" leaves no record of what it matched against, and this run is the
+  // evidence that the approved price was still live on the day of deploy.
+  notes.push(
+    `fal answered: ${entry.unit_price} ${entry.currency ?? "USD"} per ${entry.unit}.`
+  );
 
   // Said rather than quietly skipped. fal's pricing API answers with one unit
   // price; the high-thinking surcharge that makes up 2,000 of the approved

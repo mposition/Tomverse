@@ -4,6 +4,7 @@ import { test } from "node:test";
 import {
   evaluateFalPricing,
   falPricingRequest,
+  normalizeUnit,
 } from "../scripts/check-fal-image-pricing-core.mjs";
 
 const held = {
@@ -108,6 +109,34 @@ test("a lowered price fails too", () => {
   assert.match(verdict.problems[0], /still needs re-approval/);
 });
 
+test("the plural fal actually answers with is the same basis", () => {
+  // The first live run, 2026-08-14, failed here: fal answers `"images"` for
+  // this endpoint while its documentation example uses `"image"` for another.
+  // The price agreed at 0.08 -- nothing had changed but my string comparison,
+  // and a check that cries wolf on its first outing is ignored on its second.
+  const verdict = evaluateFalPricing({
+    model: enabled,
+    response: priced({ unit: "images" }),
+  });
+  assert.equal(verdict.status, "matched");
+  assert.deepEqual(verdict.problems, []);
+
+  assert.equal(normalizeUnit("images"), "image");
+  assert.equal(normalizeUnit("Image"), "image");
+  // Narrow on purpose: the units that mean something else must still fail.
+  for (const unit of ["megapixel", "megapixels", "second", "request", "token"]) {
+    assert.notEqual(normalizeUnit(unit), "image", unit);
+  }
+});
+
+test("what fal answered is recorded even when it agrees", () => {
+  // A green check that says only "matched" leaves no record of what it matched
+  // against. This run is the evidence that the approved price was live on the
+  // day of deploy.
+  const verdict = evaluateFalPricing({ model: enabled, response: priced() });
+  assert.ok(verdict.notes.some((note) => note.includes("0.08 USD per image")));
+});
+
 test("a change of billing unit fails even at the same number", () => {
   // The nastiest drift available: per-megapixel at 0.08 reads like no change
   // at all, while every credit calculation here -- arithmetic over one image --
@@ -117,7 +146,7 @@ test("a change of billing unit fails even at the same number", () => {
     response: priced({ unit: "megapixel" }),
   });
   assert.equal(verdict.status, "failed");
-  assert.match(verdict.problems[0], /per megapixel, not per image/);
+  assert.match(verdict.problems[0], /per megapixel, which is not a per-image basis/);
 });
 
 test("a non-USD quote fails", () => {
