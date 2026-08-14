@@ -37,6 +37,12 @@ export const MIN_TRANSLATABLE_LENGTH = 13;
  */
 export const SHARED_STRING_ALLOWLIST = [
   {
+    key: "externalImport.guideGeminiTitle",
+    locales: ["de", "es", "fr", "pt"],
+    reason:
+      "Two product names side by side: Google does not translate either 'Gemini' or 'Google Takeout' in these locales, and the user has to match the string against what Google's own page says. Korean and Chinese differ only in their bracket glyphs.",
+  },
+  {
     key: "sidebar.title",
     locales: "all",
     reason: "The product name. Tomverse Insight is not translated anywhere.",

@@ -49,6 +49,19 @@ const PROVIDER_CARDS: ReadonlyArray<{
             "externalImport.guideClaudeStep3",
         ],
     },
+    {
+        // Takeout's own "Gemini" product is Gems and scheduled actions, not
+        // conversations -- picking it hands the user a file with no chats in
+        // it (A2 §1). The recipe names My Activity and the JSON format
+        // because that mistake is otherwise the common path, not the rare one.
+        provider: "gemini",
+        titleKey: "externalImport.guideGeminiTitle",
+        stepKeys: [
+            "externalImport.guideGeminiStep1",
+            "externalImport.guideGeminiStep2",
+            "externalImport.guideGeminiStep3",
+        ],
+    },
 ];
 
 export function ProviderGuideStep({

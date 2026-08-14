@@ -151,10 +151,18 @@ provider와 메시지 내용만으로 id를 만들면, 서로 다른 대화 4개
 
 | 지점 | 파일 | 변경 |
 |---|---|---|
-| provider 열거 | `lib/externalImportDigest.ts` | `ExternalImportProvider`에 `"gemini"` 추가 |
-| archive 인식 | `lib/externalImportArchive.ts` | `CONVERSATION_FILENAMES`에 활동 파일명 추가, 경로 기반 인식 필요 여부 판단 |
-| 파싱 | 브라우저 Web Worker (§5.1) | Gemini 정규화기 추가. **원본 archive는 서버에 올라가지 않습니다** |
+| provider 열거 | `lib/externalImportAdapters/types.ts` | `ExternalAdapterProvider`에 `"gemini"` 추가 |
+| adapter | `lib/externalImportAdapters/gemini.ts` | 신규. 등록은 `index.ts` |
+| 인식 | 같은 파일의 `detect()` | **`CONVERSATION_FILENAMES`은 건드리지 않습니다** — §3.1 |
+| 파싱 | 브라우저 Web Worker (§5.1) | adapter 호출. **원본 archive는 서버에 올라가지 않습니다** |
 | 정규화 | §5.6 | 아래 §4 |
+| 안내 문구 | `ProviderGuideStep.tsx` + 7개 locale | §1의 2번 — My Activity·JSON을 지목 |
+
+**adapter 계약이 하나 넓어집니다.** 기존 두 provider는 "최상위 항목 하나 = 대화
+하나"라 `parseConversation(entry)`로 충분하지만, Takeout은 항목 하나가 turn
+하나이고 그 turn이 **어느 대화들에 속하는지는 전체 목록을 봐야 압니다.** 그래서
+선택적 `parseAll(items)`을 추가하고, 있으면 pipeline이 그쪽을 부릅니다. 기존
+provider의 경로는 그대로입니다.
 
 ### 3.1 archive 인식 — 고정 파일명으로는 찾을 수 없습니다
 
@@ -245,9 +253,19 @@ snapshot이 전부 다른 lineage로 보이게 됩니다.
 - **답변은 HTML입니다.** `safeHtmlItem[].html`은 markdown이 렌더된 결과이며,
   측정한 export의 태그는 `strong`·`p`·`code`·`li`·`h3`·`hr`·`ul`·`td`·`pre`·
   `tr`·`ol`·`em`·`br`·`th`·`h2`·`h4`·`blockquote`·`table`·`a`·`img`로
-  한정됐습니다. 이 목록 밖의 태그를 만나면 **조용히 버리지 않고** §5의 거절
-  규칙을 따릅니다. 저장 형식은 A와 같은 평문·markdown이며 HTML을 그대로
-  넣지 않습니다.
+  한정됐습니다. 저장 형식은 A와 같은 평문·markdown이며 HTML을 그대로 넣지
+  않습니다(`lib/externalImportAdapters/geminiHtml.ts`).
+
+  **목록 밖의 태그를 만나면 그 답변 하나를 버리고 셉니다**
+  (`skippedUnrecognizedContent`). export 전체를 거절하지 않는 이유는 adapter
+  계약이 "한 항목의 손상이 아카이브 전체를 실패시키지 않는다"이기 때문이고,
+  §5의 요구는 *조용히* 버리지 않는 것이므로 개수 표시가 그 요구를 만족합니다.
+  프롬프트는 평문이라 이해에 의심이 없으므로 남깁니다.
+- **대화 제목은 첫 프롬프트를 줄여 만듭니다.** 원본에 제목 필드가 없고, 전부
+  "제목 없음"으로 두면 선택 화면에서 대화 50개를 구분할 수 없습니다. Gemini
+  자신이 목록에 보여 주는 것도 첫 프롬프트이므로 **지어내는 것이 아니라
+  파생**입니다. 80 code point로 자르며, 프롬프트 자체는 첫 user 메시지로 한 번만
+  저장되므로 quota를 두 번 세지 않습니다.
 
 ### 4.1 첨부는 참조가 남아 있어도 파일이 없을 수 있습니다
 
@@ -266,8 +284,9 @@ Takeout 구조는 예고 없이 바뀝니다. A2에서 가장 나쁜 결과는 �
 **절반만 맞게 파싱된 결과**입니다.
 
 - 인식하지 못한 구조는 **거절**합니다. 부분 복구를 시도하지 않습니다.
-- 파서는 자기 버전을 기록합니다(`parserVersion`). 구조 변경은 새 버전이며,
-  기존 snapshot의 digest는 소급 변경하지 않습니다.
+- 파서는 자기 버전을 기록합니다(`EXTERNAL_IMPORT_PARSER_VERSION`, A2에서
+  `v3`). 구조 변경은 새 버전이며, 기존 snapshot의 digest는 소급 변경하지
+  않습니다.
 - "대화 0건"과 "파일을 이해하지 못함"은 **다른 화면**이어야 합니다. 전자는
   활동 기록이 꺼져 있었거나 Gems 파일을 올린 경우이고, 후자는 우리 문제입니다.
 - Gems·예약 작업 파일을 올린 경우는 특별히 알아보고, "이 파일에는 대화가 없고
