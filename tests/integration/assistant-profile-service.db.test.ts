@@ -243,10 +243,12 @@ test("a manifest may only name this profile's own files", async () => {
         strangerProfile.id
     );
 
+    // Only the id is load-bearing: the service replaces name and digest from
+    // the rows, which the next test asserts.
     const entry = (fileId: string) => ({
         fileId,
-        name: "handbook.txt",
-        digest: "sha256-x",
+        name: "ignored",
+        digest: "ignored",
     });
 
     // The profile's own file is fine.
@@ -275,6 +277,72 @@ test("a manifest may only name this profile's own files", async () => {
             `${fileId} was accepted into the manifest`
         );
     }
+});
+
+test("the stored manifest carries the row's digest, not the client's", async () => {
+    // The digest is what `resolveKnowledgeManifest()` compares a past version
+    // against. If a caller could supply it, a caller could decide what a past
+    // version is said to have contained -- and a client that simply got it
+    // wrong would make every entry of that version read as unavailable.
+    const user = await createUser();
+    const profile = await createAssistantProfile({
+        userId: user.id,
+        identity: identity(),
+    });
+    const file = await storeKnowledgeFile(user.id, profile.id);
+
+    await publishAssistantProfileVersion({
+        userId: user.id,
+        profileId: profile.id,
+        draft: draft({
+            knowledgeManifest: [
+                { fileId: file.id, name: "a name the client chose", digest: "sha256-lie" },
+            ],
+        }),
+        expectedRevision: null,
+    });
+
+    const active = await activeProfileVersion(user.id, profile.id);
+    assert.deepEqual(active!.knowledgeManifest, [
+        { fileId: file.id, name: file.name, digest: file.digest },
+    ]);
+});
+
+test("republishing the same file selection creates no revision", async () => {
+    // The manifest is resolved before the planner compares drafts. Resolving
+    // it afterwards would leave the planner comparing blank digests against
+    // stored ones, so every Save would publish a revision that changed
+    // nothing -- and every one of those is a snapshot a conversation could pin
+    // to.
+    const user = await createUser();
+    const profile = await createAssistantProfile({
+        userId: user.id,
+        identity: identity(),
+    });
+    const file = await storeKnowledgeFile(user.id, profile.id);
+    const withFile = draft({
+        knowledgeManifest: [{ fileId: file.id, name: "x", digest: "y" }],
+    });
+
+    await publishAssistantProfileVersion({
+        userId: user.id,
+        profileId: profile.id,
+        draft: withFile,
+        expectedRevision: null,
+    });
+    const again = await publishAssistantProfileVersion({
+        userId: user.id,
+        profileId: profile.id,
+        draft: withFile,
+        expectedRevision: 1,
+    });
+    assert.ok(again.outcome === "unchanged");
+    assert.equal(
+        await prisma.assistantProfileVersion.count({
+            where: { profileId: profile.id },
+        }),
+        1
+    );
 });
 
 /* ----------------------------------------------------- owner boundaries */

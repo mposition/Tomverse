@@ -226,6 +226,62 @@ export const updateAssistantProfileIdentity = async (input: {
     });
 };
 
+/**
+ * Turns the file ids a publisher chose into manifest entries.
+ *
+ * The digest is the reason this is server-side: it is what
+ * `resolveKnowledgeManifest()` compares a past version against, so a
+ * client-supplied one would let a caller decide what a past version is said to
+ * have contained — the same rule the knowledge upload holds when it computes
+ * the digest itself rather than trusting one. The name comes from the row for
+ * a smaller reason pointing the same way: a manifest entry has to still name a
+ * file after that file is gone, and the right name is the one it had at
+ * publish time.
+ *
+ * Every id must belong to this profile *and* this account, and must exist
+ * right now. Another of the owner's own profiles is refused as well as another
+ * account's: a manifest names what this version can retrieve, and retrieval is
+ * scoped to the profile.
+ */
+const resolveManifestEntries = async (input: {
+    userId: string;
+    profileId: string;
+    fileIds: readonly string[];
+}) => {
+    if (input.fileIds.length === 0) return [];
+    const files = await prisma.assistantKnowledgeFile.findMany({
+        where: {
+            id: { in: [...input.fileIds] },
+            userId: input.userId,
+            profileId: input.profileId,
+        },
+        select: { id: true, name: true, digest: true },
+    });
+    if (files.length !== new Set(input.fileIds).size) {
+        throw new AssistantProfileError(
+            422,
+            "ASSISTANT_PROFILE_INVALID",
+            "The profile could not be published.",
+            [
+                {
+                    field: "knowledgeFileIds",
+                    reason: "names a file this profile does not have",
+                },
+            ]
+        );
+    }
+    // Sorted by id so the stored manifest is comparable between revisions --
+    // reordering the file list in the UI is not an edit to the profile, which
+    // is the same rule `normalizeProfileVersionDraft` applies.
+    return files
+        .map((file) => ({
+            fileId: file.id,
+            name: file.name,
+            digest: file.digest,
+        }))
+        .sort((a, b) => (a.fileId < b.fileId ? -1 : a.fileId > b.fileId ? 1 : 0));
+};
+
 export type PublishOutcome =
     | { outcome: "published"; version: { id: string; revision: number } }
     | { outcome: "unchanged"; revision: number };
@@ -255,6 +311,16 @@ export const publishAssistantProfileVersion = async (input: {
     });
     if (!profile) notFound();
 
+    // Resolved *before* planning, not after. The planner decides "did this
+    // edit change anything" by comparing drafts, and a draft carrying blank
+    // names and digests would differ from every stored version -- so every
+    // Save would publish a revision that changed nothing.
+    const manifest = await resolveManifestEntries({
+        userId: input.userId,
+        profileId: input.profileId,
+        fileIds: input.draft.knowledgeManifest.map((entry) => entry.fileId),
+    });
+
     const current = profile.currentVersion;
     const plan = planProfileVersionPublish({
         state: {
@@ -276,7 +342,7 @@ export const publishAssistantProfileVersion = async (input: {
                   }
                 : null,
         },
-        draft: input.draft,
+        draft: { ...input.draft, knowledgeManifest: manifest },
         expectedRevision: input.expectedRevision,
     });
 
@@ -299,35 +365,6 @@ export const publishAssistantProfileVersion = async (input: {
         return { outcome: "unchanged", revision: plan.revision };
     }
 
-    // Every file the manifest names must be one of this profile's own, and
-    // must exist right now. A manifest is otherwise a place to write an id
-    // and have a later runtime resolve it -- which is the one thing §14 says
-    // a manifest may not do.
-    const manifestIds = plan.draft.knowledgeManifest.map((entry) => entry.fileId);
-    if (manifestIds.length > 0) {
-        const owned = await prisma.assistantKnowledgeFile.findMany({
-            where: {
-                id: { in: manifestIds },
-                userId: input.userId,
-                profileId: input.profileId,
-            },
-            select: { id: true },
-        });
-        if (owned.length !== manifestIds.length) {
-            throw new AssistantProfileError(
-                422,
-                "ASSISTANT_PROFILE_INVALID",
-                "The profile could not be published.",
-                [
-                    {
-                        field: "knowledgeManifest",
-                        reason: "names a file this profile does not have",
-                    },
-                ]
-            );
-        }
-    }
-
     const version = await prisma.$transaction(async (tx) => {
         const created = await tx.assistantProfileVersion.create({
             data: {
@@ -339,6 +376,8 @@ export const publishAssistantProfileVersion = async (input: {
                 toolPolicy: { ...plan.draft.toolPolicy },
                 memoryPolicy: { ...plan.draft.memoryPolicy },
                 starters: [...plan.draft.starters],
+                // From the plan, which is the normalised copy of what was
+                // resolved above.
                 knowledgeManifest: plan.draft.knowledgeManifest.map((entry) => ({
                     ...entry,
                 })),

@@ -52,16 +52,12 @@ const publishSchema = z
                 z.string().trim().max(ASSISTANT_PROFILE_LIMITS.maxStarterCharacters)
             )
             .max(ASSISTANT_PROFILE_LIMITS.maxStarters),
-        knowledgeManifest: z
-            .array(
-                z
-                    .object({
-                        fileId: z.string().trim().min(1).max(64),
-                        name: z.string().trim().min(1).max(200),
-                        digest: z.string().trim().min(1).max(128),
-                    })
-                    .strict()
-            )
+        // Ids only. The name and the digest are read from the rows on the
+        // server, because the digest is what a past version is compared
+        // against and a client-supplied one would let a caller decide what a
+        // past version is said to have contained.
+        knowledgeFileIds: z
+            .array(z.string().trim().min(1).max(64))
             .max(ASSISTANT_KNOWLEDGE_LIMITS.maxFilesPerProfile),
     })
     .strict();
@@ -137,7 +133,14 @@ export async function POST(
                 toolPolicy: body.toolPolicy,
                 memoryPolicy: body.memoryPolicy,
                 starters: body.starters,
-                knowledgeManifest: body.knowledgeManifest,
+                // The planner's draft shape carries entries; only the id is
+                // load-bearing here, and the service replaces the rest from
+                // the rows before anything is stored.
+                knowledgeManifest: body.knowledgeFileIds.map((fileId) => ({
+                    fileId,
+                    name: "",
+                    digest: "",
+                })),
             },
         });
 
