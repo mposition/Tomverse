@@ -3316,6 +3316,64 @@ const checks = [
         source
       ),
   },
+  {
+    name: "the fal adapter never retries a request that may already have been billed",
+    file: "lib/imageProviderAdapter.ts",
+    // The other three adapters retry, and correctly: an unbilled failure costs
+    // nothing to attempt again. Here a generation that succeeded and lost its
+    // response is indistinguishable from a transport failure, and retrying it
+    // buys a second image at a second charge while the user pays one fixed
+    // price. Read as the absence of a loop in this function, because the
+    // mistake would arrive as consistency -- someone making all four adapters
+    // look alike.
+    test: (source) => {
+      const start = source.indexOf("const generateWithFal");
+      if (start < 0) return false;
+      const end = source.indexOf("\nconst ", start + 10);
+      const body = source.slice(start, end < 0 ? undefined : end);
+      return (
+        !/\bfor\s*\(|\bwhile\s*\(|lastError/.test(body) &&
+        body.includes('"X-Fal-No-Retry"') === false &&
+        body.includes("falPlatformHeaders()")
+      );
+    },
+  },
+  {
+    name: "fal asset downloads are host-checked after redirects, not only before",
+    file: "lib/imageProviderAdapter.ts",
+    // An allowlisted URL that redirects elsewhere walks straight past the
+    // check it just passed, which turns the provider's response body into a
+    // request we make on its behalf. `redirect: "manual"` plus a check on the
+    // resolved response is what closes it.
+    test: (source) => {
+      const start = source.indexOf("const generateWithFal");
+      if (start < 0) return false;
+      const end = source.indexOf("\nconst ", start + 10);
+      const body = source.slice(start, end < 0 ? undefined : end);
+      return (
+        body.includes('redirect: "manual"') &&
+        body.includes("isFalAssetUrl(asset.url)") &&
+        body.includes("falAssetLengthRefused(asset.headers.get")
+      );
+    },
+  },
+  {
+    name: "the fal request pins every field its approved price was computed from",
+    file: "lib/falImageRequest.ts",
+    // 120 credits rest on a floor of 97, and that floor is arithmetic over a
+    // specific request. A field quietly dropped here does not break anything
+    // visible -- it just makes the audit trail describe a request the product
+    // no longer makes.
+    test: (source) =>
+      [
+        "num_images: 1",
+        'aspect_ratio: "1:1"',
+        'thinking_level: "high"',
+        "enable_web_search: false",
+        "limit_generations: true",
+        'system_prompt: ""',
+      ].every((field) => source.includes(field)),
+  },
 ];
 
 const failures = [];
