@@ -41,6 +41,7 @@ import {
 } from "@/lib/externalImportWizard";
 import type { WorkerResponse } from "@/lib/workers/externalImportWorker";
 import { trackProductEvent } from "@/lib/productAnalyticsClient";
+import { discardResponseBody } from "@/lib/discardResponseBody";
 
 /**
  * /settings/imports/new — the full-screen import wizard.
@@ -120,16 +121,19 @@ export function ExternalImportWizard() {
                 const response = await fetch("/api/imports/external/capacity", {
                     cache: "no-store",
                 });
-                if (cancelled) return;
-                if (response.status === 401) {
-                    setCapacity({ kind: "unauthenticated" });
-                    return;
-                }
-                if (response.status === 403) {
-                    setCapacity({ kind: "disabled" });
-                    return;
-                }
-                if (!response.ok) {
+                if (cancelled || !response.ok) {
+                    // None of these branches parses the body, so it is
+                    // consumed once here rather than in four places.
+                    await discardResponseBody(response);
+                    if (cancelled) return;
+                    if (response.status === 401) {
+                        setCapacity({ kind: "unauthenticated" });
+                        return;
+                    }
+                    if (response.status === 403) {
+                        setCapacity({ kind: "disabled" });
+                        return;
+                    }
                     setCapacity({ kind: "error" });
                     return;
                 }
@@ -277,7 +281,7 @@ export function ExternalImportWizard() {
         try {
             await fetch(`/api/imports/external/${importId}`, {
                 method: "DELETE",
-            });
+            }).then(discardResponseBody);
         } catch {
             // Abandoned staging is also cleared by the server TTL sweep.
         }

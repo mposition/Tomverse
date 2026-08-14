@@ -74,6 +74,7 @@ import {
 import { listImportableGuestConversations } from "@/lib/guestImport";
 import { openGuestImportModal } from "@/lib/guestImportModalEvents";
 import { useModalDialog } from "@/components/useModalDialog";
+import { discardResponseBody } from "@/lib/discardResponseBody";
 
 type LoginMethod =
     | { type: "oauth"; provider: "google" | "azure-ad"; linked: boolean }
@@ -360,7 +361,10 @@ export function AuthButton({
     const fetchLoginMethods = useCallback(async () => {
         try {
             const response = await fetch("/api/user/login-methods");
-            if (!response.ok) return;
+            if (!response.ok) {
+                await discardResponseBody(response);
+                return;
+            }
             const data = await response.json();
             setLoginMethods(Array.isArray(data.methods) ? data.methods : []);
             setCanRemoveLoginMethod(Boolean(data.canRemove));
@@ -384,7 +388,10 @@ export function AuthButton({
         let cancelled = false;
         fetch("/api/imports/external/capacity", { cache: "no-store" })
             .then(async (response) => {
-                if (cancelled || !response.ok) return;
+                if (cancelled || !response.ok) {
+                    await discardResponseBody(response);
+                    return;
+                }
                 const capacity = (await response.json()) as {
                     usage?: {
                         externalConversations?: number;
@@ -421,7 +428,14 @@ export function AuthButton({
             }),
         ])
             .then(async ([settingsResponse, candidateResponse]) => {
+                // Both bodies, on every path out of here. `Promise.all` means
+                // one refusal used to strand the other response's body unread
+                // as well, and a cancelled effect stranded both -- the request
+                // then stays in flight for the life of the page (see
+                // lib/apiCacheControlPolicy.ts).
                 if (cancelled || !settingsResponse.ok || !candidateResponse.ok) {
+                    await discardResponseBody(settingsResponse);
+                    await discardResponseBody(candidateResponse);
                     return;
                 }
                 const settings = (await settingsResponse.json()) as {
@@ -523,6 +537,7 @@ export function AuthButton({
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ method }),
             });
+            await discardResponseBody(response);
             if (!response.ok) {
                 if (response.status === 428) {
                     dispatchAppToast(t("auth.deleteAccountReauthRequired"), "error");
@@ -600,6 +615,7 @@ export function AuthButton({
             const response = await fetch("/api/user/login-methods/email/request", {
                 method: "POST",
             });
+            await discardResponseBody(response);
             if (!response.ok) throw new Error(`Request failed: ${response.status}`);
             setAddEmailCodeSent(true);
             dispatchAppToast(t("auth.emailLoginCodeSentTitle"), "info");
@@ -685,7 +701,9 @@ export function AuthButton({
                 });
 
             fetch("/api/billing/refund-request")
-                .then((res) => (res.ok ? res.json() : null))
+                .then((res) =>
+        res.ok ? res.json() : discardResponseBody(res).then(() => null)
+      )
                 .then(
                     (
                         data: {

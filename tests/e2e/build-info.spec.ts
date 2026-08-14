@@ -60,7 +60,12 @@ test.describe("build-info API contract (real endpoint)", () => {
   }) => {
     const response = await page.request.get("/api/build-info");
     expect(response.ok()).toBe(true);
-    expect(response.headers()["cache-control"]).toBe("no-store");
+    // `private` as well as `no-store`, and both are asserted rather than a
+    // `toContain("no-store")` that would pass if the proxy stopped saying
+    // `private`. The route file still writes `no-store`; the proxy adds
+    // `private` across `/api/*`, and build-info is not one of the five routes
+    // that choose their own caching, so this is what a client actually sees.
+    expect(response.headers()["cache-control"]).toBe("private, no-store");
     expect(response.headers()["content-type"]).toContain("application/json");
 
     const body = await response.json();

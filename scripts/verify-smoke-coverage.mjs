@@ -32,6 +32,12 @@ const MANIFEST = [
   { file: "smoke.spec.ts", title: "guest preview opens a 3-model comparison chat by default", categories: ["guest", "modelSelection"] },
   { file: "guest-flow.spec.ts", title: "guest message appears immediately with mocked response", categories: ["guest"] },
   { file: "guest-flow.spec.ts", title: "guest cannot activate a paid model", categories: ["guest", "payment"], mandatory: true },
+  // `private, no-store` on /api/* means the browser drains no response body of
+  // its own, so a client fetch that ignores an error body leaves the request in
+  // flight for the life of the page. It is on the guest boot path, it costs one
+  // navigation, and it is the failure the @ui-risk tier only reports as a
+  // twenty-minute timeout.
+  { file: "guest-flow.spec.ts", title: "a guest-usage read that fails still finishes its request", categories: ["guest"], mandatory: true },
 
   // --- auth / account ------------------------------------------------------
   { file: "smoke.spec.ts", title: "signed-in homepage keeps the page visible and offers one continue action", categories: ["auth"], mandatory: true },

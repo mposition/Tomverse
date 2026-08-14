@@ -23,6 +23,7 @@ import { parseSettingsDeepLink } from "@/lib/settingsNavigation";
 import { useSidebarCollapsePreference } from "@/components/chat/useSidebarCollapse";
 import { useShortViewport } from "@/components/chat/useVisualViewport";
 import { BuildInfoMenuItem, BuildStagingBadge } from "@/components/chat/BuildInfoMenu";
+import { discardResponseBody } from "@/lib/discardResponseBody";
 
 type ChatSidebarProps = {
     conversations: Conversation[];
@@ -325,7 +326,11 @@ export function ChatSidebar({
                 signal: controller.signal,
                 cache: "no-store",
             })
-                .then((response) => (response.ok ? response.json() : { results: [] }))
+                .then((response) =>
+                    response.ok
+                        ? response.json()
+                        : discardResponseBody(response).then(() => ({ results: [] }))
+                )
                 .then((data) => setMessageSearchResults(Array.isArray(data.results) ? data.results : []))
                 .catch(() => {});
         }, 250);
@@ -438,7 +443,11 @@ export function ChatSidebar({
             cache: "no-store",
             signal: controller.signal,
         })
-            .then((response) => (response.ok ? response.json() : { projects: [] }))
+            .then((response) =>
+                response.ok
+                    ? response.json()
+                    : discardResponseBody(response).then(() => ({ projects: [] }))
+            )
             .then((data) => {
                 const nextProjects = Array.isArray(data.projects)
                     ? data.projects
@@ -474,6 +483,7 @@ export function ChatSidebar({
                 body: JSON.stringify({ name }),
             });
             if (!response.ok) {
+                await discardResponseBody(response);
                 dispatchAppToast(t("sidebar.projectRenameFailed"), "error");
                 return;
             }
@@ -524,6 +534,7 @@ export function ChatSidebar({
                 body: JSON.stringify({ name }),
             });
             if (!response.ok) {
+                await discardResponseBody(response);
                 setProjects(previousProjects);
                 dispatchAppToast(t("sidebar.projectRenameFailed"), "error");
                 return;
@@ -571,6 +582,7 @@ export function ChatSidebar({
         const response = await fetch(`/api/projects/${projectId}`, {
             method: "DELETE",
         });
+        await discardResponseBody(response);
         if (!response.ok) {
             setProjects(previousProjects);
             dispatchAppToast(t("sidebar.projectDeleteFailed"), "error");
@@ -592,6 +604,7 @@ export function ChatSidebar({
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ projectId }),
         });
+        await discardResponseBody(response);
         if (!response.ok) {
             setConversationProjectOverrides((current) => ({
                 ...current,

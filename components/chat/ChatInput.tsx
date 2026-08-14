@@ -106,6 +106,7 @@ import {
 } from "@/lib/guestAttachmentPolicy";
 import { useGuestVerification } from "@/components/chat/GuestVerificationProvider";
 import { useModalDialog } from "@/components/useModalDialog";
+import { discardResponseBody } from "@/lib/discardResponseBody";
 
 type PublicModelStatus = "available" | "limited" | "unavailable";
 type PublicModelStatusRecord = {
@@ -1168,7 +1169,9 @@ export function ChatInput({
       signal: controller.signal,
       cache: "no-store",
     })
-      .then((response) => (response.ok ? response.json() : null))
+      .then((response) =>
+        response.ok ? response.json() : discardResponseBody(response).then(() => null)
+      )
       .then((data: unknown) => {
         if (!data || typeof data !== "object") return;
         const records = (data as { models?: unknown }).models;
@@ -1222,7 +1225,9 @@ export function ChatInput({
       signal: controller.signal,
       cache: "no-store",
     })
-      .then((response) => (response.ok ? response.json() : null))
+      .then((response) =>
+        response.ok ? response.json() : discardResponseBody(response).then(() => null)
+      )
       .then((data: unknown) => {
         if (!data || typeof data !== "object") return;
         const settings = (data as { settings?: unknown }).settings;
@@ -1664,6 +1669,7 @@ export function ChatInput({
           }),
         });
         if (!prepareResponse.ok) {
+          await discardResponseBody(prepareResponse);
           throw new Error("Failed to prepare upload.");
         }
 
@@ -1676,6 +1682,7 @@ export function ChatInput({
               : { "Content-Type": mediaType },
           body: file,
         });
+        await discardResponseBody(uploadResponse);
         if (!uploadResponse.ok) {
           throw new Error(`R2 upload failed: ${uploadResponse.status}`);
         }
@@ -1699,6 +1706,7 @@ export function ChatInput({
           }),
         });
         if (!finalizeResponse.ok) {
+          await discardResponseBody(finalizeResponse);
           throw new Error(`R2 validation failed: ${finalizeResponse.status}`);
         }
         const finalized = await finalizeResponse.json();
@@ -1881,6 +1889,7 @@ export function ChatInput({
     try {
       const configResponse = await fetch("/api/chat");
       if (!configResponse.ok) {
+        await discardResponseBody(configResponse);
         throw new Error("Google Picker configuration is unavailable.");
       }
       const config: unknown = await configResponse.json();
@@ -1976,6 +1985,7 @@ export function ChatInput({
           }),
         });
         if (!response.ok) {
+          await discardResponseBody(response);
           throw new Error(`Google Drive import failed: ${response.status}`);
         }
 
@@ -2021,6 +2031,7 @@ export function ChatInput({
           body: JSON.stringify({ key: attachment.objectKey }),
         }
       );
+      await discardResponseBody(response);
       if (!response.ok) {
         throw new Error(`R2 deletion failed: ${response.status}`);
       }

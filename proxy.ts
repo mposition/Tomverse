@@ -16,6 +16,11 @@ import {
   isAllowedRequestHost,
 } from "@/lib/originProtection";
 import {
+  apiRouteChoosesOwnCaching,
+  DEFAULT_API_CACHE_CONTROL,
+  isApiPathname,
+} from "@/lib/apiCacheControlPolicy";
+import {
   hasValidMutationOrigin,
   requiresMutationOriginCheck,
 } from "@/lib/requestOrigin";
@@ -237,6 +242,16 @@ export function proxy(request: NextRequest) {
       "Cache-Control",
       "public, max-age=0, s-maxage=3600, stale-while-revalidate=86400"
     );
+  } else if (
+    isApiPathname(request.nextUrl.pathname) &&
+    !apiRouteChoosesOwnCaching(request.nextUrl.pathname)
+  ) {
+    // Next attaches no Cache-Control to a route handler response, and a
+    // response with none is heuristically cacheable by a shared cache. See
+    // lib/apiCacheControlPolicy.ts for why this is set here, and why the
+    // handful of routes that choose their own caching are listed rather than
+    // detected: a header set in middleware overrides the route's own.
+    response.headers.set("Cache-Control", DEFAULT_API_CACHE_CONTROL);
   }
   const reportUrl = new URL(
     "/api/security/csp-report",

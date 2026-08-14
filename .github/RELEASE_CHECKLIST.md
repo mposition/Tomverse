@@ -28,6 +28,13 @@ Date / timezone:    ____________________
 - [ ] `npm run check:accent-tokens`
 - [ ] `npm run check:model-pricing`
 - [ ] `npm run check:default-models`
+- [ ] `npm run check:api-cache-control` — proves the proxy's `/api/*` default
+      does not silently replace a route's own caching decision
+- [ ] `npm run check:unconsumed-response-bodies` — the other half of that
+      default: `private, no-store` leaves the browser no cache entry to write,
+      so a client fetch that ignores an error body keeps the request in flight.
+      Blocks browser-capable code on the one target that was measured, and says
+      so; the server-side candidates are reported, not gated
 - [ ] `npm run check:encoding:strict`
 - [ ] `npm run build`
 - [ ] `npm run verify:smoke-coverage`

@@ -22,6 +22,7 @@ import {
     STYLE_MEMORY_KINDS,
     type MemoryKind,
 } from "@/lib/memoryValidatorCore";
+import { discardResponseBody } from "@/lib/discardResponseBody";
 
 /**
  * /settings/memory — the Release B review surface (policy §8, §21, slice B3).
@@ -322,11 +323,12 @@ export function MemoryReviewSettings() {
             const response = await fetch("/api/memories/settings", {
                 cache: "no-store",
             });
-            if (response.status === 401) {
-                setSettingsState({ kind: "unauthenticated" });
-                return;
-            }
             if (!response.ok) {
+                await discardResponseBody(response);
+                if (response.status === 401) {
+                    setSettingsState({ kind: "unauthenticated" });
+                    return;
+                }
                 setSettingsState({ kind: "error" });
                 return;
             }
@@ -351,6 +353,7 @@ export function MemoryReviewSettings() {
                     { cache: "no-store" }
                 );
                 if (!response.ok) {
+                    await discardResponseBody(response);
                     setListState({ kind: "error" });
                     return null;
                 }
@@ -572,6 +575,7 @@ export function MemoryReviewSettings() {
                 cache: "no-store",
             });
             if (!response.ok) {
+                await discardResponseBody(response);
                 setExportError(response.status === 428 ? "reauth" : "generic");
                 return;
             }

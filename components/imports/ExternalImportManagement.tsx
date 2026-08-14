@@ -29,6 +29,7 @@ import {
     groupConversationsByLineage,
     type LineageGroup,
 } from "@/lib/externalConversationLineage";
+import { discardResponseBody } from "@/lib/discardResponseBody";
 
 /**
  * /settings/imports — the management screen.
@@ -162,15 +163,18 @@ export function ExternalImportManagement() {
             const response = await fetch("/api/imports/external/capacity", {
                 cache: "no-store",
             });
-            if (response.status === 401) {
-                setCapacityState({ kind: "unauthenticated" });
-                return;
-            }
-            if (response.status === 403) {
-                setCapacityState({ kind: "disabled" });
-                return;
-            }
             if (!response.ok) {
+                // None of these branches parses the body, so it is consumed
+                // once here rather than in three places.
+                await discardResponseBody(response);
+                if (response.status === 401) {
+                    setCapacityState({ kind: "unauthenticated" });
+                    return;
+                }
+                if (response.status === 403) {
+                    setCapacityState({ kind: "disabled" });
+                    return;
+                }
                 setCapacityState({ kind: "error" });
                 return;
             }
@@ -186,11 +190,12 @@ export function ExternalImportManagement() {
             const response = await fetch("/api/imports/external", {
                 cache: "no-store",
             });
-            if (response.status === 401) {
-                setHistoryState({ kind: "unauthenticated" });
-                return;
-            }
             if (!response.ok) {
+                await discardResponseBody(response);
+                if (response.status === 401) {
+                    setHistoryState({ kind: "unauthenticated" });
+                    return;
+                }
                 setHistoryState({ kind: "error" });
                 return;
             }
@@ -217,11 +222,12 @@ export function ExternalImportManagement() {
                     `/api/external-conversations?offset=${offset}&limit=${CONVERSATIONS_PAGE_SIZE}`,
                     { cache: "no-store" }
                 );
-                if (response.status === 401 || response.status === 403) {
-                    setConversationsState({ kind: "hidden" });
-                    return;
-                }
                 if (!response.ok) {
+                    await discardResponseBody(response);
+                    if (response.status === 401 || response.status === 403) {
+                        setConversationsState({ kind: "hidden" });
+                        return;
+                    }
                     setConversationsState({ kind: "error" });
                     return;
                 }
@@ -274,6 +280,8 @@ export function ExternalImportManagement() {
                             memoryImpact?: SourceDeletionImpactView;
                         };
                         setMemoryImpact(body.memoryImpact ?? null);
+                    } else {
+                        await discardResponseBody(preview);
                     }
                 } catch {
                     // No preview is not a reason to block the delete; the
@@ -289,6 +297,7 @@ export function ExternalImportManagement() {
                     }`,
                     { method: "DELETE" }
                 );
+                await discardResponseBody(response);
                 if (response.ok) {
                     void loadCapacity();
                     void loadConversations();
