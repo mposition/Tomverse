@@ -44,13 +44,31 @@ export type RoutingAttemptOutcome =
   | "failed_pre_token"
   | "failed_post_token"
   | "cancelled"
-  | "succeeded";
+  | "succeeded"
+  /**
+   * The process stopped reporting after the dispatch was recorded.
+   *
+   * Written only by the stale-attempt sweep, and only about an attempt that
+   * reached a provider. It is deliberately not `failed_pre_token`: nobody
+   * observed the provider call, so recording a failure would be a claim about
+   * an outcome that was never seen. What is known is that a dispatch happened
+   * and the turn never came back to say how it ended.
+   */
+  | "unknown_after_dispatch";
 
 export type RoutingFailureLayer =
   | "planner"
   | "adapter"
   | "manifest"
   | "billing"
+  /**
+   * This process stopped, and nothing about the request failed.
+   *
+   * Separate from `provider` because §8's recovery reads provider and model
+   * health to decide what to route to next: a host restart filed as a provider
+   * failure would move conversations off a model that did nothing wrong.
+   */
+  | "process"
   | "provider"
   | "stream"
   | "none";
@@ -253,6 +271,20 @@ export const abandonDraft = async (input: {
   });
 };
 
+/**
+ * Records how an attempt ended, once.
+ *
+ * A compare-and-set on `outcome = 'pending'`, not an update. Two writers can
+ * reach one attempt: the request itself, and the sweep that closes attempts
+ * whose process stopped. Without the predicate the later one silently wins,
+ * and the field it overwrites is the one §5's outcomes, §8's recovery and the
+ * fallback drill's scenarios are all told apart by.
+ *
+ * Returns whether this call was the one that closed it. `false` is not an
+ * error -- it is the sweep discovering the request got there first, or the
+ * request discovering the sweep did -- but a caller that treats it as success
+ * will report an outcome that was not written.
+ */
 export const closeAttempt = async (input: {
   attemptId: string;
   outcome: RoutingAttemptOutcome;
@@ -261,10 +293,10 @@ export const closeAttempt = async (input: {
   actualInputTokens?: number | null;
   actualOutputTokens?: number | null;
   errorClass?: string | null;
-}) => {
+}): Promise<boolean> => {
   const clean = input.outcome === "succeeded" || input.outcome === "cancelled";
-  await prisma.routingAttempt.update({
-    where: { id: input.attemptId },
+  const updated = await prisma.routingAttempt.updateMany({
+    where: { id: input.attemptId, outcome: "pending" },
     data: {
       outcome: input.outcome,
       failureLayer: clean ? "none" : (input.failureLayer ?? "provider"),
@@ -274,6 +306,7 @@ export const closeAttempt = async (input: {
       errorClass: clean ? null : (input.errorClass ?? null),
     },
   });
+  return updated.count === 1;
 };
 
 /**

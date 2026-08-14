@@ -44,7 +44,20 @@ export async function recordInternalProviderUsage({
   outputCostMicroUsd,
   date,
   source = "internal",
-}: ProviderUsageRecordInput) {
+  client,
+}: ProviderUsageRecordInput & {
+  /**
+   * The transaction to record in, when the caller has one.
+   *
+   * This rollup is keyed on (provider, modelId, source, date) and has no
+   * per-request identity, so nothing about the row itself can tell a repeated
+   * increment from a new one. A caller that dedupes elsewhere -- chat
+   * settlement dedupes on ChatAttemptUsage's (reservationId, attemptIndex) --
+   * has to commit its dedupe record and this increment together, or a crash
+   * between them leaves the rollup and the evidence for it disagreeing.
+   */
+  client?: Prisma.TransactionClient;
+}) {
   const usageDate = dayStartUtc(date);
   const safeInputTokens = Math.max(0, Math.min(2_000_000_000, Math.round(inputTokens)));
   const safeOutputTokens = Math.max(0, Math.min(2_000_000_000, Math.round(outputTokens)));
@@ -57,7 +70,7 @@ export async function recordInternalProviderUsage({
   const safeCachedInputCost = Math.max(0, Math.min(2_000_000_000, Math.round(cachedInputCostMicroUsd)));
   const safeOutputCost = Math.max(0, Math.min(2_000_000_000, Math.round(outputCostMicroUsd)));
 
-  await prisma.providerDailyUsage.upsert({
+  await (client ?? prisma).providerDailyUsage.upsert({
     where: {
       provider_modelId_source_date: {
         provider,

@@ -816,6 +816,20 @@ model ChatCreditReservation {
   createdAt                DateTime  @default(now())
   updatedAt                DateTime  @updatedAt
 
+  /// Which attempt the user's charge was computed from, once one was.
+  ///
+  /// A pointer rather than a flag on the attempt row, so ChatAttemptUsage
+  /// stays completely immutable: the cost of an attempt is written when the
+  /// attempt ends, and which attempt the user pays for is not known until
+  /// settlement. A flag would have needed an UPDATE on an audit row.
+  ///
+  /// Structurally "at most one" -- one column, one row. NULL is honest and
+  /// reachable: a turn whose process died after dispatching has attempt costs
+  /// and no settlement, and saying so beats guessing which one it would have
+  /// been. A composite foreign key makes the index it names a real attempt of
+  /// this reservation rather than any integer.
+  settlementAttemptIndex   Int?
+  settlementAttempt        ChatAttemptUsage? @relation("ReservationSettlementAttempt", fields: [id, settlementAttemptIndex], references: [reservationId, attemptIndex], onDelete: NoAction, onUpdate: NoAction, map: "ChatCreditReservation_settlementAttempt_fkey")
   attemptUsage             ChatAttemptUsage[]
 
   @@index([status, expiresAt])
@@ -850,12 +864,6 @@ model ChatAttemptUsage {
   modelId       String
   provider      String
   outcome       String
-  /// Whether the user's charge was computed from this attempt. At most one
-  /// row per reservation may carry true -- a partial unique index enforces it,
-  /// because "exactly one end-user settlement" is the rule a fallback is most
-  /// likely to break and the least likely to break loudly.
-  userBilled    Boolean               @default(false)
-
   providerRequestId  String?
   providerResponseId String?
 
@@ -868,6 +876,11 @@ model ChatAttemptUsage {
   pricingSnapshot   Json?
 
   createdAt DateTime @default(now())
+
+  /// The reservations that settled against this attempt. At most one, and the
+  /// composite foreign key is what makes the pointer name a real attempt of
+  /// that reservation rather than any integer.
+  settledReservations ChatCreditReservation[] @relation("ReservationSettlementAttempt")
 
   @@unique([reservationId, attemptIndex])
   @@index([provider, createdAt])
