@@ -235,9 +235,10 @@ it: §7 names policy rejection and insufficient credits as non-candidates and
 the function had no way to say so, so `FailedAttempt` now carries a
 `providerRefusal` and there are two more named refusals for it.
 
-Neither module is wired into the chat route. That is step 3, and the scan in
-`tests/automaticFallbackAbsence.test.mjs` still holds: there is exactly one
-`streamText` call and its model is a single resolved identifier.
+Both are wired into the chat route in step 3. The scan that used to prove the
+*absence* of any substitution is now
+`tests/automaticFallbackBoundary.test.mjs`, and proves the narrower thing that
+is actually true — see §9.3.
 
 **~~Swapping `sourceReader` and `result` is not enough.~~ Done — step 2.** The
 closure also holds `modelConfig`, `generationSettings`, `webSearchToolConfig`,
@@ -321,17 +322,109 @@ wrong within one turn instead of one. The stream now reads a `dispatched`
 holder — the per-attempt state of step 2, in place — and
 `tests/chatDispatchedModelAttribution.test.mjs` scans for a relapse.
 
-**The Router does not surface a fallback candidate.** `decideFallback` takes
-`nextCandidateModelIds`, and §6 requires that candidate to have passed the
-same filters as the primary — so the list has to come from the Router rather
-than be recomputed in the stream, where it would be a second and divergent
-filter. `AutoSelection` returns only `modelId`. `RouterDecision` holds
-`candidates.eligible`, which is the filtered set, but the *ranking* lives in
-`lib/routerSelection.ts` and is discarded once a winner is picked.
-`challengerModelId` is not the runner-up despite the name — it is the natural
-winner, equal to the selected model whenever stickiness is not overriding, so
-it cannot stand in. Surfacing the ranked eligible set is the remaining
-prerequisite, and it is the next thing to build.
+**~~The Router does not surface a fallback candidate.~~ Done.**
+`decideFallback` takes `nextCandidateModelIds`, and §6 requires that candidate
+to have passed the same filters as the primary — so the list has to come from
+the Router rather than be recomputed in the stream, where it would be a second
+and divergent filter. `RouterSelectionResult` now carries `rankedModelIds`,
+`RouterDecision` turns it into `fallbackCandidateModelIds` with the chosen
+model removed, and `AutoSelection` passes it through. The removal is by
+identity rather than by position: stickiness can select a model the ranking did
+not put first, and a list that still held the primary would offer it as its own
+alternative. `challengerModelId` was not usable despite the name — it is the
+natural winner, equal to the selected model whenever stickiness is not
+overriding.
+
+### 9.3 The swap, as built
+
+Behind `AUTO_ROUTER_FALLBACK_ENABLED`, which defaults off.
+
+The seam is the stream's `pull()` catch, after the provider- and model-health
+records and before the turn ends. A provider that failed is counted as having
+failed whether or not another model rescues the answer: the fallback is a
+recovery for the user, not an amnesty for the provider.
+
+In order: classify the failure (`lib/routingStreamFailure.ts`), check the
+scope, ask `decideFallback`, plan the candidate (`planAttemptExecution` — its
+own budget, window fit and capability checks), move the provider budget if the
+provider differs, close the failed attempt as `failed_pre_token`, open the next
+one, emit the retry signal, and replace the per-attempt state wholesale.
+
+Four things it does that are easy to get wrong:
+
+- **One run, not two.** `beginRetryAttempt` opens a second attempt on the same
+  `RoutingRun` and spends §6's build budget itself. Two runs would read as two
+  responses and the reroute rate would be zero forever. It also builds the
+  candidate's own manifest — §5 requires one per attempt, and it digests the
+  messages inside the instrumentation module so the route never holds the
+  manifest hash key.
+- **The budget moves before the call.** §10 authorizes every dispatch including
+  this one, and money held at one provider does not make a call to another
+  affordable. Reserve before release, one transaction: a refusal leaves the
+  primary's hold as it was.
+- **§8 is written on success only.** `recordFallbackRecovery` runs when the
+  answer exists. A recovery candidate stored for a retry that also failed would
+  send the next turn back to a model that never worked. The conversation's
+  sticky model becomes the one that answered, not the one the Router chose, and
+  the hysteresis streak restarts — a fallback is not evidence about a
+  challenger.
+- **The user is billed once.** Settlement passes both attempts to
+  `settleChatUsage`, which charges the accepted one and puts each attempt's
+  real cost on its own provider's budget. The failed primary is recorded with
+  the reserved input estimate and zero output, flagged as an estimate: no usage
+  metadata exists for a stream that failed before its first chunk, and
+  over-recording provider spend is the safe direction for a ledger whose job is
+  to stop a budget being exceeded.
+
+The scan that used to prove there was no substitution at all is now
+`tests/automaticFallbackBoundary.test.mjs`, renamed and rewritten. It used to prove
+there was no substitution mechanism at all, which is no longer true; it now
+pins that the second model comes from the Router's ranked candidates and never
+from the provider-suggestion table, that `decideFallback` refuses on a visible
+token, that the route hands it what it actually enqueued, and that a deployment
+setting nothing substitutes nothing.
+
+### 9.4 The drill
+
+Step 4 is prepared and not run: `docs/ops/tomverse-chat-fallback-drill.md` is
+the runbook, `lib/routingFaultInjection.ts` the injector, and
+`npm run drill:fallback-verify` the judgement.
+
+The injector has three locks and needs all of them: not production (resolved by
+`lib/deploymentEnvironment.ts`, which fails closed, so an unlabelled deployment
+injects nothing), a configured `ROUTING_FAULT_INJECTION_SECRET`, and the
+request's own header carrying that secret. Per request, never a percentage of
+traffic — a QA session that had nothing to do with the drill must not start
+failing. Every armed request logs `chat_fault_injection_armed` first, so a
+drill is never read as an outage in the record it is about to produce.
+
+The verifier's judgement is separated from its query and unit-tested, because a
+verifier exercised only by real drills has its bugs found during one — and a
+false pass is the worst outcome available here.
+
+Step 5 is prepared too. Three of its four cases are faults —
+`attempt_1_pre_token` for a fallback that also fails, `attempt_0_post_token`
+for the control that must not substitute at all — and the fourth is
+`npm run drill:fallback-disconnect`, a client that hangs up mid-retry, because
+no provider-side fault reproduces the client going away. Its abort point is
+exact rather than a race: §7 puts the retry signal on the wire before the next
+model's first token and providers cannot emit a NUL, so "abort on the marker"
+lands between the fallback being dispatched and its first token every time.
+
+Writing that case is what found a real defect in the swap.
+`cancelSourceSafely` latches `sourceCancelled`, and the latch means "the
+current source is cancelled" — which stops being true the moment a different
+source is installed. Cancelling the replaced reader through it would have left
+a later disconnect with nothing to cancel, and the *fallback's* provider stream
+open and billing after the user had gone. The swap now cancels the replaced
+reader directly and clears the latch when it installs the new one.
+
+§7 of the drill runbook is the enable checklist, which is deliberately a
+decision and not the last line of a script.
+
+| Variable | Meaning |
+| --- | --- |
+| `ROUTING_FAULT_INJECTION_SECRET` | ≥16 chars. Unset means the injector does not exist. Remove it when the drill is over |
 
 Order that keeps each step checkable:
 
@@ -340,8 +433,7 @@ Order that keeps each step checkable:
    provider~~ — done, above;
 2. ~~the per-attempt execution state and the multi-attempt settlement
    contract~~ — done, above;
-3. the swap, behind a flag that is off — the scope gate and the per-attempt
-   stream state are in; the swap itself waits on §9.2's ranked candidates;
+3. ~~the swap, behind a flag that is off~~ — done, §9.3;
 4. staging fault injection on the first provider, confirming in the database
    and the logs: one run, one reservation, two attempts, one settlement, one
    lease release;

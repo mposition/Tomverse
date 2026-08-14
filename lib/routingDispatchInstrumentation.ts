@@ -379,7 +379,17 @@ export const beginRetryAttempt = async (
     plannerMode: PlannerMode;
     /** The layer that caused the retry, kept as §8's health evidence. */
     failureLayer: RoutingFailureLayer;
-    sourceRefs: ManifestSourceRef[];
+    /**
+     * The retry's own messages, digested here.
+     *
+     * Symmetric with `beginInstrumentedDispatch`, which takes messages rather
+     * than refs for the same reason: the manifest hash key belongs to this
+     * module and a caller holding it would be a caller able to forge a
+     * manifest. `sourceRefs` stays accepted for callers that have already
+     * built them.
+     */
+    messages?: readonly ManifestMessage[];
+    sourceRefs?: ManifestSourceRef[];
     tokenizerVersion: string;
     tokenCount: number;
     contextWindowTokens: number;
@@ -420,7 +430,9 @@ export const beginRetryAttempt = async (
     await createDraftManifest({
       attemptId,
       userId: input.userId ?? null,
-      sourceRefs: input.sourceRefs,
+      sourceRefs:
+        input.sourceRefs ??
+        buildManifestSourceRefs(input.messages ?? [], hashKey().secret),
       tokenizerVersion: input.tokenizerVersion,
       tokenCount: input.tokenCount,
       contextWindowTokens: input.contextWindowTokens,
