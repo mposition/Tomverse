@@ -125,6 +125,23 @@ const makeAnalyzer = (ts, isTarget) => {
     if (ts.isPropertyAccessExpression(node) || ts.isElementAccessExpression(node)) {
       return consumesExpression(node.expression);
     }
+    if (ts.isObjectLiteralExpression(node)) {
+      // Every property initialiser evaluates, so a read in any of them runs.
+      // `return { ok: true, body: await response.json() }` is the shape, and
+      // missing it reported `components/memory/MemoryReviewSettings.tsx` --
+      // which reads on both paths -- as leaking on the successful one.
+      return node.properties.some(
+        (property) =>
+          ts.isPropertyAssignment(property) &&
+          consumesExpression(property.initializer)
+      );
+    }
+    if (ts.isArrayLiteralExpression(node)) {
+      return node.elements.some((element) => consumesExpression(element));
+    }
+    if (ts.isTemplateExpression(node)) {
+      return node.templateSpans.some((span) => consumesExpression(span.expression));
+    }
     return false;
   };
 
@@ -230,20 +247,82 @@ const findsEscape = (ts, scope, isTarget) => {
   return escaped;
 };
 
-/** The statement list a node sits in, and its index within it. */
-const statementContext = (ts, node) => {
+/**
+ * The name an awaited `fetch()` lands in, and the statement that binds it.
+ *
+ * Three shapes, all of which appear here and all of which are the same
+ * question: `const r = await fetch(…)`, `r = await fetch(…)` into a `let`
+ * declared earlier, and `let r = cond ? await other() : await fetch(…)`, where
+ * the await is one arm of a ternary. Reading only the first was a real cost --
+ * `lib/feedbackClient.ts` reads its body on both paths and was reported as
+ * dropping it, which is exactly the kind of finding that teaches a reader to
+ * stop trusting the list.
+ */
+const awaitedBinding = (ts, awaitNode) => {
+  let child = awaitNode;
+  let current = awaitNode.parent;
+  while (current) {
+    if (ts.isVariableDeclaration(current) && ts.isIdentifier(current.name)) {
+      // `parent.parent` is the declaration list, and its parent the statement.
+      return { name: current.name.text, statement: current.parent.parent };
+    }
+    if (
+      ts.isBinaryExpression(current) &&
+      current.operatorToken.kind === ts.SyntaxKind.EqualsToken &&
+      ts.isIdentifier(current.left) &&
+      current.right === child
+    ) {
+      return { name: current.left.text, statement: current.parent };
+    }
+    if (
+      ts.isConditionalExpression(current) ||
+      ts.isParenthesizedExpression(current) ||
+      ts.isAwaitExpression(current)
+    ) {
+      child = current;
+      current = current.parent;
+      continue;
+    }
+    return null;
+  }
+  return null;
+};
+
+/**
+ * Every statement list between the binding and the function it lives in.
+ *
+ * Innermost first. One level is not enough: `lib/feedbackClient.ts` assigns
+ * inside a `try` and reads after the `try`/`catch`, so a walk that stopped at
+ * the inner block would see nothing after the assignment and call a consumed
+ * body a leak.
+ */
+const statementChain = (ts, node) => {
+  const chain = [];
   let child = node;
   let current = node.parent;
   while (current) {
     if (ts.isBlock(current) || ts.isSourceFile(current) || ts.isCaseClause(current)) {
-      const statements = current.statements;
-      const index = statements.indexOf(child);
-      if (index >= 0) return { statements, index, scope: current };
+      const index = current.statements.indexOf(child);
+      if (index >= 0) {
+        chain.push({ statements: current.statements, index, scope: current });
+        // A function boundary is where the response's life ends for this walk.
+        const owner = current.parent;
+        if (
+          owner &&
+          (ts.isFunctionDeclaration(owner) ||
+            ts.isFunctionExpression(owner) ||
+            ts.isArrowFunction(owner) ||
+            ts.isMethodDeclaration(owner) ||
+            ts.isSourceFile(current))
+        ) {
+          break;
+        }
+      }
     }
     child = current;
     current = current.parent;
   }
-  return null;
+  return chain;
 };
 
 /** The `.then(...)` handlers chained onto a call, in order. */
@@ -330,32 +409,34 @@ export function classifyFile(ts, filePath, source) {
     }
 
     const awaitNode = ts.isAwaitExpression(call.parent) ? call.parent : null;
-    if (
-      awaitNode &&
-      ts.isVariableDeclaration(awaitNode.parent) &&
-      ts.isIdentifier(awaitNode.parent.name)
-    ) {
-      const name = awaitNode.parent.name.text;
+    const binding = awaitNode ? awaitedBinding(ts, awaitNode) : null;
+    if (binding) {
+      const { name, statement } = binding;
       const isTarget = (candidate) =>
         ts.isIdentifier(candidate) && candidate.text === name;
-      const context = statementContext(ts, awaitNode.parent.parent.parent);
+      const chain = statementChain(ts, statement);
       const { analyzeStatements } = makeAnalyzer(ts, isTarget);
-      if (!context) {
-        record(call, "escapes", `const ${name} = await fetch(…) in an unknown scope`);
+      if (chain.length === 0) {
+        record(call, "escapes", `${name} = await fetch(…) in an unknown scope`);
         return;
       }
-      const outcome = analyzeStatements(context.statements, context.index + 1);
+      const context = chain[chain.length - 1];
+      let outcome = OPEN;
+      for (const level of chain) {
+        outcome = analyzeStatements(level.statements, level.index + 1);
+        if (outcome !== OPEN) break;
+      }
       if (outcome === CONSUMED) {
-        record(call, "consumed", `const ${name} = await fetch(…)`);
+        record(call, "consumed", `${name} = await fetch(…)`);
       } else if (findsEscape(ts, context.scope, isTarget)) {
-        record(call, "escapes", `const ${name} = await fetch(…) hands the response on`);
+        record(call, "escapes", `${name} = await fetch(…) hands the response on`);
       } else {
         record(
           call,
           "leaks",
           outcome === LEAK
-            ? `const ${name} = await fetch(…); a path returns or throws unread`
-            : `const ${name} = await fetch(…); control falls through unread`
+            ? `${name} = await fetch(…); a path returns or throws unread`
+            : `${name} = await fetch(…); control falls through unread`
         );
       }
       return;

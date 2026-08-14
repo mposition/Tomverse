@@ -27,6 +27,7 @@ import {
   getClientBillingMarket,
   type BillingCurrency,
 } from "@/lib/billingMarkets";
+import { discardResponseBody } from "@/lib/discardResponseBody";
 
 type BillingPlan = {
   id: "free" | "pro" | "max";
@@ -760,7 +761,9 @@ export function UpgradeInterestButton({
   useEffect(() => {
     if (!isOpen || billingConfig) return;
     fetch(getBillingConfigUrl())
-      .then((response) => (response.ok ? response.json() : null))
+      .then((response) =>
+        response.ok ? response.json() : discardResponseBody(response).then(() => null)
+      )
       .then((data: BillingConfig | null) => {
         if (!data) return;
         setBillingConfig(data);
@@ -781,7 +784,9 @@ export function UpgradeInterestButton({
       cache: "no-store",
       signal: controller.signal,
     })
-      .then(async (response) => (response.ok ? response.json() : null))
+      .then(async (response) =>
+        response.ok ? response.json() : discardResponseBody(response).then(() => null)
+      )
       .then((data) => {
         if (!data) return;
         setPurchaseAnalyticsContext({
@@ -895,6 +900,7 @@ export function UpgradeInterestButton({
         }),
       });
       if (response.status === 401) {
+        await discardResponseBody(response);
         router.push(
           `/auth/signin?callbackUrl=${encodeURIComponent(window.location.pathname)}`
         );
