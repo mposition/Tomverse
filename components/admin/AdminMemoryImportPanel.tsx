@@ -3,6 +3,8 @@
 import { useCallback, useEffect, useState } from "react";
 import { Brain, Loader2, RefreshCw } from "lucide-react";
 
+import { discardResponseBody } from "@/lib/discardResponseBody";
+
 /**
  * The reader for the import and memory observability APIs (§22).
  *
@@ -161,6 +163,20 @@ export function AdminMemoryImportPanel() {
                 fetch("/api/admin/external-imports", { cache: "no-store" }),
             ]);
             setError(null);
+            // The import report is secondary: its absence must not blank the
+            // memory half, so it is read but never throws. It is read *first*
+            // because the memory branch below throws: leaving this body unread
+            // on that path holds the request open for the life of the page
+            // (see lib/apiCacheControlPolicy.ts), and a refused import report
+            // did the same on its own.
+            let importData: ImportReport | null = null;
+            if (importResponse.ok) {
+                importData = (await importResponse
+                    .json()
+                    .catch(() => null)) as ImportReport;
+            } else {
+                await discardResponseBody(importResponse);
+            }
             const memoryData = (await memoryResponse.json().catch(() => null)) as
                 | MemoryReport
                 | { error?: string }
@@ -172,11 +188,6 @@ export function AdminMemoryImportPanel() {
                 );
             }
             setMemory(memoryData as MemoryReport);
-            // The import report is secondary: its absence must not blank the
-            // memory half, so it is read but never throws.
-            const importData = importResponse.ok
-                ? ((await importResponse.json().catch(() => null)) as ImportReport)
-                : null;
             setImports(importData);
         } catch (loadError) {
             setError(
