@@ -69,10 +69,23 @@ mobile-chromium 두 project에서 **27개 파일, 638 test**를 선택합니다.
 | `skip-link-and-armed-delete.spec.ts` |
 | `ssr-root-language.spec.ts` |
 
-검토 시점 실측(2026-08-05, `--list`): **25개 파일 630 test** (두 project 합계).
-이전 기록 "76 test / 14 skip / 67초"는 표에 적힌 5개 파일만 세던 시점의
-값입니다. 이 tier는 merge를 차단하므로, PR tier 비용을 근거로 무언가를
-빼거나 넣는 판단은 위 숫자를 다시 재고 나서 합니다.
+검토 시점 실측(2026-08-14, `--list`): **27개 파일 638 test** (두 project 합계).
+직전 값은 2026-08-05의 25개 파일 630 test였고, 그 뒤 `csp-eval-free.spec.ts`
+(+4)와 `external-import-settings.spec.ts`(+2)가 합류했습니다. 그 이전 기록
+"76 test / 14 skip / 67초"는 표에 적힌 5개 파일만 세던 시점의 값입니다. 이
+tier는 merge를 차단하므로, PR tier 비용을 근거로 무언가를 빼거나 넣는 판단은
+위 숫자를 다시 재고 나서 합니다.
+
+`external-import-settings.spec.ts`는 2026-08-14에 합류했습니다(27개 파일,
++2 test — desktop·mobile 각 1). 태그된 것은 그 파일의 한 case뿐입니다:
+`an HTML export is told how to fix it, not that it is unreadable`. Google
+Takeout은 My Activity를 JSON 또는 HTML로 내보내고 JSON만 지원하는데, HTML을
+고른 사용자는 **파일 선택기에서 자기 파일을 고를 수조차 없었고** 일반 "읽을 수
+없음"만 봤습니다. 고칠 방법을 아는 유일한 실패가 고칠 수 없는 실패로 보인
+것입니다. 계약은 두 가지 — `accept`에 `.html`이 있을 것, 그리고 화면이 "JSON
+형식으로 다시 내보내라"고 말할 것 — 이며 둘 다 브라우저에서만 확인됩니다.
+무태그로 두면 `main` push의 무필터 실행에서만 잡히는데, 이 회귀는 PR로
+들어옵니다.
 
 `csp-eval-free.spec.ts`는 2026-08-13에 합류했습니다(26개 파일, +4 test).
 이 tier의 다른 spec과 달리 UI 감사가 아니라 CSP 계약에서 왔습니다 — 클라이언트
