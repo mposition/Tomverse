@@ -9,7 +9,12 @@ import {
   MANIFEST_DETAIL_RETENTION_DAYS,
   MANIFEST_DETAIL_RETENTION_MS,
   compactAgedContextManifests,
-  oldestUncompactedManifestAgeDays,
+  compactionPatch,
+  MANIFEST_COMPACTION_CLEARS,
+  MANIFEST_COMPACTION_KEEPS,
+  MANIFEST_COMPACTION_TARGET_MS,
+  compactManifestsForMemoryChange,
+  manifestRetentionMetrics,
 } from "@/lib/routingManifestRetention";
 
 /**
@@ -159,31 +164,28 @@ test("a compacted manifest cannot be read as one that described nothing", async 
   });
   assert.notEqual(compacted.compactedAt, null);
 
-  // And the database refuses the two halves apart, in both directions.
+  // And the database refuses the two halves apart. The reason travels with
+  // the marker, so this supplies it and lets the detail rule be the one that
+  // fires -- a case that named two constraints would pass on either.
   const fresh = await seedManifest({ ageDays: 1 });
   await assert.rejects(
     prisma.contextManifest.update({
       where: { id: fresh.manifestId },
-      data: { compactedAt: NOW },
+      data: { compactedAt: NOW, compactionReason: "aged" },
     }),
     /compacted_has_no_detail_check/,
     "a manifest was marked compacted while still holding its detail"
   );
+
+  await prisma.contextManifest.update({
+    where: { id: fresh.manifestId },
+    data: compactionPatch(NOW, "aged"),
+  });
   await assert.rejects(
     prisma.contextManifest.update({
       where: { id: fresh.manifestId },
-      data: {
-        sourceRefs: [],
-        inclusionRange: Prisma.DbNull,
-        truncationPoints: Prisma.DbNull,
-        compactedAt: NOW,
-      },
-    }).then(() =>
-      prisma.contextManifest.update({
-        where: { id: fresh.manifestId },
-        data: { sourceRefs: [{ role: "user", index: 0, parts: [] }] },
-      })
-    ),
+      data: { sourceRefs: [{ role: "user", index: 0, parts: [] }] },
+    }),
     /compacted_has_no_detail_check/,
     "detail was written back onto a compacted manifest"
   );
@@ -289,19 +291,152 @@ test("deleting the account takes a manifest that has not aged at all", async () 
   );
 });
 
-// The second MANIFEST-02 metric, and the distinction that makes it readable:
-// nothing uncompacted is a pass, not a missing measurement.
-test("the oldest uncompacted age is a number, or null for nothing to report", async () => {
-  assert.equal(await oldestUncompactedManifestAgeDays(NOW), null);
+// A snapshot of "oldest uncompacted" forgets its own violations: a row that
+// sat at ninety-five days and was then compacted vanishes from it. A
+// compliance metric that erases breaches is not one.
+test("retention is measured on both sides, and breaches are counted", async () => {
+  const empty = await manifestRetentionMetrics(NOW);
+  assert.equal(empty.violations, 0);
+  assert.equal(empty.worstCompletedRetentionMs, null);
+  assert.equal(empty.worstOpenRetentionMs, null);
 
-  await seedManifest({ ageDays: 30 });
-  const age = await oldestUncompactedManifestAgeDays(NOW);
-  assert.ok(age !== null && Math.abs(age - 30) < 0.01);
+  // One row compacted late -- the case a snapshot would lose.
+  const late = await seedManifest({ ageDays: 95 });
+  await prisma.contextManifest.update({
+    where: { id: late.manifestId },
+    data: compactionPatch(NOW, "aged"),
+  });
+  // One row still holding detail, inside the window.
+  await seedManifest({ ageDays: 10 });
 
-  await seedManifest({ ageDays: 200 });
-  await compactAgedContextManifests(NOW);
-  // The 200-day row is compacted; the 30-day one is still inside its window.
-  const afterSweep = await oldestUncompactedManifestAgeDays(NOW);
-  assert.ok(afterSweep !== null && Math.abs(afterSweep - 30) < 0.01);
-  assert.ok(afterSweep <= MANIFEST_DETAIL_RETENTION_DAYS);
+  const metrics = await manifestRetentionMetrics(NOW);
+  assert.equal(metrics.compactedRows, 1);
+  assert.equal(metrics.detailedRows, 1);
+  assert.ok(
+    metrics.worstCompletedRetentionMs !== null &&
+      metrics.worstCompletedRetentionMs > MANIFEST_DETAIL_RETENTION_MS,
+    "a late compaction was not recorded as one"
+  );
+  assert.equal(metrics.violations, 1, "the breach was forgotten once compacted");
+
+  const openMs = metrics.worstOpenRetentionMs;
+  assert.ok(openMs !== null && Math.abs(openMs - 10 * DAY) < 1_000);
+});
+
+// Flooring to days is how 90.9 becomes 90 and a violation becomes a pass.
+test("a row past the ceiling by hours is a violation, not a rounded pass", async () => {
+  const { manifestId } = await seedManifest({ ageDays: 90 });
+  await prisma.contextManifest.update({
+    where: { id: manifestId },
+    data: { createdAt: new Date(NOW.getTime() - MANIFEST_DETAIL_RETENTION_MS - 3 * 60 * 60 * 1_000) },
+  });
+
+  const metrics = await manifestRetentionMetrics(NOW);
+  assert.equal(metrics.violations, 1);
+});
+
+// The sweep targets the ceiling minus one run of the schedule, so a daily
+// sweep never leaves a row sitting past ninety for a whole cycle.
+test("the sweep compacts before the ceiling, by one sweep interval", async () => {
+  assert.ok(MANIFEST_COMPACTION_TARGET_MS < MANIFEST_DETAIL_RETENTION_MS);
+  await seedManifest({ ageDays: 89.5 });
+
+  const result = await compactAgedContextManifests(NOW);
+  assert.equal(result.compacted, 1, "a row inside the headroom was left for another day");
+  assert.equal((await manifestRetentionMetrics(NOW)).violations, 0);
+});
+
+// §5: memory deletion and supersession outrank the retention window. Nothing
+// links a manifest to a memory item, so the scope is the account's detailed
+// manifests -- more than strictly necessary, which is the side to err on when
+// the policy says this outranks retention.
+test("a memory deletion compacts the account's detail without waiting", async () => {
+  const user = await prisma.user.create({
+    data: { email: `memory-change-${randomUUID()}@example.test` },
+  });
+  const mine = await seedManifest({ ageDays: 1, userId: user.id });
+  const someoneElse = await seedManifest({ ageDays: 1 });
+
+  const count = await compactManifestsForMemoryChange(user.id, "memory_deleted", NOW);
+  assert.equal(count, 1);
+
+  const compacted = await prisma.contextManifest.findUniqueOrThrow({
+    where: { id: mine.manifestId },
+  });
+  assert.equal(compacted.compactionReason, "memory_deleted");
+  assert.deepEqual(compacted.sourceRefs, []);
+
+  // Another account's manifest is untouched: this is a privacy transition for
+  // one person, not a sweep.
+  const untouched = await prisma.contextManifest.findUniqueOrThrow({
+    where: { id: someoneElse.manifestId },
+  });
+  assert.equal(untouched.compactedAt, null);
+});
+
+test("supersession is recorded as itself, not folded into deletion", async () => {
+  const user = await prisma.user.create({
+    data: { email: `memory-supersede-${randomUUID()}@example.test` },
+  });
+  const { manifestId } = await seedManifest({ ageDays: 1, userId: user.id });
+
+  await compactManifestsForMemoryChange(user.id, "memory_superseded", NOW);
+  const manifest = await prisma.contextManifest.findUniqueOrThrow({
+    where: { id: manifestId },
+  });
+  assert.equal(manifest.compactionReason, "memory_superseded");
+});
+
+// The allowlist is the mechanism: a column added later that carries a message
+// id or a summary label would keep being written past the window simply
+// because nobody thought to clear it.
+test("every manifest column is on exactly one side of the compaction split", async () => {
+  const columns = await prisma.$queryRaw<{ column_name: string }[]>`
+    SELECT column_name FROM information_schema.columns
+    WHERE table_name = 'ContextManifest'
+  `;
+  const named = new Set<string>([
+    ...MANIFEST_COMPACTION_KEEPS,
+    ...MANIFEST_COMPACTION_CLEARS,
+  ]);
+  const unclassified = columns
+    .map((row) => row.column_name)
+    .filter((name) => !named.has(name));
+
+  assert.deepEqual(
+    unclassified,
+    [],
+    "a manifest column belongs to neither the kept nor the cleared list"
+  );
+});
+
+// A reason with nothing compacted is a claim about an event that did not
+// happen, and a compaction with no reason is a record nobody can audit.
+test("the compaction marker and its reason are stored together", async () => {
+  const { manifestId } = await seedManifest({ ageDays: 1 });
+  await assert.rejects(
+    prisma.contextManifest.update({
+      where: { id: manifestId },
+      data: { compactionReason: "aged" },
+    }),
+    /compaction_reason_pair_check/
+  );
+});
+
+test("a compaction reason nobody enumerated is refused", async () => {
+  const { manifestId } = await seedManifest({ ageDays: 1 });
+  await assert.rejects(
+    prisma.contextManifest.update({
+      where: { id: manifestId },
+      data: {
+        sourceRefs: [],
+        inclusionRange: Prisma.DbNull,
+        truncationPoints: Prisma.DbNull,
+        summaryVersion: null,
+        compactedAt: NOW,
+        compactionReason: "because",
+      },
+    }),
+    /compactionReason_check/
+  );
 });

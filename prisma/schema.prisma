@@ -2979,11 +2979,25 @@ model ContextManifest {
   /// Why a draft was abandoned. Required when the state says it was.
   notDispatchedReason String?
 
+  /// How the surviving hash can be checked later. The scheme version and the
+  /// algorithm because both change; the key *id* because the key itself must
+  /// never be stored, and a commitment nobody can name the key for is a
+  /// commitment nobody can verify after a rotation.
+  contentHashVersion String?
+  hashAlgorithm      String?
+  hashKeyId          String?
+
   /// MANIFEST-02. When the per-part detail was dropped and only the aggregate
   /// kept. A marker rather than an inference: without it a compacted manifest
   /// would read as a dispatch that described no sources at all, which is the
   /// misrepresentation §5 forbids.
   compactedAt DateTime?
+
+  /// Why the detail went: "aged" for the retention sweep, or a privacy
+  /// transition that outranks it. Account deletion is absent on purpose —
+  /// it removes the row rather than compacting it, so it has no reason to
+  /// record. Allowlist CHECK lives in the migration.
+  compactionReason String?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

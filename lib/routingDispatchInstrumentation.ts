@@ -50,6 +50,11 @@ import type {
   RouterVersions,
 } from "@/lib/routerDecision";
 import {
+  MANIFEST_HASH_ALGORITHM,
+  activeManifestHashKey,
+} from "@/lib/manifestHashKeyring";
+import {
+  MANIFEST_CONTENT_VERSION,
   buildManifestSourceRefs,
   type ManifestSourceRef,
   effectiveRequestHash,
@@ -64,14 +69,25 @@ export const dispatchInstrumentationMode = (): DispatchInstrumentationMode => {
   return raw === "observe" || raw === "enforce" ? raw : "off";
 };
 
-const secret = () => {
-  const value = process.env.NEXTAUTH_SECRET;
-  if (!value) {
+/**
+ * The key new manifests are digested with, and its id.
+ *
+ * Its own keyring, not the session secret. `NEXTAUTH_SECRET` is rotated on
+ * authentication's schedule, and every rotation would leave the manifests
+ * written before it holding a commitment nothing could check. Throws when the
+ * keyring is unset rather than falling back: a manifest whose key nobody can
+ * name is worse than one that was never written, because the first looks like
+ * evidence.
+ */
+const hashKey = () => {
+  try {
+    return activeManifestHashKey();
+  } catch (error) {
     throw new DispatchBoundaryError(
-      "NEXTAUTH_SECRET is required to digest a context manifest."
+      "No manifest hash key is configured, so no manifest can be digested.",
+      error
     );
   }
-  return value;
 };
 
 /**
@@ -253,7 +269,7 @@ export const beginInstrumentedDispatch = async (
     await createDraftManifest({
       attemptId,
       userId: input.userId ?? null,
-      sourceRefs: buildManifestSourceRefs(input.messages, secret()),
+      sourceRefs: buildManifestSourceRefs(input.messages, hashKey().secret),
       tokenizerVersion: input.tokenizerVersion,
       tokenCount: input.tokenCount,
       contextWindowTokens: input.contextWindowTokens,
@@ -291,8 +307,8 @@ export const authoriseDispatch = async (
   const mode = dispatchInstrumentationMode();
   const startedAt = Date.now();
   try {
-    const key = secret();
-    const sourceRefs = buildManifestSourceRefs(request.messages, key);
+    const key = hashKey();
+    const sourceRefs = buildManifestSourceRefs(request.messages, key.secret);
     await finalizeManifest({
       attemptId: instrumentation.attemptId,
       plannerVersion: request.plannerVersion,
@@ -306,8 +322,15 @@ export const authoriseDispatch = async (
           toolConfig: request.toolConfig,
           sourceRefs,
         },
-        key
+        key.secret
       ),
+      // Stored beside the hash, because a commitment nobody can name the
+      // scheme, algorithm and key for cannot be checked after any of the
+      // three changes. The key itself is never written: a record carrying its
+      // own verification key lets whoever reads the table forge a match.
+      contentHashVersion: MANIFEST_CONTENT_VERSION,
+      hashAlgorithm: MANIFEST_HASH_ALGORITHM,
+      hashKeyId: key.keyId,
     });
     counters.recorded += 1;
     return {

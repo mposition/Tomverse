@@ -78,6 +78,10 @@ export type FallbackRefusal =
   | "visible_token_emitted"
   /** §7: cancellation is never an automatic fallback candidate. */
   | "cancelled"
+  /** §7: a safety refusal is not something to find another model for. */
+  | "provider_policy_rejection"
+  /** §7: a provider that cannot fund the call has not judged the model. */
+  | "provider_insufficient_credits"
   /** §6: infrastructure and safety-boundary failures fail closed. */
   | "fail_closed_layer"
   /** §6: `plannerFailureMode` is `fail_closed`. */
@@ -99,10 +103,27 @@ export type FallbackDecision =
     }
   | { action: "fallback"; modelId: string; version: string };
 
+/**
+ * §7's two provider answers that are failures but not model evidence.
+ *
+ * They arrive as provider failures and belong in provider health as such --
+ * what they are not is a reason to put the same request to a different model.
+ * A safety refusal routed around is Tomverse shopping for a provider that will
+ * comply; a funding failure routed around is a billing incident answered by
+ * spending money somewhere else.
+ */
+export type ProviderRefusal = "policy" | "insufficient_credits";
+
 export type FailedAttempt = {
   modelId: string;
   outcome: RoutingAttemptOutcome;
   failureLayer: RoutingFailureLayer;
+  /**
+   * Set by `classifyStreamFailure` when the provider's failure was one of
+   * §7's excluded answers. Absent means "not one of those", never "unknown" --
+   * an unclassified failure must not reach this function at all.
+   */
+  providerRefusal?: ProviderRefusal | null;
 };
 
 export type RunFallbackState = {
@@ -165,6 +186,21 @@ export const decideFallback = (input: FallbackInput): FallbackDecision => {
   // where retrying is most obviously wrong: the user asked for it to stop.
   if (attempt.outcome === "cancelled") {
     return { action: "terminate", reason: "cancelled", version };
+  }
+
+  // §7's sentence lists these next to cancellation for the same reason: the
+  // provider answered, and its answer was not "this model could not do it".
+  // Checked before the layer, because both arrive as `provider` failures and
+  // the layer alone would send them straight to a second model.
+  if (attempt.providerRefusal === "policy") {
+    return { action: "terminate", reason: "provider_policy_rejection", version };
+  }
+  if (attempt.providerRefusal === "insufficient_credits") {
+    return {
+      action: "terminate",
+      reason: "provider_insufficient_credits",
+      version,
+    };
   }
 
   // §6: manifest, authorization and billing-preparation failures are
