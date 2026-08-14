@@ -1103,6 +1103,8 @@ export const en = {
         warningSkippedMessages: "{count} system or tool messages were skipped",
         warningSkippedParts: "{count} non-text parts (images, audio, files) were skipped",
         warningBranches: "{count} alternate conversation branches are not imported",
+        warningNestedArchives:
+            "{count} attached archives (.zip and similar) are not opened, so they are not imported",
         notImportableBadge: "Cannot be imported",
         notImportableExplain:
             "{count} conversations contain a message above the import size limit and cannot be imported.",

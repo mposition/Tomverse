@@ -1111,6 +1111,8 @@ export const zh = {
         warningSkippedMessages: "已跳过 {count} 条系统或工具消息",
         warningSkippedParts: "已跳过 {count} 个非文本内容（图片、音频、文件）",
         warningBranches: "{count} 个备选对话分支不会被导入",
+        warningNestedArchives:
+            "{count} 个附件压缩包（.zip 等）不会被打开，因此不会导入",
         notImportableBadge: "无法导入",
         notImportableExplain:
             "{count} 个对话包含超过导入大小限制的消息，无法导入。",

@@ -1097,6 +1097,8 @@ export const fr = {
             "{count} éléments non textuels (images, audio, fichiers) ignorés",
         warningBranches:
             "{count} branches de conversation alternatives ne sont pas importées",
+        warningNestedArchives:
+            "{count} archives jointes (.zip et similaires) ne sont pas ouvertes et ne sont donc pas importées",
         notImportableBadge: "Import impossible",
         notImportableExplain:
             "{count} conversations contiennent un message dépassant la limite de taille d'import et ne peuvent pas être importées.",

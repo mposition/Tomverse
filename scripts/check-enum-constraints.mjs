@@ -43,6 +43,13 @@ const REGISTRY = {
     reason:
       "Eighty event names, recreated by a migration whenever one is added. Already covered by tests/productAnalyticsDatabaseConstraint.test.ts; covered again here so the whole set has one mechanism.",
   },
+  ContextManifest_compactionReason_check: {
+    owner: "list",
+    module: "lib/routingManifestRetention.ts",
+    list: "MANIFEST_COMPACTION_REASONS",
+    reason:
+      "aged, memory_deleted, memory_superseded. Account deletion is deliberately absent: it removes the row through the cascade rather than compacting it, so no compacted manifest can carry it, and a fourth value would be a report category that is always zero for a reason nobody could work out from the data.",
+  },
   Conversation_selectionMode_check: {
     owner: "list",
     module: "lib/conversationSelectionMode.ts",

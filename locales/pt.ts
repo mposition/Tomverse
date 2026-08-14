@@ -1100,6 +1100,8 @@ export const pt = {
             "{count} itens não textuais (imagens, áudio, arquivos) ignorados",
         warningBranches:
             "{count} ramificações alternativas de conversa não são importadas",
+        warningNestedArchives:
+            "{count} arquivos compactados anexados (.zip e semelhantes) não são abertos e, portanto, não são importados",
         notImportableBadge: "Não pode ser importada",
         notImportableExplain:
             "{count} conversas contêm uma mensagem acima do limite de tamanho de importação e não podem ser importadas.",

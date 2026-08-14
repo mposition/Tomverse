@@ -19,9 +19,17 @@
 //
 // Keyed rather than bare digests. A bare SHA-256 of a short message is
 // reversible by anyone willing to guess: "yes", "네", a phone number and most
-// single sentences fall to a dictionary in seconds. Keying with the
-// application secret means a leaked manifest table is not a lookup away from
-// the conversations it describes.
+// single sentences fall to a dictionary in seconds. Keying means a leaked
+// manifest table is not a lookup away from the conversations it describes.
+//
+// The key comes from lib/manifestHashKeyring.ts and never from the session
+// secret: an audit record that outlives ninety days cannot hang off a key
+// whose rotation policy belongs to authentication. Every manifest records the
+// key's id so a rotation does not strand what came before it.
+//
+// What this supports is server-side verification -- Tomverse can check a
+// candidate original against what was effective at dispatch -- and not a proof
+// anyone else can run, because nobody else has the key.
 
 import { createHmac } from "node:crypto";
 
@@ -30,7 +38,20 @@ export const MANIFEST_CONTENT_VERSION = "manifest-content-v1";
 
 export type ManifestMessagePart =
   | { type: "text"; text: string }
-  | { type: "file"; mediaType?: string; bytes?: number }
+  | {
+      type: "file";
+      mediaType?: string;
+      bytes?: number;
+      /**
+       * The attachment's own bytes, as the request carries them.
+       *
+       * Required for the digest to mean anything. Hashing type and size alone
+       * gave two different PDFs of the same length the same reference, so a
+       * manifest could not tell a resend from a different document -- which is
+       * exactly the distinction it exists to make.
+       */
+      content?: string;
+    }
   | { type: "other"; label: string };
 
 export type ManifestMessage = {
@@ -85,11 +106,17 @@ export const buildManifestSourceRefs = (
           kind: "file" as const,
           bytes: part.bytes ?? 0,
           mediaType: part.mediaType,
-          // A file's bytes are not hashed here: the attachment is already
-          // stored and referenced elsewhere, and streaming it through a digest
-          // on the request path would cost more than the proof is worth. Type
-          // and size are the shape this record needs.
-          digest: digest(secret, "file", `${part.mediaType ?? ""}:${part.bytes ?? 0}`),
+          // The content, not just its shape. Type and size alone collided:
+          // two different documents of the same kind and length produced one
+          // reference, so the manifest could not distinguish a resend from a
+          // substitution. The bytes are already in memory at this point --
+          // the request is carrying them to the provider -- so digesting them
+          // costs a pass over a buffer that has already been read.
+          digest: digest(
+            secret,
+            "file",
+            `${part.mediaType ?? ""}:${part.bytes ?? 0}:${part.content ?? ""}`
+          ),
         };
       }
       return {

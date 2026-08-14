@@ -2247,6 +2247,15 @@ async function handleChatPost(
                                       typeof part.data === "string"
                                           ? part.data.length
                                           : 0,
+                                  // The bytes themselves, so two documents of
+                                  // the same kind and length do not share one
+                                  // reference. Already in memory: this is the
+                                  // payload on its way to the provider.
+                                  content:
+                                      "data" in part &&
+                                      typeof part.data === "string"
+                                          ? part.data
+                                          : undefined,
                               }
                             : { type: "other" as const, label: part.type }
                   )

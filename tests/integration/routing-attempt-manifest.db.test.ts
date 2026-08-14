@@ -84,6 +84,9 @@ const finalize = (attemptId: string, now?: Date) =>
     plannerVersion: "planner-v1",
     adapterVersion: "adapter-v1",
     effectiveRequestHash: `hash-${randomUUID()}`,
+    contentHashVersion: "manifest-content-v1",
+    hashAlgorithm: "hmac-sha256",
+    hashKeyId: "test-key",
     now,
   });
 
