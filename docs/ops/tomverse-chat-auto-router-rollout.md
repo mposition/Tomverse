@@ -366,10 +366,23 @@ Four things it does that are easy to get wrong:
   candidate's own manifest — §5 requires one per attempt, and it digests the
   messages inside the instrumentation module so the route never holds the
   manifest hash key.
-- **The budget moves before the call.** §10 authorizes every dispatch including
-  this one, and money held at one provider does not make a call to another
-  affordable. Reserve before release, one transaction: a refusal leaves the
-  primary's hold as it was.
+- **The budget is held before the call, and the hold is durable.** §10
+  authorizes every dispatch including this one, and money held at one provider
+  does not make a call to another affordable. `reserveFallbackProviderBudget`
+  takes the fallback provider's own hold and writes it into the reservation's
+  payload in the same transaction — because `settleChatUsage` re-reads that
+  payload, and an earlier version handed the entries back to a caller who
+  never kept them. The primary's hold is *not* released early: keeping both
+  until settlement counts the turn against two providers briefly, which is the
+  safe direction for a guard against overspend, and it removes both the
+  no-hold window and the deadlock two opposite-direction fallbacks would have
+  had. A fallback that is authorized and then fails to dispatch gives its hold
+  back through `releaseFallbackProviderBudget`.
+- **The primary joins `endedAttempts` only once the swap commits.** It used to
+  be added before the dispatch, so a dispatch that then failed left the turn
+  settling attempt 0 twice — which `attemptSetProblems` refuses, so the whole
+  settlement failed and the money stayed where it was. A fallback that never
+  dispatched settles as the single attempt it was.
 - **§8 is written on success only.** `recordFallbackRecovery` runs when the
   answer exists. A recovery candidate stored for a retry that also failed would
   send the next turn back to a model that never worked. The conversation's

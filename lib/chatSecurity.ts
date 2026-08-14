@@ -3064,20 +3064,22 @@ export const settleChatUsage = async (
         attempts?: readonly AttemptUsage[];
     }
 ) => {
-    const multiAttempt = options?.attempts?.length
-        ? combineAttemptUsage(options.attempts)
-        : null;
-    if (multiAttempt) {
-        // A malformed attempt set settles silently wrong -- a duplicate index
-        // overwrites an audit row, a gap means an attempt was lost between
-        // dispatch and here. Refuse rather than write the money down anyway.
-        const problems = attemptSetProblems(options!.attempts!);
+    // Validated before it is interpreted. A malformed attempt set settles
+    // silently wrong -- a duplicate index overwrites an audit row, a gap means
+    // an attempt was lost between dispatch and here -- so the refusal comes
+    // first and, deliberately, before the transaction: nothing has been locked
+    // and no money has moved when it raises.
+    if (options?.attempts?.length) {
+        const problems = attemptSetProblems(options.attempts);
         if (problems.length > 0) {
             throw new Error(
                 `Chat attempt set cannot be settled: ${problems.join(" ")}`
             );
         }
     }
+    const multiAttempt = options?.attempts?.length
+        ? combineAttemptUsage(options.attempts)
+        : null;
     const settlement = await prisma.$transaction(async (tx) => {
         if (reservation.userId) {
             await lockCreditAccount(tx, reservation.userId);
@@ -3554,44 +3556,63 @@ const boundedProviderIdentifier = (value: string | null | undefined) => {
 };
 
 /**
- * Moves a turn's provider-budget hold from the primary's provider to the
- * fallback's, or refuses.
+ * Takes the fallback provider's own budget hold, and records it where
+ * settlement will find it.
  *
  * §10: every dispatch is authorized on the server "including fallback and
  * Planner pass-through", and a provider budget is one of those
- * authorizations. The hold this turn took belongs to the primary's provider,
- * and money reserved at one provider does not make a call to another one
- * affordable -- so the fallback needs its own hold before it is dispatched,
- * not a settlement-time reckoning after the money is spent.
+ * authorizations. Money held at the primary's provider does not make a call to
+ * another one affordable, so the fallback needs its own hold before it is
+ * dispatched -- not a settlement-time reckoning after the money is spent.
  *
- * One transaction, and the reserve happens before the release. If the
- * fallback's provider is at its ceiling, the answer is no and the primary's
- * hold is left exactly as it was: releasing first would open a window in
- * which this turn holds nothing anywhere, and a concurrent request could take
- * the room the primary was still occupying.
+ * ## Why it reserves and does not transfer
  *
- * Returns the entries the caller must fold into the reservation so settlement
- * knows what was held where. Same provider is not a transfer at all: the hold
- * already covers it, and re-reserving would count this turn against its own
- * budget twice.
+ * The first version of this released the primary's hold in the same
+ * transaction, and returned the new entries for the caller to keep. The caller
+ * never kept them, which was the bug: `settleChatUsage` re-reads
+ * `reservationPayload` from the row, and that payload still described a hold
+ * on the primary alone. Settlement would then have released a hold the
+ * fallback provider never had and left the primary's unreleased.
+ *
+ * Fixing it by returning entries the caller must remember would have left the
+ * same class of bug one forgetful call site away. So the hold is written into
+ * the durable payload *here*, inside the transaction that takes it, and
+ * nothing has to be remembered.
+ *
+ * Once the payload is the record, releasing the primary early stops being
+ * worth its risk. Keeping both holds until settlement means this turn is
+ * briefly counted against two providers -- conservative in the only direction
+ * a budget guard should err, because the alternative is a window in which the
+ * turn holds nothing anywhere and a concurrent request takes the room. It also
+ * removes a deadlock: two simultaneous fallbacks in opposite directions would
+ * each have locked the other's provider rows to release them, and this
+ * transaction now touches one provider's rows and its own reservation.
+ *
+ * Settlement needs no special case for the second hold. Its entries loop
+ * already settles any `provider:` entry to what that provider was actually
+ * paid, so the primary's hold is released down to the primary's real cost and
+ * the fallback's to the fallback's.
  */
-export const transferProviderBudgetForFallback = async (input: {
+export const reserveFallbackProviderBudget = async (input: {
+    reservationId: string;
+    userId?: string | null;
     heldProvider: string;
     fallbackProvider: string;
-    heldMicroUsd: number;
     fallbackReservedMicroUsd: number;
     periodStarts: { day: Date; month: Date };
 }): Promise<
-    | { moved: false; reason: "same_provider" }
-    | { moved: false; reason: "fallback_budget_exhausted"; scope: string }
-    | { moved: true; entries: ReservationEntry[] }
+    | { reserved: false; reason: "same_provider" }
+    | { reserved: false; reason: "reservation_not_open" }
+    | { reserved: false; reason: "fallback_budget_exhausted"; scope: string }
+    | { reserved: true; entries: ReservationEntry[] }
 > => {
     if (input.fallbackProvider === input.heldProvider) {
-        return { moved: false, reason: "same_provider" };
+        // The hold already covers it, and re-reserving would count this turn
+        // against its own provider's budget twice.
+        return { reserved: false, reason: "same_provider" };
     }
     const limits = getProviderCostGuardrailLimits(input.fallbackProvider);
     const amount = Math.max(0, Math.round(input.fallbackReservedMicroUsd));
-    const release = Math.max(0, Math.round(input.heldMicroUsd));
     const checks = [
         {
             period: "provider-cost-day" as const,
@@ -3608,6 +3629,23 @@ export const transferProviderBudgetForFallback = async (input: {
     ];
 
     return prisma.$transaction(async (tx) => {
+        // Same order as settlement: the credit account first, then the
+        // reservation's advisory lock. Two paths that take the same two locks
+        // in different orders is the deadlock this ordering exists to avoid.
+        if (input.userId) {
+            await lockCreditAccount(tx, input.userId);
+        }
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`chat-credit-reservation:${input.reservationId}`}))`;
+        const durable = await tx.chatCreditReservation.findUnique({
+            where: { id: input.reservationId },
+        });
+        if (!durable || durable.status !== "reserved") {
+            // Settled, refunded or reconciled while this turn was running.
+            // Taking a hold against it would put money on a reservation that
+            // has already been closed out, and nothing would ever release it.
+            throw new FallbackBudgetRefusal("reservation_not_open");
+        }
+
         const entries: ReservationEntry[] = [];
         for (const check of checks) {
             const allowed = await incrementUsage(
@@ -3619,9 +3657,8 @@ export const transferProviderBudgetForFallback = async (input: {
                 amount
             );
             if (!allowed) {
-                // Nothing has been released yet, so rolling the transaction
-                // back leaves the primary's hold intact and this turn simply
-                // does not fall back.
+                // Rolls the whole transaction back, including a day hold taken
+                // before the month check refused. Nothing is left half-held.
                 throw new FallbackBudgetRefusal(check.scope);
             }
             entries.push({
@@ -3632,34 +3669,99 @@ export const transferProviderBudgetForFallback = async (input: {
                 metric: "cost",
             });
         }
-        if (release > 0) {
-            for (const check of checks) {
-                await tx.$executeRaw`
-                    UPDATE "ChatUsageBucket"
-                    SET "count" = GREATEST(0, "count" - ${release}),
-                        "updatedAt" = NOW()
-                    WHERE "key" = ${providerBucketKey(input.heldProvider)}
-                      AND "period" = ${check.period}
-                      AND "periodStart" = ${check.start}
-                `;
-            }
-        }
-        return { moved: true as const, entries };
+
+        // The durable record of what this turn holds. Written here rather than
+        // handed back, because a caller that forgets is exactly how the
+        // previous version of this was wrong.
+        const canonical = deserializeReservation(durable.reservationPayload);
+        await tx.chatCreditReservation.update({
+            where: { id: durable.id },
+            data: {
+                reservationPayload: serializeReservation({
+                    ...canonical,
+                    entries: [...canonical.entries, ...entries],
+                }),
+            },
+        });
+        return { reserved: true as const, entries };
     }).catch((error) => {
         if (error instanceof FallbackBudgetRefusal) {
-            return {
-                moved: false as const,
-                reason: "fallback_budget_exhausted" as const,
-                scope: error.scope,
-            };
+            return error.scope === "reservation_not_open"
+                ? { reserved: false as const, reason: "reservation_not_open" as const }
+                : {
+                      reserved: false as const,
+                      reason: "fallback_budget_exhausted" as const,
+                      scope: error.scope,
+                  };
         }
         throw error;
     });
 };
 
+/**
+ * Gives back a fallback hold whose dispatch never happened.
+ *
+ * The compensating half of the reservation above. A fallback that is
+ * authorized and then fails to build its manifest, serialize, or reach the
+ * provider has spent nothing, and a hold left behind for it would count
+ * against that provider's budget until the reservation expired -- for a call
+ * that was never made.
+ *
+ * Best-effort by design: the turn is already ending on the primary's failure,
+ * and raising here would replace a diagnosable failure with a worse one. What
+ * it must not do is leave the payload claiming a hold that has been released,
+ * so both move together or neither does.
+ */
+export const releaseFallbackProviderBudget = async (input: {
+    reservationId: string;
+    userId?: string | null;
+    fallbackProvider: string;
+    periodStarts: { day: Date; month: Date };
+}): Promise<boolean> =>
+    prisma
+        .$transaction(async (tx) => {
+            if (input.userId) {
+                await lockCreditAccount(tx, input.userId);
+            }
+            await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`chat-credit-reservation:${input.reservationId}`}))`;
+            const durable = await tx.chatCreditReservation.findUnique({
+                where: { id: input.reservationId },
+            });
+            if (!durable || durable.status !== "reserved") return false;
+
+            const canonical = deserializeReservation(durable.reservationPayload);
+            const key = providerBucketKey(input.fallbackProvider);
+            const held = canonical.entries.filter((entry) => entry.key === key);
+            if (held.length === 0) return false;
+
+            for (const entry of held) {
+                await tx.$executeRaw`
+                    UPDATE "ChatUsageBucket"
+                    SET "count" = GREATEST(0, "count" - ${entry.amount}),
+                        "updatedAt" = NOW()
+                    WHERE "key" = ${entry.key}
+                      AND "period" = ${entry.period}
+                      AND "periodStart" = ${entry.periodStart}
+                `;
+            }
+            await tx.chatCreditReservation.update({
+                where: { id: durable.id },
+                data: {
+                    reservationPayload: serializeReservation({
+                        ...canonical,
+                        entries: canonical.entries.filter(
+                            (entry) => entry.key !== key
+                        ),
+                    }),
+                },
+            });
+            return true;
+        })
+        .catch(() => false);
+
 class FallbackBudgetRefusal extends Error {
     constructor(readonly scope: string) {
-        super(`Fallback provider budget exhausted: ${scope}`);
+        super(`Fallback provider budget refused: ${scope}`);
         this.name = "FallbackBudgetRefusal";
     }
 }

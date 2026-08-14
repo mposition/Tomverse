@@ -109,7 +109,8 @@ import {
     releaseChatAccess,
     resolveLeaseTtlSeconds,
     settleChatUsage,
-    transferProviderBudgetForFallback,
+    releaseFallbackProviderBudget,
+    reserveFallbackProviderBudget,
     type ChatUsageReservation,
     validateChatPayload,
 } from "@/lib/chatSecurity";
@@ -2479,11 +2480,10 @@ async function handleChatPost(
         /**
          * The provider hold this turn took, and the periods it was taken in.
          *
-         * Read from the reservation rather than recomputed: a fallback on
-         * another provider releases exactly what was held, and "exactly" has
-         * to mean the same rows the hold went into. A turn that reserved no
-         * cost holds nothing, and a fallback across providers is refused
-         * rather than granted a transfer of zero.
+         * Read from the reservation rather than recomputed, because a second
+         * hold has to go into the same day and month the first one did. A turn
+         * that reserved no cost holds nothing and names no periods, so a
+         * fallback across providers is refused rather than guessing them.
          */
         const providerHoldEntries = (usageReservation?.entries ?? []).filter(
             (entry) => entry.key === `provider:${modelConfig.provider}`
@@ -2494,7 +2494,6 @@ async function handleChatPost(
         const providerHoldMonth = providerHoldEntries.find(
             (entry) => entry.period === "provider-cost-month"
         );
-        const heldProviderCostMicroUsd = providerHoldDay?.amount ?? 0;
         /**
          * Why no fallback happened, when it was a decision rather than the
          * feature being off.
@@ -2933,42 +2932,162 @@ async function handleChatPost(
             // §10: every dispatch is authorized on the server, including this
             // one. Money held at the primary's provider does not make a call
             // to another provider affordable.
+            let fallbackHoldTaken = false;
             if (plan.provider !== dispatched.provider) {
                 if (!providerHoldDay || !providerHoldMonth) {
-                    // Nothing was held for this turn, so there is nothing to
-                    // move and no evidence of which periods to move it into.
+                    // Nothing was held for this turn, so there is no evidence
+                    // of which periods a second hold belongs in.
                     reportFallbackRefusal("no_provider_hold");
                     return false;
                 }
-                const moved = await transferProviderBudgetForFallback({
+                const reserved = await reserveFallbackProviderBudget({
+                    reservationId: usageReservation!.reservationId,
+                    userId: usageReservation!.userId ?? null,
                     heldProvider: dispatched.provider,
                     fallbackProvider: plan.provider,
-                    heldMicroUsd: heldProviderCostMicroUsd,
                     fallbackReservedMicroUsd:
                         getChatBudgetReservedCostMicroUsd(plan.budget),
                     periodStarts: {
-                        day: providerHoldDay!.periodStart,
-                        month: providerHoldMonth!.periodStart,
+                        day: providerHoldDay.periodStart,
+                        month: providerHoldMonth.periodStart,
                     },
                 }).catch((budgetError: unknown) => {
                     logRequestError(
-                        "chat_fallback_budget_transfer_failed",
+                        "chat_fallback_budget_reserve_failed",
                         traceId,
                         budgetError,
                         plan.modelId
                     );
-                    return { moved: false as const, reason: "transfer_failed" as const };
+                    return { reserved: false as const, reason: "reserve_failed" as const };
                 });
-                if (!moved.moved && moved.reason !== "same_provider") {
-                    reportFallbackRefusal(`budget_${moved.reason}`);
+                if (!reserved.reserved && reserved.reason !== "same_provider") {
+                    reportFallbackRefusal(`budget_${reserved.reason}`);
                     return false;
                 }
+                if (reserved.reserved) {
+                    fallbackHoldTaken = true;
+                    // The hold is now in the durable payload, so settlement
+                    // will find it. What is not yet true is that a call was
+                    // made against it -- that is what the release below is for.
+                    usageReservation = {
+                        ...usageReservation!,
+                        entries: [
+                            ...usageReservation!.entries,
+                            ...reserved.entries,
+                        ],
+                    };
+                }
+            }
+            /**
+             * Gives the hold back when the dispatch it authorized never
+             * happened.
+             *
+             * §10 requires the authorization *before* the call, so there is
+             * necessarily a window where the money is held and the call has
+             * not been made. Every exit from that window has to come through
+             * here, or a provider carries a hold for a request that does not
+             * exist until the reservation expires.
+             */
+            const abandonFallback = async (reason: string) => {
+                if (fallbackHoldTaken && providerHoldDay && providerHoldMonth) {
+                    await releaseFallbackProviderBudget({
+                        reservationId: usageReservation!.reservationId,
+                        userId: usageReservation!.userId ?? null,
+                        fallbackProvider: plan.provider,
+                        periodStarts: {
+                            day: providerHoldDay.periodStart,
+                            month: providerHoldMonth.periodStart,
+                        },
+                    });
+                    usageReservation = {
+                        ...usageReservation!,
+                        entries: usageReservation!.entries.filter(
+                            (entry) =>
+                                entry.key !== `provider:${plan.provider}`
+                        ),
+                    };
+                }
+                reportFallbackRefusal(reason);
+                return false;
+            };
+
+            // Kept before the dispatch because `beginRetryAttempt` opens the
+            // second attempt on this record's run. Closing it is deliberately
+            // *after* the dispatch succeeds -- see below.
+            const failing = dispatchRecord;
+            let nextRecord: DispatchInstrumentation;
+            let nextStream: Awaited<ReturnType<typeof streamText>>;
+            try {
+                // A second attempt on the *same* run, not a second run. One
+                // logical response is one RoutingRun with its attempts hanging
+                // off it; two runs would read as two responses and the reroute
+                // rate would be zero forever. `beginRetryAttempt` also spends
+                // §6's build budget itself, so a caller that forgot cannot
+                // produce a third.
+                nextRecord = await beginRetryAttempt(failing, {
+                    attemptIndex: dispatched.attemptIndex + 1,
+                    modelId: plan.modelId,
+                    provider: plan.provider,
+                    plannerMode: "planned",
+                    failureLayer: classified.failureLayer,
+                    messages: manifestMessages,
+                    tokenizerVersion: ACTIVE_ESTIMATOR_VERSION,
+                    tokenCount: plan.budget.inputTokens,
+                    contextWindowTokens:
+                        plan.outputBudget.kind === "fitted"
+                            ? plan.outputBudget.limitTokens
+                            : plan.budget.inputTokens + plan.maxOutputTokens,
+                    userId: access.userId ?? null,
+                });
+                // §5: its own manifest, finalized against its own effective
+                // request. Reusing the primary's would describe a request that
+                // was never sent to this model.
+                nextRecord = await authoriseDispatch(nextRecord, {
+                    modelId: plan.modelId,
+                    provider: plan.provider,
+                    maxOutputTokens: plan.maxOutputTokens,
+                    settings: plan.generationSettings as Record<string, unknown>,
+                    toolConfig: plan.webSearchToolConfig,
+                    messages: manifestMessages,
+                    plannerVersion: "none",
+                    adapterVersion: "vercel-ai-sdk-streamText-v1",
+                });
+                nextStream = await streamText({
+                    model: plan.activeModel,
+                    messages: formattedMessages,
+                    ...attemptDispatchOptions(plan),
+                });
+                await recordDispatched(nextRecord);
+            } catch (dispatchError) {
+                // The turn ends on the primary's failure, which is what the
+                // caller was already about to do. Nothing has been shown and
+                // nothing about the response has changed.
+                logRequestError(
+                    "chat_fallback_dispatch_failed",
+                    traceId,
+                    dispatchError,
+                    plan.modelId
+                );
+                return abandonFallback("dispatch_failed");
             }
 
-            // The attempt being replaced is closed out before the next one
-            // opens, so the run never holds two open attempts and the record
-            // says pre-token rather than merely failed.
-            const failing = dispatchRecord;
+            // §7: the client is told before the next model's first token, and
+            // told a model id and nothing else. Out-of-band, so it is not a
+            // visible token and does not close the door it just opened.
+            if (!enqueueSafely(controller, buildRoutingRetryChunk(plan.modelId))) {
+                await nextStream.textStream.getReader().cancel("client is gone");
+                return abandonFallback("client_gone_before_signal");
+            }
+
+            // From here the swap is committed, and only from here.
+            //
+            // Closing the primary attempt and adding it to `endedAttempts`
+            // used to happen before the dispatch. If the dispatch then failed,
+            // the turn ended on the primary while `endedAttempts` already held
+            // attempt 0 and `dispatched` was still attempt 0 -- so settlement
+            // built the same index twice and `attemptSetProblems` refused the
+            // whole settlement, leaving the money where it was. A fallback
+            // that never dispatched must settle as the single attempt it was.
             try {
                 await completeInstrumentedDispatch(failing, {
                     outcome: "failed_pre_token",
@@ -3025,71 +3144,6 @@ async function handleChatPost(
                         dispatched.modelId
                     );
                 }
-            }
-
-            let nextRecord: DispatchInstrumentation;
-            let nextStream: Awaited<ReturnType<typeof streamText>>;
-            try {
-                // A second attempt on the *same* run, not a second run. One
-                // logical response is one RoutingRun with its attempts hanging
-                // off it; two runs would read as two responses and the reroute
-                // rate would be zero forever. `beginRetryAttempt` also spends
-                // §6's build budget itself, so a caller that forgot cannot
-                // produce a third.
-                nextRecord = await beginRetryAttempt(failing, {
-                    attemptIndex: dispatched.attemptIndex + 1,
-                    modelId: plan.modelId,
-                    provider: plan.provider,
-                    plannerMode: "planned",
-                    failureLayer: classified.failureLayer,
-                    messages: manifestMessages,
-                    tokenizerVersion: ACTIVE_ESTIMATOR_VERSION,
-                    tokenCount: plan.budget.inputTokens,
-                    contextWindowTokens:
-                        plan.outputBudget.kind === "fitted"
-                            ? plan.outputBudget.limitTokens
-                            : plan.budget.inputTokens + plan.maxOutputTokens,
-                    userId: access.userId ?? null,
-                });
-                // §5: its own manifest, finalized against its own effective
-                // request. Reusing the primary's would describe a request that
-                // was never sent to this model.
-                nextRecord = await authoriseDispatch(nextRecord, {
-                    modelId: plan.modelId,
-                    provider: plan.provider,
-                    maxOutputTokens: plan.maxOutputTokens,
-                    settings: plan.generationSettings as Record<string, unknown>,
-                    toolConfig: plan.webSearchToolConfig,
-                    messages: manifestMessages,
-                    plannerVersion: "none",
-                    adapterVersion: "vercel-ai-sdk-streamText-v1",
-                });
-                nextStream = await streamText({
-                    model: plan.activeModel,
-                    messages: formattedMessages,
-                    ...attemptDispatchOptions(plan),
-                });
-                await recordDispatched(nextRecord);
-            } catch (dispatchError) {
-                // The turn ends on the primary's failure, which is what the
-                // caller was already about to do. Nothing has been shown and
-                // nothing about the response has changed.
-                logRequestError(
-                    "chat_fallback_dispatch_failed",
-                    traceId,
-                    dispatchError,
-                    plan.modelId
-                );
-                reportFallbackRefusal("dispatch_failed");
-                return false;
-            }
-
-            // §7: the client is told before the next model's first token, and
-            // told a model id and nothing else. Out-of-band, so it is not a
-            // visible token and does not close the door it just opened.
-            if (!enqueueSafely(controller, buildRoutingRetryChunk(plan.modelId))) {
-                await nextStream.textStream.getReader().cancel("client is gone");
-                return false;
             }
 
             displacedModelId = dispatched.modelId;
