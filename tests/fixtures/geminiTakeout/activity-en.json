@@ -1,0 +1,253 @@
+[
+  {
+    "header": "Gemini Apps",
+    "title": "Branched How should I split the list rendering?",
+    "time": "2026-03-02T10:10:00.000Z",
+    "products": [
+      "Gemini Apps"
+    ],
+    "details": [
+      {
+        "name": "https://gemini.google.com/app/a1b2c3d4e5f60718",
+        "url": "https://gemini.google.com/app/a1b2c3d4e5f60718"
+      },
+      {
+        "name": "https://gemini.google.com/app/b2c3d4e5f6071829",
+        "url": "https://gemini.google.com/app/b2c3d4e5f6071829"
+      }
+    ],
+    "activityControls": [
+      "Gemini Apps Activity"
+    ],
+    "safeHtmlItem": [
+      {
+        "html": "<h3>예시</h3><pre><code>const total = items.reduce((sum, item) =&gt; sum + item.count, 0);\nif (total === 0) return null;\n</code></pre><p><code>reduce</code>의 초기값을 빼면 빈 배열에서 던집니다.</p>"
+      }
+    ]
+  },
+  {
+    "header": "Gemini Apps",
+    "title": "Please tidy up the meeting notes draft.",
+    "subtitles": [
+      {
+        "name": "Meeting Tidier was used in this chat. Manage Gems.",
+        "url": "https://gemini.google.com/gems/view"
+      }
+    ],
+    "time": "2026-03-01T09:00:00.000Z",
+    "products": [
+      "Gemini Apps"
+    ],
+    "details": [
+      {
+        "name": "https://gemini.google.com/app/d4e5f60718293041",
+        "url": "https://gemini.google.com/app/d4e5f60718293041"
+      }
+    ],
+    "activityControls": [
+      "Gemini Apps Activity"
+    ],
+    "safeHtmlItem": [
+      {
+        "html": "<p>네, 그 방식으로 하면 됩니다.</p>"
+      }
+    ]
+  },
+  {
+    "header": "Gemini Apps",
+    "title": "Branched I want to settle on a weekly report format.",
+    "time": "2026-03-02T10:00:00.000Z",
+    "products": [
+      "Gemini Apps"
+    ],
+    "details": [
+      {
+        "name": "https://gemini.google.com/app/a1b2c3d4e5f60718",
+        "url": "https://gemini.google.com/app/a1b2c3d4e5f60718"
+      },
+      {
+        "name": "https://gemini.google.com/app/b2c3d4e5f6071829",
+        "url": "https://gemini.google.com/app/b2c3d4e5f6071829"
+      },
+      {
+        "name": "https://gemini.google.com/app/c3d4e5f607182930",
+        "url": "https://gemini.google.com/app/c3d4e5f607182930"
+      },
+      {
+        "name": "https://gemini.google.com/app/e5f6071829304152",
+        "url": "https://gemini.google.com/app/e5f6071829304152"
+      }
+    ],
+    "activityControls": [
+      "Gemini Apps Activity"
+    ],
+    "safeHtmlItem": [
+      {
+        "html": "<p>다음 세 가지를 먼저 정하는 편이 좋습니다.</p><ul><li><strong>보관 위치</strong> — 로컬인지 원격인지</li><li><strong>갱신 주기</strong></li><li>실패했을 때 무엇을 남길지</li></ul><p>가장 자주 놓치는 것은 세 번째입니다.</p>"
+      }
+    ]
+  },
+  {
+    "header": "Gemini Apps",
+    "title": "Compare them in a table, please.",
+    "subtitles": [
+      {
+        "name": "2 file(s) attached."
+      },
+      {
+        "name": "-  report-draft-1f2e3d4c5b6a7988.txt",
+        "url": "report-draft-1f2e3d4c5b6a7988.txt"
+      },
+      {
+        "name": "-  layout-2f3e4d5c6b7a8990.csv",
+        "url": "layout-2f3e4d5c6b7a8990.csv"
+      }
+    ],
+    "time": "2026-03-02T10:20:00.000Z",
+    "products": [
+      "Gemini Apps"
+    ],
+    "details": [
+      {
+        "name": "https://gemini.google.com/app/a1b2c3d4e5f60718",
+        "url": "https://gemini.google.com/app/a1b2c3d4e5f60718"
+      }
+    ],
+    "activityControls": [
+      "Gemini Apps Activity"
+    ],
+    "safeHtmlItem": [
+      {
+        "html": "<h3>비교</h3><table><thead><tr><th align=\"left\">방식</th><th align=\"left\">장점</th></tr></thead><tbody><tr><td align=\"left\">A</td><td align=\"left\">단순함</td></tr><tr><td align=\"left\">B</td><td align=\"left\">되돌리기 쉬움</td></tr></tbody></table><hr/><blockquote><p>둘 다 되돌릴 수 있어야 합니다.</p></blockquote>"
+      }
+    ],
+    "attachedFiles": [
+      "report-draft-1f2e3d4c5b6a7988.txt",
+      "layout-2f3e4d5c6b7a8990.csv"
+    ]
+  },
+  {
+    "header": "Gemini Apps",
+    "title": "Branched What if each row carried an owner?",
+    "time": "2026-03-02T10:05:00.000Z",
+    "products": [
+      "Gemini Apps"
+    ],
+    "details": [
+      {
+        "name": "https://gemini.google.com/app/a1b2c3d4e5f60718",
+        "url": "https://gemini.google.com/app/a1b2c3d4e5f60718"
+      },
+      {
+        "name": "https://gemini.google.com/app/b2c3d4e5f6071829",
+        "url": "https://gemini.google.com/app/b2c3d4e5f6071829"
+      },
+      {
+        "name": "https://gemini.google.com/app/c3d4e5f607182930",
+        "url": "https://gemini.google.com/app/c3d4e5f607182930"
+      },
+      {
+        "name": "https://gemini.google.com/app/e5f6071829304152",
+        "url": "https://gemini.google.com/app/e5f6071829304152"
+      }
+    ],
+    "activityControls": [
+      "Gemini Apps Activity"
+    ],
+    "safeHtmlItem": [
+      {
+        "html": "<p>다음 세 가지를 먼저 정하는 편이 좋습니다.</p><ul><li><strong>보관 위치</strong> — 로컬인지 원격인지</li><li><strong>갱신 주기</strong></li><li>실패했을 때 무엇을 남길지</li></ul><p>가장 자주 놓치는 것은 세 번째입니다.</p>"
+      }
+    ]
+  },
+  {
+    "header": "Gemini Apps",
+    "title": "Please review the draft I attached.",
+    "subtitles": [
+      {
+        "name": "1 file(s) attached."
+      },
+      {
+        "name": "-  never-exported-3f4e5d6c7b8a9901.tsx",
+        "url": "never-exported-3f4e5d6c7b8a9901.tsx"
+      }
+    ],
+    "time": "2026-03-02T10:18:00.000Z",
+    "products": [
+      "Gemini Apps"
+    ],
+    "details": [
+      {
+        "name": "https://gemini.google.com/app/b2c3d4e5f6071829",
+        "url": "https://gemini.google.com/app/b2c3d4e5f6071829"
+      }
+    ],
+    "activityControls": [
+      "Gemini Apps Activity"
+    ],
+    "safeHtmlItem": [
+      {
+        "html": "<p>공식 문서의 <a href=\"https://example.test/docs\">해당 절</a>을 먼저 보세요. <em>버전에 따라 이름이 다릅니다.</em></p>"
+      }
+    ],
+    "attachedFiles": [
+      "never-exported-3f4e5d6c7b8a9901.tsx"
+    ]
+  },
+  {
+    "header": "Gemini Apps",
+    "title": "Where should I fix this screen first?",
+    "time": "2026-03-02T10:22:00.000Z",
+    "products": [
+      "Gemini Apps"
+    ],
+    "details": [
+      {
+        "name": "https://gemini.google.com/app/e5f6071829304152",
+        "url": "https://gemini.google.com/app/e5f6071829304152"
+      }
+    ],
+    "activityControls": [
+      "Gemini Apps Activity"
+    ],
+    "safeHtmlItem": [
+      {
+        "html": "<p>네, 그 방식으로 하면 됩니다.</p>"
+      }
+    ],
+    "imageFile": "1000000001-4f5e6d7c8b9a0112.jpg"
+  },
+  {
+    "header": "Gemini Apps",
+    "title": "Should I reuse last time's format?",
+    "time": "2026-03-03T08:00:00.000Z",
+    "products": [
+      "Gemini Apps"
+    ],
+    "details": [
+      {
+        "name": "https://gemini.google.com/app/d4e5f60718293041",
+        "url": "https://gemini.google.com/app/d4e5f60718293041"
+      }
+    ],
+    "activityControls": [
+      "Gemini Apps Activity"
+    ],
+    "safeHtmlItem": [
+      {
+        "html": "<p>네, 그 방식으로 하면 됩니다.</p>"
+      }
+    ]
+  },
+  {
+    "header": "Gemini Apps",
+    "title": "Tell me today's schedule.",
+    "time": "2026-02-28T07:00:00.000Z",
+    "products": [
+      "Gemini Apps"
+    ],
+    "activityControls": [
+      "Gemini Apps Activity"
+    ]
+  }
+]

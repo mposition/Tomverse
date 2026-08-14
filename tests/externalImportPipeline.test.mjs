@@ -236,3 +236,18 @@ test("multi-part exports merge on source id, keeping the richer snapshot", () =>
     const a = merged.find((c) => c.rawExternalConversationId === "a");
     assert.equal(a.messages.length, 3);
 });
+
+test("skipped nested archives are disclosed, and are not a conversation warning", () => {
+    // §5.2, decided 2026-08-14. A skipped entry never became a conversation,
+    // so no conversation's warnings can carry it — the count comes from the
+    // archive scan and is reported on its own.
+    const preview = buildImportPreview("chatgpt", [conversation("a", ["one"])], {
+        nestedArchives: 2,
+    });
+    assert.equal(preview.totals.skippedNestedArchives, 2);
+    assert.equal(preview.totals.skippedNonTextParts, 0);
+
+    // An export without one must not imply that anything was withheld.
+    const clean = buildImportPreview("chatgpt", [conversation("a", ["one"])]);
+    assert.equal(clean.totals.skippedNestedArchives, 0);
+});

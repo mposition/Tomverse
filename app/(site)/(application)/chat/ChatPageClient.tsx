@@ -46,6 +46,10 @@ import {
   useLanguage,
   type Language,
 } from "@/components/LanguageProvider";
+import type {
+  ChatAssistantProfile,
+  ChatAssistantProfileOption,
+} from "@/lib/conversationProfileBinding";
 import {
   APP_DEFAULTS,
   createGuestEligibilityCheck,
@@ -708,6 +712,18 @@ export function ChatPageClient({
   const [accountMemoryDefault, setAccountMemoryDefault] = useState<"on" | "off">(
     "on"
   );
+  // §14. Two pieces of state, because a profile can be chosen before the
+  // conversation that will carry it exists: `assistantProfile` is what the
+  // server says this conversation is bound to, and `pendingProfileId` is what
+  // a not-yet-created conversation will be created with. The composer shows
+  // one thing either way -- which is why the summary below is derived rather
+  // than a third piece of state that could disagree with both.
+  const [assistantProfile, setAssistantProfile] =
+    useState<ChatAssistantProfile | null>(null);
+  const [pendingProfileId, setPendingProfileId] = useState<string | null>(null);
+  const [assistantProfileOptions, setAssistantProfileOptions] = useState<
+    ChatAssistantProfileOption[] | null
+  >(null);
   const [isDeepResearchSetupOpen, setIsDeepResearchSetupOpen] = useState(false);
   // Per-conversation, like webSearchMode -- reset on New Chat/conversation
   // switch so a job's status chip never appears to follow the user into a
@@ -1126,6 +1142,11 @@ export function ChatPageClient({
       if (currentChatIdRef.current === conversationId) {
         currentChatIdRef.current = null;
         setCurrentChatId(null);
+        // A new chat starts with no assistant. Carrying the last one over
+        // would make a profile sticky without anyone choosing that, and the
+        // user would not see which conversation it followed them into.
+        setAssistantProfile(null);
+        setPendingProfileId(null);
         setPromptPayload(null);
       }
       // Readiness must resolve on every path out of here, or the model
@@ -1717,6 +1738,7 @@ export function ChatPageClient({
         disabledPanels?: unknown;
         webSearchMode?: unknown;
         memoryMode?: unknown;
+        assistantProfile?: ChatAssistantProfile | null;
         messages?: Array<{ role?: string; modelId?: string | null }>;
     }, targetChatId?: string) => {
         const savedModels = normalizeStringArray(data.selectedModels, userDefaultModelIds);
@@ -1745,6 +1767,14 @@ export function ChatPageClient({
                 ? data.memoryMode
                 : DEFAULT_CONVERSATION_MEMORY_MODE
         );
+        // §14. Server-computed, including whether the profile has published
+        // past this conversation -- a screen that worked the revision out for
+        // itself would be a second implementation of the pinning rule.
+        setAssistantProfile(data.assistantProfile ?? null);
+        // Opening a real conversation ends whatever a not-yet-created one was
+        // going to be created with; leaving it set would apply that choice to
+        // the *next* new chat without the user asking again.
+        setPendingProfileId(null);
         if (targetChatId) {
           // A server read seeds the queue's confirmed state; markConfirmed
           // refuses while local changes are unconfirmed, so a stale read can
@@ -3067,7 +3097,11 @@ export function ChatPageClient({
             title: newConversationTitle,
             selectedModels,
             disabledPanels,
-            webSearchMode
+            webSearchMode,
+            // §14. The choice made before this conversation existed. Omitted
+            // rather than sent as null when there is none, so a create says
+            // nothing about a profile it was never asked about.
+            ...(pendingProfileId ? { assistantProfileId: pendingProfileId } : {}),
           }),
         });
 
@@ -3075,6 +3109,10 @@ export function ChatPageClient({
           const data = await res.json();
           activeChatId = data.id;
           justCreatedTitle = newConversationTitle;
+          // The server pinned a revision; the pending choice has become a
+          // binding and stops being pending.
+          setAssistantProfile(data.assistantProfile ?? null);
+          setPendingProfileId(null);
           // The conversation was created from this exact selection one line
           // above, so it is the server-confirmed state -- seed it so the
           // barrier below does not need a redundant first PATCH. (PATCH
@@ -3599,6 +3637,96 @@ export function ChatPageClient({
     };
   }, [sessionUserId]);
 
+  /**
+   * §14. The account's published profiles, loaded once per signed-in session.
+   *
+   * The feature flag is read by not answering: `GET /api/assistant-profiles`
+   * refuses with 403 when profiles are off, so a null list means "this
+   * account has no picker" whether that is because the flag is off or because
+   * the request failed. Both end in the same place -- the control is not
+   * rendered -- and inventing a second flag endpoint to distinguish them would
+   * be a second source of truth for the same answer.
+   *
+   * A profile with no published version is not in the list: the server can
+   * only bind a published one, and offering a draft would be offering a
+   * choice that is refused on click.
+   */
+  useEffect(() => {
+    if (!sessionUserId) return;
+    let cancelled = false;
+    void fetch("/api/assistant-profiles", { cache: "no-store" })
+      .then((response) =>
+        response.ok
+          ? response.json()
+          : discardResponseBody(response).then(() => null)
+      )
+      .then((body: { profiles?: unknown } | null) => {
+        if (cancelled) return;
+        if (!body || !Array.isArray(body.profiles)) {
+          setAssistantProfileOptions(null);
+          return;
+        }
+        setAssistantProfileOptions(
+          body.profiles
+            .filter(
+              (entry): entry is Record<string, unknown> =>
+                Boolean(entry) && typeof entry === "object"
+            )
+            .filter((entry) => entry.published === true)
+            .map((entry) => ({
+              id: String(entry.id),
+              name: String(entry.name ?? ""),
+              icon: typeof entry.icon === "string" ? entry.icon : null,
+              description:
+                typeof entry.description === "string" ? entry.description : null,
+              revision:
+                typeof entry.currentRevision === "number"
+                  ? entry.currentRevision
+                  : 1,
+            }))
+        );
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [sessionUserId]);
+
+  /**
+   * What the composer shows, whichever of the two states holds it.
+   *
+   * A not-yet-created conversation has no server binding to display, so the
+   * pending choice is rendered from the option list -- with that list's own
+   * revision, never a guess. `latestRevision` matches it because binding
+   * always pins the newest, so a pending row cannot claim to be superseded
+   * before it has been bound to anything.
+   */
+  // Whether there is a server conversation to have a binding at all. Asked of
+  // the id itself rather than through `accountConversationId`, which reads the
+  // identity ref: a ref read during render is the stale-value hazard
+  // `react-hooks/refs` names, and the namespace guard that helper performs is
+  // for writes -- what a display needs to know is only whether the id names
+  // something the server has.
+  const hasSavedConversation =
+    Boolean(currentChatId) && !isGuestConversationId(currentChatId ?? "");
+  const pendingAssistantOption =
+    !hasSavedConversation && pendingProfileId
+      ? assistantProfileOptions?.find((entry) => entry.id === pendingProfileId)
+      : null;
+  const effectiveAssistantProfile: ChatAssistantProfile | null =
+    hasSavedConversation
+      ? assistantProfile
+      : pendingAssistantOption
+        ? {
+            profileId: pendingAssistantOption.id,
+            name: pendingAssistantOption.name,
+            icon: pendingAssistantOption.icon,
+            revision: pendingAssistantOption.revision,
+            latestRevision: pendingAssistantOption.revision,
+            status: "current",
+          }
+        : null;
+
   const handleWebSearchModeChange = (mode: WebSearchMode) => {
     updateWebSearchMode(mode);
   };
@@ -3631,6 +3759,79 @@ export function ChatPageClient({
       .catch(() => {
         setMemoryMode(previous);
         showToast(t("chat.memoryModeFailed"), "error");
+      });
+  };
+
+  /**
+   * §14. Attaching, detaching, and the explicit move to a newer revision are
+   * one action, because they are one decision from the user's side: "which
+   * assistant is this conversation running under". Which of the three it
+   * turns into is the server's answer, not a branch here.
+   *
+   * A conversation that does not exist yet holds the choice locally and
+   * passes it to the create; anything else PATCHes. Optimistic and then
+   * corrected, exactly like the memory mode above: a failed PATCH that left
+   * the menu showing the new assistant would tell the user their next answer
+   * comes from instructions the server never bound.
+   */
+  const handleAssistantProfileChange = (profileId: string | null) => {
+    if (!sessionUserId) return;
+    const targetId = accountConversationId(currentChatId);
+    if (!targetId) {
+      setPendingProfileId(profileId);
+      return;
+    }
+    const previous = assistantProfile;
+    // Shown from the option list until the server answers, and with the
+    // revision the list carries -- never a guess. `latestRevision` matches
+    // because binding always pins the newest, so an optimistic row cannot
+    // briefly claim to be superseded.
+    const option = profileId
+      ? assistantProfileOptions?.find((entry) => entry.id === profileId)
+      : null;
+    setAssistantProfile(
+      option
+        ? {
+            profileId: option.id,
+            name: option.name,
+            icon: option.icon,
+            revision: option.revision,
+            latestRevision: option.revision,
+            status: "current",
+          }
+        : null
+    );
+    void fetch(`/api/conversations/${targetId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ assistantProfileId: profileId }),
+    })
+      .then(async (response) => {
+        if (!response.ok) {
+          await discardResponseBody(response);
+          setAssistantProfile(previous);
+          showToast(t("chat.assistantProfileFailed"), "error");
+          return;
+        }
+        const data = (await response.json().catch(() => null)) as {
+          assistantProfile?: ChatAssistantProfile | null;
+          selectedModels?: unknown;
+        } | null;
+        // The server's answer replaces the optimistic row: it is the only
+        // party that knows which revision was current when it bound.
+        setAssistantProfile(data?.assistantProfile ?? null);
+        if (Array.isArray(data?.selectedModels)) {
+          // Binding adopts the version's models, so the picker has to follow
+          // or it would show a selection the conversation no longer has.
+          const models = data.selectedModels.filter(
+            (entry): entry is string => typeof entry === "string"
+          );
+          if (models.length > 0) setSelectedModels(models);
+        }
+      })
+      .catch(() => {
+        setAssistantProfile(previous);
+        showToast(t("chat.assistantProfileFailed"), "error");
       });
   };
 
@@ -4242,6 +4443,13 @@ export function ChatPageClient({
           }
           onMemoryModeChange={handleMemoryModeChange}
           accountMemoryDefault={accountMemoryDefault}
+          assistantProfile={
+            assistantProfileOptions ? effectiveAssistantProfile : undefined
+          }
+          assistantProfileOptions={assistantProfileOptions ?? []}
+          onAssistantProfileChange={
+            assistantProfileOptions ? handleAssistantProfileChange : undefined
+          }
           onOpenDeepResearchSetup={() => setIsDeepResearchSetupOpen(true)}
           isDeepResearchPending={isDeepResearchPending}
           onDismissDeepResearchChip={dismissDeepResearchChip}
@@ -4311,6 +4519,13 @@ export function ChatPageClient({
           }
           onMemoryModeChange={handleMemoryModeChange}
           accountMemoryDefault={accountMemoryDefault}
+          assistantProfile={
+            assistantProfileOptions ? effectiveAssistantProfile : undefined
+          }
+          assistantProfileOptions={assistantProfileOptions ?? []}
+          onAssistantProfileChange={
+            assistantProfileOptions ? handleAssistantProfileChange : undefined
+          }
           onOpenDeepResearchSetup={() => setIsDeepResearchSetupOpen(true)}
           isDeepResearchPending={isDeepResearchPending}
           onDismissDeepResearchChip={dismissDeepResearchChip}

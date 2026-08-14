@@ -34,7 +34,16 @@ export type MemoryInjectionRefusal =
     | "flag_off"
     | "no_approved_pair"
     | "account_off"
-    | "conversation_off";
+    | "conversation_off"
+    /**
+     * Release C: an assistant profile whose version asked not to use account
+     * memory. Deliberately NOT a branch of `decideMemoryInjection` — a profile
+     * is a request that can only narrow (§45), so the AND lives in
+     * `resolveProfileMemoryUse` and this reason is what the caller records
+     * once that AND has already said no. A second implementation of the same
+     * narrowing inside the gate is exactly what §45 asks not to happen.
+     */
+    | "profile_off";
 
 export type MemoryInjectionDecision =
     | { allowed: true }

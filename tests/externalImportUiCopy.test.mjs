@@ -27,6 +27,14 @@ const LOCALES = { ko, en, zh, fr, de, es, pt };
 const ENGLISH_HOMOGRAPH_KEYS = new Set([
     "fr.messagesCount",
     "fr.historyConversations",
+    // Two product names side by side. Google ships "Gemini" and "Google
+    // Takeout" untranslated in these locales, and the user is matching this
+    // string against what Google's own export page says -- translating it
+    // would make the recipe harder to follow, not easier.
+    "fr.guideGeminiTitle",
+    "de.guideGeminiTitle",
+    "es.guideGeminiTitle",
+    "pt.guideGeminiTitle",
 ]);
 
 test("every supported locale carries every external import UI key", () => {
@@ -161,6 +169,19 @@ test("the components render the copy", () => {
         // Losing the password is unrecoverable, so the warning is part of the
         // contract rather than a nicety.
         "externalImport.lockNoRecoveryWarning",
+        // A2 §1: choosing "Gemini" in Takeout hands the user Gems, not
+        // conversations. The recipe naming My Activity is what keeps the
+        // common first attempt from producing an empty import.
+        "externalImport.guideGeminiTitle",
+        "externalImport.guideGeminiStep2",
+        // A2 §2.2, §4.1, §5: what branching costs, what the archive lacks,
+        // and what the export assigned to no conversation.
+        "externalImport.warningBranchDuplicates",
+        "externalImport.warningMissingAttachments",
+        "externalImport.warningUnassignedTurns",
+        // §5.2: an attached archive is skipped rather than refusing the whole
+        // export, so the preview has to say the attachment is not coming.
+        "externalImport.warningNestedArchives",
     ]) {
         assert.ok(
             sources.some((source) => source.includes(key)),

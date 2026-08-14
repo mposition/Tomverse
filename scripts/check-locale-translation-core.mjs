@@ -37,6 +37,12 @@ export const MIN_TRANSLATABLE_LENGTH = 13;
  */
 export const SHARED_STRING_ALLOWLIST = [
   {
+    key: "externalImport.guideGeminiTitle",
+    locales: ["de", "es", "fr", "pt"],
+    reason:
+      "Two product names side by side: Google does not translate either 'Gemini' or 'Google Takeout' in these locales, and the user has to match the string against what Google's own page says. Korean and Chinese differ only in their bracket glyphs.",
+  },
+  {
     key: "sidebar.title",
     locales: "all",
     reason: "The product name. Tomverse Insight is not translated anywhere.",
@@ -46,6 +52,12 @@ export const SHARED_STRING_ALLOWLIST = [
     locales: "all",
     reason:
       "Deep Research is the feature's name, used untranslated in the UI and in the model catalogue.",
+  },
+  {
+    key: "chat.toolsAssistantRevision",
+    locales: ["de"],
+    reason:
+      "German uses the same word: \"Revision {revision}\" is the translation, not the English left in place.",
   },
   {
     key: "chat.deepResearchChipLabel",
@@ -73,6 +85,12 @@ export const SHARED_STRING_ALLOWLIST = [
     key: "chat.aiReviewContradictions",
     locales: ["fr"],
     reason: "'Contradictions' is the French word as well.",
+  },
+  {
+    key: "assistantProfiles.historyEntry",
+    locales: ["de"],
+    reason:
+      "'Revision' is the German word too, and the rest of the string is the number. The other locales translate it (révision, revisión, revisão, 修订, 개정).",
   },
   {
     key: "externalImport.messagesCount",

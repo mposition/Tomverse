@@ -59,9 +59,42 @@ to be off by default.
   whether this may go to production, so it has to be on here.
 - Auto has to actually route the turn, so the cohort must include the drill
   account: `AUTO_ROUTER_ROLLOUT_PERCENT`, `AUTO_ROUTER_ELIGIBLE_PLANS`,
-  `AUTO_ROUTER_COHORT_SALT`, and the three readiness gates attested **in
-  staging only**. Attesting a gate in production to make a drill work would be
-  the rollout boundary failing at exactly the moment it is being tested.
+  `AUTO_ROUTER_COHORT_SALT`.
+- `AUTO_ROUTER_DRILL_SUBJECTS=<the drill account's user id>` — the readiness
+  override, and see §2.1 for why it exists at all. Empty means nobody.
+
+An earlier version of this document said to attest the three readiness gates
+"in staging only". That was not a thing that could be done, and following it
+would have been the rollout boundary failing at exactly the moment it is being
+tested. `lib/autoRolloutReadiness.ts` is static code with no environment
+dimension: a gate moved to `passed` to make staging route is the same `passed`
+in production. §2.1 is what replaced it.
+
+### 2.1 The readiness override, and why it is shaped this way
+
+A fallback only happens on a routed turn, and a turn is only routed when
+readiness says ready. So the drill needed one of two things: a false entry in
+the readiness register, or a narrow request-scoped hole.
+
+The register is the audit record of a human judgement. A false entry in it is
+indistinguishable from a real one forever after, and it would still be there
+long after the drill was forgotten. So the hole it is —
+`lib/autoDrillOverride.ts`, with four locks:
+
+| Lock | Effect |
+| --- | --- |
+| Not production | `resolveDeploymentEnvironment` fails closed, so an unlabelled deployment refuses. No combination of the other three opens it |
+| The fault-injection credential | the same secret and header the drill already carries, so deleting it closes the override too |
+| `AUTO_ROUTER_DRILL_SUBJECTS` | an explicit allowlist. A valid credential alone routes nobody |
+| Not a guest | Auto excludes guests structurally, and a drill is not a reason to invent an exception the product does not have |
+
+It bypasses **readiness and nothing else**. The kill switch still outranks it,
+the plan allowlist and the cohort percentage still apply, and the guest
+exclusion still holds — an operator running a drill still has to put the
+account on an eligible plan and set a percentage. Every use logs
+`chat_auto_readiness_overridden` and is marked `staging_drill_override` on the
+cohort decision, so a turn that routed only because a drill said so is never
+mistaken for one that qualified.
 - `MANIFEST_HASH_KEYS` / `MANIFEST_HASH_ACTIVE_KEY_ID` — recording a dispatch
   refuses without them, so the drill would fail for the wrong reason.
 - A **dedicated account** with an Auto conversation and no other traffic. The
@@ -152,16 +185,23 @@ Only after all four scenarios pass, and it is a decision rather than the last
 step of a script:
 
 1. All four drill rows are in §9's table, with traces.
-2. `ROUTING_FAULT_INJECTION_SECRET` is **removed from staging**. A switch that
-   breaks provider calls does not stay configured because it is off by default.
-3. `AUTO_ROUTER_FALLBACK_ENABLED=on` in production — and nowhere before the
+2. `ROUTING_FAULT_INJECTION_SECRET` and `AUTO_ROUTER_DRILL_SUBJECTS` are
+   **removed from staging**, and staging is redeployed. A switch that breaks
+   provider calls does not stay configured because it is off by default, and
+   the readiness override rides on the same credential.
+3. **Negative check.** Replay one drill request with the old secret and header
+   against the redeployed staging and confirm it neither injects a fault nor
+   overrides readiness — `chat_fault_injection_armed` and
+   `chat_auto_readiness_overridden` must both be absent. Removing a variable
+   and assuming it took effect is how a switch survives its own removal.
+4. `AUTO_ROUTER_FALLBACK_ENABLED=on` in production — and nowhere before the
    three readiness gates in `lib/autoRolloutReadiness.ts` are attested for
    production, because a fallback can only happen on a turn Auto routed.
-4. Watch `chat_auto_fallback_dispatched` and `chat_auto_fallback_refused` for
+5. Watch `chat_auto_fallback_dispatched` and `chat_auto_fallback_refused` for
    the first day. The refusal reasons are the useful half: a distribution that
    is all `no_candidate` means the Router is offering one model and the feature
    is off in practice.
-5. FALLBACK-02's production audit — `automatic_fallbacks_after_visible_token`
+6. FALLBACK-02's production audit — `automatic_fallbacks_after_visible_token`
    over real traffic — is owed once traffic exists. Until then the count is
    zero for want of traffic, which is not the same as zero for want of the
    invariant holding.

@@ -2,7 +2,11 @@ import {
     getExternalImportAdapter,
     type ExternalAdapterProvider,
 } from "@/lib/externalImportAdapters";
-import type { ParsedExternalConversation } from "@/lib/externalImportAdapters/types";
+import {
+    emptyExportExtras,
+    type ParsedExportExtras,
+    type ParsedExternalConversation,
+} from "@/lib/externalImportAdapters/types";
 import {
     EXTERNAL_IMPORT_MAX_BATCH_REQUEST_BYTES,
     EXTERNAL_IMPORT_STORAGE_LIMITS,
@@ -58,6 +62,31 @@ export type ImportPreview = {
         skippedNonConversationMessages: number;
         skippedNonTextParts: number;
         additionalBranches: number;
+        /**
+         * Attachments that are themselves archives (§5.2). Counted apart from
+         * every other skip: a user who attached a `.zip` to a chat needs to be
+         * told that file is not coming, and "unsupported file type" does not
+         * say it.
+         */
+        skippedNestedArchives: number;
+        /**
+         * Turns the export named no conversation for (A2 §5). Not attached to
+         * a neighbouring conversation by proximity, and not dropped in
+         * silence — the count is the whole disclosure.
+         */
+        unassignedTurns: number;
+        /**
+         * Attachments the export references that the archive does not contain
+         * (A2 §4.1). Distinct from what we chose not to copy: this is what
+         * Google did not include, and merging the two would tell the user we
+         * dropped something we never had.
+         */
+        missingAttachments: number;
+        /**
+         * Messages stored more than once because the user branched a chat and
+         * every branch is imported (A2 §2.2). They cost quota once per branch.
+         */
+        duplicatedBranchMessages: number;
     };
 };
 
@@ -119,7 +148,17 @@ export function estimateStoredBytes(
 
 export function buildImportPreview(
     provider: ExternalAdapterProvider,
-    conversations: readonly ParsedExternalConversation[]
+    conversations: readonly ParsedExternalConversation[],
+    /**
+     * Counts that belong to the export rather than to any conversation in it:
+     * an entry the archive walker skipped never became one, and an attachment
+     * the archive lacks is knowable only to the caller holding the listing.
+     */
+    exportTotals: {
+        nestedArchives?: number;
+        unassignedTurns?: number;
+        missingAttachments?: number;
+    } = {}
 ): ImportPreview {
     const rows: PreviewConversation[] = conversations.map((conversation) => ({
         conversation,
@@ -137,6 +176,10 @@ export function buildImportPreview(
         skippedNonConversationMessages: 0,
         skippedNonTextParts: 0,
         additionalBranches: 0,
+        skippedNestedArchives: exportTotals.nestedArchives ?? 0,
+        unassignedTurns: exportTotals.unassignedTurns ?? 0,
+        missingAttachments: exportTotals.missingAttachments ?? 0,
+        duplicatedBranchMessages: 0,
     };
     for (const row of rows) {
         if (row.importability.kind === "importable") {
@@ -155,6 +198,7 @@ export function buildImportPreview(
             warnings.skippedNonConversationMessages;
         totals.skippedNonTextParts += warnings.skippedNonTextParts;
         totals.additionalBranches += warnings.additionalBranchCount;
+        totals.duplicatedBranchMessages += warnings.duplicatedPrefixMessages;
     }
 
     return { provider, conversations: rows, totals };
@@ -295,8 +339,17 @@ export function buildBatchPayloads(
 export function parseConversationItems(
     provider: ExternalAdapterProvider,
     items: readonly unknown[]
-): { conversations: ParsedExternalConversation[]; unparsableCount: number } {
+): {
+    conversations: ParsedExternalConversation[];
+    unparsableCount: number;
+    extras: ParsedExportExtras;
+} {
     const adapter = getExternalImportAdapter(provider);
+    // A provider whose export is not one conversation per entry parses the
+    // list as a whole -- Google Takeout's turns only reveal which
+    // conversations they belong to when grouped (A2 §2.2).
+    if (adapter.parseAll) return adapter.parseAll(items);
+
     const conversations: ParsedExternalConversation[] = [];
     let unparsableCount = 0;
     for (const item of items) {
@@ -309,7 +362,7 @@ export function parseConversationItems(
         if (parsed) conversations.push(parsed);
         else unparsableCount += 1;
     }
-    return { conversations, unparsableCount };
+    return { conversations, unparsableCount, extras: emptyExportExtras() };
 }
 
 /** Deduplicates across multi-part exports, keeping the richer snapshot. */

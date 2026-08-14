@@ -4,7 +4,10 @@ import { Unzip, UnzipInflate } from "fflate";
 import {
     detectExternalImportAdapter,
 } from "@/lib/externalImportAdapters";
-import type { ParsedExternalConversation } from "@/lib/externalImportAdapters/types";
+import type {
+    ExternalAdapterProvider,
+    ParsedExternalConversation,
+} from "@/lib/externalImportAdapters/types";
 import {
     ExternalImportArchiveError,
     classifyArchiveEntry,
@@ -78,13 +81,21 @@ const errorResponse = (error: unknown): WorkerResponse => {
     };
 };
 
+/** Counts that belong to the export rather than to any one conversation. */
+type ExportTotals = {
+    nestedArchives: number;
+    unassignedTurns: number;
+    missingAttachments: number;
+};
+
 /**
  * Streams one archive, collecting parsed conversations. Entry decisions are
  * made from the entry header before any inflation begins.
  */
 async function parseArchive(file: File): Promise<{
     conversations: ParsedExternalConversation[];
-    provider: "chatgpt" | "claude";
+    provider: ExternalAdapterProvider;
+    exportTotals: ExportTotals;
 }> {
     if (
         file.size >
@@ -107,19 +118,38 @@ async function parseArchive(file: File): Promise<{
                 "no_conversation_data"
             );
         }
-        const { conversations } = parseConversationItems(
+        const { conversations, extras } = parseConversationItems(
             adapter.provider,
             value as unknown[]
         );
-        return { conversations, provider: adapter.provider };
+        return {
+            conversations,
+            provider: adapter.provider,
+            exportTotals: {
+                nestedArchives: 0,
+                unassignedTurns: extras.unassignedTurns,
+                // A bare .json has no sibling files, so nothing can be found
+                // missing here; the attachments were never in reach.
+                missingAttachments: 0,
+            },
+        };
     }
 
     const collected: ParsedExternalConversation[][] = [];
-    let provider: "chatgpt" | "claude" | null = null;
+    let provider: ExternalAdapterProvider | null = null;
     let entryCount = 0;
     let parsedBytes = 0;
     let bytesRead = 0;
     let conversationsFound = 0;
+    let nestedArchivesSkipped = 0;
+    let unassignedTurns = 0;
+    /**
+     * Every filename the archive holds, so an attachment a turn references can
+     * be found absent (A2 §4.1). Basenames only: a reference names the file,
+     * not its path. Names are all this keeps -- no entry is inflated for it.
+     */
+    const archivedNames = new Set<string>();
+    const attachmentReferences: string[] = [];
 
     await new Promise<void>((resolve, reject) => {
         const decoder = new TextDecoder();
@@ -147,6 +177,9 @@ async function parseArchive(file: File): Promise<{
                 uncompressedBytes: entry.originalSize ?? entry.size ?? 0,
                 compressedBytes: entry.size,
             };
+            const basename = entry.name.split("/").pop();
+            if (basename) archivedNames.add(basename);
+
             const decision = classifyArchiveEntry(info);
             if (decision.kind === "reject") {
                 reject(
@@ -159,6 +192,11 @@ async function parseArchive(file: File): Promise<{
             }
             if (decision.kind === "skip") {
                 // Never call entry.start(): the data is not inflated at all.
+                // For a nested archive that is the whole guarantee -- depth
+                // stays 0 because nothing here ever opens it.
+                if (decision.reason === "nested_archive") {
+                    nestedArchivesSkipped += 1;
+                }
                 return;
             }
 
@@ -209,6 +247,10 @@ async function parseArchive(file: File): Promise<{
                             const parsed = parseConversationItems(
                                 detected,
                                 items
+                            );
+                            unassignedTurns += parsed.extras.unassignedTurns;
+                            attachmentReferences.push(
+                                ...parsed.extras.attachmentReferences
                             );
                             if (parsed.conversations.length > 0) {
                                 collected.push(parsed.conversations);
@@ -267,6 +309,13 @@ async function parseArchive(file: File): Promise<{
     return {
         conversations: mergeConversationSets(collected),
         provider,
+        exportTotals: {
+            nestedArchives: nestedArchivesSkipped,
+            unassignedTurns,
+            missingAttachments: attachmentReferences.filter(
+                (name) => !archivedNames.has(name)
+            ).length,
+        },
     };
 }
 
@@ -281,14 +330,16 @@ scope.onmessage = async (event: MessageEvent<WorkerRequest>) => {
 
     cancelled = false;
     try {
-        const { conversations, provider } = await parseArchive(request.file);
+        const { conversations, provider, exportTotals } = await parseArchive(
+            request.file
+        );
         if (cancelled) {
             post({ type: "cancelled" });
             return;
         }
         post({
             type: "preview",
-            preview: buildImportPreview(provider, conversations),
+            preview: buildImportPreview(provider, conversations, exportTotals),
             conversations,
         });
     } catch (error) {

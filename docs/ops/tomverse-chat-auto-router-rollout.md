@@ -59,6 +59,7 @@ missing variable is never mistaken for a deliberate rollout.
 | `MANIFEST_HASH_KEYS` | `keyId:secret` pairs. Required before any dispatch may be recorded |
 | `MANIFEST_HASH_ACTIVE_KEY_ID` | which of them new manifests are digested with |
 | `AUTO_ROUTER_FALLBACK_ENABLED` | `on` allows a second provider attempt after a pre-token failure. Anything else, including unset, allows none |
+| `AUTO_ROUTER_DRILL_SUBJECTS` | staging only. Subject ids that may route while a readiness gate is outstanding, for the fallback drill. Empty means nobody, and production refuses regardless |
 
 **The manifest keyring is not optional and not the session secret.** Recording
 a dispatch refuses outright without it, because a manifest whose key nobody
@@ -198,23 +199,30 @@ being routed to a model that cannot see one.
 - **The Auto UI is behind a flag that is off**, and stays off until a cohort is
   actually running: a toggle that saves and changes nothing is the failure
   `docs/ui-contracts/auto-model-selection.md` §1 exists to prevent.
-- **No reroute on a failed dispatch.** §5's fallback and pass-through attempts
-  are what `RoutingAttempt` was built for, but nothing produces a second
-  attempt yet — a routed turn that fails fails, exactly as a manual one does.
-  What exists, and what is still open, is §9.1.
+- **Automatic fallback is built and switched off.** `AUTO_ROUTER_FALLBACK_ENABLED`
+  defaults to off and stays off until the staging drill has been run:
+  `docs/ops/tomverse-chat-fallback-drill.md`. §9.1 to §9.4 are the record of
+  how it was built and what is still owed.
+- **The Planner is `"none"`,** so §6's pass-through downgrade is held. The
+  policy function can return one and the route refuses it by name rather than
+  silently doing nothing.
 
-### 9.1 The fallback swap: what is decided and what is not
+### 9.1 The fallback swap: how it was built
 
-Built and covered: the decision (`lib/routingFallbackPolicy.ts`), the records
-and budgets (`RoutingAttempt`, `passThroughUsed`, `rerouteCount`), §8's
-recovery state, and §7's in-stream `retrying_with_another_model` signal on
-both sides of the wire.
+*This section is a record of work now complete. It is kept because the
+corrections in it are the reasoning behind the shape of the code, and a
+reviewer who only sees the result cannot tell which parts were argued for.*
 
-Not built: the swap itself, in `app/api/chat/route.ts`'s stream. An earlier
-note here said the `pull()` catch was the seam and that no extraction was
-required. The seam is right; the second half was wrong, and correcting it
-matters because it understates the work by a lot. Four things were open; three
-are now closed and the scope question is the one that remains.
+Built and covered before this work: the decision
+(`lib/routingFallbackPolicy.ts`), the records and budgets (`RoutingAttempt`,
+`passThroughUsed`, `rerouteCount`), §8's recovery state, and §7's in-stream
+`retrying_with_another_model` signal on both sides of the wire.
+
+Not built at that point: the swap itself, in `app/api/chat/route.ts`'s stream.
+An earlier note here said the `pull()` catch was the seam and that no
+extraction was required. The seam was right; the second half was wrong, and
+correcting it mattered because it understated the work by a lot. Four things
+were open, and all four are now closed — each below says which step closed it.
 
 **~~The catch does not classify the failure.~~ Done — step 1.**
 `generatedText === ""` says the server has not read a text chunk yet. That is a
@@ -421,6 +429,18 @@ reader directly and clears the latch when it installs the new one.
 
 §7 of the drill runbook is the enable checklist, which is deliberately a
 decision and not the last line of a script.
+
+One thing the drill needed that this document originally got wrong: the
+runbook said to attest the three readiness gates "in staging only", which is
+not a thing that can be done. `lib/autoRolloutReadiness.ts` is static code with
+no environment dimension, so a gate moved to `passed` for staging is `passed`
+in production. A fallback only happens on a routed turn and a turn is only
+routed when readiness says ready, so the drill needed either a false entry in
+the readiness register or a narrow request-scoped hole. It is the hole:
+`lib/autoDrillOverride.ts`, four locks, production fails closed, readiness and
+nothing else bypassed, every use logged and marked on the decision. A false
+entry in the register would have outlived the drill and been indistinguishable
+from a real judgement forever after.
 
 | Variable | Meaning |
 | --- | --- |

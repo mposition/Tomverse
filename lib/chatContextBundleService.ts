@@ -8,7 +8,7 @@ import {
     verifyContextBundle,
     type ContextBundleVerification,
 } from "@/lib/chatContextBundleCore";
-import type { ChatMemoryContext } from "@/lib/chatMemoryContext";
+import type { ChatTurnContext } from "@/lib/chatTurnContext";
 import { ChatAccessError } from "@/lib/chatSecurity";
 import { prisma } from "@/lib/prisma";
 
@@ -70,6 +70,8 @@ export type IssuedContextBundle = {
     /** Server-computed, for the §13.4 disclosure. Never a client claim. */
     memoryUsedCount: number;
     memoryTokens: number;
+    /** Release C: the profile's own blocks, priced apart from memory's. */
+    profileTokens: number;
 };
 
 /**
@@ -84,7 +86,7 @@ export function issueChatContextBundle(input: {
     subjectKey: string;
     conversationId: string | null;
     modelIds: string[];
-    context: ChatMemoryContext;
+    context: ChatTurnContext;
     now?: Date;
 }): IssuedContextBundle {
     const now = input.now ?? new Date();
@@ -98,6 +100,7 @@ export function issueChatContextBundle(input: {
             conversationId: input.conversationId,
             modelIds: input.modelIds,
             memoryTokens: input.context.memoryTokens,
+            profileTokens: input.context.profileTokens,
             expiresAtMs,
             ...input.context.fingerprintInput,
         },
@@ -107,8 +110,9 @@ export function issueChatContextBundle(input: {
         token,
         bundleId,
         expiresAt: new Date(expiresAtMs).toISOString(),
-        memoryUsedCount: input.context.prompt.usedCount,
+        memoryUsedCount: input.context.memory.prompt.usedCount,
         memoryTokens: input.context.memoryTokens,
+        profileTokens: input.context.profileTokens,
     };
 }
 

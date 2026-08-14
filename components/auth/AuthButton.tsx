@@ -428,7 +428,14 @@ export function AuthButton({
             }),
         ])
             .then(async ([settingsResponse, candidateResponse]) => {
+                // Both bodies, on every path out of here. `Promise.all` means
+                // one refusal used to strand the other response's body unread
+                // as well, and a cancelled effect stranded both -- the request
+                // then stays in flight for the life of the page (see
+                // lib/apiCacheControlPolicy.ts).
                 if (cancelled || !settingsResponse.ok || !candidateResponse.ok) {
+                    await discardResponseBody(settingsResponse);
+                    await discardResponseBody(candidateResponse);
                     return;
                 }
                 const settings = (await settingsResponse.json()) as {
@@ -1754,6 +1761,27 @@ export function AuthButton({
                                                     onNavigate={closeSettingsModal}
                                                     testId="memory-entry"
                                                     linkTestId="memory-entry-link"
+                                                />
+                                                {/* A profile is personalisation
+                                                    the account owns, so it is a
+                                                    row in this same group rather
+                                                    than a card beside it
+                                                    (settings-navigation contract
+                                                    §2). After memory because a
+                                                    profile may use approved
+                                                    memory and never the other
+                                                    way round. */}
+                                                <SettingsEntryRow
+                                                    section="assistants"
+                                                    href="/settings/assistants"
+                                                    icon={Bot}
+                                                    title={t("assistantProfiles.dataTabTitle")}
+                                                    description={t("assistantProfiles.dataTabDescription")}
+                                                    status={t("assistantProfiles.dataTabStatus")}
+                                                    actionLabel={t("assistantProfiles.dataTabOpen")}
+                                                    onNavigate={closeSettingsModal}
+                                                    testId="assistants-entry"
+                                                    linkTestId="assistants-entry-link"
                                                 />
                                                 {/* The unified export. The
                                                     conversations-only download

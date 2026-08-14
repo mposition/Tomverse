@@ -40,7 +40,7 @@ import {
     atLeastOneToken,
     createTokenEstimateAccumulator,
 } from "@/lib/chatTokenEstimate";
-import { buildChatMemoryContext } from "@/lib/chatMemoryContext";
+import { buildChatTurnContext } from "@/lib/chatTurnContext";
 import { fitChatOutputToContextWindow } from "@/lib/chatContextWindow";
 import { issueChatContextBundle } from "@/lib/chatContextBundleService";
 
@@ -194,6 +194,9 @@ export async function POST(request: Request) {
         // §8.1 invariant 1: null until the conversation row is read, which is
         // also the "no conversation" case — both inherit the account default.
         let conversationMemoryMode: string | null = null;
+        // §32: the conversation's bound profile version, read here so the
+        // priced context is the one the chat route will build.
+        let profileVersionId: string | null = null;
         // A guest's transcript lives in their browser, so there is no server
         // conversation to read history from -- and no ownership question to
         // answer. Signed-in callers keep the full check below unchanged.
@@ -206,6 +209,7 @@ export async function POST(request: Request) {
                     selectedModels: true,
                     kind: true,
                     memoryMode: true,
+                    assistantProfileVersionId: true,
                     messages: {
                         orderBy: { createdAt: "desc" },
                         take: 100,
@@ -257,6 +261,7 @@ export async function POST(request: Request) {
             }
             history = conversation.messages.reverse();
             conversationMemoryMode = conversation.memoryMode;
+            profileVersionId = conversation.assistantProfileVersionId;
         }
 
         // §10: the priced context and the sent context must be the same one,
@@ -264,9 +269,11 @@ export async function POST(request: Request) {
         // model's input estimate here — the figure the credit reservation and
         // the context-window check are built on. A guest gets an empty
         // context and the arithmetic below is unchanged for them.
-        const memoryContext = await buildChatMemoryContext({
+        const turnContext = await buildChatTurnContext({
             userId: session?.user?.id ?? null,
             query: payload.prompt,
+            profileVersionId,
+            plan: access.plan ?? null,
             // Priced under the same mode the chat route will send under. If
             // only one side read it, a conversation with memory off would be
             // charged for a memory block it never receives, or the reverse.
@@ -280,7 +287,11 @@ export async function POST(request: Request) {
                 .addText(payload.prompt)
                 // The memory block's own text, not its token count -- counting
                 // the text is what lets a Hangul recalibration reach it.
-                .addText(memoryContext.prompt.text ?? "");
+                // The whole §31 system block, not memory's share of it: a
+                // profile's instructions and its knowledge excerpts are input
+                // tokens too, and pricing one without the others reserves
+                // against a prompt that is not the one being sent.
+                .addText(turnContext.systemPrompt ?? "");
             for (const message of history) {
                 const belongsToModel =
                     message.role === "user"
@@ -373,7 +384,9 @@ export async function POST(request: Request) {
         // set: the panels are supposed to see one snapshot, and consumption
         // is per (bundle, model) so each still spends its own (§10).
         const contextBundle =
-            session?.user?.id && memoryContext.decision.allowed
+            session?.user?.id &&
+            (turnContext.memory.decision.allowed ||
+                turnContext.profileTokens > 0)
                 ? issueChatContextBundle({
                       subjectKey: session.user.id,
                       conversationId:
@@ -381,7 +394,7 @@ export async function POST(request: Request) {
                               ? null
                               : payload.conversationId,
                       modelIds: uniqueModelIds,
-                      context: memoryContext,
+                      context: turnContext,
                   })
                 : null;
 

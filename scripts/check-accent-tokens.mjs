@@ -73,6 +73,7 @@ const KNOWN_ROLES = [
   "accent-ai-review-start",
   "accent-ai-review-mid",
   "accent-ai-review-end",
+  "accent-assistant-profile",
   "accent-deep-research",
   "accent-image",
   "accent-model-catalogue",

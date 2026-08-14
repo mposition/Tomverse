@@ -61,6 +61,14 @@ const ENGLISH_STRING_CEILING = {
   ko: 8,
   // zh 191 -> 9, fr 235 -> 26, de 234 -> 20, es 230 -> 16, pt 227 -> 13.
   //
+  // fr, de, es and pt each gain one on 2026-08-14: the Gemini import guide's
+  // card title is "Gemini (Google Takeout)", two product names Google does not
+  // translate into any of them. The user matches this string against Google's
+  // own export page, so translating it would make the recipe harder to follow.
+  // Allowlisted in check-locale-translation-core.mjs for the same reason.
+  // Chinese differs only in its bracket glyphs and Korean in its spacing, so
+  // neither moved.
+  //
   // The 241 strings behind those numbers were translated in one pass: the whole
   // AI Review surface, Deep Research setup and its status lines, guest import
   // and the guest-save prompts, the comparison rail, the web-search chips, and
@@ -88,11 +96,24 @@ const ENGLISH_STRING_CEILING = {
   // "Refused" row means someone presented a link for this account and was
   // turned away. Reading that in a second language is a worse experience than
   // an untranslated picker label, so it went first.
+  //
+  // +1 fr and +2 de from the assistant profile screens (release C): French
+  // spells "Description" the same way English does, and German spells both
+  // "Name" and "Revision" the same way. All three were checked against the
+  // rest of that block, which is translated -- they are cognates, not copy
+  // that got skipped.
+  //
+  // +1 fr again from the conversation's assistant picker (release C4):
+  // French spells "Assistant" the same way English does, and German spells
+  // "Revision {revision}" the same way -- the same cognate the translation
+  // check allowlists for chat.toolsAssistantRevision. The rest of that block
+  // -- the "no assistant" option, the superseded line and the empty state --
+  // is translated in both.
   zh: 10,
-  fr: 26,
-  de: 20,
-  es: 16,
-  pt: 13,
+  fr: 29,
+  de: 24,
+  es: 17,
+  pt: 14,
 };
 
 test("every supported language is in the dictionary map", () => {

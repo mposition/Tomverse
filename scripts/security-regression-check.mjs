@@ -3280,6 +3280,111 @@ const checks = [
       );
     },
   },
+  {
+    name: "image provider budgets follow who bills us, never who made the model",
+    file: "lib/imageProviderBudget.ts",
+    // Nano Banana 2 is Google's model bought from fal, so those two answers
+    // came apart. The budget module must keep asking the first question: a fal
+    // request drawing down IMAGE_PROVIDER_GOOGLE_COST_* still adds up, it just
+    // adds up against an envelope with no money in it while fal's real spend
+    // goes unwatched -- and every number downstream stays plausible.
+    //
+    // Reading for the *absence* of the brand field rather than the presence of
+    // the right one, because the mistake is additive: someone reaches for
+    // `imageModelOwner()` here to make a metric read nicely, and nothing else
+    // in the system objects.
+    test: (source) => {
+      const code = source
+        .split("\n")
+        .filter((line) => !/^\s*(\/\/|\*|\/\*)/.test(line))
+        .join("\n");
+      return (
+        !code.includes("modelOwner") &&
+        !code.includes("imageModelOwner") &&
+        code.includes("ImageModelProvider")
+      );
+    },
+  },
+  {
+    name: "readiness checks the provider that holds the credential",
+    file: "lib/imageModelRegistry.ts",
+    // `listActiveImageProviders` is what readiness and the budget guard walk.
+    // It must map over `provider`; mapping over the owner would have readiness
+    // demand a Google budget for a model Google never bills us for.
+    test: (source) =>
+      /listActiveImageProviders[\s\S]{0,220}map\(\(model\) => model\.provider\)/.test(
+        source
+      ),
+  },
+  {
+    name: "the fal adapter never retries a request that may already have been billed",
+    file: "lib/imageProviderAdapter.ts",
+    // The other three adapters retry, and correctly: an unbilled failure costs
+    // nothing to attempt again. Here a generation that succeeded and lost its
+    // response is indistinguishable from a transport failure, and retrying it
+    // buys a second image at a second charge while the user pays one fixed
+    // price. Read as the absence of a loop in this function, because the
+    // mistake would arrive as consistency -- someone making all four adapters
+    // look alike.
+    test: (source) => {
+      const start = source.indexOf("const generateWithFal");
+      if (start < 0) return false;
+      const end = source.indexOf("\nconst ", start + 10);
+      const body = source.slice(start, end < 0 ? undefined : end);
+      return (
+        !/\bfor\s*\(|\bwhile\s*\(|lastError/.test(body) &&
+        body.includes('"X-Fal-No-Retry"') === false &&
+        body.includes("falPlatformHeaders()")
+      );
+    },
+  },
+  {
+    name: "fal asset downloads are host-checked after redirects, not only before",
+    file: "lib/imageProviderAdapter.ts",
+    // An allowlisted URL that redirects elsewhere walks straight past the
+    // check it just passed, which turns the provider's response body into a
+    // request we make on its behalf. `redirect: "manual"` plus a check on the
+    // resolved response is what closes it.
+    test: (source) => {
+      const start = source.indexOf("const generateWithFal");
+      if (start < 0) return false;
+      const end = source.indexOf("\nconst ", start + 10);
+      const body = source.slice(start, end < 0 ? undefined : end);
+      return (
+        body.includes('redirect: "manual"') &&
+        body.includes("isFalAssetUrl(asset.url)") &&
+        body.includes("falAssetLengthRefused(asset.headers.get")
+      );
+    },
+  },
+  {
+    name: "the fal request pins every field its approved price was computed from",
+    file: "lib/falImageRequest.ts",
+    // 120 credits rest on a floor of 97, and that floor is arithmetic over a
+    // specific request. A field quietly dropped here does not break anything
+    // visible -- it just makes the audit trail describe a request the product
+    // no longer makes.
+    test: (source) =>
+      [
+        "num_images: 1",
+        'aspect_ratio: "1:1"',
+        'thinking_level: "high"',
+        "enable_web_search: false",
+        "limit_generations: true",
+        'system_prompt: ""',
+      ].every((field) => source.includes(field)),
+  },
+  {
+    name: "the fal thinking cap and the fal request agree about thinking",
+    file: "lib/falImageRequest.ts",
+    // These two drifted apart within a day of being written: the cap was
+    // described as a bound that held "whatever the request asks", while the
+    // request had already been pinned to ask for `high`, and the policy text
+    // still said high thinking was off. The number and the field are one
+    // decision -- 2,000 microUSD of a 87,000 worst case and a floor of 97 --
+    // and nothing but a check keeps them saying the same thing.
+    test: (source) => source.includes('thinking_level: "high"'),
+  },
 ];
 
 const failures = [];

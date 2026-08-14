@@ -53,6 +53,11 @@ Date / timezone:    ____________________
       English sentence where a translation is owed
 - [ ] `npm run check:api-cache-control` — proves the proxy's `/api/*` default
       does not silently replace a route's own caching decision
+- [ ] `npm run check:unconsumed-response-bodies` — the other half of that
+      default: `private, no-store` leaves the browser no cache entry to write,
+      so a client fetch that ignores an error body keeps the request in flight.
+      Blocks browser-capable code on the one target that was measured, and says
+      so; the server-side candidates are reported, not gated
 - [ ] `npm run check:enum-constraints` — proves every closed list the schema
       enforces still matches the list the application validates against, and
       that a new one was registered rather than left undecided
@@ -70,6 +75,10 @@ Date / timezone:    ____________________
       still point at files that exist. A comment naming a test file is a claim
       about coverage: one said its cadences were asserted against the Railway
       cron files by a test that had never existed
+- [ ] `npm run check:staging-verification-records` — proves the staging
+      checklist still holds no results and every signed run record still
+      hashes to what it was signed as. The previous shape kept an approval
+      table inside the checklist, which could not say which commit it covered
 - [ ] `npm run check:ui-tier-coverage` — proves the merge-blocking `@ui-risk`
       tier and the document that records it still describe the same set
 - [ ] `npm run check:release-gate-coverage` — proves this list still matches

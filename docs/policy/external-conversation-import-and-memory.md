@@ -5,6 +5,7 @@ approvedScopes:
   - RELEASE_A_IMPORT
   - RELEASE_B_MEMORY
   - RELEASE_C_ASSISTANT_PROFILES
+  - RELEASE_A2_GEMINI_IMPORT
 approvedBy: @mposition
 approvedAt: 2026-08-13
 approvalTicket: N/A
@@ -49,7 +50,7 @@ approvalTicket: N/A
 | 릴리스 | 범위 | 명시적 비목표 |
 |---|---|---|
 | **A — Import** | ChatGPT·Claude 공식 export의 브라우저 파싱, 선택 대화의 정규화 저장, account-private read-only viewer, 삭제·export | Gemini, memory 추출·주입, 이어서 대화하기, password lock, 공유 링크, `Conversation` 변환 |
-| **A2 — Gemini Import** | Google Takeout parser. 설계는 `docs/policy/external-import-gemini-a2.md` — 대화는 Takeout의 `Gemini` 항목이 아니라 `My Activity → Gemini Apps`에 있고 JSON 선택이 가능하므로, 여기 적힌 "locale 의존 HTML" 연기 사유는 A2 설계 §1에서 정정됐습니다. 남은 진행 조건은 활동 항목에 대화 식별자가 있는지입니다 | — |
+| **A2 — Gemini Import** | Google Takeout `My Activity → Gemini Apps`의 JSON parser. **scope 승인됨 (2026-08-14, §23)** — 계약은 `docs/policy/external-import-gemini-a2.md`이며, 분기별 독립 대화·내용 형태 인식·중첩 아카이브 미해제·첨부 누락 표시가 그 핵심입니다. 승인은 **구현 착수까지**이고 production 활성화는 별도입니다 | HTML export, Gems, scheduled actions, 첨부 파일 복제 |
 | **B — 계정 장기 메모리** | 메모리 후보 추출·검토·승인, 서버 주도 retrieval·주입, context bundle, external conversation lock 일반화 + memory suspension | Assistant Profile, knowledge, 외부 embedding |
 | **C — Assistant Profile** | private 프로필(지시문·모델·도구·memory 범위·지식 파일), 버전 고정, searchTerms 기반 knowledge RAG | public marketplace, 공유·판매, Actions, OAuth connector, 코드 실행, 외부 embedding |
 
@@ -199,13 +200,29 @@ MEMORY_EXTRACTION_PROVIDER_<PROVIDER>_COST_MICROUSD_PER_MONTH (절대값 overrid
 |---|---|
 | archive container | 1GB |
 | archive entry 수 | 50,000 |
-| nested archive | 0 (거부) |
+| nested archive | 해제 깊이 0 — 절대 열지 않음. 해당 entry만 skip하고 개수를 표시 |
 | 실제 파싱하는 단일 entry | 250MB |
 | 실제 파싱한 text 총량 | 300MB |
 | 실제 parsed entry 압축률 | 100:1 |
 
 - 전체 ZIP이 크다는 이유만으로 거부하지 않습니다 — media로 비대한 archive도
   필요한 conversation entry만 안전하게 읽을 수 있으면 진행합니다.
+- **중첩 archive는 archive 전체의 거부 사유가 아닙니다**(2026-08-14 결정).
+  사용자가 대화에 `.zip`을 첨부하면 그 파일이 export에 형제 entry로 들어오는데,
+  그것을 거부 사유로 삼으면 정상 export 전체를 받지 못합니다. 실제 Google
+  Takeout이 이 이유로 통째로 거부되는 것을 확인했습니다.
+
+  완화하는 것은 **거부 여부 하나뿐이며 보안 한도가 아닙니다.**
+
+  - 재귀 해제 깊이는 계속 **0**입니다. 중첩 archive 내부는 열지도, 열거하지도,
+    검사하지도 않습니다.
+  - 해당 entry만 skip하고, **`unsupported_extension`과 섞지 않고 자기 이유로**
+    셉니다. 한 숫자에 묻으면 첨부가 왜 빠졌는지 사용자가 알 수 없습니다.
+  - 최상위의 정상 conversation payload는 그대로 파싱합니다. 파싱할 대화
+    데이터가 하나도 없으면 `no_conversation_data`입니다 — 중첩 archive가 있다는
+    사실이 그 판정을 바꾸지 않습니다.
+  - **path traversal · absolute path · 암호화 entry는 기존대로 archive 전체
+    거부**입니다. container 크기·entry 수 한도도 그대로입니다.
 - 모바일 safe threshold 초과 시 crash를 감수하고 강행하지 않고 데스크톱 사용을
   안내합니다. `EXTERNAL_IMPORT_DESKTOP_RECOMMENDED`는 **서버 오류 코드가 아니라**
   클라이언트 상태 enum이자 content-free telemetry label입니다.
@@ -1644,8 +1661,9 @@ Data 탭(`AuthButton.tsx`)에는 진입점·요약만 두고 대형 UI를 modal�
 - decision-grade eval은 ko/en만. zh/fr/de/es/pt는 저장·UI는 지원하되 동일 정량
   품질 보장을 주장하지 않고, 후속 locale eval 전까지 admin 지표·feedback으로
   관찰합니다.
-- Gemini Takeout은 A2로 연기. retrieval v1은 lexical이므로 의미 검색 품질에
-  한계가 있고 embedding 도입은 별도 승인 경로입니다.
+- ~~Gemini Takeout은 A2로 연기~~ — A2 scope 승인됨(아래). retrieval v1은
+  lexical이므로 의미 검색 품질에 한계가 있고 embedding 도입은 별도 승인
+  경로입니다.
 - 모바일 대형 archive Import는 데스크톱 권장으로 제한됩니다.
 - media·첨부는 Import되지 않습니다.
 
@@ -1654,6 +1672,27 @@ Data 탭(`AuthButton.tsx`)에는 진입점·요약만 두고 대형 UI를 modal�
 1. **`approvedScopes: [RELEASE_A_IMPORT]` 기록** — `status: approved`,
    승인자, 티켓, 날짜와 함께. 릴리스 A의 계약(§4, §5, §18 릴리스 A 표)은
    이 문서에서 확정값으로 기록돼 있습니다.
+
+### A2 (Gemini Import) scope 승인 기록 (2026-08-14)
+
+| 항목 | 값 |
+|---|---|
+| scope token | `RELEASE_A2_GEMINI_IMPORT` |
+| 승인자 | `@mposition` |
+| 승인일 | 2026-08-14 |
+| 승인 근거 커밋 | `8f4fc95f` — 승인자가 직접 frontmatter에 token을 추가 |
+| 계약 문서 | `docs/policy/external-import-gemini-a2.md` (승인문 전문은 그 문서 §10) |
+
+승인 범위는 **Gemini My Activity JSON만**이며, 계약은 분기별 독립 대화,
+locale 경로·내용 형태 판정, 중첩 아카이브 미해제·skip, 첨부 누락 표시입니다.
+HTML export, Gems, scheduled actions, 첨부 파일 복제는 범위 밖입니다.
+
+**이 승인이 여는 것은 parser 구현 착수뿐입니다.** production 활성화와 릴리스 B
+memory 활성화는 각각 별도 승인이며, 이 기록이 그것을 대신하지 않습니다.
+
+`approvedAt: 2026-08-13`은 A·B·C scope 승인일이므로 그대로 둡니다. 한 필드를
+A2 날짜로 덮으면 앞선 승인이 언제 이루어졌는지 말할 수 없게 되므로, scope별
+날짜는 이 표가 가집니다.
 
 ### 릴리스 B scope 승인 관련 항목 (2026-08-03 확정)
 

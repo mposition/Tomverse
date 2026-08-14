@@ -375,6 +375,44 @@ function ParseWarnings({ warnings }: { warnings: ParseWarningTotals }) {
             })
         );
     }
+    if (warnings.skippedNestedArchives > 0) {
+        // Its own line rather than a share of "unsupported file type": the
+        // user attached these deliberately and would otherwise have no way to
+        // tell why they are absent (§5.2).
+        lines.push(
+            interpolate(t("externalImport.warningNestedArchives"), {
+                count: warnings.skippedNestedArchives,
+            })
+        );
+    }
+    if (warnings.missingAttachments > 0) {
+        // Separate from every other skip: this is what the export did not
+        // contain, not what we chose to leave out (A2 §4.1).
+        lines.push(
+            interpolate(t("externalImport.warningMissingAttachments"), {
+                count: warnings.missingAttachments,
+            })
+        );
+    }
+    if (warnings.duplicatedBranchMessages > 0) {
+        // Branches are imported whole, so a turn before the branch point is
+        // stored in each branch and costs quota in each (A2 §2.2). Saying so
+        // before the import is the difference between a design and a surprise.
+        lines.push(
+            interpolate(t("externalImport.warningBranchDuplicates"), {
+                count: warnings.duplicatedBranchMessages,
+            })
+        );
+    }
+    if (warnings.unassignedTurns > 0) {
+        // The export named no conversation for these. Guessing one from
+        // timing is forbidden (A2 §2), so the count is the whole disclosure.
+        lines.push(
+            interpolate(t("externalImport.warningUnassignedTurns"), {
+                count: warnings.unassignedTurns,
+            })
+        );
+    }
 
     return (
         <>
