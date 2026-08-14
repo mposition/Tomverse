@@ -26,7 +26,7 @@ import type { ImportPreview } from "@/lib/externalImportPipeline";
  * feeds the outcome back in as an action.
  */
 
-export type ExternalImportGuidanceProvider = "chatgpt" | "claude";
+export type ExternalImportGuidanceProvider = "chatgpt" | "claude" | "gemini";
 
 /** How the user answered "do you already have an export file?" (§ PR1 guide). */
 export type ExternalImportGuidanceEntry = "needs_export" | "has_file";
@@ -58,6 +58,12 @@ export type ParseWarningTotals = {
     skippedNonTextParts: number;
     additionalBranches: number;
     skippedNestedArchives: number;
+    /** Turns the export named no conversation for (A2 §5). */
+    unassignedTurns: number;
+    /** Attachments referenced but absent from the archive (A2 §4.1). */
+    missingAttachments: number;
+    /** Messages stored once per branch because the chat was branched (§2.2). */
+    duplicatedBranchMessages: number;
     requiresTruncationApproval: number;
     notImportable: number;
 };
@@ -67,6 +73,9 @@ export const emptyParseWarningTotals = (): ParseWarningTotals => ({
     skippedNonTextParts: 0,
     additionalBranches: 0,
     skippedNestedArchives: 0,
+    unassignedTurns: 0,
+    missingAttachments: 0,
+    duplicatedBranchMessages: 0,
     requiresTruncationApproval: 0,
     notImportable: 0,
 });
@@ -579,6 +588,9 @@ export function parseWarningTotalsFromPreview(
         skippedNonTextParts: preview.totals.skippedNonTextParts,
         additionalBranches: preview.totals.additionalBranches,
         skippedNestedArchives: preview.totals.skippedNestedArchives,
+        unassignedTurns: preview.totals.unassignedTurns,
+        missingAttachments: preview.totals.missingAttachments,
+        duplicatedBranchMessages: preview.totals.duplicatedBranchMessages,
         requiresTruncationApproval: preview.totals.requiresTruncationApproval,
         notImportable: preview.totals.notImportable,
     };

@@ -1110,6 +1110,12 @@ export const pt = {
             "{count} ramificações alternativas de conversa não são importadas",
         warningNestedArchives:
             "{count} arquivos compactados anexados (.zip e semelhantes) não são abertos e, portanto, não são importados",
+        warningMissingAttachments:
+            "{count} arquivos anexados são citados na exportação, mas não estão no arquivo",
+        warningBranchDuplicates:
+            "{count} mensagens aparecem em mais de uma ramificação e são salvas em cada uma",
+        warningUnassignedTurns:
+            "{count} entradas não indicam nenhuma conversa na exportação e, por isso, não são importadas",
         notImportableBadge: "Não pode ser importada",
         notImportableExplain:
             "{count} conversas contêm uma mensagem acima do limite de tamanho de importação e não podem ser importadas.",
@@ -1200,6 +1206,14 @@ export const pt = {
         guideClaudeStep2: "Solicite uma exportação dos seus dados.",
         guideClaudeStep3:
             "Baixe o arquivo pelo link recebido por e-mail. Tanto ZIP quanto JSON funcionam como estão.",
+        guideGeminiTitle:
+            "Gemini (Google Takeout)",
+        guideGeminiStep1:
+            "Abra o Google Takeout e desmarque tudo",
+        guideGeminiStep2:
+            "Selecione Minha atividade, escolha Apps Gemini e defina o formato como JSON — o produto Gemini contém Gems, não conversas",
+        guideGeminiStep3:
+            "Exporte e envie o .zip quando o Google mandar o link de download",
         guideFormats: "Arquivos ZIP e JSON são aceitos.",
         guideStaysLocal:
             "O arquivo de exportação nunca sai do seu dispositivo: ele é aberto dentro do navegador.",

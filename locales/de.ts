@@ -1110,6 +1110,12 @@ export const de = {
             "{count} alternative Gesprächsverzweigungen werden nicht importiert",
         warningNestedArchives:
             "{count} angehängte Archive (.zip und ähnliche) werden nicht geöffnet und daher nicht importiert",
+        warningMissingAttachments:
+            "{count} angehängte Dateien werden im Export genannt, fehlen aber im Archiv",
+        warningBranchDuplicates:
+            "{count} Nachrichten kommen in mehreren Verzweigungen vor und werden in jeder gespeichert",
+        warningUnassignedTurns:
+            "{count} Einträge nennen im Export keine Unterhaltung und werden daher nicht importiert",
         notImportableBadge: "Import nicht möglich",
         notImportableExplain:
             "{count} Unterhaltungen enthalten eine Nachricht über der Import-Größengrenze und können nicht importiert werden.",
@@ -1201,6 +1207,14 @@ export const de = {
         guideClaudeStep2: "Fordern Sie einen Datenexport an.",
         guideClaudeStep3:
             "Laden Sie die Datei über den Link aus der E-Mail herunter. ZIP und JSON funktionieren beide unverändert.",
+        guideGeminiTitle:
+            "Gemini (Google Takeout)",
+        guideGeminiStep1:
+            "Google Takeout öffnen und alle Auswahlen aufheben",
+        guideGeminiStep2:
+            "Wählen Sie Meine Aktivitäten, darin Gemini-Apps, und stellen Sie das Format auf JSON — das Produkt Gemini enthält Gems, keine Unterhaltungen",
+        guideGeminiStep3:
+            "Exportieren und die .zip hochladen, sobald Google den Download-Link sendet",
         guideFormats: "ZIP- und JSON-Dateien werden beide unterstützt.",
         guideStaysLocal:
             "Die Exportdatei verlässt Ihr Gerät nicht — sie wird nur im Browser geöffnet.",

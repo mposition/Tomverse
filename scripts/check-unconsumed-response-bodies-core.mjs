@@ -22,10 +22,14 @@
 // gate that reads no findings as "clean" is not fail-closed. Only in
 // browser-capable code, for the same reason as above.
 //
-// **Server findings do not block.** 22 of them exist today, all calls to
-// provider APIs. The concern there is undici's connection pool, which is real
-// and separate and has not been measured. Blocking on them would borrow this
-// gate's authority for a claim it cannot make.
+// **Server findings do not block.** They are calls to provider APIs, where the
+// concern is undici's connection pool — real, separate, and not measured here.
+// Blocking on them would borrow this gate's authority for a claim it cannot
+// make. How many there are is a moving number and is deliberately not written
+// down here: `npm run report:unconsumed-response-bodies` prints today's, and a
+// count baked into a comment is wrong by the next merge. What is fixed is the
+// baseline this gate defends — the browser side reached zero at `def2b46`
+// (#522), and the gate exists to keep it there.
 //
 // Exceptions are waivers with a path, a reason and an approver — never a
 // silently narrowed filter. A waiver that stops matching anything is itself a

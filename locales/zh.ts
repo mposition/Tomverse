@@ -1121,6 +1121,12 @@ export const zh = {
         warningBranches: "{count} 个备选对话分支不会被导入",
         warningNestedArchives:
             "{count} 个附件压缩包（.zip 等）不会被打开，因此不会导入",
+        warningMissingAttachments:
+            "{count} 个附件在导出中被提及，但压缩包里没有",
+        warningBranchDuplicates:
+            "{count} 条消息同时属于多个分支，将在每个分支中各保存一份",
+        warningUnassignedTurns:
+            "{count} 个条目在导出中未标明所属对话，因此不会导入",
         notImportableBadge: "无法导入",
         notImportableExplain:
             "{count} 个对话包含超过导入大小限制的消息，无法导入。",
@@ -1203,6 +1209,14 @@ export const zh = {
         guideClaudeStep2: "申请导出数据。",
         guideClaudeStep3:
             "通过邮件中的链接下载文件，ZIP 和 JSON 都可以直接使用。",
+        guideGeminiTitle:
+            "Gemini（Google Takeout）",
+        guideGeminiStep1:
+            "打开 Google Takeout 并取消全选",
+        guideGeminiStep2:
+            "选择「我的活动」，在其中勾选 Gemini 应用并将格式设为 JSON — Gemini 产品项里放的是 Gem，不是对话",
+        guideGeminiStep3:
+            "导出后，收到 Google 的下载链接再上传该 .zip",
         guideFormats: "同时支持 ZIP 文件和 JSON 文件。",
         guideStaysLocal: "导出文件不会离开你的设备，只在浏览器中打开。",
         guideMediaExcluded: "图片、音频和附件不会被导入。",
