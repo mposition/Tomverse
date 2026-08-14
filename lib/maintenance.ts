@@ -29,6 +29,7 @@ import {
   drainKnowledgeCleanupQueue,
   sweepAbandonedKnowledgeObjects,
 } from "@/lib/assistantKnowledgeLifecycle";
+import { processPendingKnowledgeFiles } from "@/lib/assistantKnowledgeProcessor";
 import { deleteR2Object, listExpiredR2Objects } from "@/lib/r2";
 import {
   GUEST_ATTACHMENT_PREFIX,
@@ -555,6 +556,12 @@ export async function cleanupExpiredData() {
   const knowledgeOrphans = await step("assistant_knowledge_orphans", () =>
     sweepAbandonedKnowledgeObjects(now)
   );
+  // The extraction driver, in the same shape memory extraction's is: reclaim
+  // a file whose worker died, then actually process it. Reclaiming alone
+  // leaves a claimable row waiting for a request that may never come.
+  const knowledgeProcessing = await step("assistant_knowledge_processing", () =>
+    processPendingKnowledgeFiles(now)
+  );
 
   // A consumed §10 context bundle stops being worth remembering the moment
   // the bundle itself expires: past that, verification refuses it before
@@ -601,6 +608,8 @@ export async function cleanupExpiredData() {
     assistantKnowledgeObjectsDeleted: knowledgeCleanup?.deleted ?? null,
     assistantKnowledgeCleanupExhausted: knowledgeCleanup?.exhausted ?? null,
     assistantKnowledgeOrphansDeleted: knowledgeOrphans?.deleted ?? null,
+    assistantKnowledgeReclaimed: knowledgeProcessing?.reclaimed ?? null,
+    assistantKnowledgeProcessed: knowledgeProcessing?.processed ?? null,
     sessions: sessions?.count ?? null,
     usageBuckets: usageBuckets === null ? null : Number(usageBuckets),
     requestLeases: requestLeases === null ? null : Number(requestLeases),

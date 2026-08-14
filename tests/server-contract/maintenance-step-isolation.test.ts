@@ -161,6 +161,16 @@ mock.module(mod("lib/assistantKnowledgeLifecycle.ts"), {
     }),
   },
 });
+mock.module(mod("lib/assistantKnowledgeProcessor.ts"), {
+  namedExports: {
+    processPendingKnowledgeFiles: async () => ({
+      reclaimed: 29,
+      processed: 30,
+      ready: 30,
+      failed: 0,
+    }),
+  },
+});
 
 type CleanupResult = Record<string, unknown> & {
   failedSteps: { step: string; error: string }[];
@@ -222,6 +232,11 @@ test("a step that throws does not skip the steps behind it", async () => {
   assert.equal(result.assistantKnowledgeObjectsDeleted, 26);
   assert.equal(result.assistantKnowledgeCleanupExhausted, 27);
   assert.equal(result.assistantKnowledgeOrphansDeleted, 28);
+  // And the extraction driver, which reclaims a file whose worker died and
+  // then actually processes it -- reclaiming alone was the gap the memory
+  // extraction slice already paid for.
+  assert.equal(result.assistantKnowledgeReclaimed, 29);
+  assert.equal(result.assistantKnowledgeProcessed, 30);
 });
 
 test("a clean run reports no failed steps and every count", async () => {
