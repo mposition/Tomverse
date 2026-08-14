@@ -197,3 +197,41 @@ export const retentionCutoff = (key: string, now: Date = new Date()) => {
     }
     return new Date(now.getTime() - windowDays * 24 * 60 * 60 * 1000);
 };
+
+/**
+ * How long a row may sit past its cutoff before it is late rather than normal.
+ *
+ * The sweep is a daily cron (`railway.maintenance.json`, 03:00 UTC), so a row
+ * crosses its cutoff and then waits up to a day for the run that takes it.
+ * That wait is the design working, not a fault, and an alarm that fires on it
+ * is on almost all day: `databaseSnapshot()` warned whenever *any* provider
+ * error event was past 30 days, which -- with the sweep clearing them at 03:00
+ * every morning -- meant it warned about rows that had aged a few hours past
+ * the line and would be gone at the next run. A warning that is always on is
+ * read as decoration, and the operator stops seeing the day it means something.
+ *
+ * Two days, not one. One puts the boundary exactly where the sweep runs, so a
+ * slow run or a little clock skew flips the alarm on and off around 03:00. Two
+ * means two scheduled sweeps have had their chance, which is a fact about the
+ * sweep rather than about the clock -- and a sweep that has genuinely stopped
+ * still surfaces within a couple of days.
+ *
+ * This is a monitoring threshold, not a retention promise. `retentionCutoff()`
+ * is still the age the policy states and the age the sweep deletes at; nothing
+ * here lets a row live longer.
+ */
+export const RETENTION_SWEEP_GRACE_DAYS = 2;
+
+/**
+ * The age past which rows are overdue -- the sweep should already have taken
+ * them and did not.
+ *
+ * Use this to decide whether something is *wrong*. Use `retentionCutoff()` to
+ * count what the policy covers or to delete. The two are different questions
+ * and the answer to the first is not "greater than zero" of the second.
+ */
+export const retentionOverdueCutoff = (key: string, now: Date = new Date()) =>
+    retentionCutoff(
+        key,
+        new Date(now.getTime() - RETENTION_SWEEP_GRACE_DAYS * 24 * 60 * 60 * 1000)
+    );

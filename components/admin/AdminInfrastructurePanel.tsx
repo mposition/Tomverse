@@ -478,6 +478,7 @@ export function AdminInfrastructurePanel({
                 ["Usage buckets", data.database.usageBuckets],
                 ["Provider errors / 24h", data.database.providerErrors24h],
                 ["Errors pending cleanup", data.database.providerErrorsPendingCleanup],
+                ["Errors overdue cleanup", data.database.providerErrorsOverdueCleanup],
               ].map(([label, value]) => (
                 <div
                   key={String(label)}

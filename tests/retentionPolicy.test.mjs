@@ -5,7 +5,9 @@ import { fileURLToPath } from "node:url";
 
 import {
     RETENTION_POLICIES,
+    RETENTION_SWEEP_GRACE_DAYS,
     retentionCutoff,
+    retentionOverdueCutoff,
     retentionPolicy,
 } from "../lib/retentionPolicyCore.ts";
 
@@ -122,4 +124,59 @@ test("policy keys are unique, and each carries a sentence rather than a label", 
             `${policy.key} needs a sentence an operator can act on`
         );
     }
+});
+
+test("overdue is later than the cutoff, by the sweep's own cadence", () => {
+    // The distinction this pair exists to draw. `retentionCutoff` is the age
+    // the policy states and the sweep deletes at; `retentionOverdueCutoff` is
+    // the age past which the sweep has demonstrably not done it.
+    const now = new Date("2026-08-13T00:00:00.000Z");
+    assert.equal(
+        retentionCutoff("providerErrors", now).toISOString(),
+        "2026-07-14T00:00:00.000Z"
+    );
+    assert.equal(
+        retentionOverdueCutoff("providerErrors", now).toISOString(),
+        "2026-07-12T00:00:00.000Z"
+    );
+    assert.ok(
+        retentionOverdueCutoff("providerErrors", now) <
+            retentionCutoff("providerErrors", now),
+        "overdue must be the older date, or it would fire sooner than the policy"
+    );
+});
+
+test("the grace covers more than one scheduled sweep", () => {
+    // One day puts the boundary exactly where the daily cron runs, so a slow
+    // run flips the alarm on and off around 03:00. The value has to clear a
+    // whole sweep interval and then some, or the alarm measures the clock.
+    assert.ok(
+        RETENTION_SWEEP_GRACE_DAYS > 1,
+        "a one-day grace lands on the sweep time itself"
+    );
+    // And it must stay small enough that a stopped sweep still surfaces
+    // quickly. A week of silence is not a monitor.
+    assert.ok(RETENTION_SWEEP_GRACE_DAYS <= 3);
+});
+
+test("the grace is a monitoring threshold and never extends a retention promise", () => {
+    // The reason to be explicit: `retentionOverdueCutoff` must not become the
+    // age anything deletes at, or the published "older than 30 days" sentence
+    // quietly becomes 32 and the policy stops being true.
+    const MONITORING_ONLY = /retentionOverdueCutoff/;
+    assert.ok(
+        !MONITORING_ONLY.test(MAINTENANCE),
+        "the sweep must delete at the policy cutoff, not at the overdue one"
+    );
+    assert.ok(
+        !MONITORING_ONLY.test(RETENTION_ROUTE),
+        "/admin/retention counts what the policy covers, not what is late"
+    );
+});
+
+test("a policy with no window has no overdue date either", () => {
+    assert.throws(
+        () => retentionOverdueCutoff("requestLeases", new Date()),
+        /no age window/
+    );
 });
