@@ -734,8 +734,16 @@ async function handleChatPost(
     // dispatched, and an attempt stuck at `pending` is one the reliability
     // numbers cannot classify.
     let dispatchRecord: DispatchInstrumentation = null;
-    let requestedModelIdForLog: string | undefined;
-    let requestedProviderForLog: AiModel["provider"] | undefined;
+    // The model this request tried to run, for the outer failure path.
+    //
+    // Set to the requested id as soon as one is parsed, so a failure before
+    // routing still names something, then narrowed to the effective model once
+    // the Router has decided. Provider health is only meaningful about the
+    // model that was actually going to be called: pairing the requested id
+    // with the effective provider -- which is what this used to do on a routed
+    // turn -- credits an outage to a model nobody dispatched.
+    let dispatchModelIdForLog: string | undefined;
+    let dispatchProviderForLog: AiModel["provider"] | undefined;
     try {
         assertChatRequestSize(req);
         const session = await getServerSession(authOptions);
@@ -766,7 +774,11 @@ async function handleChatPost(
         // row as the memory mode so the context this request builds is the
         // one its bundle was priced against.
         let conversationProfileVersionId: string | null = null;
-        requestedModelIdForLog = requestedModelId;
+        // Seeded with what was asked, then narrowed to what was dispatched
+        // once routing decides. After a fallback the model that answered is
+        // not the model that was requested, and the outer catch records
+        // provider health about the one that was actually called.
+        dispatchModelIdForLog = requestedModelId;
         const runtimeModels = await getRuntimeModels({ includeCatalogDeleted: true });
         const runtimeModelMap = new Map(runtimeModels.map((model) => [model.id, model]));
         const catalogModel = runtimeModelMap.get(requestedModelId);
@@ -960,7 +972,8 @@ async function handleChatPost(
                 traceId
             );
         }
-        requestedProviderForLog = modelConfig.provider;
+        dispatchProviderForLog = modelConfig.provider;
+        dispatchModelIdForLog = modelConfig.id;
         // webSearchMode === "always" only ever enables a model's OWN
         // provider-native search tool when its exact catalog id is
         // confirmed-supported -- it never adds or swaps in a different
@@ -2168,7 +2181,7 @@ async function handleChatPost(
                         modelConfig.provider,
                         "DEEP_RESEARCH_SUBMIT_FAILED",
                         {
-                            modelId: requestedModelId,
+                            modelId: modelConfig.id,
                             phase: "request",
                             traceId,
                             errorName: submitMetadata.name,
@@ -2178,7 +2191,7 @@ async function handleChatPost(
                         }
                     ).catch(() => {});
                     await recordModelFailure(
-                        requestedModelId,
+                        modelConfig.id,
                         modelConfig.provider,
                         "DEEP_RESEARCH_SUBMIT_FAILED"
                     ).catch(() => {});
@@ -2327,7 +2340,31 @@ async function handleChatPost(
         // so the order here is the order the constraint enforces.
         await recordDispatched(dispatchRecord);
 
-        const sourceReader = result.textStream.getReader();
+        // Per-attempt execution state (lib/chatAttemptExecution.ts).
+        //
+        // Everything below that means "the model that answered" reads from
+        // here rather than from the enclosing scope, and the reason is not
+        // tidiness. The stream used to log, record health for, and persist the
+        // assistant message under `requestedModelId` -- the model the *user
+        // asked for*. On a manual turn those are the same id and nothing was
+        // wrong. On a routed turn they are different models: provider health
+        // was credited to a model that never ran, and MessageProviderContext
+        // paired the requested model's id with the effective model's provider,
+        // which is the exact record the provider-context restore is keyed on.
+        // Auto routes nobody yet, so it was latent -- and a fallback would
+        // have made it two models wrong instead of one.
+        const dispatched = {
+            attemptIndex: 0,
+            modelId: modelConfig.id,
+            provider: modelConfig.provider,
+            reasoning: modelConfig.reasoning,
+            reader: result.textStream.getReader(),
+            // Perplexity buffers response bodies under this key and consuming
+            // the capture releases it, so it is per attempt rather than per
+            // trace. The primary keeps the bare trace id, which is what the
+            // request headers already carried.
+            usageCaptureKey: traceId,
+        };
         // The stream owns the slot from here, but it cannot release anything
         // until it is pulled, and it is only pulled once the Response below is
         // returned. Until then the failure path is still the owner of record.
@@ -2345,8 +2382,10 @@ async function handleChatPost(
         let perplexityCapture: Promise<PerplexityResponseCapture | null> | null =
             null;
         const takePerplexityCapture = () => {
-            if (modelConfig.provider !== "perplexity") return Promise.resolve(null);
-            perplexityCapture ??= consumePerplexityResponseCapture(traceId);
+            if (dispatched.provider !== "perplexity") return Promise.resolve(null);
+            perplexityCapture ??= consumePerplexityResponseCapture(
+                dispatched.usageCaptureKey
+            );
             return perplexityCapture;
         };
         const estimatedGeneratedOutputTokens = () =>
@@ -2456,7 +2495,7 @@ async function handleChatPost(
                                 "chat_auto_sticky_persist_failed",
                                 traceId,
                                 error,
-                                modelConfig.id
+                                dispatched.modelId
                             );
                         }
                     }
@@ -2465,7 +2504,7 @@ async function handleChatPost(
                         "chat_usage_settlement_failed",
                         traceId,
                         error,
-                        requestedModelId
+                        dispatched.modelId
                     );
                 }
             })();
@@ -2487,7 +2526,7 @@ async function handleChatPost(
                         "chat_lease_heartbeat_failed",
                         traceId,
                         error,
-                        requestedModelId
+                        dispatched.modelId
                     );
                 });
             },
@@ -2520,7 +2559,7 @@ async function handleChatPost(
                     "chat_access_release_failed",
                     traceId,
                     error,
-                    requestedModelId
+                    dispatched.modelId
                 );
             }
         };
@@ -2528,14 +2567,14 @@ async function handleChatPost(
             if (sourceCancelled) return;
             sourceCancelled = true;
             try {
-                await sourceReader.cancel(reason);
+                await dispatched.reader.cancel(reason);
             } catch (error) {
                 if (!isClosedStreamControllerError(error)) {
                     logRequestError(
                         "ai_source_stream_cancel_failed",
                         traceId,
                         error,
-                        requestedModelId
+                        dispatched.modelId
                     );
                 }
             }
@@ -2555,7 +2594,7 @@ async function handleChatPost(
                         "chat_response_stream_enqueue_failed",
                         traceId,
                         error,
-                        requestedModelId
+                        dispatched.modelId
                     );
                 }
                 return false;
@@ -2576,7 +2615,7 @@ async function handleChatPost(
                         "chat_response_stream_close_failed",
                         traceId,
                         error,
-                        requestedModelId
+                        dispatched.modelId
                     );
                 }
                 return false;
@@ -2598,7 +2637,7 @@ async function handleChatPost(
                         "chat_response_stream_error_failed",
                         traceId,
                         streamError,
-                        requestedModelId
+                        dispatched.modelId
                     );
                 }
                 return false;
@@ -2609,7 +2648,7 @@ async function handleChatPost(
                 if (streamState !== "open") return;
 
                 try {
-                    const { done, value } = await sourceReader.read();
+                    const { done, value } = await dispatched.reader.read();
                     if (streamState !== "open") {
                         await releaseSafely();
                         return;
@@ -2636,7 +2675,7 @@ async function handleChatPost(
                         // pricing profile claims. Nothing here settles, prices
                         // or reserves -- see lib/servedProcessingTier.ts.
                         const servedTier = observeServedProcessingTier(
-                            modelConfig.provider,
+                            dispatched.provider,
                             providerMetadataResult.status === "fulfilled"
                                 ? providerMetadataResult.value
                                 : undefined
@@ -2647,7 +2686,7 @@ async function handleChatPost(
                                     event: "chat_served_processing_tier_mismatch",
                                     traceId,
                                     provider: servedTier.provider,
-                                    modelId: requestedModelId,
+                                    modelId: dispatched.modelId,
                                     servedTier: servedTier.servedTier,
                                     classification: servedTier.classification,
                                     timestamp: new Date().toISOString(),
@@ -2687,7 +2726,7 @@ async function handleChatPost(
                                     "chat_provider_request_link_failed",
                                     traceId,
                                     error,
-                                    requestedModelId
+                                    dispatched.modelId
                                 );
                             }
                         }
@@ -2697,7 +2736,7 @@ async function handleChatPost(
                                 "chat_stream_completion_metadata_failed",
                                 traceId,
                                 completionError,
-                                requestedModelId
+                                dispatched.modelId
                             );
                         }
 
@@ -2712,7 +2751,7 @@ async function handleChatPost(
                         const webSearchExecution = normalizeWebSearchExecution({
                             capability: webSearchCapability,
                             searchRequested: webSearchRequested,
-                            provider: modelConfig.provider,
+                            provider: dispatched.provider,
                             toolName: webSearchCapability.provider
                                 ? WEB_SEARCH_TOOL_NAMES[webSearchCapability.provider]
                                 : undefined,
@@ -2736,8 +2775,8 @@ async function handleChatPost(
                                 JSON.stringify({
                                     event: "chat_response_incomplete",
                                     traceId,
-                                    provider: modelConfig.provider,
-                                    modelId: requestedModelId,
+                                    provider: dispatched.provider,
+                                    modelId: dispatched.modelId,
                                     finishReason,
                                     rawFinishReason: rawFinishReason ?? null,
                                     incompleteReason:
@@ -2794,7 +2833,7 @@ async function handleChatPost(
                                           )}\n\n[Response truncated for storage]`
                                         : generatedText;
                                 const providerContext =
-                                    modelConfig.reasoning !== undefined &&
+                                    dispatched.reasoning !== undefined &&
                                     responseResult.status === "fulfilled"
                                         ? serializeProviderResponseMessages(
                                               responseResult.value.messages
@@ -2837,7 +2876,7 @@ async function handleChatPost(
                                             role: "assistant",
                                             content: storedContent,
                                             status: completionOutcome.status,
-                                            modelId: requestedModelId,
+                                            modelId: dispatched.modelId,
                                             searchMetadata: webSearchExecution,
                                             // Spread, so an answer with no
                                             // bundle writes neither column
@@ -2849,8 +2888,8 @@ async function handleChatPost(
                                         await tx.messageProviderContext.create({
                                             data: {
                                                 messageId: assistantMessageId,
-                                                modelId: requestedModelId,
-                                                provider: modelConfig.provider,
+                                                modelId: dispatched.modelId,
+                                                provider: dispatched.provider,
                                                 responseMessages:
                                                     providerContext.messages,
                                             },
@@ -2862,7 +2901,7 @@ async function handleChatPost(
                                     "assistant_message_persist_failed",
                                     traceId,
                                     error,
-                                    requestedModelId
+                                    dispatched.modelId
                                 );
                             }
                         }
@@ -2885,10 +2924,10 @@ async function handleChatPost(
                                 : `AI_EMPTY_RESPONSE.${finishReasonCode}`;
                             try {
                                 await recordProviderFailure(
-                                    modelConfig.provider,
+                                    dispatched.provider,
                                     diagnosticCode,
                                     {
-                                        modelId: requestedModelId,
+                                        modelId: dispatched.modelId,
                                         phase: "stream",
                                         traceId,
                                         errorName:
@@ -2904,8 +2943,8 @@ async function handleChatPost(
                                     }
                                 );
                                 await recordModelFailure(
-                                    requestedModelId,
-                                    modelConfig.provider,
+                                    dispatched.modelId,
+                                    dispatched.provider,
                                     diagnosticCode
                                 );
                             } catch (error) {
@@ -2913,21 +2952,21 @@ async function handleChatPost(
                                     "provider_empty_response_record_failed",
                                     traceId,
                                     error,
-                                    requestedModelId
+                                    dispatched.modelId
                                 );
                             }
                         } else {
                             try {
                                 await recordProviderSuccess(
-                                    modelConfig.provider
+                                    dispatched.provider
                                 );
-                                await recordModelSuccess(requestedModelId);
+                                await recordModelSuccess(dispatched.modelId);
                             } catch (error) {
                                 logRequestError(
                                     "provider_success_record_failed",
                                     traceId,
                                     error,
-                                    requestedModelId
+                                    dispatched.modelId
                                 );
                             }
                         }
@@ -2965,7 +3004,7 @@ async function handleChatPost(
                                 "ai_stream_lifecycle_closed",
                                 traceId,
                                 error,
-                                requestedModelId
+                                dispatched.modelId
                             );
                         }
                         streamState = "cancelled";
@@ -2983,14 +3022,14 @@ async function handleChatPost(
                         "ai_stream_failed",
                         traceId,
                         error,
-                        requestedModelId
+                        dispatched.modelId
                     );
                     try {
                         await recordProviderFailure(
-                            modelConfig.provider,
+                            dispatched.provider,
                             diagnosticCode,
                             {
-                                modelId: requestedModelId,
+                                modelId: dispatched.modelId,
                                 phase: "stream",
                                 traceId,
                                 errorName: errorMetadata.name,
@@ -3000,8 +3039,8 @@ async function handleChatPost(
                             }
                         );
                         await recordModelFailure(
-                            requestedModelId,
-                            modelConfig.provider,
+                            dispatched.modelId,
+                            dispatched.provider,
                             diagnosticCode
                         );
                     } catch (recordError) {
@@ -3009,7 +3048,7 @@ async function handleChatPost(
                             "provider_failure_record_failed",
                             traceId,
                             recordError,
-                            requestedModelId
+                            dispatched.modelId
                         );
                     }
                     await settleSafely("failed");
@@ -3099,7 +3138,7 @@ async function handleChatPost(
         if (usageReservation) {
             try {
                 const providerUsageSnapshot =
-                    requestedProviderForLog === "perplexity"
+                    dispatchProviderForLog === "perplexity"
                         ? await consumePerplexityUsage(traceId)
                         : null;
                 await settleChatUsage(usageReservation, {
@@ -3115,11 +3154,11 @@ async function handleChatPost(
                     "chat_usage_refund_failed",
                     traceId,
                     settlementError,
-                    requestedModelIdForLog
+                    dispatchModelIdForLog
                 );
             }
         }
-        if (requestedProviderForLog === "perplexity") {
+        if (dispatchProviderForLog === "perplexity") {
             discardPerplexityUsage(traceId);
         }
         const accessError = chatErrorResponse(error);
@@ -3135,7 +3174,7 @@ async function handleChatPost(
                         traceId,
                         code: error.code,
                         status: error.status,
-                        modelId: requestedModelIdForLog,
+                        modelId: dispatchModelIdForLog,
                         ...(error.details || {}),
                         timestamp: new Date().toISOString(),
                     })
@@ -3166,7 +3205,7 @@ async function handleChatPost(
             "ai_request_failed",
             traceId,
             error,
-            requestedModelIdForLog
+            dispatchModelIdForLog
         );
         try {
             const errorMetadata = safeErrorMetadata(error);
@@ -3175,10 +3214,10 @@ async function handleChatPost(
                     ? error.code
                     : providerDiagnosticCode("AI_REQUEST_FAILED", error);
             await recordProviderFailure(
-                requestedProviderForLog,
+                dispatchProviderForLog,
                 diagnosticCode,
                 {
-                    modelId: requestedModelIdForLog,
+                    modelId: dispatchModelIdForLog,
                     phase: "request",
                     traceId,
                     errorName: errorMetadata.name,
@@ -3188,8 +3227,8 @@ async function handleChatPost(
                 }
             );
             await recordModelFailure(
-                requestedModelIdForLog,
-                requestedProviderForLog,
+                dispatchModelIdForLog,
+                dispatchProviderForLog,
                 diagnosticCode
             );
         } catch (recordError) {
@@ -3197,7 +3236,7 @@ async function handleChatPost(
                 "provider_failure_record_failed",
                 traceId,
                 recordError,
-                requestedModelIdForLog
+                dispatchModelIdForLog
             );
         }
 
@@ -3209,8 +3248,8 @@ async function handleChatPost(
             undefined,
             {
                 phase: "request",
-                provider: requestedProviderForLog,
-                modelId: requestedModelIdForLog,
+                provider: dispatchProviderForLog,
+                modelId: dispatchModelIdForLog,
                 error,
             }
         );

@@ -155,6 +155,7 @@ run(
     "tests/integration/chat-concurrency.db.test.ts",
     "tests/integration/chat-rate-limit.db.test.ts",
     "tests/integration/fallback-pricing-metrics.db.test.ts",
+    "tests/integration/chat-attempt-usage.db.test.ts",
     "tests/integration/model-registry.db.test.ts",
     "tests/integration/admin-security.db.test.ts",
     "tests/integration/admin-users.db.test.ts",
