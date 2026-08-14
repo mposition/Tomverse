@@ -13,6 +13,7 @@ import {
   type ProductAnalyticsProperties,
 } from "@/lib/productAnalyticsShared";
 import { localeMarketingAnalyticsProperties } from "@/lib/localeLaunchPolicy";
+import { discardResponseBody } from "./discardResponseBody";
 
 declare global {
   interface Window {
@@ -326,7 +327,8 @@ const deliverInternalAnalyticsEvent = (
     keepalive: true,
     cache: "no-store",
   })
-    .then((response) => {
+    .then(async (response) => {
+      await discardResponseBody(response);
       if (
         !response.ok &&
         RETRYABLE_INTERNAL_DELIVERY_STATUSES.has(response.status) &&

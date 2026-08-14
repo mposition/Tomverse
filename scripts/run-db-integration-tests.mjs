@@ -182,8 +182,14 @@ run(
     "tests/integration/memory-metrics.db.test.ts",
     "tests/integration/conversation-memory-mode.db.test.ts",
     "tests/integration/conversation-selection-mode.db.test.ts",
+    // The only unauthenticated route that serves a customer's transcript.
+    "tests/integration/public-share-route.db.test.ts",
     // Release C1: what the database refuses about a profile version snapshot.
     "tests/integration/assistant-profile-schema.db.test.ts",
+    // Release C2: the knowledge processing state machine, the DB-first
+    // deletion order, and that the GIN term index is actually queryable.
+    "tests/integration/assistant-knowledge-schema.db.test.ts",
+    "tests/integration/assistant-knowledge-pipeline.db.test.ts",
     // PRIVACY-01/02. These settle what a source scan cannot: that no withheld
     // column reaches the export, that no identifier survives an account
     // deletion, and that a download ticket is spent exactly once under
