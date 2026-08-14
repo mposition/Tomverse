@@ -296,3 +296,129 @@ runtime 13건과 `either` 1건을 하나씩 읽어 소비자를 따라갔습니�
   있습니다. **하지 않았습니다** — 이 조사에서만 분류기 오탐 4종이 나왔고,
   heuristic 분류기를 merge 차단 gate로 올리면 무관한 PR을 막을 수 있습니다.
   승격 여부는 사람의 결정입니다.
+
+## 8. server runtime 측정 (2026-08-14, `ea60c48`)
+
+7-3에 "undici 기준으로 따로 판단해야 한다"고 적어 둔 항목을 실제로 쟀습니다.
+brower 측정을 옮겨 쓰지 않고, Node 22.22.2 / 번들 undici 6.24.1에서 직접
+측정했습니다. harness는 `scripts/report-unread-body-connection-cost.mjs`이며
+`npm run report:unread-body-connection-cost`로 재현합니다 — 매 case마다 일회용
+`node:http` 서버를 새 포트에 띄웁니다(포트가 곧 origin이고 origin이 곧 pool이라,
+그래야 각 case가 이력 없는 pool에서 시작합니다). 제품에 라우트를 추가하지
+않았습니다.
+
+### 8-1. 임계값은 크기이며, 16 KiB와 64 KiB 사이입니다
+
+가장 깨끗한 단일 변수 시험 — connection 1개짜리 pool에서 응답 하나를 붙들고
+바로 다음 요청을 보냅니다.
+
+| 본문 크기 | unread | drain | cancel |
+|---|---|---|---|
+| 64 B | 통과 | 통과 | 통과 |
+| 16 KiB | 통과 | 통과 | 통과 |
+| 64 KiB | **차단** | 통과 | 통과 |
+| 256 KiB | **차단** | 통과 | 통과 |
+| 2 MiB | **차단** | 통과 | 통과 |
+
+undici의 수신 버퍼보다 작은 본문은 아무도 읽지 않아도 이미 소켓에서 빠져나와
+있어 connection을 붙들지 않습니다. 그보다 크면 무기한 붙듭니다. **상태 코드는
+무관합니다** — 200과 500이 모든 크기에서 같게 나옵니다. browser 쪽 관찰과
+같은 방향이지만 **같은 사실이 아닙니다**: 저쪽은 cache 항목, 이쪽은 connection
+pool이고, 임계값이라는 것 자체가 이쪽에만 있습니다.
+
+### 8-2. production의 기본 pool에서는 교착이 아니라 소켓 낭비입니다
+
+`globalThis.fetch`의 기본 pool은 origin당 상한이 없습니다. 동시 요청 20개는
+크기·소비 방식과 무관하게 전부 완료했습니다(소켓 20개). 순차 5회에서는
+차이가 드러납니다 — 64 KiB 이상에서 `unread`는 매번 새 소켓(5개)을 열고,
+`drain`은 재사용합니다(2개). `cancel`은 반쯤 읽은 connection을 재사용할 수
+없어 오히려 더 엽니다(6개).
+
+즉 **오늘의 비용은 장애가 아니라 keep-alive 재사용 상실**입니다. 상한이 있는
+pool(4개)로 바꾸면 64 KiB 이상 `unread`는 곧바로 굶습니다.
+
+부수적으로 나온 사실 하나: `Promise.all([fetch, fetch, …])`로 헤더를 **전부**
+받은 뒤에야 본문을 소비하는 형태는, 요청 수가 pool 상한을 넘고 본문이 버퍼보다
+크면 **소비 방식과 무관하게** 굶습니다. drain도 cancel도 마찬가지입니다. 오늘
+안전한 이유는 pool에 상한이 없고 해당 호출부의 본문이 작기 때문이지, 그 형태가
+안전해서가 아닙니다.
+
+### 8-3. 23건 중 실제로 이 임계값에 걸리는 것은 1건입니다
+
+23건을 하나씩 읽어 "미소비 경로가 64 KiB 이상을 실어 나를 수 있는가"로
+나눴습니다.
+
+- **분류기 오탐 1건** — `lib/accountDataExport.ts:814`. `const fetch =
+  FETCHERS[domain]`가 전역을 가리고 `await fetch(userId)`는 DB 읽기입니다.
+  네트워크도 `Response`도 없습니다. 분류기를 고쳤고(오탐 5종째) 회귀 테스트
+  3건으로 고정했습니다 — 한 scope의 shadowing이 다른 scope의 진짜 호출부를
+  면제하지 않는다는 것까지 포함해서입니다.
+- **오류·확인 응답 본문뿐 21건** — turnstile, Resend, SendGrid, Sentry, GitHub
+  issues, Slack, GA4, OAuth token·userinfo, Perplexity 2건, provider catalog,
+  provider monitoring 4건, FX rate, operational webhook, 그리고 `scripts/` 6건.
+  전부 `!response.ok`에서 throw·return하는 형태이고, 실리는 것은 작은 JSON
+  오류 본문입니다. 16 KiB 아래이므로 **측정 결과 connection 비용이 없습니다.**
+  이것은 "아직 모른다"가 아니라 "재 봤고 문제 없다"입니다.
+- **실제 위험 1건** — `lib/imageProviderAdapter.ts:622`. fal asset 다운로드이고
+  미소비 경로가 둘인데 **둘 다 이미지 한 장 전체를 들고 있을 수 있습니다.**
+  하나는 `!isFalAssetUrl(asset.url)`로, 응답이 2xx인 채 본문이 통째로 남습니다.
+  다른 하나는 `content-length`가 상한을 넘어 거부하는 경로라 **크다는 이유로
+  거부하면서 그 큰 본문을 붙들고 있었습니다.**
+
+고칠 때 `discardResponseBody`를 쓰지 않았습니다. 그 helper는 본문을 *읽습니다*
+— 크기 상한 경로에서 그러면 상한이 막으려던 메가바이트를 그대로 메모리에
+올리게 됩니다. 8-1이 `cancel`도 connection을 놓아준다는 것을 보여주므로
+`asset.body.cancel()`을 씁니다.
+
+### 8-4. server `escapes` 11건 추적 — 호출부는 전부 옳았고, **공용 helper가 틀렸습니다**
+
+11건을 소비자까지 따라갔습니다. **호출부 자체는 11건 모두 정상**입니다.
+
+- **fetch wrapper 2건** — `lib/deepseekUsageAdapter.ts:54`,
+  `lib/perplexityUsageCapture.ts:79`. 둘 다 `typeof fetch` 미들웨어라 응답을
+  호출자(AI SDK)에게 넘깁니다. 감싸는 경우에도 새 stream의 `cancel`이 원본
+  reader로 전달됩니다. 소비 책임이 이동한 것이지 미소비가 아닙니다.
+- **bounded reader 경유 8건** — `lib/providerUsageSync.ts` 7건과
+  `lib/infrastructureMonitoring.ts:203`. 전부 직후에
+  `await readBoundedJson(response)`로 읽습니다.
+- **1건은 이미 모범 사례** — `app/api/chat/route.ts:473`(Google Drive export).
+  미소비 경로는 작은 오류 본문뿐이고, 성공 경로는 `lib/boundedBuffer.ts`의
+  `readResponseToBuffer`를 씁니다. 이 helper는 declared length 거부와 streaming
+  상한 **양쪽 모두에서 body를 cancel**합니다.
+
+그런데 8건이 쓰는 `readBoundedJson`은 **두 벌로 복제돼 있고 둘 다** declared
+length 거부 경로에서 body를 놓아주지 않은 채 throw했습니다.
+
+```
+if (declaredLength > MAX) {
+  throw new Error("... exceeded the ... limit.");   // body 손도 대지 않음
+}
+```
+
+streaming 상한 쪽은 `await reader.cancel()`이 있어서 옳았습니다. **틀린 것은
+early exit 하나뿐**이고, 하필 그 분기는 **본문이 크다는 이유로 발동합니다** —
+512 KB·1 MB 모두 8-1의 임계값을 한참 넘습니다. 즉 "너무 커서 거부한다"면서 그
+큰 본문으로 connection을 붙들고 있었습니다. `providerUsageSync`는 스케줄로
+돌고 재시도하므로 일회성이 아닙니다.
+
+`lib/boundedBuffer.ts`가 같은 일을 올바르게 하고 있었다는 점이 이 건의 성격을
+말해 줍니다 — 방법을 몰라서가 아니라, 같은 로직을 세 번 쓰면서 한 벌만 맞은
+것입니다.
+
+**정적 분석은 이것을 찾을 수 없습니다.** 호출부는 helper를 통해 본문을 읽으니
+전부 `consumed`로 분류되고, 틀린 곳은 helper 자신의 early exit입니다. 그래서
+gate가 아니라 test로 고정했습니다 — `tests/boundedResponseRelease.test.mjs`.
+`readResponseToBuffer`는 동작으로(refuse 시 `cancel`이 호출되는지) 검증하고,
+module-private인 두 벌은 소스 형태로 검증합니다. **후자가 더 약한 검사라는
+점을 그대로 적어 둡니다**: 해제가 *쓰여* 있다는 것을 증명할 뿐 *실행된다*는
+것을 증명하지 않습니다. 두 수정을 각각 되돌려 test가 실패하는 것까지 확인했습니다.
+
+### 8-5. 하지 않은 것
+
+- **production 관측.** 위는 전부 loopback 합성 측정입니다. 실제 provider와의
+  RTT·연결 재사용률·소켓 수를 production에서 본 것이 아닙니다. 임계값은 클라이언트
+  버퍼의 성질이라 옮겨 붙지만, "그래서 오늘 얼마나 비쌌는가"는 여전히 5장입니다.
+- **gate 확대.** server 측을 차단 대상으로 올리지 않았습니다. 측정이 말하는
+  것은 "크기가 임계값을 넘는 미소비 본문만 문제"이고, 정적 분석은 본문 크기를
+  알 수 없습니다. 크기를 모르는 검사를 차단 gate로 쓰면 21건의 무해한 오류 본문
+  경로가 전부 merge를 막습니다.

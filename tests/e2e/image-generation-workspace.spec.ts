@@ -927,6 +927,23 @@ test("the catalogue's image tab is its own list and seeds the picked model", asy
     listImageModels().length
   );
 
+  // The subtitle credits the model's owner and names the supplier when they
+  // differ. Staging showed why this needs asserting: the row read `provider`,
+  // which is indistinguishable from `owner` for every direct integration, and
+  // the first model where they part company rendered no brand at all.
+  const gatewayRow = panel.getByTestId("image-model-option").filter({
+    hasText: "Nano Banana 2",
+  });
+  await expect(gatewayRow).toContainText("Google");
+  await expect(gatewayRow.getByTestId("image-model-gateway")).toBeVisible();
+  // And a direct integration says one thing, not the same thing twice.
+  await expect(
+    panel
+      .getByTestId("image-model-option")
+      .filter({ hasText: "GPT Image 2" })
+      .getByTestId("image-model-gateway")
+  ).toHaveCount(0);
+
   await panel
     .getByTestId("image-model-option")
     .filter({ hasNot: page.getByTestId("image-model-hold-note") })

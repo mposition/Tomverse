@@ -124,6 +124,7 @@ export const ko = {
         imageModelTabSubtitle: "설명으로 이미지를 만드는 모델입니다. 첨부한 이미지를 읽기만 하는 채팅 모델은 채팅 탭에 있습니다.",
         imageModelTabFooterHint: "모델을 고르면 이미지 화면으로 이동합니다.",
         imageModelCreditsFrom: "{credits}크레딧부터",
+        imageModelViaGateway: "{gateway} 경유",
         imageModelHoldPriceUnverified: "공식 가격 확인 전까지 준비 중",
         imageModelLatencyFast: "빠름",
         imageModelLatencyBalanced: "보통",

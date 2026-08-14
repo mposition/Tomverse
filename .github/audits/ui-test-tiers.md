@@ -41,6 +41,9 @@ browser coverage without rebuilding E2E" 항목이 이 문서의 존재와 workf
 있습니다. `npm run check:ui-tier-coverage`가 이 목록과 태그를 양방향으로
 맞춥니다.
 
+실측: 2026-08-14 기준 `--grep=@ui-risk --list`가 desktop-chromium과
+mobile-chromium 두 project에서 **27개 파일, 638 test**를 선택합니다.
+
 | Spec |
 |---|
 | `account-flow.spec.ts` |

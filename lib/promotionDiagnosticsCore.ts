@@ -291,6 +291,8 @@ export const evaluateAccountEligibility = ({
 export type StripeLinkageFacts = {
   expectLiveMode: boolean | null;
   storedCouponId: string | null;
+  storedCouponExists: boolean;
+  storedCouponMismatches: string[];
   storedPromotionCodeId: string | null;
   storedPromotionCodeExists: boolean;
   storedPromotionCodeMismatches: string[];
@@ -355,6 +357,32 @@ export const evaluateStripeLinkage = ({
   const checks: DiagnosticCheck[] = [];
   const blockingReasons: string[] = [];
   const driftReasons: string[] = [];
+
+  // The coupon comes first because `ensureCoupon()` reaches it first. A stored
+  // coupon that exists and no longer matches is a hard stop regardless of what
+  // the promotion code looks like -- and it is the one state the linkage
+  // report used to miss entirely, reporting "nothing in Stripe yet" over a
+  // coupon that was about to refuse every checkout.
+  const couponFatal = facts.storedCouponMismatches.filter(
+    (item) => severityOf(item) !== "drift"
+  );
+  driftReasons.push(
+    ...facts.storedCouponMismatches.filter(
+      (item) => severityOf(item) === "drift"
+    )
+  );
+  if (!facts.storedCouponId) {
+    checks.push(check("stored_coupon", "warn", "no_stored_coupon"));
+  } else if (!facts.storedCouponExists) {
+    // Recoverable on its own: the coupon is ours to re-create, and
+    // `ensureCoupon()` does so under a stable idempotency key.
+    checks.push(check("stored_coupon", "warn", "stored_coupon_missing_in_stripe"));
+  } else if (couponFatal.length > 0) {
+    checks.push(check("stored_coupon", "fail", "stored_coupon_mismatch"));
+    blockingReasons.push(...couponFatal);
+  } else {
+    checks.push(check("stored_coupon", "pass"));
+  }
 
   const storedFatal = facts.storedPromotionCodeMismatches.filter(
     (item) => severityOf(item) !== "drift"
@@ -602,6 +630,7 @@ export const recommendActions = ({
         item.status === "fail" &&
         (item.reason === "active_code_owned_by_another_object" ||
           item.reason === "multiple_adoptable_codes" ||
+          item.reason === "stored_coupon_mismatch" ||
           item.reason === "stored_linkage_fatal_mismatch")
     )
   ) {
@@ -615,6 +644,8 @@ export const recommendActions = ({
       (item) =>
         item.status === "warn" &&
         (item.reason === "stored_object_missing_in_stripe" ||
+          item.reason === "stored_coupon_missing_in_stripe" ||
+          item.reason === "no_stored_coupon" ||
           item.reason === "no_stored_promotion_code")
     ) ||
     stripe.driftReasons.length > 0

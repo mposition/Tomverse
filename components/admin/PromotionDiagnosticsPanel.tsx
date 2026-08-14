@@ -527,14 +527,66 @@ export function PromotionDiagnosticsPanel({ promotions }: Props) {
                     label="Stored coupon"
                     value={report.stripe.facts.storedCouponId}
                   />
+                  {report.stripe.facts.storedCouponId ? (
+                    <p className="text-xs text-zinc-500">
+                      Stored coupon in Stripe:{" "}
+                      {report.stripe.facts.storedCouponExists
+                        ? "found"
+                        : "not found in this mode"}
+                    </p>
+                  ) : null}
                   <MaskedId
                     label="Stored promotion code"
                     value={report.stripe.facts.storedPromotionCodeId}
                   />
+                  {/*
+                    The reasons a checkout would be refused, on screen.
+                    A check that says `stored_coupon_mismatch` names the object
+                    but not the field, and the field is the whole answer: a
+                    `duration` mismatch and a `metadata_promotion_id` mismatch
+                    call for completely different repairs. Drift was printed
+                    here from the start while these were not, which had it
+                    exactly backwards.
+                  */}
+                  {report.stripe.blockingReasons.length > 0 ? (
+                    <p
+                      className="text-xs text-red-300"
+                      data-testid="promotion-diagnostics-blocking-reasons"
+                    >
+                      Blocking: {report.stripe.blockingReasons.join(", ")}
+                    </p>
+                  ) : null}
                   {report.stripe.driftReasons.length > 0 ? (
                     <p className="text-xs text-amber-300">
                       Drift (non-fatal): {report.stripe.driftReasons.join(", ")}
                     </p>
+                  ) : null}
+                  {report.stripe.facts.exactCodeCandidates.length > 0 ? (
+                    <div
+                      className="mt-1 flex flex-col gap-1"
+                      data-testid="promotion-diagnostics-candidates"
+                    >
+                      <p className="text-xs font-bold text-zinc-400">
+                        Stripe objects holding this code string
+                      </p>
+                      {report.stripe.facts.exactCodeCandidates.map(
+                        (candidate) => (
+                          <div key={candidate.id} className="flex flex-col gap-1">
+                            <MaskedId
+                              label={`${candidate.active ? "Active" : "Inactive"}${
+                                candidate.adoptable ? ", adoptable" : ""
+                              }`}
+                              value={candidate.id}
+                            />
+                            {candidate.mismatches.length > 0 ? (
+                              <p className="pl-1 text-xs text-zinc-500">
+                                {candidate.mismatches.join(", ")}
+                              </p>
+                            ) : null}
+                          </div>
+                        )
+                      )}
+                    </div>
                   ) : null}
                 </div>
               ) : null}

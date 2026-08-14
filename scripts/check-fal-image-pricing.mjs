@@ -22,18 +22,18 @@ import {
 const MODEL_ID = "fal-ai/nano-banana-2";
 const PRICING_URL = "https://api.fal.ai/v1/models/pricing";
 
-const model = getImageModel(MODEL_ID);
-if (!model) {
-  console.error(`${MODEL_ID} is not in the image model registry.`);
-  process.exit(1);
-}
+// Not an error when absent. The scheduled workflow runs this against `main`
+// and `develop`, and between an activation landing on one and reaching the
+// other, a branch legitimately has no such model. The core reports that as
+// `not_registered` rather than as a failure.
+const model = getImageModel(MODEL_ID) ?? null;
 
-const { endpointId } = falPricingRequest(model);
+const { endpointId } = model ? falPricingRequest(model) : { endpointId: null };
 const apiKey = process.env.FAL_KEY?.trim();
 
 let response = null;
 let reachError = null;
-if (apiKey) {
+if (apiKey && endpointId) {
   try {
     const url = `${PRICING_URL}?endpoint_id=${encodeURIComponent(endpointId)}`;
     const result = await fetch(url, {
@@ -55,7 +55,9 @@ if (apiKey) {
 const verdict = evaluateFalPricing({ model, response, reachError });
 
 console.log(`fal image pricing check: ${MODEL_ID} -- ${verdict.status}`);
-if (!apiKey) console.log("  FAL_KEY is not set, so no lookup was attempted.");
+if (!apiKey && model) {
+  console.log("  FAL_KEY is not set, so no lookup was attempted.");
+}
 for (const note of verdict.notes) console.log(`  ${note}`);
 
 if (verdict.problems.length > 0) {

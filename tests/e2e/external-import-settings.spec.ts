@@ -765,6 +765,10 @@ test.describe("external import settings", () => {
     ).toBeVisible();
   });
 
+  // @ui-risk: the guidance is only reachable if the file can be selected at
+  // all, and `accept` is a per-browser attribute. A unit test can assert the
+  // copy; only a browser can assert that the picker offers `.html` and that
+  // the panel actually renders instead of the generic read failure.
   test("an HTML export is told how to fix it, not that it is unreadable", { tag: "@ui-risk" }, async ({
     page,
   }) => {
