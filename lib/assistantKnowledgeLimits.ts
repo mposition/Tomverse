@@ -84,6 +84,41 @@ export const ASSISTANT_KNOWLEDGE_RETENTION = {
 /** Private object namespace. Never rendered, never sent to a client. */
 export const ASSISTANT_KNOWLEDGE_KEY_PREFIX = "assistant-knowledge/";
 
+/* ------------------------------------------------- the closed vocabularies */
+
+/**
+ * The processing lifecycle, as a runtime list rather than as literals spread
+ * through the pipeline.
+ *
+ * A CHECK constraint enforces the same four values, and
+ * `npm run check:enum-constraints` compares the two on every run. That
+ * comparison is the point: a status decides two different things in two
+ * different places -- the worker claims "pending", retrieval reads "ready" --
+ * so a value that exists in one and not the other is a row invisible to both.
+ */
+export const KNOWLEDGE_PROCESSING_STATUSES = [
+    "pending",
+    "processing",
+    "ready",
+    "failed",
+] as const;
+
+export type KnowledgeProcessingStatus =
+    (typeof KNOWLEDGE_PROCESSING_STATUSES)[number];
+
+/**
+ * Why a stored object is queued for deletion (§14.2). Same arrangement: the
+ * list and the constraint are checked against each other.
+ */
+export const KNOWLEDGE_CLEANUP_REASONS = [
+    "file_deleted",
+    "profile_deleted",
+    "account_deleted",
+    "upload_abandoned",
+] as const;
+
+export type KnowledgeCleanupReason = (typeof KNOWLEDGE_CLEANUP_REASONS)[number];
+
 /* --------------------------------------------------------- file types */
 
 /**

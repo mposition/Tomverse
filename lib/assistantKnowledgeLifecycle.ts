@@ -4,6 +4,7 @@ import type { Prisma } from "@prisma/client";
 import {
     ASSISTANT_KNOWLEDGE_KEY_PREFIX,
     ASSISTANT_KNOWLEDGE_RETENTION,
+    type KnowledgeCleanupReason,
 } from "@/lib/assistantKnowledgeLimits";
 import { prisma } from "@/lib/prisma";
 import { deleteR2Object, listExpiredR2Objects } from "@/lib/r2";
@@ -32,11 +33,7 @@ import { deleteR2Object, listExpiredR2Objects } from "@/lib/r2";
  * retention.
  */
 
-export type KnowledgeCleanupReason =
-    | "file_deleted"
-    | "profile_deleted"
-    | "account_deleted"
-    | "upload_abandoned";
+export type { KnowledgeCleanupReason };
 
 /**
  * Enqueues the object keys of the files about to be deleted.
