@@ -107,8 +107,19 @@ async function parseArchive(file: File): Promise<{
         );
     }
 
+    const lowerName = file.name.toLowerCase();
+    // Takeout offers My Activity as JSON or HTML, and only JSON is supported
+    // (A2 §6). A user who picked HTML can fix it themselves in a minute, so
+    // this says so instead of reporting an unreadable file.
+    if (lowerName.endsWith(".html") || lowerName.endsWith(".htm")) {
+        throw new ExternalImportArchiveError(
+            "The export is HTML; only the JSON format is supported.",
+            "html_export_unsupported"
+        );
+    }
+
     // A bare .json export skips the archive path entirely.
-    if (!file.name.toLowerCase().endsWith(".zip")) {
+    if (!lowerName.endsWith(".zip")) {
         const text = await file.text();
         const value = JSON.parse(text);
         const adapter = detectExternalImportAdapter(value);
@@ -150,6 +161,8 @@ async function parseArchive(file: File): Promise<{
      */
     const archivedNames = new Set<string>();
     const attachmentReferences: string[] = [];
+    /** Whether the archive held HTML where conversations should be (§6). */
+    let sawHtmlEntry = false;
 
     await new Promise<void>((resolve, reject) => {
         const decoder = new TextDecoder();
@@ -179,6 +192,7 @@ async function parseArchive(file: File): Promise<{
             };
             const basename = entry.name.split("/").pop();
             if (basename) archivedNames.add(basename);
+            if (/\.html?$/i.test(entry.name)) sawHtmlEntry = true;
 
             const decision = classifyArchiveEntry(info);
             if (decision.kind === "reject") {
@@ -301,6 +315,12 @@ async function parseArchive(file: File): Promise<{
     });
 
     if (!provider) {
+        if (sawHtmlEntry) {
+            throw new ExternalImportArchiveError(
+                "The export contains HTML where the conversation data should be.",
+                "html_export_unsupported"
+            );
+        }
         throw new ExternalImportArchiveError(
             "The archive contains no conversation data.",
             "no_conversation_data"

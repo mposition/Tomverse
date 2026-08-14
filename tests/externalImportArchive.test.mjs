@@ -127,6 +127,50 @@ test("a nested archive does not stop the conversation payload being parsed", () 
     );
 });
 
+test("an HTML export says so, instead of reading as unreadable", () => {
+    // §6 / A2 §6: Takeout offers My Activity as JSON or HTML and only JSON is
+    // supported. This is the one failure the user can fix in a minute, so it
+    // has to be told apart from an export we simply could not read.
+    assert.throws(
+        () =>
+            planArchiveEntries(
+                [
+                    entry("Takeout/My Activity/Gemini Apps/MyActivity.html", 40_000),
+                    entry("Takeout/My Activity/Gemini Apps/photo.jpg", 900_000),
+                ],
+                { archiveBytes: 1_000_000 }
+            ),
+        (error) =>
+            error instanceof ExternalImportArchiveError &&
+            error.reason === "html_export_unsupported"
+    );
+
+    // Detected by extension, never by a path segment: Takeout translates the
+    // directory and the filename to the account's language, so a Korean
+    // export's `내 활동/Gemini 앱/내활동.html` has to reach the same answer.
+    assert.throws(
+        () =>
+            planArchiveEntries(
+                [entry("Takeout/내 활동/Gemini 앱/내활동.html", 40_000)],
+                { archiveBytes: 100_000 }
+            ),
+        (error) => error.reason === "html_export_unsupported"
+    );
+});
+
+test("HTML beside a readable payload changes nothing", () => {
+    // Every ChatGPT export ships chat.html next to conversations.json. The
+    // HTML reason is only for an export with nothing else to read.
+    const plan = planArchiveEntries(
+        [entry("chat.html", 40_000), entry("conversations.json", 2_000)],
+        { archiveBytes: 100_000 }
+    );
+    assert.deepEqual(
+        plan.parse.map((planned) => planned.entry.name),
+        ["conversations.json"]
+    );
+});
+
 test("an archive of nothing but nested archives has no conversation data", () => {
     // Skipping is not the same as accepting: with the payload gone, the export
     // is still refused — with the reason that says what is actually wrong.

@@ -174,8 +174,13 @@ test("the components render the copy", () => {
         // common first attempt from producing an empty import.
         "externalImport.guideGeminiTitle",
         "externalImport.guideGeminiStep2",
+        // A2 §6: HTML is the one failure the user can fix in a minute, so it
+        // must not read as "unreadable".
+        "externalImport.parseFailedHtmlExport",
         // A2 §2.2, §4.1, §5: what branching costs, what the archive lacks,
-        // and what the export assigned to no conversation.
+        // what the export assigned to no conversation, and what could not be
+        // rendered exactly.
+        "externalImport.warningUnrecognizedAnswers",
         "externalImport.warningBranchDuplicates",
         "externalImport.warningMissingAttachments",
         "externalImport.warningUnassignedTurns",

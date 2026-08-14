@@ -1102,6 +1102,8 @@ export const ko = {
         desktopRecommended:
             "이 내보내기 파일은 이 기기의 브라우저로 열기에 너무 큽니다. 파일이 기기에서 직접 열리기 때문에, 데스크톱 컴퓨터에서 다시 시도해 주세요.",
         parseFailed: "지원되는 내보내기 형식으로 읽을 수 없는 파일입니다.",
+        parseFailedHtmlExport:
+            "HTML 형식으로 내보낸 파일입니다. 내 활동을 JSON 형식으로 다시 내보낸 뒤 그 파일을 올려 주세요.",
         previewTitle: "가져올 대화 선택",
         previewProvider: "감지된 내보내기: {provider}",
         warningsTitle: "포함되지 않는 항목",
@@ -1116,6 +1118,8 @@ export const ko = {
             "분기 여러 개에 함께 있는 메시지 {count}개는 각 분기에 저장됩니다",
         warningUnassignedTurns:
             "어느 대화에 속하는지 내보내기에 없는 항목 {count}개는 가져오지 않음",
+        warningUnrecognizedAnswers:
+            "정확히 읽을 수 없는 서식이 쓰인 답변 {count}개는 제외했습니다",
         notImportableBadge: "가져올 수 없음",
         notImportableExplain:
             "{count}개 대화에 가져오기 크기 한도를 넘는 메시지가 있어 가져올 수 없습니다.",

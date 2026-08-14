@@ -278,6 +278,39 @@ test("an entry the export assigns to no conversation is reported, not placed", (
     assert.equal(preview.totals.unassignedTurns, 1);
 });
 
+test("two turns sharing a timestamp keep their ids whichever order they arrive in", () => {
+    // The export records milliseconds, and two turns in one chat can land in
+    // the same one. Ordering those ties by position in the file made the id
+    // depend on how the export happened to be written out: reading the same
+    // file back to front moved `...:u` onto a different question, so a
+    // re-import stored the account's history twice. Ties are broken by the
+    // text itself, which no ordering can change.
+    const url = "https://gemini.google.com/app/aaaaaaaaaaaaaaaa";
+    const at = (title, html) => ({
+        title,
+        time: "2026-03-01T00:00:00.000Z",
+        details: [{ name: url, url }],
+        safeHtmlItem: [{ html }],
+    });
+    const forward = [at("first question", "<p>A</p>"), at("second question", "<p>B</p>")];
+    const pairs = (items) =>
+        new Map(
+            parse(items).conversations[0].messages.map((m) => [
+                m.rawExternalMessageId,
+                m.content,
+            ])
+        );
+
+    const straight = pairs(forward);
+    const reversed = pairs([...forward].reverse());
+    assert.deepEqual([...reversed.entries()].sort(), [...straight.entries()].sort());
+    for (const [id, content] of straight) {
+        assert.equal(reversed.get(id), content, `${id} must name the same message`);
+    }
+    // Every id is still distinct: the tie is broken, not collapsed.
+    assert.equal(straight.size, 4);
+});
+
 test("an answer whose markup we cannot render is dropped and counted", () => {
     // §5: a half-converted answer is worse than a counted absence. The prompt
     // is plain text and is understood, so it stays.
@@ -292,6 +325,12 @@ test("an answer whose markup we cannot render is dropped and counted", () => {
         ["user"]
     );
     assert.equal(conversation.warnings.skippedUnrecognizedContent, 1);
+
+    // And it reaches the preview. A conversation that arrives with its answer
+    // missing, and nothing said about it, is indistinguishable from a question
+    // the model never answered.
+    const preview = buildImportPreview("gemini", result.conversations);
+    assert.equal(preview.totals.skippedUnrecognizedAnswers, 1);
 });
 
 /* ------------------------------------------------------------ conversation */

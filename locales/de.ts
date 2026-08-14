@@ -1099,6 +1099,8 @@ export const de = {
             "Dieser Export ist für den Browser dieses Geräts zu groß. Da die Datei lokal geöffnet wird, versuchen Sie es bitte auf einem Desktop-Computer erneut.",
         parseFailed:
             "Die Datei konnte nicht als unterstützter Export gelesen werden.",
+        parseFailedHtmlExport:
+            "Dieser Export liegt als HTML vor. Exportieren Sie „Meine Aktivitäten“ erneut im JSON-Format und laden Sie diese Datei hoch.",
         previewTitle: "Unterhaltungen zum Import auswählen",
         previewProvider: "Erkannter Export: {provider}",
         warningsTitle: "Nicht enthalten",
@@ -1116,6 +1118,8 @@ export const de = {
             "{count} Nachrichten kommen in mehreren Verzweigungen vor und werden in jeder gespeichert",
         warningUnassignedTurns:
             "{count} Einträge nennen im Export keine Unterhaltung und werden daher nicht importiert",
+        warningUnrecognizedAnswers:
+            "{count} Antworten verwenden eine Formatierung, die dieser Import nicht exakt lesen kann, und wurden ausgelassen",
         notImportableBadge: "Import nicht möglich",
         notImportableExplain:
             "{count} Unterhaltungen enthalten eine Nachricht über der Import-Größengrenze und können nicht importiert werden.",

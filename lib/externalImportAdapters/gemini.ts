@@ -47,9 +47,10 @@ type Turn = {
     prompt: string;
     answerHtml: string;
     attachments: string[];
-    /** Position in the file, used only to break exact timestamp ties. */
-    index: number;
 };
+
+/** Total string order, used to make timestamp ties deterministic. */
+const compare = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
 
 const stringField = (entry: Record<string, unknown>, key: string): string =>
     typeof entry[key] === "string" ? (entry[key] as string) : "";
@@ -133,16 +134,16 @@ export const geminiAdapter: ExternalConversationAdapter = {
         let unparsableCount = 0;
         let unassignedTurns = 0;
 
-        items.forEach((item, index) => {
+        for (const item of items) {
             if (!isRecord(item)) {
                 unparsableCount += 1;
-                return;
+                continue;
             }
             const prompt = stringField(item, "title").trim();
             const time = asIsoTimestamp(item.time);
             if (!prompt || !time) {
                 unparsableCount += 1;
-                return;
+                continue;
             }
             const chatIds = chatIdsOf(item);
             if (chatIds.length === 0) {
@@ -150,7 +151,7 @@ export const geminiAdapter: ExternalConversationAdapter = {
                 // to, so it is reported rather than guessed at or dropped
                 // quietly. Grouping by time proximity is forbidden (§2).
                 unassignedTurns += 1;
-                return;
+                continue;
             }
             const attachments = attachmentsOf(item);
             attachmentReferences.push(...attachments);
@@ -160,9 +161,8 @@ export const geminiAdapter: ExternalConversationAdapter = {
                 prompt,
                 answerHtml: answerHtmlOf(item),
                 attachments,
-                index,
             });
-        });
+        }
 
         const byChat = new Map<string, Turn[]>();
         for (const turn of turns) {
@@ -192,10 +192,19 @@ function buildConversation(
     chatTurns: readonly Turn[]
 ): ParsedExternalConversation | null {
     // File order is not conversation order: a real export was not globally
-    // sorted, and per-chat order there was newest-first. Time decides, with
-    // file position breaking exact ties so a re-import orders identically.
-    const ordered = [...chatTurns].sort((a, b) =>
-        a.time === b.time ? a.index - b.index : a.time < b.time ? -1 : 1
+    // sorted, and per-chat order there was newest-first. Time decides.
+    //
+    // Ties are broken by content, never by file position. Two turns can share
+    // a millisecond, and ordering them by where they happened to sit in the
+    // file made the ordinals -- and the IDs derived from them -- depend on the
+    // file's ordering: the same ID named a different message when the same
+    // export was read back to front. Comparing the text itself is total,
+    // deterministic and independent of how the export was written out.
+    const ordered = [...chatTurns].sort(
+        (a, b) =>
+            compare(a.time, b.time) ||
+            compare(a.prompt, b.prompt) ||
+            compare(a.answerHtml, b.answerHtml)
     );
 
     const warnings = emptyWarnings();
@@ -208,6 +217,13 @@ function buildConversation(
      * move between exports, and an ID that moves makes a re-import a different
      * lineage. Scoping to `chatId` is what lets the same shared turn live in
      * four branches as four messages instead of collapsing into one.
+     *
+     * The occurrence suffix disambiguates turns sharing a millisecond. It is
+     * safe only because `ordered` above sorts ties by content: a suffix handed
+     * out in file order would name a different message in a differently
+     * ordered export of the same account. With a content-ordered tie, two
+     * turns that still collide are identical, so either assignment maps the
+     * ID to the same text.
      */
     const messageId = (time: string, role: "u" | "a"): string => {
         const base = `${chatId}:${time}:${role}`;

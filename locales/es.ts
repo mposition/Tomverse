@@ -1099,6 +1099,8 @@ export const es = {
             "Esta exportación es demasiado grande para el navegador de este dispositivo. Como el archivo se abre localmente, inténtalo de nuevo en un ordenador de escritorio.",
         parseFailed:
             "El archivo no se pudo leer como una exportación compatible.",
+        parseFailedHtmlExport:
+            "Esta exportación está en HTML. Vuelve a exportar Mi actividad eligiendo el formato JSON y sube ese archivo.",
         previewTitle: "Elige las conversaciones a importar",
         previewProvider: "Exportación detectada: {provider}",
         warningsTitle: "No incluido",
@@ -1116,6 +1118,8 @@ export const es = {
             "{count} mensajes aparecen en más de una rama y se guardan en cada una",
         warningUnassignedTurns:
             "{count} entradas no indican ninguna conversación en la exportación, por lo que no se importan",
+        warningUnrecognizedAnswers:
+            "{count} respuestas usan un formato que esta importación no puede leer con exactitud, así que se omitieron",
         notImportableBadge: "No se puede importar",
         notImportableExplain:
             "{count} conversaciones contienen un mensaje que supera el límite de tamaño de importación y no se pueden importar.",

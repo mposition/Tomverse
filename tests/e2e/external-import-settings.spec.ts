@@ -765,6 +765,42 @@ test.describe("external import settings", () => {
     ).toBeVisible();
   });
 
+  test("an HTML export is told how to fix it, not that it is unreadable", async ({
+    page,
+  }) => {
+    // A2 §6. Takeout offers My Activity as JSON or HTML, and only JSON is
+    // supported. This is the one failure the user can fix in a minute, so it
+    // must not arrive as the generic "could not read this file" -- and the
+    // file has to be selectable in the first place, or the guidance is
+    // unreachable.
+    await prepareGuestPage(page, "ko");
+    await mockAuthenticatedApi(page);
+    await mockImportApi(page);
+
+    await page.goto("/settings/imports/new");
+    await page.getByTestId("external-import-guide-has-file").click();
+
+    const accept = await page
+      .getByTestId("external-import-file-input")
+      .getAttribute("accept");
+    expect(accept).toContain(".html");
+
+    await page.getByTestId("external-import-file-input").setInputFiles({
+      name: "내활동.html",
+      mimeType: "text/html",
+      buffer: Buffer.from("<html><body><div>activity</div></body></html>", "utf8"),
+    });
+
+    const panel = page.getByTestId("external-import-parse-failed");
+    await expect(panel).toBeVisible();
+    // The Korean copy names the fix: re-export My Activity as JSON.
+    await expect(panel).toContainText("JSON");
+    await page.getByTestId("external-import-diagnostics-toggle").click();
+    await expect(page.getByTestId("external-import-diagnostics")).toHaveText(
+      "html_export_unsupported"
+    );
+  });
+
   test("a disabled rollout closes the wizard fail-closed but keeps history and delete reachable", async ({
     page,
   }) => {

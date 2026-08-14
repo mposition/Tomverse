@@ -1113,6 +1113,8 @@ export const zh = {
         desktopRecommended:
             "此导出文件过大，此设备的浏览器无法打开。由于文件在本地打开，请改用台式电脑重试。",
         parseFailed: "无法将该文件识别为受支持的导出格式。",
+        parseFailedHtmlExport:
+            "这份导出是 HTML 格式。请重新导出「我的活动」并选择 JSON 格式，再上传该文件。",
         previewTitle: "选择要导入的对话",
         previewProvider: "检测到的导出来源：{provider}",
         warningsTitle: "不包含的内容",
@@ -1127,6 +1129,8 @@ export const zh = {
             "{count} 条消息同时属于多个分支，将在每个分支中各保存一份",
         warningUnassignedTurns:
             "{count} 个条目在导出中未标明所属对话，因此不会导入",
+        warningUnrecognizedAnswers:
+            "{count} 条回答使用了本次导入无法准确解析的格式，因此已略去",
         notImportableBadge: "无法导入",
         notImportableExplain:
             "{count} 个对话包含超过导入大小限制的消息，无法导入。",
