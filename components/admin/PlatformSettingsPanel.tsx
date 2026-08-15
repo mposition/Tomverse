@@ -1,7 +1,8 @@
 "use client";
 
+import Link from "next/link";
 import { useMemo, useState } from "react";
-import { Bot, Database, Image as ImageIcon, Loader2, RefreshCw, Save, Settings2, ShieldAlert } from "lucide-react";
+import { Bot, Database, Image as ImageIcon, KeyRound, Loader2, RefreshCw, Save, Settings2, ShieldAlert } from "lucide-react";
 import {
   canUseModelWithPlan,
   getModelUsageProfile,
@@ -11,6 +12,17 @@ import { useModelCatalog } from "@/components/ModelCatalogProvider";
 import type { PublicAppSettings } from "@/lib/appSettings";
 import { dispatchAppToast } from "@/lib/appToast";
 import { ModelLogo } from "@/components/chat/ModelLogo";
+import { adminRecentAuthenticationHref } from "@/lib/adminReauthenticationCore";
+
+/**
+ * Where the reauthentication CTA brings the operator back to.
+ *
+ * A constant, not `usePathname()`: this panel is the whole of `/admin/platform`
+ * and its only other mount is outside `/admin` entirely, where
+ * `normalizeAdminCallbackPath()` would fold the callback to `/admin/overview`
+ * and drop the operator somewhere other than the settings they were editing.
+ */
+const PLATFORM_SETTINGS_PATH = "/admin/platform";
 
 type AdminAppSettingsResponse = {
   settings?: PublicAppSettings;
@@ -77,6 +89,13 @@ export function PlatformSettingsPanel({
   const [lastSyncedAt, setLastSyncedAt] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  // Survives on screen until the operator leaves for the reauthentication
+  // flow. A toast was the only recovery channel before, and it disappears --
+  // taking with it the one instruction ("sign in again") that a retry cannot
+  // substitute for, which left Save as the only visible action and every press
+  // of it producing the same 428.
+  const [reauthenticationRequired, setReauthenticationRequired] =
+    useState(false);
   const selectedModel =
     guestModels.find((model) => model.id === guestDefaultModelId) || guestModels[0];
 
@@ -135,7 +154,7 @@ export function PlatformSettingsPanel({
   };
 
   const save = async () => {
-    if (isLoading || isSaving) return;
+    if (isLoading || isSaving || reauthenticationRequired) return;
     setIsSaving(true);
     try {
       const response = await fetch("/api/admin/app-settings", {
@@ -163,8 +182,13 @@ export function PlatformSettingsPanel({
         // retry cannot fix, which is what "nothing changed" used to do to a
         // step-up prompt. So the server's own explanation is what gets shown.
         if (response.status === 428) {
+          // The alert below is the recovery; the toast only announces it. The
+          // request is not retried and the edit is not re-sent -- a high-risk
+          // write has to be submitted again deliberately, after a real
+          // sign-in, by the operator looking at the values.
+          setReauthenticationRequired(true);
           dispatchAppToast(
-            "Platform settings were not saved: this is a high-risk action, so sign in again and retry within the step-up window.",
+            "Platform settings were not saved: this is a high-risk action, so sign in again before saving.",
             "error"
           );
           return;
@@ -227,7 +251,16 @@ export function PlatformSettingsPanel({
             <button
               type="button"
               onClick={save}
-              disabled={isLoading || isSaving}
+              // Disabled while a step-up is outstanding, and described by the
+              // alert that says why: the endpoint would answer 428 again, and
+              // an enabled Save is what turns one refusal into a loop.
+              disabled={isLoading || isSaving || reauthenticationRequired}
+              aria-describedby={
+                reauthenticationRequired
+                  ? "admin-platform-reauthentication"
+                  : undefined
+              }
+              data-testid="admin-platform-save"
               className="inline-flex items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 py-2 text-sm font-bold text-white hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-60"
             >
               {isSaving ? (
@@ -240,6 +273,47 @@ export function PlatformSettingsPanel({
           </div>
         </div>
       </div>
+
+      {reauthenticationRequired ? (
+        <div
+          id="admin-platform-reauthentication"
+          data-testid="admin-platform-reauthentication"
+          role="alert"
+          aria-live="assertive"
+          className="border-b border-amber-500/30 bg-amber-500/10 p-5"
+        >
+          <div className="flex items-start gap-4">
+            <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-amber-500/30 bg-amber-500/10 text-amber-200">
+              <KeyRound className="h-5 w-5" aria-hidden />
+            </span>
+            <div className="min-w-0 flex-1">
+              <h3 className="text-lg font-black text-amber-100">
+                Nothing was saved
+              </h3>
+              <p className="mt-2 max-w-3xl text-sm leading-6 text-amber-100/90">
+                Changing platform settings is a high-risk action and needs a
+                more recent administrator sign-in than this session has. The
+                whole request was refused, so every setting is still exactly as
+                it was stored -- your edits below have not been applied and
+                will not be re-sent for you.
+              </p>
+              <p className="mt-2 max-w-3xl text-sm leading-6 text-amber-100/90">
+                Signing in again ends this app session and brings you back to
+                this screen. Review the settings here and save them again.
+                Refreshing the page does not renew the sign-in.
+              </p>
+              <Link
+                href={adminRecentAuthenticationHref(PLATFORM_SETTINGS_PATH)}
+                data-testid="admin-platform-reauthenticate-link"
+                className="mt-4 inline-flex items-center gap-2 rounded-xl bg-amber-400 px-4 py-2 text-sm font-black text-zinc-950 transition hover:bg-amber-300"
+              >
+                <KeyRound className="h-4 w-4" aria-hidden />
+                Sign in again to continue
+              </Link>
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       <div className="grid gap-5 p-5 xl:grid-cols-[1fr_0.8fr]">
         <div className="rounded-2xl border border-red-500/30 bg-red-500/5 p-5 xl:col-span-2">
