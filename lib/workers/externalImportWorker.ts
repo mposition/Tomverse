@@ -11,6 +11,7 @@ import type {
 import {
     ExternalImportArchiveError,
     classifyArchiveEntry,
+    readArchiveEntryItems,
     requiresStreamingParse,
     type ArchiveEntryInfo,
 } from "@/lib/externalImportArchive";
@@ -233,9 +234,28 @@ async function parseArchive(file: File): Promise<{
             let buffered = streaming ? "" : "";
             const items: unknown[] = [];
 
+            /**
+             * Only the authoritative conversations entry — and every archive
+             * safety refusal above — ends the import. A `candidate` that will
+             * not parse is abandoned: `readArchiveEntryItems` says why, and a
+             * real Claude export is the reason it has to.
+             */
+            const role = decision.role;
+            const isCandidate = role === "candidate";
+            let abandoned = false;
+            const abandonEntry = () => {
+                abandoned = true;
+                buffered = "";
+                items.length = 0;
+            };
+
             entry.ondata = (error, chunk, final) => {
-                if (cancelled) return;
+                if (cancelled || abandoned) return;
                 if (error) {
+                    if (isCandidate) {
+                        abandonEntry();
+                        return;
+                    }
                     reject(error);
                     return;
                 }
@@ -249,7 +269,14 @@ async function parseArchive(file: File): Promise<{
                     }
                     if (final) {
                         if (streamParser) streamParser.end();
-                        else items.push(...(JSON.parse(buffered) as unknown[]));
+                        else {
+                            const read = readArchiveEntryItems(buffered, role);
+                            if ("skipped" in read) {
+                                abandonEntry();
+                                return;
+                            }
+                            items.push(...read.items);
+                        }
                         buffered = "";
 
                         const detected =
@@ -281,6 +308,10 @@ async function parseArchive(file: File): Promise<{
                         });
                     }
                 } catch (parseError) {
+                    if (isCandidate) {
+                        abandonEntry();
+                        return;
+                    }
                     reject(parseError);
                 }
             };

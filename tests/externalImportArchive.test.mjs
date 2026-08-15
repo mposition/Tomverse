@@ -4,6 +4,7 @@ import {
     ExternalImportArchiveError,
     classifyArchiveEntry,
     planArchiveEntries,
+    readArchiveEntryItems,
     requiresStreamingParse,
 } from "../lib/externalImportArchive.ts";
 import { EXTERNAL_IMPORT_CLIENT_ARCHIVE_LIMITS } from "../lib/externalImportLimits.ts";
@@ -361,4 +362,113 @@ test("the streaming threshold matches the policy's 16MB", () => {
         requiresStreamingParse(entry("conversations.json", 16 * 1024 * 1024 + 1)),
         true
     );
+});
+
+/**
+ * A real Claude export, 2026-08, could not be imported at all.
+ *
+ * Its entries:
+ *
+ *     conversations.json                      3,051,381 bytes
+ *     users.json                                    142
+ *     memories.json                               4,444
+ *     login_history.json                          6,766
+ *     projects/<uuid>.json                       19,351
+ *     reflections/<uuid>.json                     3,856
+ *
+ * Only the first is in `CONVERSATION_FILENAMES`; the metadata skip list names
+ * `user.json`, singular, so even that one misses. The other six are opened as
+ * candidates, several hold a JSON object rather than an array, and the worker
+ * spread the parsed value straight into an array. `push(...{})` throws a bare
+ * TypeError, which is none of the typed archive errors, so the whole import
+ * ended as `unreadable_archive` — "this file cannot be read" — while three
+ * megabytes of readable conversations sat in the same archive.
+ *
+ * The fix is not a longer filename list. That list will lag every export
+ * format change the same way. It is that a candidate is allowed to fail.
+ */
+
+const CLAUDE_EXPORT_2026_08 = [
+    ["conversations.json", 3_051_381],
+    ["users.json", 142],
+    ["memories.json", 4_444],
+    ["login_history.json", 6_766],
+    ["projects/019f7d0c-a3b0-701c-9cfd-db291b34935e.json", 19_351],
+    ["reflections/e5538b34-4a60-441e-884e-ba80625a9476.json", 3_856],
+];
+
+test("the Claude export that failed still classifies one payload and five candidates", () => {
+    // Pinning the classification the fix is built on. If a later change moves
+    // any of these to `skip`, the isolation below stops being what protects
+    // this export and the next reader should know that from here.
+    const roles = CLAUDE_EXPORT_2026_08.map(([name, bytes]) => {
+        const decision = decisionFor(name, bytes);
+        return [name, decision.kind === "parse" ? decision.role : decision.kind];
+    });
+    assert.deepEqual(roles, [
+        ["conversations.json", "conversations"],
+        ["users.json", "candidate"],
+        ["memories.json", "candidate"],
+        ["login_history.json", "candidate"],
+        ["projects/019f7d0c-a3b0-701c-9cfd-db291b34935e.json", "candidate"],
+        ["reflections/e5538b34-4a60-441e-884e-ba80625a9476.json", "candidate"],
+    ]);
+});
+
+test("a candidate holding an object is abandoned, not fatal", () => {
+    // The exact shape that killed the import: a single JSON object.
+    assert.deepEqual(
+        readArchiveEntryItems('{"uuid":"p1","name":"a project"}', "candidate"),
+        { skipped: true }
+    );
+});
+
+test("a candidate that is not JSON at all is abandoned too", () => {
+    // An entry named `.json` is not a promise about its bytes.
+    assert.deepEqual(readArchiveEntryItems("not json", "candidate"), {
+        skipped: true,
+    });
+    assert.deepEqual(readArchiveEntryItems("", "candidate"), { skipped: true });
+});
+
+test("the authoritative conversations entry still fails closed on an object", () => {
+    // Fail-closed is kept exactly where it belongs. An import whose payload
+    // will not parse has nothing to import, and must say so rather than
+    // quietly producing zero conversations.
+    assert.throws(
+        () => readArchiveEntryItems('{"not":"an array"}', "conversations"),
+        (error) =>
+            error instanceof ExternalImportArchiveError &&
+            error.reason === "no_conversation_data"
+    );
+});
+
+test("the authoritative conversations entry still fails closed on malformed JSON", () => {
+    assert.throws(
+        () => readArchiveEntryItems("{oops", "conversations"),
+        (error) => error instanceof SyntaxError
+    );
+});
+
+test("a valid array is returned for either role", () => {
+    for (const role of ["conversations", "candidate"]) {
+        assert.deepEqual(readArchiveEntryItems('[{"uuid":"c1"}]', role), {
+            items: [{ uuid: "c1" }],
+        });
+    }
+});
+
+test("candidate isolation does not reach archive safety refusals", () => {
+    // The role only decides what happens to a *parse* failure. Traversal,
+    // encryption, nested archives and the size budgets are refused before any
+    // entry is opened, and nothing here softens them.
+    for (const [name, extra, reason] of [
+        ["../escape.json", {}, "path_traversal"],
+        ["/abs.json", {}, "absolute_path"],
+        ["secret.json", { encrypted: true }, "encrypted"],
+    ]) {
+        const decision = decisionFor(name, 1_000, extra);
+        assert.equal(decision.kind, "reject", name);
+        assert.equal(decision.reason, reason);
+    }
 });
