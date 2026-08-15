@@ -80,7 +80,6 @@ export const RETAINED_TABLES = {
     AdminProviderIncident:
         "incident history; the record of what was wrong and when it was resolved",
     Feedback: "support record, deleted with the customer",
-    ImageAssetCleanup: "the queue's own record of what was deleted from R2",
 };
 
 /**

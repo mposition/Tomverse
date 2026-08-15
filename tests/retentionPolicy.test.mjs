@@ -282,6 +282,8 @@ test("the window is shorter than every operational log policy", () => {
  * the only surviving copy of a report nothing pointed at any more.
  */
 
+const policyFor = (key) => retentionPolicy(key).policy;
+
 const ACCOUNT_DELETION = readFileSync("lib/accountDeletion.ts", "utf8");
 
 test("deep research jobs are swept by the clock that covers an abandoned one", () => {
@@ -338,4 +340,75 @@ test("deleting a conversation takes its deep research jobs with it", () => {
     const jobs = ACCOUNT_DELETION.indexOf("deleteDeepResearchJobsForConversations");
     const conversations = ACCOUNT_DELETION.indexOf("tx.conversation.deleteMany");
     assert.ok(jobs > 0 && conversations > jobs);
+});
+
+/**
+ * The last two tables on the unswept list, and a contradiction found while
+ * clearing them.
+ *
+ * `ImageAssetCleanup` and `AssistantKnowledgeCleanup` are the same table
+ * twice -- identical columns, identical `[completedAt, createdAt]` index --
+ * and had opposite answers: one registered as retained forever, the other on
+ * the unswept list. Both statements cannot be true of the same shape.
+ */
+
+const UNSWEPT_REGISTRY = readFileSync(
+    "scripts/report-unswept-tables-core.mjs",
+    "utf8"
+);
+
+test("the two R2 cleanup queues are one policy, because they are one shape", () => {
+    const policy = retentionPolicy("storageCleanupQueues");
+    assert.equal(policy.windowDays, 90);
+    assert.equal(policy.maintenanceStep, "storage_cleanup_queues");
+
+    const step = MAINTENANCE.slice(
+        MAINTENANCE.indexOf('step("storage_cleanup_queues"'),
+        MAINTENANCE.indexOf('step("token_estimate_shadow_samples"')
+    );
+    assert.match(step, /imageAssetCleanup\.deleteMany/);
+    assert.match(step, /assistantKnowledgeCleanup\.deleteMany/);
+
+    // And the retained entry is gone, or the tree would say both at once.
+    assert.ok(
+        !UNSWEPT_REGISTRY.includes("ImageAssetCleanup:"),
+        "a table with a policy is not also registered as retained"
+    );
+});
+
+test("a pending cleanup row is never deleted", () => {
+    // The only place an object's R2 key is written down. Delete a pending row
+    // and the file has no name anywhere in the system, so nothing can ever
+    // reap it -- the same permanent orphan that `account_deleted` was added to
+    // fix, reintroduced by a sweep.
+    assert.match(policyFor("storageCleanupQueues"), /Pending records are never deleted/);
+    const step = MAINTENANCE.slice(
+        MAINTENANCE.indexOf('step("storage_cleanup_queues"'),
+        MAINTENANCE.indexOf('step("token_estimate_shadow_samples"')
+    );
+    assert.match(step, /completedAt: \{ not: null, lt: cutoff \}/);
+
+    // The screen must not count what the sweep will not take, or it reports
+    // work that never finishes -- the failure this module exists for.
+    for (const source of [RETENTION_ROUTE, CLEANUP_ROUTE]) {
+        const counts = source.match(/(imageAssetCleanup|assistantKnowledgeCleanup)\.count\(\{[\s\S]{0,200}?\}\)/g) ?? [];
+        assert.equal(counts.length, 2);
+        for (const count of counts) assert.match(count, /completedAt: \{\s*not: null,/);
+    }
+});
+
+test("shadow samples are bounded because the evaluation ends", () => {
+    const policy = retentionPolicy("tokenEstimateShadowSamples");
+    assert.equal(policy.windowDays, 90);
+    assert.equal(policy.maintenanceStep, "token_estimate_shadow_samples");
+    assert.match(
+        MAINTENANCE,
+        /tokenEstimateShadowSample\.deleteMany\(\{\s*where: \{\s*createdAt: \{ lt: retentionCutoff\("tokenEstimateShadowSamples", now\) \},/
+    );
+    // Read by one report, which takes the newest samples and accepts --since.
+    // Nothing wants a sample older than the estimator version it compared.
+    assert.match(
+        readFileSync("scripts/report-token-estimate-calibration.mjs", "utf8"),
+        /orderBy: \{ createdAt: "desc" \}/
+    );
 });

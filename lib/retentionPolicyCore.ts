@@ -112,6 +112,60 @@ export const RETENTION_POLICIES: readonly RetentionPolicy[] = [
         maintenanceStep: "notification_logs",
     },
     {
+        key: "storageCleanupQueues",
+        label: "Storage cleanup queues",
+        // `ImageAssetCleanup` and `AssistantKnowledgeCleanup` are the same
+        // table twice: id, r2Key, reason, attempts, lastError, createdAt,
+        // updatedAt, completedAt, and the same `[completedAt, createdAt]`
+        // index. One was registered as retained forever ("the queue's own
+        // record of what was deleted from R2") and the other was on the
+        // unswept list. Both statements cannot be right about the same shape,
+        // so this is one decision covering both -- and one key rather than
+        // two, because the operator's question is whether completed cleanup
+        // records are piling up, not which of the two queues they are in.
+        //
+        // **Only rows with a `completedAt`.** A pending row is the only place
+        // the R2 key is written down; deleting one loses the object's name
+        // everywhere in the system and the file is orphaned in storage
+        // permanently. That is the exact failure `account_deleted` was added
+        // to fix, and a sweep is a very easy way to reintroduce it.
+        //
+        // 90 days after completion, matching the alert delivery logs. The row
+        // answers "was this object actually deleted, and when", which is an
+        // operational question with an operational lifetime -- the object it
+        // names is already gone, so nothing here is evidence about a file that
+        // still exists.
+        policy:
+            "Delete completed storage cleanup records older than 90 days. Pending records are never deleted.",
+        action: "delete",
+        windowDays: 90,
+        maintenanceStep: "storage_cleanup_queues",
+    },
+    {
+        key: "tokenEstimateShadowSamples",
+        label: "Token estimate shadow samples",
+        // Measurement rows for the estimator evaluation: character counts,
+        // byte counts, a symbol ratio, token counts and ids. No prompt text,
+        // no completion text -- the schema comment on `nonCjkSymbolRatio` says
+        // why the ratio is stored rather than the text it was derived from.
+        //
+        // Read by exactly one thing, `report:token-estimate-calibration`,
+        // which takes the newest 200,000 and accepts a `--since`. So the value
+        // of a sample is entirely in being recent enough to describe today's
+        // traffic: a 90-day window keeps several evaluation cycles and drops
+        // samples that describe an estimator version and a model mix that no
+        // longer exist.
+        //
+        // Bounded because the evaluation ends. A shadow sample kept after the
+        // candidate estimator has been adopted or abandoned measures a
+        // comparison nobody is still running.
+        policy:
+            "Delete token estimate shadow samples older than 90 days.",
+        action: "delete",
+        windowDays: 90,
+        maintenanceStep: "token_estimate_shadow_samples",
+    },
+    {
         key: "deepResearchJobs",
         label: "Deep research jobs",
         // Measured from `updatedAt`, which moves on every poll and on

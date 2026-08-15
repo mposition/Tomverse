@@ -50,6 +50,8 @@ export async function GET(req: Request) {
     const providerErrorCutoff = retentionCutoff("providerErrors", now);
     const emailLoginCutoff = retentionCutoff("emailLoginAttempts", now);
     const deepResearchCutoff = retentionCutoff("deepResearchJobs", now);
+    const storageCleanupCutoff = retentionCutoff("storageCleanupQueues", now);
+    const shadowSampleCutoff = retentionCutoff("tokenEstimateShadowSamples", now);
     const productAnalyticsCutoff = retentionCutoff("productAnalytics", now);
 
     const [
@@ -61,6 +63,9 @@ export async function GET(req: Request) {
       oldNotificationLogs,
       oldEmailLoginAttempts,
       oldDeepResearchJobs,
+      oldImageCleanups,
+      oldKnowledgeCleanups,
+      oldShadowSamples,
       oldProviderChecks,
       oldProviderErrors,
       oldProductAnalytics,
@@ -78,6 +83,8 @@ export async function GET(req: Request) {
       oldestNotification,
       oldestEmailLoginAttempt,
       oldestDeepResearchJob,
+      oldestStorageCleanup,
+      oldestShadowSample,
       oldestProviderCheck,
       oldestProviderError,
       oldestProductAnalytics,
@@ -111,6 +118,15 @@ export async function GET(req: Request) {
       }),
       prisma.perplexityAsyncJob.count({
         where: { updatedAt: { lt: deepResearchCutoff } },
+      }),
+      prisma.imageAssetCleanup.count({
+        where: { completedAt: { not: null, lt: storageCleanupCutoff } },
+      }),
+      prisma.assistantKnowledgeCleanup.count({
+        where: { completedAt: { not: null, lt: storageCleanupCutoff } },
+      }),
+      prisma.tokenEstimateShadowSample.count({
+        where: { createdAt: { lt: shadowSampleCutoff } },
       }),
       prisma.providerHealthCheck.count({
         where: { createdAt: { lt: providerCheckCutoff } },
@@ -209,6 +225,30 @@ export async function GET(req: Request) {
           select: { updatedAt: true },
         })
         .then((row) => row?.updatedAt.toISOString() || null),
+      // The older of the two queues' oldest completed rows: one policy, one
+      // number, so the screen cannot report a date for a queue it is not
+      // naming.
+      Promise.all([
+        prisma.imageAssetCleanup.findFirst({
+          where: { completedAt: { not: null } },
+          orderBy: { completedAt: "asc" },
+          select: { completedAt: true },
+        }),
+        prisma.assistantKnowledgeCleanup.findFirst({
+          where: { completedAt: { not: null } },
+          orderBy: { completedAt: "asc" },
+          select: { completedAt: true },
+        }),
+      ]).then(([image, knowledge]) => {
+        const dates = [image?.completedAt, knowledge?.completedAt].filter(
+          (value): value is Date => Boolean(value)
+        );
+        if (dates.length === 0) return null;
+        return new Date(Math.min(...dates.map((date) => date.getTime()))).toISOString();
+      }),
+      prisma.tokenEstimateShadowSample
+        .findFirst({ orderBy: { createdAt: "asc" }, select: { createdAt: true } })
+        .then((row) => row?.createdAt.toISOString() || null),
       oldestDate(
         () =>
           prisma.providerErrorEvent.findFirst({
@@ -248,6 +288,14 @@ export async function GET(req: Request) {
       deepResearchJobs: {
         staleCount: oldDeepResearchJobs,
         oldestAt: oldestDeepResearchJob,
+      },
+      storageCleanupQueues: {
+        staleCount: oldImageCleanups + oldKnowledgeCleanups,
+        oldestAt: oldestStorageCleanup,
+      },
+      tokenEstimateShadowSamples: {
+        staleCount: oldShadowSamples,
+        oldestAt: oldestShadowSample,
       },
       providerChecks: {
         staleCount: oldProviderChecks,
