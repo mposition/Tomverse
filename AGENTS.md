@@ -204,6 +204,17 @@ goodwill 지급은 Stripe 환불도 구매 취소도 아닌 **세 번째 것**�
   세 컬럼을 아예 쓰지 않습니다. 해석된 가격을 행에 다시 넣으면 장문 tier가
   사라지고 `costSource`가 전부 override로 보고돼 fallback 지표가 0%가 됩니다.
   확인은 `npm run check:model-pricing-db`.
+- **`creditWeight`에는 그 `NULL` 구분이 없습니다.** `ModelRegistryEntry.creditWeight`는
+  `Int` non-nullable이라 모든 행이 숫자를 갖고, 어떤 행도 그 숫자의 출처를 말하지
+  못합니다. `ensureModelRegistrySeeded()`는 `skipDuplicates: true`로 넣으므로 이미
+  있는 행을 다시 보지 않고, 갱신은 `STATIC_CATALOG_RECONCILIATION_MODEL_IDS`에
+  등록된 모델에만 닿습니다. **그래서 `lib/models.ts`의 `creditWeight`를 고쳐도
+  기존 행에는 반영되지 않고, 코드는 계속 옛 값을 말합니다.**
+  2026-08-15에 `perplexity/sonar`가 이 상태로 발견됐습니다 — 코드 16, 청구 20.
+  `npm run report:model-credit-weights`가 코드와 DB의 차이를 나열합니다. **gate가
+  아니라 보고입니다**: 행이 카탈로그와 다른 것은 `PUT /api/admin/models`가 만들라고
+  있는 상태이고, 의도된 override와 편집 실패는 컬럼만 봐서 구분되지 않습니다.
+  새 모델의 크레딧을 바꿀 때는 코드만 고치지 말고 이 보고로 실제 행을 확인합니다.
 - **처리 tier를 요청에 넣지 않습니다.** 모든 profile이 Standard 가격이며, 이는
   아무 요청도 `service_tier`를 지정하지 않는 동안에만 참입니다(생략 시 OpenAI
   기본값은 `auto`). `npm run check:model-pricing`이 request-side tier 지정을
