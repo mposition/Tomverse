@@ -180,7 +180,22 @@ const REGISTRY = {
   ChatAttemptUsage_outcome_check: {
     owner: "type_only",
     reason:
-      "AttemptOutcome in lib/chatMultiAttemptSettlement.ts: completed, cancelled, failed, empty. Deliberately the same four words settleChatUsage already writes to ChatCreditReservation.outcome rather than a second vocabulary for the same fact -- two spellings of one outcome is how two reports about one turn disagree.",
+      "AttemptOutcome in lib/chatMultiAttemptSettlement.ts: completed, cancelled, failed, empty. Deliberately the same four words settleChatUsage already writes to ChatCreditReservation.outcome rather than a second vocabulary for the same fact -- two spellings of one outcome is how two reports about one turn disagree. A fifth, unknown_after_dispatch, is written only by the stale-attempt sweep and matches RoutingAttempt's own outcome for the same condition: a dispatch was recorded and the turn never came back to say how it ended.",
+  },
+  ChatAttemptUsage_usageSource_check: {
+    owner: "type_only",
+    reason:
+      "How the token counts were arrived at: provider_usage_metadata, provider_response_cost, fallback_estimator, crash_reconciliation. Derived in lib/chatAttemptCostLedger.ts (attemptUsageSource) from AttemptUsage's own fields, except crash_reconciliation, which only lib/routingAttemptSweep.ts writes. A column rather than a note inside pricingSnapshot because the reports that read this ledger have to separate measured spend from estimated spend, and a provenance nobody can filter on is a provenance nobody uses.",
+  },
+  ChatAttemptUsage_costSource_check: {
+    owner: "type_only",
+    reason:
+      "PricedAttempt.costSource in lib/chatMultiAttemptSettlement.ts holds two of these -- token_estimate and provider_response -- and the third, reserved_upper_bound, is the sweep's: an upper bound the attempt was authorized to spend, recorded because the call demonstrably happened and 0 would claim it did not.",
+  },
+  ChatAttemptUsageAdjustment_kind_check: {
+    owner: "type_only",
+    reason:
+      "late_provider_actual, and only that today. Real usage arriving after a crash-reconciled estimate, appended rather than applied because the base row is immutable. A second kind would be a second reason a cost row can be wrong, and it should have to be named here before it can be written.",
   },
 
   ProductAnalyticsEvent_source_check: {

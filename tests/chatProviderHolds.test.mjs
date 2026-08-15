@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  attemptCostIntentProblems,
+  costIntentFor,
   deriveProviderEntries,
   providerHoldProblems,
   withoutAttemptHolds,
@@ -179,4 +181,126 @@ test("non-provider entries are none of this module's business", () => {
     { key: "user:abc", period: "day", periodStart: day, amount: 3 },
   ];
   assert.deepEqual(providerHoldProblems({ holds, entries }), []);
+});
+
+// A hold is one provider, one day, one month, both the same amount. The
+// looser rule these replace let every shape below through, and each leaves a
+// bucket that release cannot fully give back — release subtracts what the
+// holds say was put there.
+
+test("an attempt holding two providers is refused", () => {
+  const holds = [hold(0, "openai", "day", 10), hold(0, "google", "month", 10)];
+  assert.match(
+    providerHoldProblems({ holds, entries: entriesFor(holds) }).join(" "),
+    /holds 2 providers; an attempt runs on one/
+  );
+});
+
+test("a hold missing its month is refused", () => {
+  const holds = [hold(0, "openai", "day", 10)];
+  assert.match(
+    providerHoldProblems({ holds, entries: entriesFor(holds) }).join(" "),
+    /holds 0 provider-cost-month rows/
+  );
+});
+
+test("a hold missing its day is refused", () => {
+  const holds = [hold(0, "openai", "month", 10)];
+  assert.match(
+    providerHoldProblems({ holds, entries: entriesFor(holds) }).join(" "),
+    /holds 0 provider-cost-day rows/
+  );
+});
+
+test("day and month holding different amounts is refused", () => {
+  // They are one reservation seen through two windows, so they cannot differ.
+  const holds = [hold(0, "openai", "day", 10), hold(0, "openai", "month", 40)];
+  assert.match(
+    providerHoldProblems({ holds, entries: entriesFor(holds) }).join(" "),
+    /the day and month holds are the same reservation/
+  );
+});
+
+test("two well-formed attempts on one provider are still accepted", () => {
+  // The rules are per attempt, not per provider: sharing a bucket is the
+  // normal same-provider fallback and must not be caught by them.
+  const holds = [...pair(0, "openai", 100), ...pair(1, "openai", 40)];
+  assert.deepEqual(providerHoldProblems({ holds, entries: entriesFor(holds) }), []);
+});
+
+// The cost intent beside each hold. Its whole job is to survive the process
+// that took it, so what matters is that it cannot drift from the holds it was
+// written with -- an intent with no hold would let a crash record a cost
+// against budget nobody reserved.
+
+const intent = (attemptIndex, provider = "openai", reserved = 100) => ({
+  attemptIndex,
+  modelId: `${provider}-model`,
+  provider,
+  estimatedInputTokens: 1_000,
+  reservedOutputTokens: 1_000,
+  inputUsdPerMillionTokens: 100,
+  outputUsdPerMillionTokens: 100,
+  cachedInputPriceMultiplier: 1,
+  pricingVersion: "test",
+  reservedCostMicroUsd: reserved,
+});
+
+test("an intent for every hold, and a hold for every intent, is accepted", () => {
+  const holds = [...pair(0, "openai", 100), ...pair(1, "google", 40)];
+  assert.deepEqual(
+    attemptCostIntentProblems({
+      holds,
+      intents: [intent(0, "openai", 100), intent(1, "google", 40)],
+    }),
+    []
+  );
+});
+
+test("an intent with no hold is refused", () => {
+  // It would let a crash record a cost against budget nobody reserved.
+  assert.match(
+    attemptCostIntentProblems({
+      holds: pair(0, "openai", 100),
+      intents: [intent(0), intent(1, "google", 40)],
+    }).join(" "),
+    /attempt 1 has a cost intent and no hold/
+  );
+});
+
+test("a hold with no intent is refused", () => {
+  // The gap the whole mechanism exists to close: money committed and nothing
+  // able to say what it was for.
+  assert.match(
+    attemptCostIntentProblems({
+      holds: [...pair(0, "openai", 100), ...pair(1, "google", 40)],
+      intents: [intent(0)],
+    }).join(" "),
+    /attempt 1 has a hold and no cost intent/
+  );
+});
+
+test("two intents for one attempt are refused", () => {
+  assert.match(
+    attemptCostIntentProblems({
+      holds: pair(0, "openai", 100),
+      intents: [intent(0), intent(0, "google", 40)],
+    }).join(" "),
+    /two cost intents share an attemptIndex/
+  );
+});
+
+test("no holds and no intents is not a problem", () => {
+  // A turn that reserved no provider budget -- a zero-rate model -- takes
+  // neither, and neither is missing.
+  assert.deepEqual(attemptCostIntentProblems({ holds: [], intents: [] }), []);
+});
+
+test("an attempt's intent is found by its index, and a missing one is null", () => {
+  const intents = [intent(0), intent(1, "google", 40)];
+  assert.equal(costIntentFor(intents, 1).provider, "google");
+  assert.equal(costIntentFor(intents, 2), null);
+  // A payload written before intents existed carries none at all, and the
+  // sweep has to read that as "cannot be priced" rather than crash.
+  assert.equal(costIntentFor(undefined, 0), null);
 });

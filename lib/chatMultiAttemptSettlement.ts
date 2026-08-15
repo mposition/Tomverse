@@ -109,6 +109,21 @@ export type CombinedAttemptSettlement = {
 const nonNegative = (value: number | undefined) =>
     Number.isFinite(value) ? Math.max(0, Math.round(value!)) : 0;
 
+/**
+ * One attempt's own cost, without needing the set it belongs to.
+ *
+ * Exported because an attempt's cost is now recorded when *that attempt* ends,
+ * which is before the set exists: the fallback has not run yet and the primary
+ * is already over. `combineAttemptUsage` still prices the whole set the same
+ * way -- it calls this -- so the number written at close and the number
+ * settlement would have computed are the same number by construction rather
+ * than by two implementations agreeing.
+ */
+export const priceAttempt = (
+    attempt: AttemptUsage
+): { costMicroUsd: number; costSource: PricedAttempt["costSource"] } =>
+    priceOne(attempt);
+
 const priceOne = (attempt: AttemptUsage): { costMicroUsd: number; costSource: PricedAttempt["costSource"] } => {
     const tokenCost = calculateProviderUsageCost({
         inputTokens: attempt.inputTokens,

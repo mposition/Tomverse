@@ -867,13 +867,25 @@ model ChatAttemptUsage {
   providerRequestId  String?
   providerResponseId String?
 
-  inputTokens       Int    @default(0)
-  cachedInputTokens Int    @default(0)
-  outputTokens      Int    @default(0)
+  /// NULL only on a crash-reconciled row: nobody observed the call, and 0
+  /// would be a claim that it used nothing.
+  inputTokens       Int?
+  cachedInputTokens Int?
+  outputTokens      Int?
   reasoningTokens   Int?
   costMicroUsd      BigInt @default(0)
+  /// How the token counts were arrived at: provider_usage_metadata,
+  /// provider_response_cost, fallback_estimator, crash_reconciliation.
+  usageSource       String @default("provider_usage_metadata")
+  /// How the cost was: token_estimate, provider_response, or
+  /// reserved_upper_bound — an upper bound, not a measurement.
+  costSource        String @default("token_estimate")
   /// The rates this attempt was priced at, and where the figure came from.
   pricingSnapshot   Json?
+  /// The ProviderDailyUsage day this row's cost was rolled up on, at midnight
+  /// UTC. Stored rather than inferred from createdAt: a correction has to
+  /// reach the same rollup row, and the two clocks disagree across midnight.
+  rollupDate        DateTime
 
   createdAt DateTime @default(now())
 
@@ -881,10 +893,47 @@ model ChatAttemptUsage {
   /// composite foreign key is what makes the pointer name a real attempt of
   /// that reservation rather than any integer.
   settledReservations ChatCreditReservation[] @relation("ReservationSettlementAttempt")
+  adjustments         ChatAttemptUsageAdjustment[]
 
   @@unique([reservationId, attemptIndex])
   @@index([provider, createdAt])
   @@index([providerRequestId])
+}
+
+// A correction to what an attempt cost, appended rather than applied.
+//
+// A crash-reconciled cost row is an upper bound written because the call
+// happened. Real usage can arrive afterwards, and the unique key on the base
+// row means a second insert is silently skipped -- silently being the problem,
+// because the estimate would stand for ever while the truth was known and
+// discarded. The base row stays immutable and the observation lands here with
+// the signed difference it makes; resolved cost is base plus adjustments.
+model ChatAttemptUsageAdjustment {
+  id            String           @id @default(cuid())
+  reservationId String
+  attemptIndex  Int
+  attempt       ChatAttemptUsage @relation(fields: [reservationId, attemptIndex], references: [reservationId, attemptIndex], onDelete: Cascade, map: "ChatAttemptUsageAdjustment_attempt_fkey")
+  /// Only `late_provider_actual` today.
+  kind          String
+
+  observedInputTokens       Int?
+  observedCachedInputTokens Int?
+  observedOutputTokens      Int?
+  observedCostMicroUsd      BigInt
+  /// Signed: observed minus what the base row already claimed.
+  costDeltaMicroUsd         BigInt
+
+  /// Identifies the observation, so the same one twice is one adjustment.
+  observationId     String
+  providerRequestId String?
+  /// Whether the delta has reached ProviderDailyUsage yet.
+  appliedAt         DateTime?
+  createdAt         DateTime  @default(now())
+
+  @@unique([reservationId, attemptIndex, observationId], map: "ChatAttemptUsageAdjustment_observation_key")
+  /// Partial in the database (`WHERE "appliedAt" IS NULL`), which Prisma
+  /// cannot express; the name is mapped so the two do not read as drift.
+  @@index([createdAt], map: "ChatAttemptUsageAdjustment_unapplied_idx")
 }
 
 // One image generation request in the image work mode: the operational
@@ -2963,15 +3012,26 @@ model RoutingAttempt {
 
   /// planned | pass_through
   plannerMode  String @default("planned")
-  /// pending | not_dispatched | failed_pre_token | failed_post_token | cancelled | succeeded
+  /// pending | not_dispatched | failed_pre_token | failed_post_token |
+  /// cancelled | succeeded | unknown_after_dispatch
   ///
-  /// `pending` is deliberately not one of §5's outcomes: that section
-  /// enumerates how an attempt ended, and one in flight has not ended.
-  /// Starting life as `not_dispatched` would leave every dispatched attempt
-  /// labelled as one that never reached a provider -- erasing the distinction
-  /// §5 draws to keep such an attempt out of provider billing.
+  /// `pending` is deliberately not one of `docs/policy/tomverse-chat-routing.md`
+  /// §5's outcomes: that section enumerates how an attempt ended, and one in
+  /// flight has not ended. Starting life as `not_dispatched` would leave every
+  /// dispatched attempt labelled as one that never reached a provider --
+  /// erasing the distinction that section draws to keep such an attempt out of
+  /// provider billing.
+  ///
+  /// `unknown_after_dispatch` is the stale-attempt sweep's, and only its: a
+  /// dispatch was recorded and the turn never came back to say how it ended.
+  /// Not `failed_pre_token`, which would be a claim about a provider call
+  /// nobody observed.
   outcome      String @default("pending")
-  /// planner | adapter | manifest | billing | provider | stream | none
+  /// planner | adapter | manifest | billing | process | provider | stream | none
+  ///
+  /// `process` is this process stopping, which is not a provider failure --
+  /// filing a host restart under `provider` would move conversations off a
+  /// model that did nothing wrong.
   failureLayer String @default("none")
 
   /// Copied from the manifest at finalization, in the same transaction.
@@ -2999,15 +3059,16 @@ model RoutingAttempt {
   @@index([userId, createdAt])
 }
 
-/// The immutable record of what one attempt actually sent (§5, manifest
-/// lifecycle).
+/// The immutable record of what one attempt actually sent
+/// (`docs/policy/tomverse-chat-routing.md` §5, manifest lifecycle).
 ///
 /// One per attempt, and never shared: a fallback model may receive different
 /// context, different tokenization and a different effective request, so a
 /// manifest that two attempts both pointed at would describe neither.
 /// `attemptId` is unique, which is that rule rather than a comment about it.
 ///
-/// Source references and hashes only. §5 and the delivery plan both say the
+/// Source references and hashes only. `docs/policy/tomverse-chat-routing.md`
+/// §5 and the delivery plan both say the
 /// raw prompt is not duplicated here -- the manifest exists to prove what was
 /// sent, and a copy of the prompt would make the proof a second copy of the
 /// thing being proved.
@@ -3064,7 +3125,7 @@ model ContextManifest {
   /// MANIFEST-02. When the per-part detail was dropped and only the aggregate
   /// kept. A marker rather than an inference: without it a compacted manifest
   /// would read as a dispatch that described no sources at all, which is the
-  /// misrepresentation §5 forbids.
+  /// misrepresentation `docs/policy/tomverse-chat-routing.md` §5 forbids.
   compactedAt DateTime?
 
   /// Why the detail went: "aged" for the retention sweep, or a privacy

@@ -116,8 +116,9 @@ export const deriveProviderEntries = (
  *   double-counts on release;
  * - **an attempt index outside 0..1** — §6's build budget was exceeded
  *   somewhere upstream and the money is where it shows;
- * - **more than one period pair per attempt** — a hold in a period the
- *   reservation never took, which nothing would ever release.
+ * - **a hold that is not one provider, one day and one month at one amount**
+ *   — every other shape leaves a bucket that release cannot fully give back,
+ *   because release subtracts what the holds say was put there.
  */
 export const providerHoldProblems = (input: {
     holds: readonly AttemptHold[];
@@ -130,7 +131,7 @@ export const providerHoldProblems = (input: {
 }): readonly string[] => {
     const problems: string[] = [];
     const seen = new Set<string>();
-    const periodsByAttempt = new Map<number, Set<string>>();
+    const holdsByAttempt = new Map<number, AttemptHold[]>();
 
     for (const hold of input.holds) {
         if (
@@ -158,15 +159,40 @@ export const providerHoldProblems = (input: {
             );
         }
         seen.add(identity);
-        const periods = periodsByAttempt.get(hold.attemptIndex) ?? new Set();
-        periods.add(hold.period);
-        periodsByAttempt.set(hold.attemptIndex, periods);
+        holdsByAttempt.set(hold.attemptIndex, [
+            ...(holdsByAttempt.get(hold.attemptIndex) ?? []),
+            hold,
+        ]);
     }
 
-    for (const [attemptIndex, periods] of periodsByAttempt) {
-        if (periods.size > PROVIDER_BUDGET_PERIODS.length) {
+    // A hold is one provider, one day, one month, both the same amount.
+    //
+    // The looser "no more than two periods" this replaces was nearly vacuous:
+    // there are only two allowed periods, so almost nothing could fail it. The
+    // shapes it let through are all reachable and all wrong -- a day hold on
+    // one provider and a month hold on another, a day hold with no month, two
+    // periods holding different amounts. Each leaves a bucket that release
+    // cannot fully give back, because release subtracts what the holds say.
+    for (const [attemptIndex, holds] of holdsByAttempt) {
+        const keys = new Set(holds.map((hold) => hold.key));
+        if (keys.size > 1) {
             problems.push(
-                `attempt ${attemptIndex} holds ${periods.size} periods; a hold is one day and one month`
+                `attempt ${attemptIndex} holds ${keys.size} providers; an attempt runs on one`
+            );
+        }
+        for (const period of PROVIDER_BUDGET_PERIODS) {
+            const count = holds.filter((hold) => hold.period === period).length;
+            if (count !== 1) {
+                problems.push(
+                    `attempt ${attemptIndex} holds ${count} ${period} rows; a hold is exactly one of each`
+                );
+            }
+        }
+        const amounts = new Set(holds.map((hold) => hold.amount));
+        if (amounts.size > 1) {
+            problems.push(
+                `attempt ${attemptIndex} holds ${[...amounts].join(" and ")}; ` +
+                    "the day and month holds are the same reservation"
             );
         }
     }
@@ -217,3 +243,72 @@ export const withoutAttemptHolds = (
     holds: readonly AttemptHold[],
     attemptIndex: number
 ): AttemptHold[] => holds.filter((hold) => hold.attemptIndex !== attemptIndex);
+
+/**
+ * What an attempt was authorized to spend, and at what rates.
+ *
+ * Written when the hold is taken, which is before the provider is called.
+ * That order is what makes a crash recoverable: the sweep that finds a
+ * `pending` attempt half an hour later has no memory of the request, and the
+ * only honest thing it can record is what the attempt was allowed to spend.
+ * Without this it would have to write 0, which is a claim that a call which
+ * demonstrably happened used nothing.
+ *
+ * Not the same as the hold. The hold is the money reserved in the bucket; this
+ * is how to turn that reservation back into a cost row -- which model, which
+ * provider, at which rates, against which estimate.
+ */
+export type AttemptCostIntent = {
+    attemptIndex: number;
+    modelId: string;
+    provider: string;
+    /** The estimate the reservation was sized on. */
+    estimatedInputTokens: number;
+    reservedOutputTokens: number;
+    inputUsdPerMillionTokens: number;
+    outputUsdPerMillionTokens: number;
+    cachedInputPriceMultiplier: number;
+    pricingVersion?: string | null;
+    /** What the hold put in the bucket. The upper bound a crash records. */
+    reservedCostMicroUsd: number;
+};
+
+/**
+ * Whether the intents and the holds describe the same set of attempts.
+ *
+ * They are written in the same transaction and can still disagree, the same
+ * way the holds and the entries can. An intent with no hold would let a crash
+ * record a cost against budget nobody reserved; a hold with no intent would
+ * leave a crash unable to record anything at all, which is the gap this whole
+ * mechanism exists to close.
+ */
+export const attemptCostIntentProblems = (input: {
+    holds: readonly AttemptHold[];
+    intents: readonly AttemptCostIntent[];
+}): readonly string[] => {
+    const problems: string[] = [];
+    const heldAttempts = new Set(input.holds.map((hold) => hold.attemptIndex));
+    const intentAttempts = new Set(input.intents.map((intent) => intent.attemptIndex));
+
+    if (intentAttempts.size !== input.intents.length) {
+        problems.push("two cost intents share an attemptIndex");
+    }
+    for (const attemptIndex of intentAttempts) {
+        if (!heldAttempts.has(attemptIndex)) {
+            problems.push(`attempt ${attemptIndex} has a cost intent and no hold`);
+        }
+    }
+    for (const attemptIndex of heldAttempts) {
+        if (!intentAttempts.has(attemptIndex)) {
+            problems.push(`attempt ${attemptIndex} has a hold and no cost intent`);
+        }
+    }
+    return problems;
+};
+
+/** The intent for one attempt, or null when the payload predates them. */
+export const costIntentFor = (
+    intents: readonly AttemptCostIntent[] | undefined,
+    attemptIndex: number
+): AttemptCostIntent | null =>
+    intents?.find((intent) => intent.attemptIndex === attemptIndex) ?? null;

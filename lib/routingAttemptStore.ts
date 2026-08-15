@@ -293,9 +293,19 @@ export const closeAttempt = async (input: {
   actualInputTokens?: number | null;
   actualOutputTokens?: number | null;
   errorClass?: string | null;
+  /**
+   * The transaction to close in, when the caller has one.
+   *
+   * An attempt's provider cost is written in the same transaction as the close
+   * that establishes there is a cost to write, so a crash between the two
+   * cannot leave one without the other. The compare-and-set is what makes that
+   * safe: whichever writer wins the predicate is the one whose cost row the
+   * transaction carries, and the loser's transaction writes nothing at all.
+   */
+  client?: Prisma.TransactionClient;
 }): Promise<boolean> => {
   const clean = input.outcome === "succeeded" || input.outcome === "cancelled";
-  const updated = await prisma.routingAttempt.updateMany({
+  const updated = await (input.client ?? prisma).routingAttempt.updateMany({
     where: { id: input.attemptId, outcome: "pending" },
     data: {
       outcome: input.outcome,
