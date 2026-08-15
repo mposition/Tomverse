@@ -22,7 +22,7 @@ SHA로 이름 붙인 별도 파일**로 남습니다.
 어느 시점을 덮는지 말하지 못한 채 낡았습니다. 표 하나가 조용히 낡는 구조
 자체가 문제였습니다.
 
-- **template revision**: `2026-08-14c` — 항목이 바뀌면 이 값을 올리고, 실행
+- **template revision**: `2026-08-15` — 항목이 바뀌면 이 값을 올리고, 실행
   기록은 자기가 어느 revision으로 실행됐는지 적습니다. 그래야 "그때는 없던
   항목"을 나중에 구분할 수 있습니다.
 - 실행 방법과 파일 이름 규칙: `staging-verification-records/README.md`
@@ -30,8 +30,13 @@ SHA로 이름 붙인 별도 파일**로 남습니다.
 
 ## 사전 조건
 
-- [ ] staging이 develop의 검증 대상 커밋으로 배포되어 있고, 커밋 SHA를 아래
-      승인 기록에 적었다.
+- [ ] staging이 develop의 검증 대상 커밋으로 배포되어 있고, **전체 40자리
+      커밋 SHA**를 실행 기록에 적었다.
+- [ ] **migration이 앱 배포보다 먼저 적용됐다.** 적용된 migration 식별자와
+      완료 시각을 실행 기록에 적는다. 넓히는 방향의 migration은 기존 코드와
+      역호환이지만, 앱이 먼저 올라가면 migration 적용 전의 요청이 제약에서
+      실패한다 — 배포 직후 몇 분에만 나타나고 나중에 원인을 되짚기 어려운
+      실패다.
 - [ ] external import 관련 forward migration이 모두 적용되어 있다
       (`external_conversation_import_schema`, `external_import_staging_ledger`,
       `external_import_analytics_events` 포함). baseline은 수정되지 않았다.
