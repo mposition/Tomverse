@@ -413,15 +413,25 @@ export async function cleanupExpiredData() {
       });
     }
 
-    // Three of the no-cost reasons are defects with no grace period. A run
+    // Four of the no-cost reasons are defects with no grace period: a run
     // pointing at a reservation that is gone, a payload that will not
-    // validate, and a payload written *after* cost intents existed that
-    // carries none are each a provider call nobody can price, caused by
-    // something wrong now rather than by history.
+    // validate, a payload written *after* cost intents existed and carrying
+    // none, and an intent naming a different model than the attempt that ran.
+    // Each is a provider call nobody can price, caused by something wrong now
+    // rather than by history.
+    //
+    // A turn that authorized nothing is not among them and is not even a
+    // no-cost reason any more: it has an intent like every other dispatch, so
+    // it gets a cost row with a ceiling of zero. The models it happens on are
+    // still reported by name -- a deliberately free model and a price an
+    // administrator flattened to zero look identical from here, and the
+    // difference is *which model* -- and `npm run check:model-pricing-db`
+    // reads the catalogue to say whether that price was meant.
     const defects =
       swept.noCostReasons.dangling_reservation +
       swept.noCostReasons.invalid_cost_intent_payload +
-      swept.noCostReasons.missing_cost_intent;
+      swept.noCostReasons.missing_cost_intent +
+      swept.noCostReasons.cost_intent_identity_mismatch;
     if (defects > 0) {
       await reportOperationalIncident({
         code: "CHAT_COST_INTENT_UNAVAILABLE",
@@ -465,6 +475,7 @@ export async function cleanupExpiredData() {
           agedPending: backlog.agedPending,
           oldestEligibleMs: backlog.oldestEligibleMs,
           failedThisRun: swept.failed,
+          zeroReservedCostModels: Object.keys(swept.zeroReservedCostModels).join(", "),
         },
       });
     }

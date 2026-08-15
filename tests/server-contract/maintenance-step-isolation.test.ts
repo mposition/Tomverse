@@ -45,6 +45,7 @@ const reset = () => {
   costAdjustmentBacklogPending = 0;
   costAdjustmentBacklogOldestMs = null;
   sweepNoCostReasons = emptyNoCost();
+  sweepZeroReservedCostModels = {};
   sweepUnexpectedOutcome = 0;
   sweepAgedPending = 0;
   sweepEligiblePending = 0;
@@ -114,6 +115,7 @@ mock.module(mod("lib/routingAttemptSweep.ts"), {
       closedWithExistingCost: 0,
       closedWithoutCostIntent: sweepNoCostTotal(),
       noCostReasons: sweepNoCostReasons,
+      zeroReservedCostModels: sweepZeroReservedCostModels,
       unexpectedCostOutcome: sweepUnexpectedOutcome,
       alreadyClosed: 0,
       failed: 0,
@@ -239,6 +241,7 @@ type CleanupResult = Record<string, unknown> & {
   failedSteps: { step: string; error: string }[];
   staleRoutingAttempts: {
     closedCostInserted: number;
+    zeroReservedCostModels: Record<string, number>;
     eligiblePending: number;
     agedPending: number;
     oldestEligibleMs: number | null;
@@ -249,6 +252,7 @@ const emptyNoCost = () => ({
   no_reservation: 0,
   legacy_missing_cost_intent: 0,
   missing_cost_intent: 0,
+  cost_intent_identity_mismatch: 0,
   unclassified_missing_cost_intent: 0,
   dangling_reservation: 0,
   invalid_cost_intent_payload: 0,
@@ -256,6 +260,7 @@ const emptyNoCost = () => ({
 let sweepNoCostReasons = emptyNoCost();
 const sweepNoCostTotal = () =>
   Object.values(sweepNoCostReasons).reduce((sum, count) => sum + count, 0);
+let sweepZeroReservedCostModels: Record<string, number> = {};
 let sweepUnexpectedOutcome = 0;
 let sweepAgedPending = 0;
 let sweepEligiblePending = 0;
@@ -485,4 +490,25 @@ test("the backlog alarms on what the sweep would act on, not on what is merely o
   sweepOldestEligibleMs = 61 * 60 * 1000;
   await (await load()).cleanupExpiredData();
   assert.deepEqual(reportedIncidents, ["CHAT_ATTEMPT_SWEEP_BACKLOG"]);
+});
+
+test("a turn that authorized nothing is reported by model and never paged", async () => {
+  // These attempts get a cost row -- a ceiling of zero is a real audit record
+  // -- so nothing is missing and nothing is paged. What the run does say is
+  // which model it was, because a free model and a price an administrator
+  // flattened to zero are the same thing from inside the sweep.
+  reset();
+  sweepZeroReservedCostModels = { "openai/some-free-model": 25 };
+  const quiet = await (await load()).cleanupExpiredData();
+  assert.deepEqual(reportedIncidents, []);
+  assert.deepEqual(quiet.staleRoutingAttempts?.zeroReservedCostModels, {
+    "openai/some-free-model": 25,
+  });
+});
+
+test("an intent naming a model the attempt did not run is an incident", async () => {
+  reset();
+  sweepNoCostReasons.cost_intent_identity_mismatch = 1;
+  await (await load()).cleanupExpiredData();
+  assert.deepEqual(reportedIncidents, ["CHAT_COST_INTENT_UNAVAILABLE"]);
 });

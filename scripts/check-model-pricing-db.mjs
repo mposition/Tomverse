@@ -182,4 +182,39 @@ try {
   process.exit(1);
 }
 
+// A price of zero, which the reservation path cannot tell from a free model.
+//
+// `getChatBudgetReservedCostMicroUsd` rounds each component up, so a positive
+// rate on a positive token count always reserves at least one micro-dollar.
+// Zero reserved therefore means every applicable rate is zero -- and when that
+// happens the provider budget holds nothing, the crash sweep has no cost
+// intent to record, and every call on the model is accounted for as free. A
+// deliberately free model is a legitimate thing to have; a bad administrator
+// override that flattened a real price to zero looks exactly the same from
+// here, and nothing else in the system would notice.
+//
+// Reported rather than fatal: the compiled catalogue prices everything
+// positively today, so this fires only on a registry an administrator wrote,
+// and failing CI on a state CI cannot see would be a gate nobody can clear.
+const freeByPrice = entries.filter(
+  (entry) =>
+    entry.enabled &&
+    Number(entry.effective.inputUsdPerMillionTokens) === 0 &&
+    Number(entry.effective.outputUsdPerMillionTokens) === 0
+);
+if (freeByPrice.length > 0) {
+  console.error(
+    `\n${freeByPrice.length} enabled model(s) price every token at zero:\n` +
+      freeByPrice
+        .map(
+          (entry) =>
+            `  - ${entry.modelId}${entry.hasOverride ? " (administrator override)" : " (inherited)"}`
+        )
+        .join("\n") +
+      "\n\nEvery call on these reserves no provider budget, leaves no cost intent for\n" +
+      "the crash sweep, and is recorded as free spend. If that is deliberate, say so\n" +
+      "in the registry; if it is an override that flattened a real price, clear it."
+  );
+}
+
 console.log("\nNo redundant price overrides, and every enabled premium model is priced.");

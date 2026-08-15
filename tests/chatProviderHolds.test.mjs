@@ -257,20 +257,57 @@ test("an intent for every hold, and a hold for every intent, is accepted", () =>
   );
 });
 
-test("an intent with no hold is refused", () => {
-  // It would let a crash record a cost against budget nobody reserved.
+test("a positive intent with no hold is refused", () => {
+  // It says money was authorized, with nothing in the bucket to show for it.
   assert.match(
     attemptCostIntentProblems({
       holds: pair(0, "openai", 100),
       intents: [intent(0), intent(1, "google", 40)],
     }).join(" "),
-    /attempt 1 has a cost intent and no hold/
+    /attempt 1 authorized 40 and holds no provider-cost-day or provider-cost-month/
+  );
+});
+
+test("a positive intent holding only one of the two periods is refused", () => {
+  // Release subtracts what the holds say was put there, so a missing period
+  // would give back less than was taken.
+  assert.match(
+    attemptCostIntentProblems({
+      holds: [hold(0, "openai", "day", 100)],
+      intents: [intent(0, "openai", 100)],
+    }).join(" "),
+    /holds no provider-cost-month/
+  );
+});
+
+test("a zero intent with no hold is the normal shape of a free turn", () => {
+  // The two answer different questions: an intent is what was authorized, a
+  // hold is money in a bucket, and zero authorized puts none there. Requiring
+  // a hold here is what used to leave a free turn indistinguishable from one
+  // that lost its authorization.
+  assert.deepEqual(
+    attemptCostIntentProblems({
+      holds: [],
+      intents: [intent(0, "openai", 0)],
+    }),
+    []
+  );
+});
+
+test("a zero intent that holds a bucket anyway is refused", () => {
+  // Money reserved against an authorization that says none was.
+  assert.match(
+    attemptCostIntentProblems({
+      holds: pair(0, "openai", 100),
+      intents: [intent(0, "openai", 0)],
+    }).join(" "),
+    /attempt 0 authorized nothing and holds 2 bucket\(s\)/
   );
 });
 
 test("a hold with no intent is refused", () => {
-  // The gap the whole mechanism exists to close: money committed and nothing
-  // able to say what it was for.
+  // The one combination that can never be reconstructed: the bucket moved and
+  // nothing says why.
   assert.match(
     attemptCostIntentProblems({
       holds: [...pair(0, "openai", 100), ...pair(1, "google", 40)],

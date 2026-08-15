@@ -89,6 +89,21 @@ export type StaleAttemptSweepResult = {
     /** The same total, split by why nothing could be priced. */
     noCostReasons: NoCostReasonCounts;
     /**
+     * Which models authorized nothing, as `provider/modelId` counts.
+     *
+     * These attempts do get a cost row -- a ceiling of zero is a real audit
+     * record -- so this is not a hole in the ledger and never an incident. It
+     * is reported because a free model and a price an administrator flattened
+     * to zero are indistinguishable from inside the sweep, and the difference
+     * between them is which model it is. One name here nobody meant to be free
+     * is the whole signal, and `npm run check:model-pricing-db` is what reads
+     * the catalogue to say whether it was meant.
+     *
+     * Named from the attempt row, not the payload: a fallback's payload
+     * `modelId` is the primary's and always will be.
+     */
+    zeroReservedCostModels: Record<string, number>;
+    /**
      * Closed, and the cost writer returned something the sweep cannot produce.
      *
      * `corrected`, `adjustment_pending` and `identity_mismatch` all describe a
@@ -116,6 +131,10 @@ type SweepRow = {
     id: string;
     runId: string;
     attemptIndex: number;
+    /** The model that was actually dispatched, which the payload does not know
+     * for a fallback -- its `modelId` is the primary's and stays that way. */
+    modelId: string;
+    provider: string;
     subjectKey: string | null;
     reservationId: string | null;
 };
@@ -150,6 +169,14 @@ export type NoCostReason =
     | "legacy_missing_cost_intent"
     /** Created after the cutover and carrying no intent. A defect. */
     | "missing_cost_intent"
+    /**
+     * The intent names a different model than the attempt that was dispatched.
+     *
+     * The authorization and the call have to be about the same thing, or the
+     * cost row would price one model's call at another's rates. Refused rather
+     * than recorded, and reported: nothing else compares the two.
+     */
+    | "cost_intent_identity_mismatch"
     /** No cutover is configured, so the two above cannot be told apart. */
     | "unclassified_missing_cost_intent"
     /** The run points at a reservation row that is not there. */
@@ -163,6 +190,7 @@ const emptyNoCostReasons = (): NoCostReasonCounts => ({
     no_reservation: 0,
     legacy_missing_cost_intent: 0,
     missing_cost_intent: 0,
+    cost_intent_identity_mismatch: 0,
     unclassified_missing_cost_intent: 0,
     dangling_reservation: 0,
     invalid_cost_intent_payload: 0,
@@ -203,7 +231,8 @@ export const sweepStaleRoutingAttempts = async (
     // Written as one query so the three conditions are evaluated against one
     // snapshot rather than three reads that can disagree between them.
     const rows = await prisma.$queryRaw<SweepRow[]>`
-        SELECT a."id", a."runId", a."attemptIndex", r."subjectKey", r."reservationId"
+        SELECT a."id", a."runId", a."attemptIndex", a."modelId", a."provider",
+               r."subjectKey", r."reservationId"
         FROM "RoutingAttempt" a
         JOIN "RoutingRun" r ON r."id" = a."runId"
         LEFT JOIN "ChatCreditReservation" c ON c."id" = r."reservationId"
@@ -218,6 +247,7 @@ export const sweepStaleRoutingAttempts = async (
     let unexpectedCostOutcome = 0;
     let alreadyClosed = 0;
     const noCostReasons = emptyNoCostReasons();
+    const zeroReservedCostModels: Record<string, number> = {};
     let failed = 0;
     for (const row of rows) {
         try {
@@ -232,12 +262,18 @@ export const sweepStaleRoutingAttempts = async (
             // value, because `resolveCost` owes its caller a cost record and
             // nothing else. Only read when the record came back null.
             const noCost: { reason?: NoCostReason } = {};
+            // Set when the authorization this attempt ran under was zero. The
+            // row is still written; this is only how the models that authorize
+            // nothing get named, since a free model and a price an
+            // administrator flattened to zero are the same thing from here.
+            const zeroAuthorized: { model?: string } = {};
             const closed = await closeAttemptWithCost({
                 attemptId: row.id,
                 outcome: "unknown_after_dispatch",
                 failureLayer: "process",
                 errorClass: "process_stopped_after_dispatch",
-                resolveCost: (tx) => crashCostRecord(tx, row, noCost),
+                resolveCost: (tx) =>
+                    crashCostRecord(tx, row, noCost, zeroAuthorized),
             });
             if (!closed.closed) {
                 alreadyClosed += 1;
@@ -250,6 +286,10 @@ export const sweepStaleRoutingAttempts = async (
             switch (closed.cost) {
                 case "inserted":
                     closedCostInserted += 1;
+                    if (zeroAuthorized.model) {
+                        zeroReservedCostModels[zeroAuthorized.model] =
+                            (zeroReservedCostModels[zeroAuthorized.model] ?? 0) + 1;
+                    }
                     break;
                 case "duplicate":
                     closedWithExistingCost += 1;
@@ -300,6 +340,7 @@ export const sweepStaleRoutingAttempts = async (
         closedWithExistingCost,
         closedWithoutCostIntent,
         noCostReasons,
+        zeroReservedCostModels,
         unexpectedCostOutcome,
         alreadyClosed,
         failed,
@@ -329,7 +370,8 @@ export const sweepStaleRoutingAttempts = async (
 const crashCostRecord = async (
     tx: Prisma.TransactionClient,
     row: SweepRow,
-    noCost: { reason?: NoCostReason }
+    noCost: { reason?: NoCostReason },
+    zeroAuthorized: { model?: string }
 ): Promise<AttemptCostRecord | null> => {
     const unavailable = (reason: NoCostReason, extra?: Record<string, unknown>) => {
         noCost.reason = reason;
@@ -367,11 +409,12 @@ const crashCostRecord = async (
     }
 
     let intent: AttemptCostIntent | null = null;
+    let canonical: ReturnType<typeof deserializeReservation> | null = null;
     try {
         // Pure validation of a payload already in hand. This is the only thing
         // the catch below may be about, which is what makes the reason it logs
         // mean something.
-        const canonical = deserializeReservation(reservation.reservationPayload);
+        canonical = deserializeReservation(reservation.reservationPayload);
         intent = costIntentFor(canonical.attemptCostIntents, row.attemptIndex);
     } catch (error) {
         return unavailable("invalid_cost_intent_payload", {
@@ -380,8 +423,11 @@ const crashCostRecord = async (
     }
 
     if (!intent) {
-        // Whether this is history or a defect depends entirely on when the
-        // reservation was written, and nothing else can tell them apart.
+        // Every dispatched attempt is authorized, including one whose rates
+        // are all zero -- the intent is written unconditionally and only the
+        // hold is conditional. So a missing intent is never "nothing was
+        // reserved"; it is a payload that predates the field, or a writer that
+        // stopped filling it.
         const cutover = costIntentCutover();
         if (!cutover) {
             return unavailable("unclassified_missing_cost_intent", {
@@ -394,6 +440,27 @@ const crashCostRecord = async (
                 : "missing_cost_intent",
             { reservationCreatedAt: reservation.createdAt.toISOString() }
         );
+    }
+
+    // The authorization and the call have to be about the same model. For a
+    // fallback the payload's own `modelId` is the primary's and always will
+    // be, so the attempt row is the only thing that knows what ran -- and
+    // pricing one model's call at another's rates is the failure this stops.
+    if (intent.modelId !== row.modelId || intent.provider !== row.provider) {
+        return unavailable("cost_intent_identity_mismatch", {
+            authorized: `${intent.provider}/${intent.modelId}`,
+            dispatched: `${row.provider}/${row.modelId}`,
+        });
+    }
+
+    // A zero authorization still gets a row. `costSource: reserved_upper_bound`
+    // with a cost of zero says "the ceiling this call was allowed was nothing",
+    // which is an audit record rather than a claim that the provider charged
+    // nothing -- a native web search's own per-call charge sits outside the
+    // reservation entirely. It also gives a late actual something to correct
+    // through the ordinary adjustment path.
+    if (intent.reservedCostMicroUsd === 0) {
+        zeroAuthorized.model = `${row.provider}/${row.modelId}`;
     }
 
     return {
