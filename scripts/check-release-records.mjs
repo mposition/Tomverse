@@ -25,8 +25,10 @@ import { join } from "node:path";
 
 import {
     RELEASE_CHECKLIST_TEMPLATE,
+    RELEASE_DEVIATION_NAME,
     RELEASE_RECORDS_DIR,
     headerFields,
+    releaseDeviationProblems,
     releaseRecordProblems,
     releaseTemplateProblems,
     tickedBoxes,
@@ -45,6 +47,16 @@ const names = readdirSync(RELEASE_RECORDS_DIR)
 
 for (const name of names) {
     const text = readFileSync(join(RELEASE_RECORDS_DIR, name), "utf8");
+
+    // Two kinds of document, one prefix. A deviation is checked for what a
+    // deviation must carry, not for the ticked boxes of a run that did not
+    // happen.
+    if (RELEASE_DEVIATION_NAME.test(name)) {
+        problems.push(...releaseDeviationProblems(name, text));
+        summaries.push(`${name}: deviation, not a checklist run`);
+        continue;
+    }
+
     problems.push(...releaseRecordProblems(name, text, { templateText }));
 
     const sha = headerFields(text).get("Release SHA") ?? "(none)";
