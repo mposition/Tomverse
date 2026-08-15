@@ -3,13 +3,11 @@ status: approved
 implementationBlockedUntilApproved: true
 approvedScopes:
   - RELEASE_A_IMPORT
-  # 2026-08-03 @mposition 승인. 최초 기록은 "RELEASE_B_IMPORT"였으나 이
-  # 문서와 §24가 정의한 릴리스 B의 scope 토큰은 RELEASE_B_MEMORY이므로,
-  # 같은 날 승인자의 확인("frontmatter에 RELEASE_B_MEMORY 추가 — 완료")에
-  # 따라 정의된 토큰으로 표기를 맞춘다.
   - RELEASE_B_MEMORY
+  - RELEASE_C_ASSISTANT_PROFILES
+  - RELEASE_A2_GEMINI_IMPORT
 approvedBy: @mposition
-approvedAt: 2026-08-03
+approvedAt: 2026-08-13
 approvalTicket: N/A
 ---
 
@@ -52,7 +50,7 @@ approvalTicket: N/A
 | 릴리스 | 범위 | 명시적 비목표 |
 |---|---|---|
 | **A — Import** | ChatGPT·Claude 공식 export의 브라우저 파싱, 선택 대화의 정규화 저장, account-private read-only viewer, 삭제·export | Gemini, memory 추출·주입, 이어서 대화하기, password lock, 공유 링크, `Conversation` 변환 |
-| **A2 — Gemini Import** | Google Takeout(Gemini) parser. locale 의존 HTML 구조 때문에 별도 설계·fixture·eval 후 추가 | — |
+| **A2 — Gemini Import** | Google Takeout `My Activity → Gemini Apps`의 JSON parser. **scope 승인됨 (2026-08-14, §23)** — 계약은 `docs/policy/external-import-gemini-a2.md`이며, 분기별 독립 대화·내용 형태 인식·중첩 아카이브 미해제·첨부 누락 표시가 그 핵심입니다. 승인은 **구현 착수까지**이고 production 활성화는 별도입니다 | HTML export, Gems, scheduled actions, 첨부 파일 복제 |
 | **B — 계정 장기 메모리** | 메모리 후보 추출·검토·승인, 서버 주도 retrieval·주입, context bundle, external conversation lock 일반화 + memory suspension | Assistant Profile, knowledge, 외부 embedding |
 | **C — Assistant Profile** | private 프로필(지시문·모델·도구·memory 범위·지식 파일), 버전 고정, searchTerms 기반 knowledge RAG | public marketplace, 공유·판매, Actions, OAuth connector, 코드 실행, 외부 embedding |
 
@@ -202,13 +200,29 @@ MEMORY_EXTRACTION_PROVIDER_<PROVIDER>_COST_MICROUSD_PER_MONTH (절대값 overrid
 |---|---|
 | archive container | 1GB |
 | archive entry 수 | 50,000 |
-| nested archive | 0 (거부) |
+| nested archive | 해제 깊이 0 — 절대 열지 않음. 해당 entry만 skip하고 개수를 표시 |
 | 실제 파싱하는 단일 entry | 250MB |
 | 실제 파싱한 text 총량 | 300MB |
 | 실제 parsed entry 압축률 | 100:1 |
 
 - 전체 ZIP이 크다는 이유만으로 거부하지 않습니다 — media로 비대한 archive도
   필요한 conversation entry만 안전하게 읽을 수 있으면 진행합니다.
+- **중첩 archive는 archive 전체의 거부 사유가 아닙니다**(2026-08-14 결정).
+  사용자가 대화에 `.zip`을 첨부하면 그 파일이 export에 형제 entry로 들어오는데,
+  그것을 거부 사유로 삼으면 정상 export 전체를 받지 못합니다. 실제 Google
+  Takeout이 이 이유로 통째로 거부되는 것을 확인했습니다.
+
+  완화하는 것은 **거부 여부 하나뿐이며 보안 한도가 아닙니다.**
+
+  - 재귀 해제 깊이는 계속 **0**입니다. 중첩 archive 내부는 열지도, 열거하지도,
+    검사하지도 않습니다.
+  - 해당 entry만 skip하고, **`unsupported_extension`과 섞지 않고 자기 이유로**
+    셉니다. 한 숫자에 묻으면 첨부가 왜 빠졌는지 사용자가 알 수 없습니다.
+  - 최상위의 정상 conversation payload는 그대로 파싱합니다. 파싱할 대화
+    데이터가 하나도 없으면 `no_conversation_data`입니다 — 중첩 archive가 있다는
+    사실이 그 판정을 바꾸지 않습니다.
+  - **path traversal · absolute path · 암호화 entry는 기존대로 archive 전체
+    거부**입니다. container 크기·entry 수 한도도 그대로입니다.
 - 모바일 safe threshold 초과 시 crash를 감수하고 강행하지 않고 데스크톱 사용을
   안내합니다. `EXTERNAL_IMPORT_DESKTOP_RECOMMENDED`는 **서버 오류 코드가 아니라**
   클라이언트 상태 enum이자 content-free telemetry label입니다.
@@ -324,11 +338,42 @@ digest(`sealedSelectionDigest`)를 subset finalize에 재사용하면 정상적�
 - DELETE는 `preview_ready`를 staging 취소와 동일하게 처리합니다.
 - lazy expiry와 15분 reconciliation sweep은 `staging`·`preview_ready`를 모두
   대상으로 합니다.
-- **배포 호환성**: seal 이전 버전 클라이언트가 이미 열어 둔 화면은 `staging`
-  에서 바로 finalize할 수 있어야 하므로, `staging` finalize 경로는 absolute
-  TTL(72시간) 동안 유지합니다. 새 UI는 `preview_ready`만 재개 가능으로
-  취급하며, seal되지 않은 부분 업로드에는 재개 CTA를 제공하지 않습니다.
-  클라이언트 계약 변경은 `EXTERNAL_IMPORT_PARSER_VERSION`으로 구분합니다.
+- **배포 호환성 창은 닫혔습니다.** seal 이전 버전 클라이언트가 이미 열어 둔
+  화면을 위해 `staging` finalize 경로를 absolute TTL(72시간) 동안 유지했고,
+  그 기간이 지나 finalize는 `preview_ready`만 받습니다.
+  - **기준 시각**: seal 코드의 production 배포는 **2026-08-04T01:38:42Z**
+    입니다 — Railway production 환경의 배포 `4f0dda13`(commit `18d1e891`,
+    "Release: … external import Release A completion …")이 컨테이너를 시작한
+    시각이고, 그 직전 production 배포 `c266ea8d`(2026-08-03T12:36Z)의
+    `lib/externalImportService.ts`에는 `preview_ready`가 없습니다. 창 종료
+    가능 시각은 **2026-08-07T01:38:42Z**이며, 그 이후에 닫았습니다. 종료
+    시각 자체는 이 변경 commit의 날짜가 기록입니다 — 작업 환경의 시계를
+    분 단위 근거로 인용하지 않습니다.
+  - **develop 병합 시각(2026-08-03T23:24Z)이 기준이 아닙니다.** pre-seal
+    클라이언트가 존재할 수 있었던 마지막 순간은 새 코드가 서비스되기 시작한
+    시점이므로, 세어야 할 것은 배포 시각입니다.
+  - **창의 길이는 추정이 아니라 absolute TTL에서 나옵니다.** seal되지 않은
+    import는 `stagingAbsoluteMaxLifetimeMs`(72시간)를 넘겨 살아남을 수 없고
+    finalize가 그 전에 `isStagingExpired`로 거절하므로, seal 배포로부터 72시간
+    뒤에는 **pre-seal 세션이 이미 만들어 둔 import 중 finalize 가능한 것이
+    없습니다.** 그래서 닫을 때 migration도, 저장된 업로드를 옮기는 절차도
+    필요하지 않습니다 — **필요한 사실은 production 배포 시각 하나뿐입니다.**
+  - **이 경계는 import에 대한 것이지 세션에 대한 것이 아닙니다.** 창보다 오래
+    열려 있던 탭이 지금 *새* import를 시작해 seal 없이 finalize할 수는 있으며,
+    §5.5는 창의 길이를 세션 수명이 아니라 TTL로 정할 때 이 잔여를 받아들였습니다.
+    그런 탭이 받는 답은 아래 409이고, 저장된 업로드를 잃는 것이 아닙니다.
+  - **`status='staging'` 행 수를 세는 것은 이 판단을 바꾸지 못합니다.** 지금
+    남아 있는 `staging` 행은 대부분 seal 단계에 아직 도달하지 않은 정상 진행
+    중인 업로드이고, 그 사용자들은 seal을 거쳐 finalize하므로 영향을 받지
+    않습니다. 행 수는 영향받는 집단과 정상 집단을 구분하지 못합니다.
+  - **seal되지 않은 살아 있는 import는 409 `EXTERNAL_IMPORT_SELECTION_CHANGED`
+    입니다**(410이 아님). §18이 이미 그 의미 — "클라이언트가 들고 있는 선택
+    상태와 서버 상태가 어긋났다" — 를 갖고 있고 복구도 같습니다(seal 후
+    finalize). 410으로 답하면 한 번의 호출로 풀리는 상황에 처음부터 다시
+    하라고 말하게 됩니다. TTL이 지난 import는 계속 410입니다.
+  - 새 UI는 `preview_ready`만 재개 가능으로 취급하며, seal되지 않은 부분
+    업로드에는 재개 CTA를 제공하지 않습니다. 클라이언트 계약 변경은
+    `EXTERNAL_IMPORT_PARSER_VERSION`으로 구분합니다.
 - **finalize 멱등 계약**:
   - 같은 idempotency key + 같은 import digest·selection의 재요청 →
     **`200`으로 기존 완료 결과를 반환**합니다(no-op). 오류가 아닙니다.
@@ -409,6 +454,17 @@ window·credit·privacy disclosure 적용. 릴리스 B의 memory 사용은 이 b
    기본값, `off`는 해당 대화에서 retrieval·injection 금지. 계정 master toggle이
    꺼져 있으면 `on`도 우회하지 못하고, mode가 feature flag·revocation·인증·
    소유권 검사를 우회하지 못합니다. mode는 서버 저장·서버 판정입니다.
+   구현: 해석은 `lib/conversationMemoryMode.ts`의 순수 resolver 한 곳이고,
+   저장은 `PATCH /api/conversations/[id]`, 적용은 `/api/chat`과
+   `/api/chat/preflight` **양쪽**입니다.
+   - **`inherit`는 저장 값으로 남습니다.** 저장 시점의 계정 기본값을 복사해
+     넣으면 이후 계정 설정을 바꿔도 그 대화만 옛 값에 묶입니다. 사용자가 고른
+     것은 "기본값을 따른다"이지 "그때의 기본값"이 아닙니다.
+   - **정확히 `off` 문자열만 끕니다.** 컬럼이 문자열이므로 예상 못 한 값이
+     사용자가 켜져 있다고 믿는 기능을 조용히 꺼서는 안 됩니다. 반대 실수는 위의
+     flag·revocation·계정 toggle이 여전히 막으므로 봉쇄됩니다.
+   - **양쪽 경로가 모두 읽어야 합니다.** preflight만 읽으면 memory가 꺼진 대화가
+     memory block 없이 가격이 매겨지고 block이 담겨 전송되거나 그 반대가 됩니다.
 2. **Guest 제외** — guest에는 extraction·candidate 생성·retrieval·injection·
    profile memory를 적용하지 않고, guest identity를 memory owner로 승격하지
    않으며, 로그인 전 guest local state를 memory로 자동 변환하지 않습니다.
@@ -455,6 +511,19 @@ window·credit·privacy disclosure 적용. 릴리스 B의 memory 사용은 이 b
 일치, evidence role과 statement 관계, 길이, 허용 kind, confidence 범위, expiry
 형식, URL, credential·secret 패턴, imperative/system 지시형, prompt injection
 표현, assistant 추측 채택 패턴, source mismatch, 중복·near-duplicate·conflict.
+
+구현: 순수 검사는 `lib/memoryValidatorCore.ts`, DB가 필요한 검사(evidence
+존재·소유권·digest)는 `lib/memoryEvidenceValidation.ts`입니다.
+
+- **evidence 재검증은 읽기 시점이 아니라 쓰기 시점에 합니다.** label map은
+  chunk를 claim할 때 만들어지고 provider 호출은 그 뒤에 일어나므로, 그 사이에
+  import를 삭제한 사용자는 더 이상 없는 message를 인용하는 후보를 남깁니다.
+  검증을 저장 transaction 안에서 하지 않으면 evidence insert가 FK를 위반해
+  chunk 전체가 알 수 없는 DB 오류로 실패합니다.
+- **검증에 실패한 참조는 버리고, 남은 참조가 없으면 후보를 저장하지 않습니다**
+  (§8.2는 evidence를 요구합니다). 이는 validator 거절과 다른 결과이므로
+  `unsourced`로 따로 셉니다 — 문장이 부적합했던 것이 아니라 근거가 사라진
+  것입니다.
 
 **Bulk-safe 계약**: 일괄 승인에는 서술형 사실·선호만 포함합니다. URL, redirect
 지시, imperative, "항상·반드시·무조건" + 행동 명령, system/developer/tool 명령
@@ -711,6 +780,20 @@ Node crypto)입니다.
 - **긴급 revocation은 배포 없이**: `AppSetting["memoryExtractionRevokedPairs"]`.
   Admin Console에서 승인된 운영자만 변경, audit 기록, 즉시 fail-closed. 코드
   register를 AppSetting으로 대체하지 않으며 AppSetting은 revocation만 담당합니다.
+- 이 control의 구현은 `app/api/admin/memory-extraction/revocations/route.ts`
+  (`ops:write` + 재인증 + audit)와 `components/admin/AdminMemoryRevocationPanel.tsx`
+  (`/admin/analytics?tab=imports`)입니다. **읽기만 있고 쓰기가 없던 기간이
+  있었고**, 그때 이 항목을 실행하는 유일한 방법은 production에 직접 `UPDATE`를
+  치는 것이었습니다 — 권한 검사도 audit도 없고, 저장 형식상 오타 하나가
+  "전체 revoke"로 읽히는 경로입니다. 저장 전 검증은
+  `revokedPairsRequestProblems`가 하며, 되읽었을 때 요청한 상태와 같은 값만
+  저장합니다.
+- **revocation surface는 중지만 합니다.** `feature.memoryExtractionEnabled`와
+  `feature.memoryInjectionEnabled`에는 의도적으로 admin 쓰기 경로가 없습니다 —
+  활성화는 §12.4의 사람 절차이고, 마지막 단계만 버튼으로 만들면 앞의 다섯
+  단계를 건너뛸 수 있게 됩니다. 이 결정은
+  `tests/appSettingWriters.test.mjs`의 registry에 이유와 함께 기록돼 있고,
+  누군가 쓰기 경로를 추가하면 그 테스트가 실패합니다.
 - Effective pair = 코드 register 승인 ∧ runtime enabled ∧ verified pricing ∧
   plan 허용 ∧ promptVersion 일치 ∧ 운영 revocation 없음.
 
@@ -786,6 +869,30 @@ zh/fr/de/es/pt는 첫 decision-grade eval 범위 밖의 known limitation으로
   나머지 표본 작성은 별도 데이터 작업이고, 복제·경미 변형으로 채우는 것은
   §12.2가 금지하므로 `findDuplicateCases()`가 그런 dataset을 거부합니다.
 
+### 12.6 표본 작성 상태 — `BLOCKED_ON_HUMAN_AUTHORING_AND_REVIEW`
+
+**차단 범위: 실제 extraction pair 승인과 `memoryInjectionEnabled` 활성화.**
+릴리스 B 코드 완료와는 별개 축입니다(§12.4).
+
+`docs/ops/memory-extraction-eval-dataset.md`는 **절차만** 마련했고, 표본 작성·
+동결·예산·승인을 허가하지 않았습니다. 그 지침은 8개 cell 관리, 25~50개 batch,
+작성자·검수자 분리, critical negative 전건 독립 검수, 필요 시 제3 adjudicator를
+요구합니다. 따라서 **에이전트가 1,600개를 생성하고 스스로 승인해서 닫을 수
+없습니다.** 에이전트가 만든 것은 어떤 경우에도 candidate pool입니다.
+
+작성을 시작하기 전에 사람이 정해야 하는 것:
+
+1. 데이터셋 책임자와 8개 cell별 작성자 지정
+2. 작성자와 다른 검수자 지정
+3. adjudicator 지정
+4. AI 초안 도구 허용 범위와 기록 방식 확정
+5. 지침 자체의 사람 승인 기록 작성
+   (`docs/ops/memory-extraction-eval-dataset.md` 맨 아래)
+
+1,600개는 50개 단위로도 최소 32개 batch이므로 일반 코드 PR이 아니라 **별도 데이터
+프로그램**으로 관리합니다. 동결 전에는 live eval 예산도 승인하지 않는 §12.5의
+순서를 유지합니다.
+
 ## 13. 삭제 · export · share
 
 ### 13.1 삭제
@@ -841,6 +948,14 @@ secret 원문·잠긴 evidence는 무조건 노출하지 않음(잠긴 source ev
   provenance(`sourceType`, source 참조 metadata — 잠긴 source는 존재
   metadata만)를 포함합니다. `searchTerms`·내부 score·context bundle은
   포함하지 않습니다. 스키마 상세는 B 구현에서 이 계약 안에서 확정합니다.
+- **잠긴 source의 evidence는 존재 metadata로만 내보냅니다** — `sourceType`과
+  잠겨 있다는 사실뿐이고, conversation ID·ordinal·role은 넣지 않습니다. ID만
+  빼는 것으로는 부족합니다: 위치와 role은 계정의 릴리스 A export를 가진 사람에게
+  대상을 좁혀 줍니다. review 화면과 다른 규칙인 이유는 export가 **계정 밖으로
+  나가는 문서**이기 때문입니다 — review 화면의 ID는 lock이 스스로 거부하는
+  페이지로 이어질 뿐이지만, export의 참조는 lock 바깥에서 그대로 남습니다.
+  **memory 자체는 계속 내보냅니다.** 참조를 감추는 것과 기억을 감추는 것은
+  다르고, 사용자는 어떤 문장이 보관돼 있는지 알 권리가 있습니다.
 - **서버는 export 파일을 보존하지 않습니다**(스트리밍 생성, `no-store`).
   보존되는 것은 content 없는 생성·다운로드 audit뿐이며, 보존 기간은 기존
   admin audit 관례를 따라 **90일**입니다.
@@ -892,6 +1007,25 @@ N은 서버 계산이며 client 주장 count를 쓰지 않습니다. 0이면 오
 하지 않고, 상세 열람 시 인증·소유권·source lock을 재검증하며, 표시는 mobile
 composer·comparison rail contract를 침범하지 않습니다.
 
+구현: 표시는 `ChatMessageList`의 `memory-usage-disclosure`이고, 값의 출처는
+두 곳입니다 — 생성 중에는 `/api/chat`의 `X-Chat-Memory-Used` header, 다시
+열었을 때는 `GET /api/conversations/[conversationId]`가 돌려주는
+`Message.memoryUsedCount`입니다.
+
+- **두 경로는 같은 조건에서만 값을 보냅니다**(`> 0`). `null`은 주입 자체가
+  불가능했던 요청이고 `0`은 bundle은 있었지만 retrieval이 아무것도 고르지 않은
+  경우이며, §13.4는 둘 다 표시를 금지합니다. 둘 다 필드를 **빼서** 보냅니다 —
+  받은 숫자를 안 보여줘야 하는 renderer는 한 번의 수정으로 보여주게 됩니다.
+- **재조회가 없으면 이 계약은 절반만 참입니다.** header만 있던 동안 표시는
+  답변이 쓰이는 중에만 참이었고 다음 방문에는 조용히 사라졌습니다.
+- **읽는 쪽은 소유자 자신의 조회뿐입니다.** 같은 route가 소유권과 lock grant를
+  먼저 확인하며, share snapshot과 conversation export는 각자의 select를 쓰고
+  이 컬럼을 이름조차 대지 않습니다(§13.3). `memoryTokens`는 §22의 집계용이라
+  어디서도 이 경로에 실리지 않습니다.
+- 검증: `tests/integration/memory-usage-disclosure-route.db.test.ts`(읽기),
+  `tests/memoryReleaseContracts.test.mjs`(제3자 경로 배제),
+  `tests/e2e/chat-memory-context.spec.ts`(생성 중·재조회 양쪽 표시).
+
 ## 14. Assistant Profile (릴리스 C)
 
 - private only. public marketplace·공유·판매·Actions·OAuth·코드 실행·외부
@@ -920,6 +1054,64 @@ composer·comparison rail contract를 침범하지 않습니다.
   system prompt를 복원했다고 주장하지 않습니다. 저장 전 사용자 검토가 필수이고,
   preview 결과는 Save 전에 설정에 자동 반영되지 않습니다.
 - 응답에는 항상 실제 Tomverse model identity를 표시합니다.
+
+### 14.1 Knowledge quota 수치 — [확정 · 2026-08-13 @mposition]
+
+§23의 "릴리스 C scope 승인 전에 확정해야 하는 항목" 1번이었고, frontmatter의
+`RELEASE_C_ASSISTANT_PROFILES` 승인(2026-08-13, @mposition)과 함께 확정됐습니다.
+
+수치는 새로 지어내지 않고 저장소에 이미 있는 같은 종류의 한도에서 끌어옵니다.
+값이 같아도 **결정은 분리**합니다 — import의 50MB를 knowledge가 상속하는 것이
+아니라, 두 기능이 각자의 예산을 가지고 서로를 소비하지 않습니다. 한쪽을 올려도
+다른 쪽이 따라 움직여서는 안 됩니다(accent token과 같은 규칙).
+
+| 항목 | 제안값 | 어디서 왔는가 |
+|---|---|---|
+| 개별 파일 object byte | 32MiB | `IMAGE_ORIGINAL_MAX_READ_BYTES`. 추출은 object 전체를 읽어야 하므로 "서버가 한 번에 메모리로 읽는 R2 object의 상한"이라는 **같은 물리적 제약**입니다. 이미 있는 숫자를 두고 두 번째 숫자를 만들면 둘이 어긋납니다. |
+| 개별 파일 추출 텍스트 | 1,000,000 code point | `EXTERNAL_IMPORT_STORAGE_LIMITS.maxInboundMessageCodePoints`. "서버가 한 덩어리로 받는 최대 텍스트 단위"라는 같은 역할. |
+| profile당 파일 수 | 20 | lexical retrieval 상한. v1은 embedding이 없어 top-k가 chunk score 순이므로, 파일이 늘수록 관련 없는 chunk가 상위를 차지합니다. 이 수치는 **품질 한도이지 저장 한도가 아니며**, retrieval이 바뀌면 함께 재검토합니다. |
+| 계정당 profile 수 | 20 | UI 한도. `/settings/assistants` 목록이 한 화면에서 관리 가능한 규모. |
+| 계정당 knowledge 파일 수 | 100 | 20×20=400이 아니라 100입니다. profile마다 최대치를 채우는 사용자는 없고, 계정 한도는 chunk 테이블과 삭제 sweep이 감당할 규모여야 합니다. |
+| 계정당 knowledge object 총 byte | 500MiB | 파일 수(100)×개별 상한(32MiB)=3.2GiB보다 **의도적으로 낮습니다.** 두 한도가 막는 대상이 다릅니다 — 개수는 retrieval 품질과 UI를, byte는 저장 비용을 막습니다. 실제로는 byte 한도가 먼저 걸립니다. |
+| 계정당 knowledge 추출 텍스트 byte | 50MiB | import의 계정당 저장 텍스트와 같은 값이지만 **별개 예산**입니다. import를 가득 채운 계정도 knowledge 50MiB를 그대로 씁니다. |
+
+강제 지점:
+
+- 개별 파일 byte는 **업로드 승인 시점(pre-signed URL 발급 전)과 수신 후 실제
+  크기** 양쪽에서 검사합니다. 클라이언트가 신고한 크기를 신뢰하지 않습니다.
+- 계정·profile 한도는 **서버가 authoritative**하며, import quota와 같은 방식으로
+  파일 선택 전에 잔여량을 표시합니다.
+- 한도 초과는 부분 저장 없이 전체 거절입니다(§18 릴리스 C 표).
+- 이 수치들은 중앙 상수 module 한 곳에서 관리하고 — 릴리스 A가
+  `lib/externalImportLimits.ts`를 두는 것과 같은 방식으로 — UI는 표시용으로만
+  미러합니다.
+
+승인자가 결정해야 하는 것은 위 7개 숫자와, 이 값들을 plan별로 나눌지 여부입니다.
+제안은 **plan별로 나누지 않는 것**입니다 — 릴리스 C는 flag 뒤 비공개이고, 값을
+나중에 올리는 것보다 내리는 쪽이 사용자에게 훨씬 나쁩니다.
+
+### 14.2 Knowledge 보존과 R2 lifecycle — [확정 · 2026-08-13 @mposition]
+
+§23 항목 2였고, 같은 승인으로 확정됐습니다.
+
+**R2 bucket lifecycle rule을 쓰지 않습니다.** 저장소의 기존 두 사례가 모두
+애플리케이션 sweep입니다: guest attachment는 prefix + cutoff idle sweep
+(`listExpiredR2Objects`), 생성 이미지는 DB-first tombstone(`ImageAssetCleanup`)
++ 15분 maintenance sweep(`lib/imageAssetLifecycle.ts`). Knowledge는 **후자**를
+따릅니다. bucket rule을 쓰지 않는 이유는 셋입니다 — rule은 DB 상태를 모르므로
+아직 참조 중인 chunk의 원본을 지울 수 있고, 실패가 재시도되지 않으며, 삭제가
+audit에 남지 않습니다.
+
+| 대상 | 제안 보존 | 근거 |
+|---|---|---|
+| 활성 knowledge file | **기간 없음** | 시간 기반 만료를 두지 않는 것이 결정입니다. profile은 사용자가 계속 쓰는 도구이고, 90일 뒤 조용히 답이 나빠지는 profile은 버그와 구분되지 않습니다. 삭제는 사용자·profile 삭제·계정 삭제로만 일어납니다. |
+| 사용자 삭제 · profile 삭제 · 계정 삭제 | tombstone은 같은 transaction, object는 다음 sweep(≈15분) | DB가 먼저입니다. R2를 앞서 지우면 부분 실패가 "행은 있는데 object가 없는" 상태로 남습니다. 재시도 상한은 `IMAGE_ASSET_CLEANUP_MAX_ATTEMPTS`와 같은 방식이고, 소진되면 operator에게 보고합니다. |
+| 추출 실패·중단으로 참조가 끊긴 object | 24시간 idle | guest attachment의 60분보다 깁니다 — 추출 재시도가 그 안에 끝나야 하고, 짧게 잡으면 재시도가 자기 원본을 잃습니다. |
+| 삭제 audit metadata (content 없음) | 90일 | `EXPORT_AUDIT_RETENTION_MS`와 같은 값이지만 별개 결정입니다. |
+| 과거 version의 knowledge manifest | profile version과 함께 영구 | §14가 이미 정한 대로 manifest는 감사용 metadata입니다. 삭제된 파일을 manifest로 복원하지 않고, 과거 version에서는 `unavailable`로 표시합니다. |
+
+승인자가 결정해야 하는 것은 위 네 개의 기간과, **활성 파일에 만료를 두지 않는다**는
+방향입니다.
 
 ## 15. Feature flag와 롤아웃 · rollback
 
@@ -960,8 +1152,24 @@ ko/en 대표 렌더링만. 7개 locale 전체 privacy E2E matrix를 만들지 �
 
 ## 17. 마케팅 표현 경계 (릴리스 차단 계약)
 
-단일 정책 소스 `lib/marketingMemoryClaims.ts`(또는 동등하게 검사 가능한 구조)
-+ 정적 테스트로 보호합니다.
+단일 정책 소스 + 정적 테스트로 보호합니다. 구현: `lib/marketingMemoryClaims.ts`
+와 `tests/marketingMemoryClaims.test.mjs`. 릴리스 B·C 마케팅 문구가 나오기
+**전에** 만들었습니다 — 문구가 나온 뒤에 만드는 검사는 아무것도 막지 못합니다.
+
+- **두 층이며 도달 범위가 다릅니다.** 패턴 층은 이 절이 쓰인 두 언어(ko·en)의
+  금지 표현을 문구가 어디에 있든 잡습니다. 등록 층(`ALLOWED_MEMORY_CLAIMS`)은
+  언어와 무관합니다 — 등록되지 않은 주장은 id부터 얻어야 하므로 독일어 번역만
+  먼저 생길 수 없습니다. 이것이 zh·fr·de·es·pt를 덮는 방식이며, 패턴이 7개
+  locale을 다 커버하는 척하지 않습니다.
+- **부정문과 의문문은 주장이 아닙니다.** 마케팅 페이지에는 이미 "OpenAI 또는
+  Anthropic과 제휴하거나 보증받지 않았습니다" 같은 문장이 있고, 그것은 금지
+  주장을 *피하려고* 있는 문장입니다. 문장 단위로 부정·의문을 보지 않는 검사는
+  그 면책 문구를 페이지에서 몰아내게 되며, 이는 §17이 원하는 것의 반대입니다.
+- **필수 고지는 "언급"이 아니라 "주장"에 붙습니다.** 게스트 대화 가져오기(외부
+  provider도 memory도 없는 별개 기능)와 "직접 기억해야 합니다" 같은 동사 용법은
+  대상이 아닙니다.
+- 아래 허용·금지 목록은 여전히 사람이 읽는 규칙이고, 검사는 이 절이 지목한
+  문장을 잡을 뿐 페이지를 대신 읽지 않습니다.
 
 허용: "다른 AI 서비스의 과거 대화를 가져오세요", "검토하고 승인한 기억을 새
 대화에 활용합니다", "과거 대화에서 선호하는 답변 방식을 참고합니다", "현재
@@ -1337,11 +1545,49 @@ Data 탭(`AuthButton.tsx`)에는 진입점·요약만 두고 대형 UI를 modal�
     보고서 전체에 문장이 없는지 확인합니다.
   - **아직 측정할 수 없는 지표는 0이 아니라 이유와 함께 이름을 남깁니다**
     (`unavailable`). 주입 비율 0%는 "아무도 안 쓴다"와 구분되지 않으며, 그
-    혼동이 이 목록이 존재하는 이유입니다. **현재 목록: follow-up proxy 하나**
-    (memory를 사용한 답변에 귀속이 필요한데, 주입이 fail-closed라 귀속된 답변이
-    아직 없음). lock suspension/restore(B5), chunk당 credit·batch
-    sub-budget(slice 1.6), injection 비율·token bucket·stale bundle 비율(§10
-    배선)은 모두 출처가 생겨 목록에서 빠졌습니다.
+    혼동이 이 목록이 존재하는 이유입니다. **현재 목록: follow-up proxy의 feedback
+    신호 하나**(`Feedback`에 대상 답변으로 가는 연결이 없음). lock
+    suspension/restore(B5), chunk당 credit·batch sub-budget(slice 1.6),
+    injection 비율·token bucket·stale bundle 비율(§10 배선), follow-up·regenerate
+    (답변별 귀속)은 모두 출처가 생겨 목록에서 빠졌습니다.
+  - **`followup_repair_proxy_feedback_signal` = `POLICY_DECISION_REQUIRED /
+    METRIC_UNAVAILABLE`.** 이 하나가 비어 있다는 사실이 릴리스 B **코드**를
+    미완으로 만들지는 않습니다 — 위 규칙대로 `unavailable`로 표시되어 0으로
+    위장되지 않기 때문입니다. 초기 staging은 이 상태로 진행할 수 있고,
+    **production 확대와 효과 판정 전에 닫습니다.** 그때까지의 판정문은 이 신호를
+    제외했다고 명시하고, 확대 여부는 사람에게 다시 확인합니다.
+
+    닫는 방법은 "가장 최근 답변 추정"이 아니라 **명시적 answer attribution**입니다.
+    추정은 comparison·재생성·동시 요청에서 조용히 틀리고, 틀린 귀속은
+    `unavailable`보다 나쁩니다(0이 아닌 값을 보고하므로).
+
+    - `Feedback.answerMessageId`를 **nullable relation**으로 추가합니다. 특정
+      assistant 답변에서 연 피드백만 이 ID를 보내고, sidebar·support·billing
+      등 일반 진입점은 계속 `null`입니다.
+    - 서버가 인증 사용자·Conversation 소유권·`role=assistant`를 **재검증**합니다.
+      클라이언트가 보낸 ID를 그대로 믿지 않습니다.
+    - 답변 본문·memory 내용·bundle·memory ID는 Feedback으로 **복사하지 않습니다**.
+      지표는 FK로 SQL join하되 content와 ID를 결과 `select`에 넣지 않습니다
+      (이 절의 첫 규칙과 같습니다).
+    - Message 삭제 시 `SetNull` — 답변이 사라져도 Feedback 자체는 보존합니다.
+    - comparison에서는 panel의 **정확한** assistant Message에 결속합니다.
+    - **무엇을 repair 신호로 셀 것인가도 함께 정합니다.** 현재 `Feedback.type`은
+      bug·feature·billing 같은 **문의 분류**이지 답변 품질의 방향성이 아니므로,
+      answer-linked Feedback을 전부 부정 신호로 세면 안 됩니다. 답변 진입점에
+      폐쇄형 의미를 따로 둡니다 — `needs_improvement`는 proxy에 포함,
+      `helpful`은 별도 관측(첫 버전 미지원 가능), 일반 Feedback은 proxy 제외.
+    - **Trace와 answer attribution은 분리합니다.** Trace ID로 답변을 찾거나
+      `occurrenceId`를 답변 ID로 재사용하지 않습니다. Trace evidence는 검증된
+      token의 `occurrenceId`로만 연결하고, answer link는 소유권을 재검증한 별도
+      FK로 관리합니다. 원시 error token 저장 금지 계약은 그대로입니다
+      (`docs/policy/trace-feedback-automation.md`).
+  - **답변별 memory 귀속은 `Message`에 저장합니다**(`memoryUsedCount`,
+    `memoryTokens`). §8.1 불변식 4가 금지하는 것은 주입된 **context 본문**이고
+    "사용 개수·비민감 aggregate metadata"는 명시적으로 허용합니다. 일일 counter가
+    이미 주입 **비율**을 보고하므로 이것은 counter가 만들 수 없는 것 —
+    **어느 답변이** memory를 담았는가 — 만 담당하며, follow-up proxy가 그것을
+    필요로 합니다. `NULL`은 bundle이 없어 주입이 불가능했던 요청이고 `0`은
+    bundle이 검증됐지만 retrieval이 아무것도 고르지 않은 경우입니다.
   - **injection 비율의 분모는 인증된 chat 요청 전체입니다.** "주입이 허용된
     요청"으로 잡으면 fail-closed 상태에서 분모가 0이 되어 비율이 정의되지 않고,
     그것은 이 목록이 설명하려던 상태로 되돌아가는 것입니다. 지금 방식이면
@@ -1355,14 +1601,33 @@ Data 탭(`AuthButton.tsx`)에는 진입점·요약만 두고 대형 UI를 modal�
     (`token_budget`·`item_cap`)만 truncation입니다. `below_relevance`·
     `expired`·`duplicate`는 선택이 설계대로 동작한 것이고 `source_cap`은 크기가
     아니라 다양성 규칙이므로 포함하지 않습니다.
+  - **follow-up proxy는 단일 비율이 아니라 두 arm의 비교입니다.** memory가 형성한
+    답변과 그렇지 않은 답변에 같은 측정을 하고 그 **차이**만 판단에 씁니다.
+    "memory 답변의 12%에 follow-up이 있었다"는 그 자체로 해석 불가입니다 —
+    첫 답변이 좋아서 두 번째 질문을 하는 경우가 흔하기 때문입니다. 한쪽 arm이
+    비어 있으면 차이는 0이 아니라 `null`입니다(비교하지 않았다는 뜻).
+    Admin UI는 이것이 proxy이며 "재질문률"이 아니라는 것을 **읽는 자리에서**
+    밝힙니다.
+  - **follow-up 관계는 SQL에서 집계합니다.** 필요한 관계가 "같은 대화에서 다음에
+    온 것"이라 대화별 정렬이 필요하고, 애플리케이션에서 하려면 conversation ID를
+    지표 모듈로 읽어와야 합니다. §22는 ID를 응답이 아니라 **select에서** 배제하므로
+    grouping을 DB에 두고 두 행의 count만 받습니다.
+  - **memory-off 전환은 발생 시점에 기록합니다.** `Conversation.memoryMode`에는
+    변경 이력이 없어 사후 유도가 불가능합니다 — update가 커밋되는 순간 이전 값이
+    사라집니다. counter는 좁은 결합에서만 올라갑니다: `off`로 바뀌었고, 이미
+    `off`가 아니었으며, 그 대화의 최근 답변이 memory가 형성한 것이고 120초
+    이내입니다. 대화를 열자마자 끄는 것은 불만이 아니라 선호이며, 둘을 함께 세면
+    §22가 원하는 신호가 묻힙니다.
   - **승인률의 분모는 검토를 마친 memory입니다.** 아직 큐에 남은 항목까지 나누면
     "손대지 않은 검토 큐"가 "낮은 승인률"로 보고됩니다. 결정된 것이 없으면 0이
     아니라 `null`입니다.
   - **취소된 run은 pair 실패율 분모에 포함합니다.** 사용자가 그만둔 것도 그 run의
     결과이고, 빼면 사용자가 계속 포기하는 pair가 좋아 보입니다.
-  - 행이 남지 않는 결과(validator 거절, source 삭제 처분)는
-    `ChatUsageBucket`의 `memory:` namespace 일일 counter로 기록하며,
-    기록 실패가 사용자 요청 실패가 되지 않습니다.
+  - 행이 남지 않는 결과(validator 거절, source 삭제 처분, 쓰기 시점 evidence
+    재검증 탈락)는 `ChatUsageBucket`의 `memory:` namespace 일일 counter로
+    기록하며, 기록 실패가 사용자 요청 실패가 되지 않습니다. counter는
+    transaction 밖에서 기록합니다 — rollback된 transaction 안에서 기록하면
+    일어나지 않은 일을 보고하게 됩니다.
 
 - **C**: profile lifecycle, preview 성공·실패, version update, retired model
   차단 수, knowledge 처리 실패율, byte bucket, retrieval chunk 수, truncation,
@@ -1371,13 +1636,34 @@ Data 탭(`AuthButton.tsx`)에는 진입점·요약만 두고 대형 UI를 modal�
 
 ## 23. Known limitations · 사람 판단 필요 항목
 
+### 23.0 프로그램 상태 (2026-08-06)
+
+남은 두 항목은 **같은 종류의 "미완료"가 아닙니다.** 하나는 사람만 완료할 수 있는
+운영 승인 작업이고, 다른 하나는 설계가 필요한 관측성 보완입니다. 차단하는 대상이
+다르므로 상태도 따로 기록합니다.
+
+| 항목 | 상태 | 차단 범위 |
+|---|---|---|
+| `memory_eval_dataset` | `BLOCKED_ON_HUMAN_AUTHORING_AND_REVIEW` | 실제 extraction pair 승인과 `memoryInjectionEnabled` 활성화 (§12.6) |
+| `followup_repair_proxy_feedback_signal` | `POLICY_DECISION_REQUIRED / METRIC_UNAVAILABLE` | 없음 — production 확대·효과 판정 전에 닫습니다 (§22) |
+
+- **릴리스 B 코드 완료는 위 두 항목과 분리해 판단합니다.** 두 항목 중 어느 것도
+  코드 계약의 결함이 아니며, feedback 신호는 §22 규칙대로 `unavailable`로
+  표시되어 0으로 위장되지 않습니다.
+- **extraction·injection 운영 활성화는 eval 데이터셋과 §12.4 승인 절차 완료 전까지
+  차단**입니다. 이것이 데이터셋 항목의 실제 무게이며, 코드 완료로 대체되지
+  않습니다.
+- **production 효과 판정 시에는** feedback 신호를 제외했다고 판정문에 명시하고,
+  확대 여부를 사람에게 다시 확인합니다.
+
 기록된 한계:
 
 - decision-grade eval은 ko/en만. zh/fr/de/es/pt는 저장·UI는 지원하되 동일 정량
   품질 보장을 주장하지 않고, 후속 locale eval 전까지 admin 지표·feedback으로
   관찰합니다.
-- Gemini Takeout은 A2로 연기. retrieval v1은 lexical이므로 의미 검색 품질에
-  한계가 있고 embedding 도입은 별도 승인 경로입니다.
+- ~~Gemini Takeout은 A2로 연기~~ — A2 scope 승인됨(아래). retrieval v1은
+  lexical이므로 의미 검색 품질에 한계가 있고 embedding 도입은 별도 승인
+  경로입니다.
 - 모바일 대형 archive Import는 데스크톱 권장으로 제한됩니다.
 - media·첨부는 Import되지 않습니다.
 
@@ -1386,6 +1672,27 @@ Data 탭(`AuthButton.tsx`)에는 진입점·요약만 두고 대형 UI를 modal�
 1. **`approvedScopes: [RELEASE_A_IMPORT]` 기록** — `status: approved`,
    승인자, 티켓, 날짜와 함께. 릴리스 A의 계약(§4, §5, §18 릴리스 A 표)은
    이 문서에서 확정값으로 기록돼 있습니다.
+
+### A2 (Gemini Import) scope 승인 기록 (2026-08-14)
+
+| 항목 | 값 |
+|---|---|
+| scope token | `RELEASE_A2_GEMINI_IMPORT` |
+| 승인자 | `@mposition` |
+| 승인일 | 2026-08-14 |
+| 승인 근거 커밋 | `8f4fc95f` — 승인자가 직접 frontmatter에 token을 추가 |
+| 계약 문서 | `docs/policy/external-import-gemini-a2.md` (승인문 전문은 그 문서 §10) |
+
+승인 범위는 **Gemini My Activity JSON만**이며, 계약은 분기별 독립 대화,
+locale 경로·내용 형태 판정, 중첩 아카이브 미해제·skip, 첨부 누락 표시입니다.
+HTML export, Gems, scheduled actions, 첨부 파일 복제는 범위 밖입니다.
+
+**이 승인이 여는 것은 parser 구현 착수뿐입니다.** production 활성화와 릴리스 B
+memory 활성화는 각각 별도 승인이며, 이 기록이 그것을 대신하지 않습니다.
+
+`approvedAt: 2026-08-13`은 A·B·C scope 승인일이므로 그대로 둡니다. 한 필드를
+A2 날짜로 덮으면 앞선 승인이 언제 이루어졌는지 말할 수 없게 되므로, scope별
+날짜는 이 표가 가집니다.
 
 ### 릴리스 B scope 승인 관련 항목 (2026-08-03 확정)
 
@@ -1409,10 +1716,18 @@ Data 탭(`AuthButton.tsx`)에는 진입점·요약만 두고 대형 UI를 modal�
    구현(B1~)은 시작할 수 있으나 **B 기능의 staging 배포·활성화 전에
    체크리스트 승인 기록이 있어야 합니다.**
 
-### 릴리스 C scope 승인 전에 확정해야 하는 항목 (pending)
+### 릴리스 C scope 승인 관련 항목 (2026-08-13 확정)
 
-1. knowledge quota 수치(파일 수·개별 크기·계정 총 byte).
-2. knowledge 보존 기간과 R2 lifecycle 정책 수치.
+1. **[확정]** knowledge quota 수치(파일 수·개별 크기·계정 총 byte) — §14.1.
+   7개 수치, 각각의 근거, plan별로 나누지 않는다는 결정.
+2. **[확정]** knowledge 보존 기간과 R2 lifecycle 정책 수치 — §14.2.
+   bucket lifecycle rule 대신 DB-first tombstone + sweep, 활성 파일에는 만료
+   없음.
+
+두 항목은 frontmatter의 `RELEASE_C_ASSISTANT_PROFILES` 승인(2026-08-13,
+@mposition)과 함께 확정됐고, 릴리스 C 코드·schema·migration을 시작할 수
+있습니다. 확정값을 바꾸려면 이 문서를 먼저 고치고 승인을 다시 받습니다 —
+구현에 맞춰 수치를 사후 조정하지 않습니다(§5).
 
 ## 24. 참조
 

@@ -27,15 +27,34 @@ Date / timezone:    ____________________
 - [ ] `npm run security:regression`
 - [ ] `npm run check:accent-tokens`
 - [ ] `npm run check:model-pricing`
-- [ ] `npm run check:fal-image-pricing` (needs `FAL_KEY`) — fal publishes
-      "Pricing is subject to change" beside the number `fal-ai/nano-banana-2`'s
-      fixed credit price was computed from. The **fal Price Drift** workflow
-      runs it daily against `main` and `develop`; this line is the re-check at
-      the release SHA. `matched` is the pass. `not_registered` is the correct
-      answer on a branch that does not carry the model — which is `main` until
-      the activation reaches it — and `lookup_failed` and `skipped` are neither
-      a pass nor a failure.
+- [ ] `npm run check:image-pricing`
+- [ ] `npm run check:image-executor-budget`
+- [ ] `npm run check:fal-smoke-evidence` — recomputes the run that
+      `fal-ai/nano-banana-2` was enabled on, and compares the request it proves
+      against the one the builder produces now. Needs no credential; its
+      sibling `check:fal-image-pricing` does, and is listed below.
+- [ ] `npm run check:db-integration-coverage`
+- [ ] `npm run check:error-detail-cost`
+- [ ] `npm run check:data-domain-registry`
+- [ ] `npm run verify:package-build-matrix` — builds both shared packages with
+      Vite, with no Next.js anywhere, then runs the bundle. It is PACKAGE-01's
+      second piece of evidence; it does not by itself satisfy the gate, which
+      is approved by a person against recorded evidence.
+- [ ] `npm run check:prompt-injection` — PLANNER-03's report. Runs the
+      adversarial corpus through every builder that puts untrusted text in a
+      prompt and fails on a non-zero violation count.
+- [ ] `npm run check:shared-packages` — reports PACKAGE-01's metric
+      (`forbidden_nextjs_imports_in_shared_packages`) and proves every
+      workspace package still type-checks with no DOM, no Node types and no
+      app alias
+- [ ] `npm run check:push-scope` — reports PUSH-01's metric
+      (`unapproved_push_infrastructure_components_in_v1`). The gate is met by an
+      absence, so this is the artefact that states it; approving a use case is
+      still a decision recorded on the gate itself
 - [ ] `npm run check:default-models`
+- [ ] `npm run check:encoding:strict`
+- [ ] `npm run check:locale-translation` — proves no locale is still showing an
+      English sentence where a translation is owed
 - [ ] `npm run check:api-cache-control` — proves the proxy's `/api/*` default
       does not silently replace a route's own caching decision
 - [ ] `npm run check:unconsumed-response-bodies` — the other half of that
@@ -43,7 +62,38 @@ Date / timezone:    ____________________
       so a client fetch that ignores an error body keeps the request in flight.
       Blocks browser-capable code on the one target that was measured, and says
       so; the server-side candidates are reported, not gated
-- [ ] `npm run check:encoding:strict`
+- [ ] `npm run check:enum-constraints` — proves every closed list the schema
+      enforces still matches the list the application validates against, and
+      that a new one was registered rather than left undecided
+- [ ] `npm run check:context-window-register`
+- [ ] `npm run check:router-context-window`
+- [ ] `npm run check:router-quality-eval`
+- [ ] `npm run check:auto-rollout-readiness`
+- [ ] `npm run check:usage-bucket-range`
+- [ ] `npm run check:memory-extraction-eval`
+- [ ] `npm run check:tomverse-chat-release-gate-view`
+- [ ] `npm run verify:tomverse-chat-release-gates`
+- [ ] `npm run verify:review-parity-coverage`
+- [ ] `npm run check:doc-references` — proves AGENTS.md and every contract and
+      policy document under it, and every source comment that names a path,
+      still point at files that exist. A comment naming a test file is a claim
+      about coverage: one said its cadences were asserted against the Railway
+      cron files by a test that had never existed
+- [ ] `npm run check:policy-section-references` — the same argument one level
+      down: proves every `§NN` points at a section that exists. Release C
+      shipped 105 citations of sections 31, 32 and 42 to 46, none of which any
+      policy document has, each one beside a path the reference check found
+      perfectly valid
+- [ ] `npm run check:staging-verification-records` — proves the staging
+      checklist still holds no results and every signed run record still
+      hashes to what it was signed as. The previous shape kept an approval
+      table inside the checklist, which could not say which commit it covered
+- [ ] `npm run check:ui-tier-coverage` — proves the merge-blocking `@ui-risk`
+      tier and the document that records it still describe the same set
+- [ ] `npm run check:release-gate-coverage` — proves this list still matches
+      what CI enforces. It is the reason the list above can be trusted: the
+      repository grew to twelve CI-enforced checks while this section named
+      five, and nothing failed.
 - [ ] `npm run build`
 - [ ] `npm run verify:smoke-coverage`
 - [ ] `npm run test:e2e:ui-risk`
@@ -51,6 +101,23 @@ Date / timezone:    ____________________
       disposable database; the harness truncates every table between tests)
 - [ ] `npm run test:db:integration` (needs `TEST_DATABASE_URL`, whose name must
       carry a test marker and must differ from the application database URL)
+- [ ] `npm run check:model-pricing-db` (needs the deployed database) — proves a
+      `NULL` price column still means "inherit the code profile" rather than an
+      administrator override. No CI job can run this, so this line is the only
+      thing that does.
+- [ ] `npm run check:openai-model-access` (needs a production key) — per-account
+      model visibility only. It is **not** a price source; nothing in
+      `lib/modelPricing.ts` may be derived from its response.
+- [ ] `npm run check:fal-image-pricing` (needs `FAL_KEY`) — fal publishes
+      "Pricing is subject to change" beside the number `fal-ai/nano-banana-2`'s
+      fixed 120 credits were computed from, so this is the only thing standing
+      between a price move at fal and a settlement report nobody reads weekly.
+      The **fal Price Drift** workflow runs it daily against `main` and
+      `develop`, so this line is a re-check at the release SHA rather than the
+      only run. `matched` is the pass. `not_registered` is the correct answer
+      on a branch that does not carry the model -- which is `main` until the
+      activation reaches it -- and `lookup_failed` and `skipped` are neither a
+      pass nor a failure.
 - [ ] Chromium E2E: `desktop-chromium`, `desktop-compact`, `mobile-chromium`
       — no unexplained failures
 
@@ -420,6 +487,101 @@ ORDER BY started_at;
 Where an edited version was applied first, also check the edit against a
 pre-migration backup: a widened allowlist can have cleared a value an operator
 had set deliberately.
+
+### 7.7 Purchased-credit lot invariants (post-deploy, owned, time-boxed)
+
+`20260812070000_credit_lot_non_negative` added two CHECK constraints to
+`CreditLot` — `remainingCredits >= 0` and `remainingFundedCostMicroUsd >= 0` —
+as `NOT VALID`. From that deploy onward Postgres enforces both on every INSERT
+and UPDATE; what `NOT VALID` defers is only the check against rows that already
+existed, so that the deploy could not fail on data nobody had surveyed.
+
+`npm run report:credit-lot-invariants` is that survey. **It is not a gate.** It
+exits 0 whether it finds zero violating rows or fifty, so nothing anywhere will
+fail because this was skipped — it has to be run by a named person against a
+deadline, not left to be "caught by the next release".
+
+```
+Owner:              ____________________
+Due (within 7 days of the deploy): ____________________
+```
+
+Run **from the deployed release SHA**, against production on a read-only role.
+
+- [ ] Production deploy SHA and the timestamp of the run recorded
+- [ ] Both constraints exist and are reported `NOT VALID`
+- [ ] `violationCount` and `readyToValidate` recorded
+
+```
+Deploy SHA:         ____________________
+Ran at (UTC):       ____________________
+violationCount:     ____________________
+readyToValidate:    ____________________
+```
+
+**The full row output does not go in a pull request, an issue, or an ordinary
+log.** The report prints account identifiers alongside financial balances; only
+the two figures above are safe to circulate. Keep the rows themselves in the
+restricted operations store.
+
+Then, by outcome:
+
+- **Zero violations** — add a forward migration that runs
+  `ALTER TABLE "CreditLot" VALIDATE CONSTRAINT ...` for both. That is the only
+  way to validate them; hand-validating production leaves
+  `pg_get_constraintdef()` disagreeing with the migration history, which §7.6
+  then reports as drift.
+- **Any violations** — **do not raise the balance.** A negative lot is the
+  visible end of a specific reservation or settlement that went wrong; find it,
+  establish what the account was actually entitled to, and correct it with a
+  compensating `CreditLedgerEntry` so the lot and its ledger state the same
+  financial fact. The correction needs the same approval any credit adjustment
+  needs. Validation waits until the count reaches zero.
+
+### 7.8 Tables nothing removes rows from
+
+`npm run report:unswept-tables` lists every table the application writes and
+never deletes from, minus the ones registered as bounded by a key space or as
+deliberately retained. **It is not a gate.** It exits 0 with any number of
+findings, because whether a table should be swept, kept, or is bounded by
+something the script cannot see is a decision a person makes — the failure it
+prevents is nobody being asked.
+
+Three tables were found this way and now have policies: `ProviderProbeResult`
+(a row per probed model every ten minutes, read by nothing), `ScheduledJobRun`
+and `ProviderModelCatalogRun`. None of them broke anything, which is why they
+lasted: a table with no ceiling costs disk, backup time and query planning long
+before it costs an outage.
+
+- [ ] Run it and read the list. A new name on it is a table added since the
+      last release with no retention decision.
+- [ ] Anything acted on is either a policy in `lib/retentionPolicyCore.ts` or a
+      registry entry in `scripts/report-unswept-tables-core.mjs` with the reason
+
+The reservation tables (`ChatCreditReservation` and its image and memory
+siblings) are on the list deliberately and are **not** to be swept until the
+decision below is recorded. A settled reservation is the record linking a
+request to the credits it spent, so a sweep is a decision about billing
+evidence rather than about disk — but "billing evidence" justifies keeping a
+row for a stated period, never keeping it forever by default. The row also
+carries a user link, so how long it is kept is a privacy question as much as a
+finance one.
+
+**Both finance-ops and privacy/legal own this decision**, and it is not made
+until all three of these are written down:
+
+- [ ] **Retention period per status.** A `reserved` row that expired, a
+      `settled` row and a `refunded` row do not have the same evidential life;
+      one period for all three is a decision by omission
+- [ ] **What happens at the end of it** — deletion, or anonymisation that keeps
+      the aggregate and drops the user link. If anonymisation, name the columns
+- [ ] **Account deletion, disputes and backups.** Whether a deletion request
+      removes these rows or the retention period outlives it, what a live
+      chargeback or refund dispute freezes, and how far the period extends into
+      restorable backups
+
+Until then the tables stay on the report with no policy, which is the honest
+state: a table nobody has decided about should read as undecided, not as kept.
 
 ## 8. Unverified items and waivers
 

@@ -15,7 +15,7 @@
  * preview so the user knows what a re-import cannot recover.
  */
 
-export type ExternalAdapterProvider = "chatgpt" | "claude";
+export type ExternalAdapterProvider = "chatgpt" | "claude" | "gemini";
 
 export type ParsedExternalMessage = {
     rawExternalMessageId: string;
@@ -37,7 +37,44 @@ export type ParsedConversationWarnings = {
     skippedEmptyMessages: number;
     /** ChatGPT only: branch points not on the current branch (§5.6). */
     additionalBranchCount: number;
+    /**
+     * Messages this conversation shares with another one because the user
+     * branched the chat (A2 §2.2). Each branch is imported whole, so a shared
+     * turn really is stored once per branch and really does cost quota once
+     * per branch; the preview says so rather than letting the total surprise
+     * the user.
+     */
+    duplicatedPrefixMessages: number;
+    /**
+     * Content dropped because normalizing it exactly was not possible — an
+     * answer whose markup is outside the vocabulary the adapter renders. A
+     * half-converted answer is worse than a counted absence (A2 §5).
+     */
+    skippedUnrecognizedContent: number;
 };
+
+/**
+ * Counts that belong to the export rather than to any one conversation, so
+ * there is nowhere in `ParsedExternalConversation` to put them.
+ */
+export type ParsedExportExtras = {
+    /**
+     * Turns the export did not assign to any conversation. Reported, never
+     * guessed at: grouping by time proximity is forbidden (A2 §2).
+     */
+    unassignedTurns: number;
+    /**
+     * Filenames the export's turns reference. Attachments are never copied,
+     * and only the caller holding the archive listing can tell which of these
+     * the archive actually contains (A2 §4.1).
+     */
+    attachmentReferences: string[];
+};
+
+export const emptyExportExtras = (): ParsedExportExtras => ({
+    unassignedTurns: 0,
+    attachmentReferences: [],
+});
 
 export type ParsedExternalConversation = {
     rawExternalConversationId: string;
@@ -59,6 +96,19 @@ export type ExternalConversationAdapter = {
      * one broken entry never fails the whole archive.
      */
     parseConversation(entry: unknown): ParsedExternalConversation | null;
+    /**
+     * Optional whole-export parse, for a provider whose export is not one
+     * conversation per top-level entry. Google Takeout is a flat list of
+     * turns, and which conversations a turn belongs to — plural, when the
+     * chat was branched — is only knowable with the whole list in hand.
+     *
+     * When present the pipeline calls this instead of `parseConversation`.
+     */
+    parseAll?(items: readonly unknown[]): {
+        conversations: ParsedExternalConversation[];
+        unparsableCount: number;
+        extras: ParsedExportExtras;
+    };
 };
 
 export const emptyWarnings = (): ParsedConversationWarnings => ({
@@ -66,6 +116,8 @@ export const emptyWarnings = (): ParsedConversationWarnings => ({
     skippedNonTextParts: 0,
     skippedEmptyMessages: 0,
     additionalBranchCount: 0,
+    duplicatedPrefixMessages: 0,
+    skippedUnrecognizedContent: 0,
 });
 
 export const isRecord = (value: unknown): value is Record<string, unknown> =>

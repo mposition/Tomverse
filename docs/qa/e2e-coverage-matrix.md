@@ -268,6 +268,7 @@ what these seven browser tests assert on the real `/admin/users/:id` route.
 | Destructive retention cleanup | `admin-platform-operations.spec.ts` | `ops` | dry run recorded | `Execute cleanup` stays disabled until the exact `RUN CLEANUP` phrase is typed |
 | Two-person approval | `admin-approval-workflow.spec.ts` | `billing` + `approver` | request queued (customer unchanged) → self-approval refused → second owner approves (still unchanged) → identical re-send executes → plan changed, approval `consumed`, `user.plan_adjusted` and `admin_approval.*` audit rows, change visible in the audit workspace | rejected approval leaves the customer untouched |
 | Plan-adjust confirmation gate | `admin-approval-workflow.spec.ts` | `billing` | enabled only with a reason **and** the exact `ADJUST PLAN` phrase | nothing is sent while disabled |
+| KPI counters after a write | `admin-billing-journeys.spec.ts` | `billing` | approving a refund moves the customer to Free **and** `/admin/users` renders the new "Free access" figure on the next server render | `/admin/users` is visited before the write, so a re-introduced cache would hold the pre-write figures; a reload still showing them is the failure |
 
 ---
 
@@ -322,11 +323,32 @@ and sends nothing.
 | Not covered | Why | What it would take |
 |---|---|---|
 | A **successful** Stripe webhook replay | `/api/admin/webhooks/:id/reprocess` re-fetches the event from Stripe. The harness has no `STRIPE_SECRET_KEY` and the network guard blocks the call, so only the permission boundary and the failure UI are assertable. | A Stripe fixture boundary (a recorded-events double behind `getStripe()`). None exists today. |
-| A **successful** Stripe refund with a live charge | Same boundary. The refund route's no-Stripe path is exercised instead, which is the path the harness can reach deterministically. | As above. |
+| A **successful** Stripe refund with a live charge, *in this suite* | Same boundary. The refund route's no-Stripe path is exercised here instead, which is the path the harness can reach deterministically. | Nothing further: the money path is covered a tier down, see below. |
 | Provider health probes, Railway/Prisma usage sync, Slack/Discord/Resend delivery | All are outbound calls the network guard blocks by design. The panels' rendering and their failure handling are covered; the calls themselves are not. | Per-service fixture boundaries. |
-| `getAdminUserStats()` KPI numbers on `/admin/users` | Wrapped in `unstable_cache(..., { revalidate: 60 })`, so the counters can legitimately lag a per-test reseed. Tests assert on the (uncached) user rows instead. | A cache-tag invalidation hook usable from tests. |
 | Admin console visual regression goldens | The visual baseline policy (`docs/qa/canonical-visual-baseline.md`) pins one canonical environment; adding a second suite of goldens is a separate decision. | A design decision plus canonical-runner capacity. |
 | `/e2e/admin-security-controls` harness page | Kept as-is. `tests/e2e/admin-user-security-controls.spec.ts` still guards the component's toast/error/expiry behaviour in isolation; the new suite covers the same controls on the real route. Removing it is a separate cleanup. | — |
+
+### The refund money path, covered a tier down
+
+The row above used to say a Stripe fixture boundary was what it would take.
+That was the wrong shape of answer, and finding out why is the useful part:
+`tests/integration/refund-decision-route.db.test.ts` already replaces
+`lib/stripe.ts` with a module double, so no new boundary was needed — but its
+double answered `latest_invoice: null`, which sent **every** test in the file
+down the `no_payment_intent` branch. The amount arithmetic underneath had
+therefore never run at any tier.
+
+It runs now, and four cases are pinned there because each is wrong in a
+direction a green suite would not show: the outstanding amount is refunded
+(with `refund.execution_started` written *before* the provider call), a partly
+refunded charge gets only its remainder, a fully refunded charge creates
+nothing, and a refund already at the provider carrying this request's metadata
+is adopted rather than issued a second time.
+
+What stays out of reach here is the browser half — an operator clicking
+approve and reading the result — which is what the exclusion row is now scoped
+to. The `/api/admin/webhooks/:id/reprocess` row is unchanged: its Stripe call
+has no equivalent double yet.
 
 ## 5. Running the user suite outside the canonical environment
 

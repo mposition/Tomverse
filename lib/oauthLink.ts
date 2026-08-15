@@ -164,8 +164,18 @@ export function buildOAuthLinkAuthorizeRedirect(
     return { url: `${config.authorizeUrl}?${params.toString()}`, cookie };
 }
 
-export const clearOAuthLinkStateCookie = () =>
-    `${STATE_COOKIE}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0`;
+/**
+ * Carries the same attributes the setter does, `Secure` included.
+ *
+ * A browser keys a cookie by name, domain and path, so a clear works whether or
+ * not it repeats `Secure` -- but a clear that does not mirror its setter is how
+ * the two drift, and the next attribute added to one and not the other stops
+ * being a cosmetic difference.
+ */
+export const clearOAuthLinkStateCookie = () => {
+    const secureFlag = process.env.NODE_ENV === "production" ? "; Secure" : "";
+    return `${STATE_COOKIE}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0${secureFlag}`;
+};
 
 // The OAuth callback route must know which provider a request is for before
 // it can call completeOAuthLink -- but that can't come from the callback

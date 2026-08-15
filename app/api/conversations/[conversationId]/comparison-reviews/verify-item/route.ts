@@ -1,5 +1,6 @@
 export const dynamic = "force-dynamic";
 
+import { createTokenEstimateAccumulator } from "@/lib/chatTokenEstimate";
 import { randomUUID } from "node:crypto";
 import { generateText, Output } from "ai";
 import { getServerSession } from "next-auth/next";
@@ -152,10 +153,23 @@ export async function POST(
       userSettings?.language || "en"
     );
 
-    const inputTokens = Math.max(
-      64,
-      Math.ceil(Buffer.byteLength(body.item, "utf8") / 4) + 300
-    );
+    // Was `Buffer.byteLength(item) / 4`, the per-surface copy that
+    // lib/chatTokenEstimate.ts exists to replace: it prices a Korean item at
+    // roughly a third of what it costs, which is the direction that
+    // under-reserves. The 300 is the verification template's own framing and
+    // 64 a floor, so both stay opaque -- neither is a tokenizer prediction.
+    const estimate = createTokenEstimateAccumulator()
+      .addText(body.item)
+      .addTokens(300)
+      .breakdown();
+    const inputTokens =
+      estimate.rawTotal >= 64
+        ? estimate
+        : {
+            ...estimate,
+            opaqueTokens: estimate.opaqueTokens + (64 - estimate.rawTotal),
+            rawTotal: 64,
+          };
     const budget = createChatBudget("user", model, inputTokens);
     budget.maxOutputTokens = Math.min(
       budget.maxOutputTokens,

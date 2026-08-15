@@ -185,6 +185,32 @@ export async function validateR2ObjectMetadata(
 }
 
 /**
+ * The size of an object, without reading it and without deleting anything.
+ *
+ * `validateR2ObjectMetadata` above answers a different question: is this
+ * upload what it claimed to be, and if not, remove it. Reusing it to measure
+ * an object would make a measurement destructive -- a routing probe that
+ * deleted the user's attachment because a content type had drifted would be a
+ * data-loss bug caused by a feature that only wanted a number.
+ *
+ * Returns null when the object cannot be measured, rather than throwing:
+ * every caller so far is deciding whether it knows enough to act, and "no"
+ * is an answer they can use.
+ */
+export async function measureR2Object(key: string): Promise<number | null> {
+  try {
+    const { client, bucket } = getR2Client();
+    const head = await client.send(
+      new HeadObjectCommand({ Bucket: bucket, Key: key })
+    );
+    const size = head.ContentLength;
+    return Number.isSafeInteger(size) && size! > 0 ? size! : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Read an object we wrote ourselves, bounded, and **never** delete it.
  *
  * `readR2Object` above is for untrusted uploads: a metadata mismatch there is

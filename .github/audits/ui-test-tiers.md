@@ -31,7 +31,68 @@ browser coverage without rebuilding E2E" 항목이 이 문서의 존재와 workf
 | `korean-typography.spec.ts` | display heading 어절 보존 ×4 viewport, 150% zoom | UI-006 | 양쪽 |
 | `pricing-promotion-reflow.spec.ts` | 16개 viewport×zoom×언어 조합의 절대 overflow ≤1px + promotion 귀속 | UI-005 | desktop-chromium |
 
-검토 시점 실측: **76 test 통과 / 14 skip / 67초** (두 project 합계, 단일 worker).
+위 다섯 항목은 UI-001~UI-007 감사에서 tier가 만들어질 때 기록된 것입니다.
+그 뒤로 tier는 **표가 아니라 태그로** 정해지므로, spec은 `@ui-risk`를 붙이는
+것만으로 합류했고 이 문서는 따라오지 않았습니다. 2026-08-05 대조 시점에
+태그된 파일은 25개, 표에 적힌 것은 5개였습니다.
+
+나머지 태그된 spec은 다음과 같습니다. 상세 case 목록 없이 파일만 기록하는
+것은 태그가 진실이고 표가 뒤늦기 때문이며, 각 spec의 실제 case는 파일에
+있습니다. `npm run check:ui-tier-coverage`가 이 목록과 태그를 양방향으로
+맞춥니다.
+
+실측: 2026-08-14 기준 `--grep=@ui-risk --list`가 desktop-chromium과
+mobile-chromium 두 project에서 **27개 파일, 638 test**를 선택합니다.
+
+| Spec |
+|---|
+| `account-flow.spec.ts` |
+| `chat-analytics-settings-placement.spec.ts` |
+| `chat-memory-context.spec.ts` |
+| `comparison-panel-controls.spec.ts` |
+| `csp-eval-free.spec.ts` |
+| `external-import-settings.spec.ts` |
+| `feedback-modal.spec.ts` |
+| `keyboard-and-heading-structure.spec.ts` |
+| `marketing-language-analytics.spec.ts` |
+| `marketing-language-focus.spec.ts` |
+| `marketing-toast-host.spec.ts` |
+| `menu-and-tab-semantics.spec.ts` |
+| `mobile-composer-banner-reflow.spec.ts` |
+| `mobile-short-viewport-drawer.spec.ts` |
+| `modal-focus-contract.spec.ts` |
+| `model-panel-tablet-reachability.spec.ts` |
+| `provider-status.spec.ts` |
+| `settings-information-architecture.spec.ts` |
+| `sidebar-context-menu-theme.spec.ts` |
+| `signin-analytics-placement.spec.ts` |
+| `skip-link-and-armed-delete.spec.ts` |
+| `ssr-root-language.spec.ts` |
+
+검토 시점 실측(2026-08-14, `--list`): **27개 파일 638 test** (두 project 합계).
+직전 값은 2026-08-05의 25개 파일 630 test였고, 그 뒤 `csp-eval-free.spec.ts`
+(+4)와 `external-import-settings.spec.ts`(+2)가 합류했습니다. 그 이전 기록
+"76 test / 14 skip / 67초"는 표에 적힌 5개 파일만 세던 시점의 값입니다. 이
+tier는 merge를 차단하므로, PR tier 비용을 근거로 무언가를 빼거나 넣는 판단은
+위 숫자를 다시 재고 나서 합니다.
+
+`external-import-settings.spec.ts`는 2026-08-14에 합류했습니다(27개 파일,
++2 test — desktop·mobile 각 1). 태그된 것은 그 파일의 한 case뿐입니다:
+`an HTML export is told how to fix it, not that it is unreadable`. Google
+Takeout은 My Activity를 JSON 또는 HTML로 내보내고 JSON만 지원하는데, HTML을
+고른 사용자는 **파일 선택기에서 자기 파일을 고를 수조차 없었고** 일반 "읽을 수
+없음"만 봤습니다. 고칠 방법을 아는 유일한 실패가 고칠 수 없는 실패로 보인
+것입니다. 계약은 두 가지 — `accept`에 `.html`이 있을 것, 그리고 화면이 "JSON
+형식으로 다시 내보내라"고 말할 것 — 이며 둘 다 브라우저에서만 확인됩니다.
+무태그로 두면 `main` push의 무필터 실행에서만 잡히는데, 이 회귀는 PR로
+들어옵니다.
+
+`csp-eval-free.spec.ts`는 2026-08-13에 합류했습니다(26개 파일, +4 test).
+이 tier의 다른 spec과 달리 UI 감사가 아니라 CSP 계약에서 왔습니다 — 클라이언트
+번들이 `eval`을 부르지 않는다는 것은 브라우저에서만 확인되는 사실이고, 이를
+깨뜨리는 변경(`lib/csp.ts`의 지시문 완화, `instrumentation-client.ts` 삭제,
+eval probe를 다시 들여오는 의존성)은 PR로 들어옵니다. 무태그로 두면 `main`
+push의 무필터 실행에서만 잡히는데, 승격 후에 말하는 보안 계약은 늦습니다.
 
 ## PR tier에 두지 않는 것과 그 이유
 

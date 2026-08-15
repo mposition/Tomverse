@@ -8,7 +8,8 @@ import {
  *
  * Settings is not a route: it is a closable panel (the modal inside
  * components/auth/AuthButton.tsx) that lives on the chat surface. Its detail
- * screens — /settings/imports and /settings/memory — are full pages, so their
+ * screens — /settings/imports, /settings/memory and /settings/data — are full
+ * pages, so their
  * upward navigation has to name a destination rather than lean on
  * `router.back()`, which points at whatever the visitor happened to see last
  * and at nothing at all when the URL was opened directly.
@@ -25,11 +26,16 @@ export const SETTINGS_TAB_QUERY_PARAM = "settings";
 export const SETTINGS_SECTION_QUERY_PARAM = "settingsSection";
 
 /**
- * Entries that own a detail page. Both sit under one group in the settings
+ * Entries that own a detail page. All sit under one group in the settings
  * list ("Data & personalization") but stay separate features: separate rows,
  * separate pages, separate state.
  */
-export const SETTINGS_SECTION_IDS = ["external-import", "memory"] as const;
+export const SETTINGS_SECTION_IDS = [
+    "external-import",
+    "memory",
+    "assistants",
+    "account-data",
+] as const;
 
 export type SettingsSectionId = (typeof SETTINGS_SECTION_IDS)[number];
 
@@ -37,6 +43,13 @@ export const SETTINGS_SECTION_TAB: Record<SettingsSectionId, AccountSettingsTab>
     {
         "external-import": "data",
         memory: "data",
+        // A profile is personalisation the account owns, so it belongs in the
+        // same group rather than in a card beside it (settings-navigation
+        // contract §2). Placed after memory because that is the order the
+        // features build on each other -- a profile may use approved memory,
+        // and never the other way round.
+        assistants: "data",
+        "account-data": "data",
     };
 
 export const isSettingsSectionId = (

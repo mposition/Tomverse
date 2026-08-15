@@ -3,7 +3,12 @@
 import { ChevronRight, LockKeyhole, Sparkles } from "lucide-react";
 import { CreditCostBadge } from "@/components/credits/CreditCostBadge";
 import { useLanguage } from "@/components/LanguageProvider";
-import { listImageModels } from "@/lib/imageModelRegistry";
+import {
+  imageModelBrandParts,
+  listImageModels,
+  type ImageModelOwner,
+  type ImageModelProvider,
+} from "@/lib/imageModelRegistry";
 
 // The catalogue's image tab (policy v2 section 13 of
 // docs/policy/image-generation.md).
@@ -26,10 +31,32 @@ const interpolate = (template: string, values: Record<string, string | number>) 
     template
   );
 
-const PROVIDER_LABELS: Record<string, string> = {
+/**
+ * Brand names for the row's subtitle. Never translated -- these are brands.
+ *
+ * Typed against the union rather than `Record<string, string>`, which is what
+ * let `fal` go missing: any string satisfied the index signature, so a model
+ * whose label had never been written type-checked, rendered `undefined`, and
+ * showed a row that began with the separator and no name at all.
+ *
+ * Keyed by *owner*, because the subtitle answers "whose model is this" (policy
+ * section 16.1). For every direct integration owner and provider are the same
+ * string and this reads exactly as it did before; the gateway line below is
+ * what makes the difference visible.
+ */
+const OWNER_LABELS: Record<ImageModelOwner, string> = {
   openai: "OpenAI",
   google: "Google",
   xai: "xAI",
+  fal: "fal",
+};
+
+/** Same table, for the supplier when it differs from the owner. */
+const PROVIDER_LABELS: Record<ImageModelProvider, string> = {
+  openai: "OpenAI",
+  google: "Google",
+  xai: "xAI",
+  fal: "fal",
 };
 
 const LATENCY_LABEL_KEYS = {
@@ -80,6 +107,7 @@ export function ImageModelTabPanel({
       <ul className="space-y-2">
         {models.map((model) => {
           const held = model.disabledReason !== null;
+          const brand = imageModelBrandParts(model);
           // "From" pricing: the picker does not know which quality and size the
           // workspace will end on, so it quotes the cheapest option rather than
           // a number the composer might contradict.
@@ -119,8 +147,22 @@ export function ImageModelTabPanel({
                     {model.name}
                   </span>
                   <span className="mt-0.5 text-[11px] leading-4 text-zinc-500 dark:text-zinc-400">
-                    {/* Provider names are brands, not copy: never translated. */}
-                    {PROVIDER_LABELS[model.provider]}
+                    {/* Brand names, not copy: never translated. */}
+                    {OWNER_LABELS[brand.owner]}
+                    {brand.gateway !== null && (
+                      <>
+                        {" · "}
+                        {/* Named, not hidden (policy section 16.1). Whose model
+                            it is and who supplies it are different facts, and a
+                            row that showed only one of them would be wrong
+                            about the other. */}
+                        <span data-testid="image-model-gateway">
+                          {interpolate(t("chat.imageModelViaGateway"), {
+                            gateway: PROVIDER_LABELS[brand.gateway],
+                          })}
+                        </span>
+                      </>
+                    )}
                     {" · "}
                     {t(LATENCY_LABEL_KEYS[model.latencyClass])}
                   </span>

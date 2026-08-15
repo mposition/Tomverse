@@ -3,7 +3,7 @@ import {
   resolveGuestDefaultSelectedModels,
 } from "@/lib/appDefaults";
 
-// Same keys app/(application)/chat/ChatPageClient.tsx persists guest state
+// Same keys app/(site)/(application)/chat/ChatPageClient.tsx persists guest state
 // under. Exported from here so the "what should the composer show on its very
 // first render" decision and the effects that later write these keys can
 // never drift apart.

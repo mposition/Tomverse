@@ -5,6 +5,7 @@ import {
     type ExtractionModelAdapter,
 } from "@/lib/memoryExtractionPipeline";
 import { commitExtractionChunk } from "@/lib/memoryExtractionCommit";
+import { recordMemoryCounter } from "@/lib/memoryMetrics";
 import {
     MEMORY_EXTRACTION_CHUNK_TIMEOUT_MS,
     estimateExtraction,
@@ -432,6 +433,17 @@ export async function handleMemoryExtractionChunk({
     });
     await closeCost(commit.committed ? undefined : "fenced_out");
 
+    if (commit.committed && commit.unsourced > 0) {
+        // Recorded after the transaction, never inside it: a counter written
+        // in a transaction that then rolls back reports work nothing did.
+        // §22 gets its own kind here because a dropped candidate leaves no row
+        // -- the whole point is that it was not stored.
+        void recordMemoryCounter(
+            "extraction_evidence_unverified",
+            commit.unsourced
+        );
+    }
+
     // Content-free, per §22: counts only, never a statement.
     console.info(
         JSON.stringify({
@@ -446,6 +458,7 @@ export async function handleMemoryExtractionChunk({
                       stored: commit.stored,
                       individualReview: commit.individualReview,
                       discarded: commit.discarded,
+                      unsourced: commit.unsourced,
                   }
                 : { reason: commit.reason }),
             parseProblems: analysis.problems.length,
@@ -483,6 +496,11 @@ export function driveMemoryExtractionRun(input: {
      * `MEMORY_EXTRACTION_SLICE_BUDGET_MS`.
      */
     budgetMs?: number;
+    /**
+     * Caps how many chunks this slice attempts. Used by the kick, which is not
+     * a worker with its own lifetime.
+     */
+    maxChunks?: number;
 }): Promise<ExtractionSliceResult> {
     return driveMemoryExtractionRunSlice({
         runId: input.runId,
@@ -500,8 +518,27 @@ export function driveMemoryExtractionRun(input: {
         now: input.now,
         register: input.register,
         budgetMs: input.budgetMs,
+        maxChunks: input.maxChunks,
     });
 }
+
+/**
+ * How much of a run the post-response kick attempts: one chunk.
+ *
+ * Next's `after` reference states the callback "will run for the platform's
+ * default or configured max duration of your route", so the kick is not a
+ * background worker with its own lifetime -- it is time borrowed from a
+ * request that has already answered. A kick that tried to finish the run would
+ * routinely be killed part-way, and a kick killed mid-chunk leaves the run
+ * `running` under a lease that has to lapse before the dispatcher can reclaim
+ * it. The driver meant to reduce latency would then be adding a lease TTL
+ * to it.
+ *
+ * One chunk is the useful amount: the user sees the run move immediately, and
+ * finishing it is the dispatcher's job -- the division of labour §11.1
+ * describes.
+ */
+const KICK_MAX_CHUNKS = 1;
 
 /**
  * The post-response kick (§11.1).
@@ -516,6 +553,7 @@ export async function kickMemoryExtractionRun(runId: string): Promise<void> {
         const result = await driveMemoryExtractionRun({
             runId,
             owner: `kick:${runId}`,
+            maxChunks: KICK_MAX_CHUNKS,
         });
         console.info(
             JSON.stringify({

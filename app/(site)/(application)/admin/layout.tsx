@@ -7,6 +7,7 @@ import { authOptions } from "@/lib/auth";
 import { getAdminRole, getAdminSessionAccessState } from "@/lib/adminAuth";
 import { adminReauthenticationHref } from "@/lib/adminReauthenticationCore";
 import { getAdminNavigationCounts } from "@/lib/adminNavigationCounts";
+import { resolveDeploymentEnvironment } from "@/lib/deploymentEnvironment";
 
 export const metadata: Metadata = {
   title: "Administration",
@@ -37,12 +38,15 @@ export default async function AdminLayout({ children }: LayoutProps<"/admin">) {
   const role = getAdminRole(session) || "readonly";
   const { counts, healthy } = await getAdminNavigationCounts();
 
-  const environment = (
-    process.env.RAILWAY_ENVIRONMENT_NAME ||
-    process.env.NEXT_PUBLIC_APP_ENV ||
-    process.env.NODE_ENV ||
-    "unknown"
-  ).toUpperCase();
+  // The badge an operator reads before acting has to agree with the rules the
+  // server is actually applying, so it comes from the same resolver. Its own
+  // chain skipped APP_ENV -- the variable staging sets -- and so displayed
+  // PRODUCTION to anyone opening the admin console on staging.
+  //
+  // NEXT_PUBLIC_APP_ENV is deliberately no longer consulted: it is inlined at
+  // build time and now shares an answer with lib/securityEnvironment.ts, and a
+  // client-visible variable must not be able to move a security rule.
+  const environment = resolveDeploymentEnvironment().toUpperCase();
   const version = (
     process.env.RAILWAY_GIT_COMMIT_SHA ||
     process.env.NEXT_PUBLIC_APP_VERSION ||

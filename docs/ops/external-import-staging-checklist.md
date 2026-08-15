@@ -6,8 +6,27 @@
 릴리스 B의 나머지 pending 항목(§23 1–6)을 대체하지 않습니다.
 
 실행·판정·서명은 사람이 합니다. 에이전트는 이 문서의 검증 항목을 갱신할 수
-있지만 맨 아래 승인 기록을 스스로 기입할 수 없습니다 — 정책 frontmatter의
-승인 필드와 같은 규칙입니다.
+있지만 실행 결과를 스스로 기입할 수 없습니다 — 정책 frontmatter의 승인 필드와
+같은 규칙입니다.
+
+## 이 문서는 template입니다
+
+**여기에는 결과가 없습니다.** 체크박스는 항상 비어 있고, 그것이 이 파일의
+상태입니다. 실행 결과는 `staging-verification-records/`에 **날짜와 전체 deploy
+SHA로 이름 붙인 별도 파일**로 남습니다.
+
+그렇게 나눈 이유는 한 번 실제로 틀렸기 때문입니다. 이전 구조는 항목과 승인
+기록이 한 파일에 있었고, 승인란은 `8c43430`에 대해 `통과`로 서명돼 있는데
+체크박스는 전부 비어 있었습니다. 그 서명 이후 seal→finalize 항목이 새로
+추가되고 snapshot lock·source 삭제·설정 IA가 바뀌었지만, 표는 그대로 남아
+어느 시점을 덮는지 말하지 못한 채 낡았습니다. 표 하나가 조용히 낡는 구조
+자체가 문제였습니다.
+
+- **template revision**: `2026-08-14b` — 항목이 바뀌면 이 값을 올리고, 실행
+  기록은 자기가 어느 revision으로 실행됐는지 적습니다. 그래야 "그때는 없던
+  항목"을 나중에 구분할 수 있습니다.
+- 실행 방법과 파일 이름 규칙: `staging-verification-records/README.md`
+- 기록 template: `staging-verification-records/_record-template.md`
 
 ## 사전 조건
 
@@ -20,8 +39,12 @@
       (§15: flag off 상태에서 먼저 배포 가능해야 한다).
 - [ ] 검증용 일반 계정 1개(비어 있는 import 상태), admin 계정 1개가 있다.
 - [ ] 검증용 export 파일: 실제 ChatGPT export ZIP(미디어 포함), 그 안의
-      `conversations.json` 단독 파일, 실제 Claude export. 개인 데이터가
-      들어 있으므로 검증 후 파일과 staging 계정 데이터를 정리한다.
+      `conversations.json` 단독 파일, 실제 Claude export. H절을 실행한다면
+      실제 Google Takeout ZIP(`My Activity → Gemini Apps`, **형식 JSON**)과
+      같은 계정의 **HTML 형식** 내보내기가 하나 더 필요하다.
+- [ ] 개인 데이터가 들어 있으므로 검증 후 파일과 staging 계정 데이터를
+      정리한다. **어느 것도 저장소에 커밋하지 않는다** — fixture는 합성본만
+      쓰며(`tests/fixtures/geminiTakeout/`), git 이력은 영구적이다.
 
 ## A. Fail-closed (flag off)
 
@@ -91,8 +114,17 @@
 - [ ] TTL이 지난 작업은 조용히 사라지지 않고 "만료되어 다시 시작해야 함"으로
       표시된다. 15분 maintenance sweep이 `staging`과 `preview_ready`를 모두
       정리한다.
-- [ ] 배포 직후, seal 이전 버전 화면을 열어 둔 탭에서 `staging` finalize가
-      여전히 성공한다(72시간 호환 기간).
+- [ ] seal 없이 `staging`에서 바로 finalize를 호출하면 409
+      `EXTERNAL_IMPORT_SELECTION_CHANGED`로 거부되고, 같은 요청이 seal 이후에는
+      성공한다. TTL이 지난 import는 계속 410
+      `EXTERNAL_IMPORT_STAGING_EXPIRED`이며, 두 거절은 복구 방법이 다르므로
+      화면 문구도 달라야 한다(전자는 "확인 후 완료", 후자는 "다시 시작").
+
+  > **호환 기간 종료됨.** seal 이전 버전 화면을 열어 둔 탭이
+  > `staging`에서 바로 finalize할 수 있던 72시간 창은 닫혔습니다. 기준은
+  > seal 코드의 production 배포 시각 2026-08-04T01:38:42Z이며, 그 뒤로 seal
+  > 없는 finalize는 위와 같이 거부됩니다. 이 항목은 더 이상 "여전히 성공한다"를
+  > 확인하지 않습니다 — 정책 §5.5 참조.
 
 ## C3. 용량 부족 복구 (§5.3)
 
@@ -131,7 +163,10 @@
 
 - [ ] `GET /api/admin/external-imports`가 provider·parserVersion 분해,
       bucket, 중복·truncation 비율, 카운터를 반환하고 값이 위 검증 활동과
-      부합한다. `parserVersion`이 `v2`로 기록된다.
+      부합한다. `parserVersion`이 **배포된 값**으로 기록된다 —
+      `lib/externalImportAdapters/index.ts`의
+      `EXTERNAL_IMPORT_PARSER_VERSION`이 정하며, 이 문서에 숫자를 박아 두면
+      다음 실행에서 틀린 값을 확인하게 된다.
 - [ ] `external_import_step_entered` / `_abandoned`가 기록되고 `import_step`
       외의 속성이 없다. **단계별 `entered` 합계와 `abandoned` 합계가 맞지 않는
       것은 정상이다**(브라우저를 그냥 닫는 이탈은 측정되지 않음, §22). 실질
@@ -150,14 +185,49 @@
       가져온 데이터는 목록·삭제·export로 계속 접근 가능하다.
 - [ ] drill 종료 후 flag 상태를 운영 결정에 맞게 되돌려 놓았다.
 
-## 승인 기록 (사람이 기입)
+## H. Gemini(A2) import
 
-| 항목 | 값 |
+계약은 `docs/policy/external-import-gemini-a2.md`입니다. **이 절은 실제
+Takeout에 대해서만 의미가 있습니다** — 저장소의 fixture는 합성본이고, 그것이
+초록이라는 사실이 여기서 확인할 것을 대신하지 않습니다. A2 scope 승인은
+구현 착수까지만 덮으므로, production 활성화의 근거는 이 절의 실행 기록입니다.
+
+- [ ] Wizard 1단계에 Gemini 안내 카드가 있고, 문구가 **`My Activity → Gemini
+      Apps`와 JSON 형식**을 지목한다. Takeout에서 "Gemini" 항목을 그대로
+      고르면 대화가 아니라 Gems를 받게 된다는 사실이 읽힌다.
+- [ ] 실제 Takeout ZIP을 올리면 브라우저에서 파싱되고(개발자 도구 Network에
+      원본 archive 업로드가 **없어야 한다**), provider가 Gemini로 인식된다.
+      **경로가 한국어인 계정과 영어인 계정 모두** 같은 결과가 나온다
+      (§3.1 — 경로·파일명·라벨은 모두 번역된다).
+- [ ] 대화에 `.zip`을 첨부한 적이 있는 계정의 export가 **거절되지 않는다**
+      (§3.2). 첨부 자체는 가져오지 않으며, preview가 그 수를 말한다.
+- [ ] preview의 네 수치가 화면에 **각각 따로** 보인다 — 분기 중복 메시지,
+      아카이브에 없는 첨부, 어느 대화에도 속하지 않은 항목, 서식을 읽지 못해
+      제외한 답변. 실제 export에서 셋 이상이 0이면 그 export가 해당 경우를
+      담고 있는지 먼저 확인한다(0이 정상일 수도, 미표시일 수도 있다).
+- [ ] **분기된 대화가 각각 독립 대화로 들어온다**(§2.2). 분기점 이전 turn이
+      각 분기에 모두 있고, 선택 화면에서 분기를 개별로 해제할 수 있다.
+- [ ] **같은 export를 다시 가져오면 전부 중복으로 skip되고 저장량이 늘지
+      않는다.** 이것이 ID 결정성의 실제 확인이며, 합성 fixture로는 증명되지
+      않는 부분이다.
+- [ ] 답변이 markdown으로 저장돼 viewer에서 표·코드 블록·목록이 제대로
+      보인다. HTML 태그가 글자 그대로 노출되지 않는다.
+- [ ] **HTML 형식으로 내보낸 파일**을 올리면 파일 선택기에서 고를 수 있고,
+      "내 활동을 JSON 형식으로 다시 내보내 주세요"라는 안내가 나온다. 일반
+      "읽을 수 없음"이 아니다(§6). 진단 라벨은 `html_export_unsupported`.
+- [ ] Gems·예약 작업 파일(`Takeout/Gemini/*.html`)만 담긴 ZIP도 같은 안내로
+      이어지고, 조용히 "대화 0건"으로 끝나지 않는다.
+- [ ] 활동 기록이 꺼져 있어 대화가 없는 export는 **오류가 아니라 정상 상태**로
+      구분해 표시된다(§1).
+- [ ] admin 지표에서 이 import가 provider `gemini`로 잡힌다.
+
+## 실행 기록
+
+이 파일에는 결과를 적지 않습니다. `staging-verification-records/`를 보세요.
+
+| 실행 | 상태 |
 |---|---|
-| 검증 대상 커밋 SHA | 8c43430 |
-| 실행자 | @mposition |
-| 실행일 | 04/08/2026|
-| 결과 (통과 / 조건부 / 실패) | 통과 |
-| 발견 사항·후속 티켓 | |
-| 승인자 서명 | TH |
-| 승인일 | 04/08/2026 |
+| `2026-08-04__8c43430.md` | legacy summary — 서명은 있으나 항목별 증거 미기록 |
+| 최신 staging SHA에 대한 재검증 | **아직 없음** |
+
+재검증이 필요한 이유는 그 기록 파일 안에 적혀 있습니다.

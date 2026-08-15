@@ -1,5 +1,6 @@
 import { expect, type Page } from "@playwright/test";
 import { mockAuthenticatedApi, type AuthenticatedQaState } from "./app-fixtures";
+import { skipUnlessCanonicalVisualBrowser } from "./canonical-visual";
 
 // ---------------------------------------------------------------------------
 // UI-P1-03: deterministic chat-state fixtures for visual regression.
@@ -665,6 +666,15 @@ export async function expectStableScreenshot(
 ) {
   await expectThemeApplied(page, theme);
   await expectNoUnexpectedTransientUi(page, allowTransientUi);
+  // The canonical-browser gate belongs to the capture, not to the test file.
+  // Placed here it keeps its contract exactly -- a golden judged by a
+  // substitute Chromium reports `Not verified` rather than a product failure --
+  // while the behavioural assertions above and in the 18 screenshot-free tests
+  // of chat-state-visual-regression.spec.ts still run. Called after the checks
+  // above on purpose: a theme that did not apply or an unexpected overlay is a
+  // product fact any browser can establish, and reporting it is worth more than
+  // reporting a skip.
+  skipUnlessCanonicalVisualBrowser();
   // Every golden here is mostly text, and the webfonts are self-hosted with
   // `preload: false` (docs/ui-contracts/typography.md), so capturing before
   // they apply records the fallback face's metrics instead of the product's.

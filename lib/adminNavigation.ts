@@ -9,7 +9,7 @@ import type { AdminRole } from "@/lib/adminAuthCore";
  * (the layout's badge counts) and a client component (the sidebar) agree on the
  * same route table without either importing the other.
  *
- * Icons live in `components/admin/adminNavigationIcons.tsx`, keyed by item id,
+ * Icons live in `components/admin/adminNavigationIcons.ts`, keyed by item id,
  * because a `lucide-react` import would make this module unusable from a plain
  * Node test.
  */
@@ -256,6 +256,14 @@ export const ADMIN_NAVIGATION: readonly AdminNavItem[] = [
     group: "AI Platform",
     writeRoles: ["owner", "ops"],
     aliases: ["registry", "catalogue", "catalog", "gpt", "claude", "gemini"],
+  },
+  {
+    id: "routing",
+    label: "Routing",
+    href: "/admin/routing",
+    description: "Shadow Auto Router decisions against what actually ran",
+    group: "AI Platform",
+    aliases: ["auto", "router", "shadow", "task profile", "candidates"],
   },
   {
     id: "infrastructure",

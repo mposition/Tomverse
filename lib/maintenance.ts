@@ -9,6 +9,8 @@ import {
 import { expireCreditLots } from "@/lib/creditLedger";
 import { reconcileExpiredChatCreditReservations } from "@/lib/chatSecurity";
 import { purgeExpiredChatLimitDecisions } from "@/lib/chatLimitDecisions";
+import { purgeExpiredAccountDataExportRequests } from "@/lib/accountDataExportTickets";
+import { compactAgedContextManifests } from "@/lib/routingManifestRetention";
 import { deleteExpiredContextBundleConsumptions } from "@/lib/chatContextBundleService";
 import { dispatchPendingMemoryExtractionRuns } from "@/lib/memoryExtractionWorker";
 import { purgeExpiredTraceErrorEvidence } from "@/lib/traceErrorEvidence";
@@ -22,6 +24,13 @@ import {
   FOUNDING_TESTER_PASS_STATUS,
 } from "@/lib/foundingTesterPassCore";
 import { deleteTomverseAccount } from "@/lib/accountDeletion";
+import { createMaintenanceStepRunner } from "@/lib/maintenanceStepsCore";
+import { retentionCutoff } from "@/lib/retentionPolicyCore";
+import {
+  drainKnowledgeCleanupQueue,
+  sweepAbandonedKnowledgeObjects,
+} from "@/lib/assistantKnowledgeLifecycle";
+import { processPendingKnowledgeFiles } from "@/lib/assistantKnowledgeProcessor";
 import { deleteR2Object, listExpiredR2Objects } from "@/lib/r2";
 import {
   GUEST_ATTACHMENT_PREFIX,
@@ -331,20 +340,41 @@ const sweepExpiredGuestAttachments = async (now: Date) => {
 };
 
 export async function cleanupExpiredData() {
+  // Not a step: without the encryption key the OAuth sweep would write
+  // plaintext, so this stays fail-closed for the whole run.
   assertOAuthTokenEncryptionConfigured();
   const now = new Date();
 
-  const creditReservations = await reconcileExpiredChatCreditReservations();
-  const testerPassReminders = await sendFoundingTesterPassReminders(now);
-  const testerPassExpirations = await expireFoundingTesterPasses(now);
-  const testerPassEndedNotices = await sendFoundingTesterPassEndedNotices(now);
-  const scheduledAccountsDeleted = await deleteScheduledAccounts(now);
+  // Every piece of work below is independent of every other, and each runs
+  // under its own name so that one failing does not skip the rest. See
+  // lib/maintenanceStepsCore.ts for why. The order is unchanged: the tester
+  // pass steps read what the one before them wrote, and running them in
+  // sequence keeps a notice in the same run as the expiry it announces.
+  const { step, failures } = createMaintenanceStepRunner();
 
-  const sessions = await prisma.session.deleteMany({
-    where: { expires: { lte: new Date() } },
-  });
+  const creditReservations = await step("chat_credit_reservations", () =>
+    reconcileExpiredChatCreditReservations()
+  );
+  const testerPassReminders = await step("tester_pass_reminders", () =>
+    sendFoundingTesterPassReminders(now)
+  );
+  const testerPassExpirations = await step("tester_pass_expirations", () =>
+    expireFoundingTesterPasses(now)
+  );
+  const testerPassEndedNotices = await step("tester_pass_ended_notices", () =>
+    sendFoundingTesterPassEndedNotices(now)
+  );
+  const scheduledAccountsDeleted = await step("scheduled_account_deletions", () =>
+    deleteScheduledAccounts(now)
+  );
 
-  const usageBuckets = await prisma.$executeRaw`
+  const sessions = await step("expired_sessions", () =>
+    prisma.session.deleteMany({
+      where: { expires: { lte: new Date() } },
+    })
+  );
+
+  const usageBuckets = await step("usage_buckets", () => prisma.$executeRaw`
     DELETE FROM "ChatUsageBucket"
     WHERE
       (
@@ -366,46 +396,99 @@ export async function cleanupExpiredData() {
         AND "period" <> 'lock-15m'
         AND "updatedAt" < NOW() - INTERVAL '90 days'
       )
-  `;
+  `);
 
-  const requestLeases = await prisma.$executeRaw`
+  const requestLeases = await step("request_leases", () => prisma.$executeRaw`
     DELETE FROM "ChatRequestLease"
     WHERE "expiresAt" <= NOW()
-  `;
+  `);
 
-  const providerErrorEvents = await prisma.providerErrorEvent.deleteMany({
-    where: {
-      createdAt: {
-        lt: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000),
+  const providerErrorEvents = await step("provider_error_events", () =>
+    prisma.providerErrorEvent.deleteMany({
+      where: { createdAt: { lt: retentionCutoff("providerErrors", now) } },
+    })
+  );
+
+  // The two policies /admin/retention published and nothing performed.
+  //
+  // Provider check records are read newest-first everywhere they are read at
+  // all -- the verification cooldown wants the last attempt, the recovery
+  // evidence list takes the most recent hundred -- so a 30-day floor is far
+  // above anything that reads them, and matches the sanitized provider error
+  // diagnostics they sit beside.
+  const providerHealthChecks = await step("provider_health_checks", () =>
+    prisma.providerHealthCheck.deleteMany({
+      where: { createdAt: { lt: retentionCutoff("providerChecks", now) } },
+    })
+  );
+
+  // Written every probe cycle and read by nothing at all. Without this the
+  // table is pure accumulation: the failure path that matters already logs and
+  // moves the provider's health counters, and the row is only there for a
+  // person to query afterwards.
+  const providerProbeResults = await step("provider_probe_results", () =>
+    prisma.providerProbeResult.deleteMany({
+      where: { startedAt: { lt: retentionCutoff("providerProbeResults", now) } },
+    })
+  );
+
+  // Every reader of this table is newest-first or last-cycle, so the tail has
+  // no audience. An unattended failure older than the window is past being
+  // auto-fixable too.
+  const scheduledJobRuns = await step("scheduled_job_runs", () =>
+    prisma.scheduledJobRun.deleteMany({
+      where: { startedAt: { lt: retentionCutoff("scheduledJobRuns", now) } },
+    })
+  );
+
+  const providerModelCatalogRuns = await step("provider_model_catalog_runs", () =>
+    prisma.providerModelCatalogRun.deleteMany({
+      where: {
+        startedAt: { lt: retentionCutoff("providerModelCatalogRuns", now) },
       },
-    },
-  });
+    })
+  );
+
+  // Alert delivery logs, with the same carve-out the notification queue below
+  // has and for the same reason: a failed delivery nobody has acknowledged is
+  // still on the work queue, oldest first. Sweeping it on age would take the
+  // one row an operator has not dealt with and leave the ones they have.
+  const notificationLogs = await step("notification_logs", () =>
+    prisma.adminNotificationLog.deleteMany({
+      where: {
+        createdAt: { lt: retentionCutoff("notificationLogs", now) },
+        NOT: { status: "failed", acknowledgedAt: null },
+      },
+    })
+  );
 
   // Same 30-day window as the provider error diagnostics above; the count is
   // the only thing recorded -- never the evidence contents. Feedback rows
   // linked to a purged occurrence keep their verification outcome (the FK
   // nulls out via onDelete: SetNull).
-  const traceErrorEvidence = await purgeExpiredTraceErrorEvidence();
+  const traceErrorEvidence = await step("trace_error_evidence", () =>
+    purgeExpiredTraceErrorEvidence()
+  );
 
   // Shadow diagnosis cases that reached a terminal state keep their value for
   // 90 days of metric aggregation, then age out; open cases are never purged.
-  const autoFixCases = await purgeClosedAutoFixCases();
+  const autoFixCases = await step("autofix_cases", () => purgeClosedAutoFixCases());
 
-  const productAnalyticsEvents = await prisma.productAnalyticsEvent.deleteMany({
-    where: {
-      occurredAt: {
-        lt: new Date(Date.now() - 400 * 24 * 60 * 60 * 1000),
-      },
-    },
-  });
+  const productAnalyticsEvents = await step("product_analytics_events", () =>
+    prisma.productAnalyticsEvent.deleteMany({
+      where: { occurredAt: { lt: retentionCutoff("productAnalytics", now) } },
+    })
+  );
 
   // Limit decisions are support diagnostics, not billing records: 90 days is
   // long enough to answer "why was I blocked last quarter" and short enough
   // that the table cannot grow without bound.
-  const limitDecisions = await purgeExpiredChatLimitDecisions(now);
+  const limitDecisions = await step("limit_decisions", () =>
+    purgeExpiredChatLimitDecisions(now)
+  );
 
-  const promotionRiskIdentifiers =
-    await prisma.billingPromotionRedemption.updateMany({
+  const promotionRiskIdentifiers = await step("promotion_risk_identifiers", () =>
+    prisma.billingPromotionRedemption.updateMany({
       where: {
         redeemedAt: {
           lt: new Date(Date.now() - 90 * 24 * 60 * 60 * 1000),
@@ -419,9 +502,10 @@ export async function cleanupExpiredData() {
         clientIpHash: null,
         paymentMethodFingerprintHash: null,
       },
-    });
+    })
+  );
 
-  const shareSnapshots = await prisma.$executeRaw`
+  const shareSnapshots = await step("share_snapshots", () => prisma.$executeRaw`
     UPDATE "Conversation"
     SET
       "shareEnabled" = FALSE,
@@ -440,29 +524,54 @@ export async function cleanupExpiredData() {
         OR "shareSnapshot" IS NOT NULL
         OR "shareExpiresAt" IS NOT NULL
       )
-  `;
+  `);
   // Settled notification deliveries are an operational audit trail, not a
   // queue: 30 days is long enough to answer "did that report ever reach us"
   // and short enough that the table cannot grow without bound. Pending rows
   // are never swept -- they still owe a delivery.
-  const notificationDeliveries = await prisma.notificationDelivery.deleteMany({
-    where: {
-      status: { in: ["delivered", "abandoned"] },
-      updatedAt: { lt: new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000) },
-    },
-  });
+  const notificationDeliveries = await step("notification_deliveries", () =>
+    prisma.notificationDelivery.deleteMany({
+      where: {
+        status: { in: ["delivered", "abandoned"] },
+        updatedAt: { lt: new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000) },
+      },
+    })
+  );
 
-  const oauthTokensEncrypted = await encryptExistingOAuthTokens();
-  const creditLotsExpired = await expireCreditLots();
-  const guestAttachments = await sweepExpiredGuestAttachments(now);
+  const oauthTokensEncrypted = await step("oauth_token_encryption", () =>
+    encryptExistingOAuthTokens()
+  );
+  const creditLotsExpired = await step("credit_lot_expiry", () => expireCreditLots());
+  const guestAttachments = await step("guest_attachments", () =>
+    sweepExpiredGuestAttachments(now)
+  );
+
+  // Assistant knowledge storage (import/memory policy §14.2). Two steps
+  // because they answer different questions: the queue deletes the bytes of
+  // rows that are already gone, and the orphan sweep takes objects no row ever
+  // claimed. An active knowledge file is deliberately not swept at all -- it
+  // has no expiry, which is the policy's decision rather than a gap here.
+  const knowledgeCleanup = await step("assistant_knowledge_cleanup", () =>
+    drainKnowledgeCleanupQueue(200, now)
+  );
+  const knowledgeOrphans = await step("assistant_knowledge_orphans", () =>
+    sweepAbandonedKnowledgeObjects(now)
+  );
+  // The extraction driver, in the same shape memory extraction's is: reclaim
+  // a file whose worker died, then actually process it. Reclaiming alone
+  // leaves a claimable row waiting for a request that may never come.
+  const knowledgeProcessing = await step("assistant_knowledge_processing", () =>
+    processPendingKnowledgeFiles(now)
+  );
 
   // A consumed §10 context bundle stops being worth remembering the moment
   // the bundle itself expires: past that, verification refuses it before
   // consumption is ever consulted. Swept here rather than on the request
   // path, where a delete racing a claim is exactly what a nonce table must
   // not do.
-  const contextBundleConsumptions =
-    await deleteExpiredContextBundleConsumptions(now);
+  const contextBundleConsumptions = await step("context_bundle_consumptions", () =>
+    deleteExpiredContextBundleConsumptions(now)
+  );
 
   // Memory extraction's recovery dispatcher (import/memory policy §11, §11.1).
   //
@@ -473,25 +582,63 @@ export async function cleanupExpiredData() {
   // alone was the gap §11.1 names: the run becomes claimable and then nothing
   // claims it, so it waits for a request that may never come. Driving it here
   // is what actually guarantees a run finishes.
-  const memoryExtraction = await dispatchPendingMemoryExtractionRuns(now);
+  const memoryExtraction = await step("memory_extraction_dispatch", () =>
+    dispatchPendingMemoryExtractionRuns(now)
+  );
 
+  // The export ticket dies at its five-minute expiry; the row is what tells an
+  // account owner their data was downloaded last month, so it is kept for the
+  // same 90 days as the other security audit trails. Purging it on expiry
+  // would leave an audit covering only the last five minutes, which is the
+  // same as having none.
+  const accountDataExportRequests = await step("account_data_export_requests", () =>
+    purgeExpiredAccountDataExportRequests(now)
+  );
+
+  // MANIFEST-02. Aged manifests keep the hash an audit verifies with and lose
+  // the per-part detail that describes the request. Deletion is not this
+  // step's job and never waits for it: a manifest cascades away with the
+  // account the moment the account goes, retention window or not.
+  const contextManifests = await step("context_manifest_compaction", () =>
+    compactAgedContextManifests(now)
+  );
+
+  // `null` reads as "this step did not report", which is what a step that threw
+  // did. It is deliberately distinct from the `0` of a step that ran and found
+  // nothing, and the callers that sum these numbers skip it rather than
+  // counting a failure as no work.
   return {
+    accountDataExportRequests,
+    contextManifestsCompacted: contextManifests?.compacted ?? null,
+    // A backlog that is not shrinking is the signal the batch size is too
+    // small for the volume, and it is only visible if the step reports it.
+    contextManifestsAwaitingCompaction: contextManifests?.remaining ?? null,
     contextBundleConsumptions,
-    memoryExtractionRuns: memoryExtraction.reclaimedRuns,
-    memoryExtractionDispatched: memoryExtraction.dispatchedRuns,
-    memoryExtractionChunks: memoryExtraction.chunksProcessed,
+    memoryExtractionRuns: memoryExtraction?.reclaimedRuns ?? null,
+    memoryExtractionDispatched: memoryExtraction?.dispatchedRuns ?? null,
+    memoryExtractionChunks: memoryExtraction?.chunksProcessed ?? null,
     guestAttachments,
-    sessions: sessions.count,
-    usageBuckets: Number(usageBuckets),
-    requestLeases: Number(requestLeases),
-    providerErrorEvents: providerErrorEvents.count,
+    assistantKnowledgeObjectsDeleted: knowledgeCleanup?.deleted ?? null,
+    assistantKnowledgeCleanupExhausted: knowledgeCleanup?.exhausted ?? null,
+    assistantKnowledgeOrphansDeleted: knowledgeOrphans?.deleted ?? null,
+    assistantKnowledgeReclaimed: knowledgeProcessing?.reclaimed ?? null,
+    assistantKnowledgeProcessed: knowledgeProcessing?.processed ?? null,
+    sessions: sessions?.count ?? null,
+    usageBuckets: usageBuckets === null ? null : Number(usageBuckets),
+    requestLeases: requestLeases === null ? null : Number(requestLeases),
+    providerErrorEvents: providerErrorEvents?.count ?? null,
+    providerHealthChecks: providerHealthChecks?.count ?? null,
+    providerProbeResults: providerProbeResults?.count ?? null,
+    scheduledJobRuns: scheduledJobRuns?.count ?? null,
+    providerModelCatalogRuns: providerModelCatalogRuns?.count ?? null,
+    notificationLogs: notificationLogs?.count ?? null,
     traceErrorEvidence,
     autoFixCases,
-    productAnalyticsEvents: productAnalyticsEvents.count,
-    limitDecisions: limitDecisions.deleted,
-    promotionRiskIdentifiers: promotionRiskIdentifiers.count,
-    notificationDeliveries: notificationDeliveries.count,
-    shareSnapshots: Number(shareSnapshots),
+    productAnalyticsEvents: productAnalyticsEvents?.count ?? null,
+    limitDecisions: limitDecisions?.deleted ?? null,
+    promotionRiskIdentifiers: promotionRiskIdentifiers?.count ?? null,
+    notificationDeliveries: notificationDeliveries?.count ?? null,
+    shareSnapshots: shareSnapshots === null ? null : Number(shareSnapshots),
     oauthTokensEncrypted,
     creditLotsExpired,
     creditReservations,
@@ -499,5 +646,6 @@ export async function cleanupExpiredData() {
     testerPassExpirations,
     testerPassEndedNotices,
     scheduledAccountsDeleted,
+    failedSteps: failures,
   };
 }

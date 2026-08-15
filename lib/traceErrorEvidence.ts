@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import * as Sentry from "@sentry/nextjs";
+import { resolveDeploymentEnvironment } from "@/lib/deploymentEnvironment";
 import { prisma } from "@/lib/prisma";
 import {
   ERROR_CLASSIFICATION_SOURCE,
@@ -90,11 +91,12 @@ export const resetTraceEvidenceWriteBudgetForTests = () => {
 
 const releaseSha = () =>
   process.env.SENTRY_RELEASE || process.env.RAILWAY_GIT_COMMIT_SHA || null;
-const environmentName = () =>
-  process.env.SENTRY_ENVIRONMENT ||
-  process.env.RAILWAY_ENVIRONMENT_NAME ||
-  process.env.NODE_ENV ||
-  "unknown";
+// Deliberately NOT SENTRY_ENVIRONMENT. This name is stored on evidence a
+// person later reads to decide where a reported error happened, and the
+// feedback-automation policy forbids marking a staging deployment as a
+// production resolution. A Sentry display alias must not be able to say which
+// deployment produced a record.
+const environmentName = () => resolveDeploymentEnvironment();
 
 export type ChatErrorReportGrantInput = {
   /** Must be a trace this route minted itself (randomUUID at request start).

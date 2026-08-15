@@ -2,6 +2,8 @@ import { randomInt } from "node:crypto";
 import { after } from "next/server";
 import { getAnonymousClientKey } from "@/lib/clientIp";
 import {
+  cspSourcePosition,
+  isBrowserExtensionCspSource,
   isTrustedCspDocumentUri,
   sanitizeCspReportedUrl,
 } from "@/lib/cspReportCore";
@@ -148,14 +150,53 @@ export async function POST(req: Request) {
         blockedUri: sanitizeCspReportedUrl(
           report["blocked-uri"] || report.blockedURL || ""
         ),
+        // Without this the recurring `script-src blocked eval` report on
+        // /chat was unactionable: the page it happened on says nothing about
+        // whether our own bundle, an allowed third-party tag, or a browser
+        // extension called eval. `sanitizeCspReportedUrl` reduces a
+        // non-http(s) source to its bare scheme, so an extension shows up as
+        // `chrome-extension:` without recording which extension it was.
+        sourceFile: sanitizeCspReportedUrl(
+          report["source-file"] || report.sourceFile || ""
+        ),
+        sourcePosition: cspSourcePosition(report),
         disposition: removeControlCharacters(report.disposition, 30),
       };
       if (!Object.values(normalized).some(Boolean)) continue;
+
+      // An extension injecting `eval` into a user's own browser is not an
+      // incident about this deployment, and it arrives steadily: two issues,
+      // 56 events in two weeks, still firing. Filed as operational incidents
+      // they sit in the same stream as real problems and train the stream to
+      // be ignored -- the same failure staging's permanently-red readiness
+      // had. Counted here instead, so the volume stays visible without
+      // claiming something is wrong with the app.
+      //
+      // Only extension schemes are treated this way. `data:` and `blob:` are
+      // also non-http(s) and are what injected script looks like, so they keep
+      // reporting, and so does a violation with no source at all.
+      if (isBrowserExtensionCspSource(normalized.sourceFile)) {
+        console.info(
+          JSON.stringify({
+            event: "csp_violation_from_browser_extension",
+            documentUri: normalized.documentUri,
+            violatedDirective: normalized.violatedDirective,
+            blockedUri: normalized.blockedUri,
+            sourceFile: normalized.sourceFile,
+          })
+        );
+        continue;
+      }
+
       after(() =>
         reportOperationalIncident({
           code: "CSP_VIOLATION_DETECTED",
           title: "Content Security Policy violation detected",
-          error: `${normalized.violatedDirective || "unknown directive"} blocked ${normalized.blockedUri || "unknown resource"}`,
+          // The source is in the summary, not only in the context. Both of
+          // today's issues read "script-src blocked eval" and nothing else,
+          // so the one fact that decides whether anyone should act -- whose
+          // code called eval -- was invisible until someone opened an event.
+          error: `${normalized.violatedDirective || "unknown directive"} blocked ${normalized.blockedUri || "unknown resource"} from ${normalized.sourceFile || "an unreported source"}`,
           severity: "warning",
           cooldownMs: 15 * 60 * 1_000,
           context: {
@@ -163,6 +204,8 @@ export async function POST(req: Request) {
             documentUri: normalized.documentUri,
             violatedDirective: normalized.violatedDirective,
             blockedUri: normalized.blockedUri,
+            sourceFile: normalized.sourceFile,
+            sourcePosition: normalized.sourcePosition,
             disposition: normalized.disposition,
           },
         })

@@ -3,9 +3,13 @@ import {
   IMAGE_COST_PER_CREDIT_CEILING_MICRO_USD,
   listEnabledImagePricingEntries,
   maxRequestCostMicroUsd,
+  type ImageGenerationPricingEntry,
 } from "@/lib/imageGenerationPricing";
 import {
   listActiveImageProviders,
+  listEnabledImageModels,
+  maxImageRequestCostMicroUsd,
+  type ImageModelProfile,
   type ImageModelProvider,
 } from "@/lib/imageModelRegistry";
 
@@ -36,12 +40,51 @@ export const IMAGE_PROVIDER_BUDGET_ENV_NAMES = imageProviderBudgetEnvNames("open
 
 export const IMAGE_BUDGET_HEADROOM_MULTIPLIER = 1.25;
 
-/** Worst legitimate provider cost of one credit, prompt budget included. */
+/**
+ * Worst legitimate provider cost of one credit, prompt budget included, across
+ * everything a user can buy today.
+ *
+ * Both price lists, because there are two. `IMAGE_GENERATION_PRICING` is
+ * gpt-image-2's original table; every model added since carries its prices on
+ * its registry profile. Reading only the first was right when it was the only
+ * one and quietly stopped being: xAI shipped enabled and never entered this
+ * derivation, and a Google model would not have either. The number it returned
+ * stayed correct by luck -- gpt-image-2 Final happens to be the most expensive
+ * credit on offer -- which is the kind of correctness that ends without
+ * warning, on the deploy that adds a costlier model.
+ *
+ * An enabled model whose worst case is unknown throws rather than being
+ * skipped. Skipping it would understate the floor using the very models the
+ * floor exists to cover; `check:image-pricing` already forbids enabling one,
+ * so this is the in-process backstop for a registry edit that gets past it.
+ */
+export const worstImageCostPerCreditFrom = (
+  entries: readonly ImageGenerationPricingEntry[],
+  models: readonly ImageModelProfile[]
+): number => {
+  const fromLegacyTable = entries.map((entry) =>
+    Math.ceil(maxRequestCostMicroUsd(entry) / entry.credits)
+  );
+  const fromRegistry = models.flatMap((model) =>
+    model.prices.map((price) => {
+      const maxCost = maxImageRequestCostMicroUsd(model, price);
+      if (maxCost === null) {
+        throw new Error(
+          `${model.id} is enabled but its worst-case cost is unbounded, so no ` +
+            "image provider budget floor can be derived."
+        );
+      }
+      return Math.ceil(maxCost / price.credits);
+    })
+  );
+  return Math.max(...fromLegacyTable, ...fromRegistry);
+};
+
+/** The same derivation over what is actually enabled right now. */
 export const worstImageCostPerCreditMicroUsd = () =>
-  Math.max(
-    ...listEnabledImagePricingEntries().map((entry) =>
-      Math.ceil(maxRequestCostMicroUsd(entry) / entry.credits)
-    )
+  worstImageCostPerCreditFrom(
+    listEnabledImagePricingEntries(),
+    listEnabledImageModels()
   );
 
 /**
@@ -70,6 +113,17 @@ export type ImageProviderBudgetProblem = {
   message: string;
 };
 
+/**
+ * A configuration that is legal but says something the operator probably did
+ * not mean. Separate from `problems` on purpose: a problem sets `limits` to
+ * null and refuses readiness, and refusing to start over a merely odd budget
+ * would be worse than the budget. These surface and do not block.
+ */
+export type ImageProviderBudgetAdvisory = {
+  code: "month_not_above_day";
+  message: string;
+};
+
 export type ImageProviderBudgetClamp = {
   window: "day" | "month";
   configuredMicroUsd: number;
@@ -81,6 +135,8 @@ export type ResolvedImageProviderBudget = {
   limits: { day: number; month: number } | null;
   floorMicroUsd: number;
   problems: ImageProviderBudgetProblem[];
+  /** Legal but probably unintended. Surfaces; never blocks readiness. */
+  advisories: ImageProviderBudgetAdvisory[];
   /** Overrides raised to the floor -- reported, never silently applied. */
   clamped: ImageProviderBudgetClamp[];
   source: "environment" | "development_default" | "unconfigured";
@@ -103,6 +159,7 @@ export const resolveImageProviderBudget = (
   const envNames = imageProviderBudgetEnvNames(provider);
   const floor = imageProviderBudgetFloorMicroUsd();
   const problems: ImageProviderBudgetProblem[] = [];
+  const advisories: ImageProviderBudgetAdvisory[] = [];
   const clamped: ImageProviderBudgetClamp[] = [];
 
   const day = parseBudgetValue(env[envNames.day]);
@@ -121,7 +178,14 @@ export const resolveImageProviderBudget = (
         });
       }
     }
-    return { limits: null, floorMicroUsd: floor, problems, clamped, source: "unconfigured" };
+    return {
+      limits: null,
+      floorMicroUsd: floor,
+      problems,
+      advisories,
+      clamped,
+      source: "unconfigured",
+    };
   }
 
   if (day.state === "missing" && month.state === "missing") {
@@ -136,7 +200,14 @@ export const resolveImageProviderBudget = (
           message: `${envNames[window]} is required in production.`,
         });
       }
-      return { limits: null, floorMicroUsd: floor, problems, clamped, source: "unconfigured" };
+      return {
+      limits: null,
+      floorMicroUsd: floor,
+      problems,
+      advisories,
+      clamped,
+      source: "unconfigured",
+    };
     }
     // Development/test fallback, never below the floor so local behaviour
     // matches what production would enforce.
@@ -147,6 +218,7 @@ export const resolveImageProviderBudget = (
       },
       floorMicroUsd: floor,
       problems,
+      advisories,
       clamped,
       source: "development_default",
     };
@@ -159,7 +231,14 @@ export const resolveImageProviderBudget = (
       reason: "partial_configuration",
       message: `${envNames[missing]} is missing while the other window is set; configure both.`,
     });
-    return { limits: null, floorMicroUsd: floor, problems, clamped, source: "unconfigured" };
+    return {
+      limits: null,
+      floorMicroUsd: floor,
+      problems,
+      advisories,
+      clamped,
+      source: "unconfigured",
+    };
   }
 
   const effective = { day: day.value, month: month.value };
@@ -174,10 +253,26 @@ export const resolveImageProviderBudget = (
     }
   }
 
+  // Both windows being at or near the same number is legal and almost never
+  // intended: a month equal to the day ceiling is exhausted by one day spent
+  // at the cap, so the monthly window stops being a second bound at all. It is
+  // deliberate in staging, where a small identical pair caps total spend; in
+  // production it usually means one of the two was copied.
+  if (effective.month <= effective.day) {
+    advisories.push({
+      code: "month_not_above_day",
+      message:
+        `${envNames.month} (${effective.month}) is not above ${envNames.day} ` +
+        `(${effective.day}): one day spent at the daily cap exhausts the ` +
+        `month, so the monthly window adds no second bound.`,
+    });
+  }
+
   return {
     limits: effective,
     floorMicroUsd: floor,
     problems,
+    advisories,
     clamped,
     source: "environment",
   };

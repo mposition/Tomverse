@@ -103,6 +103,7 @@ const chatBudget = ({
   usageCredits: credits,
   inputTokens,
   maxOutputTokens: outputTokens,
+  providerMaxOutputTokens: null,
   reservedOutputTokens,
   inputUsdPerMillionTokens: inputRate,
   outputUsdPerMillionTokens: outputRate,
@@ -1277,4 +1278,49 @@ test("the largest derived guardrail survives a database round trip", async () =>
       `${plan.plan} plan's ${plan.largestLimit} did not round trip`
     );
   }
+});
+
+test("the database refuses a lot balance below zero (§9)", async () => {
+  // The net under the account lock, not a replacement for it.
+  //
+  // reserveAddOnCredits() decides sufficiency from a read and then decrements.
+  // The lock is what serialises that decision; this is what happens when a
+  // caller does not hold it. Without the constraint the transaction commits a
+  // negative balance and the account silently holds credits it never bought,
+  // which surfaces months later in a ledger reconciliation. With it the
+  // transaction fails, which is a bug someone finds the same day.
+  //
+  // Both columns, because reserveAddOnCredits() decrements them in the same
+  // loop: guarding only the credits would leave the money side of an
+  // over-reservation invisible.
+  const user = await createUser();
+  const lot = await createAddOnLot(user.id, 3);
+
+  await assert.rejects(
+    prisma.creditLot.update({
+      where: { id: lot.id },
+      data: { remainingCredits: { decrement: 4 } },
+    }),
+    /CreditLot_remainingCredits_non_negative_check/
+  );
+  await assert.rejects(
+    prisma.creditLot.update({
+      where: { id: lot.id },
+      // More micro-USD than any lot holds. Written through BigInt() rather
+      // than as a literal: the project targets ES2017, where `1n` does not
+      // parse.
+      data: {
+        remainingFundedCostMicroUsd: { decrement: BigInt(1_000_000_000_000) },
+      },
+    }),
+    /CreditLot_remainingFundedCost_non_negative_check/
+  );
+
+  // Exactly zero is a spent lot, not a violation -- the ordinary end state of
+  // every lot the account fully uses.
+  const spent = await prisma.creditLot.update({
+    where: { id: lot.id },
+    data: { remainingCredits: { decrement: 3 } },
+  });
+  assert.equal(spent.remainingCredits, 0);
 });

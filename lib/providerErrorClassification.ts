@@ -127,6 +127,13 @@ export const PROVIDER_CALL_DIAGNOSTIC_ROOTS = [
     "PROVIDER_VERIFICATION_FAILED",
     "QUICK_COMPARISON_FAILED",
     "VERIFICATION_ITEM_FAILED",
+    // AI Review's own generateText wrapper, the same shape as the two above.
+    // It was missing because the drift test listed route files by hand and
+    // this call lives in a service, so every AI Review failure -- including a
+    // real provider outage -- classified as a local rejection and taught
+    // provider health nothing. Safe to count only because the service now
+    // records nothing at all for its own ChatAccessError refusals.
+    "COMPARISON_REVIEW_FAILED",
     "DEEP_RESEARCH_SUBMIT_FAILED",
     "DEEP_RESEARCH_JOB_FAILED",
 ] as const;

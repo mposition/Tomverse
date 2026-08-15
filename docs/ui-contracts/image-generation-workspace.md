@@ -27,7 +27,9 @@ rendering, this contract is the answer.
 | Sidebar placement of the launcher | `components/chat/ChatSidebar.tsx` |
 | Which models exist, their prices and their holds | `lib/imageModelRegistry.ts` |
 | Group polling endpoint the timeline reads | `app/api/images/groups/[groupId]/route.ts` |
+| Operations view (budget, registry, invariants) | `components/admin/AdminImageGenerationPanel.tsx`, mounted at `/admin/providers` |
 | Current-attempt and group-status derivation | `lib/imageGenerationStateCore.ts`, `lib/imageGenerationRead.ts` |
+| Timeline merge rules (stale answers, asset URL churn) | `lib/imageTimelineMerge.ts` |
 | Copy | `locales/*.ts` (`chat.imageGeneration*`, `chat.imageModel*`, `chat.modelPickerTab*`, `sidebar.newImage*`) |
 
 ## Purpose
@@ -134,6 +136,103 @@ component:
 - Model selection sits **above** the textarea: the price the composer quotes is
   decided before the prompt is written.
 
+### Composer state lifecycle
+
+The composer's settings belong to the conversation, not to a React mount.
+
+- **A draft becoming the conversation it just created is not a switch.** The
+  model selection, quality and size survive it; only the prompt clears, and the
+  entry point's seed is dropped so it cannot re-fill the box with a prompt the
+  user has already paid to generate.
+- **A real conversation switch still remounts.** The workspace owns a timeline
+  and a poll loop that belong to one conversation, and neither may follow the
+  user. The remount key is explicit state, never derived from the conversation
+  id — deriving it is what made promotion look like a switch.
+- **Re-entering an image conversation restores its last comparison**, from
+  `composerRestore` on the history read (`deriveImageComposerRestore()`). One
+  round trip, one server moment: the timeline and the composer's starting state
+  must not come from two different reads.
+
+What restore may and may not do:
+
+| Rule | Why |
+| --- | --- |
+| The latest group is chosen by the **group's** `createdAt`, id as tiebreak | retrying an older group's failed target writes the newest generation row in the conversation |
+| A target's current attempt is `currentGenerationId`, falling back to the highest `attemptNumber` | the same contract `currentImageAttempt()` already owns |
+| Models come back in **registry order** | selection order is recorded nowhere and carries no product meaning |
+| Options come back **only if every current attempt agrees** | one request carries one quality and size, so a disagreement is a bug — picking one target's values would present corrupt data as the user's last choice |
+| A model that is now held, or has no price at the restored option, is excluded **and named** | a silently different selection is the failure this path exists to end |
+| The default model is the **last** resort | it is right only when nothing the user chose can be offered back |
+| The prompt is **never** restored | it is timeline history, not the next draft |
+
+A restore answer that arrives after the user has touched a model, quality or
+size is discarded. The user's newer choice wins a race with the network.
+
+### The submit control is the progress
+
+While a comparison is running the button **is** the progress indicator: a
+spinner, "Generating N model(s)" counted by target rather than attempt, and
+disabled. A separate sentence beside a button still reading "Generate" at full
+contrast said the same thing twice and left it ambiguous whether the button
+could be clicked.
+
+- The price badge is dropped while a run is in flight — it describes a request
+  the user can still start, and there is none.
+- The busy sentence stays in the accessibility tree as a visually hidden
+  `role="status"` (the same idiom as the comparison action rail): a spinner is
+  no signal at all to a screen reader. Visually hidden means it paints no row —
+  `sr-only`, never `display: none`.
+- Per-model progress stays on the timeline cards. That is where a comparison's
+  state belongs; the composer says only whether a new run can start.
+
+### Model disclosure threshold
+
+With **three or fewer** enabled image generation models the composer exposes
+every one of them as an inline choice. From **four**, only the selected models
+stay inline and the unselected ones move into the model picker
+(`shouldUseCompactImageModelPicker()`, `IMAGE_INLINE_MODEL_DISCOVERY_LIMIT`).
+
+In **either** mode the composer keeps, uncollapsed and outside any picker:
+
+- each submitted model's own label and its **exact** credit price;
+- the group total;
+- in compact mode, the fact that more models exist and how many.
+
+The switch is decided by the **number of enabled models**. Never by viewport,
+never by how many are selected, never by measuring wrapped lines. A
+viewport-driven switch gives one account a different information structure per
+device and re-shapes the composer mid-rotation; a selection-driven one changes
+structure while the user is still choosing; a measurement-driven one makes the
+same state render differently for reasons no test can pin. Desktop and mobile
+get the same structure.
+
+The threshold is three because at two and three a viewer discovers the second
+and third model without a click, and multi-model comparison is the product — a
+feature nobody is shown is a feature nobody uses. It is **not**
+`IMAGE_GROUP_MAX_MODELS`: that bounds how much provider work one request may
+start and is deployment-tunable, this bounds one row of UI. Neither may be
+derived from the other.
+
+The rule lives in `imageComposerModelLayout()` in the registry, not in the
+component, and it is tested there. **This deployment cannot render the compact
+mode**: two models are enabled and the threshold is three, so an end-to-end
+test has no way to reach it — and activating the three held Google models takes
+the count from 2 straight to 5, skipping 4 entirely. A branch first exercised
+on the day it starts mattering is a branch nobody can trust on that day. What
+the browser tests instead is the reachable half: at two enabled models the
+picker toggle and panel are absent from the DOM, not merely hidden.
+
+The picker panel renders in normal flow, in its own row. It is never absolutely
+positioned, floated or overlaid — the mobile composer contract forbids any
+control overlapping the textarea's row, and a panel opening over it would do
+exactly that. A chip is the same control in both containers: same price, same
+accessible name, same target size. Selecting a model moves which container it
+is in and changes nothing else, registry order preserved in both lists, so a
+chip never jumps position under the pointer that just picked it.
+
+A chip may show `shortName`; the accessible name always carries the full
+`name`. Abbreviating the label must not abbreviate the model's identity.
+
 ## Chat surfaces stay out
 
 An image conversation must never mount `ChatInput`, `ChatApp`, or the
@@ -180,6 +279,16 @@ is a contract violation, not a style preference:
 `GET /api/images/generations/{generationId}` stays, for one job only:
 re-reading a single card whose signed asset URLs expired. It is not a polling
 path.
+
+**A settled card keeps the asset URLs it already has.** Signed URLs are minted
+fresh on every read, so a group poll answers with a *different* URL string for
+an image that has not changed — and taking it rewrites the `<img>` src, so the
+browser downloads the same bytes again on every tick, for every target that
+finished before the slowest one in its group. Per-generation polling never hit
+this because it only read unsettled rows; reading the whole group is what put
+finished cards in every answer. `mergeImageTimelineRow()` in
+`lib/imageTimelineMerge.ts` owns the rule, and the single-card recovery read is
+the only caller permitted to replace the URLs — it exists because they expire.
 
 Which attempt is a target's current state is decided by
 `currentImageAttempt()` in `lib/imageGenerationStateCore.ts`, and the group's
@@ -250,6 +359,16 @@ Verified for **both** desktop and mobile projects:
 | 12 | picked from the image tab | workspace opens seeded with that model |
 | 13 | composer draft carry-over | text carried; cancel restores it exactly |
 | 14 | multi-model group polling | one `/api/images/groups/*` request per tick, not one per model |
+| 15 | two providers in one group | both prices quoted, total is their sum, one POST carrying both ids |
+| 16 | option one selected model cannot price | submission disabled; re-enabled when the option changes back |
+| 17 | draft promoted to a conversation | model selection, quality and size survive; the prompt clears and does not come back |
+| 18 | switch to a different image conversation | timeline and poll loop do not follow |
+| 19 | Enter on desktop / mobile / mid-IME | submit / newline / never submit |
+| 20 | enabled model count 2, 3, 4, 5 | inline, inline, compact, compact — with every selected price still visible (`imageComposerModelLayout()`, unit) |
+| 20b | today's two enabled models, in the browser | every model inline; no picker toggle and no picker panel in the DOM at all (e2e) |
+| 21 | re-entering a conversation | last comparison's models and options restored; prompt empty |
+| 22 | restore drops a model or cannot restore options | both stated on screen, never silently applied |
+| 23 | comparison running | button shows the spinner and the model count, is disabled, drops the price; busy sentence hidden but present |
 
 ## Automated regression contract
 
@@ -289,6 +408,12 @@ rather than the behaviour.
 - [ ] No chat-only surface (ChatInput, ChatApp, comparison rail, AI Review) mounts
 - [ ] Group state is still derived from the latest attempt per target
 - [ ] Polling is still one request per group, through the group endpoint
+- [ ] A settled card still keeps its asset URLs across polls
+- [ ] Composer settings survive draft promotion, and remount still isolates a real conversation switch
+- [ ] Re-entry restores from the latest group, and says what it could not restore
+- [ ] The running state lives on the button, not in a second sentence beside it
+- [ ] Enter behaviour comes from `getChatEnterKeyAction()` with the IME guard
+- [ ] Selected models' exact prices are inline in both disclosure modes
 - [ ] A retry still replaces its card in place
 - [ ] Prices are quoted before submit, per model and in total
 - [ ] `accent-image-*` tokens only; no reserved gradient

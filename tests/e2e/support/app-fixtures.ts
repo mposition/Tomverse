@@ -439,6 +439,16 @@ export type AuthenticatedQaState = {
    */
   selectedModels: string[];
   disabledPanels: string[];
+  /** The conversation's stored memory mode, updated by PATCH like the rest. */
+  memoryMode: "inherit" | "on" | "off";
+  assistantProfile: {
+    profileId: string;
+    name: string;
+    icon: string | null;
+    revision: number;
+    latestRevision: number;
+    status: "current" | "superseded";
+  } | null;
   theme: "dark" | "light" | "system";
   timeZone: string;
   timeZoneInitializedAt: string | null;
@@ -468,6 +478,13 @@ export type QaConversationMessage = {
    * a *stored* conversation renders, not only the streamed one.
    */
   searchMetadata?: unknown;
+  /**
+   * §13.4's disclosure as a *stored* fact. The real endpoint sends this only
+   * when the answer was given at least one memory, so a spec seeding it is
+   * asking the same question a reload asks: does the count come back, or did
+   * it only ever exist in the streaming response header?
+   */
+  memoryUsedCount?: number;
 };
 
 export async function mockAuthenticatedApi(
@@ -494,6 +511,38 @@ export async function mockAuthenticatedApi(
      * into its partial-support state.
      */
     webSearchMode?: "off" | "auto" | "always";
+    /** The conversation's stored memory mode (§8.1 invariant 1). */
+    memoryMode?: "inherit" | "on" | "off";
+    /**
+     * §14. The account's published profiles, served at
+     * `/api/assistant-profiles`. Absent leaves that route unmocked, which is
+     * what every spec written before Release C expects: the request fails,
+     * the picker is not rendered, and nothing else changes.
+     */
+    assistantProfiles?: Array<{
+      id: string;
+      name: string;
+      icon?: string | null;
+      description?: string | null;
+      published?: boolean;
+      currentRevision?: number | null;
+    }>;
+    /**
+     * The conversation's binding as the server reports it. Seeded rather than
+     * derived so a spec can start from a conversation the owner has already
+     * published past -- the `superseded` state, which a PATCH in the same
+     * session can never produce.
+     */
+    assistantProfile?: {
+      profileId: string;
+      name: string;
+      icon: string | null;
+      revision: number;
+      latestRevision: number;
+      status: "current" | "superseded";
+    } | null;
+    /** What `inherit` resolves to, served by /api/memories/settings. */
+    accountMemoryDefault?: "on" | "off";
     /**
      * UX-024. Additional conversations in the sidebar, each with its own
      * transcript and its own detail/messages routes. Opt-in and additive: with
@@ -542,6 +591,8 @@ export async function mockAuthenticatedApi(
     // specific model still passes `selectedModels` explicitly.
     selectedModels: options.selectedModels || ["gpt-5-6-luna"],
     disabledPanels: [],
+    memoryMode: options.memoryMode || "inherit",
+    assistantProfile: options.assistantProfile ?? null,
     theme: "dark",
     timeZone: "UTC",
     timeZoneInitializedAt: "2026-05-01T00:00:00.000Z",
@@ -555,10 +606,49 @@ export async function mockAuthenticatedApi(
     selectedModels: [...state.selectedModels],
     disabledPanels: [...state.disabledPanels],
     webSearchMode: options.webSearchMode || "off",
+    // §8.1 invariant 1. Stored, not resolved: the fixture has to be able to
+    // show the difference between "follows the account" and an override.
+    memoryMode: state.memoryMode,
+    // §14. Server-computed, including whether the profile has published past
+    // this conversation -- the screen never works the revision out itself.
+    assistantProfile: state.assistantProfile,
     isLocked: state.locked,
     shareEnabled: state.shared,
     shareExpiresAt: state.shared ? "2099-01-01T00:00:00.000Z" : null,
   });
+
+  if (options.assistantProfiles) {
+    await page.route("**/api/assistant-profiles", (route) =>
+      route.request().method() === "GET"
+        ? route.fulfill(
+            json({
+              profiles: options.assistantProfiles!.map((profile) => ({
+                id: profile.id,
+                name: profile.name,
+                icon: profile.icon ?? null,
+                description: profile.description ?? null,
+                published: profile.published !== false,
+                currentRevision: profile.currentRevision ?? 1,
+                versionCount: profile.currentRevision ?? 1,
+                knowledgeFileCount: 0,
+              })),
+            })
+          )
+        : route.fallback()
+    );
+  }
+
+  // What `inherit` resolves to. The chat page reads this once to describe the
+  // inherit option; without it the description would silently claim "in use".
+  await page.route("**/api/memories/settings", (route) =>
+    route.fulfill(
+      json({
+        masterEnabled: true,
+        styleEnabled: true,
+        defaultConversationMode: options.accountMemoryDefault || "on",
+      })
+    )
+  );
 
   await page.unroute("**/api/auth/session**");
   await page.route("**/api/auth/session**", (route) =>
@@ -852,6 +942,8 @@ export async function mockAuthenticatedApi(
         unlock?: boolean;
         selectedModels?: string[];
         disabledPanels?: string[];
+        memoryMode?: "inherit" | "on" | "off";
+        assistantProfileId?: string | null;
       };
 
       if (typeof body.password === "string") {
@@ -875,6 +967,28 @@ export async function mockAuthenticatedApi(
       // flow that *changes* the selection and immediately sends against it.
       // app/api/conversations/[conversationId]/route.ts persists both fields
       // and returns the stored values; so does this.
+      if (typeof body.memoryMode === "string") {
+        state.memoryMode = body.memoryMode;
+      }
+      // §14. The request names a profile; the *fixture* decides which
+      // revision that was, exactly as the server does -- a mock that echoed a
+      // revision back from the request would let a spec pass while the client
+      // was naming versions it must not name.
+      if (body.assistantProfileId !== undefined) {
+        const chosen = (options.assistantProfiles || []).find(
+          (profile) => profile.id === body.assistantProfileId
+        );
+        state.assistantProfile = chosen
+          ? {
+              profileId: chosen.id,
+              name: chosen.name,
+              icon: chosen.icon ?? null,
+              revision: chosen.currentRevision ?? 1,
+              latestRevision: chosen.currentRevision ?? 1,
+              status: "current",
+            }
+          : null;
+      }
       if (Array.isArray(body.selectedModels)) {
         state.selectedModels = Array.from(new Set(body.selectedModels));
       }

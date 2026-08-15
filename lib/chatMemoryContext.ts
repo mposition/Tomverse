@@ -1,12 +1,15 @@
 import "server-only";
 
 import { getMemoryExtractionRevokedPairs, isMemoryInjectionEnabled } from "@/lib/appSettings";
+import { resolveProfileMemoryUse } from "@/lib/assistantProfileRuntime";
+import type { AssistantMemoryPolicy } from "@/lib/assistantProfileVersioning";
 import {
     contextFingerprint,
     memoryStateFingerprint,
     type ContextBundleFingerprintInput,
 } from "@/lib/chatContextBundleCore";
 import { estimatePromptTokens } from "@/lib/chatTokenEstimate";
+import { resolveConversationMemoryMode } from "@/lib/conversationMemoryMode";
 import {
     buildMemoryContextPrompt,
     MEMORY_CONTEXT_PROMPT_VERSION,
@@ -25,6 +28,7 @@ import { STYLE_MEMORY_KINDS } from "@/lib/memoryValidatorCore";
 import { prisma } from "@/lib/prisma";
 
 /**
+ * Policy: docs/policy/external-conversation-import-and-memory.md.
  * The one context builder preflight and `/api/chat` both use (policy §10).
  *
  * The policy requires it in those words — "preflight와 실제 chat은 동일한
@@ -98,10 +102,15 @@ const buildEmpty = (decision: MemoryInjectionDecision): ChatMemoryContext => {
             activeCount: 0,
             latestUpdatedAtMs: 0,
         }),
+        // Both filled in by `buildChatTurnContext`, which is the only place
+        // that knows whether a profile ran. A memory context on its own binds
+        // no profile, and saying so with a value rather than leaving the field
+        // out is what keeps "no profile" a context the bundle can compare.
         profileVersion: null,
         retrievalHash: "",
         retrievalVersion: MEMORY_RETRIEVAL_ALGORITHM_VERSION,
         promptVersion: MEMORY_CONTEXT_PROMPT_VERSION,
+        knowledgeHash: "none",
     };
     return {
         decision,
@@ -136,11 +145,24 @@ export async function buildChatMemoryContext(input: {
     /** The request text retrieval is scored against. */
     query: string;
     /**
-     * This conversation's memory mode. Callers that have no per-conversation
-     * value pass the account default, which is what `UserMemorySettings`
-     * already resolves.
+     * The conversation's *stored* mode (§8.1 invariant 1), including
+     * `inherit`. Resolution happens here rather than at the caller because
+     * this is where the account default is already loaded, and one resolution
+     * site is what keeps the two chat entry points from disagreeing.
+     * Undefined for a request with no conversation, which inherits too.
      */
-    conversationMode?: "on" | "off";
+    conversationMode?: string | null;
+    /**
+     * Release C (§14). What the running profile version asked for, or null
+     * when no profile ran.
+     *
+     * Applied through `resolveProfileMemoryUse` — the AND that lets a profile
+     * turn memory off for its own conversations and never on — and applied
+     * here rather than at the caller so the retrieval below is skipped
+     * entirely. A profile that opted out should not pay for a query whose
+     * result is discarded.
+     */
+    profileMemoryPolicy?: AssistantMemoryPolicy | null;
     now?: Date;
 }): Promise<ChatMemoryContext> {
     if (!input.userId) {
@@ -158,16 +180,25 @@ export async function buildChatMemoryContext(input: {
         injectionFlagEnabled,
         hasApprovedExtractionPair: hasApprovedExtractionPair(revokedPairs),
         accountMasterEnabled: settings.masterEnabled,
-        // Anything that is not the stored "off" reads as on: the column is a
-        // string, and an unreadable value must not silently disable a
-        // control the user believes is on. "off" is the explicit choice.
-        conversationMode:
-            (input.conversationMode ?? settings.defaultConversationMode) ===
-            "off"
-                ? "off"
-                : "on",
+        conversationMode: resolveConversationMemoryMode(
+            input.conversationMode,
+            settings.defaultConversationMode
+        ),
     });
     if (!decision.allowed) return buildEmpty(decision);
+
+    // §14's AND, in its one implementation. Ordered after the account gate on
+    // purpose: `resolveProfileMemoryUse` takes the account's answer as an
+    // input, so asking it first would mean deciding memory twice.
+    if (
+        input.profileMemoryPolicy &&
+        !resolveProfileMemoryUse({
+            memoryPolicy: input.profileMemoryPolicy,
+            memoryAllowedByAccount: decision.allowed,
+        })
+    ) {
+        return buildEmpty({ allowed: false, reason: "profile_off" });
+    }
 
     // Approved *and* not revoked. Reading the register alone was a real gap:
     // revoking one pair while another stayed approved left the account-level
@@ -199,6 +230,7 @@ export async function buildChatMemoryContext(input: {
         retrievalHash: retrieval.resultHash,
         retrievalVersion: retrieval.algorithmVersion,
         promptVersion: prompt.promptVersion,
+        knowledgeHash: "none",
     };
 
     return {

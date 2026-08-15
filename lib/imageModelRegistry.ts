@@ -10,6 +10,7 @@
 // Pure and client-safe (no server-only import, no Prisma): the workspace model
 // picker renders straight from these profiles.
 
+import type { GoogleThinkingLevel } from "@/lib/googleImageRequest";
 import {
   IMAGE_COST_PER_CREDIT_CEILING_MICRO_USD,
   IMAGE_PROMPT_BUDGET_MICRO_USD,
@@ -17,7 +18,32 @@ import {
   type ImageSize,
 } from "@/lib/imageGenerationPricing";
 
-export type ImageModelProvider = "openai" | "google" | "xai";
+/**
+ * Who we call, who bills us, and whose outage it is when a request fails.
+ *
+ * Every existing consumer of `provider` already means this one: the budget env
+ * names (`IMAGE_PROVIDER_{P}_COST_*`), the adapter dispatch, the credential
+ * lookup, provider health and readiness. Keeping the name attached to that
+ * meaning is what makes adding a gateway safe -- nothing has to be re-read.
+ */
+export type ImageModelProvider = "openai" | "google" | "xai" | "fal";
+
+/**
+ * Who made the model, which is a different question and is about to stop having
+ * the same answer.
+ *
+ * Nano Banana 2 is Google's model bought through fal: the card should say
+ * Google, and the budget, credential, retry policy and failure attribution are
+ * all fal's. One field cannot answer both without one of them being wrong, and
+ * the wrong one would be silent -- a fal request drawing down
+ * `IMAGE_PROVIDER_GOOGLE_COST_*` still adds up, it just adds up somewhere with
+ * no money in it.
+ *
+ * The same alphabet as ImageModelProvider today. That is a coincidence of the
+ * current roster, not a relationship, and the two are separate aliases so the
+ * next reader has to decide which one they mean.
+ */
+export type ImageModelOwner = "openai" | "google" | "xai" | "fal";
 
 export type ImageModelLifecycle = "stable" | "preview";
 
@@ -59,11 +85,30 @@ export type ImageModelPriceVerification = {
 export type ImageModelProfile = {
   /** Stable internal id; equals the provider's API model id today. */
   id: string;
+  /** Who we call and who bills us. Drives budget, credential and readiness. */
   provider: ImageModelProvider;
+  /**
+   * Who made the model, when that is not the provider we buy it from.
+   *
+   * Omitted means they are the same, which is true of every direct integration
+   * and keeps those entries saying exactly what they said before. Read it
+   * through `imageModelOwner()` rather than directly, so the default lives in
+   * one place.
+   */
+  modelOwner?: ImageModelOwner;
   /** Exactly the string sent to the provider. */
   apiModelId: string;
-  /** Display name for the picker. */
+  /** Display name for the picker and every place with room for it. */
   name: string;
+  /**
+   * A shorter label for the composer's selection chips, where the name sits
+   * beside a credit badge and competes with the quality and size rows for one
+   * line. Omitted means the full name already fits.
+   *
+   * The full name is what the picker shows and what the accessible name uses:
+   * this abbreviates the visual label, never the identity.
+   */
+  shortName?: string;
   lifecycle: ImageModelLifecycle;
   disabledReason: ImageModelDisabledReason | null;
   sizes: readonly ImageSize[];
@@ -76,6 +121,24 @@ export type ImageModelProfile = {
   /** MIME types the adapter may store unmodified. */
   outputMimeTypes: readonly string[];
   /**
+   * What to ask the provider to deliver, when its API takes that as a request
+   * parameter.
+   *
+   * Deliberately NOT `outputMimeTypes[0]`. That list is the *storage*
+   * allowlist -- what the adapter may write down unmodified -- and reading it
+   * as a request preference is how every Google request went out asking for
+   * PNG, which its API rejects outright:
+   *
+   *   "The value 'image/png' is not supported for
+   *    'response_format.mime_type'. Supported values: 'image/jpeg'."
+   *   (observed from the API itself, 2026-08-06)
+   *
+   * A request, never an assumption: the response's own MIME is still what
+   * gets recorded, and the storage allowlist stays as permissive as the
+   * provider's documented outputs.
+   */
+  deliveryMimeType?: string;
+  /**
    * The version of *this model's* price list.
    *
    * Per model rather than one global string, because a global one splits every
@@ -87,6 +150,24 @@ export type ImageModelProfile = {
    */
   pricingVersion: string;
   priceVerification: ImageModelPriceVerification;
+  /**
+   * The model's documented output-token limit, sent on every request that
+   * takes one.
+   *
+   * **Not a cost bound.** It is the number the provider publishes for the
+   * model, and sending it is how the server avoids leaving a billable
+   * parameter unset. Whether it also bounds hidden thinking is a separate
+   * question, answered by `priceVerification.thinkingCapMicroUsd` -- which is
+   * null for every model here that has one of these. Reading this field as
+   * the cap is the mistake it is worded to prevent.
+   */
+  maxOutputTokens?: number;
+  /**
+   * Google's thinking level, per model because support is not uniform.
+   * Absent omits the field: sending a parameter to a model whose acceptance of
+   * it has not been verified fails in a way that reads like an outage.
+   */
+  thinkingLevel?: GoogleThinkingLevel;
   /** Free-text note surfaced in the admin panel for a disabled model. */
   disabledNote?: string;
 };
@@ -158,20 +239,33 @@ const GOOGLE_GEMINI_31_FLASH_IMAGE: ImageModelProfile = {
   name: "Gemini 3.1 Flash Image",
   lifecycle: "stable",
   // Per-image prices verified 2026-08-04; the thinking cap is not established,
-// so the worst case is not provably finite and no fixed credit price can be
-// derived. That is what this reason states.
-//
-// A confirmation was relayed on 2026-08-04 that hidden thinking shares the
-// `max_output_tokens` budget with the response, which would settle this --
-// and settle it in the stronger direction, because a limit we set on the
-// request bounds the cost by construction rather than by trusting a model
-// card. The cited page (generate-content/tokens) is already in `sources`
-// below: it is the page whose two sentences made the derivation an inference
-// in the first place, so citing it again does not add the missing statement.
-// What would is the sentence itself, or -- better -- staging measurement
-// showing `totalOutputTokens + totalThoughtTokens` never exceeding a
-// `max_output_tokens` we set, which is evidence from the billing signal
-// rather than from prose.
+  // so the worst case is not provably finite and no fixed credit price can be
+  // derived. That is what this reason states.
+  //
+  // As of the 2026-08-05 documentation review this is a **checked absence**,
+  // not an unchecked gap. The Interactions API reference defines
+  // `generation_config.max_output_tokens` as the maximum tokens to include in
+  // the response, and reports `usage.total_output_tokens` and
+  // `usage.total_thought_tokens` as separate counters. The thinking guide
+  // likewise describes the charge as output plus thinking and reports the two
+  // apart. Neither states that the limit covers their sum -- and the model
+  // card's output limit is a limit on the same undefined quantity, so it
+  // cannot supply the link either. A forum answer or a search summary does not
+  // meet policy §12's official-body requirement and is not admissible here.
+  //
+  // That run happened on 2026-08-14, and the billing signal answered no. A
+  // request to gemini-3.1-flash-lite-image with `max_output_tokens: 2048`
+  // reported 1,602 output plus 931 thinking -- 2,533 -- as billable usage and
+  // returned a finished image. The parameter does not bound the quantity we are
+  // charged for. Measurement is therefore no longer a route out of this state:
+  // it was taken, and it closed the question negatively
+  // (.github/audits/image-model-verification-worksheet.md §I).
+  //
+  // Only one model was measured, so the other two are held for a weaker reason:
+  // the general case for treating this parameter as a cost ceiling is gone and
+  // no model-specific evidence replaces it. `worst_case_cost_unbounded` means
+  // the finite worst case policy §12 requires was not established -- not that
+  // no finite cost exists.
   disabledReason: "worst_case_cost_unbounded",
   // 512, 2K and 4K are advertised upstream but have no representation in
   // ImageSize yet, and Google's 1K landscape is not 1536x1024 -- a provider
@@ -182,7 +276,14 @@ const GOOGLE_GEMINI_31_FLASH_IMAGE: ImageModelProfile = {
   latencyClass: "fast",
   provenance: ["synthid"],
   outputMimeTypes: ["image/png", "image/jpeg"],
+  // The only value its API accepts for response_format.mime_type,
+  // established by the API rejecting image/png on 2026-08-06.
+  deliveryMimeType: "image/jpeg",
   pricingVersion: "google-gemini-3-1-flash-image-2026-08-04-v1",
+  // The model card's own output limit, sent on every request. It bounds
+  // what is asked for; whether it also bounds hidden thinking is the open
+  // question that keeps this model disabled -- see thinkingCapMicroUsd.
+  maxOutputTokens: 32_768,
   priceVerification: {
     verifiedAt: "2026-08-04",
     sources: [
@@ -194,7 +295,7 @@ const GOOGLE_GEMINI_31_FLASH_IMAGE: ImageModelProfile = {
     thinkingCapMicroUsd: null,
   },
   disabledNote:
-    "Per-image prices verified 2026-08-04: 0.5K $0.045 / 1K $0.067 / 2K $0.101 / 4K $0.151. GA id corrected from the preview retired 2026-06-25. BLOCKED ON THE CAP, NOT THE PRICE: thinking is enabled by default and cannot be disabled in the API, and thinking_level (minimal/high) is a level rather than a token limit. The 2026-08-04 worksheet proposes a conservative cap of 98,304 microUSD (32,768 output tokens x $3.00/1M text-and-thinking), which would put the floors at 190 / 228 / 283 credits -- but that combines two documented statements rather than quoting one that says hidden thinking counts against the output limit. Recording it as the cap would turn an inference into a fact. Needs an explicit provider confirmation, or an approver's decision to accept the derivation.",
+    "Per-image prices verified 2026-08-04: 0.5K $0.045 / 1K $0.067 / 2K $0.101 / 4K $0.151. GA id corrected from the preview retired 2026-06-25. BLOCKED ON THE CAP, NOT THE PRICE. The 2026-08-05 documentation review closed this as a checked absence rather than an unread page: the Interactions API reference defines max_output_tokens as the maximum tokens to include in the response and reports total_output_tokens and total_thought_tokens as separate counters, and the thinking guide describes the charge as their sum without stating that the limit covers it. The model card's 32,768 output limit bounds the same undefined quantity, so it cannot supply the link either. The conservative derivation (32,768 x $3.00/1M = 98,304 microUSD, floors 190 / 228 / 283 credits) therefore stays an inference. Unblocked by measurement, not by more prose: a staging run that sets max_output_tokens and shows total_output_tokens + total_thought_tokens staying under it, including at a limit low enough to bite. That run is billable and needs the section 15 budget approval. The Interactions adapter is implemented and unreachable while this hold stands.",
 };
 
 // Price VERIFIED 2026-08-04, held on operational grounds.
@@ -205,25 +306,39 @@ const GOOGLE_GEMINI_31_FLASH_IMAGE: ImageModelProfile = {
 // than unknown. What is missing is execution, not knowledge -- hence
 // `operational_hold` rather than `price_unverified`.
 //
+// ENABLED 2026-08-05. The second provider, and the first real cross-provider
+// comparison the feature was built for.
+//
 // A dated snapshot rather than `-latest`, for the same reason chat profiles
 // pin one: a moving target cannot carry a fixed price, because the price is
 // only meaningful for the model that was actually verified.
 //
+// Price verified 2026-08-04: $0.05 (1K) and $0.07 (2K) per image, flat
+// regardless of prompt length, with no prompt-token or reasoning-token charge.
 // Sale credits approved 2026-08-04 at 75 (1K), against a policy floor of 62 --
-// 733 microUSD per credit worst case, 18.5% under the 900 ceiling. Only 1K
-// square ships: xAI's 2K (approved at 100 credits, floor 84) needs the size
-// system to grow a resolution tier first, and 1024x1024 is also the honest
-// comparison against gpt-image-2's square.
+// 733 microUSD per credit worst case, 18.5% under the 900 ceiling. The floors
+// are computed over the whole request (image output + full prompt budget +
+// the zero thinking cap), not over the image price alone.
 //
-// The floors are computed over the whole request -- image output plus the full
-// prompt budget plus the zero thinking cap -- not over the image price alone.
+// Only 1K square ships. xAI's 2K is approved at 100 credits (floor 84) and
+// stays out until the size system grows a resolution tier: buildXaiImageRequest
+// refuses every size it has no mapping for rather than sending a resolution the
+// approved credits were not priced for. 1024x1024 is also the honest comparison
+// against gpt-image-2's square.
+//
+// The operational hold this replaces was cleared by, in order: the adapter
+// (lib/xaiImageRequest.ts), then IMAGE_PROVIDER_XAI_COST_MICROUSD_PER_DAY and
+// _PER_MONTH deployed to both environments ahead of this commit -- env first,
+// code second, because /api/ready fails a flag-on environment whose active
+// provider has no budget the moment this line changes.
 const XAI_GROK_IMAGINE_IMAGE_QUALITY: ImageModelProfile = {
   id: "grok-imagine-image-quality-20260403",
   provider: "xai",
   apiModelId: "grok-imagine-image-quality-20260403",
   name: "Grok Imagine Image Quality",
+  shortName: "Grok Imagine",
   lifecycle: "stable",
-  disabledReason: "operational_hold",
+  disabledReason: null,
   sizes: ["1024x1024"],
   qualities: ["medium"],
   prices: [
@@ -254,8 +369,6 @@ const XAI_GROK_IMAGINE_IMAGE_QUALITY: ImageModelProfile = {
     // reasoning charge. Verified, not assumed.
     thinkingCapMicroUsd: 0,
   },
-  disabledNote:
-    "Price verified 2026-08-04: $0.05 (1K) and $0.07 (2K) per image, flat regardless of prompt length, with no prompt-token or reasoning-token charge. Worst-case floors are 62 credits (1K) and 84 (2K). Sale credits approved 2026-08-04: 75 for 1K (floor 62), and 100 for 2K (floor 84) which ships only once the size system grows a resolution tier. Held on operational grounds only: an xAI adapter is needed (imageProviderAdapter dispatches OpenAI only), IMAGE_PROVIDER_XAI_COST_MICROUSD_PER_DAY/_PER_MONTH must be deployed before the code, and the dated snapshot must be confirmed visible to the Tomverse key with one staging call.",
 };
 
 // Registered, not enabled. The review's low-cost bulk candidate: 1K only, and
@@ -282,7 +395,14 @@ const GOOGLE_GEMINI_31_FLASH_LITE_IMAGE: ImageModelProfile = {
   // the other two do not.
   provenance: ["synthid", "c2pa"],
   outputMimeTypes: ["image/png", "image/jpeg"],
+  // The only value its API accepts for response_format.mime_type,
+  // established by the API rejecting image/png on 2026-08-06.
+  deliveryMimeType: "image/jpeg",
   pricingVersion: "google-gemini-3-1-flash-lite-image-2026-08-04-v1",
+  // The model card's own output limit, sent on every request. It bounds
+  // what is asked for; whether it also bounds hidden thinking is the open
+  // question that keeps this model disabled -- see thinkingCapMicroUsd.
+  maxOutputTokens: 4_096,
   priceVerification: {
     verifiedAt: "2026-08-04",
     sources: [
@@ -294,7 +414,99 @@ const GOOGLE_GEMINI_31_FLASH_LITE_IMAGE: ImageModelProfile = {
     thinkingCapMicroUsd: null,
   },
   disabledNote:
-    "Draft-tier candidate. Image output verified 2026-08-04 at $0.0336, 1K only (2K and 4K unsupported). Blocked on the same cap as every Google image model here. The worksheet's conservative derivation is 6,144 microUSD (4,096 output tokens x $1.50/1M), giving a floor of 50 credits -- an inference, not a documented cap. Even once unblocked, the review advises against filling a second comparison seat with a second Google model.",
+    "Draft-tier candidate. Image output verified 2026-08-04 at $0.0336, 1K only (2K and 4K unsupported). Blocked on the same cap as every Google image model here, confirmed absent from the official documentation on 2026-08-05 rather than merely unread. The conservative derivation is 6,144 microUSD (4,096 output tokens x $1.50/1M), giving a floor of 50 credits -- an inference, not a documented cap. Its 4,096 limit makes it the most informative model to measure first: a low ceiling is the one likely to actually bite, and a run that never approaches the limit proves nothing about whether the limit is enforced. Even once unblocked, the review advises against filling a second comparison seat with a second Google model.",
+};
+
+// Nano Banana 2 -- Google's model, bought through fal rather than called
+// directly. Registered, not enabled, and blocked on price verification only.
+//
+// The direct route is closed and will stay closed. The 2026-08-14 measurement
+// showed `max_output_tokens` does not bound what Google bills
+// (.github/audits/image-model-verification-worksheet.md §I), so a fixed price
+// on a direct call would be a fixed price over an unbounded cost. Routing the
+// same model through a gateway that sells it per successful image moves the
+// variable part to someone whose business it is, and leaves Tomverse with the
+// bounded_fixed contract every other image model here already has.
+//
+// So `provider` is fal and `modelOwner` is google, and the difference is not
+// cosmetic. The budget this draws down is IMAGE_PROVIDER_FAL_COST_*, the
+// credential is fal's, readiness checks fal, and an outage here is fal's
+// gateway or Google's model and the two want telling apart. What the user sees
+// is Google's model, with fal named in the detail view rather than hidden.
+//
+// Price read from fal's own published text on 2026-08-14, quoted in policy
+// §16.4. The hold is `operational_hold` rather than `price_unverified`: the
+// pricing question is closed, and what is missing is an adapter, a budget and
+// an approved sale credit. `prices` stays empty until that credit is approved
+// -- the reason is allowed to carry figures precisely so approved ones are
+// validated, and putting an unapproved candidate there would be the entry
+// asserting a decision nobody made.
+const FAL_NANO_BANANA_2: ImageModelProfile = {
+  id: "fal-ai/nano-banana-2",
+  provider: "fal",
+  modelOwner: "google",
+  apiModelId: "fal-ai/nano-banana-2",
+  name: "Nano Banana 2",
+  shortName: "Nano Banana 2",
+  lifecycle: "stable",
+  // Enabled 2026-08-14, after one real generation through the adapter's own
+  // request builder and response parser proved the seven things this entry
+  // previously only believed: exactly one image, an asset on fal's CDN, a MIME
+  // we may store, no redirect off the allowed host, a body inside the ceiling,
+  // and -- the one that could not be assumed -- an image that is actually the
+  // 1024x1024 that was priced. Evidence and the billed figure are in
+  // .github/audits/evidence/fal-nano-banana-2-smoke/ and policy section 16.8.
+  //
+  // Enabling this row does not expose anything on its own: image generation as
+  // a whole sits behind `feature.imageGenerationEnabled`, an AppSetting that is
+  // off unless a row says exactly "true".
+  disabledReason: null,
+  // 1K only, deliberately, and not because the gateway is limited: a single
+  // size is one price to verify, one worst case to state and one row to
+  // explain. 2K and 4K are sold at multiples and can be added as their own
+  // decisions once the first one is real.
+  sizes: ["1024x1024"],
+  // Same tier as Grok Imagine, which is the model it sits beside in the
+  // picker. A single-tier model still has to say which shelf it is on.
+  qualities: ["medium"],
+  // 120 approved 2026-08-14 against a floor of 97. That is 725 microUSD per
+  // credit, within a rounding error of Grok Imagine's 733 (55,000 over 75), so
+  // the two neighbours carry the same headroom rather than one quietly
+  // carrying less. 115 would have been 757 and harder to explain on screen.
+  prices: [
+    { quality: "medium", size: "1024x1024", credits: 120, outputCostMicroUsd: 80_000 },
+  ],
+  latencyClass: "balanced",
+  // Inherited from the underlying Google model rather than asserted about the
+  // gateway. Worth re-reading against a real response before this is enabled,
+  // since what fal returns is what we would be storing and labelling.
+  provenance: ["synthid"],
+  outputMimeTypes: ["image/png", "image/jpeg"],
+  pricingVersion: "fal-nano-banana-2-2026-08-14-v1",
+  priceVerification: {
+    verifiedAt: "2026-08-14",
+    sources: [
+      "https://fal.ai/models/fal-ai/nano-banana-2",
+      "https://fal.ai/docs/documentation/model-apis/pricing",
+    ],
+    // 2,000 because the request asks for it, not as a safety margin. fal's
+    // schema says of `thinking_level`: "When set, enables model thinking with
+    // the given level ('minimal' or 'high') ... Omit to disable", and its
+    // pricing says "If high thinking is used, an additional $0.002 will be
+    // charged". The approved configuration sends `high`, so 2,000 is the
+    // surcharge this integration intends to incur every time.
+    //
+    // Stated that way on purpose. A cap of 2,000 beside an adapter that omits
+    // the field would price a request the product does not make, and a cap of
+    // 0 beside an adapter that sends `high` would underprice the one it does.
+    // The number and the request have to be one decision, which is why the
+    // pinned field list lives in policy §16.5 rather than in the adapter alone.
+    //
+    // Web search is a separate surcharge ($0.015) and is deliberately not
+    // folded in: it is not reasoning, and the request pins it off. That makes
+    // it a property the adapter has to keep true, not a number to carry.
+    thinkingCapMicroUsd: 2_000,
+  },
 };
 
 // Registered, not enabled. The professional-tier candidate.
@@ -318,7 +530,14 @@ const GOOGLE_GEMINI_3_PRO_IMAGE: ImageModelProfile = {
   latencyClass: "slow",
   provenance: ["synthid"],
   outputMimeTypes: ["image/png", "image/jpeg"],
+  // The only value its API accepts for response_format.mime_type,
+  // established by the API rejecting image/png on 2026-08-06.
+  deliveryMimeType: "image/jpeg",
   pricingVersion: "google-gemini-3-pro-image-2026-08-04-v1",
+  // The model card's own output limit, sent on every request. It bounds
+  // what is asked for; whether it also bounds hidden thinking is the open
+  // question that keeps this model disabled -- see thinkingCapMicroUsd.
+  maxOutputTokens: 32_768,
   priceVerification: {
     verifiedAt: "2026-08-04",
     sources: [
@@ -330,8 +549,91 @@ const GOOGLE_GEMINI_3_PRO_IMAGE: ImageModelProfile = {
     thinkingCapMicroUsd: null,
   },
   disabledNote:
-    "Final-tier candidate. Per-image prices verified 2026-08-04: $0.134 (1K/2K) and $0.24 (4K). Blocked on the cap like the other Google models -- the worksheet's derivation is 393,216 microUSD (32,768 x $12.00/1M), which would put floors at 592 and 710 credits, well past gpt-image-2 Final at 250. Held a second time by product judgement regardless of the cap: the band overlaps gpt-image-2 Final, so the review defers it until usage shows Flash is insufficient.",
+    "Final-tier candidate. Per-image prices verified 2026-08-04: $0.134 (1K/2K) and $0.24 (4K). Blocked on the cap like the other Google models, confirmed absent from the official documentation on 2026-08-05. The derivation is 393,216 microUSD (32,768 x $12.00/1M), which would put floors at 592 and 710 credits, well past gpt-image-2 Final at 250. Held a second time by product judgement regardless of the cap: the band overlaps gpt-image-2 Final, so the review defers it until usage shows Flash is insufficient.",
 };
+
+/**
+ * How many enabled models the composer will lay out inline before the
+ * unselected ones move behind a picker.
+ *
+ * Deliberately separate from IMAGE_GROUP_MAX_MODELS, which bounds how much
+ * provider work one request may start. This is an information-density
+ * decision about one row of UI, and conflating the two would let an execution
+ * limit silently restyle the composer.
+ *
+ * Three, because at two or three the second and third models are discoverable
+ * without a click -- and multi-model comparison is the product, so a viewer
+ * who never learns a second model exists has not been shown the feature. From
+ * four the model row starts taking more space than the quality, size and
+ * prompt rows it sits above.
+ */
+export const IMAGE_INLINE_MODEL_DISCOVERY_LIMIT = 3;
+
+/**
+ * Whether the composer collapses the *unselected* models into a picker.
+ *
+ * Decided by the number of enabled models, never by viewport, never by how
+ * many are selected, and never by measuring wrapped lines. A viewport-driven
+ * switch gives the same account a different information structure per device
+ * and re-shapes the composer mid-rotation; a selection-driven one changes
+ * structure while the user is choosing. The selected models and their exact
+ * credits are inline in **both** modes -- only the editing list moves.
+ */
+export const shouldUseCompactImageModelPicker = (
+  enabledModelCount: number
+): boolean =>
+  enabledModelCount > IMAGE_INLINE_MODEL_DISCOVERY_LIMIT;
+
+export type ImageComposerModelLayout = {
+  compact: boolean;
+  /** Rendered in the composer's own row, uncollapsed, with exact prices. */
+  inline: readonly ImageModelProfile[];
+  /** Rendered inside the picker. Empty whenever `compact` is false. */
+  picker: readonly ImageModelProfile[];
+};
+
+/**
+ * Which enabled models the composer shows where.
+ *
+ * Pure, and separate from the component, because the branch it decides cannot
+ * be reached by an end-to-end test today: two models are enabled and the
+ * threshold is three, so the compact rendering only appears once a fourth is
+ * activated. A rule that ships untested until the day it matters is a rule
+ * nobody can trust on that day, and enabling the three held Google models
+ * would take the count straight from 2 to 5.
+ *
+ * Order follows the registry in both lists, so a model does not jump position
+ * when it is selected -- it moves container, and that is the only change.
+ */
+export const imageComposerModelLayout = (
+  models: readonly ImageModelProfile[],
+  selectedModelIds: readonly string[]
+): ImageComposerModelLayout => {
+  const compact = shouldUseCompactImageModelPicker(models.length);
+  if (!compact) return { compact, inline: models, picker: [] };
+  const selected = new Set(selectedModelIds);
+  return {
+    compact,
+    inline: models.filter((model) => selected.has(model.id)),
+    picker: models.filter((model) => !selected.has(model.id)),
+  };
+};
+
+/**
+ * What to ask a provider to deliver for this model.
+ *
+ * One function rather than the expression written at each call site: the
+ * adapter and the thinking-cap measurement script both build a Google request,
+ * and when the adapter learned that Google only accepts `image/jpeg` the script
+ * kept asking for PNG -- so the next measurement run would have failed exactly
+ * as the first one did, for a reason already fixed.
+ */
+export const imageDeliveryMimeType = (model: ImageModelProfile): string =>
+  model.deliveryMimeType ?? model.outputMimeTypes[0] ?? "image/png";
+
+/** The composer's visual label for a model; identity stays `name`. */
+export const imageModelChipLabel = (model: ImageModelProfile): string =>
+  model.shortName ?? model.name;
 
 export const IMAGE_MODEL_REGISTRY: readonly ImageModelProfile[] = [
   OPENAI_GPT_IMAGE_2,
@@ -339,6 +641,7 @@ export const IMAGE_MODEL_REGISTRY: readonly ImageModelProfile[] = [
   XAI_GROK_IMAGINE_IMAGE_QUALITY,
   GOOGLE_GEMINI_31_FLASH_LITE_IMAGE,
   GOOGLE_GEMINI_3_PRO_IMAGE,
+  FAL_NANO_BANANA_2,
 ];
 
 /** The default single selection and the v1 compatibility model. */
@@ -399,6 +702,39 @@ export const minimumCreditsForImageOption = (
   const maxCost = maxImageRequestCostMicroUsd(model, price);
   if (maxCost === null) return null;
   return Math.ceil(maxCost / IMAGE_COST_PER_CREDIT_CEILING_MICRO_USD);
+};
+
+/**
+ * The brand behind a model.
+ *
+ * Deliberately not defaulted at each call site: a missing owner means "same as
+ * the provider", and spelling that out repeatedly is how one call site ends up
+ * defaulting differently from the others.
+ */
+export const imageModelOwner = (model: ImageModelProfile): ImageModelOwner =>
+  model.modelOwner ?? model.provider;
+
+/**
+ * What a model's subtitle has to say: whose model it is, and -- only when that
+ * differs -- who supplies it.
+ *
+ * Split out from the rendering because the presentational bug it exists to
+ * prevent is not about labels being missing. The catalogue row showed
+ * `provider`, which reads correctly for every direct integration because owner
+ * and provider are the same string there, and became wrong the moment they
+ * were not: Nano Banana 2 is Google's model bought through fal, and the row
+ * either credited the wrong company or -- as it actually did -- printed
+ * nothing at all.
+ *
+ * `gateway` is null when there is nothing extra to say, so a caller cannot
+ * render "OpenAI via OpenAI".
+ */
+export const imageModelBrandParts = (model: ImageModelProfile) => {
+  const owner = imageModelOwner(model);
+  return {
+    owner,
+    gateway: owner === model.provider ? null : model.provider,
+  } as const;
 };
 
 /** The providers that have at least one enabled model right now. */

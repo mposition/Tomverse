@@ -18,9 +18,10 @@ Google 모델 활성화는 공식 가격·thinking 상한의 수동 검증 통�
   보내고 결과를 나란히 비교한다(§11). 단일 모델 요청은 1-모델 그룹이라는
   특수한 경우일 뿐 별도 경로가 아니다.
 - 모델은 `AVAILABLE_MODELS`·`ModelRegistry` 밖의 **이미지 모델 registry**
-  (§12)에서만 관리한다. 등록 현황(2026-08-04): `gpt-image-2`(활성) 1개,
-  `gemini-3.1-flash-image`·`grok-imagine-image-quality-20260403`·
-  `gemini-3.1-flash-lite-image`·`gemini-3-pro-image`(모두 등록-비활성) 4개.
+  (§12)에서만 관리한다. 등록 현황(2026-08-05): `gpt-image-2`·
+  `grok-imagine-image-quality-20260403`(활성) 2개,
+  `gemini-3.1-flash-image`·`gemini-3.1-flash-lite-image`·
+  `gemini-3-pro-image`(등록-비활성) 3개.
   미등록 평가 후보는 §12.1에 있다. 비교 그룹의 모델 수 상한은
   `IMAGE_GROUP_MAX_MODELS`(출시 기본 2)이며 UI·데이터 모델에 상한값을
   하드코딩하지 않는다.
@@ -216,6 +217,15 @@ gate 없이 노출되는 배포 창은 금지된다. UI 비노출은 보안 경�
   서비스와 안전하게 공존한다(저장소에 장기 실행 worker 선례가 없어 별도
   Railway 서비스 신설은 운영 PR에서 실측 후 결정). 프로세스 종료로 죽은
   실행은 정확히 stale 케이스이며 sweep이 `failed` 처리 후 전액 환급한다.
+- **`after()`의 실행 시간은 그 route의 max duration이다**(Next `after`
+  레퍼런스). proxy timeout이 아니라 이쪽이 실제 제약이므로 실행자를
+  구동하는 route는 예산을 명시한다. 값은
+  `IMAGE_EXECUTOR_MAX_DURATION_SECONDS`이고, provider timeout·재시도
+  backoff·그룹 상한·provider job 하한에서 유도한다
+  (`lib/imageGenerationStateCore.ts`). 잘린 실행자는 지연이 아니다 —
+  `pending` 생성을 다시 구동하는 것은 없고 sweep은 환급만 하므로 요청
+  자체가 사라진다. stale 임계값이 한 시도의 최악 소요보다 크다는 조건과
+  함께 `npm run check:image-executor-budget`이 PR Fast Gate에서 강제한다.
 - 배포·프로세스 종료로 회수 불가능해진 stale 작업은 reconciliation이
   `failed` 처리하고 전액 환급한다. Railway graceful shutdown 유예
   (`RAILWAY_DEPLOYMENT_DRAINING_SECONDS`)를 함께 설정한다.
@@ -246,9 +256,49 @@ gate 없이 노출되는 배포 창은 금지된다. UI 비노출은 보안 경�
   `일·월 floor = Max 월 크레딧 × 최악 크레딧당 원가 × headroom`
   (참고치: headroom 25%에서 약 $10.80). 한 Max 계정이 월 크레딧을 하루에
   소진할 수 있으므로 일 floor = 월 floor다.
+  - **"최악 크레딧당 원가"는 provider별 값이 아니라 활성 이미지 상품 전체의
+    최대값**이다(`worstImageCostPerCreditMicroUsd()` — 현재 864µ/credit,
+    `gpt-image-2` Final 정사각에서 나온다). 따라서 floor는 특정 공급자의
+    실원가가 아니라 **전체 이미지 상품을 포괄하는 entitlement 안전 바닥**이다.
+    xAI budget의 floor를 "Grok 실원가"로 설명하면 틀린다.
+  - **가격표는 두 개이고 유도는 둘 다 읽는다.** `IMAGE_GENERATION_PRICING`은
+    `gpt-image-2`의 원래 표이고, 이후 추가된 모델은 registry profile의
+    `prices`에 값을 싣는다. 2026-08-12까지 유도는 앞의 표만 순회했고, 결과
+    864µ는 **우연히** 맞았다 — `gpt-image-2` Final이 마침 가장 비싼
+    크레딧이었기 때문이다. 그 사이 xAI는 enabled 상태로 유도에 한 번도
+    들어가지 않았고, 더 비싼 모델을 추가해도 floor가 따라 오르지 않았을
+    것이다. `worstImageCostPerCreditFrom()`이 두 목록을 함께 읽고,
+    **worst case가 미확정인 enabled 모델은 건너뛰지 않고 throw**한다 —
+    건너뛰면 floor가 존재하는 이유인 바로 그 모델을 뺀 채 계산된다.
+    `tests/imageProviderBudget.test.mjs`가 "더 비싼 모델을 추가하면 floor가
+    오른다"를 고정한다.
+  - **floor는 바닥이지 권고치가 아니다.** 초기 production 승인값은
+    일 $50 / 월 $500(2026-08-05). staging은 일·월 모두 floor $10.80으로,
+    총 staging 지출을 캡하는 것이 의도다.
+- **`월 ≥ 일`만으로는 충분하지 않다.** 둘이 같으면 하루치 상한을 한 번
+  소진하는 순간 그달 예산도 끝나므로 월 창이 두 번째 bound가 되지 못한다.
+  `resolveImageProviderBudget`이 `month <= day`를 `month_not_above_day`
+  **advisory**로 보고한다 — `problems`와 달리 readiness를 막지 않는다.
+  단지 이상한 예산 때문에 기동을 거부하는 것이 그 예산보다 나쁘기 때문이고,
+  staging의 동일값 설정은 의도된 것이기 때문이다.
+- **예약액과 정산액을 구분한다.** provider budget은 예약 시 최악값으로 잡고
+  성공 정산에서 실비로 true-up하며 차액을 환급한다. Grok 1K는 예약
+  55,000µ(출력 50,000 + 공통 프롬프트 안전예산 5,000), 정산 50,000µ,
+  차액 5,000µ 환급이다 — xAI는 프롬프트 길이와 무관한 장당 정액 과금이라
+  `inputTokens`가 0이다. 용량을 셀 때 두 기준을 섞지 않는다: **미정산 예약
+  기준**은 동시에 승인 가능한 건수이고, **성공 정산 기준**은 이론상 완료
+  가능한 장수다(일 $50 → 909건 승인 / 1,000장 완료).
 - production에서 env 부재 시 `/api/ready` 실패. 조용한 fallback 기본값
   금지(`providerMonitoring`의 기존 silent fallback 모순은 budget 추가 전에
   정리). env를 먼저 배포하고 코드를 나중에 배포한다.
+- **readiness 검사가 던지면 not ready다.** flag-off로 예산이 없어도 되는
+  합법 상태는 `getImageProviderBudgetReadiness()` **안에서** `ready: true`로
+  판정된다. 따라서 예외는 그 상태일 수 없고, 유도 자체가 실패했다는 뜻이다.
+  route는 2026-08-12까지 `status?.ready ?? true`로 읽어 **가장 시끄러운
+  실패를 가장 조용한 신호로** 바꿨다 — env 하나가 비면 fatal인데, 그 env를
+  찾는 검사가 터지면 healthy였다. 지금은 `?? false`이고 예외 메시지를
+  `IMAGE_PROVIDER_COST_BUDGET_NOT_READY`의 `error`로 싣는다.
+  `scripts/security-regression-check.mjs`가 이 기본값을 고정한다.
 
 ## 9. 자산 수명주기
 
@@ -374,7 +424,7 @@ gate 없이 노출되는 배포 창은 금지된다. UI 비노출은 보안 경�
 | 후보 | 상태 | 검증된 이미지 출력가 | 남은 조건 |
 |---|---|---|---|
 | `gpt-image-2` | **활성** | 표 §3 | — |
-| `grok-imagine-image-quality-20260403` | 등록-비활성 (`operational_hold`) | 1K $0.05 / 2K $0.07 · **가격 검증·판매가 승인 완료** | xAI adapter, `IMAGE_PROVIDER_XAI_COST_*`, 계정 가시성 확인. **1K 정사각만 먼저 출시**하고 2K는 크기 체계 확장 후 |
+| `grok-imagine-image-quality-20260403` | **활성 (2026-08-05)** | 1K $0.05 · 판매가 75크레딧 | 1K 정사각만. 2K(승인 100크레딧)는 크기 체계 확장 후 |
 | `gemini-3.1-flash-image` | 등록-비활성 (`worst_case_cost_unbounded`) | 0.5K $0.045 / 1K $0.067 / 2K $0.101 / 4K $0.151 | **thinking 상한** — 아래 참조 |
 | `gemini-3.1-flash-lite-image` | 등록-비활성 (`worst_case_cost_unbounded`) | 1K $0.0336 (1K 전용) | 동일. Draft 후보이며 두 번째 비교 자리를 Google로 채우지 않는다 |
 | `gemini-3-pro-image` | 등록-비활성 (`worst_case_cost_unbounded`) | 1K·2K $0.134 / 4K $0.24 | 동일 + 제품 판단 보류(`gpt-image-2` Final과 중복) |
@@ -421,21 +471,124 @@ candidate의 한도로 설명된다. 즉 hidden thinking이 32,768 안에 포함
 따라서 Google 3종의 상태는 **가격 확인 완료 / 요청당 상한 조건부**로
 분리해 유지한다.
 
-#### 공급자에게 보낼 질문
+#### 2026-08-05 문서 재조사 — 상한은 **확인된 부재**다
 
-`sources`에 추가할 답변을 받기 위한 질문은 좁고 명확해야 한다. "thinking은
-output으로 과금된다"는 답변은 **불충분**하다 — 그것은 과금 방식이지 상한이
-아니다.
+공식 문서를 다시 훑은 결과, 이 쟁점은 "아직 안 읽은 페이지"가 아니라
+**읽었고 그 문장이 없다**로 확정한다.
 
-> For each of `gemini-3.1-flash-image`, `gemini-3.1-flash-lite-image`, and
-> `gemini-3-pro-image`, is the total number of billable hidden thinking tokens
-> in a single image-generation request hard-capped by the model's documented
-> `output_token_limit`, including image-only requests where thinking cannot be
-> disabled?
+- Interactions API reference는 `generation_config.max_output_tokens`를
+  "응답에 포함할 최대 토큰 수"로 정의하고, 사용량을
+  `usage.total_output_tokens`·`usage.total_thought_tokens`·`usage.total_tokens`
+  로 **분리 보고**한다. 둘의 합이 상한 이하라는 연결 문장은 없다.
+  (`https://ai.google.dev/api/interactions-api`)
+- thinking 문서도 비용을 output + thinking의 합으로 설명하고 두 사용량을
+  별도 필드로 보고할 뿐, `max_output_tokens`가 그 합을 제한한다고 명시하지
+  않는다. (`https://ai.google.dev/gemini-api/docs/thinking`)
+- 모델 카드의 출력 한도(Flash Image 32,768 / Flash Lite 4,096 /
+  Pro Image 32,768)는 **같은 미정의 수량에 대한 한도**이므로 연결을 대신
+  제공하지 못한다.
+- 포럼 답변·검색 요약·제품 책임자 전언은 §12의 공식 본문 요건을 충족하지
+  않으므로 근거에서 제외한다.
 
-API surface(Gemini Developer API)와 Standard tier를 함께 명시한다. 답변이
-"예"면 `thinkingCapMicroUsd`를 위 표대로 기록하고 `sources`에 답변을 추가한다.
-"아니오"거나 상한을 특정하지 못하면 Google 3종은 보류를 유지한다.
+> **판정**: 공식 페이지는 `max_output_tokens`와 thinking 사용량을 각각
+> 설명하지만 `total_output_tokens + total_thought_tokens`가 해당 상한 이하라고
+> 보장하지 않는다.
+
+**2026-08-14 실측이 이 질문을 부정으로 닫았다.** `gemini-3.1-flash-lite-image`에
+`max_output_tokens: 2048`을 보낸 요청이 output 1,602 + thinking 931 = **2,533**을
+과금 대상 usage로 보고하고 완성된 이미지를 반환했다. 이 파라미터는 요청 파라미터
+이지 비용 천장이 아니다. 아래 "staging 실측 계획"은 그 실행의 절차 기록으로
+남기며, **해소 경로가 아니다** — 실행됐고 답은 부정이다. 전체 결과와 표본은
+`.github/audits/image-model-verification-worksheet.md` §I.
+
+세 모델은 `worst_case_cost_unbounded`를 유지한다. 재검토 조건은 Google이 thinking
+토큰 상한을 거는 요청 파라미터를 제공하거나, 공식 문서가 과금 대상의 상한을
+명시하는 경우다.
+
+#### 남은 증거는 산문이 아니라 과금 신호다 — staging 실측 절차 (2026-08-14 실행 완료, 판정 부정)
+
+`npm run measure:google-image-thinking-cap`이 이 절차를 수행한다. **매 실행이
+실제 유료 이미지 생성**이므로 `--i-accept-the-cost` 없이는 아무것도 보내지
+않고, §15의 eval 예산 승인이 선행돼야 한다.
+
+1. 모델별로 `1K`·`1:1`·image-only 요청을 실행한다.
+2. `max_output_tokens`를 **명시**한다.
+3. 지원 모델은 `thinking_level: "high"`로 thinking 발생 가능성을 높인다.
+4. 각 응답에서 `usage.total_output_tokens + usage.total_thought_tokens`를
+   계산한다.
+5. 그 값이 요청한 `max_output_tokens` 이하인지 확인한다.
+6. 복잡한 프롬프트 여러 개와 **둘 이상의 상한값**으로 반복한다.
+7. **낮은 상한에서 실제 제한 동작(`incomplete` 등)이 한 번 이상 나타나야
+   한다.** 항상 상한보다 한참 낮게 쓴 표본만으로는 상한 강제를 입증할 수
+   없다 — 스크립트는 이 경우를 `inconclusive_limit_never_bound`로 보고하며
+   통과로 세지 않는다. 카드 한도가 가장 낮은 `gemini-3.1-flash-lite-image`
+   (4,096)가 첫 측정 대상으로 가장 유용하다.
+8. 요청 JSON·원본 응답·모델 ID·응답 ID·실행 일시를 감사 증거로 보존한다.
+
+**이미지가 없는 응답도 표본이다.** 상한이 실제로 물린 표본은 정의상 완성된
+이미지가 없다. production parser(`parseGoogleImageResponse`)는 "정확히 한 장"이
+아니면 fail-closed로 거절하는데 — 과금할 대상이 없으니 옳다 — 측정을 그 parser
+하나로만 읽으면 **가장 비싸게 산 최고의 증거를 버린다.** 두 질문을 분리한다:
+과금 가능한 이미지인가(`parseGoogleImageResponse`)와 무엇이 과금됐고 왜
+멈췄는가(`readGoogleImageInteraction`). 후자는 이미지를 요구하지도 반환하지도
+않으므로 전자의 우회로가 될 수 없고, production 경로가 후자로 응답을 승격해서는
+안 된다.
+
+**한 프롬프트의 반복은 한 프롬프트의 증거다.** 모델이 얼마나 생각하는지는
+무엇을 물었는지의 함수이므로, `--repeats`를 올려도 §12의 "복잡한 프롬프트
+여러 개"는 충족되지 않는다. 스크립트는 서로 다른 비용 축(조밀한 라벨 기하 /
+다국어 문자 렌더링)을 가진 내장 프롬프트 2종을 `--prompts`로 제공하고,
+한 프롬프트의 표본만으로는 긍정 판정(`consistent_with_limit_bounding_billable_output`)
+을 내지 않는다 — `consistent_but_single_prompt`로 보고한다. 반증은 한
+프롬프트로도 성립하므로 이 제약은 긍정 판정에만 적용한다.
+
+**첫 반증 또는 첫 판독 불능에서 즉시 멈춘다.** 상한을 넘긴 표본 하나가 질문을
+끝내고, 두 번째 표본이 그것을 더 참으로 만들지 못한다. 판독 불능·usage 미보고
+이후의 숫자도 신뢰할 수 없다. 스크립트가 `stoppedEarly`와 `sentCalls`를
+보고한다.
+
+**스크립트는 금액을 집행하지 않는다.** 호출 수(`--prompts x --repeats`)만
+제한하며, §15의 예산은 인자를 고르는 사람이 지킨다. "도구가 막아 줄 것"에
+기대지 않는다.
+
+**스크립트는 adapter와 같은 request builder·같은 registry helper를 통해서만
+요청을 만든다.** 측정 대상은 production이 실제로 과금당하는 요청이므로, 한쪽만
+바뀐 요청으로 얻은 수치는 근거가 되지 않는다. 실제로 한 번 어긋난 적이 있다 —
+adapter가 Google의 delivery MIME(`image/jpeg`)을 반영한 뒤에도 스크립트는 자체
+표현식으로 PNG를 요청해 같은 HTTP 400을 다시 냈다. 지금은 delivery MIME을
+`imageDeliveryMimeType()` 한 곳에서 정하고,
+`scripts/security-regression-check.mjs`가 두 호출부 모두 그 helper를 쓰는지
+검사한다.
+   API key와 사용자 프롬프트는 로그에 남기지 않는다(스크립트는 프롬프트를
+   sha256 앞자리로만 기록한다).
+
+**`usage.total_tokens`는 입력 토큰까지 포함하므로 `max_output_tokens`와 직접
+비교하지 않는다.** 코드에서는 `googleBillableOutputTokens()`가 비교 대상
+수량을 이름으로 고정한다.
+
+#### adapter는 선행하고 활성화는 하지 않는다
+
+Interactions API adapter(`lib/googleImageRequest.ts`,
+`imageProviderAdapter.ts`의 `generateWithGoogle`)는 **비활성 상태에서 선행
+구현**한다. `generateImageWithProvider`가 `disabledReason`이 있는 모델을
+dispatch 전에 거부하므로 실행 경로가 없고, 위 실측 자체가 이 코드를 통해야
+하기 때문이다. **adapter 구현은 활성화 승인도 판매가 확정도 아니다.**
+
+- 요청·응답 어휘는 **Interactions API 하나만** 쓴다. GenerateContent는 같은
+  요청을 다른 이름으로 표현하며(`generationConfig.maxOutputTokens`,
+  `candidates[].content.parts[].inlineData.data`,
+  `usageMetadata.thoughtsTokenCount`) `imageConfig`는 deprecated다. 두 어휘를
+  섞은 body는 그럴듯해 보이면서 틀린다 — security regression check가 강제한다.
+- 인증은 `x-goog-api-key`이며 OpenAI식 bearer token이 아니다.
+- **`model_output` step만 읽는다.** thinking 과정에서 중간 이미지가 나올 수
+  있고, 완성본 요금을 받으면서 습작을 저장하는 실패는 둘 다 그럴듯한 그림이라
+  아무도 눈치채지 못한다. 전달된 이미지가 1장이 아니면 fail-closed다.
+- `thinking_level`은 **모델별 profile**에 둔다. 지원 여부가 균일하지 않으므로
+  값이 없으면 필드를 아예 보내지 않는다.
+- `ImageModelProfile.maxOutputTokens`는 **비용 상한이 아니다.** 모델 카드가
+  공표한 수치이자 매 요청이 보내는 값일 뿐이고, 상한 성립 여부는 여전히
+  `priceVerification.thinkingCapMicroUsd`(현재 `null`)가 답한다. 이 둘을
+  혼동하지 않도록 unit test와 regression check가 함께 고정한다.
 
 #### 판매 크레딧은 별도 승인이다
 
@@ -458,6 +611,21 @@ API surface(Gemini Developer API)와 Standard tier를 함께 명시한다. 답�
 상태에서도 바닥값을 검사한다. 승인 수치를 주석에 두었다가 출시일에 손으로
 옮기는 것이 더 위험하다. 나머지 두 사유(`price_unverified`,
 `worst_case_cost_unbounded`)는 여전히 `prices`가 비어 있어야 한다.
+
+Grok 활성화(2026-08-05)가 이 규칙의 결과다: hold 해제는 `disabledReason`
+한 줄 변경이었고 가격을 다시 입력하지 않았다. 현재 `operational_hold`를 쓰는
+모델은 없지만 사유와 그 검사는 그대로 유지한다.
+
+#### xAI 활성화 순서 (2026-08-05, 실행 기록)
+
+1. adapter(`lib/xaiImageRequest.ts`) 구현 — 활성화와 별개 결정.
+2. **환경변수를 코드보다 먼저 배포**: Railway `Tomverse` 서비스,
+   production `IMAGE_PROVIDER_XAI_COST_MICROUSD_PER_DAY=50000000` /
+   `_PER_MONTH=500000000`, staging 둘 다 floor `10800000`.
+   `disabledReason`이 `null`이 되는 순간 xAI가 활성 provider가 되므로,
+   flag가 켜진 환경에 예산이 없으면 `/api/ready`가 그때부터 실패한다.
+3. registry `disabledReason: null` 배포. production flag는 OFF 유지(§15).
+4. staging flag ON → 1K 정사각 1회 생성 + gpt-image-2와 2-모델 비교 1회.
 
 #### 등록-비활성은 사용자에게 보인다
 
@@ -581,3 +749,350 @@ ID, 상태 매트릭스, 릴리스 차단 기준)는 그쪽이 정본이고, 두
   인물/손 일관성·한국어 이해·latency·moderation 오탐·포맷 안정성·실측
   원가)은 별도 예산 승인 후 실행하고, 결과를 모델 활성화 결정에
   인용한다.
+
+## 16. 모델 소유자와 추론 공급자는 다른 질문이다 (2026-08-14)
+
+`gemini-3.1-flash-image`(Nano Banana 2)를 Google에 직접 호출하는 경로는
+**영구히 닫혔다.** §12.1의 실측이 `max_output_tokens`가 과금 대상 합계를
+bound하지 않음을 보였고, 유한한 최악 원가가 없으면 고정 가격을 붙일 수 없다.
+같은 모델을 **성공 이미지 단위로 파는 gateway**를 통해 사면 변동 부분이 그것을
+사업으로 하는 쪽으로 넘어가고, Tomverse는 다른 이미지 모델과 같은
+`bounded_fixed` 계약을 유지한다.
+
+### 16.1 두 필드를 분리한다
+
+| 필드 | 답하는 질문 | 따라오는 것 |
+|---|---|---|
+| `provider` | 누구를 호출하고 누가 우리에게 청구하는가 | 예산 `IMAGE_PROVIDER_{P}_COST_*`, credential, readiness, 재시도 정책, 장애 귀속 |
+| `modelOwner` | 누가 만든 모델인가 | 모델 카드 브랜딩, 마케팅 문구 |
+
+- **`modelOwner`가 없으면 `provider`와 같다는 뜻이다.** 직접 연동은 전부 그렇고,
+  필드가 생기기 전과 의미가 같다. 해석은 `imageModelOwner()` 한 곳에서만 한다.
+- **fal로 호출하면서 `IMAGE_PROVIDER_GOOGLE_*` 예산을 차감하지 않는다.** 그 숫자는
+  여전히 더해지지만 돈이 없는 봉투에 더해지고, 그동안 fal의 실제 지출은 아무도
+  보지 않는다. 모든 하위 지표가 그럴듯한 채로 틀린다.
+- `lib/imageProviderBudget.ts`는 `modelOwner`를 읽지 않는다.
+  `scripts/security-regression-check.mjs`가 강제한다.
+- 장애 관측은 **모델 장애와 gateway 장애를 구분**한다. 한 필드로는 구분할 수 없다.
+- 사용자에게는 소유자 브랜드를 보여주되 **상세에 gateway를 명시한다.** 숨기지
+  않는다.
+
+### 16.2 gateway 경유 모델의 활성화 조건
+
+`fal-ai/nano-banana-2`는 `price_unverified`로 등록돼 있다. **아래를 모두 충족하기
+전에는 어느 환경에서도 활성화하지 않는다.**
+
+1. **가격 원문 확인.** fal이 공표한 성공 이미지당 가격을 §12의 요건대로 공식
+   본문에서 확인하고 `priceVerification.sources`·`verifiedAt`를 채운다.
+   2026-08-14 현재 이 저장소의 실행 환경에서 `fal.ai`는 egress proxy에 차단돼
+   있어 확인하지 못했다. **읽지 않은 URL을 `sources`에 적지 않는다** — 적는 순간
+   그것은 "이 근거로 검증했다"는 진술이 된다.
+2. **요청 고정.** 1K, 정확히 1장, web search 비활성, **high thinking 고정(사용)**.
+   각각이 별도 과금 항목이므로 최악 원가는 이 넷이 고정된 상태에서만 유한하다.
+   high thinking만 유일하게 **끄는 것이 아니라 켜는** 고정이며, 그 2,000µUSD가
+   바닥값 97의 구성요소다(§16.4·§16.5).
+3. **재시도·저장 헤더.** gateway 기본값이 서버 오류에 재시도하고 입출력을
+   보관한다면, 우리 요청은 그 둘을 명시적으로 끈다. 자동 재시도는 고정가 계약에서
+   원가를 배수로 만들고, 입출력 보관은 우리가 통제하지 않는 곳에 사용자 프롬프트를
+   남긴다.
+4. **자산 즉시 복사.** gateway가 돌려주는 CDN URL은 만료 전 공개 접근 가능하다고
+   보고, 즉시 사설 저장소로 복사한 뒤 짧은 만료를 적용한다. 그 URL을 저장하거나
+   클라이언트에 그대로 넘기지 않는다.
+5. **예산.** `IMAGE_PROVIDER_FAL_COST_MICROUSD_PER_DAY`·`_PER_MONTH`를 배포보다
+   **먼저** 설정한다. production에 활성 모델이 있는데 예산이 없으면 `/api/ready`가
+   실패한다.
+6. **가격 drift 차단.** 배포 전 승인 가격과 공급자 현재 가격을 대조하고, 응답이
+   과금 단위를 보고하면 저장한다. 실단가가 승인 snapshot과 다르면 즉시 차단한다.
+   "가격은 변경될 수 있다"고 공표된 공급자에 고정가를 붙이는 것이므로, 이 대조가
+   그 격차를 메우는 유일한 장치다.
+7. **판매 크레딧 승인.** `minimumCreditsForImageOption()`이 내는 수학적 바닥값은
+   승인가가 아니다(§3·§4).
+
+### 16.3 확인된 원문 (2026-08-14)
+
+fal.ai와 ai.google.dev를 이 저장소의 실행 환경에서 직접 읽었다. 아래 인용은
+**본문 그대로**이며 요약이 아니다.
+
+**가격** — `https://fal.ai/models/fal-ai/nano-banana-2`
+
+> Your request will cost **$0.08** per image. For $1.00, you can run this model
+> 12 times. 2K and 4K outputs will be charged at 1.5 times and 2 times the
+> standard rate, respectively. 0.5K (512px) resolution outputs will be charged
+> at 0.75 times the standard rate. If web search is used, an additional $0.015
+> will be charged. If high thinking is used, an additional $0.002 will be
+> charged. **Note: Pricing is subject to change.**
+
+같은 페이지가 모델을 이렇게 설명한다.
+
+> Google's Gemini 3.1 Flash Image architecture
+
+**과금 방식** — `https://fal.ai/docs/documentation/model-apis/pricing`
+
+> You pay only for successful outputs, and you are never charged for server
+> errors or time spent waiting in the queue.
+
+> Server errors are never billed. If a request fails with an HTTP 500 or higher
+> status code, no charge is incurred.
+
+같은 페이지가 **가격 조회 API**를 제공한다. §16.2-6의 drift 대조는 스크래핑이
+아니라 이것으로 한다.
+
+> `curl "https://api.fal.ai/v1/models/pricing?endpoint_id=fal-ai/flux/dev" -H "Authorization: Key $FAL_KEY"`
+> … The response includes the billing unit and unit price for each endpoint:
+> `{"prices":[{"endpoint_id":"...","unit_price":0.025,"unit":"image","currency":"USD"}]}`
+
+**재시도** — `https://fal.ai/docs/documentation/model-apis/common-parameters`
+
+> X-Fal-No-Retry — Disable automatic retries for this request. **By default,
+> queue-based requests are retried for up to 10 total attempts on server errors
+> (503, 504, connection errors).** … Values `"1"`, `"true"`, `"yes"` to disable
+
+**재시도가 원가를 배수로 만든다는 서술은 정확하지 않다.** 재시도는 서버 오류에
+일어나고 서버 오류는 과금되지 않는다. 끄는 진짜 이유는 다른 것이다 — **성공한
+생성의 응답이 유실된 뒤의 재시도는 두 번째 이미지를 만들고 두 번 과금된다.**
+고정가 계약에서 사용자는 한 번 냈는데 우리는 두 번 낸다. 그래서 끈다.
+
+**입출력 보관** — 같은 페이지
+
+> X-Fal-Store-IO … **This only prevents storage of the JSON payloads. CDN files
+> generated during processing are still accessible (subject to media expiration
+> settings).**
+
+**자산 수명** — 같은 페이지
+
+> X-Fal-Object-Lifecycle-Preference — Control how long generated files are
+> stored on fal's CDN and who can access them. **Default: Your account setting
+> (forever and publicly readable if not configured)** … Format JSON:
+> `{"expiration_duration_seconds": <seconds>, "initial_acl": {...}}`
+
+**이것이 §16.2-4를 권고에서 필수로 만든다.** 기본값이 "영구 보관, 공개 접근"이다.
+`X-Fal-Store-IO: 0`은 JSON payload만 막고 **CDN 파일은 막지 않는다**고 같은 문서가
+명시한다. 따라서 요청마다 `X-Fal-Object-Lifecycle-Preference`로 짧은 만료를
+지정하고 자산을 즉시 사설 저장소로 복사한다. 둘 중 하나만 하면 사용자 이미지가
+공개 CDN에 남는다.
+
+**Google 종료 일정** — `https://ai.google.dev/gemini-api/docs/deprecations`
+
+| 모델 | 종료일 | 권고 대체 |
+|---|---|---|
+| `imagen-4.0-generate-001` · `-ultra-` · `-fast-` | **August 17, 2026** | `gemini-3.1-flash-image` |
+| `gemini-2.5-flash-image` | **October 2, 2026** | `gemini-3.1-flash-image-preview` |
+| `gemini-3.1-flash-image` | **No shutdown date announced** | — |
+| `gemini-3-pro-image` | **No shutdown date announced** | — |
+
+- **Imagen 4 경로는 폐기한다.** 3일 뒤 종료이고, Google 자신이 권고하는 대체가
+  `gemini-3.1-flash-image` — 즉 이 문서가 fal을 통해 사려는 바로 그 모델이다.
+- **`gemini-2.5-flash-image`(원본 Nano Banana) 브리지는 채택하지 않는다.** 남은
+  기간이 7주다. adapter·가격·크레딧 승인·UI를 갖춰 7주 쓰고 버리는 비용이 fal
+  연동을 기다리는 비용보다 크다. 마케팅 공백이 실제로 문제가 되면 그때 다시
+  판단하되, 기본은 만들지 않는 것이다.
+- **`gemini-3.1-flash-image`는 종료 예정이 없다.** fal 경로가 단명할 위험은 모델
+  쪽에는 없다.
+
+### 16.4 요청당 최악 원가와 크레딧 바닥값
+
+| 항목 | µUSD | 근거 |
+|---|---:|---|
+| fal 1K 이미지 | 80,000 | 위 인용, 성공 시에만 |
+| Tomverse 프롬프트 예산 | 5,000 | `IMAGE_PROMPT_BUDGET_MICRO_USD`. **fal의 과금 항목이 아니라 다른 모델과 같은 방식으로 얹는 여유분**이다 |
+| high thinking | 2,000 | 위 인용의 $0.002. **요청이 `thinking_level: "high"`를 보내므로 매번 발생시키기로 한 비용**이다 |
+| web search | — | 요청이 켤 수 없으므로 제외. 숫자가 아니라 **adapter가 지켜야 할 성질**이다 |
+| **최악 요청 원가** | **87,000** | |
+| **수학적 최소 크레딧** | **97** | `ceil(87,000 / 900)` |
+
+`thinkingCapMicroUsd`가 2,000인 이유는 안전 여유가 아니라 **요청이 실제로 그것을
+쓰기 때문**이다. `thinking_level`은 생략하면 비활성이므로(fal 스키마: "Omit to
+disable"), `"high"`를 보내는 것은 매번 $0.002를 발생시키겠다는 결정이다. 이
+숫자와 요청은 하나의 결정이어야 하고, 그래서 고정 필드 목록이 adapter가 아니라
+§16.5에 있다. 생략했다면 최악은 85,000, 바닥은 95다.
+
+**판매 크레딧은 별도 승인이다.** 바닥값 97은 승인가가 아니다. Grok 1K가 바닥값
+62에 승인가 75(여유 21%)인 것과 같은 비율이면 후보는 115~120이고, 이는 결정안에
+올릴 범위이지 결정이 아니다. `prices`는 승인 전까지 비워 둔다.
+
+### 16.5 승인과 요청 계약 (2026-08-14)
+
+**승인 (제품 책임자, 2026-08-14)**
+
+> `fal-ai/nano-banana-2`, 1K, 1장, High thinking, Web Search 비활성 조건에서
+> 최대 원가 87,000µUSD, 정책 바닥 97크레딧을 확인하고 판매가 120크레딧을
+> 승인한다. 옵션 확대는 별도 가격 검증과 승인을 요구한다.
+
+120은 크레딧당 725µUSD다. Grok Imagine 1K가 55,000 ÷ 75 = 733µUSD이므로 두
+이웃 모델이 같은 여유를 갖는다. 115였다면 757µUSD로 여유가 줄고 화면에서
+설명하기도 어렵다.
+
+**바닥값 97은 설정에 딸린 숫자다.** `thinking_level`을 생략하면 최대 원가는
+85,000µUSD, 바닥은 95다. 가격을 97로 잡고 요청 모드를 적지 않으면 감사 산식과
+코드가 어긋난다. 그래서 아래 필드 목록이 가격 결정의 일부이지 구현 세부가
+아니다.
+
+#### 고정 요청 필드 — fal 공식 스키마에서 확인 (2026-08-14)
+
+`https://fal.ai/models/fal-ai/nano-banana-2/api`
+
+| 필드 | 고정값 | 스키마가 말하는 기본값 | 고정하는 이유 |
+|---|---|---|---|
+| `num_images` | `1` | `1` | 고정가는 한 장에 대한 것이다 |
+| `resolution` | `"1K"` | `"1K"` | 2K·4K는 1.5배·2배로 별도 가격·별도 승인 |
+| `aspect_ratio` | `"1:1"` | **`"auto"`** | **`auto`는 "let the model decide based on the prompt"** — 검증된 가격과 `sizes: ["1024x1024"]` 계약이 모델 판단에 달리게 된다 |
+| `thinking_level` | `"high"` | 없음(생략 시 비활성) | 승인된 원가 산식의 2,000µUSD가 이 값이다 |
+| `enable_web_search` | `false` | 문서에 명시 없음 | $0.015 별도 과금. 기본값에 기대지 않는다 |
+| `limit_generations` | `true` | `true` | 프롬프트가 여러 장을 지시해도 무시하고 중간 이미지도 버린다 |
+| `system_prompt` | `""` | `""` | 우리가 넣지 않은 지시가 결과와 원가에 개입하지 않게 한다 |
+| `output_format` | 명시 | `"png"` | 저장 MIME은 응답이 말한 것을 기록하되, 요청은 가정하지 않는다 |
+| `safety_tolerance` | 명시 | `"4"` (1이 가장 엄격, 6이 가장 느슨) | moderation 기본값을 조용히 물려받지 않는다 |
+
+**`aspect_ratio`는 제시된 목록에 없었고, 빠지면 계약이 깨진다.** 스키마 기본값이
+`auto`이므로 명시하지 않으면 1:1이 아닌 이미지가 올 수 있다.
+
+추가 요구사항:
+
+- **서버가 위 값을 사용자 입력으로 덮어쓸 수 없다.** 프롬프트만 사용자 것이다.
+- 반환 이미지가 정확히 1장이 아니면 실패 처리한다(직접 Google 경로와 같은 규칙).
+- 다운로드 URL은 host allowlist로 제한하고, MIME·파일 크기·실제 해상도를
+  저장 전에 검증한다.
+- `X-Fal-No-Retry`를 보낸다. 이유는 원가 배수가 아니라 **성공 후 응답 유실 뒤의
+  재시도가 두 번째 이미지를 만들고 두 번 과금**하기 때문이다(§16.3).
+- `X-Fal-Store-IO: 0`과 `X-Fal-Object-Lifecycle-Preference`를 **둘 다** 보낸다.
+  전자는 JSON payload만 막고 CDN 파일은 막지 않는다.
+- `sync_mode: true`는 검토 대상이다. 스키마상 "the media will be returned as a
+  data URI and the output data won't be available in the request history"이므로
+  공개 CDN 의존을 줄인다. 1K 이미지 크기가 서버 처리에 무리가 없을 때만 쓰고,
+  쓰더라도 `X-Fal-Store-IO: 0`은 유지한다.
+
+#### 가격 drift 검사의 범위
+
+fal이 "Pricing is subject to change"라고 공표하므로 대조가 유일한 안전장치다.
+다만 **fail-closed의 대상은 이 모델이지 서비스 전체가 아니다.**
+
+- 배포 전 `GET /v1/models/pricing?endpoint_id=fal-ai/nano-banana-2`로 승인
+  가격($0.08 + high $0.002)과 정확히 대조한다.
+- 불일치하면 **Nano Banana 2만** 활성화하지 않는다.
+- 런타임 billable unit을 정산 snapshot에 저장하고, 승인값을 넘으면 신규 fal
+  요청을 차단하고 경고한다.
+- **fal pricing API 장애가 `/api/ready`를 503으로 만들지 않는다.** 채팅과
+  OpenAI·xAI 이미지까지 함께 멈추면 그것은 안전장치가 아니라 단일 장애점이다.
+
+#### 활성화 순서
+
+승인이 필요한 금액은 판매가 하나가 아니다.
+
+1. 판매가 120크레딧 승인 — **완료 (2026-08-14)**
+2. adapter·테스트 구현. 모델은 `operational_hold` 유지
+3. **fal credential, prepaid 충전액과 자동충전 여부, 일간·월간 provider budget
+   승인** → 환경변수 **선배포**
+4. 가격 drift 대조 통과
+5. registry 활성화
+
+3번은 아직 승인되지 않았다. 2번은 그것과 무관하게 진행할 수 있다.
+
+### 16.6 운영 예산 승인 (2026-08-14)
+
+**승인 (제품 책임자, 2026-08-14)**
+
+> Fal 초기 production canary 예산을 일 $12(`12000000`µUSD), 월
+> $50(`50000000`µUSD), prepaid $50, 자동충전 비활성으로 승인한다. 잔액·가격·
+> 성공률을 관측한 뒤 별도 승인으로 확대한다.
+
+| 항목 | 값 | 환경변수 |
+|---|---:|---|
+| 일간 | 12,000,000µUSD ($12) | `IMAGE_PROVIDER_FAL_COST_MICROUSD_PER_DAY` |
+| 월간 | 50,000,000µUSD ($50) | `IMAGE_PROVIDER_FAL_COST_MICROUSD_PER_MONTH` |
+| prepaid 충전액 | $50 | fal 대시보드 |
+| 자동충전 | **비활성** | fal 대시보드 |
+
+근거:
+
+- 저장소가 강제하는 이미지 예산 바닥은 현재 **$10.80/일**(플랜 크레딧에서 유도)
+  이므로 $12는 그 위이고 정상 적용된다. 이보다 낮게 설정하면 유도값으로 올려
+  강제된다.
+- 최악 원가 87,000µUSD 기준 하루 약 137건, 월 약 574건.
+- **월 예산 $50과 prepaid $50을 일치시킨다.** 사람이 수동으로 추가 충전하더라도
+  앱 쪽 월 예산이 그 이상의 지출을 막는다. 두 층이 같은 숫자를 말하므로 어느
+  한쪽만 올리는 것은 실수가 아니라 결정이 된다.
+- **자동충전은 끈다.** prepaid 잔액이 바닥나면 요청이 막히는 것이 초기 canary에
+  원하는 동작이다. 자동충전은 그 바닥을 없애서, 비용 사고를 "차단"이 아니라
+  "청구서"로 바꾼다.
+
+관측: 잔액을 fal billing API로 보고 **$15 경고 / $10 긴급**. 2주 또는 성공
+300건 후 문제가 없으면 월 예산과 prepaid를 각각 $120로 올리는 것을 별도 승인
+안건으로 올린다.
+
+**자동충전을 나중에 켠다면 "활성"만 정하는 것으로는 부족하다.** 충전 금액,
+발동 잔액, 월간 자동충전 상한을 함께 승인해야 한다 — 세 값이 없는 자동충전은
+상한 없는 지출과 같다.
+
+### 16.7 high thinking은 끄는 것이 아니라 켜는 고정이다
+
+2026-08-14에 문서와 코드가 하루 만에 어긋났다. adapter는
+`thinking_level: "high"`를 보내고 `thinkingCapMicroUsd`는 2,000인데, §16.2와
+registry의 `disabledNote`는 "high thinking 비활성"이라고 적고 있었다. 세 진술 중
+둘이 틀렸고 그 사이에 아무 검사도 없었다.
+
+**고정 네 가지 중 셋은 끄는 고정이고 하나는 켜는 고정이다.**
+
+| 고정 | 방향 |
+|---|---|
+| 1K | 값 지정 |
+| 정확히 1장 | 값 지정 |
+| web search | **끔** |
+| high thinking | **켬** |
+
+이 숫자와 이 필드는 하나의 결정이다. 87,000µUSD 최악값 중 2,000이 이 필드에
+달려 있고, 생략하면 정직한 상한은 0, 바닥은 95다. 이제
+`tests/falImageRequest.test.mjs`가 두 파일을 가로질러 이 일치를 강제하고,
+`scripts/security-regression-check.mjs`가 필드 자체를 고정한다.
+
+
+### 16.8 활성화 기록 (2026-08-14)
+
+`fal-ai/nano-banana-2`의 `disabledReason`을 `null`로 바꿨다. §16.2가 요구한 네
+조건이 모두 충족됐고, 각각이 무엇으로 충족됐는지 아래에 적는다 — 활성화는
+"준비됐다는 판단"이 아니라 **조건별로 지목 가능한 증거**여야 한다.
+
+| §16.2 조건 | 충족 근거 |
+|---|---|
+| 가격 검증 | fal 공표 원문(§16.3) + `check:fal-image-pricing`이 live API에 대해 `matched` (`0.08 USD per images`) |
+| adapter | `lib/imageProviderAdapter.ts`의 `generateWithFal`, 실제 요청 1건으로 증명 |
+| 재시도·저장 헤더 | `X-Fal-No-Retry: 1`, `X-Fal-Store-IO: 0`, lifecycle 900초 — 실행 기록에 그대로 남음 |
+| 예산 | `IMAGE_PROVIDER_FAL_COST_*` 배포 및 prepaid 충전(§16.6) |
+
+증거는 `.github/audits/evidence/fal-nano-banana-2-smoke/`에 있고,
+`npm run check:fal-smoke-evidence`가 PR Fast Gate에서 결론을 **다시 계산한다.**
+
+#### 실측이 확정한 것
+
+`x-fal-billable-units: 1.025` → `1.025 × 80,000 = 82,000µUSD`. §16.4 표의 fal
+측 두 항목(80,000 이미지 + 2,000 high thinking)과 정확히 일치한다. 0.025 단위가
+곧 $0.002 할증이다. `check:fal-image-pricing`은 fal pricing API가 단가 하나만
+답하므로 이 할증을 비교하지 못한다고 스스로 적어 두는데, 그 공백을 이 실측이
+메웠다.
+
+배달 이미지는 실제로 1024×1024였다. `aspect_ratio` 기본값이 `"auto"`이므로
+§16.5에서 고정하지 않았다면 팔린 크기와 다른 모양이 조용히 배달됐을 것이다.
+
+#### 활성화가 켜는 것과 켜지 않는 것
+
+**켜지 않는 것.** 이미지 생성 전체는 여전히 `feature.imageGenerationEnabled`
+(`AppSetting`, 값이 정확히 `"true"`일 때만 참) 뒤에 있다. registry 행을 켠 것만으로
+사용자에게 노출되는 것은 없고, `/api/ready`도 이 flag가 켜져 있을 때만 이미지
+예산 부재를 실패로 취급한다(`lib/imageProviderBudgetReadiness.ts`).
+
+**켜는 것.** `listActiveImageProviders()`에 `fal`이 들어간다. 이때부터 fal은
+예산·동시성·readiness가 적용되는 provider이고, `check:fal-image-pricing`이
+`skipped`에서 **fail-closed**로 바뀐다 — 활성 상태에서 가격을 읽지 못하면 실패다.
+
+#### 남은 구멍 (의도적으로 기록)
+
+`check:fal-image-pricing`은 `FAL_KEY`가 필요해 **어느 workflow에서도 실행되지
+않는다.** `check:openai-model-access`와 같은 취급이며, 배포 전 사람이 돌린다.
+그 결과 고정가가 기대는 유일한 drift 장치가 자동으로는 돌지 않는다. 오늘의
+가격은 확인됐으므로 활성화를 막을 사유는 아니지만, **"검사가 존재한다"와 "검사가
+돌아간다"는 다른 사실이므로** 여기에 적는다. 자동화하려면 저장소 secret으로
+`FAL_KEY`가 필요하고, 그것은 별도 결정이다.
+
+`disabledNote`는 제거했다. 이 필드는 disabled 모델용인데 admin panel이 조건 없이
+렌더링하므로, 남겨 두면 이미 해제된 hold를 계속 설명한다 — 그것을 확인하러 오는
+바로 그 화면에서. `tests/imageModelRegistry.test.mjs`가 활성 모델의 note를
+금지한다.

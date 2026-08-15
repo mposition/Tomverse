@@ -73,3 +73,6 @@ docs/*
 !docs/ops/
 !docs/release-gates/
 .playwright-mcp
+
+# Scratch build directory for scripts/verify-package-build-matrix.mjs.
+.package-build-matrix-*

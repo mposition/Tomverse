@@ -19,6 +19,8 @@ const resetData = () =>
       "MemoryExtractionCreditReservation",
       "MemoryExtractionChunk",
       "MemoryExtractionRun",
+      "MemoryEvidence",
+      "MemoryItem",
       "User"
     RESTART IDENTITY CASCADE
   `);
@@ -161,4 +163,87 @@ test("an empty database reports zeroes, not nulls that read as an outage", async
     assert.equal(report.queue.pendingRuns, 0);
     assert.equal(report.queue.oldestPendingAgeSeconds, null);
     assert.equal(report.truncated, false);
+});
+
+const createItem = async (
+    userId: string,
+    overrides: {
+        status?: string;
+        sensitivity?: string;
+        userEdited?: boolean;
+        createdAt?: Date;
+        extractionRunId?: string | null;
+        extractionModelId?: string | null;
+    } = {}
+) =>
+    prisma.memoryItem.create({
+        data: {
+            userId,
+            kind: "preference",
+            statement: `fixture ${randomUUID()}`,
+            confidence: 0.9,
+            status: overrides.status ?? "active",
+            sensitivity: overrides.sensitivity ?? "standard",
+            userEdited: overrides.userEdited ?? false,
+            createdAt: overrides.createdAt ?? new Date(),
+            extractionRunId:
+                overrides.extractionRunId === undefined
+                    ? "run-1"
+                    : overrides.extractionRunId,
+            extractionChunkIndex:
+                overrides.extractionRunId === null ? null : 0,
+            extractionModelId:
+                overrides.extractionModelId === undefined
+                    ? "gpt-5-6-luna"
+                    : overrides.extractionModelId,
+            promptVersion:
+                overrides.extractionModelId === null ? null : "mem-extract-v1",
+        },
+    });
+
+test("review outcomes count only extraction-produced items", async () => {
+    // A memory the user wrote themselves says nothing about a pair's precision,
+    // so it must not move the approval rate.
+    const user = await createUser();
+    await createItem(user.id, { status: "active" });
+    await createItem(user.id, { status: "rejected" });
+    await createItem(user.id, {
+        status: "rejected",
+        extractionRunId: null,
+        extractionModelId: null,
+    });
+
+    const report = await getMemoryExtractionReport();
+    assert.equal(report.review.proposed, 2);
+    assert.equal(report.review.approvalRate, 0.5);
+    assert.equal(report.review.byPair.length, 1);
+});
+
+test("a deleted item is neither an approval nor a rejection", async () => {
+    // Deleting is the user removing memory, not judging the proposal that
+    // produced it.
+    const user = await createUser();
+    await createItem(user.id, { status: "active" });
+    await createItem(user.id, { status: "deleted" });
+
+    const report = await getMemoryExtractionReport();
+    assert.equal(report.review.proposed, 1);
+    assert.equal(report.review.approvalRate, 1);
+});
+
+test("review outcomes respect the window", async () => {
+    const user = await createUser();
+    await createItem(user.id, { status: "active" });
+    await createItem(user.id, {
+        status: "rejected",
+        createdAt: new Date(Date.now() - 30 * 86_400_000),
+    });
+
+    const week = await getMemoryExtractionReport({ windowDays: 7 });
+    assert.equal(week.review.proposed, 1);
+    assert.equal(week.review.approvalRate, 1);
+
+    const month = await getMemoryExtractionReport({ windowDays: 60 });
+    assert.equal(month.review.proposed, 2);
+    assert.equal(month.review.approvalRate, 0.5);
 });

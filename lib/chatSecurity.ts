@@ -37,8 +37,32 @@ import {
     PLAN_ENTITLEMENT_EXHAUSTED,
     PROVIDER_BUDGET_EXHAUSTED,
 } from "@/lib/chatCostSafetyCore";
-import { estimateToolInputTokenOverhead } from "@/lib/chatTokenEstimate";
-import { futureResetAt } from "@/lib/chatLimitDecisionCore";
+import {
+    estimateToolInputTokenOverhead,
+    toReservedInputTokens,
+    type TokenEstimateBreakdown,
+} from "@/lib/chatTokenEstimate";
+import {
+    attemptSetProblems,
+    combineAttemptUsage,
+    type AttemptUsage,
+} from "@/lib/chatMultiAttemptSettlement";
+import {
+    MAX_ATTEMPT_INDEX,
+    PROVIDER_BUCKET_PREFIX,
+    PROVIDER_BUDGET_PERIODS,
+    deriveProviderEntries,
+    providerBucketKey,
+    providerHoldProblems,
+    withoutAttemptHolds,
+    type AttemptHold,
+} from "@/lib/chatProviderHolds";
+import { resolveInputUsageSource } from "@/lib/tokenEstimateShadow";
+import { recordShadowSettlement } from "@/lib/tokenEstimateShadowRecorder";
+import {
+    safeDailyResetAt,
+    withFutureResetAt,
+} from "@/lib/chatLimitDecisionCore";
 import { recordChatLimitDecision } from "@/lib/chatLimitDecisions";
 import { isWebSearchMode, type WebSearchMode } from "@/lib/appDefaults";
 import { getAnonymousClientKey } from "@/lib/clientIp";
@@ -132,7 +156,14 @@ export type ChatBudget = {
     modelUsageClass: ModelUsageClass;
     usageCredits: number;
     inputTokens: number;
+    /**
+     * The output cap this application asks for, before it is fitted to the
+     * room the context window has left (`lib/chatContextWindow.ts`). Not what
+     * the request ends up sending.
+     */
     maxOutputTokens: number;
+    /** The provider's absolute settable ceiling, where verified. */
+    providerMaxOutputTokens: number | null;
     reservedOutputTokens: number;
     inputUsdPerMillionTokens: number;
     outputUsdPerMillionTokens: number;
@@ -161,6 +192,16 @@ export type ChatUsageReservation = {
     modelId: string;
     provider: AiModel["provider"];
     entries: ReservationEntry[];
+    /**
+     * Which attempt holds what against which provider budget.
+     *
+     * The source of truth for the `provider:` rows in `entries`, which are
+     * derived from it -- see lib/chatProviderHolds.ts for why a provider hold
+     * cannot be expressed by the entries alone once a turn can dispatch twice.
+     * Absent on a reservation written before automatic fallback existed, and
+     * on those the entries stand as they always did.
+     */
+    attemptHolds?: AttemptHold[];
     usageCredits: number;
     inputTokens: number;
     maxOutputTokens: number;
@@ -202,6 +243,20 @@ const durableReservationPayloadSchema = z
                 })
                 .strict()
         ).max(40),
+        attemptHolds: z
+            .array(
+                z
+                    .object({
+                        attemptIndex: z.number().int().min(0).max(MAX_ATTEMPT_INDEX),
+                        key: z.string().min(1).max(240),
+                        period: z.string().min(1).max(80),
+                        periodStart: z.iso.datetime(),
+                        amount: z.number().int().nonnegative(),
+                    })
+                    .strict()
+            )
+            .max(8)
+            .optional(),
         usageCredits: z.number().int().positive(),
         inputTokens: z.number().int().nonnegative(),
         maxOutputTokens: z.number().int().nonnegative(),
@@ -229,31 +284,84 @@ const durableReservationPayloadSchema = z
     })
     .strict();
 
+/**
+ * The payload as it is stored, with the provider entries rebuilt from the
+ * holds.
+ *
+ * Rebuilt rather than trusted: `attemptHolds` is the source of truth, and a
+ * caller that changed one without the other would otherwise persist the
+ * disagreement. Deriving on the way out means the only way to change a
+ * provider entry is to change the hold that produced it.
+ *
+ * A reservation with no holds -- everything written before automatic fallback
+ * existed -- keeps its entries exactly as they are.
+ */
 const serializeReservation = (
     reservation: ChatUsageReservation
 ): Prisma.InputJsonValue => {
-    const { userId, ...rest } = reservation;
+    const { userId, attemptHolds, ...rest } = reservation;
+    const entries = attemptHolds
+        ? [
+              ...reservation.entries.filter(
+                  (entry) => !entry.key.startsWith(PROVIDER_BUCKET_PREFIX)
+              ),
+              ...deriveProviderEntries(attemptHolds),
+          ]
+        : reservation.entries;
     return {
         ...rest,
-        entries: reservation.entries.map((entry) => ({
+        entries: entries.map((entry) => ({
             ...entry,
             periodStart: entry.periodStart.toISOString(),
         })),
+        ...(attemptHolds
+            ? {
+                  attemptHolds: attemptHolds.map((hold) => ({
+                      ...hold,
+                      periodStart: hold.periodStart.toISOString(),
+                  })),
+              }
+            : {}),
         ...(userId ? { userId } : {}),
     };
 };
 
 export const deserializeReservation = (payload: Prisma.JsonValue) => {
     const parsed = durableReservationPayloadSchema.parse(payload);
+    const entries = parsed.entries.map((entry) => ({
+        ...entry,
+        periodStart: new Date(entry.periodStart),
+    }));
+    const attemptHolds = parsed.attemptHolds?.map((hold) => ({
+        ...hold,
+        periodStart: new Date(hold.periodStart),
+    }));
+    if (attemptHolds) {
+        // Checked on every read, not only on write. Two fields of one object
+        // commit together and can still be written disagreeing with each
+        // other, and every disagreement here is money moving without
+        // authorization: an entry above its holds releases budget nobody
+        // reserved, one below leaves a provider holding money for a call that
+        // finished long ago.
+        const problems = providerHoldProblems({ holds: attemptHolds, entries });
+        if (problems.length > 0) {
+            throw new Error(
+                `Chat reservation provider holds are inconsistent: ${problems.join(" ")}`
+            );
+        }
+    }
+    // `attemptHolds` is dropped from the spread and reattached with real
+    // dates: leaving the parsed one in would union a string-dated shape into
+    // the type and every caller would have to narrow it.
+    const rest = { ...parsed, attemptHolds: undefined };
+    delete (rest as { attemptHolds?: unknown }).attemptHolds;
     return {
-        ...parsed,
+        ...rest,
         reservedOutputTokens:
             parsed.reservedOutputTokens ?? parsed.maxOutputTokens,
         provider: parsed.provider as AiModel["provider"],
-        entries: parsed.entries.map((entry) => ({
-            ...entry,
-            periodStart: new Date(entry.periodStart),
-        })),
+        entries,
+        ...(attemptHolds ? { attemptHolds } : {}),
     } satisfies ChatUsageReservation;
 };
 
@@ -273,6 +381,52 @@ export class ChatAccessError extends Error {
         super(message);
     }
 }
+
+/**
+ * Whether a thrown value is one of this module's own refusals.
+ *
+ * Exported as a predicate rather than left to `instanceof` at the call site
+ * because `instanceof` compares class identity, and class identity is a
+ * property of the module *instance*: a bundler or a test harness that
+ * evaluates this file twice produces two `ChatAccessError` classes, and a
+ * refusal raised by one is not an instance of the other. Asking the module
+ * that owns the class means the comparison always happens against the copy
+ * that raised the error.
+ *
+ * That distinction is load-bearing wherever getting it wrong is silent.
+ * `chatErrorResponse` below can use `instanceof` directly -- it lives in this
+ * file -- but a caller in another module that mistakes a local refusal for a
+ * provider failure writes bad data into provider health and says nothing.
+ */
+export const isChatAccessError = (error: unknown): error is ChatAccessError =>
+    error instanceof ChatAccessError;
+
+/**
+ * Refuses an account an administrator has put out of bounds: suspended,
+ * already scheduled for deletion, or restricted from AI usage specifically.
+ *
+ * The check itself lives in lib/userOperationalSecurity.ts, which cannot raise
+ * a `ChatAccessError` without importing this module back. Every paid AI entry
+ * point should call *this*, so that a suspended account is refused the same way
+ * and with the same code wherever it asks -- chat, a model comparison, an image
+ * generation, a memory extraction. Enforced in the service rather than the
+ * route: a second caller of the service is exactly how a gate written once
+ * stops covering everything.
+ *
+ * The expiry half matters as much as the refusal: a suspension or restriction
+ * whose end date has passed is cleared here, so a fixed-term penalty ends on
+ * its own rather than waiting for an administrator to remember.
+ */
+export const assertUserOperationalAccess = async (userId: string) => {
+    try {
+        await enforceUserOperationalSecurity(userId);
+    } catch (error) {
+        if (error instanceof UserOperationalRestrictionError) {
+            throw new ChatAccessError(403, error.code, error.message);
+        }
+        throw error;
+    }
+};
 
 const positiveInteger = (value: string | undefined, fallback: number) => {
     const parsed = Number(value);
@@ -356,7 +510,14 @@ export const getChatBudgetReservedCostMicroUsd = (budget: ChatBudget) =>
 export const createChatBudget = (
     kind: AccessKind,
     model: AiModel,
-    estimatedInputTokens: number,
+    /**
+     * The turn's raw input estimate. Prefer a breakdown, built with
+     * `createTokenEstimateAccumulator`: it carries the segment mix, and the
+     * reservation margins are per segment, so a bare total leaves
+     * `toReservedInputTokens` nothing to widen accurately and it has to fall
+     * back to the largest margin any segment carries.
+     */
+    estimatedInput: number | TokenEstimateBreakdown,
     options?: {
         webSearchSurchargeCredits?: number;
         /**
@@ -373,6 +534,15 @@ export const createChatBudget = (
             ? positiveInteger(process.env.CHAT_GUEST_MAX_INPUT_TOKENS, 16_000)
             : positiveInteger(process.env.CHAT_USER_MAX_INPUT_TOKENS, 128_000);
 
+    // The limit is checked against the raw estimate, deliberately: it bounds
+    // the conversation the user sent, not the margin and tool overhead the
+    // reservation adds on top. Charging someone a rejection for overhead they
+    // did not write would move the limit without anyone changing it.
+    const estimatedInputTokens =
+        typeof estimatedInput === "number"
+            ? estimatedInput
+            : estimatedInput.rawTotal;
+
     if (
         !Number.isSafeInteger(estimatedInputTokens) ||
         estimatedInputTokens <= 0 ||
@@ -388,12 +558,22 @@ export const createChatBudget = (
     // Credits are weighted by the conversation the user actually sent, so tool
     // overhead never inflates what they are charged -- it only widens the
     // internal cost reservation, which is refunded down at settlement.
+    //
+    // Computed by `toReservedInputTokens` rather than by adding the overhead
+    // here, because that function is where the active estimator calibration's
+    // safety multiplier and framing overhead live. Under
+    // `generic_multilingual_v1` both are the identity and this is exactly what
+    // the hand-written sum produced; under a calibration that is not, a
+    // reservation that skipped them would be short by the margin the
+    // calibration exists to provide, and the reason would be that this one
+    // caller did its own arithmetic.
     const reservedInputTokens = Math.min(
         maxInputTokens,
-        estimatedInputTokens +
-            estimateToolInputTokenOverhead({
+        toReservedInputTokens(estimatedInput, {
+            toolOverheadTokens: estimateToolInputTokenOverhead({
                 nativeSearchEnabled: options?.nativeSearchEnabled === true,
-            })
+            }),
+        })
     );
     const pricing = resolveModelRequestPricing(model, {
         estimatedPromptTokens: reservedInputTokens,
@@ -408,6 +588,7 @@ export const createChatBudget = (
             (options?.webSearchSurchargeCredits || 0),
         inputTokens: reservedInputTokens,
         maxOutputTokens: pricing.maxOutputTokens,
+        providerMaxOutputTokens: pricing.providerMaxOutputTokens,
         reservedOutputTokens: pricing.reservationOutputTokens,
         inputUsdPerMillionTokens: pricing.inputUsdPerMillionTokens,
         outputUsdPerMillionTokens: pricing.outputUsdPerMillionTokens,
@@ -683,25 +864,6 @@ const retryAfterFor = (period: Period, now: Date, dailyEnd?: Date) => {
 
 const monthlyResetAt = (now: Date) =>
     new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1));
-
-/**
- * A reset instant that is always in the future.
- *
- * A day window's end is normally ahead of `now`, but it is derived from stored
- * settings and can go stale -- for instance in the moments around a DST shift
- * or right after a time-zone change moved the current bucket. Telling a blocked
- * user to wait for an instant that has already passed is worse than useless, so
- * a stale boundary is rolled forward whole days until it is ahead of now.
- */
-const safeDailyResetAt = (windowEnd: Date, now: Date) => {
-    const future = futureResetAt(windowEnd, now);
-    if (future) return future;
-    const dayMs = 86_400_000;
-    const elapsed = now.getTime() - windowEnd.getTime();
-    return new Date(
-        windowEnd.getTime() + (Math.floor(elapsed / dayMs) + 1) * dayMs
-    );
-};
 
 const incrementUsage = async (
     tx: Prisma.TransactionClient,
@@ -1279,14 +1441,7 @@ export const preflightChatComparisonAccess = async (
             admission,
         };
     }
-    try {
-        await enforceUserOperationalSecurity(access.userId);
-    } catch (error) {
-        if (error instanceof UserOperationalRestrictionError) {
-            throw new ChatAccessError(403, error.code, error.message);
-        }
-        throw error;
-    }
+    await assertUserOperationalAccess(access.userId);
 
     const now = new Date();
     const plan = access.plan || "Free";
@@ -1468,7 +1623,13 @@ export const preflightChatComparisonAccess = async (
                     dailyPlanRemaining: dailyPlanCreditsRemaining ?? 0,
                     monthlyPlanRemaining: planCreditsRemaining,
                     purchasedCreditsAvailable,
-                    resetAt: userDayWindow.end.toISOString(),
+                    // The same instant the decision record carries. A stale
+                    // stored time zone rolls it forward here too, so the audit
+                    // trail and the message the user reads agree.
+                    resetAt: safeDailyResetAt(
+                        userDayWindow.end,
+                        now
+                    ).toISOString(),
                 }
             );
         }
@@ -1527,9 +1688,16 @@ export const preflightChatComparisonAccess = async (
                 "CREDIT_COST_ALLOWANCE_INSUFFICIENT",
                 "Purchased credits do not include enough remaining AI cost allowance for this comparison.",
                 undefined,
+                // `internal` prefixed so publicChatErrorDetails strips them.
+                // These are provider spend in micro-USD, which never belongs
+                // in a user-facing payload -- the figures live in the
+                // limit-decision event and the Admin Console. The neighbouring
+                // guardrail rejection says the same thing in a comment; these
+                // two simply were not spelled to match, so the one mechanism
+                // that enforces it could not see them.
                 {
-                    requiredCostMicroUsd: purchasedReservedCost,
-                    availableCostMicroUsd: purchasedCostAvailable,
+                    internalRequiredCostMicroUsd: purchasedReservedCost,
+                    internalAvailableCostMicroUsd: purchasedCostAvailable,
                 }
             );
         }
@@ -1706,7 +1874,7 @@ export const preflightChatComparisonAccess = async (
             providerGroups.set(budget.provider, current);
         }
         for (const [provider, required] of providerGroups) {
-            const providerKey = `provider:${provider}`;
+            const providerKey = providerBucketKey(provider);
             const providerLimits = getProviderCostGuardrailLimits(provider);
             const providerChecks = [
                 {
@@ -1849,14 +2017,7 @@ export const acquireChatAccess = async (
         throw error;
     }
     if (access.kind === "user" && access.userId) {
-        try {
-            await enforceUserOperationalSecurity(access.userId);
-        } catch (error) {
-            if (error instanceof UserOperationalRestrictionError) {
-                throw new ChatAccessError(403, error.code, error.message);
-            }
-            throw error;
-        }
+        await assertUserOperationalAccess(access.userId);
     }
     const now = new Date();
     let leaseId: string = randomUUID();
@@ -2435,9 +2596,12 @@ export const acquireChatAccess = async (
                                 "CREDIT_COST_ALLOWANCE_INSUFFICIENT",
                                 "Purchased credits do not include enough remaining AI cost allowance for this request.",
                                 undefined,
+                                // Same rejection, same reason as the
+                                // comparison path above: micro-USD is internal.
                                 {
-                                    requiredCostMicroUsd: addOnReservedCost,
-                                    availableCostMicroUsd:
+                                    internalRequiredCostMicroUsd:
+                                        addOnReservedCost,
+                                    internalAvailableCostMicroUsd:
                                         error.availableFundedCostMicroUsd,
                                 }
                             );
@@ -2464,7 +2628,12 @@ export const acquireChatAccess = async (
                                     monthlyPlanRemaining: planRemaining,
                                     purchasedCreditsAvailable:
                                         error.availableCredits,
-                                    resetAt: accessDayWindow.end.toISOString(),
+                                    // Rolled forward for the same reason as
+                                    // the account path above.
+                                    resetAt: safeDailyResetAt(
+                                        accessDayWindow.end,
+                                        now
+                                    ).toISOString(),
                                 }
                             );
                         }
@@ -2751,7 +2920,7 @@ export const acquireChatAccess = async (
         }
 
         if (reservedCost > 0) {
-            const providerKey = `provider:${budget.provider}`;
+            const providerKey = providerBucketKey(budget.provider);
             const providerDayStart = periodStart("day", now);
             const providerDayAllowed = await incrementUsage(
                 tx,
@@ -2853,6 +3022,22 @@ export const acquireChatAccess = async (
             modelId: budget.modelId,
             provider: budget.provider,
             entries: reservationEntries,
+            // The primary's own provider hold, recorded as attempt 0's.
+            //
+            // Not bookkeeping for its own sake: `serializeReservation` derives
+            // the `provider:` entries from these, so a reservation that left
+            // the primary's hold out of them would lose that entry the first
+            // time a fallback added one of its own -- and settlement would
+            // then release nothing for the provider that actually ran.
+            attemptHolds: reservationEntries
+                .filter((entry) => entry.key.startsWith(PROVIDER_BUCKET_PREFIX))
+                .map((entry) => ({
+                    attemptIndex: 0,
+                    key: entry.key,
+                    period: entry.period,
+                    periodStart: entry.periodStart,
+                    amount: entry.amount,
+                })),
             usageCredits: budget.usageCredits,
             inputTokens: budget.inputTokens,
             maxOutputTokens: budget.maxOutputTokens,
@@ -2923,7 +3108,7 @@ export const acquireChatAccess = async (
 
 export const settleChatUsage = async (
     reservation: ChatUsageReservation,
-    usage: {
+    turnUsage: {
         inputTokens?: number;
         cachedInputTokens?: number;
         outputTokens?: number;
@@ -2948,8 +3133,37 @@ export const settleChatUsage = async (
         reconciled?: boolean;
         reason?: string;
         providerUsageSnapshot?: PerplexityUsageCostSnapshot | null;
+        /**
+         * Every dispatched attempt of this response, when there was more than
+         * one (routing policy §7's automatic fallback).
+         *
+         * Absent is the whole of today's traffic and settles exactly as it
+         * always has -- `turnUsage` above is the turn, priced at the reservation's
+         * own snapshot. Present splits the two ledgers §7 keeps apart: the
+         * user is charged from one accepted attempt, and every attempt's real
+         * cost lands on its own provider's budget at its own rates. See
+         * lib/chatMultiAttemptSettlement.ts for why that is two ledgers and
+         * not one number.
+         */
+        attempts?: readonly AttemptUsage[];
     }
 ) => {
+    // Validated before it is interpreted. A malformed attempt set settles
+    // silently wrong -- a duplicate index overwrites an audit row, a gap means
+    // an attempt was lost between dispatch and here -- so the refusal comes
+    // first and, deliberately, before the transaction: nothing has been locked
+    // and no money has moved when it raises.
+    if (options?.attempts?.length) {
+        const problems = attemptSetProblems(options.attempts);
+        if (problems.length > 0) {
+            throw new Error(
+                `Chat attempt set cannot be settled: ${problems.join(" ")}`
+            );
+        }
+    }
+    const multiAttempt = options?.attempts?.length
+        ? combineAttemptUsage(options.attempts)
+        : null;
     const settlement = await prisma.$transaction(async (tx) => {
         if (reservation.userId) {
             await lockCreditAccount(tx, reservation.userId);
@@ -2981,6 +3195,29 @@ export const settleChatUsage = async (
         }
 
         const canonical = deserializeReservation(durable.reservationPayload);
+        // The user's half of §7's split. With one dispatched attempt this *is*
+        // the caller's `usage`; with two it is the accepted attempt's, because
+        // the user is charged for the answer that arrived and not for
+        // Tomverse's own decision to ask a second model. The other half --
+        // every attempt's real cost at its own provider -- is applied to the
+        // provider buckets further down and never passes through here.
+        const billedAttempt = multiAttempt?.billedAttempt ?? null;
+        const usage: typeof turnUsage = billedAttempt
+            ? {
+                  ...turnUsage,
+                  inputTokens: billedAttempt.inputTokens,
+                  cachedInputTokens: billedAttempt.cachedInputTokens,
+                  outputTokens: billedAttempt.outputTokens,
+                  reasoningTokens: billedAttempt.reasoningTokens,
+                  usageFromProvider: billedAttempt.usageFromProvider,
+                  outcome: multiAttempt!.outcome,
+                  // Taken from the billed attempt too: the search cost is a
+                  // per-call provider charge, and the primary's would be
+                  // charged for a search the user's answer never used.
+                  searchCostMicroUsd: billedAttempt.searchCostMicroUsd,
+                  searchQueryCount: billedAttempt.searchQueryCount,
+              }
+            : turnUsage;
         const actualInput = Number.isSafeInteger(usage.inputTokens)
             ? Math.max(0, usage.inputTokens!)
             : canonical.inputTokens;
@@ -3086,9 +3323,25 @@ export const settleChatUsage = async (
                 : 0;
         const planActualCost = Math.max(0, actualCost - addOnActualCost);
 
+        // A provider's spend bucket settles to what *that provider* was paid,
+        // which stops being `actualCost` the moment a turn dispatches twice.
+        // The primary's bucket is settled from the primary's own attempt and
+        // the fallback provider -- which the reservation never held anything
+        // against -- is incremented separately below.
+        const providerCostFor = (key: string): number | null => {
+            if (!multiAttempt || !key.startsWith(PROVIDER_BUCKET_PREFIX)) return null;
+            const provider = key.slice(PROVIDER_BUCKET_PREFIX.length);
+            return multiAttempt.costByProvider.get(
+                provider as AiModel["provider"]
+            ) ?? 0;
+        };
+
         for (const entry of canonical.entries) {
+            const providerCost = providerCostFor(entry.key);
             const actual =
-                entry.metric === "tokens"
+                providerCost !== null
+                    ? providerCost
+                    : entry.metric === "tokens"
                     ? actualTokens
                     : entry.metric === "cost"
                       ? actualCost
@@ -3121,6 +3374,131 @@ export const settleChatUsage = async (
                       AND "period" = ${entry.period}
                       AND "periodStart" = ${entry.periodStart}
                 `;
+            }
+        }
+        if (multiAttempt) {
+            // The providers the reservation never held anything against.
+            // Their spend has to land somewhere or a fallback is free as far
+            // as the budget that is supposed to bound it can tell -- and a
+            // provider budget that cannot see its own spend keeps saying yes.
+            //
+            // The periods come from the held entries rather than from a clock
+            // read here: the attempts ran inside this request, so they belong
+            // to the day and month the hold was taken in, and reading "now"
+            // would put a turn that started at 23:59:59 in the wrong day.
+            const heldProviderEntries = canonical.entries.filter((entry) =>
+                entry.key.startsWith(PROVIDER_BUCKET_PREFIX)
+            );
+            const heldProviders = new Set(
+                heldProviderEntries.map((entry) =>
+                    entry.key.slice(PROVIDER_BUCKET_PREFIX.length)
+                )
+            );
+            for (const [provider, cost] of multiAttempt.costByProvider) {
+                if (heldProviders.has(provider) || cost <= 0) continue;
+                for (const period of PROVIDER_BUDGET_PERIODS) {
+                    const template = heldProviderEntries.find(
+                        (entry) => entry.period === period
+                    );
+                    if (!template) continue;
+                    await tx.$executeRaw`
+                        INSERT INTO "ChatUsageBucket" ("key", "period", "periodStart", "count", "updatedAt")
+                        VALUES (${providerBucketKey(provider)}, ${period}, ${template.periodStart}, ${cost}, NOW())
+                        ON CONFLICT ("key", "period", "periodStart")
+                        DO UPDATE SET
+                            "count" = "ChatUsageBucket"."count" + ${cost},
+                            "updatedAt" = NOW()
+                    `;
+                }
+            }
+
+            // One row per attempt, written once. The table refuses updates
+            // outright and holds a partial unique index on the billed one, so
+            // a second settlement of the same reservation cannot quietly
+            // rewrite what an attempt cost or move the user's charge.
+            // Insert-if-absent, so a retried settlement adds nothing. The
+            // rollup below is driven by how many rows this actually created,
+            // and both commit together: a crash leaves neither.
+            const inserted = await tx.chatAttemptUsage.createMany({
+                skipDuplicates: true,
+                data: multiAttempt.attempts.map((attempt) => ({
+                    reservationId: durable.id,
+                    attemptIndex: attempt.attemptIndex,
+                    modelId: attempt.price.modelId,
+                    provider: attempt.price.provider,
+                    outcome: attempt.outcome,
+                    providerRequestId: boundedProviderIdentifier(
+                        attempt.providerRequestId
+                    ),
+                    providerResponseId: boundedProviderIdentifier(
+                        attempt.providerResponseId
+                    ),
+                    inputTokens: attempt.inputTokens,
+                    cachedInputTokens: Math.min(
+                        attempt.inputTokens,
+                        attempt.cachedInputTokens
+                    ),
+                    outputTokens: attempt.outputTokens,
+                    reasoningTokens: Number.isSafeInteger(attempt.reasoningTokens)
+                        ? Math.max(0, attempt.reasoningTokens!)
+                        : null,
+                    costMicroUsd: BigInt(attempt.costMicroUsd),
+                    pricingSnapshot: {
+                        ...attempt.price,
+                        costSource: attempt.costSource,
+                        settlementVersion: multiAttempt.version,
+                    },
+                })),
+            });
+            if (inserted.count !== multiAttempt.attempts.length) {
+                // Some row already existed, so a previous settlement of this
+                // reservation already accrued the provider cost. Recording it
+                // again would double the day's rollup, which has no per-request
+                // key to dedupe on.
+                console.warn(JSON.stringify({
+                    event: "chat_attempt_usage_already_recorded",
+                    reservationId: durable.id,
+                    expected: multiAttempt.attempts.length,
+                    inserted: inserted.count,
+                }));
+            }
+            // The rollup, in the same transaction as the rows that dedupe it.
+            // ProviderDailyUsage has no per-request key, so a crash between an
+            // insert and its increment would leave the ledger and its evidence
+            // permanently disagreeing with no way to tell which was right.
+            for (const attempt of multiAttempt.attempts) {
+                if (
+                    inserted.count !== multiAttempt.attempts.length ||
+                    (attempt.inputTokens === 0 &&
+                        attempt.outputTokens === 0 &&
+                        attempt.costMicroUsd === 0)
+                ) {
+                    continue;
+                }
+                const breakdown = calculateProviderUsageCost({
+                    inputTokens: attempt.inputTokens,
+                    cachedInputTokens: attempt.cachedInputTokens,
+                    outputTokens: attempt.outputTokens,
+                    inputUsdPerMillionTokens: attempt.price.inputUsdPerMillionTokens,
+                    outputUsdPerMillionTokens: attempt.price.outputUsdPerMillionTokens,
+                    cachedInputPriceMultiplier:
+                        attempt.price.cachedInputPriceMultiplier,
+                });
+                await recordInternalProviderUsage({
+                    client: tx,
+                    provider: attempt.price.provider,
+                    modelId: attempt.price.modelId,
+                    inputTokens: attempt.inputTokens,
+                    cachedInputTokens: Math.min(
+                        attempt.inputTokens,
+                        attempt.cachedInputTokens
+                    ),
+                    outputTokens: attempt.outputTokens,
+                    estimatedCostMicroUsd: attempt.costMicroUsd,
+                    uncachedInputCostMicroUsd: breakdown.uncachedInputCostMicroUsd,
+                    cachedInputCostMicroUsd: breakdown.cachedInputCostMicroUsd,
+                    outputCostMicroUsd: breakdown.outputCostMicroUsd,
+                });
             }
         }
         if (canonical.userId && canonical.addOnReservations.length > 0) {
@@ -3157,10 +3535,46 @@ export const settleChatUsage = async (
                         : null,
                 },
                 providerUsageSnapshot: providerUsageSnapshot ?? undefined,
+                // The attempt the user's charge came from, written in the same
+                // transaction as the terminal status. Write-once at the
+                // database, so a later goodwill refund cannot re-attribute it.
+                ...(multiAttempt?.billedAttempt
+                    ? {
+                          settlementAttemptIndex:
+                              multiAttempt.billedAttempt.attemptIndex,
+                      }
+                    : {}),
                 settledAt: new Date(),
                 reconciledAt: options?.reconciled ? new Date() : null,
                 lastError: options?.reason?.slice(0, 500) || null,
             },
+        });
+
+        // Shadow only. Provenance is decided from the provider's *input* count
+        // alone -- deliberately not from `usageSource` above, which is decided
+        // by whether output tokens arrived. A turn that reported output but not
+        // input has an input figure that is the estimate itself, and
+        // calibrating on it would compare an estimate with a copy of itself.
+        await recordShadowSettlement({
+            attemptId: reservation.reservationId,
+            providerReportedInputTokens: Number.isSafeInteger(usage.inputTokens)
+                ? Math.max(0, usage.inputTokens!)
+                : null,
+            inputUsageSource: resolveInputUsageSource({
+                providerReportedInputTokens: usage.inputTokens,
+                providerReturnedUsage: usage.usageFromProvider !== false,
+            }),
+            outcome:
+                usage.outcome === "completed"
+                    ? "completed"
+                    : usage.outcome === "cancelled"
+                      ? "cancelled"
+                      : "failed",
+            // The settlement path receives no partial-stream signal, so this
+            // stays false until it does. A cancelled turn is already excluded
+            // from calibration on its own flag.
+            isPartial: false,
+            isCancelled: usage.outcome === "cancelled",
         });
 
         return {
@@ -3176,8 +3590,13 @@ export const settleChatUsage = async (
         };
     });
 
+    // Single-attempt only. A multi-attempt turn accrued each attempt inside
+    // the settlement transaction, against its own provider and model; running
+    // this as well would add the whole turn a second time under the
+    // reservation's canonical model.
     if (
         settlement.applied &&
+        !multiAttempt &&
         settlement.costBreakdown &&
         (settlement.actualInput > 0 ||
             settlement.actualOutput > 0 ||
@@ -3204,6 +3623,16 @@ export const settleChatUsage = async (
                         modelId: settlement.modelId,
                         error,
                     })
+            );
+        }
+    }
+    if (settlement.applied && multiAttempt) {
+        // A notification, not accounting: fired after the transaction so a
+        // provider alert cannot roll settlement back.
+        for (const provider of multiAttempt.costByProvider.keys()) {
+            if (provider !== "zhipu") continue;
+            await notifyProviderCreditIfNeeded("zhipu").catch((error) =>
+                console.error("Provider credit alert failed:", { provider, error })
             );
         }
     }
@@ -3239,6 +3668,219 @@ const boundedProviderIdentifier = (value: string | null | undefined) => {
     if (!normalized) return null;
     return normalized.replace(/[^A-Za-z0-9._:/-]/g, "").slice(0, 240) || null;
 };
+
+/**
+ * Takes an attempt's own provider-budget hold, and records whose it is.
+ *
+ * §10: every dispatch is authorized on the server "including fallback and
+ * Planner pass-through", and a provider budget is one of those
+ * authorizations.
+ *
+ * ## Every fallback reserves, including one on the same provider
+ *
+ * An earlier version returned early when the fallback ran on the provider the
+ * primary was already holding against, on the grounds that "the hold already
+ * covers it". It does not. A hold is sized for one attempt, and a second call
+ * -- same provider, different model -- costs more. Settlement increments a
+ * bucket past its hold without re-checking any limit, so the excess went
+ * through as spend the guardrail had never authorized. That the second model
+ * shares a bucket with the first is a fact about the key, not about the money.
+ *
+ * The hold goes into `attemptHolds` under this attempt's index, and the
+ * provider entry is re-derived as the sum. See lib/chatProviderHolds.ts for
+ * why the entries alone cannot carry this.
+ */
+export const reserveAttemptProviderBudget = async (input: {
+    reservationId: string;
+    userId?: string | null;
+    attemptIndex: number;
+    provider: string;
+    reservedMicroUsd: number;
+    periodStarts: { day: Date; month: Date };
+}): Promise<
+    | { reserved: false; reason: "reservation_not_open" }
+    | { reserved: false; reason: "already_held" }
+    | { reserved: false; reason: "budget_exhausted"; scope: string }
+    | { reserved: true; entries: ReservationEntry[] }
+> => {
+    const limits = getProviderCostGuardrailLimits(input.provider);
+    const amount = Math.max(0, Math.round(input.reservedMicroUsd));
+    const key = providerBucketKey(input.provider);
+    const checks = [
+        {
+            period: "provider-cost-day" as const,
+            start: input.periodStarts.day,
+            limit: limits.day,
+            scope: "provider_cost_day",
+        },
+        {
+            period: "provider-cost-month" as const,
+            start: input.periodStarts.month,
+            limit: limits.month,
+            scope: "provider_cost_month",
+        },
+    ];
+
+    return prisma.$transaction(async (tx) => {
+        // Same order as settlement: the credit account first, then the
+        // reservation's advisory lock. Two paths taking one pair of locks in
+        // different orders is the deadlock this ordering exists to avoid.
+        if (input.userId) {
+            await lockCreditAccount(tx, input.userId);
+        }
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`chat-credit-reservation:${input.reservationId}`}))`;
+        const durable = await tx.chatCreditReservation.findUnique({
+            where: { id: input.reservationId },
+        });
+        if (!durable || durable.status !== "reserved") {
+            // Settled, refunded or reconciled while this turn was running.
+            // A hold against a closed reservation is one nothing would release.
+            throw new AttemptBudgetRefusal("reservation_not_open");
+        }
+        const canonical = deserializeReservation(durable.reservationPayload);
+        const existing = canonical.attemptHolds ?? [];
+        if (existing.some((hold) => hold.attemptIndex === input.attemptIndex)) {
+            // A retry of this call, or two dispatches claiming one index.
+            // Either way the second must not add a hold nothing will release.
+            throw new AttemptBudgetRefusal("already_held");
+        }
+
+        const entries: ReservationEntry[] = [];
+        for (const check of checks) {
+            const allowed = await incrementUsage(
+                tx,
+                key,
+                check.period,
+                check.start,
+                check.limit,
+                amount
+            );
+            if (!allowed) {
+                // Rolls the whole transaction back, including a day hold taken
+                // before the month check refused.
+                throw new AttemptBudgetRefusal(check.scope);
+            }
+            entries.push({
+                key,
+                period: check.period,
+                periodStart: check.start,
+                amount,
+                metric: "cost",
+            });
+        }
+
+        const holds: AttemptHold[] = [
+            ...existing,
+            ...entries.map((entry) => ({
+                attemptIndex: input.attemptIndex,
+                key: entry.key,
+                period: entry.period,
+                periodStart: entry.periodStart,
+                amount: entry.amount,
+            })),
+        ];
+        await tx.chatCreditReservation.update({
+            where: { id: durable.id },
+            data: {
+                // `serializeReservation` re-derives the provider entries from
+                // the holds, so a same-provider hold lands as a larger amount
+                // on the one entry rather than a second row settlement would
+                // pay twice.
+                reservationPayload: serializeReservation({
+                    ...canonical,
+                    attemptHolds: holds,
+                }),
+            },
+        });
+        return { reserved: true as const, entries };
+    }).catch((error) => {
+        if (error instanceof AttemptBudgetRefusal) {
+            return error.scope === "reservation_not_open" ||
+                error.scope === "already_held"
+                ? { reserved: false as const, reason: error.scope }
+                : {
+                      reserved: false as const,
+                      reason: "budget_exhausted" as const,
+                      scope: error.scope,
+                  };
+        }
+        throw error;
+    });
+};
+
+/**
+ * Gives back one attempt's hold, and only that attempt's.
+ *
+ * By index, never by provider. Two attempts on one provider share a bucket, so
+ * releasing "the provider's hold" would take the primary's away with the
+ * fallback's -- the turn would then be holding nothing for a call that is
+ * still running.
+ *
+ * The compensating half of the reservation above: an attempt that is
+ * authorized and then fails to build its manifest, serialize, or reach the
+ * provider has spent nothing, and a hold left behind counts against that
+ * provider until the reservation expires for a call that was never made.
+ *
+ * Best-effort, and it says so by returning a boolean rather than raising. The
+ * turn is already ending on a failure, and replacing that failure with a
+ * worse one helps nobody. What it must not do is move one of the two without
+ * the other, which is why they move in one transaction.
+ */
+export const releaseAttemptProviderBudget = async (input: {
+    reservationId: string;
+    userId?: string | null;
+    attemptIndex: number;
+}): Promise<boolean> =>
+    prisma
+        .$transaction(async (tx) => {
+            if (input.userId) {
+                await lockCreditAccount(tx, input.userId);
+            }
+            await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`chat-credit-reservation:${input.reservationId}`}))`;
+            const durable = await tx.chatCreditReservation.findUnique({
+                where: { id: input.reservationId },
+            });
+            if (!durable || durable.status !== "reserved") return false;
+
+            const canonical = deserializeReservation(durable.reservationPayload);
+            const holds = canonical.attemptHolds ?? [];
+            const mine = holds.filter(
+                (hold) => hold.attemptIndex === input.attemptIndex
+            );
+            if (mine.length === 0) return false;
+
+            for (const hold of mine) {
+                await tx.$executeRaw`
+                    UPDATE "ChatUsageBucket"
+                    SET "count" = GREATEST(0, "count" - ${hold.amount}),
+                        "updatedAt" = NOW()
+                    WHERE "key" = ${hold.key}
+                      AND "period" = ${hold.period}
+                      AND "periodStart" = ${hold.periodStart}
+                `;
+            }
+            await tx.chatCreditReservation.update({
+                where: { id: durable.id },
+                data: {
+                    reservationPayload: serializeReservation({
+                        ...canonical,
+                        attemptHolds: withoutAttemptHolds(
+                            holds,
+                            input.attemptIndex
+                        ),
+                    }),
+                },
+            });
+            return true;
+        })
+        .catch(() => false);
+
+class AttemptBudgetRefusal extends Error {
+    constructor(readonly scope: string) {
+        super(`Attempt provider budget refused: ${scope}`);
+        this.name = "AttemptBudgetRefusal";
+    }
+}
 
 export const linkChatReservationProviderRequest = async (
     reservationId: string,
@@ -3603,11 +4245,22 @@ export const validateChatPayload = (body: unknown) => {
  * showing an end user and is exactly the kind of figure that made the previous
  * guardrail error read like a billing statement.
  */
+/**
+ * Everything a rejected caller is allowed to see, in one place.
+ *
+ * Two rules, both of which have to hold for *every* error response rather than
+ * for the call sites that remembered: raw internal USD never leaves the server
+ * (it goes to the limit-decision event and the Admin Console), and a reset
+ * instant is either in the future or absent. `now` defaults to the moment the
+ * response is built, which is the "creation time" the second rule is measured
+ * against.
+ */
 export const publicChatErrorDetails = (
-    details: ChatErrorDetails | undefined
+    details: ChatErrorDetails | undefined,
+    now: Date = new Date()
 ) => {
     if (!details) return undefined;
-    const entries = Object.entries(details).filter(
+    const entries = Object.entries(withFutureResetAt(details, now)).filter(
         ([key]) => !key.startsWith("internal")
     );
     return entries.length > 0 ? Object.fromEntries(entries) : undefined;

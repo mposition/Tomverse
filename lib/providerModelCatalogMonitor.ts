@@ -5,12 +5,14 @@ import type { AiProvider } from "@/lib/models";
 import { prisma } from "@/lib/prisma";
 import {
   AI_PROVIDERS,
-  PROVIDER_API_CONFIGURATION,
+  PROVIDER_API_KEY_ENV_NAMES,
+  resolveProviderApiKey,
 } from "@/lib/modelRegistryShared";
 import {
   catalogNextCursor,
   missingConfirmationRuns,
   parseProviderCatalogResponse,
+  providerCatalogUrl,
   type ProviderCatalogObservation,
 } from "@/lib/providerModelCatalogCore";
 
@@ -62,28 +64,6 @@ const providerHeaders = (
   return { Accept: "application/json", Authorization: `Bearer ${apiKey}` };
 };
 
-const providerCatalogUrl = (
-  provider: AiProvider,
-  cursor: string | null
-) => {
-  const base = PROVIDER_API_CONFIGURATION[provider].baseUrl;
-  const path =
-    provider === "xai"
-      ? "language-models"
-      : provider === "perplexity"
-        ? "v1/models"
-        : "models";
-  const url = new URL(`${base.replace(/\/$/, "")}/${path}`);
-  if (provider === "google") {
-    url.searchParams.set("pageSize", "1000");
-    if (cursor) url.searchParams.set("pageToken", cursor);
-  } else if (provider === "anthropic" || provider === "minimax") {
-    url.searchParams.set("limit", "1000");
-    if (cursor) url.searchParams.set("after_id", cursor);
-  }
-  return url;
-};
-
 const fetchJson = async (provider: AiProvider, apiKey: string, cursor: string | null) => {
   const response = await fetch(providerCatalogUrl(provider, cursor), {
     method: "GET",
@@ -116,12 +96,13 @@ const fetchJson = async (provider: AiProvider, apiKey: string, cursor: string | 
 };
 
 const fetchProviderCatalog = async (provider: AiProvider) => {
-  const configuration = PROVIDER_API_CONFIGURATION[provider];
-  const apiKey = process.env[configuration.apiKeyEnvName]?.trim();
+  const apiKey = resolveProviderApiKey(provider);
   if (!apiKey) {
+    // Names every accepted spelling: reporting only the canonical one sent an
+    // operator to set a variable they had already set under another name.
     throw new CatalogRequestError(
       "PROVIDER_MODEL_CATALOG_KEY_MISSING",
-      `${configuration.apiKeyEnvName} is not configured.`
+      `${PROVIDER_API_KEY_ENV_NAMES[provider].join(" / ")} is not configured.`
     );
   }
 

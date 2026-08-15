@@ -83,7 +83,13 @@ model User {
   externalImports                    ExternalImport[]
   memoryItems                        MemoryItem[]
   memoryExtractionRuns               MemoryExtractionRun[]
+  routingRuns                        RoutingRun[]
   memorySettings                     UserMemorySettings?
+  accountDataExportRequests          AccountDataExportRequest[]
+  assistantProfiles                  AssistantProfile[]
+  assistantProfileVersions           AssistantProfileVersion[]
+  assistantKnowledgeFiles            AssistantKnowledgeFile[]
+  assistantKnowledgeChunks           AssistantKnowledgeChunk[]
 
   @@index([plan, id])
   @@index([createdAt])
@@ -213,6 +219,42 @@ model Conversation {
   disabledPanels String @default("[]")
   webSearchMode  String @default("off") // off | auto | always
 
+  /// "manual" | "auto" (routing policy §5; allowlist CHECK lives in the
+  /// migration). Server-stored and server-decided: a request may ask for a
+  /// mode, but cohort eligibility (lib/autoCohort.ts) decides whether Auto
+  /// actually routes. A conversation left on "auto" while the account leaves
+  /// the cohort falls back to its own model choice rather than failing.
+  selectionMode String @default("manual")
+
+  /// Auto's sticky state, from lib/routerSelection.ts. `routerModelId` is the
+  /// model this conversation is currently on and `routerChallengerTurns` the
+  /// consecutive turns a challenger has cleared the switch margin. Both are
+  /// cleared when the conversation returns to manual: a streak accumulated
+  /// under Auto would otherwise decide the first switch after it is turned
+  /// back on, using evidence from a period the user did not route.
+  routerModelId         String?
+  routerChallengerTurns Int     @default(0)
+
+  /// §8 recovery, carried to the next turn. Set only by a successful hard
+  /// fallback, and cleared with the rest of the sticky state whenever the
+  /// conversation returns to manual -- §8 is explicit that manual intent wins
+  /// over fallback recovery.
+  routerSwitchReason    String?
+  routerRecoveryModelId String?
+
+  /// Policy: docs/policy/external-conversation-import-and-memory.md.
+  /// The assistant profile version this conversation is pinned to (release C,
+  /// policy §14). Set once when the conversation starts and never rewritten by
+  /// a later edit to the profile: a published revision is what this
+  /// conversation ran under, and moving it is an explicit user action.
+  ///
+  /// NULL for every conversation that started without a profile, which is all
+  /// of them before release C. `SetNull` on delete because deleting a profile
+  /// is a deletion request -- the conversation stays readable and simply
+  /// stops naming a profile.
+  assistantProfileVersionId String?
+  assistantProfileVersion   AssistantProfileVersion? @relation(fields: [assistantProfileVersionId], references: [id], onDelete: SetNull)
+
   shareToken     String?   @unique
   shareEnabled   Boolean   @default(false)
   sharedAt       DateTime?
@@ -259,11 +301,28 @@ model Message {
   searchMetadata  Json?
   providerContext MessageProviderContext?
 
+  /// How much account memory this answer's prompt carried. §8.1 invariant 4
+  /// forbids storing the injected context as a Message row and explicitly
+  /// permits the used count and non-sensitive aggregate metadata, which is
+  /// all this is — the memory text is never written here. NULL means no §10
+  /// context bundle accompanied the request, so memory was not possible;
+  /// 0 means a bundle was verified and retrieval selected nothing.
+  ///
+  /// The day counters in lib/memoryMetricsCore.ts already report the
+  /// injection ratio. This is the thing a counter cannot give: attribution
+  /// per answer, which §22's follow-up proxy needs to compare the answers
+  /// memory shaped against the ones it did not.
+  memoryUsedCount Int?
+  memoryTokens    Int?
+
   conversationId String
   conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
   createdAt      DateTime     @default(now())
 
   @@index([conversationId])
+  /// §22's follow-up proxy reads answers by time window across every
+  /// conversation; without this it scans the whole table.
+  @@index([createdAt])
 }
 
 // Provider-private assistant state needed to replay reasoning models exactly
@@ -757,11 +816,75 @@ model ChatCreditReservation {
   createdAt                DateTime  @default(now())
   updatedAt                DateTime  @updatedAt
 
+  /// Which attempt the user's charge was computed from, once one was.
+  ///
+  /// A pointer rather than a flag on the attempt row, so ChatAttemptUsage
+  /// stays completely immutable: the cost of an attempt is written when the
+  /// attempt ends, and which attempt the user pays for is not known until
+  /// settlement. A flag would have needed an UPDATE on an audit row.
+  ///
+  /// Structurally "at most one" -- one column, one row. NULL is honest and
+  /// reachable: a turn whose process died after dispatching has attempt costs
+  /// and no settlement, and saying so beats guessing which one it would have
+  /// been. A composite foreign key makes the index it names a real attempt of
+  /// this reservation rather than any integer.
+  settlementAttemptIndex   Int?
+  settlementAttempt        ChatAttemptUsage? @relation("ReservationSettlementAttempt", fields: [id, settlementAttemptIndex], references: [reservationId, attemptIndex], onDelete: NoAction, onUpdate: NoAction, map: "ChatCreditReservation_settlementAttempt_fkey")
+  attemptUsage             ChatAttemptUsage[]
+
   @@index([status, expiresAt])
   @@index([userId, createdAt])
   @@index([traceId])
   @@index([providerRequestId])
   @@index([providerResponseId])
+}
+
+// What one dispatched attempt cost, at its own provider's rates.
+//
+// The reservation above holds one modelId, one provider and one price
+// snapshot, which is the whole truth about a turn that dispatched once. A
+// fallback dispatches twice, and routing policy §7 keeps two ledgers apart:
+// the user's charge is the accepted usage of one attempt, while provider cost
+// accounting is every attempt and "must not" be rewritten by a goodwill
+// refund. One row per attempt is what lets the second sentence be true --
+// with the identifiers on the reservation alone, the primary's request id
+// wins and the fallback's is simply lost
+// (linkChatReservationProviderRequest only writes into null columns).
+//
+// Deliberately not user-scoped. It hangs off the reservation, which survives
+// account deletion with userId set to NULL because it is a financial record;
+// these rows carry model ids, token counts and costs, and nothing about what
+// was asked.
+model ChatAttemptUsage {
+  id            String                @id @default(cuid())
+  reservationId String
+  reservation   ChatCreditReservation @relation(fields: [reservationId], references: [id], onDelete: Cascade)
+  /// 0 for the primary. Matches RoutingAttempt.attemptIndex within the run.
+  attemptIndex  Int
+  modelId       String
+  provider      String
+  outcome       String
+  providerRequestId  String?
+  providerResponseId String?
+
+  inputTokens       Int    @default(0)
+  cachedInputTokens Int    @default(0)
+  outputTokens      Int    @default(0)
+  reasoningTokens   Int?
+  costMicroUsd      BigInt @default(0)
+  /// The rates this attempt was priced at, and where the figure came from.
+  pricingSnapshot   Json?
+
+  createdAt DateTime @default(now())
+
+  /// The reservations that settled against this attempt. At most one, and the
+  /// composite foreign key is what makes the pointer name a real attempt of
+  /// that reservation rather than any integer.
+  settledReservations ChatCreditReservation[] @relation("ReservationSettlementAttempt")
+
+  @@unique([reservationId, attemptIndex])
+  @@index([provider, createdAt])
+  @@index([providerRequestId])
 }
 
 // One image generation request in the image work mode: the operational
@@ -2288,6 +2411,252 @@ model UserMemorySettings {
   updatedAt DateTime @updatedAt
 }
 
+/// Policy: docs/policy/external-conversation-import-and-memory.md.
+/// A private assistant profile (release C, policy §14, §20 릴리스 C).
+///
+/// Identity only. Everything that decides how the assistant behaves lives on
+/// AssistantProfileVersion, because §14 pins a conversation to the version it
+/// started on and a field kept here would be read at request time instead --
+/// which is exactly the retroactive application §14 forbids.
+///
+/// Private by construction: there is no share token, no visibility column and
+/// no public listing. §14's non-goals (marketplace, sharing, selling) are held
+/// by the absence of a column to set, not by a check somebody can forget.
+model AssistantProfile {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  name String
+
+  /// An emoji or a short token the UI renders; never a URL, so a profile list
+  /// cannot become a request to an attacker-chosen host.
+  icon String?
+
+  /// Policy: docs/policy/external-conversation-import-and-memory.md.
+  /// Presentation, not behaviour -- so it is not part of the version snapshot
+  /// (§14 lists what a version records, and this is not in it).
+  description String?
+
+  /// The version a new conversation pins to. Nullable because a profile row
+  /// exists before its first version is published, and a profile with no
+  /// published version is a draft that cannot start a conversation.
+  currentVersionId String? @unique
+
+  currentVersion AssistantProfileVersion? @relation("AssistantProfileCurrentVersion", fields: [currentVersionId], references: [id], onDelete: SetNull)
+
+  versions       AssistantProfileVersion[] @relation("AssistantProfileVersions")
+  knowledgeFiles AssistantKnowledgeFile[]  @relation("AssistantProfileKnowledge")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId, updatedAt])
+}
+
+/// Policy: docs/policy/external-conversation-import-and-memory.md.
+/// One immutable published snapshot of a profile (§14).
+///
+/// Nothing here is ever updated after insert. Editing a profile publishes a
+/// new revision; the row a conversation pinned keeps saying what that
+/// conversation actually ran under. There is no `updatedAt` on purpose -- a
+/// column that can change is an invitation to change it.
+///
+/// `knowledgeManifest` is audit metadata and NOT a retrieval source (§14).
+/// It can prove a file was listed at publish time; it cannot resurrect a
+/// deleted one, and retrieval only ever reads chunks that currently exist and
+/// are accessible. `lib/assistantProfileVersioning.ts` resolves a manifest
+/// against what exists today and marks the rest unavailable.
+model AssistantProfileVersion {
+  id        String           @id @default(cuid())
+  profileId String
+  profile   AssistantProfile @relation("AssistantProfileVersions", fields: [profileId], references: [id], onDelete: Cascade)
+
+  /// Policy: docs/policy/external-conversation-import-and-memory.md.
+  /// The account that owns this snapshot, and -- today -- the account that
+  /// published it, which is what §14's "created by" asks for. Carried here as
+  /// well as on the profile so ownership is a column rather than a join: the
+  /// account export scopes by it, the deletion cascade reaches it directly,
+  /// and the data-domain registry can see that this table holds user data.
+  /// A profile only its owner may edit makes the two readings identical; if
+  /// that ever changes, the publisher becomes a second column with its own
+  /// migration rather than a quiet reinterpretation of this one.
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  /// 1-based, per profile. Monotonic: a revision is never reused, so a stale
+  /// editor's `ASSISTANT_PROFILE_VERSION_STALE` (§18) is decided by comparing
+  /// numbers rather than timestamps.
+  revision Int
+
+  instructions String
+
+  /// Policy: docs/policy/external-conversation-import-and-memory.md.
+  /// Model selection, tool policy, memory policy and conversation starters,
+  /// each a JSON snapshot of what the user chose. Snapshots rather than
+  /// foreign keys: a model that is later retired must not silently change what
+  /// a past conversation is recorded as having run under. §14 refuses the
+  /// version at runtime instead (`ASSISTANT_PROFILE_MODEL_UNAVAILABLE`), and
+  /// never substitutes a different model.
+  models       Json
+  toolPolicy   Json
+  memoryPolicy Json
+  starters     Json
+
+  /// The files listed at publish time. Audit metadata -- see the model comment.
+  knowledgeManifest Json
+
+  /// Policy: docs/policy/external-conversation-import-and-memory.md.
+  /// Which retrieval algorithm and prompt shape this snapshot was built for,
+  /// so a version published under an older one is refused rather than
+  /// reinterpreted (§14).
+  retrievalVersion    Int
+  promptFormatVersion String
+
+  createdAt DateTime @default(now())
+
+  /// Back-relation for AssistantProfile.currentVersionId. Never read as a
+  /// list -- at most one profile points at a given version.
+  currentFor AssistantProfile[] @relation("AssistantProfileCurrentVersion")
+
+  conversations Conversation[]
+
+  @@unique([profileId, revision])
+  @@index([profileId, createdAt])
+  @@index([userId, createdAt])
+}
+
+/// Policy: docs/policy/external-conversation-import-and-memory.md.
+/// One durable knowledge file attached to a profile (release C, policy §14,
+/// §14.1, §14.2, §20 릴리스 C).
+///
+/// Deliberately separate from a chat attachment. An attachment is transient
+/// -- it belongs to one turn and is swept -- while this is storage the owner
+/// manages, counts against a quota, and expects to still be there next month.
+/// Sharing the attachment tables would have made "delete the conversation"
+/// and "delete the knowledge file" the same operation, which they are not.
+///
+/// No embeddings and no vector column: retrieval v1 is lexical over
+/// `AssistantKnowledgeChunk.searchTerms` (§14). Adding one later is a separate
+/// policy, privacy, cost and eval decision, not a migration.
+model AssistantKnowledgeFile {
+  id        String           @id @default(cuid())
+  profileId String
+  profile   AssistantProfile @relation("AssistantProfileKnowledge", fields: [profileId], references: [id], onDelete: Cascade)
+
+  /// Ownership as a column rather than a join, for the same reason
+  /// AssistantProfileVersion carries one: the account export and the deletion
+  /// sweep both scope by it, and a row whose owner has to be derived is a row
+  /// the obvious query misses.
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  /// The name the owner sees. Normalised, never used to build a path.
+  name String
+
+  mime  String
+  bytes Int
+
+  /// SHA-256 of the stored object. This is what a version's knowledge
+  /// manifest records, and what `resolveKnowledgeManifest()` compares against
+  /// to decide whether the file a past version listed is still the same file.
+  /// NOT unique per profile: re-uploading the same bytes is a new file with a
+  /// new id, and §14 is explicit that it does not reconnect to a past version.
+  digest String
+
+  /// Private object key. Never leaves the server -- reads go through a
+  /// short-lived signed URL behind the ownership check, as image assets do.
+  r2Key String @unique
+
+  /// "pending" | "processing" | "ready" | "failed" -- allowlist CHECK in the
+  /// migration. Only "ready" has chunks, and only "ready" is retrievable.
+  processingStatus String @default("pending")
+
+  /// Why processing failed, from the §18 릴리스 C code set. Null while the
+  /// file is pending, processing, or ready.
+  failureCode String?
+
+  /// What the extractor produced, before chunking. Recorded so a file that
+  /// yielded nothing is distinguishable from one nobody has processed.
+  extractedCharacters Int?
+  chunkCount          Int  @default(0)
+
+  /// Which chunking and tokenising algorithm produced this file's chunks.
+  retrievalVersion Int @default(1)
+
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  processedAt DateTime?
+
+  chunks AssistantKnowledgeChunk[]
+
+  @@index([profileId, createdAt])
+  @@index([userId, createdAt])
+  /// The processing worker's claim query reads exactly this pair.
+  @@index([processingStatus, createdAt])
+}
+
+/// Policy: docs/policy/external-conversation-import-and-memory.md.
+/// One retrievable piece of a knowledge file (§14).
+///
+/// Chunks are derived, not authored: deleting and re-processing a file
+/// replaces them wholesale, and nothing outside this table references a chunk
+/// id. `ordinal` is the chunk's position in the file, which is what lets a
+/// citation say where in the document an answer came from.
+model AssistantKnowledgeChunk {
+  id     String                 @id @default(cuid())
+  fileId String
+  file   AssistantKnowledgeFile @relation(fields: [fileId], references: [id], onDelete: Cascade)
+
+  /// Denormalised owner, as on the file. Retrieval filters by it before it
+  /// filters by anything else.
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  /// 0-based position in the file.
+  ordinal Int
+
+  content String
+
+  /// Policy: docs/policy/external-conversation-import-and-memory.md.
+  /// Lexical retrieval terms (§9, retrieval v1 -- no embeddings). The GIN
+  /// index is created by raw SQL in the migration, mirroring MemoryItem.
+  searchTerms      String[] @default([])
+  retrievalVersion Int      @default(1)
+
+  /// Where in the document this chunk came from -- character offsets, and the
+  /// page for a PDF. Metadata for a citation, never content.
+  sourceMetadata Json?
+
+  createdAt DateTime @default(now())
+
+  @@unique([fileId, ordinal])
+  @@index([userId])
+  @@index([searchTerms(ops: ArrayOps)], type: Gin, map: "AssistantKnowledgeChunk_searchTerms_gin_idx")
+}
+
+/// A stored object whose row is gone and whose bytes still have to go (§14.2).
+///
+/// The same DB-first shape ImageAssetCleanup uses, and for the same reason: R2
+/// is never deleted ahead of the database, so a partial failure retries from
+/// the tombstone instead of leaving rows that point at missing objects. §14.2
+/// settles that this is an application sweep rather than a bucket lifecycle
+/// rule -- a bucket rule cannot see the database, does not retry, and leaves
+/// no audit trail.
+model AssistantKnowledgeCleanup {
+  id          String    @id @default(cuid())
+  r2Key       String    @unique
+  /// file_deleted | profile_deleted | account_deleted | upload_abandoned
+  reason      String
+  attempts    Int       @default(0)
+  lastError   String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  completedAt DateTime?
+
+  @@index([completedAt, createdAt])
+}
+
 /// One consumed §10 context bundle, per (bundle, model).
 ///
 /// The nonce contract cannot be held in memory: a replayed bundle has to be
@@ -2315,5 +2684,398 @@ model ChatContextBundleConsumption {
   createdAt DateTime @default(now())
 
   @@index([expiresAt])
+  @@index([userId, createdAt])
+}
+
+/// One logical assistant response, as the Router saw it
+/// (docs/policy/tomverse-chat-routing.md §5).
+///
+/// `mode` is the discriminator rather than a second table. Today every row is
+/// `shadow`: the rules ran, the decision was recorded, and the user's own
+/// model selection is what actually executed. When routing becomes
+/// authoritative the same row grows attempts and a settlement outcome, and the
+/// mode says which kind of record it is -- a partially filled row that looked
+/// like a complete one is the failure this column prevents.
+///
+/// Content-free by construction (§2: raw effective prompts are not copied into
+/// routing telemetry). Every column is a version, an identifier, a count or a
+/// label; there is no message text, no memory content and no message id.
+model RoutingRun {
+  id         String   @id @default(cuid())
+  createdAt  DateTime @default(now())
+  /// `shadow` while the user's selection stays authoritative.
+  mode       String   @default("shadow")
+  traceId    String
+  /// Set for a signed-in account; a guest run carries only its subject key.
+  ///
+  /// Cascades. `subjectKey` and `traceId` would still name the person after a
+  /// SetNull, so keeping the row would be a half-anonymisation the privacy
+  /// registry has to carry as a gap. A brand-new telemetry table has no claim
+  /// on surviving its subject: shadow evaluation is an aggregate, and losing
+  /// the rows of accounts that delete is a sampling effect rather than a hole.
+  userId     String?
+  user       User?    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  subjectKey String
+  plan       String
+
+  /// The versions a decision must be attributable to.
+  taskProfileVersion     String
+  candidateFilterVersion String
+  selectionVersion       String
+  estimatorVersion       String
+
+  /// The task profile, as labels and booleans.
+  profileKind             String
+  profileConfidence       String
+  needsCurrentInformation Boolean
+  hasImageInput           Boolean
+  hasDocumentInput        Boolean
+  expectedOutputLength    String
+
+  /// What the turn was sized at. `reservedInputTokens` includes tool
+  /// overhead, and `requestOutputCapTokens` is the cap *before* it is fitted to
+  /// any one model's window -- the filters fit it per candidate, so storing an
+  /// already-fitted figure would record the user's model's answer to a question
+  /// asked of every candidate.
+  estimatedInputTokens   Int
+  reservedInputTokens    Int
+  requestOutputCapTokens Int
+
+  /// The candidate set, as counts. `rejectedByReason` maps a fixed rejection
+  /// identifier to how many models it refused -- never which request it was.
+  eligibleCount    Int
+  rejectedByReason Json
+
+  /// What the Router would have chosen, and why. Null when nothing was
+  /// eligible, which is a result rather than a missing value.
+  selectedModelId String?
+  selectionReason String
+  selectionMargin Int
+
+  /// What actually ran. The comparison between this and `selectedModelId` is
+  /// the whole point of a shadow run, and it is derived at read time rather
+  /// than stored so the two can never disagree.
+  userSelectedModelId String
+
+  /// How long the decision itself took, in microseconds.
+  decisionMicros Int
+
+  /// --- aggregate state (§5) ------------------------------------------------
+  ///
+  /// Aggregate only. Anything that differs between attempts belongs on
+  /// RoutingAttempt, where the next attempt cannot overwrite it.
+
+  /// The model the first attempt used, and the one that finally answered.
+  /// Equal on the common path, different exactly when a fallback was taken --
+  /// which is what makes the pair worth storing rather than deriving.
+  initialModelId String?
+  finalModelId   String?
+  /// The attempt that produced the answer, so the manifest behind the visible
+  /// response is one join away. Unique: two runs cannot claim one attempt.
+  finalAttemptId String?         @unique
+  finalAttempt   RoutingAttempt? @relation("RunFinalAttempt", fields: [finalAttemptId], references: [id], onDelete: SetNull)
+
+  rerouteCount    Int     @default(0)
+  /// none | fallback_used | exhausted
+  fallbackState   String  @default("none")
+  /// §6: at most once per logical response, whichever attempt uses it.
+  passThroughUsed Boolean @default(false)
+
+  /// §8. Why this run left the model it started on, when it did.
+  /// "temporary_hard_fallback" is the only value that earns the next turn's
+  /// hysteresis bypass; anything else is an ordinary switch.
+  switchReason String?
+
+  /// §8. The model a hard fallback displaced, kept so the conversation can be
+  /// restored to it. Without this, stickiness would defend the substitute
+  /// forever and a provider blip would become a permanent model change.
+  recoveryCandidateModelId String?
+
+  /// The failure layer that caused the displacement, which is what the
+  /// confirm-healthy check on the next turn is about.
+  fallbackHealthEvidence String?
+
+  /// The assistant Message this run produced, so regeneration, model switch,
+  /// cost and quality can be compared by Router version (delivery plan §5).
+  assistantMessageId String?
+
+  totalLatencyMs    Int?
+  firstTokenMs      Int?
+  reservationId     String?
+  settlementOutcome String?
+
+  routingAttempts RoutingAttempt[] @relation("RunAttempts")
+  updatedAt       DateTime         @default(now()) @updatedAt
+
+  @@index([createdAt])
+  @@index([mode, createdAt])
+  @@index([userId, createdAt])
+  @@index([finalModelId, createdAt])
+}
+
+/// One dual-estimate observation for prompt-token estimator calibration (G1 in
+/// docs/policy/tomverse-chat-model-capability-inventory.md).
+///
+/// Shadow only. The candidate estimate is recorded and compared; it never
+/// reaches credit reservation, request rejection, routing or a provider call.
+/// No prompt text is stored either -- only derived counts and a cohort label,
+/// so a sample can be analysed without the conversation it came from.
+///
+/// `inputUsageSource` is deliberately its own field rather than reused from the
+/// settlement snapshot: that one is decided by whether the provider reported
+/// *output* tokens, while the input figure independently falls back to the
+/// reserved value. Calibrating on a fallback sample compares an estimate with a
+/// copy of itself and reports an error near zero.
+model TokenEstimateShadowSample {
+  id String @id @default(cuid())
+
+  /// The provider attempt this observation belongs to. Unique so the
+  /// reservation-time insert and the settlement-time update address one row,
+  /// and so a retry is a separate sample rather than an overwrite.
+  attemptId  String @unique
+  modelId    String
+  providerId String
+
+  /// The estimate that actually drove reservation and limits.
+  controlEstimatorVersion        String
+  controlRawEstimatedInputTokens Int
+
+  /// The estimate under evaluation. Recorded only.
+  candidateEstimatorVersion        String
+  candidateRawEstimatedInputTokens Int
+
+  /// What was really reserved, control-derived, including tool overhead.
+  reservedInputTokens Int
+
+  tokenizerFamily   String
+  contentCohort     String
+  hangulCharacters  Int
+  hanKanaCharacters Int
+  nonCjkBytes       Int
+  /// Symbol density of the non-CJK part. Stored because a cohort label bakes in
+  /// today's threshold; the ratio lets it be re-derived without the text.
+  nonCjkSymbolRatio Float  @default(0)
+
+  /// Null unless the provider itself reported input tokens. Never filled from a
+  /// reservation fallback.
+  providerReportedInputTokens Int?
+  /// `provider_reported` | `fallback_estimator` | `missing`.
+  inputUsageSource            String @default("missing")
+
+  /// `completed` | `failed` | `cancelled`.
+  outcome           String  @default("failed")
+  isPartial         Boolean @default(false)
+  isCancelled       Boolean @default(false)
+  isFallbackAttempt Boolean @default(false)
+
+  createdAt DateTime  @default(now())
+  settledAt DateTime?
+
+  /// The calibration query's own filter: eligible samples are provider-reported
+  /// and completed.
+  @@index([inputUsageSource, outcome, createdAt])
+  /// Family and cohort are how the harness segments its report.
+  @@index([tokenizerFamily, contentCohort, createdAt])
+  @@index([modelId, createdAt])
+}
+
+/// One row per account-data-export download request: the single-use ticket and
+/// the audit record are the same object.
+///
+/// Keeping them together is deliberate. A ticket table without an audit trail
+/// answers "can this link still be used" and nothing about who used it; an
+/// audit table separate from the ticket has to be written by a second call that
+/// a future edit can forget. One row, written at issue and claimed at
+/// redemption, cannot drift apart from itself.
+///
+/// The token is never stored -- only its HMAC -- so a copy of this table does
+/// not yield a working download link.
+model AccountDataExportRequest {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  /// HMAC-SHA256 of the single-use token, keyed by NEXTAUTH_SECRET.
+  tokenHash String @unique
+
+  /// issued | downloaded | refused
+  status String @default("issued")
+
+  expiresAt  DateTime
+  consumedAt DateTime?
+
+  /// Hashed request context. Enough to notice a download from somewhere the
+  /// account has never been; never enough to reconstruct where someone was.
+  issuedIpHash          String
+  issuedUserAgentHash   String
+  consumedIpHash        String?
+  consumedUserAgentHash String?
+
+  /// Why a redemption was refused: unknown_token | wrong_user | expired |
+  /// already_used. Recorded here and never told to the caller, who learns only
+  /// that the link is unusable.
+  refusalReason String?
+
+  /// What the download actually contained, so the audit answers "what did they
+  /// get" and not only "did they download". Never the data itself.
+  exportSchemaVersion Int?
+  includedDomainCount Int?
+  filteredDomainCount Int?
+  byteLength          Int?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId, createdAt])
+  @@index([expiresAt])
+  @@index([status, createdAt])
+}
+
+/// One preparation-or-dispatch attempt inside a RoutingRun
+/// (docs/policy/tomverse-chat-routing.md §5).
+///
+/// A separate table rather than columns on RoutingRun, because one logical
+/// response can produce several attempts and each has its own model,
+/// tokenizer, Planner mode, effective request and manifest:
+///
+///   Attempt 1  primary, provider failure before any visible token
+///   Attempt 2  fallback, Planner failure, never dispatched
+///   Attempt 3  fallback, pass-through, succeeded
+///
+/// Flattening that onto the run would overwrite the earlier attempts or bury
+/// them in a JSON array, and an array cannot carry the constraints below.
+/// RoutingRun keeps the aggregate; per-attempt facts live here.
+model RoutingAttempt {
+  id         String      @id @default(cuid())
+  runId      String
+  run        RoutingRun  @relation("RunAttempts", fields: [runId], references: [id], onDelete: Cascade)
+  /// Back-relation for RoutingRun.finalAttempt. The pair is what lets the
+  /// manifest behind the visible answer be reached in one join.
+  finalOfRun RoutingRun? @relation("RunFinalAttempt")
+  /// Denormalised from the run so this is a data domain in its own right: the
+  /// registry derives what it grades from a user column, and a child table
+  /// with none is a table nothing grades.
+  userId     String?
+
+  attemptIndex Int
+  modelId      String
+  provider     String
+
+  /// planned | pass_through
+  plannerMode  String @default("planned")
+  /// pending | not_dispatched | failed_pre_token | failed_post_token | cancelled | succeeded
+  ///
+  /// `pending` is deliberately not one of §5's outcomes: that section
+  /// enumerates how an attempt ended, and one in flight has not ended.
+  /// Starting life as `not_dispatched` would leave every dispatched attempt
+  /// labelled as one that never reached a provider -- erasing the distinction
+  /// §5 draws to keep such an attempt out of provider billing.
+  outcome      String @default("pending")
+  /// planner | adapter | manifest | billing | provider | stream | none
+  failureLayer String @default("none")
+
+  /// Copied from the manifest at finalization, in the same transaction.
+  ///
+  /// Denormalised on purpose: "a dispatched attempt has a finalized manifest,
+  /// finalized before dispatch" is then a single-row CHECK instead of a
+  /// cross-table assertion nothing enforces. ROUTE-06 grades exactly this.
+  manifestFinalizedAt DateTime?
+
+  dispatchedAt        DateTime?
+  providerRequestId   String?
+  firstVisibleTokenAt DateTime?
+  actualInputTokens   Int?
+  actualOutputTokens  Int?
+  /// A fixed classification, never provider error text.
+  errorClass          String?
+
+  manifest  ContextManifest?
+  createdAt DateTime         @default(now())
+  updatedAt DateTime         @updatedAt
+
+  @@unique([runId, attemptIndex])
+  @@index([outcome, createdAt])
+  @@index([modelId, createdAt])
+  @@index([userId, createdAt])
+}
+
+/// The immutable record of what one attempt actually sent (§5, manifest
+/// lifecycle).
+///
+/// One per attempt, and never shared: a fallback model may receive different
+/// context, different tokenization and a different effective request, so a
+/// manifest that two attempts both pointed at would describe neither.
+/// `attemptId` is unique, which is that rule rather than a comment about it.
+///
+/// Source references and hashes only. §5 and the delivery plan both say the
+/// raw prompt is not duplicated here -- the manifest exists to prove what was
+/// sent, and a copy of the prompt would make the proof a second copy of the
+/// thing being proved.
+///
+/// Finalization is one-way and total: once `finalizedAt` is set, a trigger
+/// refuses every further update. That is what makes the effective-request hash
+/// evidence rather than a field. The same trigger pins `attemptId` from
+/// creation, because a manifest's tokenizer and window were chosen for one
+/// attempt's model and moving even a draft would mis-size the next one.
+model ContextManifest {
+  id        String         @id @default(cuid())
+  attemptId String         @unique
+  attempt   RoutingAttempt @relation(fields: [attemptId], references: [id], onDelete: Cascade)
+  userId    String?
+
+  /// draft | finalized | not_dispatched
+  state String @default("draft")
+
+  /// Authorized source references: ids, versions and hashes. Never content.
+  sourceRefs       Json
+  summaryVersion   String?
+  /// Which slice of the conversation was included, as indices or ids.
+  inclusionRange   Json?
+  /// Where content was cut, so a truncation can be explained afterwards.
+  truncationPoints Json?
+
+  /// The tokenizer that produced tokenCount, and the window it was checked
+  /// against. Both live here rather than on the attempt because they are
+  /// per-attempt facts that must agree with each other, and agreeing is a
+  /// single-row CHECK only if they share a row.
+  tokenizerVersion    String
+  tokenCount          Int
+  contextWindowTokens Int
+
+  /// Added immediately before dispatch, in the same transaction that finalizes.
+  plannerVersion        String?
+  templateVersion       String?
+  adapterVersion        String?
+  structuredOptionsHash String?
+  effectiveRequestHash  String?
+
+  finalizedAt         DateTime?
+  /// Why a draft was abandoned. Required when the state says it was.
+  notDispatchedReason String?
+
+  /// How the surviving hash can be checked later. The scheme version and the
+  /// algorithm because both change; the key *id* because the key itself must
+  /// never be stored, and a commitment nobody can name the key for is a
+  /// commitment nobody can verify after a rotation.
+  contentHashVersion String?
+  hashAlgorithm      String?
+  hashKeyId          String?
+
+  /// MANIFEST-02. When the per-part detail was dropped and only the aggregate
+  /// kept. A marker rather than an inference: without it a compacted manifest
+  /// would read as a dispatch that described no sources at all, which is the
+  /// misrepresentation §5 forbids.
+  compactedAt DateTime?
+
+  /// Why the detail went: "aged" for the retention sweep, or a privacy
+  /// transition that outranks it. Account deletion is absent on purpose —
+  /// it removes the row rather than compacting it, so it has no reason to
+  /// record. Allowlist CHECK lives in the migration.
+  compactionReason String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([state, createdAt])
   @@index([userId, createdAt])
 }

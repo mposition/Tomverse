@@ -77,7 +77,14 @@ export type DatabaseInfrastructureSnapshot = {
   messages: number;
   usageBuckets: number;
   providerErrors24h: number;
+  /** Past the policy cutoff: what the next sweep will take. Normal. */
   providerErrorsPendingCleanup: number;
+  /**
+   * Past the cutoff plus `RETENTION_SWEEP_GRACE_DAYS`: rows the daily sweep has
+   * already had two chances at. This is what sets `status`, because the count
+   * above is never zero for long and cannot tell anyone anything.
+   */
+  providerErrorsOverdueCleanup: number;
   checkedAt: string;
 };
 

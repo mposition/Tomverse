@@ -9,10 +9,17 @@ import {
   consumeApiRateLimit,
 } from "@/lib/apiSecurity";
 import { prisma } from "@/lib/prisma";
+import { retentionCutoff, retentionPolicy } from "@/lib/retentionPolicyCore";
 
-const daysAgo = (days: number) =>
-  new Date(Date.now() - days * 24 * 60 * 60 * 1000);
-
+/**
+ * What each policy currently has waiting for it.
+ *
+ * The sentences and the windows are not written here: they come from
+ * lib/retentionPolicyCore.ts, which the maintenance sweep also reads. This
+ * screen used to carry its own copy of both, and two of the nine policies it
+ * published were performed by nothing -- the count climbed, an operator ran
+ * the cleanup, and the number stayed exactly where it was.
+ */
 const oldestDate = async <T extends { createdAt?: Date; updatedAt?: Date }>(
   loader: () => Promise<T | null>,
   field: "createdAt" | "updatedAt"
@@ -33,14 +40,15 @@ export async function GET(req: Request) {
       day: 500,
     });
 
-    const usageCutoff = daysAgo(120);
-    const leaseCutoff = new Date();
-    const revokedShareCutoff = daysAgo(30);
-    const auditCutoff = daysAgo(365);
-    const notificationCutoff = daysAgo(90);
-    const providerCheckCutoff = daysAgo(30);
-    const providerErrorCutoff = daysAgo(30);
-    const productAnalyticsCutoff = daysAgo(400);
+    const now = new Date();
+    const usageCutoff = retentionCutoff("usageBuckets", now);
+    const leaseCutoff = now;
+    const revokedShareCutoff = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+    const auditCutoff = retentionCutoff("auditLogs", now);
+    const notificationCutoff = retentionCutoff("notificationLogs", now);
+    const providerCheckCutoff = retentionCutoff("providerChecks", now);
+    const providerErrorCutoff = retentionCutoff("providerErrors", now);
+    const productAnalyticsCutoff = retentionCutoff("productAnalytics", now);
 
     const [
       oldUsageBuckets,
@@ -52,6 +60,12 @@ export async function GET(req: Request) {
       oldProviderChecks,
       oldProviderErrors,
       oldProductAnalytics,
+      oldProbeResults,
+      oldJobRuns,
+      oldCatalogRuns,
+      oldestProbeResult,
+      oldestJobRun,
+      oldestCatalogRun,
       oldestUsage,
       oldestLease,
       oldestCreditReservation,
@@ -77,7 +91,12 @@ export async function GET(req: Request) {
       }),
       prisma.adminAuditLog.count({ where: { createdAt: { lt: auditCutoff } } }),
       prisma.adminNotificationLog.count({
-        where: { createdAt: { lt: notificationCutoff } },
+        // Same carve-out the sweep applies. Counting the rows it will not take
+        // is how a screen reports work that never finishes.
+        where: {
+          createdAt: { lt: notificationCutoff },
+          NOT: { status: "failed", acknowledgedAt: null },
+        },
       }),
       prisma.providerHealthCheck.count({
         where: { createdAt: { lt: providerCheckCutoff } },
@@ -88,6 +107,26 @@ export async function GET(req: Request) {
       prisma.productAnalyticsEvent.count({
         where: { occurredAt: { lt: productAnalyticsCutoff } },
       }),
+      prisma.providerProbeResult.count({
+        where: { startedAt: { lt: retentionCutoff("providerProbeResults", now) } },
+      }),
+      prisma.scheduledJobRun.count({
+        where: { startedAt: { lt: retentionCutoff("scheduledJobRuns", now) } },
+      }),
+      prisma.providerModelCatalogRun.count({
+        where: {
+          startedAt: { lt: retentionCutoff("providerModelCatalogRuns", now) },
+        },
+      }),
+      prisma.providerProbeResult
+        .findFirst({ orderBy: { startedAt: "asc" }, select: { startedAt: true } })
+        .then((row) => row?.startedAt.toISOString() || null),
+      prisma.scheduledJobRun
+        .findFirst({ orderBy: { startedAt: "asc" }, select: { startedAt: true } })
+        .then((row) => row?.startedAt.toISOString() || null),
+      prisma.providerModelCatalogRun
+        .findFirst({ orderBy: { startedAt: "asc" }, select: { startedAt: true } })
+        .then((row) => row?.startedAt.toISOString() || null),
       oldestDate(
         () =>
           prisma.chatUsageBucket.findFirst({
@@ -160,74 +199,51 @@ export async function GET(req: Request) {
         .then((row) => row?.occurredAt.toISOString() || null),
     ]);
 
+    const measured: Record<
+      string,
+      { staleCount: number; oldestAt: string | null }
+    > = {
+      usageBuckets: { staleCount: oldUsageBuckets, oldestAt: oldestUsage },
+      requestLeases: { staleCount: expiredLeases, oldestAt: oldestLease },
+      creditReservations: {
+        staleCount: expiredCreditReservations,
+        oldestAt: oldestCreditReservation,
+      },
+      shareSnapshots: { staleCount: staleShares, oldestAt: oldestShare },
+      auditLogs: { staleCount: oldAuditLogs, oldestAt: oldestAudit },
+      notificationLogs: {
+        staleCount: oldNotificationLogs,
+        oldestAt: oldestNotification,
+      },
+      providerChecks: {
+        staleCount: oldProviderChecks,
+        oldestAt: oldestProviderCheck,
+      },
+      providerErrors: {
+        staleCount: oldProviderErrors,
+        oldestAt: oldestProviderError,
+      },
+      productAnalytics: {
+        staleCount: oldProductAnalytics,
+        oldestAt: oldestProductAnalytics,
+      },
+      providerProbeResults: {
+        staleCount: oldProbeResults,
+        oldestAt: oldestProbeResult,
+      },
+      scheduledJobRuns: { staleCount: oldJobRuns, oldestAt: oldestJobRun },
+      providerModelCatalogRuns: {
+        staleCount: oldCatalogRuns,
+        oldestAt: oldestCatalogRun,
+      },
+    };
+
     return NextResponse.json({
-      generatedAt: new Date().toISOString(),
-      items: [
-        {
-          key: "usageBuckets",
-          label: "Usage buckets",
-          policy: "Delete buckets older than 120 days.",
-          staleCount: oldUsageBuckets,
-          oldestAt: oldestUsage,
-        },
-        {
-          key: "requestLeases",
-          label: "Request leases",
-          policy: "Delete expired request leases.",
-          staleCount: expiredLeases,
-          oldestAt: oldestLease,
-        },
-        {
-          key: "creditReservations",
-          label: "Expired credit reservations",
-          policy:
-            "Refund expired reserved credits on the next fifteen-minute reconciliation sweep.",
-          staleCount: expiredCreditReservations,
-          oldestAt: oldestCreditReservation,
-        },
-        {
-          key: "shareSnapshots",
-          label: "Share snapshots",
-          policy: "Clear expired or revoked share snapshots.",
-          staleCount: staleShares,
-          oldestAt: oldestShare,
-        },
-        {
-          key: "auditLogs",
-          label: "Audit logs",
-          policy: "Keep admin audit logs for at least 365 days.",
-          staleCount: oldAuditLogs,
-          oldestAt: oldestAudit,
-        },
-        {
-          key: "notificationLogs",
-          label: "Notification logs",
-          policy: "Delete alert delivery logs older than 90 days.",
-          staleCount: oldNotificationLogs,
-          oldestAt: oldestNotification,
-        },
-        {
-          key: "providerChecks",
-          label: "Provider checks",
-          policy: "Delete manual provider check records older than 30 days.",
-          staleCount: oldProviderChecks,
-          oldestAt: oldestProviderCheck,
-        },
-        {
-          key: "providerErrors",
-          label: "Provider error events",
-          policy: "Delete sanitized provider error diagnostics older than 30 days.",
-          staleCount: oldProviderErrors,
-          oldestAt: oldestProviderError,
-        },
-        {
-          key: "productAnalytics",
-          label: "Product analytics events",
-          policy: "Delete consented, pseudonymous product events older than 400 days.",
-          staleCount: oldProductAnalytics,
-          oldestAt: oldestProductAnalytics,
-        },
-      ],
+      generatedAt: now.toISOString(),
+      items: Object.keys(measured).map((key) => {
+        const { label, policy, action } = retentionPolicy(key);
+        return { key, label, policy, action, ...measured[key] };
+      }),
     });
   } catch (error) {
     const securityResponse = apiSecurityResponse(error);

@@ -12,15 +12,24 @@ import {
 // UI-001. `dark:` now resolves from two places -- an explicit `.dark` class and
 // `prefers-color-scheme` where no explicit choice exists -- and the dark token
 // block is written twice to serve both. Duplication that nothing checks is
-// duplication that drifts, so these tests read app/globals.css and fail when
+// duplication that drifts, so these tests read the stylesheets and fail when
 // the two copies stop agreeing.
+//
+// The token blocks live in @tomverse/ui-tokens because every client needs the
+// same values; the `dark:` variant that reads them is a Tailwind directive and
+// stays in the app. So this file reads two stylesheets, and each assertion
+// names the one it is about.
 
-const css = readFileSync(join(process.cwd(), "app", "globals.css"), "utf8");
+const tokensCss = readFileSync(
+  join(process.cwd(), "packages", "ui-tokens", "src", "tokens.css"),
+  "utf8"
+);
+const appCss = readFileSync(join(process.cwd(), "app", "globals.css"), "utf8");
 
 /** Declarations inside the first `{ ... }` that follows `selector`. */
-const declarationsAfter = (selector) => {
+const declarationsAfter = (selector, css = tokensCss, sourceName = "packages/ui-tokens/src/tokens.css") => {
   const start = css.indexOf(selector);
-  assert.notEqual(start, -1, `app/globals.css no longer contains ${selector}`);
+  assert.notEqual(start, -1, `${sourceName} no longer contains ${selector}`);
   const open = css.indexOf("{", start);
   const close = css.indexOf("}", open);
   assert.ok(open !== -1 && close !== -1, `${selector} has no rule body`);
@@ -45,7 +54,8 @@ test("the explicit-dark and system-dark token blocks declare the same thing", ()
   assert.deepStrictEqual(
     system,
     explicit,
-    "app/globals.css: `:root.dark` and the `prefers-color-scheme: dark` block " +
+    "packages/ui-tokens/src/tokens.css: `:root.dark` and the " +
+      "`prefers-color-scheme: dark` block " +
       "must declare identical properties and values. A token added to one and " +
       "not the other means a visitor on OS dark with no explicit choice sees a " +
       "different palette from one who picked dark."
@@ -53,22 +63,42 @@ test("the explicit-dark and system-dark token blocks declare the same thing", ()
 });
 
 test("the system-dark block is inside a prefers-color-scheme media query", () => {
-  const index = css.indexOf(":root:not(.light):not(.dark) {");
+  const index = tokensCss.indexOf(":root:not(.light):not(.dark) {");
   assert.notEqual(index, -1);
-  const preceding = css.slice(0, index);
+  const preceding = tokensCss.slice(0, index);
   const lastMediaQuery = preceding.lastIndexOf("@media");
   assert.notEqual(lastMediaQuery, -1, "no media query precedes the block");
   assert.match(
-    css.slice(lastMediaQuery, index),
+    tokensCss.slice(lastMediaQuery, index),
     /prefers-color-scheme:\s*dark/,
     "the system-dark token block must be gated on prefers-color-scheme: dark"
   );
 });
 
+test("the app imports the token package rather than restating it", () => {
+  assert.match(
+    appCss,
+    /@import\s+"@tomverse\/ui-tokens\/tokens\.css"/,
+    "app/globals.css must import the shared tokens; without the import the " +
+      "blocks this file checks are not on the page at all"
+  );
+  // A second definition would win or lose by import order, and the tests above
+  // would still pass while the page showed something else.
+  for (const token of ["--background", "--tomverse-accent-start"]) {
+    assert.ok(
+      !new RegExp(`^\\s*${token}\\s*:`, "m").test(appCss),
+      `app/globals.css redefines ${token}; it belongs to @tomverse/ui-tokens`
+    );
+  }
+});
+
 test("the dark variant covers an explicit class and an unset preference", () => {
-  const variantStart = css.indexOf("@custom-variant dark");
+  const variantStart = appCss.indexOf("@custom-variant dark");
   assert.notEqual(variantStart, -1, "the dark custom variant is gone");
-  const variant = css.slice(variantStart, css.indexOf("\n}", variantStart));
+  const variant = appCss.slice(
+    variantStart,
+    appCss.indexOf("\n}", variantStart)
+  );
 
   // An explicit choice.
   assert.match(variant, /\.dark/, "the variant no longer matches `.dark`");

@@ -185,6 +185,13 @@ export type RunView = {
     status: string;
     chunkTotal: number;
     chunkCompleted: number;
+    /**
+     * Server-derived: the run still reads `running` but no worker holds its
+     * lease. Absent on an older response, which reads as "not stalled" —
+     * the safe direction, because it keeps the screen showing exactly what it
+     * showed before this field existed.
+     */
+    stalled?: boolean;
 };
 
 export type RunProgress = {
@@ -195,6 +202,16 @@ export type RunProgress = {
     cancellable: boolean;
     /** Whether the screen should keep polling. */
     polling: boolean;
+    /**
+     * The run is running, but paused between workers.
+     *
+     * Not a status of its own, and deliberately not a failure: the progress
+     * already made is kept, the reclaim sweep hands the run to a new worker,
+     * and cancelling stays available the whole time. What it changes is the
+     * copy — a bar that has not moved in ten minutes needs a reason, and
+     * "still working" would be untrue.
+     */
+    stalled: boolean;
 };
 
 const asStatus = (value: string): MemoryExtractionRunStatus =>
@@ -215,6 +232,13 @@ export function runProgress(run: RunView): RunProgress {
         percent: status === "completed" ? 100 : Math.round(ratio * 100),
         terminal,
         cancellable: !terminal,
+        // Polling continues while stalled. The recovery this screen is waiting
+        // for happens on the server, so stopping would leave the page frozen
+        // on the one state that resolves without the user doing anything.
         polling: !terminal,
+        // Guarded on `terminal` as well as on the flag: a run that finished
+        // between two polls must not be described as paused because a stale
+        // response said so.
+        stalled: !terminal && run.stalled === true,
     };
 }

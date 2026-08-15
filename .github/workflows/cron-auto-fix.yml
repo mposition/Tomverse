@@ -202,7 +202,7 @@ jobs:
 
       - name: Install Chromium
         if: steps.diff-check.outputs.has_diff == 'true' && steps.diff-check.outputs.out_of_scope != 'true'
-        run: npx playwright install --with-deps chromium
+        run: scripts/ci/install-playwright.sh chromium
 
       - name: Run desktop Chromium PR smoke tests
         id: gate-e2e

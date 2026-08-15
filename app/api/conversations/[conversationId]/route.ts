@@ -8,6 +8,17 @@ import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
 import { APP_DEFAULTS, WEB_SEARCH_MODES, isWebSearchMode } from "@/lib/appDefaults";
 import {
+  CONVERSATION_MEMORY_MODES,
+  DEFAULT_CONVERSATION_MEMORY_MODE,
+  isConversationMemoryMode,
+} from "@/lib/conversationMemoryMode";
+import { recordConversationMemoryOff } from "@/lib/memoryModeSignals";
+import {
+  ConversationProfileError,
+  readConversationProfile,
+  resolveProfileBinding,
+} from "@/lib/conversationProfileService";
+import {
   clampRuntimeSelectedModels,
   isEnabledRuntimeModelId,
 } from "@/lib/modelRegistry";
@@ -36,6 +47,18 @@ import {
     getUserBillingPlan,
     modelLimitResponse,
 } from "@/lib/billingEntitlements";
+import {
+    SELECTION_MODES,
+    selectionModeTransition,
+    storedSelectionMode,
+} from "@/lib/conversationSelectionMode";
+import {
+    autoSelectionCapability,
+    autoUiAvailability,
+    isAutoRouterUiEnabled,
+    mayStoreSelectionMode,
+} from "@/lib/autoRoutingUi";
+import { describeAutoCohortRefusal } from "@/lib/autoCohort";
 
 const modelSchema = z.string().min(1).max(120);
 const updateConversationSchema = z
@@ -53,6 +76,14 @@ const updateConversationSchema = z
       .optional(),
     projectId: z.union([z.string().trim().min(1).max(100), z.null()]).optional(),
     webSearchMode: z.enum(WEB_SEARCH_MODES).optional(),
+    memoryMode: z.enum(CONVERSATION_MEMORY_MODES).optional(),
+    selectionMode: z.enum(SELECTION_MODES).optional(),
+    // §14: a profile id, or null to detach. Never a version id -- the server
+    // decides which revision is current, and re-sending the same profile id
+    // is how the explicit move to a newer revision is expressed.
+    assistantProfileId: z
+      .union([z.string().trim().min(1).max(100), z.null()])
+      .optional(),
   })
   .strict()
   .refine(
@@ -62,7 +93,10 @@ const updateConversationSchema = z
       body.selectedModels !== undefined ||
       body.disabledPanels !== undefined ||
       body.projectId !== undefined ||
-      body.webSearchMode !== undefined,
+      body.webSearchMode !== undefined ||
+      body.memoryMode !== undefined ||
+      body.selectionMode !== undefined ||
+      body.assistantProfileId !== undefined,
     { message: "At least one update is required." }
   );
 const MESSAGE_PAGE_SIZE = 50;
@@ -80,6 +114,31 @@ const safeParse = (data: unknown, fallback: string[]) => {
   return Array.isArray(parsed)
     ? parsed.filter((value): value is string => typeof value === "string")
     : fallback;
+};
+
+/**
+ * Whether this account would be offered Auto.
+ *
+ * The flag is checked before the plan is fetched, so a deployment with the
+ * rollout off pays nothing for it -- no extra query on a route that loads on
+ * every conversation open. That is the difference between a feature that is
+ * disabled and one that is merely hidden.
+ *
+ * Signed-in only: this route requires a session, so `isGuest` is always false
+ * here. Guests are excluded from the cohort anyway (their conversation-scoped
+ * sticky state does not survive), and saying so in one place beats threading
+ * a constant through.
+ */
+const autoAvailabilityFor = async (userId: string) => {
+  if (!isAutoRouterUiEnabled()) {
+    return { offered: false, reason: "ui_flag_off" as const, cohort: null };
+  }
+  const billingPlan = await getUserBillingPlan(userId);
+  return autoUiAvailability({
+    subjectKey: userId,
+    isGuest: false,
+    plan: billingPlan.tier,
+  });
 };
 
 type Params = {
@@ -161,12 +220,15 @@ export async function GET(
         selectedModels: true,
         disabledPanels: true,
         webSearchMode: true,
+        memoryMode: true,
+        selectionMode: true,
         projectId: true,
         shareEnabled: true,
         shareExpiresAt: true,
         createdAt: true,
         updatedAt: true,
         password: true,
+        assistantProfileVersionId: true,
       },
     });
 
@@ -205,12 +267,37 @@ export async function GET(
         pendingJobId: true,
         searchMetadata: true,
         createdAt: true,
+        // §13.4. The count only, never `memoryTokens`: the disclosure states
+        // how many memories an answer was given, and a token figure would
+        // say something about their length without being asked for.
+        memoryUsedCount: true,
       },
     });
     const hasMoreMessages = messagePage.length > MESSAGE_PAGE_SIZE;
-    const messages = hasMoreMessages
-      ? messagePage.slice(0, MESSAGE_PAGE_SIZE)
-      : messagePage;
+    const messages = (
+      hasMoreMessages ? messagePage.slice(0, MESSAGE_PAGE_SIZE) : messagePage
+    ).map(({ memoryUsedCount, ...message }) => ({
+      ...message,
+      /*
+        §13.4: a durable fact about the answer, so reopening the conversation
+        has to state it again. Until this it lived only in the streaming
+        response header, which meant the disclosure was true while the answer
+        was being written and silently gone on the next visit.
+
+        Sent on exactly the condition the header uses, so the two paths cannot
+        disagree: `null` is a request that could not inject at all and `0` is
+        one where retrieval chose nothing, and §13.4 forbids indicating
+        either. Both leave the field off rather than sending a number the
+        renderer has to know not to show.
+
+        Ownership and the lock grant are re-checked above, and this route is
+        the owner's own read -- the share snapshot and the conversation export
+        keep their own selects, which do not name this column (§13.3).
+      */
+      ...(typeof memoryUsedCount === "number" && memoryUsedCount > 0
+        ? { memoryUsedCount }
+        : {}),
+    }));
 
     const selectedModels = await clampRuntimeSelectedModels(
       safeParse(conversation.selectedModels, [defaultEngine])
@@ -229,15 +316,36 @@ export async function GET(
         disabledPanels: safeParse(conversation.disabledPanels, []).filter(
           (modelId: string) => selectedModels.includes(modelId)
         ),
+        // The stored value, `inherit` included: resolving it here would hide
+        // from the client whether this conversation follows the account
+        // default or overrides it (§8.1 invariant 1).
+        memoryMode: isConversationMemoryMode(conversation.memoryMode)
+          ? conversation.memoryMode
+          : DEFAULT_CONVERSATION_MEMORY_MODE,
         webSearchMode: isWebSearchMode(conversation.webSearchMode)
           ? conversation.webSearchMode
           : APP_DEFAULTS.defaultWebSearchMode,
+        // The stored mode, and whether this account would be offered Auto at
+        // all. `offered` is one boolean by design: the refusals are internal
+        // rollout state (which bucket, what share, which gate), and a client
+        // that could read its own bucket could work out the rollout
+        // percentage. See lib/autoRoutingUi.ts.
+        selectionMode: storedSelectionMode(conversation.selectionMode),
+        autoSelection: autoSelectionCapability(await autoAvailabilityFor(userId)),
         isLocked: !!conversation.password,
         shareEnabled:
           conversation.shareEnabled &&
           !!conversation.shareExpiresAt &&
           conversation.shareExpiresAt > new Date(),
         shareExpiresAt: conversation.shareExpiresAt?.toISOString() || null,
+        // Server-computed (§14): which revision this conversation pinned to,
+        // and whether the profile has since published a newer one. A screen
+        // that worked this out for itself would be a second implementation of
+        // the pinning rule.
+        assistantProfile: await readConversationProfile({
+          userId,
+          profileVersionId: conversation.assistantProfileVersionId,
+        }),
         shareToken: undefined,
         shareSnapshot: undefined,
         password: undefined
@@ -284,7 +392,17 @@ export async function PATCH(
 
         const existingConv = await prisma.conversation.findUnique({
             where: { id: conversationId },
-            select: { userId: true, selectedModels: true, password: true }
+            select: {
+                userId: true,
+                selectedModels: true,
+                password: true,
+                memoryMode: true,
+                selectionMode: true,
+                routerModelId: true,
+                routerChallengerTurns: true,
+                assistantProfileVersionId: true,
+                assistantProfileVersion: { select: { profileId: true } },
+            }
         });
 
         if (!existingConv) {
@@ -443,6 +561,76 @@ export async function PATCH(
       updateData.webSearchMode = body.webSearchMode;
     }
 
+    if (body.memoryMode !== undefined) {
+      updateData.memoryMode = body.memoryMode;
+    }
+
+    // §14. Re-sending the same profile id is not a no-op: it is how the owner
+    // moves this conversation onto a revision they have since published. The
+    // pinned version id is what decides whether anything changed, which is
+    // why the comparison is here and not in the planner.
+    if (body.assistantProfileId !== undefined) {
+      const binding = await resolveProfileBinding({
+        userId,
+        requestedProfileId: body.assistantProfileId,
+        boundProfileId: existingConv.assistantProfileVersion?.profileId ?? null,
+      });
+      if (binding.outcome === "bind") {
+        if (binding.profileVersionId !== existingConv.assistantProfileVersionId) {
+          updateData.assistantProfileVersion = {
+            connect: { id: binding.profileVersionId },
+          };
+        }
+      } else if (binding.outcome === "detach") {
+        updateData.assistantProfileVersion = { disconnect: true };
+      }
+    }
+
+    if (body.selectionMode !== undefined) {
+      // `auto` is refused unless this account would actually be routed.
+      // Storing it anyway would leave a conversation marked Auto that every
+      // turn answers manually, which the user cannot distinguish from Auto
+      // choosing their model every time. `manual` is always allowed --
+      // including for an account that has left the cohort, which must be able
+      // to leave the mode it can no longer act on (lib/autoRoutingUi.ts).
+      const availability = await autoAvailabilityFor(userId);
+      if (!mayStoreSelectionMode(body.selectionMode, availability)) {
+        console.warn(JSON.stringify({
+          event: "conversation_selection_mode_denied",
+          code: "AUTO_SELECTION_UNAVAILABLE",
+          conversationId,
+          reason: availability.reason,
+          detail: availability.cohort && !availability.cohort.eligible
+            ? describeAutoCohortRefusal(availability.cohort)
+            : null,
+          timestamp: new Date().toISOString(),
+        }));
+        return NextResponse.json(
+          {
+            error: "Automatic model selection is not available for this account.",
+            code: "AUTO_SELECTION_UNAVAILABLE",
+          },
+          { status: 403 }
+        );
+      }
+
+      // The transition, not a bare column write: returning to manual has to
+      // clear the sticky model and the challenger streak, and the database
+      // refuses the row if it does not
+      // (`Conversation_manual_has_no_sticky_state_check`).
+      const transition = selectionModeTransition(existingConv, body.selectionMode);
+      Object.assign(updateData, transition.patch);
+      if (transition.clearedStickyState) {
+        console.info(JSON.stringify({
+          event: "conversation_router_sticky_cleared",
+          conversationId,
+          previousModelId: existingConv.routerModelId,
+          previousChallengerTurns: existingConv.routerChallengerTurns,
+          timestamp: new Date().toISOString(),
+        }));
+      }
+    }
+
     if (body.projectId !== undefined) {
       if (body.projectId === null) {
         updateData.project = { disconnect: true };
@@ -469,6 +657,15 @@ export async function PATCH(
       where: { id: conversationId },
       data: updateData,
     });
+    if (body.memoryMode !== undefined) {
+      // After the write, and never allowed to fail it: the user's choice is
+      // already saved, and §22 observation must not be able to undo it.
+      await recordConversationMemoryOff({
+        conversationId,
+        previousMode: existingConv.memoryMode,
+        nextMode: body.memoryMode,
+      });
+    }
     if (lockAuditEvent) {
       logSecurityAuditEvent(lockAuditEvent, {
         userId,
@@ -488,6 +685,9 @@ export async function PATCH(
       disabledPanels: safeParse(updatedConversation.disabledPanels, []).filter(
         (modelId: string) => responseSelectedModels.includes(modelId)
       ),
+        memoryMode: isConversationMemoryMode(updatedConversation.memoryMode)
+          ? updatedConversation.memoryMode
+          : DEFAULT_CONVERSATION_MEMORY_MODE,
         webSearchMode: isWebSearchMode(updatedConversation.webSearchMode)
           ? updatedConversation.webSearchMode
           : APP_DEFAULTS.defaultWebSearchMode,
@@ -498,6 +698,10 @@ export async function PATCH(
           updatedConversation.shareExpiresAt > new Date(),
         shareExpiresAt:
           updatedConversation.shareExpiresAt?.toISOString() || null,
+        assistantProfile: await readConversationProfile({
+          userId,
+          profileVersionId: updatedConversation.assistantProfileVersionId,
+        }),
         shareToken: undefined,
         shareSnapshot: undefined,
         password: undefined
@@ -515,6 +719,13 @@ export async function PATCH(
 
     const lockError = lockErrorResponse(error);
     if (lockError) return lockError;
+
+    if (error instanceof ConversationProfileError) {
+      return NextResponse.json(
+        { error: error.message, code: error.code },
+        { status: error.status }
+      );
+    }
 
 	console.error("Failed to update conversation:", error);	  
     return NextResponse.json({ error: "Failed to update conversation." }, { status: 500 });

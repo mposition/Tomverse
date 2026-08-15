@@ -1,4 +1,6 @@
 import * as Sentry from "@sentry/nextjs";
+
+import { resolveSentryEnvironmentTag } from "@/lib/deploymentEnvironment";
 import {
   isNextNoFallbackError,
   isNextNoFallbackSentryEvent,
@@ -13,10 +15,11 @@ Sentry.init({
   enabled: Boolean(
     process.env.SENTRY_DSN || process.env.NEXT_PUBLIC_SENTRY_DSN
   ),
-  environment:
-    process.env.SENTRY_ENVIRONMENT ||
-    process.env.RAILWAY_ENVIRONMENT_NAME ||
-    process.env.NODE_ENV,
+  // SENTRY_ENVIRONMENT may still label this deployment's events, but it may
+  // no longer contradict what the deployment is: staging carried
+  // `SENTRY_ENVIRONMENT=production` and every staging error arrived filed
+  // under production while the same process answered "staging".
+  environment: resolveSentryEnvironmentTag(),
   release: process.env.SENTRY_RELEASE || process.env.RAILWAY_GIT_COMMIT_SHA,
   sendDefaultPii: false,
   enableLogs: true,

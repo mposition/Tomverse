@@ -6,6 +6,7 @@ import {
 import type { RevokedPairsState } from "@/lib/memoryAccess";
 
 /**
+ * Policy: docs/policy/external-conversation-import-and-memory.md.
  * Whether an approved memory may reach a prompt at all (policy §8.1, §12.4,
  * §15).
  *
@@ -34,7 +35,16 @@ export type MemoryInjectionRefusal =
     | "flag_off"
     | "no_approved_pair"
     | "account_off"
-    | "conversation_off";
+    | "conversation_off"
+    /**
+     * Release C: an assistant profile whose version asked not to use account
+     * memory. Deliberately NOT a branch of `decideMemoryInjection` — a profile
+     * is a request that can only narrow (§14), so the AND lives in
+     * `resolveProfileMemoryUse` and this reason is what the caller records
+     * once that AND has already said no. A second implementation of the same
+     * narrowing inside the gate is exactly what §14 asks not to happen.
+     */
+    | "profile_off";
 
 export type MemoryInjectionDecision =
     | { allowed: true }

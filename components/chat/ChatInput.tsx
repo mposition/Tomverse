@@ -15,6 +15,7 @@ import {
   AlertTriangle,
   ArrowLeft,
   ArrowUp,
+  Bot,
   Boxes,
   Braces,
   Check,
@@ -22,11 +23,13 @@ import {
   File as FileIcon,
   FileText,
   HardDrive,
+  BookMarked,
   Globe2,
   Link2,
   Loader2,
   Lock,
   ImagePlus,
+  MessageSquare,
   Microscope,
   Paperclip,
   Plus,
@@ -46,10 +49,18 @@ import {
 import { useModelCatalog } from "@/components/ModelCatalogProvider";
 import { ModelLogo } from "@/components/chat/ModelLogo";
 import { useLanguage } from "@/components/LanguageProvider";
+import type {
+  ChatAssistantProfile,
+  ChatAssistantProfileOption,
+} from "@/lib/conversationProfileBinding";
 import { FeatureHelpPopover } from "@/components/chat/FeatureHelpPopover";
 import { chatHelpCopy } from "@/components/chat/chatHelpCopy";
 import { dispatchAppToast } from "@/lib/appToast";
 import { APP_DEFAULTS, WEB_SEARCH_MODES, type WebSearchMode } from "@/lib/appDefaults";
+import {
+  CONVERSATION_MEMORY_MODES,
+  type ConversationMemoryMode,
+} from "@/lib/conversationMemoryMode";
 import {
   canUseModelWithPlan,
   getModel as getStaticModel,
@@ -381,6 +392,29 @@ type ChatInputProps = {
   // this one, which always sits directly under the input box.
   hideDisclaimer?: boolean;
   webSearchMode?: WebSearchMode;
+  /**
+   * This conversation's stored memory mode (§8.1 invariant 1), or undefined
+   * when the control does not apply — a guest, who has no account memory at
+   * all, or a draft with no conversation to store a mode on.
+   */
+  memoryMode?: ConversationMemoryMode;
+  onMemoryModeChange?: (mode: ConversationMemoryMode) => void;
+  /**
+   * The assistant this conversation runs under (§14), or null when it runs
+   * under none. Undefined when the control does not apply at all — a guest,
+   * or an account with the feature switched off.
+   *
+   * The revision is part of it because pinning is the contract: a
+   * conversation keeps answering under the version it started with, and a
+   * screen that only knew the profile's name could not say so.
+   */
+  assistantProfile?: ChatAssistantProfile | null;
+  /** The account's published profiles, for the picker. Empty is a valid list. */
+  assistantProfileOptions?: ChatAssistantProfileOption[];
+  /** `null` detaches. Re-sending the bound id moves it to the newest revision. */
+  onAssistantProfileChange?: (profileId: string | null) => void;
+  /** The account default `inherit` resolves to, for describing that choice. */
+  accountMemoryDefault?: "on" | "off";
   onWebSearchModeChange?: (mode: WebSearchMode) => void;
   onOpenDeepResearchSetup?: () => void;
   /**
@@ -497,6 +531,12 @@ export function ChatInput({
   hideTopBorder = false,
   hideDisclaimer = false,
   webSearchMode = "off",
+  memoryMode,
+  onMemoryModeChange,
+  assistantProfile,
+  assistantProfileOptions = [],
+  onAssistantProfileChange,
+  accountMemoryDefault = "on",
   onWebSearchModeChange,
   onOpenDeepResearchSetup,
   onStartImageDraft,
@@ -831,7 +871,9 @@ export function ChatInput({
       : null;
   
   const [isMenuOpen, setIsMenuOpen] = useState(false);
-  const [menuView, setMenuView] = useState<"actions" | "models" | "webSearch">("actions");
+  const [menuView, setMenuView] = useState<
+    "actions" | "models" | "webSearch" | "memory" | "assistant"
+  >("actions");
   const [personalizedRecommendationIds, setPersonalizedRecommendationIds] = useState<string[]>([]);
   const hasRequestedPickerRecommendationsRef = useRef(false);
   const [liveModelStatuses, setLiveModelStatuses] = useState<Record<string, PublicModelStatusRecord>>({});
@@ -3003,6 +3045,67 @@ export function ChatInput({
                       </span>
                     </span>
                   </button>
+                  {/* §8.1 invariant 1. Absent for a guest rather than shown
+                      disabled: a guest has no account memory for a control to
+                      act on, and offering one would imply otherwise. */}
+                  {memoryMode && onMemoryModeChange && (
+                    <button
+                      type="button"
+                      data-testid="tools-memory-row"
+                      onClick={() => setMenuView("memory")}
+                      className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left transition hover:bg-zinc-100 dark:hover:bg-zinc-800"
+                    >
+                      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-accent-account-memory-500/10 text-accent-account-memory-500">
+                        <BookMarked className="h-5 w-5" />
+                      </span>
+                      <span className="flex min-w-0 flex-col">
+                        <span className="text-sm font-medium text-zinc-900 dark:text-zinc-100">
+                          {t("chat.toolsMemory")}
+                        </span>
+                        <span className="text-xs text-zinc-500">
+                          {memoryMode === "on"
+                            ? t("chat.toolsMemoryOn")
+                            : memoryMode === "off"
+                              ? t("chat.toolsMemoryOff")
+                              : accountMemoryDefault === "off"
+                                ? t("chat.toolsMemoryInheritOff")
+                                : t("chat.toolsMemoryInheritOn")}
+                        </span>
+                      </span>
+                    </button>
+                  )}
+                  {/* §14. Absent for a guest and for an account with the
+                      feature off, rather than shown disabled: a guest has no
+                      profile of their own for a control to act on. */}
+                  {assistantProfile !== undefined && onAssistantProfileChange && (
+                    <button
+                      type="button"
+                      data-testid="tools-assistant-row"
+                      onClick={() => setMenuView("assistant")}
+                      className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left transition hover:bg-zinc-100 dark:hover:bg-zinc-800"
+                    >
+                      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-accent-assistant-profile-500/10 text-accent-assistant-profile-500">
+                        <Bot className="h-5 w-5" />
+                      </span>
+                      <span className="flex min-w-0 flex-col">
+                        <span className="text-sm font-medium text-zinc-900 dark:text-zinc-100">
+                          {t("chat.toolsAssistant")}
+                        </span>
+                        <span className="truncate text-xs text-zinc-500">
+                          {assistantProfile
+                            ? `${assistantProfile.name} \u00B7 ${t("chat.toolsAssistantRevision").replace("{revision}", String(assistantProfile.revision))}`
+                            : t("chat.toolsAssistantNone")}
+                        </span>
+                      </span>
+                      {assistantProfile?.status === "superseded" && (
+                        <span
+                          data-testid="tools-assistant-superseded-dot"
+                          aria-hidden="true"
+                          className="ml-auto h-2 w-2 shrink-0 rounded-full bg-accent-assistant-profile-500"
+                        />
+                      )}
+                    </button>
+                  )}
                   {(() => {
                     const deepResearchModel = AVAILABLE_MODELS.find(
                       (model) => model.id === "perplexity/sonar-deep-research"
@@ -3206,6 +3309,181 @@ export function ChatInput({
                       )}
                     </button>
                   ))}
+                </div>
+              ) : menuView === "memory" ? (
+                <div className="space-y-1">
+                  <button
+                    type="button"
+                    onClick={() => setMenuView("actions")}
+                    className={`mb-1 flex items-center justify-center rounded-lg text-zinc-500 hover:bg-zinc-100 hover:text-zinc-900 dark:hover:bg-zinc-800 dark:hover:text-white ${isMobileShell ? "h-11 w-11" : "h-8 w-8"}`}
+                    aria-label={t("auth.cancel")}
+                  >
+                    <ArrowLeft className="h-4 w-4" />
+                  </button>
+                  {CONVERSATION_MEMORY_MODES.map((mode) => (
+                    <button
+                      key={mode}
+                      type="button"
+                      data-testid={`memory-mode-option-${mode}`}
+                      aria-pressed={memoryMode === mode}
+                      onClick={() => {
+                        onMemoryModeChange?.(mode);
+                        closeMenu(false);
+                      }}
+                      className={`flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left transition hover:bg-zinc-100 dark:hover:bg-zinc-800 ${
+                        memoryMode === mode
+                          ? "bg-accent-account-memory-500/10"
+                          : ""
+                      }`}
+                    >
+                      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-accent-account-memory-500/10 text-accent-account-memory-500">
+                        <BookMarked className="h-5 w-5" />
+                      </span>
+                      <span className="flex min-w-0 flex-1 flex-col">
+                        <span className="text-sm font-medium text-zinc-900 dark:text-zinc-100">
+                          {mode === "on"
+                            ? t("chat.toolsMemoryOn")
+                            : mode === "off"
+                              ? t("chat.toolsMemoryOff")
+                              : t("chat.toolsMemoryInherit")}
+                        </span>
+                        <span className="text-xs text-zinc-500">
+                          {mode === "on"
+                            ? t("chat.toolsMemoryOnDescription")
+                            : mode === "off"
+                              ? t("chat.toolsMemoryOffDescription")
+                              : accountMemoryDefault === "off"
+                                ? t("chat.toolsMemoryInheritOffDescription")
+                                : t("chat.toolsMemoryInheritOnDescription")}
+                        </span>
+                      </span>
+                      {memoryMode === mode && (
+                        <Check
+                          className="h-4 w-4 shrink-0 text-accent-account-memory-500"
+                          aria-hidden="true"
+                        />
+                      )}
+                    </button>
+                  ))}
+                </div>
+              ) : menuView === "assistant" ? (
+                <div className="space-y-1">
+                  <button
+                    type="button"
+                    onClick={() => setMenuView("actions")}
+                    className={`mb-1 flex items-center justify-center rounded-lg text-zinc-500 hover:bg-zinc-100 hover:text-zinc-900 dark:hover:bg-zinc-800 dark:hover:text-white ${isMobileShell ? "h-11 w-11" : "h-8 w-8"}`}
+                    aria-label={t("auth.cancel")}
+                  >
+                    <ArrowLeft className="h-4 w-4" />
+                  </button>
+                  {/* §14. Offered only when the profile has actually published
+                      past this conversation, and never performed on its own:
+                      a conversation that changed its instructions without
+                      being asked could not explain its own earlier answers. */}
+                  {assistantProfile?.status === "superseded" && (
+                    <button
+                      type="button"
+                      data-testid="assistant-move-to-latest"
+                      onClick={() => {
+                        onAssistantProfileChange?.(assistantProfile.profileId);
+                        closeMenu(false);
+                      }}
+                      className="flex w-full items-start gap-3 rounded-xl border border-accent-assistant-profile-300 px-3 py-2.5 text-left transition hover:bg-accent-assistant-profile-500/10"
+                    >
+                      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-accent-assistant-profile-500/10 text-accent-assistant-profile-500">
+                        <RefreshCw className="h-5 w-5" />
+                      </span>
+                      <span className="flex min-w-0 flex-1 flex-col">
+                        <span className="text-sm font-medium text-zinc-900 dark:text-zinc-100">
+                          {t("chat.toolsAssistantMoveToLatest")}
+                        </span>
+                        <span className="text-xs text-zinc-500">
+                          {t("chat.toolsAssistantSuperseded")
+                            .replace("{revision}", String(assistantProfile.revision))
+                            .replace("{latest}", String(assistantProfile.latestRevision))}
+                        </span>
+                      </span>
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    data-testid="assistant-option-none"
+                    aria-pressed={!assistantProfile}
+                    onClick={() => {
+                      onAssistantProfileChange?.(null);
+                      closeMenu(false);
+                    }}
+                    className={`flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left transition hover:bg-zinc-100 dark:hover:bg-zinc-800 ${
+                      !assistantProfile ? "bg-accent-assistant-profile-500/10" : ""
+                    }`}
+                  >
+                    <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-zinc-100 text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400">
+                      <MessageSquare className="h-5 w-5" />
+                    </span>
+                    <span className="flex min-w-0 flex-1 flex-col">
+                      <span className="text-sm font-medium text-zinc-900 dark:text-zinc-100">
+                        {t("chat.toolsAssistantNone")}
+                      </span>
+                      <span className="text-xs text-zinc-500">
+                        {t("chat.toolsAssistantNoneDescription")}
+                      </span>
+                    </span>
+                    {!assistantProfile && (
+                      <Check
+                        className="h-4 w-4 shrink-0 text-accent-assistant-profile-500"
+                        aria-hidden="true"
+                      />
+                    )}
+                  </button>
+                  {assistantProfileOptions.map((option) => (
+                    <button
+                      key={option.id}
+                      type="button"
+                      data-testid={`assistant-option-${option.id}`}
+                      aria-pressed={assistantProfile?.profileId === option.id}
+                      onClick={() => {
+                        onAssistantProfileChange?.(option.id);
+                        closeMenu(false);
+                      }}
+                      className={`flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left transition hover:bg-zinc-100 dark:hover:bg-zinc-800 ${
+                        assistantProfile?.profileId === option.id
+                          ? "bg-accent-assistant-profile-500/10"
+                          : ""
+                      }`}
+                    >
+                      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-accent-assistant-profile-500/10 text-base">
+                        {option.icon ?? (
+                          <Bot className="h-5 w-5 text-accent-assistant-profile-500" />
+                        )}
+                      </span>
+                      <span className="flex min-w-0 flex-1 flex-col">
+                        <span className="truncate text-sm font-medium text-zinc-900 dark:text-zinc-100">
+                          {option.name}
+                        </span>
+                        <span className="truncate text-xs text-zinc-500">
+                          {option.description ||
+                            t("chat.toolsAssistantRevision").replace(
+                              "{revision}",
+                              String(option.revision)
+                            )}
+                        </span>
+                      </span>
+                      {assistantProfile?.profileId === option.id && (
+                        <Check
+                          className="h-4 w-4 shrink-0 text-accent-assistant-profile-500"
+                          aria-hidden="true"
+                        />
+                      )}
+                    </button>
+                  ))}
+                  {assistantProfileOptions.length === 0 && (
+                    <p
+                      data-testid="assistant-options-empty"
+                      className="px-3 py-2 text-xs text-zinc-500"
+                    >
+                      {t("chat.toolsAssistantEmpty")}
+                    </p>
+                  )}
                 </div>
               ) : (
                 <>

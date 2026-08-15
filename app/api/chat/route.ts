@@ -1,5 +1,9 @@
 import { streamText, type FilePart, type ModelMessage } from "ai";
 import { APP_DEFAULTS } from "@/lib/appDefaults";
+import {
+    buildAttachmentPromptText,
+    type ExtractedAttachment,
+} from "@/lib/attachmentContextPrompt";
 import { createHash, randomUUID } from "node:crypto";
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
@@ -13,10 +17,34 @@ import {
 import { conversationKindNotSupportedResponse, isChatConversationKind } from "@/lib/conversationKindGuard";
 import { prisma } from "@/lib/prisma";
 import {
+    AVAILABLE_MODELS,
     modelSupportsImageInput,
     modelSupportsNativePdfInput,
     type AiModel,
 } from "@/lib/models";
+import { buildTaskProfile } from "@/lib/taskProfileCore";
+import { scheduleRoutingShadowRun } from "@/lib/routingShadow";
+import { selectAutoModel } from "@/lib/autoModelSelection";
+import { decideAutoCohort } from "@/lib/autoCohort";
+import { decideDrillOverride } from "@/lib/autoDrillOverride";
+import { stickyStateAfterRoutedTurn } from "@/lib/conversationSelectionMode";
+import {
+    attachmentTokensForModel,
+    measureTurnAttachments,
+    preflightInputEstimate,
+    profileTextFor,
+    turnCarriesAttachments,
+} from "@/lib/autoDispatchPreflight";
+import { resolveModelPricing } from "@/lib/modelPricing";
+import {
+    authoriseDispatch,
+    beginInstrumentedDispatch,
+    beginRetryAttempt,
+    recordFallbackRecovery,
+    completeInstrumentedDispatch,
+    recordDispatched,
+    type DispatchInstrumentation,
+} from "@/lib/routingDispatchInstrumentation";
 import { getRuntimeModels } from "@/lib/modelRegistry";
 import { getActiveAiModel } from "@/lib/activeAiModel";
 import {
@@ -28,7 +56,7 @@ import { getWebSearchSurchargeCredits } from "@/lib/webSearchCredits";
 import { buildWebSearchToolConfig, WEB_SEARCH_TOOL_NAMES } from "@/lib/webSearchToolConfig";
 import { normalizeWebSearchExecution } from "@/lib/webSearchExecutionNormalizer";
 import { buildChatStreamTrailerChunk } from "@/lib/webSearchStreamTrailer";
-import { resolveChatCompletionOutcome } from "@/lib/chatCompletionStatus";
+import { resolveChatCompletionOutcome } from "@tomverse/chat-core";
 import { ERROR_REPORT_TOKEN_HEADER } from "@/lib/errorReportContract";
 import { issueChatErrorReportGrant } from "@/lib/traceErrorEvidence";
 import {
@@ -72,6 +100,7 @@ import {
     ChatAccessError,
     chatErrorResponse,
     createChatBudget,
+    getChatBudgetReservedCostMicroUsd,
     identifyChatCaller,
     linkChatReservationProviderRequest,
     readChatJsonBody,
@@ -80,9 +109,35 @@ import {
     releaseChatAccess,
     resolveLeaseTtlSeconds,
     settleChatUsage,
+    releaseAttemptProviderBudget,
+    reserveAttemptProviderBudget,
     type ChatUsageReservation,
     validateChatPayload,
 } from "@/lib/chatSecurity";
+import {
+    attemptDispatchOptions,
+    planAttemptExecution,
+} from "@/lib/chatAttemptExecution";
+import {
+    autoFallbackScope,
+    type FallbackScopeRefusal,
+} from "@/lib/autoFallbackGate";
+import type {
+    AttemptPriceSnapshot,
+    AttemptUsage,
+} from "@/lib/chatMultiAttemptSettlement";
+import {
+    decideFallback,
+    recoveryAfterFallback,
+} from "@/lib/routingFallbackPolicy";
+import { classifyStreamFailure } from "@/lib/routingStreamFailure";
+import {
+    FAULT_INJECTION_HEADER,
+    decideFaultInjection,
+    faultedReader,
+} from "@/lib/routingFaultInjection";
+import { resolveDeploymentEnvironment } from "@/lib/deploymentEnvironment";
+import { buildRoutingRetryChunk } from "@/lib/routingRetrySignal";
 import {
     conversationLockedResponse,
     hasConversationUnlockGrant,
@@ -120,8 +175,29 @@ import {
     GUEST_MAX_ATTACHMENTS_PER_MESSAGE,
 } from "@/lib/guestAttachments";
 import { isChatCostSafetyCode } from "@/lib/chatCostSafetyCore";
+import {
+    chatLeaseAcquired,
+    chatLeaseReleased,
+    chatLeaseStreamPublished,
+    chatLeaseTakenByStream,
+    chatLeaseToReleaseOnUnwind,
+    NO_CHAT_LEASE,
+    type ChatLeaseOwnership,
+} from "@/lib/chatLeaseOwnershipCore";
 import { estimatePromptTokens } from "@/lib/chatTokenEstimate";
-import { buildChatMemoryContext } from "@/lib/chatMemoryContext";
+import { fitChatOutputToContextWindow } from "@/lib/chatContextWindow";
+import {
+    ACTIVE_ESTIMATOR_VERSION,
+    createTokenEstimateAccumulator,
+    getCalibration,
+} from "@/lib/chatTokenEstimate";
+import { createShadowAccumulator } from "@/lib/tokenEstimateShadow";
+import {
+    isTokenEstimateShadowEnabled,
+    recordShadowReservation,
+    SHADOW_CANDIDATE_ESTIMATOR_VERSION,
+} from "@/lib/tokenEstimateShadowRecorder";
+import { buildChatTurnContext } from "@/lib/chatTurnContext";
 import { latestUserPromptText } from "@/lib/chatMemoryContextCore";
 import {
     consumeContextBundle,
@@ -647,9 +723,23 @@ export async function POST(req: Request) {
     const verificationGrant: { setCookie?: string } = {};
     const response = await handleChatPost(req, traceId, verificationGrant);
     if (verificationGrant.setCookie) {
-        // append, not set: the response may already carry the guest identity
-        // cookie (accessGrant.setCookie below), and both must survive.
-        response.headers.append("Set-Cookie", verificationGrant.setCookie);
+        try {
+            // append, not set: the response may already carry the guest
+            // identity cookie (accessGrant.setCookie below), and both must
+            // survive.
+            response.headers.append("Set-Cookie", verificationGrant.setCookie);
+        } catch (error) {
+            // This is the last statement standing between a finished response
+            // and its caller, and it is outside the handler's try -- so a
+            // throw here does not just lose the answer, it drops a stream that
+            // is still holding a concurrency slot, with nothing left to
+            // release it but the fifteen-minute reconciliation. The grant is
+            // built by the server from a signed token, so a value `Headers`
+            // refuses is a bug rather than a condition; the cost of that bug
+            // must not be the caller's answer and their slot. They solve one
+            // more challenge instead, and this line is how anyone finds out.
+            logRequestError("chat_verification_grant_cookie_rejected", traceId, error);
+        }
     }
     return response;
 }
@@ -659,14 +749,31 @@ async function handleChatPost(
     traceId: string,
     verificationGrant: { setCookie?: string }
 ): Promise<Response> {
-    let leaseId: string | null = null;
+    // Who holds the concurrency slot right now. The failure path at the bottom
+    // asks this rather than a boolean, because "the request no longer holds it"
+    // covers both a clean handoff to the stream and a stream that was built and
+    // never published -- and only the second is a slot nobody will free.
+    let leaseOwnership: ChatLeaseOwnership = NO_CHAT_LEASE;
     // Declared out here so the failure path can stop the renewal timer even
     // when the stream was never built: an interval left running would keep
     // renewing a lease no request owns any more.
     let stopLeaseHeartbeat: (() => void) | null = null;
     let usageReservation: ChatUsageReservation | null = null;
-    let requestedModelIdForLog: string | undefined;
-    let requestedProviderForLog: AiModel["provider"] | undefined;
+    // Hoisted so the outer catch can close the attempt. A provider that
+    // refuses the call leaves an attempt that was prepared and never
+    // dispatched, and an attempt stuck at `pending` is one the reliability
+    // numbers cannot classify.
+    let dispatchRecord: DispatchInstrumentation = null;
+    // The model this request tried to run, for the outer failure path.
+    //
+    // Set to the requested id as soon as one is parsed, so a failure before
+    // routing still names something, then narrowed to the effective model once
+    // the Router has decided. Provider health is only meaningful about the
+    // model that was actually going to be called: pairing the requested id
+    // with the effective provider -- which is what this used to do on a routed
+    // turn -- credits an outage to a model nobody dispatched.
+    let dispatchModelIdForLog: string | undefined;
+    let dispatchProviderForLog: AiModel["provider"] | undefined;
     try {
         assertChatRequestSize(req);
         const session = await getServerSession(authOptions);
@@ -683,7 +790,26 @@ async function handleChatPost(
             contextBundle,
         } = validateChatPayload(body);
         const requestedModelId = modelId || APP_DEFAULTS.defaultModelId;
-        requestedModelIdForLog = requestedModelId;
+        // Auto's inputs, gathered before the model is resolved because the
+        // model is what Auto decides. The plan is carried forward to the
+        // access check below so this is not a second query.
+        const accountPlan = session?.user?.id
+            ? await getUserBillingPlan(session.user.id)
+            : null;
+        // §8.1 invariant 1: the conversation's stored mode, read from the row
+        // the ownership check loads below. Null for a request with no
+        // conversation, which inherits the account default like `inherit`.
+        let conversationMemoryMode: string | null = null;
+        // Policy: docs/policy/external-conversation-import-and-memory.md.
+        // §10: the conversation's bound profile version. Read from the same
+        // row as the memory mode so the context this request builds is the
+        // one its bundle was priced against.
+        let conversationProfileVersionId: string | null = null;
+        // Seeded with what was asked, then narrowed to what was dispatched
+        // once routing decides. After a fallback the model that answered is
+        // not the model that was requested, and the outer catch records
+        // provider health about the one that was actually called.
+        dispatchModelIdForLog = requestedModelId;
         const runtimeModels = await getRuntimeModels({ includeCatalogDeleted: true });
         const runtimeModelMap = new Map(runtimeModels.map((model) => [model.id, model]));
         const catalogModel = runtimeModelMap.get(requestedModelId);
@@ -720,10 +846,9 @@ async function handleChatPost(
                     : undefined
             );
         }
-        const modelConfig = catalogModel?.enabled && !catalogModel.catalogDeleted
-            ? catalogModel
-            : undefined;
-        if (!modelConfig) {
+        const requestedModelConfig =
+            catalogModel?.enabled && !catalogModel.catalogDeleted ? catalogModel : undefined;
+        if (!requestedModelConfig) {
             return tracedJsonError(
                 "Unknown or disabled model.",
                 "MODEL_NOT_AVAILABLE",
@@ -731,6 +856,156 @@ async function handleChatPost(
                 traceId
             );
         }
+
+        // ---- Auto routing (routing policy §5; delivery plan step 4) -------
+        //
+        // Placed here, after the retirement check on the model the user asked
+        // for and before anything downstream binds to a model. Everything past
+        // this line -- the Gemini prefill rule, admin availability, the web
+        // search capability, the provider-context restore, the attachment
+        // shaping, the credit budget, the window fit and the manifest -- then
+        // runs against the model that actually answers, with no second pass
+        // and nothing checked against a model that was never dispatched.
+        //
+        // The retirement branch above deliberately still speaks about the
+        // requested model: a user whose chosen model was retired is told so,
+        // rather than having Auto quietly paper over it.
+        // The caller's own attachment scope, derived from their signed identity
+        // rather than compared against anything in the request, so a crafted
+        // objectKey can only ever resolve inside it. Hoisted above the routing
+        // probe below, which measures attachment sizes and must obey the same
+        // rule: a probe that measured any key would be an object-size oracle
+        // over the whole bucket.
+        const ownAttachmentPrefix = session?.user?.email
+            ? `attachments/${createHash("sha256")
+                .update(session.user.email.toLowerCase())
+                .digest("hex")
+                .slice(0, 20)}/`
+            : null;
+        // Only read when the cohort would admit this account. `decideAutoCohort`
+        // costs nothing -- the plan is already in hand and readiness is read
+        // from memory -- so while the rollout is off this query never runs and
+        // the chat path pays nothing for a feature nobody has.
+        // The staging fallback drill's one exception, and the only path that
+        // routes a turn while a readiness gate is outstanding. Fails closed in
+        // production whatever the request carries -- see lib/autoDrillOverride.
+        const drillOverride = decideDrillOverride({
+            faultHeader: req.headers.get(FAULT_INJECTION_HEADER),
+            subjectKey: session?.user?.id ?? "",
+            isGuest: !session?.user?.id,
+        });
+        const autoCohort = decideAutoCohort({
+            subjectKey: session?.user?.id ?? "",
+            isGuest: !session?.user?.id,
+            plan: accountPlan?.tier ?? null,
+            drillOverride: drillOverride.allowed,
+        });
+        if (autoCohort.eligible && autoCohort.drillOverride) {
+            // Loud, and every time. A routed turn that only routed because a
+            // drill said so must be legible as one in the record it produces,
+            // not inferred later from the absence of an attestation.
+            console.warn(JSON.stringify({
+                event: "chat_auto_readiness_overridden",
+                traceId,
+                conversationId,
+                reason: autoCohort.drillOverride,
+                environment: resolveDeploymentEnvironment(),
+                timestamp: new Date().toISOString(),
+            }));
+        }
+        const conversationRouting =
+            autoCohort.eligible && conversationId && session?.user?.id
+                ? await prisma.conversation.findFirst({
+                      // The owner is in the `where`, not checked afterwards,
+                      // so this cannot read another account's mode. The real
+                      // ownership check still runs below and still answers 403;
+                      // a miss here simply reads as "not an Auto conversation".
+                      where: { id: conversationId, userId: session.user.id },
+                      select: {
+                          selectionMode: true,
+                          routerModelId: true,
+                          routerChallengerTurns: true,
+                      },
+                  })
+                : null;
+        // Measured, not declared. A size the client stated is a claim, and an
+        // understated one would steer the Router to a model whose window the
+        // real content does not fit -- leaving the user with a context-window
+        // error for a model they did not choose. Skipped entirely when the
+        // cohort would refuse anyway, so a turn nobody routes pays for no HEAD
+        // requests.
+        const measuredAttachments =
+            autoCohort.eligible && turnCarriesAttachments(messages)
+                ? await measureTurnAttachments(messages, ownAttachmentPrefix)
+                : ({ measurable: true, descriptors: [] } as const);
+        const autoSelection = selectAutoModel({
+            requestedModelId,
+            conversation: conversationRouting,
+            subjectKey: session?.user?.id ?? "",
+            isGuest: !session?.user?.id,
+            plan: accountPlan?.tier ?? null,
+            attachmentsUnmeasurable: !measuredAttachments.measurable,
+            attachmentTokensFor: measuredAttachments.measurable
+                ? attachmentTokensForModel(measuredAttachments.descriptors)
+                : undefined,
+            text: profileTextFor(messages),
+            // The profiler reads these to set hasImageInput / hasDocumentInput,
+            // which is what stops an image turn being routed to a model that
+            // cannot see one. Media types only -- no name, no bytes.
+            attachments: measuredAttachments.measurable
+                ? measuredAttachments.descriptors.map((descriptor) => ({
+                      mediaType: descriptor.mediaType,
+                  }))
+                : [],
+            webSearchRequested: webSearchMode === "always",
+            // Runtime models, not the static catalogue: a model an operator has
+            // disabled must not be chosen and then refused two lines later by
+            // `assertModelRuntimeAvailable`.
+            models: runtimeModels.filter(
+                (model) => model.enabled && !model.catalogDeleted
+            ),
+            reservedInputTokens: preflightInputEstimate(messages).estimatedInputTokens,
+            // The unfitted application cap. The filters fit it to each model's
+            // own window; a figure already fitted to the requested model's
+            // window would bias every other candidate against it.
+            requestOutputCapTokens: resolveModelPricing(requestedModelConfig)
+                .maxOutputTokens,
+        });
+        const effectiveModelId = autoSelection.routed
+            ? autoSelection.modelId
+            : requestedModelId;
+        if (autoSelection.routed) {
+            console.info(JSON.stringify({
+                event: "chat_auto_routed",
+                traceId,
+                conversationId,
+                requestedModelId,
+                selectedModelId: effectiveModelId,
+                selectionReason: autoSelection.record.selectionReason,
+                routerVersion: autoSelection.versions.decision,
+                timestamp: new Date().toISOString(),
+            }));
+        }
+        const routedCatalogModel = autoSelection.routed
+            ? runtimeModelMap.get(effectiveModelId)
+            : requestedModelConfig;
+        // The Router only ever considers runtime models that are enabled and
+        // not catalogue-deleted, so a miss here means the Router returned
+        // something outside the list it was given. Falling back to the
+        // requested model keeps the answer, and the log says it happened --
+        // silently answering from a model nobody chose is the one outcome
+        // worse than either.
+        if (autoSelection.routed && !routedCatalogModel) {
+            console.error(JSON.stringify({
+                event: "chat_auto_routed_model_missing",
+                traceId,
+                selectedModelId: effectiveModelId,
+                timestamp: new Date().toISOString(),
+            }));
+        }
+        const modelConfig = routedCatalogModel?.enabled && !routedCatalogModel.catalogDeleted
+            ? routedCatalogModel
+            : requestedModelConfig;
         if (hasUnsupportedGeminiPrefill(modelConfig, messages)) {
             return tracedJsonError(
                 "Gemini 3.6 and later requests must end with a user message.",
@@ -739,7 +1014,9 @@ async function handleChatPost(
                 traceId
             );
         }
-        const adminModelAccess = await assertModelRuntimeAvailable(requestedModelId);
+        // The model that will answer, not the one that was asked for: Auto's
+        // choice passes the same operational gate as a manual one.
+        const adminModelAccess = await assertModelRuntimeAvailable(modelConfig.id);
         if (!adminModelAccess.allowed) {
             return tracedJsonError(
                 adminModelAccess.reason || "This model is temporarily unavailable.",
@@ -748,7 +1025,8 @@ async function handleChatPost(
                 traceId
             );
         }
-        requestedProviderForLog = modelConfig.provider;
+        dispatchProviderForLog = modelConfig.provider;
+        dispatchModelIdForLog = modelConfig.id;
         // webSearchMode === "always" only ever enables a model's OWN
         // provider-native search tool when its exact catalog id is
         // confirmed-supported -- it never adds or swaps in a different
@@ -812,9 +1090,10 @@ async function handleChatPost(
                 "This conversation has reached its attachment limit. Start a new chat to attach more files."
             );
         }
-        const billingPlan = session?.user?.id
-            ? await getUserBillingPlan(session.user.id)
-            : null;
+        // Resolved before the model, because Auto needs the plan to decide
+        // whether this account is routed at all. Reused here rather than
+        // fetched twice.
+        const billingPlan = accountPlan;
         const userPlan = billingPlan?.tier;
         const access = identifyChatCaller(
             req,
@@ -885,8 +1164,18 @@ async function handleChatPost(
             }
             const conversation = await prisma.conversation.findUnique({
                 where: { id: conversationId },
-                select: { userId: true, password: true, selectedModels: true, kind: true },
+                select: {
+                    userId: true,
+                    password: true,
+                    selectedModels: true,
+                    kind: true,
+                    memoryMode: true,
+                    assistantProfileVersionId: true,
+                },
             });
+            conversationMemoryMode = conversation?.memoryMode ?? null;
+            conversationProfileVersionId =
+                conversation?.assistantProfileVersionId ?? null;
             if (!conversation || conversation.userId !== session.user.id) {
                 return tracedJsonError(
                     "Conversation access denied.",
@@ -930,7 +1219,13 @@ async function handleChatPost(
                     traceId
                 );
             }
+            // Skipped on a routed turn, and only there. The check exists to
+            // stop a client asking for a model the conversation does not have
+            // selected; in Auto the user selected no model for this turn, the
+            // server did, and `selectedModels` is the manual list it is not
+            // choosing from.
             if (
+                !autoSelection.routed &&
                 selectedConversationModels.length > 0 &&
                 !selectedConversationModels.includes(requestedModelId)
             ) {
@@ -952,12 +1247,7 @@ async function handleChatPost(
                 );
             }
         }
-        const userObjectPrefix = session?.user?.email
-            ? `attachments/${createHash("sha256")
-                .update(session.user.email.toLowerCase())
-                .digest("hex")
-                .slice(0, 20)}/`
-            : null;
+        const userObjectPrefix = ownAttachmentPrefix;
         // One guest's storage scope, derived from their own signed identity.
         // Computed here rather than compared against a value from the request,
         // so a crafted objectKey can only ever resolve inside the caller's own
@@ -979,8 +1269,34 @@ async function handleChatPost(
         // Shared with the composer estimate and the comparison preflight so a
         // Korean conversation is not reserved several times too small here and
         // correctly elsewhere -- see lib/chatTokenEstimate.ts.
-        const estimateTextTokens = (text: string) =>
-            Math.max(1, estimatePromptTokens(text));
+        //
+        // The shadow accumulator hangs off this alias rather than off each call
+        // site: every text-derived contribution to estimatedInputTokens already
+        // passes through here, so one wrapper captures them all and none can be
+        // forgotten later. It only observes -- the returned value is unchanged.
+        const shadowAccumulator = isTokenEstimateShadowEnabled()
+            ? createShadowAccumulator({
+                  controlVersion: ACTIVE_ESTIMATOR_VERSION,
+                  candidateVersion: SHADOW_CANDIDATE_ESTIMATOR_VERSION,
+              })
+            : null;
+        // The segment-level companion to `estimatedInputTokens`. The number is
+        // what the rest of this handler reads; the breakdown is what the
+        // reservation needs, because the calibration widens each character
+        // segment by its own margin and a bare total has thrown that mix away.
+        // Both are fed from this one alias so neither can drift from the other
+        // -- `tests/chatBudgetBreakdown.test.mjs` pins that they agree.
+        const inputEstimate = createTokenEstimateAccumulator();
+        const estimateTextTokens = (text: string) => {
+            shadowAccumulator?.add(text);
+            const raw = estimatePromptTokens(text);
+            // The per-piece floor is a minimum, not a prediction: an empty
+            // message still costs the provider its role framing. It is counted
+            // as an opaque token so no tokenizer margin is applied to it.
+            if (raw > 0) inputEstimate.addText(text);
+            else inputEstimate.addTokens(1);
+            return Math.max(1, raw);
+        };
 
         const providerContextQueues = new Map<string, ModelMessage[][]>();
         if (
@@ -992,7 +1308,12 @@ async function handleChatPost(
                 const storedContexts =
                     await prisma.messageProviderContext.findMany({
                         where: {
-                            modelId: requestedModelId,
+                            // Reasoning traces belong to the model that
+                            // produced them. On a turn Auto routed elsewhere
+                            // there is nothing stored for the new model, so
+                            // nothing is restored -- which is correct: another
+                            // model's reasoning is not this model's context.
+                            modelId: modelConfig.id,
                             message: { conversationId },
                         },
                         orderBy: { createdAt: "asc" },
@@ -1024,6 +1345,7 @@ async function handleChatPost(
             }
         }
 
+        // Policy: docs/policy/external-conversation-import-and-memory.md.
         // The §10 context bundle: what memory this request may carry, and
         // proof that it is the same context the request was priced against.
         //
@@ -1033,8 +1355,29 @@ async function handleChatPost(
         // also the ordinary path today — injection stays off until §12.4's
         // procedure has been completed, so nothing issues a bundle and this
         // whole branch is skipped.
-        let memorySystemPrompt: string | null = null;
+        //
+        // Release C put a profile's instructions and its retrieved knowledge
+        // in the same block, under the same rule and for the same reason: they
+        // are priced input tokens too. `/api/chat/context` issues a bundle
+        // whenever either is non-empty, so a profile turn arrives with one.
+        // The §9.1 system block. Named for the context rather than for memory
+        // because Release C put three things in it, and only one of them is
+        // memory.
+        let contextSystemPrompt: string | null = null;
         let memoryUsedCount = 0;
+        // §22 attribution, written onto the answer rather than counted.
+        //
+        // The day counters beside this already report the injection *ratio*.
+        // What they cannot report is which answer carried memory, and the
+        // follow-up proxy is a comparison between the answers memory shaped
+        // and the ones it did not — so it needs the fact per answer. Null
+        // while no bundle accompanies the request, which is what "memory was
+        // not possible here" means; §8.1 invariant 4 permits the used count
+        // and forbids the context itself, which is never written.
+        let memoryAttribution: {
+            memoryUsedCount: number;
+            memoryTokens: number;
+        } | null = null;
         if (session?.user?.id) {
             // §22's injection denominator. Recorded before the bundle branch
             // so it counts every authenticated request, including the ones
@@ -1050,15 +1393,28 @@ async function handleChatPost(
             // it (§10). The query is the raw prompt, the same text the
             // preparation step scored — not the attachment-augmented message
             // assembled below, which would retrieve differently.
-            const memoryContext = await buildChatMemoryContext({
+            const turnContext = await buildChatTurnContext({
                 userId: session.user.id,
                 query: latestUserPromptText(messages),
+                // Policy: docs/policy/external-conversation-import-and-memory.md.
+                // §10: bound into the fingerprint, so a profile republished or
+                // detached between preflight and send is a stale bundle rather
+                // than a turn that answers as a different assistant.
+                profileVersionId: conversationProfileVersionId,
+                plan: accountPlan?.tier ?? null,
+                // §8.1 invariant 1: this conversation's own mode decides, with
+                // `inherit` falling back to the account default. Read here
+                // rather than trusted from the client, and read on the chat
+                // side as well as the preflight side so a mode changed between
+                // the two is caught by the freshness check instead of being
+                // priced one way and sent the other.
+                conversationMode: conversationMemoryMode,
             });
             const verification = verifyChatContextBundle(contextBundle, {
                 subjectKey: session.user.id,
                 conversationId: conversationId ?? null,
                 modelId: requestedModelId,
-                currentFingerprint: memoryContext.fingerprint,
+                currentFingerprint: turnContext.fingerprint,
             });
             if (!verification.ok) {
                 // Two different failures with two different meanings. Drift is
@@ -1120,14 +1476,23 @@ async function handleChatPost(
                     { requiresPreflight: true }
                 );
             }
-            memorySystemPrompt = memoryContext.prompt.text;
-            memoryUsedCount = memoryContext.prompt.usedCount;
-            if (memorySystemPrompt) {
-                // A bundle that passed but selected nothing is not an
-                // injection: no block reaches the prompt, so counting it would
-                // report memory as used on a request the model never saw it in.
+            // Policy: docs/policy/external-conversation-import-and-memory.md.
+            // The whole §9.1 block -- profile instructions, then memory, then
+            // profile knowledge -- assembled as one system message by the
+            // builder that priced it.
+            contextSystemPrompt = turnContext.systemPrompt;
+            memoryUsedCount = turnContext.memory.prompt.usedCount;
+            memoryAttribution = {
+                memoryUsedCount,
+                memoryTokens: verification.payload.memoryTokens,
+            };
+            // Memory's own presence, not the block's: a turn whose system
+            // message carries only a profile's instructions has no memory in
+            // it, and counting it as an injection would report memory as used
+            // on a request the model never saw it in.
+            if (turnContext.memory.prompt.text) {
                 void recordMemoryCounter("chat_memory_injected");
-                if (memoryContext.truncatedByBudget) {
+                if (turnContext.memory.truncatedByBudget) {
                     void recordMemoryCounter("injected_context_truncated");
                 }
                 // The priced figure, not a fresh estimate, so the bucket
@@ -1137,17 +1502,25 @@ async function handleChatPost(
                 );
                 if (bucket) void recordMemoryCounter(bucket);
             }
-            // The figure that was reserved against, not a fresh estimate: the
+            // The figures that were reserved against, not fresh estimates: the
             // two agree here by construction, and if they ever stop agreeing
-            // the user should be billed the number they were quoted.
-            estimatedInputTokens += verification.payload.memoryTokens;
+            // the user should be billed the numbers they were quoted. The
+            // profile's blocks are counted apart from memory's because they
+            // are a different context, priced by the same builder.
+            const quotedContextTokens =
+                verification.payload.memoryTokens +
+                verification.payload.profileTokens;
+            estimatedInputTokens += quotedContextTokens;
+            // Quoted, not re-estimated -- so it enters as an opaque count.
+            inputEstimate.addTokens(quotedContextTokens);
         }
 
-        // §9.1 places the memory block above the conversation and below the
+        // Policy: docs/policy/external-conversation-import-and-memory.md.
+        // §9.1 place this block above the conversation and below the
         // safety policy, so it is the first message and the rules that govern
-        // reading it are stated inside it, before the memories themselves.
-        const formattedMessages: ModelMessage[] = memorySystemPrompt
-            ? [{ role: "system", content: memorySystemPrompt }]
+        // reading each part are stated inside it, before the part they govern.
+        const formattedMessages: ModelMessage[] = contextSystemPrompt
+            ? [{ role: "system", content: contextSystemPrompt }]
             : [];
         for (const msg of messages) {
             if (msg.role === "assistant") {
@@ -1168,7 +1541,7 @@ async function handleChatPost(
             const attachments = (
                 Array.isArray(msg.attachments) ? msg.attachments : []
             ) as IncomingAttachment[];
-            const textAttachments: string[] = [];
+            const textAttachments: ExtractedAttachment[] = [];
             const fileParts: FilePart[] = [];
 
             for (const attachment of attachments) {
@@ -1485,9 +1858,11 @@ async function handleChatPost(
                             );
                         }
 
-                        textAttachments.push(
-                            `[Attached PDF file: ${attachment.name}]\n${pdfText}`
-                        );
+                        textAttachments.push({
+                            name: attachment.name,
+                            kind: "PDF file",
+                            text: pdfText,
+                        });
                     }
                 } else if (OFFICE_ATTACHMENT_TYPES.has(attachment.mediaType)) {
                     const officeBuffer =
@@ -1523,9 +1898,11 @@ async function handleChatPost(
                         );
                     }
 
-                    textAttachments.push(
-                        `[Attached office file: ${attachment.name}]\n${extractedText}`
-                    );
+                    textAttachments.push({
+                        name: attachment.name,
+                        kind: "office file",
+                        text: extractedText,
+                    });
                 } else if (attachment.kind === "text") {
                     totalExtractedCharacters += attachmentData.length;
                     if (
@@ -1538,9 +1915,11 @@ async function handleChatPost(
                             "Extracted attachment text exceeds the request limit."
                         );
                     }
-                    textAttachments.push(
-                        `[Attached file: ${attachment.name}]\n${attachmentData}`
-                    );
+                    textAttachments.push({
+                        name: attachment.name,
+                        kind: "file",
+                        text: attachmentData,
+                    });
                 } else {
                     const binaryData =
                         attachmentBuffer || Buffer.from(attachmentData, "base64");
@@ -1578,12 +1957,23 @@ async function handleChatPost(
                 continue;
             }
 
-            const text = [String(msg.content ?? ""), ...textAttachments]
-                .filter(Boolean)
-                .join("\n\n");
+            // Extracted file text is data the user did not write, so it is
+            // fenced and the rules are stated once before it -- the same
+            // treatment lib/memoryContextPrompt.ts gives account memory, for
+            // the same reason. Built before the estimate below so the
+            // reservation is taken against the bytes actually sent.
+            const text = buildAttachmentPromptText({
+                userText: String(msg.content ?? ""),
+                attachments: textAttachments,
+            });
+            const nativeAttachmentTokens = estimateNativeAttachmentTokens(
+                fileParts.length
+            );
+            // Not text: a per-part allowance for what the provider will charge
+            // for the attachment itself.
+            inputEstimate.addTokens(nativeAttachmentTokens);
             estimatedInputTokens +=
-                estimateTextTokens(text) +
-                estimateNativeAttachmentTokens(fileParts.length);
+                estimateTextTokens(text) + nativeAttachmentTokens;
 
             formattedMessages.push({
                 role: "user",
@@ -1596,7 +1986,7 @@ async function handleChatPost(
         const budget = createChatBudget(
             access.kind,
             modelConfig,
-            estimatedInputTokens,
+            inputEstimate.breakdown(),
             {
                 webSearchSurchargeCredits: getWebSearchSurchargeCredits(
                     webSearchMode ?? "off",
@@ -1605,17 +1995,92 @@ async function handleChatPost(
                 nativeSearchEnabled,
             }
         );
-        if (
-            modelConfig.contextWindowTokens &&
-            estimatedInputTokens + budget.maxOutputTokens >
-                modelConfig.contextWindowTokens
-        ) {
+        // `budget.inputTokens`, not the raw estimate: what this guard has to
+        // bound is what the request really sends, and a provider-native search
+        // adds 6,400 input tokens on top of the conversation (6,000 of
+        // retrieved result text, 400 of tool definition). Comparing the raw
+        // estimate let a searching turn sit that far over the very limit this
+        // exists to protect, and the request then failed at the provider --
+        // after a credit reservation and a dispatched call -- instead of here,
+        // for free. It is also the figure the reservation is sized on, so the
+        // two now agree about how big this turn is
+        // (docs/ops/tomverse-chat-context-window-rollout.md).
+        //
+        // That figure is clamped to the plan's input ceiling, so a request over
+        // *that* limit was already refused by `createChatBudget` with
+        // CHAT_INPUT_TOKEN_LIMIT before reaching here.
+        const outputBudget = fitChatOutputToContextWindow({
+            contextWindowTokens: modelConfig.contextWindowTokens,
+            reservedInputTokens: budget.inputTokens,
+            requestOutputCapTokens: budget.maxOutputTokens,
+            providerMaxOutputTokens: budget.providerMaxOutputTokens,
+        });
+        if (outputBudget.kind === "exceeded") {
             throw new ChatAccessError(
                 400,
                 "MODEL_CONTEXT_WINDOW_EXCEEDED",
-                `${modelConfig.name} supports up to ${modelConfig.contextWindowTokens.toLocaleString("en-US")} input and output tokens combined. Start a new conversation or shorten the attachments.`
+                `${modelConfig.name} holds ${outputBudget.limitTokens.toLocaleString("en-US")} tokens of conversation and answer together, and this conversation already fills it. Start a new conversation or shorten the attachments.`
             );
         }
+        // What the request actually asks the model to produce: the application
+        // cap, lowered to the provider's own ceiling and to the room the window
+        // has left. The credit and cost reservation deliberately keeps the
+        // unfitted figure -- over-reserving is refunded at settlement, and
+        // reserving less than the answer might cost protects nothing.
+        const requestMaxOutputTokens = outputBudget.outputTokens;
+        // Shadow routing (docs/policy/tomverse-chat-delivery-plan.md §6 step 3).
+        // The Router's rules run on this turn and the decision is recorded; the
+        // model the user selected is what executes. Handed to `after()` and
+        // never awaited: an experiment that can delay or fail a chat is not an
+        // experiment. Off unless TOMVERSE_ROUTER_SHADOW_ENABLED says otherwise.
+        // Shadow records what Auto *would* have chosen while the user's model
+        // runs. On a turn Auto actually routed there is nothing hypothetical
+        // left to record, and a row here would enter the same decision twice
+        // -- once as a shadow prediction and once as the real run -- into
+        // metrics that read the two as independent.
+        if (!autoSelection.routed) scheduleRoutingShadowRun(() => {
+            const lastUserTurn = [...formattedMessages]
+                .reverse()
+                .find((message) => message.role === "user");
+            const parts = Array.isArray(lastUserTurn?.content)
+                ? lastUserTurn.content
+                : [];
+            const profileText =
+                typeof lastUserTurn?.content === "string"
+                    ? lastUserTurn.content
+                    : parts
+                          .filter((part) => part.type === "text")
+                          .map((part) => ("text" in part ? part.text : ""))
+                          .join("\n");
+            return {
+                traceId,
+                userId: access.userId ?? null,
+                subjectKey: access.subjectKey,
+                // A signed-in account with no resolved plan reads as Guest
+                // rather than as a paid one: the filters use this to decide
+                // what the account may reach, and guessing upwards would let a
+                // shadow decision consider a model the person cannot use.
+                plan: access.kind === "guest" ? "Guest" : (access.plan ?? "Free"),
+                profile: buildTaskProfile({
+                    text: profileText,
+                    attachments: parts
+                        .filter((part) => part.type === "file")
+                        .map((part) => ({
+                            mediaType:
+                                "mediaType" in part ? part.mediaType : undefined,
+                        })),
+                    webSearchRequested: nativeSearchEnabled,
+                }),
+                userSelectedModelId: modelConfig.id,
+                estimatedInputTokens,
+                reservedInputTokens: budget.inputTokens,
+                // The unfitted cap on purpose: the filters fit it to each
+                // candidate's own window, and handing them the figure already
+                // fitted to the user's model would bias every other candidate.
+                requestOutputCapTokens: budget.maxOutputTokens,
+                models: AVAILABLE_MODELS,
+            };
+        });
         const accessGrant = await acquireChatAccess(access, budget, {
             traceId,
             source: "chat",
@@ -1626,8 +2091,24 @@ async function handleChatPost(
             // admitted in part.
             admissionToken,
         });
-        leaseId = accessGrant.leaseId;
+        leaseOwnership = chatLeaseAcquired(accessGrant.leaseId);
         usageReservation = accessGrant.usageReservation;
+        // Shadow only, and awaited so the settlement update cannot race the
+        // insert it depends on. The recorder is inert unless the flag is set
+        // and swallows its own failures, so this cannot fail a paid request.
+        if (shadowAccumulator?.hasText) {
+            await recordShadowReservation({
+                attemptId: usageReservation.reservationId,
+                modelId: modelConfig.id,
+                providerId: modelConfig.provider,
+                controlRawEstimatedInputTokens: estimatedInputTokens,
+                candidateRawEstimatedInputTokens:
+                    shadowAccumulator.candidateTotalFrom(estimatedInputTokens),
+                reservedInputTokens: budget.inputTokens,
+                tokenizerFamily: getCalibration(ACTIVE_ESTIMATOR_VERSION).family,
+                ...shadowAccumulator.snapshot(),
+            });
+        }
         try {
             await notifyProviderBudgetIfNeeded(modelConfig.provider);
         } catch (error) {
@@ -1649,9 +2130,8 @@ async function handleChatPost(
             // Ownership of this turn moves to the polling job: the request
             // ends here, so its slot must end here too rather than being held
             // for a job that can outlive any lease.
-            const activeLeaseId = leaseId;
-            leaseId = null;
-            await releaseChatAccess(activeLeaseId, {
+            leaseOwnership = chatLeaseReleased();
+            await releaseChatAccess(accessGrant.leaseId, {
                 traceId,
                 reason: "deep_research_handoff",
                 subjectScope: access.kind,
@@ -1710,6 +2190,7 @@ async function handleChatPost(
                             status: "pending",
                             modelId: requestedModelId,
                             pendingJobId: perplexityJobId,
+                            ...memoryAttribution,
                         },
                     });
                     await tx.perplexityAsyncJob.create({
@@ -1757,7 +2238,7 @@ async function handleChatPost(
                         modelConfig.provider,
                         "DEEP_RESEARCH_SUBMIT_FAILED",
                         {
-                            modelId: requestedModelId,
+                            modelId: modelConfig.id,
                             phase: "request",
                             traceId,
                             errorName: submitMetadata.name,
@@ -1767,7 +2248,7 @@ async function handleChatPost(
                         }
                     ).catch(() => {});
                     await recordModelFailure(
-                        requestedModelId,
+                        modelConfig.id,
                         modelConfig.provider,
                         "DEEP_RESEARCH_SUBMIT_FAILED"
                     ).catch(() => {});
@@ -1808,22 +2289,237 @@ async function handleChatPost(
         const webSearchToolConfig = nativeSearchEnabled
             ? buildWebSearchToolConfig(webSearchCapability)
             : null;
+        const generationSettings = getModelGenerationSettings(modelConfig);
+        // Delivery plan §5, applied to the manual path first. The user's own
+        // model choice is untouched; what is being measured is whether the
+        // §5 records can be produced at all, and what they cost, before Auto
+        // is allowed to dispatch anything on that machinery.
+        //
+        // The shape handed to the manifest is derived from the messages, never
+        // the messages: text becomes a keyed digest and a byte count, a file
+        // becomes its media type and size. lib/routingManifestContent.ts holds
+        // that, and its tests plant a name in a filename to prove it.
+        const manifestMessages = formattedMessages.map((message) => ({
+            role: message.role,
+            parts: Array.isArray(message.content)
+                ? message.content.map((part) =>
+                      part.type === "text"
+                          ? { type: "text" as const, text: part.text }
+                          : part.type === "file"
+                            ? {
+                                  type: "file" as const,
+                                  mediaType:
+                                      "mediaType" in part
+                                          ? part.mediaType
+                                          : undefined,
+                                  bytes:
+                                      "data" in part &&
+                                      typeof part.data === "string"
+                                          ? part.data.length
+                                          : 0,
+                                  // The bytes themselves, so two documents of
+                                  // the same kind and length do not share one
+                                  // reference. Already in memory: this is the
+                                  // payload on its way to the provider.
+                                  content:
+                                      "data" in part &&
+                                      typeof part.data === "string"
+                                          ? part.data
+                                          : undefined,
+                              }
+                            : { type: "other" as const, label: part.type }
+                  )
+                : [{ type: "text" as const, text: String(message.content ?? "") }],
+        }));
+        dispatchRecord = await beginInstrumentedDispatch({
+            traceId,
+            // Present only on a routed turn, so a manual run cannot be
+            // counted in the metrics that grade routing.
+            routerDecision: autoSelection.routed
+                ? {
+                      versions: autoSelection.versions,
+                      record: autoSelection.record,
+                      userSelectedModelId: requestedModelId,
+                  }
+                : null,
+            userId: access.userId ?? null,
+            subjectKey: access.subjectKey,
+            plan: access.kind === "guest" ? "Guest" : (access.plan ?? "Free"),
+            modelId: modelConfig.id,
+            provider: modelConfig.provider,
+            messages: manifestMessages,
+            tokenizerVersion: ACTIVE_ESTIMATOR_VERSION,
+            tokenCount: budget.inputTokens,
+            // An unbounded budget means the model declares no window. The
+            // manifest still needs a number for its within-window CHECK, and
+            // the honest one is the request itself: a request cannot exceed a
+            // limit that was never stated, and recording a fabricated ceiling
+            // would make the check pass by inventing headroom.
+            contextWindowTokens:
+                outputBudget.kind === "fitted"
+                    ? outputBudget.limitTokens
+                    : budget.inputTokens + requestMaxOutputTokens,
+            estimatedInputTokens,
+            reservedInputTokens: budget.inputTokens,
+            requestOutputCapTokens: budget.maxOutputTokens,
+            reservationId: usageReservation?.reservationId ?? null,
+            conversationId: conversationId ?? null,
+        });
+        // §5 step 4: the effective request is only known once the adapter has
+        // assembled it, so the manifest is finalized here and not a line
+        // earlier -- a hash taken before this would describe something else.
+        dispatchRecord = await authoriseDispatch(dispatchRecord, {
+            modelId: modelConfig.id,
+            provider: modelConfig.provider,
+            maxOutputTokens: requestMaxOutputTokens,
+            settings: generationSettings as Record<string, unknown>,
+            toolConfig: webSearchToolConfig,
+            messages: manifestMessages,
+            // No Planner yet, and saying so is more honest than a version
+            // number for a stage that did not run.
+            plannerVersion: "none",
+            adapterVersion: "vercel-ai-sdk-streamText-v1",
+        });
         const result = await streamText({
             model: activeModel,
             messages: formattedMessages,
-            maxOutputTokens: budget.maxOutputTokens,
+            maxOutputTokens: requestMaxOutputTokens,
             maxRetries: modelConfig.provider === "zhipu" ? 0 : undefined,
             headers:
                 modelConfig.provider === "perplexity"
                     ? perplexityUsageHeaders(traceId)
                     : undefined,
-            ...getModelGenerationSettings(modelConfig),
+            ...generationSettings,
             ...(webSearchToolConfig ?? {}),
         });
+        // The fallback drill's deliberate failure, if this request asked for
+        // one and may have one (lib/routingFaultInjection.ts: not production,
+        // a configured secret, and this request's own header). Off in every
+        // other case, and decided once so a retry cannot re-roll it.
+        const faultInjection = decideFaultInjection(
+            req.headers.get(FAULT_INJECTION_HEADER)
+        );
+        const injectedFault = faultInjection.inject ? faultInjection.fault : null;
+        if (injectedFault) {
+            // Loud, and before anything fails: a drill must never be mistaken
+            // for an outage in the logs it is about to produce.
+            console.warn(JSON.stringify({
+                event: "chat_fault_injection_armed",
+                traceId,
+                conversationId,
+                fault: injectedFault,
+                environment: resolveDeploymentEnvironment(),
+                timestamp: new Date().toISOString(),
+            }));
+        }
+        // The provider call has been made. Recorded after the fact on purpose:
+        // the CHECK behind this refuses a dispatch with no finalized manifest,
+        // so the order here is the order the constraint enforces.
+        await recordDispatched(dispatchRecord);
 
-        const sourceReader = result.textStream.getReader();
-        const activeLeaseId = leaseId;
-        leaseId = null;
+        // Per-attempt execution state (lib/chatAttemptExecution.ts).
+        //
+        // Everything below that means "the model that answered" reads from
+        // here rather than from the enclosing scope, and the reason is not
+        // tidiness. The stream used to log, record health for, and persist the
+        // assistant message under `requestedModelId` -- the model the *user
+        // asked for*. On a manual turn those are the same id and nothing was
+        // wrong. On a routed turn they are different models: provider health
+        // was credited to a model that never ran, and MessageProviderContext
+        // paired the requested model's id with the effective model's provider,
+        // which is the exact record the provider-context restore is keyed on.
+        // Auto routes nobody yet, so it was latent -- and a fallback would
+        // have made it two models wrong instead of one.
+        const dispatched = {
+            attemptIndex: 0,
+            modelId: modelConfig.id,
+            provider: modelConfig.provider,
+            reasoning: modelConfig.reasoning,
+            stream: result,
+            reader: faultedReader(result.textStream.getReader(), injectedFault, 0),
+            // Perplexity buffers response bodies under this key and consuming
+            // the capture releases it, so it is per attempt rather than per
+            // trace. The primary keeps the bare trace id, which is what the
+            // request headers already carried.
+            usageCaptureKey: traceId,
+            // What this attempt is priced at. Carried per attempt because a
+            // fallback runs on another model at another provider's rates, and
+            // settling it against the reservation's single snapshot is the
+            // thing lib/chatMultiAttemptSettlement.ts exists to prevent.
+            price: {
+                provider: modelConfig.provider,
+                modelId: modelConfig.id,
+                inputUsdPerMillionTokens: budget.inputUsdPerMillionTokens,
+                outputUsdPerMillionTokens: budget.outputUsdPerMillionTokens,
+                cachedInputPriceMultiplier: budget.cachedInputPriceMultiplier,
+                pricingVersion: budget.pricingVersion ?? null,
+            } satisfies AttemptPriceSnapshot,
+        };
+        /**
+         * Attempts that have already ended, oldest first.
+         *
+         * Empty for the whole of today's traffic, and `settleSafely` passes
+         * nothing to `settleChatUsage` while it stays empty -- so a turn that
+         * dispatched once settles exactly as it always has. A swap pushes the
+         * attempt it is replacing, and settlement appends the one that ended.
+         */
+        const endedAttempts: AttemptUsage[] = [];
+        let rerouteCount = 0;
+        let displacedModelId: string | null = null;
+        /**
+         * What §7 may try instead, best first.
+         *
+         * The Router's own eligible set with the chosen model removed, so a
+         * candidate here has passed exactly the filters the primary passed.
+         * Empty on a manual turn, which the scope gate refuses on its own
+         * grounds before this is ever read.
+         */
+        const fallbackCandidates = autoSelection.routed
+            ? autoSelection.fallbackCandidateModelIds
+            : [];
+        /**
+         * The provider hold this turn took, and the periods it was taken in.
+         *
+         * Read from the reservation rather than recomputed, because a second
+         * hold has to go into the same day and month the first one did. A turn
+         * that reserved no cost holds nothing and names no periods, so a
+         * fallback across providers is refused rather than guessing them.
+         */
+        const providerHoldEntries = (usageReservation?.entries ?? []).filter(
+            (entry) => entry.key === `provider:${modelConfig.provider}`
+        );
+        const providerHoldDay = providerHoldEntries.find(
+            (entry) => entry.period === "provider-cost-day"
+        );
+        const providerHoldMonth = providerHoldEntries.find(
+            (entry) => entry.period === "provider-cost-month"
+        );
+        /**
+         * Why no fallback happened, when it was a decision rather than the
+         * feature being off.
+         *
+         * `flag_off` is deliberately silent: with the flag off it is the
+         * answer for every failed turn, and a line per failure saying a
+         * disabled feature stayed disabled is noise that would bury the ones
+         * that mean something.
+         */
+        const reportFallbackRefusal = (reason: FallbackScopeRefusal | string) => {
+            if (reason === "flag_off") return;
+            console.info(JSON.stringify({
+                event: "chat_auto_fallback_refused",
+                traceId,
+                conversationId,
+                modelId: dispatched.modelId,
+                attemptIndex: dispatched.attemptIndex,
+                reason,
+                timestamp: new Date().toISOString(),
+            }));
+        };
+        // The stream owns the slot from here, but it cannot release anything
+        // until it is pulled, and it is only pulled once the Response below is
+        // returned. Until then the failure path is still the owner of record.
+        const activeLeaseId = accessGrant.leaseId;
+        leaseOwnership = chatLeaseTakenByStream(leaseOwnership);
         let generatedText = "";
         let released = false;
         let sourceCancelled = false;
@@ -1836,8 +2532,10 @@ async function handleChatPost(
         let perplexityCapture: Promise<PerplexityResponseCapture | null> | null =
             null;
         const takePerplexityCapture = () => {
-            if (modelConfig.provider !== "perplexity") return Promise.resolve(null);
-            perplexityCapture ??= consumePerplexityResponseCapture(traceId);
+            if (dispatched.provider !== "perplexity") return Promise.resolve(null);
+            perplexityCapture ??= consumePerplexityResponseCapture(
+                dispatched.usageCaptureKey
+            );
             return perplexityCapture;
         };
         const estimatedGeneratedOutputTokens = () =>
@@ -1878,13 +2576,14 @@ async function handleChatPost(
                 try {
                     const providerUsageSnapshot =
                         (await takePerplexityCapture())?.usage ?? null;
+                    const settledInputTokens =
+                        usage?.inputTokens ?? reservation.inputTokens;
+                    const settledOutputTokens =
+                        usage?.outputTokens ?? estimatedGeneratedOutputTokens();
                     await settleChatUsage(reservation, {
-                        inputTokens:
-                            usage?.inputTokens ?? reservation.inputTokens,
+                        inputTokens: settledInputTokens,
                         cachedInputTokens: usage?.cachedInputTokens,
-                        outputTokens:
-                            usage?.outputTokens ??
-                            estimatedGeneratedOutputTokens(),
+                        outputTokens: settledOutputTokens,
                         reasoningTokens: usage?.reasoningTokens,
                         // Absent provider usage metadata, the output figure
                         // above is the documented fallback estimate rather
@@ -1895,14 +2594,117 @@ async function handleChatPost(
                         searchExecuted: usage?.searchExecuted,
                     }, {
                         providerUsageSnapshot,
+                        // Only when this turn actually dispatched more than
+                        // once. Empty leaves settleChatUsage on the path every
+                        // turn has always taken, which is the point: a turn
+                        // that ran one model settles as one model.
+                        attempts: endedAttempts.length
+                            ? [
+                                  ...endedAttempts,
+                                  {
+                                      attemptIndex: dispatched.attemptIndex,
+                                      price: dispatched.price,
+                                      inputTokens: settledInputTokens,
+                                      cachedInputTokens:
+                                          usage?.cachedInputTokens ?? 0,
+                                      outputTokens: settledOutputTokens,
+                                      reasoningTokens: usage?.reasoningTokens,
+                                      usageFromProvider:
+                                          usage?.usageFromProvider === true,
+                                      outcome,
+                                      searchCostMicroUsd: undefined,
+                                      providerReportedCostMicroUsd:
+                                          providerUsageSnapshot?.totalCostMicroUsd ??
+                                          null,
+                                  } satisfies AttemptUsage,
+                              ]
+                            : undefined,
                     });
                     usageReservation = null;
+                    // One funnel for every terminal outcome, so cancellation,
+                    // stream failure and completion all reach the attempt
+                    // record by the same path the settlement takes. Hooking
+                    // each call site instead would mean the outcomes that are
+                    // hardest to reproduce are the ones most likely to be
+                    // missed.
+                    await completeInstrumentedDispatch(dispatchRecord, {
+                        outcome:
+                            outcome === "completed"
+                                ? "succeeded"
+                                : outcome === "cancelled"
+                                  ? "cancelled"
+                                  : "failed_post_token",
+                        failureLayer:
+                            outcome === "completed" || outcome === "cancelled"
+                                ? "none"
+                                : "stream",
+                        actualInputTokens:
+                            usage?.inputTokens ?? reservation.inputTokens,
+                        actualOutputTokens:
+                            usage?.outputTokens ?? estimatedGeneratedOutputTokens(),
+                        errorClass: outcome === "empty" ? "empty_response" : null,
+                        settlementOutcome: outcome,
+                    });
+                    // Auto's memory of this conversation, written only for a
+                    // turn it actually routed and only when that turn
+                    // produced an answer. A streak advanced by a cancelled or
+                    // failed turn would let hysteresis be decided by turns
+                    // that never reached the user.
+                    // §8, and only once the answer exists. A recovery
+                    // candidate stored for a retry that then failed would send
+                    // the next turn back to a model that never worked.
+                    if (outcome === "completed") {
+                        await recordFallbackRecovery(
+                            dispatchRecord,
+                            recoveryAfterFallback({
+                                succeededModelId: dispatched.modelId,
+                                displacedModelId,
+                                failureLayer: "provider",
+                            })
+                        );
+                    }
+                    if (autoSelection.routed && outcome === "completed" && conversationId) {
+                        try {
+                            await prisma.conversation.updateMany({
+                                // `updateMany` with the mode in the filter, so
+                                // a conversation switched back to manual
+                                // mid-stream is not given sticky state the
+                                // CHECK forbids it to hold.
+                                where: {
+                                    id: conversationId,
+                                    selectionMode: "auto",
+                                },
+                                // §8: the sticky model becomes the one that
+                                // worked. On a turn that fell back that is not
+                                // the model the Router chose, and writing the
+                                // Router's choice would put the conversation
+                                // back on a model that had just failed.
+                                data: stickyStateAfterRoutedTurn(
+                                    dispatched.modelId,
+                                    // A fallback is not evidence about a
+                                    // challenger, so the hysteresis streak
+                                    // starts again rather than carrying a
+                                    // count that was about another comparison.
+                                    displacedModelId
+                                        ? 0
+                                        : autoSelection.sticky.turnsFavouringChallenger
+                                ),
+                            });
+                        } catch (error) {
+                            logRequestError(
+                                "chat_auto_sticky_persist_failed",
+                                traceId,
+                                error,
+                                dispatched.modelId
+                            );
+                        }
+                    }
                 } catch (error) {
                     logRequestError(
                         "chat_usage_settlement_failed",
                         traceId,
                         error,
-                        requestedModelId
+                        dispatched.modelId
                     );
                 }
             })();
@@ -1924,7 +2726,7 @@ async function handleChatPost(
                         "chat_lease_heartbeat_failed",
                         traceId,
                         error,
-                        requestedModelId
+                        dispatched.modelId
                     );
                 });
             },
@@ -1957,7 +2759,7 @@ async function handleChatPost(
                     "chat_access_release_failed",
                     traceId,
                     error,
-                    requestedModelId
+                    dispatched.modelId
                 );
             }
         };
@@ -1965,14 +2767,14 @@ async function handleChatPost(
             if (sourceCancelled) return;
             sourceCancelled = true;
             try {
-                await sourceReader.cancel(reason);
+                await dispatched.reader.cancel(reason);
             } catch (error) {
                 if (!isClosedStreamControllerError(error)) {
                     logRequestError(
                         "ai_source_stream_cancel_failed",
                         traceId,
                         error,
-                        requestedModelId
+                        dispatched.modelId
                     );
                 }
             }
@@ -1992,7 +2794,7 @@ async function handleChatPost(
                         "chat_response_stream_enqueue_failed",
                         traceId,
                         error,
-                        requestedModelId
+                        dispatched.modelId
                     );
                 }
                 return false;
@@ -2013,7 +2815,7 @@ async function handleChatPost(
                         "chat_response_stream_close_failed",
                         traceId,
                         error,
-                        requestedModelId
+                        dispatched.modelId
                     );
                 }
                 return false;
@@ -2035,30 +2837,363 @@ async function handleChatPost(
                         "chat_response_stream_error_failed",
                         traceId,
                         streamError,
-                        requestedModelId
+                        dispatched.modelId
                     );
                 }
                 return false;
             }
+        };
+        /**
+         * §7's automatic fallback, or the named reason there was none.
+         *
+         * Reached only from the stream's failure path, and only before the
+         * first visible token -- both of which `decideFallback` re-checks
+         * rather than trusting the call site. Returns whether the response is
+         * now being served by another model; `false` means the caller carries
+         * on failing the turn exactly as it did before this existed.
+         *
+         * Everything here is off by default. `autoFallbackScope` reads
+         * AUTO_ROUTER_FALLBACK_ENABLED first, so a deployment that sets
+         * nothing gets one refusal for every turn and never a second provider
+         * call.
+         */
+        const attemptFallback = async (
+            controller: ReadableStreamDefaultController<string>,
+            error: unknown
+        ): Promise<boolean> => {
+            const classified = classifyStreamFailure({
+                error,
+                phase: "read",
+                visibleTokenEmitted: generatedText.length > 0,
+                downstreamOpen: streamState === "open",
+            });
+            const scope = autoFallbackScope({
+                routed: autoSelection.routed,
+                isGuest: access.kind === "guest",
+                toolsOffered: Boolean(webSearchToolConfig),
+                nativeSearchEnabled,
+                // Always false here: a deep-research turn returns from the
+                // submit-then-poll branch above and never reaches a stream.
+                // Stated anyway, because a gate that lists its exclusions is
+                // checkable and one that relies on an earlier return is not.
+                deepResearch: modelConfig.usageClass === "deep-research",
+                hasAttachments: requestAttachments.length > 0,
+                candidateCount: fallbackCandidates.length,
+            });
+            if (!scope.allowed) {
+                reportFallbackRefusal(scope.reason);
+                return false;
+            }
+            const decision = decideFallback({
+                attempt: {
+                    modelId: dispatched.modelId,
+                    outcome: classified.outcome,
+                    failureLayer: classified.failureLayer,
+                    providerRefusal: classified.providerRefusal,
+                },
+                run: {
+                    // The Planner is "none", so no attempt can have taken the
+                    // downgrade. See §9.1: pass-through stays held.
+                    passThroughUsed: false,
+                    rerouteCount,
+                    visibleTokenEmitted: generatedText.length > 0,
+                },
+                nextCandidateModelIds: fallbackCandidates,
+            });
+            if (decision.action !== "fallback") {
+                reportFallbackRefusal(
+                    decision.action === "terminate" ? decision.reason : "pass_through"
+                );
+                return false;
+            }
+
+            const candidate = runtimeModelMap.get(decision.modelId);
+            if (!candidate?.enabled || candidate.catalogDeleted) {
+                reportFallbackRefusal("candidate_unavailable");
+                return false;
+            }
+            // §6: the candidate needs its own draft, adapter serialization,
+            // actual-token check and manifest. A refusal here is one candidate
+            // that did not qualify, not the request failing -- the primary's
+            // failure is still what ends the turn.
+            const planned = planAttemptExecution(candidate, {
+                accessKind: access.kind,
+                inputBreakdown: inputEstimate.breakdown(),
+                webSearchMode: webSearchMode ?? null,
+                traceId,
+                attemptIndex: dispatched.attemptIndex + 1,
+            });
+            if (!planned.ok) {
+                reportFallbackRefusal(`candidate_${planned.refusal.kind}`);
+                return false;
+            }
+            const plan = planned.plan;
+
+            // §10: every dispatch is authorized on the server, including this
+            // one. Money held at the primary's provider does not make a call
+            // to another provider affordable.
+            // §10 authorizes every dispatch, and that includes a fallback on
+            // the provider the primary is already holding against: the hold is
+            // sized for one attempt, and a second call costs more whether or
+            // not it shares a bucket.
+            let fallbackHoldTaken = false;
+            if (!providerHoldDay || !providerHoldMonth) {
+                // Nothing was held for this turn, so there is no evidence of
+                // which periods a second hold belongs in.
+                reportFallbackRefusal("no_provider_hold");
+                return false;
+            }
+            const fallbackAttemptIndex = dispatched.attemptIndex + 1;
+            const reserved = await reserveAttemptProviderBudget({
+                reservationId: usageReservation!.reservationId,
+                userId: usageReservation!.userId ?? null,
+                attemptIndex: fallbackAttemptIndex,
+                provider: plan.provider,
+                reservedMicroUsd: getChatBudgetReservedCostMicroUsd(plan.budget),
+                periodStarts: {
+                    day: providerHoldDay.periodStart,
+                    month: providerHoldMonth.periodStart,
+                },
+            }).catch((budgetError: unknown) => {
+                logRequestError(
+                    "chat_fallback_budget_reserve_failed",
+                    traceId,
+                    budgetError,
+                    plan.modelId
+                );
+                return { reserved: false as const, reason: "reserve_failed" as const };
+            });
+            if (!reserved.reserved) {
+                reportFallbackRefusal(`budget_${reserved.reason}`);
+                return false;
+            }
+            fallbackHoldTaken = true;
+            usageReservation = {
+                ...usageReservation!,
+                entries: [...usageReservation!.entries, ...reserved.entries],
+            };
+            /**
+             * Gives the hold back when the dispatch it authorized never
+             * happened.
+             *
+             * §10 requires the authorization *before* the call, so there is
+             * necessarily a window where the money is held and the call has
+             * not been made. Every exit from that window has to come through
+             * here, or a provider carries a hold for a request that does not
+             * exist until the reservation expires.
+             */
+            const abandonFallback = async (reason: string) => {
+                if (fallbackHoldTaken) {
+                    await releaseAttemptProviderBudget({
+                        reservationId: usageReservation!.reservationId,
+                        userId: usageReservation!.userId ?? null,
+                        attemptIndex: fallbackAttemptIndex,
+                    });
+                    usageReservation = {
+                        ...usageReservation!,
+                        entries: usageReservation!.entries.filter(
+                            (entry) => !reserved.entries.includes(entry)
+                        ),
+                    };
+                }
+                reportFallbackRefusal(reason);
+                return false;
+            };
+
+            // Kept before the dispatch because `beginRetryAttempt` opens the
+            // second attempt on this record's run. Closing it is deliberately
+            // *after* the dispatch succeeds -- see below.
+            const failing = dispatchRecord;
+            let nextRecord: DispatchInstrumentation;
+            let nextStream: Awaited<ReturnType<typeof streamText>>;
+            try {
+                // A second attempt on the *same* run, not a second run. One
+                // logical response is one RoutingRun with its attempts hanging
+                // off it; two runs would read as two responses and the reroute
+                // rate would be zero forever. `beginRetryAttempt` also spends
+                // §6's build budget itself, so a caller that forgot cannot
+                // produce a third.
+                nextRecord = await beginRetryAttempt(failing, {
+                    attemptIndex: dispatched.attemptIndex + 1,
+                    modelId: plan.modelId,
+                    provider: plan.provider,
+                    plannerMode: "planned",
+                    failureLayer: classified.failureLayer,
+                    messages: manifestMessages,
+                    tokenizerVersion: ACTIVE_ESTIMATOR_VERSION,
+                    tokenCount: plan.budget.inputTokens,
+                    contextWindowTokens:
+                        plan.outputBudget.kind === "fitted"
+                            ? plan.outputBudget.limitTokens
+                            : plan.budget.inputTokens + plan.maxOutputTokens,
+                    userId: access.userId ?? null,
+                });
+                // §5: its own manifest, finalized against its own effective
+                // request. Reusing the primary's would describe a request that
+                // was never sent to this model.
+                nextRecord = await authoriseDispatch(nextRecord, {
+                    modelId: plan.modelId,
+                    provider: plan.provider,
+                    maxOutputTokens: plan.maxOutputTokens,
+                    settings: plan.generationSettings as Record<string, unknown>,
+                    toolConfig: plan.webSearchToolConfig,
+                    messages: manifestMessages,
+                    plannerVersion: "none",
+                    adapterVersion: "vercel-ai-sdk-streamText-v1",
+                });
+                nextStream = await streamText({
+                    model: plan.activeModel,
+                    messages: formattedMessages,
+                    ...attemptDispatchOptions(plan),
+                });
+                await recordDispatched(nextRecord);
+            } catch (dispatchError) {
+                // The turn ends on the primary's failure, which is what the
+                // caller was already about to do. Nothing has been shown and
+                // nothing about the response has changed.
+                logRequestError(
+                    "chat_fallback_dispatch_failed",
+                    traceId,
+                    dispatchError,
+                    plan.modelId
+                );
+                return abandonFallback("dispatch_failed");
+            }
+
+            // §7: the client is told before the next model's first token, and
+            // told a model id and nothing else. Out-of-band, so it is not a
+            // visible token and does not close the door it just opened.
+            if (!enqueueSafely(controller, buildRoutingRetryChunk(plan.modelId))) {
+                await nextStream.textStream.getReader().cancel("client is gone");
+                return abandonFallback("client_gone_before_signal");
+            }
+
+            // From here the swap is committed, and only from here.
+            //
+            // Closing the primary attempt and adding it to `endedAttempts`
+            // used to happen before the dispatch. If the dispatch then failed,
+            // the turn ended on the primary while `endedAttempts` already held
+            // attempt 0 and `dispatched` was still attempt 0 -- so settlement
+            // built the same index twice and `attemptSetProblems` refused the
+            // whole settlement, leaving the money where it was. A fallback
+            // that never dispatched must settle as the single attempt it was.
+            try {
+                await completeInstrumentedDispatch(failing, {
+                    outcome: "failed_pre_token",
+                    failureLayer: classified.failureLayer,
+                    actualInputTokens: budget.inputTokens,
+                    actualOutputTokens: 0,
+                    errorClass: "provider_pre_token_failure",
+                    settlementOutcome: "failed",
+                });
+            } catch (recordError) {
+                logRequestError(
+                    "chat_fallback_attempt_close_failed",
+                    traceId,
+                    recordError,
+                    dispatched.modelId
+                );
+            }
+            // No usage metadata exists for a stream that failed before its
+            // first chunk, so the input is the reserved estimate and the
+            // output is zero, flagged as an estimate. Over-recording provider
+            // spend is the safe direction for a ledger whose job is to keep a
+            // budget from being exceeded; the user is not charged for it --
+            // §7 bills the accepted attempt only.
+            endedAttempts.push({
+                attemptIndex: dispatched.attemptIndex,
+                price: dispatched.price,
+                inputTokens: budget.inputTokens,
+                cachedInputTokens: 0,
+                outputTokens: 0,
+                usageFromProvider: false,
+                outcome: "failed",
+            });
+
+            // The replaced reader is cancelled here, directly, and not through
+            // `cancelSourceSafely`.
+            //
+            // That helper latches `sourceCancelled`, and the latch means "the
+            // current source has been cancelled" -- which stops being true the
+            // moment a different source is installed. Latching it here would
+            // leave a later disconnect with nothing to cancel, and the
+            // *fallback's* provider stream would stay open and billing after
+            // the user had gone. Cancelling before the next dispatch also means
+            // a dispatch that fails leaves nothing behind.
+            try {
+                await dispatched.reader.cancel(
+                    "replaced by a fallback attempt"
+                );
+            } catch (cancelError) {
+                if (!isClosedStreamControllerError(cancelError)) {
+                    logRequestError(
+                        "ai_source_stream_cancel_failed",
+                        traceId,
+                        cancelError,
+                        dispatched.modelId
+                    );
+                }
+            }
+
+            displacedModelId = dispatched.modelId;
+            rerouteCount += 1;
+            dispatchRecord = nextRecord;
+            dispatched.attemptIndex += 1;
+            dispatched.modelId = plan.modelId;
+            dispatched.provider = plan.provider;
+            dispatched.reasoning = plan.modelConfig.reasoning;
+            dispatched.stream = nextStream;
+            dispatched.reader = faultedReader(
+                nextStream.textStream.getReader(),
+                injectedFault,
+                dispatched.attemptIndex + 1
+            );
+            // A new source, so the "already cancelled" latch is about a stream
+            // that no longer exists. Leaving it set would make a disconnect
+            // during the fallback a no-op.
+            sourceCancelled = false;
+            dispatched.usageCaptureKey = plan.usageCaptureKey;
+            dispatched.price = {
+                provider: plan.provider,
+                modelId: plan.modelId,
+                inputUsdPerMillionTokens: plan.budget.inputUsdPerMillionTokens,
+                outputUsdPerMillionTokens: plan.budget.outputUsdPerMillionTokens,
+                cachedInputPriceMultiplier: plan.budget.cachedInputPriceMultiplier,
+                pricingVersion: plan.budget.pricingVersion ?? null,
+            };
+            // The next attempt captures under its own key, so the memo from
+            // the one it replaced must not answer for it.
+            perplexityCapture = null;
+            console.info(JSON.stringify({
+                event: "chat_auto_fallback_dispatched",
+                traceId,
+                conversationId,
+                fromModelId: displacedModelId,
+                toModelId: plan.modelId,
+                attemptIndex: dispatched.attemptIndex,
+                failureLayer: classified.failureLayer,
+                timestamp: new Date().toISOString(),
+            }));
+            return true;
         };
         const protectedStream = new ReadableStream<string>({
             async pull(controller) {
                 if (streamState !== "open") return;
 
                 try {
-                    const { done, value } = await sourceReader.read();
+                    const { done, value } = await dispatched.reader.read();
                     if (streamState !== "open") {
                         await releaseSafely();
                         return;
                     }
                     if (done) {
                         const completionResults = await Promise.allSettled([
-                            result.response,
-                            result.usage,
-                            result.finishReason,
-                            result.rawFinishReason,
-                            result.content,
-                            result.providerMetadata,
+                            dispatched.stream.response,
+                            dispatched.stream.usage,
+                            dispatched.stream.finishReason,
+                            dispatched.stream.rawFinishReason,
+                            dispatched.stream.content,
+                            dispatched.stream.providerMetadata,
                         ] as const);
                         const [
                             responseResult,
@@ -2073,7 +3208,7 @@ async function handleChatPost(
                         // pricing profile claims. Nothing here settles, prices
                         // or reserves -- see lib/servedProcessingTier.ts.
                         const servedTier = observeServedProcessingTier(
-                            modelConfig.provider,
+                            dispatched.provider,
                             providerMetadataResult.status === "fulfilled"
                                 ? providerMetadataResult.value
                                 : undefined
@@ -2084,7 +3219,7 @@ async function handleChatPost(
                                     event: "chat_served_processing_tier_mismatch",
                                     traceId,
                                     provider: servedTier.provider,
-                                    modelId: requestedModelId,
+                                    modelId: dispatched.modelId,
                                     servedTier: servedTier.servedTier,
                                     classification: servedTier.classification,
                                     timestamp: new Date().toISOString(),
@@ -2124,7 +3259,7 @@ async function handleChatPost(
                                     "chat_provider_request_link_failed",
                                     traceId,
                                     error,
-                                    requestedModelId
+                                    dispatched.modelId
                                 );
                             }
                         }
@@ -2134,7 +3269,7 @@ async function handleChatPost(
                                 "chat_stream_completion_metadata_failed",
                                 traceId,
                                 completionError,
-                                requestedModelId
+                                dispatched.modelId
                             );
                         }
 
@@ -2149,7 +3284,7 @@ async function handleChatPost(
                         const webSearchExecution = normalizeWebSearchExecution({
                             capability: webSearchCapability,
                             searchRequested: webSearchRequested,
-                            provider: modelConfig.provider,
+                            provider: dispatched.provider,
                             toolName: webSearchCapability.provider
                                 ? WEB_SEARCH_TOOL_NAMES[webSearchCapability.provider]
                                 : undefined,
@@ -2173,8 +3308,8 @@ async function handleChatPost(
                                 JSON.stringify({
                                     event: "chat_response_incomplete",
                                     traceId,
-                                    provider: modelConfig.provider,
-                                    modelId: requestedModelId,
+                                    provider: dispatched.provider,
+                                    modelId: dispatched.modelId,
                                     finishReason,
                                     rawFinishReason: rawFinishReason ?? null,
                                     incompleteReason:
@@ -2231,7 +3366,7 @@ async function handleChatPost(
                                           )}\n\n[Response truncated for storage]`
                                         : generatedText;
                                 const providerContext =
-                                    modelConfig.reasoning !== undefined &&
+                                    dispatched.reasoning !== undefined &&
                                     responseResult.status === "fulfilled"
                                         ? serializeProviderResponseMessages(
                                               responseResult.value.messages
@@ -2274,16 +3409,20 @@ async function handleChatPost(
                                             role: "assistant",
                                             content: storedContent,
                                             status: completionOutcome.status,
-                                            modelId: requestedModelId,
+                                            modelId: dispatched.modelId,
                                             searchMetadata: webSearchExecution,
+                                            // Spread, so an answer with no
+                                            // bundle writes neither column
+                                            // and both stay NULL (§22).
+                                            ...memoryAttribution,
                                         },
                                     });
                                     if (providerContext) {
                                         await tx.messageProviderContext.create({
                                             data: {
                                                 messageId: assistantMessageId,
-                                                modelId: requestedModelId,
-                                                provider: modelConfig.provider,
+                                                modelId: dispatched.modelId,
+                                                provider: dispatched.provider,
                                                 responseMessages:
                                                     providerContext.messages,
                                             },
@@ -2295,7 +3434,7 @@ async function handleChatPost(
                                     "assistant_message_persist_failed",
                                     traceId,
                                     error,
-                                    requestedModelId
+                                    dispatched.modelId
                                 );
                             }
                         }
@@ -2318,10 +3457,10 @@ async function handleChatPost(
                                 : `AI_EMPTY_RESPONSE.${finishReasonCode}`;
                             try {
                                 await recordProviderFailure(
-                                    modelConfig.provider,
+                                    dispatched.provider,
                                     diagnosticCode,
                                     {
-                                        modelId: requestedModelId,
+                                        modelId: dispatched.modelId,
                                         phase: "stream",
                                         traceId,
                                         errorName:
@@ -2337,8 +3476,8 @@ async function handleChatPost(
                                     }
                                 );
                                 await recordModelFailure(
-                                    requestedModelId,
-                                    modelConfig.provider,
+                                    dispatched.modelId,
+                                    dispatched.provider,
                                     diagnosticCode
                                 );
                             } catch (error) {
@@ -2346,21 +3485,21 @@ async function handleChatPost(
                                     "provider_empty_response_record_failed",
                                     traceId,
                                     error,
-                                    requestedModelId
+                                    dispatched.modelId
                                 );
                             }
                         } else {
                             try {
                                 await recordProviderSuccess(
-                                    modelConfig.provider
+                                    dispatched.provider
                                 );
-                                await recordModelSuccess(requestedModelId);
+                                await recordModelSuccess(dispatched.modelId);
                             } catch (error) {
                                 logRequestError(
                                     "provider_success_record_failed",
                                     traceId,
                                     error,
-                                    requestedModelId
+                                    dispatched.modelId
                                 );
                             }
                         }
@@ -2398,7 +3537,7 @@ async function handleChatPost(
                                 "ai_stream_lifecycle_closed",
                                 traceId,
                                 error,
-                                requestedModelId
+                                dispatched.modelId
                             );
                         }
                         streamState = "cancelled";
@@ -2416,14 +3555,14 @@ async function handleChatPost(
                         "ai_stream_failed",
                         traceId,
                         error,
-                        requestedModelId
+                        dispatched.modelId
                     );
                     try {
                         await recordProviderFailure(
-                            modelConfig.provider,
+                            dispatched.provider,
                             diagnosticCode,
                             {
-                                modelId: requestedModelId,
+                                modelId: dispatched.modelId,
                                 phase: "stream",
                                 traceId,
                                 errorName: errorMetadata.name,
@@ -2433,8 +3572,8 @@ async function handleChatPost(
                             }
                         );
                         await recordModelFailure(
-                            requestedModelId,
-                            modelConfig.provider,
+                            dispatched.modelId,
+                            dispatched.provider,
                             diagnosticCode
                         );
                     } catch (recordError) {
@@ -2442,8 +3581,19 @@ async function handleChatPost(
                             "provider_failure_record_failed",
                             traceId,
                             recordError,
-                            requestedModelId
+                            dispatched.modelId
                         );
+                    }
+                    // §7's automatic fallback, and the last thing tried
+                    // before the turn ends. After the health records, so a
+                    // provider that failed is counted as having failed
+                    // whether or not another model rescued the answer -- the
+                    // fallback is a recovery for the user, not an amnesty for
+                    // the provider. Off by default; see lib/autoFallbackGate.
+                    if (await attemptFallback(controller, error)) {
+                        // The response is now being served by another model.
+                        // The next pull() reads from its stream.
+                        return;
                     }
                     await settleSafely("failed");
                     errorSafely(controller, error);
@@ -2474,6 +3624,20 @@ async function handleChatPost(
         if (memoryUsedCount > 0) {
             headers.set("X-Chat-Memory-Used", String(memoryUsedCount));
         }
+        // Which model answered, on a turn Auto routed. A header rather than
+        // something in the body for the same reason as the memory count: the
+        // client needs it before the first token, and the badge on the reply
+        // is what makes the toggle's promise -- "the one that answered is
+        // shown on the reply" -- keepable.
+        //
+        // Absent on a manual turn, and absent on an Auto turn that fell back:
+        // a header there would claim a routing decision that did not happen.
+        // The reason is the Router's own fixed identifier, so the client
+        // localises it and nothing derived from the turn crosses the wire.
+        if (autoSelection.routed) {
+            headers.set("X-Chat-Routed-Model", autoSelection.modelId);
+            headers.set("X-Chat-Routed-Reason", autoSelection.record.selectionReason);
+        }
         if (accessGrant.setCookie) {
             headers.append("Set-Cookie", accessGrant.setCookie);
         }
@@ -2481,21 +3645,44 @@ async function handleChatPost(
         // path, success and failure alike -- adding it here as well would
         // send it twice.
 
-        return new Response(protectedStream.pipeThrough(new TextEncoderStream()), {
-            headers,
-        });
+        const response = new Response(
+            protectedStream.pipeThrough(new TextEncoderStream()),
+            { headers }
+        );
+        // Only once the Response exists, because everything above it can still
+        // throw and an unpublished stream is never pulled. After this the
+        // stream's own release paths are the ones that free the slot.
+        leaseOwnership = chatLeaseStreamPublished(leaseOwnership);
+        return response;
     } catch (error: unknown) {
         stopLeaseHeartbeat?.();
-        if (leaseId) {
-            await releaseChatAccess(leaseId, {
+        const orphanedLease = chatLeaseToReleaseOnUnwind(leaseOwnership);
+        if (orphanedLease) {
+            leaseOwnership = chatLeaseReleased();
+            await releaseChatAccess(orphanedLease.leaseId, {
                 traceId,
-                reason: "request_failed_before_stream",
+                reason: orphanedLease.reason,
             });
+        }
+        // The request failed before the stream owned it, so the attempt was
+        // prepared and never produced an answer. `failed_pre_token` rather
+        // than `not_dispatched`: this path is reached both before and after
+        // the provider call, and claiming nothing was sent when it may have
+        // been is the misrepresentation §5 forbids. Left `pending` it would be
+        // an attempt the reliability numbers cannot classify at all.
+        if (dispatchRecord) {
+            await completeInstrumentedDispatch(dispatchRecord, {
+                outcome: "failed_pre_token",
+                failureLayer: "provider",
+                errorClass: "request_failed",
+                settlementOutcome: "failed",
+            });
+            dispatchRecord = null;
         }
         if (usageReservation) {
             try {
                 const providerUsageSnapshot =
-                    requestedProviderForLog === "perplexity"
+                    dispatchProviderForLog === "perplexity"
                         ? await consumePerplexityUsage(traceId)
                         : null;
                 await settleChatUsage(usageReservation, {
@@ -2511,11 +3698,11 @@ async function handleChatPost(
                     "chat_usage_refund_failed",
                     traceId,
                     settlementError,
-                    requestedModelIdForLog
+                    dispatchModelIdForLog
                 );
             }
         }
-        if (requestedProviderForLog === "perplexity") {
+        if (dispatchProviderForLog === "perplexity") {
             discardPerplexityUsage(traceId);
         }
         const accessError = chatErrorResponse(error);
@@ -2531,7 +3718,7 @@ async function handleChatPost(
                         traceId,
                         code: error.code,
                         status: error.status,
-                        modelId: requestedModelIdForLog,
+                        modelId: dispatchModelIdForLog,
                         ...(error.details || {}),
                         timestamp: new Date().toISOString(),
                     })
@@ -2562,7 +3749,7 @@ async function handleChatPost(
             "ai_request_failed",
             traceId,
             error,
-            requestedModelIdForLog
+            dispatchModelIdForLog
         );
         try {
             const errorMetadata = safeErrorMetadata(error);
@@ -2571,10 +3758,10 @@ async function handleChatPost(
                     ? error.code
                     : providerDiagnosticCode("AI_REQUEST_FAILED", error);
             await recordProviderFailure(
-                requestedProviderForLog,
+                dispatchProviderForLog,
                 diagnosticCode,
                 {
-                    modelId: requestedModelIdForLog,
+                    modelId: dispatchModelIdForLog,
                     phase: "request",
                     traceId,
                     errorName: errorMetadata.name,
@@ -2584,8 +3771,8 @@ async function handleChatPost(
                 }
             );
             await recordModelFailure(
-                requestedModelIdForLog,
-                requestedProviderForLog,
+                dispatchModelIdForLog,
+                dispatchProviderForLog,
                 diagnosticCode
             );
         } catch (recordError) {
@@ -2593,7 +3780,7 @@ async function handleChatPost(
                 "provider_failure_record_failed",
                 traceId,
                 recordError,
-                requestedModelIdForLog
+                dispatchModelIdForLog
             );
         }
 
@@ -2605,8 +3792,8 @@ async function handleChatPost(
             undefined,
             {
                 phase: "request",
-                provider: requestedProviderForLog,
-                modelId: requestedModelIdForLog,
+                provider: dispatchProviderForLog,
+                modelId: dispatchModelIdForLog,
                 error,
             }
         );

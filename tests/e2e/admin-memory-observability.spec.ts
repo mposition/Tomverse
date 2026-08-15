@@ -92,6 +92,71 @@ const openPanel = async (page: Page) => {
   await expect(page.getByTestId("admin-memory-import-panel")).toBeVisible();
 };
 
+const followupProxy = {
+  memory: {
+    answers: 40,
+    followups: 12,
+    regenerates: 4,
+    followupRate: 0.3,
+    regenerateRate: 0.1,
+  },
+  plain: {
+    answers: 80,
+    followups: 20,
+    regenerates: 4,
+    followupRate: 0.25,
+    regenerateRate: 0.05,
+  },
+  followupDifference: 0.05,
+  regenerateDifference: 0.05,
+};
+
+/**
+ * The follow-up proxy arrived after this reader shipped and after these tests
+ * were written, and nothing here covered it. Reading it unconditionally meant a
+ * report without it threw during render, and the error boundary answered by
+ * replacing the whole Admin Console with "Something went wrong" — so the panel
+ * you open *because* something is wrong became the second thing that was.
+ *
+ * Both directions are asserted, because only one of them is the interesting
+ * one: a report that carries the proxy shows both arms, and a report that does
+ * not says so and still renders everything else.
+ */
+test("the follow-up proxy shows both arms when the report carries them", async ({
+  page,
+}) => {
+  await mockReports(page, { memory: { followupProxy } });
+  await openPanel(page);
+
+  const section = page.getByTestId("admin-memory-followup-proxy");
+  await expect(section).toContainText("30%");
+  await expect(section).toContainText("25%");
+  // Read as a comparison, never as a rate on its own.
+  await expect(section).toContainText("vs");
+  await expect(
+    page.getByTestId("admin-memory-followup-proxy-unavailable")
+  ).toHaveCount(0);
+});
+
+test("a report without the follow-up proxy says so instead of crashing", async ({
+  page,
+}) => {
+  // The default mock omits it, exactly as the endpoint's older shape did.
+  await mockReports(page);
+  await openPanel(page);
+
+  await expect(
+    page.getByTestId("admin-memory-followup-proxy-unavailable")
+  ).toContainText("Not measured");
+  // Two arms of "0% vs 0%" would read as a measured result showing no
+  // difference, which is the one conclusion the absence does not support.
+  await expect(page.getByTestId("admin-memory-followup-proxy")).not.toContainText(
+    "0% vs 0%"
+  );
+  // And the rest of the report is still there -- the point of the guard.
+  await expect(page.getByTestId("admin-memory-status-list")).toContainText("active");
+});
+
 test("the report renders counts, rates and the per-pair breakdown", async ({
   page,
 }) => {

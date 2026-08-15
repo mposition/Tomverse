@@ -39,6 +39,7 @@ UI-012에서 승인된 정책(B안)입니다. accent 색은 **hue가 아니라 �
 | Max plan | `accent-plan-max-*` | purple |
 | Promotion | `accent-promotion-*` | emerald |
 | Account identity | `accent-account-*` | teal |
+| Account memory 제어 | `accent-account-memory-*` | teal |
 | 성공·검증 상태 | `status-success-*` | emerald |
 
 ## 규칙
@@ -63,6 +64,81 @@ UI-012에서 승인된 정책(B안)입니다. accent 색은 **hue가 아니라 �
    않습니다.
 
 예외가 필요하면 이 문서에 근거를 적고 나서 추가합니다.
+
+# 다음 작업 고를 때 — 열린 이슈를 그대로 믿지 않습니다
+
+이슈가 **열려 있다**는 것과 **아직 안 됐다**는 것은 다른 사실입니다. 이 저장소는
+수정을 먼저 넣고 이슈를 나중에 닫으므로, 열린 목록을 그대로 후보로 쓰면 이미
+끝난 일을 다시 제안하게 됩니다. 2026-08-12에 열린 이슈 6건이 전부 이미
+해결된 상태였습니다.
+
+작업 후보를 고르기 전에 실행합니다.
+
+```
+npm run report:issue-backlog -- --issues-file <열린 이슈 JSON>
+```
+
+`GITHUB_TOKEN`이 있으면 `--issues-file` 없이 API에서 직접 읽습니다.
+
+- 판정 근거는 `scripts/report-issue-backlog-core.mjs`에 있습니다. 세 신호를
+  각각 따로 보고하며 하나의 boolean으로 합치지 않습니다 — `pricing`(profile
+  존재 + pending register 이탈), `probe`(이슈별 손으로 쓴 완료 조건),
+  `commits`(이슈 번호를 언급한 commit, 셋 중 가장 약한 신호).
+- **내용 검사는 release branch마다 따로** 합니다. `develop`과 `main`의 간격은
+  이슈마다 다르게 걸치므로, 한쪽만 읽고 "고쳐졌다"고 답하면 반대쪽에 대해
+  틀립니다.
+- 착수해도 되는 것은 `candidates`(= `open_work`)뿐입니다.
+  `landed_but_unverified`는 사람이 확인할 대상이지 시작할 작업이 아닙니다.
+- 새 이슈의 완료 조건이 generic 신호에 안 잡히면 `ISSUE_PROBES`에 추가합니다.
+  증명하지 못하는 부분은 `remainder`에 적습니다 — 그래야 부분 완료가 완료로
+  보고되지 않습니다.
+- 이 script는 보고 전용이라 gate가 아닙니다. 단 하나의 비정상 종료는
+  `lib/modelPricing.ts` 해석이 실제 module과 어긋날 때이며, 그때는 출력 전체를
+  믿을 수 없다는 뜻입니다.
+
+# 릴리스 게이트에서 일감을 고를 때
+
+`docs/release-gates/tomverse-chat-v1.yaml`의 40개 게이트가 전부 `status: pending`
+입니다. **이는 정상이며 고칠 대상이 아닙니다** — registry는 `metadata.status:
+draft`이고 `governance.implementationStatus: planned`이며, 검증기는 `--release`
+에서만 승인과 증거를 강제합니다(PR Fast Gate는 `--release` 없이 실행).
+
+다만 draft 상태에서는 "pending"이라는 한 단어가 서로 다른 세 상황을 덮습니다.
+구분해서 보려면 실행합니다.
+
+```
+npm run report:release-gate-evidence
+npm run report:release-gate-evidence -- --condition memory-release-b-enabled=false
+```
+
+- 판정 근거는 `scripts/report-release-gate-evidence-core.mjs`의 `GATE_EVIDENCE`
+  이며 **손으로 쓴 매핑**입니다. 게이트의 `evidence` 문구에서 파일을 추측하지
+  않습니다 — 아무도 안 본 게이트에 대해 확신을 지어내는 것이 이 도구가 막으려는
+  실패입니다. 매핑 없는 게이트는 `unmapped`으로 보고합니다.
+- **`evidence_present`는 통과가 아닙니다.** 게이트가 이름 댄 산출물이 트리에
+  있다는 뜻일 뿐이고, 대부분의 기준은 이 저장소에 없는 production·부하 데이터
+  위에서 정의됩니다. 임계값 판단은 사람이 합니다.
+- **이 도구는 registry에 쓰지 않습니다.** status 전환도 `evidenceRefs` 채우기도
+  하지 않습니다. 승인은 registry에 기록되는 사람의 행위이고, 보고서가 자기
+  대상을 편집하면 registry가 존재하는 이유인 감사 기록이 사라집니다.
+- **`appliesWhen`은 저장소 사실이 아니라 런타임 조건입니다.** MEMORY 4건은
+  `AppSetting`의 `feature.memoryExtractionEnabled`·`feature.memoryInjectionEnabled`
+  에 달려 있으므로, 조건을 주지 않으면 `applicability_unknown`으로 남깁니다.
+  꺼져 있다고 가정하면 blocking 프라이버시·안전 게이트 4건을 조용히 면제하게
+  됩니다.
+- 착수 후보는 `nothing built yet`입니다. `built, nothing measures it`은 보통
+  기능이 아니라 테스트나 리포트 한 건입니다.
+
+`nothing built yet` 11건 중 **BILLING-04만 다른 작업에 막혀 있지 않습니다.**
+Planner·context manifest·moderation은 선행 작업 대기이고, store·native auth는 이
+저장소에서 만들 수 없습니다. BILLING-04에 착수하기 전에 읽습니다.
+
+- `docs/policy/goodwill-credit-grants.md`
+
+goodwill 지급은 Stripe 환불도 구매 취소도 아닌 **세 번째 것**이며, 대응 결제가
+없으므로 멱등성을 빌려올 수 없습니다. 설계 문서 §8의 여섯 가지(1회·기간 상한,
+이중 승인 임계값, 만료, 소진 순서, 환불 상호작용, 사용자 가시성)는 finance-ops의
+결정이며 **정해지기 전에는 구현하지 않습니다.**
 
 # Credit entitlement vs operational guardrail
 
@@ -110,6 +186,18 @@ UI-012에서 승인된 정책(B안)입니다. accent 색은 **hue가 아니라 �
   `publicChatErrorDetails()`가 제거하고, Admin Console과 구조화 로그에만
   남깁니다.
 - 모든 오류 응답의 `resetAt`은 생성 시점보다 미래여야 합니다.
+- **크레딧을 예약·환급하는 트랜잭션은 `lockCreditAccount(tx, userId)`를 가장
+  먼저 잡습니다**(정책 문서 §9). `reserveAddOnCredits()`는 읽어서 판정하고
+  차감하는데 `CreditLot.remainingCredits`에 CHECK도 사후 검사도 없어서, 잠금이
+  없으면 같은 잔액을 읽은 두 경로가 모두 통과해 잔액이 음수가 됩니다. 순서도
+  계약입니다 — workflow advisory 잠금(`memory-extraction:*` 등)보다 **앞**이며,
+  종료 여부 같은 조건 분기 **안**에서 잠그지 않습니다.
+- **`CreditLot`의 non-negative CHECK는 그 잠금의 대체물이 아닙니다.** CHECK는
+  직렬화를 못 하므로 잠금 없는 경로를 안전하게 만들지 못하고, 조용히 틀린
+  잔액을 실패한 트랜잭션으로 바꿀 뿐입니다. `NOT VALID`로 배포했으므로
+  validate는 `npm run report:credit-lot-invariants`가 0을 보고한 뒤 **별도
+  migration**으로 합니다 — production에서 손으로 validate하면 schema 비교가
+  drift로 잡습니다.
 - 이 계약을 어기는 변경은 릴리스 차단 사유입니다.
 
 # Chat concurrency and identity namespace
@@ -248,6 +336,52 @@ UI-012에서 승인된 정책(B안)입니다. accent 색은 **hue가 아니라 �
   echo가 아니라 실제 DB 저장값만 반환합니다. UI 계약은
   `docs/ui-contracts/account-model-settings.md`.
 
+# 공유 package와 framework 순수성
+
+`packages/**`, workspace 설정, `transpilePackages`, `eslint.config.mjs`의
+`no-restricted-imports` 규칙을 건드리기 전에 읽습니다.
+
+- `docs/policy/shared-packages.md`
+
+절대 조건:
+
+- **`packages/*`는 세 환경에서 그대로 돌아야 합니다** — Next.js 서버, 브라우저
+  번들, Capacitor shell. 한 곳에서만 해석되는 import 하나가 공유 package를
+  "디렉터리만 다른 app 코드"로 되돌립니다.
+- **금지 import**: `next`·`next/*`, `server-only`·`@/*`·`@prisma/client`·
+  `next-auth`, `node:*`와 bare Node builtin, `@capacitor/*`·`react-native`.
+  플랫폼 의존은 port로 주입합니다.
+- **package는 `dependencies`·`peerDependencies`를 선언하지 않습니다.**
+  dependency block은 어떤 소스 파일도 이름을 대지 않은 채 framework가 돌아오는
+  경로입니다. `"type": "module"`은 필수입니다.
+- **package tsconfig는 root를 `extends`하지 않습니다.** `lib`는 `["ES2022"]`,
+  `types`는 `[]`, `paths` 없음 — `window`·`process`·`Buffer`가 해석되지 않는
+  것이 요점입니다. ESLint는 금지된 *import*를, 이쪽은 금지된 *global*을
+  잡습니다.
+- **PACKAGE-01 지표는 ESLint 자체 API로 셉니다**
+  (`npm run check:shared-packages`). 별도 scanner를 만들어 두 숫자가 어긋나게
+  하지 않습니다.
+- **seed는 이동이지 재export shim이 아닙니다.** `lib/`에 shim을 남기면 예전
+  import 경로가 계속 동작하므로 경계를 강제하는 것이 아무것도 없습니다.
+- **PACKAGE-01은 `approved`입니다**(2026-08-12, `@mposition`). 증거는
+  `docs/release-gates/evidence/PACKAGE-01-2026-08-12.md`에 commit SHA와 CI run
+  링크로 남아 있고, 그 승인이 덮는 범위는 **존재하는 두 package가 한 commit에서
+  framework-neutral했다**는 것까지입니다 — `chat-ui`·`api-client`가 생기면
+  다시 읽습니다.
+- **artefact가 있다는 것과 승인 가능한 증거가 있다는 것은 다릅니다.** registry는
+  `evidenceRefs`에 immutable link 또는 artifact identifier를 요구합니다. script가
+  tree에 있다는 사실은 그 어느 것도 아닙니다.
+- **한 사람이 두 역할을 겸하는 것은 registry에 기록된 허용입니다**
+  (`approvalPolicy.soleApproverAllowed`). 1인 조직에서 "서로 다른 두 사람"
+  규칙은 엄격한 것이 아니라 충족 불가능하며, 모든 blocking gate가 영원히
+  승인 불가가 됩니다. 남은 분리는 **증거를 만든 주체(대개 자동화)와 승인자가
+  다르다**는 것이고, 승인자는 사람이어야 합니다. 두 번째 담당자가 생기면
+  `soleApproverAllowed`를 `false`로 되돌리는 한 줄이면 됩니다 — validator가
+  그 field를 읽습니다.
+- 승인 없이 `status`·`approvedBy`·`approvedAt`·`evidenceRefs`를 건드리지
+  않습니다.
+- 표준 `tsc` project를 build matrix라고 부르지 않습니다. bundler가 아닙니다.
+
 <!-- BEGIN:mobile-chat-composer-invariant -->
 # 이미지 생성 (v2: 멀티 모델 비교)
 
@@ -383,7 +517,7 @@ Non-negotiable requirements:
 <!-- BEGIN:typography-invariant -->
 ## Typography and font system invariant
 
-Before changing `lib/fonts.ts`, the font tokens or `@utility type-*` roles in `app/globals.css`, `app/layout.tsx`'s font wiring, or `lib/emailTypography.ts`, read:
+Before changing `lib/fonts.ts`, the font tokens or `@utility type-*` roles in `app/globals.css`, `components/DocumentShell.tsx`'s font wiring, or `lib/emailTypography.ts`, read:
 
 - `docs/ui-contracts/typography.md`
 
@@ -440,3 +574,38 @@ Non-negotiable requirements:
 - Any related change must keep `tests/settingsNavigation.test.mjs` and `tests/e2e/settings-information-architecture.spec.ts` passing on the desktop *and* mobile projects.
 - A change that violates this contract is a release blocker.
 <!-- END:settings-navigation-invariant -->
+<!-- BEGIN:admin-console-ia-invariant -->
+## Admin Console information architecture invariant
+
+Before changing `lib/adminNavigation.ts`, `components/admin/adminNavigationIcons.ts`, `lib/adminNavigationBadges.ts`, `components/admin/AdminConsoleShell.tsx`, `AdminSidebar.tsx`, `AdminCommandPalette.tsx`, `AdminPageTabs.tsx`, or any route under `app/(site)/(application)/admin/**`, read:
+
+- `docs/ui-contracts/admin-console-ia.md`
+
+Non-negotiable requirements:
+
+- **Every retired `/admin/*` URL keeps a redirect.** Bookmarks, runbooks and `href`s already written into audit summaries point at them, so deleting a route without leaving one behind is a release blocker. A redirect carries the request's own query to the destination but never its own stale `tab`.
+- A section lives in `?tab=`, not in component state. Tabs are `<Link>`s, the page's server component reads `searchParams`, and only the open section's data is loaded.
+- Adding an entry means adding it in three places at once: the route table in `lib/adminNavigation.ts`, an icon in `adminNavigationIcons.ts`, and a real route segment. There is no catch-all `[section]` route — an unknown admin URL must answer 404, not 200.
+- A badge is for work, not decoration: only entries an operator acts on carry one, and an unknown count renders nothing rather than zero.
+- The layout loads counts; a page loads its own data. Nothing that only one workspace displays may move into `admin/layout.tsx`. A panel showing the newest N rows states N on screen and does not present its own counters as totals.
+- Authorization is out of this contract's scope and was not changed by it: `writeRoles` in the route table drives the sidebar's "Read" marker only, and access is still decided server-side by `lib/adminAuth.ts` and each `/api/admin/**` handler.
+- Any related change must keep `tests/adminNavigation.test.mjs` and the `tests/e2e-admin/**` suite (`npm run test:e2e:admin`, the "Admin Console E2E (PostgreSQL)" workflow) passing.
+- A change that violates the redirect rule is a release blocker; the rest is ordinary review.
+<!-- END:admin-console-ia-invariant -->
+<!-- BEGIN:auto-model-selection-invariant -->
+## Auto model selection invariant
+
+Before changing `components/chat/AutoRoutingToggle.tsx`, `components/chat/AutoRoutedByBadge.tsx`, `lib/autoRoutingUi.ts`, `lib/autoRoutingCopy.ts`, or the `selectionMode` handling in `app/api/conversations/[conversationId]/route.ts`, read:
+
+- `docs/ui-contracts/auto-model-selection.md`
+
+Non-negotiable requirements:
+
+- **`offered` is the only input.** It already folds the feature flag together with cohort eligibility, so no surface may derive availability from the flag alone. There is no disabled state and no greyed row: a control that flips, saves and changes nothing cannot be told apart from Auto agreeing with the user every time.
+- No user-facing string may name a bucket, a percentage, a cohort salt or a readiness gate. A client that could read its own bucket could work out the rollout percentage.
+- No locale may promise a better, best, optimal or smartest model. `ROUTE-01` measures non-inferiority, which is a far weaker claim than that copy would be making, and `tests/autoRoutingUi.test.mjs` fails the build on the words.
+- The badge renders only on a turn Auto actually routed. A turn that fell back to the user's own model gets none, or it claims a routing decision that did not happen.
+- Returning a conversation to `manual` is accepted unconditionally, including when Auto is no longer offered — it is how a conversation leaves a mode the account can no longer act on, and how Auto's sticky state is cleared.
+- Auto never appears as a row in the model catalogue: it has no context window, price or provider, and the credit estimate would have nothing to show for it.
+- A change that violates this contract is a release blocker.
+<!-- END:auto-model-selection-invariant -->

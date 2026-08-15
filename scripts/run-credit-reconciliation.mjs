@@ -33,7 +33,16 @@ try {
     signal: controller.signal,
   });
   const result = await response.json().catch(() => null);
-  if (!response.ok) {
+  // A 503 the route marked retryable means the database dropped the
+  // connection under an idempotent sweep that runs again in fifteen minutes.
+  // Exiting non-zero on that turns a deferral into a crashed deployment, which
+  // says the job is broken when nothing is. The route has already reported it.
+  if (response.status === 503 && result?.retryable) {
+    console.warn(
+      "Credit reservation reconciliation deferred; the next scheduled run will retry:",
+      result.code || "unknown"
+    );
+  } else if (!response.ok) {
     console.error("Credit reconciliation request failed:", response.status, result);
     process.exitCode = 1;
   } else {

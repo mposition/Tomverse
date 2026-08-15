@@ -124,6 +124,11 @@ analytics, 구조화 로그, Sentry, server cache 어디에도 저장하지 않�
   row를 덮어쓸 수 없다.
 - Feedback 연결은 token payload의 `occurrenceId`로만 한다. `traceId`로
   첫/최신 row를 고르는 loose lookup은 authoritative가 아니다.
+- **answer attribution은 이 연결과 별개 축이다.** 메모리 정책 §22가 요구하는
+  "이 피드백이 어느 답변에 대한 것인가"는 Trace로 유도하지 않는다. `traceId`로
+  답변을 찾거나 `occurrenceId`를 답변 ID로 재사용하지 않고, 소유권을 서버가
+  재검증한 별도 nullable FK로 관리한다. 둘은 겹치는 경우가 있어도 같은 사실이
+  아니다 — Trace는 오류 occurrence를, answer link는 품질 신호의 대상을 가리킨다.
 
 저장 allowlist: occurrence 시각, environment, release, routeClass, phase,
 errorCode, classificationSource, httpStatus, provider, modelId, retryable,

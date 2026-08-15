@@ -1,6 +1,13 @@
 import "server-only";
 
 import { APP_DEFAULTS, guestDefaultLeadRejection } from "@/lib/appDefaults";
+import {
+  ASSISTANT_KNOWLEDGE_FLAG_KEY,
+  ASSISTANT_PROFILES_FLAG_KEY,
+  assistantKnowledgeEnabledFromValue,
+  assistantKnowledgeUsable,
+  assistantProfilesEnabledFromValue,
+} from "@/lib/assistantProfileAccess";
 import { isE2EDatabaseDisabled } from "@/lib/e2eTestMode";
 import {
   EXTERNAL_IMPORT_FLAG_KEY,
@@ -17,6 +24,9 @@ import {
   memoryExtractionEnabledFromValue,
   memoryInjectionEnabledFromValue,
   parseRevokedPairs,
+  revokedPairsRequestProblems,
+  serializeRevokedPairs,
+  type RevokedPairsRequest,
   type RevokedPairsState,
 } from "@/lib/memoryAccess";
 import {
@@ -293,6 +303,75 @@ export async function assertMemoryExtractionEnabled() {
   }
 }
 
+// Release C rollout flags (import/memory policy §15): the same default-off
+// opt-in shape. Knowledge is gated on profiles as well as on itself --
+// `assistantKnowledgeUsable()` says why.
+export async function isAssistantProfilesEnabled(): Promise<boolean> {
+  if (e2eDatabaseDisabled()) return false;
+  const row = await prisma.appSetting.findUnique({
+    where: { key: ASSISTANT_PROFILES_FLAG_KEY },
+    select: { value: true },
+  });
+  return assistantProfilesEnabledFromValue(row?.value);
+}
+
+export async function isAssistantKnowledgeEnabled(): Promise<boolean> {
+  if (e2eDatabaseDisabled()) return false;
+  const [profiles, knowledge] = await Promise.all([
+    isAssistantProfilesEnabled(),
+    prisma.appSetting
+      .findUnique({
+        where: { key: ASSISTANT_KNOWLEDGE_FLAG_KEY },
+        select: { value: true },
+      })
+      .then((row) => assistantKnowledgeEnabledFromValue(row?.value)),
+  ]);
+  return assistantKnowledgeUsable({
+    profilesEnabled: profiles,
+    knowledgeEnabled: knowledge,
+  });
+}
+
+// The admin write paths, mirroring setExternalImportEnabled. Unlike the two
+// Release B flags, these are ordinary rollout switches: §15 gates them on an
+// activation order, not on the §12.4 human eval procedure, so there is nothing
+// a screen could skip past. Separate setters rather than one, because §15
+// enables them separately and in order.
+export async function setAssistantProfilesEnabled(enabled: boolean) {
+  await prisma.appSetting.upsert({
+    where: { key: ASSISTANT_PROFILES_FLAG_KEY },
+    update: { value: enabled ? "true" : "false" },
+    create: {
+      key: ASSISTANT_PROFILES_FLAG_KEY,
+      value: enabled ? "true" : "false",
+    },
+  });
+}
+
+export async function setAssistantKnowledgeEnabled(enabled: boolean) {
+  await prisma.appSetting.upsert({
+    where: { key: ASSISTANT_KNOWLEDGE_FLAG_KEY },
+    update: { value: enabled ? "true" : "false" },
+    create: {
+      key: ASSISTANT_KNOWLEDGE_FLAG_KEY,
+      value: enabled ? "true" : "false",
+    },
+  });
+}
+
+export class AssistantProfilesDisabledError extends Error {
+  constructor() {
+    super("Assistant profiles are not enabled.");
+    this.name = "AssistantProfilesDisabledError";
+  }
+}
+
+export async function assertAssistantProfilesEnabled() {
+  if (!(await isAssistantProfilesEnabled())) {
+    throw new AssistantProfilesDisabledError();
+  }
+}
+
 /**
  * Operational pair revocation (§12.1): reads
  * AppSetting["memoryExtractionRevokedPairs"]. Malformed content reads as
@@ -306,6 +385,45 @@ export async function getMemoryExtractionRevokedPairs(): Promise<RevokedPairsSta
     select: { value: true },
   });
   return parseRevokedPairs(row?.value);
+}
+
+/**
+ * The §12.1 emergency revocation write path.
+ *
+ * The policy says this is changed "by an approved operator in the Admin
+ * Console, audit-logged, immediately fail-closed". Everything but the write
+ * existed: the read, the parser and the extraction-side check were all
+ * wired, and the only way to actually revoke a pair was a hand-typed
+ * `UPDATE` against production -- with no permission check, no audit record,
+ * and a format where one typo silently means "revoke everything" rather than
+ * "revoke this pair".
+ *
+ * The stored value is re-parsed and returned rather than echoed, so the
+ * caller sees the state the next extraction will read rather than the state
+ * it asked for. `serializeRevokedPairs` and `parseRevokedPairs` round-trip,
+ * so those agree -- and the day they do not, this is where it shows.
+ */
+export async function setMemoryExtractionRevokedPairs(
+  request: RevokedPairsRequest
+): Promise<RevokedPairsState> {
+  const problems = revokedPairsRequestProblems(request);
+  if (problems.length > 0) {
+    throw new MemoryRevocationRequestError(problems);
+  }
+  const value = serializeRevokedPairs(request);
+  await prisma.appSetting.upsert({
+    where: { key: MEMORY_EXTRACTION_REVOKED_PAIRS_KEY },
+    update: { value },
+    create: { key: MEMORY_EXTRACTION_REVOKED_PAIRS_KEY, value },
+  });
+  return parseRevokedPairs(value);
+}
+
+export class MemoryRevocationRequestError extends Error {
+  constructor(public readonly problems: string[]) {
+    super("The revocation request cannot be stored as written.");
+    this.name = "MemoryRevocationRequestError";
+  }
 }
 
 export class OperationalFeatureDisabledError extends Error {

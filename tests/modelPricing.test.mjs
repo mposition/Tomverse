@@ -239,7 +239,9 @@ test("new catalogue models use their exact provider prices and output caps", () 
     "grok-4-5": [2, 6, 16_384],
     "mistral-medium-3-1": [1.5, 7.5, 16_384],
     "claude-fable-5": [10, 50, 128_000],
-    "kimi-k3": [3, 15, 1_048_576],
+    // 131,072 is the documented request default; the 1,048,576 ceiling is a
+    // capability and is carried separately as providerMaxOutputTokens.
+    "kimi-k3": [3, 15, 131_072],
     "minimax-m3": [0.3, 1.2, 524_288],
   };
 
@@ -404,6 +406,39 @@ test("an unknown model falls back conservatively and is reported, not hidden", (
   const reported = findUnpricedModels([{ ...unknown, enabled: true }]);
   assert.equal(reported.length, 1);
   assert.equal(reported[0].severity, "error");
+});
+
+// Half a price is not a price. `resolveModelPricing` falls back per side, so a
+// row carrying only an input price bills its output on the conservative class
+// fallback -- and output is the expensive half. The check used to require both
+// ends to be missing before it said anything, so this row read as priced.
+test("a premium model priced on only one side is still unpriced", () => {
+  const half = {
+    id: "half-priced-premium-model",
+    usageClass: "premium",
+    provider: "openai",
+    apiModel: "half-priced-premium-model",
+    enabled: true,
+  };
+
+  const inputOnly = { ...half, inputUsdPerMillionTokens: 1.25 };
+  assert.equal(
+    resolveModelPricing(inputOnly).outputUsdPerMillionTokens,
+    60,
+    "the unspecified side should come from the fallback, which is the problem"
+  );
+  assert.equal(findUnpricedModels([inputOnly])[0]?.severity, "error");
+
+  const outputOnly = { ...half, outputUsdPerMillionTokens: 10 };
+  assert.equal(findUnpricedModels([outputOnly])[0]?.severity, "error");
+
+  // Both ends together is what "priced" means.
+  assert.deepEqual(
+    findUnpricedModels([
+      { ...half, inputUsdPerMillionTokens: 1.25, outputUsdPerMillionTokens: 10 },
+    ]),
+    []
+  );
 });
 
 test("no enabled premium model is silently unpriced", () => {

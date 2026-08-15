@@ -52,6 +52,17 @@ const testEnvironment = {
   DIRECT_DATABASE_URL: rawTestDatabaseUrl,
   NEXTAUTH_SECRET:
     process.env.NEXTAUTH_SECRET || "tomverse-db-integration-test-secret-2026",
+  // The manifest digests have their own keyring rather than the session
+  // secret, and lib/routingDispatchInstrumentation.ts refuses to digest
+  // without one. Supplied here beside NEXTAUTH_SECRET because it is the same
+  // kind of thing -- a secret the application needs to function at all -- and
+  // because a suite that had to remember it would be a suite that eventually
+  // forgot and reported the refusal as a product failure.
+  MANIFEST_HASH_KEYS:
+    process.env.MANIFEST_HASH_KEYS ||
+    "db-integration-test:tomverse-db-integration-manifest-key-2026",
+  MANIFEST_HASH_ACTIVE_KEY_ID:
+    process.env.MANIFEST_HASH_ACTIVE_KEY_ID || "db-integration-test",
   CHAT_USER_CONCURRENT: "50",
   CHAT_USER_PER_MINUTE: "500",
   CHAT_IP_PER_MINUTE: "500",
@@ -144,6 +155,8 @@ run(
     "tests/integration/chat-concurrency.db.test.ts",
     "tests/integration/chat-rate-limit.db.test.ts",
     "tests/integration/fallback-pricing-metrics.db.test.ts",
+    "tests/integration/chat-attempt-usage.db.test.ts",
+    "tests/integration/routing-attempt-sweep.db.test.ts",
     "tests/integration/model-registry.db.test.ts",
     "tests/integration/admin-security.db.test.ts",
     "tests/integration/admin-users.db.test.ts",
@@ -153,6 +166,7 @@ run(
     "tests/integration/conversation-lock-migration.db.test.ts",
     "tests/integration/provider-recovery.db.test.ts",
     "tests/integration/provider-failure-scope.db.test.ts",
+    "tests/integration/provider-probe.db.test.ts",
     "tests/integration/subscription-sync-ordering.db.test.ts",
     "tests/integration/plan-change-reservation.db.test.ts",
     "tests/integration/image-generation.db.test.ts",
@@ -169,15 +183,51 @@ run(
     "tests/integration/memory-extraction-provider-cost.db.test.ts",
     "tests/integration/memory-extraction-executor.db.test.ts",
     "tests/integration/memory-extraction-metrics.db.test.ts",
+    "tests/integration/memory-extraction-revocation.db.test.ts",
+    "tests/integration/retention-sweep.db.test.ts",
     "tests/integration/memory-review.db.test.ts",
     "tests/integration/memory-retrieval.db.test.ts",
     "tests/integration/memory-source-deletion.db.test.ts",
     "tests/integration/external-conversation-lock.db.test.ts",
     "tests/integration/memory-expiry.db.test.ts",
     "tests/integration/chat-context-bundle.db.test.ts",
+    "tests/integration/routing-shadow.db.test.ts",
     "tests/integration/memory-metrics.db.test.ts",
+    "tests/integration/conversation-memory-mode.db.test.ts",
+    "tests/integration/conversation-selection-mode.db.test.ts",
+    "tests/integration/context-manifest-retention.db.test.ts",
+    // The only unauthenticated route that serves a customer's transcript.
+    "tests/integration/public-share-route.db.test.ts",
+    // Release C1: what the database refuses about a profile version snapshot.
+    "tests/integration/assistant-profile-schema.db.test.ts",
+    "tests/integration/assistant-profile-service.db.test.ts",
+    // Release C2: the knowledge processing state machine, the DB-first
+    // deletion order, and that the GIN term index is actually queryable.
+    "tests/integration/assistant-knowledge-schema.db.test.ts",
+    "tests/integration/assistant-knowledge-pipeline.db.test.ts",
+    // Release C3c: which row the runtime reads for a profile-backed turn --
+    // Policy: docs/policy/external-conversation-import-and-memory.md.
+    // owner boundary, superseded revisions, and the §10 identity the bundle
+    // binds.
+    "tests/integration/chat-profile-context.db.test.ts",
+    // Release C4: §14's version pinning -- which rows the resolver reads, and
+    // what a conversation reports once the owner has published past it.
+    "tests/integration/conversation-profile-binding.db.test.ts",
+    // PRIVACY-01/02. These settle what a source scan cannot: that no withheld
+    // column reaches the export, that no identifier survives an account
+    // deletion, and that a download ticket is spent exactly once under
+    // concurrency.
+    "tests/integration/account-data-export.db.test.ts",
+    "tests/integration/account-data-export-ticket.db.test.ts",
+    "tests/integration/account-anonymisation.db.test.ts",
+    // §5's dispatch boundary: attempt-scoped manifests, and ROUTE-06.
+    "tests/integration/routing-attempt-manifest.db.test.ts",
+    "tests/integration/routing-dispatch-instrumentation.db.test.ts",
+    // Whether an account an administrator put out of bounds is refused by
+    // every paid AI path, not only by chat.
+    "tests/integration/account-operational-restriction.db.test.ts",
   ],
-  "Running financial, credit, chat-concurrency, chat-rate-limit, fallback-pricing, model-registry, admin-security, admin-users, login-methods, account-deletion, conversation-title, conversation-lock-migration, provider-recovery, provider-failure-scope, subscription-sync-ordering, plan-change-reservation, image-generation, external-import, and memory transaction scenarios"
+  "Running financial, credit, chat-concurrency, chat-rate-limit, fallback-pricing, model-registry, admin-security, admin-users, login-methods, account-deletion, account export and anonymisation, conversation-title, conversation-lock-migration, provider-recovery, provider-failure-scope, provider-probe, subscription-sync-ordering, plan-change-reservation, image-generation, external-import, and memory transaction scenarios"
 );
 // Runs apart from the batch above: it drives the real route handlers, which
 // needs mock.module (--experimental-test-module-mocks) to replace the session
@@ -225,6 +275,66 @@ run(
   ],
   "Running the administrator refund decision transaction and its outbox"
 );
+// Its own process for the same reason: it replaces next-auth, the Stripe
+// client and the webhook processor to drive the administrator replay route.
+run(
+  [
+    "--conditions=react-server",
+    "--experimental-test-module-mocks",
+    "--no-warnings=ExperimentalWarning",
+    "--import",
+    "tsx",
+    "--test",
+    "--test-concurrency=1",
+    "tests/integration/webhook-reprocess-route.db.test.ts",
+  ],
+  "Running the administrator Stripe webhook replay and its mode boundary"
+);
+// Its own process for the same reason: it replaces the Stripe client and the
+// webhook processor to drive the signed webhook endpoint.
+run(
+  [
+    "--conditions=react-server",
+    "--experimental-test-module-mocks",
+    "--no-warnings=ExperimentalWarning",
+    "--import",
+    "tsx",
+    "--test",
+    "--test-concurrency=1",
+    "tests/integration/stripe-webhook-route.db.test.ts",
+  ],
+  "Running the Stripe webhook endpoint's at-least-once delivery rules"
+);
+// Its own process for the same reason: it replaces the Stripe client and the
+// billing catalogue to capture what a confirmed upgrade sends.
+run(
+  [
+    "--conditions=react-server",
+    "--experimental-test-module-mocks",
+    "--no-warnings=ExperimentalWarning",
+    "--import",
+    "tsx",
+    "--test",
+    "--test-concurrency=1",
+    "tests/integration/plan-change-upgrade-request.db.test.ts",
+  ],
+  "Running the plan-change upgrade's Stripe request parameters"
+);
+// Its own process for the same reason: it replaces the readiness inputs, the
+// operational reporter and next/server's `after` to drive /api/ready.
+run(
+  [
+    "--conditions=react-server",
+    "--experimental-test-module-mocks",
+    "--no-warnings=ExperimentalWarning",
+    "--import",
+    "tsx",
+    "--test",
+    "--test-concurrency=1",
+    "tests/integration/readiness-route.db.test.ts",
+  ],
+  "Running the readiness endpoint's dependency conjunction"
+);
 // Its own process for the same reason as the refund decision suite: it wraps
 // the notification queue module to inject an enqueue failure, and it stubs the
 // session and admin-auth seams for the feedback routes.
@@ -255,4 +365,35 @@ run(
     "tests/integration/external-conversation-lock-route.db.test.ts",
   ],
   "Running the imported snapshot lock, unlock and attempt-limit scenarios"
+);
+// Its own process for the same reason: it replaces next-auth to read a
+// conversation back as its signed-in owner.
+run(
+  [
+    "--conditions=react-server",
+    "--experimental-test-module-mocks",
+    "--no-warnings=ExperimentalWarning",
+    "--import",
+    "tsx",
+    "--test",
+    "--test-concurrency=1",
+    "tests/integration/memory-usage-disclosure-route.db.test.ts",
+  ],
+  "Running the §13.4 memory disclosure read scenarios"
+);
+// Its own process again: it replaces both next-auth and the Auto readiness
+// register, and a module mock is process-global. The register mock is why it
+// cannot share a process with anything that reads the committed one.
+run(
+  [
+    "--conditions=react-server",
+    "--experimental-test-module-mocks",
+    "--no-warnings=ExperimentalWarning",
+    "--import",
+    "tsx",
+    "--test",
+    "--test-concurrency=1",
+    "tests/integration/conversation-auto-selection-route.db.test.ts",
+  ],
+  "Running the Auto selection-mode route scenarios"
 );

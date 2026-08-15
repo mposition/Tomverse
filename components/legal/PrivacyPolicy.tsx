@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { ArrowLeft, BarChart3, Database, FileUp, Scale, Send, ShieldCheck, Share2, UserRound } from "lucide-react";
+import { ArrowLeft, BarChart3, Bot, Database, FileUp, Scale, Send, ShieldCheck, Share2, UserRound } from "lucide-react";
 import { useLanguage } from "@/components/LanguageProvider";
 import {
     MarketingFooter,
@@ -15,6 +15,7 @@ const sections = [
     ["attachmentsTitle", "attachments", FileUp],
     ["externalImportTitle", "externalImport", FileUp],
     ["memoryTitle", "memory", Database],
+    ["assistantProfilesTitle", "assistantProfiles", Bot],
     ["analyticsTitle", "analytics", BarChart3],
     ["retentionTitle", "retention", Database],
     ["sharingTitle", "sharing", Share2],

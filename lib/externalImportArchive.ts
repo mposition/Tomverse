@@ -15,9 +15,12 @@ import {
  *   * media entries are skipped without inflating (a ChatGPT export is mostly
  *     images; the conversation JSON is a fraction of it, so gating on total
  *     archive size would reject exactly the heavy users who want this most);
- *   * traversal paths, nested archives, absolute paths and encrypted entries
- *     are refused rather than sanitized — the safe answer to "why does this
- *     export contain `../../etc/passwd`" is not to fix up the name;
+ *   * traversal paths, absolute paths and encrypted entries are refused rather
+ *     than sanitized — the safe answer to "why does this export contain
+ *     `../../etc/passwd`" is not to fix up the name;
+ *   * nested archives are never unpacked, but they are skipped rather than
+ *     refused: a user who attached a `.zip` to a chat has one sitting in an
+ *     otherwise ordinary export, and refusing that entry refuses the export;
  *   * per-entry and cumulative inflate budgets bound what parsing can cost,
  *     including the compression ratio of what actually gets inflated.
  *
@@ -34,12 +37,12 @@ export type ArchiveSkipReason =
     | "media"
     | "unsupported_extension"
     | "metadata"
-    | "empty";
+    | "empty"
+    | "nested_archive";
 
 export type ArchiveRejectReason =
     | "path_traversal"
     | "absolute_path"
-    | "nested_archive"
     | "encrypted"
     | "entry_too_large"
     | "suspicious_compression_ratio";
@@ -66,6 +69,9 @@ const NESTED_ARCHIVE_EXTENSIONS = new Set([
 ]);
 
 const PARSEABLE_EXTENSIONS = new Set(["json", "jsonl"]);
+
+/** Not parsed, but recognisable enough to explain what went wrong (§6). */
+const HTML_EXTENSIONS = new Set(["html", "htm"]);
 
 /** Conversation payload filenames, by provider export layout. */
 const CONVERSATION_FILENAMES = new Set([
@@ -112,8 +118,13 @@ export function classifyArchiveEntry(
 
     const extension = extensionOf(name);
     if (NESTED_ARCHIVE_EXTENSIONS.has(extension)) {
-        // §5.2: nested archives are not unpacked at any depth.
-        return { kind: "reject", reason: "nested_archive" };
+        // §5.2: extraction depth stays 0 -- a nested archive is never opened,
+        // enumerated or inspected. It is skipped rather than refused because a
+        // user attaching a .zip to a chat puts one in an otherwise ordinary
+        // export, and refusing the entry refuses the whole export with it.
+        // Counted under its own reason: folded into unsupported_extension, the
+        // preview could not say why an attachment is missing.
+        return { kind: "skip", reason: "nested_archive" };
     }
 
     // Media is skipped before any size check: it is never inflated, so its
@@ -171,6 +182,7 @@ export class ExternalImportArchiveError extends Error {
             | "archive_too_large"
             | "parsed_budget_exceeded"
             | "no_conversation_data"
+            | "html_export_unsupported"
     ) {
         super(message);
         this.name = "ExternalImportArchiveError";
@@ -211,6 +223,7 @@ export function planArchiveEntries(
             unsupported_extension: 0,
             metadata: 0,
             empty: 0,
+            nested_archive: 0,
         },
         skippedMediaBytes: 0,
     };
@@ -242,6 +255,18 @@ export function planArchiveEntries(
     }
 
     if (plan.parse.length === 0) {
+        // An export that holds HTML where the conversations should be is the
+        // one failure the user can fix themselves: Google Takeout offers JSON
+        // or HTML for My Activity, and only JSON is supported (A2 §6). Saying
+        // "unreadable" would send them to support for a re-export they could
+        // do in a minute. Detected by extension, never by a path segment --
+        // those are translated to the account's language (A2 §3.1).
+        if (entries.some((entry) => HTML_EXTENSIONS.has(extensionOf(entry.name)))) {
+            throw new ExternalImportArchiveError(
+                "The export contains HTML where the conversation data should be.",
+                "html_export_unsupported"
+            );
+        }
         throw new ExternalImportArchiveError(
             "The archive contains no conversation data.",
             "no_conversation_data"

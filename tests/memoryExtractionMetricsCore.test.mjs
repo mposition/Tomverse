@@ -226,3 +226,98 @@ test("the query layer selects no content column", () => {
         );
     }
 });
+
+// ---------------------------------------------------------------------------
+// Review outcomes (§22, §12.3). What humans did with what a pair proposed --
+// the input to the approval decision that currently keeps extraction closed.
+
+const item = (overrides = {}) => ({
+    extractionModelId: "gpt-5-6-luna",
+    promptVersion: "mem-extract-v1",
+    status: "active",
+    sensitivity: "standard",
+    userEdited: false,
+    ...overrides,
+});
+
+const review = (items) => summarize({ reviewItems: items }).review;
+
+test("the approval rate excludes proposals nobody has reviewed yet", () => {
+    // A rate that climbs while a queue of unreviewed candidates builds is
+    // measuring the user's attention, not the model's precision.
+    const summary = review([
+        item({ status: "active" }),
+        item({ status: "rejected" }),
+        item({ status: "candidate" }),
+        item({ status: "manual_review_required" }),
+    ]);
+    assert.equal(summary.proposed, 4);
+    assert.equal(summary.awaitingReview, 2);
+    assert.equal(summary.approvalRate, 0.5);
+});
+
+test("an item accepted long ago still counts as approved", () => {
+    // Superseded and expired were accepted once. Counting them as anything
+    // else makes a pair look worse the longer its output has been in use.
+    const summary = review([
+        item({ status: "superseded" }),
+        item({ status: "expired" }),
+        item({ status: "suspended_by_source_delete" }),
+    ]);
+    assert.equal(summary.approved, 3);
+    assert.equal(summary.rejected, 0);
+    assert.equal(summary.approvalRate, 1);
+});
+
+test("the edit rate is measured over approvals, not over proposals", () => {
+    // A pair whose output is always accepted but always rewritten is not the
+    // same as one accepted as-is, and an approval rate cannot tell them apart.
+    const summary = review([
+        item({ status: "active", userEdited: true }),
+        item({ status: "active", userEdited: false }),
+        item({ status: "rejected", userEdited: true }),
+        item({ status: "candidate", userEdited: true }),
+    ]);
+    assert.equal(summary.approved, 2);
+    assert.equal(summary.editRate, 0.5);
+});
+
+test("individual review and sensitivity are counted per pair", () => {
+    const summary = review([
+        item({ status: "manual_review_required", sensitivity: "sensitive" }),
+        item({ status: "active" }),
+    ]);
+    assert.equal(summary.byPair[0].individualReview, 1);
+    assert.equal(summary.byPair[0].sensitive, 1);
+});
+
+test("pairs are judged separately", () => {
+    const summary = review([
+        item({ extractionModelId: "gpt-5-6-luna", status: "active" }),
+        item({ extractionModelId: "gpt-5-4-mini", status: "rejected" }),
+    ]);
+    assert.equal(summary.byPair.length, 2);
+    const mini = summary.byPair.find(
+        (entry) => entry.extractionModelId === "gpt-5-4-mini"
+    );
+    assert.equal(mini.approvalRate, 0);
+    const luna = summary.byPair.find(
+        (entry) => entry.extractionModelId === "gpt-5-6-luna"
+    );
+    assert.equal(luna.approvalRate, 1);
+});
+
+test("a pair with nothing decided reports null rates", () => {
+    const summary = review([item({ status: "candidate" })]);
+    assert.equal(summary.approvalRate, null);
+    assert.equal(summary.editRate, null);
+    assert.equal(summary.byPair[0].approvalRate, null);
+    assert.equal(summary.byPair[0].editRate, null);
+});
+
+test("no review items reports zeroes and null rates", () => {
+    const summary = review([]);
+    assert.deepEqual(summary.byPair, []);
+    assert.equal(summary.proposed, 0);
+    assert.equal(summary.approvalRate, null);
+});

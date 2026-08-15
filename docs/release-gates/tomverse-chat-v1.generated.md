@@ -59,13 +59,13 @@ Canonical release-gate registry for Tomverse Chat v1. Human-readable tables must
 | `MEMORY-04` | Deleted or superseded memory is never reused | security-privacy | yes (when `memory-release-b-enabled`) | `deleted_or_superseded_memory_reuse_events` = 0 | pending |
 | `UI-01` | Tomverse Review behavior remains stable after headless extraction | web-ui | yes | `required_review_regression_e2e_pass_percent` = 100 | pending |
 | `UI-02` | Fallback status, cancellation, IME, streaming, and accessibility work end to end | web-ui | yes | `critical_chat_interaction_e2e_pass_percent` = 100 | pending |
-| `PACKAGE-01` | Shared chat packages remain framework-neutral | web-ui | yes | `forbidden_nextjs_imports_in_shared_packages` = 0 | pending |
+| `PACKAGE-01` | Shared chat packages remain framework-neutral | web-ui | yes | `forbidden_nextjs_imports_in_shared_packages` = 0 | approved |
 | `AUTH-01` | Sign in with Apple and identity lifecycle work end to end | mobile-release | yes | `apple_login_link_unlink_delete_revoke_e2e_pass_percent` = 100 | pending |
 | `AUTH-02` | Email OTP, magic link, and the isolated review code work through the mobile token path | backend-ai | yes | `email_otp_magic_link_lockout_turnstile_e2e_pass_percent` = 100; `submission_scoped_review_code_isolation_e2e_pass_percent` = 100 | pending |
 | `AUTH-03` | Mobile bearer-token lifecycle resists replay and supports revocation | backend-ai | yes | `refresh_rotation_reuse_logout_device_revoke_e2e_pass_percent` = 100 | pending |
 | `AUTH-04` | CORS bypass and deep-link hijacking attack tests pass | security-privacy | yes | `unresolved_high_or_critical_cors_or_deep_link_findings` = 0 | pending |
-| `PRIVACY-01` | Account deletion is complete inside the app | security-privacy | yes | `in_app_account_deletion_e2e_pass_percent` = 100 | pending |
-| `PRIVACY-02` | Account data export covers every registered Tomverse data domain | security-privacy | yes | `registered_data_domains_in_unified_export_percent` = 100 | pending |
+| `PRIVACY-01` | Account deletion is complete inside the app | security-privacy | yes | `in_app_account_deletion_e2e_pass_percent` = 100; `data_domains_with_unverified_deletion_action_count` = 0; `data_domains_with_planned_deletion_action_count` = 0; `identifier_sentinels_surviving_account_deletion_count` = 0 | pending |
+| `PRIVACY-02` | Account data export covers every registered Tomverse data domain | security-privacy | yes | `data_domains_with_undecided_export_state_count` = 0; `account_export_wiring_problem_count` = 0; `withheld_field_sentinels_present_in_export_count` = 0; `account_export_download_security_e2e_pass_percent` = 100; `concurrent_export_ticket_double_redemption_count` = 0 | pending |
 | `STORE-01` | A new Free account can complete a useful flow without purchase | mobile-release | yes | `purchase_free_signup_chat_response_and_history_save_e2e_pass_percent` = 100 | pending |
 | `STORE-02` | Review credentials remain usable throughout an active submission | mobile-release | yes | `daily_review_credential_synthetic_login_success_percent` = 100 | pending |
 | `MANIFEST-01` | Delta manifests cannot form unbounded reconstruction chains | backend-ai | yes | `context_manifest_delta_depth_max` <= 20 | pending |
@@ -75,11 +75,11 @@ Canonical release-gate registry for Tomverse Chat v1. Human-readable tables must
 ## Release-mode approval rules
 
 - Every applicable blocking gate must have status approved.
-- approvedBy must contain an accountable gate-owner approval and an independent-reviewer approval from different people.
+- approvedBy must contain an accountable gate-owner approval and an independent-reviewer approval. Whether those two roles may be held by the same subject is decided by soleApproverAllowed below.
 - approvedAt must be a non-null RFC 3339 timestamp.
 - evidenceRefs must contain immutable links or artifact identifiers.
 - not-applicable is allowed only when appliesWhen evaluates false and the decision has independent approval and an applicability evidence reference.
-- The independent reviewer must be a person who did not produce the referenced evidence. Co-implementers of a feature may approve as gate-owner but may not serve as the independent reviewer for gates whose evidence they produced.
+- The independent reviewer must be a person who did not produce the referenced evidence. Co-implementers of a feature may approve as gate-owner but may not serve as the independent reviewer for gates whose evidence they produced. Where soleApproverAllowed is true, "did not produce the evidence" is read against the actual author of the artefacts -- automation, in most cases -- rather than against the other human, of whom there is none.
 
 ## Gate detail
 
@@ -102,6 +102,8 @@ Criteria:
 Required evidence:
 
 - Versioned decision-grade evaluation report with fixed-model baseline, sample size, paired evaluation unit, confidence-interval method, seed, point estimate, and 95% confidence-interval bounds.
+- NOT the shadow report. Shadow records the model the Router would have chosen; it never generated that model's answer, so there is no pair to compare and no win rate to compute. A Router that echoed the user would agree with every shadow row and be worth nothing, and one that is right where the user was wrong appears there as disagreement. The shadow agreement rate measures how much would change if Auto were switched on -- the blast radius -- and nothing about whether the change would be an improvement. npm run report:routing-shadow prints that distinction beside its own numbers so the two cannot be read as one result.
+- Produced by npm run eval:router-quality -- --mode=decision, which makes real billed calls and emits the report above. npm run check:router-quality-eval validates a report before it may be cited: it refuses a pilot or judge-bias run, a run against the development set, a run that stopped at its cost ceiling, a second use of an already-used decision set, a baseline pre-registered after the run started, and a routable judge with no bias measurement. The procedure the harness implements is docs/ops/tomverse-chat-router-evaluation-set.md; a passing check means the report is citable, not that the gate is approved.
 
 Evidence references: none recorded
 
@@ -677,9 +679,9 @@ Evidence references: none recorded
 
 - Owner: web-ui
 - Blocking: yes
-- Status: pending
-- Approved by: not yet approved
-- Approved at: not yet approved
+- Status: approved
+- Approved by: @mposition (gate-owner), @mposition (independent-reviewer)
+- Approved at: 2026-08-12T23:21:58Z
 
 Why this gate exists: Framework-neutral packages are the mechanism that prevents Next.js and Capacitor clients from becoming duplicated products.
 
@@ -692,7 +694,7 @@ Required evidence:
 - ESLint no-restricted-imports report
 - Next.js and Vite build matrix
 
-Evidence references: none recorded
+Evidence references: `docs/release-gates/evidence/PACKAGE-01-2026-08-12.md`, `commit:b786a97db24b0177eddbc79efcb17df29205d03f`, `https://github.com/mposition/Tomverse/actions/runs/31604472342`, `https://github.com/mposition/Tomverse/actions/runs/31604472342/job/94139773729`, `https://github.com/mposition/Tomverse/actions/runs/31604472342/job/94139773711`
 
 ### Category: authentication
 
@@ -788,15 +790,21 @@ Evidence references: none recorded
 - Approved by: not yet approved
 - Approved at: not yet approved
 
-Why this gate exists: Users and store reviewers must be able to complete account deletion inside the app without an external support workflow.
+Why this gate exists: Users and store reviewers must be able to complete account deletion inside the app without an external support workflow, and every table holding their data needs a traced and implemented deletion path rather than a decided one.
 
 Criteria:
 
 - `in_app_account_deletion_e2e_pass_percent` = 100
+- `data_domains_with_unverified_deletion_action_count` = 0
+- `data_domains_with_planned_deletion_action_count` = 0
+- `identifier_sentinels_surviving_account_deletion_count` = 0
 
 Required evidence:
 
 - deletion E2E covering reauthentication, completion, and token revocation
+- two-axis data-domain registry passing scripts/check-data-domain-registry.mjs, with every anonymise row carrying a re-identification review and every retain row a legal basis, period, owner and review date
+- tests/integration/account-anonymisation.db.test.ts planting a sentinel in every column the registry says is anonymised, deleting the account for real, and asserting none survives
+- tests/accountDataAnonymisation.test.mjs pinning the implemented column list and replacements against the registry field for field, so neither side can drift
 
 Evidence references: none recorded
 
@@ -808,15 +816,23 @@ Evidence references: none recorded
 - Approved by: not yet approved
 - Approved at: not yet approved
 
-Why this gate exists: A versioned data-domain registry prevents new product tables from silently escaping the shared account export.
+Why this gate exists: A versioned data-domain registry prevents new product tables from silently escaping the shared account export, and the export tells the user what it withheld instead of presenting a projection as the whole answer.
 
 Criteria:
 
-- `registered_data_domains_in_unified_export_percent` = 100
+- `data_domains_with_undecided_export_state_count` = 0
+- `account_export_wiring_problem_count` = 0
+- `withheld_field_sentinels_present_in_export_count` = 0
+- `account_export_download_security_e2e_pass_percent` = 100
+- `concurrent_export_ticket_double_redemption_count` = 0
 
 Required evidence:
 
 - versioned data-domain registry and export coverage test
+- tests/integration/account-data-export.db.test.ts planting a sentinel in every withheld column and asserting none survives JSON.stringify of the export
+- export manifest recording schemaVersion, generatedAt, and the included, filtered, excluded, undecided and truncated domains with their reasons
+- tests/integration/account-data-export-ticket.db.test.ts covering single-use redemption under concurrency, refusal of a link presented by another account, expiry, and the ninety-day audit retention
+- tests/accountDataExportTicket.test.mjs pinning the keyed token hash, the no-store and no-referrer download headers, and the single refusal message shared by every refusal reason
 
 Evidence references: none recorded
 

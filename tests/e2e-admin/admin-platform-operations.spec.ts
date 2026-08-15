@@ -181,6 +181,41 @@ test.describe("platform operations", () => {
     );
   });
 
+  test("extraction can be stopped from the console, and says so afterwards", async ({
+    page,
+  }) => {
+    // Policy §12.1's emergency control. The failure it guards against is a
+    // misbehaving extraction pair that can only be stopped by a deploy or by
+    // hand-editing production -- so what matters is that a stop performed on
+    // screen is the row the extraction path reads a moment later.
+    await page.goto("/admin/analytics?tab=imports");
+    await expect(page.getByTestId("admin-memory-revocation-panel")).toBeVisible();
+
+    const stop = page.getByTestId("admin-memory-revocation-stop-all");
+    // A reason is required, so the action is unavailable until one is written.
+    await expect(stop).toBeDisabled();
+    await page
+      .getByLabel("Reason (recorded in the audit log)")
+      .fill("E2E: provider incident");
+    await expect(stop).toBeEnabled();
+    await stop.click();
+
+    await expect(page.getByTestId("admin-memory-revocation-state")).toHaveText(
+      /All extraction is stopped by an operator/
+    );
+    const stored = await adminFixtureDatabase().appSetting.findUniqueOrThrow({
+      where: { key: "memoryExtractionRevokedPairs" },
+    });
+    // Stored as the deliberate stop it is. Any other string would also revoke
+    // everything, but would read back afterwards as a corrupted setting.
+    expect(stored.value).toBe('["*"]');
+
+    await page.reload();
+    await expect(page.getByTestId("admin-memory-revocation-state")).toHaveText(
+      /All extraction is stopped by an operator/
+    );
+  });
+
   test("a failed alert delivery can be acknowledged", async ({ page }) => {
     await page.goto("/admin/alerts?tab=deliveries");
     const log = page

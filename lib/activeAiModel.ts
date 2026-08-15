@@ -5,7 +5,10 @@ import { createGoogle } from "@ai-sdk/google";
 import { createOpenAI } from "@ai-sdk/openai";
 import { createMoonshotAI } from "@ai-sdk/moonshotai";
 import type { AiModel } from "@/lib/models";
-import { PROVIDER_API_CONFIGURATION } from "@/lib/modelRegistryShared";
+import {
+  PROVIDER_API_CONFIGURATION,
+  resolveProviderApiKey,
+} from "@/lib/modelRegistryShared";
 import { deepseekUsageFetch } from "@/lib/deepseekUsageAdapter";
 import { perplexityUsageFetch } from "@/lib/perplexityUsageCapture";
 
@@ -16,7 +19,11 @@ const runtimeConfiguration = (model: AiModel) => {
     // DB-controlled URL or environment-variable name would turn a compromised
     // operator account into arbitrary server-secret exfiltration.
     baseURL: defaults.baseUrl,
-    apiKey: process.env[defaults.apiKeyEnvName],
+    // Resolved through the shared alias list rather than the canonical name
+    // alone: a provider whose key has more than one accepted spelling was
+    // otherwise reported as configured by one part of the product and called
+    // without a key by this one.
+    apiKey: resolveProviderApiKey(model.provider),
   };
 };
 

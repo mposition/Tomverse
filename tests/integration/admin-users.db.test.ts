@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { after, beforeEach, test } from "node:test";
-import { getAdminUsersPage, getFreshAdminUserStats } from "@/lib/adminUsers";
+import { getAdminUsersPage, getAdminUserStats } from "@/lib/adminUsers";
 import { getUserChatUsageKey } from "@/lib/chatSecurity";
 import { prisma } from "@/lib/prisma";
 
@@ -112,7 +112,7 @@ test("creditsToday reads the ChatUsageBucket row keyed to the user's own local-d
   assert.equal(row?.creditsToday, 7);
 });
 
-test("getFreshAdminUserStats counts total accounts and plan segments from real rows", async () => {
+test("getAdminUserStats counts total accounts and plan segments from real rows", async () => {
   await createUser("free", "UTC");
   const pro = await createUser("pro", "UTC");
   await prisma.user.update({
@@ -124,7 +124,7 @@ test("getFreshAdminUserStats counts total accounts and plan segments from real r
     },
   });
 
-  const stats = await getFreshAdminUserStats(
+  const stats = await getAdminUserStats(
     new Date("2026-07-19T20:00:00.000Z")
   );
   assert.equal(stats.totalAccounts, 2);

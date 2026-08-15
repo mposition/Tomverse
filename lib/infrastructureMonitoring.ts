@@ -11,6 +11,11 @@ import {
   type RailwayUsageMeasurement,
 } from "@/lib/infrastructureTypes";
 import { railwayUsageMonitorEnabled } from "@/lib/railwayUsageMonitorFlag";
+import {
+  RETENTION_SWEEP_GRACE_DAYS,
+  retentionCutoff,
+  retentionOverdueCutoff,
+} from "@/lib/retentionPolicyCore";
 
 const RAILWAY_GRAPHQL_URL = "https://backboard.railway.com/graphql/v2";
 const CLOUDFLARE_GRAPHQL_URL = "https://api.cloudflare.com/client/v4/graphql";
@@ -158,6 +163,15 @@ const externalErrorMessage = (payload: unknown) => {
 const readBoundedJson = async (response: Response) => {
   const declaredLength = headerNumber(response.headers.get("content-length"));
   if (declaredLength !== null && declaredLength > MAX_EXTERNAL_RESPONSE_BYTES) {
+    // Released before throwing, and cancelled rather than read: this branch
+    // fires *because* the body is over 1 MB, which is far past the point where
+    // an unread body pins its connection (measured between 16 KiB and 64 KiB
+    // on Node 22 / undici 6 -- see
+    // .github/audits/unconsumed-response-bodies-2026-08-13.md §8). Refusing a
+    // response for being too large while continuing to hold it open is the one
+    // shape this guard must not have. The streaming ceiling below already
+    // cancels; only this early exit did not.
+    await response.body?.cancel().catch(() => undefined);
     throw new Error("External API response exceeded the 1 MB safety limit.");
   }
   if (!response.body) return null;
@@ -796,21 +810,38 @@ const databaseSnapshot = async (): Promise<DatabaseInfrastructureSnapshot> => {
   try {
     const now = new Date();
     const dayAgo = new Date(now.getTime() - 86_400_000);
-    const errorCutoff = new Date(now.getTime() - 30 * 86_400_000);
-    const [activeSessions, conversations, messages, usageBuckets, providerErrors24h, providerErrorsPendingCleanup] =
-      await Promise.all([
+    // Both read from the published policy rather than restating its window.
+    // This probe used to carry its own `30 * 86_400_000`, so shortening the
+    // policy would have left the dashboard quietly counting to the old number.
+    const errorCutoff = retentionCutoff("providerErrors", now);
+    const errorOverdueCutoff = retentionOverdueCutoff("providerErrors", now);
+    const [
+      activeSessions,
+      conversations,
+      messages,
+      usageBuckets,
+      providerErrors24h,
+      providerErrorsPendingCleanup,
+      providerErrorsOverdueCleanup,
+    ] = await Promise.all([
         prisma.session.count({ where: { expires: { gt: now } } }),
         prisma.conversation.count(),
         prisma.message.count(),
         prisma.chatUsageBucket.count(),
         prisma.providerErrorEvent.count({ where: { createdAt: { gte: dayAgo } } }),
         prisma.providerErrorEvent.count({ where: { createdAt: { lt: errorCutoff } } }),
+        prisma.providerErrorEvent.count({
+          where: { createdAt: { lt: errorOverdueCutoff } },
+        }),
       ]);
+    // Rows past the cutoff are what the next sweep will take -- normal, and
+    // never zero for long on a daily cron. Only rows the sweep has already had
+    // two chances at say something is wrong, so only those set the status.
     return {
-      status: providerErrorsPendingCleanup > 0 ? "warning" : "healthy",
+      status: providerErrorsOverdueCleanup > 0 ? "warning" : "healthy",
       message:
-        providerErrorsPendingCleanup > 0
-          ? "Provider error events are waiting for retention cleanup."
+        providerErrorsOverdueCleanup > 0
+          ? `Provider error events are overdue for retention cleanup by more than ${RETENTION_SWEEP_GRACE_DAYS} days; check that the maintenance cron is running.`
           : "Database connectivity and operational counts are healthy.",
       activeSessions,
       conversations,
@@ -818,6 +849,7 @@ const databaseSnapshot = async (): Promise<DatabaseInfrastructureSnapshot> => {
       usageBuckets,
       providerErrors24h,
       providerErrorsPendingCleanup,
+      providerErrorsOverdueCleanup,
       checkedAt,
     };
   } catch (error) {
@@ -830,6 +862,7 @@ const databaseSnapshot = async (): Promise<DatabaseInfrastructureSnapshot> => {
       usageBuckets: 0,
       providerErrors24h: 0,
       providerErrorsPendingCleanup: 0,
+      providerErrorsOverdueCleanup: 0,
       checkedAt,
     };
   }

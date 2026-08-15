@@ -24,6 +24,7 @@ import {
   touchChatRequestLease,
 } from "@/lib/chatRequestLease";
 import {
+  assertUserOperationalAccess,
   ChatAccessError,
   getUserChatUsageKey,
   incrementUsageBucket,
@@ -32,7 +33,10 @@ import {
   usagePeriodStart,
 } from "@/lib/chatSecurity";
 import { estimatePromptTokens } from "@/lib/chatTokenEstimate";
-import { CONVERSATION_KIND_NOT_SUPPORTED } from "@/lib/conversationKindGuard";
+import {
+  CONVERSATION_KIND_NOT_SUPPORTED,
+  isImageConversationKind,
+} from "@/lib/conversationKindGuard";
 import { lockCreditAccount } from "@/lib/creditDebt";
 import {
   reserveAddOnCredits,
@@ -65,6 +69,7 @@ import {
   STALE_IMAGE_SETTLING_AFTER_MS,
   type ImageGenerationFailurePhase,
 } from "@/lib/imageGenerationStateCore";
+import { safeDailyResetAt } from "@/lib/chatLimitDecisionCore";
 import { resolveImageProviderBudget } from "@/lib/imageProviderBudget";
 import { reportOperationalIncident } from "@/lib/operationalMonitoring";
 import { prisma } from "@/lib/prisma";
@@ -281,6 +286,12 @@ export const requestImageGeneration = async (
     }
     throw error;
   }
+
+  // An account an administrator has suspended, restricted from AI usage, or
+  // scheduled for deletion is refused here for the same reason chat refuses it:
+  // "cannot use AI services" has to mean every AI service, and this one both
+  // calls a provider and charges credits.
+  await assertUserOperationalAccess(input.userId);
 
   const plan = await getUserBillingPlan(input.userId);
   if (!planAllowsFeature(plan, "imageGeneration")) {
@@ -506,7 +517,7 @@ export const requestImageGeneration = async (
             "Conversation not found."
           );
         }
-        if (conversation.kind !== "image") {
+        if (!isImageConversationKind(conversation.kind)) {
           throw new ChatAccessError(
             409,
             CONVERSATION_KIND_NOT_SUPPORTED,
@@ -584,7 +595,10 @@ export const requestImageGeneration = async (
             1,
             Math.ceil((dayWindow.end.getTime() - now.getTime()) / 1000)
           ),
-          { resetAt: futureIso(dayWindow.end, now) }
+          // Rolled forward whole days rather than clamped to a few seconds:
+          // this is a daily boundary, and a stale one (a stored time zone
+          // moved, a DST shift) resets a day later, not in a moment.
+          { resetAt: safeDailyResetAt(dayWindow.end, now).toISOString() }
         );
       }
 
@@ -1541,6 +1555,11 @@ export const retryImageGenerationTarget = async (
     }
     throw error;
   }
+
+  // A retry is a fresh attempt against the provider on a fresh reservation, so
+  // it is gated exactly like a first request rather than inheriting the
+  // permission the original request had.
+  await assertUserOperationalAccess(input.userId);
 
   const target = await prisma.imageGenerationTarget.findUnique({
     where: { id: input.targetId },

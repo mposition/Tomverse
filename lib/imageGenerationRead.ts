@@ -1,10 +1,16 @@
 import "server-only";
 
+import { serializeImageAssets } from "@/lib/imageAssetPayload";
+import {
+  deriveImageComposerRestore,
+  type ImageComposerRestore,
+} from "@/lib/imageComposerRestore";
 import {
   currentImageAttempt,
   deriveImageGroupStatus,
   type ImageGenerationStatus,
 } from "@/lib/imageGenerationStateCore";
+import { prisma } from "@/lib/prisma";
 import { createR2ReadUrl } from "@/lib/r2";
 
 // Shared read shape for image generation status responses. The by-id polling
@@ -75,17 +81,15 @@ export async function serializeImageGeneration(
   reservation: ImageGenerationReservationRow
 ) {
   // Assets are only minted for a succeeded generation: a failed original
-  // upload must not leak a partially-written object.
-  const assets =
-    generation.status === "succeeded"
-      ? await Promise.all(
-          generation.assets.map(async (asset) => ({
-            role: asset.role,
-            mimeType: asset.mimeType,
-            url: await createR2ReadUrl(asset.r2Key, IMAGE_ASSET_URL_TTL_SECONDS),
-          }))
-        )
-      : [];
+  // upload must not leak a partially-written object. The rule and the shape
+  // live in lib/imageAssetPayload.ts so they can be tested without a database
+  // or a bucket -- the thing being prevented is an edit that spreads the row
+  // and ships `r2Key` with it, which no test here would have caught.
+  const assets = await serializeImageAssets(
+    generation.status,
+    generation.assets,
+    (r2Key) => createR2ReadUrl(r2Key, IMAGE_ASSET_URL_TTL_SECONDS)
+  );
 
   return {
     generationId: generation.id,
@@ -202,4 +206,69 @@ export async function serializeImageGroup(
       )
     ),
   };
+}
+
+// ---------------------------------------------------------------------------
+// Composer restore (policy §11, UI contract "Composer state lifecycle").
+
+export const IMAGE_COMPOSER_RESTORE_SELECT = {
+  id: true,
+  targets: {
+    select: {
+      id: true,
+      modelId: true,
+      currentGenerationId: true,
+      generations: {
+        orderBy: { attemptNumber: "asc" },
+        select: {
+          id: true,
+          attemptNumber: true,
+          preset: true,
+          quality: true,
+          size: true,
+        },
+      },
+    },
+  },
+} as const;
+
+export type ImageComposerRestoreRow = {
+  id: string;
+  targets: Array<{
+    id: string;
+    modelId: string;
+    currentGenerationId: string | null;
+    generations: Array<{
+      id: string;
+      attemptNumber: number;
+      preset: string;
+      quality: string;
+      size: string;
+    }>;
+  }>;
+};
+
+/**
+ * The composer's starting state for an image conversation, read from its most
+ * recent comparison group.
+ *
+ * Ordered by the GROUP's createdAt, with the id as a tiebreak so two groups
+ * created in the same millisecond still order deterministically. Never by a
+ * generation's timestamp: retrying an older group's failed target writes the
+ * newest ImageGeneration row in the conversation, and reading that would drag
+ * the composer back to a comparison the user has moved past.
+ */
+export async function readImageComposerRestore(
+  conversationId: string
+): Promise<ImageComposerRestore | null> {
+  const group = await prisma.imageGenerationGroup.findFirst({
+    where: { conversationId },
+    orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+    select: IMAGE_COMPOSER_RESTORE_SELECT,
+  });
+  if (!group || group.targets.length === 0) return null;
+  return deriveImageComposerRestore({
+    groupId: group.id,
+    targets: group.targets,
+  });
 }

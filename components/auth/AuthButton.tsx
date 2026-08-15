@@ -1762,6 +1762,45 @@ export function AuthButton({
                                                     testId="memory-entry"
                                                     linkTestId="memory-entry-link"
                                                 />
+                                                {/* A profile is personalisation
+                                                    the account owns, so it is a
+                                                    row in this same group rather
+                                                    than a card beside it
+                                                    (settings-navigation contract
+                                                    §2). After memory because a
+                                                    profile may use approved
+                                                    memory and never the other
+                                                    way round. */}
+                                                <SettingsEntryRow
+                                                    section="assistants"
+                                                    href="/settings/assistants"
+                                                    icon={Bot}
+                                                    title={t("assistantProfiles.dataTabTitle")}
+                                                    description={t("assistantProfiles.dataTabDescription")}
+                                                    status={t("assistantProfiles.dataTabStatus")}
+                                                    actionLabel={t("assistantProfiles.dataTabOpen")}
+                                                    onNavigate={closeSettingsModal}
+                                                    testId="assistants-entry"
+                                                    linkTestId="assistants-entry-link"
+                                                />
+                                                {/* The unified export. The
+                                                    conversations-only download
+                                                    below is a different thing
+                                                    and keeps its own button:
+                                                    one is a readable archive of
+                                                    chats, this is everything the
+                                                    account holds. */}
+                                                <SettingsEntryRow
+                                                    section="account-data"
+                                                    href="/settings/data"
+                                                    icon={ShieldCheck}
+                                                    title={t("accountDataExport.dataTabTitle")}
+                                                    description={t("accountDataExport.dataTabDescription")}
+                                                    actionLabel={t("accountDataExport.dataTabOpen")}
+                                                    onNavigate={closeSettingsModal}
+                                                    testId="account-data-entry"
+                                                    linkTestId="account-data-entry-link"
+                                                />
                                             </div>
                                         </section>
                                         {listImportableGuestConversations().length > 0 && (

@@ -38,6 +38,7 @@ type RunRow = {
     chunkCompleted: number;
     createdAt: string;
     completedAt: string | null;
+    stalled?: boolean;
 };
 
 type RunState =
@@ -45,8 +46,16 @@ type RunState =
     | { kind: "ready"; run: RunRow; progress: RunProgress }
     | { kind: "missing" };
 
-const noteKey = (status: RunProgress["status"]) =>
-    `memoryExtraction.run${status.charAt(0).toUpperCase()}${status.slice(1)}Note`;
+/**
+ * A stalled run keeps its `running` status, so the note is chosen from the
+ * progress rather than from the status: "still working" is the one thing this
+ * screen must not say while nobody is working on it.
+ */
+const noteKey = (progress: RunProgress) => {
+    if (progress.stalled) return "memoryExtraction.runStalledNote";
+    const status = progress.status;
+    return `memoryExtraction.run${status.charAt(0).toUpperCase()}${status.slice(1)}Note`;
+};
 
 export function MemoryExtractionRunStatus({ runId }: { runId: string }) {
     const { t } = useLanguage();
@@ -171,8 +180,9 @@ export function MemoryExtractionRunStatus({ runId }: { runId: string }) {
                     <p
                         className="mt-3 text-sm text-zinc-600 dark:text-zinc-400"
                         data-testid="memory-extraction-run-note"
+                        data-stalled={state.progress.stalled ? "true" : "false"}
                     >
-                        {t(noteKey(state.progress.status))}
+                        {t(noteKey(state.progress))}
                     </p>
 
                     <dl className="mt-4 space-y-1 text-xs text-zinc-500 dark:text-zinc-400">

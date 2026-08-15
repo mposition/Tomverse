@@ -4,6 +4,7 @@ import {
     MEMORY_COUNTER_KINDS,
     MEMORY_METRICS_UNAVAILABLE,
     emptyMemoryCounters,
+    summarizeFollowupProxy,
     injectedTokenBucket,
     summarizeMemoryMetrics,
 } from "../lib/memoryMetricsCore.ts";
@@ -173,9 +174,13 @@ test("the summary always carries the unavailable list, even when empty", () => {
     assert.deepEqual(summarize().unavailable, MEMORY_METRICS_UNAVAILABLE);
 });
 
-test("a follow-up proxy still needs answers nothing has attributed yet", () => {
+test("only the follow-up proxy's feedback signal is still unmeasured", () => {
+    // Answers now carry their attribution, so the follow-up and regenerate
+    // halves are measured. What is still missing is narrower and says so:
+    // Feedback has no link to the answer a report is about.
     const declared = MEMORY_METRICS_UNAVAILABLE.map((entry) => entry.metric);
-    assert.ok(declared.includes("followup_repair_proxy"));
+    assert.ok(declared.includes("followup_repair_proxy_feedback_signal"));
+    assert.ok(!declared.includes("followup_repair_proxy"));
 });
 
 test("a metric that gained a source is no longer declared unavailable", () => {
@@ -185,6 +190,7 @@ test("a metric that gained a source is no longer declared unavailable", () => {
     // reader told nothing measures something that now does.
     const declared = MEMORY_METRICS_UNAVAILABLE.map((entry) => entry.metric);
     for (const metric of [
+        "followup_repair_proxy",
         "lock_suspension_restore",
         "credit_per_chunk_percentiles",
         "batch_subbudget_exhaustion",
@@ -375,4 +381,67 @@ test("a replay is counted beside the stale ratio, never inside it", () => {
 
 test("no bundle presented reports null rather than a clean stale rate", () => {
     assert.equal(withCounters({}).contextBundle.staleRatio, null);
+});
+
+/* ------------------------------------------------------- follow-up proxy -- */
+
+const arm = (name, overrides = {}) => ({
+    arm: name,
+    answers: 100,
+    followups: 10,
+    regenerates: 2,
+    ...overrides,
+});
+
+test("the proxy is a comparison, and says nothing on its own", () => {
+    // A bare follow-up rate is uninterpretable — people ask second questions
+    // because the first answer was good. Only the gap against answers memory
+    // did not shape carries anything, so the difference is computed here
+    // rather than left for a reader to eyeball.
+    const proxy = summarizeFollowupProxy([
+        arm("memory", { answers: 200, followups: 40, regenerates: 10 }),
+        arm("plain", { answers: 100, followups: 10, regenerates: 2 }),
+    ]);
+    assert.equal(proxy.memory.followupRate, 0.2);
+    assert.equal(proxy.plain.followupRate, 0.1);
+    assert.equal(proxy.followupDifference, 0.1);
+    assert.equal(proxy.regenerateDifference, 0.03);
+});
+
+test("a missing arm makes the difference null, never zero", () => {
+    // Zero would read as "no effect", which is a claim. The honest answer
+    // when one arm is empty is that the comparison was not made.
+    const noMemory = summarizeFollowupProxy([arm("plain")]);
+    assert.equal(noMemory.memory.answers, 0);
+    assert.equal(noMemory.memory.followupRate, null);
+    assert.equal(noMemory.followupDifference, null);
+    assert.equal(noMemory.regenerateDifference, null);
+
+    const empty = summarizeFollowupProxy([]);
+    assert.equal(empty.followupDifference, null);
+    assert.equal(empty.plain.followupRate, null);
+});
+
+test("a negative difference survives, because it is the interesting one", () => {
+    // Memory answers drawing *fewer* follow-ups is the outcome §12.4 hopes
+    // for; clamping or flipping the sign would hide it.
+    const proxy = summarizeFollowupProxy([
+        arm("memory", { answers: 100, followups: 5 }),
+        arm("plain", { answers: 100, followups: 20 }),
+    ]);
+    assert.equal(proxy.followupDifference, -0.15);
+});
+
+test("both arms are always present in the shape", () => {
+    // The dashboard renders a fixed layout; an arm that vanishes when nothing
+    // landed in it reads as a broken panel rather than an empty window.
+    const proxy = summarizeFollowupProxy([]);
+    assert.deepEqual(Object.keys(proxy.memory).sort(), [
+        "answers",
+        "followupRate",
+        "followups",
+        "regenerateRate",
+        "regenerates",
+    ]);
+    assert.deepEqual(Object.keys(proxy.plain), Object.keys(proxy.memory));
 });

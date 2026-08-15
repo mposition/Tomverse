@@ -52,8 +52,31 @@ type MemoryReport = {
             failureRate: number | null;
         }>;
     };
+    /**
+     * Optional because a reader must survive a report that does not carry it.
+     * This section arrived after the endpoint shipped, and reading it
+     * unconditionally turned a missing object into a TypeError during render —
+     * which the error boundary answers by replacing the entire Admin Console
+     * with "Something went wrong". A monitoring surface is what somebody opens
+     * when something is already wrong; it does not get to be the second thing
+     * that breaks.
+     */
+    followupProxy?: {
+        memory: FollowupArm;
+        plain: FollowupArm;
+        followupDifference: number | null;
+        regenerateDifference: number | null;
+    };
     counters: Record<string, number>;
     unavailable: Unavailable;
+};
+
+type FollowupArm = {
+    answers: number;
+    followups: number;
+    regenerates: number;
+    followupRate: number | null;
+    regenerateRate: number | null;
 };
 
 type ImportReport = {
@@ -276,6 +299,56 @@ export function AdminMemoryImportPanel() {
                             testId="admin-memory-counter-list"
                         />
                     </div>
+
+                    <section
+                        className="rounded-xl border border-zinc-800 p-4"
+                        data-testid="admin-memory-followup-proxy"
+                    >
+                        <h3 className="text-sm font-semibold text-zinc-200">
+                            Follow-up and regenerate proxy
+                        </h3>
+                        {/* §22 requires this to be labelled as a proxy where
+                            it is read, not only where it is computed. A
+                            follow-up is not a complaint — people ask second
+                            questions because the first answer was good. Only
+                            the difference between the arms carries a signal,
+                            and even that is indirect. */}
+                        <p className="mt-1 text-xs leading-5 text-zinc-500">
+                            A proxy, not a measurement of answer quality. A
+                            follow-up often means the answer was useful. Read
+                            the difference between the two arms, never either
+                            rate on its own, and never as a re-ask rate.
+                        </p>
+                        {memory.followupProxy ? (
+                            <div className="mt-3 grid gap-3 md:grid-cols-2">
+                                <Stat
+                                    label="Follow-up within 120s"
+                                    value={`${rate(memory.followupProxy.memory.followupRate)} vs ${rate(memory.followupProxy.plain.followupRate)}`}
+                                    detail={`memory-shaped (${memory.followupProxy.memory.answers}) vs other answers (${memory.followupProxy.plain.answers}) · difference ${rate(memory.followupProxy.followupDifference)}`}
+                                />
+                                <Stat
+                                    label="Regenerate within 120s"
+                                    value={`${rate(memory.followupProxy.memory.regenerateRate)} vs ${rate(memory.followupProxy.plain.regenerateRate)}`}
+                                    detail={`difference ${rate(memory.followupProxy.regenerateDifference)}`}
+                                />
+                            </div>
+                        ) : (
+                            /* Named as absent rather than drawn as zero — the
+                               same rule §22 states for every other metric this
+                               panel cannot supply. Two arms of "0% vs 0%" would
+                               read as a measured result showing no difference,
+                               which is the one conclusion the data does not
+                               support. */
+                            <p
+                                className="mt-3 text-xs leading-5 text-amber-300"
+                                data-testid="admin-memory-followup-proxy-unavailable"
+                            >
+                                Not measured — this report does not carry the
+                                follow-up proxy. Nothing is being claimed about
+                                either arm.
+                            </p>
+                        )}
+                    </section>
 
                     {memory.runs.byPair.length > 0 && (
                         <div className="overflow-x-auto rounded-xl border border-zinc-800">

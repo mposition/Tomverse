@@ -129,6 +129,7 @@ const budgetFor = (modelId: string, credits = 1): ChatBudget => ({
     usageCredits: credits,
     inputTokens: 100,
     maxOutputTokens: 900,
+    providerMaxOutputTokens: null,
     reservedOutputTokens: 900,
     inputUsdPerMillionTokens: 0,
     outputUsdPerMillionTokens: 0,

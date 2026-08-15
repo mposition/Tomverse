@@ -1,10 +1,27 @@
+/**
+ * Long enough for the extraction dispatch this route now ends with.
+ *
+ * That pass is bounded at `MEMORY_EXTRACTION_DISPATCH_BUDGET_MS` (120s) and
+ * may overrun by at most one chunk timeout (60s), because a chunk already
+ * claimed is always allowed to finish -- 180s for the dispatch, plus the
+ * reconciliation, queue drains and sweeps above it. Undeclared, the platform
+ * default decided this, and a truncated pass would abandon leases it had just
+ * claimed.
+ */
+export const maxDuration = 300;
+
 import { createHash, timingSafeEqual } from "node:crypto";
 import { after } from "next/server";
 import { reconcileExpiredChatCreditReservations } from "@/lib/chatSecurity";
+import {
+  databaseErrorMetadata,
+  isRetryableDatabaseError,
+} from "@/lib/databaseError";
 import { reconcileExpiredChatRequestLeases } from "@/lib/chatRequestLease";
 import { reconcileSourceLockedMemories } from "@/lib/externalConversationLockService";
 import { reconcileExpiredExternalImportStaging } from "@/lib/externalImportService";
 import { reconcileExpiredMemories } from "@/lib/memoryExpiryService";
+import { reconcileUnsettledExtractionProviderCalls } from "@/lib/memoryExtractionProviderCost";
 import { dispatchPendingMemoryExtractionRuns } from "@/lib/memoryExtractionWorker";
 import { reportOperationalIncident } from "@/lib/operationalMonitoring";
 import {
@@ -29,6 +46,34 @@ const isAuthorized = (request: Request) => {
   return timingSafeEqual(expectedDigest, providedDigest);
 };
 
+/**
+ * The reconciliation sweep, retried once when the database connection dropped
+ * under it.
+ *
+ * A managed Postgres restart severs in-flight connections, which Prisma
+ * surfaces as `08P01` / "server conn crashed?". The sweep is idempotent -- it
+ * moves expired reservations to a terminal state and counts the ones already
+ * there -- so a second attempt on a fresh connection is exactly what the next
+ * scheduled run would do fifteen minutes later, only sooner.
+ */
+const reconcileCreditReservationsWithRetry = async () => {
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      return await reconcileExpiredChatCreditReservations(new Date(), 1_000);
+    } catch (error) {
+      if (attempt > 0 || !isRetryableDatabaseError(error)) throw error;
+      console.warn(
+        JSON.stringify({
+          event: "credit_reservation_reconciliation_retry",
+          ...databaseErrorMetadata(error),
+          timestamp: new Date().toISOString(),
+        })
+      );
+      await new Promise((resolve) => setTimeout(resolve, 250));
+    }
+  }
+};
+
 export async function POST(request: Request) {
   if (!isAuthorized(request)) {
     return Response.json(
@@ -38,10 +83,7 @@ export async function POST(request: Request) {
   }
   const run = await startScheduledJob("credit_reservation_reconciliation");
   try {
-    const result = await reconcileExpiredChatCreditReservations(
-      new Date(),
-      1_000
-    );
+    const result = await reconcileCreditReservationsWithRetry();
     const infrastructureMonitor = await monitorInfrastructureThresholdsIfDue();
     // Rides along on the only fifteen-minute schedule this deployment already
     // has, so the operator-notification queue drains without a second cron
@@ -96,6 +138,26 @@ export async function POST(request: Request) {
         truncated: false,
       })
     );
+    // Extraction provider calls that went out and never settled (policy §3,
+    // §11 "idempotent settlement"). A worker killed between issuing a request
+    // and recording what it cost leaves the attempt open forever: its
+    // reservation still holds the operational budget, but nothing says the
+    // call finished, so the settled figure any later audit reads is missing a
+    // call that really happened. The sweep settles it at the reservation --
+    // "we know it happened and not what it cost" -- which is the conservative
+    // direction and the only honest one.
+    //
+    // Before the dispatcher rather than after: this is a DB-only sweep, and
+    // the dispatcher is the one step here that waits on a provider. It is also
+    // the sweep that finalises the dead attempts of the very runs the
+    // dispatcher is about to retry. Its cutoff is fifteen minutes against a
+    // sixty-second chunk timeout, so no live call is ever inside the window.
+    // Never throws, so it cannot turn a successful reconciliation into a
+    // failed one.
+    const memoryExtractionProviderCalls =
+      await reconcileUnsettledExtractionProviderCalls().catch(() => ({
+        settled: 0,
+      }));
     // Memory extraction recovery (policy §11.1), deliberately last.
     //
     // This is the *dispatcher*, not only the lease sweep: reclaiming an expired
@@ -126,6 +188,7 @@ export async function POST(request: Request) {
         requestLeases,
         imageAssets,
         externalImportStaging,
+        memoryExtractionProviderCalls,
         memoryExtractionDispatch,
         memoryExpiry,
         memorySourceLocks,
@@ -141,25 +204,51 @@ export async function POST(request: Request) {
         requestLeases,
         imageAssets,
         externalImportStaging,
+        memoryExtractionProviderCalls,
         memoryExtractionDispatch,
       },
       { headers: { "Cache-Control": "no-store" } }
     );
   } catch (error) {
     await failScheduledJob({ runId: run?.id, error });
+    // A dropped database connection that survived the retry above is a
+    // deferral, not a broken reconciliation: the sweep is idempotent and the
+    // next run is fifteen minutes away. It is reported -- so a database that
+    // stays unreachable is still loud -- but not as the fatal incident that
+    // says the reconciliation itself failed, and the caller is told to come
+    // back rather than being handed a 500 it will exit non-zero on.
+    const retryable = isRetryableDatabaseError(error);
     after(() =>
       reportOperationalIncident({
-        code: "CREDIT_RESERVATION_RECONCILIATION_FAILED",
-        title: "Credit reservation reconciliation failed",
+        code: retryable
+          ? "CREDIT_RESERVATION_RECONCILIATION_DEFERRED"
+          : "CREDIT_RESERVATION_RECONCILIATION_FAILED",
+        title: retryable
+          ? "Credit reservation reconciliation deferred by the database"
+          : "Credit reservation reconciliation failed",
         error,
-        severity: "fatal",
+        severity: retryable ? "error" : "fatal",
         cooldownMs: 15 * 60 * 1_000,
         context: {
           component: "maintenance-credit-reservations",
           route: "/api/internal/maintenance/credit-reservations",
+          ...(retryable ? databaseErrorMetadata(error) : {}),
         },
       })
     );
+    if (retryable) {
+      return Response.json(
+        {
+          error: "Credit reservation reconciliation is temporarily unavailable.",
+          code: "CREDIT_RESERVATION_RECONCILIATION_DEFERRED",
+          retryable: true,
+        },
+        {
+          status: 503,
+          headers: { "Cache-Control": "no-store", "Retry-After": "60" },
+        }
+      );
+    }
     return Response.json(
       { error: "Credit reservation reconciliation failed." },
       { status: 500, headers: { "Cache-Control": "no-store" } }

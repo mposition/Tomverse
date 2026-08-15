@@ -115,12 +115,89 @@ jobs:
         timeout-minutes: 5
         run: npm run test:server-contract
 
+      # The release checklist is the only place the whole gate is written down
+      # in one list, and it drifted: the repository grew to twelve CI-enforced
+      # checks while its §1 named five, so a release manager who followed the
+      # checklist had not run the gate. This keeps the two in step, in both
+      # directions.
+      - name: Release gate coverage
+        timeout-minutes: 5
+        run: npm run check:release-gate-coverage
+
+      # The @ui-risk tier blocks merges and is selected by a tag, so a spec
+      # joins it by being tagged and the document that records the tier does
+      # not notice. It had drifted to 25 tagged files against a table naming
+      # five, which is the wrong input to "should this be tagged too?".
+      - name: UI tier coverage
+        timeout-minutes: 5
+        run: npm run check:ui-tier-coverage
+
+      # AGENTS.md and the contracts under it are read as instructions that
+      # override default behaviour. A reference to a file that moved or was
+      # never built fails nothing -- it just sends someone to an empty path,
+      # and what they learn is that the instructions are unreliable.
+      - name: Instruction document references
+        timeout-minutes: 5
+        run: npm run check:doc-references
+
+      # The same argument one level down. `check:doc-references` proves a path
+      # resolves; this proves the section number beside it does. Release C
+      # shipped 105 citations of sections that never existed -- each one next
+      # to a path that was correct, which is exactly why the path check could
+      # not see them. Separate script, separate failure message: "the file
+      # moved" and "the section is not in it" are different repairs.
+      - name: Policy section references
+        timeout-minutes: 5
+        run: npm run check:policy-section-references
+
+      # The staging checklist holds items and never results, and a signed run
+      # record is not edited afterwards. The previous shape put an approval
+      # table inside the checklist, where it could not say which commit it
+      # covered -- and then did not, for eight days of surface changes.
+      - name: Staging verification records
+        timeout-minutes: 5
+        run: npm run check:staging-verification-records
+
       # UI-012: semantic accent colours must stay addressed by role inside the
       # guarded components. Cheap, no browser, so it sits with the other static
       # checks rather than in the browser tier.
       - name: Accent token usage
         timeout-minutes: 5
         run: npm run check:accent-tokens
+
+      # Every locale carries every key, so a missing translation never fails
+      # the build -- it ships the English sentence as the value. That is how the
+      # account-data-export UI reached five locales in English.
+      - name: Locale translation coverage
+        timeout-minutes: 5
+        run: npm run check:locale-translation
+
+      # Next.js sets no Cache-Control on a route handler response, and a
+      # response with none is heuristically cacheable by a shared cache. The
+      # proxy sets a default; this proves no route's own choice is silently
+      # replaced by it.
+      - name: API cache-control policy
+        timeout-minutes: 5
+        run: npm run check:api-cache-control
+
+      # The other half of that default. `private, no-store` means the browser
+      # writes no cache entry, and a response body nothing consumes then did not
+      # reach `requestfinished` on Chromium at Next 16.3.0 -- so a client fetch
+      # that ignores an error body leaves the request in flight for the life of
+      # the page. That is what ran the desktop UI regression shard out to its
+      # twenty-minute step timeout. Blocks only browser-capable code on the one
+      # target that was measured; scripts/check-unconsumed-response-bodies-core.mjs
+      # explains every edge of that scope, including what it lets through.
+      - name: Unconsumed API response bodies
+        timeout-minutes: 5
+        run: npm run check:unconsumed-response-bodies
+
+      # Nineteen columns carry a closed list as a CHECK constraint, and the
+      # application holds its own copy of most of them. Code accepting a value
+      # the constraint rejects is a 500 where a 400 belongs.
+      - name: Database enum constraint agreement
+        timeout-minutes: 5
+        run: npm run check:enum-constraints
 
       # An enabled premium model with no explicit billing profile falls back to
       # generic US$15/US$60 pricing, which is what mispriced GPT-5.5, Gemini
@@ -156,6 +233,17 @@ jobs:
         timeout-minutes: 5
         run: npm run check:tomverse-chat-release-gate-view
 
+      # The chat route's context guard short-circuits on an undeclared window
+      # (`modelConfig.contextWindowTokens && ...`), so a model without one is
+      # not clamped to a safe default -- it is not checked at all, and an
+      # over-limit request reaches the provider. ESTIMATE-03 forbids that at
+      # zero tolerance. A ratchet rather than a cliff: today's gap is recorded
+      # as a baseline that may only shrink, while any newly added or enabled
+      # model must declare a window.
+      - name: Router context-window declarations
+        timeout-minutes: 5
+        run: npm run check:router-context-window
+
       # Declaring a context window is not a no-op: the chat route's guard only
       # runs when contextWindowTokens is set, so a new value immediately starts
       # rejecting long requests that used to pass. Windows are verified with a
@@ -166,12 +254,129 @@ jobs:
         timeout-minutes: 5
         run: npm run check:context-window-register
 
+      # The delivery plan promises a new product table cannot silently escape
+      # account deletion and export. A registry alone does not deliver that --
+      # someone adds a table, forgets the registry, and the promise is quietly
+      # untrue. The user-linked set and the cascade closure are derived from
+      # schema.prisma here, so an unregistered table, or a row claiming a
+      # cascade the schema no longer has, fails the build.
+      - name: Data-domain registry
+        timeout-minutes: 5
+        run: npm run check:data-domain-registry
+
+      # ROUTE-01 turns on one number, and the ways it goes wrong are all
+      # editorial: a set still being edited, a baseline named after the
+      # answers were already in, a pilot's numbers read as a decision run.
+      # None of those show up in the interval, so the committed set files are
+      # validated on every PR and a report has to pass the same check before
+      # anyone can attach it to the gate.
+      - name: Router quality evaluation evidence
+        timeout-minutes: 5
+        run: npm run check:router-quality-eval
+      # PACKAGE-01. The shared packages are the mechanism that stops the web
+      # app and the native shell from becoming two products; that only holds
+      # while the shared half runs unchanged in all three environments. The
+      # metric is counted through ESLint's own API, so it cannot disagree with
+      # the ESLint step below about what "forbidden" means, and each package
+      # is type-checked under its own tsconfig -- no DOM, no Node types, no
+      # `@/*` alias -- which catches a forbidden global that no import rule
+      # can see.
+      - name: Shared package framework purity
+        timeout-minutes: 5
+        run: npm run check:shared-packages
+
+      # The other half of PACKAGE-01's evidence. `next build` proves the shared
+      # packages compile inside this app and cannot prove the thing the gate is
+      # about: that they build where Next.js is not the one building. Vite
+      # externalizes a Node builtin with a warning rather than an error, so
+      # this fails on the warning and then executes the bundle -- a build that
+      # resolved everything and behaves differently outside Next.js is the
+      # failure worth catching.
+      - name: Package build matrix (Vite)
+        timeout-minutes: 10
+        run: npm run verify:package-build-matrix
+
+      # PLANNER-03. Memory, imported content and uploaded documents already
+      # reach the prompt, and the defences that keep them data -- fences,
+      # rules stated first, inerting -- had nothing measuring them. This runs
+      # an adversarial corpus through each builder and fails on a payload that
+      # escapes its region, forges a boundary, gets ahead of the rules, or
+      # smuggles a control character through.
+      - name: Prompt-injection containment
+        timeout-minutes: 5
+        run: npm run check:prompt-injection
+      # PUSH-01 is met by an absence, so until now the only thing holding it
+      # was a person reading a diff and remembering a decision written months
+      # earlier. A delivery SDK arrives in one line of package.json, and a
+      # device-token table outlives whatever feature motivated it. The word
+      # "push" is never the signal -- `Array.prototype.push` and `git push` are
+      # everywhere -- so this looks for the identifiers that appear only when
+      # push notifications do.
+      - name: Push infrastructure scope
+        timeout-minutes: 5
+        run: npm run check:push-scope
+
+      # The readiness register is the only thing standing between "Auto works
+      # in shadow" and "Auto answers a real person", which makes it worth
+      # attacking, and the attack is one word: pending -> passed. So a passed
+      # gate has to carry a person, a date, an artefact, a commit, a summary,
+      # a re-attestation deadline and its known limitations, or the build
+      # fails. It also prints which gates are outstanding, because that is the
+      # question everyone asks about this rollout.
+      - name: Auto rollout readiness
+        timeout-minutes: 5
+        run: npm run check:auto-rollout-readiness
+
       # gpt-image-2 lives outside AVAILABLE_MODELS by design, so the model
       # pricing check above cannot see it. Same release contract -- every
       # enabled price is explicit and verified -- separate fail-closed net.
       - name: Image pricing coverage
         timeout-minutes: 5
         run: npm run check:image-pricing
+
+      # fal-ai/nano-banana-2 was enabled on one paid generation, and that run is
+      # the only reason the request shape, the asset host and the delivered size
+      # are known rather than assumed. This recomputes the verdict from the
+      # recorded gates and compares the recorded request against what the
+      # builder produces now -- so changing a pinned field invalidates the proof
+      # here instead of leaving a stale artefact reading as a pass.
+      #
+      # No credential: it reads a committed file and this repository's own code.
+      # The sibling price check needs FAL_KEY and is still run by hand, as
+      # check:openai-model-access is.
+      - name: fal activation evidence
+        timeout-minutes: 5
+        run: npm run check:fal-smoke-evidence
+
+      # One provider timeout and one backoff schedule decide three deadlines:
+      # the worst legitimate attempt, the stale threshold the sweep refunds
+      # against, and the route budget the post-response executor runs inside.
+      # They were three literals related only in prose. A stale threshold below
+      # the worst attempt refunds live work; a route budget below what the
+      # executor needs loses the request, because nothing re-drives a pending
+      # generation.
+      - name: Image executor budget
+        timeout-minutes: 5
+        run: npm run check:image-executor-budget
+
+      # The DB integration runner names its suites one by one, because they are
+      # split across processes for module-mock isolation and a glob cannot make
+      # that decision. What a hand-written list cannot do is notice a file
+      # nobody added to it: provider-probe.db.test.ts sat unlisted from #245
+      # and had been failing since STG-R002, invisibly, because nothing ran it.
+      - name: DB integration coverage
+        timeout-minutes: 5
+        run: npm run check:db-integration-coverage
+
+      # publicChatErrorDetails strips keys beginning with `internal`, so the
+      # spelling of the key IS the mechanism that keeps provider spend out of a
+      # user-facing response. A micro-USD field named anything else ships in the
+      # body and nothing notices, because the stripper is doing exactly what it
+      # was written to do. CREDIT_COST_ALLOWANCE_INSUFFICIENT did that from two
+      # throw sites.
+      - name: Error detail cost exposure
+        timeout-minutes: 5
+        run: npm run check:error-detail-cost
 
       # The cost guardrails are derived from plan credits and stored in
       # ChatUsageBucket.count. When that product outgrew int4, PostgreSQL threw
@@ -192,26 +397,6 @@ jobs:
       - name: Default model coherence
         timeout-minutes: 5
         run: npm run check:default-models
-
-      # Next.js sets no Cache-Control on a route handler response, and a
-      # response with none is heuristically cacheable by a shared cache. The
-      # proxy sets a default; this proves no route's own choice is silently
-      # replaced by it.
-      - name: API cache-control policy
-        timeout-minutes: 5
-        run: npm run check:api-cache-control
-
-      # The other half of that default. `private, no-store` means the browser
-      # writes no cache entry, and a response body nothing consumes then did not
-      # reach `requestfinished` on Chromium at Next 16.3.0 -- so a client fetch
-      # that ignores an error body leaves the request in flight for the life of
-      # the page. That is what ran the desktop UI regression shard out to its
-      # twenty-minute step timeout. Blocks only browser-capable code on the one
-      # target that was measured; scripts/check-unconsumed-response-bodies-core.mjs
-      # explains every edge of that scope, including what it lets through.
-      - name: Unconsumed API response bodies
-        timeout-minutes: 5
-        run: npm run check:unconsumed-response-bodies
 
       - name: Strict encoding validation
         timeout-minutes: 5
@@ -347,8 +532,8 @@ jobs:
 
       - name: Install Chromium
         if: steps.scope.outputs.code == 'true'
-        timeout-minutes: 10
-        run: npx playwright install --with-deps chromium
+        timeout-minutes: 20
+        run: scripts/ci/install-playwright.sh chromium
 
       # The @smoke tier only. Every other desktop-chromium test still runs --
       # on main push via Main Chromium Regression, and nightly via Daily
@@ -511,8 +696,8 @@ jobs:
 
       - name: Install Chromium
         if: steps.scope.outputs.code == 'true'
-        timeout-minutes: 10
-        run: npx playwright install --with-deps chromium
+        timeout-minutes: 20
+        run: scripts/ci/install-playwright.sh chromium
 
       - name: Run the high-risk UI regression checks
         if: steps.scope.outputs.code == 'true'

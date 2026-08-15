@@ -5,9 +5,34 @@ import {
   type ImageQuality,
   type ImageSize,
 } from "@/lib/imageGenerationPricing";
-import { getImageModel, type ImageModelProfile } from "@/lib/imageModelRegistry";
+import {
+  getImageModel,
+  imageDeliveryMimeType,
+  type ImageModelProfile,
+} from "@/lib/imageModelRegistry";
 import { readImageDimensions } from "@/lib/imageDimensions";
-import type { ImageGenerationFailurePhase } from "@/lib/imageGenerationStateCore";
+import {
+  buildFalImageRequest,
+  falAuthorizationHeader,
+  falPlatformHeaders,
+  falAssetLengthRefused,
+  FAL_MAX_ASSET_BYTES,
+  FAL_RUN_URL_BASE,
+  isFalAssetUrl,
+  parseFalImageResponse,
+} from "@/lib/falImageRequest";
+import { resolveProviderApiKey } from "@/lib/modelRegistryShared";
+import {
+  IMAGE_PROVIDER_RETRY_DELAYS_MS,
+  IMAGE_PROVIDER_TIMEOUT_MS,
+  type ImageGenerationFailurePhase,
+} from "@/lib/imageGenerationStateCore";
+import {
+  buildGoogleImageRequest,
+  GOOGLE_API_KEY_HEADER,
+  GOOGLE_INTERACTIONS_URL,
+  parseGoogleImageResponse,
+} from "@/lib/googleImageRequest";
 import {
   buildXaiImageRequest,
   parseXaiImageResponse,
@@ -29,13 +54,15 @@ const OPENAI_IMAGES_URL = "https://api.openai.com/v1/images/generations";
 
 // A complex request can run up to ~2 minutes provider-side; the ceiling
 // leaves room for that plus network without letting a hung call outlive the
-// lease heartbeat forever.
-const PROVIDER_TIMEOUT_MS = 150_000;
-
-// Bounded: one initial attempt plus two retries on 429/5xx/network, with
-// jittered backoff. Anything still failing after that surfaces to the caller
-// for refund. User errors and moderation blocks are never retried.
-const RETRY_DELAYS_MS = [1_000, 3_000];
+// lease heartbeat forever. One initial attempt plus two retries on
+// 429/5xx/network, with jittered backoff; anything still failing after that
+// surfaces to the caller for refund, and user errors and moderation blocks
+// are never retried.
+//
+// Both numbers live in the state core, because the stale threshold and the
+// executor's route budget are derived from them and have to move together.
+const PROVIDER_TIMEOUT_MS = IMAGE_PROVIDER_TIMEOUT_MS;
+const RETRY_DELAYS_MS = IMAGE_PROVIDER_RETRY_DELAYS_MS;
 
 export class ImageProviderError extends Error {
   constructor(
@@ -130,8 +157,49 @@ export type ImageProviderResult = {
   requestParams: Record<string, unknown>;
 };
 
+const getGoogleApiKey = () => {
+  // The same key the chat Google provider uses. There is no image-scoped
+  // variable here the way OPENAI_IMAGE_API_KEY exists for OpenAI; splitting
+  // spend attribution is a separate operational decision, not something to
+  // invent an environment name for.
+  //
+  // Resolved from the shared alias list rather than an inline pair: this
+  // module accepting GEMINI_API_KEY while the chat client and the status
+  // surface did not is how image generation came to work in a deployment
+  // that reported Google as unconfigured.
+  const key = resolveProviderApiKey("google");
+  if (!key) {
+    throw new ImageProviderError(
+      "provider_failed",
+      "Image provider is not configured."
+    );
+  }
+  return key;
+};
+
+/**
+ * fal's key, deliberately not in PROVIDER_API_KEY_ENV_NAMES.
+ *
+ * That table is the chat providers': everything in it appears in the model
+ * catalogue, in provider status and in chat readiness. fal serves no chat
+ * model, and adding it there to save a function would have it reported as an
+ * unconfigured chat provider on every deployment that does not use images.
+ *
+ * `FAL_KEY` is the name fal's own documentation uses.
+ */
+const getFalApiKey = () => {
+  const key = process.env.FAL_KEY?.trim();
+  if (!key) {
+    throw new ImageProviderError(
+      "provider_failed",
+      "Image provider is not configured."
+    );
+  }
+  return key;
+};
+
 const getXaiApiKey = () => {
-  const key = process.env.XAI_API_KEY?.trim();
+  const key = resolveProviderApiKey("xai");
   if (!key) {
     throw new ImageProviderError(
       "provider_failed",
@@ -147,7 +215,7 @@ const getImageApiKey = () => {
   // the chat key is the fallback so development works with one key.
   const key =
     process.env.OPENAI_IMAGE_API_KEY?.trim() ||
-    process.env.OPENAI_API_KEY?.trim();
+    resolveProviderApiKey("openai");
   if (!key) {
     throw new ImageProviderError(
       "provider_failed",
@@ -158,15 +226,26 @@ const getImageApiKey = () => {
 };
 
 /**
+ * Every field name any provider here carries the user's prompt in.
+ *
+ * OpenAI and xAI call it `prompt`; Google's Interactions API calls it `input`.
+ * Filtering only `prompt` was correct until it silently stopped being -- the
+ * Google body would have passed its prompt straight through into the stored
+ * audit blob. The set is the guard, so adding a provider means adding its name
+ * here rather than remembering that this filter exists.
+ */
+const PROMPT_FIELD_NAMES = new Set(["prompt", "input"]);
+
+/**
  * The audit view of a request body: everything except the prompt, which is
  * already stored on the generation row and must not be duplicated into a blob
- * that deletion would then have to find twice.
+ * that deletion would then have to find twice (policy §10, §12.1).
  */
 const auditableRequestParams = (
   body: Record<string, unknown>
 ): Record<string, unknown> =>
   Object.fromEntries(
-    Object.entries(body).filter(([key]) => key !== "prompt")
+    Object.entries(body).filter(([key]) => !PROMPT_FIELD_NAMES.has(key))
   );
 
 const wait = (ms: number) =>
@@ -195,10 +274,13 @@ export const generateImageWithProvider = async (input: {
   if (model.provider === "xai") {
     return generateWithXai(model, input);
   }
+  if (model.provider === "google") {
+    return generateWithGoogle(model, input);
+  }
+  if (model.provider === "fal") {
+    return generateWithFal(model, input);
+  }
   if (model.provider !== "openai") {
-    // Google's adapter lands with its thinking cap (policy section 12):
-    // shipping an executable path to a model whose worst-case cost is not
-    // provably finite is exactly what the hold exists to prevent.
     throw new ImageProviderError(
       "provider_failed",
       `No adapter is implemented for provider ${model.provider}.`
@@ -311,6 +393,324 @@ export const generateImageWithProvider = async (input: {
     lastError ??
     new ImageProviderError("provider_failed", "Image provider request failed.")
   );
+};
+
+/**
+ * Google, over the Interactions API.
+ *
+ * Unreachable today and deliberately so: generateImageWithProvider refuses any
+ * model carrying a disabledReason before it dispatches, and all three Google
+ * image models are `worst_case_cost_unbounded` because the documentation does
+ * not state that `max_output_tokens` bounds hidden thinking. The adapter exists
+ * ahead of that answer because implementing it is not the same decision as
+ * shipping it, and because the staging measurement that would settle the
+ * question needs this code to make the call.
+ *
+ * Differences from the other two adapters, each of which is a way to get it
+ * wrong:
+ *   * authentication is `x-goog-api-key`, not an OpenAI-style bearer token;
+ *   * the request and response vocabulary is the Interactions API's, never
+ *     GenerateContent's -- lib/googleImageRequest.ts holds that boundary;
+ *   * usage is reported as separate output and thinking counters, and both are
+ *     carried through unsummed, because their relationship is the open
+ *     question rather than a detail to smooth over.
+ */
+const generateWithGoogle = async (
+  model: ImageModelProfile,
+  input: { prompt: string; size: ImageSize }
+): Promise<ImageProviderResult> => {
+  const body = buildGoogleImageRequest({
+    apiModelId: model.apiModelId,
+    prompt: input.prompt,
+    size: input.size,
+    maxOutputTokens: model.maxOutputTokens ?? null,
+    thinkingLevel: model.thinkingLevel ?? null,
+    deliveryMimeType: imageDeliveryMimeType(model),
+  });
+  if (!body) {
+    throw new ImageProviderError(
+      "provider_failed",
+      `Image size ${input.size} has no Google request mapping for ${model.id}.`
+    );
+  }
+  const requestParams = auditableRequestParams(body);
+  const apiKey = getGoogleApiKey();
+  let lastError: ImageProviderError | null = null;
+
+  for (let attempt = 0; attempt <= RETRY_DELAYS_MS.length; attempt += 1) {
+    if (attempt > 0) {
+      const base = RETRY_DELAYS_MS[attempt - 1];
+      await wait(base + Math.floor(Math.random() * 500));
+    }
+    let response: Response;
+    try {
+      response = await fetch(GOOGLE_INTERACTIONS_URL, {
+        method: "POST",
+        headers: {
+          [GOOGLE_API_KEY_HEADER]: apiKey,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(body),
+        signal: AbortSignal.timeout(PROVIDER_TIMEOUT_MS),
+      });
+    } catch (error) {
+      lastError = new ImageProviderError(
+        "provider_failed",
+        error instanceof Error && error.name === "TimeoutError"
+          ? "Image provider request timed out."
+          : "Image provider request failed.",
+        null,
+        null,
+        requestParams
+      );
+      continue;
+    }
+
+    const providerRequestId =
+      response.headers.get("x-goog-request-id") ??
+      response.headers.get("x-request-id");
+    if (!response.ok) {
+      const errorBody = await response.json().catch(() => null);
+      const failurePhase = classifyImageProviderFailure(response.status, errorBody);
+      const error = new ImageProviderError(
+        failurePhase,
+        `Image provider rejected the request (HTTP ${response.status}).`,
+        response.status,
+        providerRequestId,
+        requestParams
+      );
+      if (
+        failurePhase === "provider_rate_limited" ||
+        failurePhase === "provider_failed"
+      ) {
+        lastError = error;
+        continue;
+      }
+      throw error;
+    }
+
+    const parsed = parseGoogleImageResponse(
+      await response.json().catch(() => null)
+    );
+    if (!parsed) {
+      throw new ImageProviderError(
+        "provider_failed",
+        "Image provider returned no usable image payload.",
+        response.status,
+        providerRequestId,
+        requestParams
+      );
+    }
+    const imageBytes = Buffer.from(parsed.imageBase64, "base64");
+    const dimensions = readImageDimensions(imageBytes, parsed.mimeType);
+    return {
+      imageBytes,
+      mimeType: parsed.mimeType,
+      inputTokens: parsed.usage.inputTokens,
+      thinkingTokens: parsed.usage.thinkingTokens,
+      outputTokens: parsed.usage.outputTokens,
+      providerRequestId,
+      // Google embeds SynthID. C2PA is claimed only where the model card says
+      // so, which is why this reads the profile rather than assuming.
+      provenance: [...model.provenance],
+      outputWidth: dimensions?.width ?? null,
+      outputHeight: dimensions?.height ?? null,
+      requestParams,
+    };
+  }
+
+  throw (
+    lastError ??
+    new ImageProviderError("provider_failed", "Image provider request failed.")
+  );
+};
+
+/**
+ * Nano Banana 2 through fal: Google's model, fal's invoice.
+ *
+ * Three ways this path is deliberately unlike the other three.
+ *
+ * **It never retries.** The others retry a rate limit or a transport failure
+ * because a second attempt costs nothing when the first was not billed. Here
+ * the danger is the attempt that *was* billed: a generation that succeeded and
+ * whose response was lost looks exactly like a transport failure, and retrying
+ * it buys a second image at a second charge while the user pays one fixed
+ * price. `X-Fal-No-Retry` says the same thing to fal's own machinery.
+ *
+ * **The response is a link, not bytes.** So the link is checked before it is
+ * followed -- https, a fal CDN host, an allowlisted MIME -- and again on the
+ * redirect-resolved response. A URL out of a provider's response body is a
+ * request we would be making on its behalf, and the only thing standing
+ * between that and an SSRF is this check.
+ *
+ * **The delivered image is measured against what was priced.** The fixed 120
+ * credits are for a 1024x1024 image; a response of another size means the
+ * request did not do what its price says it did, and storing it would settle a
+ * different product than the one that was sold.
+ */
+const generateWithFal = async (
+  model: ImageModelProfile,
+  input: { prompt: string; size: ImageSize }
+): Promise<ImageProviderResult> => {
+  const body = buildFalImageRequest({
+    prompt: input.prompt,
+    size: input.size,
+    // PNG for the same reason gpt-image-2 stores PNG: it is lossless, and the
+    // response's own content type is still what gets recorded.
+    outputFormat: "png",
+  });
+  if (!body) {
+    throw new ImageProviderError(
+      "provider_failed",
+      `Image size ${input.size} has no approved fal price for ${model.id}.`
+    );
+  }
+  const requestParams = auditableRequestParams(body);
+  const apiKey = getFalApiKey();
+
+  let response: Response;
+  try {
+    response = await fetch(`${FAL_RUN_URL_BASE}/${model.apiModelId}`, {
+      method: "POST",
+      headers: {
+        Authorization: falAuthorizationHeader(apiKey),
+        "Content-Type": "application/json",
+        ...falPlatformHeaders(),
+      },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(PROVIDER_TIMEOUT_MS),
+    });
+  } catch (error) {
+    throw new ImageProviderError(
+      "provider_failed",
+      error instanceof Error && error.name === "TimeoutError"
+        ? "Image provider request timed out."
+        : "Image provider request failed.",
+      null,
+      null,
+      requestParams
+    );
+  }
+
+  const providerRequestId = response.headers.get("x-fal-request-id");
+  if (!response.ok) {
+    const errorBody = await response.json().catch(() => null);
+    throw new ImageProviderError(
+      classifyImageProviderFailure(response.status, errorBody),
+      `Image provider rejected the request (HTTP ${response.status}).`,
+      response.status,
+      providerRequestId,
+      requestParams
+    );
+  }
+
+  const parsed = parseFalImageResponse(
+    await response.json().catch(() => null)
+  );
+  if (!parsed) {
+    throw new ImageProviderError(
+      "provider_failed",
+      "Image provider returned no usable image payload.",
+      response.status,
+      providerRequestId,
+      requestParams
+    );
+  }
+
+  let asset: Response;
+  try {
+    asset = await fetch(parsed.url, {
+      // Followed manually so the final host is checked too: an allowlisted URL
+      // that redirects elsewhere would otherwise walk straight past the check
+      // it just passed.
+      redirect: "manual",
+      signal: AbortSignal.timeout(PROVIDER_TIMEOUT_MS),
+    });
+  } catch {
+    throw new ImageProviderError(
+      "provider_failed",
+      "Image provider asset could not be downloaded.",
+      null,
+      providerRequestId,
+      requestParams
+    );
+  }
+  // Cancelled, not drained. Both refusals below can be holding a whole image,
+  // and this is the one server-side call site where that is true: measured on
+  // Node 22.22 / undici 6.24, a response body left unread pins its connection
+  // once the body exceeds undici's receive buffer -- the threshold sits between
+  // 16 KiB and 64 KiB, so an error body passes through unnoticed and an image
+  // does not. `discardResponseBody` is the wrong tool here precisely because it
+  // reads: on the size-limit path that would pull the megabytes into memory
+  // that the limit exists to refuse.
+  const releaseAsset = () => asset.body?.cancel().catch(() => undefined);
+  if (!asset.ok || !isFalAssetUrl(asset.url)) {
+    await releaseAsset();
+    throw new ImageProviderError(
+      "provider_failed",
+      "Image provider asset was not served from the expected location.",
+      asset.status,
+      providerRequestId,
+      requestParams
+    );
+  }
+  // Before the body is read, not after: a limit enforced once the bytes are
+  // already in memory has not limited anything.
+  if (falAssetLengthRefused(asset.headers.get("content-length"))) {
+    await releaseAsset();
+    throw new ImageProviderError(
+      "provider_failed",
+      "Image provider asset declared a size larger than the accepted limit.",
+      null,
+      providerRequestId,
+      requestParams
+    );
+  }
+
+  const imageBytes = Buffer.from(await asset.arrayBuffer());
+  if (imageBytes.byteLength === 0 || imageBytes.byteLength > FAL_MAX_ASSET_BYTES) {
+    throw new ImageProviderError(
+      "provider_failed",
+      "Image provider asset was empty or larger than the accepted limit.",
+      null,
+      providerRequestId,
+      requestParams
+    );
+  }
+
+  const dimensions = readImageDimensions(imageBytes, parsed.mimeType);
+  const [expectedWidth, expectedHeight] = input.size.split("x").map(Number);
+  if (
+    !dimensions ||
+    dimensions.width !== expectedWidth ||
+    dimensions.height !== expectedHeight
+  ) {
+    throw new ImageProviderError(
+      "provider_failed",
+      "Image provider returned a different size than the one that was priced.",
+      null,
+      providerRequestId,
+      requestParams
+    );
+  }
+
+  return {
+    imageBytes,
+    mimeType: parsed.mimeType,
+    // fal bills per image and reports no token counts. Zero here is the honest
+    // reading -- there is no usage to record, not a usage of nothing -- and the
+    // fixed price is what settlement compares against.
+    inputTokens: 0,
+    thinkingTokens: 0,
+    outputTokens: 0,
+    providerRequestId,
+    // Google's model, so Google's watermark. Read from the profile rather than
+    // asserted about the gateway.
+    provenance: [...model.provenance],
+    outputWidth: dimensions.width,
+    outputHeight: dimensions.height,
+    requestParams,
+  };
 };
 
 /**

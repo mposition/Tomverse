@@ -1,7 +1,9 @@
 import "server-only";
 
 import { prisma } from "@/lib/prisma";
+import { anonymiseAccountData } from "@/lib/accountDataAnonymisation";
 import { getUserChatUsageKey } from "@/lib/chatSecurity";
+import { enqueueImageAssetCleanupForConversations } from "@/lib/imageAssetLifecycle";
 import { getStripe, isStripeConfigured } from "@/lib/stripe";
 import { revokeAllUserSessions } from "@/lib/sessionSecurity";
 
@@ -187,6 +189,41 @@ export async function deleteTomverseAccount(
       },
     });
 
+    // Nothing else removes these. The userId column carries no relation, so
+    // there is neither a cascade nor a SetNull, and
+    // deleteExpiredContextBundleConsumptions only sweeps rows whose bundle has
+    // already lapsed. Short-lived either way, but "deleted" has to mean deleted
+    // now rather than deleted shortly.
+    await tx.chatContextBundleConsumption.deleteMany({
+      where: { userId: user.id },
+    });
+
+    // Before the conversations go, not after, and inside this transaction.
+    //
+    // Deleting one conversation already enqueues its generated images for
+    // removal from object storage; deleting the account did not. The cascade
+    // takes Conversation, then ImageGeneration, then ImageAsset -- and
+    // ImageAsset holds the only record of the R2 key. Once it is gone the
+    // object has no name anywhere in the system, so nothing can ever reap it:
+    // the sweep drains tombstones, and the only storage-side listing sweep
+    // walks the guest attachment prefix. The user's generated images outlived
+    // the account that made them, permanently.
+    //
+    // `account_deleted` has been one of the three declared cleanup reasons
+    // since the table was added (ImageAssetCleanup.reason). Nothing had ever
+    // written it.
+    const conversationIds = (
+      await tx.conversation.findMany({
+        where: { userId: user.id },
+        select: { id: true },
+      })
+    ).map((conversation) => conversation.id);
+    await enqueueImageAssetCleanupForConversations(
+      tx,
+      conversationIds,
+      "account_deleted"
+    );
+
     await tx.conversation.deleteMany({
       where: { userId: user.id },
     });
@@ -194,6 +231,14 @@ export async function deleteTomverseAccount(
     await tx.conversationProject.deleteMany({
       where: { userId: user.id },
     });
+
+    // Before the User row goes, not after. Three of the four tables this
+    // touches relate to User with onDelete: SetNull, so once the user is
+    // deleted their userId is already NULL and there is nothing left to match
+    // on -- the rows would keep their subject keys, trace identifiers and
+    // provider request identifiers indefinitely. SetNull on its own is not
+    // anonymisation; it renames the row and leaves every join intact.
+    await anonymiseAccountData(tx, user.id);
 
     await tx.user.delete({
       where: { id: user.id },

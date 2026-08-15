@@ -8,6 +8,11 @@ type RetentionItem = {
   key: string;
   label: string;
   policy: string;
+  /**
+   * What the sweep does with these rows. Optional because a client must not
+   * blank the panel against a server that has not deployed it yet.
+   */
+  action?: "delete" | "clear" | "refund" | "keep";
   staleCount: number;
   oldestAt: string | null;
 };
@@ -133,7 +138,14 @@ export function AdminRetentionPanel() {
             </div>
             <div className="mt-4 grid grid-cols-2 gap-2 text-xs">
               <div className="rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2">
-                <p className="font-bold text-zinc-500">Cleanup count</p>
+                {/*
+                  A `keep` policy's number is history, not a queue. Calling it a
+                  cleanup count told an operator that running the cleanup would
+                  move it, and for the audit log nothing ever will.
+                */}
+                <p className="font-bold text-zinc-500">
+                  {item.action === "keep" ? "Beyond the floor" : "Cleanup count"}
+                </p>
                 <p className="mt-1 text-xl font-black text-white">{item.staleCount}</p>
               </div>
               <div className="rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2">

@@ -137,6 +137,7 @@ test("external evidence carries a reference, never the source message text", () 
                         externalConversationId: "ext-conv-1",
                         ordinal: 4,
                         role: "user",
+                        sourceLocked: false,
                     },
                 },
             ],
@@ -194,4 +195,107 @@ test("an unknown source type degrades to its type alone", () => {
         })
     );
     assert.deepEqual(item.evidence, [{ sourceType: "tomverse_message" }]);
+});
+
+/* ------------------------------------------------------------ locked source */
+
+test("a locked source is reduced to the fact that it exists", () => {
+    // §13.2. The export is a document that leaves the account, so unlike the
+    // review screen — where an id only leads to a page the lock itself
+    // refuses — a reference here outlives the lock entirely.
+    const item = serializeMemoryExportItem(
+        baseRow({
+            evidences: [
+                {
+                    sourceType: "external_message",
+                    manualContent: null,
+                    externalMessage: {
+                        externalConversationId: "ext-conv-locked",
+                        ordinal: 7,
+                        role: "assistant",
+                        sourceLocked: true,
+                    },
+                },
+            ],
+        })
+    );
+
+    assert.deepEqual(item.evidence, [
+        { sourceType: "external_message", locked: true },
+    ]);
+    const serialized = JSON.stringify(item);
+    // Each of these describes the thing the lock hides. The position and the
+    // role would still narrow it down for anyone holding the account's
+    // Release A export, which is why "no id" is not enough on its own.
+    assert.ok(!serialized.includes("ext-conv-locked"));
+    assert.ok(!serialized.includes('"ordinal"'));
+    assert.ok(!serialized.includes('"role"'));
+});
+
+test("the memory itself is still exported when its source is locked", () => {
+    // Withholding the reference is not withholding the memory: the user is
+    // entitled to know a statement is held and what it says.
+    const item = serializeMemoryExportItem(
+        baseRow({
+            statement: "사용자는 커피를 좋아한다",
+            evidences: [
+                {
+                    sourceType: "external_message",
+                    manualContent: null,
+                    externalMessage: {
+                        externalConversationId: "ext-conv-locked",
+                        ordinal: 1,
+                        role: "user",
+                        sourceLocked: true,
+                    },
+                },
+            ],
+        })
+    );
+    assert.equal(item.statement, "사용자는 커피를 좋아한다");
+    assert.equal(item.evidence.length, 1);
+});
+
+test("one locked source does not withhold the unlocked evidence beside it", () => {
+    const item = serializeMemoryExportItem(
+        baseRow({
+            evidences: [
+                {
+                    sourceType: "external_message",
+                    manualContent: null,
+                    externalMessage: {
+                        externalConversationId: "ext-conv-locked",
+                        ordinal: 1,
+                        role: "user",
+                        sourceLocked: true,
+                    },
+                },
+                {
+                    sourceType: "external_message",
+                    manualContent: null,
+                    externalMessage: {
+                        externalConversationId: "ext-conv-open",
+                        ordinal: 2,
+                        role: "user",
+                        sourceLocked: false,
+                    },
+                },
+                {
+                    sourceType: "manual",
+                    manualContent: "직접 적은 근거",
+                    externalMessage: null,
+                },
+            ],
+        })
+    );
+    assert.deepEqual(item.evidence, [
+        { sourceType: "external_message", locked: true },
+        {
+            sourceType: "external_message",
+            externalConversationId: "ext-conv-open",
+            ordinal: 2,
+            role: "user",
+        },
+        { sourceType: "manual", grounds: "직접 적은 근거" },
+    ]);
 });

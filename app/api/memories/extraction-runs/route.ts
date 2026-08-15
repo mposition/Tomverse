@@ -1,3 +1,17 @@
+/**
+ * The `after()` kick below runs inside this budget, not outside it: Next's
+ * `after` reference states the callback "will run for the platform's default
+ * or configured max duration of your route". Undeclared, the kick got whatever
+ * the platform happened to allow, and a kick killed mid-chunk leaves the run
+ * `running` under a lease that has to lapse before the dispatcher can reclaim
+ * it -- so the driver that exists to reduce latency could increase it.
+ *
+ * 120s covers what the kick attempts: one chunk, with the adapter aborting
+ * just under the driver's 60s chunk timeout, and a claimed chunk always
+ * allowed to finish.
+ */
+export const maxDuration = 120;
+
 import { NextResponse, after } from "next/server";
 import { getServerSession } from "next-auth";
 import { z } from "zod";
@@ -11,6 +25,7 @@ import {
     MemoryFeatureDisabledError,
 } from "@/lib/appSettings";
 import { authOptions } from "@/lib/auth";
+import { chatErrorResponse } from "@/lib/chatSecurity";
 import { listMemoryExtractionRuns } from "@/lib/memoryExtractionCatalogue";
 import {
     createMemoryExtractionRun,
@@ -154,6 +169,12 @@ export async function POST(req: Request) {
         if (error instanceof MemoryFeatureDisabledError) {
             return disabledResponse(error);
         }
+        // An account-level refusal (suspended, restricted, pending deletion)
+        // carries its own status and code. Without this it would fall through
+        // to the generic 500 below, and a suspended account would be told the
+        // server broke rather than why it was refused.
+        const chatResponse = chatErrorResponse(error);
+        if (chatResponse) return chatResponse;
         const securityResponse = apiSecurityResponse(error);
         if (securityResponse) return securityResponse;
         console.error("memory extraction run create failed", error);

@@ -46,7 +46,12 @@ import {
   type Conversation,
 } from "@/components/chat/types";
 import { useLanguage } from "@/components/LanguageProvider";
+import type {
+  ChatAssistantProfile,
+  ChatAssistantProfileOption,
+} from "@/lib/conversationProfileBinding";
 import { useModelCatalog } from "@/components/ModelCatalogProvider";
+import type { ConversationMemoryMode } from "@/lib/conversationMemoryMode";
 import type { WebSearchMode } from "@/lib/appDefaults";
 import {
   Check,
@@ -139,6 +144,13 @@ type MobileChatShellProps = {
   canSelectModel?: (modelId: string) => boolean;
   webSearchMode: WebSearchMode;
   onWebSearchModeChange: (mode: WebSearchMode) => void;
+  memoryMode?: ConversationMemoryMode;
+  /** §14. Passed straight through to the composer's tools menu. */
+  assistantProfile?: ChatAssistantProfile | null;
+  assistantProfileOptions?: ChatAssistantProfileOption[];
+  onAssistantProfileChange?: (profileId: string | null) => void;
+  onMemoryModeChange?: (mode: ConversationMemoryMode) => void;
+  accountMemoryDefault?: "on" | "off";
   onOpenDeepResearchSetup: () => void;
   isDeepResearchPending: boolean;
   onDismissDeepResearchChip: () => void;
@@ -207,6 +219,12 @@ export function MobileChatShell({
   canSelectModel,
   webSearchMode,
   onWebSearchModeChange,
+  memoryMode,
+  assistantProfile,
+  assistantProfileOptions,
+  onAssistantProfileChange,
+  onMemoryModeChange,
+  accountMemoryDefault,
   onOpenDeepResearchSetup,
   isDeepResearchPending,
   onDismissDeepResearchChip,
@@ -1187,6 +1205,12 @@ export function MobileChatShell({
             onSwapModel={onSwapModel}
             webSearchMode={webSearchMode}
             onWebSearchModeChange={onWebSearchModeChange}
+            memoryMode={memoryMode}
+            assistantProfile={assistantProfile}
+            assistantProfileOptions={assistantProfileOptions}
+            onAssistantProfileChange={onAssistantProfileChange}
+            onMemoryModeChange={onMemoryModeChange}
+            accountMemoryDefault={accountMemoryDefault}
             onOpenDeepResearchSetup={onOpenDeepResearchSetup}
             isDeepResearchPending={isDeepResearchPending}
             onDismissDeepResearchChip={onDismissDeepResearchChip}

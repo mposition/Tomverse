@@ -30,12 +30,32 @@ governance:
       - Every applicable blocking gate must have status approved.
       - >-
         approvedBy must contain an accountable gate-owner approval and an
-        independent-reviewer approval from different people.
+        independent-reviewer approval. Whether those two roles may be held by
+        the same subject is decided by soleApproverAllowed below.
       - approvedAt must be a non-null RFC 3339 timestamp.
       - evidenceRefs must contain immutable links or artifact identifiers.
       - >-
         not-applicable is allowed only when appliesWhen evaluates false and the
         decision has independent approval and an applicability evidence reference.
+    soleApproverAllowed: true
+    soleApproverRationale: >-
+      This organization has one accountable person. A rule requiring two
+      different human subjects is not strict here, it is unsatisfiable: every
+      blocking gate would stay unapprovable forever, and the register would stop
+      describing the release rather than start describing it more carefully. So
+      one subject may hold both roles.
+
+      What the two-person rule was protecting is kept in the dimension that still
+      exists. Most evidence in this repository is produced by automation, and the
+      separation that matters is that a person reads it before it counts: the
+      approver must be a human who did not produce the referenced evidence, and
+      automation may never appear in approvedBy under either role. An
+      AI-generated artefact approved by the human who commissioned it is one
+      review; the same artefact approved by nobody is none.
+
+      Set this back to false the day a second accountable person exists. The
+      validator reads this field rather than hard-coding either answer, so that
+      is the only edit required to restore two-person approval.
     approvedByEntrySchema:
       required:
         - subject
@@ -48,7 +68,10 @@ governance:
       The independent reviewer must be a person who did not produce the
       referenced evidence. Co-implementers of a feature may approve as
       gate-owner but may not serve as the independent reviewer for gates whose
-      evidence they produced.
+      evidence they produced. Where soleApproverAllowed is true, "did not
+      produce the evidence" is read against the actual author of the artefacts
+      -- automation, in most cases -- rather than against the other human, of
+      whom there is none.
   requiredFields:
     - id
     - rationale
@@ -91,6 +114,27 @@ gates:
         Versioned decision-grade evaluation report with fixed-model baseline,
         sample size, paired evaluation unit, confidence-interval method, seed,
         point estimate, and 95% confidence-interval bounds.
+      - >-
+        NOT the shadow report. Shadow records the model the Router would have
+        chosen; it never generated that model's answer, so there is no pair to
+        compare and no win rate to compute. A Router that echoed the user would
+        agree with every shadow row and be worth nothing, and one that is right
+        where the user was wrong appears there as disagreement. The shadow
+        agreement rate measures how much would change if Auto were switched on
+        -- the blast radius -- and nothing about whether the change would be an
+        improvement. npm run report:routing-shadow prints that distinction
+        beside its own numbers so the two cannot be read as one result.
+      - >-
+        Produced by npm run eval:router-quality -- --mode=decision, which makes
+        real billed calls and emits the report above. npm run
+        check:router-quality-eval validates a report before it may be cited: it
+        refuses a pilot or judge-bias run, a run against the development set, a
+        run that stopped at its cost ceiling, a second use of an already-used
+        decision set, a baseline pre-registered after the run started, and a
+        routable judge with no bias measurement. The procedure the harness
+        implements is docs/ops/tomverse-chat-router-evaluation-set.md; a
+        passing check means the report is citable, not that the gate is
+        approved.
 
   - id: ROUTE-02
     rationale: "Deterministic routing must preserve mobile chat responsiveness and must not consume a material share of time to first token."
@@ -575,10 +619,21 @@ gates:
 
   - id: PACKAGE-01
     rationale: "Framework-neutral packages are the mechanism that prevents Next.js and Capacitor clients from becoming duplicated products."
-    status: pending
-    approvedBy: []
-    approvedAt: null
-    evidenceRefs: []
+    status: approved
+    approvedBy:
+      - subject: "@mposition"
+        role: gate-owner
+        approvedAt: "2026-08-12T23:21:58Z"
+      - subject: "@mposition"
+        role: independent-reviewer
+        approvedAt: "2026-08-12T23:21:58Z"
+    approvedAt: "2026-08-12T23:21:58Z"
+    evidenceRefs:
+      - "docs/release-gates/evidence/PACKAGE-01-2026-08-12.md"
+      - "commit:b786a97db24b0177eddbc79efcb17df29205d03f"
+      - "https://github.com/mposition/Tomverse/actions/runs/31604472342"
+      - "https://github.com/mposition/Tomverse/actions/runs/31604472342/job/94139773729"
+      - "https://github.com/mposition/Tomverse/actions/runs/31604472342/job/94139773711"
     category: shared-packages
     title: Shared chat packages remain framework-neutral
     blocking: true
@@ -666,7 +721,7 @@ gates:
       - universal-link and app-link hijacking test report on physical devices
 
   - id: PRIVACY-01
-    rationale: "Users and store reviewers must be able to complete account deletion inside the app without an external support workflow."
+    rationale: "Users and store reviewers must be able to complete account deletion inside the app without an external support workflow, and every table holding their data needs a traced and implemented deletion path rather than a decided one."
     status: pending
     approvedBy: []
     approvedAt: null
@@ -679,11 +734,32 @@ gates:
       - metric: in_app_account_deletion_e2e_pass_percent
         operator: eq
         value: 100
+      # A row whose deletion path nobody has traced is not evidence of safety.
+      - metric: data_domains_with_unverified_deletion_action_count
+        operator: eq
+        value: 0
+      # A decided-but-unbuilt anonymisation leaves every identifier in place.
+      # The registry records the intent precisely so it cannot be mistaken for
+      # the implementation.
+      - metric: data_domains_with_planned_deletion_action_count
+        operator: eq
+        value: 0
+      # The deletion-side counterpart to the export's sentinel test. Clearing
+      # userId is where an anonymisation starts, not where it finishes: three
+      # of these tables relate to User with onDelete: SetNull, so the database
+      # performs half of it and a source scan sees an anonymisation that never
+      # touched subjectKey, traceId or the provider request identifiers.
+      - metric: identifier_sentinels_surviving_account_deletion_count
+        operator: eq
+        value: 0
     evidence:
       - deletion E2E covering reauthentication, completion, and token revocation
+      - two-axis data-domain registry passing scripts/check-data-domain-registry.mjs, with every anonymise row carrying a re-identification review and every retain row a legal basis, period, owner and review date
+      - tests/integration/account-anonymisation.db.test.ts planting a sentinel in every column the registry says is anonymised, deleting the account for real, and asserting none survives
+      - tests/accountDataAnonymisation.test.mjs pinning the implemented column list and replacements against the registry field for field, so neither side can drift
 
   - id: PRIVACY-02
-    rationale: "A versioned data-domain registry prevents new product tables from silently escaping the shared account export."
+    rationale: "A versioned data-domain registry prevents new product tables from silently escaping the shared account export, and the export tells the user what it withheld instead of presenting a projection as the whole answer."
     status: pending
     approvedBy: []
     approvedAt: null
@@ -693,11 +769,41 @@ gates:
     blocking: true
     owner: security-privacy
     criteria:
-      - metric: registered_data_domains_in_unified_export_percent
+      # Not "every domain is exported" -- credentials and internal telemetry are
+      # deliberately withheld. What must be zero is domains nobody has decided
+      # about, because an undecided domain is a gap that reads like a decision.
+      - metric: data_domains_with_undecided_export_state_count
+        operator: eq
+        value: 0
+      # Every exported domain has a fetcher, every fetcher a declaration, every
+      # projection its withheld reason and every exclusion its reason.
+      - metric: account_export_wiring_problem_count
+        operator: eq
+        value: 0
+      # The sentinel test: a unique value planted in every withheld column must
+      # not appear anywhere in the serialised export. A source scan cannot see a
+      # helper, a custom serializer or a raw query; this can.
+      - metric: withheld_field_sentinels_present_in_export_count
+        operator: eq
+        value: 0
+      # Producing the file is half the problem. The download is step-up
+      # authenticated, the link is single-use and expires in five minutes, the
+      # response is uncacheable, nothing is written to disk, and every issue,
+      # download and refusal is audited.
+      - metric: account_export_download_security_e2e_pass_percent
         operator: eq
         value: 100
+      # A ticket redeemed twice under concurrency would mean a leaked link
+      # stays live, which is the whole property the ticket buys.
+      - metric: concurrent_export_ticket_double_redemption_count
+        operator: eq
+        value: 0
     evidence:
       - versioned data-domain registry and export coverage test
+      - tests/integration/account-data-export.db.test.ts planting a sentinel in every withheld column and asserting none survives JSON.stringify of the export
+      - export manifest recording schemaVersion, generatedAt, and the included, filtered, excluded, undecided and truncated domains with their reasons
+      - tests/integration/account-data-export-ticket.db.test.ts covering single-use redemption under concurrency, refusal of a link presented by another account, expiry, and the ninety-day audit retention
+      - tests/accountDataExportTicket.test.mjs pinning the keyed token hash, the no-store and no-referrer download headers, and the single refusal message shared by every refusal reason
 
   - id: STORE-01
     rationale: "A consumption-only app still needs a complete purchase-free Free-tier experience for new users and store reviewers."

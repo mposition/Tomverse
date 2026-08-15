@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 import { formatConversationAsText } from "../lib/exportConversation.ts";
 import {
@@ -62,6 +63,12 @@ const FORBIDDEN = [
     "bundleId",
     "retrievalHash",
     "knowledgeChunks",
+    // §13.4's disclosure is for the owner and only the owner. The count is
+    // admissible on the owner's own read of their conversation and nowhere
+    // else: to a viewer it would say the author personalises and by how much,
+    // which is precisely what §13.3's notice is worded to avoid.
+    "memoryUsedCount",
+    "memoryTokens",
 ];
 
 const validSnapshot = () => ({
@@ -252,4 +259,79 @@ test("a well-formed list revokes exactly what it names", () => {
         false,
         "a different prompt version is a different pair"
     );
+});
+
+/* ----------------------- §13.4 vs §13.3: who the count is selected for ---- */
+
+test("the memory count is selected for the owner's read and for no one else", () => {
+    // A source check, because what is being pinned is which *query* names the
+    // column. The three paths read the same table and differ only in who is
+    // on the other end, so the mistake this guards is copying a select from
+    // one to another for consistency -- which would hand a share viewer the
+    // number §13.3 spends a paragraph keeping away from them.
+    const read = (path) =>
+        readFileSync(new URL(path, import.meta.url), "utf8");
+
+    assert.ok(
+        read("../app/api/conversations/[conversationId]/route.ts").includes(
+            "memoryUsedCount: true"
+        ),
+        "the owner's conversation read must select memoryUsedCount (§13.4)"
+    );
+
+    for (const path of [
+        "../app/api/conversations/[conversationId]/share/route.ts",
+        "../app/api/conversations/export-all/route.ts",
+        "../app/api/public/shares/[shareToken]/route.ts",
+    ]) {
+        const source = read(path);
+        for (const column of ["memoryUsedCount", "memoryTokens"]) {
+            assert.ok(
+                !source.includes(column),
+                `${path} must not read ${column} (§13.3)`
+            );
+        }
+    }
+});
+
+/* ------------------------------------- §8.1 invariant 1: mode is read ----- */
+
+test("every chat entry point passes the conversation's memory mode", () => {
+    // This is a source check on purpose, and the reason is the bug it exists
+    // for: `Conversation.memoryMode` was stored, the gate consulted it, and
+    // nothing in between ever passed it — so the column had no effect and
+    // every type checked. Nothing at runtime can catch an argument that is
+    // simply never supplied, and §8.1 requires *every* pricing side to read
+    // it: a side that does not would price a conversation with memory off as
+    // though it were on, and then disagree with the side that read it — which
+    // is a bundle that is stale on arrival, on every message.
+    //
+    // `/api/chat/context` is in this list because it was the third such bug:
+    // it priced single-model requests with the account default while the chat
+    // route priced with the conversation's own mode.
+    for (const path of [
+        "../app/api/chat/route.ts",
+        "../app/api/chat/preflight/route.ts",
+        "../app/api/chat/context/route.ts",
+    ]) {
+        const source = readFileSync(new URL(path, import.meta.url), "utf8");
+        // Comments are stripped before the window is measured. The assertion
+        // is about the argument list, and a rule that a paragraph of prose
+        // above one argument can break is a rule that fails for the wrong
+        // reason.
+        const code = source
+            .split("\n")
+            .filter((line) => !line.trim().startsWith("//"))
+            .join("\n");
+        const index = code.indexOf("buildChatTurnContext({");
+        assert.notEqual(
+            index,
+            -1,
+            `${path} must build its context with the one turn-context builder`
+        );
+        assert.ok(
+            code.slice(index, index + 600).includes("conversationMode:"),
+            `${path} must pass conversationMode to buildChatTurnContext`
+        );
+    }
 });

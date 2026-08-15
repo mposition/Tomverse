@@ -26,6 +26,7 @@ import {
   parseChatStreamTrailer,
   splitSearchMetadataTrailer,
 } from "@/lib/webSearchStreamTrailer";
+import { splitRoutingRetrySignal } from "@/lib/routingRetrySignal";
 import type { WebSearchExecution } from "@/lib/webSearchExecutionNormalizer";
 import { guestMessagesStorageKey } from "@/lib/guestConversationStorage";
 import {
@@ -895,17 +896,30 @@ function ChatAppComponent({
       // (used for display and the empty-response check below) always has it
       // stripped back out.
       let rawStreamText = "";
+      // Set when the server announced a model change mid-response. Kept so the
+      // finished message can say which model actually answered -- the routed
+      // header named the model that was asked first, and it is no longer true.
+      let retryingWithModelId: string | null = null;
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
 
         resetIdleTimeout();
         rawStreamText += decoder.decode(value, { stream: true });
-        assistantText = splitSearchMetadataTrailer(rawStreamText).displayText;
+        // §7's `retrying_with_another_model` arrives as a leading out-of-band
+        // chunk, because a fallback is decided after the headers are gone.
+        // Stripped here on every pass rather than once at the end: the answer
+        // is rendered as it streams, and a marker left in for even one frame
+        // is a marker the user reads.
+        const routing = splitRoutingRetrySignal(rawStreamText);
+        if (routing.signal) retryingWithModelId = routing.signal.modelId;
+        assistantText = splitSearchMetadataTrailer(routing.text).displayText;
 		setAssistantMessage(assistantMessageId, assistantText, "normal");
       }
 
-      const { searchMetadataJson } = splitSearchMetadataTrailer(rawStreamText);
+      const finalRouting = splitRoutingRetrySignal(rawStreamText);
+      if (finalRouting.signal) retryingWithModelId = finalRouting.signal.modelId;
+      const { searchMetadataJson } = splitSearchMetadataTrailer(finalRouting.text);
       const trailer = parseChatStreamTrailer(searchMetadataJson);
       const searchMetadata =
         (trailer?.searchMetadata as WebSearchExecution | null | undefined) ??
@@ -954,9 +968,19 @@ function ChatAppComponent({
           {
             searchMetadata,
             ...(memoryUsedCount > 0 ? { memoryUsedCount } : {}),
+            // §7: when the server fell back mid-response, the model that
+            // answered is not the one this request was sent to. Recording the
+            // request's model here would attribute the answer to a model that
+            // produced none of it.
+            ...(retryingWithModelId ? { modelId: retryingWithModelId } : {}),
           }
         );
-        onResponseComplete?.(analyticsPromptId, modelId, assistantText, searchMetadata);
+        onResponseComplete?.(
+          analyticsPromptId,
+          retryingWithModelId ?? modelId,
+          assistantText,
+          searchMetadata
+        );
       }
     } catch (error: unknown) {
       const requestError =
