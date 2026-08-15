@@ -35,6 +35,18 @@ export const RELEASE_RECORDS_DIR = ".github/audits";
 export const RELEASE_RECORD_NAME =
     /^release-(\d{4}-\d{2}-\d{2})__([0-9a-f]{7,40})\.md$/;
 
+// `release-deviation-<date>__<sha>.md`. A second kind of document in the same
+// directory, and deliberately not validated as a record: a record says a
+// checklist was run against a build, a deviation says production is serving a
+// build no checklist covers. Requiring ticked boxes of one would be asking it
+// to claim the thing it exists to deny.
+//
+// It is matched rather than ignored. A pattern that skipped everything not
+// shaped like a record would also skip a record somebody misnamed, which is
+// the rule this file's naming check exists for.
+export const RELEASE_DEVIATION_NAME =
+    /^release-deviation-(\d{4}-\d{2}-\d{2})__([0-9a-f]{7,40})\.md$/;
+
 export const normalizeLineEndings = (text) => text.replace(/\r\n?/g, "\n");
 
 const FULL_SHA = /^[0-9a-f]{40}$/;
@@ -119,6 +131,27 @@ export const isPlaceholderOwner = (value) => {
  * arguments, which is what lets the tests state a defect as a string literal
  * rather than a fixture tree.
  */
+export const releaseDeviationProblems = (name, text) => {
+    const problems = [];
+    const path = `${RELEASE_RECORDS_DIR}/${name}`;
+    const body = normalizeLineEndings(text);
+
+    // The one thing a deviation must do: name the build production is serving.
+    // Without it the document describes a gap without saying where the gap is,
+    // and the rollback target is unreadable.
+    if (!/\b[0-9a-f]{40}\b/.test(body)) {
+        problems.push(
+            `${path}  names no full 40-character SHA. A deviation record has to say which build production is actually serving.`
+        );
+    }
+    if (!/[Rr]ollback/.test(body)) {
+        problems.push(
+            `${path}  names no rollback target. The newest build a checklist covers is the answer, and it has to be written down before it is needed.`
+        );
+    }
+    return problems;
+};
+
 export const releaseRecordProblems = (name, text, { templateText } = {}) => {
     const problems = [];
     const path = `${RELEASE_RECORDS_DIR}/${name}`;

@@ -2,6 +2,33 @@ version: 2
 updates:
   - package-ecosystem: npm
     directory: "/"
+    # Version updates go to develop, so a dependency change is released the way
+    # every other change is: through staging, in a release someone cut.
+    #
+    # The default is the default branch, and on 2026-08-15 that put PR #570 --
+    # twelve runtime dependencies at once, including the AI SDK, Stripe, the
+    # Postgres driver, Sentry and the AWS S3 client -- straight onto `main`,
+    # where it deployed to production ten minutes later. PR Fast Gate passed,
+    # and that is real evidence; it is not evidence about the provider, the
+    # payment processor, the database driver or the observability pipeline
+    # those packages talk to, because CI talks to none of them. `/api/ready`
+    # answering true is a startup and dependency-reachability fact, not a
+    # behavioural one.
+    #
+    # ## Security updates do NOT honour this
+    #
+    # Dependabot raises security updates against the default branch whatever
+    # `target-branch` says:
+    # https://docs.github.com/en/code-security/reference/supply-chain-security/dependabot-options-reference#target-branch
+    #
+    # That is deliberate on their side and fine on ours -- an urgent fix should
+    # not queue behind a release train. It does mean a `main` PR from Dependabot
+    # is now a signal rather than routine, and the exception it travels under is
+    # written down in `.github/RELEASE_CHECKLIST.md` ("Out-of-band changes to
+    # main"): named as a security update, human-approved with a staging waiver,
+    # a new release SHA recorded, verified beyond PR CI, a rollback SHA, and a
+    # confirmed back-merge.
+    target-branch: develop
     schedule:
       interval: weekly
     open-pull-requests-limit: 10
@@ -55,8 +82,48 @@ updates:
       - dependency-name: "@types/node"
         versions: [">=23"]
     groups:
-      production-dependencies:
+      # Split by blast radius, not by `dependency-type`.
+      #
+      # #570 moved twelve runtime packages in one commit. Had production
+      # misbehaved afterwards, the first question -- which of these did it --
+      # would have had twelve answers and one revert covering all of them.
+      # Grouping is still right (twelve separate PRs is how a queue stops being
+      # read), but a group should be a set of packages that fail the same way.
+      #
+      # A package matching no pattern below still gets a PR of its own, which
+      # is the safe residue.
+      provider-sdks:
         dependency-type: production
+        patterns:
+          - "@ai-sdk/*"
+          - "ai"
+          - "openai"
+          - "@anthropic-ai/*"
+      payments-and-data:
+        dependency-type: production
+        patterns:
+          - "stripe"
+          - "pg"
+          - "@prisma/*"
+          - "prisma"
+          - "next-auth"
+          - "@auth/*"
+      infrastructure-and-observability:
+        dependency-type: production
+        patterns:
+          - "@sentry/*"
+          - "@aws-sdk/*"
+          - "@cloudflare/*"
+      user-interface:
+        dependency-type: production
+        patterns:
+          - "react"
+          - "react-dom"
+          - "next"
+          - "lucide-react"
+          - "highlight.js"
+          - "tailwindcss"
+          - "@tailwindcss/*"
       development-dependencies:
         dependency-type: development
   - package-ecosystem: github-actions
