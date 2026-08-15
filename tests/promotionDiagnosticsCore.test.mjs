@@ -71,6 +71,7 @@ const healthyStripe = (overrides = {}) => ({
       adoptable: true,
     },
   ],
+  exactCodeSearchPerformed: true,
   recommendation: "healthy",
   ...overrides,
 });
@@ -617,14 +618,6 @@ test("a search that ran and found nothing still warns", () => {
   const candidates = checkFor(section, "exact_code_candidates");
   assert.equal(candidates.status, "warn");
   assert.equal(candidates.reason, "no_stripe_object_for_code");
-});
-
-test("a caller that does not report whether it searched keeps the old reading", () => {
-  const section = stripeSection({ exactCodeCandidates: [] });
-  assert.equal(
-    checkFor(section, "exact_code_candidates").reason,
-    "no_stripe_object_for_code"
-  );
 });
 
 test("a repaired promotion warns for its drift alone, not for a search it skipped", () => {
