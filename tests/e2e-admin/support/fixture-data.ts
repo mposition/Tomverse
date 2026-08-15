@@ -121,6 +121,24 @@ export const FIXTURE_REFUNDS = {
   },
 } as const;
 
+/**
+ * The `ChatUsageBucket` rows seeded for the active Pro customer.
+ *
+ * `count` is a BigInt column, so Prisma hands these back as `bigint` no matter
+ * how small they are -- which is what makes them the fixture that exercises the
+ * admin detail route's serialization. `creditsMonth` deliberately sits past
+ * int4, the range that forced the column to BigInt (see
+ * docs/policy/credit-and-cost-limits.md), so an end-to-end read proves the full
+ * width rather than only the happy digits.
+ *
+ * The rows are written under the application's own derived key, not the raw
+ * user id -- see `userChatUsageKey` in `lib/chatUsageKey.ts`.
+ */
+export const FIXTURE_USAGE = {
+  creditsToday: 17,
+  creditsMonth: 2_500_000_000,
+} as const;
+
 export const FIXTURE_CREDIT = {
   purchaseId: "e2e-credit-purchase",
   lotId: "e2e-credit-lot",

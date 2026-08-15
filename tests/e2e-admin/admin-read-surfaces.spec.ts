@@ -14,6 +14,7 @@ import {
   FIXTURE_PRIVACY_REQUEST,
   FIXTURE_PROMOTION,
   FIXTURE_REFUNDS,
+  FIXTURE_USAGE,
   FIXTURE_WEBHOOK,
   consoleHeading,
   expect,
@@ -237,6 +238,59 @@ test.describe("admin read surfaces", () => {
     await expect(
       page.getByText(FIXTURE_CONVERSATION.title).first()
     ).toBeVisible();
+  });
+
+  test("a customer with usage history gets their buckets, not a load failure", async ({
+    page,
+  }) => {
+    // The regression this covers: `ChatUsageBucket."count"` is BigInt, and a
+    // `bigint` reaching `NextResponse.json()` throws, so the whole detail
+    // response 500ed for any customer who had actually chatted. The panel
+    // reported that as one sentence, which is why the surface has to be
+    // asserted on the seeded figures rather than on the page merely loading.
+    const detail = page.waitForResponse(
+      (response) =>
+        response.url().includes(`/api/admin/users/${FIXTURE_CUSTOMERS.activePro.id}`) &&
+        response.request().method() === "GET"
+    );
+    await page.goto(`/admin/users/${FIXTURE_CUSTOMERS.activePro.id}`);
+    expect((await detail).status()).toBe(200);
+
+    await expect(page.getByText("Failed to load user detail.")).toHaveCount(0);
+    await expect(
+      page.getByTestId("admin-user-detail-credits-today")
+    ).toHaveText(String(FIXTURE_USAGE.creditsToday));
+    // Past int4: the read carries the column's full width end to end.
+    await expect(
+      page.getByTestId("admin-user-detail-credits-month")
+    ).toHaveText(String(FIXTURE_USAGE.creditsMonth));
+    // The seeded conversation's two messages, counted in the customer's own
+    // day window.
+    await expect(
+      page.getByTestId("admin-user-detail-messages-today")
+    ).toHaveText("2");
+    // Usage is only half the detail; the relations alongside it must render
+    // too, so a green run means data reached the screen rather than an empty
+    // panel that merely stopped erroring.
+    await expect(
+      page.getByText(FIXTURE_CONVERSATION.title).first()
+    ).toBeVisible();
+    await expect(page.getByText(FIXTURE_CREDIT.packId).first()).toBeVisible();
+  });
+
+  test("a customer with no usage history still reads zero", async ({ page }) => {
+    // The other half of the same contract: an absent bucket used to be the
+    // only path that worked, and it has to keep working.
+    await page.goto(`/admin/users/${FIXTURE_CUSTOMERS.suspended.id}`);
+
+    await expect(consoleHeading(page)).toHaveText("Customer detail");
+    await expect(page.getByText("Failed to load user detail.")).toHaveCount(0);
+    await expect(
+      page.getByTestId("admin-user-detail-credits-today")
+    ).toHaveText("0");
+    await expect(
+      page.getByTestId("admin-user-detail-credits-month")
+    ).toHaveText("0");
   });
 
   test("support's feedback tab shows open and resolved entries with a filter", async ({

@@ -12,6 +12,7 @@ import {
 import { writeAdminAuditLog } from "@/lib/adminAudit";
 import { hasAdminPermission, isAdminSession } from "@/lib/adminAuth";
 import { getUserChatUsageKey } from "@/lib/chatSecurity";
+import { usageBucketCount } from "@/lib/chatUsageBucketCount";
 import {
   apiSecurityResponse,
   consumeApiRateLimit,
@@ -410,10 +411,17 @@ export async function GET(req: Request, context: RouteContext) {
           dayStart: dayWindow.start.toISOString(),
           dayEnd: dayWindow.end.toISOString(),
           messagesToday,
-          creditsToday:
-            usageRows.find((row) => row.period === "day")?.count || 0,
-          creditsMonth:
-            usageRows.find((row) => row.period === "month")?.count || 0,
+          // `ChatUsageBucket."count"` is BigInt, so these have to be narrowed
+          // here the way every other read boundary narrows it. `?.count || 0`
+          // hid that: an absent row and a stored zero both produced a plain
+          // number, and only a customer with real usage sent a `bigint` into
+          // `NextResponse.json()` -- which throws rather than serializing.
+          creditsToday: usageBucketCount(
+            usageRows.find((row) => row.period === "day")?.count
+          ),
+          creditsMonth: usageBucketCount(
+            usageRows.find((row) => row.period === "month")?.count
+          ),
         },
       },
     });
