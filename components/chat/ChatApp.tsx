@@ -63,6 +63,15 @@ type ChatAppProps = {
     text: string;
     chatId: string;
     userMessageId: string;
+    /**
+     * The models this send was actually made for. A panel only auto-sends a
+     * payload that names its own model: the payload outlives the send that
+     * created it, so a model swapped into a panel afterwards would otherwise
+     * pick it up and replay the previous question -- against a selection the
+     * server has not been told about yet (MODEL_NOT_SELECTED), consuming an
+     * admission slot the preflight never reserved for it.
+     */
+    modelIds: string[];
     attachments: ChatAttachment[];
     deepResearchDepth?: "quick" | "standard" | "deep";
     /**
@@ -206,6 +215,23 @@ function ChatAppComponent({
     targetChatId: string;
     attachments: ChatAttachment[];
   } | null>(null);
+  /**
+   * The send barrier and this panel's current model, read through refs by the
+   * auto-send effect below.
+   *
+   * `onBeforeSend` is redefined on every render of the page component, so
+   * depending on it directly would re-run (and therefore cancel) that effect
+   * on every parent render -- including while it is waiting on the barrier,
+   * which would drop the send it had already claimed. The model ref is how
+   * the send re-checks, after the wait, that this panel is still the one the
+   * payload was claimed for.
+   */
+  const onBeforeSendRef = useRef(onBeforeSend);
+  const panelModelIdRef = useRef(modelId);
+  useLayoutEffect(() => {
+    onBeforeSendRef.current = onBeforeSend;
+    panelModelIdRef.current = modelId;
+  });
 
   const expectedMessageViewKey = `${
     isGuestMode ? "guest" : sessionUserId || "account"
@@ -1218,6 +1244,11 @@ function ChatAppComponent({
     if (!isGuestMode && status === "loading") return;
     if (!isGuestMode && !session?.user) return;
     if (!promptPayload || promptPayload.chatId !== initialConversationId) return;
+    // The payload is not cleared once its panels have consumed it, so this
+    // effect re-runs for whatever model the panel is showing later. Only the
+    // models the send was made for may answer it -- a model swapped in
+    // afterwards was not part of this run and has no answer to give here.
+    if (!promptPayload.modelIds.includes(modelId)) return;
 
     const promptKey = `${promptPayload.id}:${promptPayload.chatId}:${modelId}`;
     if (processedPromptKeys.has(promptKey)) return;
@@ -1226,8 +1257,28 @@ function ChatAppComponent({
     queueMicrotask(() => {
       if (cancelled || isPanelDisabled) return;
       if (processedPromptKeys.has(promptKey)) return;
+      // Claimed before the barrier is awaited, not after: a re-render during
+      // the await must not let a second pass start the same send.
       processedPromptKeys.add(promptKey);
-      void handleSendPrompt(
+      void (async () => {
+        // Every other send path (global submit, per-panel follow-up, both
+        // retries) flushes the model-settings sync before it sends. This one
+        // did not, which made it the one way a request could reach /api/chat
+        // ahead of the PATCH that puts its model into the conversation's
+        // stored selection. Normally the flush is already satisfied and
+        // resolves without a request; when it is not, the send waits for the
+        // server rather than racing it.
+        const settingsReady =
+          (await onBeforeSendRef.current?.(promptPayload.chatId)) ?? true;
+        // Abandoned stays abandoned, exactly like the other send paths: a
+        // refused flush has already told the user and put the screen back on
+        // the selection the server confirmed, so re-sending behind that would
+        // contradict it. The claim is deliberately kept so nothing picks the
+        // payload up again. The model check catches the panel having moved on
+        // while the flush was running -- sending then would file this answer
+        // under a model the panel is no longer showing.
+        if (!settingsReady || panelModelIdRef.current !== modelId) return;
+        void handleSendPrompt(
           promptPayload.text,
           promptPayload.chatId,
           promptPayload.userMessageId,
@@ -1240,6 +1291,7 @@ function ChatAppComponent({
           promptPayload.contextBundle,
           promptPayload.contextLayout
         );
+      })();
     });
     return () => {
       cancelled = true;
