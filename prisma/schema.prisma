@@ -1956,7 +1956,7 @@ model ExternalImport {
   userId String
   user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  provider String // "chatgpt" | "claude" — allowlist CHECK lives in the migration
+  provider String // lib/externalImportProviders.ts — allowlist CHECK lives in the migration
   status   String @default("inspecting") // inspecting | staging | preview_ready | finalizing | completed | failed | cancelled
 
   /// Client-sent hint for fast duplicate-candidate detection only. Never an

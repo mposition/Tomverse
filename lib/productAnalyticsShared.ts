@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { BILLING_CURRENCIES, type BillingCurrency } from "@/lib/billingMarkets";
 import { SUPPORTED_LANGUAGES } from "@/lib/language";
+import { EXTERNAL_IMPORT_PROVIDERS } from "@/lib/externalImportProviders";
 
 export const PRODUCT_ANALYTICS_EVENT_NAMES = [
   "landing_view",
@@ -287,7 +288,9 @@ export const analyticsPropertiesSchema = z
     // before the provider was detected. The failure reason is the worker's
     // closed reason label (archive_too_large, no_conversation_data, ...) --
     // a state name, never anything derived from the archive's contents.
-    import_provider: z.enum(["chatgpt", "claude", "gemini", "unknown"]).optional(),
+    import_provider: z
+        .enum([...EXTERNAL_IMPORT_PROVIDERS, "unknown"])
+        .optional(),
     import_failure_reason: z.string().trim().min(1).max(64).optional(),
     // Which wizard step the funnel event is about. A closed enum, not a free
     // string: filenames, conversation titles, message bodies, external ids,
