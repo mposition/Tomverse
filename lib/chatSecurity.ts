@@ -68,11 +68,11 @@ import {
 import { recordChatLimitDecision } from "@/lib/chatLimitDecisions";
 import { isWebSearchMode, type WebSearchMode } from "@/lib/appDefaults";
 import { getAnonymousClientKey } from "@/lib/clientIp";
-import { recordInternalProviderUsage } from "@/lib/providerUsageAccounting";
 import {
     boundedProviderIdentifier,
     recordAttemptCost,
     rollupDayOf,
+    type LedgerAttempt,
 } from "@/lib/chatAttemptCostLedger";
 import {
     AddOnCreditError,
@@ -3385,6 +3385,50 @@ export const settleChatUsage = async (
         // settles either side of midnight UTC must not put the row on one day
         // and the spend on another -- a later correction has to find both.
         const rollupDay = rollupDayOf();
+        /**
+         * The turn that dispatched once, as an attempt.
+         *
+         * Built here so the single-attempt path settles through exactly the
+         * writer the fallback path uses: one row, one rollup, one transaction.
+         * Null when nothing was used and nothing cost -- an expiry reconciled
+         * to a full refund records no spend, and a row of zeroes would put a
+         * call that never completed into the ledger of calls that did.
+         */
+        const singleAttempt: LedgerAttempt | null =
+            !multiAttempt &&
+            (actualInput > 0 || actualOutput > 0 || actualCost > 0)
+                ? {
+                      attemptIndex: 0,
+                      price: {
+                          provider: canonical.provider,
+                          modelId: canonical.modelId,
+                          inputUsdPerMillionTokens:
+                              canonical.inputUsdPerMillionTokens,
+                          outputUsdPerMillionTokens:
+                              canonical.outputUsdPerMillionTokens,
+                          cachedInputPriceMultiplier:
+                              canonical.cachedInputPriceMultiplier,
+                          pricingVersion: canonical.pricingVersion ?? null,
+                      },
+                      inputTokens: actualInput,
+                      cachedInputTokens: actualCachedInput,
+                      outputTokens: actualOutput,
+                      reasoningTokens: Number.isSafeInteger(usage.reasoningTokens)
+                          ? Math.max(0, usage.reasoningTokens!)
+                          : undefined,
+                      usageFromProvider: usageSource === "provider_usage_metadata",
+                      outcome: usage.outcome,
+                      costMicroUsd: actualCost,
+                      costSource: costBreakdown.costSource,
+                      userBilled: actualCredits > 0,
+                      // From the reservation row, where
+                      // `linkChatReservationProviderRequest` put them. A
+                      // single-attempt turn has exactly one of each, so the
+                      // reservation's own columns are the whole answer.
+                      providerRequestId: durable.providerRequestId,
+                      providerResponseId: durable.providerResponseId,
+                  }
+                : null;
         const planActualCredits = Math.min(
             actualCredits,
             canonical.planReservedCredits
@@ -3504,6 +3548,34 @@ export const settleChatUsage = async (
                     snapshot: { settlementVersion: multiAttempt.version },
                 });
             }
+        } else if (singleAttempt) {
+            // The same contract for the turn that dispatched once, which is
+            // most of them.
+            //
+            // It used to accrue after the transaction committed, and that left
+            // the window this whole ledger exists to close: commit, die, and
+            // the rollup never happens -- with the reservation already
+            // terminal, so a rerun cannot restore it. Inside the transaction,
+            // the cost row and the rollup are as durable as the settlement
+            // that justifies them.
+            //
+            // The rollup split is handed over rather than recomputed: a
+            // provider that reports its own component costs (Perplexity) has
+            // already had them resolved here, and pricing them again from
+            // tokens would write a different breakdown for the same total.
+            await recordAttemptCost(tx, {
+                reservationId: durable.id,
+                attempt: singleAttempt,
+                rollupDate: rollupDay,
+                rollup: {
+                    uncachedInputCostMicroUsd:
+                        costBreakdown.uncachedInputCostMicroUsd,
+                    cachedInputCostMicroUsd:
+                        costBreakdown.cachedInputCostMicroUsd,
+                    outputCostMicroUsd: costBreakdown.outputCostMicroUsd,
+                },
+                snapshot: { usageSource },
+            });
         }
         if (canonical.userId && canonical.addOnReservations.length > 0) {
             await settleAddOnCredits(tx, {
@@ -3543,12 +3615,18 @@ export const settleChatUsage = async (
                 // transaction as the terminal status. Write-once at the
                 // database, so a later goodwill refund cannot re-attribute it.
                 //
+                // Only when the user was actually charged. A full refund
+                // charged for no attempt, and naming one would be a claim that
+                // some attempt was billed when none was -- the case crash
+                // reconciliation made ordinary.
                 ...(multiAttempt?.billedAttempt
                     ? {
                           settlementAttemptIndex:
                               multiAttempt.billedAttempt.attemptIndex,
                       }
-                    : {}),
+                    : singleAttempt && actualCredits > 0
+                      ? { settlementAttemptIndex: 0 }
+                      : {}),
                 settledAt: new Date(),
                 reconciledAt: options?.reconciled ? new Date() : null,
                 lastError: options?.reason?.slice(0, 500) || null,
@@ -3595,10 +3673,13 @@ export const settleChatUsage = async (
         };
     });
 
-    // Single-attempt only. A multi-attempt turn accrued each attempt inside
-    // the settlement transaction, against its own provider and model; running
-    // this as well would add the whole turn a second time under the
-    // reservation's canonical model.
+    // Every accrual now happens inside the settlement transaction, single
+    // attempt and fallback alike, so nothing is recorded here.
+    //
+    // What stays outside is the alert, and deliberately: it is a notification
+    // about a balance, it talks to something other than this database, and a
+    // slow or failing provider API must not hold a settlement transaction open
+    // or roll one back.
     if (
         settlement.applied &&
         !multiAttempt &&
@@ -3607,19 +3688,6 @@ export const settleChatUsage = async (
             settlement.actualOutput > 0 ||
             settlement.actualCost > 0)
     ) {
-        await recordInternalProviderUsage({
-            provider: settlement.provider,
-            modelId: settlement.modelId,
-            inputTokens: settlement.actualInput,
-            cachedInputTokens: settlement.actualCachedInput,
-            outputTokens: settlement.actualOutput,
-            estimatedCostMicroUsd: settlement.actualCost,
-            uncachedInputCostMicroUsd:
-                settlement.costBreakdown.uncachedInputCostMicroUsd,
-            cachedInputCostMicroUsd:
-                settlement.costBreakdown.cachedInputCostMicroUsd,
-            outputCostMicroUsd: settlement.costBreakdown.outputCostMicroUsd,
-        });
         if (settlement.provider === "zhipu") {
             await notifyProviderCreditIfNeeded(settlement.provider).catch(
                 (error) =>

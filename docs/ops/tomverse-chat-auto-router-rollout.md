@@ -537,6 +537,14 @@ that fails to read is reported separately again, as
 `invalid_cost_intent_payload`: the first is a closed set that ages out, the
 second is a defect happening now.
 
+**Single-attempt turns settle through the same writer.** They are most of the
+traffic, and their accrual used to happen after the settlement transaction
+committed — so a crash in that window lost the rollup with no way to rebuild
+it, the reservation already being terminal. The cost row, the rollup, the
+terminal status and the settlement pointer now commit together. Only the
+provider balance alert stays outside, because it talks to another service and
+must not hold a settlement open or roll one back.
+
 The two ledgers stay separated at their furthest apart here: a crash refunds
 the user in full, keeps the provider's cost, and names no billed attempt.
 `ChatCreditReservation.settlementAttemptIndex` is therefore allowed to be NULL

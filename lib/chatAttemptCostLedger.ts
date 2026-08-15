@@ -123,6 +123,19 @@ export type AttemptCostRecord = {
      */
     rollupDate?: Date;
     /**
+     * The cost split to roll up, when the caller has a better one than the
+     * token calculator produces.
+     *
+     * Perplexity reports its own component costs and settlement already
+     * resolved them; recomputing from tokens here would write a different
+     * split for the same total. Omitted, the tokens decide.
+     */
+    rollup?: {
+        uncachedInputCostMicroUsd: number;
+        cachedInputCostMicroUsd: number;
+        outputCostMicroUsd: number;
+    };
+    /**
      * Nobody counted this call's tokens, so the row records none.
      *
      * NULL rather than 0, which would be a measurement. The cost still stands:
@@ -156,6 +169,7 @@ export const recordAttemptCost = async (
         attempt,
         snapshot,
         rollupDate,
+        rollup,
         unknownTokens,
     }: AttemptCostRecord
 ): Promise<AttemptCostOutcome> => {
@@ -213,6 +227,7 @@ export const recordAttemptCost = async (
     }
 
     const breakdown =
+        rollup ??
         (unknownTokens
             ? {
                   uncachedInputCostMicroUsd: 0,

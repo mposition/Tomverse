@@ -493,9 +493,14 @@ test("the provider usage ledger records each attempt under its own model", async
   );
 });
 
-test("a settlement with no attempts behaves exactly as it always has", async () => {
-  // The whole of today's traffic. Nothing about the single-attempt path may
-  // move because the multi-attempt one now exists.
+test("a settlement with no attempts settles the user's half exactly as it always has", async () => {
+  // The whole of today's traffic. The user's ledger -- credits, cost, the
+  // provider bucket -- must be untouched by the attempt ledger existing.
+  //
+  // What did change, deliberately, is that the turn now leaves a cost row of
+  // its own. It used to accrue after the transaction committed, which left a
+  // window where a crash lost the rollup with no way to rebuild it: the
+  // reservation was already terminal, so a rerun could not restore it.
   const { acquired } = await twoAttemptRun();
   await settleChatUsage(acquired.usageReservation, {
     inputTokens: 10_000,
@@ -508,14 +513,14 @@ test("a settlement with no attempts behaves exactly as it always has", async () 
   });
   assert.equal(durable.status, "settled");
   assert.equal(durable.settledCostMicroUsd, BigInt(2_000_000));
-  assert.equal(
-    await prisma.chatAttemptUsage.count({
-      where: { reservationId: durable.id },
-    }),
-    0,
-    "a single-attempt turn writes no attempt rows; the reservation is its own record"
-  );
   assert.equal(await bucket("provider:openai", "provider-cost-day"), 2_000_000);
+
+  const rows = await prisma.chatAttemptUsage.findMany({
+    where: { reservationId: durable.id },
+  });
+  assert.equal(rows.length, 1, "one dispatch, one cost row");
+  assert.equal(rows[0].attemptIndex, 0);
+  assert.equal(rows[0].costMicroUsd, BigInt(2_000_000));
 });
 
 test("a malformed attempt set is refused rather than settled anyway", async () => {
@@ -921,7 +926,9 @@ test("a legacy reservation settles exactly as it always did", async () => {
     where: { id: acquired.usageReservation.reservationId },
   });
   assert.equal(durable.status, "settled");
-  assert.equal(durable.settlementAttemptIndex, null);
+  // A charged turn names the attempt it charged for, legacy payload or not:
+  // the pointer is about what was billed, and this one billed attempt 0.
+  assert.equal(durable.settlementAttemptIndex, 0);
   // 10K in and 10K out at $100/M: the whole turn on one provider.
   assert.equal(await bucket("provider:openai", "provider-cost-day"), 2_000_000);
 });
@@ -1340,4 +1347,130 @@ test("a same-provider fallback settles the shared bucket to the sum of both actu
     where: { id: acquired.usageReservation.reservationId },
   });
   assert.equal(durable.settlementAttemptIndex, 1);
+});
+
+// The turn that dispatched once, which is most of them.
+//
+// Its accrual used to happen after the settlement transaction committed, which
+// left the window this ledger exists to close: commit, die, and the rollup
+// never happens -- with the reservation already terminal, so a rerun cannot
+// restore it.
+
+test("a single-attempt settlement writes its row, its rollup and its pointer atomically", async () => {
+  const { acquired } = await twoAttemptRun();
+  const reservationId = acquired.usageReservation.reservationId;
+
+  await settleChatUsage(acquired.usageReservation, {
+    inputTokens: 10_000,
+    outputTokens: 10_000,
+    outcome: "completed",
+  });
+
+  const row = await prisma.chatAttemptUsage.findUniqueOrThrow({
+    where: { reservationId_attemptIndex: { reservationId, attemptIndex: 0 } },
+  });
+  assert.equal(row.provider, "openai");
+  assert.equal(row.modelId, "attempt-usage-model");
+  assert.equal(row.usageSource, "provider_usage_metadata");
+  assert.equal(row.costSource, "token_estimate");
+  // 10K in and 10K out at $100/M each.
+  assert.equal(row.costMicroUsd, BigInt(2_000_000));
+
+  const rollup = await prisma.providerDailyUsage.findFirstOrThrow({
+    where: { provider: "openai", modelId: "attempt-usage-model", source: "internal" },
+  });
+  assert.equal(rollup.estimatedCostMicroUsd, 2_000_000);
+  assert.equal(rollup.requestCount, 1);
+  // Same day for both, by the value the row carries rather than by inference.
+  assert.equal(rollup.date.getTime(), row.rollupDate.getTime());
+
+  const durable = await prisma.chatCreditReservation.findUniqueOrThrow({
+    where: { id: reservationId },
+  });
+  assert.equal(durable.status, "settled");
+  assert.equal(
+    durable.settlementAttemptIndex,
+    0,
+    "a charged single-attempt turn names the attempt it charged for"
+  );
+});
+
+test("settling a single-attempt turn twice moves the ledger once", async () => {
+  const { acquired } = await twoAttemptRun();
+  const reservationId = acquired.usageReservation.reservationId;
+  const usage = {
+    inputTokens: 10_000,
+    outputTokens: 10_000,
+    outcome: "completed" as const,
+  };
+
+  await settleChatUsage(acquired.usageReservation, usage);
+  const second = await settleChatUsage(acquired.usageReservation, usage);
+  assert.equal(second.applied, false, "the reservation is already terminal");
+
+  assert.equal(
+    await prisma.chatAttemptUsage.count({ where: { reservationId } }),
+    1
+  );
+  const rollup = await prisma.providerDailyUsage.findFirstOrThrow({
+    where: { provider: "openai", modelId: "attempt-usage-model", source: "internal" },
+  });
+  assert.equal(rollup.estimatedCostMicroUsd, 2_000_000);
+  assert.equal(rollup.requestCount, 1);
+  assert.equal(
+    await prisma.chatAttemptUsageAdjustment.count({ where: { reservationId } }),
+    0
+  );
+});
+
+test("a full refund names no attempt and records no spend", async () => {
+  const { acquired } = await twoAttemptRun();
+  const reservationId = acquired.usageReservation.reservationId;
+
+  await settleChatUsage(acquired.usageReservation, {
+    inputTokens: 0,
+    outputTokens: 0,
+    outcome: "failed",
+  });
+
+  const durable = await prisma.chatCreditReservation.findUniqueOrThrow({
+    where: { id: reservationId },
+  });
+  assert.equal(durable.status, "refunded");
+  assert.equal(durable.settledCredits, 0);
+  assert.equal(
+    durable.settlementAttemptIndex,
+    null,
+    "charged for no attempt, so it names none"
+  );
+  // Nothing was used and nothing cost, so there is no call to put in the
+  // ledger of calls that happened.
+  assert.equal(
+    await prisma.chatAttemptUsage.count({ where: { reservationId } }),
+    0
+  );
+  assert.equal(await prisma.providerDailyUsage.count(), 0);
+});
+
+test("a cancelled single-attempt turn still records what it cost", async () => {
+  // The user is charged for a partial answer, and the provider was paid for
+  // the whole call either way.
+  const { acquired } = await twoAttemptRun();
+  const reservationId = acquired.usageReservation.reservationId;
+
+  await settleChatUsage(acquired.usageReservation, {
+    inputTokens: 10_000,
+    outputTokens: 2_000,
+    outcome: "cancelled",
+  });
+
+  const row = await prisma.chatAttemptUsage.findUniqueOrThrow({
+    where: { reservationId_attemptIndex: { reservationId, attemptIndex: 0 } },
+  });
+  assert.equal(row.outcome, "cancelled");
+  assert.equal(row.costMicroUsd, BigInt(1_200_000));
+  const rollup = await prisma.providerDailyUsage.findFirstOrThrow({
+    where: { provider: "openai", modelId: "attempt-usage-model", source: "internal" },
+  });
+  assert.equal(rollup.estimatedCostMicroUsd, 1_200_000);
 });
