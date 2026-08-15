@@ -526,6 +526,63 @@ the partial index and applies them, recreating a missing rollup row rather than
 leaving the delta stranded. Marking first and applying second is what makes two
 replays apply one delta once.
 
+**Something has to run all of this.** The fifteen-minute maintenance job now
+drives the three recovery passes in the only order that works: reconcile
+expired reservations, then sweep stale attempts — the sweep only considers an
+attempt whose reservation is terminal or expired, so running it first would
+defer a run's worth every time — then replay pending adjustments, which the
+step before it can create. Until that wiring existed the last two had no
+production caller at all: a sweep nobody ran, and a partial index nobody
+consumed, which from the data is indistinguishable from having nothing to
+recover.
+
+There is deliberately no retry ceiling and no dead-letter queue. A provider
+cost delta is not data that may be abandoned after N attempts; what it needs is
+to stop being invisible. The step reports the pending count and the age of the
+oldest unapplied correction, and an age past two maintenance runs raises
+`CHAT_COST_ADJUSTMENT_BACKLOG`. One run failing to apply a delta is a blip; two
+is a pattern nobody would otherwise see.
+
+The steps are idempotent and do not depend on one another for correctness — the
+sweep already accepts a reservation that is merely expired, and nothing in a
+maintenance run creates the adjustments the replay applies. They run after the
+primary reconciliation to keep reporting and operational ownership predictable,
+not because either needs the other.
+
+**Each sweep signal gets the threshold its meaning earns.** Alerting on "closed
+without a cost row" as one number would either shout about instrumentation-only
+runs or stay silent about a writer that stopped recording intents, so the total
+is split by reason:
+
+| Reason | Meaning | Threshold |
+| --- | --- | --- |
+| `no_reservation` | An instrumentation-only run | Counted; never alerts |
+| `legacy_missing_cost_intent` | Written before intents existed | Counted; ages out |
+| `missing_cost_intent` | Written after the cutover, carrying none | One is an incident |
+| `dangling_reservation` | The run points at a row that is gone | One is an incident |
+| `invalid_cost_intent_payload` | The payload will not validate | One is an incident |
+| `unclassified_missing_cost_intent` | No cutover configured | Warning naming the variable |
+
+History and defect are told apart by `AUTO_ROUTER_COST_INTENT_CUTOVER_AT`, the
+moment intents began being written, compared against the reservation's own
+creation time. Unset, the two cannot be distinguished at all — so the unset
+configuration is what gets reported, rather than the alarm quietly answering
+"legacy" to everything.
+
+`unexpectedCostOutcome` is an incident on the first occurrence: the sweep
+cannot produce those outcomes by construction, so one means a contract broke.
+`failed` is not, on its own — a database that was briefly unavailable costs a
+delay, and the attempt is still `pending` for the next run. What is worth a
+call is the sweep falling behind: more eligible attempts than one batch can
+take, or one eligible for longer than thirty minutes to become stale plus two
+fifteen-minute runs.
+
+The backlog counts what the sweep would actually act on, sharing its exact
+predicate. Counting by age alone included turns that are legitimately still
+streaming — deep research runs past thirty minutes — so an alarm on that number
+would have fired on healthy traffic. `agedPending` is still reported beside it
+as a health figure.
+
 **Every writer is atomic, including the sweep.** The sweep reads and validates
 the cost intent first, then closes and records in one transaction through
 `closeAttemptWithCost`; a failure takes the close with it, so the attempt stays
@@ -541,9 +598,24 @@ second is a defect happening now.
 traffic, and their accrual used to happen after the settlement transaction
 committed — so a crash in that window lost the rollup with no way to rebuild
 it, the reservation already being terminal. The cost row, the rollup, the
-terminal status and the settlement pointer now commit together. Only the
-provider balance alert stays outside, because it talks to another service and
-must not hold a settlement open or roll one back.
+terminal status and the settlement pointer now commit together. Shadow telemetry and the
+provider balance alert stay outside, and the first of those is not about speed:
+`recordShadowSettlement` swallows its own errors because the contract is that
+shadow telemetry never fails a paid request, and a statement that fails on a
+transaction's own connection aborts that transaction whatever the caller does
+with the exception. Running it inside would have made the contract untrue in
+exactly the case it exists for — and it ran on the global client while the
+transaction held one, a second connection per settlement and a pool that can
+deadlock against itself. Outside the commit it also cannot record a settlement
+that never happened.
+
+The accrual is the transaction's *last* statement. `ProviderDailyUsage` is
+keyed on (provider, model, day), so it is one row shared by every turn on that
+model — the hottest row here — and whoever touches it holds it until COMMIT.
+Touching it early would serialise every concurrent turn on that model across
+the whole tail of the settlement; touching it last narrows that to the commit
+itself. When a fallback has two of them they are taken in sorted order, so two
+settlements holding two rollup rows cannot deadlock on each other.
 
 The two ledgers stay separated at their furthest apart here: a crash refunds
 the user in full, keeps the provider's cost, and names no billed attempt.

@@ -117,7 +117,8 @@
     "check:prompt-injection": "node --conditions=react-server --import tsx scripts/report-prompt-injection.mjs",
     "check:push-scope": "node scripts/check-push-scope.mjs",
     "report:routing-dispatch-readiness": "node --import tsx scripts/report-routing-dispatch-readiness.mjs",
-    "verify:package-build-matrix": "node scripts/verify-package-build-matrix.mjs"
+    "verify:package-build-matrix": "node scripts/verify-package-build-matrix.mjs",
+    "check:release-records": "node scripts/check-release-records.mjs"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^4.0.38",

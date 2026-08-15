@@ -112,6 +112,112 @@ export const RETENTION_POLICIES: readonly RetentionPolicy[] = [
         maintenanceStep: "notification_logs",
     },
     {
+        key: "storageCleanupQueues",
+        label: "Storage cleanup queues",
+        // `ImageAssetCleanup` and `AssistantKnowledgeCleanup` are the same
+        // table twice: id, r2Key, reason, attempts, lastError, createdAt,
+        // updatedAt, completedAt, and the same `[completedAt, createdAt]`
+        // index. One was registered as retained forever ("the queue's own
+        // record of what was deleted from R2") and the other was on the
+        // unswept list. Both statements cannot be right about the same shape,
+        // so this is one decision covering both -- and one key rather than
+        // two, because the operator's question is whether completed cleanup
+        // records are piling up, not which of the two queues they are in.
+        //
+        // **Only rows with a `completedAt`.** A pending row is the only place
+        // the R2 key is written down; deleting one loses the object's name
+        // everywhere in the system and the file is orphaned in storage
+        // permanently. That is the exact failure `account_deleted` was added
+        // to fix, and a sweep is a very easy way to reintroduce it.
+        //
+        // 90 days after completion, matching the alert delivery logs. The row
+        // answers "was this object actually deleted, and when", which is an
+        // operational question with an operational lifetime -- the object it
+        // names is already gone, so nothing here is evidence about a file that
+        // still exists.
+        policy:
+            "Delete completed storage cleanup records older than 90 days. Pending records are never deleted.",
+        action: "delete",
+        windowDays: 90,
+        maintenanceStep: "storage_cleanup_queues",
+    },
+    {
+        key: "tokenEstimateShadowSamples",
+        label: "Token estimate shadow samples",
+        // Measurement rows for the estimator evaluation: character counts,
+        // byte counts, a symbol ratio, token counts and ids. No prompt text,
+        // no completion text -- the schema comment on `nonCjkSymbolRatio` says
+        // why the ratio is stored rather than the text it was derived from.
+        //
+        // Read by exactly one thing, `report:token-estimate-calibration`,
+        // which takes the newest 200,000 and accepts a `--since`. So the value
+        // of a sample is entirely in being recent enough to describe today's
+        // traffic: a 90-day window keeps several evaluation cycles and drops
+        // samples that describe an estimator version and a model mix that no
+        // longer exist.
+        //
+        // Bounded because the evaluation ends. A shadow sample kept after the
+        // candidate estimator has been adopted or abandoned measures a
+        // comparison nobody is still running.
+        policy:
+            "Delete token estimate shadow samples older than 90 days.",
+        action: "delete",
+        windowDays: 90,
+        maintenanceStep: "token_estimate_shadow_samples",
+    },
+    {
+        key: "deepResearchJobs",
+        label: "Deep research jobs",
+        // Measured from `updatedAt`, which moves on every poll and on
+        // finalization. That is one clock for two row shapes: a job that
+        // finished, and a job nobody ever polled again because the user closed
+        // the tab -- the second never reaches a terminal status, has no
+        // `completedAt`, and is the one that actually accumulates.
+        //
+        // 30 days, matching the operational diagnostics beside it, because
+        // that is what this row is. Its user-visible half is a *copy*: on
+        // completion `resultText` is written into `Message.content` in the same
+        // transaction, and the Message is what the product reads and what the
+        // user deletes. What the row still buys after that is a poll from a
+        // second tab and an operator answering "what happened to this
+        // request", and a poll 30 days after the last one is not a poll.
+        //
+        // The copy is also why this is not measured in months: a duplicate of
+        // personal data that nothing reads is the worst kind to keep.
+        policy:
+            "Delete deep research job records 30 days after their last update.",
+        action: "delete",
+        windowDays: 30,
+        maintenanceStep: "deep_research_jobs",
+    },
+    {
+        key: "emailLoginAttempts",
+        label: "Email login attempts",
+        // Measured from `expiresAt`, not `createdAt`. The two are ten minutes
+        // apart at most (`EMAIL_LOGIN_CODE_TTL_MINUTES`, clamped to 1-10), so
+        // the window is the same either way -- but `expiresAt` is the moment
+        // the row stops being able to authenticate anyone, which is the fact
+        // the policy is about, and it is the indexed column.
+        //
+        // Seven days, and the reason is not that seven is a round number: the
+        // row's authentication value ends at `expiresAt`, and nothing in the
+        // product reads the table for history -- every read is `findFirst` for
+        // the current attempt. What the week buys is a live support or abuse
+        // question ("did someone request a code for my address?"), and a
+        // longer window would be keeping raw email addresses and credential
+        // hashes for an investigation nobody performs. That is the same
+        // forever-by-default this list exists to refuse, only shorter.
+        //
+        // Consumed and invalidated rows are covered too: a consumed row is
+        // already spent and an invalidated one was superseded, so neither has
+        // a life beyond the unconsumed row's.
+        policy:
+            "Delete email login attempts more than 7 days after they expired.",
+        action: "delete",
+        windowDays: 7,
+        maintenanceStep: "email_login_attempts",
+    },
+    {
         key: "providerChecks",
         label: "Provider checks",
         policy: "Delete provider check records older than 30 days.",

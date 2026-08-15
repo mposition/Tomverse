@@ -3531,51 +3531,6 @@ export const settleChatUsage = async (
                     `;
                 }
             }
-
-            // One row per attempt, written once, each with its own rollup.
-            //
-            // Most of these are already here: an attempt records its own cost
-            // when it ends (`closeAttemptWithCost`), which is what a crash
-            // between one attempt's end and the turn's needs. Settlement runs
-            // the same writer for whichever rows are missing -- normally just
-            // the attempt that answered, whose usage is not known any earlier
-            // -- and `recordAttemptCost` is idempotent on the rest.
-            for (const attempt of multiAttempt.attempts) {
-                await recordAttemptCost(tx, {
-                    reservationId: durable.id,
-                    attempt,
-                    rollupDate: rollupDay,
-                    snapshot: { settlementVersion: multiAttempt.version },
-                });
-            }
-        } else if (singleAttempt) {
-            // The same contract for the turn that dispatched once, which is
-            // most of them.
-            //
-            // It used to accrue after the transaction committed, and that left
-            // the window this whole ledger exists to close: commit, die, and
-            // the rollup never happens -- with the reservation already
-            // terminal, so a rerun cannot restore it. Inside the transaction,
-            // the cost row and the rollup are as durable as the settlement
-            // that justifies them.
-            //
-            // The rollup split is handed over rather than recomputed: a
-            // provider that reports its own component costs (Perplexity) has
-            // already had them resolved here, and pricing them again from
-            // tokens would write a different breakdown for the same total.
-            await recordAttemptCost(tx, {
-                reservationId: durable.id,
-                attempt: singleAttempt,
-                rollupDate: rollupDay,
-                rollup: {
-                    uncachedInputCostMicroUsd:
-                        costBreakdown.uncachedInputCostMicroUsd,
-                    cachedInputCostMicroUsd:
-                        costBreakdown.cachedInputCostMicroUsd,
-                    outputCostMicroUsd: costBreakdown.outputCostMicroUsd,
-                },
-                snapshot: { usageSource },
-            });
         }
         if (canonical.userId && canonical.addOnReservations.length > 0) {
             await settleAddOnCredits(tx, {
@@ -3633,32 +3588,67 @@ export const settleChatUsage = async (
             },
         });
 
-        // Shadow only. Provenance is decided from the provider's *input* count
-        // alone -- deliberately not from `usageSource` above, which is decided
-        // by whether output tokens arrived. A turn that reported output but not
-        // input has an input figure that is the estimate itself, and
-        // calibrating on it would compare an estimate with a copy of itself.
-        await recordShadowSettlement({
-            attemptId: reservation.reservationId,
-            providerReportedInputTokens: Number.isSafeInteger(usage.inputTokens)
-                ? Math.max(0, usage.inputTokens!)
-                : null,
-            inputUsageSource: resolveInputUsageSource({
-                providerReportedInputTokens: usage.inputTokens,
-                providerReturnedUsage: usage.usageFromProvider !== false,
-            }),
-            outcome:
-                usage.outcome === "completed"
-                    ? "completed"
-                    : usage.outcome === "cancelled"
-                      ? "cancelled"
-                      : "failed",
-            // The settlement path receives no partial-stream signal, so this
-            // stays false until it does. A cancelled turn is already excluded
-            // from calibration on its own flag.
-            isPartial: false,
-            isCancelled: usage.outcome === "cancelled",
-        });
+        // The last database work this transaction does, and deliberately so.
+        //
+        // `ProviderDailyUsage` is keyed on (provider, model, day), which makes
+        // it one row shared by every turn on that model -- the hottest row this
+        // system has. Whoever touches it holds it until COMMIT, so touching it
+        // early would serialise every concurrent turn on that model across the
+        // whole tail of this transaction: the add-on credits, the reservation
+        // update, the shadow record. Touching it last narrows that to the
+        // commit itself.
+        //
+        // Still inside the transaction, because the cost row and its rollup
+        // have to be as durable as the settlement that justifies them -- and
+        // for the same reason this is one call rather than a row-writing step
+        // and a rollup step somebody could later forget to pair.
+        //
+        // Sorted by (provider, model) so two settlements that both touch two
+        // rollup rows take them in one order and cannot deadlock on each other.
+        const accruals = multiAttempt
+            ? [...multiAttempt.attempts]
+                  .sort((a, b) =>
+                      `${a.price.provider}/${a.price.modelId}`.localeCompare(
+                          `${b.price.provider}/${b.price.modelId}`
+                      )
+                  )
+                  .map((attempt) => ({
+                      reservationId: durable.id,
+                      attempt,
+                      rollupDate: rollupDay,
+                      snapshot: { settlementVersion: multiAttempt.version },
+                  }))
+            : singleAttempt
+              ? [
+                    {
+                        reservationId: durable.id,
+                        attempt: singleAttempt,
+                        rollupDate: rollupDay,
+                        // Handed over rather than recomputed: a provider that
+                        // reports its own component costs has already had them
+                        // resolved here, and pricing from tokens again would
+                        // write a different split for the same total.
+                        rollup: {
+                            uncachedInputCostMicroUsd:
+                                costBreakdown.uncachedInputCostMicroUsd,
+                            cachedInputCostMicroUsd:
+                                costBreakdown.cachedInputCostMicroUsd,
+                            outputCostMicroUsd: costBreakdown.outputCostMicroUsd,
+                        },
+                        // Named apart from the row's own `usageSource`
+                        // column, which is derived and authoritative. They can
+                        // legitimately differ -- a provider that reports a cost
+                        // makes the column `provider_response_cost` while this
+                        // stays `provider_usage_metadata` -- and one row saying
+                        // two things under one name is a trap for whoever reads
+                        // the snapshot.
+                        snapshot: { settlementUsageSource: usageSource },
+                    },
+                ]
+              : [];
+        for (const accrual of accruals) {
+            await recordAttemptCost(tx, accrual);
+        }
 
         return {
             applied: true,
@@ -3670,8 +3660,53 @@ export const settleChatUsage = async (
             costBreakdown,
             provider: canonical.provider,
             modelId: canonical.modelId,
+            shadow: {
+                attemptId: reservation.reservationId,
+                providerReportedInputTokens: Number.isSafeInteger(usage.inputTokens)
+                    ? Math.max(0, usage.inputTokens!)
+                    : null,
+                inputUsageSource: resolveInputUsageSource({
+                    providerReportedInputTokens: usage.inputTokens,
+                    providerReturnedUsage: usage.usageFromProvider !== false,
+                }),
+                outcome:
+                    usage.outcome === "completed"
+                        ? ("completed" as const)
+                        : usage.outcome === "cancelled"
+                          ? ("cancelled" as const)
+                          : ("failed" as const),
+                // The settlement path receives no partial-stream signal, so
+                // this stays false until it does. A cancelled turn is already
+                // excluded from calibration on its own flag.
+                isPartial: false,
+                isCancelled: usage.outcome === "cancelled",
+            },
         };
     });
+
+    // Shadow telemetry, after the commit and never inside it.
+    //
+    // Two reasons, and the first is not about speed. `recordShadowSettlement`
+    // swallows its own errors because the module's contract is that shadow
+    // telemetry never fails a paid request -- but a statement that fails on a
+    // transaction's own connection aborts that transaction whatever the caller
+    // does with the exception, so running it inside would have made the
+    // contract untrue in exactly the case it exists for. It also ran on the
+    // global client while this transaction held a connection, which is a
+    // second connection acquired per settlement and a pool that can deadlock
+    // against itself under load.
+    //
+    // After the commit it also cannot record a settlement that did not happen:
+    // a rolled-back turn now leaves no shadow sample claiming it settled.
+    //
+    // Provenance is decided from the provider's *input* count alone --
+    // deliberately not from `usageSource`, which is decided by whether output
+    // tokens arrived. A turn that reported output but not input has an input
+    // figure that is the estimate itself, and calibrating on it would compare
+    // an estimate with a copy of itself.
+    if (settlement.applied && settlement.shadow) {
+        await recordShadowSettlement(settlement.shadow);
+    }
 
     // Every accrual now happens inside the settlement transaction, single
     // attempt and fallback alike, so nothing is recorded here.

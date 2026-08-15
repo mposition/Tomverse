@@ -180,3 +180,235 @@ test("a policy with no window has no overdue date either", () => {
         /no age window/
     );
 });
+
+/**
+ * Email login attempts: the first table on the unswept list to get a policy.
+ *
+ * It holds a raw email address and two credential HMACs per sign-in attempt,
+ * including attempts for addresses with no account, and nothing had ever
+ * removed a row. It reached `origin/main` that way, so this was already
+ * production data rather than a future problem.
+ */
+
+const CLEANUP_ROUTE = readFileSync(
+    "app/api/admin/maintenance/cleanup/route.ts",
+    "utf8"
+);
+
+test("email login attempts are swept, and by the column the policy is about", () => {
+    const policy = retentionPolicy("emailLoginAttempts");
+    assert.equal(policy.action, "delete");
+    assert.equal(policy.windowDays, 7);
+    assert.equal(policy.maintenanceStep, "email_login_attempts");
+    // The published sentence has to say what the query does. "older than 7
+    // days" would be a different promise from "7 days after they expired".
+    assert.match(policy.policy, /7 days after they expired/);
+
+    // `expiresAt`, not `createdAt`: it is the moment the row stops being able
+    // to authenticate anyone, and it is the indexed column. A `createdAt`
+    // sweep would be a sequential scan of a table that grows with every login
+    // attempt.
+    assert.match(
+        MAINTENANCE,
+        /emailLoginAttempt\.deleteMany\(\{\s*where: \{ expiresAt: \{ lt: retentionCutoff\("emailLoginAttempts", now\) \} \},/
+    );
+});
+
+test("the screen, the dry run and the sweep count the same rows", () => {
+    // The failure this whole module was written for: /admin/retention
+    // published nine policies and the sweep performed seven. An operator read
+    // a number, typed RUN CLEANUP, and the number did not move.
+    for (const [name, source] of [
+        ["/admin/retention", RETENTION_ROUTE],
+        ["the cleanup dry run", CLEANUP_ROUTE],
+    ]) {
+        assert.match(
+            source,
+            /emailLoginAttempt\.count\(/,
+            `${name} counts the rows`
+        );
+        assert.match(
+            source,
+            /retentionCutoff\("emailLoginAttempts", now\)/,
+            `${name} uses the published cutoff rather than a literal`
+        );
+        assert.ok(
+            !/emailLoginAttempt\.count\(\{\s*where: \{ createdAt/.test(source),
+            `${name} counts by the same column the sweep deletes by`
+        );
+    }
+});
+
+test("no carve-out keeps the rows of people who did sign in", () => {
+    // A `consumedAt: null` filter reads like caution and does the opposite:
+    // consumed rows belong to successful sign-ins, so excluding them would
+    // retain the email addresses of real users and delete only the rest.
+    const step = MAINTENANCE.slice(
+        MAINTENANCE.indexOf('step("email_login_attempts"'),
+        MAINTENANCE.indexOf('step("provider_error_events"')
+    );
+    assert.ok(step.length > 0, "the step is where this test thinks it is");
+    assert.ok(!step.includes("consumedAt"), "consumed rows are swept too");
+    assert.ok(!step.includes("invalidatedAt"), "invalidated rows are swept too");
+});
+
+test("the window is shorter than every operational log policy", () => {
+    // Not a round number for its own sake. Credential hashes and raw addresses
+    // should not outlive the diagnostics they sit beside, and every other
+    // delete policy here is measured in tens of days.
+    const others = RETENTION_POLICIES.filter(
+        (entry) =>
+            entry.action === "delete" &&
+            entry.windowDays !== null &&
+            entry.key !== "emailLoginAttempts"
+    );
+    assert.ok(others.length > 0);
+    for (const entry of others) {
+        assert.ok(
+            entry.windowDays > 7,
+            `${entry.key} is ${entry.windowDays} days; the credential table must not be the longest`
+        );
+    }
+});
+
+/**
+ * Deep research jobs: a row per Perplexity async request, holding a copy of
+ * the report and, when things go wrong, the error text.
+ *
+ * Two things were wrong with it, and only one is a retention question. The
+ * table had no policy, so it grew without limit -- and it has no relation to
+ * `Conversation` despite naming a `conversationId`, so no cascade reached it:
+ * deleting a conversation, or an entire account, left `resultText` behind as
+ * the only surviving copy of a report nothing pointed at any more.
+ */
+
+const policyFor = (key) => retentionPolicy(key).policy;
+
+const ACCOUNT_DELETION = readFileSync("lib/accountDeletion.ts", "utf8");
+
+test("deep research jobs are swept by the clock that covers an abandoned one", () => {
+    const policy = retentionPolicy("deepResearchJobs");
+    assert.equal(policy.action, "delete");
+    assert.equal(policy.windowDays, 30);
+    assert.equal(policy.maintenanceStep, "deep_research_jobs");
+    assert.match(policy.policy, /30 days after their last update/);
+
+    // `updatedAt`, not `completedAt`. A job nobody polls again -- the user
+    // starts a deep research request and closes the tab -- never reaches a
+    // terminal status and never gets a `completedAt`, and that is precisely
+    // the row that accumulates. A `completedAt` sweep would cover only the
+    // rows that were already finished with.
+    assert.match(
+        MAINTENANCE,
+        /perplexityAsyncJob\.deleteMany\(\{\s*where: \{ updatedAt: \{ lt: retentionCutoff\("deepResearchJobs", now\) \} \},/
+    );
+    assert.ok(
+        !/perplexityAsyncJob\.deleteMany[\s\S]{0,200}completedAt/.test(MAINTENANCE),
+        "the sweep must not filter on completedAt"
+    );
+});
+
+test("the screen and the dry run measure deep research jobs the same way", () => {
+    for (const [name, source] of [
+        ["/admin/retention", RETENTION_ROUTE],
+        ["the cleanup dry run", CLEANUP_ROUTE],
+    ]) {
+        assert.match(source, /perplexityAsyncJob\.count\(/, name);
+        assert.match(source, /retentionCutoff\("deepResearchJobs", now\)/, name);
+    }
+});
+
+test("deleting a conversation takes its deep research jobs with it", () => {
+    // No cascade reaches this table, so each delete path has to say so. The
+    // retention sweep is not the answer here: the point of deleting an account
+    // is that the content goes when the user says so, not thirty days later on
+    // a cadence.
+    for (const path of [
+        "lib/accountDeletion.ts",
+        "app/api/conversations/[conversationId]/route.ts",
+        "app/api/conversations/route.ts",
+    ]) {
+        assert.match(
+            readFileSync(path, "utf8"),
+            /deleteDeepResearchJobsForConversations\(\s*tx,/,
+            `${path} removes the jobs inside the delete transaction`
+        );
+    }
+
+    // Inside the same transaction as the conversation delete, and before it.
+    // A failure between the two is the orphan this exists to prevent.
+    const jobs = ACCOUNT_DELETION.indexOf("deleteDeepResearchJobsForConversations");
+    const conversations = ACCOUNT_DELETION.indexOf("tx.conversation.deleteMany");
+    assert.ok(jobs > 0 && conversations > jobs);
+});
+
+/**
+ * The last two tables on the unswept list, and a contradiction found while
+ * clearing them.
+ *
+ * `ImageAssetCleanup` and `AssistantKnowledgeCleanup` are the same table
+ * twice -- identical columns, identical `[completedAt, createdAt]` index --
+ * and had opposite answers: one registered as retained forever, the other on
+ * the unswept list. Both statements cannot be true of the same shape.
+ */
+
+const UNSWEPT_REGISTRY = readFileSync(
+    "scripts/report-unswept-tables-core.mjs",
+    "utf8"
+);
+
+test("the two R2 cleanup queues are one policy, because they are one shape", () => {
+    const policy = retentionPolicy("storageCleanupQueues");
+    assert.equal(policy.windowDays, 90);
+    assert.equal(policy.maintenanceStep, "storage_cleanup_queues");
+
+    const step = MAINTENANCE.slice(
+        MAINTENANCE.indexOf('step("storage_cleanup_queues"'),
+        MAINTENANCE.indexOf('step("token_estimate_shadow_samples"')
+    );
+    assert.match(step, /imageAssetCleanup\.deleteMany/);
+    assert.match(step, /assistantKnowledgeCleanup\.deleteMany/);
+
+    // And the retained entry is gone, or the tree would say both at once.
+    assert.ok(
+        !UNSWEPT_REGISTRY.includes("ImageAssetCleanup:"),
+        "a table with a policy is not also registered as retained"
+    );
+});
+
+test("a pending cleanup row is never deleted", () => {
+    // The only place an object's R2 key is written down. Delete a pending row
+    // and the file has no name anywhere in the system, so nothing can ever
+    // reap it -- the same permanent orphan that `account_deleted` was added to
+    // fix, reintroduced by a sweep.
+    assert.match(policyFor("storageCleanupQueues"), /Pending records are never deleted/);
+    const step = MAINTENANCE.slice(
+        MAINTENANCE.indexOf('step("storage_cleanup_queues"'),
+        MAINTENANCE.indexOf('step("token_estimate_shadow_samples"')
+    );
+    assert.match(step, /completedAt: \{ not: null, lt: cutoff \}/);
+
+    // The screen must not count what the sweep will not take, or it reports
+    // work that never finishes -- the failure this module exists for.
+    for (const source of [RETENTION_ROUTE, CLEANUP_ROUTE]) {
+        const counts = source.match(/(imageAssetCleanup|assistantKnowledgeCleanup)\.count\(\{[\s\S]{0,200}?\}\)/g) ?? [];
+        assert.equal(counts.length, 2);
+        for (const count of counts) assert.match(count, /completedAt: \{\s*not: null,/);
+    }
+});
+
+test("shadow samples are bounded because the evaluation ends", () => {
+    const policy = retentionPolicy("tokenEstimateShadowSamples");
+    assert.equal(policy.windowDays, 90);
+    assert.equal(policy.maintenanceStep, "token_estimate_shadow_samples");
+    assert.match(
+        MAINTENANCE,
+        /tokenEstimateShadowSample\.deleteMany\(\{\s*where: \{\s*createdAt: \{ lt: retentionCutoff\("tokenEstimateShadowSamples", now\) \},/
+    );
+    // Read by one report, which takes the newest samples and accepts --since.
+    // Nothing wants a sample older than the estimator version it compared.
+    assert.match(
+        readFileSync("scripts/report-token-estimate-calibration.mjs", "utf8"),
+        /orderBy: \{ createdAt: "desc" \}/
+    );
+});

@@ -39,16 +39,25 @@ jobs:
   credit-finance-db:
     name: Credit and finance PostgreSQL scenarios
     runs-on: ubuntu-latest
-    # These scenarios run against a real PostgreSQL, serially, because they
-    # assert lock ordering and constraint behaviour that concurrent files would
-    # make nondeterministic. That puts the suite at 17:26-18:22 across runs
-    # 763-780, against a ceiling of 20: under 10% headroom, which ordinary
-    # runner variance eats. Runs 775 and 776 crossed it on two unrelated
-    # branches within an hour of each other, and a suite that takes 18 minutes
-    # then reports "cancelled" reads as a code failure to whoever opened the
-    # PR. 30 leaves room for the suite to keep growing while still failing a
-    # genuine hang well inside the runner's own limit, and matches what the
-    # other long jobs here already use (25 for admin E2E, 40 for e2e).
+    # 20 left no margin, and the check was flaky because of it rather than
+    # because of anything it tests. Measured on 2026-08-15 across branches that
+    # share no code with each other:
+    #
+    #   main b0cf10e            17:53   success
+    #   feature/tvc-0008        17:26, 17:40, 17:53, 18:22   success
+    #   claude/promotion-...    17:40   success, then 20:19  cancelled
+    #   fix/visual-baseline     20:35   cancelled
+    #
+    # A normal run uses 88-92% of a 20-minute budget, so an ordinarily slow
+    # runner ends the job. Two unrelated branches were cancelled within the
+    # same minute, which is what a shared-capacity slowdown looks like and what
+    # a per-branch investigation would never have found.
+    #
+    # 30 keeps the timeout doing its actual job -- catching a hang -- while a
+    # run two minutes over its usual length is no longer a red check. This is
+    # not a licence to grow: past about 25 minutes the suite needs splitting by
+    # scenario group, because raising this again would be the second time the
+    # number was chosen to fit the runtime rather than to bound it.
     timeout-minutes: 30
 
     services:

@@ -36,6 +36,10 @@ async function dryRunCleanup() {
     usageBuckets,
     requestLeases,
     creditReservations,
+    emailLoginAttempts,
+    deepResearchJobs,
+    storageCleanupQueues,
+    tokenEstimateShadowSamples,
     providerErrorEvents,
     providerHealthChecks,
     providerProbeResults,
@@ -52,6 +56,37 @@ async function dryRunCleanup() {
     prisma.chatRequestLease.count({ where: { expiresAt: { lte: now } } }),
     prisma.chatCreditReservation.count({
       where: { status: "reserved", expiresAt: { lte: now } },
+    }),
+    prisma.emailLoginAttempt.count({
+      where: {
+        expiresAt: { lt: retentionCutoff("emailLoginAttempts", now) },
+      },
+    }),
+    prisma.perplexityAsyncJob.count({
+      where: { updatedAt: { lt: retentionCutoff("deepResearchJobs", now) } },
+    }),
+    Promise.all([
+      prisma.imageAssetCleanup.count({
+        where: {
+          completedAt: {
+            not: null,
+            lt: retentionCutoff("storageCleanupQueues", now),
+          },
+        },
+      }),
+      prisma.assistantKnowledgeCleanup.count({
+        where: {
+          completedAt: {
+            not: null,
+            lt: retentionCutoff("storageCleanupQueues", now),
+          },
+        },
+      }),
+    ]).then(([images, knowledge]) => images + knowledge),
+    prisma.tokenEstimateShadowSample.count({
+      where: {
+        createdAt: { lt: retentionCutoff("tokenEstimateShadowSamples", now) },
+      },
     }),
     prisma.providerErrorEvent.count({
       where: { createdAt: { lt: retentionCutoff("providerErrors", now) } },
@@ -100,6 +135,10 @@ async function dryRunCleanup() {
     usageBuckets,
     requestLeases,
     creditReservations,
+    emailLoginAttempts,
+    deepResearchJobs,
+    storageCleanupQueues,
+    tokenEstimateShadowSamples,
     providerErrorEvents,
     providerHealthChecks,
     providerProbeResults,

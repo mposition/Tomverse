@@ -8,6 +8,35 @@ import {
 } from "@/lib/oauthTokenCrypto";
 import { expireCreditLots } from "@/lib/creditLedger";
 import { reconcileExpiredChatCreditReservations } from "@/lib/chatSecurity";
+import {
+  applyPendingAttemptCostAdjustments,
+  pendingAttemptCostAdjustmentBacklog,
+} from "@/lib/chatAttemptCostLedger";
+import {
+  COST_INTENT_CUTOVER_ENV,
+  STALE_ATTEMPT_SWEEP_BATCH,
+  staleAttemptBacklog,
+  sweepStaleRoutingAttempts,
+} from "@/lib/routingAttemptSweep";
+import { reportOperationalIncident } from "@/lib/operationalMonitoring";
+
+/**
+ * How long an unapplied cost correction may sit before it is an incident.
+ *
+ * Two runs of the fifteen-minute maintenance cron, plus a margin: one run
+ * failing to apply a delta is a blip, and two in a row is something nobody is
+ * going to notice from the logs alone.
+ */
+const STALE_COST_ADJUSTMENT_AFTER_MS = 45 * 60 * 1000;
+
+/**
+ * How long an attempt may stay sweepable before the sweep is behind.
+ *
+ * Thirty minutes to be judged stale at all, plus two fifteen-minute runs. One
+ * run failing to reach it is a batch boundary or a blip; an attempt still open
+ * an hour after it was created is the sweep not keeping up.
+ */
+const STALE_ATTEMPT_BACKLOG_AFTER_MS = 60 * 60 * 1000;
 import { purgeExpiredChatLimitDecisions } from "@/lib/chatLimitDecisions";
 import { purgeExpiredAccountDataExportRequests } from "@/lib/accountDataExportTickets";
 import { compactAgedContextManifests } from "@/lib/routingManifestRetention";
@@ -355,6 +384,118 @@ export async function cleanupExpiredData() {
   const creditReservations = await step("chat_credit_reservations", () =>
     reconcileExpiredChatCreditReservations()
   );
+
+  // The provider-cost ledger's two recovery passes.
+  //
+  // These are idempotent and do not depend on one another for correctness --
+  // the sweep already accepts a reservation that is merely expired, and
+  // nothing in this run creates the adjustments the replay applies. They run
+  // after the primary reconciliation to keep maintenance reporting and
+  // operational ownership predictable, not because either needs the other.
+  //
+  // Until this run existed neither had a production caller at all: a sweep
+  // nobody ran, and a partial index nobody consumed, which from the data is
+  // indistinguishable from having nothing to recover.
+  const staleRoutingAttempts = await step("stale_routing_attempts", async () => {
+    const swept = await sweepStaleRoutingAttempts(now);
+    const backlog = await staleAttemptBacklog(now);
+
+    // A contract violation, not a workload. One is enough: the sweep cannot
+    // produce these outcomes by construction, so seeing one means the ledger
+    // grew a path nobody expected or this sweep started writing a record it
+    // should not.
+    if (swept.unexpectedCostOutcome > 0) {
+      await reportOperationalIncident({
+        code: "CHAT_COST_SWEEP_UNEXPECTED_OUTCOME",
+        title: "The attempt sweep produced a cost outcome it cannot produce",
+        severity: "error",
+        context: { component: "chat-cost-ledger", ...swept.noCostReasons, unexpected: swept.unexpectedCostOutcome },
+      });
+    }
+
+    // Three of the no-cost reasons are defects with no grace period. A run
+    // pointing at a reservation that is gone, a payload that will not
+    // validate, and a payload written *after* cost intents existed that
+    // carries none are each a provider call nobody can price, caused by
+    // something wrong now rather than by history.
+    const defects =
+      swept.noCostReasons.dangling_reservation +
+      swept.noCostReasons.invalid_cost_intent_payload +
+      swept.noCostReasons.missing_cost_intent;
+    if (defects > 0) {
+      await reportOperationalIncident({
+        code: "CHAT_COST_INTENT_UNAVAILABLE",
+        title: "A crashed attempt could not be priced, and not because of legacy data",
+        severity: "error",
+        context: { component: "chat-cost-ledger", ...swept.noCostReasons },
+      });
+    }
+
+    // The cutover is what tells history apart from a defect. Unset, the
+    // distinction cannot be made at all -- so the missing configuration is
+    // itself the thing to report, rather than silently answering "legacy".
+    if (swept.noCostReasons.unclassified_missing_cost_intent > 0) {
+      await reportOperationalIncident({
+        code: "CHAT_COST_INTENT_CUTOVER_UNSET",
+        title: `Set ${COST_INTENT_CUTOVER_ENV} so a missing cost intent can be classified`,
+        severity: "warning",
+        context: {
+          component: "chat-cost-ledger",
+          unclassified: swept.noCostReasons.unclassified_missing_cost_intent,
+        },
+      });
+    }
+
+    // `failed` is a database that was briefly unavailable, and one of those is
+    // not worth a call. What is worth a call is the sweep not keeping up:
+    // either more eligible attempts than one batch can take, or an attempt
+    // that has been eligible longer than two cron periods past the stale
+    // window -- thirty minutes to become stale, plus two fifteen-minute runs.
+    if (
+      backlog.eligiblePending > STALE_ATTEMPT_SWEEP_BATCH ||
+      (backlog.oldestEligibleMs ?? 0) > STALE_ATTEMPT_BACKLOG_AFTER_MS
+    ) {
+      await reportOperationalIncident({
+        code: "CHAT_ATTEMPT_SWEEP_BACKLOG",
+        title: "Crashed attempts are not being closed fast enough",
+        severity: "error",
+        context: {
+          component: "chat-cost-ledger",
+          eligiblePending: backlog.eligiblePending,
+          agedPending: backlog.agedPending,
+          oldestEligibleMs: backlog.oldestEligibleMs,
+          failedThisRun: swept.failed,
+        },
+      });
+    }
+    return { ...swept, ...backlog };
+  });
+
+  const costAdjustments = await step("pending_cost_adjustments", async () => {
+    const replayed = await applyPendingAttemptCostAdjustments();
+    const backlog = await pendingAttemptCostAdjustmentBacklog(now);
+    // Nothing here retries with a ceiling, and deliberately: a provider cost
+    // delta is not data that may be abandoned after N attempts. What is needed
+    // instead is for a delta that keeps failing to become visible, and the age
+    // of the oldest unapplied one is the number that says so. Two runs is the
+    // threshold because one run failing is a blip and two is a pattern.
+    if ((backlog.oldestPendingMs ?? 0) > STALE_COST_ADJUSTMENT_AFTER_MS) {
+      await reportOperationalIncident({
+        code: "CHAT_COST_ADJUSTMENT_BACKLOG",
+        title: "Provider cost corrections are not reaching the rollup",
+        severity: "error",
+        context: {
+          component: "chat-cost-ledger",
+          pending: backlog.pending,
+          oldestPendingMs: backlog.oldestPendingMs,
+          appliedThisRun: replayed.applied,
+          failedThisRun: replayed.failed,
+        },
+      });
+    }
+    return { ...replayed, ...backlog };
+  });
+
   const testerPassReminders = await step("tester_pass_reminders", () =>
     sendFoundingTesterPassReminders(now)
   );
@@ -402,6 +543,68 @@ export async function cleanupExpiredData() {
     DELETE FROM "ChatRequestLease"
     WHERE "expiresAt" <= NOW()
   `);
+
+  // Raw email addresses and two credential hashes per sign-in attempt, kept by
+  // nothing until now. `expiresAt` rather than `createdAt`: it is the moment
+  // the row stops being able to authenticate anyone, and it is the indexed
+  // column (`@@index([expiresAt])`), so this is an index scan rather than a
+  // sequential one over a table that grows with every login attempt including
+  // the ones for addresses that have no account.
+  //
+  // No carve-out for consumed or invalidated rows. A consumed row is spent and
+  // an invalidated one was superseded by a newer attempt, so neither outlives
+  // the unconsumed row beside it -- and a carve-out here would keep exactly
+  // the rows belonging to people who did sign in.
+  // One row per deep research request. Its user-visible half is a copy --
+  // `resultText` is written into `Message.content` in the same transaction that
+  // finalizes the job -- so what is kept here is an operational record, and the
+  // clock is `updatedAt` because a job nobody polls again never reaches a
+  // terminal status and would otherwise never be covered at all.
+  // Both R2 deletion queues, one step, completed rows only.
+  //
+  // The `completedAt: { not: null }` filter is the whole safety of this: a
+  // pending row is the only record of the object's R2 key anywhere in the
+  // system, so deleting one strands the file in storage with no name and
+  // nothing that could ever reap it. The queue is drained by
+  // `assistant_knowledge_cleanup` and the image sweep; this only removes what
+  // they already finished.
+  const storageCleanupQueues = await step("storage_cleanup_queues", async () => {
+    const cutoff = retentionCutoff("storageCleanupQueues", now);
+    const where = {
+      completedAt: { not: null, lt: cutoff },
+    } as const;
+    const [images, knowledge] = await Promise.all([
+      prisma.imageAssetCleanup.deleteMany({ where }),
+      prisma.assistantKnowledgeCleanup.deleteMany({ where }),
+    ]);
+    return { count: images.count + knowledge.count };
+  });
+
+  // Measurement rows for the estimator evaluation -- counts and ratios, no
+  // prompt or completion text. Read only by report:token-estimate-calibration,
+  // which wants recent traffic; a sample older than the estimator version it
+  // was comparing describes a comparison nobody is running.
+  const tokenEstimateShadowSamples = await step(
+    "token_estimate_shadow_samples",
+    () =>
+      prisma.tokenEstimateShadowSample.deleteMany({
+        where: {
+          createdAt: { lt: retentionCutoff("tokenEstimateShadowSamples", now) },
+        },
+      })
+  );
+
+  const deepResearchJobs = await step("deep_research_jobs", () =>
+    prisma.perplexityAsyncJob.deleteMany({
+      where: { updatedAt: { lt: retentionCutoff("deepResearchJobs", now) } },
+    })
+  );
+
+  const emailLoginAttempts = await step("email_login_attempts", () =>
+    prisma.emailLoginAttempt.deleteMany({
+      where: { expiresAt: { lt: retentionCutoff("emailLoginAttempts", now) } },
+    })
+  );
 
   const providerErrorEvents = await step("provider_error_events", () =>
     prisma.providerErrorEvent.deleteMany({
@@ -626,6 +829,10 @@ export async function cleanupExpiredData() {
     sessions: sessions?.count ?? null,
     usageBuckets: usageBuckets === null ? null : Number(usageBuckets),
     requestLeases: requestLeases === null ? null : Number(requestLeases),
+    storageCleanupQueues: storageCleanupQueues?.count ?? null,
+    tokenEstimateShadowSamples: tokenEstimateShadowSamples?.count ?? null,
+    deepResearchJobs: deepResearchJobs?.count ?? null,
+    emailLoginAttempts: emailLoginAttempts?.count ?? null,
     providerErrorEvents: providerErrorEvents?.count ?? null,
     providerHealthChecks: providerHealthChecks?.count ?? null,
     providerProbeResults: providerProbeResults?.count ?? null,
@@ -642,6 +849,8 @@ export async function cleanupExpiredData() {
     oauthTokensEncrypted,
     creditLotsExpired,
     creditReservations,
+    staleRoutingAttempts,
+    costAdjustments,
     testerPassReminders,
     testerPassExpirations,
     testerPassEndedNotices,
