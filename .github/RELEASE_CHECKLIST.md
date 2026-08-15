@@ -595,50 +595,129 @@ later.
       chargeback or refund dispute freezes, and how far the period extends
       into restorable backups
 
-## 7.9 Out-of-band changes to main
+## 7.9 How a change reaches production
 
 Everything above assumes the build being released came through `develop` and
-was deployed to staging. A change merged straight to `main` skips that, and
-production deploys on the push -- so the deviation is already live by the time
-anyone writes it down.
+was deployed to staging. On 2026-08-15 four changes did not, in one day,
+against one release that did. That is not four people being careless; it is
+one structural gap, and the gap was never staging itself.
 
-Routine dependency updates no longer arrive this way: `.github/dependabot.yml`
-sets `target-branch: develop`. **Dependabot security updates ignore that
-setting** and are raised against the default branch by design, which is the
-one case this section exists for -- an urgent fix should not queue behind a
-release train.
+**The gap was selective release.** `develop` sat 36 commits ahead of `main`.
+Every one of the four needed a subset of that shipped without promoting the
+rest, and the only mechanism the repository offered for "some of develop, now"
+was a merge straight to `main`. Widening the exception would have made that
+official; the fix is to give the need its own path.
 
-It is an exception, not a lane. All six apply, and the first one is what makes
-it an exception at all:
+Three lanes. Which one a change takes is decided by what it is, not by how
+inconvenient the alternative feels.
 
-- [ ] **It is a security update**, named as one, with the advisory it fixes.
-      A version bump that merely arrived on `main` is not this; retarget it to
-      `develop`
-- [ ] **A person approved it** and recorded a staging waiver, because staging
-      is being skipped rather than passed
-- [ ] **The new release SHA is recorded** -- the merge commit production will
-      serve, not the PR head
-- [ ] **Verified beyond PR CI.** CI reaches no provider, no payment processor,
-      no database driver in anger and no object store; if the change touches
-      one, the check has to
-- [ ] **A rollback SHA is named**: the newest build a checklist actually covers
-- [ ] **The back-merge to `develop` is confirmed**, or the next release silently
-      reverts the fix
+| Change | Lane | Verification |
+|---|---|---|
+| Ordinary work | `develop` | staging, then a release cut from `develop` |
+| Part of `develop`, needed sooner | `release/**`, cut from `main` | the exact RC SHA verified on staging or a scratch environment, then merged to `main` |
+| A declared incident or a security advisory | `hotfix/**` | §7.9.2, and the incident or advisory is named |
+
+The branch prefix is the declaration. `*-main` in a name says where somebody
+meant it to go and proves nothing about urgency or approval, which is why it
+is not one of the three. `scripts/auto-pr-branch-policy.mjs` already refuses
+`release/**`, `hotfix/**` and anything with a `to-main` segment an automatic
+develop pull request, so these names carry no automation of their own -- their
+pull requests are opened and merged by a person on purpose.
+
+### 7.9.1 Selective release: `release/**`
+
+For a change that is finished, is already on `develop`, and should not wait for
+everything else on `develop`. This is not an exception and needs no waiver; it
+is a smaller release with the same evidence.
 
 ```
-Advisory:           ____________________
-Approved by:        ____________________
-New release SHA:    ____________________
+git fetch origin main develop
+git checkout -b release/<date>-<subject> origin/main
+git cherry-pick <the commits, and only those>
+```
+
+- [ ] The branch starts at `origin/main`, so what is verified is what is merged
+- [ ] Only the intended commits are on it. If a cherry-pick needs a conflict
+      resolution the original never had, that resolution is new code and is
+      reviewed as such
+- [ ] **The RC SHA is deployed to staging or a scratch environment**, and
+      `/api/build-info` is read back to confirm it names that SHA. Not the
+      current `develop`, which is further ahead and would measure a different
+      build
+- [ ] Whatever the change touches is exercised there: a provider turn, a Stripe
+      path in test mode, a signed asset URL, an admin flow -- CI reaches none
+      of these
+- [ ] A rollback SHA is named
+- [ ] The back-merge to `develop` is confirmed, or the next release reverts it
+
+```
+RC SHA:             ____________________
+Verified on:        ____________________
 Verified by / how:  ____________________
 Rollback SHA:       ____________________
 Back-merge run:     ____________________
 ```
 
-**If any of the six is missing, the change is a deviation rather than a
-release**, and it is recorded as one at the time -- not deferred to the next
+Done this way, a selective release is a release. It gets a record under
+`.github/audits/release-<date>__<sha>.md`, not a deviation record.
+
+### 7.9.2 The exception: `hotfix/**`
+
+Staging is skipped entirely here, so the bar is what makes it an exception
+rather than a faster lane. All six apply, and the first is the one that
+qualifies it:
+
+- [ ] **A security advisory, or a declared production incident.** Named, with
+      its link. Dependabot security updates arrive on the default branch
+      whatever `target-branch` says, and belong here. A change that is merely
+      finished, or merely wanted sooner, is §7.9.1
+- [ ] **A person approved it before the merge**, and recorded that staging is
+      being skipped. A record written afterwards is not this: it describes the
+      skip, it cannot authorise it retroactively
+- [ ] **The new release SHA is recorded** -- the merge commit production will
+      serve, not the PR head
+- [ ] **Verified beyond PR CI**, at whichever boundary the change touches. CI
+      reaches no provider, no payment processor, no object store, and no
+      database in anger
+- [ ] **A rollback SHA is named**: the newest build a checklist actually covers
+- [ ] **The back-merge to `develop` is confirmed**
+
+```
+Incident / advisory: ____________________
+Approved by:         ____________________
+New release SHA:     ____________________
+Verified by / how:   ____________________
+Rollback SHA:        ____________________
+Back-merge run:      ____________________
+```
+
+**"All checks passed" is not on this list, and must not become the bar.**
+A rule that admits anything with a green suite is a continuous-deployment
+policy wearing an exception's name, and it would have admitted all four of the
+2026-08-15 changes -- every one of them was green.
+
+### 7.9.3 When it happens anyway
+
+If a change reaches `main` outside all three lanes, or takes 7.9.2 without its
+six, it is a **deviation**: recorded at the time, in
+`.github/audits/release-deviation-<date>__<sha>.md`, not deferred to the next
 release checklist, which covers a different SHA and cannot speak for this one.
-Write it to `.github/audits/release-deviation-<date>__<sha>.md`; the
-2026-08-15 record is the worked example.
+The four records dated 2026-08-15 are the worked examples.
+
+A deviation record describes; it does not authorise and it does not control.
+If they accumulate, the answer is a lane the work actually fits, not a
+shorter record.
+
+### 7.9.4 Wait for CI
+
+Railway's **Wait for CI** (`checkSuites`) is on for both environments as of
+2026-08-15. It holds a deployment until the pushed commit's check suite
+finishes, which removes the race where production deployed while its own checks
+were still running.
+
+It is a floor under every lane above and a substitute for none of them: it
+answers "did the checks finish", never "was this exercised anywhere real".
+https://docs.railway.com/deployments/github-autodeploys#wait-for-ci
 
 ## 8. Unverified items and waivers
 
