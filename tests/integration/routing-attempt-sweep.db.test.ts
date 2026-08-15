@@ -1069,68 +1069,114 @@ const makeFreeReservation = async (): Promise<ChatUsageReservation> => {
   return acquired.usageReservation;
 };
 
-test("a turn that reserved nothing is counted, not alerted", async () => {
-  process.env.AUTO_ROUTER_COST_INTENT_CUTOVER_AT = new Date(
-    Date.now() - 24 * 60 * 60 * 1000
-  ).toISOString();
-  try {
-    const reservation = await makeFreeReservation();
-    const { runId } = await makeRun({ reservationId: reservation.reservationId });
-    const id = await makeAttempt(runId, { createdAt: ancient() });
+test("a turn that authorized nothing still leaves an audit row", async () => {
+  // Under the old contract this attempt had no intent at all, so the sweep
+  // could only say "nothing to price" and guess whether that was a free model
+  // or a lost authorization. The intent is written for every dispatch now, so
+  // the ceiling of zero is a recorded fact rather than an absence.
+  const reservation = await makeFreeReservation();
+  const { runId } = await makeRun({ reservationId: reservation.reservationId });
+  const id = await makeAttempt(runId, { createdAt: ancient() });
 
-    const result = await sweepStaleRoutingAttempts();
-    // Created well after the cutover, so the old classification would have
-    // called this a defect and paged somebody about a turn behaving correctly.
-    assert.equal(result.noCostReasons.zero_reserved_provider_cost, 1);
-    assert.equal(result.noCostReasons.missing_cost_intent, 0);
-    assert.equal(result.noCostReasons.invalid_zero_cost_reservation, 0);
-    assert.equal(await outcomeOf(id), "unknown_after_dispatch");
-    assert.equal(await attemptCostRow(reservation.reservationId), null);
-  } finally {
-    delete process.env.AUTO_ROUTER_COST_INTENT_CUTOVER_AT;
-  }
+  const result = await sweepStaleRoutingAttempts();
+  assert.equal(result.closedCostInserted, 1);
+  assert.equal(result.closedWithoutCostIntent, 0);
+  // Named from the attempt row, which is what actually ran.
+  assert.deepEqual(result.zeroReservedCostModels, { "openai/gpt-5-6-luna": 1 });
+  assert.equal(await outcomeOf(id), "unknown_after_dispatch");
+
+  const row = (await attemptCostRow(reservation.reservationId))!;
+  assert.equal(row.costMicroUsd, BigInt(0));
+  // Not "the provider charged nothing" -- the ceiling it was allowed was
+  // nothing. A native search's own per-call charge sits outside the
+  // reservation entirely.
+  assert.equal(row.costSource, "reserved_upper_bound");
+  assert.equal(row.usageSource, "crash_reconciliation");
+  assert.equal(row.inputTokens, null);
 });
 
-test("a reservation that froze a positive cost and holds nothing is a defect", async () => {
-  // The combination that means one of the pair was lost: the two are written
-  // together under one condition, so a frozen price with no hold is money
-  // authorized whose record is gone.
-  process.env.AUTO_ROUTER_COST_INTENT_CUTOVER_AT = new Date(
-    Date.now() - 24 * 60 * 60 * 1000
-  ).toISOString();
-  try {
-    const reservation = await makeCrashedReservation();
-    const durable = await prisma.chatCreditReservation.findUniqueOrThrow({
-      where: { id: reservation.reservationId },
-    });
-    const payload = durable.reservationPayload as {
-      entries?: { key: string }[];
-      attemptHolds?: unknown[];
-      attemptCostIntents?: unknown[];
-    };
-    // The holds go, and so do the provider entries derived from them: an
-    // entry with no hold behind it is refused on read for its own reason, and
-    // this test is about the one after that.
-    payload.entries = (payload.entries ?? []).filter(
-      (entry) => !entry.key.startsWith("provider:")
-    );
-    payload.attemptHolds = [];
-    delete payload.attemptCostIntents;
-    await prisma.$executeRaw`
-      UPDATE "ChatCreditReservation"
-      SET "reservationPayload" = ${payload}::jsonb
-      WHERE "id" = ${reservation.reservationId}
-    `;
+test("a late actual corrects a zero ceiling like any other estimate", async () => {
+  const reservation = await makeFreeReservation();
+  const { runId } = await makeRun({ reservationId: reservation.reservationId });
+  await makeAttempt(runId, { createdAt: ancient() });
+  await sweepStaleRoutingAttempts();
 
-    const { runId } = await makeRun({ reservationId: reservation.reservationId });
-    await makeAttempt(runId, { createdAt: ancient() });
+  await settleChatUsage(
+    reservation,
+    { inputTokens: 10_000, outputTokens: 0, outcome: "failed" },
+    {
+      attempts: [
+        {
+          attemptIndex: 0,
+          price: {
+            provider: "openai",
+            modelId: "gpt-5-6-luna",
+            inputUsdPerMillionTokens: 100,
+            outputUsdPerMillionTokens: 100,
+            cachedInputPriceMultiplier: 1,
+            pricingVersion: "sweep-test",
+          },
+          inputTokens: 10_000,
+          cachedInputTokens: 0,
+          outputTokens: 0,
+          usageFromProvider: true,
+          outcome: "failed",
+        },
+      ],
+    }
+  );
 
-    const result = await sweepStaleRoutingAttempts();
-    assert.equal(result.noCostReasons.invalid_zero_cost_reservation, 1);
-    assert.equal(result.noCostReasons.zero_reserved_provider_cost, 0);
-  } finally {
-    delete process.env.AUTO_ROUTER_COST_INTENT_CUTOVER_AT;
-  }
+  const [resolved] = await resolvedAttemptCosts(reservation.reservationId);
+  // Base zero plus the whole observed cost: the ordinary adjustment path, with
+  // nothing special about the ceiling having been zero.
+  assert.equal(resolved.recordedCostMicroUsd, BigInt(0));
+  assert.equal(resolved.correctionMicroUsd, BigInt(1_000_000));
+  assert.equal(resolved.costMicroUsd, BigInt(1_000_000));
+});
+
+test("an intent naming a different model than the attempt that ran is refused", async () => {
+  // A fallback's payload `modelId` is the primary's for ever, so the attempt
+  // row is the only record of what actually ran. Pricing one model's call at
+  // another's rates is what this stops.
+  const reservation = await makeCrashedReservation();
+  const { runId } = await makeRun({ reservationId: reservation.reservationId });
+  const attemptId = await makeAttempt(runId, { createdAt: ancient() });
+  await prisma.$executeRaw`
+    UPDATE "RoutingAttempt" SET "modelId" = 'a-different-model' WHERE "id" = ${attemptId}
+  `;
+
+  const result = await sweepStaleRoutingAttempts();
+  assert.equal(result.noCostReasons.cost_intent_identity_mismatch, 1);
+  assert.equal(result.closedCostInserted, 0);
+  assert.equal(await attemptCostRow(reservation.reservationId), null);
+});
+
+test("a positive authorization holding no bucket is refused on read", async () => {
+  // The validator's job now: an intent that says money was authorized, with
+  // nothing in the bucket to show for it, is a hold that was lost.
+  const reservation = await makeCrashedReservation();
+  const durable = await prisma.chatCreditReservation.findUniqueOrThrow({
+    where: { id: reservation.reservationId },
+  });
+  const payload = durable.reservationPayload as {
+    entries?: { key: string }[];
+    attemptHolds?: unknown[];
+  };
+  payload.entries = (payload.entries ?? []).filter(
+    (entry) => !entry.key.startsWith("provider:")
+  );
+  payload.attemptHolds = [];
+  await prisma.$executeRaw`
+    UPDATE "ChatCreditReservation"
+    SET "reservationPayload" = ${payload}::jsonb
+    WHERE "id" = ${reservation.reservationId}
+  `;
+
+  const { runId } = await makeRun({ reservationId: reservation.reservationId });
+  await makeAttempt(runId, { createdAt: ancient() });
+
+  const result = await sweepStaleRoutingAttempts();
+  assert.equal(result.noCostReasons.invalid_cost_intent_payload, 1);
 });
 
 test("a fallback that reserves nothing leaves the same shape the primary does", async () => {
@@ -1175,10 +1221,27 @@ test("a fallback that reserves nothing leaves the same shape the primary does", 
     where: { id: reservation.reservationId },
   });
   const payload = durable.reservationPayload as {
-    attemptHolds?: unknown[];
-    attemptCostIntents?: unknown[];
+    attemptHolds?: { attemptIndex: number }[];
+    attemptCostIntents?: { attemptIndex: number; reservedCostMicroUsd: number }[];
   };
-  // Neither half written, exactly as acquisition leaves a free primary.
-  assert.deepEqual(payload.attemptHolds ?? [], []);
-  assert.deepEqual(payload.attemptCostIntents ?? [], []);
+  // The authorization is written and the hold is not, exactly as acquisition
+  // leaves a free primary: an intent is what was allowed, a hold is money in a
+  // bucket, and zero allowed puts none there.
+  const fallbackIntent = (payload.attemptCostIntents ?? []).find(
+    (intent) => intent.attemptIndex === 1
+  );
+  assert.ok(fallbackIntent, "a dispatched attempt is always authorized");
+  assert.equal(fallbackIntent.reservedCostMicroUsd, 0);
+  assert.equal(
+    (payload.attemptHolds ?? []).some((hold) => hold.attemptIndex === 1),
+    false
+  );
+  // And the primary's own hold, if it had one, is untouched by all of this.
+  assert.equal(
+    (payload.attemptHolds ?? []).filter((hold) => hold.attemptIndex === 0).length,
+    (payload.attemptCostIntents ?? []).find((i) => i.attemptIndex === 0)
+      ?.reservedCostMicroUsd
+      ? 2
+      : 0
+  );
 });

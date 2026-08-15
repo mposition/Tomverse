@@ -561,8 +561,7 @@ is split by reason:
 | `missing_cost_intent` | Written after the cutover, carrying none | One is an incident |
 | `dangling_reservation` | The run points at a row that is gone | One is an incident |
 | `invalid_cost_intent_payload` | The payload will not validate | One is an incident |
-| `zero_reserved_provider_cost` | Nothing was reserved for it | Counted; the catalogue check watches it |
-| `invalid_zero_cost_reservation` | A frozen positive cost with no hold | One is an incident |
+| `cost_intent_identity_mismatch` | The intent names a model the attempt did not run | One is an incident |
 | `unclassified_missing_cost_intent` | No cutover configured | Warning naming the variable |
 
 History and defect are told apart by `AUTO_ROUTER_COST_INTENT_CUTOVER_AT`, the
@@ -571,29 +570,42 @@ creation time. Unset, the two cannot be distinguished at all — so the unset
 configuration is what gets reported, rather than the alarm quietly answering
 "legacy" to everything.
 
-The last two are the difference between "nothing to price" and "the price went
-missing", and they are told apart by the reservation's own frozen numbers.
-`getChatBudgetReservedCostMicroUsd` rounds each component up, so any positive
-rate on a positive token count reserves at least one micro-dollar: zero
-reserved means every applicable rate is zero. That is a free model or an
-administrator override that flattened a real price, and the sweep cannot tell
-those apart — so the run reports the models by name, as `provider/modelId`
-counts, and `npm run check:model-pricing-db` reads the catalogue to say whether
-that price was meant. One model in that list nobody intended to be free is the
-whole signal; a per-occurrence page would only ever be about a turn behaving
-correctly.
+**An intent and a hold answer different questions.** The intent is the
+authorization — which model, at which rates, up to what — and *every*
+dispatched attempt has one, including a turn whose rates are all zero. A hold
+is money actually put in a budget bucket, which only a positive authorization
+does. So:
 
-The empty hold proves something narrower than "the call was free": that zero
-was reserved against the provider budget. A native web search's own per-call
-charge sits outside that reservation and is not covered by it. A frozen positive cost with no hold is the other thing
-entirely: the hold and the intent are written together under one condition, so
-that combination means one of them was lost.
+| Intent | Hold | Meaning |
+| --- | --- | --- |
+| zero | absent | A free turn. Normal, and it still gets a cost row |
+| positive | both periods | The ordinary case |
+| positive | one or none | A hold was lost — refused on read |
+| zero | present | Money nothing authorized — refused on read |
+| absent | present | The bucket moved and nothing says why — refused on read |
 
-Holds are checked per attempt index, never by asking whether the list is empty:
-a fallback turn holds for the other attempt, and the emptiness question would
-call that "reserved" for an attempt that reserved nothing. The fallback
-reservation path now also skips both halves at zero, the way acquisition
-always has — the two used to leave different payloads for the same free model.
+That separation is what made the zero case legible. It used to have neither
+half, so a sweep could only say "nothing to price" and had no way to tell a
+free model from an authorization that went missing — and the fallback path
+wrote a zero hold where acquisition wrote nothing, so the same free model left
+two different shapes. Now a zero authorization is an explicit record and the
+sweep writes a cost row for it: `costSource: reserved_upper_bound` with a cost
+of zero says *the ceiling this call was allowed was nothing*, which is not a
+claim that the provider charged nothing — a native web search's own per-call
+charge sits outside the reservation entirely — and a late actual corrects it
+through the ordinary adjustment path.
+
+The models that authorize nothing are still reported by name, as
+`provider/modelId` counts taken from the **attempt row** rather than the
+payload: a fallback's payload `modelId` is the primary's and always will be.
+`npm run check:model-pricing-db` reads the catalogue from the other side and
+reports any enabled model pricing every token at zero. One name in either list
+nobody meant to be free is the signal; a per-occurrence page would only ever be
+about a turn behaving correctly.
+
+The intent's model and provider are checked against the attempt row on every
+sweep, because nothing else compares them and pricing one model's call at
+another's rates is what that would cause.
 
 `unexpectedCostOutcome` is an incident on the first occurrence: the sweep
 cannot produce those outcomes by construction, so one means a contract broke.

@@ -247,8 +247,7 @@ const emptyNoCost = () => ({
   no_reservation: 0,
   legacy_missing_cost_intent: 0,
   missing_cost_intent: 0,
-  zero_reserved_provider_cost: 0,
-  invalid_zero_cost_reservation: 0,
+  cost_intent_identity_mismatch: 0,
   unclassified_missing_cost_intent: 0,
   dangling_reservation: 0,
   invalid_cost_intent_payload: 0,
@@ -488,27 +487,23 @@ test("the backlog alarms on what the sweep would act on, not on what is merely o
   assert.deepEqual(reportedIncidents, ["CHAT_ATTEMPT_SWEEP_BACKLOG"]);
 });
 
-test("a turn that reserved nothing is not a defect; one that lost its hold is", async () => {
-  // `microdollarsFor` rounds up, so zero reserved means every rate is zero --
-  // a free model or a bad override, and the sweep cannot tell those apart.
-  // Paging on it would be paging about a turn behaving correctly; the
-  // catalogue check is what notices a price flattened to zero.
+test("a turn that authorized nothing is reported by model and never paged", async () => {
+  // These attempts get a cost row -- a ceiling of zero is a real audit record
+  // -- so nothing is missing and nothing is paged. What the run does say is
+  // which model it was, because a free model and a price an administrator
+  // flattened to zero are the same thing from inside the sweep.
   reset();
-  sweepNoCostReasons.zero_reserved_provider_cost = 25;
   sweepZeroReservedCostModels = { "openai/some-free-model": 25 };
   const quiet = await (await load()).cleanupExpiredData();
   assert.deepEqual(reportedIncidents, []);
-  // Quiet is not the same as buried. Which model reserved nothing is the only
-  // thing that separates a free model from a flattened price, so the run says
-  // it by name.
   assert.deepEqual(quiet.staleRoutingAttempts?.zeroReservedCostModels, {
     "openai/some-free-model": 25,
   });
+});
 
-  // A frozen positive cost with nothing held is the other thing entirely: the
-  // hold and the intent are written together, so this means one was lost.
+test("an intent naming a model the attempt did not run is an incident", async () => {
   reset();
-  sweepNoCostReasons.invalid_zero_cost_reservation = 1;
+  sweepNoCostReasons.cost_intent_identity_mismatch = 1;
   await (await load()).cleanupExpiredData();
   assert.deepEqual(reportedIncidents, ["CHAT_COST_INTENT_UNAVAILABLE"]);
 });

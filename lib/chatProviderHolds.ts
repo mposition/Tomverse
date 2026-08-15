@@ -274,33 +274,70 @@ export type AttemptCostIntent = {
 };
 
 /**
- * Whether the intents and the holds describe the same set of attempts.
+ * Whether the intents and the holds agree about what was authorized.
  *
- * They are written in the same transaction and can still disagree, the same
- * way the holds and the entries can. An intent with no hold would let a crash
- * record a cost against budget nobody reserved; a hold with no intent would
- * leave a crash unable to record anything at all, which is the gap this whole
- * mechanism exists to close.
+ * The two answer different questions and are deliberately not required to
+ * match one-for-one. An intent is the authorization -- which model, at which
+ * rates, up to what -- and every dispatched attempt has one, including a turn
+ * whose rates are all zero. A hold is money actually put in a budget bucket,
+ * which only a positive authorization does.
+ *
+ * So: zero authorized and no hold is the normal shape of a free turn, and
+ * needs no special case anywhere downstream. Positive authorized with a
+ * missing bucket is a lost hold. Zero authorized with a hold is money nothing
+ * authorized. And a hold with no intent is the one that can never be
+ * reconstructed -- the bucket moved and nothing says why.
  */
 export const attemptCostIntentProblems = (input: {
     holds: readonly AttemptHold[];
     intents: readonly AttemptCostIntent[];
 }): readonly string[] => {
     const problems: string[] = [];
-    const heldAttempts = new Set(input.holds.map((hold) => hold.attemptIndex));
     const intentAttempts = new Set(input.intents.map((intent) => intent.attemptIndex));
-
     if (intentAttempts.size !== input.intents.length) {
         problems.push("two cost intents share an attemptIndex");
     }
-    for (const attemptIndex of intentAttempts) {
-        if (!heldAttempts.has(attemptIndex)) {
-            problems.push(`attempt ${attemptIndex} has a cost intent and no hold`);
-        }
+
+    const holdsByAttempt = new Map<number, AttemptHold[]>();
+    for (const hold of input.holds) {
+        holdsByAttempt.set(hold.attemptIndex, [
+            ...(holdsByAttempt.get(hold.attemptIndex) ?? []),
+            hold,
+        ]);
     }
-    for (const attemptIndex of heldAttempts) {
+
+    // A hold with no intent is corruption in every case. The intent is the
+    // record of what was authorized and at what rates; money moved in a bucket
+    // with nothing saying why is the one combination that can never be
+    // reconstructed.
+    for (const attemptIndex of holdsByAttempt.keys()) {
         if (!intentAttempts.has(attemptIndex)) {
             problems.push(`attempt ${attemptIndex} has a hold and no cost intent`);
+        }
+    }
+
+    for (const intent of input.intents) {
+        const held = holdsByAttempt.get(intent.attemptIndex) ?? [];
+        if (intent.reservedCostMicroUsd > 0) {
+            // A positive authorization has to have moved both buckets. One of
+            // them missing means a hold was lost, and release would give back
+            // less than was taken.
+            const missing = PROVIDER_BUDGET_PERIODS.filter(
+                (period) => !held.some((hold) => hold.period === period)
+            );
+            if (missing.length > 0) {
+                problems.push(
+                    `attempt ${intent.attemptIndex} authorized ${intent.reservedCostMicroUsd} and holds no ${missing.join(" or ")}`
+                );
+            }
+            continue;
+        }
+        // Zero authorized, so nothing was put in a bucket. A hold here would
+        // be money reserved against an authorization that says none was.
+        if (held.length > 0) {
+            problems.push(
+                `attempt ${intent.attemptIndex} authorized nothing and holds ${held.length} bucket(s)`
+            );
         }
     }
     return problems;

@@ -415,26 +415,23 @@ export async function cleanupExpiredData() {
 
     // Four of the no-cost reasons are defects with no grace period: a run
     // pointing at a reservation that is gone, a payload that will not
-    // validate, a payload written *after* cost intents existed in the shape
-    // that predates them, and a reservation that froze a positive cost and
-    // holds nothing for it. Each is a provider call nobody can price, caused
-    // by something wrong now rather than by history.
+    // validate, a payload written *after* cost intents existed and carrying
+    // none, and an intent naming a different model than the attempt that ran.
+    // Each is a provider call nobody can price, caused by something wrong now
+    // rather than by history.
     //
-    // `zero_reserved_provider_cost` is deliberately not among them. A turn
-    // that reserved nothing has nothing the sweep could have recorded, so a
-    // per-occurrence call would be about a turn that is behaving correctly.
-    //
-    // What it is not is uninteresting: a deliberately free model and a price
-    // an administrator flattened to zero look identical from inside the sweep,
-    // and the difference is *which model*. So the models are reported by name
-    // in the run's own result -- one nobody meant to be free is the signal --
-    // and `npm run check:model-pricing-db` is what reads the catalogue to say
-    // whether the price was meant.
+    // A turn that authorized nothing is not among them and is not even a
+    // no-cost reason any more: it has an intent like every other dispatch, so
+    // it gets a cost row with a ceiling of zero. The models it happens on are
+    // still reported by name -- a deliberately free model and a price an
+    // administrator flattened to zero look identical from here, and the
+    // difference is *which model* -- and `npm run check:model-pricing-db`
+    // reads the catalogue to say whether that price was meant.
     const defects =
       swept.noCostReasons.dangling_reservation +
       swept.noCostReasons.invalid_cost_intent_payload +
       swept.noCostReasons.missing_cost_intent +
-      swept.noCostReasons.invalid_zero_cost_reservation;
+      swept.noCostReasons.cost_intent_identity_mismatch;
     if (defects > 0) {
       await reportOperationalIncident({
         code: "CHAT_COST_INTENT_UNAVAILABLE",

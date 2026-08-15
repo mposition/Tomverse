@@ -3079,37 +3079,28 @@ export const acquireChatAccess = async (
                     periodStart: entry.periodStart,
                     amount: entry.amount,
                 })),
-            // What attempt 0 was authorized to spend, and at what rates. The
-            // only thing a sweep can honestly record about a call nobody
-            // observed, so it has to exist before the call is made.
+            // What attempt 0 was authorized to spend, and at what rates.
             //
-            // Written only when a hold was taken, which is the same condition
-            // (`reservedCost > 0`) the hold itself is under. The intent and
-            // the hold are two halves of one authorization and the validator
-            // compares them as a pair; an intent whose reserved cost is zero
-            // would also give a sweep nothing to record but a zero cost row,
-            // and a zero is the one figure this ledger must never invent.
-            ...(reservedCost > 0
-                ? {
-                      attemptCostIntents: [
-                          {
-                              attemptIndex: 0,
-                              modelId: budget.modelId,
-                              provider: budget.provider,
-                              estimatedInputTokens: budget.inputTokens,
-                              reservedOutputTokens: budget.reservedOutputTokens,
-                              inputUsdPerMillionTokens:
-                                  budget.inputUsdPerMillionTokens,
-                              outputUsdPerMillionTokens:
-                                  budget.outputUsdPerMillionTokens,
-                              cachedInputPriceMultiplier:
-                                  budget.cachedInputPriceMultiplier,
-                              pricingVersion: budget.pricingVersion ?? null,
-                              reservedCostMicroUsd: reservedCost,
-                          },
-                      ],
-                  }
-                : {}),
+            // Written for every dispatch, including one whose rates are all
+            // zero. The hold beside it is not: a hold is money put in a budget
+            // bucket, and zero authorized puts none there. Separating the two
+            // is what lets a crashed free turn still say what it was allowed
+            // to spend -- nothing -- instead of leaving a sweep to guess
+            // between "authorized nothing" and "lost its authorization".
+            attemptCostIntents: [
+                {
+                    attemptIndex: 0,
+                    modelId: budget.modelId,
+                    provider: budget.provider,
+                    estimatedInputTokens: budget.inputTokens,
+                    reservedOutputTokens: budget.reservedOutputTokens,
+                    inputUsdPerMillionTokens: budget.inputUsdPerMillionTokens,
+                    outputUsdPerMillionTokens: budget.outputUsdPerMillionTokens,
+                    cachedInputPriceMultiplier: budget.cachedInputPriceMultiplier,
+                    pricingVersion: budget.pricingVersion ?? null,
+                    reservedCostMicroUsd: reservedCost,
+                },
+            ],
             usageCredits: budget.usageCredits,
             inputTokens: budget.inputTokens,
             maxOutputTokens: budget.maxOutputTokens,
@@ -3868,18 +3859,32 @@ export const reserveAttemptProviderBudget = async (input: {
             throw new AttemptBudgetRefusal("reservation_not_open");
         }
         const canonical = deserializeReservation(durable.reservationPayload);
-        // Nothing to reserve, so nothing is written -- the same shape
-        // acquisition leaves for a turn whose rates are all zero, where the
-        // `reservedCost > 0` guard skips the hold and the intent together.
+        // Nothing to put in a bucket, but there is still something to
+        // authorize. The intent is written and the hold is not, which is
+        // exactly the shape acquisition leaves for a free primary.
         //
-        // The two paths used to disagree here: this one wrote a zero hold and
-        // an intent beside it, so a crashed fallback and a crashed primary on
-        // the same free model left payloads a sweep classified differently.
-        // Refusing on the budget would be the other way to be consistent, and
-        // it is the wrong one: a call that reserves nothing consumes none of
-        // the budget the guardrail bounds, so there is nothing for it to
-        // refuse.
+        // Refusing on the budget would be the other way to handle zero, and it
+        // is the wrong one: a call that reserves nothing consumes none of the
+        // budget the guardrail bounds, so there is nothing for it to refuse.
         if (amount === 0) {
+            await tx.chatCreditReservation.update({
+                where: { id: durable.id },
+                data: {
+                    reservationPayload: serializeReservation({
+                        ...canonical,
+                        attemptCostIntents: [
+                            ...(canonical.attemptCostIntents ?? []).filter(
+                                (intent) => intent.attemptIndex !== input.attemptIndex
+                            ),
+                            {
+                                ...input.costIntent,
+                                attemptIndex: input.attemptIndex,
+                                reservedCostMicroUsd: 0,
+                            },
+                        ],
+                    }),
+                },
+            });
             return { reserved: true as const, entries: [] };
         }
         // A reservation written before `attemptHolds` existed carries its
