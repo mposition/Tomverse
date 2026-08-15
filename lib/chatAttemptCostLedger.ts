@@ -495,6 +495,33 @@ const applyAdjustmentDelta = async (
  * transaction, and the `appliedAt IS NULL` predicate on the mark is the
  * compare-and-set that keeps two replays from applying one delta twice.
  */
+/**
+ * How much correction is still owed to the rollups, and how long it has waited.
+ *
+ * The count alone answers "is there work"; the age answers "is anything
+ * getting through", which is the number that says whether the replay is
+ * running at all. A backlog of zero on a replay nobody wired up looks
+ * identical to a backlog of zero on one that keeps up -- which is exactly the
+ * state this ledger was in until the maintenance run began calling it.
+ */
+export const pendingAttemptCostAdjustmentBacklog = async (now = new Date()) => {
+    const rows = await prisma.$queryRaw<
+        { pending: bigint; oldest_ms: number | null }[]
+    >`
+        SELECT
+            COUNT(*)::bigint AS pending,
+            MAX(EXTRACT(EPOCH FROM (${now}::timestamp - "createdAt")) * 1000)::float
+                AS oldest_ms
+        FROM "ChatAttemptUsageAdjustment"
+        WHERE "appliedAt" IS NULL
+    `;
+    const row = rows[0];
+    return {
+        pending: Number(row?.pending ?? 0),
+        oldestPendingMs: row?.oldest_ms == null ? null : Math.round(row.oldest_ms),
+    };
+};
+
 export const applyPendingAttemptCostAdjustments = async (
     batch = 200
 ): Promise<{ examined: number; applied: number; failed: number }> => {

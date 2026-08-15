@@ -81,6 +81,18 @@ export type StaleAttemptSweepResult = {
      * count would report a permanent hole in the ledger as an ordinary sweep.
      */
     closedWithoutCostIntent: number;
+    /**
+     * Closed, and the cost writer returned something the sweep cannot produce.
+     *
+     * `corrected`, `adjustment_pending` and `identity_mismatch` all describe a
+     * cost row this call did not write for a reason that is not a race and not
+     * a missing intent. None of them is reachable from here today -- the sweep
+     * writes a reserved upper bound, and a guess is refused before it can
+     * correct anything -- so a non-zero count means either the ledger grew a
+     * path nobody expected or this sweep started producing a record it should
+     * not. Counted rather than folded into a success for exactly that reason.
+     */
+    unexpectedCostOutcome: number;
     /** Lost the compare-and-set: the live request closed it first. */
     alreadyClosed: number;
     /**
@@ -135,6 +147,7 @@ export const sweepStaleRoutingAttempts = async (
     let closedCostInserted = 0;
     let closedWithExistingCost = 0;
     let closedWithoutCostIntent = 0;
+    let unexpectedCostOutcome = 0;
     let alreadyClosed = 0;
     let failed = 0;
     for (const row of rows) {
@@ -157,10 +170,44 @@ export const sweepStaleRoutingAttempts = async (
                 alreadyClosed += 1;
                 continue;
             }
-            // Counted from what was written, not from what was attempted.
-            if (closed.cost === "inserted") closedCostInserted += 1;
-            else if (closed.cost === "skipped") closedWithoutCostIntent += 1;
-            else closedWithExistingCost += 1;
+            // Counted from what was written, not from what was attempted, and
+            // every outcome named. The `default` is unreachable by
+            // construction -- `never` makes adding a sixth outcome a compile
+            // error here rather than a silent extra success.
+            switch (closed.cost) {
+                case "inserted":
+                    closedCostInserted += 1;
+                    break;
+                case "duplicate":
+                    closedWithExistingCost += 1;
+                    break;
+                case "skipped":
+                    closedWithoutCostIntent += 1;
+                    break;
+                case "corrected":
+                case "adjustment_pending":
+                case "identity_mismatch":
+                    unexpectedCostOutcome += 1;
+                    console.error(
+                        JSON.stringify({
+                            event: "routing_attempt_sweep_unexpected_cost_outcome",
+                            attemptId: row.id,
+                            outcome: closed.cost,
+                        })
+                    );
+                    break;
+                default: {
+                    const unreachable: never = closed.cost;
+                    unexpectedCostOutcome += 1;
+                    console.error(
+                        JSON.stringify({
+                            event: "routing_attempt_sweep_unexpected_cost_outcome",
+                            attemptId: row.id,
+                            outcome: String(unreachable),
+                        })
+                    );
+                }
+            }
         } catch (error) {
             failed += 1;
             console.error(
@@ -178,6 +225,7 @@ export const sweepStaleRoutingAttempts = async (
         closedCostInserted,
         closedWithExistingCost,
         closedWithoutCostIntent,
+        unexpectedCostOutcome,
         alreadyClosed,
         failed,
     };
