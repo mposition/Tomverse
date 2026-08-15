@@ -8,7 +8,10 @@ import { useTurnstile } from "@/components/chat/useTurnstile";
 import Link from "next/link";
 import { discardResponseBody } from "@/lib/discardResponseBody";
 import { withChatLanguage } from "@/lib/localizedCallbackUrl";
-import { ACCOUNT_SWITCH_REASON } from "@/lib/adminReauthenticationCore";
+import {
+    ACCOUNT_SWITCH_REASON,
+    isAdminReauthenticationSignInReason,
+} from "@/lib/adminReauthenticationCore";
 import { isValidLoginEmail } from "@/lib/emailValidation";
 import { useAuthConsentSlotRef } from "@/components/analytics/AnalyticsProvider";
 import {
@@ -60,8 +63,15 @@ function SignInButtons() {
     const { status } = useSession();
     const { t, lang } = useLanguage();
     const callbackUrl = withChatLanguage(searchParams.get("callbackUrl"), lang);
-    const adminReauthentication =
-        searchParams.get("reason") === "admin-session-expired";
+    // Both administrator windows land here: an expired console session and an
+    // expired high-risk step-up window. The notice is the same either way --
+    // the previous session was ended on purpose and signing in again is what
+    // continues -- but the step-up reason has to be recognised too, or the
+    // operator arriving from a refused save is shown a bare sign-in page and a
+    // provider error box.
+    const adminReauthentication = isAdminReauthenticationSignInReason(
+        searchParams.get("reason")
+    );
     // The visitor deliberately ended the previous session to use a different
     // account. Whoever was signed in with the identity provider is still signed
     // in *there*, so without this the next click would silently hand back the
@@ -252,7 +262,11 @@ function SignInButtons() {
     return (
         <div className="mt-8 space-y-4">
             {adminReauthentication ? (
-                <div role="status" className="rounded-2xl border border-blue-200 bg-blue-50 p-4 text-sm leading-6 text-blue-900 dark:border-blue-500/30 dark:bg-blue-950/30 dark:text-blue-100">
+                <div
+                    role="status"
+                    data-testid="signin-admin-reauthentication-notice"
+                    className="rounded-2xl border border-blue-200 bg-blue-50 p-4 text-sm leading-6 text-blue-900 dark:border-blue-500/30 dark:bg-blue-950/30 dark:text-blue-100"
+                >
                     Your previous administrator session was ended. Sign in again
                     to open the Tomverse Admin Console.
                 </div>

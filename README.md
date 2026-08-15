@@ -937,17 +937,35 @@ ADMIN_REFUND_APPROVAL_THRESHOLD_CENTS=10000
 High-risk operations create an exact, expiring approval request. A different
 administrator must approve it; the original requester then retries the same
 target and payload. Successful execution consumes the approval once. Existing
-administrators must sign in again after the security migration. Recent-auth
-checks use the current database session's creation time, not a user-wide last
-login timestamp.
+administrators must sign in again after the security migration.
 
-The general database session can remain valid for seven days while
-`ADMIN_SESSION_MAX_HOURS` applies a shorter administrator window. When that
-window expires, an allow-listed administrator is sent to the dedicated
-reauthentication screen and must fully sign out and sign in again; refreshing
-the browser does not renew it. Accounts that are not present in
-`ADMIN_EMAILS`/`ADMIN_USER_IDS`, or whose configured access has expired, still
-receive a hidden 404 response.
+`ADMIN_SESSION_MAX_HOURS` and `ADMIN_RECENT_AUTH_MINUTES` are two different
+windows and both are measured from the same value: `authenticatedAt`, a claim
+`callbacks.jwt` in `lib/auth.ts` stamps on every real sign-in. Sessions use
+NextAuth's JWT strategy, so there is no `Session` row and no database session
+creation time to read — an earlier version of this document said there was, and
+the code that tried to read one failed closed for every caller.
+
+- `ADMIN_SESSION_MAX_HOURS` (8 by default) is Admin Console *access*. While the
+  ordinary application session can remain valid for seven days, an expired
+  administrator window sends an allow-listed administrator to the dedicated
+  reauthentication screen instead of the console.
+- `ADMIN_RECENT_AUTH_MINUTES` (30 by default) is the step-up window that only
+  high-risk writes require (`assertRecentAdminAuthentication`). While it is
+  spent, the console keeps working and those endpoints answer HTTP 428.
+
+Because the two windows differ, a step-up refusal is its own recovery path:
+`/auth/admin-reauthenticate?mode=recent` shows the reauthentication card for a
+session whose console access is still valid, where the plain screen would
+redirect back to the console. Admin Console panels link there after a 428, keep
+the refused change on screen, and never re-send it — the operator signs in
+again, returns to the same screen, and submits it themselves. The Admin Console
+header's account menu is where signing out from inside the console lives.
+
+Refreshing the browser renews neither window; only a full sign-out and sign-in
+does. Accounts that are not present in `ADMIN_EMAILS`/`ADMIN_USER_IDS`, or whose
+configured access has expired, still receive a hidden 404 response — including
+on the reauthentication screen.
 
 New admin audit records are serialized into an HMAC chain. A dedicated secret
 is recommended; when omitted, `NEXTAUTH_SECRET` is used:
