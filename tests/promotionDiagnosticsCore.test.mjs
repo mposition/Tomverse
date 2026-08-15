@@ -578,3 +578,68 @@ test("no stored coupon at all is a warning, not a failure", () => {
   });
   assert.equal(checkFor(section, "stored_coupon").reason, "no_stored_coupon");
 });
+
+/* -------------------------------------------------------------------------- */
+/* "Nothing found" vs "never looked"                                           */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * `inspectStripePromotionLinkage()` returns as soon as the linked object is
+ * usable, before running the exact-code search, because nothing downstream of
+ * the linked path would consult a candidate. That leaves `exactCodeCandidates`
+ * empty for two opposite reasons, and reading the empty list as the second one
+ * is a claim the report never checked.
+ *
+ * It reached production: EDDIEFRIEND100, minutes after its Stripe objects were
+ * stamped and while it was serving checkouts, showed
+ * `Exact code candidates -- Warning no_stripe_object_for_code`.
+ */
+
+test("an unsearched candidate list is reported as unchecked, not as an empty Stripe", () => {
+  const section = stripeSection({
+    exactCodeCandidates: [],
+    exactCodeSearchPerformed: false,
+  });
+  const candidates = checkFor(section, "exact_code_candidates");
+  assert.equal(candidates.status, "not_checked");
+  assert.equal(candidates.reason, "stored_linkage_is_usable");
+  assert.equal(section.blockingReasons.length, 0);
+});
+
+test("a search that ran and found nothing still warns", () => {
+  // The distinction only holds if the true empty case keeps its warning: a
+  // promotion whose linkage is broken *and* has no object under its code is
+  // exactly what "no_stripe_object_for_code" is for.
+  const section = stripeSection({
+    exactCodeCandidates: [],
+    exactCodeSearchPerformed: true,
+  });
+  const candidates = checkFor(section, "exact_code_candidates");
+  assert.equal(candidates.status, "warn");
+  assert.equal(candidates.reason, "no_stripe_object_for_code");
+});
+
+test("a caller that does not report whether it searched keeps the old reading", () => {
+  const section = stripeSection({ exactCodeCandidates: [] });
+  assert.equal(
+    checkFor(section, "exact_code_candidates").reason,
+    "no_stripe_object_for_code"
+  );
+});
+
+test("a repaired promotion warns for its drift alone, not for a search it skipped", () => {
+  // The post-repair production state: both stamps written, the code's expiry
+  // still later than the policy's end date. Nothing blocks checkout, and the
+  // only thing an operator is being told about is the drift.
+  const section = stripeSection({
+    exactCodeCandidates: [],
+    exactCodeSearchPerformed: false,
+    storedPromotionCodeMismatches: ["drift:expires_at"],
+  });
+  assert.equal(checkFor(section, "stored_coupon").status, "pass");
+  assert.equal(checkFor(section, "stored_linkage").status, "pass");
+  assert.equal(checkFor(section, "exact_code_candidates").status, "not_checked");
+  assert.deepEqual(section.blockingReasons, []);
+  assert.deepEqual(section.driftReasons, ["drift:expires_at"]);
+  assert.equal(section.status, "warn");
+});
