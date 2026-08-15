@@ -53,6 +53,9 @@ const HEALTHY_LINKAGE: import("../../lib/stripePromotionProvisioning").Promotion
   storedPromotionCodeExists: true,
   storedPromotionCodeMismatches: [] as string[],
   exactCodeCandidates: [],
+  // Healthy linkage: the inspector returns before the exact-code search, so the
+  // empty list above means "not looked at" rather than "Stripe holds nothing".
+  exactCodeSearchPerformed: false,
   recommendation: "healthy",
 };
 

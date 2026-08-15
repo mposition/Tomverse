@@ -609,6 +609,19 @@ export type PromotionLinkageReport = {
     mismatches: string[];
     adoptable: boolean;
   }[];
+  /**
+   * Whether the exact-code search actually ran.
+   *
+   * A healthy linkage returns before searching, because nothing downstream of
+   * `ensureStripePromotionDiscount`'s linked path would consult a candidate.
+   * That leaves `exactCodeCandidates` empty for two opposite reasons -- "Stripe
+   * holds no object under this code" and "we did not look, because the object
+   * we already hold works" -- and a reader that cannot tell them apart reports
+   * the healthy case as `no_stripe_object_for_code`. Which is what the Admin
+   * panel did, on a promotion that had just been repaired and was serving
+   * checkouts.
+   */
+  exactCodeSearchPerformed: boolean;
   recommendation:
     | "healthy"
     | "relink_stored_object"
@@ -652,6 +665,7 @@ export async function inspectStripePromotionLinkage({
     storedPromotionCodeExists: false,
     storedPromotionCodeMismatches: [],
     exactCodeCandidates: [],
+    exactCodeSearchPerformed: false,
     recommendation: "manual_review",
   };
 
@@ -711,6 +725,7 @@ export async function inspectStripePromotionLinkage({
     stripe,
     promotion.code
   );
+  report.exactCodeSearchPerformed = true;
   for (const candidate of candidates) {
     const { mismatches } = await evaluate(candidate);
     report.exactCodeCandidates.push({

@@ -76,3 +76,7 @@ docs/*
 
 # Scratch build directory for scripts/verify-package-build-matrix.mjs.
 .package-build-matrix-*
+
+# Pre-change snapshots from scripts/stamp-promotion-metadata.mjs. Its default
+# path is the working tree, and the file records live Stripe object metadata.
+promotion-metadata-snapshot-*.json

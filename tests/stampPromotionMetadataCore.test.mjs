@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 
 import {
+  SNAPSHOT_FILENAME_PREFIX,
   STAMPED_KEYS,
   stampDiff,
   stampFor,
@@ -149,5 +150,24 @@ test("a snapshot is written before any update under --apply", () => {
   assert.ok(
     snapshotAt < firstUpdateAt,
     "the pre-change metadata must be captured before it is overwritten"
+  );
+});
+
+test("the snapshot's default location is ignored by git", () => {
+  // `--apply` defaults to writing into the working tree, and the snapshot holds
+  // live Stripe object metadata. One `git add -A` would commit it. The rule and
+  // the filename are tied to one constant so the rule cannot drift away from
+  // what the script actually writes.
+  const pattern = `${SNAPSHOT_FILENAME_PREFIX}*.json`;
+  const ignored = readFileSync(".gitignore", "utf8")
+    .split("\n")
+    .map((line) => line.trim());
+  assert.ok(
+    ignored.includes(pattern),
+    `.gitignore must carry ${pattern}`
+  );
+  assert.match(
+    readFileSync(SCRIPT, "utf8"),
+    /\$\{SNAPSHOT_FILENAME_PREFIX\}\$\{code\}-\$\{Date\.now\(\)\}\.json/
   );
 });
