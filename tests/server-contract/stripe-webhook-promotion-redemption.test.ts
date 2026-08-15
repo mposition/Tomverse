@@ -41,6 +41,12 @@ type World = {
   redemptionRows: Record<string, unknown>[];
   userUpdates: Record<string, unknown>[];
   releases: string[];
+  /** Full call shape, so the staleness guard can be asserted, not assumed. */
+  releaseCalls: {
+    promotionId: string;
+    userId: string;
+    takenAtOrBefore?: Date;
+  }[];
   subscription: Stripe.Subscription;
   paymentMethodRetrieves: string[];
 };
@@ -75,6 +81,7 @@ const freshWorld = (): World => ({
   redemptionRows: [],
   userUpdates: [],
   releases: [],
+  releaseCalls: [],
   subscription: subscriptionFixture(),
   paymentMethodRetrieves: [],
 });
@@ -162,8 +169,17 @@ async function loadProcessor() {
     mock.module(mod("lib/billingPromotionSecurity.ts"), {
       namedExports: {
         ...realPromotionSecurity,
-        releasePromotionCheckout: async (promotionId: string) => {
+        releasePromotionCheckout: async (
+          promotionId: string,
+          userId: string,
+          options: { takenAtOrBefore?: Date } = {}
+        ) => {
           world.releases.push(promotionId);
+          world.releaseCalls.push({
+            promotionId,
+            userId,
+            takenAtOrBefore: options.takenAtOrBefore,
+          });
         },
       },
     });
@@ -249,6 +265,24 @@ const zeroDueSession = (id = "cs_zero") =>
     },
   }) as unknown as Stripe.Checkout.Session;
 
+/** Stripe expires an unpaid Session 30 minutes after it is created. */
+const SESSION_CREATED_SECONDS = 1_800_000_000;
+
+const expiringSession = (overrides: Record<string, unknown> = {}) =>
+  ({
+    ...(zeroDueSession("cs_expired") as unknown as Record<string, unknown>),
+    subscription: null,
+    created: SESSION_CREATED_SECONDS,
+    ...overrides,
+  }) as unknown as Stripe.Checkout.Session;
+
+const expiredEvent = (session: Stripe.Checkout.Session) =>
+  ({
+    id: `evt_expired_${session.id}`,
+    type: "checkout.session.expired",
+    data: { object: session },
+  }) as unknown as Stripe.Event;
+
 const completedEvent = (session: Stripe.Checkout.Session) =>
   ({
     id: `evt_${session.id}`,
@@ -330,4 +364,69 @@ test("redemption counting lives in the webhook, never in the checkout route", as
     "only activateInternalPass may touch redeemedCount in the checkout route"
   );
   assert.match(checkoutRoute, /activateInternalPass/);
+});
+
+/* -------------------------------------------------------------------------- */
+/* Abandoned checkouts                                                         */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * The lease is keyed on `(promotionId, userId)`, not on the plan, so a customer
+ * who opens a Pro checkout and walks away cannot start a Max one until it
+ * clears. Before this event was handled the only thing that cleared it was the
+ * 31-minute TTL, and the customer was told "A checkout using this promotion is
+ * already in progress" about an attempt Stripe had already closed.
+ */
+
+test("an expired checkout releases the promotion lease", async () => {
+  const { processStripeEvent } = await loadProcessor();
+  await processStripeEvent(expiredEvent(expiringSession()));
+
+  assert.equal(world.releaseCalls.length, 1);
+  assert.equal(world.releaseCalls[0].promotionId, "promo_db");
+  assert.equal(world.releaseCalls[0].userId, "user_1");
+});
+
+test("the release is bounded by the Session's own creation time", async () => {
+  // Stripe redelivers a failed webhook for days. An unbounded release would
+  // free a lease belonging to a later attempt and allow two live Sessions for
+  // one promotion -- the single thing the lease exists to prevent.
+  const { processStripeEvent } = await loadProcessor();
+  await processStripeEvent(expiredEvent(expiringSession()));
+
+  assert.deepEqual(
+    world.releaseCalls[0].takenAtOrBefore,
+    new Date(SESSION_CREATED_SECONDS * 1000)
+  );
+});
+
+test("an expired checkout consumes no redemption and touches no subscription", async () => {
+  // Nothing was paid for. Counting it would spend a redemption on a capped
+  // promotion for a customer who received nothing.
+  const { processStripeEvent } = await loadProcessor();
+  await processStripeEvent(expiredEvent(expiringSession()));
+
+  assert.equal(world.redeemedCount, 0);
+  assert.deepEqual(world.redemptionRows, []);
+  assert.deepEqual(world.userUpdates, []);
+});
+
+test("an expired checkout that carried no promotion releases nothing", async () => {
+  // A credit-pack or plain subscription checkout never took a promotion lease.
+  const { processStripeEvent } = await loadProcessor();
+  await processStripeEvent(
+    expiredEvent(expiringSession({ metadata: {}, client_reference_id: null }))
+  );
+
+  assert.deepEqual(world.releaseCalls, []);
+});
+
+test("an expired checkout with no creation time releases nothing", async () => {
+  // Fail closed: without the Session's own timestamp this attempt cannot be
+  // told from a later one, and waiting out the TTL is the behaviour this
+  // handler improves on rather than a failure of it.
+  const { processStripeEvent } = await loadProcessor();
+  await processStripeEvent(expiredEvent(expiringSession({ created: null })));
+
+  assert.deepEqual(world.releaseCalls, []);
 });

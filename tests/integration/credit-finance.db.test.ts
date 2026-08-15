@@ -22,6 +22,10 @@ import {
 } from "@/lib/creditPurchase";
 import { lockCreditAccount } from "@/lib/creditDebt";
 import { reserveAddOnCredits, settleAddOnCredits } from "@/lib/creditLedger";
+import {
+  releasePromotionCheckout,
+  reservePromotionCheckout,
+} from "@/lib/billingPromotionSecurity";
 import { getCreditPack } from "@/lib/creditPacks";
 import { prisma } from "@/lib/prisma";
 import { usageBucketCount } from "@/lib/chatUsageBucketCount";
@@ -1323,4 +1327,61 @@ test("the database refuses a lot balance below zero (§9)", async () => {
     data: { remainingCredits: { decrement: 3 } },
   });
   assert.equal(spent.remainingCredits, 0);
+});
+
+/* -------------------------------------------------------------------------- */
+/* Promotion checkout lease                                                    */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * The lease that stops one customer holding two live Checkout Sessions for the
+ * same promotion. It is keyed on `(promotionId, userId)` and records nothing
+ * about which attempt took it, so the `checkout.session.expired` handler has to
+ * bound its release by the Session's own creation time. Stripe redelivers a
+ * failed webhook for days; an unbounded release would free a lease a later
+ * attempt is relying on, which is the one outcome the lease exists to prevent.
+ *
+ * Asserted against the real table because the guard is a `where` clause: a
+ * mocked release proves only that the bound was passed, not that it is obeyed.
+ */
+
+test("an expired checkout releases only the lease its own attempt took", async () => {
+  const promotionId = `promo_${randomUUID()}`;
+  const userId = `user_${randomUUID()}`;
+
+  const abandoned = await reservePromotionCheckout(promotionId, userId);
+  const abandonedRow = await prisma.chatRequestLease.findUniqueOrThrow({
+    where: { id: abandoned.id },
+  });
+
+  // A redelivery naming an instant before this lease was taken: the attempt it
+  // describes is older than the lease that is currently held.
+  await releasePromotionCheckout(promotionId, userId, {
+    takenAtOrBefore: new Date(abandonedRow.createdAt.getTime() - 1000),
+  });
+  assert.equal(
+    await prisma.chatRequestLease.count({ where: { id: abandoned.id } }),
+    1,
+    "a lease taken after the Session being reported must survive"
+  );
+
+  // The Session that actually took it. Stripe stamps `created` before the lease
+  // row exists, so the bound is at or after the row's own timestamp.
+  await releasePromotionCheckout(promotionId, userId, {
+    takenAtOrBefore: new Date(abandonedRow.createdAt.getTime() + 1000),
+  });
+  assert.equal(
+    await prisma.chatRequestLease.count({ where: { id: abandoned.id } }),
+    0
+  );
+
+  // And with the lease gone the customer can start the other plan's checkout,
+  // which is the whole point of handling the event.
+  const next = await reservePromotionCheckout(promotionId, userId);
+  assert.equal(next.id, abandoned.id);
+  await releasePromotionCheckout(promotionId, userId);
+  assert.equal(
+    await prisma.chatRequestLease.count({ where: { id: abandoned.id } }),
+    0
+  );
 });
