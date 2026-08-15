@@ -117,6 +117,37 @@ test("usageBucketCount narrows a bigint and refuses an unsafe one", () => {
   );
 });
 
+test("the narrowed count is JSON-serializable where the raw column value is not", () => {
+  // This is the whole reason read boundaries call `usageBucketCount()` rather
+  // than passing the column through. `NextResponse.json()` is
+  // `JSON.stringify`, and a `bigint` has no serialization -- so a route that
+  // forwards the raw value answers 500 for exactly those customers who have a
+  // usage row, and 200 for everyone else.
+  assert.throws(
+    () => JSON.stringify({ creditsToday: 17n }),
+    /Do not know how to serialize a BigInt/
+  );
+  assert.equal(
+    JSON.stringify({ creditsToday: usageBucketCount(17n) }),
+    '{"creditsToday":17}'
+  );
+  // Absent and zero both narrow to the same JSON number, which is why neither
+  // ever revealed the failure.
+  assert.equal(
+    JSON.stringify({ creditsToday: usageBucketCount(undefined) }),
+    '{"creditsToday":0}'
+  );
+  assert.equal(
+    JSON.stringify({ creditsToday: usageBucketCount(0n) }),
+    '{"creditsToday":0}'
+  );
+  // The full column width survives, still as a number rather than a string.
+  assert.equal(
+    JSON.stringify({ creditsMonth: usageBucketCount(2_500_000_000n) }),
+    '{"creditsMonth":2500000000}'
+  );
+});
+
 test("the policy document records the storage contract", () => {
   // AGENTS.md sends readers here before they touch a cost limit, so the
   // constraint that caused the outage has to be findable in it.

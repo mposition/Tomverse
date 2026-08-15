@@ -988,15 +988,15 @@ export function AdminUsersPanel({
                 </p>
                 <div className="mt-3 grid grid-cols-3 gap-3">
                   <div>
-                    <div className="text-2xl font-black text-white">{detailUser.usage.messagesToday}</div>
+                    <div data-testid="admin-user-detail-messages-today" className="text-2xl font-black text-white">{detailUser.usage.messagesToday}</div>
                     <div className="text-xs text-zinc-500">messages today</div>
                   </div>
                   <div>
-                    <div className="text-2xl font-black text-amber-200">{detailUser.usage.creditsToday}</div>
+                    <div data-testid="admin-user-detail-credits-today" className="text-2xl font-black text-amber-200">{detailUser.usage.creditsToday}</div>
                     <div className="text-xs text-zinc-500">plan credits today</div>
                   </div>
                   <div>
-                    <div className="text-2xl font-black text-white">{detailUser.usage.creditsMonth}</div>
+                    <div data-testid="admin-user-detail-credits-month" className="text-2xl font-black text-white">{detailUser.usage.creditsMonth}</div>
                     <div className="text-xs text-zinc-500">plan credits this month</div>
                   </div>
                 </div>
