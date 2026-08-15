@@ -620,6 +620,11 @@ test("the read-only inspection reports state and mutates nothing", async () => {
     now: NOW,
   });
   assert.equal(healthy.recommendation, "healthy");
+  // It returns before the exact-code search, so the empty candidate list means
+  // "not looked at". A reader that cannot tell that from "Stripe holds nothing"
+  // reports a healthy promotion as `no_stripe_object_for_code`.
+  assert.equal(healthy.exactCodeSearchPerformed, false);
+  assert.deepEqual(healthy.exactCodeCandidates, []);
 
   const empty = await inspectStripePromotionLinkage({
     promotion: promotionConfig({ code: "NOTHING_HERE" }),
@@ -629,6 +634,8 @@ test("the read-only inspection reports state and mutates nothing", async () => {
     now: NOW,
   });
   assert.equal(empty.recommendation, "create_missing_objects");
+  assert.equal(empty.exactCodeSearchPerformed, true);
+  assert.deepEqual(empty.exactCodeCandidates, []);
 });
 
 /**

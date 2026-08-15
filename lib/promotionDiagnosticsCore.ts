@@ -303,6 +303,11 @@ export type StripeLinkageFacts = {
     mismatches: string[];
     adoptable: boolean;
   }[];
+  /**
+   * Whether the exact-code search ran at all. Optional so an older caller keeps
+   * the previous reading, which is only wrong for a healthy linkage.
+   */
+  exactCodeSearchPerformed?: boolean;
   recommendation:
     | "healthy"
     | "relink_stored_object"
@@ -414,7 +419,15 @@ export const evaluateStripeLinkage = ({
     (item) => !item.adoptable && item.active
   );
 
-  if (facts.exactCodeCandidates.length === 0) {
+  if (facts.exactCodeSearchPerformed === false) {
+    // A healthy linkage returns before searching, so an empty candidate list
+    // here means "not looked at", not "Stripe holds nothing". Reporting the
+    // second is a claim the report never checked, and it turned a repaired
+    // promotion that was serving checkouts into a warning nobody could act on.
+    checks.push(
+      check("exact_code_candidates", "not_checked", "stored_linkage_is_usable")
+    );
+  } else if (facts.exactCodeCandidates.length === 0) {
     checks.push(
       check("exact_code_candidates", "warn", "no_stripe_object_for_code")
     );
