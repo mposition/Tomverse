@@ -24,6 +24,7 @@
 // is not read from git, because the SHA that matters is what staging is
 // actually serving, which this machine has no way to know.
 
+import { execFileSync } from "node:child_process";
 import { readFileSync, writeFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 
@@ -91,7 +92,38 @@ if (items.length === 0) {
   fail(`${CHECKLIST} yielded no items. Refusing to write an empty record.`);
 }
 
-const record = renderRecord({ template, items, date, deploySha: sha, revision });
+// Which commit the *items* came from, as opposed to which build was verified.
+//
+// The two are routinely different and that is the design: the checklist's
+// history stays on one branch (`develop`), while the thing being verified is
+// an activation candidate that may have reached `main` another way. Without
+// this value, a reader finding items in the record that do not exist in the
+// deployed tree has no way to tell an intended split from a mistake.
+//
+// Unlike `--sha`, git *is* the authority here -- the checklist was read from
+// this checkout. A checkout with the file edited is not any commit, so it says
+// so rather than naming one it is not.
+const checklistSourceSha = (() => {
+  try {
+    const dirty = execFileSync("git", ["status", "--porcelain", "--", CHECKLIST], {
+      encoding: "utf8",
+    }).trim();
+    if (dirty) return "uncommitted";
+    return execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim();
+  } catch {
+    // Not a checkout, or no git. Better an honest blank than a guess.
+    return "";
+  }
+})();
+
+const record = renderRecord({
+  template,
+  items,
+  date,
+  deploySha: sha,
+  revision,
+  checklistSourceSha,
+});
 
 if (process.argv.includes("--preview")) {
   console.log(record);
@@ -110,6 +142,7 @@ writeFileSync(path, record, "utf8");
 console.log(
   `Wrote ${path}\n` +
     `  template revision ${revision}, ${items.length} item(s) from ${CHECKLIST}\n` +
+    `  checklist source ${checklistSourceSha || "(unknown)"}\n` +
     "  Results, evidence, timings and signatures are blank: fill them in as you go.\n" +
     "  When the run is signed, set `frozen: true` and record the digest with\n" +
     "  `node scripts/check-staging-verification-records.mjs --digest <file>`."

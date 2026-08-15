@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 
 import {
     bodyOf,
+    formalRunProblems,
     frontMatter,
     normalizeLineEndings,
     recordDigest,
@@ -87,4 +88,76 @@ test("normalisation is idempotent and leaves an LF document untouched", () => {
     // A lone CR is a line ending too -- classic Mac line endings still turn up
     // in files that have been through the wrong editor.
     assert.equal(normalizeLineEndings("a\rb"), "a\nb");
+});
+
+/**
+ * A formal run has to name the build it ran, not only the commit.
+ *
+ * The rule arrived with the release flow that made it necessary. A provider
+ * fix was cherry-picked straight to `main` and production served it while
+ * `develop` -- what staging was deploying -- was 43 commits away. "Verify the
+ * branch" stopped meaning anything at that point, so the checklist's subject
+ * became the activation-candidate SHA. And a SHA alone does not identify a
+ * build: dependency resolution, the builder version and the build environment
+ * can all move between two deployments of one commit.
+ */
+
+const fields = (entries) => new Map(Object.entries(entries));
+
+test("a formal run must name its artifact, its migrations and its item source", () => {
+    const problems = formalRunProblems(
+        fields({ runType: "formal", deploySha: "a".repeat(40) }),
+        "record.md"
+    );
+    assert.equal(problems.length, 3);
+    assert.match(problems[0], /deploymentId nor artifactDigest/);
+    assert.match(problems[1], /applied migrations/);
+    assert.match(problems[2], /checklistSourceSha/);
+});
+
+test("either a deployment ID or an artifact digest satisfies the artifact half", () => {
+    // Two names for the same fact, and which one is available depends on where
+    // the build was produced. Requiring a specific one would fail a record
+    // that says exactly what it ran.
+    for (const naming of [{ deploymentId: "dep_1" }, { artifactDigest: "sha256:ab" }]) {
+        assert.deepEqual(
+            formalRunProblems(
+                fields({
+                    runType: "formal",
+                    appliedMigrations: "20260815100000_x",
+                    checklistSourceSha: "e".repeat(40),
+                    ...naming,
+                }),
+                "record.md"
+            ),
+            []
+        );
+    }
+});
+
+test("an exploratory run is not held to it, and neither is a record without the field", () => {
+    // Exploratory runs exist to find defects early, before an activation SHA
+    // is chosen -- there is no artifact to name yet. And a record with no
+    // runType predates the field or belongs to a feature whose template has
+    // not adopted it; a requirement invented for those would fail the check on
+    // records nobody can go back and fill in.
+    assert.deepEqual(formalRunProblems(fields({ runType: "exploratory" }), "r.md"), []);
+    assert.deepEqual(formalRunProblems(fields({ result: "legacy_summary" }), "r.md"), []);
+});
+
+test("a formal run must name the commit its items came from", () => {
+    const complete = {
+        runType: "formal",
+        deploymentId: "dep_1",
+        appliedMigrations: "20260815100000_x",
+    };
+    assert.deepEqual(
+        formalRunProblems(fields({ ...complete, checklistSourceSha: "e".repeat(40) }), "r.md"),
+        []
+    );
+    for (const source of [{}, { checklistSourceSha: "" }, { checklistSourceSha: "uncommitted" }]) {
+        const problems = formalRunProblems(fields({ ...complete, ...source }), "r.md");
+        assert.equal(problems.length, 1);
+        assert.match(problems[0], /checklistSourceSha/);
+    }
 });

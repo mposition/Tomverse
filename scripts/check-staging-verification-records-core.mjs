@@ -49,3 +49,52 @@ export const frontMatter = (raw) => {
 
 export const recordDigest = (text) =>
   createHash("sha256").update(bodyOf(text), "utf8").digest("hex").slice(0, 32);
+
+/**
+ * What a run quoted to approve an activation has to name, beyond its SHA.
+ *
+ * A commit SHA does not identify a build. Dependency resolution, the builder
+ * version and the build environment can all move between two deployments of
+ * the same commit, so a record naming only the SHA cannot point at the thing
+ * it actually exercised. The migration set is the other half: the same code
+ * against a different set is a different system.
+ *
+ * Only `formal` is held to this. A record with no `runType` either predates
+ * the field or belongs to a feature whose template has not adopted it, and a
+ * requirement invented for those would fail the check on records nobody can go
+ * back and fill in.
+ *
+ * Pure, and returns messages rather than throwing, so the checker can collect
+ * them alongside everything else it found.
+ */
+export const formalRunProblems = (fields, path) => {
+  if (fields.get("runType") !== "formal") return [];
+  const problems = [];
+  if (!fields.get("deploymentId") && !fields.get("artifactDigest")) {
+    problems.push(
+      `${path}  is a formal run with neither deploymentId nor artifactDigest. ` +
+        `The same SHA can build twice; without one of these the record cannot ` +
+        `name the build it actually ran against.`
+    );
+  }
+  if (!fields.get("appliedMigrations")) {
+    problems.push(
+      `${path}  is a formal run that does not name its applied migrations. ` +
+        `The same code on a different migration set is a different system.`
+    );
+  }
+  // Which commit the items came from. Routinely not the deployed SHA -- the
+  // checklist's history stays on one branch while the verified build is an
+  // activation candidate that may have reached production another way. A
+  // reader who finds items here that are absent from the deployed tree cannot
+  // otherwise tell that intended split from a mistake.
+  const source = fields.get("checklistSourceSha");
+  if (!source || source === "uncommitted") {
+    problems.push(
+      `${path}  is a formal run whose checklistSourceSha is ` +
+        `${source ? `"${source}"` : "empty"}. The items have to come from a ` +
+        `commit someone else can read back, not from a working tree.`
+    );
+  }
+  return problems;
+};
