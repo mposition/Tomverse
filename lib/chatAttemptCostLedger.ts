@@ -108,7 +108,16 @@ export type AttemptCostOutcome =
      */
     | "adjustment_pending"
     /** Somebody already recorded this attempt with equal standing. */
-    | "duplicate";
+    | "duplicate"
+    /**
+     * The observation names a different model or provider than the row it
+     * would correct.
+     *
+     * Refused rather than applied. A delta is a difference between two prices
+     * for the same call; moving one model's difference onto another model's
+     * rollup is not a correction, it is two wrong numbers.
+     */
+    | "identity_mismatch";
 
 export type AttemptCostRecord = {
     reservationId: string;
@@ -285,6 +294,31 @@ const correctExistingAttemptCost = async (
     // expect one can say so with the context to make it meaningful.
     if (existing?.usageSource !== "crash_reconciliation") return "duplicate";
 
+    // A guess may not correct a guess. Only an observation -- somebody who saw
+    // the call -- has standing to replace a reserved upper bound; another
+    // upper bound would append an adjustment of zero and call it a correction.
+    if (attempt.costSource === "reserved_upper_bound") return "duplicate";
+
+    // The row is the authority on which rollup it moved: it recorded the
+    // provider, the model and the day it landed on. An observation that names
+    // a different model is not describing the same call, and its delta belongs
+    // to no row here.
+    if (
+        existing.provider !== attempt.price.provider ||
+        existing.modelId !== attempt.price.modelId
+    ) {
+        console.error(
+            JSON.stringify({
+                event: "chat_attempt_usage_identity_mismatch",
+                reservationId,
+                attemptIndex: attempt.attemptIndex,
+                recorded: `${existing.provider}/${existing.modelId}`,
+                observed: `${attempt.price.provider}/${attempt.price.modelId}`,
+            })
+        );
+        return "identity_mismatch";
+    }
+
     // Identifies the observation, so the same one twice is one adjustment. A
     // provider request id when there is one, because a reconciliation file
     // replayed a week later carries that and not this turn's identity.
@@ -327,8 +361,11 @@ const correctExistingAttemptCost = async (
     // surface rather than a row to invent. `applyPendingAttemptCostAdjustments`
     // is the path that repairs it, and it is the one allowed to create.
     const moved = await applyAdjustmentDelta(tx, {
-        provider: attempt.price.provider,
-        modelId: attempt.price.modelId,
+        // All three from the row, which is the only record of where the base
+        // accrual actually went. Taking the day from it and the identity from
+        // the observation was how the two could point at different rows.
+        provider: existing.provider,
+        modelId: existing.modelId,
         rollupDate: existing.rollupDate,
         costDeltaMicroUsd: delta,
         inputTokens: attempt.inputTokens,
@@ -388,15 +425,27 @@ const applyAdjustmentDelta = async (
         create: boolean;
     }
 ): Promise<boolean> => {
-    const delta = Number(input.costDeltaMicroUsd);
+    // The delta stays a bigint all the way into the statement. `ProviderDailyUsage`
+    // stores 32-bit integers and every other writer clamps before it gets there;
+    // this one has to do the same, and it has to do the arithmetic in `bigint`
+    // first. Clamping the *result* is not enough -- `int + int` overflows inside
+    // Postgres before any clamp of ours could see it, and the statement raises
+    // rather than saturating.
+    const delta = input.costDeltaMicroUsd;
+    const input_ = BigInt(Math.max(0, input.inputTokens));
+    const cached_ = BigInt(Math.max(0, input.cachedInputTokens));
+    const output_ = BigInt(Math.max(0, input.outputTokens));
     if (!input.create) {
         const rows = await tx.$executeRaw`
             UPDATE "ProviderDailyUsage"
-            SET "estimatedCostMicroUsd" =
-                    GREATEST(0, "estimatedCostMicroUsd" + ${delta}),
-                "inputTokens" = "inputTokens" + ${input.inputTokens},
-                "cachedInputTokens" = "cachedInputTokens" + ${input.cachedInputTokens},
-                "outputTokens" = "outputTokens" + ${input.outputTokens},
+            SET "estimatedCostMicroUsd" = LEAST(2000000000, GREATEST(0,
+                    "estimatedCostMicroUsd"::bigint + ${delta}::bigint))::int,
+                "inputTokens" = LEAST(2000000000, GREATEST(0,
+                    "inputTokens"::bigint + ${input_}::bigint))::int,
+                "cachedInputTokens" = LEAST(2000000000, GREATEST(0,
+                    "cachedInputTokens"::bigint + ${cached_}::bigint))::int,
+                "outputTokens" = LEAST(2000000000, GREATEST(0,
+                    "outputTokens"::bigint + ${output_}::bigint))::int,
                 "updatedAt" = NOW()
             WHERE "provider" = ${input.provider}
               AND "modelId" = ${input.modelId}
@@ -416,18 +465,23 @@ const applyAdjustmentDelta = async (
         VALUES (
             ${`pdu_${input.provider}_${input.modelId}_${input.rollupDate.toISOString()}`},
             ${input.provider}, ${input.modelId}, 'internal', ${input.rollupDate},
-            0, ${input.inputTokens}, ${input.cachedInputTokens}, ${input.outputTokens},
-            GREATEST(0, ${delta}), 0, 0, 0,
+            0,
+            LEAST(2000000000, GREATEST(0, ${input_}::bigint))::int,
+            LEAST(2000000000, GREATEST(0, ${cached_}::bigint))::int,
+            LEAST(2000000000, GREATEST(0, ${output_}::bigint))::int,
+            LEAST(2000000000, GREATEST(0, ${delta}::bigint))::int, 0, 0, 0,
             NOW(), NOW()
         )
         ON CONFLICT ("provider", "modelId", "source", "date")
         DO UPDATE SET
-            "estimatedCostMicroUsd" =
-                GREATEST(0, "ProviderDailyUsage"."estimatedCostMicroUsd" + ${delta}),
-            "inputTokens" = "ProviderDailyUsage"."inputTokens" + ${input.inputTokens},
-            "cachedInputTokens" =
-                "ProviderDailyUsage"."cachedInputTokens" + ${input.cachedInputTokens},
-            "outputTokens" = "ProviderDailyUsage"."outputTokens" + ${input.outputTokens},
+            "estimatedCostMicroUsd" = LEAST(2000000000, GREATEST(0,
+                "ProviderDailyUsage"."estimatedCostMicroUsd"::bigint + ${delta}::bigint))::int,
+            "inputTokens" = LEAST(2000000000, GREATEST(0,
+                "ProviderDailyUsage"."inputTokens"::bigint + ${input_}::bigint))::int,
+            "cachedInputTokens" = LEAST(2000000000, GREATEST(0,
+                "ProviderDailyUsage"."cachedInputTokens"::bigint + ${cached_}::bigint))::int,
+            "outputTokens" = LEAST(2000000000, GREATEST(0,
+                "ProviderDailyUsage"."outputTokens"::bigint + ${output_}::bigint))::int,
             "updatedAt" = NOW()
     `;
     return true;
@@ -555,7 +609,23 @@ export type AttemptCloseWithCost = {
     actualOutputTokens?: number | null;
     errorClass?: string | null;
     /** Absent when there is no reservation to charge -- nothing was held. */
-    cost: AttemptCostRecord | null;
+    cost?: AttemptCostRecord | null;
+    /**
+     * Works out what to record, inside the transaction that will record it.
+     *
+     * Given instead of `cost` when the answer has to be read from the database:
+     * a caller that read first and wrote second would be deciding from a state
+     * that can change in between, and any read failure would happen outside the
+     * transaction, where a throw cannot take the close back with it.
+     *
+     * Called only after the compare-and-set has been won, so no read happens
+     * for an attempt this call is not going to close. Returning null means
+     * "close it, record nothing"; throwing means "record nothing and do not
+     * close it either", which leaves the next sweep something to find.
+     */
+    resolveCost?: (
+        tx: Prisma.TransactionClient
+    ) => Promise<AttemptCostRecord | null>;
 };
 
 /**
@@ -570,10 +640,10 @@ export type AttemptCloseWithCost = {
 export const closeAttemptWithCost = async (
     input: AttemptCloseWithCost
 ): Promise<{ closed: boolean; cost: AttemptCostOutcome | "skipped" }> => {
-    // No cost to bind the close to, so no transaction to bind it in. This is
+    // Nothing to bind the close to, so no transaction to bind it in. This is
     // the attempt that ends the turn -- its usage is not known until
     // settlement, which writes the row there -- and it is on the hot path.
-    if (!input.cost) {
+    if (!input.cost && !input.resolveCost) {
         const closed = await closeAttempt(input);
         return { closed, cost: "skipped" };
     }
@@ -589,7 +659,13 @@ export const closeAttemptWithCost = async (
             errorClass: input.errorClass,
         });
         if (!closed) return { closed: false, cost: "skipped" as const };
-        const cost = await recordAttemptCost(tx, input.cost!);
+
+        const record = input.resolveCost
+            ? await input.resolveCost(tx)
+            : (input.cost ?? null);
+        if (!record) return { closed: true, cost: "skipped" as const };
+
+        const cost = await recordAttemptCost(tx, record);
         if (cost === "duplicate") {
             // This writer won the compare-and-set, so it is the first to
             // establish the attempt was over -- and a cost row already being
@@ -598,8 +674,8 @@ export const closeAttemptWithCost = async (
             console.warn(
                 JSON.stringify({
                     event: "chat_attempt_usage_recorded_before_close",
-                    reservationId: input.cost!.reservationId,
-                    attemptIndex: input.cost!.attempt.attemptIndex,
+                    reservationId: record.reservationId,
+                    attemptIndex: record.attempt.attemptIndex,
                 })
             );
         }

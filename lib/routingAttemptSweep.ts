@@ -49,6 +49,7 @@ import { costIntentFor, type AttemptCostIntent } from "@/lib/chatProviderHolds";
 import { deserializeReservation } from "@/lib/chatSecurity";
 import type { AiModel } from "@/lib/models";
 import { prisma } from "@/lib/prisma";
+import type { Prisma } from "@prisma/client";
 
 /** How long an attempt may stay open before the sweep will consider it. */
 export const STALE_ATTEMPT_AFTER_MS = 30 * 60 * 1000;
@@ -61,18 +62,34 @@ export const STALE_ATTEMPT_SWEEP_BATCH = 200;
 
 export type StaleAttemptSweepResult = {
     examined: number;
-    /** Closed with the reserved upper bound recorded, atomically. */
-    closedWithCost: number;
+    /** Closed with the reserved upper bound written by this call. */
+    closedCostInserted: number;
     /**
-     * Closed with no cost row, because the payload carries no cost intent.
+     * Closed, and a cost row was already there.
      *
-     * Counted apart from `closedWithCost` on purpose. These are attempts whose
-     * provider spend nobody can now state, and folding them into the success
+     * A normal race, not a loss: settlement got to the row first, so the spend
+     * is recorded and this call had nothing to add. Counted apart from
+     * `closedCostInserted` because this call wrote no cost, and apart from
+     * `closedWithoutCostIntent` because the cost is not missing.
+     */
+    closedWithExistingCost: number;
+    /**
+     * Closed with no cost row, because nothing could honestly price it.
+     *
+     * Counted apart from the two above on purpose. These are attempts whose
+     * provider spend nobody can now state, and folding them into a success
      * count would report a permanent hole in the ledger as an ordinary sweep.
      */
     closedWithoutCostIntent: number;
     /** Lost the compare-and-set: the live request closed it first. */
     alreadyClosed: number;
+    /**
+     * Neither closed nor recorded, and still `pending`.
+     *
+     * The transaction took the close back with whatever failed, which is the
+     * point of binding them: a database that is briefly unavailable costs a
+     * delay until the next sweep, not a record nobody can rebuild.
+     */
     failed: number;
 };
 
@@ -115,37 +132,36 @@ export const sweepStaleRoutingAttempts = async (
         LIMIT ${limit}
     `;
 
-    let closedWithCost = 0;
+    let closedCostInserted = 0;
+    let closedWithExistingCost = 0;
     let closedWithoutCostIntent = 0;
     let alreadyClosed = 0;
     let failed = 0;
     for (const row of rows) {
         try {
-            // Read and validate before anything is written. The close and the
-            // cost row have to commit together -- a crash between them would
-            // leave a terminal attempt with no cost row, and the sweep only
-            // ever looks at `pending`, so nothing would come back for it.
-            // That is the very defect this module exists to close, and doing
-            // it in two transactions here would reproduce it.
-            const cost = await crashCostRecord(row);
+            // The reservation is read inside the transaction that closes the
+            // attempt, not before it. Two reasons, and both are failure modes
+            // that reading first would leave open: the payload can change
+            // between a read and a write, and a read that fails outside the
+            // transaction cannot take the close back with it -- so a database
+            // blip would close the attempt with no cost row, permanently,
+            // because the sweep only ever looks at `pending` again.
             const closed = await closeAttemptWithCost({
                 attemptId: row.id,
                 outcome: "unknown_after_dispatch",
                 failureLayer: "process",
                 errorClass: "process_stopped_after_dispatch",
-                cost,
+                resolveCost: (tx) => crashCostRecord(tx, row),
             });
             if (!closed.closed) {
                 alreadyClosed += 1;
                 continue;
             }
-            if (cost) closedWithCost += 1;
-            else closedWithoutCostIntent += 1;
+            // Counted from what was written, not from what was attempted.
+            if (closed.cost === "inserted") closedCostInserted += 1;
+            else if (closed.cost === "skipped") closedWithoutCostIntent += 1;
+            else closedWithExistingCost += 1;
         } catch (error) {
-            // Whatever failed, the transaction took the close with it, so the
-            // attempt is still `pending` and the next sweep will try again.
-            // That is the point of binding them: a failure here costs a delay,
-            // not a record.
             failed += 1;
             console.error(
                 JSON.stringify({
@@ -159,7 +175,8 @@ export const sweepStaleRoutingAttempts = async (
 
     return {
         examined: rows.length,
-        closedWithCost,
+        closedCostInserted,
+        closedWithExistingCost,
         closedWithoutCostIntent,
         alreadyClosed,
         failed,
@@ -186,19 +203,44 @@ export const sweepStaleRoutingAttempts = async (
  * payload that fails to read is a defect happening now. Reporting both as
  * "swept" would hide the second inside the first.
  */
-const crashCostRecord = async (row: SweepRow): Promise<AttemptCostRecord | null> => {
+const crashCostRecord = async (
+    tx: Prisma.TransactionClient,
+    row: SweepRow
+): Promise<AttemptCostRecord | null> => {
+    // No reservation at all: an instrumentation-only run, with no money to
+    // account for. Ordinary, and silent.
     if (!row.reservationId) return null;
+
+    // Deliberately outside the try below. A read that fails is the database
+    // being unavailable, and the caller has to see that as a failure -- the
+    // throw takes the close back with it and leaves the attempt `pending` for
+    // the next sweep. Swallowing it would close the attempt with no cost row,
+    // which nothing can ever rebuild.
+    const reservation = await tx.chatCreditReservation.findUnique({
+        where: { id: row.reservationId },
+    });
+    if (!reservation) {
+        // The row is gone while a run still points at it. Not the legacy case
+        // and not a payload defect: a reference with nothing behind it.
+        console.error(
+            JSON.stringify({
+                event: "routing_attempt_sweep_cost_unavailable",
+                reason: "dangling_reservation",
+                attemptId: row.id,
+                reservationId: row.reservationId,
+            })
+        );
+        return null;
+    }
+
     let intent: AttemptCostIntent | null = null;
     try {
-        const reservation = await prisma.chatCreditReservation.findUnique({
-            where: { id: row.reservationId },
-        });
-        if (!reservation) return null;
+        // Pure validation of a payload already in hand. This is the only thing
+        // the catch below may be about, which is what makes the reason it logs
+        // mean something.
         const canonical = deserializeReservation(reservation.reservationPayload);
         intent = costIntentFor(canonical.attemptCostIntents, row.attemptIndex);
     } catch (error) {
-        // The payload would not read. Not the legacy case: something wrote a
-        // payload whose holds and intents disagree, and that is a live defect.
         console.error(
             JSON.stringify({
                 event: "routing_attempt_sweep_cost_unavailable",
@@ -235,9 +277,9 @@ const crashCostRecord = async (row: SweepRow): Promise<AttemptCostRecord | null>
                 cachedInputPriceMultiplier: intent.cachedInputPriceMultiplier,
                 pricingVersion: intent.pricingVersion ?? null,
             },
-            // Zero here, NULL in the row: `crashUnknownTokens` below strips
-            // them. Nothing measured these, and the database refuses a
-            // non-crash row that leaves them out.
+            // Zero here, NULL in the row: `unknownTokens` strips them. Nothing
+            // measured these, and the database refuses a non-crash row that
+            // leaves them out.
             inputTokens: 0,
             cachedInputTokens: 0,
             outputTokens: 0,
