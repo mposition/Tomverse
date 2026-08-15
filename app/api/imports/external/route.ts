@@ -16,10 +16,11 @@ import {
     createExternalImport,
     listExternalImports,
 } from "@/lib/externalImportService";
+import { EXTERNAL_IMPORT_PROVIDERS } from "@/lib/externalImportProviders";
 
 const createImportSchema = z
     .object({
-        provider: z.enum(["chatgpt", "claude"]),
+        provider: z.enum(EXTERNAL_IMPORT_PROVIDERS),
         parserVersion: z.string().trim().min(1).max(64),
         // A hint for duplicate-candidate UX only; never an authoritative
         // dedup input (policy §4.1) and never logged.
