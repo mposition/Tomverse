@@ -545,6 +545,14 @@ terminal status and the settlement pointer now commit together. Only the
 provider balance alert stays outside, because it talks to another service and
 must not hold a settlement open or roll one back.
 
+The accrual is the transaction's *last* statement. `ProviderDailyUsage` is
+keyed on (provider, model, day), so it is one row shared by every turn on that
+model — the hottest row here — and whoever touches it holds it until COMMIT.
+Touching it early would serialise every concurrent turn on that model across
+the whole tail of the settlement; touching it last narrows that to the commit
+itself. When a fallback has two of them they are taken in sorted order, so two
+settlements holding two rollup rows cannot deadlock on each other.
+
 The two ledgers stay separated at their furthest apart here: a crash refunds
 the user in full, keeps the provider's cost, and names no billed attempt.
 `ChatCreditReservation.settlementAttemptIndex` is therefore allowed to be NULL

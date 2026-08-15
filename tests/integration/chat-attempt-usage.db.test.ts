@@ -1474,3 +1474,114 @@ test("a cancelled single-attempt turn still records what it cost", async () => {
   });
   assert.equal(rollup.estimatedCostMicroUsd, 1_200_000);
 });
+
+// The rollup is the last thing the settlement transaction does, and it is
+// still inside it. Both halves of that need pinning: that moving it late did
+// not move it out, and that it is late enough to matter.
+
+test("a rollup that fails rolls back the credits, the reservation and the cost row", async () => {
+  // The reason this stayed inside the transaction when it moved to the end.
+  // A settlement that charged the user and lost the provider accrual is two
+  // ledgers disagreeing about the same turn, with no record of which is wrong.
+  const user = await createUser();
+  const acquired = await acquireChatAccess(chatAccess(user), chatBudget(), {
+    traceId: `trace-${randomUUID()}`,
+  });
+  const reservationId = acquired.usageReservation.reservationId;
+
+  await prisma.$executeRaw`
+    ALTER TABLE "ProviderDailyUsage"
+    ADD CONSTRAINT "settlement_test_refuses_rollup" CHECK (false) NOT VALID
+  `;
+  try {
+    await assert.rejects(
+      settleChatUsage(acquired.usageReservation, {
+        inputTokens: 10_000,
+        outputTokens: 10_000,
+        outcome: "completed",
+      })
+    );
+  } finally {
+    await prisma.$executeRaw`
+      ALTER TABLE "ProviderDailyUsage" DROP CONSTRAINT "settlement_test_refuses_rollup"
+    `;
+  }
+
+  const durable = await prisma.chatCreditReservation.findUniqueOrThrow({
+    where: { id: reservationId },
+  });
+  assert.equal(
+    durable.status,
+    "reserved",
+    "the whole settlement must have rolled back, not just the rollup"
+  );
+  assert.equal(durable.settlementAttemptIndex, null);
+  assert.equal(
+    await prisma.chatAttemptUsage.count({ where: { reservationId } }),
+    0
+  );
+  assert.equal(await prisma.providerDailyUsage.count(), 0);
+
+  // And it settles cleanly once the fault is gone: nothing was half-written.
+  await settleChatUsage(acquired.usageReservation, {
+    inputTokens: 10_000,
+    outputTokens: 10_000,
+    outcome: "completed",
+  });
+  const settled = await prisma.chatCreditReservation.findUniqueOrThrow({
+    where: { id: reservationId },
+  });
+  assert.equal(settled.status, "settled");
+  assert.equal(settled.settlementAttemptIndex, 0);
+  assert.equal(
+    (
+      await prisma.providerDailyUsage.findFirstOrThrow({
+        where: { provider: "openai", modelId: "attempt-usage-model" },
+      })
+    ).estimatedCostMicroUsd,
+    2_000_000
+  );
+});
+
+test("concurrent single-attempt settlements each accrue once on the shared rollup row", async () => {
+  // Every turn on one model settles against one ProviderDailyUsage row, which
+  // is why the accrual is the transaction's last statement. Correctness under
+  // that contention is the part worth pinning: four turns, four accruals, no
+  // lost update and no deadlock.
+  const reservations = await Promise.all(
+    Array.from({ length: 4 }, async () => {
+      const user = await createUser();
+      const acquired = await acquireChatAccess(chatAccess(user), chatBudget(), {
+        traceId: `trace-${randomUUID()}`,
+      });
+      return acquired.usageReservation;
+    })
+  );
+
+  await Promise.all(
+    reservations.map((reservation) =>
+      settleChatUsage(reservation, {
+        inputTokens: 10_000,
+        outputTokens: 10_000,
+        outcome: "completed",
+      })
+    )
+  );
+
+  const rollup = await prisma.providerDailyUsage.findFirstOrThrow({
+    where: { provider: "openai", modelId: "attempt-usage-model", source: "internal" },
+  });
+  assert.equal(rollup.requestCount, 4);
+  assert.equal(rollup.estimatedCostMicroUsd, 4 * 2_000_000);
+  assert.equal(rollup.inputTokens, 4 * 10_000);
+  assert.equal(rollup.outputTokens, 4 * 10_000);
+
+  for (const reservation of reservations) {
+    const durable = await prisma.chatCreditReservation.findUniqueOrThrow({
+      where: { id: reservation.reservationId },
+    });
+    assert.equal(durable.status, "settled");
+    assert.equal(durable.settlementAttemptIndex, 0);
+  }
+  assert.equal(await prisma.chatAttemptUsage.count(), 4);
+});
