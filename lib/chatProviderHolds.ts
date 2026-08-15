@@ -291,6 +291,8 @@ export type AttemptCostIntent = {
 export const attemptCostIntentProblems = (input: {
     holds: readonly AttemptHold[];
     intents: readonly AttemptCostIntent[];
+    /** The period this reservation's provider budget was anchored to. */
+    periodStarts?: { day: Date; month: Date };
 }): readonly string[] => {
     const problems: string[] = [];
     const intentAttempts = new Set(input.intents.map((intent) => intent.attemptIndex));
@@ -338,6 +340,24 @@ export const attemptCostIntentProblems = (input: {
             problems.push(
                 `attempt ${intent.attemptIndex} authorized nothing and holds ${held.length} bucket(s)`
             );
+        }
+    }
+    // Every hold belongs to the period the reservation was authorized in.
+    // A hold on another period is one settlement would not release: it
+    // subtracts from the bucket the payload names, and that would be a
+    // different row.
+    if (input.periodStarts) {
+        const anchored: Record<string, Date> = {
+            "provider-cost-day": input.periodStarts.day,
+            "provider-cost-month": input.periodStarts.month,
+        };
+        for (const hold of input.holds) {
+            const expected = anchored[hold.period];
+            if (expected && hold.periodStart.getTime() !== expected.getTime()) {
+                problems.push(
+                    `attempt ${hold.attemptIndex} holds ${hold.period} at ${hold.periodStart.toISOString()}, not the reservation's ${expected.toISOString()}`
+                );
+            }
         }
     }
     return problems;

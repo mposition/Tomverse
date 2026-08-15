@@ -218,6 +218,22 @@ export type ChatUsageReservation = {
      * which happened used nothing.
      */
     attemptCostIntents?: AttemptCostIntent[];
+    /**
+     * The UTC day and month this turn's provider budget belongs to.
+     *
+     * Anchored once, when the reservation is created, and used by every later
+     * write -- a fallback's hold, and the settlement of a provider the
+     * reservation never held anything against. One logical response is charged
+     * to one period even when it crosses UTC midnight.
+     *
+     * Stored even when nothing is held. The period is part of the
+     * authorization, not something to reconstruct afterwards from whatever
+     * happens to be at hand: a user's `day` bucket is anchored to their
+     * account's own reckoning and can name a different day, and `createdAt` is
+     * the database's clock rather than the one the reservation was computed
+     * against.
+     */
+    providerBudgetPeriodStarts?: { day: Date; month: Date };
     usageCredits: number;
     inputTokens: number;
     maxOutputTokens: number;
@@ -272,6 +288,13 @@ const durableReservationPayloadSchema = z
                     .strict()
             )
             .max(8)
+            .optional(),
+        providerBudgetPeriodStarts: z
+            .object({
+                day: z.coerce.date(),
+                month: z.coerce.date(),
+            })
+            .strict()
             .optional(),
         attemptCostIntents: z
             .array(
@@ -383,6 +406,7 @@ export const deserializeReservation = (payload: Prisma.JsonValue) => {
             ...attemptCostIntentProblems({
                 holds: attemptHolds,
                 intents: parsed.attemptCostIntents ?? [],
+                periodStarts: parsed.providerBudgetPeriodStarts,
             }),
         ];
         if (problems.length > 0) {
@@ -2960,9 +2984,18 @@ export const acquireChatAccess = async (
             }
         }
 
+        // Anchored before the hold, and regardless of whether one is taken.
+        // The period a turn's provider spend belongs to is decided when the
+        // turn is authorized, not when somebody later needs a date -- so a
+        // free primary that gets a paid fallback across UTC midnight still has
+        // one answer, and it is this one.
+        const providerBudgetPeriodStarts = {
+            day: periodStart("day", now),
+            month: periodStart("month", now),
+        };
         if (reservedCost > 0) {
             const providerKey = providerBucketKey(budget.provider);
-            const providerDayStart = periodStart("day", now);
+            const providerDayStart = providerBudgetPeriodStarts.day;
             const providerDayAllowed = await incrementUsage(
                 tx,
                 providerKey,
@@ -2997,7 +3030,7 @@ export const acquireChatAccess = async (
                 metric: "cost",
             });
 
-            const providerStart = periodStart("month", now);
+            const providerStart = providerBudgetPeriodStarts.month;
             const providerAllowed = await incrementUsage(
                 tx,
                 providerKey,
@@ -3070,6 +3103,7 @@ export const acquireChatAccess = async (
             // the primary's hold out of them would lose that entry the first
             // time a fallback added one of its own -- and settlement would
             // then release nothing for the provider that actually ran.
+            providerBudgetPeriodStarts,
             attemptHolds: reservationEntries
                 .filter((entry) => entry.key.startsWith(PROVIDER_BUCKET_PREFIX))
                 .map((entry) => ({
@@ -3493,28 +3527,47 @@ export const settleChatUsage = async (
             // as the budget that is supposed to bound it can tell -- and a
             // provider budget that cannot see its own spend keeps saying yes.
             //
-            // The periods come from the held entries rather than from a clock
-            // read here: the attempts ran inside this request, so they belong
-            // to the day and month the hold was taken in, and reading "now"
-            // would put a turn that started at 23:59:59 in the wrong day.
-            const heldProviderEntries = canonical.entries.filter((entry) =>
-                entry.key.startsWith(PROVIDER_BUCKET_PREFIX)
-            );
+            // The period comes from the reservation's own anchor, decided when
+            // the turn was authorized. It used to be borrowed from whichever
+            // held entry happened to share the period -- which worked only
+            // while something was held. A turn whose primary reserved nothing
+            // had no entry to borrow from, so a fallback's real spend was
+            // silently dropped: exactly the "a provider budget that cannot see
+            // its own spend keeps saying yes" this block exists to prevent.
+            //
+            // Not a clock read here either. The attempts ran inside this
+            // request, so they belong to the day the request was authorized
+            // in, and "now" would put a turn that started at 23:59:59 in the
+            // wrong one.
             const heldProviders = new Set(
-                heldProviderEntries.map((entry) =>
-                    entry.key.slice(PROVIDER_BUCKET_PREFIX.length)
-                )
+                canonical.entries
+                    .filter((entry) => entry.key.startsWith(PROVIDER_BUCKET_PREFIX))
+                    .map((entry) => entry.key.slice(PROVIDER_BUCKET_PREFIX.length))
             );
+            const anchor =
+                canonical.providerBudgetPeriodStarts ??
+                legacyProviderBudgetAnchor(canonical.attemptHolds ?? []);
             for (const [provider, cost] of multiAttempt.costByProvider) {
                 if (heldProviders.has(provider) || cost <= 0) continue;
+                if (!anchor) {
+                    // A payload with neither an anchor nor a hold to recover
+                    // one from. Recorded rather than guessed at: putting real
+                    // spend in a period nobody chose is worse than an operator
+                    // knowing a figure is missing.
+                    console.error(JSON.stringify({
+                        event: "chat_provider_spend_unanchored",
+                        reservationId: durable.id,
+                        provider,
+                        costMicroUsd: cost,
+                    }));
+                    continue;
+                }
                 for (const period of PROVIDER_BUDGET_PERIODS) {
-                    const template = heldProviderEntries.find(
-                        (entry) => entry.period === period
-                    );
-                    if (!template) continue;
+                    const periodStartForSpend =
+                        period === "provider-cost-day" ? anchor.day : anchor.month;
                     await tx.$executeRaw`
                         INSERT INTO "ChatUsageBucket" ("key", "period", "periodStart", "count", "updatedAt")
-                        VALUES (${providerBucketKey(provider)}, ${period}, ${template.periodStart}, ${cost}, NOW())
+                        VALUES (${providerBucketKey(provider)}, ${period}, ${periodStartForSpend}, ${cost}, NOW())
                         ON CONFLICT ("key", "period", "periodStart")
                         DO UPDATE SET
                             "count" = "ChatUsageBucket"."count" + ${cost},
@@ -3809,7 +3862,6 @@ export const reserveAttemptProviderBudget = async (input: {
     attemptIndex: number;
     provider: string;
     reservedMicroUsd: number;
-    periodStarts: { day: Date; month: Date };
     /**
      * What this attempt is authorized to spend, at its own rates.
      *
@@ -3821,26 +3873,13 @@ export const reserveAttemptProviderBudget = async (input: {
 }): Promise<
     | { reserved: false; reason: "reservation_not_open" }
     | { reserved: false; reason: "already_authorized" }
+    | { reserved: false; reason: "no_provider_budget_period" }
     | { reserved: false; reason: "budget_exhausted"; scope: string }
     | { reserved: true; entries: ReservationEntry[] }
 > => {
     const limits = getProviderCostGuardrailLimits(input.provider);
     const amount = Math.max(0, Math.round(input.reservedMicroUsd));
     const key = providerBucketKey(input.provider);
-    const checks = [
-        {
-            period: "provider-cost-day" as const,
-            start: input.periodStarts.day,
-            limit: limits.day,
-            scope: "provider_cost_day",
-        },
-        {
-            period: "provider-cost-month" as const,
-            start: input.periodStarts.month,
-            limit: limits.month,
-            scope: "provider_cost_month",
-        },
-    ];
 
     return prisma.$transaction(async (tx) => {
         // Same order as settlement: the credit account first, then the
@@ -3892,6 +3931,44 @@ export const reserveAttemptProviderBudget = async (input: {
         }
         const existingIntents = canonical.attemptCostIntents ?? [];
 
+        // The period comes from the reservation, never from the caller and
+        // never from a clock read here.
+        //
+        // A turn that began at 23:59:59 and reaches its fallback a second
+        // later belongs to the day it was authorized in, and a caller passing
+        // "now" would split one logical response across two provider budget
+        // periods -- the second of which nothing would release, because
+        // settlement releases what the payload says was held.
+        //
+        // A payload written before the anchor existed can still answer, from
+        // the holds it already carries: those were taken at the same moment,
+        // so their own periodStart *is* the anchor. One that carries neither
+        // is refused. Reconstructing a period from a user's `day` bucket would
+        // be reading an account-local reckoning as a UTC one, and from
+        // `createdAt` would be reading the database's clock instead of the one
+        // the reservation was computed against -- both are guesses, and a
+        // guess here puts real money in the wrong period.
+        const anchor =
+            canonical.providerBudgetPeriodStarts ??
+            legacyProviderBudgetAnchor(existing);
+        if (!anchor) {
+            throw new AttemptBudgetRefusal("no_provider_budget_period");
+        }
+        const checks = [
+            {
+                period: "provider-cost-day" as const,
+                start: anchor.day,
+                limit: limits.day,
+                scope: "provider_cost_day",
+            },
+            {
+                period: "provider-cost-month" as const,
+                start: anchor.month,
+                limit: limits.month,
+                scope: "provider_cost_month",
+            },
+        ];
+
         // Already authorized, by either half.
         //
         // Checking the holds alone was enough while a hold was the only thing
@@ -3933,6 +4010,7 @@ export const reserveAttemptProviderBudget = async (input: {
                 data: {
                     reservationPayload: serializeReservation({
                         ...canonical,
+                        providerBudgetPeriodStarts: anchor,
                         attemptHolds: existing,
                         attemptCostIntents: authorized(0),
                     }),
@@ -3984,6 +4062,7 @@ export const reserveAttemptProviderBudget = async (input: {
                 // pay twice.
                 reservationPayload: serializeReservation({
                     ...canonical,
+                    providerBudgetPeriodStarts: anchor,
                     attemptHolds: holds,
                     attemptCostIntents: authorized(amount),
                 }),
@@ -3993,7 +4072,8 @@ export const reserveAttemptProviderBudget = async (input: {
     }).catch((error) => {
         if (error instanceof AttemptBudgetRefusal) {
             return error.scope === "reservation_not_open" ||
-                error.scope === "already_authorized"
+                error.scope === "already_authorized" ||
+                error.scope === "no_provider_budget_period"
                 ? { reserved: false as const, reason: error.scope }
                 : {
                       reserved: false as const,
@@ -4089,6 +4169,23 @@ export const releaseAttemptProviderBudget = async (input: {
             return true;
         })
         .catch(() => false);
+
+/**
+ * The period a legacy payload's provider holds were taken in.
+ *
+ * Those holds carry their own `periodStart`, and they were taken at the moment
+ * the reservation was authorized -- so they are the anchor rather than a
+ * reconstruction of it. Null when there are none, which is the case the caller
+ * has to refuse: nothing else in the payload knows the answer.
+ */
+const legacyProviderBudgetAnchor = (
+    holds: readonly AttemptHold[]
+): { day: Date; month: Date } | null => {
+    const day = holds.find((hold) => hold.period === "provider-cost-day");
+    const month = holds.find((hold) => hold.period === "provider-cost-month");
+    if (!day || !month) return null;
+    return { day: day.periodStart, month: month.periodStart };
+};
 
 class AttemptBudgetRefusal extends Error {
     constructor(readonly scope: string) {
