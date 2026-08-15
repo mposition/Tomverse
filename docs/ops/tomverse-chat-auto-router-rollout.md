@@ -526,6 +526,23 @@ the partial index and applies them, recreating a missing rollup row rather than
 leaving the delta stranded. Marking first and applying second is what makes two
 replays apply one delta once.
 
+**Something has to run all of this.** The fifteen-minute maintenance job now
+drives the three recovery passes in the only order that works: reconcile
+expired reservations, then sweep stale attempts — the sweep only considers an
+attempt whose reservation is terminal or expired, so running it first would
+defer a run's worth every time — then replay pending adjustments, which the
+step before it can create. Until that wiring existed the last two had no
+production caller at all: a sweep nobody ran, and a partial index nobody
+consumed, which from the data is indistinguishable from having nothing to
+recover.
+
+There is deliberately no retry ceiling and no dead-letter queue. A provider
+cost delta is not data that may be abandoned after N attempts; what it needs is
+to stop being invisible. The step reports the pending count and the age of the
+oldest unapplied correction, and an age past two maintenance runs raises
+`CHAT_COST_ADJUSTMENT_BACKLOG`. One run failing to apply a delta is a blip; two
+is a pattern nobody would otherwise see.
+
 **Every writer is atomic, including the sweep.** The sweep reads and validates
 the cost intent first, then closes and records in one transaction through
 `closeAttemptWithCost`; a failure takes the close with it, so the attempt stays
@@ -541,9 +558,16 @@ second is a defect happening now.
 traffic, and their accrual used to happen after the settlement transaction
 committed — so a crash in that window lost the rollup with no way to rebuild
 it, the reservation already being terminal. The cost row, the rollup, the
-terminal status and the settlement pointer now commit together. Only the
-provider balance alert stays outside, because it talks to another service and
-must not hold a settlement open or roll one back.
+terminal status and the settlement pointer now commit together. Shadow telemetry and the
+provider balance alert stay outside, and the first of those is not about speed:
+`recordShadowSettlement` swallows its own errors because the contract is that
+shadow telemetry never fails a paid request, and a statement that fails on a
+transaction's own connection aborts that transaction whatever the caller does
+with the exception. Running it inside would have made the contract untrue in
+exactly the case it exists for — and it ran on the global client while the
+transaction held one, a second connection per settlement and a pool that can
+deadlock against itself. Outside the commit it also cannot record a settlement
+that never happened.
 
 The accrual is the transaction's *last* statement. `ProviderDailyUsage` is
 keyed on (provider, model, day), so it is one row shared by every turn on that

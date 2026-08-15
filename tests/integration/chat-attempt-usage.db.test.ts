@@ -41,6 +41,7 @@ const reset = () =>
       "RoutingAttempt",
       "RoutingRun",
       "ProviderDailyUsage",
+      "TokenEstimateShadowSample",
       "ChatAttemptUsageAdjustment",
       "ChatAttemptUsage",
       "ChatCreditReservation",
@@ -1584,4 +1585,104 @@ test("concurrent single-attempt settlements each accrue once on the shared rollu
     assert.equal(durable.settlementAttemptIndex, 0);
   }
   assert.equal(await prisma.chatAttemptUsage.count(), 4);
+});
+
+// Shadow telemetry sits outside the settlement transaction, and both halves of
+// that need pinning: it cannot fail a paid settlement, and it cannot record
+// one that did not happen.
+
+test("a shadow telemetry failure does not stop the settlement committing", async () => {
+  // The module's contract is that shadow telemetry never fails a paid request.
+  // Run on the transaction's own connection, a failing statement would abort
+  // that transaction whatever the caller does with the exception -- so the
+  // contract only holds because the call is outside.
+  const { acquired } = await twoAttemptRun();
+  const reservationId = acquired.usageReservation.reservationId;
+
+  await prisma.$executeRaw`
+    ALTER TABLE "TokenEstimateShadowSample"
+    ADD CONSTRAINT "shadow_test_refuses_everything" CHECK (false) NOT VALID
+  `;
+  try {
+    const result = await settleChatUsage(acquired.usageReservation, {
+      inputTokens: 10_000,
+      outputTokens: 10_000,
+      outcome: "completed",
+    });
+    assert.equal(result.applied, true);
+  } finally {
+    await prisma.$executeRaw`
+      ALTER TABLE "TokenEstimateShadowSample"
+      DROP CONSTRAINT "shadow_test_refuses_everything"
+    `;
+  }
+
+  const durable = await prisma.chatCreditReservation.findUniqueOrThrow({
+    where: { id: reservationId },
+  });
+  assert.equal(durable.status, "settled");
+  assert.equal(durable.settlementAttemptIndex, 0);
+  assert.equal(
+    await prisma.chatAttemptUsage.count({ where: { reservationId } }),
+    1
+  );
+  assert.equal(
+    (
+      await prisma.providerDailyUsage.findFirstOrThrow({
+        where: { provider: "openai", modelId: "attempt-usage-model" },
+      })
+    ).estimatedCostMicroUsd,
+    2_000_000
+  );
+});
+
+test("a settlement that rolls back leaves no shadow sample claiming it settled", async () => {
+  const { acquired } = await twoAttemptRun();
+  const reservationId = acquired.usageReservation.reservationId;
+
+  await prisma.tokenEstimateShadowSample.create({
+    data: {
+      attemptId: reservationId,
+      modelId: "attempt-usage-model",
+      providerId: "openai",
+      controlEstimatorVersion: "attempt-usage-test",
+      controlRawEstimatedInputTokens: 10_000,
+      candidateEstimatorVersion: "attempt-usage-test",
+      candidateRawEstimatedInputTokens: 10_000,
+      reservedInputTokens: 10_000,
+      tokenizerFamily: "test",
+      contentCohort: "test",
+      hangulCharacters: 0,
+      hanKanaCharacters: 0,
+      nonCjkBytes: 0,
+    },
+  });
+
+  await prisma.$executeRaw`
+    ALTER TABLE "ProviderDailyUsage"
+    ADD CONSTRAINT "settlement_test_refuses_rollup_2" CHECK (false) NOT VALID
+  `;
+  try {
+    await assert.rejects(
+      settleChatUsage(acquired.usageReservation, {
+        inputTokens: 10_000,
+        outputTokens: 10_000,
+        outcome: "completed",
+      })
+    );
+  } finally {
+    await prisma.$executeRaw`
+      ALTER TABLE "ProviderDailyUsage"
+      DROP CONSTRAINT "settlement_test_refuses_rollup_2"
+    `;
+  }
+
+  const sample = await prisma.tokenEstimateShadowSample.findFirstOrThrow({
+    where: { attemptId: reservationId },
+  });
+  assert.equal(
+    sample.settledAt,
+    null,
+    "a turn that did not settle must not appear in calibration as one that did"
+  );
 });

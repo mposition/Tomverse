@@ -8,6 +8,21 @@ import {
 } from "@/lib/oauthTokenCrypto";
 import { expireCreditLots } from "@/lib/creditLedger";
 import { reconcileExpiredChatCreditReservations } from "@/lib/chatSecurity";
+import {
+  applyPendingAttemptCostAdjustments,
+  pendingAttemptCostAdjustmentBacklog,
+} from "@/lib/chatAttemptCostLedger";
+import { sweepStaleRoutingAttempts } from "@/lib/routingAttemptSweep";
+import { reportOperationalIncident } from "@/lib/operationalMonitoring";
+
+/**
+ * How long an unapplied cost correction may sit before it is an incident.
+ *
+ * Two runs of the fifteen-minute maintenance cron, plus a margin: one run
+ * failing to apply a delta is a blip, and two in a row is something nobody is
+ * going to notice from the logs alone.
+ */
+const STALE_COST_ADJUSTMENT_AFTER_MS = 45 * 60 * 1000;
 import { purgeExpiredChatLimitDecisions } from "@/lib/chatLimitDecisions";
 import { purgeExpiredAccountDataExportRequests } from "@/lib/accountDataExportTickets";
 import { compactAgedContextManifests } from "@/lib/routingManifestRetention";
@@ -355,6 +370,46 @@ export async function cleanupExpiredData() {
   const creditReservations = await step("chat_credit_reservations", () =>
     reconcileExpiredChatCreditReservations()
   );
+
+  // The provider-cost ledger's three recovery passes, in the only order that
+  // makes sense: money first, then the attempts that money belongs to, then
+  // the corrections owed to the rollups those attempts moved.
+  //
+  // Reconciliation is what makes a crashed turn's reservation terminal, and
+  // the sweep only considers an attempt whose reservation is terminal or
+  // expired -- so running the sweep first would leave a run's worth of
+  // attempts for the next pass every time. The replay comes last because the
+  // adjustments it applies can be created by the sweep's own settlements.
+  //
+  // Until this run existed, neither of the last two had a production caller at
+  // all: a sweep nobody ran, and a partial index nobody consumed.
+  const staleRoutingAttempts = await step("stale_routing_attempts", () =>
+    sweepStaleRoutingAttempts()
+  );
+  const costAdjustments = await step("pending_cost_adjustments", async () => {
+    const replayed = await applyPendingAttemptCostAdjustments();
+    const backlog = await pendingAttemptCostAdjustmentBacklog(now);
+    // Nothing here retries with a ceiling, and deliberately: a provider cost
+    // delta is not data that may be abandoned after N attempts. What is needed
+    // instead is for a delta that keeps failing to become visible, and the age
+    // of the oldest unapplied one is the number that says so. Two runs is the
+    // threshold because one run failing is a blip and two is a pattern.
+    if ((backlog.oldestPendingMs ?? 0) > STALE_COST_ADJUSTMENT_AFTER_MS) {
+      await reportOperationalIncident({
+        code: "CHAT_COST_ADJUSTMENT_BACKLOG",
+        title: "Provider cost corrections are not reaching the rollup",
+        severity: "error",
+        context: {
+          component: "chat-cost-ledger",
+          pending: backlog.pending,
+          oldestPendingMs: backlog.oldestPendingMs,
+          appliedThisRun: replayed.applied,
+          failedThisRun: replayed.failed,
+        },
+      });
+    }
+    return { ...replayed, ...backlog };
+  });
   const testerPassReminders = await step("tester_pass_reminders", () =>
     sendFoundingTesterPassReminders(now)
   );
@@ -642,6 +697,8 @@ export async function cleanupExpiredData() {
     oauthTokensEncrypted,
     creditLotsExpired,
     creditReservations,
+    staleRoutingAttempts,
+    costAdjustments,
     testerPassReminders,
     testerPassExpirations,
     testerPassEndedNotices,

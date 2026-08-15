@@ -42,6 +42,9 @@ const reset = () => {
   creditReservationBehaviour = () => 1;
   oauthKeyBehaviour = () => undefined;
   deletedAccountIds = [];
+  costAdjustmentBacklogPending = 0;
+  costAdjustmentBacklogOldestMs = null;
+  reportedIncidents.length = 0;
 };
 
 // The rows the sweep would find. Only `user.findMany` returns anything: it is
@@ -85,6 +88,43 @@ mock.module(mod("lib/chatSecurity.ts"), {
   namedExports: {
     reconcileExpiredChatCreditReservations: async () =>
       creditReservationBehaviour(),
+  },
+});
+
+// The provider-cost ledger's two recovery passes. Both had no production
+// caller at all before this run began invoking them -- a sweep nobody ran and
+// a partial index nobody consumed -- so the wiring is the thing worth pinning.
+mock.module(mod("lib/routingAttemptSweep.ts"), {
+  namedExports: {
+    sweepStaleRoutingAttempts: async () => ({
+      examined: 31,
+      closedCostInserted: 31,
+      closedWithExistingCost: 0,
+      closedWithoutCostIntent: 0,
+      unexpectedCostOutcome: 0,
+      alreadyClosed: 0,
+      failed: 0,
+    }),
+  },
+});
+mock.module(mod("lib/chatAttemptCostLedger.ts"), {
+  namedExports: {
+    applyPendingAttemptCostAdjustments: async () => ({
+      examined: 32,
+      applied: 32,
+      failed: 0,
+    }),
+    pendingAttemptCostAdjustmentBacklog: async () => ({
+      pending: costAdjustmentBacklogPending,
+      oldestPendingMs: costAdjustmentBacklogOldestMs,
+    }),
+  },
+});
+mock.module(mod("lib/operationalMonitoring.ts"), {
+  namedExports: {
+    reportOperationalIncident: async (incident: { code: string }) => {
+      reportedIncidents.push(incident.code);
+    },
   },
 });
 
@@ -179,7 +219,13 @@ mock.module(mod("lib/assistantKnowledgeProcessor.ts"), {
 
 type CleanupResult = Record<string, unknown> & {
   failedSteps: { step: string; error: string }[];
+  staleRoutingAttempts: { closedCostInserted: number } | null;
+  costAdjustments: { applied: number; pending: number } | null;
 };
+let costAdjustmentBacklogPending = 0;
+let costAdjustmentBacklogOldestMs: number | null = null;
+const reportedIncidents: string[] = [];
+
 type MaintenanceModule = { cleanupExpiredData: () => Promise<CleanupResult> };
 
 // Loaded lazily: this file is transformed to CJS, where top-level await is not
@@ -279,4 +325,50 @@ test("a missing OAuth encryption key still fails the whole run", async () => {
   const { cleanupExpiredData } = await load();
   await assert.rejects(cleanupExpiredData(), /OAUTH_TOKEN_ENCRYPTION_KEY/);
   assert.deepEqual(deletedAccountIds, []);
+});
+
+// The provider-cost ledger's recovery passes only exist if something runs
+// them. Until this run called them, `sweepStaleRoutingAttempts` and
+// `applyPendingAttemptCostAdjustments` were a function and a partial index
+// with tests and no caller -- which looks identical, from the data, to a
+// system with nothing to recover.
+
+test("the maintenance run drives the cost ledger's recovery passes", async () => {
+  reset();
+  const { cleanupExpiredData } = await load();
+  const result = await cleanupExpiredData();
+
+  assert.equal(result.staleRoutingAttempts?.closedCostInserted, 31);
+  assert.equal(result.costAdjustments?.applied, 32);
+  // The backlog is reported beside the count, for the same reason the manifest
+  // sweep reports its own: a pass that applied everything it found and left
+  // work behind is only visible if the step says so.
+  assert.equal(result.costAdjustments?.pending, 0);
+  assert.deepEqual(reportedIncidents, []);
+});
+
+test("corrections older than two runs are an incident, not a log line", async () => {
+  reset();
+  costAdjustmentBacklogPending = 4;
+  costAdjustmentBacklogOldestMs = 46 * 60 * 1000;
+
+  const { cleanupExpiredData } = await load();
+  await cleanupExpiredData();
+
+  // No retry ceiling and no dead letter: a provider cost delta is not data
+  // that may be abandoned after N attempts. What it needs instead is to stop
+  // being invisible, and the age of the oldest unapplied one says it.
+  assert.deepEqual(reportedIncidents, ["CHAT_COST_ADJUSTMENT_BACKLOG"]);
+});
+
+test("a backlog inside one run is not yet an incident", async () => {
+  reset();
+  costAdjustmentBacklogPending = 2;
+  costAdjustmentBacklogOldestMs = 5 * 60 * 1000;
+
+  const { cleanupExpiredData } = await load();
+  await cleanupExpiredData();
+
+  // One run failing to apply a delta is a blip; the alert is for a pattern.
+  assert.deepEqual(reportedIncidents, []);
 });

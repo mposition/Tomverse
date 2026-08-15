@@ -3588,33 +3588,6 @@ export const settleChatUsage = async (
             },
         });
 
-        // Shadow only. Provenance is decided from the provider's *input* count
-        // alone -- deliberately not from `usageSource` above, which is decided
-        // by whether output tokens arrived. A turn that reported output but not
-        // input has an input figure that is the estimate itself, and
-        // calibrating on it would compare an estimate with a copy of itself.
-        await recordShadowSettlement({
-            attemptId: reservation.reservationId,
-            providerReportedInputTokens: Number.isSafeInteger(usage.inputTokens)
-                ? Math.max(0, usage.inputTokens!)
-                : null,
-            inputUsageSource: resolveInputUsageSource({
-                providerReportedInputTokens: usage.inputTokens,
-                providerReturnedUsage: usage.usageFromProvider !== false,
-            }),
-            outcome:
-                usage.outcome === "completed"
-                    ? "completed"
-                    : usage.outcome === "cancelled"
-                      ? "cancelled"
-                      : "failed",
-            // The settlement path receives no partial-stream signal, so this
-            // stays false until it does. A cancelled turn is already excluded
-            // from calibration on its own flag.
-            isPartial: false,
-            isCancelled: usage.outcome === "cancelled",
-        });
-
         // The last database work this transaction does, and deliberately so.
         //
         // `ProviderDailyUsage` is keyed on (provider, model, day), which makes
@@ -3662,7 +3635,14 @@ export const settleChatUsage = async (
                                 costBreakdown.cachedInputCostMicroUsd,
                             outputCostMicroUsd: costBreakdown.outputCostMicroUsd,
                         },
-                        snapshot: { usageSource },
+                        // Named apart from the row's own `usageSource`
+                        // column, which is derived and authoritative. They can
+                        // legitimately differ -- a provider that reports a cost
+                        // makes the column `provider_response_cost` while this
+                        // stays `provider_usage_metadata` -- and one row saying
+                        // two things under one name is a trap for whoever reads
+                        // the snapshot.
+                        snapshot: { settlementUsageSource: usageSource },
                     },
                 ]
               : [];
@@ -3680,8 +3660,53 @@ export const settleChatUsage = async (
             costBreakdown,
             provider: canonical.provider,
             modelId: canonical.modelId,
+            shadow: {
+                attemptId: reservation.reservationId,
+                providerReportedInputTokens: Number.isSafeInteger(usage.inputTokens)
+                    ? Math.max(0, usage.inputTokens!)
+                    : null,
+                inputUsageSource: resolveInputUsageSource({
+                    providerReportedInputTokens: usage.inputTokens,
+                    providerReturnedUsage: usage.usageFromProvider !== false,
+                }),
+                outcome:
+                    usage.outcome === "completed"
+                        ? ("completed" as const)
+                        : usage.outcome === "cancelled"
+                          ? ("cancelled" as const)
+                          : ("failed" as const),
+                // The settlement path receives no partial-stream signal, so
+                // this stays false until it does. A cancelled turn is already
+                // excluded from calibration on its own flag.
+                isPartial: false,
+                isCancelled: usage.outcome === "cancelled",
+            },
         };
     });
+
+    // Shadow telemetry, after the commit and never inside it.
+    //
+    // Two reasons, and the first is not about speed. `recordShadowSettlement`
+    // swallows its own errors because the module's contract is that shadow
+    // telemetry never fails a paid request -- but a statement that fails on a
+    // transaction's own connection aborts that transaction whatever the caller
+    // does with the exception, so running it inside would have made the
+    // contract untrue in exactly the case it exists for. It also ran on the
+    // global client while this transaction held a connection, which is a
+    // second connection acquired per settlement and a pool that can deadlock
+    // against itself under load.
+    //
+    // After the commit it also cannot record a settlement that did not happen:
+    // a rolled-back turn now leaves no shadow sample claiming it settled.
+    //
+    // Provenance is decided from the provider's *input* count alone --
+    // deliberately not from `usageSource`, which is decided by whether output
+    // tokens arrived. A turn that reported output but not input has an input
+    // figure that is the estimate itself, and calibrating on it would compare
+    // an estimate with a copy of itself.
+    if (settlement.applied && settlement.shadow) {
+        await recordShadowSettlement(settlement.shadow);
+    }
 
     // Every accrual now happens inside the settlement transaction, single
     // attempt and fallback alike, so nothing is recorded here.
