@@ -65,6 +65,47 @@ UI-012에서 승인된 정책(B안)입니다. accent 색은 **hue가 아니라 �
 
 예외가 필요하면 이 문서에 근거를 적고 나서 추가합니다.
 
+# 브랜치 이름이 자동화 권한을 정합니다
+
+**브랜치의 목적이 아니라 병합 대상이 자동화 권한을 결정합니다.** `claude/`,
+`codex/`, `docs/`, `fix/`는 누가 왜 만들었는지를 말할 뿐 어디로 가는지를 말하지
+않고, push 이벤트는 그것을 알아낼 방법이 없습니다 — 브랜치는 PR보다 먼저
+존재합니다.
+
+`Auto PR to Develop`은 이름에 **`to-develop` 경로 조각이 있는 브랜치에만**
+develop PR을 만듭니다. 판정은 `scripts/auto-pr-branch-policy.mjs`가 하고
+`tests/autoPrBranchPolicy.test.mjs`가 허용·거부 양쪽을 고정합니다.
+
+```
+claude/to-develop/image-generation   자동 PR
+codex/to-develop/fix-picker          자동 PR
+docs/to-develop/release-policy       자동 PR
+to-develop/ime-submit                자동 PR
+
+claude/to-main/dependabot-hold       없음 — main PR은 손으로 엽니다
+release/**, hotfix/**                없음 — production에 닿습니다
+dependabot/**, autofix/**,
+feedback-autofix/**                  없음 — 각자 자기 PR을 엽니다
+visual-baseline/**                   없음 — 골든 재기록은 사람이 diff를 보고 병합합니다
+그 밖의 모든 이름                     없음
+```
+
+`to-develop`은 **경로 조각**이지 부분 문자열이 아닙니다.
+`feature/to-development-notes`는 개발 노트에 관한 브랜치이고
+`chore/to-develop-later`는 누군가의 약칭입니다. 둘 다 대상을 말한 것이
+아닙니다.
+
+이전 규칙은 `branches-ignore`에 예외를 쌓는 방식이었고, 그 목록은 **이미 한 번
+당해 본 namespace만** 담을 수 있습니다. 2026-08-15에 `.github/dependabot.yml`
+변경(기본 브랜치에서만 읽히는 파일)을 담은 브랜치가 main용으로 push되자 develop
+PR #573이 먼저 열렸습니다 — 한 브랜치에 PR 둘, 그중 하나는 변경이 아무 효과도
+없는 base였습니다. opt-in에서 모르는 브랜치는 **PR 없음**이고 비용은 `gh pr
+create` 한 번이지만, opt-out에서는 **잘못된 base의 PR에 auto-merge까지 켜진
+상태**입니다.
+
+기존에 열린 PR과 브랜치는 그대로 둡니다. 새 규칙은 이 변경 이후 만드는
+브랜치부터 적용합니다.
+
 # 다음 작업 고를 때 — 열린 이슈를 그대로 믿지 않습니다
 
 이슈가 **열려 있다**는 것과 **아직 안 됐다**는 것은 다른 사실입니다. 이 저장소는
