@@ -49,7 +49,7 @@ import { costIntentFor, type AttemptCostIntent } from "@/lib/chatProviderHolds";
 import { deserializeReservation } from "@/lib/chatSecurity";
 import type { AiModel } from "@/lib/models";
 import { prisma } from "@/lib/prisma";
-import type { Prisma } from "@prisma/client";
+import { Prisma } from "@prisma/client";
 
 /** How long an attempt may stay open before the sweep will consider it. */
 export const STALE_ATTEMPT_AFTER_MS = 30 * 60 * 1000;
@@ -79,8 +79,15 @@ export type StaleAttemptSweepResult = {
      * Counted apart from the two above on purpose. These are attempts whose
      * provider spend nobody can now state, and folding them into a success
      * count would report a permanent hole in the ledger as an ordinary sweep.
+     *
+     * The total alone cannot carry an alarm, which is what `noCostReasons`
+     * is for: one of its reasons is intended, one is history that ages out,
+     * and the rest are defects. Alerting on the sum would either shout about
+     * instrumentation-only runs or stay silent about a broken writer.
      */
     closedWithoutCostIntent: number;
+    /** The same total, split by why nothing could be priced. */
+    noCostReasons: NoCostReasonCounts;
     /**
      * Closed, and the cost writer returned something the sweep cannot produce.
      *
@@ -113,6 +120,78 @@ type SweepRow = {
     reservationId: string | null;
 };
 
+/**
+ * When cost intents began being written, as an ISO timestamp.
+ *
+ * A reservation created before this cannot carry one, and a sweep that finds
+ * none is describing history rather than a defect. A reservation created after
+ * it and carrying none is a defect, with no grace period: the writer that was
+ * supposed to record the intent did not.
+ *
+ * Unset is neither. It is not treated as "everything is legacy" -- that would
+ * silently disable the alarm this distinction exists to raise -- but as its
+ * own unclassified state, reported so the missing configuration is the thing
+ * an operator sees.
+ */
+export const COST_INTENT_CUTOVER_ENV = "AUTO_ROUTER_COST_INTENT_CUTOVER_AT";
+
+const costIntentCutover = (): Date | null => {
+    const raw = process.env[COST_INTENT_CUTOVER_ENV]?.trim();
+    if (!raw) return null;
+    const parsed = new Date(raw);
+    return Number.isNaN(parsed.getTime()) ? null : parsed;
+};
+
+/** Why an attempt was closed without a cost row. */
+export type NoCostReason =
+    /** No reservation at all: an instrumentation-only run. Intended. */
+    | "no_reservation"
+    /** Created before cost intents existed. History, and it ages out. */
+    | "legacy_missing_cost_intent"
+    /** Created after the cutover and carrying no intent. A defect. */
+    | "missing_cost_intent"
+    /** No cutover is configured, so the two above cannot be told apart. */
+    | "unclassified_missing_cost_intent"
+    /** The run points at a reservation row that is not there. */
+    | "dangling_reservation"
+    /** The payload would not validate. A defect happening now. */
+    | "invalid_cost_intent_payload";
+
+export type NoCostReasonCounts = Record<NoCostReason, number>;
+
+const emptyNoCostReasons = (): NoCostReasonCounts => ({
+    no_reservation: 0,
+    legacy_missing_cost_intent: 0,
+    missing_cost_intent: 0,
+    unclassified_missing_cost_intent: 0,
+    dangling_reservation: 0,
+    invalid_cost_intent_payload: 0,
+});
+
+/**
+ * Exactly what the sweep will act on, as one predicate used by both readers.
+ *
+ * Written once and shared because a backlog that counts something else is
+ * worse than no backlog: `staleAttemptBacklog` used to check age alone, so a
+ * deep-research turn legitimately streaming past thirty minutes counted as
+ * work the sweep had not got to. An alarm on that number would fire on healthy
+ * traffic.
+ */
+const eligibleStaleAttempts = (now: Date, cutoff: Date) => Prisma.sql`
+    a."outcome" = 'pending'
+    AND a."dispatchedAt" IS NOT NULL
+    AND a."createdAt" < ${cutoff}
+    AND NOT EXISTS (
+        SELECT 1 FROM "ChatRequestLease" l
+        WHERE l."subjectKey" = r."subjectKey"
+    )
+    AND (
+        c."id" IS NULL
+        OR c."status" <> 'reserved'
+        OR c."expiresAt" <= ${now}
+    )
+`;
+
 export const sweepStaleRoutingAttempts = async (
     now = new Date(),
     batch = STALE_ATTEMPT_SWEEP_BATCH
@@ -128,18 +207,7 @@ export const sweepStaleRoutingAttempts = async (
         FROM "RoutingAttempt" a
         JOIN "RoutingRun" r ON r."id" = a."runId"
         LEFT JOIN "ChatCreditReservation" c ON c."id" = r."reservationId"
-        WHERE a."outcome" = 'pending'
-          AND a."dispatchedAt" IS NOT NULL
-          AND a."createdAt" < ${cutoff}
-          AND NOT EXISTS (
-              SELECT 1 FROM "ChatRequestLease" l
-              WHERE l."subjectKey" = r."subjectKey"
-          )
-          AND (
-              c."id" IS NULL
-              OR c."status" <> 'reserved'
-              OR c."expiresAt" <= ${now}
-          )
+        WHERE ${eligibleStaleAttempts(now, cutoff)}
         ORDER BY a."createdAt" ASC
         LIMIT ${limit}
     `;
@@ -149,6 +217,7 @@ export const sweepStaleRoutingAttempts = async (
     let closedWithoutCostIntent = 0;
     let unexpectedCostOutcome = 0;
     let alreadyClosed = 0;
+    const noCostReasons = emptyNoCostReasons();
     let failed = 0;
     for (const row of rows) {
         try {
@@ -159,12 +228,16 @@ export const sweepStaleRoutingAttempts = async (
             // transaction cannot take the close back with it -- so a database
             // blip would close the attempt with no cost row, permanently,
             // because the sweep only ever looks at `pending` again.
+            // The reason travels back through a holder rather than the return
+            // value, because `resolveCost` owes its caller a cost record and
+            // nothing else. Only read when the record came back null.
+            const noCost: { reason?: NoCostReason } = {};
             const closed = await closeAttemptWithCost({
                 attemptId: row.id,
                 outcome: "unknown_after_dispatch",
                 failureLayer: "process",
                 errorClass: "process_stopped_after_dispatch",
-                resolveCost: (tx) => crashCostRecord(tx, row),
+                resolveCost: (tx) => crashCostRecord(tx, row, noCost),
             });
             if (!closed.closed) {
                 alreadyClosed += 1;
@@ -183,6 +256,7 @@ export const sweepStaleRoutingAttempts = async (
                     break;
                 case "skipped":
                     closedWithoutCostIntent += 1;
+                    noCostReasons[noCost.reason ?? "no_reservation"] += 1;
                     break;
                 case "corrected":
                 case "adjustment_pending":
@@ -225,6 +299,7 @@ export const sweepStaleRoutingAttempts = async (
         closedCostInserted,
         closedWithExistingCost,
         closedWithoutCostIntent,
+        noCostReasons,
         unexpectedCostOutcome,
         alreadyClosed,
         failed,
@@ -253,11 +328,29 @@ export const sweepStaleRoutingAttempts = async (
  */
 const crashCostRecord = async (
     tx: Prisma.TransactionClient,
-    row: SweepRow
+    row: SweepRow,
+    noCost: { reason?: NoCostReason }
 ): Promise<AttemptCostRecord | null> => {
-    // No reservation at all: an instrumentation-only run, with no money to
-    // account for. Ordinary, and silent.
-    if (!row.reservationId) return null;
+    const unavailable = (reason: NoCostReason, extra?: Record<string, unknown>) => {
+        noCost.reason = reason;
+        // `no_reservation` is the intended shape of an instrumentation-only
+        // run, so it is counted and not logged. Every other reason is
+        // something an operator may need to see the individual case for.
+        if (reason !== "no_reservation") {
+            console.error(
+                JSON.stringify({
+                    event: "routing_attempt_sweep_cost_unavailable",
+                    reason,
+                    attemptId: row.id,
+                    reservationId: row.reservationId,
+                    ...(extra ?? {}),
+                })
+            );
+        }
+        return null;
+    };
+
+    if (!row.reservationId) return unavailable("no_reservation");
 
     // Deliberately outside the try below. A read that fails is the database
     // being unavailable, and the caller has to see that as a failure -- the
@@ -268,17 +361,9 @@ const crashCostRecord = async (
         where: { id: row.reservationId },
     });
     if (!reservation) {
-        // The row is gone while a run still points at it. Not the legacy case
-        // and not a payload defect: a reference with nothing behind it.
-        console.error(
-            JSON.stringify({
-                event: "routing_attempt_sweep_cost_unavailable",
-                reason: "dangling_reservation",
-                attemptId: row.id,
-                reservationId: row.reservationId,
-            })
-        );
-        return null;
+        // The row is gone while a run still points at it. Not history and not
+        // a payload defect: a reference with nothing behind it.
+        return unavailable("dangling_reservation");
     }
 
     let intent: AttemptCostIntent | null = null;
@@ -289,28 +374,26 @@ const crashCostRecord = async (
         const canonical = deserializeReservation(reservation.reservationPayload);
         intent = costIntentFor(canonical.attemptCostIntents, row.attemptIndex);
     } catch (error) {
-        console.error(
-            JSON.stringify({
-                event: "routing_attempt_sweep_cost_unavailable",
-                reason: "invalid_cost_intent_payload",
-                attemptId: row.id,
-                reservationId: row.reservationId,
-                error: error instanceof Error ? error.message.slice(0, 300) : "unknown",
-            })
-        );
-        return null;
+        return unavailable("invalid_cost_intent_payload", {
+            error: error instanceof Error ? error.message.slice(0, 300) : "unknown",
+        });
     }
 
     if (!intent) {
-        console.warn(
-            JSON.stringify({
-                event: "routing_attempt_sweep_cost_unavailable",
-                reason: "legacy_missing_cost_intent",
-                attemptId: row.id,
-                reservationId: row.reservationId,
-            })
+        // Whether this is history or a defect depends entirely on when the
+        // reservation was written, and nothing else can tell them apart.
+        const cutover = costIntentCutover();
+        if (!cutover) {
+            return unavailable("unclassified_missing_cost_intent", {
+                configured: COST_INTENT_CUTOVER_ENV,
+            });
+        }
+        return unavailable(
+            reservation.createdAt < cutover
+                ? "legacy_missing_cost_intent"
+                : "missing_cost_intent",
+            { reservationCreatedAt: reservation.createdAt.toISOString() }
         );
-        return null;
     }
 
     return {
@@ -353,20 +436,34 @@ const crashCostRecord = async (
 export const staleAttemptBacklog = async (now = new Date()) => {
     const cutoff = new Date(now.getTime() - STALE_ATTEMPT_AFTER_MS);
     const rows = await prisma.$queryRaw<
-        { backlog: bigint; oldest_ms: number | null }[]
+        { aged: bigint; eligible: bigint; oldest_ms: number | null }[]
     >`
         SELECT
-            COUNT(*)::bigint AS backlog,
-            MAX(EXTRACT(EPOCH FROM (${now}::timestamp - a."createdAt")) * 1000)::float
+            COUNT(*)::bigint AS aged,
+            COUNT(*) FILTER (WHERE ${eligibleStaleAttempts(now, cutoff)})::bigint
+                AS eligible,
+            MAX(EXTRACT(EPOCH FROM (${now}::timestamp - a."createdAt")) * 1000)
+                FILTER (WHERE ${eligibleStaleAttempts(now, cutoff)})::float
                 AS oldest_ms
         FROM "RoutingAttempt" a
+        JOIN "RoutingRun" r ON r."id" = a."runId"
+        LEFT JOIN "ChatCreditReservation" c ON c."id" = r."reservationId"
         WHERE a."outcome" = 'pending'
           AND a."dispatchedAt" IS NOT NULL
           AND a."createdAt" < ${cutoff}
     `;
     const row = rows[0];
     return {
-        backlog: Number(row?.backlog ?? 0),
-        oldestPendingMs: row?.oldest_ms == null ? null : Math.round(row.oldest_ms),
+        /**
+         * Old and still open, whether or not the sweep may touch it.
+         *
+         * Includes a turn legitimately streaming past the window -- deep
+         * research does -- so it is a health number and never an alarm.
+         */
+        agedPending: Number(row?.aged ?? 0),
+        /** What the sweep would act on right now. The number worth alarming on. */
+        eligiblePending: Number(row?.eligible ?? 0),
+        /** Age of the oldest eligible one, which says whether anything is getting through. */
+        oldestEligibleMs: row?.oldest_ms == null ? null : Math.round(row.oldest_ms),
     };
 };

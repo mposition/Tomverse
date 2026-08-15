@@ -543,6 +543,46 @@ oldest unapplied correction, and an age past two maintenance runs raises
 `CHAT_COST_ADJUSTMENT_BACKLOG`. One run failing to apply a delta is a blip; two
 is a pattern nobody would otherwise see.
 
+The steps are idempotent and do not depend on one another for correctness — the
+sweep already accepts a reservation that is merely expired, and nothing in a
+maintenance run creates the adjustments the replay applies. They run after the
+primary reconciliation to keep reporting and operational ownership predictable,
+not because either needs the other.
+
+**Each sweep signal gets the threshold its meaning earns.** Alerting on "closed
+without a cost row" as one number would either shout about instrumentation-only
+runs or stay silent about a writer that stopped recording intents, so the total
+is split by reason:
+
+| Reason | Meaning | Threshold |
+| --- | --- | --- |
+| `no_reservation` | An instrumentation-only run | Counted; never alerts |
+| `legacy_missing_cost_intent` | Written before intents existed | Counted; ages out |
+| `missing_cost_intent` | Written after the cutover, carrying none | One is an incident |
+| `dangling_reservation` | The run points at a row that is gone | One is an incident |
+| `invalid_cost_intent_payload` | The payload will not validate | One is an incident |
+| `unclassified_missing_cost_intent` | No cutover configured | Warning naming the variable |
+
+History and defect are told apart by `AUTO_ROUTER_COST_INTENT_CUTOVER_AT`, the
+moment intents began being written, compared against the reservation's own
+creation time. Unset, the two cannot be distinguished at all — so the unset
+configuration is what gets reported, rather than the alarm quietly answering
+"legacy" to everything.
+
+`unexpectedCostOutcome` is an incident on the first occurrence: the sweep
+cannot produce those outcomes by construction, so one means a contract broke.
+`failed` is not, on its own — a database that was briefly unavailable costs a
+delay, and the attempt is still `pending` for the next run. What is worth a
+call is the sweep falling behind: more eligible attempts than one batch can
+take, or one eligible for longer than thirty minutes to become stale plus two
+fifteen-minute runs.
+
+The backlog counts what the sweep would actually act on, sharing its exact
+predicate. Counting by age alone included turns that are legitimately still
+streaming — deep research runs past thirty minutes — so an alarm on that number
+would have fired on healthy traffic. `agedPending` is still reported beside it
+as a health figure.
+
 **Every writer is atomic, including the sweep.** The sweep reads and validates
 the cost intent first, then closes and records in one transaction through
 `closeAttemptWithCost`; a failure takes the close with it, so the attempt stays
