@@ -39,7 +39,17 @@ jobs:
   credit-finance-db:
     name: Credit and finance PostgreSQL scenarios
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    # These scenarios run against a real PostgreSQL, serially, because they
+    # assert lock ordering and constraint behaviour that concurrent files would
+    # make nondeterministic. That puts the suite at 17:26-18:22 across runs
+    # 763-780, against a ceiling of 20: under 10% headroom, which ordinary
+    # runner variance eats. Runs 775 and 776 crossed it on two unrelated
+    # branches within an hour of each other, and a suite that takes 18 minutes
+    # then reports "cancelled" reads as a code failure to whoever opened the
+    # PR. 30 leaves room for the suite to keep growing while still failing a
+    # genuine hang well inside the runner's own limit, and matches what the
+    # other long jobs here already use (25 for admin E2E, 40 for e2e).
+    timeout-minutes: 30
 
     services:
       postgres:
