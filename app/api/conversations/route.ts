@@ -2,6 +2,7 @@
 
 import { NextResponse } from "next/server";
 import { enqueueImageAssetCleanupForConversations } from "@/lib/imageAssetLifecycle";
+import { deleteDeepResearchJobsForConversations } from "@/lib/deepResearchJobs";
 import { prisma } from "@/lib/prisma";
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
@@ -366,6 +367,7 @@ export async function DELETE(req: Request) {
         (conversation) => conversation.id
       );
       await enqueueImageAssetCleanupForConversations(tx, conversationIds);
+      await deleteDeepResearchJobsForConversations(tx, conversationIds);
       return tx.conversation.deleteMany({
         where: {
           userId,

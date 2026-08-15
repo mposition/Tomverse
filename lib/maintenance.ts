@@ -544,6 +544,68 @@ export async function cleanupExpiredData() {
     WHERE "expiresAt" <= NOW()
   `);
 
+  // Raw email addresses and two credential hashes per sign-in attempt, kept by
+  // nothing until now. `expiresAt` rather than `createdAt`: it is the moment
+  // the row stops being able to authenticate anyone, and it is the indexed
+  // column (`@@index([expiresAt])`), so this is an index scan rather than a
+  // sequential one over a table that grows with every login attempt including
+  // the ones for addresses that have no account.
+  //
+  // No carve-out for consumed or invalidated rows. A consumed row is spent and
+  // an invalidated one was superseded by a newer attempt, so neither outlives
+  // the unconsumed row beside it -- and a carve-out here would keep exactly
+  // the rows belonging to people who did sign in.
+  // One row per deep research request. Its user-visible half is a copy --
+  // `resultText` is written into `Message.content` in the same transaction that
+  // finalizes the job -- so what is kept here is an operational record, and the
+  // clock is `updatedAt` because a job nobody polls again never reaches a
+  // terminal status and would otherwise never be covered at all.
+  // Both R2 deletion queues, one step, completed rows only.
+  //
+  // The `completedAt: { not: null }` filter is the whole safety of this: a
+  // pending row is the only record of the object's R2 key anywhere in the
+  // system, so deleting one strands the file in storage with no name and
+  // nothing that could ever reap it. The queue is drained by
+  // `assistant_knowledge_cleanup` and the image sweep; this only removes what
+  // they already finished.
+  const storageCleanupQueues = await step("storage_cleanup_queues", async () => {
+    const cutoff = retentionCutoff("storageCleanupQueues", now);
+    const where = {
+      completedAt: { not: null, lt: cutoff },
+    } as const;
+    const [images, knowledge] = await Promise.all([
+      prisma.imageAssetCleanup.deleteMany({ where }),
+      prisma.assistantKnowledgeCleanup.deleteMany({ where }),
+    ]);
+    return { count: images.count + knowledge.count };
+  });
+
+  // Measurement rows for the estimator evaluation -- counts and ratios, no
+  // prompt or completion text. Read only by report:token-estimate-calibration,
+  // which wants recent traffic; a sample older than the estimator version it
+  // was comparing describes a comparison nobody is running.
+  const tokenEstimateShadowSamples = await step(
+    "token_estimate_shadow_samples",
+    () =>
+      prisma.tokenEstimateShadowSample.deleteMany({
+        where: {
+          createdAt: { lt: retentionCutoff("tokenEstimateShadowSamples", now) },
+        },
+      })
+  );
+
+  const deepResearchJobs = await step("deep_research_jobs", () =>
+    prisma.perplexityAsyncJob.deleteMany({
+      where: { updatedAt: { lt: retentionCutoff("deepResearchJobs", now) } },
+    })
+  );
+
+  const emailLoginAttempts = await step("email_login_attempts", () =>
+    prisma.emailLoginAttempt.deleteMany({
+      where: { expiresAt: { lt: retentionCutoff("emailLoginAttempts", now) } },
+    })
+  );
+
   const providerErrorEvents = await step("provider_error_events", () =>
     prisma.providerErrorEvent.deleteMany({
       where: { createdAt: { lt: retentionCutoff("providerErrors", now) } },
@@ -767,6 +829,10 @@ export async function cleanupExpiredData() {
     sessions: sessions?.count ?? null,
     usageBuckets: usageBuckets === null ? null : Number(usageBuckets),
     requestLeases: requestLeases === null ? null : Number(requestLeases),
+    storageCleanupQueues: storageCleanupQueues?.count ?? null,
+    tokenEstimateShadowSamples: tokenEstimateShadowSamples?.count ?? null,
+    deepResearchJobs: deepResearchJobs?.count ?? null,
+    emailLoginAttempts: emailLoginAttempts?.count ?? null,
     providerErrorEvents: providerErrorEvents?.count ?? null,
     providerHealthChecks: providerHealthChecks?.count ?? null,
     providerProbeResults: providerProbeResults?.count ?? null,

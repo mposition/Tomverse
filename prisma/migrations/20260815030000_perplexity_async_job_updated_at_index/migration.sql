@@ -1,0 +1,13 @@
+-- The clock the PerplexityAsyncJob retention sweep reads.
+--
+-- Policy: lib/retentionPolicyCore.ts, key `deepResearchJobs`.
+--
+-- `updatedAt` rather than `completedAt`, because a job that is never polled
+-- again has no `completedAt` and is exactly the row that accumulates: the user
+-- starts a deep research request, closes the tab, and nothing ever moves the
+-- row out of `submitted`. One column covers both.
+--
+-- Created concurrently is not available inside Prisma's migration transaction,
+-- and this table is small enough that the brief lock is not worth splitting the
+-- migration over: it holds one row per deep research request, not per message.
+CREATE INDEX "PerplexityAsyncJob_updatedAt_idx" ON "PerplexityAsyncJob"("updatedAt");

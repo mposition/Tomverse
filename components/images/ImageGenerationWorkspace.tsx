@@ -1081,9 +1081,20 @@ export function ImageGenerationWorkspace({
               // Ctrl/Cmd+Enter already submitted here, and still does, so no
               // existing habit breaks -- desktop Enter is the only addition.
               // What is genuinely new is the IME guard: this composer was safe
-              // only by accident, because a Korean composition-confirming
-              // Enter carries no modifier. Enter submitting makes that
-              // accident load-bearing, so it stops being an accident.
+              // only by accident, because a composition-confirming Enter
+              // carries no modifier. Enter submitting makes that accident
+              // load-bearing, so it stops being an accident.
+              //
+              // The case the guard actually defends is a candidate-selection
+              // IME -- Pinyin, Japanese -- where the first Enter picks a
+              // candidate and must not also send. This comment used to name
+              // Korean as the example; a measurement on 2026-08-15 (Windows,
+              // Chrome, Microsoft Korean IME) found no guard signal there at
+              // all, because `compositionend` fires before the Enter keydown
+              // and that keydown reports `isComposing: false, keyCode: 13`.
+              // See .github/audits/ime-enter-observation-2026-08-15.md. That
+              // is an observation about one environment, not a rule: the
+              // invariant in lib/chatKeyboardPolicy.ts is unchanged.
               onKeyDown={(event) => {
                 const action = getChatEnterKeyAction(
                   event,

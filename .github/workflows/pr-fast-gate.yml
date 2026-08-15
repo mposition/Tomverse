@@ -158,6 +158,17 @@ jobs:
         timeout-minutes: 5
         run: npm run check:staging-verification-records
 
+      # Same guarantee, one directory over: the release checklist is a
+      # template and a run is a dated copy of it. That was a convention with
+      # nothing behind it -- the first fifteen commits of the checklist's life
+      # carried zero ticked boxes because no run had ever been recorded
+      # anywhere, and the first one that was could as easily have been typed
+      # into the template, where it becomes every later release's starting
+      # state.
+      - name: Release records
+        timeout-minutes: 5
+        run: npm run check:release-records
+
       # UI-012: semantic accent colours must stay addressed by role inside the
       # guarded components. Cheap, no browser, so it sits with the other static
       # checks rather than in the browser tier.

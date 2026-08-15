@@ -55,6 +55,9 @@ Nothing below can be inferred from a green suite.
 | 14 | Real browser zoom 200% | `/`, `/pricing`, chat | No horizontal scroll, nothing clipped | | | **N/V** |
 | 15 | Real browser zoom 400% | As #14 | As above | | | **N/V** |
 | 16 | Windows High Contrast (real, not emulated) | Consent, picker, send, error | Controls and focus remain visible | | | **N/V** |
+| 17 | Windows + Chrome/Edge + Microsoft Pinyin | Type Chinese in the composer; Enter to confirm a candidate | The candidate is confirmed and nothing is sent; a second Enter sends | | | **N/V** |
+| 18 | Windows + Chrome/Edge + Microsoft Japanese IME | As #17 | As above | | | **N/V** |
+| 19 | macOS + Safari + Apple Japanese IME | As #17 | As above | | | **N/V** |
 
 ### Why these specifically
 
@@ -62,6 +65,19 @@ Nothing below can be inferred from a green suite.
   call silently destroys user input. `lib/chatKeyboardPolicy.ts` treats
   `isComposing` and `keyCode === 229` as the guard; emulated key events in a
   headless browser cannot prove a real IME sets either.
+- **17–19** are where that guard has something to do. A candidate-selection
+  IME shows a popup and the first Enter picks from it; if that Enter also
+  submits, the message goes with the wrong characters and the popup's purpose
+  is defeated. Chinese is a supported product locale, so #17 is the higher
+  priority; the Japanese rows are the cheapest regression detector for
+  candidate selection whether or not the locale ships.
+
+  They were added after an exploratory measurement, not from the code: on
+  Windows + Chrome + Microsoft Korean IME the guard has no signal to act on,
+  because `compositionend` fires before the Enter keydown and that keydown
+  reports `isComposing: false, keyCode: 13`. That is one environment, not a
+  rule, and it is **not** evidence for rows 10-13, which ask about mobile
+  keyboards. See `.github/audits/ime-enter-observation-2026-08-15.md`.
 - **14–15** are listed separately from the automated reflow row on purpose.
   Injecting CSS `zoom` is **not** a substitute for real browser zoom and must
   not be recorded as satisfying them.
@@ -73,6 +89,21 @@ Nothing below can be inferred from a green suite.
 A finding gets its own tracked ID and severity; it is not fixed silently
 inside this document. P0/P1 accessibility blockers block release. Record the
 ID in the row's Evidence column so the matrix and the tracker agree.
+
+## Exploratory observations
+
+A measurement that is not a row. Something was seen, someone went and looked,
+and the result is worth keeping whether or not it turned into a checklist item
+-- but it is filed here rather than in a row's Evidence column, because a row
+is a claim about a specific environment and an observation from a different one
+does not satisfy it.
+
+Each entry names OS, browser, IME and version, and states the event sequence it
+observed rather than the conclusion drawn from it.
+
+| Date | Build | Environment | Observation |
+|---|---|---|---|
+| 2026-08-15 | `b0cf10e` | Windows 11, Chrome, Microsoft Korean IME (2-beolsik), desktop composer | `compositionend` precedes the Enter `keydown`, and that keydown reports `isComposing: false`, `keyCode: 13`. No guard signal is present. Full log and what it does and does not establish: `.github/audits/ime-enter-observation-2026-08-15.md` |
 
 ## Scope
 

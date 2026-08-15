@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { anonymiseAccountData } from "@/lib/accountDataAnonymisation";
 import { getUserChatUsageKey } from "@/lib/chatSecurity";
 import { enqueueImageAssetCleanupForConversations } from "@/lib/imageAssetLifecycle";
+import { deleteDeepResearchJobsForConversations } from "@/lib/deepResearchJobs";
 import { getStripe, isStripeConfigured } from "@/lib/stripe";
 import { revokeAllUserSessions } from "@/lib/sessionSecurity";
 
@@ -223,6 +224,11 @@ export async function deleteTomverseAccount(
       conversationIds,
       "account_deleted"
     );
+
+    // Not covered by any cascade: PerplexityAsyncJob names a conversationId
+    // but declares no relation, so deleting the conversations would leave the
+    // deep research reports behind with nothing pointing at them.
+    await deleteDeepResearchJobsForConversations(tx, conversationIds);
 
     await tx.conversation.deleteMany({
       where: { userId: user.id },

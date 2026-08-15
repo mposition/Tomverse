@@ -1187,6 +1187,11 @@ model PerplexityAsyncJob {
   updatedAt          DateTime  @updatedAt
 
   @@index([status, lastPolledAt])
+  // The retention sweep's clock. `updatedAt` moves on every poll and on
+  // finalization, so one column covers a finished job and one abandoned
+  // mid-flight -- and without an index the sweep is a sequential scan over a
+  // table that grows with every deep research request.
+  @@index([updatedAt])
 }
 
 model AppSetting {
