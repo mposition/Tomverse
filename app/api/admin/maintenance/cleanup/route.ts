@@ -37,6 +37,7 @@ async function dryRunCleanup() {
     requestLeases,
     creditReservations,
     emailLoginAttempts,
+    deepResearchJobs,
     providerErrorEvents,
     providerHealthChecks,
     providerProbeResults,
@@ -58,6 +59,9 @@ async function dryRunCleanup() {
       where: {
         expiresAt: { lt: retentionCutoff("emailLoginAttempts", now) },
       },
+    }),
+    prisma.perplexityAsyncJob.count({
+      where: { updatedAt: { lt: retentionCutoff("deepResearchJobs", now) } },
     }),
     prisma.providerErrorEvent.count({
       where: { createdAt: { lt: retentionCutoff("providerErrors", now) } },
@@ -107,6 +111,7 @@ async function dryRunCleanup() {
     requestLeases,
     creditReservations,
     emailLoginAttempts,
+    deepResearchJobs,
     providerErrorEvents,
     providerHealthChecks,
     providerProbeResults,

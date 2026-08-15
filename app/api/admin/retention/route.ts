@@ -49,6 +49,7 @@ export async function GET(req: Request) {
     const providerCheckCutoff = retentionCutoff("providerChecks", now);
     const providerErrorCutoff = retentionCutoff("providerErrors", now);
     const emailLoginCutoff = retentionCutoff("emailLoginAttempts", now);
+    const deepResearchCutoff = retentionCutoff("deepResearchJobs", now);
     const productAnalyticsCutoff = retentionCutoff("productAnalytics", now);
 
     const [
@@ -59,6 +60,7 @@ export async function GET(req: Request) {
       oldAuditLogs,
       oldNotificationLogs,
       oldEmailLoginAttempts,
+      oldDeepResearchJobs,
       oldProviderChecks,
       oldProviderErrors,
       oldProductAnalytics,
@@ -75,6 +77,7 @@ export async function GET(req: Request) {
       oldestAudit,
       oldestNotification,
       oldestEmailLoginAttempt,
+      oldestDeepResearchJob,
       oldestProviderCheck,
       oldestProviderError,
       oldestProductAnalytics,
@@ -105,6 +108,9 @@ export async function GET(req: Request) {
         // `expiresAt`, matching the sweep. Counting by `createdAt` would
         // report a number the cleanup does not take.
         where: { expiresAt: { lt: emailLoginCutoff } },
+      }),
+      prisma.perplexityAsyncJob.count({
+        where: { updatedAt: { lt: deepResearchCutoff } },
       }),
       prisma.providerHealthCheck.count({
         where: { createdAt: { lt: providerCheckCutoff } },
@@ -197,6 +203,12 @@ export async function GET(req: Request) {
           select: { expiresAt: true },
         })
         .then((row) => row?.expiresAt.toISOString() || null),
+      prisma.perplexityAsyncJob
+        .findFirst({
+          orderBy: { updatedAt: "asc" },
+          select: { updatedAt: true },
+        })
+        .then((row) => row?.updatedAt.toISOString() || null),
       oldestDate(
         () =>
           prisma.providerErrorEvent.findFirst({
@@ -232,6 +244,10 @@ export async function GET(req: Request) {
       emailLoginAttempts: {
         staleCount: oldEmailLoginAttempts,
         oldestAt: oldestEmailLoginAttempt,
+      },
+      deepResearchJobs: {
+        staleCount: oldDeepResearchJobs,
+        oldestAt: oldestDeepResearchJob,
       },
       providerChecks: {
         staleCount: oldProviderChecks,

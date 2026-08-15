@@ -112,6 +112,31 @@ export const RETENTION_POLICIES: readonly RetentionPolicy[] = [
         maintenanceStep: "notification_logs",
     },
     {
+        key: "deepResearchJobs",
+        label: "Deep research jobs",
+        // Measured from `updatedAt`, which moves on every poll and on
+        // finalization. That is one clock for two row shapes: a job that
+        // finished, and a job nobody ever polled again because the user closed
+        // the tab -- the second never reaches a terminal status, has no
+        // `completedAt`, and is the one that actually accumulates.
+        //
+        // 30 days, matching the operational diagnostics beside it, because
+        // that is what this row is. Its user-visible half is a *copy*: on
+        // completion `resultText` is written into `Message.content` in the same
+        // transaction, and the Message is what the product reads and what the
+        // user deletes. What the row still buys after that is a poll from a
+        // second tab and an operator answering "what happened to this
+        // request", and a poll 30 days after the last one is not a poll.
+        //
+        // The copy is also why this is not measured in months: a duplicate of
+        // personal data that nothing reads is the worst kind to keep.
+        policy:
+            "Delete deep research job records 30 days after their last update.",
+        action: "delete",
+        windowDays: 30,
+        maintenanceStep: "deep_research_jobs",
+    },
+    {
         key: "emailLoginAttempts",
         label: "Email login attempts",
         // Measured from `expiresAt`, not `createdAt`. The two are ten minutes

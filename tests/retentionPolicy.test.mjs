@@ -270,3 +270,72 @@ test("the window is shorter than every operational log policy", () => {
         );
     }
 });
+
+/**
+ * Deep research jobs: a row per Perplexity async request, holding a copy of
+ * the report and, when things go wrong, the error text.
+ *
+ * Two things were wrong with it, and only one is a retention question. The
+ * table had no policy, so it grew without limit -- and it has no relation to
+ * `Conversation` despite naming a `conversationId`, so no cascade reached it:
+ * deleting a conversation, or an entire account, left `resultText` behind as
+ * the only surviving copy of a report nothing pointed at any more.
+ */
+
+const ACCOUNT_DELETION = readFileSync("lib/accountDeletion.ts", "utf8");
+
+test("deep research jobs are swept by the clock that covers an abandoned one", () => {
+    const policy = retentionPolicy("deepResearchJobs");
+    assert.equal(policy.action, "delete");
+    assert.equal(policy.windowDays, 30);
+    assert.equal(policy.maintenanceStep, "deep_research_jobs");
+    assert.match(policy.policy, /30 days after their last update/);
+
+    // `updatedAt`, not `completedAt`. A job nobody polls again -- the user
+    // starts a deep research request and closes the tab -- never reaches a
+    // terminal status and never gets a `completedAt`, and that is precisely
+    // the row that accumulates. A `completedAt` sweep would cover only the
+    // rows that were already finished with.
+    assert.match(
+        MAINTENANCE,
+        /perplexityAsyncJob\.deleteMany\(\{\s*where: \{ updatedAt: \{ lt: retentionCutoff\("deepResearchJobs", now\) \} \},/
+    );
+    assert.ok(
+        !/perplexityAsyncJob\.deleteMany[\s\S]{0,200}completedAt/.test(MAINTENANCE),
+        "the sweep must not filter on completedAt"
+    );
+});
+
+test("the screen and the dry run measure deep research jobs the same way", () => {
+    for (const [name, source] of [
+        ["/admin/retention", RETENTION_ROUTE],
+        ["the cleanup dry run", CLEANUP_ROUTE],
+    ]) {
+        assert.match(source, /perplexityAsyncJob\.count\(/, name);
+        assert.match(source, /retentionCutoff\("deepResearchJobs", now\)/, name);
+    }
+});
+
+test("deleting a conversation takes its deep research jobs with it", () => {
+    // No cascade reaches this table, so each delete path has to say so. The
+    // retention sweep is not the answer here: the point of deleting an account
+    // is that the content goes when the user says so, not thirty days later on
+    // a cadence.
+    for (const path of [
+        "lib/accountDeletion.ts",
+        "app/api/conversations/[conversationId]/route.ts",
+        "app/api/conversations/route.ts",
+    ]) {
+        assert.match(
+            readFileSync(path, "utf8"),
+            /deleteDeepResearchJobsForConversations\(\s*tx,/,
+            `${path} removes the jobs inside the delete transaction`
+        );
+    }
+
+    // Inside the same transaction as the conversation delete, and before it.
+    // A failure between the two is the orphan this exists to prevent.
+    const jobs = ACCOUNT_DELETION.indexOf("deleteDeepResearchJobsForConversations");
+    const conversations = ACCOUNT_DELETION.indexOf("tx.conversation.deleteMany");
+    assert.ok(jobs > 0 && conversations > jobs);
+});

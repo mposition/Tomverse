@@ -414,6 +414,17 @@ export async function cleanupExpiredData() {
   // an invalidated one was superseded by a newer attempt, so neither outlives
   // the unconsumed row beside it -- and a carve-out here would keep exactly
   // the rows belonging to people who did sign in.
+  // One row per deep research request. Its user-visible half is a copy --
+  // `resultText` is written into `Message.content` in the same transaction that
+  // finalizes the job -- so what is kept here is an operational record, and the
+  // clock is `updatedAt` because a job nobody polls again never reaches a
+  // terminal status and would otherwise never be covered at all.
+  const deepResearchJobs = await step("deep_research_jobs", () =>
+    prisma.perplexityAsyncJob.deleteMany({
+      where: { updatedAt: { lt: retentionCutoff("deepResearchJobs", now) } },
+    })
+  );
+
   const emailLoginAttempts = await step("email_login_attempts", () =>
     prisma.emailLoginAttempt.deleteMany({
       where: { expiresAt: { lt: retentionCutoff("emailLoginAttempts", now) } },
@@ -643,6 +654,7 @@ export async function cleanupExpiredData() {
     sessions: sessions?.count ?? null,
     usageBuckets: usageBuckets === null ? null : Number(usageBuckets),
     requestLeases: requestLeases === null ? null : Number(requestLeases),
+    deepResearchJobs: deepResearchJobs?.count ?? null,
     emailLoginAttempts: emailLoginAttempts?.count ?? null,
     providerErrorEvents: providerErrorEvents?.count ?? null,
     providerHealthChecks: providerHealthChecks?.count ?? null,
