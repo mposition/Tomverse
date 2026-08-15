@@ -6,6 +6,7 @@ import {
     RELEASE_CHECKLIST_TEMPLATE,
     headerFields,
     isPlaceholderOwner,
+    releaseDeviationProblems,
     releaseRecordProblems,
     releaseTemplateProblems,
     waiverRows,
@@ -161,4 +162,49 @@ test("a record filename says which run it is", () => {
         releaseRecordProblems("release-2026-08-15__9424a4b.md", RECORD),
         []
     );
+});
+
+test("a deviation is a second kind of document, checked for different things", () => {
+    // A record says a checklist was run against a build. A deviation says
+    // production is serving a build no checklist covers. Demanding ticked
+    // boxes of the second would be asking it to claim the thing it exists to
+    // deny -- but it is matched, not ignored, because a pattern that skipped
+    // anything unlike a record would also skip a record somebody misnamed.
+    const good = `# Release deviation
+
+| SHA production serves | \`b0cf10e761053fd5f00c3cd6064edc41925e1898\` |
+| Rollback SHA | 851598eb8957342bc66d742596692961dbaec03f |
+`;
+    assert.deepEqual(
+        releaseDeviationProblems("release-deviation-2026-08-15__b0cf10e.md", good),
+        []
+    );
+
+    // The two things it cannot omit: which build is live, and what to go back
+    // to. A deviation that names neither describes a gap without locating it.
+    assert.match(
+        releaseDeviationProblems("release-deviation-2026-08-15__b0cf10e.md", "# Nothing here\nRollback: none named yet\n").join("\n"),
+        /names no full 40-character SHA/
+    );
+    assert.match(
+        releaseDeviationProblems(
+            "release-deviation-2026-08-15__b0cf10e.md",
+            "# x\nb0cf10e761053fd5f00c3cd6064edc41925e1898\n"
+        ).join("\n"),
+        /names no rollback target/
+    );
+});
+
+test("the shipped deviation record satisfies its own rules", () => {
+    const name = "release-deviation-2026-08-15__b0cf10e.md";
+    assert.deepEqual(
+        releaseDeviationProblems(
+            name,
+            readFileSync(`.github/audits/${name}`, "utf8")
+        ),
+        []
+    );
+    // And it is still refused as a *record*, which is what makes the split
+    // meaningful rather than a way of exempting a file from checking.
+    assert.ok(releaseRecordProblems(name, "x").length > 0);
 });

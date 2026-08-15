@@ -595,6 +595,51 @@ later.
       chargeback or refund dispute freezes, and how far the period extends
       into restorable backups
 
+## 7.9 Out-of-band changes to main
+
+Everything above assumes the build being released came through `develop` and
+was deployed to staging. A change merged straight to `main` skips that, and
+production deploys on the push -- so the deviation is already live by the time
+anyone writes it down.
+
+Routine dependency updates no longer arrive this way: `.github/dependabot.yml`
+sets `target-branch: develop`. **Dependabot security updates ignore that
+setting** and are raised against the default branch by design, which is the
+one case this section exists for -- an urgent fix should not queue behind a
+release train.
+
+It is an exception, not a lane. All six apply, and the first one is what makes
+it an exception at all:
+
+- [ ] **It is a security update**, named as one, with the advisory it fixes.
+      A version bump that merely arrived on `main` is not this; retarget it to
+      `develop`
+- [ ] **A person approved it** and recorded a staging waiver, because staging
+      is being skipped rather than passed
+- [ ] **The new release SHA is recorded** -- the merge commit production will
+      serve, not the PR head
+- [ ] **Verified beyond PR CI.** CI reaches no provider, no payment processor,
+      no database driver in anger and no object store; if the change touches
+      one, the check has to
+- [ ] **A rollback SHA is named**: the newest build a checklist actually covers
+- [ ] **The back-merge to `develop` is confirmed**, or the next release silently
+      reverts the fix
+
+```
+Advisory:           ____________________
+Approved by:        ____________________
+New release SHA:    ____________________
+Verified by / how:  ____________________
+Rollback SHA:       ____________________
+Back-merge run:     ____________________
+```
+
+**If any of the six is missing, the change is a deviation rather than a
+release**, and it is recorded as one at the time -- not deferred to the next
+release checklist, which covers a different SHA and cannot speak for this one.
+Write it to `.github/audits/release-deviation-<date>__<sha>.md`; the
+2026-08-15 record is the worked example.
+
 ## 8. Unverified items and waivers
 
 Anything above that could not be verified from this environment goes here with
