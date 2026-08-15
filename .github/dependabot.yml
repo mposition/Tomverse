@@ -41,6 +41,19 @@ updates:
       # supports ESLint 10. ESLint 9 stays eligible.
       - dependency-name: eslint
         versions: [">=10"]
+      # @types/node is not an ordinary dependency: its major tracks a Node
+      # runtime major, and describing a runtime we do not run is worse than
+      # describing an old one. Everything here is pinned to Node 22 --
+      # `engines.node` is "22.x", `.nvmrc` is 22.22.2, and every workflow sets
+      # `node-version: 22` -- so @types/node@26 would type the standard library
+      # as Node 26's. Code calling an API that only exists in 26 would
+      # typecheck, pass CI, and throw at runtime, which is the one failure mode
+      # a types package is supposed to make impossible.
+      #
+      # Raise this bound in the same change that raises the runtime, never on
+      # its own. 22.x patches and minors stay eligible.
+      - dependency-name: "@types/node"
+        versions: [">=23"]
     groups:
       production-dependencies:
         dependency-type: production

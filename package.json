@@ -162,7 +162,7 @@
     "eslint-config-next": "16.3.0",
     "js-tiktoken": "^1.0.21",
     "tailwindcss": "^4",
-    "tsx": "^4.23.8",
+    "tsx": "^4.23.12",
     "typescript": "^6",
     "vite": "^8.2.1",
     "yaml": "^2.9.0"
