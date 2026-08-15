@@ -3820,7 +3820,7 @@ export const reserveAttemptProviderBudget = async (input: {
     costIntent: Omit<AttemptCostIntent, "attemptIndex" | "reservedCostMicroUsd">;
 }): Promise<
     | { reserved: false; reason: "reservation_not_open" }
-    | { reserved: false; reason: "already_held" }
+    | { reserved: false; reason: "already_authorized" }
     | { reserved: false; reason: "budget_exhausted"; scope: string }
     | { reserved: true; entries: ReservationEntry[] }
 > => {
@@ -3859,34 +3859,7 @@ export const reserveAttemptProviderBudget = async (input: {
             throw new AttemptBudgetRefusal("reservation_not_open");
         }
         const canonical = deserializeReservation(durable.reservationPayload);
-        // Nothing to put in a bucket, but there is still something to
-        // authorize. The intent is written and the hold is not, which is
-        // exactly the shape acquisition leaves for a free primary.
-        //
-        // Refusing on the budget would be the other way to handle zero, and it
-        // is the wrong one: a call that reserves nothing consumes none of the
-        // budget the guardrail bounds, so there is nothing for it to refuse.
-        if (amount === 0) {
-            await tx.chatCreditReservation.update({
-                where: { id: durable.id },
-                data: {
-                    reservationPayload: serializeReservation({
-                        ...canonical,
-                        attemptCostIntents: [
-                            ...(canonical.attemptCostIntents ?? []).filter(
-                                (intent) => intent.attemptIndex !== input.attemptIndex
-                            ),
-                            {
-                                ...input.costIntent,
-                                attemptIndex: input.attemptIndex,
-                                reservedCostMicroUsd: 0,
-                            },
-                        ],
-                    }),
-                },
-            });
-            return { reserved: true as const, entries: [] };
-        }
+
         // A reservation written before `attemptHolds` existed carries its
         // primary hold only in `entries`. Adopting it as attempt 0's is not
         // bookkeeping: `serializeReservation` derives the provider entries
@@ -3894,6 +3867,9 @@ export const reserveAttemptProviderBudget = async (input: {
         // rebuild the entries from that hold alone and the primary's would
         // vanish -- leaving a hold in the bucket that nothing would ever
         // release.
+        //
+        // Before the duplicate check, not after: an adopted hold is an
+        // authorization this attempt has to be measured against too.
         const existing = canonical.attemptHolds ?? adoptLegacyProviderHolds(canonical);
         if (!canonical.attemptHolds && existing.length > 0) {
             // Adopted holds need adopted intents, or the payload fails its own
@@ -3914,10 +3890,55 @@ export const reserveAttemptProviderBudget = async (input: {
                 },
             ];
         }
-        if (existing.some((hold) => hold.attemptIndex === input.attemptIndex)) {
-            // A retry of this call, or two dispatches claiming one index.
-            // Either way the second must not add a hold nothing will release.
-            throw new AttemptBudgetRefusal("already_held");
+        const existingIntents = canonical.attemptCostIntents ?? [];
+
+        // Already authorized, by either half.
+        //
+        // Checking the holds alone was enough while a hold was the only thing
+        // an authorization produced. It stopped being enough the moment a zero
+        // authorization began writing an intent and no hold: a second zero
+        // call would find no hold, pass, and append a duplicate intent for one
+        // index -- which the payload validator refuses on the next read, so
+        // the reservation would stop being readable at all and its money would
+        // be stuck. A retry of this call, or two dispatches claiming one
+        // index, has to be refused whichever shape the first one left.
+        if (
+            existing.some((hold) => hold.attemptIndex === input.attemptIndex) ||
+            existingIntents.some(
+                (intent) => intent.attemptIndex === input.attemptIndex
+            )
+        ) {
+            throw new AttemptBudgetRefusal("already_authorized");
+        }
+
+        const authorized = (reservedCostMicroUsd: number): AttemptCostIntent[] => [
+            ...existingIntents,
+            {
+                ...input.costIntent,
+                attemptIndex: input.attemptIndex,
+                reservedCostMicroUsd,
+            },
+        ];
+
+        // Nothing to put in a bucket, but there is still something to
+        // authorize. The intent is written and the hold is not, which is
+        // exactly the shape acquisition leaves for a free primary.
+        //
+        // Refusing on the budget would be the other way to handle zero, and it
+        // is the wrong one: a call that reserves nothing consumes none of the
+        // budget the guardrail bounds, so there is nothing for it to refuse.
+        if (amount === 0) {
+            await tx.chatCreditReservation.update({
+                where: { id: durable.id },
+                data: {
+                    reservationPayload: serializeReservation({
+                        ...canonical,
+                        attemptHolds: existing,
+                        attemptCostIntents: authorized(0),
+                    }),
+                },
+            });
+            return { reserved: true as const, entries: [] };
         }
 
         const entries: ReservationEntry[] = [];
@@ -3964,14 +3985,7 @@ export const reserveAttemptProviderBudget = async (input: {
                 reservationPayload: serializeReservation({
                     ...canonical,
                     attemptHolds: holds,
-                    attemptCostIntents: [
-                        ...(canonical.attemptCostIntents ?? []),
-                        {
-                            ...input.costIntent,
-                            attemptIndex: input.attemptIndex,
-                            reservedCostMicroUsd: amount,
-                        },
-                    ],
+                    attemptCostIntents: authorized(amount),
                 }),
             },
         });
@@ -3979,7 +3993,7 @@ export const reserveAttemptProviderBudget = async (input: {
     }).catch((error) => {
         if (error instanceof AttemptBudgetRefusal) {
             return error.scope === "reservation_not_open" ||
-                error.scope === "already_held"
+                error.scope === "already_authorized"
                 ? { reserved: false as const, reason: error.scope }
                 : {
                       reserved: false as const,
@@ -4027,10 +4041,22 @@ export const releaseAttemptProviderBudget = async (input: {
 
             const canonical = deserializeReservation(durable.reservationPayload);
             const holds = canonical.attemptHolds ?? [];
+            const intents = canonical.attemptCostIntents ?? [];
             const mine = holds.filter(
                 (hold) => hold.attemptIndex === input.attemptIndex
             );
-            if (mine.length === 0) return false;
+            const hasIntent = intents.some(
+                (intent) => intent.attemptIndex === input.attemptIndex
+            );
+            // Both halves, because a zero authorization has only the second.
+            // Keying this on the holds alone left a free attempt's intent
+            // behind after its dispatch failed -- an authorization on the
+            // record for a preparation that was abandoned before it reached
+            // anything. What proves a request reached a provider is
+            // `RoutingAttempt.dispatchedAt` beside a finalized manifest; this
+            // is about undoing the authorization completely, which is what
+            // §6 asks of a preparation that failed.
+            if (mine.length === 0 && !hasIntent) return false;
 
             for (const hold of mine) {
                 await tx.$executeRaw`
@@ -4054,7 +4080,7 @@ export const releaseAttemptProviderBudget = async (input: {
                         // The intent goes with the hold. An intent left behind
                         // would let a sweep record a cost against budget that
                         // has already been given back.
-                        attemptCostIntents: (canonical.attemptCostIntents ?? []).filter(
+                        attemptCostIntents: intents.filter(
                             (intent) => intent.attemptIndex !== input.attemptIndex
                         ),
                     }),

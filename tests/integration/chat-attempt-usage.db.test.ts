@@ -558,6 +558,27 @@ const periodStarts = async () => ({
   ).periodStart,
 });
 
+const payloadIntents = async (reservationId: string) => {
+  const row = await prisma.chatCreditReservation.findUniqueOrThrow({
+    where: { id: reservationId },
+  });
+  return (
+    (row.reservationPayload as {
+      attemptCostIntents?: { attemptIndex: number; reservedCostMicroUsd: number }[];
+    }).attemptCostIntents ?? []
+  );
+};
+
+const payloadHolds = async (reservationId: string) => {
+  const row = await prisma.chatCreditReservation.findUniqueOrThrow({
+    where: { id: reservationId },
+  });
+  return (
+    (row.reservationPayload as { attemptHolds?: { attemptIndex: number }[] })
+      .attemptHolds ?? []
+  );
+};
+
 const payloadEntries = async (reservationId: string) => {
   const row = await prisma.chatCreditReservation.findUniqueOrThrow({
     where: { id: reservationId },
@@ -652,7 +673,7 @@ test("one attempt cannot hold the same budget twice", async () => {
     periodStarts: starts,
   });
   assert.equal(second.reserved, false);
-  assert.equal(second.reserved === false && second.reason, "already_held");
+  assert.equal(second.reserved === false && second.reason, "already_authorized");
   assert.equal(await bucket("provider:google", "provider-cost-day"), 500_000);
 });
 
@@ -1685,4 +1706,133 @@ test("a settlement that rolls back leaves no shadow sample claiming it settled",
     null,
     "a turn that did not settle must not appear in calibration as one that did"
   );
+});
+
+// One authorization per attempt, whichever shape it left behind.
+//
+// Checking the holds alone was enough while a hold was the only thing an
+// authorization produced. A zero authorization writes an intent and no hold,
+// so a second call would find no hold, pass, and append a duplicate intent --
+// which the payload validator refuses on the next read, leaving the
+// reservation unreadable and its money stuck.
+
+const zeroIntent = { ...fallbackIntent, inputUsdPerMillionTokens: 0, outputUsdPerMillionTokens: 0 };
+
+const reserveFallback = async (
+  reservationId: string,
+  userId: string | null,
+  reservedMicroUsd: number
+) =>
+  reserveAttemptProviderBudget({
+    reservationId,
+    userId,
+    attemptIndex: 1,
+    provider: "google",
+    costIntent: reservedMicroUsd === 0 ? zeroIntent : fallbackIntent,
+    reservedMicroUsd,
+    periodStarts: await periodStarts(),
+  });
+
+test("a positive authorization refuses a zero one for the same attempt", async () => {
+  const { acquired } = await twoAttemptRun();
+  const id = acquired.usageReservation.reservationId;
+  const userId = acquired.usageReservation.userId ?? null;
+
+  assert.equal((await reserveFallback(id, userId, 500_000)).reserved, true);
+  const second = await reserveFallback(id, userId, 0);
+  assert.equal(second.reserved, false);
+  assert.equal(second.reserved === false && second.reason, "already_authorized");
+  // And the payload still reads, which is the thing a duplicate would break.
+  await settleChatUsage(acquired.usageReservation, {
+    inputTokens: 10_000,
+    outputTokens: 10_000,
+    outcome: "completed",
+  });
+});
+
+test("a zero authorization refuses a second zero one for the same attempt", async () => {
+  const { acquired } = await twoAttemptRun();
+  const id = acquired.usageReservation.reservationId;
+  const userId = acquired.usageReservation.userId ?? null;
+
+  assert.equal((await reserveFallback(id, userId, 0)).reserved, true);
+  const second = await reserveFallback(id, userId, 0);
+  assert.equal(second.reserved === false && second.reason, "already_authorized");
+  const intents = await payloadIntents(id);
+  assert.equal(intents.filter((intent) => intent.attemptIndex === 1).length, 1);
+});
+
+test("a zero authorization refuses a positive one for the same attempt", async () => {
+  const { acquired } = await twoAttemptRun();
+  const id = acquired.usageReservation.reservationId;
+  const userId = acquired.usageReservation.userId ?? null;
+
+  assert.equal((await reserveFallback(id, userId, 0)).reserved, true);
+  const before = await bucket("provider:google", "provider-cost-day");
+  const second = await reserveFallback(id, userId, 500_000);
+  assert.equal(second.reserved === false && second.reason, "already_authorized");
+  assert.equal(
+    await bucket("provider:google", "provider-cost-day"),
+    before,
+    "a refused authorization takes no budget"
+  );
+});
+
+test("two concurrent zero authorizations, and only one wins", async () => {
+  const { acquired } = await twoAttemptRun();
+  const id = acquired.usageReservation.reservationId;
+  const userId = acquired.usageReservation.userId ?? null;
+
+  const [first, second] = await Promise.all([
+    reserveFallback(id, userId, 0),
+    reserveFallback(id, userId, 0),
+  ]);
+  assert.equal(
+    [first, second].filter((result) => result.reserved).length,
+    1,
+    "the advisory lock serialises them; the loser sees the winner's intent"
+  );
+  const intents = await payloadIntents(id);
+  assert.equal(intents.filter((intent) => intent.attemptIndex === 1).length, 1);
+});
+
+test("releasing a zero authorization removes the intent and moves no bucket", async () => {
+  const { acquired } = await twoAttemptRun();
+  const id = acquired.usageReservation.reservationId;
+  const userId = acquired.usageReservation.userId ?? null;
+  await reserveFallback(id, userId, 0);
+
+  const primaryDay = await bucket("provider:openai", "provider-cost-day");
+  assert.equal(
+    await releaseAttemptProviderBudget({ reservationId: id, userId, attemptIndex: 1 }),
+    true,
+    "something really changed, so the release says so"
+  );
+  assert.deepEqual(
+    (await payloadIntents(id)).map((intent) => intent.attemptIndex),
+    [0],
+    "the abandoned attempt's authorization is undone completely"
+  );
+  // The primary is untouched: its hold, its intent, its bucket.
+  assert.equal(await bucket("provider:openai", "provider-cost-day"), primaryDay);
+  const holds = await payloadHolds(id);
+  assert.equal(holds.filter((hold) => hold.attemptIndex === 0).length, 2);
+  assert.equal(await bucket("provider:google", "provider-cost-day"), 0);
+
+  // A second release changed nothing, and says so.
+  assert.equal(
+    await releaseAttemptProviderBudget({ reservationId: id, userId, attemptIndex: 1 }),
+    false
+  );
+
+  // And the reservation still settles, which a half-undone payload would not.
+  await settleChatUsage(acquired.usageReservation, {
+    inputTokens: 10_000,
+    outputTokens: 10_000,
+    outcome: "completed",
+  });
+  const durable = await prisma.chatCreditReservation.findUniqueOrThrow({
+    where: { id },
+  });
+  assert.equal(durable.status, "settled");
 });
