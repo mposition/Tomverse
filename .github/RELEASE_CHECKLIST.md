@@ -88,6 +88,10 @@ Date / timezone:    ____________________
       checklist still holds no results and every signed run record still
       hashes to what it was signed as. The previous shape kept an approval
       table inside the checklist, which could not say which commit it covered
+- [ ] `npm run check:release-records` -- proves this file still holds no
+      results and every recorded run names the build it covers, with an owner
+      for each box it left unticked. Written after a run reached a signed
+      state with its build unnamed and two owner cells reading `(이름)`
 - [ ] `npm run check:ui-tier-coverage` — proves the merge-blocking `@ui-risk`
       tier and the document that records it still describe the same set
 - [ ] `npm run check:release-gate-coverage` — proves this list still matches
