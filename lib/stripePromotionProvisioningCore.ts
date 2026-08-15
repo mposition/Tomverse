@@ -260,6 +260,37 @@ export type StripePromotionCodeFacts = {
   metadata?: Record<string, string | undefined> | null;
 };
 
+const idOf = (value: unknown): string | null => {
+  if (typeof value === "string") return value;
+  if (value && typeof value === "object") {
+    const id = (value as Record<string, unknown>).id;
+    if (typeof id === "string") return id;
+  }
+  return null;
+};
+
+/**
+ * The coupon id on a raw Stripe promotion code, wherever this API version keeps
+ * it.
+ *
+ * Recent API versions moved it from `promotion_code.coupon` to
+ * `promotion_code.promotion.coupon`. Reading only the old field yields
+ * `undefined`, which looks like "no coupon linked" and sends a perfectly
+ * healthy promotion down the conflict path.
+ *
+ * It lives here, in the pure layer, rather than beside the Stripe client
+ * because it is the extraction every caller has to agree on and it needs
+ * nothing but the object. An operator tool that reimplements it reads the
+ * legacy field alone and refuses a healthy pair -- which is how it got here.
+ */
+export const promotionCodeCouponId = (promotionCode: unknown): string | null => {
+  const record = (promotionCode ?? {}) as Record<string, unknown>;
+  const legacy = idOf(record.coupon);
+  if (legacy) return legacy;
+  const promotion = record.promotion as Record<string, unknown> | undefined;
+  return idOf(promotion?.coupon);
+};
+
 /**
  * Mismatch reasons are split into two severities because "is this object ours"
  * and "can this object still be charged" are different questions.

@@ -17,6 +17,7 @@ import {
   fatalMismatches,
   isMissingResourceStripeError,
   isRetryableStripeError,
+  promotionCodeCouponId,
   promotionCodeIdempotencyKey,
   promotionCodeMismatches,
   promotionCouponIdempotencyKey,
@@ -97,34 +98,6 @@ const couponFacts = (coupon: Stripe.Coupon): StripeCouponFacts => ({
   metadata: coupon.metadata ?? null,
   appliesToProducts: coupon.applies_to?.products ?? null,
 });
-
-/**
- * The coupon id, wherever this SDK version keeps it.
- *
- * Recent API versions moved it from `promotion_code.coupon` to
- * `promotion_code.promotion.coupon`. Reading only the old field yields
- * `undefined`, which would look like "no coupon linked" and send a perfectly
- * healthy promotion down the conflict path.
- */
-const promotionCodeCouponId = (
-  promotionCode: Stripe.PromotionCode
-): string | null => {
-  const record = promotionCode as unknown as Record<string, unknown>;
-  const legacy = record.coupon;
-  if (typeof legacy === "string") return legacy;
-  if (legacy && typeof legacy === "object") {
-    const id = (legacy as Record<string, unknown>).id;
-    if (typeof id === "string") return id;
-  }
-  const promotion = record.promotion as Record<string, unknown> | undefined;
-  const coupon = promotion?.coupon;
-  if (typeof coupon === "string") return coupon;
-  if (coupon && typeof coupon === "object") {
-    const id = (coupon as Record<string, unknown>).id;
-    if (typeof id === "string") return id;
-  }
-  return null;
-};
 
 const promotionCodeFacts = (
   promotionCode: Stripe.PromotionCode
@@ -636,6 +609,19 @@ export type PromotionLinkageReport = {
     mismatches: string[];
     adoptable: boolean;
   }[];
+  /**
+   * Whether the exact-code search actually ran.
+   *
+   * A healthy linkage returns before searching, because nothing downstream of
+   * `ensureStripePromotionDiscount`'s linked path would consult a candidate.
+   * That leaves `exactCodeCandidates` empty for two opposite reasons -- "Stripe
+   * holds no object under this code" and "we did not look, because the object
+   * we already hold works" -- and a reader that cannot tell them apart reports
+   * the healthy case as `no_stripe_object_for_code`. Which is what the Admin
+   * panel did, on a promotion that had just been repaired and was serving
+   * checkouts.
+   */
+  exactCodeSearchPerformed: boolean;
   recommendation:
     | "healthy"
     | "relink_stored_object"
@@ -679,6 +665,7 @@ export async function inspectStripePromotionLinkage({
     storedPromotionCodeExists: false,
     storedPromotionCodeMismatches: [],
     exactCodeCandidates: [],
+    exactCodeSearchPerformed: false,
     recommendation: "manual_review",
   };
 
@@ -738,6 +725,7 @@ export async function inspectStripePromotionLinkage({
     stripe,
     promotion.code
   );
+  report.exactCodeSearchPerformed = true;
   for (const candidate of candidates) {
     const { mismatches } = await evaluate(candidate);
     report.exactCodeCandidates.push({

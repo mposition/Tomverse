@@ -611,11 +611,52 @@ async function handleSubscriptionDeleted(
   });
 }
 
+/**
+ * A checkout the customer walked away from.
+ *
+ * Only the promotion lease is touched: an expired Session redeemed nothing, so
+ * there is no subscription to sync and no redemption to record. Without this the
+ * lease sits for its full 31-minute TTL and the customer is told "A checkout
+ * using this promotion is already in progress" when they try the other plan --
+ * a lock held on behalf of an attempt Stripe has already closed.
+ *
+ * The release is conditional on the lease predating this Session, because a
+ * redelivered webhook must not free a lease a later attempt is relying on.
+ */
+async function handleCheckoutExpired(session: Stripe.Checkout.Session) {
+  const promotionId = session.metadata?.promotionId || null;
+  const userId =
+    session.client_reference_id ||
+    (typeof session.metadata?.userId === "string"
+      ? session.metadata.userId
+      : null);
+  if (!promotionId || !userId) return;
+  if (typeof session.created !== "number") {
+    // Without the Session's own creation time there is no way to tell this
+    // lease from a later attempt's, and holding one for its TTL is the
+    // behaviour this handler improves on rather than a failure.
+    return;
+  }
+  await releasePromotionCheckout(promotionId, userId, {
+    takenAtOrBefore: new Date(session.created * 1000),
+  }).catch((error) => {
+    console.error("Promotion checkout lease release failed.", {
+      stripeCheckoutSessionId: session.id,
+      promotionId,
+      trigger: "checkout.session.expired",
+      errorName: error instanceof Error ? error.name : "UnknownError",
+    });
+  });
+}
+
 export async function processStripeEvent(event: Stripe.Event) {
   switch (event.type) {
     case "checkout.session.completed":
     case "checkout.session.async_payment_succeeded":
       await handleCheckoutCompleted(event.data.object as Stripe.Checkout.Session);
+      break;
+    case "checkout.session.expired":
+      await handleCheckoutExpired(event.data.object as Stripe.Checkout.Session);
       break;
     case "charge.refunded":
       await handleCreditPackRefund(event.data.object as Stripe.Charge);
