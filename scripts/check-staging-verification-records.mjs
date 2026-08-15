@@ -32,6 +32,7 @@ import { join } from "node:path";
 
 import { STAGING_VERIFICATION_FEATURES } from "./staging-verification-features.mjs";
 import {
+  formalRunProblems,
   frontMatter,
   normalizeLineEndings,
   recordDigest,
@@ -170,6 +171,8 @@ for (const name of entries) {
       );
     }
   }
+
+  problems.push(...formalRunProblems(fields, path));
 
   if (fields.get("frozen") !== "true") continue;
   frozen += 1;

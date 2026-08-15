@@ -1,5 +1,12 @@
 # Release deviation — 2026-08-15, `b0cf10e`
 
+> **Superseded on "what production serves".** Later the same day `391c933`
+> was merged to `main` and deployed, so the row below naming `b0cf10e` as the
+> served SHA is no longer current — see
+> `.github/audits/release-deviation-2026-08-15__391c933.md`. Everything else
+> here still holds: `b0cf10e` remains unverified, it is contained in the build
+> now running, and the rollback target is still `851598eb`.
+
 **Production is running a build that no release checklist covers.** This
 records that, rather than leaving it to be noticed at the next release or
 answered by pointing at a checklist run for a different SHA.
