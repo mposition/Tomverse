@@ -128,6 +128,19 @@ test("the script refuses to stamp anything the database is not already linked to
   assert.equal(source.includes("promotionCodes.list"), false);
 });
 
+test("the script reads a promotion code's coupon through the shared helper", () => {
+  // It hand-rolled `promotionCode.coupon?.id` once, which reads only the field
+  // recent API versions moved away from. Against production that yielded no
+  // coupon id at all, and the pair guard refused a healthy pair with
+  // "attached to coupon -". The extraction has one home for exactly this
+  // reason; a second copy is a second chance to read the wrong field.
+  const source = readFileSync(SCRIPT, "utf8");
+  assert.match(source, /promotionCodeCouponId\(promotionCode\)/);
+  assert.match(source, /promotionCodeCouponId\(codeObject\)/);
+  assert.equal(/\.coupon\s*===\s*"string"/.test(source), false);
+  assert.equal(/\.coupon\?\.id/.test(source), false);
+});
+
 test("a snapshot is written before any update under --apply", () => {
   const source = readFileSync(SCRIPT, "utf8");
   const snapshotAt = source.indexOf("writeFileSync(snapshotPath");
