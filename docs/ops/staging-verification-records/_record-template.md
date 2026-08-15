@@ -1,7 +1,7 @@
 ---
 record: staging-verification
 checklist: docs/ops/external-import-staging-checklist.md
-templateRevision: 2026-08-14b
+templateRevision: 2026-08-14c
 environment:
 deploySha:
 startedAtUtc:
@@ -21,7 +21,7 @@ digest:
 |---|---|
 | 환경 | staging / production / 기타 |
 | 배포 SHA (전체 40자리) | |
-| template revision | 2026-08-14b |
+| template revision | 2026-08-14c |
 | 시작 (UTC) | |
 | 종료 (UTC) | |
 | 실행자 | |
