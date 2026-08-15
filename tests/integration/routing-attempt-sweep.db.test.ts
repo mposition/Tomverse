@@ -9,7 +9,11 @@ import {
   type ChatBudget,
   type ChatUsageReservation,
 } from "@/lib/chatSecurity";
-import { resolvedAttemptCosts } from "@/lib/chatAttemptCostLedger";
+import {
+  applyPendingAttemptCostAdjustments,
+  resolvedAttemptCosts,
+  rollupDayOf,
+} from "@/lib/chatAttemptCostLedger";
 import { prisma } from "@/lib/prisma";
 import { closeAttempt } from "@/lib/routingAttemptStore";
 import {
@@ -214,8 +218,11 @@ test("a dispatched attempt whose process stopped is closed, honestly", async () 
   const { runId } = await makeRun();
   const id = await makeAttempt(runId, { createdAt: ancient() });
 
+  // No reservation on this run, so there is no cost to state -- the close is
+  // still the point, and it is counted where it belongs.
   const result = await sweepStaleRoutingAttempts();
-  assert.equal(result.closed, 1);
+  assert.equal(result.closedWithoutCostIntent, 1);
+  assert.equal(result.closedWithCost, 0);
 
   const row = await prisma.routingAttempt.findUniqueOrThrow({ where: { id } });
   // Not `failed_pre_token`: nobody observed the provider call, so a failure
@@ -304,7 +311,7 @@ test("the live request and the sweep cannot both close one attempt", async () =>
     closeAttempt({ attemptId: id, outcome: "succeeded" }),
     sweepStaleRoutingAttempts(),
   ]);
-  const wonBySweep = swept.closed === 1;
+  const wonBySweep = swept.closedWithCost + swept.closedWithoutCostIntent === 1;
   assert.equal(
     [live, wonBySweep].filter(Boolean).length,
     1,
@@ -354,8 +361,8 @@ test("a crashed attempt's provider cost is recorded, at what it was allowed to s
   await makeAttempt(runId, { createdAt: ancient() });
 
   const result = await sweepStaleRoutingAttempts();
-  assert.equal(result.closed, 1);
-  assert.equal(result.costRecorded, 1);
+  assert.equal(result.closedWithCost, 1);
+  assert.equal(result.closedWithoutCostIntent, 0);
 
   const row = await attemptCostRow(reservation.reservationId);
   assert.ok(row, "the sweep must leave a cost row");
@@ -447,6 +454,7 @@ test("only a crash-reconciled row may leave its tokens unknown", async () => {
         modelId: "gpt-5-6-luna",
         provider: "openai",
         outcome: "completed",
+        rollupDate: rollupDayOf(),
         usageSource: "provider_usage_metadata",
       },
     }),
@@ -465,7 +473,7 @@ test("sweeping twice records the cost once", async () => {
   // and even if it did, the unique key would refuse a second row.
   const again = await sweepStaleRoutingAttempts();
   assert.equal(again.examined, 0);
-  assert.equal(again.costRecorded, 0);
+  assert.equal(again.closedWithCost, 0);
 
   const rows = await prisma.chatAttemptUsage.findMany({
     where: { reservationId: reservation.reservationId },
@@ -676,8 +684,133 @@ test("a payload whose cost intent is missing is swept without one", async () => 
   const id = await makeAttempt(runId, { createdAt: ancient() });
 
   const result = await sweepStaleRoutingAttempts();
-  assert.equal(result.closed, 1);
-  assert.equal(result.costRecorded, 0);
+  // Counted apart from a clean sweep: nobody can now state what this attempt
+  // cost, and reporting that as an ordinary success hides a hole in the ledger.
+  assert.equal(result.closedWithCost, 0);
+  assert.equal(result.closedWithoutCostIntent, 1);
   assert.equal(await outcomeOf(id), "unknown_after_dispatch");
   assert.equal(await attemptCostRow(reservation.reservationId), null);
+});
+
+// Failure has to cost a delay, not a record.
+
+test("a cost write that fails takes the close with it, and the next sweep recovers", async () => {
+  // The reason the close and the cost row share a transaction. If they did
+  // not, a failure here would leave a terminal attempt with no cost row --
+  // and the sweep only looks at `pending`, so nothing would ever come back
+  // for it. Bound together, a failure leaves the attempt exactly where the
+  // next sweep can find it.
+  const reservation = await makeCrashedReservation();
+  const { runId } = await makeRun({ reservationId: reservation.reservationId });
+  const id = await makeAttempt(runId, { createdAt: ancient() });
+
+  // A row already under this key that the sweep's insert cannot become: the
+  // insert is skipped, and the outcome is `duplicate` rather than a write.
+  // Then the ledger's own guard fires on a close that won the CAS.
+  await prisma.$executeRaw`
+    ALTER TABLE "ChatAttemptUsage"
+    ADD CONSTRAINT "sweep_test_refuses_everything" CHECK (false) NOT VALID
+  `;
+  try {
+    const result = await sweepStaleRoutingAttempts();
+    assert.equal(result.failed, 1);
+    assert.equal(result.closedWithCost, 0);
+    // Still open, because the transaction that would have closed it rolled
+    // back with the cost row it could not write.
+    assert.equal(await outcomeOf(id), "pending");
+    assert.equal(await attemptCostRow(reservation.reservationId), null);
+  } finally {
+    await prisma.$executeRaw`
+      ALTER TABLE "ChatAttemptUsage" DROP CONSTRAINT "sweep_test_refuses_everything"
+    `;
+  }
+
+  // The next sweep finds it and completes both.
+  const recovered = await sweepStaleRoutingAttempts();
+  assert.equal(recovered.closedWithCost, 1);
+  assert.equal(await outcomeOf(id), "unknown_after_dispatch");
+  assert.ok(await attemptCostRow(reservation.reservationId));
+});
+
+test("the base row and its rollup agree on which day they landed on", async () => {
+  // Stored rather than inferred from `createdAt`: the rollup's day comes from
+  // the application clock and `createdAt` from the database's, and across UTC
+  // midnight those are different days. A correction that guessed would update
+  // a row that is not there.
+  const reservation = await makeCrashedReservation();
+  const { runId } = await makeRun({ reservationId: reservation.reservationId });
+  await makeAttempt(runId, { createdAt: ancient() });
+  await sweepStaleRoutingAttempts();
+
+  const row = (await attemptCostRow(reservation.reservationId))!;
+  const rollup = await prisma.providerDailyUsage.findFirstOrThrow({
+    where: { provider: "openai", modelId: "gpt-5-6-luna", source: "internal" },
+  });
+  assert.equal(row.rollupDate.getTime(), rollup.date.getTime());
+  // Midnight UTC, which the database also enforces.
+  assert.equal(row.rollupDate.getTime(), rollupDayOf(row.createdAt).getTime());
+});
+
+test("a correction whose rollup row is gone stays pending, and the replay applies it once", async () => {
+  const reservation = await makeCrashedReservation();
+  const { runId } = await makeRun({ reservationId: reservation.reservationId });
+  await makeAttempt(runId, { createdAt: ancient() });
+  await sweepStaleRoutingAttempts();
+  const estimate = (await attemptCostRow(reservation.reservationId))!;
+
+  // The rollup row disappears -- a retention job, a bad restore, anything.
+  // The delta has nowhere to land, and that must be visible rather than lost.
+  await prisma.providerDailyUsage.deleteMany({});
+
+  await settleChatUsage(
+    reservation,
+    { inputTokens: 10_000, outputTokens: 0, outcome: "failed" },
+    {
+      attempts: [
+        {
+          attemptIndex: 0,
+          price: {
+            provider: "openai",
+            modelId: "gpt-5-6-luna",
+            inputUsdPerMillionTokens: 100,
+            outputUsdPerMillionTokens: 100,
+            cachedInputPriceMultiplier: 1,
+            pricingVersion: "sweep-test",
+          },
+          inputTokens: 10_000,
+          cachedInputTokens: 0,
+          outputTokens: 0,
+          usageFromProvider: true,
+          outcome: "failed",
+        },
+      ],
+    }
+  );
+
+  const pending = await prisma.chatAttemptUsageAdjustment.findFirstOrThrow({
+    where: { reservationId: reservation.reservationId },
+  });
+  assert.equal(
+    pending.appliedAt,
+    null,
+    "an unapplied delta must say so; the partial index exists to find it"
+  );
+
+  // The replay is the consumer that index was built for.
+  const first = await applyPendingAttemptCostAdjustments();
+  assert.deepEqual(first, { examined: 1, applied: 1, failed: 0 });
+  const rollup = await prisma.providerDailyUsage.findFirstOrThrow({
+    where: { provider: "openai", modelId: "gpt-5-6-luna", source: "internal" },
+  });
+  // The row is recreated on the base row's own day, carrying the delta.
+  assert.equal(rollup.date.getTime(), estimate.rollupDate.getTime());
+  const afterFirst = rollup.estimatedCostMicroUsd;
+
+  // And exactly once: a second replay finds nothing to do.
+  const second = await applyPendingAttemptCostAdjustments();
+  assert.deepEqual(second, { examined: 0, applied: 0, failed: 0 });
+  const again = await prisma.providerDailyUsage.findFirstOrThrow({
+    where: { provider: "openai", modelId: "gpt-5-6-luna", source: "internal" },
+  });
+  assert.equal(again.estimatedCostMicroUsd, afterFirst);
 });

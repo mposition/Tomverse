@@ -65,31 +65,80 @@ export const boundedProviderIdentifier = (value: string | null | undefined) => {
  * that read this ledger have to separate measured spend from estimated spend,
  * and a provenance nobody can filter on is a provenance nobody uses.
  */
-export const attemptUsageSource = (attempt: PricedAttempt) =>
-    attempt.costSource === "provider_response"
-        ? "provider_response_cost"
-        : attempt.usageFromProvider
-          ? "provider_usage_metadata"
-          : "fallback_estimator";
+export const attemptUsageSource = (attempt: LedgerAttempt) =>
+    attempt.costSource === "reserved_upper_bound"
+        ? "crash_reconciliation"
+        : attempt.costSource === "provider_response"
+          ? "provider_response_cost"
+          : attempt.usageFromProvider
+            ? "provider_usage_metadata"
+            : "fallback_estimator";
 
 /** Cached input can never exceed input; providers occasionally say otherwise. */
-const cachedInputTokensOf = (attempt: PricedAttempt) =>
+const cachedInputTokensOf = (attempt: LedgerAttempt) =>
     Math.min(attempt.inputTokens, attempt.cachedInputTokens);
+
+/**
+ * An attempt as this ledger accepts it.
+ *
+ * Two values wider than `PricedAttempt`, and both belong to the sweep alone:
+ * an outcome nobody observed, and a cost nobody measured. They are deliberately
+ * *not* added to `PricedAttempt` -- that type feeds `combineAttemptUsage`,
+ * where "which attempt does the user pay for" is decided, and an attempt whose
+ * outcome is unknown must never be a candidate for that answer.
+ */
+export type LedgerAttempt = Omit<PricedAttempt, "outcome" | "costSource"> & {
+    outcome: PricedAttempt["outcome"] | "unknown_after_dispatch";
+    costSource: PricedAttempt["costSource"] | "reserved_upper_bound";
+};
 
 export type AttemptCostOutcome =
     /** This call wrote the row and moved the rollup. */
     | "inserted"
     /** A crash-reconciled estimate was here; the real usage was appended. */
     | "corrected"
+    /**
+     * The correction was appended and the rollup row it belongs to was not
+     * there to receive it.
+     *
+     * Distinct from `corrected` because the two are not the same state and
+     * reporting them as one is how a lost delta stays lost. The adjustment
+     * keeps `appliedAt` NULL, which is what
+     * `applyPendingAttemptCostAdjustments` looks for.
+     */
+    | "adjustment_pending"
     /** Somebody already recorded this attempt with equal standing. */
     | "duplicate";
 
 export type AttemptCostRecord = {
     reservationId: string;
-    attempt: PricedAttempt;
+    attempt: LedgerAttempt;
     /** Merged into `pricingSnapshot` beside the rates, for attribution. */
     snapshot?: Record<string, unknown>;
+    /**
+     * The `ProviderDailyUsage` day this row belongs to.
+     *
+     * Passed rather than read from a clock here so the caller can give the
+     * row and its rollup one value. Defaults to today at midnight UTC.
+     */
+    rollupDate?: Date;
+    /**
+     * Nobody counted this call's tokens, so the row records none.
+     *
+     * NULL rather than 0, which would be a measurement. The cost still stands:
+     * the money was committed, and that is a different kind of claim from a
+     * token count nobody took. The rollup takes the cost with a zero split for
+     * the same reason -- apportioning it would be inventing three numbers to
+     * make one look complete.
+     */
+    unknownTokens?: boolean;
 };
+
+/** Midnight UTC, matching `ProviderDailyUsage.date`. */
+export const rollupDayOf = (at = new Date()) =>
+    new Date(
+        Date.UTC(at.getUTCFullYear(), at.getUTCMonth(), at.getUTCDate())
+    );
 
 /**
  * One attempt's cost row and its rollup, in the caller's transaction.
@@ -102,9 +151,18 @@ export type AttemptCostRecord = {
  */
 export const recordAttemptCost = async (
     tx: Prisma.TransactionClient,
-    { reservationId, attempt, snapshot }: AttemptCostRecord
+    {
+        reservationId,
+        attempt,
+        snapshot,
+        rollupDate,
+        unknownTokens,
+    }: AttemptCostRecord
 ): Promise<AttemptCostOutcome> => {
     const cachedInputTokens = cachedInputTokensOf(attempt);
+    // One value for the row and its rollup. Read once, here, so the two
+    // cannot land on different days when a turn settles across midnight.
+    const day = rollupDate ?? rollupDayOf();
     const written = await tx.chatAttemptUsage.createMany({
         skipDuplicates: true,
         data: [
@@ -120,15 +178,17 @@ export const recordAttemptCost = async (
                 providerResponseId: boundedProviderIdentifier(
                     attempt.providerResponseId
                 ),
-                inputTokens: attempt.inputTokens,
-                cachedInputTokens,
-                outputTokens: attempt.outputTokens,
-                reasoningTokens: Number.isSafeInteger(attempt.reasoningTokens)
-                    ? Math.max(0, attempt.reasoningTokens!)
-                    : null,
+                inputTokens: unknownTokens ? null : attempt.inputTokens,
+                cachedInputTokens: unknownTokens ? null : cachedInputTokens,
+                outputTokens: unknownTokens ? null : attempt.outputTokens,
+                reasoningTokens:
+                    !unknownTokens && Number.isSafeInteger(attempt.reasoningTokens)
+                        ? Math.max(0, attempt.reasoningTokens!)
+                        : null,
                 costMicroUsd: BigInt(attempt.costMicroUsd),
                 usageSource: attemptUsageSource(attempt),
                 costSource: attempt.costSource,
+                rollupDate: day,
                 pricingSnapshot: {
                     ...attempt.price,
                     costSource: attempt.costSource,
@@ -152,21 +212,30 @@ export const recordAttemptCost = async (
         return "inserted";
     }
 
-    const breakdown = calculateProviderUsageCost({
-        inputTokens: attempt.inputTokens,
-        cachedInputTokens: attempt.cachedInputTokens,
-        outputTokens: attempt.outputTokens,
-        inputUsdPerMillionTokens: attempt.price.inputUsdPerMillionTokens,
-        outputUsdPerMillionTokens: attempt.price.outputUsdPerMillionTokens,
-        cachedInputPriceMultiplier: attempt.price.cachedInputPriceMultiplier,
-    });
+    const breakdown =
+        (unknownTokens
+            ? {
+                  uncachedInputCostMicroUsd: 0,
+                  cachedInputCostMicroUsd: 0,
+                  outputCostMicroUsd: 0,
+              }
+            : null) ??
+        calculateProviderUsageCost({
+            inputTokens: attempt.inputTokens,
+            cachedInputTokens: attempt.cachedInputTokens,
+            outputTokens: attempt.outputTokens,
+            inputUsdPerMillionTokens: attempt.price.inputUsdPerMillionTokens,
+            outputUsdPerMillionTokens: attempt.price.outputUsdPerMillionTokens,
+            cachedInputPriceMultiplier: attempt.price.cachedInputPriceMultiplier,
+        });
     await recordInternalProviderUsage({
         client: tx,
+        date: day,
         provider: attempt.price.provider,
         modelId: attempt.price.modelId,
-        inputTokens: attempt.inputTokens,
-        cachedInputTokens,
-        outputTokens: attempt.outputTokens,
+        inputTokens: unknownTokens ? 0 : attempt.inputTokens,
+        cachedInputTokens: unknownTokens ? 0 : cachedInputTokens,
+        outputTokens: unknownTokens ? 0 : attempt.outputTokens,
         estimatedCostMicroUsd: attempt.costMicroUsd,
         uncachedInputCostMicroUsd: breakdown.uncachedInputCostMicroUsd,
         cachedInputCostMicroUsd: breakdown.cachedInputCostMicroUsd,
@@ -225,46 +294,189 @@ const correctExistingAttemptCost = async (
                 providerRequestId: boundedProviderIdentifier(
                     attempt.providerRequestId
                 ),
-                appliedAt: new Date(),
+                // Unapplied until the rollup has actually taken it. Claiming
+                // otherwise would make `ChatAttemptUsageAdjustment_unapplied_idx`
+                // -- an index whose entire purpose is finding deltas the rollup
+                // never received -- structurally unable to find one.
+                appliedAt: null,
             },
         ],
     });
+    if (appended.count !== 1) return "duplicate";
 
-    if (appended.count === 1) {
-        // The difference, in the same transaction as the adjustment that
-        // justifies it. Written against the day the estimate landed on, so
-        // the correction reaches the row it corrects rather than today's.
-        //
-        // The tokens are added rather than adjusted: the row this corrects was
-        // written by the sweep, which knew the money and not the split, so it
-        // contributed zero tokens. `requestCount` is deliberately untouched --
-        // the call was counted when it was recorded, and learning what it used
-        // does not make it a second call.
-        await tx.$executeRaw`
-            UPDATE "ProviderDailyUsage"
-            SET "estimatedCostMicroUsd" =
-                    GREATEST(0, "estimatedCostMicroUsd" + ${delta}),
-                "inputTokens" = "inputTokens" + ${attempt.inputTokens},
-                "cachedInputTokens" = "cachedInputTokens" + ${cachedInputTokensOf(attempt)},
-                "outputTokens" = "outputTokens" + ${attempt.outputTokens},
-                "updatedAt" = NOW()
-            WHERE "provider" = ${attempt.price.provider}
-              AND "modelId" = ${attempt.price.modelId}
-              AND "source" = 'internal'
-              AND "date" = DATE_TRUNC('day', ${existing.createdAt}::timestamp)
-        `;
+    // The difference, in the same transaction as the adjustment that
+    // justifies it, against the day the base row recorded as its own.
+    //
+    // An UPDATE and not an upsert: this delta belongs to the rollup row the
+    // base row already moved, and a row that is not there is an anomaly to
+    // surface rather than a row to invent. `applyPendingAttemptCostAdjustments`
+    // is the path that repairs it, and it is the one allowed to create.
+    const moved = await applyAdjustmentDelta(tx, {
+        provider: attempt.price.provider,
+        modelId: attempt.price.modelId,
+        rollupDate: existing.rollupDate,
+        costDeltaMicroUsd: delta,
+        inputTokens: attempt.inputTokens,
+        cachedInputTokens: cachedInputTokensOf(attempt),
+        outputTokens: attempt.outputTokens,
+        create: false,
+    });
+
+    if (moved) {
+        await tx.chatAttemptUsageAdjustment.updateMany({
+            where: {
+                reservationId,
+                attemptIndex: attempt.attemptIndex,
+                observationId,
+                appliedAt: null,
+            },
+            data: { appliedAt: new Date() },
+        });
     }
 
     console.warn(
         JSON.stringify({
-            event: "chat_attempt_usage_corrected",
+            event: moved
+                ? "chat_attempt_usage_corrected"
+                : "chat_attempt_usage_correction_pending",
             reservationId,
             attemptIndex: attempt.attemptIndex,
             costDeltaMicroUsd: delta.toString(),
-            appended: appended.count === 1,
         })
     );
-    return appended.count === 1 ? "corrected" : "duplicate";
+    return moved ? "corrected" : "adjustment_pending";
+};
+
+/**
+ * Moves one adjustment's delta into the rollup it belongs to.
+ *
+ * `create: false` refuses to invent the row -- the base cost row already moved
+ * it, so its absence means something is wrong and the caller records that.
+ * `create: true` is the repair path, where the row's absence is the thing
+ * being repaired and a missing row must not block the delta for ever.
+ *
+ * Token counts are added rather than adjusted: the row a correction targets
+ * was written by the sweep, which knew the money and not the split, so it
+ * contributed none. `requestCount` is untouched -- the call was counted when
+ * it was recorded, and learning what it used does not make it a second call.
+ */
+const applyAdjustmentDelta = async (
+    tx: Prisma.TransactionClient,
+    input: {
+        provider: string;
+        modelId: string;
+        rollupDate: Date;
+        costDeltaMicroUsd: bigint;
+        inputTokens: number;
+        cachedInputTokens: number;
+        outputTokens: number;
+        create: boolean;
+    }
+): Promise<boolean> => {
+    const delta = Number(input.costDeltaMicroUsd);
+    if (!input.create) {
+        const rows = await tx.$executeRaw`
+            UPDATE "ProviderDailyUsage"
+            SET "estimatedCostMicroUsd" =
+                    GREATEST(0, "estimatedCostMicroUsd" + ${delta}),
+                "inputTokens" = "inputTokens" + ${input.inputTokens},
+                "cachedInputTokens" = "cachedInputTokens" + ${input.cachedInputTokens},
+                "outputTokens" = "outputTokens" + ${input.outputTokens},
+                "updatedAt" = NOW()
+            WHERE "provider" = ${input.provider}
+              AND "modelId" = ${input.modelId}
+              AND "source" = 'internal'
+              AND "date" = ${input.rollupDate}
+        `;
+        return rows === 1;
+    }
+    await tx.$executeRaw`
+        INSERT INTO "ProviderDailyUsage" (
+            "id", "provider", "modelId", "source", "date",
+            "requestCount", "inputTokens", "cachedInputTokens", "outputTokens",
+            "estimatedCostMicroUsd", "uncachedInputCostMicroUsd",
+            "cachedInputCostMicroUsd", "outputCostMicroUsd",
+            "createdAt", "updatedAt"
+        )
+        VALUES (
+            ${`pdu_${input.provider}_${input.modelId}_${input.rollupDate.toISOString()}`},
+            ${input.provider}, ${input.modelId}, 'internal', ${input.rollupDate},
+            0, ${input.inputTokens}, ${input.cachedInputTokens}, ${input.outputTokens},
+            GREATEST(0, ${delta}), 0, 0, 0,
+            NOW(), NOW()
+        )
+        ON CONFLICT ("provider", "modelId", "source", "date")
+        DO UPDATE SET
+            "estimatedCostMicroUsd" =
+                GREATEST(0, "ProviderDailyUsage"."estimatedCostMicroUsd" + ${delta}),
+            "inputTokens" = "ProviderDailyUsage"."inputTokens" + ${input.inputTokens},
+            "cachedInputTokens" =
+                "ProviderDailyUsage"."cachedInputTokens" + ${input.cachedInputTokens},
+            "outputTokens" = "ProviderDailyUsage"."outputTokens" + ${input.outputTokens},
+            "updatedAt" = NOW()
+    `;
+    return true;
+};
+
+/**
+ * Deltas the rollup never received, applied now.
+ *
+ * The partial index on `appliedAt IS NULL` marks the problem; without this it
+ * would only ever mark it. Each adjustment is applied and marked in one
+ * transaction, and the `appliedAt IS NULL` predicate on the mark is the
+ * compare-and-set that keeps two replays from applying one delta twice.
+ */
+export const applyPendingAttemptCostAdjustments = async (
+    batch = 200
+): Promise<{ examined: number; applied: number; failed: number }> => {
+    const pending = await prisma.chatAttemptUsageAdjustment.findMany({
+        where: { appliedAt: null },
+        orderBy: { createdAt: "asc" },
+        take: Math.min(1_000, Math.max(1, batch)),
+        include: { attempt: true },
+    });
+
+    let applied = 0;
+    let failed = 0;
+    for (const adjustment of pending) {
+        try {
+            const moved = await prisma.$transaction(async (tx) => {
+                // The mark first, on the `appliedAt IS NULL` predicate: a
+                // replay that loses it wrote nothing, so the delta cannot be
+                // applied twice by two runs racing.
+                const claimed = await tx.chatAttemptUsageAdjustment.updateMany({
+                    where: { id: adjustment.id, appliedAt: null },
+                    data: { appliedAt: new Date() },
+                });
+                if (claimed.count !== 1) return false;
+                await applyAdjustmentDelta(tx, {
+                    provider: adjustment.attempt.provider,
+                    modelId: adjustment.attempt.modelId,
+                    rollupDate: adjustment.attempt.rollupDate,
+                    costDeltaMicroUsd: adjustment.costDeltaMicroUsd,
+                    inputTokens: adjustment.observedInputTokens ?? 0,
+                    cachedInputTokens: adjustment.observedCachedInputTokens ?? 0,
+                    outputTokens: adjustment.observedOutputTokens ?? 0,
+                    create: true,
+                });
+                return true;
+            });
+            if (moved) applied += 1;
+        } catch (error) {
+            failed += 1;
+            console.error(
+                JSON.stringify({
+                    event: "chat_attempt_usage_adjustment_replay_failed",
+                    adjustmentId: adjustment.id,
+                    error:
+                        error instanceof Error
+                            ? error.message.slice(0, 300)
+                            : "unknown",
+                })
+            );
+        }
+    }
+    return { examined: pending.length, applied, failed };
 };
 
 /**

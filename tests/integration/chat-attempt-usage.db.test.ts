@@ -11,7 +11,10 @@ import {
   type ChatAccess,
   type ChatBudget,
 } from "@/lib/chatSecurity";
-import { closeAttemptWithCost } from "@/lib/chatAttemptCostLedger";
+import {
+  closeAttemptWithCost,
+  rollupDayOf,
+} from "@/lib/chatAttemptCostLedger";
 import { closeAttempt } from "@/lib/routingAttemptStore";
 import { getProviderCostGuardrailLimits } from "@/lib/providerCostBudget";
 import { Prisma } from "@prisma/client";
@@ -373,6 +376,7 @@ test("an attempt's recorded cost cannot be edited afterwards", async () => {
       modelId: "primary-model",
       provider: "openai",
       outcome: "failed",
+      rollupDate: rollupDayOf(),
       inputTokens: 0,
       outputTokens: 0,
       costMicroUsd: BigInt(1_000_000),
@@ -398,6 +402,7 @@ test("a third attempt cannot be recorded at all", async () => {
         modelId: "third-model",
         provider: "google",
         outcome: "completed",
+        rollupDate: rollupDayOf(),
         inputTokens: 0,
         outputTokens: 0,
       },
@@ -1002,6 +1007,7 @@ test("a temporary violation inside the transaction survives to COMMIT", async ()
         modelId: "primary-model",
         provider: "openai",
         outcome: "failed",
+        rollupDate: rollupDayOf(),
         inputTokens: 0,
         outputTokens: 0,
       },
@@ -1039,6 +1045,7 @@ test("a violation left standing fails the whole transaction", async () => {
           modelId: "primary-model",
           provider: "openai",
           outcome: "failed",
+          rollupDate: rollupDayOf(),
           inputTokens: 0,
           outputTokens: 0,
         },
@@ -1072,6 +1079,7 @@ test("a full refund may name no attempt, even with cost rows against it", async 
         modelId: "primary-model",
         provider: "openai",
         outcome: "unknown_after_dispatch",
+        rollupDate: rollupDayOf(),
         usageSource: "crash_reconciliation",
         costSource: "reserved_upper_bound",
         costMicroUsd: BigInt(2_000_000),
@@ -1116,6 +1124,7 @@ test("the pointer may be set before the attempt row it names exists", async () =
         modelId: "fallback-model",
         provider: "google",
         outcome: "completed",
+        rollupDate: rollupDayOf(),
         inputTokens: 0,
         outputTokens: 0,
       },

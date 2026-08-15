@@ -882,6 +882,10 @@ model ChatAttemptUsage {
   costSource        String @default("token_estimate")
   /// The rates this attempt was priced at, and where the figure came from.
   pricingSnapshot   Json?
+  /// The ProviderDailyUsage day this row's cost was rolled up on, at midnight
+  /// UTC. Stored rather than inferred from createdAt: a correction has to
+  /// reach the same rollup row, and the two clocks disagree across midnight.
+  rollupDate        DateTime
 
   createdAt DateTime @default(now())
 

@@ -72,6 +72,7 @@ import { recordInternalProviderUsage } from "@/lib/providerUsageAccounting";
 import {
     boundedProviderIdentifier,
     recordAttemptCost,
+    rollupDayOf,
 } from "@/lib/chatAttemptCostLedger";
 import {
     AddOnCreditError,
@@ -3380,6 +3381,10 @@ export const settleChatUsage = async (
                   }
                 : baseCostBreakdown;
         const actualCost = costBreakdown.totalCostMicroUsd;
+        // One value for the cost row and its rollup, read once. A turn that
+        // settles either side of midnight UTC must not put the row on one day
+        // and the spend on another -- a later correction has to find both.
+        const rollupDay = rollupDayOf();
         const planActualCredits = Math.min(
             actualCredits,
             canonical.planReservedCredits
@@ -3495,6 +3500,7 @@ export const settleChatUsage = async (
                 await recordAttemptCost(tx, {
                     reservationId: durable.id,
                     attempt,
+                    rollupDate: rollupDay,
                     snapshot: { settlementVersion: multiAttempt.version },
                 });
             }
@@ -3536,6 +3542,7 @@ export const settleChatUsage = async (
                 // The attempt the user's charge came from, written in the same
                 // transaction as the terminal status. Write-once at the
                 // database, so a later goodwill refund cannot re-attribute it.
+                //
                 ...(multiAttempt?.billedAttempt
                     ? {
                           settlementAttemptIndex:

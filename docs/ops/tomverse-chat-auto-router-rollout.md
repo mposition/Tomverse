@@ -518,6 +518,25 @@ cost is base plus adjustments — `resolvedAttemptCosts` — and it reports whet
 a figure is still an unmeasured upper bound, because an estimate that reads
 like measured spend is one somebody will plan against.
 
+An adjustment is created with `appliedAt` NULL and marked only once the rollup
+has actually taken the delta. If the rollup row is missing the adjustment stays
+unmarked and the writer returns `adjustment_pending` rather than `corrected`;
+`applyPendingAttemptCostAdjustments` is the consumer that finds those through
+the partial index and applies them, recreating a missing rollup row rather than
+leaving the delta stranded. Marking first and applying second is what makes two
+replays apply one delta once.
+
+**Every writer is atomic, including the sweep.** The sweep reads and validates
+the cost intent first, then closes and records in one transaction through
+`closeAttemptWithCost`; a failure takes the close with it, so the attempt stays
+`pending` and the next sweep retries. An attempt whose payload carries no
+intent is closed without a cost row and counted as `closedWithoutCostIntent`,
+never folded into the success count — nobody can now state what that attempt
+cost, and that is a hole in the ledger rather than an ordinary sweep. A payload
+that fails to read is reported separately again, as
+`invalid_cost_intent_payload`: the first is a closed set that ages out, the
+second is a defect happening now.
+
 The two ledgers stay separated at their furthest apart here: a crash refunds
 the user in full, keeps the provider's cost, and names no billed attempt.
 `ChatCreditReservation.settlementAttemptIndex` is therefore allowed to be NULL

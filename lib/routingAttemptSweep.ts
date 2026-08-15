@@ -41,12 +41,14 @@
  * wrong the sweep and the live request cannot both win.
  */
 
-import { costIntentFor } from "@/lib/chatProviderHolds";
+import {
+    closeAttemptWithCost,
+    type AttemptCostRecord,
+} from "@/lib/chatAttemptCostLedger";
+import { costIntentFor, type AttemptCostIntent } from "@/lib/chatProviderHolds";
 import { deserializeReservation } from "@/lib/chatSecurity";
 import type { AiModel } from "@/lib/models";
 import { prisma } from "@/lib/prisma";
-import { recordInternalProviderUsage } from "@/lib/providerUsageAccounting";
-import { closeAttempt } from "@/lib/routingAttemptStore";
 
 /** How long an attempt may stay open before the sweep will consider it. */
 export const STALE_ATTEMPT_AFTER_MS = 30 * 60 * 1000;
@@ -59,11 +61,18 @@ export const STALE_ATTEMPT_SWEEP_BATCH = 200;
 
 export type StaleAttemptSweepResult = {
     examined: number;
-    closed: number;
+    /** Closed with the reserved upper bound recorded, atomically. */
+    closedWithCost: number;
+    /**
+     * Closed with no cost row, because the payload carries no cost intent.
+     *
+     * Counted apart from `closedWithCost` on purpose. These are attempts whose
+     * provider spend nobody can now state, and folding them into the success
+     * count would report a permanent hole in the ledger as an ordinary sweep.
+     */
+    closedWithoutCostIntent: number;
     /** Lost the compare-and-set: the live request closed it first. */
     alreadyClosed: number;
-    /** Cost rows written at the reserved upper bound. */
-    costRecorded: number;
     failed: number;
 };
 
@@ -106,25 +115,37 @@ export const sweepStaleRoutingAttempts = async (
         LIMIT ${limit}
     `;
 
-    let closed = 0;
+    let closedWithCost = 0;
+    let closedWithoutCostIntent = 0;
     let alreadyClosed = 0;
-    let costRecorded = 0;
     let failed = 0;
     for (const row of rows) {
         try {
-            const won = await closeAttempt({
+            // Read and validate before anything is written. The close and the
+            // cost row have to commit together -- a crash between them would
+            // leave a terminal attempt with no cost row, and the sweep only
+            // ever looks at `pending`, so nothing would come back for it.
+            // That is the very defect this module exists to close, and doing
+            // it in two transactions here would reproduce it.
+            const cost = await crashCostRecord(row);
+            const closed = await closeAttemptWithCost({
                 attemptId: row.id,
                 outcome: "unknown_after_dispatch",
                 failureLayer: "process",
                 errorClass: "process_stopped_after_dispatch",
+                cost,
             });
-            if (!won) {
+            if (!closed.closed) {
                 alreadyClosed += 1;
                 continue;
             }
-            closed += 1;
-            if (await recordCrashCost(row)) costRecorded += 1;
+            if (cost) closedWithCost += 1;
+            else closedWithoutCostIntent += 1;
         } catch (error) {
+            // Whatever failed, the transaction took the close with it, so the
+            // attempt is still `pending` and the next sweep will try again.
+            // That is the point of binding them: a failure here costs a delay,
+            // not a record.
             failed += 1;
             console.error(
                 JSON.stringify({
@@ -136,7 +157,13 @@ export const sweepStaleRoutingAttempts = async (
         }
     }
 
-    return { examined: rows.length, closed, alreadyClosed, costRecorded, failed };
+    return {
+        examined: rows.length,
+        closedWithCost,
+        closedWithoutCostIntent,
+        alreadyClosed,
+        failed,
+    };
 };
 
 /**
@@ -153,84 +180,76 @@ export const sweepStaleRoutingAttempts = async (
  * because the money was really committed, and an estimate of the tokens is
  * just a number nobody measured.
  *
- * Silent when there is no reservation (nothing was committed), no cost intent
- * (a payload written before intents existed, which cannot be reconstructed),
- * or a row already exists (the settlement got there first).
+ * Returns null when there is nothing that can honestly be priced, and says
+ * which kind of nothing it was. A payload written before cost intents existed
+ * is a known, closed set that shrinks to zero as those reservations age out; a
+ * payload that fails to read is a defect happening now. Reporting both as
+ * "swept" would hide the second inside the first.
  */
-const recordCrashCost = async (row: SweepRow): Promise<boolean> => {
-    if (!row.reservationId) return false;
+const crashCostRecord = async (row: SweepRow): Promise<AttemptCostRecord | null> => {
+    if (!row.reservationId) return null;
+    let intent: AttemptCostIntent | null = null;
     try {
         const reservation = await prisma.chatCreditReservation.findUnique({
             where: { id: row.reservationId },
         });
-        if (!reservation) return false;
+        if (!reservation) return null;
         const canonical = deserializeReservation(reservation.reservationPayload);
-        const intent = costIntentFor(canonical.attemptCostIntents, row.attemptIndex);
-        if (!intent) return false;
-
-        const reservationId = row.reservationId;
-        return await prisma.$transaction(async (tx) => {
-            const written = await tx.chatAttemptUsage.createMany({
-                skipDuplicates: true,
-                data: [
-                    {
-                        reservationId,
-                        attemptIndex: row.attemptIndex,
-                        modelId: intent.modelId,
-                        provider: intent.provider,
-                        outcome: "unknown_after_dispatch",
-                        inputTokens: null,
-                        cachedInputTokens: null,
-                        outputTokens: null,
-                        costMicroUsd: BigInt(intent.reservedCostMicroUsd),
-                        usageSource: "crash_reconciliation",
-                        costSource: "reserved_upper_bound",
-                        pricingSnapshot: {
-                            ...intent,
-                            sweptBy: SWEEP_VERSION,
-                            reconciledAt: new Date().toISOString(),
-                        },
-                    },
-                ],
-            });
-            if (written.count !== 1) return false;
-
-            // The rollup moves with the row, in the same transaction.
-            //
-            // Not optional, and not deferrable to whoever finds the real usage
-            // later: a correction is applied as a *delta* against what this row
-            // already claimed, so a rollup that never received the estimate
-            // would be short by it for ever once the delta landed.
-            //
-            // Zero tokens and a zero component breakdown, with the whole figure
-            // in the total. The money is known -- it was committed -- and the
-            // split between cached input, uncached input and output is not.
-            // Apportioning it would be inventing three numbers to make one look
-            // complete.
-            await recordInternalProviderUsage({
-                client: tx,
-                provider: intent.provider as AiModel["provider"],
-                modelId: intent.modelId,
-                inputTokens: 0,
-                cachedInputTokens: 0,
-                outputTokens: 0,
-                estimatedCostMicroUsd: intent.reservedCostMicroUsd,
-                uncachedInputCostMicroUsd: 0,
-                cachedInputCostMicroUsd: 0,
-                outputCostMicroUsd: 0,
-            });
-            return true;
-        });
+        intent = costIntentFor(canonical.attemptCostIntents, row.attemptIndex);
     } catch (error) {
+        // The payload would not read. Not the legacy case: something wrote a
+        // payload whose holds and intents disagree, and that is a live defect.
         console.error(
             JSON.stringify({
-                event: "routing_attempt_sweep_cost_failed",
+                event: "routing_attempt_sweep_cost_unavailable",
+                reason: "invalid_cost_intent_payload",
                 attemptId: row.id,
+                reservationId: row.reservationId,
                 error: error instanceof Error ? error.message.slice(0, 300) : "unknown",
             })
         );
-        return false;
+        return null;
     }
+
+    if (!intent) {
+        console.warn(
+            JSON.stringify({
+                event: "routing_attempt_sweep_cost_unavailable",
+                reason: "legacy_missing_cost_intent",
+                attemptId: row.id,
+                reservationId: row.reservationId,
+            })
+        );
+        return null;
+    }
+
+    return {
+        reservationId: row.reservationId,
+        attempt: {
+            attemptIndex: row.attemptIndex,
+            price: {
+                provider: intent.provider as AiModel["provider"],
+                modelId: intent.modelId,
+                inputUsdPerMillionTokens: intent.inputUsdPerMillionTokens,
+                outputUsdPerMillionTokens: intent.outputUsdPerMillionTokens,
+                cachedInputPriceMultiplier: intent.cachedInputPriceMultiplier,
+                pricingVersion: intent.pricingVersion ?? null,
+            },
+            // Zero here, NULL in the row: `crashUnknownTokens` below strips
+            // them. Nothing measured these, and the database refuses a
+            // non-crash row that leaves them out.
+            inputTokens: 0,
+            cachedInputTokens: 0,
+            outputTokens: 0,
+            usageFromProvider: false,
+            outcome: "unknown_after_dispatch",
+            costMicroUsd: intent.reservedCostMicroUsd,
+            costSource: "reserved_upper_bound",
+            userBilled: false,
+        },
+        snapshot: { sweptBy: SWEEP_VERSION },
+        unknownTokens: true,
+    };
 };
 
 /**
