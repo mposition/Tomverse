@@ -158,6 +158,32 @@ provider와 메시지 내용만으로 id를 만들면, 서로 다른 대화 4개
 | 정규화 | §5.6 | 아래 §4 |
 | 안내 문구 | `ProviderGuideStep.tsx` + 7개 locale | §1의 2번 — My Activity·JSON을 지목 |
 
+### 3.3 provider 집합은 한 곳에만 적습니다
+
+parser가 병합된 뒤에도 A2는 **end-to-end로 동작하지 않았습니다.** 브라우저가
+Takeout을 파싱하고 대화를 고르게 한 다음, 첫 서버 호출이 400으로 거절했습니다.
+
+provider 집합이 네 군데에 따로 적혀 있었고 Gemini는 그중 하나에만 추가됐기
+때문입니다 — adapter union에는 있고, digest union·생성 route의 request
+schema·DB CHECK 제약 두 개에는 없었습니다. **타입이 잡을 수 없는 종류의
+결함입니다**: 그 값은 JSON으로 경계를 넘고, SQL은 TypeScript를 import할 수
+없습니다.
+
+정본은 `lib/externalImportProviders.ts`의 `EXTERNAL_IMPORT_PROVIDERS`
+하나입니다. adapter·digest·route schema·guidance union·분석 enum·표시 이름이
+모두 여기서 파생합니다.
+
+**DB는 파생할 수 없으므로 자기 사본을 가집니다.** 그 사본을 정본에 붙들어 두는
+것이 `tests/integration/external-import-provider-canon.db.test.ts`이며,
+`pg_get_constraintdef()`로 제약이 실제로 허용하는 값을 읽어 정본과 대조합니다.
+`tests/integration/external-import-create-route.db.test.ts`는 같은 경계를
+route에서 확인합니다 — 인증되고 flag가 켜진 요청에서 모든 정본 provider가 행
+생성까지 도달하는지, 그리고 parser 없는 값은 여전히 거절되는지.
+
+**배포 순서가 계약입니다.** CHECK 확장은 기존 코드와 역호환되므로 **DB를 먼저
+migrate하고 애플리케이션을 나중에 배포**합니다. 반대 순서에서는 migration이
+적용되기 전의 Gemini 요청이 제약에서 실패합니다.
+
 **adapter 계약이 하나 넓어집니다.** 기존 두 provider는 "최상위 항목 하나 = 대화
 하나"라 `parseConversation(entry)`로 충분하지만, Takeout은 항목 하나가 turn
 하나이고 그 turn이 **어느 대화들에 속하는지는 전체 목록을 봐야 압니다.** 그래서
@@ -385,7 +411,8 @@ A2에서는 그 파일이 **저장소에 들어간다**는 점에서 더 엄격�
 |---|---|---|
 | 상위 archive 규칙 변경(§5.2) | **완료** | 이미 반영·검증됨 |
 | 합성 fixture | **완료** | 유지만 하면 됨 |
-| Gemini parser 구현 | **완료** (2026-08-14 병합) | — |
+| Gemini parser 구현 (클라이언트) | **완료** (2026-08-14 병합) | — |
+| 서버 provider 지원 | **완료** (2026-08-15) | — |
 | production 활성화 | **금지** | staging 검증 증거 + 그것을 근거로 한 별도 승인 |
 | Release B memory 활성화 | **금지** | A2와 무관한 별도 승인 |
 

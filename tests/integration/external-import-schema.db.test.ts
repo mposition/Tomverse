@@ -181,11 +181,17 @@ test("the role allowlist rejects non-conversation roles at the database", async 
 test("the provider and status allowlists hold", async () => {
     const user = await createUser();
 
+    // This used to name Gemini as the provider outside the allowlist, which is
+    // what it was for Release A. A2 added it (2026-08-15), so the example moves
+    // to one that genuinely has no parser. Which providers *are* allowed is
+    // checked against the canonical list in
+    // tests/integration/external-import-provider-canon.db.test.ts; what this
+    // asserts is only that the constraint still refuses something.
     await assert.rejects(
         prisma.externalImport.create({
             data: {
                 userId: user.id,
-                provider: "gemini",
+                provider: "copilot",
                 digestVersion: EXTERNAL_IMPORT_DIGEST_VERSION,
                 parserVersion: "test-1",
             },

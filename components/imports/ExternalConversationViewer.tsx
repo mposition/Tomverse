@@ -14,6 +14,7 @@ import {
     type SourceDeletionImpactView,
 } from "@/components/imports/SourceDeletionNotice";
 import { discardResponseBody } from "@/lib/discardResponseBody";
+import { providerLabel } from "@/components/imports/importFormatting";
 
 /**
  * Account-private read-only viewer for one imported conversation (policy
@@ -31,9 +32,6 @@ const interpolate = (
         (copy, [key, value]) => copy.replaceAll(`{${key}}`, String(value)),
         template
     );
-
-const providerLabel = (provider: string) =>
-    provider === "chatgpt" ? "ChatGPT" : provider === "claude" ? "Claude" : provider;
 
 type ViewerMessage = {
     id: string;

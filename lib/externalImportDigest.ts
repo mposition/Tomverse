@@ -30,7 +30,13 @@ import { createHash } from "node:crypto";
 
 export const EXTERNAL_IMPORT_DIGEST_VERSION = 1;
 
-export type ExternalImportProvider = "chatgpt" | "claude";
+// Re-exported so existing importers keep their path; the set itself lives in
+// one place (lib/externalImportProviders.ts). A bare `export type { ... } from`
+// would not bring the name into this module's own scope, and the functions
+// below need it.
+import type { ExternalImportProvider } from "@/lib/externalImportProviders";
+
+export type { ExternalImportProvider };
 
 export type ExternalMessageRole = "user" | "assistant";
 
