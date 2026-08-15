@@ -1185,16 +1185,6 @@ test("a fallback that reserves nothing leaves the same shape the primary does", 
   // it -- so a crashed free primary and a crashed free fallback produced
   // payloads the sweep classified differently.
   const reservation = await makeFreeReservation();
-  const day = await prisma.chatUsageBucket.findFirst({
-    where: { period: "provider-cost-day" },
-  });
-  const month = await prisma.chatUsageBucket.findFirst({
-    where: { period: "provider-cost-month" },
-  });
-  const starts = {
-    day: day?.periodStart ?? new Date(),
-    month: month?.periodStart ?? new Date(),
-  };
 
   const result = await reserveAttemptProviderBudget({
     reservationId: reservation.reservationId,
@@ -1212,7 +1202,6 @@ test("a fallback that reserves nothing leaves the same shape the primary does", 
       pricingVersion: "sweep-test",
     },
     reservedMicroUsd: 0,
-    periodStarts: starts,
   });
   assert.equal(result.reserved, true);
   assert.deepEqual(result.reserved === true && result.entries, []);

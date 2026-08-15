@@ -607,6 +607,28 @@ The intent's model and provider are checked against the attempt row on every
 sweep, because nothing else compares them and pricing one model's call at
 another's rates is what that would cause.
 
+**The provider budget period is anchored once, when the turn is authorized.**
+`providerBudgetPeriodStarts` is written into the reservation whether or not a
+hold is taken, and every later write reads it: a fallback's hold, and the
+settlement of a provider the reservation never held anything against. One
+logical response is charged to one period even when it crosses UTC midnight.
+
+It was previously borrowed from whichever held entry happened to share the
+period, which worked only while something was held — so a turn whose primary
+reserved nothing had no entry to borrow from and a fallback's real spend was
+dropped on the floor. A free model running a paid native web search is exactly
+that shape.
+
+None of the alternatives to storing it are sound. A user's `day` bucket is
+anchored to their account's own reckoning and can name a different day than
+the provider's UTC one. `createdAt` is the database's clock rather than the one
+the reservation was computed against, and the two can fall either side of
+midnight. The period is part of the authorization, not something to reconstruct
+afterwards. A payload written before the anchor existed recovers it from the
+provider holds it already carries — those were taken at the same moment, so
+their `periodStart` *is* the anchor — and one carrying neither is refused with
+`no_provider_budget_period` rather than guessed at.
+
 `unexpectedCostOutcome` is an incident on the first occurrence: the sweep
 cannot produce those outcomes by construction, so one means a contract broke.
 `failed` is not, on its own — a database that was briefly unavailable costs a

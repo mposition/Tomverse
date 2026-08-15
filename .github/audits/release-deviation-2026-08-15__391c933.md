@@ -98,7 +98,8 @@ without anyone sequencing it by hand.
 | Migration applied before the app took traffic | Yes — pre-deploy command |
 | Terminal status | `SUCCESS`, 2026-08-15T06:16:26.256Z |
 | Previous deployment | `b0cf10e…` → `REMOVED` at 06:19:29Z |
-| Flag before / after | **Not read back.** See "What is not verified" |
+| Flag before deploy | **Never observed.** Production deploys on the push, so there was no window between the merge and the deployment for anyone to look |
+| Flag after deploy | `off` — read from Admin Console → Platform settings by `@mposition`, 2026-08-15T08:05Z |
 
 ## What was verified
 
@@ -158,15 +159,17 @@ known, handled condition as a new incident.
 
 ## What is not verified
 
-- **The flag's actual value in production.** `feature.externalConversationImportEnabled`
-  is an `AppSetting` row, not an environment variable, and it was not read back
-  before or after the deploy — production deploys on the push, so there was no
-  window between the merge and the deployment for anyone to look. It is
-  believed off; believed is not read back.
-- **The constraint in the production database.** Prisma recorded the migration
-  as applied and `/api/ready` reports the database reachable. Neither is
-  `pg_get_constraintdef()` on the production instance. The read-back that was
-  performed was on an empty database built from `main`'s history.
+- **The flag's value *before* the deploy.** `feature.externalConversationImportEnabled`
+  is an `AppSetting` row, not an environment variable. It was read back
+  afterwards and is `off`, which is what matters for whether anything was
+  exposed — but production deploys on the push, so nobody could look in
+  between, and the before value is inferred rather than observed. The
+  conclusion the reading supports is "the feature is not open now", not "the
+  deploy did not change it".
+- **The constraint in the production database.** The ledger read-back above
+  says the migration ran; it does not say the constraint has the definition it
+  was meant to produce. The only `pg_get_constraintdef()` performed was on an
+  empty database built from `main`'s history, not on the production instance.
 - **Behavioural verification of anything.** As with `b0cf10e`, this build has
   had no chat turn, no settlement, no payment path and no image generation
   exercised against it. `/api/ready` was green before the deploy and after it.
@@ -181,7 +184,7 @@ ahead and a run against it measures a different build.
 
 - [ ] Deploy `391c9336d4d73110bd30f2ad3cb95ceae367eeb4` to staging or a scratch environment
 - [ ] Read `/api/build-info` back and confirm it names that SHA and its deployment ID
-- [ ] Read `feature.externalConversationImportEnabled` back from production and record the value
+- [x] Read `feature.externalConversationImportEnabled` back from production and record the value — `off`, 2026-08-15T08:05Z
 - [ ] Read `pg_get_constraintdef()` for `ExternalImport_provider_check` and `ExternalConversation_provider_check` from production, on a read-only role, and confirm both admit `chatgpt`, `claude` and `gemini`
 - [ ] Re-run `prisma migrate status` **from a worktree at `391c933` itself**, against production, and confirm it reports nothing pending
 - [ ] Exercise one turn per active provider and confirm usage settles
@@ -205,8 +208,12 @@ Until those are filled in, **the newest build with behavioural verification is
 `checkSuites: false`, so a push to `main` deploys whether or not its checks
 have finished. Here CI finished at 06:08 and the deploy started at 06:12, which
 is luck rather than a guarantee — a slower run would have shipped an unverified
-build. Turning it on is a one-line change to the service's source settings and
-is not made by this document.
+build. Turning it on is a change to the service's source settings and is not
+made by this document. It also cannot be made from the API surface available
+here: Railway's MCP `update-service` states that source changes are out of its
+scope, and the Railway agent's own `updateServiceTool` takes no environment id
+— it reported "applied" and the environment still read `checkSuites: false`
+afterwards. It is a dashboard change, per environment.
 
 **One flag covers three providers.** `feature.externalConversationImportEnabled`
 activates ChatGPT, Claude and Gemini together. Now that this SHA is in
