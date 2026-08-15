@@ -157,3 +157,40 @@ test("the real checklist yields an item for every section it has", () => {
         assert.ok(covered.has(letter), `section ${letter} produced no item`);
     }
 });
+
+test("the record separates the SHA it verified from the SHA the items came from", () => {
+    // Routinely different, and that is the design: the checklist's history
+    // stays on one branch while the verified build is an activation candidate
+    // that may have reached production another way. A reader who finds items
+    // in the record that are absent from the deployed tree has nothing else to
+    // tell that intended split from a mistake.
+    const record = renderRecord({
+        template: readFileSync(TEMPLATE, "utf8"),
+        items: checklistItems(SAMPLE),
+        date: "2026-08-15",
+        deploySha: "c".repeat(40),
+        revision: "2026-08-15c",
+        checklistSourceSha: "d".repeat(40),
+    });
+    assert.match(record, new RegExp(`^checklistSourceSha: ${"d".repeat(40)}$`, "m"));
+    assert.match(
+        record,
+        new RegExp(`\\| \\*\\*checklist source SHA\\*\\* \\| \`${"d".repeat(40)}\` \\|`)
+    );
+    // And the two are not confused for one another.
+    assert.match(record, new RegExp(`^deploySha: ${"c".repeat(40)}$`, "m"));
+});
+
+test("an unknown checklist source is left blank rather than guessed", () => {
+    // The generator passes nothing when it is not in a checkout. A blank says
+    // "not known"; a SHA invented here would say something false about which
+    // items were run.
+    const record = renderRecord({
+        template: readFileSync(TEMPLATE, "utf8"),
+        items: checklistItems(SAMPLE),
+        date: "2026-08-15",
+        deploySha: "c".repeat(40),
+        revision: "2026-08-15c",
+    });
+    assert.match(record, /^checklistSourceSha:\s*$/m);
+});
