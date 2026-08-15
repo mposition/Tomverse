@@ -3531,51 +3531,6 @@ export const settleChatUsage = async (
                     `;
                 }
             }
-
-            // One row per attempt, written once, each with its own rollup.
-            //
-            // Most of these are already here: an attempt records its own cost
-            // when it ends (`closeAttemptWithCost`), which is what a crash
-            // between one attempt's end and the turn's needs. Settlement runs
-            // the same writer for whichever rows are missing -- normally just
-            // the attempt that answered, whose usage is not known any earlier
-            // -- and `recordAttemptCost` is idempotent on the rest.
-            for (const attempt of multiAttempt.attempts) {
-                await recordAttemptCost(tx, {
-                    reservationId: durable.id,
-                    attempt,
-                    rollupDate: rollupDay,
-                    snapshot: { settlementVersion: multiAttempt.version },
-                });
-            }
-        } else if (singleAttempt) {
-            // The same contract for the turn that dispatched once, which is
-            // most of them.
-            //
-            // It used to accrue after the transaction committed, and that left
-            // the window this whole ledger exists to close: commit, die, and
-            // the rollup never happens -- with the reservation already
-            // terminal, so a rerun cannot restore it. Inside the transaction,
-            // the cost row and the rollup are as durable as the settlement
-            // that justifies them.
-            //
-            // The rollup split is handed over rather than recomputed: a
-            // provider that reports its own component costs (Perplexity) has
-            // already had them resolved here, and pricing them again from
-            // tokens would write a different breakdown for the same total.
-            await recordAttemptCost(tx, {
-                reservationId: durable.id,
-                attempt: singleAttempt,
-                rollupDate: rollupDay,
-                rollup: {
-                    uncachedInputCostMicroUsd:
-                        costBreakdown.uncachedInputCostMicroUsd,
-                    cachedInputCostMicroUsd:
-                        costBreakdown.cachedInputCostMicroUsd,
-                    outputCostMicroUsd: costBreakdown.outputCostMicroUsd,
-                },
-                snapshot: { usageSource },
-            });
         }
         if (canonical.userId && canonical.addOnReservations.length > 0) {
             await settleAddOnCredits(tx, {
@@ -3659,6 +3614,61 @@ export const settleChatUsage = async (
             isPartial: false,
             isCancelled: usage.outcome === "cancelled",
         });
+
+        // The last database work this transaction does, and deliberately so.
+        //
+        // `ProviderDailyUsage` is keyed on (provider, model, day), which makes
+        // it one row shared by every turn on that model -- the hottest row this
+        // system has. Whoever touches it holds it until COMMIT, so touching it
+        // early would serialise every concurrent turn on that model across the
+        // whole tail of this transaction: the add-on credits, the reservation
+        // update, the shadow record. Touching it last narrows that to the
+        // commit itself.
+        //
+        // Still inside the transaction, because the cost row and its rollup
+        // have to be as durable as the settlement that justifies them -- and
+        // for the same reason this is one call rather than a row-writing step
+        // and a rollup step somebody could later forget to pair.
+        //
+        // Sorted by (provider, model) so two settlements that both touch two
+        // rollup rows take them in one order and cannot deadlock on each other.
+        const accruals = multiAttempt
+            ? [...multiAttempt.attempts]
+                  .sort((a, b) =>
+                      `${a.price.provider}/${a.price.modelId}`.localeCompare(
+                          `${b.price.provider}/${b.price.modelId}`
+                      )
+                  )
+                  .map((attempt) => ({
+                      reservationId: durable.id,
+                      attempt,
+                      rollupDate: rollupDay,
+                      snapshot: { settlementVersion: multiAttempt.version },
+                  }))
+            : singleAttempt
+              ? [
+                    {
+                        reservationId: durable.id,
+                        attempt: singleAttempt,
+                        rollupDate: rollupDay,
+                        // Handed over rather than recomputed: a provider that
+                        // reports its own component costs has already had them
+                        // resolved here, and pricing from tokens again would
+                        // write a different split for the same total.
+                        rollup: {
+                            uncachedInputCostMicroUsd:
+                                costBreakdown.uncachedInputCostMicroUsd,
+                            cachedInputCostMicroUsd:
+                                costBreakdown.cachedInputCostMicroUsd,
+                            outputCostMicroUsd: costBreakdown.outputCostMicroUsd,
+                        },
+                        snapshot: { usageSource },
+                    },
+                ]
+              : [];
+        for (const accrual of accruals) {
+            await recordAttemptCost(tx, accrual);
+        }
 
         return {
             applied: true,
