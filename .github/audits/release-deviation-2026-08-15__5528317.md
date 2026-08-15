@@ -187,9 +187,49 @@ it was. The value must be treated as burned regardless.
 - Code fix: `redactReportableRequestHeaders()` inverts the denylist to an
   allowlist so a header added tomorrow is redacted by default. Node and Edge
   now share one helper.
-- **Rotation is an operational action outside the tree and is not done by that
-  fix.** Until `CLOUDFLARE_ORIGIN_SECRET` is rotated in both Cloudflare and
-  Railway, the origin-protection boundary is a known-disclosed secret.
+- **Rotation is an operational action outside the tree and was not done by that
+  fix.** It was performed separately the same afternoon, and it took the site
+  down — see below.
+
+### The rotation caused a seven-minute outage
+
+`CLOUDFLARE_ORIGIN_SECRET` lives in two places that cannot be changed at the
+same instant: a Cloudflare Transform Rule, which takes effect in seconds, and a
+Railway environment variable, which takes effect only when a new container
+replaces the old one. Between the two, Cloudflare sends a value the running
+container does not accept and `proxy.ts:102` rejects every request.
+
+```
+14:06:44.955Z   deployment 6d258bff created -- the env change takes effect
+14:06:59Z       Sentry uptime monitor: "Downtime detected for https://tomverse.app"
+14:13:54.887Z   deployment succeeds; new container carries the new value
+                                                              ~7 minutes
+```
+
+`GET /api/health` answered 200 throughout while `/` and `/api/ready` answered
+421. That is not a contradiction: `proxy.ts:97` lets health through ahead of the
+origin check so Railway can see container liveness, and everything else is
+gated. **A green liveness probe during a total outage is the designed
+behaviour**, which is worth knowing before it is read as reassurance.
+
+Recovery was automatic and nothing was rolled back. The alternative considered
+— reverting the Cloudflare rule to the old value, which applies in seconds —
+would have restored service faster only if the deployment were still an hour
+out; the deployment reached `DEPLOYING` at 14:13:40Z, so reverting would have
+produced a second mismatch minutes later.
+
+Verified after recovery, 2026-08-15T14:14:58Z: `/` answers 200 from outside
+Cloudflare's own network, and `/api/ready` reports `securityEnvironment: true`
+— which asserts both that `REQUIRE_CLOUDFLARE_ORIGIN_SECRET` is `"true"` and
+that the new value clears the 32-character floor (`lib/securityEnvironment.ts:118`).
+Enforcement is on and both sides agree.
+
+**Nothing gates this path.** This was the eighth production change of the day
+and the only one that did not come from code. PR CI, "Wait for CI", the
+release checklist and §7.9's three lanes all describe how a *commit* reaches
+production; an environment variable reaches it with none of them involved, and
+this one caused the day's only user-visible outage. Naming it because the
+lane-shaped controls under discussion would not have caught it.
 
 Separately, the same event shows `script-src-elem` blocking Cloudflare's Email
 Address Obfuscation script on our own origin. Low severity — the obfuscation
@@ -215,7 +255,7 @@ build.
 - [x] One image generated, signed asset URL resolves
 - [x] `feature.externalConversationImportEnabled` read back — `false`, with 0 imports over 7 days
 - [ ] One turn each on `deepseek` and `perplexity`, confirming usage settles
-- [ ] Rotate `CLOUDFLARE_ORIGIN_SECRET` in Cloudflare and Railway
+- [x] Rotate `CLOUDFLARE_ORIGIN_SECRET` in Cloudflare and Railway — done 14:13:54Z, verified by `securityEnvironment: true` and a 200 from outside at 14:14:58Z, at the cost of a seven-minute outage
 - [ ] One error reaching Sentry with its application trace id, on this SHA
 - [ ] A Stripe path on the production build, or a recorded named-risk approval
 - [ ] `prisma migrate status` from a worktree at `5528317` itself
