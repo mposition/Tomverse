@@ -125,10 +125,32 @@ export async function reservePromotionCheckout(
 
 export async function releasePromotionCheckout(
   promotionId: string,
-  userId: string
+  userId: string,
+  options: {
+    /**
+     * Release only a lease taken no later than this instant.
+     *
+     * The lease id is `(promotionId, userId)` and records nothing about which
+     * checkout attempt took it, so a webhook that arrives late would release a
+     * lease belonging to a *later* attempt and let a second live Session exist
+     * beside it -- the one thing this lease prevents. Stripe redelivers a
+     * failed webhook for days, so "late" is not hypothetical.
+     *
+     * The lease is taken immediately before the Session is created, so it can
+     * only belong to that attempt if it existed before the Session did. Callers
+     * acting on a specific Session pass that Session's creation time; callers
+     * releasing their own in-flight attempt pass nothing.
+     */
+    takenAtOrBefore?: Date;
+  } = {}
 ) {
   await prisma.chatRequestLease.deleteMany({
-    where: { id: promotionLeaseId(promotionId, userId) },
+    where: {
+      id: promotionLeaseId(promotionId, userId),
+      ...(options.takenAtOrBefore
+        ? { createdAt: { lte: options.takenAtOrBefore } }
+        : {}),
+    },
   });
 }
 
