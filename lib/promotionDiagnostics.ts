@@ -271,6 +271,7 @@ export async function runPromotionDiagnostics(
       storedPromotionCodeExists: linkage.storedPromotionCodeExists,
       storedPromotionCodeMismatches: linkage.storedPromotionCodeMismatches,
       exactCodeCandidates: linkage.exactCodeCandidates,
+      exactCodeSearchPerformed: linkage.exactCodeSearchPerformed,
       recommendation: linkage.recommendation,
     };
   }

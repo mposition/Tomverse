@@ -304,10 +304,17 @@ export type StripeLinkageFacts = {
     adoptable: boolean;
   }[];
   /**
-   * Whether the exact-code search ran at all. Optional so an older caller keeps
-   * the previous reading, which is only wrong for a healthy linkage.
+   * Whether the exact-code search ran at all.
+   *
+   * Required, not optional. It was optional once, on the reasoning that an
+   * older caller should keep the previous reading -- and the one real caller
+   * then built this object field by field and never copied it, so the fix
+   * shipped to production and changed nothing. `undefined` is not a safe
+   * default here: it is indistinguishable from "searched and found nothing",
+   * which is the wrong answer. Required makes the compiler ask the question at
+   * every construction site, which is the only place that knows.
    */
-  exactCodeSearchPerformed?: boolean;
+  exactCodeSearchPerformed: boolean;
   recommendation:
     | "healthy"
     | "relink_stored_object"
@@ -419,7 +426,7 @@ export const evaluateStripeLinkage = ({
     (item) => !item.adoptable && item.active
   );
 
-  if (facts.exactCodeSearchPerformed === false) {
+  if (!facts.exactCodeSearchPerformed) {
     // A healthy linkage returns before searching, so an empty candidate list
     // here means "not looked at", not "Stripe holds nothing". Reporting the
     // second is a claim the report never checked, and it turned a repaired
