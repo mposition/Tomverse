@@ -1,5 +1,12 @@
 # Release deviation — 2026-08-15, `391c933`
 
+> **Superseded on "what production serves".** Later the same day `78af657`
+> was merged to `main` and deployed — see
+> `.github/audits/release-deviation-2026-08-15__78af657.md`. Everything else
+> here still holds: `391c933` remains unverified, it is contained in the build
+> now running, its migration is still the only schema change of the three, and
+> the rollback target is still `851598eb`.
+
 **Production is running a build that no release checklist covers**, and the
 distance from the last verified build grew rather than closed. This is the
 second deviation in one day; the first
