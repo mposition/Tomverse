@@ -561,6 +561,8 @@ is split by reason:
 | `missing_cost_intent` | Written after the cutover, carrying none | One is an incident |
 | `dangling_reservation` | The run points at a row that is gone | One is an incident |
 | `invalid_cost_intent_payload` | The payload will not validate | One is an incident |
+| `zero_reserved_provider_cost` | Nothing was reserved for it | Counted; the catalogue check watches it |
+| `invalid_zero_cost_reservation` | A frozen positive cost with no hold | One is an incident |
 | `unclassified_missing_cost_intent` | No cutover configured | Warning naming the variable |
 
 History and defect are told apart by `AUTO_ROUTER_COST_INTENT_CUTOVER_AT`, the
@@ -568,6 +570,30 @@ moment intents began being written, compared against the reservation's own
 creation time. Unset, the two cannot be distinguished at all — so the unset
 configuration is what gets reported, rather than the alarm quietly answering
 "legacy" to everything.
+
+The last two are the difference between "nothing to price" and "the price went
+missing", and they are told apart by the reservation's own frozen numbers.
+`getChatBudgetReservedCostMicroUsd` rounds each component up, so any positive
+rate on a positive token count reserves at least one micro-dollar: zero
+reserved means every applicable rate is zero. That is a free model or an
+administrator override that flattened a real price, and the sweep cannot tell
+those apart — so the run reports the models by name, as `provider/modelId`
+counts, and `npm run check:model-pricing-db` reads the catalogue to say whether
+that price was meant. One model in that list nobody intended to be free is the
+whole signal; a per-occurrence page would only ever be about a turn behaving
+correctly.
+
+The empty hold proves something narrower than "the call was free": that zero
+was reserved against the provider budget. A native web search's own per-call
+charge sits outside that reservation and is not covered by it. A frozen positive cost with no hold is the other thing
+entirely: the hold and the intent are written together under one condition, so
+that combination means one of them was lost.
+
+Holds are checked per attempt index, never by asking whether the list is empty:
+a fallback turn holds for the other attempt, and the emptiness question would
+call that "reserved" for an attempt that reserved nothing. The fallback
+reservation path now also skips both halves at zero, the way acquisition
+always has — the two used to leave different payloads for the same free model.
 
 `unexpectedCostOutcome` is an incident on the first occurrence: the sweep
 cannot produce those outcomes by construction, so one means a contract broke.

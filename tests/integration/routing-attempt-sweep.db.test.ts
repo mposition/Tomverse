@@ -4,6 +4,7 @@ import { after, beforeEach, test } from "node:test";
 
 import {
   acquireChatAccess,
+  reserveAttemptProviderBudget,
   settleChatUsage,
   type ChatAccess,
   type ChatBudget,
@@ -1017,4 +1018,167 @@ test("a correction reaches the rollup the base row names, not the one the observ
   assert.equal(rollups[0].estimatedCostMicroUsd, 1_000_000);
   // The tokens the observation brought, which the estimate had none of.
   assert.equal(rollups[0].inputTokens, 10_000);
+});
+
+// A turn that reserved nothing, and the two ways a payload can say so.
+//
+// `microdollarsFor` rounds each component up, so any positive rate on a
+// positive token count reserves at least one micro-dollar. Zero reserved
+// means every applicable rate is zero -- a free model, or an administrator
+// override that flattened a real price. The sweep cannot tell those apart and
+// must not raise an incident for either; the catalogue check is what does.
+
+const makeFreeReservation = async (): Promise<ChatUsageReservation> => {
+  const user = await prisma.user.create({
+    data: { email: `sweep-free-${randomUUID()}@example.test`, plan: "Pro" },
+  });
+  const acquired = await acquireChatAccess(
+    {
+      kind: "user",
+      userId: user.id,
+      plan: "Pro",
+      subjectKey: `integration:user:${user.id}`,
+      ipKey: `integration:ip:${user.id}`,
+      planLimits: { dailyMessageLimit: 10_000, monthlyMessageLimit: 10_000 },
+    },
+    {
+      modelId: "gpt-5-6-luna",
+      minimumPlan: "Guest",
+      modelUsageClass: "standard",
+      usageCredits: 5,
+      inputTokens: 10_000,
+      maxOutputTokens: 10_000,
+      providerMaxOutputTokens: null,
+      reservedOutputTokens: 10_000,
+      // Every rate zero: the only way `reservedCost` reaches zero.
+      inputUsdPerMillionTokens: 0,
+      outputUsdPerMillionTokens: 0,
+      cachedInputPriceMultiplier: 1,
+      provider: "openai",
+      pricingVersion: "sweep-test",
+      costSource: "sweep-test",
+      longContextThresholdTokens: null,
+    },
+    { traceId: `trace-${randomUUID()}` }
+  );
+  await prisma.chatRequestLease.deleteMany({});
+  await prisma.chatCreditReservation.update({
+    where: { id: acquired.usageReservation.reservationId },
+    data: { expiresAt: new Date(Date.now() - 60_000) },
+  });
+  return acquired.usageReservation;
+};
+
+test("a turn that reserved nothing is counted, not alerted", async () => {
+  process.env.AUTO_ROUTER_COST_INTENT_CUTOVER_AT = new Date(
+    Date.now() - 24 * 60 * 60 * 1000
+  ).toISOString();
+  try {
+    const reservation = await makeFreeReservation();
+    const { runId } = await makeRun({ reservationId: reservation.reservationId });
+    const id = await makeAttempt(runId, { createdAt: ancient() });
+
+    const result = await sweepStaleRoutingAttempts();
+    // Created well after the cutover, so the old classification would have
+    // called this a defect and paged somebody about a turn behaving correctly.
+    assert.equal(result.noCostReasons.zero_reserved_provider_cost, 1);
+    assert.equal(result.noCostReasons.missing_cost_intent, 0);
+    assert.equal(result.noCostReasons.invalid_zero_cost_reservation, 0);
+    assert.equal(await outcomeOf(id), "unknown_after_dispatch");
+    assert.equal(await attemptCostRow(reservation.reservationId), null);
+  } finally {
+    delete process.env.AUTO_ROUTER_COST_INTENT_CUTOVER_AT;
+  }
+});
+
+test("a reservation that froze a positive cost and holds nothing is a defect", async () => {
+  // The combination that means one of the pair was lost: the two are written
+  // together under one condition, so a frozen price with no hold is money
+  // authorized whose record is gone.
+  process.env.AUTO_ROUTER_COST_INTENT_CUTOVER_AT = new Date(
+    Date.now() - 24 * 60 * 60 * 1000
+  ).toISOString();
+  try {
+    const reservation = await makeCrashedReservation();
+    const durable = await prisma.chatCreditReservation.findUniqueOrThrow({
+      where: { id: reservation.reservationId },
+    });
+    const payload = durable.reservationPayload as {
+      entries?: { key: string }[];
+      attemptHolds?: unknown[];
+      attemptCostIntents?: unknown[];
+    };
+    // The holds go, and so do the provider entries derived from them: an
+    // entry with no hold behind it is refused on read for its own reason, and
+    // this test is about the one after that.
+    payload.entries = (payload.entries ?? []).filter(
+      (entry) => !entry.key.startsWith("provider:")
+    );
+    payload.attemptHolds = [];
+    delete payload.attemptCostIntents;
+    await prisma.$executeRaw`
+      UPDATE "ChatCreditReservation"
+      SET "reservationPayload" = ${payload}::jsonb
+      WHERE "id" = ${reservation.reservationId}
+    `;
+
+    const { runId } = await makeRun({ reservationId: reservation.reservationId });
+    await makeAttempt(runId, { createdAt: ancient() });
+
+    const result = await sweepStaleRoutingAttempts();
+    assert.equal(result.noCostReasons.invalid_zero_cost_reservation, 1);
+    assert.equal(result.noCostReasons.zero_reserved_provider_cost, 0);
+  } finally {
+    delete process.env.AUTO_ROUTER_COST_INTENT_CUTOVER_AT;
+  }
+});
+
+test("a fallback that reserves nothing leaves the same shape the primary does", async () => {
+  // The two paths used to disagree: acquisition skipped the hold and the
+  // intent together, and the fallback wrote a zero hold with an intent beside
+  // it -- so a crashed free primary and a crashed free fallback produced
+  // payloads the sweep classified differently.
+  const reservation = await makeFreeReservation();
+  const day = await prisma.chatUsageBucket.findFirst({
+    where: { period: "provider-cost-day" },
+  });
+  const month = await prisma.chatUsageBucket.findFirst({
+    where: { period: "provider-cost-month" },
+  });
+  const starts = {
+    day: day?.periodStart ?? new Date(),
+    month: month?.periodStart ?? new Date(),
+  };
+
+  const result = await reserveAttemptProviderBudget({
+    reservationId: reservation.reservationId,
+    userId: reservation.userId ?? null,
+    attemptIndex: 1,
+    provider: "google",
+    costIntent: {
+      modelId: "fallback-model",
+      provider: "google",
+      estimatedInputTokens: 10_000,
+      reservedOutputTokens: 10_000,
+      inputUsdPerMillionTokens: 0,
+      outputUsdPerMillionTokens: 0,
+      cachedInputPriceMultiplier: 1,
+      pricingVersion: "sweep-test",
+    },
+    reservedMicroUsd: 0,
+    periodStarts: starts,
+  });
+  assert.equal(result.reserved, true);
+  assert.deepEqual(result.reserved === true && result.entries, []);
+
+  const durable = await prisma.chatCreditReservation.findUniqueOrThrow({
+    where: { id: reservation.reservationId },
+  });
+  const payload = durable.reservationPayload as {
+    attemptHolds?: unknown[];
+    attemptCostIntents?: unknown[];
+  };
+  // Neither half written, exactly as acquisition leaves a free primary.
+  assert.deepEqual(payload.attemptHolds ?? [], []);
+  assert.deepEqual(payload.attemptCostIntents ?? [], []);
 });

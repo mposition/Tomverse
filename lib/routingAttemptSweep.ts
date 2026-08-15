@@ -89,6 +89,16 @@ export type StaleAttemptSweepResult = {
     /** The same total, split by why nothing could be priced. */
     noCostReasons: NoCostReasonCounts;
     /**
+     * Which models reserved nothing, as `provider/modelId` counts.
+     *
+     * The reason this is not buried in a per-occurrence log line. A free model
+     * and a price an administrator flattened to zero are indistinguishable
+     * from inside the sweep, and the difference between them is which model it
+     * is -- so the models are what the run reports. One name appearing here
+     * that nobody meant to be free is the whole signal.
+     */
+    zeroReservedCostModels: Record<string, number>;
+    /**
      * Closed, and the cost writer returned something the sweep cannot produce.
      *
      * `corrected`, `adjustment_pending` and `identity_mismatch` all describe a
@@ -142,6 +152,33 @@ const costIntentCutover = (): Date | null => {
     return Number.isNaN(parsed.getTime()) ? null : parsed;
 };
 
+/**
+ * What acquisition would have reserved, recomputed from the frozen payload.
+ *
+ * Deliberately the same arithmetic `getChatBudgetReservedCostMicroUsd` uses --
+ * `Math.ceil` per component -- because the question is exactly "would the
+ * `reservedCost > 0` guard have taken a hold". Rounding up means any positive
+ * rate on a positive token count reserves at least one micro-dollar, so zero
+ * here is only reachable when every applicable rate is zero.
+ *
+ * Answerable only for attempt 0, whose price the reservation froze. A fallback
+ * ran on a model the payload does not carry the rates for, so its own intent
+ * is the only record -- and if that is missing, the reservation cannot say
+ * what it would have been.
+ */
+const frozenReservedCostMicroUsd = (
+    canonical: { inputTokens: number; reservedOutputTokens: number; inputUsdPerMillionTokens: number; outputUsdPerMillionTokens: number },
+    attemptIndex: number
+): number => {
+    if (attemptIndex !== 0) return 0;
+    return (
+        Math.ceil(canonical.inputTokens * canonical.inputUsdPerMillionTokens) +
+        Math.ceil(
+            canonical.reservedOutputTokens * canonical.outputUsdPerMillionTokens
+        )
+    );
+};
+
 /** Why an attempt was closed without a cost row. */
 export type NoCostReason =
     /** No reservation at all: an instrumentation-only run. Intended. */
@@ -150,6 +187,29 @@ export type NoCostReason =
     | "legacy_missing_cost_intent"
     /** Created after the cutover and carrying no intent. A defect. */
     | "missing_cost_intent"
+    /**
+     * Nothing was reserved for this attempt, so there is no intent to carry.
+     *
+     * Not "the call was free" -- it is the narrower fact that the provider
+     * budget had zero reserved against it, which every rate being zero is the
+     * only way to reach: `microdollarsFor` rounds up, so any positive rate on
+     * a positive token count reserves at least one micro-dollar. A native web
+     * search's own per-call charge is outside this and is not covered by it.
+     *
+     * Counted rather than alerted per occurrence -- a turn with nothing
+     * reserved has nothing the sweep could have recorded -- but the models it
+     * happens on are reported, because "every call on this model is free" is
+     * usually a bad price override rather than a free model.
+     */
+    | "zero_reserved_provider_cost"
+    /**
+     * A reservation that froze a positive cost and holds nothing for it.
+     *
+     * The two are written together under one condition, so this combination
+     * means one of them was lost. Money was authorized and the record of what
+     * it authorized is gone.
+     */
+    | "invalid_zero_cost_reservation"
     /** No cutover is configured, so the two above cannot be told apart. */
     | "unclassified_missing_cost_intent"
     /** The run points at a reservation row that is not there. */
@@ -163,6 +223,8 @@ const emptyNoCostReasons = (): NoCostReasonCounts => ({
     no_reservation: 0,
     legacy_missing_cost_intent: 0,
     missing_cost_intent: 0,
+    zero_reserved_provider_cost: 0,
+    invalid_zero_cost_reservation: 0,
     unclassified_missing_cost_intent: 0,
     dangling_reservation: 0,
     invalid_cost_intent_payload: 0,
@@ -218,6 +280,7 @@ export const sweepStaleRoutingAttempts = async (
     let unexpectedCostOutcome = 0;
     let alreadyClosed = 0;
     const noCostReasons = emptyNoCostReasons();
+    const zeroReservedCostModels: Record<string, number> = {};
     let failed = 0;
     for (const row of rows) {
         try {
@@ -231,7 +294,7 @@ export const sweepStaleRoutingAttempts = async (
             // The reason travels back through a holder rather than the return
             // value, because `resolveCost` owes its caller a cost record and
             // nothing else. Only read when the record came back null.
-            const noCost: { reason?: NoCostReason } = {};
+            const noCost: { reason?: NoCostReason; model?: string } = {};
             const closed = await closeAttemptWithCost({
                 attemptId: row.id,
                 outcome: "unknown_after_dispatch",
@@ -257,6 +320,10 @@ export const sweepStaleRoutingAttempts = async (
                 case "skipped":
                     closedWithoutCostIntent += 1;
                     noCostReasons[noCost.reason ?? "no_reservation"] += 1;
+                    if (noCost.model) {
+                        zeroReservedCostModels[noCost.model] =
+                            (zeroReservedCostModels[noCost.model] ?? 0) + 1;
+                    }
                     break;
                 case "corrected":
                 case "adjustment_pending":
@@ -300,6 +367,7 @@ export const sweepStaleRoutingAttempts = async (
         closedWithExistingCost,
         closedWithoutCostIntent,
         noCostReasons,
+        zeroReservedCostModels,
         unexpectedCostOutcome,
         alreadyClosed,
         failed,
@@ -329,7 +397,7 @@ export const sweepStaleRoutingAttempts = async (
 const crashCostRecord = async (
     tx: Prisma.TransactionClient,
     row: SweepRow,
-    noCost: { reason?: NoCostReason }
+    noCost: { reason?: NoCostReason; model?: string }
 ): Promise<AttemptCostRecord | null> => {
     const unavailable = (reason: NoCostReason, extra?: Record<string, unknown>) => {
         noCost.reason = reason;
@@ -367,11 +435,12 @@ const crashCostRecord = async (
     }
 
     let intent: AttemptCostIntent | null = null;
+    let canonical: ReturnType<typeof deserializeReservation> | null = null;
     try {
         // Pure validation of a payload already in hand. This is the only thing
         // the catch below may be about, which is what makes the reason it logs
         // mean something.
-        const canonical = deserializeReservation(reservation.reservationPayload);
+        canonical = deserializeReservation(reservation.reservationPayload);
         intent = costIntentFor(canonical.attemptCostIntents, row.attemptIndex);
     } catch (error) {
         return unavailable("invalid_cost_intent_payload", {
@@ -380,20 +449,61 @@ const crashCostRecord = async (
     }
 
     if (!intent) {
-        // Whether this is history or a defect depends entirely on when the
-        // reservation was written, and nothing else can tell them apart.
-        const cutover = costIntentCutover();
-        if (!cutover) {
-            return unavailable("unclassified_missing_cost_intent", {
-                configured: COST_INTENT_CUTOVER_ENV,
+        // Four different facts arrive here, and only two of them are defects.
+        //
+        // The shape of the payload decides first. A payload with no
+        // `attemptHolds` field at all predates the field: history before the
+        // cutover, and after it a writer producing the old shape, which is a
+        // defect. A payload that *has* the field and no hold for this attempt
+        // reserved nothing for it -- and whether that is fine depends on
+        // whether it froze a cost it then failed to hold.
+        //
+        // Per attempt index, never on the array being empty: a fallback turn
+        // has a hold for the other attempt, and asking whether the list is
+        // empty would call that "reserved" for an attempt that reserved
+        // nothing.
+        if (!canonical || !canonical.attemptHolds) {
+            const cutover = costIntentCutover();
+            if (!cutover) {
+                return unavailable("unclassified_missing_cost_intent", {
+                    configured: COST_INTENT_CUTOVER_ENV,
+                });
+            }
+            return unavailable(
+                reservation.createdAt < cutover
+                    ? "legacy_missing_cost_intent"
+                    : "missing_cost_intent",
+                { reservationCreatedAt: reservation.createdAt.toISOString() }
+            );
+        }
+
+        const heldForAttempt = canonical.attemptHolds.some(
+            (hold) => hold.attemptIndex === row.attemptIndex
+        );
+        // A hold with no intent never reaches here: the payload validator
+        // refuses that pair on read, and the catch above reported it. Kept as
+        // a named outcome so a validator that ever stops refusing it does not
+        // land silently in the benign branch below.
+        if (heldForAttempt) {
+            return unavailable("invalid_cost_intent_payload", {
+                detail: "hold without intent survived validation",
             });
         }
-        return unavailable(
-            reservation.createdAt < cutover
-                ? "legacy_missing_cost_intent"
-                : "missing_cost_intent",
-            { reservationCreatedAt: reservation.createdAt.toISOString() }
-        );
+
+        // Nothing held. The only defensible reason is that nothing was
+        // reservable: the reservation's own frozen price, recomputed exactly
+        // as acquisition computed it, comes to zero. Anything else means a
+        // reservation authorized money and lost the record of it.
+        const frozen = frozenReservedCostMicroUsd(canonical, row.attemptIndex);
+        if (frozen > 0) {
+            return unavailable("invalid_zero_cost_reservation", {
+                frozenReservedCostMicroUsd: frozen,
+            });
+        }
+        noCost.model = `${canonical.provider}/${canonical.modelId}`;
+        return unavailable("zero_reserved_provider_cost", {
+            model: noCost.model,
+        });
     }
 
     return {

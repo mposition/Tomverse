@@ -3868,6 +3868,20 @@ export const reserveAttemptProviderBudget = async (input: {
             throw new AttemptBudgetRefusal("reservation_not_open");
         }
         const canonical = deserializeReservation(durable.reservationPayload);
+        // Nothing to reserve, so nothing is written -- the same shape
+        // acquisition leaves for a turn whose rates are all zero, where the
+        // `reservedCost > 0` guard skips the hold and the intent together.
+        //
+        // The two paths used to disagree here: this one wrote a zero hold and
+        // an intent beside it, so a crashed fallback and a crashed primary on
+        // the same free model left payloads a sweep classified differently.
+        // Refusing on the budget would be the other way to be consistent, and
+        // it is the wrong one: a call that reserves nothing consumes none of
+        // the budget the guardrail bounds, so there is nothing for it to
+        // refuse.
+        if (amount === 0) {
+            return { reserved: true as const, entries: [] };
+        }
         // A reservation written before `attemptHolds` existed carries its
         // primary hold only in `entries`. Adopting it as attempt 0's is not
         // bookkeeping: `serializeReservation` derives the provider entries

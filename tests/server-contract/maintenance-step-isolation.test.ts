@@ -45,6 +45,7 @@ const reset = () => {
   costAdjustmentBacklogPending = 0;
   costAdjustmentBacklogOldestMs = null;
   sweepNoCostReasons = emptyNoCost();
+  sweepZeroReservedCostModels = {};
   sweepUnexpectedOutcome = 0;
   sweepAgedPending = 0;
   sweepEligiblePending = 0;
@@ -109,6 +110,7 @@ mock.module(mod("lib/routingAttemptSweep.ts"), {
       closedWithExistingCost: 0,
       closedWithoutCostIntent: sweepNoCostTotal(),
       noCostReasons: sweepNoCostReasons,
+      zeroReservedCostModels: sweepZeroReservedCostModels,
       unexpectedCostOutcome: sweepUnexpectedOutcome,
       alreadyClosed: 0,
       failed: 0,
@@ -234,6 +236,7 @@ type CleanupResult = Record<string, unknown> & {
   failedSteps: { step: string; error: string }[];
   staleRoutingAttempts: {
     closedCostInserted: number;
+    zeroReservedCostModels: Record<string, number>;
     eligiblePending: number;
     agedPending: number;
     oldestEligibleMs: number | null;
@@ -244,6 +247,8 @@ const emptyNoCost = () => ({
   no_reservation: 0,
   legacy_missing_cost_intent: 0,
   missing_cost_intent: 0,
+  zero_reserved_provider_cost: 0,
+  invalid_zero_cost_reservation: 0,
   unclassified_missing_cost_intent: 0,
   dangling_reservation: 0,
   invalid_cost_intent_payload: 0,
@@ -251,6 +256,7 @@ const emptyNoCost = () => ({
 let sweepNoCostReasons = emptyNoCost();
 const sweepNoCostTotal = () =>
   Object.values(sweepNoCostReasons).reduce((sum, count) => sum + count, 0);
+let sweepZeroReservedCostModels: Record<string, number> = {};
 let sweepUnexpectedOutcome = 0;
 let sweepAgedPending = 0;
 let sweepEligiblePending = 0;
@@ -480,4 +486,29 @@ test("the backlog alarms on what the sweep would act on, not on what is merely o
   sweepOldestEligibleMs = 61 * 60 * 1000;
   await (await load()).cleanupExpiredData();
   assert.deepEqual(reportedIncidents, ["CHAT_ATTEMPT_SWEEP_BACKLOG"]);
+});
+
+test("a turn that reserved nothing is not a defect; one that lost its hold is", async () => {
+  // `microdollarsFor` rounds up, so zero reserved means every rate is zero --
+  // a free model or a bad override, and the sweep cannot tell those apart.
+  // Paging on it would be paging about a turn behaving correctly; the
+  // catalogue check is what notices a price flattened to zero.
+  reset();
+  sweepNoCostReasons.zero_reserved_provider_cost = 25;
+  sweepZeroReservedCostModels = { "openai/some-free-model": 25 };
+  const quiet = await (await load()).cleanupExpiredData();
+  assert.deepEqual(reportedIncidents, []);
+  // Quiet is not the same as buried. Which model reserved nothing is the only
+  // thing that separates a free model from a flattened price, so the run says
+  // it by name.
+  assert.deepEqual(quiet.staleRoutingAttempts?.zeroReservedCostModels, {
+    "openai/some-free-model": 25,
+  });
+
+  // A frozen positive cost with nothing held is the other thing entirely: the
+  // hold and the intent are written together, so this means one was lost.
+  reset();
+  sweepNoCostReasons.invalid_zero_cost_reservation = 1;
+  await (await load()).cleanupExpiredData();
+  assert.deepEqual(reportedIncidents, ["CHAT_COST_INTENT_UNAVAILABLE"]);
 });
