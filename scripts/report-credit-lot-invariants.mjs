@@ -89,7 +89,12 @@ const report = {
   },
   violationCount: printable.length,
   violations: printable,
-  readyToValidate: missing.length === 0 && printable.length === 0,
+  // "There is something left to validate, and it is safe to." Once the
+  // follow-up migration has run there is nothing left, and a report still
+  // reading `true` would go on telling the next operator to write a migration
+  // that is already in the tree.
+  readyToValidate:
+    missing.length === 0 && unvalidated.length > 0 && printable.length === 0,
 };
 
 if (json) {
@@ -119,17 +124,26 @@ if (json) {
     );
   }
 
-  console.log(
-    report.readyToValidate
-      ? "\nReady to validate: add the follow-up migration with\n" +
-          CONSTRAINTS.map(
-            (name) =>
-              `  ALTER TABLE "CreditLot" VALIDATE CONSTRAINT "${name}";`
-          ).join("\n")
-      : "\nNot ready to validate. Correct each row above with a compensating\n" +
-          "CreditLedgerEntry -- never by editing the balance alone, which would\n" +
-          "leave the row and its history disagreeing -- then re-run this."
-  );
+  if (report.readyToValidate) {
+    console.log(
+      "\nReady to validate: add the follow-up migration with\n" +
+        CONSTRAINTS.map(
+          (name) => `  ALTER TABLE "CreditLot" VALIDATE CONSTRAINT "${name}";`
+        ).join("\n")
+    );
+  } else if (missing.length === 0 && unvalidated.length === 0) {
+    console.log(
+      "\nNothing left to validate: both constraints are validated on this\n" +
+        "database, so Postgres has checked every existing row as well as every\n" +
+        "write. Re-run this after an incident, not as a step."
+    );
+  } else {
+    console.log(
+      "\nNot ready to validate. Correct each row above with a compensating\n" +
+        "CreditLedgerEntry -- never by editing the balance alone, which would\n" +
+        "leave the row and its history disagreeing -- then re-run this."
+    );
+  }
 }
 
 await prisma.$disconnect();
