@@ -289,3 +289,53 @@ export function requiresStreamingParse(
 ): boolean {
     return entry.uncompressedBytes > limits.maxSyncJsonParseBytes;
 }
+
+/**
+ * One entry's buffered text, turned into conversation items — or abandoned.
+ *
+ * The two roles are held to different standards, and that asymmetry is the
+ * whole point of this function.
+ *
+ * `conversations` names the authoritative payload. If it will not parse, the
+ * import has nothing to import, so the failure is raised and the caller fails
+ * closed.
+ *
+ * `candidate` is a JSON entry whose purpose is unknown. Export layouts move
+ * the payload between versions, so anything that is not obviously metadata is
+ * opened in case it holds conversations; it failing to parse means only that
+ * it did not. Ending the import over one would throw away the payload sitting
+ * beside it.
+ *
+ * That is not hypothetical. A 2026-08 Claude export ships `users.json`,
+ * `memories.json`, `login_history.json`, `projects/<uuid>.json` and
+ * `reflections/<uuid>.json` next to `conversations.json`. None are in the
+ * metadata skip list, so all six classify as `candidate`, and several hold a
+ * JSON *object*. The caller used to spread the parsed value straight into an
+ * array, so an object threw a bare `TypeError` — not one of the typed archive
+ * errors, therefore the catch-all `unreadable_archive`. The user was told
+ * their export could not be read while three megabytes of readable
+ * conversations sat in the same file.
+ *
+ * A skipped candidate is reported to nobody, deliberately: nobody asked for
+ * `login_history.json` to be imported, so its shape is not their concern.
+ */
+export function readArchiveEntryItems(
+    text: string,
+    role: "conversations" | "candidate"
+): { items: unknown[] } | { skipped: true } {
+    let value: unknown;
+    try {
+        value = JSON.parse(text);
+    } catch (error) {
+        if (role === "candidate") return { skipped: true };
+        throw error;
+    }
+    if (!Array.isArray(value)) {
+        if (role === "candidate") return { skipped: true };
+        throw new ExternalImportArchiveError(
+            "The entry is not a list of conversations.",
+            "no_conversation_data"
+        );
+    }
+    return { items: value };
+}
