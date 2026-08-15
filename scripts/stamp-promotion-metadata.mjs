@@ -121,6 +121,7 @@ const main = async () => {
     promotionCodeMismatches,
     canUseStripePromotionCode,
     describeMismatches,
+    promotionCodeCouponId,
     stripeKeyLiveMode,
   } = await import("../lib/stripePromotionProvisioningCore.ts");
   const { prisma } = await import("../lib/prisma.ts");
@@ -195,10 +196,7 @@ const main = async () => {
   // The promotion code must hang off the coupon the database names. Without
   // this the tool could stamp a coupon that no checkout ever reaches, leaving
   // the real one unstamped and the failure unchanged.
-  const attachedCouponId =
-    typeof promotionCode.coupon === "string"
-      ? promotionCode.coupon
-      : promotionCode.coupon?.id || null;
+  const attachedCouponId = promotionCodeCouponId(promotionCode);
   if (attachedCouponId !== promotion.stripeCouponId) {
     fail(
       `Promotion code ${promotionCode.id} is attached to coupon ${attachedCouponId || "-"}, not the stored ${promotion.stripeCouponId}. Refusing to stamp two objects that are not a pair.`
@@ -232,10 +230,7 @@ const main = async () => {
         livemode: codeObject.livemode,
         code: codeObject.code,
         metadata: codeObject.metadata || {},
-        couponId:
-          typeof codeObject.coupon === "string"
-            ? codeObject.coupon
-            : codeObject.coupon?.id || null,
+        couponId: promotionCodeCouponId(codeObject),
         active: codeObject.active,
         expiresAtSeconds: codeObject.expires_at ?? null,
         maxRedemptions: codeObject.max_redemptions ?? null,

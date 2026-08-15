@@ -17,6 +17,7 @@ import {
   fatalMismatches,
   isMissingResourceStripeError,
   isRetryableStripeError,
+  promotionCodeCouponId,
   promotionCodeIdempotencyKey,
   promotionCodeMismatches,
   promotionCouponIdempotencyKey,
@@ -97,34 +98,6 @@ const couponFacts = (coupon: Stripe.Coupon): StripeCouponFacts => ({
   metadata: coupon.metadata ?? null,
   appliesToProducts: coupon.applies_to?.products ?? null,
 });
-
-/**
- * The coupon id, wherever this SDK version keeps it.
- *
- * Recent API versions moved it from `promotion_code.coupon` to
- * `promotion_code.promotion.coupon`. Reading only the old field yields
- * `undefined`, which would look like "no coupon linked" and send a perfectly
- * healthy promotion down the conflict path.
- */
-const promotionCodeCouponId = (
-  promotionCode: Stripe.PromotionCode
-): string | null => {
-  const record = promotionCode as unknown as Record<string, unknown>;
-  const legacy = record.coupon;
-  if (typeof legacy === "string") return legacy;
-  if (legacy && typeof legacy === "object") {
-    const id = (legacy as Record<string, unknown>).id;
-    if (typeof id === "string") return id;
-  }
-  const promotion = record.promotion as Record<string, unknown> | undefined;
-  const coupon = promotion?.coupon;
-  if (typeof coupon === "string") return coupon;
-  if (coupon && typeof coupon === "object") {
-    const id = (coupon as Record<string, unknown>).id;
-    if (typeof id === "string") return id;
-  }
-  return null;
-};
 
 const promotionCodeFacts = (
   promotionCode: Stripe.PromotionCode

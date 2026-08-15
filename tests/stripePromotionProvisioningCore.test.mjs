@@ -12,6 +12,7 @@ import {
   externalCheckoutError,
   isMissingResourceStripeError,
   isRetryableStripeError,
+  promotionCodeCouponId,
   promotionCodeIdempotencyKey,
   promotionCodeMismatches,
   promotionCouponIdempotencyKey,
@@ -702,4 +703,58 @@ test("a stranger's code is still refused whatever its plan stamp says", () => {
     describeMismatches(mismatches).includes("identity:metadata_promotion_id")
   );
   assert.equal(canUseStripePromotionCode(mismatches), false);
+});
+
+/**
+ * Where the coupon id lives on a raw promotion code.
+ *
+ * Recent API versions moved it from `promotion_code.coupon` to
+ * `promotion_code.promotion.coupon`, and a caller that reads only the old field
+ * sees `undefined` -- indistinguishable from "no coupon linked". Production hit
+ * exactly that: an operator tool with its own copy of the extraction refused a
+ * healthy pair, reporting the promotion code as attached to no coupon at all.
+ */
+
+test("the legacy field is read when the API version still sends it", () => {
+  assert.equal(promotionCodeCouponId({ coupon: "cpn_live" }), "cpn_live");
+  assert.equal(promotionCodeCouponId({ coupon: { id: "cpn_live" } }), "cpn_live");
+});
+
+test("the nested field is read when the API version moved it", () => {
+  assert.equal(
+    promotionCodeCouponId({ promotion: { coupon: "cpn_live" } }),
+    "cpn_live"
+  );
+  assert.equal(
+    promotionCodeCouponId({ promotion: { coupon: { id: "cpn_live" } } }),
+    "cpn_live"
+  );
+});
+
+test("the legacy field wins when both are present", () => {
+  // Not a preference so much as a statement that the two never disagree in
+  // practice; picking one deterministically keeps the answer stable across SDK
+  // upgrades rather than flipping with field order.
+  assert.equal(
+    promotionCodeCouponId({
+      coupon: "cpn_legacy",
+      promotion: { coupon: "cpn_nested" },
+    }),
+    "cpn_legacy"
+  );
+});
+
+test("an object with no coupon anywhere answers null, not undefined", () => {
+  // `null` is the shape `promotionCodeMismatches()` treats as "coupon missing".
+  // `undefined` would compare unequal to a stored id and read as a different
+  // coupon instead.
+  assert.equal(promotionCodeCouponId({}), null);
+  assert.equal(promotionCodeCouponId({ promotion: {} }), null);
+  assert.equal(promotionCodeCouponId(null), null);
+  assert.equal(promotionCodeCouponId(undefined), null);
+});
+
+test("a non-string id is not passed off as one", () => {
+  assert.equal(promotionCodeCouponId({ coupon: { id: 42 } }), null);
+  assert.equal(promotionCodeCouponId({ coupon: 42 }), null);
 });
