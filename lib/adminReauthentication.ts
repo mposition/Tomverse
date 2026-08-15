@@ -22,18 +22,28 @@ export class AdminReauthenticationRequiredError extends Error {
 // The decision itself lives in lib/adminReauthenticationCore.ts so it can be
 // unit-tested without a session or an environment, and so the clock-skew rule
 // (a claim dated far in the future buys no step-up window) has one home.
+//
+// Two callers, one policy. A page cannot use the assertion below -- it has to
+// *render* something when the window is spent, and catching a control-flow
+// exception to choose a view is easy to get backwards -- so it reads this
+// predicate instead. Both go through the same environment lookup, so the
+// reauthentication page and `/api/admin/**` cannot reach different conclusions
+// about the same session, which is what a surface re-implementing the window
+// would eventually produce.
+export const hasRecentAdminAuthentication = (
+  session: Session | null | undefined
+) =>
+  Boolean(session?.user?.id) &&
+  isRecentAdminAuthentication({
+    authenticatedAt: session?.user?.authenticatedAt,
+    recentAuthMinutes: resolveRecentAuthMinutes(
+      process.env.ADMIN_RECENT_AUTH_MINUTES
+    ),
+    now: new Date(),
+  });
+
 export async function assertRecentAdminAuthentication(session: Session) {
-  const userId = session.user?.id;
-  if (!userId) throw new AdminReauthenticationRequiredError();
-  if (
-    !isRecentAdminAuthentication({
-      authenticatedAt: session.user?.authenticatedAt,
-      recentAuthMinutes: resolveRecentAuthMinutes(
-        process.env.ADMIN_RECENT_AUTH_MINUTES
-      ),
-      now: new Date(),
-    })
-  ) {
+  if (!hasRecentAdminAuthentication(session)) {
     throw new AdminReauthenticationRequiredError();
   }
 }

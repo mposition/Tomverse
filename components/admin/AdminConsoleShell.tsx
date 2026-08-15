@@ -2,9 +2,10 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { Bell, Loader2, Menu, RefreshCw, Search, UserRound } from "lucide-react";
+import { Bell, Loader2, Menu, RefreshCw, Search } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { AppToastViewport } from "@/components/AppToastViewport";
+import { AdminAccountMenu } from "@/components/admin/AdminAccountMenu";
 import {
   AdminConsolePreferencesProvider,
   useAdminConsolePreferences,
@@ -206,7 +207,14 @@ function AdminConsoleChrome({
 
       <div className="lg:pl-64">
         <header className="sticky top-0 z-40 border-b border-zinc-800 bg-zinc-950/95 backdrop-blur-xl">
-          <div className="flex h-16 items-center gap-3 px-4 sm:px-6">
+          {/*
+            Tighter gutters and gaps below `sm`. The header now carries one
+            more control than it used to, and at 320px with a 200% root font
+            every spacing unit is doubled too -- so the space the account menu
+            needs is taken from the padding rather than from the menu, which
+            would have to shrink below a usable touch target to pay for it.
+          */}
+          <div className="flex h-16 items-center gap-2 px-3 sm:gap-3 sm:px-6">
             <button
               type="button"
               onClick={openDrawer}
@@ -300,17 +308,16 @@ function AdminConsoleChrome({
                 </div>
               ) : null}
             </div>
-            <div className="hidden items-center gap-2 rounded-xl border border-zinc-800 px-2.5 py-1.5 md:flex">
-              <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-zinc-800">
-                <UserRound className="h-3.5 w-3.5" aria-hidden />
-              </span>
-              <span className="max-w-36 truncate text-xs font-bold text-zinc-300">
-                {user.name || user.email || "Administrator"}
-              </span>
-              <span className="rounded bg-purple-500/10 px-1.5 py-0.5 text-xs font-bold uppercase text-purple-200">
-                {role}
-              </span>
-            </div>
+            {/*
+              Not `hidden md:flex` any more. This was a label, so on a phone
+              the console had neither a sign-out nor a way back to the app --
+              and "sign out completely, then sign in again" is the only
+              instruction that clears an expired administrator window.
+            */}
+            <AdminAccountMenu
+              user={{ name: user.name, email: user.email }}
+              role={role}
+            />
           </div>
         </header>
 

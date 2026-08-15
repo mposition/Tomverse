@@ -5,7 +5,7 @@ import { usePathname } from "next/navigation";
 import { useId, useRef, useState } from "react";
 import { dispatchAppToast } from "@/lib/appToast";
 import { adminDateTimeLabel } from "@/lib/adminDateTime";
-import { adminReauthenticationHref } from "@/lib/adminReauthenticationCore";
+import { adminRecentAuthenticationHref } from "@/lib/adminReauthenticationCore";
 import {
   ADMIN_SECURITY_NETWORK_FAILURE_MESSAGE,
   ADMIN_SECURITY_REASON_MIN_LENGTH,
@@ -541,7 +541,10 @@ export function AdminUserSecurityControls({
           <p>{failure.message}</p>
           {failure.requiresReauthentication ? (
             <Link
-              href={adminReauthenticationHref(pathname)}
+              // The step-up URL, not the console-session one: the console
+              // session is still valid here, and the plain reauthentication
+              // page answers that by redirecting straight back to this screen.
+              href={adminRecentAuthenticationHref(pathname)}
               data-testid="admin-security-reauthenticate-link"
               className="mt-2 inline-flex cursor-pointer items-center rounded-lg border border-red-400/50 px-2.5 py-1.5 font-bold text-red-50 underline-offset-4 transition hover:bg-red-500/20 hover:underline"
             >

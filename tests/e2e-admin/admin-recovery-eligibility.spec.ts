@@ -231,13 +231,16 @@ test.describe("account recovery eligibility", () => {
     await expect(failure).toContainText(
       "Your administrator sign-in is no longer recent enough for this control."
     );
+    // `mode=recent`, because it is the step-up window that expired and not the
+    // console session. Without it the reauthentication page sees an authorized
+    // session and redirects straight back to this screen.
     await expect(
       page.getByTestId("admin-security-reauthenticate-link")
     ).toHaveAttribute(
       "href",
       `/auth/admin-reauthenticate?callbackUrl=${encodeURIComponent(
         `/admin/users/${FIXTURE_CUSTOMERS.pendingDeletion.id}`
-      )}`
+      )}&mode=recent`
     );
     await expect(
       page.getByTestId("admin-security-account-status")

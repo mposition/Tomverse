@@ -18,6 +18,7 @@
 | Badge shape and per-entry derivation (client-safe) | `lib/adminNavigationBadges.ts` |
 | Badge loader (server-only) | `lib/adminNavigationCounts.ts` |
 | Shell, header, breadcrumb, auto-refresh | `components/admin/AdminConsoleShell.tsx` |
+| Header account menu (`Return to Tomverse`, `Sign out`) | `components/admin/AdminAccountMenu.tsx` |
 | Sidebar, collapsible groups, quick access | `components/admin/AdminSidebar.tsx` |
 | Command palette | `components/admin/AdminCommandPalette.tsx` |
 | Pinned pages and recents | `components/admin/AdminConsolePreferences.tsx` |
