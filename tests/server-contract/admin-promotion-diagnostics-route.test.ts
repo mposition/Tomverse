@@ -572,3 +572,56 @@ test("a stored coupon that no longer matches is reported as a blocker", async ()
     )
   );
 });
+
+test("a healthy linkage does not report an exact-code search it never ran", async () => {
+  // `inspectStripePromotionLinkage()` returns before the search when the linked
+  // object is usable, so its empty candidate list means "not looked at". This
+  // asserts the answer the route actually produces, not the predicate in
+  // isolation: the first version of this fix was correct in
+  // `evaluateStripeLinkage()` and never reached it, because
+  // `runPromotionDiagnostics()` builds its facts field by field and did not
+  // copy the new one. It shipped to production and changed nothing -- the panel
+  // still called a repaired promotion `no_stripe_object_for_code` while it was
+  // serving checkouts.
+  world.linkage = {
+    ...HEALTHY_LINKAGE,
+    exactCodeCandidates: [],
+    exactCodeSearchPerformed: false,
+    storedPromotionCodeMismatches: ["drift:expires_at"],
+  };
+  const body = (await (await post(VALID_BODY)).json()) as {
+    report: {
+      stripe: {
+        checks: { id: string; status: string; reason: string | null }[];
+        blockingReasons: string[];
+        driftReasons: string[];
+      };
+    };
+  };
+  const candidates = body.report.stripe.checks.find(
+    (item) => item.id === "exact_code_candidates"
+  );
+  assert.equal(candidates?.status, "not_checked");
+  assert.equal(candidates?.reason, "stored_linkage_is_usable");
+  assert.deepEqual(body.report.stripe.blockingReasons, []);
+  assert.deepEqual(body.report.stripe.driftReasons, ["drift:expires_at"]);
+});
+
+test("a search that ran and found nothing is still reported through the route", async () => {
+  world.linkage = {
+    ...HEALTHY_LINKAGE,
+    exactCodeCandidates: [],
+    exactCodeSearchPerformed: true,
+    storedPromotionCodeId: null,
+    storedPromotionCodeExists: false,
+  };
+  const body = (await (await post(VALID_BODY)).json()) as {
+    report: { stripe: { checks: { id: string; reason: string | null }[] } };
+  };
+  assert.equal(
+    body.report.stripe.checks.find(
+      (item) => item.id === "exact_code_candidates"
+    )?.reason,
+    "no_stripe_object_for_code"
+  );
+});
