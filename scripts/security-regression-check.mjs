@@ -3043,6 +3043,30 @@ const checks = [
     },
   },
   {
+    // The third way a golden stops judging anything, after the two below: not
+    // a flag in a workflow and not a substitute browser, but the config's own
+    // default. `updateSnapshots` defaults to "missing", which writes a
+    // baseline that does not exist yet and reports the test passed -- so a
+    // platform with no goldens produces a green run and a directory of files
+    // nobody reviewed, and the two are indistinguishable afterwards.
+    //
+    // Asserted here rather than left to review because the failure is
+    // invisible in CI: the canonical image always has its baselines, so the
+    // setting only matters on the runs that are not it, and those are the
+    // runs whose output gets committed.
+    name: "A missing visual baseline fails instead of being written",
+    file: "playwright.config.ts",
+    test: (source) =>
+      /^\s*updateSnapshots:\s*"none",$/m.test(source) &&
+      // Recording still has to work, or the guard would leave no way to move
+      // a baseline at all. The recorder passes the CLI flag, which overrides
+      // the config -- the assertion that only that one workflow carries it
+      // lives in the workflow entry above.
+      read(".github/workflows/visual-baseline-record.yml").includes(
+        "--update-snapshots"
+      ),
+  },
+  {
     // The goldens report `Not verified` on a substitute browser instead of a
     // red diff (tests/e2e/support/canonical-visual.ts). That is only safe
     // while no workflow can put CI into the substitute case: a runner with
