@@ -116,6 +116,37 @@ Turning `checkSuites` on is a change to the service's source settings and is
 not made by this document. It is named here so that whoever decides has the
 measurement rather than an impression.
 
+### Resolved, 2026-08-15
+
+The decision was made after this record named it, and the setting was read
+back rather than taken on report:
+
+| Environment | Branch | `checkSuites` |
+|---|---|---|
+| production | `main` | **true** (was `false`) |
+| staging | `develop` | **true** (was `false`) |
+
+Read from the Railway service configuration at 2026-08-15T09:58Z. A push now
+waits for its check suite before any deployment starts, so the margins tabled
+above cannot recur.
+
+Recorded here rather than in a new document because this is the one item the
+record named that has since changed, and a reader arriving at the table above
+should not be left measuring a race that no longer exists. It is an addition,
+not a revision: every other fact in this document still describes 2026-08-15
+as it happened.
+
+Two consequences worth knowing before the next urgent change:
+
+- **A red check suite now blocks the deploy entirely.** That is the point, and
+  it is also the thing that will be inconvenient at the worst moment. A manual
+  redeploy from the Railway dashboard bypasses the wait.
+- **Staging now waits too**, and `develop`'s suite includes the credit and
+  finance PostgreSQL scenarios at roughly 18 minutes. If that delay makes
+  staging less useful as a place to look at something quickly, turning it off
+  for staging alone is a coherent position — production carries the risk this
+  setting was turned on for.
+
 ## What would close this
 
 All three deviations at once, since `78af657` contains both earlier ones.
