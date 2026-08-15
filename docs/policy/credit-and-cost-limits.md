@@ -102,12 +102,20 @@ Max 전체입니다(Pro는 3,000이라 아래에 머뭅니다).
 5. **`bigint`를 API JSON으로 그대로 넘기지 않습니다.**
    `NextResponse.json()`에 `bigint`가 도달하면
    `Do not know how to serialize a BigInt`로 던집니다.
+6. **`?.count || 0`은 4번의 대체물이 아닙니다.** 행이 없을 때와 저장값이
+   `0`일 때는 둘 다 `number`가 나오므로, 이 관용구는 사용 이력이 **있는**
+   사용자에게만 실패합니다. 실패가 드물어 보이는 것이 아니라 테스트가
+   닿지 않는 곳으로 옮겨갈 뿐입니다 — `GET /api/admin/users/[userId]`가
+   그렇게 500을 냈습니다.
 
 관련 파일:
 
 - `prisma/migrations-archive/20260801130000_widen_chat_usage_bucket_count/migration.sql`
 - `lib/chatUsageBucketCount.ts`
 - `tests/usageBucketRange.test.mjs` (schema 자료형 + 플랜별 최대 저장값)
+- `tests/server-contract/admin-user-detail-route.test.ts`
+  (읽기 경계 한 곳의 응답 전체 — 사용 이력이 있는 사용자, 없는 사용자,
+  안전 정수 범위를 벗어난 값)
 - `tests/integration/credit-finance.db.test.ts`
   ("a cost bucket's running total crosses int4's ceiling",
   "the largest derived guardrail survives a database round trip")

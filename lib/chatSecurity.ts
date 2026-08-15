@@ -1,10 +1,11 @@
 import "server-only";
 
-import { createHash, createHmac, randomUUID, timingSafeEqual } from "node:crypto";
+import { createHmac, randomUUID, timingSafeEqual } from "node:crypto";
 import type { Prisma } from "@prisma/client";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { usageBucketCount } from "@/lib/chatUsageBucketCount";
+import { hashChatSubject, userChatUsageKey } from "@/lib/chatUsageKey";
 import {
     AVAILABLE_MODELS,
     canUseModelWithPlan,
@@ -799,12 +800,10 @@ const createGuestCookie = (guestId: string) => {
 };
 
 const hashKey = (scope: string, value: string) =>
-    createHash("sha256")
-        .update(`${scope}:${value}:${getSecret()}`)
-        .digest("hex");
+    hashChatSubject(scope, value, getSecret());
 
 export const getUserChatUsageKey = (userId: string) =>
-    `user:${hashKey("user", userId)}`;
+    userChatUsageKey(userId, getSecret());
 
 export const identifyChatCaller = (
     request: Request,

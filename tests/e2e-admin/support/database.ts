@@ -2,9 +2,11 @@ import { PrismaClient } from "@prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { Pool } from "pg";
 import { staticModelRegistrySeedRows } from "../../../lib/modelRegistryShared";
+import { userChatUsageKey } from "../../../lib/chatUsageKey";
 import {
   ADMIN_E2E_IDENTITIES,
   ADMIN_E2E_IDENTITY_KEYS,
+  adminE2eNextAuthSecret,
   resolveAdminE2EDatabaseUrl,
 } from "./harness-config";
 import {
@@ -27,6 +29,7 @@ import {
   FIXTURE_PROVIDER_USAGE,
   FIXTURE_REFUNDS,
   FIXTURE_RETENTION_RUN,
+  FIXTURE_USAGE,
   FIXTURE_WEBHOOK,
 } from "./fixture-data";
 
@@ -238,19 +241,28 @@ export const seedAdminFixtures = async () => {
   const utcMonthStart = new Date(
     Date.UTC(new Date(now).getUTCFullYear(), new Date(now).getUTCMonth(), 1)
   );
+  // The key the application derives, not the raw user id. Seeding `user:<id>`
+  // meant the admin routes -- which look the rows up by
+  // `getUserChatUsageKey()` -- never found them, so every usage figure in this
+  // suite read zero and the specs stayed green through a serialization failure
+  // that only fires once a bucket exists.
+  const usageKey = userChatUsageKey(
+    FIXTURE_CUSTOMERS.activePro.id,
+    adminE2eNextAuthSecret()
+  );
   await prisma.chatUsageBucket.createMany({
     data: [
       {
-        key: `user:${FIXTURE_CUSTOMERS.activePro.id}`,
+        key: usageKey,
         period: "day",
         periodStart: utcDayStart,
-        count: 17,
+        count: BigInt(FIXTURE_USAGE.creditsToday),
       },
       {
-        key: `user:${FIXTURE_CUSTOMERS.activePro.id}`,
+        key: usageKey,
         period: "month",
         periodStart: utcMonthStart,
-        count: 412,
+        count: BigInt(FIXTURE_USAGE.creditsMonth),
       },
     ],
   });

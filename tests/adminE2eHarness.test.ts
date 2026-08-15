@@ -27,6 +27,8 @@ import {
   isE2EDatabaseDisabled,
   isE2EFixtureMode,
 } from "../lib/e2eTestMode.ts";
+import { getUserChatUsageKey } from "../lib/chatSecurity.ts";
+import { userChatUsageKey } from "../lib/chatUsageKey.ts";
 
 /**
  * The safety contract for the Admin Console E2E harness.
@@ -215,6 +217,36 @@ test("the harness signs in with the cookie a production server actually reads", 
     "a production server prefixes the session cookie, so the harness must too"
   );
   assert.equal(ADMIN_E2E_LEGACY_SESSION_COOKIE_NAME, "next-auth.session-token");
+});
+
+test("the fixture writes usage rows under the key the application reads", () => {
+  // The regression this pins is the same shape as the cookie one above: the
+  // seeder wrote `ChatUsageBucket."key"` as `user:<id>` while every admin
+  // route looks it up through `getUserChatUsageKey()`, which is
+  // `user:<sha256>`. The rows were therefore never found, every usage figure
+  // in the suite read zero, and the specs stayed green through a production
+  // 500 that only occurs once a bucket exists.
+  //
+  // Both sides now derive the key from `lib/chatUsageKey.ts`; this asserts
+  // they still agree, and that the raw-id form is not what the application
+  // asks for.
+  const secret = adminE2eNextAuthSecret();
+  const userId = ADMIN_E2E_IDENTITIES.member.id;
+  const original = process.env.NEXTAUTH_SECRET;
+  process.env.NEXTAUTH_SECRET = secret;
+  try {
+    assert.equal(userChatUsageKey(userId, secret), getUserChatUsageKey(userId));
+  } finally {
+    if (original === undefined) delete process.env.NEXTAUTH_SECRET;
+    else process.env.NEXTAUTH_SECRET = original;
+  }
+  assert.notEqual(userChatUsageKey(userId, secret), `user:${userId}`);
+  // A different secret must name different rows, or the key would not be
+  // scoped to the deployment at all.
+  assert.notEqual(
+    userChatUsageKey(userId, secret),
+    userChatUsageKey(userId, `${secret}-rotated`)
+  );
 });
 
 test("the harness identity domain can never receive real mail", () => {
