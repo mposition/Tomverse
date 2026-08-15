@@ -60,7 +60,7 @@ for (const { name } of models) {
   }
 }
 
-const { unswept, cascadeOnly, errors } = auditUnsweptTables({
+const { unswept, cascadeOnly, errors, heldTables, decisions } = auditUnsweptTables({
   models,
   created,
   deleted,
@@ -93,6 +93,47 @@ if (unswept.length > 0) {
   );
 } else {
   console.log("\nNo unbounded, unswept table without a stated reason.");
+}
+
+// Printed before the registry problems and after the unswept list, because
+// it is the section most likely to be the reason someone ran this: a hold with
+// a date is the only entry here that changes on its own.
+for (const decision of decisions.open) {
+  console.log(
+    `\n${decision.tables.length} table(s) held for a decision due ${decision.dueByLabel}:\n` +
+      decision.tables.map((name) => `  - ${name}`).join("\n") +
+      `\n  Held as: ${decision.holds}\n` +
+      `  Owners:  ${decision.owners.join(", ")}\n` +
+      `  Decides:\n` +
+      decision.decides.map((item) => `    - ${item}`).join("\n") +
+      `\n  See ${decision.reference}.`
+  );
+}
+
+for (const decision of decisions.overdue) {
+  // Not a warning appended to the section above. The hold has failed, and the
+  // rows are now growing under a policy nobody wrote -- which is the state the
+  // date existed to prevent, so it gets its own heading and says how late it
+  // is rather than repeating "due 2026-08-28" as if that were still ahead.
+  console.log(
+    `\n${decision.tables.length} table(s) have NO retention policy and their decision is OVERDUE ` +
+      `by ${decision.daysPast} day(s) (was due ${decision.dueByLabel}):\n` +
+      decision.tables.map((name) => `  - ${name}`).join("\n") +
+      `\n  Owners:  ${decision.owners.join(", ")}\n` +
+      `  Still undecided:\n` +
+      decision.decides.map((item) => `    - ${item}`).join("\n") +
+      `\n  The hold said "${decision.holds}", and it still holds -- nothing here` +
+      `\n  may be deleted without the approval. What has lapsed is the promise` +
+      `\n  to decide, so this is an open policy question, not a cleanup task.` +
+      `\n  See ${decision.reference}.`
+  );
+}
+
+if (heldTables.length > 0 && decisions.open.length + decisions.overdue.length === 0) {
+  console.log(
+    `\n${heldTables.length} table(s) are held by a decision that is no longer registered. ` +
+      `Removing the decision does not settle them.`
+  );
 }
 
 if (errors.length > 0) {

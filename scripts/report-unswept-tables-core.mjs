@@ -84,12 +84,74 @@ export const RETAINED_TABLES = {
 };
 
 /**
+ * Tables held out of both lists on purpose, because the decision that would
+ * put them in one has an owner and a date and has not been made yet.
+ *
+ * This is a third state and needs to be, because the other two both read as
+ * settled. "Unswept" says nobody has looked; "retained" says someone decided
+ * to keep the rows. A reservation row is neither: it is the record linking a
+ * request to the credits it spent, so a sweep is a decision about billing
+ * evidence rather than about disk -- and "billing evidence" justifies keeping
+ * a row for a stated period, never keeping it forever by default. The row also
+ * carries a user link, so how long it is kept is a privacy question as much as
+ * a finance one.
+ *
+ * A hold without a date is how "not yet" becomes "never", so each entry
+ * carries one. Past it the report stops calling the hold current and reports
+ * it as an overdue decision -- the same rows, a different sentence, because a
+ * deadline that produces the identical output on either side of itself is not
+ * a deadline.
+ */
+export const PENDING_RETENTION_DECISIONS = [
+    {
+        key: "credit-reservations",
+        // One decision, not three. The three tables differ only in which
+        // workflow reserved the credits; every question below has the same
+        // answer for all of them, and answering them separately is how two of
+        // the three end up with a policy and the third does not.
+        tables: [
+            "ChatCreditReservation",
+            "ImageCreditReservation",
+            "MemoryExtractionCreditReservation",
+        ],
+        owners: ["finance-ops", "privacy/legal"],
+        // End of 2026-08-28 in AEST (UTC+10), as an instant, so the report
+        // does not depend on the reader's clock. This is the date a policy is
+        // approved by -- not a date anything is deleted on. Nothing may be
+        // deleted before the approval exists.
+        dueBy: "2026-08-28T14:00:00Z",
+        dueByLabel: "2026-08-28 (AEST)",
+        holds: "no deletion before approval",
+        decides: [
+            "retention period per status -- an expired `reserved` row, a `settled` row and a `refunded` row do not have the same evidential life, and one period for all three is a decision by omission",
+            "what happens at the end of it: deletion, or anonymisation that keeps the aggregate and drops the user link (if anonymisation, which columns)",
+            "account deletion, refunds and disputes: whether a deletion request removes these rows or the period outlives it, and what a live chargeback freezes",
+            "how far the period reaches into restorable backups, and what a deletion covers there",
+        ],
+        reference: ".github/RELEASE_CHECKLIST.md §7.8",
+    },
+];
+
+/** Every table named by a pending decision, mapped to the decision holding it. */
+export const pendingDecisionByTable = (
+    decisions = PENDING_RETENTION_DECISIONS
+) => {
+    const byTable = new Map();
+    for (const decision of decisions) {
+        for (const table of decision.tables) byTable.set(table, decision);
+    }
+    return byTable;
+};
+
+/**
  * @param {{
  *   models: { name: string, hasUserCascade: boolean }[],
  *   created: Set<string>,
  *   deleted: Set<string>,
  *   bounded?: Record<string, string>,
  *   retained?: Record<string, string>,
+ *   pending?: typeof PENDING_RETENTION_DECISIONS,
+ *   now?: Date,
  * }} input
  */
 export function auditUnsweptTables({
@@ -98,15 +160,26 @@ export function auditUnsweptTables({
     deleted,
     bounded = BOUNDED_TABLES,
     retained = RETAINED_TABLES,
+    pending = PENDING_RETENTION_DECISIONS,
+    now = new Date(),
 }) {
     const unswept = [];
     const cascadeOnly = [];
     const errors = [];
+    const held = pendingDecisionByTable(pending);
+    const heldTables = [];
 
     for (const { name, hasUserCascade } of models) {
         if (!created.has(name)) continue;
         if (deleted.has(name)) continue;
         if (name in bounded || name in retained) continue;
+        if (held.has(name)) {
+            // Not `unswept`. A table with an owner and a date is a different
+            // state from one nobody has looked at, and merging them loses the
+            // only fact that distinguishes them.
+            heldTables.push(name);
+            continue;
+        }
         if (hasUserCascade) {
             cascadeOnly.push(name);
             continue;
@@ -114,7 +187,11 @@ export function auditUnsweptTables({
         unswept.push(name);
     }
 
-    for (const name of [...Object.keys(bounded), ...Object.keys(retained)]) {
+    for (const name of [
+        ...Object.keys(bounded),
+        ...Object.keys(retained),
+        ...held.keys(),
+    ]) {
         if (!models.some((model) => model.name === name)) {
             errors.push(
                 `${name} is registered here but is not a model in prisma/schema.prisma. Remove the entry.`
@@ -126,6 +203,26 @@ export function auditUnsweptTables({
             errors.push(`${name} is registered as both bounded and retained.`);
         }
     }
+    for (const name of held.keys()) {
+        if (name in bounded || name in retained) {
+            errors.push(
+                `${name} is held for a pending decision and also registered as bounded or retained. A settled entry and an open decision cannot both be true of it.`
+            );
+        }
+    }
 
-    return { unswept, cascadeOnly, errors };
+    // Split rather than flagged, so the caller cannot print one sentence for
+    // both. An overdue decision is not a louder version of a current hold; it
+    // is the hold having failed.
+    const decisions = { open: [], overdue: [] };
+    for (const decision of pending) {
+        const due = new Date(decision.dueBy);
+        const overdue = now.getTime() > due.getTime();
+        const daysPast = overdue
+            ? Math.floor((now.getTime() - due.getTime()) / 86_400_000)
+            : 0;
+        decisions[overdue ? "overdue" : "open"].push({ ...decision, daysPast });
+    }
+
+    return { unswept, cascadeOnly, errors, heldTables, decisions };
 }
