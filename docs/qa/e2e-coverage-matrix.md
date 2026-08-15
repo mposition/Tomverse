@@ -270,6 +270,21 @@ what these seven browser tests assert on the real `/admin/users/:id` route.
 | Plan-adjust confirmation gate | `admin-approval-workflow.spec.ts` | `billing` | enabled only with a reason **and** the exact `ADJUST PLAN` phrase | nothing is sent while disabled |
 | KPI counters after a write | `admin-billing-journeys.spec.ts` | `billing` | approving a refund moves the customer to Free **and** `/admin/users` renders the new "Free access" figure on the next server render | `/admin/users` is visited before the write, so a re-introduced cache would hold the pre-write figures; a reload still showing them is the failure |
 
+### 2.7 Step-up recovery — `admin-step-up-recovery.spec.ts`
+
+A 428 is not the bug; having no way past it was. A session inside the 8-hour
+console window but past the 30-minute step-up window renders the console
+normally and is refused every high-risk write, so this suite follows the whole
+way out rather than asserting the status code alone.
+
+| Case | Role | Expected |
+|---|---|---|
+| Refused platform save, end to end | `ops` (45 min) | save refused; "Nothing was saved" alert persists and Save is disabled; nothing written; CTA opens the card (not a redirect back); a reload still shows the card; sign-out clears the session cookie and lands on sign-in with `reason=admin-step-up-expired`; after a fresh sign-in the same edit is made again by hand, saves, and is read back from the database |
+| Console reads on a stale step-up window | `ops` (45 min) | `/admin/platform` renders stored values and Save is enabled — the step-up window is not console access |
+| Reauthentication page for a non-administrator | `member` | 404, so it is not an oracle for `/admin` |
+| Reauthentication page on a recent sign-in | `ops` | redirected to the callback |
+| Sign-out from the console | `ops` | account menu and `Sign out` reachable at 1440px and 390px; Escape closes the menu |
+
 ---
 
 ## 3. User platform coverage
