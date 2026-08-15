@@ -2965,10 +2965,6 @@ async function handleChatPost(
                         plan.budget.cachedInputPriceMultiplier,
                     pricingVersion: plan.budget.pricingVersion ?? null,
                 },
-                periodStarts: {
-                    day: providerHoldDay.periodStart,
-                    month: providerHoldMonth.periodStart,
-                },
             }).catch((budgetError: unknown) => {
                 logRequestError(
                     "chat_fallback_budget_reserve_failed",
