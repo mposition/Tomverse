@@ -7,8 +7,16 @@ second deviation in one day; the first
 question of what production actually serves, and stays accurate about how the
 gap opened.
 
-Not a waiver. A waiver is a decision someone owns in advance; this is a
-description of something that already happened, written while it is still true.
+**Not a waiver, and it cannot become one.** A waiver is a decision someone owns
+*in advance*; this is a description of something that already happened, written
+while it is still true. A record made afterwards cannot create the approval
+that was not sought beforehand, and the condition table below says so rather
+than pointing at this document as if it satisfied itself.
+
+**Intent is recorded only as far as it is evidenced.** The pull request says it
+cherry-picks the external-import provider fix onto `main`. Nothing states
+urgency, and nothing here infers it: a correctness fix brought forward and an
+emergency are different risks, and the difference is not in the commit.
 
 ## The gap
 
@@ -57,7 +65,7 @@ makes the exception an exception.
 | §7.9 condition | Status |
 |---|---|
 | It is a **security update**, named as one, with its advisory | **No.** It is a correctness fix. §7.9 says a change that merely arrived on `main` is not this |
-| A person approved it, and a staging waiver is recorded | Approved (`@mposition`); the waiver is this document |
+| A person approved it, and a staging waiver is recorded | **Partly.** Human merge approval: evidenced by `@mposition` merging #587. Pre-merge staging waiver: **not evidenced / not recorded.** This document records the deviation; it is not a retroactive waiver |
 | The new release SHA is recorded | Yes — `391c9336…`, the merge commit, not the PR head |
 | Verified beyond PR CI | **Partly.** See below |
 | A rollback SHA is named | Yes — `851598eb` |
@@ -96,6 +104,52 @@ without anyone sequencing it by hand.
 | `/api/ready` | `database`, `securityEnvironment`, `providerBudgets`, `imageProviderBudget` all true | 2026-08-15T06:34:19Z |
 | `/api/health` | `{"ok":true}` | 2026-08-15T06:34:19Z |
 
+## Migration ledger, read back
+
+`npx prisma migrate status` against the production datasource, 2026-08-15,
+after the deploy. Output paraphrased; no connection string, credential or host
+detail is reproduced here.
+
+| | |
+|---|---|
+| Last common migration | `20260814150000_settlement_attempt_pointer` |
+| `20260815100000_external_import_gemini_provider` | **not listed as pending — applied** |
+| Listed as not yet applied | 5, and all five are the `develop`-only migrations below |
+
+```
+20260814160000_settlement_pointer_commit_check
+20260814170000_attempt_cost_accrual
+20260815012000_validate_credit_lot_non_negative
+20260815030000_perplexity_async_job_updated_at_index
+20260815090000_attempt_cost_rollup_date
+```
+
+That list matches `git diff --name-only origin/main origin/develop --
+prisma/migrations/` exactly, which is the reading that matters: **the
+production database is at `main`'s migration set, and the five it lacks are
+ones `main` does not have either.**
+
+Two caveats, and both are the point rather than footnotes.
+
+- **It was run from a tree that is not `391c933`.** The five "pending" entries
+  are pending relative to the local checkout, not relative to what production
+  is serving. A run at the exact SHA would report none. The conclusion drawn
+  above survives that, because it rests on which migration is *absent* from the
+  pending list, not on the count.
+- **The command reads `_prisma_migrations` and nothing else.** A ledger row
+  says the migration ran, not that the constraint has the definition it was
+  supposed to produce. That still needs `pg_get_constraintdef()`, and it is
+  still on the list below.
+
+The same output also reported roughly 79 migrations present in the database and
+absent from `prisma/migrations`. That is **not** drift caused by anything here:
+the repository's history was replaced by
+`prisma/migrations/00000000000000_baseline` because the old history could not
+build the schema from empty, and databases created before that keep their
+original rows. `scripts/baseline-existing-database.mjs` exists for exactly this
+and runs ahead of every deploy. Recorded so the next reader does not treat a
+known, handled condition as a new incident.
+
 ## What is not verified
 
 - **The flag's value *before* the deploy.** `feature.externalConversationImportEnabled`
@@ -105,10 +159,10 @@ without anyone sequencing it by hand.
   between, and the before value is inferred rather than observed. The
   conclusion the reading supports is "the feature is not open now", not "the
   deploy did not change it".
-- **The constraint in the production database.** Prisma recorded the migration
-  as applied and `/api/ready` reports the database reachable. Neither is
-  `pg_get_constraintdef()` on the production instance. The read-back that was
-  performed was on an empty database built from `main`'s history.
+- **The constraint in the production database.** The ledger read-back above
+  says the migration ran; it does not say the constraint has the definition it
+  was meant to produce. The only `pg_get_constraintdef()` performed was on an
+  empty database built from `main`'s history, not on the production instance.
 - **Behavioural verification of anything.** As with `b0cf10e`, this build has
   had no chat turn, no settlement, no payment path and no image generation
   exercised against it. `/api/ready` was green before the deploy and after it.
@@ -124,7 +178,8 @@ ahead and a run against it measures a different build.
 - [ ] Deploy `391c9336d4d73110bd30f2ad3cb95ceae367eeb4` to staging or a scratch environment
 - [ ] Read `/api/build-info` back and confirm it names that SHA and its deployment ID
 - [x] Read `feature.externalConversationImportEnabled` back from production and record the value — `off`, 2026-08-15T08:05Z
-- [ ] Read `pg_get_constraintdef()` for `ExternalImport_provider_check` and `ExternalConversation_provider_check` from production
+- [ ] Read `pg_get_constraintdef()` for `ExternalImport_provider_check` and `ExternalConversation_provider_check` from production, on a read-only role, and confirm both admit `chatgpt`, `claude` and `gemini`
+- [ ] Re-run `prisma migrate status` **from a worktree at `391c933` itself**, against production, and confirm it reports nothing pending
 - [ ] Exercise one turn per active provider and confirm usage settles
 - [ ] Exercise one Stripe path end to end (checkout or plan change) against test mode
 - [ ] Generate one image and confirm the signed asset URL resolves
