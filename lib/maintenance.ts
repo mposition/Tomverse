@@ -403,6 +403,23 @@ export async function cleanupExpiredData() {
     WHERE "expiresAt" <= NOW()
   `);
 
+  // Raw email addresses and two credential hashes per sign-in attempt, kept by
+  // nothing until now. `expiresAt` rather than `createdAt`: it is the moment
+  // the row stops being able to authenticate anyone, and it is the indexed
+  // column (`@@index([expiresAt])`), so this is an index scan rather than a
+  // sequential one over a table that grows with every login attempt including
+  // the ones for addresses that have no account.
+  //
+  // No carve-out for consumed or invalidated rows. A consumed row is spent and
+  // an invalidated one was superseded by a newer attempt, so neither outlives
+  // the unconsumed row beside it -- and a carve-out here would keep exactly
+  // the rows belonging to people who did sign in.
+  const emailLoginAttempts = await step("email_login_attempts", () =>
+    prisma.emailLoginAttempt.deleteMany({
+      where: { expiresAt: { lt: retentionCutoff("emailLoginAttempts", now) } },
+    })
+  );
+
   const providerErrorEvents = await step("provider_error_events", () =>
     prisma.providerErrorEvent.deleteMany({
       where: { createdAt: { lt: retentionCutoff("providerErrors", now) } },
@@ -626,6 +643,7 @@ export async function cleanupExpiredData() {
     sessions: sessions?.count ?? null,
     usageBuckets: usageBuckets === null ? null : Number(usageBuckets),
     requestLeases: requestLeases === null ? null : Number(requestLeases),
+    emailLoginAttempts: emailLoginAttempts?.count ?? null,
     providerErrorEvents: providerErrorEvents?.count ?? null,
     providerHealthChecks: providerHealthChecks?.count ?? null,
     providerProbeResults: providerProbeResults?.count ?? null,

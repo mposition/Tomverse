@@ -180,3 +180,93 @@ test("a policy with no window has no overdue date either", () => {
         /no age window/
     );
 });
+
+/**
+ * Email login attempts: the first table on the unswept list to get a policy.
+ *
+ * It holds a raw email address and two credential HMACs per sign-in attempt,
+ * including attempts for addresses with no account, and nothing had ever
+ * removed a row. It reached `origin/main` that way, so this was already
+ * production data rather than a future problem.
+ */
+
+const CLEANUP_ROUTE = readFileSync(
+    "app/api/admin/maintenance/cleanup/route.ts",
+    "utf8"
+);
+
+test("email login attempts are swept, and by the column the policy is about", () => {
+    const policy = retentionPolicy("emailLoginAttempts");
+    assert.equal(policy.action, "delete");
+    assert.equal(policy.windowDays, 7);
+    assert.equal(policy.maintenanceStep, "email_login_attempts");
+    // The published sentence has to say what the query does. "older than 7
+    // days" would be a different promise from "7 days after they expired".
+    assert.match(policy.policy, /7 days after they expired/);
+
+    // `expiresAt`, not `createdAt`: it is the moment the row stops being able
+    // to authenticate anyone, and it is the indexed column. A `createdAt`
+    // sweep would be a sequential scan of a table that grows with every login
+    // attempt.
+    assert.match(
+        MAINTENANCE,
+        /emailLoginAttempt\.deleteMany\(\{\s*where: \{ expiresAt: \{ lt: retentionCutoff\("emailLoginAttempts", now\) \} \},/
+    );
+});
+
+test("the screen, the dry run and the sweep count the same rows", () => {
+    // The failure this whole module was written for: /admin/retention
+    // published nine policies and the sweep performed seven. An operator read
+    // a number, typed RUN CLEANUP, and the number did not move.
+    for (const [name, source] of [
+        ["/admin/retention", RETENTION_ROUTE],
+        ["the cleanup dry run", CLEANUP_ROUTE],
+    ]) {
+        assert.match(
+            source,
+            /emailLoginAttempt\.count\(/,
+            `${name} counts the rows`
+        );
+        assert.match(
+            source,
+            /retentionCutoff\("emailLoginAttempts", now\)/,
+            `${name} uses the published cutoff rather than a literal`
+        );
+        assert.ok(
+            !/emailLoginAttempt\.count\(\{\s*where: \{ createdAt/.test(source),
+            `${name} counts by the same column the sweep deletes by`
+        );
+    }
+});
+
+test("no carve-out keeps the rows of people who did sign in", () => {
+    // A `consumedAt: null` filter reads like caution and does the opposite:
+    // consumed rows belong to successful sign-ins, so excluding them would
+    // retain the email addresses of real users and delete only the rest.
+    const step = MAINTENANCE.slice(
+        MAINTENANCE.indexOf('step("email_login_attempts"'),
+        MAINTENANCE.indexOf('step("provider_error_events"')
+    );
+    assert.ok(step.length > 0, "the step is where this test thinks it is");
+    assert.ok(!step.includes("consumedAt"), "consumed rows are swept too");
+    assert.ok(!step.includes("invalidatedAt"), "invalidated rows are swept too");
+});
+
+test("the window is shorter than every operational log policy", () => {
+    // Not a round number for its own sake. Credential hashes and raw addresses
+    // should not outlive the diagnostics they sit beside, and every other
+    // delete policy here is measured in tens of days.
+    const others = RETENTION_POLICIES.filter(
+        (entry) =>
+            entry.action === "delete" &&
+            entry.windowDays !== null &&
+            entry.key !== "emailLoginAttempts"
+    );
+    assert.ok(others.length > 0);
+    for (const entry of others) {
+        assert.ok(
+            entry.windowDays > 7,
+            `${entry.key} is ${entry.windowDays} days; the credential table must not be the longest`
+        );
+    }
+});

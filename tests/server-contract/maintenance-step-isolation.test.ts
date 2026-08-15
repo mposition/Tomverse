@@ -59,6 +59,7 @@ const prismaStub = {
     update: async () => ({}),
     updateMany: async () => ({ count: 4 }),
   },
+  emailLoginAttempt: { deleteMany: async () => ({ count: 26 }) },
   providerErrorEvent: { deleteMany: async () => ({ count: 6 }) },
   productAnalyticsEvent: { deleteMany: async () => ({ count: 7 }) },
   notificationDelivery: { deleteMany: async () => ({ count: 8 }) },

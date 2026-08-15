@@ -112,6 +112,33 @@ export const RETENTION_POLICIES: readonly RetentionPolicy[] = [
         maintenanceStep: "notification_logs",
     },
     {
+        key: "emailLoginAttempts",
+        label: "Email login attempts",
+        // Measured from `expiresAt`, not `createdAt`. The two are ten minutes
+        // apart at most (`EMAIL_LOGIN_CODE_TTL_MINUTES`, clamped to 1-10), so
+        // the window is the same either way -- but `expiresAt` is the moment
+        // the row stops being able to authenticate anyone, which is the fact
+        // the policy is about, and it is the indexed column.
+        //
+        // Seven days, and the reason is not that seven is a round number: the
+        // row's authentication value ends at `expiresAt`, and nothing in the
+        // product reads the table for history -- every read is `findFirst` for
+        // the current attempt. What the week buys is a live support or abuse
+        // question ("did someone request a code for my address?"), and a
+        // longer window would be keeping raw email addresses and credential
+        // hashes for an investigation nobody performs. That is the same
+        // forever-by-default this list exists to refuse, only shorter.
+        //
+        // Consumed and invalidated rows are covered too: a consumed row is
+        // already spent and an invalidated one was superseded, so neither has
+        // a life beyond the unconsumed row's.
+        policy:
+            "Delete email login attempts more than 7 days after they expired.",
+        action: "delete",
+        windowDays: 7,
+        maintenanceStep: "email_login_attempts",
+    },
+    {
         key: "providerChecks",
         label: "Provider checks",
         policy: "Delete provider check records older than 30 days.",

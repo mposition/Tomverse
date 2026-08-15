@@ -36,6 +36,7 @@ async function dryRunCleanup() {
     usageBuckets,
     requestLeases,
     creditReservations,
+    emailLoginAttempts,
     providerErrorEvents,
     providerHealthChecks,
     providerProbeResults,
@@ -52,6 +53,11 @@ async function dryRunCleanup() {
     prisma.chatRequestLease.count({ where: { expiresAt: { lte: now } } }),
     prisma.chatCreditReservation.count({
       where: { status: "reserved", expiresAt: { lte: now } },
+    }),
+    prisma.emailLoginAttempt.count({
+      where: {
+        expiresAt: { lt: retentionCutoff("emailLoginAttempts", now) },
+      },
     }),
     prisma.providerErrorEvent.count({
       where: { createdAt: { lt: retentionCutoff("providerErrors", now) } },
@@ -100,6 +106,7 @@ async function dryRunCleanup() {
     usageBuckets,
     requestLeases,
     creditReservations,
+    emailLoginAttempts,
     providerErrorEvents,
     providerHealthChecks,
     providerProbeResults,

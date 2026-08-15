@@ -48,6 +48,7 @@ export async function GET(req: Request) {
     const notificationCutoff = retentionCutoff("notificationLogs", now);
     const providerCheckCutoff = retentionCutoff("providerChecks", now);
     const providerErrorCutoff = retentionCutoff("providerErrors", now);
+    const emailLoginCutoff = retentionCutoff("emailLoginAttempts", now);
     const productAnalyticsCutoff = retentionCutoff("productAnalytics", now);
 
     const [
@@ -57,6 +58,7 @@ export async function GET(req: Request) {
       staleShares,
       oldAuditLogs,
       oldNotificationLogs,
+      oldEmailLoginAttempts,
       oldProviderChecks,
       oldProviderErrors,
       oldProductAnalytics,
@@ -72,6 +74,7 @@ export async function GET(req: Request) {
       oldestShare,
       oldestAudit,
       oldestNotification,
+      oldestEmailLoginAttempt,
       oldestProviderCheck,
       oldestProviderError,
       oldestProductAnalytics,
@@ -97,6 +100,11 @@ export async function GET(req: Request) {
           createdAt: { lt: notificationCutoff },
           NOT: { status: "failed", acknowledgedAt: null },
         },
+      }),
+      prisma.emailLoginAttempt.count({
+        // `expiresAt`, matching the sweep. Counting by `createdAt` would
+        // report a number the cleanup does not take.
+        where: { expiresAt: { lt: emailLoginCutoff } },
       }),
       prisma.providerHealthCheck.count({
         where: { createdAt: { lt: providerCheckCutoff } },
@@ -183,6 +191,12 @@ export async function GET(req: Request) {
           }),
         "createdAt"
       ),
+      prisma.emailLoginAttempt
+        .findFirst({
+          orderBy: { expiresAt: "asc" },
+          select: { expiresAt: true },
+        })
+        .then((row) => row?.expiresAt.toISOString() || null),
       oldestDate(
         () =>
           prisma.providerErrorEvent.findFirst({
@@ -214,6 +228,10 @@ export async function GET(req: Request) {
       notificationLogs: {
         staleCount: oldNotificationLogs,
         oldestAt: oldestNotification,
+      },
+      emailLoginAttempts: {
+        staleCount: oldEmailLoginAttempts,
+        oldestAt: oldestEmailLoginAttempt,
       },
       providerChecks: {
         staleCount: oldProviderChecks,
