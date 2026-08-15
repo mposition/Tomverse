@@ -1,4 +1,5 @@
 import type { ImportPreview } from "@/lib/externalImportPipeline";
+import type { ExternalImportProvider } from "@/lib/externalImportProviders";
 
 /**
  * Pure state machine for the external conversation import wizard.
@@ -26,7 +27,12 @@ import type { ImportPreview } from "@/lib/externalImportPipeline";
  * feeds the outcome back in as an action.
  */
 
-export type ExternalImportGuidanceProvider = "chatgpt" | "claude" | "gemini";
+/**
+ * Which provider's recipe the guide shows. Advisory only -- the format that
+ * actually gets used is whatever `detect()` reports -- but it is the same set,
+ * so it is the same list.
+ */
+export type ExternalImportGuidanceProvider = ExternalImportProvider;
 
 /** How the user answered "do you already have an export file?" (§ PR1 guide). */
 export type ExternalImportGuidanceEntry = "needs_export" | "has_file";

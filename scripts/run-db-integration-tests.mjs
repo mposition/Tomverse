@@ -195,6 +195,9 @@ run(
     "tests/integration/memory-metrics.db.test.ts",
     "tests/integration/conversation-memory-mode.db.test.ts",
     "tests/integration/conversation-selection-mode.db.test.ts",
+    // The provider set is written in TypeScript and in SQL, and only a
+    // real database can say the two still agree.
+    "tests/integration/external-import-provider-canon.db.test.ts",
     "tests/integration/context-manifest-retention.db.test.ts",
     // The only unauthenticated route that serves a customer's transcript.
     "tests/integration/public-share-route.db.test.ts",
@@ -380,6 +383,22 @@ run(
     "tests/integration/memory-usage-disclosure-route.db.test.ts",
   ],
   "Running the §13.4 memory disclosure read scenarios"
+);
+// Its own process again: it replaces next-auth so the create route can be
+// driven as a signed-in account. The provider set is written on both sides of
+// this route, and only the route can say the two halves still agree.
+run(
+  [
+    "--conditions=react-server",
+    "--experimental-test-module-mocks",
+    "--no-warnings=ExperimentalWarning",
+    "--import",
+    "tsx",
+    "--test",
+    "--test-concurrency=1",
+    "tests/integration/external-import-create-route.db.test.ts",
+  ],
+  "Running the external import create-route provider scenarios"
 );
 // Its own process again: it replaces both next-auth and the Auto readiness
 // register, and a module mock is process-global. The register mock is why it

@@ -1,3 +1,5 @@
+import type { ExternalImportProvider } from "@/lib/externalImportProviders";
+
 /**
  * Provider adapter contract for external conversation import (Release A, A2).
  *
@@ -15,7 +17,12 @@
  * preview so the user knows what a re-import cannot recover.
  */
 
-export type ExternalAdapterProvider = "chatgpt" | "claude" | "gemini";
+/**
+ * An adapter's provider. The same set the server accepts and the same set the
+ * database allows — see lib/externalImportProviders.ts for why that is one
+ * list and not four.
+ */
+export type ExternalAdapterProvider = ExternalImportProvider;
 
 export type ParsedExternalMessage = {
     rawExternalMessageId: string;
