@@ -12,7 +12,12 @@ import {
   applyPendingAttemptCostAdjustments,
   pendingAttemptCostAdjustmentBacklog,
 } from "@/lib/chatAttemptCostLedger";
-import { sweepStaleRoutingAttempts } from "@/lib/routingAttemptSweep";
+import {
+  COST_INTENT_CUTOVER_ENV,
+  STALE_ATTEMPT_SWEEP_BATCH,
+  staleAttemptBacklog,
+  sweepStaleRoutingAttempts,
+} from "@/lib/routingAttemptSweep";
 import { reportOperationalIncident } from "@/lib/operationalMonitoring";
 
 /**
@@ -23,6 +28,15 @@ import { reportOperationalIncident } from "@/lib/operationalMonitoring";
  * going to notice from the logs alone.
  */
 const STALE_COST_ADJUSTMENT_AFTER_MS = 45 * 60 * 1000;
+
+/**
+ * How long an attempt may stay sweepable before the sweep is behind.
+ *
+ * Thirty minutes to be judged stale at all, plus two fifteen-minute runs. One
+ * run failing to reach it is a batch boundary or a blip; an attempt still open
+ * an hour after it was created is the sweep not keeping up.
+ */
+const STALE_ATTEMPT_BACKLOG_AFTER_MS = 60 * 60 * 1000;
 import { purgeExpiredChatLimitDecisions } from "@/lib/chatLimitDecisions";
 import { purgeExpiredAccountDataExportRequests } from "@/lib/accountDataExportTickets";
 import { compactAgedContextManifests } from "@/lib/routingManifestRetention";
@@ -371,21 +385,92 @@ export async function cleanupExpiredData() {
     reconcileExpiredChatCreditReservations()
   );
 
-  // The provider-cost ledger's three recovery passes, in the only order that
-  // makes sense: money first, then the attempts that money belongs to, then
-  // the corrections owed to the rollups those attempts moved.
+  // The provider-cost ledger's two recovery passes.
   //
-  // Reconciliation is what makes a crashed turn's reservation terminal, and
-  // the sweep only considers an attempt whose reservation is terminal or
-  // expired -- so running the sweep first would leave a run's worth of
-  // attempts for the next pass every time. The replay comes last because the
-  // adjustments it applies can be created by the sweep's own settlements.
+  // These are idempotent and do not depend on one another for correctness --
+  // the sweep already accepts a reservation that is merely expired, and
+  // nothing in this run creates the adjustments the replay applies. They run
+  // after the primary reconciliation to keep maintenance reporting and
+  // operational ownership predictable, not because either needs the other.
   //
-  // Until this run existed, neither of the last two had a production caller at
-  // all: a sweep nobody ran, and a partial index nobody consumed.
-  const staleRoutingAttempts = await step("stale_routing_attempts", () =>
-    sweepStaleRoutingAttempts()
-  );
+  // Until this run existed neither had a production caller at all: a sweep
+  // nobody ran, and a partial index nobody consumed, which from the data is
+  // indistinguishable from having nothing to recover.
+  const staleRoutingAttempts = await step("stale_routing_attempts", async () => {
+    const swept = await sweepStaleRoutingAttempts(now);
+    const backlog = await staleAttemptBacklog(now);
+
+    // A contract violation, not a workload. One is enough: the sweep cannot
+    // produce these outcomes by construction, so seeing one means the ledger
+    // grew a path nobody expected or this sweep started writing a record it
+    // should not.
+    if (swept.unexpectedCostOutcome > 0) {
+      await reportOperationalIncident({
+        code: "CHAT_COST_SWEEP_UNEXPECTED_OUTCOME",
+        title: "The attempt sweep produced a cost outcome it cannot produce",
+        severity: "error",
+        context: { component: "chat-cost-ledger", ...swept.noCostReasons, unexpected: swept.unexpectedCostOutcome },
+      });
+    }
+
+    // Three of the no-cost reasons are defects with no grace period. A run
+    // pointing at a reservation that is gone, a payload that will not
+    // validate, and a payload written *after* cost intents existed that
+    // carries none are each a provider call nobody can price, caused by
+    // something wrong now rather than by history.
+    const defects =
+      swept.noCostReasons.dangling_reservation +
+      swept.noCostReasons.invalid_cost_intent_payload +
+      swept.noCostReasons.missing_cost_intent;
+    if (defects > 0) {
+      await reportOperationalIncident({
+        code: "CHAT_COST_INTENT_UNAVAILABLE",
+        title: "A crashed attempt could not be priced, and not because of legacy data",
+        severity: "error",
+        context: { component: "chat-cost-ledger", ...swept.noCostReasons },
+      });
+    }
+
+    // The cutover is what tells history apart from a defect. Unset, the
+    // distinction cannot be made at all -- so the missing configuration is
+    // itself the thing to report, rather than silently answering "legacy".
+    if (swept.noCostReasons.unclassified_missing_cost_intent > 0) {
+      await reportOperationalIncident({
+        code: "CHAT_COST_INTENT_CUTOVER_UNSET",
+        title: `Set ${COST_INTENT_CUTOVER_ENV} so a missing cost intent can be classified`,
+        severity: "warning",
+        context: {
+          component: "chat-cost-ledger",
+          unclassified: swept.noCostReasons.unclassified_missing_cost_intent,
+        },
+      });
+    }
+
+    // `failed` is a database that was briefly unavailable, and one of those is
+    // not worth a call. What is worth a call is the sweep not keeping up:
+    // either more eligible attempts than one batch can take, or an attempt
+    // that has been eligible longer than two cron periods past the stale
+    // window -- thirty minutes to become stale, plus two fifteen-minute runs.
+    if (
+      backlog.eligiblePending > STALE_ATTEMPT_SWEEP_BATCH ||
+      (backlog.oldestEligibleMs ?? 0) > STALE_ATTEMPT_BACKLOG_AFTER_MS
+    ) {
+      await reportOperationalIncident({
+        code: "CHAT_ATTEMPT_SWEEP_BACKLOG",
+        title: "Crashed attempts are not being closed fast enough",
+        severity: "error",
+        context: {
+          component: "chat-cost-ledger",
+          eligiblePending: backlog.eligiblePending,
+          agedPending: backlog.agedPending,
+          oldestEligibleMs: backlog.oldestEligibleMs,
+          failedThisRun: swept.failed,
+        },
+      });
+    }
+    return { ...swept, ...backlog };
+  });
+
   const costAdjustments = await step("pending_cost_adjustments", async () => {
     const replayed = await applyPendingAttemptCostAdjustments();
     const backlog = await pendingAttemptCostAdjustmentBacklog(now);
@@ -410,6 +495,7 @@ export async function cleanupExpiredData() {
     }
     return { ...replayed, ...backlog };
   });
+
   const testerPassReminders = await step("tester_pass_reminders", () =>
     sendFoundingTesterPassReminders(now)
   );

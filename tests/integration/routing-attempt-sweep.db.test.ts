@@ -331,12 +331,57 @@ test("the backlog reports how far behind the sweep is, not only that it is", asy
   await makeAttempt(runId, { createdAt: ancient() });
 
   const before = await staleAttemptBacklog();
-  assert.equal(before.backlog, 1);
-  assert.ok((before.oldestPendingMs ?? 0) >= STALE_ATTEMPT_AFTER_MS);
+  assert.equal(before.eligiblePending, 1);
+  assert.equal(before.agedPending, 1);
+  assert.ok((before.oldestEligibleMs ?? 0) >= STALE_ATTEMPT_AFTER_MS);
 
   await sweepStaleRoutingAttempts();
   const after = await staleAttemptBacklog();
-  assert.deepEqual(after, { backlog: 0, oldestPendingMs: null });
+  assert.deepEqual(after, {
+    agedPending: 0,
+    eligiblePending: 0,
+    oldestEligibleMs: null,
+  });
+});
+
+test("an old attempt the sweep may not touch is aged but not eligible", async () => {
+  // A deep-research turn legitimately streaming past the window holds a lease.
+  // Counting it as work the sweep has not got to would put healthy traffic
+  // into the number an alarm reads -- which is why the backlog now shares the
+  // sweep's own predicate instead of checking age alone.
+  const { runId, subjectKey } = await makeRun();
+  await makeAttempt(runId, { createdAt: ancient() });
+  await prisma.chatRequestLease.create({
+    data: {
+      id: `lease-${randomUUID()}`,
+      subjectKey,
+      ipKey: `ip-${randomUUID()}`,
+      expiresAt: new Date(Date.now() + 60_000),
+    },
+  });
+
+  const backlog = await staleAttemptBacklog();
+  assert.equal(backlog.agedPending, 1, "it is old, and that is true");
+  assert.equal(backlog.eligiblePending, 0, "and nothing is waiting on the sweep");
+  assert.equal(backlog.oldestEligibleMs, null);
+});
+
+test("a reservation still reserved and unexpired keeps its attempt out of the backlog", async () => {
+  const reservation = await makeCrashedReservation();
+  await prisma.chatCreditReservation.update({
+    where: { id: reservation.reservationId },
+    data: { expiresAt: new Date(Date.now() + 10 * 60_000) },
+  });
+  const { runId } = await makeRun({ reservationId: reservation.reservationId });
+  await makeAttempt(runId, { createdAt: ancient() });
+
+  const backlog = await staleAttemptBacklog();
+  assert.equal(backlog.agedPending, 1);
+  assert.equal(
+    backlog.eligiblePending,
+    0,
+    "the money may yet settle, so the sweep is not behind on this one"
+  );
 });
 
 test("an unknown_after_dispatch outcome requires a dispatch", async () => {
