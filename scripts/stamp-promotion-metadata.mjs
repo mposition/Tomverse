@@ -39,6 +39,7 @@ import { writeFileSync } from "node:fs";
 import process from "node:process";
 
 import {
+  SNAPSHOT_FILENAME_PREFIX,
   stampDiff,
   stampFor,
   stampRequestBody,
@@ -296,7 +297,7 @@ const main = async () => {
     } else {
       const snapshotPath =
         args.snapshot ||
-        `./promotion-metadata-snapshot-${code}-${Date.now()}.json`;
+        `./${SNAPSHOT_FILENAME_PREFIX}${code}-${Date.now()}.json`;
       writeFileSync(snapshotPath, `${JSON.stringify(snapshot, null, 2)}\n`);
 
       // `metadata` is the entire request body in both calls. Stripe merges

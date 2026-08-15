@@ -16,6 +16,16 @@
  */
 export const STAMPED_KEYS = ["tomversePromotionId", "planId"];
 
+/**
+ * Filename prefix for the pre-change snapshot `--apply` writes.
+ *
+ * Named here, and asserted against `.gitignore`, because the default path is
+ * the working tree: the snapshot records live Stripe object metadata, and one
+ * `git add -A` would commit it. An ignore rule written by hand drifts the
+ * moment this filename changes, so the two are tied to one constant instead.
+ */
+export const SNAPSHOT_FILENAME_PREFIX = "promotion-metadata-snapshot-";
+
 /** The stamp the policy row implies. Never a whole-metadata replacement. */
 export const stampFor = (promotionId, planId) => ({
   tomversePromotionId: promotionId,
