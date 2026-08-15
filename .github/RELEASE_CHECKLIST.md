@@ -140,9 +140,9 @@ than merely before a merge.
       artifacts were inspected before accepting.
 
 ```
-Workflow run URL:   ____________________
-Reviewed by:        ____________________
-Artifacts checked:  ____________________
+Workflow run URL:   https://github.com/mposition/Tomverse/actions/runs/31853029964
+Reviewed by:        @mposition
+Artifacts checked:  nightly-visual-regression-31853029964
 ```
 
 No CI job that *judges* a golden ever rewrites one — `scripts/security-regression-check.mjs`
