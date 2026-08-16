@@ -820,6 +820,68 @@ test("another user's target is not retryable", async () => {
   );
 });
 
+test("a non-OpenAI reservation charges its own provider budget, and only its own", async () => {
+  // The defect behind this test: admission has been per-provider since v2
+  // (`imageProviderBudgetKey(provider)`), while the refund was still pinned to
+  // a module constant for OpenAI. Every xAI and fal settlement credited
+  // OpenAI's bucket, so OpenAI under-counted its own spend while the other two
+  // kept their worst case, and `GREATEST(0, ...)` kept both numbers legal the
+  // whole time.
+  await enableImageGeneration();
+  const user = await createUser();
+
+  const result = await requestImageGeneration(
+    // Both option fields stated rather than inherited. `requestInput` is a
+    // single-model OpenAI Draft fixture and defaults to `low`, where Nano
+    // Banana 2 has no price at all -- it sells 1K square at Standard only --
+    // so an inherited tier would be refused before any reservation existed.
+    requestInput(user.id, {
+      quality: "medium",
+      size: "1024x1024",
+      modelIds: ["fal-ai/nano-banana-2"],
+    })
+  );
+
+  const reservation = await prisma.imageCreditReservation.findUnique({
+    where: { generationId: result.targets[0].generationId },
+  });
+  assert.equal(reservation?.provider, "fal");
+  const heldMicroUsd = Number(reservation?.reservedCostMicroUsd ?? 0);
+  assert.ok(heldMicroUsd > 0);
+
+  const budgetFor = async (provider: string) => {
+    const row = await prisma.chatUsageBucket.findFirst({
+      where: {
+        key: `image-provider:${provider}`,
+        period: "provider-cost-day",
+      },
+    });
+    return Number(row?.count ?? 0);
+  };
+
+  // The hold lands on fal alone. OpenAI has no row at all -- not a zeroed one.
+  assert.equal(await budgetFor("fal"), heldMicroUsd);
+  assert.equal(await budgetFor("openai"), 0);
+
+  const sweep = await reconcileStaleImageGenerations(
+    new Date(Date.now() + 60 * 60 * 1_000)
+  );
+  assert.equal(sweep.refunded, 1);
+
+  // Credits come back; the provider charge deliberately does not. The executor
+  // died at an unknown point, so the provider may already have been billed and
+  // the sweep keeps the charge (`releaseProviderBudget: false`). Asserted
+  // rather than assumed, because a later change that starts releasing here
+  // would be a real decision about real money and should have to edit a test
+  // that says so.
+  assert.equal(await budgetFor("fal"), heldMicroUsd);
+  // And whatever a failure path does with the charge, it never moves it onto
+  // a provider that was never charged. This is the half of the defect a test
+  // can reach: the settlement true-up that produced it runs only on success,
+  // and success needs a provider response this suite has no seam to fake.
+  assert.equal(await budgetFor("openai"), 0);
+});
+
 /* ------------------------------------------------------------------------- */
 /* Model selection limit: admission is the boundary, whatever the UI offered. */
 /* ------------------------------------------------------------------------- */
