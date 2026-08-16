@@ -1072,14 +1072,14 @@ export const de = {
     externalImport: {
         dataTabTitle: "Aus einem anderen KI-Dienst importieren",
         dataTabDescription:
-            "Speichern Sie frühere Unterhaltungen aus einer ChatGPT- oder Claude-Exportdatei in Ihrem Tomverse-Konto. Die Exportdatei wird nur in Ihrem Browser gelesen.",
+            "Speichern Sie frühere Unterhaltungen aus einer Exportdatei von ChatGPT, Claude oder Gemini (Google Takeout) in Ihrem Tomverse-Konto. Die Exportdatei wird nur in Ihrem Browser gelesen.",
         dataTabUsage:
             "{conversations} importierte Unterhaltungen · {storage} gespeichert",
         dataTabOpen: "Importe verwalten",
         dataTabUsageEmpty: "Noch keine importierten Unterhaltungen",
         pageTitle: "Unterhaltungen aus einem anderen KI-Dienst importieren",
         pageDescription:
-            "Laden Sie einen offiziellen Datenexport von ChatGPT oder Claude hoch, prüfen Sie den Inhalt und wählen Sie die Unterhaltungen aus, die Sie in Ihrem Tomverse-Konto behalten möchten.",
+            "Laden Sie einen offiziellen Datenexport von ChatGPT, Claude oder Gemini hoch, prüfen Sie den Inhalt und wählen Sie die Unterhaltungen aus, die Sie in Ihrem Tomverse-Konto behalten möchten.",
         backToImports: "Zurück zu den Importen",
         signInRequired:
             "Melden Sie sich an, um Unterhaltungen aus einem anderen KI-Dienst zu importieren.",
@@ -1092,7 +1092,7 @@ export const de = {
         capacityConversations: "{used} von {limit} importierten Unterhaltungen",
         selectFile: "Exportdatei auswählen",
         selectFileHint:
-            "ChatGPT- oder Claude-Datenexport (.zip oder .json), bis zu 1 GB. Große Archive sind kein Problem — Mediendateien werden übersprungen, ohne gelesen zu werden.",
+            "Datenexport von ChatGPT, Claude oder Gemini (.zip oder .json), bis zu 1 GB. Für Gemini wird der JSON-Export von Meine Aktivitäten → Gemini-Apps aus Google Takeout benötigt. Große Archive sind kein Problem — Mediendateien werden übersprungen, ohne gelesen zu werden.",
         parsing: "Export wird in Ihrem Browser gelesen…",
         parsingProgress: "{conversations} Unterhaltungen gefunden",
         cancel: "Abbrechen",
@@ -1220,7 +1220,8 @@ export const de = {
             "Wählen Sie Meine Aktivitäten, darin Gemini-Apps, und stellen Sie das Format auf JSON — das Produkt Gemini enthält Gems, keine Unterhaltungen",
         guideGeminiStep3:
             "Exportieren und die .zip hochladen, sobald Google den Download-Link sendet",
-        guideFormats: "ZIP- und JSON-Dateien werden beide unterstützt.",
+        guideFormats:
+            "ZIP- und JSON-Dateien werden beide unterstützt. Ein Gemini-Export muss im JSON-Format vorliegen — HTML kann nicht gelesen werden.",
         guideStaysLocal:
             "Die Exportdatei verlässt Ihr Gerät nicht — sie wird nur im Browser geöffnet.",
         guideMediaExcluded:
@@ -1605,7 +1606,7 @@ export const de = {
         attachmentsTitle: "Anhänge",
         attachments: "Anhänge können vorübergehend in verschlüsseltem Objektspeicher für Modellzustellung und Dokumentextraktion gespeichert werden. Temporäre Anhänge werden derzeit nach etwa einem Tag per Lifecycle-Regel gelöscht.",
         externalImportTitle: "Aus anderen KI-Diensten importierte Unterhaltungen",
-        externalImport: "Sie können frühere Unterhaltungen, die Sie aus einer bei einem anderen KI-Dienst wie ChatGPT oder Claude heruntergeladenen Exportdatei auswählen, in Ihrem Tomverse-Konto speichern. Die Exportdatei wird ausschließlich in Ihrem Browser geöffnet; das ursprüngliche Archiv wird niemals auf Server oder Speicher von Tomverse hochgeladen oder dort aufbewahrt. Gespeichert werden nur der normalisierte Text der ausgewählten Unterhaltungen sowie Herkunftsangaben (Ausgangsdienst, ursprüngliche Zeitstempel, Modellnamen nur zur Anzeige). Bilder, Audio und Anhänge werden nicht importiert. Importierte Unterhaltungen können personenbezogene Daten anderer Personen enthalten; Sie sind daher dafür verantwortlich sicherzustellen, dass Sie zum Import dieser Daten berechtigt sind. Sie können importierte Inhalte jederzeit einsehen, löschen und exportieren; sie werden mit Ihrem Konto gelöscht. Eine Löschung bei Tomverse löscht nicht die beim ursprünglichen Dienst gespeicherten Daten.",
+        externalImport: "Sie können frühere Unterhaltungen, die Sie aus einer bei einem anderen KI-Dienst wie ChatGPT, Claude oder Gemini (Google Takeout) heruntergeladenen Exportdatei auswählen, in Ihrem Tomverse-Konto speichern. Die Exportdatei wird ausschließlich in Ihrem Browser geöffnet; das ursprüngliche Archiv wird niemals auf Server oder Speicher von Tomverse hochgeladen oder dort aufbewahrt. Gespeichert werden nur der normalisierte Text der ausgewählten Unterhaltungen sowie Herkunftsangaben (Ausgangsdienst, ursprüngliche Zeitstempel, Modellnamen nur zur Anzeige). Bilder, Audio und Anhänge werden nicht importiert. Importierte Unterhaltungen können personenbezogene Daten anderer Personen enthalten; Sie sind daher dafür verantwortlich sicherzustellen, dass Sie zum Import dieser Daten berechtigt sind. Sie können importierte Inhalte jederzeit einsehen, löschen und exportieren; sie werden mit Ihrem Konto gelöscht. Eine Löschung bei Tomverse löscht nicht die beim ursprünglichen Dienst gespeicherten Daten.",
         memoryTitle: "Langzeitgedächtnis des Kontos",
         memory: "Wenn Sie die Gedächtnisfunktion nutzen möchten, sendet Tomverse die von Ihnen ausgewählten Teile Ihrer importierten Unterhaltungen an den von Ihnen bestätigten KI-Anbieter, um daraus Gedächtnis-Kandidaten zu gewinnen. Für die Extraktion werden das Modell und der Credit-Betrag verwendet, die Ihnen vor der Ausführung angezeigt werden. Extrahierte Kandidaten werden erst zur Antworterzeugung genutzt, nachdem Sie sie geprüft und genehmigt haben. Als sensibel eingestufte Kandidaten sowie solche, die eine Einzelprüfung erfordern, sind von der Sammelgenehmigung ausgenommen und müssen einzeln bestätigt werden. Kandidaten, genehmigte Erinnerungen und deren Begründungen verbleiben in Ihrem Konto, bis Sie sie löschen oder Ihre Kontodaten gelöscht werden. Genehmigte Erinnerungen und Antwortstil-Präferenzen werden als Referenzmaterial an den KI-Anbieter übermittelt, der die jeweilige neue Antwort erzeugt — beim Vergleich mehrerer Modelle also an den Anbieter jedes Modells. Sie können gespeicherte Erinnerungen jederzeit einsehen, bearbeiten und deaktivieren, die vollständige Liste als Datei herunterladen oder alles auf einmal löschen. Wenn Sie das Gedächtnis ausschalten, wird es in neuen Chats nicht mehr verwendet.",
         assistantProfilesTitle: "Eigene KI-Profile und Wissensdateien",

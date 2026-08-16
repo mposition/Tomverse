@@ -559,6 +559,20 @@ export function ChatPageClient({
     text: string;
     chatId: string;
     userMessageId: string;
+    /**
+     * The models this send was actually made for -- the set the preflight
+     * priced, reserved admission slots for, and the send barrier confirmed
+     * with the server.
+     *
+     * A payload stays set after its panels have consumed it (nothing clears
+     * it until the conversation changes), so without this a model swapped
+     * into a panel afterwards saw an unprocessed payload for its own new
+     * model id and replayed the previous question against it -- a send
+     * nobody asked for, against a model the server's `selectedModels` did
+     * not contain yet. That is trace 2b8e03fc-4a58-44ff-8e96-346c331a67b8's
+     * MODEL_NOT_SELECTED.
+     */
+    modelIds: string[];
     attachments: ChatAttachment[];
     deepResearchDepth?: "quick" | "standard" | "deep";
     admissionToken?: string | null;
@@ -3259,6 +3273,11 @@ export function ChatPageClient({
         text: trimmed,
         chatId: activeChatId,
         userMessageId: userMsgId,
+        // Exactly the set this run was prepared for above: priced by the
+        // preflight, given admission slots by it, and confirmed by the send
+        // barrier. A panel whose model is not in here was not part of this
+        // send and must not answer it.
+        modelIds: activeModelIds,
         attachments: promptAttachments,
         ...(options?.deepResearchDepth
           ? { deepResearchDepth: options.deepResearchDepth }
@@ -3539,7 +3558,13 @@ export function ChatPageClient({
 
   const toggleModel = (modelId: string) => {
     const model = getModel(modelId);
-    const isSelected = selectedModels.includes(modelId);
+    // The latest committed selection, not this render's copy of it: the
+    // picker can fire two toggles before React commits the first, and the
+    // second one re-saving the pre-first array is how a change the user made
+    // silently disappears from what the server is told.
+    const { models: committedModels, disabled: committedDisabled } =
+      latestModelSettingsRef.current;
+    const isSelected = committedModels.includes(modelId);
     if (
       !isSelected &&
       (!model || !canUseModelWithPlan(currentAccessPlan, model))
@@ -3559,8 +3584,8 @@ export function ChatPageClient({
     ) {
       return false;
     }
-	let nextModels = [...selectedModels];
-    let nextDisabled = [...disabledPanels];
+	let nextModels = [...committedModels];
+    let nextDisabled = [...committedDisabled];
 
 	if (nextModels.includes(modelId)) {
       if (nextModels.length === 1) return false; 
@@ -3619,12 +3644,17 @@ export function ChatPageClient({
     if (isGuestMode && !clampGuestSelectedModels([addModelId]).includes(addModelId)) {
       return false;
     }
-    let nextModels = selectedModels.filter((id) => id !== removeModelId);
+    // Same reason as toggleModel above: derived from the latest committed
+    // selection so a swap made before the previous change has rendered does
+    // not re-save the selection that change replaced.
+    const { models: committedModels, disabled: committedDisabled } =
+      latestModelSettingsRef.current;
+    let nextModels = committedModels.filter((id) => id !== removeModelId);
     nextModels.push(addModelId);
     nextModels = isGuestMode
       ? clampGuestSelectedModels(nextModels)
       : clampSelectedModels(nextModels).slice(0, maxSelectableModels);
-    const nextDisabled = disabledPanels.filter((id) => id !== removeModelId);
+    const nextDisabled = committedDisabled.filter((id) => id !== removeModelId);
     mutateModelSettings(currentChatId, nextModels, nextDisabled);
     return true;
   };
@@ -4005,7 +4035,12 @@ export function ChatPageClient({
   };
   
   const changePanelModel = (oldModelId: string, newModelId: string) => {
-    if (newModelId !== oldModelId && selectedModels.includes(newModelId)) {
+    // Read from the synchronously maintained ref, not the render closure, for
+    // the same reason togglePanelDisable does: two changes in one tick (or a
+    // change made before React has committed the previous one) must compose
+    // instead of the second one re-saving the array the first one replaced.
+    const { models, disabled } = latestModelSettingsRef.current;
+    if (newModelId !== oldModelId && models.includes(newModelId)) {
       return;
     }
     const nextModel = getModel(newModelId);
@@ -4018,10 +4053,10 @@ export function ChatPageClient({
       return;
     }
     const nextModels = clampSelectedModels(
-      selectedModels.map((id) => (id === oldModelId ? newModelId : id))
+      models.map((id) => (id === oldModelId ? newModelId : id))
     );
-    let nextDisabled = [...disabledPanels];
-    
+    let nextDisabled = [...disabled];
+
     if (nextDisabled.includes(oldModelId)) {
       nextDisabled = [...nextDisabled.filter((id) => id !== oldModelId), newModelId];
     }

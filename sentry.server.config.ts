@@ -4,6 +4,7 @@ import { resolveSentryEnvironmentTag } from "@/lib/deploymentEnvironment";
 import {
   isNextNoFallbackError,
   isNextNoFallbackSentryEvent,
+  redactReportableRequestHeaders,
   sanitizeOperationalStack,
   sanitizeOperationalText,
 } from "@/lib/operationalMonitoringCore";
@@ -56,15 +57,9 @@ Sentry.init({
     if (event.request) {
       event.request.data = undefined;
       event.request.cookies = undefined;
-      if (event.request.headers) {
-        const headers = { ...event.request.headers };
-        for (const name of Object.keys(headers)) {
-          if (/authorization|cookie|token|api[-_]?key/i.test(name)) {
-            headers[name] = "[REDACTED]";
-          }
-        }
-        event.request.headers = headers;
-      }
+      event.request.headers = redactReportableRequestHeaders(
+        event.request.headers
+      );
     }
     if (event.user) {
       event.user = event.user.id ? { id: event.user.id } : undefined;

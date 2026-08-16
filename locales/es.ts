@@ -1072,14 +1072,14 @@ export const es = {
     externalImport: {
         dataTabTitle: "Importar desde otro servicio de IA",
         dataTabDescription:
-            "Guarda en tu cuenta de Tomverse conversaciones de un archivo de exportación de ChatGPT o Claude. El archivo de exportación solo se lee en tu navegador.",
+            "Guarda en tu cuenta de Tomverse conversaciones de un archivo de exportación de ChatGPT, Claude o Gemini (Google Takeout). El archivo de exportación solo se lee en tu navegador.",
         dataTabUsage:
             "{conversations} conversaciones importadas · {storage} almacenados",
         dataTabOpen: "Gestionar importaciones",
         dataTabUsageEmpty: "Aún no hay conversaciones importadas",
         pageTitle: "Importar conversaciones desde otro servicio de IA",
         pageDescription:
-            "Sube una exportación oficial de datos de ChatGPT o Claude, revisa su contenido y elige qué conversaciones conservar en tu cuenta de Tomverse.",
+            "Sube una exportación oficial de datos de ChatGPT, Claude o Gemini, revisa su contenido y elige qué conversaciones conservar en tu cuenta de Tomverse.",
         backToImports: "Volver a las importaciones",
         signInRequired:
             "Inicia sesión para importar conversaciones desde otro servicio de IA.",
@@ -1092,7 +1092,7 @@ export const es = {
         capacityConversations: "{used} de {limit} conversaciones importadas",
         selectFile: "Elegir archivo de exportación",
         selectFileHint:
-            "Exportación de datos de ChatGPT o Claude (.zip o .json), hasta 1 GB. Los archivos grandes no son problema: los archivos multimedia se omiten sin leerse.",
+            "Exportación de datos de ChatGPT, Claude o Gemini (.zip o .json), hasta 1 GB. Para Gemini hace falta la exportación en JSON de Mi actividad → Aplicaciones de Gemini, obtenida en Google Takeout. Los archivos grandes no son problema: los archivos multimedia se omiten sin leerse.",
         parsing: "Leyendo la exportación en tu navegador…",
         parsingProgress: "{conversations} conversaciones encontradas",
         cancel: "Cancelar",
@@ -1219,7 +1219,8 @@ export const es = {
             "Selecciona Mi actividad, dentro elige Aplicaciones de Gemini y usa el formato JSON: el producto Gemini contiene Gems, no conversaciones",
         guideGeminiStep3:
             "Exporta y sube el .zip cuando Google te envíe el enlace de descarga",
-        guideFormats: "Se admiten archivos ZIP y JSON.",
+        guideFormats:
+            "Se admiten archivos ZIP y JSON. Una exportación de Gemini debe estar en formato JSON: el HTML no se puede leer.",
         guideStaysLocal:
             "El archivo exportado nunca sale de tu dispositivo: se abre dentro del navegador.",
         guideMediaExcluded:
@@ -1602,7 +1603,7 @@ export const es = {
         attachmentsTitle: "Adjuntos",
         attachments: "Los adjuntos pueden almacenarse temporalmente en almacenamiento cifrado para entrega al modelo y extracción de documentos. Actualmente se eliminan tras aproximadamente un día mediante la política de ciclo de vida.",
         externalImportTitle: "Conversaciones importadas de otros servicios de IA",
-        externalImport: "Puedes guardar en tu cuenta de Tomverse las conversaciones anteriores que selecciones de un archivo de exportación descargado de otro servicio de IA, como ChatGPT o Claude. El archivo de exportación se abre únicamente en tu navegador; el archivo original nunca se sube ni se conserva en los servidores o el almacenamiento de Tomverse. Solo se guarda como material privado de la cuenta el texto normalizado de las conversaciones que selecciones, junto con los datos de procedencia (servicio de origen, marcas de tiempo originales, nombres de modelo solo para mostrar). Las imágenes, el audio y los archivos adjuntos no se importan. Las conversaciones importadas pueden contener información personal de otras personas, por lo que es tu responsabilidad confirmar que tienes derecho a importar esos datos. Puedes consultar, eliminar y exportar el material importado en cualquier momento, y se elimina junto con tu cuenta. Eliminarlo de Tomverse no elimina los datos que conserva el servicio original.",
+        externalImport: "Puedes guardar en tu cuenta de Tomverse las conversaciones anteriores que selecciones de un archivo de exportación descargado de otro servicio de IA, como ChatGPT, Claude o Gemini (Google Takeout). El archivo de exportación se abre únicamente en tu navegador; el archivo original nunca se sube ni se conserva en los servidores o el almacenamiento de Tomverse. Solo se guarda como material privado de la cuenta el texto normalizado de las conversaciones que selecciones, junto con los datos de procedencia (servicio de origen, marcas de tiempo originales, nombres de modelo solo para mostrar). Las imágenes, el audio y los archivos adjuntos no se importan. Las conversaciones importadas pueden contener información personal de otras personas, por lo que es tu responsabilidad confirmar que tienes derecho a importar esos datos. Puedes consultar, eliminar y exportar el material importado en cualquier momento, y se elimina junto con tu cuenta. Eliminarlo de Tomverse no elimina los datos que conserva el servicio original.",
         memoryTitle: "Memoria a largo plazo de la cuenta",
         memory: "Si decides usar la función de memoria, Tomverse envía las partes de tus conversaciones importadas que selecciones al proveedor de IA que confirmes, con el fin de extraer recuerdos candidatos. La extracción utiliza el modelo y la cantidad de créditos que se te muestran antes de ejecutarla. Los candidatos extraídos no se usan para generar respuestas hasta que los revisas y apruebas. Los candidatos clasificados como sensibles y los que requieren revisión individual quedan excluidos de la aprobación masiva y deben confirmarse uno a uno. Los candidatos, los recuerdos aprobados y sus fundamentos se conservan en tu cuenta hasta que los elimines o se eliminen los datos de tu cuenta. Los recuerdos aprobados y las preferencias de estilo de respuesta se envían como material de referencia al proveedor de IA que genera cada nueva respuesta, es decir, al proveedor de cada modelo cuando comparas varios. Puedes consultar, editar y desactivar los recuerdos guardados en cualquier momento, descargar la lista completa como archivo o eliminarlos todos de una vez. Si desactivas la memoria, deja de usarse en los chats nuevos.",
         assistantProfilesTitle: "Perfiles de IA personalizados y archivos de conocimiento",

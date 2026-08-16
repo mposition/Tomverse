@@ -116,6 +116,63 @@ export const sanitizeOperationalContext = (
   );
 };
 
+/**
+ * Request headers whose values may leave the process inside an error report.
+ *
+ * This is an allowlist because the denylist it replaced could only name the
+ * secret-carrying headers someone had already thought of. `x-tomverse-origin-verify`
+ * carries `CLOUDFLARE_ORIGIN_SECRET` -- the shared value that proves a request
+ * reached the origin through Cloudflare rather than around it -- and matched
+ * none of `authorization|cookie|token|api[-_]?key`, so every event with request
+ * headers shipped it in plaintext to a third-party system.
+ *
+ * A header not named here is reported as present with its value redacted, so
+ * the shape of a request stays legible without its contents. Adding one is a
+ * deliberate decision: the question is not "is this header useful" but "is this
+ * value safe to store outside our infrastructure".
+ */
+const REPORTABLE_REQUEST_HEADERS = new Set([
+  "accept",
+  "accept-encoding",
+  "accept-language",
+  "cf-ipcountry",
+  "cf-ray",
+  "cf-visitor",
+  "content-length",
+  "content-type",
+  "host",
+  "origin",
+  "priority",
+  "sec-fetch-dest",
+  "sec-fetch-mode",
+  "sec-fetch-site",
+  "user-agent",
+  "x-forwarded-host",
+  "x-forwarded-proto",
+  "x-railway-edge",
+  "x-railway-request-id",
+  "x-request-start",
+]);
+
+/**
+ * `referer` is deliberately absent. A magic-link sign-in lands on a URL whose
+ * query carries the login token, and the next request from that page reports it
+ * as the referrer. `event.request.url` already says which endpoint failed.
+ */
+export const redactReportableRequestHeaders = (
+  headers: Record<string, string> | undefined
+): Record<string, string> | undefined => {
+  if (!headers) return headers;
+  return Object.fromEntries(
+    Object.entries(headers).map(([name, value]) => [
+      name,
+      REPORTABLE_REQUEST_HEADERS.has(name.trim().toLowerCase())
+        ? value
+        : "[REDACTED]",
+    ])
+  );
+};
+
 export const operationalAlertCooldownMs = (value: string | undefined) => {
   const seconds = Number(value);
   if (!Number.isFinite(seconds)) return 10 * 60 * 1_000;

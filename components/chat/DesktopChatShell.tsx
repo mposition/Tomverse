@@ -47,6 +47,8 @@ type PromptPayload = {
   text: string;
   chatId: string;
   userMessageId: string;
+  /** The models this send was made for; other panels must not consume it. */
+  modelIds: string[];
   attachments: ChatAttachment[];
   deepResearchDepth?: "quick" | "standard" | "deep";
   admissionToken?: string | null;

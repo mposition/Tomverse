@@ -383,8 +383,10 @@ export function PlatformSettingsPanel({
               <p className="text-xs font-bold uppercase tracking-[0.18em] text-blue-300">Opt-in rollout</p>
               <h3 className="mt-2 text-xl font-black text-white">External conversation import</h3>
               <p className="mt-2 text-sm leading-6 text-zinc-400">
-                Release A of the import/memory program: ChatGPT and Claude
-                export files, parsed in the browser, stored per account.
+                Release A of the import/memory program: ChatGPT, Claude and
+                Gemini (Google Takeout) export files, parsed in the browser,
+                stored per account. One switch for all three — there is no
+                per-provider flag, so enabling this enables Gemini too.
                 Default-off and fail-closed; turning this off closes the
                 import APIs and UI while listing, deletion and export stay
                 available to owners

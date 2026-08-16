@@ -1082,13 +1082,13 @@ export const en = {
     externalImport: {
         dataTabTitle: "Import from another AI service",
         dataTabDescription:
-            "Store past conversations from a ChatGPT or Claude export file in your Tomverse account. The export file is read only in your browser.",
+            "Store past conversations from a ChatGPT, Claude or Gemini (Google Takeout) export file in your Tomverse account. The export file is read only in your browser.",
         dataTabUsage: "{conversations} imported conversations · {storage} stored",
         dataTabOpen: "Manage imports",
         dataTabUsageEmpty: "No imported conversations yet",
         pageTitle: "Import conversations from another AI service",
         pageDescription:
-            "Upload an official data export from ChatGPT or Claude, review what it contains, and choose which conversations to keep in your Tomverse account.",
+            "Upload an official data export from ChatGPT, Claude or Gemini, review what it contains, and choose which conversations to keep in your Tomverse account.",
         backToImports: "Back to imports",
         signInRequired: "Sign in to import conversations from another AI service.",
         disabledNotice: "External conversation import is not available right now.",
@@ -1099,7 +1099,7 @@ export const en = {
         capacityConversations: "{used} of {limit} imported conversations",
         selectFile: "Choose export file",
         selectFileHint:
-            "ChatGPT or Claude data export (.zip or .json), up to 1GB. Large archives are fine — media files are skipped without being read.",
+            "ChatGPT, Claude or Gemini data export (.zip or .json), up to 1GB. A Gemini export has to be Google Takeout's My Activity → Gemini Apps in the JSON format. Large archives are fine — media files are skipped without being read.",
         parsing: "Reading the export in your browser…",
         parsingProgress: "{conversations} conversations found",
         cancel: "Cancel",
@@ -1220,7 +1220,8 @@ export const en = {
             "Select My Activity, then inside it choose Gemini Apps and set the format to JSON — the Gemini product itself holds Gems, not conversations",
         guideGeminiStep3:
             "Export, then upload the .zip once Google emails you the download link",
-        guideFormats: "Both ZIP and JSON files are supported.",
+        guideFormats:
+            "Both ZIP and JSON files are supported. A Gemini export has to be in the JSON format — HTML cannot be read.",
         guideStaysLocal:
             "The export file never leaves your device — it is opened inside your browser.",
         guideMediaExcluded: "Images, audio and attachments are not imported.",
@@ -1602,7 +1603,7 @@ export const en = {
         attachmentsTitle: "Attachments",
         attachments: "Attachments may be stored temporarily in encrypted object storage for model delivery and document extraction. Temporary attachments are currently deleted after approximately one day under the lifecycle policy.",
         externalImportTitle: "Conversations imported from other AI services",
-        externalImport: "You can store past conversations you select from an export file downloaded from another AI service, such as ChatGPT or Claude, in your Tomverse account. The export file is opened only in your browser; the original archive is never uploaded to or retained by Tomverse servers or storage. Only the normalized text of the conversations you select, together with provenance details (source service, original timestamps, display-only model names), is stored as account-private material. Images, audio and attachments are not imported. Imported conversations may contain other people's personal information, so it is your responsibility to confirm that you are entitled to import that data. You can view, delete and export imported material at any time, and it is deleted with your account. Deleting it from Tomverse does not delete the data held by the original service.",
+        externalImport: "You can store past conversations you select from an export file downloaded from another AI service, such as ChatGPT, Claude or Gemini (Google Takeout), in your Tomverse account. The export file is opened only in your browser; the original archive is never uploaded to or retained by Tomverse servers or storage. Only the normalized text of the conversations you select, together with provenance details (source service, original timestamps, display-only model names), is stored as account-private material. Images, audio and attachments are not imported. Imported conversations may contain other people's personal information, so it is your responsibility to confirm that you are entitled to import that data. You can view, delete and export imported material at any time, and it is deleted with your account. Deleting it from Tomverse does not delete the data held by the original service.",
         memoryTitle: "Account long-term memory",
         memory: "If you choose to use the memory feature, Tomverse sends the parts of your imported conversations that you select to the AI provider you confirm, in order to extract memory candidates. Extraction uses the model and the credit amount shown to you before it runs. Extracted candidates are not used to generate answers until you review and approve them. Candidates classified as sensitive, and those that need individual review, are excluded from bulk approval and must be confirmed one at a time. Candidates, approved memories and their evidence are retained in your account until you delete them or your account data is deleted. Approved memories and answer-style preferences are sent as reference material to the AI provider that generates each new answer, which means to each model's provider when you compare several models. You can view, edit and disable stored memories at any time, download the full list as a file, or delete all of them at once. Turning memory off stops it being used in new chats.",
         assistantProfilesTitle: "Custom AI profiles and knowledge files",

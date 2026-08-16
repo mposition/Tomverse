@@ -1090,13 +1090,13 @@ export const zh = {
     externalImport: {
         dataTabTitle: "从其他 AI 服务导入",
         dataTabDescription:
-            "将 ChatGPT 或 Claude 导出文件中的历史对话保存到您的 Tomverse 账户。导出文件仅在您的浏览器中读取。",
+            "将 ChatGPT、Claude 或 Gemini（Google Takeout）导出文件中的历史对话保存到您的 Tomverse 账户。导出文件仅在您的浏览器中读取。",
         dataTabUsage: "已导入 {conversations} 个对话 · 已存储 {storage}",
         dataTabOpen: "管理导入",
         dataTabUsageEmpty: "尚未导入任何对话",
         pageTitle: "从其他 AI 服务导入对话",
         pageDescription:
-            "上传 ChatGPT 或 Claude 的官方数据导出文件，查看其内容，然后选择要保存到 Tomverse 账户的对话。",
+            "上传 ChatGPT、Claude 或 Gemini 的官方数据导出文件，查看其内容，然后选择要保存到 Tomverse 账户的对话。",
         backToImports: "返回导入列表",
         signInRequired: "登录后即可从其他 AI 服务导入对话。",
         disabledNotice: "外部对话导入功能目前不可用。",
@@ -1107,7 +1107,7 @@ export const zh = {
         capacityConversations: "已导入 {used} 个对话（上限 {limit} 个）",
         selectFile: "选择导出文件",
         selectFileHint:
-            "ChatGPT 或 Claude 数据导出（.zip 或 .json），最大 1GB。文件较大也没关系 — 媒体文件会直接跳过，不会读取。",
+            "ChatGPT、Claude 或 Gemini 数据导出（.zip 或 .json），最大 1GB。Gemini 需要在 Google Takeout 中导出「我的活动 → Gemini 应用」的 JSON 格式文件。文件较大也没关系 — 媒体文件会直接跳过，不会读取。",
         parsing: "正在浏览器中读取导出文件…",
         parsingProgress: "已发现 {conversations} 个对话",
         cancel: "取消",
@@ -1222,7 +1222,8 @@ export const zh = {
             "选择「我的活动」，在其中勾选 Gemini 应用并将格式设为 JSON — Gemini 产品项里放的是 Gem，不是对话",
         guideGeminiStep3:
             "导出后，收到 Google 的下载链接再上传该 .zip",
-        guideFormats: "同时支持 ZIP 文件和 JSON 文件。",
+        guideFormats:
+            "同时支持 ZIP 文件和 JSON 文件。Gemini 导出必须是 JSON 格式，HTML 无法读取。",
         guideStaysLocal: "导出文件不会离开你的设备，只在浏览器中打开。",
         guideMediaExcluded: "图片、音频和附件不会被导入。",
         guidePrivacyDisclosure: "查看数据处理方式",
@@ -1583,7 +1584,7 @@ export const zh = {
         attachmentsTitle: "附件",
         attachments: "附件可能会临时存储在加密对象存储中，用于发送给模型和提取文档内容。当前临时附件会根据生命周期策略在约一天后删除。",
         externalImportTitle: "从其他 AI 服务导入的对话",
-        externalImport: "您可以将从 ChatGPT、Claude 等其他 AI 服务下载的导出文件中所选的历史对话保存到 Tomverse 账户。导出文件仅在您的浏览器中打开，原始压缩包不会上传或保存到 Tomverse 的服务器或存储中。仅保存您所选对话的规范化文本及来源信息（来源服务、原始时间、仅供显示的模型名称），图片、音频和附件不会被导入。导入的对话可能包含他人的个人信息，因此您有责任确认自己有权导入这些数据。您可以随时查看、删除和导出导入的资料，删除账户时这些资料也会一并删除。在 Tomverse 中删除并不会删除原服务中保存的数据。",
+        externalImport: "您可以将从 ChatGPT、Claude、Gemini（Google Takeout）等其他 AI 服务下载的导出文件中所选的历史对话保存到 Tomverse 账户。导出文件仅在您的浏览器中打开，原始压缩包不会上传或保存到 Tomverse 的服务器或存储中。仅保存您所选对话的规范化文本及来源信息（来源服务、原始时间、仅供显示的模型名称），图片、音频和附件不会被导入。导入的对话可能包含他人的个人信息，因此您有责任确认自己有权导入这些数据。您可以随时查看、删除和导出导入的资料，删除账户时这些资料也会一并删除。在 Tomverse 中删除并不会删除原服务中保存的数据。",
         memoryTitle: "账户长期记忆",
         memory: "如果您选择使用记忆功能，Tomverse 会将您指定的导入对话内容发送给您确认的 AI 提供方，以提取记忆候选。提取会使用运行前向您显示的模型和额度。提取出的候选在您审核并批准之前不会用于生成回答。被归类为敏感的候选以及需要单独审核的候选不会包含在批量批准中，必须逐条确认。候选、已批准的记忆及其依据会保存在您的账户中，直到您删除它们或您的账户数据被删除。已批准的记忆和回答风格偏好会作为参考资料发送给生成该回答的 AI 提供方；在比较多个模型时，会分别发送给各模型的提供方。您可以随时查看、修改和停用已保存的记忆，将完整列表下载为文件，或一次性全部删除。关闭记忆后，新对话将不再使用记忆。",
         assistantProfilesTitle: "自定义 AI 配置与知识文件",
