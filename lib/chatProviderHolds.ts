@@ -271,6 +271,24 @@ export type AttemptCostIntent = {
     pricingVersion?: string | null;
     /** What the hold put in the bucket. The upper bound a crash records. */
     reservedCostMicroUsd: number;
+    /**
+     * The native web search this attempt was authorized to run, if any.
+     *
+     * Here rather than on the reservation because an authorization is a
+     * contract with one dispatched attempt: a fallback runs a different model
+     * at a different provider, with its own rate and its own ceiling. Native
+     * search is excluded from fallback today, and putting this at the top
+     * level would mean changing the schema again on the day it is not.
+     *
+     * Frozen so settlement prices what was authorized. Recomputing from the
+     * live registry would let a price change between dispatch and settlement
+     * silently rewrite what a turn was allowed to spend.
+     */
+    nativeSearchAuthorization?: {
+        reservedCostMicroUsd: number;
+        costPerQueryMicroUsd: number;
+        maxQueries: number;
+    };
 };
 
 /**
@@ -319,6 +337,36 @@ export const attemptCostIntentProblems = (input: {
     }
 
     for (const intent of input.intents) {
+        // The parts have to add up to the whole. `reservedCostMicroUsd` is
+        // what the hold put in the bucket, and it is the sum of the token
+        // reservation and the search reservation -- an authorization whose
+        // components disagree with its total is one nobody can audit.
+        const search = intent.nativeSearchAuthorization;
+        if (search) {
+            const expectedSearch = Math.ceil(
+                search.costPerQueryMicroUsd * search.maxQueries
+            );
+            if (search.reservedCostMicroUsd !== expectedSearch) {
+                problems.push(
+                    `attempt ${intent.attemptIndex} authorized ${search.reservedCostMicroUsd} for search but ${search.maxQueries} queries at ${search.costPerQueryMicroUsd} is ${expectedSearch}`
+                );
+            }
+            const tokens =
+                Math.ceil(
+                    intent.estimatedInputTokens * intent.inputUsdPerMillionTokens
+                ) +
+                Math.ceil(
+                    intent.reservedOutputTokens * intent.outputUsdPerMillionTokens
+                );
+            if (
+                intent.reservedCostMicroUsd !==
+                tokens + search.reservedCostMicroUsd
+            ) {
+                problems.push(
+                    `attempt ${intent.attemptIndex} reserved ${intent.reservedCostMicroUsd}, which is not ${tokens} of tokens plus ${search.reservedCostMicroUsd} of search`
+                );
+            }
+        }
         const held = holdsByAttempt.get(intent.attemptIndex) ?? [];
         if (intent.reservedCostMicroUsd > 0) {
             // A positive authorization has to have moved both buckets. One of

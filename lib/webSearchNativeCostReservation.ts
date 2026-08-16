@@ -147,3 +147,26 @@ export const settledNativeSearchCost = (input: {
         breachedCeiling: input.maxQueries > 0 && queries > input.maxQueries,
     };
 };
+
+/**
+ * When authorizations began being frozen into reservations.
+ *
+ * A reservation created before it settles on the caller's figure and is not a
+ * defect -- it was dispatched correctly under the older contract, and failing
+ * it or dropping its cost would punish a turn that did nothing wrong. One
+ * created after it and carrying none is a writer that stopped filling it.
+ *
+ * Unset means the two cannot be told apart, and the honest answer there is the
+ * lenient one: settle on the caller's figure and say nothing. The alternative
+ * would page about every legacy turn on a deployment that never set it.
+ */
+export const NATIVE_SEARCH_AUTHORIZATION_CUTOVER_ENV =
+    "NATIVE_SEARCH_AUTHORIZATION_CUTOVER_AT";
+
+export const missingAuthorizationIsADefect = (reservationCreatedAt: Date) => {
+    const raw = process.env[NATIVE_SEARCH_AUTHORIZATION_CUTOVER_ENV]?.trim();
+    if (!raw) return false;
+    const cutover = new Date(raw);
+    if (Number.isNaN(cutover.getTime())) return false;
+    return reservationCreatedAt >= cutover;
+};

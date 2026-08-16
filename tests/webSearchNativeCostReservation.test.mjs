@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  missingAuthorizationIsADefect,
   recordSearchQueryCeilingBreach,
   reserveNativeSearchCost,
   resetSearchQueryCeilingBreaches,
@@ -139,4 +140,32 @@ test("no search still reserves nothing after a breach", () => {
   });
   assert.equal(reserved.ok, true, "the latch is about searching, not about the model");
   resetSearchQueryCeilingBreaches();
+});
+
+test("a missing authorization is a defect only after the cutover", () => {
+  const before = new Date("2026-01-01T00:00:00.000Z");
+  const after = new Date("2026-12-01T00:00:00.000Z");
+  // Unset: the two cannot be told apart, and the lenient answer is the honest
+  // one. Paging about every legacy turn on a deployment that never set the
+  // variable would be an alarm nobody can act on.
+  delete process.env.NATIVE_SEARCH_AUTHORIZATION_CUTOVER_AT;
+  assert.equal(missingAuthorizationIsADefect(after), false);
+
+  process.env.NATIVE_SEARCH_AUTHORIZATION_CUTOVER_AT =
+    "2026-06-01T00:00:00.000Z";
+  try {
+    assert.equal(missingAuthorizationIsADefect(before), false, "dispatched under the older contract");
+    assert.equal(missingAuthorizationIsADefect(after), true, "a writer stopped filling it");
+  } finally {
+    delete process.env.NATIVE_SEARCH_AUTHORIZATION_CUTOVER_AT;
+  }
+});
+
+test("an unparseable cutover is treated as unset rather than as now", () => {
+  process.env.NATIVE_SEARCH_AUTHORIZATION_CUTOVER_AT = "not a date";
+  try {
+    assert.equal(missingAuthorizationIsADefect(new Date()), false);
+  } finally {
+    delete process.env.NATIVE_SEARCH_AUTHORIZATION_CUTOVER_AT;
+  }
 });
