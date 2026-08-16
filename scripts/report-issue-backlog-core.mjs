@@ -178,6 +178,50 @@ export const ISSUE_PROBES = [
             "confirm costSource=registry, then remove the three CHAT_MODEL_GLM_5_2_* variables. " +
             "Staging is done; production still holds both the variables and the seeded registry row.",
     },
+    {
+        issue: 636,
+        title: "Deprecate creation of fixed-amount billing promotions",
+        looksAt: "app/api/admin/billing/route.ts",
+        resolvedWhen: ({ readFile }) => {
+            const source = readFile("app/api/admin/billing/route.ts");
+            if (source === null) return null;
+            // The block has to name the column it refuses. A percent-only rule
+            // that never mentions `discountAmountCents` is not this issue.
+            return (
+                /discountAmountCents/.test(source) &&
+                /percentage[- ]only|fixed[- ]amount/i.test(source)
+            );
+        },
+        blockedOn:
+            "A read-only production inventory of fixed-amount promotions " +
+            "(docs/policy/promotion-discount-currency.md §6). The schema " +
+            "cannot answer marketing exposure, usage country or campaign owner -- BillingPromotion has " +
+            "no country or owner column and BillingPromotionRedemption stores no currency and only a " +
+            "hashed IP -- so those come from campaign records or stay `unknown`. Blocking creation " +
+            "before knowing which codes are live could interrupt a running campaign.",
+        remainder:
+            "The Admin UI has to match the API, and `discountAmountCents` stays in the schema for the " +
+            "audit trail: dropping it is a separate migration behind the three conditions in " +
+            "docs/policy/promotion-discount-currency.md §5.",
+    },
+    {
+        issue: 637,
+        title: "Verify the production AUD billing price override",
+        looksAt: "lib/billingPriceCatalog.ts",
+        resolvedWhen: () =>
+            // Nothing in the tree can answer this. The question is what
+            // production's AppSetting holds, who set it and what Stripe
+            // actually charges; a probe that guessed from the default catalogue
+            // would be answering a different question confidently.
+            false,
+        blockedOn:
+            "Production reads: AppSetting.billingPriceCatalog and its AdminAuditLog entry, a recent AUD " +
+            "Checkout Session's unit_amount, and existing AUD subscription item Prices. Note that " +
+            "checkout builds an ad-hoc price_data per Session while plan change uses " +
+            "BillingPlan.stripePriceId, so there are two price sources and nothing reconciles them. " +
+            "Do not change the catalogue before the verification: reverting an override with no " +
+            "approval record is itself a price change.",
+    },
 ];
 
 /**
@@ -216,6 +260,18 @@ export const VERDICTS = {
     CODE_COMPLETE_REMAINDER: "code_complete_remainder",
     RESOLVED_NOT_ON_ALL_BRANCHES: "resolved_not_on_all_branches",
     LANDED_BUT_UNVERIFIED: "landed_but_unverified",
+    /**
+     * Not done, and not startable either.
+     *
+     * `candidates` answers "what may I pick up", and an issue whose first step
+     * is reading production is not one of them: the work cannot begin and a
+     * session that tries will either stall or guess. That is a different state
+     * from `open_work`, and collapsing the two is what would send someone to
+     * implement an Admin restriction without knowing which promotions are live.
+     *
+     * Declared by a probe's `blockedOn`, which names what is being waited for.
+     */
+    BLOCKED: "blocked",
     OPEN_WORK: "open_work",
 };
 
@@ -260,6 +316,9 @@ const signalsForBranch = (issue, ref, state) => {
             ref,
             resolved: outcome,
             remainder: outcome ? probe.remainder : undefined,
+            // Carried only while unresolved: once the issue is done, what it
+            // was once waiting for is history rather than a warning.
+            blockedOn: outcome ? undefined : probe.blockedOn,
             detail: outcome
                 ? `${probe.looksAt} satisfies the issue's definition of done.`
                 : `${probe.looksAt} does not yet satisfy the issue's definition of done.`,
@@ -310,6 +369,9 @@ export const classifyIssue = (issue, facts) => {
     }
 
     const remainder = signals.find((signal) => signal.resolved && signal.remainder);
+    const blocked = signals.find(
+        (signal) => !signal.resolved && signal.blockedOn
+    );
 
     let verdict = VERDICTS.OPEN_WORK;
     if (resolvedOn.length > 0 && resolvedOn.length === evaluatedOn.length) {
@@ -320,6 +382,8 @@ export const classifyIssue = (issue, facts) => {
         verdict = VERDICTS.RESOLVED_NOT_ON_ALL_BRANCHES;
     } else if (substantive.length > 0) {
         verdict = VERDICTS.LANDED_BUT_UNVERIFIED;
+    } else if (blocked) {
+        verdict = VERDICTS.BLOCKED;
     }
 
     return {
@@ -330,6 +394,7 @@ export const classifyIssue = (issue, facts) => {
         missingFrom: evaluatedOn.filter((ref) => !resolvedOn.includes(ref)),
         commitBranches,
         remainder: remainder?.remainder,
+        blockedOn: blocked?.blockedOn,
         signals,
     };
 };
@@ -361,5 +426,6 @@ export const auditIssueBacklog = ({ issues, facts }) => {
         ),
         awaitingPromotion: withVerdict(VERDICTS.RESOLVED_NOT_ON_ALL_BRANCHES),
         needsReview: withVerdict(VERDICTS.LANDED_BUT_UNVERIFIED),
+        blocked: withVerdict(VERDICTS.BLOCKED),
     };
 };

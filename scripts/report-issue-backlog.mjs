@@ -253,6 +253,7 @@ const LABELS = {
   [VERDICTS.CODE_COMPLETE_REMAINDER]: "code complete, stated remainder left",
   [VERDICTS.RESOLVED_NOT_ON_ALL_BRANCHES]: "resolved on some branches only",
   [VERDICTS.LANDED_BUT_UNVERIFIED]: "commits landed, completion unverified",
+  [VERDICTS.BLOCKED]: "blocked, not startable",
   [VERDICTS.OPEN_WORK]: "open work",
 };
 
@@ -298,6 +299,7 @@ if (asJson) {
       console.log(`  [${signal.kind}${where}] ${signal.detail}`);
     }
     if (issue.remainder) console.log(`  remaining: ${issue.remainder}`);
+    if (issue.blockedOn) console.log(`  blocked on: ${issue.blockedOn}`);
     console.log("");
   }
 
@@ -318,6 +320,13 @@ if (asJson) {
   }
   if (report.needsReview.length > 0) {
     console.log(`Needs a person to confirm: ${numbers(report.needsReview)}`);
+  }
+  if (report.blocked.length > 0) {
+    // Deliberately printed beside the candidates rather than among them: these
+    // are open and unfinished, and still must not be started.
+    console.log(
+      `Blocked, do not start: ${numbers(report.blocked)} -- see "blocked on" above`
+    );
   }
 }
 
