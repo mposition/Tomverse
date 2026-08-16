@@ -237,6 +237,44 @@ const storedRow = (value: unknown) => ({
   updatedAt: new Date("2026-08-01T00:00:00.000Z"),
 });
 
+/**
+ * Captures the fallback event while a body runs.
+ *
+ * The event is the only thing that distinguishes "serving the override" from
+ * "serving the default" at runtime, so it is asserted rather than tolerated:
+ * a fallback that stopped announcing itself would put production back in the
+ * state this work exists to end.
+ */
+const withWarnings = async <T>(body: () => Promise<T>) => {
+  const warnings: string[] = [];
+  const original = console.warn;
+  console.warn = (...args: unknown[]) => {
+    warnings.push(String(args[0]));
+  };
+  try {
+    const result = await body();
+    return { result, warnings };
+  } finally {
+    console.warn = original;
+  }
+};
+
+type FallbackEvent = { event?: string; source?: string; served?: string };
+
+const fallbackEvents = (warnings: string[]): FallbackEvent[] =>
+  warnings
+    .map((line) => {
+      try {
+        return JSON.parse(line) as FallbackEvent;
+      } catch {
+        return null;
+      }
+    })
+    .filter(
+      (entry): entry is FallbackEvent =>
+        entry?.event === "billing_price_catalog_fallback"
+    );
+
 test.beforeEach(() => {
   world = freshWorld();
 });
@@ -294,14 +332,22 @@ test("a valid stored override is honoured by both paths, not just one", async ()
   // together, so no state exists where a customer is quoted one number and
   // charged another.
   const override = JSON.parse(JSON.stringify(defaults));
-  override.plans.pro.AUD = { monthly: 2_000, annual: 19_200 };
+  // Derived from the default rather than written out. Aligning the default to
+  // the approved price (#637) made a literal here equal to the default, and a
+  // test where the override and the fallback are the same number cannot tell
+  // which one answered.
+  const overridden = defaults.plans.pro.AUD.monthly + 500;
+  override.plans.pro.AUD = {
+    monthly: overridden,
+    annual: Math.round(overridden * 12 * 0.8),
+  };
   world.storedRow = storedRow(override);
 
   const quoted = await quotedMonthlyMinor();
   const charged = await chargedMonthlyMinor();
 
   assert.equal(quoted, charged);
-  assert.equal(quoted, 2_000);
+  assert.equal(quoted, overridden);
   assert.notEqual(
     quoted,
     defaults.plans.pro.AUD.monthly,
@@ -309,4 +355,75 @@ test("a valid stored override is honoured by both paths, not just one", async ()
   );
   // A read must not rewrite a row it could read.
   assert.deepEqual(world.appSettingWrites, []);
+});
+
+/* -------------------------------------------------------------------------- */
+/* The fallback says so                                                        */
+/* -------------------------------------------------------------------------- */
+
+test("each fallback state announces itself, and names which one it is", async () => {
+  const cases: [string, () => void][] = [
+    ["created_from_default", () => {
+      world.storedRow = null;
+    }],
+    ["default_row_unparseable", () => {
+      world.storedRow = storedRow("{not json");
+    }],
+    ["default_row_invalid", () => {
+      world.storedRow = storedRow({ version: 1, plans: {}, creditPacks: {} });
+    }],
+  ];
+
+  for (const [expected, arrange] of cases) {
+    world = freshWorld();
+    arrange();
+    const { warnings } = await withWarnings(() => quotedMonthlyMinor());
+    const events = fallbackEvents(warnings);
+    assert.ok(
+      events.length > 0,
+      `${expected}: a silent fallback is the defect this event exists for`
+    );
+    assert.equal(events[0].source, expected);
+    assert.equal(
+      events[0].served,
+      "compiled_default",
+      "the line has to say what the customer got, not only that something failed"
+    );
+  }
+});
+
+test("a readable stored catalogue says nothing", async () => {
+  // An event on the healthy path would be noise on every request, and noise is
+  // how a real one gets ignored.
+  const override = JSON.parse(JSON.stringify(defaults));
+  override.plans.pro.AUD = { monthly: 2_100, annual: 20_160 };
+  world.storedRow = storedRow(override);
+
+  const { result, warnings } = await withWarnings(() => quotedMonthlyMinor());
+  assert.equal(result, 2_100);
+  assert.deepEqual(fallbackEvents(warnings), []);
+});
+
+test("the Admin catalogue read reports which table answered", async () => {
+  // The panel renders the stored row's `updatedAt` beside the catalogue. When
+  // the row is unreadable those numbers are the defaults, so without this the
+  // console shows a recent timestamp next to values that row never held.
+  const { getBillingPriceCatalogWithMeta } = (await import(
+    mod("lib/billingPriceCatalog.ts")
+  )) as typeof import("../../lib/billingPriceCatalog");
+
+  world.storedRow = storedRow({ version: 1, plans: {}, creditPacks: {} });
+  const invalid = await withWarnings(() => getBillingPriceCatalogWithMeta());
+  assert.equal(invalid.result.source, "default_row_invalid");
+  assert.equal(
+    invalid.result.updatedAt,
+    "2026-08-01T00:00:00.000Z",
+    "the timestamp is still the row's -- `source` is what stops it being read as this catalogue's"
+  );
+
+  world = freshWorld();
+  const override = JSON.parse(JSON.stringify(defaults));
+  world.storedRow = storedRow(override);
+  const stored = await withWarnings(() => getBillingPriceCatalogWithMeta());
+  assert.equal(stored.result.source, "stored");
 });

@@ -19,7 +19,10 @@ import type {
   BillingPlanConfig,
   BillingPromotionConfig,
 } from "@/lib/billingConfig";
-import type { BillingPriceCatalog } from "@/lib/billingPriceCatalog";
+import type {
+  BillingPriceCatalog,
+  BillingPriceCatalogSource,
+} from "@/lib/billingPriceCatalog";
 import {
   BILLING_CURRENCIES,
   billingCurrencyFractionDigits,
@@ -35,6 +38,14 @@ type BillingConfigPayload = {
   promotions: BillingPromotionConfig[];
   priceCatalog: BillingPriceCatalog;
   priceCatalogUpdatedAt: string | null;
+  /**
+   * Which table the catalogue above came from.
+   *
+   * Optional because the PATCH/GET response shape is shared with older
+   * callers; absent reads as "not reported" rather than as "stored", so a
+   * client that does not know about this cannot claim the row is in use.
+   */
+  priceCatalogSource?: BillingPriceCatalogSource;
 };
 
 type Props = BillingConfigPayload & {
@@ -721,6 +732,7 @@ export function BillingAdminPanel({
   promotions,
   priceCatalog,
   priceCatalogUpdatedAt,
+  priceCatalogSource,
   paidUserCount,
   activeSubscriptionCount,
   initialTab = "plans",
@@ -737,6 +749,9 @@ export function BillingAdminPanel({
     useState<BillingPriceCatalog>(priceCatalog);
   const [draftPriceCatalogUpdatedAt, setDraftPriceCatalogUpdatedAt] =
     useState<string | null>(priceCatalogUpdatedAt);
+  const [catalogSource, setCatalogSource] = useState<
+    BillingPriceCatalogSource | undefined
+  >(priceCatalogSource);
   const [isSaving, setIsSaving] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [isValidatingStripe, setIsValidatingStripe] = useState(false);
@@ -885,6 +900,7 @@ export function BillingAdminPanel({
     setDraftPriceCatalog(data.priceCatalog);
     setBaselinePriceCatalog(data.priceCatalog);
     setDraftPriceCatalogUpdatedAt(data.priceCatalogUpdatedAt);
+    setCatalogSource(data.priceCatalogSource);
     setLastSyncedAt(new Date().toLocaleTimeString());
   };
 
@@ -1233,10 +1249,23 @@ export function BillingAdminPanel({
             ))}
           </div>
         ) : activeTab === "prices" ? (
-          <LocalizedPriceEditor
-            catalog={draftPriceCatalog}
-            onChange={setDraftPriceCatalog}
-          />
+          <div>
+            {catalogSource && catalogSource !== "stored" ? (
+              <p
+                data-testid="price-catalog-fallback-notice"
+                role="status"
+                className="mb-4 rounded-2xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-xs font-semibold leading-5 text-amber-100"
+              >
+                {catalogSource === "created_from_default"
+                  ? "There was no stored price catalogue, so these are the code defaults and they have just been written to the database."
+                  : "The stored price catalogue could not be read, so these are the code defaults. The timestamp above belongs to the unreadable row, not to these numbers. Saving replaces the row."}
+              </p>
+            ) : null}
+            <LocalizedPriceEditor
+              catalog={draftPriceCatalog}
+              onChange={setDraftPriceCatalog}
+            />
+          </div>
         ) : (
           <div>
             <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">

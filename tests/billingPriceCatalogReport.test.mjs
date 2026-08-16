@@ -37,15 +37,30 @@ test("an identical stored catalogue reports no differences", () => {
 });
 
 test("a differing price is reported with both numbers and its own path", () => {
+  const base = defaults();
   const stored = defaults();
-  stored.plans.pro.AUD = { monthly: 2_000, annual: 19_200 };
+  // Derived from the defaults rather than written out, so aligning the default
+  // catalogue to a new approved price cannot silently turn this into a test of
+  // two identical numbers.
+  stored.plans.pro.AUD = {
+    monthly: base.plans.pro.AUD.monthly + 300,
+    annual: base.plans.pro.AUD.annual + 2_800,
+  };
   const result = compare("stored", stored);
 
   assert.deepEqual(
     result.differs.map((row) => [row.path, row.storedMinor, row.defaultMinor]),
     [
-      ["plans.pro.AUD.monthly", 2_000, 2_300],
-      ["plans.pro.AUD.annual", 19_200, 22_000],
+      [
+        "plans.pro.AUD.monthly",
+        base.plans.pro.AUD.monthly + 300,
+        base.plans.pro.AUD.monthly,
+      ],
+      [
+        "plans.pro.AUD.annual",
+        base.plans.pro.AUD.annual + 2_800,
+        base.plans.pro.AUD.annual,
+      ],
     ]
   );
   // Only those two. A report that flagged neighbouring currencies would make
@@ -233,14 +248,17 @@ test("audits are not consulted when there is nothing to consult", () => {
 /* -------------------------------------------------------------------------- */
 
 test("the delta is signed and relative to the default", () => {
+  const base = defaults();
   const stored = defaults();
-  stored.plans.pro.AUD.monthly = 2_000; // default 2_300
-  stored.plans.max.KRW.monthly = 35_000; // default 34_000
+  stored.plans.pro.AUD.monthly = Math.round(base.plans.pro.AUD.monthly * 0.9);
+  stored.plans.max.KRW.monthly = Math.round(base.plans.max.KRW.monthly * 1.05);
   const rows = compare("stored", stored).rows;
   const at = (path) => rows.find((row) => row.path === path);
 
-  assert.ok(Math.abs(priceDeltaRatio(at("plans.pro.AUD.monthly")) + 0.1304) < 0.001);
-  assert.ok(Math.abs(priceDeltaRatio(at("plans.max.KRW.monthly")) - 0.0294) < 0.001);
+  assert.ok(priceDeltaRatio(at("plans.pro.AUD.monthly")) < 0, "a cut is negative");
+  assert.ok(Math.abs(priceDeltaRatio(at("plans.pro.AUD.monthly")) + 0.1) < 0.005);
+  assert.ok(priceDeltaRatio(at("plans.max.KRW.monthly")) > 0, "a rise is positive");
+  assert.ok(Math.abs(priceDeltaRatio(at("plans.max.KRW.monthly")) - 0.05) < 0.005);
   // An agreeing row has no delta rather than a zero one: zero would sort and
   // read as a measurement where none was taken.
   assert.equal(priceDeltaRatio(at("plans.pro.EUR.monthly")), null);

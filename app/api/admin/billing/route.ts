@@ -170,6 +170,7 @@ export async function GET(req: Request) {
       settings,
       priceCatalog: pricing.catalog,
       priceCatalogUpdatedAt: pricing.updatedAt,
+      priceCatalogSource: pricing.source,
     });
   } catch (error) {
     const securityResponse = apiSecurityResponse(error);
@@ -410,6 +411,7 @@ export async function PATCH(req: Request) {
       settings,
       priceCatalog: pricing.catalog,
       priceCatalogUpdatedAt: pricing.updatedAt,
+      priceCatalogSource: pricing.source,
     });
   } catch (error) {
     const securityResponse = apiSecurityResponse(error);
