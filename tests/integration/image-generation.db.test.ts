@@ -809,11 +809,15 @@ test("a non-OpenAI reservation refunds its own provider budget, not OpenAI's", a
   const user = await createUser();
 
   const result = await requestImageGeneration(
-    // Standard, not `requestInput`'s default of `low`: Nano Banana 2 prices 1K
-    // square at `medium` only, and an unpriceable model is refused outright,
-    // so the default would never reach a reservation to refund.
+    // Both option fields stated rather than inherited. `requestInput` is a
+    // single-model OpenAI Draft fixture and defaults to `low`, where Nano
+    // Banana 2 has no price at all -- it sells 1K square at Standard only --
+    // so an inherited tier would be refused before any reservation existed to
+    // refund. A non-OpenAI test must name its own options even when the
+    // fixture's happen to agree.
     requestInput(user.id, {
       quality: "medium",
+      size: "1024x1024",
       modelIds: ["fal-ai/nano-banana-2"],
     })
   );
