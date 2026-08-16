@@ -93,9 +93,6 @@ const imageLeaseSubjectKey = (userId: string) =>
 
 const imageProviderBudgetKey = (provider: string) => `image-provider:${provider}`;
 
-/** Kept for the settlement paths that still speak only OpenAI. */
-const IMAGE_PROVIDER_BUDGET_KEY = imageProviderBudgetKey("openai");
-
 const boundedEnvInt = (raw: string | undefined, fallback: number, max: number) => {
   const parsed = Number(raw);
   return Number.isSafeInteger(parsed) && parsed > 0 && parsed <= max
@@ -883,12 +880,34 @@ const refundPlanCredits = async (
   }
 };
 
+/**
+ * Return a reservation's unspent provider cost to the bucket it was taken
+ * from.
+ *
+ * `provider` is not optional and has no default on purpose. This refund used
+ * to be hard-wired to the OpenAI key, from when OpenAI was the only image
+ * provider; once v2 made the reservation side per-provider
+ * (`imageProviderBudgetKey(provider)` at admission) the two halves stopped
+ * agreeing. Every xAI and fal settlement credited OpenAI's bucket, so OpenAI
+ * under-counted its own spend -- reaching its ceiling later than it should --
+ * while xAI and fal kept their worst-case reservation forever and reached
+ * theirs earlier. `GREATEST(0, ...)` kept the numbers legal the whole time.
+ * Found on 2026-08-16 from a 12,000 microUSD gap between OpenAI's month bucket
+ * and its settled total, four generations after the flag was turned on.
+ *
+ * A caller that cannot name the provider must not fall back to a constant: an
+ * unmatched key updates no row, leaving the reservation's worst case standing,
+ * which over-counts that provider and is the safe direction for a guardrail.
+ * Crediting the wrong provider is not.
+ */
 const refundProviderBudget = async (
   tx: Prisma.TransactionClient,
+  provider: string,
   amountMicroUsd: number,
   reservedAt: Date
 ) => {
   if (amountMicroUsd <= 0) return;
+  const budgetKey = imageProviderBudgetKey(provider);
   for (const window of [
     { period: "provider-cost-day", start: usagePeriodStart("day", reservedAt) },
     {
@@ -899,7 +918,7 @@ const refundProviderBudget = async (
     await tx.$executeRaw`
       UPDATE "ChatUsageBucket"
       SET "count" = GREATEST(0, "count" - ${amountMicroUsd}), "updatedAt" = NOW()
-      WHERE "key" = ${IMAGE_PROVIDER_BUDGET_KEY} AND "period" = ${window.period} AND "periodStart" = ${window.start}
+      WHERE "key" = ${budgetKey} AND "period" = ${window.period} AND "periodStart" = ${window.start}
     `;
   }
 };
@@ -1013,6 +1032,7 @@ const finalizeFailure = async (input: {
         if (input.releaseProviderBudget) {
           await refundProviderBudget(
             tx,
+            reservation.provider,
             Number(reservation.reservedCostMicroUsd),
             reservation.createdAt
           );
@@ -1340,7 +1360,12 @@ export const processImageGeneration = async (
       const budgetDifference =
         Number(reservation.reservedCostMicroUsd) - actualCostMicroUsd;
       if (budgetDifference > 0) {
-        await refundProviderBudget(tx, budgetDifference, reservation.createdAt);
+        await refundProviderBudget(
+          tx,
+          reservation.provider,
+          budgetDifference,
+          reservation.createdAt
+        );
       }
       await tx.imageCreditReservation.update({
         where: { id: reservation.id },

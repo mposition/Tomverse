@@ -798,3 +798,48 @@ test("another user's target is not retryable", async () => {
     (error: { code?: string }) => error.code === "IMAGE_GENERATION_NOT_FOUND"
   );
 });
+
+test("a non-OpenAI reservation refunds its own provider budget, not OpenAI's", async () => {
+  // The refund used to be hard-wired to the OpenAI bucket while admission was
+  // already per-provider, so every xAI and fal settlement credited OpenAI:
+  // OpenAI under-counted its own spend and reached its ceiling late, while the
+  // other two kept their worst case and reached theirs early. GREATEST(0, ...)
+  // kept both numbers legal, which is why nothing failed.
+  await enableImageGeneration();
+  const user = await createUser();
+
+  const result = await requestImageGeneration(
+    requestInput(user.id, { modelIds: ["fal-ai/nano-banana-2"] })
+  );
+
+  const reservation = await prisma.imageCreditReservation.findUnique({
+    where: { generationId: result.targets[0].generationId },
+  });
+  assert.equal(reservation?.provider, "fal");
+  const heldMicroUsd = Number(reservation?.reservedCostMicroUsd ?? 0);
+  assert.ok(heldMicroUsd > 0);
+
+  const budgetFor = async (provider: string) => {
+    const row = await prisma.chatUsageBucket.findFirst({
+      where: {
+        key: `image-provider:${provider}`,
+        period: "provider-cost-day",
+      },
+    });
+    return Number(row?.count ?? 0);
+  };
+
+  // Admission charged fal and nothing else.
+  assert.equal(await budgetFor("fal"), heldMicroUsd);
+  assert.equal(await budgetFor("openai"), 0);
+
+  const sweep = await reconcileStaleImageGenerations(
+    new Date(Date.now() + 60 * 60 * 1_000)
+  );
+  assert.equal(sweep.refunded, 1);
+
+  // The refund goes back where the hold came from. OpenAI is untouched in
+  // both directions -- it was never charged and must not be credited.
+  assert.equal(await budgetFor("fal"), 0);
+  assert.equal(await budgetFor("openai"), 0);
+});
