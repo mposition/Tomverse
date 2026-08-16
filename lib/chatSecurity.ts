@@ -3341,7 +3341,53 @@ export const settleChatUsage = async (
         } | null;
         missingSearchAuthorization: { provider: string; queries: number } | null;
     } = { searchCeilingBreach: null, missingSearchAuthorization: null };
-    const settlement = await prisma.$transaction(async (tx) => {
+    /**
+     * Whatever the settlement transaction found out about the search, told to
+     * an operator -- whether or not that transaction committed.
+     *
+     * The provider ran the searches it ran. That is a fact about money already
+     * spent at somebody else's API, and it does not become untrue because the
+     * row recording it failed to write. The breach latch is set inside the
+     * transaction and survives a rollback for the same reason, so reporting
+     * only on the committed path would leave the pathological combination:
+     * dispatch stopped, and nothing said why.
+     *
+     * Called exactly once per settlement, on whichever path is taken.
+     */
+    const deliverSearchIncidents = async () => {
+        if (reported.searchCeilingBreach) {
+            // A ceiling that did not hold cannot size the next reservation, so
+            // the capability stops dispatching -- in this process. The latch is
+            // not shared between instances; this incident is what reaches an
+            // operator, and a durable circuit breaker is still owed.
+            await reportOperationalIncident({
+                code: "NATIVE_SEARCH_QUERY_CEILING_BREACHED",
+                title: "A provider ran more billable searches than the request authorized",
+                severity: "error",
+                context: {
+                    component: "chat-cost-ledger",
+                    provider: reported.searchCeilingBreach.provider,
+                    observedQueries: reported.searchCeilingBreach.observed,
+                    authorizedQueries: reported.searchCeilingBreach.authorized,
+                    costMicroUsd: reported.searchCeilingBreach.costMicroUsd,
+                },
+            });
+        }
+        if (reported.missingSearchAuthorization) {
+            await reportOperationalIncident({
+                code: "MISSING_NATIVE_SEARCH_AUTHORIZATION",
+                title: "A paid native search settled with no authorization to price it against",
+                severity: "error",
+                context: {
+                    component: "chat-cost-ledger",
+                    provider: reported.missingSearchAuthorization.provider,
+                    queries: reported.missingSearchAuthorization.queries,
+                    configured: NATIVE_SEARCH_AUTHORIZATION_CUTOVER_ENV,
+                },
+            });
+        }
+    };
+    const settled = prisma.$transaction(async (tx) => {
         if (reservation.userId) {
             await lockCreditAccount(tx, reservation.userId);
         }
@@ -3476,6 +3522,23 @@ export const settleChatUsage = async (
         // returned -- the same unit it bills per use and the same unit
         // Anthropic's `maxUses` bounds. Citations are counted separately and
         // are deliberately not this.
+        //
+        // ## Why the billed attempt's authorization is the right one
+        //
+        // One turn, one search cost, and it belongs to whichever attempt ran
+        // it. Reading the billed attempt's authorization is correct because a
+        // searching turn never falls back at all: `autoFallbackScope` excludes
+        // it with reason `web_search`, pinned by "a searching turn is excluded
+        // even though its text streams normally" in
+        // `tests/autoFallbackGate.test.mjs`. So attempt 0 is the only attempt,
+        // and the billed one is it.
+        //
+        // That is a dependency, not a coincidence. If that exclusion is ever
+        // relaxed -- a fallback allowed to search, or a second attempt allowed
+        // to inherit a search -- this line settles the second attempt's queries
+        // against the first attempt's rate and ceiling, and the fix is a per
+        // attempt search settlement, not a wider ceiling here. Anyone weakening
+        // that gate owns this site too.
         const searchAuthorization = costIntentFor(
             canonical.attemptCostIntents,
             multiAttempt?.billedAttempt?.attemptIndex ?? 0
@@ -3866,37 +3929,17 @@ export const settleChatUsage = async (
         };
     });
 
-    if (reported.searchCeilingBreach) {
-        // A ceiling that did not hold cannot size the next reservation, so the
-        // capability stops dispatching -- in this process. The latch is not
-        // shared between instances; this incident is what reaches an operator,
-        // and a durable circuit breaker is still owed.
-        await reportOperationalIncident({
-            code: "NATIVE_SEARCH_QUERY_CEILING_BREACHED",
-            title: "A provider ran more billable searches than the request authorized",
-            severity: "error",
-            context: {
-                component: "chat-cost-ledger",
-                provider: reported.searchCeilingBreach.provider,
-                observedQueries: reported.searchCeilingBreach.observed,
-                authorizedQueries: reported.searchCeilingBreach.authorized,
-                costMicroUsd: reported.searchCeilingBreach.costMicroUsd,
-            },
-        });
+    let settlement: Awaited<typeof settled>;
+    try {
+        settlement = await settled;
+    } catch (error) {
+        // The settlement did not commit; the searches still ran. Reported
+        // before rethrowing, and its own failure swallowed so it cannot
+        // replace the error that actually broke the settlement.
+        await deliverSearchIncidents().catch(() => {});
+        throw error;
     }
-    if (reported.missingSearchAuthorization) {
-        await reportOperationalIncident({
-            code: "MISSING_NATIVE_SEARCH_AUTHORIZATION",
-            title: "A paid native search settled with no authorization to price it against",
-            severity: "error",
-            context: {
-                component: "chat-cost-ledger",
-                provider: reported.missingSearchAuthorization.provider,
-                queries: reported.missingSearchAuthorization.queries,
-                configured: NATIVE_SEARCH_AUTHORIZATION_CUTOVER_ENV,
-            },
-        });
-    }
+    await deliverSearchIncidents();
 
     // Shadow telemetry, after the commit and never inside it.
     //

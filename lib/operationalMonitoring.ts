@@ -43,6 +43,38 @@ const state =
 
 const ALERT_TIMEOUT_MS = 5_000;
 
+/** An incident as an in-process observer sees it, after sanitisation. */
+export type ObservedOperationalIncident = {
+  code: string;
+  title: string;
+  severity: OperationalSeverity;
+  context: Record<string, unknown>;
+};
+
+type IncidentObserver = (incident: ObservedOperationalIncident) => void;
+
+/**
+ * In-process listeners for incidents, so a test can assert one was raised.
+ *
+ * The alternative is matching the JSON line this module logs, which pins a
+ * test to a log format rather than to the behaviour, and passes just as well
+ * when the incident is written and never delivered. Observers see the same
+ * sanitised payload the external channels do.
+ *
+ * Nothing on a request path registers one: an observer can only be added by
+ * code running inside this process, and delivery is unaffected either way --
+ * an observer that throws is swallowed below, because a listener must never
+ * fail the incident it is watching.
+ */
+const incidentObservers = new Set<IncidentObserver>();
+
+export const observeOperationalIncidents = (observer: IncidentObserver) => {
+  incidentObservers.add(observer);
+  return () => {
+    incidentObservers.delete(observer);
+  };
+};
+
 const severityLabel = (severity: OperationalSeverity) =>
   severity === "fatal" ? "FATAL" : severity === "error" ? "ERROR" : "WARNING";
 
@@ -170,6 +202,17 @@ export async function reportOperationalIncident({
       timestamp,
     })
   );
+
+  // Before the cooldown gate, deliberately: an incident that repeats inside
+  // the cooldown window is still an incident that happened, and an observer
+  // that only saw the first one would report the second as never raised.
+  for (const observe of incidentObservers) {
+    try {
+      observe({ code, title, severity, context: safeContext });
+    } catch {
+      // A listener must never fail the incident it is watching.
+    }
+  }
 
   const lastNotifiedAt = state.lastNotifiedAt.get(code) || 0;
   if (!forceNotification && Date.now() - lastNotifiedAt < cooldownMs) {

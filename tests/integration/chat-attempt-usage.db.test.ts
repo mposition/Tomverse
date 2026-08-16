@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { after, beforeEach, test } from "node:test";
+import { after, afterEach, beforeEach, test } from "node:test";
 
 import {
   acquireChatAccess,
@@ -16,7 +16,20 @@ import {
   rollupDayOf,
 } from "@/lib/chatAttemptCostLedger";
 import { closeAttempt } from "@/lib/routingAttemptStore";
+import { getModel } from "@/lib/models";
+import { getNativeSearchCostMicroUsdPerQuery } from "@/lib/modelPricing";
+import {
+  observeOperationalIncidents,
+  type ObservedOperationalIncident,
+} from "@/lib/operationalMonitoring";
 import { getProviderCostGuardrailLimits } from "@/lib/providerCostBudget";
+import { getWebSearchCapability } from "@/lib/webSearchCapability";
+import {
+  NATIVE_SEARCH_AUTHORIZATION_CUTOVER_ENV,
+  reserveNativeSearchCost,
+  resetSearchQueryCeilingBreaches,
+  searchQueryCeilingBreached,
+} from "@/lib/webSearchNativeCostReservation";
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { usageBucketCount } from "@/lib/chatUsageBucketCount";
@@ -54,6 +67,19 @@ const reset = () =>
   `);
 
 beforeEach(reset);
+/**
+ * Process state, put back whatever a test did with it.
+ *
+ * The search-ceiling latch and the authorization cutover both live outside the
+ * database, so `reset()` above does not touch them -- and a latch left set by
+ * one test would refuse every dispatch the next one makes, from a module the
+ * next test never mentions. Each test that touches them also restores them in
+ * its own `finally`; this is the net under a test that throws somewhere else.
+ */
+afterEach(() => {
+  resetSearchQueryCeilingBreaches();
+  delete process.env[NATIVE_SEARCH_AUTHORIZATION_CUTOVER_ENV];
+});
 after(async () => {
   await reset();
   await prisma.$disconnect();
@@ -2045,4 +2071,325 @@ test("a hold on a period the reservation did not anchor is refused on read", asy
     }),
     /not the reservation's/
   );
+});
+
+/**
+ * A native search's authorization, from the reservation that froze it to the
+ * settlement that prices against it.
+ *
+ * `tests/webSearchNativeCostReservation.test.mjs` pins the arithmetic. What
+ * only a database can show is that the authorization written at
+ * `acquireChatAccess` is still there -- serialized, stored, read back --  when
+ * `settleChatUsage` needs it, and that a provider over its declared ceiling
+ * lands in all three of the reservation, the attempt row and the provider's
+ * daily rollup rather than being quietly clamped to what was authorized.
+ */
+
+const SEARCH_MAX_QUERIES = 5;
+
+/** A turn allowed `max` searches at `rate` each, on Anthropic's tool. */
+const searchBudget = (rate: number, max: number) =>
+  chatBudget({
+    provider: "anthropic",
+    nativeSearchCostPerQueryMicroUsd: rate,
+    nativeSearchMaxQueries: max,
+    nativeSearchReservedCostMicroUsd: Math.ceil(rate * max),
+  });
+
+/** 10K input and 10K output at $100/M each, which every case below settles. */
+const SETTLED_TOKEN_COST = 2_000_000;
+
+const storedIntents = async (reservationId: string) => {
+  const row = await prisma.chatCreditReservation.findUniqueOrThrow({
+    where: { id: reservationId },
+  });
+  return (
+    row.reservationPayload as {
+      attemptCostIntents?: {
+        attemptIndex: number;
+        nativeSearchAuthorization?: {
+          reservedCostMicroUsd: number;
+          costPerQueryMicroUsd: number;
+          maxQueries: number;
+        };
+      }[];
+    }
+  ).attemptCostIntents;
+};
+
+const settledCostOf = (reservationId: string) =>
+  prisma.chatCreditReservation
+    .findUniqueOrThrow({ where: { id: reservationId } })
+    .then((row) => row.settledCostMicroUsd);
+
+const searchTurn = async (rate: number, max: number) => {
+  const user = await createUser();
+  const acquired = await acquireChatAccess(chatAccess(user), searchBudget(rate, max), {
+    traceId: `trace-${randomUUID()}`,
+  });
+  return { user, acquired, id: acquired.usageReservation.reservationId };
+};
+
+test("a search authorization survives serialization, storage and read-back into settlement", async () => {
+  const { acquired, id } = await searchTurn(10_000, SEARCH_MAX_QUERIES);
+
+  // In the row, not only in the object the caller still holds.
+  assert.deepEqual((await storedIntents(id))?.[0]?.nativeSearchAuthorization, {
+    reservedCostMicroUsd: 50_000,
+    costPerQueryMicroUsd: 10_000,
+    maxQueries: SEARCH_MAX_QUERIES,
+  });
+
+  // The caller's own figure is deliberately absurd. Settlement reads the
+  // stored authorization and prices two queries against it instead.
+  await settleChatUsage(acquired.usageReservation, {
+    inputTokens: 10_000,
+    outputTokens: 10_000,
+    outcome: "completed",
+    searchQueryCount: 2,
+    searchCostMicroUsd: 999_999,
+  });
+
+  assert.equal(await settledCostOf(id), BigInt(SETTLED_TOKEN_COST + 20_000));
+  const row = await prisma.chatAttemptUsage.findFirstOrThrow({
+    where: { reservationId: id },
+  });
+  assert.equal(row.costMicroUsd, BigInt(SETTLED_TOKEN_COST + 20_000));
+});
+
+test("the rate the turn was authorized at governs settlement, not today's registry", async () => {
+  // The point of freezing the rate is the case where the two disagree, so the
+  // authorization is taken at a rate the catalogue does not sell.
+  assert.equal(getNativeSearchCostMicroUsdPerQuery("anthropic"), 10_000);
+  const { acquired, id } = await searchTurn(7_777, SEARCH_MAX_QUERIES);
+
+  await settleChatUsage(acquired.usageReservation, {
+    inputTokens: 10_000,
+    outputTokens: 10_000,
+    outcome: "completed",
+    searchQueryCount: 3,
+    // What a normalizer pricing at today's rate would have handed over.
+    searchCostMicroUsd: 30_000,
+  });
+
+  // Three at the stored 7,777, not three at the registry's 10,000.
+  assert.equal(await settledCostOf(id), BigInt(SETTLED_TOKEN_COST + 23_331));
+});
+
+test("a provider over its authorized ceiling is billed in full, reported, and stops dispatching", async () => {
+  const incidents: ObservedOperationalIncident[] = [];
+  const stopObserving = observeOperationalIncidents((incident) =>
+    incidents.push(incident)
+  );
+  try {
+    const { acquired, id } = await searchTurn(10_000, SEARCH_MAX_QUERIES);
+
+    await settleChatUsage(acquired.usageReservation, {
+      inputTokens: 10_000,
+      outputTokens: 10_000,
+      outcome: "completed",
+      // One more than the request authorized.
+      searchQueryCount: SEARCH_MAX_QUERIES + 1,
+      searchCostMicroUsd: 60_000,
+    });
+
+    // Six queries' worth, in all three places. Clamping to the authorized five
+    // would have been accurate about the authorization and wrong about the
+    // money, which is the direction that hides the problem.
+    const overCeiling = BigInt(SETTLED_TOKEN_COST + 60_000);
+    assert.equal(await settledCostOf(id), overCeiling);
+    const row = await prisma.chatAttemptUsage.findFirstOrThrow({
+      where: { reservationId: id },
+    });
+    assert.equal(row.costMicroUsd, overCeiling);
+    const rollup = await prisma.providerDailyUsage.findFirstOrThrow({
+      where: {
+        provider: "anthropic",
+        modelId: "attempt-usage-model",
+        source: "internal",
+        date: rollupDayOf(),
+      },
+    });
+    assert.equal(rollup.estimatedCostMicroUsd, SETTLED_TOKEN_COST + 60_000);
+
+    const breach = incidents.find(
+      (incident) => incident.code === "NATIVE_SEARCH_QUERY_CEILING_BREACHED"
+    );
+    assert.ok(breach, "the ceiling breach was not reported");
+    assert.equal(breach.severity, "error");
+    assert.deepEqual(
+      {
+        provider: breach.context.provider,
+        observedQueries: breach.context.observedQueries,
+        authorizedQueries: breach.context.authorizedQueries,
+        costMicroUsd: breach.context.costMicroUsd,
+      },
+      {
+        provider: "anthropic",
+        observedQueries: 6,
+        authorizedQueries: SEARCH_MAX_QUERIES,
+        costMicroUsd: 60_000,
+      }
+    );
+
+    // And the next real pre-authorization for that provider is refused: a
+    // ceiling that did not hold cannot size the next reservation.
+    assert.equal(searchQueryCeilingBreached("anthropic"), true);
+    const next = reserveNativeSearchCost({
+      model: getModel("claude-sonnet-5")!,
+      capability: getWebSearchCapability("claude-sonnet-5"),
+      nativeSearchEnabled: true,
+    });
+    assert.equal(next.ok, false);
+    assert.equal(
+      next.ok === false && next.reason,
+      "search_query_ceiling_breached"
+    );
+  } finally {
+    stopObserving();
+    resetSearchQueryCeilingBreaches();
+  }
+});
+
+test("a breach reaches an operator even when the settlement that found it fails", async () => {
+  const incidents: ObservedOperationalIncident[] = [];
+  const stopObserving = observeOperationalIncidents((incident) =>
+    incidents.push(incident)
+  );
+  // The failure is injected at the database, at the tail of the settlement
+  // transaction: the breach has been detected and the latch set, and the
+  // commit that would have recorded it never happens.
+  await prisma.$executeRawUnsafe(`
+    CREATE OR REPLACE FUNCTION attempt_cost_write_fails() RETURNS trigger AS $fn$
+    BEGIN RAISE EXCEPTION 'injected attempt cost write failure'; END;
+    $fn$ LANGUAGE plpgsql
+  `);
+  await prisma.$executeRawUnsafe(`
+    CREATE TRIGGER attempt_cost_write_fails
+    BEFORE INSERT ON "ChatAttemptUsage"
+    FOR EACH ROW EXECUTE FUNCTION attempt_cost_write_fails()
+  `);
+  try {
+    const { acquired, id } = await searchTurn(10_000, SEARCH_MAX_QUERIES);
+
+    await assert.rejects(
+      settleChatUsage(acquired.usageReservation, {
+        inputTokens: 10_000,
+        outputTokens: 10_000,
+        outcome: "completed",
+        searchQueryCount: SEARCH_MAX_QUERIES + 1,
+        searchCostMicroUsd: 60_000,
+      }),
+      /injected attempt cost write failure/
+    );
+
+    // Nothing committed.
+    const reservation = await prisma.chatCreditReservation.findUniqueOrThrow({
+      where: { id },
+    });
+    assert.equal(reservation.status, "reserved");
+    assert.equal(await prisma.chatAttemptUsage.count(), 0);
+
+    // The provider still ran six searches. That is money already spent at
+    // somebody else's API, and it does not become untrue because this
+    // transaction rolled back -- so the latch holds and the incident is sent.
+    assert.equal(searchQueryCeilingBreached("anthropic"), true);
+    assert.ok(
+      incidents.some(
+        (incident) => incident.code === "NATIVE_SEARCH_QUERY_CEILING_BREACHED"
+      ),
+      "a rolled-back settlement swallowed the breach it had already detected"
+    );
+  } finally {
+    stopObserving();
+    resetSearchQueryCeilingBreaches();
+    await prisma.$executeRawUnsafe(
+      `DROP TRIGGER IF EXISTS attempt_cost_write_fails ON "ChatAttemptUsage"`
+    );
+    await prisma.$executeRawUnsafe(
+      `DROP FUNCTION IF EXISTS attempt_cost_write_fails()`
+    );
+  }
+});
+
+test("a payload with no authorization settles on the caller's search cost and raises nothing", async () => {
+  const incidents: ObservedOperationalIncident[] = [];
+  const stopObserving = observeOperationalIncidents((incident) =>
+    incidents.push(incident)
+  );
+  try {
+    const { acquired, id } = await searchTurn(10_000, SEARCH_MAX_QUERIES);
+    // A reservation as it looked before authorizations were frozen into it:
+    // an intent, and nothing in it about search.
+    const payload = (
+      await prisma.chatCreditReservation.findUniqueOrThrow({ where: { id } })
+    ).reservationPayload as {
+      attemptCostIntents?: { nativeSearchAuthorization?: unknown }[];
+    };
+    delete payload.attemptCostIntents?.[0]?.nativeSearchAuthorization;
+    await prisma.$executeRaw`
+      UPDATE "ChatCreditReservation" SET "reservationPayload" = ${payload}::jsonb WHERE "id" = ${id}
+    `;
+
+    await settleChatUsage(acquired.usageReservation, {
+      inputTokens: 10_000,
+      outputTokens: 10_000,
+      outcome: "completed",
+      searchQueryCount: 3,
+      searchCostMicroUsd: 30_000,
+    });
+
+    // Its cost is kept. Dropping it would under-record real provider spend to
+    // punish a turn that was dispatched correctly under the older contract.
+    assert.equal(await settledCostOf(id), BigInt(SETTLED_TOKEN_COST + 30_000));
+    assert.deepEqual(
+      incidents.map((incident) => incident.code),
+      []
+    );
+  } finally {
+    stopObserving();
+  }
+});
+
+test("past the cutover, a paid search with no authorization is a defect and is reported", async () => {
+  const incidents: ObservedOperationalIncident[] = [];
+  const stopObserving = observeOperationalIncidents((incident) =>
+    incidents.push(incident)
+  );
+  try {
+    const { acquired, id } = await searchTurn(10_000, SEARCH_MAX_QUERIES);
+    const payload = (
+      await prisma.chatCreditReservation.findUniqueOrThrow({ where: { id } })
+    ).reservationPayload as {
+      attemptCostIntents?: { nativeSearchAuthorization?: unknown }[];
+    };
+    delete payload.attemptCostIntents?.[0]?.nativeSearchAuthorization;
+    await prisma.$executeRaw`
+      UPDATE "ChatCreditReservation" SET "reservationPayload" = ${payload}::jsonb WHERE "id" = ${id}
+    `;
+    // Written after the cutover, so it is a writer that stopped filling the
+    // authorization in rather than a turn that predates it.
+    process.env[NATIVE_SEARCH_AUTHORIZATION_CUTOVER_ENV] = new Date(
+      Date.now() - 86_400_000
+    ).toISOString();
+
+    await settleChatUsage(acquired.usageReservation, {
+      inputTokens: 10_000,
+      outputTokens: 10_000,
+      outcome: "completed",
+      searchQueryCount: 3,
+      searchCostMicroUsd: 30_000,
+    });
+
+    assert.equal(await settledCostOf(id), BigInt(SETTLED_TOKEN_COST + 30_000));
+    const missing = incidents.find(
+      (incident) => incident.code === "MISSING_NATIVE_SEARCH_AUTHORIZATION"
+    );
+    assert.ok(missing, "an unauthorized paid search was not reported");
+    assert.equal(missing.context.provider, "anthropic");
+    assert.equal(missing.context.queries, 3);
+  } finally {
+    stopObserving();
+    delete process.env[NATIVE_SEARCH_AUTHORIZATION_CUTOVER_ENV];
+  }
 });
