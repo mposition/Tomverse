@@ -85,12 +85,24 @@ export type ProfileBindingPlan =
           profileVersionId: string;
           revision: number;
           /**
-           * The version's own model list, which the conversation adopts.
+           * The version's own model list. **Only a conversation being created
+           * adopts it; binding to an existing conversation does not.**
            *
            * A profile that names a model and then answers on a different one
-           * is a profile whose model choice does nothing. Copied rather than
-           * referenced: the conversation's selection stays the user's to
-           * change afterwards, and changing it does not edit the profile.
+           * is a profile whose model choice does nothing -- so a new
+           * conversation starts from the profile's models (`POST
+           * /api/conversations` reads this field). Copied rather than
+           * referenced: the selection is the user's to change afterwards, and
+           * changing it does not edit the profile.
+           *
+           * `PATCH /api/conversations/:id` deliberately ignores this field and
+           * writes only the profile version. Swapping an existing
+           * conversation's models changes its per-turn credit cost, its answer
+           * characteristics and its panel layout at once, and a user who
+           * picked an assistant did not ask for any of that. Replacing them is
+           * a separate, explicit action -- see #643 -- and if it is ever
+           * built it belongs in this plan and one atomic write, never in a
+           * client response handler (that is what produced #632).
            */
           modelIds: readonly string[];
       }
