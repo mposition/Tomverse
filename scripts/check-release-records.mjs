@@ -11,6 +11,7 @@
 //
 //   * a ticked box, a build SHA, or a filled header field in the template;
 //   * a record not named release-<date>__<sha>.md;
+//   * a deviation or handoff that names no build;
 //   * a record that leaves `Release SHA:` blank or short;
 //   * a record byte-identical to the template, or with nothing ticked;
 //   * unticked boxes with an empty section 8;
@@ -26,9 +27,11 @@ import { join } from "node:path";
 import {
     RELEASE_CHECKLIST_TEMPLATE,
     RELEASE_DEVIATION_NAME,
+    RELEASE_HANDOFF_NAME,
     RELEASE_RECORDS_DIR,
     headerFields,
     releaseDeviationProblems,
+    releaseHandoffProblems,
     releaseRecordProblems,
     releaseTemplateProblems,
     tickedBoxes,
@@ -48,12 +51,18 @@ const names = readdirSync(RELEASE_RECORDS_DIR)
 for (const name of names) {
     const text = readFileSync(join(RELEASE_RECORDS_DIR, name), "utf8");
 
-    // Two kinds of document, one prefix. A deviation is checked for what a
-    // deviation must carry, not for the ticked boxes of a run that did not
-    // happen.
+    // Three kinds of document, one prefix. A deviation and a handoff are each
+    // checked for what they must carry, not for the ticked boxes of a run that
+    // did not happen: requiring those of a deviation would ask it to claim the
+    // thing it exists to deny, and of a handoff a format nobody agreed to.
     if (RELEASE_DEVIATION_NAME.test(name)) {
         problems.push(...releaseDeviationProblems(name, text));
         summaries.push(`${name}: deviation, not a checklist run`);
+        continue;
+    }
+    if (RELEASE_HANDOFF_NAME.test(name)) {
+        problems.push(...releaseHandoffProblems(name, text));
+        summaries.push(`${name}: handoff, not a checklist run`);
         continue;
     }
 
