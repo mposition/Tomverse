@@ -4,7 +4,10 @@ import type { ToolSet } from "ai";
 import { openai } from "@ai-sdk/openai";
 import { anthropic } from "@ai-sdk/anthropic";
 import { google } from "@ai-sdk/google";
-import type { WebSearchCapability } from "@/lib/webSearchCapability";
+import {
+  ANTHROPIC_MAX_SEARCH_USES,
+  type WebSearchCapability,
+} from "@/lib/webSearchCapability";
 
 // The provider-defined tool factories below (openai.tools.webSearch,
 // anthropic.tools.webSearch_20250305, google.tools.googleSearch) are pure
@@ -40,7 +43,14 @@ export const buildWebSearchToolConfig = (
       };
     case "anthropic":
       return {
-        tools: { web_search: anthropic.tools.webSearch_20250305({ maxUses: 5 }) },
+        // The same constant the capability declares its ceiling from, so the
+        // number the request enforces and the number the reservation is sized
+        // on cannot drift apart.
+        tools: {
+          web_search: anthropic.tools.webSearch_20250305({
+            maxUses: ANTHROPIC_MAX_SEARCH_USES,
+          }),
+        },
         // Anthropic's server tool has no documented tool_choice override;
         // Claude decides per-turn whether the question needs a search.
       };
