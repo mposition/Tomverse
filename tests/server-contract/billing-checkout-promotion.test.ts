@@ -60,6 +60,12 @@ type World = {
   session: { user: { id: string } } | null;
   user: Record<string, unknown>;
   promotionValid: boolean;
+  /**
+   * Overridable so a fixed-amount promotion can reach the currency gate.
+   * `null` means the default; it cannot hold `PROMOTION` itself because
+   * `freshWorld()` runs before that constant is initialised.
+   */
+  promotion: typeof PROMOTION | null;
   promotionReserveError: Error | null;
   releases: string[];
   releaseShouldFail: boolean;
@@ -88,6 +94,7 @@ const freshWorld = (): World => ({
     settings: { language: "en" },
   },
   promotionValid: true,
+  promotion: null,
   promotionReserveError: null,
   releases: [],
   releaseShouldFail: false,
@@ -111,7 +118,8 @@ const PROMOTION = {
   id: "promo_db",
   code: "EDDIEFRIEND100",
   discountPercent: 100,
-  discountAmountCents: null,
+  // Widened so a fixed-amount variant can be built from this one.
+  discountAmountCents: null as number | null,
   maxRedemptions: 1000,
   redeemedCount: 0,
   durationMonths: 1,
@@ -206,7 +214,7 @@ async function loadRoute(): Promise<{
           world.promotionValid
             ? {
                 valid: true,
-                promotion: PROMOTION,
+                promotion: world.promotion ?? PROMOTION,
                 clientIpHash: "a".repeat(64),
                 riskFlags: [],
               }
@@ -681,4 +689,100 @@ test("a pass that has not expired still blocks buying the tier it grants", async
   const response = await post({ planId: "pro" });
   assert.equal(response.status, 409);
   assert.equal((await response.json()).code, "PLAN_CHANGE_NOT_SUPPORTED");
+});
+
+/* -------------------------------------------------------------------------- */
+/* Currency                                                                    */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * `PAYMENTTEST27` is a $14 fixed-amount discount. Applied to a plan priced at
+ * A$20.00 it validated, the order summary showed "-$14" and "A$1.33 due today",
+ * and the button refused the purchase.
+ *
+ * Validation now decides this, so these cases are only reachable through a
+ * request that skipped it -- a forged POST, or a future edit that loosens the
+ * validator. The route's own check is the fail-closed half of that pair, and
+ * this file is where it can be proved, because the harness replaces
+ * `validatePromotionForCheckout` wholesale: whatever the validator would have
+ * said, the route still refuses.
+ */
+
+const FIXED_AMOUNT_PROMOTION: typeof PROMOTION = {
+  ...PROMOTION,
+  code: "PAYMENTTEST27",
+  discountPercent: 0,
+  discountAmountCents: 1400,
+};
+
+/** A market the edge, not the client, says is Australian. */
+const postFromAustralia = async (body: Record<string, unknown>) => {
+  const { POST } = await loadRoute();
+  return POST(
+    new Request("http://127.0.0.1:3100/api/billing/checkout", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "cf-ipcountry": "AU",
+      },
+      body: JSON.stringify({
+        planId: "max",
+        billingInterval: "monthly",
+        currency: "AUD",
+        country: "AU",
+        purchaseAttemptId: "11111111-2222-4333-8444-555555555555",
+        ...body,
+      }),
+    })
+  );
+};
+
+test("a fixed-amount promotion is refused in a non-USD market with its own code", async () => {
+  world.promotion = FIXED_AMOUNT_PROMOTION;
+  const response = await postFromAustralia({ promoCode: "PAYMENTTEST27" });
+  const body = (await response.json()) as { code?: string; error?: string };
+  assert.equal(response.status, 400);
+  assert.equal(body.code, "PROMOTION_CURRENCY_NOT_SUPPORTED");
+  // Not the generic refusal: the customer is told what to do instead.
+  assert.match(String(body.error), /percentage/i);
+});
+
+test("the refusal happens before Stripe, the lease and any redemption", async () => {
+  // The order that matters. A refusal after any of these leaves state behind
+  // for a purchase that never happened: a Session the customer could still pay,
+  // a lease locking them out of the other plan for 31 minutes, a redemption
+  // spent on a capped promotion.
+  world.promotion = FIXED_AMOUNT_PROMOTION;
+  const response = await postFromAustralia({ promoCode: "PAYMENTTEST27" });
+  assert.equal(response.status, 400);
+  await response.json();
+  assert.equal(world.sessionCreateCalls.length, 0);
+  assert.equal(world.customerCreateKeys.length, 0);
+  assert.deepEqual(world.releases, []);
+});
+
+/** The currency Stripe is actually asked to charge, from the line item. */
+const lastSessionCurrency = () => {
+  const lineItems = lastSessionParams()?.line_items as
+    | Array<{ price_data?: { currency?: string } }>
+    | undefined;
+  return lineItems?.[0]?.price_data?.currency;
+};
+
+test("a percentage promotion is charged in the local currency", async () => {
+  // The gate must refuse only what it is for. 100% off A$ is still 100% off.
+  const response = await postFromAustralia({ promoCode: "EDDIEFRIEND100" });
+  assert.equal(response.status, 200);
+  await response.json();
+  assert.equal(world.sessionCreateCalls.length, 1);
+  assert.equal(lastSessionCurrency(), "aud");
+});
+
+test("the same fixed-amount promotion is accepted for a USD checkout", async () => {
+  world.promotion = FIXED_AMOUNT_PROMOTION;
+  const response = await post({ promoCode: "PAYMENTTEST27" });
+  assert.equal(response.status, 200);
+  await response.json();
+  assert.equal(world.sessionCreateCalls.length, 1);
+  assert.equal(lastSessionCurrency(), "usd");
 });

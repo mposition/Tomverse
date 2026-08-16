@@ -10,9 +10,11 @@ import {
   type BillingPromotionConfig,
 } from "@/lib/billingConfig";
 import {
+  promotionCurrencyFailure,
   promotionEligibilityFailure,
   type PromotionValidationReason,
 } from "@/lib/billingPromotionCore";
+import type { BillingCurrency } from "@/lib/billingMarkets";
 import { getAnonymousClientKey } from "@/lib/clientIp";
 import { prisma } from "@/lib/prisma";
 import { promotionStripePolicyViolation } from "@/lib/stripePromotionProvisioningCore";
@@ -196,6 +198,7 @@ export async function validatePromotionForCheckout({
   code,
   planId,
   billingInterval,
+  currency,
   userId,
   request,
   now = new Date(),
@@ -203,6 +206,16 @@ export async function validatePromotionForCheckout({
   code: string;
   planId: BillingPlanId;
   billingInterval: BillingInterval;
+  /**
+   * The currency this checkout will actually be charged in, decided by the
+   * trusted market -- never a currency the client asked for.
+   *
+   * Required so both callers have to answer it. It was absent, and the currency
+   * rule lived inside the checkout route instead, so validation returned
+   * `valid: true` for a fixed-amount code in an AUD market and the order summary
+   * quoted a discount the button then refused.
+   */
+  currency: BillingCurrency;
   userId: string | null;
   request: Request;
   now?: Date;
@@ -232,6 +245,13 @@ export async function validatePromotionForCheckout({
       return { valid: false, reason: "unavailable" };
     }
   }
+
+  // Decided here, before any redemption lookup or IP hashing, because it is a
+  // property of the promotion and the market and needs nothing else. Both
+  // endpoints reach it, which is the whole point: the answer the order summary
+  // is drawn from is the answer Checkout will give.
+  const currencyFailure = promotionCurrencyFailure({ promotion, currency });
+  if (currencyFailure) return { valid: false, reason: currencyFailure };
 
   if (userId) {
     const existingRedemption =
