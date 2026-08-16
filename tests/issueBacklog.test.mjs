@@ -319,3 +319,77 @@ test("only genuinely open work is offered as a candidate", () => {
     [300]
   );
 });
+
+/* -------------------------------------------------------------------------- */
+/* Blocked                                                                     */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * `candidates` answers "what may I pick up next", so an issue whose first step
+ * is reading production must not appear in it.
+ *
+ * #636 is the case this was added for: the decision is approved and the code
+ * site is known, but blocking fixed-amount promotion creation before knowing
+ * which codes are live could interrupt a running campaign. Offered as
+ * `open_work`, a session would start it and then either stall or guess.
+ */
+
+test("an unresolved probe that names a blocker is not open work", () => {
+  const result = classifyIssue(
+    {
+      number: 636,
+      title: "Deprecate creation of fixed-amount billing promotions",
+    },
+    facts({ readFile: () => "export const promotionSchema = {};" })
+  );
+  assert.equal(result.verdict, VERDICTS.BLOCKED);
+  assert.match(result.blockedOn, /production inventory/i);
+});
+
+test("a blocked issue is kept out of the candidate list", () => {
+  const audit = auditIssueBacklog({
+    issues: [
+      {
+        number: 636,
+        title: "Deprecate creation of fixed-amount billing promotions",
+      },
+      { number: 999, title: "Something with no probe at all" },
+    ],
+    facts: facts({ readFile: () => "export const promotionSchema = {};" }),
+  });
+  assert.deepEqual(
+    audit.candidates.map((item) => item.number),
+    [999]
+  );
+  assert.deepEqual(
+    audit.blocked.map((item) => item.number),
+    [636]
+  );
+});
+
+test("resolving the work clears the blocker rather than reporting both", () => {
+  // What an issue was once waiting for is history once it is done. Carrying
+  // `blockedOn` into a resolved verdict would read as "done, but still stuck".
+  const result = classifyIssue(
+    {
+      number: 636,
+      title: "Deprecate creation of fixed-amount billing promotions",
+    },
+    facts({
+      readFile: () =>
+        "// percentage-only: refuse discountAmountCents on create\n",
+    })
+  );
+  assert.notEqual(result.verdict, VERDICTS.BLOCKED);
+  assert.equal(result.blockedOn, undefined);
+});
+
+test("every probe that declares a blocker explains what it is waiting for", () => {
+  for (const probe of ISSUE_PROBES) {
+    if (!probe.blockedOn) continue;
+    assert.ok(
+      probe.blockedOn.length > 40,
+      `#${probe.issue} must say what the blocker is, not just that there is one`
+    );
+  }
+});
