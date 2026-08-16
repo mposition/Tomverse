@@ -360,34 +360,30 @@ JSON과 HTML은 **같은 계정에서, 두 export 사이에 대화를 추가·�
 영향을 주는 flag·런타임 설정, 실제 배포 artifact. 검증 도중 staging 대상이
 움직였다면 기록은 무효이고 다시 실행합니다.
 
-#### 9.1.3 체크리스트가 branch마다 다른 상태 — 미해결
+#### 9.1.3 체크리스트가 branch마다 달랐던 상태 — 해결됨
 
-2026-08-16 기준, 이 계약의 정본인 H절 서두는 **`develop`에만 있습니다**
-(`cf9b1f1` "docs(ops): verify an activation candidate SHA, not a branch").
-`main`의 체크리스트는 233줄판이라 이 요구가 없습니다. 그래서 §9.1은 참조가
-아니라 요구 자체를 적었습니다 — main만 읽는 사람이 참조를 따라가면 없는 문단에
-도달합니다.
+> **Resolved: checklist revision `2026-08-15c`가 2026-08-16에
+> `2d4a22c0dc93d1b5cca3b99677cab790c9e1ca18`로 main에 합류했습니다**
+> (PR #661). 세 source commit(`9d87e72` → `495929d` → `cf9b1f1`)의 9-file
+> delta를 적용했습니다. `main`·`develop` 모두 397줄판이며 H절 서두의
+> 활성화 증거 계약을 가집니다.
 
-**이 감사 문서가 main 체크리스트의 공백을 대신한다고 해석하지 않습니다.** 여기
-적힌 것은 정본의 요약이며, 정식 실행의 근거는 체크리스트와 기록입니다.
+**이 절을 지우지 않는 이유가 provenance입니다.** 2026-08-15 ~ 08-16 사이에는
+정본 H절 서두가 `develop`에만 있었고 `main`은 233줄판이었습니다. 그 창에서
+만들어진 기록이 왜 그런 `checklistSourceSha`를 담고 있는지는 이 사실을 알아야
+설명됩니다.
 
-합류 전에 정식 실행이 필요하다면 이렇게 합니다.
+그때 §9.1이 참조가 아니라 요구 자체를 적은 것도 같은 이유였고, 지금은 정본이
+양쪽에 있으므로 **§9.1은 정본의 요약입니다.** 정식 실행의 근거는 계속
+체크리스트와 기록이며, **이 감사 문서가 그 자리를 대신하지 않습니다.**
 
-- `develop` 체크아웃의 **최신 template**으로 기록을 생성하고,
-- `deploySha`에는 **실제 production 활성화 대상 SHA**를 적고,
-- `checklistSourceSha`로 template 출처 commit을 함께 고정합니다.
+`checklistSourceSha`의 설계 목적은 branch 간 **일시적** 차이를 허용하고 감사
+가능하게 만드는 것이지 장기적인 불일치가 목표는 아니었습니다. 그래서 이
+간격은 런타임 결함이 아니라 활성화 전에 닫을 거버넌스 부채였고, 닫혔습니다.
 
-**`checklistSourceSha`의 설계 목적은 branch 간 일시적 차이를 허용하고 감사
-가능하게 만드는 것이지, 장기적인 checklist 불일치를 목표로 하는 것이
-아닙니다.** 그래서 현재 상태는 런타임 결함은 아니지만 **활성화 전에 닫는 것이
-좋은 운영 거버넌스 부채**입니다. 그 사이에도 H/H2 `exploratory` 실행은 계속할
-수 있습니다.
+##### 합류에 무엇이 필요했는지 (기록)
 
-##### 합류는 체크리스트 파일 단독으로 하지 않습니다
-
-`develop`의 계약은 문서 하나가 아니라 **한 슬라이스로 함께 움직입니다.**
-2026-08-16 기준 `origin/main...origin/develop` 차이는 **9개 파일**이며 전부
-수정(추가 없음)입니다.
+체크리스트 문서 하나가 아니라 9개 파일이 한 슬라이스로 움직였습니다.
 
 | 구분 | 파일 |
 |---|---|
@@ -395,20 +391,17 @@ JSON과 HTML은 **같은 계정에서, 두 export 사이에 대화를 추가·�
 | 생성·검증 | `scripts/new-staging-verification-record.mjs`, `staging-verification-record-core.mjs`, `check-staging-verification-records{,-core}.mjs` |
 | 테스트 | `tests/stagingVerificationRecord{Parsing,Skeleton}.test.mjs` |
 
-`package.json`은 필요 없습니다 — `check:staging-verification-records`와
-`new:staging-verification-record`는 이미 `main`에 있습니다.
+`package.json`은 필요 없었습니다 — `check:staging-verification-records`와
+`new:staging-verification-record`가 이미 `main`에 있었습니다.
 
-**체크리스트만 cherry-pick하면 생성기가 새 필드를 누락하거나 validator가 다르게
-해석합니다.** 문서는 `templateRevision: 2026-08-15c`를 요구하는데 생성기가 옛
-skeleton을 쓰면, 그 기록은 사람 눈에만 맞아 보이고 검사에는 걸리지 않습니다.
-그것이 이 9개를 한 PR로 묶는 이유입니다.
+**문서만 옮겼다면 생성기가 새 필드를 누락했을 것입니다.** 문서는
+`templateRevision: 2026-08-15c`를 요구하는데 생성기가 옛 skeleton을 쓰면, 그
+기록은 사람 눈에만 맞아 보이고 검사에는 걸리지 않습니다. 그것이 9개를 한 PR로
+묶은 이유입니다.
 
-이 PR의 검증은 다음입니다. `npm run check:release-records`는 **여기서 돌리지
-않습니다** — 아래 §9.1.3.1의 별개 gate입니다.
-
-- `npm run test:unit`
-- `npm run check:staging-verification-records`
-- 기록 생성 preview로 `templateRevision`·`checklistSourceSha`가 채워지는지 확인
+검증은 `npm run test:unit`, `npm run check:staging-verification-records`, 그리고
+clean tree에서의 생성 preview였습니다. `npm run check:release-records`는 이
+슬라이스가 아니므로 실행하지 않았습니다(§9.1.3.1).
 
 ##### 9.1.3.1 release-record gate는 별개 승격 후보입니다
 
@@ -447,11 +440,14 @@ convergence PR뿐**입니다. release-record gate 승격은 그와 독립적으�
 #### 9.1.4 권장 종결 순서
 
 1. ~~감사 문서 정정을 `main`에 병합~~ — **완료** (#640, #646, #655)
-2. **9개짜리** checklist 계약 슬라이스를 별도 `main` PR로 합류 (§9.1.3)
-3. 그 병합 SHA가 확정된 뒤 §9.1.3을 **삭제하지 않고** `Resolved` 한 줄로 갱신
-4. 그 SHA 또는 이후 확정된 활성화 SHA에서 정식 A~H/H2 실행
+2. ~~**9개짜리** checklist 계약 슬라이스를 별도 `main` PR로 합류~~ — **완료**
+   (#661, `2d4a22c`)
+3. ~~그 병합 SHA가 확정된 뒤 §9.1.3을 **삭제하지 않고** `Resolved`로 갱신~~ —
+   **완료** (이 문서)
+4. **남음** — 확정된 활성화 SHA에서 정식 A~H/H2 실행 (§9.1·§9.1.1·§9.1.2)
 
-2와 4는 순서 의존입니다. 나머지 둘은 **이 순서에 끼워 넣지 않습니다.**
+활성화 전에 남은 것은 **4번 하나**입니다. 나머지 둘은 **이 순서에 끼워 넣지
+않습니다.**
 
 - **release-record gate 승격**(§9.1.3.1) — 활성화의 선행 조건이 아니며, 별도
   검토·PR입니다.
