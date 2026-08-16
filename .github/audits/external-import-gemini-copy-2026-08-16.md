@@ -377,10 +377,32 @@ JSON과 HTML은 **같은 계정에서, 두 export 사이에 대화를 추가·�
 - `deploySha`에는 **실제 production 활성화 대상 SHA**를 적고,
 - `checklistSourceSha`로 template 출처 commit을 함께 고정합니다.
 
-이 어긋남 자체는 사고가 아니라 설계입니다 — template이 "checklist source SHA는
-배포 SHA와 다른 것이 정상"이라고 적고 있고, 검증 *절차*의 이력을 `develop` 한
-줄기로 두기 위해 그 칸이 존재합니다. 다만 **활성화 전에 체크리스트를 `main`에도
-합류시키는 것이 가장 안전합니다.**
+**`checklistSourceSha`의 설계 목적은 branch 간 일시적 차이를 허용하고 감사
+가능하게 만드는 것이지, 장기적인 checklist 불일치를 목표로 하는 것이
+아닙니다.** 그래서 현재 상태는 런타임 결함은 아니지만 **활성화 전에 닫는 것이
+좋은 운영 거버넌스 부채**입니다. 그 사이에도 H/H2 `exploratory` 실행은 계속할
+수 있습니다.
+
+##### 합류는 체크리스트 파일 단독으로 하지 않습니다
+
+`develop`의 계약은 문서 하나가 아니라 **한 슬라이스로 함께 움직입니다.**
+2026-08-16 기준 `origin/main...origin/develop` 차이는 13개 파일이고, 그중
+셋은 `main`에 아예 없습니다.
+
+| 구분 | 파일 |
+|---|---|
+| 문서 | `docs/ops/external-import-staging-checklist.md`, `staging-verification-records/README.md`, `_record-template.md` |
+| 생성·검증 | `scripts/new-staging-verification-record.mjs`, `staging-verification-record-core.mjs`, `check-staging-verification-records{,-core}.mjs` |
+| **main에 없음** | `scripts/release-record-policy.mjs`, `scripts/check-release-records.mjs`, `tests/releaseRecordPolicy.test.mjs` |
+| 테스트 | `tests/stagingVerificationRecord{Parsing,Skeleton}.test.mjs` |
+| 명령 | `package.json` — `check:release-records`가 `main`에 없음 |
+
+**체크리스트만 cherry-pick하면 생성기가 새 필드를 누락하거나 validator가 다르게
+해석합니다.** 문서는 `templateRevision: 2026-08-15c`를 요구하는데 생성기가 옛
+skeleton을 쓰면, 그 기록은 사람 눈에만 맞아 보이고 검사에는 걸리지 않습니다.
+
+별도의 **"checklist contract convergence" PR**로 이 슬라이스 전체를 `main`에
+옮기는 것을 권합니다.
 
 > **해결되면 이 절을 지우지 말고 아래 한 줄로 바꿉니다.**
 >
@@ -389,6 +411,17 @@ JSON과 HTML은 **같은 계정에서, 두 export 사이에 대화를 추가·�
 >
 > 당시 branch 불일치가 있었다는 사실을 지우면, 그 사이에 만들어진 기록들이 왜
 > `checklistSourceSha`를 그렇게 적었는지 나중에 설명할 수 없습니다.
+
+#### 9.1.4 권장 종결 순서
+
+1. ~~감사 문서 정정을 `main`에 병합~~ — **완료** (#640, #646)
+2. checklist 계약 슬라이스 전체를 별도 `main` PR로 합류
+3. 그 병합 SHA가 확정된 뒤 §9.1.3을 **삭제하지 않고** `Resolved` 한 줄로 갱신
+4. 그 SHA 또는 이후 확정된 활성화 SHA에서 정식 A~H/H2 실행
+
+2와 4는 순서 의존이지만, **§9.2의 마케팅 결정과는 독립**입니다. checklist 간격은
+활성화 전 해결 권고이고, §17 분리는 마케팅 콘텐츠 작성 전 승인 조건이며, 서로를
+기다리지 않습니다.
 
 ### 9.2 마케팅 론치
 
