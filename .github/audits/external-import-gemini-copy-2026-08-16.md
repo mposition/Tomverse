@@ -303,12 +303,10 @@ registry·7개 locale·landing·SEO·정적 테스트를 **한 변경으로** �
 켜는 것은 Gemini rollout이 아니라 **외부 import 전체의 최초 production
 공개**입니다. 근거는 다음을 모두 충족해야 합니다.
 
-- 실제 활성화 대상의 정확한 **40자리 SHA**
-- 동일한 **migration 집합**과 배포 artifact / deployment ID
-- **사전 조건 + A~H/H2 전체** 실행 (H는 D절 XSS 항목을 참조하므로 단독 분리
-  불가)
-- **실제 export / Takeout** 사용 — 저장소 fixture는 합성이며 테스트 통과는
-  staging 증거가 아닙니다
+- **사전 조건 + A~H/H2 전체** 실행. H는 D절 XSS 항목을 참조하므로 단독 분리
+  불가입니다.
+- **실제 검증 자료 여섯 종 전부** — §9.1.1
+- 기록에 **대상과 절차를 함께 고정** — §9.1.2
 - 실행자·승인자 **서명과 기록 동결**, `docs/ops/staging-verification-records/`에
   저장
 
@@ -316,19 +314,97 @@ H·H2 단독 실행은 `runType: exploratory`로 남기며 Gemini 구현 확인�
 충분하지만 production 승인 근거로 인용할 수 없고, 미실행 항목은 `미기록`으로
 둡니다.
 
-> **이 계약의 정본은 `docs/ops/external-import-staging-checklist.md`의 H절
-> 서두이며, 2026-08-16 기준으로 그 문단은 `develop`에만 있습니다**(`cf9b1f1`
-> "verify an activation candidate SHA, not a branch"). `main`의 체크리스트는
-> 아직 233줄판이라 이 요구가 없습니다. 그래서 여기에 참조가 아니라 요구
-> 자체를 적어 둡니다 — main만 읽는 사람이 참조를 따라가면 없는 문단에
-> 도달합니다. 두 branch가 합류하면 이 각주는 지워도 됩니다.
-
 2026-08-04 기록은 A2를 덮지 않습니다 — Gemini import가 존재하기 전의
 실행이고, 기록 자체가 전 항목 `미기록`이라고 적고 있습니다.
 
+#### 9.1.1 "실제 export"는 Gemini 하나가 아닙니다
+
+flag가 세 provider를 함께 공개하므로 검증 자료도 셋 전부입니다. 체크리스트는
+**여섯 종을 각각의 목적과 함께** 열거하고, 이것을 "검증용 파일"로 뭉뚱그리는
+것을 명시적으로 금지합니다 — 뭉치면 **HTML export가 실패하는 것이 결함처럼
+보입니다.**
+
+| 자료 | 목적 |
+|---|---|
+| ChatGPT export ZIP | 정상 import 경로 |
+| `conversations.json` 단독 | 정상 import 경로 |
+| Claude 실제 export | 정상 import 경로 |
+| Google Takeout **JSON** | Gemini 정상 import, 분기 처리, H2 측정 |
+| Google Takeout **HTML** | 정상 import가 **아니라** 미지원 형식의 안내·복구 경로(`html_export_unsupported`) |
+| 합성 XSS export | viewer가 HTML을 실행하지 않는다는 안전성 경로 |
+
+JSON과 HTML은 **같은 계정에서, 두 export 사이에 대화를 추가·수정·삭제하지 않고**
+받아야 합니다. 재-import 확인은 새로 뽑지 말고 **같은 JSON 파일을 다시** 씁니다 —
+새 export로 하면 ID 결정성이 아니라 "두 export가 우연히 닮았는가"를 본 것이
+됩니다.
+
+#### 9.1.2 기록은 `deploySha` 하나로 대상을 고정하지 못합니다
+
+`_record-template.md`(`templateRevision: 2026-08-15c`)의 front matter가 스키마
+이고, 최소한 다음이 함께 있어야 합니다.
+
+| 축 | 항목 |
+|---|---|
+| 검증 대상 | `deploySha`(40자리) · `deploymentId` · `artifactDigest` |
+| migration | `appliedMigrations` · `migrationsCompletedAtUtc` · 앱 배포보다 먼저 적용됐는지 |
+| 검증 절차 | `templateRevision` · `checklistSourceSha` |
+| 실행 | `runType` · `environment` · 시작·종료 UTC · `executor` · `approver` · 시작 시점 flag·런타임 설정 |
+| 동결 | `frozen` · `digest` · 검증 데이터 정리 확인 |
+
+`deploySha`만으로 부족한 이유는 template이 직접 적고 있습니다 — **같은 SHA가
+같은 artifact를 보장하지 않습니다.** 의존성 해석·builder 버전·build 환경이 그
+사이에 움직입니다.
+
+**동결 후 다음 중 하나라도 달라지면 그 기록은 새 대상을 덮지 못합니다** — 활성화
+대상 SHA, 적용 migration 집합, import·parser·wizard 관련 코드, 검증 결과에
+영향을 주는 flag·런타임 설정, 실제 배포 artifact. 검증 도중 staging 대상이
+움직였다면 기록은 무효이고 다시 실행합니다.
+
+#### 9.1.3 체크리스트가 branch마다 다른 상태 — 미해결
+
+2026-08-16 기준, 이 계약의 정본인 H절 서두는 **`develop`에만 있습니다**
+(`cf9b1f1` "docs(ops): verify an activation candidate SHA, not a branch").
+`main`의 체크리스트는 233줄판이라 이 요구가 없습니다. 그래서 §9.1은 참조가
+아니라 요구 자체를 적었습니다 — main만 읽는 사람이 참조를 따라가면 없는 문단에
+도달합니다.
+
+**이 감사 문서가 main 체크리스트의 공백을 대신한다고 해석하지 않습니다.** 여기
+적힌 것은 정본의 요약이며, 정식 실행의 근거는 체크리스트와 기록입니다.
+
+합류 전에 정식 실행이 필요하다면 이렇게 합니다.
+
+- `develop` 체크아웃의 **최신 template**으로 기록을 생성하고,
+- `deploySha`에는 **실제 production 활성화 대상 SHA**를 적고,
+- `checklistSourceSha`로 template 출처 commit을 함께 고정합니다.
+
+이 어긋남 자체는 사고가 아니라 설계입니다 — template이 "checklist source SHA는
+배포 SHA와 다른 것이 정상"이라고 적고 있고, 검증 *절차*의 이력을 `develop` 한
+줄기로 두기 위해 그 칸이 존재합니다. 다만 **활성화 전에 체크리스트를 `main`에도
+합류시키는 것이 가장 안전합니다.**
+
+> **해결되면 이 절을 지우지 말고 아래 한 줄로 바꿉니다.**
+>
+> `Resolved: checklist revision <revision>이 <YYYY-MM-DD>에 <40자리 SHA>로
+> main에 합류했습니다.`
+>
+> 당시 branch 불일치가 있었다는 사실을 지우면, 그 사이에 만들어진 기록들이 왜
+> `checklistSourceSha`를 그렇게 적었는지 나중에 설명할 수 없습니다.
+
 ### 9.2 마케팅 론치
 
-§8.2의 분리 결정이 먼저입니다. 활성화와 같은 시점일 필요가 없습니다.
+활성화와 같은 시점일 필요가 없습니다. 조용한 활성화가 기본값이며, 그 경우
+세 층을 구분해 다룹니다.
+
+| 층 | 취급 |
+|---|---|
+| 제품 내 Import UI·개인정보 문구 | **실제 동작에 맞게 유지.** 이번 PR이 한 일이며 활성화 승인과 무관합니다 |
+| homepage·SEO 홍보 | **별도 마케팅 승인 전까지 미노출** |
+| §17 분리(`import-only` / `memory personalization`) | **정책 계약 개정이므로 사람 승인 선행** — 문구 변경이 아닙니다 |
+
+세 번째가 특히 그렇습니다. `lib/marketingMemoryClaims.ts`는 상위 정책 §17을
+코드로 옮긴 단일 정본이고, 고지의 범위를 나누는 것은 그 정책이 무엇을 약속하는지를
+바꾸는 일입니다. 에이전트가 registry를 먼저 고치고 정책을 따라 맞추는 순서로는
+안 됩니다.
 
 ### 9.3 이 감사가 하지 않은 것
 
