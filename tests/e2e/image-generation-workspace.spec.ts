@@ -1004,3 +1004,169 @@ test("the composer entry carries the chat draft and restores it on cancel", asyn
     "a lighthouse at dusk"
   );
 });
+
+/* -------------------------------------------------------------------------- */
+/* The comparison limit: what the composer offers is what admission accepts.  */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Override the limit for one browser context.
+ *
+ * The value is an environment variable read at boot and the suite runs one
+ * server for every test, so a spec cannot restart it to exercise both sides of
+ * the limit. Honoured only in fixture mode, through the same parser a
+ * deployment goes through (app/(site)/(application)/chat/page.tsx).
+ */
+const setImageGroupMaxModels = async (page: Page, value: string) => {
+  await page.context().addCookies([
+    {
+      name: "__tomverse_e2e_image_group_max_models",
+      value,
+      url: BASE_URL,
+    },
+  ]);
+};
+
+test("at a limit of two, the third model is refused and the reason is specific", async ({
+  page,
+}) => {
+  // The defect this covers: all three chips selected cleanly, the total read
+  // 265, Generate was enabled, and the request came back as a generic "try
+  // again" that retrying could not fix.
+  await enableImageGenerationFlag(page);
+  await setImageGroupMaxModels(page, "2");
+  await mockAuthenticatedApi(page);
+  await mockUserUsage(page, { plan: "Pro" });
+  const api = await installImageGenerationApi(page);
+  await page.goto("/chat");
+
+  await openNewImageEntry(page);
+  const openai = page.getByTestId("image-model-gpt-image-2");
+  const grok = page.getByTestId("image-model-grok-imagine-image-quality-20260403");
+  const nano = page.getByTestId("image-model-fal-ai/nano-banana-2");
+
+  await expect(openai).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByTestId("image-model-selection-count")).toContainText("1");
+  await grok.click();
+  await expect(grok).toHaveAttribute("aria-pressed", "true");
+
+  // Still listed and still focusable: discovery is not the price of the limit.
+  await expect(nano).toBeVisible();
+  await expect(nano).toHaveAttribute("aria-disabled", "true");
+  await nano.click();
+  await expect(nano).toHaveAttribute("aria-pressed", "false");
+  // Neither of the first two was swapped out to make room.
+  await expect(openai).toHaveAttribute("aria-pressed", "true");
+  await expect(grok).toHaveAttribute("aria-pressed", "true");
+
+  const notice = page.getByTestId("image-model-limit-notice");
+  await expect(notice).toBeVisible();
+  await expect(notice).toContainText("2");
+  // The reason reaches the control itself, not only the page.
+  await expect(nano).toHaveAttribute(
+    "aria-describedby",
+    await notice.getAttribute("id") as string
+  );
+
+  // A keyboard activation is refused the same way, and changes nothing.
+  await nano.focus();
+  await page.keyboard.press("Enter");
+  await expect(nano).toHaveAttribute("aria-pressed", "false");
+  await page.keyboard.press("Space");
+  await expect(nano).toHaveAttribute("aria-pressed", "false");
+
+  // The valid selection still submits: a limit is not a dead end.
+  await expect(page.getByTestId("image-total-credits")).toContainText("145");
+  await page.getByTestId("image-generation-prompt").fill("a red apple");
+  await page.getByTestId("image-generation-submit").click();
+  expect(api.createBodies).toHaveLength(1);
+  expect(api.createBodies[0].modelIds).toEqual([
+    "gpt-image-2",
+    "grok-imagine-image-quality-20260403",
+  ]);
+
+  // Deselecting at the limit is how the user gets out of it.
+  await openai.click();
+  await expect(openai).toHaveAttribute("aria-pressed", "false");
+  await expect(nano).not.toHaveAttribute("aria-disabled", "true");
+});
+
+test("at a limit of three, all three providers compare in one request", async ({
+  page,
+}) => {
+  await enableImageGenerationFlag(page);
+  await setImageGroupMaxModels(page, "3");
+  await mockAuthenticatedApi(page);
+  await mockUserUsage(page, { plan: "Pro" });
+  const api = await installImageGenerationApi(page);
+  await page.goto("/chat");
+
+  await openNewImageEntry(page);
+  await page.getByTestId("image-model-grok-imagine-image-quality-20260403").click();
+  await page.getByTestId("image-model-fal-ai/nano-banana-2").click();
+
+  for (const modelId of [
+    "gpt-image-2",
+    "grok-imagine-image-quality-20260403",
+    "fal-ai/nano-banana-2",
+  ]) {
+    await expect(page.getByTestId(`image-model-${modelId}`)).toHaveAttribute(
+      "aria-pressed",
+      "true"
+    );
+  }
+  // 70 + 75 + 120 at Standard square.
+  await expect(page.getByTestId("image-total-credits")).toContainText("265");
+  await expect(page.getByTestId("image-model-selection-count")).toContainText("3");
+
+  await page.getByTestId("image-generation-prompt").fill("a red apple");
+  await page.getByTestId("image-generation-submit").click();
+
+  expect(api.createBodies).toHaveLength(1);
+  expect(api.createBodies[0].modelIds).toEqual([
+    "gpt-image-2",
+    "grok-imagine-image-quality-20260403",
+    "fal-ai/nano-banana-2",
+  ]);
+  await expect(page.getByTestId("image-comparison-card")).toHaveCount(3);
+});
+
+test("a server refusal a stale composer could not predict names the limit", async ({
+  page,
+}) => {
+  // The composer believes 3 and admission applied 2 -- a tab left open across
+  // a deployment that lowered the limit. The client's own check passed, so the
+  // only thing standing between the user and "try again" forever is this
+  // mapping.
+  await enableImageGenerationFlag(page);
+  await setImageGroupMaxModels(page, "3");
+  await mockAuthenticatedApi(page);
+  await mockUserUsage(page, { plan: "Pro" });
+  await installImageGenerationApi(page);
+  await page.route("**/api/images/generations", async (route) => {
+    if (route.request().method() !== "POST") return route.fallback();
+    await route.fulfill(
+      json(
+        {
+          error: "Select at most 2 models to compare.",
+          code: "IMAGE_MODEL_SELECTION_INVALID",
+          details: { maxModels: 2, requestedModels: 3 },
+        },
+        400
+      )
+    );
+  });
+  await page.goto("/chat");
+
+  await openNewImageEntry(page);
+  await page.getByTestId("image-model-grok-imagine-image-quality-20260403").click();
+  await page.getByTestId("image-model-fal-ai/nano-banana-2").click();
+  await page.getByTestId("image-generation-prompt").fill("a red apple");
+  await page.getByTestId("image-generation-submit").click();
+
+  const error = page.getByTestId("image-generation-error");
+  await expect(error).toBeVisible();
+  // The server's number, not the composer's: 2 is what admission applied.
+  await expect(error).toContainText("2");
+  await expect(error).not.toContainText("3");
+});

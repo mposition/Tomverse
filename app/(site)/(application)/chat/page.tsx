@@ -4,6 +4,10 @@ import { cookies } from "next/headers";
 import { APP_DEFAULTS } from "@/lib/appDefaults";
 import { isE2EFixtureMode } from "@/lib/e2eTestMode";
 import { getPublicAppSettings, isImageGenerationEnabled } from "@/lib/appSettings";
+import {
+  imageGroupMaxModels,
+  resolveImageGroupMaxModels,
+} from "@/lib/imageGroupLimits";
 import { GuestVerificationProvider } from "@/components/chat/GuestVerificationProvider";
 import { ChatPageClient } from "./ChatPageClient";
 
@@ -34,15 +38,32 @@ export default async function ChatPage() {
     });
   }
 
+  // The comparison limit this process is running with. Resolved here, per
+  // request, from the same function `requestImageGeneration` enforces -- a
+  // composer offering more models than admission accepts is a request the UI
+  // presented as valid and the server can only refuse, which is what this
+  // prop exists to prevent.
+  let maxImageModels = imageGroupMaxModels();
+
   // Playwright override, mirroring the __tomverse_e2e_auth pattern in the
   // application layout: with the database disabled the opt-in flag can never
   // read true, so a test opts in per-context with a cookie. Only honoured in
   // fixture mode (loopback origin + both E2E env vars), and production
   // readiness fails outright if those vars are ever set there
   // (lib/securityEnvironment.ts e2eBypassDisabled).
-  if (!imageGenerationEnabled && isE2EFixtureMode()) {
-    imageGenerationEnabled =
-      (await cookies()).get("__tomverse_e2e_image_generation")?.value === "1";
+  if (isE2EFixtureMode()) {
+    const jar = await cookies();
+    if (!imageGenerationEnabled) {
+      imageGenerationEnabled =
+        jar.get("__tomverse_e2e_image_generation")?.value === "1";
+    }
+    // The limit comes from an environment variable read at boot, and the e2e
+    // suite runs one server for every test, so a spec cannot restart it to
+    // exercise both sides of the limit. The override goes through the same
+    // parser rather than trusting the cookie's digits: a test must not be able
+    // to reach a value a deployment could not.
+    const overrideRaw = jar.get("__tomverse_e2e_image_group_max_models")?.value;
+    if (overrideRaw) maxImageModels = resolveImageGroupMaxModels(overrideRaw);
   }
 
   // The verification coordinator wraps the page rather than living inside it,
@@ -55,6 +76,11 @@ export default async function ChatPage() {
       <ChatPageClient
         guestDefaultModelId={guestDefaultModelId}
         imageGenerationEnabled={imageGenerationEnabled}
+        // The composer cannot read this itself: `process.env` in a Client
+        // Component is substituted at build time, so a client-side copy would
+        // keep offering yesterday's limit after a deployment changed it. This
+        // page is `force-dynamic`, so the value is the running process's.
+        imageGroupMaxModels={maxImageModels}
       />
     </GuestVerificationProvider>
   );

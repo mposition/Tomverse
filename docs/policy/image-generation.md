@@ -24,7 +24,22 @@ Google 모델 활성화는 공식 가격·thinking 상한의 수동 검증 통�
   `gemini-3-pro-image`(등록-비활성) 3개.
   미등록 평가 후보는 §12.1에 있다. 비교 그룹의 모델 수 상한은
   `IMAGE_GROUP_MAX_MODELS`(출시 기본 2)이며 UI·데이터 모델에 상한값을
-  하드코딩하지 않는다.
+  하드코딩하지 않는다. **UI는 이 값을 서버에서 전달받는다**
+  (`imageGroupMaxModels()`, `lib/imageGroupLimits.ts` — admission과 같은
+  함수). client가 자기 사본을 계산하면 build-time 값이 되어 배포로 상한이
+  바뀐 뒤에도 옛 값을 계속 제시하고, **서버가 거절할 수밖에 없는 요청을
+  유효한 요청처럼 보여준다.** 2026-08-16에 활성 모델 3개 · 상한 2에서 이
+  상태가 실제로 발생했다.
+- **`IMAGE_GROUP_MAX_MODELS`와 `IMAGE_INLINE_MODEL_DISCOVERY_LIMIT`는 서로
+  다른 결정이며 어느 쪽도 다른 쪽에서 유도하지 않는다.** 전자는 한 요청이
+  실제로 시작할 수 있는 provider 작업량이고, 후자는 picker를 열지 않고
+  발견되는 모델 수(UI 한 줄의 정보 밀도)다. 오늘 두 값이 3으로 같더라도
+  합치지 않는다 — 합치면 실행 상한이 composer를 재배치하거나 레이아웃
+  결정이 provider 지출을 승인하게 된다.
+- **활성 모델 수가 상한보다 많은 구성은 정상이며 UI가 안전하게 처리해야
+  한다.** 초과 선택은 거절하되 선택을 바꾸지 않고, 이유를 남기며, 이미
+  선택된 모델의 해제는 계속 허용한다. 계약은
+  `docs/ui-contracts/image-generation-workspace.md`의 "Selection limit".
 - text-to-image 전용, 모델당 요청 1장. `size=auto`·`quality=auto`·부분
   스트리밍·투명 배경·편집·참조 이미지는 여전히 범위 밖이다. 크기·품질
   선택지는 모델별 profile이 정의하되 provider 제약이 아니라 **Tomverse
