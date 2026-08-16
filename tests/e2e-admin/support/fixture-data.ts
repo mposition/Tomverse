@@ -155,6 +155,22 @@ export const FIXTURE_PROMOTION = {
   maxRedemptions: 10,
 } as const;
 
+/**
+ * A paused fixed-amount promotion, which is what production actually holds.
+ *
+ * Fixed-amount discounts are deprecated
+ * (docs/policy/promotion-discount-currency.md section 2) but the existing rows
+ * stay, so the console has to keep letting an operator narrow and inspect one
+ * while refusing to widen or restart it. Seeded inactive on purpose: the
+ * catalogue orders by `isActive desc, code asc`, so this never displaces
+ * `FIXTURE_PROMOTION` as the first row the diagnostics panel selects.
+ */
+export const FIXTURE_FIXED_AMOUNT_PROMOTION = {
+  id: "e2e-promotion-fixed-amount",
+  code: "E2EFIXED14",
+  discountAmountCents: 1_400,
+} as const;
+
 export const FIXTURE_MODEL = {
   /** Enabled model the registry lists and the tests toggle. */
   enabled: {

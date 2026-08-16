@@ -288,6 +288,38 @@ goodwill 지급은 Stripe 환불도 구매 취소도 아닌 **세 번째 것**�
 - **로그인 시 guest localStorage를 삭제하지 않습니다.** 전환은 *선택*만 해제하고
   guest snapshot은 import modal이 결정할 수 있도록 보존합니다.
 
+# 프로모션 할인과 통화
+
+프로모션의 할인 형태, `discountAmountCents`, Admin billing PATCH의 프로모션
+분기를 건드리기 전에 읽습니다.
+
+- `docs/policy/promotion-discount-currency.md`
+
+절대 조건:
+
+- **신규 프로모션은 정률만입니다.** 고정액 할인은 승인된 상태로 deprecated이고
+  (docs/policy/promotion-discount-currency.md §2, rollout 승인 2026-08-16,
+  활성 0개 확인), 다중 통화로 확장하지 않습니다.
+- **`discountAmountCents`는 USD 금액입니다.** 다른 통화의 가격에 비율로 환산해
+  적용하지 않습니다. 그 환산이 이 정책을 만든 사고입니다.
+- **컬럼은 삭제하지 않습니다.** 과거 상환 기록이 프로모션 행을 가리키므로
+  당시 할인을 재구성할 수 없게 됩니다. 삭제는
+  docs/policy/promotion-discount-currency.md §5의 세 조건을 확인한 뒤 별도 migration입니다.
+- **판정은 `fixedAmountPromotionRefusal()` 한 곳에 있습니다**
+  (`lib/billingPromotionAdminPolicy.ts`). Admin API와 Admin 패널이 같은 함수를
+  부릅니다.
+  docs/policy/promotion-discount-currency.md §4 행렬을 route와 component에
+  각각 옮겨 적지 않습니다.
+- **판정은 요청 본문이 아니라 저장된 행과 비교합니다.** 패널이 매 저장마다
+  프로모션 목록 전체를 PATCH하므로, 본문만 보고 고정액을 거절하면 기존 코드가
+  하나라도 있는 동안 billing 폼 전체가 잠깁니다.
+- **거절은 어떤 write보다 먼저** 합니다. plan·price·promotion이 한 요청에 실려
+  오므로 늦게 거절하면 절반만 적용된 상태가 남습니다.
+- **좁히는 편집은 계속 허용합니다** — 비활성화, 종료일 단축, 할인액 인하, 플랜
+  제거, 상한 인하. 비활성화까지 막으면 살아 있는 프로모션을 끌 수단이 없어집니다.
+- 통화 판정 자체(`promotionCurrencyFailure()`, `PROMOTION_CURRENCY_NOT_SUPPORTED`)
+  는 별개 계층이며 validation과 Checkout이 공유합니다. 완화하지 않습니다.
+
 # Plan change (Pro <-> Max)
 
 플랜 변경 CTA나 `/api/billing/checkout`의 차단 분기를 건드리기 전에 읽습니다.
