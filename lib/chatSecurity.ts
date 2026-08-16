@@ -175,6 +175,18 @@ export type ChatBudget = {
     inputUsdPerMillionTokens: number;
     outputUsdPerMillionTokens: number;
     cachedInputPriceMultiplier: number;
+    /**
+     * The worst case this turn's native web search may cost, reserved before
+     * dispatch. Zero unless a paid native search is attached.
+     *
+     * Its own field rather than folded into the token rates: it is charged per
+     * query and not per token, and settlement has to be able to release the
+     * unused part of it separately.
+     */
+    nativeSearchReservedCostMicroUsd: number;
+    /** The per-query rate and enforced ceiling the reservation was sized on. */
+    nativeSearchCostPerQueryMicroUsd: number;
+    nativeSearchMaxQueries: number;
     provider: AiModel["provider"];
     /** Which entry of lib/modelPricing.ts produced the rates above. */
     pricingVersion: string;
@@ -562,6 +574,14 @@ const microdollarsFor = (tokens: number, usdPerMillionTokens: number) =>
 export const getChatBudgetReservedTokens = (budget: ChatBudget) =>
     budget.inputTokens + budget.reservedOutputTokens;
 
+/**
+ * Everything this turn is authorized to spend at its provider.
+ *
+ * Tokens and native search both, because both are billed by the provider and
+ * both have to be inside the amount the provider budget checked before the
+ * request went out. The search half used to be added only at settlement, which
+ * meant the guardrail never saw it until the money was already gone.
+ */
 export const getChatBudgetReservedCostMicroUsd = (budget: ChatBudget) =>
     microdollarsFor(
         budget.inputTokens,
@@ -570,7 +590,8 @@ export const getChatBudgetReservedCostMicroUsd = (budget: ChatBudget) =>
     microdollarsFor(
         budget.reservedOutputTokens,
         budget.outputUsdPerMillionTokens
-    );
+    ) +
+    Math.max(0, budget.nativeSearchReservedCostMicroUsd || 0);
 
 export const createChatBudget = (
     kind: AccessKind,
@@ -592,6 +613,17 @@ export const createChatBudget = (
          * without it is what made searching requests settle above reservation.
          */
         nativeSearchEnabled?: boolean;
+        /**
+         * The worst case that search may cost, from
+         * `reserveNativeSearchCost`. The caller resolves it because refusing a
+         * search that cannot be bounded is a dispatch decision, not a pricing
+         * one -- this only carries the number into the reservation.
+         */
+        nativeSearch?: {
+            reservedCostMicroUsd: number;
+            costPerQueryMicroUsd: number;
+            maxQueries: number;
+        };
     }
 ): ChatBudget => {
     const maxInputTokens =
@@ -658,6 +690,11 @@ export const createChatBudget = (
         inputUsdPerMillionTokens: pricing.inputUsdPerMillionTokens,
         outputUsdPerMillionTokens: pricing.outputUsdPerMillionTokens,
         cachedInputPriceMultiplier: pricing.cachedInputPriceMultiplier,
+        nativeSearchReservedCostMicroUsd:
+            options?.nativeSearch?.reservedCostMicroUsd ?? 0,
+        nativeSearchCostPerQueryMicroUsd:
+            options?.nativeSearch?.costPerQueryMicroUsd ?? 0,
+        nativeSearchMaxQueries: options?.nativeSearch?.maxQueries ?? 0,
         provider: model.provider,
         pricingVersion: pricing.pricingVersion,
         costSource: pricing.costSource,

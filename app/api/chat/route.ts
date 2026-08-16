@@ -52,6 +52,7 @@ import {
     hasUnsupportedGeminiPrefill,
 } from "@/lib/modelGenerationCompatibility";
 import { getWebSearchCapability } from "@/lib/webSearchCapability";
+import { reserveNativeSearchCost } from "@/lib/webSearchNativeCostReservation";
 import { getWebSearchSurchargeCredits } from "@/lib/webSearchCredits";
 import { buildWebSearchToolConfig, WEB_SEARCH_TOOL_NAMES } from "@/lib/webSearchToolConfig";
 import { normalizeWebSearchExecution } from "@/lib/webSearchExecutionNormalizer";
@@ -1984,6 +1985,28 @@ async function handleChatPost(
                 ],
             });
         }
+        // What the search half of this turn may cost, before anything is sent.
+        //
+        // A native search is billed per query on top of tokens, and nothing
+        // used to reserve it -- the cost was added at settlement, so the
+        // provider budget only ever learned about it after the money was
+        // gone. Reserving the worst case requires there to be one: a provider
+        // whose request cannot bound the query count is refused here rather
+        // than dispatched against a reservation that does not cover it.
+        const nativeSearchReservation = reserveNativeSearchCost({
+            model: modelConfig,
+            capability: webSearchCapability,
+            nativeSearchEnabled,
+        });
+        if (!nativeSearchReservation.ok) {
+            throw new ChatAccessError(
+                503,
+                "WEB_SEARCH_COST_UNBOUNDED",
+                "Web search is temporarily unavailable for this model.",
+                undefined,
+                { scope: nativeSearchReservation.reason }
+            );
+        }
         const budget = createChatBudget(
             access.kind,
             modelConfig,
@@ -1994,6 +2017,7 @@ async function handleChatPost(
                     webSearchCapability
                 ),
                 nativeSearchEnabled,
+                nativeSearch: nativeSearchReservation,
             }
         );
         // `budget.inputTokens`, not the raw estimate: what this guard has to

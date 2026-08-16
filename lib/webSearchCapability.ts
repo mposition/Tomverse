@@ -32,7 +32,30 @@ export type WebSearchCapability = {
   canForceExecution: boolean;
   returnsCitations: boolean;
   hasAdditionalCost: boolean;
+  /**
+   * The most billable searches one request can produce, when the request
+   * itself enforces it.
+   *
+   * Declared only where the ceiling is really imposed -- Anthropic's tool
+   * takes `maxUses` and this module owns that number -- and left undefined
+   * where the API offers no way to bound it. It is not an observation of what
+   * providers usually do: a reservation sized on a typical value is a
+   * reservation that is wrong exactly when it matters.
+   *
+   * Undefined on a `hasAdditionalCost` capability means the worst-case cost of
+   * a request cannot be computed, so the request cannot be authorized.
+   */
+  maxBillableSearchQueriesPerRequest?: number;
 };
+
+/**
+ * Anthropic's `web_search_20250305` ceiling, sent on every request.
+ *
+ * Exported so `buildWebSearchToolConfig` sends this exact number. The
+ * reservation is sized on it, and a config that quietly sent a different one
+ * would authorize less than the request can spend.
+ */
+export const ANTHROPIC_MAX_SEARCH_USES = 5;
 
 const NATIVE_OPENAI: WebSearchCapability = {
   support: "native",
@@ -40,6 +63,8 @@ const NATIVE_OPENAI: WebSearchCapability = {
   canForceExecution: true,
   returnsCitations: true,
   hasAdditionalCost: true,
+  // `openai.tools.webSearch({})` sends no ceiling and the API documents none,
+  // so the worst case is unbounded and no reservation can cover it.
 };
 
 const NATIVE_ANTHROPIC: WebSearchCapability = {
@@ -49,6 +74,7 @@ const NATIVE_ANTHROPIC: WebSearchCapability = {
   canForceExecution: false,
   returnsCitations: true,
   hasAdditionalCost: true,
+  maxBillableSearchQueriesPerRequest: ANTHROPIC_MAX_SEARCH_USES,
 };
 
 const NATIVE_GOOGLE: WebSearchCapability = {
@@ -57,6 +83,7 @@ const NATIVE_GOOGLE: WebSearchCapability = {
   canForceExecution: false,
   returnsCitations: true,
   hasAdditionalCost: true,
+  // Grounding takes no per-request cap either.
 };
 
 const SEARCH_MODEL: WebSearchCapability = {
