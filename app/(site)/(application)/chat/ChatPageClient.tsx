@@ -41,6 +41,7 @@ import { useModelCatalog } from "@/components/ModelCatalogProvider";
 import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import { ImageGenerationWorkspace } from "@/components/images/ImageGenerationWorkspace";
+import { IMAGE_GROUP_MAX_MODELS_BOUNDS } from "@/lib/imageGroupLimits";
 import { planAllowsImageGeneration } from "@/lib/imageGenerationAccess";
 import {
   useLanguage,
@@ -450,10 +451,18 @@ export function ChatPageClient({
   // this component's very first render already knows the guest default.
   guestDefaultModelId,
   imageGenerationEnabled = false,
+  imageGroupMaxModels: imageGroupMaxModelsProp = IMAGE_GROUP_MAX_MODELS_BOUNDS.fallback,
 }: {
   guestDefaultModelId: string;
   /** The image generation opt-in flag, resolved server-side in page.tsx. */
   imageGenerationEnabled?: boolean;
+  /**
+   * How many models one image comparison may fan out to, read from the running
+   * server in page.tsx. Passed rather than resolved here: `process.env` in a
+   * Client Component is a build-time substitution, so a local copy would drift
+   * from admission the moment a deployment changed the variable.
+   */
+  imageGroupMaxModels?: number;
 }) {
   const {
     models: AVAILABLE_MODELS,
@@ -4393,6 +4402,7 @@ export function ChatPageClient({
       initialModelIds={imageDraftSeedModelIds}
       onCancelDraft={chatDraftBeforeImage ? handleCancelImageDraft : undefined}
       flagEnabled={imageGenerationEnabled}
+      maxModels={imageGroupMaxModelsProp}
       planAllowsImageGeneration={
         !isGuestMode && planAllowsImageGeneration(accountUsage?.plan ?? "Free")
       }

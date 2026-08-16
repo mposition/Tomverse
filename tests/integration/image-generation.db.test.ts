@@ -798,3 +798,113 @@ test("another user's target is not retryable", async () => {
     (error: { code?: string }) => error.code === "IMAGE_GENERATION_NOT_FOUND"
   );
 });
+
+/* ------------------------------------------------------------------------- */
+/* Model selection limit: admission is the boundary, whatever the UI offered. */
+/* ------------------------------------------------------------------------- */
+
+/**
+ * `imageGroupMaxModels()` reads `process.env` at call time, so a test sets the
+ * variable around the call rather than at import. Restored afterwards so the
+ * limit does not leak into the tests that follow.
+ */
+const withGroupMaxModels = async <T,>(
+  value: string,
+  run: () => Promise<T>
+): Promise<T> => {
+  const previous = process.env.IMAGE_GROUP_MAX_MODELS;
+  process.env.IMAGE_GROUP_MAX_MODELS = value;
+  try {
+    return await run();
+  } finally {
+    if (previous === undefined) delete process.env.IMAGE_GROUP_MAX_MODELS;
+    else process.env.IMAGE_GROUP_MAX_MODELS = previous;
+  }
+};
+
+test("three models at a limit of two are refused before any row exists", async () => {
+  await enableImageGeneration();
+  const user = await createUser();
+
+  await withGroupMaxModels("2", async () => {
+    await assert.rejects(
+      requestImageGeneration(
+        requestInput(user.id, {
+          modelIds: [
+            "gpt-image-2",
+            "grok-imagine-image-quality-20260403",
+            "fal-ai/nano-banana-2",
+          ],
+        })
+      ),
+      (error: unknown) => {
+        const refusal = error as {
+          status: number;
+          code: string;
+          details: { maxModels: number; requestedModels: number };
+        };
+        assert.equal(refusal.status, 400);
+        assert.equal(refusal.code, "IMAGE_MODEL_SELECTION_INVALID");
+        // The client renders the limit from this, so it is part of the
+        // contract rather than debug detail.
+        assert.equal(refusal.details.maxModels, 2);
+        assert.equal(refusal.details.requestedModels, 3);
+        return true;
+      }
+    );
+  });
+
+  // Refused before anything was created or charged: a rejected group must
+  // leave no row and no cost, not a cancelled one.
+  assert.equal(await prisma.imageGenerationGroup.count(), 0);
+  assert.equal(await prisma.imageGenerationTarget.count(), 0);
+  assert.equal(await prisma.imageGeneration.count(), 0);
+  assert.equal(await prisma.imageCreditReservation.count(), 0);
+  const budgets = await prisma.chatUsageBucket.findMany({
+    where: { key: { startsWith: "image-provider:" } },
+  });
+  assert.deepEqual(budgets, []);
+});
+
+test("three models at a limit of three fan out as one group of three", async () => {
+  await enableImageGeneration();
+  const user = await createUser();
+  const modelIds = [
+    "gpt-image-2",
+    "grok-imagine-image-quality-20260403",
+    "fal-ai/nano-banana-2",
+  ];
+
+  const result = await withGroupMaxModels("3", () =>
+    requestImageGeneration(requestInput(user.id, { modelIds }))
+  );
+
+  assert.equal(result.targets.length, 3);
+  const targets = await prisma.imageGenerationTarget.findMany({
+    where: { groupId: result.groupId },
+  });
+  assert.equal(targets.length, 3);
+  assert.deepEqual(
+    targets.map((target) => target.modelId).sort(),
+    [...modelIds].sort()
+  );
+
+  const reservations = await prisma.imageCreditReservation.findMany({
+    where: { generationId: { in: result.targets.map((t) => t.generationId) } },
+  });
+  assert.equal(reservations.length, 3);
+  // All-or-nothing admission means the quoted total is the sum of the parts,
+  // with no target admitted at a price the caller was not told.
+  assert.equal(
+    result.reservedCredits,
+    result.targets.reduce((sum, target) => sum + target.reservedCredits, 0)
+  );
+  // Each provider's budget carries its own hold; none borrows another's.
+  const budgets = await prisma.chatUsageBucket.findMany({
+    where: { key: { startsWith: "image-provider:" }, period: "provider-cost-day" },
+  });
+  assert.deepEqual(
+    budgets.map((row) => row.key).sort(),
+    ["image-provider:fal", "image-provider:openai", "image-provider:xai"]
+  );
+});

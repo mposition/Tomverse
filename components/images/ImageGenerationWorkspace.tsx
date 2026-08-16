@@ -45,6 +45,11 @@ import {
   listEnabledImageModels,
   type ImageModelProfile,
 } from "@/lib/imageModelRegistry";
+import {
+  limitImageModelSelection,
+  reportedImageModelLimit,
+  toggleImageModelSelection,
+} from "@/lib/imageModelSelection";
 import { discardResponseBody } from "@/lib/discardResponseBody";
 
 // The image conversation surface: prompt composer, option pickers and the
@@ -86,6 +91,15 @@ const IMAGE_PRESETS: Array<{
 ];
 
 const POLL_INTERVAL_MS = 5_000;
+
+/**
+ * One id, referenced by every chip the limit currently blocks.
+ *
+ * A single shared description rather than one per chip: the reason is the same
+ * sentence for all of them, and duplicating it would make a screen reader read
+ * the limit once per unselectable model.
+ */
+const MODEL_LIMIT_NOTICE_ID = "image-model-limit-notice";
 
 type GenerationAsset = { role: string; mimeType: string; url: string };
 
@@ -197,6 +211,16 @@ type ImageGenerationWorkspaceProps = {
    * what is selectable, not the caller.
    */
   initialModelIds?: readonly string[];
+  /**
+   * How many models one request may compare, as the running server resolves it
+   * (`lib/imageGroupLimits.ts`, read in the chat page's Server Component).
+   *
+   * Passed in, never derived here, and never written as a literal below: the
+   * composer offering three models while admission allows two is what produced
+   * this prop -- the request looked valid all the way to submit and came back
+   * as a generic "try again" that retrying could not fix.
+   */
+  maxModels: number;
   /** Present only when there is a chat draft to go back to. */
   onCancelDraft?: () => void;
 };
@@ -208,6 +232,7 @@ export function ImageGenerationWorkspace({
   planAllowsImageGeneration,
   initialPrompt = "",
   initialModelIds,
+  maxModels,
   onCancelDraft,
 }: ImageGenerationWorkspaceProps) {
   const { t } = useLanguage();
@@ -217,23 +242,44 @@ export function ImageGenerationWorkspace({
   const [prompt, setPrompt] = useState(initialPrompt);
   const [preset, setPreset] = useState<ImagePreset>("standard");
   const [size, setSize] = useState<ImageSize>("1024x1024");
-  const [selectedModelIds, setSelectedModelIds] = useState<string[]>(() => {
+  // Seed ids come from the catalogue's image tab and are bounded by the same
+  // limit as everything else: a deployment can lower it between the catalogue
+  // render and this mount, and a seed is not more privileged than a restore.
+  const [seedLimitOutcome] = useState(() => {
     const enabled = new Set(listEnabledImageModels().map((model) => model.id));
     const seeded = (initialModelIds ?? []).filter((modelId) =>
       enabled.has(modelId)
     );
-    return seeded.length > 0 ? [...new Set(seeded)] : [DEFAULT_IMAGE_MODEL_ID];
+    if (seeded.length === 0) {
+      return { modelIds: [DEFAULT_IMAGE_MODEL_ID], excludedModelIds: [] };
+    }
+    return limitImageModelSelection({ modelIds: seeded, maxModels });
   });
+  const [selectedModelIds, setSelectedModelIds] = useState<string[]>(
+    seedLimitOutcome.modelIds
+  );
+  // Set when a click or key press was refused for the limit. Persistent --
+  // cleared by the next successful selection change, not by a timer -- so the
+  // reason stays on screen while the user decides which model to drop.
+  const [limitNotice, setLimitNotice] = useState(false);
   // Set the moment the user touches a model, quality or size. A restore
   // answer that arrives after that is discarded: the read describes the last
   // comparison, and the user's newer choice is the one that should win a race
   // with the network.
   const composerTouchedRef = useRef(false);
+  // Read inside the history effect without joining its dependency list: the
+  // effect fetches a conversation's timeline, and re-fetching it because the
+  // limit changed would be a request nobody asked for.
+  const maxModelsRef = useRef(maxModels);
+  useEffect(() => {
+    maxModelsRef.current = maxModels;
+  }, [maxModels]);
   // The restore's *outcome*, not its copy: rendering the sentences here would
   // pull `t` into the history-load effect and re-run the fetch on a language
   // change. Stored structurally, the notice simply follows the language.
   const [restoreOutcome, setRestoreOutcome] = useState<{
     excludedModelIds: string[];
+    limitExcludedModelIds: string[];
     optionsConsistent: boolean;
   } | null>(null);
   const [retryingTargetIds, setRetryingTargetIds] = useState<string[]>([]);
@@ -325,7 +371,15 @@ export function ImageGenerationWorkspace({
         // choice the user has already made.
         const restore = payload.composerRestore;
         if (restore && !composerTouchedRef.current) {
-          setSelectedModelIds(restore.modelIds);
+          // A comparison made when the limit was higher restores more models
+          // than the composer may now offer. The stored group is left exactly
+          // as it is -- it is a record of what ran -- and only what the
+          // composer starts with is cut down, with the dropped models named.
+          const limited = limitImageModelSelection({
+            modelIds: restore.modelIds,
+            maxModels: maxModelsRef.current,
+          });
+          setSelectedModelIds(limited.modelIds);
           // Options come back only when every target of the last comparison
           // agreed on them. A disagreement is a bug, not a preference, so the
           // composer keeps its safe defaults and says the options were not
@@ -333,7 +387,12 @@ export function ImageGenerationWorkspace({
           if (restore.preset) setPreset(restore.preset);
           if (restore.size) setSize(restore.size);
           setRestoreOutcome({
+            // Two different reasons a model is missing, kept apart: the
+            // registry can no longer offer it, or it did not fit. Merging them
+            // would tell a user a model was withdrawn when it is simply the
+            // fourth of three.
             excludedModelIds: restore.excludedModelIds,
+            limitExcludedModelIds: limited.excludedModelIds,
             optionsConsistent: restore.optionsConsistent,
           });
         }
@@ -463,6 +522,15 @@ export function ImageGenerationWorkspace({
         });
       case "IMAGE_GENERATION_DISABLED":
         return t("chat.imageGenerationDisabledNotice");
+      case "IMAGE_MODEL_SELECTION_INVALID":
+        // Reachable with a selection this composer approved: a tab left open
+        // across a deployment that lowered the limit, or a deploy landing
+        // between render and submit. The generic "try again" was the defect --
+        // retrying re-sends the same selection and fails identically, and the
+        // user is never told what to change.
+        return interpolateCopy(t("chat.imageGenerationErrorTooManyModels"), {
+          max: reportedImageModelLimit(detailRecord.maxModels, maxModels),
+        });
       case "PLAN_FEATURE_NOT_INCLUDED":
         return t("chat.imageGenerationPlanGateTitle");
       default:
@@ -480,6 +548,19 @@ export function ImageGenerationWorkspace({
     selectedModelIds.length > 0 &&
     !hasUnpricedSelection;
 
+  // Seed ids that did not fit are announced the same way a restore's are: the
+  // catalogue offered a model, the composer did not start with it, and
+  // silently starting from a smaller set would look like the click was lost.
+  const seedLimitNotice =
+    seedLimitOutcome.excludedModelIds.length > 0
+      ? interpolateCopy(t("chat.imageGenerationRestoreLimitExcluded"), {
+          models: seedLimitOutcome.excludedModelIds
+            .map((modelId) => imageModelName(modelId))
+            .join(", "),
+          max: maxModels,
+        })
+      : null;
+
   const restoreNotices = restoreOutcome
     ? [
         restoreOutcome.excludedModelIds.length > 0
@@ -487,6 +568,14 @@ export function ImageGenerationWorkspace({
               models: restoreOutcome.excludedModelIds
                 .map((modelId) => imageModelName(modelId))
                 .join(", "),
+            })
+          : null,
+        restoreOutcome.limitExcludedModelIds.length > 0
+          ? interpolateCopy(t("chat.imageGenerationRestoreLimitExcluded"), {
+              models: restoreOutcome.limitExcludedModelIds
+                .map((modelId) => imageModelName(modelId))
+                .join(", "),
+              max: maxModels,
             })
           : null,
         restoreOutcome.optionsConsistent
@@ -501,17 +590,32 @@ export function ImageGenerationWorkspace({
   const modelChip = (model: ImageModelProfile) => {
     const selected = selectedModelIds.includes(model.id);
     const price = getImageModelPrice(model.id, quality, size);
+    // At the limit, an unselected chip stays visible and focusable -- hiding
+    // it or removing it from the tab order would cost the discovery the whole
+    // inline row exists for. It is marked `aria-disabled` rather than
+    // `disabled`: the element must still receive the activation so the reason
+    // can be announced, which a `disabled` button never would.
+    const limitReached = !selected && selectedModelIds.length >= maxModels;
     return (
       <button
         key={model.id}
         type="button"
         aria-pressed={selected}
+        aria-disabled={limitReached || undefined}
+        // The reason travels with the control, so a screen reader user meets
+        // it on the chip rather than having to find the notice elsewhere.
+        aria-describedby={limitReached ? MODEL_LIMIT_NOTICE_ID : undefined}
         data-testid={`image-model-${model.id}`}
+        data-limit-reached={limitReached ? "true" : undefined}
         onClick={() => toggleModel(model.id)}
         className={`inline-flex min-h-9 items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-semibold transition ${
           selected
             ? "border-accent-image-400 bg-accent-image-50 text-accent-image-800 dark:border-accent-image-700 dark:bg-accent-image-950/30 dark:text-accent-image-200"
-            : "border-zinc-200 bg-white text-zinc-600 hover:bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-300 dark:hover:bg-zinc-900"
+            : limitReached
+              ? // Dashed edge and reduced contrast, not colour alone: the state
+                // has to survive a monochrome or forced-colours rendering.
+                "border-dashed border-zinc-300 bg-white text-zinc-400 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-500"
+              : "border-zinc-200 bg-white text-zinc-600 hover:bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-300 dark:hover:bg-zinc-900"
         }`}
       >
         {/*
@@ -527,18 +631,21 @@ export function ImageGenerationWorkspace({
   };
 
   const toggleModel = (modelId: string) => {
+    const change = toggleImageModelSelection({
+      selected: selectedModelIds,
+      modelId,
+      maxModels,
+    });
+    if (change.blockedByLimit) {
+      // The selection is untouched: no automatic deselection, no silent swap
+      // of an older choice. Only the reason appears.
+      setLimitNotice(true);
+      return;
+    }
     composerTouchedRef.current = true;
     setRestoreOutcome(null);
-    setSelectedModelIds((current) => {
-      if (current.includes(modelId)) {
-        // Never empty: deselecting the last model would leave a composer that
-        // looks ready and refuses on submit.
-        return current.length === 1
-          ? current
-          : current.filter((id) => id !== modelId);
-      }
-      return [...current, modelId];
-    });
+    setLimitNotice(false);
+    setSelectedModelIds(change.modelIds);
   };
 
   const handleSubmit = async () => {
@@ -1002,12 +1109,14 @@ export function ImageGenerationWorkspace({
             quietly differs from the one the user last made is the failure this
             whole restore path exists to end.
           */}
-          {restoreNotices.length > 0 && (
+          {(restoreNotices.length > 0 || seedLimitNotice) && (
             <p
               data-testid="image-generation-restore-notice"
               className="rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-2 text-xs leading-5 text-zinc-600 dark:border-zinc-800 dark:bg-zinc-900/60 dark:text-zinc-300"
             >
-              {restoreNotices.join(" ")}
+              {[seedLimitNotice, ...restoreNotices]
+                .filter((notice): notice is string => Boolean(notice))
+                .join(" ")}
             </p>
           )}
           {/*
@@ -1038,6 +1147,21 @@ export function ImageGenerationWorkspace({
                     })}
               </button>
             )}
+            {/*
+              How many of how many, always -- not only once the ceiling is hit.
+              A count that appears at the limit tells the user about the rule
+              at the moment it is already inconvenient; a count that is always
+              there is how they knew the rule before choosing.
+            */}
+            <span
+              data-testid="image-model-selection-count"
+              className="text-[11px] font-semibold text-zinc-500 dark:text-zinc-400"
+            >
+              {interpolateCopy(t("chat.imageGenerationSelectionCount"), {
+                count: selectedModelIds.length,
+                max: maxModels,
+              })}
+            </span>
             {selectedModelIds.length > 1 && (
               <span
                 data-testid="image-total-credits"
@@ -1049,6 +1173,25 @@ export function ImageGenerationWorkspace({
               </span>
             )}
           </div>
+          {/*
+            Rendered whenever the ceiling is reached, not only after a refused
+            click, so it is already on screen as the `aria-describedby` target
+            of every chip that cannot be selected. `role="status"` rather than
+            `alert`: reaching a documented limit is a state, and an assertive
+            interruption on every third selection would be hostile.
+          */}
+          {(limitNotice || selectedModelIds.length >= maxModels) && (
+            <p
+              id={MODEL_LIMIT_NOTICE_ID}
+              role="status"
+              data-testid="image-model-limit-notice"
+              className="rounded-xl border border-accent-image-200 bg-accent-image-50 px-3 py-2 text-xs leading-5 font-semibold text-accent-image-800 dark:border-accent-image-800 dark:bg-accent-image-950/30 dark:text-accent-image-200"
+            >
+              {interpolateCopy(t("chat.imageGenerationModelLimitNotice"), {
+                max: maxModels,
+              })}
+            </p>
+          )}
           {/*
             The unselected models, in their own row in normal flow. Never
             absolutely positioned or floated: the mobile composer contract
