@@ -70,6 +70,7 @@ import {
   type ImageGenerationFailurePhase,
 } from "@/lib/imageGenerationStateCore";
 import { safeDailyResetAt } from "@/lib/chatLimitDecisionCore";
+import { imageGroupMaxModels } from "@/lib/imageGroupLimits";
 import { resolveImageProviderBudget } from "@/lib/imageProviderBudget";
 import { reportOperationalIncident } from "@/lib/operationalMonitoring";
 import { prisma } from "@/lib/prisma";
@@ -114,8 +115,13 @@ const imageConcurrencyLimit = () =>
 
 // The second layer: how many models one group may fan out to. Without it a
 // single workflow slot would authorize unbounded provider work.
-export const imageGroupMaxModels = () =>
-  boundedEnvInt(process.env.IMAGE_GROUP_MAX_MODELS, 2, 4);
+//
+// Lives in lib/imageGroupLimits.ts so the Server Component that seeds the
+// composer can read the same number without importing this module's Prisma,
+// R2 and provider-adapter dependencies. Re-exported because this module is
+// where callers already look for it, and because admission below is still the
+// only place the value is enforced.
+export { imageGroupMaxModels };
 
 // Execution concurrency (policy v2 §7): provider-side job cap, counted per
 // provider so one slow provider cannot starve another.

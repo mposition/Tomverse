@@ -41,6 +41,7 @@ import { useModelCatalog } from "@/components/ModelCatalogProvider";
 import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import { ImageGenerationWorkspace } from "@/components/images/ImageGenerationWorkspace";
+import { IMAGE_GROUP_MAX_MODELS_BOUNDS } from "@/lib/imageGroupLimits";
 import { planAllowsImageGeneration } from "@/lib/imageGenerationAccess";
 import {
   useLanguage,
@@ -450,10 +451,18 @@ export function ChatPageClient({
   // this component's very first render already knows the guest default.
   guestDefaultModelId,
   imageGenerationEnabled = false,
+  imageGroupMaxModels: imageGroupMaxModelsProp = IMAGE_GROUP_MAX_MODELS_BOUNDS.fallback,
 }: {
   guestDefaultModelId: string;
   /** The image generation opt-in flag, resolved server-side in page.tsx. */
   imageGenerationEnabled?: boolean;
+  /**
+   * How many models one image comparison may fan out to, read from the running
+   * server in page.tsx. Passed rather than resolved here: `process.env` in a
+   * Client Component is a build-time substitution, so a local copy would drift
+   * from admission the moment a deployment changed the variable.
+   */
+  imageGroupMaxModels?: number;
 }) {
   const {
     models: AVAILABLE_MODELS,
@@ -738,6 +747,20 @@ export function ChatPageClient({
   const [assistantProfileOptions, setAssistantProfileOptions] = useState<
     ChatAssistantProfileOption[] | null
   >(null);
+  /**
+   * Staleness guards for the assistant-profile PATCH, whose response arrives
+   * long after the click that sent it.
+   *
+   * `assistantProfileRequestSeqRef` is bumped per request, so a response that
+   * a newer profile change has already superseded is dropped instead of
+   * winning by arriving last. `conversationSettingsRevisionRef` is bumped
+   * every time a server read re-seeds the open conversation's settings, which
+   * is what catches leaving a conversation and coming back to it -- the id is
+   * the same on return, so an id comparison alone cannot tell the returning
+   * state from the state the request was made against.
+   */
+  const assistantProfileRequestSeqRef = useRef(0);
+  const conversationSettingsRevisionRef = useRef(0);
   const [isDeepResearchSetupOpen, setIsDeepResearchSetupOpen] = useState(false);
   // Per-conversation, like webSearchMode -- reset on New Chat/conversation
   // switch so a job's status chip never appears to follow the user into a
@@ -1755,6 +1778,13 @@ export function ChatPageClient({
         assistantProfile?: ChatAssistantProfile | null;
         messages?: Array<{ role?: string; modelId?: string | null }>;
     }, targetChatId?: string) => {
+        // A server *confirmation* is re-seeding this conversation's settings,
+        // so anything still in flight that was started against the previous
+        // seeding now describes a state that has been superseded. Only the
+        // confirmed read counts (`targetChatId` is what tells the two apart):
+        // the optimistic seeding from the conversation list is this client's
+        // own guess and must not invalidate a request made against it.
+        if (targetChatId) conversationSettingsRevisionRef.current += 1;
         const savedModels = normalizeStringArray(data.selectedModels, userDefaultModelIds);
         const nextModels = clampSelectedModels(uniqueStrings(savedModels));
         const nextDisabled = normalizeStringArray(data.disabledPanels, []).filter(
@@ -3812,6 +3842,31 @@ export function ChatPageClient({
       return;
     }
     const previous = assistantProfile;
+    // Everything the response has to be checked against, captured now: which
+    // conversation this PATCH is for, which identity issued it, which
+    // seeding of that conversation's settings it was made against, and
+    // whether a later profile change has since superseded it.
+    const requestSeq = (assistantProfileRequestSeqRef.current += 1);
+    const requestIdentityKey = identityNamespaceKey(
+      identityNamespaceRef.current
+    );
+    const requestSettingsRevision = conversationSettingsRevisionRef.current;
+    /**
+     * Whether this response still describes the state the user is looking at.
+     *
+     * Without this the response applied unconditionally, so a profile change
+     * made in one conversation and answered after the user had moved to
+     * another wrote the first conversation's state onto the second -- and,
+     * because the send barrier then treats the screen as the truth to
+     * confirm, the second conversation's stored `selectedModels` was
+     * overwritten with the first one's. That was silent: no error, and it
+     * survived a reload.
+     */
+    const responseStillApplies = () =>
+      requestSeq === assistantProfileRequestSeqRef.current &&
+      requestIdentityKey === identityNamespaceKey(identityNamespaceRef.current) &&
+      requestSettingsRevision === conversationSettingsRevisionRef.current &&
+      accountConversationId(currentChatIdRef.current) === targetId;
     // Shown from the option list until the server answers, and with the
     // revision the list carries -- never a guess. `latestRevision` matches
     // because binding always pins the newest, so an optimistic row cannot
@@ -3839,27 +3894,39 @@ export function ChatPageClient({
       .then(async (response) => {
         if (!response.ok) {
           await discardResponseBody(response);
+          // The revert is as conversation-scoped as the optimistic write it
+          // undoes: putting this conversation's previous assistant onto
+          // whatever the user is looking at now would be the same defect in
+          // the failure direction.
+          if (!responseStillApplies()) return;
           setAssistantProfile(previous);
           showToast(t("chat.assistantProfileFailed"), "error");
           return;
         }
         const data = (await response.json().catch(() => null)) as {
           assistantProfile?: ChatAssistantProfile | null;
-          selectedModels?: unknown;
         } | null;
+        if (!responseStillApplies()) return;
         // The server's answer replaces the optimistic row: it is the only
         // party that knows which revision was current when it bound.
+        //
+        // Only the profile. This response's `selectedModels` is not an
+        // adoption -- PATCH's binding branch
+        // (app/api/conversations/[conversationId]/route.ts) writes the
+        // profile version and nothing else, so the field is the conversation's
+        // own stored selection echoed back. Re-applying it changed nothing
+        // when it was right and clobbered another conversation's selection
+        // when it was late. Model settings have exactly one client-side
+        // mutation path (`mutateModelSettings`) and one server-side sync
+        // (the per-conversation queue); a second writer here would be outside
+        // both. Note that `resolveProfileBinding` does return the version's
+        // `modelIds`, and the *create* route applies them -- whether PATCH
+        // should too is a §14 product question, not something to smuggle in
+        // through a response handler.
         setAssistantProfile(data?.assistantProfile ?? null);
-        if (Array.isArray(data?.selectedModels)) {
-          // Binding adopts the version's models, so the picker has to follow
-          // or it would show a selection the conversation no longer has.
-          const models = data.selectedModels.filter(
-            (entry): entry is string => typeof entry === "string"
-          );
-          if (models.length > 0) setSelectedModels(models);
-        }
       })
       .catch(() => {
+        if (!responseStillApplies()) return;
         setAssistantProfile(previous);
         showToast(t("chat.assistantProfileFailed"), "error");
       });
@@ -4393,6 +4460,7 @@ export function ChatPageClient({
       initialModelIds={imageDraftSeedModelIds}
       onCancelDraft={chatDraftBeforeImage ? handleCancelImageDraft : undefined}
       flagEnabled={imageGenerationEnabled}
+      maxModels={imageGroupMaxModelsProp}
       planAllowsImageGeneration={
         !isGuestMode && planAllowsImageGeneration(accountUsage?.plan ?? "Free")
       }

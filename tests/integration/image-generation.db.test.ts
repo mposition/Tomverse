@@ -310,6 +310,27 @@ const enableImageGeneration = () =>
     data: { key: "feature.imageGenerationEnabled", value: "true" },
   });
 
+/**
+ * A single-model OpenAI Draft request.
+ *
+ * Named for what it is rather than for what it looks like: the defaults below
+ * are a fixture -- `quality: "low"`, one OpenAI target, 15 credits, an 11,000
+ * microUSD hold -- and several tests assert those exact numbers, so they are a
+ * contract this helper carries rather than incidental values.
+ *
+ * **A multi-model test must state its own `quality` and `size`.** Two of the
+ * three active models sell 1K square at Standard only, so a comparison that
+ * inherits `low` is refused for an unpriceable model rather than for whatever
+ * it meant to test. Raising the default to `medium` would break the Draft
+ * assertions and would not stay safe: the tiers three models happen to share
+ * today is a coincidence, not a rule the next model has to honour.
+ *
+ * The intended split is `openAiDraftRequestInput()` for the Draft-pricing
+ * tests and a `comparisonRequestInput()` that takes `modelIds`, `quality` and
+ * `size` as required arguments, with a real `Partial<>` of the request type in
+ * place of the `Record<string, unknown>` cast below. Left as its own change so
+ * this one does not move assertions while it moves fixtures.
+ */
 const requestInput = (userId: string, overrides: Record<string, unknown> = {}) =>
   ({
     userId,
@@ -859,4 +880,132 @@ test("a non-OpenAI reservation charges its own provider budget, and only its own
   // can reach: the settlement true-up that produced it runs only on success,
   // and success needs a provider response this suite has no seam to fake.
   assert.equal(await budgetFor("openai"), 0);
+});
+
+/* ------------------------------------------------------------------------- */
+/* Model selection limit: admission is the boundary, whatever the UI offered. */
+/* ------------------------------------------------------------------------- */
+
+/**
+ * `imageGroupMaxModels()` reads `process.env` at call time, so a test sets the
+ * variable around the call rather than at import. Restored afterwards so the
+ * limit does not leak into the tests that follow.
+ */
+const withGroupMaxModels = async <T,>(
+  value: string,
+  run: () => Promise<T>
+): Promise<T> => {
+  const previous = process.env.IMAGE_GROUP_MAX_MODELS;
+  process.env.IMAGE_GROUP_MAX_MODELS = value;
+  try {
+    return await run();
+  } finally {
+    if (previous === undefined) delete process.env.IMAGE_GROUP_MAX_MODELS;
+    else process.env.IMAGE_GROUP_MAX_MODELS = previous;
+  }
+};
+
+test("three models at a limit of two are refused before any row exists", async () => {
+  await enableImageGeneration();
+  const user = await createUser();
+
+  await withGroupMaxModels("2", async () => {
+    await assert.rejects(
+      requestImageGeneration(
+        requestInput(user.id, {
+          // Stated, not inherited. `requestInput` defaults to `low`, where
+          // Grok and Nano Banana 2 have no price at all, so the group would be
+          // refused for an unpriceable model instead of for the limit -- the
+          // same 400 for a different reason, which is exactly the confusion
+          // this test exists to rule out. `size` is spelled out for the same
+          // reason: a multi-model test must not inherit a tier from a fixture
+          // built for a single-model one, even when the values agree today.
+          quality: "medium",
+          size: "1024x1024",
+          modelIds: [
+            "gpt-image-2",
+            "grok-imagine-image-quality-20260403",
+            "fal-ai/nano-banana-2",
+          ],
+        })
+      ),
+      (error: unknown) => {
+        const refusal = error as {
+          status: number;
+          code: string;
+          details: { maxModels: number; requestedModels: number };
+        };
+        assert.equal(refusal.status, 400);
+        assert.equal(refusal.code, "IMAGE_MODEL_SELECTION_INVALID");
+        // The client renders the limit from this, so it is part of the
+        // contract rather than debug detail.
+        assert.equal(refusal.details.maxModels, 2);
+        assert.equal(refusal.details.requestedModels, 3);
+        return true;
+      }
+    );
+  });
+
+  // Refused before anything was created or charged: a rejected group must
+  // leave no row and no cost, not a cancelled one.
+  assert.equal(await prisma.imageGenerationGroup.count(), 0);
+  assert.equal(await prisma.imageGenerationTarget.count(), 0);
+  assert.equal(await prisma.imageGeneration.count(), 0);
+  assert.equal(await prisma.imageCreditReservation.count(), 0);
+  const budgets = await prisma.chatUsageBucket.findMany({
+    where: { key: { startsWith: "image-provider:" } },
+  });
+  assert.deepEqual(budgets, []);
+});
+
+test("three models at a limit of three fan out as one group of three", async () => {
+  await enableImageGeneration();
+  const user = await createUser();
+  const modelIds = [
+    "gpt-image-2",
+    "grok-imagine-image-quality-20260403",
+    "fal-ai/nano-banana-2",
+  ];
+
+  const result = await withGroupMaxModels("3", () =>
+    // Both option fields stated for the same reason as above: Grok and Nano
+    // Banana 2 price 1K square at Standard only, and all-or-nothing admission
+    // refuses a group whose second model cannot be priced.
+    requestImageGeneration(
+      requestInput(user.id, {
+        quality: "medium",
+        size: "1024x1024",
+        modelIds,
+      })
+    )
+  );
+
+  assert.equal(result.targets.length, 3);
+  const targets = await prisma.imageGenerationTarget.findMany({
+    where: { groupId: result.groupId },
+  });
+  assert.equal(targets.length, 3);
+  assert.deepEqual(
+    targets.map((target) => target.modelId).sort(),
+    [...modelIds].sort()
+  );
+
+  const reservations = await prisma.imageCreditReservation.findMany({
+    where: { generationId: { in: result.targets.map((t) => t.generationId) } },
+  });
+  assert.equal(reservations.length, 3);
+  // All-or-nothing admission means the quoted total is the sum of the parts,
+  // with no target admitted at a price the caller was not told.
+  assert.equal(
+    result.reservedCredits,
+    result.targets.reduce((sum, target) => sum + target.reservedCredits, 0)
+  );
+  // Each provider's budget carries its own hold; none borrows another's.
+  const budgets = await prisma.chatUsageBucket.findMany({
+    where: { key: { startsWith: "image-provider:" }, period: "provider-cost-day" },
+  });
+  assert.deepEqual(
+    budgets.map((row) => row.key).sort(),
+    ["image-provider:fal", "image-provider:openai", "image-provider:xai"]
+  );
 });
