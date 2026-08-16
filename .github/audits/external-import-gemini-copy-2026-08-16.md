@@ -15,7 +15,7 @@ canonical provider 집합과 어긋나 있는지 확인하고, 확실한 누락�
 | 정본 | `lib/externalImportProviders.ts`의 `EXTERNAL_IMPORT_PROVIDERS` = `chatgpt`, `claude`, `gemini` |
 | 상위 정책 | `docs/policy/external-conversation-import-and-memory.md` |
 | 설계 | `docs/policy/external-import-gemini-a2.md` |
-| production 활성화 | **금지 유지** (A2 §10 — staging 증거 + 별도 승인 대기) |
+| production 활성화 | **금지 유지** (A2 §10). 승인에 필요한 것은 §9.1 |
 
 ## 1. 전제 — "코드가 지원한다"와 "지금 쓸 수 있다"
 
@@ -96,9 +96,11 @@ Import와 무관하며 GPT·Claude·Gemini를 이미 정확히 언급합니다.
 **외부 대화 Import를 언급하는 공개 문구가 저장소에 하나도 없습니다.**
 
 - homepage·landing·feature·FAQ·SEO metadata·OG·structured data 전부 해당 없음
-- `lib/marketingMemoryClaims.ts`가 정의한 `marketingMemory` locale namespace가
-  **아직 존재하지 않습니다** — 즉 §17이 허용하는 5개 claim 중 어느 것도
-  번역되어 있지 않고, 어떤 페이지도 Import·memory를 주장하지 않습니다.
+- `lib/marketingMemoryClaims.ts`의 registry(namespace 상수·허용 claim·고지)는
+  **있지만**, 그 namespace의 **locale dictionary가 7개 언어 어디에도
+  없습니다**(`grep marketingMemory locales/*.ts` → 0건). 즉 §17이 허용하는
+  claim 중 어느 것도 번역돼 있지 않고, 어떤 페이지도 Import·memory를
+  주장하지 않습니다. 자세한 구분은 §8.1.
 
 이것이 현재로선 올바른 상태이므로 **아무것도 추가하지 않았습니다.** SEO
 keyword를 늘리려고 무관한 위치에 Gemini를 넣지도 않았습니다.
@@ -160,7 +162,7 @@ flag가 없다**는 사실을 명시했습니다.
 | 대상 | 이유 |
 |---|---|
 | homepage·SEO에 Import 소개 신설 | 활성화 미승인. 지원 구현과 현재 이용 가능성을 혼동하게 됨 |
-| `marketingMemory` namespace 신설 | 같음. §17은 claim id 등록이 선행 |
+| `marketingMemory` locale dictionary 작성 | 같음. 더해서 §8.2의 고지 범위 결정이 선행 |
 | ChatGPT vs Claude 비교 페이지 | Import와 무관 |
 | landing의 "비회원 대화 가져오기" | 별개 기능 (정책 §21) |
 | A2 설계 문서·staging 기록 | 역사적 사실 |
@@ -245,29 +247,90 @@ provider가 추가되면 **컴파일 단계에서 먼저** 걸립니다. 위 테
 > ChatGPT, Claude, Gemini의 공식 데이터 내보내기 파일을 올리고, 내용을 확인한
 > 뒤 Tomverse 계정에 보관할 대화를 선택하세요.
 
-## 8. 활성화 승인과 동시에 반영해야 할 문구
+## 8. 마케팅 공개 — 누락이 아니라 의도적으로 분리된 결정
 
-**아직 만들지 않았습니다.** 활성화가 승인되는 변경과 한 묶음으로 배포해야
-합니다.
+§2.5가 확인한 "공개 문구 없음"을 **해야 할 일이 밀린 상태로 읽지 않습니다.**
+운영 활성화와 마케팅 론치는 별개 결정이고, 지금은 의도적으로 분리돼 있습니다.
+Import를 조용히 활성화하고 homepage·SEO를 그대로 두는 선택이 가능하며, 그것이
+현재 기본값입니다.
 
-1. `marketingMemory` locale namespace 신설 — `ALLOWED_MEMORY_CLAIMS` 중 실제로
-   쓸 claim의 번역. **claim id 등록이 선행**이며, 등록되지 않은 문장은 어떤
-   locale에도 번역으로 들어갈 수 없습니다(§17 구조 규칙).
-2. `MEMORY_MARKETING_DISCLOSURE`(`modelDifferenceNotice`)를 그 claim과 **함께**
-   배치. 없이 claim만 내보내면 다른 서비스의 답변을 재현한다는 무조건부 약속이
-   됩니다.
-3. 그 namespace를 쓰는 landing 영역과 SEO metadata. 7 locale 동시.
-4. 공개 문구를 넣는 순간 `tests/marketingMemoryClaims.test.mjs`의 disclosure
-   규칙이 그 파일에 적용됩니다.
+### 8.1 이미 있는 것과 없는 것
+
+초판은 "namespace 신설과 claim id 등록이 선행"이라고 적었는데 **틀렸습니다.**
+registry 쪽은 이미 갖춰져 있습니다.
+
+| 항목 | 상태 |
+|---|---|
+| `MEMORY_MARKETING_NAMESPACE = "marketingMemory"` | `lib/marketingMemoryClaims.ts`에 **있음** |
+| `importPastConversations` claim id | `ALLOWED_MEMORY_CLAIMS`에 **있음** |
+| `MEMORY_MARKETING_DISCLOSURE` (ko/en) | **있음** |
+| 7개 locale의 `marketingMemory` dictionary | **없음** |
+| 그 dictionary를 쓰는 landing·SEO 콘텐츠 | **없음** |
+
+즉 남은 것은 **번역과 콘텐츠**입니다. 새 claim id는 `importPastConversations`
+보다 **범위가 넓거나 의미가 다른** 주장을 할 때만 필요합니다.
+
+### 8.2 먼저 정해야 하는 것 — §17 고지의 범위
+
+문구를 쓰기 전에 걸리는 문제가 있습니다.
+
+`claimsImportOrMemory()`는 "과거 대화"·"past conversations"·provider+가져오기를
+모두 잡으므로, **import만 주장하는 문구에도 §17 고지가 요구됩니다.** 그런데
+현행 `MEMORY_MARKETING_DISCLOSURE`는 이렇게 시작합니다.
+
+> 과거 대화의 맥락과 **사용자가 승인한 기억·답변 스타일**을 참고합니다. …
+
+이것은 Release B 성격의 주장입니다. memory 추출·주입이 꺼져 있는 Release A
+상태에서 import-only 문구 옆에 이 고지를 그대로 붙이면, 고지가 오히려 **하지
+않는 일을 설명**하게 됩니다. §17이 막으려던 과장이 고지 쪽에서 발생합니다.
+
+따라서 마케팅을 공개하기 전에 정합니다 — **§17을 `import-only` 주장과
+`memory personalization` 주장으로 분리할지.** 분리한다면 각 주장에 맞는 고지가
+따로 필요하고, 분리하지 않는다면 memory가 켜지기 전까지 마케팅을 내지
+않는다는 뜻입니다.
+
+### 8.3 공개하기로 정했다면
+
+registry·7개 locale·landing·SEO·정적 테스트를 **한 변경으로** 적용합니다.
+`tests/marketingMemoryClaims.test.mjs`의 disclosure 규칙이 문구를 넣는 순간
+그 파일에 적용되므로, 절반만 반영한 상태는 CI에서 멈춥니다.
 
 ## 9. 사람이 정해야 하는 것
 
-1. **production 활성화.** `docs/ops/external-import-staging-checklist.md`의 H·H2절을
-   실제 Takeout으로 실행하고 `docs/ops/staging-verification-records/`에 기록한 뒤,
-   그 기록을 근거로 승인합니다. 저장소의 fixture는 합성이므로 테스트 통과는
-   staging 증거가 아닙니다(A2 §10). 2026-08-04 기록은 A2를 덮지 않습니다 —
-   Gemini import가 존재하기 전의 실행입니다.
-2. **활성화 시 공개 마케팅을 낼지, 낸다면 어떤 claim으로.** §8의 1번은 문구
-   작업이 아니라 registry 등록 결정입니다.
-3. 이 감사는 위 어느 것도 승인하지 않았고, flag·운영 설정·migration·정책
-   승인 필드를 변경하지 않았습니다.
+### 9.1 production 활성화
+
+**H·H2만 실행한 기록으로는 승인할 수 없습니다.** flag가 하나뿐이라 그것을
+켜는 것은 Gemini rollout이 아니라 **외부 import 전체의 최초 production
+공개**입니다. 근거는 다음을 모두 충족해야 합니다.
+
+- 실제 활성화 대상의 정확한 **40자리 SHA**
+- 동일한 **migration 집합**과 배포 artifact / deployment ID
+- **사전 조건 + A~H/H2 전체** 실행 (H는 D절 XSS 항목을 참조하므로 단독 분리
+  불가)
+- **실제 export / Takeout** 사용 — 저장소 fixture는 합성이며 테스트 통과는
+  staging 증거가 아닙니다
+- 실행자·승인자 **서명과 기록 동결**, `docs/ops/staging-verification-records/`에
+  저장
+
+H·H2 단독 실행은 `runType: exploratory`로 남기며 Gemini 구현 확인에는
+충분하지만 production 승인 근거로 인용할 수 없고, 미실행 항목은 `미기록`으로
+둡니다.
+
+> **이 계약의 정본은 `docs/ops/external-import-staging-checklist.md`의 H절
+> 서두이며, 2026-08-16 기준으로 그 문단은 `develop`에만 있습니다**(`cf9b1f1`
+> "verify an activation candidate SHA, not a branch"). `main`의 체크리스트는
+> 아직 233줄판이라 이 요구가 없습니다. 그래서 여기에 참조가 아니라 요구
+> 자체를 적어 둡니다 — main만 읽는 사람이 참조를 따라가면 없는 문단에
+> 도달합니다. 두 branch가 합류하면 이 각주는 지워도 됩니다.
+
+2026-08-04 기록은 A2를 덮지 않습니다 — Gemini import가 존재하기 전의
+실행이고, 기록 자체가 전 항목 `미기록`이라고 적고 있습니다.
+
+### 9.2 마케팅 론치
+
+§8.2의 분리 결정이 먼저입니다. 활성화와 같은 시점일 필요가 없습니다.
+
+### 9.3 이 감사가 하지 않은 것
+
+위 어느 것도 승인하지 않았고, flag·운영 설정·migration·정책 승인 필드를
+변경하지 않았습니다.
