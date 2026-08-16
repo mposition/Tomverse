@@ -310,6 +310,27 @@ const enableImageGeneration = () =>
     data: { key: "feature.imageGenerationEnabled", value: "true" },
   });
 
+/**
+ * A single-model OpenAI Draft request.
+ *
+ * Named for what it is rather than for what it looks like: the defaults below
+ * are a fixture -- `quality: "low"`, one OpenAI target, 15 credits, an 11,000
+ * microUSD hold -- and several tests assert those exact numbers, so they are a
+ * contract this helper carries rather than incidental values.
+ *
+ * **A multi-model test must state its own `quality` and `size`.** Two of the
+ * three active models sell 1K square at Standard only, so a comparison that
+ * inherits `low` is refused for an unpriceable model rather than for whatever
+ * it meant to test. Raising the default to `medium` would break the Draft
+ * assertions and would not stay safe: the tiers three models happen to share
+ * today is a coincidence, not a rule the next model has to honour.
+ *
+ * The intended split is `openAiDraftRequestInput()` for the Draft-pricing
+ * tests and a `comparisonRequestInput()` that takes `modelIds`, `quality` and
+ * `size` as required arguments, with a real `Partial<>` of the request type in
+ * place of the `Record<string, unknown>` cast below. Left as its own change so
+ * this one does not move assertions while it moves fixtures.
+ */
 const requestInput = (userId: string, overrides: Record<string, unknown> = {}) =>
   ({
     userId,
@@ -830,12 +851,15 @@ test("three models at a limit of two are refused before any row exists", async (
     await assert.rejects(
       requestImageGeneration(
         requestInput(user.id, {
-          // Standard: the only tier all three price. `requestInput` defaults
-          // to `low`, where Grok and Nano Banana 2 have no price at all, and
-          // the group would then be refused for an unpriceable model instead
-          // of for the limit -- the same 400 for a different reason, which is
-          // exactly the confusion this test exists to rule out.
+          // Stated, not inherited. `requestInput` defaults to `low`, where
+          // Grok and Nano Banana 2 have no price at all, so the group would be
+          // refused for an unpriceable model instead of for the limit -- the
+          // same 400 for a different reason, which is exactly the confusion
+          // this test exists to rule out. `size` is spelled out for the same
+          // reason: a multi-model test must not inherit a tier from a fixture
+          // built for a single-model one, even when the values agree today.
           quality: "medium",
+          size: "1024x1024",
           modelIds: [
             "gpt-image-2",
             "grok-imagine-image-quality-20260403",
@@ -882,10 +906,16 @@ test("three models at a limit of three fan out as one group of three", async () 
   ];
 
   const result = await withGroupMaxModels("3", () =>
-    // Standard for the same reason as above: Grok and Nano Banana 2 price 1K
-    // square at `medium` only, and all-or-nothing admission refuses a group
-    // whose second model cannot be priced.
-    requestImageGeneration(requestInput(user.id, { quality: "medium", modelIds }))
+    // Both option fields stated for the same reason as above: Grok and Nano
+    // Banana 2 price 1K square at Standard only, and all-or-nothing admission
+    // refuses a group whose second model cannot be priced.
+    requestImageGeneration(
+      requestInput(user.id, {
+        quality: "medium",
+        size: "1024x1024",
+        modelIds,
+      })
+    )
   );
 
   assert.equal(result.targets.length, 3);
