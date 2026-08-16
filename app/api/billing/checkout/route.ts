@@ -27,6 +27,7 @@ import {
   type PromotionRiskFlag,
 } from "@/lib/billingPromotionSecurity";
 import {
+  promotionCurrencyFailure,
   promotionDiscountedMinor,
   promotionValidationError,
 } from "@/lib/billingPromotionCore";
@@ -467,6 +468,7 @@ export async function POST(req: Request) {
         code: promoCode,
         planId: planId as BillingPlanId,
         billingInterval,
+        currency: market.currency,
         userId: user.id,
         request: req,
       });
@@ -487,17 +489,22 @@ export async function POST(req: Request) {
       promotionRiskFlags = promotionValidation.riskFlags;
     }
 
+    // Fail closed, a second time, from the same pure predicate the validation
+    // above already ran. Unreachable while both agree, which is the point: a
+    // forged request that skipped the validate endpoint, or a future edit that
+    // loosens it, still stops here -- before Stripe is called, before the
+    // promotion lease is taken, before any redemption exists.
     if (
-      market.currency !== "USD" &&
-      appliedPromotion?.discountAmountCents &&
-      appliedPromotion.discountPercent <= 0
+      appliedPromotion &&
+      promotionCurrencyFailure({
+        promotion: appliedPromotion,
+        currency: market.currency,
+      })
     ) {
+      const currencyError = promotionValidationError("currency_not_supported");
       return NextResponse.json(
-        {
-          error:
-            "Fixed-amount promotion codes are currently available only for USD checkout. Use a percentage promotion for localized billing.",
-        },
-        { status: 400 }
+        { code: currencyError.code, error: currencyError.message },
+        { status: currencyError.status }
       );
     }
 

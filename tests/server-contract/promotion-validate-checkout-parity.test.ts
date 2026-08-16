@@ -84,13 +84,17 @@ const request = () =>
     headers: { "x-forwarded-for": "203.0.113.7" },
   });
 
-const validate = async (overrides: Partial<typeof HEALTHY> = {}) => {
+const validate = async (
+  overrides: Partial<typeof HEALTHY> = {},
+  currency: import("../../lib/billingMarkets").BillingCurrency = "USD"
+) => {
   const { validatePromotionForCheckout } = await loadValidator();
   promotionRow = { ...HEALTHY, ...overrides };
   return validatePromotionForCheckout({
     code: "EDDIEFRIEND100",
     planId: "pro",
     billingInterval: "monthly",
+    currency,
     userId: null,
     request: request(),
     now: NOW,
@@ -166,10 +170,88 @@ test("an unknown code is still just invalid", async () => {
     code: "NOPE",
     planId: "pro",
     billingInterval: "monthly",
+    currency: "USD",
     userId: null,
     request: request(),
     now: NOW,
   });
   assert.equal(result.valid, false);
   assert.equal(result.valid === false ? result.reason : null, "invalid");
+});
+
+/* -------------------------------------------------------------------------- */
+/* Currency                                                                    */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * The second shape of the same defect, and the one that reached a customer.
+ *
+ * `PAYMENTTEST27` is a $14 fixed-amount discount. Applied to Pro monthly in the
+ * AUD market it validated, the summary showed "-$14" and "A$1.33 due today",
+ * and the button answered "Fixed-amount promotion codes are currently available
+ * only for USD checkout." That refusal lived inside the checkout route, where
+ * validation could not reach it; the currency is now an argument both endpoints
+ * must supply, so there is one answer rather than two.
+ */
+
+const FIXED = {
+  discountPercent: 0,
+  discountAmountCents: 1400,
+} satisfies Partial<typeof HEALTHY>;
+
+test("a fixed-amount promotion is refused at validation in a non-USD market", async () => {
+  for (const currency of ["AUD", "CNY", "EUR", "KRW"] as const) {
+    const result = await validate(FIXED, currency);
+    assert.equal(result.valid, false, `${currency} should refuse`);
+    assert.equal(
+      result.valid === false ? result.reason : null,
+      "currency_not_supported"
+    );
+  }
+});
+
+test("the same fixed-amount promotion still validates for USD", async () => {
+  const result = await validate(FIXED, "USD");
+  assert.equal(result.valid, true);
+});
+
+test("a percentage promotion validates in every market Checkout supports", async () => {
+  // The other half of the invariant: the currency gate must not start refusing
+  // promotions Checkout would have taken. A percentage applies to whatever the
+  // local price is.
+  for (const currency of ["USD", "AUD", "CNY", "EUR", "KRW"] as const) {
+    const result = await validate({}, currency);
+    assert.equal(result.valid, true, `${currency} should validate`);
+  }
+});
+
+test("Checkout answers a non-USD fixed-amount promotion with the same status and code", async () => {
+  // Both endpoints render the refusal through `promotionValidationError`, so
+  // the customer cannot be told one thing by the summary and another by the
+  // button. This is the parity assertion; the route-level proof that Checkout
+  // refuses before Stripe, the lease and the redemption is in
+  // billing-checkout-promotion.test.ts.
+  const { promotionValidationError } = (await import(
+    mod("lib/billingPromotionCore.ts")
+  )) as typeof import("../../lib/billingPromotionCore");
+  const result = await validate(FIXED, "AUD");
+  assert.equal(result.valid, false);
+  const rendered = promotionValidationError(
+    result.valid === false ? result.reason : "invalid"
+  );
+  assert.equal(rendered.status, 400);
+  assert.equal(rendered.code, "PROMOTION_CURRENCY_NOT_SUPPORTED");
+});
+
+test("an internal pass is unaffected by the currency of the market", async () => {
+  const result = await validate(
+    {
+      fulfillmentType: "internal_pass",
+      accessDurationDays: 60,
+      durationMonths: 1,
+      appliesToPlanIds: ["pro"],
+    },
+    "AUD"
+  );
+  assert.equal(result.valid, true);
 });

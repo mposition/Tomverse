@@ -1,3 +1,5 @@
+import type { BillingCurrency } from "@/lib/billingMarkets";
+
 export type PromotionValidationReason =
   | "invalid"
   | "unavailable"
@@ -6,7 +8,66 @@ export type PromotionValidationReason =
   | "redemption_limit"
   | "plan_not_eligible"
   | "annual_not_allowed"
+  | "currency_not_supported"
   | "already_used";
+
+/**
+ * The billing currencies a fixed-amount promotion can be charged in.
+ *
+ * `BillingPromotion.discountAmountCents` is a USD amount and nothing in the
+ * schema says otherwise, so USD is the only currency in which the stored number
+ * means what it says. Charging it against A$20.00 would be subtracting fourteen
+ * of one currency from twenty of another.
+ *
+ * Widening this is a product and finance decision, not a code change: it needs
+ * per-currency discount amounts, an admin surface that captures them, Stripe
+ * coupon `currency_options` provisioning and reconciliation, and a webhook
+ * amount check that knows about both. Until then the honest answer to "can this
+ * code be used here" is no, given early enough that nobody is shown a price
+ * that will not be charged.
+ */
+export const FIXED_AMOUNT_PROMOTION_CURRENCIES: readonly BillingCurrency[] = [
+  "USD",
+];
+
+type PromotionCurrencyInput = {
+  discountPercent: number;
+  discountAmountCents: number | null;
+  fulfillmentType?: string | null;
+};
+
+/**
+ * Whether this promotion can be charged in this currency.
+ *
+ * Pure, and the only place the rule lives. It used to exist as an inline
+ * refusal inside the checkout route, which is why validation could return
+ * `valid: true` for an AUD checkout that the button would then reject: the
+ * order summary was built from an answer nothing had asked the currency
+ * question of.
+ *
+ * A percentage applies to whatever the local price is, so it is allowed
+ * everywhere. An internal pass never becomes a Stripe coupon at all -- it is
+ * fulfilled by granting an access period -- so the rule does not apply to it.
+ */
+export const promotionCurrencyFailure = ({
+  promotion,
+  currency,
+}: {
+  promotion: PromotionCurrencyInput;
+  currency: BillingCurrency;
+}): "currency_not_supported" | null => {
+  if (promotion.fulfillmentType === "internal_pass") return null;
+  if (promotion.discountPercent > 0) return null;
+  if (!promotion.discountAmountCents || promotion.discountAmountCents <= 0) {
+    // Not a fixed-amount promotion either. `promotionEligibilityFailure()`
+    // already refuses a promotion that discounts nothing; answering
+    // "currency" here would relabel that failure.
+    return null;
+  }
+  return FIXED_AMOUNT_PROMOTION_CURRENCIES.includes(currency)
+    ? null
+    : "currency_not_supported";
+};
 
 type PromotionEligibilityInput = {
   isActive: boolean;
@@ -129,6 +190,17 @@ export const promotionValidationError = (reason: PromotionValidationReason) => {
         status: 400,
         code: "PROMOTION_ANNUAL_NOT_ALLOWED",
         message: "This promotion can only be used with monthly billing.",
+      };
+    case "currency_not_supported":
+      // Its own code rather than PROMOTION_UNAVAILABLE: this one has an action
+      // attached to it -- use a percentage code -- and the client localises by
+      // code. Folding it into the generic refusal would leave the customer with
+      // "not currently available" for a code that is available, just not here.
+      return {
+        status: 400,
+        code: "PROMOTION_CURRENCY_NOT_SUPPORTED",
+        message:
+          "Fixed-amount promotion codes are currently available only for USD checkout. Use a percentage promotion for localized billing.",
       };
     case "unavailable":
       return {
