@@ -143,6 +143,15 @@ jobs:
             -m "Recorded by Record Visual Baseline, run ${{ github.run_id }}, on ubuntu-24.04 with the Chromium bundled with the pinned Playwright version. Reviewed and merged separately -- see the run's baseline-evidence artifact for the diff against the previous baseline."
           git push origin "$branch"
           echo "Pushed $branch"
+          # No `to-develop` segment, so Auto PR to Develop leaves this branch
+          # alone and opens nothing (scripts/auto-pr-branch-policy.mjs). That
+          # is the point: it used to open one and enable auto-merge on it, so a
+          # re-recorded golden could reach develop the moment checks went green
+          # -- and a golden that merges without anyone opening the diff is the
+          # baseline becoming whatever the last run rendered. The commit
+          # message above already says "reviewed and merged separately"; this
+          # is what makes that true.
+          echo "::notice::Open the pull request for $branch by hand after reviewing the baseline-evidence artifact for this run."
 
       - name: Upload the recording and its evidence
         if: always()

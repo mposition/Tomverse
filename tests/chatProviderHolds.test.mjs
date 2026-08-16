@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  attemptCostIntentProblems,
+  costIntentFor,
   deriveProviderEntries,
   providerHoldProblems,
   withoutAttemptHolds,
@@ -179,4 +181,248 @@ test("non-provider entries are none of this module's business", () => {
     { key: "user:abc", period: "day", periodStart: day, amount: 3 },
   ];
   assert.deepEqual(providerHoldProblems({ holds, entries }), []);
+});
+
+// A hold is one provider, one day, one month, both the same amount. The
+// looser rule these replace let every shape below through, and each leaves a
+// bucket that release cannot fully give back — release subtracts what the
+// holds say was put there.
+
+test("an attempt holding two providers is refused", () => {
+  const holds = [hold(0, "openai", "day", 10), hold(0, "google", "month", 10)];
+  assert.match(
+    providerHoldProblems({ holds, entries: entriesFor(holds) }).join(" "),
+    /holds 2 providers; an attempt runs on one/
+  );
+});
+
+test("a hold missing its month is refused", () => {
+  const holds = [hold(0, "openai", "day", 10)];
+  assert.match(
+    providerHoldProblems({ holds, entries: entriesFor(holds) }).join(" "),
+    /holds 0 provider-cost-month rows/
+  );
+});
+
+test("a hold missing its day is refused", () => {
+  const holds = [hold(0, "openai", "month", 10)];
+  assert.match(
+    providerHoldProblems({ holds, entries: entriesFor(holds) }).join(" "),
+    /holds 0 provider-cost-day rows/
+  );
+});
+
+test("day and month holding different amounts is refused", () => {
+  // They are one reservation seen through two windows, so they cannot differ.
+  const holds = [hold(0, "openai", "day", 10), hold(0, "openai", "month", 40)];
+  assert.match(
+    providerHoldProblems({ holds, entries: entriesFor(holds) }).join(" "),
+    /the day and month holds are the same reservation/
+  );
+});
+
+test("two well-formed attempts on one provider are still accepted", () => {
+  // The rules are per attempt, not per provider: sharing a bucket is the
+  // normal same-provider fallback and must not be caught by them.
+  const holds = [...pair(0, "openai", 100), ...pair(1, "openai", 40)];
+  assert.deepEqual(providerHoldProblems({ holds, entries: entriesFor(holds) }), []);
+});
+
+// The cost intent beside each hold. Its whole job is to survive the process
+// that took it, so what matters is that it cannot drift from the holds it was
+// written with -- an intent with no hold would let a crash record a cost
+// against budget nobody reserved.
+
+const intent = (attemptIndex, provider = "openai", reserved = 100) => ({
+  attemptIndex,
+  modelId: `${provider}-model`,
+  provider,
+  estimatedInputTokens: 1_000,
+  reservedOutputTokens: 1_000,
+  inputUsdPerMillionTokens: 100,
+  outputUsdPerMillionTokens: 100,
+  cachedInputPriceMultiplier: 1,
+  pricingVersion: "test",
+  reservedCostMicroUsd: reserved,
+});
+
+test("an intent for every hold, and a hold for every intent, is accepted", () => {
+  const holds = [...pair(0, "openai", 100), ...pair(1, "google", 40)];
+  assert.deepEqual(
+    attemptCostIntentProblems({
+      holds,
+      intents: [intent(0, "openai", 100), intent(1, "google", 40)],
+    }),
+    []
+  );
+});
+
+test("a positive intent with no hold is refused", () => {
+  // It says money was authorized, with nothing in the bucket to show for it.
+  assert.match(
+    attemptCostIntentProblems({
+      holds: pair(0, "openai", 100),
+      intents: [intent(0), intent(1, "google", 40)],
+    }).join(" "),
+    /attempt 1 authorized 40 and holds no provider-cost-day or provider-cost-month/
+  );
+});
+
+test("a positive intent holding only one of the two periods is refused", () => {
+  // Release subtracts what the holds say was put there, so a missing period
+  // would give back less than was taken.
+  assert.match(
+    attemptCostIntentProblems({
+      holds: [hold(0, "openai", "day", 100)],
+      intents: [intent(0, "openai", 100)],
+    }).join(" "),
+    /holds no provider-cost-month/
+  );
+});
+
+test("a zero intent with no hold is the normal shape of a free turn", () => {
+  // The two answer different questions: an intent is what was authorized, a
+  // hold is money in a bucket, and zero authorized puts none there. Requiring
+  // a hold here is what used to leave a free turn indistinguishable from one
+  // that lost its authorization.
+  assert.deepEqual(
+    attemptCostIntentProblems({
+      holds: [],
+      intents: [intent(0, "openai", 0)],
+    }),
+    []
+  );
+});
+
+test("a zero intent that holds a bucket anyway is refused", () => {
+  // Money reserved against an authorization that says none was.
+  assert.match(
+    attemptCostIntentProblems({
+      holds: pair(0, "openai", 100),
+      intents: [intent(0, "openai", 0)],
+    }).join(" "),
+    /attempt 0 authorized nothing and holds 2 bucket\(s\)/
+  );
+});
+
+test("a hold with no intent is refused", () => {
+  // The one combination that can never be reconstructed: the bucket moved and
+  // nothing says why.
+  assert.match(
+    attemptCostIntentProblems({
+      holds: [...pair(0, "openai", 100), ...pair(1, "google", 40)],
+      intents: [intent(0)],
+    }).join(" "),
+    /attempt 1 has a hold and no cost intent/
+  );
+});
+
+test("two intents for one attempt are refused", () => {
+  assert.match(
+    attemptCostIntentProblems({
+      holds: pair(0, "openai", 100),
+      intents: [intent(0), intent(0, "google", 40)],
+    }).join(" "),
+    /two cost intents share an attemptIndex/
+  );
+});
+
+test("no holds and no intents is not a problem", () => {
+  // A turn that reserved no provider budget -- a zero-rate model -- takes
+  // neither, and neither is missing.
+  assert.deepEqual(attemptCostIntentProblems({ holds: [], intents: [] }), []);
+});
+
+test("an attempt's intent is found by its index, and a missing one is null", () => {
+  const intents = [intent(0), intent(1, "google", 40)];
+  assert.equal(costIntentFor(intents, 1).provider, "google");
+  assert.equal(costIntentFor(intents, 2), null);
+  // A payload written before intents existed carries none at all, and the
+  // sweep has to read that as "cannot be priced" rather than crash.
+  assert.equal(costIntentFor(undefined, 0), null);
+});
+
+// The native-search authorization, stored on the attempt's own intent because
+// it is a contract with one dispatched attempt: a fallback runs a different
+// model at a different provider, with its own rate and its own ceiling.
+
+const searchIntent = (attemptIndex, reserved, search) => ({
+  ...intent(attemptIndex, "anthropic", reserved),
+  nativeSearchAuthorization: search,
+});
+
+test("an authorization whose parts do not make its total is refused", () => {
+  // 5 queries at 10,000 is 50,000, not 40,000. An authorization nobody can
+  // recompute is one nobody can audit.
+  assert.match(
+    attemptCostIntentProblems({
+      holds: pair(0, "anthropic", 100),
+      intents: [
+        searchIntent(0, 100, {
+          reservedCostMicroUsd: 40_000,
+          costPerQueryMicroUsd: 10_000,
+          maxQueries: 5,
+        }),
+      ],
+    }).join(" "),
+    /authorized 40000 for search but 5 queries at 10000 is 50000/
+  );
+});
+
+test("a reservation total that is not tokens plus search is refused", () => {
+  // The hold put `reservedCostMicroUsd` in the bucket, and it has to be the
+  // sum of what the two halves authorized.
+  const tokens =
+    Math.ceil(1_000 * 100) + Math.ceil(1_000 * 100);
+  assert.match(
+    attemptCostIntentProblems({
+      holds: pair(0, "anthropic", tokens),
+      intents: [
+        {
+          ...searchIntent(0, tokens, {
+            reservedCostMicroUsd: 50_000,
+            costPerQueryMicroUsd: 10_000,
+            maxQueries: 5,
+          }),
+          estimatedInputTokens: 1_000,
+          reservedOutputTokens: 1_000,
+          inputUsdPerMillionTokens: 100,
+          outputUsdPerMillionTokens: 100,
+        },
+      ],
+    }).join(" "),
+    /is not 200000 of tokens plus 50000 of search/
+  );
+});
+
+test("an authorization that adds up is accepted", () => {
+  const tokens = Math.ceil(1_000 * 100) + Math.ceil(1_000 * 100);
+  const total = tokens + 50_000;
+  assert.deepEqual(
+    attemptCostIntentProblems({
+      holds: pair(0, "anthropic", total),
+      intents: [
+        {
+          ...searchIntent(0, total, {
+            reservedCostMicroUsd: 50_000,
+            costPerQueryMicroUsd: 10_000,
+            maxQueries: 5,
+          }),
+          estimatedInputTokens: 1_000,
+          reservedOutputTokens: 1_000,
+          inputUsdPerMillionTokens: 100,
+          outputUsdPerMillionTokens: 100,
+        },
+      ],
+    }),
+    []
+  );
+});
+
+test("an intent with no search authorization is unaffected by the new rule", () => {
+  const holds = pair(0, "openai", 100);
+  assert.deepEqual(
+    attemptCostIntentProblems({ holds, intents: [intent(0, "openai", 100)] }),
+    []
+  );
 });

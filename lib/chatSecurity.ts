@@ -51,6 +51,9 @@ import {
 import {
     MAX_ATTEMPT_INDEX,
     PROVIDER_BUCKET_PREFIX,
+    attemptCostIntentProblems,
+    costIntentFor,
+    type AttemptCostIntent,
     PROVIDER_BUDGET_PERIODS,
     deriveProviderEntries,
     providerBucketKey,
@@ -67,7 +70,18 @@ import {
 import { recordChatLimitDecision } from "@/lib/chatLimitDecisions";
 import { isWebSearchMode, type WebSearchMode } from "@/lib/appDefaults";
 import { getAnonymousClientKey } from "@/lib/clientIp";
-import { recordInternalProviderUsage } from "@/lib/providerUsageAccounting";
+import {
+    NATIVE_SEARCH_AUTHORIZATION_CUTOVER_ENV,
+    missingAuthorizationIsADefect,
+    recordSearchQueryCeilingBreach,
+    settledNativeSearchCost,
+} from "@/lib/webSearchNativeCostReservation";
+import {
+    boundedProviderIdentifier,
+    recordAttemptCost,
+    rollupDayOf,
+    type LedgerAttempt,
+} from "@/lib/chatAttemptCostLedger";
 import {
     AddOnCreditError,
     reserveAddOnCredits,
@@ -169,6 +183,18 @@ export type ChatBudget = {
     inputUsdPerMillionTokens: number;
     outputUsdPerMillionTokens: number;
     cachedInputPriceMultiplier: number;
+    /**
+     * The worst case this turn's native web search may cost, reserved before
+     * dispatch. Zero unless a paid native search is attached.
+     *
+     * Its own field rather than folded into the token rates: it is charged per
+     * query and not per token, and settlement has to be able to release the
+     * unused part of it separately.
+     */
+    nativeSearchReservedCostMicroUsd: number;
+    /** The per-query rate and enforced ceiling the reservation was sized on. */
+    nativeSearchCostPerQueryMicroUsd: number;
+    nativeSearchMaxQueries: number;
     provider: AiModel["provider"];
     /** Which entry of lib/modelPricing.ts produced the rates above. */
     pricingVersion: string;
@@ -203,6 +229,31 @@ export type ChatUsageReservation = {
      * on those the entries stand as they always did.
      */
     attemptHolds?: AttemptHold[];
+    /**
+     * What each attempt was authorized to spend, and at what rates.
+     *
+     * Written beside the hold, before the provider is called, because a sweep
+     * that finds a crashed attempt half an hour later has no other way to know
+     * what the call was allowed to cost -- and 0 would be a claim that a call
+     * which happened used nothing.
+     */
+    attemptCostIntents?: AttemptCostIntent[];
+    /**
+     * The UTC day and month this turn's provider budget belongs to.
+     *
+     * Anchored once, when the reservation is created, and used by every later
+     * write -- a fallback's hold, and the settlement of a provider the
+     * reservation never held anything against. One logical response is charged
+     * to one period even when it crosses UTC midnight.
+     *
+     * Stored even when nothing is held. The period is part of the
+     * authorization, not something to reconstruct afterwards from whatever
+     * happens to be at hand: a user's `day` bucket is anchored to their
+     * account's own reckoning and can name a different day, and `createdAt` is
+     * the database's clock rather than the one the reservation was computed
+     * against.
+     */
+    providerBudgetPeriodStarts?: { day: Date; month: Date };
     usageCredits: number;
     inputTokens: number;
     maxOutputTokens: number;
@@ -257,6 +308,40 @@ const durableReservationPayloadSchema = z
                     .strict()
             )
             .max(8)
+            .optional(),
+        providerBudgetPeriodStarts: z
+            .object({
+                day: z.coerce.date(),
+                month: z.coerce.date(),
+            })
+            .strict()
+            .optional(),
+        attemptCostIntents: z
+            .array(
+                z
+                    .object({
+                        attemptIndex: z.number().int().min(0).max(MAX_ATTEMPT_INDEX),
+                        modelId: z.string().min(1).max(160),
+                        provider: z.string().min(1).max(80),
+                        estimatedInputTokens: z.number().int().nonnegative(),
+                        reservedOutputTokens: z.number().int().nonnegative(),
+                        inputUsdPerMillionTokens: z.number().nonnegative(),
+                        outputUsdPerMillionTokens: z.number().nonnegative(),
+                        cachedInputPriceMultiplier: z.number().min(0).max(1),
+                        pricingVersion: z.string().min(1).max(120).nullable().optional(),
+                        reservedCostMicroUsd: z.number().int().nonnegative(),
+                        nativeSearchAuthorization: z
+                            .object({
+                                reservedCostMicroUsd: z.number().int().nonnegative(),
+                                costPerQueryMicroUsd: z.number().int().nonnegative(),
+                                maxQueries: z.number().int().nonnegative(),
+                            })
+                            .strict()
+                            .optional(),
+                    })
+                    .strict()
+            )
+            .max(4)
             .optional(),
         usageCredits: z.number().int().positive(),
         inputTokens: z.number().int().nonnegative(),
@@ -344,7 +429,14 @@ export const deserializeReservation = (payload: Prisma.JsonValue) => {
         // authorization: an entry above its holds releases budget nobody
         // reserved, one below leaves a provider holding money for a call that
         // finished long ago.
-        const problems = providerHoldProblems({ holds: attemptHolds, entries });
+        const problems = [
+            ...providerHoldProblems({ holds: attemptHolds, entries }),
+            ...attemptCostIntentProblems({
+                holds: attemptHolds,
+                intents: parsed.attemptCostIntents ?? [],
+                periodStarts: parsed.providerBudgetPeriodStarts,
+            }),
+        ];
         if (problems.length > 0) {
             throw new Error(
                 `Chat reservation provider holds are inconsistent: ${problems.join(" ")}`
@@ -498,6 +590,14 @@ const microdollarsFor = (tokens: number, usdPerMillionTokens: number) =>
 export const getChatBudgetReservedTokens = (budget: ChatBudget) =>
     budget.inputTokens + budget.reservedOutputTokens;
 
+/**
+ * Everything this turn is authorized to spend at its provider.
+ *
+ * Tokens and native search both, because both are billed by the provider and
+ * both have to be inside the amount the provider budget checked before the
+ * request went out. The search half used to be added only at settlement, which
+ * meant the guardrail never saw it until the money was already gone.
+ */
 export const getChatBudgetReservedCostMicroUsd = (budget: ChatBudget) =>
     microdollarsFor(
         budget.inputTokens,
@@ -506,7 +606,8 @@ export const getChatBudgetReservedCostMicroUsd = (budget: ChatBudget) =>
     microdollarsFor(
         budget.reservedOutputTokens,
         budget.outputUsdPerMillionTokens
-    );
+    ) +
+    Math.max(0, budget.nativeSearchReservedCostMicroUsd || 0);
 
 export const createChatBudget = (
     kind: AccessKind,
@@ -528,6 +629,17 @@ export const createChatBudget = (
          * without it is what made searching requests settle above reservation.
          */
         nativeSearchEnabled?: boolean;
+        /**
+         * The worst case that search may cost, from
+         * `reserveNativeSearchCost`. The caller resolves it because refusing a
+         * search that cannot be bounded is a dispatch decision, not a pricing
+         * one -- this only carries the number into the reservation.
+         */
+        nativeSearch?: {
+            reservedCostMicroUsd: number;
+            costPerQueryMicroUsd: number;
+            maxQueries: number;
+        };
     }
 ): ChatBudget => {
     const maxInputTokens =
@@ -594,6 +706,11 @@ export const createChatBudget = (
         inputUsdPerMillionTokens: pricing.inputUsdPerMillionTokens,
         outputUsdPerMillionTokens: pricing.outputUsdPerMillionTokens,
         cachedInputPriceMultiplier: pricing.cachedInputPriceMultiplier,
+        nativeSearchReservedCostMicroUsd:
+            options?.nativeSearch?.reservedCostMicroUsd ?? 0,
+        nativeSearchCostPerQueryMicroUsd:
+            options?.nativeSearch?.costPerQueryMicroUsd ?? 0,
+        nativeSearchMaxQueries: options?.nativeSearch?.maxQueries ?? 0,
         provider: model.provider,
         pricingVersion: pricing.pricingVersion,
         costSource: pricing.costSource,
@@ -2918,9 +3035,18 @@ export const acquireChatAccess = async (
             }
         }
 
+        // Anchored before the hold, and regardless of whether one is taken.
+        // The period a turn's provider spend belongs to is decided when the
+        // turn is authorized, not when somebody later needs a date -- so a
+        // free primary that gets a paid fallback across UTC midnight still has
+        // one answer, and it is this one.
+        const providerBudgetPeriodStarts = {
+            day: periodStart("day", now),
+            month: periodStart("month", now),
+        };
         if (reservedCost > 0) {
             const providerKey = providerBucketKey(budget.provider);
-            const providerDayStart = periodStart("day", now);
+            const providerDayStart = providerBudgetPeriodStarts.day;
             const providerDayAllowed = await incrementUsage(
                 tx,
                 providerKey,
@@ -2955,7 +3081,7 @@ export const acquireChatAccess = async (
                 metric: "cost",
             });
 
-            const providerStart = periodStart("month", now);
+            const providerStart = providerBudgetPeriodStarts.month;
             const providerAllowed = await incrementUsage(
                 tx,
                 providerKey,
@@ -3028,6 +3154,7 @@ export const acquireChatAccess = async (
             // the primary's hold out of them would lose that entry the first
             // time a fallback added one of its own -- and settlement would
             // then release nothing for the provider that actually ran.
+            providerBudgetPeriodStarts,
             attemptHolds: reservationEntries
                 .filter((entry) => entry.key.startsWith(PROVIDER_BUCKET_PREFIX))
                 .map((entry) => ({
@@ -3037,6 +3164,42 @@ export const acquireChatAccess = async (
                     periodStart: entry.periodStart,
                     amount: entry.amount,
                 })),
+            // What attempt 0 was authorized to spend, and at what rates.
+            //
+            // Written for every dispatch, including one whose rates are all
+            // zero. The hold beside it is not: a hold is money put in a budget
+            // bucket, and zero authorized puts none there. Separating the two
+            // is what lets a crashed free turn still say what it was allowed
+            // to spend -- nothing -- instead of leaving a sweep to guess
+            // between "authorized nothing" and "lost its authorization".
+            attemptCostIntents: [
+                {
+                    attemptIndex: 0,
+                    modelId: budget.modelId,
+                    provider: budget.provider,
+                    estimatedInputTokens: budget.inputTokens,
+                    reservedOutputTokens: budget.reservedOutputTokens,
+                    inputUsdPerMillionTokens: budget.inputUsdPerMillionTokens,
+                    outputUsdPerMillionTokens: budget.outputUsdPerMillionTokens,
+                    cachedInputPriceMultiplier: budget.cachedInputPriceMultiplier,
+                    pricingVersion: budget.pricingVersion ?? null,
+                    reservedCostMicroUsd: reservedCost,
+                    // Frozen with the rest of the authorization, so settlement
+                    // prices the search this turn was allowed rather than the
+                    // one today's registry would sell.
+                    ...(budget.nativeSearchMaxQueries > 0
+                        ? {
+                              nativeSearchAuthorization: {
+                                  reservedCostMicroUsd:
+                                      budget.nativeSearchReservedCostMicroUsd,
+                                  costPerQueryMicroUsd:
+                                      budget.nativeSearchCostPerQueryMicroUsd,
+                                  maxQueries: budget.nativeSearchMaxQueries,
+                              },
+                          }
+                        : {}),
+                },
+            ],
             usageCredits: budget.usageCredits,
             inputTokens: budget.inputTokens,
             maxOutputTokens: budget.maxOutputTokens,
@@ -3163,6 +3326,21 @@ export const settleChatUsage = async (
     const multiAttempt = options?.attempts?.length
         ? combineAttemptUsage(options.attempts)
         : null;
+    // Raised after the commit: an alerting call inside a transaction holds a
+    // hot row and can fail the settlement it is reporting on.
+    // Holders rather than plain `let`, because these are assigned inside the
+    // transaction callback and TypeScript's flow analysis does not follow an
+    // assignment through a closure -- it would narrow the reads below to
+    // `never` and the reports would not compile.
+    const reported: {
+        searchCeilingBreach: {
+            provider: string;
+            observed: number;
+            authorized: number;
+            costMicroUsd: number;
+        } | null;
+        missingSearchAuthorization: { provider: string; queries: number } | null;
+    } = { searchCeilingBreach: null, missingSearchAuthorization: null };
     const settlement = await prisma.$transaction(async (tx) => {
         if (reservation.userId) {
             await lockCreditAccount(tx, reservation.userId);
@@ -3285,12 +3463,70 @@ export const settleChatUsage = async (
         // see lib/webSearchExecutionNormalizer.ts). Perplexity always takes
         // the providerUsageSnapshot branch above instead, so this stays 0
         // there and can never double-count its already-reported cost.
-        const searchCostMicroUsd = Math.max(
+        // What the search actually cost, priced at what was authorized.
+        //
+        // The caller's figure comes from the normalizer, which multiplies the
+        // observed query count by *today's* registry rate. Between dispatch
+        // and settlement that rate can change, and a turn settled at a price
+        // it was never authorized at is a snapshot principle broken in the one
+        // place it exists to hold. So when the reservation froze an
+        // authorization, the stored rate prices it.
+        //
+        // `queryCount` is the number of web-search tool results the provider
+        // returned -- the same unit it bills per use and the same unit
+        // Anthropic's `maxUses` bounds. Citations are counted separately and
+        // are deliberately not this.
+        const searchAuthorization = costIntentFor(
+            canonical.attemptCostIntents,
+            multiAttempt?.billedAttempt?.attemptIndex ?? 0
+        )?.nativeSearchAuthorization;
+        const observedSearchQueries = Math.max(
             0,
-            Number.isFinite(usage.searchCostMicroUsd)
-                ? Math.round(usage.searchCostMicroUsd!)
+            Number.isSafeInteger(usage.searchQueryCount)
+                ? usage.searchQueryCount!
                 : 0
         );
+        const settledSearch = searchAuthorization
+            ? settledNativeSearchCost({
+                  provider: canonical.provider,
+                  queryCount: observedSearchQueries,
+                  costPerQueryMicroUsd: searchAuthorization.costPerQueryMicroUsd,
+                  maxQueries: searchAuthorization.maxQueries,
+              })
+            : null;
+        // A reservation written before authorizations existed settles on the
+        // caller's figure. Failing it, or dropping the cost, would punish a
+        // turn that was dispatched correctly under the older contract.
+        const searchCostMicroUsd =
+            settledSearch?.costMicroUsd ??
+            Math.max(
+                0,
+                Number.isFinite(usage.searchCostMicroUsd)
+                    ? Math.round(usage.searchCostMicroUsd!)
+                    : 0
+            );
+        if (settledSearch?.breachedCeiling) {
+            // Not clamped. The provider bills for what it ran, and recording
+            // the authorized figure instead would be accurate about the
+            // authorization and wrong about the money. The full cost stands
+            // above; what changes is that this capability stops dispatching.
+            recordSearchQueryCeilingBreach(canonical.provider);
+            reported.searchCeilingBreach = {
+                provider: canonical.provider,
+                observed: observedSearchQueries,
+                authorized: searchAuthorization!.maxQueries,
+                costMicroUsd: settledSearch.costMicroUsd,
+            };
+        } else if (
+            !searchAuthorization &&
+            observedSearchQueries > 0 &&
+            missingAuthorizationIsADefect(durable.createdAt)
+        ) {
+            reported.missingSearchAuthorization = {
+                provider: canonical.provider,
+                queries: observedSearchQueries,
+            };
+        }
         const costBreakdown =
             searchCostMicroUsd > 0
                 ? {
@@ -3308,6 +3544,54 @@ export const settleChatUsage = async (
                   }
                 : baseCostBreakdown;
         const actualCost = costBreakdown.totalCostMicroUsd;
+        // One value for the cost row and its rollup, read once. A turn that
+        // settles either side of midnight UTC must not put the row on one day
+        // and the spend on another -- a later correction has to find both.
+        const rollupDay = rollupDayOf();
+        /**
+         * The turn that dispatched once, as an attempt.
+         *
+         * Built here so the single-attempt path settles through exactly the
+         * writer the fallback path uses: one row, one rollup, one transaction.
+         * Null when nothing was used and nothing cost -- an expiry reconciled
+         * to a full refund records no spend, and a row of zeroes would put a
+         * call that never completed into the ledger of calls that did.
+         */
+        const singleAttempt: LedgerAttempt | null =
+            !multiAttempt &&
+            (actualInput > 0 || actualOutput > 0 || actualCost > 0)
+                ? {
+                      attemptIndex: 0,
+                      price: {
+                          provider: canonical.provider,
+                          modelId: canonical.modelId,
+                          inputUsdPerMillionTokens:
+                              canonical.inputUsdPerMillionTokens,
+                          outputUsdPerMillionTokens:
+                              canonical.outputUsdPerMillionTokens,
+                          cachedInputPriceMultiplier:
+                              canonical.cachedInputPriceMultiplier,
+                          pricingVersion: canonical.pricingVersion ?? null,
+                      },
+                      inputTokens: actualInput,
+                      cachedInputTokens: actualCachedInput,
+                      outputTokens: actualOutput,
+                      reasoningTokens: Number.isSafeInteger(usage.reasoningTokens)
+                          ? Math.max(0, usage.reasoningTokens!)
+                          : undefined,
+                      usageFromProvider: usageSource === "provider_usage_metadata",
+                      outcome: usage.outcome,
+                      costMicroUsd: actualCost,
+                      costSource: costBreakdown.costSource,
+                      userBilled: actualCredits > 0,
+                      // From the reservation row, where
+                      // `linkChatReservationProviderRequest` put them. A
+                      // single-attempt turn has exactly one of each, so the
+                      // reservation's own columns are the whole answer.
+                      providerRequestId: durable.providerRequestId,
+                      providerResponseId: durable.providerResponseId,
+                  }
+                : null;
         const planActualCredits = Math.min(
             actualCredits,
             canonical.planReservedCredits
@@ -3381,123 +3665,53 @@ export const settleChatUsage = async (
             // as the budget that is supposed to bound it can tell -- and a
             // provider budget that cannot see its own spend keeps saying yes.
             //
-            // The periods come from the held entries rather than from a clock
-            // read here: the attempts ran inside this request, so they belong
-            // to the day and month the hold was taken in, and reading "now"
-            // would put a turn that started at 23:59:59 in the wrong day.
-            const heldProviderEntries = canonical.entries.filter((entry) =>
-                entry.key.startsWith(PROVIDER_BUCKET_PREFIX)
-            );
+            // The period comes from the reservation's own anchor, decided when
+            // the turn was authorized. It used to be borrowed from whichever
+            // held entry happened to share the period -- which worked only
+            // while something was held. A turn whose primary reserved nothing
+            // had no entry to borrow from, so a fallback's real spend was
+            // silently dropped: exactly the "a provider budget that cannot see
+            // its own spend keeps saying yes" this block exists to prevent.
+            //
+            // Not a clock read here either. The attempts ran inside this
+            // request, so they belong to the day the request was authorized
+            // in, and "now" would put a turn that started at 23:59:59 in the
+            // wrong one.
             const heldProviders = new Set(
-                heldProviderEntries.map((entry) =>
-                    entry.key.slice(PROVIDER_BUCKET_PREFIX.length)
-                )
+                canonical.entries
+                    .filter((entry) => entry.key.startsWith(PROVIDER_BUCKET_PREFIX))
+                    .map((entry) => entry.key.slice(PROVIDER_BUCKET_PREFIX.length))
             );
+            const anchor =
+                canonical.providerBudgetPeriodStarts ??
+                legacyProviderBudgetAnchor(canonical.attemptHolds ?? []);
             for (const [provider, cost] of multiAttempt.costByProvider) {
                 if (heldProviders.has(provider) || cost <= 0) continue;
+                if (!anchor) {
+                    // A payload with neither an anchor nor a hold to recover
+                    // one from. Recorded rather than guessed at: putting real
+                    // spend in a period nobody chose is worse than an operator
+                    // knowing a figure is missing.
+                    console.error(JSON.stringify({
+                        event: "chat_provider_spend_unanchored",
+                        reservationId: durable.id,
+                        provider,
+                        costMicroUsd: cost,
+                    }));
+                    continue;
+                }
                 for (const period of PROVIDER_BUDGET_PERIODS) {
-                    const template = heldProviderEntries.find(
-                        (entry) => entry.period === period
-                    );
-                    if (!template) continue;
+                    const periodStartForSpend =
+                        period === "provider-cost-day" ? anchor.day : anchor.month;
                     await tx.$executeRaw`
                         INSERT INTO "ChatUsageBucket" ("key", "period", "periodStart", "count", "updatedAt")
-                        VALUES (${providerBucketKey(provider)}, ${period}, ${template.periodStart}, ${cost}, NOW())
+                        VALUES (${providerBucketKey(provider)}, ${period}, ${periodStartForSpend}, ${cost}, NOW())
                         ON CONFLICT ("key", "period", "periodStart")
                         DO UPDATE SET
                             "count" = "ChatUsageBucket"."count" + ${cost},
                             "updatedAt" = NOW()
                     `;
                 }
-            }
-
-            // One row per attempt, written once. The table refuses updates
-            // outright and holds a partial unique index on the billed one, so
-            // a second settlement of the same reservation cannot quietly
-            // rewrite what an attempt cost or move the user's charge.
-            // Insert-if-absent, so a retried settlement adds nothing. The
-            // rollup below is driven by how many rows this actually created,
-            // and both commit together: a crash leaves neither.
-            const inserted = await tx.chatAttemptUsage.createMany({
-                skipDuplicates: true,
-                data: multiAttempt.attempts.map((attempt) => ({
-                    reservationId: durable.id,
-                    attemptIndex: attempt.attemptIndex,
-                    modelId: attempt.price.modelId,
-                    provider: attempt.price.provider,
-                    outcome: attempt.outcome,
-                    providerRequestId: boundedProviderIdentifier(
-                        attempt.providerRequestId
-                    ),
-                    providerResponseId: boundedProviderIdentifier(
-                        attempt.providerResponseId
-                    ),
-                    inputTokens: attempt.inputTokens,
-                    cachedInputTokens: Math.min(
-                        attempt.inputTokens,
-                        attempt.cachedInputTokens
-                    ),
-                    outputTokens: attempt.outputTokens,
-                    reasoningTokens: Number.isSafeInteger(attempt.reasoningTokens)
-                        ? Math.max(0, attempt.reasoningTokens!)
-                        : null,
-                    costMicroUsd: BigInt(attempt.costMicroUsd),
-                    pricingSnapshot: {
-                        ...attempt.price,
-                        costSource: attempt.costSource,
-                        settlementVersion: multiAttempt.version,
-                    },
-                })),
-            });
-            if (inserted.count !== multiAttempt.attempts.length) {
-                // Some row already existed, so a previous settlement of this
-                // reservation already accrued the provider cost. Recording it
-                // again would double the day's rollup, which has no per-request
-                // key to dedupe on.
-                console.warn(JSON.stringify({
-                    event: "chat_attempt_usage_already_recorded",
-                    reservationId: durable.id,
-                    expected: multiAttempt.attempts.length,
-                    inserted: inserted.count,
-                }));
-            }
-            // The rollup, in the same transaction as the rows that dedupe it.
-            // ProviderDailyUsage has no per-request key, so a crash between an
-            // insert and its increment would leave the ledger and its evidence
-            // permanently disagreeing with no way to tell which was right.
-            for (const attempt of multiAttempt.attempts) {
-                if (
-                    inserted.count !== multiAttempt.attempts.length ||
-                    (attempt.inputTokens === 0 &&
-                        attempt.outputTokens === 0 &&
-                        attempt.costMicroUsd === 0)
-                ) {
-                    continue;
-                }
-                const breakdown = calculateProviderUsageCost({
-                    inputTokens: attempt.inputTokens,
-                    cachedInputTokens: attempt.cachedInputTokens,
-                    outputTokens: attempt.outputTokens,
-                    inputUsdPerMillionTokens: attempt.price.inputUsdPerMillionTokens,
-                    outputUsdPerMillionTokens: attempt.price.outputUsdPerMillionTokens,
-                    cachedInputPriceMultiplier:
-                        attempt.price.cachedInputPriceMultiplier,
-                });
-                await recordInternalProviderUsage({
-                    client: tx,
-                    provider: attempt.price.provider,
-                    modelId: attempt.price.modelId,
-                    inputTokens: attempt.inputTokens,
-                    cachedInputTokens: Math.min(
-                        attempt.inputTokens,
-                        attempt.cachedInputTokens
-                    ),
-                    outputTokens: attempt.outputTokens,
-                    estimatedCostMicroUsd: attempt.costMicroUsd,
-                    uncachedInputCostMicroUsd: breakdown.uncachedInputCostMicroUsd,
-                    cachedInputCostMicroUsd: breakdown.cachedInputCostMicroUsd,
-                    outputCostMicroUsd: breakdown.outputCostMicroUsd,
-                });
             }
         }
         if (canonical.userId && canonical.addOnReservations.length > 0) {
@@ -3537,44 +3751,86 @@ export const settleChatUsage = async (
                 // The attempt the user's charge came from, written in the same
                 // transaction as the terminal status. Write-once at the
                 // database, so a later goodwill refund cannot re-attribute it.
+                //
+                // Only when the user was actually charged. A full refund
+                // charged for no attempt, and naming one would be a claim that
+                // some attempt was billed when none was -- the case crash
+                // reconciliation made ordinary.
                 ...(multiAttempt?.billedAttempt
                     ? {
                           settlementAttemptIndex:
                               multiAttempt.billedAttempt.attemptIndex,
                       }
-                    : {}),
+                    : singleAttempt && actualCredits > 0
+                      ? { settlementAttemptIndex: 0 }
+                      : {}),
                 settledAt: new Date(),
                 reconciledAt: options?.reconciled ? new Date() : null,
                 lastError: options?.reason?.slice(0, 500) || null,
             },
         });
 
-        // Shadow only. Provenance is decided from the provider's *input* count
-        // alone -- deliberately not from `usageSource` above, which is decided
-        // by whether output tokens arrived. A turn that reported output but not
-        // input has an input figure that is the estimate itself, and
-        // calibrating on it would compare an estimate with a copy of itself.
-        await recordShadowSettlement({
-            attemptId: reservation.reservationId,
-            providerReportedInputTokens: Number.isSafeInteger(usage.inputTokens)
-                ? Math.max(0, usage.inputTokens!)
-                : null,
-            inputUsageSource: resolveInputUsageSource({
-                providerReportedInputTokens: usage.inputTokens,
-                providerReturnedUsage: usage.usageFromProvider !== false,
-            }),
-            outcome:
-                usage.outcome === "completed"
-                    ? "completed"
-                    : usage.outcome === "cancelled"
-                      ? "cancelled"
-                      : "failed",
-            // The settlement path receives no partial-stream signal, so this
-            // stays false until it does. A cancelled turn is already excluded
-            // from calibration on its own flag.
-            isPartial: false,
-            isCancelled: usage.outcome === "cancelled",
-        });
+        // The last database work this transaction does, and deliberately so.
+        //
+        // `ProviderDailyUsage` is keyed on (provider, model, day), which makes
+        // it one row shared by every turn on that model -- the hottest row this
+        // system has. Whoever touches it holds it until COMMIT, so touching it
+        // early would serialise every concurrent turn on that model across the
+        // whole tail of this transaction: the add-on credits, the reservation
+        // update, the shadow record. Touching it last narrows that to the
+        // commit itself.
+        //
+        // Still inside the transaction, because the cost row and its rollup
+        // have to be as durable as the settlement that justifies them -- and
+        // for the same reason this is one call rather than a row-writing step
+        // and a rollup step somebody could later forget to pair.
+        //
+        // Sorted by (provider, model) so two settlements that both touch two
+        // rollup rows take them in one order and cannot deadlock on each other.
+        const accruals = multiAttempt
+            ? [...multiAttempt.attempts]
+                  .sort((a, b) =>
+                      `${a.price.provider}/${a.price.modelId}`.localeCompare(
+                          `${b.price.provider}/${b.price.modelId}`
+                      )
+                  )
+                  .map((attempt) => ({
+                      reservationId: durable.id,
+                      attempt,
+                      rollupDate: rollupDay,
+                      snapshot: { settlementVersion: multiAttempt.version },
+                  }))
+            : singleAttempt
+              ? [
+                    {
+                        reservationId: durable.id,
+                        attempt: singleAttempt,
+                        rollupDate: rollupDay,
+                        // Handed over rather than recomputed: a provider that
+                        // reports its own component costs has already had them
+                        // resolved here, and pricing from tokens again would
+                        // write a different split for the same total.
+                        rollup: {
+                            uncachedInputCostMicroUsd:
+                                costBreakdown.uncachedInputCostMicroUsd,
+                            cachedInputCostMicroUsd:
+                                costBreakdown.cachedInputCostMicroUsd,
+                            outputCostMicroUsd: costBreakdown.outputCostMicroUsd,
+                        },
+                        // Named apart from the row's own `usageSource`
+                        // column, which is derived and authoritative. They can
+                        // legitimately differ -- a provider that reports a cost
+                        // makes the column `provider_response_cost` while this
+                        // stays `provider_usage_metadata` -- and one row saying
+                        // two things under one name is a trap for whoever reads
+                        // the snapshot.
+                        snapshot: { settlementUsageSource: usageSource },
+                    },
+                ]
+              : [];
+        for (const accrual of accruals) {
+            await recordAttemptCost(tx, accrual);
+        }
 
         return {
             applied: true,
@@ -3586,13 +3842,93 @@ export const settleChatUsage = async (
             costBreakdown,
             provider: canonical.provider,
             modelId: canonical.modelId,
+            shadow: {
+                attemptId: reservation.reservationId,
+                providerReportedInputTokens: Number.isSafeInteger(usage.inputTokens)
+                    ? Math.max(0, usage.inputTokens!)
+                    : null,
+                inputUsageSource: resolveInputUsageSource({
+                    providerReportedInputTokens: usage.inputTokens,
+                    providerReturnedUsage: usage.usageFromProvider !== false,
+                }),
+                outcome:
+                    usage.outcome === "completed"
+                        ? ("completed" as const)
+                        : usage.outcome === "cancelled"
+                          ? ("cancelled" as const)
+                          : ("failed" as const),
+                // The settlement path receives no partial-stream signal, so
+                // this stays false until it does. A cancelled turn is already
+                // excluded from calibration on its own flag.
+                isPartial: false,
+                isCancelled: usage.outcome === "cancelled",
+            },
         };
     });
 
-    // Single-attempt only. A multi-attempt turn accrued each attempt inside
-    // the settlement transaction, against its own provider and model; running
-    // this as well would add the whole turn a second time under the
-    // reservation's canonical model.
+    if (reported.searchCeilingBreach) {
+        // A ceiling that did not hold cannot size the next reservation, so the
+        // capability stops dispatching -- in this process. The latch is not
+        // shared between instances; this incident is what reaches an operator,
+        // and a durable circuit breaker is still owed.
+        await reportOperationalIncident({
+            code: "NATIVE_SEARCH_QUERY_CEILING_BREACHED",
+            title: "A provider ran more billable searches than the request authorized",
+            severity: "error",
+            context: {
+                component: "chat-cost-ledger",
+                provider: reported.searchCeilingBreach.provider,
+                observedQueries: reported.searchCeilingBreach.observed,
+                authorizedQueries: reported.searchCeilingBreach.authorized,
+                costMicroUsd: reported.searchCeilingBreach.costMicroUsd,
+            },
+        });
+    }
+    if (reported.missingSearchAuthorization) {
+        await reportOperationalIncident({
+            code: "MISSING_NATIVE_SEARCH_AUTHORIZATION",
+            title: "A paid native search settled with no authorization to price it against",
+            severity: "error",
+            context: {
+                component: "chat-cost-ledger",
+                provider: reported.missingSearchAuthorization.provider,
+                queries: reported.missingSearchAuthorization.queries,
+                configured: NATIVE_SEARCH_AUTHORIZATION_CUTOVER_ENV,
+            },
+        });
+    }
+
+    // Shadow telemetry, after the commit and never inside it.
+    //
+    // Two reasons, and the first is not about speed. `recordShadowSettlement`
+    // swallows its own errors because the module's contract is that shadow
+    // telemetry never fails a paid request -- but a statement that fails on a
+    // transaction's own connection aborts that transaction whatever the caller
+    // does with the exception, so running it inside would have made the
+    // contract untrue in exactly the case it exists for. It also ran on the
+    // global client while this transaction held a connection, which is a
+    // second connection acquired per settlement and a pool that can deadlock
+    // against itself under load.
+    //
+    // After the commit it also cannot record a settlement that did not happen:
+    // a rolled-back turn now leaves no shadow sample claiming it settled.
+    //
+    // Provenance is decided from the provider's *input* count alone --
+    // deliberately not from `usageSource`, which is decided by whether output
+    // tokens arrived. A turn that reported output but not input has an input
+    // figure that is the estimate itself, and calibrating on it would compare
+    // an estimate with a copy of itself.
+    if (settlement.applied && settlement.shadow) {
+        await recordShadowSettlement(settlement.shadow);
+    }
+
+    // Every accrual now happens inside the settlement transaction, single
+    // attempt and fallback alike, so nothing is recorded here.
+    //
+    // What stays outside is the alert, and deliberately: it is a notification
+    // about a balance, it talks to something other than this database, and a
+    // slow or failing provider API must not hold a settlement transaction open
+    // or roll one back.
     if (
         settlement.applied &&
         !multiAttempt &&
@@ -3601,19 +3937,6 @@ export const settleChatUsage = async (
             settlement.actualOutput > 0 ||
             settlement.actualCost > 0)
     ) {
-        await recordInternalProviderUsage({
-            provider: settlement.provider,
-            modelId: settlement.modelId,
-            inputTokens: settlement.actualInput,
-            cachedInputTokens: settlement.actualCachedInput,
-            outputTokens: settlement.actualOutput,
-            estimatedCostMicroUsd: settlement.actualCost,
-            uncachedInputCostMicroUsd:
-                settlement.costBreakdown.uncachedInputCostMicroUsd,
-            cachedInputCostMicroUsd:
-                settlement.costBreakdown.cachedInputCostMicroUsd,
-            outputCostMicroUsd: settlement.costBreakdown.outputCostMicroUsd,
-        });
         if (settlement.provider === "zhipu") {
             await notifyProviderCreditIfNeeded(settlement.provider).catch(
                 (error) =>
@@ -3662,12 +3985,6 @@ export const extendChatReservationExpiry = async (
     });
 };
 
-const boundedProviderIdentifier = (value: string | null | undefined) => {
-    const normalized = value?.trim();
-    if (!normalized) return null;
-    return normalized.replace(/[^A-Za-z0-9._:/-]/g, "").slice(0, 240) || null;
-};
-
 /**
  * Takes an attempt's own provider-budget hold, and records whose it is.
  *
@@ -3689,36 +4006,50 @@ const boundedProviderIdentifier = (value: string | null | undefined) => {
  * provider entry is re-derived as the sum. See lib/chatProviderHolds.ts for
  * why the entries alone cannot carry this.
  */
+/**
+ * The provider entries of a pre-`attemptHolds` reservation, read as attempt
+ * 0's holds.
+ *
+ * The primary is the only thing that can have put them there: the holds list
+ * arrived with automatic fallback, and before it a turn dispatched once.
+ */
+const adoptLegacyProviderHolds = (
+    reservation: ChatUsageReservation
+): AttemptHold[] =>
+    reservation.entries
+        .filter((entry) => entry.key.startsWith(PROVIDER_BUCKET_PREFIX))
+        .map((entry) => ({
+            attemptIndex: 0,
+            key: entry.key,
+            period: entry.period,
+            periodStart: entry.periodStart,
+            amount: entry.amount,
+        }));
+
 export const reserveAttemptProviderBudget = async (input: {
     reservationId: string;
     userId?: string | null;
     attemptIndex: number;
     provider: string;
     reservedMicroUsd: number;
-    periodStarts: { day: Date; month: Date };
+    /**
+     * What this attempt is authorized to spend, at its own rates.
+     *
+     * Required, and stored in the same transaction as the hold: a hold with no
+     * intent leaves a crash unable to record anything at all, which is the gap
+     * this mechanism exists to close.
+     */
+    costIntent: Omit<AttemptCostIntent, "attemptIndex" | "reservedCostMicroUsd">;
 }): Promise<
     | { reserved: false; reason: "reservation_not_open" }
-    | { reserved: false; reason: "already_held" }
+    | { reserved: false; reason: "already_authorized" }
+    | { reserved: false; reason: "no_provider_budget_period" }
     | { reserved: false; reason: "budget_exhausted"; scope: string }
     | { reserved: true; entries: ReservationEntry[] }
 > => {
     const limits = getProviderCostGuardrailLimits(input.provider);
     const amount = Math.max(0, Math.round(input.reservedMicroUsd));
     const key = providerBucketKey(input.provider);
-    const checks = [
-        {
-            period: "provider-cost-day" as const,
-            start: input.periodStarts.day,
-            limit: limits.day,
-            scope: "provider_cost_day",
-        },
-        {
-            period: "provider-cost-month" as const,
-            start: input.periodStarts.month,
-            limit: limits.month,
-            scope: "provider_cost_month",
-        },
-    ];
 
     return prisma.$transaction(async (tx) => {
         // Same order as settlement: the credit account first, then the
@@ -3737,11 +4068,125 @@ export const reserveAttemptProviderBudget = async (input: {
             throw new AttemptBudgetRefusal("reservation_not_open");
         }
         const canonical = deserializeReservation(durable.reservationPayload);
-        const existing = canonical.attemptHolds ?? [];
-        if (existing.some((hold) => hold.attemptIndex === input.attemptIndex)) {
-            // A retry of this call, or two dispatches claiming one index.
-            // Either way the second must not add a hold nothing will release.
-            throw new AttemptBudgetRefusal("already_held");
+
+        // A reservation written before `attemptHolds` existed carries its
+        // primary hold only in `entries`. Adopting it as attempt 0's is not
+        // bookkeeping: `serializeReservation` derives the provider entries
+        // from the holds, so writing a fallback hold onto an empty list would
+        // rebuild the entries from that hold alone and the primary's would
+        // vanish -- leaving a hold in the bucket that nothing would ever
+        // release.
+        //
+        // Before the duplicate check, not after: an adopted hold is an
+        // authorization this attempt has to be measured against too.
+        const existing = canonical.attemptHolds ?? adoptLegacyProviderHolds(canonical);
+        if (!canonical.attemptHolds && existing.length > 0) {
+            // Adopted holds need adopted intents, or the payload fails its own
+            // consistency check on the next read. The rates are the
+            // reservation's own, which is what the primary ran at.
+            canonical.attemptCostIntents = [
+                {
+                    attemptIndex: 0,
+                    modelId: canonical.modelId,
+                    provider: canonical.provider,
+                    estimatedInputTokens: canonical.inputTokens,
+                    reservedOutputTokens: canonical.reservedOutputTokens,
+                    inputUsdPerMillionTokens: canonical.inputUsdPerMillionTokens,
+                    outputUsdPerMillionTokens: canonical.outputUsdPerMillionTokens,
+                    cachedInputPriceMultiplier: canonical.cachedInputPriceMultiplier,
+                    pricingVersion: canonical.pricingVersion ?? null,
+                    reservedCostMicroUsd: existing[0]?.amount ?? 0,
+                },
+            ];
+        }
+        const existingIntents = canonical.attemptCostIntents ?? [];
+
+        // The period comes from the reservation, never from the caller and
+        // never from a clock read here.
+        //
+        // A turn that began at 23:59:59 and reaches its fallback a second
+        // later belongs to the day it was authorized in, and a caller passing
+        // "now" would split one logical response across two provider budget
+        // periods -- the second of which nothing would release, because
+        // settlement releases what the payload says was held.
+        //
+        // A payload written before the anchor existed can still answer, from
+        // the holds it already carries: those were taken at the same moment,
+        // so their own periodStart *is* the anchor. One that carries neither
+        // is refused. Reconstructing a period from a user's `day` bucket would
+        // be reading an account-local reckoning as a UTC one, and from
+        // `createdAt` would be reading the database's clock instead of the one
+        // the reservation was computed against -- both are guesses, and a
+        // guess here puts real money in the wrong period.
+        const anchor =
+            canonical.providerBudgetPeriodStarts ??
+            legacyProviderBudgetAnchor(existing);
+        if (!anchor) {
+            throw new AttemptBudgetRefusal("no_provider_budget_period");
+        }
+        const checks = [
+            {
+                period: "provider-cost-day" as const,
+                start: anchor.day,
+                limit: limits.day,
+                scope: "provider_cost_day",
+            },
+            {
+                period: "provider-cost-month" as const,
+                start: anchor.month,
+                limit: limits.month,
+                scope: "provider_cost_month",
+            },
+        ];
+
+        // Already authorized, by either half.
+        //
+        // Checking the holds alone was enough while a hold was the only thing
+        // an authorization produced. It stopped being enough the moment a zero
+        // authorization began writing an intent and no hold: a second zero
+        // call would find no hold, pass, and append a duplicate intent for one
+        // index -- which the payload validator refuses on the next read, so
+        // the reservation would stop being readable at all and its money would
+        // be stuck. A retry of this call, or two dispatches claiming one
+        // index, has to be refused whichever shape the first one left.
+        if (
+            existing.some((hold) => hold.attemptIndex === input.attemptIndex) ||
+            existingIntents.some(
+                (intent) => intent.attemptIndex === input.attemptIndex
+            )
+        ) {
+            throw new AttemptBudgetRefusal("already_authorized");
+        }
+
+        const authorized = (reservedCostMicroUsd: number): AttemptCostIntent[] => [
+            ...existingIntents,
+            {
+                ...input.costIntent,
+                attemptIndex: input.attemptIndex,
+                reservedCostMicroUsd,
+            },
+        ];
+
+        // Nothing to put in a bucket, but there is still something to
+        // authorize. The intent is written and the hold is not, which is
+        // exactly the shape acquisition leaves for a free primary.
+        //
+        // Refusing on the budget would be the other way to handle zero, and it
+        // is the wrong one: a call that reserves nothing consumes none of the
+        // budget the guardrail bounds, so there is nothing for it to refuse.
+        if (amount === 0) {
+            await tx.chatCreditReservation.update({
+                where: { id: durable.id },
+                data: {
+                    reservationPayload: serializeReservation({
+                        ...canonical,
+                        providerBudgetPeriodStarts: anchor,
+                        attemptHolds: existing,
+                        attemptCostIntents: authorized(0),
+                    }),
+                },
+            });
+            return { reserved: true as const, entries: [] };
         }
 
         const entries: ReservationEntry[] = [];
@@ -3787,7 +4232,9 @@ export const reserveAttemptProviderBudget = async (input: {
                 // pay twice.
                 reservationPayload: serializeReservation({
                     ...canonical,
+                    providerBudgetPeriodStarts: anchor,
                     attemptHolds: holds,
+                    attemptCostIntents: authorized(amount),
                 }),
             },
         });
@@ -3795,7 +4242,8 @@ export const reserveAttemptProviderBudget = async (input: {
     }).catch((error) => {
         if (error instanceof AttemptBudgetRefusal) {
             return error.scope === "reservation_not_open" ||
-                error.scope === "already_held"
+                error.scope === "already_authorized" ||
+                error.scope === "no_provider_budget_period"
                 ? { reserved: false as const, reason: error.scope }
                 : {
                       reserved: false as const,
@@ -3843,10 +4291,22 @@ export const releaseAttemptProviderBudget = async (input: {
 
             const canonical = deserializeReservation(durable.reservationPayload);
             const holds = canonical.attemptHolds ?? [];
+            const intents = canonical.attemptCostIntents ?? [];
             const mine = holds.filter(
                 (hold) => hold.attemptIndex === input.attemptIndex
             );
-            if (mine.length === 0) return false;
+            const hasIntent = intents.some(
+                (intent) => intent.attemptIndex === input.attemptIndex
+            );
+            // Both halves, because a zero authorization has only the second.
+            // Keying this on the holds alone left a free attempt's intent
+            // behind after its dispatch failed -- an authorization on the
+            // record for a preparation that was abandoned before it reached
+            // anything. What proves a request reached a provider is
+            // `RoutingAttempt.dispatchedAt` beside a finalized manifest; this
+            // is about undoing the authorization completely, which is what
+            // §6 asks of a preparation that failed.
+            if (mine.length === 0 && !hasIntent) return false;
 
             for (const hold of mine) {
                 await tx.$executeRaw`
@@ -3867,12 +4327,35 @@ export const releaseAttemptProviderBudget = async (input: {
                             holds,
                             input.attemptIndex
                         ),
+                        // The intent goes with the hold. An intent left behind
+                        // would let a sweep record a cost against budget that
+                        // has already been given back.
+                        attemptCostIntents: intents.filter(
+                            (intent) => intent.attemptIndex !== input.attemptIndex
+                        ),
                     }),
                 },
             });
             return true;
         })
         .catch(() => false);
+
+/**
+ * The period a legacy payload's provider holds were taken in.
+ *
+ * Those holds carry their own `periodStart`, and they were taken at the moment
+ * the reservation was authorized -- so they are the anchor rather than a
+ * reconstruction of it. Null when there are none, which is the case the caller
+ * has to refuse: nothing else in the payload knows the answer.
+ */
+const legacyProviderBudgetAnchor = (
+    holds: readonly AttemptHold[]
+): { day: Date; month: Date } | null => {
+    const day = holds.find((hold) => hold.period === "provider-cost-day");
+    const month = holds.find((hold) => hold.period === "provider-cost-month");
+    if (!day || !month) return null;
+    return { day: day.periodStart, month: month.periodStart };
+};
 
 class AttemptBudgetRefusal extends Error {
     constructor(readonly scope: string) {

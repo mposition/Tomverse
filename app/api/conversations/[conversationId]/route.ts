@@ -3,6 +3,7 @@
 import { NextResponse } from "next/server";
 import type { Prisma } from "@prisma/client";
 import { enqueueImageAssetCleanupForConversations } from "@/lib/imageAssetLifecycle";
+import { deleteDeepResearchJobsForConversations } from "@/lib/deepResearchJobs";
 import { prisma } from "@/lib/prisma";
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
@@ -796,6 +797,7 @@ export async function DELETE(req: Request, { params }: Params) {
     // objects whenever the second step failed.
     await prisma.$transaction(async (tx) => {
       await enqueueImageAssetCleanupForConversations(tx, [conversationId]);
+      await deleteDeepResearchJobsForConversations(tx, [conversationId]);
       await tx.conversation.delete({
         where: { id: conversationId },
       });

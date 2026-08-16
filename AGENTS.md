@@ -65,6 +65,47 @@ UI-012에서 승인된 정책(B안)입니다. accent 색은 **hue가 아니라 �
 
 예외가 필요하면 이 문서에 근거를 적고 나서 추가합니다.
 
+# 브랜치 이름이 자동화 권한을 정합니다
+
+**브랜치의 목적이 아니라 병합 대상이 자동화 권한을 결정합니다.** `claude/`,
+`codex/`, `docs/`, `fix/`는 누가 왜 만들었는지를 말할 뿐 어디로 가는지를 말하지
+않고, push 이벤트는 그것을 알아낼 방법이 없습니다 — 브랜치는 PR보다 먼저
+존재합니다.
+
+`Auto PR to Develop`은 이름에 **`to-develop` 경로 조각이 있는 브랜치에만**
+develop PR을 만듭니다. 판정은 `scripts/auto-pr-branch-policy.mjs`가 하고
+`tests/autoPrBranchPolicy.test.mjs`가 허용·거부 양쪽을 고정합니다.
+
+```
+claude/to-develop/image-generation   자동 PR
+codex/to-develop/fix-picker          자동 PR
+docs/to-develop/release-policy       자동 PR
+to-develop/ime-submit                자동 PR
+
+claude/to-main/dependabot-hold       없음 — main PR은 손으로 엽니다
+release/**, hotfix/**                없음 — production에 닿습니다
+dependabot/**, autofix/**,
+feedback-autofix/**                  없음 — 각자 자기 PR을 엽니다
+visual-baseline/**                   없음 — 골든 재기록은 사람이 diff를 보고 병합합니다
+그 밖의 모든 이름                     없음
+```
+
+`to-develop`은 **경로 조각**이지 부분 문자열이 아닙니다.
+`feature/to-development-notes`는 개발 노트에 관한 브랜치이고
+`chore/to-develop-later`는 누군가의 약칭입니다. 둘 다 대상을 말한 것이
+아닙니다.
+
+이전 규칙은 `branches-ignore`에 예외를 쌓는 방식이었고, 그 목록은 **이미 한 번
+당해 본 namespace만** 담을 수 있습니다. 2026-08-15에 `.github/dependabot.yml`
+변경(기본 브랜치에서만 읽히는 파일)을 담은 브랜치가 main용으로 push되자 develop
+PR #573이 먼저 열렸습니다 — 한 브랜치에 PR 둘, 그중 하나는 변경이 아무 효과도
+없는 base였습니다. opt-in에서 모르는 브랜치는 **PR 없음**이고 비용은 `gh pr
+create` 한 번이지만, opt-out에서는 **잘못된 base의 PR에 auto-merge까지 켜진
+상태**입니다.
+
+기존에 열린 PR과 브랜치는 그대로 둡니다. 새 규칙은 이 변경 이후 만드는
+브랜치부터 적용합니다.
+
 # 다음 작업 고를 때 — 열린 이슈를 그대로 믿지 않습니다
 
 이슈가 **열려 있다**는 것과 **아직 안 됐다**는 것은 다른 사실입니다. 이 저장소는
@@ -89,6 +130,12 @@ npm run report:issue-backlog -- --issues-file <열린 이슈 JSON>
   틀립니다.
 - 착수해도 되는 것은 `candidates`(= `open_work`)뿐입니다.
   `landed_but_unverified`는 사람이 확인할 대상이지 시작할 작업이 아닙니다.
+- `blocked`는 **열려 있고 끝나지도 않았지만 시작해서는 안 되는** 것입니다.
+  probe의 `blockedOn`이 무엇을 기다리는지 이름을 대며, 대개 저장소가 답할 수 없는
+  사실(운영 DB, 결제 제공자 상태)입니다. 그것을 모른 채 시작하면 멈추거나
+  추측하게 되고, 추측이 곧 결과가 됩니다 — 예: 어떤 프로모션이 살아 있는지 모르는
+  채 생성을 막으면 진행 중인 캠페인이 끊깁니다. 보고서가 `blocked on`으로 무엇을
+  읽어야 하는지 알려 주므로, 그것부터 구하고 나서 착수합니다.
 - 새 이슈의 완료 조건이 generic 신호에 안 잡히면 `ISSUE_PROBES`에 추가합니다.
   증명하지 못하는 부분은 `remainder`에 적습니다 — 그래야 부분 완료가 완료로
   보고되지 않습니다.
@@ -163,6 +210,17 @@ goodwill 지급은 Stripe 환불도 구매 취소도 아닌 **세 번째 것**�
   세 컬럼을 아예 쓰지 않습니다. 해석된 가격을 행에 다시 넣으면 장문 tier가
   사라지고 `costSource`가 전부 override로 보고돼 fallback 지표가 0%가 됩니다.
   확인은 `npm run check:model-pricing-db`.
+- **`creditWeight`에는 그 `NULL` 구분이 없습니다.** `ModelRegistryEntry.creditWeight`는
+  `Int` non-nullable이라 모든 행이 숫자를 갖고, 어떤 행도 그 숫자의 출처를 말하지
+  못합니다. `ensureModelRegistrySeeded()`는 `skipDuplicates: true`로 넣으므로 이미
+  있는 행을 다시 보지 않고, 갱신은 `STATIC_CATALOG_RECONCILIATION_MODEL_IDS`에
+  등록된 모델에만 닿습니다. **그래서 `lib/models.ts`의 `creditWeight`를 고쳐도
+  기존 행에는 반영되지 않고, 코드는 계속 옛 값을 말합니다.**
+  2026-08-15에 `perplexity/sonar`가 이 상태로 발견됐습니다 — 코드 16, 청구 20.
+  `npm run report:model-credit-weights`가 코드와 DB의 차이를 나열합니다. **gate가
+  아니라 보고입니다**: 행이 카탈로그와 다른 것은 `PUT /api/admin/models`가 만들라고
+  있는 상태이고, 의도된 override와 편집 실패는 컬럼만 봐서 구분되지 않습니다.
+  새 모델의 크레딧을 바꿀 때는 코드만 고치지 말고 이 보고로 실제 행을 확인합니다.
 - **처리 tier를 요청에 넣지 않습니다.** 모든 profile이 Standard 가격이며, 이는
   아무 요청도 `service_tier`를 지정하지 않는 동안에만 참입니다(생략 시 OpenAI
   기본값은 `auto`). `npm run check:model-pricing`이 request-side tier 지정을
@@ -546,6 +604,7 @@ Non-negotiable requirements:
 - There are exactly four entry points (sidebar split button, mobile drawer rows, composer tools menu, catalogue image tab) and no standalone "new image" button. Switching to the image draft creates no server row.
 - Guest and Free see every entry point locked, with the requirement stated up front and the click routed to sign-in or `/pricing` — never hidden, never blocked only at the last step. With the flag off nothing renders at all.
 - Image generation models are their own catalogue tab. They are never mixed into the chat model list, and the chat list's `modelSupportsImageInput` filter (image *input*) is never reused to mean generation.
+- The comparison limit reaches the composer as a **prop resolved on the server** (`imageGroupMaxModels()`, `lib/imageGroupLimits.ts` — the same function admission calls). The client never reads `process.env`, never hard-codes the number, and never derives it from `IMAGE_INLINE_MODEL_DISCOVERY_LIMIT`, which is a separate decision about one row of UI. Exceeding the limit refuses the change without altering the selection, states the reason, and still allows deselecting an already selected model; `IMAGE_MODEL_SELECTION_INVALID` gets its own message rather than a generic retry.
 - Every registered image model is listed, including one held by the price-verification rule; a held row is stated as a hold and is not selectable. The tab quotes "from N credits"; only the composer quotes an exact price.
 - The workspace follows the mobile composer contract's shape: the textarea owns a dedicated full-width row and no control shares, overlaps or floats above it.
 - An image conversation never mounts `ChatInput`, `ChatApp` or the comparison action rail, never enables AI Review, and never imports `ComparisonActionRail`/`shouldShowVisualStatus()` — only their principles.

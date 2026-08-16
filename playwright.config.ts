@@ -59,6 +59,26 @@ export default defineConfig({
   testDir: "./tests/e2e",
   fullyParallel: false,
   forbidOnly: Boolean(process.env.CI),
+  // A missing golden is a failure, not a blank to fill in.
+  //
+  // Playwright's default is "missing": when a screenshot has no baseline for
+  // the current platform it writes one and reports the test as passed. That
+  // is the quiet version of `--update-snapshots`, which the workflows are
+  // already forbidden from carrying -- no flag is needed to produce it, and
+  // the run is green either way, so nothing distinguishes "compared and
+  // matched" from "there was nothing to compare against".
+  //
+  // It is not hypothetical. Baselines are platform-suffixed, so a run on any
+  // platform the canonical image is not -- a developer's Windows machine, a
+  // substitute runner -- has no baseline for a single golden. One such run
+  // wrote 68 `-win32` files and passed all of them, and those files are
+  // indistinguishable in the tree from goldens that were reviewed.
+  //
+  // "none" makes that case fail. Recording stays possible exactly where the
+  // policy puts it: the `Record Visual Baseline` workflow passes
+  // `--update-snapshots` on the command line, and a CLI flag overrides this.
+  // See docs/qa/canonical-visual-baseline.md.
+  updateSnapshots: "none",
   retries: process.env.CI ? 2 : 0,
   workers: process.env.CI ? 1 : 4,
   reporter: [["list"], ["html", { open: "never" }]],

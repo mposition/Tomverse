@@ -88,6 +88,10 @@ Date / timezone:    ____________________
       checklist still holds no results and every signed run record still
       hashes to what it was signed as. The previous shape kept an approval
       table inside the checklist, which could not say which commit it covered
+- [ ] `npm run check:release-records` -- proves this file still holds no
+      results and every recorded run names the build it covers, with an owner
+      for each box it left unticked. Written after a run reached a signed
+      state with its build unnamed and two owner cells reading `(이름)`
 - [ ] `npm run check:ui-tier-coverage` — proves the merge-blocking `@ui-risk`
       tier and the document that records it still describe the same set
 - [ ] `npm run check:release-gate-coverage` — proves this list still matches
@@ -559,29 +563,161 @@ before it costs an outage.
       registry entry in `scripts/report-unswept-tables-core.mjs` with the reason
 
 The reservation tables (`ChatCreditReservation` and its image and memory
-siblings) are on the list deliberately and are **not** to be swept until the
-decision below is recorded. A settled reservation is the record linking a
-request to the credits it spent, so a sweep is a decision about billing
-evidence rather than about disk — but "billing evidence" justifies keeping a
-row for a stated period, never keeping it forever by default. The row also
-carries a user link, so how long it is kept is a privacy question as much as a
-finance one.
+siblings) are **held**, not unswept: `report:unswept-tables` reports them in
+their own section with an owner and a date rather than in the list of tables
+nobody has looked at. A settled reservation is the record linking a request to
+the credits it spent, so a sweep is a decision about billing evidence rather
+than about disk -- but "billing evidence" justifies keeping a row for a stated
+period, never keeping it forever by default. The row also carries a user link,
+so how long it is kept is a privacy question as much as a finance one.
 
-**Both finance-ops and privacy/legal own this decision**, and it is not made
-until all three of these are written down:
+**Both finance-ops and privacy/legal own this decision, jointly, by
+2026-08-28 (AEST).** That is the date a policy is *approved* by, not a date
+anything is deleted on: the hold is "no deletion before approval", and it does
+not lapse when the date does. What lapses is the promise to decide, after
+which the report stops calling it a current hold and reports it as an overdue
+policy question -- a deadline that printed the same thing on either side of
+itself would not be one.
+
+All three tables are one decision. They differ only in which workflow reserved
+the credits, every question below has the same answer for all three, and
+answering them separately is how two get a policy and the third is found years
+later.
 
 - [ ] **Retention period per status.** A `reserved` row that expired, a
       `settled` row and a `refunded` row do not have the same evidential life;
       one period for all three is a decision by omission
-- [ ] **What happens at the end of it** — deletion, or anonymisation that keeps
-      the aggregate and drops the user link. If anonymisation, name the columns
+- [ ] **What happens at the end of it** -- deletion, or anonymisation that
+      keeps the aggregate and drops the user link. If anonymisation, name the
+      columns
 - [ ] **Account deletion, disputes and backups.** Whether a deletion request
       removes these rows or the retention period outlives it, what a live
-      chargeback or refund dispute freezes, and how far the period extends into
-      restorable backups
+      chargeback or refund dispute freezes, and how far the period extends
+      into restorable backups
 
-Until then the tables stay on the report with no policy, which is the honest
-state: a table nobody has decided about should read as undecided, not as kept.
+## 7.9 How a change reaches production
+
+Everything above assumes the build being released came through `develop` and
+was deployed to staging. On 2026-08-15 four changes did not, in one day,
+against one release that did. That is not four people being careless; it is
+one structural gap, and the gap was never staging itself.
+
+**The gap was selective release.** `develop` sat 36 commits ahead of `main`.
+Every one of the four needed a subset of that shipped without promoting the
+rest, and the only mechanism the repository offered for "some of develop, now"
+was a merge straight to `main`. Widening the exception would have made that
+official; the fix is to give the need its own path.
+
+Three lanes. Which one a change takes is decided by what it is, not by how
+inconvenient the alternative feels.
+
+| Change | Lane | Verification |
+|---|---|---|
+| Ordinary work | `develop` | staging, then a release cut from `develop` |
+| Part of `develop`, needed sooner | `release/**`, cut from `main` | the exact RC SHA verified on staging or a scratch environment, then merged to `main` |
+| A declared incident or a security advisory | `hotfix/**` | §7.9.2, and the incident or advisory is named |
+
+The branch prefix is the declaration. `*-main` in a name says where somebody
+meant it to go and proves nothing about urgency or approval, which is why it
+is not one of the three. `scripts/auto-pr-branch-policy.mjs` already refuses
+`release/**`, `hotfix/**` and anything with a `to-main` segment an automatic
+develop pull request, so these names carry no automation of their own -- their
+pull requests are opened and merged by a person on purpose.
+
+### 7.9.1 Selective release: `release/**`
+
+For a change that is finished, is already on `develop`, and should not wait for
+everything else on `develop`. This is not an exception and needs no waiver; it
+is a smaller release with the same evidence.
+
+```
+git fetch origin main develop
+git checkout -b release/<date>-<subject> origin/main
+git cherry-pick <the commits, and only those>
+```
+
+- [ ] The branch starts at `origin/main`, so what is verified is what is merged
+- [ ] Only the intended commits are on it. If a cherry-pick needs a conflict
+      resolution the original never had, that resolution is new code and is
+      reviewed as such
+- [ ] **The RC SHA is deployed to staging or a scratch environment**, and
+      `/api/build-info` is read back to confirm it names that SHA. Not the
+      current `develop`, which is further ahead and would measure a different
+      build
+- [ ] Whatever the change touches is exercised there: a provider turn, a Stripe
+      path in test mode, a signed asset URL, an admin flow -- CI reaches none
+      of these
+- [ ] A rollback SHA is named
+- [ ] The back-merge to `develop` is confirmed, or the next release reverts it
+
+```
+RC SHA:             ____________________
+Verified on:        ____________________
+Verified by / how:  ____________________
+Rollback SHA:       ____________________
+Back-merge run:     ____________________
+```
+
+Done this way, a selective release is a release. It gets a record under
+`.github/audits/release-<date>__<sha>.md`, not a deviation record.
+
+### 7.9.2 The exception: `hotfix/**`
+
+Staging is skipped entirely here, so the bar is what makes it an exception
+rather than a faster lane. All six apply, and the first is the one that
+qualifies it:
+
+- [ ] **A security advisory, or a declared production incident.** Named, with
+      its link. Dependabot security updates arrive on the default branch
+      whatever `target-branch` says, and belong here. A change that is merely
+      finished, or merely wanted sooner, is §7.9.1
+- [ ] **A person approved it before the merge**, and recorded that staging is
+      being skipped. A record written afterwards is not this: it describes the
+      skip, it cannot authorise it retroactively
+- [ ] **The new release SHA is recorded** -- the merge commit production will
+      serve, not the PR head
+- [ ] **Verified beyond PR CI**, at whichever boundary the change touches. CI
+      reaches no provider, no payment processor, no object store, and no
+      database in anger
+- [ ] **A rollback SHA is named**: the newest build a checklist actually covers
+- [ ] **The back-merge to `develop` is confirmed**
+
+```
+Incident / advisory: ____________________
+Approved by:         ____________________
+New release SHA:     ____________________
+Verified by / how:   ____________________
+Rollback SHA:        ____________________
+Back-merge run:      ____________________
+```
+
+**"All checks passed" is not on this list, and must not become the bar.**
+A rule that admits anything with a green suite is a continuous-deployment
+policy wearing an exception's name, and it would have admitted all four of the
+2026-08-15 changes -- every one of them was green.
+
+### 7.9.3 When it happens anyway
+
+If a change reaches `main` outside all three lanes, or takes 7.9.2 without its
+six, it is a **deviation**: recorded at the time, in
+`.github/audits/release-deviation-<date>__<sha>.md`, not deferred to the next
+release checklist, which covers a different SHA and cannot speak for this one.
+The four records dated 2026-08-15 are the worked examples.
+
+A deviation record describes; it does not authorise and it does not control.
+If they accumulate, the answer is a lane the work actually fits, not a
+shorter record.
+
+### 7.9.4 Wait for CI
+
+Railway's **Wait for CI** (`checkSuites`) is on for both environments as of
+2026-08-15. It holds a deployment until the pushed commit's check suite
+finishes, which removes the race where production deployed while its own checks
+were still running.
+
+It is a floor under every lane above and a substitute for none of them: it
+answers "did the checks finish", never "was this exercised anywhere real".
+https://docs.railway.com/deployments/github-autodeploys#wait-for-ci
 
 ## 8. Unverified items and waivers
 

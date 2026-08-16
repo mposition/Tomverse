@@ -1,9 +1,15 @@
 ---
 record: staging-verification
 checklist: docs/ops/external-import-staging-checklist.md
-templateRevision: 2026-08-14b
+templateRevision: 2026-08-15c
+checklistSourceSha:
+runType:
 environment:
 deploySha:
+deploymentId:
+artifactDigest:
+appliedMigrations:
+migrationsCompletedAtUtc:
 startedAtUtc:
 completedAtUtc:
 executor:
@@ -19,13 +25,85 @@ digest:
 
 | 항목 | 값 |
 |---|---|
+| **실행 종류** | 탐색(`exploratory`) / 정식(`formal`) |
 | 환경 | staging / production / 기타 |
 | 배포 SHA (전체 40자리) | |
-| template revision | 2026-08-14b |
+| **deployment ID 또는 artifact digest** | |
+| **적용된 migration 식별자** | |
+| **migration 완료 (UTC)** | |
+| **migration이 앱 배포보다 먼저 적용됨** | 예 / 아니오 |
+| template revision | 2026-08-15c |
+| **checklist source SHA** | |
 | 시작 (UTC) | |
 | 종료 (UTC) | |
 | 실행자 | |
 | flag 상태 (시작 시점) | |
+
+**실행 종류를 먼저 적습니다.** 탐색 실행은 결함을 일찍 찾기 위한 것이고,
+활성화 승인의 근거로 인용할 수 없습니다. 정식 실행은 **예정된 production
+활성화 대상 SHA** 위에서만 성립합니다 — 체크리스트의 "무엇에 대해 실행하는가"
+절이 그 기준입니다. 탐색 실행은 서명·동결하지 않으며, `result`에 무엇을 찾았고
+무엇을 덮지 않는지 적습니다.
+
+**deployment ID를 SHA와 함께 적습니다.** 같은 SHA가 같은 artifact를 보장하지
+않습니다 — 의존성 해석, builder 버전, build 환경이 그 사이에 움직일 수 있습니다.
+SHA만 적힌 기록은 "그때 그 빌드"를 지목하지 못합니다.
+
+**checklist source SHA는 배포 SHA와 다른 것이 정상입니다.** 검증 *절차*와 검증
+*대상*은 서로 독립입니다. 체크리스트 문서 이력은 `develop` 한 줄기로 두고,
+검증 대상은 활성화 후보 artifact(대개 `main` 계열 SHA)입니다. 두 값을 나란히
+적으면 이 어긋남이 의도된 구조임을 나중에 설명할 필요가 없어집니다 — 값이
+없으면 "왜 이 기록의 항목이 그 배포에 없던 것이냐"는 질문에 답할 수 없습니다.
+생성기가 이 값을 채웁니다.
+
+**세 칸이 함께 있어야 의미가 있습니다.** 식별자만으로는 무엇이 적용됐는지는
+알아도 언제인지 모르고, 시각만으로는 앱 배포와의 선후를 말하지 못합니다.
+순서가 계약인 이유는 A2에서 드러났습니다 — provider CHECK 확장 같은 migration은
+넓히는 방향이라 기존 코드와 역호환이지만, **앱이 먼저 배포되면 migration이
+적용되기 전의 요청이 제약에서 실패합니다.** 그 실패는 배포 직후 몇 분에만
+나타나고 로그에서 원인을 되짚기 어렵습니다.
+
+"아니오"가 실패를 뜻하지는 않습니다. 그 순서로 배포됐다면 그 창에서 무엇이
+일어났는지 확인한 사실을 발견 사항에 적습니다.
+
+## 이 기록이 덮는 범위
+
+정식 실행이 통과해도 그것은 **이 코드와 migration 조합이 올바르게 동작한다**는
+근거이지, production이 그 상태라는 증명이 아닙니다. 활성화 전에 production에서
+따로 확인하고, 그 결과는 `environment: production`인 **별도 기록**에 적습니다.
+
+그리고 동결한 뒤 다음 중 하나가 달라지면 이 기록은 새 대상을 덮지 못합니다 —
+활성화 대상 SHA, 적용 migration 집합, import·parser·wizard 관련 코드, 검증
+결과에 영향을 주는 flag·런타임 설정, 실제 배포 artifact.
+
+## 검증용 export와 정리
+
+실제 export에는 개인 데이터가 들어 있습니다. **여기에는 그 데이터가 아니라
+데이터에 대한 사실만 적습니다** — 계정 이메일, 대화 제목, 본문, 파일 자체는
+저장소에도 CI artifact에도 올리지 않습니다.
+
+| 항목 | 값 |
+|---|---|
+| 계정 종류 | 전용 검증 계정 / 개인 계정 (주소는 적지 않음) |
+| evidence ID (익명) | |
+| export 생성 (UTC) | |
+| 형식과 파일 SHA-256 | |
+| 실행자 | |
+| staging 데이터 삭제 (UTC) | |
+| 로컬 파일 정리 (UTC) / 확인자 | |
+
+정리 대상은 원본 archive만이 아닙니다.
+
+- 압축 해제본과 임시 복사본
+- 브라우저 다운로드 사본
+- 스크린샷·영상에 찍힌 대화 내용
+- staging의 import·conversation 데이터
+- 휴지통·동기화 서비스에 남은 사본
+- 검증 중 만든 로그와 첨부 증거 안의 개인 데이터
+
+**정리가 확인되지 않은 기록은 동결하지 않습니다.** "검증 후 정리한다"는 문장은
+담당자도 기한도 없어서 지켜졌는지 알 수 없습니다. 위 두 칸이 비어 있으면
+`frozen: true`로 넘어가지 않습니다.
 
 ## 항목별 결과
 

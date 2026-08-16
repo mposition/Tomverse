@@ -42,6 +42,15 @@ const reset = () => {
   creditReservationBehaviour = () => 1;
   oauthKeyBehaviour = () => undefined;
   deletedAccountIds = [];
+  costAdjustmentBacklogPending = 0;
+  costAdjustmentBacklogOldestMs = null;
+  sweepNoCostReasons = emptyNoCost();
+  sweepZeroReservedCostModels = {};
+  sweepUnexpectedOutcome = 0;
+  sweepAgedPending = 0;
+  sweepEligiblePending = 0;
+  sweepOldestEligibleMs = null;
+  reportedIncidents.length = 0;
 };
 
 // The rows the sweep would find. Only `user.findMany` returns anything: it is
@@ -59,6 +68,11 @@ const prismaStub = {
     update: async () => ({}),
     updateMany: async () => ({ count: 4 }),
   },
+  emailLoginAttempt: { deleteMany: async () => ({ count: 26 }) },
+  perplexityAsyncJob: { deleteMany: async () => ({ count: 27 }) },
+  imageAssetCleanup: { deleteMany: async () => ({ count: 28 }) },
+  assistantKnowledgeCleanup: { deleteMany: async () => ({ count: 29 }) },
+  tokenEstimateShadowSample: { deleteMany: async () => ({ count: 30 }) },
   providerErrorEvent: { deleteMany: async () => ({ count: 6 }) },
   productAnalyticsEvent: { deleteMany: async () => ({ count: 7 }) },
   notificationDelivery: { deleteMany: async () => ({ count: 8 }) },
@@ -85,6 +99,52 @@ mock.module(mod("lib/chatSecurity.ts"), {
   namedExports: {
     reconcileExpiredChatCreditReservations: async () =>
       creditReservationBehaviour(),
+  },
+});
+
+// The provider-cost ledger's two recovery passes. Both had no production
+// caller at all before this run began invoking them -- a sweep nobody ran and
+// a partial index nobody consumed -- so the wiring is the thing worth pinning.
+mock.module(mod("lib/routingAttemptSweep.ts"), {
+  namedExports: {
+    COST_INTENT_CUTOVER_ENV: "AUTO_ROUTER_COST_INTENT_CUTOVER_AT",
+    STALE_ATTEMPT_SWEEP_BATCH: 200,
+    sweepStaleRoutingAttempts: async () => ({
+      examined: 31,
+      closedCostInserted: 31,
+      closedWithExistingCost: 0,
+      closedWithoutCostIntent: sweepNoCostTotal(),
+      noCostReasons: sweepNoCostReasons,
+      zeroReservedCostModels: sweepZeroReservedCostModels,
+      unexpectedCostOutcome: sweepUnexpectedOutcome,
+      alreadyClosed: 0,
+      failed: 0,
+    }),
+    staleAttemptBacklog: async () => ({
+      agedPending: sweepAgedPending,
+      eligiblePending: sweepEligiblePending,
+      oldestEligibleMs: sweepOldestEligibleMs,
+    }),
+  },
+});
+mock.module(mod("lib/chatAttemptCostLedger.ts"), {
+  namedExports: {
+    applyPendingAttemptCostAdjustments: async () => ({
+      examined: 32,
+      applied: 32,
+      failed: 0,
+    }),
+    pendingAttemptCostAdjustmentBacklog: async () => ({
+      pending: costAdjustmentBacklogPending,
+      oldestPendingMs: costAdjustmentBacklogOldestMs,
+    }),
+  },
+});
+mock.module(mod("lib/operationalMonitoring.ts"), {
+  namedExports: {
+    reportOperationalIncident: async (incident: { code: string }) => {
+      reportedIncidents.push(incident.code);
+    },
   },
 });
 
@@ -179,7 +239,36 @@ mock.module(mod("lib/assistantKnowledgeProcessor.ts"), {
 
 type CleanupResult = Record<string, unknown> & {
   failedSteps: { step: string; error: string }[];
+  staleRoutingAttempts: {
+    closedCostInserted: number;
+    zeroReservedCostModels: Record<string, number>;
+    eligiblePending: number;
+    agedPending: number;
+    oldestEligibleMs: number | null;
+  } | null;
+  costAdjustments: { applied: number; pending: number } | null;
 };
+const emptyNoCost = () => ({
+  no_reservation: 0,
+  legacy_missing_cost_intent: 0,
+  missing_cost_intent: 0,
+  cost_intent_identity_mismatch: 0,
+  unclassified_missing_cost_intent: 0,
+  dangling_reservation: 0,
+  invalid_cost_intent_payload: 0,
+});
+let sweepNoCostReasons = emptyNoCost();
+const sweepNoCostTotal = () =>
+  Object.values(sweepNoCostReasons).reduce((sum, count) => sum + count, 0);
+let sweepZeroReservedCostModels: Record<string, number> = {};
+let sweepUnexpectedOutcome = 0;
+let sweepAgedPending = 0;
+let sweepEligiblePending = 0;
+let sweepOldestEligibleMs: number | null = null;
+let costAdjustmentBacklogPending = 0;
+let costAdjustmentBacklogOldestMs: number | null = null;
+const reportedIncidents: string[] = [];
+
 type MaintenanceModule = { cleanupExpiredData: () => Promise<CleanupResult> };
 
 // Loaded lazily: this file is transformed to CJS, where top-level await is not
@@ -279,4 +368,147 @@ test("a missing OAuth encryption key still fails the whole run", async () => {
   const { cleanupExpiredData } = await load();
   await assert.rejects(cleanupExpiredData(), /OAUTH_TOKEN_ENCRYPTION_KEY/);
   assert.deepEqual(deletedAccountIds, []);
+});
+
+// The provider-cost ledger's recovery passes only exist if something runs
+// them. Until this run called them, `sweepStaleRoutingAttempts` and
+// `applyPendingAttemptCostAdjustments` were a function and a partial index
+// with tests and no caller -- which looks identical, from the data, to a
+// system with nothing to recover.
+
+test("the maintenance run drives the cost ledger's recovery passes", async () => {
+  reset();
+  const { cleanupExpiredData } = await load();
+  const result = await cleanupExpiredData();
+
+  assert.equal(result.staleRoutingAttempts?.closedCostInserted, 31);
+  assert.equal(result.costAdjustments?.applied, 32);
+  // The backlog is reported beside the count, for the same reason the manifest
+  // sweep reports its own: a pass that applied everything it found and left
+  // work behind is only visible if the step says so.
+  assert.equal(result.costAdjustments?.pending, 0);
+  assert.deepEqual(reportedIncidents, []);
+});
+
+test("corrections older than two runs are an incident, not a log line", async () => {
+  reset();
+  costAdjustmentBacklogPending = 4;
+  costAdjustmentBacklogOldestMs = 46 * 60 * 1000;
+
+  const { cleanupExpiredData } = await load();
+  await cleanupExpiredData();
+
+  // No retry ceiling and no dead letter: a provider cost delta is not data
+  // that may be abandoned after N attempts. What it needs instead is to stop
+  // being invisible, and the age of the oldest unapplied one says it.
+  assert.deepEqual(reportedIncidents, ["CHAT_COST_ADJUSTMENT_BACKLOG"]);
+});
+
+test("a backlog inside one run is not yet an incident", async () => {
+  reset();
+  costAdjustmentBacklogPending = 2;
+  costAdjustmentBacklogOldestMs = 5 * 60 * 1000;
+
+  const { cleanupExpiredData } = await load();
+  await cleanupExpiredData();
+
+  // One run failing to apply a delta is a blip; the alert is for a pattern.
+  assert.deepEqual(reportedIncidents, []);
+});
+
+// The sweep's signals, each with the threshold its meaning earns. Alerting on
+// the no-cost total would either shout about instrumentation-only runs or stay
+// silent about a writer that stopped recording intents.
+
+test("an instrumentation-only run is not a signal", async () => {
+  reset();
+  sweepNoCostReasons.no_reservation = 12;
+
+  const { cleanupExpiredData } = await load();
+  const result = await cleanupExpiredData();
+
+  assert.equal(result.staleRoutingAttempts?.closedCostInserted, 31);
+  assert.deepEqual(reportedIncidents, []);
+});
+
+test("legacy payloads age out quietly; a post-cutover one does not", async () => {
+  reset();
+  sweepNoCostReasons.legacy_missing_cost_intent = 40;
+  const { cleanupExpiredData } = await load();
+  await cleanupExpiredData();
+  assert.deepEqual(reportedIncidents, [], "history is not a defect");
+
+  reset();
+  // Written after cost intents existed and carrying none: the writer that was
+  // supposed to record one did not, and no grace period applies.
+  sweepNoCostReasons.missing_cost_intent = 1;
+  await (await load()).cleanupExpiredData();
+  assert.deepEqual(reportedIncidents, ["CHAT_COST_INTENT_UNAVAILABLE"]);
+});
+
+test("a dangling reservation and an unreadable payload are each immediate", async () => {
+  for (const reason of ["dangling_reservation", "invalid_cost_intent_payload"] as const) {
+    reset();
+    sweepNoCostReasons[reason] = 1;
+    await (await load()).cleanupExpiredData();
+    assert.deepEqual(reportedIncidents, ["CHAT_COST_INTENT_UNAVAILABLE"], reason);
+  }
+});
+
+test("an unset cutover reports itself rather than answering legacy", async () => {
+  reset();
+  sweepNoCostReasons.unclassified_missing_cost_intent = 3;
+  await (await load()).cleanupExpiredData();
+  assert.deepEqual(reportedIncidents, ["CHAT_COST_INTENT_CUTOVER_UNSET"]);
+});
+
+test("an outcome the sweep cannot produce is an incident on the first one", async () => {
+  reset();
+  sweepUnexpectedOutcome = 1;
+  await (await load()).cleanupExpiredData();
+  assert.deepEqual(reportedIncidents, ["CHAT_COST_SWEEP_UNEXPECTED_OUTCOME"]);
+});
+
+test("the backlog alarms on what the sweep would act on, not on what is merely old", async () => {
+  // A deep-research turn legitimately streaming past the stale window is aged
+  // and not eligible. Alarming on age alone would fire on healthy traffic.
+  reset();
+  sweepAgedPending = 5_000;
+  sweepEligiblePending = 0;
+  await (await load()).cleanupExpiredData();
+  assert.deepEqual(reportedIncidents, []);
+
+  // More eligible than one batch can take.
+  reset();
+  sweepEligiblePending = 201;
+  await (await load()).cleanupExpiredData();
+  assert.deepEqual(reportedIncidents, ["CHAT_ATTEMPT_SWEEP_BACKLOG"]);
+
+  // Or one that has been eligible longer than the stale window plus two runs.
+  reset();
+  sweepEligiblePending = 1;
+  sweepOldestEligibleMs = 61 * 60 * 1000;
+  await (await load()).cleanupExpiredData();
+  assert.deepEqual(reportedIncidents, ["CHAT_ATTEMPT_SWEEP_BACKLOG"]);
+});
+
+test("a turn that authorized nothing is reported by model and never paged", async () => {
+  // These attempts get a cost row -- a ceiling of zero is a real audit record
+  // -- so nothing is missing and nothing is paged. What the run does say is
+  // which model it was, because a free model and a price an administrator
+  // flattened to zero are the same thing from inside the sweep.
+  reset();
+  sweepZeroReservedCostModels = { "openai/some-free-model": 25 };
+  const quiet = await (await load()).cleanupExpiredData();
+  assert.deepEqual(reportedIncidents, []);
+  assert.deepEqual(quiet.staleRoutingAttempts?.zeroReservedCostModels, {
+    "openai/some-free-model": 25,
+  });
+});
+
+test("an intent naming a model the attempt did not run is an incident", async () => {
+  reset();
+  sweepNoCostReasons.cost_intent_identity_mismatch = 1;
+  await (await load()).cleanupExpiredData();
+  assert.deepEqual(reportedIncidents, ["CHAT_COST_INTENT_UNAVAILABLE"]);
 });

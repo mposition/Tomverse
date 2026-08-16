@@ -52,6 +52,7 @@ import {
     hasUnsupportedGeminiPrefill,
 } from "@/lib/modelGenerationCompatibility";
 import { getWebSearchCapability } from "@/lib/webSearchCapability";
+import { reserveNativeSearchCost } from "@/lib/webSearchNativeCostReservation";
 import { getWebSearchSurchargeCredits } from "@/lib/webSearchCredits";
 import { buildWebSearchToolConfig, WEB_SEARCH_TOOL_NAMES } from "@/lib/webSearchToolConfig";
 import { normalizeWebSearchExecution } from "@/lib/webSearchExecutionNormalizer";
@@ -122,9 +123,10 @@ import {
     autoFallbackScope,
     type FallbackScopeRefusal,
 } from "@/lib/autoFallbackGate";
-import type {
-    AttemptPriceSnapshot,
-    AttemptUsage,
+import {
+    priceAttempt,
+    type AttemptPriceSnapshot,
+    type AttemptUsage,
 } from "@/lib/chatMultiAttemptSettlement";
 import {
     decideFallback,
@@ -1983,6 +1985,28 @@ async function handleChatPost(
                 ],
             });
         }
+        // What the search half of this turn may cost, before anything is sent.
+        //
+        // A native search is billed per query on top of tokens, and nothing
+        // used to reserve it -- the cost was added at settlement, so the
+        // provider budget only ever learned about it after the money was
+        // gone. Reserving the worst case requires there to be one: a provider
+        // whose request cannot bound the query count is refused here rather
+        // than dispatched against a reservation that does not cover it.
+        const nativeSearchReservation = reserveNativeSearchCost({
+            model: modelConfig,
+            capability: webSearchCapability,
+            nativeSearchEnabled,
+        });
+        if (!nativeSearchReservation.ok) {
+            throw new ChatAccessError(
+                503,
+                "WEB_SEARCH_COST_UNBOUNDED",
+                "Web search is temporarily unavailable for this model.",
+                undefined,
+                { scope: nativeSearchReservation.reason }
+            );
+        }
         const budget = createChatBudget(
             access.kind,
             modelConfig,
@@ -1993,6 +2017,7 @@ async function handleChatPost(
                     webSearchCapability
                 ),
                 nativeSearchEnabled,
+                nativeSearch: nativeSearchReservation,
             }
         );
         // `budget.inputTokens`, not the raw estimate: what this guard has to
@@ -2950,9 +2975,19 @@ async function handleChatPost(
                 attemptIndex: fallbackAttemptIndex,
                 provider: plan.provider,
                 reservedMicroUsd: getChatBudgetReservedCostMicroUsd(plan.budget),
-                periodStarts: {
-                    day: providerHoldDay.periodStart,
-                    month: providerHoldMonth.periodStart,
+                // Written with the hold, before the provider is called: a
+                // sweep that finds this attempt crashed has no other way to
+                // know what the call was allowed to cost.
+                costIntent: {
+                    modelId: plan.modelId,
+                    provider: plan.provider,
+                    estimatedInputTokens: plan.budget.inputTokens,
+                    reservedOutputTokens: plan.budget.reservedOutputTokens,
+                    inputUsdPerMillionTokens: plan.budget.inputUsdPerMillionTokens,
+                    outputUsdPerMillionTokens: plan.budget.outputUsdPerMillionTokens,
+                    cachedInputPriceMultiplier:
+                        plan.budget.cachedInputPriceMultiplier,
+                    pricingVersion: plan.budget.pricingVersion ?? null,
                 },
             }).catch((budgetError: unknown) => {
                 logRequestError(
@@ -3077,7 +3112,29 @@ async function handleChatPost(
             // built the same index twice and `attemptSetProblems` refused the
             // whole settlement, leaving the money where it was. A fallback
             // that never dispatched must settle as the single attempt it was.
+            //
+            // No usage metadata exists for a stream that failed before its
+            // first chunk, so the input is the reserved estimate and the
+            // output is zero, flagged as an estimate. Over-recording provider
+            // spend is the safe direction for a ledger whose job is to keep a
+            // budget from being exceeded; the user is not charged for it --
+            // §7 bills the accepted attempt only.
+            const endedAttempt: AttemptUsage = {
+                attemptIndex: dispatched.attemptIndex,
+                price: dispatched.price,
+                inputTokens: budget.inputTokens,
+                cachedInputTokens: 0,
+                outputTokens: 0,
+                usageFromProvider: false,
+                outcome: "failed",
+            };
             try {
+                // The cost is written with the close, not left to settlement
+                // at the end of the turn. This attempt is over and the turn is
+                // not: from here on it is terminal, so the stale-attempt sweep
+                // will never consider it again, and a process that dies during
+                // the fallback would otherwise leave a provider call that was
+                // made, was paid, and appears in no ledger at all.
                 await completeInstrumentedDispatch(failing, {
                     outcome: "failed_pre_token",
                     failureLayer: classified.failureLayer,
@@ -3085,6 +3142,16 @@ async function handleChatPost(
                     actualOutputTokens: 0,
                     errorClass: "provider_pre_token_failure",
                     settlementOutcome: "failed",
+                    cost: usageReservation
+                        ? {
+                              reservationId: usageReservation.reservationId,
+                              attempt: {
+                                  ...endedAttempt,
+                                  ...priceAttempt(endedAttempt),
+                                  userBilled: false,
+                              },
+                          }
+                        : null,
                 });
             } catch (recordError) {
                 logRequestError(
@@ -3094,21 +3161,7 @@ async function handleChatPost(
                     dispatched.modelId
                 );
             }
-            // No usage metadata exists for a stream that failed before its
-            // first chunk, so the input is the reserved estimate and the
-            // output is zero, flagged as an estimate. Over-recording provider
-            // spend is the safe direction for a ledger whose job is to keep a
-            // budget from being exceeded; the user is not charged for it --
-            // §7 bills the accepted attempt only.
-            endedAttempts.push({
-                attemptIndex: dispatched.attemptIndex,
-                price: dispatched.price,
-                inputTokens: budget.inputTokens,
-                cachedInputTokens: 0,
-                outputTokens: 0,
-                usageFromProvider: false,
-                outcome: "failed",
-            });
+            endedAttempts.push(endedAttempt);
 
             // The replaced reader is cancelled here, directly, and not through
             // `cancelSourceSafely`.

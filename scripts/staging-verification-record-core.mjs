@@ -123,10 +123,25 @@ export function renderItemTable(items) {
  * is generated, so a change to how a record is *shaped* stays a change to one
  * file rather than to this code.
  */
-export function renderRecord({ template, items, date, deploySha, revision }) {
+export function renderRecord({
+  template,
+  items,
+  date,
+  deploySha,
+  revision,
+  checklistSourceSha,
+}) {
   const table = renderItemTable(items);
   return template
     .replace(/^templateRevision:.*$/m, `templateRevision: ${revision}`)
+    .replace(
+      /^checklistSourceSha:.*$/m,
+      `checklistSourceSha: ${checklistSourceSha ?? ""}`
+    )
+    .replace(
+      /^\| \*\*checklist source SHA\*\* \|.*$/m,
+      `| **checklist source SHA** | ${checklistSourceSha ? `\`${checklistSourceSha}\`` : ""} |`
+    )
     .replace(/^deploySha:.*$/m, `deploySha: ${deploySha}`)
     .replace(
       /^# Staging 검증 실행 — .*$/m,

@@ -3043,6 +3043,30 @@ const checks = [
     },
   },
   {
+    // The third way a golden stops judging anything, after the two below: not
+    // a flag in a workflow and not a substitute browser, but the config's own
+    // default. `updateSnapshots` defaults to "missing", which writes a
+    // baseline that does not exist yet and reports the test passed -- so a
+    // platform with no goldens produces a green run and a directory of files
+    // nobody reviewed, and the two are indistinguishable afterwards.
+    //
+    // Asserted here rather than left to review because the failure is
+    // invisible in CI: the canonical image always has its baselines, so the
+    // setting only matters on the runs that are not it, and those are the
+    // runs whose output gets committed.
+    name: "A missing visual baseline fails instead of being written",
+    file: "playwright.config.ts",
+    test: (source) =>
+      /^\s*updateSnapshots:\s*"none",$/m.test(source) &&
+      // Recording still has to work, or the guard would leave no way to move
+      // a baseline at all. The recorder passes the CLI flag, which overrides
+      // the config -- the assertion that only that one workflow carries it
+      // lives in the workflow entry above.
+      read(".github/workflows/visual-baseline-record.yml").includes(
+        "--update-snapshots"
+      ),
+  },
+  {
     // The goldens report `Not verified` on a substitute browser instead of a
     // red diff (tests/e2e/support/canonical-visual.ts). That is only safe
     // while no workflow can put CI into the substitute case: a runner with
@@ -3199,11 +3223,57 @@ const checks = [
     // their own PRs (cron-auto-fix -> main, feedback-autofix -> develop), so
     // the generic auto-PR workflow has to stay out of them -- a PAT push
     // does trigger workflows, which is exactly how the duplicate happened.
-    name: "Auto PR to Develop excludes the automation branch namespaces",
+    // Was: "excludes the automation branch namespaces", asserting two entries
+    // in a `branches-ignore` list. An exclusion list can only name the cases
+    // someone has already been surprised by, and on 2026-08-15 it missed one
+    // -- a branch pushed for a `main` PR got a develop PR (#573) with
+    // auto-merge enabled, against a base where its change did nothing.
+    //
+    // The rule is now opt-in: a `to-develop` path segment. What this asserts
+    // is that both halves are still in force, because either alone reopens the
+    // hole -- a glob without the module cannot refuse `autofix/to-develop/...`,
+    // and the module without the glob would run the job on every push.
+    name: "Auto PR to Develop opens a PR only for branches that name develop as their target",
     file: ".github/workflows/auto-pr-to-develop.yml",
-    test: (source) =>
-      source.includes("- autofix/**") &&
-      source.includes("- feedback-autofix/**"),
+    test: (source) => {
+      const policy = read("scripts/auto-pr-branch-policy.mjs");
+      // The whole list, not a match inside it. A pattern that only asserted
+      // the two entries were present would pass with `- "claude/**"` appended
+      // underneath them, which is the opt-out rule restored one line at a
+      // time.
+      const listed = (() => {
+        const at = source.search(/^\s*branches:\s*$/m);
+        if (at === -1) return null;
+        const entries = [];
+        for (const line of source.slice(at).split("\n").slice(1)) {
+          const item = /^\s+-\s+(.*\S)\s*$/.exec(line);
+          if (!item) break;
+          entries.push(item[1].replace(/^"|"$/g, ""));
+        }
+        return entries;
+      })();
+      return (
+        !/^\s*branches-ignore:/m.test(source) &&
+        listed !== null &&
+        listed.length === 2 &&
+        listed[0] === "to-develop/**" &&
+        listed[1] === "**/to-develop/**" &&
+        source.includes('node scripts/auto-pr-branch-policy.mjs "$BRANCH"') &&
+        // Every step that creates a pull request or arranges its merge, plus
+        // the diff check they both read. A step left ungated would run on a
+        // widened glob alone.
+        (source.match(/steps\.target\.outputs\.create == 'true'/g) ?? []).length === 3 &&
+        // The namespaces that open their own PRs are still refused, and still
+        // refused ahead of the marker -- `feedback-autofix` records the number
+        // of the PR its own workflow created, so a second one is not a
+        // duplicate but a wrong answer.
+        policy.includes('"dependabot"') &&
+        policy.includes('"autofix"') &&
+        policy.includes('"feedback-autofix"') &&
+        policy.indexOf("AUTOMATION_NAMESPACES") < policy.indexOf("TARGET_MARKER") &&
+        policy.includes('PRODUCTION_NAMESPACES = ["to-main", "release", "hotfix"]')
+      );
+    },
   },
   {
     // Phase 3 fix workflow supply chain and trigger surface: dispatch-only

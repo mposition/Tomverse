@@ -213,6 +213,46 @@ feature nobody is shown is a feature nobody uses. It is **not**
 start and is deployment-tunable, this bounds one row of UI. Neither may be
 derived from the other.
 
+### Selection limit
+
+`IMAGE_GROUP_MAX_MODELS` is the second, unrelated number: how many models one
+request may actually fan out to. **The composer must never offer a selection
+admission would refuse.**
+
+- The limit is resolved **on the server, per request**
+  (`imageGroupMaxModels()`, `lib/imageGroupLimits.ts`) and handed to the
+  composer as a prop. The client never reads `process.env` and never carries
+  its own copy: in a Client Component that is a build-time substitution, so it
+  would keep offering the previous limit after a deployment changed one.
+- The composer and admission call the **same function**. A number written into
+  a component is a violation even when it currently agrees.
+- At the limit an unselected model **stays visible, stays focusable and keeps
+  its price**. Discovery is not what a limit costs.
+- An attempt to exceed it **changes nothing**: no automatic deselection, no
+  silent replacement of an older choice. The refusal is stated instead, in a
+  persistent `role="status"` notice that every blocked chip points at through
+  `aria-describedby`, and the chips carry `aria-disabled`. The state is never
+  conveyed by colour alone, and a keyboard activation is refused the same way a
+  click is, with the same reason.
+- An **already selected** model is always deselectable, including at the
+  limit — that is how a user gets out of it. The one selection that cannot be
+  emptied is the last remaining model.
+- The current count is shown as `{n}/{max}` **at all times**, not only once the
+  ceiling is reached: a rule first mentioned at the moment it becomes
+  inconvenient was never disclosed.
+- Per-model prices and the group total stay visible throughout.
+- Seeded and restored selections are cut to the limit **deterministically**, in
+  registry order, and the models that did not fit are named. Nothing stored is
+  rewritten: a group that ran four models keeps saying so.
+- Because the client's limit can be stale, the server's refusal has its own
+  message. `IMAGE_MODEL_SELECTION_INVALID` renders `details.maxModels` — the
+  number admission actually applied — falling back to the client's runtime
+  limit only when that detail is missing or malformed. A generic "try again" is
+  a violation: retrying re-sends the same selection and fails identically.
+
+Desktop and mobile use the same information structure. Server admission remains
+the only boundary; none of the above may replace it.
+
 The rule lives in `imageComposerModelLayout()` in the registry, not in the
 component, and it is tested there. **This deployment cannot render the compact
 mode**: two models are enabled and the threshold is three, so an end-to-end

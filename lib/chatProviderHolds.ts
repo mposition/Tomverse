@@ -116,8 +116,9 @@ export const deriveProviderEntries = (
  *   double-counts on release;
  * - **an attempt index outside 0..1** — §6's build budget was exceeded
  *   somewhere upstream and the money is where it shows;
- * - **more than one period pair per attempt** — a hold in a period the
- *   reservation never took, which nothing would ever release.
+ * - **a hold that is not one provider, one day and one month at one amount**
+ *   — every other shape leaves a bucket that release cannot fully give back,
+ *   because release subtracts what the holds say was put there.
  */
 export const providerHoldProblems = (input: {
     holds: readonly AttemptHold[];
@@ -130,7 +131,7 @@ export const providerHoldProblems = (input: {
 }): readonly string[] => {
     const problems: string[] = [];
     const seen = new Set<string>();
-    const periodsByAttempt = new Map<number, Set<string>>();
+    const holdsByAttempt = new Map<number, AttemptHold[]>();
 
     for (const hold of input.holds) {
         if (
@@ -158,15 +159,40 @@ export const providerHoldProblems = (input: {
             );
         }
         seen.add(identity);
-        const periods = periodsByAttempt.get(hold.attemptIndex) ?? new Set();
-        periods.add(hold.period);
-        periodsByAttempt.set(hold.attemptIndex, periods);
+        holdsByAttempt.set(hold.attemptIndex, [
+            ...(holdsByAttempt.get(hold.attemptIndex) ?? []),
+            hold,
+        ]);
     }
 
-    for (const [attemptIndex, periods] of periodsByAttempt) {
-        if (periods.size > PROVIDER_BUDGET_PERIODS.length) {
+    // A hold is one provider, one day, one month, both the same amount.
+    //
+    // The looser "no more than two periods" this replaces was nearly vacuous:
+    // there are only two allowed periods, so almost nothing could fail it. The
+    // shapes it let through are all reachable and all wrong -- a day hold on
+    // one provider and a month hold on another, a day hold with no month, two
+    // periods holding different amounts. Each leaves a bucket that release
+    // cannot fully give back, because release subtracts what the holds say.
+    for (const [attemptIndex, holds] of holdsByAttempt) {
+        const keys = new Set(holds.map((hold) => hold.key));
+        if (keys.size > 1) {
             problems.push(
-                `attempt ${attemptIndex} holds ${periods.size} periods; a hold is one day and one month`
+                `attempt ${attemptIndex} holds ${keys.size} providers; an attempt runs on one`
+            );
+        }
+        for (const period of PROVIDER_BUDGET_PERIODS) {
+            const count = holds.filter((hold) => hold.period === period).length;
+            if (count !== 1) {
+                problems.push(
+                    `attempt ${attemptIndex} holds ${count} ${period} rows; a hold is exactly one of each`
+                );
+            }
+        }
+        const amounts = new Set(holds.map((hold) => hold.amount));
+        if (amounts.size > 1) {
+            problems.push(
+                `attempt ${attemptIndex} holds ${[...amounts].join(" and ")}; ` +
+                    "the day and month holds are the same reservation"
             );
         }
     }
@@ -217,3 +243,177 @@ export const withoutAttemptHolds = (
     holds: readonly AttemptHold[],
     attemptIndex: number
 ): AttemptHold[] => holds.filter((hold) => hold.attemptIndex !== attemptIndex);
+
+/**
+ * What an attempt was authorized to spend, and at what rates.
+ *
+ * Written when the hold is taken, which is before the provider is called.
+ * That order is what makes a crash recoverable: the sweep that finds a
+ * `pending` attempt half an hour later has no memory of the request, and the
+ * only honest thing it can record is what the attempt was allowed to spend.
+ * Without this it would have to write 0, which is a claim that a call which
+ * demonstrably happened used nothing.
+ *
+ * Not the same as the hold. The hold is the money reserved in the bucket; this
+ * is how to turn that reservation back into a cost row -- which model, which
+ * provider, at which rates, against which estimate.
+ */
+export type AttemptCostIntent = {
+    attemptIndex: number;
+    modelId: string;
+    provider: string;
+    /** The estimate the reservation was sized on. */
+    estimatedInputTokens: number;
+    reservedOutputTokens: number;
+    inputUsdPerMillionTokens: number;
+    outputUsdPerMillionTokens: number;
+    cachedInputPriceMultiplier: number;
+    pricingVersion?: string | null;
+    /** What the hold put in the bucket. The upper bound a crash records. */
+    reservedCostMicroUsd: number;
+    /**
+     * The native web search this attempt was authorized to run, if any.
+     *
+     * Here rather than on the reservation because an authorization is a
+     * contract with one dispatched attempt: a fallback runs a different model
+     * at a different provider, with its own rate and its own ceiling. Native
+     * search is excluded from fallback today, and putting this at the top
+     * level would mean changing the schema again on the day it is not.
+     *
+     * Frozen so settlement prices what was authorized. Recomputing from the
+     * live registry would let a price change between dispatch and settlement
+     * silently rewrite what a turn was allowed to spend.
+     */
+    nativeSearchAuthorization?: {
+        reservedCostMicroUsd: number;
+        costPerQueryMicroUsd: number;
+        maxQueries: number;
+    };
+};
+
+/**
+ * Whether the intents and the holds agree about what was authorized.
+ *
+ * The two answer different questions and are deliberately not required to
+ * match one-for-one. An intent is the authorization -- which model, at which
+ * rates, up to what -- and every dispatched attempt has one, including a turn
+ * whose rates are all zero. A hold is money actually put in a budget bucket,
+ * which only a positive authorization does.
+ *
+ * So: zero authorized and no hold is the normal shape of a free turn, and
+ * needs no special case anywhere downstream. Positive authorized with a
+ * missing bucket is a lost hold. Zero authorized with a hold is money nothing
+ * authorized. And a hold with no intent is the one that can never be
+ * reconstructed -- the bucket moved and nothing says why.
+ */
+export const attemptCostIntentProblems = (input: {
+    holds: readonly AttemptHold[];
+    intents: readonly AttemptCostIntent[];
+    /** The period this reservation's provider budget was anchored to. */
+    periodStarts?: { day: Date; month: Date };
+}): readonly string[] => {
+    const problems: string[] = [];
+    const intentAttempts = new Set(input.intents.map((intent) => intent.attemptIndex));
+    if (intentAttempts.size !== input.intents.length) {
+        problems.push("two cost intents share an attemptIndex");
+    }
+
+    const holdsByAttempt = new Map<number, AttemptHold[]>();
+    for (const hold of input.holds) {
+        holdsByAttempt.set(hold.attemptIndex, [
+            ...(holdsByAttempt.get(hold.attemptIndex) ?? []),
+            hold,
+        ]);
+    }
+
+    // A hold with no intent is corruption in every case. The intent is the
+    // record of what was authorized and at what rates; money moved in a bucket
+    // with nothing saying why is the one combination that can never be
+    // reconstructed.
+    for (const attemptIndex of holdsByAttempt.keys()) {
+        if (!intentAttempts.has(attemptIndex)) {
+            problems.push(`attempt ${attemptIndex} has a hold and no cost intent`);
+        }
+    }
+
+    for (const intent of input.intents) {
+        // The parts have to add up to the whole. `reservedCostMicroUsd` is
+        // what the hold put in the bucket, and it is the sum of the token
+        // reservation and the search reservation -- an authorization whose
+        // components disagree with its total is one nobody can audit.
+        const search = intent.nativeSearchAuthorization;
+        if (search) {
+            const expectedSearch = Math.ceil(
+                search.costPerQueryMicroUsd * search.maxQueries
+            );
+            if (search.reservedCostMicroUsd !== expectedSearch) {
+                problems.push(
+                    `attempt ${intent.attemptIndex} authorized ${search.reservedCostMicroUsd} for search but ${search.maxQueries} queries at ${search.costPerQueryMicroUsd} is ${expectedSearch}`
+                );
+            }
+            const tokens =
+                Math.ceil(
+                    intent.estimatedInputTokens * intent.inputUsdPerMillionTokens
+                ) +
+                Math.ceil(
+                    intent.reservedOutputTokens * intent.outputUsdPerMillionTokens
+                );
+            if (
+                intent.reservedCostMicroUsd !==
+                tokens + search.reservedCostMicroUsd
+            ) {
+                problems.push(
+                    `attempt ${intent.attemptIndex} reserved ${intent.reservedCostMicroUsd}, which is not ${tokens} of tokens plus ${search.reservedCostMicroUsd} of search`
+                );
+            }
+        }
+        const held = holdsByAttempt.get(intent.attemptIndex) ?? [];
+        if (intent.reservedCostMicroUsd > 0) {
+            // A positive authorization has to have moved both buckets. One of
+            // them missing means a hold was lost, and release would give back
+            // less than was taken.
+            const missing = PROVIDER_BUDGET_PERIODS.filter(
+                (period) => !held.some((hold) => hold.period === period)
+            );
+            if (missing.length > 0) {
+                problems.push(
+                    `attempt ${intent.attemptIndex} authorized ${intent.reservedCostMicroUsd} and holds no ${missing.join(" or ")}`
+                );
+            }
+            continue;
+        }
+        // Zero authorized, so nothing was put in a bucket. A hold here would
+        // be money reserved against an authorization that says none was.
+        if (held.length > 0) {
+            problems.push(
+                `attempt ${intent.attemptIndex} authorized nothing and holds ${held.length} bucket(s)`
+            );
+        }
+    }
+    // Every hold belongs to the period the reservation was authorized in.
+    // A hold on another period is one settlement would not release: it
+    // subtracts from the bucket the payload names, and that would be a
+    // different row.
+    if (input.periodStarts) {
+        const anchored: Record<string, Date> = {
+            "provider-cost-day": input.periodStarts.day,
+            "provider-cost-month": input.periodStarts.month,
+        };
+        for (const hold of input.holds) {
+            const expected = anchored[hold.period];
+            if (expected && hold.periodStart.getTime() !== expected.getTime()) {
+                problems.push(
+                    `attempt ${hold.attemptIndex} holds ${hold.period} at ${hold.periodStart.toISOString()}, not the reservation's ${expected.toISOString()}`
+                );
+            }
+        }
+    }
+    return problems;
+};
+
+/** The intent for one attempt, or null when the payload predates them. */
+export const costIntentFor = (
+    intents: readonly AttemptCostIntent[] | undefined,
+    attemptIndex: number
+): AttemptCostIntent | null =>
+    intents?.find((intent) => intent.attemptIndex === attemptIndex) ?? null;

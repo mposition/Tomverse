@@ -368,7 +368,7 @@ Four things it does that are easy to get wrong:
   manifest hash key.
 - **The budget is held before the call, and the hold is durable.** §10
   authorizes every dispatch including this one, and money held at one provider
-  does not make a call to another affordable. `reserveFallbackProviderBudget`
+  does not make a call to another affordable. `reserveAttemptProviderBudget`
   takes the fallback provider's own hold and writes it into the reservation's
   payload in the same transaction — because `settleChatUsage` re-reads that
   payload, and an earlier version handed the entries back to a caller who
@@ -377,7 +377,7 @@ Four things it does that are easy to get wrong:
   safe direction for a guard against overspend, and it removes both the
   no-hold window and the deadlock two opposite-direction fallbacks would have
   had. A fallback that is authorized and then fails to dispatch gives its hold
-  back through `releaseFallbackProviderBudget`.
+  back through `releaseAttemptProviderBudget`.
 - **The primary joins `endedAttempts` only once the swap commits.** It used to
   be added before the dispatch, so a dispatch that then failed left the turn
   settling attempt 0 twice — which `attemptSetProblems` refuses, so the whole
@@ -396,6 +396,12 @@ Four things it does that are easy to get wrong:
   metadata exists for a stream that failed before its first chunk, and
   over-recording provider spend is the safe direction for a ledger whose job is
   to stop a budget being exceeded.
+- **The primary's cost is recorded when the primary ends, not when the turn
+  does.** `closeAttemptWithCost` writes the attempt's terminal outcome and its
+  `ChatAttemptUsage` row in one transaction. The reason is §9.5: from the
+  moment the primary is closed it is terminal, so the stale-attempt sweep will
+  never look at it again, and a process that died during the fallback used to
+  lose that attempt's provider spend outright.
 
 The scan that used to prove there was no substitution at all is now
 `tests/automaticFallbackBoundary.test.mjs`, renamed and rewritten. It used to prove
@@ -461,6 +467,222 @@ from a real judgement forever after.
 
 Order that keeps each step checkable:
 
+### 9.5 What a crashed attempt cost
+
+A dispatch is recorded before the provider's stream is read and the outcome
+after it. Between those two the process can die — a deploy, an OOM, a host
+going away — and until this section existed the money simply vanished: the
+provider had been called and paid, the attempt stayed `pending` for ever, and
+no ledger anywhere carried the spend. Not a wrong number; no number.
+
+Four pieces, and each answers a different question.
+
+**What was it allowed to spend?** The hold alone does not say — it is a number
+in a bucket shared with every other attempt on that provider. So the
+reservation payload now carries an *attempt cost intent* per attempt, written
+at the moment the hold is taken: model, provider, the estimate and reservation
+it was sized from, the price snapshot with its version, and the reserved
+provider cost. `lib/chatProviderHolds.ts` validates it against the holds on
+every read and write, so a payload whose intents and holds disagree is refused
+rather than settled.
+
+**Who writes the cost, and when?** Whoever closes the attempt, in the same
+transaction. `closeAttemptWithCost` compare-and-sets `RoutingAttempt` from
+`pending` to its terminal outcome and writes `ChatAttemptUsage` together; the
+writer that loses the CAS writes nothing at all, so a cost row can never be
+recorded against an outcome its writer did not set. The attempt that ends the
+turn is the exception, and only because its usage is not known any earlier —
+settlement writes that one.
+
+**What may the sweep conclude?** `lib/routingAttemptSweep.ts` closes attempts
+that are dispatched, old, unleased and whose reservation is finished or
+expired. It records `outcome: unknown_after_dispatch` — not `failed_pre_token`,
+because nobody observed the provider call — and `failureLayer: process`,
+because filing a host restart under `provider` would move conversations off a
+model that did nothing wrong. Its cost row is the attempt's own reserved upper
+bound, marked `costSource: reserved_upper_bound` and `usageSource:
+crash_reconciliation`, with the token columns NULL. Zero would be a claim that
+a call which demonstrably happened used nothing; invented token counts would be
+numbers nobody measured. A database CHECK restricts NULL tokens to exactly that
+provenance.
+
+**What happens when the truth arrives late?** It is appended, never applied.
+`ChatAttemptUsage` is immutable and unique per `(reservationId, attemptIndex)`,
+so a later insert is skipped — and skipping is right for a replay and wrong for
+a real observation, which would leave the estimate standing for ever while the
+truth was known and discarded. `ChatAttemptUsageAdjustment` takes the
+observation with the signed difference it makes, unique on its `observationId`
+so a reconciliation file replayed twice moves the ledger once, and the delta
+reaches `ProviderDailyUsage` in the same transaction that appends it. Resolved
+cost is base plus adjustments — `resolvedAttemptCosts` — and it reports whether
+a figure is still an unmeasured upper bound, because an estimate that reads
+like measured spend is one somebody will plan against.
+
+An adjustment is created with `appliedAt` NULL and marked only once the rollup
+has actually taken the delta. If the rollup row is missing the adjustment stays
+unmarked and the writer returns `adjustment_pending` rather than `corrected`;
+`applyPendingAttemptCostAdjustments` is the consumer that finds those through
+the partial index and applies them, recreating a missing rollup row rather than
+leaving the delta stranded. Marking first and applying second is what makes two
+replays apply one delta once.
+
+**Something has to run all of this.** The fifteen-minute maintenance job now
+drives the three recovery passes in the only order that works: reconcile
+expired reservations, then sweep stale attempts — the sweep only considers an
+attempt whose reservation is terminal or expired, so running it first would
+defer a run's worth every time — then replay pending adjustments, which the
+step before it can create. Until that wiring existed the last two had no
+production caller at all: a sweep nobody ran, and a partial index nobody
+consumed, which from the data is indistinguishable from having nothing to
+recover.
+
+There is deliberately no retry ceiling and no dead-letter queue. A provider
+cost delta is not data that may be abandoned after N attempts; what it needs is
+to stop being invisible. The step reports the pending count and the age of the
+oldest unapplied correction, and an age past two maintenance runs raises
+`CHAT_COST_ADJUSTMENT_BACKLOG`. One run failing to apply a delta is a blip; two
+is a pattern nobody would otherwise see.
+
+The steps are idempotent and do not depend on one another for correctness — the
+sweep already accepts a reservation that is merely expired, and nothing in a
+maintenance run creates the adjustments the replay applies. They run after the
+primary reconciliation to keep reporting and operational ownership predictable,
+not because either needs the other.
+
+**Each sweep signal gets the threshold its meaning earns.** Alerting on "closed
+without a cost row" as one number would either shout about instrumentation-only
+runs or stay silent about a writer that stopped recording intents, so the total
+is split by reason:
+
+| Reason | Meaning | Threshold |
+| --- | --- | --- |
+| `no_reservation` | An instrumentation-only run | Counted; never alerts |
+| `legacy_missing_cost_intent` | Written before intents existed | Counted; ages out |
+| `missing_cost_intent` | Written after the cutover, carrying none | One is an incident |
+| `dangling_reservation` | The run points at a row that is gone | One is an incident |
+| `invalid_cost_intent_payload` | The payload will not validate | One is an incident |
+| `cost_intent_identity_mismatch` | The intent names a model the attempt did not run | One is an incident |
+| `unclassified_missing_cost_intent` | No cutover configured | Warning naming the variable |
+
+History and defect are told apart by `AUTO_ROUTER_COST_INTENT_CUTOVER_AT`, the
+moment intents began being written, compared against the reservation's own
+creation time. Unset, the two cannot be distinguished at all — so the unset
+configuration is what gets reported, rather than the alarm quietly answering
+"legacy" to everything.
+
+**An intent and a hold answer different questions.** The intent is the
+authorization — which model, at which rates, up to what — and *every*
+dispatched attempt has one, including a turn whose rates are all zero. A hold
+is money actually put in a budget bucket, which only a positive authorization
+does. So:
+
+| Intent | Hold | Meaning |
+| --- | --- | --- |
+| zero | absent | A free turn. Normal, and it still gets a cost row |
+| positive | both periods | The ordinary case |
+| positive | one or none | A hold was lost — refused on read |
+| zero | present | Money nothing authorized — refused on read |
+| absent | present | The bucket moved and nothing says why — refused on read |
+
+That separation is what made the zero case legible. It used to have neither
+half, so a sweep could only say "nothing to price" and had no way to tell a
+free model from an authorization that went missing — and the fallback path
+wrote a zero hold where acquisition wrote nothing, so the same free model left
+two different shapes. Now a zero authorization is an explicit record and the
+sweep writes a cost row for it: `costSource: reserved_upper_bound` with a cost
+of zero says *the ceiling this call was allowed was nothing*, which is not a
+claim that the provider charged nothing — a native web search's own per-call
+charge sits outside the reservation entirely — and a late actual corrects it
+through the ordinary adjustment path.
+
+The models that authorize nothing are still reported by name, as
+`provider/modelId` counts taken from the **attempt row** rather than the
+payload: a fallback's payload `modelId` is the primary's and always will be.
+`npm run check:model-pricing-db` reads the catalogue from the other side and
+reports any enabled model pricing every token at zero. One name in either list
+nobody meant to be free is the signal; a per-occurrence page would only ever be
+about a turn behaving correctly.
+
+The intent's model and provider are checked against the attempt row on every
+sweep, because nothing else compares them and pricing one model's call at
+another's rates is what that would cause.
+
+**The provider budget period is anchored once, when the turn is authorized.**
+`providerBudgetPeriodStarts` is written into the reservation whether or not a
+hold is taken, and every later write reads it: a fallback's hold, and the
+settlement of a provider the reservation never held anything against. One
+logical response is charged to one period even when it crosses UTC midnight.
+
+It was previously borrowed from whichever held entry happened to share the
+period, which worked only while something was held — so a turn whose primary
+reserved nothing had no entry to borrow from and a fallback's real spend was
+dropped on the floor. A free model running a paid native web search is exactly
+that shape.
+
+None of the alternatives to storing it are sound. A user's `day` bucket is
+anchored to their account's own reckoning and can name a different day than
+the provider's UTC one. `createdAt` is the database's clock rather than the one
+the reservation was computed against, and the two can fall either side of
+midnight. The period is part of the authorization, not something to reconstruct
+afterwards. A payload written before the anchor existed recovers it from the
+provider holds it already carries — those were taken at the same moment, so
+their `periodStart` *is* the anchor — and one carrying neither is refused with
+`no_provider_budget_period` rather than guessed at.
+
+`unexpectedCostOutcome` is an incident on the first occurrence: the sweep
+cannot produce those outcomes by construction, so one means a contract broke.
+`failed` is not, on its own — a database that was briefly unavailable costs a
+delay, and the attempt is still `pending` for the next run. What is worth a
+call is the sweep falling behind: more eligible attempts than one batch can
+take, or one eligible for longer than thirty minutes to become stale plus two
+fifteen-minute runs.
+
+The backlog counts what the sweep would actually act on, sharing its exact
+predicate. Counting by age alone included turns that are legitimately still
+streaming — deep research runs past thirty minutes — so an alarm on that number
+would have fired on healthy traffic. `agedPending` is still reported beside it
+as a health figure.
+
+**Every writer is atomic, including the sweep.** The sweep reads and validates
+the cost intent first, then closes and records in one transaction through
+`closeAttemptWithCost`; a failure takes the close with it, so the attempt stays
+`pending` and the next sweep retries. An attempt whose payload carries no
+intent is closed without a cost row and counted as `closedWithoutCostIntent`,
+never folded into the success count — nobody can now state what that attempt
+cost, and that is a hole in the ledger rather than an ordinary sweep. A payload
+that fails to read is reported separately again, as
+`invalid_cost_intent_payload`: the first is a closed set that ages out, the
+second is a defect happening now.
+
+**Single-attempt turns settle through the same writer.** They are most of the
+traffic, and their accrual used to happen after the settlement transaction
+committed — so a crash in that window lost the rollup with no way to rebuild
+it, the reservation already being terminal. The cost row, the rollup, the
+terminal status and the settlement pointer now commit together. Shadow telemetry and the
+provider balance alert stay outside, and the first of those is not about speed:
+`recordShadowSettlement` swallows its own errors because the contract is that
+shadow telemetry never fails a paid request, and a statement that fails on a
+transaction's own connection aborts that transaction whatever the caller does
+with the exception. Running it inside would have made the contract untrue in
+exactly the case it exists for — and it ran on the global client while the
+transaction held one, a second connection per settlement and a pool that can
+deadlock against itself. Outside the commit it also cannot record a settlement
+that never happened.
+
+The accrual is the transaction's *last* statement. `ProviderDailyUsage` is
+keyed on (provider, model, day), so it is one row shared by every turn on that
+model — the hottest row here — and whoever touches it holds it until COMMIT.
+Touching it early would serialise every concurrent turn on that model across
+the whole tail of the settlement; touching it last narrows that to the commit
+itself. When a fallback has two of them they are taken in sorted order, so two
+settlements holding two rollup rows cannot deadlock on each other.
+
+The two ledgers stay separated at their furthest apart here: a crash refunds
+the user in full, keeps the provider's cost, and names no billed attempt.
+`ChatCreditReservation.settlementAttemptIndex` is therefore allowed to be NULL
+on a refund, and the deferred trigger demands a pointer only from a settlement
+that actually charged credits.
+
 1. ~~a deterministic test double where the first reader raises a pre-token
    error and the second succeeds, fails, or is cancelled — before any real
    provider~~ — done, above;
@@ -471,6 +693,12 @@ Order that keeps each step checkable:
    and the logs: one run, one reservation, two attempts, one settlement, one
    lease release;
 5. fallback failure and disconnect-during-fallback, then enable.
+
+Prerequisite to all of them, and now done: crash provider cost accrual, §9.5.
+The branch was held merge-blocked until it landed, because a fallback doubles
+the window in which a process can die between a dispatch and its outcome, and
+enabling one without the accrual would have made provider spend quietly
+unaccountable at exactly the rate the feature succeeds.
 
 This is its own change and should not ride along with the pieces above.
 
