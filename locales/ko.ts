@@ -1079,13 +1079,13 @@ export const ko = {
     externalImport: {
         dataTabTitle: "다른 AI 서비스에서 가져오기",
         dataTabDescription:
-            "ChatGPT·Claude 내보내기 파일의 과거 대화를 Tomverse 계정에 저장합니다. 내보내기 파일은 브라우저 안에서만 읽습니다.",
+            "ChatGPT·Claude·Gemini(Google Takeout) 내보내기 파일의 과거 대화를 Tomverse 계정에 저장합니다. 내보내기 파일은 브라우저 안에서만 읽습니다.",
         dataTabUsage: "가져온 대화 {conversations}개 · {storage} 저장됨",
         dataTabOpen: "가져오기 관리",
         dataTabUsageEmpty: "아직 가져온 대화가 없습니다",
         pageTitle: "다른 AI 서비스에서 대화 가져오기",
         pageDescription:
-            "ChatGPT 또는 Claude의 공식 데이터 내보내기 파일을 올리고, 내용을 확인한 뒤 Tomverse 계정에 보관할 대화를 선택하세요.",
+            "ChatGPT, Claude, Gemini의 공식 데이터 내보내기 파일을 올리고, 내용을 확인한 뒤 Tomverse 계정에 보관할 대화를 선택하세요.",
         backToImports: "가져오기 목록으로",
         signInRequired: "다른 AI 서비스의 대화를 가져오려면 로그인하세요.",
         disabledNotice: "외부 대화 가져오기는 지금 사용할 수 없습니다.",
@@ -1096,7 +1096,7 @@ export const ko = {
         capacityConversations: "가져온 대화 {limit}개 중 {used}개",
         selectFile: "내보내기 파일 선택",
         selectFileHint:
-            "ChatGPT 또는 Claude 데이터 내보내기(.zip 또는 .json), 최대 1GB. 용량이 커도 괜찮습니다 — 미디어 파일은 읽지 않고 건너뜁니다.",
+            "ChatGPT·Claude·Gemini 데이터 내보내기(.zip 또는 .json), 최대 1GB. Gemini는 Google Takeout에서 내 활동 → Gemini 앱을 JSON으로 내보낸 파일이어야 합니다. 용량이 커도 괜찮습니다 — 미디어 파일은 읽지 않고 건너뜁니다.",
         parsing: "브라우저에서 내보내기 파일을 읽는 중…",
         parsingProgress: "대화 {conversations}개 발견",
         cancel: "취소",
@@ -1215,7 +1215,8 @@ export const ko = {
             "내 활동을 선택한 뒤 그 안에서 Gemini 앱을 고르고 형식을 JSON으로 지정합니다 — Gemini 항목 자체에는 대화가 아니라 Gem이 들어 있습니다",
         guideGeminiStep3:
             "내보낸 뒤 Google이 보내 준 다운로드 링크로 받은 .zip을 올립니다",
-        guideFormats: "ZIP 파일과 JSON 파일을 모두 지원합니다.",
+        guideFormats:
+            "ZIP 파일과 JSON 파일을 모두 지원합니다. Gemini 내보내기는 JSON 형식이어야 하며 HTML은 읽을 수 없습니다.",
         guideStaysLocal:
             "원본 파일은 기기를 벗어나지 않습니다. 브라우저 안에서만 열립니다.",
         guideMediaExcluded: "이미지·음성·첨부파일은 가져오지 않습니다.",
@@ -1597,7 +1598,7 @@ export const ko = {
         attachmentsTitle: "첨부파일",
         attachments: "첨부파일은 모델 전달과 문서 추출을 위해 암호화된 객체 저장소에 임시 저장될 수 있습니다. 현재 임시 첨부파일은 수명 주기 정책에 따라 약 하루 후 삭제됩니다.",
         externalImportTitle: "다른 AI 서비스에서 가져온 대화",
-        externalImport: "사용자는 ChatGPT, Claude 등 다른 AI 서비스에서 내려받은 내보내기 파일에서 선택한 과거 대화를 Tomverse 계정에 저장할 수 있습니다. 내보내기 파일은 사용자의 브라우저에서만 열리며, 원본 파일은 Tomverse 서버나 저장소에 업로드·보관되지 않습니다. 사용자가 선택한 대화의 정규화된 텍스트와 출처 정보(서비스명, 원래 시간, 표시용 모델명)만 계정 전용 자료로 저장되고, 이미지·음성·첨부파일은 가져오지 않습니다. 가져온 대화에는 다른 사람의 개인정보가 포함될 수 있으므로, 해당 데이터를 가져올 권한이 있는지 확인할 책임은 사용자에게 있습니다. 가져온 자료는 언제든지 조회·삭제·내보내기 할 수 있으며, 계정 삭제 시 함께 삭제됩니다. Tomverse에서 삭제해도 원래 서비스에 있는 데이터는 삭제되지 않습니다.",
+        externalImport: "사용자는 ChatGPT, Claude, Gemini(Google Takeout) 등 다른 AI 서비스에서 내려받은 내보내기 파일에서 선택한 과거 대화를 Tomverse 계정에 저장할 수 있습니다. 내보내기 파일은 사용자의 브라우저에서만 열리며, 원본 파일은 Tomverse 서버나 저장소에 업로드·보관되지 않습니다. 사용자가 선택한 대화의 정규화된 텍스트와 출처 정보(서비스명, 원래 시간, 표시용 모델명)만 계정 전용 자료로 저장되고, 이미지·음성·첨부파일은 가져오지 않습니다. 가져온 대화에는 다른 사람의 개인정보가 포함될 수 있으므로, 해당 데이터를 가져올 권한이 있는지 확인할 책임은 사용자에게 있습니다. 가져온 자료는 언제든지 조회·삭제·내보내기 할 수 있으며, 계정 삭제 시 함께 삭제됩니다. Tomverse에서 삭제해도 원래 서비스에 있는 데이터는 삭제되지 않습니다.",
         memoryTitle: "계정 장기 기억",
         memory: "사용자가 기억 기능을 사용하기로 선택하면, Tomverse는 사용자가 지정한 가져온 대화의 일부를 기억 후보를 추출하기 위해 사용자가 확인한 AI 공급자에게 전송합니다. 추출에는 실행 전에 표시된 모델과 크레딧이 사용됩니다. 추출된 후보는 사용자가 검토해 승인하기 전에는 답변 생성에 사용되지 않습니다. 민감한 정보로 분류된 후보와 개별 검토가 필요한 후보는 일괄 승인에서 제외되어 하나씩 확인해야 합니다. 후보와 승인된 기억, 그 근거는 사용자가 삭제하거나 계정 데이터가 삭제될 때까지 계정에 보관됩니다. 승인된 기억과 답변 스타일 선호는 새 대화의 답변을 생성할 때 참고 자료로 해당 답변을 생성하는 AI 공급자에게 전송되며, 여러 모델을 비교하는 경우 각 모델의 공급자에게 전송됩니다. 사용자는 저장된 기억을 언제든지 조회·수정·비활성화할 수 있고, 전체 목록을 파일로 내려받거나 한 번에 모두 삭제할 수 있습니다. 기억 사용을 끄면 새 대화에서 기억이 사용되지 않습니다.",
         assistantProfilesTitle: "사용자 정의 AI 프로필과 지식 파일",

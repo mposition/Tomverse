@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
+import { PROVIDER_LABELS } from "../components/imports/importFormatting.ts";
+import { EXTERNAL_IMPORT_PROVIDERS } from "../lib/externalImportProviders.ts";
 import { de } from "../locales/de.ts";
 import { en } from "../locales/en.ts";
 import { es } from "../locales/es.ts";
@@ -192,6 +194,88 @@ test("the components render the copy", () => {
             sources.some((source) => source.includes(key)),
             `${key} must be rendered by an import component`
         );
+    }
+});
+
+/**
+ * The keys that enumerate which services a user can import from.
+ *
+ * Only these. `guideChatgptStep1` names one provider because it is that
+ * provider's recipe, and demanding all three names there would be nonsense --
+ * the rule is about copy that answers "what can I import?", which is the copy
+ * a user reads before they ever pick a card.
+ */
+const PROVIDER_ENUMERATING_KEYS = [
+    "dataTabDescription",
+    "pageDescription",
+    "selectFileHint",
+];
+
+test("the brand-name map covers the canonical provider set", () => {
+    // TypeScript already makes an unlabelled provider a compile error, but the
+    // copy tests below run off this map at runtime -- so if it ever loses a
+    // key the checks would silently stop covering that provider.
+    assert.deepEqual(
+        Object.keys(PROVIDER_LABELS).sort(),
+        [...EXTERNAL_IMPORT_PROVIDERS].sort(),
+        "every canonical provider needs a brand name before it can be named in copy"
+    );
+});
+
+test("every locale's general import copy names every provider", () => {
+    for (const [name, bundle] of Object.entries(LOCALES)) {
+        for (const key of PROVIDER_ENUMERATING_KEYS) {
+            const body = bundle.externalImport[key];
+            for (const brand of Object.values(PROVIDER_LABELS)) {
+                assert.ok(
+                    body.includes(brand),
+                    `${name}.externalImport.${key} must name ${brand}`
+                );
+            }
+        }
+    }
+});
+
+test("every provider has a guide card in every locale", () => {
+    // The card is where a provider becomes reachable. A provider named in the
+    // page description with no recipe behind it is an invitation to upload
+    // the wrong file.
+    const guideSource = readFileSync(
+        new URL(
+            "../components/imports/wizard/ProviderGuideStep.tsx",
+            import.meta.url
+        ),
+        "utf8"
+    );
+    for (const provider of EXTERNAL_IMPORT_PROVIDERS) {
+        const suffix = provider[0].toUpperCase() + provider.slice(1);
+        const titleKey = `guide${suffix}Title`;
+        assert.ok(
+            guideSource.includes(`externalImport.${titleKey}`),
+            `ProviderGuideStep must render externalImport.${titleKey}`
+        );
+        for (const [name, bundle] of Object.entries(LOCALES)) {
+            assert.ok(
+                typeof bundle.externalImport[titleKey] === "string" &&
+                    bundle.externalImport[titleKey].trim().length > 0,
+                `${name}.externalImport.${titleKey} must exist`
+            );
+        }
+    }
+});
+
+test("no locale offers HTML as an accepted file", () => {
+    // A2 §6: HTML is rejected with its own recovery message. The picker still
+    // accepts .html so the user reaches that message, which is exactly why the
+    // format copy must not list the extension as something we read -- ".zip,
+    // .json or .html" would make the rejection look like a bug.
+    for (const [name, bundle] of Object.entries(LOCALES)) {
+        for (const key of ["guideFormats", "selectFileHint"]) {
+            assert.ok(
+                !bundle.externalImport[key].toLowerCase().includes(".html"),
+                `${name}.externalImport.${key} must not list .html as an accepted file`
+            );
+        }
     }
 });
 

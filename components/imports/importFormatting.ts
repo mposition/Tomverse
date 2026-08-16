@@ -33,8 +33,13 @@ export const formatBytes = (bytes: number): string => {
  * Keyed by the canonical provider set, so a provider added there without a
  * label here is a type error rather than a lowercase id shown to the user --
  * which is what "gemini" was until A2's server side landed.
+ *
+ * Exported because the locale copy tests check that every provider named here
+ * also appears in the copy that answers "what can I import?". A second list
+ * living in the tests would drift from this one, which is the shape of the
+ * bug they are guarding against.
  */
-const PROVIDER_LABELS: Record<ExternalImportProvider, string> = {
+export const PROVIDER_LABELS: Record<ExternalImportProvider, string> = {
     chatgpt: "ChatGPT",
     claude: "Claude",
     gemini: "Gemini",
