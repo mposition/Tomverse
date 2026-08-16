@@ -2,7 +2,10 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   catalogFindings,
+  classifyPriceAudits,
   compareBillingPriceCatalog,
+  maskEmail,
+  priceDeltaRatio,
   unknownKeyPaths,
 } from "../scripts/report-billing-price-catalog-core.mjs";
 import { DEFAULT_BILLING_PRICE_CATALOG } from "../lib/billingPriceCatalog.ts";
@@ -136,4 +139,109 @@ test("every plan price the schema requires appears in the report", () => {
       `${currency} must be compared for both plans and both intervals`
     );
   }
+});
+
+/* -------------------------------------------------------------------------- */
+/* Who wrote the row                                                           */
+/* -------------------------------------------------------------------------- */
+
+const AUDIT_AT = "2026-08-14T12:52:41.100Z";
+const ROW_AT = "2026-08-14T12:52:41.182Z";
+
+const auditEntry = (overrides = {}) => ({
+  createdAt: AUDIT_AT,
+  actorUserId: "cmdz1actor",
+  actorEmail: "ops@tomverse.app",
+  metadata: { localizedPricesUpdated: true },
+  ...overrides,
+});
+
+test("the audit entry written with the row is the one identified", () => {
+  const audits = classifyPriceAudits({
+    entries: [
+      auditEntry(),
+      auditEntry({ createdAt: "2026-07-01T00:00:00.000Z" }),
+    ],
+    storedUpdatedAt: ROW_AT,
+  });
+
+  assert.deepEqual(
+    audits.map((entry) => entry.wroteCurrentRow),
+    [true, false]
+  );
+  assert.match(
+    catalogFindings(compare("stored", defaults()), audits).join(" "),
+    /written by o\*\*\*@tomverse\.app \(actor cmdz1actor\) at 2026-08-14/
+  );
+});
+
+test("a billing.updated entry that touched no price is not a price write", () => {
+  // The action covers plans, promotions and prices together. A promotion edit
+  // named as the writer of a price row would be a false attribution, and the
+  // whole point of this lookup is to answer "who set this price".
+  const audits = classifyPriceAudits({
+    entries: [auditEntry({ metadata: { localizedPricesUpdated: false } })],
+    storedUpdatedAt: ROW_AT,
+  });
+  assert.deepEqual(audits, []);
+  assert.match(
+    catalogFindings(compare("stored", defaults()), audits).join(" "),
+    /No `billing.updated` audit entry records a price write/
+  );
+});
+
+test("a row with no matching audit entry is reported as unexplained", () => {
+  // A price that changed without an audit entry did not come through the Admin
+  // API. Saying "written by <whoever last used the panel>" would be worse than
+  // saying nothing.
+  const audits = classifyPriceAudits({
+    entries: [auditEntry({ createdAt: "2026-07-01T00:00:00.000Z" })],
+    storedUpdatedAt: ROW_AT,
+  });
+  assert.ok(audits.every((entry) => !entry.wroteCurrentRow));
+  assert.match(
+    catalogFindings(compare("stored", defaults()), audits).join(" "),
+    /does not write an audit entry -- a migration, a seed, or a direct database edit/
+  );
+});
+
+test("actor emails are masked and actor ids are not", () => {
+  assert.equal(maskEmail("ops@tomverse.app"), "o***@tomverse.app");
+  assert.equal(maskEmail("a@b.co"), "a***@b.co");
+  assert.equal(maskEmail("not-an-email"), null);
+  assert.equal(maskEmail(null), null);
+
+  const audits = classifyPriceAudits({
+    entries: [auditEntry()],
+    storedUpdatedAt: ROW_AT,
+  });
+  assert.equal(audits[0].actorEmail, "o***@tomverse.app");
+  // The id is opaque, so it travels intact and stays lookup-able.
+  assert.equal(audits[0].actorUserId, "cmdz1actor");
+});
+
+test("audits are not consulted when there is nothing to consult", () => {
+  // `null` means "not read", which must not be reported as "no write on
+  // record" -- a run without a database would otherwise claim a fact about
+  // production.
+  const findings = catalogFindings(compare("absent", null), null);
+  assert.doesNotMatch(findings.join(" "), /audit/i);
+});
+
+/* -------------------------------------------------------------------------- */
+/* Delta                                                                       */
+/* -------------------------------------------------------------------------- */
+
+test("the delta is signed and relative to the default", () => {
+  const stored = defaults();
+  stored.plans.pro.AUD.monthly = 2_000; // default 2_300
+  stored.plans.max.KRW.monthly = 35_000; // default 34_000
+  const rows = compare("stored", stored).rows;
+  const at = (path) => rows.find((row) => row.path === path);
+
+  assert.ok(Math.abs(priceDeltaRatio(at("plans.pro.AUD.monthly")) + 0.1304) < 0.001);
+  assert.ok(Math.abs(priceDeltaRatio(at("plans.max.KRW.monthly")) - 0.0294) < 0.001);
+  // An agreeing row has no delta rather than a zero one: zero would sort and
+  // read as a measurement where none was taken.
+  assert.equal(priceDeltaRatio(at("plans.pro.EUR.monthly")), null);
 });

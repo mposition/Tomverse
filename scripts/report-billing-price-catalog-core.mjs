@@ -142,6 +142,26 @@ export const compareBillingPriceCatalog = ({ source, stored, defaults }) => {
   };
 };
 
+/**
+ * How far the stored price sits from the default, as a signed percentage.
+ *
+ * Shown because the shape of a set of differences is what tells an operator
+ * whether they are looking at one deliberate repricing or at accumulated
+ * drift: a column of similar percentages in the same direction reads very
+ * differently from four numbers scattered either side of zero.
+ */
+export const priceDeltaRatio = (row) => {
+  if (row.status !== "differs" || !row.defaultMinor) return null;
+  return (row.storedMinor - row.defaultMinor) / row.defaultMinor;
+};
+
+const formatDelta = (row) => {
+  const ratio = priceDeltaRatio(row);
+  if (ratio === null) return "";
+  const percent = (ratio * 100).toFixed(1);
+  return `  ${ratio > 0 ? "+" : ""}${percent}%`;
+};
+
 /** One row, formatted. `format` turns (minor, currency) into a display string. */
 export const formatCatalogRow = (row, format) => {
   const stored =
@@ -150,7 +170,51 @@ export const formatCatalogRow = (row, format) => {
     row.defaultMinor === undefined || row.defaultMinor === null
       ? "--"
       : format(row.defaultMinor, row.currency);
-  return `${row.path.padEnd(34)} stored ${stored.padStart(12)}   default ${base.padStart(12)}   ${row.status}`;
+  return `${row.path.padEnd(34)} stored ${stored.padStart(12)}   default ${base.padStart(12)}   ${row.status}${formatDelta(row)}`;
+};
+
+/**
+ * An email reduced to what identifies an account without reproducing it.
+ *
+ * The output of this report is meant to be pasted into an issue, and "who
+ * wrote this row" is answered well enough by a first initial and a domain
+ * together with the full actor id, which is an opaque cuid. The unmasked
+ * address adds nothing an operator cannot look up in the console.
+ */
+export const maskEmail = (email) => {
+  if (typeof email !== "string" || !email.includes("@")) return null;
+  const [local, domain] = email.split("@");
+  if (!local) return `***@${domain}`;
+  return `${local[0]}***@${domain}`;
+};
+
+/**
+ * The audit entries that could have written this catalogue, newest first.
+ *
+ * `billing.updated` covers plans, promotions and prices in one action, so the
+ * `localizedPricesUpdated` flag in its metadata is what separates a price write
+ * from a promotion edit. An entry whose timestamp is within a second of the
+ * row's own `updatedAt` is the write; the rest are history, and are kept
+ * because "this price has been rewritten four times this month" is a different
+ * situation from "it was set once".
+ */
+export const classifyPriceAudits = ({ entries, storedUpdatedAt }) => {
+  const rowWrittenAt = storedUpdatedAt ? new Date(storedUpdatedAt).getTime() : null;
+  return (entries || [])
+    .filter((entry) => entry.metadata?.localizedPricesUpdated === true)
+    .map((entry) => {
+      const at = new Date(entry.createdAt).getTime();
+      return {
+        at: new Date(entry.createdAt).toISOString(),
+        actorUserId: entry.actorUserId || null,
+        actorEmail: maskEmail(entry.actorEmail),
+        // Within a second: the audit row and the AppSetting row are written by
+        // the same request but not in one statement, so they differ by
+        // milliseconds rather than matching exactly.
+        wroteCurrentRow:
+          rowWrittenAt !== null && Math.abs(at - rowWrittenAt) < 1_000,
+      };
+    });
 };
 
 /**
@@ -160,8 +224,24 @@ export const formatCatalogRow = (row, format) => {
  * number finance approved, and this repository cannot know that -- reverting an
  * override with no approval record is itself a price change.
  */
-export const catalogFindings = (comparison) => {
+export const catalogFindings = (comparison, audits = null) => {
   const findings = [];
+  if (audits !== null) {
+    const writer = audits.find((entry) => entry.wroteCurrentRow);
+    if (writer) {
+      findings.push(
+        `The stored row was written by ${writer.actorEmail || writer.actorUserId || "an unidentified actor"} (actor ${writer.actorUserId || "unknown"}) at ${writer.at}.`
+      );
+    } else if (audits.length > 0) {
+      findings.push(
+        `No audit entry matches the row's own timestamp. The most recent price write on record is ${audits[0].at}, so the row was changed by something that does not write an audit entry -- a migration, a seed, or a direct database edit.`
+      );
+    } else {
+      findings.push(
+        "No `billing.updated` audit entry records a price write. Either the retention window has passed or the row was not written through the Admin API."
+      );
+    }
+  }
   if (comparison.source === "absent") {
     findings.push(
       "No AppSetting row: the compiled default is the live price, and the next read will write it into the database."

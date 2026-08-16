@@ -27,9 +27,13 @@ import {
 } from "../lib/billingPriceCatalog.ts";
 import {
   catalogFindings,
+  classifyPriceAudits,
   compareBillingPriceCatalog,
   formatCatalogRow,
 } from "./report-billing-price-catalog-core.mjs";
+
+/** How far back to look for the write. Enough to cover a retention window. */
+const AUDIT_LOOKBACK = 50;
 
 const json = process.argv.includes("--json");
 const databaseUrl = process.env.DATABASE_URL?.trim();
@@ -42,6 +46,7 @@ const format = (minor, currency) => {
 let source = "absent";
 let stored = null;
 let storedUpdatedAt = null;
+let audits = null;
 let note = "No DATABASE_URL: nothing to compare the compiled default against.";
 let readError = null;
 
@@ -52,7 +57,30 @@ if (databaseUrl) {
       where: { key: BILLING_PRICE_CATALOG_KEY },
       select: { value: true, updatedAt: true },
     });
+    // Who wrote it, from the same read. `billing.updated` covers plans,
+    // promotions and prices together, so the metadata flag is what makes an
+    // entry a price write rather than a promotion edit.
+    const auditRows = await prisma.adminAuditLog.findMany({
+      where: { action: "billing.updated" },
+      orderBy: { createdAt: "desc" },
+      take: AUDIT_LOOKBACK,
+      select: {
+        createdAt: true,
+        actorUserId: true,
+        actorEmail: true,
+        metadata: true,
+      },
+    });
     await prisma.$disconnect().catch(() => undefined);
+    audits = classifyPriceAudits({
+      entries: auditRows.map((entry) => ({
+        createdAt: entry.createdAt,
+        actorUserId: entry.actorUserId,
+        actorEmail: entry.actorEmail,
+        metadata: entry.metadata,
+      })),
+      storedUpdatedAt: row?.updatedAt.toISOString() || null,
+    });
     if (!row) {
       note = `No AppSetting row for ${BILLING_PRICE_CATALOG_KEY}.`;
     } else {
@@ -94,7 +122,7 @@ const comparison = compareBillingPriceCatalog({
 });
 const findings = readError
   ? [`The database could not be read, so nothing below is a statement about production: ${readError}`]
-  : catalogFindings(comparison);
+  : catalogFindings(comparison, audits);
 
 if (json) {
   console.log(
@@ -105,6 +133,7 @@ if (json) {
         effectivePriceSource: comparison.effectivePriceSource,
         storedUpdatedAt,
         readError,
+        priceWrites: audits,
         rows: comparison.rows,
         unknownKeys: comparison.unknownKeys,
         findings,
@@ -122,6 +151,16 @@ if (json) {
 
   for (const row of comparison.rows) {
     console.log(`  ${formatCatalogRow(row, format)}`);
+  }
+
+  if (audits && audits.length > 0) {
+    console.log("\n  Price writes on record (newest first):");
+    for (const entry of audits.slice(0, 5)) {
+      console.log(
+        `    ${entry.at}  ${(entry.actorEmail || "unknown").padEnd(28)} ${entry.wroteCurrentRow ? "<- wrote the current row" : ""}`
+      );
+    }
+    if (audits.length > 5) console.log(`    ... and ${audits.length - 5} older.`);
   }
 
   console.log("");
