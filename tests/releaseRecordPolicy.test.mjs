@@ -7,6 +7,8 @@ import {
     headerFields,
     isPlaceholderOwner,
     releaseDeviationProblems,
+    releaseHandoffProblems,
+    RELEASE_HANDOFF_NAME,
     releaseRecordProblems,
     releaseTemplateProblems,
     waiverRows,
@@ -207,4 +209,53 @@ test("the shipped deviation record satisfies its own rules", () => {
     // And it is still refused as a *record*, which is what makes the split
     // meaningful rather than a way of exempting a file from checking.
     assert.ok(releaseRecordProblems(name, "x").length > 0);
+});
+
+test("a handoff is a third kind, recognised by a name that has no SHA slot", () => {
+    // `release-` is a reserved namespace in .github/audits/, so a document
+    // about release work that is neither a run nor a deviation was being told
+    // to rename itself to something that hid its subject. It is recognised
+    // instead -- and only by a shape a record can never take, since a record's
+    // name is date-then-SHA and this one ends at the date.
+    assert.equal(
+        RELEASE_HANDOFF_NAME.test("release-verification-handoff-2026-08-15.md"),
+        true
+    );
+    assert.equal(
+        RELEASE_HANDOFF_NAME.test("release-2026-08-15__9424a4bd.md"),
+        false
+    );
+    assert.equal(
+        RELEASE_HANDOFF_NAME.test("release-deviation-2026-08-15__b0cf10e.md"),
+        false
+    );
+    // A misnamed record must still be caught by the record rule rather than
+    // slipping through as a handoff.
+    assert.equal(RELEASE_HANDOFF_NAME.test("release-handoff.md"), false);
+});
+
+test("a handoff must name the build the state it describes was measured against", () => {
+    const sha = "5528317e19fb8f061f18a9fde98f68c9fecd6013";
+    assert.deepEqual(
+        releaseHandoffProblems(
+            "release-verification-handoff-2026-08-15.md",
+            `# Handoff\n\nproduction ${sha}\n`
+        ),
+        []
+    );
+    assert.match(
+        releaseHandoffProblems(
+            "release-verification-handoff-2026-08-15.md",
+            "# Handoff\n\nEverything is fine.\n"
+        ).join("\n"),
+        /names no full 40-character SHA/
+    );
+    // A short SHA is not a build identifier: it is the prefix of one.
+    assert.match(
+        releaseHandoffProblems(
+            "release-verification-handoff-2026-08-15.md",
+            "# Handoff\n\nproduction 5528317\n"
+        ).join("\n"),
+        /names no full 40-character SHA/
+    );
 });

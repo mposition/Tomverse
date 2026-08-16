@@ -47,6 +47,24 @@ export const RELEASE_RECORD_NAME =
 export const RELEASE_DEVIATION_NAME =
     /^release-deviation-(\d{4}-\d{2}-\d{2})__([0-9a-f]{7,40})\.md$/;
 
+// `release-<subject>-handoff-<date>.md`. The third kind, and the reason the
+// prefix needs saying out loud: `release-` is a reserved namespace in this
+// directory, so a document about release work that is not a run and not a
+// deviation was being told to rename itself to something that hid its subject.
+//
+// A handoff describes where a thread stands -- what was closed, what could not
+// be, what the next session should read first. It has no checklist to tick and
+// no waiver section, so validating it as a record would demand a claim it does
+// not make.
+//
+// It carries no `__<sha>` slot, which is what keeps it from ever being
+// mistaken for a misnamed record: a record's name is date-then-SHA, and this
+// one ends at the date. What it must still do is name the build it describes,
+// for the same reason a deviation must -- a handoff that never says which
+// production build it is about cannot be acted on later.
+export const RELEASE_HANDOFF_NAME =
+    /^release-[a-z0-9-]+-handoff-(\d{4}-\d{2}-\d{2})\.md$/;
+
 export const normalizeLineEndings = (text) => text.replace(/\r\n?/g, "\n");
 
 const FULL_SHA = /^[0-9a-f]{40}$/;
@@ -147,6 +165,26 @@ export const releaseDeviationProblems = (name, text) => {
     if (!/[Rr]ollback/.test(body)) {
         problems.push(
             `${path}  names no rollback target. The newest build a checklist covers is the answer, and it has to be written down before it is needed.`
+        );
+    }
+    return problems;
+};
+
+/**
+ * Every problem with a handoff.
+ *
+ * One rule only, and it is the same one a deviation carries: name the build.
+ * Everything else a handoff contains is prose whose shape cannot be checked
+ * without inventing a format nobody agreed to, and a gate that invented one
+ * would be answered by satisfying the gate rather than by writing a useful
+ * handoff.
+ */
+export const releaseHandoffProblems = (name, text) => {
+    const problems = [];
+    const path = `${RELEASE_RECORDS_DIR}/${name}`;
+    if (!/\b[0-9a-f]{40}\b/.test(normalizeLineEndings(text))) {
+        problems.push(
+            `${path}  names no full 40-character SHA. A handoff has to say which build the state it describes was measured against, or the next session cannot tell what has moved since.`
         );
     }
     return problems;
