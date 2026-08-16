@@ -41,8 +41,8 @@ browser coverage without rebuilding E2E" 항목이 이 문서의 존재와 workf
 있습니다. `npm run check:ui-tier-coverage`가 이 목록과 태그를 양방향으로
 맞춥니다.
 
-실측: 2026-08-14 기준 `--grep=@ui-risk --list`가 desktop-chromium과
-mobile-chromium 두 project에서 **27개 파일, 638 test**를 선택합니다.
+실측: 2026-08-16 기준 `--grep=@ui-risk --list`가 desktop-chromium과
+mobile-chromium 두 project에서 **28개 파일, 646 test**를 선택합니다.
 
 | Spec |
 |---|
@@ -62,6 +62,7 @@ mobile-chromium 두 project에서 **27개 파일, 638 test**를 선택합니다.
 | `mobile-short-viewport-drawer.spec.ts` |
 | `modal-focus-contract.spec.ts` |
 | `model-panel-tablet-reachability.spec.ts` |
+| `pricing-promotion-currency.spec.ts` |
 | `provider-status.spec.ts` |
 | `settings-information-architecture.spec.ts` |
 | `sidebar-context-menu-theme.spec.ts` |
@@ -69,12 +70,26 @@ mobile-chromium 두 project에서 **27개 파일, 638 test**를 선택합니다.
 | `skip-link-and-armed-delete.spec.ts` |
 | `ssr-root-language.spec.ts` |
 
-검토 시점 실측(2026-08-14, `--list`): **27개 파일 638 test** (두 project 합계).
-직전 값은 2026-08-05의 25개 파일 630 test였고, 그 뒤 `csp-eval-free.spec.ts`
-(+4)와 `external-import-settings.spec.ts`(+2)가 합류했습니다. 그 이전 기록
+검토 시점 실측(2026-08-16, `--list`): **28개 파일 646 test** (두 project 합계).
+직전 값은 2026-08-14의 27개 파일 638 test였고, 그 뒤
+`pricing-promotion-currency.spec.ts`(+8)가 합류했습니다. 그 이전은 2026-08-05의
+25개 파일 630 test였고 `csp-eval-free.spec.ts`(+4)와
+`external-import-settings.spec.ts`(+2)가 합류했습니다. 그 이전 기록
 "76 test / 14 skip / 67초"는 표에 적힌 5개 파일만 세던 시점의 값입니다. 이
 tier는 merge를 차단하므로, PR tier 비용을 근거로 무언가를 빼거나 넣는 판단은
 위 숫자를 다시 재고 나서 합니다.
+
+`pricing-promotion-currency.spec.ts`는 2026-08-16에 합류했습니다(28개 파일,
++8 test — desktop·mobile 각 4). AUD 시장에서 USD 고정액 프로모션 코드를
+적용하면 주문 요약이 `-$14`와 "A$1.33 due today"를 표시하고 "결제 계속하기"가
+거절하던 결함입니다. A$1.33은 $15 USD 요금제에서 $14를 뺀 비율 93.3%를 호주
+가격에 곱한 값이며, 그런 AUD 할인은 DB에도 Stripe에도 없습니다. 계약은 화면
+에서만 확인됩니다 — 할인 행이 그려지지 않을 것, due today가 현지 가격을 유지할
+것, toast가 서버의 영어 문장이 아니라 현지화된 문구일 것, 그리고 그 상태에서
+Checkout 요청이 나가지 않을 것. 서버 계약과 두 endpoint의 parity는
+server-contract 쪽에 있고, 여기서 태그가 지키는 것은 **사용자가 보는 금액**
+입니다. 결제 금액을 잘못 표시하는 회귀는 PR로 들어오므로 `main` push의 무필터
+실행까지 기다릴 수 없습니다.
 
 `external-import-settings.spec.ts`는 2026-08-14에 합류했습니다(27개 파일,
 +2 test — desktop·mobile 각 1). 태그된 것은 그 파일의 한 case뿐입니다:

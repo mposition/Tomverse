@@ -86,6 +86,59 @@ type PromotionValidationPayload = {
   error?: string;
 };
 
+/**
+ * A refusal from the validation endpoint, carrying the server's stable code.
+ *
+ * The code is what gets localised. The server's `error` is English and exists
+ * for API consumers; showing it in a Korean toast was how "Fixed-amount
+ * promotion codes are currently available only for USD checkout" reached a
+ * Korean customer verbatim. It stays as the last-resort fallback for codes this
+ * client has no copy for.
+ */
+class PromotionValidationFailure extends Error {
+  constructor(
+    message: string,
+    readonly code: string | null
+  ) {
+    super(message);
+    this.name = "PromotionValidationFailure";
+  }
+}
+
+/**
+ * The market a request is made against.
+ *
+ * A plain function of the config rather than a value the component closes over,
+ * so the effect that loads the config can pass the market that config describes
+ * -- not one derived from state React has not committed yet. Neither is
+ * authoritative: the server decides from the trusted edge country and refuses a
+ * mismatch. Sending it lets that refusal happen at validation instead of at the
+ * button.
+ */
+const billingMarketForRequest = (
+  config: BillingConfig | null | undefined,
+  planId: "pro" | "max"
+) => {
+  const plan = config?.plans.find((item) => item.id === planId);
+  return config?.displayCountry && plan?.displayCurrency
+    ? {
+        country: config.displayCountry,
+        currency: plan.displayCurrency as BillingCurrency,
+      }
+    : getClientBillingMarket();
+};
+
+/** Server code first, server English last. */
+const promotionFailureMessage = (error: unknown, copy: CheckoutCopy) => {
+  if (
+    error instanceof PromotionValidationFailure &&
+    error.code === "PROMOTION_CURRENCY_NOT_SUPPORTED"
+  ) {
+    return copy.promotionCurrencyNotSupported;
+  }
+  return error instanceof Error ? error.message : copy.invalidPromo;
+};
+
 type CheckoutCopy = {
   secureCheckout: string;
   upgradeTo: (plan: string) => string;
@@ -105,6 +158,7 @@ type CheckoutCopy = {
   promoFinePrint: string;
   invalidPromo: string;
   promoApplied: string;
+  promotionCurrencyNotSupported: string;
   orderSummary: string;
   plan: string;
   billing: string;
@@ -201,6 +255,8 @@ const checkoutCopy: Record<Language, CheckoutCopy> = {
       "The validated offer shows its discount period. After it ends, the subscription renews at the regular price unless cancelled.",
     invalidPromo: "Invalid promotion code.",
     promoApplied: "Promotion code applied.",
+    promotionCurrencyNotSupported:
+      "Fixed-amount promotion codes currently work only with USD checkout. Use a percentage code for local-currency billing.",
     orderSummary: "Order summary",
     plan: "Plan",
     billing: "Billing",
@@ -239,6 +295,8 @@ const checkoutCopy: Record<Language, CheckoutCopy> = {
       "검증된 혜택에 할인 적용 기간이 표시됩니다. 기간 종료 후에는 취소하지 않는 한 정가로 갱신됩니다.",
     invalidPromo: "유효하지 않은 프로모션 코드입니다.",
     promoApplied: "프로모션 코드가 적용되었습니다.",
+    promotionCurrencyNotSupported:
+      "고정 금액 프로모션 코드는 현재 USD 결제에서만 사용할 수 있습니다. 현지 통화 결제에는 정률 할인 프로모션을 사용해 주세요.",
     orderSummary: "주문 요약",
     plan: "플랜",
     billing: "결제",
@@ -276,6 +334,8 @@ const checkoutCopy: Record<Language, CheckoutCopy> = {
       "验证后的优惠会显示折扣期限。优惠结束后，如未取消，订阅将按正常价格续订。",
     invalidPromo: "促销代码无效。",
     promoApplied: "促销代码已应用。",
+    promotionCurrencyNotSupported:
+      "固定金额促销代码目前仅支持美元结账。本地货币结算请使用按比例折扣的促销代码。",
     orderSummary: "订单摘要",
     plan: "方案",
     billing: "计费",
@@ -314,6 +374,8 @@ const checkoutCopy: Record<Language, CheckoutCopy> = {
       "L'offre validée indique la durée de la remise. Ensuite, l'abonnement est renouvelé au tarif normal sauf résiliation.",
     invalidPromo: "Code promotionnel invalide.",
     promoApplied: "Code promotionnel appliqué.",
+    promotionCurrencyNotSupported:
+      "Les codes promotionnels à montant fixe ne fonctionnent actuellement qu\u2019avec un paiement en USD. Utilisez un code en pourcentage pour la facturation en devise locale.",
     orderSummary: "Résumé de commande",
     plan: "Offre",
     billing: "Facturation",
@@ -352,6 +414,8 @@ const checkoutCopy: Record<Language, CheckoutCopy> = {
       "Das geprüfte Angebot zeigt die Rabattdauer. Danach verlängert sich das Abo zum regulären Preis, sofern es nicht gekündigt wird.",
     invalidPromo: "Ungültiger Aktionscode.",
     promoApplied: "Aktionscode angewendet.",
+    promotionCurrencyNotSupported:
+      "Aktionscodes mit festem Betrag funktionieren derzeit nur bei Zahlung in USD. Verwenden Sie für die Abrechnung in Landeswährung einen Prozentcode.",
     orderSummary: "Bestellübersicht",
     plan: "Plan",
     billing: "Abrechnung",
@@ -390,6 +454,8 @@ const checkoutCopy: Record<Language, CheckoutCopy> = {
       "La oferta validada muestra la duración del descuento. Después, la suscripción se renueva al precio normal salvo cancelación.",
     invalidPromo: "Código promocional no válido.",
     promoApplied: "Código promocional aplicado.",
+    promotionCurrencyNotSupported:
+      "Los códigos promocionales de importe fijo solo funcionan por ahora con pagos en USD. Usa un código de porcentaje para la facturación en moneda local.",
     orderSummary: "Resumen del pedido",
     plan: "Plan",
     billing: "Facturación",
@@ -428,6 +494,8 @@ const checkoutCopy: Record<Language, CheckoutCopy> = {
       "A oferta validada mostra a duração do desconto. Depois, a assinatura renova pelo preço normal, salvo cancelamento.",
     invalidPromo: "Código promocional inválido.",
     promoApplied: "Código promocional aplicado.",
+    promotionCurrencyNotSupported:
+      "Códigos promocionais de valor fixo funcionam apenas com pagamento em USD por enquanto. Use um código percentual para cobrança em moeda local.",
     orderSummary: "Resumo do pedido",
     plan: "Plano",
     billing: "Cobrança",
@@ -559,21 +627,53 @@ const calculateDiscountedCents = (
   return Math.max(0, cents - (promotion.discountAmountCents || 0));
 };
 
+/**
+ * Whether this promotion can be shown as a discount against this currency.
+ *
+ * The same rule the server decides with, restated for the summary. It is not
+ * the authority -- validation refuses these codes before they are ever applied
+ * -- but the summary must not be able to quote a discount even if one reaches
+ * this state some other way: a stale promotion left over from a currency
+ * change, a response that arrived after the market moved.
+ *
+ * A percentage applies to whatever the local price is. A fixed amount is stored
+ * in USD cents and means nothing against another currency.
+ */
+const promotionAppliesToCurrency = (
+  promotion: BillingPromotion | null | undefined,
+  currency: BillingCurrency
+) => {
+  if (!promotion) return false;
+  if (promotion.fulfillmentType === "internal_pass") return true;
+  if (promotion.discountPercent > 0) return true;
+  if (!promotion.discountAmountCents) return false;
+  return currency === "USD";
+};
+
+/**
+ * The local amount left to charge.
+ *
+ * This used to convert a USD fixed discount into a ratio of the USD price and
+ * apply that ratio to the local one: $14 off a $15 plan became 93.3% off, and
+ * A$20.00 was displayed as A$1.33 due today. No such AUD discount was ever
+ * approved -- not in the database, not in Stripe -- and Checkout refused the
+ * purchase a click later. A discount that cannot be charged is not shown.
+ */
 const calculateDiscountedDisplayMinor = (
   amountMinor: number,
-  baseUsdCents: number,
-  promotion: BillingPromotion | null | undefined
+  promotion: BillingPromotion | null | undefined,
+  currency: BillingCurrency
 ) => {
-  if (!promotion) return amountMinor;
-  if (promotion.discountPercent > 0) {
+  if (!promotionAppliesToCurrency(promotion, currency)) return amountMinor;
+  if (promotion!.discountPercent > 0) {
     return Math.max(
       0,
-      Math.round(amountMinor * (1 - promotion.discountPercent / 100))
+      Math.round(amountMinor * (1 - promotion!.discountPercent / 100))
     );
   }
-  const fixedDiscountRatio =
-    baseUsdCents > 0 ? (promotion.discountAmountCents || 0) / baseUsdCents : 0;
-  return Math.max(0, Math.round(amountMinor * (1 - fixedDiscountRatio)));
+  // USD only, guarded above: the stored amount is USD cents and `amountMinor`
+  // is the same unit, so it is an exact subtraction rather than a conversion.
+  return Math.max(0, amountMinor - (promotion!.discountAmountCents || 0));
 };
 
 const formatPrice = (
@@ -635,28 +735,45 @@ export function UpgradeInterestButton({
   const priceLabel = formatPrice(planConfig, billingInterval);
   const monthlyPriceLabel = formatPrice(planConfig, "monthly");
   const annualPriceLabel = formatPrice(planConfig, "annual");
-  const discountLabel = appliedPromotion?.discountPercent
-    ? `-${appliedPromotion.discountPercent}%`
-    : appliedPromotion?.discountAmountCents
-      ? `-${formatUsdCents(appliedPromotion.discountAmountCents)}`
+  const checkoutCurrency = (planConfig?.displayCurrency || "USD") as BillingCurrency;
+  // The market both requests are made against. Hoisted out of `submit` so
+  // promotion validation and Checkout quote the same one -- validating against
+  // a different market than the button posts is the shape of the defect this
+  // whole path exists to prevent. Neither is authoritative: the server decides
+  // from the trusted edge country and refuses a mismatch.
+  const requestMarket = billingMarketForRequest(billingConfig, planId);
+  // The promotion the summary is allowed to draw. `appliedPromotion` should
+  // never hold a code this market refuses -- validation rejects it before it is
+  // applied -- but the summary decides what to show from what it can charge,
+  // not from what happens to be in state. A currency change between validation
+  // and render must not leave a discount row behind.
+  const chargeablePromotion = promotionAppliesToCurrency(
+    appliedPromotion,
+    checkoutCurrency
+  )
+    ? appliedPromotion
+    : null;
+  const discountLabel = chargeablePromotion?.discountPercent
+    ? `-${chargeablePromotion.discountPercent}%`
+    : chargeablePromotion?.discountAmountCents
+      ? `-${formatUsdCents(chargeablePromotion.discountAmountCents)}`
       : null;
   const baseCents =
     billingInterval === "annual"
       ? planConfig?.baseAnnualPriceCents ?? planConfig?.annualPriceCents ?? 0
       : planConfig?.baseMonthlyPriceCents ?? planConfig?.monthlyPriceCents ?? 0;
-  const dueUsdCents = calculateDiscountedCents(baseCents, appliedPromotion);
+  const dueUsdCents = calculateDiscountedCents(baseCents, chargeablePromotion);
   const dueUsdLabel = formatUsdCents(dueUsdCents, 1);
   const displayAmountMinor =
     billingInterval === "annual"
       ? planConfig?.displayAnnualPriceMinor
       : planConfig?.displayMonthlyPriceMinor;
-  const checkoutCurrency = (planConfig?.displayCurrency || "USD") as BillingCurrency;
   const dueDisplayMinor =
     typeof displayAmountMinor === "number"
       ? calculateDiscountedDisplayMinor(
           displayAmountMinor,
-          baseCents,
-          appliedPromotion
+          chargeablePromotion,
+          checkoutCurrency
         )
       : dueUsdCents;
   const dueLabel =
@@ -690,7 +807,8 @@ export function UpgradeInterestButton({
   const requestPromotionValidation = useCallback(
     async (
       normalizedCode: string,
-      interval: BillingInterval
+      interval: BillingInterval,
+      market: { currency: BillingCurrency; country: string }
     ) => {
       const response = await fetch("/api/billing/promotion/validate", {
         method: "POST",
@@ -699,22 +817,29 @@ export function UpgradeInterestButton({
           planId,
           billingInterval: interval,
           promoCode: normalizedCode,
+          currency: market.currency,
+          country: market.country,
         }),
       });
       const data = (await response.json().catch(() => null)) as
         | PromotionValidationPayload
         | null;
       if (!response.ok || !data?.valid || !data.promotion) {
-        throw new Error(data?.error || copy.invalidPromo);
+        throw new PromotionValidationFailure(
+          data?.error || copy.invalidPromo,
+          data?.code || null
+        );
       }
       return data.promotion;
     },
     [copy.invalidPromo, planId]
   );
 
+
   const applyFeaturedPromotion = useCallback(async (
     featured: FeaturedBillingPromotion,
-    interval: BillingInterval
+    interval: BillingInterval,
+    market: { currency: BillingCurrency; country: string }
   ) => {
     const normalizedFeaturedCode = featured.code.trim().toUpperCase();
     const requestId = autoPromotionRequestRef.current + 1;
@@ -737,7 +862,8 @@ export function UpgradeInterestButton({
     try {
       const promotion = await requestPromotionValidation(
         normalizedFeaturedCode,
-        interval
+        interval,
+        market
       );
       if (autoPromotionRequestRef.current !== requestId) return;
       setAppliedPromoCode(normalizedFeaturedCode);
@@ -747,16 +873,13 @@ export function UpgradeInterestButton({
       setAppliedPromoCode(null);
       setAppliedPromotion(null);
       setPromoCode("");
-      dispatchAppToast(
-        error instanceof Error ? error.message : copy.invalidPromo,
-        "error"
-      );
+      dispatchAppToast(promotionFailureMessage(error, copy), "error");
     } finally {
       if (autoPromotionRequestRef.current === requestId) {
         setIsValidatingPromotion(false);
       }
     }
-  }, [copy.invalidPromo, planId, requestPromotionValidation]);
+  }, [copy, planId, requestPromotionValidation]);
 
   useEffect(() => {
     if (!isOpen || billingConfig) return;
@@ -770,12 +893,13 @@ export function UpgradeInterestButton({
         if (data.featuredPromotion) {
           void applyFeaturedPromotion(
             data.featuredPromotion,
-            billingIntervalRef.current
+            billingIntervalRef.current,
+            billingMarketForRequest(data, planId)
           );
         }
       })
       .catch(() => undefined);
-  }, [applyFeaturedPromotion, billingConfig, isOpen]);
+  }, [applyFeaturedPromotion, billingConfig, isOpen, planId]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -833,7 +957,8 @@ export function UpgradeInterestButton({
         setIsValidatingPromotion(true);
         promotionForCheckout = await requestPromotionValidation(
           normalizedInputCode,
-          billingInterval
+          billingInterval,
+          requestMarket
         );
         checkoutPromoCode = normalizedInputCode;
         setAppliedPromoCode(normalizedInputCode);
@@ -844,15 +969,9 @@ export function UpgradeInterestButton({
       failureStage = "checkout_session";
       const checkoutDueMinor = calculateDiscountedDisplayMinor(
         displayAmountMinor ?? baseCents,
-        baseCents,
-        promotionForCheckout
+        promotionForCheckout,
+        requestMarket.currency
       );
-      const checkoutMarket = billingConfig?.displayCountry && planConfig?.displayCurrency
-        ? {
-            country: billingConfig.displayCountry,
-            currency: planConfig.displayCurrency as BillingCurrency,
-          }
-        : getClientBillingMarket();
       const analytics = getAnalyticsAttributionSnapshot();
       const purchaseTrigger = normalizePurchaseAnalyticsTrigger(
         trigger ||
@@ -880,8 +999,8 @@ export function UpgradeInterestButton({
           trigger: purchaseTrigger,
           plan_credits_remaining: analyticsContext.planCreditsRemaining,
           addon_credits_remaining: analyticsContext.addonCreditsRemaining,
-          value: billingMinorToMajor(checkoutDueMinor, checkoutMarket.currency),
-          currency: checkoutMarket.currency,
+          value: billingMinorToMajor(checkoutDueMinor, requestMarket.currency),
+          currency: requestMarket.currency,
         });
       }
       const response = await fetch("/api/billing/checkout", {
@@ -892,8 +1011,8 @@ export function UpgradeInterestButton({
           billingInterval,
           language: lang,
           promoCode: checkoutPromoCode || undefined,
-          currency: checkoutMarket.currency,
-          country: checkoutMarket.country,
+          currency: requestMarket.currency,
+          country: requestMarket.country,
           trigger: purchaseTrigger,
           purchaseAttemptId,
           ...(analytics ? { analytics } : {}),
@@ -931,7 +1050,11 @@ export function UpgradeInterestButton({
         error_code: errorCode,
       });
       dispatchAppToast(
-        error instanceof Error ? error.message : t("billing.waitlistFailed"),
+        error instanceof PromotionValidationFailure
+          ? promotionFailureMessage(error, copy)
+          : error instanceof Error
+            ? error.message
+            : t("billing.waitlistFailed"),
         "error"
       );
     } finally {
@@ -948,24 +1071,41 @@ export function UpgradeInterestButton({
       return;
     }
     if (isValidatingPromotion) return;
+    // The same counter the featured auto-apply uses, so the two cannot land out
+    // of order. A featured code applied on open and a code the customer typed
+    // a moment later are two answers to one question, and the later request is
+    // the one that was asked -- whichever reply arrives first.
+    const requestId = autoPromotionRequestRef.current + 1;
+    autoPromotionRequestRef.current = requestId;
+    const requestedInterval = billingInterval;
     setIsValidatingPromotion(true);
     try {
       const promotion = await requestPromotionValidation(
         normalizedCode,
-        billingInterval
+        requestedInterval,
+        requestMarket
       );
+      // A late reply must not overwrite newer state, and a promotion validated
+      // against an interval the customer has since changed is not an answer
+      // about the interval they are now buying.
+      if (
+        autoPromotionRequestRef.current !== requestId ||
+        billingIntervalRef.current !== requestedInterval
+      ) {
+        return;
+      }
       setAppliedPromoCode(normalizedCode);
       setAppliedPromotion(promotion);
       dispatchAppToast(copy.promoApplied, "success");
     } catch (error) {
+      if (autoPromotionRequestRef.current !== requestId) return;
       setAppliedPromoCode(null);
       setAppliedPromotion(null);
-      dispatchAppToast(
-        error instanceof Error ? error.message : copy.invalidPromo,
-        "error"
-      );
+      dispatchAppToast(promotionFailureMessage(error, copy), "error");
     } finally {
-      setIsValidatingPromotion(false);
+      if (autoPromotionRequestRef.current === requestId) {
+        setIsValidatingPromotion(false);
+      }
     }
   };
 
@@ -986,7 +1126,8 @@ export function UpgradeInterestButton({
           if (billingConfig?.featuredPromotion) {
             void applyFeaturedPromotion(
               billingConfig.featuredPromotion,
-              billingInterval
+              billingInterval,
+              billingMarketForRequest(billingConfig, planId)
             );
           }
         }}
@@ -1058,7 +1199,8 @@ export function UpgradeInterestButton({
                         if (billingConfig?.featuredPromotion) {
                           void applyFeaturedPromotion(
                             billingConfig.featuredPromotion,
-                            value
+                            value,
+                            billingMarketForRequest(billingConfig, planId)
                           );
                         } else {
                           setAppliedPromoCode(null);
@@ -1213,8 +1355,11 @@ export function UpgradeInterestButton({
                     <span className="font-bold">20%</span>
                   </div>
                 ) : null}
-                {appliedPromotion ? (
-                  <div className="flex justify-between gap-4 text-sm text-blue-600 dark:text-blue-300">
+                {chargeablePromotion ? (
+                  <div
+                    data-testid="checkout-promotion-row"
+                    className="flex justify-between gap-4 text-sm text-blue-600 dark:text-blue-300"
+                  >
                     <span className="font-semibold">{appliedPromoCode}</span>
                     <span className="font-bold">{discountLabel || copy.appliedAtCheckout}</span>
                   </div>
@@ -1224,7 +1369,10 @@ export function UpgradeInterestButton({
                     <span className="font-bold text-zinc-950 dark:text-white">
                       {copy.dueToday}
                     </span>
-                    <span className="text-2xl font-black text-zinc-950 dark:text-white">
+                    <span
+                      data-testid="checkout-due-today"
+                      className="text-2xl font-black text-zinc-950 dark:text-white"
+                    >
                       {displayedDueLabel || priceLabel || "-"}
                     </span>
                   </div>
