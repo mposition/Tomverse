@@ -341,3 +341,88 @@ test("an attempt's intent is found by its index, and a missing one is null", () 
   // sweep has to read that as "cannot be priced" rather than crash.
   assert.equal(costIntentFor(undefined, 0), null);
 });
+
+// The native-search authorization, stored on the attempt's own intent because
+// it is a contract with one dispatched attempt: a fallback runs a different
+// model at a different provider, with its own rate and its own ceiling.
+
+const searchIntent = (attemptIndex, reserved, search) => ({
+  ...intent(attemptIndex, "anthropic", reserved),
+  nativeSearchAuthorization: search,
+});
+
+test("an authorization whose parts do not make its total is refused", () => {
+  // 5 queries at 10,000 is 50,000, not 40,000. An authorization nobody can
+  // recompute is one nobody can audit.
+  assert.match(
+    attemptCostIntentProblems({
+      holds: pair(0, "anthropic", 100),
+      intents: [
+        searchIntent(0, 100, {
+          reservedCostMicroUsd: 40_000,
+          costPerQueryMicroUsd: 10_000,
+          maxQueries: 5,
+        }),
+      ],
+    }).join(" "),
+    /authorized 40000 for search but 5 queries at 10000 is 50000/
+  );
+});
+
+test("a reservation total that is not tokens plus search is refused", () => {
+  // The hold put `reservedCostMicroUsd` in the bucket, and it has to be the
+  // sum of what the two halves authorized.
+  const tokens =
+    Math.ceil(1_000 * 100) + Math.ceil(1_000 * 100);
+  assert.match(
+    attemptCostIntentProblems({
+      holds: pair(0, "anthropic", tokens),
+      intents: [
+        {
+          ...searchIntent(0, tokens, {
+            reservedCostMicroUsd: 50_000,
+            costPerQueryMicroUsd: 10_000,
+            maxQueries: 5,
+          }),
+          estimatedInputTokens: 1_000,
+          reservedOutputTokens: 1_000,
+          inputUsdPerMillionTokens: 100,
+          outputUsdPerMillionTokens: 100,
+        },
+      ],
+    }).join(" "),
+    /is not 200000 of tokens plus 50000 of search/
+  );
+});
+
+test("an authorization that adds up is accepted", () => {
+  const tokens = Math.ceil(1_000 * 100) + Math.ceil(1_000 * 100);
+  const total = tokens + 50_000;
+  assert.deepEqual(
+    attemptCostIntentProblems({
+      holds: pair(0, "anthropic", total),
+      intents: [
+        {
+          ...searchIntent(0, total, {
+            reservedCostMicroUsd: 50_000,
+            costPerQueryMicroUsd: 10_000,
+            maxQueries: 5,
+          }),
+          estimatedInputTokens: 1_000,
+          reservedOutputTokens: 1_000,
+          inputUsdPerMillionTokens: 100,
+          outputUsdPerMillionTokens: 100,
+        },
+      ],
+    }),
+    []
+  );
+});
+
+test("an intent with no search authorization is unaffected by the new rule", () => {
+  const holds = pair(0, "openai", 100);
+  assert.deepEqual(
+    attemptCostIntentProblems({ holds, intents: [intent(0, "openai", 100)] }),
+    []
+  );
+});

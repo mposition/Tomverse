@@ -52,6 +52,7 @@ import {
     MAX_ATTEMPT_INDEX,
     PROVIDER_BUCKET_PREFIX,
     attemptCostIntentProblems,
+    costIntentFor,
     type AttemptCostIntent,
     PROVIDER_BUDGET_PERIODS,
     deriveProviderEntries,
@@ -69,6 +70,12 @@ import {
 import { recordChatLimitDecision } from "@/lib/chatLimitDecisions";
 import { isWebSearchMode, type WebSearchMode } from "@/lib/appDefaults";
 import { getAnonymousClientKey } from "@/lib/clientIp";
+import {
+    NATIVE_SEARCH_AUTHORIZATION_CUTOVER_ENV,
+    missingAuthorizationIsADefect,
+    recordSearchQueryCeilingBreach,
+    settledNativeSearchCost,
+} from "@/lib/webSearchNativeCostReservation";
 import {
     boundedProviderIdentifier,
     recordAttemptCost,
@@ -323,6 +330,14 @@ const durableReservationPayloadSchema = z
                         cachedInputPriceMultiplier: z.number().min(0).max(1),
                         pricingVersion: z.string().min(1).max(120).nullable().optional(),
                         reservedCostMicroUsd: z.number().int().nonnegative(),
+                        nativeSearchAuthorization: z
+                            .object({
+                                reservedCostMicroUsd: z.number().int().nonnegative(),
+                                costPerQueryMicroUsd: z.number().int().nonnegative(),
+                                maxQueries: z.number().int().nonnegative(),
+                            })
+                            .strict()
+                            .optional(),
                     })
                     .strict()
             )
@@ -3169,6 +3184,20 @@ export const acquireChatAccess = async (
                     cachedInputPriceMultiplier: budget.cachedInputPriceMultiplier,
                     pricingVersion: budget.pricingVersion ?? null,
                     reservedCostMicroUsd: reservedCost,
+                    // Frozen with the rest of the authorization, so settlement
+                    // prices the search this turn was allowed rather than the
+                    // one today's registry would sell.
+                    ...(budget.nativeSearchMaxQueries > 0
+                        ? {
+                              nativeSearchAuthorization: {
+                                  reservedCostMicroUsd:
+                                      budget.nativeSearchReservedCostMicroUsd,
+                                  costPerQueryMicroUsd:
+                                      budget.nativeSearchCostPerQueryMicroUsd,
+                                  maxQueries: budget.nativeSearchMaxQueries,
+                              },
+                          }
+                        : {}),
                 },
             ],
             usageCredits: budget.usageCredits,
@@ -3297,6 +3326,21 @@ export const settleChatUsage = async (
     const multiAttempt = options?.attempts?.length
         ? combineAttemptUsage(options.attempts)
         : null;
+    // Raised after the commit: an alerting call inside a transaction holds a
+    // hot row and can fail the settlement it is reporting on.
+    // Holders rather than plain `let`, because these are assigned inside the
+    // transaction callback and TypeScript's flow analysis does not follow an
+    // assignment through a closure -- it would narrow the reads below to
+    // `never` and the reports would not compile.
+    const reported: {
+        searchCeilingBreach: {
+            provider: string;
+            observed: number;
+            authorized: number;
+            costMicroUsd: number;
+        } | null;
+        missingSearchAuthorization: { provider: string; queries: number } | null;
+    } = { searchCeilingBreach: null, missingSearchAuthorization: null };
     const settlement = await prisma.$transaction(async (tx) => {
         if (reservation.userId) {
             await lockCreditAccount(tx, reservation.userId);
@@ -3419,12 +3463,70 @@ export const settleChatUsage = async (
         // see lib/webSearchExecutionNormalizer.ts). Perplexity always takes
         // the providerUsageSnapshot branch above instead, so this stays 0
         // there and can never double-count its already-reported cost.
-        const searchCostMicroUsd = Math.max(
+        // What the search actually cost, priced at what was authorized.
+        //
+        // The caller's figure comes from the normalizer, which multiplies the
+        // observed query count by *today's* registry rate. Between dispatch
+        // and settlement that rate can change, and a turn settled at a price
+        // it was never authorized at is a snapshot principle broken in the one
+        // place it exists to hold. So when the reservation froze an
+        // authorization, the stored rate prices it.
+        //
+        // `queryCount` is the number of web-search tool results the provider
+        // returned -- the same unit it bills per use and the same unit
+        // Anthropic's `maxUses` bounds. Citations are counted separately and
+        // are deliberately not this.
+        const searchAuthorization = costIntentFor(
+            canonical.attemptCostIntents,
+            multiAttempt?.billedAttempt?.attemptIndex ?? 0
+        )?.nativeSearchAuthorization;
+        const observedSearchQueries = Math.max(
             0,
-            Number.isFinite(usage.searchCostMicroUsd)
-                ? Math.round(usage.searchCostMicroUsd!)
+            Number.isSafeInteger(usage.searchQueryCount)
+                ? usage.searchQueryCount!
                 : 0
         );
+        const settledSearch = searchAuthorization
+            ? settledNativeSearchCost({
+                  provider: canonical.provider,
+                  queryCount: observedSearchQueries,
+                  costPerQueryMicroUsd: searchAuthorization.costPerQueryMicroUsd,
+                  maxQueries: searchAuthorization.maxQueries,
+              })
+            : null;
+        // A reservation written before authorizations existed settles on the
+        // caller's figure. Failing it, or dropping the cost, would punish a
+        // turn that was dispatched correctly under the older contract.
+        const searchCostMicroUsd =
+            settledSearch?.costMicroUsd ??
+            Math.max(
+                0,
+                Number.isFinite(usage.searchCostMicroUsd)
+                    ? Math.round(usage.searchCostMicroUsd!)
+                    : 0
+            );
+        if (settledSearch?.breachedCeiling) {
+            // Not clamped. The provider bills for what it ran, and recording
+            // the authorized figure instead would be accurate about the
+            // authorization and wrong about the money. The full cost stands
+            // above; what changes is that this capability stops dispatching.
+            recordSearchQueryCeilingBreach(canonical.provider);
+            reported.searchCeilingBreach = {
+                provider: canonical.provider,
+                observed: observedSearchQueries,
+                authorized: searchAuthorization!.maxQueries,
+                costMicroUsd: settledSearch.costMicroUsd,
+            };
+        } else if (
+            !searchAuthorization &&
+            observedSearchQueries > 0 &&
+            missingAuthorizationIsADefect(durable.createdAt)
+        ) {
+            reported.missingSearchAuthorization = {
+                provider: canonical.provider,
+                queries: observedSearchQueries,
+            };
+        }
         const costBreakdown =
             searchCostMicroUsd > 0
                 ? {
@@ -3763,6 +3865,38 @@ export const settleChatUsage = async (
             },
         };
     });
+
+    if (reported.searchCeilingBreach) {
+        // A ceiling that did not hold cannot size the next reservation, so the
+        // capability stops dispatching -- in this process. The latch is not
+        // shared between instances; this incident is what reaches an operator,
+        // and a durable circuit breaker is still owed.
+        await reportOperationalIncident({
+            code: "NATIVE_SEARCH_QUERY_CEILING_BREACHED",
+            title: "A provider ran more billable searches than the request authorized",
+            severity: "error",
+            context: {
+                component: "chat-cost-ledger",
+                provider: reported.searchCeilingBreach.provider,
+                observedQueries: reported.searchCeilingBreach.observed,
+                authorizedQueries: reported.searchCeilingBreach.authorized,
+                costMicroUsd: reported.searchCeilingBreach.costMicroUsd,
+            },
+        });
+    }
+    if (reported.missingSearchAuthorization) {
+        await reportOperationalIncident({
+            code: "MISSING_NATIVE_SEARCH_AUTHORIZATION",
+            title: "A paid native search settled with no authorization to price it against",
+            severity: "error",
+            context: {
+                component: "chat-cost-ledger",
+                provider: reported.missingSearchAuthorization.provider,
+                queries: reported.missingSearchAuthorization.queries,
+                configured: NATIVE_SEARCH_AUTHORIZATION_CUTOVER_ENV,
+            },
+        });
+    }
 
     // Shadow telemetry, after the commit and never inside it.
     //
