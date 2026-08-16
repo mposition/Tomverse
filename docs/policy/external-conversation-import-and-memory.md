@@ -1055,6 +1055,34 @@ composer·comparison rail contract를 침범하지 않습니다.
   preview 결과는 Save 전에 설정에 자동 반영되지 않습니다.
 - 응답에는 항상 실제 Tomverse model identity를 표시합니다.
 
+### 14.0 profile의 model 목록을 언제 채택하는가 — [확정 · 2026-08-16 @mposition]
+
+`ProfileBindingPlan.modelIds`(profile version이 지정한 model 목록)를 대화의
+`selectedModels`로 옮기는 시점은 **생성뿐**입니다. 이슈 #643의 결정입니다.
+
+| 경로 | 동작 |
+|---|---|
+| 새 대화 생성 (`POST /api/conversations`) | profile의 `modelIds`로 초기 선택을 구성합니다. |
+| 기존 대화에 profile 연결 (`PATCH /api/conversations/:id`) | 기존 `selectedModels`와 `disabledPanels`를 **보존**합니다. profile version만 씁니다. |
+| profile의 model을 기존 대화에 적용 | 별도의 **명시적 사용자 동작**으로만. assistant를 고르는 행위의 부수 효과로 일어나지 않습니다. |
+
+기존 대화의 모델을 조용히 교체하면 turn당 크레딧 비용, 응답 특성, 패널 구성이
+한꺼번에 바뀝니다. assistant를 고른 사용자는 그 어느 것도 요청하지 않았고,
+경고도 되돌리기도 제공되지 않습니다. 그래서 보존이 기본값입니다.
+
+명시적 적용을 나중에 만든다면 지켜야 할 것:
+
+- 요청이 그 선택을 명시적으로 실어 보내고, 서버가 **plan 접근성·model 활성
+  상태·다중 모델 한도**를 검증한 뒤 **한 요청에서 원자적으로** 저장합니다.
+  부분 적용은 없습니다.
+- 채택 로직은 binding plan과 그 한 번의 쓰기에 둡니다. **client 응답 핸들러에
+  두지 않습니다** — 그렇게 하려던 것이 #632(다른 대화의 모델 설정이 덮어써진
+  결함)의 원인이었습니다.
+- 모델 설정의 client 변경 경로는 `mutateModelSettings` 하나, 서버 동기화는
+  `lib/modelSettingsSyncQueue.ts`의 대화별 queue 하나를 유지합니다.
+
+계약 테스트: `tests/server-contract/conversation-profile-binding-models.test.ts`.
+
 ### 14.1 Knowledge quota 수치 — [확정 · 2026-08-13 @mposition]
 
 §23의 "릴리스 C scope 승인 전에 확정해야 하는 항목" 1번이었고, frontmatter의

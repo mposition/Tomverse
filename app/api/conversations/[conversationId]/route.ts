@@ -581,6 +581,13 @@ export async function PATCH(
             connect: { id: binding.profileVersionId },
           };
         }
+        // `binding.modelIds` is deliberately not applied here. Only a
+        // conversation being created adopts the profile's models; binding to
+        // an existing one preserves whatever the user already chose, because
+        // replacing them would change this conversation's per-turn cost,
+        // answer characteristics and panel layout without anyone asking.
+        // Applying them is a separate explicit action (#643), and this branch
+        // must keep writing the profile version and nothing else.
       } else if (binding.outcome === "detach") {
         updateData.assistantProfileVersion = { disconnect: true };
       }
