@@ -830,6 +830,12 @@ test("three models at a limit of two are refused before any row exists", async (
     await assert.rejects(
       requestImageGeneration(
         requestInput(user.id, {
+          // Standard: the only tier all three price. `requestInput` defaults
+          // to `low`, where Grok and Nano Banana 2 have no price at all, and
+          // the group would then be refused for an unpriceable model instead
+          // of for the limit -- the same 400 for a different reason, which is
+          // exactly the confusion this test exists to rule out.
+          quality: "medium",
           modelIds: [
             "gpt-image-2",
             "grok-imagine-image-quality-20260403",
@@ -876,7 +882,10 @@ test("three models at a limit of three fan out as one group of three", async () 
   ];
 
   const result = await withGroupMaxModels("3", () =>
-    requestImageGeneration(requestInput(user.id, { modelIds }))
+    // Standard for the same reason as above: Grok and Nano Banana 2 price 1K
+    // square at `medium` only, and all-or-nothing admission refuses a group
+    // whose second model cannot be priced.
+    requestImageGeneration(requestInput(user.id, { quality: "medium", modelIds }))
   );
 
   assert.equal(result.targets.length, 3);
