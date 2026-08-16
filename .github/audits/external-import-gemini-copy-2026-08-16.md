@@ -386,23 +386,55 @@ JSON과 HTML은 **같은 계정에서, 두 export 사이에 대화를 추가·�
 ##### 합류는 체크리스트 파일 단독으로 하지 않습니다
 
 `develop`의 계약은 문서 하나가 아니라 **한 슬라이스로 함께 움직입니다.**
-2026-08-16 기준 `origin/main...origin/develop` 차이는 13개 파일이고, 그중
-셋은 `main`에 아예 없습니다.
+2026-08-16 기준 `origin/main...origin/develop` 차이는 **9개 파일**이며 전부
+수정(추가 없음)입니다.
 
 | 구분 | 파일 |
 |---|---|
 | 문서 | `docs/ops/external-import-staging-checklist.md`, `staging-verification-records/README.md`, `_record-template.md` |
 | 생성·검증 | `scripts/new-staging-verification-record.mjs`, `staging-verification-record-core.mjs`, `check-staging-verification-records{,-core}.mjs` |
-| **main에 없음** | `scripts/release-record-policy.mjs`, `scripts/check-release-records.mjs`, `tests/releaseRecordPolicy.test.mjs` |
 | 테스트 | `tests/stagingVerificationRecord{Parsing,Skeleton}.test.mjs` |
-| 명령 | `package.json` — `check:release-records`가 `main`에 없음 |
+
+`package.json`은 필요 없습니다 — `check:staging-verification-records`와
+`new:staging-verification-record`는 이미 `main`에 있습니다.
 
 **체크리스트만 cherry-pick하면 생성기가 새 필드를 누락하거나 validator가 다르게
 해석합니다.** 문서는 `templateRevision: 2026-08-15c`를 요구하는데 생성기가 옛
 skeleton을 쓰면, 그 기록은 사람 눈에만 맞아 보이고 검사에는 걸리지 않습니다.
+그것이 이 9개를 한 PR로 묶는 이유입니다.
 
-별도의 **"checklist contract convergence" PR**로 이 슬라이스 전체를 `main`에
-옮기는 것을 권합니다.
+이 PR의 검증은 다음입니다. `npm run check:release-records`는 **여기서 돌리지
+않습니다** — 아래 §9.1.3.1의 별개 gate입니다.
+
+- `npm run test:unit`
+- `npm run check:staging-verification-records`
+- 기록 생성 preview로 `templateRevision`·`checklistSourceSha`가 채워지는지 확인
+
+##### 9.1.3.1 release-record gate는 별개 승격 후보입니다
+
+`develop`에는 `main`에 없는 release governance 기능이 함께 있습니다
+(`f4828997`·`9a564919`). 인접해 있을 뿐 **위 슬라이스의 의존성이
+아닙니다** — staging 생성·검증 스크립트 넷은
+`staging-verification-record-core`·`staging-verification-features`·
+`check-staging-verification-records-core`만 import하고
+`release-record-policy.mjs`를 참조하지 않습니다.
+
+| 파일 | 상태 |
+|---|---|
+| `scripts/release-record-policy.mjs` | `main`에 없음 |
+| `scripts/check-release-records.mjs` | `main`에 없음 |
+| `tests/releaseRecordPolicy.test.mjs` | `main`에 없음 |
+| `package.json` (`check:release-records`) | `main`에 없음 |
+| `.github/RELEASE_CHECKLIST.md` | 차이 있음 |
+| `.github/workflows/pr-fast-gate.yml` | 차이 있음 |
+
+**별도 PR로 다룹니다.** 승격한다면 마지막 두 개를 빼면 안 됩니다 — script만
+옮기면 아무도 부르지 않는 검사가 되고, 지속적인 gate가 되려면 release
+checklist와 fast gate workflow가 함께 가야 합니다(최소 6개, 위 9개와 합치면
+15개).
+
+활성화 전 거버넌스 부채를 닫는 데 필요한 것은 **9개짜리 checklist
+convergence PR뿐**입니다. release-record gate 승격은 그와 독립적으로 검토합니다.
 
 > **해결되면 이 절을 지우지 말고 아래 한 줄로 바꿉니다.**
 >
@@ -414,14 +446,19 @@ skeleton을 쓰면, 그 기록은 사람 눈에만 맞아 보이고 검사에는
 
 #### 9.1.4 권장 종결 순서
 
-1. ~~감사 문서 정정을 `main`에 병합~~ — **완료** (#640, #646)
-2. checklist 계약 슬라이스 전체를 별도 `main` PR로 합류
+1. ~~감사 문서 정정을 `main`에 병합~~ — **완료** (#640, #646, #655)
+2. **9개짜리** checklist 계약 슬라이스를 별도 `main` PR로 합류 (§9.1.3)
 3. 그 병합 SHA가 확정된 뒤 §9.1.3을 **삭제하지 않고** `Resolved` 한 줄로 갱신
 4. 그 SHA 또는 이후 확정된 활성화 SHA에서 정식 A~H/H2 실행
 
-2와 4는 순서 의존이지만, **§9.2의 마케팅 결정과는 독립**입니다. checklist 간격은
-활성화 전 해결 권고이고, §17 분리는 마케팅 콘텐츠 작성 전 승인 조건이며, 서로를
-기다리지 않습니다.
+2와 4는 순서 의존입니다. 나머지 둘은 **이 순서에 끼워 넣지 않습니다.**
+
+- **release-record gate 승격**(§9.1.3.1) — 활성화의 선행 조건이 아니며, 별도
+  검토·PR입니다.
+- **§17 분리**(§9.2) — 마케팅 콘텐츠 작성 전 승인 조건이지 활성화 조건이
+  아닙니다.
+
+셋은 서로를 기다리지 않습니다.
 
 ### 9.2 마케팅 론치
 
