@@ -809,7 +809,13 @@ test("a non-OpenAI reservation refunds its own provider budget, not OpenAI's", a
   const user = await createUser();
 
   const result = await requestImageGeneration(
-    requestInput(user.id, { modelIds: ["fal-ai/nano-banana-2"] })
+    // Standard, not `requestInput`'s default of `low`: Nano Banana 2 prices 1K
+    // square at `medium` only, and an unpriceable model is refused outright,
+    // so the default would never reach a reservation to refund.
+    requestInput(user.id, {
+      quality: "medium",
+      modelIds: ["fal-ai/nano-banana-2"],
+    })
   );
 
   const reservation = await prisma.imageCreditReservation.findUnique({
