@@ -10,27 +10,77 @@ Record the release SHA once and reuse it everywhere below; evidence produced
 against a different SHA does not count.
 
 ```
-Release SHA:        82fa0bd2805130532464d7db2ff283625bf569ae
+Release SHA:        d4dd0e0a800eed8fa43618e3b720b9ac1a6b9f1d
 Staging deployment: ____________________
 Date / timezone:    2026-08-16 / AEST
 ```
 
-The SHA above is the **release candidate** -- `origin/develop` at the moment
-[#651](https://github.com/mposition/Tomverse/pull/651) was opened. It is what
-every item below must be evidenced against. The merge commit on `main` is a
-different SHA and is recorded here on merge; evidence gathered against the RC
-carries to it only because the merge introduces no new content, and that is
-true only while nothing else lands on `develop` first.
+**Re-frozen.** The first freeze was `82fa0bd2`, and eleven commits across nine
+files landed on `develop` before anything was run against it. The header of
+that version said evidence carries to the merge commit "only while nothing else
+lands on `develop` first"; it did not, so the candidate moved rather than the
+sentence being quietly ignored.
 
-Rolling back means returning to the build a checklist already covers. At the
-time of writing that is still `851598eb8957342bc66d742596692961dbaec03f`
-(`.github/audits/release-2026-08-15__9424a4bd.md`) -- production has served ten
-builds since, all recorded as deviations rather than releases.
+That is a property of this lane, not an accident: an ordinary release freezes a
+moving branch, so the freeze holds only until the next merge. **If anything
+lands on `develop` before §1 is run, this record is re-frozen again and renamed
+with it.** The alternative is `release/**` cut from `main`, which does not move
+-- §7.9.1, and a deliberate choice rather than a fallback.
+
+Every item below must be evidenced against the SHA above, in an isolated
+worktree at that exact commit, with the tree hash recorded alongside it. The
+merge commit on `main` is a different SHA and is recorded here on merge.
 
 ```
 Merge commit SHA:   ____________________
-Rollback SHA:       851598eb8957342bc66d742596692961dbaec03f
+Tree hash at RC:    ____________________
+Node / npm:         ____________________
 ```
+
+### Rollback is not a SHA in this release
+
+The usual rollback -- redeploy the newest build a checklist covers -- **does not
+work here, and naming one would be worse than naming none.**
+
+`20260815090000_attempt_cost_rollup_date` ends with:
+
+```sql
+ALTER TABLE "ChatAttemptUsage" ALTER COLUMN "rollupDate" SET NOT NULL;
+```
+
+with no default. No build on `main` writes that column -- `rollupDate` appears
+zero times in `lib/chatAttemptCostLedger.ts` at `origin/main`, and zero times at
+`851598eb8957342bc66d742596692961dbaec03f`, the last build a checklist covers.
+So once this migration has run, reverting the application to **any** current
+`main` build makes every `ChatAttemptUsage` insert fail on a NOT NULL
+violation, and that table is written on chat settlement.
+
+Rolling back therefore takes two steps in this order, and the second is a
+schema change that has to be decided before it is needed rather than at 3am:
+
+```
+1. ALTER TABLE "ChatAttemptUsage" ALTER COLUMN "rollupDate" DROP NOT NULL;
+2. redeploy the previous application SHA
+```
+
+Dropping the constraint is safe in that direction -- the column stays, the
+backfilled values stay, and the older application simply does not write it. It
+is not safe to leave dropped: the correction path this migration exists for
+finds its `ProviderDailyUsage` row by `rollupDate`, and a NULL there is the
+silent wrong-day update the migration was written to stop.
+
+**The honest alternative is forward-fix.** For anything short of data loss,
+shipping a correction on top of this schema is less risky than a two-step
+reversal nobody has rehearsed.
+
+```
+Rollback decision:  ____________________   (two-step reversal / forward-fix only)
+Decided by:         ____________________
+Rehearsed on:       ____________________   (staging, before the merge)
+```
+
+Recorded as a release blocker rather than a note: a release whose rollback plan
+does not work is a release with no rollback plan.
 
 ## 1. Automated gates
 
@@ -576,8 +626,10 @@ before it costs an outage.
 
 - [x] Run it and read the list. A new name on it is a table added since the
       last release with no retention decision.
-- [x] Anything acted on is either a policy in `lib/retentionPolicyCore.ts` or a
+- [ ] Anything acted on is either a policy in `lib/retentionPolicyCore.ts` or a
       registry entry in `scripts/report-unswept-tables-core.mjs` with the reason
+      — **open.** The scope correction below is written here and nowhere else;
+      the registry still names three tables.
 
 **Run: 2026-08-16, `npm run report:unswept-tables` at the RC.**
 
@@ -602,17 +654,36 @@ table's only ceiling is a table that does not have one yet. It is append-only
 by database trigger and grows per usage adjustment, so it accumulates for as
 long as the account lives.
 
-**It is added to that decision rather than given one of its own.** The report
+**It belongs in that decision rather than getting one of its own.** The report
 already warns what happens otherwise -- "answering them separately is how two
 get a policy and the third is found years later" -- and an adjustment row is
 evidence about the same charge as the reservation it hangs from, so a shorter
 life for one than the other would leave a settled charge whose corrections had
 been deleted.
 
-Not a release blocker: §7.8 is a report, not a gate, and the hold is "no
-deletion before approval", which this inherits unchanged.
+**Scope is a family, not a count.** An earlier draft of this section said "four
+tables, not three", which is both wrong and the same mistake in miniature:
+`ChatAttemptUsage` is a dependent of `ChatCreditReservation` too, and adding
+only the newest sibling because it is the one that showed up in a report is how
+the list stays incomplete. Written as a rule instead:
 
-- [ ] The 2026-08-28 decision is written to cover four tables, not three
+> The three reservation roots and the financial evidence dependent on them.
+> Today the `ChatCreditReservation` family is `ChatAttemptUsage` and
+> `ChatAttemptUsageAdjustment`.
+
+Counted out that is five models, and it stays correct when the sixth arrives.
+
+Not a release blocker. §7.8 is a report, not a gate; the hold is "no deletion
+before approval", which the dependents inherit unchanged; and
+`ChatAttemptUsageAdjustment` carries a `(reservationId, attemptIndex,
+observationId)` unique with duplicates ignored, so a re-run of the same
+observation cannot amplify the row count while the decision is pending.
+
+- [ ] `scripts/report-unswept-tables-core.mjs` states the hold as roots plus
+      dependent financial evidence, and the checklist template and its tests
+      change with it (owner: release manager). **Until then this section is a
+      document and the registry is the code, and they disagree.**
+- [ ] The 2026-08-28 decision is written against that scope
       (owner: finance-ops + privacy/legal)
 
 The reservation tables (`ChatCreditReservation` and its image and memory
@@ -792,9 +863,10 @@ a named owner. N/V is an accepted, tracked risk; a silent tick is neither.
 | §7.6 Post-deploy operator checks | Run against production at the deployed SHA, which does not exist until this merges | Release manager | The §7.6 list, at the merge commit |
 | Stripe path on the production build | Production requires a live key (`lib/securityEnvironment.ts:110`) and a live key rejects test cards, so there is no free path. No live subscription was found to resync | Release manager + finance | A real charge then cancel, a live-subscription resync, or a recorded named-risk approval. See `.github/audits/release-verification-handoff-2026-08-15.md` |
 | An error reaching Sentry with its application trace id | Not provokable from outside without breaking something: the tagged capture needs `AI_PROVIDER_ERROR`, `AI_REQUEST_FAILED`, `DEEP_RESEARCH_JOB_FAILED`, `AI_EMPTY_RESPONSE` or a 5xx, **and** a real `Error` | Release manager | Closes on the next genuine provider failure; test-covered, production-unproven |
-| Historical provider-budget bucket drift | Deploying the fix stops new mis-attribution; it does not move what was already counted. OpenAI is short ~12,000 µUSD for August, xAI and fal hold un-refunded worst-case amounts | Release manager | Decide `completed` / `accepted` / `pending`. The month boundary clears it on 1 September UTC |
+| Historical provider-budget bucket drift | Deploying the fix stops new mis-attribution; it does not move what was already counted. OpenAI is short ~12,000 µUSD for August, xAI and fal hold un-refunded worst-case amounts | Release manager | `completed` only if the buckets were actually corrected, with the amount, the approver and the time; `accepted` if they are left as they are, which is what the month boundary on 1 September UTC produces — the boundary ends the effect, it does not repair the figure; `pending` until one of those is chosen |
 | Six models billing at a credit price the source does not state | Held pending finance/product approval per model; no constant and no row is changed by this release | finance/product | `npm run report:model-credit-weights` against production; `docs/policy/perplexity-sonar-credit-price-hold.md` |
-| §7.8 reservation retention, now four tables | `ChatAttemptUsageAdjustment` is new in this release and inherits the held decision | finance-ops + privacy/legal | The 2026-08-28 (AEST) decision, written to cover four tables |
+| §7.8 reservation retention scope | The registry names three roots; the dependent financial evidence (`ChatAttemptUsage`, `ChatAttemptUsageAdjustment`) is covered only by this document | Release manager, then finance-ops + privacy/legal | Change `report-unswept-tables-core.mjs`, the checklist template and its tests to state roots plus dependents; then the 2026-08-28 decision against that scope |
+| A working rollback plan | No `main` build writes `ChatAttemptUsage.rollupDate`, which this release makes NOT NULL without a default, so no current SHA is a valid rollback target | Release manager | Decide two-step reversal or forward-fix, rehearse it on staging, and record it in the header block above |
 | WebKit (`mobile-safari`) E2E project | WebKit is absent from this container's Playwright bundle; only Chromium is installed | QA | `npx playwright install webkit && npx playwright test --project=mobile-safari` on a runner that has it |
 | UX-020 Chinese, French, German, Spanish and Portuguese translations | Translating them needs a reviewer per language, not a machine pass into the product's core interface | Localization owner | Lower the per-locale ceiling in `tests/localeParity.test.mjs` as strings land; the test measures the remaining gap |
 
