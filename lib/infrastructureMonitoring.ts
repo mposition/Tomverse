@@ -1,5 +1,10 @@
 import "server-only";
 
+import {
+  CLOUDFLARE_GRAPHQL_URL,
+  R2_ANALYTICS_QUERY,
+  r2AnalyticsVariables,
+} from "@/lib/cloudflareR2Analytics";
 import { prisma } from "@/lib/prisma";
 import {
   RAILWAY_USAGE_MONITOR_DISABLED_MESSAGE,
@@ -18,7 +23,6 @@ import {
 } from "@/lib/retentionPolicyCore";
 
 const RAILWAY_GRAPHQL_URL = "https://backboard.railway.com/graphql/v2";
-const CLOUDFLARE_GRAPHQL_URL = "https://api.cloudflare.com/client/v4/graphql";
 const PRISMA_MANAGEMENT_API_URL = "https://api.prisma.io/v1";
 const MAX_EXTERNAL_RESPONSE_BYTES = 1_000_000;
 const EXTERNAL_TIMEOUT_MS = 8_000;
@@ -659,8 +663,6 @@ const r2Snapshot = async (): Promise<R2InfrastructureSnapshot> => {
     };
   }
 
-  const now = new Date();
-  const monthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
   try {
     const { response, payload: rawPayload } = await requestExternalJson(
       "Cloudflare API",
@@ -673,48 +675,8 @@ const r2Snapshot = async (): Promise<R2InfrastructureSnapshot> => {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          query: `
-            query TomverseR2Audit(
-              $accountTag: string!
-              $startDate: Time!
-              $endDate: Time!
-              $bucketName: string!
-            ) {
-              viewer {
-                accounts(filter: { accountTag: $accountTag }) {
-                  storage: r2StorageAdaptiveGroups(
-                    limit: 1
-                    filter: {
-                      datetime_geq: $startDate
-                      datetime_leq: $endDate
-                      bucketName: $bucketName
-                    }
-                    orderBy: [datetime_DESC]
-                  ) {
-                    max { objectCount uploadCount payloadSize metadataSize }
-                    dimensions { datetime }
-                  }
-                  operations: r2OperationsAdaptiveGroups(
-                    limit: 1000
-                    filter: {
-                      datetime_geq: $startDate
-                      datetime_leq: $endDate
-                      bucketName: $bucketName
-                    }
-                  ) {
-                    sum { requests }
-                    dimensions { actionType }
-                  }
-                }
-              }
-            }
-          `,
-          variables: {
-            accountTag: accountId,
-            startDate: monthStart.toISOString(),
-            endDate: now.toISOString(),
-            bucketName,
-          },
+          query: R2_ANALYTICS_QUERY,
+          variables: r2AnalyticsVariables(accountId, bucketName),
         }),
       }
     );
