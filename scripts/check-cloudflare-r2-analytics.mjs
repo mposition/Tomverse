@@ -21,9 +21,21 @@
 //
 // Three reads, each answering one question, so a failure lands on one line:
 //
-//   1. GET /user/tokens/verify   is the token itself live?
+//   1. tokens/verify             what kind of token is this? (advisory only)
 //   2. accounts(accountTag)      can it see this account at all?
 //   3. the R2 datasets           can it read R2 storage and operations?
+//
+// Step 1 never decides anything, and that is deliberate. Cloudflare has two
+// kinds of API token with two different verify endpoints: user tokens answer
+// at `/user/tokens/verify`, account-owned tokens -- which is what the R2 >
+// Manage API Tokens screen hands out -- answer only at
+// `/accounts/{id}/tokens/verify` and return `1000 Invalid API Token` at the
+// user endpoint. An earlier version of this script stopped there and told the
+// operator to reissue a token that was live and working, which is the same
+// misdirection it was written to end. Steps 2 and 3 make every decision; step
+// 1 only reports which kind of token turned up, because "account-owned" is
+// itself the clue that it came from the R2 screen and therefore carries R2
+// storage permissions rather than Account Analytics.
 //
 // Read-only, unbilled, and writes nothing anywhere. Safe to run against a
 // candidate token before deploying it: export the four variables in a shell
@@ -53,7 +65,10 @@ const accountId = process.env.R2_ACCOUNT_ID?.trim();
 const bucketName = process.env.R2_BUCKET_NAME?.trim();
 const token = process.env.CLOUDFLARE_API_TOKEN?.trim();
 
-const TOKEN_VERIFY_URL = "https://api.cloudflare.com/client/v4/user/tokens/verify";
+const USER_TOKEN_VERIFY_URL =
+  "https://api.cloudflare.com/client/v4/user/tokens/verify";
+const accountTokenVerifyUrl = (id) =>
+  `https://api.cloudflare.com/client/v4/accounts/${encodeURIComponent(id)}/tokens/verify`;
 const TIMEOUT_MS = 15_000;
 
 /**
@@ -181,50 +196,61 @@ if (!accountId || !bucketName || !token) {
 }
 
 // ---------------------------------------------------------------------------
-// Step 1: is the token itself live? Permission-free, so it separates "the
-// token is gone" from every scope question below.
+// Step 1: what kind of token is this? Advisory -- see the header. Nothing
+// here exits, because neither verify endpoint answering "no" proves the token
+// is unusable; only steps 2 and 3 can say that.
 // ---------------------------------------------------------------------------
-const verify = await post(TOKEN_VERIFY_URL, null);
-if (verify.networkError !== undefined) {
-  step("token verify", false, "network_error", verify.networkError);
-  finish(
-    "Cloudflare did not answer, so nothing about the token was established.",
-    "Retry. If this persists, check egress from wherever you ran it -- this says nothing about the token.",
-    1
-  );
-}
-if (!verify.ok && !isCloudflareRestEnvelope(verify.payload)) {
-  step(
-    "token verify",
-    false,
-    `intercepted_http_${verify.status}`,
-    summarise(verify.text)
-  );
-  finish(
-    `Something other than the Cloudflare API answered with ${verify.status}, so nothing about the token was established.`,
-    "Run this where egress to api.cloudflare.com is permitted. Nothing above says the token is wrong.",
-    1
-  );
-}
-if (!verify.ok) {
-  const detail = restErrors(verify.payload).join("; ") || summarise(verify.text);
-  step("token verify", false, `http_${verify.status}`, detail);
-  finish(
-    "CLOUDFLARE_API_TOKEN was rejected: the token is invalid, revoked or expired.",
-    "Issue a new API token scoped to the account holding the bucket, with Account Analytics: Read, and set CLOUDFLARE_API_TOKEN to it.",
-    1
-  );
-}
-const tokenStatus = verify.payload?.result?.status ?? "unknown";
-if (tokenStatus !== "active") {
-  step("token verify", false, `status_${tokenStatus}`, "Token is not active.");
-  finish(
-    `CLOUDFLARE_API_TOKEN exists but its status is "${tokenStatus}".`,
-    "Reactivate or reissue the token in the Cloudflare dashboard under My Profile > API Tokens.",
-    1
-  );
-}
-step("token verify", true, "active", "The token itself is live.");
+const verifiedAs = async () => {
+  const asUser = await post(USER_TOKEN_VERIFY_URL, null);
+  // Only a transport failure or a non-Cloudflare answer is worth stopping for:
+  // it means the check never reached Cloudflare, so no later step means
+  // anything either.
+  if (asUser.networkError !== undefined) {
+    step("token verify", false, "network_error", asUser.networkError);
+    finish(
+      "Cloudflare did not answer, so nothing was established.",
+      "Retry. If this persists, check egress from wherever you ran it -- this says nothing about the token.",
+      1
+    );
+  }
+  if (!asUser.ok && !isCloudflareRestEnvelope(asUser.payload)) {
+    step(
+      "token verify",
+      false,
+      `intercepted_http_${asUser.status}`,
+      summarise(asUser.text)
+    );
+    finish(
+      `Something other than the Cloudflare API answered with ${asUser.status}, so nothing was established.`,
+      "Run this where egress to api.cloudflare.com is permitted. Nothing above says the token is wrong.",
+      1
+    );
+  }
+  if (asUser.ok) {
+    return {
+      code: "user_token",
+      detail: `User API token, status ${asUser.payload?.result?.status ?? "unknown"}.`,
+    };
+  }
+  const asAccount = await post(accountTokenVerifyUrl(accountId), null);
+  if (asAccount.ok) {
+    return {
+      code: "account_token",
+      detail:
+        `Account-owned token for this account, status ${asAccount.payload?.result?.status ?? "unknown"}. ` +
+        "The R2 > Manage API Tokens screen issues this kind, and those carry R2 storage permissions rather than Account Analytics.",
+    };
+  }
+  return {
+    code: "unverified",
+    detail:
+      `Neither verify endpoint accepted it (user ${asUser.status}, account ${asAccount.status}: ` +
+      `${restErrors(asAccount.payload).join("; ") || summarise(asAccount.text)}). ` +
+      "Not a verdict -- steps 2 and 3 decide.",
+  };
+};
+const tokenKind = await verifiedAs();
+step("token verify", true, tokenKind.code, tokenKind.detail);
 
 // ---------------------------------------------------------------------------
 // Step 2: can it see this account? This is the step that names R2_ACCOUNT_ID
@@ -332,7 +358,10 @@ if (analyticsFailure !== null) {
   // permission is missing.
   finish(
     "The token can see the account but cannot read the R2 analytics datasets. This is the exact read the threshold monitor makes, and the exact message it reports.",
-    "Add Account Analytics: Read to the token for this account. Reaching this line means R2_ACCOUNT_ID is correct -- the account resolved in step 2 -- so do not change it.",
+    "Issue a token with Account Analytics: Read for this account (My Profile > API Tokens > Create Token > Custom token). Reaching this line means R2_ACCOUNT_ID is correct -- the account resolved in step 2 -- so do not change it." +
+      (tokenKind.code === "account_token"
+        ? " Step 1 identified an account-owned token, which is what the R2 > Manage API Tokens screen issues: it grants R2 storage permissions, and no amount of R2 permission grants this dataset."
+        : ""),
     1
   );
 }
