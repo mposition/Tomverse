@@ -178,6 +178,48 @@ test("railway errors and other dependency warnings still page", async () => {
   }
 });
 
+test("the reason code the probe worked out reaches the alert", async () => {
+  resetWorld();
+  const { monitorInfrastructureThresholdsIfDue } = await loadMonitor();
+  // The production incident: the alert carried Cloudflare's bare sentence and
+  // nothing naming which credential produced it, while the probe had already
+  // decided this was R2_API_ERROR -- a permission failure a person must fix --
+  // rather than R2_USAGE_API_UNAVAILABLE. The reason was computed and then
+  // dropped between the probe and the channels.
+  world.dashboard = dashboard({
+    r2: snapshot("error", "not authorized for that account", [
+      { code: "R2_API_ERROR", detail: "not authorized for that account" },
+    ]),
+  });
+
+  await monitorInfrastructureThresholdsIfDue();
+
+  const incident = world.incidents[0];
+  assert.equal(incident?.code, "INFRASTRUCTURE_R2_ERROR");
+  assert.equal(incident?.context?.reasons, "R2_API_ERROR");
+  assert.equal(incident?.context?.dependency, "r2");
+  // The title names the read that failed. The probe never touches a bucket,
+  // and uploads authenticate with unrelated S3 credentials, so "r2
+  // infrastructure is error" told the on-call that user storage was down.
+  assert.equal(incident?.title, "Cloudflare R2 usage analytics read failed");
+  // `reasonCodes` is consumed here, not forwarded as its own incident field.
+  assert.equal("reasonCodes" in (incident as object), false);
+});
+
+test("a dependency with no reason codes reports no reasons key at all", async () => {
+  resetWorld();
+  const { monitorInfrastructureThresholdsIfDue } = await loadMonitor();
+  world.dashboard = dashboard({
+    database: snapshot("error", "Database unreachable."),
+  });
+
+  await monitorInfrastructureThresholdsIfDue();
+
+  // An empty string would read as "the reasons were checked and there were
+  // none", which is a different claim from "this probe supplies none".
+  assert.equal("reasons" in (world.incidents[0]?.context ?? {}), false);
+});
+
 test("an unknown new railway warning reason still pages", async () => {
   resetWorld();
   const { monitorInfrastructureThresholdsIfDue } = await loadMonitor();
