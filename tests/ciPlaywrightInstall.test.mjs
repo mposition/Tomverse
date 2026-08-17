@@ -60,30 +60,99 @@ test("every workflow that needs a browser goes through the wrapper", () => {
     }
 });
 
+const scriptDefault = (variable) => {
+    const match = new RegExp(`^${variable}=(\\d+)$`, "m").exec(read(SCRIPT_PATH));
+    assert.ok(match, `${SCRIPT_PATH} no longer declares ${variable}`);
+    return Number(match[1]);
+};
+
+// The script's own budget, in minutes, plus the slack a step needs on top of it
+// to report rather than be killed mid-report.
+const STEP_SLACK_MINUTES = 5;
+const requiredStepMinutes = (browsers) => {
+    const heavy = browsers.some((browser) => browser === "webkit" || browser === "firefox");
+    const deadline = scriptDefault(heavy ? "DEADLINE_HEAVY_DEFAULT" : "DEADLINE_LIGHT_DEFAULT");
+    return Math.ceil(deadline / 60) + STEP_SLACK_MINUTES;
+};
+
+const installSteps = workflows.flatMap(({ name, source }) => {
+    const lines = source.split("\n");
+    return lines.flatMap((line, index) => {
+        if (!line.includes(SCRIPT_PATH)) return [];
+        const browsers = line.slice(line.indexOf(SCRIPT_PATH) + SCRIPT_PATH.length).trim().split(/\s+/).filter(Boolean);
+        const timeout = lines
+            .slice(Math.max(0, index - 6), index)
+            .map((candidate) => /timeout-minutes:\s*(\d+)/.exec(candidate))
+            .filter(Boolean)
+            .at(-1);
+        return [
+            {
+                workflow: name,
+                browsers: browsers.length > 0 ? browsers : ["chromium"],
+                timeoutMinutes: timeout ? Number(timeout[1]) : null,
+            },
+        ];
+    });
+});
+
 test("the install step is given more time than its own retry loop needs", () => {
     // A retry loop inside a step timeout shorter than the loop is not a retry
-    // loop: the run this script exists for died with two attempts unused.
-    // Worst case is 3 attempts of 5 minutes plus 30s and 60s of backoff, per
-    // half, so a step capped below that can still be killed mid-recovery.
-    const MINIMUM_MINUTES = 20;
-    for (const { name, source } of workflows) {
-        const lines = source.split("\n");
-        lines.forEach((line, index) => {
-            if (!line.includes(SCRIPT_PATH)) return;
-            const preceding = lines.slice(Math.max(0, index - 5), index);
-            const timeout = preceding
-                .map((candidate) => /timeout-minutes:\s*(\d+)/.exec(candidate))
-                .filter(Boolean)
-                .at(-1);
-            // No explicit step timeout is allowed: the job timeout applies and
-            // is far larger. What is not allowed is one too small to finish.
-            if (!timeout) return;
-            assert.ok(
-                Number(timeout[1]) >= MINIMUM_MINUTES,
-                `${name}: install step allows ${timeout[1]}m, below the ${MINIMUM_MINUTES}m the retry loop can need`
-            );
-        });
+    // loop: the run this script exists for died with two attempts unused, and
+    // an exhausted loop killed by the step reports a bare timeout instead of
+    // naming the half that failed.
+    //
+    // The number is read from the script rather than written here, because the
+    // two drifted apart once already: the comment said "3 attempts of 5 minutes
+    // plus backoff, per half" and the workflows said 20 minutes, and the worst
+    // case was in fact above that.
+    assert.ok(installSteps.length > 0, "no install step was found");
+    for (const { workflow, browsers, timeoutMinutes } of installSteps) {
+        // No explicit step timeout is allowed: the job timeout applies and
+        // is far larger. What is not allowed is one too small to finish.
+        if (timeoutMinutes === null) continue;
+        const required = requiredStepMinutes(browsers);
+        assert.ok(
+            timeoutMinutes >= required,
+            `${workflow}: install step for ${browsers.join(" ")} allows ${timeoutMinutes}m, below the ${required}m its budget can need`
+        );
     }
+});
+
+test("a WebKit install is budgeted as the larger apt transaction it is", () => {
+    // The 2026-08-17 daily security audit failure. WebKit's system dependencies
+    // pull the GStreamer and FFmpeg stacks: 181 packages and 114 MB, against a
+    // mirror giving ~140 kB/s. Three five-minute attempts fetched about half of
+    // it and the step reported a mirror failure for a budget that was never
+    // large enough to succeed, whatever the mirror did.
+    const light = scriptDefault("DEADLINE_LIGHT_DEFAULT");
+    const heavy = scriptDefault("DEADLINE_HEAVY_DEFAULT");
+    assert.ok(
+        heavy >= light * 2,
+        `a WebKit install is budgeted ${heavy}s against Chromium's ${light}s, which does not reflect the transaction`
+    );
+    // 114 MB at the speed actually observed, with nothing left over, was 13
+    // minutes; a budget under that is one no retry can rescue.
+    assert.ok(heavy >= 20 * 60, `${heavy}s cannot fetch WebKit's dependencies on a slow mirror`);
+    const attemptHeavy = scriptDefault("ATTEMPT_TIMEOUT_HEAVY_DEFAULT");
+    assert.ok(
+        attemptHeavy >= 13 * 60,
+        `a single attempt of ${attemptHeavy}s cannot finish a fetch that takes 13 minutes, so every attempt is spent and none completes`
+    );
+    assert.ok(attemptHeavy < heavy, "an attempt may not be as long as the whole budget, or nothing is left to retry with");
+});
+
+test("the whole run is bounded by one deadline, not by attempts times a timeout", () => {
+    const script = read(SCRIPT_PATH);
+    // Attempts times a timeout says nothing about the waiting between attempts,
+    // which is where the 2026-08-17 run spent minutes it was never charged for.
+    assert.match(script, /DEADLINE_AT/);
+    assert.match(script, /remaining_budget/);
+    // Every attempt window is clamped to what is left, or the step timeout
+    // becomes the real bound again and the report is lost with it.
+    assert.match(script, /window="\$budget"/);
+    // The browser download must not be starved by a slow apt half: its own
+    // failure has to be its own.
+    assert.match(script, /DOWNLOAD_RESERVE/);
 });
 
 test("the wrapper retries both halves and bounds each attempt", () => {
@@ -118,6 +187,23 @@ test("a retry clears the lock the attempt it retries is still holding", () => {
     // Escalation, because waiting forever inside a bounded step is just the
     // step timeout with extra steps.
     assert.match(script, /pkill -KILL -x apt-get/);
+    // But escalation on a *stall*, not on the clock. Until 2026-08-17 the wait
+    // was 120 seconds of wall time, so an apt-get thirteen minutes into a
+    // thirteen-minute download was killed for being slow -- and the attempt
+    // that killed it then had to fetch what it had just thrown away. What is
+    // measured is whether apt is still making progress.
+    assert.match(script, /apt_progress/);
+    assert.match(
+        script,
+        /du -sb \/var\/cache\/apt\/archives/,
+        "the download phase's progress must be observed"
+    );
+    assert.match(
+        script,
+        /stat -c %Y \/var\/lib\/dpkg\/status/,
+        "the unpack and configure phases move no bytes into the cache; without a second signal they read as a stall"
+    );
+    assert.match(script, /stalled=\$\(\(stalled \+ 5\)\)/);
     // A killed apt-get can leave a half-configured package that fails every
     // later install until it is repaired.
     assert.match(script, /dpkg --configure -a/);
