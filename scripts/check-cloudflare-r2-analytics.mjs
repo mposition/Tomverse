@@ -92,6 +92,25 @@ const summarise = (text) => {
 const maskAccount = (value) =>
   value.length <= 10 ? value : `${value.slice(0, 4)}...${value.slice(-4)}`;
 
+/**
+ * Length and shape, never the value.
+ *
+ * `.trim()` -- which the probe and this check both apply -- removes whitespace
+ * but not quotation marks. A value pasted into a dashboard as `"c49c..."`
+ * therefore reaches Cloudflare with the quotes still attached and is rejected
+ * for a reason no amount of eyeballing the two strings side by side will
+ * catch, because both *look* right. Printing the length makes it visible
+ * without printing the secret: a Cloudflare account id is 32 characters, and
+ * anything else here is worth settling before the token gets blamed.
+ */
+const shape = (value) => {
+  if (!value) return null;
+  const notes = [];
+  if (/^["'`]|["'`]$/.test(value)) notes.push("starts or ends with a quote");
+  if (/[^A-Za-z0-9_.:-]/.test(value)) notes.push("unexpected characters");
+  return `${value.length} chars${notes.length > 0 ? ` -- ${notes.join(", ")}` : ""}`;
+};
+
 const post = async (url, body) => {
   try {
     const response = await fetch(url, {
@@ -139,8 +158,11 @@ const result = {
   checkedAt: new Date().toISOString(),
   configured: {
     R2_ACCOUNT_ID: accountId ? maskAccount(accountId) : null,
+    R2_ACCOUNT_ID_shape: shape(accountId),
     R2_BUCKET_NAME: bucketName || null,
+    R2_BUCKET_NAME_shape: shape(bucketName),
     CLOUDFLARE_API_TOKEN: token ? "set" : null,
+    CLOUDFLARE_API_TOKEN_shape: shape(token),
   },
   steps: [],
   verdict: null,
@@ -160,10 +182,17 @@ const finish = (verdict, remedy, exitCode) => {
   } else {
     console.log("Cloudflare R2 usage analytics check\n");
     console.log(`  checked:         ${result.checkedAt}`);
-    console.log(`  R2_ACCOUNT_ID:   ${result.configured.R2_ACCOUNT_ID ?? "(unset)"}`);
-    console.log(`  R2_BUCKET_NAME:  ${result.configured.R2_BUCKET_NAME ?? "(unset)"}`);
     console.log(
-      `  CLOUDFLARE_API_TOKEN: ${result.configured.CLOUDFLARE_API_TOKEN ?? "(unset)"}\n`
+      `  R2_ACCOUNT_ID:   ${result.configured.R2_ACCOUNT_ID ?? "(unset)"}` +
+        `  [${result.configured.R2_ACCOUNT_ID_shape ?? "unset"}]`
+    );
+    console.log(
+      `  R2_BUCKET_NAME:  ${result.configured.R2_BUCKET_NAME ?? "(unset)"}` +
+        `  [${result.configured.R2_BUCKET_NAME_shape ?? "unset"}]`
+    );
+    console.log(
+      `  CLOUDFLARE_API_TOKEN: ${result.configured.CLOUDFLARE_API_TOKEN ?? "(unset)"}` +
+        `  [${result.configured.CLOUDFLARE_API_TOKEN_shape ?? "unset"}]\n`
     );
     for (const entry of result.steps) {
       console.log(`  ${entry.ok ? "ok  " : "FAIL"} ${entry.name}  [${entry.code}]`);
