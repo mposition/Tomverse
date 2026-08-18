@@ -1,7 +1,7 @@
 ---
 record: staging-verification
 checklist: docs/ops/external-import-staging-checklist.md
-templateRevision: 2026-08-15c
+templateRevision: 2026-08-18a
 checklistSourceSha:
 runType:
 environment:
@@ -32,7 +32,7 @@ digest:
 | **적용된 migration 식별자** | |
 | **migration 완료 (UTC)** | |
 | **migration이 앱 배포보다 먼저 적용됨** | 예 / 아니오 |
-| template revision | 2026-08-15c |
+| template revision | 2026-08-18a |
 | **checklist source SHA** | |
 | 시작 (UTC) | |
 | 종료 (UTC) | |
