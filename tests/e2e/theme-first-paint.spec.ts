@@ -16,10 +16,11 @@ import { prepareGuestPage } from "./support/app-fixtures";
  *    explicit choice that contradicts the OS. It runs during HTML parsing,
  *    before the first paint.
  *
- * The assertions below compare the theme at `DOMContentLoaded` -- captured by
- * an init script, which is the earliest a test can observe the document -- with
- * the theme after hydration. Equal means no flash. Asserting only the final
- * state would pass on the very build this spec exists to fail.
+ * The assertions below compare the theme at the earliest moment the document
+ * could have been painted -- captured by an init script, see
+ * captureFromFirstPaint -- with the theme after hydration. Equal means no
+ * flash. Asserting only the final state would pass on the very build this spec
+ * exists to fail.
  */
 
 const THEME_COOKIE = "tomverse_theme";
@@ -34,14 +35,37 @@ type ThemeSample = {
 
 type ThemeObservation = {
   firstPaint: ThemeSample | null;
+  /** The same read taken at `DOMContentLoaded`, for diagnosis only. */
+  domContentLoaded: ThemeSample | null;
+  /** How many stylesheets the sample had to wait for, if any. */
+  deferredForStylesheets: number | null;
   hydrated: ThemeSample;
   consoleErrors: string[];
   cspViolations: string[];
 };
 
 /**
- * Records the document's theme as soon as the parser reaches the end of the
- * document, which is after ThemeBootstrap has run and before React hydrates.
+ * Records the document's theme at the earliest moment the browser could have
+ * painted it: the end of parsing, or -- if the render-blocking stylesheets have
+ * not been applied by then -- the moment they are.
+ *
+ * The sample used to be taken at `DOMContentLoaded` alone, and that is not the
+ * same moment in every engine. `DOMContentLoaded` does not wait for stylesheets;
+ * only *painting* does. On 2026-08-18 the five marketing-route cases failed on
+ * mobile WebKit with `rgba(0, 0, 0, 0)` -- not the other theme's colour, the
+ * absence of any author style -- while the same assertions passed on the
+ * dynamic `/chat` route and on every Chromium project, and the expected value
+ * differed per case (white for light, near-black for dark) while the observed
+ * one never did. A sample that is the same whatever the theme is not measuring
+ * the theme; it was taken before the stylesheet applied, which is before the
+ * document had been painted at all.
+ *
+ * Waiting for those stylesheets skips past nothing: a render-blocking sheet is
+ * exactly the thing that stops the first paint, so no paint can have happened
+ * while one is pending. What the assertions still see is every theme decision
+ * -- the bootstrap runs during parsing, and React's hydration is far later --
+ * so a genuine flash still fails, and now it fails with the other theme's
+ * colour rather than with a blank.
  */
 async function captureFromFirstPaint(page: Page) {
   await page.addInitScript(() => {
@@ -58,13 +82,46 @@ async function captureFromFirstPaint(page: Page) {
         colorScheme: getComputedStyle(root).colorScheme,
       };
     };
+    const store = (key: string, value: unknown) => {
+      (window as unknown as Record<string, unknown>)[key] = value;
+    };
     const record = () => {
-      (window as unknown as Record<string, unknown>).__firstPaintTheme = read();
+      store("__firstPaintTheme", read());
+    };
+    const recordWhenPaintable = () => {
+      // Kept as evidence rather than asserted on: when the two samples differ,
+      // this one says the engine reached the end of parsing before its own
+      // stylesheets, which is the difference that made this spec engine-
+      // dependent in the first place.
+      store("__domContentLoadedTheme", read());
+      // `link.sheet` is null until the stylesheet has loaded *and* been applied
+      // to the document, which is the property being waited on.
+      const pending = Array.from(
+        document.querySelectorAll<HTMLLinkElement>('link[rel="stylesheet"]')
+      ).filter((link) => !link.sheet);
+      if (pending.length === 0) {
+        record();
+        return;
+      }
+      store("__deferredForStylesheets", pending.length);
+      let remaining = pending.length;
+      for (const link of pending) {
+        const settle = () => {
+          remaining -= 1;
+          if (remaining === 0) record();
+        };
+        link.addEventListener("load", settle, { once: true });
+        // An error is not a reason to hold the sample back: the sheet will
+        // never apply, so this is the state the document paints in.
+        link.addEventListener("error", settle, { once: true });
+      }
     };
     if (document.readyState === "loading") {
-      document.addEventListener("DOMContentLoaded", record, { once: true });
+      document.addEventListener("DOMContentLoaded", recordWhenPaintable, {
+        once: true,
+      });
     } else {
-      record();
+      recordWhenPaintable();
     }
   });
 }
@@ -89,11 +146,13 @@ async function observe(page: Page, path: string): Promise<ThemeObservation> {
 
   const result = await page.evaluate(() => {
     const root = document.documentElement;
+    const stored = window as unknown as Record<string, unknown>;
     return {
-      firstPaint:
-        ((window as unknown as Record<string, unknown>).__firstPaintTheme as
-          | ThemeSample
-          | undefined) ?? null,
+      firstPaint: (stored.__firstPaintTheme as ThemeSample | undefined) ?? null,
+      domContentLoaded:
+        (stored.__domContentLoadedTheme as ThemeSample | undefined) ?? null,
+      deferredForStylesheets:
+        (stored.__deferredForStylesheets as number | undefined) ?? null,
       hydrated: {
         className: root.className,
         dataTheme: root.dataset.theme ?? null,
@@ -109,13 +168,22 @@ async function observe(page: Page, path: string): Promise<ThemeObservation> {
 /** The theme did not change between the first paint and hydration. */
 function expectNoFlash(observation: ThemeObservation, label: string) {
   expect(observation.firstPaint, `${label}: first-paint sample missing`).not.toBeNull();
+  // A failure here is read by someone who cannot reproduce it: WebKit is only
+  // installed by one workflow. Which sample was taken when, and whether it had
+  // to wait for a stylesheet, is the difference between a theme that flashed
+  // and an engine that finished parsing before it had styles to paint with.
+  const evidence = [
+    `first paint ${JSON.stringify(observation.firstPaint)}`,
+    `at DOMContentLoaded ${JSON.stringify(observation.domContentLoaded)}`,
+    `stylesheets pending then: ${observation.deferredForStylesheets ?? 0}`,
+  ].join("; ");
   expect(
     observation.firstPaint!.backgroundColor,
-    `${label}: background changed after hydration (this is the flash)`
+    `${label}: background changed after hydration (this is the flash) -- ${evidence}`
   ).toBe(observation.hydrated.backgroundColor);
   expect(
     observation.firstPaint!.colorScheme,
-    `${label}: color-scheme changed after hydration`
+    `${label}: color-scheme changed after hydration -- ${evidence}`
   ).toBe(observation.hydrated.colorScheme);
   expect(observation.consoleErrors, `${label}: hydration errors`).toEqual([]);
   expect(observation.cspViolations, `${label}: CSP violations`).toEqual([]);
