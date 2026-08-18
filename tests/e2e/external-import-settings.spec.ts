@@ -930,10 +930,14 @@ test.describe("external import settings", () => {
       page.getByTestId("external-import-conversation-link")
     ).toHaveCount(3);
 
-    const download = page.waitForEvent("download");
+    // The export navigates to a route that answers with an attachment; WebKit
+    // never hands that file to a test, so the request the product makes is what
+    // is waited on here (support/engine-capabilities.ts). The page staying put
+    // is the other half of the same decision.
     await page.getByTestId("external-import-export").click();
-    await download;
-    expect(api.exportCount).toBe(1);
+    await expect.poll(() => api.exportCount).toBe(1);
+    expect(new URL(page.url()).pathname).toBe("/settings/imports");
+    await expect(section).toBeVisible();
   });
 
   test("the viewer renders imported content inertly, pages messages, and deletes a snapshot", async ({
