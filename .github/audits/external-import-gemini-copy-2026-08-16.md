@@ -403,31 +403,38 @@ JSON과 HTML은 **같은 계정에서, 두 export 사이에 대화를 추가·�
 clean tree에서의 생성 preview였습니다. `npm run check:release-records`는 이
 슬라이스가 아니므로 실행하지 않았습니다(§9.1.3.1).
 
-##### 9.1.3.1 release-record gate는 별개 승격 후보입니다
+##### 9.1.3.1 release-record gate는 별개 승격 후보였습니다 — 해결됨
 
-`develop`에는 `main`에 없는 release governance 기능이 함께 있습니다
-(`f4828997`·`9a564919`). 인접해 있을 뿐 **위 슬라이스의 의존성이
-아닙니다** — staging 생성·검증 스크립트 넷은
+> **Resolved: release-record gate가 `main`에 합류했습니다.** 두 source
+> commit(`f48289973ee757fefe6213bdd167d39ad29ea0bf` 2026-08-15,
+> `9a56491915d483a863b4d14aceb2eba48e8ca007` 2026-08-16)이 모두 `main`의
+> 조상이고, 아래 여섯 파일이 `main`·`develop`에서 동일합니다. `main`의
+> `.github/workflows/pr-fast-gate.yml:170`에서 `check:release-records`가
+> 실제로 실행됩니다. 2026-08-18 확인.
+
+**이 절을 지우지 않는 이유도 provenance입니다.** 이 gate가 한동안 `develop`
+에만 있었다는 사실을 알아야, 그 창에 열린 PR들이 왜 이 검사를 거치지 않았는지
+설명됩니다.
+
+당시 상태는 이랬습니다. `develop`에는 `main`에 없는 release governance 기능이
+함께 있었고, 인접해 있을 뿐 **checklist 슬라이스의 의존성이 아니었습니다** —
+staging 생성·검증 스크립트 넷은
 `staging-verification-record-core`·`staging-verification-features`·
 `check-staging-verification-records-core`만 import하고
 `release-record-policy.mjs`를 참조하지 않습니다.
 
-| 파일 | 상태 |
-|---|---|
-| `scripts/release-record-policy.mjs` | `main`에 없음 |
-| `scripts/check-release-records.mjs` | `main`에 없음 |
-| `tests/releaseRecordPolicy.test.mjs` | `main`에 없음 |
-| `package.json` (`check:release-records`) | `main`에 없음 |
-| `.github/RELEASE_CHECKLIST.md` | 차이 있음 |
-| `.github/workflows/pr-fast-gate.yml` | 차이 있음 |
+| 파일 | 당시 | 현재 |
+|---|---|---|
+| `scripts/release-record-policy.mjs` | `main`에 없음 | 동일 |
+| `scripts/check-release-records.mjs` | `main`에 없음 | 동일 |
+| `tests/releaseRecordPolicy.test.mjs` | `main`에 없음 | 동일 |
+| `package.json` (`check:release-records`) | `main`에 없음 | 동일 |
+| `.github/RELEASE_CHECKLIST.md` | 차이 있음 | 동일 |
+| `.github/workflows/pr-fast-gate.yml` | 차이 있음 | 동일 |
 
-**별도 PR로 다룹니다.** 승격한다면 마지막 두 개를 빼면 안 됩니다 — script만
-옮기면 아무도 부르지 않는 검사가 되고, 지속적인 gate가 되려면 release
-checklist와 fast gate workflow가 함께 가야 합니다(최소 6개, 위 9개와 합치면
-15개).
-
-활성화 전 거버넌스 부채를 닫는 데 필요한 것은 **9개짜리 checklist
-convergence PR뿐**입니다. release-record gate 승격은 그와 독립적으로 검토합니다.
+**우려했던 부분 절반 승격은 일어나지 않았습니다.** script만 옮기면 아무도
+부르지 않는 검사가 되므로 release checklist와 fast gate workflow가 함께 가야
+했는데, 여섯 개가 모두 갔습니다.
 
 > **해결되면 이 절을 지우지 말고 아래 한 줄로 바꿉니다.**
 >
@@ -444,17 +451,28 @@ convergence PR뿐**입니다. release-record gate 승격은 그와 독립적으�
    (#661, `2d4a22c`)
 3. ~~그 병합 SHA가 확정된 뒤 §9.1.3을 **삭제하지 않고** `Resolved`로 갱신~~ —
    **완료** (이 문서)
-4. **남음** — 확정된 활성화 SHA에서 정식 A~H/H2 실행 (§9.1·§9.1.1·§9.1.2)
+4. ~~확정된 활성화 SHA에서 정식 A~H/H2 실행~~ — **실행했고 실패**
+   (2026-08-16 ~ 08-18,
+   `docs/ops/staging-verification-records/2026-08-16__62987e9891c55f641cb89e1266550018b82e1c50.md`,
+   `runType: formal`, `result: failed`, 동결됨). 72항목 중 pass 63 · fail 2 ·
+   n/a 3 · 미기록 3 · 혼합 1, 발견 16건. **release blocker는 1건** — 발견-7
+   (#664): Google Takeout ZIP이 data descriptor를 쓰므로 대화 JSON이 빈
+   파일로 skip되고 HTML export로 오인되어, 정상 경로로 내보낸 사용자 전원이
+   실패합니다.
+5. **남음** — #664 수정(PR #669) 병합 후 **새 SHA에서 A~H/H2 전체 재실행**.
+   체크리스트 H절이 요구하는 바이며, 수정이 `lib/externalImportArchive.ts`·
+   `lib/workers/externalImportWorker.ts`를 바꾸므로 2026-08-16 기록은 새
+   대상을 덮지 못합니다. 그 기록의 63개 실측값은 재실행의 기대값으로 그대로
+   쓸 수 있습니다.
 
-활성화 전에 남은 것은 **4번 하나**입니다. 나머지 둘은 **이 순서에 끼워 넣지
+활성화 전에 남은 것은 **5번 하나**입니다. 아래는 **이 순서에 끼워 넣지
 않습니다.**
 
-- **release-record gate 승격**(§9.1.3.1) — 활성화의 선행 조건이 아니며, 별도
-  검토·PR입니다.
+- ~~**release-record gate 승격**(§9.1.3.1)~~ — **완료**. 2026-08-18 확인.
 - **§17 분리**(§9.2) — 마케팅 콘텐츠 작성 전 승인 조건이지 활성화 조건이
-  아닙니다.
+  아닙니다. **미결.**
 
-셋은 서로를 기다리지 않습니다.
+둘은 서로를 기다리지 않습니다.
 
 ### 9.2 마케팅 론치
 
