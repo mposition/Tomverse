@@ -19,6 +19,7 @@ import {
     JsonArrayStreamParser,
     ExternalImportJsonStreamError,
 } from "@/lib/externalImportJsonStream";
+import { readZipDirectoryFromBlob } from "@/lib/externalImportZipDirectory";
 import { EXTERNAL_IMPORT_CLIENT_ARCHIVE_LIMITS } from "@/lib/externalImportLimits";
 import {
     buildImportPreview,
@@ -165,6 +166,16 @@ async function parseArchive(file: File): Promise<{
     /** Whether the archive held HTML where conversations should be (§6). */
     let sawHtmlEntry = false;
 
+    /**
+     * True entry sizes, read from the archive's own directory before anything
+     * is inflated. Google Takeout writes every entry with a data descriptor
+     * (general-purpose flag bit 3), so its local headers report size 0 and the
+     * conversations file would be skipped as `empty` — the export then looks
+     * like the HTML one it is not. `null` when the directory cannot be read,
+     * in which case each entry falls back to its local header.
+     */
+    const directory = await readZipDirectoryFromBlob(file);
+
     await new Promise<void>((resolve, reject) => {
         const decoder = new TextDecoder();
         const unzip = new Unzip((entry) => {
@@ -183,13 +194,21 @@ async function parseArchive(file: File): Promise<{
                 return;
             }
 
+            const known = directory?.get(entry.name);
             const info: ArchiveEntryInfo = {
+                // The directory is authoritative: it carries the real sizes
+                // even for entries whose local header deferred them to a data
+                // descriptor. The local header is the fallback, and there
+                // originalSize is present only when the producer knew it —
+                // falling back to the compressed size keeps such an entry
+                // bounded rather than unbounded.
                 name: entry.name,
-                // originalSize is present when the entry header carries it;
-                // fall back to the compressed size so an entry with an absent
-                // header is still bounded rather than unbounded.
-                uncompressedBytes: entry.originalSize ?? entry.size ?? 0,
-                compressedBytes: entry.size,
+                uncompressedBytes:
+                    known?.uncompressedBytes ??
+                    entry.originalSize ??
+                    entry.size ??
+                    0,
+                compressedBytes: known?.compressedBytes ?? entry.size,
             };
             const basename = entry.name.split("/").pop();
             if (basename) archivedNames.add(basename);
