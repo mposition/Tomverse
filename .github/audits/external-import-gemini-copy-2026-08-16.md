@@ -289,6 +289,18 @@ registry 쪽은 이미 갖춰져 있습니다.
 따로 필요하고, 분리하지 않는다면 memory가 켜지기 전까지 마케팅을 내지
 않는다는 뜻입니다.
 
+**추가 확인 결과, 현행 고지의 두 번째 문장도 Release A에는 적용되지 않습니다.**
+Release A에서는 가져온 대화가 보관·열람되지만 memory extraction·injection이
+비활성인 동안 새 답변 생성에는 사용되지 않습니다 — 가져온 대화가 채팅에 닿는
+경로는 `lib/memoryExtractionService.ts`와 `lib/memoryRetrievalService.ts`뿐이고
+둘 다 그 flag 뒤에 있습니다. 따라서 import-only 고지는 **기존 고지의 어느
+문장도 재사용해서는 안 되며**, "가져오기만으로 새 답변에 사용되지 않는다"는
+경계를 별도로 설명해야 합니다.
+
+이것은 §17 분리를 승인하는 기록이 **아닙니다.** 향후 결정이 지켜야 할 사실
+제약입니다. 위 문단이 ⓐ만 문제 삼고 있어, 그것만 읽고 고지를 쓰면 ⓑ를 그대로
+가져다 쓰게 됩니다.
+
 ### 8.3 공개하기로 정했다면
 
 registry·7개 locale·landing·SEO·정적 테스트를 **한 변경으로** 적용합니다.
@@ -459,11 +471,12 @@ staging 생성·검증 스크립트 넷은
    (#664): Google Takeout ZIP이 data descriptor를 쓰므로 대화 JSON이 빈
    파일로 skip되고 HTML export로 오인되어, 정상 경로로 내보낸 사용자 전원이
    실패합니다.
-5. **남음** — #664 수정(PR #669) 병합 후 **새 SHA에서 A~H/H2 전체 재실행**.
-   체크리스트 H절이 요구하는 바이며, 수정이 `lib/externalImportArchive.ts`·
-   `lib/workers/externalImportWorker.ts`를 바꾸므로 2026-08-16 기록은 새
-   대상을 덮지 못합니다. 그 기록의 63개 실측값은 재실행의 기대값으로 그대로
-   쓸 수 있습니다.
+5. **남음** — #664 수정은 2026-08-18에 `develop`에 병합됐습니다(PR #669).
+   남은 것은 **활성화 대상 SHA를 정해 staging에 배포하고 그 위에서 A~H/H2
+   전체를 재실행**하는 것입니다. 체크리스트 H절이 요구하는 바이며, 수정이
+   `lib/externalImportArchive.ts`·`lib/workers/externalImportWorker.ts`를
+   바꾸므로 2026-08-16 기록은 새 대상을 덮지 못합니다. 그 기록의 63개
+   실측값은 재실행의 기대값으로 그대로 쓸 수 있습니다.
 
 활성화 전에 남은 것은 **5번 하나**입니다. 아래는 **이 순서에 끼워 넣지
 않습니다.**
