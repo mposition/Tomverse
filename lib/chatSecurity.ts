@@ -3290,6 +3290,17 @@ export const settleChatUsage = async (
         /** Native web search's own per-call provider cost (OpenAI/Anthropic/Google), from webSearchExecutionNormalizer's costMetadata. Never set for Perplexity -- its own reported response cost already covers search. */
         searchCostMicroUsd?: number;
         searchQueryCount?: number;
+        /**
+         * Whether anybody counted this turn's searches.
+         *
+         * `false` says the turn ended before the response could be read --
+         * cancelled, disconnected, or failed mid-stream. It is not the same as
+         * a count of zero, and the difference is money: a native search runs
+         * before the model writes, so a turn abandoned mid-answer has already
+         * been billed for searches nobody tallied. Absent means observed, which
+         * keeps every existing caller on the behaviour it has.
+         */
+        searchQueriesObserved?: boolean;
     },
     options?: {
         reconciled?: boolean;
@@ -3352,40 +3363,72 @@ export const settleChatUsage = async (
      * only on the committed path would leave the pathological combination:
      * dispatch stopped, and nothing said why.
      *
-     * Called exactly once per settlement, on whichever path is taken.
+     * Called exactly once per settlement, on whichever path is taken. The two
+     * reports go out with `Promise.allSettled` rather than in sequence: they
+     * are independent facts about the same turn, and the first one failing to
+     * reach Slack is not a reason the second never gets sent.
      */
     const deliverSearchIncidents = async () => {
+        const deliveries: Promise<unknown>[] = [];
         if (reported.searchCeilingBreach) {
             // A ceiling that did not hold cannot size the next reservation, so
             // the capability stops dispatching -- in this process. The latch is
             // not shared between instances; this incident is what reaches an
             // operator, and a durable circuit breaker is still owed.
-            await reportOperationalIncident({
-                code: "NATIVE_SEARCH_QUERY_CEILING_BREACHED",
-                title: "A provider ran more billable searches than the request authorized",
-                severity: "error",
-                context: {
-                    component: "chat-cost-ledger",
-                    provider: reported.searchCeilingBreach.provider,
-                    observedQueries: reported.searchCeilingBreach.observed,
-                    authorizedQueries: reported.searchCeilingBreach.authorized,
-                    costMicroUsd: reported.searchCeilingBreach.costMicroUsd,
-                },
-            });
+            deliveries.push(
+                reportOperationalIncident({
+                    code: "NATIVE_SEARCH_QUERY_CEILING_BREACHED",
+                    title: "A provider ran more billable searches than the request authorized",
+                    severity: "error",
+                    context: {
+                        component: "chat-cost-ledger",
+                        provider: reported.searchCeilingBreach.provider,
+                        observedQueries: reported.searchCeilingBreach.observed,
+                        authorizedQueries: reported.searchCeilingBreach.authorized,
+                        costMicroUsd: reported.searchCeilingBreach.costMicroUsd,
+                    },
+                })
+            );
         }
         if (reported.missingSearchAuthorization) {
-            await reportOperationalIncident({
-                code: "MISSING_NATIVE_SEARCH_AUTHORIZATION",
-                title: "A paid native search settled with no authorization to price it against",
-                severity: "error",
-                context: {
-                    component: "chat-cost-ledger",
-                    provider: reported.missingSearchAuthorization.provider,
-                    queries: reported.missingSearchAuthorization.queries,
-                    configured: NATIVE_SEARCH_AUTHORIZATION_CUTOVER_ENV,
-                },
-            });
+            deliveries.push(
+                reportOperationalIncident({
+                    code: "MISSING_NATIVE_SEARCH_AUTHORIZATION",
+                    title: "A paid native search settled with no authorization to price it against",
+                    severity: "error",
+                    context: {
+                        component: "chat-cost-ledger",
+                        provider: reported.missingSearchAuthorization.provider,
+                        queries: reported.missingSearchAuthorization.queries,
+                        configured: NATIVE_SEARCH_AUTHORIZATION_CUTOVER_ENV,
+                    },
+                })
+            );
         }
+        if (deliveries.length === 0) return;
+        for (const result of await Promise.allSettled(deliveries)) {
+            if (result.status === "rejected") throw result.reason;
+        }
+    };
+
+    /**
+     * An incident that could not be delivered, logged and then let go.
+     *
+     * Both settlement paths swallow delivery failures, and symmetrically. On
+     * the failing path a throw here would replace the error that actually
+     * broke the settlement; on the committed path it would fail a turn whose
+     * money has already moved, and the caller would be told the settlement did
+     * not happen when it did. Neither is a better outcome than a logged line.
+     */
+    const logIncidentDeliveryFailure = (error: unknown) => {
+        console.error(
+            JSON.stringify({
+                event: "chat_search_incident_delivery_failed",
+                reservationId: reservation.reservationId,
+                message: error instanceof Error ? error.message : String(error),
+                timestamp: new Date().toISOString(),
+            })
+        );
     };
     const settled = prisma.$transaction(async (tx) => {
         if (reservation.userId) {
@@ -3549,25 +3592,44 @@ export const settleChatUsage = async (
                 ? usage.searchQueryCount!
                 : 0
         );
-        const settledSearch = searchAuthorization
-            ? settledNativeSearchCost({
-                  provider: canonical.provider,
-                  queryCount: observedSearchQueries,
-                  costPerQueryMicroUsd: searchAuthorization.costPerQueryMicroUsd,
-                  maxQueries: searchAuthorization.maxQueries,
-              })
-            : null;
+        /**
+         * The turn ended before anybody could count its searches.
+         *
+         * A native search executes before the model writes a word, so a turn
+         * that was cancelled, disconnected, or failed mid-stream has already
+         * been billed for searches nobody tallied. Settling that as zero takes
+         * real provider spend out of the budget that exists to bound it, and
+         * hands the whole search reservation back on top -- so the frozen
+         * authorization is recorded instead, as the upper bound it is.
+         *
+         * Only when there is an authorization to bound it with. A payload
+         * without one has no honest ceiling to fall back on, so it keeps the
+         * older behaviour rather than inventing a figure.
+         */
+        const searchQueriesUnobserved =
+            usage.searchQueriesObserved === false && !!searchAuthorization;
+        const settledSearch =
+            searchAuthorization && !searchQueriesUnobserved
+                ? settledNativeSearchCost({
+                      provider: canonical.provider,
+                      queryCount: observedSearchQueries,
+                      costPerQueryMicroUsd:
+                          searchAuthorization.costPerQueryMicroUsd,
+                      maxQueries: searchAuthorization.maxQueries,
+                  })
+                : null;
         // A reservation written before authorizations existed settles on the
         // caller's figure. Failing it, or dropping the cost, would punish a
         // turn that was dispatched correctly under the older contract.
-        const searchCostMicroUsd =
-            settledSearch?.costMicroUsd ??
-            Math.max(
-                0,
-                Number.isFinite(usage.searchCostMicroUsd)
-                    ? Math.round(usage.searchCostMicroUsd!)
-                    : 0
-            );
+        const searchCostMicroUsd = searchQueriesUnobserved
+            ? searchAuthorization!.reservedCostMicroUsd
+            : (settledSearch?.costMicroUsd ??
+              Math.max(
+                  0,
+                  Number.isFinite(usage.searchCostMicroUsd)
+                      ? Math.round(usage.searchCostMicroUsd!)
+                      : 0
+              ));
         if (settledSearch?.breachedCeiling) {
             // Not clamped. The provider bills for what it ran, and recording
             // the authorized figure instead would be accurate about the
@@ -3596,12 +3658,19 @@ export const settleChatUsage = async (
                       ...baseCostBreakdown,
                       tokenCostMicroUsd: baseCostBreakdown.totalCostMicroUsd,
                       searchCostMicroUsd,
-                      searchQueryCount: Math.max(
-                          0,
-                          Number.isSafeInteger(usage.searchQueryCount)
-                              ? usage.searchQueryCount!
-                              : 0
-                      ),
+                      // Null, not `maxQueries`. The ceiling prices the cost
+                      // because it is the only honest bound available; writing
+                      // it here as well would state a query count as though
+                      // somebody had counted it, and every report downstream
+                      // reads this field as an observation.
+                      searchQueryCount: searchQueriesUnobserved
+                          ? null
+                          : Math.max(
+                                0,
+                                Number.isSafeInteger(usage.searchQueryCount)
+                                    ? usage.searchQueryCount!
+                                    : 0
+                            ),
                       totalCostMicroUsd:
                           baseCostBreakdown.totalCostMicroUsd + searchCostMicroUsd,
                   }
@@ -3645,7 +3714,14 @@ export const settleChatUsage = async (
                       usageFromProvider: usageSource === "provider_usage_metadata",
                       outcome: usage.outcome,
                       costMicroUsd: actualCost,
-                      costSource: costBreakdown.costSource,
+                      // An unobserved search makes the whole figure an upper
+                      // bound: part of it was measured and part of it is the
+                      // ceiling the turn was authorized to spend. A report that
+                      // separates measured spend from estimated spend has to
+                      // see this row on the estimated side.
+                      costSource: searchQueriesUnobserved
+                          ? "reserved_upper_bound"
+                          : costBreakdown.costSource,
                       userBilled: actualCredits > 0,
                       // From the reservation row, where
                       // `linkChatReservationProviderRequest` put them. A
@@ -3887,7 +3963,31 @@ export const settleChatUsage = async (
                         // stays `provider_usage_metadata` -- and one row saying
                         // two things under one name is a trap for whoever reads
                         // the snapshot.
-                        snapshot: { settlementUsageSource: usageSource },
+                        snapshot: {
+                            settlementUsageSource: usageSource,
+                            // What the search half of this cost actually is,
+                            // written down rather than left to be inferred from
+                            // `costSource`. The count is explicitly null: the
+                            // ceiling priced the cost because it was the only
+                            // honest bound, and recording `maxQueries` here
+                            // would put an authorization where a reader expects
+                            // an observation.
+                            //
+                            // No later correction arrives on its own. Nothing in
+                            // production hands settlement a real count after a
+                            // cancelled turn, so this figure stands as a
+                            // deliberately conservative upper bound until such a
+                            // path exists and is wired to the adjustment ledger.
+                            ...(searchQueriesUnobserved
+                                ? {
+                                      searchCostSource:
+                                          "reserved_upper_bound" as const,
+                                      searchQueryCount: null,
+                                      searchAuthorizedMaxQueries:
+                                          searchAuthorization!.maxQueries,
+                                  }
+                                : {}),
+                        },
                     },
                 ]
               : [];
@@ -3933,13 +4033,11 @@ export const settleChatUsage = async (
     try {
         settlement = await settled;
     } catch (error) {
-        // The settlement did not commit; the searches still ran. Reported
-        // before rethrowing, and its own failure swallowed so it cannot
-        // replace the error that actually broke the settlement.
-        await deliverSearchIncidents().catch(() => {});
+        // The settlement did not commit; the searches still ran.
+        await deliverSearchIncidents().catch(logIncidentDeliveryFailure);
         throw error;
     }
-    await deliverSearchIncidents();
+    await deliverSearchIncidents().catch(logIncidentDeliveryFailure);
 
     // Shadow telemetry, after the commit and never inside it.
     //

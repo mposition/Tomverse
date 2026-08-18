@@ -2575,12 +2575,21 @@ async function handleChatPost(
         // client disconnect, transport error) -- a search cannot have been
         // confirmed executed at that point, so treat any reserved surcharge
         // as unearned and let the cancelled-outcome proration exclude it.
+        //
+        // That is the *user's* ledger and it stays. The provider's ledger is a
+        // different question with a different answer: a native search runs
+        // before the model writes a word, so by the time a client disconnects
+        // mid-answer the provider has already run and billed for it. Nobody
+        // counted the queries, which is what `searchQueriesObserved: false`
+        // says -- settlement records the frozen authorization as an upper
+        // bound rather than pretending the count is zero.
         const earlyCancelSearchFields = {
             searchSurchargeCredits: getWebSearchSurchargeCredits(
                 webSearchMode ?? "off",
                 webSearchCapability
             ),
             searchExecuted: false,
+            searchQueriesObserved: false,
         };
         const settleSafely = (
             outcome: "completed" | "cancelled" | "failed" | "empty",
@@ -2592,6 +2601,19 @@ async function handleChatPost(
                 usageFromProvider?: boolean;
                 searchSurchargeCredits?: number;
                 searchExecuted?: boolean;
+                // The provider's half of a native search, and whether anybody
+                // was still there to count it.
+                //
+                // These two were absent for as long as this function has
+                // existed. `searchSettlementFields` has always carried them and
+                // has always been spread into this parameter -- and TypeScript
+                // does not excess-property-check a spread, so both were dropped
+                // here in silence and every completed search settled as zero
+                // queries. The settlement arithmetic that prices them was
+                // right; it was simply never handed anything to price.
+                searchCostMicroUsd?: number;
+                searchQueryCount?: number;
+                searchQueriesObserved?: boolean;
             }
         ) => {
             if (usageSettlement) return usageSettlement;
@@ -2617,6 +2639,9 @@ async function handleChatPost(
                         outcome,
                         searchSurchargeCredits: usage?.searchSurchargeCredits,
                         searchExecuted: usage?.searchExecuted,
+                        searchCostMicroUsd: usage?.searchCostMicroUsd,
+                        searchQueryCount: usage?.searchQueryCount,
+                        searchQueriesObserved: usage?.searchQueriesObserved,
                     }, {
                         providerUsageSnapshot,
                         // Only when this turn actually dispatched more than
@@ -2637,7 +2662,17 @@ async function handleChatPost(
                                       usageFromProvider:
                                           usage?.usageFromProvider === true,
                                       outcome,
-                                      searchCostMicroUsd: undefined,
+                                      // The turn's search belongs to the
+                                      // attempt that ran it, and a searching
+                                      // turn never falls back (autoFallbackGate
+                                      // excludes it), so the attempt being
+                                      // built here is that one. Passing
+                                      // `undefined` unconditionally dropped the
+                                      // cost a second time on the multi-attempt
+                                      // path.
+                                      searchCostMicroUsd:
+                                          usage?.searchCostMicroUsd,
+                                      searchQueryCount: usage?.searchQueryCount,
                                       providerReportedCostMicroUsd:
                                           providerUsageSnapshot?.totalCostMicroUsd ??
                                           null,
@@ -3380,6 +3415,10 @@ async function handleChatPost(
                             searchCostMicroUsd:
                                 webSearchExecution.costMetadata?.searchCostMicroUsd,
                             searchQueryCount: webSearchExecution.queryCount,
+                            // The normalizer read the finished response, so an
+                            // absent count here means the search really did not
+                            // run -- not that nobody looked.
+                            searchQueriesObserved: true,
                         };
 
                         if (usageResult.status === "fulfilled") {
@@ -3648,7 +3687,13 @@ async function handleChatPost(
                         // The next pull() reads from its stream.
                         return;
                     }
-                    await settleSafely("failed");
+                    // Same reason as the cancelled paths: the provider errored
+                    // mid-stream, so the normalizer never ran and nobody
+                    // counted the searches it may already have executed. The
+                    // user-ledger fields are left alone -- only the provider
+                    // ledger is told that the count is unknown rather than
+                    // zero.
+                    await settleSafely("failed", { searchQueriesObserved: false });
                     errorSafely(controller, error);
                     await releaseSafely();
                 }

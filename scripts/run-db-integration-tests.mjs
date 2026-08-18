@@ -278,6 +278,24 @@ run(
   ],
   "Running the administrator refund decision transaction and its outbox"
 );
+// Also its own process: it replaces next-auth and the AI SDK's streamText to
+// drive a real searching turn end to end. What it asserts is the wiring
+// between the route and the cost ledger -- a claim no test calling
+// settleChatUsage directly can make, and one that was false for as long as
+// the handler had existed.
+run(
+  [
+    "--conditions=react-server",
+    "--experimental-test-module-mocks",
+    "--no-warnings=ExperimentalWarning",
+    "--import",
+    "tsx",
+    "--test",
+    "--test-concurrency=1",
+    "tests/integration/chat-route-search-settlement.db.test.ts",
+  ],
+  "Running a native web search from the chat route through to the cost ledger"
+);
 // Its own process for the same reason: it replaces next-auth, the Stripe
 // client and the webhook processor to drive the administrator replay route.
 run(

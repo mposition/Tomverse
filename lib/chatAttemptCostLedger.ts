@@ -64,9 +64,20 @@ export const boundedProviderIdentifier = (value: string | null | undefined) => {
  * A column rather than a note inside `pricingSnapshot`, because the reports
  * that read this ledger have to separate measured spend from estimated spend,
  * and a provenance nobody can filter on is a provenance nobody uses.
+ *
+ * Keyed on the outcome rather than on `costSource`, because the two answer
+ * different questions. `crash_reconciliation` means nobody saw this call at
+ * all -- which is precisely what `unknown_after_dispatch` says, and the sweep,
+ * until now the only writer of `reserved_upper_bound`, always pairs the two.
+ *
+ * Settlement now writes that cost source as well, for a cancelled turn whose
+ * native search went uncounted. Its tokens were counted the usual way, so
+ * calling it crash-reconciled would claim its token figures came from nowhere
+ * and would quietly widen the constraint that lets only a crash-reconciled row
+ * leave its token counts NULL.
  */
 export const attemptUsageSource = (attempt: LedgerAttempt) =>
-    attempt.costSource === "reserved_upper_bound"
+    attempt.outcome === "unknown_after_dispatch"
         ? "crash_reconciliation"
         : attempt.costSource === "provider_response"
           ? "provider_response_cost"
