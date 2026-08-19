@@ -28,6 +28,21 @@ type AdminImageGenerationReport = {
     priceVerifiedAt: string | null;
     optionCount: number;
   }>;
+  providerBudgets: Array<{
+    provider: string;
+    source: string;
+    limits: { day: number; month: number } | null;
+    floorMicroUsd: number;
+    problems: Array<{ window: string; reason: string; message: string }>;
+    advisories: Array<{ code: string; message: string }>;
+    clamped: Array<{
+      window: string;
+      configuredMicroUsd: number;
+      effectiveMicroUsd: number;
+    }>;
+    usedTodayMicroUsd: number;
+    usedThisMonthMicroUsd: number;
+  }>;
   budget: {
     source: string;
     floorMicroUsd: number;
@@ -242,6 +257,83 @@ export function AdminImageGenerationPanel() {
               value={invariantIssues === 0 ? "clean" : `${invariantIssues} issue(s)`}
               detail={`${report.invariants.emptyImageConversations} empty conversations · ${report.invariants.staleGenerations} stale (${report.invariants.strandedSettlements} stranded mid-settlement) · ${report.invariants.cleanupBacklog} cleanup backlog · ${report.invariants.thumbnailBacklog} thumbnails queued (${report.invariants.thumbnailsExhausted} exhausted)`}
             />
+          </div>
+
+          {/*
+            Per-provider budgets. The `budget` block above is the legacy
+            OpenAI-only shape kept for its existing consumers; every provider
+            has had its own ceiling since v2, and until this table existed the
+            console showed one provider's spend next to three providers'
+            limits. The 2026-08-16 defect -- xAI and fal settlement
+            differences refunded to OpenAI's bucket -- was invisible here for
+            exactly that reason.
+          */}
+          <div className="rounded-2xl border border-zinc-800 bg-zinc-950/70 p-4">
+            <h3 className="text-sm font-black uppercase tracking-[0.14em] text-zinc-400">
+              Provider budgets
+            </h3>
+            <p className="mt-1 text-xs leading-5 text-zinc-500">
+              Each provider spends against its own ceiling. A provider with no
+              row has spent nothing today.
+            </p>
+            <div className="mt-3 overflow-x-auto">
+              <table className="w-full min-w-[34rem] text-left text-xs">
+                <thead className="text-[11px] uppercase tracking-[0.12em] text-zinc-500">
+                  <tr>
+                    <th className="py-1 pr-3 font-bold">Provider</th>
+                    <th className="py-1 pr-3 font-bold">Today</th>
+                    <th className="py-1 pr-3 font-bold">This month</th>
+                    <th className="py-1 font-bold">Source</th>
+                  </tr>
+                </thead>
+                <tbody className="text-zinc-300">
+                  {report.providerBudgets.map((entry) => (
+                    <tr key={entry.provider} className="border-t border-zinc-800/70">
+                      <td className="py-1.5 pr-3 font-semibold text-white">
+                        {entry.provider}
+                      </td>
+                      <td className="py-1.5 pr-3">
+                        {usd(entry.usedTodayMicroUsd)}
+                        {entry.limits ? ` / ${usd(entry.limits.day)}` : " / unconfigured"}
+                        {percentOf(entry.usedTodayMicroUsd, entry.limits?.day) !== null && (
+                          <span className="text-zinc-500">
+                            {" "}
+                            ({percentOf(entry.usedTodayMicroUsd, entry.limits?.day)}%)
+                          </span>
+                        )}
+                      </td>
+                      <td className="py-1.5 pr-3">
+                        {usd(entry.usedThisMonthMicroUsd)}
+                        {entry.limits ? ` / ${usd(entry.limits.month)}` : " / unconfigured"}
+                        {percentOf(entry.usedThisMonthMicroUsd, entry.limits?.month) !== null && (
+                          <span className="text-zinc-500">
+                            {" "}
+                            ({percentOf(entry.usedThisMonthMicroUsd, entry.limits?.month)}%)
+                          </span>
+                        )}
+                      </td>
+                      <td className="py-1.5 text-zinc-500">
+                        {entry.source}
+                        {entry.problems.length > 0 && ` · ${entry.problems.length} problem(s)`}
+                        {entry.advisories.length > 0 && ` · ${entry.advisories[0].code}`}
+                        {entry.clamped.length > 0 &&
+                          ` · ${entry.clamped.length} raised to floor`}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            {report.providerBudgets.flatMap((entry) =>
+              entry.problems.map((problem) => (
+                <p
+                  key={`${entry.provider}:${problem.window}:${problem.reason}`}
+                  className="mt-2 rounded-lg border border-amber-500/30 bg-amber-500/5 px-2.5 py-1.5 text-xs text-amber-200"
+                >
+                  {entry.provider}: {problem.message}
+                </p>
+              ))
+            )}
           </div>
 
           {report.budget.problems.length > 0 && (
