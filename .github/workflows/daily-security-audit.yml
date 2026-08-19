@@ -18,7 +18,17 @@ jobs:
   audit:
     name: Security audit and daily report
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    # The E2E suite is what sets this, and it has grown into the old 120-minute
+    # cap: 1.76h in run #34, 1.75h in #36, and #38 was killed mid-suite with the
+    # job at exactly 120 minutes. It was not the first -- runs #28 to #32 all
+    # ended at 120.3-120.4 minutes, which is a timeout wearing the word
+    # "cancelled", and it is part of why the mobile-safari failures went unseen
+    # for weeks: a run that never reaches the end reports nothing about it.
+    #
+    # The step below carries its own smaller budget, so an overrun fails that
+    # step and the audit still delivers its report and evidence, instead of the
+    # job being cancelled out from under both.
+    timeout-minutes: 180
     # The full E2E suite runs against this build. The public test key is not a
     # credential; it only lets the browser-side Turnstile mock execute in CI.
     env:
@@ -123,6 +133,10 @@ jobs:
         id: e2e
         if: steps.production_check.outcome == 'success' && steps.browser_install.outcome == 'success'
         continue-on-error: true
+        # Above the ~1.8h the full matrix takes, and below the job's own budget,
+        # so a suite that overruns is reported as this step failing rather than
+        # taking the report and the artefacts down with it.
+        timeout-minutes: 150
         run: npm run test:e2e:run
 
       - name: Deliver security audit report
