@@ -104,19 +104,25 @@ export async function scrollUpBy(target: Locator, pixels: number) {
 }
 
 /**
- * Whether a download started by *navigating* to an attachment response can be
- * observed on this project.
+ * Whether a download started by *navigating* to an attachment response is
+ * handled as a download on this project.
  *
  * Two download shapes exist in this product. A blob built in the page and
  * clicked through an `<a download>` raises Playwright's `download` event on
  * every engine -- the memory export proves it, passing on mobile-safari in the
- * same run these failed. A `window.location.href` assignment to a route that
- * answers `Content-Disposition: attachment` does not raise it on WebKit here;
- * the test simply waits out its timeout with nothing to show for it.
+ * same runs these failed. A `window.location.href` assignment to a route that
+ * answers `Content-Disposition: attachment` is not saved on WebKit here: the
+ * asserted evidence is that after the click `page.url()` was
+ * `/api/conversations/qa-conversation/export`, so the engine rendered the
+ * response rather than downloading it and the page went with it.
  *
- * So the event is observed where it exists, and what the *application* decides
- * -- request the export route, and stay on the page instead of navigating to it
- * -- is asserted everywhere, which is the half a regression would break.
+ * That is the browser's disposition of a response, not the product's decision,
+ * and it is only reachable through this harness -- what real Safari does with
+ * the same response cannot be observed from here, and the response these tests
+ * navigate to is a fulfilled mock rather than the server's own. So the
+ * application's decision -- that the export route is requested, exactly once --
+ * is asserted on every engine, and what the browser then does with the
+ * attachment is asserted where this harness can see it.
  */
 export function navigationDownloadsObservable(testInfo: TestInfo): boolean {
   return !testInfo.project.name.includes("safari");
