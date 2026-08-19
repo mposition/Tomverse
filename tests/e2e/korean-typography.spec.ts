@@ -15,6 +15,31 @@ function boxesOverlap(
   return a.y < b.y + b.height && a.y + a.height > b.y && a.x < b.x + b.width && a.x + a.width > b.x;
 }
 
+/**
+ * Waits until the element actually contains the word about to be measured.
+ *
+ * Being *visible* is not the same as carrying the right copy. On a route the
+ * server rendered in English, LanguageProvider restores a stored preference in
+ * an effect scheduled with `setTimeout(..., 0)` -- the documented migration
+ * path for a visitor whose choice predates the `tomverse_lang` cookie the
+ * server reads, which is exactly what prepareGuestPage sets up. So an element
+ * can be on screen, and still be showing "Hello! How can I help you today?"
+ * when the Korean measurement runs.
+ *
+ * That is how `dark theme keeps the same welcome wrapping behavior` flaked on
+ * mobile-safari in run #39: it waited for the greeting to be visible and then
+ * measured, and reported `Word "도와드릴까요" not found in "Hello! How can I
+ * help you today?"`. Every sibling test happened to wait for its own text
+ * first -- through `toContainText` or a `:has-text()` locator -- so the gap was
+ * one call site rather than a rule.
+ *
+ * Waiting here makes it a rule, and it cannot hide a copy that never arrives:
+ * the wait fails on its own timeout, naming the word and the element.
+ */
+async function expectWordPresent(locator: Locator, word: string) {
+  await expect(locator, `waiting for "${word}" before measuring its wrapping`).toContainText(word);
+}
+
 // Measures the rendered line each character of `word` lands on inside
 // `selector`, using Range.getBoundingClientRect() so wrapping is read from
 // actual layout rather than guessed from string length. Returns the number
@@ -25,6 +50,7 @@ async function countLinesForWord(
   selector: string,
   word: string
 ): Promise<number> {
+  await expectWordPresent(page.locator(selector).first(), word);
   return page.evaluate(
     ({ selector, word }) => {
       const el = document.querySelector(selector);
@@ -70,6 +96,7 @@ async function countLinesForWord(
 // "Selector not found" rather than with anything about wrapping. Measuring
 // through the locator's own element handle removes the window entirely.
 async function countLinesForWordIn(locator: Locator, word: string): Promise<number> {
+  await expectWordPresent(locator, word);
   return locator.evaluate((el, target) => {
     const fullText = el.textContent ?? "";
     const wordStart = fullText.indexOf(target);
