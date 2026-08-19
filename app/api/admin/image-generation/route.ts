@@ -15,12 +15,14 @@ import {
 } from "@/lib/imageGenerationPricing";
 import {
   imageCostCeilingHeadroomMicroUsd,
+  imageProviderBudgetBucketKey,
   resolveActiveImageProviderBudgets,
   resolveImageProviderBudget,
   worstImageCostPerCreditMicroUsd,
 } from "@/lib/imageProviderBudget";
 import { IMAGE_MODEL_REGISTRY } from "@/lib/imageModelRegistry";
 import { prisma } from "@/lib/prisma";
+import { usageBucketCount as narrowBucketCount } from "@/lib/chatUsageBucketCount";
 
 // The image generation operations surface: budget configuration vs effective
 // enforcement, reservation vs settlement, failure phases, storage growth and
@@ -49,6 +51,7 @@ export async function GET(req: Request) {
       flagEnabled,
       dayBudgetUsage,
       monthBudgetUsage,
+      providerBudgetUsage,
       statusCounts,
       failureCounts,
       reservationTotals,
@@ -78,6 +81,23 @@ export async function GET(req: Request) {
           },
         },
         select: { count: true },
+      }),
+      // Every image provider's bucket for the two windows that matter, in one
+      // query keyed by prefix rather than by a provider list -- a provider
+      // activated between this deploy and the next still shows up.
+      //
+      // The two `findUnique` calls above stay: they feed the legacy
+      // OpenAI-only `budget` block that predates per-provider budgets, and
+      // removing it would break every consumer reading that shape.
+      prisma.chatUsageBucket.findMany({
+        where: {
+          key: { startsWith: "image-provider:" },
+          OR: [
+            { period: "provider-cost-day", periodStart: dayStartUtc(now) },
+            { period: "provider-cost-month", periodStart: monthStartUtc(now) },
+          ],
+        },
+        select: { key: true, period: true, count: true },
       }),
       prisma.imageGeneration.groupBy({
         by: ["status"],
@@ -151,6 +171,14 @@ export async function GET(req: Request) {
     const providerBudgets = resolveActiveImageProviderBudgets(process.env, {
       production: process.env.NODE_ENV === "production",
     });
+    // `count` is a BigInt column; narrowed here rather than at render, because
+    // `NextResponse.json()` is `JSON.stringify` and throws on one.
+    const providerUsage = new Map(
+      providerBudgetUsage.map((row) => [
+        `${row.key}|${row.period}`,
+        narrowBucketCount(row.count),
+      ])
+    );
 
     return NextResponse.json({
       flagEnabled,
@@ -192,6 +220,23 @@ export async function GET(req: Request) {
         problems: entry.resolved.problems,
         advisories: entry.resolved.advisories,
         clamped: entry.resolved.clamped,
+        // What the provider has actually spent against its own ceiling.
+        //
+        // Without these the endpoint reported a per-provider *limit* and a
+        // single-provider *usage*, so xAI and fal had a budget nobody could
+        // read -- and the 2026-08-16 defect, where their settlement
+        // differences were refunded to OpenAI's bucket, was invisible from
+        // the admin surface that exists to watch exactly this.
+        //
+        // A provider with no row has spent nothing, so it reports 0 rather
+        // than null: absent and zero are the same fact for a bucket that only
+        // exists once something is charged to it.
+        usedTodayMicroUsd: providerUsage.get(
+          `${imageProviderBudgetBucketKey(entry.provider)}|provider-cost-day`
+        ) ?? 0,
+        usedThisMonthMicroUsd: providerUsage.get(
+          `${imageProviderBudgetBucketKey(entry.provider)}|provider-cost-month`
+        ) ?? 0,
       })),
       budget: {
         source: budget.source,

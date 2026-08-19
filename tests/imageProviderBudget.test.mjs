@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import {
+  imageProviderBudgetBucketKey,
   imageProviderBudgetEnvNames,
   resolveActiveImageProviderBudgets,
   IMAGE_BUDGET_HEADROOM_MULTIPLIER,
@@ -257,4 +258,17 @@ test("a month budget that is not above the day budget is flagged, not blocked", 
   );
   assert.deepEqual(approved.advisories, []);
   assert.deepEqual(approved.limits, { day: 50_000_000, month: 500_000_000 });
+});
+
+test("the bucket key is one function, shared by admission, refund and the report", () => {
+  // It was private to lib/imageGenerationService.ts, so the admin report could
+  // not reach it and showed per-provider limits beside one provider's usage.
+  // The 2026-08-16 defect -- xAI and fal settlements refunded to OpenAI's
+  // bucket -- was invisible from the surface built to watch exactly this.
+  assert.equal(imageProviderBudgetBucketKey("openai"), "image-provider:openai");
+  assert.equal(imageProviderBudgetBucketKey("xai"), "image-provider:xai");
+  assert.equal(imageProviderBudgetBucketKey("fal"), "image-provider:fal");
+  // Distinct per provider: a shared key would make every budget one budget.
+  const keys = ["openai", "xai", "fal"].map(imageProviderBudgetBucketKey);
+  assert.equal(new Set(keys).size, keys.length);
 });
