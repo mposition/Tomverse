@@ -4,6 +4,11 @@ import {
   mockAuthenticatedApi,
   prepareGuestPage,
 } from "./support/app-fixtures";
+import {
+  clipboardWrites,
+  grantClipboardAccess,
+  recordClipboardWrites,
+} from "./support/engine-capabilities";
 
 // The sidebar (and its help menu) lives behind a drawer on mobile projects,
 // but is always visible on desktop -- open it first wherever a test needs
@@ -257,7 +262,12 @@ test.describe("build-info UI", () => {
   }, testInfo) => {
     await prepareGuestPage(page, "en");
     await mockBuildInfo(page, VALID_BUILD_INFO);
-    await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
+    // Both of these are about the engine, not the product: WebKit has no
+    // clipboard permission to grant, and only the engine that granted one will
+    // read the clipboard back. What the panel copies is recorded either way, so
+    // the assertion below runs everywhere. See support/engine-capabilities.ts.
+    const clipboardReadable = await grantClipboardAccess(page);
+    await recordClipboardWrites(page);
     await page.goto("/chat");
     await openSidebarIfNeeded(page, testInfo);
 
@@ -266,7 +276,16 @@ test.describe("build-info UI", () => {
     await page.getByTestId("build-info-copy-button").click();
 
     await expect(page.getByRole("status")).toContainText("copied", { ignoreCase: true });
-    const clipboardText = await page.evaluate(() => navigator.clipboard.readText());
+    const written = await clipboardWrites(page);
+    expect(written, "the copy control wrote to the clipboard exactly once").toHaveLength(1);
+    const clipboardText = written[0];
+    if (clipboardReadable) {
+      // Where the engine allows it, the same text is read back out of the real
+      // clipboard, so the end-to-end path stays covered on at least one project.
+      expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(
+        clipboardText
+      );
+    }
     expect(clipboardText).toContain("Environment: staging");
     expect(clipboardText).toContain(
       "Commit: c12e84489559ed1320293e1cf8099dd17a7e80a6"
