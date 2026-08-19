@@ -1,5 +1,6 @@
 import { test, expect, type Page } from "@playwright/test";
 import { mockAuthenticatedApi, prepareGuestPage } from "./support/app-fixtures";
+import { navigationDownloadsObservable } from "./support/engine-capabilities";
 
 /**
  * Release A external conversation import — /settings/imports and its Data-tab
@@ -886,7 +887,7 @@ test.describe("external import settings", () => {
 
   test("the conversation list groups lineage snapshots and offers the export download", async ({
     page,
-  }) => {
+  }, testInfo) => {
     const row = (
       id: string,
       externalStableId: string,
@@ -930,10 +931,17 @@ test.describe("external import settings", () => {
       page.getByTestId("external-import-conversation-link")
     ).toHaveCount(3);
 
-    const download = page.waitForEvent("download");
+    // The export navigates to a route that answers with an attachment. The
+    // request is the product's decision and is waited on everywhere; whether the
+    // browser saves that response or renders it differs by engine, so the page
+    // staying put is asserted where this harness can see the download
+    // (support/engine-capabilities.ts).
     await page.getByTestId("external-import-export").click();
-    await download;
-    expect(api.exportCount).toBe(1);
+    await expect.poll(() => api.exportCount).toBe(1);
+    if (navigationDownloadsObservable(testInfo)) {
+      expect(new URL(page.url()).pathname).toBe("/settings/imports");
+      await expect(section).toBeVisible();
+    }
   });
 
   test("the viewer renders imported content inertly, pages messages, and deletes a snapshot", async ({
