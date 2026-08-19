@@ -119,6 +119,19 @@ const truncationBoundary = () => {
     return { parsedLength, retained, head, tail, tailStart };
 };
 
+const XSS_PAYLOADS = [
+    '<script>alert("xss")</script>',
+    '<img src=x onerror="alert(\'xss\')">',
+    '<a href="javascript:alert(\'xss\')">link</a>',
+    '<iframe src="javascript:alert(\'xss\')"></iframe>',
+    '<svg onload="alert(\'xss\')"></svg>',
+    '<div onmouseover="alert(\'xss\')">hover</div>',
+    '<style>body{display:none}</style>',
+    '</p><script>alert("break out")</script><p>',
+    '[markdown link](javascript:alert("xss"))',
+    '![img](x" onerror="alert(\'xss\'))',
+];
+
 const CASES = {
     c1: {
         conversations: () => [truncationConversation(), controlConversation()],
@@ -134,6 +147,36 @@ const CASES = {
                 `tail starts with  ${JSON.stringify(trimmed.slice(tailStart, tailStart + 14))}`,
             ];
         },
+    },
+    d1: {
+        conversations: () => [
+            {
+                uuid: "d1-xss-inert-rendering",
+                name: "D1 XSS - inert rendering",
+                created_at: "2026-08-19T03:00:00.000Z",
+                updated_at: "2026-08-19T03:00:00.000Z",
+                chat_messages: [
+                    message(
+                        "d1-xss-msg-1",
+                        "human",
+                        `Payloads follow. None of them may execute or render as HTML.\n\n${XSS_PAYLOADS.join("\n")}`,
+                        "2026-08-19T03:00:00.000Z"
+                    ),
+                    message(
+                        "d1-xss-msg-2",
+                        "assistant",
+                        `Answer side, same payloads.\n\n${XSS_PAYLOADS.join("\n")}`,
+                        "2026-08-19T03:00:01.000Z"
+                    ),
+                ],
+            },
+        ],
+        describe: () => [
+            `${XSS_PAYLOADS.length} payloads on both the question and the answer side`,
+            "expect every one of them visible as literal text in the viewer",
+            "expect no alert, no broken layout, no element appearing in the DOM",
+            "the viewer stores and renders plain text, so a rendered tag is the failure",
+        ],
     },
     c4: {
         conversations: () => [
