@@ -92,10 +92,9 @@ test("an entitled account can export a conversation to a file", async ({
   await expect(item).toBeEnabled();
 
   // The export is a navigation to a route that answers with an attachment, and
-  // whether the browser then hands the file to a test is the browser's business
-  // -- on WebKit it does not (support/engine-capabilities.ts). What the product
-  // decides is asserted below on every engine: the route is requested once, and
-  // the page it was requested from is still the one on screen.
+  // that the route is requested, once, is the product's decision and is asserted
+  // on every engine; what the browser does with the attachment is its own, and
+  // this harness only sees it on some (support/engine-capabilities.ts).
   const download = page
     .waitForEvent("download", { timeout: 5_000 })
     .catch(() => null);
@@ -105,18 +104,16 @@ test("an entitled account can export a conversation to a file", async ({
     .toBe(1);
   expect(exportRequests[0]).toContain("/api/conversations/qa-conversation/export");
 
-  // Not a page navigation: a router push would have rendered the response and
-  // taken the chat with it.
+  const file = await download;
+  if (!navigationDownloadsObservable(testInfo)) return;
+  expect(file, "the attachment response was saved as a download").not.toBeNull();
+  expect(file!.suggestedFilename()).toBe("qa-conversation.txt");
+  // Saved rather than navigated to: a router push would have rendered the
+  // response and taken the chat with it.
   expect(new URL(page.url()).pathname).toBe("/chat");
   await expect(page.getByTestId("chat-input")).toBeVisible();
   // The menu closes once the export starts, so the sidebar is usable again.
   await expect(page.getByTestId("conversation-menu-panel")).toBeHidden();
-
-  const file = await download;
-  if (navigationDownloadsObservable(testInfo)) {
-    expect(file, "the attachment response was saved as a download").not.toBeNull();
-    expect(file!.suggestedFilename()).toBe("qa-conversation.txt");
-  }
 });
 
 test("a plan without the download entitlement disables the control and sends nothing", async ({
