@@ -3,6 +3,13 @@ export const ACCOUNT_SETTINGS_OPEN_EVENT = "tomverse:account-settings-open";
 export const ACCOUNT_SETTINGS_TABS = [
   "account",
   "preferences",
+  // Everything that shapes what the models do: which ones a new conversation
+  // starts with, the profiles that carry instructions, and the account's
+  // long-term memory. These used to be split between "preferences" (a tab
+  // about theme, language and time zone) and "data" (a tab about import,
+  // export and deletion), which put the three decisions a user makes about
+  // their assistants in two places, neither of which is named after them.
+  "ai",
   "data",
   "plan",
 ] as const;

@@ -4,6 +4,7 @@ import Link from "next/link";
 import { ArrowLeft } from "lucide-react";
 import { useLanguage } from "@/components/LanguageProvider";
 import {
+    settingsSectionGroupLabelKey,
     settingsSectionHref,
     type SettingsSectionId,
 } from "@/lib/settingsNavigation";
@@ -38,9 +39,15 @@ export function SettingsDetailNav({
     backTestId: string;
 }) {
     const { t } = useLanguage();
+    // The category comes from the section, never from a constant here. This
+    // trail named "Data & personalization" for every page, which was true
+    // while every detail row lived in that one tab; once profiles and memory
+    // moved to their own tab it would have told half its readers they were
+    // somewhere they were not -- while the back link beside it, which reads
+    // the same mapping the tab does, took them somewhere else.
     const trail = [
         t("settingsNav.settings"),
-        t("settingsNav.dataAndPersonalization"),
+        t(settingsSectionGroupLabelKey(section)),
     ];
 
     return (

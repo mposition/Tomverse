@@ -162,7 +162,10 @@ test.describe("assistant profile settings", () => {
 
         const back = page.getByTestId("assistants-back-to-settings");
         await expect(back).toBeVisible();
-        await expect(back).toHaveAttribute("href", /settings=data/);
+        // The AI settings tab, not the data tab: profiles moved when
+        // personalisation got a tab of its own, and this href is the half of
+        // the pair a reader actually follows.
+        await expect(back).toHaveAttribute("href", /settings=ai/);
         await expect(back).toHaveAttribute("href", /settingsSection=assistants/);
     });
 
@@ -270,5 +273,183 @@ test.describe("assistant profile settings", () => {
         await expect(history).toContainText(/2/);
         await expect(history).toContainText(/1/);
         await expect(history).toContainText(/current|현재/);
+    });
+
+    /* ------------------------------------------ the minimal create form */
+
+    /**
+     * Creating used to be: save a name, land in the editor, fill in
+     * instructions and a comma-separated list of internal model ids, then
+     * "publish a revision" — and only then did the profile work at all. These
+     * pin what replaced it, and in particular that the advanced fields are
+     * still *there*, closed rather than gone.
+     */
+
+    async function mockCreate(page: Page) {
+        await mockAuthenticatedApi(page);
+        await page.route(
+            (url) => url.pathname === "/api/assistant-profiles",
+            async (route) => {
+                if (route.request().method() !== "POST") {
+                    return route.fulfill(json(PROFILE_LIST));
+                }
+                const body = route.request().postDataJSON() as {
+                    name?: string;
+                    instructions?: string;
+                    modelIds?: string[];
+                };
+                createRequests.push(body);
+                return route.fulfill({
+                    status: 201,
+                    contentType: "application/json",
+                    body: JSON.stringify({ profile: { id: "p-new" } }),
+                });
+            }
+        );
+        await page.route(
+            (url) => /^\/api\/assistant-profiles\/[^/]+$/.test(url.pathname),
+            (route) => route.fulfill(json(PROFILE_DETAIL))
+        );
+    }
+
+    let createRequests: Array<Record<string, unknown>> = [];
+    test.beforeEach(() => {
+        createRequests = [];
+    });
+
+    test("the create form asks for a name and instructions, and nothing else @ui-risk", async ({
+        page,
+    }) => {
+        await prepareGuestPage(page);
+        await mockCreate(page);
+        await page.goto("/settings/assistants/new");
+
+        await expect(page.getByTestId("assistant-name")).toBeVisible();
+        await expect(page.getByTestId("assistant-instructions")).toBeVisible();
+        // Optional, and present -- it is not one of the things hidden.
+        await expect(page.getByTestId("assistant-description")).toBeVisible();
+
+        // Everything that used to be a required second step is closed.
+        await expect(page.getByTestId("assistant-icon")).toBeHidden();
+        await expect(page.getByTestId("assistant-models")).toBeHidden();
+        await expect(page.getByTestId("assistant-starters")).toHaveCount(0);
+        await expect(page.getByTestId("assistant-web-search")).toHaveCount(0);
+        await expect(page.getByTestId("assistant-use-memory")).toHaveCount(0);
+        await expect(page.getByTestId("assistant-version-history")).toHaveCount(0);
+    });
+
+    test("advanced settings open on request and report their state", async ({
+        page,
+    }) => {
+        await prepareGuestPage(page);
+        await mockCreate(page);
+        await page.goto("/settings/assistants/new");
+
+        const toggle = page.getByTestId("assistant-advanced-toggle");
+        await expect(toggle).toHaveAttribute("aria-expanded", "false");
+        await toggle.click();
+        await expect(toggle).toHaveAttribute("aria-expanded", "true");
+
+        // The model control is a selector over named models, not a text field
+        // asking for internal ids.
+        const models = page.getByTestId("assistant-models");
+        await expect(models).toBeVisible();
+        await expect(models.locator("input[type=checkbox]").first()).toBeVisible();
+        await expect(page.getByTestId("assistant-icon")).toBeVisible();
+    });
+
+    test("a name and instructions are enough to create a usable profile", async ({
+        page,
+    }) => {
+        await prepareGuestPage(page);
+        await mockCreate(page);
+        await page.goto("/settings/assistants/new");
+
+        await page.getByTestId("assistant-name").fill("Tax helper");
+        await page
+            .getByTestId("assistant-instructions")
+            .fill("Answer briefly, and say what you are unsure about.");
+        await page.getByTestId("assistant-create").click();
+
+        await expect(page).toHaveURL(/\/settings\/assistants\/p-new$/);
+        expect(createRequests).toHaveLength(1);
+        // One request, carrying both halves: the profile and its first
+        // version are written together or not at all.
+        expect(createRequests[0]).toMatchObject({
+            name: "Tax helper",
+            instructions: "Answer briefly, and say what you are unsure about.",
+        });
+        // No models named, so the server resolves the account default rather
+        // than the client choosing one.
+        expect(createRequests[0].modelIds).toBeUndefined();
+    });
+
+    test("an empty instruction is refused at the field, with focus", async ({
+        page,
+    }) => {
+        await prepareGuestPage(page);
+        await mockCreate(page);
+        await page.goto("/settings/assistants/new");
+
+        await page.getByTestId("assistant-name").fill("Nameless behaviour");
+        await page.getByTestId("assistant-create").click();
+
+        const error = page.getByTestId("assistant-instructions-error");
+        await expect(error).toBeVisible();
+        await expect(page.getByTestId("assistant-instructions")).toBeFocused();
+        await expect(page.getByTestId("assistant-instructions")).toHaveAttribute(
+            "aria-invalid",
+            "true"
+        );
+        // Nothing was sent: a refused form is refused before the request.
+        expect(createRequests).toHaveLength(0);
+    });
+
+    test("a chosen model reaches the request as a real id", async ({ page }) => {
+        await prepareGuestPage(page);
+        await mockCreate(page);
+        await page.goto("/settings/assistants/new");
+
+        await page.getByTestId("assistant-name").fill("Picky");
+        await page.getByTestId("assistant-instructions").fill("Be brief.");
+        await page.getByTestId("assistant-advanced-toggle").click();
+        await page.getByTestId("assistant-model-gpt-5-6-luna").check();
+        await page.getByTestId("assistant-create").click();
+
+        await expect(page).toHaveURL(/\/settings\/assistants\/p-new$/);
+        expect(createRequests[0].modelIds).toContain("gpt-5-6-luna");
+    });
+
+    test("arriving from the chat returns there instead of the edit page", async ({
+        page,
+    }) => {
+        await prepareGuestPage(page);
+        await mockCreate(page);
+        await page.goto("/settings/assistants/new?from=chat");
+
+        // The button says where it goes, which the settings entry point's
+        // does not promise.
+        const create = page.getByTestId("assistant-create");
+        await expect(create).toContainText(/this chat|이 대화/i);
+
+        await page.getByTestId("assistant-name").fill("From the composer");
+        await page.getByTestId("assistant-instructions").fill("Be brief.");
+        await create.click();
+
+        await expect(page).toHaveURL(/\/chat$/);
+    });
+
+    test("the edit screen says save, not publish a revision", async ({
+        page,
+    }) => {
+        await prepareGuestPage(page);
+        await mockProfileApis(page);
+        await page.goto("/settings/assistants/p-published");
+
+        const save = page.getByTestId("assistant-publish");
+        await expect(save).toBeVisible();
+        await expect(save).not.toContainText(/revision|개정/i);
+        // Revisions are still tracked, and still shown to whoever wants them.
+        await expect(page.getByTestId("assistant-version-history")).toBeVisible();
     });
 });

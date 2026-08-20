@@ -63,6 +63,7 @@ import {
     ACCOUNT_SETTINGS_OPEN_EVENT,
     consumePendingAccountSettingsRequest,
     readAccountSettingsOpenRequest,
+    type AccountSettingsTab,
 } from "@/lib/accountSettingsEvents";
 import { SettingsEntryRow } from "@/components/settings/SettingsEntryRow";
 import {
@@ -94,7 +95,7 @@ export function AuthButton({
   const { data: session, status } = useSession();
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [isAccountMenuOpen, setIsAccountMenuOpen] = useState(false);
-    const [activeSettingsTab, setActiveSettingsTab] = useState<"account" | "preferences" | "data" | "plan">("account");
+    const [activeSettingsTab, setActiveSettingsTab] = useState<AccountSettingsTab>("account");
     // Data-tab entry point for external conversation import. Hidden until the
     // capacity endpoint answers 200: that endpoint is the authoritative
     // session + rollout-flag probe, so a disabled flag closes this entry
@@ -269,7 +270,7 @@ export function AuthButton({
 
     const openSettingsTab = useCallback(
         (
-            tab: "account" | "preferences" | "data" | "plan",
+            tab: AccountSettingsTab,
             section: string | null = null
         ) => {
             setIsAccountMenuOpen(false);
@@ -417,8 +418,12 @@ export function AuthButton({
     // Status line for the memory row. Both endpoints stay reachable with the
     // rollout flag off (policy §15), so a failure here is a network fact and
     // not a feature probe: the row renders either way, just without a status.
+    //
+    // Gated on "ai" rather than "data" because that is where the row moved. A
+    // status fetch keyed to the wrong tab does not fail loudly -- the row just
+    // renders with no status forever.
     useEffect(() => {
-        if (!isModalOpen || activeSettingsTab !== "data" || !session?.user) {
+        if (!isModalOpen || activeSettingsTab !== "ai" || !session?.user) {
             return;
         }
         let cancelled = false;
@@ -1363,10 +1368,20 @@ export function AuthButton({
                         </div>
 
                         <div className="grid min-h-0 flex-1 grid-cols-1 md:grid-cols-[13rem_1fr]">
-                            <nav className="grid grid-cols-2 gap-2 border-b border-zinc-200 bg-zinc-50 p-3 dark:border-zinc-800 dark:bg-zinc-950/50 sm:grid-cols-4 md:flex md:flex-col md:overflow-visible md:border-b-0 md:border-r">
+                            {/*
+                              Five tabs wrap rather than shrink. `grid-cols-4`
+                              held four across at `sm`; a fifth would have
+                              divided the same row again and taken every label
+                              below the 11px floor the typography contract
+                              sets. Two columns then three lets the fifth start
+                              a row instead, so no label is ever cut and the
+                              touch targets keep their height.
+                            */}
+                            <nav className="grid grid-cols-2 gap-2 border-b border-zinc-200 bg-zinc-50 p-3 dark:border-zinc-800 dark:bg-zinc-950/50 sm:grid-cols-3 md:flex md:flex-col md:overflow-visible md:border-b-0 md:border-r">
                                 {[
                                     { id: "account", label: t("auth.accountTab"), icon: UserRound },
                                     { id: "preferences", label: t("auth.preferencesTab"), icon: Palette },
+                                    { id: "ai", label: t("auth.aiTab"), icon: Bot },
                                     { id: "data", label: t("auth.dataTab"), icon: Database },
                                     { id: "plan", label: t("auth.planTab"), icon: CreditCard },
                                 ].map((item) => {
@@ -1577,6 +1592,21 @@ export function AuthButton({
                                             </span>
                                         </label>
 
+                                    </div>
+                                )}
+
+                                {activeSettingsTab === "ai" && (
+                                    <div className="space-y-4">
+                                        {/*
+                                          Three decisions about what the models
+                                          are told, in the order they take
+                                          effect: which models a new
+                                          conversation opens with, the profile
+                                          that adds instructions on top, and
+                                          the memory a profile may draw on.
+                                          They were previously split across two
+                                          tabs named after neither of them.
+                                        */}
                                         <div
                                             data-testid="settings-new-conversation-models"
                                             className="rounded-xl border border-zinc-200 bg-zinc-50 p-3 dark:border-zinc-800 dark:bg-zinc-950/60"
@@ -1727,6 +1757,49 @@ export function AuthButton({
                                             <Bot className="h-4 w-4" />
                                             {t("modelFinder.findAgain")}
                                         </button>
+                                        <section
+                                            className="rounded-2xl border border-zinc-200 bg-zinc-50 p-4 dark:border-zinc-800 dark:bg-zinc-950/60"
+                                            data-testid="settings-ai-personalization"
+                                        >
+                                            <h3 className="text-sm font-bold">{t("settingsNav.aiPersonalization")}</h3>
+                                            <p className="mt-1 text-sm leading-6 text-zinc-500">{t("settingsNav.aiPersonalizationDescription")}</p>
+                                            <div className="mt-3">
+                                                {/*
+                                                  A row in this group rather
+                                                  than a card beside it, per
+                                                  docs/ui-contracts/settings-navigation.md §2.
+                                                  Before memory because that is
+                                                  the order a user meets them:
+                                                  a profile is the thing they
+                                                  make, and memory is what it
+                                                  may draw on.
+                                                */}
+                                                <SettingsEntryRow
+                                                    section="assistants"
+                                                    href="/settings/assistants"
+                                                    icon={Bot}
+                                                    title={t("assistantProfiles.dataTabTitle")}
+                                                    description={t("assistantProfiles.dataTabDescription")}
+                                                    status={t("assistantProfiles.dataTabStatus")}
+                                                    actionLabel={t("assistantProfiles.dataTabOpen")}
+                                                    onNavigate={closeSettingsModal}
+                                                    testId="assistants-entry"
+                                                    linkTestId="assistants-entry-link"
+                                                />
+                                                <SettingsEntryRow
+                                                    section="memory"
+                                                    href="/settings/memory"
+                                                    icon={Brain}
+                                                    title={t("memoryReview.dataTabTitle")}
+                                                    description={t("memoryReview.dataTabDescription")}
+                                                    status={memoryEntryStatusText}
+                                                    actionLabel={t("memoryReview.dataTabOpen")}
+                                                    onNavigate={closeSettingsModal}
+                                                    testId="memory-entry"
+                                                    linkTestId="memory-entry-link"
+                                                />
+                                            </div>
+                                        </section>
                                     </div>
                                 )}
 
@@ -1771,39 +1844,6 @@ export function AuthButton({
                                                         linkTestId="external-import-entry-link"
                                                     />
                                                 )}
-                                                <SettingsEntryRow
-                                                    section="memory"
-                                                    href="/settings/memory"
-                                                    icon={Brain}
-                                                    title={t("memoryReview.dataTabTitle")}
-                                                    description={t("memoryReview.dataTabDescription")}
-                                                    status={memoryEntryStatusText}
-                                                    actionLabel={t("memoryReview.dataTabOpen")}
-                                                    onNavigate={closeSettingsModal}
-                                                    testId="memory-entry"
-                                                    linkTestId="memory-entry-link"
-                                                />
-                                                {/* A profile is personalisation
-                                                    the account owns, so it is a
-                                                    row in this same group rather
-                                                    than a card beside it
-                                                    (settings-navigation contract
-                                                    §2). After memory because a
-                                                    profile may use approved
-                                                    memory and never the other
-                                                    way round. */}
-                                                <SettingsEntryRow
-                                                    section="assistants"
-                                                    href="/settings/assistants"
-                                                    icon={Bot}
-                                                    title={t("assistantProfiles.dataTabTitle")}
-                                                    description={t("assistantProfiles.dataTabDescription")}
-                                                    status={t("assistantProfiles.dataTabStatus")}
-                                                    actionLabel={t("assistantProfiles.dataTabOpen")}
-                                                    onNavigate={closeSettingsModal}
-                                                    testId="assistants-entry"
-                                                    linkTestId="assistants-entry-link"
-                                                />
                                                 {/* The unified export. The
                                                     conversations-only download
                                                     below is a different thing
