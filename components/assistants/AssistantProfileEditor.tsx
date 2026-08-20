@@ -1,12 +1,21 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useState } from "react";
-import { AlertTriangle, Loader2, Save, Trash2 } from "lucide-react";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
+import {
+    AlertTriangle,
+    ChevronDown,
+    Loader2,
+    Save,
+    Trash2,
+} from "lucide-react";
 import { useLanguage } from "@/components/LanguageProvider";
 import { SettingsDetailNav } from "@/components/settings/SettingsDetailNav";
 import { ASSISTANT_PROFILE_LIMITS } from "@/lib/assistantProfileVersioning";
 import { discardResponseBody } from "@/lib/discardResponseBody";
+import { ENABLED_MODELS } from "@/lib/models";
+import { trackProductEvent } from "@/lib/productAnalyticsClient";
+import { APP_DEFAULTS } from "@/lib/appDefaults";
 
 /**
  * Creating and editing one profile (Release C, slice C3b).
@@ -28,6 +37,25 @@ import { discardResponseBody } from "@/lib/discardResponseBody";
  * "this changed underneath you, reload" rather than as a retry: the other tab's
  * edit is somebody's work, and picking a winner here would discard it without
  * anyone seeing what was lost.
+ *
+ * ## Creating asks for two things, editing offers all of them
+ *
+ * The create screen used to ask for identity, save it, land the user in the
+ * editor, and require a second save before the profile could be used at all.
+ * Both halves are gone: the first save now carries instructions and publishes
+ * revision 1 with them (one request, one transaction), and everything that is
+ * not a name or an instruction moved behind a closed `<details>`.
+ *
+ * That is disclosure, not removal. Icons, models, starters, tools, memory and
+ * knowledge are all still here and still write the same fields — they are just
+ * not decisions anybody has to make before their first profile works. The
+ * defaults they take are the narrow ones (§14): no tools, no account memory,
+ * no starters, and the model the account already starts new conversations
+ * with.
+ *
+ * Revisions are still revisions. What changed is the word on the button: a
+ * user saving an edit is told their profile was updated, and the revision
+ * numbers stay in the history section for whoever wants them.
  */
 
 const interpolate = (
@@ -84,7 +112,76 @@ type Notice =
     | { kind: "stale" }
     | { kind: "failed"; detail?: string };
 
-export function AssistantProfileEditor({ profileId }: { profileId?: string }) {
+/**
+ * The models a profile runs, chosen from the catalogue.
+ *
+ * A checkbox list rather than a `<select multiple>`: the maximum is three, the
+ * list is short, and a multi-select is the control users most often fail to
+ * operate without a mouse. Each row names the model the way the rest of the
+ * product names it, so nobody has to recognise an internal id.
+ */
+function ModelSelector({
+    label,
+    hint,
+    selected,
+    onChange,
+}: {
+    label: string;
+    hint: string;
+    selected: string[];
+    onChange: (next: string[]) => void;
+}) {
+    const atLimit = selected.length >= ASSISTANT_PROFILE_LIMITS.maxModels;
+    return (
+        <fieldset className="flex flex-col gap-2" data-testid="assistant-models">
+            <legend className="text-sm font-semibold">{label}</legend>
+            <p className="text-xs text-zinc-500">{hint}</p>
+            {ENABLED_MODELS.map((model) => {
+                const checked = selected.includes(model.id);
+                return (
+                    <label
+                        key={model.id}
+                        className="flex items-center gap-2 text-sm"
+                    >
+                        <input
+                            type="checkbox"
+                            checked={checked}
+                            // The ceiling is enforced by refusing to add, not
+                            // by dropping silently: a user who ticks a fourth
+                            // model should find out here rather than discover
+                            // later that one of their choices went missing.
+                            disabled={!checked && atLimit}
+                            onChange={(event) =>
+                                onChange(
+                                    event.target.checked
+                                        ? [...selected, model.id]
+                                        : selected.filter((id) => id !== model.id)
+                                )
+                            }
+                            data-testid={`assistant-model-${model.id}`}
+                        />
+                        <span>{model.name}</span>
+                    </label>
+                );
+            })}
+        </fieldset>
+    );
+}
+
+export function AssistantProfileEditor({
+    profileId,
+    onCreated,
+}: {
+    profileId?: string;
+    /**
+     * Where a create should go instead of the profile's own edit page.
+     *
+     * Supplied by the chat entry point, which wants the user back in the
+     * conversation they left. Absent everywhere else, and the fallback is the
+     * edit page — the same destination as before.
+     */
+    onCreated?: (profileId: string) => void;
+}) {
     const { t } = useLanguage();
     const router = useRouter();
     const isNew = !profileId;
@@ -99,12 +196,42 @@ export function AssistantProfileEditor({ profileId }: { profileId?: string }) {
     const [description, setDescription] = useState("");
 
     const [instructions, setInstructions] = useState("");
-    const [modelIds, setModelIds] = useState("");
+    /**
+     * Real ids, chosen from the catalogue rather than typed.
+     *
+     * This was a comma-separated text field holding internal model ids, which
+     * asked the user to know strings like `gpt-5-6-luna` and spell them
+     * correctly — and silently produced a profile naming a model that does not
+     * exist when they did not.
+     */
+    const [selectedModelIds, setSelectedModelIds] = useState<string[]>([]);
     const [webSearch, setWebSearch] = useState(false);
     const [deepResearch, setDeepResearch] = useState(false);
-    const [useAccountMemory, setUseAccountMemory] = useState(true);
+    // §14's narrow-only default. A new profile asks for nothing it was not
+    // told to ask for; the editor's checkbox is how it gets widened.
+    const [useAccountMemory, setUseAccountMemory] = useState(false);
     const [starters, setStarters] = useState("");
     const [selectedFileIds, setSelectedFileIds] = useState<string[]>([]);
+    const [advancedOpen, setAdvancedOpen] = useState(false);
+    /** Which field a refused save belongs to, so focus can go there. */
+    const [invalidField, setInvalidField] = useState<
+        "name" | "instructions" | null
+    >(null);
+
+    // "Create and use in this chat" only when there is a chat to go back to.
+    // Promising it from the settings page would name a destination the button
+    // does not have.
+    // The same signal the label reads, so the funnel and the button can never
+    // disagree about which entry point this is.
+    const analyticsEntry = onCreated ? "chat" : "settings";
+
+    const createActionLabel = onCreated
+        ? t("assistantProfiles.createAndUseAction")
+        : t("assistantProfiles.createAction");
+
+    const advancedPanelId = useId();
+    const nameRef = useRef<HTMLInputElement | null>(null);
+    const instructionsRef = useRef<HTMLTextAreaElement | null>(null);
 
     const [profile, setProfile] = useState<LoadedProfile | null>(null);
     /** The revision this editor loaded, sent back so a stale save is caught. */
@@ -136,10 +263,12 @@ export function AssistantProfileEditor({ profileId }: { profileId?: string }) {
             const version = loaded.currentVersion;
             setLoadedRevision(version?.revision ?? null);
             setInstructions(version?.instructions ?? "");
-            setModelIds((version?.models ?? []).join(", "));
+            setSelectedModelIds(
+                version?.models ?? [APP_DEFAULTS.defaultModelId]
+            );
             setWebSearch(version?.toolPolicy.webSearch ?? false);
             setDeepResearch(version?.toolPolicy.deepResearch ?? false);
-            setUseAccountMemory(version?.memoryPolicy.useAccountMemory ?? true);
+            setUseAccountMemory(version?.memoryPolicy.useAccountMemory ?? false);
             setStarters((version?.starters ?? []).join("\n"));
             setSelectedFileIds(
                 (version?.knowledgeManifest ?? []).map((entry) => entry.fileId)
@@ -161,21 +290,96 @@ export function AssistantProfileEditor({ profileId }: { profileId?: string }) {
         });
     }, [load]);
 
+    /**
+     * Sends the whole profile in one request when creating, and only the
+     * identity when editing.
+     *
+     * The split is §14's, not an artefact: a rename must not spend a revision,
+     * so editing keeps its own PATCH and leaves behaviour to `publish()`.
+     * Creating has no revision to protect, so it carries the instructions with
+     * it and the server writes both rows in one transaction. That is what
+     * removes the unusable in-between profile the old two-step flow produced.
+     */
+    const create = async () => {
+        if (name.trim() === "") {
+            setInvalidField("name");
+            nameRef.current?.focus();
+            return;
+        }
+        if (instructions.trim() === "") {
+            setInvalidField("instructions");
+            // The field lives inside the minimal form, so it is always
+            // visible; opening advanced would be wrong here and is not done.
+            instructionsRef.current?.focus();
+            return;
+        }
+        setInvalidField(null);
+        setBusy(true);
+        setNotice(null);
+        // After validation, so an empty form submitted twice does not read as
+        // two attempts at making something.
+        trackProductEvent("assistant_profile_create_started", 0, {
+            assistant_profile_entry: analyticsEntry,
+        });
+        try {
+            const response = await fetch("/api/assistant-profiles", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    name,
+                    icon: icon.trim() === "" ? null : icon,
+                    description: description.trim() === "" ? null : description,
+                    instructions,
+                    // Omitted rather than guessed when the user never opened
+                    // advanced: the server resolves the account's own default,
+                    // and a client-supplied one would be the client deciding
+                    // what this account may run.
+                    ...(selectedModelIds.length > 0
+                        ? { modelIds: selectedModelIds }
+                        : {}),
+                }),
+            });
+            if (!response.ok) {
+                const data = (await response.json().catch(() => null)) as
+                    | { error?: string }
+                    | null;
+                setNotice({ kind: "failed", detail: data?.error });
+                return;
+            }
+            const data = (await response.json()) as { profile: { id: string } };
+            trackProductEvent("assistant_profile_create_completed", 0, {
+                assistant_profile_entry: analyticsEntry,
+            });
+            onCreated?.(data.profile.id);
+            if (!onCreated) router.replace(`/settings/assistants/${data.profile.id}`);
+        } catch {
+            setNotice({ kind: "failed" });
+        } finally {
+            setBusy(false);
+        }
+    };
+
     const saveIdentity = async () => {
+        if (name.trim() === "") {
+            setInvalidField("name");
+            nameRef.current?.focus();
+            return;
+        }
+        setInvalidField(null);
         setBusy(true);
         setNotice(null);
         try {
-            const body = JSON.stringify({
-                name,
-                icon: icon.trim() === "" ? null : icon,
-                description: description.trim() === "" ? null : description,
-            });
             const response = await fetch(
-                isNew ? "/api/assistant-profiles" : `/api/assistant-profiles/${profileId}`,
+                `/api/assistant-profiles/${profileId}`,
                 {
-                    method: isNew ? "POST" : "PATCH",
+                    method: "PATCH",
                     headers: { "Content-Type": "application/json" },
-                    body,
+                    body: JSON.stringify({
+                        name,
+                        icon: icon.trim() === "" ? null : icon,
+                        description:
+                            description.trim() === "" ? null : description,
+                    }),
                 }
             );
             if (!response.ok) {
@@ -185,15 +389,7 @@ export function AssistantProfileEditor({ profileId }: { profileId?: string }) {
                 setNotice({ kind: "failed", detail: data?.error });
                 return;
             }
-            const data = (await response.json()) as { profile: { id: string } };
-            if (isNew) {
-                // Straight to the editor for the profile that now exists, so
-                // the next thing the user does is publish its first version --
-                // an unpublished profile cannot start a conversation, and
-                // leaving them on a "created" screen hides that.
-                router.replace(`/settings/assistants/${data.profile.id}`);
-                return;
-            }
+            await discardResponseBody(response);
             setNotice({ kind: "saved" });
             await load();
         } catch {
@@ -222,10 +418,7 @@ export function AssistantProfileEditor({ profileId }: { profileId?: string }) {
                     body: JSON.stringify({
                         expectedRevision: loadedRevision,
                         instructions,
-                        modelIds: modelIds
-                            .split(",")
-                            .map((id) => id.trim())
-                            .filter(Boolean),
+                        modelIds: selectedModelIds,
                         toolPolicy: { webSearch, deepResearch },
                         memoryPolicy: { useAccountMemory },
                         starters: starters
@@ -337,10 +530,13 @@ export function AssistantProfileEditor({ profileId }: { profileId?: string }) {
                                 />
                             )}
                             {notice.kind === "saved" && t("assistantProfiles.noticeSaved")}
+                            {/* The revision is still recorded and still
+                                shown in the history below; what changed is
+                                that a user saving an edit is told their
+                                profile was updated rather than that a
+                                numbered snapshot was published. */}
                             {notice.kind === "published" &&
-                                interpolate(t("assistantProfiles.noticePublished"), {
-                                    revision: notice.revision,
-                                })}
+                                t("assistantProfiles.noticePublished")}
                             {notice.kind === "unchanged" &&
                                 t("assistantProfiles.noticeUnchanged")}
                             {notice.kind === "stale" && t("assistantProfiles.noticeStale")}
@@ -349,38 +545,103 @@ export function AssistantProfileEditor({ profileId }: { profileId?: string }) {
                         </p>
                     )}
 
-                    {/* Identity: saved on its own, because a rename is not a
-                        behaviour change and must not spend a revision. */}
+                    {/* Identity: saved on its own when editing, because a
+                        rename is not a behaviour change and must not spend a
+                        revision. When creating, this form is the whole thing
+                        and its button publishes revision 1 with it. */}
                     <section className={`mt-6 ${sectionClass}`}>
                         <h2 className="text-lg font-bold">
                             {t("assistantProfiles.identityHeading")}
                         </h2>
                         <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-400">
-                            {t("assistantProfiles.identityHint")}
+                            {isNew
+                                ? t("assistantProfiles.createHint")
+                                : t("assistantProfiles.identityHint")}
                         </p>
                         <div className="mt-4 flex flex-col gap-4">
                             <label className={labelClass}>
                                 {t("assistantProfiles.nameLabel")}
                                 <input
+                                    ref={nameRef}
                                     className={fieldClass}
                                     value={name}
                                     maxLength={ASSISTANT_PROFILE_LIMITS.maxNameCharacters}
-                                    onChange={(event) => setName(event.target.value)}
+                                    onChange={(event) => {
+                                        setName(event.target.value);
+                                        if (invalidField === "name") setInvalidField(null);
+                                    }}
+                                    aria-invalid={invalidField === "name" || undefined}
+                                    aria-describedby={
+                                        invalidField === "name"
+                                            ? "assistant-name-error"
+                                            : undefined
+                                    }
                                     data-testid="assistant-name"
                                 />
                             </label>
-                            <label className={labelClass}>
-                                {t("assistantProfiles.iconLabel")}
-                                <input
-                                    className={fieldClass}
-                                    value={icon}
-                                    maxLength={ASSISTANT_PROFILE_LIMITS.maxIconCharacters}
-                                    onChange={(event) => setIcon(event.target.value)}
-                                    data-testid="assistant-icon"
-                                />
-                            </label>
+                            {invalidField === "name" && (
+                                <p
+                                    id="assistant-name-error"
+                                    className="-mt-2 text-sm text-red-600 dark:text-red-400"
+                                    data-testid="assistant-name-error"
+                                >
+                                    {t("assistantProfiles.nameRequired")}
+                                </p>
+                            )}
+
+                            {/* Instructions sit in the minimal form, not
+                                behind advanced: they are the reason somebody
+                                makes a profile, and a create that asked only
+                                for a name produced an assistant that did
+                                nothing. */}
+                            {isNew && (
+                                <>
+                                    <label className={labelClass}>
+                                        {t("assistantProfiles.instructionsLabel")}
+                                        <textarea
+                                            ref={instructionsRef}
+                                            className={`${fieldClass} min-h-40`}
+                                            value={instructions}
+                                            maxLength={
+                                                ASSISTANT_PROFILE_LIMITS.maxInstructionsCharacters
+                                            }
+                                            placeholder={t(
+                                                "assistantProfiles.instructionsPlaceholder"
+                                            )}
+                                            onChange={(event) => {
+                                                setInstructions(event.target.value);
+                                                if (invalidField === "instructions") {
+                                                    setInvalidField(null);
+                                                }
+                                            }}
+                                            aria-invalid={
+                                                invalidField === "instructions" || undefined
+                                            }
+                                            aria-describedby={
+                                                invalidField === "instructions"
+                                                    ? "assistant-instructions-error"
+                                                    : undefined
+                                            }
+                                            data-testid="assistant-instructions"
+                                        />
+                                    </label>
+                                    {invalidField === "instructions" && (
+                                        <p
+                                            id="assistant-instructions-error"
+                                            className="-mt-2 text-sm text-red-600 dark:text-red-400"
+                                            data-testid="assistant-instructions-error"
+                                        >
+                                            {t("assistantProfiles.instructionsRequired")}
+                                        </p>
+                                    )}
+                                </>
+                            )}
+
                             <label className={labelClass}>
                                 {t("assistantProfiles.descriptionLabel")}
+                                <span className="ml-1 text-xs font-normal text-zinc-500">
+                                    {t("assistantProfiles.optionalSuffix")}
+                                </span>
                                 <input
                                     className={fieldClass}
                                     value={description}
@@ -391,17 +652,100 @@ export function AssistantProfileEditor({ profileId }: { profileId?: string }) {
                                     data-testid="assistant-description"
                                 />
                             </label>
+
+                            {!isNew && (
+                                <label className={labelClass}>
+                                    {t("assistantProfiles.iconLabel")}
+                                    <span className="ml-1 text-xs font-normal text-zinc-500">
+                                        {t("assistantProfiles.optionalSuffix")}
+                                    </span>
+                                    <input
+                                        className={fieldClass}
+                                        value={icon}
+                                        maxLength={ASSISTANT_PROFILE_LIMITS.maxIconCharacters}
+                                        onChange={(event) => setIcon(event.target.value)}
+                                        data-testid="assistant-icon"
+                                    />
+                                </label>
+                            )}
                         </div>
+
+                        {isNew && (
+                            <details
+                                className="mt-4 rounded-xl border border-zinc-200 dark:border-zinc-800"
+                                open={advancedOpen}
+                                onToggle={(event) =>
+                                    setAdvancedOpen(
+                                        (event.currentTarget as HTMLDetailsElement).open
+                                    )
+                                }
+                                data-testid="assistant-advanced"
+                            >
+                                <summary
+                                    className="flex cursor-pointer list-none items-center gap-2 rounded-xl px-3 py-2.5 text-sm font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+                                    aria-expanded={advancedOpen}
+                                    aria-controls={advancedPanelId}
+                                    data-testid="assistant-advanced-toggle"
+                                >
+                                    <ChevronDown
+                                        className={`h-4 w-4 transition-transform ${
+                                            advancedOpen ? "rotate-180" : ""
+                                        }`}
+                                        aria-hidden="true"
+                                    />
+                                    {t("assistantProfiles.advancedHeading")}
+                                </summary>
+                                <div
+                                    id={advancedPanelId}
+                                    className="flex flex-col gap-4 border-t border-zinc-200 px-3 py-3 dark:border-zinc-800"
+                                >
+                                    <p className="text-sm text-zinc-600 dark:text-zinc-400">
+                                        {t("assistantProfiles.advancedHint")}
+                                    </p>
+                                    <label className={labelClass}>
+                                        {t("assistantProfiles.iconLabel")}
+                                        <span className="ml-1 text-xs font-normal text-zinc-500">
+                                            {t("assistantProfiles.optionalSuffix")}
+                                        </span>
+                                        <input
+                                            className={fieldClass}
+                                            value={icon}
+                                            maxLength={
+                                                ASSISTANT_PROFILE_LIMITS.maxIconCharacters
+                                            }
+                                            onChange={(event) => setIcon(event.target.value)}
+                                            data-testid="assistant-icon"
+                                        />
+                                    </label>
+                                    <ModelSelector
+                                        label={t("assistantProfiles.modelsLabel")}
+                                        hint={t("assistantProfiles.modelsHint")}
+                                        selected={selectedModelIds}
+                                        onChange={setSelectedModelIds}
+                                    />
+                                </div>
+                            </details>
+                        )}
+
                         <button
                             type="button"
                             className={`mt-4 ${primaryButtonClass}`}
-                            onClick={() => void saveIdentity()}
-                            disabled={busy || name.trim() === ""}
-                            data-testid="assistant-save-identity"
+                            onClick={() => void (isNew ? create() : saveIdentity())}
+                            disabled={busy}
+                            data-testid={
+                                isNew ? "assistant-create" : "assistant-save-identity"
+                            }
                         >
-                            <Save className="h-4 w-4" aria-hidden="true" />
+                            {busy ? (
+                                <Loader2
+                                    className="h-4 w-4 animate-spin"
+                                    aria-hidden="true"
+                                />
+                            ) : (
+                                <Save className="h-4 w-4" aria-hidden="true" />
+                            )}
                             {isNew
-                                ? t("assistantProfiles.createAction")
+                                ? createActionLabel
                                 : t("assistantProfiles.saveIdentity")}
                         </button>
                     </section>
@@ -432,17 +776,12 @@ export function AssistantProfileEditor({ profileId }: { profileId?: string }) {
                                             data-testid="assistant-instructions"
                                         />
                                     </label>
-                                    <label className={labelClass}>
-                                        {t("assistantProfiles.modelsLabel")}
-                                        <input
-                                            className={fieldClass}
-                                            value={modelIds}
-                                            onChange={(event) =>
-                                                setModelIds(event.target.value)
-                                            }
-                                            data-testid="assistant-models"
-                                        />
-                                    </label>
+                                    <ModelSelector
+                                        label={t("assistantProfiles.modelsLabel")}
+                                        hint={t("assistantProfiles.modelsHint")}
+                                        selected={selectedModelIds}
+                                        onChange={setSelectedModelIds}
+                                    />
                                     <label className={labelClass}>
                                         {t("assistantProfiles.startersLabel")}
                                         <textarea
@@ -551,8 +890,15 @@ export function AssistantProfileEditor({ profileId }: { profileId?: string }) {
                                     disabled={busy}
                                     data-testid="assistant-publish"
                                 >
-                                    <Save className="h-4 w-4" aria-hidden="true" />
-                                    {t("assistantProfiles.publish")}
+                                    {busy ? (
+                                        <Loader2
+                                            className="h-4 w-4 animate-spin"
+                                            aria-hidden="true"
+                                        />
+                                    ) : (
+                                        <Save className="h-4 w-4" aria-hidden="true" />
+                                    )}
+                                    {t("assistantProfiles.saveChanges")}
                                 </button>
                             </section>
 

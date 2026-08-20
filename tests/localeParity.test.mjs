@@ -116,9 +116,15 @@ const ENGLISH_STRING_CEILING = {
   // too long for a subtitle already carrying a brand and a latency class.
   // German, Spanish, Korean and Chinese all differ, so only these two moved.
   // Allowlisted in check-locale-translation-core.mjs for the same reason.
+  // +1 de from the assistant profile create form (release C): German writes
+  // the optional marker as "(optional)", which is the ordinary word and not a
+  // skipped translation -- "(freiwillig)" means voluntary and "(wahlweise)"
+  // reads as a choice between alternatives, neither of which is what a form
+  // field marker says. French, Spanish, Portuguese and Chinese all differ, so
+  // only German moved.
   zh: 10,
   fr: 30,
-  de: 24,
+  de: 25,
   es: 17,
   pt: 15,
 };

@@ -11,6 +11,7 @@ import {
   type ReactNode,
 } from "react";
 import { createPortal } from "react-dom";
+import Link from "next/link";
 import {
   AlertTriangle,
   ArrowLeft,
@@ -35,11 +36,13 @@ import {
   Plus,
   Presentation,
   RefreshCw,
+  Settings2,
   Sheet,
   Sparkles,
   Square,
   X,
 } from "lucide-react";
+import { assistantProfileCreateHref } from "@/lib/assistantProfileReturn";
 import { CreditCostBadge } from "@/components/credits/CreditCostBadge";
 import {
   MAX_SELECTED_MODELS,
@@ -3484,6 +3487,65 @@ export function ChatInput({
                       {t("chat.toolsAssistantEmpty")}
                     </p>
                   )}
+                  {/*
+                    The two ways out of this list. With nothing published the
+                    empty state used to be a sentence telling the user a
+                    profile could be made "in settings", which left them to
+                    work out where -- so creating is a link here, and it is the
+                    primary control when the list is empty.
+
+                    Rendered inside `menuView === "assistant"`, which a guest
+                    never reaches (the row that opens it is not rendered for
+                    them) and which is absent entirely when the flag is off,
+                    because `assistantProfileOptions` is only supplied once the
+                    profiles API has answered.
+                  */}
+                  <div className="mt-1 flex flex-col gap-1 border-t border-zinc-200 pt-2 dark:border-zinc-800">
+                    <Link
+                      href={assistantProfileCreateHref({ fromChat: true })}
+                      data-testid="assistant-create-cta"
+                      onClick={() => closeMenu(false)}
+                      className={`flex w-full items-center gap-3 rounded-xl px-3 text-left transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-assistant-profile-500 ${
+                        isMobileShell ? "min-h-11 py-2.5" : "py-2.5"
+                      } ${
+                        assistantProfileOptions.length === 0
+                          ? "bg-accent-assistant-profile-500/10 hover:bg-accent-assistant-profile-500/20"
+                          : "hover:bg-zinc-100 dark:hover:bg-zinc-800"
+                      }`}
+                    >
+                      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-accent-assistant-profile-500/10 text-accent-assistant-profile-500">
+                        <Plus className="h-5 w-5" />
+                      </span>
+                      <span className="flex min-w-0 flex-1 flex-col">
+                        <span className="text-sm font-medium text-zinc-900 dark:text-zinc-100">
+                          {t("chat.toolsAssistantCreate")}
+                        </span>
+                        <span className="text-xs text-zinc-500">
+                          {t("chat.toolsAssistantCreateDescription")}
+                        </span>
+                      </span>
+                    </Link>
+                    <Link
+                      href="/settings/assistants"
+                      data-testid="assistant-manage-cta"
+                      onClick={() => closeMenu(false)}
+                      className={`flex w-full items-center gap-3 rounded-xl px-3 text-left transition hover:bg-zinc-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-assistant-profile-500 dark:hover:bg-zinc-800 ${
+                        isMobileShell ? "min-h-11 py-2.5" : "py-2.5"
+                      }`}
+                    >
+                      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-zinc-100 text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400">
+                        <Settings2 className="h-5 w-5" />
+                      </span>
+                      <span className="flex min-w-0 flex-1 flex-col">
+                        <span className="text-sm font-medium text-zinc-900 dark:text-zinc-100">
+                          {t("chat.toolsAssistantManage")}
+                        </span>
+                        <span className="text-xs text-zinc-500">
+                          {t("chat.toolsAssistantManageDescription")}
+                        </span>
+                      </span>
+                    </Link>
+                  </div>
                 </div>
               ) : (
                 <>

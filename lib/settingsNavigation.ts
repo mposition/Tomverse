@@ -26,9 +26,9 @@ export const SETTINGS_TAB_QUERY_PARAM = "settings";
 export const SETTINGS_SECTION_QUERY_PARAM = "settingsSection";
 
 /**
- * Entries that own a detail page. All sit under one group in the settings
- * list ("Data & personalization") but stay separate features: separate rows,
- * separate pages, separate state.
+ * Entries that own a detail page. Each stays a separate feature — separate
+ * row, separate page, separate state — and each names the tab it lives in
+ * below rather than assuming they share one.
  */
 export const SETTINGS_SECTION_IDS = [
     "external-import",
@@ -41,16 +41,41 @@ export type SettingsSectionId = (typeof SETTINGS_SECTION_IDS)[number];
 
 export const SETTINGS_SECTION_TAB: Record<SettingsSectionId, AccountSettingsTab> =
     {
+        // Import moves conversations *into* the account: it is a data
+        // operation, and it stays beside export and deletion.
         "external-import": "data",
-        memory: "data",
-        // A profile is personalisation the account owns, so it belongs in the
-        // same group rather than in a card beside it (settings-navigation
-        // contract §2). Placed after memory because that is the order the
-        // features build on each other -- a profile may use approved memory,
-        // and never the other way round.
-        assistants: "data",
+        // Memory and profiles both shape what a model is told, so they sit in
+        // the tab named after that rather than in the one named after data.
+        // They were in "data" while it was the only tab with detail rows;
+        // that made "Data & personalization" a group whose second half had no
+        // relationship to its first.
+        memory: "ai",
+        // After memory because that is the order the features build on each
+        // other -- a profile may use approved memory, and never the other way
+        // round.
+        assistants: "ai",
         "account-data": "data",
     };
+
+/**
+ * The tab's own name, for a detail page's breadcrumb.
+ *
+ * Keyed by tab rather than by section so the trail cannot disagree with where
+ * the back link actually goes: both read `SETTINGS_SECTION_TAB`. The previous
+ * breadcrumb hard-coded one group name, which was correct while every section
+ * lived in one tab and silently wrong the moment one did not.
+ */
+export const SETTINGS_TAB_LABEL_KEY: Record<AccountSettingsTab, string> = {
+    account: "auth.accountTab",
+    preferences: "auth.preferencesTab",
+    ai: "auth.aiTab",
+    data: "auth.dataTab",
+    plan: "auth.planTab",
+};
+
+/** The category a detail page sits under, as its breadcrumb should say it. */
+export const settingsSectionGroupLabelKey = (section: SettingsSectionId) =>
+    SETTINGS_TAB_LABEL_KEY[SETTINGS_SECTION_TAB[section]];
 
 export const isSettingsSectionId = (
     value: unknown

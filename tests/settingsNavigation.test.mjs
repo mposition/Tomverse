@@ -8,6 +8,8 @@ import {
   settingsSectionElementId,
   settingsSectionHref,
   stripSettingsDeepLink,
+  settingsSectionGroupLabelKey,
+  SETTINGS_TAB_LABEL_KEY,
 } from "../lib/settingsNavigation.ts";
 import {
   consumePendingAccountSettingsRequest,
@@ -30,16 +32,36 @@ test("every entry with a detail page addresses the settings list, not the chat",
 // The set is asserted explicitly so a section cannot quietly disappear, but the
 // row-level properties are derived: adding a fourth entry should not mean
 // hand-writing another pair of comparisons that somebody will forget.
-test("every entry lives under the same settings tab but stays a separate row", () => {
+test("every entry names the tab it is actually in, and stays a separate row", () => {
   assert.deepEqual(SETTINGS_SECTION_IDS, ["external-import", "memory", "assistants", "account-data"]);
+
+  // Pinned per section rather than "all of them are in `data`". They were all
+  // in one tab, and asserting that shape said nothing about whether each row
+  // was in the right place -- it only said they were in the same place. What
+  // has to hold now is that a row's tab, its href and its breadcrumb agree,
+  // which is what the rest of this test and the trail test below check.
+  const EXPECTED_TAB = {
+    "external-import": "data",
+    memory: "ai",
+    assistants: "ai",
+    "account-data": "data",
+  };
 
   const elementIds = new Set();
   const hrefs = new Set();
   for (const section of SETTINGS_SECTION_IDS) {
     assert.equal(
       SETTINGS_SECTION_TAB[section],
-      "data",
-      `${section} is not in the data tab, so the group heading above it would be wrong`
+      EXPECTED_TAB[section],
+      `${section} is not in the ${EXPECTED_TAB[section]} tab, so the group heading above it would be wrong`
+    );
+
+    // The href is what "Back to settings" uses, so it has to carry the same
+    // tab the row lives in. A drifting pair opens a tab the row is not in.
+    assert.match(
+      settingsSectionHref(section),
+      new RegExp(`[?&]settings=${EXPECTED_TAB[section]}(&|$)`),
+      `${section}'s back link opens a different tab than the row is in`
     );
 
     const elementId = settingsSectionElementId(section);
@@ -55,9 +77,13 @@ test("every entry lives under the same settings tab but stays a separate row", (
 
 test("a directly opened detail-page link still resolves without any history", () => {
   // Nothing but the query string is consulted: no referrer, no prior state.
-  assert.deepEqual(parseSettingsDeepLink("?settings=data&settingsSection=memory"), {
-    tab: "data",
+  assert.deepEqual(parseSettingsDeepLink("?settings=ai&settingsSection=memory"), {
+    tab: "ai",
     section: "memory",
+  });
+  assert.deepEqual(parseSettingsDeepLink("?settings=data&settingsSection=external-import"), {
+    tab: "data",
+    section: "external-import",
   });
   assert.deepEqual(parseSettingsDeepLink("settings=data"), {
     tab: "data",
@@ -82,7 +108,13 @@ test("an unknown section opens the tab rather than nothing at all", () => {
 test("the section decides the tab when a hand-edited pair disagrees", () => {
   assert.deepEqual(
     parseSettingsDeepLink("?settings=plan&settingsSection=memory"),
-    { tab: "data", section: "memory" }
+    { tab: "ai", section: "memory" }
+  );
+  // The direction that regressed when the tabs were split: a link minted
+  // before the move still names `data`, and the section still wins.
+  assert.deepEqual(
+    parseSettingsDeepLink("?settings=data&settingsSection=assistants"),
+    { tab: "ai", section: "assistants" }
   );
 });
 
@@ -143,8 +175,31 @@ test("no user-facing label promises a destination the link does not go to", () =
 test("the group and the trail call the same thing by the same name", () => {
   for (const [name, locale] of Object.entries(LOCALES)) {
     assert.ok(locale.settingsNav.dataAndPersonalization, name);
+    assert.ok(locale.settingsNav.aiPersonalization, name);
     assert.ok(locale.settingsNav.settings, name);
     assert.ok(locale.settingsNav.navLabel, name);
+  }
+});
+
+test("a detail page's breadcrumb names the tab its back link opens", () => {
+  // The bug this replaces a hard-coded string to prevent: the trail said
+  // "Data & personalization" on every detail page, so once profiles and
+  // memory moved the breadcrumb and the back link beside it disagreed --
+  // and the breadcrumb is the half a reader trusts to know where they are.
+  for (const section of SETTINGS_SECTION_IDS) {
+    const key = settingsSectionGroupLabelKey(section);
+    assert.equal(
+      key,
+      SETTINGS_TAB_LABEL_KEY[SETTINGS_SECTION_TAB[section]],
+      `${section}'s trail is not derived from the tab it lives in`
+    );
+    const [namespace, leaf] = key.split(".");
+    for (const [name, locale] of Object.entries(LOCALES)) {
+      assert.ok(
+        locale[namespace]?.[leaf],
+        `${name} has no ${key} for ${section}'s breadcrumb`
+      );
+    }
   }
 });
 

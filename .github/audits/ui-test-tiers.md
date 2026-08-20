@@ -41,8 +41,8 @@ browser coverage without rebuilding E2E" 항목이 이 문서의 존재와 workf
 있습니다. `npm run check:ui-tier-coverage`가 이 목록과 태그를 양방향으로
 맞춥니다.
 
-실측: 2026-08-16 기준 `--grep=@ui-risk --list`가 desktop-chromium과
-mobile-chromium 두 project에서 **28개 파일, 646 test**를 선택합니다.
+실측: 2026-08-20 기준 `--grep=@ui-risk --list`가 desktop-chromium과
+mobile-chromium 두 project에서 **29개 파일, 650 test**를 선택합니다.
 
 | Spec |
 |---|
@@ -64,14 +64,19 @@ mobile-chromium 두 project에서 **28개 파일, 646 test**를 선택합니다.
 | `model-panel-tablet-reachability.spec.ts` |
 | `pricing-promotion-currency.spec.ts` |
 | `provider-status.spec.ts` |
+| `assistant-profiles-settings.spec.ts` |
 | `settings-information-architecture.spec.ts` |
 | `sidebar-context-menu-theme.spec.ts` |
 | `signin-analytics-placement.spec.ts` |
 | `skip-link-and-armed-delete.spec.ts` |
 | `ssr-root-language.spec.ts` |
 
-검토 시점 실측(2026-08-16, `--list`): **28개 파일 646 test** (두 project 합계).
-직전 값은 2026-08-14의 27개 파일 638 test였고, 그 뒤
+검토 시점 실측(2026-08-20, `--list`): **29개 파일 650 test** (두 project 합계).
+직전 값은 2026-08-16의 28개 파일 646 test였고, 그 뒤
+`assistant-profiles-settings.spec.ts`(+4)가 합류했습니다 — AI 프로필 생성 폼이
+최소 입력만 묻고 고급 설정을 접어 두는 계약, 그리고 어시스턴트 선택 메뉴가
+생성 경로를 제공하는 계약은 둘 다 화면에서만 확인되고 둘 다 릴리스 C의 진입
+경로이므로 tier에 넣었습니다. 그 이전은 2026-08-14의 27개 파일 638 test였고,
 `pricing-promotion-currency.spec.ts`(+8)가 합류했습니다. 그 이전은 2026-08-05의
 25개 파일 630 test였고 `csp-eval-free.spec.ts`(+4)와
 `external-import-settings.spec.ts`(+2)가 합류했습니다. 그 이전 기록

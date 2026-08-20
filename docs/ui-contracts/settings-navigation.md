@@ -38,13 +38,31 @@ Import and memory are **separate features**: separate rows, separate detail
 pages, separate state, separate APIs. They are **not merged**, and neither is
 promoted into the other.
 
-They are presented under **one group** in the settings list
-(`settingsNav.dataAndPersonalization`), as rows — not as two stacked full-width
-cards. A row states three things and keeps them distinguishable: its name, what
-it does, and where it currently stands.
+Each is presented as a **row inside the group its tab owns** — not as a stacked
+full-width card. A row states three things and keeps them distinguishable: its
+name, what it does, and where it currently stands.
 
-Adding a third entry with a detail page means adding it to
-`SETTINGS_SECTION_IDS` and to that group, not a new card beside it.
+Which group a row belongs to is decided by what the feature *does*, not by
+which tab happened to exist first:
+
+| Section | Tab | Group |
+|---|---|---|
+| `assistants` | `ai` | `settingsNav.aiPersonalization` |
+| `memory` | `ai` | `settingsNav.aiPersonalization` |
+| `external-import` | `data` | `settingsNav.dataAndPersonalization` |
+| `account-data` | `data` | `settingsNav.dataAndPersonalization` |
+
+`SETTINGS_SECTION_TAB` in `lib/settingsNavigation.ts` is the single source of
+that mapping. Three things read it and must never be allowed to disagree: the
+row's deep link (`settingsSectionHref`), the panel that opens from it, and the
+detail page's breadcrumb (`settingsSectionGroupLabelKey`). A breadcrumb that
+hard-codes one group name is a violation — it was correct only while every
+section lived in one tab, and it silently mislabels every page the moment one
+does not.
+
+Adding an entry with a detail page means adding it to `SETTINGS_SECTION_IDS`,
+naming its tab in `SETTINGS_SECTION_TAB`, and putting it in that tab's group —
+not a new card beside it.
 
 ## 3. Naming
 

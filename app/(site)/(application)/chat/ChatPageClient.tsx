@@ -13,6 +13,7 @@ import { useModalDialog } from "@/components/useModalDialog";
 import { DesktopChatShell } from "@/components/chat/DesktopChatShell";
 import { MobileChatShell } from "@/components/chat/MobileChatShell";
 import { prepareChatContextBundle } from "@/lib/chatContextBundleClient";
+import { consumePendingChatProfile } from "@/lib/assistantProfileReturn";
 import { discardResponseBody } from "@/lib/discardResponseBody";
 import { saveResponseAsFile } from "@/lib/browserDownload";
 import { createSharedPendingRequest } from "@/lib/sharedPendingRequest";
@@ -3932,6 +3933,54 @@ export function ChatPageClient({
         showToast(t("chat.assistantProfileFailed"), "error");
       });
   };
+
+  /**
+   * Applies a profile the user just created from this chat.
+   *
+   * The round trip is: the picker's CTA leaves for the create screen, that
+   * screen stashes the new profile's id and pushes `/chat`, and this consumes
+   * it once on the way back. No conversation id and no return URL travel — the
+   * conversation is the one this page restored for itself, and the id is read
+   * exactly once so a refresh cannot reapply it
+   * (`lib/assistantProfileReturn.ts`).
+   *
+   * Deliberately routed through `handleAssistantProfileChange` rather than
+   * through a PATCH of its own. That handler already owns the two cases this
+   * has — a conversation with a server row is PATCHed, one without is held in
+   * `pendingProfileId` and sent with the create — and it carries the four-way
+   * staleness guard that #632 was fixed with. A second implementation here
+   * would be a second place for that guard to be forgotten.
+   *
+   * Waits for the options list because the optimistic row is built from it,
+   * and because an empty list is how "the flag is off" arrives: with profiles
+   * disabled the fetch 403s, `assistantProfileOptions` stays null, and a
+   * stashed id is simply never applied.
+   */
+  const handleAssistantProfileChangeRef = useRef(handleAssistantProfileChange);
+  useEffect(() => {
+    handleAssistantProfileChangeRef.current = handleAssistantProfileChange;
+  });
+  useEffect(() => {
+    if (isGuestMode || !assistantProfileOptions || !isInitialConversationResolved) {
+      return;
+    }
+    const profileId = consumePendingChatProfile();
+    if (!profileId) return;
+    // A profile that is not in this account's own list is not applied. The
+    // server would refuse it anyway; refusing here keeps a doomed request off
+    // the wire and keeps the optimistic row from flashing a profile that was
+    // never theirs.
+    if (!assistantProfileOptions.some((option) => option.id === profileId)) {
+      return;
+    }
+    // Recorded here rather than on the create screen: what this measures is
+    // whether the round trip finished, and the create screen cannot know that
+    // -- it has already navigated away by the time this runs.
+    trackProductEvent("assistant_profile_applied_to_chat", 0, {
+        assistant_profile_entry: "chat",
+    });
+    handleAssistantProfileChangeRef.current(profileId);
+  }, [assistantProfileOptions, isGuestMode, isInitialConversationResolved]);
 
   // handleGlobalSubmit is redefined every render (not memoized); a ref
   // holding the latest closure lets the effect below call a fresh copy

@@ -65,6 +65,13 @@ async function mockSettingsEntryApis(page: Page) {
     (route) => route.fulfill(json({ imports: [] }))
   );
   await page.route(
+    (url) => url.pathname === "/api/assistant-profiles",
+    (route) =>
+      route.fulfill(
+        json({ profiles: [], limits: { maxProfilesPerAccount: 20 } })
+      )
+  );
+  await page.route(
     (url) => url.pathname === "/api/external-conversations",
     (route) =>
       route.fulfill(json({ total: 0, offset: 0, limit: 50, conversations: [] }))
@@ -87,18 +94,23 @@ async function mockSettingsEntryApis(page: Page) {
   );
 }
 
-async function openSettingsDataTab(page: Page) {
-  // The panel lives in the sidebar, which on mobile is the drawer.
-  if (isMobileViewport(page)) {
+async function openSettingsTab(page: Page, tab: "data" | "ai") {
+  // The panel lives in the sidebar, which on mobile is the drawer -- but only
+  // when it is not already mounted. Reaching for the drawer button with the
+  // modal open waits forever on mobile: the modal is a full-screen overlay
+  // and intercepts the click. An open modal takes the tab switch from the
+  // event alone, which is what the event is for.
+  const alreadyOpen = await settingsDialog(page).isVisible();
+  if (!alreadyOpen && isMobileViewport(page)) {
     await page
       .getByRole("button", { name: /Open chat menu|대화 메뉴 열기/ })
       .click();
   }
-  await page.evaluate(() => {
+  await page.evaluate((detail) => {
     window.dispatchEvent(
-      new CustomEvent("tomverse:account-settings-open", { detail: "data" })
+      new CustomEvent("tomverse:account-settings-open", { detail })
     );
-  });
+  }, tab);
   await expect(settingsDialog(page)).toBeVisible();
 }
 
@@ -111,38 +123,58 @@ async function gotoChatWithSettings(page: Page) {
 }
 
 test.describe("settings information architecture", () => {
-  test("both features sit in one group as separate rows @ui-risk", async ({
+  test("each feature sits in the group its tab owns, as a row @ui-risk", async ({
     page,
   }) => {
     await gotoChatWithSettings(page);
-    await openSettingsDataTab(page);
+    await openSettingsTab(page, "data");
 
+    // Data keeps the features that move conversations in and out of the
+    // account; personalisation moved to its own tab, and the assertion below
+    // is that it is *not* here any more.
     const group = page.getByTestId("settings-data-personalization");
     await expect(group).toBeVisible();
-    await expect(group).toContainText("데이터 및 개인화");
-
-    // One group, two rows -- and the rows are inside it, not beside it.
+    await expect(group).toContainText("데이터 관리");
     await expect(group.getByTestId("external-import-entry")).toHaveCount(1);
-    await expect(group.getByTestId("memory-entry")).toHaveCount(1);
+    await expect(group.getByTestId("account-data-entry")).toHaveCount(1);
+    await expect(page.getByTestId("memory-entry")).toHaveCount(0);
+    await expect(page.getByTestId("assistants-entry")).toHaveCount(0);
 
+    await openSettingsTab(page, "ai");
+    const aiGroup = page.getByTestId("settings-ai-personalization");
+    await expect(aiGroup).toBeVisible();
+    await expect(aiGroup).toContainText("AI 개인화");
+    await expect(aiGroup.getByTestId("assistants-entry")).toHaveCount(1);
+    await expect(aiGroup.getByTestId("memory-entry")).toHaveCount(1);
+    // The new-conversation model combination moved with them: it is the third
+    // decision about what a model is told, and it was on a tab about theme
+    // and language.
+    await expect(
+      page.getByTestId("settings-new-conversation-models")
+    ).toBeVisible();
+
+    // Asserted while each row's own tab is open. A locator resolves when it
+    // is awaited, not when it is written, so capturing one on the data tab
+    // and checking it after switching to the AI tab looks past a row that is
+    // no longer rendered.
+    await openSettingsTab(page, "data");
     const importLink = page.getByTestId("external-import-entry-link");
-    const memoryLink = page.getByTestId("memory-entry-link");
     await expect(importLink).toHaveAttribute("href", "/settings/imports");
-    await expect(memoryLink).toHaveAttribute("href", "/settings/memory");
-
-    // Each row names its own title and its own purpose. A repeated generic
-    // CTA ("Open settings") would make these two names identical.
     await expect(importLink).toHaveAccessibleName(
       /다른 AI 서비스에서 가져오기[\s\S]*가져오기 관리/
     );
+    await expect(importLink).toHaveAccessibleDescription(/가져온 대화 3개/);
+    await expect(page.getByTestId("external-import-entry-status")).toBeVisible();
+
+    await openSettingsTab(page, "ai");
+    const memoryLink = page.getByTestId("memory-entry-link");
+    await expect(memoryLink).toHaveAttribute("href", "/settings/memory");
+
+    // Each row names its own title and its own purpose. A repeated generic
+    // CTA ("Open settings") would make these names identical.
     await expect(memoryLink).toHaveAccessibleName(
       /계정 장기 기억[\s\S]*기억 관리/
     );
-
-    // Title, description and status are all distinguishable, and the
-    // description/status never run into the accessible name.
-    await expect(importLink).toHaveAccessibleDescription(/가져온 대화 3개/);
-    await expect(page.getByTestId("external-import-entry-status")).toBeVisible();
     await expect(page.getByTestId("memory-entry-status")).toContainText(
       "새 대화에서 사용 중"
     );
@@ -152,7 +184,7 @@ test.describe("settings information architecture", () => {
     page,
   }) => {
     await gotoChatWithSettings(page);
-    await openSettingsDataTab(page);
+    await openSettingsTab(page, "ai");
 
     const memoryLink = page.getByTestId("memory-entry-link");
     await memoryLink.focus();
@@ -167,12 +199,23 @@ test.describe("settings information architecture", () => {
   for (const entry of [
     {
       name: "account memory",
+      tab: "ai" as const,
       linkTestId: "memory-entry-link",
       urlPattern: /\/settings\/memory$/,
       readyTestId: "memory-settings-card",
     },
     {
+      name: "assistant profiles",
+      tab: "ai" as const,
+      linkTestId: "assistants-entry-link",
+      urlPattern: /\/settings\/assistants$/,
+      readyTestId: "assistants-empty",
+      // Rendered once the list endpoint answers with no profiles, which is
+      // what `mockSettingsEntryApis` returns.
+    },
+    {
       name: "external import",
+      tab: "data" as const,
       linkTestId: "external-import-entry-link",
       urlPattern: /\/settings\/imports$/,
       readyTestId: "external-import-capacity",
@@ -180,7 +223,7 @@ test.describe("settings information architecture", () => {
   ]) {
     test(`the ${entry.name} row opens its own detail page`, async ({ page }) => {
       await gotoChatWithSettings(page);
-      await openSettingsDataTab(page);
+      await openSettingsTab(page, entry.tab);
       await page.getByTestId(entry.linkTestId).click();
       await expect(page).toHaveURL(entry.urlPattern);
       await expect(page.getByTestId(entry.readyTestId)).toBeVisible();
@@ -194,8 +237,19 @@ test.describe("settings information architecture", () => {
       backTestId: "memory-back",
       entryTestId: "memory-entry",
       entryLinkTestId: "memory-entry-link",
-      href: "/chat?settings=data&settingsSection=memory",
+      href: "/chat?settings=ai&settingsSection=memory",
+      group: "AI 설정",
       crumb: "계정 장기 기억",
+    },
+    {
+      name: "assistant profiles",
+      path: "/settings/assistants",
+      backTestId: "assistants-back-to-settings",
+      entryTestId: "assistants-entry",
+      entryLinkTestId: "assistants-entry-link",
+      href: "/chat?settings=ai&settingsSection=assistants",
+      group: "AI 설정",
+      crumb: "나만의 AI 프로필",
     },
     {
       name: "external import",
@@ -204,6 +258,7 @@ test.describe("settings information architecture", () => {
       entryTestId: "external-import-entry",
       entryLinkTestId: "external-import-entry-link",
       href: "/chat?settings=data&settingsSection=external-import",
+      group: "데이터",
       crumb: "다른 AI 서비스에서 가져오기",
     },
   ]) {
@@ -265,7 +320,10 @@ test.describe("settings information architecture", () => {
       } else {
         await expect(breadcrumb).toBeVisible();
         await expect(breadcrumb).toContainText("설정");
-        await expect(breadcrumb).toContainText("데이터 및 개인화");
+        // The category, from the section rather than hard-coded. It used to
+        // read "데이터 및 개인화" on every detail page, which stopped being
+        // true for two of them the moment personalisation got its own tab.
+        await expect(breadcrumb).toContainText(detail.group);
         await expect(breadcrumb).toContainText(detail.crumb);
       }
     });
