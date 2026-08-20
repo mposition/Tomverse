@@ -143,6 +143,8 @@ fal           160,000     167,000     +7,000    변화 없음
 
 ## Related
 
+- `.github/audits/image-generation-followup-2026-08-20.md` — **이 활성화가 덮지
+  않은 것들.** 다음 세션이 집어 들 목록
 - `.github/audits/image-generation-exposure-readiness-2026-08-16.md` — 이 문서가
   이어받은 시점 기록
 - `docs/ops/image-generation-staging-verification-records/2026-08-20__cc2614d80d1631f60057c2feaaed50ead1457024.md` — 활성화 전 기준선
