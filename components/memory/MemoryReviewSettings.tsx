@@ -23,6 +23,7 @@ import {
     type MemoryKind,
 } from "@/lib/memoryValidatorCore";
 import { discardResponseBody } from "@/lib/discardResponseBody";
+import { saveResponseAsFile } from "@/lib/browserDownload";
 
 /**
  * /settings/memory — the Release B review surface (policy §8, §21, slice B3).
@@ -579,15 +580,9 @@ export function MemoryReviewSettings() {
                 setExportError(response.status === 428 ? "reauth" : "generic");
                 return;
             }
-            const blob = await response.blob();
-            const url = URL.createObjectURL(blob);
-            const anchor = document.createElement("a");
-            anchor.href = url;
-            anchor.download = "tomverse-memories.json";
-            document.body.appendChild(anchor);
-            anchor.click();
-            anchor.remove();
-            URL.revokeObjectURL(url);
+            // The pattern this export has always used, now shared with the
+            // conversation and external-import exports (lib/browserDownload.ts).
+            await saveResponseAsFile(response, "tomverse-memories.json");
         } catch {
             setExportError("generic");
         } finally {

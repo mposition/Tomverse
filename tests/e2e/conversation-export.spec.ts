@@ -4,7 +4,6 @@ import {
   prepareGuestPage,
 } from "./support/app-fixtures";
 import { mockUserUsage } from "./support/chat-state-fixtures";
-import { navigationDownloadsObservable } from "./support/engine-capabilities";
 
 /**
  * Exporting a conversation, and the plan entitlement that gates it.
@@ -80,7 +79,7 @@ test.beforeEach(async ({ page }) => {
 
 test("an entitled account can export a conversation to a file", async ({
   page,
-}, testInfo) => {
+}) => {
   await mockAuthenticatedApi(page);
   await mockUserUsage(page, { plan: "Pro", limits: { allowDownloads: true } });
   const exportRequests = await mockExportRoute(page);
@@ -91,29 +90,51 @@ test("an entitled account can export a conversation to a file", async ({
   const item = downloadItem(page);
   await expect(item).toBeEnabled();
 
-  // The export is a navigation to a route that answers with an attachment, and
-  // that the route is requested, once, is the product's decision and is asserted
-  // on every engine; what the browser does with the attachment is its own, and
-  // this harness only sees it on some (support/engine-capabilities.ts).
-  const download = page
-    .waitForEvent("download", { timeout: 5_000 })
-    .catch(() => null);
-  await item.click();
-  await expect
-    .poll(() => exportRequests.length, { message: "the export route was requested" })
-    .toBe(1);
-  expect(exportRequests[0]).toContain("/api/conversations/qa-conversation/export");
+  // The page fetches the export and saves the blob itself, so every engine
+  // raises the download -- the reason this assertion is no longer gated by
+  // project. Before, mobile WebKit rendered the attachment response and left
+  // /chat entirely.
+  const [download] = await Promise.all([
+    page.waitForEvent("download"),
+    item.click(),
+  ]);
 
-  const file = await download;
-  if (!navigationDownloadsObservable(testInfo)) return;
-  expect(file, "the attachment response was saved as a download").not.toBeNull();
-  expect(file!.suggestedFilename()).toBe("qa-conversation.txt");
-  // Saved rather than navigated to: a router push would have rendered the
-  // response and taken the chat with it.
+  expect(exportRequests).toHaveLength(1);
+  expect(exportRequests[0]).toContain("/api/conversations/qa-conversation/export");
+  expect(download.suggestedFilename()).toBe("qa-conversation.txt");
+  // Saved rather than navigated to: the chat is still the page on screen.
   expect(new URL(page.url()).pathname).toBe("/chat");
   await expect(page.getByTestId("chat-input")).toBeVisible();
   // The menu closes once the export starts, so the sidebar is usable again.
   await expect(page.getByTestId("conversation-menu-panel")).toBeHidden();
+});
+
+test("an export the server refuses says so and keeps the workspace", async ({ page }) => {
+  // The half a navigation could not do. `location.href` handed a refusal to
+  // the browser as a document to render, so the visitor lost the chat and got
+  // a JSON error page; now it is a toast on the page they were already on.
+  await mockAuthenticatedApi(page);
+  await mockUserUsage(page, { plan: "Pro", limits: { allowDownloads: true } });
+  await page.route("**/api/conversations/*/export**", (route) =>
+    route.fulfill({
+      status: 500,
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ error: "Failed to export conversation." }),
+    })
+  );
+  await page.goto("/chat");
+  await expect(page.getByTestId("chat-input")).toBeVisible();
+
+  await openConversationMenu(page);
+  await downloadItem(page).click();
+
+  // An error-tone toast is `role="alert"`, not `status` -- the tone is the
+  // point, so it is asserted rather than assumed.
+  const toast = page.getByTestId("app-toast");
+  await expect(toast).toBeVisible();
+  await expect(toast).toHaveAttribute("data-tone", "error");
+  expect(new URL(page.url()).pathname).toBe("/chat");
+  await expect(page.getByTestId("chat-input")).toBeVisible();
 });
 
 test("a plan without the download entitlement disables the control and sends nothing", async ({
