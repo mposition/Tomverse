@@ -14,6 +14,7 @@ import { DesktopChatShell } from "@/components/chat/DesktopChatShell";
 import { MobileChatShell } from "@/components/chat/MobileChatShell";
 import { prepareChatContextBundle } from "@/lib/chatContextBundleClient";
 import { discardResponseBody } from "@/lib/discardResponseBody";
+import { saveResponseAsFile } from "@/lib/browserDownload";
 import { createSharedPendingRequest } from "@/lib/sharedPendingRequest";
 import {
   ComparisonReviewDialog,
@@ -4075,13 +4076,25 @@ export function ChatPageClient({
   
     const blendedConversations = conversations; 
   
-    const handleDownloadConversation = (convId: string) => {
+    const handleDownloadConversation = async (convId: string) => {
         if (isGuestMode) return;
-        // Not a page navigation: the route answers with a file download
-        // (Content-Disposition: attachment), so the browser keeps this page
-        // and saves the response. A router push would try to render it.
-        // eslint-disable-next-line @next/next/no-location-assign-relative-destination
-        window.location.href = `/api/conversations/${convId}/export`;
+        // Fetched and saved from here rather than navigated to. Assigning
+        // `location.href` handed the whole outcome to the browser, including
+        // the failures: a refusal became a JSON error page the user was
+        // navigated to, with the chat gone. See lib/browserDownload.ts.
+        try {
+            const response = await fetch(`/api/conversations/${convId}/export`, {
+                cache: "no-store",
+            });
+            if (!response.ok) {
+                await discardResponseBody(response);
+                showToast(t("sidebar.downloadFailed"), "error");
+                return;
+            }
+            await saveResponseAsFile(response, "conversation.txt");
+        } catch {
+            showToast(t("sidebar.downloadFailed"), "error");
+        }
     };
 
     const handleShareConversation = async (convId: string) => {

@@ -1,4 +1,4 @@
-import type { Locator, Page, TestInfo } from "@playwright/test";
+import type { Locator, Page } from "@playwright/test";
 
 /**
  * What the E2E harness can and cannot drive, per engine.
@@ -8,14 +8,20 @@ import type { Locator, Page, TestInfo } from "@playwright/test";
  * are read by someone who cannot reproduce them locally. When that project ran
  * for the first time in weeks on 2026-08-18, four specs failed on capability
  * errors rather than on anything the product did: a permission name WebKit does
- * not have, an input device it does not have, and a download the harness cannot
- * see.
+ * not have, an input device it does not have, and two downloads it rendered
+ * instead of saving.
  *
  * The rule this module exists to keep is that a missing *capability* must never
- * quietly become a missing *assertion*. Each helper below either drives the same
- * product behaviour by another route -- so the check still runs everywhere -- or
- * says exactly which observation is unavailable and leaves the rest of the test
- * asserting. None of them skips a test.
+ * quietly become a missing *assertion*. Each helper below drives the same
+ * product behaviour by another route, so the check still runs everywhere. None
+ * of them skips a test.
+ *
+ * The downloads left: `navigationDownloadsObservable` lived here while the two
+ * exports reached their route by assigning `location.href`, and it went when
+ * they stopped. They now fetch the response and save the blob themselves
+ * (lib/browserDownload.ts), which every engine reports as a download -- so
+ * there is nothing engine-shaped left to describe, and their specs assert the
+ * file on every project.
  */
 
 /**
@@ -101,29 +107,4 @@ export async function scrollUpBy(target: Locator, pixels: number) {
   await target.evaluate((element, amount) => {
     element.scrollTop -= amount;
   }, pixels);
-}
-
-/**
- * Whether a download started by *navigating* to an attachment response is
- * handled as a download on this project.
- *
- * Two download shapes exist in this product. A blob built in the page and
- * clicked through an `<a download>` raises Playwright's `download` event on
- * every engine -- the memory export proves it, passing on mobile-safari in the
- * same runs these failed. A `window.location.href` assignment to a route that
- * answers `Content-Disposition: attachment` is not saved on WebKit here: the
- * asserted evidence is that after the click `page.url()` was
- * `/api/conversations/qa-conversation/export`, so the engine rendered the
- * response rather than downloading it and the page went with it.
- *
- * That is the browser's disposition of a response, not the product's decision,
- * and it is only reachable through this harness -- what real Safari does with
- * the same response cannot be observed from here, and the response these tests
- * navigate to is a fulfilled mock rather than the server's own. So the
- * application's decision -- that the export route is requested, exactly once --
- * is asserted on every engine, and what the browser then does with the
- * attachment is asserted where this harness can see it.
- */
-export function navigationDownloadsObservable(testInfo: TestInfo): boolean {
-  return !testInfo.project.name.includes("safari");
 }

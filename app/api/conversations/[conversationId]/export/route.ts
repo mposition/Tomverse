@@ -128,10 +128,17 @@ export async function GET(
         });
 
         const fileName = `${sanitizeFileName(conversation.title)}.txt`;
+        // Two fields, because one cannot do both jobs. A quoted `filename` is
+        // literal and ASCII, so a Korean title percent-encoded into it arrived
+        // as the escapes themselves -- `%ED%95%9C.txt` on disk. RFC 5987's
+        // `filename*` is the field that carries the real name, and the quoted
+        // one stays as the ASCII fallback for anything that ignores it.
+        const asciiFileName =
+            fileName.replace(/[^\x20-\x7e]/g, "").trim() || "conversation.txt";
         return new Response(stream, {
             headers: {
                 "Content-Type": "text/plain; charset=utf-8",
-                "Content-Disposition": `attachment; filename="${encodeURIComponent(fileName)}"`,
+                "Content-Disposition": `attachment; filename="${asciiFileName}"; filename*=UTF-8''${encodeURIComponent(fileName)}`,
                 "Cache-Control": "no-store",
                 "X-Content-Type-Options": "nosniff",
             },
