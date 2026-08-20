@@ -42,12 +42,13 @@ browser coverage without rebuilding E2E" 항목이 이 문서의 존재와 workf
 맞춥니다.
 
 실측: 2026-08-20 기준 `--grep=@ui-risk --list`가 desktop-chromium과
-mobile-chromium 두 project에서 **29개 파일, 650 test**를 선택합니다.
+mobile-chromium 두 project에서 **30개 파일, 662 test**를 선택합니다.
 
 | Spec |
 |---|
 | `account-flow.spec.ts` |
 | `chat-analytics-settings-placement.spec.ts` |
+| `chat-welcome-flicker.spec.ts` |
 | `chat-memory-context.spec.ts` |
 | `comparison-panel-controls.spec.ts` |
 | `csp-eval-free.spec.ts` |
@@ -71,18 +72,40 @@ mobile-chromium 두 project에서 **29개 파일, 650 test**를 선택합니다.
 | `skip-link-and-armed-delete.spec.ts` |
 | `ssr-root-language.spec.ts` |
 
-검토 시점 실측(2026-08-20, `--list`): **29개 파일 650 test** (두 project 합계).
-직전 값은 2026-08-16의 28개 파일 646 test였고, 그 뒤
-`assistant-profiles-settings.spec.ts`(+4)가 합류했습니다 — AI 프로필 생성 폼이
-최소 입력만 묻고 고급 설정을 접어 두는 계약, 그리고 어시스턴트 선택 메뉴가
-생성 경로를 제공하는 계약은 둘 다 화면에서만 확인되고 둘 다 릴리스 C의 진입
-경로이므로 tier에 넣었습니다. 그 이전은 2026-08-14의 27개 파일 638 test였고,
+검토 시점 실측(2026-08-20, `--list`): **30개 파일 662 test** (두 project 합계).
+직전 값은 같은 날의 29개 파일 650 test였고, 그 뒤
+`chat-welcome-flicker.spec.ts`(+12)가 합류했습니다. 그 이전은 2026-08-16의
+28개 파일 646 test였고 `assistant-profiles-settings.spec.ts`(+4)가
+합류했습니다 — AI 프로필 생성 폼이 최소 입력만 묻고 고급 설정을 접어 두는 계약,
+그리고 어시스턴트 선택 메뉴가 생성 경로를 제공하는 계약은 둘 다 화면에서만
+확인되고 둘 다 릴리스 C의 진입 경로이므로 tier에 넣었습니다. 그 이전은
+2026-08-14의 27개 파일 638 test였고,
 `pricing-promotion-currency.spec.ts`(+8)가 합류했습니다. 그 이전은 2026-08-05의
 25개 파일 630 test였고 `csp-eval-free.spec.ts`(+4)와
 `external-import-settings.spec.ts`(+2)가 합류했습니다. 그 이전 기록
 "76 test / 14 skip / 67초"는 표에 적힌 5개 파일만 세던 시점의 값입니다. 이
 tier는 merge를 차단하므로, PR tier 비용을 근거로 무언가를 빼거나 넣는 판단은
 위 숫자를 다시 재고 나서 합니다.
+
+`chat-welcome-flicker.spec.ts`는 2026-08-20에 합류했습니다(29개 파일,
++12 test — desktop·mobile 각 6). 기존 대화를 복원하거나 그 안에서 후속 질문을
+보낼 때 `chat-empty-state`(채팅 환영 화면)가 한두 프레임 깜빡이던 결함입니다.
+두 shell이 "이 대화가 비어 있는가"를 boolean으로 물었고, 어떤 panel도 아직
+보고하지 않은 상태 — 즉 *아직 모름* — 을 "비어 있음"으로 채웠기 때문입니다
+(`lib/chatContentState.ts`).
+
+이 spec은 **최종 화면을 보지 않습니다.** 최종 화면만 확인하는 test는 이
+결함을 구조적으로 놓칩니다 — transcript가 올라온 시점에는 환영 화면이 이미
+왔다 갔으므로 그런 단언은 언제나 통과합니다. app의 첫 script보다 먼저 설치된
+MutationObserver가 page 수명 전체에 걸쳐 `chat-empty-state`의 등장·퇴장을
+기록하고, 단언은 그 이력에 대해 이뤄집니다. 같은 probe가 `/chat` 수명 동안
+marketing hero(`landing-hero-title`)가 한 번도 나타나지 않는다는 것도 함께
+고정합니다.
+
+두 shell이 이 판정을 각자 내리고 mobile은 환영 화면을 overlay가 아니라 일반
+flow로 그리므로 desktop·mobile 양쪽에서 돌립니다. 렌더 순서 회귀는 PR로
+들어오고 스크린샷에도 남지 않으므로, `main` push의 무필터 실행까지 기다릴 수
+없습니다.
 
 `pricing-promotion-currency.spec.ts`는 2026-08-16에 합류했습니다(28개 파일,
 +8 test — desktop·mobile 각 4). AUD 시장에서 USD 고정액 프로모션 코드를
