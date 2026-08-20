@@ -20,8 +20,11 @@
 상태입니다. 실행 결과는 `assistant-profile-staging-verification-records/`에
 **날짜와 전체 deploy SHA로 이름 붙인 별도 파일**로 남습니다.
 
-- **template revision**: `2026-08-20` — 항목이 바뀌면 이 값을 올리고, 실행
-  기록은 자기가 어느 revision으로 실행됐는지 적습니다.
+- **template revision**: `2026-08-20a` — 항목이 바뀌면 이 값을 올리고, 실행
+  기록은 자기가 어느 revision으로 실행됐는지 적습니다. `2026-08-20`에서 올린
+  이유는 발견성·생성 UX 변경(#690)이 §F의 진입점을 옮기고 §I의 생성 흐름을
+  새로 만들었기 때문입니다 — 그 전 revision으로 실행된 기록은 §I를 몰랐던
+  실행으로 읽어야 합니다.
 - 실행 방법과 파일 이름 규칙:
   `assistant-profile-staging-verification-records/README.md`
 - 기록 template:
@@ -57,8 +60,9 @@
 | D | 1 | 적대적 instructions가 prompt 경계를 넘지 못하는가 |
 | E | 1 | injection flag가 꺼진 동안 profile memory policy가 무효인가 |
 | F–H | 0 | 화면·관측만 |
+| I | 1 | 채팅에서 만든 profile이 그 대화에 실제로 붙는가 (#690) |
 
-기본 모델(`gpt-5-6-luna`) Standard 기준 turn당 1크레딧이므로 **합계 5~6크레딧**
+기본 모델(`gpt-5-6-luna`) Standard 기준 turn당 1크레딧이므로 **합계 6~7크레딧**
 입니다. 프롬프트는 짧게 씁니다 — 판별 대상은 답의 품질이 아니라 경계입니다.
 
 **§D·§E는 답 내용을 읽어야 하므로 모델을 바꾸지 않습니다.** 여러 모델을 비교할
@@ -155,13 +159,23 @@ Profiles가 앞입니다. **이 구획이 그 순서가 안전하다는 것을 �
 
 ## F. 진입점과 노출
 
-- [ ] 설정 → 데이터 그룹에 assistants 행이 있고, 그 행의 action label이 자기
-      목적을 말한다 (`settings-navigation` 계약)
+**#690으로 정보 구조가 바뀌었습니다.** profile과 memory는 새 `AI 설정` 탭에
+있고, Data 탭에는 가져오기·계정 데이터만 남습니다.
+
+- [ ] 설정에 `AI 설정` 탭이 있고, 그 안에 assistants 행·memory 행·새 대화
+      모델 조합이 함께 있다
+- [ ] Data 탭에는 assistants 행과 memory 행이 **없다**
+- [ ] assistants 행의 action label이 자기 목적을 말한다
+      (`docs/ui-contracts/settings-navigation.md` 계약)
+- [ ] 상세 페이지의 breadcrumb가 `설정 / AI 설정 / 나만의 AI 프로필`이다 —
+      `데이터 및 개인화`가 아니다
 - [ ] 컴포저 도구 메뉴의 assistant 행에서 profile을 고르고 해제할 수 있다
 - [ ] 비로그인 세션에는 진입점이 없다 — profile은 계정에 속한다
-- [ ] 상세 페이지에서 "설정으로 돌아가기"가 직접 연 URL에서도 동작한다
+- [ ] 상세 페이지에서 "설정으로 돌아가기"가 직접 연 URL에서도 동작하고, 돌아간
+      뒤 그 행에 focus가 있다
 - [ ] 모바일 320px에서 컴포저 textarea가 전용 full-width 행을 유지한다
-      (mobile-chat-composer 계약)
+      (`docs/ui-contracts/mobile-chat-composer.md` 계약)
+- [ ] 모바일에서 설정 탭 5개가 잘리거나 라벨이 읽을 수 없게 좁아지지 않는다
 
 ## G. 삭제
 
@@ -182,6 +196,35 @@ Profiles가 앞입니다. **이 구획이 그 순서가 안전하다는 것을 �
 - [ ] `GET /api/admin/audit-integrity`가 `valid: true`
 - [ ] §B의 대화 상태는 소유자 자신의 `GET /api/conversations/{id}` 응답으로
       확인한다 — 계정 식별자가 저장소로 나가지 않는다
+
+## I. 생성과 발견 (#690, 유료 turn 1건)
+
+이 구획은 발견성·생성 UX 변경과 함께 추가됐습니다. **되돌릴 수 없는 것과
+무관하지만, 한 번도 사람 눈으로 본 적이 없는 새 경로**입니다.
+
+되돌릴 수 없는 것이 여기에도 하나 있습니다 — **생성이 실패했는데 사용할 수
+없는 profile이 남는 상태**입니다. 남으면 목록에 보이고 picker에 뜨는데 대화를
+시작하지 못하며, 사용자는 그것이 고장인지 미완성인지 구분할 수 없습니다.
+
+- [ ] `/settings/assistants/new`가 이름·지시문·설명만 보여준다. 아이콘과
+      모델은 닫힌 `고급 설정` 안에 있다
+- [ ] `고급 설정`을 열면 모델이 **이름으로 고르는 selector**다 — 쉼표로
+      구분한 내부 ID 입력창이 아니다
+- [ ] 이름과 지시문만으로 만든 profile이 **즉시 picker에 나타나고 대화를
+      시작할 수 있다** (두 번째 저장 없이)
+- [ ] 지시문을 비운 채 제출하면 그 필드에 오류가 붙고 focus가 이동하며,
+      **요청이 나가지 않는다**
+- [ ] 컴포저 → 어시스턴트 → `새 프로필 만들기` → 최소 폼 → `만들고 이 대화에
+      사용` → **원래 대화로 돌아오고 그 profile이 붙어 있다**
+- [ ] 복귀한 대화의 `selectedModels`가 §B의 사전 기록과 같다 — 생성 왕복이
+      모델 설정을 건드리지 않는다
+- [ ] profile이 하나도 없을 때 picker가 안내 문장이 아니라 `새 프로필 만들기`를
+      primary로 보여준다
+- [ ] 편집 화면의 주 버튼이 `변경사항 저장`이고, 성공 메시지가 개정 번호를
+      말하지 않는다. version history에는 개정 번호가 그대로 있다
+- [ ] 생성이 서버 오류로 실패했을 때 **목록에 사용할 수 없는 profile이 남지
+      않는다** (staging에서 만들기 어려우면 `n/a`로 두고 이유를 적습니다 —
+      DB 통합 테스트가 이 계약을 덮고 있습니다)
 
 ## 실행 기록
 
