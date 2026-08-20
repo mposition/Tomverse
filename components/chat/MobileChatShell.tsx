@@ -38,6 +38,12 @@ import {
 } from "@/components/chat/useVisualViewport";
 import { chatModelSummaryCopy } from "@/components/chat/chatModelSummaryCopy";
 import { deriveComparisonReadiness } from "@/lib/comparisonReadiness";
+import {
+  chatContentStateKey,
+  resolveChatContentState,
+  type ChatContentState,
+} from "@/lib/chatContentState";
+import { useGuestChatContentSeed } from "@/components/chat/useGuestChatContentSeed";
 import { buildChatModelSummary } from "@/lib/chatModelSummary";
 import { openChatModelPicker } from "@/lib/chatModelPickerEvents";
 import { trackProductEvent } from "@/lib/productAnalyticsClient";
@@ -125,6 +131,19 @@ type MobileChatShellProps = {
   guestMessageCount: number;
   maxGuestMessages: number;
   isModelSelectionReady: boolean;
+  /**
+   * Whether the page has finished deciding which conversation is active.
+   * Distinct from `isModelSelectionReady`, which is unconditionally true for
+   * guests: a guest conversation is restored from localStorage after mount,
+   * so until this flips there is no conversation to call empty or not.
+   */
+  isConversationSelectionResolved: boolean;
+  /**
+   * A send this page has started but not yet handed to the panels, and the
+   * conversation it started from. Only the content-state derivation reads
+   * it; it decides nothing about credits, preflight or admission.
+   */
+  pendingSubmission: { originConversationId: string | null } | null;
   onNewChat: () => void;
   onNewImage?: (() => void) | null;
   /** Set when image generation is visible to this viewer but not usable. */
@@ -202,6 +221,8 @@ export function MobileChatShell({
   guestMessageCount,
   maxGuestMessages,
   isModelSelectionReady,
+  isConversationSelectionResolved,
+  pendingSubmission,
   onNewChat,
   onNewImage,
   imageLock,
@@ -315,7 +336,9 @@ export function MobileChatShell({
     [conversations, currentChatId]
   );
   const [modelStatuses, setModelStatuses] = useState<Record<string, ModelRuntimeStatus>>({});
-  const [modelEmptyStates, setModelEmptyStates] = useState<Record<string, boolean>>({});
+  const [modelContentStates, setModelContentStates] = useState<
+    Record<string, ChatContentState>
+  >({});
   const [modeSheet, setModeSheet] = useState<"guest" | null>(null);
 
   const handleTabRemoveClick = useCallback(
@@ -333,11 +356,6 @@ export function MobileChatShell({
     activeModelId && selectedModels.includes(activeModelId)
       ? activeModelId
       : selectedModels[0] || null;
-  const conversationStateKey = currentChatId || "new";
-  const emptyStateKey = useCallback(
-    (modelId: string) => `${conversationStateKey}:${modelId}`,
-    [conversationStateKey]
-  );
 
   // Bumped to abort every currently-responding panel at once ("stop all").
   const [stopSignal, setStopSignal] = useState(0);
@@ -356,14 +374,14 @@ export function MobileChatShell({
     []
   );
 
-  const handleEmptyStateChange = useCallback(
-    (modelId: string, isEmpty: boolean) => {
-      const key = emptyStateKey(modelId);
-      setModelEmptyStates((current) =>
-        current[key] === isEmpty ? current : { ...current, [key]: isEmpty }
+  const handleContentStateChange = useCallback(
+    (modelId: string, state: ChatContentState) => {
+      const key = chatContentStateKey(currentChatId, modelId);
+      setModelContentStates((current) =>
+        current[key] === state ? current : { ...current, [key]: state }
       );
     },
-    [emptyStateKey]
+    [currentChatId]
   );
 
   const activeModelIndex = resolvedActiveModelId
@@ -539,22 +557,31 @@ export function MobileChatShell({
     },
     [modelSummary.activeCount]
   );
-  // See DesktopChatShell's matching comment: an existing *authenticated*
-  // conversation shouldn't default to "empty" before any panel has
-  // actually reported in, or a still-loading panel would flash the
-  // welcome screen instead of its own loading state. Only a brand-new
-  // conversation defaults to empty -- guests are excluded since their
-  // currentChatId is a client-generated placeholder assigned immediately
-  // even for a guaranteed-empty new chat, unlike an authenticated chat's
-  // server-assigned id.
+  // See DesktopChatShell's matching block and lib/chatContentState.ts: "is
+  // this conversation empty" has three answers, and only `empty` -- reached
+  // from evidence, never from the absence of a report -- renders the welcome
+  // surface. `unknown` renders the panel, which shows its own loading state.
+  const guestContentSeed = useGuestChatContentSeed(isGuestMode, currentChatId);
+  const hasAcceptedSubmission = Boolean(
+    promptPayload && currentChatId && promptPayload.chatId === currentChatId
+  );
+  const contentStateFor = (modelIds: string[]) =>
+    resolveChatContentState({
+      isConversationSelectionResolved,
+      conversationId: currentChatId,
+      selectedModelIds: modelIds,
+      reported: modelContentStates,
+      hasAcceptedSubmission,
+      storedSeed: guestContentSeed,
+      pendingSubmission,
+    });
+  // With no model resolved there is no panel to be in a conversation with, so
+  // the header keeps treating that as the new-chat case it always has.
   const isActiveConversationEmpty = resolvedActiveModelId
-    ? modelEmptyStates[emptyStateKey(resolvedActiveModelId)] ?? (isGuestMode || !currentChatId)
+    ? contentStateFor([resolvedActiveModelId]) === "empty"
     : true;
-  const isConversationEmpty =
-    selectedModels.length > 0 &&
-    selectedModels.every(
-      (modelId) => modelEmptyStates[emptyStateKey(modelId)] ?? (isGuestMode || !currentChatId)
-    );
+  const conversationContentState = contentStateFor(selectedModels);
+  const isConversationEmpty = conversationContentState === "empty";
   const currentConversation = conversations.find(
     (conversation) => conversation.id === currentChatId
   );
@@ -726,6 +753,10 @@ export function MobileChatShell({
     // cannot quietly absorb a real sideways overflow.
     <main
       data-testid="mobile-chat-shell"
+      // Observable so a regression test can assert on the state machine itself
+      // -- "unknown" must never be rendered as the welcome surface -- rather
+      // than only on what happened to be painted when it looked.
+      data-content-state={conversationContentState}
       inert={isGuestVerificationOpen || undefined}
       // `100dvh` tracks the browser's own chrome, never the on-screen
       // keyboard, so the bottom of this box sits underneath a raised keyboard
@@ -1126,7 +1157,7 @@ export function MobileChatShell({
                   onBeforeSend={onBeforeModelSend}
                   hideModelOnlyInput
                   useCenteredWelcome
-                  onEmptyStateChange={handleEmptyStateChange}
+                  onContentStateChange={handleContentStateChange}
                   onStatusChange={handleModelStatusChange}
                   onResponseComplete={onResponseComplete}
                   onFollowupSent={onFollowupSent}
