@@ -76,23 +76,55 @@ fal            80,000      87,000     +7,000     변화 없음
 `image-generation-exposure-readiness-2026-08-16.md` §"What remains" 기준입니다.
 
 - [x] flag ON
-- [ ] **`AdminAuditLog` 항목 확인** — 그 문서는 flag를 `PUT /api/admin/app-settings`로
-      켜야 한다고 적습니다(route가 변경 전후를 `app_settings.update_started`로 남김).
-      행을 직접 고치면 동작은 같고 감사 기록만 없습니다. 어느 쪽으로 켰는지와
-      audit log id를 확인해 아래에 적습니다
-- [ ] **fal 1건** — 이 회차는 openai·xai만 실행했습니다. `dimensionCoverage`가 세
-      provider를 보고하긴 하지만 fal의 1건은 활성화 이전 것입니다. 활성화 이후
-      fal 실행은 아직 없습니다 (Nano Banana 2, Standard / 1024×1024, 120크레딧)
+- [x] **`AdminAuditLog` 항목 확인** — route를 탔습니다. 같은 시각에 두 항목이
+      남았습니다: `app_settings.update_started`(변경 전)와
+      `app_settings.guest_default_model.updated`(결과). 전자의 metadata에
+      `"imageGenerationEnabled": true`가 들어 있습니다. **DB 행 직접 편집이었다면
+      이 두 항목이 없습니다**
+- [x] **fal 1건** — 활성화 이후 실행 완료. 아래 §"fal 실행" 참조
 - [x] ~~마지막 `@ai-sdk/*` patch bump 판단~~ — 그 시점 이후 빌드가 여러 번 바뀌었고
       현재 production 빌드는 위 실행으로 직접 검증됐으므로 대체됨
 
 ```
-켠 사람:        ____________________
-켠 시각 (UTC):  ____________________
-켠 방법:        PUT /api/admin/app-settings  /  DB 직접 편집
-AdminAuditLog:  ____________________
-fal 1건 실행:   ____________________
+켠 사람:        @mposition (계정 소유자)
+켠 시각 (UTC):  2026-08-20T00:59Z
+켠 방법:        PUT /api/admin/app-settings   (AdminAuditLog 항목으로 확인)
+AdminAuditLog:  app_settings.update_started + app_settings.guest_default_model.updated
+                target AppSettings / public, 2026-08-20 00:59 UTC
+fal 1건 실행:   Nano Banana 2, Standard / 1024x1024, 120크레딧
 ```
+
+## fal 실행 — 세 provider가 모두 자기 버킷으로
+
+| 버킷 | 이전 | 이후 |
+|---|---|---|
+| fal `usedTodayMicroUsd` | 0 | **80,000** (+80,000 = 자기 정산액) |
+| openai | 53,045 | 53,045 (0) |
+| xai | 50,000 | 50,000 (0) |
+
+`reserved` 371,000 → 458,000 (+87,000 = fal 최악 원가), `settled` 339,150 →
+419,150 (+80,000), true-up 7,000이 fal에서 빠짐. `reservations.total` 6 → 7,
+`settledCredits` 480 → 600 (+120, 고정가), succeeded 6 → 7, 저장 7/7,
+`dimensionCoverage` fal 2/2, invariant 6종 0, `failuresByPhase` 비어 있음.
+
+크레딧당 80,000/120 = 667 µUSD로 상한 900 아래입니다.
+
+**이로써 세 provider가 production에서 각각 확인됐습니다.** fal은 셋 중 true-up이
+가장 크고(7,000) 일 한도가 가장 낮으므로(12,000,000), 옛 결함이 남아 있었다면
+가장 크게 드러났을 지점입니다.
+
+### drift는 세 번째 실행에서도 그대로다
+
+```
+              정산 합계    월 버킷     차이       기준선 대비
+openai        159,150     147,150    −12,000    변화 없음
+xai           100,000     105,000     +5,000    변화 없음
+fal           160,000     167,000     +7,000    변화 없음
+합계          419,150     419,150          0
+```
+
+활성화 이후 생성 3건(openai·xai·fal 각 1건)이 drift에 **하나도 기여하지
+않았습니다.** 12,000 / 5,000 / 7,000은 활성화 전 기준선의 값 그대로입니다.
 
 ## 여전히 실행된 적 없는 것
 
