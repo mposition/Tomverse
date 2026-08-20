@@ -38,6 +38,7 @@ import { APP_DEFAULTS } from "@/lib/appDefaults";
 import { canUseModelWithPlan } from "@/lib/models";
 import { localeLaunchPolicy } from "@/lib/localeLaunchPolicy";
 import { dispatchAppToast } from "@/lib/appToast";
+import { saveResponseAsFile } from "@/lib/browserDownload";
 import { notifyUserSettingsUpdated } from "@/lib/userSettingsEvents";
 import {
     notifyUserUsageChanged,
@@ -510,6 +511,26 @@ export function AuthButton({
         });
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
+
+    // Fetched and saved from here rather than navigated to, for the same reason
+    // as the other two exports (lib/browserDownload.ts): a navigation handed
+    // the outcome to the browser, refusals included, and this settings panel
+    // was replaced by whatever came back.
+    const downloadAllConversations = useCallback(async () => {
+        try {
+            const response = await fetch("/api/conversations/export-all", {
+                cache: "no-store",
+            });
+            if (!response.ok) {
+                await discardResponseBody(response);
+                dispatchAppToast(t("auth.downloadAllFailed"), "error");
+                return;
+            }
+            await saveResponseAsFile(response, "tomverse-all-conversations.txt");
+        } catch {
+            dispatchAppToast(t("auth.downloadAllFailed"), "error");
+        }
+    }, [t]);
 
     const handleAddOAuthLoginMethod = useCallback((provider: "google" | "azure-ad") => {
         // Not a page navigation: the route answers with a 302 to the identity
@@ -1823,11 +1844,7 @@ export function AuthButton({
                                             <button
                                                 type="button"
                                                 onClick={() => {
-                                                    // Not a page navigation: the route answers with a
-                                                    // file download, so the browser saves the response
-                                                    // and this page stays mounted.
-                                                    // eslint-disable-next-line @next/next/no-location-assign-relative-destination
-                                                    window.location.href = "/api/conversations/export-all";
+                                                    void downloadAllConversations();
                                                 }}
                                                 disabled={accountUsage?.limits.allowDownloads === false}
                                                 title={accountUsage?.limits.allowDownloads === false ? t("modelStatusReasons.upgradeRequired") : ""}

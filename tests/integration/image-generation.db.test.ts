@@ -301,6 +301,57 @@ test("stale generation audit uses the stale window, not mere age", async () => {
   assert.ok(generation.id);
 });
 
+test("a reservation whose generation is gone is orphaned, with what it holds", async () => {
+  const user = await createUser();
+  const conversation = await createImageConversation(user.id);
+  const generation = await createGeneration(user.id, conversation.id);
+  await createReservation(user.id, conversation.id, generation.id);
+
+  // While the generation row exists the stale sweep can still reach this
+  // reservation, so it is not yet the state being counted.
+  let result = await auditImageGenerationInvariants();
+  assert.equal(result.orphanedReservations, 0);
+  assert.equal(result.orphanedReservationCostMicroUsd, 0);
+
+  // Deleting the conversation cascades the generation away. The reservation
+  // survives by design -- it has no foreign key to anything it describes --
+  // and that is exactly why nothing could see its hold on the provider budget
+  // before this count.
+  await prisma.conversation.delete({ where: { id: conversation.id } });
+
+  result = await auditImageGenerationInvariants();
+  assert.equal(result.orphanedReservations, 1);
+  assert.equal(result.orphanedReservationCostMicroUsd, 11_000);
+  // None of the older counts sees it: every one of them reads a row the
+  // cascade just removed.
+  assert.equal(result.staleGenerations, 0);
+  assert.equal(result.emptyImageConversations, 0);
+});
+
+test("a settled reservation is not orphaned when its generation is gone", async () => {
+  const user = await createUser();
+  const conversation = await createImageConversation(user.id);
+  const generation = await createGeneration(user.id, conversation.id);
+  await createReservation(user.id, conversation.id, generation.id);
+  await prisma.imageCreditReservation.update({
+    where: { generationId: generation.id },
+    data: {
+      status: "settled",
+      settledCredits: 15,
+      settledCostMicroUsd: BigInt(9_000),
+      settledAt: new Date(),
+    },
+  });
+
+  await prisma.conversation.delete({ where: { id: conversation.id } });
+
+  // Its money is already accounted for, so the missing generation is
+  // retention doing its job rather than a reservation nobody can resolve.
+  const result = await auditImageGenerationInvariants();
+  assert.equal(result.orphanedReservations, 0);
+  assert.equal(result.orphanedReservationCostMicroUsd, 0);
+});
+
 /* ------------------------------------------------------------------------- */
 /* Billing path: reservation, empty-work invariant, idempotency, refund.     */
 /* ------------------------------------------------------------------------- */

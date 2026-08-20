@@ -30,6 +30,7 @@ import {
     type LineageGroup,
 } from "@/lib/externalConversationLineage";
 import { discardResponseBody } from "@/lib/discardResponseBody";
+import { saveResponseAsFile } from "@/lib/browserDownload";
 
 /**
  * /settings/imports — the management screen.
@@ -157,6 +158,30 @@ export function ExternalImportManagement() {
     const [expandedLineages, setExpandedLineages] = useState<
         ReadonlySet<string>
     >(new Set());
+    const [exportFailed, setExportFailed] = useState(false);
+
+    // Fetched and saved from here rather than navigated to: a navigation gave
+    // the browser the whole outcome, and a refusal became a JSON error page
+    // this screen was replaced by. See lib/browserDownload.ts.
+    const downloadExport = useCallback(async () => {
+        setExportFailed(false);
+        try {
+            const response = await fetch("/api/imports/external/export", {
+                cache: "no-store",
+            });
+            if (!response.ok) {
+                await discardResponseBody(response);
+                setExportFailed(true);
+                return;
+            }
+            await saveResponseAsFile(
+                response,
+                "tomverse-external-conversations.json"
+            );
+        } catch {
+            setExportFailed(true);
+        }
+    }, []);
 
     const loadCapacity = useCallback(async () => {
         try {
@@ -491,12 +516,7 @@ export function ExternalImportManagement() {
                                 <button
                                     type="button"
                                     onClick={() => {
-                                        // Not a page navigation: the route answers
-                                        // with a file download, so the browser saves
-                                        // the response and this page stays mounted.
-                                        // eslint-disable-next-line @next/next/no-location-assign-relative-destination
-                                        window.location.href =
-                                            "/api/imports/external/export";
+                                        void downloadExport();
                                     }}
                                     className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-zinc-700 hover:bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:bg-zinc-800"
                                     data-testid="external-import-export"
@@ -506,6 +526,14 @@ export function ExternalImportManagement() {
                                 </button>
                             )}
                     </div>
+                    {exportFailed && (
+                        <p
+                            className="mt-3 text-sm leading-6 text-red-600 dark:text-red-400"
+                            data-testid="external-import-export-error"
+                        >
+                            {t("externalImport.exportFailed")}
+                        </p>
+                    )}
                     {conversationsState.kind === "loading" && (
                         <div className="mt-3 flex items-center gap-2 text-sm text-zinc-500">
                             <Loader2 className="h-4 w-4 animate-spin" />
