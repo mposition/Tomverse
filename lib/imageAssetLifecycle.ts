@@ -265,6 +265,30 @@ export type ImageInvariantAuditResult = {
    * has refused the same bytes every time.
    */
   thumbnailsExhausted: number;
+  /**
+   * Reservations that can never be resolved: not settled, and the generation
+   * they name is gone. Every path that could advance one -- finalizeFailure,
+   * the stale sweep -- reads the generation first, so a missing row is
+   * terminal rather than slow. No stale window is involved for the same
+   * reason.
+   *
+   * Counted because nothing else could see them. The reservation deliberately
+   * has no foreign key to anything it describes, so that a financial record
+   * survives the deletion of the conversation, the generation and the assets.
+   * The five counts above read generations, conversations, assets and cleanup
+   * rows -- so the cascade that removes the generation also removes the only
+   * row that made an unreleased reservation visible. Found on 2026-08-19 with
+   * two rows from 2026-08-03 holding 116,000 microUSD of an image provider's
+   * budget, unseen for sixteen days.
+   */
+  orphanedReservations: number;
+  /**
+   * What those reservations are still holding in their provider budget
+   * bucket: reserved minus settled, which for a row that never settled is the
+   * whole reservation. The count says how many; this says how much, and only
+   * the second one tells an operator whether to act.
+   */
+  orphanedReservationCostMicroUsd: number;
 };
 
 /**
@@ -285,6 +309,7 @@ export const auditImageGenerationInvariants = async (
     cleanupBacklog,
     thumbnailBacklog,
     thumbnailsExhausted,
+    orphaned,
   ] = await Promise.all([
     prisma.conversation.count({
       where: { kind: "image", imageGenerations: { none: {} } },
@@ -322,6 +347,21 @@ export const auditImageGenerationInvariants = async (
         thumbnailRetryCount: { gte: IMAGE_THUMBNAIL_MAX_RETRIES },
       },
     }),
+    // Raw, because the reservation has no relation to the generation to join
+    // through -- that missing relation is the whole subject of this count.
+    prisma.$queryRaw<{ count: bigint; costMicroUsd: bigint }[]>`
+      SELECT
+        count(*)::bigint AS "count",
+        COALESCE(
+          sum(r."reservedCostMicroUsd" - r."settledCostMicroUsd"),
+          0
+        )::bigint AS "costMicroUsd"
+      FROM "ImageCreditReservation" r
+      WHERE r."status" <> 'settled'
+        AND NOT EXISTS (
+          SELECT 1 FROM "ImageGeneration" g WHERE g."id" = r."generationId"
+        )
+    `,
   ]);
 
   if (emptyImageConversations > 0) {
@@ -337,6 +377,12 @@ export const auditImageGenerationInvariants = async (
     });
   }
 
+  // orphanedReservations raises no incident on purpose. Nothing clears one --
+  // no refund path exists, and building one is a separate decision, since
+  // finalizeFailure keeps the provider charge precisely because the provider
+  // may already have billed. An alert that can never go green is noise by the
+  // second firing, so this stays a number an operator reads.
+
   return {
     emptyImageConversations,
     staleGenerations,
@@ -344,6 +390,8 @@ export const auditImageGenerationInvariants = async (
     cleanupBacklog,
     thumbnailBacklog,
     thumbnailsExhausted,
+    orphanedReservations: Number(orphaned[0]?.count ?? 0),
+    orphanedReservationCostMicroUsd: Number(orphaned[0]?.costMicroUsd ?? 0),
   };
 };
 
@@ -401,6 +449,8 @@ export const runImageAssetMaintenanceQuietly = async (
         cleanupBacklog: 0,
         thumbnailBacklog: 0,
         thumbnailsExhausted: 0,
+        orphanedReservations: 0,
+        orphanedReservationCostMicroUsd: 0,
       },
       staleRecovery: { examined: 0, refunded: 0, settlementStranded: 0 },
     };

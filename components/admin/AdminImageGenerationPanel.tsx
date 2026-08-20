@@ -98,6 +98,8 @@ type AdminImageGenerationReport = {
     cleanupBacklog: number;
     thumbnailBacklog: number;
     thumbnailsExhausted: number;
+    orphanedReservations: number;
+    orphanedReservationCostMicroUsd: number;
   };
 };
 
@@ -161,11 +163,15 @@ export function AdminImageGenerationPanel() {
 
   // A queued thumbnail is not an issue -- the sweep is going to take it, and
   // the card renders the original meanwhile. One that ran out of retries is:
-  // nothing will try again, so it stays that way until someone looks.
+  // nothing will try again, so it stays that way until someone looks. An
+  // orphaned reservation counts for the same reason and more strongly: its
+  // generation is gone, so no code path can ever advance it, and it holds
+  // provider budget until someone decides what to do about it.
   const invariantIssues = report
     ? report.invariants.emptyImageConversations +
       report.invariants.staleGenerations +
-      report.invariants.thumbnailsExhausted
+      report.invariants.thumbnailsExhausted +
+      report.invariants.orphanedReservations
     : 0;
 
   return (
@@ -255,7 +261,7 @@ export function AdminImageGenerationPanel() {
             <Stat
               label="Invariants"
               value={invariantIssues === 0 ? "clean" : `${invariantIssues} issue(s)`}
-              detail={`${report.invariants.emptyImageConversations} empty conversations · ${report.invariants.staleGenerations} stale (${report.invariants.strandedSettlements} stranded mid-settlement) · ${report.invariants.cleanupBacklog} cleanup backlog · ${report.invariants.thumbnailBacklog} thumbnails queued (${report.invariants.thumbnailsExhausted} exhausted)`}
+              detail={`${report.invariants.emptyImageConversations} empty conversations · ${report.invariants.staleGenerations} stale (${report.invariants.strandedSettlements} stranded mid-settlement) · ${report.invariants.cleanupBacklog} cleanup backlog · ${report.invariants.thumbnailBacklog} thumbnails queued (${report.invariants.thumbnailsExhausted} exhausted) · ${report.invariants.orphanedReservations} orphaned reservations holding ${usd(report.invariants.orphanedReservationCostMicroUsd)}`}
             />
           </div>
 
