@@ -40,6 +40,7 @@ import {
   type MessageErrorReportContext,
 } from "@/lib/errorReportContract";
 import { discardResponseBody } from "@/lib/discardResponseBody";
+import type { ChatContentState } from "@/lib/chatContentState";
 
 const processedPromptKeys = new Set<string>();
 const CHAT_STREAM_IDLE_TIMEOUT_MS = 90_000;
@@ -113,7 +114,15 @@ type ChatAppProps = {
   webSearchMode?: WebSearchMode;
   hideModelOnlyInput?: boolean;
   useCenteredWelcome?: boolean;
-  onEmptyStateChange?: (modelId: string, isEmpty: boolean) => void;
+  /**
+   * Reports what this panel knows about its own transcript. Three states, not
+   * a boolean: "unknown" is what the panel is between mounting and finishing
+   * the restore for its current view, and it is the state the shells used to
+   * have no way to receive -- so they guessed "empty" and painted the welcome
+   * screen over conversations that were still loading. See
+   * lib/chatContentState.ts.
+   */
+  onContentStateChange?: (modelId: string, state: ChatContentState) => void;
   onStatusChange?: (
     modelId: string,
     status: "idle" | "loading" | "responding" | "error" | "cancelled" | "paused"
@@ -154,7 +163,7 @@ function ChatAppComponent({
   webSearchMode,
   hideModelOnlyInput = false,
   useCenteredWelcome = false,
-  onEmptyStateChange,
+  onContentStateChange,
   onStatusChange,
   onResponseComplete,
   onFollowupSent,
@@ -287,10 +296,22 @@ function ChatAppComponent({
     messages.length === 0 ||
     (messages.length === 1 && messages[0]?.id === WELCOME_MESSAGE_ID);
 
+  // Reported in a layout effect so the shell has it before the browser paints
+  // the commit that produced it. "unknown" is reported explicitly rather than
+  // by staying silent: a view that goes back to loading (a different
+  // conversation, a different model) has to retract what it said about the
+  // previous one, and a missing report is exactly what the shells used to fill
+  // in with a guess.
   useLayoutEffect(() => {
-    if (!isCurrentMessageViewLoaded) return;
-    onEmptyStateChange?.(modelId, isConversationEmpty);
-  }, [isCurrentMessageViewLoaded, isConversationEmpty, modelId, onEmptyStateChange]);
+    onContentStateChange?.(
+      modelId,
+      !isCurrentMessageViewLoaded
+        ? "unknown"
+        : isConversationEmpty
+          ? "empty"
+          : "non-empty"
+    );
+  }, [isCurrentMessageViewLoaded, isConversationEmpty, modelId, onContentStateChange]);
 
   const setAssistantMessage = useCallback((
     id: string,
@@ -1346,7 +1367,11 @@ function ChatAppComponent({
               <div className="flex flex-1 min-h-0 flex-col overflow-hidden">
                   <div className="min-h-0 flex-1 overflow-hidden">
       {!isCurrentMessageViewLoaded ? (
-        <div className="flex h-full items-center justify-center text-xs text-zinc-500">
+        <div
+          data-testid="chat-panel-loading"
+          aria-busy="true"
+          className="flex h-full items-center justify-center text-xs text-zinc-500"
+        >
           {t("auth.loading")}
         </div>
       ) : useCenteredWelcome && isConversationEmpty ? null : <ChatMessageList

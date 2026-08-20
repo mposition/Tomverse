@@ -564,6 +564,15 @@ export function ChatPageClient({
         "guest-preview"
   );
   const [showGuestSignInPrompt, setShowGuestSignInPrompt] = useState(false);
+  /**
+   * A send that has been started but not yet handed to the panels, and the
+   * conversation it started from. Read only by the shells' content-state
+   * derivation; it changes nothing about credits, preflight, admission,
+   * concurrency or message storage.
+   */
+  const [pendingSubmission, setPendingSubmission] = useState<{
+    originConversationId: string | null;
+  } | null>(null);
   const [promptPayload, setPromptPayload] = useState<{
     id: string;
     text: string;
@@ -3063,10 +3072,25 @@ export function ChatPageClient({
   }) => {
     if (submitInFlightRef.current) return;
     submitInFlightRef.current = true;
+    // Which conversation this send started from, published for the shells.
+    // A first send on a brand-new chat creates a conversation and the shell
+    // adopts its id mid-flight, so between those two moments the panels'
+    // reports are all filed under the id the send started from. Without
+    // knowing that, the shell reads the new id as "nothing reported", and a
+    // panel that then loads the still-empty new conversation reports it empty
+    // -- which used to send the user back to the welcome screen they had just
+    // left. See lib/chatContentState.ts.
+    setPendingSubmission({ originConversationId: currentChatIdRef.current });
     try {
       await runGlobalSubmit(options);
     } finally {
       submitInFlightRef.current = false;
+      // Cleared in the same commit as the promptPayload a successful send
+      // sets, so there is no frame between "no longer pending" and "accepted".
+      // A refused send clears it with no payload, and the conversation goes
+      // back to being described by its own panels -- which is correct: it
+      // really is still empty.
+      setPendingSubmission(null);
     }
   };
 
@@ -4528,6 +4552,8 @@ export function ChatPageClient({
           guestMessageCount={guestMessageCount}
           maxGuestMessages={MAX_GUEST_MESSAGES}
           isModelSelectionReady={isModelSelectionReady}
+          isConversationSelectionResolved={isInitialConversationResolved}
+          pendingSubmission={pendingSubmission}
           onNewChat={handleNewChat}
           onNewImage={canOfferNewImage ? handleNewImage : null}
           imageLock={imageLock}
@@ -4604,6 +4630,8 @@ export function ChatPageClient({
           guestMessageCount={guestMessageCount}
           maxGuestMessages={MAX_GUEST_MESSAGES}
           isModelSelectionReady={isModelSelectionReady}
+          isConversationSelectionResolved={isInitialConversationResolved}
+          pendingSubmission={pendingSubmission}
           onNewChat={handleNewChat}
           onNewImage={canOfferNewImage ? handleNewImage : null}
           imageLock={imageLock}
