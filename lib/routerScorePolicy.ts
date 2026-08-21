@@ -58,8 +58,15 @@ import type { TaskKind, TaskProfile } from "@/lib/taskProfileCore";
  * of models below. Recorded on `RoutingRun.selectionPolicyVersion` beside the
  * component versions, because a decision whose policy is not recorded cannot
  * be attributed to one afterwards.
+ *
+ * v2: the measured signals are wired to real data, `health_degraded` joins the
+ * tie-break, and the observation thresholds those two need arrive with them.
+ * Under v1 criteria 3 and 4 abstained on every turn because nothing supplied
+ * them, so a v1 decision and a v2 decision on identical candidates can differ
+ * -- which is the whole reason the version moves rather than the numbers being
+ * edited in place.
  */
-export const ROUTER_SCORE_POLICY_VERSION = "router-score-policy-v1";
+export const ROUTER_SCORE_POLICY_VERSION = "router-score-policy-v2";
 
 /**
  * Quality, in three levels.
@@ -216,10 +223,20 @@ export const isRouterScoreSnapshotModel = (modelId: string) =>
  * order.
  *
  *   quality_band         curated-and-evidenced quality, above.
+ *   health_degraded      the health path reports this model misbehaving.
  *   expected_total_cost  what this turn would cost on this model.
  *   recent_success_rate  how often it has answered lately.
  *   ttft_p95             how long it makes people wait.
  *   model_id             a stable, arbitrary, total order.
+ *
+ * `health_degraded` sits above cost deliberately. A degraded model is not
+ * refused -- refusal is `unavailable`, and that is a hard filter -- but "this
+ * model is currently misbehaving" is a stronger reason to pick the other one
+ * than "this model is cheaper". Only measured-or-evidenced quality outranks
+ * it. It is a set rather than a rate, and a model absent from the set counts
+ * as not degraded whether it is healthy or merely unprobed: uncertainty
+ * demotes nobody, the same rule that keeps unprobed models out of the hard
+ * filter.
  *
  * The last one is not a quality judgement and is not meant to be: what it
  * guarantees is that two runs over the same inputs produce the same answer,
@@ -228,6 +245,7 @@ export const isRouterScoreSnapshotModel = (modelId: string) =>
  */
 export const ROUTER_TIE_BREAK_ORDER = [
     "quality_band",
+    "health_degraded",
     "expected_total_cost",
     "recent_success_rate",
     "ttft_p95",
@@ -251,10 +269,26 @@ export type RouterTieBreakCriterion = (typeof ROUTER_TIE_BREAK_ORDER)[number];
 export type RouterTieBreakSignals = {
     /** Expected total cost of this turn, per model, in US dollars. */
     expectedTotalCostUsdByModelId?: Readonly<Record<string, number>>;
-    /** Recent success rate per model, as a fraction in [0, 1]. */
+    /**
+     * Recent success rate per model, as a fraction in [0, 1].
+     *
+     * From dispatch outcomes only -- see `lib/routerSignalCore.ts` for why a
+     * probe success rate is never mixed in, and why an under-sampled model has
+     * no entry rather than a provisional number.
+     */
     recentSuccessRateByModelId?: Readonly<Record<string, number>>;
     /** Observed time to first token per model, p95, in milliseconds. */
     ttftP95MsByModelId?: Readonly<Record<string, number>>;
+    /**
+     * Models the health path reports as degraded: still answering, not well.
+     *
+     * A set rather than a rate, and kept apart from the success rate above
+     * because the two are measured on different populations -- this is
+     * synthetic probe evidence about whether the provider answers at all, and
+     * that is real traffic. Absence means "not known to be degraded", which
+     * covers a healthy model and an unprobed one alike.
+     */
+    degradedModelIds?: readonly string[];
 };
 
 /**
@@ -272,6 +306,42 @@ export type RouterTieBreakSignals = {
 export const ROUTER_COST_TIE_EPSILON_RATIO = 0.05;
 export const ROUTER_SUCCESS_RATE_TIE_EPSILON = 0.01;
 export const ROUTER_TTFT_TIE_EPSILON_MS = 250;
+
+/**
+ * How much recent dispatch history the measured signals are computed over.
+ *
+ * One window for every model, because a rate over the last day compared
+ * against a rate over the last week is not a comparison. Widening it buys
+ * coverage on a quiet catalogue and pays for it in freshness, which is a
+ * policy decision rather than a tuning knob -- hence a version, not a default.
+ */
+export const ROUTER_SIGNAL_WINDOW_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * How many observations a model needs before its number is used at all.
+ *
+ * Below these the model has no entry and the criterion abstains. The success
+ * rate needs enough attempts for a difference larger than
+ * `ROUTER_SUCCESS_RATE_TIE_EPSILON` to mean something -- at ten attempts the
+ * smallest expressible difference is ten points, so the epsilon would be
+ * decorative. The p95 needs enough points that the ninety-fifth percentile is
+ * not simply the largest observation: at twenty it is exactly that, and at
+ * fifty there are two above it.
+ */
+export const ROUTER_SUCCESS_RATE_MIN_OBSERVATIONS = 30;
+export const ROUTER_TTFT_MIN_OBSERVATIONS = 50;
+
+/**
+ * How long a computed signal snapshot may be reused before it is read again.
+ *
+ * A bound on how stale a decision's inputs may be, which makes it a property
+ * of the decision rather than of the cache -- so it lives here, beside the
+ * numbers it bounds, and moves with them. The chat path cannot afford a query
+ * per turn (`ROUTE-02` bounds the whole routing decision at a p95 of 300ms),
+ * and a signal describing the last day does not change meaningfully in a
+ * minute.
+ */
+export const ROUTER_SIGNAL_SNAPSHOT_TTL_MS = 60_000;
 
 /**
  * How much better a challenger must look before Auto changes model mid

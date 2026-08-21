@@ -353,3 +353,50 @@ test("the ranking still holds the sticky winner, so the caller must remove it", 
     assert.equal(sticky.selectedModelId, other.modelId);
     assert.ok(sticky.rankedModelIds.includes(other.modelId));
 });
+
+// A degraded model is still a candidate -- refusal is a hard filter and this
+// is not one -- but it loses to a model nothing is reporting problems with,
+// and it loses before price is asked about.
+
+test("a degraded model loses to a healthy one, even when it is cheaper", () => {
+    const result = selectRouterModel({
+        profile: plainTurn,
+        eligible: candidates("model-a", "model-b"),
+        signals: {
+            degradedModelIds: ["model-a"],
+            expectedTotalCostUsdByModelId: { "model-a": 0.01, "model-b": 5 },
+        },
+    });
+    assert.equal(result.selectedModelId, "model-b");
+    assert.equal(result.decidedBy, "health_degraded");
+});
+
+test("degradation does not decide when both sides carry it", () => {
+    const result = selectRouterModel({
+        profile: plainTurn,
+        eligible: candidates("model-a", "model-b"),
+        signals: {
+            degradedModelIds: ["model-a", "model-b"],
+            expectedTotalCostUsdByModelId: { "model-a": 5, "model-b": 0.5 },
+        },
+    });
+    assert.equal(result.selectedModelId, "model-b");
+    assert.equal(result.decidedBy, "expected_total_cost");
+});
+
+test("a model nothing has probed is not demoted for being unprobed", () => {
+    // Absence from the set is "not known to be degraded", which covers a
+    // healthy model and an unprobed one alike. Uncertainty demotes nobody --
+    // the same rule that keeps unprobed models out of the hard filter.
+    const result = selectRouterModel({
+        profile: plainTurn,
+        eligible: candidates("model-a", "model-b"),
+        signals: {
+            degradedModelIds: [],
+            expectedTotalCostUsdByModelId: { "model-a": 5, "model-b": 0.5 },
+        },
+    });
+    assert.equal(result.decidedBy, "expected_total_cost");
+    assert.equal(result.selectedModelId, "model-b");
+});
+

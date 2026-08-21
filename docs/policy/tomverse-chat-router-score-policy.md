@@ -97,20 +97,54 @@ Applied in order, most decisive first:
    key: letting an interval outrank a band would make the comparison
    non-transitive on a partly-measured snapshot, and the sort result would then
    depend on the order the filters happened to emit.
-2. **expected total cost** — what this turn would cost on this model, from the
+2. **health degraded** — the health path reports this model misbehaving. Not a
+   refusal: refusal is `unavailable`, and that is a hard filter. It sits above
+   cost because "this model is currently misbehaving" is a stronger reason to
+   pick the other one than "this model is cheaper". A set rather than a rate,
+   and absence from it means "not known to be degraded" — a healthy model and
+   an unprobed one alike.
+3. **expected total cost** — what this turn would cost on this model, from the
    pricing registry (`lib/routerCostSignal.ts`): the same input and output
    token counts for every candidate, each model's own price. A comparison, not
    a forecast; nothing bills from it.
-3. **recent success rate** — from the per-model health rollup.
-4. **time to first token, p95** — from output-token telemetry.
-5. **stable model id** — arbitrary, and deliberately so. What it buys is that
+4. **recent success rate** — from real dispatch outcomes (`RoutingAttempt`),
+   through `lib/routerSignalCore.ts`.
+5. **time to first token, p95** — from the same dispatch rows, measured from
+   `dispatchedAt` to `firstVisibleTokenAt`.
+6. **stable model id** — arbitrary, and deliberately so. What it buys is that
    two runs over the same inputs answer the same way.
 
-Criteria 3 and 4 are supplied by the caller, exactly as `unhealthyModelIds`
-already is: where a number comes from is the caller's business, and what it
-means is this policy's. That is also what keeps `selectRouterModel` pure —
+Criteria 2, 4 and 5 are supplied by the caller, exactly as `unhealthyModelIds`
+is: where a number comes from is the caller's business, and what it means is
+this policy's. That is also what keeps `selectRouterModel` pure —
 `tests/routerScorePolicy.test.mjs` walks its import graph and fails on anything
 that touches a database, the filesystem or the network.
+`lib/routerRuntimeSignals.ts` is the caller-side reader that supplies them, on
+a snapshot refreshed at most once per `ROUTER_SIGNAL_SNAPSHOT_TTL_MS`.
+
+### Two populations, never one number
+
+Probes and dispatches both look like they measure success, and they are not the
+same measurement. A probe is a synthetic request the scheduler makes to find
+out whether a provider answers at all; a dispatch is a person waiting for a
+reply. Ranking one model's probe rate against another's dispatch rate would
+compare two different questions and report the answer as a preference.
+
+So the split is by what the number decides:
+
+| Source | Decides | Where |
+|---|---|---|
+| `ProviderProbeResult` | whether a model is a candidate (`unavailable`), and whether it is degraded | hard filter, and criterion 2 |
+| `RoutingAttempt` | the order of the candidates that survive | criteria 4 and 5 |
+
+Neither is ever folded into the other, and a model with too few observations on
+either gets no entry rather than a provisional number. Under-sampled means the
+criterion abstains and the next one decides.
+
+The counted outcomes are fixed so that a rate means one thing across models:
+`succeeded`, `failed_pre_token` and `failed_post_token`. `not_dispatched` never
+reached a provider, `cancelled` is the person changing their mind, `pending` has
+not ended, and `unknown_after_dispatch` is a crash that is evidence neither way.
 
 A signal missing for either side means *unknown*. The criterion abstains and
 the next one decides. Treating an absent success rate as a perfect one would
@@ -123,6 +157,16 @@ Two values within these thresholds are the same value:
 | `ROUTER_COST_TIE_EPSILON_RATIO` | 0.05, relative |
 | `ROUTER_SUCCESS_RATE_TIE_EPSILON` | 0.01 |
 | `ROUTER_TTFT_TIE_EPSILON_MS` | 250 |
+| `ROUTER_SIGNAL_WINDOW_MS` | 24 hours |
+| `ROUTER_SUCCESS_RATE_MIN_OBSERVATIONS` | 30 |
+| `ROUTER_TTFT_MIN_OBSERVATIONS` | 50 |
+| `ROUTER_SIGNAL_SNAPSHOT_TTL_MS` | 60 seconds |
+
+One window for every model, because a rate over the last day compared against a
+rate over the last week is not a comparison. The minimum counts are what stop a
+number being reported before it can carry the epsilon above it: at ten attempts
+the smallest expressible success-rate difference is ten points, and a p95 over
+twenty points is simply the largest of them.
 
 Without them the cost criterion decides every tie on the fourth decimal place
 of a price, and the Router reshuffles itself over a rounding difference while
@@ -198,15 +242,50 @@ would put the Router's cost and latency comparisons into chat copy.
 These are gaps in what is implemented, recorded here rather than left for a
 reader to discover.
 
-- **No measured evidence exists.** Every band is neutral, so §5's first
+- **No measured quality evidence exists.** Every band is neutral, so §5's first
   criterion currently separates nobody and cost decides the first turn of most
   conversations. Auto's disposition today is "the cheapest candidate that
   passed the filters", which is a defensible default and is not a quality
   claim.
-- **Criteria 3 and 4 are not wired on the chat path.** `lib/autoModelSelection.ts`
-  accepts them and passes them through; no caller supplies them yet, so they
-  abstain. Wiring `lib/modelHealthRollup.ts` and the output-token telemetry is
-  a separate change with its own freshness questions.
+- **The measured criteria are wired, and mostly have nothing to say yet.**
+  `lib/routerRuntimeSignals.ts` supplies them from a cached snapshot, and both
+  sources are thin:
+
+  - probes cover about ten of the thirty enabled models, because
+    `getProbeModelFor` probes one model per provider — the cheapest standard
+    one — and none of Perplexity's, whose every model is search-backed. A
+    probe result is never spread to a provider's other models: that would be
+    ranking one model on another's traffic.
+  - `RoutingAttempt` is written only when `ROUTING_DISPATCH_INSTRUMENTATION` is
+    `observe` or `enforce`, and it defaults to `off`. Until it is switched on,
+    the success-rate and TTFT maps are empty and criteria 4 and 5 abstain on
+    every turn.
+
+  Both are the designed behaviour rather than a defect — an absent observation
+  abstains — but neither should be described as a live signal until its source
+  is populated. Switching the instrumentation on is an operational decision
+  with its own volume and retention questions.
+
+- **The hard health filter admits confirmed failures only.** `unavailable`
+  excludes a model from Auto; `degraded` keeps it as a candidate and demotes it
+  at criterion 2; `unknown` excludes nobody. Excluding on `unknown` would take
+  the twenty unprobed models out of Auto for want of a probe, and uncertainty
+  is not a verdict. A verdict is honoured only while the probe behind it is
+  fresh (`PROBE_FRESHNESS_WINDOW_MS`), so a stale failure stops excluding
+  rather than excluding forever, and recovery uses
+  `evaluateProviderFailureHealth`'s existing trailing-success rule rather than
+  a second one.
+
+- **The Router's provider verdict is probe-derived, not the public status
+  page's.** That page merges real-traffic heartbeats and operator-declared
+  incidents, and reaching its verdict needs a bucket-derived `internalStatus`
+  this path does not compute. The blind spot has a name: a provider failing
+  real traffic while its probes pass is not excluded. It is not invisible —
+  that shows up as the model's own dispatch success rate, in the tie-break.
+
+- **A degraded model is not labelled for the user.** The demotion is internal.
+  Manual selection of a degraded model stays possible and says nothing about
+  its state, which is a UI question this policy does not answer.
 - **Passing the web-search filter is not proof of a search path, and the
   remaining half is a product decision.** The filter in
   `lib/routerCandidates.ts` checks the *declared* capability — the register
