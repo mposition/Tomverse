@@ -157,7 +157,11 @@ export type EmailLoginRequestResult =
    * someone in front of "check your email" is the worse outcome: nothing is
    * coming, and the screen has told them to wait for it.
    */
-  | { ok: true; delivered: false; reason: "send_failed" | "credential_expired" };
+  | {
+      ok: true;
+      delivered: false;
+      reason: "send_failed" | "credential_expired" | "suppressed";
+    };
 
 export async function requestEmailLoginCode(
   request: Request,
@@ -291,7 +295,9 @@ export async function requestEmailLoginCode(
     error:
       result.reason === "credential_expired"
         ? "The login code expired before it could be sent"
-        : `Login code send failed: ${result.errorKind}`,
+        : result.reason === "suppressed"
+          ? `Login code withheld: the address is suppressed (${result.skipReason})`
+          : `Login code send failed: ${result.errorKind}`,
     severity: "warning",
     context: { component: "email-login", deliveryId },
   });

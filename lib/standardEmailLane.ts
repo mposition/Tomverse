@@ -17,6 +17,10 @@ import {
 } from "@/lib/emailTemplateDefinitions";
 import { ensureBootstrapPolicyVersion, ensureTemplateVersion } from "@/lib/emailTemplateRegistry";
 import {
+  reportProviderSuppression,
+  suppressionCheck,
+} from "@/lib/emailSuppression";
+import {
   EMAIL_AUDIT_HASH_KEY_VERSION,
   renderedBodyHash,
 } from "@/lib/emailAuditHash";
@@ -201,6 +205,7 @@ export type StandardDrainResult = {
   sent: number;
   failed: number;
   abandoned: number;
+  suppressed: number;
   pending: number;
 };
 
@@ -304,6 +309,17 @@ const recordOutcome = async (
     }
     const suppressed =
       context.status !== null && SUPPRESSION_REFUSAL_STATUSES.has(context.status);
+    if (suppressed) {
+      // Our gate said yes and the provider said no. That gap is specific and
+      // worth naming: Resend suppression is account-wide across a region, so a
+      // marketing complaint can refuse a login code no matter what our list
+      // says (§5.3.1).
+      await reportProviderSuppression({
+        emailAddress: delivery.emailAddress,
+        classification: context.classification,
+        deliveryId: delivery.id,
+      });
+    }
     await prisma.emailDelivery.update({
       where: { id: delivery.id },
       data: {
@@ -360,6 +376,45 @@ const recordOutcome = async (
  */
 const sendClaimedDelivery = async (delivery: ClaimedDelivery, now: Date) => {
   const definition = emailTemplateDefinition(delivery.templateVersion.template.key);
+
+  // Checked at send time, not at enqueue: a message queued yesterday may be for
+  // an address that complained this morning, and the decision that matters is
+  // the one true when it goes out.
+  const verdict = await suppressionCheck({
+    emailAddress: delivery.emailAddress,
+    classification: definition.classification,
+    purpose: definition.purpose,
+    now,
+  });
+  if (!verdict.allowed) {
+    await prisma.emailDelivery.update({
+      where: { id: delivery.id },
+      data: {
+        status: "suppressed",
+        skipReason: verdict.skipReason,
+        attempts: delivery.attempts,
+        nextAttemptAt: null,
+        claimedAt: null,
+      },
+    });
+    return "suppressed" as const;
+  }
+  if (verdict.raiseIncident === "transactional_complaint") {
+    await reportOperationalIncident({
+      code: "EMAIL_TRANSACTIONAL_COMPLAINT_SEND",
+      title: "Sending to an address that reported transactional mail as spam",
+      error:
+        "The message is going out anyway -- withholding it would lock the " +
+        "account holder out -- but the complaint needs a person to look at it.",
+      severity: "warning",
+      cooldownMs: 60 * 60 * 1_000,
+      context: {
+        component: "standard-email-lane",
+        classification: definition.classification,
+      },
+    });
+  }
+
   const payload = decryptSnapshot(delivery.renderDataSnapshot, snapshotKeyring());
   const rendered = definition.render(payload, delivery.language);
   const attempts = delivery.attempts + 1;
@@ -408,6 +463,7 @@ export async function drainStandardEmailDeliveries(options?: {
     sent: 0,
     failed: 0,
     abandoned: 0,
+    suppressed: 0,
     pending: 0,
   };
 
@@ -422,6 +478,7 @@ export async function drainStandardEmailDeliveries(options?: {
       if (outcome === "sent") result.sent += 1;
       else if (outcome === "failed") result.failed += 1;
       else if (outcome === "abandoned") result.abandoned += 1;
+      else if (outcome === "suppressed") result.suppressed += 1;
     } catch (error) {
       // A render or decrypt failure, not a provider failure. Retrying it will
       // not help -- the snapshot is what it is -- so the row stops here rather

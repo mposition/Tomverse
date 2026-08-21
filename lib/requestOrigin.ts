@@ -1,11 +1,19 @@
 import { isAllowedRequestHost } from "@/lib/originProtection";
 
 const SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
+// Server-to-server callers that cannot send an Origin header, and are
+// authenticated by something stronger than one: a provider signature, an OAuth
+// state parameter, or a shared maintenance secret. Anything added here has to
+// carry its own proof of origin -- this list is the only thing standing between
+// a path and being callable cross-site.
 const EXEMPT_MUTATION_PATHS = [
   "/api/auth/callback/",
   "/api/billing/webhook",
   "/api/internal/",
   "/api/security/csp-report",
+  // Resend delivery, bounce and complaint events, verified by their Svix
+  // signature in the route itself (lib/svixSignature.ts).
+  "/api/webhooks/",
 ];
 
 const parseOrigin = (value: string | null) => {

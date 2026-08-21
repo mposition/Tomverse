@@ -116,6 +116,15 @@ export function adminEnvironmentChecks(): AdminEnvCheck[] {
         "Receives website support form notifications. Falls back to ADMIN_ALERT_EMAIL or ADMIN_EMAILS.",
     },
     {
+      name: "RESEND_WEBHOOK_SECRET",
+      configured: isConfigured(process.env.RESEND_WEBHOOK_SECRET),
+      description:
+        "Svix signing secret for Resend delivery, bounce and complaint events. " +
+        "Without it the webhook answers 503 so events queue at the provider " +
+        "rather than being dropped -- but nothing reaches the suppression list " +
+        "until it is set, so bounced addresses keep being sent to.",
+    },
+    {
       name: "EMAIL_SNAPSHOT_KEYS",
       configured: isConfigured(process.env.EMAIL_SNAPSHOT_KEYS),
       description:

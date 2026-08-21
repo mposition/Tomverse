@@ -5,6 +5,7 @@ import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { deliverEmailOnce } from "@/lib/email";
 import { reportOperationalIncident } from "@/lib/operationalMonitoring";
+import { suppressionCheck } from "@/lib/emailSuppression";
 import { AUTH_LOGIN_CODE_TEMPLATE } from "@/lib/emailTemplateDefinitions";
 import {
   EMAIL_AUDIT_HASH_KEY_VERSION,
@@ -133,6 +134,11 @@ export async function createCredentialDeliveryRows(
 export type CredentialSendResult =
   | { sent: true; providerMessageId: string | null }
   | { sent: false; reason: "credential_expired" }
+  /**
+   * The address cannot receive mail at all -- a hard bounce, or an operator or
+   * data-subject decision. A spam complaint does not produce this: see §13.3.
+   */
+  | { sent: false; reason: "suppressed"; skipReason: string }
   | { sent: false; reason: "send_failed"; errorKind: string };
 
 /**
@@ -159,6 +165,28 @@ export async function sendCredentialEmailNow(input: {
   const sleep =
     input.sleep ??
     ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
+
+  // Checked once, before the first attempt. A hard bounce means the mailbox
+  // does not exist, so no amount of retrying inside this request reaches it --
+  // and a complaint deliberately does *not* stop this lane, because refusing to
+  // send a login code to someone who reported a newsletter locks them out of
+  // the account they were trying to leave (§13.3).
+  const verdict = await suppressionCheck({
+    emailAddress: input.to,
+    classification: "transactional",
+    now: new Date(now()),
+  });
+  if (!verdict.allowed) {
+    await prisma.emailDelivery.update({
+      where: { id: input.deliveryId },
+      data: {
+        status: "suppressed",
+        skipReason: verdict.skipReason,
+        lastAttemptAt: new Date(now()),
+      },
+    });
+    return { sent: false, reason: "suppressed", skipReason: verdict.skipReason };
+  }
 
   const startedAt = now();
   const renderedHash = renderedBodyHash(input);

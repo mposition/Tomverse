@@ -86,3 +86,22 @@ test("machine-auth and webhook routes are exempt while user mutations are checke
   );
   assert.equal(requiresMutationOriginCheck("GET", "/api/user/settings"), false);
 });
+
+test("provider webhooks are exempt from the mutation-origin check", () => {
+  // Resend, like any server-to-server caller, sends no Origin header. Without
+  // the exemption every delivery, bounce and complaint event is rejected and
+  // the suppression list silently never fills -- which presents as bounced
+  // addresses being mailed forever.
+  assert.equal(
+    requiresMutationOriginCheck("POST", "/api/webhooks/email/resend"),
+    false
+  );
+
+  // Everything under the prefix is exempt, and everything under it has to
+  // carry its own proof of origin. This one is verified by its Svix signature.
+  assert.equal(requiresMutationOriginCheck("POST", "/api/webhooks/anything"), false);
+
+  // Nothing outside it gets in.
+  assert.equal(requiresMutationOriginCheck("POST", "/api/webhook"), true);
+  assert.equal(requiresMutationOriginCheck("POST", "/api/user/settings"), true);
+});

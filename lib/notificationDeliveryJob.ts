@@ -7,6 +7,7 @@ import {
 } from "@/lib/notificationDeliveries";
 import { sweepExpiredCredentialDeliveries } from "@/lib/credentialEmailLane";
 import { drainStandardEmailDeliveries } from "@/lib/standardEmailLane";
+import { purgeExpiredWebhookEvents } from "@/lib/emailWebhookProcessing";
 import { reportOperationalIncident } from "@/lib/operationalMonitoring";
 import {
   completeScheduledJob,
@@ -94,6 +95,30 @@ export async function runNotificationDeliveryDrain(options?: {
         JSON.stringify({
           event: "standard_email_drain_failed",
           reason: drainError instanceof Error ? drainError.name : "unknown",
+          at: new Date().toISOString(),
+        })
+      );
+    }
+
+    // Raw provider events past their ninety days go here too. They carry the
+    // recipient's address, so leaving them is not a tidiness problem -- it is a
+    // second copy of who we mail, accumulating where nothing manages it.
+    try {
+      const purged = await purgeExpiredWebhookEvents();
+      if (purged.purged > 0) {
+        console.info(
+          JSON.stringify({
+            event: "email_webhook_events_purged",
+            purged: purged.purged,
+            at: new Date().toISOString(),
+          })
+        );
+      }
+    } catch (purgeError) {
+      console.error(
+        JSON.stringify({
+          event: "email_webhook_purge_failed",
+          reason: purgeError instanceof Error ? purgeError.name : "unknown",
           at: new Date().toISOString(),
         })
       );
