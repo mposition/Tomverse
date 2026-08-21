@@ -300,9 +300,15 @@ test("each dependency alone sinks the verdict, and the others still report", asy
         assert.equal(response.headers.get("Retry-After"), "5");
 
         await runDeferred();
+        // Counted from the body rather than written down. A literal here has
+        // now been wrong three times -- at four dependencies, at five, and at
+        // six -- each time because a dependency was added to the route and to
+        // every other assertion in this file except this one. What the route
+        // actually couples is that each check it answers with is also a check
+        // it reports on, so that is what this asserts.
         assert.equal(
             reported.length,
-            5,
+            Object.keys(body.checks).length,
             "every dependency is reported, not only the failing one"
         );
     }

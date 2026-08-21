@@ -1092,7 +1092,15 @@ idempotencyKey = hash(eventId, recipientKey, templateVersionId, policyVersionId)
 | transactional (P0) | standard | 8 | 10s, 30s, 1m, 5m, 15m, 1h, 4h | incident + 앱 내 대체 경로 |
 | legal (P0) | standard | 10 | 위 + 12h, 24h | **incident(critical) + 수동 후속 + 대체 채널** |
 | service (P1) | standard | 6 | 현행과 동일 | incident |
-| marketing (P3) | standard | 2 | 5m, 1h | **조용히 포기.** 프로모션 재시도는 가치보다 위험이 큼 |
+| marketing (P3) | standard | 2 | 5m | **조용히 포기.** 프로모션 재시도는 가치보다 위험이 큼 |
+
+**"최대 시도"는 최초 발송을 포함한 총 횟수입니다.** 따라서 백오프 개수는 항상
+`최대 시도 − 1`입니다 — transactional 7개/8회, service 5개/6회, legal 9개/10회.
+marketing 행은 2026-08-21까지 `2`와 `5m, 1h`를 함께 적고 있어 이 규칙만 어겼고,
+구현은 백오프를 따라 3회를 시도하고 있었습니다. **상한 쪽을 남겼습니다** — 아래
+문단이 논증하는 숫자가 그것이고, 나머지 세 행과 계산 방식이 일치해야 합니다.
+`tests/standardEmailRetryCore.test.mjs`가 이 표 전체를 그대로 옮겨 적어 고정하며,
+`delays.length === maxAttempts - 1` 불변식도 함께 검사합니다.
 
 **marketing의 관대한 재시도가 중요합니다.** 실패한 프로모션을 끈질기게 재시도하면
 일시적 차단이 영구적 평판 손상이 됩니다.
