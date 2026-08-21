@@ -737,6 +737,29 @@ export async function mockAuthenticatedApi(
     route.fulfill(json({ models: [] }))
   );
 
+  /**
+   * Context preparation for a single-model send (policy section 10).
+   *
+   * Answered here because the real route reads the database, and this suite
+   * runs against a deliberately unreachable one -- so every authenticated send
+   * logged `chat_context_preparation_failed` and took the failure path of a
+   * step that is meant to be invisible.
+   *
+   * The shape is the one the route itself returns when there is nothing to
+   * bind: no memory allowed and no profile blocks. That is production today
+   * with memory injection off, so a spec that does not care about memory sees
+   * what its users see. A spec that does care overrides this route.
+   */
+  await page.route("**/api/chat/context", async (route) => {
+    if (route.request().method() !== "POST") {
+      await route.fallback();
+      return;
+    }
+    await route.fulfill(
+      json({ ok: true, contextBundle: null, memoryUsedCount: 0, reason: "flag_off" })
+    );
+  });
+
   await page.route("**/api/chat/preflight", async (route) => {
     if (route.request().method() !== "POST") {
       await route.fallback();
