@@ -145,8 +145,8 @@ Two caveats, and both are the point rather than footnotes.
   pending list, not on the count.
 - **The command reads `_prisma_migrations` and nothing else.** A ledger row
   says the migration ran, not that the constraint has the definition it was
-  supposed to produce. That still needs `pg_get_constraintdef()`, and it is
-  still on the list below.
+  supposed to produce. That needed `pg_get_constraintdef()` separately, and it
+  was read on 2026-08-15 — see below.
 
 The same output also reported roughly 79 migrations present in the database and
 absent from `prisma/migrations`. That is **not** drift caused by anything here:
@@ -157,6 +157,41 @@ original rows. `scripts/baseline-existing-database.mjs` exists for exactly this
 and runs ahead of every deploy. Recorded so the next reader does not treat a
 known, handled condition as a new incident.
 
+## Constraint definition, read back
+
+`pg_get_constraintdef()` against the **production** database, read by
+`@mposition` and reported 2026-08-15T11:20Z. Two rows:
+
+```
+ExternalImport_provider_check        CHECK ((provider = ANY (ARRAY['chatgpt'::text, 'claude'::text, 'gemini'::text])))
+ExternalConversation_provider_check  CHECK ((provider = ANY (ARRAY['chatgpt'::text, 'claude'::text, 'gemini'::text])))
+```
+
+**This is the fact the ledger could not give.** `prisma migrate status` says a
+migration ran; this says the constraint carries the definition that migration
+was written to produce. Between those two sits a migration that half-applied,
+or one applied against a schema that had drifted.
+
+With it, the defect the cherry-pick was for is closed by observation rather
+than inference: a Takeout export the browser parses can be written by the
+server, on the database production is actually using.
+
+Two limits, so the row is not read as more than it is.
+
+- **It is a point-in-time read.** Nothing stops a later migration narrowing the
+  set again; that is caught by
+  `tests/integration/external-import-provider-canon.db.test.ts` in CI, not by
+  this record.
+- **The time is when the result was relayed**, not necessarily when the query
+  ran. Same session, and the distinction changes no conclusion — recorded
+  rather than rounded away.
+
+**Written down late.** The reading was taken on 2026-08-15 and this section was
+committed on 2026-08-21, because the session that took it moved on before
+recording it. The gap is stated rather than hidden: a reading that sits
+unrecorded for six days is weaker evidence than one written the same hour, and
+the next person should weigh it as such.
+
 ## What is not verified
 
 - **The flag's value *before* the deploy.** `feature.externalConversationImportEnabled`
@@ -166,10 +201,9 @@ known, handled condition as a new incident.
   between, and the before value is inferred rather than observed. The
   conclusion the reading supports is "the feature is not open now", not "the
   deploy did not change it".
-- **The constraint in the production database.** The ledger read-back above
-  says the migration ran; it does not say the constraint has the definition it
-  was meant to produce. The only `pg_get_constraintdef()` performed was on an
-  empty database built from `main`'s history, not on the production instance.
+- ~~**The constraint in the production database.**~~ Read back on 2026-08-15;
+  see "Constraint definition, read back" above. Struck through rather than
+  deleted, so the record still shows what was open when it was written.
 - **Behavioural verification of anything.** As with `b0cf10e`, this build has
   had no chat turn, no settlement, no payment path and no image generation
   exercised against it. `/api/ready` was green before the deploy and after it.
@@ -185,7 +219,7 @@ ahead and a run against it measures a different build.
 - [ ] Deploy `391c9336d4d73110bd30f2ad3cb95ceae367eeb4` to staging or a scratch environment
 - [ ] Read `/api/build-info` back and confirm it names that SHA and its deployment ID
 - [x] Read `feature.externalConversationImportEnabled` back from production and record the value — `off`, 2026-08-15T08:05Z
-- [ ] Read `pg_get_constraintdef()` for `ExternalImport_provider_check` and `ExternalConversation_provider_check` from production, on a read-only role, and confirm both admit `chatgpt`, `claude` and `gemini`
+- [x] Read `pg_get_constraintdef()` for `ExternalImport_provider_check` and `ExternalConversation_provider_check` from production, and confirm both admit `chatgpt`, `claude` and `gemini` — both do, read 2026-08-15T11:20Z
 - [ ] Re-run `prisma migrate status` **from a worktree at `391c933` itself**, against production, and confirm it reports nothing pending
 - [ ] Exercise one turn per active provider and confirm usage settles
 - [ ] Exercise one Stripe path end to end (checkout or plan change) against test mode
