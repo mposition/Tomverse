@@ -263,8 +263,11 @@ test("a row whose conversation belongs to somebody else is refused", async () =>
 });
 
 test("a format with no generator is refused rather than served", async () => {
+  // A row can only carry a format the CHECK constraint allows, so this is a
+  // row written by a build that knew a format this one does not. Serving it
+  // would mean answering with a media type nothing here can name.
   resetWorld();
-  world.rows[0] = { ...world.rows[0], format: "docx" };
+  world.rows[0] = { ...world.rows[0], format: "psd" };
   const { GET } = await loadRoute();
   const response = await GET(request(), context());
 

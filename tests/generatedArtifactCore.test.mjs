@@ -3,7 +3,6 @@ import test from "node:test";
 
 import {
   ARTIFACT_LIMITS,
-  ARTIFACT_MEDIA_TYPES,
   admitWorkbookSpecSafely,
   artifactContentDisposition,
   artifactDownloadPath,
@@ -15,6 +14,7 @@ import {
   parseChatStreamArtifact,
   parseChatStreamArtifacts,
   PERSISTED_ARTIFACT_STATUSES,
+  requireArtifactFormat,
   sanitizeArtifactFilename,
   SUPPORTED_ARTIFACT_FORMATS,
 } from "../lib/generatedArtifactCore.ts";
@@ -247,15 +247,20 @@ test("a cell string over the character limit is refused", () => {
 /* -------------------------------------------------------------------------- */
 
 test("only formats with a generator behind them are supported", () => {
-  assert.deepEqual([...SUPPORTED_ARTIFACT_FORMATS], ["xlsx", "csv"]);
-  for (const format of ["docx", "pptx", "pdf", "json", "txt", "md"]) {
+  for (const format of ["xlsx", "csv", "docx", "pptx", "pdf", "json", "txt", "md", "zip"]) {
+    assert.equal(isSupportedArtifactFormat(format), true, format);
+  }
+  // A format nobody wrote a generator for stays out of the list, which is what
+  // keeps the database CHECK and the download route honest.
+  for (const format of ["exe", "psd", "mp4", "doc", "xls"]) {
     assert.equal(isSupportedArtifactFormat(format), false, format);
   }
+  assert.equal(SUPPORTED_ARTIFACT_FORMATS.length > 40, true);
 });
 
 test("the xlsx media type is the one Excel is registered against", () => {
   assert.equal(
-    ARTIFACT_MEDIA_TYPES.xlsx,
+    requireArtifactFormat("xlsx").mediaType,
     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
   );
 });
@@ -274,7 +279,7 @@ const validArtifact = {
   ordinal: 0,
   format: "xlsx",
   filename: "분기별_매출.xlsx",
-  mediaType: ARTIFACT_MEDIA_TYPES.xlsx,
+  mediaType: requireArtifactFormat("xlsx").mediaType,
   byteSize: 3053,
   status: "ready",
   modelId: "gpt-5-6-luna",
@@ -298,7 +303,7 @@ test("a malformed artifact is dropped rather than repaired", () => {
   // A card describing a file that does not exist is worse than no card.
   assert.equal(parseChatStreamArtifact(null), null);
   assert.equal(parseChatStreamArtifact({ ...validArtifact, id: "" }), null);
-  assert.equal(parseChatStreamArtifact({ ...validArtifact, format: "docx" }), null);
+  assert.equal(parseChatStreamArtifact({ ...validArtifact, format: "psd" }), null);
   assert.equal(parseChatStreamArtifact({ ...validArtifact, status: "queued" }), null);
   assert.equal(parseChatStreamArtifact({ ...validArtifact, filename: 5 }), null);
 });

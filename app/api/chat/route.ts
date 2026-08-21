@@ -62,8 +62,8 @@ import {
     ARTIFACT_TOOL_DEFINITION_TOKENS,
 } from "@/lib/generatedArtifactToolPolicy";
 import {
+    ALL_ARTIFACT_TOOL_NAMES,
     buildGeneratedArtifactToolConfig,
-    CREATE_SPREADSHEET_TOOL_NAME,
     GeneratedArtifactCollector,
     GENERATED_ARTIFACT_MAX_STEPS,
 } from "@/lib/generatedArtifactTool";
@@ -2566,7 +2566,7 @@ async function handleChatPost(
             toolConfig: artifactToolConfig
                 ? {
                       ...(webSearchToolConfig ?? {}),
-                      applicationTools: [CREATE_SPREADSHEET_TOOL_NAME],
+                      applicationTools: [...ALL_ARTIFACT_TOOL_NAMES],
                   }
                 : webSearchToolConfig,
             messages: manifestMessages,

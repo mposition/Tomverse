@@ -90,6 +90,50 @@ const inCard = (page: Page, testId: string) => card(page).getByTestId(testId);
 /* The card                                                                     */
 /* -------------------------------------------------------------------------- */
 
+/**
+ * Every format draws its own card.
+ *
+ * The card has no per-format branch in it -- it reads the format table for the
+ * label group and the icon. So this walks one format from each group, which is
+ * what would catch a group whose copy nobody translated or whose icon nobody
+ * chose.
+ */
+const CARDS_BY_FORMAT = [
+  { format: "xlsx", filename: "매출.xlsx", label: "Excel 통합 문서" },
+  { format: "docx", filename: "보고서.docx", label: "Word 문서" },
+  { format: "pdf", filename: "보고서.pdf", label: "PDF 문서" },
+  { format: "pptx", filename: "소개.pptx", label: "PowerPoint 프레젠테이션" },
+  { format: "md", filename: "README.md", label: "Markdown 문서" },
+  { format: "json", filename: "설정.json", label: "JSON 데이터 파일" },
+  { format: "html", filename: "index.html", label: "HTML 파일" },
+  { format: "py", filename: "main.py", label: "PY 소스 파일" },
+  { format: "zip", filename: "starter.zip", label: "ZIP 압축 파일" },
+];
+
+for (const { format, filename, label } of CARDS_BY_FORMAT) {
+  test(`a ${format} file draws a card that names what it is`, async ({
+    page,
+  }, testInfo) => {
+    await prepareGuestPage(page, "ko");
+    await mockChat(
+      page,
+      answerWith([{ ...ARTIFACT, format, filename, mediaType: "application/octet-stream" }])
+    );
+    await page.goto("/chat");
+
+    await sendChatMessage(page, testInfo, `${filename} 파일로 만들어줘`);
+
+    await expect(card(page)).toBeVisible();
+    await expect(card(page)).toHaveAttribute("data-artifact-format", format);
+    await expect(inCard(page, "generated-artifact-filename")).toHaveText(filename);
+    await expect(inCard(page, "generated-artifact-meta")).toContainText(label);
+    // Whatever the format, the answer body is a sentence and not the file.
+    await expect(page.getByTestId("chat-message-list").first()).not.toContainText(
+      "```"
+    );
+  });
+}
+
 test("a file request answers with a download card, not a table @ui-risk", async ({
   page,
 }, testInfo) => {

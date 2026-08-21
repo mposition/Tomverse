@@ -858,7 +858,11 @@ export function ChatMessageList({
                     {!isUser &&
                       isActivelyGenerating &&
                       msg.isGeneratingArtifact &&
-                      !msg.artifacts?.length && <GeneratedArtifactPending />}
+                      !msg.artifacts?.length && (
+                        <GeneratedArtifactPending
+                          format={msg.generatingArtifactFormat}
+                        />
+                      )}
                     {msg.searchMetadata && msg.searchMetadata.citations.length > 0 && (
                       <div
                         data-testid="search-citation-list"

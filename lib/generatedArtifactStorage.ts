@@ -26,8 +26,8 @@ import { randomUUID } from "node:crypto";
 import type { Prisma } from "@prisma/client";
 
 import {
-  ARTIFACT_FILE_EXTENSIONS,
   ARTIFACT_LIMITS,
+  requireArtifactFormat,
   type SupportedArtifactFormat,
 } from "@/lib/generatedArtifactCore";
 import { prisma } from "@/lib/prisma";
@@ -78,7 +78,7 @@ export const artifactObjectKey = (input: {
   format: SupportedArtifactFormat;
 }): string =>
   `${ARTIFACT_OBJECT_PREFIX}${input.userId}/${input.conversationId}/` +
-  `${input.artifactId}${ARTIFACT_FILE_EXTENSIONS[input.format]}`;
+  `${input.artifactId}${requireArtifactFormat(input.format).extension}`;
 
 /* ------------------------------------------------------------------------ */
 /* Writing                                                                    */

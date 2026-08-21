@@ -49,7 +49,7 @@ test("an unparseable payload is still removed, only its content is dropped", () 
 });
 
 test("a payload naming a format with no generator is refused", () => {
-  const raw = `${ARTIFACT_PROGRESS_MARKER}{"state":"generating","format":"docx"}x`;
+  const raw = `${ARTIFACT_PROGRESS_MARKER}{"state":"generating","format":"psd"}x`;
   const result = splitArtifactProgressSignal(raw);
   assert.equal(result.signal, null);
   assert.equal(result.text, "x");

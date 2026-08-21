@@ -72,6 +72,14 @@ export type Message = {
    * behind either.
    */
   isGeneratingArtifact?: boolean;
+  /**
+   * Which format is being generated, so the spinner can name it.
+   *
+   * Transient for the same reason the flag is, and separate from it because a
+   * signal whose payload did not parse still means "a file is being made" --
+   * the flag is the fact and this is the detail.
+   */
+  generatingArtifactFormat?: string;
 };
 
 export type Conversation = {

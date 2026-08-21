@@ -4,77 +4,67 @@
  * Policy: docs/policy/generated-artifacts.md.
  *
  * Deliberately pure -- no `server-only`, no Prisma, no R2, no `ai`. Three very
- * different callers read this file: the tool definition on the server, the
+ * different callers read this file: the tool definitions on the server, the
  * message card in the browser, and the unit tests. The limits and the
  * sanitisers are the part that must be identical in all three, so they live
  * where all three can import them and where a test can reach them without a
  * database.
  *
- * The one rule the whole domain rests on: **the model never produces bytes.**
- * It produces a specification, this file decides whether that specification is
- * admissible, and a trusted server-side generator turns an admissible one into
- * a file. A model that could emit base64 could emit anything.
+ * The one rule the whole domain rests on: **the model never produces bytes for
+ * a format that has structure.** For a spreadsheet, a document, a deck or an
+ * archive it produces a *specification*, this file decides whether that
+ * specification is admissible, and a trusted server-side generator turns an
+ * admissible one into a file.
+ *
+ * Source code, markup and config files are the deliberate exception, and the
+ * exception proves the rule: there is no specification for a Python module
+ * that is not simply its text. So for those the model does author the content
+ * -- and everything that made a specification safe is applied to the text
+ * instead: a bounded size, an extension this application chose, a structural
+ * check where malformed means useless, and a delivery path that downloads
+ * rather than renders.
  */
 
 import { z } from "zod";
 
-/* ------------------------------------------------------------------------ */
-/* Formats                                                                    */
-/* ------------------------------------------------------------------------ */
+import {
+  ARCHIVE_ENTRY_FORMATS,
+  ARTIFACT_FORMAT_TABLE,
+  formatIdsOfKind,
+  isSupportedArtifactFormat,
+  requireArtifactFormat,
+  type ArtifactKind,
+} from "@/lib/generatedArtifactFormats";
+
+export {
+  ARCHIVE_ENTRY_FORMATS,
+  ARTIFACT_FORMAT_TABLE,
+  ARTIFACT_KINDS,
+  ARTIFACT_LABEL_GROUPS,
+  REFUSED_ARTIFACT_EXTENSIONS,
+  SUPPORTED_ARTIFACT_FORMATS,
+  artifactFormat,
+  formatIdsOfKind,
+  formatsOfKind,
+  isRefusedArtifactExtension,
+  isSupportedArtifactFormat,
+  requireArtifactFormat,
+  type ArtifactFormatDescriptor,
+  type ArtifactKind,
+  type ArtifactLabelGroup,
+  type ArtifactTextValidation,
+} from "@/lib/generatedArtifactFormats";
 
 /**
- * Every format the artifact domain knows about, including the ones that are
- * not built.
+ * A format id that has passed `isSupportedArtifactFormat`.
  *
- * Listing the unsupported ones is the point. "This app cannot make a .docx
- * yet" is a true sentence the product can say; silence is how a model ends up
- * inventing a download link for a file nobody wrote. `SUPPORTED_ARTIFACT_FORMATS`
- * below is the subset a generator actually exists for, and it is the only list
- * anything is allowed to produce from.
+ * A plain string alias, and that is the honest type: the set of formats is a
+ * table that grows by a line of data, not a union the compiler can enumerate.
+ * The guarantee moved with it -- every entry point validates against the table
+ * at runtime, and `requireArtifactFormat` throws rather than returning
+ * `undefined` for anything that slipped past.
  */
-export const ARTIFACT_FORMATS = [
-  "xlsx",
-  "csv",
-  "json",
-  "txt",
-  "md",
-  "docx",
-  "pptx",
-  "pdf",
-] as const;
-
-export type ArtifactFormat = (typeof ARTIFACT_FORMATS)[number];
-
-/**
- * The formats that have a real generator behind them today.
- *
- * MVP ships the spreadsheet pair. `csv` is here because the same workbook
- * specification produces it for free -- **not** as a substitute: a request for
- * `.xlsx` is answered with `.xlsx` or refused, never quietly downgraded to
- * comma-separated text (policy section 4).
- */
-export const SUPPORTED_ARTIFACT_FORMATS = ["xlsx", "csv"] as const;
-
-export type SupportedArtifactFormat = (typeof SUPPORTED_ARTIFACT_FORMATS)[number];
-
-export const isSupportedArtifactFormat = (
-  value: string
-): value is SupportedArtifactFormat =>
-  (SUPPORTED_ARTIFACT_FORMATS as readonly string[]).includes(value);
-
-export const ARTIFACT_MEDIA_TYPES: Readonly<
-  Record<SupportedArtifactFormat, string>
-> = {
-  xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-  csv: "text/csv; charset=utf-8",
-};
-
-export const ARTIFACT_FILE_EXTENSIONS: Readonly<
-  Record<SupportedArtifactFormat, string>
-> = {
-  xlsx: ".xlsx",
-  csv: ".csv",
-};
+export type SupportedArtifactFormat = string;
 
 /* ------------------------------------------------------------------------ */
 /* Limits                                                                     */
@@ -83,13 +73,15 @@ export const ARTIFACT_FILE_EXTENSIONS: Readonly<
 /**
  * Explicit ceilings on everything the model controls.
  *
- * Each one bounds a different resource, so none of them is redundant:
- * `maxCells` bounds the work, `maxTextLength` bounds a single value, and
- * `maxOutputBytes` bounds the result after compression has had its say -- a
- * specification well inside the cell limit can still deflate to something no
- * download route should stream.
+ * Grouped by what they bound rather than by which tool reads them, because a
+ * ceiling exists to protect a resource: `maxCells` and `maxDocumentBlocks`
+ * bound the work, `maxTextLength` bounds a single value, `maxOutputBytes`
+ * bounds the result after compression has had its say -- a specification well
+ * inside every other limit can still deflate to something no download route
+ * should stream.
  */
 export const ARTIFACT_LIMITS = {
+  // Spreadsheets
   /** Worksheets in one workbook. */
   maxWorksheets: 10,
   /** Data rows in one worksheet, excluding the header. */
@@ -98,10 +90,40 @@ export const ARTIFACT_LIMITS = {
   maxColumnsPerSheet: 64,
   /** Cells across the whole workbook, header rows included. */
   maxCells: 100_000,
-  /** Characters in one cell value or one column header. */
-  maxTextLength: 8_000,
-  /** Characters in the optional per-sheet title row. */
-  maxTitleLength: 200,
+
+  // Documents
+  /** Blocks in one document. */
+  maxDocumentBlocks: 2_000,
+  /** Items in one list block. */
+  maxListItems: 200,
+  /** Rows in a document's table block, excluding the header. */
+  maxDocumentTableRows: 500,
+  /** Columns in a document's table block. */
+  maxDocumentTableColumns: 20,
+
+  // Presentations
+  /** Slides in one deck. */
+  maxSlides: 100,
+  /** Bullets on one slide. */
+  maxSlideBullets: 20,
+
+  // Text files
+  /** Characters in an authored text file. */
+  maxTextFileCharacters: 400_000,
+
+  // Archives
+  /** Entries in one archive. */
+  maxArchiveEntries: 100,
+  /** Characters across every entry of one archive, before compression. */
+  maxArchiveCharacters: 2_000_000,
+  /** Characters in one archive entry path. */
+  maxArchivePathLength: 200,
+
+  // Shared
+  /** Characters in one cell value, one column header or one document block. */
+  maxTextLength: 20_000,
+  /** Characters in a title or a heading. */
+  maxTitleLength: 300,
   /** Characters in the requested file name, extension included. */
   maxFilenameLength: 120,
   /** Bytes in the generated file. Checked after generation, not guessed. */
@@ -123,6 +145,10 @@ const RESERVED_WINDOWS_NAMES = new Set([
   ...Array.from({ length: 9 }, (_, index) => `lpt${index + 1}`),
 ]);
 
+const KNOWN_EXTENSIONS = new Set(
+  ARTIFACT_FORMAT_TABLE.map((format) => format.id)
+);
+
 /**
  * A model-supplied name, reduced to something that is only ever a file name.
  *
@@ -142,7 +168,7 @@ export const sanitizeArtifactFilename = (
   requested: string,
   format: SupportedArtifactFormat
 ): string => {
-  const extension = ARTIFACT_FILE_EXTENSIONS[format];
+  const extension = requireArtifactFormat(format).extension;
   let base = String(requested ?? "")
     // Everything after the last path separator, so a traversal attempt loses
     // its path rather than its meaning.
@@ -161,12 +187,10 @@ export const sanitizeArtifactFilename = (
   base = base.replace(/^\.+/, "").trim();
 
   // Drop a trailing extension the caller supplied -- ours is authoritative.
-  const lowered = base.toLowerCase();
-  for (const known of ARTIFACT_FORMATS) {
-    if (lowered.endsWith(`.${known}`)) {
-      base = base.slice(0, base.length - known.length - 1).trim();
-      break;
-    }
+  const lastDot = base.lastIndexOf(".");
+  if (lastDot > 0) {
+    const suffix = base.slice(lastDot + 1).toLowerCase();
+    if (KNOWN_EXTENSIONS.has(suffix)) base = base.slice(0, lastDot).trim();
   }
 
   if (RESERVED_WINDOWS_NAMES.has(base.toLowerCase())) base = `${base}-file`;
@@ -190,7 +214,7 @@ export const asciiArtifactFilename = (
   filename: string,
   format: SupportedArtifactFormat
 ): string => {
-  const extension = ARTIFACT_FILE_EXTENSIONS[format];
+  const extension = requireArtifactFormat(format).extension;
   const ascii = filename
     .replace(/[^\x20-\x7e]/g, "")
     .replace(/["\\]/g, "")
@@ -254,8 +278,15 @@ export const csvCell = (value: string): string => {
 };
 
 /* ------------------------------------------------------------------------ */
-/* Workbook specification                                                     */
+/* Shared schema pieces                                                       */
 /* ------------------------------------------------------------------------ */
+
+const formatEnum = (kind: ArtifactKind) => {
+  const ids = formatIdsOfKind(kind);
+  return z.enum(ids as [string, ...string[]]);
+};
+
+const filenameField = z.string().min(1).max(ARTIFACT_LIMITS.maxFilenameLength);
 
 /**
  * The cell value shapes a model may send.
@@ -274,6 +305,10 @@ const cellValueSchema = z.union([
 
 export type ArtifactCellValue = z.infer<typeof cellValueSchema>;
 
+/* ------------------------------------------------------------------------ */
+/* Workbook specification (xlsx, csv)                                         */
+/* ------------------------------------------------------------------------ */
+
 export const ARTIFACT_COLUMN_TYPES = ["text", "number", "date"] as const;
 export type ArtifactColumnType = (typeof ARTIFACT_COLUMN_TYPES)[number];
 
@@ -290,7 +325,7 @@ export const ARTIFACT_NUMBER_FORMATS = {
   integer: "#,##0",
   decimal: "#,##0.00",
   percent: "0.0%",
-  currency_krw: '\u20a9#,##0',
+  currency_krw: "\u20a9#,##0",
   currency_usd: '"$"#,##0.00',
   date: "yyyy-mm-dd",
   datetime: "yyyy-mm-dd hh:mm",
@@ -338,8 +373,8 @@ export type ArtifactWorksheetSpec = z.infer<typeof worksheetSchema>;
 
 export const workbookSpecSchema = z
   .object({
-    filename: z.string().min(1).max(ARTIFACT_LIMITS.maxFilenameLength),
-    format: z.enum(SUPPORTED_ARTIFACT_FORMATS).optional().default("xlsx"),
+    filename: filenameField,
+    format: formatEnum("spreadsheet").optional().default("xlsx"),
     worksheets: z
       .array(worksheetSchema)
       .min(1)
@@ -350,6 +385,171 @@ export const workbookSpecSchema = z
   .strict();
 
 export type WorkbookSpec = z.infer<typeof workbookSpecSchema>;
+
+/* ------------------------------------------------------------------------ */
+/* Document specification (docx, pdf, md, txt)                                */
+/* ------------------------------------------------------------------------ */
+
+const blockText = z.string().max(ARTIFACT_LIMITS.maxTextLength);
+
+/**
+ * The blocks a document is made of.
+ *
+ * A flow of blocks rather than a string of Markdown, and the reason is the
+ * same one the workbook has a schema: four very different writers read this
+ * (Word, PDF, Markdown, plain text), and only a structure they all understand
+ * lets a heading be a heading in each of them. A Markdown string would make
+ * the Word and PDF writers into Markdown parsers, and a parser is where a
+ * "document" quietly becomes whatever the model's markup happened to mean.
+ *
+ * There is no `html`, no `image` and no `link` block. Each would put content
+ * this application cannot check into a file it signs its name to.
+ */
+const blockSchema = z.discriminatedUnion("type", [
+  z
+    .object({
+      type: z.literal("heading"),
+      level: z.number().int().min(1).max(4),
+      text: z.string().min(1).max(ARTIFACT_LIMITS.maxTitleLength),
+    })
+    .strict(),
+  z.object({ type: z.literal("paragraph"), text: blockText }).strict(),
+  z
+    .object({
+      type: z.literal("bullets"),
+      items: z.array(blockText).min(1).max(ARTIFACT_LIMITS.maxListItems),
+    })
+    .strict(),
+  z
+    .object({
+      type: z.literal("numbers"),
+      items: z.array(blockText).min(1).max(ARTIFACT_LIMITS.maxListItems),
+    })
+    .strict(),
+  z.object({ type: z.literal("quote"), text: blockText }).strict(),
+  z
+    .object({
+      type: z.literal("code"),
+      language: z.string().max(40).optional(),
+      text: blockText,
+    })
+    .strict(),
+  z
+    .object({
+      type: z.literal("table"),
+      columns: z
+        .array(z.string().max(ARTIFACT_LIMITS.maxTitleLength))
+        .min(1)
+        .max(ARTIFACT_LIMITS.maxDocumentTableColumns),
+      rows: z
+        .array(
+          z
+            .array(cellValueSchema)
+            .max(ARTIFACT_LIMITS.maxDocumentTableColumns)
+        )
+        .max(ARTIFACT_LIMITS.maxDocumentTableRows),
+    })
+    .strict(),
+  z.object({ type: z.literal("divider") }).strict(),
+  z.object({ type: z.literal("pageBreak") }).strict(),
+]);
+
+export type ArtifactDocumentBlock = z.infer<typeof blockSchema>;
+
+export const documentSpecSchema = z
+  .object({
+    filename: filenameField,
+    format: formatEnum("document"),
+    title: z.string().max(ARTIFACT_LIMITS.maxTitleLength).optional(),
+    subtitle: z.string().max(ARTIFACT_LIMITS.maxTitleLength).optional(),
+    blocks: z
+      .array(blockSchema)
+      .min(1)
+      .max(ARTIFACT_LIMITS.maxDocumentBlocks),
+  })
+  .strict();
+
+export type DocumentSpec = z.infer<typeof documentSpecSchema>;
+
+/* ------------------------------------------------------------------------ */
+/* Presentation specification (pptx)                                          */
+/* ------------------------------------------------------------------------ */
+
+export const ARTIFACT_SLIDE_LAYOUTS = [
+  "title",
+  "titleAndContent",
+  "sectionHeader",
+] as const;
+
+export type ArtifactSlideLayout = (typeof ARTIFACT_SLIDE_LAYOUTS)[number];
+
+const slideSchema = z
+  .object({
+    layout: z.enum(ARTIFACT_SLIDE_LAYOUTS).optional().default("titleAndContent"),
+    title: z.string().min(1).max(ARTIFACT_LIMITS.maxTitleLength),
+    subtitle: z.string().max(ARTIFACT_LIMITS.maxTitleLength).optional(),
+    bullets: z
+      .array(z.string().max(ARTIFACT_LIMITS.maxTitleLength))
+      .max(ARTIFACT_LIMITS.maxSlideBullets)
+      .optional(),
+    /** Speaker notes. Present in the file, never on the slide. */
+    notes: z.string().max(ARTIFACT_LIMITS.maxTextLength).optional(),
+  })
+  .strict();
+
+export type ArtifactSlideSpec = z.infer<typeof slideSchema>;
+
+export const presentationSpecSchema = z
+  .object({
+    filename: filenameField,
+    format: formatEnum("presentation").optional().default("pptx"),
+    slides: z.array(slideSchema).min(1).max(ARTIFACT_LIMITS.maxSlides),
+  })
+  .strict();
+
+export type PresentationSpec = z.infer<typeof presentationSpecSchema>;
+
+/* ------------------------------------------------------------------------ */
+/* Text file specification (source, markup, config)                           */
+/* ------------------------------------------------------------------------ */
+
+export const textFileSpecSchema = z
+  .object({
+    filename: filenameField,
+    format: formatEnum("text"),
+    content: z.string().min(1).max(ARTIFACT_LIMITS.maxTextFileCharacters),
+  })
+  .strict();
+
+export type TextFileSpec = z.infer<typeof textFileSpecSchema>;
+
+/* ------------------------------------------------------------------------ */
+/* Archive specification (zip)                                                */
+/* ------------------------------------------------------------------------ */
+
+const archiveEntrySchema = z
+  .object({
+    /** A relative path inside the archive, `/`-separated. */
+    path: z.string().min(1).max(ARTIFACT_LIMITS.maxArchivePathLength),
+    format: z.enum(ARCHIVE_ENTRY_FORMATS as [string, ...string[]]),
+    content: z.string().min(1).max(ARTIFACT_LIMITS.maxTextFileCharacters),
+  })
+  .strict();
+
+export type ArtifactArchiveEntry = z.infer<typeof archiveEntrySchema>;
+
+export const archiveSpecSchema = z
+  .object({
+    filename: filenameField,
+    format: formatEnum("archive").optional().default("zip"),
+    entries: z
+      .array(archiveEntrySchema)
+      .min(1)
+      .max(ARTIFACT_LIMITS.maxArchiveEntries),
+  })
+  .strict();
+
+export type ArchiveSpec = z.infer<typeof archiveSpecSchema>;
 
 /* ------------------------------------------------------------------------ */
 /* Admissibility                                                              */
@@ -363,13 +563,37 @@ export const ARTIFACT_REJECTION_CODES = [
   "EMPTY_WORKBOOK",
   "OUTPUT_TOO_LARGE",
   "FORMAT_UNSUPPORTED",
+  "CONTENT_MALFORMED",
+  "UNSAFE_PATH",
+  "ARCHIVE_TOO_LARGE",
 ] as const;
 
 export type ArtifactRejectionCode = (typeof ARTIFACT_REJECTION_CODES)[number];
 
-export type WorkbookAdmission =
-  | { ok: true; spec: WorkbookSpec; cellCount: number }
+export type ArtifactAdmission<TSpec> =
+  | { ok: true; spec: TSpec; cellCount: number }
   | { ok: false; code: ArtifactRejectionCode; detail: string };
+
+export type WorkbookAdmission = ArtifactAdmission<WorkbookSpec>;
+
+export class WorkbookAdmissionError extends Error {
+  constructor(
+    readonly code: ArtifactRejectionCode,
+    message: string
+  ) {
+    super(message);
+    this.name = "WorkbookAdmissionError";
+  }
+}
+
+const schemaFailure = (error: z.ZodError): ArtifactAdmission<never> => ({
+  ok: false,
+  code: "SCHEMA_INVALID",
+  detail: error.issues
+    .slice(0, 3)
+    .map((issue) => `${issue.path.join(".") || "(root)"}: ${issue.message}`)
+    .join("; "),
+});
 
 /**
  * Excel's own worksheet-name rules, applied before the file exists.
@@ -388,7 +612,7 @@ const normalizeSheetName = (name: string, index: number): string => {
 };
 
 /**
- * Whether this specification may be generated, and the shape it generates as.
+ * Whether this workbook may be generated, and the shape it generates as.
  *
  * Returns a *normalised* spec rather than validating in place: sheet names are
  * made unique and legal, rows are padded to the column count, and the whole
@@ -398,16 +622,7 @@ const normalizeSheetName = (name: string, index: number): string => {
  */
 export const admitWorkbookSpec = (input: unknown): WorkbookAdmission => {
   const parsed = workbookSpecSchema.safeParse(input);
-  if (!parsed.success) {
-    return {
-      ok: false,
-      code: "SCHEMA_INVALID",
-      detail: parsed.error.issues
-        .slice(0, 3)
-        .map((issue) => `${issue.path.join(".") || "(root)"}: ${issue.message}`)
-        .join("; "),
-    };
-  }
+  if (!parsed.success) return schemaFailure(parsed.error);
 
   const spec = parsed.data;
   const seenNames = new Set<string>();
@@ -468,16 +683,6 @@ export const admitWorkbookSpec = (input: unknown): WorkbookAdmission => {
   return { ok: true, spec: { ...spec, worksheets }, cellCount };
 };
 
-export class WorkbookAdmissionError extends Error {
-  constructor(
-    readonly code: ArtifactRejectionCode,
-    message: string
-  ) {
-    super(message);
-    this.name = "WorkbookAdmissionError";
-  }
-}
-
 /** `admitWorkbookSpec`, with the thrown row-width failure folded back in. */
 export const admitWorkbookSpecSafely = (input: unknown): WorkbookAdmission => {
   try {
@@ -488,6 +693,134 @@ export const admitWorkbookSpecSafely = (input: unknown): WorkbookAdmission => {
     }
     throw error;
   }
+};
+
+/**
+ * Whether this document may be generated.
+ *
+ * The count returned is blocks rather than cells; both feed the same "how much
+ * work is this" report the tool gives back to the model, and a document's
+ * blocks are the unit a reader would recognise.
+ */
+export const admitDocumentSpec = (
+  input: unknown
+): ArtifactAdmission<DocumentSpec> => {
+  const parsed = documentSpecSchema.safeParse(input);
+  if (!parsed.success) return schemaFailure(parsed.error);
+  const spec = parsed.data;
+
+  for (const block of spec.blocks) {
+    if (block.type !== "table") continue;
+    for (const row of block.rows) {
+      if (row.length > block.columns.length) {
+        return {
+          ok: false,
+          code: "ROW_WIDER_THAN_COLUMNS",
+          detail: `A table row has ${row.length} values for ${block.columns.length} columns.`,
+        };
+      }
+    }
+  }
+
+  // Rows are padded here for the same reason the workbook's are: four writers
+  // read this, and none of them should have to decide what a short row means.
+  const blocks = spec.blocks.map((block) =>
+    block.type === "table"
+      ? {
+          ...block,
+          rows: block.rows.map((row) =>
+            row.length === block.columns.length
+              ? row
+              : [
+                  ...row,
+                  ...Array<null>(block.columns.length - row.length).fill(null),
+                ]
+          ),
+        }
+      : block
+  );
+
+  return { ok: true, spec: { ...spec, blocks }, cellCount: blocks.length };
+};
+
+export const admitPresentationSpec = (
+  input: unknown
+): ArtifactAdmission<PresentationSpec> => {
+  const parsed = presentationSpecSchema.safeParse(input);
+  if (!parsed.success) return schemaFailure(parsed.error);
+  return { ok: true, spec: parsed.data, cellCount: parsed.data.slides.length };
+};
+
+export const admitTextFileSpec = (
+  input: unknown
+): ArtifactAdmission<TextFileSpec> => {
+  const parsed = textFileSpecSchema.safeParse(input);
+  if (!parsed.success) return schemaFailure(parsed.error);
+  return {
+    ok: true,
+    spec: parsed.data,
+    cellCount: parsed.data.content.split("\n").length,
+  };
+};
+
+/**
+ * A path an archive entry may occupy.
+ *
+ * Refused rather than sanitised, and that is the difference from a file name.
+ * A name is a label and a mangled one still names the file the user asked for;
+ * a path is a *location*, and quietly moving `../../etc/passwd` to
+ * `etc/passwd` would deliver an archive whose contents are not where the model
+ * said they would be. An archive is read by tools that trust their entries.
+ */
+export const isSafeArchivePath = (path: string): boolean => {
+  if (!path || path.length > ARTIFACT_LIMITS.maxArchivePathLength) return false;
+  if (path.startsWith("/") || /^[A-Za-z]:/.test(path)) return false;
+  if (path.includes("\\")) return false;
+  if (/[\u0000-\u001f\u007f]/.test(path)) return false;
+  const segments = path.split("/");
+  if (segments.some((segment) => segment === "" || segment === "." || segment === "..")) {
+    return false;
+  }
+  return true;
+};
+
+export const admitArchiveSpec = (
+  input: unknown
+): ArtifactAdmission<ArchiveSpec> => {
+  const parsed = archiveSpecSchema.safeParse(input);
+  if (!parsed.success) return schemaFailure(parsed.error);
+  const spec = parsed.data;
+
+  const seen = new Set<string>();
+  let characters = 0;
+  for (const entry of spec.entries) {
+    if (!isSafeArchivePath(entry.path)) {
+      return {
+        ok: false,
+        code: "UNSAFE_PATH",
+        detail: `"${entry.path.slice(0, 80)}" is not a relative path inside the archive.`,
+      };
+    }
+    if (seen.has(entry.path)) {
+      return {
+        ok: false,
+        code: "UNSAFE_PATH",
+        detail: `"${entry.path.slice(0, 80)}" appears twice.`,
+      };
+    }
+    seen.add(entry.path);
+    characters += entry.content.length;
+  }
+
+  if (characters > ARTIFACT_LIMITS.maxArchiveCharacters) {
+    return {
+      ok: false,
+      code: "ARCHIVE_TOO_LARGE",
+      detail: `${characters} characters exceeds the ${ARTIFACT_LIMITS.maxArchiveCharacters} character limit.`,
+    };
+  }
+
+  return { ok: true, spec, cellCount: spec.entries.length };
 };
 
 /* ------------------------------------------------------------------------ */
@@ -554,9 +887,6 @@ export type ChatStreamArtifact = {
   modelId?: string;
 };
 
-const isSupportedFormatValue = (value: unknown): value is SupportedArtifactFormat =>
-  typeof value === "string" && isSupportedArtifactFormat(value);
-
 /**
  * Reads one artifact entry from an untrusted payload.
  *
@@ -571,7 +901,9 @@ export const parseChatStreamArtifact = (
   if (!value || typeof value !== "object") return null;
   const record = value as Record<string, unknown>;
   if (typeof record.id !== "string" || !record.id) return null;
-  if (!isSupportedFormatValue(record.format)) return null;
+  if (typeof record.format !== "string" || !isSupportedArtifactFormat(record.format)) {
+    return null;
+  }
   if (typeof record.filename !== "string" || !record.filename) return null;
   if (typeof record.mediaType !== "string" || !record.mediaType) return null;
   const status = record.status;

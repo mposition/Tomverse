@@ -96,9 +96,14 @@ test("the format CHECK matches the formats a generator exists for", async () => 
       }),
     });
   }
+  // A format nothing can generate must not reach a row: the download route
+  // would have no media type to answer with, and the card no name to draw.
   await assert.rejects(
     prisma.messageArtifact.create({
-      data: readyRow(ids, { format: "docx", ordinal: 9 }),
+      data: readyRow(ids, {
+        format: "psd",
+        ordinal: SUPPORTED_ARTIFACT_FORMATS.length,
+      }),
     })
   );
 });

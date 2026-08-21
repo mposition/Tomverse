@@ -17,8 +17,8 @@
 
 import {
   ARTIFACT_LIMITS,
-  SUPPORTED_ARTIFACT_FORMATS,
-  type ArtifactFormat,
+  REFUSED_ARTIFACT_EXTENSIONS,
+  formatIdsOfKind,
 } from "@/lib/generatedArtifactCore";
 
 /* ------------------------------------------------------------------------ */
@@ -151,50 +151,66 @@ export const nativeSearchBlocksArtifactTool = (input: {
   return input.provider === "google";
 };
 
-const UNSUPPORTED_FORMATS = (
-  ["docx", "pptx", "pdf", "json", "txt", "md"] as ArtifactFormat[]
-).filter(
-  (format) => !(SUPPORTED_ARTIFACT_FORMATS as readonly string[]).includes(format)
-);
+const formatList = (kind: Parameters<typeof formatIdsOfKind>[0]) =>
+  formatIdsOfKind(kind).join(", ");
 
 /**
- * The instructions that go with the tool.
+ * The instructions that go with the tools.
  *
- * Three jobs, in order of how badly they fail without it:
+ * Four jobs, in order of how badly they fail without it:
  *
  *   1. tell the model that the file is the deliverable, so the answer body
  *      stops being a thousand-line Markdown table nobody can paste anywhere;
- *   2. tell it which formats exist, so it stops offering .docx;
- *   3. tell it never to write a link, a path or base64, because the download
+ *   2. tell it which tool makes which kind of file, so a deck request does not
+ *      arrive as a Markdown outline;
+ *   3. tell it which formats exist and which are refused outright, so it
+ *      neither offers `.psd` nor tries to write an installer;
+ *   4. tell it never to write a link, a path or base64, because the download
  *      is attached by the application and any URL the model invents is a lie
  *      with a plausible shape.
  */
 const GENERATE_PROMPT = [
   "# File generation",
   "",
-  "You can create real, downloadable files for this user with the",
-  "`create_spreadsheet` tool. When the user asks for a spreadsheet, an Excel",
-  "file, a .xlsx, a CSV, or asks you to 'put this in a file', call the tool.",
+  "You can create real, downloadable files for this user. When the user asks",
+  "for a file -- a spreadsheet, a document, slides, a script, a config file, a",
+  "data file, a set of files -- call the matching tool.",
+  "",
+  `- \`create_spreadsheet\` -- ${formatList("spreadsheet")}`,
+  `- \`create_document\` -- ${formatList("document")}`,
+  `- \`create_presentation\` -- ${formatList("presentation")}`,
+  `- \`create_text_file\` -- source code, markup and config: ${formatList("text")}`,
+  `- \`create_archive\` -- ${formatList("archive")}, for delivering several files at once`,
   "",
   "Rules:",
-  `- Supported formats: ${SUPPORTED_ARTIFACT_FORMATS.join(", ")}. If the user asks for ` +
-    `${UNSUPPORTED_FORMATS.join(", ")} or any other format, say plainly that it is not ` +
-    "supported yet and offer a supported one. Never pretend to have made it.",
-  "- A request for .xlsx is answered with .xlsx. Never substitute CSV for it.",
-  "- The tool takes structured data, not a file. You never produce bytes,",
-  "  base64, a data URL, a file path or a download link; the application",
-  "  attaches the finished file to your message and shows a download card.",
-  "- Do not also print the whole table, the CSV text, or the Python/pandas code",
-  "  that would have produced it. After a successful call, write one or two",
-  "  short sentences saying what the file contains, in the user's language.",
-  "- Put real values in the rows. Never invent data the conversation does not",
-  "  contain; if something is unknown, leave the cell empty and say so.",
-  "- Write plain values only. The tool has no formula field, and a string that",
-  "  looks like a formula is stored as text.",
-  `- Limits: at most ${ARTIFACT_LIMITS.maxWorksheets} worksheets, ` +
+  "- The format the user names is the format you produce. Never substitute CSV",
+  "  for a .xlsx request, or Markdown for a .docx one.",
+  `- Never produce an executable or installer: ${REFUSED_ARTIFACT_EXTENSIONS.join(", ")}. ` +
+    "Say plainly that you do not create those.",
+  "- Any other extension is not supported. Say so plainly and offer the closest",
+  "  supported format. Never pretend to have made a file you did not make.",
+  "- The spreadsheet, document and presentation tools take structured content,",
+  "  not a file; `create_text_file` and `create_archive` take the file's exact",
+  "  text. In no case do you write bytes, base64, a data URL, a file path or a",
+  "  download link -- the application attaches the finished file to your",
+  "  message and shows a download card.",
+  "- Do not also print the whole table, the whole file text, or the",
+  "  Python/pandas code that would have produced it. After a successful call,",
+  "  write one or two short sentences saying what the file contains, in the",
+  "  user's language.",
+  "- Put real values in. Never invent data the conversation does not contain;",
+  "  if something is unknown, leave it empty and say so.",
+  "- Spreadsheets hold plain values only. There is no formula field, and a",
+  "  string that looks like a formula is stored as text.",
+  `- Limits: ${ARTIFACT_LIMITS.maxWorksheets} worksheets, ` +
     `${ARTIFACT_LIMITS.maxRowsPerSheet} rows and ${ARTIFACT_LIMITS.maxColumnsPerSheet} ` +
-    `columns per worksheet, and ${ARTIFACT_LIMITS.maxCells} cells in total. If the data ` +
-    "does not fit, say so and offer a narrower selection rather than truncating silently.",
+    `columns per worksheet, ${ARTIFACT_LIMITS.maxCells} cells in total; ` +
+    `${ARTIFACT_LIMITS.maxDocumentBlocks} document blocks; ` +
+    `${ARTIFACT_LIMITS.maxSlides} slides; ` +
+    `${ARTIFACT_LIMITS.maxTextFileCharacters} characters per text file; ` +
+    `${ARTIFACT_LIMITS.maxArchiveEntries} files per archive; ` +
+    `${ARTIFACT_LIMITS.maxArtifactsPerMessage} files per answer. If the content does not ` +
+    "fit, say so and offer a narrower selection rather than truncating silently.",
   "- If the tool reports a failure, tell the user what failed. Do not describe",
   "  a file that does not exist.",
 ].join("\n");
@@ -202,15 +218,15 @@ const GENERATE_PROMPT = [
 const SIGN_IN_PROMPT = [
   "# File generation",
   "",
-  "This user is not signed in. File generation requires an account, so the",
-  "`create_spreadsheet` tool will refuse. If the user asks for a spreadsheet,",
-  "an Excel file, a .xlsx or a CSV, call the tool once anyway: the application",
-  "uses the refusal to show a sign-in card next to your message.",
+  "This user is not signed in. File generation requires an account, so the file",
+  "tools will refuse. If the user asks for a spreadsheet, a document, slides, a",
+  "script, a config file or any other file, call the matching tool once anyway:",
+  "the application uses the refusal to show a sign-in card next to your message.",
   "",
   "Then say briefly, in the user's language, that creating a downloadable file",
   "requires signing in. Do not write the file contents as a table, as CSV text,",
-  "as code that would produce it, as base64, or as a link. None of those is the",
-  "file the user asked for.",
+  "as a code block, as base64, or as a link. None of those is the file the user",
+  "asked for.",
 ].join("\n");
 
 const offPrompt = (reason: ArtifactToolOffReason): string => {
@@ -226,7 +242,7 @@ const offPrompt = (reason: ArtifactToolOffReason): string => {
     "# File generation",
     "",
     `You cannot create downloadable files ${why}. If the user asks for a`,
-    "spreadsheet, an Excel file, a .xlsx, a CSV or any other file, say so",
+    "spreadsheet, a document, slides, a script or any other file, say so",
     "plainly in the user's language and say what would let them get one",
     reason === "native_search_conflict"
       ? "(turning web search off for this question)."
@@ -315,4 +331,4 @@ export const planGeneratedArtifactTool = (
  * Measured against the rendered schema and rounded up, so the reservation is
  * never short.
  */
-export const ARTIFACT_TOOL_DEFINITION_TOKENS = 420;
+export const ARTIFACT_TOOL_DEFINITION_TOKENS = 2600;

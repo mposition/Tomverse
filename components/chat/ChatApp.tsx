@@ -953,6 +953,7 @@ function ChatAppComponent({
       // in component state because three panels stream at once and the status
       // belongs to one of them.
       let isGeneratingArtifact = false;
+      let generatingArtifactFormat: string | null = null;
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
@@ -971,7 +972,10 @@ function ChatAppComponent({
         // streams, and a marker left in for even one frame is a marker the
         // user reads.
         const artifactProgress = splitArtifactProgressSignal(routing.text);
-        if (artifactProgress.signal) isGeneratingArtifact = true;
+        if (artifactProgress.signal) {
+          isGeneratingArtifact = true;
+          generatingArtifactFormat = artifactProgress.signal.format;
+        }
         assistantText = splitSearchMetadataTrailer(
           artifactProgress.text
         ).displayText;
@@ -980,7 +984,14 @@ function ChatAppComponent({
           assistantText,
           "normal",
           undefined,
-          isGeneratingArtifact ? { isGeneratingArtifact: true } : undefined
+          isGeneratingArtifact
+            ? {
+                isGeneratingArtifact: true,
+                ...(generatingArtifactFormat
+                  ? { generatingArtifactFormat }
+                  : {}),
+              }
+            : undefined
         );
       }
 
@@ -1049,6 +1060,7 @@ function ChatAppComponent({
             // cards the previous attempt left behind.
             artifacts,
             isGeneratingArtifact: false,
+            generatingArtifactFormat: undefined,
             ...(memoryUsedCount > 0 ? { memoryUsedCount } : {}),
             // §7: when the server fell back mid-response, the model that
             // answered is not the one this request was sent to. Recording the

@@ -2,13 +2,30 @@
 
 import { useCallback, useState } from "react";
 import Link from "next/link";
-import { AlertTriangle, Download, Loader2, Lock, RotateCcw, Sheet } from "lucide-react";
+import {
+  AlertTriangle,
+  Braces,
+  Download,
+  FileArchive,
+  FileCode,
+  FileText,
+  FileType,
+  Loader2,
+  Lock,
+  Presentation,
+  RotateCcw,
+  Sheet,
+  Table,
+  type LucideIcon,
+} from "lucide-react";
 
 import { useLanguage } from "@/components/LanguageProvider";
 import {
   artifactDownloadPath,
+  artifactFormat,
   formatArtifactSize,
   type ArtifactFailureCode,
+  type ArtifactLabelGroup,
   type ChatStreamArtifact,
 } from "@/lib/generatedArtifactCore";
 import { saveResponseAsFile } from "@/lib/browserDownload";
@@ -45,6 +62,30 @@ const interpolateCopy = (
     (copy, [key, value]) => copy.replaceAll(`{${key}}`, String(value)),
     template
   );
+
+/**
+ * The card's name and icon for each label group.
+ *
+ * Grouped rather than per format, for the reason `ARTIFACT_LABEL_GROUPS` is
+ * grouped: eleven translated names cover fifty-eight formats, and the four
+ * generic ones fill the extension in themselves so a `.rs` file still says
+ * "RS" on the card rather than "source file".
+ */
+const LABEL_GROUP_COPY: Readonly<
+  Record<ArtifactLabelGroup, { key: string; icon: LucideIcon }>
+> = {
+  xlsx: { key: "chat.artifactTypeXlsx", icon: Sheet },
+  csv: { key: "chat.artifactTypeCsv", icon: Table },
+  docx: { key: "chat.artifactTypeDocx", icon: FileText },
+  pdf: { key: "chat.artifactTypePdf", icon: FileType },
+  pptx: { key: "chat.artifactTypePptx", icon: Presentation },
+  markdown: { key: "chat.artifactTypeMarkdown", icon: FileText },
+  text: { key: "chat.artifactTypeText", icon: FileText },
+  data: { key: "chat.artifactTypeData", icon: Braces },
+  markup: { key: "chat.artifactTypeMarkup", icon: FileCode },
+  code: { key: "chat.artifactTypeCode", icon: FileCode },
+  archive: { key: "chat.artifactTypeArchive", icon: FileArchive },
+};
 
 const FAILURE_COPY_KEYS: Readonly<Record<ArtifactFailureCode, string>> = {
   sign_in_required: "chat.artifactSignInDescription",
@@ -90,10 +131,18 @@ export function GeneratedArtifactCard({
   const modelName = attributedModelId
     ? (modelNameFor?.(attributedModelId) ?? attributedModelId)
     : null;
-  const typeLabel =
-    artifact.format === "csv"
-      ? t("chat.artifactTypeCsv")
-      : t("chat.artifactTypeXlsx");
+  /*
+    An artifact's format arrives over the wire, so it is looked up rather than
+    indexed: a transcript written by a newer server can name a format this
+    build has never heard of, and a card that throws would take the whole
+    answer with it.
+  */
+  const descriptor = artifactFormat(artifact.format);
+  const group = LABEL_GROUP_COPY[descriptor?.labelGroup ?? "text"];
+  const typeLabel = interpolateCopy(t(group.key), {
+    ext: artifact.format.toUpperCase(),
+  });
+  const FormatIcon = group.icon;
   const sizeLabel = formatArtifactSize(artifact.byteSize);
 
   const download = useCallback(async () => {
@@ -184,7 +233,7 @@ export function GeneratedArtifactCard({
         }`}
       >
         {isReady ? (
-          <Sheet className="h-5 w-5" />
+          <FormatIcon className="h-5 w-5" />
         ) : isBlocked ? (
           <Lock className="h-5 w-5" />
         ) : (
@@ -324,11 +373,18 @@ export function GeneratedArtifactList({
  * A separate component rather than a fourth `status`, because it describes the
  * request rather than a result: there is no artifact yet, no id, no size and
  * nothing to download. Naming the format in the label -- "Creating the Excel
- * file" -- is what makes the wait legible; a bare spinner beside a streaming
- * answer says nothing about which of the two is slow.
+ * workbook" -- is what makes the wait legible; a bare spinner beside a
+ * streaming answer says nothing about which of the two is slow. A signal that
+ * did not carry a readable format still gets a spinner, without a name.
  */
-export function GeneratedArtifactPending() {
+export function GeneratedArtifactPending({ format }: { format?: string }) {
   const { t } = useLanguage();
+  const descriptor = format ? artifactFormat(format) : undefined;
+  const typeLabel = descriptor
+    ? interpolateCopy(t(LABEL_GROUP_COPY[descriptor.labelGroup].key), {
+        ext: descriptor.id.toUpperCase(),
+      })
+    : null;
   return (
     <section
       data-testid="generated-artifact-pending"
@@ -340,7 +396,11 @@ export function GeneratedArtifactPending() {
         className="flex items-center gap-2 text-xs font-semibold text-zinc-500 dark:text-zinc-400"
       >
         <Loader2 className="h-4 w-4 animate-spin motion-reduce:animate-none" />
-        {t("chat.artifactGenerating")}
+        {typeLabel
+          ? interpolateCopy(t("chat.artifactGeneratingNamed"), {
+              type: typeLabel,
+            })
+          : t("chat.artifactGenerating")}
       </p>
     </section>
   );

@@ -62,19 +62,36 @@ submit-then-poll 작업이라 streaming 경로에 도달하지 않고,
 
 ## 3. 모델은 명세만 만든다
 
-`create_spreadsheet` tool의 입력은 Zod로 검증된 **workbook specification**
-이다. 모델은 바이너리도 base64도 만들지 않는다.
+**구조가 있는 형식에서 모델은 바이트를 만들지 않는다.** 스프레드시트·문서·
+프레젠테이션·아카이브는 Zod로 검증된 **명세**를 받고, 서버의 생성기가 바이트를
+만든다. 모델은 바이너리도 base64도 만들지 않는다.
 
-- 안전한 파일명(§6), worksheet 배열, sheet 이름, 열 정의, 행 데이터
-- 선택: sheet 제목, 헤더 스타일, 열 너비, 숫자·날짜 표시 형식
+tool은 형식마다가 아니라 **종류(kind)마다** 하나다. 형식은 명세의 field이고,
+`xlsx`와 `csv`는 하나의 명세를 두 가지로 쓴 것이지 서로 다른 요청이 아니다.
+
+| tool | kind | 입력 |
+|---|---|---|
+| `create_spreadsheet` | spreadsheet | worksheet 배열, sheet 이름, 열 정의, 행 데이터, 선택적 제목·너비·표시 형식 |
+| `create_document` | document | 제목·부제와 block의 흐름(heading, paragraph, bullets, numbers, quote, code, table, divider, pageBreak) |
+| `create_presentation` | presentation | slide 배열(layout, 제목, 부제, bullet, 발표자 노트) |
+| `create_text_file` | text | 파일의 정확한 텍스트 |
+| `create_archive` | archive | 아카이브 안의 상대 경로와 각 항목의 텍스트 |
 
 표시 형식은 **이름**으로만 받는다(`ARTIFACT_NUMBER_FORMATS`). raw `numFmt`
 코드는 작은 언어이고, 모델에게서 받으면 그 언어를 여기서 파싱해 다른 것을
 실어 나르지 않는지 확인해야 한다. 이름 집합은 코드 리뷰로 늘린다.
 
+**소스 코드·마크업·설정은 의도된 예외이며, 예외가 규칙을 증명한다.** Python
+module에는 "그 텍스트"가 아닌 명세가 없다. 그래서 그 형식에서는 모델이 내용을
+직접 쓰고, 명세를 안전하게 만들던 것들을 **텍스트에 그대로 적용**한다 —
+제한된 크기, 이 애플리케이션이 정한 확장자, 깨지면 쓸모가 없는 형식에 대한
+구조 검사(JSON·YAML·XML·SVG), 그리고 렌더링이 아니라 다운로드로만 나가는 전달
+경로.
+
 **tool schema를 신뢰하지 않는다.** 같은 스키마를 `execute` 안에서
-`admitWorkbookSpecSafely()`로 다시 검증한다. provider가 넘겨받은 JSON schema를
-강제한다는 보장은 어느 provider도 하지 않는다.
+`admitWorkbookSpecSafely()`·`admitDocumentSpec()`·`admitPresentationSpec()`·
+`admitTextFileSpec()`·`admitArchiveSpec()`로 다시 검증한다. provider가
+넘겨받은 JSON schema를 강제한다는 보장은 어느 provider도 하지 않는다.
 
 명시적 상한(`ARTIFACT_LIMITS`):
 
@@ -84,27 +101,56 @@ submit-then-poll 작업이라 streaming 경로에 도달하지 않고,
 | sheet당 행 | 10,000 |
 | sheet당 열 | 64 |
 | 전체 cell | 100,000 |
-| cell 문자열 | 8,000자 |
+| 문서 block 수 | 2,000 |
+| 목록 항목 | 200 |
+| 문서 표 행·열 | 500 · 20 |
+| slide 수 | 100 |
+| slide당 bullet | 20 |
+| 텍스트 파일 문자 수 | 400,000 |
+| 아카이브 항목 수 | 100 |
+| 아카이브 전체 문자 수 | 2,000,000 |
+| cell·block 문자열 | 20,000자 |
 | 파일명 | 120자 |
 | 결과 파일 크기 | 5 MB |
 | 메시지당 artifact | 3 |
 
 각 상한은 서로 다른 자원을 막으므로 어느 하나도 잉여가 아니다. 특히 파일
 크기는 **생성 후 실제 바이트로 검사**한다 — cell 수로 추정하지 않는다.
+검사는 `lib/generatedArtifactRenderers.ts`의 `bounded()` 한 곳에서 한다.
 
 ## 4. 형식
 
-`SUPPORTED_ARTIFACT_FORMATS` = `xlsx`, `csv`. 생성기는
-`lib/generatedArtifactXlsx.ts` 하나이며 format adapter 구조다: 새 형식은
-`renderWorkbook()`에 분기를 추가하고 `ARTIFACT_MEDIA_TYPES`·
-`ARTIFACT_FILE_EXTENSIONS`·migration의 `format` CHECK를 함께 넓힌다.
+형식은 표 하나에 있다 — `lib/generatedArtifactFormats.ts`의
+`ARTIFACT_FORMAT_TABLE`. 한 형식은 다섯 가지 사실이 서로 맞아야 하는 것이므로
+(디스크의 확장자, 전송의 media type, 어느 생성기가 만드는가, 내용을 무엇으로
+검사하는가, 제공하는가) 그 다섯을 다섯 개의 `switch`로 흩어 두지 않는다.
 
-- **xlsx 요청을 csv로 대체하지 않는다.** csv는 같은 명세에서 파생될 뿐
-  대체재가 아니다. csv는 sheet 하나만 담을 수 있으므로 다중 sheet 명세를 csv로
-  요청하면 **실패로 보고**한다(첫 sheet만 쓰고 나머지를 버리지 않는다).
-- `docx`, `pptx`, `pdf`, `json`, `txt`, `md`는 `ARTIFACT_FORMATS`에 이름만
-  올라가 있다. 지원되지 않는다는 것을 **말할 수 있게** 하기 위해서다. 침묵이
-  가짜 링크의 출발점이다.
+| kind | 형식 | 생성기 |
+|---|---|---|
+| spreadsheet | `xlsx`, `csv` | `lib/generatedArtifactXlsx.ts` |
+| document | `docx`, `pdf`, `md`, `txt` | `generatedArtifactDocx.ts`, `generatedArtifactPdf.ts`, `generatedArtifactText.ts` |
+| presentation | `pptx` | `lib/generatedArtifactPptx.ts` |
+| text | `json`, `yaml`, `yml`, `xml`, `toml`, `ini`, `tsv`, `html`, `htm`, `svg`, `css`, `scss`, `less`, `sql`, `graphql`, `proto`, `ts`, `tsx`, `js`, `jsx`, `mjs`, `cjs`, `py`, `rb`, `go`, `rs`, `java`, `kt`, `swift`, `c`, `h`, `cpp`, `hpp`, `cs`, `php`, `sh`, `bash`, `ps1`, `r`, `scala`, `lua`, `pl`, `dart`, `ex`, `exs`, `hs`, `vue`, `svelte`, `dockerfile`, `env` | `lib/generatedArtifactText.ts` |
+| archive | `zip` | `lib/generatedArtifactText.ts` |
+
+**형식을 추가하는 일은 세 가지다** — `ARTIFACT_FORMAT_TABLE`의 행 하나,
+`lib/generatedArtifactRenderers.ts`의 분기 하나, migration의 `format` CHECK를
+넓히는 것. tool 배선도, collector도, 저장도, 다운로드 route도, 카드도 형식별
+분기를 갖지 않으며, 이 성질을 지키는 것이 renderer 파일의 존재 이유다.
+
+- **요청한 형식으로 만든다.** xlsx 요청을 csv로, docx 요청을 md로 대체하지
+  않는다. csv는 같은 명세에서 파생될 뿐 대체재가 아니고, sheet 하나만 담을 수
+  있으므로 다중 sheet 명세를 csv로 요청하면 **실패로 보고**한다(첫 sheet만
+  쓰고 나머지를 버리지 않는다).
+- **실행되는 형식은 만들지 않는다**(`REFUSED_ARTIFACT_EXTENSIONS`): `exe`,
+  `dll`, `com`, `bat`, `cmd`, `msi`, `scr`, `vbs`, `vbe`, `jse`, `wsf`, `wsh`,
+  `lnk`, `reg`, `cpl`, `hta`, `pif`와 설치 패키지(`app`, `dmg`, `pkg`, `deb`,
+  `rpm`, `jar`, `apk`). 기준은 "두 번 눌렀을 때 열리는가 실행되는가"이지
+  "실행될 수 있는가"가 아니다 — 그래서 `.sh`, `.ps1`, `.py`는 지원한다. 같은
+  목록이 아카이브 항목에도 적용되므로, 직접 요청이 거절되는 것을 zip으로
+  배달할 수 없다.
+- **목록에 없는 확장자는 지원하지 않는다고 말한다.** 침묵이 가짜 링크의
+  출발점이다.
 
 ## 5. 저장, 전송, 다운로드
 
@@ -153,7 +199,7 @@ modelId. 서명 URL은 DB에 저장하지 않는다(애초에 만들지 않는�
 - 잠긴 대화만 예외로 `CONVERSATION_LOCKED`(423)를 답한다. 이미 소유권이 확인된
   뒤이므로 그 문장을 보는 사람은 소유자뿐이고, 이유를 숨기면 unlock 안내를
   잃는다.
-- 헤더: 정확한 XLSX Content-Type, ASCII `filename`, UTF-8 `filename*`,
+- 헤더: 형식 표가 정한 정확한 Content-Type, ASCII `filename`, UTF-8 `filename*`,
   `Content-Disposition: attachment`, `Cache-Control: private, no-store`,
   `X-Content-Type-Options: nosniff`.
 - 읽기는 `readOwnR2ObjectBytes`(비파괴)로 한다. `readR2Object`는 메타데이터가
@@ -173,8 +219,23 @@ modelId. 서명 URL은 DB에 저장하지 않는다(애초에 만들지 않는�
   그런 구조가 없으므로 `'`를 앞에 붙인다 — 형식마다 다른 처리이고, 그 차이는
   숨기지 않고 여기 적는다.
 - **package에 없는 것**: external link, `xl/connections.xml`, 매크로
-  (`.xlsm`이 아니다), hyperlink relationship, `docProps/custom.xml`. writer가
-  해당 part를 아예 쓰지 않으므로 넣을 방법이 없다.
+  (`.xlsm`도 `.docm`도 `.pptm`도 아니다), hyperlink relationship, Word의
+  `fldChar`, PowerPoint의 `hlinkClick`, `docProps/custom.xml`. writer가 해당
+  part를 아예 쓰지 않으므로 넣을 방법이 없다.
+- **SVG에는 script를 넣지 않는다.** 다운로드된 SVG는 `file://`에서 열리고
+  그 안의 `<script>`는 제약할 origin 없이 실행된다 — `<script>`,
+  `<foreignObject>`, inline event handler, `javascript:`·`data:text/html`
+  참조가 있으면 거절한다. HTML은 여기에 걸지 않는다: script가 있는 page가
+  "웹 페이지를 만들어 달라"의 의미이고, 그것을 막는 것은 안전하게 만드는 것이
+  아니라 형식을 거절하는 것이다. 둘 다 `nosniff`가 붙은 attachment로만 나가므로
+  이 애플리케이션의 origin에서는 어느 쪽도 실행되지 않는다.
+- **아카이브 경로는 정규화하지 않고 거절한다.** 파일명은 label이라 다듬어도
+  여전히 그 파일을 가리키지만, 경로는 **위치**다. `../../etc/passwd`를 조용히
+  `etc/passwd`로 옮기면 모델이 말한 곳에 없는 내용을 담은 아카이브가 배달된다.
+  절대 경로, 드라이브 문자, `\\`, `.`·`..`·빈 segment, 제어문자, 중복 경로를
+  모두 거절한다(`isSafeArchivePath`).
+- **깨진 구조는 배달하지 않는다.** JSON·YAML은 파싱해 보고, XML·SVG·HTML은
+  균형과 미종료 속성을 검사한다. 파싱되지 않는 설정 파일은 설정 파일이 아니다.
 - **파일명**: path separator, `..`, 제어문자, RTL override, Windows 예약어,
   `< > : " | ? * %`를 제거한다. 확장자는 format이 정하며 입력에서 가져오지
   않는다 — `report.xlsx.exe`도 `report.pdf`도 `report.xlsx`가 된다. 한국어

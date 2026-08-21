@@ -29,7 +29,7 @@ import { zipSync, type Zippable } from "fflate";
 
 import {
   ARTIFACT_LIMITS,
-  ARTIFACT_MEDIA_TYPES,
+  requireArtifactFormat,
   ARTIFACT_NUMBER_FORMATS,
   csvCell,
   needsFormulaGuard,
@@ -565,5 +565,5 @@ export const renderWorkbook = (
     );
   }
 
-  return { format, mediaType: ARTIFACT_MEDIA_TYPES[format], bytes };
+  return { format, mediaType: requireArtifactFormat(format).mediaType, bytes };
 };

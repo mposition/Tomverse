@@ -1,16 +1,23 @@
 /**
- * The `create_spreadsheet` tool, and the per-turn collector behind it.
+ * The five artifact tools, and the per-turn collector behind them.
  *
  * Policy: docs/policy/generated-artifacts.md sections 3, 4 and 8.
  *
- * The tool's contract with the model is narrow on purpose: it accepts a
- * workbook *specification* and returns a short report. It never returns bytes,
- * a URL, an object key or the artifact's own id -- everything a model is
- * handed can end up quoted in the answer, and a model that could quote a
- * download link could also invent one.
+ * One tool per *kind*, not per format. A spreadsheet, a document, a deck, a
+ * text file and an archive are five genuinely different things to describe;
+ * xlsx and csv are one thing written two ways. So the format is a field on the
+ * specification and the tool is chosen by what the model is making -- which is
+ * also why adding a format costs a row in `lib/generatedArtifactFormats.ts`
+ * and nothing here.
+ *
+ * Each tool's contract with the model is narrow on purpose: it accepts a
+ * *specification* and returns a short report. It never returns bytes, a URL,
+ * an object key or the artifact's own id -- everything a model is handed can
+ * end up quoted in the answer, and a model that could quote a download link
+ * could also invent one.
  *
  * The collector is what makes a tool call survivable. A chat turn can end four
- * ways after the tool has already run (finished, cancelled, failed over to
+ * ways after a tool has already run (finished, cancelled, failed over to
  * another model, or died mid-stream), and only the first of them writes a
  * message row for the artifact to hang from. So the collector holds what was
  * stored, the route persists it in the message transaction, and every other
@@ -25,18 +32,42 @@ import type { ToolSet } from "ai";
 
 import {
   ARTIFACT_LIMITS,
-  ARTIFACT_MEDIA_TYPES,
+  admitArchiveSpec,
+  admitDocumentSpec,
+  admitPresentationSpec,
+  admitTextFileSpec,
   admitWorkbookSpecSafely,
+  archiveSpecSchema,
+  artifactFormat,
+  documentSpecSchema,
+  presentationSpecSchema,
+  requireArtifactFormat,
   sanitizeArtifactFilename,
+  textFileSpecSchema,
   workbookSpecSchema,
+  type ArtifactAdmission,
   type ArtifactFailureCode,
+  type ArchiveSpec,
+  type ArtifactKind,
   type ChatStreamArtifact,
+  type DocumentSpec,
+  type PresentationSpec,
   type SupportedArtifactFormat,
+  type TextFileSpec,
+  type WorkbookSpec,
 } from "@/lib/generatedArtifactCore";
 import {
-  ArtifactGenerationError,
-  renderWorkbook,
-} from "@/lib/generatedArtifactXlsx";
+  ArtifactRenderError,
+  renderArchiveArtifact,
+  renderDocumentArtifact,
+  renderPresentationArtifact,
+  renderSpreadsheetArtifact,
+  renderTextArtifact,
+  type RenderedArtifact,
+} from "@/lib/generatedArtifactRenderers";
+import { ArtifactGenerationError } from "@/lib/generatedArtifactXlsx";
+import { PdfGenerationError } from "@/lib/generatedArtifactPdf";
+import { TextContentError } from "@/lib/generatedArtifactText";
 import {
   discardStoredArtifacts,
   putArtifactObject,
@@ -44,17 +75,47 @@ import {
 } from "@/lib/generatedArtifactStorage";
 import type { ArtifactToolMode } from "@/lib/generatedArtifactToolPolicy";
 
-export const CREATE_SPREADSHEET_TOOL_NAME = "create_spreadsheet";
+/**
+ * The tool name for each kind.
+ *
+ * Named for what the user asked for rather than for the format, so the model
+ * picking a tool is making the same decision the user already made. A model
+ * that wants a `.py` file reaches for `create_text_file` with
+ * `format: "py"` -- there is no `create_python_file`, and there is no format
+ * whose support depends on a tool existing for it.
+ */
+export const ARTIFACT_TOOL_NAMES = {
+  spreadsheet: "create_spreadsheet",
+  document: "create_document",
+  presentation: "create_presentation",
+  text: "create_text_file",
+  archive: "create_archive",
+} as const satisfies Record<ArtifactKind, string>;
+
+export const CREATE_SPREADSHEET_TOOL_NAME = ARTIFACT_TOOL_NAMES.spreadsheet;
+
+export const ALL_ARTIFACT_TOOL_NAMES: readonly string[] =
+  Object.values(ARTIFACT_TOOL_NAMES);
 
 /**
- * Steps one turn may take when the tool is registered.
+ * Steps one turn may take when the tools are registered.
  *
- * Three, not two: one for the tool call, one for the answer that follows it,
- * and one of slack for a model that calls the tool a second time for a second
- * sheet. `maxArtifactsPerMessage` is the real ceiling on how much work that
- * slack can buy -- the step budget only bounds the round trips.
+ * Four, not two: one for the tool call, one for the answer that follows it,
+ * and two of slack for a model that makes a second file (a report and the
+ * spreadsheet behind it is an ordinary request, and it is two calls).
+ * `maxArtifactsPerMessage` is the real ceiling on how much work that slack can
+ * buy -- the step budget only bounds the round trips.
  */
-export const GENERATED_ARTIFACT_MAX_STEPS = 3;
+export const GENERATED_ARTIFACT_MAX_STEPS = 4;
+
+/** What a failed call is labelled with when the format never got decided. */
+const FALLBACK_FORMAT = {
+  spreadsheet: "xlsx",
+  document: "docx",
+  presentation: "pptx",
+  text: "txt",
+  archive: "zip",
+} as const satisfies Record<ArtifactKind, string>;
 
 type FailedArtifact = {
   ordinal: number;
@@ -70,14 +131,134 @@ export type ArtifactToolReport =
       status: "created";
       filename: string;
       format: SupportedArtifactFormat;
-      worksheets: number;
-      rows: number;
+      /** Human-readable size of the work, e.g. "2 worksheets, 40 rows". */
+      parts: string;
       /** Restates the delivery rule at the moment the model is most likely to break it. */
       note: string;
     }
   | { status: "unchanged"; filename: string; note: string }
   | { status: "sign_in_required"; note: string }
   | { status: "failed"; reason: string; note: string };
+
+/**
+ * Every specification any tool can admit.
+ *
+ * A union rather than a generic, because the point of the table below is that
+ * `run()` never learns which member it has: it admits, renders, describes and
+ * stores through the same four calls whatever the model asked for.
+ */
+type ArtifactSpec =
+  | WorkbookSpec
+  | DocumentSpec
+  | PresentationSpec
+  | TextFileSpec
+  | ArchiveSpec;
+
+/**
+ * Everything one kind needs, so `run()` has no per-kind branch in it.
+ *
+ * `admit` re-checks the input the provider already saw a schema for, `render`
+ * turns an admitted specification into bytes, and `describe` says how much was
+ * in it. Adding a kind is adding a row; the lifecycle around it -- idempotency,
+ * ordinals, storage, failure recording, logging -- is written once.
+ */
+type KindHandler = {
+  admit(input: unknown): ArtifactAdmission<ArtifactSpec>;
+  render(spec: ArtifactSpec): RenderedArtifact;
+  describe(spec: ArtifactSpec): string;
+  /** What the provider is told the tool is for. */
+  description: string;
+};
+
+const plural = (count: number, noun: string) =>
+  `${count} ${noun}${count === 1 ? "" : "s"}`;
+
+const HANDLERS: Record<ArtifactKind, KindHandler> = {
+  spreadsheet: {
+    admit: admitWorkbookSpecSafely,
+    render: renderSpreadsheetArtifact,
+    describe: (spec: WorkbookSpec) =>
+      `${plural(spec.worksheets.length, "worksheet")}, ` +
+      plural(
+        spec.worksheets.reduce((total, sheet) => total + sheet.rows.length, 0),
+        "row"
+      ),
+    description:
+      "Create a real, downloadable spreadsheet file (.xlsx or .csv) from " +
+      "structured data and attach it to your reply. Use this whenever the " +
+      "user asks for a spreadsheet, an Excel file, a .xlsx or a CSV. You " +
+      "supply the data; the application writes the file. Never write file " +
+      "bytes, base64 or a download link yourself.",
+  },
+  document: {
+    admit: admitDocumentSpec,
+    render: renderDocumentArtifact,
+    describe: (spec: DocumentSpec) => plural(spec.blocks.length, "block"),
+    description:
+      "Create a real, downloadable document (.docx, .pdf, .md or .txt) and " +
+      "attach it to your reply. Use this for reports, letters, summaries, " +
+      "proposals and any prose document the user wants as a file. You supply " +
+      "the content as a flow of blocks (headings, paragraphs, lists, tables, " +
+      "quotes, code); the application writes the file. Never write file " +
+      "bytes, base64 or a download link yourself.",
+  },
+  presentation: {
+    admit: admitPresentationSpec,
+    render: renderPresentationArtifact,
+    describe: (spec: PresentationSpec) => plural(spec.slides.length, "slide"),
+    description:
+      "Create a real, downloadable PowerPoint deck (.pptx) and attach it to " +
+      "your reply. Use this whenever the user asks for slides, a deck or a " +
+      "presentation. You supply the slides; the application writes the file. " +
+      "Never write file bytes, base64 or a download link yourself.",
+  },
+  text: {
+    admit: admitTextFileSpec,
+    render: renderTextArtifact,
+    describe: (spec: TextFileSpec) =>
+      plural(spec.content.split("\n").length, "line"),
+    description:
+      "Create a real, downloadable text file and attach it to your reply. " +
+      "This covers source code and structured text: json, yaml, xml, sql, " +
+      "html, svg, css, and language files such as py, ts, tsx, js, go, rs, " +
+      "java, sh and many more. You author the file's exact text; the " +
+      "application stores it and gives the user a download. Use this instead " +
+      "of a long code block whenever the user asks for a file. Never write " +
+      "base64 or a download link yourself.",
+  },
+  archive: {
+    admit: admitArchiveSpec,
+    render: renderArchiveArtifact,
+    describe: (spec: ArchiveSpec) => plural(spec.entries.length, "entry"),
+    description:
+      "Create a real, downloadable .zip archive of several text files and " +
+      "attach it to your reply. Use this when the user asks for a project, a " +
+      "starter, a set of files, or anything that is more than one file. Each " +
+      "entry has a relative path inside the archive and its own text " +
+      "content. Never write file bytes, base64 or a download link yourself.",
+  },
+};
+
+/**
+ * Which failure the user's card should name.
+ *
+ * The distinction that earns its keep is "too big" against "broken": one has
+ * an obvious next request (a smaller file) and the other does not, and the
+ * card's copy differs accordingly.
+ */
+const renderFailureCode = (error: unknown): ArtifactFailureCode => {
+  if (error instanceof ArtifactRenderError) {
+    return error.code === "OUTPUT_TOO_LARGE" ? "limit_exceeded" : "generation_failed";
+  }
+  if (error instanceof ArtifactGenerationError) {
+    return error.code === "OUTPUT_TOO_LARGE" ? "limit_exceeded" : "generation_failed";
+  }
+  // A model wrote malformed JSON, YAML or XML. Rejected content, not a broken
+  // generator -- and the model can fix it on a second attempt.
+  if (error instanceof TextContentError) return "spec_rejected";
+  if (error instanceof PdfGenerationError) return "generation_failed";
+  return "generation_failed";
+};
 
 export type GeneratedArtifactCollectorOptions = {
   mode: ArtifactToolMode;
@@ -135,7 +316,7 @@ export class GeneratedArtifactCollector {
   }
 
   /**
-   * Whether the model called the tool at all, however that call ended.
+   * Whether the model called a tool at all, however that call ended.
    *
    * Distinct from `isEmpty`, and the distinction matters exactly once: a call
    * this collector refused without recording anything (no conversation to
@@ -225,7 +406,7 @@ export class GeneratedArtifactCollector {
       ordinal: this.nextOrdinal,
       format,
       filename,
-      mediaType: ARTIFACT_MEDIA_TYPES[format],
+      mediaType: requireArtifactFormat(format).mediaType,
       failureCode,
       modelId: this.modelId,
     };
@@ -236,7 +417,27 @@ export class GeneratedArtifactCollector {
   }
 
   /**
-   * One tool call.
+   * The format a *rejected* call should be labelled with.
+   *
+   * Read back off the raw input when it named one this kind actually has, so a
+   * failed `.pdf` request draws a PDF card rather than a Word one. A rejected
+   * specification is untrusted by definition, hence the membership check
+   * rather than a cast.
+   */
+  private failureFormat(kind: ArtifactKind, rawInput: unknown): SupportedArtifactFormat {
+    const requested =
+      rawInput && typeof rawInput === "object"
+        ? (rawInput as Record<string, unknown>).format
+        : undefined;
+    if (typeof requested === "string") {
+      const descriptor = artifactFormat(requested);
+      if (descriptor && descriptor.kind === kind) return requested;
+    }
+    return FALLBACK_FORMAT[kind];
+  }
+
+  /**
+   * One tool call, whichever tool it was.
    *
    * Idempotent on the specification, not on the call: a provider that replays
    * an identical tool call (a retried step, a duplicated stream frame) gets
@@ -245,13 +446,18 @@ export class GeneratedArtifactCollector {
    * "edit produces a new version" rule (policy section 9), and it is why the
    * key is the content and not the name.
    */
-  async run(rawInput: unknown): Promise<ArtifactToolReport> {
+  async run(kind: ArtifactKind, rawInput: unknown): Promise<ArtifactToolReport> {
     this.invocations += 1;
+    const handler = HANDLERS[kind];
+
     if (this.options.mode === "sign_in_required") {
-      const parsed = workbookSpecSchema.safeParse(rawInput);
-      const format = parsed.success ? parsed.data.format : "xlsx";
+      const format = this.failureFormat(kind, rawInput);
+      const requestedName =
+        rawInput && typeof rawInput === "object"
+          ? (rawInput as Record<string, unknown>).filename
+          : undefined;
       const filename = sanitizeArtifactFilename(
-        parsed.success ? parsed.data.filename : "generated",
+        typeof requestedName === "string" ? requestedName : "generated",
         format
       );
       this.recordFailure(filename, format, "sign_in_required", null);
@@ -286,13 +492,17 @@ export class GeneratedArtifactCollector {
       };
     }
 
-    const admission = admitWorkbookSpecSafely(rawInput);
+    const admission = handler.admit(rawInput);
     if (!admission.ok) {
-      const format: SupportedArtifactFormat = "xlsx";
+      const format = this.failureFormat(kind, rawInput);
       this.recordFailure(
-        "generated.xlsx",
+        sanitizeArtifactFilename("generated", format),
         format,
-        admission.code === "TOO_MANY_CELLS" ? "limit_exceeded" : "spec_rejected",
+        admission.code === "TOO_MANY_CELLS" ||
+          admission.code === "ARCHIVE_TOO_LARGE" ||
+          admission.code === "OUTPUT_TOO_LARGE"
+          ? "limit_exceeded"
+          : "spec_rejected",
         null
       );
       return {
@@ -304,15 +514,15 @@ export class GeneratedArtifactCollector {
       };
     }
 
-    const { spec } = admission;
-    const format = spec.format;
+    const spec = admission.spec;
+    const format: SupportedArtifactFormat = spec.format;
     const filename = sanitizeArtifactFilename(spec.filename, format);
 
     // The hash covers the normalised specification and the resolved name, so
     // two calls that differ only in a character the sanitiser removes are one
     // file rather than two.
     const specHash = createHash("sha256")
-      .update(JSON.stringify({ filename, format, worksheets: spec.worksheets }))
+      .update(JSON.stringify({ kind, ...spec, filename }))
       .digest("hex");
 
     const already = this.seenSpecHashes.get(specHash);
@@ -330,37 +540,25 @@ export class GeneratedArtifactCollector {
     // finished is a status nobody needed.
     this.options.emitProgress?.(format);
 
-    let bytes: Uint8Array;
-    let mediaType: string;
+    let rendered: RenderedArtifact;
     try {
-      const rendered = renderWorkbook(spec, format);
-      bytes = rendered.bytes;
-      mediaType = rendered.mediaType;
+      rendered = handler.render(spec);
     } catch (error) {
-      const limitExceeded =
-        error instanceof ArtifactGenerationError &&
-        error.code === "OUTPUT_TOO_LARGE";
-      this.recordFailure(
-        filename,
-        format,
-        limitExceeded ? "limit_exceeded" : "generation_failed",
-        specHash
-      );
+      this.recordFailure(filename, format, renderFailureCode(error), specHash);
       console.error("Generated artifact rendering failed:", {
         traceId: this.options.traceId,
         conversationId: this.options.conversationId,
+        kind,
         format,
         error: error instanceof Error ? error.message : String(error),
       });
       return {
         status: "failed",
         reason:
-          error instanceof ArtifactGenerationError
-            ? error.message.slice(0, 300)
-            : "generation_failed",
+          error instanceof Error ? error.message.slice(0, 300) : "generation_failed",
         note:
-          "The file was not created. Tell the user, and offer a smaller version. " +
-          "Do not describe a file that does not exist.",
+          "The file was not created. Tell the user, and offer a smaller or " +
+          "corrected version. Do not describe a file that does not exist.",
       };
     }
 
@@ -372,8 +570,8 @@ export class GeneratedArtifactCollector {
         ordinal: this.nextOrdinal,
         format,
         filename,
-        mediaType,
-        bytes,
+        mediaType: rendered.mediaType,
+        bytes: rendered.bytes,
         modelId: this.modelId,
       });
     } catch (error) {
@@ -396,16 +594,16 @@ export class GeneratedArtifactCollector {
     this.storedArtifacts.push(storedArtifact);
     this.seenSpecHashes.set(specHash, storedArtifact);
 
-    const rows = spec.worksheets.reduce((total, sheet) => total + sheet.rows.length, 0);
+    const parts = handler.describe(spec);
     console.info(
       JSON.stringify({
         event: "generated_artifact_created",
         traceId: this.options.traceId,
         conversationId: this.options.conversationId,
         modelId: this.modelId,
+        kind,
         format,
-        worksheets: spec.worksheets.length,
-        rows,
+        parts,
         byteSize: storedArtifact.byteSize,
         timestamp: new Date().toISOString(),
       })
@@ -415,8 +613,7 @@ export class GeneratedArtifactCollector {
       status: "created",
       filename,
       format,
-      worksheets: spec.worksheets.length,
-      rows,
+      parts,
       note:
         "The file is attached to your message and the user has a download " +
         "button. Do not repeat the table, the CSV text, the code, or a link. " +
@@ -426,28 +623,43 @@ export class GeneratedArtifactCollector {
 }
 
 /**
- * The tool definition sent to the provider.
+ * The tool definitions sent to the provider.
  *
- * `inputSchema` is the same Zod schema `admitWorkbookSpecSafely` re-checks
- * inside `execute`, and the duplication is intentional. The schema the
- * provider sees is a hint that a well-behaved model follows; the check inside
- * is what actually decides. Trusting the first would mean trusting that every
- * provider enforces a JSON schema it was handed, which is not a property any
- * of them promises.
+ * `inputSchema` is the same Zod schema the handler's `admit` re-checks inside
+ * `execute`, and the duplication is intentional. The schema the provider sees
+ * is a hint that a well-behaved model follows; the check inside is what
+ * actually decides. Trusting the first would mean trusting that every provider
+ * enforces a JSON schema it was handed, which is not a property any of them
+ * promises.
  */
 export const buildGeneratedArtifactToolConfig = (
   collector: GeneratedArtifactCollector
 ): { tools: ToolSet } => ({
   tools: {
-    [CREATE_SPREADSHEET_TOOL_NAME]: tool({
-      description:
-        "Create a real, downloadable spreadsheet file (.xlsx or .csv) from " +
-        "structured data and attach it to your reply. Use this whenever the " +
-        "user asks for a spreadsheet, an Excel file, a .xlsx, a CSV, or asks " +
-        "for data 'as a file'. You supply the data; the application writes the " +
-        "file. Never write file bytes, base64 or a download link yourself.",
+    [ARTIFACT_TOOL_NAMES.spreadsheet]: tool({
+      description: HANDLERS.spreadsheet.description,
       inputSchema: workbookSpecSchema,
-      execute: async (input) => collector.run(input),
+      execute: async (input) => collector.run("spreadsheet", input),
+    }),
+    [ARTIFACT_TOOL_NAMES.document]: tool({
+      description: HANDLERS.document.description,
+      inputSchema: documentSpecSchema,
+      execute: async (input) => collector.run("document", input),
+    }),
+    [ARTIFACT_TOOL_NAMES.presentation]: tool({
+      description: HANDLERS.presentation.description,
+      inputSchema: presentationSpecSchema,
+      execute: async (input) => collector.run("presentation", input),
+    }),
+    [ARTIFACT_TOOL_NAMES.text]: tool({
+      description: HANDLERS.text.description,
+      inputSchema: textFileSpecSchema,
+      execute: async (input) => collector.run("text", input),
+    }),
+    [ARTIFACT_TOOL_NAMES.archive]: tool({
+      description: HANDLERS.archive.description,
+      inputSchema: archiveSpecSchema,
+      execute: async (input) => collector.run("archive", input),
     }),
   },
 });

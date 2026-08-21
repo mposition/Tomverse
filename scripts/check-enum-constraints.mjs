@@ -62,7 +62,7 @@ const REGISTRY = {
     module: "lib/generatedArtifactCore.ts",
     list: "SUPPORTED_ARTIFACT_FORMATS",
     reason:
-      "xlsx and csv -- the formats a generator actually exists for (docs/policy/generated-artifacts.md). ARTIFACT_FORMATS beside it is deliberately wider: it names the formats the product can say it does not support yet, and writing that list into the constraint would let a row claim a file nothing can produce.",
+      "The fifty-eight formats a generator actually exists for, built from the format table in lib/generatedArtifactFormats.ts (docs/policy/generated-artifacts.md). REFUSED_ARTIFACT_EXTENSIONS beside it is the opposite list -- extensions the product refuses outright -- and neither it nor any format without a generator may reach the constraint, because a row here claims a file the download route can serve.",
   },
   MessageArtifact_status_check: {
     owner: "list",

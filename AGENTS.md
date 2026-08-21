@@ -573,8 +573,8 @@ default를 DB에 씁니다), 저장값 JSON 파싱 실패, schema 검증 실패.
 
 # AI 생성 파일 (Generated Artifact)
 
-채팅 답변이 만들어 내는 실제 파일 — tool 정의, workbook 명세, XLSX 생성기,
-저장, 다운로드 권한, 수명주기 — 를 건드리기 전에 읽습니다.
+채팅 답변이 만들어 내는 실제 파일 — tool 정의, 명세, 형식 표, 생성기, 저장,
+다운로드 권한, 수명주기 — 를 건드리기 전에 읽습니다.
 
 - `docs/policy/generated-artifacts.md`
 
@@ -584,10 +584,25 @@ default를 DB에 씁니다), 저장값 JSON 파싱 실패, schema 검증 실패.
   base64, sandbox 경로(`/mnt/data/...`), 가짜 링크는 파일의 대체물이 아닙니다.
   파일 생성 요청의 결과는 다운로드 가능한 artifact이고, 안 되면 왜 안 되는지와
   무엇을 하면 되는지를 말합니다.
-- **모델은 명세만 만들고 바이트는 서버가 만듭니다.** `create_spreadsheet`의
-  입력은 Zod로 검증된 workbook specification이며, tool schema는 힌트일 뿐이라
-  `admitWorkbookSpecSafely()`가 `execute` 안에서 다시 판정합니다. 명세에
-  `formula` 필드는 없고 writer는 `<f>` 요소를 쓰지 않습니다.
+- **구조가 있는 형식에서 모델은 명세만 만들고 바이트는 서버가 만듭니다.**
+  tool은 형식마다가 아니라 종류마다 하나입니다 — `create_spreadsheet`,
+  `create_document`, `create_presentation`, `create_text_file`,
+  `create_archive`. 입력은 Zod로 검증된 명세이며, tool schema는 힌트일 뿐이라
+  `admit*Spec()`이 `execute` 안에서 다시 판정합니다. 명세에 `formula` 필드는
+  없고 writer는 `<f>` 요소를 쓰지 않습니다.
+- **소스 코드·마크업·설정은 모델이 텍스트를 직접 씁니다.** Python module에는
+  "그 텍스트"가 아닌 명세가 없기 때문이고, 대신 제한된 크기·이 앱이 정한
+  확장자·구조 검사(JSON·YAML·XML·SVG)·다운로드 전용 전달이 적용됩니다.
+  SVG의 `<script>`·event handler·`javascript:`는 거절합니다.
+- **형식은 표 하나입니다.** `lib/generatedArtifactFormats.ts`의
+  `ARTIFACT_FORMAT_TABLE`이 확장자·media type·kind·검증·label을 함께 정합니다.
+  형식 추가는 표의 행 하나 + `lib/generatedArtifactRenderers.ts`의 분기 하나 +
+  migration의 `format` CHECK뿐이고, 그 밖의 어디에도 형식별 분기를 만들지
+  않습니다.
+- **실행되는 형식은 만들지 않습니다**(`REFUSED_ARTIFACT_EXTENSIONS`). 기준은
+  "열면 실행되는가"이므로 `.sh`·`.ps1`·`.py`는 지원하고 `.exe`·`.msi`·`.bat`은
+  거절합니다. 같은 목록이 아카이브 항목에도 적용되므로 zip으로 우회할 수
+  없습니다. 아카이브 경로는 정규화하지 않고 **거절**합니다.
 - **조용한 퇴행이 없습니다.** 모든 turn이 artifact system block을 하나 싣고,
   tool을 못 쓰는 turn은 그 사실을 말하라고 지시받습니다. 가용성 판정은
   `planGeneratedArtifactTool()` 한 곳이며, 검증되지 않은 모델은 fail-closed
@@ -608,8 +623,8 @@ default를 DB에 씁니다), 저장값 JSON 파싱 실패, schema 검증 실패.
 - **web search와의 충돌은 검색이 이깁니다.** 강제된 native 검색
   (`toolChoice: "required"`)과 Google grounding에서는 artifact tool을 등록하지
   않습니다. Anthropic 검색은 공존합니다.
-- **xlsx 요청을 csv로 대체하지 않습니다.** DOCX/PPTX/PDF는 지원하지 않는다고
-  말합니다.
+- **요청한 형식으로 만듭니다.** xlsx를 csv로, docx를 md로 대체하지 않습니다.
+  표에 없는 확장자는 지원하지 않는다고 말합니다.
 - **billing의 `allowDownloads`를 재사용하지 않습니다.** 그 권한은 대화 TXT
   내보내기의 것이며, 생성 파일은 로그인한 모든 계정이 쓸 수 있습니다:
   docs/policy/generated-artifacts.md §11.

@@ -146,7 +146,32 @@ test("the generate prompt forbids every shape of a faked result", () => {
     assert.ok(prompt.includes(forbidden), forbidden);
   }
   assert.match(prompt, /Never substitute CSV/);
-  assert.match(prompt, /not supported yet/);
+  assert.match(prompt, /not supported/);
+});
+
+test("the generate prompt names every tool and every format group", () => {
+  const prompt = plan().systemPrompt;
+  for (const name of [
+    "create_spreadsheet",
+    "create_document",
+    "create_presentation",
+    "create_text_file",
+    "create_archive",
+  ]) {
+    assert.ok(prompt.includes(name), name);
+  }
+  for (const format of ["xlsx", "docx", "pptx", "pdf", "json", "yaml", "sql", "py", "zip"]) {
+    assert.ok(prompt.includes(format), format);
+  }
+});
+
+test("the generate prompt says which extensions are refused outright", () => {
+  const prompt = plan().systemPrompt;
+  // A refusal the model can state is what keeps it from inventing a link
+  // instead (policy section 4).
+  for (const refused of ["exe", "dll", "msi", "bat"]) {
+    assert.ok(prompt.includes(refused), refused);
+  }
 });
 
 test("the guest prompt refuses the same four substitutes", () => {

@@ -18,9 +18,9 @@
 -- Three CHECK constraints, each closing a way the application could write a
 -- row that promises a file it cannot serve:
 --
---   format   the allowlist SUPPORTED_ARTIFACT_FORMATS in
---            lib/generatedArtifactCore.ts. SQL cannot import it, so the copy
---            here is held to that list by
+--   format   the allowlist SUPPORTED_ARTIFACT_FORMATS, built from the format
+--            table in lib/generatedArtifactFormats.ts. SQL cannot import it,
+--            so the copy here is held to that list by
 --            tests/integration/generated-artifacts.db.test.ts and registered
 --            in scripts/check-enum-constraints.mjs.
 --   status   ready | failed. There is no `pending`: a row is written only
@@ -69,7 +69,15 @@ ALTER TABLE "MessageArtifact"
   DROP CONSTRAINT IF EXISTS "MessageArtifact_format_check";
 ALTER TABLE "MessageArtifact"
   ADD CONSTRAINT "MessageArtifact_format_check"
-  CHECK ("format" IN ('xlsx', 'csv'));
+  CHECK ("format" IN (
+    'xlsx', 'docx', 'pptx', 'pdf', 'csv', 'md', 'txt', 'json', 'yaml',
+    'yml', 'xml', 'toml', 'ini', 'tsv', 'html', 'htm', 'svg', 'css',
+    'scss', 'less', 'sql', 'graphql', 'proto', 'ts', 'tsx', 'js', 'jsx',
+    'mjs', 'cjs', 'py', 'rb', 'go', 'rs', 'java', 'kt', 'swift', 'c',
+    'h', 'cpp', 'hpp', 'cs', 'php', 'sh', 'bash', 'ps1', 'r', 'scala',
+    'lua', 'pl', 'dart', 'ex', 'exs', 'hs', 'vue', 'svelte', 'dockerfile',
+    'env', 'zip'
+  ));
 
 ALTER TABLE "MessageArtifact"
   DROP CONSTRAINT IF EXISTS "MessageArtifact_status_check";
