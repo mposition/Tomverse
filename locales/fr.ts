@@ -1600,6 +1600,51 @@ export const fr = {
             cancelled: "Annulée",
         },
     },
+    emailNotifications: {
+        title: "Notifications par e-mail",
+        description: "Choisissez les e-mails que Tomverse vous envoie.",
+        dataTabTitle: "Notifications par e-mail",
+        dataTabDescription: "Choisissez les e-mails que vous recevez et indiquez le pays dont les règles s'appliquent.",
+        dataTabStatus: "Les e-mails de sécurité et de facturation sont toujours activés",
+        dataTabOpen: "Ouvrir les notifications par e-mail",
+        loadFailed: "Impossible de charger vos réglages d'e-mail. Réessayez dans un instant.",
+        lockedNote: "Impossible à désactiver : ces e-mails protègent votre compte et attestent vos paiements.",
+        alwaysOn: "Toujours activé",
+        withdrawAll: "Désactiver tous les e-mails marketing",
+        countryNeededTitle: "Confirmez votre pays",
+        countryNeededBody: "Nous devons savoir quelles règles nationales s'appliquent avant de vous envoyer des e-mails marketing. Indiquez-le ci-dessous.",
+        countryConflictBody: "Votre pays de facturation et celui de votre profil diffèrent ({countries}). Choisissez ci-dessous celui qui s'applique.",
+        needsCountryNote: "Indiquez votre pays ci-dessous pour que cet envoi soit possible.",
+        countryLabel: "Pays",
+        countryDescription: "Code à deux lettres. Sert à appliquer le bon étiquetage publicitaire, les mentions d'expéditeur et les règles de désabonnement, pas à la tarification.",
+        countrySave: "Enregistrer",
+        purpose: {
+            security: {
+                title: "Sécurité et compte",
+                description: "Codes de connexion, changements de mot de passe et de méthode de connexion, alertes de sécurité.",
+            },
+            billing: {
+                title: "Facturation",
+                description: "Reçus, paiements échoués, changements d'abonnement.",
+            },
+            service_status: {
+                title: "État du service",
+                description: "Pannes et maintenances planifiées.",
+            },
+            product_updates: {
+                title: "Nouveautés produit",
+                description: "Nouvelles fonctionnalités et améliorations.",
+            },
+            newsletter: {
+                title: "Newsletter",
+                description: "Actualités Tomverse et cas d'usage.",
+            },
+            promotions: {
+                title: "Offres",
+                description: "Remises et campagnes.",
+            },
+        },
+    },
     unsubscribe: {
         title: "Ne plus recevoir cet e-mail",
         body: "Vous pouvez cesser de recevoir ce type d'e-mail de Tomverse. Les alertes de sécurité et les reçus de facturation continueront : ils font partie de votre compte et ne peuvent pas être désactivés.",

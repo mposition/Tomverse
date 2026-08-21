@@ -116,9 +116,13 @@ const ENGLISH_STRING_CEILING = {
   // too long for a subtitle already carrying a brand and a latency class.
   // German, Spanish, Korean and Chinese all differ, so only these two moved.
   // Allowlisted in check-locale-translation-core.mjs for the same reason.
+  // +1 for fr and de on 2026-08-21: the preference centre's newsletter row is
+  // titled "Newsletter", which is the word French and German both use for it.
+  // Rendering something else would be a worse translation, not a better one.
+  // Chinese, Spanish and Portuguese have their own words and did not move.
   zh: 10,
-  fr: 30,
-  de: 24,
+  fr: 31,
+  de: 25,
   es: 17,
   pt: 15,
 };

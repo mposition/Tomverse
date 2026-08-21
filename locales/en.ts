@@ -1600,6 +1600,51 @@ export const en = {
             cancelled: "Cancelled",
         },
     },
+    emailNotifications: {
+        title: "Email notifications",
+        description: "Choose which emails Tomverse sends you.",
+        dataTabTitle: "Email notifications",
+        dataTabDescription: "Choose which emails you receive, and set the country whose rules apply.",
+        dataTabStatus: "Security and billing email is always on",
+        dataTabOpen: "Open email notifications",
+        loadFailed: "Could not load your email settings. Try again in a moment.",
+        lockedNote: "This cannot be turned off: it protects your account and records your payments.",
+        alwaysOn: "Always on",
+        withdrawAll: "Turn off all marketing email",
+        countryNeededTitle: "Confirm your country",
+        countryNeededBody: "We need to know which country's email rules apply before we can send you marketing email. Set it below.",
+        countryConflictBody: "Your billing country and your profile country do not match ({countries}). Set the one that applies below.",
+        needsCountryNote: "Set your country below before this can be sent.",
+        countryLabel: "Country",
+        countryDescription: "Two-letter code. Used to apply the right advertising labelling, sender details and unsubscribe rules -- not for pricing.",
+        countrySave: "Save",
+        purpose: {
+            security: {
+                title: "Security and account",
+                description: "Sign-in codes, password and login-method changes, security alerts.",
+            },
+            billing: {
+                title: "Billing",
+                description: "Receipts, failed payments, subscription changes.",
+            },
+            service_status: {
+                title: "Service status",
+                description: "Outages and planned maintenance.",
+            },
+            product_updates: {
+                title: "Product updates",
+                description: "New features and improvements.",
+            },
+            newsletter: {
+                title: "Newsletter",
+                description: "Tomverse news and how people use it.",
+            },
+            promotions: {
+                title: "Offers",
+                description: "Discounts and campaigns.",
+            },
+        },
+    },
     unsubscribe: {
         title: "Stop receiving this email",
         body: "You can stop receiving this kind of email from Tomverse. You will still get security alerts and billing receipts -- those are part of your account and cannot be switched off.",

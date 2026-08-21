@@ -1600,6 +1600,51 @@ export const es = {
             cancelled: "Cancelada",
         },
     },
+    emailNotifications: {
+        title: "Notificaciones por correo",
+        description: "Elige qué correos te envía Tomverse.",
+        dataTabTitle: "Notificaciones por correo",
+        dataTabDescription: "Elige qué correos recibes e indica el país cuyas normas se aplican.",
+        dataTabStatus: "Los correos de seguridad y facturación están siempre activos",
+        dataTabOpen: "Abrir notificaciones por correo",
+        loadFailed: "No se pudieron cargar tus ajustes de correo. Inténtalo de nuevo en un momento.",
+        lockedNote: "No se puede desactivar: protege tu cuenta y deja constancia de tus pagos.",
+        alwaysOn: "Siempre activo",
+        withdrawAll: "Desactivar todo el correo de marketing",
+        countryNeededTitle: "Confirma tu país",
+        countryNeededBody: "Necesitamos saber qué normas nacionales se aplican antes de enviarte correo de marketing. Indícalo abajo.",
+        countryConflictBody: "Tu país de facturación y el de tu perfil no coinciden ({countries}). Elige abajo el que corresponde.",
+        needsCountryNote: "Indica tu país abajo para que esto pueda enviarse.",
+        countryLabel: "País",
+        countryDescription: "Código de dos letras. Se usa para aplicar el etiquetado publicitario, los datos del remitente y las reglas de baja correctos, no para el precio.",
+        countrySave: "Guardar",
+        purpose: {
+            security: {
+                title: "Seguridad y cuenta",
+                description: "Códigos de acceso, cambios de contraseña y de método de inicio de sesión, alertas de seguridad.",
+            },
+            billing: {
+                title: "Facturación",
+                description: "Recibos, pagos fallidos, cambios de suscripción.",
+            },
+            service_status: {
+                title: "Estado del servicio",
+                description: "Incidencias y mantenimiento planificado.",
+            },
+            product_updates: {
+                title: "Novedades del producto",
+                description: "Funciones nuevas y mejoras.",
+            },
+            newsletter: {
+                title: "Boletín",
+                description: "Novedades de Tomverse y casos de uso.",
+            },
+            promotions: {
+                title: "Ofertas",
+                description: "Descuentos y campañas.",
+            },
+        },
+    },
     unsubscribe: {
         title: "Dejar de recibir este correo",
         body: "Puedes dejar de recibir este tipo de correo de Tomverse. Seguirás recibiendo alertas de seguridad y recibos de facturación: forman parte de tu cuenta y no se pueden desactivar.",

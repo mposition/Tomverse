@@ -115,8 +115,11 @@ export async function createCredentialDeliveryRows(
       lane: CREDENTIAL_LANE,
       emailAddress: input.emailAddress,
       language: input.language,
-      // Transactional mail branches on no jurisdiction rule, so the fallback
-      // profile is the honest answer rather than a guess (§6.3).
+      // A login code is answered identically whether or not an account
+      // exists, so resolving a jurisdiction here would make this row the one
+      // place that knows. Transactional mail branches on no jurisdiction rule
+      // anyway -- no advertising label, no quiet hours -- so `ZZ` costs it
+      // nothing (§6.3).
       jurisdictionCountry: "ZZ",
       jurisdictionProfileKey: "ZZ",
       policyVersionId: input.policyVersionId,

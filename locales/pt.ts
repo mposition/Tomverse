@@ -1599,6 +1599,51 @@ export const pt = {
             cancelled: "Cancelada",
         },
     },
+    emailNotifications: {
+        title: "Notificações por e-mail",
+        description: "Escolha quais e-mails a Tomverse envia para você.",
+        dataTabTitle: "Notificações por e-mail",
+        dataTabDescription: "Escolha quais e-mails você recebe e defina o país cujas regras se aplicam.",
+        dataTabStatus: "E-mails de segurança e cobrança estão sempre ativos",
+        dataTabOpen: "Abrir notificações por e-mail",
+        loadFailed: "Não foi possível carregar suas configurações de e-mail. Tente novamente em instantes.",
+        lockedNote: "Não pode ser desligado: protege sua conta e registra seus pagamentos.",
+        alwaysOn: "Sempre ativo",
+        withdrawAll: "Desligar todos os e-mails de marketing",
+        countryNeededTitle: "Confirme seu país",
+        countryNeededBody: "Precisamos saber quais regras nacionais se aplicam antes de enviar e-mails de marketing. Defina abaixo.",
+        countryConflictBody: "Seu país de cobrança e o do seu perfil não coincidem ({countries}). Escolha abaixo o que se aplica.",
+        needsCountryNote: "Defina seu país abaixo para que isto possa ser enviado.",
+        countryLabel: "País",
+        countryDescription: "Código de duas letras. Usado para aplicar a identificação publicitária, os dados do remetente e as regras de descadastro corretos -- não para preços.",
+        countrySave: "Salvar",
+        purpose: {
+            security: {
+                title: "Segurança e conta",
+                description: "Códigos de acesso, alterações de senha e de método de login, alertas de segurança.",
+            },
+            billing: {
+                title: "Cobrança",
+                description: "Recibos, pagamentos recusados, mudanças de assinatura.",
+            },
+            service_status: {
+                title: "Status do serviço",
+                description: "Falhas e manutenções programadas.",
+            },
+            product_updates: {
+                title: "Novidades do produto",
+                description: "Novos recursos e melhorias.",
+            },
+            newsletter: {
+                title: "Boletim",
+                description: "Novidades da Tomverse e casos de uso.",
+            },
+            promotions: {
+                title: "Ofertas",
+                description: "Descontos e campanhas.",
+            },
+        },
+    },
     unsubscribe: {
         title: "Parar de receber este e-mail",
         body: "Você pode parar de receber este tipo de e-mail da Tomverse. Alertas de segurança e recibos de cobrança continuarão a chegar -- fazem parte da sua conta e não podem ser desligados.",

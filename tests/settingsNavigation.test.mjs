@@ -31,7 +31,15 @@ test("every entry with a detail page addresses the settings list, not the chat",
 // row-level properties are derived: adding a fourth entry should not mean
 // hand-writing another pair of comparisons that somebody will forget.
 test("every entry lives under the same settings tab but stays a separate row", () => {
-  assert.deepEqual(SETTINGS_SECTION_IDS, ["external-import", "memory", "assistants", "account-data"]);
+  // Asserted explicitly rather than derived: this list is what stops a section
+  // vanishing in a refactor, so a change to it has to be a change here too.
+  assert.deepEqual(SETTINGS_SECTION_IDS, [
+    "external-import",
+    "memory",
+    "assistants",
+    "account-data",
+    "email-notifications",
+  ]);
 
   const elementIds = new Set();
   const hrefs = new Set();

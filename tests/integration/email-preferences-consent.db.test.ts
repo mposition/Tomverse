@@ -11,6 +11,11 @@ import {
 } from "@/lib/emailPreferences";
 import { suppressionCheck } from "@/lib/emailSuppression";
 import {
+  jurisdictionForUser,
+  recordBillingCountry,
+  setSelfDeclaredCountry,
+} from "@/lib/emailJurisdiction";
+import {
   createUnsubscribeToken,
   readUnsubscribeKeyring,
 } from "@/lib/unsubscribeToken";
@@ -493,4 +498,105 @@ test("a token names one subject and one purpose and nothing else", async () => {
 
   assert.notEqual(token, other);
   assert.equal(token.includes("user_a"), false);
+});
+
+test("a jurisdiction resolves from the payment method and the declaration", async () => {
+  const user = await someone();
+  await prisma.userSettings.create({
+    data: { userId: user.id, language: "en", timeZone: "UTC" },
+  });
+
+  // Nothing known yet: honest rather than guessed, and marketing will not send.
+  const unknown = await jurisdictionForUser({ userId: user.id });
+  assert.equal(unknown.confidence, "unknown");
+  assert.equal(unknown.countryCode, "ZZ");
+
+  await setSelfDeclaredCountry({ userId: user.id, country: "kr" });
+  const declared = await jurisdictionForUser({ userId: user.id });
+  assert.equal(declared.countryCode, "KR");
+  assert.equal(declared.confidence, "high");
+  assert.equal(declared.source, "self_declared");
+
+  // Agreeing does not change it.
+  await recordBillingCountry({ userId: user.id, country: "KR" });
+  const agreed = await jurisdictionForUser({ userId: user.id });
+  assert.equal(agreed.confidence, "high");
+  assert.equal(agreed.source, "billing");
+});
+
+test("a payment method from elsewhere is a conflict, not a move", async () => {
+  const user = await someone();
+  await prisma.userSettings.create({
+    data: { userId: user.id, language: "en", timeZone: "UTC" },
+  });
+  await setSelfDeclaredCountry({ userId: user.id, country: "KR" });
+  await recordBillingCountry({ userId: user.id, country: "SG" });
+
+  const resolved = await jurisdictionForUser({ userId: user.id });
+  assert.equal(resolved.confidence, "conflict");
+  assert.deepEqual(resolved.conflicts.sort(), ["KR", "SG"]);
+  // The declaration is preserved, not overwritten: paying with a card
+  // registered elsewhere is not moving house.
+  assert.equal(resolved.selfDeclaredCountry, "KR");
+});
+
+test("an inferred country is never read back as a declaration", async () => {
+  const user = await someone();
+  await prisma.userSettings.create({
+    data: { userId: user.id, language: "ko", timeZone: "Asia/Seoul" },
+  });
+
+  const resolved = await jurisdictionForUser({ userId: user.id });
+  assert.equal(resolved.countryCode, "KR");
+  assert.equal(resolved.confidence, "low");
+  // The field stays empty, so the preference centre asks rather than
+  // pre-filling a guess that a save would turn into a fact.
+  assert.equal(resolved.selfDeclaredCountry, null);
+});
+
+test("an IP is observed and changes nothing", async () => {
+  const user = await someone();
+  await prisma.userSettings.create({
+    data: { userId: user.id, language: "en", timeZone: "UTC" },
+  });
+  await setSelfDeclaredCountry({ userId: user.id, country: "KR" });
+
+  const resolved = await jurisdictionForUser({
+    userId: user.id,
+    ipCountry: "US",
+  });
+  assert.equal(resolved.countryCode, "KR");
+  assert.equal(resolved.observedIpCountry, "US");
+});
+
+test("a withdrawn consent does not tell us where somebody is", async () => {
+  const user = await someone();
+  await prisma.userSettings.create({
+    data: { userId: user.id, language: "en", timeZone: "UTC" },
+  });
+  await setSelfDeclaredCountry({ userId: user.id, country: "KR" });
+  await setPreference({
+    userId: user.id,
+    purpose: "newsletter",
+    enabled: true,
+    capturedVia: "preference_center",
+    source: "preference_center",
+  });
+  await setPreference({
+    userId: user.id,
+    purpose: "newsletter",
+    enabled: false,
+    capturedVia: "preference_center",
+    source: "preference_center",
+  });
+
+  // Clear the declaration; only the consent history is left, and the standing
+  // consent is gone.
+  await prisma.userSettings.update({
+    where: { userId: user.id },
+    data: { country: null, countrySource: null },
+  });
+
+  const resolved = await jurisdictionForUser({ userId: user.id });
+  assert.equal(resolved.confidence, "unknown");
 });

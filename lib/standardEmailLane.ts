@@ -21,6 +21,8 @@ import {
   suppressionCheck,
 } from "@/lib/emailSuppression";
 import { unsubscribeHeaders } from "@/lib/emailUnsubscribeHeaders";
+import { jurisdictionForUser } from "@/lib/emailJurisdiction";
+import { marketingJurisdictionVerdict } from "@/lib/emailJurisdictionCore";
 import { isEmailPurpose } from "@/lib/emailPreferenceCore";
 import {
   EMAIL_AUDIT_HASH_KEY_VERSION,
@@ -114,6 +116,8 @@ export async function createStandardDeliveryRows(
     templateVersionId: string;
     policyVersionId: string;
     language: string;
+    jurisdictionCountry: string;
+    jurisdictionProfileKey: string;
   }
 ): Promise<{ eventId: string; deliveryId: string; idempotencyKey: string }> {
   const definition = emailTemplateDefinition(input.templateKey);
@@ -151,10 +155,12 @@ export async function createStandardDeliveryRows(
       lane: "standard",
       emailAddress: input.emailAddress,
       language: input.language,
-      // Transactional and legal mail branches on no jurisdiction rule, so the
-      // fallback profile is the honest answer rather than a guess (§6.3).
-      jurisdictionCountry: "ZZ",
-      jurisdictionProfileKey: "ZZ",
+      // Pinned at enqueue so activating a new policy version mid-flight cannot
+      // change what this row renders. `ZZ` when nothing resolves is the honest
+      // answer rather than a guess -- it carries the business identity footer
+      // and no advertising rule, which is right for the mail that sends on it.
+      jurisdictionCountry: input.jurisdictionCountry,
+      jurisdictionProfileKey: input.jurisdictionProfileKey,
       policyVersionId: input.policyVersionId,
       templateVersionId: input.templateVersionId,
       idempotencyKey,
@@ -190,12 +196,22 @@ export async function enqueueStandardEmail(
   });
   const policyVersionId = await ensureBootstrapPolicyVersion();
 
+  // Resolved here rather than at send time so the row records what was true
+  // when the message was owed. The *marketing* gate re-checks at send time,
+  // because a jurisdiction that became confirmed in between should not keep a
+  // message held -- and one that became conflicted should stop it.
+  const resolved = input.userId
+    ? await jurisdictionForUser({ userId: input.userId })
+    : null;
+
   const rows = {
     ...input,
     emailAddress: input.emailAddress,
     ...template,
     policyVersionId,
     language,
+    jurisdictionCountry: resolved?.countryCode ?? "ZZ",
+    jurisdictionProfileKey: resolved?.profileKey ?? "ZZ",
   };
   return input.tx
     ? createStandardDeliveryRows(input.tx, rows)
@@ -442,6 +458,32 @@ const sendClaimedDelivery = async (delivery: ClaimedDelivery, now: Date) => {
         data: {
           status: "skipped",
           skipReason: "no_consent",
+          attempts: delivery.attempts,
+          nextAttemptAt: null,
+          claimedAt: null,
+        },
+      });
+      return "suppressed" as const;
+    }
+  }
+
+  // Marketing needs a confirmed jurisdiction, and nothing else consults this.
+  // An inferred country is refused as firmly as an absent one: sending
+  // advertising under a guessed set of labelling rules is what §6.3 declines
+  // to do, and "(광고)" versus "<ADV>" is not a difference anything can split.
+  if (definition.classification === "marketing") {
+    const resolved = delivery.userId
+      ? await jurisdictionForUser({ userId: delivery.userId })
+      : null;
+    const verdict = resolved
+      ? marketingJurisdictionVerdict(resolved)
+      : ({ allowed: false, skipReason: "jurisdiction_unconfirmed" } as const);
+    if (!verdict.allowed) {
+      await prisma.emailDelivery.update({
+        where: { id: delivery.id },
+        data: {
+          status: "skipped",
+          skipReason: verdict.skipReason,
           attempts: delivery.attempts,
           nextAttemptAt: null,
           claimedAt: null,

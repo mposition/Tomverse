@@ -1603,6 +1603,51 @@ export const de = {
             cancelled: "Abgebrochen",
         },
     },
+    emailNotifications: {
+        title: "E-Mail-Benachrichtigungen",
+        description: "Wählen Sie, welche E-Mails Tomverse Ihnen sendet.",
+        dataTabTitle: "E-Mail-Benachrichtigungen",
+        dataTabDescription: "Wählen Sie, welche E-Mails Sie erhalten, und legen Sie fest, welches Landesrecht gilt.",
+        dataTabStatus: "Sicherheits- und Zahlungs-E-Mails sind immer aktiv",
+        dataTabOpen: "E-Mail-Benachrichtigungen öffnen",
+        loadFailed: "Ihre E-Mail-Einstellungen konnten nicht geladen werden. Versuchen Sie es gleich noch einmal.",
+        lockedNote: "Nicht abschaltbar: Diese E-Mails schützen Ihr Konto und belegen Ihre Zahlungen.",
+        alwaysOn: "Immer aktiv",
+        withdrawAll: "Alle Marketing-E-Mails abschalten",
+        countryNeededTitle: "Bestätigen Sie Ihr Land",
+        countryNeededBody: "Bevor wir Marketing-E-Mails senden können, müssen wir wissen, welches Landesrecht gilt. Legen Sie es unten fest.",
+        countryConflictBody: "Ihr Rechnungsland und Ihr Profilland stimmen nicht überein ({countries}). Wählen Sie unten das zutreffende aus.",
+        needsCountryNote: "Legen Sie unten Ihr Land fest, damit dies gesendet werden kann.",
+        countryLabel: "Land",
+        countryDescription: "Zweibuchstabiger Code. Bestimmt Werbekennzeichnung, Absenderangaben und Abmelderegeln -- nicht den Preis.",
+        countrySave: "Speichern",
+        purpose: {
+            security: {
+                title: "Sicherheit und Konto",
+                description: "Anmeldecodes, Änderungen an Passwort und Anmeldemethode, Sicherheitshinweise.",
+            },
+            billing: {
+                title: "Abrechnung",
+                description: "Belege, fehlgeschlagene Zahlungen, Abo-Änderungen.",
+            },
+            service_status: {
+                title: "Servicestatus",
+                description: "Störungen und geplante Wartungen.",
+            },
+            product_updates: {
+                title: "Produkt-Updates",
+                description: "Neue Funktionen und Verbesserungen.",
+            },
+            newsletter: {
+                title: "Newsletter",
+                description: "Tomverse-Neuigkeiten und Anwendungsbeispiele.",
+            },
+            promotions: {
+                title: "Angebote",
+                description: "Rabatte und Aktionen.",
+            },
+        },
+    },
     unsubscribe: {
         title: "Diese E-Mails abbestellen",
         body: "Sie können diese Art von E-Mail von Tomverse abbestellen. Sicherheitshinweise und Zahlungsbelege erhalten Sie weiterhin -- sie gehören zu Ihrem Konto und lassen sich nicht abschalten.",

@@ -142,6 +142,16 @@ model UserSettings {
   countrySource    String?
   countryUpdatedAt DateTime?
 
+  /// What the payment method's country said, kept beside the declaration
+  /// rather than folded into it.
+  ///
+  /// Both are needed at once or a disagreement cannot be seen: with one column
+  /// the second signal would simply overwrite the first, and the contract's
+  /// conflict case (§6.2 step 3) would be undetectable rather than handled.
+  /// Written by the Stripe webhook; never by anything a visitor controls.
+  billingCountry          String?
+  billingCountryUpdatedAt DateTime?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 }

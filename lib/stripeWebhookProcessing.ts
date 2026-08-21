@@ -3,6 +3,7 @@ import "server-only";
 import type Stripe from "stripe";
 import { getBillingPlans, tierForPlanId, type BillingPlanId } from "@/lib/billingConfig";
 import { resolveBillingPeriodEnd } from "@/lib/billingEmails";
+import { recordBillingCountry } from "@/lib/emailJurisdiction";
 import { BILLING_WELCOME_TEMPLATE } from "@/lib/emailTemplateDefinitions";
 import { enqueueStandardEmail } from "@/lib/standardEmailLane";
 import {
@@ -519,6 +520,17 @@ async function handleCheckoutCompleted(session: Stripe.Checkout.Session) {
         snapshot: billingSnapshot,
       });
     }
+  }
+  if (synced?.user.id) {
+    // What the payment method said, kept beside what the person told us. It
+    // does not overwrite their own declaration: paying with a card registered
+    // elsewhere is not moving house (§6.2).
+    await recordBillingCountry({
+      userId: synced.user.id,
+      country: session.metadata?.billingCountry,
+    }).catch((error) => {
+      console.error("Billing country record failed:", error);
+    });
   }
   if (synced && synced.plan !== "Free") {
     // periodEnd is resolved here, not in the renderer: a `new Date()` inside
