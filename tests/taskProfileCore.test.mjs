@@ -197,3 +197,68 @@ test("missing and malformed input does not throw", () => {
         buildTaskProfile({ text: "x", attachments: [{ name: undefined }] })
     );
 });
+
+// The v2 fix, and the thing it must not become.
+//
+// `needsCurrentInformation` drives the Router's web-search hard filter. Until
+// v2 it was read through the composer's suggestion heuristic, whose
+// four-character floor exists so the UI does not nag while somebody types --
+// an anti-nagging rule sitting on a safety boundary. A two-character request
+// for sources therefore recorded `false`, the filter never ran, and a model
+// with no search path stayed eligible for a turn that had asked for sources.
+
+test("an explicit source request needs the web however short it is", () => {
+    for (const text of ["출처", "근거", "웹검색"]) {
+        const built = profile(text);
+        assert.equal(built.needsCurrentInformation, true, text);
+        assert.equal(built.kind, "research", text);
+        // Attributable: the flag says which of the three rules set it, so a
+        // stated request is never reported as a guess about wording.
+        assert.ok(built.signals.includes("search:source-intent"), text);
+        assert.ok(!built.signals.includes("search:recency-heuristic"), text);
+    }
+});
+
+test("a short ordinary turn still needs nothing", () => {
+    const built = profile("hi");
+    assert.equal(built.kind, "general");
+    assert.equal(built.needsCurrentInformation, false);
+    assert.equal(built.kindConfidence, "none");
+});
+
+test("softer recency wording keeps the floor it had", () => {
+    // The fix is about stated intent. A bare "오늘" is a guess about what the
+    // turn needs rather than something the person asked for, so widening it
+    // stays a separate decision with its own evidence.
+    assert.equal(profile("오늘 서울 날씨 어때?").needsCurrentInformation, true);
+    assert.equal(profile("오늘").needsCurrentInformation, false);
+});
+
+// The rule this fix must NOT turn into: "the research kind implies a
+// search-capable model". Document work that happens to be research-shaped
+// would then be pushed onto search models for no reason.
+test("summarising an attached paper needs no current information", () => {
+    const built = profile("이 논문을 요약해 줘", {
+        attachments: [{ name: "paper.pdf", mediaType: "application/pdf" }],
+    });
+    assert.equal(built.needsCurrentInformation, false);
+    // And it is not even the research kind: an attachment is a fact and
+    // outranks vocabulary, so this is document work. Which is the point --
+    // nothing about "research-shaped" reaches the web-search filter.
+    assert.equal(built.kind, "documents");
+});
+
+test("the two axes are read from one definition without becoming one axis", () => {
+    // Independence is not symmetry. A turn that asked for sources is both
+    // research-shaped and in need of the web, so `research` implies
+    // `needsCurrentInformation` -- that is what the research kind is detected
+    // by. The direction that must stay open is the other one, and these are
+    // the turns that hold it open.
+    const weather = profile("오늘 서울 날씨 어때?");
+    assert.equal(weather.needsCurrentInformation, true);
+    assert.notEqual(weather.kind, "research");
+
+    const document = profile("이 계약서의 조항을 요약해 줘");
+    assert.equal(document.kind, "documents");
+    assert.equal(document.needsCurrentInformation, false);
+});

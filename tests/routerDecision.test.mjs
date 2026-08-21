@@ -8,6 +8,7 @@ import {
   summariseRejections,
 } from "../lib/routerDecision.ts";
 import { ROUTER_CANDIDATE_VERSION } from "../lib/routerCandidates.ts";
+import { ROUTER_SCORE_POLICY_VERSION } from "../lib/routerScorePolicy.ts";
 import { ROUTER_SELECTION_VERSION } from "../lib/routerSelection.ts";
 import { TASK_PROFILE_VERSION } from "../lib/taskProfileCore.ts";
 
@@ -131,8 +132,9 @@ test("an attachment's filename does not reach the record either", () => {
   assert.equal(decision.profile.hasDocumentInput, true);
 });
 
-// Four components each carry a version. A record with three of them cannot be
-// attributed when a routing change lands.
+// Five versions now: the scoring policy travels with the rule that applies it,
+// because a band moving and the comparator moving are different changes and a
+// record carrying only one of them can be attributed to neither.
 test("every component version reaches the record", () => {
   const decision = decideRouterModel(baseInput());
 
@@ -141,6 +143,7 @@ test("every component version reaches the record", () => {
     taskProfile: TASK_PROFILE_VERSION,
     candidates: ROUTER_CANDIDATE_VERSION,
     selection: ROUTER_SELECTION_VERSION,
+    scorePolicy: ROUTER_SCORE_POLICY_VERSION,
   });
   assert.deepEqual(ROUTER_VERSIONS, decision.record.versions);
   for (const version of Object.values(decision.record.versions)) {

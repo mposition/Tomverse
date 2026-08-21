@@ -41,6 +41,7 @@ const report = {
         taskProfileVersions: ["task-profile-v1"],
         candidateFilterVersions: ["router-candidates-v1"],
         selectionVersions: ["router-selection-v1"],
+        selectionPolicyVersions: ["router-score-policy-v1"],
         mixed: false,
     },
     switches: [{ from: "gpt-5-6-luna", to: "deepseek-v4-flash", count: 1 }],

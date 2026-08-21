@@ -22,10 +22,25 @@
  * Pure. The caller supplies rows; this decides what they mean.
  */
 
+/**
+ * Stands for a row that recorded no scoring-policy version.
+ *
+ * A real key rather than a filter, so a sample that mixes pre-policy rows with
+ * post-policy ones says so instead of quietly comparing one against a subset
+ * of itself.
+ */
+export const NO_POLICY_VERSION = "none";
+
 export type ShadowRunRow = {
     taskProfileVersion: string;
     candidateFilterVersion: string;
     selectionVersion: string;
+    /**
+     * The scoring policy the decision ran under. Null on a row written before
+     * the policy had a version of its own, and on a manual turn the Router
+     * never decided.
+     */
+    selectionPolicyVersion?: string | null;
     profileKind: string;
     plan: string;
     selectedModelId: string | null;
@@ -40,7 +55,9 @@ export type VersionMix = {
     taskProfileVersions: string[];
     candidateFilterVersions: string[];
     selectionVersions: string[];
-    /** True when any of the three has more than one value in the sample. */
+    /** `none` stands for a row that recorded no policy version. */
+    selectionPolicyVersions: string[];
+    /** True when any of the four has more than one value in the sample. */
     mixed: boolean;
 };
 
@@ -153,6 +170,9 @@ export function buildShadowReport(
         (row) => row.candidateFilterVersion
     );
     const selectionVersions = distinct((row) => row.selectionVersion);
+    const selectionPolicyVersions = distinct(
+        (row) => row.selectionPolicyVersion ?? NO_POLICY_VERSION
+    );
 
     let decided = 0;
     let agreed = 0;
@@ -219,10 +239,12 @@ export function buildShadowReport(
             taskProfileVersions,
             candidateFilterVersions,
             selectionVersions,
+            selectionPolicyVersions,
             mixed:
                 taskProfileVersions.length > 1 ||
                 candidateFilterVersions.length > 1 ||
-                selectionVersions.length > 1,
+                selectionVersions.length > 1 ||
+                selectionPolicyVersions.length > 1,
         },
         decided,
         undecided: rows.length - decided,
@@ -244,5 +266,186 @@ export function buildShadowReport(
         selectedModelCounts,
         stickyHeldRate:
             decided === 0 ? null : (selectionReasons.sticky ?? 0) / decided,
+    };
+}
+
+
+export type SelectionShareDelta = {
+    modelId: string;
+    baselineCount: number;
+    baselineShare: number;
+    candidateCount: number;
+    candidateShare: number;
+    /** Candidate share minus baseline share. Positive means it gained turns. */
+    shareDelta: number;
+};
+
+export type SelectionDistributionComparison = {
+    /** Which column the two sides were split on. */
+    groupedBy: SelectionDistributionKey;
+    baseline: string;
+    candidate: string;
+    baselineDecided: number;
+    candidateDecided: number;
+    /**
+     * Every model either side selected, ordered by how much its share moved.
+     * A model present on one side only appears with a zero on the other, which
+     * is the entry that matters most: it is a model the change made reachable
+     * or unreachable.
+     */
+    models: SelectionShareDelta[];
+    /**
+     * Half the summed absolute share difference: the fraction of decided turns
+     * that would land on a different model under the candidate policy.
+     *
+     * Null when either side decided nothing, because a distance from an empty
+     * distribution is not zero -- it is undefined, and reporting zero would
+     * read as "nothing changed".
+     */
+    totalVariationDistance: number | null;
+    baselineSelectionReasons: Record<string, number>;
+    candidateSelectionReasons: Record<string, number>;
+    /** False when either side has no decided rows, which makes the rest noise. */
+    comparable: boolean;
+};
+
+export type SelectionDistributionKey =
+    | "selectionPolicyVersion"
+    | "selectionVersion";
+
+const distributionKeyOf = (
+    row: ShadowRunRow,
+    key: SelectionDistributionKey
+): string =>
+    key === "selectionVersion"
+        ? row.selectionVersion
+        : (row.selectionPolicyVersion ?? NO_POLICY_VERSION);
+
+/**
+ * Which values of a version column the sample actually holds, largest first.
+ *
+ * The caller needs this before it can name a baseline and a candidate, and it
+ * is also the answer to "why is there no comparison": one key means the sample
+ * spans one policy, so there is nothing to compare it with.
+ */
+export const selectionDistributionKeys = (
+    rows: readonly ShadowRunRow[],
+    key: SelectionDistributionKey = "selectionPolicyVersion"
+): { key: string; rows: number; decided: number }[] => {
+    const groups = new Map<string, { rows: number; decided: number }>();
+    for (const row of rows) {
+        const value = distributionKeyOf(row, key);
+        const group = groups.get(value) ?? { rows: 0, decided: 0 };
+        group.rows += 1;
+        if (row.selectedModelId !== null) group.decided += 1;
+        groups.set(value, group);
+    }
+    return [...groups.entries()]
+        .map(([value, group]) => ({ key: value, ...group }))
+        .sort((left, right) =>
+            right.rows !== left.rows
+                ? right.rows - left.rows
+                : left.key < right.key
+                  ? -1
+                  : 1
+        );
+};
+
+/**
+ * How one policy version's selections differ from another's.
+ *
+ * This is the shape the rollout's exit condition asks for: not "is the Router
+ * good" -- shadow data cannot answer that, and `ROUTE-01` is where that
+ * question lives -- but "where would Auto send traffic under the new policy
+ * that it did not send under the old one". Shares rather than counts, because
+ * the two sides are never the same size; a model that appears on one side only
+ * is kept with a zero on the other, since that is exactly the case the score
+ * snapshot was widened for.
+ *
+ * Undecided rows are excluded from both sides for the same reason the
+ * agreement rate excludes them: a turn with no candidate is not a different
+ * choice. The counts stay visible so a policy that decided far less often
+ * cannot hide behind a stable-looking distribution.
+ *
+ * Pure. The caller supplies rows; this decides what they mean.
+ */
+export function compareSelectionDistributions(
+    rows: readonly ShadowRunRow[],
+    {
+        baseline,
+        candidate,
+        groupedBy = "selectionPolicyVersion",
+    }: {
+        baseline: string;
+        candidate: string;
+        groupedBy?: SelectionDistributionKey;
+    }
+): SelectionDistributionComparison {
+    const countsFor = (value: string) => {
+        const models: Record<string, number> = {};
+        const reasons: Record<string, number> = {};
+        let decided = 0;
+        for (const row of rows) {
+            if (distributionKeyOf(row, groupedBy) !== value) continue;
+            reasons[row.selectionReason] = (reasons[row.selectionReason] ?? 0) + 1;
+            if (row.selectedModelId === null) continue;
+            decided += 1;
+            models[row.selectedModelId] = (models[row.selectedModelId] ?? 0) + 1;
+        }
+        return { models, reasons, decided };
+    };
+
+    const left = countsFor(baseline);
+    const right = countsFor(candidate);
+    const comparable = left.decided > 0 && right.decided > 0;
+
+    const modelIds = [
+        ...new Set([...Object.keys(left.models), ...Object.keys(right.models)]),
+    ];
+    const models = modelIds
+        .map((modelId) => {
+            const baselineCount = left.models[modelId] ?? 0;
+            const candidateCount = right.models[modelId] ?? 0;
+            const baselineShare =
+                left.decided === 0 ? 0 : baselineCount / left.decided;
+            const candidateShare =
+                right.decided === 0 ? 0 : candidateCount / right.decided;
+            return {
+                modelId,
+                baselineCount,
+                candidateCount,
+                baselineShare,
+                candidateShare,
+                shareDelta: candidateShare - baselineShare,
+            };
+        })
+        .sort((first, second) => {
+            const byMove =
+                Math.abs(second.shareDelta) - Math.abs(first.shareDelta);
+            // Stable beyond the movement, so two runs over the same data print
+            // the same order.
+            return byMove !== 0
+                ? byMove
+                : first.modelId < second.modelId
+                  ? -1
+                  : 1;
+        });
+
+    return {
+        groupedBy,
+        baseline,
+        candidate,
+        baselineDecided: left.decided,
+        candidateDecided: right.decided,
+        models,
+        totalVariationDistance: comparable
+            ? models.reduce(
+                  (total, entry) => total + Math.abs(entry.shareDelta),
+                  0
+              ) / 2
+            : null,
+        baselineSelectionReasons: left.reasons,
+        candidateSelectionReasons: right.reasons,
+        comparable,
     };
 }

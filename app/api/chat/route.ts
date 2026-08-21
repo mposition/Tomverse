@@ -55,6 +55,7 @@ import { getWebSearchCapability } from "@/lib/webSearchCapability";
 import { reserveNativeSearchCost } from "@/lib/webSearchNativeCostReservation";
 import { getWebSearchSurchargeCredits } from "@/lib/webSearchCredits";
 import { buildWebSearchToolConfig, WEB_SEARCH_TOOL_NAMES } from "@/lib/webSearchToolConfig";
+import { hasSearchPath, resolveAttemptSearchPath } from "@/lib/webSearchPath";
 import { normalizeWebSearchExecution } from "@/lib/webSearchExecutionNormalizer";
 import { buildChatStreamTrailerChunk } from "@/lib/webSearchStreamTrailer";
 import { resolveChatCompletionOutcome } from "@tomverse/chat-core";
@@ -2314,6 +2315,43 @@ async function handleChatPost(
         const webSearchToolConfig = nativeSearchEnabled
             ? buildWebSearchToolConfig(webSearchCapability)
             : null;
+        // Whether this dispatch will actually be able to search, as opposed to
+        // being allowed to. The Router's filter answers the second: it keeps a
+        // native model for a turn that needs current information because the
+        // model *can* search. Whether it *will* depends on the mode, the tool
+        // configuration and the surcharge, none of which the filter can see --
+        // it runs before there is an attempt to configure or a cost to
+        // reserve. See docs/policy/tomverse-chat-router-score-policy.md §8.
+        const primarySearchPath = resolveAttemptSearchPath({
+            support: webSearchCapability.support,
+            webSearchMode: webSearchMode ?? null,
+            toolConfigBuilt: webSearchToolConfig !== null,
+            surchargeCredits: getWebSearchSurchargeCredits(
+                webSearchMode ?? "off",
+                webSearchCapability
+            ),
+        });
+        // Recorded, not refused. A routed turn whose profile says it needs the
+        // web and whose model will not search is the incoherence this check
+        // exists to surface -- but the answer still goes out, because the
+        // alternatives are refusing a turn the user would rather have answered
+        // imperfectly, or switching search on for a mode they set to `off`.
+        // Which of those to do is a product decision; making the case visible
+        // is not. Content-free: fixed identifiers and model ids only.
+        if (
+            autoSelection.routed &&
+            autoSelection.record.needsCurrentInformation &&
+            !hasSearchPath(primarySearchPath)
+        ) {
+            console.warn(JSON.stringify({
+                event: "chat_auto_search_path_missing",
+                traceId,
+                modelId: modelConfig.id,
+                gap: primarySearchPath.kind === "none" ? primarySearchPath.gap : null,
+                selectionReason: autoSelection.record.selectionReason,
+                timestamp: new Date().toISOString(),
+            }));
+        }
         const generationSettings = getModelGenerationSettings(modelConfig);
         // Delivery plan §5, applied to the manual path first. The user's own
         // model choice is untouched; what is being measured is whether the
@@ -3006,6 +3044,18 @@ async function handleChatPost(
                 webSearchMode: webSearchMode ?? null,
                 traceId,
                 attemptIndex: dispatched.attemptIndex + 1,
+                // `docs/policy/tomverse-chat-routing.md` §10, in the
+                // direction it is usually read the other way round: a fallback
+                // may not silently change what the user was going to get. If
+                // the primary was going to search, a candidate that will answer
+                // from training data instead is a different answer to the same
+                // question, not a substitute for it.
+                //
+                // In practice this fires for a search-model primary. Once a
+                // provider-native tool has been offered, autoFallbackGate has
+                // already refused to fall back at all -- a search may have run
+                // and been surcharged by then.
+                requireSearchPath: hasSearchPath(primarySearchPath),
             });
             if (!planned.ok) {
                 reportFallbackRefusal(`candidate_${planned.refusal.kind}`);

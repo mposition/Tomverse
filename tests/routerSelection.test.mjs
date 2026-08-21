@@ -2,9 +2,15 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
-    ROUTER_SELECTION_VERSION,
+    ROUTER_COST_TIE_EPSILON_RATIO,
+    ROUTER_SCORE_POLICY_VERSION,
     ROUTER_STICKY_HYSTERESIS_TURNS,
-    ROUTER_STICKY_SWITCH_MARGIN,
+    ROUTER_STICKY_SWITCH_MARGIN_BANDS,
+    ROUTER_SUCCESS_RATE_TIE_EPSILON,
+    ROUTER_TTFT_TIE_EPSILON_MS,
+} from "../lib/routerScorePolicy.ts";
+import {
+    ROUTER_SELECTION_VERSION,
     SELECTION_REASONS,
     selectRouterModel,
 } from "../lib/routerSelection.ts";
@@ -13,18 +19,18 @@ import { buildTaskProfile } from "../lib/taskProfileCore.ts";
 /**
  * Router Pass 1's choice, in shadow mode.
  *
- * The interesting tests are about *not* changing model. A router that picks a
- * slightly different winner every turn is worse than one that picks a mediocre
- * model and stays: the user sees the answer's character change between two
- * questions that felt identical to them, and nothing on screen explains it.
+ * Two things these tests are about. The tie-break, because with every quality
+ * band neutral it is what actually decides -- and it has to decide the same
+ * way twice, from measured signals, abstaining where it has none. And *not*
+ * changing model: a router that picks a slightly different winner every turn
+ * is worse than one that picks a mediocre model and stays, because the user
+ * sees the answer's character change between two questions that felt identical
+ * to them and nothing on screen explains it.
  */
 
 const candidates = (...modelIds) =>
     modelIds.map((modelId) => ({ modelId, outputTokens: 4_000 }));
 
-// `TASK_SCORES.coding` prefers deepseek-v4-flash (12), then gpt-5-6-luna (3),
-// then qwen3.6-flash (2). Used rather than restated so the tests move with the
-// curated table instead of pinning a copy of it.
 const codingTurn = buildTaskProfile({ text: "이 정규식 디버그해 줘" });
 const plainTurn = buildTaskProfile({ text: "안녕" });
 
@@ -34,7 +40,9 @@ test("no eligible candidate selects nothing and says so", () => {
     const result = selectRouterModel({ profile: codingTurn, eligible: [] });
     assert.equal(result.selectedModelId, null);
     assert.equal(result.reason, "no_candidate");
+    assert.equal(result.decidedBy, null);
     assert.equal(result.version, ROUTER_SELECTION_VERSION);
+    assert.equal(result.policyVersion, ROUTER_SCORE_POLICY_VERSION);
 });
 
 test("every reason is one of the declared identifiers", () => {
@@ -56,118 +64,191 @@ test("a single candidate wins without consulting a preference", () => {
     assert.equal(result.selectedModelId, "qwen3.6-flash");
     assert.equal(result.reason, "only_candidate");
     assert.equal(result.margin, 0);
+    assert.equal(result.decidedBy, null);
 });
 
-test("the curated preference decides a coding turn", () => {
+// The state of the snapshot, pinned deliberately rather than assumed. Every
+// band is neutral because nothing has been measured, so quality separates
+// nobody and the tie-break below is the whole decision. When the first
+// approved evidence record lands this test is the one that should fail.
+test("with no evidence in the snapshot, quality decides nothing", () => {
     const result = selectRouterModel({
         profile: codingTurn,
-        eligible: candidates("gpt-5-6-luna", "deepseek-v4-flash"),
+        eligible: candidates("deepseek-v4-flash", "gpt-5-6-luna", "kimi-k3"),
     });
-    assert.equal(result.selectedModelId, "deepseek-v4-flash");
-    assert.equal(result.reason, "task_preference");
-    assert.ok(result.margin > 0);
-});
-
-test("a model the preference does not name still loses to one it does", () => {
-    const result = selectRouterModel({
-        profile: codingTurn,
-        eligible: candidates("mistral-small-4", "deepseek-v4-flash"),
-    });
-    assert.equal(result.selectedModelId, "deepseek-v4-flash");
-});
-
-test("with no preference to apply, catalogue order decides deterministically", () => {
-    const eligible = candidates("qwen3.6-flash", "mistral-small-4");
-    const result = selectRouterModel({ profile: plainTurn, eligible });
-    // Both score zero for a general turn, so the answer must still be stable
-    // rather than dependent on the order the filters happened to emit.
-    assert.equal(result.reason, "fallback_order");
+    assert.notEqual(result.decidedBy, "quality_band");
+    assert.notEqual(result.reason, "task_preference");
     assert.equal(result.margin, 0);
+});
+
+test("the tie-break applies its criteria in the documented order", () => {
+    const eligible = candidates("model-a", "model-b");
+
+    // 2. Cost, once quality is level.
+    const byCost = selectRouterModel({
+        profile: plainTurn,
+        eligible,
+        signals: {
+            expectedTotalCostUsdByModelId: { "model-a": 0.9, "model-b": 0.2 },
+            recentSuccessRateByModelId: { "model-a": 1, "model-b": 0.5 },
+            ttftP95MsByModelId: { "model-a": 100, "model-b": 9_000 },
+        },
+    });
+    assert.equal(byCost.selectedModelId, "model-b");
+    assert.equal(byCost.decidedBy, "expected_total_cost");
+
+    // 3. Success rate, once cost is level too.
+    const bySuccess = selectRouterModel({
+        profile: plainTurn,
+        eligible,
+        signals: {
+            expectedTotalCostUsdByModelId: { "model-a": 0.5, "model-b": 0.5 },
+            recentSuccessRateByModelId: { "model-a": 0.99, "model-b": 0.6 },
+            ttftP95MsByModelId: { "model-a": 9_000, "model-b": 100 },
+        },
+    });
+    assert.equal(bySuccess.selectedModelId, "model-a");
+    assert.equal(bySuccess.decidedBy, "recent_success_rate");
+
+    // 4. Time to first token, once the two above are level.
+    const byLatency = selectRouterModel({
+        profile: plainTurn,
+        eligible,
+        signals: {
+            expectedTotalCostUsdByModelId: { "model-a": 0.5, "model-b": 0.5 },
+            recentSuccessRateByModelId: { "model-a": 0.9, "model-b": 0.9 },
+            ttftP95MsByModelId: { "model-a": 5_000, "model-b": 400 },
+        },
+    });
+    assert.equal(byLatency.selectedModelId, "model-b");
+    assert.equal(byLatency.decidedBy, "ttft_p95");
+
+    // 5. The stable identifier, when nothing above separated them.
+    const byId = selectRouterModel({ profile: plainTurn, eligible });
+    assert.equal(byId.selectedModelId, "model-a");
+    assert.equal(byId.decidedBy, "model_id");
+    assert.equal(byId.reason, "fallback_order");
+});
+
+// A model nobody has ever called must not outrank one with a measured record
+// by virtue of having no record. Unknown is unknown, not perfect and not zero.
+test("a missing signal abstains instead of winning or losing", () => {
+    const result = selectRouterModel({
+        profile: plainTurn,
+        eligible: candidates("model-z", "model-a"),
+        signals: {
+            // Only one side is priced, so cost cannot decide at all.
+            expectedTotalCostUsdByModelId: { "model-z": 0.000_1 },
+            recentSuccessRateByModelId: { "model-z": 0.2, "model-a": 0.99 },
+        },
+    });
+    assert.equal(result.selectedModelId, "model-a");
+    assert.equal(result.decidedBy, "recent_success_rate");
+});
+
+test("differences inside the policy's thresholds are not differences", () => {
+    const eligible = candidates("model-a", "model-b");
+    const nearlyEqualCost = 1;
+    const result = selectRouterModel({
+        profile: plainTurn,
+        eligible,
+        signals: {
+            expectedTotalCostUsdByModelId: {
+                // Inside the cost epsilon, so cost abstains ...
+                "model-a": nearlyEqualCost,
+                "model-b":
+                    nearlyEqualCost * (1 + ROUTER_COST_TIE_EPSILON_RATIO / 2),
+            },
+            recentSuccessRateByModelId: {
+                // ... and so does the success rate ...
+                "model-a": 0.9,
+                "model-b": 0.9 + ROUTER_SUCCESS_RATE_TIE_EPSILON / 2,
+            },
+            ttftP95MsByModelId: {
+                // ... and the latency, leaving the stable identifier.
+                "model-a": 1_000,
+                "model-b": 1_000 - ROUTER_TTFT_TIE_EPSILON_MS / 2,
+            },
+        },
+    });
+    assert.equal(result.decidedBy, "model_id");
+    assert.equal(result.selectedModelId, "model-a");
+});
+
+test("the answer does not depend on the order the filters emitted", () => {
+    const signals = {
+        expectedTotalCostUsdByModelId: { "model-a": 0.5, "model-b": 0.5 },
+    };
+    const eligible = candidates("qwen3.6-flash", "mistral-small-4");
+    const result = selectRouterModel({ profile: plainTurn, eligible, signals });
     assert.equal(
         selectRouterModel({
             profile: plainTurn,
             eligible: [...eligible].reverse(),
+            signals,
         }).selectedModelId,
         result.selectedModelId
     );
 });
 
-test("a model outside the curated order is still ordered, not dropped", () => {
-    // The catalogue can carry a model the table has not caught up with. It
-    // sorts last, but it is selectable when it is the only thing eligible.
+// The previous fallback was position in the model finder's six-model order, so
+// every model outside it sorted last and identically. Enrolment plus a stable
+// identifier is what replaced that.
+test("a model outside the six the finder lists is ranked, not parked", () => {
     const result = selectRouterModel({
         profile: plainTurn,
-        eligible: candidates("some-new-model"),
+        eligible: candidates("kimi-k3", "perplexity/sonar-pro"),
+        signals: {
+            expectedTotalCostUsdByModelId: {
+                "kimi-k3": 5,
+                "perplexity/sonar-pro": 0.5,
+            },
+        },
     });
-    assert.equal(result.selectedModelId, "some-new-model");
-
-    const contested = selectRouterModel({
-        profile: plainTurn,
-        eligible: candidates("some-new-model", "gpt-5-6-luna"),
-    });
-    assert.equal(contested.selectedModelId, "gpt-5-6-luna");
+    assert.equal(result.selectedModelId, "perplexity/sonar-pro");
+    assert.equal(result.decidedBy, "expected_total_cost");
 });
 
-test("a marginally better challenger does not move the conversation", () => {
-    // gpt-5-6-luna (3) against qwen3.6-flash (2) on a coding turn is a
-    // difference of one, below the switch margin.
+// Stickiness is measured in bands, because a switch is a claim that the other
+// model is better -- not that it is cheaper, which is a reason to have started
+// somewhere else rather than to change mid-conversation. With every band
+// neutral no challenger can clear the margin, so Auto holds its model. That is
+// the correct behaviour for a scale with no measurements in it, and it is the
+// first thing an approved evidence record will change.
+test("a cheaper challenger does not move the conversation", () => {
     const result = selectRouterModel({
         profile: codingTurn,
-        eligible: candidates("gpt-5-6-luna", "qwen3.6-flash"),
+        eligible: candidates("deepseek-v4-flash", "qwen3.6-flash"),
         sticky: { modelId: "qwen3.6-flash", turnsFavouringChallenger: 0 },
+        signals: {
+            expectedTotalCostUsdByModelId: {
+                "deepseek-v4-flash": 0.01,
+                "qwen3.6-flash": 5,
+            },
+        },
     });
     assert.equal(result.selectedModelId, "qwen3.6-flash");
     assert.equal(result.reason, "sticky");
-    assert.equal(result.challengerModelId, "gpt-5-6-luna");
+    assert.equal(result.challengerModelId, "deepseek-v4-flash");
+    assert.ok(result.margin < ROUTER_STICKY_SWITCH_MARGIN_BANDS);
     assert.equal(result.turnsFavouringChallenger, 0);
 });
 
-test("a clearly better challenger still needs consecutive turns", () => {
-    // deepseek-v4-flash (12) against qwen3.6-flash (2) clears the margin, so
-    // the streak advances -- but one turn is not a trend.
-    const first = selectRouterModel({
-        profile: codingTurn,
-        eligible: candidates("deepseek-v4-flash", "qwen3.6-flash"),
-        sticky: { modelId: "qwen3.6-flash", turnsFavouringChallenger: 0 },
-    });
-    assert.equal(first.selectedModelId, "qwen3.6-flash");
-    assert.equal(first.reason, "sticky");
-    assert.equal(first.turnsFavouringChallenger, 1);
-
-    const second = selectRouterModel({
-        profile: codingTurn,
-        eligible: candidates("deepseek-v4-flash", "qwen3.6-flash"),
-        sticky: {
-            modelId: "qwen3.6-flash",
-            turnsFavouringChallenger: first.turnsFavouringChallenger,
-        },
-    });
-    assert.equal(second.selectedModelId, "deepseek-v4-flash");
-    // The switch happened, so the streak starts again for the next comparison.
-    assert.equal(second.turnsFavouringChallenger, 0);
-});
-
-test("the streak resets rather than accumulating across unrelated turns", () => {
-    // A coding question, then a plain one, then coding again must not switch:
-    // consecutive is the point, and an accumulating counter would make a
-    // conversation that occasionally mentions code drift to a code model.
-    const afterCoding = selectRouterModel({
-        profile: codingTurn,
-        eligible: candidates("deepseek-v4-flash", "qwen3.6-flash"),
-        sticky: { modelId: "qwen3.6-flash", turnsFavouringChallenger: 0 },
-    });
-    assert.equal(afterCoding.turnsFavouringChallenger, 1);
-
-    const afterPlain = selectRouterModel({
-        profile: plainTurn,
-        eligible: candidates("deepseek-v4-flash", "qwen3.6-flash"),
-        sticky: {
-            modelId: "qwen3.6-flash",
-            turnsFavouringChallenger: afterCoding.turnsFavouringChallenger,
-        },
-    });
-    assert.equal(afterPlain.selectedModelId, "qwen3.6-flash");
-    assert.equal(afterPlain.turnsFavouringChallenger, 0);
+test("the streak does not advance while the margin is unmet", () => {
+    let sticky = { modelId: "qwen3.6-flash", turnsFavouringChallenger: 0 };
+    for (let turn = 0; turn < ROUTER_STICKY_HYSTERESIS_TURNS + 2; turn += 1) {
+        const result = selectRouterModel({
+            profile: codingTurn,
+            eligible: candidates("deepseek-v4-flash", "qwen3.6-flash"),
+            sticky,
+        });
+        assert.equal(result.selectedModelId, "qwen3.6-flash");
+        assert.equal(result.turnsFavouringChallenger, 0);
+        sticky = {
+            modelId: result.selectedModelId,
+            turnsFavouringChallenger: result.turnsFavouringChallenger,
+        };
+    }
 });
 
 test("stickiness never keeps a model that failed a filter", () => {
@@ -183,35 +264,38 @@ test("stickiness never keeps a model that failed a filter", () => {
 
 test("the model already in use reports its own reason, not stickiness", () => {
     // "sticky" has to mean the rule changed the outcome. Reporting it when the
-    // preference agreed anyway would make the telemetry unable to say how
-    // often continuity actually overrode a different winner.
+    // ranking agreed anyway would make the telemetry unable to say how often
+    // continuity actually overrode a different winner.
     const result = selectRouterModel({
         profile: codingTurn,
         eligible: candidates("deepseek-v4-flash", "qwen3.6-flash"),
         sticky: { modelId: "deepseek-v4-flash", turnsFavouringChallenger: 0 },
-    });
-    assert.equal(result.selectedModelId, "deepseek-v4-flash");
-    assert.equal(result.reason, "task_preference");
-});
-
-test("the challenger is measured against the model in use, not the runner-up", () => {
-    // Three candidates where the model in use is last. Comparing the winner
-    // with the runner-up would report a small margin and never switch, however
-    // far behind the conversation's model had fallen.
-    const result = selectRouterModel({
-        profile: codingTurn,
-        eligible: candidates(
-            "deepseek-v4-flash",
-            "gpt-5-6-luna",
-            "qwen3.6-flash"
-        ),
-        sticky: {
-            modelId: "qwen3.6-flash",
-            turnsFavouringChallenger: ROUTER_STICKY_HYSTERESIS_TURNS - 1,
+        signals: {
+            expectedTotalCostUsdByModelId: {
+                "deepseek-v4-flash": 0.01,
+                "qwen3.6-flash": 5,
+            },
         },
     });
     assert.equal(result.selectedModelId, "deepseek-v4-flash");
-    assert.ok(result.margin >= ROUTER_STICKY_SWITCH_MARGIN);
+    assert.notEqual(result.reason, "sticky");
+});
+
+// A turn whose kind rests on nothing must not rank on that kind's column. The
+// profiler only produces "none" together with "general" today, so this is an
+// invariant rather than a visible change -- which is exactly why it is pinned.
+test("an unsupported kind is routed on the general column", () => {
+    const unsupported = buildTaskProfile({ text: "안녕" });
+    assert.equal(unsupported.kindConfidence, "none");
+    const result = selectRouterModel({
+        profile: { ...unsupported, kind: "coding" },
+        eligible: candidates("deepseek-v4-flash", "gpt-5-6-luna"),
+    });
+    const asGeneral = selectRouterModel({
+        profile: { ...unsupported, kind: "general" },
+        eligible: candidates("deepseek-v4-flash", "gpt-5-6-luna"),
+    });
+    assert.equal(result.selectedModelId, asGeneral.selectedModelId);
 });
 
 test("the result carries no request content", () => {
@@ -238,46 +322,34 @@ test("the same turn always selects the same way", () => {
 // recomputed downstream by a second filter free to disagree.
 
 test("the ranking names every eligible model, best first", () => {
-  const result = selectRouterModel({
-    profile: { kind: "general", confidence: 1 },
-    eligible: [
-      { modelId: "deepseek-v4-flash", outputTokens: 1000 },
-      { modelId: "gpt-5-6-luna", outputTokens: 1000 },
-    ],
-  });
-  assert.equal(result.rankedModelIds.length, 2);
-  assert.equal(result.rankedModelIds[0], result.selectedModelId);
-  assert.deepEqual(new Set(result.rankedModelIds).size, 2);
+    const result = selectRouterModel({
+        profile: plainTurn,
+        eligible: candidates("deepseek-v4-flash", "gpt-5-6-luna"),
+    });
+    assert.equal(result.rankedModelIds.length, 2);
+    assert.equal(result.rankedModelIds[0], result.selectedModelId);
+    assert.equal(new Set(result.rankedModelIds).size, 2);
 });
 
 test("nothing eligible ranks nothing", () => {
-  const result = selectRouterModel({
-    profile: { kind: "general", confidence: 1 },
-    eligible: [],
-  });
-  assert.deepEqual(result.rankedModelIds, []);
+    const result = selectRouterModel({ profile: plainTurn, eligible: [] });
+    assert.deepEqual(result.rankedModelIds, []);
 });
 
 test("the ranking still holds the sticky winner, so the caller must remove it", () => {
-  // Stickiness can select a model the ranking did not put first. The list is
-  // the *ranking*, not "the alternatives" -- removing the chosen model is the
-  // caller's job precisely because which one was chosen is not always the top.
-  const eligible = [
-    { modelId: "deepseek-v4-flash", outputTokens: 1000 },
-    { modelId: "gpt-5-6-luna", outputTokens: 1000 },
-  ];
-  const natural = selectRouterModel({
-    profile: { kind: "general", confidence: 1 },
-    eligible,
-  });
-  const other = eligible.find(
-    (candidate) => candidate.modelId !== natural.selectedModelId
-  );
-  const sticky = selectRouterModel({
-    profile: { kind: "general", confidence: 1 },
-    eligible,
-    sticky: { modelId: other.modelId, turnsFavouringChallenger: 0 },
-  });
-  assert.equal(sticky.selectedModelId, other.modelId);
-  assert.ok(sticky.rankedModelIds.includes(other.modelId));
+    // Stickiness can select a model the ranking did not put first. The list is
+    // the *ranking*, not "the alternatives" -- removing the chosen model is the
+    // caller's job precisely because which one was chosen is not always the top.
+    const eligible = candidates("deepseek-v4-flash", "gpt-5-6-luna");
+    const natural = selectRouterModel({ profile: plainTurn, eligible });
+    const other = eligible.find(
+        (candidate) => candidate.modelId !== natural.selectedModelId
+    );
+    const sticky = selectRouterModel({
+        profile: plainTurn,
+        eligible,
+        sticky: { modelId: other.modelId, turnsFavouringChallenger: 0 },
+    });
+    assert.equal(sticky.selectedModelId, other.modelId);
+    assert.ok(sticky.rankedModelIds.includes(other.modelId));
 });

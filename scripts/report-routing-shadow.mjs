@@ -12,11 +12,25 @@
 // would change if Auto were switched on -- the blast radius -- and nothing
 // about whether the change would be an improvement.
 //
+// It also answers the question the Router rollout exits on: how the selection
+// distribution moved between two scoring policies. That comparison needs rows
+// from both, so with a single policy in the window it says so rather than
+// printing a table comparing a policy with itself. Shadow recording has never
+// been switched on against real traffic, so today it says there are no rows at
+// all -- which is the honest state, and the reason the comparison is built now
+// rather than after somebody needs it in a hurry.
+//
 // Usage:
 //   npm run report:routing-shadow
 //   npm run report:routing-shadow -- --days=7 --json
+//   npm run report:routing-shadow -- --compare=<baseline>..<candidate>
+//   npm run report:routing-shadow -- --compare-by=selectionVersion
 
-import { buildShadowReport } from "../lib/routingShadowReport.ts";
+import {
+  buildShadowReport,
+  compareSelectionDistributions,
+  selectionDistributionKeys,
+} from "../lib/routingShadowReport.ts";
 import { prisma } from "../lib/prisma.ts";
 
 const args = process.argv.slice(2);
@@ -25,6 +39,11 @@ const flag = (name, fallback) => {
   return found ? found.slice(name.length + 3) : fallback;
 };
 const asJson = args.includes("--json");
+const compareBy =
+  flag("compare-by", "selectionPolicyVersion") === "selectionVersion"
+    ? "selectionVersion"
+    : "selectionPolicyVersion";
+const comparePair = flag("compare", "");
 const days = Math.max(1, Number(flag("days", "30")) || 30);
 const maxRows = Math.max(1, Number(flag("limit", "200000")) || 200_000);
 const since = new Date(Date.now() - days * 86_400_000);
@@ -39,6 +58,7 @@ const runs = await prisma.routingRun.findMany({
     taskProfileVersion: true,
     candidateFilterVersion: true,
     selectionVersion: true,
+    selectionPolicyVersion: true,
     profileKind: true,
     plan: true,
     selectedModelId: true,
@@ -50,15 +70,38 @@ const runs = await prisma.routingRun.findMany({
   },
 });
 
-const report = buildShadowReport(
-  runs.map((run) => ({
-    ...run,
-    rejectedByReason:
-      run.rejectedByReason && typeof run.rejectedByReason === "object"
-        ? run.rejectedByReason
-        : {},
-  }))
-);
+const shadowRows = runs.map((run) => ({
+  ...run,
+  rejectedByReason:
+    run.rejectedByReason && typeof run.rejectedByReason === "object"
+      ? run.rejectedByReason
+      : {},
+}));
+
+const report = buildShadowReport(shadowRows);
+
+// Which policies the window actually holds, and therefore whether a comparison
+// is possible at all. Two keys are the minimum; one means the sample spans one
+// policy, and zero means there is no sample.
+const distributionGroups = selectionDistributionKeys(shadowRows, compareBy);
+const [explicitBaseline, explicitCandidate] = comparePair.split("..");
+// Default pair: the two largest groups, oldest-recorded as the baseline is not
+// knowable from counts, so the *smaller* one is treated as the candidate --
+// a policy being rolled out has fewer rows than the one it is replacing.
+const defaultPair =
+  distributionGroups.length >= 2
+    ? [distributionGroups[0].key, distributionGroups[1].key]
+    : [];
+const baselineKey = explicitBaseline || defaultPair[0] || "";
+const candidateKey = explicitCandidate || defaultPair[1] || "";
+const comparison =
+  baselineKey && candidateKey && baselineKey !== candidateKey
+    ? compareSelectionDistributions(shadowRows, {
+        baseline: baselineKey,
+        candidate: candidateKey,
+        groupedBy: compareBy,
+      })
+    : null;
 
 const num = (value) => value.toLocaleString("en-US");
 const pct = (value) => (value === null ? "n/a" : `${(value * 100).toFixed(2)}%`);
@@ -66,7 +109,17 @@ const ms = (micros) => `${(micros / 1000).toFixed(1)}ms`;
 
 if (asJson) {
   console.log(
-    JSON.stringify({ windowDays: days, since: since.toISOString(), ...report }, null, 2)
+    JSON.stringify(
+      {
+        windowDays: days,
+        since: since.toISOString(),
+        ...report,
+        distributionGroups,
+        selectionDistributionComparison: comparison,
+      },
+      null,
+      2
+    )
   );
 } else {
   console.log(`Shadow routing — last ${days} day(s), since ${since.toISOString()}`);
@@ -88,6 +141,7 @@ if (asJson) {
     console.log(`  task profile: ${report.versions.taskProfileVersions.join(", ")}`);
     console.log(`  candidates:   ${report.versions.candidateFilterVersions.join(", ")}`);
     console.log(`  selection:    ${report.versions.selectionVersions.join(", ")}`);
+    console.log(`  score policy: ${report.versions.selectionPolicyVersions.join(", ")}`);
     console.log("");
   }
 
@@ -154,6 +208,65 @@ if (asJson) {
     "  put on purpose. Near zero means the margin and hysteresis are doing nothing;"
   );
   console.log("  near one means they are deciding everything.");
+  console.log("");
+
+  // How the selection distribution moved between two scoring policies. This is
+  // the rollout's exit artefact: not whether Auto is better -- shadow data
+  // cannot answer that -- but which models it would stop and start choosing.
+  console.log(`Selection distribution, grouped by ${compareBy}:`);
+  for (const group of distributionGroups) {
+    console.log(
+      `  ${group.key.padEnd(30)} ${num(group.rows)} run(s), ${num(group.decided)} decided`
+    );
+  }
+  if (!comparison) {
+    console.log("");
+    console.log(
+      distributionGroups.length < 2
+        ? "  Only one policy in this window, so there is nothing to compare it with."
+        : "  Name two with --compare=<baseline>..<candidate>."
+    );
+    console.log(
+      "  A distribution comparison needs rows recorded under both policies."
+    );
+  } else if (!comparison.comparable) {
+    console.log("");
+    console.log(
+      `  ${comparison.baseline} decided ${num(comparison.baselineDecided)} and ` +
+        `${comparison.candidate} decided ${num(comparison.candidateDecided)}.`
+    );
+    console.log(
+      "  One side decided nothing, so shares would divide by zero. No comparison."
+    );
+  } else {
+    console.log("");
+    console.log(
+      `  ${comparison.baseline} (${num(comparison.baselineDecided)} decided)  →  ` +
+        `${comparison.candidate} (${num(comparison.candidateDecided)} decided)`
+    );
+    console.log(
+      `  Share of decided turns that would land elsewhere: ${pct(comparison.totalVariationDistance)}`
+    );
+    console.log("");
+    console.log("  model                          baseline  candidate   delta");
+    for (const entry of comparison.models) {
+      console.log(
+        `  ${entry.modelId.padEnd(30)} ${pct(entry.baselineShare).padStart(8)} ` +
+          `${pct(entry.candidateShare).padStart(10)} ${(entry.shareDelta >= 0 ? "+" : "") + (entry.shareDelta * 100).toFixed(2) + "%"}`
+      );
+    }
+    console.log("");
+    console.log(
+      "  A model at 0.00% on one side and above it on the other is one the policy"
+    );
+    console.log(
+      "  change made reachable or unreachable. That is the row to read first: the"
+    );
+    console.log(
+      "  previous score table listed six models, so twenty-four could only ever be"
+    );
+    console.log("  chosen when everything ahead of them failed a hard filter.");
+  }
   console.log("");
 
   console.log(

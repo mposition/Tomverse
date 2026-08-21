@@ -42,6 +42,7 @@ import {
   type RouterVersions,
   ROUTER_VERSIONS,
 } from "@/lib/routerDecision";
+import type { RouterTieBreakSignals } from "@/lib/routerScorePolicy";
 import type { RouterStickyState } from "@/lib/routerSelection";
 import type { autoRolloutReadiness } from "@/lib/autoRolloutReadiness";
 
@@ -140,6 +141,16 @@ export type AutoSelectionInput = {
   creditsByModelId?: Readonly<Record<string, number>>;
   /** Per-model attachment cost. See `lib/routerCandidates.ts`. */
   attachmentTokensFor?: (model: AiModel) => number;
+  /**
+   * Measured tie-break signals -- recent success rate and time to first token
+   * per model -- for the ranking's third and fourth criteria.
+   *
+   * Optional, and unknown when absent rather than assumed: a criterion with no
+   * data abstains, so a caller that has not wired the health rollup and the
+   * output-token telemetry yet gets a ranking decided by quality band and
+   * cost, not one that quietly credits every model with a perfect record.
+   */
+  signals?: RouterTieBreakSignals;
   cohortConfig?: AutoCohortConfig;
   readiness?: ReturnType<typeof autoRolloutReadiness>;
   now?: () => number;
@@ -197,6 +208,7 @@ export const selectAutoModel = (input: AutoSelectionInput): AutoSelection => {
       creditsByModelId: input.creditsByModelId,
       attachmentTokensFor: input.attachmentTokensFor,
       sticky: stickyStateFor(input.conversation),
+      signals: input.signals,
     },
     input.now
   );
