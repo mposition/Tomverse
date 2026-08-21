@@ -2059,6 +2059,11 @@ POST /api/unsubscribe            -> One-Click (RFC 8058)
   커스텀 설정**해 정렬(alignment)을 맞춥니다.
 - **BIMI**: 지금 하지 않습니다(VMC 비용 대비 이점 낮음).
 
+등록 절차와 현재 DNS 상태는 `docs/ops/email-sending-domains.md`에 있습니다.
+현황 확인은 `npm run report:email-domains`와 Admin Console의 Email policy →
+Sending domains입니다. **DMARC는 제공자가 발급하지도 보고하지도 않으므로** 그
+어느 쪽도 확인해 주지 않습니다 — zone에서 직접 봅니다.
+
 ### 14.2 대량 발신자 요건
 
 Gmail/Yahoo/Microsoft의 대량 발신자 요건(일 5,000통 이상 기준)은 이미 업계 표준

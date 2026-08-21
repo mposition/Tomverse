@@ -7,6 +7,7 @@ import { prisma } from "@/lib/prisma";
 import { getSecurityEnvironmentStatus } from "@/lib/securityEnvironment";
 import { reportOperationalDependencyStatus } from "@/lib/operationalMonitoring";
 import { getImageProviderBudgetReadiness } from "@/lib/imageProviderBudgetReadiness";
+import { getSendingIdentityReadiness } from "@/lib/emailSendingIdentity";
 import { AVAILABLE_MODELS } from "@/lib/models";
 import {
   getActiveProviders,
@@ -83,9 +84,18 @@ const readinessResponse = async (head = false) => {
     })
   );
   const imageProviderBudget = imageBudgetStatus.status?.ready ?? false;
+  // The sending domains. Errors here are configurations that would send from
+  // the wrong domain or from nothing at all; the outstanding move of
+  // transactional mail onto its own subdomain
+  // (docs/policy/email-notifications.md §14.1) is a warning, because gating on
+  // it would refuse readiness on today's deployment in order to announce a
+  // planned migration.
+  const sendingIdentity = getSendingIdentityReadiness();
+  const emailSendingIdentity = sendingIdentity.ready;
   const database = databaseResult.ready;
   const ready =
-    database && securityEnvironment && providerBudgets && imageProviderBudget;
+    database && securityEnvironment && providerBudgets &&
+    imageProviderBudget && emailSendingIdentity;
   const headers = ready
     ? { ...baseHeaders, "X-Tomverse-Trace-Id": traceId }
     : {
@@ -166,6 +176,25 @@ const readinessResponse = async (head = false) => {
         },
       }),
       reportOperationalDependencyStatus({
+        dependency: "email-sending-identity",
+        healthy: emailSendingIdentity,
+        code: "EMAIL_SENDING_IDENTITY_NOT_READY",
+        title: "Email sending domains are not configured correctly",
+        error:
+          sendingIdentity.errors.length > 0
+            ? sendingIdentity.errors.map((problem) => problem.message).join(" | ")
+            : "Email sending domains are configured.",
+        severity: "fatal",
+        context: {
+          component: "api-ready",
+          route: "/api/ready",
+          warnings:
+            sendingIdentity.warnings.map((problem) => problem.code).join(",") ||
+            "none",
+          traceId,
+        },
+      }),
+      reportOperationalDependencyStatus({
         dependency: "security-environment",
         healthy: securityEnvironment,
         code: "SECURITY_ENVIRONMENT_NOT_READY",
@@ -200,6 +229,7 @@ const readinessResponse = async (head = false) => {
         securityEnvironment,
         providerBudgets,
         imageProviderBudget,
+        emailSendingIdentity,
       },
       traceId,
     },

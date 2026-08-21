@@ -147,7 +147,20 @@ export function adminEnvironmentChecks(): AdminEnvCheck[] {
       name: "TRANSACTIONAL_EMAIL_FROM",
       configured: true,
       description:
-        "Verified sender used for account and billing emails. Defaults to hello@tomverse.app.",
+        "Verified sender used for account and billing emails. Defaults to " +
+        "hello@tomverse.app, which is the registrable domain rather than the " +
+        "sending subdomain docs/policy/email-notifications.md §14.1 moves it " +
+        "to -- /api/ready reports that as a warning until the DNS move is done.",
+    },
+    {
+      name: "MARKETING_EMAIL_FROM",
+      configured: isConfigured(process.env.MARKETING_EMAIL_FROM),
+      description:
+        "Sender for marketing mail, on its own domain. Absent today and that " +
+        "is correct: marketing is production-disabled, and the send path " +
+        "refuses rather than falling back to the transactional address -- a " +
+        "promotion sent from the transactional domain puts its spam " +
+        "complaints on the domain that carries login codes.",
     },
     {
       name: "SLACK_WEBHOOK_URL",

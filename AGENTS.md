@@ -599,13 +599,18 @@ feedback의 Trace 검증, `errorReportToken`, `TraceErrorEvidence`, chat 오류
   발송 계정 분리를 결정합니다(§5.3.1, A18).
 - **IP만으로 관할권을 정하지 않습니다.** 신호 우선순위는 자기 신고 → 결제 국가 →
   직전 동의 시점의 관할권이고, IP는 관측용입니다. 신호가 충돌하면 marketing을
-  보류하고 확인을 요청합니다(§6).
+  보류하고 확인을 요청합니다(docs/policy/email-notifications.md §6).
 - **국가 규칙은 데이터입니다.** `JurisdictionProfile`·`JurisdictionCountryMap`은
   `EmailPolicyVersion`에 묶이고, 활성화는 사람이 승인해 registry에 기록하는
   행위입니다. 코드가 status를 스스로 `active`로 올리지 않습니다(§12.5).
 - **자격증명 본문은 어디에도 남기지 않습니다.** 코드·magic link는
   `EmailEvent.payload`, `renderDataSnapshot`, 로그 어디에도 넣지 않습니다.
   standard lane의 snapshot은 봉투 암호화하고 보관 기한이 지나면 지웁니다(§10.3).
+- **스트림마다 발송 도메인이 다릅니다.** marketing은 `MARKETING_EMAIL_FROM`이
+  없으면 transactional 주소로 대체되지 않고 **거부**합니다 — 대체는 프로모션
+  스팸 신고를 로그인 코드가 나가는 도메인에 얹는 일이고, 증상은 로그인 메일이
+  안 온다는 신고로만 나타납니다. 두 스트림을 같은 도메인에 설정하면
+  `/api/ready`가 실패합니다. 절차는 `docs/ops/email-sending-domains.md`.
 - **unsubscribe는 로그인 없이 한 번에 됩니다.** RFC 8058 one-click을 지원하고,
   marketing에 서명 키가 없으면 헤더 없이 보내는 대신 발송을 거부합니다(§11.3).
 - marketing은 위 suppression 경계 결정 전까지 production에서 비활성입니다.
