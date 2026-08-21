@@ -319,6 +319,36 @@ goodwill 지급은 Stripe 환불도 구매 취소도 아닌 **세 번째 것**�
   제거, 상한 인하. 비활성화까지 막으면 살아 있는 프로모션을 끌 수단이 없어집니다.
 - 통화 판정 자체(`promotionCurrencyFailure()`, `PROMOTION_CURRENCY_NOT_SUPPORTED`)
   는 별개 계층이며 validation과 Checkout이 공유합니다. 완화하지 않습니다.
+# 가격 카탈로그 default는 fixture가 아닙니다
+
+`DEFAULT_BILLING_PRICE_CATALOG`(`lib/billingPriceCatalog.ts`)의 숫자를 고치기
+전에 읽습니다.
+
+- docs/policy/promotion-discount-currency.md §8
+
+**이 표는 세 상황에서 실제로 청구됩니다.** `AppSetting` 행 없음(첫 read가
+default를 DB에 씁니다), 저장값 JSON 파싱 실패, schema 검증 실패. 그러므로 여기의
+숫자를 바꾸는 것은 **가격 변경**이고, 테스트 값 조정이 아닙니다.
+
+- **필드 하나가 빠지면 카탈로그 전체가 버려집니다.** 손상된 항목만이 아니라
+  멀쩡한 값까지 default로 되돌아갑니다.
+- **값은 승인된 것만 넣습니다.** 2026-08-16에 production 저장값(20건)에 맞췄고,
+  근거는 `npm run report:billing-price-catalog`의 production read입니다. 환율로도
+  비율로도 유도하지 않습니다.
+- **부분 정렬 금지.** 20건은 한 transaction에서 저장됐고, 어떤 절단선을 잡아도
+  일관성이 깨집니다 — Pro AUD 월간만 옮기면 연간가가 월 12회 결제보다 비싸집니다.
+- **fallback은 조용하지 않아야 합니다.** `billing_price_catalog_fallback` 구조화
+  이벤트가 세 상태를 구분해 남기고 `served: compiled_default`를 함께 적습니다.
+  정상 경로에서는 아무것도 남기지 않습니다 — 매 요청 로그는 진짜 신호를 묻습니다.
+- **두 reader 모두 source를 반환합니다.** Admin 패널은 저장된 행의 `updatedAt`을
+  카탈로그 옆에 그리므로, source 없이는 그 행이 가진 적 없는 숫자 옆에 최근
+  타임스탬프가 붙습니다.
+- **`AdminAuditLog`는 가격 이력이 아닙니다.** `billing.updated`는 가격이 바뀌었다는
+  사실(`localizedPricesUpdated`)만 남기고 이전·이후 값은 남기지 않습니다. 과거
+  가격은 이 로그로 재구성할 수 없습니다.
+- 값 변경은 `tests/billingPriceCatalogDefaults.test.mjs`를 함께 고쳐야 합니다.
+  전체 비교이므로 언급되지 않은 가격이 조용히 움직일 수 없고, 연간 할인 구간·
+  Max > Pro·크레딧팩 단조성 불변식이 자릿수 실수를 잡습니다.
 
 # Plan change (Pro <-> Max)
 
