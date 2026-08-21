@@ -272,4 +272,52 @@ test.describe("two-person approval", () => {
       ).plan
     ).toBe(FIXTURE_CUSTOMERS.activePro.plan);
   });
+
+  test("a jurisdiction policy is seeded as a draft and needs a second approver to go live", async ({
+    page,
+    signInAs,
+  }) => {
+    const database = adminFixtureDatabase();
+
+    await signInAs("owner");
+    await page.goto("/admin/email-policy");
+    await expect(consoleHeading(page)).toHaveText("Email policy");
+
+    // 1. Seeding is ordinary work: it needs no approval, because a draft
+    //    changes nothing about what is sent.
+    await page.getByTestId("email-policy-create-draft").click();
+    await expect
+      .poll(async () => database.emailPolicyVersion.count())
+      .toBe(1);
+    const draft = await database.emailPolicyVersion.findFirstOrThrow();
+    expect(draft.status).toBe("draft");
+    expect(draft.approvedAt).toBeNull();
+    expect(await database.jurisdictionProfile.count()).toBe(8);
+
+    // 2. Activating it is not. The first attempt records a request and
+    //    leaves the draft exactly where it was.
+    await expect(page.getByTestId("email-policy-profile-KR")).toBeVisible();
+    await page
+      .getByLabel("Why this version is being activated")
+      .fill("Launching the jurisdiction profiles researched on 2026-08-21.");
+    await page.getByTestId("email-policy-activate").click();
+
+    await expect
+      .poll(async () =>
+        (
+          await database.adminActionApproval.findFirstOrThrow({
+            where: { action: "email_policy.activate" },
+          })
+        ).status
+      )
+      .toBe("pending");
+    expect(
+      (
+        await database.emailPolicyVersion.findUniqueOrThrow({
+          where: { id: draft.id },
+          select: { status: true },
+        })
+      ).status
+    ).toBe("draft");
+  });
 });

@@ -132,7 +132,8 @@ model UserSettings {
   /// jurisdiction's email rules apply. Deliberately separate from the IP
   /// country that analytics consent and billing currency read: a Korean
   /// resident travelling through Chicago does not leave the reach of the
-  /// Network Act, and an address is not a location signal (contract §6.1).
+  /// Network Act, and an address is not a location signal
+  /// (docs/policy/email-notifications.md §6.1).
   ///
   /// NULL means unresolved, which holds marketing back rather than guessing
   /// (§6.3). It never blocks transactional or legal mail.
@@ -147,7 +148,8 @@ model UserSettings {
   ///
   /// Both are needed at once or a disagreement cannot be seen: with one column
   /// the second signal would simply overwrite the first, and the contract's
-  /// conflict case (§6.2 step 3) would be undetectable rather than handled.
+  /// conflict case (docs/policy/email-notifications.md §6.2 step 3) would be
+  /// undetectable rather than handled.
   /// Written by the Stripe webhook; never by anything a visitor controls.
   billingCountry          String?
   billingCountryUpdatedAt DateTime?

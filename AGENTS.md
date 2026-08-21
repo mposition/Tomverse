@@ -599,7 +599,7 @@ feedback의 Trace 검증, `errorReportToken`, `TraceErrorEvidence`, chat 오류
   발송 계정 분리를 결정합니다(§5.3.1, A18).
 - **IP만으로 관할권을 정하지 않습니다.** 신호 우선순위는 자기 신고 → 결제 국가 →
   직전 동의 시점의 관할권이고, IP는 관측용입니다. 신호가 충돌하면 marketing을
-  보류하고 확인을 요청합니다(§6).
+  보류하고 확인을 요청합니다(docs/policy/email-notifications.md §6).
 - **국가 규칙은 데이터입니다.** `JurisdictionProfile`·`JurisdictionCountryMap`은
   `EmailPolicyVersion`에 묶이고, 활성화는 사람이 승인해 registry에 기록하는
   행위입니다. 코드가 status를 스스로 `active`로 올리지 않습니다(§12.5).
