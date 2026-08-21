@@ -37,7 +37,7 @@ suppression은 **같은 region의 계정 전체**에 적용되므로, marketing�
 | 외부 수신지 인증 레코드 | **불필요.** 아래 근거 |
 | DMARC 리포트 수신 | **미확인.** `dmarc@tomverse.app` 사서함은 2026-08-21에 만들었다고 보고받았고, 실제 수신은 리포트가 와야 압니다 |
 | `mail.tomverse.app` 첫 발송 | **미관측** (2026-08-21 09:20Z 기준). 1.2 참조 |
-| 다른 발송 신원 3개 | **전환 안 됨.** 1.2 |
+| 다른 발송 신원 3개 | **코드는 통합함**(1.2). 실제 발신 주소는 각 환경변수 반영 여부에 달려 있습니다 |
 
 ```
 _dmarc.mail.tomverse.app   "v=DMARC1; p=none; rua=mailto:dmarc@tomverse.app; fo=1"
@@ -57,43 +57,63 @@ Domain이 다를 때만 인증 절차를 요구합니다 — 정확한 도메인
 2026-08-21. `rua`를 조직 밖 주소(리포트 처리 서비스 등)로 바꾸는 순간 이 레코드가
 필요해지고, 없으면 **리포트가 조용히 오지 않습니다.**
 
-### 1.2 발송 신원은 넷이고, 전환된 것은 하나입니다
+### 1.2 발송 신원은 하나의 resolver로 통합했습니다
 
-2026-08-21 전환 뒤에 확인한 결과입니다. `TRANSACTIONAL_EMAIL_FROM`을 읽는 경로는
-넷 중 하나뿐이고, 나머지 셋은 Resend API를 직접 호출합니다.
+2026-08-21 전환 직후 확인했을 때는 `TRANSACTIONAL_EMAIL_FROM`을 읽는 경로가 넷 중
+하나뿐이었고, 나머지 셋은 각자의 변수와 각자의 하드코딩 fallback으로 Resend API를
+직접 호출하고 있었습니다. 그래서 발송 도메인을 옮겼을 때 **하나만 따라왔고 아무도
+알아채지 못했습니다.**
 
-| 경로 | From 출처 | 2026-08-21 현재 |
+| 경로 | 전환 전 | 지금 |
 |---|---|---|
-| `lib/email.ts` → `fromAddressForStream()` | Railway `TRANSACTIONAL_EMAIL_FROM` | `hello@mail.tomverse.app` |
-| `lib/operationalMonitoring.ts` | `ADMIN_ALERT_FROM` → 하드코딩 | `Tomverse Operations <alerts@tomverse.app>` |
-| `lib/providerMonitoring.ts` | `ADMIN_ALERT_FROM` → 하드코딩 | `Tomverse Admin <alerts@tomverse.app>` |
-| `scripts/send-security-audit-report.mjs` | GitHub Actions **secret** → 하드코딩 | 관측값 `Tomverse Admin <alerts@tomverse.app>` |
+| `lib/email.ts` | `TRANSACTIONAL_EMAIL_FROM` | `fromAddressForStream()` |
+| `lib/operationalMonitoring.ts` | `ADMIN_ALERT_FROM` → 하드코딩 | `resolveSendingIdentity("transactional", …)` |
+| `lib/providerMonitoring.ts` | `ADMIN_ALERT_FROM` → 하드코딩 (SendGrid 분기에 두 번째 복사본) | 동일 |
+| `scripts/send-security-audit-report.mjs` | GitHub secret → 하드코딩 | 동일 (pure core 경유) |
 
-**세 경로는 이 저장소의 어떤 검사에도 잡히지 않습니다.** `/api/ready`의
-`emailSendingIdentity`도, `sendingIdentityProblems()`도, 스트림 분리도 전부
-`lib/emailSendingIdentity.ts`를 통과하는 발송만 봅니다. 마지막 경로는 Railway가
-아니라 GitHub secret에서 값을 읽으므로 환경변수를 바꿔도 닿지 않습니다.
+판정은 `lib/emailSendingIdentityCore.ts`의 `resolveSendingIdentity()` 한 곳에
+있습니다. `lib/emailSendingIdentity.ts`는 `process.env`를 읽고 던지는 얇은 wrapper일
+뿐이고, GitHub Actions 스크립트는 그 wrapper가 `server-only`라서 core를 직접
+씁니다 — 그래서 workflow가 `node --import tsx`로 실행합니다.
 
-**이것이 §14.1과 어긋나는 지점.** 그 표는 "운영자 내부 알림 → transactional
-재사용"이라고 합니다. 전환 후 transactional은 `mail.tomverse.app`이므로 계약대로면
-이들도 함께 옮겨졌어야 하는데, 그 변수를 읽지 않아서 남았습니다. §2의 "루트는
-발송하지 않음"도 지금은 사실이 아닙니다 — purelymail(사람 메일함)과 이 세 경로가
-루트에서 나갑니다.
+**표시 이름은 하나로 합쳤습니다.** `Tomverse Operations`와 `Tomverse Admin` 구분은
+원래 있던 자리이자 메일 클라이언트가 실제로 보여 주는 자리인 **제목 prefix**에
+그대로 남습니다.
 
-**당장 깨지는 것은 없고, 하나가 취약합니다.** 이 알림들은 운영자 한 명에게 가는
-내부 메일이고 사용자 메일이 아닙니다. DMARC도 통과합니다 — 다만 통과 근거가
-DKIM 하나뿐입니다. 루트 SPF는 `include:_spf.purelymail.com`이라 SES를 포함하지
-않으므로 SPF는 실패하고, Resend가 루트 도메인에 서명하는 DKIM만 정렬합니다.
+**직접 발송 경로는 유지했습니다.** 두 알림 경로는 outbox에 넣지 않습니다 — 시스템이
+아프다는 알림이 큐를 비우는 부분에 의존하면 안 됩니다. 채널 실패 격리도 그대로입니다:
+`operationalMonitoring`은 Slack·Discord·email을 `Promise.allSettled`로 돌리고 Sentry
+capture는 그보다 앞서며, `providerMonitoring`은 신원을 못 구하면 던지지 않고
+`failed`로 기록하고 넘어갑니다.
 
-> **그래서 전환 뒷정리로 Resend에서 `tomverse.app` 도메인을 지우면 안 됩니다.**
-> 지우는 순간 이 세 경로가 DKIM을 잃고, SPF는 원래 이들을 덮은 적이 없으므로
-> DMARC가 전부 실패합니다. 루트를 `p=quarantine` 이상으로 올린 뒤라면 운영 알림이
-> 조용히 사라집니다 — 알림이 안 오는 것을 알려 줄 알림이 그것뿐인 상태로.
+#### 검사가 두 곳에 있는 이유
 
-옮기려면 세 곳을 각각 손봐야 합니다: `ADMIN_ALERT_FROM`을 설정하거나(두 경로가
-공유), GitHub secret을 갱신하거나(감사 리포트), 세 경로를
-`fromAddressForStream()` 뒤로 넣거나. 마지막이 가장 낫지만 알림 경로를 건드리는
-변경이므로 사람이 결정합니다.
+`/api/ready`의 `emailSendingIdentity`는 **배포된 프로세스의 환경**만 봅니다. GitHub
+Actions runner의 변수는 볼 수 없습니다. 그래서 같은 resolver를 두 곳에서 각각
+확인합니다.
+
+| 무엇 | 어디 |
+|---|---|
+| 배포 환경의 신원 | `/api/ready` |
+| runner 환경의 신원 | daily-security-audit workflow의 preflight (`npm run check:sending-identity -- --env`) |
+| 코드에 하드코딩된 발신자 | PR Fast Gate (`npm run check:sending-identity`) |
+
+정적 검사는 `from:` 바로 뒤의 리터럴을 찾지 **않습니다.** 그 규칙이었다면 문제가
+있던 트리에서 그대로 통과했을 것입니다 — 네 경로 모두 리터럴이 key 옆이 아니라
+fallback 뒤에 있었으니까요. 대신 값의 모양을 봅니다: `"이름 <주소@도메인>"` 형태와,
+`from`이 있는 줄의 자기 도메인 주소. `tests/sendingIdentity.test.mjs`가 **2026-08-21
+당시의 네 줄을 그대로 넣어** 각각 잡히는지 고정합니다.
+
+#### 남은 것: 루트 도메인은 아직 발송합니다
+
+세 경로가 새 도메인으로 옮겨져도 루트에서 나가는 메일이 사라지는 것은 아닙니다.
+purelymail(사람이 쓰는 메일함)이 계속 `tomverse.app`에서 보냅니다. §2의 "루트는
+발송하지 않음"은 여전히 목표이지 현재 상태가 아닙니다.
+
+> **전환 뒷정리로 Resend에서 `tomverse.app` 도메인을 지우지 마세요.** 세 경로가
+> 옮겨지기 전까지는 그들이 DKIM을 잃습니다. 루트 SPF는 `include:_spf.purelymail.com`
+> 이라 SES를 덮은 적이 없으므로, DKIM이 사라지면 DMARC가 통과할 근거가 남지
+> 않습니다.
 
 ## 2. 목표 상태
 
