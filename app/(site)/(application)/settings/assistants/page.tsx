@@ -1,5 +1,6 @@
 export const dynamic = "force-dynamic";
 
+import { Suspense } from "react";
 import { AssistantProfileList } from "@/components/assistants/AssistantProfileList";
 
 // Route shell only. Availability is resolved by the API itself: the list
@@ -9,7 +10,16 @@ import { AssistantProfileList } from "@/components/assistants/AssistantProfileLi
 export default function AssistantProfilesPage() {
     return (
         <main className="min-h-dvh bg-zinc-50 text-zinc-900 dark:bg-zinc-950 dark:text-zinc-100">
-            <AssistantProfileList />
+            {/*
+              The list reads the query string to know which row to restore on
+              the way back from a profile. `useSearchParams` suspends during
+              prerendering; this route is `force-dynamic` so it does not here,
+              and the boundary keeps that true if the rendering mode ever
+              changes.
+            */}
+            <Suspense fallback={null}>
+                <AssistantProfileList />
+            </Suspense>
         </main>
     );
 }

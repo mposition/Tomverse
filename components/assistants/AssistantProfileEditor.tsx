@@ -2,8 +2,10 @@
 
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useId, useRef, useState } from "react";
+import Link from "next/link";
 import {
     AlertTriangle,
+    ArrowLeft,
     ChevronDown,
     Loader2,
     Save,
@@ -11,6 +13,11 @@ import {
 } from "lucide-react";
 import { useLanguage } from "@/components/LanguageProvider";
 import { SettingsDetailNav } from "@/components/settings/SettingsDetailNav";
+import {
+    ASSISTANT_PROFILE_LIST_PATH,
+    assistantProfileHierarchy,
+} from "@/lib/settingsNavigation";
+import { ASSISTANT_PROFILE_CHAT_PATH } from "@/lib/assistantProfileReturn";
 import { ASSISTANT_PROFILE_LIMITS } from "@/lib/assistantProfileVersioning";
 import { discardResponseBody } from "@/lib/discardResponseBody";
 import { ENABLED_MODELS } from "@/lib/models";
@@ -234,6 +241,17 @@ export function AssistantProfileEditor({
     const instructionsRef = useRef<HTMLTextAreaElement | null>(null);
 
     const [profile, setProfile] = useState<LoadedProfile | null>(null);
+    /**
+     * What the breadcrumb calls this page.
+     *
+     * The profile's own name once it is loaded, because that is what the page
+     * is; a generic fallback while it is not, because a crumb reading the name
+     * of a profile that has not arrived would be a claim rather than a label.
+     */
+    const detailLabel = isNew
+        ? t("assistantProfiles.newTitle")
+        : profile?.name || t("assistantProfiles.editTitle");
+
     /** The revision this editor loaded, sent back so a stale save is caught. */
     const [loadedRevision, setLoadedRevision] = useState<number | null>(null);
 
@@ -465,7 +483,7 @@ export function AssistantProfileEditor({
                 method: "DELETE",
             });
             await discardResponseBody(response);
-            if (response.ok) router.replace("/settings/assistants");
+            if (response.ok) router.replace(ASSISTANT_PROFILE_LIST_PATH);
             else setNotice({ kind: "failed" });
         } catch {
             setNotice({ kind: "failed" });
@@ -474,14 +492,47 @@ export function AssistantProfileEditor({
         }
     };
 
+    /**
+     * The one way up, decided once.
+     *
+     * Loading, error, disabled and the loaded page all render this, because a
+     * page that offers a different parent depending on what it managed to
+     * fetch is a page whose hierarchy depends on the network.
+     *
+     * Opened from a conversation, the way out is the conversation rather than
+     * a list the visitor never saw -- and it is a plain link rather than a
+     * trail, because the chat is not a settings ancestor and putting it in the
+     * breadcrumb would claim settings sits underneath it. The destination is a
+     * constant either way; the query parameter that got the visitor here is
+     * compared to a literal and never read as a place to go
+     * (lib/assistantProfileReturn.ts).
+     */
+    const upwardNav = onCreated ? (
+                <nav
+                    aria-label={t("settingsNav.navLabel")}
+                    data-testid="settings-detail-nav"
+                >
+                    <Link
+                        href={ASSISTANT_PROFILE_CHAT_PATH}
+                        data-testid="assistant-create-back"
+                        className="inline-flex items-center gap-1.5 rounded-lg text-sm font-semibold text-zinc-500 transition-colors hover:text-zinc-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 focus-visible:ring-offset-zinc-50 dark:hover:text-zinc-100 dark:focus-visible:ring-offset-zinc-950"
+                    >
+                        <ArrowLeft className="h-4 w-4" aria-hidden="true" />
+                        {t("assistantProfiles.backToChat")}
+                    </Link>
+                </nav>
+    ) : (
+        <SettingsDetailNav
+            hierarchy={assistantProfileHierarchy({ focusProfileId: profileId })}
+            currentLabel={detailLabel}
+            backTestId={isNew ? "assistant-create-back" : "assistant-back-to-list"}
+        />
+    );
+
     if (disabled) {
         return (
             <div className="mx-auto w-full max-w-3xl px-4 py-6 sm:px-6">
-                <SettingsDetailNav
-                    section="assistants"
-                    currentLabel={t("assistantProfiles.pageTitle")}
-                    backTestId="assistants-back-to-settings"
-                />
+                {upwardNav}
                 <p
                     className={`mt-6 ${sectionClass} text-sm`}
                     data-testid="assistants-disabled"
@@ -494,11 +545,7 @@ export function AssistantProfileEditor({
 
     return (
         <div className="mx-auto w-full max-w-3xl px-4 py-6 sm:px-6">
-            <SettingsDetailNav
-                section="assistants"
-                currentLabel={t("assistantProfiles.pageTitle")}
-                backTestId="assistants-back-to-settings"
-            />
+            {upwardNav}
 
             <h1 className="mt-4 text-2xl font-black">
                 {isNew

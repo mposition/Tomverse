@@ -25,6 +25,7 @@ import {
     Mail,
     Palette,
     ShieldCheck,
+    Sparkles,
     Settings,
     Trash2,
     UserRound,
@@ -59,6 +60,7 @@ import {
     type ThemePreference,
 } from "@/lib/theme";
 import { openAnalyticsPreferences } from "@/lib/analyticsPreferencesEvents";
+import { SETTINGS_TAB_LABEL_KEY } from "@/lib/settingsNavigation";
 import {
     ACCOUNT_SETTINGS_OPEN_EVENT,
     consumePendingAccountSettingsRequest,
@@ -838,6 +840,57 @@ export function AuthButton({
         });
     };
 
+    const [modelFinderConfirmOpen, setModelFinderConfirmOpen] = useState(false);
+    /**
+     * Whether the combination on screen differs from the one that is saved.
+     *
+     * A function rather than a render-time value, and deliberately so: it
+     * reads the same ref `handleSaveSettings` compares against, and reading a
+     * ref during render is what `react-hooks/refs` refuses -- correctly, since
+     * a ref's value is not something a render can depend on. The question is
+     * only ever asked in response to a click, which is when the answer
+     * matters.
+     */
+    const combinationIsDirty = () => {
+        const saved = savedSettingsRef.current;
+        return (
+            !saved ||
+            JSON.stringify(saved.modelIds) !== JSON.stringify(defaultModelIds)
+        );
+    };
+
+    /**
+     * Opens the finder, once.
+     *
+     * The panel closes first and the finder opens on the next frame, which is
+     * the order that lets the finder's own focus trap take focus from a
+     * dialog that has already gone. `modelFinderOpeningRef` makes a second
+     * click during that frame a no-op -- the event is a broadcast, so two
+     * clicks would be two opens.
+     */
+    const modelFinderOpeningRef = useRef(false);
+    const openModelFinderNow = () => {
+        if (modelFinderOpeningRef.current) return;
+        modelFinderOpeningRef.current = true;
+        setModelFinderConfirmOpen(false);
+        closeSettingsModal();
+        requestAnimationFrame(() => {
+            openModelFinder();
+            modelFinderOpeningRef.current = false;
+        });
+    };
+
+    const startModelFinder = () => {
+        // Unsaved edits are named before they are lost. The finder writes the
+        // same setting, so continuing silently would discard the visitor's own
+        // choice and replace it with a suggestion.
+        if (combinationIsDirty()) {
+            setModelFinderConfirmOpen(true);
+            return;
+        }
+        openModelFinderNow();
+    };
+
     const handleSaveSettings = async () => {
         if (newlyAddedHighCostModelIds.length > 0 && !highCostAcknowledged) {
             dispatchAppToast(
@@ -1381,7 +1434,14 @@ export function AuthButton({
                                 {[
                                     { id: "account", label: t("auth.accountTab"), icon: UserRound },
                                     { id: "preferences", label: t("auth.preferencesTab"), icon: Palette },
-                                    { id: "ai", label: t("auth.aiTab"), icon: Bot },
+                                    // Read through the same map the breadcrumb
+                                    // reads, so the tab and the trail cannot
+                                    // call this place two different names.
+                                    {
+                                        id: "ai",
+                                        label: t(SETTINGS_TAB_LABEL_KEY.ai),
+                                        icon: Sparkles,
+                                    },
                                     { id: "data", label: t("auth.dataTab"), icon: Database },
                                     { id: "plan", label: t("auth.planTab"), icon: CreditCard },
                                 ].map((item) => {
@@ -1745,24 +1805,105 @@ export function AuthButton({
                                                     </span>
                                                 </label>
                                             )}
+                                            {/*
+                                              Inside the card, below a divider,
+                                              as a secondary action. It used to
+                                              be a full-width primary button
+                                              between this card and the profiles
+                                              one, which read as a third
+                                              top-level setting -- it is not a
+                                              setting at all, it is another way
+                                              to decide the combination above
+                                              it.
+
+                                              Wording carries no "again": the
+                                              settings screen cannot know
+                                              whether this visitor has ever run
+                                              the finder, and copy that assumes
+                                              they have is wrong for everyone
+                                              who has not.
+                                            */}
+                                            <div className="mt-3 flex flex-col gap-2 border-t border-zinc-200 pt-3 sm:flex-row sm:items-center sm:justify-between dark:border-zinc-800">
+                                                <p
+                                                    id="settings-model-finder-hint"
+                                                    className="text-xs leading-5 text-zinc-500"
+                                                >
+                                                    <span className="block font-semibold text-zinc-600 dark:text-zinc-300">
+                                                        {t("modelFinder.settingsCtaHeading")}
+                                                    </span>
+                                                    {t("modelFinder.settingsCtaDescription")}
+                                                </p>
+                                                <button
+                                                    type="button"
+                                                    data-testid="settings-model-finder-cta"
+                                                    aria-describedby="settings-model-finder-hint"
+                                                    onClick={startModelFinder}
+                                                    className="inline-flex min-h-11 shrink-0 items-center justify-center gap-2 rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm font-semibold text-zinc-700 transition-colors hover:bg-zinc-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 disabled:cursor-not-allowed disabled:opacity-60 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:bg-zinc-800"
+                                                >
+                                                    <Sparkles className="h-4 w-4" aria-hidden="true" />
+                                                    {t("modelFinder.settingsCta")}
+                                                </button>
+                                            </div>
+                                            {modelFinderConfirmOpen && (
+                                                /*
+                                                  The combination was edited and
+                                                  not saved. Closing the panel
+                                                  would drop those edits, and the
+                                                  finder would then write over
+                                                  the same setting -- so the loss
+                                                  is stated and the visitor
+                                                  chooses.
+
+                                                  Saving on their behalf is the
+                                                  other obvious option and is not
+                                                  taken: this panel's save sends
+                                                  every dirty field, so it would
+                                                  also persist a theme or
+                                                  language change they had not
+                                                  agreed to yet.
+                                                */
+                                                <div
+                                                    className="mt-2 rounded-xl border border-amber-200 bg-amber-50 p-3 dark:border-amber-900/60 dark:bg-amber-950/30"
+                                                    data-testid="settings-model-finder-unsaved"
+                                                    role="alert"
+                                                >
+                                                    <p className="text-xs leading-5 text-amber-800 dark:text-amber-200">
+                                                        {t("modelFinder.settingsCtaUnsaved")}
+                                                    </p>
+                                                    <div className="mt-2 flex flex-wrap gap-2">
+                                                        <button
+                                                            type="button"
+                                                            data-testid="settings-model-finder-unsaved-continue"
+                                                            onClick={openModelFinderNow}
+                                                            className="inline-flex min-h-11 items-center justify-center rounded-lg bg-amber-600 px-3 py-2 text-sm font-semibold text-white transition-colors hover:bg-amber-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500"
+                                                        >
+                                                            {t("modelFinder.settingsCtaUnsavedContinue")}
+                                                        </button>
+                                                        <button
+                                                            type="button"
+                                                            data-testid="settings-model-finder-unsaved-cancel"
+                                                            onClick={() => setModelFinderConfirmOpen(false)}
+                                                            className="inline-flex min-h-11 items-center justify-center rounded-lg border border-amber-300 px-3 py-2 text-sm font-semibold text-amber-800 transition-colors hover:bg-amber-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500 dark:border-amber-800 dark:text-amber-200 dark:hover:bg-amber-950/50"
+                                                        >
+                                                            {t("modelFinder.settingsCtaUnsavedCancel")}
+                                                        </button>
+                                                    </div>
+                                                </div>
+                                            )}
                                         </div>
-                                        <button
-                                            type="button"
-                                            onClick={() => {
-                                                closeSettingsModal();
-                                                requestAnimationFrame(() => openModelFinder());
-                                            }}
-                                            className="flex w-full items-center justify-center gap-2 rounded-xl border border-blue-200 bg-blue-50 px-3 py-3 text-sm font-bold text-blue-700 transition hover:bg-blue-100 dark:border-blue-900/60 dark:bg-blue-950/20 dark:text-blue-200 dark:hover:bg-blue-950/40"
-                                        >
-                                            <Bot className="h-4 w-4" />
-                                            {t("modelFinder.findAgain")}
-                                        </button>
                                         <section
                                             className="rounded-2xl border border-zinc-200 bg-zinc-50 p-4 dark:border-zinc-800 dark:bg-zinc-950/60"
                                             data-testid="settings-ai-personalization"
                                         >
-                                            <h3 className="text-sm font-bold">{t("settingsNav.aiPersonalization")}</h3>
-                                            <p className="mt-1 text-sm leading-6 text-zinc-500">{t("settingsNav.aiPersonalizationDescription")}</p>
+                                            {/* Named for what it holds, not
+                                                for the tab it is on: the tab
+                                                is already called "AI
+                                                personalization", and a group
+                                                repeating that name reads as a
+                                                heading that forgot to say
+                                                anything. */}
+                                            <h3 className="text-sm font-bold">{t("settingsNav.profilesAndMemory")}</h3>
+                                            <p className="mt-1 text-sm leading-6 text-zinc-500">{t("settingsNav.profilesAndMemoryDescription")}</p>
                                             <div className="mt-3">
                                                 {/*
                                                   A row in this group rather

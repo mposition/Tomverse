@@ -452,4 +452,152 @@ test.describe("assistant profile settings", () => {
         // Revisions are still tracked, and still shown to whoever wants them.
         await expect(page.getByTestId("assistant-version-history")).toBeVisible();
     });
+
+    /* -------------------------------------------- the profile hierarchy */
+
+    /**
+     * A profile sits inside a list, which sits inside a settings tab. The
+     * editor used to offer "back to settings", skipping the list entirely,
+     * while the trail underneath claimed a hierarchy the link did not follow.
+     */
+
+    test("a profile goes back to the list, not past it @ui-risk", async ({
+        page,
+    }) => {
+        await prepareGuestPage(page);
+        await mockProfileApis(page);
+        // Cold: no history, so the link has to name its destination.
+        await page.goto("/settings/assistants/p-published");
+
+        const back = page.getByTestId("assistant-back-to-list");
+        await expect(back).toBeVisible();
+        await expect(back).toHaveAttribute("href", /\/settings\/assistants(\?|$)/);
+        await expect(back).toContainText(/AI 프로필 목록으로|Back to AI profiles/);
+
+        // The link that skipped the list is gone from this page.
+        await expect(page.getByTestId("assistants-back-to-settings")).toHaveCount(0);
+
+        await back.click();
+        await expect(page).toHaveURL(/\/settings\/assistants(\?|$)/);
+        await expect(page.getByTestId("assistants-list")).toBeVisible();
+    });
+
+    test("the trail names every step and marks the current page @ui-risk", async ({
+        page,
+    }) => {
+        await prepareGuestPage(page);
+        await mockProfileApis(page);
+        await page.goto("/settings/assistants/p-published");
+
+        const crumb = page.getByTestId("settings-breadcrumb");
+        if ((page.viewportSize()?.width ?? 1920) < 768) {
+            // Mobile keeps the back link, which is the control either layout
+            // needs; the trail is the desktop extra.
+            await expect(crumb).toBeHidden();
+            await expect(page.getByTestId("assistant-back-to-list")).toBeVisible();
+            return;
+        }
+
+        await expect(crumb).toContainText("설정");
+        await expect(crumb).toContainText("AI 개인화");
+        await expect(crumb).toContainText("나만의 AI 프로필");
+        // The page's own crumb is the profile, and it is not a link.
+        await expect(crumb.locator('[aria-current="page"]')).toContainText(
+            "Scheduling helper"
+        );
+
+        // The list crumb is reachable, not just readable.
+        await crumb
+            .getByRole("link", { name: "나만의 AI 프로필" })
+            .click();
+        await expect(page).toHaveURL(/\/settings\/assistants(\?|$)/);
+    });
+
+    test("the disabled state still offers the list", async ({ page }) => {
+        // A page that offers a different parent depending on what it managed
+        // to fetch is a page whose hierarchy depends on the network.
+        await prepareGuestPage(page);
+        await mockAuthenticatedApi(page);
+        await page.route(
+            (url) => /^\/api\/assistant-profiles\/[^/]+$/.test(url.pathname),
+            (route) =>
+                route.fulfill({
+                    status: 403,
+                    contentType: "application/json",
+                    body: JSON.stringify({ code: "ASSISTANT_PROFILES_DISABLED" }),
+                })
+        );
+        await page.goto("/settings/assistants/p-published");
+
+        await expect(page.getByTestId("assistants-disabled")).toBeVisible();
+        await expect(page.getByTestId("assistant-back-to-list")).toHaveAttribute(
+            "href",
+            /\/settings\/assistants(\?|$)/
+        );
+    });
+
+    test("creating from the list goes back to the list", async ({ page }) => {
+        await prepareGuestPage(page);
+        await mockCreate(page);
+        await page.goto("/settings/assistants/new");
+
+        const back = page.getByTestId("assistant-create-back");
+        await expect(back).toHaveAttribute("href", /\/settings\/assistants(\?|$)/);
+        await expect(back).toContainText(/AI 프로필 목록으로|Back to AI profiles/);
+    });
+
+    test("creating from a chat offers the chat, not the list", async ({
+        page,
+    }) => {
+        // The chat is not a settings ancestor: it is a plain back link and
+        // never a crumb, because a trail containing it would claim settings
+        // sits underneath the chat.
+        await prepareGuestPage(page);
+        await mockCreate(page);
+        await page.goto("/settings/assistants/new?from=chat");
+
+        const back = page.getByTestId("assistant-create-back");
+        await expect(back).toHaveAttribute("href", "/chat");
+        await expect(back).toContainText(/채팅으로 돌아가기|Back to the chat/);
+        await expect(page.getByTestId("settings-breadcrumb")).toHaveCount(0);
+    });
+
+    test("returning from a profile restores its row", async ({ page }) => {
+        await prepareGuestPage(page);
+        await mockProfileApis(page);
+        await page.goto("/settings/assistants/p-published");
+
+        await page.getByTestId("assistant-back-to-list").click();
+        await expect(page.getByTestId("assistants-list")).toBeVisible();
+        await expect(
+            page.getByTestId("assistant-profile-p-published")
+        ).toBeFocused();
+    });
+
+    test("a row that no longer exists focuses the heading instead", async ({
+        page,
+    }) => {
+        // The profile was deleted from its own page: the hint names nothing,
+        // and focus must not be left on `<body>` with nothing announced.
+        await prepareGuestPage(page);
+        await mockProfileApis(page);
+        await page.goto("/settings/assistants?focus=p-deleted");
+
+        await expect(page.getByTestId("assistants-list")).toBeVisible();
+        await expect(page.getByRole("heading", { level: 1 })).toBeFocused();
+    });
+
+    test("the back link is reachable and activatable from the keyboard", async ({
+        page,
+    }) => {
+        await prepareGuestPage(page);
+        await mockProfileApis(page);
+        await page.goto("/settings/assistants/p-published");
+
+        const back = page.getByTestId("assistant-back-to-list");
+        await back.focus();
+        await expect(back).toBeFocused();
+        await page.keyboard.press("Enter");
+        await expect(page).toHaveURL(/\/settings\/assistants(\?|$)/);
+    });
 });

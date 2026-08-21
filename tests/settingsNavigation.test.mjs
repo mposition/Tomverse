@@ -10,6 +10,12 @@ import {
   stripSettingsDeepLink,
   settingsSectionGroupLabelKey,
   SETTINGS_TAB_LABEL_KEY,
+  ASSISTANT_PROFILE_FOCUS_PARAM,
+  settingsBackTarget,
+  ASSISTANT_PROFILE_LIST_PATH,
+  assistantProfileHierarchy,
+  assistantProfileListHref,
+  settingsEntryHierarchy,
 } from "../lib/settingsNavigation.ts";
 import {
   consumePendingAccountSettingsRequest,
@@ -231,5 +237,130 @@ test("every row can state where it stands, including when it is empty", () => {
       name
     );
     assert.ok(locale.memoryReview.dataTabStatusPending.includes("{count}"), name);
+  }
+});
+
+/* ------------------------------------------------ nested detail pages ---- */
+
+test("the AI tab keeps its id and its deep link while its name changes", () => {
+  // The name on screen is a product decision; `ai` and `settings=ai` are the
+  // identifiers a bookmark and a deep link carry, and renaming the tab must
+  // not break either.
+  assert.equal(SETTINGS_SECTION_TAB.assistants, "ai");
+  assert.equal(SETTINGS_SECTION_TAB.memory, "ai");
+  assert.deepEqual(parseSettingsDeepLink("?settings=ai&settingsSection=assistants"), {
+    tab: "ai",
+    section: "assistants",
+  });
+  assert.equal(
+    settingsSectionHref("assistants"),
+    "/chat?settings=ai&settingsSection=assistants"
+  );
+});
+
+test("the tab and the breadcrumb crumb read one label key", () => {
+  // Two keys is how "AI settings" and "AI personalization" ended up on screen
+  // at the same time, one in the tab strip and one in the trail below it.
+  assert.equal(SETTINGS_TAB_LABEL_KEY.ai, "settingsNav.aiPersonalization");
+  assert.equal(
+    settingsSectionGroupLabelKey("assistants"),
+    SETTINGS_TAB_LABEL_KEY.ai
+  );
+  for (const [name, locale] of Object.entries(LOCALES)) {
+    assert.ok(locale.settingsNav.aiPersonalization, name);
+    // The group inside the tab is named for what it holds, so the two are not
+    // the same string.
+    assert.ok(locale.settingsNav.profilesAndMemory, name);
+    assert.notEqual(
+      locale.settingsNav.profilesAndMemory,
+      locale.settingsNav.aiPersonalization,
+      `${name} names the tab and the group inside it identically`
+    );
+  }
+});
+
+test("a settings entry page goes back to the panel, and names its tab", () => {
+  for (const section of SETTINGS_SECTION_IDS) {
+    const trail = settingsEntryHierarchy(section);
+    // Two crumbs, one destination: the panel opens *at* the tab, so the tab
+    // names where you are rather than offering a second place to go.
+    assert.equal(trail.length, 2);
+    assert.equal(trail[0].href, settingsSectionHref(section));
+    assert.equal(trail[1].href, undefined);
+    assert.equal(trail[1].labelKey, settingsSectionGroupLabelKey(section));
+
+    const back = settingsBackTarget(trail);
+    assert.equal(back.href, settingsSectionHref(section));
+    assert.equal(back.backLabelKey, "settingsNav.backToSettings");
+  }
+});
+
+test("the back target is the nearest ancestor that is somewhere", () => {
+  // Not simply the last crumb: for both page kinds the last crumb may be a
+  // naming step, and a back link pointing at a label has nowhere to go.
+  const entry = settingsBackTarget(settingsEntryHierarchy("memory"));
+  assert.equal(entry.href, settingsSectionHref("memory"));
+
+  const profile = settingsBackTarget(assistantProfileHierarchy());
+  assert.equal(profile.href, ASSISTANT_PROFILE_LIST_PATH);
+  assert.equal(profile.backLabelKey, "assistantProfiles.backToList");
+});
+
+test("a profile's nearest ancestor is the list, not the settings panel", () => {
+  // The correction this whole hierarchy exists for: the editor used to offer
+  // "back to settings", skipping the list it sat inside, while the trail
+  // underneath claimed a hierarchy the link did not follow.
+  const trail = assistantProfileHierarchy();
+  assert.equal(trail.length, 3);
+  const parent = settingsBackTarget(trail);
+  assert.equal(parent.href, ASSISTANT_PROFILE_LIST_PATH);
+  assert.equal(parent.backLabelKey, "assistantProfiles.backToList");
+
+  // Settings, then the AI tab, then the list -- the order a reader walks up.
+  assert.deepEqual(
+    trail.map((ancestor) => ancestor.labelKey),
+    [
+      "settingsNav.settings",
+      SETTINGS_TAB_LABEL_KEY.ai,
+      "assistantProfiles.pageTitle",
+    ]
+  );
+});
+
+test("every ancestor's back label exists in every locale", () => {
+  const trails = [
+    ...SETTINGS_SECTION_IDS.map((section) => settingsEntryHierarchy(section)),
+    assistantProfileHierarchy(),
+  ];
+  for (const trail of trails) {
+    for (const ancestor of trail) {
+      for (const key of [ancestor.labelKey, ancestor.backLabelKey].filter(
+        Boolean
+      )) {
+        const [namespace, leaf] = key.split(".");
+        for (const [name, locale] of Object.entries(LOCALES)) {
+          assert.ok(locale[namespace]?.[leaf], `${name} has no ${key}`);
+        }
+      }
+    }
+  }
+});
+
+test("the focus hint is a query parameter, never a path", () => {
+  assert.equal(assistantProfileListHref(), ASSISTANT_PROFILE_LIST_PATH);
+  assert.equal(
+    assistantProfileListHref("p-1"),
+    `${ASSISTANT_PROFILE_LIST_PATH}?${ASSISTANT_PROFILE_FOCUS_PARAM}=p-1`
+  );
+  // A value that would change the destination if it were pasted in raw is
+  // encoded, so the href still points at the list and the list still decides
+  // what to do with the value by looking it up among its own rows.
+  for (const hostile of ["../../admin", "a/b", "?x=1", "https://evil.example"]) {
+    const href = assistantProfileListHref(hostile);
+    assert.ok(
+      href.startsWith(`${ASSISTANT_PROFILE_LIST_PATH}?${ASSISTANT_PROFILE_FOCUS_PARAM}=`),
+      `${hostile} escaped the query string`
+    );
+    assert.equal(href.includes("/", ASSISTANT_PROFILE_LIST_PATH.length), false);
   }
 });
