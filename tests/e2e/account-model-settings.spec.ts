@@ -62,10 +62,15 @@ async function openSettingsAiTab(page: Page) {
     .click();
   const settings = page.getByRole("dialog", { name: "User Settings" });
   await expect(settings).toBeVisible();
-  // The new-conversation combination lives on the AI settings tab. It was on
-  // "Preferences" beside theme, language and time zone -- a tab about how the
-  // app looks, holding the decision about which models answer.
-  await settings.getByRole("button", { name: "AI settings" }).click();
+  // The new-conversation combination lives on the AI personalization tab. It
+  // was on "Preferences" beside theme, language and time zone -- a tab about
+  // how the app looks, holding the decision about which models answer.
+  //
+  // Reached by test id, not by label. This test is about the combination
+  // editor, and pinning it to the tab's wording made it fail when the tab was
+  // renamed -- a rename this file had no reason to care about. The label
+  // itself is asserted by tests/e2e/settings-information-architecture.spec.ts.
+  await settings.getByTestId("settings-tab-ai").click();
   return settings;
 }
 
