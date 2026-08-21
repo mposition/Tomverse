@@ -6,6 +6,7 @@ import { AVAILABLE_MODELS, type AiProvider, type ModelTier } from "@/lib/models"
 import { getRuntimeModel, getRuntimeModels } from "@/lib/modelRegistry";
 import { PROVIDER_API_KEY_ENV_NAMES } from "@/lib/modelRegistryShared";
 import { sendManagedSlackMessage } from "@/lib/managedSlack";
+import { resolveSendingIdentity } from "@/lib/emailSendingIdentityCore";
 import {
   getProviderCreditSummaries,
   type ProviderCreditSummary,
@@ -537,7 +538,26 @@ const sendEmailAlert = async (
     return;
   }
 
-  const from = process.env.ADMIN_ALERT_FROM || "Tomverse Admin <alerts@tomverse.app>";
+  // One resolver for every sender (docs/policy/email-notifications.md §14.1).
+  // This path carried its own variable and its own literal until the sending
+  // domain moved without it -- docs/ops/email-sending-domains.md §1.2.
+  const identity = resolveSendingIdentity("transactional", process.env);
+  if (!identity.ok) {
+    // Recorded and returned rather than thrown: this is one delivery channel
+    // among several, and a sender it cannot resolve must not take the rest of
+    // the alert with it.
+    await recordNotificationLog({
+      channel: "email",
+      title,
+      detail,
+      status: "failed",
+      targetType: log.targetType,
+      targetId: log.targetId,
+      error: `Sending identity unusable: ${identity.code}`,
+    });
+    return;
+  }
+  const from = identity.from;
   const text = `${title}\n\n${detail}`;
 
   if (process.env.RESEND_API_KEY) {
@@ -591,7 +611,7 @@ const sendEmailAlert = async (
         },
         body: JSON.stringify({
           personalizations: [{ to: [{ email: to }] }],
-          from: { email: from.includes("<") ? "alerts@tomverse.app" : from },
+          from: { email: identity.address },
           subject: `[Tomverse Admin] ${title}`,
           content: [{ type: "text/plain", value: text }],
         }),

@@ -93,6 +93,176 @@ export const isWithinDomain = (domain: string, parent: string) =>
 export const rootDomainOf = (domain: string) =>
   domain.split(".").slice(-2).join(".");
 
+/**
+ * The historical transactional sender, used when nothing is configured.
+ *
+ * It is the registrable domain rather than a sending subdomain -- the state
+ * §17.3 step 1 moves away from -- and it stays that way on purpose. Moving it
+ * is a DNS change plus a notice to people whose filters name the current
+ * address, not something a deploy may do by editing a default. The health
+ * check reports the gap instead.
+ */
+export const TRANSACTIONAL_FROM_FALLBACK = "Tomverse Insight <hello@tomverse.app>";
+
+/**
+ * The variables each stream reads, most specific first.
+ *
+ * Written down once. Three senders used to each carry their own variable and
+ * their own literal fallback, which is how the 2026-08-21 cutover moved one of
+ * four sending identities and left the other three on the old domain without
+ * anything noticing (docs/ops/email-sending-domains.md §1.2).
+ */
+export const SENDING_IDENTITY_ENV_KEYS = {
+  transactional: ["TRANSACTIONAL_EMAIL_FROM", "EMAIL_FROM"],
+  marketing: ["MARKETING_EMAIL_FROM"],
+} as const satisfies Record<SendingStream, readonly string[]>;
+
+/** Any environment-shaped object. Deliberately not `process.env`: this is pure. */
+export type SendingIdentityEnv = Readonly<Record<string, string | undefined>>;
+
+const firstConfigured = (env: SendingIdentityEnv, keys: readonly string[]) => {
+  for (const key of keys) {
+    const value = env[key]?.trim();
+    if (value) return value;
+  }
+  return null;
+};
+
+/** What the health check reasons over, read from an environment. */
+export const sendingIdentityInputFrom = (
+  env: SendingIdentityEnv
+): SendingIdentityInput => ({
+  transactionalFrom:
+    firstConfigured(env, SENDING_IDENTITY_ENV_KEYS.transactional) ??
+    TRANSACTIONAL_FROM_FALLBACK,
+  marketingFrom: firstConfigured(env, SENDING_IDENTITY_ENV_KEYS.marketing),
+  nodeEnv: env.NODE_ENV,
+});
+
+export type SendingIdentityRefusalCode =
+  | "TRANSACTIONAL_FROM_UNPARSEABLE"
+  | "MARKETING_FROM_UNPARSEABLE"
+  | "MARKETING_FROM_MISSING"
+  | "STREAMS_SHARE_A_DOMAIN";
+
+export type ResolvedSendingIdentity =
+  | { ok: true; from: string; address: string; domain: string }
+  | { ok: false; code: SendingIdentityRefusalCode; message: string };
+
+/**
+ * The From header for a stream, or a refusal, from a given environment.
+ *
+ * Returns rather than throws, because two of its three callers are alerting
+ * paths: a delivery channel that threw would take the other channels with it,
+ * and the one thing an alert must not do is fail silently because the alert
+ * about the failure also failed. `fromAddressForStream` in
+ * lib/emailSendingIdentity.ts wraps this and throws, for callers that want it.
+ *
+ * Pure and environment-agnostic so the GitHub Actions security report can
+ * share it: that script runs outside Next.js and cannot import a `server-only`
+ * module, and a second copy of this logic is how the identities drifted apart
+ * in the first place.
+ */
+export const resolveSendingIdentity = (
+  stream: SendingStream,
+  env: SendingIdentityEnv
+): ResolvedSendingIdentity => {
+  const input = sendingIdentityInputFrom(env);
+  const transactional = parseFromAddress(input.transactionalFrom);
+
+  if (stream === "transactional") {
+    if (!transactional) {
+      return {
+        ok: false,
+        code: "TRANSACTIONAL_FROM_UNPARSEABLE",
+        message: `${SENDING_IDENTITY_ENV_KEYS.transactional[0]} is not a readable address.`,
+      };
+    }
+    return {
+      ok: true,
+      from: input.transactionalFrom!,
+      address: transactional.address,
+      domain: transactional.domain,
+    };
+  }
+
+  if (!input.marketingFrom) {
+    return {
+      ok: false,
+      code: "MARKETING_FROM_MISSING",
+      message:
+        "Marketing mail has no sending identity of its own (MARKETING_EMAIL_FROM). Sending it from the transactional domain is refused rather than defaulted.",
+    };
+  }
+  const marketing = parseFromAddress(input.marketingFrom);
+  if (!marketing) {
+    return {
+      ok: false,
+      code: "MARKETING_FROM_UNPARSEABLE",
+      message: "MARKETING_EMAIL_FROM is not a readable address.",
+    };
+  }
+  if (transactional && transactional.domain === marketing.domain) {
+    return {
+      ok: false,
+      code: "STREAMS_SHARE_A_DOMAIN",
+      message: `Marketing and transactional mail would both send from ${marketing.domain}. Domain reputation is the one layer that separates the two streams (§5.3).`,
+    };
+  }
+  return {
+    ok: true,
+    from: input.marketingFrom,
+    address: marketing.address,
+    domain: marketing.domain,
+  };
+};
+
+/**
+ * A sender written as a literal, found in source text.
+ *
+ * Pure so the shapes can be pinned by a test. The rule that matters is *which*
+ * shapes, and the obvious one is wrong: a literal directly after `from:` would
+ * have passed on the tree that had the bug, because all four senders wrote
+ * `from: process.env.SOMETHING || "Name <addr@domain>"` and the literal sat
+ * behind a fallback rather than beside the key.
+ *
+ * So it matches on the value:
+ *
+ *   A. `"Display Name <local@domain>"` -- the RFC 5322 From form. A string
+ *      shaped like that is a sender or it is nothing.
+ *   B. a bare address on one of our own domains, on a line that also says
+ *      `from` -- how the SendGrid branch carried its second copy.
+ *
+ * B is scoped to a `from` line deliberately. Unscoped it flags every address on
+ * our domain, and most are not senders: the support address the marketing pages
+ * print, the `qa@` and `demo@` identities fixtures sign in as. Failing on those
+ * teaches people to add exceptions instead of reading findings.
+ */
+const DISPLAY_NAME_FROM = /["'`][^"'`]*<[^"'`@\s]+@[^"'`>\s]+>["'`]/g;
+const OWN_DOMAIN_ADDRESS = /["'`][A-Za-z0-9._%+-]+@(?:[A-Za-z0-9-]+\.)*tomverse\.app["'`]/;
+
+export type HardCodedSender = { line: number; literal: string };
+
+export const hardCodedSenders = (source: string): HardCodedSender[] => {
+  const found: HardCodedSender[] = [];
+  const lines = source.split("\n");
+
+  lines.forEach((line, index) => {
+    for (const match of line.matchAll(DISPLAY_NAME_FROM)) {
+      found.push({ line: index + 1, literal: match[0] });
+    }
+    if (/\bfrom\b/.test(line)) {
+      const match = OWN_DOMAIN_ADDRESS.exec(line);
+      // Only when it is not already reported as a display-name form above.
+      if (match && !found.some((entry) => entry.line === index + 1)) {
+        found.push({ line: index + 1, literal: match[0] });
+      }
+    }
+  });
+
+  return found;
+};
+
 export type SendingIdentityProblem = {
   severity: "error" | "warning";
   stream: SendingStream | "both";

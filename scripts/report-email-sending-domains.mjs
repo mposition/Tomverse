@@ -30,20 +30,21 @@ import {
   domainReportFindings,
   parseProviderDomains,
 } from "../lib/emailSendingDomainsCore.ts";
-import { parseFromAddress } from "../lib/emailSendingIdentityCore.ts";
+import {
+  parseFromAddress,
+  sendingIdentityInputFrom,
+} from "../lib/emailSendingIdentityCore.ts";
 
 const json = process.argv.includes("--json");
 
-const TRANSACTIONAL_FALLBACK = "Tomverse Insight <hello@tomverse.app>";
-
+// Resolved through the shared function rather than re-reading the variables
+// here. This script carried its own copy of the precedence and the fallback
+// until `npm run check:sending-identity` found it -- a fourth copy of the rules,
+// written the day after three others were found to have drifted.
+const identity = sendingIdentityInputFrom(process.env);
 const configured = {
-  transactional:
-    parseFromAddress(
-      process.env.TRANSACTIONAL_EMAIL_FROM ||
-        process.env.EMAIL_FROM ||
-        TRANSACTIONAL_FALLBACK
-    )?.domain ?? null,
-  marketing: parseFromAddress(process.env.MARKETING_EMAIL_FROM)?.domain ?? null,
+  transactional: parseFromAddress(identity.transactionalFrom)?.domain ?? null,
+  marketing: parseFromAddress(identity.marketingFrom)?.domain ?? null,
 };
 
 const readProviderDomains = async () => {

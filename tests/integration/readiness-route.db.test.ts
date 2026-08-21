@@ -6,7 +6,7 @@ import { resolve } from "node:path";
 // `/api/ready`, driven as the load balancer drives it.
 //
 // This endpoint decides whether a deployment receives traffic. Its contract is
-// a conjunction -- four dependencies, any one of which must sink the verdict --
+// a conjunction -- five dependencies, any one of which must sink the verdict --
 // and the failure mode is a check that gets computed and then not folded in:
 // the body lists a dependency as broken while `ok` stays true and the platform
 // keeps routing to it.
@@ -78,9 +78,11 @@ mock.module(mod("lib/imageProviderBudgetReadiness.ts"), {
 });
 
 /**
- * The email sending identity, mocked like every other dependency: this suite
- * runs against a live database but not against a configured mail domain, and
- * the route only reads `ready`, the error messages and the warning codes.
+ * The sending-identity readiness the route folds in.
+ *
+ * Mocked rather than driven through the real environment: the resolver falls
+ * back to a compiled address when nothing is configured, so a live read is
+ * always ready and the refusal branch would never be exercised here.
  */
 let sendingIdentityReady = true;
 mock.module(mod("lib/emailSendingIdentity.ts"), {
@@ -91,9 +93,9 @@ mock.module(mod("lib/emailSendingIdentity.ts"), {
                 ? []
                 : [
                       {
-                          code: "TRANSACTIONAL_FROM_MISSING",
                           severity: "error",
-                          message: "no transactional sending domain",
+                          code: "STREAMS_SHARE_A_DOMAIN",
+                          message: "marketing shares the transactional domain",
                       },
                   ],
             warnings: [],
@@ -149,6 +151,7 @@ beforeEach(() => {
     securityChecks = { stripeLiveMode: true };
     providerBudgetReady = true;
     imageBudget = { ready: true, flagEnabled: false };
+    sendingIdentityReady = true;
     setNodeEnv(originalNodeEnv);
 });
 
@@ -263,19 +266,6 @@ test("each dependency alone sinks the verdict, and the others still report", asy
             "every dependency is reported, not only the failing one"
         );
     }
-
-    // The loop arranges its failure at the *start* of each iteration, so the
-    // last case is still broken when it ends. Every later test sets only the
-    // dependency it is about and expects the rest to be healthy, so leaving
-    // one broken here would fail them for a reason that has nothing to do with
-    // what they assert -- and the reason would move whenever a case is added
-    // at the end.
-    securityReady = true;
-    securityChecks = { stripeLiveMode: true };
-    providerBudgetReady = true;
-    imageBudget = { ready: true, flagEnabled: false };
-    sendingIdentityReady = true;
-    setNodeEnv(originalNodeEnv);
 });
 
 test("the image budget check throwing is not ready", async () => {
