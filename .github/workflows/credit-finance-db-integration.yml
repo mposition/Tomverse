@@ -23,9 +23,26 @@ on:
       - "package.json"
       - "package-lock.json"
       - ".github/workflows/credit-finance-db-integration.yml"
+  # Both release branches, and deliberately without the path filter above.
+  #
+  # A pull_request run tests the merge of head and base, so it answers "would
+  # this branch be green" -- not "is the branch it merged into green". Those
+  # came apart on 2026-08-21: a readiness dependency landed on develop with no
+  # matching test change, and because nothing ran this suite on the merge, the
+  # failure sat on develop until an unrelated routing PR picked it up and
+  # looked like that PR's fault. Whoever merged it had already moved on, and
+  # the branch it broke is the one every other PR is measured against.
+  #
+  # No `paths` here on purpose. A path filter answers "did this push touch
+  # something the suite covers", and the case above is the one where it does
+  # not: the push that broke it changed a route, and the file that failed was a
+  # test the filter would have matched only by luck. On a release branch the
+  # question is whether the branch is green, which does not depend on what the
+  # last push happened to touch.
   push:
     branches:
       - main
+      - develop
   workflow_dispatch:
 
 permissions:
