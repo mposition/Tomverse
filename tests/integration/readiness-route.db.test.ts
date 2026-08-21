@@ -77,6 +77,30 @@ mock.module(mod("lib/imageProviderBudgetReadiness.ts"), {
     },
 });
 
+/**
+ * The email sending identity, mocked like every other dependency: this suite
+ * runs against a live database but not against a configured mail domain, and
+ * the route only reads `ready`, the error messages and the warning codes.
+ */
+let sendingIdentityReady = true;
+mock.module(mod("lib/emailSendingIdentity.ts"), {
+    namedExports: {
+        getSendingIdentityReadiness: () => ({
+            ready: sendingIdentityReady,
+            errors: sendingIdentityReady
+                ? []
+                : [
+                      {
+                          code: "TRANSACTIONAL_FROM_MISSING",
+                          severity: "error",
+                          message: "no transactional sending domain",
+                      },
+                  ],
+            warnings: [],
+        }),
+    },
+});
+
 /** Dependency reports the route files after answering. */
 let reported: Array<{ dependency: string; healthy: boolean }> = [];
 mock.module(mod("lib/operationalMonitoring.ts"), {
@@ -140,6 +164,7 @@ type ReadinessBody = {
         securityEnvironment: boolean;
         providerBudgets: boolean;
         imageProviderBudget: boolean;
+        emailSendingIdentity: boolean;
     };
     traceId: string;
 };
@@ -165,6 +190,7 @@ test("a healthy deployment is ready, and says which checks passed", async () => 
         securityEnvironment: true,
         providerBudgets: true,
         imageProviderBudget: true,
+        emailSendingIdentity: true,
     });
     assert.ok(body.traceId, "a trace id ties the answer to the reports");
     // Only sent when refusing traffic; a load balancer reads it.
@@ -200,6 +226,12 @@ test("each dependency alone sinks the verdict, and the others still report", asy
                 imageBudget = { ready: false, flagEnabled: true };
             },
         },
+        {
+            name: "emailSendingIdentity",
+            arrange: () => {
+                sendingIdentityReady = false;
+            },
+        },
     ];
 
     for (const { name, arrange } of cases) {
@@ -209,6 +241,7 @@ test("each dependency alone sinks the verdict, and the others still report", asy
         securityChecks = { stripeLiveMode: true };
         providerBudgetReady = true;
         imageBudget = { ready: true, flagEnabled: false };
+        sendingIdentityReady = true;
         setNodeEnv(originalNodeEnv);
         arrange();
 
@@ -226,10 +259,23 @@ test("each dependency alone sinks the verdict, and the others still report", asy
         await runDeferred();
         assert.equal(
             reported.length,
-            4,
+            5,
             "every dependency is reported, not only the failing one"
         );
     }
+
+    // The loop arranges its failure at the *start* of each iteration, so the
+    // last case is still broken when it ends. Every later test sets only the
+    // dependency it is about and expects the rest to be healthy, so leaving
+    // one broken here would fail them for a reason that has nothing to do with
+    // what they assert -- and the reason would move whenever a case is added
+    // at the end.
+    securityReady = true;
+    securityChecks = { stripeLiveMode: true };
+    providerBudgetReady = true;
+    imageBudget = { ready: true, flagEnabled: false };
+    sendingIdentityReady = true;
+    setNodeEnv(originalNodeEnv);
 });
 
 test("the image budget check throwing is not ready", async () => {
