@@ -145,6 +145,16 @@ jobs:
         timeout-minutes: 150
         run: npm run test:e2e:run
 
+      # /api/ready checks the deployment's sending identity and cannot see this
+      # runner's variables. Same resolver, checked where it actually runs.
+      - name: Check the sending identity
+        if: always()
+        continue-on-error: true
+        id: sending_identity
+        env:
+          TRANSACTIONAL_EMAIL_FROM: ${{ vars.TRANSACTIONAL_EMAIL_FROM }}
+        run: npm run check:sending-identity -- --env
+
       - name: Deliver security audit report
         id: report
         if: always()
@@ -152,7 +162,10 @@ jobs:
           SECURITY_AUDIT_SEND_NOTIFICATIONS: "true"
           SECURITY_AUDIT_SLACK_WEBHOOK_URL: ${{ secrets.SECURITY_AUDIT_SLACK_WEBHOOK_URL || secrets.OPS_ALERT_SLACK_WEBHOOK_URL || secrets.SLACK_WEBHOOK_URL }}
           SECURITY_AUDIT_EMAILS: ${{ secrets.SECURITY_AUDIT_EMAILS || secrets.OPS_ALERT_EMAIL || secrets.ADMIN_ALERT_EMAIL }}
-          SECURITY_AUDIT_EMAIL_FROM: ${{ secrets.SECURITY_AUDIT_EMAIL_FROM || secrets.TRANSACTIONAL_EMAIL_FROM || secrets.EMAIL_FROM }}
+          # A repository/environment *variable*, not a secret: a From address is
+          # not confidential, and only RESEND_API_KEY needs to be. The script
+          # resolves it through the same pure function the application uses.
+          TRANSACTIONAL_EMAIL_FROM: ${{ vars.TRANSACTIONAL_EMAIL_FROM }}
           RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
           SECURITY_AUDIT_OUTPUT_PATH: security-audit/daily-report.json
           SECURITY_AUDIT_GITLEAKS_STATUS: ${{ steps.gitleaks.outcome }}
@@ -166,7 +179,11 @@ jobs:
           SECURITY_AUDIT_PRODUCTION_STATUS: ${{ steps.production_check.outcome }}
           SECURITY_AUDIT_BROWSER_INSTALL_STATUS: ${{ steps.browser_install.outcome }}
           SECURITY_AUDIT_E2E_STATUS: ${{ steps.e2e.outcome }}
-        run: node scripts/send-security-audit-report.mjs
+        # `--import tsx` because the sender is resolved through
+        # lib/emailSendingIdentityCore.ts, which is TypeScript. Sharing that
+        # function is the point: a second copy of the rules is what left this
+        # sender on the old domain (docs/ops/email-sending-domains.md §1.2).
+        run: node --import tsx scripts/send-security-audit-report.mjs
 
       - name: Upload daily audit evidence
         if: always()

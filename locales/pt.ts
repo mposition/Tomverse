@@ -244,6 +244,7 @@ export const pt = {
         undo: "Desfazer",
         reportError: "Reportar erro",
         copyResponse: "Copiar resposta",
+        copyCode: "Copiar código",
         responseCopied: "Copiado",
         tryAnotherModelHint: "Você também pode selecionar outro modelo e tentar novamente.",
         guestQuotaLoginBenefitHint: "Ao entrar na sua conta, você recebe um limite diário muito maior, e esta conversa é salva na sua conta.",
@@ -1089,6 +1090,9 @@ export const pt = {
     settingsNav: {
         navLabel: "Navegação das configurações",
         backToSettings: "Voltar às configurações",
+        backToChat: "Voltar ao chat",
+        backToChatShort: "Chat",
+        exitNavLabel: "Sair das configurações",
         settings: "Configurações",
         dataAndPersonalization: "Gestão de dados",
         dataAndPersonalizationDescription: "Conversas importadas e exportação dos dados da conta. Cada um é gerido na sua própria página.",

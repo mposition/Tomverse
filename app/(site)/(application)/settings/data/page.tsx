@@ -8,7 +8,7 @@ import { AccountDataDownload } from "@/components/privacy/AccountDataDownload";
 // could get wrong.
 export default function AccountDataSettingsPage() {
     return (
-        <main className="min-h-dvh bg-zinc-50 text-zinc-900 dark:bg-zinc-950 dark:text-zinc-100">
+        <main>
             <AccountDataDownload />
         </main>
     );

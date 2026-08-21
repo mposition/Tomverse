@@ -253,6 +253,7 @@ export const zh = {
         undo: "撤销",
         reportError: "报告错误",
         copyResponse: "复制回答",
+        copyCode: "复制代码",
         responseCopied: "已复制",
         tryAnotherModelHint: "你也可以选择其他模型后再试。",
         guestQuotaLoginBenefitHint: "登录后可获得更高的每日额度，并且此对话会保存到你的账户中。",
@@ -1107,6 +1108,9 @@ export const zh = {
     settingsNav: {
         navLabel: "设置导航",
         backToSettings: "返回设置",
+        backToChat: "返回对话",
+        backToChatShort: "对话",
+        exitNavLabel: "退出设置",
         settings: "设置",
         dataAndPersonalization: "数据管理",
         dataAndPersonalizationDescription: "已导入的对话和账户数据导出。两者分别在各自的页面中管理。",
