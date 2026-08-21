@@ -891,11 +891,40 @@ export async function mockAuthenticatedApi(
     state.deleted = false;
     state.locked = false;
     state.shared = false;
-    const body = route.request().postDataJSON() as { title?: unknown };
+    const body = route.request().postDataJSON() as {
+      title?: unknown;
+      selectedModels?: unknown;
+      disabledPanels?: unknown;
+      assistantProfileId?: unknown;
+    };
     state.title =
       typeof body.title === "string" && body.title.trim()
         ? body.title
         : "New QA conversation";
+    // The create takes the caller's selection, as the real endpoint does. The
+    // client reads its model list back out of this response rather than
+    // keeping what it sent -- it has to, because a create carrying a profile
+    // comes back with the profile's models instead (policy section 14.0) --
+    // so a mock that answered with a canned default silently replaced every
+    // selection a spec had made in the picker, turning a two-model comparison
+    // into a one-model send that never reaches /api/chat/preflight.
+    //
+    // A spec exercising the profile case overrides this route and answers with
+    // the profile's models, which is the one time the two legitimately differ.
+    if (
+      !body.assistantProfileId &&
+      Array.isArray(body.selectedModels) &&
+      body.selectedModels.length > 0
+    ) {
+      state.selectedModels = Array.from(
+        new Set(body.selectedModels.filter((id): id is string => typeof id === "string"))
+      );
+    }
+    if (Array.isArray(body.disabledPanels)) {
+      state.disabledPanels = body.disabledPanels.filter(
+        (id): id is string => typeof id === "string"
+      );
+    }
     await route.fulfill(json(conversation(), 201));
   });
 
