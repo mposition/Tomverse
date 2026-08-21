@@ -123,6 +123,9 @@ test("an unenrolled model is neutral rather than refused", () => {
 test("the tie-break order is the one the policy documents", () => {
     assert.deepEqual(ROUTER_TIE_BREAK_ORDER, [
         "quality_band",
+        // Above cost deliberately: "this model is currently misbehaving" is a
+        // stronger reason to pick the other one than "this model is cheaper".
+        "health_degraded",
         "expected_total_cost",
         "recent_success_rate",
         "ttft_p95",

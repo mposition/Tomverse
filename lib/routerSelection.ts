@@ -182,6 +182,23 @@ const compareCandidates = (
     const byQuality = compareRouterScoreCells(left.cell, right.cell);
     if (byQuality !== 0) return { order: byQuality, decidedBy: "quality_band" };
 
+    // A degraded model is still a candidate -- refusal is a hard filter, and
+    // this is not one -- but it loses to a model nothing is reporting problems
+    // with, before price is even asked about. Absence from the set is "not
+    // known to be degraded", so an unprobed model is not demoted for being
+    // unprobed.
+    const degraded = signals.degradedModelIds;
+    if (degraded !== undefined && degraded.length > 0) {
+        const leftDegraded = degraded.includes(left.modelId);
+        const rightDegraded = degraded.includes(right.modelId);
+        if (leftDegraded !== rightDegraded) {
+            return {
+                order: leftDegraded ? 1 : -1,
+                decidedBy: "health_degraded",
+            };
+        }
+    }
+
     const byCost = compareCost(
         signals.expectedTotalCostUsdByModelId?.[left.modelId],
         signals.expectedTotalCostUsdByModelId?.[right.modelId]

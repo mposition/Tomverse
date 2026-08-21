@@ -56,6 +56,7 @@ import { reserveNativeSearchCost } from "@/lib/webSearchNativeCostReservation";
 import { getWebSearchSurchargeCredits } from "@/lib/webSearchCredits";
 import { buildWebSearchToolConfig, WEB_SEARCH_TOOL_NAMES } from "@/lib/webSearchToolConfig";
 import { hasSearchPath, resolveAttemptSearchPath } from "@/lib/webSearchPath";
+import { getRouterRuntimeSignals } from "@/lib/routerRuntimeSignals";
 import { normalizeWebSearchExecution } from "@/lib/webSearchExecutionNormalizer";
 import { buildChatStreamTrailerChunk } from "@/lib/webSearchStreamTrailer";
 import { resolveChatCompletionOutcome } from "@tomverse/chat-core";
@@ -941,6 +942,15 @@ async function handleChatPost(
             autoCohort.eligible && turnCarriesAttachments(messages)
                 ? await measureTurnAttachments(messages, ownAttachmentPrefix)
                 : ({ measurable: true, descriptors: [] } as const);
+        // Health and the measured tie-break signals, from one cached snapshot.
+        // Read only for an account the cohort would actually route: a feature
+        // that is off should cost nothing, which is the same reason the
+        // attachment measurement above is skipped. The read never throws --
+        // an input it could not fetch is unknown, and unknown has a defined
+        // meaning in every criterion downstream.
+        const routerSignals = autoCohort.eligible
+            ? await getRouterRuntimeSignals()
+            : null;
         const autoSelection = selectAutoModel({
             requestedModelId,
             conversation: conversationRouting,
@@ -973,6 +983,13 @@ async function handleChatPost(
             // window would bias every other candidate against it.
             requestOutputCapTokens: resolveModelPricing(requestedModelConfig)
                 .maxOutputTokens,
+            // Confirmed unavailable only. `degraded` stays a candidate and
+            // loses tie-breaks instead, and `unknown` -- every model nothing
+            // probes -- excludes nobody: uncertainty is not a verdict, and
+            // treating it as one would take two thirds of the catalogue out of
+            // Auto for want of a probe.
+            unhealthyModelIds: routerSignals?.unhealthyModelIds,
+            signals: routerSignals?.signals,
         });
         const effectiveModelId = autoSelection.routed
             ? autoSelection.modelId
