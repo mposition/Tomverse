@@ -1,9 +1,56 @@
+# Automated repair of failed scheduled jobs.
+#
+# DARK BY DEFAULT, and off today. This workflow does nothing unless the
+# repository variable CRON_AUTO_FIX_ENABLED is exactly "true". The schedule
+# stays, so activation is one variable rather than a workflow edit, but until
+# that variable is set every run stops at the first step and reports why.
+#
+# Activation is a decision, not a missing value. The absence of a secret must
+# never stand in for it: a guard that skipped whenever AUTO_FIX_SYNC_SECRET was
+# empty would make a rotated, mistyped or expired secret indistinguishable from
+# "we chose not to run this", and the pipeline would go quiet at exactly the
+# moment it should be loud. So the variable decides, and once it says yes a
+# missing credential is a configuration error that fails the run.
+#
+# What this cost while it was neither on nor off: runs #1 (2026-07-22) through
+# #31 (2026-08-21) failed identically, every day, six seconds in, because
+# AUTO_FIX_SYNC_SECRET was never set in Actions and the poll endpoint answers
+# 404 to an unauthenticated request. A month of red runs that meant "not
+# configured" trains the reader to ignore the one that will mean "broken".
+#
+# BEFORE SETTING CRON_AUTO_FIX_ENABLED=true, settle all four. None is fixed by
+# this file, and each can lose or corrupt work if it is skipped:
+#
+#   1. Every credential, not just the sync secret. AUTO_FIX_SYNC_SECRET (>= 32
+#      chars, identical to the deployed app's env), ANTHROPIC_API_KEY and
+#      GH_AUTOMATION_PAT must all exist. The preflight below checks for their
+#      presence and fails when one is missing; it cannot check that they work.
+#   2. The `|| true` on the LLM step. A failed `claude` invocation currently
+#      leaves the tree unchanged, which the diff check reads as "no fix was
+#      needed" and reports to the server as `no_action_needed`. An unattempted
+#      incident would be recorded as an examined one.
+#   3. Claim recovery. GET .../auto-fix/pending is not a read: it stamps
+#      `autoFixAttemptedAt` on every run it returns. Anything that fails after
+#      the response -- parsing, the matrix, a cancelled job -- consumes those
+#      incidents permanently, because the next poll no longer sees them. A
+#      lease with reclaim, or an explicit release on failure, is needed first.
+#   4. The merge target. `attempt-fix` opens its PR against `main` and enables
+#      auto-merge, so a machine-authored change can reach production with no
+#      human in the path. That is a separate approval from switching the
+#      pipeline on.
+
 name: Cron Auto-Fix
 
 on:
   schedule:
     # 00:15 and 01:15 UTC, shortly after Provider Model Catalog Monitor (00:00)
     # and Provider Usage Sync (00:30) run.
+    #
+    # Only one run per day has actually appeared, at ~01:50 UTC, for all 31
+    # runs so far. The cause is not established -- GitHub delays scheduled runs
+    # under load, and the two entries are an hour apart -- and it has never
+    # mattered while the workflow could not authenticate. Worth re-checking
+    # once real runs exist.
     - cron: "15 0,1 * * *"
   workflow_dispatch:
 
@@ -26,15 +73,83 @@ jobs:
       runs: ${{ steps.poll.outputs.runs }}
       has_runs: ${{ steps.poll.outputs.has_runs }}
     steps:
+      # The job runs rather than being skipped at the `jobs:` level so that a
+      # disabled day leaves a readable line in the log saying so, instead of a
+      # grey square that looks the same as a workflow nobody remembers.
+      - name: Resolve activation state
+        id: activation
+        env:
+          CRON_AUTO_FIX_ENABLED: ${{ vars.CRON_AUTO_FIX_ENABLED }}
+        run: |
+          if [ "$CRON_AUTO_FIX_ENABLED" = "true" ]; then
+            echo "Cron auto-fix is enabled."
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "Cron auto-fix is disabled: repository variable CRON_AUTO_FIX_ENABLED is '${CRON_AUTO_FIX_ENABLED:-unset}', not 'true'. Nothing to poll."
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      # Booleans, not values: `secrets.X != ''` is evaluated by Actions, so no
+      # secret material enters this step's environment merely to be counted.
+      #
+      # This runs before the poll on purpose. The poll claims the incidents it
+      # returns, so discovering a missing ANTHROPIC_API_KEY afterwards would
+      # already have burned them.
+      - name: Verify required credentials are present
+        if: steps.activation.outputs.enabled == 'true'
+        env:
+          HAS_SYNC_SECRET: ${{ secrets.AUTO_FIX_SYNC_SECRET != '' }}
+          HAS_ANTHROPIC_KEY: ${{ secrets.ANTHROPIC_API_KEY != '' }}
+          HAS_AUTOMATION_PAT: ${{ secrets.GH_AUTOMATION_PAT != '' }}
+        run: |
+          missing=""
+          [ "$HAS_SYNC_SECRET" = "true" ] || missing="$missing AUTO_FIX_SYNC_SECRET"
+          [ "$HAS_ANTHROPIC_KEY" = "true" ] || missing="$missing ANTHROPIC_API_KEY"
+          [ "$HAS_AUTOMATION_PAT" = "true" ] || missing="$missing GH_AUTOMATION_PAT"
+          if [ -n "$missing" ]; then
+            echo "::error::Cron auto-fix is enabled but these repository secrets are unset:${missing}. Set them, or set CRON_AUTO_FIX_ENABLED to false."
+            exit 1
+          fi
+          echo "All required secrets are present."
+
       - name: Poll for unattempted auto-fix-eligible failures
         id: poll
+        if: steps.activation.outputs.enabled == 'true'
         env:
           AUTO_FIX_SYNC_SECRET: ${{ secrets.AUTO_FIX_SYNC_SECRET }}
         run: |
-          response=$(curl -sS -f \
+          # `curl -f` collapsed every outcome into exit 22, which is how a
+          # month of "not configured" was indistinguishable from an outage.
+          # The status code is read instead, and each case says what it means.
+          status=$(curl -sS -o /tmp/pending.json -w '%{http_code}' \
             -H "Authorization: Bearer ${AUTO_FIX_SYNC_SECRET}" \
-            "${TOMVERSE_APP_URL}/api/internal/scheduled-jobs/auto-fix/pending")
-          runs=$(echo "$response" | jq -c '.runs')
+            "${TOMVERSE_APP_URL}/api/internal/scheduled-jobs/auto-fix/pending") || status=000
+          case "$status" in
+            200)
+              ;;
+            404)
+              echo "::error::The poll endpoint answered 404. The request was not authenticated, or the route is absent from the deployed app. The endpoint answers 404 rather than 401 by design, so this one code covers a wrong secret, a secret missing from the server's env, and a missing route -- check the deployed app before assuming which."
+              exit 1
+              ;;
+            000)
+              echo "::error::The poll request did not complete: DNS, TLS or connection failure reaching ${TOMVERSE_APP_URL}."
+              exit 1
+              ;;
+            *)
+              echo "::error::The poll endpoint answered HTTP ${status}."
+              exit 1
+              ;;
+          esac
+          # A 200 is not yet an answer this workflow can use. The body decides
+          # the matrix, and the incidents in it are already claimed by the time
+          # it is read -- so it is validated here rather than trusted into jq
+          # further down, where `.runs` on an error body would silently become
+          # `null` and the run would end reporting nothing pending.
+          if ! jq -e '.runs | arrays' /tmp/pending.json > /dev/null 2>&1; then
+            echo "::error::The poll endpoint answered 200 without a 'runs' array. These incidents are now claimed server-side (autoFixAttemptedAt is stamped on read) and the next poll will not return them; they need releasing by hand."
+            exit 1
+          fi
+          runs=$(jq -c '.runs' /tmp/pending.json)
           count=$(echo "$runs" | jq 'length')
           echo "Found $count pending run(s)."
           echo "runs=$runs" >> "$GITHUB_OUTPUT"
