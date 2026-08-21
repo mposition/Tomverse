@@ -2362,6 +2362,29 @@ async function handleChatPost(
         // the messages: text becomes a keyed digest and a byte count, a file
         // becomes its media type and size. lib/routingManifestContent.ts holds
         // that, and its tests plant a name in a filename to prove it.
+        /**
+         * The SDK call's two halves.
+         *
+         * `ai@7` refuses a system message inside `messages` unless
+         * `allowSystemInMessages` is set, and wants it in `instructions`
+         * instead (`node_modules/ai/dist/index.d.ts`). `formattedMessages`
+         * keeps carrying it: the deep research path hands the same array to
+         * Perplexity's own API, which does take a system turn
+         * (`lib/perplexityDeepResearch.ts`), and the request manifest below
+         * describes what was sent.
+         *
+         * The branch that builds `contextSystemPrompt` only runs when there is
+         * memory or profile context to inject, and neither has ever been on --
+         * so no turn produced a system message until a conversation with an
+         * assistant sent its first, which then failed with
+         * `AI_InvalidPromptError` and reached the user as an empty answer.
+         * Found on the Release C staging round, trace
+         * 0dde1576-6bb8-4a19-bd8f-55f8e73d2b27.
+         */
+        const sdkMessages: ModelMessage[] = contextSystemPrompt
+            ? formattedMessages.filter((message) => message.role !== "system")
+            : formattedMessages;
+        const sdkInstructions = contextSystemPrompt || undefined;
         const manifestMessages = formattedMessages.map((message) => ({
             role: message.role,
             parts: Array.isArray(message.content)
@@ -2445,7 +2468,8 @@ async function handleChatPost(
         });
         const result = await streamText({
             model: activeModel,
-            messages: formattedMessages,
+            messages: sdkMessages,
+            ...(sdkInstructions ? { instructions: sdkInstructions } : {}),
             maxOutputTokens: requestMaxOutputTokens,
             maxRetries: modelConfig.provider === "zhipu" ? 0 : undefined,
             headers:
@@ -3163,7 +3187,8 @@ async function handleChatPost(
                 });
                 nextStream = await streamText({
                     model: plan.activeModel,
-                    messages: formattedMessages,
+                    messages: sdkMessages,
+                    ...(sdkInstructions ? { instructions: sdkInstructions } : {}),
                     ...attemptDispatchOptions(plan),
                 });
                 await recordDispatched(nextRecord);
