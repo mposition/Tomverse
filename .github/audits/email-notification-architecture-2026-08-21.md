@@ -80,9 +80,8 @@ marketing을 포함하지 않는다는 범위 결정.
   구현자가 수행합니다.
 - **Resend suppression 범위 — 확인됨.** 공식 문서와 API 표면 양쪽에서 region 내
   계정 전체 적용이 확인되었습니다(5.3.1).
-- **여전히 확인하지 못한 것:** `node_modules` 미설치로 Next 16.3.0 문서를
-  읽지 못했습니다(2.1, 22절 A13). **구현 착수 전 필수이며, 이 문서에서 유일하게
-  남은 미확인 항목입니다.**
+- **Next 16.3.0 — 확인됨(2026-08-21).** `node_modules` 설치 후 번들 문서를
+  읽었습니다. 결과는 9.7에 기록했고 A13은 해소되었습니다.
 
 ---
 
@@ -1325,8 +1324,15 @@ POST /api/webhooks/email/resend
 - fan-out과 drain은 **HTTP 요청 수명에 태우지 않습니다.** Railway cron ->
   `/api/internal/maintenance/*` 방식(현행 `run-notification-deliveries.mjs` 선례)을
   그대로 씁니다.
-- **구현 전 확인:** Next 16.3.0의 Route Handler 시그니처, `after()` 지원 여부,
-  캐시 기본값을 `node_modules/next/dist/docs/`에서 읽어야 합니다(2.1 참고).
+- **확인 완료 (2026-08-21, `node_modules/next/dist/docs/`).**
+  - **Route Handler는 기본적으로 캐시되지 않습니다.** `GET`만 `dynamic =
+    'force-static'`으로 캐시를 선택할 수 있고 다른 메서드는 캐시 대상이
+    아닙니다. 따라서 웹훅·unsubscribe의 `POST` 핸들러에 `force-dynamic`을
+    붙일 필요가 없습니다.
+  - **`after()`는 존재하며**(`next/server`) Route Handler에서 쓸 수 있지만,
+    **응답이 끝난 뒤** 실행됩니다. credential lane은 응답 **전에** 보내야
+    성공/실패를 응답에 담을 수 있으므로(9.4a-3) 발송 자체에는 쓰지 않습니다.
+    관측용 쓰기처럼 응답을 막을 이유가 없는 작업에만 씁니다.
 
 ---
 
@@ -2498,7 +2504,7 @@ marketing 도메인 신설 시 4~6주 warm-up:
 | A10 | 이메일 주소 변경 기능이 현재 없다 | 코드에서 경로를 찾지 못함 | 있다면 13.4를 즉시 적용해야 함 |
 | A11 | Railway cron으로 fan-out/drain을 충분히 처리할 수 있다 | 기존 4개 cron이 이 방식으로 동작 | 대량 fan-out(전체 사용자)이 시간 예산을 넘으면 커서 기반 재개가 필수(9.2에 반영됨) |
 | A12 | 기존 `NotificationDelivery` 큐를 그대로 두고 병행 운영 가능 | 별개 테이블 | 중복 발송 없음 — kind가 다름 |
-| A13 | Next 16.3.0의 Route Handler / cron 호출 패턴이 현행 코드와 동일하게 동작 | 기존 `/api/internal/maintenance/*`가 동작 중 | **`node_modules/next/dist/docs/` 미확인 (2.1). 착수 전 필수** |
+| ~~A13~~ | **확인 완료(2026-08-21).** Route Handler는 기본 비캐시(`GET`만 opt-in), `after()`는 응답 이후 실행이라 credential lane 발송에는 부적합. 9.7에 기록 | `node_modules/next/dist/docs/` | 해소 |
 | **A14** | **동의 무응답 시 자동 opt-out을 하지 않는다**(기본값) | 5.5 — 법적 의무가 아님 | **켜기로 하면 별도 사업 결정이며, 동의한 사용자 일부를 근거 없이 잃습니다. 목록 위생 이득과 저울질 필요** |
 | ~~A15~~ | **폐기(v3).** 가정이 아니라 확인된 사실이며 반대 방향으로 판명. 5.3.1 참조 | — | — |
 | **A18** | **marketing 활성화 시 Resend 계정을 분리한다**(잠정) | 5.3.1. 한 계정 유지는 로그인 도달을 걸고 하는 선택 | **한 계정 유지를 고르면 "이메일 외 로그인 수단 1개 이상"이 권장에서 요구가 되고, 그것을 강제할 수 없는 사용자(OAuth 미연결 + 이메일 로그인만)에 대한 정책이 필요합니다** |
