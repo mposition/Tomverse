@@ -1,0 +1,85 @@
+# Assistant profile staging 검증 실행 기록
+
+`../assistant-profile-staging-checklist.md`는 항목만 가진 template입니다. 실행
+결과는 여기에 **실행 1회 = 파일 1개**로 남습니다.
+
+규칙은 외부 import·이미지 생성 기록과 같습니다. 같은 규칙을 세 번째로 적어 두는
+이유는, 이 구조가 만들어진 계기가 **문서 하나가 낡은 채로 공식적으로 보였던
+일**이기 때문입니다.
+
+## 파일 이름
+
+```
+YYYY-MM-DD__<40자리 deploy SHA>.md
+```
+
+전체 SHA를 씁니다. 축약 SHA는 시간이 지나면 충돌할 수 있고, 무엇보다 어느
+커밋인지 확인하려면 저장소를 뒤져야 합니다. 날짜가 앞에 오는 것은 목록이
+시간순으로 정렬되게 하기 위해서입니다.
+
+## 규칙
+
+1. **기록은 덮어쓰지 않습니다.** 재검증은 새 파일입니다.
+2. **비어 있던 항목을 나중에 통과로 채우지 않습니다.** 실행하지 않은 항목은
+   `미기록`이며, 그것이 사실입니다.
+3. **한 기록은 자기가 실행된 template revision을 적습니다.**
+4. **동결된 기록은 digest로 보호합니다.** `frozen: true`인 기록은
+   `npm run check:staging-verification-records`가 본문 digest를 대조합니다.
+5. **실행·판정·서명은 사람이 합니다.** 에이전트는 기록 파일의 뼈대를 만들 수
+   있지만 결과·서명란을 채울 수 없습니다.
+
+## 이 기능에만 있는 규칙
+
+6. **§B의 실행 전 대화 상태를 먼저 적습니다.** `Conversation.selectedModels`와
+   `disabledPanels`에는 변경 이력 테이블이 없습니다. 실행 후에 적으면 비교할
+   원본이 존재하지 않고, 그것이 #632를 사후에 판정할 수 없게 만든 바로 그
+   조건입니다.
+7. **대화 본문과 profile instructions 원문을 기록에 넣지 않습니다.** 판별
+   대상은 경계이지 내용이 아니므로, "instructions가 system message 앞쪽에 한 번
+   나타남"처럼 관측만 적습니다.
+
+## 새 실행을 시작할 때
+
+기록은 손으로 복사하지 말고 생성합니다.
+
+```
+npm run new:staging-verification-record -- --feature assistant-profile --sha <staging에 실제 배포된 40자리 SHA>
+```
+
+체크리스트의 전 구획을 읽어 항목마다 한 행씩 펼친 빈 기록을 만듭니다.
+`--preview`를 붙이면 파일을 쓰지 않고 출력만 합니다. 이미 있는 파일은
+덮어쓰지 않습니다.
+
+SHA는 git에서 읽지 않고 반드시 인자로 받습니다. 중요한 것은 staging이
+**실제로 서빙하고 있는** 커밋이고, 이 기계는 그것을 알 방법이 없습니다.
+`GET /api/build-info`가 그 값을 돌려줍니다.
+
+## 실행 순서
+
+1. `GET /api/build-info`로 staging에 실제 배포된 전체 40자리 SHA를 확인합니다.
+2. 그 SHA로 기록을 생성합니다. **커밋하지 않은 상태로 둡니다.**
+3. §A를 **flag가 꺼진 상태에서** 먼저 실행합니다.
+4. Admin Console에서 flag를 켭니다 — `PUT /api/admin/app-settings`입니다. DB
+   행을 직접 고치면 동작은 같고 `AdminAuditLog`가 남지 않습니다.
+5. 사람이 §B–§H를 실행하고 결과·증거를 적습니다.
+6. 필수 항목에 `미기록`이 남아 있으면 전체 결과를 `통과`로 서명하지 않습니다.
+7. 실행자·승인자가 서명합니다.
+8. 최종 본문으로 digest를 계산합니다.
+9. `frozen: true`와 digest를 적습니다.
+10. `npm run check:staging-verification-records`가 통과한 뒤에 커밋합니다.
+
+```
+node scripts/check-staging-verification-records.mjs --digest <파일>
+```
+
+이 명령이 그 파일의 digest를 출력합니다.
+
+**결과와 서명이 빈 기록을 커밋하거나 PR에 올리지 않습니다.** 검사기는
+`frozen`이 아니어도 `executor`와 `result`를 요구하므로 빈 기록은 실패하고,
+그것이 의도입니다.
+
+## 증거에 넣지 않는 것
+
+대화 본문, profile instructions 원문, 계정 식별자 같은 개인 데이터는 저장소에
+넣지 않습니다. 제한된 운영 저장소에 두고 여기에는 **참조만** 남깁니다. git
+이력은 영구적이고, 되돌릴 수 없습니다.

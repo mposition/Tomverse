@@ -124,6 +124,7 @@ export default async function AdminBillingPage({
           promotions={promotions}
           priceCatalog={pricing.catalog}
           priceCatalogUpdatedAt={pricing.updatedAt}
+          priceCatalogSource={pricing.source}
           paidUserCount={userStats.activePaidSubscriptions}
           activeSubscriptionCount={userStats.activePaidSubscriptions}
           initialTab="promotions"
@@ -161,6 +162,7 @@ export default async function AdminBillingPage({
         promotions={promotions}
         priceCatalog={pricing.catalog}
         priceCatalogUpdatedAt={pricing.updatedAt}
+        priceCatalogSource={pricing.source}
         paidUserCount={userStats.activePaidSubscriptions}
         activeSubscriptionCount={userStats.activePaidSubscriptions}
       />

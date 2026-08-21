@@ -50,31 +50,91 @@ export const billingPriceCatalogSchema = z.object({
 
 export type BillingPriceCatalog = z.infer<typeof billingPriceCatalogSchema>;
 
+/**
+ * The approved localized prices.
+ *
+ * Not a fixture and not a placeholder. Three production paths charge these
+ * numbers: no `AppSetting` row (the first read writes them into the database),
+ * a row that does not parse, and a row that parses but fails the schema. So a
+ * number here is a price somebody can be charged, and changing one is a price
+ * change.
+ *
+ * These are the values production has stored since 2026-08-14, verified with
+ * `npm run report:billing-price-catalog` and aligned deliberately (#637). They
+ * were previously stale in twenty places, which meant losing the row would
+ * have raised Pro AUD/CNY and every non-USD credit pack while *lowering* Max
+ * KRW -- a four-market pricing incident with nothing to announce it.
+ *
+ * USD is not here. Plan prices in USD come from `BillingPlan`, and the USD
+ * credit-pack prices below are the only USD numbers this table holds.
+ */
 export const DEFAULT_BILLING_PRICE_CATALOG: BillingPriceCatalog = {
   version: 1,
   plans: {
     pro: {
-      AUD: { monthly: 2_300, annual: 22_000 },
-      CNY: { monthly: 10_800, annual: 103_700 },
+      AUD: { monthly: 2_000, annual: 19_200 },
+      CNY: { monthly: 9_900, annual: 95_000 },
       EUR: { monthly: 1_400, annual: 13_400 },
       KRW: { monthly: 20_000, annual: 192_000 },
     },
     max: {
-      AUD: { monthly: 3_900, annual: 37_200 },
+      AUD: { monthly: 3_900, annual: 37_400 },
       CNY: { monthly: 18_000, annual: 172_800 },
-      EUR: { monthly: 2_300, annual: 22_100 },
-      KRW: { monthly: 34_000, annual: 326_000 },
+      EUR: { monthly: 2_300, annual: 22_000 },
+      KRW: { monthly: 35_000, annual: 336_000 },
     },
   },
   creditPacks: {
-    starter_500: { USD: 499, AUD: 790, CNY: 3_600, EUR: 490, KRW: 7_900 },
-    project_1500: { USD: 999, AUD: 1_590, CNY: 7_200, EUR: 990, KRW: 14_900 },
-    power_4000: { USD: 1_999, AUD: 3_190, CNY: 14_400, EUR: 1_990, KRW: 29_900 },
+    starter_500: { USD: 499, AUD: 700, CNY: 3_300, EUR: 450, KRW: 7_000 },
+    project_1500: { USD: 999, AUD: 1_400, CNY: 6_500, EUR: 900, KRW: 14_000 },
+    power_4000: { USD: 1_999, AUD: 2_800, CNY: 13_500, EUR: 1_800, KRW: 28_000 },
   },
 };
 
 const cloneDefaultCatalog = () =>
   JSON.parse(JSON.stringify(DEFAULT_BILLING_PRICE_CATALOG)) as BillingPriceCatalog;
+
+/**
+ * Which of the two tables answered.
+ *
+ * `stored` is the AppSetting row. Everything else means the compiled default is
+ * what the customer is being quoted and charged, and says why.
+ */
+export type BillingPriceCatalogSource =
+  | "stored"
+  | "created_from_default"
+  | "default_row_missing"
+  | "default_row_unparseable"
+  | "default_row_invalid";
+
+/**
+ * Says out loud that the catalogue fell back.
+ *
+ * The fallback used to be entirely silent -- no log, no metric -- so nothing
+ * distinguished "serving the stored override" from "serving the compiled
+ * default" at runtime, and a row that was deleted or corrupted would change
+ * what new checkouts are charged with no signal at all. Now aligned with the
+ * approved prices, the fallback charges the right amount; that is a reason for
+ * it to be recoverable rather than a reason for it to be quiet, because the
+ * row is still gone and somebody has to know.
+ *
+ * Warn rather than error: the request succeeds and the price is correct. What
+ * is broken is the stored row.
+ */
+const reportCatalogFallback = (
+  source: Exclude<BillingPriceCatalogSource, "stored">
+) => {
+  console.warn(
+    JSON.stringify({
+      event: "billing_price_catalog_fallback",
+      source,
+      key: BILLING_PRICE_CATALOG_KEY,
+      // Stated so nobody reading the line has to work out whether customers
+      // were affected: they were served the compiled default.
+      served: "compiled_default",
+    })
+  );
+};
 
 export async function getBillingPriceCatalogWithMeta() {
   const row = await prisma.appSetting.findUnique({
@@ -82,6 +142,7 @@ export async function getBillingPriceCatalogWithMeta() {
     select: { value: true, updatedAt: true },
   });
   if (!row) {
+    reportCatalogFallback("created_from_default");
     const created = await prisma.appSetting.upsert({
       where: { key: BILLING_PRICE_CATALOG_KEY },
       create: {
@@ -94,17 +155,32 @@ export async function getBillingPriceCatalogWithMeta() {
     return {
       catalog: billingPriceCatalogSchema.parse(JSON.parse(created.value)),
       updatedAt: created.updatedAt.toISOString(),
+      source: "created_from_default" as BillingPriceCatalogSource,
     };
   }
+  let source: BillingPriceCatalogSource = "default_row_unparseable";
   try {
     const parsed = billingPriceCatalogSchema.safeParse(JSON.parse(row.value));
     if (parsed.success) {
-      return { catalog: parsed.data, updatedAt: row.updatedAt.toISOString() };
+      return {
+        catalog: parsed.data,
+        updatedAt: row.updatedAt.toISOString(),
+        source: "stored" as BillingPriceCatalogSource,
+      };
     }
+    source = "default_row_invalid";
   } catch {
     // Fall through to safe defaults. The admin API can overwrite an invalid value.
   }
-  return { catalog: cloneDefaultCatalog(), updatedAt: row.updatedAt.toISOString() };
+  reportCatalogFallback(source);
+  // `updatedAt` is the row's, and the catalogue is not: a caller that renders
+  // them together would show a recent timestamp beside numbers that did not
+  // come from that row. `source` is what lets it say so instead.
+  return {
+    catalog: cloneDefaultCatalog(),
+    updatedAt: row.updatedAt.toISOString(),
+    source,
+  };
 }
 
 export async function getBillingPriceCatalog() {
@@ -127,14 +203,20 @@ export async function readBillingPriceCatalog(): Promise<BillingPriceCatalog> {
     where: { key: BILLING_PRICE_CATALOG_KEY },
     select: { value: true },
   });
-  if (!row) return cloneDefaultCatalog();
+  if (!row) {
+    reportCatalogFallback("default_row_missing");
+    return cloneDefaultCatalog();
+  }
+  let source: BillingPriceCatalogSource = "default_row_unparseable";
   try {
     const parsed = billingPriceCatalogSchema.safeParse(JSON.parse(row.value));
     if (parsed.success) return parsed.data;
+    source = "default_row_invalid";
   } catch {
     // An unreadable stored value is reported by the admin catalogue editor, not
     // repaired from here.
   }
+  reportCatalogFallback(source);
   return cloneDefaultCatalog();
 }
 

@@ -1,6 +1,8 @@
 import "server-only";
 
 import * as Sentry from "@sentry/nextjs";
+
+import { resolveSendingIdentity } from "@/lib/emailSendingIdentityCore";
 import {
   operationalAlertCooldownMs,
   sanitizeOperationalContext,
@@ -109,16 +111,38 @@ const postJson = async (
   }
 };
 
+/**
+ * The operator alert email.
+ *
+ * The sender comes from the one resolver every stream uses
+ * (docs/policy/email-notifications.md §14.1: operator alerts travel on the
+ * transactional identity). It used to carry its own variable and its own
+ * literal, which is why it stayed on the old domain when the transactional
+ * sender moved -- see docs/ops/email-sending-domains.md §1.2.
+ *
+ * The display name is gone with it. One transactional identity sends
+ * everything, and "Operations" versus "Admin" stays where it already was and
+ * where a mail client actually shows it: the subject prefix.
+ *
+ * Still a direct send rather than the outbox. An alert about the system being
+ * unwell must not depend on the part of the system that drains a queue.
+ */
 const sendEmail = async (subject: string, detail: string) => {
   const apiKey = process.env.RESEND_API_KEY?.trim();
   const to = (process.env.OPS_ALERT_EMAIL || process.env.ADMIN_ALERT_EMAIL)?.trim();
   if (!apiKey || !to) return;
+  const identity = resolveSendingIdentity("transactional", process.env);
+  if (!identity.ok) {
+    // Thrown rather than returned so `notifyExternalChannels` records it the
+    // same way it records a webhook failure. It is caught there: a refused
+    // sender must not stop Slack, Discord or the Sentry capture that already
+    // happened above it.
+    throw new Error(`Operational alert sender unusable: ${identity.code}`);
+  }
   await postJson(
     "https://api.resend.com/emails",
     {
-      from:
-        process.env.ADMIN_ALERT_FROM?.trim() ||
-        "Tomverse Operations <alerts@tomverse.app>",
+      from: identity.from,
       to: [to],
       subject: `[Tomverse Operations] ${subject}`,
       text: detail,

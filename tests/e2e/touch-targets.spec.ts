@@ -125,7 +125,7 @@ test.describe("mobile touch targets (STG-F005)", () => {
 
       await assertMinTouchTarget(
         page.locator('button[aria-controls="chat-input-popover"]').first(),
-        `[${viewport.width}x${viewport.height}] More actions`
+        `[${viewport.width}x${viewport.height}] Add and tools`
       );
       await assertMinTouchTarget(
         modelSelectorTrigger(page),
@@ -154,7 +154,7 @@ test.describe("mobile touch targets (STG-F005)", () => {
 
     await assertHitTestReturnsSelf(
       page.locator('button[aria-controls="chat-input-popover"]').first(),
-      "More actions"
+      "Add and tools"
     );
     await assertHitTestReturnsSelf(modelSelectorTrigger(page), "Choose AI models");
     await assertHitTestReturnsSelf(page.getByTestId("request-credit-estimate"), "Estimated credits");
@@ -378,7 +378,7 @@ test.describe("mobile touch targets (STG-F005)", () => {
 
     await assertMinTouchTarget(
       page.locator('button[aria-controls="chat-input-popover"]').first(),
-      "[ko] More actions"
+      "[ko] Add and tools"
     );
     await assertMinTouchTarget(modelSelectorTrigger(page), "[ko] Choose AI models");
     await assertMinTouchTarget(page.getByTestId("chat-send-button"), "[ko] Send");

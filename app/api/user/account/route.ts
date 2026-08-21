@@ -5,7 +5,8 @@ import { getServerSession } from "next-auth/next";
 import { z } from "zod";
 import { authOptions } from "@/lib/auth";
 import { scheduleTomverseAccountDeletion } from "@/lib/accountDeletion";
-import { sendAccountDeletionScheduledEmail } from "@/lib/accountEmails";
+import { ACCOUNT_DELETION_SCHEDULED_TEMPLATE } from "@/lib/emailTemplateDefinitions";
+import { enqueueStandardEmail } from "@/lib/standardEmailLane";
 import {
   assertRecentAdminAuthentication,
   isAdminReauthenticationError,
@@ -53,9 +54,13 @@ export async function DELETE(req: Request) {
     });
     after(async () => {
       try {
-        await sendAccountDeletionScheduledEmail({
-          to: deletion.email,
-          scheduledFor: deletion.scheduledFor,
+        await enqueueStandardEmail({
+          templateKey: ACCOUNT_DELETION_SCHEDULED_TEMPLATE,
+          emailAddress: deletion.email,
+          userId: session.user.id,
+          payload: { scheduledFor: deletion.scheduledFor.toISOString() },
+          referenceType: "User",
+          referenceId: session.user.id,
         });
       } catch (error) {
         await reportOperationalIncident({

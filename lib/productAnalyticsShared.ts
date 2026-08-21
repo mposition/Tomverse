@@ -119,6 +119,23 @@ export const PRODUCT_ANALYTICS_EVENT_NAMES = [
   // only property is the closed `import_step` enum.
   "external_import_step_entered",
   "external_import_step_abandoned",
+  // Assistant profiles (Release C). The question these answer is whether the
+  // chat entry point earns its place: creates started from the picker versus
+  // from settings, how many of each finish, and how many of the chat ones end
+  // up on the conversation they were started from.
+  //
+  // Content-free by schema, and deliberately so — a profile's name, its
+  // description and its instructions are the user's own words about
+  // themselves, and docs/policy/external-conversation-import-and-memory.md
+  // §16 does not describe sending them anywhere. The only
+  // property any of these carries is `assistant_profile_entry`, a two-value
+  // enum. There is no key on `analyticsPropertiesSchema` that a name or an
+  // instruction could travel in, and unknown keys are stripped before an
+  // event is sent, so this is a structural guarantee rather than a
+  // convention someone has to remember.
+  "assistant_profile_create_started",
+  "assistant_profile_create_completed",
+  "assistant_profile_applied_to_chat",
 ] as const;
 
 export type ProductAnalyticsEventName =
@@ -157,6 +174,10 @@ export const normalizePurchaseAnalyticsTrigger = (
 export const analyticsPropertiesSchema = z
   .object({
     cta_location: z.string().trim().min(1).max(64).optional(),
+    // Where an assistant-profile create began. A closed enum rather than a
+    // free string: the two entry points are the whole question, and a free
+    // field is where a title eventually gets put "just to see".
+    assistant_profile_entry: z.enum(["settings", "chat"]).optional(),
     method: z.string().trim().min(1).max(32).optional(),
     attachment_count: z.number().int().min(1).max(5).optional(),
     model_id: z.string().trim().min(1).max(80).optional(),

@@ -487,3 +487,165 @@ test("the account profile ceiling is enforced", async () => {
             error.code === "ASSISTANT_PROFILE_QUOTA_EXCEEDED"
     );
 });
+
+/* ------------------------------------------- transactional first version */
+
+/**
+ * The state these tests exist to make unreachable: a profile row with no
+ * current version. It listed, it offered itself in the picker, and it could
+ * not start a conversation — and every abandoned create left one behind.
+ */
+
+test("a create carrying a first version publishes revision 1 with it", async () => {
+    const user = await createUser();
+    const profile = await createAssistantProfile({
+        userId: user.id,
+        identity: identity("Ready to use"),
+        firstVersion: draft(),
+    });
+
+    const active = await activeProfileVersion(user.id, profile.id);
+    assert.ok(active, "a created profile must have a version to pin to");
+    assert.equal(active.revision, 1);
+    assert.equal(
+        active.instructions,
+        "Answer in Korean, and prefer short examples."
+    );
+
+    // The pointer, not just the row: a version that exists and is not current
+    // is exactly the unusable state this replaces.
+    const stored = await prisma.assistantProfile.findUniqueOrThrow({
+        where: { id: profile.id },
+        select: { currentVersionId: true },
+    });
+    assert.equal(stored.currentVersionId, active.id);
+});
+
+test("a create with no first version still makes an identity-only profile", async () => {
+    // The two-step flow is still a legitimate call and this is the only test
+    // that says so: removing the optional path would break the existing API.
+    const user = await createUser();
+    const profile = await createAssistantProfile({
+        userId: user.id,
+        identity: identity("Draft only"),
+    });
+    assert.equal(await activeProfileVersion(user.id, profile.id), null);
+});
+
+test("a first version that fails validation leaves no profile behind", async () => {
+    const user = await createUser();
+    await assert.rejects(
+        createAssistantProfile({
+            userId: user.id,
+            identity: identity("Never stored"),
+            firstVersion: draft({ modelIds: [] }),
+        }),
+        (error: unknown) =>
+            error instanceof AssistantProfileError &&
+            error.status === 422 &&
+            error.code === "ASSISTANT_PROFILE_INVALID"
+    );
+
+    // The point of the assertion: not that the call failed, but that it left
+    // nothing. A rejected create that still wrote the identity row would look
+    // identical to the caller and be the very state being removed.
+    assert.deepEqual(await listAssistantProfiles(user.id), []);
+});
+
+test("a first version does not consume the account ceiling twice", async () => {
+    const user = await createUser();
+    for (let index = 0; index < 20; index += 1) {
+        await createAssistantProfile({
+            userId: user.id,
+            identity: identity(`Profile ${index}`),
+            firstVersion: draft(),
+        });
+    }
+    await assert.rejects(
+        createAssistantProfile({
+            userId: user.id,
+            identity: identity("One more"),
+            firstVersion: draft(),
+        }),
+        (error: unknown) =>
+            error instanceof AssistantProfileError &&
+            error.status === 409 &&
+            error.code === "ASSISTANT_PROFILE_QUOTA_EXCEEDED"
+    );
+    assert.equal((await listAssistantProfiles(user.id)).length, 20);
+});
+
+test("editing a profile created this way keeps the version contract", async () => {
+    const user = await createUser();
+    const profile = await createAssistantProfile({
+        userId: user.id,
+        identity: identity("Editable"),
+        firstVersion: draft(),
+    });
+
+    // Publishing from revision 1 gives revision 2, and publishing from a
+    // revision that is no longer current is still refused as stale. A create
+    // that wrote its version outside the planner could have left a revision
+    // number the publish path disagreed with.
+    const published = await publishAssistantProfileVersion({
+        userId: user.id,
+        profileId: profile.id,
+        draft: draft({ instructions: "Answer in English." }),
+        expectedRevision: 1,
+    });
+    assert.equal(published.outcome, "published");
+    assert.equal(
+        published.outcome === "published" ? published.version.revision : null,
+        2
+    );
+
+    await assert.rejects(
+        publishAssistantProfileVersion({
+            userId: user.id,
+            profileId: profile.id,
+            draft: draft({ instructions: "Answer in French." }),
+            expectedRevision: 1,
+        }),
+        (error: unknown) =>
+            error instanceof AssistantProfileError && error.status === 409
+    );
+});
+
+test("a conversation pinned at creation stays on that revision after an edit", async () => {
+    // §14's version pinning, exercised through the new create path: the
+    // profile a conversation started under must not change under it.
+    const user = await createUser();
+    const profile = await createAssistantProfile({
+        userId: user.id,
+        identity: identity("Pinned"),
+        firstVersion: draft(),
+    });
+    const pinned = await activeProfileVersion(user.id, profile.id);
+    assert.ok(pinned);
+
+    const conversation = await prisma.conversation.create({
+        data: {
+            userId: user.id,
+            title: "Pinned conversation",
+            assistantProfileVersionId: pinned.id,
+        },
+        select: { id: true },
+    });
+
+    await publishAssistantProfileVersion({
+        userId: user.id,
+        profileId: profile.id,
+        draft: draft({ instructions: "Completely different instructions." }),
+        expectedRevision: 1,
+    });
+
+    const after = await prisma.conversation.findUniqueOrThrow({
+        where: { id: conversation.id },
+        select: { assistantProfileVersionId: true },
+    });
+    assert.equal(
+        after.assistantProfileVersionId,
+        pinned.id,
+        "publishing a new revision moved a conversation that was pinned"
+    );
+});

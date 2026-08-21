@@ -66,6 +66,7 @@ const ENGLISH_STRING_CEILING = {
   // translate into any of them. The user matches this string against Google's
   // own export page, so translating it would make the recipe harder to follow.
   // Allowlisted in check-locale-translation-core.mjs for the same reason.
+  //
   // Chinese differs only in its bracket glyphs and Korean in its spacing, so
   // neither moved.
   //
@@ -117,15 +118,32 @@ const ENGLISH_STRING_CEILING = {
   // German, Spanish, Korean and Chinese all differ, so only these two moved.
   // Allowlisted in check-locale-translation-core.mjs for the same reason.
   //
+  // +1 de from the assistant profile create form (release C): German writes
+  // the optional marker as "(optional)", which is the ordinary word and not a
+  // skipped translation -- "(freiwillig)" means voluntary and "(wahlweise)"
+  // reads as a choice between alternatives, neither of which is what a form
+  // field marker says. French, Spanish, Portuguese and Chinese all differ, so
+  // only German moved.
+  //
+  // +1 for fr and de on 2026-08-21: the preference centre's newsletter row is
+  // titled "Newsletter", which is the word French and German both use for it.
+  // Rendering something else would be a worse translation, not a better one.
+  // Chinese, Spanish and Portuguese have their own words and did not move.
+  //
   // +1 each for de, es, fr and pt from the settings exit control
   // (settingsNav.backToChatShort). It is the narrow-viewport rendering of
   // "Back to chat", and all four locales already call the thing itself a
   // "chat" -- sidebar.newChat is "Neuer Chat", "Nuevo chat", "Nouveau chat",
   // "Novo chat". Korean and Chinese use their own word (대화 / 对话), so
   // neither moved. The full phrase this shortens is translated in all six.
+  //
+  // The three notes above arrived on opposite sides of the develop -> main
+  // merge and every one of them still holds: the merged tree carries both the
+  // exit control and the assistant/preference-centre copy, so the counts are
+  // the sum rather than either side's.
   zh: 10,
-  fr: 31,
-  de: 25,
+  fr: 32,
+  de: 27,
   es: 18,
   pt: 16,
 };

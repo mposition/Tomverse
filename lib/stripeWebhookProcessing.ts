@@ -2,7 +2,10 @@ import "server-only";
 
 import type Stripe from "stripe";
 import { getBillingPlans, tierForPlanId, type BillingPlanId } from "@/lib/billingConfig";
-import { sendBillingWelcomeEmail } from "@/lib/billingEmails";
+import { resolveBillingPeriodEnd } from "@/lib/billingEmails";
+import { recordBillingCountry } from "@/lib/emailJurisdiction";
+import { BILLING_WELCOME_TEMPLATE } from "@/lib/emailTemplateDefinitions";
+import { enqueueStandardEmail } from "@/lib/standardEmailLane";
 import {
   encodePromotionRiskFlags,
   hashPaymentMethodFingerprint,
@@ -518,15 +521,39 @@ async function handleCheckoutCompleted(session: Stripe.Checkout.Session) {
       });
     }
   }
+  if (synced?.user.id) {
+    // What the payment method said, kept beside what the person told us. It
+    // does not overwrite their own declaration: paying with a card registered
+    // elsewhere is not moving house
+    // (docs/policy/email-notifications.md §6.2).
+    await recordBillingCountry({
+      userId: synced.user.id,
+      country: session.metadata?.billingCountry,
+    }).catch((error) => {
+      console.error("Billing country record failed:", error);
+    });
+  }
   if (synced && synced.plan !== "Free") {
-    await sendBillingWelcomeEmail({
-      to: synced.user.email,
-      plan: synced.plan,
-      billingInterval: synced.billingInterval,
-      periodEnd: synced.periodEnd,
+    // periodEnd is resolved here, not in the renderer: a `new Date()` inside
+    // the template would make the drain render a different message from the
+    // enqueue, which breaks both the idempotency key and the audit copy.
+    await enqueueStandardEmail({
+      templateKey: BILLING_WELCOME_TEMPLATE,
+      emailAddress: synced.user.email,
+      userId: synced.user.id,
       language: synced.user.settings?.language,
+      payload: {
+        plan: synced.plan,
+        billingInterval: synced.billingInterval ?? null,
+        periodEnd: resolveBillingPeriodEnd(
+          synced.periodEnd,
+          synced.billingInterval
+        ),
+      },
+      referenceType: "User",
+      referenceId: synced.user.id,
     }).catch((emailError) => {
-      console.error("Billing welcome email failed:", emailError);
+      console.error("Billing welcome email enqueue failed:", emailError);
     });
   }
   const analytics = analyticsAttributionFromMetadata(session.metadata);
