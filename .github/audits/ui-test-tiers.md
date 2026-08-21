@@ -41,8 +41,8 @@ browser coverage without rebuilding E2E" 항목이 이 문서의 존재와 workf
 있습니다. `npm run check:ui-tier-coverage`가 이 목록과 태그를 양방향으로
 맞춥니다.
 
-실측: 2026-08-20 기준 `--grep=@ui-risk --list`가 desktop-chromium과
-mobile-chromium 두 project에서 **29개 파일, 658 test**를 선택합니다.
+실측: 2026-08-21 기준 `--grep=@ui-risk --list`가 desktop-chromium과
+mobile-chromium 두 project에서 **30개 파일, 674 test**를 선택합니다.
 
 | Spec |
 |---|
@@ -54,6 +54,7 @@ mobile-chromium 두 project에서 **29개 파일, 658 test**를 선택합니다.
 | `csp-eval-free.spec.ts` |
 | `external-import-settings.spec.ts` |
 | `feedback-modal.spec.ts` |
+| `generated-artifact-card.spec.ts` |
 | `keyboard-and-heading-structure.spec.ts` |
 | `marketing-language-analytics.spec.ts` |
 | `marketing-language-focus.spec.ts` |
@@ -71,8 +72,9 @@ mobile-chromium 두 project에서 **29개 파일, 658 test**를 선택합니다.
 | `skip-link-and-armed-delete.spec.ts` |
 | `ssr-root-language.spec.ts` |
 
-검토 시점 실측(2026-08-20, `--list`): **29개 파일 658 test** (두 project 합계).
-직전 값은 2026-08-16의 28개 파일 646 test였고, 그 뒤
+검토 시점 실측(2026-08-21, `--list`): **30개 파일 674 test** (두 project 합계).
+직전 값은 2026-08-20의 29개 파일 658 test였고, 그 뒤
+`generated-artifact-card.spec.ts`(+16)가 합류했습니다. 그 이전은 2026-08-16의 28개 파일 646 test였고, 그 뒤
 `chat-welcome-flicker.spec.ts`(+12)가 합류했습니다. 그 이전은 2026-08-14의
 27개 파일 638 test였고 `pricing-promotion-currency.spec.ts`(+8)가 합류했습니다. 그 이전은 2026-08-05의
 25개 파일 630 test였고 `csp-eval-free.spec.ts`(+4)와
@@ -152,3 +154,13 @@ push의 무필터 실행에서만 잡히는데, 승격 후에 말하는 보안 �
 3. mobile/coarse-pointer 측정에는 `hasTouch: true`가 필요합니다. viewport 폭만
    줄인 desktop project 결과는 44px 근거로 인정하지 않습니다
    (`useIsMobileShell`은 `(max-width: 767px) AND (pointer: coarse)`).
+
+`generated-artifact-card.spec.ts`는 2026-08-21에 합류했습니다(30개 파일,
++16 test — desktop·mobile 각 8). AI 생성 파일의 다운로드 카드가 tier에 드는
+이유는 세 가지가 전부 레이아웃·입력·접근성 회귀이기 때문입니다: 320px에서
+파일명 행과 다운로드 버튼이 겹치지 않는가, 버튼이 44px 터치 영역과 키보드
+`:focus-visible` 링을 갖는가, 스크린 리더가 형식·파일명·크기·상태를 하나의
+이름으로 받는가. 나머지 case(게스트 로그인 CTA, 실패 카드, 재조회 복원,
+본문에 코드·base64가 없을 것)는 같은 파일이 이미 열어 둔 브라우저에서
+따라오므로 tier 비용이 사실상 추가되지 않습니다.
+정책: `docs/policy/generated-artifacts.md`.

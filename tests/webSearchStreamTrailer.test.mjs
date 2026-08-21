@@ -116,3 +116,95 @@ test("an unusable trailer never fabricates a status", () => {
   assert.equal(unknownStatus.completion, undefined);
   assert.deepEqual(unknownStatus.searchMetadata, execution);
 });
+
+/* -------------------------------------------------------------------------- */
+/* Generated artifacts (docs/policy/generated-artifacts.md section 5)            */
+/* -------------------------------------------------------------------------- */
+
+const artifact = {
+  id: "art_1",
+  ordinal: 0,
+  format: "xlsx",
+  filename: "분기별_매출.xlsx",
+  mediaType:
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  byteSize: 3053,
+  status: "ready",
+  modelId: "gpt-5-6-luna",
+};
+
+test("the trailer carries artifacts beside the search metadata", () => {
+  const trailer = parseChatStreamTrailer(
+    splitSearchMetadataTrailer(
+      buildChatStreamTrailerChunk({
+        searchMetadata: execution,
+        completion: { status: "normal" },
+        artifacts: [artifact],
+      })
+    ).searchMetadataJson
+  );
+  assert.deepEqual(trailer.searchMetadata, execution);
+  assert.equal(trailer.completion.status, "normal");
+  assert.deepEqual(trailer.artifacts, [artifact]);
+});
+
+test("a turn with no files says nothing about files", () => {
+  // Absent rather than empty: an older client ignores the key, and a turn
+  // that made nothing has nothing to report.
+  const trailer = parseChatStreamTrailer(
+    splitSearchMetadataTrailer(
+      buildChatStreamTrailerChunk({
+        searchMetadata: execution,
+        completion: { status: "normal" },
+      })
+    ).searchMetadataJson
+  );
+  assert.equal(trailer.artifacts, undefined);
+});
+
+test("an artifacts-only trailer is still read as an envelope", () => {
+  // What a newer server sends on a turn that searched nothing: without this
+  // the whole payload would be mistaken for bare search metadata.
+  const trailer = parseChatStreamTrailer(
+    JSON.stringify({ artifacts: [artifact] })
+  );
+  assert.deepEqual(trailer.artifacts, [artifact]);
+  assert.equal(trailer.searchMetadata, null);
+});
+
+test("the storage key cannot ride along in the trailer", () => {
+  const trailer = parseChatStreamTrailer(
+    JSON.stringify({
+      searchMetadata: execution,
+      artifacts: [
+        { ...artifact, objectKey: "message-artifacts/u/c/art_1.xlsx" },
+      ],
+    })
+  );
+  assert.ok(!("objectKey" in trailer.artifacts[0]));
+});
+
+test("a malformed artifact never becomes a card", () => {
+  const trailer = parseChatStreamTrailer(
+    JSON.stringify({
+      searchMetadata: execution,
+      artifacts: [{ id: "", format: "docx" }],
+    })
+  );
+  assert.equal(trailer.artifacts, undefined);
+});
+
+test("an old client reading a new trailer still gets its citations", () => {
+  // The backward-compatibility direction that matters during a rolling
+  // deploy: the fields the old client knows are untouched by the new key.
+  const json = splitSearchMetadataTrailer(
+    buildChatStreamTrailerChunk({
+      searchMetadata: execution,
+      completion: { status: "incomplete", incompleteReason: "length" },
+      artifacts: [artifact],
+    })
+  ).searchMetadataJson;
+  const parsed = JSON.parse(json);
+  assert.deepEqual(parsed.searchMetadata, execution);
+  assert.equal(parsed.completion.status, "incomplete");
+});

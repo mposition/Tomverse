@@ -550,6 +550,32 @@ const FETCHERS: Record<string, (userId: string) => Promise<unknown[]>> = {
       take: EXPORT_ROW_CAP,
     }),
 
+  // The files answers produced for this account. Same shape of gap as the
+  // images below: the bytes are in object storage, so the export describes
+  // what exists rather than pretending it was delivered. `objectKey` is
+  // deliberately absent -- it is Tomverse's address for the object and means
+  // nothing to the person holding the file.
+  messageArtifact: (userId) =>
+    prisma.messageArtifact.findMany({
+      where: { userId },
+      select: {
+        id: true,
+        messageId: true,
+        conversationId: true,
+        ordinal: true,
+        format: true,
+        filename: true,
+        mediaType: true,
+        byteSize: true,
+        status: true,
+        failureCode: true,
+        modelId: true,
+        createdAt: true,
+      },
+      orderBy: { createdAt: "asc" },
+      take: EXPORT_ROW_CAP,
+    }),
+
   imageGenerationGroup: (userId) =>
     prisma.imageGenerationGroup.findMany({
       where: { userId },

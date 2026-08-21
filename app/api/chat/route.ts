@@ -1,4 +1,4 @@
-import { streamText, type FilePart, type ModelMessage } from "ai";
+import { stepCountIs, streamText, type FilePart, type ModelMessage } from "ai";
 import { APP_DEFAULTS } from "@/lib/appDefaults";
 import {
     buildAttachmentPromptText,
@@ -57,6 +57,18 @@ import { getWebSearchSurchargeCredits } from "@/lib/webSearchCredits";
 import { buildWebSearchToolConfig, WEB_SEARCH_TOOL_NAMES } from "@/lib/webSearchToolConfig";
 import { normalizeWebSearchExecution } from "@/lib/webSearchExecutionNormalizer";
 import { buildChatStreamTrailerChunk } from "@/lib/webSearchStreamTrailer";
+import {
+    planGeneratedArtifactTool,
+    ARTIFACT_TOOL_DEFINITION_TOKENS,
+} from "@/lib/generatedArtifactToolPolicy";
+import {
+    buildGeneratedArtifactToolConfig,
+    CREATE_SPREADSHEET_TOOL_NAME,
+    GeneratedArtifactCollector,
+    GENERATED_ARTIFACT_MAX_STEPS,
+} from "@/lib/generatedArtifactTool";
+import { persistArtifactRows } from "@/lib/generatedArtifactStorage";
+import type { ChatStreamArtifact } from "@/lib/generatedArtifactCore";
 import { resolveChatCompletionOutcome } from "@tomverse/chat-core";
 import { ERROR_REPORT_TOKEN_HEADER } from "@/lib/errorReportContract";
 import { issueChatErrorReportGrant } from "@/lib/traceErrorEvidence";
@@ -140,6 +152,7 @@ import {
 } from "@/lib/routingFaultInjection";
 import { resolveDeploymentEnvironment } from "@/lib/deploymentEnvironment";
 import { buildRoutingRetryChunk } from "@/lib/routingRetrySignal";
+import { buildArtifactProgressChunk } from "@/lib/generatedArtifactProgressSignal";
 import {
     conversationLockedResponse,
     hasConversationUnlockGrant,
@@ -1517,6 +1530,48 @@ async function handleChatPost(
             inputEstimate.addTokens(quotedContextTokens);
         }
 
+        /*
+          Whether this turn may produce a downloadable file, and what the model
+          is told either way (docs/policy/generated-artifacts.md section 2).
+
+          Decided here, above the message loop, for one reason: the decision
+          adds a system block, the block is priced input, and the reservation
+          is taken further down. Deciding it after the budget would send the
+          user a prompt they were not quoted for.
+
+          There is always a block. A turn that cannot make files says so in the
+          request, so a model on an unverified adapter refuses out loud instead
+          of answering a spreadsheet request with a Markdown table -- the
+          silent regression this feature exists to remove.
+
+          Deep research is the one exclusion, and it is excluded entirely
+          rather than planned and refused: it is a submit-then-poll job on
+          Perplexity that never reaches the streaming path below, and
+          `submitDeepResearchJob` validates the message shape it is handed. A
+          block about a tool that job cannot call would be priced input on a
+          request with no use for it, and a change to a payload whose contract
+          is checked elsewhere.
+        */
+        const isDeepResearchTurn = modelConfig.usageClass === "deep-research";
+        const artifactToolPlan = isDeepResearchTurn
+            ? null
+            : planGeneratedArtifactTool({
+                  modelId: modelConfig.id,
+                  provider: modelConfig.provider,
+                  isAuthenticated: Boolean(session?.user?.id),
+                  canPersist: Boolean(
+                      session?.user?.id && conversationId && assistantMessageId
+                  ),
+                  nativeSearchEnabled,
+                  // Only OpenAI's tool can be forced, and
+                  // `buildWebSearchToolConfig` forces it whenever it is
+                  // enabled. Read from the capability rather than from the
+                  // provider name so the two cannot drift.
+                  nativeSearchForced:
+                      nativeSearchEnabled &&
+                      webSearchCapability.canForceExecution,
+                  conversationKind: "chat",
+              });
         // Policy: docs/policy/external-conversation-import-and-memory.md.
         // §9.1 place this block above the conversation and below the
         // safety policy, so it is the first message and the rules that govern
@@ -1524,6 +1579,23 @@ async function handleChatPost(
         const formattedMessages: ModelMessage[] = contextSystemPrompt
             ? [{ role: "system", content: contextSystemPrompt }]
             : [];
+        if (artifactToolPlan) {
+            formattedMessages.push({
+                role: "system",
+                content: artifactToolPlan.systemPrompt,
+            });
+            // Priced like any other input. The tool *definition* is a separate
+            // cost the provider adds when the schema is sent, and it is a
+            // build-time constant rather than a per-request tokenisation --
+            // see ARTIFACT_TOOL_DEFINITION_TOKENS.
+            const artifactPromptTokens =
+                estimateTextTokens(artifactToolPlan.systemPrompt) +
+                (artifactToolPlan.registerTool
+                    ? ARTIFACT_TOOL_DEFINITION_TOKENS
+                    : 0);
+            estimatedInputTokens += artifactPromptTokens;
+            inputEstimate.addTokens(artifactPromptTokens);
+        }
         for (const msg of messages) {
             if (msg.role === "assistant") {
                 const content = String(msg.content ?? "");
@@ -2314,6 +2386,72 @@ async function handleChatPost(
         const webSearchToolConfig = nativeSearchEnabled
             ? buildWebSearchToolConfig(webSearchCapability)
             : null;
+        /*
+          This turn's generated files (docs/policy/generated-artifacts.md).
+
+          The collector exists because a tool call outlives the certainty that
+          its turn will finish. `execute` runs while the stream is open, and
+          the assistant message it must hang from is not written until the
+          stream closes -- so bytes go to storage now, rows go down with the
+          message later, and every ending that does not write a message calls
+          `discard()` to reclaim what was stored. That is the whole reason the
+          non-atomic write is safe.
+
+          `streamController` is where the "creating the file" chunk is written.
+          Captured on the stream's first pull rather than passed in, because
+          the collector is built before the ReadableStream exists and the tool
+          runs after it does. `enqueue` is legal on a controller at any point
+          while the stream is open, which is what lets a status be announced
+          from inside a tool call rather than after it.
+        */
+        let streamController: ReadableStreamDefaultController<string> | null =
+            null;
+        const artifactCollector =
+            artifactToolPlan && artifactToolPlan.registerTool
+                ? new GeneratedArtifactCollector({
+                      mode: artifactToolPlan.mode,
+                      userId: session?.user?.id ?? null,
+                      conversationId: conversationId ?? null,
+                      modelId: modelConfig.id,
+                      traceId,
+                      emitProgress: (format) => {
+                          if (!streamController) return;
+                          enqueueSafely(
+                              streamController,
+                              buildArtifactProgressChunk(format)
+                          );
+                      },
+                  })
+                : null;
+        const artifactToolConfig = artifactCollector
+            ? buildGeneratedArtifactToolConfig(artifactCollector)
+            : null;
+        /*
+          Tools from both features, merged rather than chosen between.
+
+          The names cannot collide: the native search tools are `web_search`
+          and `google_search`, and this one is `create_spreadsheet`. Where the
+          two features genuinely cannot coexist -- a forced search, or Google
+          grounding -- `planGeneratedArtifactTool` has already refused, so
+          nothing here has to re-derive that.
+
+          `stopWhen` is set only when the artifact tool is registered. Every
+          other turn keeps the SDK's single-step default, so a request that
+          registers no application tool behaves exactly as it does today.
+        */
+        const combinedToolConfig =
+            webSearchToolConfig || artifactToolConfig
+                ? {
+                      ...(webSearchToolConfig ?? {}),
+                      tools: {
+                          ...(webSearchToolConfig?.tools ?? {}),
+                          ...(artifactToolConfig?.tools ?? {}),
+                      },
+                      ...(artifactToolConfig
+                          ? { stopWhen: stepCountIs(GENERATED_ARTIFACT_MAX_STEPS) }
+                          : {}),
+                  }
+                : null;
         const generationSettings = getModelGenerationSettings(modelConfig);
         // Delivery plan §5, applied to the manual path first. The user's own
         // model choice is untouched; what is being measured is whether the
@@ -2398,7 +2536,16 @@ async function handleChatPost(
             provider: modelConfig.provider,
             maxOutputTokens: requestMaxOutputTokens,
             settings: generationSettings as Record<string, unknown>,
-            toolConfig: webSearchToolConfig,
+            // Named rather than embedded when the artifact tool is present:
+            // the tool object carries an `execute` closure and a Zod schema,
+            // neither of which survives `JSON.stringify`, and one of which can
+            // be cyclic. A turn without it hashes exactly as it always has.
+            toolConfig: artifactToolConfig
+                ? {
+                      ...(webSearchToolConfig ?? {}),
+                      applicationTools: [CREATE_SPREADSHEET_TOOL_NAME],
+                  }
+                : webSearchToolConfig,
             messages: manifestMessages,
             // No Planner yet, and saying so is more honest than a version
             // number for a stage that did not run.
@@ -2415,7 +2562,7 @@ async function handleChatPost(
                     ? perplexityUsageHeaders(traceId)
                     : undefined,
             ...generationSettings,
-            ...(webSearchToolConfig ?? {}),
+            ...(combinedToolConfig ?? {}),
         });
         // The fallback drill's deliberate failure, if this request asked for
         // one and may have one (lib/routingFaultInjection.ts: not production,
@@ -2811,6 +2958,17 @@ async function handleChatPost(
                 subjectScope: access.kind,
             });
         };
+        /*
+          Set only by a message transaction that committed.
+
+          Every terminal path funnels through `releaseSafely`, so this one
+          boolean decides whether the objects this turn wrote are kept or
+          reclaimed -- and it defaults to "reclaim". A cancelled stream, a
+          provider failure, a client that disconnected, a swap to another
+          model and a message write that threw all reach the release without
+          ever setting it, and all of them leave storage clean.
+        */
+        let artifactsPersisted = false;
         const releaseSafely = async () => {
             try {
                 await release();
@@ -2821,6 +2979,11 @@ async function handleChatPost(
                     error,
                     dispatched.modelId
                 );
+            }
+            if (artifactCollector && !artifactsPersisted) {
+                // Idempotent: `discard` empties its own list, so the several
+                // paths that release twice cannot double-delete or throw.
+                await artifactCollector.discard();
             }
         };
         const cancelSourceSafely = async (reason?: unknown) => {
@@ -2930,7 +3093,12 @@ async function handleChatPost(
             const scope = autoFallbackScope({
                 routed: autoSelection.routed,
                 isGuest: access.kind === "guest",
-                toolsOffered: Boolean(webSearchToolConfig),
+                // Includes the artifact tool, and that is the point: §7's own
+                // rationale excludes a turn with a tool result the
+                // conversation now refers to, and a generated file is exactly
+                // that -- bytes already in storage that a second model's
+                // answer would not account for.
+                toolsOffered: Boolean(combinedToolConfig),
                 nativeSearchEnabled,
                 // Always false here: a deep-research turn returns from the
                 // submit-then-poll branch above and never reaches a stream.
@@ -3223,6 +3391,18 @@ async function handleChatPost(
                 }
             }
 
+            /*
+              Unreachable today, and kept because "today" is a configuration.
+
+              `autoFallbackScope` refuses a turn that offered tools, so a turn
+              with an artifact collector never reaches a swap. If that scope
+              ever widens, the primary's files must not follow another model's
+              answer: they were produced from the displaced attempt's
+              reasoning, and the message that will be written is not the one
+              they belong to.
+            */
+            await artifactCollector?.discard();
+
             displacedModelId = dispatched.modelId;
             rerouteCount += 1;
             dispatchRecord = nextRecord;
@@ -3267,6 +3447,7 @@ async function handleChatPost(
         const protectedStream = new ReadableStream<string>({
             async pull(controller) {
                 if (streamState !== "open") return;
+                streamController = controller;
 
                 try {
                     const { done, value } = await dispatched.reader.read();
@@ -3443,6 +3624,19 @@ async function handleChatPost(
                                 searchSettlementFields
                             );
                         }
+                        /*
+                          The files this turn produced, as the client will be
+                          told about them.
+
+                          Reassigned below once the rows exist, so a failed
+                          artifact's card gets the id of its own row and
+                          survives a reload. A turn that persists nothing
+                          keeps the collector's synthetic ids, which address
+                          nothing and are only ever attached to cards that
+                          have no download button.
+                        */
+                        let artifactsForTrailer: ChatStreamArtifact[] =
+                            artifactCollector?.toStreamArtifacts() ?? [];
                         if (
                             conversationId &&
                             assistantMessageId &&
@@ -3457,9 +3651,28 @@ async function handleChatPost(
                                               MAX_STORED_MESSAGE_CHARACTERS
                                           )}\n\n[Response truncated for storage]`
                                         : generatedText;
+                                /*
+                                  Provider-private state for replaying a
+                                  reasoning model exactly -- and not stored at
+                                  all on a turn that called the artifact tool.
+
+                                  `response.messages` carries that turn's tool
+                                  call and its result verbatim. Replaying them
+                                  on a later turn that does not register
+                                  `create_spreadsheet` sends a provider a
+                                  tool_use naming a tool the request never
+                                  declared, which several providers reject
+                                  outright -- and whether the tool is
+                                  registered is decided per turn (a model
+                                  change, web search switched on). The
+                                  reasoning replay is an optimisation; a turn
+                                  the provider refuses is a broken answer, so
+                                  the optimisation is the half that gives way.
+                                */
                                 const providerContext =
                                     dispatched.reasoning !== undefined &&
-                                    responseResult.status === "fulfilled"
+                                    responseResult.status === "fulfilled" &&
+                                    !artifactCollector?.wasInvoked
                                         ? serializeProviderResponseMessages(
                                               responseResult.value.messages
                                           )
@@ -3520,7 +3733,49 @@ async function handleChatPost(
                                             },
                                         });
                                     }
+                                    /*
+                                      The artifact rows, in the same
+                                      transaction as the message they belong
+                                      to. Either the answer and its files are
+                                      both there or neither is -- there is no
+                                      state in which a download card points at
+                                      a message that was never written.
+
+                                      The bytes are already in storage. That
+                                      order is the one this domain chose (see
+                                      lib/generatedArtifactStorage.ts): an
+                                      object with no row is reclaimable by a
+                                      sweep, a row with no object is a broken
+                                      download button.
+                                    */
+                                    if (artifactCollector && !artifactCollector.isEmpty) {
+                                        await persistArtifactRows(tx, {
+                                            messageId: assistantMessageId,
+                                            conversationId,
+                                            userId: session!.user!.id,
+                                            stored: artifactCollector.stored,
+                                            failed: artifactCollector.failed,
+                                        });
+                                    }
                                 });
+                                if (artifactCollector && !artifactCollector.isEmpty) {
+                                    // Read back rather than assumed: the
+                                    // failed rows were created without
+                                    // caller-supplied ids, and the card the
+                                    // user reloads into has to be addressable
+                                    // by the same id the card they are looking
+                                    // at already carries.
+                                    const persistedRows =
+                                        await prisma.messageArtifact.findMany({
+                                            where: { messageId: assistantMessageId },
+                                            select: { id: true, ordinal: true },
+                                        });
+                                    artifactsForTrailer =
+                                        artifactCollector.withPersistedIds(persistedRows);
+                                }
+                                // The rows are committed, so the objects they
+                                // point at must survive the release below.
+                                artifactsPersisted = true;
                             } catch (error) {
                                 logRequestError(
                                     "assistant_message_persist_failed",
@@ -3528,7 +3783,48 @@ async function handleChatPost(
                                     error,
                                     dispatched.modelId
                                 );
+                                /*
+                                  The message did not land, so nothing can
+                                  ever reach these objects: no row references
+                                  them and no route accepts a key. Reclaimed
+                                  now, and swept later if this fails too.
+
+                                  The cards are dropped from the trailer in
+                                  the same breath. Showing a download button
+                                  for a file whose row does not exist would be
+                                  the one failure this feature must not have.
+                                */
+                                await artifactCollector?.discard();
+                                artifactsForTrailer = [];
                             }
+                        } else if (artifactCollector?.stored.length) {
+                            /*
+                              A turn that called the tool and then wrote no
+                              text at all, or that has no conversation to
+                              write to.
+
+                              The answer is reported as empty by the branch
+                              below, and an empty answer keeps no file: there
+                              is no message for the row to reference, so the
+                              object would be unreachable from the moment it
+                              was written. The event is logged separately
+                              because it is the one shape where a successful
+                              generation is deliberately thrown away, and a
+                              rate that stops being near-zero means the
+                              instructions have stopped working.
+                            */
+                            console.warn(
+                                JSON.stringify({
+                                    event: "generated_artifact_discarded_empty_answer",
+                                    traceId,
+                                    conversationId,
+                                    modelId: dispatched.modelId,
+                                    artifacts: artifactCollector.stored.length,
+                                    timestamp: new Date().toISOString(),
+                                })
+                            );
+                            await artifactCollector.discard();
+                            artifactsForTrailer = [];
                         }
                         const isEmptyResponse = !generatedText.trim();
                         if (isEmptyResponse) {
@@ -3606,6 +3902,12 @@ async function handleChatPost(
                             buildChatStreamTrailerChunk({
                                 searchMetadata: webSearchExecution,
                                 completion: completionOutcome,
+                                // Absent, not empty, on a turn with no files:
+                                // an older client ignores the key and a turn
+                                // that made nothing says nothing.
+                                ...(artifactsForTrailer.length
+                                    ? { artifacts: artifactsForTrailer }
+                                    : {}),
                             })
                         );
                         closeSafely(controller);

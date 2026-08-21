@@ -485,6 +485,23 @@ export type QaConversationMessage = {
    * it only ever exist in the streaming response header?
    */
   memoryUsedCount?: number;
+  /**
+   * The files this answer produced, exactly as the real endpoint returns them
+   * (docs/policy/generated-artifacts.md section 5). Seeded so a spec can ask
+   * the question a reload asks: does the download card come back, or did it
+   * only ever exist in the streaming trailer?
+   */
+  artifacts?: Array<{
+    id: string;
+    ordinal: number;
+    format: "xlsx" | "csv";
+    filename: string;
+    mediaType: string;
+    byteSize: number;
+    status: "ready" | "failed" | "blocked";
+    failureCode?: string;
+    modelId?: string;
+  }>;
 };
 
 export async function mockAuthenticatedApi(

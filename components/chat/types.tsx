@@ -1,5 +1,6 @@
 ﻿import type { WebSearchExecution } from "@/lib/webSearchExecutionNormalizer";
 import type { MessageErrorReportContext } from "@/lib/errorReportContract";
+import type { ChatStreamArtifact } from "@/lib/generatedArtifactCore";
 
 export type ChatAttachment = {
   id: string;
@@ -46,6 +47,31 @@ export type Message = {
    * it could only ever be a stale claim.
    */
   memoryUsedCount?: number;
+  /**
+   * Files this answer produced (docs/policy/generated-artifacts.md).
+   *
+   * Absent on every message that made none, which is almost all of them --
+   * an artifact is an addition to an answer, never a replacement for one, so
+   * `content` still carries the whole reply. Arrives twice by two paths that
+   * must agree: the streaming trailer while the answer is live, and the
+   * conversation re-fetch afterwards.
+   *
+   * Public fields only. `objectKey` and the storage URL are not in
+   * `ChatStreamArtifact` at all, so neither can arrive here.
+   */
+  artifacts?: ChatStreamArtifact[];
+  /**
+   * Runtime only: the server announced that a file is being generated for
+   * this answer, and the trailer has not yet said what came of it.
+   *
+   * Never serialized -- the allowlists in lib/chatMessageSerialization.ts do
+   * not name it -- because it describes a request that is in flight, and a
+   * stored copy could only ever be a spinner for work that finished before
+   * the page was reloaded. The renderer additionally requires the panel to be
+   * actively streaming this message, so a cancelled turn cannot leave one
+   * behind either.
+   */
+  isGeneratingArtifact?: boolean;
 };
 
 export type Conversation = {

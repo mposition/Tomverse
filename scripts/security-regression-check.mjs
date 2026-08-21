@@ -1421,6 +1421,75 @@ const checks = [
     },
   },
   {
+    name: "The workbook writer cannot emit a formula, a macro or an external link",
+    file: "lib/generatedArtifactXlsx.ts",
+    test: (source) => {
+      // Comments stripped first, and deliberately: the file's own header
+      // *names* these parts to explain why they are absent, so matching the
+      // raw text would fail on the documentation rather than on the code.
+      const code = source
+        .replace(/\/\*[\s\S]*?\*\//g, "")
+        .replace(/^\s*\/\/.*$/gm, "");
+      // The formula defence is structural: OOXML evaluates `<f>` and nothing
+      // else, so a writer with no `<f>` in it cannot produce a spreadsheet
+      // that executes anything. Same for the parts that would make a workbook
+      // fetch or run something when it is opened.
+      return (
+        !code.includes("<f>") &&
+        !code.includes("<f ") &&
+        !code.includes("vbaProject") &&
+        !code.includes("externalLink") &&
+        !code.includes("connections.xml") &&
+        !code.includes("relationships/hyperlink") &&
+        // And the forced-text style stays a real quotePrefix attribute rather
+        // than a comment claiming one.
+        code.includes('quotePrefix="1"')
+      );
+    },
+  },
+  {
+    name: "A model cannot ask for a formula, and its input is re-checked server-side",
+    file: "lib/generatedArtifactTool.ts",
+    test: (source) => {
+      const code = source
+        .replace(/\/\*[\s\S]*?\*\//g, "")
+        .replace(/^\s*\/\/.*$/gm, "");
+      // The provider is handed a JSON schema; nothing guarantees it enforces
+      // one. The admission inside `execute` is what actually decides, so the
+      // tool must call it rather than trusting the parsed input.
+      return (
+        code.includes("admitWorkbookSpecSafely(rawInput)") &&
+        code.includes("inputSchema: workbookSpecSchema") &&
+        // Nothing the model is handed back may address the stored object.
+        !code.includes("objectKey:") &&
+        !code.includes("createR2ReadUrl")
+      );
+    },
+  },
+  {
+    name: "An artifact download is scoped by owner and cannot destroy its own file",
+    file: "app/api/artifacts/[artifactId]/route.ts",
+    test: (source) => {
+      const code = source
+        .replace(/\/\*[\s\S]*?\*\//g, "")
+        .replace(/^\s*\/\/.*$/gm, "");
+      // Ownership is part of the lookup, so there is no branch that could tell
+      // "not yours" from "not there" -- and no signed URL is ever minted, so a
+      // key cannot leak by being turned into a link.
+      return (
+        code.includes("where: { id: artifactId, userId }") &&
+        code.includes("hasConversationUnlockGrant(") &&
+        // The non-destructive read: `readR2Object` deletes on a metadata
+        // mismatch, which would destroy a file the user paid for.
+        code.includes("readOwnR2ObjectBytes(") &&
+        !code.includes("readR2Object(") &&
+        !code.includes("createR2ReadUrl") &&
+        code.includes('"X-Content-Type-Options": "nosniff"') &&
+        code.includes('"Cache-Control": "private, no-store"')
+      );
+    },
+  },
+  {
     name: "Stale image recovery can reclaim a stranded settlement",
     file: "lib/imageGenerationService.ts",
     test: (source) =>

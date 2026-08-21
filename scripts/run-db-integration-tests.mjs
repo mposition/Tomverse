@@ -170,6 +170,10 @@ run(
     "tests/integration/subscription-sync-ordering.db.test.ts",
     "tests/integration/plan-change-reservation.db.test.ts",
     "tests/integration/image-generation.db.test.ts",
+    // The constraints that make "a ready artifact always has a file" a fact
+    // rather than a convention, and the tombstone ordering every deletion
+    // path depends on. Neither can be checked without Postgres.
+    "tests/integration/generated-artifacts.db.test.ts",
     // The import/memory program's suites were written alongside their slices
     // but never listed here, i.e. never actually run by CI — a guard nobody
     // runs is not a guard. Keep this list in step with tests/integration/.

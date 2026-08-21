@@ -256,6 +256,16 @@ domains:
     implementationStatus: implemented
     inUnifiedExport: included_filtered
 
+  - domain: messageArtifact
+    prismaModel: MessageArtifact
+    userLinkageRole: subject
+    owner: security-privacy
+    deletionAction: delete
+    deletionMechanism: cascade_from_user
+    retentionPolicy: immediate
+    implementationStatus: implemented
+    inUnifiedExport: included_filtered
+
   - domain: imageGeneration
     prismaModel: ImageGeneration
     userLinkageRole: subject
