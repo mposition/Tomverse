@@ -285,12 +285,13 @@ test.describe("settings information architecture", () => {
       await expect(back).toContainText("설정으로 돌아가기");
       await expect(back).toHaveAttribute("href", detail.href);
 
-      // No chat-bound link competing with it at the top of the page. Counting
-      // links was the old proxy for this and stopped meaning it once
-      // breadcrumb crumbs became navigable: what has to hold is that nothing
-      // here offers the chat, not that there is exactly one control.
+      // Nothing inside this nav offers the chat. Counting links was the old
+      // proxy for that and stopped meaning it once breadcrumb crumbs became
+      // navigable: what has to hold is that every link *here* goes up inside
+      // settings, not that there is exactly one control.
       const nav = page.getByTestId("settings-detail-nav");
       await expect(nav.getByRole("link", { name: /채팅/ })).toHaveCount(0);
+      await expect(nav.getByTestId(RETURN_TO_CHAT)).toHaveCount(0);
       for (const href of await nav.getByRole("link").evaluateAll((links) =>
         links.map((link) => link.getAttribute("href") ?? "")
       )) {
@@ -299,9 +300,8 @@ test.describe("settings information architecture", () => {
         expect(href === "/chat").toBe(false);
       }
 
-      // The way out of settings is a separate control in the route shell, so
-      // it must not have leaked into this nav or borrowed its wording.
-      await expect(nav.getByTestId(RETURN_TO_CHAT)).toHaveCount(0);
+      // Leaving settings entirely is a separate control, rendered by the route
+      // shell beside this nav rather than inside it.
       await expect(page.getByTestId(RETURN_TO_CHAT)).toHaveAttribute(
         "href",
         "/chat"
@@ -531,6 +531,7 @@ async function mockDepthApis(page: Page) {
     /^\/api\/imports\/external\/[^/]+$/,
     /^\/api\/external-conversations\/[^/]+$/,
     /^\/api\/memories\/extraction-runs\/[^/]+$/,
+    /^\/api\/user\/email-preferences$/,
   ]) {
     await page.route(
       (url) => missing.test(url.pathname),
@@ -558,61 +559,56 @@ const SETTINGS_DEPTHS = [
     name: "import list",
     path: "/settings/imports",
     upTestId: "external-import-back",
-    upHref: "/chat?settings=data&settingsSection=external-import",
   },
   {
     name: "import wizard",
     path: "/settings/imports/new",
     upTestId: "external-import-back",
-    upHref: "/settings/imports",
   },
   {
     name: "one import",
     path: "/settings/imports/imp-qa",
     upTestId: "external-import-detail-back",
-    upHref: "/settings/imports",
   },
   {
     name: "an imported conversation",
     path: "/settings/imports/conversations/conv-qa",
     upTestId: "external-viewer-back",
-    upHref: "/settings/imports",
   },
   {
     name: "memory settings",
     path: "/settings/memory",
     upTestId: "memory-back",
-    upHref: "/chat?settings=data&settingsSection=memory",
   },
   {
     name: "one extraction run",
     path: "/settings/memory/runs/run-qa",
     upTestId: "memory-extraction-run-back",
-    upHref: "/settings/memory",
   },
   {
     name: "assistant profiles",
     path: "/settings/assistants",
     upTestId: "assistants-back-to-settings",
-    upHref: "/chat?settings=data&settingsSection=assistants",
   },
   {
     name: "a new assistant profile",
     path: "/settings/assistants/new",
-    upTestId: "assistants-back-to-settings",
-    upHref: "/chat?settings=data&settingsSection=assistants",
+    upTestId: "assistant-create-back",
   },
   {
     name: "one assistant profile",
     path: "/settings/assistants/p-qa",
-    upTestId: "assistants-back-to-settings",
-    upHref: "/chat?settings=data&settingsSection=assistants",
+    upTestId: "assistant-back-to-list",
   },
   {
     name: "account data",
     path: "/settings/data",
     upTestId: "account-data-back",
-    upHref: "/chat?settings=data&settingsSection=account-data",
+  },
+  {
+    name: "email notifications",
+    path: "/settings/notifications",
+    upTestId: "email-notifications-back",
   },
 ] as const;
 
@@ -632,11 +628,15 @@ test.describe("returning to the chat from settings", () => {
       // not, so a screen reader hears the same control at every width.
       await expect(exit).toHaveAccessibleName("대화로 돌아가기");
 
-      // The hierarchy is untouched: this page's own link still goes one
-      // level up, to the place it went before the exit existed.
+      // The hierarchy is untouched: this page's own link still goes one level
+      // up, and up is somewhere inside settings. Where exactly is each page's
+      // own business and is pinned by its own spec -- restating it here would
+      // make this file fail for a reason it is not about.
       const up = page.getByTestId(depth.upTestId);
       await expect(up).toBeVisible();
-      await expect(up).toHaveAttribute("href", depth.upHref);
+      const upHref = await up.getAttribute("href");
+      expect(upHref).not.toBe("/chat");
+      expect(upHref).toMatch(/^(\/settings\/|\/chat\?settings=)/);
 
       // Two different controls, and they never occupy the same space.
       const exitBox = await exit.boundingBox();

@@ -2,8 +2,9 @@
 
 Scope: the settings list (the Data tab inside `components/auth/AuthButton.tsx`),
 the entries that own a detail page — external conversation import, account
-memory, assistant profiles and account data — the upward navigation on those
-detail pages, and the control that leaves the settings hierarchy.
+memory, assistant profiles, account data and email notifications — the upward
+navigation on those detail pages, and the control that leaves the settings
+hierarchy.
 
 Owning modules:
 
@@ -213,7 +214,8 @@ The exit control renders on both, with the same destination and the same
 accessible name. Only its **visible** label shortens on a narrow viewport
 (`settingsNav.backToChatShort`), and that is a width decision made in CSS: the
 `aria-label` carries the full phrase at every width, so its name never changes
-under a screen reader, and the short form stays a prefix of the full one.
+under a screen reader, and the short form stays part of the full one — what is
+on screen is always in the name (WCAG 2.5.3).
 
 Nothing in this navigation may be decided by `layout === "mobile"`, a UA
 string, or a device name.
