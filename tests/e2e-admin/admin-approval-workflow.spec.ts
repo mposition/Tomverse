@@ -302,13 +302,17 @@ test.describe("two-person approval", () => {
       .fill("Launching the jurisdiction profiles researched on 2026-08-21.");
     await page.getByTestId("email-policy-activate").click();
 
+    // `findFirst` rather than `findFirstOrThrow`: the click returns before the
+    // request does, so the first poll runs against a table that has no row
+    // yet -- and a throwing callback fails `expect.poll` outright instead of
+    // being retried, which is what made the first version of this test red.
     await expect
       .poll(async () =>
         (
-          await database.adminActionApproval.findFirstOrThrow({
+          await database.adminActionApproval.findFirst({
             where: { action: "email_policy.activate" },
           })
-        ).status
+        )?.status ?? null
       )
       .toBe("pending");
     expect(
