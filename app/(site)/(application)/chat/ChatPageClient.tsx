@@ -183,6 +183,14 @@ const normalizeStringArray = (value: unknown, fallback: string[]) => {
 const uniqueStrings = (values: string[]) => Array.from(new Set(values));
 
 /**
+ * Ordered comparison, not set comparison: the model list is also the panel
+ * order, so two lists with the same members in a different order are two
+ * different screens and re-rendering for that is correct.
+ */
+const sameStringList = (a: string[], b: string[]) =>
+  a.length === b.length && a.every((value, index) => value === b[index]);
+
+/**
  * PATCHes one conversation's model settings and reports the server's
  * normalized answer back as the confirmed state. Module-level because it
  * closes over nothing from the component -- which is also what lets the
@@ -3124,6 +3132,12 @@ export function ChatPageClient({
     // string without re-deriving it from state that may not have committed
     // yet (setConversations is async).
     let justCreatedTitle: string | null = null;
+    // What this send will name. Ordinarily the screen's own selection, but a
+    // create can come back with a different one (see the profile branch
+    // below), and the rest of this function runs in the same closure -- a
+    // `setState` alone would not reach it.
+    let sendSelectedModels = selectedModels;
+    let sendDisabledPanels = effectiveDisabledPanels;
 
     if (!activeChatId) {
       if (isGuestMode) {
@@ -3183,17 +3197,56 @@ export function ChatPageClient({
           // binding and stops being pending.
           setAssistantProfile(data.assistantProfile ?? null);
           setPendingProfileId(null);
-          // The conversation was created from this exact selection one line
-          // above, so it is the server-confirmed state -- seed it so the
-          // barrier below does not need a redundant first PATCH. (PATCH
-          // responses, where the server may genuinely disagree, feed the
-          // queue their normalized answer instead.)
+          /**
+           * The created conversation's own models, read back rather than
+           * assumed.
+           *
+           * A create that carries a profile does not keep the caller's list:
+           * `docs/policy/external-conversation-import-and-memory.md` §14.0 has
+           * the new conversation *adopt* the profile's models, and
+           * `app/api/conversations/route.ts` lets `profileModels` win over
+           * `body.selectedModels`. Seeding the queue with what was sent
+           * therefore marked a list the server had already replaced as
+           * "server-confirmed", so the barrier found nothing to reconcile and
+           * this turn's `POST /api/chat` named a model the conversation did
+           * not have -- a 403 `MODEL_NOT_SELECTED` on the first turn of every
+           * conversation started with an assistant, which retrying could not
+           * clear because the screen never learned the real list.
+           *
+           * Trace 627e9859-c57d-42e1-9928-c973278636c3.
+           */
+          const createdModels = clampSelectedModels(
+            Array.isArray(data.selectedModels) && data.selectedModels.length > 0
+              ? data.selectedModels
+              : selectedModels
+          );
+          const createdDisabled = uniqueStrings(
+            Array.isArray(data.disabledPanels) ? data.disabledPanels : disabledPanels
+          ).filter((modelId) => createdModels.includes(modelId));
           modelSettingsSyncQueueRef.current.markConfirmed(data.id, {
-            models: clampSelectedModels(selectedModels),
-            disabled: uniqueStrings(disabledPanels).filter((modelId) =>
-              selectedModels.includes(modelId)
-            ),
+            models: createdModels,
+            disabled: createdDisabled,
           });
+          // This send, and the screen behind it, both follow the answer.
+          sendSelectedModels = createdModels;
+          sendDisabledPanels = createdDisabled;
+          if (!sameStringList(createdModels, selectedModels)) {
+            setSelectedModels(createdModels);
+          }
+          if (!sameStringList(createdDisabled, disabledPanels)) {
+            setDisabledPanels(createdDisabled);
+          }
+          // Written here as well as through state, the same way loading a
+          // conversation does it: the send barrier a few lines below reads
+          // this ref, and React has not committed the setState by then. Left
+          // to the effect, the barrier would capture the replaced list and
+          // PATCH the conversation back onto it -- undoing the adoption
+          // instead of failing loudly, which is worse than the bug this
+          // fixes.
+          latestModelSettingsRef.current = {
+            models: createdModels,
+            disabled: createdDisabled,
+          };
           setCurrentChatId(activeChatId);
           currentChatIdRef.current = activeChatId;
           // Same hand-off as the guest branch above: the draft follows the id
@@ -3232,8 +3285,8 @@ export function ChatPageClient({
       // bundle for it. A single-model send never had a preparation step, so
       // this is where it gets one -- §10 requires the context to be priced
       // before the request that sends it, whichever shape the send is.
-      const activeModelIds = selectedModels.filter(
-        (modelId) => !effectiveDisabledPanels.includes(modelId)
+      const activeModelIds = sendSelectedModels.filter(
+        (modelId) => !sendDisabledPanels.includes(modelId)
       );
       const contextLayout =
         activeModelIds.length >= 2
@@ -3254,7 +3307,7 @@ export function ChatPageClient({
         (conversation?.messageCount ? 1 : 0);
       trackProductEvent(
         previousCount === 0 ? "chat_started" : "followup_sent",
-        activeModelCount,
+        activeModelIds.length,
         { conversation_mode: isGuestMode ? "guest" : "account" }
       );
       promptCountsRef.current.set(activeChatId, previousCount + 1);
