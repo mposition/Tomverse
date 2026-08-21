@@ -914,6 +914,9 @@ export const ko = {
         orDivider: "또는",
         emailLoginPlaceholder: "you@example.com",
         emailLoginEmailInputLabel: "이메일 주소",
+        emailLoginSendFailed:
+            "지금은 코드를 보내지 못했습니다. 주소 문제가 아니라 저희 쪽 문제입니다. 잠시 후 다시 시도해 주세요.",
+        emailLoginResendButton: "새 코드 받기",
         emailLoginInvalidFormat: "올바른 이메일 주소를 입력해 주세요.",
         emailLoginButton: "로그인 코드 받기",
         emailLoginCodeSentTitle: "이메일을 확인해 주세요",

@@ -88,15 +88,27 @@ const codeEmailCopy: Record<EmailLanguage, CodeEmailCopy> = {
   },
 };
 
-export async function sendEmailLoginCodeEmail(input: {
-  to: string;
+/**
+ * The login code message, built rather than sent.
+ *
+ * Split out because the credential lane needs the same bytes twice for two
+ * different reasons: once with the real code, to send, and once with the
+ * variables left as placeholders, to register the TemplateVersion the delivery
+ * row points at. Registering the *rendered* message would hash a different
+ * value on every request and mint a new template version per sign-in; what
+ * belongs in the registry is the template, and this returns exactly that when
+ * given placeholder values.
+ *
+ * Pure and deterministic for a given input, which is also what the provider's
+ * idempotency key requires of every attempt (§9.3).
+ */
+export function buildEmailLoginCodeEmail(input: {
   code: string;
   verifyUrl: string;
   language?: string | null;
 }) {
   const copy = codeEmailCopy[normalizeLanguage(input.language)];
-  return sendTransactionalEmail({
-    to: input.to,
+  return {
     subject: copy.subject,
     text: [
       copy.intro,
@@ -116,6 +128,18 @@ export async function sendEmailLoginCodeEmail(input: {
         <p style="color:#6b7280;font-size:13px">${escapeHtml(copy.ignore)}</p>
       </div>
     `,
+  };
+}
+
+export async function sendEmailLoginCodeEmail(input: {
+  to: string;
+  code: string;
+  verifyUrl: string;
+  language?: string | null;
+}) {
+  return sendTransactionalEmail({
+    to: input.to,
+    ...buildEmailLoginCodeEmail(input),
   });
 }
 

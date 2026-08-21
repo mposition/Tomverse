@@ -9,8 +9,16 @@ import { ApiSecurityError, consumeApiRateLimit, releaseApiRateLimit } from "@/li
 import { verifyGuestTurnstile } from "@/lib/turnstile";
 import { ChatAccessError } from "@/lib/chatSecurity";
 import { logSecurityAuditEvent } from "@/lib/securityAudit";
-import { sendEmailLoginCodeEmail } from "@/lib/emailLoginEmails";
+import { buildEmailLoginCodeEmail } from "@/lib/emailLoginEmails";
+import { isLanguage } from "@/lib/language";
 import { reportOperationalIncident } from "@/lib/operationalMonitoring";
+import {
+  CREDENTIAL_TEMPLATE_PLACEHOLDERS,
+  createCredentialDeliveryRows,
+  ensureBootstrapPolicyVersion,
+  ensureCredentialTemplateVersion,
+  sendCredentialEmailNow,
+} from "@/lib/credentialEmailLane";
 
 const CODE_TTL_MINUTES = clamp(Number(process.env.EMAIL_LOGIN_CODE_TTL_MINUTES) || 10, 1, 10);
 const LOCKOUT_THRESHOLD = clamp(Number(process.env.EMAIL_LOGIN_LOCKOUT_THRESHOLD) || 5, 3, 20);
@@ -121,11 +129,39 @@ const lockoutWindowStart = (now: Date) =>
 const releaseEmailRequestQuota = (email: string) =>
   releaseApiRateLimit(`email-otp:${email}`, "email-otp-request", "day");
 
+/**
+ * The language this message renders in.
+ *
+ * `Accept-Language` rather than `UserSettings.language`, because at request
+ * time there may be no account to have a setting -- the response is deliberately
+ * identical whether or not the address is registered, so looking one up here
+ * would make this the one place that knows.
+ */
+const requestLanguage = (request: Request) => {
+  const header = request.headers.get("accept-language") || "";
+  const first = header.split(",")[0]?.trim().split("-")[0]?.toLowerCase() || "";
+  return isLanguage(first) ? first : "en";
+};
+
+export type EmailLoginRequestResult =
+  | { ok: true; delivered: true }
+  /**
+   * Stored, attempted, and not delivered.
+   *
+   * Reported rather than swallowed. The uniform-response rule exists so that
+   * this endpoint cannot be used to test whether an address has an account, and
+   * a provider outage says nothing about that -- it fails identically for a
+   * registered address and an unregistered one. Answering `ok` here and leaving
+   * someone in front of "check your email" is the worse outcome: nothing is
+   * coming, and the screen has told them to wait for it.
+   */
+  | { ok: true; delivered: false; reason: "send_failed" | "credential_expired" };
+
 export async function requestEmailLoginCode(
   request: Request,
   rawEmail: string,
   turnstileToken: string | undefined
-): Promise<{ ok: true }> {
+): Promise<EmailLoginRequestResult> {
   const email = normalizeEmailLoginAddress(rawEmail);
 
   const anonymousKey = getAnonymousClientKey(request);
@@ -193,36 +229,72 @@ export async function requestEmailLoginCode(
   const linkTokenHash = hmacHex("link", linkToken);
   const expiresAt = new Date(now.getTime() + CODE_TTL_MINUTES * 60_000);
 
-  await prisma.$transaction([
-    prisma.emailLoginAttempt.updateMany({
-      where: { email, consumedAt: null, invalidatedAt: null },
-      data: { invalidatedAt: now },
-    }),
-    prisma.emailLoginAttempt.create({
-      data: { email, codeHash, linkTokenHash, expiresAt },
-    }),
-  ]);
-
+  const language = requestLanguage(request);
   const verifyUrl = `${getPublicAppOrigin(request)}/auth/email/verify?token=${linkToken}`;
-  try {
-    await sendEmailLoginCodeEmail({ to: email, code, verifyUrl, language: request.headers.get("accept-language") });
-  } catch (error) {
-    await reportOperationalIncident({
-      code: "EMAIL_LOGIN_CODE_SEND_FAILED",
-      title: "Failed to send email login code",
-      error,
-      severity: "warning",
-      context: { component: "email-login" },
-    });
-  }
+  const message = buildEmailLoginCodeEmail({ code, verifyUrl, language });
+
+  // Registered from the template with its variables still in place, never from
+  // the rendered message: hashing a real login code would mint a fresh
+  // TemplateVersion on every sign-in.
+  const template = await ensureCredentialTemplateVersion({
+    language,
+    ...buildEmailLoginCodeEmail({ ...CREDENTIAL_TEMPLATE_PLACEHOLDERS, language }),
+  });
+  const policyVersionId = await ensureBootstrapPolicyVersion();
+
+  // One transaction, three rows (§9.4a-3). An attempt without a delivery row
+  // would report a code nobody recorded trying to send; a delivery row without
+  // an attempt would point at a credential that was never minted.
+  const { attemptId, deliveryId, idempotencyKey } = await prisma.$transaction(
+    async (tx) => {
+      await tx.emailLoginAttempt.updateMany({
+        where: { email, consumedAt: null, invalidatedAt: null },
+        data: { invalidatedAt: now },
+      });
+      const attempt = await tx.emailLoginAttempt.create({
+        data: { email, codeHash, linkTokenHash, expiresAt },
+        select: { id: true },
+      });
+      const rows = await createCredentialDeliveryRows(tx, {
+        attemptId: attempt.id,
+        emailAddress: email,
+        language,
+        policyVersionId,
+        templateVersionId: template.templateVersionId,
+        templateId: template.templateId,
+      });
+      return { attemptId: attempt.id, ...rows };
+    }
+  );
+
+  const result = await sendCredentialEmailNow({
+    deliveryId,
+    attemptId,
+    to: email,
+    ...message,
+    idempotencyKey,
+  });
 
   logSecurityAuditEvent("auth.email_code.request", {
     request,
     resourceId: email,
-    outcome: "success",
+    outcome: result.sent ? "success" : "failure",
   });
 
-  return { ok: true };
+  if (result.sent) return { ok: true, delivered: true };
+
+  await reportOperationalIncident({
+    code: "EMAIL_LOGIN_CODE_SEND_FAILED",
+    title: "Failed to send email login code",
+    error:
+      result.reason === "credential_expired"
+        ? "The login code expired before it could be sent"
+        : `Login code send failed: ${result.errorKind}`,
+    severity: "warning",
+    context: { component: "email-login", deliveryId },
+  });
+
+  return { ok: true, delivered: false, reason: result.reason };
 }
 
 export type EmailLoginVerifyResult =

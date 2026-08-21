@@ -914,6 +914,9 @@ export const pt = {
         orDivider: "ou",
         emailLoginPlaceholder: "voce@exemplo.com",
         emailLoginEmailInputLabel: "Endereço de e-mail",
+        emailLoginSendFailed:
+            "Não foi possível enviar o código agora. O problema não é o seu endereço, é nosso. Tente novamente em instantes.",
+        emailLoginResendButton: "Enviar um novo código",
         emailLoginInvalidFormat: "Informe um endereço de e-mail válido.",
         emailLoginButton: "Receber código de login",
         emailLoginCodeSentTitle: "Verifique seu e-mail",

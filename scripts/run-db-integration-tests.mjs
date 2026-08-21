@@ -171,6 +171,7 @@ run(
     "tests/integration/plan-change-reservation.db.test.ts",
     "tests/integration/image-generation.db.test.ts",
     "tests/integration/email-notification-schema.db.test.ts",
+    "tests/integration/credential-email-lane.db.test.ts",
     // The import/memory program's suites were written alongside their slices
     // but never listed here, i.e. never actually run by CI — a guard nobody
     // runs is not a guard. Keep this list in step with tests/integration/.

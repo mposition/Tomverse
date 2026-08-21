@@ -918,3 +918,110 @@ domains:
       audit retention, so the cascade removes it like anything else. It holds
       references and hashes, never the prompt, so there is nothing here that
       deletion would otherwise have to scrub.
+
+  # --- email notification (MVP) ---------------------------------------------
+  #
+  # Contract: .github/audits/email-notification-architecture-2026-08-21.md.
+  #
+  # These three sit on opposite sides of one deliberate split. What a person
+  # currently wants goes when they go; what proves what they once agreed to, and
+  # what we did about it, does not. That asymmetry is the reason consent is two
+  # tables rather than one: EmailPreference is overwritten every time a toggle
+  # moves, and a row that gets overwritten cannot be evidence of anything.
+  #
+  # The retained pair keeps `emailAddress` after the account is gone, which the
+  # SetNull relation does not scrub. That is the point rather than an oversight
+  # -- consent and suppression attach to a mailbox, so a deleted-and-recreated
+  # account must not clear a spam complaint -- and it is why both are `retain`
+  # rather than `anonymise`. Whether GDPR Article 17(3) and PIPA Article 21
+  # actually carry that, and for how long, is question Q6 of the contract and is
+  # not settled here.
+
+  - domain: emailPreference
+    prismaModel: EmailPreference
+    userLinkageRole: subject
+    owner: security-privacy
+    deletionAction: delete
+    deletionMechanism: cascade_from_user
+    retentionPolicy: immediate
+    implementationStatus: implemented
+    inUnifiedExport: included
+    note: >-
+      Current state only, and it belongs to the person: it says which mail they
+      want, which is theirs to take with them and theirs to have removed. The
+      history behind it lives in ConsentRecord, which is what survives. Security
+      and billing rows cannot be written disabled -- a CHECK constraint holds
+      that -- so what cascades away here is never the reason a login alert was
+      not sent.
+
+  - domain: consentRecord
+    prismaModel: ConsentRecord
+    userLinkageRole: subject
+    owner: security-privacy
+    deletionAction: retain
+    retentionPolicy: legal_hold
+    implementationStatus: implemented
+    minimisationFields:
+      - emailAddress
+      - ipHash
+      - userAgentHash
+      - evidence
+    retention:
+      retentionPolicyRef: "TBD-compliance-retention-schedule"
+      legalBasis: >-
+        Proof of consent, which CASL and the Australian Spam Act both place on
+        the sender rather than the recipient. A record that disappears with the
+        account cannot discharge a burden that outlives it -- and the addresses
+        most likely to be complained about are the ones most likely to have
+        closed their account first. Establishing this against GDPR Article
+        17(3) and PIPA Article 21 is contract question Q6.
+      retentionStartsFrom: "occurredAt"
+      retentionPeriod: "TBD-pending-legal-approval"
+      owner: legal-compliance
+      legalHoldOverridesPurge: true
+      nextReviewAt: "2026-11-21"
+    inUnifiedExport: included_filtered
+    note: >-
+      Append-only: never updated, never deleted with the account. ipHash and
+      userAgentHash are already the minimised form -- the raw values are not
+      stored, because a hash proves the same thing about a consent event and a
+      raw address proves things about everything else the person did. evidence
+      holds the consent wording's hash and a screen identifier, never the
+      request.
+
+  - domain: emailDelivery
+    prismaModel: EmailDelivery
+    userLinkageRole: subject
+    owner: security-privacy
+    deletionAction: retain
+    retentionPolicy: legal_hold
+    implementationStatus: implemented
+    minimisationFields:
+      - emailAddress
+      - renderedSubject
+      - renderDataSnapshot
+    retention:
+      retentionPolicyRef: "TBD-compliance-retention-schedule"
+      legalBasis: >-
+        Evidence that a legally required notice was actually delivered --
+        a breach notification, a terms change, a price change. The notices that
+        most need proving are the ones people close their account over, so a
+        record that cascades away is missing exactly when it is wanted.
+        Ordinary transactional and marketing rows have no such basis and should
+        fall to a TTL well short of this; splitting the two is contract question
+        Q6 and the reason this row is legal_hold rather than ttl today.
+      retentionStartsFrom: "createdAt"
+      retentionPeriod: "TBD-pending-legal-approval"
+      owner: legal-compliance
+      legalHoldOverridesPurge: true
+      nextReviewAt: "2026-11-21"
+    inUnifiedExport: included_filtered
+    note: >-
+      renderDataSnapshot is the personalisation input a message was built from,
+      kept so an audit can reconstruct what was sent rather than merely attest
+      that something was. It is always NULL on the credential lane, enforced by
+      a CHECK: for a login code the personalisation input is the secret itself,
+      so minimising it leaves nothing to store. renderedHash is a keyed HMAC for
+      the same reason -- a plain digest over a body containing a six-digit code
+      is reversible in a million tries, which would make the audit column the
+      thing worth stealing.

@@ -76,8 +76,30 @@ export const EXPORT_DOMAIN_DECLARATIONS: ExportDomainDeclaration[] = [
     prismaModel: "PrivacyRequest",
     state: "included",
   },
+  {
+    domain: "emailPreference",
+    publicName: "email_preferences",
+    prismaModel: "EmailPreference",
+    state: "included",
+  },
 
   // --- the user's data mixed with Tomverse's internals ----------------------
+  {
+    domain: "consentRecord",
+    publicName: "email_consent_history",
+    prismaModel: "ConsentRecord",
+    state: "included_filtered",
+    withheldReason:
+      "When they agreed to what, on which policy version, and how it was captured -- returned in full. Held back: ipHash and userAgentHash, which are salted digests kept to prove a consent event happened and are not readable by the person they describe, and the evidence blob, which holds the consent wording's hash and an internal screen identifier rather than anything they wrote.",
+  },
+  {
+    domain: "emailDelivery",
+    publicName: "email_deliveries",
+    prismaModel: "EmailDelivery",
+    state: "included_filtered",
+    withheldReason:
+      "Which messages went to them, when, in what language, and whether each arrived. Held back: the provider's message id, the idempotency key, the rendered-body HMAC and its key version, the template and policy version ids, and the error classification -- delivery machinery that says nothing about them and, in the hash's case, is a keyed value that must not travel with the body it covers. The credential lane never carries a rendered-data snapshot at all.",
+  },
   {
     domain: "user",
     publicName: "profile",

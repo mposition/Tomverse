@@ -5,6 +5,7 @@ import {
   drainNotificationDeliveries,
   type NotificationDrainResult,
 } from "@/lib/notificationDeliveries";
+import { sweepExpiredCredentialDeliveries } from "@/lib/credentialEmailLane";
 import { reportOperationalIncident } from "@/lib/operationalMonitoring";
 import {
   completeScheduledJob,
@@ -71,6 +72,37 @@ export async function runNotificationDeliveryDrain(options?: {
         },
       });
     }
+    // Credential rows are closed out on the same tick rather than on a cron of
+    // their own, for the reason this file already gives about the drain: an
+    // upkeep pass that needs a schedule provisioned before it does anything is
+    // an upkeep pass that does nothing for a while.
+    //
+    // It is a sweep, not a retry. Nothing in the database can rebuild a login
+    // code (see lib/credentialEmailLane.ts), so all this does is stop rows
+    // whose credential has since expired from sitting in the console as sends
+    // still waiting to happen. Its failure must not fail the drain, which is
+    // the part with a queue behind it.
+    try {
+      const sweep = await sweepExpiredCredentialDeliveries();
+      if (sweep.swept > 0) {
+        console.info(
+          JSON.stringify({
+            event: "credential_email_sweep",
+            swept: sweep.swept,
+            at: new Date().toISOString(),
+          })
+        );
+      }
+    } catch (sweepError) {
+      console.error(
+        JSON.stringify({
+          event: "credential_email_sweep_failed",
+          reason: sweepError instanceof Error ? sweepError.name : "unknown",
+          at: new Date().toISOString(),
+        })
+      );
+    }
+
     return result;
   } catch (error) {
     await failScheduledJob({ runId: run?.id, error });

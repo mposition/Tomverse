@@ -31,7 +31,19 @@ const EMAIL_LOGIN_ERROR_STATUS: Record<EmailLoginError["code"], number> = {
 export async function POST(req: Request) {
   try {
     const body = await readLimitedJson(req, 2_048, requestSchema);
-    await requestEmailLoginCode(req, body.email, body.turnstileToken);
+    const result = await requestEmailLoginCode(req, body.email, body.turnstileToken);
+
+    // `delivered` is not an account-existence signal and cannot be used as one:
+    // a provider outage refuses a registered address and an unregistered one
+    // identically, and the code is minted and stored either way. Reporting it
+    // is what lets the sign-in screen stop saying "check your email" when
+    // nothing was sent (contract §9.4a-3).
+    if (!result.delivered) {
+      return NextResponse.json(
+        { ok: false, code: "SEND_FAILED" },
+        { status: 502 }
+      );
+    }
     return NextResponse.json({ ok: true });
   } catch (error) {
     if (error instanceof EmailLoginError) {

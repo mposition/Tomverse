@@ -932,6 +932,9 @@ export const zh = {
         orDivider: "或",
         emailLoginPlaceholder: "you@example.com",
         emailLoginEmailInputLabel: "电子邮箱地址",
+        emailLoginSendFailed:
+            "暂时无法发送验证码。这不是你的邮箱地址的问题，而是我们这边的问题。请稍后再试。",
+        emailLoginResendButton: "重新获取验证码",
         emailLoginInvalidFormat: "请输入有效的电子邮箱地址。",
         emailLoginButton: "获取登录代码",
         emailLoginCodeSentTitle: "请查收邮件",

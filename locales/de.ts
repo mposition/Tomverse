@@ -914,6 +914,9 @@ export const de = {
         orDivider: "oder",
         emailLoginPlaceholder: "sie@beispiel.com",
         emailLoginEmailInputLabel: "E-Mail-Adresse",
+        emailLoginSendFailed:
+            "Der Code konnte gerade nicht gesendet werden. Das liegt nicht an Ihrer Adresse, sondern an uns. Versuchen Sie es gleich noch einmal.",
+        emailLoginResendButton: "Neuen Code senden",
         emailLoginInvalidFormat: "Bitte geben Sie eine gültige E-Mail-Adresse ein.",
         emailLoginButton: "Anmeldecode anfordern",
         emailLoginCodeSentTitle: "Prüfen Sie Ihre E-Mails",
