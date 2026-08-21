@@ -14,22 +14,35 @@ Sending domains**.
 
 | 항목 | 값 |
 |---|---|
-| 제공자에 등록된 도메인 | `tomverse.app` 하나 |
-| 상태 | `verified`, sending enabled |
-| region | `ap-northeast-1` |
-| 검증된 레코드 | DKIM(TXT `resend._domainkey`), SPF(MX·TXT `send`) |
+| 제공자에 등록된 도메인 | `tomverse.app`, `mail.tomverse.app` |
+| `mail.tomverse.app` 상태 | `verified`, sending enabled (2026-08-21 등록·검증) |
+| `mail.tomverse.app` 검증된 레코드 | DKIM(TXT `resend._domainkey.mail`), SPF(MX·TXT `send.mail`) |
+| region | 둘 다 `ap-northeast-1` |
 | DMARC | **제공자 레코드 집합에 없음.** zone에서 따로 확인해야 합니다 |
-| transactional From | `hello@tomverse.app` (= 등록 가능 도메인 자체) |
+| transactional From | `hello@mail.tomverse.app` (2026-08-21 전환) |
 | marketing From | 미설정 |
-
-즉 **§14.1의 목표 상태가 아닙니다.** 지금은 발송 도메인이 등록 가능 도메인
-하나뿐이고, 그 위에서는 스트림별 평판도 `sp=` 정책도 나눌 수 없습니다.
+| DNS | Cloudflare |
 
 `region`이 `ap-northeast-1`이라는 사실은 §5.3.1과 직접 연결됩니다. 제공자의
 suppression은 **같은 region의 계정 전체**에 적용되므로, marketing을 분리하려면
-도메인이 아니라 계정 또는 region을 나눠야 합니다(A18).
+도메인이 아니라 계정 또는 region을 나눠야 합니다(A18). `mail.tomverse.app`을
+같은 region에 만든 것은 그 결정을 이 작업에서 우연히 내리지 않기 위해서입니다.
 
----
+### 1.1 아직 확인되지 않은 것
+
+이 표에 없는 것은 모릅니다. 확인한 것과 보고받은 것을 섞지 않기 위해 나눠 적습니다.
+
+| 항목 | 상태 |
+|---|---|
+| DKIM·SPF 검증 | **확인함.** 제공자 API가 `verified`를 반환 |
+| DMARC 레코드 2건 | **미확인.** 입력했다고 보고받았으나 이 저장소에서 조회할 수단이 없습니다 |
+| DMARC 리포트 수신 | **미확인.** `rua` 주소가 실제로 받는지 확인되지 않았습니다 |
+| 새 도메인 첫 발송 | **미관측.** 전환 후 발송 기록이 아직 없습니다 |
+
+DMARC는 `dig TXT _dmarc.mail.tomverse.app`과 `dig TXT _dmarc.tomverse.app`으로
+사람이 확인합니다. `npm run report:email-domains`도 Admin Console도 이것을
+확인해 주지 않습니다 — 제공자가 그 레코드를 발급하지도 보고하지도 않기
+때문입니다.
 
 ## 2. 목표 상태
 
@@ -42,6 +55,38 @@ suppression은 **같은 region의 계정 전체**에 적용되므로, marketing�
 ---
 
 ## 3. transactional 도메인 이전 (§17.3 1~4단계)
+
+**2026-08-21에 3.1~3.3과 3.5를 실행했습니다.** 절차는 아래에 그대로 남겨 둡니다 —
+`news.tomverse.app`에서 다시 쓰이고, 무엇이 왜 필요한지가 기록이기 때문입니다.
+실제로 밟은 순서와 남은 것은 3.0에 적습니다.
+
+### 3.0 실행 기록 (2026-08-21)
+
+| 단계 | 상태 |
+|---|---|
+| 3.1 도메인 등록 | 완료. `ap-northeast-1`, Return-Path `send`, 추적 off |
+| 3.2 DMARC 레코드 | 입력했다고 보고받음. **이 저장소에서 미확인**(1.1) |
+| 3.3 DKIM·SPF 검증 | 완료. 세 레코드 모두 `verified` |
+| 3.4 2주 관측 | **아직 하지 않음** |
+| 3.5 From 전환 | 완료. `hello@mail.tomverse.app` |
+| 3.6 정책 강화 | 아직 |
+
+**3.4와 3.5의 순서가 계약과 다릅니다.** §17.3은 2주 관측 뒤에 전환하고, 전환 전에
+기존 도메인에서 안내 메일을 한 번 보내라고 합니다. 실제로는 전환이 먼저
+일어났고, 발송 로그에 안내 메일은 없습니다.
+
+이것은 승인이 아니라 기록입니다. 나중에 쓰는 문장이 미리 받지 않은 승인을 만들어
+낼 수는 없습니다. 다만 이 순서가 무엇을 바꿨는지는 적어 둘 수 있습니다.
+
+- **관측이 사전이 아니라 사후가 됐습니다.** `p=none`이므로 수신자가 메일을 버리지는
+  않습니다. 대신 정렬이 깨져 있었다면 그 사실을 리포트가 아니라 **도달률 하락으로**
+  먼저 알게 됩니다. 그래서 첫 리포트를 평소보다 빨리, 그리고 반드시 봐야 합니다.
+- **필터를 잃은 사용자에게 예고가 없었습니다.** `hello@tomverse.app`으로 규칙을
+  만들어 둔 사람은 로그인 코드가 규칙에 안 걸리는 상태를 예고 없이 만나게 됩니다.
+  사후 안내라도 보낼지는 사람의 판단이고, 보낸다면 **새 도메인에서** 보내는 것이
+  맞습니다 — 기존 도메인에서 보내면 이미 바뀐 사실과 어긋납니다.
+- **되돌리기는 환경변수 한 줄입니다.** `TRANSACTIONAL_EMAIL_FROM`을 되돌리면 다음
+  발송부터 이전 도메인으로 돌아갑니다. 새 도메인은 verified 상태로 남습니다.
 
 ### 3.1 도메인 등록
 
@@ -100,7 +145,17 @@ _dmarc.mail.tomverse.app`으로 직접 봅니다.
 - 우리가 보낸 메일이 SPF·DKIM 양쪽에서 **정렬(alignment)**되는가
 - 우리가 모르는 발송원이 이 도메인을 쓰고 있지 않은가
 
-### 3.5 From 주소 전환
+**이번에는 이 관측이 실트래픽 위에서 돌아갑니다**(3.0). 전환이 먼저 일어났으므로
+관측 기간에 나가는 메일이 곧 사용자에게 가는 메일입니다. 두 가지가 달라집니다.
+
+1. **첫 리포트를 기다리지 말고 확인합니다.** DMARC 리포트는 보통 하루 단위로 오고,
+   `rua` 주소가 받지 못하면 아무것도 오지 않은 것과 구분되지 않습니다. 24시간 안에
+   한 통도 없으면 그 자체가 조사 대상입니다 — 정렬이 완벽해서 조용한 것이 아닙니다.
+2. **도달률을 함께 봅니다.** `EmailDelivery`의 bounce·complaint 비율(§14.5)이
+   전환 전후로 움직이는지 봅니다. 새 도메인은 평판 이력이 없으므로 초기에 약간의
+   지연이나 스팸함 분류가 있을 수 있고, 그것과 정렬 오류는 리포트로만 구분됩니다.
+
+### 3.5 From 주소 전환 — 2026-08-21 완료
 
 **사용자에게 미리 알립니다.** From 주소가 바뀌면 기존 도메인 주소로 만들어 둔
 필터·규칙이 전부 무효가 됩니다. §17.3 3단계가 요구하는 안내 메일 1회를 **기존
@@ -116,7 +171,10 @@ TRANSACTIONAL_EMAIL_FROM=Tomverse Insight <hello@mail.tomverse.app>
 않습니다 — 코드는 이미 이 변수를 읽습니다. 바꾸는 즉시 다음 발송부터 적용됩니다.
 
 전환 후 `/api/ready`의 `emailSendingIdentity` 경고
-(`TRANSACTIONAL_ON_ROOT_DOMAIN`)가 사라집니다. 그 경고가 이 작업의 완료 신호입니다.
+(`TRANSACTIONAL_ON_ROOT_DOMAIN`)가 사라집니다. 그 경고가 이 작업의 완료 신호이며,
+**전환이 실제로 반영됐는지 확인하는 방법이기도 합니다** — 환경변수를 바꿨다고
+믿는 것과 배포된 프로세스가 그 값을 읽는 것은 다른 사실입니다. 경고가 남아 있으면
+값이 반영되지 않은 것입니다.
 
 ### 3.6 정책 강화 (Phase 2)
 
@@ -157,7 +215,7 @@ MARKETING_EMAIL_FROM=Tomverse <news@news.tomverse.app>
 규모와 무관하게 처음부터 충족합니다.
 
 - [x] SPF + DKIM — 제공자 발급, 위 3.1
-- [ ] DMARC 정렬 — 3.2
+- [~] DMARC — 레코드는 입력했다고 보고받았으나 미확인(1.1), 정렬 관측은 아직(3.4)
 - [x] marketing One-Click unsubscribe (RFC 8058) — `lib/emailUnsubscribeHeaders.ts`
 - [x] 스팸 신고율 감시 — `docs/policy/email-notifications.md` §14.5
 - [x] TLS 전송 — 제공자 기본
