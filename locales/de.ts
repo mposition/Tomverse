@@ -1603,6 +1603,17 @@ export const de = {
             cancelled: "Abgebrochen",
         },
     },
+    unsubscribe: {
+        title: "Diese E-Mails abbestellen",
+        body: "Sie können diese Art von E-Mail von Tomverse abbestellen. Sicherheitshinweise und Zahlungsbelege erhalten Sie weiterhin -- sie gehören zu Ihrem Konto und lassen sich nicht abschalten.",
+        confirmButton: "Abbestellen",
+        allButton: "Alle Marketing-E-Mails abbestellen",
+        doneTitle: "Erledigt",
+        doneBody: "Sie erhalten diese Art von E-Mail nicht mehr.",
+        doneAllBody: "Sie erhalten keine Marketing-E-Mails von Tomverse mehr.",
+        invalidBody: "Dieser Link ist nicht mehr gültig. Öffnen Sie die E-Mail-Einstellungen in Ihrem Konto, um Ihre Auswahl zu ändern.",
+        stillReceiveNote: "Sicherheitshinweise und Zahlungsbelege sind davon nicht betroffen.",
+    },
     privacyPolicy: {
         title: "Datenschutzerklärung",
         effective: "Gültig ab: 16. Juli 2026",

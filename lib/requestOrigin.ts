@@ -14,6 +14,12 @@ const EXEMPT_MUTATION_PATHS = [
   // Resend delivery, bounce and complaint events, verified by their Svix
   // signature in the route itself (lib/svixSignature.ts).
   "/api/webhooks/",
+  // RFC 8058 one-click unsubscribe. The mailbox provider POSTs this on the
+  // recipient's behalf and sends no Origin header, so the check would reject
+  // every one -- and a one-click unsubscribe that silently fails is what the
+  // spam button is for. Authenticated by the token instead, which can only
+  // ever switch one purpose off for one subject (lib/unsubscribeToken.ts).
+  "/api/unsubscribe",
 ];
 
 const parseOrigin = (value: string | null) => {

@@ -1600,6 +1600,17 @@ export const es = {
             cancelled: "Cancelada",
         },
     },
+    unsubscribe: {
+        title: "Dejar de recibir este correo",
+        body: "Puedes dejar de recibir este tipo de correo de Tomverse. Seguirás recibiendo alertas de seguridad y recibos de facturación: forman parte de tu cuenta y no se pueden desactivar.",
+        confirmButton: "Darse de baja",
+        allButton: "Dejar de recibir todo el correo de marketing",
+        doneTitle: "Listo",
+        doneBody: "No volverás a recibir este tipo de correo.",
+        doneAllBody: "No volverás a recibir correo de marketing de Tomverse.",
+        invalidBody: "Este enlace ya no es válido. Abre los ajustes de correo desde tu cuenta para cambiar lo que recibes.",
+        stillReceiveNote: "Las alertas de seguridad y los recibos de facturación no se ven afectados.",
+    },
     privacyPolicy: {
         title: "Política de privacidad",
         effective: "Vigente desde: 16 de julio de 2026",

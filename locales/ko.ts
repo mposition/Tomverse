@@ -1595,6 +1595,17 @@ export const ko = {
             cancelled: "취소됨",
         },
     },
+    unsubscribe: {
+        title: "이 이메일 수신 중단",
+        body: "Tomverse에서 이 종류의 이메일을 더 이상 받지 않도록 설정합니다. 보안 알림과 결제 영수증은 계정에 필요한 안내라 계속 발송되며 끌 수 없습니다.",
+        confirmButton: "수신 거부",
+        allButton: "모든 마케팅 이메일 수신 거부",
+        doneTitle: "완료했습니다",
+        doneBody: "이 종류의 이메일은 더 이상 보내지 않습니다.",
+        doneAllBody: "Tomverse의 마케팅 이메일을 더 이상 보내지 않습니다.",
+        invalidBody: "이 링크는 더 이상 유효하지 않습니다. 계정에서 이메일 설정을 열어 수신 항목을 바꿀 수 있습니다.",
+        stillReceiveNote: "보안 알림과 결제 영수증은 영향을 받지 않습니다.",
+    },
     privacyPolicy: {
         title: "개인정보 처리방침",
         effective: "시행일: 2026년 7월 16일",

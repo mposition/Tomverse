@@ -1600,6 +1600,17 @@ export const en = {
             cancelled: "Cancelled",
         },
     },
+    unsubscribe: {
+        title: "Stop receiving this email",
+        body: "You can stop receiving this kind of email from Tomverse. You will still get security alerts and billing receipts -- those are part of your account and cannot be switched off.",
+        confirmButton: "Unsubscribe",
+        allButton: "Stop all marketing email",
+        doneTitle: "Done",
+        doneBody: "You will not receive this kind of email again.",
+        doneAllBody: "You will not receive marketing email from Tomverse again.",
+        invalidBody: "This link is no longer valid. Open your email settings from your account to change what you receive.",
+        stillReceiveNote: "Security alerts and billing receipts are not affected.",
+    },
     privacyPolicy: {
         title: "Privacy Policy",
         effective: "Effective: July 16, 2026",

@@ -89,7 +89,17 @@ export const parseRetryAfterMs = (
  * it is the wire, and the lanes above it hold the rules.
  */
 export async function deliverEmailOnce(
-  input: SendEmailInput & { from?: string; timeoutMs?: number }
+  input: SendEmailInput & {
+    from?: string;
+    timeoutMs?: number;
+    /**
+     * Extra message headers. Only `List-Unsubscribe` and its one-click
+     * companion use this today, and only on marketing mail -- §5.1 C10 forbids
+     * them on transactional mail, where the link is a button that locks people
+     * out of their own account.
+     */
+    headers?: Record<string, string>;
+  }
 ): Promise<ProviderSendResult> {
   const resendApiKey = process.env.RESEND_API_KEY;
   if (!resendApiKey) {
@@ -116,6 +126,9 @@ export async function deliverEmailOnce(
         subject: input.subject,
         html: input.html,
         text: input.text,
+        ...(input.headers && Object.keys(input.headers).length > 0
+          ? { headers: input.headers }
+          : {}),
       }),
       ...(input.timeoutMs
         ? { signal: AbortSignal.timeout(input.timeoutMs) }

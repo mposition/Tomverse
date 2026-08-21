@@ -125,6 +125,16 @@ export function adminEnvironmentChecks(): AdminEnvCheck[] {
         "until it is set, so bounced addresses keep being sent to.",
     },
     {
+      name: "EMAIL_UNSUBSCRIBE_KEYS",
+      configured: isConfigured(process.env.EMAIL_UNSUBSCRIBE_KEYS),
+      description:
+        "Keys for unsubscribe links, as version:secret pairs. Marketing mail " +
+        "refuses to send without one. Old versions must stay listed for as " +
+        "long as mail carrying them is in the wild -- dropping a version does " +
+        "not invalidate those links, it breaks them, and a broken unsubscribe " +
+        "link's alternative is the spam button.",
+    },
+    {
       name: "EMAIL_SNAPSHOT_KEYS",
       configured: isConfigured(process.env.EMAIL_SNAPSHOT_KEYS),
       description:

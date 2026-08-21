@@ -25,6 +25,7 @@ import {
     isValidIanaTimeZone,
     normalizeIanaTimeZone,
 } from "@/lib/userTimeZone";
+import { ensureDefaultPreferences } from "@/lib/emailPreferences";
 import { ACCOUNT_WELCOME_TEMPLATE } from "@/lib/emailTemplateDefinitions";
 import { enqueueStandardEmail } from "@/lib/standardEmailLane";
 import { z } from "zod";
@@ -119,6 +120,11 @@ export async function GET(req: Request) {
                 }
             });
             isNewAccount = true;
+            // Everything consent-based starts off. No consent record is written
+            // for a default: nobody agreed to anything at signup, and a
+            // `granted` row for a default would be a false statement in the one
+            // table whose purpose is to be true about consent.
+            await ensureDefaultPreferences(userId);
             // Enqueued rather than sent: a provider blip used to lose the
             // welcome email permanently, and the report of that went to a
             // console line nobody reads.

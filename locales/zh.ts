@@ -1581,6 +1581,17 @@ export const zh = {
             cancelled: "已取消",
         },
     },
+    unsubscribe: {
+        title: "停止接收此类邮件",
+        body: "你可以停止接收 Tomverse 的此类邮件。安全提醒和账单收据仍会发送，它们属于账户必要通知，无法关闭。",
+        confirmButton: "退订",
+        allButton: "退订所有营销邮件",
+        doneTitle: "已完成",
+        doneBody: "我们不会再向你发送此类邮件。",
+        doneAllBody: "我们不会再向你发送 Tomverse 的营销邮件。",
+        invalidBody: "此链接已失效。请在账户中打开邮件设置来更改接收内容。",
+        stillReceiveNote: "安全提醒和账单收据不受影响。",
+    },
     privacyPolicy: {
         title: "隐私政策",
         effective: "生效日期：2026 年 7 月 16 日",

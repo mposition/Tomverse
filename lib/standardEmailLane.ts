@@ -20,6 +20,8 @@ import {
   reportProviderSuppression,
   suppressionCheck,
 } from "@/lib/emailSuppression";
+import { unsubscribeHeaders } from "@/lib/emailUnsubscribeHeaders";
+import { isEmailPurpose } from "@/lib/emailPreferenceCore";
 import {
   EMAIL_AUDIT_HASH_KEY_VERSION,
   renderedBodyHash,
@@ -211,12 +213,15 @@ export type StandardDrainResult = {
 
 type ClaimedDelivery = {
   id: string;
+  userId: string | null;
   emailAddress: string;
   language: string;
   attempts: number;
   idempotencyKey: string;
   renderDataSnapshot: unknown;
-  templateVersion: { template: { key: string; classification: string } };
+  templateVersion: {
+    template: { key: string; classification: string; requiresUnsubscribe: boolean };
+  };
 };
 
 /**
@@ -256,13 +261,18 @@ const claimDueDelivery = async (now: Date): Promise<ClaimedDelivery | null> => {
     where: { id: claimedId },
     select: {
       id: true,
+      userId: true,
       emailAddress: true,
       language: true,
       attempts: true,
       idempotencyKey: true,
       renderDataSnapshot: true,
       templateVersion: {
-        select: { template: { select: { key: true, classification: true } } },
+        select: {
+          template: {
+            select: { key: true, classification: true, requiresUnsubscribe: true },
+          },
+        },
       },
     },
   }) as Promise<ClaimedDelivery | null>;
@@ -415,14 +425,55 @@ const sendClaimedDelivery = async (delivery: ClaimedDelivery, now: Date) => {
     });
   }
 
+  // A preference is a different question from a suppression: suppression is
+  // about the mailbox, a preference is about what this person asked for. Both
+  // are checked at send time, because a message queued yesterday may be for a
+  // purpose switched off this morning.
+  if (definition.purpose && delivery.userId && isEmailPurpose(definition.purpose)) {
+    const preference = await prisma.emailPreference.findUnique({
+      where: {
+        userId_purpose: { userId: delivery.userId, purpose: definition.purpose },
+      },
+      select: { enabled: true },
+    });
+    if (preference && !preference.enabled) {
+      await prisma.emailDelivery.update({
+        where: { id: delivery.id },
+        data: {
+          status: "skipped",
+          skipReason: "no_consent",
+          attempts: delivery.attempts,
+          nextAttemptAt: null,
+          claimedAt: null,
+        },
+      });
+      return "suppressed" as const;
+    }
+  }
+
   const payload = decryptSnapshot(delivery.renderDataSnapshot, snapshotKeyring());
   const rendered = definition.render(payload, delivery.language);
   const attempts = delivery.attempts + 1;
+
+  // Only marketing carries these, and the template's own flag decides -- which
+  // the database holds as a CHECK against the classification, so a message
+  // cannot acquire an unsubscribe header by being sent from the wrong place.
+  const headers = unsubscribeHeaders({
+    requiresUnsubscribe: delivery.templateVersion.template.requiresUnsubscribe,
+    userId: delivery.userId,
+    purpose: definition.purpose,
+    deliveryId: delivery.id,
+    appUrl:
+      process.env.PUBLIC_APP_URL ||
+      process.env.NEXT_PUBLIC_APP_URL ||
+      "https://tomverse.app",
+  });
 
   const response = await deliverEmailOnce({
     to: delivery.emailAddress,
     ...rendered,
     idempotencyKey: delivery.idempotencyKey,
+    ...(Object.keys(headers).length > 0 ? { headers } : {}),
   });
 
   const outcome: ProviderSendOutcome = response.ok

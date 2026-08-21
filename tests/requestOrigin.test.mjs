@@ -101,6 +101,11 @@ test("provider webhooks are exempt from the mutation-origin check", () => {
   // carry its own proof of origin. This one is verified by its Svix signature.
   assert.equal(requiresMutationOriginCheck("POST", "/api/webhooks/anything"), false);
 
+  // RFC 8058 one-click unsubscribe is the same shape: the mailbox provider
+  // POSTs on the recipient's behalf and sends no Origin. A one-click
+  // unsubscribe that silently fails is what the spam button is for.
+  assert.equal(requiresMutationOriginCheck("POST", "/api/unsubscribe"), false);
+
   // Nothing outside it gets in.
   assert.equal(requiresMutationOriginCheck("POST", "/api/webhook"), true);
   assert.equal(requiresMutationOriginCheck("POST", "/api/user/settings"), true);
