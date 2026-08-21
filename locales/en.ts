@@ -235,6 +235,7 @@ export const en = {
         undo: "Undo",
         reportError: "Report error",
         copyResponse: "Copy response",
+        copyCode: "Copy code",
         responseCopied: "Copied",
         tryAnotherModelHint: "You can also select another model and try again.",
         guestQuotaLoginBenefitHint: "Logging in gives you a much higher daily limit, and keeps this conversation on your account.",

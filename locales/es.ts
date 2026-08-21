@@ -244,6 +244,7 @@ export const es = {
         undo: "Deshacer",
         reportError: "Reportar error",
         copyResponse: "Copiar respuesta",
+        copyCode: "Copiar código",
         responseCopied: "Copiado",
         tryAnotherModelHint: "También puedes seleccionar otro modelo e intentarlo de nuevo.",
         guestQuotaLoginBenefitHint: "Al iniciar sesión obtienes un límite diario mucho mayor y esta conversación se guarda en tu cuenta.",

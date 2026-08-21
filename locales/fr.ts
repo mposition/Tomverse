@@ -244,6 +244,7 @@ export const fr = {
         undo: "Annuler",
         reportError: "Signaler l'erreur",
         copyResponse: "Copier la réponse",
+        copyCode: "Copier le code",
         responseCopied: "Copié",
         tryAnotherModelHint: "Vous pouvez aussi sélectionner un autre modèle et réessayer.",
         guestQuotaLoginBenefitHint: "En vous connectant, vous obtenez une limite quotidienne bien plus élevée, et cette conversation est enregistrée sur votre compte.",

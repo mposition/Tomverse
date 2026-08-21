@@ -244,6 +244,7 @@ export const pt = {
         undo: "Desfazer",
         reportError: "Reportar erro",
         copyResponse: "Copiar resposta",
+        copyCode: "Copiar código",
         responseCopied: "Copiado",
         tryAnotherModelHint: "Você também pode selecionar outro modelo e tentar novamente.",
         guestQuotaLoginBenefitHint: "Ao entrar na sua conta, você recebe um limite diário muito maior, e esta conversa é salva na sua conta.",
