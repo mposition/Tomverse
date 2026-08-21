@@ -1,7 +1,7 @@
 ---
 record: staging-verification
 checklist: docs/ops/assistant-profile-staging-checklist.md
-templateRevision: 2026-08-20a
+templateRevision: 2026-08-21a
 environment:
 deploySha:
 startedAtUtc:
@@ -23,7 +23,7 @@ digest:
 | 배포 SHA (전체 40자리) | |
 | production SHA와 동일한가 | |
 | 다르다면 profile 표면 diff 결과 | |
-| template revision | 2026-08-20a |
+| template revision | 2026-08-21a |
 | 시작 (UTC) | |
 | 종료 (UTC) | |
 | 실행자 | |
