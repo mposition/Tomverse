@@ -1,21 +1,27 @@
 import { test, expect, type Page } from "@playwright/test";
-import { mockAuthenticatedApi, prepareGuestPage } from "./support/app-fixtures";
+import {
+  expectNoHorizontalOverflow,
+  mockAuthenticatedApi,
+  prepareGuestPage,
+} from "./support/app-fixtures";
 
 /**
  * The settings information architecture: how "Import from another AI service"
- * and "Account memory" are presented in the settings list, and how their
- * detail pages navigate back up.
+ * and "Account memory" are presented in the settings list, how their detail
+ * pages navigate back up, and how a visitor leaves settings altogether.
  *
- * Two claims are under test and neither is shell-specific, so every assertion
+ * Three claims are under test and none is shell-specific, so every assertion
  * runs on the desktop and mobile projects alike:
  *
  *   1. the two features sit under ONE group with one row each -- separate
  *      destinations, separate state, but not two headline cards competing on
  *      a tab that has five other sections;
  *   2. their detail pages go back to *settings*, by name, and get there from a
- *      cold URL with no history at all. Settings is a closable panel rather
- *      than a route, so leaving it entirely stays the panel's close action:
- *      the detail pages must not grow a second, chat-bound link.
+ *      cold URL with no history at all;
+ *   3. every settings screen, at every depth, also offers one click out to the
+ *      chat. That is a second control, not a replacement: the hierarchical
+ *      link still goes one level up, and the exit still goes all the way out,
+ *      and neither ever answers for the other.
  *
  * Nothing here depends on the browser Back button, which is deliberately
  * untouched by this navigation.
@@ -26,6 +32,9 @@ const json = (body: unknown) => ({
   contentType: "application/json",
   body: JSON.stringify(body),
 });
+
+/** Mirrors SETTINGS_RETURN_TO_CHAT_TEST_ID in lib/settingsNavigation.ts. */
+const RETURN_TO_CHAT = "settings-return-to-chat";
 
 const isMobileViewport = (page: Page) =>
   (page.viewportSize()?.width ?? 1920) < 768;
@@ -289,6 +298,14 @@ test.describe("settings information architecture", () => {
         // goes up to; a bare `/chat` would be the chat itself.
         expect(href === "/chat").toBe(false);
       }
+
+      // The way out of settings is a separate control in the route shell, so
+      // it must not have leaked into this nav or borrowed its wording.
+      await expect(nav.getByTestId(RETURN_TO_CHAT)).toHaveCount(0);
+      await expect(page.getByTestId(RETURN_TO_CHAT)).toHaveAttribute(
+        "href",
+        "/chat"
+      );
     });
 
     test(`${detail.name} restores the settings row it was opened from`, async ({
@@ -485,5 +502,279 @@ test.describe("settings information architecture", () => {
     await expect(
       page.getByTestId("settings-assistants-tab").getByText("프로필")
     ).toHaveCount(0);
+  });
+});
+
+/**
+ * Every settings depth, and the one control that leaves them all.
+ *
+ * The exit is route-shell furniture rather than page content, so these cases
+ * deliberately do not depend on what each page's own API answers: a 404'd
+ * import is still a visitor standing three segments deep in settings, and the
+ * way out has to be there for them too. What each case does check is that the
+ * page's *own* upward link is still present and still points one level up --
+ * the exit was added beside the hierarchy, not on top of it.
+ */
+
+/** Nothing here has a body worth seeding; what matters is the depth. */
+async function mockDepthApis(page: Page) {
+  await mockSettingsEntryApis(page);
+  await page.route(
+    (url) => url.pathname === "/api/assistant-profiles",
+    (route) =>
+      route.fulfill(
+        json({ profiles: [], limits: { maxProfilesPerAccount: 20 } })
+      )
+  );
+  for (const missing of [
+    /^\/api\/assistant-profiles\/[^/]+$/,
+    /^\/api\/imports\/external\/[^/]+$/,
+    /^\/api\/external-conversations\/[^/]+$/,
+    /^\/api\/memories\/extraction-runs\/[^/]+$/,
+  ]) {
+    await page.route(
+      (url) => missing.test(url.pathname),
+      (route) =>
+        route.fulfill({
+          status: 404,
+          contentType: "application/json",
+          body: JSON.stringify({ code: "NOT_FOUND" }),
+        })
+    );
+  }
+}
+
+async function gotoSettingsDepth(page: Page, path: string) {
+  // Cold, directly opened URL every time: no referrer, no prior page, no
+  // history entry to fall back on.
+  await prepareGuestPage(page, "ko");
+  await mockAuthenticatedApi(page);
+  await mockDepthApis(page);
+  await page.goto(path);
+}
+
+const SETTINGS_DEPTHS = [
+  {
+    name: "import list",
+    path: "/settings/imports",
+    upTestId: "external-import-back",
+    upHref: "/chat?settings=data&settingsSection=external-import",
+  },
+  {
+    name: "import wizard",
+    path: "/settings/imports/new",
+    upTestId: "external-import-back",
+    upHref: "/settings/imports",
+  },
+  {
+    name: "one import",
+    path: "/settings/imports/imp-qa",
+    upTestId: "external-import-detail-back",
+    upHref: "/settings/imports",
+  },
+  {
+    name: "an imported conversation",
+    path: "/settings/imports/conversations/conv-qa",
+    upTestId: "external-viewer-back",
+    upHref: "/settings/imports",
+  },
+  {
+    name: "memory settings",
+    path: "/settings/memory",
+    upTestId: "memory-back",
+    upHref: "/chat?settings=data&settingsSection=memory",
+  },
+  {
+    name: "one extraction run",
+    path: "/settings/memory/runs/run-qa",
+    upTestId: "memory-extraction-run-back",
+    upHref: "/settings/memory",
+  },
+  {
+    name: "assistant profiles",
+    path: "/settings/assistants",
+    upTestId: "assistants-back-to-settings",
+    upHref: "/chat?settings=data&settingsSection=assistants",
+  },
+  {
+    name: "a new assistant profile",
+    path: "/settings/assistants/new",
+    upTestId: "assistants-back-to-settings",
+    upHref: "/chat?settings=data&settingsSection=assistants",
+  },
+  {
+    name: "one assistant profile",
+    path: "/settings/assistants/p-qa",
+    upTestId: "assistants-back-to-settings",
+    upHref: "/chat?settings=data&settingsSection=assistants",
+  },
+  {
+    name: "account data",
+    path: "/settings/data",
+    upTestId: "account-data-back",
+    upHref: "/chat?settings=data&settingsSection=account-data",
+  },
+] as const;
+
+test.describe("returning to the chat from settings", () => {
+  for (const depth of SETTINGS_DEPTHS) {
+    test(`${depth.name} offers the exit without losing its own back link @ui-risk`, async ({
+      page,
+    }) => {
+      await gotoSettingsDepth(page, depth.path);
+
+      const exit = page.getByTestId(RETURN_TO_CHAT);
+      await expect(exit).toBeVisible();
+      // Exactly /chat. A settings deep link here would reopen the panel
+      // the visitor just asked to leave.
+      await expect(exit).toHaveAttribute("href", "/chat");
+      // The visible label shortens on a narrow viewport; the name does
+      // not, so a screen reader hears the same control at every width.
+      await expect(exit).toHaveAccessibleName("대화로 돌아가기");
+
+      // The hierarchy is untouched: this page's own link still goes one
+      // level up, to the place it went before the exit existed.
+      const up = page.getByTestId(depth.upTestId);
+      await expect(up).toBeVisible();
+      await expect(up).toHaveAttribute("href", depth.upHref);
+
+      // Two different controls, and they never occupy the same space.
+      const exitBox = await exit.boundingBox();
+      const upBox = await up.boundingBox();
+      expect(exitBox).not.toBeNull();
+      expect(upBox).not.toBeNull();
+      const overlaps =
+        exitBox!.x < upBox!.x + upBox!.width &&
+        upBox!.x < exitBox!.x + exitBox!.width &&
+        exitBox!.y < upBox!.y + upBox!.height &&
+        upBox!.y < exitBox!.y + exitBox!.height;
+      expect(overlaps).toBe(false);
+    });
+
+    test(`${depth.name} reaches the chat in one click`, async ({ page }) => {
+      await gotoSettingsDepth(page, depth.path);
+
+      await page.getByTestId(RETURN_TO_CHAT).click();
+
+      await expect(page).toHaveURL(/\/chat$/);
+      await expect(page.getByTestId("chat-input")).toBeVisible();
+      // Out of settings, not back into it: the panel stays closed.
+      await expect(settingsDialog(page)).toHaveCount(0);
+    });
+  }
+
+  test("the exit is reachable from the keyboard @ui-risk", async ({ page }) => {
+    await gotoSettingsDepth(page, "/settings/imports/conversations/conv-qa");
+
+    const exit = page.getByTestId(RETURN_TO_CHAT);
+    await exit.focus();
+    await expect(exit).toBeFocused();
+    // A visible ring, not just a focused element -- `focus-visible` is
+    // what a keyboard user actually sees.
+    const outline = await exit.evaluate((node) => {
+      const style = getComputedStyle(node);
+      return `${style.outlineStyle} ${style.boxShadow}`;
+    });
+    expect(outline).not.toBe("none none");
+
+    await page.keyboard.press("Enter");
+    await expect(page).toHaveURL(/\/chat$/);
+  });
+
+  test("the exit stays reachable without scrolling back up", async ({
+    page,
+  }) => {
+    // The memory page is long enough to bury a top-of-page control, which
+    // is exactly the case the sticky strip exists for.
+    await gotoSettingsDepth(page, "/settings/memory");
+    await expect(page.getByTestId("memory-settings-card")).toBeVisible();
+
+    await page.evaluate(() => window.scrollTo(0, 2000));
+    const exit = page.getByTestId(RETURN_TO_CHAT);
+    await expect(exit).toBeInViewport();
+
+    const box = await exit.boundingBox();
+    expect(box).not.toBeNull();
+    expect(box!.height).toBeGreaterThanOrEqual(44);
+    expect(box!.width).toBeGreaterThanOrEqual(44);
+  });
+
+  test("a long label at 320px wraps instead of clipping or overlapping @ui-risk", async ({
+    page,
+  }) => {
+    await gotoSettingsDepth(page, "/settings/memory");
+    await page.setViewportSize({ width: 320, height: 640 });
+
+    // The widest phrasing any shipped locale gives this control, forced on
+    // at the narrowest supported width and at 200% text scaling. The
+    // rendering has to survive both without the label being cut off or
+    // pushed over the page's own back link.
+    await page.getByTestId(RETURN_TO_CHAT).evaluate((node) => {
+      for (const span of node.querySelectorAll("span")) {
+        span.classList.remove("sm:hidden", "hidden", "sm:inline");
+        span.textContent = "Zurück zum Chat";
+      }
+      document.documentElement.style.fontSize = "32px";
+    });
+
+    await expectNoHorizontalOverflow(page);
+
+    const exit = page.getByTestId(RETURN_TO_CHAT);
+    const clipped = await exit.evaluate(
+      (node) => node.scrollWidth > node.clientWidth + 1
+    );
+    expect(clipped).toBe(false);
+
+    const exitBox = await exit.boundingBox();
+    const upBox = await page.getByTestId("memory-back").boundingBox();
+    expect(exitBox).not.toBeNull();
+    expect(upBox).not.toBeNull();
+    expect(exitBox!.x).toBeGreaterThanOrEqual(0);
+    expect(exitBox!.x + exitBox!.width).toBeLessThanOrEqual(321);
+    // Still two separate rows, so the wrap cannot have run one control
+    // into the other.
+    expect(exitBox!.y + exitBox!.height).toBeLessThanOrEqual(upBox!.y + 1);
+  });
+
+  test("returning restores this tab's active conversation", async ({
+    page,
+  }) => {
+    await prepareGuestPage(page, "ko");
+    await mockAuthenticatedApi(page, {
+      selectedModels: ["gpt-5-4-mini"],
+      messages: [
+        { id: "seed-user", role: "user", content: "복귀 확인용 질문" },
+        {
+          id: "seed-answer",
+          role: "assistant",
+          content: "복귀 확인용 답변",
+          modelId: "gpt-5-4-mini",
+        },
+      ],
+    });
+    await mockDepthApis(page);
+    // The tab was already on a conversation when settings was opened.
+    await page.addInitScript(() => {
+      window.sessionStorage.setItem(
+        "tomverse_active_chat_id",
+        "qa-conversation"
+      );
+    });
+
+    await page.goto("/settings/memory");
+    await page.getByTestId(RETURN_TO_CHAT).click();
+    await expect(page).toHaveURL(/\/chat$/);
+
+    // The existing restore path runs untouched: the same conversation is
+    // reopened rather than a new one created or the selection cleared.
+    await expect(
+      page.getByTestId("chat-message-list").first()
+    ).toContainText("복귀 확인용 답변");
+    await expect(page.getByTestId("chat-empty-state")).toHaveCount(0);
+    await expect(
+      page.evaluate(() =>
+        window.sessionStorage.getItem("tomverse_active_chat_id")
+      )
+    ).resolves.toBe("qa-conversation");
   });
 });

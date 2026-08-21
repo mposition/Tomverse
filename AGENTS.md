@@ -765,8 +765,8 @@ Before changing the Data tab's entries in `AuthButton.tsx`, `lib/settingsNavigat
 
 Non-negotiable requirements:
 
-- Settings is a closable panel, not a route. A detail page navigates up to settings by name (`settingsSectionHref()`), never with `router.back()`, and never grows a second link to the chat — leaving settings entirely is the panel's own close action.
-- "Back to settings" must work from a directly-opened detail-page URL, on every shell and in every sidebar state, and must not disturb the browser's own Back button (the deep link is dropped with `replaceState`, never a pushed entry).
+- Two movements, two controls, both rendered. A detail page navigates *up* to settings by name (`settingsSectionHref()`), never with `router.back()`; leaving settings *entirely* is a separate one-click exit to `/chat` (`settingsExitHref()`, no query string) rendered once by the `/settings` route shell for every screen under it. Neither control is merged into the other, and no detail component renders its own copy of the exit.
+- "Back to settings" and the exit must both work from a directly-opened detail-page URL, on every shell and in every sidebar state, and must not disturb the browser's own Back button (the deep link is dropped with `replaceState`, never a pushed entry). The exit is not an `X`: it names the chat and carries a `MessageSquare`-family icon, with the full phrase as its accessible name at every width.
 - External import and account memory stay separate features with separate detail pages and separate state, presented as separate rows under one group (`settingsNav.dataAndPersonalization`) — not merged, and not two stacked full-width cards.
 - Every entry's action label names its own purpose; a generic label repeated across entries ("Open settings") is a violation. A "back" label must name where the link actually goes, in every locale.
 - Desktop and mobile use the same hierarchy, order and wording; only the desktop breadcrumb trail is extra. Nothing here may be decided by `layout === "mobile"`, a UA string or a device name.

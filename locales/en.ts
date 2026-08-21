@@ -1093,9 +1093,18 @@ export const en = {
     // not a route, and its detail pages navigate back up to it by name --
     // so the group and the trail have to read identically on both shells
     // and in the panel itself (lib/settingsNavigation.ts).
+    //
+    // `backToSettings` and `backToChat` name two different movements and are
+    // never interchanged: the first goes one level up, to the settings list;
+    // the second leaves the settings hierarchy for the chat. `Short` is the
+    // narrow-viewport rendering of the same control -- visible text only, the
+    // accessible name stays the full phrase.
     settingsNav: {
         navLabel: "Settings navigation",
         backToSettings: "Back to settings",
+        backToChat: "Back to chat",
+        backToChatShort: "Chat",
+        exitNavLabel: "Leave settings",
         settings: "Settings",
         dataAndPersonalization: "Data management",
         dataAndPersonalizationDescription: "Imported conversations and account data export. Each is managed on its own page.",

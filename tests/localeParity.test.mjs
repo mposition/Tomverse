@@ -129,11 +129,18 @@ const ENGLISH_STRING_CEILING = {
   // titled "Newsletter", which is the word French and German both use for it.
   // Rendering something else would be a worse translation, not a better one.
   // Chinese, Spanish and Portuguese have their own words and did not move.
+  //
+  // +1 each for de, es, fr and pt from the settings exit control
+  // (settingsNav.backToChatShort). It is the narrow-viewport rendering of
+  // "Back to chat", and all four locales already call the thing itself a
+  // "chat" -- sidebar.newChat is "Neuer Chat", "Nuevo chat", "Nouveau chat",
+  // "Novo chat". Korean and Chinese use their own word (대화 / 对话), so
+  // neither moved. The full phrase this shortens is translated in all six.
   zh: 10,
-  fr: 31,
-  de: 26,
-  es: 17,
-  pt: 15,
+  fr: 32,
+  de: 27,
+  es: 18,
+  pt: 16,
 };
 
 test("every supported language is in the dictionary map", () => {
