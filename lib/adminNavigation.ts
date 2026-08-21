@@ -33,6 +33,7 @@ export type AdminNavGroup = (typeof ADMIN_NAV_GROUPS)[number];
  * operator to stop reading badges.
  */
 export type AdminNavBadgeKey =
+  | "abandonedLegalEmail"
   | "workQueue"
   | "support"
   | "refunds"
@@ -333,6 +334,39 @@ export const ADMIN_NAVIGATION: readonly AdminNavItem[] = [
         id: "deliveries",
         label: "Delivery log",
         description: "What was sent, to where, and whether it landed",
+      },
+    ],
+  },
+  {
+    id: "email-delivery",
+    label: "Email delivery",
+    href: "/admin/email-delivery",
+    description: "What was sent to whom, what was refused, and which addresses are suppressed",
+    group: "Operations",
+    writeRoles: ["owner", "ops"],
+    badge: "abandonedLegalEmail",
+    aliases: [
+      "outbox",
+      "delivery log",
+      "bounce",
+      "complaint",
+      "suppression",
+      "abandoned",
+      "dead letter",
+      "did not arrive",
+      "never received",
+      "email history",
+    ],
+    tabs: [
+      {
+        id: "deliveries",
+        label: "Deliveries",
+        description: "Every message and what became of it",
+      },
+      {
+        id: "suppressions",
+        label: "Suppressions",
+        description: "Addresses we will not mail, and why",
       },
     ],
   },

@@ -228,16 +228,13 @@ test("a badge with no known count renders nothing rather than zero", () => {
 });
 
 test("every badge key a navigation entry declares is one the resolver knows", () => {
-  const counts = {
-    openFeedback: 1,
-    openPrivacyRequests: 1,
-    pendingRefunds: 1,
-    pendingApprovals: 1,
-    activeIncidents: 1,
-    failedWebhooks: 1,
-    delayedJobs: 1,
-    failedAlerts: 1,
-  };
+  // Built from the shape rather than written out. A hand-listed object here
+  // goes stale the moment a count is added, and it fails as "the new badge
+  // resolves to nothing" -- which is what an unregistered badge key looks like
+  // too, so the failure would not say which of the two happened.
+  const counts = Object.fromEntries(
+    Object.keys(EMPTY_ADMIN_NAVIGATION_COUNTS).map((key) => [key, 1])
+  );
   for (const item of ADMIN_NAVIGATION) {
     if (!item.badge) continue;
     assert.notEqual(
