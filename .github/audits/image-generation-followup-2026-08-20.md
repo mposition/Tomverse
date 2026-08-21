@@ -70,18 +70,26 @@ staging에서는 일·월이 같은 값(10,800,000)이라 창이 사실상 하�
 정책 §12의 두 층입니다 — workflow(활성 그룹 수)와 execution(provider별 job 수).
 어느 쪽도 실행하지 않았습니다. 그룹을 여러 개 동시에 제출해야 관측됩니다.
 
-## 5. `orphanedReservations`를 production에서 확인
+## 5. `orphanedReservations` production 확인 — **닫힘 (2026-08-20)**
 
-`#683`(일곱 번째 invariant)은 **develop에만** 있습니다. 다음 develop → main
-승격이 배포되면 production admin 보고서에 `orphaned reservations holding $X`가
-나타납니다.
+`#683`(일곱 번째 invariant)이 `#687` 승격으로 production에 배포됐습니다
+(`c823fc853b8d7b918e5a5d690d67b4623ea6667f`, deployedAt 2026-08-20T04:31:49Z).
 
-**예상은 0입니다.** 활성화 전 기준선에서 예약 총액이 provider별 최악 원가로
-정확히 분해됐기 때문입니다(`openai 2×58,000 + xai 55,000 + fal 87,000 =
-258,000`). 다만 그건 산술이고, count가 그것을 관측으로 바꿉니다.
+```
+/admin/providers?tab=usage-cost  →  Image generation  →  Invariants
+clean
+0 empty conversations · 0 stale (0 stranded mid-settlement) · 0 cleanup backlog
+· 0 thumbnails queued (0 exhausted) · 0 orphaned reservations holding $0.00
+```
 
-0이 아니면 행을 열어 봅니다 — `docs/ops/...2026-08-19__6fb0a9e...md` §발견-4에
-staging에서 같은 일을 한 절차가 있습니다.
+**0입니다.** 활성화 전 기준선에서 예약 총액이 provider별 최악 원가로 정확히
+분해된다는 산술(`openai 2×58,000 + xai 55,000 + fal 87,000 = 258,000`)이 이제
+관측으로 바뀌었습니다. production에는 staging의 blind spot이 없습니다.
+
+**계속 볼 값입니다.** 0이 아니게 되는 순간이 곧 "생성이 중간에 죽고 그 대화가
+지워졌다"는 신호이며, 그때는 행을 열어 봅니다 —
+`docs/ops/image-generation-staging-verification-records/2026-08-19__6fb0a9e7148fc93a15340f1348285bec37639513.md`
+§발견-4에 staging에서 같은 일을 한 SQL과 절차가 있습니다.
 
 ## 6. staging에 남은 116,000 µUSD와 예약 2건
 
@@ -186,11 +194,12 @@ staging 데이터 삭제 (UTC):   ____________________
 ## 다음 세션에 권하는 순서
 
 1. **C·F·G 구획** — 브라우저에서 몇 분, 돈과 무관, 가장 싼 미확인 계약
-2. **`orphanedReservations` production 확인** — 승격 배포 후 숫자 하나 읽기
-3. **모바일 320px** — 이미지 workspace를 실제로 열어보기
-4. **부분 실패 한 건** — staging에서 provider 키를 일시 무효화. 1번과 2번을
+2. **모바일 320px** — 이미지 workspace를 실제로 열어보기
+3. **부분 실패 한 건** — staging에서 provider 키를 일시 무효화. 1번과 2번을
    한 번에 닫습니다
-5. 나머지는 결정이 선행됩니다 (6·10·11·12)
+4. 나머지는 결정이 선행됩니다 (6·10·11·12)
+
+§5는 2026-08-20에 닫혔습니다.
 
 ## Related
 

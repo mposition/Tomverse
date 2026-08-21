@@ -1,6 +1,8 @@
 import { appendFile, mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 
+import { resolveSendingIdentity } from "../lib/emailSendingIdentityCore.ts";
+
 const CHECKS = [
   ["Secret history scan", "SECURITY_AUDIT_GITLEAKS_STATUS"],
   ["Node runtime setup", "SECURITY_AUDIT_SETUP_NODE_STATUS"],
@@ -226,9 +228,20 @@ const sendEmails = async () => {
     throw new Error("Security audit email recipient is not configured.");
   }
   if (!apiKey) throw new Error("RESEND_API_KEY is not configured for security reports.");
-  const from =
-    process.env.SECURITY_AUDIT_EMAIL_FROM?.trim() ||
-    "Tomverse Security <hello@tomverse.app>";
+  // The same resolver every other sender uses, reached through the pure core
+  // rather than lib/emailSendingIdentity.ts: that module is `server-only` and
+  // this script runs in GitHub Actions, outside Next.js. A second copy of the
+  // rules is exactly how this sender stayed on the old domain through the
+  // 2026-08-21 cutover (docs/ops/email-sending-domains.md §1.2).
+  //
+  // Note that `TRANSACTIONAL_EMAIL_FROM` here comes from a GitHub Actions
+  // variable, not from the deployment's environment: `/api/ready` cannot see
+  // this process, which is why the workflow runs its own preflight.
+  const identity = resolveSendingIdentity("transactional", process.env);
+  if (!identity.ok) {
+    throw new Error(`Security audit sender unusable: ${identity.code}`);
+  }
+  const from = identity.from;
   for (const recipient of recipients) {
     const response = await fetch("https://api.resend.com/emails", {
       method: "POST",

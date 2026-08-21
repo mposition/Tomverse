@@ -27,6 +27,12 @@ export const STAGING_VERIFICATION_FEATURES = [
         checklist: "docs/ops/image-generation-staging-checklist.md",
         records: "docs/ops/image-generation-staging-verification-records",
     },
+    {
+        key: "assistant-profile",
+        label: "assistant profiles (release C)",
+        checklist: "docs/ops/assistant-profile-staging-checklist.md",
+        records: "docs/ops/assistant-profile-staging-verification-records",
+    },
 ];
 
 export const stagingVerificationFeature = (key) => {

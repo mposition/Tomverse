@@ -18,11 +18,13 @@ async function attachFromComputer(
   file: { name: string; mimeType: string; buffer: Buffer }
 ) {
   await actionMenuTrigger(page).click();
+  // Two steps now: the root menu asks *whether* to attach, and the source view
+  // asks where from. The chooser opens on the second click, so the wait is set
+  // up around that one -- arming it before the first would time out on a click
+  // that only changes view.
+  await page.getByTestId("tools-attach-row").click();
   const chooserPromise = page.waitForEvent("filechooser");
-  await page
-    .getByRole("dialog", { name: /더 많은 작업|More actions|更多操作/ })
-    .getByRole("button", { name: /파일 첨부|Add photos & files|Add files|上传/ })
-    .click();
+  await page.getByTestId("attach-local-file-row").click();
   const chooser = await chooserPromise;
   await chooser.setFiles(file);
 }
@@ -145,11 +147,8 @@ test.describe("attachment UX", () => {
       buffer: createQaPngBuffer(),
     });
 
-    await actionMenuTrigger(page).click();
-    await page
-      .getByRole("dialog", { name: /더 많은 작업|More actions|更多操作/ })
-      .getByRole("button", { name: /AI 모델 선택|Choose AI models|选择 AI 模型/ })
-      .click();
+    // The menu's duplicate "choose models" row is gone; the composer's own
+    // model button is the single way in, and openModelCatalogue() uses it.
     await openModelCatalogue(page);
 
     // Was llama-3-1 / llama-4-scout until Llama left the public catalogue
@@ -168,11 +167,8 @@ test.describe("attachment UX", () => {
   });
 
   test("warns when a selected text-only model becomes incompatible with an image", async ({ page }) => {
-    await actionMenuTrigger(page).click();
-    await page
-      .getByRole("dialog", { name: /더 많은 작업|More actions|更多操作/ })
-      .getByRole("button", { name: /AI 모델 선택|Choose AI models|选择 AI 模型/ })
-      .click();
+    // The menu's duplicate "choose models" row is gone; the composer's own
+    // model button is the single way in, and openModelCatalogue() uses it.
     await openModelCatalogue(page);
     await page
       .locator('[data-testid="model-option"][data-model-id="deepseek-v4-flash"]')

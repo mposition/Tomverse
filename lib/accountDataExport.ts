@@ -407,6 +407,68 @@ const FETCHERS: Record<string, (userId: string) => Promise<unknown[]>> = {
       take: EXPORT_ROW_CAP,
     }),
 
+  emailPreference: (userId) =>
+    prisma.emailPreference.findMany({
+      where: { userId },
+      // Wholly theirs, including the confirmation-notice dates: those say when
+      // we last told them what they had agreed to, which is a fact about them.
+      select: {
+        id: true,
+        purpose: true,
+        enabled: true,
+        source: true,
+        grantedAt: true,
+        lastConfirmationNoticeAt: true,
+        nextConfirmationNoticeAt: true,
+        createdAt: true,
+        updatedAt: true,
+      },
+      take: EXPORT_ROW_CAP,
+    }),
+
+  consentRecord: (userId) =>
+    prisma.consentRecord.findMany({
+      where: { userId },
+      // ipHash and userAgentHash are salted digests: they exist to prove a
+      // consent event happened, and returning them tells the subject nothing
+      // they do not already know while handing anyone else a value to test
+      // guesses against. evidence holds the consent wording's hash and a screen
+      // identifier -- ours, not theirs.
+      select: {
+        id: true,
+        emailAddress: true,
+        purpose: true,
+        action: true,
+        occurredAt: true,
+        jurisdiction: true,
+        jurisdictionSource: true,
+        capturedVia: true,
+      },
+      take: EXPORT_ROW_CAP,
+    }),
+
+  emailDelivery: (userId) =>
+    prisma.emailDelivery.findMany({
+      where: { userId },
+      // What they can check: which message, when, where to, and whether it
+      // arrived. renderedHash is withheld as well as the ids -- it is a keyed
+      // HMAC over a body that may contain a login code, and shipping it beside
+      // the record of that message is the one place it could do harm.
+      select: {
+        id: true,
+        emailAddress: true,
+        language: true,
+        lane: true,
+        status: true,
+        skipReason: true,
+        renderedSubject: true,
+        sentAt: true,
+        deliveredAt: true,
+        createdAt: true,
+      },
+      take: EXPORT_ROW_CAP,
+    }),
+
   comparisonReview: (userId) =>
     prisma.comparisonReview.findMany({
       where: { userId },

@@ -19,7 +19,8 @@ import {
 import { prisma } from "@/lib/prisma";
 import { revokeAllUserSessions } from "@/lib/sessionSecurity";
 import { restoreTomverseAccount } from "@/lib/accountDeletion";
-import { sendAccountRestoredEmail } from "@/lib/accountEmails";
+import { ACCOUNT_RESTORED_TEMPLATE } from "@/lib/emailTemplateDefinitions";
+import { enqueueStandardEmail } from "@/lib/standardEmailLane";
 
 const SECURITY_ACTIONS_WITH_EXPIRY = new Set(["suspend", "restrict_ai"]);
 
@@ -204,8 +205,15 @@ export async function POST(req: Request, context: RouteContext) {
         }
         restoreResult = result;
         if (result === "restored") {
-          await sendAccountRestoredEmail({ to: existing.email }).catch((emailError) =>
-            console.error("Account restoration email failed:", emailError)
+          await enqueueStandardEmail({
+            templateKey: ACCOUNT_RESTORED_TEMPLATE,
+            emailAddress: existing.email,
+            userId,
+            payload: {},
+            referenceType: "User",
+            referenceId: userId,
+          }).catch((emailError) =>
+            console.error("Account restoration email enqueue failed:", emailError)
           );
         }
       } else {

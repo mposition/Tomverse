@@ -90,6 +90,9 @@ model User {
   assistantProfileVersions           AssistantProfileVersion[]
   assistantKnowledgeFiles            AssistantKnowledgeFile[]
   assistantKnowledgeChunks           AssistantKnowledgeChunk[]
+  emailPreferences                   EmailPreference[]
+  consentRecords                     ConsentRecord[]
+  emailDeliveries                    EmailDelivery[]
 
   @@index([plan, id])
   @@index([createdAt])
@@ -124,6 +127,32 @@ model UserSettings {
   timeZone                String    @default("UTC")
   timeZoneInitializedAt   DateTime?
   timeZoneChangedAt       DateTime?
+
+  /// The account's own statement of where it is, used to decide which
+  /// jurisdiction's email rules apply. Deliberately separate from the IP
+  /// country that analytics consent and billing currency read: a Korean
+  /// resident travelling through Chicago does not leave the reach of the
+  /// Network Act, and an address is not a location signal
+  /// (docs/policy/email-notifications.md §6.1).
+  ///
+  /// NULL means unresolved, which holds marketing back rather than guessing
+  /// (§6.3). It never blocks transactional or legal mail.
+  country          String?
+  /// self_declared | billing | inferred. Which signal produced `country`,
+  /// so a weaker one cannot silently overwrite a stronger one.
+  countrySource    String?
+  countryUpdatedAt DateTime?
+
+  /// What the payment method's country said, kept beside the declaration
+  /// rather than folded into it.
+  ///
+  /// Both are needed at once or a disagreement cannot be seen: with one column
+  /// the second signal would simply overwrite the first, and the contract's
+  /// conflict case (docs/policy/email-notifications.md §6.2 step 3) would be
+  /// undetectable rather than handled.
+  /// Written by the Stripe webhook; never by anything a visitor controls.
+  billingCountry          String?
+  billingCountryUpdatedAt DateTime?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -598,6 +627,12 @@ model BillingPromotion {
   id                    String                       @id @default(cuid())
   code                  String                       @unique
   discountPercent       Int                          @default(0)
+  /// Deprecated. A USD amount, so the promotion can only be charged in a USD
+  /// checkout; new promotions are percentage-only
+  /// (docs/policy/promotion-discount-currency.md section 2). Kept because past
+  /// redemptions point at the promotion rather than at a copy of its terms, so
+  /// dropping this column would make an audited redemption unreconstructable.
+  /// Section 5 lists what must be true before it can go.
   discountAmountCents   Int?
   maxRedemptions        Int?
   redeemedCount         Int                          @default(0)
@@ -828,9 +863,9 @@ model ChatCreditReservation {
   /// and no settlement, and saying so beats guessing which one it would have
   /// been. A composite foreign key makes the index it names a real attempt of
   /// this reservation rather than any integer.
-  settlementAttemptIndex   Int?
-  settlementAttempt        ChatAttemptUsage? @relation("ReservationSettlementAttempt", fields: [id, settlementAttemptIndex], references: [reservationId, attemptIndex], onDelete: NoAction, onUpdate: NoAction, map: "ChatCreditReservation_settlementAttempt_fkey")
-  attemptUsage             ChatAttemptUsage[]
+  settlementAttemptIndex Int?
+  settlementAttempt      ChatAttemptUsage?  @relation("ReservationSettlementAttempt", fields: [id, settlementAttemptIndex], references: [reservationId, attemptIndex], onDelete: NoAction, onUpdate: NoAction, map: "ChatCreditReservation_settlementAttempt_fkey")
+  attemptUsage           ChatAttemptUsage[]
 
   @@index([status, expiresAt])
   @@index([userId, createdAt])
@@ -856,14 +891,14 @@ model ChatCreditReservation {
 // these rows carry model ids, token counts and costs, and nothing about what
 // was asked.
 model ChatAttemptUsage {
-  id            String                @id @default(cuid())
-  reservationId String
-  reservation   ChatCreditReservation @relation(fields: [reservationId], references: [id], onDelete: Cascade)
+  id                 String                @id @default(cuid())
+  reservationId      String
+  reservation        ChatCreditReservation @relation(fields: [reservationId], references: [id], onDelete: Cascade)
   /// 0 for the primary. Matches RoutingAttempt.attemptIndex within the run.
-  attemptIndex  Int
-  modelId       String
-  provider      String
-  outcome       String
+  attemptIndex       Int
+  modelId            String
+  provider           String
+  outcome            String
   providerRequestId  String?
   providerResponseId String?
 
@@ -873,13 +908,13 @@ model ChatAttemptUsage {
   cachedInputTokens Int?
   outputTokens      Int?
   reasoningTokens   Int?
-  costMicroUsd      BigInt @default(0)
+  costMicroUsd      BigInt   @default(0)
   /// How the token counts were arrived at: provider_usage_metadata,
   /// provider_response_cost, fallback_estimator, crash_reconciliation.
-  usageSource       String @default("provider_usage_metadata")
+  usageSource       String   @default("provider_usage_metadata")
   /// How the cost was: token_estimate, provider_response, or
   /// reserved_upper_bound — an upper bound, not a measurement.
-  costSource        String @default("token_estimate")
+  costSource        String   @default("token_estimate")
   /// The rates this attempt was priced at, and where the figure came from.
   pricingSnapshot   Json?
   /// The ProviderDailyUsage day this row's cost was rolled up on, at midnight
@@ -892,7 +927,7 @@ model ChatAttemptUsage {
   /// The reservations that settled against this attempt. At most one, and the
   /// composite foreign key is what makes the pointer name a real attempt of
   /// that reservation rather than any integer.
-  settledReservations ChatCreditReservation[] @relation("ReservationSettlementAttempt")
+  settledReservations ChatCreditReservation[]      @relation("ReservationSettlementAttempt")
   adjustments         ChatAttemptUsageAdjustment[]
 
   @@unique([reservationId, attemptIndex])
@@ -3144,4 +3179,496 @@ model ContextManifest {
 
   @@index([state, createdAt])
   @@index([userId, createdAt])
+}
+
+// ==========================================
+// Email notification system (MVP).
+// Contract: docs/policy/email-notifications.md
+//
+// Three rules this schema exists to make structural rather than conventional:
+//
+//  - A message's classification decides whether it carries an unsubscribe
+//    link, and that decision is a CHECK constraint, not a code path someone
+//    can invert later (D-note 8.5).
+//  - Nothing that identifies a delivery may be nullable. PostgreSQL treats
+//    NULLs as distinct, so a unique index over a nullable column is not a
+//    unique index at all -- see EmailDelivery.recipientKey and
+//    SuppressionEntry.purposeKey.
+//  - The credential lane stores no credential. Enforced here by CHECKs in the
+//    migration, because "we agreed not to" is not a guarantee (§9.4a-3).
+// ==========================================
+
+/// One approved snapshot of every jurisdiction rule at a point in time.
+///
+/// Profiles are never edited in place: a change means a new version, which is
+/// what lets "what were the rules the day we sent this" be answered at all. A
+/// delivery pins the version it resolved against, so activating a new one
+/// cannot change what an in-flight send renders (§12.5).
+model EmailPolicyVersion {
+  id      String @id @default(cuid())
+  version String @unique
+
+  /// draft | active | superseded. Exactly one row may be active; the partial
+  /// unique index that enforces it lives in the migration.
+  status          String    @default("draft")
+  activatedAt     DateTime?
+  supersededAt    DateTime?
+  changeSummary   String
+  approvedById    String?
+  approvedByEmail String?
+  approvedAt      DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  profiles       JurisdictionProfile[]
+  countryMap     JurisdictionCountryMap[]
+  consentRecords ConsentRecord[]
+  deliveries     EmailDelivery[]
+
+  @@index([status, activatedAt])
+}
+
+/// The rules for one jurisdiction profile, as data rather than code.
+///
+/// Keyed by profile, not by country: the EEA is thirty countries and one
+/// profile, and a member state that later needs its own rules becomes a new
+/// profile plus a remapped row rather than a deploy (§10.2).
+///
+/// Deliberately holds values, never expressions. A profile that could express
+/// conditions would be a program stored in a table, and changing it would be
+/// riskier than shipping code rather than safer (§8.7).
+model JurisdictionProfile {
+  id         String @id @default(cuid())
+  profileKey String
+
+  policyVersionId String
+  policyVersion   EmailPolicyVersion @relation(fields: [policyVersionId], references: [id], onDelete: Cascade)
+
+  /// What the jurisdiction itself requires: opt_in | opt_out. Recorded as the
+  /// law states it even though we send opt-in everywhere (C1), because a
+  /// profile that lies about its jurisdiction is useless as evidence.
+  marketingBasis String
+
+  /// Prefixed to marketing subjects. "(광고)" in KR, "<ADV> " in SG.
+  subjectPrefix String?
+
+  /// Ordered footer block identifiers the renderer assembles, e.g.
+  /// ["legal_name","postal_address","business_registration"].
+  footerBlocks Json
+
+  /// Quoted in copy only. Processing is always immediate everywhere (C3).
+  unsubscribeSlaBusinessDays Int
+
+  /// E7. How often consent must be *confirmed to the recipient* -- KR is 24.
+  /// This is a notice interval, not an expiry: a recipient who does not answer
+  /// keeps their consent (docs/policy/email-notifications.md §5.5). NULL where
+  /// no such duty exists.
+  consentNoticeIntervalMonths Int?
+
+  /// { start, end, tz }. Held back rather than sent during these hours.
+  quietHours Json?
+
+  /// CASL's 2-year/6-month implied consent windows. Present so the profile can
+  /// describe the jurisdiction truthfully; unused while C8 holds.
+  impliedConsentDays Json?
+
+  /// Source and confirmation date for every value above. An operator editing a
+  /// profile has to be able to see what the value is based on.
+  notes String
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([profileKey, policyVersionId])
+  @@index([policyVersionId])
+}
+
+/// Which profile a country resolves to, per policy version.
+model JurisdictionCountryMap {
+  id          String @id @default(cuid())
+  countryCode String
+  profileKey  String
+
+  policyVersionId String
+  policyVersion   EmailPolicyVersion @relation(fields: [policyVersionId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+
+  @@unique([countryCode, policyVersionId])
+  @@index([policyVersionId, profileKey])
+}
+
+/// A message we can send, and what kind of message it is.
+///
+/// `classification` is the field everything else keys off: it decides the
+/// recipient set, the footer, whether an unsubscribe link appears, and whether
+/// a human has to approve the send. It is chosen once and cannot be edited to
+/// something incompatible with the versions already published under it.
+model EmailTemplate {
+  id  String @id @default(cuid())
+  key String @unique
+
+  /// transactional | service | legal | marketing
+  classification String
+
+  /// Which EmailPreference.purpose gates this. Required for marketing and
+  /// service, absent for transactional and legal -- those are not opt-outable.
+  purpose String?
+
+  /// Derived from classification, stored anyway so a CHECK can hold the two
+  /// together and a static test can read the intent without re-deriving it.
+  requiresUnsubscribe Boolean
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  versions TemplateVersion[]
+  events   EmailEvent[]
+
+  @@index([classification])
+}
+
+/// One immutable published rendering source, per template per language.
+///
+/// Published versions are never edited. The renderer must be deterministic for
+/// a given version, because the provider only suppresses a duplicate when the
+/// retried payload is byte-identical (§9.3), and because an audit that
+/// re-renders from a changed template proves nothing.
+model TemplateVersion {
+  id         String        @id @default(cuid())
+  templateId String
+  template   EmailTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+
+  version  Int
+  language String
+
+  subject  String
+  bodyHtml String
+  bodyText String
+
+  /// Over the three fields above. Detects an edit that bypassed the workflow.
+  contentHash String
+
+  /// draft | published | retired
+  status           String    @default("draft")
+  publishedAt      DateTime?
+  publishedById    String?
+  publishedByEmail String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  deliveries EmailDelivery[]
+
+  @@unique([templateId, version, language])
+  @@index([templateId, status, language])
+}
+
+/// What a user currently receives. Mutable; the history lives in ConsentRecord.
+///
+/// security and billing rows exist but cannot be disabled -- an attacker who
+/// can turn off security mail turns off the warning about themselves, and a
+/// receipt is contract performance rather than a preference. They are shown
+/// locked rather than hidden, because "there is no setting for it" is a common
+/// reason people reach for the spam button instead.
+model EmailPreference {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  /// security | billing | service_status | product_updates | newsletter | promotions
+  purpose String
+  enabled Boolean
+
+  /// signup | preference_center | unsubscribe_link | admin | system_default
+  source String
+
+  /// When the current enabled state began. Not the row's creation.
+  grantedAt DateTime?
+
+  /// E7. When consent was last confirmed *to* the recipient, and when it is
+  /// next due. Passing nextConfirmationNoticeAt does not change `enabled`:
+  /// the duty is to notify, not to expire (docs/policy/email-notifications.md
+  /// §5.5). Automatic lapse is a
+  /// separate business policy behind its own flag, default off.
+  lastConfirmationNoticeAt DateTime?
+  nextConfirmationNoticeAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([userId, purpose])
+  @@index([nextConfirmationNoticeAt])
+  @@index([purpose, enabled])
+}
+
+/// Append-only consent history. Never updated, never deleted with the account.
+///
+/// EmailPreference answers "what now"; this answers "when, on what basis, and
+/// under which policy". CASL and the Australian Spam Act both put the burden of
+/// proving consent on the sender, and a row that gets overwritten proves
+/// nothing. jurisdiction is the value resolved at the time and is never
+/// rewritten when the account later moves (§6.4).
+model ConsentRecord {
+  id     String  @id @default(cuid())
+  userId String?
+  user   User?   @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  /// The address as it was. Preserved when the account changes address, since
+  /// consent attaches to an address rather than to a row
+  /// (docs/policy/email-notifications.md §13.4).
+  emailAddress String
+  purpose      String
+
+  /// granted | withdrawn | reconfirmed | confirmation_notice_sent | lapsed
+  action     String
+  occurredAt DateTime @default(now())
+
+  jurisdiction       String
+  jurisdictionSource String
+
+  policyVersionId String
+  policyVersion   EmailPolicyVersion @relation(fields: [policyVersionId], references: [id])
+
+  /// signup_form | preference_center | unsubscribe_page | import | admin
+  capturedVia String
+
+  /// Consent wording hash, screen identifier, request metadata. Never the raw
+  /// request.
+  evidence Json?
+
+  /// Salted hashes. The raw IP is not evidence of anything the hash is not,
+  /// and storing it would be collecting more than the purpose needs.
+  ipHash        String?
+  userAgentHash String?
+
+  createdAt DateTime @default(now())
+
+  @@index([userId, purpose, occurredAt])
+  @@index([emailAddress, occurredAt])
+  @@index([policyVersionId])
+}
+
+/// Addresses we must not send to, and why.
+///
+/// Keyed by address rather than by user: a spam complaint follows the mailbox,
+/// so deleting an account and signing up again must not clear it.
+///
+/// The provenance columns are gating inputs, not reporting conveniences. A
+/// complaint raised against a marketing message and one raised against a login
+/// code mean opposite things -- the first is ordinary, the second is either an
+/// account takeover in progress or proof we are misclassifying mail
+/// (docs/policy/email-notifications.md §13.3).
+model SuppressionEntry {
+  id           String @id @default(cuid())
+  emailAddress String
+
+  /// global | purpose
+  scope String
+
+  /// The purpose this suppression covers, or "*" for global. Non-null on
+  /// purpose: a nullable column here would let the unique index below admit
+  /// unlimited duplicate global suppressions for one address.
+  purposeKey String
+
+  /// hard_bounce | soft_bounce | complaint | unsubscribe | manual | privacy_request
+  reason String
+
+  /// provider_webhook | unsubscribe_link | preference_center | admin
+  source String
+
+  sourceStream         String?
+  sourceDomain         String?
+  sourceClassification String?
+  sourceDeliveryId     String?
+  sourceMessageId      String?
+
+  occurredAt DateTime @default(now())
+
+  /// Set only for soft_bounce, which is the one temporary suppression. A hard
+  /// bounce or a complaint has no expiry -- the CHECK in the migration says so.
+  expiresAt DateTime?
+
+  evidence Json?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([emailAddress, scope, purposeKey])
+  @@index([emailAddress])
+  @@index([reason, sourceStream, occurredAt])
+  @@index([expiresAt])
+}
+
+/// Something happened that people may need to hear about. The outbox row.
+///
+/// Written in the same transaction as whatever caused it, so a crash anywhere
+/// downstream cannot lose the notification. Fan-out is separate and resumable:
+/// "the terms changed" is one event and a delivery per account, and expanding
+/// that cannot be an operation that has to finish in one pass.
+model EmailEvent {
+  id   String @id @default(cuid())
+  kind String
+
+  templateId String
+  template   EmailTemplate @relation(fields: [templateId], references: [id])
+
+  referenceType String?
+  referenceId   String?
+
+  /// Only what the template's version actually reads. Never a dump of the
+  /// source row, and never a credential (§9.4a-3).
+  payload Json
+
+  /// single_user | user_segment | all_users
+  audienceKind String
+  audienceSpec Json?
+
+  /// pending | expanding | expanded | failed
+  status String @default("pending")
+
+  /// Where a partial fan-out stopped, so the next pass resumes rather than
+  /// restarts.
+  expansionCursor String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  deliveries EmailDelivery[]
+
+  @@index([status, createdAt])
+  @@index([templateId, createdAt])
+}
+
+/// One message to one recipient, and everything needed to answer for it later.
+///
+/// Two lanes with different guarantees:
+///
+///  - standard: at-least-once. A process that dies still delivers, and the
+///    provider's idempotency key stops the duplicate.
+///  - credential_sync: sent inside the request and not retried afterwards.
+///    The row preserves the *record* of the send; it does not promise the send
+///    (§9.4a-3). Nothing here can re-render a login code, by design: the
+///    plaintext exists only in the request that created it.
+model EmailDelivery {
+  id      String     @id @default(cuid())
+  eventId String
+  event   EmailEvent @relation(fields: [eventId], references: [id], onDelete: Cascade)
+
+  userId String?
+  user   User?   @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  /// "user:<id>" for an account, "addr:<normalized email>" otherwise. Non-null
+  /// so the unique index below actually holds: with a nullable userId it did
+  /// not, and re-running fan-out piled up duplicate rows for every recipient
+  /// without an account.
+  recipientKey String
+
+  /// credential_sync | standard
+  lane String @default("standard")
+
+  /// The address at send time. Kept even after the account changes address.
+  emailAddress String
+  language     String
+
+  /// Resolved once, at fan-out. Both are pinned so that activating a new
+  /// policy version mid-flight cannot change what this row renders -- which
+  /// would silently invalidate its idempotency key.
+  jurisdictionCountry    String
+  jurisdictionProfileKey String
+
+  policyVersionId String
+  policyVersion   EmailPolicyVersion @relation(fields: [policyVersionId], references: [id])
+
+  templateVersionId String
+  templateVersion   TemplateVersion @relation(fields: [templateVersionId], references: [id])
+
+  /// hash(eventId, recipientKey, templateVersionId, policyVersionId). Stable
+  /// across attempts, which is the whole reason the provider can suppress a
+  /// duplicate.
+  idempotencyKey String @unique
+
+  /// pending | sent | delivered | bounced | complained | suppressed | skipped
+  ///   | failed | abandoned
+  ///
+  /// failed: finished without retries left to try. The only failure terminus
+  ///   on the credential lane, and the terminus for a permanent 4xx elsewhere.
+  /// abandoned: retries exhausted. Standard lane only -- the credential lane
+  ///   has none to exhaust, and a CHECK keeps it from appearing there.
+  status String @default("pending")
+
+  /// Why nothing was sent. Not sending is a decision we have to answer for too.
+  /// no_consent | consent_lapsed | suppressed_complaint | hard_bounce
+  ///   | quiet_hours | jurisdiction_conflict | jurisdiction_unconfirmed
+  ///   | credential_expired | dry_run
+  skipReason String?
+
+  attempts      Int       @default(0)
+  nextAttemptAt DateTime?
+  lastAttemptAt DateTime?
+
+  /// A short classification such as "http_502". Never a provider response body.
+  lastErrorKind String?
+
+  /// Set when one sender claims the row, so the request path and a worker
+  /// cannot both send it.
+  claimedAt DateTime?
+  claimedBy String?
+
+  providerMessageId String?
+
+  /// Audit snapshot. Null until the message is first rendered.
+  renderedSubject String?
+
+  /// A keyed HMAC, not a digest. A plain hash of a body containing a six-digit
+  /// code is itself the attack: the space is 10^6. Keyed means the key must
+  /// outlive the record, so the version that produced it is stored alongside
+  /// (§10.3-7).
+  renderedHash           String?
+  renderedHashKeyVersion String?
+
+  /// The personalisation inputs, minimised and encrypted, so the message can be
+  /// reconstructed rather than merely attested to. Always NULL on the
+  /// credential lane -- there the inputs *are* the credential, so minimising
+  /// leaves nothing (§9.4a-3). A CHECK enforces that.
+  renderDataSnapshot Json?
+  snapshotPurgedAt   DateTime?
+
+  sentAt      DateTime?
+  deliveredAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([eventId, recipientKey])
+  @@index([status, lane, nextAttemptAt])
+  @@index([eventId, status])
+  @@index([userId, createdAt])
+  @@index([emailAddress, createdAt])
+  @@index([status, snapshotPurgedAt])
+}
+
+/// Raw provider callbacks, stored before they are acted on.
+///
+/// The unique key is the provider's own event id (Resend sends `svix-id`),
+/// which is what makes a redelivered webhook a no-op rather than a second state
+/// change. Same shape as StripeWebhookEventLog, for the same reason.
+model ProviderWebhookEvent {
+  id       String @id @default(cuid())
+  provider String
+
+  providerEventId String
+  eventType       String
+
+  receivedAt  DateTime  @default(now())
+  processedAt DateTime?
+
+  payload Json
+
+  processingError String?
+
+  @@unique([provider, providerEventId])
+  @@index([provider, eventType, receivedAt])
+  @@index([processedAt])
 }

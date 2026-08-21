@@ -192,35 +192,41 @@ export const ISSUE_PROBES = [
                 /percentage[- ]only|fixed[- ]amount/i.test(source)
             );
         },
-        blockedOn:
-            "A read-only production inventory of fixed-amount promotions " +
-            "(docs/policy/promotion-discount-currency.md §6). The schema " +
-            "cannot answer marketing exposure, usage country or campaign owner -- BillingPromotion has " +
-            "no country or owner column and BillingPromotionRedemption stores no currency and only a " +
-            "hashed IP -- so those come from campaign records or stay `unknown`. Blocking creation " +
-            "before knowing which codes are live could interrupt a running campaign.",
+        // The inventory this used to be blocked on was taken on 2026-08-16:
+        // zero active fixed-amount codes, `PAYMENTTEST27` deactivated, recorded
+        // in docs/policy/promotion-discount-currency.md §6.1. `blockedOn` is
+        // gone rather than rewritten -- the report distinguishes "not started
+        // because it must not be" from "not started", and this is neither.
         remainder:
-            "The Admin UI has to match the API, and `discountAmountCents` stays in the schema for the " +
-            "audit trail: dropping it is a separate migration behind the three conditions in " +
-            "docs/policy/promotion-discount-currency.md §5.",
+            "`discountAmountCents` stays in the schema for the audit trail: dropping it is a separate " +
+            "migration behind the three conditions in docs/policy/promotion-discount-currency.md §5. " +
+            "The probe reads the API route only, so the Admin panel's half of the block " +
+            "(components/admin/BillingAdminPanel.tsx) is covered by tests rather than by this signal.",
     },
     {
         issue: 637,
         title: "Verify the production AUD billing price override",
         looksAt: "lib/billingPriceCatalog.ts",
         resolvedWhen: () =>
-            // Nothing in the tree can answer this. The question is what
-            // production's AppSetting holds, who set it and what Stripe
-            // actually charges; a probe that guessed from the default catalogue
-            // would be answering a different question confidently.
+            // Still nothing in the tree can answer what remains. The catalogue
+            // half is done -- `npm run report:billing-price-catalog` read
+            // production and the default now matches it -- but the rest is what
+            // Stripe holds, and a probe that guessed from the catalogue would
+            // be answering a different question confidently.
             false,
         blockedOn:
-            "Production reads: AppSetting.billingPriceCatalog and its AdminAuditLog entry, a recent AUD " +
-            "Checkout Session's unit_amount, and existing AUD subscription item Prices. Note that " +
-            "checkout builds an ad-hoc price_data per Session while plan change uses " +
-            "BillingPlan.stripePriceId, so there are two price sources and nothing reconciles them. " +
-            "Do not change the catalogue before the verification: reverting an override with no " +
-            "approval record is itself a price change.",
+            "Stripe reads only; the catalogue half is finished. Done on 2026-08-16 and recorded in " +
+            "docs/policy/promotion-discount-currency.md section 8: the override was read, its author " +
+            "and timestamp identified from AdminAuditLog, and DEFAULT_BILLING_PRICE_CATALOG aligned to " +
+            "the twenty stored values. Still unread: a recent AUD Checkout Session's unit_amount, the " +
+            "Price on existing AUD subscription items and its renewal amount, and the target Price " +
+            "plan change uses. That last one is the point -- checkout builds an ad-hoc price_data per " +
+            "Session while plan change uses BillingPlan.stripePriceId, so there are two price sources " +
+            "and nothing reconciles them. Do NOT revert the default catalogue to its pre-2026-08-16 " +
+            "values; those were never approved, and putting them back would make a lost AppSetting row " +
+            "an actual price rise. A second gap is recorded on the issue: AdminAuditLog stores only " +
+            "that prices changed (localizedPricesUpdated), never the before/after values, so price " +
+            "history cannot be reconstructed from it.",
     },
 ];
 

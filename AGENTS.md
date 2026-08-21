@@ -143,6 +143,42 @@ npm run report:issue-backlog -- --issues-file <열린 이슈 JSON>
   `lib/modelPricing.ts` 해석이 실제 module과 어긋날 때이며, 그때는 출력 전체를
   믿을 수 없다는 뜻입니다.
 
+# 검증 범위는 되돌릴 수 없는 것에 비례합니다
+
+**이 저장소는 1인 조직입니다.** staging 검증의 모든 항목을 매 회차 실행하는
+것은 감당할 수 있는 일이 아니고, 그렇게 요구하면 검증 자체가 미뤄집니다.
+그래서 범위를 정하는 규칙을 여기에 둡니다.
+
+**항목을 릴리스 차단으로 올리는 근거는 단 하나 — 틀렸을 때 되돌릴 수 없는가.**
+
+- **되돌릴 수 없음** = 이력 테이블이 없어 원상 복구가 불가능하거나(예:
+  `Conversation.selectedModels`, pin된 profile version), 유출처럼 회수가
+  성립하지 않거나, 사용자 데이터가 사라지는 것.
+- **되돌릴 수 있음** = 고쳐서 배포하면 끝나는 것. 라벨·문구·breadcrumb·탭
+  배치·편의 기능이 여기 속합니다. 잘못된 과금도 여기입니다 — 환급됩니다.
+
+"중요해 보인다", "완성도가 떨어진다"는 차단 근거가 아닙니다. **무엇이 복구
+불가인지 한 줄로 적을 수 없으면 차단이 아닙니다.**
+
+## 에이전트가 검증을 설계할 때
+
+1. 체크리스트를 통째로 요구하지 않습니다. **차단 항목부터 제시하고, 나머지는
+   선택지로 알립니다.** 총 항목 수와 유료 turn 수를 먼저 말합니다.
+2. 유료 항목은 **무엇을 판별하는지** 한 줄로 설명합니다. 설명할 수 없는 유료
+   turn은 제안하지 않습니다.
+3. 사람이 범위를 줄이면 그대로 따릅니다. 건너뛴 구획은 기록의 `미기록`이며,
+   판정란에 **무엇을 왜 건너뛰었는지** 적습니다 — 그러면 그 기록은 비어 있는
+   것이 아니라 범위를 밝힌 것이 됩니다.
+4. 차단·비차단 갈래는 각 체크리스트 안에 적습니다. 예:
+   `docs/ops/assistant-profile-staging-checklist.md`의
+   "무엇이 flag를 막고, 무엇이 막지 않는가".
+
+## 검증을 건너뛴다는 뜻이 아닙니다
+
+차단 항목은 줄이지 않습니다. 줄이는 것은 **차단이 아닌 항목을 지금 할지
+나중에 할지**뿐입니다. flag를 켠 뒤에 발견된 라벨 오류는 고치면 되지만,
+덮어써진 대화 설정은 고칠 수 없습니다.
+
 # 릴리스 게이트에서 일감을 고를 때
 
 `docs/release-gates/tomverse-chat-v1.yaml`의 40개 게이트가 전부 `status: pending`
@@ -287,6 +323,68 @@ goodwill 지급은 Stripe 환불도 구매 취소도 아닌 **세 번째 것**�
   `CONVERSATION_FORBIDDEN`을 완화하지 않습니다.
 - **로그인 시 guest localStorage를 삭제하지 않습니다.** 전환은 *선택*만 해제하고
   guest snapshot은 import modal이 결정할 수 있도록 보존합니다.
+
+# 프로모션 할인과 통화
+
+프로모션의 할인 형태, `discountAmountCents`, Admin billing PATCH의 프로모션
+분기를 건드리기 전에 읽습니다.
+
+- `docs/policy/promotion-discount-currency.md`
+
+절대 조건:
+
+- **신규 프로모션은 정률만입니다.** 고정액 할인은 승인된 상태로 deprecated이고
+  (docs/policy/promotion-discount-currency.md §2, rollout 승인 2026-08-16,
+  활성 0개 확인), 다중 통화로 확장하지 않습니다.
+- **`discountAmountCents`는 USD 금액입니다.** 다른 통화의 가격에 비율로 환산해
+  적용하지 않습니다. 그 환산이 이 정책을 만든 사고입니다.
+- **컬럼은 삭제하지 않습니다.** 과거 상환 기록이 프로모션 행을 가리키므로
+  당시 할인을 재구성할 수 없게 됩니다. 삭제는
+  docs/policy/promotion-discount-currency.md §5의 세 조건을 확인한 뒤 별도 migration입니다.
+- **판정은 `fixedAmountPromotionRefusal()` 한 곳에 있습니다**
+  (`lib/billingPromotionAdminPolicy.ts`). Admin API와 Admin 패널이 같은 함수를
+  부릅니다.
+  docs/policy/promotion-discount-currency.md §4 행렬을 route와 component에
+  각각 옮겨 적지 않습니다.
+- **판정은 요청 본문이 아니라 저장된 행과 비교합니다.** 패널이 매 저장마다
+  프로모션 목록 전체를 PATCH하므로, 본문만 보고 고정액을 거절하면 기존 코드가
+  하나라도 있는 동안 billing 폼 전체가 잠깁니다.
+- **거절은 어떤 write보다 먼저** 합니다. plan·price·promotion이 한 요청에 실려
+  오므로 늦게 거절하면 절반만 적용된 상태가 남습니다.
+- **좁히는 편집은 계속 허용합니다** — 비활성화, 종료일 단축, 할인액 인하, 플랜
+  제거, 상한 인하. 비활성화까지 막으면 살아 있는 프로모션을 끌 수단이 없어집니다.
+- 통화 판정 자체(`promotionCurrencyFailure()`, `PROMOTION_CURRENCY_NOT_SUPPORTED`)
+  는 별개 계층이며 validation과 Checkout이 공유합니다. 완화하지 않습니다.
+# 가격 카탈로그 default는 fixture가 아닙니다
+
+`DEFAULT_BILLING_PRICE_CATALOG`(`lib/billingPriceCatalog.ts`)의 숫자를 고치기
+전에 읽습니다.
+
+- docs/policy/promotion-discount-currency.md §8
+
+**이 표는 세 상황에서 실제로 청구됩니다.** `AppSetting` 행 없음(첫 read가
+default를 DB에 씁니다), 저장값 JSON 파싱 실패, schema 검증 실패. 그러므로 여기의
+숫자를 바꾸는 것은 **가격 변경**이고, 테스트 값 조정이 아닙니다.
+
+- **필드 하나가 빠지면 카탈로그 전체가 버려집니다.** 손상된 항목만이 아니라
+  멀쩡한 값까지 default로 되돌아갑니다.
+- **값은 승인된 것만 넣습니다.** 2026-08-16에 production 저장값(20건)에 맞췄고,
+  근거는 `npm run report:billing-price-catalog`의 production read입니다. 환율로도
+  비율로도 유도하지 않습니다.
+- **부분 정렬 금지.** 20건은 한 transaction에서 저장됐고, 어떤 절단선을 잡아도
+  일관성이 깨집니다 — Pro AUD 월간만 옮기면 연간가가 월 12회 결제보다 비싸집니다.
+- **fallback은 조용하지 않아야 합니다.** `billing_price_catalog_fallback` 구조화
+  이벤트가 세 상태를 구분해 남기고 `served: compiled_default`를 함께 적습니다.
+  정상 경로에서는 아무것도 남기지 않습니다 — 매 요청 로그는 진짜 신호를 묻습니다.
+- **두 reader 모두 source를 반환합니다.** Admin 패널은 저장된 행의 `updatedAt`을
+  카탈로그 옆에 그리므로, source 없이는 그 행이 가진 적 없는 숫자 옆에 최근
+  타임스탬프가 붙습니다.
+- **`AdminAuditLog`는 가격 이력이 아닙니다.** `billing.updated`는 가격이 바뀌었다는
+  사실(`localizedPricesUpdated`)만 남기고 이전·이후 값은 남기지 않습니다. 과거
+  가격은 이 로그로 재구성할 수 없습니다.
+- 값 변경은 `tests/billingPriceCatalogDefaults.test.mjs`를 함께 고쳐야 합니다.
+  전체 비교이므로 언급되지 않은 가격이 조용히 움직일 수 없고, 연간 할인 구간·
+  Max > Pro·크레딧팩 단조성 불변식이 자릿수 실수를 잡습니다.
 
 # Plan change (Pro <-> Max)
 
@@ -509,6 +607,49 @@ feedback의 Trace 검증, `errorReportToken`, `TraceErrorEvidence`, chat 오류
   `develop`뿐이고 auto-merge는 켜지 않습니다. change policy는
   `lib/feedbackAutoFixPolicy.ts`가 정의하며 파이프라인 자기 자신을 수정
   대상에서 제외합니다. staging 배포를 production 해결로 표시하지 않습니다.
+
+# 이메일 알림
+
+이메일 발송 경로, 수신 동의·수신 거부, suppression, 관할권 판정, 발송 템플릿을
+건드리기 전에 읽습니다.
+
+- `docs/policy/email-notifications.md`
+
+이 문서는 감사 보고서가 아니라 승인된 계약입니다. `.github/audits/`에 있던
+초안을 `docs/policy/`로 옮긴 것이며, 코드 주석의 인용은 전부 이 경로를 가리킵니다.
+
+절대 조건:
+
+- **차선(lane)이 둘이고 보증이 서로 반대입니다.** credential synchronous
+  lane(로그인 코드 등)은 요청 안에서 예산 안에 보내고 실패를 즉시 알리며,
+  standard lane은 outbox에 넣고 cron drain이 끝까지 재시도합니다. 수명이 10분인
+  자격증명을 15분 주기 큐에 넣지 않습니다(§9.4a).
+- **enqueue는 호출자의 transaction 안에서 합니다.** fire-and-forget 발송을
+  되살리지 않습니다 — 그것이 이 시스템이 대체한 것입니다(§2.4).
+- **security·billing 수신 설정은 끌 수 없습니다**(`LOCKED_EMAIL_PURPOSES`,
+  DB CHECK). marketing은 동의가 있어야 보내고, 동의 철회는 purpose 범위
+  suppression을 함께 씁니다.
+- **suppression은 주소 기준이라 계정 삭제 후에도 남습니다.** transactional은
+  hard bounce에서만 막고 complaint로는 막지 않습니다(§13.3). Resend의 suppression은
+  계정·region 전체 범위라는 확인된 제약이 있으므로, marketing 활성화 전에
+  발송 계정 분리를 결정합니다(§5.3.1, A18).
+- **IP만으로 관할권을 정하지 않습니다.** 신호 우선순위는 자기 신고 → 결제 국가 →
+  직전 동의 시점의 관할권이고, IP는 관측용입니다. 신호가 충돌하면 marketing을
+  보류하고 확인을 요청합니다(docs/policy/email-notifications.md §6).
+- **국가 규칙은 데이터입니다.** `JurisdictionProfile`·`JurisdictionCountryMap`은
+  `EmailPolicyVersion`에 묶이고, 활성화는 사람이 승인해 registry에 기록하는
+  행위입니다. 코드가 status를 스스로 `active`로 올리지 않습니다(§12.5).
+- **자격증명 본문은 어디에도 남기지 않습니다.** 코드·magic link는
+  `EmailEvent.payload`, `renderDataSnapshot`, 로그 어디에도 넣지 않습니다.
+  standard lane의 snapshot은 봉투 암호화하고 보관 기한이 지나면 지웁니다(§10.3).
+- **스트림마다 발송 도메인이 다릅니다.** marketing은 `MARKETING_EMAIL_FROM`이
+  없으면 transactional 주소로 대체되지 않고 **거부**합니다 — 대체는 프로모션
+  스팸 신고를 로그인 코드가 나가는 도메인에 얹는 일이고, 증상은 로그인 메일이
+  안 온다는 신고로만 나타납니다. 두 스트림을 같은 도메인에 설정하면
+  `/api/ready`가 실패합니다. 절차는 `docs/ops/email-sending-domains.md`.
+- **unsubscribe는 로그인 없이 한 번에 됩니다.** RFC 8058 one-click을 지원하고,
+  marketing에 서명 키가 없으면 헤더 없이 보내는 대신 발송을 거부합니다(§11.3).
+- marketing은 위 suppression 경계 결정 전까지 production에서 비활성입니다.
 
 ## Mobile chat composer invariant
 

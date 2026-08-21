@@ -1153,7 +1153,8 @@ AppSetting 기반, 기본값 전부 `false`, 설정 누락 시 fail-closed:
 | `assistantProfilesEnabled` | C | profile CRUD·runtime |
 | `assistantKnowledgeEnabled` | C | knowledge 업로드·retrieval |
 
-- 활성화 순서: Import → Extraction → Injection → Profiles → Knowledge.
+- 활성화 순서(원안): Import → Extraction → Injection → Profiles → Knowledge.
+  **실제 순서는 §15.1이 정합니다.**
 - 사용자 master toggle은 운영 kill switch를 대체하지 않습니다.
 - migration은 additive 우선, flag off 상태에서 먼저 배포 가능해야 하며,
   backfill은 재시작 가능·멱등, destructive cleanup은 분리합니다. baseline은
@@ -1162,6 +1163,35 @@ AppSetting 기반, 기본값 전부 `false`, 설정 누락 시 fail-closed:
   chat 흐름에 회귀가 없어야 합니다. schema rollback은 계획하지 않으며(additive)
   데이터 제거는 별도 운영 결정입니다.
 - production 환경변수(batch budget 등)는 코드보다 먼저 배포합니다.
+
+### 15.1 실제 활성화 순서 — [확정 · 2026-08-20 @mposition]
+
+위 원안과 다릅니다. 실제로 켜는 순서는 다음이며, 이 표가 기준입니다.
+
+| # | flag | 상태 |
+|---|---|---|
+| 1 | `externalConversationImportEnabled` | ON (2026-08-19) |
+| 2 | `imageGenerationEnabled` | ON (2026-08-20) — 이 정책이 아니라 `docs/policy/image-generation.md`가 통제합니다 |
+| 3 | `assistantProfilesEnabled` | |
+| 4 | `assistantKnowledgeEnabled` | |
+| 5 | `memoryExtractionEnabled` | |
+| 6 | `memoryInjectionEnabled` | |
+
+원안과의 차이는 **Profiles·Knowledge가 Extraction·Injection보다 앞선다**는 것
+하나입니다.
+
+**왜 안전한가.** profile version은 `memoryPolicy`를 snapshot에 담지만, 그 값이
+효과를 내려면 `decideMemoryInjection`이 먼저 허용해야 합니다. 이 함수는
+`injectionFlagEnabled`를 profile보다 **앞에서** 판정하므로, injection flag가 꺼져
+있는 동안 profile의 memory policy는 도달하지 않습니다. §14가 요구하는 "profile은
+narrow만 할 수 있다"는 방향과도 일치합니다 — 꺼진 것을 profile이 켤 수는 없습니다.
+
+관측으로 확인하는 자리는 `docs/ops/assistant-profile-staging-checklist.md` §E이며,
+거절 사유가 `profile_off`가 아니라 `flag_off`로 관측되어야 합니다. 그 구분이
+"운영이 껐다"와 "profile이 좁혔다"를 섞지 않는 지점입니다.
+
+**원안을 되살리려면** 이 표를 고치는 것이 아니라 새 결정을 추가합니다. 이미 켠
+flag를 순서 때문에 되돌리지는 않습니다.
 
 ## 16. 개인정보 처리 활동 (릴리스별)
 

@@ -1,5 +1,6 @@
 import {
   ADMIN_E2E_IDENTITIES,
+  FIXTURE_FIXED_AMOUNT_PROMOTION,
   FIXTURE_PROMOTION,
   FIXTURE_REFUNDS,
   adminApi,
@@ -289,6 +290,104 @@ test.describe("billing journeys", () => {
         .filter({ hasText: FIXTURE_PROMOTION.code })
         .getByLabel("Discount percent")
     ).toHaveValue("45");
+  });
+
+  /**
+   * Fixed-amount promotions, deprecated by
+   * docs/policy/promotion-discount-currency.md section 2.
+   *
+   * Section 6 requires the block in the Admin API *and* the Admin UI. These
+   * cover the UI half: what an operator can still reach, what is refused
+   * before the round trip, and -- the case the whole deprecation turns on --
+   * that a refusal never touches the stored row.
+   */
+  const fixedAmountCard = (page: import("@playwright/test").Page) =>
+    page
+      .locator("article")
+      .filter({ hasText: FIXTURE_FIXED_AMOUNT_PROMOTION.code });
+
+  const storedFixedAmount = async () =>
+    adminFixtureDatabase().billingPromotion.findUniqueOrThrow({
+      where: { id: FIXTURE_FIXED_AMOUNT_PROMOTION.id },
+      select: { discountAmountCents: true, isActive: true, endsAt: true },
+    });
+
+  test("a percentage promotion cannot be given a fixed amount, and says why", async ({
+    page,
+  }) => {
+    await page.goto("/admin/billing?tab=promotions");
+    const promotion = page
+      .locator("article")
+      .filter({ hasText: FIXTURE_PROMOTION.code });
+
+    // Stated where the amount would be typed, not discovered on save. The
+    // field is the only route from a percentage promotion to a fixed-amount
+    // one, so closing it closes the bypass around the creation block.
+    await expect(
+      promotion.getByTestId("promotion-fixed-amount-input")
+    ).toBeDisabled();
+    await expect(
+      promotion.getByTestId("promotion-fixed-amount-note")
+    ).toContainText("New fixed-amount promotions are not accepted");
+  });
+
+  test("an existing fixed-amount promotion can be narrowed", async ({
+    page,
+  }) => {
+    await page.goto("/admin/billing?tab=promotions");
+    const promotion = fixedAmountCard(page);
+
+    // The amount is editable here because the stored row already carries one,
+    // and lowering it is the direction the policy allows.
+    await promotion.getByTestId("promotion-fixed-amount-input").fill("5.00");
+    await savePromotions(page);
+
+    await expect(
+      page.getByText(
+        "Billing settings saved. Plans, promotions and the price catalogue are live."
+      )
+    ).toBeVisible();
+    expect((await storedFixedAmount()).discountAmountCents).toBe(500);
+  });
+
+  test("an existing fixed-amount promotion cannot be reactivated", async ({
+    page,
+  }) => {
+    await page.goto("/admin/billing?tab=promotions");
+    const promotion = fixedAmountCard(page);
+    const before = await storedFixedAmount();
+    expect(before.isActive).toBe(false);
+
+    await promotion.getByRole("checkbox", { name: "Active" }).check();
+
+    // Refused on the spot, next to the control that caused it, rather than
+    // after a save the operator has to interpret.
+    await expect(
+      promotion.getByTestId("promotion-policy-refusal")
+    ).toContainText("cannot be reactivated");
+    await expect(
+      page.getByTestId("promotion-policy-refusal-summary")
+    ).toBeVisible();
+
+    await savePromotions(page);
+    expect((await storedFixedAmount()).isActive).toBe(false);
+  });
+
+  test("raising an existing fixed-amount discount is refused and writes nothing", async ({
+    page,
+  }) => {
+    await page.goto("/admin/billing?tab=promotions");
+    const promotion = fixedAmountCard(page);
+
+    await promotion.getByTestId("promotion-fixed-amount-input").fill("20.00");
+    await expect(
+      promotion.getByTestId("promotion-policy-refusal")
+    ).toContainText("cannot be raised");
+
+    await savePromotions(page);
+    expect((await storedFixedAmount()).discountAmountCents).toBe(
+      FIXTURE_FIXED_AMOUNT_PROMOTION.discountAmountCents
+    );
   });
 
   test("a promotion with no discount at all is refused and nothing is written", async ({
