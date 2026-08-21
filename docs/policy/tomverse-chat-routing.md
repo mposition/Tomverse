@@ -46,7 +46,7 @@ The context inventory estimates conversation history, attachments, project instr
 
 If the built request exceeds the selected model's limit, the Router may take one escape-hatch pass. It must select a compatible model or fail without dispatch. A second context-limit reroute is prohibited.
 
-Question-type changes do not immediately break Auto stickiness. A soft switch requires a configured confidence margin plus hysteresis across consecutive turns. Exact values are versioned Router configuration, not client behavior.
+Question-type changes do not immediately break Auto stickiness. A soft switch requires a configured confidence margin plus hysteresis across consecutive turns. Exact values are versioned Router configuration, not client behavior. Those values, the quality scale they are measured on, the tie-break order and the enrolled model set are one versioned bundle: `docs/policy/tomverse-chat-router-score-policy.md`, implemented in `lib/routerScorePolicy.ts` and recorded on `RoutingRun.selectionPolicyVersion`.
 
 ## 4. Execution budgets
 

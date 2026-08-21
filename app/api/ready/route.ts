@@ -8,6 +8,7 @@ import { getSecurityEnvironmentStatus } from "@/lib/securityEnvironment";
 import { reportOperationalDependencyStatus } from "@/lib/operationalMonitoring";
 import { getImageProviderBudgetReadiness } from "@/lib/imageProviderBudgetReadiness";
 import { getSendingIdentityReadiness } from "@/lib/emailSendingIdentity";
+import { snapshotKeyringReadiness } from "@/lib/emailSnapshotCrypto";
 import { AVAILABLE_MODELS } from "@/lib/models";
 import {
   getActiveProviders,
@@ -92,10 +93,19 @@ const readinessResponse = async (head = false) => {
   // planned migration.
   const sendingIdentity = getSendingIdentityReadiness();
   const emailSendingIdentity = sendingIdentity.ready;
+  // The keyring the standard lane seals its render snapshots with. Unlike the
+  // image budget, there is no flag to be off: the lane is live wherever this
+  // code is, it refuses to store the snapshot unencrypted, and its callers
+  // swallow the throw so the user's own action still succeeds. Without this
+  // check a deployment answers ready while every welcome email, receipt and
+  // deletion notice is dropped -- and the first report of it is somebody
+  // saying they never got a receipt.
+  const snapshotKeyring = snapshotKeyringReadiness();
+  const emailSnapshotKeyring = snapshotKeyring.ready;
   const database = databaseResult.ready;
   const ready =
     database && securityEnvironment && providerBudgets &&
-    imageProviderBudget && emailSendingIdentity;
+    imageProviderBudget && emailSendingIdentity && emailSnapshotKeyring;
   const headers = ready
     ? { ...baseHeaders, "X-Tomverse-Trace-Id": traceId }
     : {
@@ -195,6 +205,29 @@ const readinessResponse = async (head = false) => {
         },
       }),
       reportOperationalDependencyStatus({
+        dependency: "email-snapshot-keyring",
+        healthy: emailSnapshotKeyring,
+        code: "EMAIL_SNAPSHOT_KEYRING_NOT_READY",
+        title: "Email render snapshots cannot be sealed",
+        error:
+          snapshotKeyring.errors.length > 0
+            ? snapshotKeyring.errors.map((problem) => problem.message).join(" | ")
+            : "The email snapshot keyring is configured.",
+        severity: "fatal",
+        context: {
+          component: "api-ready",
+          route: "/api/ready",
+          // Counts, never the version label or the secret: a keyring is
+          // misconfigured most often by a value pasted into the wrong
+          // variable, and the wrong variable here holds key material.
+          versionCount: snapshotKeyring.versionCount,
+          warnings:
+            snapshotKeyring.warnings.map((problem) => problem.code).join(",") ||
+            "none",
+          traceId,
+        },
+      }),
+      reportOperationalDependencyStatus({
         dependency: "security-environment",
         healthy: securityEnvironment,
         code: "SECURITY_ENVIRONMENT_NOT_READY",
@@ -230,6 +263,7 @@ const readinessResponse = async (head = false) => {
         providerBudgets,
         imageProviderBudget,
         emailSendingIdentity,
+        emailSnapshotKeyring,
       },
       traceId,
     },

@@ -136,6 +136,11 @@ const ENGLISH_STRING_CEILING = {
   // "chat" -- sidebar.newChat is "Neuer Chat", "Nuevo chat", "Nouveau chat",
   // "Novo chat". Korean and Chinese use their own word (대화 / 对话), so
   // neither moved. The full phrase this shortens is translated in all six.
+  //
+  // The three notes above arrived on opposite sides of the develop -> main
+  // merge and every one of them still holds: the merged tree carries both the
+  // exit control and the assistant/preference-centre copy, so the counts are
+  // the sum rather than either side's.
   zh: 10,
   fr: 32,
   de: 27,

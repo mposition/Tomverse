@@ -9,6 +9,11 @@ import {
     type CandidateRejection,
     type RouterCandidateInput,
 } from "@/lib/routerCandidates";
+import { expectedTotalCostUsdByModel } from "@/lib/routerCostSignal";
+import {
+    ROUTER_SCORE_POLICY_VERSION,
+    type RouterTieBreakSignals,
+} from "@/lib/routerScorePolicy";
 import {
     ROUTER_SELECTION_VERSION,
     selectRouterModel,
@@ -74,6 +79,8 @@ export type RoutingShadowInput = {
     sticky?: RouterStickyState | null;
     unhealthyModelIds?: readonly string[];
     regionBlockedModelIds?: readonly string[];
+    /** Measured tie-break signals; cost is derived when not supplied. */
+    signals?: RouterTieBreakSignals;
 };
 
 export type RoutingShadowDecision = {
@@ -85,6 +92,7 @@ export type RoutingShadowDecision = {
     taskProfileVersion: string;
     candidateFilterVersion: string;
     selectionVersion: string;
+    selectionPolicyVersion: string;
     estimatorVersion: string;
     profileKind: string;
     profileConfidence: string;
@@ -131,6 +139,14 @@ export function buildRoutingShadowDecision(
         profile: input.profile,
         eligible: candidates.eligible,
         sticky: input.sticky ?? null,
+        signals: {
+            expectedTotalCostUsdByModelId: expectedTotalCostUsdByModel({
+                models: input.models,
+                reservedInputTokens: input.reservedInputTokens,
+                requestOutputCapTokens: input.requestOutputCapTokens,
+            }),
+            ...input.signals,
+        },
     });
 
     // Counts, not a list. Which models were refused is stable catalogue
@@ -154,6 +170,7 @@ export function buildRoutingShadowDecision(
         taskProfileVersion: TASK_PROFILE_VERSION,
         candidateFilterVersion: ROUTER_CANDIDATE_VERSION,
         selectionVersion: ROUTER_SELECTION_VERSION,
+        selectionPolicyVersion: ROUTER_SCORE_POLICY_VERSION,
         estimatorVersion: ACTIVE_ESTIMATOR_VERSION,
         profileKind: input.profile.kind,
         profileConfidence: input.profile.kindConfidence,

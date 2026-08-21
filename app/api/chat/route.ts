@@ -17,13 +17,15 @@ import {
 import { conversationKindNotSupportedResponse, isChatConversationKind } from "@/lib/conversationKindGuard";
 import { prisma } from "@/lib/prisma";
 import {
-    AVAILABLE_MODELS,
     modelSupportsImageInput,
     modelSupportsNativePdfInput,
     type AiModel,
 } from "@/lib/models";
 import { buildTaskProfile } from "@/lib/taskProfileCore";
-import { scheduleRoutingShadowRun } from "@/lib/routingShadow";
+import {
+    isRouterShadowEnabled,
+    scheduleRoutingShadowRun,
+} from "@/lib/routingShadow";
 import { selectAutoModel } from "@/lib/autoModelSelection";
 import { decideAutoCohort } from "@/lib/autoCohort";
 import { decideDrillOverride } from "@/lib/autoDrillOverride";
@@ -55,6 +57,8 @@ import { getWebSearchCapability } from "@/lib/webSearchCapability";
 import { reserveNativeSearchCost } from "@/lib/webSearchNativeCostReservation";
 import { getWebSearchSurchargeCredits } from "@/lib/webSearchCredits";
 import { buildWebSearchToolConfig, WEB_SEARCH_TOOL_NAMES } from "@/lib/webSearchToolConfig";
+import { hasSearchPath, resolveAttemptSearchPath } from "@/lib/webSearchPath";
+import { getRouterRuntimeSignals } from "@/lib/routerRuntimeSignals";
 import { normalizeWebSearchExecution } from "@/lib/webSearchExecutionNormalizer";
 import { buildChatStreamTrailerChunk } from "@/lib/webSearchStreamTrailer";
 import {
@@ -953,6 +957,54 @@ async function handleChatPost(
             autoCohort.eligible && turnCarriesAttachments(messages)
                 ? await measureTurnAttachments(messages, ownAttachmentPrefix)
                 : ({ measurable: true, descriptors: [] } as const);
+        // Health and the measured tie-break signals, from one cached snapshot.
+        // Read only for an account the cohort would actually route: a feature
+        // that is off should cost nothing, which is the same reason the
+        // attachment measurement above is skipped. The read never throws --
+        // an input it could not fetch is unknown, and unknown has a defined
+        // meaning in every criterion downstream.
+        //
+        // Read for a shadow turn too, not only a routable one. Shadow records
+        // what Auto *would* have chosen, and today the cohort refuses everyone
+        // -- so the turns shadow records are exactly the turns this would
+        // otherwise skip, and the recorded decision would be made without the
+        // health and signal inputs the real one uses.
+        const routerShadowEnabled = isRouterShadowEnabled();
+        const routerSignals =
+            autoCohort.eligible || routerShadowEnabled
+                ? await getRouterRuntimeSignals()
+                : null;
+        /**
+         * What the Router decides from, built once.
+         *
+         * Spread into the live selection and the shadow recorder both. They
+         * assembled these separately before, and had drifted: shadow read the
+         * static catalogue rather than the runtime registry, so it considered
+         * models an operator had disabled; it passed neither the health
+         * exclusions nor the tie-break signals; and it derived
+         * `webSearchRequested` from whether the *user's* model has a native
+         * search tool rather than from what the user asked for, which changes
+         * `needsCurrentInformation` and with it the candidate set.
+         *
+         * A shadow given different inputs measures a different router, and the
+         * rollout's exit condition is a comparison of its distribution against
+         * the live one. One object is what stops that happening again.
+         */
+        const routerCandidateInputs = {
+            // Runtime models, not the static catalogue: a model an operator has
+            // disabled must not be chosen and then refused two lines later by
+            // `assertModelRuntimeAvailable`.
+            models: runtimeModels.filter(
+                (model) => model.enabled && !model.catalogDeleted
+            ),
+            // Confirmed unavailable only. `degraded` stays a candidate and
+            // loses tie-breaks instead, and `unknown` -- every model nothing
+            // probes -- excludes nobody: uncertainty is not a verdict.
+            unhealthyModelIds: routerSignals?.unhealthyModelIds,
+            signals: routerSignals?.signals,
+            // What the user asked for, not what their model happens to support.
+            webSearchRequested: webSearchMode === "always",
+        };
         const autoSelection = selectAutoModel({
             requestedModelId,
             conversation: conversationRouting,
@@ -972,13 +1024,7 @@ async function handleChatPost(
                       mediaType: descriptor.mediaType,
                   }))
                 : [],
-            webSearchRequested: webSearchMode === "always",
-            // Runtime models, not the static catalogue: a model an operator has
-            // disabled must not be chosen and then refused two lines later by
-            // `assertModelRuntimeAvailable`.
-            models: runtimeModels.filter(
-                (model) => model.enabled && !model.catalogDeleted
-            ),
+            ...routerCandidateInputs,
             reservedInputTokens: preflightInputEstimate(messages).estimatedInputTokens,
             // The unfitted application cap. The filters fit it to each model's
             // own window; a figure already fitted to the requested model's
@@ -2166,7 +2212,7 @@ async function handleChatPost(
                             mediaType:
                                 "mediaType" in part ? part.mediaType : undefined,
                         })),
-                    webSearchRequested: nativeSearchEnabled,
+                    webSearchRequested: routerCandidateInputs.webSearchRequested,
                 }),
                 userSelectedModelId: modelConfig.id,
                 estimatedInputTokens,
@@ -2175,7 +2221,9 @@ async function handleChatPost(
                 // candidate's own window, and handing them the figure already
                 // fitted to the user's model would bias every other candidate.
                 requestOutputCapTokens: budget.maxOutputTokens,
-                models: AVAILABLE_MODELS,
+                models: routerCandidateInputs.models,
+                unhealthyModelIds: routerCandidateInputs.unhealthyModelIds,
+                signals: routerCandidateInputs.signals,
             };
         });
         const accessGrant = await acquireChatAccess(access, budget, {
@@ -2386,6 +2434,43 @@ async function handleChatPost(
         const webSearchToolConfig = nativeSearchEnabled
             ? buildWebSearchToolConfig(webSearchCapability)
             : null;
+        // Whether this dispatch will actually be able to search, as opposed to
+        // being allowed to. The Router's filter answers the second: it keeps a
+        // native model for a turn that needs current information because the
+        // model *can* search. Whether it *will* depends on the mode, the tool
+        // configuration and the surcharge, none of which the filter can see --
+        // it runs before there is an attempt to configure or a cost to
+        // reserve. See docs/policy/tomverse-chat-router-score-policy.md §8.
+        const primarySearchPath = resolveAttemptSearchPath({
+            support: webSearchCapability.support,
+            webSearchMode: webSearchMode ?? null,
+            toolConfigBuilt: webSearchToolConfig !== null,
+            surchargeCredits: getWebSearchSurchargeCredits(
+                webSearchMode ?? "off",
+                webSearchCapability
+            ),
+        });
+        // Recorded, not refused. A routed turn whose profile says it needs the
+        // web and whose model will not search is the incoherence this check
+        // exists to surface -- but the answer still goes out, because the
+        // alternatives are refusing a turn the user would rather have answered
+        // imperfectly, or switching search on for a mode they set to `off`.
+        // Which of those to do is a product decision; making the case visible
+        // is not. Content-free: fixed identifiers and model ids only.
+        if (
+            autoSelection.routed &&
+            autoSelection.record.needsCurrentInformation &&
+            !hasSearchPath(primarySearchPath)
+        ) {
+            console.warn(JSON.stringify({
+                event: "chat_auto_search_path_missing",
+                traceId,
+                modelId: modelConfig.id,
+                gap: primarySearchPath.kind === "none" ? primarySearchPath.gap : null,
+                selectionReason: autoSelection.record.selectionReason,
+                timestamp: new Date().toISOString(),
+            }));
+        }
         /*
           This turn's generated files (docs/policy/generated-artifacts.md).
 
@@ -2430,10 +2515,10 @@ async function handleChatPost(
           Tools from both features, merged rather than chosen between.
 
           The names cannot collide: the native search tools are `web_search`
-          and `google_search`, and this one is `create_spreadsheet`. Where the
-          two features genuinely cannot coexist -- a forced search, or Google
-          grounding -- `planGeneratedArtifactTool` has already refused, so
-          nothing here has to re-derive that.
+          and `google_search`, and these are the five `create_*` tools. Where
+          the two features genuinely cannot coexist -- a forced search, or
+          Google grounding -- `planGeneratedArtifactTool` has already refused,
+          so nothing here has to re-derive that.
 
           `stopWhen` is set only when the artifact tool is registered. Every
           other turn keeps the SDK's single-step default, so a request that
@@ -3175,6 +3260,18 @@ async function handleChatPost(
                 webSearchMode: webSearchMode ?? null,
                 traceId,
                 attemptIndex: dispatched.attemptIndex + 1,
+                // `docs/policy/tomverse-chat-routing.md` §10, in the
+                // direction it is usually read the other way round: a fallback
+                // may not silently change what the user was going to get. If
+                // the primary was going to search, a candidate that will answer
+                // from training data instead is a different answer to the same
+                // question, not a substitute for it.
+                //
+                // In practice this fires for a search-model primary. Once a
+                // provider-native tool has been offered, autoFallbackGate has
+                // already refused to fall back at all -- a search may have run
+                // and been surcharged by then.
+                requireSearchPath: hasSearchPath(primarySearchPath),
             });
             if (!planned.ok) {
                 reportFallbackRefusal(`candidate_${planned.refusal.kind}`);

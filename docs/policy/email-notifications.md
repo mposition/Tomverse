@@ -1092,7 +1092,15 @@ idempotencyKey = hash(eventId, recipientKey, templateVersionId, policyVersionId)
 | transactional (P0) | standard | 8 | 10s, 30s, 1m, 5m, 15m, 1h, 4h | incident + 앱 내 대체 경로 |
 | legal (P0) | standard | 10 | 위 + 12h, 24h | **incident(critical) + 수동 후속 + 대체 채널** |
 | service (P1) | standard | 6 | 현행과 동일 | incident |
-| marketing (P3) | standard | 2 | 5m, 1h | **조용히 포기.** 프로모션 재시도는 가치보다 위험이 큼 |
+| marketing (P3) | standard | 2 | 5m | **조용히 포기.** 프로모션 재시도는 가치보다 위험이 큼 |
+
+**"최대 시도"는 최초 발송을 포함한 총 횟수입니다.** 따라서 백오프 개수는 항상
+`최대 시도 − 1`입니다 — transactional 7개/8회, service 5개/6회, legal 9개/10회.
+marketing 행은 2026-08-21까지 `2`와 `5m, 1h`를 함께 적고 있어 이 규칙만 어겼고,
+구현은 백오프를 따라 3회를 시도하고 있었습니다. **상한 쪽을 남겼습니다** — 아래
+문단이 논증하는 숫자가 그것이고, 나머지 세 행과 계산 방식이 일치해야 합니다.
+`tests/standardEmailRetryCore.test.mjs`가 이 표 전체를 그대로 옮겨 적어 고정하며,
+`delays.length === maxAttempts - 1` 불변식도 함께 검사합니다.
 
 **marketing의 관대한 재시도가 중요합니다.** 실패한 프로모션을 끈질기게 재시도하면
 일시적 차단이 영구적 평판 손상이 됩니다.
@@ -1657,6 +1665,37 @@ processingError    String?
    그 키가 살아 있어야 합니다. 이것은 운영 항목이지 코드 항목이 아니며,
    **키 보관 기간을 정하지 않은 채 HMAC으로 전환하면 감사 능력을 조용히
    잃습니다.**
+
+8. **키가 없으면 배포는 ready가 아닙니다 (v5 추가).** 규칙 2의 봉투 암호화는
+   `EMAIL_SNAPSHOT_KEYS`(그리고 회전 중에는 `EMAIL_SNAPSHOT_KEY_VERSION`)로
+   구성합니다. **키가 없으면 standard lane의 enqueue가 예외를 던지고**,
+   그 호출부 넷 — 환영 메일, 구독 시작 메일, 계정 삭제 예약 메일, 복구 메일 —
+   은 사용자의 본 작업이 성공하도록 그 예외를 모두 삼킵니다. 사용자에게 옳은
+   동작이지만, 결과는 **화면에 아무 표시 없이 메일이 사라지고 로그 한 줄만
+   남는 것**입니다. 이 lane에는 feature flag가 없으므로 "flag는 꺼져 있고 키는
+   없는" 중간 상태가 존재하지 않습니다.
+
+   그래서 `/api/ready`가 `emailSnapshotKeyring`을 검사하고, 아래 상태에서
+   **거부**합니다. 판정은 `snapshotKeyringProblems()`
+   (`lib/emailSnapshotCrypto.ts`) 한 곳에 있고 `readSnapshotKeyring()`과 같은
+   parser를 씁니다 — 검사와 실제 사용이 서로 다른 규칙을 갖는 것이 이 검사가
+   막으려는 실패입니다.
+
+   | 코드 | 상태 | 등급 |
+   |---|---|---|
+   | `SNAPSHOT_KEYS_MISSING` | 변수 없음 또는 공백 | error |
+   | `SNAPSHOT_KEYS_UNPARSEABLE` | 설정돼 있으나 `version:secret` 쌍을 하나도 읽을 수 없음 | error |
+   | `SNAPSHOT_ACTIVE_VERSION_UNKNOWN` | `EMAIL_SNAPSHOT_KEY_VERSION`이 keyring에 없는 버전을 가리킴 | error |
+   | `SNAPSHOT_ACTIVE_VERSION_UNPINNED` | 키가 둘 이상인데 활성 버전이 고정되지 않음 | warning |
+
+   **환경변수를 먼저 배포하고 코드를 나중에** 배포합니다. 이 검사는 그 순서를
+   강제하는 장치이지 순서를 대신해 주는 것이 아닙니다.
+
+   **오류 메시지는 환경변수 값을 되돌려 적지 않습니다.** keyring 오설정은
+   대개 값을 엉뚱한 변수에 붙여 넣어 생기고, 여기서 엉뚱한 변수에 담기는 것은
+   키 자체입니다. 메시지와 구조화 로그에는 **개수만** 남깁니다.
+
+   값을 만들고 넣고 회전하는 절차는 `docs/ops/email-snapshot-keyring.md`.
 
 **legal 분류는 그 위에 완성 본문도 보관합니다.** 재구성이 아니라 원본이
 필요하고, 건수가 적습니다.

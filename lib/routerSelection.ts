@@ -2,65 +2,79 @@
  * Router Pass 1's choice — step 3 of the rollout order in the delivery plan §6.
  *
  * The filters decided who may be considered; this decides who wins. It is
- * deliberately the smallest thing that can be called a decision: a preference
- * lookup, a deterministic tie-break, and the stickiness rule the routing
- * policy already specifies. Nothing here dispatches, prices or persists.
+ * deliberately the smallest thing that can be called a decision: a lookup in
+ * the scoring policy, a deterministic tie-break, and the stickiness rule the
+ * routing policy already specifies. Nothing here dispatches, prices or
+ * persists.
  *
- * **What the preference is, and what it is not.** Scores come from
- * `TASK_SCORES` in `lib/modelFinder.ts` — the curated table the model finder
- * already uses to answer "which model suits this kind of work". Reused rather
- * than reinvented so the repository holds one opinion; a second table would
- * drift, and the second would be the one nobody remembered to update. It is
- * *curation*, not measurement. `ROUTE-01` ("Auto Router quality is
- * non-inferior to the fixed-model baseline") is what turns this into a claim
- * about quality, and it has not run. Until it does, this is a rule that can be
- * observed in shadow mode, not a rule that is known to be good.
+ * **The policy is one versioned bundle, and it is not the model finder's.**
+ * Bands, thresholds, the tie-break order and the switch margin all come from
+ * `lib/routerScorePolicy.ts` under one version. Until now they came from
+ * `TASK_SCORES` in `lib/modelFinder.ts` -- since renamed `MODEL_FINDER_SCORES`
+ * -- a six-model product questionnaire
+ * -- which meant the Router could not reach twenty-four of the thirty enabled
+ * models, and that a change made for one consumer silently changed the other.
+ * This module no longer imports the model finder at all; that is what makes
+ * the separation real rather than a comment.
  *
- * **The margin is in the table's own units.** It is a difference between two
- * curated integers, so the switch threshold below is versioned configuration
- * rather than a probability, exactly as the routing policy says ("Exact values
- * are versioned Router configuration, not client behavior").
+ * **The margin is in the policy's own units.** It is a difference between
+ * quality bands, so the switch threshold is versioned configuration rather
+ * than a probability, exactly as the routing policy says ("Exact values are
+ * versioned Router configuration, not client behavior"). It moved from 2
+ * points to 1 band with the scale, because the literal 2 would have meant
+ * something else entirely on a three-level scale.
+ *
+ * **It is curation and measurement, kept apart.** Bands are curation and are
+ * all neutral today; cost, success rate and time to first token are
+ * measurements, and they are inputs rather than lookups -- the caller owns
+ * where they come from, and this owns what they mean, the same arrangement
+ * `unhealthyModelIds` already has in `lib/routerCandidates.ts`. `ROUTE-01`
+ * ("Auto Router quality is non-inferior to the fixed-model baseline") is what
+ * would turn any of this into a claim about quality, and it has not run.
  *
  * **Stickiness never overrides a filter.** A previous selection that is no
  * longer eligible is not kept; it lost on a hard rule, and hard rules do not
  * lose to continuity.
+ *
+ * Pure: no database, no clock, no network, no model call.
  */
 
-import { STANDARD_CANDIDATE_ORDER, TASK_SCORES } from "@/lib/modelFinder";
 import type { RouterCandidate } from "@/lib/routerCandidates";
+import {
+    ROUTER_COST_TIE_EPSILON_RATIO,
+    ROUTER_SCORE_POLICY_VERSION,
+    ROUTER_STICKY_SWITCH_MARGIN_BANDS,
+    ROUTER_SUCCESS_RATE_TIE_EPSILON,
+    ROUTER_TTFT_TIE_EPSILON_MS,
+    compareRouterScoreCells,
+    getRouterScoreCell,
+    rankingKindFor,
+    stickyHysteresisTurnsFor,
+    type RouterScoreCell,
+    type RouterTieBreakCriterion,
+    type RouterTieBreakSignals,
+} from "@/lib/routerScorePolicy";
 import type { TaskProfile } from "@/lib/taskProfileCore";
 
-/** Bump with any change to the rule, the tie-break, or the configuration. */
-export const ROUTER_SELECTION_VERSION = "router-selection-v1";
-
-/**
- * How much better a challenger must look before Auto changes model mid
- * conversation, in `TASK_SCORES` units.
- *
- * Switching on a hair's difference is the failure the policy's "confidence
- * margin plus hysteresis" exists to prevent: the user sees the model change
- * between two turns that felt the same to them, and neither answer explains
- * why.
- */
-export const ROUTER_STICKY_SWITCH_MARGIN = 2;
-
-/**
- * And how many consecutive turns must favour the challenger by that margin.
- *
- * One turn is not a trend. A single question of a different shape inside a
- * long conversation should not move the model, because the next turn is
- * usually back to the original subject.
- */
-export const ROUTER_STICKY_HYSTERESIS_TURNS = 2;
+/** Bump with any change to the rule or the tie-break. */
+export const ROUTER_SELECTION_VERSION = "router-selection-v2";
 
 export const SELECTION_REASONS = [
     /** Nothing survived the filters. The caller must not invent a model. */
     "no_candidate",
     /** Exactly one candidate; no preference was consulted. */
     "only_candidate",
-    /** The curated table preferred this model for the profile's task. */
+    /** The scoring policy preferred this model for the profile's task. */
     "task_preference",
-    /** No preference distinguished the candidates; catalogue order decided. */
+    /**
+     * Quality did not separate the candidates; a tie-break decided.
+     *
+     * Deliberately one reason rather than one per criterion. It is the reason
+     * a user can be shown ("no model was a better fit for this message"), and
+     * splitting it would put the Router's cost and latency comparisons into
+     * chat copy. Which criterion actually decided is on `decidedBy`, which is
+     * operator telemetry and never rendered.
+     */
     "fallback_order",
     /** A different model scored higher, but not by enough for long enough. */
     "sticky",
@@ -80,11 +94,20 @@ export type RouterStickyState = {
 
 export type RouterSelectionResult = {
     version: string;
+    /** The scoring policy this decision was made under. */
+    policyVersion: string;
     /** Null only when nothing was eligible. */
     selectedModelId: string | null;
     reason: SelectionReason;
-    /** Score difference between the top two candidates, in table units. */
+    /** Band difference between the top two candidates, in whole bands. */
     margin: number;
+    /**
+     * Which tie-break criterion separated the top two, for operators.
+     *
+     * Null when there was nothing to separate -- no candidate, or one. Never
+     * user-facing: `reason` is what a person is shown.
+     */
+    decidedBy: RouterTieBreakCriterion | null;
     /** The model that would have been chosen without stickiness. */
     challengerModelId: string | null;
     /**
@@ -109,23 +132,116 @@ export type RouterSelectionResult = {
     turnsFavouringChallenger: number;
 };
 
-const orderIndex = (modelId: string) => {
-    const index = (STANDARD_CANDIDATE_ORDER as readonly string[]).indexOf(
-        modelId
+type ScoredCandidate = {
+    modelId: string;
+    cell: RouterScoreCell;
+};
+
+/**
+ * Compares one measured signal, and abstains when it cannot.
+ *
+ * Two rules, both about not inventing information. A signal absent for either
+ * model is unknown rather than zero, so the criterion abstains and the next
+ * one decides -- otherwise a model nobody has ever called would outrank one
+ * with a measured record. And two values within the policy's epsilon are the
+ * same value, so the Router does not reshuffle itself over a rounding
+ * difference while reporting a confident reason for it.
+ */
+const compareSignal = (
+    left: number | undefined,
+    right: number | undefined,
+    { epsilon, lowerWins }: { epsilon: number; lowerWins: boolean }
+): number => {
+    if (typeof left !== "number" || typeof right !== "number") return 0;
+    if (!Number.isFinite(left) || !Number.isFinite(right)) return 0;
+    if (Math.abs(left - right) <= epsilon) return 0;
+    return lowerWins ? left - right : right - left;
+};
+
+/** Relative, because a cent between two cheap models is not a cent between two expensive ones. */
+const compareCost = (left: number | undefined, right: number | undefined) => {
+    if (typeof left !== "number" || typeof right !== "number") return 0;
+    if (!Number.isFinite(left) || !Number.isFinite(right)) return 0;
+    const larger = Math.max(Math.abs(left), Math.abs(right));
+    if (larger === 0) return 0;
+    if (Math.abs(left - right) / larger <= ROUTER_COST_TIE_EPSILON_RATIO) return 0;
+    return left - right;
+};
+
+/**
+ * Applies `ROUTER_TIE_BREAK_ORDER` and reports which entry decided.
+ *
+ * One function rather than a comparator plus a separate explanation, so the
+ * order a decision is explained by cannot drift from the order it was made in.
+ */
+const compareCandidates = (
+    left: ScoredCandidate,
+    right: ScoredCandidate,
+    signals: RouterTieBreakSignals
+): { order: number; decidedBy: RouterTieBreakCriterion } => {
+    const byQuality = compareRouterScoreCells(left.cell, right.cell);
+    if (byQuality !== 0) return { order: byQuality, decidedBy: "quality_band" };
+
+    // A degraded model is still a candidate -- refusal is a hard filter, and
+    // this is not one -- but it loses to a model nothing is reporting problems
+    // with, before price is even asked about. Absence from the set is "not
+    // known to be degraded", so an unprobed model is not demoted for being
+    // unprobed.
+    const degraded = signals.degradedModelIds;
+    if (degraded !== undefined && degraded.length > 0) {
+        const leftDegraded = degraded.includes(left.modelId);
+        const rightDegraded = degraded.includes(right.modelId);
+        if (leftDegraded !== rightDegraded) {
+            return {
+                order: leftDegraded ? 1 : -1,
+                decidedBy: "health_degraded",
+            };
+        }
+    }
+
+    const byCost = compareCost(
+        signals.expectedTotalCostUsdByModelId?.[left.modelId],
+        signals.expectedTotalCostUsdByModelId?.[right.modelId]
     );
-    // A model outside the curated order sorts last, and by id among itself, so
-    // the result stays deterministic for a catalogue this table has not caught
-    // up with yet.
-    return index === -1 ? Number.MAX_SAFE_INTEGER : index;
+    if (byCost !== 0) return { order: byCost, decidedBy: "expected_total_cost" };
+
+    const bySuccess = compareSignal(
+        signals.recentSuccessRateByModelId?.[left.modelId],
+        signals.recentSuccessRateByModelId?.[right.modelId],
+        { epsilon: ROUTER_SUCCESS_RATE_TIE_EPSILON, lowerWins: false }
+    );
+    if (bySuccess !== 0) {
+        return { order: bySuccess, decidedBy: "recent_success_rate" };
+    }
+
+    const byLatency = compareSignal(
+        signals.ttftP95MsByModelId?.[left.modelId],
+        signals.ttftP95MsByModelId?.[right.modelId],
+        { epsilon: ROUTER_TTFT_TIE_EPSILON_MS, lowerWins: true }
+    );
+    if (byLatency !== 0) return { order: byLatency, decidedBy: "ttft_p95" };
+
+    // Arbitrary, stable, and total. Not a quality judgement: what it buys is
+    // that two runs over the same inputs answer the same way, which the old
+    // fallback -- position in a six-model curated order -- could not do for
+    // the models that order never listed.
+    if (left.modelId === right.modelId) return { order: 0, decidedBy: "model_id" };
+    return {
+        order: left.modelId < right.modelId ? -1 : 1,
+        decidedBy: "model_id",
+    };
 };
 
 export function selectRouterModel(input: {
     profile: TaskProfile;
     eligible: readonly RouterCandidate[];
     sticky?: RouterStickyState | null;
+    /** Measured inputs for tie-break criteria 2 to 4. See the policy module. */
+    signals?: RouterTieBreakSignals;
 }): RouterSelectionResult {
     const base = {
         version: ROUTER_SELECTION_VERSION,
+        policyVersion: ROUTER_SCORE_POLICY_VERSION,
         turnsFavouringChallenger: 0,
     };
 
@@ -135,32 +251,35 @@ export function selectRouterModel(input: {
             selectedModelId: null,
             reason: "no_candidate",
             margin: 0,
+            decidedBy: null,
             challengerModelId: null,
             rankedModelIds: [],
         };
     }
 
-    const preference = TASK_SCORES[input.profile.kind] ?? {};
+    const signals = input.signals ?? {};
+    // A kind nothing supported does not steer the ranking; it falls back to
+    // the general column. See `rankingKindFor`.
+    const kind = rankingKindFor(input.profile);
     const ranked = [...input.eligible]
         .map((candidate) => ({
             modelId: candidate.modelId,
-            score: preference[candidate.modelId] ?? 0,
+            cell: getRouterScoreCell(candidate.modelId, kind),
         }))
-        .sort((left, right) => {
-            if (right.score !== left.score) return right.score - left.score;
-            const byOrder = orderIndex(left.modelId) - orderIndex(right.modelId);
-            if (byOrder !== 0) return byOrder;
-            return left.modelId < right.modelId ? -1 : 1;
-        });
+        .sort((left, right) => compareCandidates(left, right, signals).order);
 
     const rankedModelIds = ranked.map((candidate) => candidate.modelId);
     const winner = ranked[0];
     const runnerUp = ranked[1];
-    const margin = runnerUp ? winner.score - runnerUp.score : 0;
+    const bandOf = (candidate: ScoredCandidate) => candidate.cell.qualityBand;
+    const margin = runnerUp ? bandOf(winner) - bandOf(runnerUp) : 0;
+    const decidedBy = runnerUp
+        ? compareCandidates(winner, runnerUp, signals).decidedBy
+        : null;
 
     const naturalReason: SelectionReason = !runnerUp
         ? "only_candidate"
-        : winner.score > runnerUp.score
+        : decidedBy === "quality_band"
           ? "task_preference"
           : "fallback_order";
 
@@ -177,6 +296,7 @@ export function selectRouterModel(input: {
             selectedModelId: winner.modelId,
             reason: naturalReason,
             margin,
+            decidedBy,
             challengerModelId: winner.modelId,
             rankedModelIds,
         };
@@ -184,20 +304,26 @@ export function selectRouterModel(input: {
 
     // The challenger is measured against the model actually in use, not
     // against the runner-up: what decides a switch is how much better the
-    // alternative is than what the user is already getting.
-    const stickyScore = preference[sticky.modelId] ?? 0;
-    const challengerMargin = winner.score - stickyScore;
+    // alternative is than what the user is already getting. In bands, because
+    // that is the scale the margin is stated on -- a cheaper or faster model
+    // is not a reason to change a conversation's model mid-way, only a reason
+    // to have started somewhere else.
+    const stickyBand = getRouterScoreCell(sticky.modelId, kind).qualityBand;
+    const challengerMargin = bandOf(winner) - stickyBand;
+    const requiredTurns = stickyHysteresisTurnsFor(input.profile);
     const streak =
-        challengerMargin >= ROUTER_STICKY_SWITCH_MARGIN
+        challengerMargin >= ROUTER_STICKY_SWITCH_MARGIN_BANDS
             ? sticky.turnsFavouringChallenger + 1
             : 0;
 
-    if (streak >= ROUTER_STICKY_HYSTERESIS_TURNS) {
+    if (streak >= requiredTurns) {
         return {
             version: ROUTER_SELECTION_VERSION,
+            policyVersion: ROUTER_SCORE_POLICY_VERSION,
             selectedModelId: winner.modelId,
             reason: naturalReason,
             margin: challengerMargin,
+            decidedBy,
             challengerModelId: winner.modelId,
             rankedModelIds,
             // The switch happened, so the streak has done its job and starts
@@ -208,9 +334,11 @@ export function selectRouterModel(input: {
 
     return {
         version: ROUTER_SELECTION_VERSION,
+        policyVersion: ROUTER_SCORE_POLICY_VERSION,
         selectedModelId: sticky.modelId,
         reason: "sticky",
         margin: challengerMargin,
+        decidedBy,
         challengerModelId: winner.modelId,
         rankedModelIds,
         turnsFavouringChallenger: streak,

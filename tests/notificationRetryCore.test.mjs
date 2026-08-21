@@ -314,8 +314,12 @@ test("every attempt at one notification presents the same idempotency key", () =
 });
 
 test("the mailer forwards the key as the provider's header, within its limit", () => {
-  const email = read("lib/email.ts");
-  assert.match(email, /"Idempotency-Key": input\.idempotencyKey\.slice\(0, 256\)/);
+  // The wire call moved into the provider port (docs/policy/email-notifications.md
+  // §8.2) when `lib/email.ts` stopped holding two copies of it. The invariant is
+  // unchanged: whatever the queue hands down reaches the provider as its
+  // idempotency header, cut to the length the provider accepts.
+  const core = read("lib/emailProviderPortCore.ts");
+  assert.match(core, /"Idempotency-Key": config\.idempotencyKey\.slice\(0, 256\)/);
 });
 
 test("a notification renders identically however many times it is attempted", () => {

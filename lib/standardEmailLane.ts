@@ -37,7 +37,9 @@ import {
   type ProviderSendOutcome,
 } from "@/lib/emailSendRetryCore";
 import {
+  RETRY_CLASSIFICATIONS,
   STANDARD_LANE_CLAIM_TTL_MS,
+  abandonmentEscalation,
   nextStandardAttempt,
 } from "@/lib/standardEmailRetryCore";
 
@@ -226,6 +228,14 @@ export type StandardDrainResult = {
   abandoned: number;
   suppressed: number;
   pending: number;
+  /**
+   * Abandonments by classification.
+   *
+   * A total on its own cannot be escalated correctly: §9.4 gives each
+   * classification its own answer to running out of attempts, and "three
+   * messages were abandoned" does not say whether a person has to be woken.
+   */
+  abandonedByClassification: Record<EmailClassification, number>;
 };
 
 type ClaimedDelivery = {
@@ -424,7 +434,7 @@ const sendClaimedDelivery = async (delivery: ClaimedDelivery, now: Date) => {
         claimedAt: null,
       },
     });
-    return "suppressed" as const;
+    return { outcome: "suppressed" as const, classification: definition.classification };
   }
   if (verdict.raiseIncident === "transactional_complaint") {
     await reportOperationalIncident({
@@ -464,7 +474,7 @@ const sendClaimedDelivery = async (delivery: ClaimedDelivery, now: Date) => {
           claimedAt: null,
         },
       });
-      return "suppressed" as const;
+      return { outcome: "suppressed" as const, classification: definition.classification };
     }
   }
 
@@ -490,7 +500,7 @@ const sendClaimedDelivery = async (delivery: ClaimedDelivery, now: Date) => {
           claimedAt: null,
         },
       });
-      return "suppressed" as const;
+      return { outcome: "suppressed" as const, classification: definition.classification };
     }
   }
 
@@ -553,13 +563,14 @@ const sendClaimedDelivery = async (delivery: ClaimedDelivery, now: Date) => {
         ? classifyTransportError(response.transportError)
         : classifyProviderStatus(response.status);
 
-  return recordOutcome(delivery, outcome, {
+  const recorded = await recordOutcome(delivery, outcome, {
     now,
     attempts,
     classification: definition.classification,
     rendered,
     status: response.ok ? null : (response.status ?? null),
   });
+  return { outcome: recorded, classification: definition.classification };
 };
 
 /**
@@ -585,6 +596,12 @@ export async function drainStandardEmailDeliveries(options?: {
     abandoned: 0,
     suppressed: 0,
     pending: 0,
+    abandonedByClassification: {
+      transactional: 0,
+      service: 0,
+      legal: 0,
+      marketing: 0,
+    },
   };
 
   while (result.claimed < limit && Date.now() < deadline) {
@@ -594,11 +611,13 @@ export async function drainStandardEmailDeliveries(options?: {
     result.claimed += 1;
 
     try {
-      const outcome = await sendClaimedDelivery(delivery, now);
+      const { outcome, classification } = await sendClaimedDelivery(delivery, now);
       if (outcome === "sent") result.sent += 1;
       else if (outcome === "failed") result.failed += 1;
-      else if (outcome === "abandoned") result.abandoned += 1;
-      else if (outcome === "suppressed") result.suppressed += 1;
+      else if (outcome === "abandoned") {
+        result.abandoned += 1;
+        result.abandonedByClassification[classification] += 1;
+      } else if (outcome === "suppressed") result.suppressed += 1;
     } catch (error) {
       // A render or decrypt failure, not a provider failure. Retrying it will
       // not help -- the snapshot is what it is -- so the row stops here rather
@@ -641,19 +660,34 @@ export async function drainStandardEmailDeliveries(options?: {
     where: { lane: "standard", status: "pending" },
   });
 
-  if (result.abandoned > 0) {
-    // Abandonment is the outcome nobody else notices: the account was created,
-    // the subscription started, the deletion was scheduled -- the product looks
-    // fine while the person was never told.
+  // Abandonment is the outcome nobody else notices: the account was created,
+  // the subscription started, the deletion was scheduled -- the product looks
+  // fine while the person was never told.
+  //
+  // Raised per classification rather than as one total, because §9.4 answers
+  // "what happens when it runs out of attempts" per classification and a total
+  // cannot carry that answer. It also keeps the cooldowns separate: they are
+  // keyed by incident code, so a single code would let a marketing abandonment
+  // -- the one the policy asks us to keep quiet about -- start a window that
+  // swallows a legal one minutes later.
+  for (const classification of RETRY_CLASSIFICATIONS) {
+    const abandoned = result.abandonedByClassification[classification];
+    if (abandoned === 0) continue;
+    const escalation = abandonmentEscalation(classification);
+    // Marketing. Counted above and carried in the drain's log line; §9.4 asks
+    // for a quiet surrender, and persistence is the failure mode here.
+    if (!escalation.notify) continue;
     await reportOperationalIncident({
-      code: "EMAIL_DELIVERY_ABANDONED",
-      title: "User email was abandoned after repeated failures",
-      error: `${result.abandoned} message(s) exhausted their retries`,
-      severity: "error",
+      code: escalation.code,
+      title: escalation.title,
+      error: `${abandoned} ${classification} message(s) exhausted their retries`,
+      severity: escalation.severity,
       cooldownMs: 30 * 60 * 1_000,
+      forceNotification: escalation.forceNotification,
       context: {
         component: "standard-email-lane",
-        abandoned: result.abandoned,
+        classification,
+        abandoned,
         pending: result.pending,
       },
     });
