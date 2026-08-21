@@ -35,8 +35,9 @@ suppression은 **같은 region의 계정 전체**에 적용되므로, marketing�
 | DKIM·SPF 검증 | **확인함.** 제공자 API `verified`, `dig`로 값 일치 확인 |
 | DMARC 레코드 2건 | **확인함.** 아래 값 그대로 응답 |
 | 외부 수신지 인증 레코드 | **불필요.** 아래 근거 |
-| DMARC 리포트 수신 | **미확인.** `rua` 주소가 실제로 받는지는 리포트가 와야 압니다 |
-| 새 도메인 첫 발송 | **미관측** (2026-08-21 08:00Z 기준) |
+| DMARC 리포트 수신 | **미확인.** `dmarc@tomverse.app` 사서함은 2026-08-21에 만들었다고 보고받았고, 실제 수신은 리포트가 와야 압니다 |
+| `mail.tomverse.app` 첫 발송 | **미관측** (2026-08-21 09:20Z 기준). 1.2 참조 |
+| 다른 발송 신원 3개 | **전환 안 됨.** 1.2 |
 
 ```
 _dmarc.mail.tomverse.app   "v=DMARC1; p=none; rua=mailto:dmarc@tomverse.app; fo=1"
@@ -56,13 +57,51 @@ Domain이 다를 때만 인증 절차를 요구합니다 — 정확한 도메인
 2026-08-21. `rua`를 조직 밖 주소(리포트 처리 서비스 등)로 바꾸는 순간 이 레코드가
 필요해지고, 없으면 **리포트가 조용히 오지 않습니다.**
 
+### 1.2 발송 신원은 넷이고, 전환된 것은 하나입니다
+
+2026-08-21 전환 뒤에 확인한 결과입니다. `TRANSACTIONAL_EMAIL_FROM`을 읽는 경로는
+넷 중 하나뿐이고, 나머지 셋은 Resend API를 직접 호출합니다.
+
+| 경로 | From 출처 | 2026-08-21 현재 |
+|---|---|---|
+| `lib/email.ts` → `fromAddressForStream()` | Railway `TRANSACTIONAL_EMAIL_FROM` | `hello@mail.tomverse.app` |
+| `lib/operationalMonitoring.ts` | `ADMIN_ALERT_FROM` → 하드코딩 | `Tomverse Operations <alerts@tomverse.app>` |
+| `lib/providerMonitoring.ts` | `ADMIN_ALERT_FROM` → 하드코딩 | `Tomverse Admin <alerts@tomverse.app>` |
+| `scripts/send-security-audit-report.mjs` | GitHub Actions **secret** → 하드코딩 | 관측값 `Tomverse Admin <alerts@tomverse.app>` |
+
+**세 경로는 이 저장소의 어떤 검사에도 잡히지 않습니다.** `/api/ready`의
+`emailSendingIdentity`도, `sendingIdentityProblems()`도, 스트림 분리도 전부
+`lib/emailSendingIdentity.ts`를 통과하는 발송만 봅니다. 마지막 경로는 Railway가
+아니라 GitHub secret에서 값을 읽으므로 환경변수를 바꿔도 닿지 않습니다.
+
+**이것이 §14.1과 어긋나는 지점.** 그 표는 "운영자 내부 알림 → transactional
+재사용"이라고 합니다. 전환 후 transactional은 `mail.tomverse.app`이므로 계약대로면
+이들도 함께 옮겨졌어야 하는데, 그 변수를 읽지 않아서 남았습니다. §2의 "루트는
+발송하지 않음"도 지금은 사실이 아닙니다 — purelymail(사람 메일함)과 이 세 경로가
+루트에서 나갑니다.
+
+**당장 깨지는 것은 없고, 하나가 취약합니다.** 이 알림들은 운영자 한 명에게 가는
+내부 메일이고 사용자 메일이 아닙니다. DMARC도 통과합니다 — 다만 통과 근거가
+DKIM 하나뿐입니다. 루트 SPF는 `include:_spf.purelymail.com`이라 SES를 포함하지
+않으므로 SPF는 실패하고, Resend가 루트 도메인에 서명하는 DKIM만 정렬합니다.
+
+> **그래서 전환 뒷정리로 Resend에서 `tomverse.app` 도메인을 지우면 안 됩니다.**
+> 지우는 순간 이 세 경로가 DKIM을 잃고, SPF는 원래 이들을 덮은 적이 없으므로
+> DMARC가 전부 실패합니다. 루트를 `p=quarantine` 이상으로 올린 뒤라면 운영 알림이
+> 조용히 사라집니다 — 알림이 안 오는 것을 알려 줄 알림이 그것뿐인 상태로.
+
+옮기려면 세 곳을 각각 손봐야 합니다: `ADMIN_ALERT_FROM`을 설정하거나(두 경로가
+공유), GitHub secret을 갱신하거나(감사 리포트), 세 경로를
+`fromAddressForStream()` 뒤로 넣거나. 마지막이 가장 낫지만 알림 경로를 건드리는
+변경이므로 사람이 결정합니다.
+
 ## 2. 목표 상태
 
 | 용도 | 도메인 | 비고 |
 |---|---|---|
 | transactional | `mail.tomverse.app` | `hello@tomverse.app`에서 이전 |
 | marketing | `news.tomverse.app` | marketing 활성화 시점에 신설 + warm-up |
-| 루트 | `tomverse.app` | 발송하지 않음. DMARC와 `sp=`만 둡니다 |
+| 루트 | `tomverse.app` | 발송하지 않는 것이 목표. **오늘은 아직 발송합니다** — 1.2 |
 
 ---
 
@@ -160,9 +199,18 @@ _dmarc.mail.tomverse.app`으로 직접 봅니다(1.1 — 이 환경에서 동작
 **이번에는 이 관측이 실트래픽 위에서 돌아갑니다**(3.0). 전환이 먼저 일어났으므로
 관측 기간에 나가는 메일이 곧 사용자에게 가는 메일입니다. 두 가지가 달라집니다.
 
-1. **첫 리포트를 기다리지 말고 확인합니다.** DMARC 리포트는 보통 하루 단위로 오고,
-   `rua` 주소가 받지 못하면 아무것도 오지 않은 것과 구분되지 않습니다. 24시간 안에
-   한 통도 없으면 그 자체가 조사 대상입니다 — 정렬이 완벽해서 조용한 것이 아닙니다.
+1. **첫 리포트를 기다리지 말고 확인합니다 — 단, 시계는 첫 발송부터입니다.**
+   집계 리포트는 *우리 메일을 받은 쪽*이 만듭니다. `mail.tomverse.app`에서 아직
+   아무것도 안 나갔다면 보고할 것이 있는 수신자가 없으므로 리포트가 없는 것이
+   정상입니다. DNS를 바꾼 시점이 아니라 **그 도메인에서 첫 메일이 나간 시점**부터
+   24시간을 셉니다. (이 문장이 없던 초판은 전환 직후의 침묵을 장애로 읽게 만들었고,
+   2026-08-21 09:20Z 시점에도 첫 발송은 아직 없었습니다.)
+
+   **두 종류의 침묵은 루트 리포트로 구분됩니다.** 루트 `_dmarc.tomverse.app`은
+   purelymail과 1.2의 세 경로를 이미 덮고 있으므로, 우리가 새 도메인에서 한 통도
+   보내지 않아도 루트 리포트는 옵니다. 루트 리포트는 오는데 서브도메인 리포트만
+   없다면 **사서함은 멀쩡하고 아직 안 보낸 것**입니다. 둘 다 안 오면 사서함이나
+   `rua` 쪽을 봅니다.
 2. **도달률을 함께 봅니다.** `EmailDelivery`의 bounce·complaint 비율(§14.5)이
    전환 전후로 움직이는지 봅니다. 새 도메인은 평판 이력이 없으므로 초기에 약간의
    지연이나 스팸함 분류가 있을 수 있고, 그것과 정렬 오류는 리포트로만 구분됩니다.
