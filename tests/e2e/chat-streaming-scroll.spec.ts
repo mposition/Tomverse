@@ -1,5 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 import { prepareGuestPage, sendChatMessage } from "./support/app-fixtures";
+import { scrollUpBy } from "./support/engine-capabilities";
 
 // Regression coverage for the streaming auto-scroll fix: the chat panel used
 // to force the viewport back to the bottom on every streamed chunk (a fixed
@@ -57,12 +58,11 @@ const distanceFromBottom = (page: Page, index = 0) =>
     (el) => el.scrollHeight - el.scrollTop - el.clientHeight
   );
 
-const wheelUp = async (page: Page, index = 0) => {
-  const box = await messageList(page, index).boundingBox();
-  if (!box) throw new Error("message list not visible");
-  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
-  await page.mouse.wheel(0, -800);
-};
+// The user scrolls the list up. `mouse.wheel` where the engine has a wheel,
+// the same native `scroll` event by another route where it does not -- mobile
+// WebKit has no wheel input at all. See support/engine-capabilities.ts.
+const wheelUp = async (page: Page, index = 0) =>
+  scrollUpBy(messageList(page, index), 800);
 
 const waitForContentGrowth = async (page: Page, index = 0) => {
   await page.waitForFunction(

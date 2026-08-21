@@ -1053,7 +1053,14 @@ test("at a limit of two, the third model is refused and the reason is specific",
   // Still listed and still focusable: discovery is not the price of the limit.
   await expect(nano).toBeVisible();
   await expect(nano).toHaveAttribute("aria-disabled", "true");
-  await nano.click();
+  // aria-disabled blocks activation rather than only dimming the control:
+  // Playwright already refuses a normal click on an aria-disabled control, so
+  // force one through and confirm nothing changes. Without `force` the two
+  // lines above and this one contradict each other -- the assertion pins the
+  // attribute that makes the click unperformable -- and the click spends the
+  // whole 30s actionability budget reporting "element is not enabled".
+  // Same reasoning and same fix as comparison-action-rail.spec.ts.
+  await nano.click({ force: true });
   await expect(nano).toHaveAttribute("aria-pressed", "false");
   // Neither of the first two was swapped out to make room.
   await expect(openai).toHaveAttribute("aria-pressed", "true");

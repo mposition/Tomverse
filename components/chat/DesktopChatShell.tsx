@@ -21,6 +21,12 @@ import type { ChatAttachmentCapabilities } from "@/lib/guestAttachmentPolicy";
 import { GuestVerificationDesktopSlot } from "@/components/chat/GuestVerificationDesktopSlot";
 import { CreditCostBadge } from "@/components/credits/CreditCostBadge";
 import { deriveComparisonReadiness } from "@/lib/comparisonReadiness";
+import {
+  chatContentStateKey,
+  resolveChatContentState,
+  type ChatContentState,
+} from "@/lib/chatContentState";
+import { useGuestChatContentSeed } from "@/components/chat/useGuestChatContentSeed";
 import { englishCreditUnit, formatCountedUnit } from "@/lib/pricingFormat";
 import {
   getModelUsageProfile,
@@ -77,6 +83,19 @@ type DesktopChatShellProps = {
   guestMessageCount: number;
   maxGuestMessages: number;
   isModelSelectionReady: boolean;
+  /**
+   * Whether the page has finished deciding which conversation is active.
+   * Distinct from `isModelSelectionReady`, which is unconditionally true for
+   * guests: a guest conversation is restored from localStorage after mount,
+   * so until this flips there is no conversation to call empty or not.
+   */
+  isConversationSelectionResolved: boolean;
+  /**
+   * A send this page has started but not yet handed to the panels, and the
+   * conversation it started from. Only the content-state derivation reads
+   * it; it decides nothing about credits, preflight or admission.
+   */
+  pendingSubmission: { originConversationId: string | null } | null;
   onNewChat: () => void;
   onNewImage?: (() => void) | null;
   /** Set when image generation is visible to this viewer but not usable. */
@@ -152,6 +171,8 @@ export function DesktopChatShell({
   guestMessageCount,
   maxGuestMessages,
   isModelSelectionReady,
+  isConversationSelectionResolved,
+  pendingSubmission,
   onNewChat,
   onNewImage,
   imageLock,
@@ -215,35 +236,42 @@ export function DesktopChatShell({
         .map((conversation) => ({ id: conversation.id, title: conversation.title })),
     [conversations, currentChatId]
   );
-  const [modelEmptyStates, setModelEmptyStates] = useState<Record<string, boolean>>({});
+  // Identity of the conversation currently on screen, used to scope
+  // per-conversation UI state (the active tab below).
   const conversationStateKey = currentChatId || "new";
-  const emptyStateKey = useCallback(
-    (modelId: string) => `${conversationStateKey}:${modelId}`,
-    [conversationStateKey]
-  );
-  const handleEmptyStateChange = useCallback(
-    (modelId: string, isEmpty: boolean) => {
-      const key = emptyStateKey(modelId);
-      setModelEmptyStates((current) =>
-        current[key] === isEmpty ? current : { ...current, [key]: isEmpty }
+  const [modelContentStates, setModelContentStates] = useState<
+    Record<string, ChatContentState>
+  >({});
+  const handleContentStateChange = useCallback(
+    (modelId: string, state: ChatContentState) => {
+      const key = chatContentStateKey(currentChatId, modelId);
+      setModelContentStates((current) =>
+        current[key] === state ? current : { ...current, [key]: state }
       );
     },
-    [emptyStateKey]
+    [currentChatId]
   );
-  // An existing *authenticated* conversation (currentChatId set) hasn't
-  // been proven empty until at least one panel reports back -- defaulting
-  // it to "empty" would flash the welcome screen over a still-loading
-  // panel, indistinguishable from a genuinely empty new chat. Only a
-  // brand-new conversation (no id yet) defaults to empty, since it always
-  // legitimately starts that way. Guests are excluded: unlike an
-  // authenticated chat's server-assigned id, a guest's currentChatId is a
-  // client-generated placeholder assigned immediately even for a
-  // guaranteed-empty new chat, so "has an id" isn't a signal there.
-  const isConversationEmpty =
-    selectedModels.length > 0 &&
-    selectedModels.every(
-      (modelId) => modelEmptyStates[emptyStateKey(modelId)] ?? (isGuestMode || !currentChatId)
-    );
+  // "Is this conversation empty" has three answers, not two, and only one of
+  // them may render the welcome screen. See lib/chatContentState.ts: the
+  // shell used to default an unreported panel to "empty", which flashed the
+  // welcome screen over every conversation that was still loading and over
+  // every send that adopted a new conversation id.
+  const guestContentSeed = useGuestChatContentSeed(isGuestMode, currentChatId);
+  const conversationContentState = resolveChatContentState({
+    isConversationSelectionResolved,
+    conversationId: currentChatId,
+    selectedModelIds: selectedModels,
+    reported: modelContentStates,
+    // An accepted send has put a user turn in this conversation, so it can
+    // never read as empty again -- not even in the window before its panels
+    // have re-reported under the new conversation id.
+    hasAcceptedSubmission: Boolean(
+      promptPayload && currentChatId && promptPayload.chatId === currentChatId
+    ),
+    storedSeed: guestContentSeed,
+    pendingSubmission,
+  });
+  const isConversationEmpty = conversationContentState === "empty";
   const [modelStatuses, setModelStatuses] = useState<
     Record<string, "idle" | "loading" | "responding" | "error" | "cancelled" | "paused">
   >({});
@@ -420,6 +448,10 @@ export function DesktopChatShell({
   return (
     <main
       data-testid="desktop-chat-shell"
+      // Observable so a regression test can assert on the state machine itself
+      // -- "unknown" must never be rendered as the welcome screen -- rather
+      // than only on what happened to be painted when it looked.
+      data-content-state={conversationContentState}
       className="flex h-screen overflow-hidden bg-white text-zinc-900 dark:bg-zinc-950 dark:text-zinc-100"
     >
       <ChatSidebar
@@ -787,7 +819,7 @@ export function DesktopChatShell({
                   onContextBundleStale={onContextBundleStale}
                   hideModelOnlyInput={selectedModels.length <= 1}
                   useCenteredWelcome
-                  onEmptyStateChange={handleEmptyStateChange}
+                  onContentStateChange={handleContentStateChange}
                   onStatusChange={handleModelStatusChange}
                   onRequestCloseModel={() => onToggleModel(modelId)}
                   hasMultipleActiveModels={selectedModels.length > 1}

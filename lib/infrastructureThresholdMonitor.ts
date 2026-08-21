@@ -30,11 +30,20 @@ export async function monitorInfrastructureThresholdsIfDue(now = new Date()) {
     // the real-time channels. `alerts` counts what was actually reported.
     const plan = planInfrastructureAlerts(dashboard);
     await Promise.all(
-      plan.incidents.map(({ dependency, ...incident }) =>
+      plan.incidents.map(({ dependency, reasonCodes, ...incident }) =>
         reportOperationalIncident({
           ...incident,
           cooldownMs: 30 * 60 * 1_000,
-          context: { component: "infrastructure-threshold-monitor", dependency },
+          context: {
+            component: "infrastructure-threshold-monitor",
+            dependency,
+            // Joined rather than passed as an array: the context sanitizer
+            // JSON-stringifies anything that is not a scalar, which would put
+            // `["R2_API_ERROR"]` in a Sentry tag nobody can read at a glance.
+            ...(reasonCodes.length > 0
+              ? { reasons: reasonCodes.join(", ") }
+              : {}),
+          },
         })
       )
     );

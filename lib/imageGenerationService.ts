@@ -71,7 +71,10 @@ import {
 } from "@/lib/imageGenerationStateCore";
 import { safeDailyResetAt } from "@/lib/chatLimitDecisionCore";
 import { imageGroupMaxModels } from "@/lib/imageGroupLimits";
-import { resolveImageProviderBudget } from "@/lib/imageProviderBudget";
+import {
+  imageProviderBudgetBucketKey as imageProviderBudgetKey,
+  resolveImageProviderBudget,
+} from "@/lib/imageProviderBudget";
 import { reportOperationalIncident } from "@/lib/operationalMonitoring";
 import { prisma } from "@/lib/prisma";
 import { writeR2Object } from "@/lib/r2";
@@ -91,8 +94,6 @@ const IMAGE_LEASE_MODEL_ID = IMAGE_GENERATION_MODEL_ID;
 // value opaque without a second hashing scheme.
 const imageLeaseSubjectKey = (userId: string) =>
   `image:${getUserChatUsageKey(userId)}`;
-
-const imageProviderBudgetKey = (provider: string) => `image-provider:${provider}`;
 
 const boundedEnvInt = (raw: string | undefined, fallback: number, max: number) => {
   const parsed = Number(raw);

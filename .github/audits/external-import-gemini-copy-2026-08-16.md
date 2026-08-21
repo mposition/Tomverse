@@ -289,6 +289,18 @@ registry 쪽은 이미 갖춰져 있습니다.
 따로 필요하고, 분리하지 않는다면 memory가 켜지기 전까지 마케팅을 내지
 않는다는 뜻입니다.
 
+**추가 확인 결과, 현행 고지의 두 번째 문장도 Release A에는 적용되지 않습니다.**
+Release A에서는 가져온 대화가 보관·열람되지만 memory extraction·injection이
+비활성인 동안 새 답변 생성에는 사용되지 않습니다 — 가져온 대화가 채팅에 닿는
+경로는 `lib/memoryExtractionService.ts`와 `lib/memoryRetrievalService.ts`뿐이고
+둘 다 그 flag 뒤에 있습니다. 따라서 import-only 고지는 **기존 고지의 어느
+문장도 재사용해서는 안 되며**, "가져오기만으로 새 답변에 사용되지 않는다"는
+경계를 별도로 설명해야 합니다.
+
+이것은 §17 분리를 승인하는 기록이 **아닙니다.** 향후 결정이 지켜야 할 사실
+제약입니다. 위 문단이 ⓐ만 문제 삼고 있어, 그것만 읽고 고지를 쓰면 ⓑ를 그대로
+가져다 쓰게 됩니다.
+
 ### 8.3 공개하기로 정했다면
 
 registry·7개 locale·landing·SEO·정적 테스트를 **한 변경으로** 적용합니다.
@@ -360,27 +372,81 @@ JSON과 HTML은 **같은 계정에서, 두 export 사이에 대화를 추가·�
 영향을 주는 flag·런타임 설정, 실제 배포 artifact. 검증 도중 staging 대상이
 움직였다면 기록은 무효이고 다시 실행합니다.
 
-#### 9.1.3 체크리스트가 branch마다 다른 상태 — 미해결
+#### 9.1.3 체크리스트가 branch마다 달랐던 상태 — 해결됨
 
-2026-08-16 기준, 이 계약의 정본인 H절 서두는 **`develop`에만 있습니다**
-(`cf9b1f1` "docs(ops): verify an activation candidate SHA, not a branch").
-`main`의 체크리스트는 233줄판이라 이 요구가 없습니다. 그래서 §9.1은 참조가
-아니라 요구 자체를 적었습니다 — main만 읽는 사람이 참조를 따라가면 없는 문단에
-도달합니다.
+> **Resolved: checklist revision `2026-08-15c`가 2026-08-16에
+> `2d4a22c0dc93d1b5cca3b99677cab790c9e1ca18`로 main에 합류했습니다**
+> (PR #661). 세 source commit(`9d87e72` → `495929d` → `cf9b1f1`)의 9-file
+> delta를 적용했습니다. `main`·`develop` 모두 397줄판이며 H절 서두의
+> 활성화 증거 계약을 가집니다.
 
-**이 감사 문서가 main 체크리스트의 공백을 대신한다고 해석하지 않습니다.** 여기
-적힌 것은 정본의 요약이며, 정식 실행의 근거는 체크리스트와 기록입니다.
+**이 절을 지우지 않는 이유가 provenance입니다.** 2026-08-15 ~ 08-16 사이에는
+정본 H절 서두가 `develop`에만 있었고 `main`은 233줄판이었습니다. 그 창에서
+만들어진 기록이 왜 그런 `checklistSourceSha`를 담고 있는지는 이 사실을 알아야
+설명됩니다.
 
-합류 전에 정식 실행이 필요하다면 이렇게 합니다.
+그때 §9.1이 참조가 아니라 요구 자체를 적은 것도 같은 이유였고, 지금은 정본이
+양쪽에 있으므로 **§9.1은 정본의 요약입니다.** 정식 실행의 근거는 계속
+체크리스트와 기록이며, **이 감사 문서가 그 자리를 대신하지 않습니다.**
 
-- `develop` 체크아웃의 **최신 template**으로 기록을 생성하고,
-- `deploySha`에는 **실제 production 활성화 대상 SHA**를 적고,
-- `checklistSourceSha`로 template 출처 commit을 함께 고정합니다.
+`checklistSourceSha`의 설계 목적은 branch 간 **일시적** 차이를 허용하고 감사
+가능하게 만드는 것이지 장기적인 불일치가 목표는 아니었습니다. 그래서 이
+간격은 런타임 결함이 아니라 활성화 전에 닫을 거버넌스 부채였고, 닫혔습니다.
 
-이 어긋남 자체는 사고가 아니라 설계입니다 — template이 "checklist source SHA는
-배포 SHA와 다른 것이 정상"이라고 적고 있고, 검증 *절차*의 이력을 `develop` 한
-줄기로 두기 위해 그 칸이 존재합니다. 다만 **활성화 전에 체크리스트를 `main`에도
-합류시키는 것이 가장 안전합니다.**
+##### 합류에 무엇이 필요했는지 (기록)
+
+체크리스트 문서 하나가 아니라 9개 파일이 한 슬라이스로 움직였습니다.
+
+| 구분 | 파일 |
+|---|---|
+| 문서 | `docs/ops/external-import-staging-checklist.md`, `staging-verification-records/README.md`, `_record-template.md` |
+| 생성·검증 | `scripts/new-staging-verification-record.mjs`, `staging-verification-record-core.mjs`, `check-staging-verification-records{,-core}.mjs` |
+| 테스트 | `tests/stagingVerificationRecord{Parsing,Skeleton}.test.mjs` |
+
+`package.json`은 필요 없었습니다 — `check:staging-verification-records`와
+`new:staging-verification-record`가 이미 `main`에 있었습니다.
+
+**문서만 옮겼다면 생성기가 새 필드를 누락했을 것입니다.** 문서는
+`templateRevision: 2026-08-15c`를 요구하는데 생성기가 옛 skeleton을 쓰면, 그
+기록은 사람 눈에만 맞아 보이고 검사에는 걸리지 않습니다. 그것이 9개를 한 PR로
+묶은 이유입니다.
+
+검증은 `npm run test:unit`, `npm run check:staging-verification-records`, 그리고
+clean tree에서의 생성 preview였습니다. `npm run check:release-records`는 이
+슬라이스가 아니므로 실행하지 않았습니다(§9.1.3.1).
+
+##### 9.1.3.1 release-record gate는 별개 승격 후보였습니다 — 해결됨
+
+> **Resolved: release-record gate가 `main`에 합류했습니다.** 두 source
+> commit(`f48289973ee757fefe6213bdd167d39ad29ea0bf` 2026-08-15,
+> `9a56491915d483a863b4d14aceb2eba48e8ca007` 2026-08-16)이 모두 `main`의
+> 조상이고, 아래 여섯 파일이 `main`·`develop`에서 동일합니다. `main`의
+> `.github/workflows/pr-fast-gate.yml:170`에서 `check:release-records`가
+> 실제로 실행됩니다. 2026-08-18 확인.
+
+**이 절을 지우지 않는 이유도 provenance입니다.** 이 gate가 한동안 `develop`
+에만 있었다는 사실을 알아야, 그 창에 열린 PR들이 왜 이 검사를 거치지 않았는지
+설명됩니다.
+
+당시 상태는 이랬습니다. `develop`에는 `main`에 없는 release governance 기능이
+함께 있었고, 인접해 있을 뿐 **checklist 슬라이스의 의존성이 아니었습니다** —
+staging 생성·검증 스크립트 넷은
+`staging-verification-record-core`·`staging-verification-features`·
+`check-staging-verification-records-core`만 import하고
+`release-record-policy.mjs`를 참조하지 않습니다.
+
+| 파일 | 당시 | 현재 |
+|---|---|---|
+| `scripts/release-record-policy.mjs` | `main`에 없음 | 동일 |
+| `scripts/check-release-records.mjs` | `main`에 없음 | 동일 |
+| `tests/releaseRecordPolicy.test.mjs` | `main`에 없음 | 동일 |
+| `package.json` (`check:release-records`) | `main`에 없음 | 동일 |
+| `.github/RELEASE_CHECKLIST.md` | 차이 있음 | 동일 |
+| `.github/workflows/pr-fast-gate.yml` | 차이 있음 | 동일 |
+
+**우려했던 부분 절반 승격은 일어나지 않았습니다.** script만 옮기면 아무도
+부르지 않는 검사가 되므로 release checklist와 fast gate workflow가 함께 가야
+했는데, 여섯 개가 모두 갔습니다.
 
 > **해결되면 이 절을 지우지 말고 아래 한 줄로 바꿉니다.**
 >
@@ -389,6 +455,37 @@ JSON과 HTML은 **같은 계정에서, 두 export 사이에 대화를 추가·�
 >
 > 당시 branch 불일치가 있었다는 사실을 지우면, 그 사이에 만들어진 기록들이 왜
 > `checklistSourceSha`를 그렇게 적었는지 나중에 설명할 수 없습니다.
+
+#### 9.1.4 권장 종결 순서
+
+1. ~~감사 문서 정정을 `main`에 병합~~ — **완료** (#640, #646, #655)
+2. ~~**9개짜리** checklist 계약 슬라이스를 별도 `main` PR로 합류~~ — **완료**
+   (#661, `2d4a22c`)
+3. ~~그 병합 SHA가 확정된 뒤 §9.1.3을 **삭제하지 않고** `Resolved`로 갱신~~ —
+   **완료** (이 문서)
+4. ~~확정된 활성화 SHA에서 정식 A~H/H2 실행~~ — **실행했고 실패**
+   (2026-08-16 ~ 08-18,
+   `docs/ops/staging-verification-records/2026-08-16__62987e9891c55f641cb89e1266550018b82e1c50.md`,
+   `runType: formal`, `result: failed`, 동결됨). 72항목 중 pass 63 · fail 2 ·
+   n/a 3 · 미기록 3 · 혼합 1, 발견 16건. **release blocker는 1건** — 발견-7
+   (#664): Google Takeout ZIP이 data descriptor를 쓰므로 대화 JSON이 빈
+   파일로 skip되고 HTML export로 오인되어, 정상 경로로 내보낸 사용자 전원이
+   실패합니다.
+5. **남음** — #664 수정은 2026-08-18에 `develop`에 병합됐습니다(PR #669).
+   남은 것은 **활성화 대상 SHA를 정해 staging에 배포하고 그 위에서 A~H/H2
+   전체를 재실행**하는 것입니다. 체크리스트 H절이 요구하는 바이며, 수정이
+   `lib/externalImportArchive.ts`·`lib/workers/externalImportWorker.ts`를
+   바꾸므로 2026-08-16 기록은 새 대상을 덮지 못합니다. 그 기록의 63개
+   실측값은 재실행의 기대값으로 그대로 쓸 수 있습니다.
+
+활성화 전에 남은 것은 **5번 하나**입니다. 아래는 **이 순서에 끼워 넣지
+않습니다.**
+
+- ~~**release-record gate 승격**(§9.1.3.1)~~ — **완료**. 2026-08-18 확인.
+- **§17 분리**(§9.2) — 마케팅 콘텐츠 작성 전 승인 조건이지 활성화 조건이
+  아닙니다. **미결.**
+
+둘은 서로를 기다리지 않습니다.
 
 ### 9.2 마케팅 론치
 

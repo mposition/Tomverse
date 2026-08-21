@@ -14,6 +14,7 @@ import {
     profileIdentityProblems,
     type AssistantProfileIdentityDraft,
     type AssistantProfileVersionDraft,
+    type ProfileVersionPublishPlan,
 } from "@/lib/assistantProfileVersioning";
 import { prisma } from "@/lib/prisma";
 
@@ -113,9 +114,28 @@ export const listAssistantProfiles = async (userId: string) => {
     }));
 };
 
+/**
+ * Creates a profile, and — when a first version is supplied — publishes it in
+ * the same transaction.
+ *
+ * The two-call shape this replaces (create identity, then publish a version)
+ * left a window in which a profile existed and could not be used: no current
+ * version means `activeProfileVersion` finds nothing, so the row appears in
+ * the owner's list, offers itself in the picker, and cannot start a
+ * conversation. Every abandoned create left one behind, and nothing swept
+ * them up.
+ *
+ * So the version travels with the identity. Either both rows exist and the
+ * pointer is set, or neither row does — there is no third state to clean up.
+ * `firstVersion` stays optional because the identity-only create is still a
+ * legitimate call for a caller that will publish separately, and removing it
+ * would break the existing API contract.
+ */
 export const createAssistantProfile = async (input: {
     userId: string;
     identity: AssistantProfileIdentityDraft;
+    /** Published as revision 1 in the same transaction when present. */
+    firstVersion?: AssistantProfileVersionDraft;
 }) => {
     const identity = normalizeProfileIdentity(input.identity);
     const problems = profileIdentityProblems(identity);
@@ -126,6 +146,40 @@ export const createAssistantProfile = async (input: {
             "The profile could not be saved.",
             problems
         );
+    }
+
+    // Planned before anything is written, and by the same planner the publish
+    // route uses. Deciding here that "the first revision is 1" would be a
+    // second place that knows it, and the two would drift.
+    let firstVersionPlan: Extract<
+        ProfileVersionPublishPlan,
+        { outcome: "publish" }
+    > | null = null;
+    if (input.firstVersion) {
+        const plan = planProfileVersionPublish({
+            state: { currentRevision: null, currentDraft: null },
+            draft: input.firstVersion,
+            expectedRevision: null,
+        });
+        if (plan.outcome === "invalid") {
+            throw new AssistantProfileError(
+                422,
+                "ASSISTANT_PROFILE_INVALID",
+                "The profile could not be saved.",
+                plan.problems
+            );
+        }
+        // `stale` cannot happen from a null state and `unchanged` needs a
+        // stored draft to be unchanged from. Narrowed rather than assumed so a
+        // later planner change surfaces here instead of writing a bad row.
+        if (plan.outcome !== "publish") {
+            throw new AssistantProfileError(
+                500,
+                "ASSISTANT_PROFILE_INVALID",
+                "The profile could not be saved."
+            );
+        }
+        firstVersionPlan = plan;
     }
 
     const count = await prisma.assistantProfile.count({
@@ -139,14 +193,56 @@ export const createAssistantProfile = async (input: {
         );
     }
 
-    return prisma.assistantProfile.create({
-        data: {
-            userId: input.userId,
-            name: identity.name,
-            icon: identity.icon,
-            description: identity.description,
-        },
-        select: PROFILE_SELECT,
+    if (!firstVersionPlan) {
+        return prisma.assistantProfile.create({
+            data: {
+                userId: input.userId,
+                name: identity.name,
+                icon: identity.icon,
+                description: identity.description,
+            },
+            select: PROFILE_SELECT,
+        });
+    }
+
+    const plan = firstVersionPlan;
+    return prisma.$transaction(async (tx) => {
+        const profile = await tx.assistantProfile.create({
+            data: {
+                userId: input.userId,
+                name: identity.name,
+                icon: identity.icon,
+                description: identity.description,
+            },
+            select: { id: true },
+        });
+        const version = await tx.assistantProfileVersion.create({
+            data: {
+                profileId: profile.id,
+                userId: input.userId,
+                revision: plan.revision,
+                instructions: plan.draft.instructions,
+                models: [...plan.draft.modelIds],
+                toolPolicy: { ...plan.draft.toolPolicy },
+                memoryPolicy: { ...plan.draft.memoryPolicy },
+                starters: [...plan.draft.starters],
+                // A profile created this way has no knowledge files yet: they
+                // are uploaded against a profile that exists, so the first
+                // manifest is always empty and nothing needs resolving.
+                knowledgeManifest: [],
+                retrievalVersion: ASSISTANT_RETRIEVAL_VERSION,
+                promptFormatVersion: ASSISTANT_PROMPT_FORMAT_VERSION,
+            },
+            select: { id: true },
+        });
+        await tx.assistantProfile.update({
+            where: { id: profile.id },
+            data: { currentVersionId: version.id },
+        });
+        return tx.assistantProfile.findUniqueOrThrow({
+            where: { id: profile.id },
+            select: PROFILE_SELECT,
+        });
     });
 };
 

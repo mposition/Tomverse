@@ -37,6 +37,43 @@ export const DASHBOARD_ONLY_WARNING_REASON_CODES: Readonly<
   railway: ["PROJECTED_BALANCE_LOW"],
 };
 
+/**
+ * What each probe actually measures, for the sentence a human reads.
+ *
+ * The dependency label is an identifier: it builds `INFRASTRUCTURE_R2_ERROR`,
+ * which the cooldown keys off and which operators grep for, so it cannot
+ * change. The *title* is prose, and "r2 infrastructure is error" was prose
+ * that claimed something untrue. None of the three usage probes touches the
+ * service it is named after -- `r2Snapshot` only reads Cloudflare's GraphQL
+ * analytics, never a bucket -- so a rejected analytics token was paging the
+ * on-call with a sentence that reads as "user attachments are down". Uploads
+ * were healthy throughout: they authenticate with `R2_ACCESS_KEY_ID` /
+ * `R2_SECRET_ACCESS_KEY` against the S3 endpoint and share nothing with
+ * `CLOUDFLARE_API_TOKEN`.
+ *
+ * A dependency with no entry here falls back to the old wording rather than
+ * being dropped, so adding a probe cannot silently produce a nameless alert.
+ */
+export const INFRASTRUCTURE_DEPENDENCY_SUBJECTS: Readonly<
+  Record<string, string>
+> = {
+  railway: "Railway usage analytics",
+  r2: "Cloudflare R2 usage analytics",
+  prisma: "Prisma Postgres usage analytics",
+  database: "Application database inventory",
+};
+
+export const infrastructureIncidentTitle = (
+  dependency: string,
+  status: "warning" | "error"
+) => {
+  const subject = INFRASTRUCTURE_DEPENDENCY_SUBJECTS[dependency];
+  if (!subject) return `${dependency} infrastructure is ${status}`;
+  return status === "error"
+    ? `${subject} read failed`
+    : `${subject} reported a warning`;
+};
+
 export type InfrastructureAlertClassification =
   | "incident"
   | "dashboard_advisory"
@@ -48,6 +85,14 @@ export type InfrastructureIncidentReport = {
   title: string;
   error: string;
   severity: "warning" | "fatal";
+  /**
+   * The reason codes the probe already worked out (`R2_API_ERROR` vs
+   * `R2_USAGE_API_UNAVAILABLE`). They were computed and then thrown away at
+   * this boundary, so the alert carried the upstream's bare sentence -- "not
+   * authorized for that account" -- with nothing naming which credential it
+   * came from. Empty when the probe supplied none.
+   */
+  reasonCodes: string[];
 };
 
 export type InfrastructureAlertDecision = {
@@ -95,9 +140,10 @@ export const classifyInfrastructureDependency = (
     incident: {
       dependency,
       code: `INFRASTRUCTURE_${dependency.toUpperCase()}_${signal.status.toUpperCase()}`,
-      title: `${dependency} infrastructure is ${signal.status}`,
+      title: infrastructureIncidentTitle(dependency, signal.status),
       error: signal.message,
       severity: signal.status === "error" ? "fatal" : "warning",
+      reasonCodes: (signal.warningReasons || []).map((reason) => reason.code),
     },
   };
 };

@@ -598,6 +598,12 @@ model BillingPromotion {
   id                    String                       @id @default(cuid())
   code                  String                       @unique
   discountPercent       Int                          @default(0)
+  /// Deprecated. A USD amount, so the promotion can only be charged in a USD
+  /// checkout; new promotions are percentage-only
+  /// (docs/policy/promotion-discount-currency.md section 2). Kept because past
+  /// redemptions point at the promotion rather than at a copy of its terms, so
+  /// dropping this column would make an audited redemption unreconstructable.
+  /// Section 5 lists what must be true before it can go.
   discountAmountCents   Int?
   maxRedemptions        Int?
   redeemedCount         Int                          @default(0)

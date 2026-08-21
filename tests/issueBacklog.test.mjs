@@ -328,34 +328,38 @@ test("only genuinely open work is offered as a candidate", () => {
  * `candidates` answers "what may I pick up next", so an issue whose first step
  * is reading production must not appear in it.
  *
- * #636 is the case this was added for: the decision is approved and the code
- * site is known, but blocking fixed-amount promotion creation before knowing
- * which codes are live could interrupt a running campaign. Offered as
- * `open_work`, a session would start it and then either stall or guess.
+ * #636 was the case this was added for -- the decision was approved and the
+ * code site known, but blocking fixed-amount promotion creation before knowing
+ * which codes were live could have interrupted a running campaign. That
+ * inventory was taken (zero active, 2026-08-16), so #637 carries the example
+ * now: what the production AUD price override holds, and who set it, is not
+ * something this repository can be read for at all.
  */
 
 test("an unresolved probe that names a blocker is not open work", () => {
   const result = classifyIssue(
     {
-      number: 636,
-      title: "Deprecate creation of fixed-amount billing promotions",
+      number: 637,
+      title: "Verify the production AUD billing price override",
     },
-    facts({ readFile: () => "export const promotionSchema = {};" })
+    facts({ readFile: () => "export const DEFAULT_BILLING_PRICE_CATALOG = {};" })
   );
   assert.equal(result.verdict, VERDICTS.BLOCKED);
-  assert.match(result.blockedOn, /production inventory/i);
+  assert.match(result.blockedOn, /AppSetting\.billingPriceCatalog/);
 });
 
 test("a blocked issue is kept out of the candidate list", () => {
   const audit = auditIssueBacklog({
     issues: [
       {
-        number: 636,
-        title: "Deprecate creation of fixed-amount billing promotions",
+        number: 637,
+        title: "Verify the production AUD billing price override",
       },
       { number: 999, title: "Something with no probe at all" },
     ],
-    facts: facts({ readFile: () => "export const promotionSchema = {};" }),
+    facts: facts({
+      readFile: () => "export const DEFAULT_BILLING_PRICE_CATALOG = {};",
+    }),
   });
   assert.deepEqual(
     audit.candidates.map((item) => item.number),
@@ -363,13 +367,18 @@ test("a blocked issue is kept out of the candidate list", () => {
   );
   assert.deepEqual(
     audit.blocked.map((item) => item.number),
-    [636]
+    [637]
   );
 });
 
-test("resolving the work clears the blocker rather than reporting both", () => {
+test("resolving the work reports the remainder and no blocker", () => {
   // What an issue was once waiting for is history once it is done. Carrying
   // `blockedOn` into a resolved verdict would read as "done, but still stuck".
+  //
+  // The unresolved half of that rule is asserted above against #637; this is
+  // the resolved half. #636 is the right probe for it because being done is not
+  // the end of the story there -- `discountAmountCents` still has to come out
+  // of the schema one day, and the remainder is what says so.
   const result = classifyIssue(
     {
       number: 636,
@@ -382,6 +391,7 @@ test("resolving the work clears the blocker rather than reporting both", () => {
   );
   assert.notEqual(result.verdict, VERDICTS.BLOCKED);
   assert.equal(result.blockedOn, undefined);
+  assert.match(result.remainder, /discountAmountCents/);
 });
 
 test("every probe that declares a blocker explains what it is waiting for", () => {

@@ -683,7 +683,7 @@ test.describe("memory review settings", () => {
     await expect(page.getByTestId("memory-settings-card")).toHaveCount(0);
   });
 
-  test("the Data tab offers the memory entry point", async ({ page }) => {
+  test("the AI settings tab offers the memory entry point", async ({ page }) => {
     await prepareGuestPage(page, "ko");
     await mockAuthenticatedApi(page);
     await mockMemoryApi(page);
@@ -697,7 +697,9 @@ test.describe("memory review settings", () => {
     }
     await page.evaluate(() => {
       window.dispatchEvent(
-        new CustomEvent("tomverse:account-settings-open", { detail: "data" })
+        // Memory moved to the AI settings tab: it shapes what a model is
+        // told, which the data tab is not about.
+        new CustomEvent("tomverse:account-settings-open", { detail: "ai" })
       );
     });
     await expect(

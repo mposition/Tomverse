@@ -105,5 +105,12 @@ test("a searching turn is excluded even though its text streams normally", () =>
   // The exclusion is not about the shape of the stream. A native search has
   // already executed and been surcharged by the time the provider fails, and
   // the second attempt cannot inherit it.
+  //
+  // Settlement depends on this one. `settleChatUsage` prices a turn's search
+  // against the *billed* attempt's frozen authorization, which is the right
+  // authorization only because a searching turn has exactly one attempt.
+  // Relaxing this gate means settling each attempt's queries against its own
+  // rate and ceiling first -- see the note beside `searchAuthorization` in
+  // lib/chatSecurity.ts. Do not delete this test to make a fallback pass.
   assert.equal(scope({ nativeSearchEnabled: true }).allowed, false);
 });

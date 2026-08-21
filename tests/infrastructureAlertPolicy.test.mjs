@@ -3,7 +3,9 @@ import test from "node:test";
 
 import {
   DASHBOARD_ONLY_WARNING_REASON_CODES,
+  INFRASTRUCTURE_DEPENDENCY_SUBJECTS,
   classifyInfrastructureDependency,
+  infrastructureIncidentTitle,
   planInfrastructureAlerts,
 } from "../lib/infrastructureAlertPolicy.ts";
 
@@ -78,12 +80,78 @@ test("railway API error still reports a fatal incident", () => {
     {
       dependency: "railway",
       code: "INFRASTRUCTURE_RAILWAY_ERROR",
-      title: "railway infrastructure is error",
+      title: "Railway usage analytics read failed",
       error: "Railway API returned 500.",
       severity: "fatal",
+      reasonCodes: ["RAILWAY_API_ERROR"],
     },
   ]);
   assert.equal(plan.advisories.length, 0);
+});
+
+// The regression this guards: INFRASTRUCTURE_R2_ERROR paged production as
+// fatal for three days with the title "r2 infrastructure is error" and the
+// body "not authorized for that account". Both halves misdirect. The probe
+// never touches a bucket -- it reads Cloudflare's GraphQL analytics -- and
+// object storage authenticates with entirely separate S3 credentials, so
+// uploads were healthy the whole time. The reason code that says which of the
+// two failure classes this was had already been computed and was then dropped
+// at this boundary.
+test("an incident names the read that failed, not the service", () => {
+  const plan = planInfrastructureAlerts(
+    dashboard({
+      r2: {
+        status: "error",
+        message: "not authorized for that account",
+        warningReasons: [
+          { code: "R2_API_ERROR", detail: "not authorized for that account" },
+        ],
+      },
+    })
+  );
+  assert.deepEqual(plan.incidents, [
+    {
+      dependency: "r2",
+      code: "INFRASTRUCTURE_R2_ERROR",
+      title: "Cloudflare R2 usage analytics read failed",
+      error: "not authorized for that account",
+      severity: "fatal",
+      reasonCodes: ["R2_API_ERROR"],
+    },
+  ]);
+});
+
+test("the incident code stays the identifier operators and cooldowns key off", () => {
+  for (const [dependency, status, code] of [
+    ["r2", "error", "INFRASTRUCTURE_R2_ERROR"],
+    ["r2", "warning", "INFRASTRUCTURE_R2_WARNING"],
+    ["prisma", "error", "INFRASTRUCTURE_PRISMA_ERROR"],
+  ]) {
+    const decision = classifyInfrastructureDependency(dependency, {
+      status,
+      message: "m",
+    });
+    assert.equal(decision.incident.code, code);
+  }
+});
+
+test("a dependency with no subject keeps the old wording rather than none", () => {
+  assert.equal(
+    infrastructureIncidentTitle("something-new", "error"),
+    "something-new infrastructure is error"
+  );
+  // Every dependency planInfrastructureAlerts actually emits has a subject.
+  for (const dependency of ["railway", "r2", "database", "prisma"]) {
+    assert.ok(INFRASTRUCTURE_DEPENDENCY_SUBJECTS[dependency], dependency);
+  }
+});
+
+test("a probe that supplied no reason codes reports an empty list, not undefined", () => {
+  const decision = classifyInfrastructureDependency("database", {
+    status: "error",
+    message: "Database unreachable.",
+  });
+  assert.deepEqual(decision.incident.reasonCodes, []);
 });
 
 test("an unknown new railway warning reason fails safe to an incident", () => {

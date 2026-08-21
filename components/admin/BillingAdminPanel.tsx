@@ -24,6 +24,11 @@ import type {
   BillingPriceCatalogSource,
 } from "@/lib/billingPriceCatalog";
 import {
+  fixedAmountPromotionRefusal,
+  type AdminPromotionPolicyInput,
+} from "@/lib/billingPromotionAdminPolicy";
+import { isFixedAmountPromotion } from "@/lib/billingPromotionCore";
+import {
   BILLING_CURRENCIES,
   billingCurrencyFractionDigits,
   billingMajorToMinor,
@@ -58,7 +63,15 @@ type EditablePlan = BillingPlanConfig;
 type EditablePromotion = BillingPromotionConfig;
 type AdminBillingResponse = BillingConfigPayload & {
   error?: string;
+  /**
+   * Present when the save was refused by policy rather than failing. The
+   * generic "retry, or reload" advice is wrong for these -- retrying the same
+   * edit is refused again -- so the reason is shown instead.
+   */
+  code?: string;
 };
+
+const PROMOTION_POLICY_REFUSAL_CODE = "PROMOTION_FIXED_AMOUNT_BLOCKED";
 
 const PLAN_ACCENTS: Record<EditablePlan["id"], string> = {
   free: "from-emerald-500/20 to-emerald-500/5 border-emerald-500/30",
@@ -102,6 +115,25 @@ const statusPill = (active: boolean) =>
   active
     ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-300"
     : "border-zinc-700 bg-zinc-900 text-zinc-400";
+
+/**
+ * The same shape the endpoint judges a promotion write from, so the panel and
+ * the server reach their answer through one function rather than two readings
+ * of docs/policy/promotion-discount-currency.md section 4.
+ */
+const policyInput = (
+  promotion: EditablePromotion
+): AdminPromotionPolicyInput => ({
+  code: promotion.code,
+  discountPercent: promotion.discountPercent,
+  discountAmountCents: promotion.discountAmountCents,
+  maxRedemptions: promotion.maxRedemptions,
+  durationMonths: promotion.durationMonths,
+  appliesToPlanIds: promotion.appliesToPlanIds,
+  startsAt: promotion.startsAt,
+  endsAt: promotion.endsAt,
+  isActive: promotion.isActive,
+});
 
 const newPromotion = (): EditablePromotion => ({
   id: `promo_${Date.now()}`,
@@ -320,13 +352,25 @@ function PlanEditor({
 
 function PromotionEditor({
   promotion,
+  baseline,
+  refusal,
   onChange,
   onDelete,
 }: {
   promotion: EditablePromotion;
+  /** The stored promotion this edit is judged against, or null if it is new. */
+  baseline: EditablePromotion | null;
+  refusal: string | null;
   onChange: (promotion: EditablePromotion) => void;
   onDelete: () => void;
 }) {
+  // Whether a fixed amount may be typed here at all is decided by what is
+  // stored, not by what the draft currently says: a promotion that is a
+  // percentage one in the database can never acquire an amount, and clearing
+  // the field mid-edit must not be what unlocks it.
+  const fixedAmountEditable = baseline
+    ? isFixedAmountPromotion(baseline)
+    : false;
   const amountDollars =
     promotion.discountAmountCents === null ||
     promotion.discountAmountCents === undefined
@@ -395,11 +439,14 @@ function PromotionEditor({
             }
           />
         </Field>
-        <Field label="Fixed discount USD">
+        <Field label="Fixed discount USD (deprecated)">
           <TextInput
             type="number"
             min="0"
             step="0.01"
+            disabled={!fixedAmountEditable}
+            data-testid="promotion-fixed-amount-input"
+            aria-describedby={`promotion-fixed-amount-note-${promotion.id}`}
             value={amountDollars}
             onChange={(event) =>
               onChange({
@@ -411,8 +458,27 @@ function PromotionEditor({
               })
             }
           />
+          <p
+            id={`promotion-fixed-amount-note-${promotion.id}`}
+            data-testid="promotion-fixed-amount-note"
+            className="mt-1.5 text-[11px] font-medium leading-4 text-zinc-500"
+          >
+            {fixedAmountEditable
+              ? "USD checkout only. This amount can be lowered, never raised, and this code cannot be reactivated once paused."
+              : "New fixed-amount promotions are not accepted -- the amount is USD and would be unusable in every other market. Use a percentage discount."}
+          </p>
         </Field>
       </div>
+
+      {refusal ? (
+        <p
+          data-testid="promotion-policy-refusal"
+          role="status"
+          className="mt-3 rounded-xl border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs font-semibold leading-5 text-red-200"
+        >
+          {refusal}
+        </p>
+      ) : null}
 
       <div className="mt-4 grid gap-3 md:grid-cols-3">
         <Field label="Fulfillment">
@@ -823,6 +889,30 @@ export function BillingAdminPanel({
         : 1,
     [baselinePriceCatalog, draftPriceCatalog]
   );
+  /**
+   * The fixed-amount edits this draft would be refused for, keyed by promotion.
+   *
+   * Decided against `baselinePromotions` -- what is stored -- rather than
+   * against the draft, and with the same function the endpoint uses, so the
+   * panel refuses exactly what the server refuses. It is a refusal rather than
+   * a warning: these saves are rejected, so offering the button would only
+   * spend a round trip to find that out.
+   */
+  const promotionRefusals = useMemo(() => {
+    const entries = new Map<string, string>();
+    draftPromotions.forEach((promotion) => {
+      const baseline = baselinePromotions.find(
+        (item) => item.id === promotion.id
+      );
+      const refusal = fixedAmountPromotionRefusal({
+        existing: baseline ? policyInput(baseline) : null,
+        next: policyInput(promotion),
+      });
+      if (refusal) entries.set(promotion.id, refusal.message);
+    });
+    return entries;
+  }, [baselinePromotions, draftPromotions]);
+
   const stripeWarnings = useMemo(() => {
     const warnings: string[] = [];
     draftPlans
@@ -924,6 +1014,13 @@ export function BillingAdminPanel({
 
   const save = async () => {
     if (isSaving) return;
+    if (promotionRefusals.size > 0) {
+      dispatchAppToast(
+        `${Array.from(promotionRefusals.values())[0]} Nothing was saved.`,
+        "error"
+      );
+      return;
+    }
     setIsSaving(true);
     setShowSaveReview(false);
     try {
@@ -938,6 +1035,10 @@ export function BillingAdminPanel({
         }),
       });
       const data = (await response.json().catch(() => null)) as AdminBillingResponse | null;
+      if (data?.code === PROMOTION_POLICY_REFUSAL_CODE && data.error) {
+        dispatchAppToast(`${data.error} Nothing was saved.`, "error");
+        return;
+      }
       if (!response.ok || !data?.plans || !data?.promotions || !data?.priceCatalog) {
         throw new Error(data?.error || "Billing save failed");
       }
@@ -1085,16 +1186,31 @@ export function BillingAdminPanel({
             </p>
           </div>
           <div className={`rounded-2xl border p-4 ${
-            stripeWarnings.length > 0
-              ? "border-amber-500/30 bg-amber-500/10"
-              : "border-emerald-500/20 bg-emerald-500/10"
+            promotionRefusals.size > 0
+              ? "border-red-500/30 bg-red-500/10"
+              : stripeWarnings.length > 0
+                ? "border-amber-500/30 bg-amber-500/10"
+                : "border-emerald-500/20 bg-emerald-500/10"
           }`}>
             <p className={`text-xs font-black uppercase tracking-[0.16em] ${
-              stripeWarnings.length > 0 ? "text-amber-200/80" : "text-emerald-200/80"
+              promotionRefusals.size > 0
+                ? "text-red-200/80"
+                : stripeWarnings.length > 0
+                  ? "text-amber-200/80"
+                  : "text-emerald-200/80"
             }`}>
               Pre-save validation
             </p>
-            {stripeWarnings.length > 0 ? (
+            {promotionRefusals.size > 0 ? (
+              <ul
+                data-testid="promotion-policy-refusal-summary"
+                className="mt-2 space-y-1 text-xs leading-5 text-red-100"
+              >
+                {Array.from(promotionRefusals.values()).map((message) => (
+                  <li key={message}>- {message}</li>
+                ))}
+              </ul>
+            ) : stripeWarnings.length > 0 ? (
               <ul className="mt-2 space-y-1 text-xs leading-5 text-amber-100">
                 {stripeWarnings.slice(0, 5).map((warning) => (
                   <li key={warning}>- {warning}</li>
@@ -1303,6 +1419,12 @@ export function BillingAdminPanel({
                 <PromotionEditor
                   key={promotion.id}
                   promotion={promotion}
+                  baseline={
+                    baselinePromotions.find(
+                      (item) => item.id === promotion.id
+                    ) || null
+                  }
+                  refusal={promotionRefusals.get(promotion.id) || null}
                   onDelete={() =>
                     setDraftPromotions((current) =>
                       current.filter((_, itemIndex) => itemIndex !== index)

@@ -77,6 +77,7 @@
     "postinstall": "prisma generate",
     "check:default-models": "node --conditions=react-server --import tsx scripts/check-default-models.mjs",
     "check:openai-model-access": "node --conditions=react-server --import tsx scripts/check-openai-model-access.mjs",
+    "check:cloudflare-r2-analytics": "node --import tsx scripts/check-cloudflare-r2-analytics.mjs",
     "measure:google-image-thinking-cap": "node --conditions=react-server --import tsx scripts/measure-google-image-thinking-cap.mjs",
     "report:output-token-telemetry": "node --conditions=react-server --import tsx scripts/report-output-token-telemetry.mjs",
     "check:model-pricing-db": "node --conditions=react-server --import tsx scripts/check-model-pricing-db.mjs",
@@ -179,6 +180,9 @@
       "brace-expansion": "^1.1.17"
     },
     "@hono/node-server": "1.19.13",
+    "@prisma/config": {
+      "deepmerge-ts": "^8.0.1"
+    },
     "@sentry/nextjs": {
       "brace-expansion": "^5.0.9"
     },

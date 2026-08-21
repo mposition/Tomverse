@@ -559,6 +559,28 @@ The existing `R2_ACCOUNT_ID`, `R2_BUCKET_NAME`, `R2_ACCESS_KEY_ID`, and
 `CLOUDFLARE_API_TOKEN` is required for GraphQL analytics. Scope it to the
 relevant Cloudflare account with `Account Analytics: Read` only.
 
+Uploads and analytics share no credential, so they fail independently. To find
+out which of the two is broken, and why:
+
+```bash
+npm run check:cloudflare-r2-analytics
+npm run check:cloudflare-r2-analytics -- --json
+```
+
+It reads the environment exactly as the probe does and makes three read-only,
+unbilled requests: verify the token, resolve the account, then run the probe's
+own query. Each possible failure gets its own line — token revoked, token
+scoped to a different account, missing `Account Analytics: Read`, unknown
+bucket, or a host that never reached Cloudflare — because Cloudflare answers
+several of them with the same sentence, `not authorized for that account`.
+It is an operational check against a live account, not a PR gate; an
+environment with no token configured exits 0.
+
+Watch `R2_ACCOUNT_ID` in particular. When `R2_ENDPOINT` is set the account id
+is no longer used to build the S3 endpoint, so a wrong value leaves every
+upload working and breaks only the analytics probe, which passes it as the
+GraphQL `accountTag`.
+
 Railway credit is an admin-maintained checkpoint stored in the database. The
 displayed balance subtracts Railway's projected end-of-cycle usage from that
 checkpoint; it is an operational estimate, not an invoice or payment action.

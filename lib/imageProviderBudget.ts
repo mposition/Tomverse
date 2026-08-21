@@ -297,3 +297,19 @@ export const resolveActiveImageProviderBudgets = (
     provider,
     resolved: resolveImageProviderBudget(env, { ...options, provider }),
   }));
+
+/**
+ * The `ChatUsageBucket` key an image provider's spend is counted under.
+ *
+ * Lives here rather than beside admission because three places need it and
+ * they are not all server-side request handlers: admission increments it, the
+ * settlement true-up decrements it, and the admin report reads it. When it was
+ * private to `lib/imageGenerationService.ts` the reader could not reach it, so
+ * the endpoint reported per-provider *limits* next to a single provider's
+ * *usage* -- and the 2026-08-16 defect, xAI and fal settlements crediting
+ * OpenAI's bucket, was invisible from the one surface built to watch it.
+ *
+ * One function, so the three halves cannot disagree about which row they mean.
+ */
+export const imageProviderBudgetBucketKey = (provider: string) =>
+  `image-provider:${provider}`;

@@ -930,10 +930,17 @@ test.describe("external import settings", () => {
       page.getByTestId("external-import-conversation-link")
     ).toHaveCount(3);
 
-    const download = page.waitForEvent("download");
-    await page.getByTestId("external-import-export").click();
-    await download;
+    // The page fetches the export and saves the blob itself, so the download
+    // is observable on every engine -- mobile WebKit used to render the
+    // attachment response and leave this screen behind.
+    const [download] = await Promise.all([
+      page.waitForEvent("download"),
+      page.getByTestId("external-import-export").click(),
+    ]);
     expect(api.exportCount).toBe(1);
+    expect(download.suggestedFilename()).toBe("tomverse-external-conversations.json");
+    expect(new URL(page.url()).pathname).toBe("/settings/imports");
+    await expect(section).toBeVisible();
   });
 
   test("the viewer renders imported content inertly, pages messages, and deletes a snapshot", async ({
