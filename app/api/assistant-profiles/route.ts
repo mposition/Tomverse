@@ -2,11 +2,12 @@
  * Policy: docs/policy/external-conversation-import-and-memory.md.
  * The owner's assistant profiles (Release C, C3a; policy §14, §21).
  *
- * List and create only. A profile's *behaviour* is a version, published
- * through `[profileId]/versions`, and keeping creation here identity-only is
- * what stops a profile existing with instructions nobody published — a state
- * that would have no revision number and so nothing for a conversation to pin
- * to.
+ * List and create. A profile's *behaviour* is a version, and later edits are
+ * published through `[profileId]/versions`; create additionally accepts the
+ * first one so a profile never exists without a revision to pin to. That was
+ * previously enforced by refusing behaviour here, which produced the same
+ * unusable state from the other direction — an identity row with no version,
+ * listed and pickable and unable to start a conversation.
  */
 export const dynamic = "force-dynamic";
 
@@ -31,7 +32,15 @@ import {
 // approved ones in the knowledge limits module; the per-field limits are the
 // profile's own.
 import { ASSISTANT_KNOWLEDGE_LIMITS } from "@/lib/assistantKnowledgeLimits";
-import { ASSISTANT_PROFILE_LIMITS } from "@/lib/assistantProfileVersioning";
+import {
+    ASSISTANT_PROFILE_LIMITS,
+    ASSISTANT_PROFILE_MODEL_UNAVAILABLE,
+} from "@/lib/assistantProfileVersioning";
+import {
+    clampSelectedModelsAgainstRuntime,
+    getRuntimeModels,
+} from "@/lib/modelRegistry";
+import { APP_DEFAULTS } from "@/lib/appDefaults";
 import { authOptions } from "@/lib/auth";
 
 const createSchema = z
@@ -47,8 +56,35 @@ const createSchema = z
             .trim()
             .max(ASSISTANT_PROFILE_LIMITS.maxDescriptionCharacters)
             .nullish(),
+        /**
+         * The first version, published with the identity in one transaction.
+         *
+         * `instructions` is required here and not by
+         * `profileVersionProblems`: a *published* profile may legitimately
+         * carry none — it is then a model preset — but a profile created from
+         * the minimal form is created because the user has something to say,
+         * and an empty box submitted by accident should be refused at the
+         * field rather than saved as an assistant that does nothing.
+         */
+        instructions: z
+            .string()
+            .trim()
+            .min(1)
+            .max(ASSISTANT_PROFILE_LIMITS.maxInstructionsCharacters)
+            .optional(),
+        modelIds: z
+            .array(z.string().trim().min(1))
+            .min(1)
+            .max(ASSISTANT_PROFILE_LIMITS.maxModels)
+            .optional(),
     })
-    .strict();
+    .strict()
+    .refine((value) => value.modelIds === undefined || value.instructions !== undefined, {
+        // Models without instructions would publish a first version the form
+        // never asked for. The pair travels together or not at all.
+        path: ["instructions"],
+        message: "instructions is required when modelIds is supplied",
+    });
 
 export const assistantProfileErrorResponse = (error: unknown) => {
     if (error instanceof AssistantProfileError) {
@@ -119,6 +155,54 @@ export async function GET(req: Request) {
     }
 }
 
+/**
+ * The models a created profile is published with, checked against the
+ * catalogue the server actually serves.
+ *
+ * `clampSelectedModelsAgainstRuntime` *drops* what it cannot resolve, which is
+ * right for restoring a stored conversation and wrong here: a create naming a
+ * model that does not exist would silently become a create naming fewer, and
+ * the owner would find a profile running something they did not choose. So the
+ * clamp is used as the check and a shortfall is a refusal.
+ *
+ * With no models named, the account's own new-conversation default stands in —
+ * resolved server-side, because a client-supplied default is a client deciding
+ * what this account may run.
+ */
+const resolveCreateModelIds = async (
+    requested: string[] | undefined
+): Promise<string[]> => {
+    const models = await getRuntimeModels();
+    if (requested === undefined) {
+        const fallback = clampSelectedModelsAgainstRuntime(
+            [APP_DEFAULTS.defaultModelId],
+            models,
+            1
+        );
+        if (fallback.length === 0) {
+            throw new AssistantProfileError(
+                503,
+                ASSISTANT_PROFILE_MODEL_UNAVAILABLE,
+                "No model is available to create a profile with."
+            );
+        }
+        return fallback;
+    }
+    const resolved = clampSelectedModelsAgainstRuntime(
+        requested,
+        models,
+        ASSISTANT_PROFILE_LIMITS.maxModels
+    );
+    if (resolved.length !== new Set(requested).size) {
+        throw new AssistantProfileError(
+            422,
+            ASSISTANT_PROFILE_MODEL_UNAVAILABLE,
+            "One of those models is not available."
+        );
+    }
+    return resolved;
+};
+
 export async function POST(req: Request) {
     try {
         const userId = await requireOwner();
@@ -137,6 +221,23 @@ export async function POST(req: Request) {
                 icon: body.icon ?? null,
                 description: body.description ?? null,
             },
+            firstVersion:
+                body.instructions === undefined
+                    ? undefined
+                    : {
+                          instructions: body.instructions,
+                          modelIds: await resolveCreateModelIds(body.modelIds),
+                          // The narrow-only defaults (§14). A profile created
+                          // from the minimal form asks for nothing beyond
+                          // instructions, and a tool it never requested must
+                          // not arrive switched on. Widening happens in the
+                          // editor, explicitly, and still cannot exceed what
+                          // the account's plan allows at runtime.
+                          toolPolicy: { webSearch: false, deepResearch: false },
+                          memoryPolicy: { useAccountMemory: false },
+                          starters: [],
+                          knowledgeManifest: [],
+                      },
         });
         return NextResponse.json(
             { profile },

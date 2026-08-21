@@ -13,13 +13,6 @@ type RefundEmailInput = {
   language?: string | null;
 };
 
-type BillingWelcomeEmailInput = {
-  to: string | null | undefined;
-  plan: string | null | undefined;
-  billingInterval?: string | null;
-  periodEnd?: Date | string | null;
-  language?: string | null;
-};
 
 const appUrl = () =>
   process.env.PUBLIC_APP_URL ||
@@ -47,6 +40,31 @@ const escapeHtml = (value: string) =>
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#39;");
+
+/**
+ * The period end a receipt quotes, resolved once at enqueue time.
+ *
+ * Exported because the resolution has to happen at the call site, not in the
+ * renderer: the renderer runs again at drain time and possibly days later, and
+ * a `new Date()` in there would make the delivered message differ from the one
+ * that was queued -- breaking the idempotency key's payload match and the audit
+ * reproduction with it (docs/policy/email-notifications.md §9.3, §10.3).
+ * Resolved here and frozen into the
+ * snapshot, it stays the date the purchase actually renews on.
+ *
+ * Stripe usually supplies it. The fallback covers the case where it does not,
+ * and exists because a receipt reading "renewal date: not available" is worse
+ * than one reading the date the interval implies.
+ */
+export const resolveBillingPeriodEnd = (
+  periodEnd: Date | string | null | undefined,
+  billingInterval: string | null | undefined,
+  now = new Date()
+): string =>
+  (periodEnd
+    ? new Date(periodEnd)
+    : addBillingPeriod(now, billingInterval)
+  ).toISOString();
 
 const addBillingPeriod = (
   date: Date,
@@ -709,24 +727,33 @@ const shell = (title: string, body: string, language: EmailLanguage) => {
 `;
 };
 
-export async function sendBillingWelcomeEmail(input: BillingWelcomeEmailInput) {
-  if (!input.to) return;
+export function buildBillingWelcomeEmail(input: {
+  plan: string | null | undefined;
+  billingInterval?: string | null;
+  /** ISO string, never a Date: the snapshot has to survive JSON. */
+  periodEnd?: string | null;
+  language?: string | null;
+}) {
   const language = normalizeLanguage(input.language);
   const copy = getCopy(input.language);
   const plan = escapeHtml(input.plan || "Tomverse Insight");
   const billingInterval = formatBillingInterval(input.billingInterval, language);
-  const resolvedPeriodEnd =
-    input.periodEnd || addBillingPeriod(new Date(), input.billingInterval);
-  const periodEnd = formatDate(resolvedPeriodEnd, language);
-  const subject = copy.welcome.subject(plan);
-  const text = copy.welcome.text(plan, billingInterval, periodEnd).join("\n");
-  const html = shell(
-    copy.welcome.title,
-    copy.welcome.body(plan, billingInterval, periodEnd),
-    language
-  );
-  await sendTransactionalEmail({ to: input.to, subject, text, html });
+  // Resolved by the caller, never here: `new Date()` inside a renderer makes
+  // the drain render something different from the enqueue, which breaks both
+  // the idempotency key and the audit reproduction
+  // (docs/policy/email-notifications.md §9.3, §10.3).
+  const periodEnd = formatDate(input.periodEnd ?? null, language);
+  return {
+    subject: copy.welcome.subject(plan),
+    text: copy.welcome.text(plan, billingInterval, periodEnd).join("\n"),
+    html: shell(
+      copy.welcome.title,
+      copy.welcome.body(plan, billingInterval, periodEnd),
+      language
+    ),
+  };
 }
+
 
 type FoundingTesterPassEmailInput = {
   to: string | null | undefined;

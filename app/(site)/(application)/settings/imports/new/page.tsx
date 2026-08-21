@@ -14,7 +14,7 @@ import { ExternalImportWizard } from "@/components/imports/ExternalImportWizard"
 // Server Component is only the route shell.
 export default function NewImportPage() {
     return (
-        <main className="min-h-dvh bg-zinc-50 text-zinc-900 dark:bg-zinc-950 dark:text-zinc-100">
+        <main>
             <ExternalImportWizard />
         </main>
     );

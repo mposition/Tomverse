@@ -49,7 +49,7 @@ async function startNewChat(page: Page) {
   }
 }
 
-async function openSettingsPreferences(page: Page) {
+async function openSettingsAiTab(page: Page) {
   const accountTrigger = page.getByTestId("account-menu-trigger");
   if ((page.viewportSize()?.width ?? 0) < 768) {
     await page.getByRole("button", { name: "Open chat menu" }).click();
@@ -62,7 +62,10 @@ async function openSettingsPreferences(page: Page) {
     .click();
   const settings = page.getByRole("dialog", { name: "User Settings" });
   await expect(settings).toBeVisible();
-  await settings.getByRole("button", { name: "Preferences" }).click();
+  // The new-conversation combination lives on the AI settings tab. It was on
+  // "Preferences" beside theme, language and time zone -- a tab about how the
+  // app looks, holding the decision about which models answer.
+  await settings.getByRole("button", { name: "AI settings" }).click();
   return settings;
 }
 
@@ -120,7 +123,7 @@ test("the combination editor designates a lead, gates high-cost and plan-locked 
   });
 
   await page.goto("/chat?lang=en");
-  const settings = await openSettingsPreferences(page);
+  const settings = await openSettingsAiTab(page);
   const editor = settings.getByTestId("settings-new-conversation-models");
   await expect(editor).toBeVisible();
 
@@ -178,7 +181,7 @@ test("the combination editor designates a lead, gates high-cost and plan-locked 
 
   // Reopening settings shows the saved combination with the lead first, and
   // the already-saved higher-cost model no longer demands fresh consent.
-  const reopened = await openSettingsPreferences(page);
+  const reopened = await openSettingsAiTab(page);
   const reopenedRows = reopened
     .getByTestId("settings-new-conversation-models")
     .getByTestId("settings-combination-row");

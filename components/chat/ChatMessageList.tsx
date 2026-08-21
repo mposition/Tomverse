@@ -141,6 +141,107 @@ const isFileParsingError = (content: string) => {
   );
 };
 
+type MarkdownPreProps = ComponentPropsWithoutRef<"pre"> & ExtraProps;
+
+/**
+ * A markdown code block with its own copy control.
+ *
+ * Declared here at module scope rather than inline in `ReactMarkdown`'s
+ * `components` map on purpose. A component written inside that map is a new
+ * function -- a new element *type* -- on every render, so React unmounts the
+ * old subtree and mounts a fresh one each time: the "copied" tick would be
+ * wiped by the very next streamed chunk, or by any parent re-render. Given a
+ * stable type, each block keeps its own state for as long as it is on screen.
+ */
+function MarkdownCodeBlock({ children }: MarkdownPreProps) {
+  const { t } = useLanguage();
+  const preRef = useRef<HTMLPreElement | null>(null);
+  const [copied, setCopied] = useState(false);
+  const copiedResetRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (copiedResetRef.current) clearTimeout(copiedResetRef.current);
+    };
+  }, []);
+
+  const copyCode = async () => {
+    const element = preRef.current;
+    if (!element) return;
+    // Read the rendered text, not `children`: rehype-highlight has already
+    // split the code into nested <span>s, so anything derived from the React
+    // children (`String(children)`, a join of the leaves) returns markup
+    // artefacts instead of code. The copy button is a sibling of the <pre>,
+    // never a child, so nothing but the code itself is in here.
+    //
+    // mdast-util-to-hast ends every code block with the one newline that
+    // closes it for display; the author did not type it, so exactly that one
+    // is dropped -- and only if it is there. A blank line the author did
+    // write before it survives, as does every newline inside the block.
+    const code = (element.textContent ?? "").replace(/\r?\n$/, "");
+    try {
+      await navigator.clipboard.writeText(code);
+    } catch (error) {
+      console.error("Failed to copy code block:", error);
+      return;
+    }
+    if (copiedResetRef.current) clearTimeout(copiedResetRef.current);
+    setCopied(true);
+    copiedResetRef.current = setTimeout(() => setCopied(false), 1_500);
+  };
+
+  // The success state has to reach the accessible name as well as the icon --
+  // a keyboard or screen reader user gets no result at all from a glyph swap.
+  // Reusing the existing `responseCopied` string keeps one wording for "the
+  // clipboard now holds this", and adds no second `role="status"` inside the
+  // transcript (which would make the app's own toast assertions ambiguous).
+  const label = copied ? t("chat.responseCopied") : t("chat.copyCode");
+
+  return (
+    <div className="relative mb-3 last:mb-0">
+      {/*
+        UX-031, same reasoning as the table above: a long line of code scrolls
+        sideways and nothing inside a <pre> can take focus.
+
+        The extra top padding is what the button sits in. The button is a
+        sibling of the <pre> rather than a child, so scrolling the code
+        sideways does not carry it off the edge, and `textContent` above stays
+        the code alone.
+      */}
+      <pre
+        ref={preRef}
+        className="overflow-x-auto rounded-lg bg-zinc-950 px-3 pb-3 pt-11 text-zinc-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 [&>code]:block [&>code]:rounded-none [&>code]:bg-transparent [&>code]:p-0 [&>code]:text-zinc-100"
+        tabIndex={0}
+        role="region"
+        aria-label={t("chat.markdownCodeRegion")}
+      >
+        {children}
+      </pre>
+      {/*
+        The icon stays small, but the touch target does not: `before:-inset-2`
+        grows the hit area of the 28px button to 44x44. Offset by the same 8px
+        it is inset from the corner, that square ends flush with the block's
+        top and right edges -- a full-size target that still cannot be hit
+        from outside the code block it belongs to.
+      */}
+      <button
+        type="button"
+        data-testid="chat-code-copy-button"
+        onClick={() => void copyCode()}
+        title={label}
+        aria-label={label}
+        className="absolute right-2 top-2 inline-flex h-7 w-7 items-center justify-center rounded-md text-zinc-400 transition-colors before:absolute before:-inset-2 before:content-[''] hover:bg-zinc-800 hover:text-zinc-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+      >
+        {copied ? (
+          <Check className="h-3.5 w-3.5" aria-hidden="true" />
+        ) : (
+          <Copy className="h-3.5 w-3.5" aria-hidden="true" />
+        )}
+      </button>
+    </div>
+  );
+}
+
 function TypingIndicator({ label }: { label?: string }) {
   return (
     // The three bouncing dots are purely visual: without a text alternative,
@@ -665,19 +766,12 @@ export function ChatMessageList({
                         td: ({ children }) => (
                             <td className="border border-zinc-300 px-2 py-1 align-top dark:border-zinc-600">{children}</td>
                         ),
-                        // UX-031, same reasoning as the table above: a long
-                        // line of code scrolls sideways and nothing inside a
-                        // <pre> can take focus.
-                        pre: ({ children }) => (
-                          <pre
-                            className="mb-3 overflow-x-auto rounded-lg bg-zinc-950 p-3 text-zinc-100 last:mb-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 [&>code]:block [&>code]:rounded-none [&>code]:bg-transparent [&>code]:p-0 [&>code]:text-zinc-100"
-                            tabIndex={0}
-                            role="region"
-                            aria-label={t("chat.markdownCodeRegion")}
-                          >
-                            {children}
-                          </pre>
-                        ),
+                        // Block code, with its own copy control. Referenced
+                        // by identity rather than written out here: an inline
+                        // component would be remounted on every render and
+                        // could not hold the copied state (see
+                        // MarkdownCodeBlock).
+                        pre: MarkdownCodeBlock,
                         code: ({ children, className, ...props }: MarkdownCodeProps) => (
                           <code
                             {...props}

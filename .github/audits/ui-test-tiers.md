@@ -42,7 +42,7 @@ browser coverage without rebuilding E2E" 항목이 이 문서의 존재와 workf
 맞춥니다.
 
 실측: 2026-08-21 기준 `--grep=@ui-risk --list`가 desktop-chromium과
-mobile-chromium 두 project에서 **30개 파일, 674 test**를 선택합니다.
+mobile-chromium 두 project에서 **32개 파일, 738 test**를 선택합니다.
 
 | Spec |
 |---|
@@ -66,17 +66,29 @@ mobile-chromium 두 project에서 **30개 파일, 674 test**를 선택합니다.
 | `model-panel-tablet-reachability.spec.ts` |
 | `pricing-promotion-currency.spec.ts` |
 | `provider-status.spec.ts` |
+| `assistant-profiles-settings.spec.ts` |
+| `chat-context-menu-shape.spec.ts` |
 | `settings-information-architecture.spec.ts` |
 | `sidebar-context-menu-theme.spec.ts` |
 | `signin-analytics-placement.spec.ts` |
 | `skip-link-and-armed-delete.spec.ts` |
 | `ssr-root-language.spec.ts` |
 
-검토 시점 실측(2026-08-21, `--list`): **30개 파일 674 test** (두 project 합계).
-직전 값은 2026-08-20의 29개 파일 658 test였고, 그 뒤
-`generated-artifact-card.spec.ts`(+16)가 합류했습니다. 그 이전은 2026-08-16의 28개 파일 646 test였고, 그 뒤
-`chat-welcome-flicker.spec.ts`(+12)가 합류했습니다. 그 이전은 2026-08-14의
-27개 파일 638 test였고 `pricing-promotion-currency.spec.ts`(+8)가 합류했습니다. 그 이전은 2026-08-05의
+검토 시점 실측(2026-08-21, `--list`): **32개 파일 738 test** (두 project 합계).
+`generated-artifact-card.spec.ts`(+16 — 이 spec을 빼고 다시 재면 31개 파일
+722 test입니다)가 합류했습니다. 직전 기록인 2026-08-21의 31개 파일 696 test는
+그 사이 다른 tier spec이 자라면서 이미 26 test만큼 뒤처져 있었으므로, 위
+숫자는 그 기록에 더한 값이 아니라 병합 시점에 다시 잰 값입니다. 그 이전에는
+`chat-context-menu-shape.spec.ts`(+34)가 합류했습니다 — 컴포저 Context 메뉴의
+항목 수·순서와 일곱 개 viewport의 "스크롤 없음" 계약은 화면에서만 확인되고, 이
+메뉴는 채팅의 모든 도구 진입점이므로 tier에 넣었습니다. 그 이전에는
+`chat-welcome-flicker.spec.ts`(+12)가 합류했습니다. 그 이전은 2026-08-16의
+28개 파일 646 test였고 `assistant-profiles-settings.spec.ts`(+4)가
+합류했습니다 — AI 프로필 생성 폼이 최소 입력만 묻고 고급 설정을 접어 두는 계약,
+그리고 어시스턴트 선택 메뉴가 생성 경로를 제공하는 계약은 둘 다 화면에서만
+확인되고 둘 다 릴리스 C의 진입 경로이므로 tier에 넣었습니다. 그 이전은
+2026-08-14의 27개 파일 638 test였고,
+`pricing-promotion-currency.spec.ts`(+8)가 합류했습니다. 그 이전은 2026-08-05의
 25개 파일 630 test였고 `csp-eval-free.spec.ts`(+4)와
 `external-import-settings.spec.ts`(+2)가 합류했습니다. 그 이전 기록
 "76 test / 14 skip / 67초"는 표에 적힌 5개 파일만 세던 시점의 값입니다. 이
@@ -155,7 +167,7 @@ push의 무필터 실행에서만 잡히는데, 승격 후에 말하는 보안 �
    줄인 desktop project 결과는 44px 근거로 인정하지 않습니다
    (`useIsMobileShell`은 `(max-width: 767px) AND (pointer: coarse)`).
 
-`generated-artifact-card.spec.ts`는 2026-08-21에 합류했습니다(30개 파일,
+`generated-artifact-card.spec.ts`는 2026-08-21에 합류했습니다(32개 파일,
 +16 test — desktop·mobile 각 8). AI 생성 파일의 다운로드 카드가 tier에 드는
 이유는 세 가지가 전부 레이아웃·입력·접근성 회귀이기 때문입니다: 320px에서
 파일명 행과 다운로드 버튼이 겹치지 않는가, 버튼이 44px 터치 영역과 키보드

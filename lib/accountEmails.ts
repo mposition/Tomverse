@@ -1,40 +1,36 @@
 import "server-only";
 
-import { sendTransactionalEmail } from "@/lib/email";
 import { EMAIL_FONT_STACK } from "@/lib/emailTypography";
 
 type EmailLanguage = "en" | "ko" | "zh" | "fr" | "de" | "es" | "pt";
 
-type AccountWelcomeEmailInput = {
-  to: string | null | undefined;
-  name?: string | null;
-  language?: string | null;
-};
 
-export async function sendAccountDeletionScheduledEmail(input: {
-  to: string | null | undefined;
-  scheduledFor: Date;
+/**
+ * Built rather than sent, so the standard lane can render the same bytes at
+ * drain time that it would have rendered at enqueue time.
+ *
+ * Pure and deterministic for a given input: the provider only suppresses a
+ * duplicate when the retried payload is byte-identical, and an audit that
+ * re-renders differently from what was sent proves nothing
+ * (docs/policy/email-notifications.md §9.3, §10.3).
+ */
+export function buildAccountDeletionScheduledEmail(input: {
+  scheduledFor: string;
 }) {
-  if (!input.to) return { sent: false, reason: "Recipient email missing" };
-  const date = input.scheduledFor.toISOString();
-  return sendTransactionalEmail({
-    to: input.to,
+  const date = input.scheduledFor;
+  return {
     subject: "Tomverse account deletion scheduled",
     text: `Your Tomverse account access has been stopped immediately and permanent deletion (including all data) is scheduled for ${date}. If you have a paid plan, automatic renewal has been stopped, but access stays blocked either way while deletion is pending. Cancelling this request is not self-service -- contact support@tomverse.app before that date and our team will restore your account. If restored, plan access resumes only until your plan's original expiration date; automatic renewal is not restored. If you did not request this, contact support@tomverse.app immediately.`,
     html: `<p>Your Tomverse account access has been stopped immediately, and permanent deletion (including all data) is scheduled for <strong>${escapeHtml(date)}</strong>.</p><p>If you have a paid plan, automatic renewal has been stopped, but access stays blocked either way while deletion is pending.</p><p>Cancelling this request is <strong>not self-service</strong> -- contact <a href="mailto:support@tomverse.app">support@tomverse.app</a> before that date and our team will restore your account. If restored, plan access resumes only until your plan's original expiration date; automatic renewal is not restored.</p><p>If you did not request this, contact <a href="mailto:support@tomverse.app">support@tomverse.app</a> immediately.</p>`,
-  });
+  };
 }
 
-export async function sendAccountRestoredEmail(input: {
-  to: string | null | undefined;
-}) {
-  if (!input.to) return { sent: false, reason: "Recipient email missing" };
-  return sendTransactionalEmail({
-    to: input.to,
+export function buildAccountRestoredEmail() {
+  return {
     subject: "Your Tomverse account has been restored",
     text: `Your Tomverse account is active again and you can sign in. If you had a paid plan, it continues until its original expiration date, but automatic renewal was not restored -- you'll need to resubscribe if you want to keep the plan after that date.`,
     html: `<p>Your Tomverse account is active again and you can sign in.</p><p>If you had a paid plan, it continues until its original expiration date, but automatic renewal was not restored -- you'll need to resubscribe if you want to keep the plan after that date.</p>`,
-  });
+  };
 }
 
 type WelcomeCopy = {
@@ -316,9 +312,10 @@ const shell = (copyItem: WelcomeCopy, body: string) => {
 `;
 };
 
-export async function sendAccountWelcomeEmail(input: AccountWelcomeEmailInput) {
-  if (!input.to) return;
-
+export function buildAccountWelcomeEmail(input: {
+  name?: string | null;
+  language?: string | null;
+}) {
   const language = normalizeLanguage(input.language);
   const selected = copy[language];
   const displayName = input.name || "there";
@@ -337,10 +334,5 @@ export async function sendAccountWelcomeEmail(input: AccountWelcomeEmailInput) {
     `${selected.button}: ${appUrl()}/chat`,
   ].join("\n");
 
-  await sendTransactionalEmail({
-    to: input.to,
-    subject: selected.subject,
-    text,
-    html: shell(selected, body),
-  });
+  return { subject: selected.subject, text, html: shell(selected, body) };
 }

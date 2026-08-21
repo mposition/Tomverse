@@ -116,10 +116,51 @@ export function adminEnvironmentChecks(): AdminEnvCheck[] {
         "Receives website support form notifications. Falls back to ADMIN_ALERT_EMAIL or ADMIN_EMAILS.",
     },
     {
+      name: "RESEND_WEBHOOK_SECRET",
+      configured: isConfigured(process.env.RESEND_WEBHOOK_SECRET),
+      description:
+        "Svix signing secret for Resend delivery, bounce and complaint events. " +
+        "Without it the webhook answers 503 so events queue at the provider " +
+        "rather than being dropped -- but nothing reaches the suppression list " +
+        "until it is set, so bounced addresses keep being sent to.",
+    },
+    {
+      name: "EMAIL_UNSUBSCRIBE_KEYS",
+      configured: isConfigured(process.env.EMAIL_UNSUBSCRIBE_KEYS),
+      description:
+        "Keys for unsubscribe links, as version:secret pairs. Marketing mail " +
+        "refuses to send without one. Old versions must stay listed for as " +
+        "long as mail carrying them is in the wild -- dropping a version does " +
+        "not invalidate those links, it breaks them, and a broken unsubscribe " +
+        "link's alternative is the spam button.",
+    },
+    {
+      name: "EMAIL_SNAPSHOT_KEYS",
+      configured: isConfigured(process.env.EMAIL_SNAPSHOT_KEYS),
+      description:
+        "Envelope keys for the personalisation inputs the standard email lane " +
+        "stores, as version:secret pairs. Without it that lane refuses to " +
+        "enqueue rather than storing them in the clear. Old versions must stay " +
+        "listed for as long as the rows they sealed are retained.",
+    },
+    {
       name: "TRANSACTIONAL_EMAIL_FROM",
       configured: true,
       description:
-        "Verified sender used for account and billing emails. Defaults to hello@tomverse.app.",
+        "Verified sender used for account and billing emails. Defaults to " +
+        "hello@tomverse.app, which is the registrable domain rather than the " +
+        "sending subdomain docs/policy/email-notifications.md §14.1 moves it " +
+        "to -- /api/ready reports that as a warning until the DNS move is done.",
+    },
+    {
+      name: "MARKETING_EMAIL_FROM",
+      configured: isConfigured(process.env.MARKETING_EMAIL_FROM),
+      description:
+        "Sender for marketing mail, on its own domain. Absent today and that " +
+        "is correct: marketing is production-disabled, and the send path " +
+        "refuses rather than falling back to the transactional address -- a " +
+        "promotion sent from the transactional domain puts its spam " +
+        "complaints on the domain that carries login codes.",
     },
     {
       name: "SLACK_WEBHOOK_URL",

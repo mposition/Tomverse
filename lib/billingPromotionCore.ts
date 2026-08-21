@@ -37,6 +37,22 @@ type PromotionCurrencyInput = {
 };
 
 /**
+ * Whether this promotion discounts a fixed USD amount rather than a percentage.
+ *
+ * One definition, because two places decide from it and they must not disagree:
+ * `promotionCurrencyFailure()` refuses these outside USD, and the Admin policy
+ * in `lib/billingPromotionAdminPolicy.ts` refuses creating any more of them.
+ * A promotion carrying both a percent and an amount is a percentage promotion
+ * -- `promotionDiscountedMinor()` applies the percent and ignores the amount,
+ * so that is what the customer is actually charged.
+ */
+export const isFixedAmountPromotion = (promotion: {
+  discountPercent: number;
+  discountAmountCents: number | null;
+}) =>
+  promotion.discountPercent <= 0 && (promotion.discountAmountCents || 0) > 0;
+
+/**
  * Whether this promotion can be charged in this currency.
  *
  * Pure, and the only place the rule lives. It used to exist as an inline
@@ -57,13 +73,11 @@ export const promotionCurrencyFailure = ({
   currency: BillingCurrency;
 }): "currency_not_supported" | null => {
   if (promotion.fulfillmentType === "internal_pass") return null;
-  if (promotion.discountPercent > 0) return null;
-  if (!promotion.discountAmountCents || promotion.discountAmountCents <= 0) {
-    // Not a fixed-amount promotion either. `promotionEligibilityFailure()`
-    // already refuses a promotion that discounts nothing; answering
-    // "currency" here would relabel that failure.
-    return null;
-  }
+  // Not a fixed-amount promotion: a percentage applies to whatever the local
+  // price is, and a promotion that discounts nothing is already refused by
+  // `promotionEligibilityFailure()` -- answering "currency" here would relabel
+  // that failure.
+  if (!isFixedAmountPromotion(promotion)) return null;
   return FIXED_AMOUNT_PROMOTION_CURRENCIES.includes(currency)
     ? null
     : "currency_not_supported";

@@ -5,6 +5,9 @@ import {
   drainNotificationDeliveries,
   type NotificationDrainResult,
 } from "@/lib/notificationDeliveries";
+import { sweepExpiredCredentialDeliveries } from "@/lib/credentialEmailLane";
+import { drainStandardEmailDeliveries } from "@/lib/standardEmailLane";
+import { purgeExpiredWebhookEvents } from "@/lib/emailWebhookProcessing";
 import { reportOperationalIncident } from "@/lib/operationalMonitoring";
 import {
   completeScheduledJob,
@@ -71,6 +74,87 @@ export async function runNotificationDeliveryDrain(options?: {
         },
       });
     }
+    // User-facing mail drains on the same tick, for the same reason the
+    // operator queue does: a pass that needs its own cron provisioned before it
+    // moves anything is a pass that moves nothing for a while. It is wrapped so
+    // its failure cannot fail the operator drain -- the two queues fail
+    // independently and should be reported that way.
+    try {
+      const userMail = await drainStandardEmailDeliveries();
+      if (userMail.claimed > 0) {
+        console.info(
+          JSON.stringify({
+            event: "standard_email_drain",
+            ...userMail,
+            at: new Date().toISOString(),
+          })
+        );
+      }
+    } catch (drainError) {
+      console.error(
+        JSON.stringify({
+          event: "standard_email_drain_failed",
+          reason: drainError instanceof Error ? drainError.name : "unknown",
+          at: new Date().toISOString(),
+        })
+      );
+    }
+
+    // Raw provider events past their ninety days go here too. They carry the
+    // recipient's address, so leaving them is not a tidiness problem -- it is a
+    // second copy of who we mail, accumulating where nothing manages it.
+    try {
+      const purged = await purgeExpiredWebhookEvents();
+      if (purged.purged > 0) {
+        console.info(
+          JSON.stringify({
+            event: "email_webhook_events_purged",
+            purged: purged.purged,
+            at: new Date().toISOString(),
+          })
+        );
+      }
+    } catch (purgeError) {
+      console.error(
+        JSON.stringify({
+          event: "email_webhook_purge_failed",
+          reason: purgeError instanceof Error ? purgeError.name : "unknown",
+          at: new Date().toISOString(),
+        })
+      );
+    }
+
+    // Credential rows are closed out on the same tick rather than on a cron of
+    // their own, for the reason this file already gives about the drain: an
+    // upkeep pass that needs a schedule provisioned before it does anything is
+    // an upkeep pass that does nothing for a while.
+    //
+    // It is a sweep, not a retry. Nothing in the database can rebuild a login
+    // code (see lib/credentialEmailLane.ts), so all this does is stop rows
+    // whose credential has since expired from sitting in the console as sends
+    // still waiting to happen. Its failure must not fail the drain, which is
+    // the part with a queue behind it.
+    try {
+      const sweep = await sweepExpiredCredentialDeliveries();
+      if (sweep.swept > 0) {
+        console.info(
+          JSON.stringify({
+            event: "credential_email_sweep",
+            swept: sweep.swept,
+            at: new Date().toISOString(),
+          })
+        );
+      }
+    } catch (sweepError) {
+      console.error(
+        JSON.stringify({
+          event: "credential_email_sweep_failed",
+          reason: sweepError instanceof Error ? sweepError.name : "unknown",
+          at: new Date().toISOString(),
+        })
+      );
+    }
+
     return result;
   } catch (error) {
     await failScheduledJob({ runId: run?.id, error });

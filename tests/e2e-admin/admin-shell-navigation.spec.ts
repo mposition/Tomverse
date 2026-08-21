@@ -35,6 +35,7 @@ const NAVIGATION = [
   { group: "Operations", label: "Automation", href: "/admin/automation" },
   { group: "Operations", label: "Alerts", href: "/admin/alerts" },
   { group: "Operations", label: "Platform settings", href: "/admin/platform" },
+  { group: "Governance", label: "Email policy", href: "/admin/email-policy" },
   { group: "Governance", label: "Audit log", href: "/admin/audit" },
   { group: "Governance", label: "Retention", href: "/admin/retention" },
   { group: "Governance", label: "Admin access", href: "/admin/admin-access" },

@@ -1,5 +1,6 @@
 export const dynamic = "force-dynamic";
 
+import type { BillingPromotion } from "@prisma/client";
 import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth/next";
 import { z } from "zod";
@@ -21,6 +22,11 @@ import {
   getBillingPromotions,
   syncBillingDefaultsToDatabase,
 } from "@/lib/billingConfig";
+import {
+  PROMOTION_FIXED_AMOUNT_BLOCKED,
+  fixedAmountPromotionRefusals,
+  type AdminPromotionPolicyInput,
+} from "@/lib/billingPromotionAdminPolicy";
 import { prisma } from "@/lib/prisma";
 import {
   BILLING_PRICE_CATALOG_KEY,
@@ -65,6 +71,13 @@ const promotionSchema = z
     id: z.string().trim().min(1).max(120).optional(),
     code: z.string().trim().toUpperCase().min(2).max(32),
     discountPercent: z.number().int().min(0).max(100),
+    /**
+     * @deprecated USD only, and not extended to other currencies
+     * (docs/policy/promotion-discount-currency.md section 2). Still accepted so
+     * the codes that already carry one can be narrowed and audited; what may
+     * still be done to them is decided by `fixedAmountPromotionRefusal()`,
+     * which needs the stored row and so cannot be a schema rule.
+     */
     discountAmountCents: z.number().int().min(0).max(1_000_000).nullable().optional(),
     maxRedemptions: z.number().int().min(1).max(1_000_000).nullable().optional(),
     redeemedCount: z.number().int().min(0).max(1_000_000).optional(),
@@ -144,6 +157,55 @@ const updateBillingSchema = z
   })
   .strict();
 
+type PromotionPayload = z.infer<typeof promotionSchema>;
+
+const promotionRecordId = (promotion: PromotionPayload) =>
+  promotion.id || `promo_${promotion.code.toLowerCase()}`;
+
+const payloadPolicyInput = (
+  promotion: PromotionPayload
+): AdminPromotionPolicyInput => ({
+  code: promotion.code,
+  discountPercent: promotion.discountPercent,
+  discountAmountCents: promotion.discountAmountCents || null,
+  maxRedemptions: promotion.maxRedemptions || null,
+  durationMonths: promotion.durationMonths,
+  appliesToPlanIds: promotion.appliesToPlanIds,
+  startsAt: promotion.startsAt || null,
+  endsAt: promotion.endsAt || null,
+  isActive: promotion.isActive,
+});
+
+const storedPolicyInput = (
+  promotion: BillingPromotion
+): AdminPromotionPolicyInput => {
+  let appliesToPlanIds: string[] = [];
+  try {
+    const parsed = JSON.parse(promotion.appliesToPlanIds);
+    if (Array.isArray(parsed)) {
+      appliesToPlanIds = parsed.filter(
+        (item): item is string => typeof item === "string"
+      );
+    }
+  } catch {
+    // A row whose plan list will not parse is treated as applying to nothing,
+    // so every plan in the payload reads as newly added and the edit is
+    // refused. Guessing the wider set here would let a malformed row be a way
+    // through the check.
+  }
+  return {
+    code: promotion.code,
+    discountPercent: promotion.discountPercent,
+    discountAmountCents: promotion.discountAmountCents,
+    maxRedemptions: promotion.maxRedemptions,
+    durationMonths: promotion.durationMonths,
+    appliesToPlanIds,
+    startsAt: promotion.startsAt?.toISOString() || null,
+    endsAt: promotion.endsAt?.toISOString() || null,
+    isActive: promotion.isActive,
+  };
+};
+
 const planName = (id: "free" | "pro" | "max") =>
   id === "max" ? "Max" : id === "pro" ? "Pro" : "Free";
 
@@ -170,6 +232,7 @@ export async function GET(req: Request) {
       settings,
       priceCatalog: pricing.catalog,
       priceCatalogUpdatedAt: pricing.updatedAt,
+      priceCatalogSource: pricing.source,
     });
   } catch (error) {
     const securityResponse = apiSecurityResponse(error);
@@ -214,28 +277,54 @@ export async function PATCH(req: Request) {
       }
     }
 
-    const existingPromotions = await prisma.billingPromotion.findMany({
-      select: { id: true, updatedAt: true },
-    });
-    const existingPromotionUpdatedAt = new Map(
-      existingPromotions.map((promotion) => [
-        promotion.id,
-        promotion.updatedAt.toISOString(),
-      ])
+    // Read once and keep the whole row: the optimistic-concurrency check, the
+    // fixed-amount policy gate and the upsert loop below all need the stored
+    // promotion, and re-reading it per promotion per purpose invites the three
+    // to disagree about what "existing" was.
+    const existingPromotions = await prisma.billingPromotion.findMany();
+    const existingPromotionById = new Map(
+      existingPromotions.map((promotion) => [promotion.id, promotion])
     );
     for (const promotion of body.promotions || []) {
-      const id = promotion.id || `promo_${promotion.code.toLowerCase()}`;
-      const currentUpdatedAt = existingPromotionUpdatedAt.get(id);
+      const current = existingPromotionById.get(promotionRecordId(promotion));
       if (
-        currentUpdatedAt &&
+        current &&
         promotion.updatedAt &&
-        currentUpdatedAt !== promotion.updatedAt
+        current.updatedAt.toISOString() !== promotion.updatedAt
       ) {
         return NextResponse.json(
           { error: `Promotion ${promotion.code} was changed by another admin. Reload before saving.` },
           { status: 409 }
         );
       }
+    }
+
+    // Fixed-amount promotions are deprecated, not deleted: existing codes may
+    // be narrowed or switched off, nothing may create or widen one.
+    // docs/policy/promotion-discount-currency.md section 4 is the matrix; this
+    // is where it is enforced, before any write, so a refused save changes
+    // nothing at all. The Admin panel refuses the same edits, but the panel is
+    // not the only client this endpoint has.
+    const promotionRefusals = fixedAmountPromotionRefusals(
+      (body.promotions || []).map((promotion) => {
+        const current = existingPromotionById.get(promotionRecordId(promotion));
+        return {
+          existing: current ? storedPolicyInput(current) : null,
+          next: payloadPolicyInput(promotion),
+        };
+      })
+    );
+    if (promotionRefusals.length > 0) {
+      return NextResponse.json(
+        {
+          error: promotionRefusals
+            .map((item) => `${item.code}: ${item.message}`)
+            .join(" "),
+          code: PROMOTION_FIXED_AMOUNT_BLOCKED,
+          refusals: promotionRefusals,
+        },
+        { status: 400 }
+      );
     }
 
     if (body.priceCatalog) {
@@ -299,11 +388,9 @@ export async function PATCH(req: Request) {
 
     const savedPromotionIds: string[] = [];
     for (const promotion of body.promotions || []) {
-      const id = promotion.id || `promo_${promotion.code.toLowerCase()}`;
+      const id = promotionRecordId(promotion);
       savedPromotionIds.push(id);
-      const existingPromotion = await prisma.billingPromotion.findUnique({
-        where: { id },
-      });
+      const existingPromotion = existingPromotionById.get(id) || null;
       const startsAt = promotion.startsAt ? new Date(promotion.startsAt) : null;
       const endsAt = promotion.endsAt ? new Date(promotion.endsAt) : null;
       const policyChanged =
@@ -410,6 +497,7 @@ export async function PATCH(req: Request) {
       settings,
       priceCatalog: pricing.catalog,
       priceCatalogUpdatedAt: pricing.updatedAt,
+      priceCatalogSource: pricing.source,
     });
   } catch (error) {
     const securityResponse = apiSecurityResponse(error);

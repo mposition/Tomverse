@@ -555,6 +555,28 @@ test.describe("admin read surfaces", () => {
     await expect(page.getByText(/most recent entries/)).toBeVisible();
   });
 
+  test("the sending-domain tab reports what it could not read", async ({
+    page,
+  }) => {
+    // No provider key in the fixture environment, which is the case worth
+    // pinning: the screen has to say the provider was not reached and make no
+    // claims, rather than deriving findings from an empty list and sending an
+    // operator to re-create domains that already exist.
+    await page.goto("/admin/email-policy?tab=domains");
+
+    await expect(
+      page.getByRole("heading", { name: "Sending domains" })
+    ).toBeVisible();
+    await expect(
+      page.getByTestId("email-domain-configured-transactional")
+    ).toContainText("tomverse.app");
+    await expect(
+      page.getByTestId("email-domain-configured-marketing")
+    ).toContainText("not configured");
+    await expect(page.getByTestId("email-domain-provider-error")).toBeVisible();
+    await expect(page.getByTestId("email-domain-findings")).toBeEmpty();
+  });
+
   test("retention renders its cleanup controls", async ({ page }) => {
     await page.goto("/admin/retention");
 

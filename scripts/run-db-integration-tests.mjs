@@ -174,6 +174,12 @@ run(
     // rather than a convention, and the tombstone ordering every deletion
     // path depends on. Neither can be checked without Postgres.
     "tests/integration/generated-artifacts.db.test.ts",
+    "tests/integration/email-notification-schema.db.test.ts",
+    "tests/integration/credential-email-lane.db.test.ts",
+    "tests/integration/standard-email-lane.db.test.ts",
+    "tests/integration/email-webhook-suppression.db.test.ts",
+    "tests/integration/email-preferences-consent.db.test.ts",
+    "tests/integration/email-jurisdiction-policy.db.test.ts",
     // The import/memory program's suites were written alongside their slices
     // but never listed here, i.e. never actually run by CI — a guard nobody
     // runs is not a guard. Keep this list in step with tests/integration/.

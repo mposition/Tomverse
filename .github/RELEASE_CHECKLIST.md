@@ -65,6 +65,11 @@ Date / timezone:    ____________________
 - [ ] `npm run check:enum-constraints` — proves every closed list the schema
       enforces still matches the list the application validates against, and
       that a new one was registered rather than left undecided
+- [ ] `npm run check:sending-identity` — proves nothing hard-codes the address
+      mail is sent from. Four senders each carried their own variable and their
+      own literal, so moving the sending domain moved one of them and no health
+      check could tell: a check only sees the senders that ask it
+      (docs/ops/email-sending-domains.md §1.2)
 - [ ] `npm run check:context-window-register`
 - [ ] `npm run check:router-context-window`
 - [ ] `npm run check:router-quality-eval`

@@ -18,6 +18,7 @@ import {
   FIXTURE_CREDIT,
   FIXTURE_CUSTOMERS,
   FIXTURE_FEEDBACK,
+  FIXTURE_FIXED_AMOUNT_PROMOTION,
   FIXTURE_TRACE_REPORT,
   FIXTURE_HEALTH_CHECK,
   FIXTURE_INCIDENT,
@@ -510,6 +511,25 @@ export const seedAdminFixtures = async () => {
           },
         ],
       },
+    },
+  });
+
+  await prisma.billingPromotion.create({
+    data: {
+      id: FIXTURE_FIXED_AMOUNT_PROMOTION.id,
+      code: FIXTURE_FIXED_AMOUNT_PROMOTION.code,
+      discountPercent: 0,
+      discountAmountCents: FIXTURE_FIXED_AMOUNT_PROMOTION.discountAmountCents,
+      durationMonths: 1,
+      maxRedemptions: 100,
+      redeemedCount: 2,
+      appliesToPlanIds: JSON.stringify(["pro"]),
+      // Paused, and it has to stay refusable to restart: reactivating a
+      // fixed-amount code is the row of section 4's matrix that the console is
+      // most likely to be asked for.
+      isActive: false,
+      startsAt: at(-60 * DAY),
+      endsAt: at(30 * DAY),
     },
   });
 

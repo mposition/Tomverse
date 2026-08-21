@@ -2883,7 +2883,14 @@ const checks = [
         // unchanged -- this workflow installs the two browsers it runs.
         source.includes("scripts/ci/install-playwright.sh chromium webkit") &&
         source.includes("npm run test:e2e:run") &&
-        source.includes("node scripts/send-security-audit-report.mjs") &&
+        // Under tsx since 2026-08-21: the reporter resolves its From through
+        // lib/emailSendingIdentityCore.ts rather than its own literal, and that
+        // module is TypeScript. Sharing the resolver is the point -- a second
+        // copy of the rules is what left this sender on the old domain when the
+        // transactional domain moved (docs/ops/email-sending-domains.md §1.2).
+        source.includes(
+          "node --import tsx scripts/send-security-audit-report.mjs"
+        ) &&
         source.includes('check_result "Unit and API policy tests"') &&
         source.includes('check_result "Independent TypeScript validation"') &&
         source.includes('check_result "Full desktop and mobile E2E"') &&

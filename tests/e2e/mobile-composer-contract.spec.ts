@@ -739,6 +739,10 @@ test.describe("Mobile composer: guest attachments", () => {
     await enterGuestMobileComposer(page, { viewport: { width: 390, height: 780 } });
     await openActions(page);
 
+    // Where a file comes from is now asked after the user says they want to
+    // attach one, so the sources live one step in rather than as two root rows.
+    await page.getByTestId("tools-attach-row").click();
+
     // The capability the homepage promises, actually offered.
     const local = page.getByTestId("attach-local-file-row");
     await expect(local).toBeVisible();
