@@ -1433,15 +1433,30 @@ export function ChatPageClient({
       conversationId,
       prompt,
       promptAttachments,
+      modelIds: requestedModelIds,
     }: {
       comparisonId: string;
       conversationId: string;
       prompt: string;
       promptAttachments: ChatAttachment[];
+      /**
+       * The set this send is actually for, when the caller already knows it.
+       *
+       * A create that carries an assistant comes back with the profile's
+       * models rather than the caller's (§14.0), and the screen's own list has
+       * not caught up by the time this runs. Reading state here priced -- and
+       * asked admission for -- models the conversation no longer had, which
+       * `/api/chat/preflight` refuses with "One or more comparison models are
+       * not selected for this conversation." Trace
+       * 9219480c-6ad3-49ae-8120-8a31ee18513e.
+       */
+      modelIds?: string[];
     }) => {
-      const modelIds = selectedModels.filter(
-        (modelId) => !effectiveDisabledPanels.includes(modelId)
-      );
+      const modelIds =
+        requestedModelIds ??
+        selectedModels.filter(
+          (modelId) => !effectiveDisabledPanels.includes(modelId)
+        );
       // Guests run this too. A guest comparison is the same three requests an
       // account's is, so its concurrency has to be admitted once for the whole
       // run -- otherwise the panels race each other and some are refused after
@@ -3285,20 +3300,24 @@ export function ChatPageClient({
         if (!modelSettingsReady) return;
       }
       const comparisonId = Date.now().toString();
+      // Resolved before the preflight, not after it: the preflight prices this
+      // set and hands back the admission slots for it, so it has to be asked
+      // about the same models the send will name.
+      const activeModelIds = sendSelectedModels.filter(
+        (modelId) => !sendDisabledPanels.includes(modelId)
+      );
       const preflight = await runComparisonPreflight({
         comparisonId,
         conversationId: activeChatId,
         prompt: trimmed,
         promptAttachments,
+        modelIds: activeModelIds,
       });
       if (!preflight.allowed) return;
       // The comparison preflight prices the whole set and hands back one
       // bundle for it. A single-model send never had a preparation step, so
       // this is where it gets one -- §10 requires the context to be priced
       // before the request that sends it, whichever shape the send is.
-      const activeModelIds = sendSelectedModels.filter(
-        (modelId) => !sendDisabledPanels.includes(modelId)
-      );
       const contextLayout =
         activeModelIds.length >= 2
           ? ("comparison" as const)
