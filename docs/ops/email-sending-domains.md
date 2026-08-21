@@ -28,21 +28,33 @@ suppression은 **같은 region의 계정 전체**에 적용되므로, marketing�
 도메인이 아니라 계정 또는 region을 나눠야 합니다(A18). `mail.tomverse.app`을
 같은 region에 만든 것은 그 결정을 이 작업에서 우연히 내리지 않기 위해서입니다.
 
-### 1.1 아직 확인되지 않은 것
-
-이 표에 없는 것은 모릅니다. 확인한 것과 보고받은 것을 섞지 않기 위해 나눠 적습니다.
+### 1.1 확인한 것과 확인하지 못한 것
 
 | 항목 | 상태 |
 |---|---|
-| DKIM·SPF 검증 | **확인함.** 제공자 API가 `verified`를 반환 |
-| DMARC 레코드 2건 | **미확인.** 입력했다고 보고받았으나 이 저장소에서 조회할 수단이 없습니다 |
-| DMARC 리포트 수신 | **미확인.** `rua` 주소가 실제로 받는지 확인되지 않았습니다 |
-| 새 도메인 첫 발송 | **미관측.** 전환 후 발송 기록이 아직 없습니다 |
+| DKIM·SPF 검증 | **확인함.** 제공자 API `verified`, `dig`로 값 일치 확인 |
+| DMARC 레코드 2건 | **확인함.** 아래 값 그대로 응답 |
+| 외부 수신지 인증 레코드 | **불필요.** 아래 근거 |
+| DMARC 리포트 수신 | **미확인.** `rua` 주소가 실제로 받는지는 리포트가 와야 압니다 |
+| 새 도메인 첫 발송 | **미관측** (2026-08-21 08:00Z 기준) |
 
-DMARC는 `dig TXT _dmarc.mail.tomverse.app`과 `dig TXT _dmarc.tomverse.app`으로
-사람이 확인합니다. `npm run report:email-domains`도 Admin Console도 이것을
-확인해 주지 않습니다 — 제공자가 그 레코드를 발급하지도 보고하지도 않기
-때문입니다.
+```
+_dmarc.mail.tomverse.app   "v=DMARC1; p=none; rua=mailto:dmarc@tomverse.app; fo=1"
+_dmarc.tomverse.app        "v=DMARC1; p=none; sp=none; rua=mailto:dmarc@tomverse.app; fo=1"
+```
+
+**`dig`는 이 저장소의 실행 환경에서 됩니다.** egress 프록시가 DNS-over-HTTPS
+호스트(`cloudflare-dns.com`, `dns.google`)를 막지만 그것은 *HTTPS 목적지* 차단이고,
+평범한 DNS 조회는 컨테이너가 늘 하는 일이라 영향받지 않습니다. `dnsutils`를 설치하면
+`dig TXT _dmarc.mail.tomverse.app`이 그대로 동작합니다.
+
+**외부 수신지 인증(`_report._dmarc`)이 필요 없는 이유.** RFC 7489 §7.1은 DMARC
+레코드가 발견된 **Organizational Domain**과 `rua` URI 호스트의 Organizational
+Domain이 다를 때만 인증 절차를 요구합니다 — 정확한 도메인 일치가 아니라 조직
+도메인 비교입니다. 여기서는 양쪽 다 `tomverse.app`이므로
+`mail.tomverse.app._report._dmarc.tomverse.app`은 두지 않아도 됩니다. 확인일
+2026-08-21. `rua`를 조직 밖 주소(리포트 처리 서비스 등)로 바꾸는 순간 이 레코드가
+필요해지고, 없으면 **리포트가 조용히 오지 않습니다.**
 
 ## 2. 목표 상태
 
@@ -65,7 +77,7 @@ DMARC는 `dig TXT _dmarc.mail.tomverse.app`과 `dig TXT _dmarc.tomverse.app`으�
 | 단계 | 상태 |
 |---|---|
 | 3.1 도메인 등록 | 완료. `ap-northeast-1`, Return-Path `send`, 추적 off |
-| 3.2 DMARC 레코드 | 입력했다고 보고받음. **이 저장소에서 미확인**(1.1) |
+| 3.2 DMARC 레코드 | 완료. `dig`로 두 레코드 모두 확인(1.1) |
 | 3.3 DKIM·SPF 검증 | 완료. 세 레코드 모두 `verified` |
 | 3.4 2주 관측 | **아직 하지 않음** |
 | 3.5 From 전환 | 완료. `hello@mail.tomverse.app` |
@@ -136,7 +148,7 @@ npm run report:email-domains
 `mail.tomverse.app`이 `verified`로 나오고 DKIM·SPF 레코드가 모두 `verified`가
 될 때까지 기다립니다. 이 보고서는 **DMARC를 확인하지 않습니다** — 제공자가 그
 레코드를 발급하지도, 상태를 보고하지도 않기 때문입니다. `dig TXT
-_dmarc.mail.tomverse.app`으로 직접 봅니다.
+_dmarc.mail.tomverse.app`으로 직접 봅니다(1.1 — 이 환경에서 동작합니다).
 
 ### 3.4 2주 관측
 
@@ -181,6 +193,14 @@ TRANSACTIONAL_EMAIL_FROM=Tomverse Insight <hello@mail.tomverse.app>
 리포트가 깨끗하면 `p=quarantine`, 이후 `p=reject`. 각 단계 사이에 최소 2주.
 루트의 `sp=`도 함께 올립니다.
 
+**루트를 조일 때는 우리 발송만 보고 판단하면 안 됩니다.** `tomverse.app`은 자체
+SPF(`v=spf1 include:_spf.purelymail.com ~all`)와 MX(`mailserver.purelymail.com`)를
+가지고 있습니다 — 사람이 쓰는 메일함이 그 제공자에 있습니다. 루트의 `p=`를 올리면
+그 경로로 나가는 메일도 함께 걸리므로, 리포트에서 **purelymail 경유 발송이 SPF·DKIM
+정렬을 통과하는지** 먼저 확인해야 합니다. 발송 서브도메인만 보고 올리면 우리가 쓰는
+메일함이 먼저 깨집니다. 서브도메인(`_dmarc.mail`)만 조이는 것은 이 제약과 무관하며,
+그래서 두 레코드를 나눠 둔 것이기도 합니다.
+
 ---
 
 ## 4. marketing 도메인 (`news.tomverse.app`)
@@ -215,7 +235,7 @@ MARKETING_EMAIL_FROM=Tomverse <news@news.tomverse.app>
 규모와 무관하게 처음부터 충족합니다.
 
 - [x] SPF + DKIM — 제공자 발급, 위 3.1
-- [~] DMARC — 레코드는 입력했다고 보고받았으나 미확인(1.1), 정렬 관측은 아직(3.4)
+- [~] DMARC — 레코드 확인 완료(1.1). 정렬 관측과 리포트 수신 확인은 아직(3.4)
 - [x] marketing One-Click unsubscribe (RFC 8058) — `lib/emailUnsubscribeHeaders.ts`
 - [x] 스팸 신고율 감시 — `docs/policy/email-notifications.md` §14.5
 - [x] TLS 전송 — 제공자 기본
