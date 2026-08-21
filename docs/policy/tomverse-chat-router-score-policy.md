@@ -207,12 +207,48 @@ reader to discover.
   accepts them and passes them through; no caller supplies them yet, so they
   abstain. Wiring `lib/modelHealthRollup.ts` and the output-token telemetry is
   a separate change with its own freshness questions.
-- **A research-kind turn is not guaranteed to reach the web-search filter.**
-  The filter runs on `needsCurrentInformation`, and the profiler sets that from
-  a recency heuristic that ignores inputs shorter than four characters, while
-  the research *kind* has no such floor. A two-character research keyword
-  therefore produces `kind: "research"` with `needsCurrentInformation: false`,
-  and a model with no search path stays eligible. Closing it is a change to the
-  hard filters or the profiler, both versioned separately from this policy.
+- **A short explicit source request does not set `needsCurrentInformation`.**
+  The profiler derives that flag from `suggestsCurrentInformationNeeded()` in
+  `lib/webSearchSuggestion.ts`, which returns false for any input shorter than
+  four characters. That floor exists so the composer does not offer a web
+  search after two keystrokes — a *typing-time* concern — and reusing the same
+  function as a routing input carried the floor into a safety boundary it was
+  never written for. So `"출처"` produces `needsCurrentInformation: false`, the
+  web-search filter never runs, and a model with no search path stays
+  eligible for a turn that asked for sources.
+
+  The fix belongs in the profiler layer, by splitting the two questions the one
+  function currently answers: an explicit source/search/citation intent, with
+  no length floor, for routing and capability; and the composer suggestion,
+  which may keep its floor. `TASK_PROFILE_VERSION` must be bumped with it, or
+  one version would answer `false` for `"출처"` before the change and `true`
+  after, and no recorded run could be attributed to either.
+
+  What must **not** be done is to route on the kind instead — "`kind:
+  "research"` implies a search-capable model only". `kind` and
+  `needsCurrentInformation` are deliberately independent axes — the reason is
+  written on `TaskProfile.needsCurrentInformation` in `lib/taskProfileCore.ts`
+  and pinned by "current-information need is separate from the research kind"
+  in `tests/taskProfileCore.test.mjs`: a one-line weather question needs current
+  information and is not research, and a summary of an attached paper is
+  research that needs nothing current. Filtering on the kind would push
+  document analysis and non-current literature work onto search models for no
+  reason.
+
+- **Passing the web-search filter is not proof of a search path.** The filter
+  in `lib/routerCandidates.ts` checks the *declared* capability only — the
+  register says `native`, `search-model`, `unverified` or `unsupported`. A
+  `search-model` searches as part of ordinary completion, but a `native` model
+  only actually searches when the dispatch also sets `webSearchMode` to
+  `always`, builds its tool configuration successfully, and reserves the search
+  surcharge. The precise invariant is therefore
+
+  > `needsCurrentInformation` → `search-model`, **or** an approved native tool
+  > configuration together with a successful search-cost reservation
+
+  and its second half is an attempt-preflight check, not a candidate filter:
+  the filter runs before there is an attempt to configure or a cost to
+  reserve. Recorded here so the two halves are not mistaken for one, and so
+  nobody closes the second by tightening the first.
 - **`ROUTE-01` has not run.** Nothing here may be described as accurate; it can
   only be described as defined.

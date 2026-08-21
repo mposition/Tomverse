@@ -23,7 +23,7 @@
  * So this is a comparison, not a forecast. It ranks candidates by what they
  * charge for the same work; it does not predict a bill, and nothing bills from
  * it -- credit reservation and settlement remain the financial source of truth
- * (routing policy §2).
+ * (`docs/policy/tomverse-chat-routing.md` §2).
  *
  * Pure enough for the decision path: registry lookups and environment-declared
  * price overrides, no database, no network, no clock.
