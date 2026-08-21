@@ -8,7 +8,7 @@ import { SettingsDetailNav } from "@/components/settings/SettingsDetailNav";
 /**
  * The preference centre.
  *
- * Contract: .github/audits/email-notification-architecture-2026-08-21.md §11.2.
+ * Contract: docs/policy/email-notifications.md §11.2.
  *
  * Three decisions are worth stating, because each looks like an omission:
  *

@@ -3,7 +3,7 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 /**
  * Svix webhook signature verification, which is what Resend signs with.
  *
- * Contract: .github/audits/email-notification-architecture-2026-08-21.md §9.6, §13.5.
+ * Contract: docs/policy/email-notifications.md §9.6, §13.5.
  * Scheme: https://docs.svix.com/receiving/verifying-payloads/how-manual
  * (confirmed 2026-08-21).
  *

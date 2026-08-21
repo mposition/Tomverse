@@ -1,7 +1,7 @@
 /**
  * What a person can and cannot switch off, and what changing it records.
  *
- * Contract: .github/audits/email-notification-architecture-2026-08-21.md §11.2, §17.1.
+ * Contract: docs/policy/email-notifications.md §11.2, §17.1.
  *
  * Pure and dependency-free. Storage lives in lib/emailPreferences.ts.
  *

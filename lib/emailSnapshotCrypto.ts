@@ -9,7 +9,7 @@ import {
  * Envelope encryption for the personalisation inputs a message was rendered
  * from.
  *
- * Contract: .github/audits/email-notification-architecture-2026-08-21.md §10.3.
+ * Contract: docs/policy/email-notifications.md §10.3.
  *
  * The snapshot exists because a template version and a policy version cannot
  * reconstruct a sent message on their own: the name changed, the plan changed,

@@ -15,7 +15,7 @@ import { readUnsubscribeKeyring, readUnsubscribeToken } from "@/lib/unsubscribeT
 /**
  * Unsubscribing, without a login.
  *
- * Contract: .github/audits/email-notification-architecture-2026-08-21.md §11.3, §11.4.
+ * Contract: docs/policy/email-notifications.md §11.3, §11.4.
  *
  * The Australian rule is explicit that unsubscribing must not require an
  * account or a sign-in, and CAN-SPAM allows at most a reply or a single page

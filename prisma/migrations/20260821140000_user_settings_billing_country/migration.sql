@@ -1,6 +1,6 @@
 -- The billing country, kept beside the self-declared one.
 --
--- Contract: .github/audits/email-notification-architecture-2026-08-21.md §6.2.
+-- Contract: docs/policy/email-notifications.md §6.2.
 --
 -- Two columns rather than one because the contract's conflict case needs both
 -- values at once. Folded into a single column, a payment method reporting a

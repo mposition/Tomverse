@@ -8,7 +8,7 @@ import {
 /**
  * The token in an unsubscribe link.
  *
- * Contract: .github/audits/email-notification-architecture-2026-08-21.md §11.4.
+ * Contract: docs/policy/email-notifications.md §11.4.
  *
  * Pure and dependency-free -- no Prisma, no `server-only` -- so the whole
  * property list below can be driven in tests without a database.

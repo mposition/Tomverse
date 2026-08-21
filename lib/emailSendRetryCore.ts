@@ -2,7 +2,7 @@
  * Which send failures are worth another attempt, and how long the credential
  * lane may keep trying.
  *
- * Contract: .github/audits/email-notification-architecture-2026-08-21.md §9.4a-3.
+ * Contract: docs/policy/email-notifications.md §9.4a-3.
  *
  * Pure and dependency-free so tests/emailSendRetryCore.test.mjs can drive every
  * branch without a provider or a clock. The storage side lives in

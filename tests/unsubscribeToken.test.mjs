@@ -17,7 +17,8 @@ import {
   recordsConsent,
 } from "../lib/emailPreferenceCore.ts";
 
-// Unsubscribe tokens and preference rules. Contract §11.2, §11.4, §17.1.
+// Unsubscribe tokens and preference rules.
+// Contract: docs/policy/email-notifications.md §11.2, §11.4, §17.1.
 
 const keyring = { activeVersion: "v1", secrets: { v1: "unsubscribe-secret-v1" } };
 

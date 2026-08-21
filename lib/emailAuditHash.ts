@@ -5,7 +5,7 @@ import { createHmac } from "node:crypto";
 /**
  * The hash recorded against a sent message.
  *
- * Contract: .github/audits/email-notification-architecture-2026-08-21.md §10.3-6, §10.3-7.
+ * Contract: docs/policy/email-notifications.md §10.3-6, §10.3-7.
  *
  * Keyed, not a plain digest. A login code body hashed with bare SHA-256 is a
  * million guesses away from the code itself, which would make the audit column

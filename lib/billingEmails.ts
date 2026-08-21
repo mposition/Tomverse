@@ -48,7 +48,8 @@ const escapeHtml = (value: string) =>
  * renderer: the renderer runs again at drain time and possibly days later, and
  * a `new Date()` in there would make the delivered message differ from the one
  * that was queued -- breaking the idempotency key's payload match and the audit
- * reproduction with it (§9.3, §10.3). Resolved here and frozen into the
+ * reproduction with it (docs/policy/email-notifications.md §9.3, §10.3).
+ * Resolved here and frozen into the
  * snapshot, it stays the date the purchase actually renews on.
  *
  * Stripe usually supplies it. The fallback covers the case where it does not,
@@ -739,7 +740,8 @@ export function buildBillingWelcomeEmail(input: {
   const billingInterval = formatBillingInterval(input.billingInterval, language);
   // Resolved by the caller, never here: `new Date()` inside a renderer makes
   // the drain render something different from the enqueue, which breaks both
-  // the idempotency key and the audit reproduction (§9.3, §10.3).
+  // the idempotency key and the audit reproduction
+  // (docs/policy/email-notifications.md §9.3, §10.3).
   const periodEnd = formatDate(input.periodEnd ?? null, language);
   return {
     subject: copy.welcome.subject(plan),

@@ -43,7 +43,7 @@ import {
 /**
  * The standard lane: durable, at-least-once, delivered eventually.
  *
- * Contract: .github/audits/email-notification-architecture-2026-08-21.md §9.1-9.5.
+ * Contract: docs/policy/email-notifications.md §9.1-9.5.
  *
  * The opposite guarantee to the credential lane. There, nothing is stored and
  * nothing is retried, because a login code is dead in ten minutes and its

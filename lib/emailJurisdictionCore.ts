@@ -1,7 +1,7 @@
 /**
  * Which country's email rules apply to a person, and how sure we are.
  *
- * Contract: .github/audits/email-notification-architecture-2026-08-21.md §6.
+ * Contract: docs/policy/email-notifications.md §6.
  *
  * Pure and dependency-free. Storage and the signal reads live in
  * lib/emailJurisdiction.ts.

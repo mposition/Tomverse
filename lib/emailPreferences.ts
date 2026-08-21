@@ -24,7 +24,7 @@ import {
  * What a person currently receives, and the append-only record of how it got
  * that way.
  *
- * Contract: .github/audits/email-notification-architecture-2026-08-21.md §10.2, §11.2, §17.1.
+ * Contract: docs/policy/email-notifications.md §10.2, §11.2, §17.1.
  *
  * The two tables answer different questions and neither substitutes for the
  * other. `EmailPreference` says what is true now and is overwritten on every

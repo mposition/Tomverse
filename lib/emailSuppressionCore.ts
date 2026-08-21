@@ -1,7 +1,7 @@
 /**
  * Whether an address may be sent to, and what a provider event means about it.
  *
- * Contract: .github/audits/email-notification-architecture-2026-08-21.md §13.3, §14.4.
+ * Contract: docs/policy/email-notifications.md §13.3, §14.4.
  *
  * Pure and dependency-free. The storage side lives in lib/emailSuppression.ts.
  *

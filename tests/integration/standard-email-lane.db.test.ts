@@ -17,7 +17,7 @@ import { decryptSnapshot, readSnapshotKeyring } from "@/lib/emailSnapshotCrypto"
 
 // The standard lane against a real database.
 //
-// Contract: .github/audits/email-notification-architecture-2026-08-21.md §9.1-9.5.
+// Contract: docs/policy/email-notifications.md §9.1-9.5.
 //
 // The guarantee here is the opposite of the credential lane's: the message
 // survives the process. So most of these establish that a send which failed, or

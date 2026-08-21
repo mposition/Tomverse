@@ -11,7 +11,8 @@ type EmailLanguage = "en" | "ko" | "zh" | "fr" | "de" | "es" | "pt";
  *
  * Pure and deterministic for a given input: the provider only suppresses a
  * duplicate when the retried payload is byte-identical, and an audit that
- * re-renders differently from what was sent proves nothing (§9.3, §10.3).
+ * re-renders differently from what was sent proves nothing
+ * (docs/policy/email-notifications.md §9.3, §10.3).
  */
 export function buildAccountDeletionScheduledEmail(input: {
   scheduledFor: string;

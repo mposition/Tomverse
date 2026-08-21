@@ -11,7 +11,7 @@ import {
 /**
  * Reconciles the templates in code with the rows a delivery can point at.
  *
- * Contract: .github/audits/email-notification-architecture-2026-08-21.md §10.2.
+ * Contract: docs/policy/email-notifications.md §10.2.
  *
  * Published versions are immutable, so changed copy becomes a *new* version
  * rather than an update. That is the difference between this and the seeding

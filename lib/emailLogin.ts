@@ -248,7 +248,8 @@ export async function requestEmailLoginCode(
   });
   const policyVersionId = await ensureBootstrapPolicyVersion();
 
-  // One transaction, three rows (§9.4a-3). An attempt without a delivery row
+  // One transaction, three rows (docs/policy/email-notifications.md §9.4a-3).
+  // An attempt without a delivery row
   // would report a code nobody recorded trying to send; a delivery row without
   // an attempt would point at a credential that was never minted.
   const { attemptId, deliveryId, idempotencyKey } = await prisma.$transaction(

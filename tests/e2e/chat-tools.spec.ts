@@ -77,9 +77,12 @@ test("the + menu opens a tools sheet with web search, Deep Research, and an unch
   await toolsMenuTrigger(page).click();
   await expect(page.getByTestId("tools-web-search-row")).toBeVisible();
   await expect(page.getByTestId("tools-deep-research-row")).toBeVisible();
-  await expect(page.getByTestId("tools-read-webpage-row")).toBeDisabled();
+  // The "read a webpage" row is gone rather than disabled. Shipping a control
+  // that cannot be used costs a row in a menu whose whole problem was length,
+  // and tells the user about a feature they cannot have.
+  await expect(page.getByTestId("tools-read-webpage-row")).toHaveCount(0);
   // Regression check: the file-attach affordance is untouched by the new rows.
-  await expect(page.getByText("Attach file")).toBeVisible();
+  await expect(page.getByTestId("tools-attach-row")).toBeVisible();
 });
 
 test("selecting a web search mode shows a removable status chip", async ({ page }) => {

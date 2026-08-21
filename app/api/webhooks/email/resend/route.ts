@@ -10,7 +10,7 @@ import { readSvixHeaders, verifySvixSignature } from "@/lib/svixSignature";
 /**
  * Receives Resend's delivery, bounce and complaint events.
  *
- * Contract: .github/audits/email-notification-architecture-2026-08-21.md §9.6, §13.5.
+ * Contract: docs/policy/email-notifications.md §9.6, §13.5.
  *
  * `runtime = "nodejs"` is load-bearing: the signature covers the raw bytes, and
  * verifying it needs `node:crypto` and a body that has not been through a parse

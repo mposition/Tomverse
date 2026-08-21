@@ -8,7 +8,8 @@ import {
   readSnapshotKeyring,
 } from "../lib/emailSnapshotCrypto.ts";
 
-// Envelope encryption for the personalisation snapshot. Contract §10.3.
+// Envelope encryption for the personalisation snapshot.
+// Contract: docs/policy/email-notifications.md §10.3.
 
 const keyring = {
   activeVersion: "v1",

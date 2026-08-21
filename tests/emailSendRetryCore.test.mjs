@@ -14,7 +14,7 @@ import {
 } from "../lib/emailSendRetryCore.ts";
 
 // The retry rules for the credential lane, driven without a provider or a
-// clock. Contract §9.4a-3.
+// clock. Contract: docs/policy/email-notifications.md §9.4a-3.
 
 test("retryable is an allowlist, not everything that is not permanent", () => {
   for (const status of [408, 429, 500, 502, 503, 504]) {

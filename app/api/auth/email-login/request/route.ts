@@ -37,7 +37,7 @@ export async function POST(req: Request) {
     // a provider outage refuses a registered address and an unregistered one
     // identically, and the code is minted and stored either way. Reporting it
     // is what lets the sign-in screen stop saying "check your email" when
-    // nothing was sent (contract §9.4a-3).
+    // nothing was sent (docs/policy/email-notifications.md §9.4a-3).
     if (!result.delivered) {
       return NextResponse.json(
         { ok: false, code: "SEND_FAILED" },

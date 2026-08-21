@@ -625,6 +625,12 @@ model BillingPromotion {
   id                    String                       @id @default(cuid())
   code                  String                       @unique
   discountPercent       Int                          @default(0)
+  /// Deprecated. A USD amount, so the promotion can only be charged in a USD
+  /// checkout; new promotions are percentage-only
+  /// (docs/policy/promotion-discount-currency.md section 2). Kept because past
+  /// redemptions point at the promotion rather than at a copy of its terms, so
+  /// dropping this column would make an audited redemption unreconstructable.
+  /// Section 5 lists what must be true before it can go.
   discountAmountCents   Int?
   maxRedemptions        Int?
   redeemedCount         Int                          @default(0)
@@ -3175,7 +3181,7 @@ model ContextManifest {
 
 // ==========================================
 // Email notification system (MVP).
-// Contract: .github/audits/email-notification-architecture-2026-08-21.md
+// Contract: docs/policy/email-notifications.md
 //
 // Three rules this schema exists to make structural rather than conventional:
 //
@@ -3254,7 +3260,8 @@ model JurisdictionProfile {
 
   /// E7. How often consent must be *confirmed to the recipient* -- KR is 24.
   /// This is a notice interval, not an expiry: a recipient who does not answer
-  /// keeps their consent (§5.5). NULL where no such duty exists.
+  /// keeps their consent (docs/policy/email-notifications.md §5.5). NULL where
+  /// no such duty exists.
   consentNoticeIntervalMonths Int?
 
   /// { start, end, tz }. Held back rather than sent during these hours.
@@ -3380,7 +3387,8 @@ model EmailPreference {
 
   /// E7. When consent was last confirmed *to* the recipient, and when it is
   /// next due. Passing nextConfirmationNoticeAt does not change `enabled`:
-  /// the duty is to notify, not to expire (§5.5). Automatic lapse is a
+  /// the duty is to notify, not to expire (docs/policy/email-notifications.md
+  /// §5.5). Automatic lapse is a
   /// separate business policy behind its own flag, default off.
   lastConfirmationNoticeAt DateTime?
   nextConfirmationNoticeAt DateTime?
@@ -3406,7 +3414,8 @@ model ConsentRecord {
   user   User?   @relation(fields: [userId], references: [id], onDelete: SetNull)
 
   /// The address as it was. Preserved when the account changes address, since
-  /// consent attaches to an address rather than to a row (§13.4).
+  /// consent attaches to an address rather than to a row
+  /// (docs/policy/email-notifications.md §13.4).
   emailAddress String
   purpose      String
 
@@ -3447,7 +3456,8 @@ model ConsentRecord {
 /// The provenance columns are gating inputs, not reporting conveniences. A
 /// complaint raised against a marketing message and one raised against a login
 /// code mean opposite things -- the first is ordinary, the second is either an
-/// account takeover in progress or proof we are misclassifying mail (§13.3).
+/// account takeover in progress or proof we are misclassifying mail
+/// (docs/policy/email-notifications.md §13.3).
 model SuppressionEntry {
   id           String @id @default(cuid())
   emailAddress String

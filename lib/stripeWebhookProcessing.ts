@@ -524,7 +524,8 @@ async function handleCheckoutCompleted(session: Stripe.Checkout.Session) {
   if (synced?.user.id) {
     // What the payment method said, kept beside what the person told us. It
     // does not overwrite their own declaration: paying with a card registered
-    // elsewhere is not moving house (§6.2).
+    // elsewhere is not moving house
+    // (docs/policy/email-notifications.md §6.2).
     await recordBillingCountry({
       userId: synced.user.id,
       country: session.metadata?.billingCountry,

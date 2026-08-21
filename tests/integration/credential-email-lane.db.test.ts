@@ -17,7 +17,7 @@ import {
 
 // The credential synchronous lane against a real database.
 //
-// Contract: .github/audits/email-notification-architecture-2026-08-21.md §9.4a.
+// Contract: docs/policy/email-notifications.md §9.4a.
 //
 // What is being established here is mostly what the lane *refuses* to do. It
 // does not store the credential, it does not retry in the background, and it

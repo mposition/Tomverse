@@ -9,7 +9,7 @@ import {
   resolveEmailJurisdiction,
 } from "../lib/emailJurisdictionCore.ts";
 
-// Jurisdiction resolution. Contract §6.
+// Jurisdiction resolution. Contract: docs/policy/email-notifications.md §6.
 
 test("the payment method outranks the profile field when both agree", () => {
   const resolved = resolveEmailJurisdiction({

@@ -7,7 +7,7 @@ import { prisma } from "@/lib/prisma";
 // The invariants of the email notification data model that only the database
 // can hold.
 //
-// Contract: .github/audits/email-notification-architecture-2026-08-21.md
+// Contract: docs/policy/email-notifications.md
 //
 // None of these are reachable from the Prisma schema: it has no CHECK and no
 // partial index, so `prisma migrate diff` neither creates them nor notices if

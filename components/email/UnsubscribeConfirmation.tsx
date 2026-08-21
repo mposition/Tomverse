@@ -7,7 +7,7 @@ import { useLanguage } from "@/components/LanguageProvider";
 /**
  * The confirmation step of an unsubscribe link.
  *
- * Contract: .github/audits/email-notification-architecture-2026-08-21.md §11.3.
+ * Contract: docs/policy/email-notifications.md §11.3.
  *
  * Deliberately small. Two decisions in it are worth stating:
  *

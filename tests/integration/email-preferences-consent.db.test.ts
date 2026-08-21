@@ -32,7 +32,7 @@ import {
 // Preferences, the consent history behind them, and unsubscribing without a
 // login.
 //
-// Contract: .github/audits/email-notification-architecture-2026-08-21.md
+// Contract: docs/policy/email-notifications.md
 // §10.2, §11.2, §11.4, §17.1.
 //
 // The pair of tables is the thing under test: EmailPreference is overwritten on

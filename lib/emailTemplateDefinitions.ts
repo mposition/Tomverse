@@ -11,7 +11,7 @@ import { buildEmailLoginCodeEmail } from "@/lib/emailLoginEmails";
 /**
  * Every message this system can send, and what kind of message each one is.
  *
- * Contract: .github/audits/email-notification-architecture-2026-08-21.md §3, §8.5.
+ * Contract: docs/policy/email-notifications.md §3, §8.5.
  *
  * One table rather than a classification argument at each call site. The
  * classification decides the recipient set, the footer, whether an unsubscribe

@@ -5,7 +5,7 @@ import { createUnsubscribeToken, readUnsubscribeKeyring } from "@/lib/unsubscrib
 /**
  * The `List-Unsubscribe` headers, and who gets them.
  *
- * Contract: .github/audits/email-notification-architecture-2026-08-21.md §5.1 C5, C10.
+ * Contract: docs/policy/email-notifications.md §5.1 C5, C10.
  *
  * C5 requires them on marketing mail: the major mailbox providers expect
  * one-click unsubscribe from bulk senders, and RFC 8058 is how it is offered.

@@ -1,6 +1,6 @@
 -- Email notification system, MVP data model.
 --
--- Contract: .github/audits/email-notification-architecture-2026-08-21.md
+-- Contract: docs/policy/email-notifications.md
 --
 -- Every table here is new and every column added to an existing table is
 -- nullable, so this migration is additive and has no backfill. What it is not

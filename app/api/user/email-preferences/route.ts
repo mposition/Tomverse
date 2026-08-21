@@ -14,7 +14,7 @@ import { needsCountryConfirmation } from "@/lib/emailJurisdictionCore";
 /**
  * The preference centre's data.
  *
- * Contract: .github/audits/email-notification-architecture-2026-08-21.md §11.2.
+ * Contract: docs/policy/email-notifications.md §11.2.
  *
  * The country travels with the preferences rather than in a separate call
  * because they are one decision from the person's side: marketing needs a

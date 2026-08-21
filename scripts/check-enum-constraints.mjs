@@ -249,6 +249,90 @@ const REGISTRY = {
     reason:
       "The account default is 'on' or 'off' only -- 'inherit' would have nothing to inherit from, which is exactly why it is not the conversation-mode list.",
   },
+  // --- email notifications -------------------------------------------------
+  EmailPreference_purpose_check: {
+    owner: "list",
+    module: "lib/emailPreferenceCore.ts",
+    list: "EMAIL_PURPOSES",
+    reason:
+      "The six things an account can receive (docs/policy/email-notifications.md \u00a711.2). The list is what the preference centre renders and what the standard lane gates on, so a purpose in the constraint the list has never heard of is mail nobody can switch off, and one in the list the constraint refuses is a preference row that cannot be written.",
+  },
+  EmailPreference_source_check: {
+    owner: "database",
+    reason:
+      "Where a preference row came from: signup, preference_center, unsubscribe_link, admin, system_default. Written as literals at each write site in lib/emailPreferences.ts. It is audit provenance rather than a value anything branches on, which is why there is no runtime list to compare against -- and why a sixth value has to be argued for here before it can be written.",
+  },
+  ConsentRecord_action_check: {
+    owner: "type_only",
+    reason:
+      "ConsentAction in lib/emailPreferenceCore.ts: granted, withdrawn, reconfirmed, confirmation_notice_sent, lapsed. The last two are the Korean confirmation duty and the optional lapse behind its own flag (\u00a75.5); they are separate values precisely because notifying is not expiring, and folding them together would make the history unable to answer which one happened.",
+  },
+  ConsentRecord_captured_via_check: {
+    owner: "database",
+    reason:
+      "Which surface captured the consent, kept because the evidence a regulator asks for is where and how, not only when. Written as a literal by each surface; there is no runtime list.",
+  },
+  SuppressionEntry_scope_check: {
+    owner: "database",
+    reason:
+      "global or purpose. Paired with SuppressionEntry_purpose_key_check, which is the constraint doing the real work: this one only bounds the vocabulary that one reasons over.",
+  },
+  SuppressionEntry_reason_check: {
+    owner: "type_only",
+    reason:
+      "SuppressionReason in lib/emailSuppressionCore.ts. Not one flat 'blocked' state: hard_bounce stops every lane, complaint stops marketing only, and soft_bounce is the one reason an entry may expire (\u00a713.3). A value the code cannot name would be a block nobody can explain to the person it silences.",
+  },
+  SuppressionEntry_source_stream_check: {
+    owner: "type_only",
+    reason:
+      "SendClassification narrowed to the two streams a provider event can be attributed to. Nullable, because a manual or privacy-request entry has no originating stream to name -- and inventing one would make the provenance columns a report that always has an answer and is sometimes wrong.",
+  },
+  EmailTemplate_classification_check: {
+    owner: "type_only",
+    reason:
+      "EmailClassification in lib/emailTemplateDefinitions.ts: transactional, service, legal, marketing. It is the single input to whether an unsubscribe link is required, forbidden or free (EmailTemplate_unsubscribe_check), so widening it silently widens that decision.",
+  },
+  TemplateVersion_status_check: {
+    owner: "database",
+    reason:
+      "draft, published, retired. Only lib/emailTemplateRegistry.ts writes them, as literals, and only 'published' is ever read back -- a version is looked up by content hash rather than by state.",
+  },
+  EmailPolicyVersion_status_check: {
+    owner: "database",
+    reason:
+      "draft, active, superseded, with a partial unique index making at most one row active. Deliberately not a runtime list: nothing in the application may transition it, because activation is a human approval recorded in the registry (\u00a712.5). A list in the code would be the first step towards a code path that sets it.",
+  },
+  JurisdictionProfile_marketing_basis_check: {
+    owner: "database",
+    reason:
+      "opt_in or opt_out, recorded as the jurisdiction states it even though C1 sends opt-in everywhere. The column exists so a later decision to follow a jurisdiction's own basis has the fact to hand; a third value would be a legal basis nobody has researched.",
+  },
+  EmailEvent_status_check: {
+    owner: "database",
+    reason:
+      "pending, expanding, expanded, failed -- the fan-out lifecycle of one event into its delivery rows. Written as literals inside the transaction that claims the event.",
+  },
+  EmailEvent_audience_kind_check: {
+    owner: "database",
+    reason:
+      "single_user, user_segment, all_users. Only the first is reachable today; the other two are named so the admin send path cannot invent a fourth shape of audience without saying so here.",
+  },
+  EmailDelivery_lane_check: {
+    owner: "database",
+    reason:
+      "credential_sync or standard, the two lanes with opposite guarantees (\u00a79.4a). lib/credentialEmailLane.ts holds CREDENTIAL_LANE as a single constant and the standard lane defaults the column, so there is no list holding both; the constraint is what makes a third lane impossible to add by accident, and three of the constraints above are conditioned on this column's value.",
+  },
+  EmailDelivery_status_check: {
+    owner: "database",
+    reason:
+      "The nine delivery states. failed and abandoned are deliberately different: failed is one attempt that did not land, abandoned is the queue giving up, and only the credential lane is forbidden the second (EmailDelivery_credential_not_abandoned_check). Written as literals by the two lanes and by the webhook processor.",
+  },
+  EmailDelivery_skip_reason_check: {
+    owner: "database",
+    reason:
+      "Why a delivery was never attempted -- no_consent, suppressed_complaint, jurisdiction_unconfirmed and the rest. Nullable, so it is only present on a skipped row. It is the answer to \"why did this person not get it\", which is a question support has to be able to answer without reading the send code.",
+  },
+
 };
 
 const migrations = readdirSync(migrationsDirectory)

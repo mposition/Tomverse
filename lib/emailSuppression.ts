@@ -16,7 +16,7 @@ import {
 /**
  * The suppression list, and the gate every send passes through.
  *
- * Contract: .github/audits/email-notification-architecture-2026-08-21.md §13.3, §14.4.
+ * Contract: docs/policy/email-notifications.md §13.3, §14.4.
  *
  * Keyed by address rather than by account, because a spam complaint follows the
  * mailbox: deleting an account and signing up again must not clear it. That is

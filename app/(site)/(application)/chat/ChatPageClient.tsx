@@ -13,6 +13,7 @@ import { useModalDialog } from "@/components/useModalDialog";
 import { DesktopChatShell } from "@/components/chat/DesktopChatShell";
 import { MobileChatShell } from "@/components/chat/MobileChatShell";
 import { prepareChatContextBundle } from "@/lib/chatContextBundleClient";
+import { consumePendingChatProfile } from "@/lib/assistantProfileReturn";
 import { discardResponseBody } from "@/lib/discardResponseBody";
 import { saveResponseAsFile } from "@/lib/browserDownload";
 import { createSharedPendingRequest } from "@/lib/sharedPendingRequest";
@@ -180,6 +181,14 @@ const normalizeStringArray = (value: unknown, fallback: string[]) => {
 };
 
 const uniqueStrings = (values: string[]) => Array.from(new Set(values));
+
+/**
+ * Ordered comparison, not set comparison: the model list is also the panel
+ * order, so two lists with the same members in a different order are two
+ * different screens and re-rendering for that is correct.
+ */
+const sameStringList = (a: string[], b: string[]) =>
+  a.length === b.length && a.every((value, index) => value === b[index]);
 
 /**
  * PATCHes one conversation's model settings and reports the server's
@@ -3123,6 +3132,16 @@ export function ChatPageClient({
     // string without re-deriving it from state that may not have committed
     // yet (setConversations is async).
     let justCreatedTitle: string | null = null;
+    // What this send will name. Ordinarily the screen's own selection, but a
+    // create can come back with a different one (see the profile branch
+    // below), and the rest of this function runs in the same closure -- a
+    // `setState` alone would not reach it.
+    let sendSelectedModels = selectedModels;
+    let sendDisabledPanels = effectiveDisabledPanels;
+    // Set only when a create came back with something else; applied in the
+    // same batch as the prompt payload, never before it.
+    let pendingScreenModels: string[] | null = null;
+    let pendingScreenDisabled: string[] | null = null;
 
     if (!activeChatId) {
       if (isGuestMode) {
@@ -3182,17 +3201,63 @@ export function ChatPageClient({
           // binding and stops being pending.
           setAssistantProfile(data.assistantProfile ?? null);
           setPendingProfileId(null);
-          // The conversation was created from this exact selection one line
-          // above, so it is the server-confirmed state -- seed it so the
-          // barrier below does not need a redundant first PATCH. (PATCH
-          // responses, where the server may genuinely disagree, feed the
-          // queue their normalized answer instead.)
+          /**
+           * The created conversation's own models, read back rather than
+           * assumed.
+           *
+           * A create that carries a profile does not keep the caller's list:
+           * `docs/policy/external-conversation-import-and-memory.md` §14.0 has
+           * the new conversation *adopt* the profile's models, and
+           * `app/api/conversations/route.ts` lets `profileModels` win over
+           * `body.selectedModels`. Seeding the queue with what was sent
+           * therefore marked a list the server had already replaced as
+           * "server-confirmed", so the barrier found nothing to reconcile and
+           * this turn's `POST /api/chat` named a model the conversation did
+           * not have -- a 403 `MODEL_NOT_SELECTED` on the first turn of every
+           * conversation started with an assistant, which retrying could not
+           * clear because the screen never learned the real list.
+           *
+           * Trace 627e9859-c57d-42e1-9928-c973278636c3.
+           */
+          const createdModels = clampSelectedModels(
+            Array.isArray(data.selectedModels) && data.selectedModels.length > 0
+              ? data.selectedModels
+              : selectedModels
+          );
+          const createdDisabled = uniqueStrings(
+            Array.isArray(data.disabledPanels) ? data.disabledPanels : disabledPanels
+          ).filter((modelId) => createdModels.includes(modelId));
           modelSettingsSyncQueueRef.current.markConfirmed(data.id, {
-            models: clampSelectedModels(selectedModels),
-            disabled: uniqueStrings(disabledPanels).filter((modelId) =>
-              selectedModels.includes(modelId)
-            ),
+            models: createdModels,
+            disabled: createdDisabled,
           });
+          // This send follows the answer immediately.
+          sendSelectedModels = createdModels;
+          sendDisabledPanels = createdDisabled;
+          // Written here as well as through state, the same way loading a
+          // conversation does it: the send barrier a few lines below reads
+          // this ref, and React has not committed a setState by then. Left to
+          // the effect, the barrier would capture the replaced list and PATCH
+          // the conversation back onto it -- undoing the adoption instead of
+          // failing loudly, which is worse than the bug this fixes.
+          latestModelSettingsRef.current = {
+            models: createdModels,
+            disabled: createdDisabled,
+          };
+          // The *screen* waits, and is applied with `setPromptPayload` below.
+          // Swapping panels here instead put a frame on screen in which the
+          // new panel had mounted, reported "empty" for a conversation id it
+          // had no turn under yet, and no accepted submission had been
+          // recorded -- so the welcome screen came back mid-send
+          // (`tests/e2e/chat-welcome-flicker.spec.ts`). Batched with the
+          // payload, `hasAcceptedSubmission` is already true on the render
+          // that first shows the new panel.
+          if (!sameStringList(createdModels, selectedModels)) {
+            pendingScreenModels = createdModels;
+          }
+          if (!sameStringList(createdDisabled, disabledPanels)) {
+            pendingScreenDisabled = createdDisabled;
+          }
           setCurrentChatId(activeChatId);
           currentChatIdRef.current = activeChatId;
           // Same hand-off as the guest branch above: the draft follows the id
@@ -3231,8 +3296,8 @@ export function ChatPageClient({
       // bundle for it. A single-model send never had a preparation step, so
       // this is where it gets one -- §10 requires the context to be priced
       // before the request that sends it, whichever shape the send is.
-      const activeModelIds = selectedModels.filter(
-        (modelId) => !effectiveDisabledPanels.includes(modelId)
+      const activeModelIds = sendSelectedModels.filter(
+        (modelId) => !sendDisabledPanels.includes(modelId)
       );
       const contextLayout =
         activeModelIds.length >= 2
@@ -3253,7 +3318,7 @@ export function ChatPageClient({
         (conversation?.messageCount ? 1 : 0);
       trackProductEvent(
         previousCount === 0 ? "chat_started" : "followup_sent",
-        activeModelCount,
+        activeModelIds.length,
         { conversation_mode: isGuestMode ? "guest" : "account" }
       );
       promptCountsRef.current.set(activeChatId, previousCount + 1);
@@ -3302,6 +3367,8 @@ export function ChatPageClient({
       });
       localComparisonQuestionsRef.current.set(comparisonId, trimmed);
       setCachedCompareSummaryChatId(null);
+      if (pendingScreenModels) setSelectedModels(pendingScreenModels);
+      if (pendingScreenDisabled) setDisabledPanels(pendingScreenDisabled);
       setPromptPayload({
         id: comparisonId,
         text: trimmed,
@@ -3956,6 +4023,54 @@ export function ChatPageClient({
         showToast(t("chat.assistantProfileFailed"), "error");
       });
   };
+
+  /**
+   * Applies a profile the user just created from this chat.
+   *
+   * The round trip is: the picker's CTA leaves for the create screen, that
+   * screen stashes the new profile's id and pushes `/chat`, and this consumes
+   * it once on the way back. No conversation id and no return URL travel — the
+   * conversation is the one this page restored for itself, and the id is read
+   * exactly once so a refresh cannot reapply it
+   * (`lib/assistantProfileReturn.ts`).
+   *
+   * Deliberately routed through `handleAssistantProfileChange` rather than
+   * through a PATCH of its own. That handler already owns the two cases this
+   * has — a conversation with a server row is PATCHed, one without is held in
+   * `pendingProfileId` and sent with the create — and it carries the four-way
+   * staleness guard that #632 was fixed with. A second implementation here
+   * would be a second place for that guard to be forgotten.
+   *
+   * Waits for the options list because the optimistic row is built from it,
+   * and because an empty list is how "the flag is off" arrives: with profiles
+   * disabled the fetch 403s, `assistantProfileOptions` stays null, and a
+   * stashed id is simply never applied.
+   */
+  const handleAssistantProfileChangeRef = useRef(handleAssistantProfileChange);
+  useEffect(() => {
+    handleAssistantProfileChangeRef.current = handleAssistantProfileChange;
+  });
+  useEffect(() => {
+    if (isGuestMode || !assistantProfileOptions || !isInitialConversationResolved) {
+      return;
+    }
+    const profileId = consumePendingChatProfile();
+    if (!profileId) return;
+    // A profile that is not in this account's own list is not applied. The
+    // server would refuse it anyway; refusing here keeps a doomed request off
+    // the wire and keeps the optimistic row from flashing a profile that was
+    // never theirs.
+    if (!assistantProfileOptions.some((option) => option.id === profileId)) {
+      return;
+    }
+    // Recorded here rather than on the create screen: what this measures is
+    // whether the round trip finished, and the create screen cannot know that
+    // -- it has already navigated away by the time this runs.
+    trackProductEvent("assistant_profile_applied_to_chat", 0, {
+        assistant_profile_entry: "chat",
+    });
+    handleAssistantProfileChangeRef.current(profileId);
+  }, [assistantProfileOptions, isGuestMode, isInitialConversationResolved]);
 
   // handleGlobalSubmit is redefined every render (not memoized); a ref
   // holding the latest closure lets the effect below call a fresh copy

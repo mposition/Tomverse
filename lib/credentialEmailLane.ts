@@ -24,7 +24,7 @@ import {
 /**
  * The credential synchronous lane.
  *
- * Contract: .github/audits/email-notification-architecture-2026-08-21.md §9.4a.
+ * Contract: docs/policy/email-notifications.md §9.4a.
  *
  * A login code lives for at most ten minutes -- `CODE_TTL_MINUTES` in
  * lib/emailLogin.ts is clamped to a ceiling of 10, so no environment variable

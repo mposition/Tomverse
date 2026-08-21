@@ -192,17 +192,16 @@ export const ISSUE_PROBES = [
                 /percentage[- ]only|fixed[- ]amount/i.test(source)
             );
         },
-        blockedOn:
-            "A read-only production inventory of fixed-amount promotions " +
-            "(docs/policy/promotion-discount-currency.md §6). The schema " +
-            "cannot answer marketing exposure, usage country or campaign owner -- BillingPromotion has " +
-            "no country or owner column and BillingPromotionRedemption stores no currency and only a " +
-            "hashed IP -- so those come from campaign records or stay `unknown`. Blocking creation " +
-            "before knowing which codes are live could interrupt a running campaign.",
+        // The inventory this used to be blocked on was taken on 2026-08-16:
+        // zero active fixed-amount codes, `PAYMENTTEST27` deactivated, recorded
+        // in docs/policy/promotion-discount-currency.md §6.1. `blockedOn` is
+        // gone rather than rewritten -- the report distinguishes "not started
+        // because it must not be" from "not started", and this is neither.
         remainder:
-            "The Admin UI has to match the API, and `discountAmountCents` stays in the schema for the " +
-            "audit trail: dropping it is a separate migration behind the three conditions in " +
-            "docs/policy/promotion-discount-currency.md §5.",
+            "`discountAmountCents` stays in the schema for the audit trail: dropping it is a separate " +
+            "migration behind the three conditions in docs/policy/promotion-discount-currency.md §5. " +
+            "The probe reads the API route only, so the Admin panel's half of the block " +
+            "(components/admin/BillingAdminPanel.tsx) is covered by tests rather than by this signal.",
     },
     {
         issue: 637,

@@ -1,7 +1,7 @@
 /**
  * How long the standard lane keeps trying, by classification.
  *
- * Contract: .github/audits/email-notification-architecture-2026-08-21.md §9.4.
+ * Contract: docs/policy/email-notifications.md §9.4.
  *
  * Pure and dependency-free, so every curve can be driven without a database or
  * a provider. The storage side lives in lib/standardEmailLane.ts.

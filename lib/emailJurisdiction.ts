@@ -10,7 +10,7 @@ import {
 /**
  * Reads the signals and resolves them.
  *
- * Contract: .github/audits/email-notification-architecture-2026-08-21.md §6.
+ * Contract: docs/policy/email-notifications.md §6.
  *
  * The decision itself is pure and lives in emailJurisdictionCore; this only
  * gathers what it needs. Kept apart because the resolution rules are the part

@@ -8,7 +8,7 @@ import { providerEventEffect } from "@/lib/emailSuppressionCore";
 /**
  * Turns one Resend webhook into state, exactly once.
  *
- * Contract: .github/audits/email-notification-architecture-2026-08-21.md §9.6.
+ * Contract: docs/policy/email-notifications.md §9.6.
  *
  * Two things make this safe to call with a redelivered event:
  *

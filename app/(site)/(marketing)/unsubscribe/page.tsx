@@ -14,7 +14,7 @@ export const metadata = createPageMetadata({
 /**
  * Where an unsubscribe link lands.
  *
- * Contract: .github/audits/email-notification-architecture-2026-08-21.md §11.3.
+ * Contract: docs/policy/email-notifications.md §11.3.
  *
  * The page itself changes nothing. Mail clients and security appliances
  * prefetch links, so a page that unsubscribed on load would unsubscribe people

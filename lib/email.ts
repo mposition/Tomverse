@@ -94,7 +94,8 @@ export async function deliverEmailOnce(
     timeoutMs?: number;
     /**
      * Extra message headers. Only `List-Unsubscribe` and its one-click
-     * companion use this today, and only on marketing mail -- §5.1 C10 forbids
+     * companion use this today, and only on marketing mail --
+     * docs/policy/email-notifications.md §5.1 C10 forbids
      * them on transactional mail, where the link is a button that locks people
      * out of their own account.
      */

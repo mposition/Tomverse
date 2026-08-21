@@ -19,7 +19,7 @@ import { SOFT_BOUNCE_SUPPRESSION_THRESHOLD } from "@/lib/emailSuppressionCore";
 // Provider webhooks and the suppression list they feed, against a real
 // database.
 //
-// Contract: .github/audits/email-notification-architecture-2026-08-21.md §9.6, §13.3.
+// Contract: docs/policy/email-notifications.md §9.6, §13.3.
 //
 // The asymmetry in §13.3 is what most of this establishes: a complaint about a
 // promotion stops promotions and does not stop a login code, because refusing

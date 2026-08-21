@@ -9,7 +9,8 @@ import {
 } from "../lib/standardEmailRetryCore.ts";
 import { templateDefinitionProblems } from "../lib/emailTemplateDefinitions.ts";
 
-// The standard lane's retry curves. Contract §9.4.
+// The standard lane's retry curves.
+// Contract: docs/policy/email-notifications.md §9.4.
 
 test("every curve starts sooner than it ends", () => {
   for (const [classification, curve] of Object.entries(STANDARD_RETRY_CURVES)) {

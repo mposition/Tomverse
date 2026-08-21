@@ -100,7 +100,8 @@ const codeEmailCopy: Record<EmailLanguage, CodeEmailCopy> = {
  * given placeholder values.
  *
  * Pure and deterministic for a given input, which is also what the provider's
- * idempotency key requires of every attempt (§9.3).
+ * idempotency key requires of every attempt
+ * (docs/policy/email-notifications.md §9.3).
  */
 export function buildEmailLoginCodeEmail(input: {
   code: string;

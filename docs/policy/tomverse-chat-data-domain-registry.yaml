@@ -921,7 +921,7 @@ domains:
 
   # --- email notification (MVP) ---------------------------------------------
   #
-  # Contract: .github/audits/email-notification-architecture-2026-08-21.md.
+  # Contract: docs/policy/email-notifications.md.
   #
   # These three sit on opposite sides of one deliberate split. What a person
   # currently wants goes when they go; what proves what they once agreed to, and
