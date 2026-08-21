@@ -3138,6 +3138,10 @@ export function ChatPageClient({
     // `setState` alone would not reach it.
     let sendSelectedModels = selectedModels;
     let sendDisabledPanels = effectiveDisabledPanels;
+    // Set only when a create came back with something else; applied in the
+    // same batch as the prompt payload, never before it.
+    let pendingScreenModels: string[] | null = null;
+    let pendingScreenDisabled: string[] | null = null;
 
     if (!activeChatId) {
       if (isGuestMode) {
@@ -3227,26 +3231,33 @@ export function ChatPageClient({
             models: createdModels,
             disabled: createdDisabled,
           });
-          // This send, and the screen behind it, both follow the answer.
+          // This send follows the answer immediately.
           sendSelectedModels = createdModels;
           sendDisabledPanels = createdDisabled;
-          if (!sameStringList(createdModels, selectedModels)) {
-            setSelectedModels(createdModels);
-          }
-          if (!sameStringList(createdDisabled, disabledPanels)) {
-            setDisabledPanels(createdDisabled);
-          }
           // Written here as well as through state, the same way loading a
           // conversation does it: the send barrier a few lines below reads
-          // this ref, and React has not committed the setState by then. Left
-          // to the effect, the barrier would capture the replaced list and
-          // PATCH the conversation back onto it -- undoing the adoption
-          // instead of failing loudly, which is worse than the bug this
-          // fixes.
+          // this ref, and React has not committed a setState by then. Left to
+          // the effect, the barrier would capture the replaced list and PATCH
+          // the conversation back onto it -- undoing the adoption instead of
+          // failing loudly, which is worse than the bug this fixes.
           latestModelSettingsRef.current = {
             models: createdModels,
             disabled: createdDisabled,
           };
+          // The *screen* waits, and is applied with `setPromptPayload` below.
+          // Swapping panels here instead put a frame on screen in which the
+          // new panel had mounted, reported "empty" for a conversation id it
+          // had no turn under yet, and no accepted submission had been
+          // recorded -- so the welcome screen came back mid-send
+          // (`tests/e2e/chat-welcome-flicker.spec.ts`). Batched with the
+          // payload, `hasAcceptedSubmission` is already true on the render
+          // that first shows the new panel.
+          if (!sameStringList(createdModels, selectedModels)) {
+            pendingScreenModels = createdModels;
+          }
+          if (!sameStringList(createdDisabled, disabledPanels)) {
+            pendingScreenDisabled = createdDisabled;
+          }
           setCurrentChatId(activeChatId);
           currentChatIdRef.current = activeChatId;
           // Same hand-off as the guest branch above: the draft follows the id
@@ -3356,6 +3367,8 @@ export function ChatPageClient({
       });
       localComparisonQuestionsRef.current.set(comparisonId, trimmed);
       setCachedCompareSummaryChatId(null);
+      if (pendingScreenModels) setSelectedModels(pendingScreenModels);
+      if (pendingScreenDisabled) setDisabledPanels(pendingScreenDisabled);
       setPromptPayload({
         id: comparisonId,
         text: trimmed,
