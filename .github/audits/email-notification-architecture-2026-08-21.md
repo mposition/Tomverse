@@ -1,15 +1,39 @@
 # 이메일 알림 시스템 아키텍처 의사결정 문서
 
 - 기준일: 2026-08-21
-- 상태: **초안, 승인 대기**. 이 문서는 코드 변경을 포함하지 않습니다.
+- 상태: **승인됨 (ADR).** 아키텍처·제공자·데이터 모델 결정이 확정되었습니다.
+  marketing 계열은 **production 비활성**을 유지합니다(아래 결정 3).
 - 작성 범위: 규제 요구사항 조사 + 저장소 현황 조사 + 아키텍처 권고
-- 개정: **v3 (2026-08-21).** v2 검토에서 제기된 핵심 2건 + 소소 3건을 반영. 0절 참조.
+- 개정: **v4 (2026-08-21).** 승인 판정과 정합성 5건을 반영. 0절 참조.
 - 법적 성격: **법률 자문이 아닙니다.** 21절의 질문 목록을 법률 담당자가 확인하기
   전에는 marketing 계열 기능을 production에서 활성화하지 않는 것을 전제로 씁니다.
 
 ---
 
 ## 0. 개정 이력
+
+### v4 (2026-08-21) — 승인 및 정합성 정리
+
+**승인 판정 (2026-08-21):**
+
+| # | 결정 | 상태 |
+|---|---|---|
+| 1 | 전체 아키텍처 (Resend 유지 + 얇은 port, outbox, consent/suppression/jurisdiction 분리) | **승인** |
+| 2 | credential lane은 **방식 B** — 자격증명 미저장, 요청 내 재시도, 사용자 재요청으로 복구 | **승인** |
+| 3 | marketing은 **suppression 경계 결정(A18) 전까지 production 비활성** | **승인** |
+| 4 | 구현 착수는 아래 정합성 5건 반영 후 | **반영 완료** |
+
+**명칭 변경:** `fast lane` -> **`credential synchronous lane`**.
+"fast"는 빠른 재시도 worker가 있다는 인상을 주지만 확정된 동작은 요청과
+동기적으로 보내고 끝나는 것입니다. lane 값도 `"fast"` -> `"credential_sync"`.
+
+| 정합성 지적 | 반영 | 절 |
+|---|---|---|
+| 1. `EmailDelivery.status`에 `failed` 없음 | 추가. `failed`(재시도 여지 없이 종료)와 `abandoned`(재시도 소진)의 구분을 명시 — credential lane에는 `abandoned`가 나타나지 않습니다 | 10.2 |
+| 2. M1의 eventual delivery 보장이 credential lane에 적용되지 않음 | M1은 **standard lane 한정**으로 축소, M1a는 "발송 기록 보존, 자동 재발송 없음"으로 명시. acceptance criteria도 lane별로 분리 | 15, 18.3 |
+| 3. 요청 내 재시도 대상 미명시 | **allowlist 표** 추가 — 네트워크/타임아웃/429/5xx만 재시도, 401·403·422·suppression 거절·그 밖의 4xx는 즉시 중단 | 9.4a-3 |
+| 4. HMAC 전환 시 키 버전·회전·보관 기간 필요 | `renderedHashKeyVersion` 추가. 소급 재계산 금지, 검증 키 보관은 **legal 7년이 하한**, 키 분실은 "검증 불가"로 보고 | 10.2, 10.3-7 |
+| 5. 방식 B에서 자격증명 미포함 조건 명시 + Q13 잔여 문구 정리 | `EmailEvent.payload`·`renderDataSnapshot`(이 lane에서는 `NULL`)·로그 3곳 금지 표 추가. `verifyUrl` 전체 로깅도 금지. Q13 미확인 문구 제거 | 9.4a-3, 0, 4.3 |
 
 ### v3 (2026-08-21) — 2차 검토 반영
 
@@ -21,13 +45,14 @@
 | 4. fast lane 트랜잭션에 세 행이 모두 포함돼야 함 | `EmailLoginAttempt` + `EmailEvent` + `EmailDelivery` 명시 | 9.4a-3 |
 | 5. Q13은 시행령상 고지 의무이며 무응답 자동 만료 규정 없음 | **확인 완료로 전환.** 자동 opt-out 기본 OFF 유지가 맞음을 확정 | 4.3, 5.5, 21 Q13 |
 
-**v3에서 방향이 바뀐 것 두 가지 — 승인 시 확인 필요:**
+**v3에서 방향이 바뀐 것 두 가지 — v4에서 모두 처리됨:**
 
-1. **fast lane worker가 자격증명을 재발송하지 않습니다**(방식 B 권고). v2에서
-   합의한 "전용 상시 worker가 복구한다"를 뒤집는 제안이며, 근거는 9.4a-3의
-   비용/편익 표입니다. 방식 A를 택하시면 9.4a-2가 그대로 구현 명세입니다.
+1. **worker가 자격증명을 재발송하지 않습니다**(방식 B). v2에서 합의한 "전용 상시
+   worker가 복구한다"를 뒤집는 제안이었고, **2026-08-21 승인되었습니다.**
+   대안이던 방식 A의 명세(9.4a-2)는 근거 기록으로 남겨 둡니다.
 2. **"단일 제공자" 권고가 발송 계정 수준에서 완화됩니다.** 제품은 Resend 하나여도
-   되지만, marketing을 켜려면 계정(team)이 둘이어야 합니다(5.3.1).
+   되지만, marketing을 켜려면 계정(team)이 둘이어야 합니다(5.3.1). MVP는 영향
+   없음(D7), 결정은 A18로 이월.
 
 ### v2 (2026-08-21) — 1차 검토 반영
 
@@ -48,15 +73,16 @@ marketing을 포함하지 않는다는 범위 결정.
 
 ### 확인 상태
 
-- **시행령 제62조의3 (v3에서 해결).** 2차 검토에서 조문상 의무가 "수신동의 사실,
-  동의일, 유지/철회 방법의 **고지**"이며 무응답 시 자동 만료 규정은 확인되지
-  않는다는 점이 확정되었습니다. 자동 opt-out 기본 OFF(5.5)가 맞는 방향입니다.
-  이 환경의 egress proxy가 `law.go.kr`을 차단해 **제가 직접 원문을 읽지는
-  못했으며**, 근거는 검토자 확인입니다.
-- **Resend suppression 범위 (v3에서 해결).** 공식 문서와 API 표면 양쪽에서
-  region 내 계정 전체 적용이 확인되었습니다(5.3.1). v2의 Q15는 종료되었습니다.
+- **시행령 제62조의3 — 확인됨.** 조문상 의무는 수신동의 사실, 동의일,
+  유지/철회 방법의 **고지**이며, 무응답 시 자동 만료 규정은 없습니다.
+  자동 opt-out은 사업 정책이며 기본 OFF입니다(5.5). 근거는 검토 확인
+  (2026-08-21)이며, 이 환경의 egress proxy가 `law.go.kr`을 차단해 원문 대조는
+  구현자가 수행합니다.
+- **Resend suppression 범위 — 확인됨.** 공식 문서와 API 표면 양쪽에서 region 내
+  계정 전체 적용이 확인되었습니다(5.3.1).
 - **여전히 확인하지 못한 것:** `node_modules` 미설치로 Next 16.3.0 문서를
-  읽지 못했습니다(2.1, 22절 A13). 구현 착수 전 필수입니다.
+  읽지 못했습니다(2.1, 22절 A13). **구현 착수 전 필수이며, 이 문서에서 유일하게
+  남은 미확인 항목입니다.**
 
 ---
 
@@ -468,8 +494,9 @@ marketing을 포함하지 않는다는 범위 결정.
     수신동의 날짜와 수신동의 사실, 수신동의의 유지 또는 철회 의사표시 방법을
     **알리도록** 규정하며, 적극적 재동의가 없으면 동의를 소멸시키라는 내용이
     아닙니다. v1은 이를 `expiresAt`으로 잘못 설계했고 v2에서 정정했습니다.
-  - 확인 후 수신자가 아무 의사표시를 하지 않은 경우의 효과를 정한 ②항의 정확한
-    문언은 **21절 Q13**에서 확인합니다(0절 "확인하지 못한 것" 참조).
+  - 확인 후 수신자가 아무 의사표시를 하지 않아도 **수신동의는 유지됩니다.**
+    조문에 무응답 자동 만료 규정은 없습니다(검토 확인, 2026-08-21).
+    따라서 자동 opt-out은 법적 의무가 아니라 사업 정책입니다(5.5).
   - 확인 고지 자체는 **광고가 아니라 법정 통지**입니다. 여기에 판촉 문구를 넣으면
     광고성 정보가 되어 `(광고)` 표시와 야간 제한의 대상이 됩니다.
     출처: [국가법령정보센터 — 시행령 제62조의3](https://www.law.go.kr/LSW/lsSideInfoP.do?docCls=jo&joBrNo=03&joNo=0062&lsiSeq=284861&urlMode=lsScJoRltInfoR). 확인일 2026-08-21(검토자 제시).
@@ -893,9 +920,9 @@ EmailProviderPort {
 
 우선순위 순서 — **이 순서 자체가 권고입니다.**
 
-1. **outbox 통합 + credential fast lane.** 2.4의 fire-and-forget 경로를 전부
+1. **outbox 통합 + credential synchronous lane.** 2.4의 fire-and-forget 경로를 전부
    `EmailEvent` -> `EmailDelivery` 큐로 옮기되, 로그인 코드는 standard lane이 아니라
-   **fast lane**(9.4a)으로 보냅니다. **규제와 무관하게 지금 가장 큰 사용자 피해가
+   **credential synchronous lane**(9.4a)으로 보냅니다. **규제와 무관하게 지금 가장 큰 사용자 피해가
    여기 있습니다.**
 2. **`SuppressionEntry` + Resend webhook 수신** (bounce/complaint). 서명 검증과
    `svix-id` 기반 replay 방지 포함.
@@ -1071,7 +1098,7 @@ idempotencyKey = hash(eventId, recipientKey, templateVersionId, policyVersionId)
 **marketing의 관대한 재시도가 중요합니다.** 실패한 프로모션을 끈질기게 재시도하면
 일시적 차단이 영구적 평판 손상이 됩니다.
 
-### 9.4a Fast lane: 수명이 짧은 credential 메일
+### 9.4a Credential synchronous lane: 수명이 짧은 자격증명 메일
 
 **v1은 로그인 코드를 일반 outbox에 넣었고, 그것은 틀렸습니다.**
 
@@ -1131,7 +1158,7 @@ model EmailLoginAttempt {          // prisma/schema.prisma:178
      credentialPurgedAt       DateTime?
    ```
 2. **발송 성공 또는 만료 즉시 파기.** 성공 시 같은 트랜잭션에서 `NULL`,
-   만료 시 fast-lane worker가 파기하고 `credentialPurgedAt`을 찍습니다.
+   만료 시 정리 작업이 파기하고 `credentialPurgedAt`을 찍습니다.
    **한계를 명시합니다: 라이브 테이블에서만 사라집니다.** WAL, 논리 복제 슬롯,
    스냅샷 백업에는 보존 기간만큼 ciphertext가 남습니다. 키가 DB 밖에 있는 것이
    이 한계에 대한 유일한 방어입니다.
@@ -1174,13 +1201,47 @@ POST /api/auth/email-login
   1. 한 트랜잭션에서 세 행을 커밋:
        EmailLoginAttempt  (기존 updateMany 무효화 포함)
        EmailEvent         (kind = "auth.login_code")
-       EmailDelivery      (lane = "fast", status = "pending")
+       EmailDelivery      (lane = "credential_sync", status = "pending")
      -> outbox 계약을 지키고, 시도했다는 사실이 남습니다
   2. 요청 안에서 최대 3회 발송 시도 (0s, 700ms, 2s -- 총 지연 예산 3초 이하)
+     재시도 대상은 아래 표에 열거된 것만
   3. 성공 -> status = "sent"
      실패 -> status = "failed", lastErrorKind 기록, incident
   4. 응답: 성공/실패를 사용자에게 **알립니다** (아래)
 ```
+
+**무엇을 재시도하고 무엇을 즉시 중단하는가.** 재시도 예산이 3초뿐이므로, 기다려도
+달라지지 않을 오류에 그 예산을 쓰면 사용자만 3초 더 기다리고 결과는 같습니다.
+
+| 결과 | 동작 | 이유 |
+|---|---|---|
+| 네트워크 오류, DNS 실패, 연결 끊김 | **재시도** | 전형적 일시 장애 |
+| 타임아웃 | **재시도** | 단, 남은 예산 안에서만 |
+| `429 Too Many Requests` | **재시도**, `Retry-After`가 남은 예산보다 크면 즉시 중단 | 기다릴 수 있으면 기다리고, 못 기다리면 지금 실패를 알리는 편이 낫습니다 |
+| `500`, `502`, `503`, `504` | **재시도** | 제공자 일시 장애 |
+| `401`, `403` (API 키 오류) | **즉시 중단** | 설정 오류. 재시도가 고칠 수 없고, **운영 incident로 즉시 올려야** 합니다 |
+| `422` 등 payload 오류 | **즉시 중단** | 같은 payload를 다시 보내면 같은 답이 옵니다 |
+| suppression으로 인한 거절 | **즉시 중단** | 제공자가 이미 결정했습니다(5.3.1). `skipReason`에 기록 |
+| 그 밖의 4xx | **즉시 중단** | 기본값은 중단. 재시도 대상은 위에 열거된 것뿐입니다 |
+
+분류는 **allowlist**입니다 — "재시도할 것"을 열거하고 나머지는 전부 중단합니다.
+반대로 하면 새로운 오류 코드가 등장할 때마다 조용히 재시도 대상이 됩니다.
+`lib/notificationRetryCore.ts`의 `classifyNotificationError()`가 이미 같은 일을
+하고 있으므로 그 자리에 분류를 얹습니다.
+
+**자격증명은 어디에도 남지 않습니다 (방식 B의 정의).** 다음 세 곳에 평문 `code`나
+`linkToken`이 나타나면 방식 B가 아니라 이름만 다른 방식 A입니다.
+
+| 위치 | 규칙 |
+|---|---|
+| `EmailEvent.payload` | 자격증명을 담지 않습니다. `EmailLoginAttempt.id` 참조만 둡니다 |
+| `EmailDelivery.renderDataSnapshot` | **이 lane에서는 아예 `NULL`입니다.** 10.3-5의 금지 항목이 곧 이 메일의 본문 전부이므로, 최소화하면 남는 것이 없습니다 |
+| 구조화 로그, Sentry, 접근 로그 | 값도 컬럼명도 남기지 않습니다. `verifyUrl` 전체도 금지입니다 — 쿼리스트링에 토큰이 들어 있습니다 |
+
+렌더된 본문은 발송 호출의 인자로만 존재하고 호출이 끝나면 사라집니다. 감사에
+남는 것은 `renderedSubject`, `renderedHash`(키 있는 HMAC), 그리고 발송 시각뿐이며,
+**이 lane은 재현 가능 창을 갖지 않습니다**(10.3). 자격증명 메일의 본문을 나중에
+재구성할 수 있어야 할 이유가 없습니다.
 
 **응답에서 실패를 숨기지 않습니다.** 현행 코드는 발송 실패를 삼키고
 `{ ok: true }`를 반환합니다(`lib/emailLogin.ts:208-218`) — 계정 존재 여부를
@@ -1193,13 +1254,16 @@ POST /api/auth/email-login
 **"다시 보내기"는 항상 보입니다.** 카운트다운과 함께 노출하고,
 `DAILY_REQUEST_LIMIT`(12)과 `consumeApiRateLimit`이 남용을 이미 막습니다.
 
-**그래도 fast lane은 남습니다.** lane 구분(`EmailDelivery.lane`)과 전용 worker는
-유지하되, worker의 역할이 바뀝니다:
+**lane 구분은 남습니다.** `EmailDelivery.lane`은 유지하되 뒷단의 역할이 바뀝니다.
+**그래서 이름도 바꿉니다: `fast lane` -> `credential synchronous lane`.** "fast"는
+빠른 재시도 worker가 있다는 인상을 주는데, 확정된 동작은 **요청과 동기적으로
+보내고 끝난다**는 것입니다. 이름이 동작을 그대로 말해야 다음 사람이 worker를
+찾다가 없다고 버그로 신고하지 않습니다.
 
 - **자격증명 메일:** 재발송하지 않습니다. 만료된 `pending`/`failed` 행을
   `skipped:credential_expired`로 종료시키고, 실패율을 집계해 incident를 올립니다.
   **관측과 정리 담당이지 재발송 담당이 아닙니다.**
-- 그 외 fast lane 대상이 생기면(현재 없음) 그때 재발송을 논의합니다.
+- 그 외 이 lane의 대상이 생기면(현재 없음) 그때 재발송을 논의합니다.
 - 따라서 **상시 프로세스가 필수는 아닙니다.** 1분 주기 cron으로 충분하며,
   22절 A16(상시 worker 가용성)의 제약이 해소됩니다.
 
@@ -1210,14 +1274,14 @@ POST /api/auth/email-login
 
 ### 9.4a-4 그 밖의 계약
 
-**fast lane 대상:** 로그인 코드/매직링크. **그 외에는 쓰지 않습니다** — 이 lane은
+**이 lane의 대상:** 로그인 코드/매직링크. **그 외에는 쓰지 않습니다** — 이 lane은
 지연 예산이 초 단위인 것만 담고, 늘어나면 lane 구분의 의미가 사라집니다.
 비밀번호/인증수단 변경 통지는 credential이 아니라 사후 알림이므로 standard입니다.
 
 **`renderedHash`를 자격증명 본문 위에 그대로 계산하지 않습니다.** 6자리 코드가
 들어간 본문의 단순 SHA-256은 10^6 시도로 코드를 역산할 수 있습니다. 저장소에
 이미 올바른 선례가 있습니다 — `lib/emailLogin.ts:59`의
-`createHmac("sha256", secret())`. fast lane의 `renderedHash`는 (a) 자격증명을
+`createHmac("sha256", secret())`. 이 lane의 `renderedHash`는 (a) 자격증명을
 자리표시자로 치환한 본문 위에 계산하거나, (b) 서버 비밀로 키를 준 HMAC이어야
 합니다. **(b)를 권고합니다** — 자리표시자 치환은 렌더러가 무엇이 자격증명인지
 알아야 하고, 그 지식이 틀리면 조용히 평문 해시가 남습니다.
@@ -1229,7 +1293,7 @@ POST /api/auth/email-login
 
 **언어 주의:** `sendEmailLoginCodeEmail`은 요청 시점에 계정이 없을 수 있어
 `UserSettings.language`가 아니라 `accept-language` 헤더를 씁니다
-(`lib/emailLogin.ts:208`). fast lane은 이 동작을 그대로 유지하며, 언어를 렌더
+(`lib/emailLogin.ts:208`). 이 lane은 이 동작을 그대로 유지하며, 언어를 렌더
 입력에 명시적으로 실어 결정성을 보존합니다.
 
 ### 9.5 dead-letter
@@ -1436,7 +1500,7 @@ id
 eventId -> EmailEvent
 userId -> User?          // null 가능(게스트 support 회신 등)
 recipientKey       String // NOT NULL. 아래 설명 참조
-lane               String // "fast" | "standard" (9.4a)
+lane               String // "credential_sync" | "standard" (9.4a)
 emailAddress       String // 발송 시점 주소 (스냅샷)
 language           String
 jurisdiction       String
@@ -1444,13 +1508,19 @@ policyVersionId -> EmailPolicyVersion
 templateVersionId -> TemplateVersion
 idempotencyKey     String
 status             "pending" | "sent" | "delivered" | "bounced" | "complained"
-                   | "suppressed" | "skipped" | "abandoned"
+                   | "suppressed" | "skipped" | "failed" | "abandoned"
+                   // failed: 재시도 여지를 남기지 않고 종료된 발송.
+                   //   credential lane(9.4a-3)의 유일한 실패 종착지이며,
+                   //   standard lane에서는 영구 4xx(9.4a-3의 중단 목록)에 쓴다.
+                   // abandoned: 재시도를 소진하고 포기. standard lane 전용.
+                   //   credential lane에는 나타나지 않는다 -- 소진할 재시도가 없다.
 skipReason         String?  // "no_consent" | "consent_expired" | "suppressed_complaint"
                    //  | "quiet_hours" | "hard_bounce"
 attempts, nextAttemptAt, lastAttemptAt, lastErrorKind
 providerMessageId  String?
 renderedSubject    String   // 감사 스냅샷
-renderedHash       String   // 본문 해시
+renderedHash       String   // 본문 HMAC (10.3-6)
+renderedHashKeyVersion String // 어느 키로 계산했는지. 10.3-7
 renderDataSnapshot Json?    // 개인화 입력. 최소화 + 암호화 + 보관기간 제한 (10.3)
 snapshotPurgedAt   DateTime?
 sentAt, deliveredAt
@@ -1552,12 +1622,35 @@ processingError    String?
 5. **금지 항목:** 인증 코드, 매직링크 토큰, unsubscribe 토큰의 원문.
    이들은 스냅샷에 들어가면 저장된 자격증명이 됩니다. 재현 시 자리표시자로
    대체하고, 해시 대조는 자리표시자 기준으로 합니다.
-6. **`renderedHash`는 키를 준 HMAC입니다 (v3 추가).** 자격증명이 담긴 본문의
-   단순 해시는 해시 자체가 공격 표면입니다 — 6자리 코드는 10^6 공간이라
-   DB 덤프만 있으면 역산됩니다. 저장소의 `lib/emailLogin.ts:59`가 이미
+6. **`renderedHash`는 키를 준 HMAC입니다.** 자격증명이 담긴 본문의 단순 해시는
+   해시 자체가 공격 표면입니다 — 6자리 코드는 10^6 공간이라 DB 덤프만 있으면
+   역산됩니다. 저장소의 `lib/emailLogin.ts:59`가 이미
    `createHmac("sha256", secret())`을 쓰고 있으므로 같은 패턴을 따릅니다.
    전 분류에 일괄 적용합니다 — "자격증명이 든 메일에만"으로 두면 분류가
    틀리는 날 조용히 평문 해시가 남습니다. 9.4a-4 참조.
+7. **키에는 버전이 있고, 검증 키는 기록보다 오래 살아야 합니다 (v4 추가).**
+   HMAC으로 바꾸는 순간 해시는 **키가 있어야만 검증 가능한 값**이 됩니다.
+   키를 잃으면 감사 기록 전체가 대조 불가능한 문자열이 되고, 그것은 해시를
+   두지 않은 것과 같습니다.
+
+   ```
+   EmailDelivery.renderedHashKeyVersion  String   // "v1", "v2", ...
+   ```
+
+   | 항목 | 규칙 |
+   |---|---|
+   | 키 보관 | **`NEXTAUTH_SECRET`과 분리된 전용 키.** 인증 비밀을 회전하는 이유와 감사 키를 회전하는 이유가 다릅니다 |
+   | 회전 | 새 버전을 **추가**할 뿐 이전 버전을 폐기하지 않습니다. 신규 발송만 최신 버전으로 계산 |
+   | 소급 재계산 | **하지 않습니다.** `renderedHash`는 불변 감사 기록이고, 재계산하면 그 시점의 본문이 아니라 지금의 렌더러가 만든 것을 증명하게 됩니다 |
+   | **검증 키 보관 기간** | 해당 분류의 `EmailDelivery` 보관 기간 **이상**. 즉 **legal 7년**(13.2)이 하한이며, 그 기간 안에 쓰인 모든 키 버전을 보관합니다 |
+   | 키 분실 | 해당 버전으로 계산된 기록은 **검증 불가**로 표시하고 그렇게 보고합니다. 조용히 재계산해 메우지 않습니다 |
+   | 키 저장소 | 애플리케이션 환경변수 하나에 7년치를 쌓지 않습니다. 버전 -> 키 매핑을 비밀 관리 저장소에 두고 앱은 필요한 버전만 조회합니다 |
+
+   **legal 분류가 이 요구의 근거입니다.** 13.2에서 legal 기록을 7년 보관하기로
+   했으므로, 7년 뒤에도 "이 통지를 이 내용으로 보냈다"를 증명하려면 그때
+   그 키가 살아 있어야 합니다. 이것은 운영 항목이지 코드 항목이 아니며,
+   **키 보관 기간을 정하지 않은 채 HMAC으로 전환하면 감사 능력을 조용히
+   잃습니다.**
 
 **legal 분류는 그 위에 완성 본문도 보관합니다.** 재구성이 아니라 원본이
 필요하고, 건수가 적습니다.
@@ -2016,8 +2109,8 @@ marketing 도메인 신설 시 4~6주 warm-up:
 
 | # | 항목 | 완료 조건 |
 |---|---|---|
-| M1 | `EmailEvent` + `EmailDelivery` outbox 도입 | 2.4의 **모든** 직접 발송 경로가 큐를 경유. 프로세스가 죽어도 메일이 유실되지 않음을 통합 테스트로 증명 |
-| **M1a** | **credential fast lane** (9.4a) | `EmailLoginAttempt` + `EmailEvent` + `EmailDelivery` **세 행이 한 트랜잭션**에서 커밋. 요청 안에서 최대 3회(총 3초 이하) 발송 시도. **만료된 코드는 어떤 경로로도 발송되지 않음.** 발송 실패를 응답에서 숨기지 않음(열거 위험 없음 — 9.4a-3). 로그인 화면에 "다시 보내기" 상시 노출. **방식 A를 택하면** 9.4a-2의 네 조건(봉투 암호화·즉시 파기·감사 제외·claim lease)을 모두 충족해야 통과 |
+| M1 | `EmailEvent` + `EmailDelivery` outbox 도입 (**standard lane**) | 2.4의 직접 발송 경로가 큐를 경유. **프로세스가 죽어도 결국 도착함**(eventual delivery)을 통합 테스트로 증명. **이 보장은 standard lane에 한정되며 credential lane에는 적용되지 않습니다 — M1a 참조** |
+| **M1a** | **credential synchronous lane** (9.4a, **방식 B 확정**) | `EmailLoginAttempt` + `EmailEvent` + `EmailDelivery` **세 행이 한 트랜잭션**에서 커밋. 요청 안에서 최대 3회(총 3초 이하, allowlist 분류) 발송 시도. **만료된 코드는 어떤 경로로도 발송되지 않음.** 발송 실패를 응답에서 숨기지 않음. 로그인 화면에 "다시 보내기" 상시 노출. 평문 자격증명이 payload·snapshot·로그 어디에도 없음. **보장하는 것은 "발송 기록의 보존"이지 "자동 재발송"이 아님** |
 | **M1b** | **Resend 계정 범위 제약 반영** (5.3.1) | Resend는 transactional 전용. marketing 도메인·API 키를 **만들지 않음**. 계정 suppression에 오른 주소를 탐지해 운영 보고에 올리고, 이메일 외 로그인 수단이 없는 사용자를 식별할 수 있음 |
 | M2 | `EmailTemplate` + `TemplateVersion`, 이메일 카피 통합 | 3개 모듈의 중복 `EmailLanguage`/`normalizeLanguage`/`escapeHtml` 제거. 언어 추가가 한 곳에서 끝남 |
 | M3 | Resend 웹훅 수신 + `ProviderWebhookEvent` | Svix 서명 검증, `svix-id` replay 방지, 중복 전달이 상태를 두 번 바꾸지 않음 |
@@ -2134,10 +2227,11 @@ marketing 도메인 신설 시 4~6주 warm-up:
 5. 계정 환영 메일
 6. 결제 관련 (Stripe webhook)
 7. 계정 삭제/복구 통지
-8. **로그인 코드 — 마지막이며, standard lane이 아니라 fast lane으로.** 실패가 가장
-   치명적이므로 다른 모든 경로가 안정된 뒤에 옮기고, 옮길 때는 9.4a의 전용 경로를
-   씁니다. 이 단계 전에 fast-lane worker가 이미 떠 있고 다른 시험용 kind로
-   관찰되어 있어야 합니다 — 로그인 코드가 그 worker의 첫 손님이어서는 안 됩니다.
+8. **로그인 코드 — 마지막이며, standard lane이 아니라 credential synchronous
+   lane으로.** 실패가 가장 치명적이므로 다른 모든 경로가 안정된 뒤에 옮기고, 옮길
+   때는 9.4a의 전용 경로를 씁니다. 이 단계 전에 요청 내 재시도와 실패 응답, "다시
+   보내기" UI가 이미 동작하고 있어야 합니다 — 이 경로에는 뒤에서 받아 줄 worker가
+   없으므로, 옮기는 순간이 곧 사용자에게 노출되는 순간입니다.
 
 ### 17.3 도메인 전환
 
@@ -2196,7 +2290,7 @@ marketing 도메인 신설 시 4~6주 warm-up:
 - 관할권 unknown/충돌 + transactional / legal / service -> **발송됨**, `ZZ` profile
 - marketing opt-in을 국가 없이 시도 -> **거부** (6.3 규칙 2)
 
-**fast lane (9.4a)**
+**credential synchronous lane (9.4a)**
 - `EmailLoginAttempt` / `EmailEvent` / `EmailDelivery` 세 행이 **한 트랜잭션**에서
   커밋되고, 어느 하나가 실패하면 전부 롤백됨
 - 발송 시점에 `EmailLoginAttempt.expiresAt`이 지났으면 -> `skipped:credential_expired`,
@@ -2205,7 +2299,7 @@ marketing 도메인 신설 시 4~6주 warm-up:
 - 요청 안 재시도 3회가 총 3초 예산을 넘지 않음
 - 발송이 끝내 실패하면 응답이 **실패를 알림**. 등록된 주소와 미등록 주소의
   응답이 **구별되지 않음**(열거 방지가 유지되는지 검증)
-- fast lane 정리 작업이 standard lane 행을 집지 않고, 그 반대도 성립
+- credential lane 정리 작업이 standard lane 행을 집지 않고, 그 반대도 성립
 - **방식 A를 택한 경우에만:** claim lease가 요청 경로와 worker의 동시 발송을
   막음(0행 UPDATE -> 건너뜀); 발송 성공 시 같은 트랜잭션에서 ciphertext가
   `NULL`이 됨; 만료 시 파기되고 `credentialPurgedAt`이 찍힘;
@@ -2246,8 +2340,12 @@ marketing 도메인 신설 시 4~6주 warm-up:
 ### 18.3 Acceptance criteria (MVP)
 
 - [ ] 2.4의 직접 발송 경로가 **0개** 남음 (정적 검사로 확인)
-- [ ] 프로세스를 발송 직전에 죽여도 메일이 결국 도착 (통합 테스트)
-- [ ] 프로세스를 발송 직후 죽여도 **두 번 도착하지 않음**
+- [ ] **standard lane:** 프로세스를 발송 직전에 죽여도 메일이 결국 도착 (통합 테스트)
+- [ ] **standard lane:** 프로세스를 발송 직후 죽여도 **두 번 도착하지 않음**
+- [ ] **credential lane:** 프로세스를 발송 직전에 죽이면 `EmailDelivery`가 `pending`
+      또는 `failed`로 **남아 있고**(발송 기록 보존), 메일은 자동으로 재발송되지
+      **않으며**, 사용자가 "다시 보내기"로 새 코드를 받을 수 있음.
+      **이 lane에 eventual delivery 보장은 없습니다 — 그것이 방식 B의 정의입니다**
 - [ ] hard bounce 처리 후 같은 주소로 재발송 시도가 발생하지 않음
 - [ ] marketing flag가 꺼진 상태에서 marketing 발송 시도가 **실패**함(조용한 통과 아님)
 - [ ] **profile 8개 x 언어 7개 = 56 스냅샷**에서 footer가 정상 렌더 (M7과 개수 일치)
@@ -2345,7 +2443,7 @@ marketing 도메인 신설 시 4~6주 warm-up:
 | R16 | 규제 변경을 놓침 | 조용한 위반 | 19.3 분기 검토, `JurisdictionProfile.notes`에 확인일 기록 |
 | R17 | policy version 전환 중 렌더 불일치 | idempotency key 무효화, 중복 발송 | 12.5 발송이 잡은 버전 유지 |
 | R18 | Next 16.3.0 API 가정 오류 | 구현 재작업 | 2.1 — 착수 전 `node_modules/next/dist/docs/` 확인 필수 |
-| **R19** | **로그인 코드가 TTL 안에 도착하지 못함** | 로그인 불가. v1 설계로는 재시도가 15분 뒤라 항상 늦음 | **9.4a fast lane.** 요청 중 즉시 발송 + 전용 상시 worker + 만료 코드 미발송 + "다시 보내기" |
+| **R19** | **로그인 코드가 TTL 안에 도착하지 못함** | 로그인 불가. v1 설계로는 재시도가 15분 뒤라 항상 늦음 | **9.4a credential synchronous lane.** 요청 내 재시도 + 실패를 알리는 응답 + 만료 코드 미발송 + "다시 보내기" |
 | **R20** | **만료된 로그인 코드가 뒤늦게 도착** | 사용자가 입력해 실패 -> 계정 문제로 오해 | 9.4a — 발송 직전 소스 행 재확인, `skipped:credential_expired` |
 | **R21** | **nullable unique로 중복 발송** | 게스트 수신자에게 같은 메일 반복 | 10.2 `recipientKey`, `purposeKey` non-null |
 | **R22** | **감사 시 발송 본문을 재구성하지 못함** | 입증책임(CASL/호주) 대응 불가 | 10.3 `renderDataSnapshot`, 재현 창/검증 창 분리 |
@@ -2376,7 +2474,7 @@ marketing 도메인 신설 시 4~6주 warm-up:
 | ~~Q13~~ | **해결(v3).** 시행령상 의무는 수신동의 사실·동의일·유지/철회 방법의 **고지**이며, 무응답 자동 만료 규정은 확인되지 않음. 자동 opt-out 기본 OFF(5.5)가 맞음 | — | 해소 |
 | **Q14** | 확인 고지에 담을 문구가 시행령이 요구하는 사항(전송자 명칭, 수신동의 날짜와 사실, 유지/철회 의사표시 방법)을 충족하는가? 고지 자체가 광고로 읽히지 않는가? | 고지에 판촉이 섞이면 광고성 정보가 되어 `(광고)` 표시 대상 | 확인 고지 템플릿 |
 | ~~Q15~~ | **해결(v3).** suppression은 **region 내 계정 전체**에 적용되며 도메인을 구분하지 않음. 질문이 아니라 **확인된 제약**이 되었고 5.3.1로 옮겼습니다 | — | 해소. 대신 **A18**(계정 분리 결정)이 생김 |
-| **Q17** | 방식 A를 택할 경우, 평문 자격증명을 봉투 암호화해 최대 10분간 저장하는 것이 보안 정책상 허용되는가? WAL·백업에 ciphertext가 남는 것은? | 9.4a-2. **방식 B를 택하면 이 질문 자체가 사라집니다** | fast lane 구현 방식 |
+| ~~Q17~~ | **해소(v4).** 방식 B가 승인되어 평문 자격증명을 저장하지 않습니다 | — | 해소 |
 | **Q16** | 발송 본문의 개인화 입력(`renderDataSnapshot`)을 90일 보관하는 것이 최소수집 원칙에 부합하는가? legal 분류 7년 보관은? | 10.3, 13.2 | 감사 재현 설계 |
 
 ---
@@ -2404,7 +2502,7 @@ marketing 도메인 신설 시 4~6주 warm-up:
 | **A14** | **동의 무응답 시 자동 opt-out을 하지 않는다**(기본값) | 5.5 — 법적 의무가 아님 | **켜기로 하면 별도 사업 결정이며, 동의한 사용자 일부를 근거 없이 잃습니다. 목록 위생 이득과 저울질 필요** |
 | ~~A15~~ | **폐기(v3).** 가정이 아니라 확인된 사실이며 반대 방향으로 판명. 5.3.1 참조 | — | — |
 | **A18** | **marketing 활성화 시 Resend 계정을 분리한다**(잠정) | 5.3.1. 한 계정 유지는 로그인 도달을 걸고 하는 선택 | **한 계정 유지를 고르면 "이메일 외 로그인 수단 1개 이상"이 권장에서 요구가 되고, 그것을 강제할 수 없는 사용자(OAuth 미연결 + 이메일 로그인만)에 대한 정책이 필요합니다** |
-| **A19** | **fast lane은 자격증명을 저장하지 않는다**(방식 B) | 9.4a-3의 비용/편익 | 방식 A를 택하면 9.4a-2가 구현 명세가 되고, Q17이 살아납니다 |
+| ~~A19~~ | **결정됨(v4).** 방식 B 승인. 자격증명은 저장하지 않습니다 | 검토 승인 2026-08-21 | 가정이 아니라 결정입니다 |
 | ~~A16~~ | **완화(v3).** 방식 B에서는 worker가 재발송하지 않고 정리·관측만 하므로 **상시 프로세스가 필요 없습니다.** 1분 주기 cron으로 충분 | 9.4a-3 | 방식 A를 택하면 다시 제약이 됩니다 |
 | **A17** | 관할권 profile 8개로 충분하다 | 5.2의 예외 7개가 profile 8개로 표현됨 | EU 회원국별 분리가 필요해지면(Q1) profile이 늘지만, `JurisdictionCountryMap` 덕분에 **데이터 변경**입니다 |
 
@@ -2450,7 +2548,7 @@ marketing 도메인 신설 시 4~6주 warm-up:
 - [국가법령정보센터 — 정보통신망법 제50조](https://www.law.go.kr/LSW/lsLawLinkInfo.do?chrClsCd=010202&lsJoLnkSeq=1000688185&lsId=000030)
 - [정보통신망법 시행령 [별표 6] 영리목적의 광고성 정보의 명시사항 및 명시방법](https://www.law.go.kr/flDownload.do?flSeq=41072496)
 - [국가법령정보센터 — 정보통신망법 시행령](https://www.law.go.kr/LSW/lsInfoP.do?lsiSeq=260797)
-- [국가법령정보센터 — 시행령 제62조의3(수신동의 여부의 확인)](https://www.law.go.kr/LSW/lsSideInfoP.do?docCls=jo&joBrNo=03&joNo=0062&lsiSeq=284861&urlMode=lsScJoRltInfoR) — **전문 미확인.** 이 환경에서 `law.go.kr` egress 차단(0절). 검토자 제시 근거를 채택하고 ②항 문언은 Q13으로 이월
+- [국가법령정보센터 — 시행령 제62조의3(수신동의 여부의 확인)](https://www.law.go.kr/LSW/lsSideInfoP.do?docCls=jo&joBrNo=03&joNo=0062&lsiSeq=284861&urlMode=lsScJoRltInfoR) — 의무는 **고지**(수신동의 사실, 동의일, 유지/철회 방법)이며 무응답 자동 만료 규정 없음. 확인일 2026-08-21(검토 확인). 이 환경에서 `law.go.kr` egress가 차단되어 원문 대조는 구현자가 수행
 - [방송통신위원회 — 법령정보](https://kcc.go.kr/user.do?boardId=1098&dc=K02030400&mode=view&page=A02030400)
 - 방송통신위원회/KISA 「스팸 방지를 위한 정보통신망법 안내서」(2020)
 
@@ -2506,9 +2604,10 @@ marketing 도메인 신설 시 4~6주 warm-up:
 
 ---
 
-## 승인 요청
+## 승인 결과 및 착수 조건
 
-이 문서는 **분석과 권고까지**입니다. 코드는 변경하지 않았습니다.
+**2026-08-21 승인.** 이 문서는 이 시점부터 **ADR**이며, 아래 결정은 변경하려면
+새 개정과 재승인이 필요합니다.
 
 **v1에서 조건부 승인된 것 (재확인만):**
 1. 8절의 제공자 결정 (Resend 유지 + 얇은 port)
@@ -2516,20 +2615,40 @@ marketing 도메인 신설 시 4~6주 warm-up:
 3. 5.1의 C1(전역 opt-in), C8(soft opt-in 미사용)
 4. 15절의 MVP 범위와 "만들되 끄는" 항목 목록
 
-**v3에서 방향이 바뀌어 재승인이 필요한 것:**
+### 확정된 결정
 
-A. **fast lane worker가 자격증명을 재발송하지 않습니다**(방식 B, 9.4a-3).
-   v2에서 합의한 "전용 상시 worker가 복구"를 뒤집는 제안입니다. 대안인 방식 A는
-   9.4a-2에 완전한 계약으로 명세해 두었으니, **A와 B 중 하나를 골라 주십시오.**
-   - B를 고르면: A16 제약 해소(상시 프로세스 불필요), Q17 소멸.
-   - A를 고르면: 네 조건 전부가 acceptance criteria가 되고, Q17이 살아납니다.
-B. **"단일 제공자"가 발송 계정 수준에서 완화됩니다**(5.3.1). marketing을 켜려면
-   Resend 계정이 둘이거나, 한 계정을 유지하고 **이메일 외 로그인 수단을 요구로
-   올려야** 합니다. 후자를 고르면 OAuth 미연결 사용자에 대한 정책이 필요합니다(A18).
+| # | 결정 | 근거 |
+|---|---|---|
+| D1 | 제공자는 **Resend 유지**, `lib/email.ts` 자리에 얇은 `EmailProviderPort`. 구현체는 하나 | 8.1, 8.2 |
+| D2 | **outbox 도입** — 2.4의 fire-and-forget 경로를 전부 큐로 | 9.1, 15 M1 |
+| D3 | credential은 **방식 B / credential synchronous lane**. 자격증명 미저장, 자동 재발송 없음 | 9.4a-3 |
+| D4 | **전역 opt-in(C1)**, **soft opt-in 미사용(C8)** | 5.1, 5.6 |
+| D5 | 관할권은 **IP 단독으로 판정하지 않음**. marketing은 확정된 관할권을 요구하고, 미확정이면 보류 | 6.2, 6.3 |
+| D6 | 국가별 규칙은 **`JurisdictionProfile` + `EmailPolicyVersion`** 데이터. profile 8개 + 국가 매핑 | 10.2 |
+| D7 | **MVP는 Resend transactional 전용.** marketing 도메인·API 키를 만들지 않음 | 5.3.1, 15 M1b |
+| D8 | `renderedHash`는 **키 있는 HMAC + 키 버전**, 검증 키 보관 하한은 legal 7년 | 10.3-6, 10.3-7 |
 
-**v2에서 승인이 필요했던 것 (유지):**
-5. **9.4a credential fast lane** — 세 행 한 트랜잭션, 만료 코드 미발송,
-   "다시 보내기" UI, 실패를 숨기지 않는 응답 (재발송 방식은 위 A에서 결정)
+### 착수 전 남은 것
+
+1. **`node_modules` 설치 후 Next 16.3.0 문서 확인**(2.1, A13). 이 문서에서
+   유일하게 남은 미확인 항목입니다. Route Handler 시그니처, `after()` 지원 여부,
+   캐시 기본값을 읽고 9.7의 배치를 확정합니다.
+2. **21절 법률 질문 전달.** Q8(사업자 정보 실제 값)과 Q11(Resend DPA)은
+   marketing과 무관하게 지금 진행 중인 발송에 걸립니다.
+3. **브랜치 정책 확인.** 현재 브랜치 `claude/saas-email-notification-architecture-764951`은
+   이름에 `to-develop` 경로 조각이 없어 develop 자동 PR 대상이 아닙니다
+   (AGENTS.md). 구현은 `claude/to-develop/...` 브랜치에서 진행하는 것을 권고합니다.
+
+### marketing 활성화 전에 결정할 것 (MVP 착수를 막지 않음)
+
+- **A18** — marketing 시 Resend 계정/region을 분리할 것인가, 한 계정을 유지하고
+  이메일 외 로그인 수단을 요구로 올릴 것인가(5.3.1).
+- **A14**(자동 opt-out 채택), **A2**(EU 리전), **A3**(일본), **A4**(중국),
+  **A1**(B2C/B2B), **A5**(opt-in 비용), **A17**(profile 8개).
+
+### 참고 — v2에서 승인된 항목
+5. **9.4a credential synchronous lane** — 세 행 한 트랜잭션, 만료 코드 미발송,
+   "다시 보내기" UI, 실패를 숨기지 않는 응답
 6. **5.5의 고지/만료 분리** — 자동 opt-out을 기본 OFF로 두는 것
 7. **6.3의 marketing 보류 정책** — 관할권이 확정되지 않으면 보내지 않고, 대신
    opt-in 시점에 국가를 필수 수집. 정렬("더 엄격한 쪽")은 폐기
@@ -2537,10 +2656,8 @@ B. **"단일 제공자"가 발송 계정 수준에서 완화됩니다**(5.3.1). 
 9. **10.3의 `renderDataSnapshot`** — 90일(legal 7년) 보관, 암호화, 최소화
 
 **22절의 결정 필요 항목 (v1 5건 + v2 4건):**
-A1(B2C/B2B), A2(EU 리전), A3(일본), A4(중국), A5(opt-in 비용),
-A14(자동 opt-out 채택 여부), A17(profile 8개로 충분한지),
-**A18(marketing 시 Resend 계정 분리), A19(fast lane 방식 A/B)**
-— A15는 확인된 사실로 판명되어 폐기, A16은 방식 B에서 해소됩니다.
+A15는 확인된 사실로 판명되어 폐기, A16과 A19는 방식 B 확정으로 해소되었습니다.
+남은 항목은 위 "marketing 활성화 전에 결정할 것"에 정리되어 있습니다.
 
 **병렬로 시작할 수 있는 것:** 21절의 법률 질문 전달(Q13·Q15는 해결, Q17 신규). 특히 **Q8(사업자 정보
 실제 값)과 Q11(Resend DPA 체결 여부)**은 답이 없으면 아무것도 진행할 수 없습니다.
