@@ -1658,6 +1658,35 @@ processingError    String?
    **키 보관 기간을 정하지 않은 채 HMAC으로 전환하면 감사 능력을 조용히
    잃습니다.**
 
+8. **키가 없으면 배포는 ready가 아닙니다 (v5 추가).** 규칙 2의 봉투 암호화는
+   `EMAIL_SNAPSHOT_KEYS`(그리고 회전 중에는 `EMAIL_SNAPSHOT_KEY_VERSION`)로
+   구성합니다. **키가 없으면 standard lane의 enqueue가 예외를 던지고**,
+   그 호출부 넷 — 환영 메일, 구독 시작 메일, 계정 삭제 예약 메일, 복구 메일 —
+   은 사용자의 본 작업이 성공하도록 그 예외를 모두 삼킵니다. 사용자에게 옳은
+   동작이지만, 결과는 **화면에 아무 표시 없이 메일이 사라지고 로그 한 줄만
+   남는 것**입니다. 이 lane에는 feature flag가 없으므로 "flag는 꺼져 있고 키는
+   없는" 중간 상태가 존재하지 않습니다.
+
+   그래서 `/api/ready`가 `emailSnapshotKeyring`을 검사하고, 아래 상태에서
+   **거부**합니다. 판정은 `snapshotKeyringProblems()`
+   (`lib/emailSnapshotCrypto.ts`) 한 곳에 있고 `readSnapshotKeyring()`과 같은
+   parser를 씁니다 — 검사와 실제 사용이 서로 다른 규칙을 갖는 것이 이 검사가
+   막으려는 실패입니다.
+
+   | 코드 | 상태 | 등급 |
+   |---|---|---|
+   | `SNAPSHOT_KEYS_MISSING` | 변수 없음 또는 공백 | error |
+   | `SNAPSHOT_KEYS_UNPARSEABLE` | 설정돼 있으나 `version:secret` 쌍을 하나도 읽을 수 없음 | error |
+   | `SNAPSHOT_ACTIVE_VERSION_UNKNOWN` | `EMAIL_SNAPSHOT_KEY_VERSION`이 keyring에 없는 버전을 가리킴 | error |
+   | `SNAPSHOT_ACTIVE_VERSION_UNPINNED` | 키가 둘 이상인데 활성 버전이 고정되지 않음 | warning |
+
+   **환경변수를 먼저 배포하고 코드를 나중에** 배포합니다. 이 검사는 그 순서를
+   강제하는 장치이지 순서를 대신해 주는 것이 아닙니다.
+
+   **오류 메시지는 환경변수 값을 되돌려 적지 않습니다.** keyring 오설정은
+   대개 값을 엉뚱한 변수에 붙여 넣어 생기고, 여기서 엉뚱한 변수에 담기는 것은
+   키 자체입니다. 메시지와 구조화 로그에는 **개수만** 남깁니다.
+
 **legal 분류는 그 위에 완성 본문도 보관합니다.** 재구성이 아니라 원본이
 필요하고, 건수가 적습니다.
 

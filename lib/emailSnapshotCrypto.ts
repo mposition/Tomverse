@@ -96,29 +96,154 @@ export type SnapshotKeyring = {
  * rotation is a deploy that adds a pair and moves `EMAIL_SNAPSHOT_KEY_VERSION`
  * -- old rows keep decrypting throughout.
  */
-export const readSnapshotKeyring = (env: NodeJS.ProcessEnv): SnapshotKeyring | null => {
+/**
+ * What the environment says, before anything decides whether it is usable.
+ *
+ * Split out so the reader below and the readiness check further down cannot
+ * disagree about what `EMAIL_SNAPSHOT_KEYS` means. A second parser written for
+ * the health check is a second set of rules, and the failure it would produce
+ * is the one worth avoiding here: a check that calls the configuration good
+ * while the lane that uses it throws.
+ */
+const parseSnapshotKeyring = (env: NodeJS.ProcessEnv) => {
   const raw = env.EMAIL_SNAPSHOT_KEYS?.trim();
-  if (!raw) return null;
-
   const secrets: Record<string, string> = {};
-  for (const pair of raw.split(",")) {
-    const separator = pair.indexOf(":");
-    if (separator <= 0) continue;
-    const version = pair.slice(0, separator).trim();
-    const secret = pair.slice(separator + 1).trim();
-    if (version && secret) secrets[version] = secret;
+  if (raw) {
+    for (const pair of raw.split(",")) {
+      const separator = pair.indexOf(":");
+      if (separator <= 0) continue;
+      const version = pair.slice(0, separator).trim();
+      const secret = pair.slice(separator + 1).trim();
+      if (version && secret) secrets[version] = secret;
+    }
   }
 
   const versions = Object.keys(secrets);
-  if (versions.length === 0) return null;
+  const pinnedVersion = env.EMAIL_SNAPSHOT_KEY_VERSION?.trim() || null;
+  return {
+    /** True when the variable was set to something, however malformed. */
+    configured: Boolean(raw),
+    secrets,
+    versions,
+    pinnedVersion,
+    /** What a write would be sealed under. Null when nothing parsed. */
+    activeVersion: pinnedVersion ?? versions[0] ?? null,
+  };
+};
 
-  const activeVersion = env.EMAIL_SNAPSHOT_KEY_VERSION?.trim() || versions[0];
-  if (!secrets[activeVersion]) {
+export const readSnapshotKeyring = (env: NodeJS.ProcessEnv): SnapshotKeyring | null => {
+  const parsed = parseSnapshotKeyring(env);
+  if (parsed.versions.length === 0) return null;
+
+  const activeVersion = parsed.activeVersion as string;
+  if (!parsed.secrets[activeVersion]) {
     throw new Error(
       `EMAIL_SNAPSHOT_KEY_VERSION "${activeVersion}" has no matching key in EMAIL_SNAPSHOT_KEYS.`
     );
   }
-  return { activeVersion, secrets };
+  return { activeVersion, secrets: parsed.secrets };
+};
+
+export type SnapshotKeyringProblem = {
+  severity: "error" | "warning";
+  code:
+    | "SNAPSHOT_KEYS_MISSING"
+    | "SNAPSHOT_KEYS_UNPARSEABLE"
+    | "SNAPSHOT_ACTIVE_VERSION_UNKNOWN"
+    | "SNAPSHOT_ACTIVE_VERSION_UNPINNED";
+  message: string;
+};
+
+/**
+ * Everything wrong with the configured keyring, for a health check to report.
+ *
+ * Separated from `readSnapshotKeyring` because that one is allowed to throw
+ * and a readiness check is not: the check has to survive the state it exists
+ * to find. Errors and warnings are split the way `sendingIdentityProblems`
+ * splits them -- an error refuses traffic, a warning is something an operator
+ * should finish.
+ *
+ * Why a missing keyring is an error rather than a warning. The standard lane
+ * (`lib/standardEmailLane.ts`) stores the personalisation inputs it rendered
+ * from and refuses to store them in the clear, so without a keyring every
+ * enqueue throws. Its four callers -- the welcome email, the subscription
+ * receipt, the deletion notice and the restore notice -- each swallow that
+ * throw so the user's own action still succeeds, which is right for them and
+ * means the mail disappears with nothing on screen and one line in a log. The
+ * lane is behind no feature flag, so this is live the moment the code is:
+ * there is no "flag off, key absent" intermediate state to protect, which is
+ * what makes this different from the image budget above it. An error here is
+ * the only place the loss is visible before someone reports never receiving a
+ * receipt.
+ *
+ * Nothing read from the environment is quoted back. A misconfiguration is
+ * frequently a value pasted into the wrong variable, and the wrong variable
+ * here holds key material -- so the messages carry counts and never the
+ * version label or the secret.
+ */
+export const snapshotKeyringProblems = (
+  env: NodeJS.ProcessEnv
+): SnapshotKeyringProblem[] => {
+  const parsed = parseSnapshotKeyring(env);
+  const problems: SnapshotKeyringProblem[] = [];
+
+  if (!parsed.configured) {
+    problems.push({
+      severity: "error",
+      code: "SNAPSHOT_KEYS_MISSING",
+      message:
+        "EMAIL_SNAPSHOT_KEYS is not set. The standard email lane stores what each message was rendered from and will not store it unencrypted, so every enqueue throws and the mail is lost rather than delayed.",
+    });
+    return problems;
+  }
+
+  if (parsed.versions.length === 0) {
+    problems.push({
+      severity: "error",
+      code: "SNAPSHOT_KEYS_UNPARSEABLE",
+      message:
+        "EMAIL_SNAPSHOT_KEYS is set but no `version:secret` pair could be read from it, so the keyring is empty while the variable looks configured.",
+    });
+    return problems;
+  }
+
+  if (parsed.pinnedVersion && !parsed.secrets[parsed.pinnedVersion]) {
+    problems.push({
+      severity: "error",
+      code: "SNAPSHOT_ACTIVE_VERSION_UNKNOWN",
+      message: `EMAIL_SNAPSHOT_KEY_VERSION names a version that is not among the ${parsed.versions.length} in EMAIL_SNAPSHOT_KEYS. Reading the keyring throws, so no message can be sealed and none of the existing rows can be read.`,
+    });
+    return problems;
+  }
+
+  if (!parsed.pinnedVersion && parsed.versions.length > 1) {
+    // Not an error: writes still succeed and every version stays readable.
+    // But which one seals new rows is then decided by the order the pairs
+    // happen to appear in, so a rotation that adds a key before pinning it
+    // moves the active version without anyone choosing to.
+    problems.push({
+      severity: "warning",
+      code: "SNAPSHOT_ACTIVE_VERSION_UNPINNED",
+      message: `EMAIL_SNAPSHOT_KEYS holds ${parsed.versions.length} versions and EMAIL_SNAPSHOT_KEY_VERSION is unset, so new snapshots are sealed under whichever pair is listed first rather than one that was chosen.`,
+    });
+  }
+
+  return problems;
+};
+
+/** What a health check reports about the keyring. */
+export const snapshotKeyringReadiness = (
+  env: NodeJS.ProcessEnv = process.env
+) => {
+  const problems = snapshotKeyringProblems(env);
+  const errors = problems.filter((problem) => problem.severity === "error");
+  return {
+    ready: errors.length === 0,
+    errors,
+    warnings: problems.filter((problem) => problem.severity === "warning"),
+    /** Counts only -- see the note on `snapshotKeyringProblems`. */
+    versionCount: parseSnapshotKeyring(env).versions.length,
+  };
 };
 
 export const encryptSnapshot = (
