@@ -30,3 +30,24 @@ e159b4ed85a3ba5e3f9c286b8a1f207933aa7254:tests/memoryValidatorCore.test.mjs:jwt:
 # Scope: exactly these two findings in that one commit — nothing wider.
 c5d63312a625450918df5bf8f4a0c32e575243b1:tests/fixtures/memoryExtractionEval.mjs:aws-access-token:501
 c5d63312a625450918df5bf8f4a0c32e575243b1:tests/fixtures/memoryExtractionEval.mjs:aws-access-token:511
+
+# Svix webhook secrets in a test, not credentials.
+#
+# Commit 32d95e6c introduced tests/emailSuppressionCore.test.mjs with six
+# `whsec_`-prefixed strings: one is Svix's own published verification vector
+# (docs.svix.com), the other was invented for the rotation test. Neither ever
+# signed anything outside this file. gitleaks scans a line at a time and
+# cannot tell a documented vector from a live secret, which is the correct
+# behaviour for a scanner -- so the follow-up commit stopped writing the
+# shape (the vector is joined from its parts, the round-trip secrets are
+# derived) rather than teaching the scanner to ignore it.
+#
+# The introducing commit is immutable history and stays pinned here.
+#
+# Scope: exactly these six findings in that one commit — nothing wider.
+32d95e6c9296554d43fa0969fa243eff7791d3ad:tests/emailSuppressionCore.test.mjs:generic-api-key:164
+32d95e6c9296554d43fa0969fa243eff7791d3ad:tests/emailSuppressionCore.test.mjs:generic-api-key:171
+32d95e6c9296554d43fa0969fa243eff7791d3ad:tests/emailSuppressionCore.test.mjs:generic-api-key:199
+32d95e6c9296554d43fa0969fa243eff7791d3ad:tests/emailSuppressionCore.test.mjs:generic-api-key:216
+32d95e6c9296554d43fa0969fa243eff7791d3ad:tests/emailSuppressionCore.test.mjs:generic-api-key:217
+32d95e6c9296554d43fa0969fa243eff7791d3ad:tests/emailSuppressionCore.test.mjs:generic-api-key:245

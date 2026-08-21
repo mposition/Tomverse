@@ -1992,6 +1992,26 @@ export function AuthButton({
                                                         linkTestId="external-import-entry-link"
                                                     />
                                                 )}
+                                                {/* What the account receives
+                                                    by email. A row in this
+                                                    group rather than a card
+                                                    beside it, and separate from
+                                                    the import row above: that
+                                                    is about data the account
+                                                    already holds, this is about
+                                                    what leaves. */}
+                                                <SettingsEntryRow
+                                                    section="email-notifications"
+                                                    href="/settings/notifications"
+                                                    icon={Mail}
+                                                    title={t("emailNotifications.dataTabTitle")}
+                                                    description={t("emailNotifications.dataTabDescription")}
+                                                    status={t("emailNotifications.dataTabStatus")}
+                                                    actionLabel={t("emailNotifications.dataTabOpen")}
+                                                    onNavigate={closeSettingsModal}
+                                                    testId="email-notifications-entry"
+                                                    linkTestId="email-notifications-entry-link"
+                                                />
                                                 {/* The unified export. The
                                                     conversations-only download
                                                     below is a different thing

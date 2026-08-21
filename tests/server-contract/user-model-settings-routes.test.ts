@@ -148,9 +148,13 @@ async function loadRoutes() {
       },
     });
 
-    mock.module(mod("lib/accountEmails.ts"), {
+    // The welcome email is enqueued now rather than sent, so what has to be
+    // stubbed is the lane rather than the mailer. Left pointing at
+    // lib/accountEmails.ts this mocked a function nothing calls, which reads
+    // like coverage and is not.
+    mock.module(mod("lib/standardEmailLane.ts"), {
       namedExports: {
-        sendAccountWelcomeEmail: async () => undefined,
+        enqueueStandardEmail: async () => null,
       },
     });
 

@@ -572,6 +572,44 @@ feedback의 Trace 검증, `errorReportToken`, `TraceErrorEvidence`, chat 오류
   `lib/feedbackAutoFixPolicy.ts`가 정의하며 파이프라인 자기 자신을 수정
   대상에서 제외합니다. staging 배포를 production 해결로 표시하지 않습니다.
 
+# 이메일 알림
+
+이메일 발송 경로, 수신 동의·수신 거부, suppression, 관할권 판정, 발송 템플릿을
+건드리기 전에 읽습니다.
+
+- `docs/policy/email-notifications.md`
+
+이 문서는 감사 보고서가 아니라 승인된 계약입니다. `.github/audits/`에 있던
+초안을 `docs/policy/`로 옮긴 것이며, 코드 주석의 인용은 전부 이 경로를 가리킵니다.
+
+절대 조건:
+
+- **차선(lane)이 둘이고 보증이 서로 반대입니다.** credential synchronous
+  lane(로그인 코드 등)은 요청 안에서 예산 안에 보내고 실패를 즉시 알리며,
+  standard lane은 outbox에 넣고 cron drain이 끝까지 재시도합니다. 수명이 10분인
+  자격증명을 15분 주기 큐에 넣지 않습니다(§9.4a).
+- **enqueue는 호출자의 transaction 안에서 합니다.** fire-and-forget 발송을
+  되살리지 않습니다 — 그것이 이 시스템이 대체한 것입니다(§2.4).
+- **security·billing 수신 설정은 끌 수 없습니다**(`LOCKED_EMAIL_PURPOSES`,
+  DB CHECK). marketing은 동의가 있어야 보내고, 동의 철회는 purpose 범위
+  suppression을 함께 씁니다.
+- **suppression은 주소 기준이라 계정 삭제 후에도 남습니다.** transactional은
+  hard bounce에서만 막고 complaint로는 막지 않습니다(§13.3). Resend의 suppression은
+  계정·region 전체 범위라는 확인된 제약이 있으므로, marketing 활성화 전에
+  발송 계정 분리를 결정합니다(§5.3.1, A18).
+- **IP만으로 관할권을 정하지 않습니다.** 신호 우선순위는 자기 신고 → 결제 국가 →
+  직전 동의 시점의 관할권이고, IP는 관측용입니다. 신호가 충돌하면 marketing을
+  보류하고 확인을 요청합니다(§6).
+- **국가 규칙은 데이터입니다.** `JurisdictionProfile`·`JurisdictionCountryMap`은
+  `EmailPolicyVersion`에 묶이고, 활성화는 사람이 승인해 registry에 기록하는
+  행위입니다. 코드가 status를 스스로 `active`로 올리지 않습니다(§12.5).
+- **자격증명 본문은 어디에도 남기지 않습니다.** 코드·magic link는
+  `EmailEvent.payload`, `renderDataSnapshot`, 로그 어디에도 넣지 않습니다.
+  standard lane의 snapshot은 봉투 암호화하고 보관 기한이 지나면 지웁니다(§10.3).
+- **unsubscribe는 로그인 없이 한 번에 됩니다.** RFC 8058 one-click을 지원하고,
+  marketing에 서명 키가 없으면 헤더 없이 보내는 대신 발송을 거부합니다(§11.3).
+- marketing은 위 suppression 경계 결정 전까지 production에서 비활성입니다.
+
 ## Mobile chat composer invariant
 
 Before changing `ChatInput.tsx`, `MobileChatShell.tsx`, composer styles, tool chips, or mobile bottom-dock layout, read:

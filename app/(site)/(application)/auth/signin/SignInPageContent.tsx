@@ -48,6 +48,13 @@ const emailLoginErrorMessage = (
             return t("auth.emailLoginTurnstileFailed");
         case "TURNSTILE_UNAVAILABLE":
             return t("auth.emailLoginTurnstileUnavailable");
+        case "SEND_FAILED":
+            // Distinct from the generic 5xx copy: the request was accepted and
+            // the code was minted, only the mail did not go out. Telling
+            // someone to check their inbox here would be false, and telling
+            // them to check their address would send them looking for a
+            // mistake they did not make.
+            return t("auth.emailLoginSendFailed");
         case "INVALID_REQUEST":
             return t("auth.emailLoginInvalidFormat");
         default:
@@ -430,6 +437,25 @@ function SignInButtons() {
                         className={providerButtonClass}
                     >
                         {isVerifyingCode ? t("auth.loading") : t("auth.emailLoginVerifyButton")}
+                    </button>
+                    {/*
+                      * Always present, not only after something visibly fails.
+                      * This lane does not retry a login code in the background
+                      * -- there is nothing stored to retry it from -- so the
+                      * user pressing this is the recovery path, and it is
+                      * better than a background retry anyway because it mints a
+                      * fresh code rather than resending one that may have
+                      * expired while it waited.
+                      */}
+                    <button
+                        type="button"
+                        disabled={isSendingCode || retryCountdown > 0}
+                        onClick={handleSendCode}
+                        className="w-full text-center text-xs font-semibold text-zinc-500 hover:underline disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:no-underline dark:text-zinc-400"
+                    >
+                        {retryCountdown > 0
+                            ? `${t("auth.emailLoginResendButton")} (${retryCountdown})`
+                            : t("auth.emailLoginResendButton")}
                     </button>
                     <button
                         type="button"

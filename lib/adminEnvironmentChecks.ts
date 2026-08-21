@@ -116,6 +116,34 @@ export function adminEnvironmentChecks(): AdminEnvCheck[] {
         "Receives website support form notifications. Falls back to ADMIN_ALERT_EMAIL or ADMIN_EMAILS.",
     },
     {
+      name: "RESEND_WEBHOOK_SECRET",
+      configured: isConfigured(process.env.RESEND_WEBHOOK_SECRET),
+      description:
+        "Svix signing secret for Resend delivery, bounce and complaint events. " +
+        "Without it the webhook answers 503 so events queue at the provider " +
+        "rather than being dropped -- but nothing reaches the suppression list " +
+        "until it is set, so bounced addresses keep being sent to.",
+    },
+    {
+      name: "EMAIL_UNSUBSCRIBE_KEYS",
+      configured: isConfigured(process.env.EMAIL_UNSUBSCRIBE_KEYS),
+      description:
+        "Keys for unsubscribe links, as version:secret pairs. Marketing mail " +
+        "refuses to send without one. Old versions must stay listed for as " +
+        "long as mail carrying them is in the wild -- dropping a version does " +
+        "not invalidate those links, it breaks them, and a broken unsubscribe " +
+        "link's alternative is the spam button.",
+    },
+    {
+      name: "EMAIL_SNAPSHOT_KEYS",
+      configured: isConfigured(process.env.EMAIL_SNAPSHOT_KEYS),
+      description:
+        "Envelope keys for the personalisation inputs the standard email lane " +
+        "stores, as version:secret pairs. Without it that lane refuses to " +
+        "enqueue rather than storing them in the clear. Old versions must stay " +
+        "listed for as long as the rows they sealed are retained.",
+    },
+    {
       name: "TRANSACTIONAL_EMAIL_FROM",
       configured: true,
       description:

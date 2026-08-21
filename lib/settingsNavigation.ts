@@ -35,6 +35,7 @@ export const SETTINGS_SECTION_IDS = [
     "memory",
     "assistants",
     "account-data",
+    "email-notifications",
 ] as const;
 
 export type SettingsSectionId = (typeof SETTINGS_SECTION_IDS)[number];
@@ -56,6 +57,14 @@ export const SETTINGS_SECTION_TAB: Record<SettingsSectionId, AccountSettingsTab>
         // bookmark opens the assistants tab rather than a tab the row left.
         assistants: "assistants",
         "account-data": "data",
+        // What the account receives by email is personalisation it owns, in
+        // the same sense the other four are: a separate feature with its own
+        // page and its own state, presented as another row in this group
+        // rather than merged into one of them (settings-navigation contract
+        // docs/policy/email-notifications.md §2). Last because it is the only
+        // one that is about outbound mail
+        // rather than about data the account already holds.
+        "email-notifications": "data",
     };
 
 /**

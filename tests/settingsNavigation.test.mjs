@@ -39,7 +39,15 @@ test("every entry with a detail page addresses the settings list, not the chat",
 // row-level properties are derived: adding a fourth entry should not mean
 // hand-writing another pair of comparisons that somebody will forget.
 test("every entry names the tab it is actually in, and stays a separate row", () => {
-  assert.deepEqual(SETTINGS_SECTION_IDS, ["external-import", "memory", "assistants", "account-data"]);
+  // Asserted explicitly rather than derived: this list is what stops a section
+  // vanishing in a refactor, so a change to it has to be a change here too.
+  assert.deepEqual(SETTINGS_SECTION_IDS, [
+    "external-import",
+    "memory",
+    "assistants",
+    "account-data",
+    "email-notifications",
+  ]);
 
   // Pinned per section rather than "all of them are in `data`". They were all
   // in one tab, and asserting that shape said nothing about whether each row
@@ -52,6 +60,9 @@ test("every entry names the tab it is actually in, and stays a separate row", ()
     // Its own tab, which is also where the collection is managed.
     assistants: "assistants",
     "account-data": "data",
+    // Outbound mail, not stored data -- but it is still an account-wide data
+    // decision, so it sits in the same tab as import and export.
+    "email-notifications": "data",
   };
 
   const elementIds = new Set();

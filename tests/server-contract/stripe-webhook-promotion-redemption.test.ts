@@ -212,10 +212,13 @@ async function loadProcessor() {
       },
     });
 
-    mock.module(mod("lib/billingEmails.ts"), {
+    // The subscription receipt is enqueued now rather than sent, so the lane is
+    // what needs stubbing. lib/billingEmails.ts is left alone: the webhook
+    // still calls resolveBillingPeriodEnd out of it, and mocking a module to
+    // replace a function nobody calls is coverage-shaped noise.
+    mock.module(mod("lib/standardEmailLane.ts"), {
       namedExports: {
-        ...original("lib/billingEmails.ts"),
-        sendBillingWelcomeEmail: async () => undefined,
+        enqueueStandardEmail: async () => null,
       },
     });
     mock.module(mod("lib/billingTransactions.ts"), {
