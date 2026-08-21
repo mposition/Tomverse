@@ -3,8 +3,39 @@
 - 기준일: 2026-08-21
 - 상태: **초안, 승인 대기**. 이 문서는 코드 변경을 포함하지 않습니다.
 - 작성 범위: 규제 요구사항 조사 + 저장소 현황 조사 + 아키텍처 권고
+- 개정: **v2 (2026-08-21).** v1 검토에서 제기된 7건 + 정합성 1건을 반영. 0절 참조.
 - 법적 성격: **법률 자문이 아닙니다.** 21절의 질문 목록을 법률 담당자가 확인하기
   전에는 marketing 계열 기능을 production에서 활성화하지 않는 것을 전제로 씁니다.
+
+---
+
+## 0. 개정 이력
+
+### v2 (2026-08-21) — 검토 반영
+
+| 검토 지적 | 반영 | 절 |
+|---|---|---|
+| 1. 로그인 코드에 일반 outbox는 부적합 (TTL 10분 vs drain 15분) | **fast lane 신설.** durable enqueue -> 요청 중 즉시 발송 -> 전용 상시 worker 복구. 만료된 credential은 발송하지 않음 | 9.4a, 15 (M1a) |
+| 2. 한국 2년 의무를 "동의 만료"로 구현한 것은 오류 | **고지 의무로 정정.** `expiresAt` 폐기 -> `nextConfirmationNoticeAt` / `lastConfirmationNoticeAt`. 자동 opt-out은 별도 사업 정책 flag로 분리 | 4.3, 5.1 C7, 5.2 E7, 10.2, 16, 20 R5 |
+| 3. "만 14세가 전역 최고 기준"은 오류 (GDPR 제8조 기본 16세) | **C12 폐기.** 연령 기준은 이메일 시스템의 결정이 아니라 가입·개인정보 처리 정책의 결정. 이메일은 결과를 소비만 함 | 5.1, 21 Q9 |
+| 4. `@@unique([eventId, userId])`가 게스트(NULL)에 무효 | **`recipientKey` non-null 도입.** `SuppressionEntry`의 nullable `purpose`도 같은 결함이라 함께 수정 | 10.2 |
+| 5. 감사 재현에 개인화 입력 snapshot 누락 | **`renderDataSnapshot` 도입.** 최소화·암호화·보관기간 제한. 재현 가능 창과 검증 전용 창을 구분 | 10.3 |
+| 6. complaint 출처 미구분, 도메인 분리는 논리적 분리일 뿐 | `sourceStream`/`sourceDomain`/`sourceMessageId`/`sourceClassification` 기록. **C9의 효과 범위를 정정** (도메인 평판 분리는 실재, IP·제공자 계정 분리는 아님) | 5.1 C9, 10.2, 13.3, 20 R4 |
+| 7. "더 엄격한 국가"는 단일 전순서가 아님 | **정렬 시도 폐기.** marketing 동의 시점에 국가를 필수 수집하고, 고신뢰 신호 충돌 시 marketing **보류 + 사용자 확인** | 6.2, 6.3, 11.2 |
+| 8. M7("8개 관할권 + ZZ")과 테스트(`8x7=56`)의 개수 불일치 | **country와 profile을 분리.** profile 8개(ZZ 포함), country -> profile 매핑은 데이터. EEA 30개국이 profile 1개로 접힘 | 10.2, 15 M7, 18.3 |
+
+**v1에서 바뀌지 않은 것:** 제공자 결정(Resend 유지 + 얇은 port), outbox 도입,
+transactional/marketing 경계, 전역 opt-in(C1)과 soft opt-in 미사용(C8), MVP가
+marketing을 포함하지 않는다는 범위 결정.
+
+### 확인하지 못한 것
+
+- **정보통신망법 시행령 제62조의3의 조문 전문을 직접 확인하지 못했습니다.**
+  이 환경의 egress proxy가 `law.go.kr`을 차단합니다. 조문 번호와 취지(2년마다
+  수신동의 사실·동의일·유지/철회 방법을 **알리는** 의무이며 자동 철회 규정이
+  아니라는 점)는 검토자가 제시한 근거를 채택했고, 미의사표시 시의 효과를 정한
+  ②항의 정확한 문언은 **21절 Q13**으로 올렸습니다. 구현 전에 원문 확인이
+  필요합니다.
 
 ---
 
@@ -38,6 +69,10 @@
 6. **가장 큰 현재 리스크는 마케팅이 아니라 유실입니다.** 로그인 코드, 환영 메일,
    Stripe 결제 확인 메일이 지금 큐 밖에서 fire-and-forget으로 나갑니다. 실패하면
    사용자는 로그인하지 못하고 아무도 그것을 모릅니다.
+7. **그러나 로그인 코드는 일반 큐로도 구제되지 않습니다.** 코드 TTL 상한이 10분인데
+   (`lib/emailLogin.ts:15`) 큐 drain은 15분 주기에 얹혀 있습니다
+   (`railway.credit-reconciliation.json:5`). 재시도 곡선이 아무리 촘촘해도 그
+   촘촘함은 존재하지 않습니다. 인증 메일에는 **별도 fast lane**이 필요합니다(9.4a).
 
 **즉시 결정이 필요한 항목(22절 상세):** 서비스 유형(B2C/B2B), 우선 국가 확정,
 일본·중국 시장 포함 여부, 예상 발송량, EU 데이터 리전 요구 여부.
@@ -402,8 +437,17 @@
 
 **한국**
 - 정보통신망법 제50조: 영리목적 광고성 정보 전송은 **명시적 사전 동의** 필요.
-- **제50조제8항: 동의를 받은 날부터 2년마다 수신동의 여부를 확인**해야 하며,
-  위반 시 **3천만원 이하 과태료**.
+- **제50조제8항 + 시행령 제62조의3: 동의를 받은 날부터 2년마다 수신동의 여부를
+  확인**해야 하며, 위반 시 **3천만원 이하 과태료**.
+  - **이것은 고지 의무이지 동의 만료 규정이 아닙니다.** 시행령은 전송자의 명칭,
+    수신동의 날짜와 수신동의 사실, 수신동의의 유지 또는 철회 의사표시 방법을
+    **알리도록** 규정하며, 적극적 재동의가 없으면 동의를 소멸시키라는 내용이
+    아닙니다. v1은 이를 `expiresAt`으로 잘못 설계했고 v2에서 정정했습니다.
+  - 확인 후 수신자가 아무 의사표시를 하지 않은 경우의 효과를 정한 ②항의 정확한
+    문언은 **21절 Q13**에서 확인합니다(0절 "확인하지 못한 것" 참조).
+  - 확인 고지 자체는 **광고가 아니라 법정 통지**입니다. 여기에 판촉 문구를 넣으면
+    광고성 정보가 되어 `(광고)` 표시와 야간 제한의 대상이 됩니다.
+    출처: [국가법령정보센터 — 시행령 제62조의3](https://www.law.go.kr/LSW/lsSideInfoP.do?docCls=jo&joBrNo=03&joNo=0062&lsiSeq=284861&urlMode=lsScJoRltInfoR). 확인일 2026-08-21(검토자 제시).
 - 제50조제4항 + 시행령 제61조제3항 [별표 6]: 광고성 정보에 명시할 사항과 방법.
   **전자우편은 제목이 시작되는 부분에 `(광고)` 표시**가 요구됩니다.
 - 제50조제3항: **오후 9시~다음날 오전 8시** 전송에는 별도 사전 동의. 다만
@@ -471,18 +515,18 @@
 | C4 | 모든 marketing 메일에 **법인명 + 물리적 우편 주소 + 수신거부 링크 + 수신 이유** | 미국(주소), 호주(법인명/ABN), CASL |
 | C5 | `List-Unsubscribe` + `List-Unsubscribe-Post: List-Unsubscribe=One-Click` (RFC 8058) 헤더를 **marketing에만** 부착 | Gmail/Yahoo 대량 발신자 요건 + C2 |
 | C6 | 동의는 **시각, 출처, 정책 버전, 관할권, 증거**를 함께 기록 | CASL/호주 입증책임, GDPR 제7조(1) |
-| C7 | 동의 **재확인 주기 2년** 전역 적용 | 한국 제50조제8항이 최단 |
-| C8 | 묵시적 동의는 **쓰지 않습니다** (soft opt-in 미사용) | 아래 5.3 |
-| C9 | 발송 수단은 **transactional / marketing 도메인·스트림 완전 분리** | 전 관할권 + deliverability |
+| C7 | 동의 **확인 고지 주기 2년** 전역 적용 (고지 의무이지 만료가 아님) | 한국 제50조제8항 + 시행령 제62조의3 |
+| C8 | 묵시적 동의는 **쓰지 않습니다** (soft opt-in 미사용) | 아래 5.6 |
+| C9 | 발송 수단은 **transactional / marketing 도메인·스트림 분리** (효과 범위는 5.3 참조 — 완전 분리가 아님) | 전 관할권 + deliverability |
 | C10 | transactional에는 unsubscribe 링크도 `List-Unsubscribe` 헤더도 **넣지 않음** | 오분류 방지 |
 | C11 | 모든 메일에 **plain-text 대체본** 제공 | 접근성 + deliverability |
-| C12 | 미성년자 기준 **만 14세** 전역 적용(가장 높은 기준) | 한국 개인정보보호법 |
+| C12 | 미성년자 기준을 **이메일 시스템이 정하지 않음.** 가입·개인정보 처리 정책의 판정 결과를 소비만 함 | 5.4 |
 | C13 | 발신자 정보는 발송 후 **최소 30일간** 유효 | 호주 |
 | C14 | 수신거부 수단은 발송 후 **최소 30일간** 동작 | 미국 |
 
-### 5.2 국가별로 남는 진짜 예외 (딱 여섯 개)
+### 5.2 국가별로 남는 진짜 예외 (일곱 개)
 
-C1~C14를 적용하고 나면 국가별 분기는 여섯 개만 남습니다. **이것이 "정말 필요한
+C1~C14를 적용하고 나면 국가별 분기는 일곱 개만 남습니다. **이것이 "정말 필요한
 국가별 분기"의 전부입니다.**
 
 | # | 예외 | 적용 국가 | 구현 위치 |
@@ -493,11 +537,67 @@ C1~C14를 적용하고 나면 국가별 분기는 여섯 개만 남습니다. **
 | E4 | **수신거부 처리 SLA 표기** (5/10 영업일) | AU=5, US/CA/SG=10 | `JurisdictionProfile.unsubscribeSlaBusinessDays` — 표기용. 실제 처리는 항상 즉시 |
 | E5 | **야간 발송 억제 창** (21:00~08:00 현지) | KR (매체 예외 확인 전까지) | `JurisdictionProfile.quietHours` |
 | E6 | **묵시적 동의 만료 계산** | CA(2년/6개월) | C8로 인해 **미사용**. profile에 필드만 남기고 비활성 |
+| E7 | **동의 확인 고지 주기** | KR=24개월 | `JurisdictionProfile.consentNoticeIntervalMonths`. 만료가 아니라 고지. 5.5 |
 
 **나머지는 전부 공통입니다.** 템플릿 본문, 레이아웃, 버튼, 언어, 브랜딩은 국가로
 분기하지 않습니다.
 
-### 5.3 soft opt-in을 쓰지 않기로 하는 이유
+### 5.3 C9(스트림 분리)가 실제로 분리하는 것과 하지 않는 것
+
+**v1은 C9의 효과를 과장했습니다.** 서브도메인과 API 키를 나누는 것은 **논리적
+분리**이며, 공유 IP 환경에서 평판이 완전히 갈라진다는 뜻이 아닙니다. 정확히는:
+
+| 층 | 분리되는가 | 근거 |
+|---|---|---|
+| **도메인 평판** (DKIM `d=`, From 도메인) | **분리됨** | 주요 수신자가 도메인 단위 평판을 실제로 유지합니다. 이것이 C9의 진짜 이득입니다 |
+| **DMARC 정책** | 분리 가능 | 서브도메인별 정책(`sp=`) |
+| **발송 IP** | **분리되지 않음** | 공유 IP 풀에서는 두 스트림이 같은 IP를 쓸 수 있습니다. 전용 IP를 쓰지 않기로 했으므로(8.4) 이 층은 분리되지 않습니다 |
+| **제공자 계정 상태** | **분리되지 않음** | 남용으로 인한 계정 정지, 발송 한도, 계정 수준 억제는 스트림을 가리지 않습니다 |
+| **제공자 억제 목록** | **확인 필요** | Resend 문서는 억제 목록을 "team" 단위로 서술합니다. team 단위라면 marketing에서 발생한 억제가 transactional 발송까지 막을 수 있습니다. **21절 Q15** |
+
+따라서 C9는 위험을 **줄이지만 없애지 않습니다.** 13.3과 20절 R4의 완화책 서술을
+이에 맞게 정정했습니다.
+
+### 5.4 미성년자 기준은 이메일 시스템이 정하지 않습니다
+
+**v1의 C12("만 14세 전역 적용, 가장 높은 기준")는 사실관계가 틀렸습니다.**
+
+- GDPR 제8조: 정보사회서비스를 아동에게 직접 제공하면서 **동의**를 근거로 처리할
+  때 기본 연령은 **만 16세**이며, 회원국이 **13세 미만으로는 낮출 수 없는** 범위에서
+  조정할 수 있습니다. 즉 **16세가 14세보다 높습니다.**
+  출처: [Regulation (EU) 2016/679 제8조](https://eur-lex.europa.eu/legal-content/EN/TXT/?uri=CELEX:32016R0679). 확인일 2026-08-21.
+- 한국 개인정보보호법: **만 14세 미만** 법정대리인 동의.
+- 영국: 13세. 미국 COPPA: 13세 미만.
+
+**설계상의 정정이 더 중요합니다.** 연령 기준은 **가입과 개인정보 처리의 결정**이지
+이메일 발송의 결정이 아닙니다. 이메일 시스템이 자기 연령 규칙을 들고 있으면
+가입 정책과 두 벌이 되고, 둘이 어긋나면 어느 쪽이 진실인지 알 수 없습니다.
+
+**규칙:** 이메일 시스템은 연령을 판정하지 않습니다. 가입·개인정보 처리 정책이
+내린 판정 결과(예: "이 계정은 아동 계정이며 동의 근거가 법정대리인이다")를
+**소비만** 합니다. 그 결과가 없으면 marketing opt-in UI를 제공하지 않습니다.
+연령 기준값 자체는 **21절 Q9**의 결정 사항입니다.
+
+### 5.5 동의 확인 고지(E7)와 동의 만료는 다른 것입니다
+
+| | 동의 확인 고지 | 자동 opt-out(만료) |
+|---|---|---|
+| 성격 | **법적 의무**(한국) | **사업 정책** |
+| 근거 | 정보통신망법 제50조제8항, 시행령 제62조의3 | 없음 |
+| 동작 | 2년마다 동의 사실·동의일·유지/철회 방법을 **알림** | 무응답 시 동의를 **소멸**시킴 |
+| 무응답 시 | 동의 유지(Q13에서 확인) | 수신 중단 |
+| 구현 | `EmailPreference.nextConfirmationNoticeAt` | `feature.emailConsentLapseAutoOptOut` (기본 OFF) |
+| 분류 | **service/legal** — 판촉 문구 금지 | 해당 없음 |
+
+**자동 opt-out을 기본값으로 두지 않는 이유:** 법이 요구하지 않는 것을 법적
+의무처럼 구현하면, 나중에 그것을 끄려 할 때 "규제 때문에 켜 둔 것"으로 오해되어
+아무도 끄지 못합니다. 목록 위생 목적으로 채택할 수 있으나 그것은 **별도 결정**
+입니다(22절 A14).
+
+캐나다의 묵시적 동의 만료는 진짜 만료지만, C8로 묵시적 동의를 쓰지 않으므로
+충돌하지 않습니다.
+
+### 5.6 soft opt-in을 쓰지 않기로 하는 이유
 
 EU/UK의 soft opt-in은 합법적이고 매력적입니다. 그런데 **조건을 정확히 만족시키는
 비용이 얻는 것보다 큽니다.**
@@ -534,31 +634,63 @@ IP는 **가장 약한 신호**이며 단독으로 관할권을 확정하지 않�
 ### 6.2 판정 알고리즘
 
 ```
-resolveEmailJurisdiction(user) -> { code, confidence, source, conflicts[] }
+resolveEmailJurisdiction(user)
+  -> { countryCode, profileKey, confidence, source, conflicts[] }
 
 1. 1~3순위 신호를 모은다.
 2. 존재하는 최고 순위 신호를 채택한다.
-3. 2순위와 3순위가 서로 다르면 -> conflict 기록.
-   - marketing: 두 관할권 중 **더 엄격한 쪽**을 적용한다.
-   - transactional/legal: 판정과 무관하게 발송한다.
+3. 2순위와 3순위가 **둘 다 존재하고 서로 다르면** -> confidence = "conflict",
+   두 값을 conflicts[]에 모두 기록한다. 어느 쪽도 채택하지 않는다.
 4. 1~3순위가 하나도 없으면 5순위(언어+시간대)로 후보를 만들되
    confidence = "low"로 표시한다.
-5. 그래도 없으면 code = "ZZ", confidence = "unknown".
+5. 그래도 없으면 countryCode = "ZZ", confidence = "unknown".
 6. IP(6순위)는 **판정에 쓰지 않고 conflict 관찰용으로만 기록**한다.
+7. countryCode -> profileKey 매핑(10.2)으로 profile을 고른다.
 ```
+
+**v1에서 바뀐 점 — "더 엄격한 쪽을 적용한다"를 폐기했습니다.**
+
+관할권 profile 사이에는 **단일 전순서(total order)가 존재하지 않습니다.** 한국의
+`(광고)`와 싱가포르의 `<ADV>`는 어느 쪽이 더 엄격하다고 정렬할 수 없고, 둘 다
+붙이면 어느 쪽 요건도 정확히 만족하지 않는 제3의 문자열이 됩니다. footer 블록
+집합도 마찬가지로 포함 관계가 아닙니다. 수신거부 SLA(5일 vs 10일)만 비교 가능한데,
+비교 가능한 필드 하나로 profile 전체를 정렬할 수는 없습니다.
+
+정렬할 수 없는 것을 정렬하는 코드는 언젠가 임의의 답을 내고, 그 답이 규제 준수의
+근거가 됩니다.
 
 ### 6.3 불확실할 때의 동작 (fail-closed)
 
-`analyticsConsentPolicy`의 `ZZ -> opt_in` 원칙을 그대로 계승합니다.
+정렬 대신 **두 개의 단순한 규칙**을 씁니다.
 
-| confidence | marketing | service/legal | transactional |
-|---|---|---|---|
-| high (1~3순위) | 해당 profile 적용 | 발송 | 발송 |
-| low (5순위) | **가장 엄격한 profile 적용** (= `(광고)` 접두어 포함 KR 수준) | 발송 | 발송 |
-| unknown (ZZ) | **가장 엄격한 profile 적용** | 발송 | 발송 |
+**규칙 1 — marketing은 확정된 관할권을 요구합니다.**
+관할권을 모르거나 신호가 충돌하면 marketing을 **보내지 않고 보류**합니다.
+"대충 엄격하게 보내기"를 하지 않습니다.
 
-**핵심:** 관할권 불명이 **transactional/legal 발송을 막아서는 안 됩니다.** 불명은
-marketing을 더 보수적으로 만들 뿐입니다. 여기를 뒤집으면 계정 복구 불가가 됩니다.
+**규칙 2 — 그래서 marketing opt-in 시점에 국가를 필수로 수집합니다.**
+이것이 규칙 1을 실무적으로 감당 가능하게 만드는 짝입니다. 수신 동의를 받을 때
+국가를 함께 묻고 `ConsentRecord.jurisdiction`에 기록하면, **marketing 수신자는
+정의상 항상 확정된 관할권을 가집니다.** 보류는 예외 상황(청구 국가가 나중에
+바뀌어 충돌이 생긴 경우)에만 발생합니다.
+
+| confidence | marketing | service | legal | transactional |
+|---|---|---|---|---|
+| high (1~3순위, 충돌 없음) | 해당 profile 적용 | 발송 | 발송 | 발송 |
+| **conflict** (2순위 vs 3순위 불일치) | **보류** `skipped:jurisdiction_conflict` + 사용자 확인 요청 | 발송 | 발송 | 발송 |
+| low (5순위) | **보류** `skipped:jurisdiction_unconfirmed` + 확인 요청 | 발송 | 발송 | 발송 |
+| unknown (ZZ) | **보류** + 확인 요청 | 발송 | 발송 | 발송 |
+
+**핵심은 v1과 같습니다: 관할권 불명이 transactional/legal 발송을 막아서는 안
+됩니다.** 이들은 `ZZ` profile로 렌더하며, `ZZ`에는 정렬 문제가 없습니다 —
+사업자 신원 블록만 들어가고 광고 표시가 없기 때문입니다.
+
+**보류의 해소 경로:**
+- preference center 상단에 국가 확인 배너(11.2).
+- 다음 로그인 시 1회 확인 프롬프트.
+- 확인되면 `EmailDelivery`가 `pending`으로 복귀하지 **않습니다.** 보류된 캠페인은
+  지나간 것으로 취급하고, 다음 캠페인부터 정상 발송합니다. 지나간 프로모션을
+  뒤늦게 보내는 것은 사용자에게 이상하고, 재개 로직은 중복 발송의 원천입니다.
+- 확인 없이 90일이 지나면 운영 보고에 집계합니다(개별 incident는 아님).
 
 ### 6.4 관할권이 바뀌었을 때
 
@@ -693,8 +825,10 @@ EmailProviderPort {
 
 우선순위 순서 — **이 순서 자체가 권고입니다.**
 
-1. **outbox 통합.** 2.4의 fire-and-forget 경로를 전부 `EmailEvent` -> `EmailDelivery`
-   큐로 옮깁니다. **규제와 무관하게 지금 가장 큰 사용자 피해가 여기 있습니다.**
+1. **outbox 통합 + credential fast lane.** 2.4의 fire-and-forget 경로를 전부
+   `EmailEvent` -> `EmailDelivery` 큐로 옮기되, 로그인 코드는 standard lane이 아니라
+   **fast lane**(9.4a)으로 보냅니다. **규제와 무관하게 지금 가장 큰 사용자 피해가
+   여기 있습니다.**
 2. **`SuppressionEntry` + Resend webhook 수신** (bounce/complaint). 서명 검증과
    `svix-id` 기반 replay 방지 포함.
 3. **`EmailPreference` + `ConsentRecord`** 스키마와 목적별 opt-in/opt-out.
@@ -834,14 +968,15 @@ EmailProviderPort {
 - 이벤트는 소스 트랜잭션에서 즉시 커밋되고(유실 없음), fan-out은 비동기로
   천천히 진행할 수 있습니다(약관 변경 = 전체 사용자).
 - **fan-out 자체가 재시작 가능**해야 합니다: `EmailEvent`에 커서를 두고
-  `(eventId, userId)` unique로 중복 생성을 막습니다.
+  `(eventId, recipientKey)` unique로 중복 생성을 막습니다. **`userId`가 아닙니다** —
+  이유는 10.2.
 - gating 결과를 `EmailDelivery`에 **이유와 함께 기록**할 수 있습니다
   (`suppressed_complaint`, `no_consent`, `consent_expired`). 안 보낸 것도 증거입니다.
 
 ### 9.3 idempotency key 설계
 
 ```
-idempotencyKey = hash(eventId, userId, templateVersionId, jurisdictionProfileVersion)
+idempotencyKey = hash(eventId, recipientKey, templateVersionId, policyVersionId)
 ```
 
 - Resend가 24시간 창에서 **같은 key + 같은 payload**만 억제하므로, 렌더러가
@@ -856,15 +991,69 @@ idempotencyKey = hash(eventId, userId, templateVersionId, jurisdictionProfileVer
 
 `lib/notificationRetryCore.ts`의 구조를 재사용하되 분류별 곡선을 둡니다.
 
-| 분류 | 최대 시도 | 백오프 | 소진 시 |
-|---|---|---|---|
-| transactional (P0) | 8 | 10s, 30s, 1m, 5m, 15m, 1h, 4h | incident + 사용자에게 앱 내 대체 경로 |
-| legal (P0) | 10 | 위 + 12h, 24h | **incident(critical) + 수동 후속 + 대체 채널** |
-| service (P1) | 6 | 현행과 동일 | incident |
-| marketing (P3) | 2 | 5m, 1h | **조용히 포기.** 프로모션 재시도는 가치보다 위험이 큼 |
+| 분류 | lane | 최대 시도 | 백오프 | 소진 시 |
+|---|---|---|---|---|
+| **credential (P0)** | **fast** | 시간 예산제 | 5s, 15s, 30s, 60s, 120s — **credential 만료 전까지만** | 사용자에게 "다시 보내기" 노출 + incident |
+| transactional (P0) | standard | 8 | 10s, 30s, 1m, 5m, 15m, 1h, 4h | incident + 앱 내 대체 경로 |
+| legal (P0) | standard | 10 | 위 + 12h, 24h | **incident(critical) + 수동 후속 + 대체 채널** |
+| service (P1) | standard | 6 | 현행과 동일 | incident |
+| marketing (P3) | standard | 2 | 5m, 1h | **조용히 포기.** 프로모션 재시도는 가치보다 위험이 큼 |
 
 **marketing의 관대한 재시도가 중요합니다.** 실패한 프로모션을 끈질기게 재시도하면
 일시적 차단이 영구적 평판 손상이 됩니다.
+
+### 9.4a Fast lane: 수명이 짧은 credential 메일
+
+**v1은 로그인 코드를 일반 outbox에 넣었고, 그것은 틀렸습니다.**
+
+저장소 사실:
+
+- `lib/emailLogin.ts:15` — `CODE_TTL_MINUTES = clamp(env || 10, 1, 10)`.
+  **상한이 10이므로 환경변수로도 10분을 넘길 수 없습니다.**
+- `railway.credit-reconciliation.json:5` — `*/15 * * * *`. 현재 큐 drain이
+  얹혀 있는 유일한 짧은 주기 cron입니다.
+- 따라서 `NOTIFICATION_RETRY_DELAYS_MS`의 첫 지연이 60초여도 **실제로는 최대
+  15분 뒤에야 재시도**되고, 그때 코드는 이미 죽어 있습니다. 재시도 곡선이
+  drain 주기보다 촘촘하면 그 촘촘함은 존재하지 않습니다.
+
+**설계:**
+
+```
+POST /api/auth/email-login
+  1. 같은 트랜잭션에서 EmailLoginAttempt + EmailDelivery(lane="fast") 커밋
+     -> 여기서 유실 가능성이 사라짐
+  2. 응답을 반환하기 전에 즉시 1회 발송 시도
+     -> 정상 경로에서는 이것으로 끝. worker는 관여하지 않음
+  3. 실패하면 상태를 남기고 응답은 정상 반환
+     (주소 존재 여부를 노출하지 않는 현행 동작 유지)
+
+fast-lane worker (전용, 상시 구동)
+  - 10~15초 주기 폴링
+  - cron이 아니라 **상시 프로세스**여야 합니다: 컨테이너 cold start가
+    10분 예산의 상당 부분을 먹고, Railway cron의 최소 주기는 분 단위입니다
+  - standard lane drain과 **별개 워커**. 대량 fan-out이 인증 메일을 밀어내면
+    안 됨
+```
+
+**만료된 credential은 발송하지 않습니다.** 이것이 fast lane의 두 번째 규칙입니다.
+worker는 발송 직전에 소스 행(`EmailLoginAttempt.expiresAt`, `consumedAt`,
+`invalidatedAt`)을 다시 읽고, 죽은 코드면 `skipped:credential_expired`로 종료
+합니다. 12분 지나 도착한 "당신의 로그인 코드"는 도움이 안 될 뿐 아니라, 사용자가
+그것을 입력했다가 실패하면 계정에 문제가 있다고 오해합니다.
+
+**대신 사용자 쪽에 경로를 둡니다.** 로그인 화면은 "메일이 오지 않으면 다시 보내기"를
+항상 노출합니다. 짧은 TTL에서 가장 신뢰할 수 있는 복구는 재시도 큐가 아니라
+**사용자가 한 번 더 요청하는 것**이며, `DAILY_REQUEST_LIMIT`(12)이 그것을 이미
+감당합니다.
+
+**fast lane 대상:** 로그인 코드/매직링크. **그 외에는 쓰지 않습니다** — 이 lane은
+지연 예산이 초 단위인 것만 담고, 늘어나면 전용 워커의 의미가 사라집니다.
+비밀번호/인증수단 변경 통지는 credential이 아니라 사후 알림이므로 standard입니다.
+
+**언어 주의:** `sendEmailLoginCodeEmail`은 요청 시점에 계정이 없을 수 있어
+`UserSettings.language`가 아니라 `accept-language` 헤더를 씁니다
+(`lib/emailLogin.ts:208`). fast lane은 이 동작을 그대로 유지하며, 언어를 렌더
+입력에 명시적으로 실어 결정성을 보존합니다.
 
 ### 9.5 dead-letter
 
@@ -933,18 +1122,30 @@ purpose            "security" | "billing" | "service_status" | "product_updates"
 enabled            Boolean
 source             "signup" | "preference_center" | "unsubscribe_link"
                    | "admin" | "system_default"
+grantedAt                DateTime?  // 현재 enabled 상태가 시작된 시각
+lastConfirmationNoticeAt DateTime?  // E7. 마지막 확인 고지 발송 시각
+nextConfirmationNoticeAt DateTime?  // E7. 다음 고지 예정. 만료 기한이 아님
 updatedAt, createdAt
 @@unique([userId, purpose])
+@@index([nextConfirmationNoticeAt])
 ```
 - `security`와 `billing`은 **행이 존재하되 `enabled` 변경이 거부**됩니다.
   UI에서도 잠긴 상태로 보이되 숨기지 않습니다(사용자가 왜 받는지 알아야 함).
+- **`nextConfirmationNoticeAt`은 만료 기한이 아니라 고지 예정일입니다**(5.5).
+  이 날짜가 지나도 `enabled`는 바뀌지 않습니다. 고지를 보내고 다음 주기로
+  밀 뿐입니다. 자동 opt-out은 `feature.emailConsentLapseAutoOptOut`이 켜졌을
+  때만 동작하는 **별도 사업 정책**이며 기본 OFF입니다.
+- 값은 `JurisdictionProfile.consentNoticeIntervalMonths`에서 계산합니다. 해당
+  관할권에 고지 의무가 없으면(대부분) `NULL`입니다.
 
 **`ConsentRecord`** — 이력(불변, append-only)
 ```
 id, userId -> User (SetNull: 계정 삭제 후에도 증거 필요할 수 있음. 21절 Q6)
 emailAddress       String   // 당시 주소. 변경돼도 보존
 purpose            String
-action             "granted" | "withdrawn" | "reconfirmed" | "expired"
+action             "granted" | "withdrawn" | "reconfirmed"
+                   | "confirmation_notice_sent"   // E7. 고지를 보냈다는 사실
+                   | "lapsed"                     // 자동 opt-out 정책이 켜진 경우만
 occurredAt         DateTime
 jurisdiction       String   // 당시 판정값. 소급 변경 금지
 jurisdictionSource String   // "billing_country" | "self_declared" | ...
@@ -953,10 +1154,12 @@ capturedVia        "signup_form" | "preference_center" | "unsubscribe_page" | "i
 evidence           Json     // 동의 문구 원문 해시, UI 스크린 식별자, 요청 메타
 ipHash             String?  // 원시 IP 저장 금지. 해시 + salt
 userAgentHash      String?
-expiresAt          DateTime? // C7의 2년 재확인 기한
 @@index([userId, purpose, occurredAt])
-@@index([expiresAt])
 ```
+- **v1에 있던 `expiresAt`을 제거했습니다.** 한국의 2년 의무는 고지이지 만료가
+  아니고(5.5), 애초에 "다음에 무엇을 할 시각"은 불변 이력이 아니라 현재 상태이므로
+  `EmailPreference`에 있어야 합니다. 이력 테이블에 미래 시각을 두면 그 행을
+  갱신하게 되고, append-only 계약이 깨집니다.
 - **`EmailPreference`와 분리하는 이유:** preference는 "지금 어떤가", consent는
   "언제 무엇에 동의했는가"입니다. 캐나다·호주의 **입증책임**은 후자를 요구하고,
   전자는 덮어쓰기 때문에 증거가 되지 못합니다.
@@ -967,19 +1170,38 @@ expiresAt          DateTime? // C7의 2년 재확인 기한
 **`JurisdictionProfile`**
 ```
 id
-countryCode        String   // "KR", "AU", "ZZ"(fallback)
+profileKey         String   // "KR" | "US" | "CA" | "AU" | "GB" | "SG" | "EU" | "ZZ"
 policyVersionId -> EmailPolicyVersion
 marketingBasis     "opt_in" | "opt_out"     // 우리는 전역 opt_in(C1)이나 기록은 사실대로
 subjectPrefix      String?  // "(광고)" | "<ADV> "
 footerBlocks       Json     // ["legal_name","postal_address","business_registration",...]
 unsubscribeSlaBusinessDays Int
-consentReconfirmMonths     Int?   // KR=24
+consentNoticeIntervalMonths Int?  // E7. KR=24. 고지 주기이지 만료 기한이 아님
 quietHours         Json?    // { start:"21:00", end:"08:00", tz:"local" }
 impliedConsentDays Json?    // CASL. C8로 비활성
-minimumAgeYears    Int      // 14 전역
 notes              String   // 근거 출처와 확인일
-@@unique([countryCode, policyVersionId])
+@@unique([profileKey, policyVersionId])
 ```
+
+**`countryCode`가 아니라 `profileKey`입니다 (v2 정정).** v1은 M7에서 "8개 관할권"
+이라 쓰고 검증 기준에서 `8 x 7 = 56`을 요구해 개수가 어긋났는데, 원인은 **국가와
+profile을 같은 것으로 본 것**입니다. EEA는 30개국이지만 우리에게는 profile 하나이고,
+나중에 독일이나 프랑스가 별도 profile을 요구하면(21절 Q1) 국가 하나가 profile
+하나로 떨어져 나옵니다.
+
+```
+JurisdictionCountryMap
+  countryCode  String  // "DE", "FR", "IE", ... 30개 EEA + CH
+  profileKey   String  // -> "EU"
+  policyVersionId -> EmailPolicyVersion
+  @@unique([countryCode, policyVersionId])
+```
+
+- **profile 8개**: `KR`, `US`, `CA`, `AU`, `GB`, `SG`, `EU`, `ZZ`.
+- 국가 -> profile 매핑은 **데이터**이므로, 회원국 하나를 분리하는 것은 배포가
+  아니라 새 `EmailPolicyVersion` 발행입니다(8.7의 "값은 바꾸고 형태는 안 바꾼다"에
+  부합).
+- `minimumAgeYears`는 **제거했습니다** — 연령은 이메일 profile의 결정이 아닙니다(5.4).
 - **표현식/조건 언어를 넣지 않습니다**(8.7).
 
 **`EmailPolicyVersion`**
@@ -1036,6 +1258,8 @@ createdAt
 id
 eventId -> EmailEvent
 userId -> User?          // null 가능(게스트 support 회신 등)
+recipientKey       String // NOT NULL. 아래 설명 참조
+lane               String // "fast" | "standard" (9.4a)
 emailAddress       String // 발송 시점 주소 (스냅샷)
 language           String
 jurisdiction       String
@@ -1049,12 +1273,29 @@ skipReason         String?  // "no_consent" | "consent_expired" | "suppressed_co
 attempts, nextAttemptAt, lastAttemptAt, lastErrorKind
 providerMessageId  String?
 renderedSubject    String   // 감사 스냅샷
-renderedHash       String   // 본문 해시. 본문 자체는 저장하지 않음(10.3)
+renderedHash       String   // 본문 해시
+renderDataSnapshot Json?    // 개인화 입력. 최소화 + 암호화 + 보관기간 제한 (10.3)
+snapshotPurgedAt   DateTime?
 sentAt, deliveredAt
-@@unique([eventId, userId])       // fan-out 중복 방지
+@@unique([eventId, recipientKey])  // fan-out 중복 방지
 @@unique([idempotencyKey])
-@@index([status, nextAttemptAt])
+@@index([status, lane, nextAttemptAt])
 ```
+
+**`recipientKey`가 `userId`를 대신하는 이유 (v2 정정).**
+PostgreSQL의 unique 제약은 **`NULL`을 서로 다른 값으로 취급**하므로
+`@@unique([eventId, userId])`는 `userId IS NULL`인 수신자에 대해 아무것도 막지
+못합니다. 게스트 support 회신이나 계정 없는 주소로 보내는 발송이 정확히 그
+경우이고, fan-out을 재시작하면 같은 사람에게 행이 무한히 쌓입니다.
+
+- PostgreSQL 15부터 `UNIQUE NULLS NOT DISTINCT`가 있지만 **Prisma가 노출하지
+  않으므로** 인덱스 수준의 우회는 우리에게 선택지가 아닙니다.
+- 그래서 non-null 파생 키를 씁니다:
+  `recipientKey = userId ? "user:" + userId : "addr:" + normalizedEmail`
+- 한 사람이 두 형태로 들어오지 않도록, fan-out은 **주소로 계정을 먼저 조회**한
+  뒤 계정이 있으면 반드시 `user:` 형태를 씁니다.
+- `emailAddress`와 중복되어 보이지만 별개입니다: `emailAddress`는 발송 시점
+  스냅샷(나중에 주소가 바뀌어도 보존), `recipientKey`는 중복 방지 키입니다.
 
 **`SuppressionEntry`**
 ```
@@ -1066,14 +1307,28 @@ reason             "hard_bounce" | "complaint" | "unsubscribe" | "manual"
                    | "privacy_request"
 source             "provider_webhook" | "unsubscribe_link" | "preference_center"
                    | "admin"
+// --- 출처 추적 (v2 추가). complaint가 어디서 왔는지 구분하기 위함 ---
+sourceStream         String?  // "transactional" | "marketing"
+sourceDomain         String?  // 실제 발송 도메인
+sourceClassification String?  // 그 메일의 분류
+sourceDeliveryId     String?  // EmailDelivery.id
+sourceMessageId      String?  // provider message id
 occurredAt
 expiresAt          DateTime?  // soft bounce 임시 억제용. hard는 null(영구)
 evidence           Json?
-@@unique([emailAddress, scope, purpose])
+@@unique([emailAddress, scope, purposeKey])
 @@index([emailAddress])
+@@index([reason, sourceStream, occurredAt])
 ```
 - **userId가 아니라 emailAddress 기준**입니다. 사용자가 계정을 지웠다 다시 만들어도
   스팸 신고는 그 주소에 남아야 합니다.
+- **`purpose`를 nullable로 두지 않습니다 (v2 정정).** `EmailDelivery`와 같은
+  `NULL` 결함입니다: `scope = "global"`인 행은 `purpose`가 없으므로 unique가
+  걸리지 않고, 같은 주소에 전역 억제가 여러 건 쌓입니다. 대신 non-null
+  `purposeKey String`을 두고 전역은 `"*"`를 씁니다. 사람이 읽는 `purpose`는
+  별도 nullable 컬럼으로 남겨도 되고, `purposeKey` 하나로 합쳐도 됩니다.
+- **출처 컬럼은 조회 편의가 아니라 판정 입력입니다.** marketing에서 발생한
+  complaint와 transactional에서 발생한 complaint는 13.3에서 다르게 다뤄집니다.
 
 **`ProviderWebhookEvent`**
 ```
@@ -1087,19 +1342,40 @@ processingError    String?
 @@unique([provider, providerEventId])
 ```
 
-### 10.3 발송 내용의 immutable audit snapshot
+### 10.3 발송 내용의 audit snapshot
 
-**본문 전체를 저장하지 않습니다.** 대신:
-- `TemplateVersion`(불변, `contentHash`) + `EmailDelivery.payload 참조` +
-  `policyVersionId` + `renderedHash`
-- 이 넷이 있으면 **결정적 렌더러로 원본을 재구성**하고 해시로 검증할 수 있습니다.
+**v1의 재현 모델은 성립하지 않았습니다.** 템플릿 버전 + 정책 버전 + 본문 해시만
+가지고는 그날의 메일을 재구성할 수 없습니다. 렌더러가 결정적이어도 **입력이
+사라지기 때문**입니다 — 사용자 이름이 바뀌고, 플랜이 바뀌고, 금액은 애초에 그
+시점의 값입니다. 소스 행을 다시 읽는 방식(`NotificationDeliveries`의 현행 방식)은
+"최신 상태로 렌더된 무언가"를 만들 뿐이고, 그것은 발송된 것과 다릅니다.
 
-이유: 사용자 이름·금액 등이 들어간 완성 본문을 수백만 건 보관하면 그 자체가
-개인정보 저장소가 되고, 삭제 요청이 오면 복잡해집니다. 기존
-`NotificationDeliveries`가 이미 "본문을 저장하지 않고 재렌더링" 원칙을 씁니다.
+**재현 가능 창과 검증 전용 창을 나눕니다.**
 
-**단, legal 분류는 예외로 완성 본문을 보관합니다.** "그날 정확히 무엇을
-통지했는가"를 증명해야 하고, 건수가 적습니다.
+| | 재현 가능 창 | 검증 전용 창 |
+|---|---|---|
+| 보유 | `renderDataSnapshot` + `templateVersionId` + `policyVersionId` + `renderedHash` | `renderedHash` + 버전 참조만 |
+| 할 수 있는 것 | **본문 재구성** + 해시 대조 | "이 해시의 무언가를 보냈다"는 사실 확인 |
+| 기간 | 분류별(아래) | 그 이후 `EmailDelivery` 보관 기간까지 |
+
+**`renderDataSnapshot` 규칙:**
+
+1. **최소화.** 템플릿 버전이 실제로 참조하는 변수만 담습니다. 소스 행 전체를
+   덤프하지 않습니다. 어떤 변수를 쓰는지는 `TemplateVersion`에서 정적으로
+   추출할 수 있으므로, 스냅샷 스키마를 템플릿 버전이 정의합니다.
+2. **암호화.** 애플리케이션 수준 봉투 암호화. 키는 발송 인프라와 분리 보관.
+3. **보관 기간:** transactional/service **90일**, marketing **90일**,
+   **legal은 완성 본문과 함께 7년**(잠정, 21절 Q6). 기간이 지나면
+   `snapshotPurgedAt`을 찍고 값을 `NULL`로 만듭니다. 행은 남습니다.
+4. **개인정보로 취급.** 데이터 주체 접근·삭제 요청의 대상이며,
+   `AccountDataExportRequest` 처리에 포함됩니다. 삭제 요청 시 스냅샷은 지우되
+   `renderedHash`와 발송 사실은 남깁니다(법적 통지 증명).
+5. **금지 항목:** 인증 코드, 매직링크 토큰, unsubscribe 토큰의 원문.
+   이들은 스냅샷에 들어가면 저장된 자격증명이 됩니다. 재현 시 자리표시자로
+   대체하고, 해시 대조는 자리표시자 기준으로 합니다.
+
+**legal 분류는 그 위에 완성 본문도 보관합니다.** 재구성이 아니라 원본이
+필요하고, 건수가 적습니다.
 
 ### 10.4 User/UserSettings 변경
 
@@ -1134,6 +1410,10 @@ UserSettings:
 ```
 이메일 알림                                   받는 주소: u***@example.com [변경]
 
+  [!] 국가를 확인해 주세요                                   (필요할 때만)
+      마케팅 수신 설정에 국가 정보가 필요합니다.
+      결제 국가(KR)와 프로필 국가(SG)가 다릅니다.  [ 국가 선택 v ] [확인]
+
   보안 및 계정                                          [항상 켜짐]
     로그인 코드, 비밀번호 변경, 보안 경고
     > 이 알림은 계정 보호를 위해 꺼둘 수 없습니다.
@@ -1158,6 +1438,9 @@ UserSettings:
 
   [ 모든 마케팅 수신 거부 ]
 
+  국가: 대한민국 (결제 정보 기준)                              [변경]
+  > 수신 거부 방법과 광고 표시 등 법적 요건을 정하는 데 사용합니다.
+
   발송 이력 보기 >
 ```
 
@@ -1169,6 +1452,14 @@ UserSettings:
   호주의 "추가 단계 요구 금지" 정신과 어긋납니다.
 - **발송 이력**: 사용자가 자기에게 간 메일 목록(제목, 시각, 상태)을 볼 수 있게
   합니다. GDPR 접근권 대응이자 신뢰 장치입니다.
+- **국가 확인 배너는 필요할 때만 뜹니다**(6.3). 고신뢰 신호가 충돌하거나 marketing
+  opt-in을 하려는데 관할권이 확정되지 않은 경우입니다. 평상시에는 하단에 현재
+  국가와 그 출처만 조용히 표시합니다.
+- **marketing opt-in 시 국가는 필수 입력입니다**(6.3 규칙 2). 국가를 고르지 않으면
+  프로모션·뉴스레터 토글을 켤 수 없고, 그 사실을 토글 옆에 설명합니다. 이것이
+  "관할권 불명이면 marketing 보류"를 사용자가 마주치지 않게 하는 장치입니다.
+- 국가는 **자기신고 값**이며 IP로 덮어쓰지 않습니다. 결제 국가와 다르면 6.3의
+  충돌 처리로 들어갑니다.
 
 ### 11.3 로그인 없는 수신 거부
 
@@ -1350,23 +1641,50 @@ POST /api/unsubscribe            -> One-Click (RFC 8058)
 
 **가장 어려운 설계 지점입니다.**
 
+**v1은 complaint를 하나로 뭉뚱그렸습니다.** 어느 스트림에서 신고가 들어왔는지에
+따라 의미가 전혀 다릅니다. 그래서 `SuppressionEntry`에 `sourceStream`,
+`sourceDomain`, `sourceClassification`, `sourceMessageId`를 기록하고(10.2)
+아래 표는 그것을 읽습니다.
+
 | 억제 사유 | transactional | legal | service | marketing |
 |---|---|---|---|---|
 | hard bounce | **차단**(주소가 없음) | **차단** + 대체 채널 | 차단 | 차단 |
-| complaint (스팸 신고) | **발송**(아래) | 발송 | 차단 | 차단 |
+| complaint — **marketing 스트림 발** | **발송** | 발송 | 차단 | 차단 |
+| complaint — **transactional 스트림 발** | **발송하되 incident** | 발송 | 차단 | 차단 |
+| complaint — **출처 불명** | **발송하되 incident** | 발송 | 차단 | 차단 |
 | unsubscribe | 발송 | 발송 | 목적별로 판단 | 차단 |
 | soft bounce (일시) | 재시도 | 재시도 | 재시도 | 차단 |
 
-**complaint에도 transactional을 보내는 이유:** 사용자가 프로모션을 스팸 신고했다고
-로그인 코드를 막으면 계정에서 잠깁니다. 법적으로도 transactional은 동의 대상이
-아닙니다.
+**marketing 스트림 complaint에도 transactional을 보내는 이유:** 사용자가 프로모션을
+스팸 신고했다고 로그인 코드를 막으면 계정에서 잠깁니다. 법적으로도 transactional은
+동의 대상이 아닙니다.
 
-**그러나 이것은 도달률 리스크입니다.** 완화책:
-1. transactional과 marketing 도메인이 분리되어 있으므로, marketing 도메인의
-   complaint가 transactional 도메인 평판에 직접 전이되지 않습니다. **C9가 이
-   문제의 실질적 해법입니다.**
-2. 같은 주소에서 transactional complaint가 반복되면 **critical incident**로 올리고
-   사람이 판단합니다.
+**transactional 스트림 complaint는 다른 사실입니다.** 사용자가 로그인 코드나
+영수증을 스팸으로 신고했다면 그것은 (a) 계정 탈취 시도의 징후이거나, (b) 우리가
+사용자가 기대하지 않은 메일을 transactional로 분류해 보내고 있다는 뜻입니다.
+둘 다 **사람이 봐야 하는 사건**이므로 발송은 계속하되 incident를 올립니다.
+발송 자체를 막지 않는 이유는 (a)의 경우 피해자가 보안 알림을 받아야 하기
+때문입니다.
+
+**출처 불명**은 마이그레이션 이전 데이터이거나 제공자가 원본 메시지를 특정하지
+못한 경우입니다. transactional 스트림 발과 같이 보수적으로 다룹니다.
+
+**도달률 리스크와 그 완화책의 실제 범위 (v2 정정).** v1은 "C9가 이 문제의 실질적
+해법"이라고 썼는데, 과장이었습니다. 5.3이 정리한 대로:
+
+1. **도메인 평판은 실제로 분리됩니다.** marketing 도메인의 complaint가 transactional
+   도메인의 평판 신호로 직접 합산되지 않습니다. 이것이 C9의 진짜 이득이고 작지
+   않습니다.
+2. **IP 평판은 분리되지 않습니다.** 전용 IP를 쓰지 않으므로 두 스트림이 같은 공유
+   IP 풀을 쓸 수 있습니다.
+3. **제공자 계정 수준의 억제와 제재는 분리되지 않습니다.** Resend 문서는 억제
+   목록을 team 단위로 서술하며, 그렇다면 marketing에서 생긴 억제가 transactional
+   발송을 조용히 막을 수 있습니다(**21절 Q15**).
+4. 따라서 **우리 `SuppressionEntry`가 gating 판정의 유일한 근거가 되고**, 제공자 억제는
+   2차 방어선이자 **관측 대상**입니다. 우리가 보내기로 결정했는데 제공자가
+   조용히 떨어뜨리는 경우를 탐지해야 합니다: 발송 수락 후 delivered 이벤트가
+   오지 않거나 제공자가 suppressed 계열 이벤트를 주면 incident.
+5. 같은 주소에서 transactional complaint가 반복되면 **critical incident**.
 
 ### 13.4 이메일 주소 변경 시 처리
 
@@ -1491,12 +1809,13 @@ marketing 도메인 신설 시 4~6주 warm-up:
 | # | 항목 | 완료 조건 |
 |---|---|---|
 | M1 | `EmailEvent` + `EmailDelivery` outbox 도입 | 2.4의 **모든** 직접 발송 경로가 큐를 경유. 프로세스가 죽어도 메일이 유실되지 않음을 통합 테스트로 증명 |
+| **M1a** | **credential fast lane** (9.4a) | 로그인 코드가 `EmailLoginAttempt`와 같은 트랜잭션에서 enqueue되고, 요청 중 즉시 발송되며, 전용 상시 worker가 10~15초 주기로 복구. **만료된 코드는 발송되지 않음**. 로그인 화면에 "다시 보내기" 노출 |
 | M2 | `EmailTemplate` + `TemplateVersion`, 이메일 카피 통합 | 3개 모듈의 중복 `EmailLanguage`/`normalizeLanguage`/`escapeHtml` 제거. 언어 추가가 한 곳에서 끝남 |
 | M3 | Resend 웹훅 수신 + `ProviderWebhookEvent` | Svix 서명 검증, `svix-id` replay 방지, 중복 전달이 상태를 두 번 바꾸지 않음 |
 | M4 | `SuppressionEntry` + hard bounce/complaint 자동 억제 | 13.3 표대로 분류별 동작. bounce된 주소로 재발송하지 않음 |
 | M5 | `EmailPreference` (6개 목적) + 잠금 규칙 | security/billing은 API로도 끌 수 없음 |
 | M6 | `ConsentRecord` append-only | 모든 preference 변경이 이력을 남김. 원시 IP 미저장 |
-| M7 | `JurisdictionProfile` + `EmailPolicyVersion` + footer renderer | 8개 관할권 + `ZZ` fallback. 6.3의 fail-closed 동작 |
+| M7 | `JurisdictionProfile` + `JurisdictionCountryMap` + `EmailPolicyVersion` + footer renderer | **profile 8개**(`KR`/`US`/`CA`/`AU`/`GB`/`SG`/`EU`/`ZZ`, `ZZ` 포함) + 국가->profile 매핑(EEA 30개국 + CH -> `EU`). 6.3의 보류 동작 |
 | M8 | 관할권 판정 (`resolveEmailJurisdiction`) | IP 단독 판정 없음. conflict 기록. `UserSettings.country` 추가 |
 | M9 | unsubscribe token + `/unsubscribe` + One-Click | 로그인 불필요. `GET`이 상태를 바꾸지 않음. 끄기만 가능 |
 | M10 | preference center (`/settings/notifications`) | settings-navigation 계약 준수. desktop/mobile 동일 |
@@ -1541,7 +1860,7 @@ marketing 도메인 신설 시 4~6주 warm-up:
 |---|---|
 | marketing 발송 활성화 | flag 해제, `news.` 도메인 warm-up 시작(14.6) |
 | 관리자 캠페인 UI | 12.2의 전체 플로우 + 이중 승인 |
-| 동의 2년 재확인 배치 | 만료 30일 전 알림 -> 만료 시 자동 opt-out + `ConsentRecord("expired")` |
+| 동의 2년 **확인 고지** 배치 | `nextConfirmationNoticeAt` 도래 시 고지 발송 -> `ConsentRecord("confirmation_notice_sent")` + 다음 주기로 이동. **동의는 유지됩니다.** 자동 opt-out은 `feature.emailConsentLapseAutoOptOut`이 켜진 경우에만(기본 OFF, 22절 A14) |
 | DMARC 강화 | `p=none` -> `p=quarantine` -> `p=reject` |
 | 가입 플로우 동의 수집 | 회원가입 시 목적별 opt-in 체크박스(사전 선택 금지). `analyticsConsentPolicy`의 UI 선례 참고 |
 | 사용자 발송 이력 화면 | 11.2의 "발송 이력 보기" |
@@ -1606,7 +1925,10 @@ marketing 도메인 신설 시 4~6주 warm-up:
 5. 계정 환영 메일
 6. 결제 관련 (Stripe webhook)
 7. 계정 삭제/복구 통지
-8. **로그인 코드 — 마지막.** 실패가 가장 치명적이므로 다른 모든 경로가 안정된 뒤
+8. **로그인 코드 — 마지막이며, standard lane이 아니라 fast lane으로.** 실패가 가장
+   치명적이므로 다른 모든 경로가 안정된 뒤에 옮기고, 옮길 때는 9.4a의 전용 경로를
+   씁니다. 이 단계 전에 fast-lane worker가 이미 떠 있고 다른 시험용 kind로
+   관찰되어 있어야 합니다 — 로그인 코드가 그 worker의 첫 손님이어서는 안 됩니다.
 
 ### 17.3 도메인 전환
 
@@ -1652,13 +1974,26 @@ marketing 도메인 신설 시 4~6주 warm-up:
 
 **gating (단위)**
 - marketing + opt-in 없음 -> `skipped:no_consent`
-- marketing + 동의 만료 -> `skipped:consent_expired`
+- marketing + `nextConfirmationNoticeAt` 경과 -> **발송됨**(동의는 유지). 별도로
+  확인 고지가 큐에 들어감
+- marketing + `feature.emailConsentLapseAutoOptOut` ON + 고지 후 무응답 ->
+  `skipped:consent_lapsed` (**flag가 OFF면 발송됨**)
 - marketing + complaint suppression -> `skipped:suppressed_complaint`
 - **transactional + complaint suppression -> 발송됨** (13.3)
 - **legal + marketing opt-out -> 발송됨**
 - legal + hard bounce -> `skipped:hard_bounce` + critical incident
-- 관할권 unknown + marketing -> **가장 엄격한 profile 적용**
-- 관할권 unknown + transactional -> **발송됨** (6.3)
+- 관할권 unknown + marketing -> **`skipped:jurisdiction_unconfirmed`** (6.3)
+- 관할권 고신뢰 신호 충돌 + marketing -> **`skipped:jurisdiction_conflict`**
+- 관할권 unknown/충돌 + transactional / legal / service -> **발송됨**, `ZZ` profile
+- marketing opt-in을 국가 없이 시도 -> **거부** (6.3 규칙 2)
+
+**fast lane (9.4a)**
+- 발송 시점에 `EmailLoginAttempt.expiresAt`이 지났으면 -> `skipped:credential_expired`,
+  **발송하지 않음**
+- `consumedAt` 또는 `invalidatedAt`이 찍혀 있으면 -> 발송하지 않음
+- 요청 중 즉시 발송이 성공하면 worker가 같은 행을 다시 발송하지 않음
+- 요청 중 즉시 발송이 실패해도 응답은 정상이고 큐 행은 남아 있음
+- fast lane worker가 standard lane 행을 집지 않고, 그 반대도 성립
 
 **렌더러 결정성**
 - 같은 (템플릿버전, payload, 관할권, 언어) -> **바이트 단위 동일** 출력.
@@ -1694,13 +2029,25 @@ marketing 도메인 신설 시 4~6주 warm-up:
 - [ ] 프로세스를 발송 직후 죽여도 **두 번 도착하지 않음**
 - [ ] hard bounce 처리 후 같은 주소로 재발송 시도가 발생하지 않음
 - [ ] marketing flag가 꺼진 상태에서 marketing 발송 시도가 **실패**함(조용한 통과 아님)
-- [ ] 8개 관할권 x 7개 언어 조합에서 footer가 정상 렌더 (56 스냅샷)
+- [ ] **profile 8개 x 언어 7개 = 56 스냅샷**에서 footer가 정상 렌더 (M7과 개수 일치)
 - [ ] unsubscribe가 로그인 없이 1클릭으로 동작하고 5초 내 반영
 - [ ] 모든 관리자 발송 행위가 `AdminAuditLog`에 기록됨
 - [ ] `EmailPolicyVersion`을 새로 활성화해도 진행 중인 발송의 렌더가 바뀌지 않음
 - [ ] 320px 폭, 200% 텍스트 확대, 한국어 IME에서 preference center 정상 (모바일 계약)
 - [ ] `npm run check:accent-tokens` 통과 (신규 UI가 역할 token 사용)
 - [ ] `npm run check:encoding` 통과
+- [ ] **로그인 코드 발송이 실패해도 사용자가 60초 안에 재시도할 수 있고, 만료된
+      코드가 뒤늦게 도착하지 않음** (fast lane, 9.4a)
+- [ ] `userId`가 `NULL`인 수신자에 대해 fan-out을 두 번 돌려도 `EmailDelivery`가
+      한 건만 생김 (`recipientKey`)
+- [ ] `scope="global"` 억제를 두 번 기록해도 `SuppressionEntry`가 한 건만 생김
+      (`purposeKey`)
+- [ ] 고신뢰 관할권 신호가 충돌하면 marketing이 `skipped:jurisdiction_conflict`로
+      **보류**되고 transactional/legal은 정상 발송됨
+- [ ] `nextConfirmationNoticeAt`이 지나도 `EmailPreference.enabled`가 바뀌지 않음
+      (고지는 발송되되 동의는 유지)
+- [ ] `renderDataSnapshot`으로 90일 이내 발송 본문을 재구성해 `renderedHash`와
+      일치시킬 수 있고, 스냅샷에 인증 코드/토큰 원문이 없음
 
 ---
 
@@ -1757,10 +2104,10 @@ marketing 도메인 신설 시 4~6주 warm-up:
 | # | 위험 | 영향 | 완화 |
 |---|---|---|---|
 | R1 | **legal/service 메일에 프로모션을 섞어 marketing이 됨** | 법적 통지가 opt-out 사용자에게 도달하지 못함. 이중 위반 | 8.5 타입 분리, 12.2 분류 선점, 18.2 정적 검사 |
-| R2 | **관할권 오판으로 잘못된 규칙 적용** | 과태료. 한국 3천만원 이하 등 | 6.3 fail-closed, C1 전역 opt-in, C8 soft opt-in 미사용 |
-| R3 | complaint suppression이 로그인 코드를 막음 | 사용자가 계정에서 잠김 | 13.3 분류별 억제, C9 도메인 분리 |
-| R4 | marketing complaint가 transactional 도달률을 깎음 | 로그인 코드 미도달 | C9 도메인/IP 분리, 14.5 자동 중단 |
-| R5 | **한국 2년 재확인 누락** | 3천만원 이하 과태료 | C7 전역 적용, 배치 자동화, `ConsentRecord.expiresAt` 인덱스 |
+| R2 | **관할권 오판으로 잘못된 규칙 적용** | 과태료. 한국 3천만원 이하 등 | 6.3 marketing 보류(정렬 시도 폐기), opt-in 시 국가 필수 수집, C1 전역 opt-in, C8 soft opt-in 미사용 |
+| R3 | complaint suppression이 로그인 코드를 막음 | 사용자가 계정에서 잠김 | 13.3 출처별 억제(`sourceStream`), 우리 억제 목록이 판정 근거 |
+| R4 | marketing complaint가 transactional 도달률을 깎음 | 로그인 코드 미도달 | C9 **도메인** 평판 분리(IP·제공자 계정은 분리 안 됨, 5.3), 14.5 marketing 자동 중단 |
+| R5 | **한국 2년 확인 고지 누락** | 3천만원 이하 과태료 | C7/E7 전역 적용, 배치 자동화, `EmailPreference.nextConfirmationNoticeAt` 인덱스 |
 | R6 | 캐나다 묵시적 동의 만료 후 발송 | CASL 위반 | C8로 묵시적 동의 미사용 |
 | R7 | 호주 5영업일 초과 | Spam Act 위반 | C3 즉시 처리(SLA 24시간) |
 | R8 | unsubscribe token 유출 | 타인 설정 변경 | 11.4 끄기 전용, 범위 제한, URL 로그 마스킹 |
@@ -1774,6 +2121,12 @@ marketing 도메인 신설 시 4~6주 warm-up:
 | R16 | 규제 변경을 놓침 | 조용한 위반 | 19.3 분기 검토, `JurisdictionProfile.notes`에 확인일 기록 |
 | R17 | policy version 전환 중 렌더 불일치 | idempotency key 무효화, 중복 발송 | 12.5 발송이 잡은 버전 유지 |
 | R18 | Next 16.3.0 API 가정 오류 | 구현 재작업 | 2.1 — 착수 전 `node_modules/next/dist/docs/` 확인 필수 |
+| **R19** | **로그인 코드가 TTL 안에 도착하지 못함** | 로그인 불가. v1 설계로는 재시도가 15분 뒤라 항상 늦음 | **9.4a fast lane.** 요청 중 즉시 발송 + 전용 상시 worker + 만료 코드 미발송 + "다시 보내기" |
+| **R20** | **만료된 로그인 코드가 뒤늦게 도착** | 사용자가 입력해 실패 -> 계정 문제로 오해 | 9.4a — 발송 직전 소스 행 재확인, `skipped:credential_expired` |
+| **R21** | **nullable unique로 중복 발송** | 게스트 수신자에게 같은 메일 반복 | 10.2 `recipientKey`, `purposeKey` non-null |
+| **R22** | **감사 시 발송 본문을 재구성하지 못함** | 입증책임(CASL/호주) 대응 불가 | 10.3 `renderDataSnapshot`, 재현 창/검증 창 분리 |
+| **R23** | **제공자 계정 수준 억제가 transactional을 조용히 차단** | 로그인 코드 미도달, 원인 불명 | 5.3, 13.3 — 수락 후 delivered 부재 탐지 + incident. **Q15 선행 확인** |
+| **R24** | 자동 opt-out을 법적 의무로 오해해 켜 둠 | 동의한 사용자를 근거 없이 잃음 | 5.5 — 별도 flag, 기본 OFF, 22절 A14 |
 
 ---
 
@@ -1789,10 +2142,14 @@ marketing 도메인 신설 시 4~6주 warm-up:
 | Q6 | `ConsentRecord`와 `SuppressionEntry`를 **계정 삭제 후에도 보관**하는 것이 GDPR 제17조(3)와 개인정보보호법 제21조상 정당한가? 보관 기간은? | 13.2. 삭제하면 재발송 위험, 보관하면 삭제권 논점 | 계정 삭제 프로세스, 개인정보처리방침 |
 | Q7 | 영수증에 관할권별 **세무 정보 표시 의무**가 있는가? (한국 부가세, EU VAT) | 3.2의 #3. 이 문서 범위 밖 | 영수증 템플릿 |
 | Q8 | 발신자 정보로 표시할 **법인명, 사업자등록번호, 통신판매업 신고번호, 물리적 주소, ABN**의 실제 값은? | C4, E3. 값이 없으면 marketing 자체가 불가 | 모든 marketing 발송 |
-| Q9 | **만 14세 미만 사용자**가 실제로 존재할 수 있는가? 연령 확인을 하는가? | C12. 하지 않으면 법정대리인 동의 절차가 필요 | 가입 플로우 |
+| Q9 | 아동 사용자가 실제로 존재할 수 있는가? 연령 확인을 하는가? **어느 기준값을 쓸 것인가** — GDPR 제8조는 기본 16세(회원국이 13세까지 하향 가능), 한국 14세, 영국·미국 13세 | 5.4. **이메일이 아니라 가입·개인정보 처리 정책의 결정** | 가입 플로우, marketing opt-in UI 제공 여부 |
 | Q10 | 미국 **주별 개인정보법**(CCPA 등) 중 이메일 마케팅에 실제로 영향을 주는 요건이 있는가? GPC 신호를 존중해야 하는가? | 4.3 미국. 2026년 현황 미확인 | 미국 marketing |
 | Q11 | Resend의 **DPA를 체결했는가?** subprocessor 목록을 개인정보처리방침에 반영했는가? | GDPR 제28조 처리자 계약 | 모든 발송(현재도!) |
 | Q12 | 개인정보처리방침에 **이메일 마케팅과 이메일 관련 처리**가 기재되어 있는가? (현재 `PrivacyPolicy` 컴포넌트에 marketing 관련 문구 없음 — 2.5 조사 결과) | 고지 없이 처리 불가 | marketing 활성화 |
+| **Q13** | **정보통신망법 시행령 제62조의3 ②항의 정확한 문언** — 확인 후 수신자가 아무 의사표시를 하지 않으면 수신동의는 유지되는가? | 5.5 전체가 이 답에 걸려 있습니다. **이 환경에서 `law.go.kr` 접근이 차단되어 원문을 확인하지 못했습니다**(0절) | 확인 고지 배치의 동작 |
+| **Q14** | 확인 고지에 담을 문구가 시행령이 요구하는 사항(전송자 명칭, 수신동의 날짜와 사실, 유지/철회 의사표시 방법)을 충족하는가? 고지 자체가 광고로 읽히지 않는가? | 고지에 판촉이 섞이면 광고성 정보가 되어 `(광고)` 표시 대상 | 확인 고지 템플릿 |
+| **Q15** | **Resend의 suppression list가 team(계정) 단위인가, 도메인/스트림 단위인가?** marketing에서 생긴 억제가 transactional 발송을 막는가? | 5.3, 13.3, R23. C9의 실제 효과 범위를 정함 | 스트림 분리 설계 확정 |
+| **Q16** | 발송 본문의 개인화 입력(`renderDataSnapshot`)을 90일 보관하는 것이 최소수집 원칙에 부합하는가? legal 분류 7년 보관은? | 10.3, 13.2 | 감사 재현 설계 |
 
 ---
 
@@ -1816,6 +2173,10 @@ marketing 도메인 신설 시 4~6주 warm-up:
 | A11 | Railway cron으로 fan-out/drain을 충분히 처리할 수 있다 | 기존 4개 cron이 이 방식으로 동작 | 대량 fan-out(전체 사용자)이 시간 예산을 넘으면 커서 기반 재개가 필수(9.2에 반영됨) |
 | A12 | 기존 `NotificationDelivery` 큐를 그대로 두고 병행 운영 가능 | 별개 테이블 | 중복 발송 없음 — kind가 다름 |
 | A13 | Next 16.3.0의 Route Handler / cron 호출 패턴이 현행 코드와 동일하게 동작 | 기존 `/api/internal/maintenance/*`가 동작 중 | **`node_modules/next/dist/docs/` 미확인 (2.1). 착수 전 필수** |
+| **A14** | **동의 무응답 시 자동 opt-out을 하지 않는다**(기본값) | 5.5 — 법적 의무가 아님 | **켜기로 하면 별도 사업 결정이며, 동의한 사용자 일부를 근거 없이 잃습니다. 목록 위생 이득과 저울질 필요** |
+| **A15** | Resend suppression이 스트림을 넘어 transactional을 막지 않는다 | **미확인.** 문서가 "team" 단위로 서술 | **막는다면 C9의 효과가 크게 줄고, 전용 IP 또는 제공자 분리(transactional=Postmark, marketing=Resend)를 앞당겨 검토해야 합니다. Q15** |
+| **A16** | fast lane 전용 상시 worker를 Railway에 띄울 수 있다 | 현재는 cron job만 사용 중(`railway.*.json` 5종) | 상시 서비스를 못 띄우면 1분 주기 cron으로 대체해야 하고, 10분 TTL에서 복구 해상도가 나빠집니다. 그 경우 "다시 보내기" UI의 비중이 커집니다 |
+| **A17** | 관할권 profile 8개로 충분하다 | 5.2의 예외 7개가 profile 8개로 표현됨 | EU 회원국별 분리가 필요해지면(Q1) profile이 늘지만, `JurisdictionCountryMap` 덕분에 **데이터 변경**입니다 |
 
 ---
 
@@ -1827,6 +2188,7 @@ marketing 도메인 신설 시 4~6주 warm-up:
 - [Directive 2002/58/EC (ePrivacy Directive), 제13조 — EUR-Lex](https://eur-lex.europa.eu/legal-content/EN/TXT/HTML/?uri=CELEX:32002L0058)
 - [EDPB Opinion 5/2019 — ePrivacy Directive와 GDPR의 상호작용](https://www.edpb.europa.eu/sites/default/files/files/file1/201905_edpb_opinion_eprivacydir_gdpr_interplay_en_0.pdf)
 - [EDPB Guidelines 1/2024 — legitimate interest](https://www.edpb.europa.eu/system/files/2024-10/edpb_guidelines_202401_legitimateinterest_en.pdf)
+- [Regulation (EU) 2016/679 (GDPR) — 제8조 아동의 동의 연령](https://eur-lex.europa.eu/legal-content/EN/TXT/?uri=CELEX:32016R0679) (기본 16세, 회원국이 13세 미만으로는 하향 불가)
 
 **영국**
 - [ICO — Guidance on direct marketing using electronic mail](https://ico.org.uk/for-organisations/direct-marketing-and-privacy-and-electronic-communications/guidance-on-direct-marketing-using-electronic-mail/)
@@ -1858,6 +2220,7 @@ marketing 도메인 신설 시 4~6주 warm-up:
 - [국가법령정보센터 — 정보통신망법 제50조](https://www.law.go.kr/LSW/lsLawLinkInfo.do?chrClsCd=010202&lsJoLnkSeq=1000688185&lsId=000030)
 - [정보통신망법 시행령 [별표 6] 영리목적의 광고성 정보의 명시사항 및 명시방법](https://www.law.go.kr/flDownload.do?flSeq=41072496)
 - [국가법령정보센터 — 정보통신망법 시행령](https://www.law.go.kr/LSW/lsInfoP.do?lsiSeq=260797)
+- [국가법령정보센터 — 시행령 제62조의3(수신동의 여부의 확인)](https://www.law.go.kr/LSW/lsSideInfoP.do?docCls=jo&joBrNo=03&joNo=0062&lsiSeq=284861&urlMode=lsScJoRltInfoR) — **전문 미확인.** 이 환경에서 `law.go.kr` egress 차단(0절). 검토자 제시 근거를 채택하고 ②항 문언은 Q13으로 이월
 - [방송통신위원회 — 법령정보](https://kcc.go.kr/user.do?boardId=1098&dc=K02030400&mode=view&page=A02030400)
 - 방송통신위원회/KISA 「스팸 방지를 위한 정보통신망법 안내서」(2020)
 
@@ -1916,13 +2279,28 @@ marketing 도메인 신설 시 4~6주 warm-up:
 
 이 문서는 **분석과 권고까지**입니다. 코드는 변경하지 않았습니다.
 
-**승인이 필요한 것:**
+**v1에서 조건부 승인된 것 (재확인만):**
 1. 8절의 제공자 결정 (Resend 유지 + 얇은 port)
-2. 5.1의 공통 규칙 C1~C14, 특히 **C1(전역 opt-in)과 C8(soft opt-in 미사용)**
-3. 6절의 관할권 판정 우선순위 (IP를 판정에 쓰지 않음)
+2. outbox / consent / suppression / jurisdiction 계층 분리
+3. 5.1의 C1(전역 opt-in), C8(soft opt-in 미사용)
 4. 15절의 MVP 범위와 "만들되 끄는" 항목 목록
-5. 22절의 **결정 필요 5건**: A1(B2C/B2B), A2(EU 리전), A3(일본), A4(중국), A5(opt-in 비용)
 
-**병렬로 시작할 수 있는 것:** 21절의 법률 질문 12건 전달. 특히 **Q8(사업자 정보
+**v2에서 새로 승인이 필요한 것:**
+5. **9.4a credential fast lane** — 전용 상시 worker, 만료 코드 미발송,
+   "다시 보내기" UI. 상시 프로세스를 띄울 수 있는지 확인 필요(22절 A16)
+6. **5.5의 고지/만료 분리** — 자동 opt-out을 기본 OFF로 두는 것
+7. **6.3의 marketing 보류 정책** — 관할권이 확정되지 않으면 보내지 않고, 대신
+   opt-in 시점에 국가를 필수 수집. 정렬("더 엄격한 쪽")은 폐기
+8. **10.2의 profile/country 분리** — profile 8개 + 매핑 테이블
+9. **10.3의 `renderDataSnapshot`** — 90일(legal 7년) 보관, 암호화, 최소화
+
+**22절의 결정 필요 항목 (v1 5건 + v2 4건):**
+A1(B2C/B2B), A2(EU 리전), A3(일본), A4(중국), A5(opt-in 비용),
+**A14(자동 opt-out 채택 여부), A15(Resend 억제 범위), A16(상시 worker 가용성),
+A17(profile 8개로 충분한지)**
+
+**병렬로 시작할 수 있는 것:** 21절의 법률 질문 **16건** 전달. 특히 **Q8(사업자 정보
 실제 값)과 Q11(Resend DPA 체결 여부)**은 답이 없으면 아무것도 진행할 수 없습니다.
 Q11은 marketing과 무관하게 **지금 이미 발송 중이므로** 가장 급합니다.
+**Q15(Resend 억제가 team 단위인지)는 법률 질문이 아니라 제공자 확인**이므로
+지금 바로 답을 얻을 수 있고, 답에 따라 5.3과 13.3이 달라집니다.
