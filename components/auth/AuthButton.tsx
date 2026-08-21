@@ -60,6 +60,7 @@ import {
     type ThemePreference,
 } from "@/lib/theme";
 import { openAnalyticsPreferences } from "@/lib/analyticsPreferencesEvents";
+import { AssistantProfileListContent } from "@/components/assistants/AssistantProfileList";
 import { SETTINGS_TAB_LABEL_KEY } from "@/lib/settingsNavigation";
 import {
     ACCOUNT_SETTINGS_OPEN_EVENT,
@@ -1422,13 +1423,14 @@ export function AuthButton({
 
                         <div className="grid min-h-0 flex-1 grid-cols-1 md:grid-cols-[13rem_1fr]">
                             {/*
-                              Five tabs wrap rather than shrink. `grid-cols-4`
-                              held four across at `sm`; a fifth would have
-                              divided the same row again and taken every label
-                              below the 11px floor the typography contract
-                              sets. Two columns then three lets the fifth start
-                              a row instead, so no label is ever cut and the
-                              touch targets keep their height.
+                              Six tabs wrap rather than shrink. `grid-cols-4`
+                              held four across at `sm`; a fifth and sixth would
+                              have divided the same row again and taken every
+                              label below the 11px floor the typography
+                              contract sets. Two columns then three gives a
+                              clean 3x2 at `sm` and 2x3 below it, so no label
+                              is ever cut and the touch targets keep their
+                              height.
                             */}
                             <nav className="grid grid-cols-2 gap-2 border-b border-zinc-200 bg-zinc-50 p-3 dark:border-zinc-800 dark:bg-zinc-950/50 sm:grid-cols-3 md:flex md:flex-col md:overflow-visible md:border-b-0 md:border-r">
                                 {[
@@ -1437,6 +1439,11 @@ export function AuthButton({
                                     // Read through the same map the breadcrumb
                                     // reads, so the tab and the trail cannot
                                     // call this place two different names.
+                                    {
+                                        id: "assistants",
+                                        label: t(SETTINGS_TAB_LABEL_KEY.assistants),
+                                        icon: Bot,
+                                    },
                                     {
                                         id: "ai",
                                         label: t(SETTINGS_TAB_LABEL_KEY.ai),
@@ -1652,6 +1659,28 @@ export function AuthButton({
                                             </span>
                                         </label>
 
+                                    </div>
+                                )}
+
+                                {activeSettingsTab === "assistants" && (
+                                    /*
+                                      The tab *is* the management home, not a
+                                      signpost to one. A tab whose whole
+                                      content is a link to a page is a redirect
+                                      with a label, and it made the assistants
+                                      the only settings collection you could
+                                      not see without leaving settings.
+
+                                      The list, its states and its create CTA
+                                      come from the same component the full
+                                      page renders, so a 403 means the same
+                                      thing on both.
+                                    */
+                                    <div
+                                        className="space-y-4"
+                                        data-testid="settings-assistants-tab"
+                                    >
+                                        <AssistantProfileListContent headingLevel="h2" />
                                     </div>
                                 )}
 
@@ -1905,28 +1934,6 @@ export function AuthButton({
                                             <h3 className="text-sm font-bold">{t("settingsNav.profilesAndMemory")}</h3>
                                             <p className="mt-1 text-sm leading-6 text-zinc-500">{t("settingsNav.profilesAndMemoryDescription")}</p>
                                             <div className="mt-3">
-                                                {/*
-                                                  A row in this group rather
-                                                  than a card beside it, per
-                                                  docs/ui-contracts/settings-navigation.md §2.
-                                                  Before memory because that is
-                                                  the order a user meets them:
-                                                  a profile is the thing they
-                                                  make, and memory is what it
-                                                  may draw on.
-                                                */}
-                                                <SettingsEntryRow
-                                                    section="assistants"
-                                                    href="/settings/assistants"
-                                                    icon={Bot}
-                                                    title={t("assistantProfiles.dataTabTitle")}
-                                                    description={t("assistantProfiles.dataTabDescription")}
-                                                    status={t("assistantProfiles.dataTabStatus")}
-                                                    actionLabel={t("assistantProfiles.dataTabOpen")}
-                                                    onNavigate={closeSettingsModal}
-                                                    testId="assistants-entry"
-                                                    linkTestId="assistants-entry-link"
-                                                />
                                                 <SettingsEntryRow
                                                     section="memory"
                                                     href="/settings/memory"

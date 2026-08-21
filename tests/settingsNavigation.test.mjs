@@ -49,7 +49,8 @@ test("every entry names the tab it is actually in, and stays a separate row", ()
   const EXPECTED_TAB = {
     "external-import": "data",
     memory: "ai",
-    assistants: "ai",
+    // Its own tab, which is also where the collection is managed.
+    assistants: "assistants",
     "account-data": "data",
   };
 
@@ -117,10 +118,16 @@ test("the section decides the tab when a hand-edited pair disagrees", () => {
     { tab: "ai", section: "memory" }
   );
   // The direction that regressed when the tabs were split: a link minted
-  // before the move still names `data`, and the section still wins.
+  // before a move still names the old tab, and the section still wins. Both
+  // moves are covered -- `data` was the first home, `ai` the second -- because
+  // a bookmark from either era has to keep working.
   assert.deepEqual(
     parseSettingsDeepLink("?settings=data&settingsSection=assistants"),
-    { tab: "ai", section: "assistants" }
+    { tab: "assistants", section: "assistants" }
+  );
+  assert.deepEqual(
+    parseSettingsDeepLink("?settings=ai&settingsSection=assistants"),
+    { tab: "assistants", section: "assistants" }
   );
 });
 
@@ -242,19 +249,22 @@ test("every row can state where it stands, including when it is empty", () => {
 
 /* ------------------------------------------------ nested detail pages ---- */
 
-test("the AI tab keeps its id and its deep link while its name changes", () => {
-  // The name on screen is a product decision; `ai` and `settings=ai` are the
-  // identifiers a bookmark and a deep link carry, and renaming the tab must
-  // not break either.
-  assert.equal(SETTINGS_SECTION_TAB.assistants, "ai");
+test("tab ids stay stable while the names on screen change", () => {
+  // The name on screen is a product decision; the ids are what a bookmark and
+  // a deep link carry, and renaming a tab must not break either.
+  assert.equal(SETTINGS_SECTION_TAB.assistants, "assistants");
   assert.equal(SETTINGS_SECTION_TAB.memory, "ai");
-  assert.deepEqual(parseSettingsDeepLink("?settings=ai&settingsSection=assistants"), {
-    tab: "ai",
-    section: "assistants",
-  });
+  assert.deepEqual(
+    parseSettingsDeepLink("?settings=ai&settingsSection=memory"),
+    { tab: "ai", section: "memory" }
+  );
   assert.equal(
     settingsSectionHref("assistants"),
-    "/chat?settings=ai&settingsSection=assistants"
+    "/chat?settings=assistants&settingsSection=assistants"
+  );
+  assert.equal(
+    settingsSectionHref("memory"),
+    "/chat?settings=ai&settingsSection=memory"
   );
 });
 
@@ -262,13 +272,19 @@ test("the tab and the breadcrumb crumb read one label key", () => {
   // Two keys is how "AI settings" and "AI personalization" ended up on screen
   // at the same time, one in the tab strip and one in the trail below it.
   assert.equal(SETTINGS_TAB_LABEL_KEY.ai, "settingsNav.aiPersonalization");
+  assert.equal(SETTINGS_TAB_LABEL_KEY.assistants, "settingsNav.assistantsTab");
   assert.equal(
     settingsSectionGroupLabelKey("assistants"),
+    SETTINGS_TAB_LABEL_KEY.assistants
+  );
+  assert.equal(
+    settingsSectionGroupLabelKey("memory"),
     SETTINGS_TAB_LABEL_KEY.ai
   );
   for (const [name, locale] of Object.entries(LOCALES)) {
     assert.ok(locale.settingsNav.aiPersonalization, name);
-    // The group inside the tab is named for what it holds, so the two are not
+    assert.ok(locale.settingsNav.assistantsTab, name);
+    // The group inside a tab is named for what it holds, so the two are not
     // the same string.
     assert.ok(locale.settingsNav.profilesAndMemory, name);
     assert.notEqual(
@@ -321,7 +337,7 @@ test("a profile's nearest ancestor is the list, not the settings panel", () => {
     trail.map((ancestor) => ancestor.labelKey),
     [
       "settingsNav.settings",
-      SETTINGS_TAB_LABEL_KEY.ai,
+      SETTINGS_TAB_LABEL_KEY.assistants,
       "assistantProfiles.pageTitle",
     ]
   );

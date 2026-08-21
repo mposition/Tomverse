@@ -47,10 +47,37 @@ which tab happened to exist first:
 
 | Section | Tab | Tab name on screen | Group |
 |---|---|---|---|
-| `assistants` | `ai` | `settingsNav.aiPersonalization` | `settingsNav.profilesAndMemory` |
+| `assistants` | `assistants` | `settingsNav.assistantsTab` | the tab itself |
 | `memory` | `ai` | `settingsNav.aiPersonalization` | `settingsNav.profilesAndMemory` |
 | `external-import` | `data` | `auth.dataTab` | `settingsNav.dataAndPersonalization` |
 | `account-data` | `data` | `auth.dataTab` | `settingsNav.dataAndPersonalization` |
+
+**A tab is a home, not a signpost.** The assistants tab renders the collection
+— its list, its states and its create action — rather than one row linking to a
+page. A tab whose entire content is a link to somewhere else is a redirect with
+a label, and it made assistants the only settings collection a user could not
+see without leaving settings. The list is one component
+(`AssistantProfileListContent`), rendered by the tab and by
+`/settings/assistants` alike, so a 403 cannot come to mean two different things.
+
+**Old deep links keep working.** `settings=ai&settingsSection=assistants` was
+minted while assistants lived in the AI tab, and `settings=data&...` before
+that. The section decides the tab, so both open the assistants tab today. This
+is the reason `parseSettingsDeepLink` resolves the tab from the section rather
+than trusting the pair.
+
+## 2.0 Product vocabulary
+
+| Surface | Word |
+|---|---|
+| anything a user reads | **AI assistant** / AI 어시스턴트 |
+| code, database, routes, policy | **assistant profile**, `AssistantProfile`, `/api/assistant-profiles`, `/settings/assistants` |
+
+The two are the same object. The rename covers what a user reads and stops at
+the boundary: table names, ids, URLs, analytics events and the
+`accent-assistant-profile-*` tokens keep the implementation word, because
+renaming those is a migration and not a copy change. "Profile" also still means
+*account* profile elsewhere in settings, and that use is untouched.
 
 **The tab id and the deep link are stable identifiers; the tab's name is not.**
 `ai` and `settings=ai` are what a bookmark carries and never change with the

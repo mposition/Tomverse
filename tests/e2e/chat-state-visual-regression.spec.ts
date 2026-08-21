@@ -848,11 +848,13 @@ const actionMenuTrigger = (page: Page) => page.locator('button[aria-controls="ch
 
 async function attachFromComputer(page: Page, file: { name: string; mimeType: string; buffer: Buffer }) {
   await actionMenuTrigger(page).click();
+  // Two steps now: the root menu asks *whether* to attach, and the source view
+  // asks where from. The chooser opens on the second click, so the wait is armed
+  // around that one -- arming it before the first would time out on a click that
+  // only changes view.
+  await page.getByTestId("tools-attach-row").click();
   const chooserPromise = page.waitForEvent("filechooser");
-  await page
-    .getByRole("dialog", { name: /더 많은 작업|More actions/ })
-    .getByRole("button", { name: /파일 첨부|Add photos & files|Add files/ })
-    .click();
+  await page.getByTestId("attach-local-file-row").click();
   const chooser = await chooserPromise;
   await chooser.setFiles(file);
 }
