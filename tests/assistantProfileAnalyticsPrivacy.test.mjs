@@ -6,7 +6,8 @@ import {
 } from "../lib/productAnalyticsShared.ts";
 
 /**
- * §16 describes what a profile's fields are used for, and sending them to an
+ * docs/policy/external-conversation-import-and-memory.md §16 describes what a profile's fields are used
+ * for, and sending them to an
  * analytics provider is not on that list. A profile's name, description and
  * instructions are the user's own words about how they want to be spoken to.
  *
