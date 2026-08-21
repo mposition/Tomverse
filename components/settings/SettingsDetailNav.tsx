@@ -19,9 +19,12 @@ import {
  * and history is not the settings hierarchy anyway. The browser's own Back
  * button is untouched and still does what it always did.
  *
- * There is deliberately no second link to the chat here: settings is a
- * closable panel, so leaving settings entirely is the panel's close action,
- * not a third destination competing at the top of a detail page.
+ * Leaving settings entirely is a different movement and is not this
+ * component's job: the route shell renders it once for every
+ * /settings/** screen (components/settings/SettingsExitBar.tsx), at the other
+ * end of the page and with the chat's own name on it. The two coexist by
+ * design — one level up here, all the way out there — and must stay
+ * distinguishable, so nothing in this nav may adopt chat-bound wording.
  *
  * Desktop additionally gets the trail it has room for; the back link is the
  * only interactive element in either layout, so the two never disagree about

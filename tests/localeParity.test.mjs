@@ -116,11 +116,18 @@ const ENGLISH_STRING_CEILING = {
   // too long for a subtitle already carrying a brand and a latency class.
   // German, Spanish, Korean and Chinese all differ, so only these two moved.
   // Allowlisted in check-locale-translation-core.mjs for the same reason.
+  //
+  // +1 each for de, es, fr and pt from the settings exit control
+  // (settingsNav.backToChatShort). It is the narrow-viewport rendering of
+  // "Back to chat", and all four locales already call the thing itself a
+  // "chat" -- sidebar.newChat is "Neuer Chat", "Nuevo chat", "Nouveau chat",
+  // "Novo chat". Korean and Chinese use their own word (대화 / 对话), so
+  // neither moved. The full phrase this shortens is translated in all six.
   zh: 10,
-  fr: 30,
-  de: 24,
-  es: 17,
-  pt: 15,
+  fr: 31,
+  de: 25,
+  es: 18,
+  pt: 16,
 };
 
 test("every supported language is in the dictionary map", () => {

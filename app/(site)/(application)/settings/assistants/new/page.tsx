@@ -7,7 +7,7 @@ import { AssistantProfileEditor } from "@/components/assistants/AssistantProfile
 // "new" -- which is also why no profile id is ever the string "new".
 export default function NewAssistantProfilePage() {
     return (
-        <main className="min-h-dvh bg-zinc-50 text-zinc-900 dark:bg-zinc-950 dark:text-zinc-100">
+        <main>
             <AssistantProfileEditor />
         </main>
     );

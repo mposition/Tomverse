@@ -1072,9 +1072,17 @@ export const ko = {
     // 패널이고, 상세 페이지는 그 패널을 이름으로 지목해 올라갑니다 — 그룹
     // 이름과 breadcrumb은 두 shell과 패널에서 같은 문구여야 합니다
     // (lib/settingsNavigation.ts).
+    //
+    // backToSettings와 backToChat은 서로 다른 이동이며 바꿔 쓰지 않습니다.
+    // 앞은 설정 계층에서 한 단계 위로, 뒤는 설정을 완전히 벗어나 대화 화면으로
+    // 갑니다. Short는 좁은 viewport에서의 표시 문구일 뿐이고 accessible name은
+    // 항상 전체 문구입니다.
     settingsNav: {
         navLabel: "설정 탐색",
         backToSettings: "설정으로 돌아가기",
+        backToChat: "대화로 돌아가기",
+        backToChatShort: "대화",
+        exitNavLabel: "설정 나가기",
         settings: "설정",
         dataAndPersonalization: "데이터 및 개인화",
         dataAndPersonalizationDescription: "가져온 대화와 계정 기억입니다. 각각은 별도 페이지에서 관리합니다.",

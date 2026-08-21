@@ -9,7 +9,7 @@ export default async function ImportDetailPage({
 }) {
     const { importId } = await params;
     return (
-        <main className="min-h-dvh bg-zinc-50 text-zinc-900 dark:bg-zinc-950 dark:text-zinc-100">
+        <main>
             <ExternalImportDetail importId={importId} />
         </main>
     );
