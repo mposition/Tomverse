@@ -180,6 +180,7 @@ run(
     "tests/integration/email-webhook-suppression.db.test.ts",
     "tests/integration/email-preferences-consent.db.test.ts",
     "tests/integration/email-jurisdiction-policy.db.test.ts",
+    "tests/integration/admin-email-delivery.db.test.ts",
     // The import/memory program's suites were written alongside their slices
     // but never listed here, i.e. never actually run by CI — a guard nobody
     // runs is not a guard. Keep this list in step with tests/integration/.

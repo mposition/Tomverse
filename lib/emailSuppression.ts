@@ -119,6 +119,62 @@ export async function recordSuppression(input: RecordSuppressionInput) {
 }
 
 /**
+ * Entries an operator may not lift from this screen.
+ *
+ * A suppression created by a privacy request is the record of someone
+ * exercising a legal right. Lifting it re-enables mail to them, and the process
+ * that would be entitled to do that is the privacy process that created it --
+ * not a button on an operations screen. Refused here rather than gated behind
+ * approval, because there is no operational reason that would make it correct.
+ */
+export const UNLIFTABLE_SUPPRESSION_REASONS = ["privacy_request"] as const;
+
+/**
+ * Entries whose removal needs a second administrator.
+ *
+ * §13.3 calls these permanent: the provider, or the person, has said stop.
+ * Removing one starts mail to an address that said stop, and the cost is not
+ * only to them -- complaints and hard bounces are what a receiver measures a
+ * sending domain by (§14.5), and a domain's reputation is the part of this
+ * system that recovers slowest.
+ */
+export const APPROVAL_REQUIRED_SUPPRESSION_REASONS = [
+  "hard_bounce",
+  "complaint",
+] as const;
+
+export type SuppressionRemovalRefusal = "not_found" | "unliftable";
+
+/**
+ * Lifts one suppression, returning what it was so the audit entry can hold it.
+ *
+ * The row is read and deleted in one transaction: an audit entry describing a
+ * row that a concurrent lift already removed would be a record of something
+ * that did not happen, and the reason column is the only trace of why mail to
+ * this address was re-enabled (§13.7).
+ */
+export async function removeSuppression(input: {
+  id: string;
+}): Promise<
+  | { removed: true; entry: Prisma.SuppressionEntryGetPayload<object> }
+  | { removed: false; refusal: SuppressionRemovalRefusal }
+> {
+  return prisma.$transaction(async (tx) => {
+    const entry = await tx.suppressionEntry.findUnique({
+      where: { id: input.id },
+    });
+    if (!entry) return { removed: false as const, refusal: "not_found" as const };
+    if (
+      (UNLIFTABLE_SUPPRESSION_REASONS as readonly string[]).includes(entry.reason)
+    ) {
+      return { removed: false as const, refusal: "unliftable" as const };
+    }
+    await tx.suppressionEntry.delete({ where: { id: entry.id } });
+    return { removed: true as const, entry };
+  });
+}
+
+/**
  * Whether this message may go out.
  *
  * Reads every entry for the address -- global and per-purpose -- and hands them

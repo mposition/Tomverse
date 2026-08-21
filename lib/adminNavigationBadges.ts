@@ -9,6 +9,15 @@
  */
 
 export type AdminNavigationCounts = {
+  /**
+   * Abandoned legal notices
+   * (docs/policy/email-notifications.md §9.5).
+   *
+   * The only email count that earns a badge. An abandoned legal notice is work
+   * -- that document's §9.4 asks for manual follow-up on an alternate channel
+   * -- while an abandoned promotion is a promotion nobody missed.
+   */
+  abandonedLegalEmail: number | null;
   openFeedback: number | null;
   openPrivacyRequests: number | null;
   pendingRefunds: number | null;
@@ -20,6 +29,7 @@ export type AdminNavigationCounts = {
 };
 
 export const EMPTY_ADMIN_NAVIGATION_COUNTS: AdminNavigationCounts = {
+  abandonedLegalEmail: null,
   openFeedback: null,
   openPrivacyRequests: null,
   pendingRefunds: null,
@@ -65,6 +75,8 @@ export const adminNavigationBadge = (
       return sum(counts.delayedJobs, counts.failedWebhooks);
     case "alerts":
       return counts.failedAlerts;
+    case "abandonedLegalEmail":
+      return counts.abandonedLegalEmail;
     default:
       return null;
   }

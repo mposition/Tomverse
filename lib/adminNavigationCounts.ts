@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { getScheduledJobsDashboard } from "@/lib/scheduledJobs";
+import { abandonedLegalEmailCount } from "@/lib/adminEmailDeliveries";
 import type { AdminNavigationCounts } from "@/lib/adminNavigationBadges";
 
 export {
@@ -11,7 +12,7 @@ export {
 /**
  * The only data the Admin Console layout loads on every navigation.
  *
- * Eight counts, one of them a job-health read. Everything else a page needs is
+ * Nine counts, one of them a job-health read. Everything else a page needs is
  * loaded by that page's own server component, so moving between workspaces no
  * longer re-runs the whole console's query set -- which is what the single
  * `AdminWorkspace` did on every route, including the routes that used none of
@@ -40,6 +41,7 @@ export async function getAdminNavigationCounts(): Promise<{
     failedWebhooks,
     jobs,
     failedAlerts,
+    abandonedLegalEmail,
   ] = await Promise.allSettled([
     prisma.feedback.count({ where: { status: "open" } }),
     prisma.privacyRequest.count({ where: { status: "open" } }),
@@ -53,6 +55,7 @@ export async function getAdminNavigationCounts(): Promise<{
     prisma.adminNotificationLog.count({
       where: { status: "failed", acknowledgedAt: null },
     }),
+    abandonedLegalEmailCount(),
   ]);
 
   const jobsValue = settled(jobs);
@@ -67,6 +70,7 @@ export async function getAdminNavigationCounts(): Promise<{
       ? jobsValue.filter((job) => job.delayed || job.status === "stuck").length
       : null,
     failedAlerts: settled(failedAlerts),
+    abandonedLegalEmail: settled(abandonedLegalEmail),
   };
 
   return {

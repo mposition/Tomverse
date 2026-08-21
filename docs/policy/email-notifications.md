@@ -2077,6 +2077,33 @@ POST /api/unsubscribe            -> One-Click (RFC 8058)
 - 테스트 발송
 - 사용자 preference의 **관리자에 의한** 변경
 
+#### 13.7.1 지금 무엇이 기록되고, 무엇이 기록할 행위가 없는가
+
+이 목록은 **관리자 행위**의 목록입니다. `AdminAuditLog`의 모든 행에는 행위자가
+있으므로, 관리자가 하지 않는 일은 이 표에 넣을 수 없습니다. 여섯 항목의 현재
+상태를 적어 둡니다 — "M14 완료"가 "여섯 개 모두 기록 중"으로 읽히지 않도록.
+
+| 항목 | 상태 | action |
+|---|---|---|
+| `EmailPolicyVersion` 생성/활성화 | 기록됨 | `email_policy.draft_created`, `email_policy.activated` |
+| 테스트 발송 | 기록됨 | `app/api/admin/test-email` |
+| 억제 항목 추가/제거 | 기록됨 (2026-08-21) | `email_suppression.added`, `email_suppression.removed` |
+| 캠페인 생성/승인/발송/취소 | **행위 없음** | 캠페인 기능이 없습니다(15.2, `feature.emailCampaignsEnabled`) |
+| 템플릿 버전 게시/폐기 | **관리자 행위 아님** | 발송 경로가 content hash로 자동 게시합니다(`lib/emailTemplateRegistry.ts`). 행위자가 없으므로 `AdminAuditLog`가 아니라 행 자체(`TemplateVersion.publishedAt`)가 기록입니다 |
+| 사용자 preference의 관리자 변경 | **경로 없음** | 관리자가 남의 preference를 바꾸는 API가 없습니다. 생기면 그때 기록합니다 |
+
+**억제 제거의 사유는 세 층입니다**(`app/api/admin/email-suppressions`). 추가는
+mail을 멈추고 제거는 mail을 다시 시작시키므로 비대칭이 요점입니다.
+
+- `privacy_request`는 **거절**합니다. 법적 권리 행사의 기록이고, 그것을 해제할
+  자격이 있는 절차는 그것을 만든 privacy 절차이지 운영 화면의 버튼이 아닙니다.
+- `hard_bounce`·`complaint`는 **2인 승인**이 필요합니다. 13.3이 영구로 부르는
+  항목이고, complaint는 수신자가 발송 도메인을 평가하는 지표이며(14.5) 도메인
+  평판은 이 시스템에서 가장 늦게 회복되는 부분입니다.
+- 나머지는 **내용 있는 사유**와 감사 기록입니다. `suppressionRemovalProblem()`이
+  길이와 상투어를 함께 거절합니다 — 필수 항목에 "test"라고 답하면 그 필수 항목은
+  무력화된 것입니다.
+
 ---
 
 ## 14. Deliverability 운영 계획
