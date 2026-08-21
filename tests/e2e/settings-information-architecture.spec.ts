@@ -143,7 +143,9 @@ test.describe("settings information architecture", () => {
     await openSettingsTab(page, "ai");
     const aiGroup = page.getByTestId("settings-ai-personalization");
     await expect(aiGroup).toBeVisible();
-    await expect(aiGroup).toContainText("AI 개인화");
+    // The group inside the tab is named for what it holds; the tab itself is
+    // "AI 개인화", and a group repeating that would say nothing.
+    await expect(aiGroup).toContainText("프로필 및 기억");
     await expect(aiGroup.getByTestId("assistants-entry")).toHaveCount(1);
     await expect(aiGroup.getByTestId("memory-entry")).toHaveCount(1);
     // The new-conversation model combination moved with them: it is the third
@@ -238,7 +240,7 @@ test.describe("settings information architecture", () => {
       entryTestId: "memory-entry",
       entryLinkTestId: "memory-entry-link",
       href: "/chat?settings=ai&settingsSection=memory",
-      group: "AI 설정",
+      group: "AI 개인화",
       crumb: "계정 장기 기억",
     },
     {
@@ -248,7 +250,7 @@ test.describe("settings information architecture", () => {
       entryTestId: "assistants-entry",
       entryLinkTestId: "assistants-entry-link",
       href: "/chat?settings=ai&settingsSection=assistants",
-      group: "AI 설정",
+      group: "AI 개인화",
       crumb: "나만의 AI 프로필",
     },
     {
@@ -277,10 +279,19 @@ test.describe("settings information architecture", () => {
       await expect(back).toContainText("설정으로 돌아가기");
       await expect(back).toHaveAttribute("href", detail.href);
 
-      // No second, chat-bound link competing with it at the top of the page.
+      // No chat-bound link competing with it at the top of the page. Counting
+      // links was the old proxy for this and stopped meaning it once
+      // breadcrumb crumbs became navigable: what has to hold is that nothing
+      // here offers the chat, not that there is exactly one control.
       const nav = page.getByTestId("settings-detail-nav");
-      await expect(nav.getByRole("link")).toHaveCount(1);
       await expect(nav.getByRole("link", { name: /채팅/ })).toHaveCount(0);
+      for (const href of await nav.getByRole("link").evaluateAll((links) =>
+        links.map((link) => link.getAttribute("href") ?? "")
+      )) {
+        // `/chat?settings=...` is the settings panel, which is where this page
+        // goes up to; a bare `/chat` would be the chat itself.
+        expect(href === "/chat").toBe(false);
+      }
     });
 
     test(`${detail.name} restores the settings row it was opened from`, async ({
@@ -328,4 +339,121 @@ test.describe("settings information architecture", () => {
       }
     });
   }
+
+  /* ------------------------------------------- the model finder CTA ----- */
+
+  /**
+   * The CTA is another way to decide the new-conversation combination, not a
+   * setting of its own. It used to stand between the combination card and the
+   * profiles card as a full-width primary button, which read as a third
+   * top-level entry.
+   */
+
+  test("the recommendation CTA lives inside the combination card @ui-risk", async ({
+    page,
+  }) => {
+    await gotoChatWithSettings(page);
+    await openSettingsTab(page, "ai");
+
+    const card = page.getByTestId("settings-new-conversation-models");
+    const cta = page.getByTestId("settings-model-finder-cta");
+    await expect(cta).toBeVisible();
+    // DOM ownership, not proximity: the assertion is that it is *inside*.
+    await expect(card.getByTestId("settings-model-finder-cta")).toHaveCount(1);
+
+    // And not a sibling of the profiles group.
+    const profilesGroup = page.getByTestId("settings-ai-personalization");
+    await expect(
+      profilesGroup.getByTestId("settings-model-finder-cta")
+    ).toHaveCount(0);
+  });
+
+  test("the CTA does not assume the visitor has used the finder before", async ({
+    page,
+  }) => {
+    await gotoChatWithSettings(page);
+    await openSettingsTab(page, "ai");
+
+    const cta = page.getByTestId("settings-model-finder-cta");
+    // "다시" would be wrong for everyone who has never opened it, and the
+    // settings screen cannot know which kind of visitor this is.
+    await expect(cta).not.toContainText("다시");
+    await expect(cta).toContainText("내게 맞는 조합 추천받기");
+    // The name alone says what it does; the hint is attached, not required.
+    await expect(cta).toHaveAttribute("aria-describedby", /model-finder-hint/);
+  });
+
+  test("the CTA opens the finder once and moves focus into it", async ({
+    page,
+  }) => {
+    await gotoChatWithSettings(page);
+    await openSettingsTab(page, "ai");
+
+    const cta = page.getByTestId("settings-model-finder-cta");
+    // Two fast clicks: the open is an event broadcast, so an unguarded second
+    // click would be a second open.
+    await cta.click({ clickCount: 2, delay: 10 });
+
+    await expect(page.getByTestId("model-finder")).toHaveCount(1);
+    await expect(settingsDialog(page)).toBeHidden();
+    // Focus lands inside the finder rather than falling to the document when
+    // the panel behind it closes. Asserted on the element the finder's own
+    // focus trap targets, so the check retries while that effect runs -- a
+    // one-shot read of `document.activeElement` races it.
+    await expect(page.getByTestId("model-finder-close")).toBeFocused();
+  });
+
+  test("unsaved combination changes are named before they are lost @ui-risk", async ({
+    page,
+  }) => {
+    await gotoChatWithSettings(page);
+    await openSettingsTab(page, "ai");
+
+    // Edit the combination and do not save.
+    await page.getByTestId("settings-combination-add").click();
+
+    await page.getByTestId("settings-model-finder-cta").click();
+
+    // The finder has not opened, and the loss is stated rather than silent.
+    await expect(page.getByTestId("model-finder")).toHaveCount(0);
+    const warning = page.getByTestId("settings-model-finder-unsaved");
+    await expect(warning).toBeVisible();
+
+    // Cancelling leaves the edit in place.
+    await page.getByTestId("settings-model-finder-unsaved-cancel").click();
+    await expect(warning).toBeHidden();
+    await expect(settingsDialog(page)).toBeVisible();
+
+    // Continuing is a deliberate second click.
+    await page.getByTestId("settings-model-finder-cta").click();
+    await page.getByTestId("settings-model-finder-unsaved-continue").click();
+    await expect(page.getByTestId("model-finder")).toHaveCount(1);
+  });
+
+  test("the CTA is reachable and activatable from the keyboard", async ({
+    page,
+  }) => {
+    await gotoChatWithSettings(page);
+    await openSettingsTab(page, "ai");
+
+    const cta = page.getByTestId("settings-model-finder-cta");
+    await cta.focus();
+    await expect(cta).toBeFocused();
+    await page.keyboard.press("Enter");
+    await expect(page.getByTestId("model-finder")).toHaveCount(1);
+  });
+
+  test("the AI tab is named for personalization, not settings @ui-risk", async ({
+    page,
+  }) => {
+    await gotoChatWithSettings(page);
+    await openSettingsTab(page, "ai");
+
+    const dialog = settingsDialog(page);
+    await expect(
+      dialog.getByRole("button", { name: "AI 개인화" })
+    ).toBeVisible();
+    // The previous name must not survive anywhere in the panel.
+    await expect(dialog.getByText("AI 설정", { exact: true })).toHaveCount(0);
+  });
 });

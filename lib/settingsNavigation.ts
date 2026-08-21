@@ -68,7 +68,11 @@ export const SETTINGS_SECTION_TAB: Record<SettingsSectionId, AccountSettingsTab>
 export const SETTINGS_TAB_LABEL_KEY: Record<AccountSettingsTab, string> = {
     account: "auth.accountTab",
     preferences: "auth.preferencesTab",
-    ai: "auth.aiTab",
+    // Deliberately not `auth.aiTab`. The tab and the breadcrumb crumb are the
+    // same name for the same place, so they read one key -- two keys is how
+    // "AI settings" and "AI personalization" ended up on screen at once, one
+    // in the tab strip and one in the trail below it.
+    ai: "settingsNav.aiPersonalization",
     data: "auth.dataTab",
     plan: "auth.planTab",
 };
@@ -93,6 +97,133 @@ export const settingsSectionHref = (section: SettingsSectionId) => {
     params.set(SETTINGS_SECTION_QUERY_PARAM, section);
     return `${SETTINGS_HOME_PATH}?${params.toString()}`;
 };
+
+/* ------------------------------------------------ nested detail pages ---- */
+
+/**
+ * One step in a settings page's ancestry.
+ *
+ * A settings *entry* page (imports, memory, the profile list) has one ancestor:
+ * the settings panel. A page nested below one of those -- a single assistant
+ * profile -- has two, and the difference is what this exists for. The profile
+ * editor previously rendered the entry-page nav, so its back link went to the
+ * settings panel while the list it actually sat inside was skipped, and the
+ * trail underneath claimed a hierarchy the link did not follow.
+ *
+ * `href` is a literal or built from a literal. Nothing here ever comes from a
+ * query string, so no ancestor can be pointed anywhere by a caller.
+ */
+export type SettingsAncestor = {
+    /**
+     * Where this crumb goes, when it goes anywhere.
+     *
+     * Absent for a step that names a place without being a separate
+     * destination — the settings tab is one, since the panel opens *at* that
+     * tab and the crumb before it already links there. A crumb that looked
+     * like a link and led to the page you were already on would be a control
+     * people try once.
+     */
+    href?: string;
+    /** Locale key for the breadcrumb crumb: this ancestor's own name. */
+    labelKey: string;
+    /**
+     * Locale key for the back link, when this is the nearest navigable
+     * ancestor.
+     *
+     * A whole sentence rather than a name interpolated into "Back to {x}",
+     * because the join is grammar: Korean's particle changes with the noun it
+     * follows, and every locale has some version of that. One key per
+     * destination costs a line and leaves the sentence to the translator.
+     */
+    backLabelKey?: string;
+};
+
+/**
+ * The back link's target: the nearest ancestor that is actually somewhere.
+ *
+ * Not simply the last entry, because the last entry may be a naming step. For
+ * a settings entry page that makes the back link the panel; for a profile it
+ * makes it the list.
+ */
+export const settingsBackTarget = (
+    hierarchy: SettingsHierarchy
+): SettingsAncestor | null => {
+    for (let index = hierarchy.length - 1; index >= 0; index -= 1) {
+        const ancestor = hierarchy[index];
+        if (ancestor.href && ancestor.backLabelKey) return ancestor;
+    }
+    return null;
+};
+
+/**
+ * The ancestry of a page, nearest parent last.
+ *
+ * The back link is the last entry and the breadcrumb is the whole list, so
+ * they cannot disagree: there is one array and two readings of it.
+ */
+export type SettingsHierarchy = readonly SettingsAncestor[];
+
+/** The assistant profile list, as its own children should address it. */
+export const ASSISTANT_PROFILE_LIST_PATH = "/settings/assistants";
+
+/**
+ * A settings entry page: settings panel -> this page.
+ *
+ * `settingsSectionHref` already encodes which tab the row lives in, so the
+ * crumb's name comes from the same mapping the link does.
+ */
+export const settingsEntryHierarchy = (
+    section: SettingsSectionId
+): SettingsHierarchy => [
+    {
+        href: settingsSectionHref(section),
+        labelKey: "settingsNav.settings",
+        backLabelKey: "settingsNav.backToSettings",
+    },
+    // The tab this row lives in. It names the place without being a second
+    // one: the deep link above already opens the panel *at* this tab.
+    { labelKey: settingsSectionGroupLabelKey(section) },
+];
+
+/**
+ * An assistant profile: settings panel -> AI personalization -> profile list.
+ *
+ * Three ancestors rather than the entry page's one, and the nearest is the
+ * list. That is the whole correction: a profile belongs to a list, and the
+ * list belongs to a settings tab.
+ */
+/**
+ * The list's href, optionally asking it to restore a row.
+ *
+ * The id is placed in a query parameter and the list looks it up *against its
+ * own loaded profiles* — it is never interpolated into a selector, and an id
+ * naming nothing simply restores nothing. That is the whole handling: the
+ * parameter is a hint about which of the list's own rows to focus, so the
+ * worst a crafted value can do is fail to match.
+ */
+export const ASSISTANT_PROFILE_FOCUS_PARAM = "focus";
+
+export const assistantProfileListHref = (focusProfileId?: string) =>
+    focusProfileId
+        ? `${ASSISTANT_PROFILE_LIST_PATH}?${ASSISTANT_PROFILE_FOCUS_PARAM}=${encodeURIComponent(focusProfileId)}`
+        : ASSISTANT_PROFILE_LIST_PATH;
+
+export const assistantProfileHierarchy = (options?: {
+    /** Focused on return, when the visitor came from that profile. */
+    focusProfileId?: string;
+}): SettingsHierarchy => [
+    {
+        href: settingsSectionHref("assistants"),
+        labelKey: "settingsNav.settings",
+        backLabelKey: "settingsNav.backToSettings",
+    },
+    { labelKey: SETTINGS_TAB_LABEL_KEY.ai },
+    {
+        href: assistantProfileListHref(options?.focusProfileId),
+        labelKey: "assistantProfiles.pageTitle",
+        backLabelKey: "assistantProfiles.backToList",
+    },
+];
 
 export type SettingsDeepLink = {
     tab: AccountSettingsTab;

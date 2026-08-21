@@ -45,12 +45,45 @@ name, what it does, and where it currently stands.
 Which group a row belongs to is decided by what the feature *does*, not by
 which tab happened to exist first:
 
-| Section | Tab | Group |
-|---|---|---|
-| `assistants` | `ai` | `settingsNav.aiPersonalization` |
-| `memory` | `ai` | `settingsNav.aiPersonalization` |
-| `external-import` | `data` | `settingsNav.dataAndPersonalization` |
-| `account-data` | `data` | `settingsNav.dataAndPersonalization` |
+| Section | Tab | Tab name on screen | Group |
+|---|---|---|---|
+| `assistants` | `ai` | `settingsNav.aiPersonalization` | `settingsNav.profilesAndMemory` |
+| `memory` | `ai` | `settingsNav.aiPersonalization` | `settingsNav.profilesAndMemory` |
+| `external-import` | `data` | `auth.dataTab` | `settingsNav.dataAndPersonalization` |
+| `account-data` | `data` | `auth.dataTab` | `settingsNav.dataAndPersonalization` |
+
+**The tab id and the deep link are stable identifiers; the tab's name is not.**
+`ai` and `settings=ai` are what a bookmark carries and never change with the
+wording. The AI tab is called **AI personalization** on screen, and the group
+inside it is called **Profiles and memory** — named for what it holds, because
+a group repeating its tab's name says nothing.
+
+One key, not two: `SETTINGS_TAB_LABEL_KEY` is read by the tab strip *and* by
+the breadcrumb. Giving the tab its own `auth.aiTab` is what once put "AI
+settings" in the tab strip and "AI personalization" in the trail beneath it.
+
+## 2.1 Ancestry
+
+A page's ancestors are declared as data (`SettingsHierarchy`), and both the
+back link and the breadcrumb read that one array — the back link is its last
+entry, the trail is all of it. They cannot drift apart, because there is
+nothing to drift.
+
+| Page | Ancestors, nearest last |
+|---|---|
+| settings entry page (imports, memory, profile list) | settings panel |
+| a single assistant profile | settings panel → AI personalization → profile list |
+| create a profile, from the list | settings panel → AI personalization → profile list |
+| create a profile, from a conversation | the conversation (not a settings ancestor: rendered as a plain back link, never as a crumb) |
+
+Each ancestor carries **two** locale keys: `labelKey` for its crumb and
+`backLabelKey` for the whole back sentence. The sentence is not assembled from
+"Back to {name}" — Korean's particle changes with the noun before it, and every
+locale has some version of that problem.
+
+A profile detail page must not offer a link straight to the settings panel. It
+sits inside a list, and skipping the list is the mismatch this section exists
+to prevent.
 
 `SETTINGS_SECTION_TAB` in `lib/settingsNavigation.ts` is the single source of
 that mapping. Three things read it and must never be allowed to disagree: the
@@ -59,6 +92,30 @@ detail page's breadcrumb (`settingsSectionGroupLabelKey`). A breadcrumb that
 hard-codes one group name is a violation — it was correct only while every
 section lived in one tab, and it silently mislabels every page the moment one
 does not.
+
+Returning from a profile to the list may ask the list to restore a row, through
+a query parameter. The id is looked up **against the list's own loaded
+profiles** and never interpolated into a selector, so a value naming nothing
+restores nothing and a crafted one has nowhere to go. An id that no longer
+matches — a profile deleted from its own page — focuses the list heading rather
+than leaving focus on `<body>`.
+
+## 2.2 The model finder CTA
+
+The recommendation CTA belongs **inside** `settings-new-conversation-models`,
+below a divider, as a secondary action. It is not a setting of its own: it is
+another way to decide the combination directly above it, and standing between
+two cards as a full-width primary button is what made it read as a third
+top-level entry.
+
+Its wording must not assume a previous run — the settings screen cannot know
+whether this visitor has ever opened the finder. It uses `Sparkles`, the
+suggestion vocabulary, not the `Bot` that means a profile.
+
+If the combination has unsaved edits, the CTA states that they will be lost and
+offers continue or cancel. Saving on the visitor's behalf is **not** the
+handling: this panel's save sends every dirty field, so it would also persist a
+theme or language change nobody agreed to yet.
 
 Adding an entry with a detail page means adding it to `SETTINGS_SECTION_IDS`,
 naming its tab in `SETTINGS_SECTION_TAB`, and putting it in that tab's group —

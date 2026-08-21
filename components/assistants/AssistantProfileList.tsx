@@ -1,10 +1,12 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { AlertTriangle, Bot, Loader2, Plus } from "lucide-react";
 import { useLanguage } from "@/components/LanguageProvider";
+import { useSearchParams } from "next/navigation";
 import { SettingsDetailNav } from "@/components/settings/SettingsDetailNav";
+import { ASSISTANT_PROFILE_FOCUS_PARAM } from "@/lib/settingsNavigation";
 import { discardResponseBody } from "@/lib/discardResponseBody";
 
 /**
@@ -62,6 +64,9 @@ type ListState =
 export function AssistantProfileList() {
     const { t } = useLanguage();
     const [state, setState] = useState<ListState>({ status: "loading" });
+    const searchParams = useSearchParams();
+    const rowRefs = useRef(new Map<string, HTMLAnchorElement>());
+    const headingRef = useRef<HTMLHeadingElement | null>(null);
 
     const load = useCallback(async () => {
         try {
@@ -102,6 +107,33 @@ export function AssistantProfileList() {
         });
     }, [load]);
 
+    /**
+     * Restores the row the visitor came back from.
+     *
+     * The parameter is a *hint about one of this list's own rows*, never a
+     * selector and never a destination: the id is compared against the
+     * profiles already loaded, and one that matches nothing focuses nothing.
+     * So a crafted value has nowhere to go -- there is no string here that
+     * reaches `querySelector`, and no branch that navigates.
+     *
+     * A profile that was deleted from its own detail page is exactly the case
+     * that matches nothing, and the heading takes focus instead of leaving it
+     * on `<body>` with nothing announced.
+     */
+    const requestedFocusId = searchParams.get(ASSISTANT_PROFILE_FOCUS_PARAM);
+    useEffect(() => {
+        if (state.status !== "ready" || !requestedFocusId) return;
+        const target = state.profiles.find(
+            (profile) => profile.id === requestedFocusId
+        );
+        const node = target
+            ? rowRefs.current.get(target.id)
+            : headingRef.current;
+        if (!node) return;
+        node.focus();
+        node.scrollIntoView({ block: "center" });
+    }, [requestedFocusId, state]);
+
     const atCapacity =
         state.status === "ready" &&
         state.profiles.length >= state.maxProfilesPerAccount;
@@ -115,7 +147,14 @@ export function AssistantProfileList() {
             />
 
             <header className="mt-4">
-                <h1 className="text-2xl font-black">
+                <h1
+                    ref={headingRef}
+                    // Focusable only so it can receive focus programmatically
+                    // when the row a visitor came from is gone; it is not in
+                    // the tab order.
+                    tabIndex={-1}
+                    className="text-2xl font-black focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+                >
                     {t("assistantProfiles.pageTitle")}
                 </h1>
                 <p className="mt-2 text-sm leading-6 text-zinc-600 dark:text-zinc-400">
@@ -194,6 +233,10 @@ export function AssistantProfileList() {
                                     <Link
                                         href={`/settings/assistants/${profile.id}`}
                                         className={`${sectionClass} flex items-start gap-3 transition-colors hover:bg-zinc-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:hover:bg-zinc-900`}
+                                        ref={(node) => {
+                                            if (node) rowRefs.current.set(profile.id, node);
+                                            else rowRefs.current.delete(profile.id);
+                                        }}
                                         data-testid={`assistant-profile-${profile.id}`}
                                     >
                                         <span
