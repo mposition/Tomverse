@@ -239,6 +239,7 @@ export const ko = {
         undo: "실행 취소",
         reportError: "오류 신고",
         copyResponse: "답변 복사",
+        copyCode: "코드 복사",
         responseCopied: "복사됨",
         tryAnotherModelHint: "다른 모델을 선택해 다시 시도할 수도 있습니다.",
         guestQuotaLoginBenefitHint: "로그인하면 훨씬 더 많은 일일 사용량을 받고, 이 대화도 계정에 저장됩니다.",
