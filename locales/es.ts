@@ -1089,6 +1089,9 @@ export const es = {
     settingsNav: {
         navLabel: "Navegación de ajustes",
         backToSettings: "Volver a los ajustes",
+        backToChat: "Volver al chat",
+        backToChatShort: "Chat",
+        exitNavLabel: "Salir de los ajustes",
         settings: "Ajustes",
         dataAndPersonalization: "Gestión de datos",
         dataAndPersonalizationDescription: "Conversaciones importadas y exportación de datos de la cuenta. Cada uno se gestiona en su propia página.",

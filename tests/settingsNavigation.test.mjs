@@ -1,10 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  SETTINGS_HOME_PATH,
   SETTINGS_SECTION_IDS,
   SETTINGS_SECTION_TAB,
   isSettingsSectionId,
   parseSettingsDeepLink,
+  settingsExitHref,
   settingsSectionElementId,
   settingsSectionHref,
   stripSettingsDeepLink,
@@ -21,10 +23,19 @@ import {
   consumePendingAccountSettingsRequest,
   readAccountSettingsOpenRequest,
 } from "../lib/accountSettingsEvents.ts";
+import { de } from "../locales/de.ts";
 import { en } from "../locales/en.ts";
+import { es } from "../locales/es.ts";
+import { fr } from "../locales/fr.ts";
 import { ko } from "../locales/ko.ts";
+import { pt } from "../locales/pt.ts";
+import { zh } from "../locales/zh.ts";
 
 const LOCALES = { en, ko };
+// The exit control ships in every language the product speaks, so its copy is
+// checked in every language rather than in the two the rest of this file
+// happens to assert on.
+const ALL_LOCALES = { de, en, es, fr, ko, pt, zh };
 
 test("every entry with a detail page addresses the settings list, not the chat", () => {
   for (const section of SETTINGS_SECTION_IDS) {
@@ -187,12 +198,58 @@ test("a request nobody made is never replayed on the next mount", () => {
 
 test("no user-facing label promises a destination the link does not go to", () => {
   for (const [name, locale] of Object.entries(LOCALES)) {
-    // The two detail pages navigate up to settings, so the copy they use has
-    // to name settings -- and the chat-bound wording is gone from the bundle
-    // entirely, not merely unused.
+    // A detail page's own nav goes up to settings, so it names settings. The
+    // chat-bound wording it used to carry stays deleted from these
+    // namespaces: the one control that goes to the chat owns the only key
+    // that says so (settingsNav.backToChat).
     assert.equal(locale.externalImport.backToChat, undefined, name);
     assert.equal(locale.memoryReview.backToChat, undefined, name);
     assert.ok(locale.settingsNav.backToSettings, name);
+  }
+});
+
+test("the exit goes to the bare chat route, with nothing appended", () => {
+  // A settings deep link here would reopen the panel the visitor just asked
+  // to leave, so the exit href must not merely *start* with /chat.
+  assert.equal(settingsExitHref(), "/chat");
+  assert.equal(settingsExitHref(), SETTINGS_HOME_PATH);
+  assert.equal(parseSettingsDeepLink(""), null);
+
+  // And it is a different destination from every hierarchical back link, in
+  // both directions: no section href collapses to the exit, and the exit
+  // carries no section.
+  for (const section of SETTINGS_SECTION_IDS) {
+    assert.notEqual(settingsSectionHref(section), settingsExitHref());
+  }
+});
+
+test("both movements are named, in every language, and never share a phrase", () => {
+  for (const [name, locale] of Object.entries(ALL_LOCALES)) {
+    const { backToSettings, backToChat, backToChatShort, exitNavLabel } =
+      locale.settingsNav;
+
+    // One level up and all the way out are different movements; a locale that
+    // gives them the same words leaves two controls no one can tell apart.
+    assert.ok(backToSettings, name);
+    assert.ok(backToChat, name);
+    assert.notEqual(backToChat, backToSettings, name);
+
+    // The narrow-viewport rendering is the same control, so it stays part of
+    // the accessible name rather than a second, shorter phrase: WCAG 2.5.3
+    // asks that what is on screen appear in the name, and a speech-input user
+    // can only say what they can see.
+    assert.ok(backToChatShort, name);
+    assert.ok(backToChat.length >= backToChatShort.length, name);
+    assert.ok(
+      backToChat.toLowerCase().includes(backToChatShort.toLowerCase()),
+      `${name}: "${backToChatShort}" is not part of "${backToChat}"`
+    );
+
+    // The exit strip is its own landmark, so it cannot borrow the detail
+    // nav's name -- two "Settings navigation" entries in the landmark list
+    // are indistinguishable.
+    assert.ok(exitNavLabel, name);
+    assert.notEqual(exitNavLabel, locale.settingsNav.navLabel, name);
   }
 });
 
