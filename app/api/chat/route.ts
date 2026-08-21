@@ -17,13 +17,15 @@ import {
 import { conversationKindNotSupportedResponse, isChatConversationKind } from "@/lib/conversationKindGuard";
 import { prisma } from "@/lib/prisma";
 import {
-    AVAILABLE_MODELS,
     modelSupportsImageInput,
     modelSupportsNativePdfInput,
     type AiModel,
 } from "@/lib/models";
 import { buildTaskProfile } from "@/lib/taskProfileCore";
-import { scheduleRoutingShadowRun } from "@/lib/routingShadow";
+import {
+    isRouterShadowEnabled,
+    scheduleRoutingShadowRun,
+} from "@/lib/routingShadow";
 import { selectAutoModel } from "@/lib/autoModelSelection";
 import { decideAutoCohort } from "@/lib/autoCohort";
 import { decideDrillOverride } from "@/lib/autoDrillOverride";
@@ -948,9 +950,48 @@ async function handleChatPost(
         // attachment measurement above is skipped. The read never throws --
         // an input it could not fetch is unknown, and unknown has a defined
         // meaning in every criterion downstream.
-        const routerSignals = autoCohort.eligible
-            ? await getRouterRuntimeSignals()
-            : null;
+        //
+        // Read for a shadow turn too, not only a routable one. Shadow records
+        // what Auto *would* have chosen, and today the cohort refuses everyone
+        // -- so the turns shadow records are exactly the turns this would
+        // otherwise skip, and the recorded decision would be made without the
+        // health and signal inputs the real one uses.
+        const routerShadowEnabled = isRouterShadowEnabled();
+        const routerSignals =
+            autoCohort.eligible || routerShadowEnabled
+                ? await getRouterRuntimeSignals()
+                : null;
+        /**
+         * What the Router decides from, built once.
+         *
+         * Spread into the live selection and the shadow recorder both. They
+         * assembled these separately before, and had drifted: shadow read the
+         * static catalogue rather than the runtime registry, so it considered
+         * models an operator had disabled; it passed neither the health
+         * exclusions nor the tie-break signals; and it derived
+         * `webSearchRequested` from whether the *user's* model has a native
+         * search tool rather than from what the user asked for, which changes
+         * `needsCurrentInformation` and with it the candidate set.
+         *
+         * A shadow given different inputs measures a different router, and the
+         * rollout's exit condition is a comparison of its distribution against
+         * the live one. One object is what stops that happening again.
+         */
+        const routerCandidateInputs = {
+            // Runtime models, not the static catalogue: a model an operator has
+            // disabled must not be chosen and then refused two lines later by
+            // `assertModelRuntimeAvailable`.
+            models: runtimeModels.filter(
+                (model) => model.enabled && !model.catalogDeleted
+            ),
+            // Confirmed unavailable only. `degraded` stays a candidate and
+            // loses tie-breaks instead, and `unknown` -- every model nothing
+            // probes -- excludes nobody: uncertainty is not a verdict.
+            unhealthyModelIds: routerSignals?.unhealthyModelIds,
+            signals: routerSignals?.signals,
+            // What the user asked for, not what their model happens to support.
+            webSearchRequested: webSearchMode === "always",
+        };
         const autoSelection = selectAutoModel({
             requestedModelId,
             conversation: conversationRouting,
@@ -970,26 +1011,13 @@ async function handleChatPost(
                       mediaType: descriptor.mediaType,
                   }))
                 : [],
-            webSearchRequested: webSearchMode === "always",
-            // Runtime models, not the static catalogue: a model an operator has
-            // disabled must not be chosen and then refused two lines later by
-            // `assertModelRuntimeAvailable`.
-            models: runtimeModels.filter(
-                (model) => model.enabled && !model.catalogDeleted
-            ),
+            ...routerCandidateInputs,
             reservedInputTokens: preflightInputEstimate(messages).estimatedInputTokens,
             // The unfitted application cap. The filters fit it to each model's
             // own window; a figure already fitted to the requested model's
             // window would bias every other candidate against it.
             requestOutputCapTokens: resolveModelPricing(requestedModelConfig)
                 .maxOutputTokens,
-            // Confirmed unavailable only. `degraded` stays a candidate and
-            // loses tie-breaks instead, and `unknown` -- every model nothing
-            // probes -- excludes nobody: uncertainty is not a verdict, and
-            // treating it as one would take two thirds of the catalogue out of
-            // Auto for want of a probe.
-            unhealthyModelIds: routerSignals?.unhealthyModelIds,
-            signals: routerSignals?.signals,
         });
         const effectiveModelId = autoSelection.routed
             ? autoSelection.modelId
@@ -2112,7 +2140,7 @@ async function handleChatPost(
                             mediaType:
                                 "mediaType" in part ? part.mediaType : undefined,
                         })),
-                    webSearchRequested: nativeSearchEnabled,
+                    webSearchRequested: routerCandidateInputs.webSearchRequested,
                 }),
                 userSelectedModelId: modelConfig.id,
                 estimatedInputTokens,
@@ -2121,7 +2149,9 @@ async function handleChatPost(
                 // candidate's own window, and handing them the figure already
                 // fitted to the user's model would bias every other candidate.
                 requestOutputCapTokens: budget.maxOutputTokens,
-                models: AVAILABLE_MODELS,
+                models: routerCandidateInputs.models,
+                unhealthyModelIds: routerCandidateInputs.unhealthyModelIds,
+                signals: routerCandidateInputs.signals,
             };
         });
         const accessGrant = await acquireChatAccess(access, budget, {
