@@ -1458,6 +1458,18 @@ export function AuthButton({
                                         <button
                                             key={item.id}
                                             type="button"
+                                            // The stable handle for the tab. A
+                                            // test that clicks this place by
+                                            // its label breaks every time the
+                                            // label is rewritten -- which is
+                                            // how `account-model-settings`
+                                            // came to be looking for a tab
+                                            // called "AI settings" months
+                                            // after it stopped being called
+                                            // that. What the tab *says* is a
+                                            // separate contract, asserted by
+                                            // the settings IA spec.
+                                            data-testid={`settings-tab-${item.id}`}
                                             onClick={() => setActiveSettingsTab(item.id as typeof activeSettingsTab)}
                                             aria-pressed={isActive}
                                             className={`flex min-w-0 items-center justify-center gap-2 rounded-xl px-3 py-2 text-center text-sm font-semibold transition-colors md:justify-start md:text-left ${
