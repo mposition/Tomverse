@@ -34,6 +34,7 @@ UI-012에서 승인된 정책(B안)입니다. accent 색은 **hue가 아니라 �
 | AI Review | `accent-ai-review-start\|mid\|end-*`, `tomverse-accent-*`, `tomverse-review-*` | cyan → blue → purple |
 | Deep Research | `accent-deep-research-*` | violet |
 | 이미지 생성 | `accent-image-*` | fuchsia |
+| AI 생성 파일 | `accent-generated-artifact-*` | emerald |
 | Web Search | `accent-web-search-*` | sky |
 | Model Catalogue | `accent-model-catalogue-*` | purple |
 | Max plan | `accent-plan-max-*` | purple |
@@ -50,7 +51,8 @@ UI-012에서 승인된 정책(B안)입니다. accent 색은 **hue가 아니라 �
 2. **역할이 다르면 값이 같아도 token을 분리**합니다. `accent-promotion`과
    `status-success`는 오늘 둘 다 emerald지만 별개 결정이며, 한쪽을 바꿔도
    다른 쪽이 따라 움직여서는 안 됩니다. `accent-model-catalogue`와
-   `accent-plan-max`(둘 다 purple)도 같습니다.
+   `accent-plan-max`(둘 다 purple), `accent-generated-artifact`(세 번째
+   emerald)도 같습니다.
 3. **guarded 파일 안에서는 raw accent utility 금지.** `bg-violet-500`,
    `text-emerald-600` 같은 직접 지정 대신 역할 token을 씁니다. 대상 hue는
    `cyan`, `emerald`, `fuchsia`, `purple`, `sky`, `teal`, `violet`입니다.
@@ -568,6 +570,64 @@ default를 DB에 씁니다), 저장값 JSON 파싱 실패, schema 검증 실패.
   금지입니다.
 - **v1 flag는 staging 검증 전용입니다.** 멀티 모델 UX 완성 전 production
   공개 활성화 금지, Google 모델은 가격 검증 통과 전 활성화 금지.
+
+# AI 생성 파일 (Generated Artifact)
+
+채팅 답변이 만들어 내는 실제 파일 — tool 정의, 명세, 형식 표, 생성기, 저장,
+다운로드 권한, 수명주기 — 를 건드리기 전에 읽습니다.
+
+- `docs/policy/generated-artifacts.md`
+
+절대 조건:
+
+- **앱이 파일을 만들지 못했으면 만들었다고 말하지 않습니다.** 코드블록,
+  base64, sandbox 경로(`/mnt/data/...`), 가짜 링크는 파일의 대체물이 아닙니다.
+  파일 생성 요청의 결과는 다운로드 가능한 artifact이고, 안 되면 왜 안 되는지와
+  무엇을 하면 되는지를 말합니다.
+- **구조가 있는 형식에서 모델은 명세만 만들고 바이트는 서버가 만듭니다.**
+  tool은 형식마다가 아니라 종류마다 하나입니다 — `create_spreadsheet`,
+  `create_document`, `create_presentation`, `create_text_file`,
+  `create_archive`. 입력은 Zod로 검증된 명세이며, tool schema는 힌트일 뿐이라
+  `admit*Spec()`이 `execute` 안에서 다시 판정합니다. 명세에 `formula` 필드는
+  없고 writer는 `<f>` 요소를 쓰지 않습니다.
+- **소스 코드·마크업·설정은 모델이 텍스트를 직접 씁니다.** Python module에는
+  "그 텍스트"가 아닌 명세가 없기 때문이고, 대신 제한된 크기·이 앱이 정한
+  확장자·구조 검사(JSON·YAML·XML·SVG)·다운로드 전용 전달이 적용됩니다.
+  SVG의 `<script>`·event handler·`javascript:`는 거절합니다.
+- **형식은 표 하나입니다.** `lib/generatedArtifactFormats.ts`의
+  `ARTIFACT_FORMAT_TABLE`이 확장자·media type·kind·검증·label을 함께 정합니다.
+  형식 추가는 표의 행 하나 + `lib/generatedArtifactRenderers.ts`의 분기 하나 +
+  migration의 `format` CHECK뿐이고, 그 밖의 어디에도 형식별 분기를 만들지
+  않습니다.
+- **실행되는 형식은 만들지 않습니다**(`REFUSED_ARTIFACT_EXTENSIONS`). 기준은
+  "열면 실행되는가"이므로 `.sh`·`.ps1`·`.py`는 지원하고 `.exe`·`.msi`·`.bat`은
+  거절합니다. 같은 목록이 아카이브 항목에도 적용되므로 zip으로 우회할 수
+  없습니다. 아카이브 경로는 정규화하지 않고 **거절**합니다.
+- **조용한 퇴행이 없습니다.** 모든 turn이 artifact system block을 하나 싣고,
+  tool을 못 쓰는 turn은 그 사실을 말하라고 지시받습니다. 가용성 판정은
+  `planGeneratedArtifactTool()` 한 곳이며, 검증되지 않은 모델은 fail-closed
+  입니다(`ARTIFACT_TOOL_CAPABILITIES`).
+- **게스트는 MVP에서 파일을 만들 수 없습니다.** tool은 등록되지만 즉시
+  거절하고, UI는 `blocked` 카드와 로그인 CTA를 보여 줍니다. 표·코드로 대신하지
+  않습니다.
+- **생성은 객체 먼저·행 나중, 삭제는 행 먼저·객체 나중**입니다. 행은 assistant
+  메시지와 같은 트랜잭션에서 쓰고, 메시지를 쓰지 못한 모든 종료 경로는
+  `releaseSafely()`에서 객체를 회수하며, tombstone queue와 orphan sweep이
+  15분 cron에서 나머지를 정리합니다.
+- **`objectKey`·저장소 URL·서명 URL은 클라이언트에 가지 않습니다.**
+  클라이언트가 보는 것은 `ChatStreamArtifact` allowlist뿐이고, 다운로드는
+  `GET /api/artifacts/{id}` 하나뿐입니다. 모델이 만든 URL은 다운로드 URL이
+  아닙니다.
+- **소유권·잠금 실패는 전부 404**입니다(잠금만 423). 조회 자체가 `userId`로
+  범위를 잡으므로 "없음"과 "남의 것"을 구분할 분기가 존재하지 않습니다.
+- **web search와의 충돌은 검색이 이깁니다.** 강제된 native 검색
+  (`toolChoice: "required"`)과 Google grounding에서는 artifact tool을 등록하지
+  않습니다. Anthropic 검색은 공존합니다.
+- **요청한 형식으로 만듭니다.** xlsx를 csv로, docx를 md로 대체하지 않습니다.
+  표에 없는 확장자는 지원하지 않는다고 말합니다.
+- **billing의 `allowDownloads`를 재사용하지 않습니다.** 그 권한은 대화 TXT
+  내보내기의 것이며, 생성 파일은 로그인한 모든 계정이 쓸 수 있습니다:
+  docs/policy/generated-artifacts.md §11.
 
 # Trace 기반 오류 신고 자동화
 

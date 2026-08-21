@@ -27,6 +27,10 @@ import { ModelLogo } from "@/components/chat/ModelLogo";
 import { useLanguage } from "@/components/LanguageProvider";
 import { useModelCatalog } from "@/components/ModelCatalogProvider";
 import { FeedbackButton } from "@/components/chat/FeedbackButton";
+import {
+  GeneratedArtifactList,
+  GeneratedArtifactPending,
+} from "@/components/chat/GeneratedArtifactCard";
 import { writePendingGuestImportIntent } from "@/lib/guestImport";
 import {
   nextModeForUserScroll,
@@ -267,7 +271,7 @@ export function ChatMessageList({
   isSending = false,
   onStopGenerating,
 }: ChatMessageListProps) {
-  const { models: AVAILABLE_MODELS } = useModelCatalog();
+  const { models: AVAILABLE_MODELS, getModel } = useModelCatalog();
   const containerRef = useRef<HTMLDivElement | null>(null);
   const previousLastUserMessageIdRef = useRef<string | null>(null);
   const previousMessageCountRef = useRef(0);
@@ -826,6 +830,38 @@ export function ChatMessageList({
                             String(msg.memoryUsedCount)
                           )}
                         </p>
+                      )}
+                    {/*
+                      The files this answer produced
+                      (docs/policy/generated-artifacts.md section 9).
+
+                      Below the body, never inside it: the answer is a short
+                      sentence about the file and the card is the file itself,
+                      so putting the card in the prose would be the second
+                      copy of the same thing this feature exists to remove.
+
+                      The pending row additionally requires the panel to be
+                      actively streaming this message, so a cancelled or failed
+                      turn cannot leave a spinner behind for work that stopped.
+                    */}
+                    {!isUser && msg.artifacts && msg.artifacts.length > 0 && (
+                      <GeneratedArtifactList
+                        artifacts={msg.artifacts}
+                        modelNameFor={(modelId) =>
+                          getModel(modelId)?.name ?? modelId
+                        }
+                        fallbackModelId={msg.modelId ?? null}
+                        onRetry={onRetryLast}
+                        isGuestMode={isGuestMode}
+                      />
+                    )}
+                    {!isUser &&
+                      isActivelyGenerating &&
+                      msg.isGeneratingArtifact &&
+                      !msg.artifacts?.length && (
+                        <GeneratedArtifactPending
+                          format={msg.generatingArtifactFormat}
+                        />
                       )}
                     {msg.searchMetadata && msg.searchMetadata.citations.length > 0 && (
                       <div

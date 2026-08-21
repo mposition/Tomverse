@@ -33,6 +33,7 @@ import { monitorInfrastructureThresholdsIfDue } from "@/lib/infrastructureThresh
 import { drainNotificationDeliveriesQuietly } from "@/lib/notificationDeliveryJob";
 import { reconcileProcessingRefundRequestsQuietly } from "@/lib/refundReconciliation";
 import { runImageAssetMaintenanceQuietly } from "@/lib/imageAssetLifecycle";
+import { runGeneratedArtifactMaintenanceQuietly } from "@/lib/generatedArtifactStorage";
 
 const isAuthorized = (request: Request) => {
   const configured = process.env.MAINTENANCE_SECRET;
@@ -108,6 +109,11 @@ export async function POST(request: Request) {
     // died). It never throws, so it cannot turn a successful reconciliation
     // into a failed one.
     const imageAssets = await runImageAssetMaintenanceQuietly();
+    // The same two arms for generated files: drain the deletion tombstones
+    // against object storage, then reclaim objects whose row write never
+    // landed. Never throws, so it cannot turn a successful reconciliation
+    // into a failed one (docs/policy/generated-artifacts.md section 8).
+    const generatedArtifacts = await runGeneratedArtifactMaintenanceQuietly();
     // Staged external-import payloads carry user conversation content and a
     // 24h-idle / 72h-absolute lifetime (policy §5.5). The lazy checks in
     // batch/finalize are the primary guard; this sweep clears content whose
@@ -187,6 +193,7 @@ export async function POST(request: Request) {
         refundRequests,
         requestLeases,
         imageAssets,
+        generatedArtifacts,
         externalImportStaging,
         memoryExtractionProviderCalls,
         memoryExtractionDispatch,
@@ -203,6 +210,7 @@ export async function POST(request: Request) {
         refundRequests,
         requestLeases,
         imageAssets,
+        generatedArtifacts,
         externalImportStaging,
         memoryExtractionProviderCalls,
         memoryExtractionDispatch,

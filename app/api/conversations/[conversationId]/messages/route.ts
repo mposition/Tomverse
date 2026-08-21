@@ -14,6 +14,7 @@ import {
   consumeApiRateLimit,
   readLimitedJson,
 } from "@/lib/apiSecurity";
+import { enqueueArtifactCleanupForMessages } from "@/lib/generatedArtifactStorage";
 
 const modelIdSchema = z
   .string()
@@ -170,6 +171,15 @@ export async function DELETE(
         }
 
         await prisma.$transaction(async (tx) => {
+            // DB-first tombstone, before the cascade takes the rows with it:
+            // MessageArtifact cascades from Message, so after the delete there
+            // is nothing left to read the object keys from
+            // (docs/policy/generated-artifacts.md section 8).
+            await enqueueArtifactCleanupForMessages(tx, {
+                conversationId,
+                modelId: parsedModelId.data,
+                role: "assistant",
+            });
             const deletedSources = await tx.message.deleteMany({
                 where: {
                     conversationId,

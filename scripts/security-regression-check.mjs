@@ -1421,6 +1421,172 @@ const checks = [
     },
   },
   {
+    name: "The workbook writer cannot emit a formula, a macro or an external link",
+    file: "lib/generatedArtifactXlsx.ts",
+    test: (source) => {
+      // Comments stripped first, and deliberately: the file's own header
+      // *names* these parts to explain why they are absent, so matching the
+      // raw text would fail on the documentation rather than on the code.
+      const code = source
+        .replace(/\/\*[\s\S]*?\*\//g, "")
+        .replace(/^\s*\/\/.*$/gm, "");
+      // The formula defence is structural: OOXML evaluates `<f>` and nothing
+      // else, so a writer with no `<f>` in it cannot produce a spreadsheet
+      // that executes anything. Same for the parts that would make a workbook
+      // fetch or run something when it is opened.
+      return (
+        !code.includes("<f>") &&
+        !code.includes("<f ") &&
+        !code.includes("vbaProject") &&
+        !code.includes("externalLink") &&
+        !code.includes("connections.xml") &&
+        !code.includes("relationships/hyperlink") &&
+        // And the forced-text style stays a real quotePrefix attribute rather
+        // than a comment claiming one.
+        code.includes('quotePrefix="1"')
+      );
+    },
+  },
+  {
+    name: "A model cannot ask for a formula, and its input is re-checked server-side",
+    file: "lib/generatedArtifactTool.ts",
+    test: (source) => {
+      const code = source
+        .replace(/\/\*[\s\S]*?\*\//g, "")
+        .replace(/^\s*\/\/.*$/gm, "");
+      // The provider is handed a JSON schema; nothing guarantees it enforces
+      // one. The admission inside `execute` is what actually decides, so every
+      // tool must route through the handler table's `admit` rather than
+      // trusting the parsed input -- and each of the five must be in it.
+      const admissions = [
+        "admitWorkbookSpecSafely",
+        "admitDocumentSpec",
+        "admitPresentationSpec",
+        "admitTextFileSpec",
+        "admitArchiveSpec",
+      ];
+      return (
+        admissions.every((admission) => code.includes(`admit: ${admission},`)) &&
+        code.includes("const admission = handler.admit(rawInput);") &&
+        code.includes("inputSchema: workbookSpecSchema") &&
+        code.includes("inputSchema: documentSpecSchema") &&
+        code.includes("inputSchema: presentationSpecSchema") &&
+        code.includes("inputSchema: textFileSpecSchema") &&
+        code.includes("inputSchema: archiveSpecSchema") &&
+        // Nothing the model is handed back may address the stored object.
+        !code.includes("objectKey:") &&
+        !code.includes("createR2ReadUrl")
+      );
+    },
+  },
+  {
+    name: "No generated format is one that runs when it is opened",
+    file: "lib/generatedArtifactFormats.ts",
+    test: (source) => {
+      const code = source
+        .replace(/\/\*[\s\S]*?\*\//g, "")
+        .replace(/^\s*\/\/.*$/gm, "");
+      // The refusal has to be a list the code can state, not an absence: a
+      // format nobody thought about is how ".exe" becomes "sure, here you go".
+      // The same list governs archive entries, so a zip cannot deliver what a
+      // direct request is refused.
+      const refused = ["exe", "dll", "bat", "cmd", "msi", "vbs", "reg", "hta"];
+      const refusedBlock = code.slice(
+        code.indexOf("REFUSED_ARTIFACT_EXTENSIONS")
+      );
+      return (
+        refused.every((extension) => refusedBlock.includes(`"${extension}"`)) &&
+        // And none of them may also appear as a generated format.
+        !refused.some((extension) =>
+          code.includes(`id: "${extension}"`) ||
+          code.includes(`text("${extension}"`)
+        )
+      );
+    },
+  },
+  {
+    name: "Authored text is validated, and an archive entry cannot escape the archive",
+    file: "lib/generatedArtifactText.ts",
+    test: (source) => {
+      const code = source
+        .replace(/\/\*[\s\S]*?\*\//g, "")
+        .replace(/^\s*\/\/.*$/gm, "");
+      // Every archive entry goes through the same admission a direct request
+      // does -- same extension table, same structural check, same ceiling --
+      // and an SVG carrying script is refused rather than sanitised.
+      return (
+        code.includes("admitTextContent({") &&
+        code.includes("findSvgScript(") &&
+        code.includes("<script") &&
+        code.includes("foreignObject") &&
+        code.includes("javascript") &&
+        // Paths are decided at admission and never rewritten here.
+        !code.includes("replace(/\\.\\./g")
+      );
+    },
+  },
+  {
+    name: "A generated document or deck carries no link, field or remote data",
+    file: "lib/generatedArtifactDocx.ts",
+    test: (source) => {
+      const code = source
+        .replace(/\/\*[\s\S]*?\*\//g, "")
+        .replace(/^\s*\/\/.*$/gm, "");
+      // Structural, like the workbook's `<f>` rule: a writer that never emits
+      // a field or a hyperlink relationship cannot produce a document that
+      // fetches or runs anything when it is opened.
+      return (
+        !code.includes("w:fldChar") &&
+        !code.includes("w:instrText") &&
+        !code.includes("relationships/hyperlink") &&
+        !code.includes("relationships/oleObject") &&
+        !code.includes("vbaProject")
+      );
+    },
+  },
+  {
+    name: "A generated PDF has no action, no script and no embedded file",
+    file: "lib/generatedArtifactPdf.ts",
+    test: (source) => {
+      const code = source
+        .replace(/\/\*[\s\S]*?\*\//g, "")
+        .replace(/^\s*\/\/.*$/gm, "");
+      // PDF's own execution surfaces. None of them is written, so none of them
+      // can be present.
+      return (
+        !code.includes("/JavaScript") &&
+        !code.includes("/OpenAction") &&
+        !code.includes("/AA") &&
+        !code.includes("/Launch") &&
+        !code.includes("/EmbeddedFile") &&
+        !code.includes("/URI")
+      );
+    },
+  },
+  {
+    name: "An artifact download is scoped by owner and cannot destroy its own file",
+    file: "app/api/artifacts/[artifactId]/route.ts",
+    test: (source) => {
+      const code = source
+        .replace(/\/\*[\s\S]*?\*\//g, "")
+        .replace(/^\s*\/\/.*$/gm, "");
+      // Ownership is part of the lookup, so there is no branch that could tell
+      // "not yours" from "not there" -- and no signed URL is ever minted, so a
+      // key cannot leak by being turned into a link.
+      return (
+        code.includes("where: { id: artifactId, userId }") &&
+        code.includes("hasConversationUnlockGrant(") &&
+        // The non-destructive read: `readR2Object` deletes on a metadata
+        // mismatch, which would destroy a file the user paid for.
+        code.includes("readOwnR2ObjectBytes(") &&
+        !code.includes("readR2Object(") &&
+        !code.includes("createR2ReadUrl") &&
+        code.includes('"X-Content-Type-Options": "nosniff"') &&
+        code.includes('"Cache-Control": "private, no-store"')
+      );
+    },
+  },
+  {
     name: "Stale image recovery can reclaim a stranded settlement",
     file: "lib/imageGenerationService.ts",
     test: (source) =>

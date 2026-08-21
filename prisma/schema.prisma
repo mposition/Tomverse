@@ -69,6 +69,7 @@ model User {
   creditDebtEntries                  CreditDebtEntry[]
   chatCreditReservations             ChatCreditReservation[]
   imageGenerations                   ImageGeneration[]
+  messageArtifacts                   MessageArtifact[]
   imageGenerationGroups              ImageGenerationGroup[]
   imageCreditReservations            ImageCreditReservation[]
   memoryExtractionCreditReservations MemoryExtractionCreditReservation[]
@@ -292,6 +293,7 @@ model Conversation {
   shareRevokedAt DateTime?
 
   messages              Message[]
+  messageArtifacts      MessageArtifact[]
   comparisonReviews     ComparisonReview[]
   imageGenerations      ImageGeneration[]
   imageGenerationGroups ImageGenerationGroup[]
@@ -344,6 +346,13 @@ model Message {
   memoryUsedCount Int?
   memoryTokens    Int?
 
+  /// Files this answer produced (docs/policy/generated-artifacts.md). Empty
+  /// for every message written before the feature and for every message that
+  /// asked for no file, which is almost all of them -- an artifact is an
+  /// addition to an answer, never a replacement for one, so a message with
+  /// none is a complete message.
+  artifacts MessageArtifact[]
+
   conversationId String
   conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
   createdAt      DateTime     @default(now())
@@ -367,6 +376,83 @@ model MessageProviderContext {
   createdAt        DateTime @default(now())
 
   @@index([modelId])
+}
+
+/// One file an assistant answer produced, and the record that authorises its
+/// download. Policy: docs/policy/generated-artifacts.md.
+///
+/// `userId` and `conversationId` are stored rather than reached through
+/// `message`, and that redundancy is the point: the download route checks
+/// ownership before it has any reason to trust the message row, and a join it
+/// has to perform first is a join whose absence is a 500 rather than a 404.
+/// Both carry their own cascade, so deleting either the account or the
+/// conversation removes the row.
+///
+/// The bytes are not here. They are in object storage under `objectKey`, which
+/// never leaves the server: the client is given the row id and asks
+/// `/api/artifacts/{id}` for the file (policy section 5).
+model MessageArtifact {
+  id String @id @default(cuid())
+
+  messageId String
+  message   Message @relation(fields: [messageId], references: [id], onDelete: Cascade)
+
+  conversationId String
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  /// Position within the turn. Together with `messageId` this is the
+  /// idempotency key: a provider retry that replays the same tool call writes
+  /// the same (messageId, ordinal) and is refused by the unique index rather
+  /// than producing a second copy of the same file.
+  ordinal Int @default(0)
+
+  /// xlsx | csv -- SUPPORTED_ARTIFACT_FORMATS in lib/generatedArtifactCore.ts,
+  /// with the allowlist CHECK in the migration.
+  format    String
+  filename  String
+  mediaType String
+  byteSize  Int    @default(0)
+
+  /// ready | failed. NULL objectKey exactly when the row is not `ready`; the
+  /// migration's CHECK enforces the pairing, so a "ready" artifact that points
+  /// at nothing cannot be written at all.
+  status      String  @default("ready")
+  objectKey   String? @unique
+  /// ArtifactFailureCode, when status is `failed`.
+  failureCode String?
+
+  /// Which model's answer produced it. Denormalised from the message on
+  /// purpose: a comparison turn writes several messages and several artifacts,
+  /// and the card has to name the right model for each without a second read.
+  modelId String?
+
+  createdAt DateTime @default(now())
+
+  @@unique([messageId, ordinal])
+  @@index([conversationId, createdAt])
+  @@index([userId, createdAt])
+}
+
+/// DB-first deletion tombstone for generated artifacts, mirroring
+/// `ImageAssetCleanup` and for the same reason: the row and the object cannot
+/// be removed in one transaction, so the row's removal enqueues the object's
+/// and the maintenance sweep drains the queue. Object storage is never deleted
+/// ahead of the database.
+model MessageArtifactCleanup {
+  id          String    @id @default(cuid())
+  objectKey   String    @unique
+  /// conversation_deleted | account_deleted | message_deleted | storage_rollback
+  reason      String
+  attempts    Int       @default(0)
+  lastError   String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  completedAt DateTime?
+
+  @@index([completedAt, createdAt])
 }
 
 model ComparisonReview {

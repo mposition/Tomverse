@@ -57,6 +57,20 @@ const REGISTRY = {
     reason:
       "Manual or Auto, per conversation (routing policy \u00a75). The application reads an unrecognised stored value as manual, so a mode the constraint allows but the list does not know would silently route nobody rather than fail loudly \u2014 which is exactly the drift this check exists to catch.",
   },
+  MessageArtifact_format_check: {
+    owner: "list",
+    module: "lib/generatedArtifactCore.ts",
+    list: "SUPPORTED_ARTIFACT_FORMATS",
+    reason:
+      "The fifty-eight formats a generator actually exists for, built from the format table in lib/generatedArtifactFormats.ts (docs/policy/generated-artifacts.md). REFUSED_ARTIFACT_EXTENSIONS beside it is the opposite list -- extensions the product refuses outright -- and neither it nor any format without a generator may reach the constraint, because a row here claims a file the download route can serve.",
+  },
+  MessageArtifact_status_check: {
+    owner: "list",
+    module: "lib/generatedArtifactCore.ts",
+    list: "PERSISTED_ARTIFACT_STATUSES",
+    reason:
+      "ready and failed. ARTIFACT_STATUSES beside it carries a third value, `blocked`, which is a live-stream state for a guest who has not signed in: there is no account to write a row under, so a third database value would be a status nothing could ever query for. The split is what keeps the constraint and the transport union from being forced to agree about a state only one of them has.",
+  },
   Conversation_memoryMode_check: {
     owner: "list",
     module: "lib/conversationMemoryMode.ts",

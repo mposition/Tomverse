@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
+import { createRequire } from "node:module";
 import { after, before, beforeEach, mock, test } from "node:test";
 import { pathToFileURL } from "node:url";
 import { resolve } from "node:path";
@@ -64,8 +65,15 @@ type StreamScript = {
 let script: StreamScript = { text: "an answer", queries: 0, outputTokens: 120 };
 let streamTextCalls = 0;
 
+const require = createRequire(import.meta.url);
+
+// Only `streamText` is replaced. The rest of the module is spread back in
+// because the route also uses `tool()` and `stepCountIs()` to register the
+// generated-artifact tools, and a mock that dropped them would fail the turn
+// for a reason that has nothing to do with search settlement.
 mock.module("ai", {
   namedExports: {
+    ...(require("ai") as Record<string, unknown>),
     streamText: () => {
       streamTextCalls += 1;
       const text = script.text;
