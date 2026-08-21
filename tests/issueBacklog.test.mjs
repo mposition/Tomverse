@@ -345,7 +345,11 @@ test("an unresolved probe that names a blocker is not open work", () => {
     facts({ readFile: () => "export const DEFAULT_BILLING_PRICE_CATALOG = {};" })
   );
   assert.equal(result.verdict, VERDICTS.BLOCKED);
-  assert.match(result.blockedOn, /AppSetting\.billingPriceCatalog/);
+  // What it is waiting for, not merely that it is waiting. The catalogue half
+  // of #637 is finished, so a blocker still naming the AppSetting read would
+  // send the next session to re-do work that is already recorded.
+  assert.match(result.blockedOn, /Stripe reads only/);
+  assert.match(result.blockedOn, /BillingPlan\.stripePriceId/);
 });
 
 test("a blocked issue is kept out of the candidate list", () => {
