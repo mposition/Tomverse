@@ -6,7 +6,7 @@ import { resolve } from "node:path";
 // `/api/ready`, driven as the load balancer drives it.
 //
 // This endpoint decides whether a deployment receives traffic. Its contract is
-// a conjunction -- four dependencies, any one of which must sink the verdict --
+// a conjunction -- five dependencies, any one of which must sink the verdict --
 // and the failure mode is a check that gets computed and then not folded in:
 // the body lists a dependency as broken while `ok` stays true and the platform
 // keeps routing to it.
@@ -77,6 +77,32 @@ mock.module(mod("lib/imageProviderBudgetReadiness.ts"), {
     },
 });
 
+/**
+ * The sending-identity readiness the route folds in.
+ *
+ * Mocked rather than driven through the real environment: the resolver falls
+ * back to a compiled address when nothing is configured, so a live read is
+ * always ready and the refusal branch would never be exercised here.
+ */
+let sendingIdentityReady = true;
+mock.module(mod("lib/emailSendingIdentity.ts"), {
+    namedExports: {
+        getSendingIdentityReadiness: () => ({
+            ready: sendingIdentityReady,
+            errors: sendingIdentityReady
+                ? []
+                : [
+                      {
+                          severity: "error",
+                          code: "STREAMS_SHARE_A_DOMAIN",
+                          message: "marketing shares the transactional domain",
+                      },
+                  ],
+            warnings: [],
+        }),
+    },
+});
+
 /** Dependency reports the route files after answering. */
 let reported: Array<{ dependency: string; healthy: boolean }> = [];
 mock.module(mod("lib/operationalMonitoring.ts"), {
@@ -125,6 +151,7 @@ beforeEach(() => {
     securityChecks = { stripeLiveMode: true };
     providerBudgetReady = true;
     imageBudget = { ready: true, flagEnabled: false };
+    sendingIdentityReady = true;
     setNodeEnv(originalNodeEnv);
 });
 
@@ -140,6 +167,7 @@ type ReadinessBody = {
         securityEnvironment: boolean;
         providerBudgets: boolean;
         imageProviderBudget: boolean;
+        emailSendingIdentity: boolean;
     };
     traceId: string;
 };
@@ -165,6 +193,7 @@ test("a healthy deployment is ready, and says which checks passed", async () => 
         securityEnvironment: true,
         providerBudgets: true,
         imageProviderBudget: true,
+        emailSendingIdentity: true,
     });
     assert.ok(body.traceId, "a trace id ties the answer to the reports");
     // Only sent when refusing traffic; a load balancer reads it.
@@ -200,6 +229,12 @@ test("each dependency alone sinks the verdict, and the others still report", asy
                 imageBudget = { ready: false, flagEnabled: true };
             },
         },
+        {
+            name: "emailSendingIdentity",
+            arrange: () => {
+                sendingIdentityReady = false;
+            },
+        },
     ];
 
     for (const { name, arrange } of cases) {
@@ -209,6 +244,7 @@ test("each dependency alone sinks the verdict, and the others still report", asy
         securityChecks = { stripeLiveMode: true };
         providerBudgetReady = true;
         imageBudget = { ready: true, flagEnabled: false };
+        sendingIdentityReady = true;
         setNodeEnv(originalNodeEnv);
         arrange();
 
@@ -226,7 +262,7 @@ test("each dependency alone sinks the verdict, and the others still report", asy
         await runDeferred();
         assert.equal(
             reported.length,
-            4,
+            5,
             "every dependency is reported, not only the failing one"
         );
     }
