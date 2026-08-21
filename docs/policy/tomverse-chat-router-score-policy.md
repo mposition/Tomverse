@@ -207,20 +207,45 @@ reader to discover.
   accepts them and passes them through; no caller supplies them yet, so they
   abstain. Wiring `lib/modelHealthRollup.ts` and the output-token telemetry is
   a separate change with its own freshness questions.
-- **Passing the web-search filter is not proof of a search path.** The filter
-  in `lib/routerCandidates.ts` checks the *declared* capability only — the
-  register says `native`, `search-model`, `unverified` or `unsupported`. A
+- **Passing the web-search filter is not proof of a search path, and the
+  remaining half is a product decision.** The filter in
+  `lib/routerCandidates.ts` checks the *declared* capability — the register
+  says `native`, `search-model`, `unverified` or `unsupported`. A
   `search-model` searches as part of ordinary completion, but a `native` model
   only actually searches when the dispatch also sets `webSearchMode` to
-  `always`, builds its tool configuration successfully, and reserves the search
-  surcharge. The precise invariant is therefore
+  `always`, builds its tool configuration, and reserves the search surcharge.
+  The invariant is
 
   > `needsCurrentInformation` → `search-model`, **or** an approved native tool
   > configuration together with a successful search-cost reservation
 
-  and its second half is an attempt-preflight check, not a candidate filter:
-  the filter runs before there is an attempt to configure or a cost to
-  reserve. Recorded here so the two halves are not mistaken for one, and so
-  nobody closes the second by tightening the first.
+  and its second half is an attempt-preflight fact, not a filter one: the
+  filter runs before there is an attempt to configure or a cost to reserve.
+
+  It is now computed there. `resolveAttemptSearchPath()`
+  (`lib/webSearchPath.ts`) answers it from what the attempt actually carries —
+  read off the built plan rather than rebuilt, so the check cannot pass for a
+  request that dispatched no tools — and every plan carries the answer, with a
+  fixed identifier for which half failed.
+
+  Two of the three cases are closed:
+
+  - a turn whose primary offered a provider-native tool never falls back at
+    all, which `lib/autoFallbackGate.ts` already enforced: a search may have
+    run and been surcharged by then;
+  - a turn whose primary was a `search-model` may fall back, and now refuses a
+    candidate that would answer from training data instead. §10's rule that a
+    fallback may not silently change what the user was allowed to get reads in
+    this direction too.
+
+  What stays open is the primary of a routed turn whose profile needs the web
+  while the account's web search mode is `auto` or `off`. The filter admitted a
+  native model *because* it can search; on that turn it will not. The dispatch
+  records it (`chat_auto_search_path_missing`, model id and gap identifier
+  only) and answers anyway, because the alternatives — refusing a turn the user
+  would rather have answered imperfectly, or switching search on for someone
+  who set the mode to `off` and billing them the surcharge — are product
+  decisions with a cost either way. Recorded rather than chosen here.
+
 - **`ROUTE-01` has not run.** Nothing here may be described as accurate; it can
   only be described as defined.

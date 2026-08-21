@@ -42,6 +42,12 @@ import { getModelGenerationSettings } from "@/lib/modelGenerationCompatibility";
 import { getWebSearchCapability } from "@/lib/webSearchCapability";
 import { getWebSearchSurchargeCredits } from "@/lib/webSearchCredits";
 import {
+    hasSearchPath,
+    resolveAttemptSearchPath,
+    type AttemptSearchPath,
+    type SearchPathGap,
+} from "@/lib/webSearchPath";
+import {
     buildWebSearchToolConfig,
     type WebSearchToolConfig,
 } from "@/lib/webSearchToolConfig";
@@ -69,6 +75,7 @@ export const ATTEMPT_BOUND_FIELDS = [
     "budget",
     "outputBudget",
     "searchSurchargeCredits",
+    "searchPath",
 ] as const;
 
 export type AttemptExecutionRequest = {
@@ -79,6 +86,26 @@ export type AttemptExecutionRequest = {
     traceId: string;
     /** 0 for the primary. Keys the provider usage capture -- see below. */
     attemptIndex: number;
+    /**
+     * Refuse a candidate that cannot actually search.
+     *
+     * Off by default, because most turns do not need the web and refusing on
+     * an axis the turn never used would only lose the answer. The caller turns
+     * it on for a turn whose answer depended on a search -- in practice, a
+     * fallback for a primary that had a search path, where the rule in
+     * `docs/policy/tomverse-chat-routing.md` §10 that a fallback may not
+     * silently change what the user was allowed to get reads in both
+     * directions: a searching turn must not quietly continue on a model that
+     * will answer from training data instead.
+     *
+     * `lib/autoFallbackGate.ts` already refuses to fall back at all once a
+     * provider-native tool was offered, since a search has been executed and
+     * surcharged by then. This covers the case that gate does not: a
+     * `search-model` primary, where nothing was offered and nothing was
+     * surcharged, so falling back is allowed and the search path can be lost
+     * on the way.
+     */
+    requireSearchPath?: boolean;
 };
 
 export type AttemptExecutionPlan = {
@@ -96,6 +123,14 @@ export type AttemptExecutionPlan = {
     maxOutputTokens: number;
     nativeSearchEnabled: boolean;
     webSearchToolConfig: WebSearchToolConfig | null;
+    /**
+     * Whether this attempt can actually search, and why not when it cannot.
+     *
+     * Computed from what the plan really carries rather than from the
+     * capability register alone: passing the Router's web-search filter says
+     * the model *may* search, and this says whether this dispatch *will*.
+     */
+    searchPath: AttemptSearchPath;
     generationSettings: ReturnType<typeof getModelGenerationSettings>;
     searchSurchargeCredits: number;
     /**
@@ -112,6 +147,12 @@ export type AttemptExecutionPlan = {
 };
 
 export type AttemptExecutionRefusal =
+    | {
+          kind: "search_path_unavailable";
+          modelId: string;
+          /** Which half of the invariant failed. A fixed identifier. */
+          gap: SearchPathGap;
+      }
     | {
           kind: "context_window_exceeded";
           modelId: string;
@@ -151,6 +192,34 @@ export const planAttemptExecution = (
         request.webSearchMode ?? "off",
         capability
     );
+    // Built once and read, never rebuilt: the tool configuration this attempt
+    // will dispatch is the same object the search-path check is answered from,
+    // so the check cannot pass for a request that carried no tools.
+    const webSearchToolConfig = nativeSearchEnabled
+        ? buildWebSearchToolConfig(capability)
+        : null;
+    const searchPath = resolveAttemptSearchPath({
+        support: capability.support,
+        webSearchMode: request.webSearchMode,
+        toolConfigBuilt: webSearchToolConfig !== null,
+        surchargeCredits: searchSurchargeCredits,
+    });
+
+    // Before the budget, deliberately. A candidate that cannot answer the
+    // question is not a candidate whose price is interesting, and refusing it
+    // here keeps the reason "it cannot search" rather than whatever the budget
+    // would have said next.
+    if (request.requireSearchPath === true && !hasSearchPath(searchPath)) {
+        return {
+            ok: false,
+            refusal: {
+                kind: "search_path_unavailable",
+                modelId: modelConfig.id,
+                gap: (searchPath as Extract<AttemptSearchPath, { kind: "none" }>)
+                    .gap,
+            },
+        };
+    }
 
     let budget: ChatBudget;
     try {
@@ -205,9 +274,8 @@ export const planAttemptExecution = (
             outputBudget,
             maxOutputTokens: outputBudget.outputTokens,
             nativeSearchEnabled,
-            webSearchToolConfig: nativeSearchEnabled
-                ? buildWebSearchToolConfig(capability)
-                : null,
+            webSearchToolConfig,
+            searchPath,
             generationSettings: getModelGenerationSettings(modelConfig),
             searchSurchargeCredits,
             usageCaptureKey: attemptUsageCaptureKey(
@@ -246,6 +314,17 @@ export const attemptRefusalError = (
 ): ChatAccessError =>
     refusal.kind === "budget_refused"
         ? refusal.error
+        : refusal.kind === "search_path_unavailable"
+          ? // Only reachable for a caller that asked for a search path, which
+            // today is a fallback candidate -- and there a refusal is a value
+            // the run carries on from, never an error anybody raises. Mapped
+            // anyway so the function stays total: a refusal with no error is
+            // how a third kind gets added later and silently answers 200.
+            new ChatAccessError(
+                503,
+                "MODEL_WEB_SEARCH_UNAVAILABLE",
+                "This answer needs a web search, and no available model could run one for it. Try again in a moment."
+            )
         : new ChatAccessError(
               400,
               "MODEL_CONTEXT_WINDOW_EXCEEDED",
