@@ -581,7 +581,10 @@ const SETTINGS_DEPTHS = [
     name: "memory settings",
     path: "/settings/memory",
     upTestId: "memory-back",
-    upHref: "/chat?settings=data&settingsSection=memory",
+    // "ai", not "data". develop moved memory into the tab named after what it
+    // shapes -- lib/settingsNavigation.ts says `memory: "ai"` -- and this row
+    // still named the tab it left.
+    upHref: "/chat?settings=ai&settingsSection=memory",
   },
   {
     name: "one extraction run",
@@ -589,23 +592,36 @@ const SETTINGS_DEPTHS = [
     upTestId: "memory-extraction-run-back",
     upHref: "/settings/memory",
   },
+  // The three assistants routes do not share one up-link, and that is the
+  // design rather than an inconsistency. develop gave the deeper two their own
+  // hierarchy -- a profile goes up to the list it came from, and the list goes
+  // up to settings -- so only the collection carries
+  // `assistants-back-to-settings`. This table named that one test id for all
+  // three because it was written before that hierarchy existed, and the two
+  // deep rows failed on the merge for exactly that reason.
+  //
+  // What the test below actually checks is unchanged by this: every settings
+  // detail page still offers an up-link, and no up-link is bare `/chat`.
   {
     name: "assistant profiles",
     path: "/settings/assistants",
     upTestId: "assistants-back-to-settings",
-    upHref: "/chat?settings=data&settingsSection=assistants",
+    upHref: "/chat?settings=assistants&settingsSection=assistants",
   },
   {
     name: "a new assistant profile",
     path: "/settings/assistants/new",
-    upTestId: "assistants-back-to-settings",
-    upHref: "/chat?settings=data&settingsSection=assistants",
+    upTestId: "assistant-create-back",
+    upHref: "/settings/assistants",
   },
   {
     name: "one assistant profile",
     path: "/settings/assistants/p-qa",
-    upTestId: "assistants-back-to-settings",
-    upHref: "/chat?settings=data&settingsSection=assistants",
+    upTestId: "assistant-back-to-list",
+    // The focus parameter is the point of the link, not noise on it: returning
+    // to the list restores the row this profile was opened from, which the
+    // settings-navigation contract requires.
+    upHref: "/settings/assistants?focus=p-qa",
   },
   {
     name: "account data",
