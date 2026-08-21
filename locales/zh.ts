@@ -253,6 +253,7 @@ export const zh = {
         undo: "撤销",
         reportError: "报告错误",
         copyResponse: "复制回答",
+        copyCode: "复制代码",
         responseCopied: "已复制",
         tryAnotherModelHint: "你也可以选择其他模型后再试。",
         guestQuotaLoginBenefitHint: "登录后可获得更高的每日额度，并且此对话会保存到你的账户中。",
