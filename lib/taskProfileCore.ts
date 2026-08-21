@@ -36,16 +36,29 @@
  */
 
 import { CJK_CHARACTER_PATTERN } from "@/lib/chatTokenEstimate";
-import { RESEARCH_PATTERN } from "@/lib/modelFinder";
-import { suggestsCurrentInformationNeeded } from "@/lib/webSearchSuggestion";
+import {
+    hasExplicitSourceOrSearchIntent,
+    suggestsRecentInformationNeeded,
+} from "@/lib/webSearchSuggestion";
 
 /**
  * Bump on any change to the rules, the axes, or their meanings.
  *
  * A profile whose version is not recorded is a routing decision that cannot be
  * explained afterwards, which is the whole reason `RoutingRun` carries one.
+ *
+ * v2: an explicit request for sources, citations or a search now sets
+ * `needsCurrentInformation` at any length. v1 read that flag through the
+ * composer's suggestion heuristic, which ignores drafts shorter than four
+ * characters so it does not nag while somebody types -- and that typing-time
+ * floor was load-bearing on a safety boundary, because the flag drives the
+ * Router's web-search hard filter. So `"출처"` recorded `false` and a model
+ * with no search path stayed eligible for a turn that asked for sources.
+ * Recorded as a new version rather than fixed in place: one version answering
+ * `false` before the change and `true` after would make every run under it
+ * unattributable.
  */
-export const TASK_PROFILE_VERSION = "task-profile-v1";
+export const TASK_PROFILE_VERSION = "task-profile-v2";
 
 /**
  * The dominant shape of the turn.
@@ -100,6 +113,16 @@ export type TaskProfile = {
      * questions: a one-line "what's the weather" needs current information and
      * is not research, and a literature summary is research that may need
      * nothing current.
+     *
+     * Separate does not mean symmetrical, and the asymmetry is worth knowing
+     * before reading a profile. The research *kind* is recognised by someone
+     * asking for sources, citations or a search, so a research turn also needs
+     * the web -- there is no `kind: "research"` with this false. The direction
+     * that stays open is the other one, and it is the one that matters: this
+     * flag being true says nothing about the kind, and a literature summary
+     * arrives as document work with this false. Which is why the Router filters
+     * on this flag and never on the kind: filtering on the kind would put
+     * document analysis on a search model for no reason.
      */
     needsCurrentInformation: boolean;
     /** Hard capability filters for the Router's candidate set. */
@@ -186,11 +209,27 @@ export function buildTaskProfile(input: TaskProfileInput): TaskProfile {
     if (hasImageInput) fired("attachment:image");
     if (hasDocumentInput) fired("attachment:document");
 
-    // An explicit request beats every heuristic: the user said so.
+    // Three ways a turn can need the web, strongest first, and each records
+    // which one it was. They are separate signals rather than one because
+    // "the user turned search on", "the user asked for sources" and "this
+    // wording sounds time-sensitive" are three different claims, and a
+    // decision that cannot say which of them fired cannot be reviewed.
+    //
+    // An explicit setting beats every heuristic: the user said so.
     const explicitSearch = input.webSearchRequested === true;
     if (explicitSearch) fired("search:requested");
+    // Stated intent, at any length. See the version note above for why the
+    // length floor below must not apply here.
+    const sourceIntent =
+        !explicitSearch && hasExplicitSourceOrSearchIntent(trimmed);
+    if (sourceIntent) fired("search:source-intent");
+    // And the softer reading of wording that merely sounds time-sensitive,
+    // which keeps its floor: a bare "오늘" is a guess about the turn, not a
+    // request in it.
     const inferredSearch =
-        !explicitSearch && suggestsCurrentInformationNeeded(trimmed);
+        !explicitSearch &&
+        !sourceIntent &&
+        suggestsRecentInformationNeeded(trimmed);
     if (inferredSearch) fired("search:recency-heuristic");
 
     const codeSignals = [
@@ -200,8 +239,13 @@ export function buildTaskProfile(input: TaskProfileInput): TaskProfile {
         CODE_WORDS.test(trimmed) && fired("code:vocabulary"),
     ].filter(Boolean).length;
 
+    // The same predicate as the source-intent signal above, deliberately: one
+    // definition of "asked for sources", read by two independent axes. Sharing
+    // the *reading* is not collapsing the axes -- `kind` says what shape of
+    // work this is and `needsCurrentInformation` says whether it needs the
+    // web, and the tests below hold a turn that has one without the other.
     const researchSignals = [
-        RESEARCH_PATTERN.test(trimmed) && fired("research:vocabulary"),
+        hasExplicitSourceOrSearchIntent(trimmed) && fired("research:vocabulary"),
         explicitSearch && fired("research:search-requested"),
     ].filter(Boolean).length;
 
@@ -267,7 +311,7 @@ export function buildTaskProfile(input: TaskProfileInput): TaskProfile {
         version: TASK_PROFILE_VERSION,
         kind,
         kindConfidence,
-        needsCurrentInformation: explicitSearch || inferredSearch,
+        needsCurrentInformation: explicitSearch || sourceIntent || inferredSearch,
         hasImageInput,
         hasDocumentInput,
         expectedOutputLength,

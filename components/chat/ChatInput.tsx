@@ -96,7 +96,7 @@ import {
   type ModelFinderPriority,
   type ModelFinderTask,
 } from "@/lib/modelFinder";
-import { draftSuggestionKey, suggestsCurrentInformationNeeded } from "@/lib/webSearchSuggestion";
+import { draftSuggestionKey, suggestsWebSearchInComposer } from "@/lib/webSearchSuggestion";
 import { deriveWebSearchComposerState } from "@/lib/webSearchComposerState";
 import { openModelFinder } from "@/lib/modelFinderEvents";
 import { CreditBreakdownSheet } from "@/components/chat/CreditBreakdownSheet";
@@ -942,7 +942,7 @@ export function ChatInput({
   // sends a search on its own. Never shown once a mode is already forced on
   // (nothing to suggest), and never repeats for the exact same draft text.
   const webSearchSuggestionKey =
-    webSearchMode === "auto" && suggestsCurrentInformationNeeded(value)
+    webSearchMode === "auto" && suggestsWebSearchInComposer(value)
       ? draftSuggestionKey(value)
       : null;
   const showWebSearchSuggestion = Boolean(
