@@ -70,6 +70,12 @@ Date / timezone:    ____________________
       own literal, so moving the sending domain moved one of them and no health
       check could tell: a check only sees the senders that ask it
       (docs/ops/email-sending-domains.md §1.2)
+- [ ] `npm run check:email-provider-port` — proves the provider seam is still
+      two methods over one implementation, and that nothing posts to the send
+      endpoint around it. Templates, contacts and segments stay in our own
+      database; a port that grew them would put the copy in the provider's
+      account, which is the lock-in the port exists to avoid
+      (docs/policy/email-notifications.md §8.2)
 - [ ] `npm run check:context-window-register`
 - [ ] `npm run check:router-context-window`
 - [ ] `npm run check:router-quality-eval`

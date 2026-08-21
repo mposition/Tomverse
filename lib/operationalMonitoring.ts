@@ -2,7 +2,7 @@ import "server-only";
 
 import * as Sentry from "@sentry/nextjs";
 
-import { resolveSendingIdentity } from "@/lib/emailSendingIdentityCore";
+import { emailProvider } from "@/lib/emailProviderPort";
 import {
   operationalAlertCooldownMs,
   sanitizeOperationalContext,
@@ -90,11 +90,7 @@ const safeError = (error: unknown) => {
   return sanitized;
 };
 
-const postJson = async (
-  url: string | undefined,
-  body: unknown,
-  headers: Record<string, string> = {}
-) => {
+const postJson = async (url: string | undefined, body: unknown) => {
   if (!url?.trim()) return;
   const target = new URL(url);
   if (target.protocol !== "https:") {
@@ -102,7 +98,7 @@ const postJson = async (
   }
   const response = await fetch(target, {
     method: "POST",
-    headers: { "Content-Type": "application/json", ...headers },
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
     signal: AbortSignal.timeout(ALERT_TIMEOUT_MS),
   });
@@ -128,28 +124,25 @@ const postJson = async (
  * unwell must not depend on the part of the system that drains a queue.
  */
 const sendEmail = async (subject: string, detail: string) => {
-  const apiKey = process.env.RESEND_API_KEY?.trim();
   const to = (process.env.OPS_ALERT_EMAIL || process.env.ADMIN_ALERT_EMAIL)?.trim();
-  if (!apiKey || !to) return;
-  const identity = resolveSendingIdentity("transactional", process.env);
-  if (!identity.ok) {
-    // Thrown rather than returned so `notifyExternalChannels` records it the
-    // same way it records a webhook failure. It is caught there: a refused
-    // sender must not stop Slack, Discord or the Sentry capture that already
-    // happened above it.
-    throw new Error(`Operational alert sender unusable: ${identity.code}`);
-  }
-  await postJson(
-    "https://api.resend.com/emails",
-    {
-      from: identity.from,
-      to: [to],
-      subject: `[Tomverse Operations] ${subject}`,
-      text: detail,
-    },
-    {
-      Authorization: `Bearer ${apiKey}`,
-    }
+  if (!to) return;
+
+  const result = await emailProvider().send(
+    { to, subject: `[Tomverse Operations] ${subject}`, text: detail },
+    { stream: "transactional" }
+  );
+  if (result.ok) return;
+  // A deployment with no key sends no alerts and says nothing about it, which
+  // is the state of every local checkout.
+  if (result.notConfigured) return;
+  // Everything else is thrown rather than returned, so `notifyExternalChannels`
+  // records it the same way it records a webhook failure. It is caught there: a
+  // failed alert email must not stop Slack, Discord or the Sentry capture that
+  // already happened above it.
+  throw new Error(
+    result.identityRefusal
+      ? `Operational alert sender unusable: ${result.identityRefusal}`
+      : `Operational alert email failed: ${result.status ?? "no response"}.`
   );
 };
 
