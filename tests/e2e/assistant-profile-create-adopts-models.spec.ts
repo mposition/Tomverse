@@ -40,6 +40,13 @@ const PROFILES = [
 const COMPOSER_MODEL = "gpt-5-6-luna";
 const PROFILE_MODEL = "gemini-2-5-flash";
 
+/**
+ * The comparison shape of the same disagreement: a composer holding two
+ * models, and a profile that answers on two different ones.
+ */
+const COMPARISON_COMPOSER_MODELS = ["gpt-5-6-luna", "claude-haiku-4-5"];
+const COMPARISON_PROFILE_MODELS = ["gemini-2-5-flash", "deepseek-v4-flash"];
+
 const CREATED_ID = "c-created-with-assistant";
 
 type Recorder = { chatModelIds: string[]; createRequests: unknown[] };
@@ -185,5 +192,124 @@ test.describe("a conversation started with an assistant", () => {
             .poll(() => recorder.chatModelIds.length, { timeout: 15_000 })
             .toBe(2);
         expect(recorder.chatModelIds).toEqual([PROFILE_MODEL, PROFILE_MODEL]);
+    });
+});
+
+/**
+ * The comparison path has its own door onto the same mistake.
+ *
+ * `/api/chat/preflight` prices the set and hands back the admission slots for
+ * it, and it refuses models the conversation does not have -- "One or more
+ * comparison models are not selected for this conversation."
+ * (`app/api/chat/preflight/route.ts`). It runs before the chat requests, so
+ * correcting only those left this call reading the screen's stale list: a
+ * conversation created with an assistant refused its first turn here instead,
+ * one error code further up. Trace 9219480c-6ad3-49ae-8120-8a31ee18513e.
+ */
+test.describe("a comparison started with an assistant", () => {
+    test("prices the assistant's models, not the composer's", async ({
+        page,
+    }, testInfo) => {
+        await mockAuthenticatedApi(page, {
+            assistantProfiles: PROFILES,
+            selectedModels: COMPARISON_COMPOSER_MODELS,
+        });
+        await mockChatStream(page, "Assistant QA response");
+
+        // The new-conversation screen starts from the account's saved
+        // combination, and it takes two models to reach the comparison path
+        // at all.
+        await page.route("**/api/user/settings", async (route) => {
+            if (route.request().method() !== "GET") {
+                await route.fallback();
+                return;
+            }
+            await route.fulfill({
+                status: 200,
+                contentType: "application/json",
+                body: JSON.stringify({
+                    theme: "system",
+                    language: "ko",
+                    defaultModel: COMPARISON_COMPOSER_MODELS[0],
+                    newConversationModelIds: COMPARISON_COMPOSER_MODELS,
+                }),
+            });
+        });
+
+        const preflightModelIds: string[][] = [];
+        await page.route("**/api/chat/preflight", async (route) => {
+            if (route.request().method() !== "POST") {
+                await route.fallback();
+                return;
+            }
+            const body = route.request().postDataJSON() as {
+                modelIds?: string[];
+            };
+            if (Array.isArray(body?.modelIds)) {
+                preflightModelIds.push(body.modelIds);
+            }
+            await route.fallback();
+        });
+
+        await page.route("**/api/conversations", async (route) => {
+            if (route.request().method() !== "POST") {
+                await route.fallback();
+                return;
+            }
+            const body = route.request().postDataJSON() as {
+                assistantProfileId?: string;
+            };
+            if (!body?.assistantProfileId) {
+                await route.fallback();
+                return;
+            }
+            await route.fulfill({
+                status: 201,
+                contentType: "application/json",
+                body: JSON.stringify({
+                    id: CREATED_ID,
+                    title: "QA",
+                    kind: "chat",
+                    projectId: null,
+                    selectedModels: COMPARISON_PROFILE_MODELS,
+                    disabledPanels: [],
+                    webSearchMode: "off",
+                    isLocked: false,
+                    shareEnabled: false,
+                    shareExpiresAt: null,
+                    messageCount: 0,
+                    assistantProfile: {
+                        profileId: "p-scheduler",
+                        name: "Scheduling helper",
+                        icon: "🧭",
+                        revision: 3,
+                        latestRevision: 3,
+                        status: "current",
+                    },
+                }),
+            });
+        });
+
+        await page.goto("/chat");
+        await expect(page.getByTestId("chat-input")).toBeVisible();
+
+        await page.locator('button[aria-controls="chat-input-popover"]').first().click();
+        await page.getByTestId("tools-assistant-row").click();
+        await page.getByTestId("assistant-option-p-scheduler").click();
+        await page.keyboard.press("Escape");
+        await expect(page.locator("#chat-input-popover")).toBeHidden();
+
+        await sendChatMessage(page, testInfo, "안녕");
+
+        await expect
+            .poll(() => preflightModelIds.length, { timeout: 15_000 })
+            .toBeGreaterThan(0);
+        // Asking admission for models the conversation does not have is what
+        // the server refuses; every call names the adopted set instead.
+        for (const modelIds of preflightModelIds) {
+            expect([...modelIds].sort()).toEqual(
+                [...COMPARISON_PROFILE_MODELS].sort()
+            );
+        }
     });
 });
