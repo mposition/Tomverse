@@ -23,6 +23,7 @@ import {
 import { unsubscribeHeaders } from "@/lib/emailUnsubscribeHeaders";
 import { jurisdictionForUser } from "@/lib/emailJurisdiction";
 import { marketingJurisdictionVerdict } from "@/lib/emailJurisdictionCore";
+import { streamForClassification } from "@/lib/emailSendingIdentityCore";
 import { isEmailPurpose } from "@/lib/emailPreferenceCore";
 import {
   EMAIL_AUDIT_HASH_KEY_VERSION,
@@ -515,12 +516,38 @@ const sendClaimedDelivery = async (delivery: ClaimedDelivery, now: Date) => {
     to: delivery.emailAddress,
     ...rendered,
     idempotencyKey: delivery.idempotencyKey,
+    // Marketing sends from its own domain or does not send. Derived from the
+    // template's classification rather than passed by the enqueuing caller,
+    // for the same reason the classification itself is: a caller that could
+    // choose would eventually choose wrong, and a promotion sent from the
+    // transactional domain has no symptom until login codes stop arriving
+    // (docs/policy/email-notifications.md §5.3, §14.1).
+    stream: streamForClassification(definition.classification),
     ...(Object.keys(headers).length > 0 ? { headers } : {}),
   });
 
+  if (response.ok === false && response.identityRefusal) {
+    // Permanent, and reported once per delivery rather than retried: no amount
+    // of waiting sets an environment variable, and the retry curve would spend
+    // the message's whole budget discovering that.
+    await reportOperationalIncident({
+      code: "EMAIL_SENDING_IDENTITY_REFUSED",
+      title: "A message was refused because its stream has no sending identity",
+      severity: "error",
+      error: response.identityRefusal,
+      context: {
+        component: "standard-email-lane",
+        deliveryId: delivery.id,
+        classification: definition.classification,
+      },
+    });
+  }
+
   const outcome: ProviderSendOutcome = response.ok
     ? { kind: "delivered", providerMessageId: response.providerMessageId }
-    : response.notConfigured
+    : response.identityRefusal
+      ? { kind: "permanent", errorKind: `identity_${response.identityRefusal.toLowerCase()}` }
+      : response.notConfigured
       ? { kind: "transient", errorKind: "not_configured" }
       : response.status === null
         ? classifyTransportError(response.transportError)

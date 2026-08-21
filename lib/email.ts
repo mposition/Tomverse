@@ -1,5 +1,11 @@
 import "server-only";
 
+import {
+  SendingIdentityError,
+  fromAddressForStream,
+} from "@/lib/emailSendingIdentity";
+import type { SendingStream } from "@/lib/emailSendingIdentityCore";
+
 type SendEmailInput = {
   to: string;
   subject: string;
@@ -20,10 +26,16 @@ type SendEmailInput = {
   idempotencyKey?: string;
 };
 
-const fromAddress = () =>
-  process.env.TRANSACTIONAL_EMAIL_FROM ||
-  process.env.EMAIL_FROM ||
-  "Tomverse Insight <hello@tomverse.app>";
+/**
+ * The transactional From header.
+ *
+ * Resolved through lib/emailSendingIdentity.ts rather than read here, so the
+ * marketing stream cannot reach this value by omission: a caller that passes
+ * no `stream` gets transactional, and a marketing caller has to name itself
+ * and be refused if it has no domain of its own
+ * (docs/policy/email-notifications.md §5.3, §14.1).
+ */
+const fromAddress = () => fromAddressForStream("transactional");
 
 /**
  * One attempt at the provider, reported rather than thrown.
@@ -56,6 +68,14 @@ export type ProviderSendResult =
        * somebody every time a developer signs in.
        */
       notConfigured?: true;
+      /**
+       * The message was refused before it reached the wire because the stream
+       * it belongs to has no sending identity of its own. Distinct from every
+       * provider answer: nothing was sent, nothing was rejected, and retrying
+       * changes nothing until an operator sets the variable
+       * (docs/policy/email-notifications.md §14.1).
+       */
+      identityRefusal?: string;
     };
 
 /**
@@ -90,7 +110,14 @@ export const parseRetryAfterMs = (
  */
 export async function deliverEmailOnce(
   input: SendEmailInput & {
+    /** An explicit override. Wins over `stream`; used by nothing today. */
     from?: string;
+    /**
+     * Which sending domain this message belongs to. Defaults to
+     * transactional, which is where `service` and `legal` also send from --
+     * marketing has to ask, and is refused if it has no domain of its own.
+     */
+    stream?: SendingStream;
     timeoutMs?: number;
     /**
      * Extra message headers. Only `List-Unsubscribe` and its one-click
@@ -109,6 +136,21 @@ export async function deliverEmailOnce(
     return { ok: false, status: null, notConfigured: true };
   }
 
+  // Resolved before the request rather than inside the body, so a stream with
+  // no domain of its own is reported as itself instead of throwing out of a
+  // function whose whole contract is that it reports rather than throws.
+  let from: string;
+  try {
+    from = input.from || fromAddressForStream(input.stream || "transactional");
+  } catch (error) {
+    return {
+      ok: false,
+      status: null,
+      identityRefusal:
+        error instanceof SendingIdentityError ? error.code : "IDENTITY_UNRESOLVED",
+    };
+  }
+
   let response: Response;
   try {
     response = await fetch("https://api.resend.com/emails", {
@@ -122,7 +164,7 @@ export async function deliverEmailOnce(
           : {}),
       },
       body: JSON.stringify({
-        from: input.from || fromAddress(),
+        from,
         to: input.to,
         subject: input.subject,
         html: input.html,

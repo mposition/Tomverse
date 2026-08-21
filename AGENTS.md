@@ -606,6 +606,11 @@ feedback의 Trace 검증, `errorReportToken`, `TraceErrorEvidence`, chat 오류
 - **자격증명 본문은 어디에도 남기지 않습니다.** 코드·magic link는
   `EmailEvent.payload`, `renderDataSnapshot`, 로그 어디에도 넣지 않습니다.
   standard lane의 snapshot은 봉투 암호화하고 보관 기한이 지나면 지웁니다(§10.3).
+- **스트림마다 발송 도메인이 다릅니다.** marketing은 `MARKETING_EMAIL_FROM`이
+  없으면 transactional 주소로 대체되지 않고 **거부**합니다 — 대체는 프로모션
+  스팸 신고를 로그인 코드가 나가는 도메인에 얹는 일이고, 증상은 로그인 메일이
+  안 온다는 신고로만 나타납니다. 두 스트림을 같은 도메인에 설정하면
+  `/api/ready`가 실패합니다. 절차는 `docs/ops/email-sending-domains.md`.
 - **unsubscribe는 로그인 없이 한 번에 됩니다.** RFC 8058 one-click을 지원하고,
   marketing에 서명 키가 없으면 헤더 없이 보내는 대신 발송을 거부합니다(§11.3).
 - marketing은 위 suppression 경계 결정 전까지 production에서 비활성입니다.

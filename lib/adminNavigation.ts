@@ -367,6 +367,23 @@ export const ADMIN_NAVIGATION: readonly AdminNavItem[] = [
       "subject prefix",
       "quiet hours",
       "consent",
+      "dmarc",
+      "dkim",
+      "spf",
+      "sending domain",
+      "deliverability",
+    ],
+    tabs: [
+      {
+        id: "jurisdictions",
+        label: "Jurisdictions",
+        description: "Profile versions, and which one is in force",
+      },
+      {
+        id: "domains",
+        label: "Sending domains",
+        description: "Domain verification and DNS record status",
+      },
     ],
   },
   {
