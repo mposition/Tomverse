@@ -8,11 +8,10 @@ import {
  *
  * Settings is not a route: it is a closable panel (the modal inside
  * components/auth/AuthButton.tsx) that lives on the chat surface. Its detail
- * screens — /settings/imports, /settings/memory, /settings/assistants and
- * /settings/data — are full pages, so their upward navigation has to name a
- * destination rather than lean on `router.back()`, which points at whatever
- * the visitor happened to see last and at nothing at all when the URL was
- * opened directly.
+ * screens — everything under /settings — are full pages, so their upward
+ * navigation has to name a destination rather than lean on `router.back()`,
+ * which points at whatever the visitor happened to see last and at nothing at
+ * all when the URL was opened directly.
  *
  * The destination is therefore the chat route plus a deep link that says which
  * settings tab to open and which entry inside it to restore, so "Back to
