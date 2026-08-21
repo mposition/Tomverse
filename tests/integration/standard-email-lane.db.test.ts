@@ -13,6 +13,7 @@ import {
   enqueueStandardEmail,
 } from "@/lib/standardEmailLane";
 import { STANDARD_RETRY_CURVES } from "@/lib/standardEmailRetryCore";
+import { observeOperationalIncidents } from "@/lib/operationalMonitoring";
 import { decryptSnapshot, readSnapshotKeyring } from "@/lib/emailSnapshotCrypto";
 
 // The standard lane against a real database.
@@ -403,4 +404,84 @@ test("the enqueue joins the caller's transaction", async () => {
   assert.equal(failed, true);
   assert.equal(await prisma.emailDelivery.count(), 0);
   assert.equal(await prisma.emailEvent.count(), 0);
+});
+
+// ---------------------------------------------------------------------------
+// What abandonment tells an operator (§9.4 "소진 시", §9.5)
+// ---------------------------------------------------------------------------
+
+/** Collects the incidents raised during one drain. */
+const watchIncidents = () => {
+  const seen: Array<{ code: string; severity: string; context: unknown }> = [];
+  const stop = observeOperationalIncidents((incident) => {
+    seen.push({
+      code: incident.code,
+      severity: incident.severity,
+      context: incident.context,
+    });
+  });
+  return { seen, stop };
+};
+
+test("a legal abandonment is its own critical incident, not a line in a total", async () => {
+  // The failure this pins: one drain that abandons a deletion notice and a
+  // receipt used to raise a single `error` saying "2 message(s)". An operator
+  // reading that cannot tell whether anyone has to be woken -- and §9.4 gives
+  // legal an answer the others do not have.
+  const user = await someone();
+  const legal = await enqueueStandardEmail({
+    templateKey: ACCOUNT_DELETION_SCHEDULED_TEMPLATE,
+    emailAddress: user.email,
+    userId: user.id,
+    payload: { scheduledFor: new Date().toISOString() },
+  });
+  const transactional = await enqueueStandardEmail({
+    templateKey: ACCOUNT_WELCOME_TEMPLATE,
+    emailAddress: user.email,
+    userId: user.id,
+    payload: { name: "Someone" },
+  });
+
+  await prisma.emailDelivery.updateMany({
+    where: { id: legal!.deliveryId },
+    data: { attempts: STANDARD_RETRY_CURVES.legal.length },
+  });
+  await prisma.emailDelivery.updateMany({
+    where: { id: transactional!.deliveryId },
+    data: { attempts: STANDARD_RETRY_CURVES.transactional.length },
+  });
+
+  stubFetch([refused(503)]);
+  const watcher = watchIncidents();
+  let result;
+  try {
+    result = await drainStandardEmailDeliveries();
+  } finally {
+    watcher.stop();
+  }
+
+  assert.equal(result.abandoned, 2);
+  assert.equal(result.abandonedByClassification.legal, 1);
+  assert.equal(result.abandonedByClassification.transactional, 1);
+  assert.equal(result.abandonedByClassification.marketing, 0);
+
+  const abandonment = watcher.seen.filter((incident) =>
+    incident.code.endsWith("_DELIVERY_ABANDONED")
+  );
+  const byCode = new Map(abandonment.map((incident) => [incident.code, incident]));
+  assert.equal(
+    byCode.size,
+    2,
+    `expected one incident per classification, got ${abandonment.map((i) => i.code).join(", ")}`
+  );
+
+  const legalIncident = byCode.get("EMAIL_LEGAL_DELIVERY_ABANDONED");
+  assert.ok(legalIncident, "the legal abandonment raised no incident of its own");
+  assert.equal(legalIncident.severity, "fatal");
+
+  const transactionalIncident = byCode.get(
+    "EMAIL_TRANSACTIONAL_DELIVERY_ABANDONED"
+  );
+  assert.ok(transactionalIncident);
+  assert.equal(transactionalIncident.severity, "error");
 });
