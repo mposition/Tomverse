@@ -17,7 +17,6 @@ import {
   ArrowLeft,
   ArrowUp,
   Bot,
-  Boxes,
   Braces,
   Check,
   ChevronDown,
@@ -26,7 +25,6 @@ import {
   HardDrive,
   BookMarked,
   Globe2,
-  Link2,
   Loader2,
   Lock,
   ImagePlus,
@@ -43,6 +41,7 @@ import {
   X,
 } from "lucide-react";
 import { assistantProfileCreateHref } from "@/lib/assistantProfileReturn";
+import { settingsSectionHref } from "@/lib/settingsNavigation";
 import { CreditCostBadge } from "@/components/credits/CreditCostBadge";
 import {
   MAX_SELECTED_MODELS,
@@ -875,7 +874,7 @@ export function ChatInput({
   
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [menuView, setMenuView] = useState<
-    "actions" | "models" | "webSearch" | "memory" | "assistant"
+    "actions" | "models" | "webSearch" | "memory" | "assistant" | "attachSource"
   >("actions");
   const [personalizedRecommendationIds, setPersonalizedRecommendationIds] = useState<string[]>([]);
   const hasRequestedPickerRecommendationsRef = useRef(false);
@@ -2895,12 +2894,21 @@ export function ChatInput({
               id="chat-input-popover"
               role="dialog"
               aria-modal="false"
+              // The dialog is named for the view inside it, so a screen
+              // reader announces where the user actually is rather than the
+              // menu they opened three steps ago.
               aria-label={
                 menuView === "models"
                   ? t("chat.modelSelect")
                   : menuView === "webSearch"
                     ? t("chat.toolsWebSearch")
-                    : t("chat.moreActions")
+                    : menuView === "attachSource"
+                      ? t("chat.attachSourceTitle")
+                      : menuView === "assistant"
+                        ? t("chat.assistantPickerTitle")
+                        : menuView === "memory"
+                          ? t("chat.toolsMemory")
+                          : t("chat.moreActions")
               }
               tabIndex={-1}
               // Exposed for the responsive suite so a keyboard fixture can
@@ -2936,15 +2944,27 @@ export function ChatInput({
               {menuView !== "models" && (
                 <div className="mb-2 flex items-center justify-between border-b border-zinc-200 px-2 pb-2 pt-1 dark:border-zinc-800 md:hidden">
                   <div>
+                    {/* Each view says its own name. The subtitle used to
+                        read "upload from your computer" on every view that was
+                        not web search, which described one row of one of
+                        them. */}
                     <p className="text-sm font-bold text-zinc-900 dark:text-zinc-100">
                       {menuView === "webSearch"
                         ? t("chat.toolsWebSearch")
-                        : t("chat.moreActions")}
+                        : menuView === "attachSource"
+                          ? t("chat.attachSourceTitle")
+                          : menuView === "assistant"
+                            ? t("chat.assistantPickerTitle")
+                            : menuView === "memory"
+                              ? t("chat.toolsMemory")
+                              : t("chat.moreActions")}
                     </p>
                     <p className="text-xs text-zinc-500">
                       {menuView === "webSearch"
                         ? t("chat.toolsWebSearchDescription")
-                        : t("chat.uploadFromComputer")}
+                        : menuView === "attachSource"
+                          ? t("chat.attachSourceSubtitle")
+                          : ""}
                     </p>
                   </div>
                   <button
@@ -2959,14 +2979,18 @@ export function ChatInput({
               )}
               {menuView === "actions" ? (
                 <div className="space-y-1">
+                  {/*
+                    One row, not two. Where a file comes from is a question
+                    about attaching, so it is asked after the user says they
+                    want to attach -- and the limits that used to sit in a
+                    bordered card under the whole menu are asked there too,
+                    beside the control they describe.
+                  */}
                   <button
                     type="button"
-                    data-testid="attach-local-file-row"
+                    data-testid="tools-attach-row"
                     disabled={!canAttach || attachments.length >= maxAttachments}
-                    onClick={() => {
-                      closeMenu(false);
-                      fileInputRef.current?.click();
-                    }}
+                    onClick={() => setMenuView("attachSource")}
                     className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left transition hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-40 dark:hover:bg-zinc-800"
                   >
                     <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300">
@@ -2974,60 +2998,13 @@ export function ChatInput({
                     </span>
                     <span className="flex min-w-0 flex-col">
                       <span className="text-sm font-medium text-zinc-900 dark:text-zinc-100">{t("chat.attachFile")}</span>
-                      <span className="text-xs text-zinc-500">
+                      <span className="truncate text-xs text-zinc-500">
                         {isEphemeralAttachment
                           ? t("chat.guestAttachmentOneFile")
-                          : t("chat.uploadFromComputer")}
+                          : t("chat.attachSourceSubtitle")}
                       </span>
                     </span>
                   </button>
-                  {/*
-                    Google Drive needs an OAuth grant an anonymous session
-                    cannot hold, so for a guest this is not a disabled control
-                    with no explanation -- it names the reason and offers the
-                    one action that changes it.
-                  */}
-                  <button
-                    type="button"
-                    data-testid="attach-google-drive-row"
-                    data-locked={canConnectGoogleDrive ? "false" : "true"}
-                    disabled={
-                      canConnectGoogleDrive &&
-                      attachments.length >= maxAttachments
-                    }
-                    onClick={() => {
-                      closeMenu(false);
-                      if (!canConnectGoogleDrive) {
-                        onGuestSignInPrompt?.();
-                        return;
-                      }
-                      void handleGoogleDriveSelect();
-                    }}
-                    className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left transition hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-40 dark:hover:bg-zinc-800"
-                  >
-                    <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-blue-500/10 text-blue-500">
-                      {canConnectGoogleDrive ? (
-                        <HardDrive className="h-5 w-5" />
-                      ) : (
-                        <Lock className="h-5 w-5" />
-                      )}
-                    </span>
-                    <span className="flex min-w-0 flex-col">
-                      <span className="text-sm font-medium text-zinc-900 dark:text-zinc-100">{t("chat.attachGoogleDrive")}</span>
-                      <span
-                        className={`text-xs ${
-                          canConnectGoogleDrive
-                            ? "text-zinc-500"
-                            : "text-amber-600 dark:text-amber-400"
-                        }`}
-                      >
-                        {canConnectGoogleDrive
-                          ? t("chat.googleDriveDescription")
-                          : t("chat.guestGoogleDriveSignIn")}
-                      </span>
-                    </span>
-                  </button>
-                  <div className="my-1 border-t border-zinc-200 dark:border-zinc-700" />
                   <button
                     type="button"
                     data-testid="tools-web-search-row"
@@ -3048,35 +3025,7 @@ export function ChatInput({
                       </span>
                     </span>
                   </button>
-                  {/* §8.1 invariant 1. Absent for a guest rather than shown
-                      disabled: a guest has no account memory for a control to
-                      act on, and offering one would imply otherwise. */}
-                  {memoryMode && onMemoryModeChange && (
-                    <button
-                      type="button"
-                      data-testid="tools-memory-row"
-                      onClick={() => setMenuView("memory")}
-                      className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left transition hover:bg-zinc-100 dark:hover:bg-zinc-800"
-                    >
-                      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-accent-account-memory-500/10 text-accent-account-memory-500">
-                        <BookMarked className="h-5 w-5" />
-                      </span>
-                      <span className="flex min-w-0 flex-col">
-                        <span className="text-sm font-medium text-zinc-900 dark:text-zinc-100">
-                          {t("chat.toolsMemory")}
-                        </span>
-                        <span className="text-xs text-zinc-500">
-                          {memoryMode === "on"
-                            ? t("chat.toolsMemoryOn")
-                            : memoryMode === "off"
-                              ? t("chat.toolsMemoryOff")
-                              : accountMemoryDefault === "off"
-                                ? t("chat.toolsMemoryInheritOff")
-                                : t("chat.toolsMemoryInheritOn")}
-                        </span>
-                      </span>
-                    </button>
-                  )}
+                  <div className="my-1 border-t border-zinc-200 dark:border-zinc-700" />
                   {/* §14. Absent for a guest and for an account with the
                       feature off, rather than shown disabled: a guest has no
                       profile of their own for a control to act on. */}
@@ -3109,6 +3058,37 @@ export function ChatInput({
                       )}
                     </button>
                   )}
+                  {/* docs/policy/external-conversation-import-and-memory.md
+                      §8.1 invariant 1. Absent for a guest rather than shown
+                      disabled: a guest has no account memory for a control to
+                      act on, and offering one would imply otherwise. */}
+                  {memoryMode && onMemoryModeChange && (
+                    <button
+                      type="button"
+                      data-testid="tools-memory-row"
+                      onClick={() => setMenuView("memory")}
+                      className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left transition hover:bg-zinc-100 dark:hover:bg-zinc-800"
+                    >
+                      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-accent-account-memory-500/10 text-accent-account-memory-500">
+                        <BookMarked className="h-5 w-5" />
+                      </span>
+                      <span className="flex min-w-0 flex-col">
+                        <span className="text-sm font-medium text-zinc-900 dark:text-zinc-100">
+                          {t("chat.toolsMemory")}
+                        </span>
+                        <span className="text-xs text-zinc-500">
+                          {memoryMode === "on"
+                            ? t("chat.toolsMemoryOn")
+                            : memoryMode === "off"
+                              ? t("chat.toolsMemoryOff")
+                              : accountMemoryDefault === "off"
+                                ? t("chat.toolsMemoryInheritOff")
+                                : t("chat.toolsMemoryInheritOn")}
+                        </span>
+                      </span>
+                    </button>
+                  )}
+                  <div className="my-1 border-t border-zinc-200 dark:border-zinc-700" />
                   {(() => {
                     const deepResearchModel = AVAILABLE_MODELS.find(
                       (model) => model.id === "perplexity/sonar-deep-research"
@@ -3157,42 +3137,6 @@ export function ChatInput({
                       </button>
                     );
                   })()}
-                  <button
-                    type="button"
-                    data-testid="tools-read-webpage-row"
-                    disabled
-                    className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left opacity-40"
-                  >
-                    <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-zinc-100 text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400">
-                      <Link2 className="h-5 w-5" />
-                    </span>
-                    <span className="flex min-w-0 flex-col">
-                      <span className="text-sm font-medium text-zinc-900 dark:text-zinc-100">{t("chat.toolsReadWebpage")}</span>
-                      <span className="text-xs text-zinc-500">{t("chat.toolsComingSoon")}</span>
-                    </span>
-                  </button>
-                  <div className="mx-1 rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-2 text-xs leading-5 text-zinc-500 dark:border-zinc-800 dark:bg-zinc-950/70 dark:text-zinc-400">
-                    <p className="font-semibold text-zinc-700 dark:text-zinc-200">
-                      {canAttach ? t("chat.attachmentGuideTitle") : t("chat.loginToAttach")}
-                    </p>
-                    <p className="mt-0.5">
-                      {t("chat.attachmentGuideBody")}
-                    </p>
-                    {/*
-                      A guest's files are held for a short time and are never
-                      added to a saved chat, a project, a share link or an
-                      export. That is a promise the product has to make where
-                      the file is picked, not in a policy page.
-                    */}
-                    {isEphemeralAttachment && (
-                      <p
-                        data-testid="guest-attachment-temporary-note"
-                        className="mt-1 font-semibold text-zinc-700 dark:text-zinc-200"
-                      >
-                        {t("chat.guestAttachmentTemporary")}
-                      </p>
-                    )}
-                  </div>
                   {(onStartImageDraft || imageGenerationLock) && (
                     <button
                       type="button"
@@ -3239,25 +3183,6 @@ export function ChatInput({
                       </span>
                     </button>
                   )}
-                  <div className="my-1 border-t border-zinc-200 dark:border-zinc-700" />
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setMenuView("models");
-                      trackProductEvent("model_picker_opened", selectedModels.length, {});
-                    }}
-                    className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left transition hover:bg-zinc-100 dark:hover:bg-zinc-800"
-                  >
-                    <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-accent-model-catalogue-500/10 text-accent-model-catalogue-500">
-                      <Boxes className="h-5 w-5" />
-                    </span>
-                    <span className="flex min-w-0 flex-col">
-                      <span className="text-sm font-medium text-zinc-900 dark:text-zinc-100">{t("chat.modelSelect")}</span>
-                      <span className="text-xs text-zinc-500">
-                        {isGuestMode ? t("chat.maxGuestModelsDescription") : t("chat.maxModelsDescription")}
-                      </span>
-                    </span>
-                  </button>
                 </div>
               ) : menuView === "webSearch" ? (
                 <div className="space-y-1">
@@ -3369,16 +3294,137 @@ export function ChatInput({
                     </button>
                   ))}
                 </div>
-              ) : menuView === "assistant" ? (
+              ) : menuView === "attachSource" ? (
+                /*
+                  Where a file comes from, asked once the user has said they
+                  want to attach one.
+
+                  The limits live here rather than in the bordered card that
+                  used to sit under the whole root menu: they describe this
+                  control, and stated beside it they are supporting text
+                  instead of a paragraph everybody scrolls past on their way
+                  to something else.
+                */
                 <div className="space-y-1">
                   <button
                     type="button"
                     onClick={() => setMenuView("actions")}
                     className={`mb-1 flex items-center justify-center rounded-lg text-zinc-500 hover:bg-zinc-100 hover:text-zinc-900 dark:hover:bg-zinc-800 dark:hover:text-white ${isMobileShell ? "h-11 w-11" : "h-8 w-8"}`}
-                    aria-label={t("auth.cancel")}
+                    aria-label={t("chat.backToMenu")}
                   >
                     <ArrowLeft className="h-4 w-4" />
                   </button>
+                  <button
+                    type="button"
+                    data-testid="attach-local-file-row"
+                    disabled={!canAttach || attachments.length >= maxAttachments}
+                    onClick={() => {
+                      closeMenu(false);
+                      fileInputRef.current?.click();
+                    }}
+                    className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left transition hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-40 dark:hover:bg-zinc-800"
+                  >
+                    <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300">
+                      <Paperclip className="h-5 w-5" />
+                    </span>
+                    <span className="flex min-w-0 flex-col">
+                      <span className="text-sm font-medium text-zinc-900 dark:text-zinc-100">
+                        {t("chat.uploadFromComputer")}
+                      </span>
+                    </span>
+                  </button>
+                  {/*
+                    Google Drive needs an OAuth grant an anonymous session
+                    cannot hold, so for a guest this is not a disabled control
+                    with no explanation -- it names the reason and offers the
+                    one action that changes it.
+                  */}
+                  <button
+                    type="button"
+                    data-testid="attach-google-drive-row"
+                    data-locked={canConnectGoogleDrive ? "false" : "true"}
+                    disabled={
+                      canConnectGoogleDrive &&
+                      attachments.length >= maxAttachments
+                    }
+                    onClick={() => {
+                      closeMenu(false);
+                      if (!canConnectGoogleDrive) {
+                        onGuestSignInPrompt?.();
+                        return;
+                      }
+                      void handleGoogleDriveSelect();
+                    }}
+                    className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left transition hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-40 dark:hover:bg-zinc-800"
+                  >
+                    <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-blue-500/10 text-blue-500">
+                      {canConnectGoogleDrive ? (
+                        <HardDrive className="h-5 w-5" />
+                      ) : (
+                        <Lock className="h-5 w-5" />
+                      )}
+                    </span>
+                    <span className="flex min-w-0 flex-col">
+                      <span className="text-sm font-medium text-zinc-900 dark:text-zinc-100">{t("chat.attachGoogleDrive")}</span>
+                      <span
+                        className={`text-xs ${
+                          canConnectGoogleDrive
+                            ? "text-zinc-500"
+                            : "text-amber-600 dark:text-amber-400"
+                        }`}
+                      >
+                        {canConnectGoogleDrive
+                          ? t("chat.googleDriveDescription")
+                          : t("chat.guestGoogleDriveSignIn")}
+                      </span>
+                    </span>
+                  </button>
+                  <p
+                    data-testid="attach-limits"
+                    className="px-3 pt-1 text-xs leading-5 text-zinc-500"
+                  >
+                    {canAttach ? t("chat.attachLimitsSummary") : t("chat.loginToAttach")}
+                  </p>
+                  {/*
+                    A guest's files are held for a short time and are never
+                    added to a saved chat, a project, a share link or an
+                    export. That is a promise the product has to make where the
+                    file is picked, which is now here.
+                  */}
+                  {isEphemeralAttachment && (
+                    <p
+                      data-testid="guest-attachment-temporary-note"
+                      className="px-3 text-xs font-semibold leading-5 text-zinc-700 dark:text-zinc-200"
+                    >
+                      {t("chat.guestAttachmentTemporary")}
+                    </p>
+                  )}
+                </div>
+              ) : menuView === "assistant" ? (
+                /*
+                  A collection, not a fixed set of actions, so this is the one
+                  view that scrolls by design: the account decides how many
+                  assistants there are. The root menu does not scroll for the
+                  same reason -- its length is a design decision, and a
+                  scrollbar there would be a symptom of one gone wrong.
+
+                  The back control stays put and the list scrolls under it;
+                  `min-h-0` is what lets the flex child shrink far enough for
+                  `overflow-y-auto` to mean anything.
+                */
+                <div className="flex min-h-0 flex-1 flex-col" data-testid="assistant-picker">
+                  <button
+                    type="button"
+                    onClick={() => setMenuView("actions")}
+                    className={`mb-1 flex shrink-0 items-center justify-center rounded-lg text-zinc-500 hover:bg-zinc-100 hover:text-zinc-900 dark:hover:bg-zinc-800 dark:hover:text-white ${isMobileShell ? "h-11 w-11" : "h-8 w-8"}`}
+                    aria-label={t("chat.backToMenu")}
+                  >
+                    <ArrowLeft className="h-4 w-4" />
+                  </button>
+                  <div
+                    data-testid="assistant-picker-list"
+                    className="min-h-0 flex-1 space-y-1 overflow-y-auto overscroll-contain"
+                  >
                   {/* §14. Offered only when the profile has actually published
                       past this conversation, and never performed on its own:
                       a conversation that changed its instructions without
@@ -3525,8 +3571,14 @@ export function ChatInput({
                         </span>
                       </span>
                     </Link>
+                    {/*
+                      Straight to the settings tab that manages them, not to
+                      the standalone page: the tab is the management home now,
+                      and it keeps the visitor inside the surface they were
+                      already in.
+                    */}
                     <Link
-                      href="/settings/assistants"
+                      href={settingsSectionHref("assistants")}
                       data-testid="assistant-manage-cta"
                       onClick={() => closeMenu(false)}
                       className={`flex w-full items-center gap-3 rounded-xl px-3 text-left transition hover:bg-zinc-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-assistant-profile-500 dark:hover:bg-zinc-800 ${
@@ -3545,6 +3597,7 @@ export function ChatInput({
                         </span>
                       </span>
                     </Link>
+                  </div>
                   </div>
                 </div>
               ) : (

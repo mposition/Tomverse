@@ -9,6 +9,11 @@ export const ACCOUNT_SETTINGS_TABS = [
   // about theme, language and time zone) and "data" (a tab about import,
   // export and deletion), which put the three decisions a user makes about
   // their assistants in two places, neither of which is named after them.
+  // Assistants get a tab of their own rather than a row that leaves for a
+  // page. They are a collection the account manages -- created, edited,
+  // deleted -- and a tab holding one link to that collection is a redirect
+  // wearing a tab's clothes.
+  "assistants",
   "ai",
   "data",
   "plan",

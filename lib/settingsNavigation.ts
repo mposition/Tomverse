@@ -50,10 +50,11 @@ export const SETTINGS_SECTION_TAB: Record<SettingsSectionId, AccountSettingsTab>
         // that made "Data & personalization" a group whose second half had no
         // relationship to its first.
         memory: "ai",
-        // After memory because that is the order the features build on each
-        // other -- a profile may use approved memory, and never the other way
-        // round.
-        assistants: "ai",
+            // Its own tab, which is also its management home. A deep link minted
+        // while this section lived in "ai" still resolves, because the section
+        // decides the tab and `parseSettingsDeepLink` reads that -- so an old
+        // bookmark opens the assistants tab rather than a tab the row left.
+        assistants: "assistants",
         "account-data": "data",
     };
 
@@ -72,6 +73,7 @@ export const SETTINGS_TAB_LABEL_KEY: Record<AccountSettingsTab, string> = {
     // same name for the same place, so they read one key -- two keys is how
     // "AI settings" and "AI personalization" ended up on screen at once, one
     // in the tab strip and one in the trail below it.
+    assistants: "settingsNav.assistantsTab",
     ai: "settingsNav.aiPersonalization",
     data: "auth.dataTab",
     plan: "auth.planTab",
@@ -217,7 +219,7 @@ export const assistantProfileHierarchy = (options?: {
         labelKey: "settingsNav.settings",
         backLabelKey: "settingsNav.backToSettings",
     },
-    { labelKey: SETTINGS_TAB_LABEL_KEY.ai },
+    { labelKey: SETTINGS_TAB_LABEL_KEY.assistants },
     {
         href: assistantProfileListHref(options?.focusProfileId),
         labelKey: "assistantProfiles.pageTitle",

@@ -236,9 +236,11 @@ test("the CTAs stay available once profiles exist", async ({ page }) => {
 
     await expect(page.getByTestId("assistant-option-p-scheduler")).toBeVisible();
     await expect(page.getByTestId("assistant-create-cta")).toBeVisible();
+    // Straight to the settings tab that manages them, which keeps the visitor
+    // inside the surface they were already in.
     await expect(page.getByTestId("assistant-manage-cta")).toHaveAttribute(
         "href",
-        "/settings/assistants"
+        "/chat?settings=assistants&settingsSection=assistants"
     );
 });
 
@@ -295,7 +297,7 @@ test("following a CTA closes the tools menu behind it", async ({ page }) => {
     await openAssistantMenu(page);
 
     await page.getByTestId("assistant-manage-cta").click();
-    await expect(page).toHaveURL(/\/settings\/assistants$/);
+    await expect(page).toHaveURL(/settings=assistants/);
     // The menu is a portal over the chat; leaving it open would sit above the
     // page that was navigated to.
     await expect(page.getByTestId("tools-assistant-row")).toHaveCount(0);

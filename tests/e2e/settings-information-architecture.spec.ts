@@ -94,7 +94,7 @@ async function mockSettingsEntryApis(page: Page) {
   );
 }
 
-async function openSettingsTab(page: Page, tab: "data" | "ai") {
+async function openSettingsTab(page: Page, tab: "data" | "ai" | "assistants") {
   // The panel lives in the sidebar, which on mobile is the drawer -- but only
   // when it is not already mounted. Reaching for the drawer button with the
   // modal open waits forever on mobile: the modal is a full-screen overlay
@@ -145,9 +145,11 @@ test.describe("settings information architecture", () => {
     await expect(aiGroup).toBeVisible();
     // The group inside the tab is named for what it holds; the tab itself is
     // "AI 개인화", and a group repeating that would say nothing.
-    await expect(aiGroup).toContainText("프로필 및 기억");
-    await expect(aiGroup.getByTestId("assistants-entry")).toHaveCount(1);
+    await expect(aiGroup).toContainText("계정 기억");
     await expect(aiGroup.getByTestId("memory-entry")).toHaveCount(1);
+    // Assistants moved to a tab of their own, so they must not also appear
+    // here: two doors to one collection is how the two drift.
+    await expect(page.getByTestId("assistants-entry")).toHaveCount(0);
     // The new-conversation model combination moved with them: it is the third
     // decision about what a model is told, and it was on a tab about theme
     // and language.
@@ -207,15 +209,6 @@ test.describe("settings information architecture", () => {
       readyTestId: "memory-settings-card",
     },
     {
-      name: "assistant profiles",
-      tab: "ai" as const,
-      linkTestId: "assistants-entry-link",
-      urlPattern: /\/settings\/assistants$/,
-      readyTestId: "assistants-empty",
-      // Rendered once the list endpoint answers with no profiles, which is
-      // what `mockSettingsEntryApis` returns.
-    },
-    {
       name: "external import",
       tab: "data" as const,
       linkTestId: "external-import-entry-link",
@@ -247,11 +240,15 @@ test.describe("settings information architecture", () => {
       name: "assistant profiles",
       path: "/settings/assistants",
       backTestId: "assistants-back-to-settings",
-      entryTestId: "assistants-entry",
-      entryLinkTestId: "assistants-entry-link",
-      href: "/chat?settings=ai&settingsSection=assistants",
-      group: "AI 개인화",
-      crumb: "나만의 AI 프로필",
+      // There is no row to restore: the assistants tab renders the collection
+      // itself, so coming back lands on the content rather than on a link to
+      // it. The deep link still names the section, which is what selects the
+      // tab.
+      entryTestId: "assistants-content",
+      entryLinkTestId: null,
+      href: "/chat?settings=assistants&settingsSection=assistants",
+      group: "AI 어시스턴트",
+      crumb: "나의 AI 어시스턴트",
     },
     {
       name: "external import",
@@ -309,7 +306,9 @@ test.describe("settings information architecture", () => {
       // address bar rather than left to fire again on reload.
       await expect(settingsDialog(page)).toBeVisible();
       await expect(page.getByTestId(detail.entryTestId)).toBeVisible();
-      await expect(page.getByTestId(detail.entryLinkTestId)).toBeFocused();
+      if (detail.entryLinkTestId) {
+        await expect(page.getByTestId(detail.entryLinkTestId)).toBeFocused();
+      }
       await expect(page).toHaveURL(/\/chat$/);
     });
 
@@ -455,5 +454,36 @@ test.describe("settings information architecture", () => {
     ).toBeVisible();
     // The previous name must not survive anywhere in the panel.
     await expect(dialog.getByText("AI 설정", { exact: true })).toHaveCount(0);
+  });
+
+  test("the assistants tab is the management home, not a signpost @ui-risk", async ({
+    page,
+  }) => {
+    await gotoChatWithSettings(page);
+    await openSettingsTab(page, "assistants");
+
+    const tab = page.getByTestId("settings-assistants-tab");
+    await expect(tab).toBeVisible();
+    // The collection itself, with its create action -- not one row that
+    // leaves for a page.
+    await expect(tab.getByTestId("assistants-content")).toBeVisible();
+    await expect(tab.getByTestId("assistants-create")).toBeVisible();
+  });
+
+  test("the user-facing word is assistant, not profile @ui-risk", async ({
+    page,
+  }) => {
+    await gotoChatWithSettings(page);
+    await openSettingsTab(page, "assistants");
+
+    const dialog = settingsDialog(page);
+    await expect(
+      dialog.getByRole("button", { name: "AI 어시스턴트" })
+    ).toBeVisible();
+    // "프로필" still means the *account* profile elsewhere, so this is scoped
+    // to the tab that renders the collection.
+    await expect(
+      page.getByTestId("settings-assistants-tab").getByText("프로필")
+    ).toHaveCount(0);
   });
 });

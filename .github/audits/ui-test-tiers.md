@@ -41,8 +41,8 @@ browser coverage without rebuilding E2E" 항목이 이 문서의 존재와 workf
 있습니다. `npm run check:ui-tier-coverage`가 이 목록과 태그를 양방향으로
 맞춥니다.
 
-실측: 2026-08-20 기준 `--grep=@ui-risk --list`가 desktop-chromium과
-mobile-chromium 두 project에서 **30개 파일, 662 test**를 선택합니다.
+실측: 2026-08-21 기준 `--grep=@ui-risk --list`가 desktop-chromium과
+mobile-chromium 두 project에서 **31개 파일, 696 test**를 선택합니다.
 
 | Spec |
 |---|
@@ -66,14 +66,18 @@ mobile-chromium 두 project에서 **30개 파일, 662 test**를 선택합니다.
 | `pricing-promotion-currency.spec.ts` |
 | `provider-status.spec.ts` |
 | `assistant-profiles-settings.spec.ts` |
+| `chat-context-menu-shape.spec.ts` |
 | `settings-information-architecture.spec.ts` |
 | `sidebar-context-menu-theme.spec.ts` |
 | `signin-analytics-placement.spec.ts` |
 | `skip-link-and-armed-delete.spec.ts` |
 | `ssr-root-language.spec.ts` |
 
-검토 시점 실측(2026-08-20, `--list`): **30개 파일 662 test** (두 project 합계).
-직전 값은 같은 날의 29개 파일 650 test였고, 그 뒤
+검토 시점 실측(2026-08-21, `--list`): **31개 파일 696 test** (두 project 합계).
+직전 값은 2026-08-20의 30개 파일 662 test였고, 그 뒤
+`chat-context-menu-shape.spec.ts`(+34)가 합류했습니다 — 컴포저 Context 메뉴의
+항목 수·순서와 일곱 개 viewport의 "스크롤 없음" 계약은 화면에서만 확인되고, 이
+메뉴는 채팅의 모든 도구 진입점이므로 tier에 넣었습니다. 그 이전에는
 `chat-welcome-flicker.spec.ts`(+12)가 합류했습니다. 그 이전은 2026-08-16의
 28개 파일 646 test였고 `assistant-profiles-settings.spec.ts`(+4)가
 합류했습니다 — AI 프로필 생성 폼이 최소 입력만 묻고 고급 설정을 접어 두는 계약,

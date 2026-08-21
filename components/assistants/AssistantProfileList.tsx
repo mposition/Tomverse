@@ -61,12 +61,30 @@ type ListState =
           maxProfilesPerAccount: number;
       };
 
-export function AssistantProfileList() {
+/**
+ * The list itself, without the page around it.
+ *
+ * Two surfaces show it: the settings panel's assistants tab and
+ * `/settings/assistants`. They differ in chrome and in nothing else, so the
+ * API states -- loading, disabled, error, empty, ready -- are implemented once
+ * here rather than twice with a chance to disagree about what a 403 means.
+ *
+ * `focusProfileId` is a prop rather than a query read, so the panel does not
+ * have to care that the page restores a row from the URL.
+ */
+export function AssistantProfileListContent({
+    focusProfileId,
+    headingLevel = "h1",
+}: {
+    focusProfileId?: string | null;
+    /** The page owns the document's `h1`; inside the panel this is a section. */
+    headingLevel?: "h1" | "h2";
+}) {
     const { t } = useLanguage();
     const [state, setState] = useState<ListState>({ status: "loading" });
-    const searchParams = useSearchParams();
     const rowRefs = useRef(new Map<string, HTMLAnchorElement>());
     const headingRef = useRef<HTMLHeadingElement | null>(null);
+    const Heading = headingLevel;
 
     const load = useCallback(async () => {
         try {
@@ -120,7 +138,7 @@ export function AssistantProfileList() {
      * that matches nothing, and the heading takes focus instead of leaving it
      * on `<body>` with nothing announced.
      */
-    const requestedFocusId = searchParams.get(ASSISTANT_PROFILE_FOCUS_PARAM);
+    const requestedFocusId = focusProfileId ?? null;
     useEffect(() => {
         if (state.status !== "ready" || !requestedFocusId) return;
         const target = state.profiles.find(
@@ -139,24 +157,25 @@ export function AssistantProfileList() {
         state.profiles.length >= state.maxProfilesPerAccount;
 
     return (
-        <div className="mx-auto w-full max-w-3xl px-4 py-6 sm:px-6">
-            <SettingsDetailNav
-                section="assistants"
-                currentLabel={t("assistantProfiles.pageTitle")}
-                backTestId="assistants-back-to-settings"
-            />
-
-            <header className="mt-4">
-                <h1
+        <div data-testid="assistants-content">
+            <header>
+                <Heading
                     ref={headingRef}
                     // Focusable only so it can receive focus programmatically
                     // when the row a visitor came from is gone; it is not in
                     // the tab order.
                     tabIndex={-1}
-                    className="text-2xl font-black focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+                    // Weight follows size, not the other way round: 900 is
+                    // for headline-sized text, so the panel's 16px heading is
+                    // bold rather than black (docs/ui-contracts/typography.md).
+                    className={
+                        headingLevel === "h1"
+                            ? "text-2xl font-black focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+                            : "text-base font-bold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+                    }
                 >
                     {t("assistantProfiles.pageTitle")}
-                </h1>
+                </Heading>
                 <p className="mt-2 text-sm leading-6 text-zinc-600 dark:text-zinc-400">
                     {t("assistantProfiles.pageDescription")}
                 </p>
@@ -274,6 +293,31 @@ export function AssistantProfileList() {
                     )}
                 </>
             )}
+        </div>
+    );
+}
+
+/**
+ * `/settings/assistants`: the same list, with the page chrome around it.
+ *
+ * The nav belongs to the page and not to the content, because the panel
+ * version is already inside settings and has nothing to navigate up to.
+ */
+export function AssistantProfileList() {
+    const { t } = useLanguage();
+    const searchParams = useSearchParams();
+    return (
+        <div className="mx-auto w-full max-w-3xl px-4 py-6 sm:px-6">
+            <SettingsDetailNav
+                section="assistants"
+                currentLabel={t("assistantProfiles.pageTitle")}
+                backTestId="assistants-back-to-settings"
+            />
+            <div className="mt-4">
+                <AssistantProfileListContent
+                    focusProfileId={searchParams.get(ASSISTANT_PROFILE_FOCUS_PARAM)}
+                />
+            </div>
         </div>
     );
 }

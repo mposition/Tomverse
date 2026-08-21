@@ -162,10 +162,9 @@ test.describe("assistant profile settings", () => {
 
         const back = page.getByTestId("assistants-back-to-settings");
         await expect(back).toBeVisible();
-        // The AI settings tab, not the data tab: profiles moved when
-        // personalisation got a tab of its own, and this href is the half of
-        // the pair a reader actually follows.
-        await expect(back).toHaveAttribute("href", /settings=ai/);
+        // The assistants tab, which is also where the collection is managed.
+        // This href is the half of the pair a reader actually follows.
+        await expect(back).toHaveAttribute("href", /settings=assistants/);
         await expect(back).toHaveAttribute("href", /settingsSection=assistants/);
     });
 
@@ -472,7 +471,7 @@ test.describe("assistant profile settings", () => {
         const back = page.getByTestId("assistant-back-to-list");
         await expect(back).toBeVisible();
         await expect(back).toHaveAttribute("href", /\/settings\/assistants(\?|$)/);
-        await expect(back).toContainText(/AI 프로필 목록으로|Back to AI profiles/);
+        await expect(back).toContainText(/AI 어시스턴트 목록으로|Back to AI assistants/);
 
         // The link that skipped the list is gone from this page.
         await expect(page.getByTestId("assistants-back-to-settings")).toHaveCount(0);
@@ -499,8 +498,8 @@ test.describe("assistant profile settings", () => {
         }
 
         await expect(crumb).toContainText("설정");
-        await expect(crumb).toContainText("AI 개인화");
-        await expect(crumb).toContainText("나만의 AI 프로필");
+        await expect(crumb).toContainText("AI 어시스턴트");
+        await expect(crumb).toContainText("나의 AI 어시스턴트");
         // The page's own crumb is the profile, and it is not a link.
         await expect(crumb.locator('[aria-current="page"]')).toContainText(
             "Scheduling helper"
@@ -508,7 +507,7 @@ test.describe("assistant profile settings", () => {
 
         // The list crumb is reachable, not just readable.
         await crumb
-            .getByRole("link", { name: "나만의 AI 프로필" })
+            .getByRole("link", { name: "나의 AI 어시스턴트" })
             .click();
         await expect(page).toHaveURL(/\/settings\/assistants(\?|$)/);
     });
@@ -543,7 +542,7 @@ test.describe("assistant profile settings", () => {
 
         const back = page.getByTestId("assistant-create-back");
         await expect(back).toHaveAttribute("href", /\/settings\/assistants(\?|$)/);
-        await expect(back).toContainText(/AI 프로필 목록으로|Back to AI profiles/);
+        await expect(back).toContainText(/AI 어시스턴트 목록으로|Back to AI assistants/);
     });
 
     test("creating from a chat offers the chat, not the list", async ({
