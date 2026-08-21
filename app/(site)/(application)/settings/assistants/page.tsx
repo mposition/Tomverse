@@ -8,7 +8,7 @@ import { AssistantProfileList } from "@/components/assistants/AssistantProfileLi
 // (policy §15).
 export default function AssistantProfilesPage() {
     return (
-        <main className="min-h-dvh bg-zinc-50 text-zinc-900 dark:bg-zinc-950 dark:text-zinc-100">
+        <main>
             <AssistantProfileList />
         </main>
     );

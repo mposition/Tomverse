@@ -1071,6 +1071,9 @@ export const fr = {
     settingsNav: {
         navLabel: "Navigation des réglages",
         backToSettings: "Retour aux réglages",
+        backToChat: "Retour au chat",
+        backToChatShort: "Chat",
+        exitNavLabel: "Quitter les réglages",
         settings: "Réglages",
         dataAndPersonalization: "Données et personnalisation",
         dataAndPersonalizationDescription: "Conversations importées et mémoire du compte. Chacune se gère sur sa propre page.",
