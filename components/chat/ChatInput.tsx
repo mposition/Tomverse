@@ -2736,8 +2736,8 @@ export function ChatInput({
             }}
             className={`flex shrink-0 touch-manipulation items-center justify-center rounded-full border border-zinc-300 bg-zinc-50 text-zinc-600 transition hover:bg-zinc-100 hover:text-zinc-900 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-300 dark:hover:bg-zinc-800 dark:hover:text-white ${isMobileShell ? "h-11 w-11" : "h-10 w-10"}`}
             data-testid="composer-tools-button"
-            title={t("chat.moreActions")}
-            aria-label={t("chat.moreActions")}
+            title={t("chat.addAndTools")}
+            aria-label={t("chat.addAndTools")}
             aria-expanded={isMenuOpen && menuView === "actions"}
             aria-controls="chat-input-popover"
             aria-haspopup="dialog"
@@ -2908,7 +2908,7 @@ export function ChatInput({
                         ? t("chat.assistantPickerTitle")
                         : menuView === "memory"
                           ? t("chat.toolsMemory")
-                          : t("chat.moreActions")
+                          : t("chat.addAndTools")
               }
               tabIndex={-1}
               // Exposed for the responsive suite so a keyboard fixture can
@@ -2957,7 +2957,7 @@ export function ChatInput({
                             ? t("chat.assistantPickerTitle")
                             : menuView === "memory"
                               ? t("chat.toolsMemory")
-                              : t("chat.moreActions")}
+                              : t("chat.addAndTools")}
                     </p>
                     <p className="text-xs text-zinc-500">
                       {menuView === "webSearch"
