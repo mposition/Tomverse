@@ -554,6 +554,15 @@ async function gotoSettingsDepth(page: Page, path: string) {
   await page.goto(path);
 }
 
+// The three assistants routes do not share one up-link, and that is the design
+// rather than an inconsistency. A profile goes up to the list it came from and
+// the list goes up to settings, so only the collection carries
+// `assistants-back-to-settings`. The table named that one test id for all three
+// while it was written against a base that had no such hierarchy, and the two
+// deep rows failed on the merge for exactly that reason.
+//
+// What the test below checks is unchanged by it: every settings detail page
+// still offers an up-link, and no up-link is bare `/chat`.
 const SETTINGS_DEPTHS = [
   {
     name: "import list",
