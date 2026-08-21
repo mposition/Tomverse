@@ -25,7 +25,8 @@ import {
     isValidIanaTimeZone,
     normalizeIanaTimeZone,
 } from "@/lib/userTimeZone";
-import { sendAccountWelcomeEmail } from "@/lib/accountEmails";
+import { ACCOUNT_WELCOME_TEMPLATE } from "@/lib/emailTemplateDefinitions";
+import { enqueueStandardEmail } from "@/lib/standardEmailLane";
 import { z } from "zod";
 import {
     apiSecurityResponse,
@@ -118,12 +119,19 @@ export async function GET(req: Request) {
                 }
             });
             isNewAccount = true;
-            await sendAccountWelcomeEmail({
-                to: session.user.email,
-                name: session.user.name,
+            // Enqueued rather than sent: a provider blip used to lose the
+            // welcome email permanently, and the report of that went to a
+            // console line nobody reads.
+            await enqueueStandardEmail({
+                templateKey: ACCOUNT_WELCOME_TEMPLATE,
+                emailAddress: session.user.email,
+                userId,
                 language: settings.language,
+                payload: { name: session.user.name ?? null },
+                referenceType: "User",
+                referenceId: userId,
             }).catch((error) => {
-                console.error("Account welcome email failed:", error);
+                console.error("Account welcome email enqueue failed:", error);
             });
         }
 

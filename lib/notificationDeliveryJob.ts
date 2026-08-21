@@ -6,6 +6,7 @@ import {
   type NotificationDrainResult,
 } from "@/lib/notificationDeliveries";
 import { sweepExpiredCredentialDeliveries } from "@/lib/credentialEmailLane";
+import { drainStandardEmailDeliveries } from "@/lib/standardEmailLane";
 import { reportOperationalIncident } from "@/lib/operationalMonitoring";
 import {
   completeScheduledJob,
@@ -72,6 +73,32 @@ export async function runNotificationDeliveryDrain(options?: {
         },
       });
     }
+    // User-facing mail drains on the same tick, for the same reason the
+    // operator queue does: a pass that needs its own cron provisioned before it
+    // moves anything is a pass that moves nothing for a while. It is wrapped so
+    // its failure cannot fail the operator drain -- the two queues fail
+    // independently and should be reported that way.
+    try {
+      const userMail = await drainStandardEmailDeliveries();
+      if (userMail.claimed > 0) {
+        console.info(
+          JSON.stringify({
+            event: "standard_email_drain",
+            ...userMail,
+            at: new Date().toISOString(),
+          })
+        );
+      }
+    } catch (drainError) {
+      console.error(
+        JSON.stringify({
+          event: "standard_email_drain_failed",
+          reason: drainError instanceof Error ? drainError.name : "unknown",
+          at: new Date().toISOString(),
+        })
+      );
+    }
+
     // Credential rows are closed out on the same tick rather than on a cron of
     // their own, for the reason this file already gives about the drain: an
     // upkeep pass that needs a schedule provisioned before it does anything is

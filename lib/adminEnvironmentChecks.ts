@@ -116,6 +116,15 @@ export function adminEnvironmentChecks(): AdminEnvCheck[] {
         "Receives website support form notifications. Falls back to ADMIN_ALERT_EMAIL or ADMIN_EMAILS.",
     },
     {
+      name: "EMAIL_SNAPSHOT_KEYS",
+      configured: isConfigured(process.env.EMAIL_SNAPSHOT_KEYS),
+      description:
+        "Envelope keys for the personalisation inputs the standard email lane " +
+        "stores, as version:secret pairs. Without it that lane refuses to " +
+        "enqueue rather than storing them in the clear. Old versions must stay " +
+        "listed for as long as the rows they sealed are retained.",
+    },
+    {
       name: "TRANSACTIONAL_EMAIL_FROM",
       configured: true,
       description:

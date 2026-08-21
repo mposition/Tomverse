@@ -6,11 +6,14 @@ import { prisma } from "@/lib/prisma";
 import {
   CREDENTIAL_LANE,
   createCredentialDeliveryRows,
-  ensureBootstrapPolicyVersion,
-  ensureCredentialTemplateVersion,
   sendCredentialEmailNow,
   sweepExpiredCredentialDeliveries,
 } from "@/lib/credentialEmailLane";
+import { AUTH_LOGIN_CODE_TEMPLATE } from "@/lib/emailTemplateDefinitions";
+import {
+  ensureBootstrapPolicyVersion,
+  ensureTemplateVersion,
+} from "@/lib/emailTemplateRegistry";
 
 // The credential synchronous lane against a real database.
 //
@@ -31,10 +34,8 @@ const reset = () =>
   `);
 
 const template = {
+  templateKey: AUTH_LOGIN_CODE_TEMPLATE,
   language: "en",
-  subject: "Your Tomverse login code",
-  html: "<p>{{code}}</p>",
-  text: "{{code}}",
 };
 
 /** A live credential, as lib/emailLogin.ts would have just written. */
@@ -87,7 +88,7 @@ after(async () => {
 
 const enqueue = async (attemptId: string, emailAddress: string) => {
   const policyVersionId = await ensureBootstrapPolicyVersion();
-  const registered = await ensureCredentialTemplateVersion(template);
+  const registered = await ensureTemplateVersion(template);
   return prisma.$transaction((tx) =>
     createCredentialDeliveryRows(tx, {
       attemptId,
@@ -101,19 +102,30 @@ const enqueue = async (attemptId: string, emailAddress: string) => {
 };
 
 test("the template registry stores the template, not the message", async () => {
-  const first = await ensureCredentialTemplateVersion(template);
-  const again = await ensureCredentialTemplateVersion(template);
+  const first = await ensureTemplateVersion(template);
+  const again = await ensureTemplateVersion(template);
 
   // Unchanged copy reuses the row. Registering the rendered message instead
   // would mint one version per sign-in, because the code differs every time.
   assert.equal(again.templateVersionId, first.templateVersionId);
 
-  // Changed copy is a new version, never an edit: the deliveries that pointed
-  // at the old one still describe what they actually sent.
-  const changed = await ensureCredentialTemplateVersion({
-    ...template,
-    text: "{{code}} -- expires in 10 minutes",
+  // The registered body carries the variables rather than a real code, which
+  // is what makes the hash stable across sends.
+  const stored = await prisma.templateVersion.findUniqueOrThrow({
+    where: { id: first.templateVersionId },
   });
+  assert.ok(stored.bodyText.includes("{{code}}"));
+  assert.equal(stored.status, "published");
+  assert.equal(stored.version, 1);
+
+  // Changed copy would be a new version, never an edit. Simulated by retiring
+  // the published row: the lookup requires `published`, so the next call has to
+  // mint version 2 rather than reuse what is there.
+  await prisma.templateVersion.update({
+    where: { id: first.templateVersionId },
+    data: { status: "retired" },
+  });
+  const changed = await ensureTemplateVersion(template);
   assert.notEqual(changed.templateVersionId, first.templateVersionId);
 
   const versions = await prisma.templateVersion.findMany({
@@ -124,7 +136,6 @@ test("the template registry stores the template, not the message", async () => {
     versions.map((row) => row.version),
     [1, 2]
   );
-  assert.equal(versions[0].bodyText, template.text);
 });
 
 test("the attempt and its delivery record commit together or not at all", async () => {
@@ -134,7 +145,7 @@ test("the attempt and its delivery record commit together or not at all", async 
   try {
     await prisma.$transaction(async (tx) => {
       const policyVersionId = await ensureBootstrapPolicyVersion();
-      const registered = await ensureCredentialTemplateVersion(template);
+      const registered = await ensureTemplateVersion(template);
       await createCredentialDeliveryRows(tx, {
         attemptId: attempt.id,
         emailAddress: attempt.email,

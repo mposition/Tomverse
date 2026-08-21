@@ -1,11 +1,15 @@
 import "server-only";
 
-import { createHash, createHmac } from "node:crypto";
 import type { Prisma } from "@prisma/client";
 
 import { prisma } from "@/lib/prisma";
 import { deliverEmailOnce } from "@/lib/email";
 import { reportOperationalIncident } from "@/lib/operationalMonitoring";
+import { AUTH_LOGIN_CODE_TEMPLATE } from "@/lib/emailTemplateDefinitions";
+import {
+  EMAIL_AUDIT_HASH_KEY_VERSION,
+  renderedBodyHash,
+} from "@/lib/emailAuditHash";
 import {
   classifyProviderStatus,
   classifyTransportError,
@@ -46,208 +50,9 @@ import {
  */
 
 /** The one template this lane carries. Adding a second needs a reason. */
-export const CREDENTIAL_TEMPLATE_KEY = "auth_login_code";
+export const CREDENTIAL_TEMPLATE_KEY = AUTH_LOGIN_CODE_TEMPLATE;
 
 export const CREDENTIAL_LANE = "credential_sync";
-
-/**
- * Stand-ins used to register the template, never to send.
- *
- * The registry stores the template, not the message: hashing a rendered login
- * code would mint a new TemplateVersion on every sign-in and fill the table
- * with one row per request. Rendering with these placeholders yields the copy
- * with its variables still in place, which is both hash-stable and a truthful
- * artefact of what shipped.
- */
-export const CREDENTIAL_TEMPLATE_PLACEHOLDERS = {
-  code: "{{code}}",
-  verifyUrl: "{{verifyUrl}}",
-} as const;
-
-const BOOTSTRAP_POLICY_VERSION = "2026-08-21.1";
-
-/**
- * The key the audit hash is computed with.
- *
- * Separate from `NEXTAUTH_SECRET` because the two rotate for different reasons
- * and on different clocks: rotating the auth secret signs everyone out, while
- * rotating this one must never invalidate a record -- which is why the version
- * that produced each hash is stored beside it and old versions stay readable
- * for as long as the record does (§10.3-7).
- */
-const auditHashKey = () => {
-  const value =
-    process.env.EMAIL_AUDIT_HASH_KEY || process.env.NEXTAUTH_SECRET || "";
-  if (!value) throw new Error("EMAIL_AUDIT_HASH_KEY is not configured.");
-  return value;
-};
-
-export const EMAIL_AUDIT_HASH_KEY_VERSION =
-  process.env.EMAIL_AUDIT_HASH_KEY_VERSION || "v1";
-
-/**
- * Keyed, not plain.
- *
- * The body being hashed contains the six-digit code, and a digest of it is a
- * million guesses away from the code itself -- so an audit column would become
- * the thing an attacker reads. lib/emailLogin.ts already establishes the
- * pattern with `createHmac("sha256", secret())`; this follows it, and applies
- * it on every lane rather than only where a credential is expected, because a
- * rule that depends on classifying the message correctly fails on the day the
- * classification is wrong.
- */
-export const renderedBodyHash = (parts: {
-  subject: string;
-  html: string;
-  text: string;
-}) =>
-  createHmac("sha256", auditHashKey())
-    .update(`${parts.subject}\n${parts.html}\n${parts.text}`)
-    .digest("hex");
-
-/**
- * Prisma reports a unique-constraint conflict as P2002 regardless of which
- * index caught it, which is all the caller below needs to know.
- */
-const isUniqueViolation = (error: unknown) =>
-  typeof error === "object" &&
-  error !== null &&
-  (error as { code?: unknown }).code === "P2002";
-
-/** Unkeyed on purpose: this detects template drift, it guards nothing. */
-const templateContentHash = (parts: {
-  subject: string;
-  html: string;
-  text: string;
-}) =>
-  createHash("sha256")
-    .update(`${parts.subject}\n${parts.html}\n${parts.text}`)
-    .digest("hex");
-
-/**
- * The policy version deliveries resolve against.
- *
- * Bootstrap only: it carries no jurisdiction profile beyond the fallback,
- * because transactional mail branches on none of them -- no advertising label,
- * no unsubscribe SLA, no quiet hours. The eight real profiles arrive with M7 as
- * a *new* version that a human approves, which is the only way a policy version
- * is ever supposed to become active (§12.5). This one exists so the delivery
- * row has something truthful to point at in the meantime.
- */
-export async function ensureBootstrapPolicyVersion(): Promise<string> {
-  const active = await prisma.emailPolicyVersion.findFirst({
-    where: { status: "active" },
-    select: { id: true },
-  });
-  if (active) return active.id;
-
-  const created = await prisma.emailPolicyVersion.upsert({
-    where: { version: BOOTSTRAP_POLICY_VERSION },
-    update: {},
-    create: {
-      version: BOOTSTRAP_POLICY_VERSION,
-      status: "active",
-      activatedAt: new Date(),
-      changeSummary:
-        "Bootstrap: transactional-only. Jurisdiction profiles land with M7 " +
-        "as a separately approved version.",
-    },
-    select: { id: true },
-  });
-  return created.id;
-}
-
-/**
- * The published TemplateVersion for this template and language, creating it if
- * the copy in code has no matching row yet.
- *
- * Published versions are immutable, so a changed template is a *new* version
- * rather than an update. That is deliberate, and it is the difference between
- * this and the seeding pattern AGENTS.md warns about with `creditWeight`: there,
- * `skipDuplicates` left existing rows holding a value the code no longer said,
- * and nothing reported the divergence. Here the content hash is part of the
- * lookup, so code that has moved on cannot silently keep pointing at the old
- * row -- it gets a new one, and the deliveries that referenced the old version
- * still render what they actually sent.
- */
-export async function ensureCredentialTemplateVersion(input: {
-  language: string;
-  subject: string;
-  html: string;
-  text: string;
-}): Promise<{ templateId: string; templateVersionId: string }> {
-  const contentHash = templateContentHash(input);
-
-  const template = await prisma.emailTemplate.upsert({
-    where: { key: CREDENTIAL_TEMPLATE_KEY },
-    update: {},
-    create: {
-      key: CREDENTIAL_TEMPLATE_KEY,
-      classification: "transactional",
-      // Null, and the database insists on it: a login code is not gated by a
-      // preference, and giving it one would imply it could be switched off.
-      purpose: null,
-      requiresUnsubscribe: false,
-    },
-    select: { id: true },
-  });
-
-  const existing = await prisma.templateVersion.findFirst({
-    where: {
-      templateId: template.id,
-      language: input.language,
-      contentHash,
-      status: "published",
-    },
-    select: { id: true },
-  });
-  if (existing) {
-    return { templateId: template.id, templateVersionId: existing.id };
-  }
-
-  const latest = await prisma.templateVersion.findFirst({
-    where: { templateId: template.id, language: input.language },
-    orderBy: { version: "desc" },
-    select: { version: true },
-  });
-
-  try {
-    const created = await prisma.templateVersion.create({
-      data: {
-        templateId: template.id,
-        language: input.language,
-        version: (latest?.version ?? 0) + 1,
-        subject: input.subject,
-        bodyHtml: input.html,
-        bodyText: input.text,
-        contentHash,
-        status: "published",
-        publishedAt: new Date(),
-      },
-      select: { id: true },
-    });
-    return { templateId: template.id, templateVersionId: created.id };
-  } catch (error) {
-    // Two sign-ins arriving together after a copy change both read the same
-    // `latest` and both try to write version N+1; the unique index lets one
-    // through. Losing that race is not an error -- the row the winner wrote is
-    // the row this caller wanted -- so it is read back rather than propagated.
-    // Left unhandled it would surface as a failed login, which is a spectacular
-    // consequence for two people signing in at the same moment.
-    if (!isUniqueViolation(error)) throw error;
-    const raced = await prisma.templateVersion.findFirst({
-      where: {
-        templateId: template.id,
-        language: input.language,
-        contentHash,
-        status: "published",
-      },
-      select: { id: true },
-    });
-    if (!raced) throw error;
-    return { templateId: template.id, templateVersionId: raced.id };
-  }
-}
 
 export type CredentialEnqueueInput = {
   /** The EmailLoginAttempt this message carries a credential for. */

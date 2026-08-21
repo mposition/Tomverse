@@ -13,12 +13,14 @@ import { buildEmailLoginCodeEmail } from "@/lib/emailLoginEmails";
 import { isLanguage } from "@/lib/language";
 import { reportOperationalIncident } from "@/lib/operationalMonitoring";
 import {
-  CREDENTIAL_TEMPLATE_PLACEHOLDERS,
   createCredentialDeliveryRows,
-  ensureBootstrapPolicyVersion,
-  ensureCredentialTemplateVersion,
   sendCredentialEmailNow,
 } from "@/lib/credentialEmailLane";
+import { AUTH_LOGIN_CODE_TEMPLATE } from "@/lib/emailTemplateDefinitions";
+import {
+  ensureBootstrapPolicyVersion,
+  ensureTemplateVersion,
+} from "@/lib/emailTemplateRegistry";
 
 const CODE_TTL_MINUTES = clamp(Number(process.env.EMAIL_LOGIN_CODE_TTL_MINUTES) || 10, 1, 10);
 const LOCKOUT_THRESHOLD = clamp(Number(process.env.EMAIL_LOGIN_LOCKOUT_THRESHOLD) || 5, 3, 20);
@@ -236,9 +238,9 @@ export async function requestEmailLoginCode(
   // Registered from the template with its variables still in place, never from
   // the rendered message: hashing a real login code would mint a fresh
   // TemplateVersion on every sign-in.
-  const template = await ensureCredentialTemplateVersion({
+  const template = await ensureTemplateVersion({
+    templateKey: AUTH_LOGIN_CODE_TEMPLATE,
     language,
-    ...buildEmailLoginCodeEmail({ ...CREDENTIAL_TEMPLATE_PLACEHOLDERS, language }),
   });
   const policyVersionId = await ensureBootstrapPolicyVersion();
 
