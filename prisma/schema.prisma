@@ -2811,6 +2811,18 @@ model RoutingRun {
   selectionVersion       String
   estimatorVersion       String
 
+  /// The scoring policy the selection ran under: quality bands, tie-break
+  /// order, switch margin, hysteresis and the cost/latency thresholds, all
+  /// versioned together in lib/routerScorePolicy.ts.
+  ///
+  /// Separate from `selectionVersion` because the rule and the numbers it
+  /// applies move independently -- a band changing is not the comparator
+  /// changing -- and a run recorded with only one of the two can be attributed
+  /// to neither. Nullable because rows written before the policy existed
+  /// genuinely had none; an invented default would claim they ran under a
+  /// policy that had not been decided.
+  selectionPolicyVersion String?
+
   /// The task profile, as labels and booleans.
   profileKind             String
   profileConfidence       String

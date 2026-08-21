@@ -66,11 +66,21 @@ const REASONING_SUGGESTION_ORDER = [
 // recommendation this wizard should make. Two near-identical OpenAI Standard
 // models would also crowd the three-slot result and cost it provider spread.
 /**
- * Also read by the Router's shadow selection (lib/routerSelection.ts), which
- * uses it only as a deterministic tie-break. Exported rather than copied so
- * the repository holds one curated opinion about which models suit which task
- * -- two would drift, and the second would be the one nobody remembered to
- * update.
+ * The wizard's own candidate set, and its own tie-break.
+ *
+ * The Router used to read this and the table below, which made a six-model
+ * product questionnaire the ceiling on what Auto could select: the twenty-four
+ * enabled models this order never lists sorted last and identically, so
+ * premium-reasoning and research models were unreachable as a class. Auto now
+ * ranks from `lib/routerScorePolicy.ts`, which enrols every enabled model, and
+ * nothing outside this file reads either table.
+ *
+ * Keeping them separate is the point. This one is static product curation --
+ * which model a new account should start on -- and the Router's is versioned
+ * operational policy. Shared, one would have had to change for the other, and
+ * a change made for routing would have quietly rewritten a recommendation.
+ * `tests/modelFinder.test.mjs` pins this wizard's output over every
+ * combination of answers, so the split cannot become nominal.
  */
 export const STANDARD_CANDIDATE_ORDER = [
   "gpt-5-6-luna",
@@ -81,8 +91,11 @@ export const STANDARD_CANDIDATE_ORDER = [
   "qwen3.6-flash",
 ] as const;
 
-/** Curated task-to-model preference. Shared with the Router; see above. */
-export const TASK_SCORES: Record<ModelFinderTask, Partial<Record<string, number>>> = {
+/** Curated task-to-model preference, for this wizard only; see above. */
+export const MODEL_FINDER_SCORES: Record<
+  ModelFinderTask,
+  Partial<Record<string, number>>
+> = {
   documents: {
     "gemini-2-5-flash": 5,
     "gpt-5-6-luna": 4,
@@ -200,7 +213,7 @@ export const getModelFinderRecommendations = (
     ])
   );
 
-  for (const task of answers.tasks) addScores(scores, TASK_SCORES[task]);
+  for (const task of answers.tasks) addScores(scores, MODEL_FINDER_SCORES[task]);
   addScores(scores, PRIORITY_SCORES[answers.priority]);
   addScores(scores, FILE_SCORES[answers.fileUsage]);
 
@@ -279,7 +292,7 @@ export const getModelFinderCombination = (
 
   for (const task of answers.tasks) {
     if (usedIds.size >= 2) break;
-    const taskScores = Object.entries(TASK_SCORES[task] || {})
+    const taskScores = Object.entries(MODEL_FINDER_SCORES[task] || {})
       .filter(([modelId]) => !usedIds.has(modelId) && isModelFinderDefaultId(modelId))
       .sort(([, left], [, right]) => (right || 0) - (left || 0));
     const bestModelId = taskScores[0]?.[0];

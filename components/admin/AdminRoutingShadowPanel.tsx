@@ -48,6 +48,7 @@ type ShadowReport = {
         taskProfileVersions: string[];
         candidateFilterVersions: string[];
         selectionVersions: string[];
+        selectionPolicyVersions: string[];
         mixed: boolean;
     };
     switches: Array<{ from: string; to: string; count: number }>;

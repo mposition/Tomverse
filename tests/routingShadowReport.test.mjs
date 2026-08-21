@@ -1,7 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { buildShadowReport } from "../lib/routingShadowReport.ts";
+import {
+    NO_POLICY_VERSION,
+    buildShadowReport,
+    compareSelectionDistributions,
+    selectionDistributionKeys,
+} from "../lib/routingShadowReport.ts";
 
 /**
  * Reading shadow routing back.
@@ -17,6 +22,7 @@ const row = (overrides = {}) => ({
     taskProfileVersion: "task-profile-v1",
     candidateFilterVersion: "router-candidates-v1",
     selectionVersion: "router-selection-v1",
+    selectionPolicyVersion: "router-score-policy-v1",
     profileKind: "general",
     plan: "Free",
     selectedModelId: "a",
@@ -226,4 +232,114 @@ test("the sticky-held rate is over decided turns, and counts only held ones", ()
 
     assert.equal(report.stickyHeldRate, 0.5);
     assert.equal(report.decided, 4);
+});
+
+// The Router rollout exits on a report of how the selection distribution moved.
+// It cannot be written after the fact -- shadow rows carry the policy they were
+// decided under, so a comparison is only possible if the column was recorded
+// while the traffic ran.
+
+test("a row with no recorded policy is its own group, not a silent drop", () => {
+    // Mixing pre-policy rows into a policy's numbers would compare a policy
+    // with a subset of itself and report the difference as the policy's doing.
+    const groups = selectionDistributionKeys([
+        row({ selectionPolicyVersion: null }),
+        row({ selectionPolicyVersion: "router-score-policy-v1" }),
+        row({ selectionPolicyVersion: "router-score-policy-v1" }),
+    ]);
+    assert.deepEqual(groups, [
+        { key: "router-score-policy-v1", rows: 2, decided: 2 },
+        { key: NO_POLICY_VERSION, rows: 1, decided: 1 },
+    ]);
+});
+
+test("the comparison reports where selections moved, as shares", () => {
+    const old = (modelId) =>
+        row({ selectionPolicyVersion: "old", selectedModelId: modelId });
+    const fresh = (modelId) =>
+        row({ selectionPolicyVersion: "new", selectedModelId: modelId });
+
+    const comparison = compareSelectionDistributions(
+        [old("luna"), old("luna"), old("luna"), old("haiku"), fresh("luna"), fresh("kimi")],
+        { baseline: "old", candidate: "new" }
+    );
+
+    assert.equal(comparison.comparable, true);
+    assert.equal(comparison.baselineDecided, 4);
+    assert.equal(comparison.candidateDecided, 2);
+
+    const byModel = Object.fromEntries(
+        comparison.models.map((entry) => [entry.modelId, entry])
+    );
+    assert.equal(byModel.luna.baselineShare, 0.75);
+    assert.equal(byModel.luna.candidateShare, 0.5);
+    // The row that matters most: a model the old policy could never choose.
+    assert.equal(byModel.kimi.baselineShare, 0);
+    assert.equal(byModel.kimi.candidateShare, 0.5);
+    assert.equal(byModel.kimi.shareDelta, 0.5);
+    // Half the summed absolute differences: the share of decided turns that
+    // would land somewhere else.
+    assert.equal(comparison.totalVariationDistance, 0.5);
+    // Biggest mover first, so the table reads top-down.
+    assert.equal(comparison.models[0].modelId, "kimi");
+});
+
+test("an undecided row is excluded from both sides, and counted", () => {
+    const comparison = compareSelectionDistributions(
+        [
+            row({ selectionPolicyVersion: "old", selectedModelId: "luna" }),
+            row({
+                selectionPolicyVersion: "new",
+                selectedModelId: null,
+                selectionReason: "no_candidate",
+            }),
+            row({ selectionPolicyVersion: "new", selectedModelId: "luna" }),
+        ],
+        { baseline: "old", candidate: "new" }
+    );
+    assert.equal(comparison.candidateDecided, 1);
+    // Still visible, so a policy that decided far less often cannot hide
+    // behind a distribution that looks unchanged.
+    assert.equal(comparison.candidateSelectionReasons.no_candidate, 1);
+    assert.equal(comparison.totalVariationDistance, 0);
+});
+
+test("a side that decided nothing yields no comparison rather than a zero", () => {
+    // Shares would divide by zero, and a printed 0% would read as "nothing
+    // changed" when the truth is that nothing was measured.
+    const comparison = compareSelectionDistributions(
+        [row({ selectionPolicyVersion: "old", selectedModelId: "luna" })],
+        { baseline: "old", candidate: "new" }
+    );
+    assert.equal(comparison.comparable, false);
+    assert.equal(comparison.candidateDecided, 0);
+    assert.equal(comparison.totalVariationDistance, null);
+});
+
+test("the comparison can also be taken over selection versions", () => {
+    const comparison = compareSelectionDistributions(
+        [
+            row({ selectionVersion: "router-selection-v1", selectedModelId: "luna" }),
+            row({ selectionVersion: "router-selection-v2", selectedModelId: "kimi" }),
+        ],
+        {
+            baseline: "router-selection-v1",
+            candidate: "router-selection-v2",
+            groupedBy: "selectionVersion",
+        }
+    );
+    assert.equal(comparison.groupedBy, "selectionVersion");
+    assert.equal(comparison.totalVariationDistance, 1);
+});
+
+test("a mixed policy version is flagged like any other mixed version", () => {
+    const mixed = buildShadowReport([
+        row(),
+        row({ selectionPolicyVersion: "router-score-policy-v2" }),
+    ]);
+    assert.equal(mixed.versions.mixed, true);
+    assert.deepEqual(mixed.versions.selectionPolicyVersions, [
+        "router-score-policy-v1",
+        "router-score-policy-v2",
+    ]);
 });

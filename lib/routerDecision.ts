@@ -23,10 +23,18 @@
 // profile contributes fixed rule names and script labels, the filters
 // contribute model ids and fixed reason identifiers, and that is all there is.
 //
-// **Versions travel together.** Four components each carry their own version,
-// and a decision that records three of them cannot be attributed later. They
-// are collected in one place so adding a fifth is a change here rather than a
+// **Versions travel together.** Five components each carry their own version,
+// and a decision that records four of them cannot be attributed later. They
+// are collected in one place so adding a sixth is a change here rather than a
 // change in every caller.
+//
+// **This is also where the ranking's cost figures are read.** The selection
+// itself stays pure and takes measured signals as inputs; somebody has to
+// supply them, and for cost that somebody is here, because the pricing
+// registry already knows every enabled model's price and a caller left to
+// compute it would be a second opinion about what a turn costs. Health and
+// latency are not derived here: they need a database, which this must not
+// have.
 
 import {
   filterRouterCandidates,
@@ -35,6 +43,12 @@ import {
   type RouterCandidate,
   type RouterCandidateInput,
 } from "@/lib/routerCandidates";
+import { expectedTotalCostUsdByModel } from "@/lib/routerCostSignal";
+import {
+  ROUTER_SCORE_POLICY_VERSION,
+  type RouterTieBreakCriterion,
+  type RouterTieBreakSignals,
+} from "@/lib/routerScorePolicy";
 import {
   selectRouterModel,
   ROUTER_SELECTION_VERSION,
@@ -60,6 +74,17 @@ export type RouterVersions = {
   taskProfile: string;
   candidates: string;
   selection: string;
+  /**
+   * The scoring policy the selection ran under -- bands, tie-break order,
+   * switch margin, hysteresis and the cost/latency thresholds, versioned
+   * together in `lib/routerScorePolicy.ts`.
+   *
+   * Its own version rather than an implied part of `selection`, because the
+   * rule and the numbers it applies move independently: a band changing is not
+   * the comparator changing, and a decision recorded with only one of the two
+   * cannot be attributed to either.
+   */
+  scorePolicy: string;
 };
 
 export const ROUTER_VERSIONS: RouterVersions = {
@@ -67,12 +92,20 @@ export const ROUTER_VERSIONS: RouterVersions = {
   taskProfile: TASK_PROFILE_VERSION,
   candidates: ROUTER_CANDIDATE_VERSION,
   selection: ROUTER_SELECTION_VERSION,
+  scorePolicy: ROUTER_SCORE_POLICY_VERSION,
 };
 
 export type RouterDecisionInput = TaskProfileInput &
   Omit<RouterCandidateInput, "profile"> & {
     /** The conversation's current model and challenger streak, if any. */
     sticky?: RouterStickyState | null;
+    /**
+     * Measured tie-break signals. Each map given here replaces the default for
+     * that criterion; each one omitted stays unknown and its criterion
+     * abstains -- except cost, which is derived from the pricing registry
+     * below because the catalogue already knows it.
+     */
+    signals?: RouterTieBreakSignals;
   };
 
 /**
@@ -96,6 +129,8 @@ export type RouterDecisionRecord = {
   selectedModelId: string | null;
   selectionReason: SelectionReason;
   selectionMargin: number;
+  /** Which tie-break criterion separated the top two. Operator telemetry. */
+  selectionDecidedBy: RouterTieBreakCriterion | null;
   challengerModelId: string | null;
   turnsFavouringChallenger: number;
   decisionLatencyMs: number;
@@ -187,6 +222,18 @@ export function decideRouterModel(
     profile,
     eligible: candidates.eligible,
     sticky: input.sticky ?? null,
+    signals: {
+      // Derived by default: the pricing registry already holds every enabled
+      // model's price, so leaving the cost criterion unknown would fall the
+      // ranking through to the stable model id for no reason. A caller with a
+      // better figure passes its own.
+      expectedTotalCostUsdByModelId: expectedTotalCostUsdByModel({
+        models: input.models,
+        reservedInputTokens: input.reservedInputTokens,
+        requestOutputCapTokens: input.requestOutputCapTokens,
+      }),
+      ...input.signals,
+    },
   });
 
   const record: RouterDecisionRecord = {
@@ -205,6 +252,7 @@ export function decideRouterModel(
     selectedModelId: selection.selectedModelId,
     selectionReason: selection.reason,
     selectionMargin: selection.margin,
+    selectionDecidedBy: selection.decidedBy,
     challengerModelId: selection.challengerModelId,
     turnsFavouringChallenger: selection.turnsFavouringChallenger,
     decisionLatencyMs: Math.max(0, now() - startedAt),

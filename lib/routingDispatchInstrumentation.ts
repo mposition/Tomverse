@@ -234,6 +234,10 @@ export const beginInstrumentedDispatch = async (
         taskProfileVersion: record?.versions.taskProfile ?? "manual",
         candidateFilterVersion: record?.versions.candidates ?? "manual",
         selectionVersion: record?.versions.selection ?? "manual",
+        // Null rather than the "manual" sentinel: a turn the Router did not
+        // decide ran under no scoring policy at all, and the column is
+        // nullable precisely so that stays sayable.
+        selectionPolicyVersion: record?.versions.scorePolicy ?? null,
         estimatorVersion: input.tokenizerVersion,
         profileKind: record?.taskKind ?? "manual",
         profileConfidence: record?.taskConfidence ?? "none",
