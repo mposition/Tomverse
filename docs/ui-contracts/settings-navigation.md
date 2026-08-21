@@ -111,7 +111,8 @@ The exit control renders on both, with the same destination and the same
 accessible name. Only its **visible** label shortens on a narrow viewport
 (`settingsNav.backToChatShort`), and that is a width decision made in CSS: the
 `aria-label` carries the full phrase at every width, so its name never changes
-under a screen reader, and the short form stays a prefix of the full one.
+under a screen reader, and the short form stays part of the full one — what is
+on screen is always in the name (WCAG 2.5.3).
 
 Nothing in this navigation may be decided by `layout === "mobile"`, a UA
 string, or a device name.
