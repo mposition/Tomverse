@@ -443,7 +443,7 @@ export const ko = {
         deepResearchEstimatedTimeValue: "수분 이상",
         deepResearchEstimatedCost: "예상 사용량",
         deepResearchStart: "연구 시작",
-        searchStatusTrainingKnowledge: "학습 지식 기반",
+        searchStatusNotSearched: "웹 검색 안 함",
         searchStatusWebSearch: "웹 검색됨",
         searchStatusRequestedNotExecuted: "검색 미실행 · 8크레딧 환불",
         searchStatusRefundDetail: "웹 검색이 실행되지 않아 8크레딧이 환불되었습니다.",

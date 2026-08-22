@@ -401,7 +401,7 @@ export const de = {
         webSearchTurnOff: "Websuche ausschalten",
         webSearchReservationLabel: "Websuche-Reservierung: bis zu {credits}",
         webSearchRefundNotice: "Suchguthaben wird für Modelle erstattet, die keine Websuche durchführen.",
-        searchStatusTrainingKnowledge: "Trainingswissen",
+        searchStatusNotSearched: "Keine Websuche",
         searchStatusWebSearch: "Web durchsucht",
         searchStatusRequestedNotExecuted: "Nicht durchsucht · 8 Credits erstattet",
         searchStatusRefundDetail: "Die Websuche wurde nicht durchgeführt, daher wurden die zusätzlichen 8 Credits erstattet.",
