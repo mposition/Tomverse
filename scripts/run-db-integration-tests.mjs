@@ -174,6 +174,11 @@ run(
     // rather than a convention, and the tombstone ordering every deletion
     // path depends on. Neither can be checked without Postgres.
     "tests/integration/generated-artifacts.db.test.ts",
+    // The unique index that turns a re-posted pre-save into a no-op, the
+    // ownership-scoped resolution that makes another account's id "not found",
+    // and the tombstone ordering every deletion path depends on -- including
+    // the one that must NOT fire when a single model's answers are cleared.
+    "tests/integration/message-attachments.db.test.ts",
     "tests/integration/email-notification-schema.db.test.ts",
     "tests/integration/credential-email-lane.db.test.ts",
     "tests/integration/standard-email-lane.db.test.ts",

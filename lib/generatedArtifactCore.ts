@@ -527,7 +527,13 @@ export type TextFileSpec = z.infer<typeof textFileSpecSchema>;
 /* Archive specification (zip)                                                */
 /* ------------------------------------------------------------------------ */
 
-const archiveEntrySchema = z
+/**
+ * A file inside the archive whose bytes the model authors.
+ *
+ * The original archive entry, unchanged. It stays the default shape because it
+ * is what most archives are: a project, a starter, a set of configs.
+ */
+const archiveTextEntrySchema = z
   .object({
     /** A relative path inside the archive, `/`-separated. */
     path: z.string().min(1).max(ARTIFACT_LIMITS.maxArchivePathLength),
@@ -536,7 +542,49 @@ const archiveEntrySchema = z
   })
   .strict();
 
+/**
+ * A file inside the archive that the *server* renders from a specification.
+ *
+ * The reason this exists is the one the whole domain rests on: a `.docx` has
+ * no "text" the model could author, so before this the only way to deliver
+ * several documents at once was several top-level artifacts -- and the ceiling
+ * on those is three. That ceiling bounds how much work one turn may ask for,
+ * and it is not the right thing to raise so that a set of files can be a set
+ * of files.
+ *
+ * So the archive learns to hold a rendered document, and the ceilings stay
+ * exactly where they were: three artifacts per answer, a hundred entries in
+ * one archive.
+ */
+const archiveDocumentEntrySchema = z
+  .object({
+    path: z.string().min(1).max(ARTIFACT_LIMITS.maxArchivePathLength),
+    /** `docx`, `pdf`, `md` or `txt` -- the same writers a top-level document uses. */
+    documentFormat: formatEnum("document"),
+    title: z.string().max(ARTIFACT_LIMITS.maxTitleLength).optional(),
+    subtitle: z.string().max(ARTIFACT_LIMITS.maxTitleLength).optional(),
+    blocks: z
+      .array(blockSchema)
+      .min(1)
+      .max(ARTIFACT_LIMITS.maxDocumentBlocks),
+  })
+  .strict();
+
+const archiveEntrySchema = z.union([
+  archiveTextEntrySchema,
+  archiveDocumentEntrySchema,
+]);
+
+export type ArtifactArchiveTextEntry = z.infer<typeof archiveTextEntrySchema>;
+export type ArtifactArchiveDocumentEntry = z.infer<
+  typeof archiveDocumentEntrySchema
+>;
 export type ArtifactArchiveEntry = z.infer<typeof archiveEntrySchema>;
+
+export const isArchiveDocumentEntry = (
+  entry: ArtifactArchiveEntry
+): entry is ArtifactArchiveDocumentEntry =>
+  "documentFormat" in entry && typeof entry.documentFormat === "string";
 
 export const archiveSpecSchema = z
   .object({
@@ -550,6 +598,49 @@ export const archiveSpecSchema = z
   .strict();
 
 export type ArchiveSpec = z.infer<typeof archiveSpecSchema>;
+
+/* ------------------------------------------------------------------------ */
+/* Document batch specification (template + data -> one archive)              */
+/* ------------------------------------------------------------------------ */
+
+/**
+ * The opaque handle the model uses to name a file the user attached to this
+ * turn.
+ *
+ * `att_1`, `att_2`. Minted per request and meaningless outside it: it is not a
+ * row id, not a storage key, and addresses no route. A model's handle can end
+ * up quoted in an answer, and this is the only kind of handle for which that
+ * costs nothing.
+ */
+const turnAttachmentHandleField = z
+  .string()
+  .regex(/^att_[1-9][0-9]{0,2}$/, "Reference an attached file as att_1, att_2, ...");
+
+export const documentBatchSpecSchema = z
+  .object({
+    /** The name of the archive that comes back, not of the documents in it. */
+    filename: filenameField,
+    format: formatEnum("archive").optional().default("zip"),
+    /** The .docx the user attached, by handle. */
+    templateAttachment: turnAttachmentHandleField,
+    /** The .xlsx or .csv the user attached, by handle. One record per row. */
+    dataAttachment: turnAttachmentHandleField,
+    /** Which worksheet, when the workbook has more than one. */
+    sheet: z.string().max(120).optional(),
+    /**
+     * How each document is named, as a template over the same column names.
+     * The date folder and the `.docx` extension are added by the server.
+     */
+    filenameTemplate: z.string().min(1).max(ARTIFACT_LIMITS.maxFilenameLength),
+    /** Columns that must have a value in every row. */
+    requiredPlaceholders: z
+      .array(z.string().min(1).max(120))
+      .max(64)
+      .optional(),
+  })
+  .strict();
+
+export type DocumentBatchSpec = z.infer<typeof documentBatchSpecSchema>;
 
 /* ------------------------------------------------------------------------ */
 /* Admissibility                                                              */
@@ -566,6 +657,13 @@ export const ARTIFACT_REJECTION_CODES = [
   "CONTENT_MALFORMED",
   "UNSAFE_PATH",
   "ARCHIVE_TOO_LARGE",
+  // The batch generator's own refusals: an attachment handle that names
+  // nothing on this turn, a template that cannot be filled safely, a data file
+  // that is not a table. Each is reported to the model as a reason rather than
+  // as a generic failure, because each has a different next request.
+  "ATTACHMENT_NOT_ON_TURN",
+  "TEMPLATE_REJECTED",
+  "DATA_REJECTED",
 ] as const;
 
 export type ArtifactRejectionCode = (typeof ARTIFACT_REJECTION_CODES)[number];
@@ -784,6 +882,77 @@ export const isSafeArchivePath = (path: string): boolean => {
   return true;
 };
 
+/**
+ * How much text a document specification carries.
+ *
+ * Used only to weigh an archive entry against the archive's character ceiling.
+ * Approximate by design -- it counts what the writer will emit as text, not
+ * the XML around it, because the ceiling exists to bound the work rather than
+ * to predict the byte size (`bounded()` does that, on the real bytes).
+ */
+const documentSpecCharacterCount = (spec: {
+  title?: string;
+  subtitle?: string;
+  blocks: ArtifactDocumentBlock[];
+}): number => {
+  let characters = (spec.title?.length ?? 0) + (spec.subtitle?.length ?? 0);
+  for (const block of spec.blocks) {
+    switch (block.type) {
+      case "heading":
+      case "paragraph":
+      case "quote":
+      case "code":
+        characters += block.text.length;
+        break;
+      case "bullets":
+      case "numbers":
+        characters += block.items.reduce((total, item) => total + item.length, 0);
+        break;
+      case "table":
+        characters +=
+          block.columns.reduce((total, column) => total + column.length, 0) +
+          block.rows.reduce(
+            (total: number, row) =>
+              total +
+              row.reduce(
+                (rowTotal: number, cell) => rowTotal + String(cell ?? "").length,
+                0
+              ),
+            0
+          );
+        break;
+      default:
+        break;
+    }
+  }
+  return characters;
+};
+
+/**
+ * The batch specification, re-checked inside `execute`.
+ *
+ * Nothing here reads a file: the handles are validated as *shapes*, and
+ * whether `att_2` is a spreadsheet the caller may read is decided by the
+ * collector against the turn's own resolved attachments. A schema cannot
+ * answer an ownership question, and pretending it can is how one gets asked
+ * twice and answered once.
+ */
+export const admitDocumentBatchSpec = (
+  input: unknown
+): ArtifactAdmission<DocumentBatchSpec> => {
+  const parsed = documentBatchSpecSchema.safeParse(input);
+  if (!parsed.success) return schemaFailure(parsed.error);
+  if (parsed.data.templateAttachment === parsed.data.dataAttachment) {
+    return {
+      ok: false,
+      code: "SCHEMA_INVALID",
+      detail:
+        "The template and the data must be two different attached files.",
+    };
+  }
+  return { ok: true, spec: parsed.data, cellCount: 0 };
+};
+
 export const admitArchiveSpec = (
   input: unknown
 ): ArtifactAdmission<ArchiveSpec> => {
@@ -809,7 +978,13 @@ export const admitArchiveSpec = (
       };
     }
     seen.add(entry.path);
-    characters += entry.content.length;
+    // A rendered entry has no `content`, so its weight against the archive's
+    // character ceiling is the text it will render from. Counting it keeps one
+    // ceiling for the whole archive rather than one the two entry kinds can
+    // each slip under separately.
+    characters += isArchiveDocumentEntry(entry)
+      ? documentSpecCharacterCount(entry)
+      : entry.content.length;
   }
 
   if (characters > ARTIFACT_LIMITS.maxArchiveCharacters) {

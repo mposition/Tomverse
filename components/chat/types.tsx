@@ -7,7 +7,33 @@ export type ChatAttachment = {
   name: string;
   mediaType: string;
   size: number;
+  /**
+   * A local preview only -- a `data:` or `blob:` URL for an image thumbnail.
+   * Never sent to the server and never stored: the serializers in
+   * lib/chatMessageSerialization.ts drop it.
+   */
   data?: string;
+  /**
+   * The opaque id the upload finalisation step issued, before this attachment
+   * has been bound to a saved message.
+   *
+   * This replaced the storage key the composer used to hold. A key in browser
+   * memory is a key in a request body, and a key in a request body is
+   * something a route has to decide whether to believe
+   * (docs/policy/user-attachment-persistence.md).
+   */
+  uploadId?: string;
+  /**
+   * The `MessageAttachment` id, once the message this file belongs to has been
+   * saved. What a reloaded conversation carries, and what a later turn names
+   * to have the server read the file again.
+   */
+  attachmentId?: string;
+  /**
+   * A guest's ephemeral object key. Guests have no account to hang a durable
+   * row on, so their key is derived from their own signed guest identity and
+   * is self-authorising; a signed-in composer never sets this.
+   */
   objectKey?: string;
   kind: "file" | "text";
 };

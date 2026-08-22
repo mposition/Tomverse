@@ -386,9 +386,170 @@ tool 호출 후의 두 번째 step은 출력 토큰이며, 둘 다 기존 reserv
 
 ## 12. 아직 만들지 않은 것
 
-- DOCX / PPTX / PDF / JSON / TXT / Markdown 생성기. 요청 시 지원하지 않는다고
-  **말한다**.
+이 목록에 있던 "DOCX / PPTX / PDF / JSON / TXT / Markdown 생성기"는 §4의 형식
+표가 그 형식들을 담게 되면서 사실이 아니게 됐다. 목록에서 지운다 — 만들지 않은
+것의 목록이 만든 것을 담고 있으면 그 목록은 읽을 수 없다.
+
 - 게스트 artifact(§7).
 - 사용자가 만든 파일을 대화 밖에서 다시 찾는 목록 화면.
 - 수식, 차트, 조건부 서식, 피벗.
 - artifact 공유 링크. 공유 대화 스냅샷은 artifact를 포함하지 않는다.
+
+## 13. 첨부된 템플릿에서 여러 문서 만들기
+
+승인일: 2026-08-22. §3의 규칙("구조가 있는 형식에서 모델은 명세만 만들고
+바이트는 서버가 만든다")의 연장이며, 예외가 아니다.
+
+### 13.1 무엇이 막고 있었는가
+
+"이 계약서 양식으로 10명분 만들어 줘"는 거절됐다. 원인은 GPT-5.6 Luna의 출력
+토큰 제한이 **아니었다**. 세 가지가 겹친 것이다.
+
+1. **메시지당 artifact 3개**(`maxArtifactsPerMessage`). 이 상한은 한 turn이
+   요청할 수 있는 작업량을 묶는 것이며, batch 하나를 위해 올리면 모든 요청에
+   대해 올라간다. 그래서 올리지 않는다.
+2. **ZIP 안에 텍스트 항목만** 들어갈 수 있었다. `.docx`에는 "그 텍스트"가 없으
+   므로 여러 문서를 한 번에 배달할 형태가 존재하지 않았다.
+3. **업로드된 DOCX는 텍스트만 추출**된다. 그 텍스트로 문서를 다시 쓰면 원본의
+   서식·표·헤더·푸터·섹션·이미지가 전부 사라진다 — 받는 사람 입장에서는 그것이
+   문서다.
+
+그리고 system prompt가 `3 files per answer`라고 말했다. 모델은 그 문장을
+"10개는 불가능하다"로 읽었고, 그것은 정확한 독해였다.
+
+### 13.2 결정
+
+- **상한은 그대로다.** top-level artifact 3개, archive 항목 100개, 전체 크기
+  제한 모두 변경 없음.
+- **archive가 서버 렌더링 문서를 담는다.** `create_archive`의 항목은 이제 둘 중
+  하나다 — 모델이 쓴 텍스트(`path`, `format`, `content`) 또는 서버가 렌더링하는
+  문서(`path`, `documentFormat`, `blocks`). 후자는 top-level `create_document`와
+  **같은 writer**를 쓴다.
+- **`create_document_batch`**가 새로 생긴다. 첨부된 DOCX 템플릿을 첨부된
+  스프레드시트의 행마다 한 번씩 채워 **하나의 ZIP**으로 돌려준다. 결과는
+  `archive` artifact 하나이므로 3개 상한을 건드리지 않는다.
+- **system prompt를 고친다.** 3은 *top-level 첨부* 상한이고, archive는 그중
+  하나이며 100개를 담는다는 것을 명시한다. `N files per answer`라는 문장은
+  사라졌고 `tests/generatedArtifactToolPolicy.test.mjs`가 그것을 고정한다.
+- **batch tool은 turn에 DOCX가 있을 때만 등록**한다. 입력이 없는 tool은
+  요청이 쓸 데 없는 과금 입력이고, 그럼에도 제공하면 모델은 결국 지어낸
+  handle로 부른다. schema 비용은 `ARTIFACT_BATCH_TOOL_DEFINITION_TOKENS`로
+  따로 계상한다.
+
+### 13.3 모델은 파일을 만지지 않는다
+
+**모델이 tool에 넣을 수 있는 것은 handle 두 개와 이름 규칙뿐이다.**
+
+- `templateAttachment`, `dataAttachment`는
+  `/^att_[1-9][0-9]{0,2}$/`만 통과한다. bytes·base64·XML·objectKey·로컬 경로를
+  담을 field가 schema에 **없고**, `.strict()`이므로 추가할 수도 없다.
+- handle은 요청 범위이며 어떤 route도 가리키지 않는다
+  (docs/policy/user-attachment-persistence.md §6).
+- handle → 바이트 매핑은 요청 처리 중 서버 메모리에만 있고, 소유권 해석이 끝난
+  뒤에 만들어진다. 모델이 없는 handle을 대면 tool은 **실제로 붙어 있는 handle
+  목록을 알려 주고 거절**한다 — 지어내지 말라고 말하는 것이 지어낸 파일을 만드는
+  것보다 낫다.
+
+### 13.4 템플릿 보존 — 무엇을, 어디까지
+
+`lib/docxTemplate.ts`는 **part를 복사**한다. 텍스트를 다시 쓰지 않는다. 그래서
+아래는 바이트 단위로 그대로 남는다.
+
+| 보존 | 근거 |
+|---|---|
+| styles, theme, fonts | part를 건드리지 않는다 |
+| 표(테두리·너비·스타일) | `word/document.xml`의 `<w:tbl>` 구조가 그대로 |
+| header / footer | 치환 대상이지만 구조는 유지, 텍스트만 바뀜 |
+| section 설정(용지·여백·머리글 참조) | `<w:sectPr>` 그대로 |
+| 이미지 | `word/media/*`와 relationship 그대로 |
+| numbering, footnotes, endnotes | part 그대로 |
+| 문서 속성(`docProps/core.xml`) | 그대로 |
+
+바뀌는 바이트는 **`<w:t>` 안의 문자뿐**이다. part가 추가되지도, relationship이
+생기지도, content type이 선언되지도 않는다.
+
+**의도적으로 지원하지 않는 것**(거절이지 무시가 아니다):
+
+- 매크로(`vbaProject.bin`, macroEnabled content type) — `TEMPLATE_MACRO_REFUSED`
+- OLE·ActiveX·embeddings·`<w:object>` — `TEMPLATE_OLE_REFUSED`
+- external relationship(`TargetMode="External"`), 원격 이미지 —
+  `TEMPLATE_EXTERNAL_REFERENCE_REFUSED`
+- `<w:altChunk>` — `TEMPLATE_ALT_CHUNK_REFUSED`
+- 외부를 읽는 field code(DDE, INCLUDETEXT, INCLUDEPICTURE, LINK) —
+  `TEMPLATE_FIELD_CODE_REFUSED`
+- 경로 traversal·절대 경로·비정상 ZIP entry — `TEMPLATE_UNSAFE_ENTRY`
+
+**제거가 아니라 거절인 이유**: 문제 있는 part만 떼어 내면 사용자가 올린 것과
+다른 문서가, 그것이라고 말하는 이름을 달고 배달된다.
+
+또한 지원하지 않는 것(거절 대상은 아님): 조건 분기(`{{#if}}`), 반복
+(`{{#each}}`), 이미지 치환, 표 행 반복, content control(`<w:sdt>`) 바인딩.
+템플릿 한 개에서 문서 한 개, placeholder는 문자열 치환뿐이다.
+
+### 13.5 placeholder는 문단 단위로 찾는다
+
+Word는 맞춤법 경계·언어 태그·입력 순서 때문에 run을 쪼갠다. 실제 파일에서
+`{{이름}}`은 보통 이렇게 생겼다.
+
+```xml
+<w:r><w:t>{{</w:t></w:r><w:r><w:t>이름</w:t></w:r><w:r><w:t>}}</w:t></w:r>
+```
+
+그래서 raw XML에 대한 문자열 치환은 **아무것도 찾지 못한다.** 치환은
+`<w:p>` 단위로, 그 문단의 `<w:t>` 텍스트를 이어 붙인 문자열에서 찾고, 같은
+run들에 되돌려 쓴다. 값은 placeholder가 **시작된** run의 서식을 물려받는다 —
+Word에서 선택 영역 위에 타이핑했을 때와 같은 결과다.
+
+- 값의 `&`·`<`·`>`는 escape되고, XML 1.0이 담을 수 없는 코드 포인트는 제거된다.
+- 값의 줄바꿈은 `<w:br/>`이 된다.
+- 치환된 run에는 `xml:space="preserve"`가 붙는다(값이 공백으로 시작·끝날 수 있다).
+
+### 13.6 조용히 불완전한 문서를 만들지 않는다
+
+- `requiredPlaceholders`에 이름 댄 열의 값이 비면 **배치 전체가 실패**한다.
+  오류 메시지는 몇 번째 행인지 말한다.
+- 치환 후에도 `{{...}}`가 남으면 실패한다. 이 검사는 *출력*에 대해 하므로,
+  값 자체가 `{{`를 담고 있던 경우도 잡힌다.
+- 부분 성공은 없다. 절반만 채워진 계약서 묶음이 배달되면 사람은 그것을 보내고,
+  빠진 항목은 받는 쪽이 발견한다.
+
+### 13.7 데이터는 서버가 읽는다
+
+`lib/spreadsheetDataRows.ts`가 업로드된 `.xlsx`/`.csv`를 레코드로 읽는다.
+첫 행이 header이고 그 셀 이름이 placeholder 이름이다.
+
+- **모델이 값을 옮겨 적지 않는다.** 첨부 파이프라인이 만드는 추출 텍스트는 셀
+  경계도 열 정체성도 없다. 그것을 보고 생년월일을 다시 타이핑하는 것이 이
+  기능에서 가장 조용하게 틀리는 지점이다.
+- 날짜는 Excel이 **화면에 보여 주는 날**로 읽는다. 직렬값 32936은 1990-03-04
+  이다. epoch는 1899-12-30이며, 이는 Excel 자신의 1900년 윤년 버그를 재현한다.
+  1900-01-01~1900-02-28(직렬 1~59)은 하루 이르게 읽히며, 이는 고치지 않고
+  적어 둔 결정이다.
+- 상한: 행 500, 열 64, 셀 값 4,000자. archive 항목 100개가 실질적 상한이다.
+
+### 13.8 출력 경로
+
+`YYYYMMDD/<sanitized-name>.docx`.
+
+- 날짜는 생성 시각(UTC)이며 주입 가능하다 — 경로를 단언하는 테스트가 시계에
+  좌우되면 안 된다.
+- 이름은 `filenameTemplate`을 행 값으로 치환한 뒤
+  `sanitizeArtifactFilename(..., "docx")`를 통과한 것이다. 경로 구분자·`..`·
+  제어문자·Windows 예약어는 여기서 사라진다.
+- 중복 이름은 **결정적으로** 처리한다: 첫 번째는 그대로, 이후는 `-2`, `-3`.
+  같은 입력은 항상 같은 이름 집합을, 같은 순서로 만든다.
+- 완성된 경로는 `isSafeArchivePath()`를 다시 통과해야 한다.
+
+### 13.9 무엇을 테스트하는가
+
+- 10행 XLSX + DOCX 템플릿 → ZIP 안 DOCX 10개, 행별 값과 파일명 정확성,
+  **다른 행의 값이 섞이지 않음**.
+- 여러 run에 분리된 placeholder 치환(본문·header·footer).
+- styles·theme·이미지·relationship·content types가 **바이트 동일**.
+- 표·section·drawing 유지.
+- 생성된 모든 DOCX를 `officeparser`(이 앱이 업로드 파일을 읽을 때 쓰는 파서)로
+  다시 열어 텍스트 확인.
+- 매크로·OLE·external relationship·altChunk·field code·ZIP traversal 거절.
+- 101번째 archive 항목 거절, 100번째 통과.
+- 네 번째 top-level artifact 거절 유지.
+- 기존 텍스트 ZIP과 단일 DOCX 생성 회귀 없음.
