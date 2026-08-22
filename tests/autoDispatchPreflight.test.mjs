@@ -125,6 +125,9 @@ const selection = (overrides = {}) =>
       routerModelId: null,
       routerChallengerTurns: 0,
     },
+    // A routed conversation is a Chat conversation: Auto is offered in one
+    // product (decision record v1.2 §3).
+    productKey: "chat",
     subjectKey: "user_abc",
     isGuest: false,
     plan: "Pro",

@@ -934,8 +934,18 @@ async function handleChatPost(
                 timestamp: new Date().toISOString(),
             }));
         }
+        // No longer gated on cohort eligibility. Decision record v1.2 §3 puts
+        // the product before the cohort, and the product lives on this row --
+        // so skipping the read for an account the cohort would refuse would
+        // mean deciding the cohort first, which is the ordering that dilutes
+        // the rollout percentage with Review traffic.
+        //
+        // The cost is one primary-key read on a signed-in conversation turn.
+        // A guest turn still reads nothing. The ownership check below reads
+        // the same row again; merging the two is worth doing and is not this
+        // change.
         const conversationRouting =
-            autoCohort.eligible && conversationId && session?.user?.id
+            conversationId && session?.user?.id
                 ? await prisma.conversation.findFirst({
                       // The owner is in the `where`, not checked afterwards,
                       // so this cannot read another account's mode. The real
@@ -946,6 +956,7 @@ async function handleChatPost(
                           selectionMode: true,
                           routerModelId: true,
                           routerChallengerTurns: true,
+                          productKey: true,
                       },
                   })
                 : null;
@@ -1010,6 +1021,11 @@ async function handleChatPost(
         const autoSelection = selectAutoModel({
             requestedModelId,
             conversation: conversationRouting,
+            // The stored product, never the surface the request came from:
+            // §6 forbids a surfaceProductKey fallback at dispatch. Null when
+            // there is no conversation, which is `no_conversation` further
+            // down rather than a product refusal.
+            productKey: conversationRouting?.productKey ?? null,
             subjectKey: session?.user?.id ?? "",
             isGuest: !session?.user?.id,
             plan: accountPlan?.tier ?? null,

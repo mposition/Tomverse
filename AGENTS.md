@@ -889,13 +889,14 @@ Non-negotiable requirements:
 <!-- BEGIN:auto-model-selection-invariant -->
 ## Auto model selection invariant
 
-Before changing `components/chat/AutoRoutingToggle.tsx`, `components/chat/AutoRoutedByBadge.tsx`, `lib/autoRoutingUi.ts`, `lib/autoRoutingCopy.ts`, or the `selectionMode` handling in `app/api/conversations/[conversationId]/route.ts`, read:
+Before changing `components/chat/AutoRoutingToggle.tsx`, `components/chat/AutoRoutedByBadge.tsx`, `lib/autoRoutingUi.ts`, `lib/autoProductBoundary.ts`, `lib/autoRoutingCopy.ts`, or the `selectionMode` handling in `app/api/conversations/[conversationId]/route.ts`, read:
 
 - `docs/ui-contracts/auto-model-selection.md`
 
 Non-negotiable requirements:
 
-- **`offered` is the only input.** It already folds the feature flag together with cohort eligibility, so no surface may derive availability from the flag alone. There is no disabled state and no greyed row: a control that flips, saves and changes nothing cannot be told apart from Auto agreeing with the user every time.
+- **`offered` is the only input.** It already folds the feature flag, the conversation's product and cohort eligibility together, so no surface may derive availability from the flag alone.
+- **The product is decided before the cohort, in `lib/autoProductBoundary.ts`, and all three consumers share it** — surface entry, `offered`, and turn routing. `product_not_chat` is an `AutoSelectionRefusal`/`AutoUiRefusal` and never an `AutoCohortRefusal`: a Review conversation was not a subject of the cohort question, and counting it as a refusal dilutes the rollout percentage with Review traffic. The refusal carries no cohort. A row whose `productKey` is still NULL resolves through `PRODUCT_KEY_READ_MODE` and is refused; a turn with no conversation is `no_conversation` instead. There is no disabled state and no greyed row: a control that flips, saves and changes nothing cannot be told apart from Auto agreeing with the user every time.
 - No user-facing string may name a bucket, a percentage, a cohort salt or a readiness gate. A client that could read its own bucket could work out the rollout percentage.
 - No locale may promise a better, best, optimal or smartest model. `ROUTE-01` measures non-inferiority, which is a far weaker claim than that copy would be making, and `tests/autoRoutingUi.test.mjs` fails the build on the words.
 - The badge renders only on a turn Auto actually routed. A turn that fell back to the user's own model gets none, or it claims a routing decision that did not happen.

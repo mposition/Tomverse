@@ -27,7 +27,22 @@
 import { autoUiAvailability, isAutoRouterUiEnabled } from "@/lib/autoRoutingUi";
 import { getUserBillingPlan } from "@/lib/billingEntitlements";
 
-export const autoAvailabilityFor = async (userId: string) => {
+export const autoAvailabilityFor = async (
+  userId: string,
+  /**
+   * The conversation this is being asked about, or nothing at all.
+   *
+   * Passing `{ productKey }` says a row exists and this is its stored value --
+   * read under an ownership check by the caller, never a request body, a
+   * Referer, or the surface the client was on. A NULL stored value on an
+   * existing row is resolved through PRODUCT_KEY_READ_MODE, which is Review
+   * during the transition.
+   *
+   * Omitting it says there is no conversation: the surface-entry question,
+   * "may this account start a Chat".
+   */
+  conversation?: { productKey: string | null }
+) => {
   if (!isAutoRouterUiEnabled()) {
     return { offered: false, reason: "ui_flag_off" as const, cohort: null };
   }
@@ -36,5 +51,7 @@ export const autoAvailabilityFor = async (userId: string) => {
     subjectKey: userId,
     isGuest: false,
     plan: billingPlan.tier,
+    productKey: conversation?.productKey ?? null,
+    hasConversation: conversation !== undefined,
   });
 };

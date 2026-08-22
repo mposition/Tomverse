@@ -5,6 +5,7 @@ import { getServerSession } from "next-auth/next";
 
 import { authOptions } from "@/lib/auth";
 import { autoAvailabilityFor } from "@/lib/autoAvailability";
+import { chatSurfaceAvailable } from "@/lib/autoProductBoundary";
 import { createConversationForProduct } from "@/lib/conversationCreateHandler";
 import { CHAT_PRODUCT_KEY } from "@/lib/conversationProduct";
 
@@ -36,10 +37,10 @@ import { CHAT_PRODUCT_KEY } from "@/lib/conversationProduct";
  * and the UI contract §2 keeps all of it on the server. A client that could
  * read its own bucket could work out the rollout percentage.
  *
- * **This gate is provisional.** Decision record §3 requires one shared product
- * decision used by all three consumers -- surface entry, `offered`, and turn
- * routing -- and when that function lands it replaces the call below. Until
- * then the two agree because they read the same availability.
+ * The three consumers of §3's shared decision are surface entry (here, via
+ * `chatSurfaceAvailable`), `offered` (the conversation detail route) and turn
+ * routing (`selectAutoModel`). All three read `lib/autoProductBoundary.ts`, so
+ * the screen and the execution cannot disagree.
  */
 export async function POST(req: Request) {
   const session = await getServerSession(authOptions);
@@ -47,8 +48,13 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Authentication required." }, { status: 401 });
   }
 
+  // No conversation exists yet, so there is no stored product to read: this
+  // is the surface-entry question, "may this account start a Chat", which §3
+  // keeps separate from "may this account open the Chat it already has".
+  // Merging them locks a user out of their own conversation the moment the
+  // cohort shrinks.
   const availability = await autoAvailabilityFor(session.user.id);
-  if (!availability.offered) {
+  if (!chatSurfaceAvailable(availability)) {
     return NextResponse.json({ error: "Not found." }, { status: 404 });
   }
 
