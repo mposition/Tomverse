@@ -170,11 +170,56 @@ Advanced 대역에 함께 섭니다.
   `ensureModelRegistrySeeded()`가 삽입하므로 불필요합니다.
 - 3.6 Flash 은퇴 관련 일체(`replacementModelId`·`userVisibleNote`·사용자 안내).
 
-**남은 위험 1건 `[확인 불가]`**: Google AI 개발자 포럼에 "3.7 Flash가 문서화되지
-않은 32,768 토큰 한도로 유효한 요청을 거절한다"는 신고가 있습니다
-(`discuss.ai.google.dev` 차단으로 내용 미확인). 사실이라면
-`maxOutputTokens: 65_536`이 실패를 만듭니다. **staging에서 긴 출력 요청 1회**로
-확인한 뒤 필요하면 값을 내립니다. 공식 모델 페이지의 값은 65,536입니다.
+#### 남은 위험 1건 — 32,768 출력 한도 `[확인 불가]`
+
+Google AI 개발자 포럼에 "3.7 Flash가 문서화되지 않은 32,768 토큰 한도로 유효한
+요청을 거절한다"는 신고가 있습니다. `discuss.ai.google.dev`가 egress 차단이라
+내용을 읽지 못했습니다. 공식 모델 페이지의 값은 **65,536**이고 profile은 그
+값을 씁니다.
+
+**2026-08-22에 확인한 것 — 이 위험은 이론이 아닙니다.**
+profile의 `maxOutputTokens`는 비용 계산에만 쓰이는 값이 아니라 **실제 요청에
+실려 나갑니다**: `chatSecurity.ts:703`이 `pricing.maxOutputTokens`를 budget에
+넣고, `app/api/chat/route.ts:2174`가 그것을 `requestMaxOutputTokens`로 만들어
+`:2636`·`:2658`의 provider 호출에 전달합니다. 신고가 사실이면 **긴 출력을
+요구하는 요청이 실패합니다.**
+
+**고칠 자리도 이미 있습니다.** `providerMaxOutputTokens`가 정확히 이 경우를 위한
+필드입니다 — "The provider's absolute settable ceiling for the request's output
+cap, **where it is verified** and differs from what this app asks for"
+(`lib/modelPricing.ts:118-121`). 선례는 `:869`의 `1_048_576` 한 건입니다.
+
+**이 세션에서는 실행할 수 없습니다.** 세 가지가 모두 막혀 있습니다.
+1. Google/Gemini API key가 이 세션에 없습니다.
+2. staging에 이 모델이 없습니다 — `GET https://staging.tomverse.app/api/models/catalog`가
+   모델 42건을 반환하고 gemini는 5건(`3-5-flash`·`3-1-pro`·`2-5-pro`·`2-5-flash`·`3-6-flash`)
+   뿐입니다. 이 브랜치는 아직 어디에도 병합되지 않았습니다.
+3. key를 얻는 경로(Railway 변수 읽기)는 권한 classifier가 이미 차단했고
+   우회하지 않습니다.
+
+**실행 절차 (배포 불필요, 사람이 직접):**
+
+```bash
+# 1) 65,536을 요구했을 때 요청 자체가 거절되는가
+curl -sS https://generativelanguage.googleapis.com/v1beta/models/gemini-3.7-flash:generateContent \
+  -H "x-goog-api-key: $GEMINI_API_KEY" -H 'Content-Type: application/json' \
+  -d '{"contents":[{"parts":[{"text":"Count from 1 to 20000, one number per line."}]}],
+       "generationConfig":{"maxOutputTokens":65536}}' \
+  | head -c 600
+
+# 2) 통과했다면, 실제로 32,768에서 끊기는가
+#    finishReason 과 usageMetadata.candidatesTokenCount 를 봅니다
+```
+
+**판정 기준**
+
+| 결과 | 의미 | 코드 조치 |
+|---|---|---|
+| HTTP 400 + 한도 언급 | 요청 시점 거절. 가장 나쁨 | `providerMaxOutputTokens: 32_768` 추가 |
+| 200 · `finishReason: MAX_TOKENS` · `candidatesTokenCount` ≈ 32,768 | 조용한 절단 | 동일 |
+| 200 · `candidatesTokenCount` > 32,768 | 신고가 틀렸거나 이미 수정됨 | 변경 없음. 이 항목을 닫습니다 |
+
+비용은 출력 최대 65K 토큰 1회이므로 정가 기준 **US$0.5 미만**입니다.
 
 ---
 
