@@ -416,6 +416,74 @@ provider 알림 쪽 헤더에 `X-MS-Exchange-Organization-SCL: 5`가 찍혔습�
 눌렀을 때 SCL이 이보다 나쁘면 도메인 평판이 아니라 그쪽 설정을 의심할 근거가
 됩니다.
 
+#### 3.5.5 production 실측 (2026-08-22 02:45Z)
+
+staging과 같은 절차를 production에서 반복했습니다.
+
+**발신 주소 — 발송 없이**
+
+```
+npm run check:sending-identity -- --env
+  source        TRANSACTIONAL_EMAIL_FROM
+  transactional Tomverse Insight <hello@mail.tomverse.app>
+
+npm run report:email-domains
+  transactional  mail.tomverse.app
+  marketing      not configured
+  The provider answered 401 when listing domains.
+```
+
+`source`가 `TRANSACTIONAL_EMAIL_FROM`이라는 것은 컴파일된 fallback도 구형
+`EMAIL_FROM`도 아닌 **명시적으로 설정된 변수**를 읽었다는 뜻이고,
+`TRANSACTIONAL_ON_ROOT_DOMAIN` 경고가 **뜨지 않은 것**이 서브도메인 전환이 이
+프로세스에 반영됐다는 증거입니다. 401은 3.5.2와 같은 sending 전용 키입니다.
+
+**알림 두 경로 — 실제 발송**
+
+3.5.3의 두 버튼. 둘 다 도착했고 `From: Tomverse Insight <hello@mail.tomverse.app>`,
+DKIM `d=mail.tomverse.app` pass, SPF `send.mail.tomverse.app` pass, DMARC pass.
+실제 발송이 성공했으므로 "sending 전용 키"와 "무효한 키"의 구분도 함께
+확정됐습니다(3.5.2).
+
+##### SCL은 설정을 가리키지 못합니다 — 3.5.4의 기준을 정정합니다
+
+3.5.4는 "production SCL이 staging보다 나쁘면 그쪽 설정을 의심할 근거"라고
+적었습니다. **틀렸습니다.** production은 둘 다 SCL 5였고(staging은 operational 1,
+provider 5), 두 환경의 DKIM body hash를 대조하면 같습니다.
+
+```
+operational  bh=n8liCWDInI1YnGAUhvmdXEmO6Cwddaniwa4DnB/SlZg=   staging = production
+provider     bh=vD98GoHdU+QkrnzBnDiGsKwH8t0r+39X+q5LRfToZn8=   staging = production
+```
+
+**바이트 단위로 같은 메시지가 한 번은 1, 한 번은 5를 받았습니다.** 같은 도메인,
+같은 발신 주소, 같은 provider, 같은 인증 결과입니다. 그러므로 SCL은 배포나 설정의
+차이를 판별하는 값이 아니라 평판과 시점에 따라 움직이는 수신자 측 판단입니다.
+
+남는 사실은 **`mail.tomverse.app`이 아직 Outlook의 스팸 판정 구간에 걸린다**는
+것이고, 네 통 모두 받은편지함에 들어온 것은 수신자의 신뢰 목록(`wl:1`,
+`OFR:TrustedSenderList`) 덕분입니다. 이력 없는 새 도메인이라 3.4가 예상한
+상태이며, 관측 대상은 SCL 개별 값이 아니라 실트래픽의 bounce·complaint 비율입니다.
+
+#### 3.5.6 ③ 감사 리포트 경로는 정기 실행으로 확인합니다 (미기록)
+
+**의도적으로 건너뛴 구획입니다.** 무엇을 왜 건너뛰었는지 적어 둡니다.
+
+확인되지 않은 것은 "감사 script가 그 주소로 실제 발송하는가" 하나입니다. runner가
+읽을 입력값은 Settings → Variables에서 그대로 보이고(발신 주소는 secret이 아니라
+**variable**입니다), 그 문자열을 resolver가 어떻게 처리하는지는 같은 문자열로
+staging·production 두 환경에서 확인했습니다.
+
+**수동 dispatch를 강행하지 않았습니다.** 21:00 UTC 정기 실행이 같은 답을 비용 없이
+주기 때문입니다 — 그 리포트 메일의 `From:`이 증거입니다.
+
+그리고 이 판단을 하다가 preflight의 배치가 잘못돼 있는 것을 발견했습니다. "Check
+the sending identity"가 발송 직전, 즉 **1.8시간짜리 E2E 스위트 뒤**에 있었습니다.
+발송 전이라는 성질은 맞지만, "runner가 어느 주소를 해석하는가"를 한 줄 보려고
+1.8시간을 기다려야 했습니다. **읽는 데 1.8시간이 드는 검사는 아무도 읽지 않습니다.**
+`node_modules`만 있으면 되므로 install 바로 뒤로 옮겼고, 여전히 리포트 발송보다
+앞입니다.
+
 ### 3.6 정책 강화 (Phase 2)
 
 리포트가 깨끗하면 `p=quarantine`, 이후 `p=reject`. 각 단계 사이에 최소 2주.

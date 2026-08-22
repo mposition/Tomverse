@@ -74,6 +74,25 @@ jobs:
         continue-on-error: true
         run: npm ci
 
+      # /api/ready checks the deployment's sending identity and cannot see this
+      # runner's variables. Same resolver, checked where it actually runs.
+      #
+      # Placed here rather than beside the send it precedes, which is where it
+      # started. The send is the last step of a job whose E2E suite takes about
+      # 1.8 hours, so an operator dispatching this workflow to answer "which
+      # address does the runner resolve?" waited that long for one line of
+      # output -- and a check that costs 1.8 hours to read is a check nobody
+      # reads. It needs only `node_modules`, so it belongs immediately after
+      # the install. It still runs before the report, which is all its position
+      # ever had to guarantee.
+      - name: Check the sending identity
+        if: steps.install.outcome == 'success'
+        continue-on-error: true
+        id: sending_identity
+        env:
+          TRANSACTIONAL_EMAIL_FROM: ${{ vars.TRANSACTIONAL_EMAIL_FROM }}
+        run: npm run check:sending-identity -- --env
+
       - name: Dependency vulnerability audit
         id: dependency_audit
         if: steps.install.outcome == 'success'
@@ -144,16 +163,6 @@ jobs:
         # taking the report and the artefacts down with it.
         timeout-minutes: 150
         run: npm run test:e2e:run
-
-      # /api/ready checks the deployment's sending identity and cannot see this
-      # runner's variables. Same resolver, checked where it actually runs.
-      - name: Check the sending identity
-        if: always()
-        continue-on-error: true
-        id: sending_identity
-        env:
-          TRANSACTIONAL_EMAIL_FROM: ${{ vars.TRANSACTIONAL_EMAIL_FROM }}
-        run: npm run check:sending-identity -- --env
 
       - name: Deliver security audit report
         id: report
