@@ -68,7 +68,7 @@ DB 쪽 순서는 CI가 증명합니다. **bytes가 실제로 언제 사라지는
 붙인 별도 파일**로 `assistant-knowledge-staging-verification-records/` 아래에
 남습니다.
 
-- **template revision**: `2026-08-22b`
+- **template revision**: `2026-08-22c`
 - 실행 방법과 파일 이름 규칙:
   `assistant-knowledge-staging-verification-records/README.md`
 
@@ -114,8 +114,17 @@ DB 쪽 순서는 CI가 증명합니다. **bytes가 실제로 언제 사라지는
 
 - [ ] B-1. Admin Console(`PATCH /api/admin/app-settings`)로 전환했고
       `AdminAuditLog`에 시작·완료 두 행이 남았다
-- [ ] B-2. `GET /api/admin/audit-integrity`가 `valid: true`이고
-      `checkedEntries`가 전환 전보다 크다
+- [ ] B-2. 전환 **전에** 읽어 둔 `GET /api/admin/audit-integrity`와 비교해
+      `checkedEntries`가 2 늘고 **`firstInvalidId`가 움직이지 않는다**
+
+`valid: true`를 staging에서 기대하지 않습니다. staging 체인은 과거의 키 교체
+이후 `valid: false`이고, 그것이 이 회차의 결함이 아닙니다 — 검사기에 key
+epoch이 없어 키를 한 번 바꾸면 그 이전 전부가 영구히 무효로 보입니다
+(`9c91042` 회차 발견 사항 5). `valid: true`는 production에서 전환할 때
+확인하며, 그것이 그 회차의 조건 (1)이 한 일입니다.
+
+**여기서 판별하는 것은 "체인이 건강한가"가 아니라 "이 전환이 새 파손을
+만들지 않았는가"입니다.** `firstInvalidId`가 그대로면 새 두 행은 정상입니다.
 
 ## C. R2 왕복 (유료 1턴) — 이 회차의 이유
 
