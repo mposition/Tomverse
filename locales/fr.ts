@@ -401,7 +401,7 @@ export const fr = {
         webSearchTurnOff: "Désactiver la recherche web",
         webSearchReservationLabel: "Réservation de recherche web : jusqu'à {credits}",
         webSearchRefundNotice: "Les crédits de recherche sont remboursés pour les modèles qui n'effectuent pas de recherche web.",
-        searchStatusTrainingKnowledge: "Connaissances d'entraînement",
+        searchStatusNotSearched: "Pas de recherche web",
         searchStatusWebSearch: "Web recherché",
         searchStatusRequestedNotExecuted: "Non recherché · 8 crédits remboursés",
         searchStatusRefundDetail: "La recherche web n'a pas été effectuée, les 8 crédits supplémentaires ont donc été remboursés.",
