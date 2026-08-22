@@ -349,6 +349,7 @@ export const es = {
         assistantProfileFailed: "No se pudo cambiar el asistente de esta conversación.",
         toolsMemoryInheritOffDescription: "Tu ajuste actual es no usarla, y esta conversación seguirá cualquier cambio",
         memoryModeFailed: "No se pudo guardar ese ajuste de memoria.",
+        autoSelectionFailed: "No se pudo guardar ese ajuste de Auto.",
         toolsWebSearchAuto: "Automática",
         toolsWebSearchAutoDescription: "Sugiere una búsqueda web cuando una pregunta parece necesitar información actual",
         toolsWebSearchAlways: "Usar búsqueda web",

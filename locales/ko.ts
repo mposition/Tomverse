@@ -362,6 +362,7 @@ export const ko = {
         assistantProfileFailed: "이 대화의 어시스턴트를 바꾸지 못했습니다.",
         toolsMemoryInheritOffDescription: "지금 계정 기본값은 사용 안 함입니다. 계정 설정을 바꾸면 이 대화도 따라갑니다",
         memoryModeFailed: "기억 설정을 저장하지 못했습니다.",
+        autoSelectionFailed: "자동 설정을 저장하지 못했습니다.",
         toolsWebSearchAuto: "자동",
         toolsWebSearchAutoDescription: "최신 정보가 필요해 보이는 질문에는 웹 검색을 제안합니다",
         toolsWebSearchAlways: "웹 검색 사용",

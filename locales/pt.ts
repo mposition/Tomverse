@@ -349,6 +349,7 @@ export const pt = {
         assistantProfileFailed: "Não foi possível alterar o assistente desta conversa.",
         toolsMemoryInheritOffDescription: "Seu padrão atual é não usar, e esta conversa acompanhará qualquer mudança",
         memoryModeFailed: "Não foi possível salvar essa configuração de memória.",
+        autoSelectionFailed: "Não foi possível salvar essa configuração de Auto.",
         toolsWebSearchAuto: "Automática",
         toolsWebSearchAutoDescription: "Sugere uma pesquisa web quando uma pergunta parece precisar de informações atuais",
         toolsWebSearchAlways: "Usar pesquisa web",

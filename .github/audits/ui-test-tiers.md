@@ -26,6 +26,7 @@ browser coverage without rebuilding E2E" 항목이 이 문서의 존재와 workf
 | Spec | 태그된 test | 관련 이슈 | Project |
 |---|---|---|---|
 | `model-picker-responsive.spec.ts` | `model selection can be finished at 390x844 / 320x568 with the keyboard open`, `the picker footer clears the safe area with no keyboard` | UI-001 | mobile-chromium (desktop은 skip) |
+| `auto-routing-toggle.spec.ts` | `the switch stays reachable and legible at 320px and 200% text scaling`, `the composer keeps its dedicated textarea row while the picker is open` | 제품 경계 v1.2 §7 | 양쪽 |
 | `analytics-settings-target.spec.ts` | 44px target ×3 route, content intersection ×3 route, keyboard 도달, light/dark AA | UI-002 | 양쪽 |
 | `ui-state-contrast.spec.ts` | full/partial error, mobile header·composer, sidebar, desktop model panel의 light/dark AA, 11px floor ×2 | UI-003, UI-007 | desktop-chromium (다른 project는 skip) |
 | `korean-typography.spec.ts` | display heading 어절 보존 ×4 viewport, 150% zoom | UI-006 | 양쪽 |

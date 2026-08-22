@@ -166,6 +166,16 @@ type MobileChatShellProps = {
   webSearchMode: WebSearchMode;
   onWebSearchModeChange: (mode: WebSearchMode) => void;
   memoryMode?: ConversationMemoryMode;
+  /**
+   * Auto model selection (UI contract auto-model-selection.md §1). Passed
+   * straight through to the composer's model picker; this shell makes no
+   * decision about it, because `offered` already folds the flag, the
+   * conversation's product and cohort eligibility together on the server.
+   */
+  autoSelectionOffered?: boolean;
+  selectionMode?: "manual" | "auto";
+  selectionModePending?: boolean;
+  onSelectionModeChange?: (next: boolean) => void;
   /** §14. Passed straight through to the composer's tools menu. */
   assistantProfile?: ChatAssistantProfile | null;
   assistantProfileOptions?: ChatAssistantProfileOption[];
@@ -243,6 +253,10 @@ export function MobileChatShell({
   webSearchMode,
   onWebSearchModeChange,
   memoryMode,
+  autoSelectionOffered,
+  selectionMode,
+  selectionModePending,
+  onSelectionModeChange,
   assistantProfile,
   assistantProfileOptions,
   onAssistantProfileChange,
@@ -1239,6 +1253,10 @@ export function MobileChatShell({
             webSearchMode={webSearchMode}
             onWebSearchModeChange={onWebSearchModeChange}
             memoryMode={memoryMode}
+            autoSelectionOffered={autoSelectionOffered}
+            selectionMode={selectionMode}
+            selectionModePending={selectionModePending}
+            onSelectionModeChange={onSelectionModeChange}
             assistantProfile={assistantProfile}
             assistantProfileOptions={assistantProfileOptions}
             onAssistantProfileChange={onAssistantProfileChange}

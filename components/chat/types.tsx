@@ -48,6 +48,26 @@ export type Message = {
    */
   memoryUsedCount?: number;
   /**
+   * The model Auto routed this turn to, and the Router's own reason
+   * identifier.
+   *
+   * Both are read from this response's headers, and the server sets them only
+   * when the Router actually chose the model (`autoSelection.routed`). A turn
+   * that fell back to the user's own model carries neither, so a badge cannot
+   * claim a routing decision that did not happen -- the same rule
+   * `lib/autoModelSelection.ts` makes unrepresentable on the server.
+   *
+   * `routedReason` is a fixed identifier, never prose and never anything
+   * derived from what the user wrote, so the client localises it and nothing
+   * about the turn crosses the wire.
+   *
+   * Runtime-only, like `memoryUsedCount`: the serializers in
+   * lib/chatMessageSerialization.ts are allowlists, so this stays out of
+   * transcripts and storage, where it could only ever be a stale claim.
+   */
+  routedModelId?: string;
+  routedReason?: string | null;
+  /**
    * Files this answer produced (docs/policy/generated-artifacts.md).
    *
    * Absent on every message that made none, which is almost all of them --

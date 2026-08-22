@@ -358,6 +358,7 @@ export const zh = {
         assistantProfileFailed: "无法更改此对话的助手。",
         toolsMemoryInheritOffDescription: "当前默认为不使用，更改账户设置后此对话会跟随",
         memoryModeFailed: "未能保存该记忆设置。",
+        autoSelectionFailed: "未能保存该自动设置。",
         toolsWebSearchAuto: "自动",
         toolsWebSearchAutoDescription: "当问题看起来需要最新信息时会建议使用网页搜索",
         toolsWebSearchAlways: "使用网页搜索",

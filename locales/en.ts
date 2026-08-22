@@ -358,6 +358,7 @@ export const en = {
         assistantProfileFailed: "Could not change the assistant for this conversation.",
         toolsMemoryInheritOffDescription: "Your default is currently not to use it, and this conversation will follow a change",
         memoryModeFailed: "That memory setting could not be saved.",
+        autoSelectionFailed: "That Auto setting could not be saved.",
         toolsWebSearchAuto: "Auto",
         toolsWebSearchAutoDescription: "Suggests a web search when a question looks like it needs current information",
         toolsWebSearchAlways: "Use web search",

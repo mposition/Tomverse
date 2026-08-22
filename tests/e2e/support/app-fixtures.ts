@@ -441,6 +441,20 @@ export type AuthenticatedQaState = {
   disabledPanels: string[];
   /** The conversation's stored memory mode, updated by PATCH like the rest. */
   memoryMode: "inherit" | "on" | "off";
+  /**
+   * The conversation's stored Auto state, updated by PATCH like the rest, and
+   * whether the "server" offers Auto at all.
+   *
+   * Two fields because they are two decisions: `offered` is the server's own
+   * conjunction of flag, product and cohort (UI contract §1), and
+   * `selectionMode` is what this conversation stores. A spec that needs an
+   * account which has *left* the cohort sets `offered: false` with
+   * `selectionMode: "auto"` -- a state a PATCH in the same session can never
+   * produce, and the one the contract's unconditional return to manual exists
+   * for.
+   */
+  selectionMode: "manual" | "auto";
+  autoSelectionOffered: boolean;
   assistantProfile: {
     profileId: string;
     name: string;
@@ -531,6 +545,14 @@ export async function mockAuthenticatedApi(
     /** The conversation's stored memory mode (§8.1 invariant 1). */
     memoryMode?: "inherit" | "on" | "off";
     /**
+     * Auto model selection (UI contract auto-model-selection.md §1). Absent
+     * leaves Auto unoffered and the conversation manual, which is what every
+     * spec written before the wiring expects -- and what every real account
+     * gets today.
+     */
+    selectionMode?: "manual" | "auto";
+    autoSelectionOffered?: boolean;
+    /**
      * §14. The account's published profiles, served at
      * `/api/assistant-profiles`. Absent leaves that route unmocked, which is
      * what every spec written before Release C expects: the request fails,
@@ -609,6 +631,8 @@ export async function mockAuthenticatedApi(
     selectedModels: options.selectedModels || ["gpt-5-6-luna"],
     disabledPanels: [],
     memoryMode: options.memoryMode || "inherit",
+    selectionMode: options.selectionMode || "manual",
+    autoSelectionOffered: options.autoSelectionOffered ?? false,
     assistantProfile: options.assistantProfile ?? null,
     theme: "dark",
     timeZone: "UTC",
@@ -626,6 +650,11 @@ export async function mockAuthenticatedApi(
     // §8.1 invariant 1. Stored, not resolved: the fixture has to be able to
     // show the difference between "follows the account" and an override.
     memoryMode: state.memoryMode,
+    // The stored mode, and one boolean for availability. The real response
+    // carries no reason at all -- which bucket, what share, which gate stay on
+    // the server -- so neither does this.
+    selectionMode: state.selectionMode,
+    autoSelection: { offered: state.autoSelectionOffered },
     // §14. Server-computed, including whether the profile has published past
     // this conversation -- the screen never works the revision out itself.
     assistantProfile: state.assistantProfile,
@@ -989,6 +1018,7 @@ export async function mockAuthenticatedApi(
         selectedModels?: string[];
         disabledPanels?: string[];
         memoryMode?: "inherit" | "on" | "off";
+        selectionMode?: "manual" | "auto";
         assistantProfileId?: string | null;
       };
 
@@ -1015,6 +1045,29 @@ export async function mockAuthenticatedApi(
       // and returns the stored values; so does this.
       if (typeof body.memoryMode === "string") {
         state.memoryMode = body.memoryMode;
+      }
+      // The same rule the real endpoint applies (`mayStoreSelectionMode`):
+      // `manual` is accepted unconditionally, including for an account that
+      // has left the cohort -- that is how a conversation leaves a mode the
+      // account can no longer act on -- and `auto` only when the server would
+      // actually route it. A mock that stored `auto` anyway would let a spec
+      // pass on the exact state the contract forbids: a conversation marked
+      // Auto that every turn answers manually.
+      if (body.selectionMode === "manual") {
+        state.selectionMode = "manual";
+      } else if (body.selectionMode === "auto") {
+        if (!state.autoSelectionOffered) {
+          return route.fulfill(
+            json(
+              {
+                error: "Automatic model selection is not available for this account.",
+                code: "AUTO_SELECTION_UNAVAILABLE",
+              },
+              403
+            )
+          );
+        }
+        state.selectionMode = "auto";
       }
       // §14. The request names a profile; the *fixture* decides which
       // revision that was, exactly as the server does -- a mock that echoed a

@@ -23,6 +23,7 @@ import {
   UserRound,
 } from "lucide-react";
 import { Message, type ChatAttachment } from "@/components/chat/types";
+import { AutoRoutedByBadge } from "@/components/chat/AutoRoutedByBadge";
 import { ModelLogo } from "@/components/chat/ModelLogo";
 import { useLanguage } from "@/components/LanguageProvider";
 import { useModelCatalog } from "@/components/ModelCatalogProvider";
@@ -286,7 +287,7 @@ export function ChatMessageList({
   const isProgrammaticScrollRef = useRef(false);
   const programmaticScrollRafRef = useRef<number | null>(null);
   const [scrollMode, setScrollModeState] = useState<ChatScrollMode>("following");
-    const { t } = useLanguage();
+    const { t, lang } = useLanguage();
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
   const copiedResetRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -831,6 +832,38 @@ export function ChatMessageList({
                           )}
                         </p>
                       )}
+                    {/*
+                      Which model answered, on a turn Auto routed
+                      (docs/ui-contracts/auto-model-selection.md).
+
+                      Only on a routed turn: `routedModelId` is set from a
+                      response header the server writes when the Router chose
+                      the model and omits when it did not, so a fallback turn
+                      has nothing here rather than a badge claiming a decision
+                      nobody made.
+
+                      The display name, not the id -- the id is for logs. A
+                      model that has since left the catalogue falls back to its
+                      id rather than rendering an empty badge, because "this
+                      answer came from something we no longer list" is still
+                      the truth about the answer.
+
+                      It is a statement about this answer, so it sits with the
+                      answer. It touches neither the mobile composer contract
+                      nor the comparison rail's.
+                    */}
+                    {!isUser && msg.routedModelId && (
+                      <p className="mt-3">
+                        <AutoRoutedByBadge
+                          routed
+                          modelName={
+                            getModel(msg.routedModelId)?.name ?? msg.routedModelId
+                          }
+                          reason={msg.routedReason ?? null}
+                          language={lang as Parameters<typeof AutoRoutedByBadge>[0]["language"]}
+                        />
+                      </p>
+                    )}
                     {/*
                       The files this answer produced
                       (docs/policy/generated-artifacts.md section 9).

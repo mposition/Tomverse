@@ -349,6 +349,7 @@ export const fr = {
         assistantProfileFailed: "Impossible de changer l'assistant de cette conversation.",
         toolsMemoryInheritOffDescription: "Votre réglage est actuellement de ne pas l'utiliser, et cette conversation suivra tout changement",
         memoryModeFailed: "Ce réglage de mémoire n'a pas pu être enregistré.",
+        autoSelectionFailed: "Ce réglage Auto n'a pas pu être enregistré.",
         toolsWebSearchAuto: "Auto",
         toolsWebSearchAutoDescription: "Suggère une recherche web lorsqu'une question semble nécessiter des informations récentes",
         toolsWebSearchAlways: "Utiliser la recherche web",

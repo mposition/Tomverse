@@ -349,6 +349,7 @@ export const de = {
         assistantProfileFailed: "Der Assistent dieser Unterhaltung konnte nicht geändert werden.",
         toolsMemoryInheritOffDescription: "Deine Einstellung ist derzeit, es nicht zu verwenden; diese Unterhaltung folgt einer Änderung",
         memoryModeFailed: "Diese Gedächtniseinstellung konnte nicht gespeichert werden.",
+        autoSelectionFailed: "Diese Auto-Einstellung konnte nicht gespeichert werden.",
         toolsWebSearchAuto: "Automatisch",
         toolsWebSearchAutoDescription: "Schlägt eine Websuche vor, wenn eine Frage aktuelle Informationen zu benötigen scheint",
         toolsWebSearchAlways: "Websuche verwenden",
