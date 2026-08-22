@@ -379,6 +379,43 @@ provider 경로의 시험은 `AdminNotificationLog`에 진짜 알림과 똑같�
 이는 부작용이 아니라 의도입니다 — 이 경로가 실패하면 그 실패는 운영자의 알림
 로그와 미확인 실패 배지에 나타나야 하고, 그곳이 진짜 실패가 갔을 자리입니다.
 
+#### 3.5.4 staging 알림 경로 실측 (2026-08-22 01:39Z)
+
+3.5.3의 두 버튼을 눌러 실제로 도착한 메일의 헤더입니다. 이로써 **staging에서 세
+발신 경로 중 둘이 확정**됐습니다.
+
+| | ① Operational | ② Provider |
+|---|---|---|
+| Subject | `[Tomverse Operations] Sending path test` | `[Tomverse Admin] Sending path test` |
+| From | `Tomverse Insight <hello@mail.tomverse.app>` | 동일 |
+| DKIM | `d=mail.tomverse.app` pass | pass |
+| SPF | `send.mail.tomverse.app` pass | pass |
+| DMARC | pass | pass |
+
+제목 prefix가 서로 다르게 찍힌 것도 계약대로입니다. M12에서 표시 이름을 하나의
+transactional identity로 합치면서 "Operations"와 "Admin" 구분을 **제목 prefix로**
+옮겼고(1.2), 그 결정이 실물에서 확인됩니다.
+
+**남은 것은 ③ 보안 감사 리포트뿐입니다.** GitHub Actions runner의 변수를 쓰므로
+배포 환경과 무관하며, Actions → Daily Security Audit → Run workflow로만 확인됩니다.
+
+##### 관측된 값 하나: Outlook SCL 5
+
+provider 알림 쪽 헤더에 `X-MS-Exchange-Organization-SCL: 5`가 찍혔습니다
+(operational 쪽은 1). Outlook에서 5는 스팸 판정 구간이고, 받은편지함에 들어온 것은
+수신자가 발신자를 신뢰 목록에 두고 있기 때문입니다 — 같은 헤더의 `wl:1`,
+`OFR:TrustedSenderList`, `dest:I`가 그것을 말합니다.
+
+**실패가 아니라 3.4가 관측하라고 한 신호입니다.** 새 도메인은 평판 이력이 없어
+초기에 이런 점수가 나올 수 있고, 신뢰 목록에 없는 수신자에게는 정크로 갈 수
+있습니다. 거의 같은 두 메일이 1과 5로 갈린 것은 특정 트리거보다 경계선상 판정으로
+보이며, 2주 관측 기간에 `EmailDelivery`의 bounce·complaint 비율과 함께 지켜볼
+값입니다.
+
+**production 검증 때의 비교 기준으로 남깁니다.** production에서 같은 두 버튼을
+눌렀을 때 SCL이 이보다 나쁘면 도메인 평판이 아니라 그쪽 설정을 의심할 근거가
+됩니다.
+
 ### 3.6 정책 강화 (Phase 2)
 
 리포트가 깨끗하면 `p=quarantine`, 이후 `p=reject`. 각 단계 사이에 최소 2주.
