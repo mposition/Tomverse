@@ -164,8 +164,12 @@ const modelFinderRoute = readFileSync(
   join(process.cwd(), "app/api/user/model-finder/route.ts"),
   "utf8"
 );
+// The conversation creation path, which POST /api/conversations delegates to
+// since it was parameterised by product (decision record v1.2 §6). The two
+// product-specific endpoints call the same handler, so reading it here covers
+// all three rather than one.
 const conversationsRoute = readFileSync(
-  join(process.cwd(), "app/api/conversations/route.ts"),
+  join(process.cwd(), "lib/conversationCreateHandler.ts"),
   "utf8"
 );
 const chatPageClient = readFileSync(
