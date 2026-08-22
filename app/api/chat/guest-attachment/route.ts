@@ -171,6 +171,10 @@ const GUEST_VALIDATION_CODES: Record<string, { code: string; message: string }> 
     code: "GUEST_ATTACHMENT_UNREADABLE",
     message: "The document is invalid or could not be processed.",
   },
+  ATTACHMENT_ENCRYPTED: {
+    code: "ATTACHMENT_ENCRYPTED",
+    message: "The document is password-protected.",
+  },
   ATTACHMENT_TEXT_TOO_LARGE: {
     code: "GUEST_ATTACHMENT_TEXT_TOO_LARGE",
     message: "The file's text is longer than a guest message can carry.",

@@ -25,6 +25,7 @@ export const CHAT_ATTACHMENT_ERROR_COPY_KEYS: Readonly<Record<string, string>> =
     INVALID_IMAGE_ATTACHMENT: "chat.attachmentImageInvalid",
     INVALID_PDF_ATTACHMENT: "chat.attachmentPdfInvalid",
     ATTACHMENT_NO_TEXT: "chat.attachmentNoText",
+    ATTACHMENT_ENCRYPTED: "chat.attachmentEncrypted",
     GUEST_ATTACHMENT_NO_TEXT: "chat.guestAttachmentUnreadable",
     ATTACHMENT_UNREADABLE: "chat.attachmentUnreadable",
     GUEST_ATTACHMENT_UNREADABLE: "chat.guestAttachmentUnreadable",

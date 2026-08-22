@@ -112,6 +112,8 @@ import {
 } from "@/lib/perplexityDeepResearch";
 import { assertModelRuntimeAvailable } from "@/lib/modelAvailability";
 import { parseOfficeSafely } from "@/lib/officeSecurity";
+import { extractLegacyOfficeText, type LegacyOfficeFormatId } from "@/lib/legacyOfficeText";
+import { legacyOfficeValidationCode } from "@/lib/chatAttachmentValidation";
 import {
     AnimatedImageError,
     extractPdfTextSafely,
@@ -2001,6 +2003,38 @@ async function handleChatPost(
                         "PDF_TEXT_UNREADABLE",
                         "The attached PDF does not contain readable text."
                     );
+                }
+
+                if (format.category === "legacy-office") {
+                    // Word/Excel/PowerPoint 97-2003 and RTF, read by this
+                    // repository's own parsers. Bounded by the same remaining
+                    // character budget every other extractor answers to, so a
+                    // legacy document cannot spend more of the turn than a
+                    // modern one.
+                    let extractedText: string;
+                    try {
+                        extractedText = extractLegacyOfficeText(
+                            new Uint8Array(
+                                buffer.buffer,
+                                buffer.byteOffset,
+                                buffer.byteLength
+                            ),
+                            format.id as LegacyOfficeFormatId,
+                            { maxCharacters: remainingCharacters - 64 }
+                        ).text;
+                    } catch (error) {
+                        if (fromArchive) return "unreadable";
+                        const code = legacyOfficeValidationCode(error);
+                        throw new ChatAccessError(
+                            code === "ATTACHMENT_TEXT_TOO_LARGE" ? 413 : 400,
+                            code,
+                            code === "ATTACHMENT_ENCRYPTED"
+                                ? "The attached document is password-protected."
+                                : "The attached document could not be read."
+                        );
+                    }
+                    addExtractedText(format.promptKind, extractedText);
+                    return "ok";
                 }
 
                 if (format.category === "office") {

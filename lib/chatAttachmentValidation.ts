@@ -25,6 +25,11 @@ import {
     type NormalizableImageMediaType,
 } from "@/lib/mediaSecurity";
 import { assertSafeOfficeArchive, parseOfficeSafely } from "@/lib/officeSecurity";
+import {
+    extractLegacyOfficeText,
+    LegacyOfficeError,
+    type LegacyOfficeFormatId,
+} from "@/lib/legacyOfficeText";
 
 /**
  * Proving an upload is what it says it is, in one place, for every caller.
@@ -69,6 +74,7 @@ export type ChatAttachmentValidationCode =
     | "INVALID_PDF_ATTACHMENT"
     | "ATTACHMENT_NO_TEXT"
     | "ATTACHMENT_TEXT_TOO_LARGE"
+    | "ATTACHMENT_ENCRYPTED"
     | "ATTACHMENT_UNREADABLE";
 
 export class ChatAttachmentValidationError extends Error {
@@ -103,6 +109,31 @@ export type ChatAttachmentValidationResult = {
 };
 
 const isImageFormat = (format: ChatAttachmentFormat) => format.category === "image";
+
+/**
+ * Turns a legacy parser's outcome into the shared validation vocabulary.
+ *
+ * Encryption gets its own code because it is the one failure with an answer:
+ * the person can remove the password and try again, where "invalid or
+ * unsupported" would send them looking for a different file.
+ */
+export const legacyOfficeValidationCode = (
+    error: unknown
+): ChatAttachmentValidationCode => {
+    if (!(error instanceof LegacyOfficeError)) return "ATTACHMENT_UNREADABLE";
+    switch (error.code) {
+        case "LEGACY_OFFICE_ENCRYPTED":
+            return "ATTACHMENT_ENCRYPTED";
+        case "LEGACY_OFFICE_NO_TEXT":
+            return "ATTACHMENT_NO_TEXT";
+        case "LEGACY_OFFICE_TOO_LARGE":
+            return "ATTACHMENT_TEXT_TOO_LARGE";
+        case "LEGACY_OFFICE_TIMEOUT":
+            return "ATTACHMENT_UNREADABLE";
+        default:
+            return "ATTACHMENT_TYPE_MISMATCH";
+    }
+};
 
 /**
  * Validates one uploaded file.
@@ -196,6 +227,37 @@ export async function validateChatAttachmentUpload({
         }
         if (!extracted) throw new ChatAttachmentValidationError("ATTACHMENT_NO_TEXT");
         if (extracted.length > maxExtractedCharacters) {
+            throw new ChatAttachmentValidationError("ATTACHMENT_TEXT_TOO_LARGE", 413);
+        }
+        return { bytes: buffer, mediaType: format.mediaType };
+    }
+
+    if (format.category === "legacy-office") {
+        // Unlike the OOXML path there is no cheap structural check that is
+        // meaningfully weaker than the parse: opening the compound file, the
+        // piece table or the record stream *is* the validation, and it is the
+        // same work the turn will do. So the text is extracted here whatever
+        // the caller asked for, and only the ceiling differs.
+        let extracted: string;
+        try {
+            extracted = extractLegacyOfficeText(
+                new Uint8Array(buffer.buffer, buffer.byteOffset, buffer.byteLength),
+                format.id as LegacyOfficeFormatId,
+                maxExtractedCharacters === undefined
+                    ? {}
+                    : { maxCharacters: maxExtractedCharacters + 1 }
+            ).text;
+        } catch (error) {
+            const code = legacyOfficeValidationCode(error);
+            throw new ChatAttachmentValidationError(
+                code,
+                code === "ATTACHMENT_TEXT_TOO_LARGE" ? 413 : 400
+            );
+        }
+        if (
+            maxExtractedCharacters !== undefined &&
+            extracted.length > maxExtractedCharacters
+        ) {
             throw new ChatAttachmentValidationError("ATTACHMENT_TEXT_TOO_LARGE", 413);
         }
         return { bytes: buffer, mediaType: format.mediaType };

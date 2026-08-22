@@ -296,6 +296,7 @@ export const zh = {
         attachmentImageInvalid: "图片已损坏或格式不受支持。",
         attachmentPdfInvalid: "PDF 已损坏或无法读取。",
         attachmentNoText: "未在此文件中找到可读文本。",
+        attachmentEncrypted: "该文档已设置密码。请解除密码后重新添加。",
         attachmentUnreadable: "无法处理此文件。",
         attachmentTextTooLarge: "此文件的文本超出了单条消息可承载的长度。",
         attachmentModelImageUnsupported: "该模型无法处理此文件中包含的图片。",

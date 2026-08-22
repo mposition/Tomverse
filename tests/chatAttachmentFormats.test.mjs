@@ -204,20 +204,43 @@ test("the formats this change was asked for are actually in the table", () => {
     "widget.vue": "text/x-vue",
     "schema.graphql": "application/graphql",
     "user.proto": "text/x-protobuf",
+    // Office 97-2003 and RTF, read by lib/legacyOffice/**.
+    "report.doc": "application/msword",
+    "book.xls": "application/vnd.ms-excel",
+    "deck.ppt": "application/vnd.ms-powerpoint",
+    "letter.rtf": "application/rtf",
   };
   for (const [name, mediaType] of Object.entries(expected)) {
     assert.equal(resolve(name, "")?.mediaType, mediaType, name);
   }
 });
 
+test("the legacy Office formats are read, not merely listed", () => {
+  // The rule this table is held to: an entry means the product can read the
+  // file. These four waited until there was a parser behind them, and the
+  // parser is `lib/legacyOffice/**`.
+  for (const [name, id] of [
+    ["report.doc", "doc"],
+    ["book.xls", "xls"],
+    ["deck.ppt", "ppt"],
+    ["letter.rtf", "rtf"],
+  ]) {
+    const format = resolve(name, "");
+    assert.equal(format?.id, id, name);
+    assert.equal(format?.category, "legacy-office", name);
+    assert.equal(format?.parser, "legacy-office-extractor", name);
+    assert.equal(attachmentKindForFormat(format), "file", name);
+    assert.equal(format?.guestAllowed, true, name);
+    assert.equal(format?.allowedInArchive, true, name);
+  }
+  // A compound file is not the ZIP the OOXML path walks, so the two families
+  // must not share a category.
+  assert.equal(resolve("modern.docx", "")?.category, "office");
+});
+
 test("formats explicitly left out of this change stay out", () => {
-  // Legacy Office and RTF have no safe parser in this tree; the rest need a
-  // separate pipeline, not a row in a table.
+  // Each of these needs a separate pipeline, not a row in a table.
   for (const name of [
-    "old.doc",
-    "old.xls",
-    "old.ppt",
-    "letter.rtf",
     "scan.tiff",
     "photo.heic",
     "clip.mp4",

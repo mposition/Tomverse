@@ -47,7 +47,16 @@
 export type ChatAttachmentCategory =
     | "image"
     | "pdf"
+    /** OOXML and OpenDocument: a ZIP with XML in it. */
     | "office"
+    /**
+     * Word/Excel/PowerPoint 97-2003 and RTF. A separate category from
+     * `office` because nothing is shared: these are compound-file or
+     * plain-text containers, they never see `assertSafeOfficeArchive`, and
+     * they are read by this repository's own parsers rather than by
+     * `officeparser`.
+     */
+    | "legacy-office"
     | "text"
     | "archive";
 
@@ -60,6 +69,7 @@ export type ChatAttachmentParser =
     | "image-normalizer"
     | "pdf-extractor"
     | "office-extractor"
+    | "legacy-office-extractor"
     | "utf-text-decoder"
     | "archive-expander";
 
@@ -75,6 +85,9 @@ export type ChatAttachmentSignature =
     | "gif"
     | "pdf"
     | "zip"
+    /** The compound-file magic a `.doc`, `.xls` or `.ppt` opens with. */
+    | "cfbf"
+    | "rtf"
     | "utf-text";
 
 /** How the format is grouped when a person is told what they may attach. */
@@ -168,6 +181,27 @@ const office = (
     promptKind: "office file",
 });
 
+const legacyOffice = (
+    id: string,
+    extensions: readonly string[],
+    mediaType: string,
+    signature: ChatAttachmentSignature,
+    mediaTypeAliases: readonly string[] = []
+): ChatAttachmentFormat => ({
+    id,
+    extensions,
+    mediaType,
+    mediaTypeAliases,
+    category: "legacy-office",
+    parser: "legacy-office-extractor",
+    signature,
+    allowedInArchive: true,
+    guestAllowed: true,
+    requiresImageInput: false,
+    uiGroup: "document",
+    promptKind: "office file",
+});
+
 const text = (
     id: string,
     extensions: readonly string[],
@@ -233,6 +267,30 @@ export const CHAT_ATTACHMENT_FORMATS: readonly ChatAttachmentFormat[] = [
     office("odt", "odt", `${ODF}.text`),
     office("ods", "ods", `${ODF}.spreadsheet`),
     office("odp", "odp", `${ODF}.presentation`),
+
+    // -- Office 97-2003 and RTF ---------------------------------------------
+    // Read by this repository's own parsers (lib/legacyOffice/**), never
+    // decrypted, and never opened past the streams that hold text.
+    legacyOffice("doc", ["doc"], "application/msword", "cfbf", [
+        "application/vnd.ms-word",
+        "application/doc",
+        "application/winword",
+    ]),
+    legacyOffice("xls", ["xls"], "application/vnd.ms-excel", "cfbf", [
+        "application/msexcel",
+        "application/x-excel",
+        "application/x-msexcel",
+    ]),
+    legacyOffice("ppt", ["ppt"], "application/vnd.ms-powerpoint", "cfbf", [
+        "application/mspowerpoint",
+        "application/powerpoint",
+        "application/x-mspowerpoint",
+    ]),
+    legacyOffice("rtf", ["rtf"], "application/rtf", "rtf", [
+        "text/rtf",
+        "text/richtext",
+        "application/x-rtf",
+    ]),
 
     // -- Archive ------------------------------------------------------------
     {

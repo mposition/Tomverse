@@ -282,6 +282,7 @@ export const ko = {
         attachmentImageInvalid: "이미지가 손상되었거나 지원하지 않는 형식입니다.",
         attachmentPdfInvalid: "PDF가 손상되었거나 읽을 수 없습니다.",
         attachmentNoText: "이 파일에서 읽을 수 있는 텍스트를 찾지 못했습니다.",
+        attachmentEncrypted: "암호가 걸린 문서입니다. 암호를 해제한 뒤 다시 첨부해 주세요.",
         attachmentUnreadable: "이 파일을 처리할 수 없습니다.",
         attachmentTextTooLarge: "이 파일의 텍스트가 한 번에 보낼 수 있는 길이를 초과합니다.",
         attachmentModelImageUnsupported: "이 모델은 포함된 이미지를 처리할 수 없습니다.",

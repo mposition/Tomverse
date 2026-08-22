@@ -581,6 +581,20 @@ default를 DB에 씁니다), 저장값 JSON 파싱 실패, schema 검증 실패.
   payload 상한, 추출 텍스트 예산, OCR 허용량을 우회하는 길이 되어서는 안 됩니다.
 - **오류에 항목 경로·파서 메시지·R2 key·파일 내용을 싣지 않습니다.** 코드만
   전달하고 문장은 `lib/chatAttachmentErrorCopy.ts`가 locale로 옮깁니다.
+- **Office 97-2003과 RTF는 자체 파서로 읽습니다**(`lib/legacyOffice/**`,
+  진입점 `lib/legacyOfficeText.ts`). 복호화하지 않고(암호 문서는
+  `ATTACHMENT_ENCRYPTED`), 매크로 저장소·임베디드 객체·그림을 열지 않으며,
+  아무것도 실행·평가·fetch 하지 않습니다. 파싱했는데 텍스트가 없으면 거절이지
+  빈 문자열이 아닙니다.
+- **이 네 파서는 워커가 아니라 예산으로 묶습니다.** eval된 워커는 저장소
+  `lib/`의 모듈을 `require`할 수 없으므로 `sharp`·`officeparser`·`pdfjs`의
+  방식을 쓸 수 없습니다. 대신 `lib/legacyOffice/budget.ts`의 deadline·byte
+  상한·문자 상한·iteration backstop이 모든 루프에 걸립니다. 이 파일들에 새
+  루프를 넣을 때 `budget.tick()`을 빼면 그 방어가 사라집니다.
+- **바이너리 파서의 정상 경로는 진짜 문서로 테스트합니다**
+  (`tests/fixtures/legacyOffice/`). 자체 writer가 만든 파일로만 검증하면 둘이
+  서로 동의한다는 것만 증명합니다. 거절 경로는
+  `tests/support/compoundFile.mjs`로 바이트 단위로 만듭니다.
 
 # 이미지 생성 (v2: 멀티 모델 비교)
 

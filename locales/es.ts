@@ -287,6 +287,7 @@ export const es = {
         attachmentImageInvalid: "La imagen está dañada o tiene un formato no compatible.",
         attachmentPdfInvalid: "El PDF está dañado o no se pudo leer.",
         attachmentNoText: "No se encontró texto legible en este archivo.",
+        attachmentEncrypted: "Este documento está protegido con contraseña. Quita la contraseña y vuelve a adjuntarlo.",
         attachmentUnreadable: "No se pudo procesar este archivo.",
         attachmentTextTooLarge: "El texto de este archivo supera lo que puede llevar un solo mensaje.",
         attachmentModelImageUnsupported: "Este modelo no puede procesar las imágenes que contiene este archivo.",

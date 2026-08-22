@@ -214,6 +214,68 @@ test("an Office file that is not the type it claims is refused", async () => {
   );
 });
 
+// -- Office 97-2003 and RTF --------------------------------------------------
+
+test("a legacy document is read at upload, so its text is proven before send", async () => {
+  const { readFileSync } = await import("node:fs");
+  const { fileURLToPath } = await import("node:url");
+  const read = (name) =>
+    Buffer.from(
+      readFileSync(fileURLToPath(new URL(`./fixtures/legacyOffice/${name}`, import.meta.url)))
+    );
+
+  for (const [file, mediaType] of [
+    ["sample.doc", "application/msword"],
+    ["sample.xls", "application/vnd.ms-excel"],
+    ["sample.ppt", "application/vnd.ms-powerpoint"],
+    ["sample.rtf", "application/rtf"],
+  ]) {
+    const result = await validate(read(file), mediaType);
+    // The bytes are stored as they arrived: extraction happens per turn, and
+    // the upload only proves it can happen at all.
+    assert.equal(result.mediaType, mediaType);
+    assert.equal(result.bytes.length, read(file).length);
+  }
+});
+
+test("a password-protected legacy document gets its own refusal", async () => {
+  const { buildCompoundFile } = await import("./support/compoundFile.mjs");
+  const word = new Uint8Array(512);
+  const view = new DataView(word.buffer);
+  view.setUint16(0, 0xa5ec, true);
+  view.setUint16(10, 0x0100, true);
+  await refuses(
+    Buffer.from(
+      buildCompoundFile([
+        { name: "WordDocument", data: word },
+        { name: "1Table", data: new Uint8Array(64) },
+      ])
+    ),
+    "application/msword",
+    "ATTACHMENT_ENCRYPTED"
+  );
+});
+
+test("a legacy extension on something else is a mismatch, not a crash", async () => {
+  await refuses(
+    Buffer.from("this is plainly not a Word document", "utf8"),
+    "application/msword",
+    "ATTACHMENT_TYPE_MISMATCH"
+  );
+});
+
+test("the guest ceiling applies to a legacy document too", async () => {
+  const { readFileSync } = await import("node:fs");
+  const { fileURLToPath } = await import("node:url");
+  const doc = Buffer.from(
+    readFileSync(fileURLToPath(new URL("./fixtures/legacyOffice/sample.doc", import.meta.url)))
+  );
+  await refuses(doc, "application/msword", "ATTACHMENT_TEXT_TOO_LARGE", {
+    scope: "guest",
+    maxExtractedCharacters: 5,
+  });
+});
+
 test("a PDF that is not a PDF is refused", async () => {
   await refuses(
     Buffer.from("%PDF-1.7 but not really", "utf8"),

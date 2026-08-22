@@ -2900,6 +2900,61 @@ const checks = [
     },
   },
   {
+    name: "Legacy Office parsers never decrypt, never execute and are bounded before they read",
+    file: "lib/legacyOfficeText.ts",
+    test: (source) => {
+      const budget = read("lib/legacyOffice/budget.ts");
+      const cfbf = read("lib/legacyOffice/cfbf.ts");
+      const doc = read("lib/legacyOffice/doc.ts");
+      const xls = read("lib/legacyOffice/xls.ts");
+      const ppt = read("lib/legacyOffice/ppt.ts");
+      const rtf = read("lib/legacyOffice/rtf.ts");
+      const parsers = [cfbf, doc, xls, ppt, rtf];
+      return (
+        // A protected document is refused by name. Nothing attempts a key.
+        doc.includes("FIB_FLAG_ENCRYPTED") &&
+        doc.includes('LEGACY_OFFICE_ENCRYPTED') &&
+        xls.includes("RECORD_FILEPASS") &&
+        xls.includes('LEGACY_OFFICE_ENCRYPTED') &&
+        ppt.includes("CURRENT_USER_ENCRYPTED") &&
+        ppt.includes("RECORD_CRYPT_SESSION_10") &&
+        !/\b(createDecipheriv|createHash|rc4|crypto)\b/i.test(
+            parsers.join("\n")
+        ) &&
+        // Every loop a file's own contents can lengthen is bounded, and the
+        // bytes are claimed before they are allocated.
+        budget.includes("maxIterations") &&
+        budget.includes("timeoutMs") &&
+        budget.includes("claimBytes") &&
+        budget.includes("claimCharacters") &&
+        parsers.every((parser) => parser.includes("budget.tick()")) &&
+        cfbf.includes("budget.claimBytes") &&
+        // A sector chain is a linked list inside the file: loops and
+        // out-of-range links are refusals, not best-effort reads.
+        cfbf.includes("seen.has(sector)") &&
+        cfbf.includes("sector > MAXREGSECT") &&
+        // Nothing is executed, evaluated, fetched or read from disk.
+        !/\beval\(|new Function\(|child_process|node:fs|node:https?|fetch\(/.test(
+            parsers.join("\n")
+        ) &&
+        !/\beval\(|new Function\(|child_process|node:fs|fetch\(/.test(source) &&
+        // The macro storage, embedded objects and pictures are never opened:
+        // each parser reads named streams, and RTF skips those destinations.
+        rtf.includes('"objdata"') &&
+        rtf.includes('"pict"') &&
+        rtf.includes('"object"') &&
+        !parsers.join("\n").includes("_VBA_PROJECT") &&
+        // A document that parses to nothing is a refusal rather than an empty
+        // string handed to a model as the file's contents.
+        source.includes('LEGACY_OFFICE_NO_TEXT') &&
+        // The refusal codes reach the shared vocabulary, so the client can say
+        // what happened instead of "try again".
+        read("lib/chatAttachmentValidation.ts").includes("legacyOfficeValidationCode") &&
+        read("lib/chatAttachmentErrorCopy.ts").includes("ATTACHMENT_ENCRYPTED")
+      );
+    },
+  },
+  {
     name: "Credit-pack refunds and disputes record unrecovered debt under an account lock",
     file: "lib/creditPurchase.ts",
     test: (source) =>

@@ -287,6 +287,7 @@ export const fr = {
         attachmentImageInvalid: "L'image est endommagée ou dans un format non pris en charge.",
         attachmentPdfInvalid: "Le PDF est endommagé ou illisible.",
         attachmentNoText: "Aucun texte lisible n'a été trouvé dans ce fichier.",
+        attachmentEncrypted: "Ce document est protégé par mot de passe. Retirez le mot de passe et joignez-le à nouveau.",
         attachmentUnreadable: "Ce fichier n'a pas pu être traité.",
         attachmentTextTooLarge: "Le texte de ce fichier dépasse ce qu'un seul message peut contenir.",
         attachmentModelImageUnsupported: "Ce modèle ne peut pas traiter les images contenues dans ce fichier.",
