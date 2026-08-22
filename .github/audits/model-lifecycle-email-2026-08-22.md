@@ -19,10 +19,12 @@
 
 1. **신규 모델 후보는 발견된 날 하루만 존재하고, 이미 손실이 발생했습니다.**
    `newCandidates`는 `ProviderModelCatalogEntry` 행이 이미 있으면 비게 되고,
-   행은 첫 스캔에서 만들어집니다. production 실측(2026-08-17~22): 후보 6건이
-   보고됐고 **어느 하나도 두 번 보고되지 않았으며 5건은 저장소 어디에도
-   없습니다.** 그중 `qwen3.8-27b`는 Qwen 자신의 모델로 8/20에 한 번 보고된 뒤
-   사라졌습니다.
+   행은 첫 스캔에서 만들어집니다. production 실측(2026-07-21~08-22, 전 기간):
+   20일에 걸쳐 후보 37건이 생성됐고, 그중 **해당 provider 자신의 모델인데 오늘
+   저장소 어디에도 없는 것이 7건**입니다 — `qwen3.7-flash`(28일 방치),
+   `qwen3.8-max`(18일), `grok-4.6`(9일), `gemini-3.7-flash`(8일),
+   `qwen3.8-2.4t-a95b`(8일), `glm-5.3`(6일), `qwen3.8-27b`(2일).
+   카탈로그에 도달한 후보는 전부 **발견 당일에 사람이 처리한 것**입니다.
    `[코드]` `lib/providerModelCatalogMonitor.ts:213` `[측정]` 5절 ML-01
 2. **그 후보를 다시 볼 수 있는 화면이 저장소에 하나도 없습니다.**
    `ProviderModelCatalogEntry`를 읽는 코드는 monitor 자기 자신뿐입니다 — admin
@@ -145,32 +147,56 @@ cause · 권고 · Acceptance criteria · 검증 방법 · 파일:line 순입니
   두 번 `newCandidates`에 들어가지 않습니다.
 - **기대 동작**: 미검토 후보는 검토·기각·연기 중 하나가 되기 전까지 매일 보고에
   남는다.
-- **`[측정]` production 실측 (2026-08-17 ~ 08-22)**
+- **`[측정]` production 실측 — 관측 전 기간 (2026-07-21 ~ 08-22, 33일)**
 
-  Railway `Provider Model Catalog` 서비스 cron 로그(`newCandidates` 카운트)와
-  `#all-tomverse`의 `Tomverse model catalog report` Slack 메시지(후보 이름)를
-  대조했습니다. 6일 연속 `checked 12/12 · missing 0 · lifecycle warnings 0 ·
-  registry auto-updates 0`입니다.
+  DB에 닿지 않고 복원했습니다. `newCandidates` 수는 Railway `Provider Model
+  Catalog` cron 로그가, 후보 **이름**은 `#all-tomverse`의
+  `Tomverse model catalog report` Slack 메시지가 갖고 있습니다. 리포트는
+  ML-01의 메커니즘상 **행이 생기는 날 정확히 한 번** 후보를 호명하므로,
+  전 기간 리포트의 합집합이 곧 `ProviderModelCatalogEntry`의 누적 후보 전체입니다.
 
-  | 날짜 (AEST) | newCandidates | 보고된 후보 | 오늘 저장소에 있는가 |
-  |---|---|---|---|
-  | 8/17 | 0 | — | — |
-  | 8/18 | 0 | — | — |
-  | 8/19 | 2 | Qwen `ZHIPU/GLM-5.3` · Perplexity `perplexity/deepseek-v4-pro-0813` | **없음** · **없음** |
-  | 8/20 | 1 | Qwen `qwen3.8-27b` | **없음** |
-  | 8/21 | 1 | Perplexity `perplexity/glm-5.3` | **없음** |
-  | 8/22 | 2 | DeepSeek `deepseek-v4-flash-vision-exp` · Qwen `kimi-k3` | **없음** · 있음(moonshot) |
+  첫 리포트는 2026-07-21. **20일에 걸쳐 후보 37건이 생성**됐고 중복 모델을
+  묶으면 고유 모델 약 24종입니다. 하루 최대는 4건(8/13)이라 20행 상한(ML-04)에
+  닿은 적이 없습니다.
 
-  **6건 중 어느 하나도 두 번 보고되지 않았고, 5건은 저장소 어디에도
-  존재하지 않습니다**(`grep -ril` 전수, `lib/models.ts`·테스트·문서 포함).
+  그중 **해당 provider 자신의 카탈로그에서 나온 그 provider 자신의 모델인데
+  오늘 저장소 어디에도 없는 것이 7건**입니다. 이것이 U1의 답입니다.
 
-  가장 깨끗한 사례는 **`qwen3.8-27b`**입니다 — Qwen 자신의 카탈로그에서 나온
-  Qwen 자신의 모델이고, 2026-08-20에 한 번 보고됐으며, 그 뒤 이틀간의 리포트는
-  `New model candidates found today: None`을 출력했고, 저장소에는 없습니다.
-  검토됐는지 기각됐는지 **저장소가 답할 수 없습니다**(ML-03).
+  | 최초 발견 | provider | 모델 | 방치 일수 | 재호명 |
+  |---|---|---|---|---|
+  | 07-25 | Qwen | `qwen3.7-flash` (+`-2026-07-15`) | **28일** | 없음 |
+  | 08-04 | Qwen | `qwen3.8-max` | **18일** | 없음 |
+  | 08-13 | xAI | `grok-4.6` | **9일** | 없음(당일 Perplexity 경유 1건 별도) |
+  | 08-14 | Google | `gemini-3.7-flash` | **8일** | 없음(익일 Perplexity 경유 1건 별도) |
+  | 08-14 | Qwen | `qwen3.8-2.4t-a95b` | **8일** | 없음 |
+  | 08-16 | Zhipu | `glm-5.3` | **6일** | 없음(8/19·8/21에 타 provider 경유) |
+  | 08-20 | Qwen | `qwen3.8-27b` | **2일** | 없음 |
+
+  대조군으로, 카탈로그에 **도달한** 후보들은 전부 발견 직후 사람이 손으로
+  넣은 것입니다 — `gemini-3.6-flash`·`gemini-3.5-flash-lite`(7/22 발견),
+  `kimi-k3`(7/28 발견 → `20260803040000_launch_kimi_k3` migration),
+  `claude-opus-5`·`claude-fable-5`·`glm-5.2`. 즉 **이 파이프라인이 실제로
+  작동한 경우는 전부 "그날 이메일을 본 사람이 그날 처리했다"입니다.**
+  하루를 놓치면 위 표가 됩니다.
+
+  나머지 후보는 두 종류의 노이즈입니다. (a) 집계 provider 경유 중복 —
+  Perplexity·Qwen·Mistral의 카탈로그가 남의 모델을 서빙해서 생기는 것으로,
+  `perplexity/kimi-k3`·`google/gemini-3.7-flash`·`zai-glm-5-2` 등(ML-12).
+  (b) chat이 아닌 모델 — `gemini-robotics-er-2-preview`,
+  `qwen-audio-3.0-asr-flash`, `qwen-image-3.0`,
+  `gemini-3.7-flash-video-understanding-eap`가 `isLikelyChatModelId`를
+  통과했습니다(6절 #10·#11).
+
+  **부수 확인**: 7/22~8/15 전 기간 리포트가
+  `Anthropic: failed (PROVIDER_MODEL_CATALOG_HTTP_404)`를 달고 있습니다 —
+  `providerModelCatalogCore.ts:10-20`의 주석이 말하는 그 한 달이며, 8/16부터
+  `checked 12/12`로 복구됐습니다. 7/29에는
+  `registry auto-updates 4`가 찍혀 auto-disable이 실제로 동작한 기록이
+  남아 있습니다.
 - **영향**: cron 실패, 이메일 유실, 휴가, 다른 급한 일 — 어느 하나만 겹쳐도 그
-  모델은 영구히 사라집니다. 위 표가 그 손실이 가설이 아니라 이미 일어난 일임을
-  보여 줍니다.
+  모델은 영구히 사라집니다. 위 표가 그 손실이 가설이 아니라 **한 달 동안 7건**
+  누적된 사실임을 보여 줍니다. 그중 `grok-4.6`·`gemini-3.7-flash`·`glm-5.3`은
+  각 provider의 현행 플래그십 후속 모델입니다.
 - **Root cause**: "오늘의 변화"와 "미처리 목록"이 같은 배열로 표현됨.
 - **권고**: 5절의 `ModelLifecycleWorkItem` 도입. Daily 리포트는 `NEW TODAY`와
   `PENDING N DAYS`를 별도 섹션으로 렌더.
@@ -349,14 +375,19 @@ cause · 권고 · Acceptance criteria · 검증 방법 · 파일:line 순입니
   (`prisma/schema.prisma:1745`). 여러 provider가 같은 모델을 서빙하면 각각
   별개의 행이 되고, 각각 따로 `newCandidates`에 들어갑니다.
 - **`[측정]` 실측 두 사례**
-  - **GLM-5.3이 두 번, 서로 다른 날, 서로 무관한 한 줄로 보고됐습니다** —
-    8/19에 `Qwen ZHIPU/GLM-5.3`, 8/21에 `Perplexity perplexity/glm-5.3`.
-    두 리포트 중 어느 쪽도 "이건 이틀 전에 본 그 모델"이라고 말하지 않습니다.
-    한편 **Zhipu 자신의 카탈로그 스캔은 이 모델을 한 번도 반환하지 않았고**,
-    registry는 여전히 `glm-5.2`입니다(`lib/models.ts:293`).
-  - **`kimi-k3`는 이미 카탈로그에 있는 모델인데 NEW로 보고됐습니다**(8/22) —
-    `(moonshot, kimi-k3)` 행은 있지만 `(qwen, kimi-k3)` 행은 없기 때문입니다
-    (`lib/models.ts:288`). 이미 출시한 모델에 "새 모델 발견" 줄이 붙습니다.
+  - **GLM-5.3이 세 번, 사흘에 걸쳐, 서로 무관한 세 줄로 보고됐습니다** —
+    8/16에 `Zhipu GLM glm-5.3`(Zhipu 자신의 카탈로그), 8/19에
+    `Qwen ZHIPU/GLM-5.3`, 8/21에 `Perplexity perplexity/glm-5.3`.
+    세 리포트 중 어느 쪽도 "이건 며칠 전에 본 그 모델"이라고 말하지 않습니다.
+    세 번 호명됐는데도 registry는 여전히 `glm-5.2`입니다(`lib/models.ts:293`).
+    **같은 모델을 세 번 말하면서 한 번도 같은 것으로 묶지 못하면, 세 번은
+    한 번보다 나을 것이 없습니다.**
+  - **`kimi-k3`는 세 번 NEW로 보고됐습니다** — 7/28
+    `Perplexity moonshotai/kimi-k3`, 7/29 `Perplexity perplexity/kimi-k3`
+    (같은 provider가 id 철자를 바꾸자 새 후보가 됨), 8/22 `Qwen kimi-k3`.
+    그런데 이 모델은 2026-08-03에 이미 출시됐습니다
+    (`prisma/migrations/20260803040000_launch_kimi_k3/`). 출시 3주 뒤에도
+    "새 모델 발견" 줄이 붙습니다.
 - **기대 동작**: 이미 카탈로그에 있는 모델은 어느 provider 경로로 나타나든
   후보가 아니어야 하고, 같은 모델의 서로 다른 provider 관측은 하나의 검토
   대상으로 묶여야 합니다.
@@ -1946,8 +1977,8 @@ post-run validation → completion(F). **이 순서를 바꾸지 않습니다.**
 
 | # | 확인 불가 사실 | read-only 확인 방법 |
 |---|---|---|
-| U1 | 지금 DB에 미검토 candidate가 **누적 총** 몇 건인지 | `SELECT provider, count(*) FROM "ProviderModelCatalogEntry" WHERE status='candidate' AND "modelRegistryId" IS NULL GROUP BY provider;` — **미해결.** U2는 최근 6일 창만 덮습니다 |
-| U2 | ML-01 때문에 놓친 모델이 실제로 있는지 | **해결됨 (2026-08-22).** Railway cron 로그 + `#all-tomverse` Slack 리포트 + 저장소 `grep` 대조. **후보 6건 중 5건이 저장소에 없고, 어느 하나도 두 번 보고되지 않았습니다.** 5절 ML-01의 표 참조. DB를 쓰지 않았으므로 production 자격증명을 세션에 반입하지 않았습니다 |
+| U1 | 지금 DB에 미검토 candidate가 **누적 총** 몇 건인지 | **해결됨 (2026-08-22).** DB 없이 Slack 리포트 전 기간(2026-07-21~08-22) 합집합으로 복원: **후보 37건 / 고유 모델 약 24종 / 그중 first-party 미처리 7건.** 5절 ML-01의 표. production 변수 읽기는 권한 classifier가 차단했고, 우회하지 않았습니다. DB 직접 확인이 필요하면 `SELECT provider, count(*) FROM "ProviderModelCatalogEntry" WHERE status='candidate' AND "modelRegistryId" IS NULL GROUP BY provider;` |
+| U2 | ML-01 때문에 놓친 모델이 실제로 있는지 | **해결됨 (2026-08-22).** U1과 같은 자료로 확인. **7건이 first-party 모델이면서 오늘 저장소에 없고, 어느 하나도 두 번 호명되지 않았습니다.** 5절 ML-01의 표 |
 | U3 | Daily 이메일이 실제로 도착하는지 | **부분 해결.** cron 로그의 `emailDelivered: 1`·`slackDelivered: true`가 8/17~8/21 전일 확인됩니다. 다만 이는 **발송 시도의 성공**이지 수신이 아닙니다(EM-14: bounce 처리 없음). 수신 확인은 여전히 사서함 필요 |
 | U4 | provider별 최근 성공 시각 | **부분 해결.** 8/17~8/22 매일 `checked: 12/12 · failed: 0`. provider별 세부는 `SELECT provider, max("startedAt") FROM "ProviderModelCatalogRun" WHERE status='checked' GROUP BY provider;` |
 | U12 | Zhipu 카탈로그가 `glm-5.3`을 반환하지 않는 이유 (ML-12) | `SELECT * FROM "ProviderModelCatalogEntry" WHERE provider='zhipu';` — API key별 모델 가시성(6절 #4) 또는 endpoint 범위 차이 |
@@ -1977,8 +2008,8 @@ post-run validation → completion(F). **이 순서를 바꾸지 않습니다.**
 - **신규 후보가 다음 날에도 추적되는가?**
   아니오 — `newCandidates`는 첫 관측에서만 채워지고
   (`lib/providerModelCatalogMonitor.ts:213`), 그 행을 다시 읽는 코드가 저장소에
-  없으며, 2026-08-17~22 production 실측에서 후보 6건 중 5건이 한 번 보고된 뒤
-  저장소 어디에도 남지 않았습니다.
+  없으며, 2026-07-21~08-22 전 기간 실측에서 후보 37건 중 first-party 모델 7건이
+  한 번 호명된 뒤 최대 28일째 저장소 어디에도 없습니다.
 
 - **현재 Daily 이메일이 새 standard lane과 template registry를 활용하는가?**
   아니오 — `sendTransactionalEmail()` 직접 호출에 `white-space:pre-wrap` 평문이며
