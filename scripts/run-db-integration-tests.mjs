@@ -209,6 +209,9 @@ run(
     // v1.2 decision 2: what the database refuses about a conversation's
     // product, and that the three CHECKs are still NOT VALID.
     "tests/integration/conversation-product-key.db.test.ts",
+    // v1.2 §6: the one writer writes the product, composes with the caller's
+    // transaction, and refuses what the CHECKs refuse.
+    "tests/integration/conversation-writer-product.db.test.ts",
     // The provider set is written in TypeScript and in SQL, and only a
     // real database can say the two still agree.
     "tests/integration/external-import-provider-canon.db.test.ts",

@@ -56,6 +56,19 @@ export const isConversationProductKey = (
   (CONVERSATION_PRODUCT_KEYS as readonly string[]).includes(value);
 
 /**
+ * Named constants for the server-side call sites.
+ *
+ * A product-specific endpoint decides its product from a module constant, not
+ * from the request. Naming them here rather than writing the literal at each
+ * call site means a reader of `createConversation(tx, { productKey: ... })`
+ * lands on this file's reasoning, and a grep for the constant finds every
+ * place a product is asserted.
+ */
+export const CHAT_PRODUCT_KEY: ConversationProductKey = "chat";
+export const REVIEW_PRODUCT_KEY: ConversationProductKey = "review";
+export const STUDIO_PRODUCT_KEY: ConversationProductKey = "studio";
+
+/**
  * The modality each product runs in.
  *
  * Image generation is Studio; Chat and Review are both `kind: "chat"`. Held

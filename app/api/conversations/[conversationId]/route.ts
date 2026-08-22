@@ -54,10 +54,9 @@ import {
     selectionModeTransition,
     storedSelectionMode,
 } from "@/lib/conversationSelectionMode";
+import { autoAvailabilityFor } from "@/lib/autoAvailability";
 import {
     autoSelectionCapability,
-    autoUiAvailability,
-    isAutoRouterUiEnabled,
     mayStoreSelectionMode,
 } from "@/lib/autoRoutingUi";
 import { describeAutoCohortRefusal } from "@/lib/autoCohort";
@@ -116,31 +115,6 @@ const safeParse = (data: unknown, fallback: string[]) => {
   return Array.isArray(parsed)
     ? parsed.filter((value): value is string => typeof value === "string")
     : fallback;
-};
-
-/**
- * Whether this account would be offered Auto.
- *
- * The flag is checked before the plan is fetched, so a deployment with the
- * rollout off pays nothing for it -- no extra query on a route that loads on
- * every conversation open. That is the difference between a feature that is
- * disabled and one that is merely hidden.
- *
- * Signed-in only: this route requires a session, so `isGuest` is always false
- * here. Guests are excluded from the cohort anyway (their conversation-scoped
- * sticky state does not survive), and saying so in one place beats threading
- * a constant through.
- */
-const autoAvailabilityFor = async (userId: string) => {
-  if (!isAutoRouterUiEnabled()) {
-    return { offered: false, reason: "ui_flag_off" as const, cohort: null };
-  }
-  const billingPlan = await getUserBillingPlan(userId);
-  return autoUiAvailability({
-    subjectKey: userId,
-    isGuest: false,
-    plan: billingPlan.tier,
-  });
 };
 
 type Params = {

@@ -77,6 +77,56 @@ Tomverse Code는 아직 `Conversation` 행을 쓰지 않으므로, 지금 `code`
 2. production 코드의 직접 `conversation.create` 호출을 막는 정적 검사
 3. writer coverage 테스트
 
+## 5.1 생성 경로 (구현됨)
+
+| 경로 | productKey | 비고 |
+|---|---|---|
+| `POST /api/products/review/conversations` | `review` | 서버 상수 |
+| `POST /api/products/chat/conversations` | `chat` | 서버 상수. Chat 미출시이므로 **fail-closed** |
+| `POST /api/conversations` | `review` | 호환 경로. URL이 Chat/Review를 구분하지 못하므로 Review로 고정 |
+| `POST /api/conversations/import-guest` | `review` | 게스트 대화는 멀티 모델 비교였음. import는 소유권을 옮길 뿐 제품을 바꾸지 않음 |
+| `lib/imageGenerationService.ts` | `studio` | 이미지 대화 |
+
+**제품은 요청이 아니라 endpoint가 정합니다.** body 필드·`Referer`·임의 header는
+"어느 화면에서 왔다"는 클라이언트의 주장이고, 주장에서 유도한 제품 정체성은
+서버 파생이 아닙니다. `createConversationSchema`는 `.strict()`이므로 body가
+`productKey`를 실어 보내면 무시가 아니라 **거부**됩니다.
+
+`POST /api/products/chat/conversations`는 현재 `autoAvailabilityFor()`
+(flag + cohort, 기본 off)가 `offered: false`면 **404**를 반환합니다. 403이 아니라
+404이고 본문에 사유가 없는 이유는 거절이 내부 롤아웃 상태이기 때문입니다 —
+어느 bucket인지, 비율이 얼마인지, 어떤 readiness gate가 남았는지는 UI 계약 §2가
+서버에 두라고 한 것들입니다.
+
+> **이 gate는 잠정입니다.** 결정 기록 §3은 표면 진입 · `offered` · 턴 라우팅
+> 셋이 **하나의 공유 제품 판정 함수**를 쓰라고 요구합니다. 그 함수가 들어오면
+> 위 호출을 대체합니다. 그때까지는 두 곳이 같은 availability를 읽으므로 최소한
+> 서로 어긋나지는 않습니다.
+
+## 5.2 공통 생성 서비스
+
+`lib/conversationCreation.ts`의 `createConversation(tx, input)`.
+
+- `Prisma.TransactionClient`를 받고 **자기 트랜잭션을 열지 않습니다.** 세 writer
+  모두 대화와 함께 성립하거나 함께 없어져야 하는 작업을 갖고 있습니다 — capacity
+  assertion, import된 메시지, 이미지 예약과 예산 행. 서비스가 자기 트랜잭션을
+  열면 호출자가 롤백해도 대화만 남습니다.
+- `productKey`는 **선택 인자가 아니라 필수 인자**입니다. optional로 두면 DB
+  default를 두지 않은 이유와 같은 치환이 생깁니다 — 생각하지 않은 호출자가
+  Review를 의도한 호출자처럼 보입니다.
+- `kind`는 제품에서 유도되며(`PRODUCT_MODALITY`), 어긋나는 값을 넘기면 DB가 아니라
+  이 함수가 거부합니다. DB 메시지는 제약 이름을 대지만 이 메시지는 호출 지점을
+  댑니다.
+
+검증: `npm run check:conversation-writers` (PR Fast Gate),
+`tests/conversationWriters.test.mjs`(오탐 포함),
+`tests/integration/conversation-writer-product.db.test.ts`.
+
+정적 검사가 `conversation.createdAt`과 `conversation.createMany`를 잡지 않는
+것은 의도입니다 — 결정 기록 v1이 `lib/guestImport.ts`와
+`app/api/admin/users/[userId]/route.ts`를 writer로 셌던 것이 정확히 그 오독이었고,
+두 파일은 대화를 만들지 않습니다.
+
 ## 6. 제약 셋
 
 `Conversation_auto_only_chat_check`는 **허용 하나**로 씁니다. v1.1은

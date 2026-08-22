@@ -123,6 +123,7 @@
     "check:prompt-injection": "node --conditions=react-server --import tsx scripts/report-prompt-injection.mjs",
     "check:push-scope": "node scripts/check-push-scope.mjs",
     "check:retired-product-name": "node scripts/check-retired-product-name.mjs",
+    "check:conversation-writers": "node scripts/check-conversation-writers.mjs",
     "report:routing-dispatch-readiness": "node --import tsx scripts/report-routing-dispatch-readiness.mjs",
     "verify:package-build-matrix": "node scripts/verify-package-build-matrix.mjs",
     "check:release-records": "node scripts/check-release-records.mjs"
