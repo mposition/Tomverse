@@ -9,7 +9,7 @@ import {
  * The Admin Console on a narrow viewport.
  *
  * The desktop sidebar is `hidden lg:block`, so below 1024px the only route to
- * the other sixteen workspaces is the drawer. These tests are the ones that fail
+ * the other workspaces is the drawer. These tests are the ones that fail
  * if the drawer stops opening, stops closing, clips its own scroll region,
  * hides a group's contents behind a collapsed toggle, or pushes the page into
  * horizontal overflow.

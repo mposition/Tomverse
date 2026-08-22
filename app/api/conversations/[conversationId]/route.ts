@@ -3,6 +3,7 @@
 import { NextResponse } from "next/server";
 import type { Prisma } from "@prisma/client";
 import { enqueueImageAssetCleanupForConversations } from "@/lib/imageAssetLifecycle";
+import { enqueueArtifactCleanupForConversations } from "@/lib/generatedArtifactStorage";
 import { deleteDeepResearchJobsForConversations } from "@/lib/deepResearchJobs";
 import { prisma } from "@/lib/prisma";
 import { getServerSession } from "next-auth/next";
@@ -272,13 +273,40 @@ export async function GET(
         // how many memories an answer was given, and a token figure would
         // say something about their length without being asked for.
         memoryUsedCount: true,
+        /*
+          The files this answer produced
+          (docs/policy/generated-artifacts.md section 5).
+
+          A named select rather than `include: { artifacts: true }`, because
+          `objectKey` is on that row and an include would send it. The client
+          needs the id to build a download URL and nothing else about where
+          the bytes live.
+        */
+        artifacts: {
+          orderBy: { ordinal: "asc" },
+          select: {
+            id: true,
+            ordinal: true,
+            format: true,
+            filename: true,
+            mediaType: true,
+            byteSize: true,
+            status: true,
+            failureCode: true,
+            modelId: true,
+          },
+        },
       },
     });
     const hasMoreMessages = messagePage.length > MESSAGE_PAGE_SIZE;
     const messages = (
       hasMoreMessages ? messagePage.slice(0, MESSAGE_PAGE_SIZE) : messagePage
-    ).map(({ memoryUsedCount, ...message }) => ({
+    ).map(({ memoryUsedCount, artifacts, ...message }) => ({
       ...message,
+      // Absent, not empty, when the answer produced no file -- the same
+      // shape the streaming trailer uses, so a restored message and a live
+      // one are indistinguishable to the renderer.
+      ...(artifacts.length ? { artifacts } : {}),
       /*
         §13.4: a durable fact about the answer, so reopening the conversation
         has to state it again. Until this it lived only in the streaming
@@ -797,6 +825,9 @@ export async function DELETE(req: Request, { params }: Params) {
     // objects whenever the second step failed.
     await prisma.$transaction(async (tx) => {
       await enqueueImageAssetCleanupForConversations(tx, [conversationId]);
+      // Generated files follow the same order for the same reason
+      // (docs/policy/generated-artifacts.md section 8).
+      await enqueueArtifactCleanupForConversations(tx, [conversationId]);
       await deleteDeepResearchJobsForConversations(tx, [conversationId]);
       await tx.conversation.delete({
         where: { id: conversationId },

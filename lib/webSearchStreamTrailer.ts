@@ -3,6 +3,10 @@ import {
   type ChatCompletionStatus,
   type ChatIncompleteReason,
 } from "@tomverse/chat-core";
+import {
+  parseChatStreamArtifacts,
+  type ChatStreamArtifact,
+} from "@/lib/generatedArtifactCore";
 
 // A provider-executed search tool call only resolves once the whole
 // streamText() turn settles (tool-result/source parts only exist in the
@@ -34,6 +38,19 @@ export type ChatStreamTrailer = {
     status: ChatCompletionStatus;
     incompleteReason?: ChatIncompleteReason;
   };
+  /**
+   * The files this turn produced (docs/policy/generated-artifacts.md section 5).
+   *
+   * Here for the same reason the citations are: a tool result only resolves
+   * once the whole turn settles, so it cannot ride in a header, and a guest
+   * turn has no persisted message to re-fetch it from. Carries public fields
+   * only -- no object key, no storage URL, nothing the provider said.
+   *
+   * Absent, not empty, when the turn made no file. An older client ignores the
+   * key; an older server never sends it and the client shows no cards, which
+   * is exactly right for a turn that had none.
+   */
+  artifacts?: ChatStreamArtifact[];
 };
 
 export function buildChatStreamTrailerChunk(trailer: ChatStreamTrailer): string {
@@ -61,7 +78,11 @@ export function parseChatStreamTrailer(
   }
   if (!parsed || typeof parsed !== "object") return null;
   const record = parsed as Record<string, unknown>;
-  if (!("searchMetadata" in record) && !("completion" in record)) {
+  if (
+    !("searchMetadata" in record) &&
+    !("completion" in record) &&
+    !("artifacts" in record)
+  ) {
     return { searchMetadata: parsed };
   }
   const completion = record.completion;
@@ -69,6 +90,7 @@ export function parseChatStreamTrailer(
     completion && typeof completion === "object"
       ? (completion as Record<string, unknown>)
       : null;
+  const artifacts = parseChatStreamArtifacts(record.artifacts);
   return {
     searchMetadata: record.searchMetadata ?? null,
     ...(completionRecord && isChatCompletionStatus(completionRecord.status)
@@ -81,6 +103,7 @@ export function parseChatStreamTrailer(
           },
         }
       : {}),
+    ...(artifacts ? { artifacts } : {}),
   };
 }
 

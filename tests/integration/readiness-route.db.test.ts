@@ -103,6 +103,33 @@ mock.module(mod("lib/emailSendingIdentity.ts"), {
     },
 });
 
+/**
+ * The snapshot keyring readiness the route folds in.
+ *
+ * Mocked for the same reason as the sending identity above, and for the
+ * opposite one too: a live read of this container's environment has no
+ * `EMAIL_SNAPSHOT_KEYS`, so the *ready* branch would never be exercised here.
+ */
+let snapshotKeyringReady = true;
+mock.module(mod("lib/emailSnapshotCrypto.ts"), {
+    namedExports: {
+        snapshotKeyringReadiness: () => ({
+            ready: snapshotKeyringReady,
+            errors: snapshotKeyringReady
+                ? []
+                : [
+                      {
+                          severity: "error",
+                          code: "SNAPSHOT_KEYS_MISSING",
+                          message: "EMAIL_SNAPSHOT_KEYS is not set",
+                      },
+                  ],
+            warnings: [],
+            versionCount: snapshotKeyringReady ? 1 : 0,
+        }),
+    },
+});
+
 /** Dependency reports the route files after answering. */
 let reported: Array<{ dependency: string; healthy: boolean }> = [];
 mock.module(mod("lib/operationalMonitoring.ts"), {
@@ -152,6 +179,7 @@ beforeEach(() => {
     providerBudgetReady = true;
     imageBudget = { ready: true, flagEnabled: false };
     sendingIdentityReady = true;
+    snapshotKeyringReady = true;
     setNodeEnv(originalNodeEnv);
 });
 
@@ -168,6 +196,7 @@ type ReadinessBody = {
         providerBudgets: boolean;
         imageProviderBudget: boolean;
         emailSendingIdentity: boolean;
+        emailSnapshotKeyring: boolean;
     };
     traceId: string;
 };
@@ -194,6 +223,7 @@ test("a healthy deployment is ready, and says which checks passed", async () => 
         providerBudgets: true,
         imageProviderBudget: true,
         emailSendingIdentity: true,
+        emailSnapshotKeyring: true,
     });
     assert.ok(body.traceId, "a trace id ties the answer to the reports");
     // Only sent when refusing traffic; a load balancer reads it.
@@ -235,6 +265,15 @@ test("each dependency alone sinks the verdict, and the others still report", asy
                 sendingIdentityReady = false;
             },
         },
+        {
+            // Without this the endpoint answers ready while every welcome
+            // email, receipt and deletion notice is dropped -- the lane's
+            // callers swallow the throw, so nothing else says so.
+            name: "emailSnapshotKeyring",
+            arrange: () => {
+                snapshotKeyringReady = false;
+            },
+        },
     ];
 
     for (const { name, arrange } of cases) {
@@ -245,6 +284,7 @@ test("each dependency alone sinks the verdict, and the others still report", asy
         providerBudgetReady = true;
         imageBudget = { ready: true, flagEnabled: false };
         sendingIdentityReady = true;
+        snapshotKeyringReady = true;
         setNodeEnv(originalNodeEnv);
         arrange();
 
@@ -260,9 +300,15 @@ test("each dependency alone sinks the verdict, and the others still report", asy
         assert.equal(response.headers.get("Retry-After"), "5");
 
         await runDeferred();
+        // Counted from the body rather than written down. A literal here has
+        // now been wrong three times -- at four dependencies, at five, and at
+        // six -- each time because a dependency was added to the route and to
+        // every other assertion in this file except this one. What the route
+        // actually couples is that each check it answers with is also a check
+        // it reports on, so that is what this asserts.
         assert.equal(
             reported.length,
-            5,
+            Object.keys(body.checks).length,
             "every dependency is reported, not only the failing one"
         );
     }

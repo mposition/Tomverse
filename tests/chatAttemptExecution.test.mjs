@@ -214,3 +214,94 @@ test("the breakdown shape the route passes is accepted", () => {
   const result = planAttemptExecution(enabled[0], request({ inputBreakdown: realBreakdown() }));
   assert.equal(result.ok, true);
 });
+
+// A plan says whether its attempt can actually search, and refuses when the
+// caller required one and it cannot. The Router's filter answers "may this
+// model search"; this answers "will this dispatch search", which is a
+// different fact and was never checked.
+
+const modelById = (id) => {
+  const model = enabled.find((entry) => entry.id === id);
+  assert.ok(model, `${id} is expected to be enabled in the catalogue`);
+  return model;
+};
+
+test("a plan reports the search path its own dispatch will have", () => {
+  // Perplexity searches as part of ordinary completion, whatever the mode.
+  assert.deepEqual(
+    planFor(modelById("perplexity/sonar"), { webSearchMode: "off" }).searchPath,
+    { kind: "search_model" }
+  );
+
+  // A native model with the mode on carries the tool and the surcharge.
+  const native = planFor(modelById("gpt-5-6-luna"), { webSearchMode: "always" });
+  assert.deepEqual(native.searchPath, { kind: "native_tool" });
+  assert.ok(native.webSearchToolConfig);
+  assert.ok(native.searchSurchargeCredits > 0);
+
+  // The same model with the mode off carries neither, and says which.
+  const idle = planFor(modelById("gpt-5-6-luna"), { webSearchMode: "off" });
+  assert.deepEqual(idle.searchPath, { kind: "none", gap: "mode_not_always" });
+  assert.equal(idle.webSearchToolConfig, null);
+});
+
+test("the tool configuration a plan reports is the one it will dispatch", () => {
+  // Rebuilt rather than read, the check could pass for a request that carried
+  // no tools -- which is the whole failure it exists to catch.
+  const plan = planFor(modelById("gpt-5-6-luna"), { webSearchMode: "always" });
+  const options = attemptDispatchOptions(plan);
+  assert.equal(plan.searchPath.kind, "native_tool");
+  assert.ok(options.tools, "a native_tool plan must dispatch tools");
+});
+
+test("a candidate with no search path is refused when one was required", () => {
+  // `docs/policy/tomverse-chat-routing.md` §10, read in the direction it
+  // usually is not: a fallback may not silently change what the user was going
+  // to get. A searching turn continued on a model that answers from training
+  // data is a different answer, not a substitute.
+  const result = planAttemptExecution(
+    modelById("deepseek-v4-flash"),
+    request({ webSearchMode: "always", requireSearchPath: true })
+  );
+  assert.equal(result.ok, false);
+  assert.equal(result.refusal.kind, "search_path_unavailable");
+  assert.equal(result.refusal.modelId, "deepseek-v4-flash");
+  assert.equal(result.refusal.gap, "capability_unsupported");
+});
+
+test("requiring a search path accepts either kind of path", () => {
+  for (const [modelId, webSearchMode] of [
+    ["perplexity/sonar", "off"],
+    ["gpt-5-6-luna", "always"],
+  ]) {
+    const result = planAttemptExecution(
+      modelById(modelId),
+      request({ webSearchMode, requireSearchPath: true })
+    );
+    assert.equal(result.ok, true, modelId);
+  }
+});
+
+test("nothing is refused on the axis by default", () => {
+  // Most turns do not need the web, and refusing on an axis the turn never
+  // used would only lose the answer. The flag is opt-in for that reason.
+  const result = planAttemptExecution(
+    modelById("deepseek-v4-flash"),
+    request({ webSearchMode: "off" })
+  );
+  assert.equal(result.ok, true);
+  assert.equal(result.plan.searchPath.kind, "none");
+});
+
+test("the refusal maps to an error rather than falling through to a plan", () => {
+  const refusal = {
+    kind: "search_path_unavailable",
+    modelId: "deepseek-v4-flash",
+    gap: "capability_unsupported",
+  };
+  const error = attemptRefusalError(refusal);
+  assert.equal(error.status, 503);
+  assert.equal(error.code, "MODEL_WEB_SEARCH_UNAVAILABLE");
+  // Content-free: the message names no model and no request text.
+  assert.ok(!error.message.includes("deepseek"));
+});

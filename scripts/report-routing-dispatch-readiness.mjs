@@ -19,7 +19,15 @@
 // with a different gate (ROUTE-01), and reading this report as if it settled
 // quality is the mistake the separation exists to prevent.
 
+import {
+  ManifestHashKeyringError,
+  activeManifestHashKey,
+} from "../lib/manifestHashKeyring.ts";
 import { prisma } from "../lib/prisma.ts";
+import {
+  ROUTING_DISPATCH_INSTRUMENTATION_ENV,
+  dispatchInstrumentationMode,
+} from "../lib/routingInstrumentationMode.ts";
 
 const WINDOW_DAYS = Number(process.env.ROUTING_READINESS_WINDOW_DAYS || 7);
 const MODES = ["manual", "shadow", "auto"];
@@ -45,10 +53,64 @@ try {
   const runsByMode = Object.fromEntries(runs.map((row) => [row.mode, row._count._all]));
 
   console.log(`Routing dispatch readiness — last ${WINDOW_DAYS} day(s)\n`);
+
+  // The preflight, first, because everything below is a count of rows and a
+  // count of rows cannot tell you whether recording is on. A zero here reads
+  // as "nothing happened" when it can just as easily mean "nothing was ever
+  // written down", and those need different work.
+  const mode = dispatchInstrumentationMode();
+  console.log("Instrumentation");
+  console.log(`  ${ROUTING_DISPATCH_INSTRUMENTATION_ENV.padEnd(34)} ${mode}`);
+
+  // Whether the keyring resolves -- never the key. The active id is already
+  // stored in plaintext on every manifest row (`hashKeyId`), so naming it here
+  // reveals nothing the table does not, and it is what tells an operator which
+  // key the rows they are about to read were digested with.
+  let keyring = null;
+  let keyringError = null;
+  try {
+    keyring = activeManifestHashKey();
+  } catch (error) {
+    keyringError =
+      error instanceof ManifestHashKeyringError ? error.message : "unavailable";
+  }
+  console.log(
+    `  manifest hash keyring              ${
+      keyring ? `configured (active key id: ${keyring.keyId})` : "NOT CONFIGURED"
+    }`
+  );
+
+  // The failure this preflight exists for. The writes are not one transaction:
+  // the run and the attempt are committed before the draft manifest is
+  // digested, so a missing keyring leaves both behind and throws on the third.
+  // In observe mode that throw is a warning rather than a refusal, so the
+  // request is served and an incident is filed on every dispatch.
+  //
+  // The attempt is then stranded rather than swept. `sweepStaleRoutingAttempts`
+  // only closes attempts with a `dispatchedAt`, and this one never got that far
+  // -- the manifest it needed first is what failed -- so it stays `pending`
+  // indefinitely instead of being resolved to anything. On means recording; on
+  // without a keyring means an incident per turn and a growing pile of attempts
+  // nothing will ever close.
+  if (mode !== "off" && !keyring) {
+    console.log("");
+    console.log(`  ^ ${ROUTING_DISPATCH_INSTRUMENTATION_ENV} is "${mode}" with no keyring: ${keyringError}`);
+    console.log("    Every dispatch will file an incident, leave an unclosed attempt, and");
+    console.log("    record no manifest. Set MANIFEST_HASH_KEYS and MANIFEST_HASH_ACTIVE_KEY_ID,");
+    console.log("    or turn the instrumentation off. Nothing below is evidence until one of");
+    console.log("    those is true.");
+  }
+  if (mode === "off") {
+    console.log("");
+    console.log("  ^ recording is off, so the counts below describe whatever was written");
+    console.log("    before it was turned off, not the last window of traffic.");
+  }
+  console.log("");
+
   console.log("Runs recorded");
   for (const mode of MODES) console.log(`  ${mode.padEnd(8)} ${runsByMode[mode] ?? 0}`);
 
-  const [dispatched, covered, drafts, notDispatched, attempts] = await Promise.all([
+  const [dispatched, covered, drafts, notDispatched, attempts, pending, unknownAfterDispatch] = await Promise.all([
     prisma.routingAttempt.count({
       where: { createdAt: { gte: since }, dispatchedAt: { not: null } },
     }),
@@ -64,6 +126,12 @@ try {
       where: { createdAt: { gte: since }, outcome: "not_dispatched" },
     }),
     prisma.routingAttempt.count({ where: { createdAt: { gte: since } } }),
+    prisma.routingAttempt.count({
+      where: { createdAt: { gte: since }, outcome: "pending" },
+    }),
+    prisma.routingAttempt.count({
+      where: { createdAt: { gte: since }, outcome: "unknown_after_dispatch" },
+    }),
   ]);
 
   console.log("\nROUTE-06 — every dispatched attempt references its own finalized manifest");
@@ -81,10 +149,23 @@ try {
   console.log(`  attempts              ${attempts}`);
   console.log(`  not_dispatched        ${notDispatched}`);
   console.log(`  still draft           ${drafts}`);
+  console.log(`  still pending         ${pending}`);
+  // A different failure from the one above, and worth its own line: this is a
+  // process that stopped after the provider was called, not one that could not
+  // record the call in the first place.
+  console.log(`  unknown_after_dispatch ${unknownAfterDispatch}`);
   if (drafts > 0) {
     console.log(
       "  ^ a draft that is neither finalized nor abandoned is a preparation nobody\n" +
         "    closed. In-flight requests explain a few; a standing count does not."
+    );
+  }
+  if (mode !== "off" && attempts > 0 && pending === attempts) {
+    console.log(
+      "  ^ every attempt in this window is still pending. That is the fingerprint\n" +
+        "    of the keyring failure above: the run and the attempt are written, the\n" +
+        "    manifest is not, and the stale sweep never reaches these because it\n" +
+        "    only closes attempts that recorded a dispatch."
     );
   }
 

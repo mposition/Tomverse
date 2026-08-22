@@ -1092,7 +1092,15 @@ idempotencyKey = hash(eventId, recipientKey, templateVersionId, policyVersionId)
 | transactional (P0) | standard | 8 | 10s, 30s, 1m, 5m, 15m, 1h, 4h | incident + 앱 내 대체 경로 |
 | legal (P0) | standard | 10 | 위 + 12h, 24h | **incident(critical) + 수동 후속 + 대체 채널** |
 | service (P1) | standard | 6 | 현행과 동일 | incident |
-| marketing (P3) | standard | 2 | 5m, 1h | **조용히 포기.** 프로모션 재시도는 가치보다 위험이 큼 |
+| marketing (P3) | standard | 2 | 5m | **조용히 포기.** 프로모션 재시도는 가치보다 위험이 큼 |
+
+**"최대 시도"는 최초 발송을 포함한 총 횟수입니다.** 따라서 백오프 개수는 항상
+`최대 시도 − 1`입니다 — transactional 7개/8회, service 5개/6회, legal 9개/10회.
+marketing 행은 2026-08-21까지 `2`와 `5m, 1h`를 함께 적고 있어 이 규칙만 어겼고,
+구현은 백오프를 따라 3회를 시도하고 있었습니다. **상한 쪽을 남겼습니다** — 아래
+문단이 논증하는 숫자가 그것이고, 나머지 세 행과 계산 방식이 일치해야 합니다.
+`tests/standardEmailRetryCore.test.mjs`가 이 표 전체를 그대로 옮겨 적어 고정하며,
+`delays.length === maxAttempts - 1` 불변식도 함께 검사합니다.
 
 **marketing의 관대한 재시도가 중요합니다.** 실패한 프로모션을 끈질기게 재시도하면
 일시적 차단이 영구적 평판 손상이 됩니다.
@@ -1658,6 +1666,37 @@ processingError    String?
    **키 보관 기간을 정하지 않은 채 HMAC으로 전환하면 감사 능력을 조용히
    잃습니다.**
 
+8. **키가 없으면 배포는 ready가 아닙니다 (v5 추가).** 규칙 2의 봉투 암호화는
+   `EMAIL_SNAPSHOT_KEYS`(그리고 회전 중에는 `EMAIL_SNAPSHOT_KEY_VERSION`)로
+   구성합니다. **키가 없으면 standard lane의 enqueue가 예외를 던지고**,
+   그 호출부 넷 — 환영 메일, 구독 시작 메일, 계정 삭제 예약 메일, 복구 메일 —
+   은 사용자의 본 작업이 성공하도록 그 예외를 모두 삼킵니다. 사용자에게 옳은
+   동작이지만, 결과는 **화면에 아무 표시 없이 메일이 사라지고 로그 한 줄만
+   남는 것**입니다. 이 lane에는 feature flag가 없으므로 "flag는 꺼져 있고 키는
+   없는" 중간 상태가 존재하지 않습니다.
+
+   그래서 `/api/ready`가 `emailSnapshotKeyring`을 검사하고, 아래 상태에서
+   **거부**합니다. 판정은 `snapshotKeyringProblems()`
+   (`lib/emailSnapshotCrypto.ts`) 한 곳에 있고 `readSnapshotKeyring()`과 같은
+   parser를 씁니다 — 검사와 실제 사용이 서로 다른 규칙을 갖는 것이 이 검사가
+   막으려는 실패입니다.
+
+   | 코드 | 상태 | 등급 |
+   |---|---|---|
+   | `SNAPSHOT_KEYS_MISSING` | 변수 없음 또는 공백 | error |
+   | `SNAPSHOT_KEYS_UNPARSEABLE` | 설정돼 있으나 `version:secret` 쌍을 하나도 읽을 수 없음 | error |
+   | `SNAPSHOT_ACTIVE_VERSION_UNKNOWN` | `EMAIL_SNAPSHOT_KEY_VERSION`이 keyring에 없는 버전을 가리킴 | error |
+   | `SNAPSHOT_ACTIVE_VERSION_UNPINNED` | 키가 둘 이상인데 활성 버전이 고정되지 않음 | warning |
+
+   **환경변수를 먼저 배포하고 코드를 나중에** 배포합니다. 이 검사는 그 순서를
+   강제하는 장치이지 순서를 대신해 주는 것이 아닙니다.
+
+   **오류 메시지는 환경변수 값을 되돌려 적지 않습니다.** keyring 오설정은
+   대개 값을 엉뚱한 변수에 붙여 넣어 생기고, 여기서 엉뚱한 변수에 담기는 것은
+   키 자체입니다. 메시지와 구조화 로그에는 **개수만** 남깁니다.
+
+   값을 만들고 넣고 회전하는 절차는 `docs/ops/email-snapshot-keyring.md`.
+
 **legal 분류는 그 위에 완성 본문도 보관합니다.** 재구성이 아니라 원본이
 필요하고, 건수가 적습니다.
 
@@ -2037,6 +2076,33 @@ POST /api/unsubscribe            -> One-Click (RFC 8058)
 - `EmailPolicyVersion` 생성/활성화
 - 테스트 발송
 - 사용자 preference의 **관리자에 의한** 변경
+
+#### 13.7.1 지금 무엇이 기록되고, 무엇이 기록할 행위가 없는가
+
+이 목록은 **관리자 행위**의 목록입니다. `AdminAuditLog`의 모든 행에는 행위자가
+있으므로, 관리자가 하지 않는 일은 이 표에 넣을 수 없습니다. 여섯 항목의 현재
+상태를 적어 둡니다 — "M14 완료"가 "여섯 개 모두 기록 중"으로 읽히지 않도록.
+
+| 항목 | 상태 | action |
+|---|---|---|
+| `EmailPolicyVersion` 생성/활성화 | 기록됨 | `email_policy.draft_created`, `email_policy.activated` |
+| 테스트 발송 | 기록됨 | `app/api/admin/test-email` |
+| 억제 항목 추가/제거 | 기록됨 (2026-08-21) | `email_suppression.added`, `email_suppression.removed` |
+| 캠페인 생성/승인/발송/취소 | **행위 없음** | 캠페인 기능이 없습니다(15.2, `feature.emailCampaignsEnabled`) |
+| 템플릿 버전 게시/폐기 | **관리자 행위 아님** | 발송 경로가 content hash로 자동 게시합니다(`lib/emailTemplateRegistry.ts`). 행위자가 없으므로 `AdminAuditLog`가 아니라 행 자체(`TemplateVersion.publishedAt`)가 기록입니다 |
+| 사용자 preference의 관리자 변경 | **경로 없음** | 관리자가 남의 preference를 바꾸는 API가 없습니다. 생기면 그때 기록합니다 |
+
+**억제 제거의 사유는 세 층입니다**(`app/api/admin/email-suppressions`). 추가는
+mail을 멈추고 제거는 mail을 다시 시작시키므로 비대칭이 요점입니다.
+
+- `privacy_request`는 **거절**합니다. 법적 권리 행사의 기록이고, 그것을 해제할
+  자격이 있는 절차는 그것을 만든 privacy 절차이지 운영 화면의 버튼이 아닙니다.
+- `hard_bounce`·`complaint`는 **2인 승인**이 필요합니다. 13.3이 영구로 부르는
+  항목이고, complaint는 수신자가 발송 도메인을 평가하는 지표이며(14.5) 도메인
+  평판은 이 시스템에서 가장 늦게 회복되는 부분입니다.
+- 나머지는 **내용 있는 사유**와 감사 기록입니다. `suppressionRemovalProblem()`이
+  길이와 상투어를 함께 거절합니다 — 필수 항목에 "test"라고 답하면 그 필수 항목은
+  무력화된 것입니다.
 
 ---
 

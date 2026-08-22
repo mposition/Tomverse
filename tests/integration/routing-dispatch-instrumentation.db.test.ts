@@ -247,6 +247,7 @@ test("a routed dispatch records the decision rather than the manual sentinels", 
           taskProfile: "task-profile-v1",
           candidates: "router-candidates-v1",
           selection: "router-selection-v1",
+          scorePolicy: "router-score-policy-v1",
         },
         record: {
           versions: {
@@ -254,6 +255,7 @@ test("a routed dispatch records the decision rather than the manual sentinels", 
             taskProfile: "task-profile-v1",
             candidates: "router-candidates-v1",
             selection: "router-selection-v1",
+            scorePolicy: "router-score-policy-v1",
           },
           taskKind: "translation",
           taskConfidence: "high",
@@ -273,6 +275,7 @@ test("a routed dispatch records the decision rather than the manual sentinels", 
           selectedModelId: "gpt-5-6-luna",
           selectionReason: "task_preference",
           selectionMargin: 3,
+          selectionDecidedBy: "quality_band",
           challengerModelId: null,
           turnsFavouringChallenger: 0,
           decisionLatencyMs: 2,
@@ -287,6 +290,10 @@ test("a routed dispatch records the decision rather than the manual sentinels", 
   });
   assert.equal(run.mode, "auto");
   assert.equal(run.selectionVersion, "router-selection-v1");
+  // The scoring policy travels with the rule that applied it: a band moving
+  // and the comparator moving are different changes, and a run carrying only
+  // one of the two can be attributed to neither.
+  assert.equal(run.selectionPolicyVersion, "router-score-policy-v1");
   assert.equal(run.taskProfileVersion, "task-profile-v1");
   assert.equal(run.selectionReason, "task_preference");
   assert.equal(run.eligibleCount, 2);

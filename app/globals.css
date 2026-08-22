@@ -197,6 +197,24 @@
   --color-accent-image-900: var(--color-fuchsia-900);
   --color-accent-image-950: var(--color-fuchsia-950);
 
+  /* accent-generated-artifact: files an answer produced
+     (docs/policy/generated-artifacts.md). Emerald, which accent-promotion and
+     status-success also resolve to today -- three separate decisions that
+     happen to share a palette step, exactly as UI-012 rule 2 requires. A
+     spreadsheet card is neither a promotion nor a success state, and moving
+     either of those must not move this one. */
+  --color-accent-generated-artifact-50: var(--color-emerald-50);
+  --color-accent-generated-artifact-100: var(--color-emerald-100);
+  --color-accent-generated-artifact-200: var(--color-emerald-200);
+  --color-accent-generated-artifact-300: var(--color-emerald-300);
+  --color-accent-generated-artifact-400: var(--color-emerald-400);
+  --color-accent-generated-artifact-500: var(--color-emerald-500);
+  --color-accent-generated-artifact-600: var(--color-emerald-600);
+  --color-accent-generated-artifact-700: var(--color-emerald-700);
+  --color-accent-generated-artifact-800: var(--color-emerald-800);
+  --color-accent-generated-artifact-900: var(--color-emerald-900);
+  --color-accent-generated-artifact-950: var(--color-emerald-950);
+
   /* accent-assistant-profile: the assistant a conversation runs under
      (policy §14). Purple like accent-model-catalogue and accent-plan-max,
      and a separate role from both: this one sits in the composer's tools

@@ -2,7 +2,11 @@ import "server-only";
 
 import * as Sentry from "@sentry/nextjs";
 
-import { resolveSendingIdentity } from "@/lib/emailSendingIdentityCore";
+import { emailProvider } from "@/lib/emailProviderPort";
+import {
+  operatorAlertProbeResult,
+  type OperatorAlertProbeResult,
+} from "@/lib/operatorAlertProbeCore";
 import {
   operationalAlertCooldownMs,
   sanitizeOperationalContext,
@@ -90,11 +94,7 @@ const safeError = (error: unknown) => {
   return sanitized;
 };
 
-const postJson = async (
-  url: string | undefined,
-  body: unknown,
-  headers: Record<string, string> = {}
-) => {
+const postJson = async (url: string | undefined, body: unknown) => {
   if (!url?.trim()) return;
   const target = new URL(url);
   if (target.protocol !== "https:") {
@@ -102,7 +102,7 @@ const postJson = async (
   }
   const response = await fetch(target, {
     method: "POST",
-    headers: { "Content-Type": "application/json", ...headers },
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
     signal: AbortSignal.timeout(ALERT_TIMEOUT_MS),
   });
@@ -127,31 +127,67 @@ const postJson = async (
  * Still a direct send rather than the outbox. An alert about the system being
  * unwell must not depend on the part of the system that drains a queue.
  */
+const operatorAlertRecipient = () =>
+  (process.env.OPS_ALERT_EMAIL || process.env.ADMIN_ALERT_EMAIL)?.trim() || null;
+
+/**
+ * The wire call, reported rather than thrown.
+ *
+ * Split out so `probeOperationalAlertEmail` below can exercise *this* -- the
+ * recipient resolution, the identity resolution and the provider call -- rather
+ * than a copy of it written for testing. A probe that runs its own version of
+ * the path proves only that the copy works.
+ */
+const deliverOperatorEmail = async (subject: string, detail: string) => {
+  const to = operatorAlertRecipient();
+  if (!to) return { to: null, send: null };
+  return {
+    to,
+    send: await emailProvider().send(
+      { to, subject: `[Tomverse Operations] ${subject}`, text: detail },
+      { stream: "transactional" }
+    ),
+  };
+};
+
 const sendEmail = async (subject: string, detail: string) => {
-  const apiKey = process.env.RESEND_API_KEY?.trim();
-  const to = (process.env.OPS_ALERT_EMAIL || process.env.ADMIN_ALERT_EMAIL)?.trim();
-  if (!apiKey || !to) return;
-  const identity = resolveSendingIdentity("transactional", process.env);
-  if (!identity.ok) {
-    // Thrown rather than returned so `notifyExternalChannels` records it the
-    // same way it records a webhook failure. It is caught there: a refused
-    // sender must not stop Slack, Discord or the Sentry capture that already
-    // happened above it.
-    throw new Error(`Operational alert sender unusable: ${identity.code}`);
-  }
-  await postJson(
-    "https://api.resend.com/emails",
-    {
-      from: identity.from,
-      to: [to],
-      subject: `[Tomverse Operations] ${subject}`,
-      text: detail,
-    },
-    {
-      Authorization: `Bearer ${apiKey}`,
-    }
+  const { send } = await deliverOperatorEmail(subject, detail);
+  if (!send) return;
+  if (send.ok) return;
+  // A deployment with no key sends no alerts and says nothing about it, which
+  // is the state of every local checkout.
+  if (send.notConfigured) return;
+  // Everything else is thrown rather than returned, so `notifyExternalChannels`
+  // records it the same way it records a webhook failure. It is caught there: a
+  // failed alert email must not stop Slack, Discord or the Sentry capture that
+  // already happened above it.
+  throw new Error(
+    send.identityRefusal
+      ? `Operational alert sender unusable: ${send.identityRefusal}`
+      : `Operational alert email failed: ${send.status ?? "no response"}.`
   );
 };
+
+/**
+ * Sends one test message through this path, on purpose.
+ *
+ * Deliberately not `reportOperationalIncident`: that would put a fabricated
+ * incident into Sentry and onto Slack and Discord, and an alert channel that
+ * carries invented incidents is a channel operators learn to skim. This
+ * exercises only the email leg, which is the leg that has no other way to be
+ * checked (lib/operatorAlertProbeCore.ts).
+ */
+export const probeOperationalAlertEmail =
+  async (): Promise<OperatorAlertProbeResult> => {
+    const { to, send } = await deliverOperatorEmail(
+      "Sending path test",
+      [
+        "This is a test of the operational alert email path.",
+        "It was requested from the Admin Console and reports no real incident.",
+      ].join("\n")
+    );
+    return operatorAlertProbeResult({ path: "operational", recipient: to, send });
+  };
 
 const notifyExternalChannels = async ({
   title,

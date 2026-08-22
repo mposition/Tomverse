@@ -52,6 +52,7 @@ export async function getRoutingShadowReport({
             taskProfileVersion: true,
             candidateFilterVersion: true,
             selectionVersion: true,
+            selectionPolicyVersion: true,
             profileKind: true,
             plan: true,
             selectedModelId: true,

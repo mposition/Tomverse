@@ -145,6 +145,14 @@ const loadRoute = () => {
     mock.module(mod("lib/imageAssetLifecycle.ts"), {
       namedExports: { runImageAssetMaintenanceQuietly: quiet({ deleted: 0 }) },
     });
+    mock.module(mod("lib/generatedArtifactStorage.ts"), {
+      namedExports: {
+        runGeneratedArtifactMaintenanceQuietly: quiet({
+          cleanup: { examined: 0, deleted: 0, failed: 0, exhausted: 0 },
+          orphans: { examined: 0, deleted: 0, failed: 0 },
+        }),
+      },
+    });
     mock.module(mod("lib/externalImportService.ts"), {
       namedExports: {
         reconcileExpiredExternalImportStaging: quiet({ expiredImports: 0 }),

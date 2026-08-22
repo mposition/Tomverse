@@ -348,6 +348,14 @@ export const EXPORT_DOMAIN_DECLARATIONS: ExportDomainDeclaration[] = [
     withheldReason: "Same cost basis and metadata bag as credit_ledger.",
   },
   {
+    domain: "messageArtifact",
+    publicName: "generated_files",
+    prismaModel: "MessageArtifact",
+    state: "included_filtered",
+    withheldReason:
+      "The files an assistant answer produced for the user: name, format, size, which answer and which model made each one. The file bytes themselves are not in this export -- they are binaries in object storage and a JSON file cannot carry them, which is a gap rather than a withholding, and they remain downloadable from the conversation while it exists. Also withheld: the object storage key, which is Tomverse's internal address for the object and grants nothing on its own.",
+  },
+  {
     domain: "imageGeneration",
     publicName: "image_generations",
     prismaModel: "ImageGeneration",

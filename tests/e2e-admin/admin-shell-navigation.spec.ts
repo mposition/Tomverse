@@ -34,6 +34,7 @@ const NAVIGATION = [
   { group: "Operations", label: "Infrastructure", href: "/admin/infrastructure" },
   { group: "Operations", label: "Automation", href: "/admin/automation" },
   { group: "Operations", label: "Alerts", href: "/admin/alerts" },
+  { group: "Operations", label: "Email delivery", href: "/admin/email-delivery" },
   { group: "Operations", label: "Platform settings", href: "/admin/platform" },
   { group: "Governance", label: "Email policy", href: "/admin/email-policy" },
   { group: "Governance", label: "Audit log", href: "/admin/audit" },

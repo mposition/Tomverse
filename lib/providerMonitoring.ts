@@ -6,7 +6,12 @@ import { AVAILABLE_MODELS, type AiProvider, type ModelTier } from "@/lib/models"
 import { getRuntimeModel, getRuntimeModels } from "@/lib/modelRegistry";
 import { PROVIDER_API_KEY_ENV_NAMES } from "@/lib/modelRegistryShared";
 import { sendManagedSlackMessage } from "@/lib/managedSlack";
-import { resolveSendingIdentity } from "@/lib/emailSendingIdentityCore";
+import { emailProvider } from "@/lib/emailProviderPort";
+import type { ProviderSendResult } from "@/lib/emailProviderPortCore";
+import {
+  operatorAlertProbeResult,
+  type OperatorAlertProbeResult,
+} from "@/lib/operatorAlertProbeCore";
 import {
   getProviderCreditSummaries,
   type ProviderCreditSummary,
@@ -523,8 +528,8 @@ const sendEmailAlert = async (
   title: string,
   detail: string,
   log: { targetType: string; targetId: string }
-) => {
-  const to = process.env.ADMIN_ALERT_EMAIL;
+): Promise<{ to: string | null; send: ProviderSendResult | null }> => {
+  const to = process.env.ADMIN_ALERT_EMAIL?.trim() || null;
   if (!to) {
     await recordNotificationLog({
       channel: "email",
@@ -535,130 +540,99 @@ const sendEmailAlert = async (
       targetId: log.targetId,
       error: "ADMIN_ALERT_EMAIL is not configured.",
     });
-    return;
+    return { to: null, send: null };
   }
 
-  // One resolver for every sender (docs/policy/email-notifications.md §14.1).
-  // This path carried its own variable and its own literal until the sending
-  // domain moved without it -- docs/ops/email-sending-domains.md §1.2.
-  const identity = resolveSendingIdentity("transactional", process.env);
-  if (!identity.ok) {
-    // Recorded and returned rather than thrown: this is one delivery channel
-    // among several, and a sender it cannot resolve must not take the rest of
-    // the alert with it.
+  // Sent through the one provider port (docs/policy/email-notifications.md
+  // §8.2), which resolves both the account key and the From address for the
+  // transactional stream. This path built its own request until 2026-08-21, and
+  // carried its own From variable before that, which is why it stayed on the
+  // old sending domain when the transactional sender moved
+  // (docs/ops/email-sending-domains.md §1.2).
+  //
+  // The SendGrid branch that used to sit here is gone. That document's §8.2
+  // rules out multi-provider routing while there is one implementation, and
+  // nothing configured it: no environment example named `SENDGRID_API_KEY`, no
+  // readiness check looked for it, and no runbook mentioned it. A second wire
+  // call in the path that alerts about providers is the one place a silent
+  // divergence costs the most.
+  const result = await emailProvider().send(
+    { to, subject: `[Tomverse Admin] ${title}`, text: `${title}\n\n${detail}` },
+    { stream: "transactional" }
+  );
+
+  if (result.ok) {
     await recordNotificationLog({
       channel: "email",
       title,
       detail,
-      status: "failed",
+      status: "sent",
       targetType: log.targetType,
       targetId: log.targetId,
-      error: `Sending identity unusable: ${identity.code}`,
     });
-    return;
-  }
-  const from = identity.from;
-  const text = `${title}\n\n${detail}`;
-
-  if (process.env.RESEND_API_KEY) {
-    try {
-      const response = await fetch("https://api.resend.com/emails", {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${process.env.RESEND_API_KEY}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          from,
-          to: [to],
-          subject: `[Tomverse Admin] ${title}`,
-          text,
-        }),
-      });
-      if (!response.ok) {
-        throw new Error(`Resend returned ${response.status}.`);
-      }
-      await recordNotificationLog({
-        channel: "email",
-        title,
-        detail,
-        status: "sent",
-        targetType: log.targetType,
-        targetId: log.targetId,
-      });
-    } catch (error) {
-      console.error("Resend provider alert failed:", error);
-      await recordNotificationLog({
-        channel: "email",
-        title,
-        detail,
-        status: "failed",
-        targetType: log.targetType,
-        targetId: log.targetId,
-        error: error instanceof Error ? error.message : "Email failed.",
-      });
-    }
-    return;
+    return { to, send: result };
   }
 
-  if (process.env.SENDGRID_API_KEY) {
-    try {
-      const response = await fetch("https://api.sendgrid.com/v3/mail/send", {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${process.env.SENDGRID_API_KEY}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          personalizations: [{ to: [{ email: to }] }],
-          from: { email: identity.address },
-          subject: `[Tomverse Admin] ${title}`,
-          content: [{ type: "text/plain", value: text }],
-        }),
-      });
-      if (!response.ok) {
-        throw new Error(`SendGrid returned ${response.status}.`);
-      }
-      await recordNotificationLog({
-        channel: "email",
+  if (result.notConfigured) {
+    console.warn(
+      JSON.stringify({
+        event: "provider_email_alert_not_configured",
         title,
-        detail,
-        status: "sent",
-        targetType: log.targetType,
-        targetId: log.targetId,
-      });
-    } catch (error) {
-      console.error("SendGrid provider alert failed:", error);
-      await recordNotificationLog({
-        channel: "email",
-        title,
-        detail,
-        status: "failed",
-        targetType: log.targetType,
-        targetId: log.targetId,
-        error: error instanceof Error ? error.message : "Email failed.",
-      });
-    }
-    return;
-  }
-
-  console.warn(
-    JSON.stringify({
-      event: "provider_email_alert_not_configured",
+        email: to,
+      })
+    );
+    await recordNotificationLog({
+      channel: "email",
       title,
-      email: to,
-    })
-  );
+      detail,
+      status: "skipped",
+      targetType: log.targetType,
+      targetId: log.targetId,
+      error: "Email provider is not configured.",
+    });
+    return { to, send: result };
+  }
+
+  // Recorded and returned rather than thrown: this is one delivery channel
+  // among several, and an email it cannot send must not take the rest of the
+  // alert with it.
+  const reason = result.identityRefusal
+    ? `Sending identity unusable: ${result.identityRefusal}`
+    : `Resend returned ${result.status ?? "no response"}.`;
+  console.error("Provider alert email failed:", reason);
   await recordNotificationLog({
     channel: "email",
     title,
     detail,
-    status: "skipped",
+    status: "failed",
     targetType: log.targetType,
     targetId: log.targetId,
-    error: "Email provider is not configured.",
+    error: reason,
   });
+  return { to, send: result };
 };
+
+/**
+ * Sends one test message through this path, on purpose.
+ *
+ * Runs the real `sendEmailAlert`, so the `AdminNotificationLog` row is written
+ * exactly as a genuine provider alert writes one. That is the point rather than
+ * a side effect: if this path fails, the failure belongs in the operator's
+ * alert log and on the badge that counts unacknowledged failures, which is
+ * where a real failure would have gone (lib/operatorAlertProbeCore.ts).
+ */
+export const probeProviderAlertEmail =
+  async (): Promise<OperatorAlertProbeResult> => {
+    const { to, send } = await sendEmailAlert(
+      "Sending path test",
+      [
+        "This is a test of the provider alert email path.",
+        "It was requested from the Admin Console and reports no real provider problem.",
+      ].join("\n"),
+      { targetType: "sending-path-probe", targetId: "provider-alert-email" }
+    );
+    return operatorAlertProbeResult({ path: "provider", recipient: to, send });
+  };
 
 const sendProviderAlert = async (
   provider: AiProvider,

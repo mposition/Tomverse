@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
+import { createRequire } from "node:module";
 import { after, before, beforeEach, mock, test } from "node:test";
 import { pathToFileURL } from "node:url";
 import { resolve } from "node:path";
@@ -63,11 +64,21 @@ type StreamScript = {
 
 let script: StreamScript = { text: "an answer", queries: 0, outputTokens: 120 };
 let streamTextCalls = 0;
+/** The last options the route handed the SDK, for the prompt-shape assertion. */
+let lastStreamTextOptions: Record<string, unknown> | null = null;
 
+const require = createRequire(import.meta.url);
+
+// Only `streamText` is replaced. The rest of the module is spread back in
+// because the route also uses `tool()` and `stepCountIs()` to register the
+// generated-artifact tools, and a mock that dropped them would fail the turn
+// for a reason that has nothing to do with search settlement.
 mock.module("ai", {
   namedExports: {
-    streamText: () => {
+    ...(require("ai") as Record<string, unknown>),
+    streamText: (options: Record<string, unknown>) => {
       streamTextCalls += 1;
+      lastStreamTextOptions = options;
       const text = script.text;
       return {
         textStream: new ReadableStream<string>({
@@ -260,4 +271,38 @@ test("a completed search is recorded as measured, not as an upper bound", async 
   // observed, so its provenance must not claim otherwise.
   assert.notEqual(row.costSource, "reserved_upper_bound");
   assert.notEqual(row.usageSource, "crash_reconciliation");
+});
+
+/**
+ * The prompt shape the SDK will actually accept.
+ *
+ * `ai@7` rejects a system message inside `messages`, and the rejection reaches
+ * the user as an empty answer rather than as anything about a prompt -- so a
+ * route that assembles one is a route whose every turn fails, silently as far
+ * as the message is concerned. It has happened twice: once when assistant
+ * profiles introduced a system block, and again when generated artifacts
+ * introduced a second one and the first fix's conditional stopped covering it.
+ *
+ * Asserted here rather than in a unit test because the thing that broke was
+ * neither the splitter nor the SDK. It was the route forgetting to call it.
+ */
+test("the route hands the SDK no system message, and the artifact block as instructions", async () => {
+  lastStreamTextOptions = null;
+  await settledCostOfOneTurn(0);
+
+  assert.ok(lastStreamTextOptions, "streamText was never called");
+  const options = lastStreamTextOptions as {
+    messages?: Array<{ role?: string }>;
+    instructions?: string;
+  };
+  assert.ok(Array.isArray(options.messages));
+  assert.equal(
+    options.messages!.some((message) => message.role === "system"),
+    false,
+    "a system message reached `messages`; the SDK refuses the whole turn for this"
+  );
+  // And it was not simply dropped: every turn carries the artifact block, and
+  // a turn that lost it is a turn where the model was never told what it can
+  // and cannot make.
+  assert.match(String(options.instructions ?? ""), /File generation/);
 });

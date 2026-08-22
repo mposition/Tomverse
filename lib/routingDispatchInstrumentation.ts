@@ -57,6 +57,10 @@ import {
   activeManifestHashKey,
 } from "@/lib/manifestHashKeyring";
 import {
+  dispatchInstrumentationMode,
+  type DispatchInstrumentationMode,
+} from "@/lib/routingInstrumentationMode";
+import {
   MANIFEST_CONTENT_VERSION,
   buildManifestSourceRefs,
   type ManifestSourceRef,
@@ -65,11 +69,13 @@ import {
   type ManifestMessage,
 } from "@/lib/routingManifestContent";
 
-export type DispatchInstrumentationMode = "off" | "observe" | "enforce";
-
-export const dispatchInstrumentationMode = (): DispatchInstrumentationMode => {
-  const raw = process.env.ROUTING_DISPATCH_INSTRUMENTATION;
-  return raw === "observe" || raw === "enforce" ? raw : "off";
+// Imported and re-exported rather than defined here: an operator report has to
+// read the same rule and cannot import this module, which is `server-only` and
+// pulls in Next's request scope. See lib/routingInstrumentationMode.ts. The
+// re-export keeps every existing caller of this module unchanged.
+export {
+  dispatchInstrumentationMode,
+  type DispatchInstrumentationMode,
 };
 
 /**
@@ -234,6 +240,10 @@ export const beginInstrumentedDispatch = async (
         taskProfileVersion: record?.versions.taskProfile ?? "manual",
         candidateFilterVersion: record?.versions.candidates ?? "manual",
         selectionVersion: record?.versions.selection ?? "manual",
+        // Null rather than the "manual" sentinel: a turn the Router did not
+        // decide ran under no scoring policy at all, and the column is
+        // nullable precisely so that stays sayable.
+        selectionPolicyVersion: record?.versions.scorePolicy ?? null,
         estimatorVersion: input.tokenizerVersion,
         profileKind: record?.taskKind ?? "manual",
         profileConfidence: record?.taskConfidence ?? "none",

@@ -1,0 +1,12 @@
+-- The scoring policy a routing decision ran under.
+--
+-- Contract: docs/policy/tomverse-chat-routing.md §5, which requires a run to
+-- record the versions it must be attributable to. Four were recorded; the
+-- scores, tie-break order, switch margin and hysteresis were not -- they lived
+-- inside the selection rule and moved without a version of their own.
+--
+-- Additive and nullable. Rows written before the policy existed had no policy
+-- version, and backfilling one would assert they ran under a policy that had
+-- not been decided when they were written.
+-- AlterTable
+ALTER TABLE "RoutingRun" ADD COLUMN     "selectionPolicyVersion" TEXT;

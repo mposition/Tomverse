@@ -285,12 +285,10 @@ test.describe("settings information architecture", () => {
       await expect(back).toContainText("설정으로 돌아가기");
       await expect(back).toHaveAttribute("href", detail.href);
 
-      // Two things have to hold at once, and they came from opposite sides of
-      // this merge. develop stopped counting links here: once breadcrumb
-      // crumbs became navigable, "exactly one link" no longer described the
-      // rule -- what has to hold is that nothing in this nav offers the chat.
-      // main added the exit control itself, which lives in the route shell
-      // rather than in this nav, so its own assertion still applies.
+      // Nothing inside this nav offers the chat. Counting links was the old
+      // proxy for that and stopped meaning it once breadcrumb crumbs became
+      // navigable: what has to hold is that every link *here* goes up inside
+      // settings, not that there is exactly one control.
       const nav = page.getByTestId("settings-detail-nav");
       await expect(nav.getByRole("link", { name: /채팅/ })).toHaveCount(0);
       await expect(nav.getByTestId(RETURN_TO_CHAT)).toHaveCount(0);
@@ -301,6 +299,9 @@ test.describe("settings information architecture", () => {
         // goes up to; a bare `/chat` would be the chat itself.
         expect(href === "/chat").toBe(false);
       }
+
+      // Leaving settings entirely is a separate control, rendered by the route
+      // shell beside this nav rather than inside it.
       await expect(page.getByTestId(RETURN_TO_CHAT)).toHaveAttribute(
         "href",
         "/chat"
@@ -530,6 +531,7 @@ async function mockDepthApis(page: Page) {
     /^\/api\/imports\/external\/[^/]+$/,
     /^\/api\/external-conversations\/[^/]+$/,
     /^\/api\/memories\/extraction-runs\/[^/]+$/,
+    /^\/api\/user\/email-preferences$/,
   ]) {
     await page.route(
       (url) => missing.test(url.pathname),
@@ -552,6 +554,15 @@ async function gotoSettingsDepth(page: Page, path: string) {
   await page.goto(path);
 }
 
+// The three assistants routes do not share one up-link, and that is the design
+// rather than an inconsistency. A profile goes up to the list it came from and
+// the list goes up to settings, so only the collection carries
+// `assistants-back-to-settings`. The table named that one test id for all three
+// while it was written against a base that had no such hierarchy, and the two
+// deep rows failed on the merge for exactly that reason.
+//
+// What the test below checks is unchanged by it: every settings detail page
+// still offers an up-link, and no up-link is bare `/chat`.
 const SETTINGS_DEPTHS = [
   {
     name: "import list",
@@ -583,16 +594,6 @@ const SETTINGS_DEPTHS = [
     path: "/settings/memory/runs/run-qa",
     upTestId: "memory-extraction-run-back",
   },
-  // The three assistants routes do not share one up-link, and that is the
-  // design rather than an inconsistency. develop gave the deeper two their own
-  // hierarchy -- a profile goes up to the list it came from, and the list goes
-  // up to settings -- so only the collection carries
-  // `assistants-back-to-settings`. This table named that one test id for all
-  // three because it was written before that hierarchy existed, and the two
-  // deep rows failed on the merge for exactly that reason.
-  //
-  // What the test below actually checks is unchanged by this: every settings
-  // detail page still offers an up-link, and no up-link is bare `/chat`.
   {
     name: "assistant profiles",
     path: "/settings/assistants",
@@ -612,6 +613,11 @@ const SETTINGS_DEPTHS = [
     name: "account data",
     path: "/settings/data",
     upTestId: "account-data-back",
+  },
+  {
+    name: "email notifications",
+    path: "/settings/notifications",
+    upTestId: "email-notifications-back",
   },
 ] as const;
 

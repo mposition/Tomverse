@@ -4,8 +4,8 @@ export const runtime = "nodejs";
 import { NextResponse } from "next/server";
 
 import { readLimitedText } from "@/lib/apiSecurity";
+import { emailProvider } from "@/lib/emailProviderPort";
 import { processResendWebhook } from "@/lib/emailWebhookProcessing";
-import { readSvixHeaders, verifySvixSignature } from "@/lib/svixSignature";
 
 /**
  * Receives Resend's delivery, bounce and complaint events.
@@ -26,17 +26,6 @@ import { readSvixHeaders, verifySvixSignature } from "@/lib/svixSignature";
 const MAX_WEBHOOK_BYTES = 512 * 1024;
 
 export async function POST(req: Request) {
-  const secret = process.env.RESEND_WEBHOOK_SECRET;
-  if (!secret) {
-    // Not 401: nothing was wrong with the request. Answering 503 keeps the
-    // provider retrying, so events queue at Resend rather than being dropped
-    // while a deployment is missing its secret.
-    return NextResponse.json(
-      { error: "Email webhook is not configured." },
-      { status: 503, headers: { "Cache-Control": "no-store" } }
-    );
-  }
-
   let rawBody: string;
   try {
     rawBody = await readLimitedText(req, MAX_WEBHOOK_BYTES);
@@ -47,12 +36,11 @@ export async function POST(req: Request) {
     );
   }
 
-  const verification = verifySvixSignature({
-    headers: readSvixHeaders(req.headers),
-    body: rawBody,
-    secret,
-  });
-  if (!verification.valid) {
+  // Verification belongs to the provider port: the signature scheme is the
+  // provider's, and a second place that knows it is a second place to get it
+  // wrong (docs/policy/email-notifications.md §8.2).
+  const verification = emailProvider().verifyWebhook(rawBody, req.headers);
+  if (!verification.ok) {
     // The reason is logged, the body is not.
     console.warn(
       JSON.stringify({
@@ -61,26 +49,29 @@ export async function POST(req: Request) {
         at: new Date().toISOString(),
       })
     );
+    // A missing secret is not 401 and not 400: nothing was wrong with the
+    // request. Answering 503 keeps the provider retrying, so events queue at
+    // Resend rather than being dropped while a deployment misses its secret.
+    // A body that is signed but not JSON says so, rather than blaming the
+    // signature that just verified.
+    const [status, error] =
+      verification.reason === "secret_missing"
+        ? ([503, "Email webhook is not configured."] as const)
+        : verification.reason === "payload_not_json"
+          ? ([400, "Invalid payload."] as const)
+          : ([400, "Invalid signature."] as const);
     return NextResponse.json(
-      { error: "Invalid signature." },
-      { status: 400, headers: { "Cache-Control": "no-store" } }
-    );
-  }
-
-  let payload: unknown;
-  try {
-    payload = JSON.parse(rawBody);
-  } catch {
-    return NextResponse.json(
-      { error: "Invalid payload." },
-      { status: 400, headers: { "Cache-Control": "no-store" } }
+      { error },
+      { status, headers: { "Cache-Control": "no-store" } }
     );
   }
 
   try {
     await processResendWebhook({
       providerEventId: verification.id,
-      payload: payload as Parameters<typeof processResendWebhook>[0]["payload"],
+      payload: verification.payload as Parameters<
+        typeof processResendWebhook
+      >[0]["payload"],
     });
     // Acknowledgement only. The provider needs to know we accepted it; our
     // delivery ids and effect names are of no use to it and echoing internal

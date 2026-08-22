@@ -7,24 +7,39 @@ const ROOT = resolve(import.meta.dirname, "..");
 const read = (relative) => readFileSync(resolve(ROOT, relative), "utf8");
 
 /**
- * Trace 0dde1576-6bb8-4a19-bd8f-55f8e73d2b27, found on the Release C staging
- * round.
+ * Two traces, one rule.
  *
  * `ai@7` refuses a system message inside `messages` and asks for it through
- * `instructions`. The chat route put the injected context block -- an
- * assistant profile's instructions, or memory's -- at the head of the
- * `messages` array, so the first turn that had anything to inject threw
- * `AI_InvalidPromptError` before the provider was called and reached the user
- * as an empty answer. Neither flag had ever been on, so no turn had produced
- * that block until an assistant was picked in staging.
+ * `instructions`. The rejection does not reach the caller as anything about a
+ * prompt: it arrives wrapped as `AI_NoOutputGeneratedError` and this
+ * application reports it as an empty answer, so both times it shipped it read
+ * as a provider fault.
  *
- * This is a source-shape test, and it is one deliberately: the seam is which
- * variable reaches `streamText`, and reproducing the fault end-to-end would
- * mean driving the whole paid path to the provider call. What it pins is the
- * pair -- the filtered array going to `messages`, the block going to
- * `instructions` -- plus the library fact that makes the split necessary, so
- * an SDK upgrade that changes the rule surfaces here rather than being kept
- * as a workaround nobody can date.
+ *   * 0dde1576-6bb8-4a19-bd8f-55f8e73d2b27, Release C staging. The injected
+ *     context block -- an assistant profile's instructions, or memory's --
+ *     went to the head of `messages`. Neither flag had ever been on, so no
+ *     turn produced the block until an assistant was picked in staging.
+ *   * cbd6b2b5-9cae-4aa8-976e-b220f25b7232, generated-artifacts staging. Every
+ *     turn now carries an artifact system block. The first fix had been
+ *     written as a conditional on `contextSystemPrompt`, which was the only
+ *     source at the time, so a second source failed in both directions at
+ *     once: with no context prompt the block reached `messages` and every turn
+ *     died, and with one it was filtered away and never reached the model.
+ *
+ * The second one is why the shape assertions here are narrower than they were.
+ * A source-shape test can only pin the shape it was written for, and the shape
+ * it pinned was the bug's next incarnation. What is pinned now is the
+ * invariant rather than the expression: the split is unconditional, and every
+ * dispatch sends its two halves.
+ *
+ * The behaviour itself is tested where it can fail rather than in source text:
+ *
+ *   * `tests/chatProviderPrompt.test.mjs` hands the split's output to the real
+ *     `streamText`, and asserts the unsplit array is refused -- so the library
+ *     fact is checked against the library, not restated.
+ *   * `tests/integration/chat-route-search-settlement.db.test.ts` captures
+ *     what the route actually handed the SDK, because what broke was neither
+ *     the splitter nor the SDK but the route forgetting to call it.
  */
 
 const ROUTE = "app/api/chat/route.ts";
@@ -32,17 +47,18 @@ const ROUTE = "app/api/chat/route.ts";
 test("the chat route hands the injected context block to the SDK as instructions", () => {
   const source = read(ROUTE);
 
-  // The array the SDK is given excludes system turns...
+  // Unconditional, and through the shared splitter. A conditional here is
+  // what shipped twice: it is only correct while the branch it names is the
+  // only source of system messages, and nothing makes that stay true.
   assert.match(
     source,
-    /const sdkMessages: ModelMessage\[\] = contextSystemPrompt\s*\?\s*formattedMessages\.filter\(\(message\) => message\.role !== "system"\)\s*:\s*formattedMessages;/,
-    `${ROUTE} must build the SDK's messages array by removing system turns`
+    /const \{ messages: sdkMessages, instructions: sdkInstructions \} =\s*splitProviderInstructions\(formattedMessages\);/,
+    `${ROUTE} must split system blocks out of the SDK's messages unconditionally`
   );
-  // ...and the block travels beside it instead.
-  assert.match(
+  assert.doesNotMatch(
     source,
-    /const sdkInstructions = contextSystemPrompt \|\| undefined;/,
-    `${ROUTE} must carry the context block as instructions`
+    /const sdkMessages[^\n]*=\s*contextSystemPrompt\s*\?/,
+    `${ROUTE} must not decide the split from one source of system messages`
   );
 
   const streamTextCalls = source.match(/await streamText\(\{[\s\S]*?\n\s*\}\);/g) ?? [];
