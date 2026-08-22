@@ -284,6 +284,24 @@ test("the create CTA is reachable and activatable from the keyboard", async ({
     await openAssistantMenu(page);
 
     const create = page.getByTestId("assistant-create-cta");
+    await expect(create).toBeVisible();
+    // Opening a view schedules one animation frame that moves focus into the
+    // sheet -- the sheet itself where the pointer is coarse, its first
+    // control where it is not. Until that frame runs the active element is
+    // still the body, so a focus() issued before it is handed straight back
+    // and never returns. Which side of the frame the test lands on is the
+    // runner's decision, not the product's: it has never lost on a developer
+    // machine and lost three times in a row on a frame-starved CI runner.
+    // Wait for the sheet to take focus, then take it from the sheet.
+    await expect
+        .poll(() =>
+            page.evaluate(() => {
+                const popover = document.getElementById("chat-input-popover");
+                const active = document.activeElement;
+                return Boolean(popover && active && popover.contains(active));
+            })
+        )
+        .toBe(true);
     await create.focus();
     await expect(create).toBeFocused();
     await page.keyboard.press("Enter");
