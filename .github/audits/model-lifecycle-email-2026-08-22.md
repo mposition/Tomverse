@@ -193,6 +193,8 @@ cause · 권고 · Acceptance criteria · 검증 방법 · 파일:line 순입니
   `checked 12/12`로 복구됐습니다. 7/29에는
   `registry auto-updates 4`가 찍혀 auto-disable이 실제로 동작한 기록이
   남아 있습니다.
+- **이 7건의 triage는 `.github/audits/model-lifecycle-triage-2026-08-22.md`에
+  있습니다.** 5개 결정으로 묶이고, 그중 둘이 premium 가격 gate에 걸립니다.
 - **영향**: cron 실패, 이메일 유실, 휴가, 다른 급한 일 — 어느 하나만 겹쳐도 그
   모델은 영구히 사라집니다. 위 표가 그 손실이 가설이 아니라 **한 달 동안 7건**
   누적된 사실임을 보여 줍니다. 그중 `grok-4.6`·`gemini-3.7-flash`·`glm-5.3`은
@@ -1924,6 +1926,7 @@ post-run validation → completion(F). **이 순서를 바꾸지 않습니다.**
 
 | # | 항목 | findings | 왜 지금인가 |
 |---|---|---|---|
+| P0-0 | 미처리 7건 triage 실행 (`model-lifecycle-triage-2026-08-22.md`) | ML-01 | 최대 28일째 방치. P0-1과 **병렬**로 — 순차로 하면 처리하는 동안 새 후보가 같은 방식으로 사라집니다 |
 | P0-1 | `ModelLifecycleWorkItem` + backfill | ML-01, ML-03 | 하루만 사는 후보가 계속 사라지고 있습니다 |
 | P0-2 | `/admin/models?tab=discovery` + work-queue collector | ML-02 | 저장된 것을 볼 수 없으면 P0-1이 의미가 없습니다 |
 | P0-3 | Daily email v2 (NEW/PENDING 분리 + standard lane) | ML-01, ML-04, EM-14 | 운영자가 매일 보는 유일한 신호입니다 |
