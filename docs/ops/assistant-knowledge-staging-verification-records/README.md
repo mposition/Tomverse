@@ -38,9 +38,11 @@ YYYY-MM-DD__<40자리 deploy SHA>.md
    파일을 두었는지를 나중에 적으면, 무엇이 인용됐어야 하는지 판정할 원본이
    존재하지 않습니다.
 
-8. **정리 의무에 R2가 포함됩니다.** 이 회차는 staging의 R2에 object를 만듭니다.
-   행만 지우고 cleanup queue를 소진하지 않으면 bytes가 남습니다. 잔여 tombstone
-   수를 세어 적습니다.
+8. **정리 의무에 R2가 포함되지만, 같은 날 끝나지 않습니다.** 이 회차는
+   staging의 R2에 object를 만듭니다. 행을 지워도 bytes는 **다음 03:00 UTC
+   sweep**까지 남습니다(`railway.maintenance.json`). 회차가 끝난 시점에
+   object가 남아 있는 것은 정상이며, 정리 의무는 그 다음 날 확인으로
+   이어집니다.
 
 ## 새 실행을 시작할 때
 
@@ -75,7 +77,7 @@ git diff <staging sha> <production sha> -- lib/assistantKnowledge*.ts 'app/api/a
 
 ## 이 체크리스트가 짧은 이유
 
-항목이 7개입니다. 적어서 부실한 것이 아니라, **CI가 실제 PostgreSQL에서 이미
+항목이 8개입니다. 적어서 부실한 것이 아니라, **CI가 실제 PostgreSQL에서 이미
 증명하는 계약을 손으로 다시 하지 않기로** 한 결과입니다. 근거 표는 체크리스트
 앞부분에 있습니다.
 
