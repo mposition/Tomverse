@@ -4,6 +4,10 @@ import * as Sentry from "@sentry/nextjs";
 
 import { emailProvider } from "@/lib/emailProviderPort";
 import {
+  operatorAlertProbeResult,
+  type OperatorAlertProbeResult,
+} from "@/lib/operatorAlertProbeCore";
+import {
   operationalAlertCooldownMs,
   sanitizeOperationalContext,
   sanitizeOperationalStack,
@@ -123,28 +127,67 @@ const postJson = async (url: string | undefined, body: unknown) => {
  * Still a direct send rather than the outbox. An alert about the system being
  * unwell must not depend on the part of the system that drains a queue.
  */
-const sendEmail = async (subject: string, detail: string) => {
-  const to = (process.env.OPS_ALERT_EMAIL || process.env.ADMIN_ALERT_EMAIL)?.trim();
-  if (!to) return;
+const operatorAlertRecipient = () =>
+  (process.env.OPS_ALERT_EMAIL || process.env.ADMIN_ALERT_EMAIL)?.trim() || null;
 
-  const result = await emailProvider().send(
-    { to, subject: `[Tomverse Operations] ${subject}`, text: detail },
-    { stream: "transactional" }
-  );
-  if (result.ok) return;
+/**
+ * The wire call, reported rather than thrown.
+ *
+ * Split out so `probeOperationalAlertEmail` below can exercise *this* -- the
+ * recipient resolution, the identity resolution and the provider call -- rather
+ * than a copy of it written for testing. A probe that runs its own version of
+ * the path proves only that the copy works.
+ */
+const deliverOperatorEmail = async (subject: string, detail: string) => {
+  const to = operatorAlertRecipient();
+  if (!to) return { to: null, send: null };
+  return {
+    to,
+    send: await emailProvider().send(
+      { to, subject: `[Tomverse Operations] ${subject}`, text: detail },
+      { stream: "transactional" }
+    ),
+  };
+};
+
+const sendEmail = async (subject: string, detail: string) => {
+  const { send } = await deliverOperatorEmail(subject, detail);
+  if (!send) return;
+  if (send.ok) return;
   // A deployment with no key sends no alerts and says nothing about it, which
   // is the state of every local checkout.
-  if (result.notConfigured) return;
+  if (send.notConfigured) return;
   // Everything else is thrown rather than returned, so `notifyExternalChannels`
   // records it the same way it records a webhook failure. It is caught there: a
   // failed alert email must not stop Slack, Discord or the Sentry capture that
   // already happened above it.
   throw new Error(
-    result.identityRefusal
-      ? `Operational alert sender unusable: ${result.identityRefusal}`
-      : `Operational alert email failed: ${result.status ?? "no response"}.`
+    send.identityRefusal
+      ? `Operational alert sender unusable: ${send.identityRefusal}`
+      : `Operational alert email failed: ${send.status ?? "no response"}.`
   );
 };
+
+/**
+ * Sends one test message through this path, on purpose.
+ *
+ * Deliberately not `reportOperationalIncident`: that would put a fabricated
+ * incident into Sentry and onto Slack and Discord, and an alert channel that
+ * carries invented incidents is a channel operators learn to skim. This
+ * exercises only the email leg, which is the leg that has no other way to be
+ * checked (lib/operatorAlertProbeCore.ts).
+ */
+export const probeOperationalAlertEmail =
+  async (): Promise<OperatorAlertProbeResult> => {
+    const { to, send } = await deliverOperatorEmail(
+      "Sending path test",
+      [
+        "This is a test of the operational alert email path.",
+        "It was requested from the Admin Console and reports no real incident.",
+      ].join("\n")
+    );
+    return operatorAlertProbeResult({ path: "operational", recipient: to, send });
+  };
 
 const notifyExternalChannels = async ({
   title,

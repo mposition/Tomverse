@@ -577,6 +577,26 @@ test.describe("admin read surfaces", () => {
     await expect(page.getByTestId("email-domain-findings")).toBeEmpty();
   });
 
+  test("the operator alert paths can be tested, and say what a pass means", async ({
+    page,
+  }) => {
+    // These paths run only when something is wrong, so nothing exercises them
+    // in ordinary operation -- which is how three of four senders stayed on the
+    // old sending domain through a cutover
+    // (docs/ops/email-sending-domains.md §1.2).
+    await page.goto("/admin/alerts?tab=templates");
+
+    const probe = page.getByTestId("operator-alert-probe");
+    await expect(
+      probe.getByRole("heading", { name: "Operator alert paths" })
+    ).toBeVisible();
+    await expect(page.getByTestId("operator-alert-probe-operational")).toBeVisible();
+    await expect(page.getByTestId("operator-alert-probe-provider")).toBeVisible();
+
+    // The limit of what a passing test proves is on screen, not in a comment.
+    await expect(probe).toContainText("does not show that the condition");
+  });
+
   test("the delivery history opens on what did not arrive, and says so", async ({
     page,
   }) => {

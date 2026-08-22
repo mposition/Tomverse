@@ -298,6 +298,87 @@ TRANSACTIONAL_EMAIL_FROM=Tomverse Insight <hello@mail.tomverse.app>
 믿는 것과 배포된 프로세스가 그 값을 읽는 것은 다른 사실입니다. 경고가 남아 있으면
 값이 반영되지 않은 것입니다.
 
+#### 3.5.1 staging 실측 검증 (2026-08-21 23:56Z)
+
+`/api/admin/test-email`이 staging에서 실제로 보낸 메일의 헤더입니다. §14.1의 네
+요구가 전부 실물로 확인됐습니다 — 설정값을 읽은 것이 아니라 수신자가 판정한
+결과입니다.
+
+| §14.1 요구 | 헤더 | 판정 |
+|---|---|---|
+| From이 발송 서브도메인 | `From: Tomverse Insight <hello@mail.tomverse.app>` | 통과 |
+| DKIM | `d=mail.tomverse.app; s=resend` → `dkim=pass` | 통과, **strict 정렬** |
+| Return-Path를 우리 서브도메인으로 | `<…@send.mail.tomverse.app>` | 통과 |
+| SPF | `spf=pass`, `23.251.234.59` (SES ap-northeast-1) | 통과 |
+| DMARC | `dmarc=pass (p=NONE sp=NONE) header.from=mail.tomverse.app` | 통과 |
+
+**DMARC가 두 축 모두에서 정렬됩니다.** DKIM의 `d=`가 From 도메인과 정확히 같고
+(strict), SPF의 MAIL FROM이 `send.mail.tomverse.app`이라 relaxed로 정렬됩니다.
+한쪽에만 걸친 상태가 아니므로, 한 축이 깨져도 다른 축이 DMARC를 지탱합니다.
+
+`p=none`은 계획대로이며 3.4의 관측 기간입니다. 이 발송이 그 시계의 기준이 되는
+발송 중 하나입니다.
+
+#### 3.5.2 `GET /domains` 401은 고장이 아닙니다
+
+staging에서 `npm run report:email-domains`가 이렇게 답합니다.
+
+```
+  transactional  mail.tomverse.app
+  marketing      not configured
+
+  The provider answered 401 when listing domains.
+```
+
+Resend API 키에는 권한 등급이 있고, **sending 전용 키는 `POST /emails`는 되지만
+`GET /domains`는 401**입니다. staging의 키가 그것입니다 — 같은 키로 위 3.5.1의
+메일이 실제로 나갔으므로 발송은 정상이고, 읽지 못하는 것은 도메인 목록뿐입니다.
+
+그래서 staging에서는 이것이 **정상 상태**입니다.
+
+- `npm run report:email-domains`의 provider 구획이 비어 있고 findings가 없습니다.
+  보고서가 도메인을 하나도 못 읽었을 때 findings를 만들지 않는 것은 의도된
+  동작입니다 — 빈 목록에서 유도한 findings는 이미 있는 도메인을 다시 만들라고
+  사람을 보냅니다.
+- Admin의 **Sending domains** 탭도 같은 이유로 오류를 표시합니다.
+
+**틀린 키와 sending 전용 키는 같은 401로 나옵니다.** 구분은 실제 발송뿐입니다 —
+Admin → Overview → **Send test email**. 메일이 오면 sending 전용 키이고, 실패하면
+키가 무효입니다.
+
+`/api/ready`의 `emailSendingIdentity`로는 구분되지 않습니다. **그 검사는 API 키를
+아예 보지 않습니다** — 주소 문자열의 파싱과 스트림 간 도메인 분리만 판정하므로,
+401 키를 가진 배포도 readiness를 통과합니다.
+
+#### 3.5.3 운영자 알림 경로는 Admin에서 시험 발송합니다
+
+3.5.1은 **제품 메일 경로**(`lib/email.ts`)를 확인한 것입니다. 운영자 알림 두
+경로는 그것과 다른 코드이고, **진짜 장애 조건에서만** 호출됩니다 — 운영 알림은
+`reportOperationalIncident` 안에서, provider 알림은 예산·잔액이 바닥날 때입니다.
+그래서 오랫동안 일부러 실행시킬 방법이 없었고, **그것이 1.2의 드리프트를 아무도
+보지 못한 이유입니다.** 아무것도 평소에 그 경로들을 지나가지 않았습니다.
+
+**Admin → Alerts → Templates → "Operator alert paths"** 에서 경로별로 시험
+발송합니다. 각 버튼은 그 경로의 **자기 발송 함수**를 호출하고, provider가 실제로
+받아들인 From 주소와 message id를, 실패했으면 그 이유를 화면에 돌려줍니다.
+
+| 실패 코드 | 뜻 | 조치 |
+|---|---|---|
+| `RECIPIENT_NOT_CONFIGURED` | 수신 주소 환경변수가 없음 | `OPS_ALERT_EMAIL`/`ADMIN_ALERT_EMAIL` 설정 |
+| `PROVIDER_KEY_MISSING` | transactional 스트림용 API 키 없음 | `RESEND_API_KEY` 설정 |
+| `TRANSACTIONAL_FROM_UNPARSEABLE` 등 | 발신 신원 해석 실패 | 14.1의 변수 확인 |
+| `NO_RESPONSE` | provider에 닿지 못함 | 일시적일 수 있음, 재시도 |
+| `HTTP_4xx`/`HTTP_5xx` | provider가 거절 | 상태 코드별로 판단 |
+
+**통과가 무엇을 뜻하는지 화면에 적혀 있습니다.** 이 시험은 *경로가 보낼 수 있다*는
+것만 보이며, *그것을 불러야 할 조건이 여전히 그것을 부른다*는 것은 보이지
+않습니다. 화면이 그렇게 말하는 이유는, 확인한 것보다 많은 것을 암시하는 컨트롤이
+없는 것보다 나쁘기 때문입니다.
+
+provider 경로의 시험은 `AdminNotificationLog`에 진짜 알림과 똑같은 행을 남깁니다.
+이는 부작용이 아니라 의도입니다 — 이 경로가 실패하면 그 실패는 운영자의 알림
+로그와 미확인 실패 배지에 나타나야 하고, 그곳이 진짜 실패가 갔을 자리입니다.
+
 ### 3.6 정책 강화 (Phase 2)
 
 리포트가 깨끗하면 `p=quarantine`, 이후 `p=reject`. 각 단계 사이에 최소 2주.
