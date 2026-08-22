@@ -75,7 +75,7 @@ git diff <staging sha> <production sha> -- lib/assistantKnowledge*.ts 'app/api/a
 
 ## 이 체크리스트가 짧은 이유
 
-항목이 6개입니다. 적어서 부실한 것이 아니라, **CI가 실제 PostgreSQL에서 이미
+항목이 7개입니다. 적어서 부실한 것이 아니라, **CI가 실제 PostgreSQL에서 이미
 증명하는 계약을 손으로 다시 하지 않기로** 한 결과입니다. 근거 표는 체크리스트
 앞부분에 있습니다.
 

@@ -4,10 +4,10 @@
 정책 근거는 `docs/policy/external-conversation-import-and-memory.md` §14(지식
 파일), §14.2(보존·R2 lifecycle), §15.1(활성화 순서)입니다.
 
-**6항목, 유료 1턴입니다.** 짧은 것이 이 문서의 요점이므로 왜 짧은지부터
+**7항목, 유료 1턴입니다.** 짧은 것이 이 문서의 요점이므로 왜 짧은지부터
 적습니다.
 
-## 왜 6항목인가 — CI가 증명하지 못하는 것만 남깁니다
+## 왜 7항목인가 — CI가 증명하지 못하는 것만 남깁니다
 
 이 기능의 계약은 대부분 **이미 CI에서, 실제 PostgreSQL을 상대로** 증명되고
 있습니다. `tests/integration/assistant-knowledge-pipeline.db.test.ts`,
@@ -37,8 +37,8 @@ deliberately does [not exercise]"*. DB test는 `r2Key` 문자열을 만들 뿐 b
 
 그래서 이 회차가 판별하는 것은 셋뿐입니다.
 
-1. **배포된 빌드에서 flag가 실제로 닫는가** — test는 함수를 부르고, 여기서는
-   배포된 route가 답합니다
+1. **배포된 빌드에서 flag가 무엇을 닫고 무엇을 닫지 않는가** — test는
+   함수를 부르고, 여기서는 배포된 route가 답합니다
 2. **R2 왕복이 실제로 일어나는가** — 업로드된 bytes가 추출되고, 검색되고,
    삭제 후 정말로 사라지는가
 3. **전환이 감사 기록에 남는가** — Admin Console과 해시 체인
@@ -68,7 +68,7 @@ DB 쪽 순서는 CI가 증명합니다. **bytes가 실제로 언제 사라지는
 붙인 별도 파일**로 `assistant-knowledge-staging-verification-records/` 아래에
 남습니다.
 
-- **template revision**: `2026-08-22a`
+- **template revision**: `2026-08-22b`
 - 실행 방법과 파일 이름 규칙:
   `assistant-knowledge-staging-verification-records/README.md`
 
@@ -94,9 +94,21 @@ DB 쪽 순서는 CI가 증명합니다. **bytes가 실제로 언제 사라지는
 
 ## A. 켜기 전 (0크레딧)
 
-- [ ] A-1. flag가 꺼진 상태에서 `POST`(`action: "prepare"`)·`GET`·`DELETE`
-      세 경로가 모두 403 `ASSISTANT_KNOWLEDGE_DISABLED`. 켠 뒤에는 이 상태를
-      다시 만들기 어렵다
+켠 뒤에는 이 상태를 다시 만들기 어려우므로 먼저 합니다.
+
+- [ ] A-1. flag가 꺼진 상태에서 `POST`(`action: "prepare"`)와 `GET`이 403
+      `ASSISTANT_KNOWLEDGE_DISABLED`
+- [ ] A-2. **같은 상태에서 `DELETE`는 열려 있다.** 403이 아니어야 한다 —
+      403이면 그것이 결함이다
+
+`DELETE`가 예외인 것은 실수가 아니라 §15 rollback의 결과입니다. flag를 끄는
+것은 기능을 닫는 일이지 **이미 저장한 데이터를 지울 능력을 뺏는 일이
+아닙니다.** 그래서 삭제는 `assistantKnowledgeEnabled`와
+`assistantProfilesEnabled`가 **둘 다** 꺼졌을 때만 닫힙니다
+(`app/api/assistant-profiles/[profileId]/knowledge/[fileId]/route.ts`).
+
+이 회차의 사전 조건은 profiles가 켜져 있는 것이므로, `DELETE`는 열려 있는
+쪽이 정상입니다.
 
 ## B. 전환 (0크레딧)
 
