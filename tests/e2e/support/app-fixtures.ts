@@ -1131,6 +1131,17 @@ export type AttachmentUploadQaState = {
   finalizeCount: number;
   prepareCount: number;
   uploadCount: number;
+  /**
+   * What finalize answers. Left null it succeeds, which is what every test
+   * that is not about a refusal wants.
+   *
+   * Set to a code, the route answers the way the real one does -- a status
+   * and a `code` -- so a test can assert that the composer says what actually
+   * went wrong instead of "try again".
+   */
+  finalizeFailure: { status: number; code: string } | null;
+  /** The archive summary a successful finalize reports, if any. */
+  archive: { totalEntries: number; includedFiles: number; excludedFiles: number } | null;
 };
 
 export async function mockAttachmentUpload(page: Page): Promise<AttachmentUploadQaState> {
@@ -1138,6 +1149,8 @@ export async function mockAttachmentUpload(page: Page): Promise<AttachmentUpload
     finalizeCount: 0,
     prepareCount: 0,
     uploadCount: 0,
+    finalizeFailure: null,
+    archive: null,
   };
 
   await page.route("**/api/chat", async (route) => {
@@ -1157,8 +1170,24 @@ export async function mockAttachmentUpload(page: Page): Promise<AttachmentUpload
 
     if (method === "PATCH") {
       state.finalizeCount += 1;
+      if (state.finalizeFailure) {
+        await route.fulfill({
+          status: state.finalizeFailure.status,
+          contentType: "application/json",
+          body: JSON.stringify({
+            error: "Uploaded attachment failed validation.",
+            code: state.finalizeFailure.code,
+          }),
+        });
+        return;
+      }
       const body = route.request().postDataJSON() as { size?: number };
-      await route.fulfill(json({ size: body.size || 1 }));
+      await route.fulfill(
+        json({
+          size: body.size || 1,
+          ...(state.archive ? { archive: state.archive } : {}),
+        })
+      );
       return;
     }
 

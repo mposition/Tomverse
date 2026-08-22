@@ -49,17 +49,23 @@ test("the browser's accepted list and the server's allowlist are the same set", 
   );
 });
 
-test("archives and executables are refused whatever media type is claimed", () => {
+test("other archive formats and executables are refused whatever media type is claimed", () => {
+  // ZIP left this list when it became a supported format with its own
+  // expansion contract; `.sh` and `.js` left it when source files became
+  // readable text. The test is still "does opening this run it", which is why
+  // every name below stays: they are containers this product does not open
+  // and programs it will never read.
   for (const name of [
-    "payload.zip",
     "backup.tar",
     "archive.7z",
+    "bundle.rar",
     "tool.exe",
     "lib.dll",
-    "run.sh",
     "installer.msi",
     "app.apk",
-    "script.js",
+    "macro.bat",
+    "task.cmd",
+    "module.wasm",
   ]) {
     throws(
       () => assertGuestAttachmentType(name, "text/plain"),
@@ -71,6 +77,27 @@ test("archives and executables are refused whatever media type is claimed", () =
       "GUEST_ATTACHMENT_UNSUPPORTED_TYPE"
     );
   }
+});
+
+test("the formats added alongside archive support are accepted, paired correctly", () => {
+  for (const [name, mediaType] of [
+    ["project.zip", "application/zip"],
+    ["deploy.sh", "application/x-sh"],
+    ["bundle.js", "text/javascript"],
+    ["still.gif", "image/gif"],
+    ["config.yaml", "application/yaml"],
+    ["page.html", "text/html"],
+  ]) {
+    assert.doesNotThrow(
+      () => assertGuestAttachmentType(name, mediaType),
+      `${name} / ${mediaType}`
+    );
+  }
+  // A supported format still cannot borrow another one's media type.
+  throws(
+    () => assertGuestAttachmentType("project.zip", "text/plain"),
+    "GUEST_ATTACHMENT_TYPE_MISMATCH"
+  );
 });
 
 test("an unsupported media type is refused even with a plausible extension", () => {
@@ -144,10 +171,32 @@ test("a renamed binary is refused before its bytes can be read as text", () => {
     () => assertGuestTextPayload(Buffer.from("hello\u0000world", "utf8")),
     "GUEST_ATTACHMENT_TYPE_MISMATCH"
   );
-  // Nor is something that is simply not UTF-8.
+  // Nor is something that is simply not UTF-8 and carries no byte order mark.
   throws(
-    () => assertGuestTextPayload(Buffer.from([0xff, 0xfe, 0x41, 0x30])),
+    () => assertGuestTextPayload(Buffer.from([0x41, 0xc3, 0x28, 0x42])),
     "GUEST_ATTACHMENT_UNREADABLE"
+  );
+});
+
+test("UTF-16 with a byte order mark is converted rather than refused", () => {
+  // A Windows editor writes this without being asked, and the previous check
+  // read its NUL bytes as evidence of a binary. The byte order mark is the
+  // evidence that it is not, and a strict decode is the proof.
+  const utf16le = Buffer.concat([
+    Buffer.from([0xff, 0xfe]),
+    Buffer.from("hello", "utf16le"),
+  ]);
+  assert.equal(assertGuestTextPayload(utf16le), "hello");
+
+  const utf16be = Buffer.from([0xfe, 0xff, 0x00, 0x68, 0x00, 0x69]);
+  assert.equal(assertGuestTextPayload(utf16be), "hi");
+
+  // A UTF-8 byte order mark is stripped, not carried into the prompt.
+  assert.equal(
+    assertGuestTextPayload(
+      Buffer.concat([Buffer.from([0xef, 0xbb, 0xbf]), Buffer.from("hi", "utf8")])
+    ),
+    "hi"
   );
 });
 

@@ -541,6 +541,61 @@ default를 DB에 씁니다), 저장값 JSON 파싱 실패, schema 검증 실패.
 - 표준 `tsc` project를 build matrix라고 부르지 않습니다. bundler가 아닙니다.
 
 <!-- BEGIN:mobile-chat-composer-invariant -->
+# 채팅 첨부 형식과 압축파일
+
+채팅 입력으로 받는 파일 — 형식 목록, MIME 판정, 업로드 검증, ZIP 해제 — 을
+건드리기 전에 읽습니다.
+
+- `docs/policy/chat-attachment-formats.md`
+
+절대 조건:
+
+- **형식은 표 하나입니다.** `lib/chatAttachmentFormats.ts`의
+  `CHAT_ATTACHMENT_FORMATS`에서 picker의 `accept`, 클라이언트의 확장자→MIME
+  정규화, 업로드 준비·finalize 허용 목록, 메시지 처리 분기, 게스트 부분집합,
+  사용자 안내가 전부 파생됩니다. 두 번째 목록을 만들지 않습니다 — 목록이
+  넷으로 갈라져 있던 것이 이 정책을 만든 사고입니다.
+- **목록에 있다는 것은 실제로 읽을 수 있다는 뜻입니다.** 확장자만 허용하고
+  분석에 실패하는 가짜 지원은 금지입니다. 그래서 `.doc`·`.xls`·`.ppt`·`.rtf`는
+  안전한 파서가 없어 목록에 없습니다.
+- **이름이 정하고 MIME은 힌트입니다.** 브라우저가 MIME을 비워도 알려진
+  확장자면 처리하고, 이름과 MIME이 각각 다른 형식을 가리키면 거절합니다.
+  확장자가 없으면 거절합니다.
+- **거절 기준은 "열면 실행되는가"입니다.** `.sh`·`.ps1`·`.py`는 지원하고
+  `.exe`·`.msi`·`.bat`은 거절합니다. 어떤 소스코드도 실행·컴파일·동적 import
+  하지 않습니다.
+- **finalize는 실제 바이트를 봅니다.** 로그인 경로도 R2 메타데이터가 아니라
+  `validateChatAttachmentUpload()`를 통과해야 하고, 실패한 객체는 즉시
+  삭제합니다.
+- **깨진 인코딩은 오류이지 복구 대상이 아닙니다.** U+FFFD로 조용히 치환하지
+  않습니다. BOM이 있는 UTF-16은 변환합니다.
+- **애니메이션 GIF는 첫 프레임으로 대체하지 않고 거절합니다.** 판정은
+  `lib/gifStructure.ts`의 블록 walk이며 libvips의 페이지 수가 아닙니다.
+- **ZIP은 중앙 디렉터리를 먼저 읽고, 거절하거나 고르고, 그 다음에만 풉니다.**
+  푼 크기는 디렉터리가 약속한 크기와 대조하고, 어긋나면 거절입니다. 디스크에
+  쓰지 않습니다. 중첩 깊이는 0입니다.
+- **압축 한도는 외부 대화 가져오기의 한도와 다릅니다.** 그쪽은 브라우저에서
+  열고 서버에 보내지 않으며, 이쪽은 채팅 요청 안에서 서버가 풉니다.
+  `lib/externalImportLimits.ts`의 숫자를 빌려오지 않습니다.
+- **내부 항목은 일반 첨부와 같은 함수를 지납니다.** 컨테이너가 이미지 개수,
+  payload 상한, 추출 텍스트 예산, OCR 허용량을 우회하는 길이 되어서는 안 됩니다.
+- **오류에 항목 경로·파서 메시지·R2 key·파일 내용을 싣지 않습니다.** 코드만
+  전달하고 문장은 `lib/chatAttachmentErrorCopy.ts`가 locale로 옮깁니다.
+- **Office 97-2003과 RTF는 자체 파서로 읽습니다**(`lib/legacyOffice/**`,
+  진입점 `lib/legacyOfficeText.ts`). 복호화하지 않고(암호 문서는
+  `ATTACHMENT_ENCRYPTED`), 매크로 저장소·임베디드 객체·그림을 열지 않으며,
+  아무것도 실행·평가·fetch 하지 않습니다. 파싱했는데 텍스트가 없으면 거절이지
+  빈 문자열이 아닙니다.
+- **이 네 파서는 워커가 아니라 예산으로 묶습니다.** eval된 워커는 저장소
+  `lib/`의 모듈을 `require`할 수 없으므로 `sharp`·`officeparser`·`pdfjs`의
+  방식을 쓸 수 없습니다. 대신 `lib/legacyOffice/budget.ts`의 deadline·byte
+  상한·문자 상한·iteration backstop이 모든 루프에 걸립니다. 이 파일들에 새
+  루프를 넣을 때 `budget.tick()`을 빼면 그 방어가 사라집니다.
+- **바이너리 파서의 정상 경로는 진짜 문서로 테스트합니다**
+  (`tests/fixtures/legacyOffice/`). 자체 writer가 만든 파일로만 검증하면 둘이
+  서로 동의한다는 것만 증명합니다. 거절 경로는
+  `tests/support/compoundFile.mjs`로 바이트 단위로 만듭니다.
+
 # 이미지 생성 (v2: 멀티 모델 비교)
 
 이미지 생성 관련 코드를 건드리기 전에 읽습니다.

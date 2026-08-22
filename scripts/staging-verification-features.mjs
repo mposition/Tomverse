@@ -45,6 +45,12 @@ export const STAGING_VERIFICATION_FEATURES = [
         checklist: "docs/ops/assistant-knowledge-staging-checklist.md",
         records: "docs/ops/assistant-knowledge-staging-verification-records",
     },
+    {
+        key: "chat-attachment",
+        label: "chat attachment formats (archives, legacy Office, GIF)",
+        checklist: "docs/ops/chat-attachment-staging-checklist.md",
+        records: "docs/ops/chat-attachment-staging-verification-records",
+    },
 ];
 
 export const stagingVerificationFeature = (key) => {
