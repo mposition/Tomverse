@@ -73,6 +73,7 @@ import {
 } from "@/lib/generatedArtifactTool";
 import { persistArtifactRows } from "@/lib/generatedArtifactStorage";
 import type { ChatStreamArtifact } from "@/lib/generatedArtifactCore";
+import { splitProviderInstructions } from "@/lib/chatProviderPrompt";
 import { resolveChatCompletionOutcome } from "@tomverse/chat-core";
 import { ERROR_REPORT_TOKEN_HEADER } from "@/lib/errorReportContract";
 import { issueChatErrorReportGrant } from "@/lib/traceErrorEvidence";
@@ -2550,26 +2551,16 @@ async function handleChatPost(
         /**
          * The SDK call's two halves.
          *
-         * `ai@7` refuses a system message inside `messages` unless
-         * `allowSystemInMessages` is set, and wants it in `instructions`
-         * instead (`node_modules/ai/dist/index.d.ts`). `formattedMessages`
-         * keeps carrying it: the deep research path hands the same array to
-         * Perplexity's own API, which does take a system turn
-         * (`lib/perplexityDeepResearch.ts`), and the request manifest below
-         * describes what was sent.
-         *
-         * The branch that builds `contextSystemPrompt` only runs when there is
-         * memory or profile context to inject, and neither has ever been on --
-         * so no turn produced a system message until a conversation with an
-         * assistant sent its first, which then failed with
-         * `AI_InvalidPromptError` and reached the user as an empty answer.
-         * Found on the Release C staging round, trace
-         * 0dde1576-6bb8-4a19-bd8f-55f8e73d2b27.
+         * `formattedMessages` keeps carrying its system blocks: the deep
+         * research path hands the same array to Perplexity's own API, which
+         * does take a system turn (`lib/perplexityDeepResearch.ts`), and the
+         * request manifest below describes what was sent. `ai@7` will not take
+         * them in `messages`, so the split happens here -- unconditionally,
+         * and in one place, because doing it per-source is what broke twice.
+         * See lib/chatProviderPrompt.ts.
          */
-        const sdkMessages: ModelMessage[] = contextSystemPrompt
-            ? formattedMessages.filter((message) => message.role !== "system")
-            : formattedMessages;
-        const sdkInstructions = contextSystemPrompt || undefined;
+        const { messages: sdkMessages, instructions: sdkInstructions } =
+            splitProviderInstructions(formattedMessages);
         const manifestMessages = formattedMessages.map((message) => ({
             role: message.role,
             parts: Array.isArray(message.content)
