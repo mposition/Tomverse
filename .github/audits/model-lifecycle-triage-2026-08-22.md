@@ -20,8 +20,8 @@ Qwen 3.8 계열 3건(`qwen3.8-max` · `qwen3.8-2.4t-a95b` · `qwen3.8-27b`)은
 
 | # | 결정 | 대상 | 성격 |
 |---|---|---|---|
-| D-1 | Gemini Flash 세대 이동 | `gemini-3.7-flash` | upgrade · **선례 있음** |
-| D-2 | Zhipu GLM 세대 이동 | `glm-5.3` | upgrade |
+| D-1 | Gemini Flash 세대 이동 | `gemini-3.7-flash` | upgrade · **선례 있음 · 착수 가능** |
+| D-2 | Zhipu GLM 세대 이동 | `glm-5.3` | upgrade · **blocked** |
 | D-3 | Qwen Flash 세대 이동 | `qwen3.7-flash` | upgrade |
 | D-4 | xAI 플래그십 세대 이동 | `grok-4.6` | upgrade · **연쇄 있음** |
 | D-5 | Qwen 3.8 계열 편입 여부 | `qwen3.8-max` 외 2 | 신규 계열 · **가격 gate** |
@@ -72,16 +72,16 @@ provider 공식 가격표를 사람이 읽어야 합니다. discovery가 `metada
 
 | 모델 | provider | 최초 발견 | 방치 | 권고 action | 신뢰도 | 상태 | 최대 blocker |
 |---|---|---|---|---|---|---|---|
-| `gemini-3.7-flash` | Google | 08-14 | 8일 | **upgrade** | 높음 | awaiting_decision | 가격 확인 |
-| `glm-5.3` | Zhipu | 08-16 | 6일 | **upgrade** | 높음 | awaiting_decision | 가격 확인 |
+| `gemini-3.7-flash` | Google | 08-14 | 8일 | **upgrade** | **확정** | **착수 가능** | 없음 (§5.1) |
+| `glm-5.3` | Zhipu | 08-16 | 6일 | **upgrade** | 낮음 | **blocked** | 종량제 단가 공표 여부 (§5.2) |
 | `qwen3.7-flash` | Qwen | 07-25 | **28일** | **upgrade** | 중간 | awaiting_decision | 가격 확인 · 세대 정합성 |
 | `grok-4.6` | xAI | 08-13 | 9일 | **upgrade** | 중간 | awaiting_decision | **premium 가격 gate** · replacement 연쇄 |
 | `qwen3.8-max` | Qwen | 08-04 | 18일 | **평가 필요** | 낮음 | evaluation_required | **premium 가격 gate** · 3.7-max와의 관계 |
 | `qwen3.8-2.4t-a95b` | Qwen | 08-14 | 8일 | **monitor** | 낮음 | deferred(D-5 종속) | 제품 결정 부재 |
 | `qwen3.8-27b` | Qwen | 08-20 | 2일 | **monitor** | 낮음 | deferred(D-5 종속) | 제품 결정 부재 |
 
-**착수 순서 권고: D-1 → D-2 → D-3 → D-4 → D-5.**
-가격 gate가 없는 것부터, 그리고 선례가 있는 것부터입니다.
+**착수 순서(2026-08-22 조사 반영): D-1 → (D-3·D-4 자료 확보) → D-2 판정 → D-5.**
+D-1만 지금 착수 가능하고, D-2는 착수 자체가 막혔습니다. §5.7 참조.
 
 ---
 
@@ -236,24 +236,184 @@ flash는 3.6입니다. `qwen3.7-flash`는 정확히 그 구멍을 메웁니다.
 
 ---
 
-## 5. 한 번에 구해야 할 provider 사실
+## 5. Provider 자료 조사 결과 (2026-08-22 확인)
 
-7건이 기다리는 것은 결국 같은 종류의 자료입니다. 흩어서 찾지 말고 한 번에
-모읍니다. **전부 `[확인 불가]`이며 provider 공식 가격표·모델 문서가 출처입니다.
-`GET /v1/models`는 가격 출처가 아닙니다**(`lib/modelPricing.ts:402`).
+조사 결과 **6건 중 1건만 공식 자료로 확정**됐습니다. 나머지 5건은 provider
+공식 도메인이 이 세션의 egress proxy에 차단돼 1차 확인이 불가능합니다.
+집계 사이트 수치는 참고로 남기되 **`priceSource`로 쓸 수 없습니다** —
+`lib/modelPricing.ts:402`의 `MODEL_LIST_ENDPOINT_IS_NOT_A_PRICE_SOURCE`가
+세운 기준이 여기에도 적용됩니다.
 
-| 모델 | 필요한 것 |
-|---|---|
-| `gemini-3.7-flash` | 입·출력 단가, cache read 단가, 컨텍스트, 출력 상한 |
-| `glm-5.3` | 입·출력 단가, 컨텍스트, 5.2 대비 변화 |
-| `qwen3.7-flash` | 입·출력 단가(길이 tier 여부), 컨텍스트 |
-| `grok-4.6` | 입·출력 단가, 컨텍스트, reasoning 등급, 출력 상한 |
-| `qwen3.8-max` | 입·출력 단가(길이 tier), 3.7-max와의 관계 |
-| `qwen3.8-*b` | 서빙 형태(API tier인지 open-weight인지) |
+차단된 도메인: `x.ai`, `docs.x.ai`, `docs.z.ai`, `bigmodel.cn`,
+`www.alibabacloud.com`, `help.aliyun.com`. (`ai.google.dev`는 접근 가능.)
 
-Qwen은 **입력 길이별 계단 가격**을 쓰므로(`qwen3.7-plus` profile의
-`maxPromptTokens: 256_000` 분기) 단일 단가로 받아 적으면 장문 요청에서
-과소청구됩니다. 3.7-plus/3.7-max profile의 형태를 그대로 따릅니다.
+---
+
+### 5.1 `gemini-3.7-flash` — `[공식 자료]` **확정**
+
+출처: `https://ai.google.dev/gemini-api/docs/pricing` ·
+`https://ai.google.dev/gemini-api/docs/models/gemini-3.7-flash` (2026-08-22 확인)
+
+| 항목 | 값 | 3.6 Flash(현행) |
+|---|---|---|
+| API id | `gemini-3.7-flash` | `gemini-3.6-flash` |
+| 입력 | **$0.75/M** (~2026-12-31) → **$1.50/M** (2027-01-01~) | $1.50/M |
+| 출력(thinking 포함) | **$3.75/M** (~2026-12-31) → **$7.50/M** | $7.50/M |
+| cache read | **$0.075/M** → **$0.15/M** | multiplier 0.1 |
+| 입력 한도 | **1,048,576** | 1,048,576 |
+| 출력 한도 | **65,536** | 65,536 |
+| 입력 형식 | Text·Image·Video·Audio·PDF | `FULL_BINARY_INPUT` |
+| thinking | low/medium/high (`minimal`은 오류) | — |
+| 출시 단계 | **GA / Stable** | — |
+
+**핵심: 정가가 3.6 Flash와 완전히 같습니다.** 컨텍스트·출력 한도·입력 형식·
+cache multiplier(0.075/0.75 = 0.1)까지 동일합니다. 다른 것은 2026-12-31까지의
+**도입 할인 50%** 하나뿐입니다.
+
+**그래서 credit band 결정이 없습니다** — `usageClass: "advanced"`,
+`minimumPlan: "Free"`를 3.6 Flash에서 그대로 씁니다. 2026-08-03에 3.5 Flash가
+겪은 "Standard 대역에 잘못 남아 있었다" 류의 재계산이 필요 없습니다.
+
+> **가격 권고: 도입가가 아니라 정가 `flatTier(1.5, 7.5, 0.1)`로 등록합니다.**
+>
+> `ModelPricingProfile`에는 만료일도 예약 변경 필드도 없습니다 — `effectiveDate`
+> 하나뿐입니다(`lib/modelPricing.ts:95-152`). 즉 **"2027-01-01에 두 배가 된다"를
+> 코드로 표현할 방법이 없습니다.** $0.75/$3.75로 등록하면 그날부터 누군가 새
+> `pricingVersion`을 배포하기 전까지 **실원가의 절반으로 청구**합니다. 반대로
+> 정가로 등록하면 도입 기간 동안 보수적으로 과다 예약할 뿐이고, 이는 이
+> 저장소가 fallback에서 이미 택한 방향입니다. 그리고 정가가 3.6 Flash와 같으므로
+> **profile을 그대로 복사**하면 됩니다.
+>
+> 도입가의 이득을 취하려면 그것은 별도 결정이며, 만료일을 사람이 캘린더에
+> 들고 있어야 합니다.
+
+**남은 확인 1건**: `nativeSearchCostMicroUsdPerQuery`. 3.6 Flash는 `14_000`을
+갖고 있습니다(`lib/modelPricing.ts:561`). 3.7의 grounding 단가가 같은지
+확인이 필요하며, Google grounding을 쓰지 않으면 무관합니다.
+
+**주의(미확인)**: Google AI 개발자 포럼에 "Gemini 3.7 Flash가 문서화되지 않은
+32,768 토큰 한도로 유효한 요청을 거절한다"는 신고가 있습니다. 해당 도메인
+(`discuss.ai.google.dev`)이 차단돼 내용을 확인하지 못했습니다. 사실이라면
+`maxOutputTokens: 65_536` 설정이 실패를 낳으므로, **staging에서 긴 출력 요청을
+한 번 실행해 확인**한 뒤 등록합니다.
+
+---
+
+### 5.2 `glm-5.3` — `[확인 불가]` · **자료가 서로 충돌합니다**
+
+공식(`docs.z.ai`, `bigmodel.cn`) 모두 차단. 그리고 2차 자료가 **엇갈립니다**.
+
+- 한쪽: "Z.ai가 GLM-5.3의 종량제 단가를 아직 공표하지 않았고 API는 coming soon.
+  현재는 GLM Coding Plan 구독(Lite $18/Pro $80/Max $168 월)으로만 접근 가능."
+- 다른쪽(공식 도메인 한정 검색): "$1.4/M 입력 · $0.26/M cached · $4.4/M 출력."
+
+**후자의 수치는 GLM-5.2의 공표가($1.40/$4.40)와 동일**하므로, 검색이 5.2와 5.3을
+섞었을 가능성이 높습니다. 어느 쪽이든 지금 등록하면 안 됩니다.
+
+**판정 변경: `awaiting_decision` → `blocked`.**
+blocked on: **Z.ai가 GLM-5.3 종량제 단가를 공표했는지 여부.**
+확인처: `https://docs.z.ai/guides/overview/pricing`.
+
+구독 전용이 사실이라면 이 모델은 **가격 문제가 아니라 조달 형태 문제**입니다 —
+이 저장소의 과금 모델은 토큰 종량제를 전제하며(`ModelPriceTier`), 월 구독
+모델을 표현할 자리가 없습니다. 그 경우 판정은 `blocked`가 아니라
+`closed_no_action`이 되고, 재평가는 종량제 공표 시점입니다.
+
+---
+
+### 5.3 `grok-4.6` — `[확인 불가]` · 구조는 저장소가 표현 가능
+
+`x.ai`·`docs.x.ai` 모두 차단. 2차 자료가 보고하는 구조는 다음과 같습니다
+(**미검증**).
+
+| 구간 | 입력 | cached | 출력 |
+|---|---|---|---|
+| 프롬프트 < 200K | $2/M | $0.50/M | $6/M |
+| 프롬프트 ≥ 200K | $4/M | $1/M | $12/M |
+
+**계단 진입 시 요청 전체에 상위 단가가 적용**된다고 보고됩니다(210K 요청을
+200K+10K로 쪼개 계산하지 않음). 이는 `ModelPriceTier.maxPromptTokens`의 의미와
+정확히 일치하므로 — 한 tier가 선택되면 그 요청 전체에 적용 — **저장소가 이미
+표현할 수 있는 형태**입니다. `qwen3.7-plus` profile의 2구간 구성이 그대로
+본보기입니다.
+
+**판정 유지: `awaiting_decision`, blocked on 공식 단가 확인.**
+확인처: `https://docs.x.ai/docs/models`.
+`premium-reasoning`이므로 `check:model-pricing`이 fail-closed이고,
+미검증 수치로는 착수할 수 없습니다.
+
+---
+
+### 5.4 `qwen3.7-flash` — `[확인 불가]` · 3구간 보고
+
+`www.alibabacloud.com`·`help.aliyun.com` 차단. 2차 자료 보고(**미검증**):
+
+| 프롬프트 구간 | 입력 | 출력 |
+|---|---|---|
+| < 32K | $0.03/M | $0.13/M |
+| 32K ~ 256K | $0.10/M | $0.40/M |
+| 256K ~ 1M | $0.20/M | $0.80/M |
+
+사실이라면 현행 `qwen3.6-flash`보다 훨씬 싸고, **3구간이므로 단일 단가로 받아
+적으면 장문에서 과소청구**됩니다. `qwen3.7-plus`가 이미 같은 이유로 2구간을
+명시하고 있습니다(`lib/modelPricing.ts:998-1010`).
+
+**판정 유지.** 확인처: Alibaba Cloud Model Studio 공식 가격 페이지.
+
+---
+
+### 5.5 `qwen3.8-max` — `[확인 불가]` · premium gate 때문에 특히 엄격
+
+2차 자료 보고(**미검증**): $2/M 입력 · $6/M 출력 · cache read $0.25/M.
+
+사실이라면 현행 `qwen3.7-max`의 검증가($2.5/$7.5)보다 **싸면서 상위 세대**라는
+뜻이고, 그러면 3.7-max를 대체하는지 병존하는지가 제품 결정으로 남습니다.
+
+**주의**: `qwen3.7-max`는 실가격이 기록되기 전까지 US$15/US$60 fallback으로
+**실입력가의 6배**를 예약하고 있었습니다. 3.8-max를 미검증 상태로 넣으면 같은
+일이 반복되고, 이번에는 비어 있는 `PENDING_VERIFIED_PRICE_REGISTER`를 깨는
+첫 항목이 됩니다.
+
+**판정 유지: `evaluation_required`.**
+
+---
+
+### 5.6 `qwen3.8-2.4t-a95b` · `qwen3.8-27b` — 조사하지 않음
+
+가격 조사 대상이 아닙니다. 선행 질문이 **"open-weight 변형을 제품 카탈로그에
+넣는가"**라는 제품 결정이고(§4 D-5), 그 답이 `아니오`면 가격은 무의미합니다.
+`deferred` 유지.
+
+---
+
+### 5.7 조사가 바꾼 것
+
+| | 조사 전 | 조사 후 |
+|---|---|---|
+| D-1 `gemini-3.7-flash` | awaiting_decision · 가격 확인 필요 | **착수 가능.** 공식 확정, credit band 결정 불필요, profile은 3.6 Flash 복사 |
+| D-2 `glm-5.3` | awaiting_decision (2순위) | **blocked.** 종량제 단가 공표 여부 자체가 미확인 |
+| D-3 `qwen3.7-flash` | 가격 확인 필요 | 유지. 3구간 구조 확인, 공식 미확인 |
+| D-4 `grok-4.6` | 가격 gate | 유지. 계단 구조는 저장소가 표현 가능, 공식 미확인 |
+| D-5 Qwen 3.8 | 가격 gate + 제품 결정 | 유지. 제품 결정이 먼저 |
+
+**착수 순서 수정: D-1 → (D-3·D-4 자료 확보) → D-2 판정 → D-5.**
+D-2가 2순위에서 내려간 것은 우선순위 판단이 아니라 **착수 자체가 불가능하기
+때문**입니다.
+
+### 5.8 이 조사가 드러낸 저장소 결함 하나
+
+**`ModelPricingProfile`에 가격 만료·예약 변경을 표현할 필드가 없습니다.**
+필드는 `effectiveDate` 하나이며 "언제부터"만 말하고 "언제까지"를 말하지
+못합니다(`lib/modelPricing.ts:95-152`).
+
+Gemini 3.7 Flash처럼 **만료일이 명시된 도입가**는 이 구조에서 안전하게 담기지
+않습니다. 지금은 정가 등록으로 회피할 수 있지만(§5.1), 도입가가 정가보다
+구조적으로 다른 모델 — 예컨대 무료 프리뷰 — 이 오면 회피가 성립하지 않습니다.
+
+정책 문서 `docs/policy/credit-and-cost-limits.md`가 "가격 변경은 소급 적용하지
+않는다"를 말하지만 **예정된 변경을 어떻게 다루는지는 말하지 않습니다.**
+`ModelLifecycleWorkItem`의 `dueAt`으로 "2026-12-31에 3.7 Flash 가격 재확인"을
+거는 것이 지금 구조에서 가능한 최선입니다.
 
 ---
 

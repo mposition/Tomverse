@@ -194,7 +194,9 @@ cause · 권고 · Acceptance criteria · 검증 방법 · 파일:line 순입니
   `registry auto-updates 4`가 찍혀 auto-disable이 실제로 동작한 기록이
   남아 있습니다.
 - **이 7건의 triage는 `.github/audits/model-lifecycle-triage-2026-08-22.md`에
-  있습니다.** 5개 결정으로 묶이고, 그중 둘이 premium 가격 gate에 걸립니다.
+  있습니다.** 5개 결정으로 묶이고, 2026-08-22 provider 자료 조사 결과
+  **`gemini-3.7-flash` 1건만 착수 가능**하며 `glm-5.3`은 종량제 단가 공표 여부가
+  확인되지 않아 blocked입니다.
 - **영향**: cron 실패, 이메일 유실, 휴가, 다른 급한 일 — 어느 하나만 겹쳐도 그
   모델은 영구히 사라집니다. 위 표가 그 손실이 가설이 아니라 **한 달 동안 7건**
   누적된 사실임을 보여 줍니다. 그중 `grok-4.6`·`gemini-3.7-flash`·`glm-5.3`은
