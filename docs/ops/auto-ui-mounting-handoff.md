@@ -16,32 +16,47 @@
   쓰고 있었습니다. 두 Auto 컴포넌트가 이제 `check:accent-tokens`의
   `GUARDED_FILES`에 있습니다.
 
-## 2. 아직 하지 않은 것 — 왜 별도 PR인가
+## 2. 마운트 — 완료
 
-`AutoRoutingToggle`과 `AutoRoutedByBadge`는 **여전히 어디에도 마운트되지
-않았습니다.** 마운트는 다음을 한 변경에 요구합니다.
+`AutoRoutingToggle`과 `AutoRoutedByBadge`가 실제 UI에 연결됐습니다.
 
-1. `autoSelection.offered`를 서버 응답에서 클라이언트 상태로 배선
-   (현재 `app/api/conversations/[conversationId]` 응답에만 있고 클라이언트가
-   읽지 않습니다).
-2. 토글을 `ModelPickerPanel` 상단에 배치 — 이 파일은 **release blocker 계약**
-   두 개(`docs/ui-contracts/mobile-chat-composer.md`,
-   `docs/ui-contracts/image-generation-workspace.md`)의 대상입니다.
-3. 배지를 메시지 헤더에 배치 — **실제 응답한 모델만** 표시해야 하고,
-   fallback한 턴에는 렌더링하면 안 됩니다. 데이터(`selectionDisclosure`,
-   `X-Chat-Routed-*` 헤더)는 이미 서버에 있으나 클라이언트로 오지 않습니다.
-4. e2e 회귀 — bounding-box · overlap · horizontal-overflow · **한국어 IME** ·
-   **320px** · **200% 확대**를 desktop과 mobile 프로젝트 양쪽에서.
-5. 필수 증거 — `offered: false`에서 **두 컴포넌트가 아무것도 렌더링하지
-   않는다**는 테스트. 계약 §1이 존재하는 이유가 "저장하고 아무것도 바꾸지 않는
-   토글은 없는 것보다 나쁘다"인데, 지금 그 컴포넌트들은 마운트된 적이 없어
-   **계약이 한 번도 실행된 적이 없습니다.**
+| 배선 | 위치 |
+|---|---|
+| `autoSelection.offered` → 클라이언트 상태 | `ChatPageClient` → 두 shell → `ChatInput` → `ModelPickerPanel` |
+| 토글 | `ModelPickerPanel` 목록 **위**, keyboard-scroll 영역 **안** |
+| 배지 | `ChatMessageList`의 답변 아래, `msg.routedModelId`가 있을 때만 |
+| PATCH | `handleSelectionModeChange` — 낙관적 적용 후 실패 시 되돌림 |
+| 문구 | `locales/*.ts`에 `chat.autoSelectionFailed` 7종 추가 |
 
-이것은 Playwright가 실제 앱과 DB를 띄워야 검증되는 작업이고, release blocker
-계약 두 개를 건드립니다. 검증 없이 섞으면 그 계약들이 통과했는지 말할 수 없게
-됩니다.
+**`offered`는 확정된 서버 읽기에서만 설정됩니다.** 대화 목록의 낙관적 seeding은
+`autoSelection`을 싣지 않으므로, 그것으로 값을 지우면 사이드바에서 대화를 열 때
+컨트롤이 깜빡입니다. 대화가 생성되기 전에는 항상 false입니다 — 서버가 그 상태의
+`auto`를 거부하므로, 거기 있는 스위치는 아무것도 저장하지 못합니다.
 
-## 3. 그 PR이 지켜야 할 것
+### 검증
+
+- `tests/client/autoRoutingRender.test.tsx` — 13건. `offered: false`가 **`null`**
+  임을 직접 확인하고, 7개 언어의 렌더 결과에 금지어(better/best/optimal/smartest,
+  "가장 좋은", "최적")와 롤아웃 어휘(bucket/cohort/rollout/salt/readiness/percent/
+  flag/%)와 Refiner가 없는지 확인합니다.
+- `tests/e2e/auto-routing-toggle.spec.ts` — 9건 × desktop·mobile. **320px +
+  200% 확대**, 한국어 초안 보존, composer의 textarea 행 불변, cohort 이탈 상태
+  (`selectionMode: "auto"` + `offered: false`)에서 대화가 계속 열리는지.
+- 재실행한 release blocker 계약 suite — mobile composer, model picker,
+  picker-responsive, limit-state, sidebar drawer. **97 passed.**
+- `tests/autoRoutingUi.test.mjs` — 마운트 지점 자체를 고정: wrapper가 조건
+  **안**에 있는지(빈 div의 margin이 남지 않도록), 배지가 서버의 routed 표시
+  뒤에서만 렌더되는지, 클라이언트가 `routed`를 **유도하지 않는지**.
+
+### 새 테스트 lane
+
+`tests/client/`는 `--conditions=react-server` **없이** 도는 두 번째 프로세스입니다.
+그 조건에서는 `react.createContext`가 없어서 lucide-react를 쓰는 컴포넌트가
+import 시점에 throw합니다 — 이 저장소에 컴포넌트 렌더 테스트가 하나도 없었고
+따라서 **계약이 한 번도 실행된 적이 없었던** 이유입니다. 조건을 전역으로 끄는
+대신 프로세스를 나눈 것은 `run-db-integration-tests.mjs`의 선례를 따른 것입니다.
+
+## 3. 마운트가 지킨 것 (앞으로도 지켜야 할 것)
 
 - `offered=false`면 **아무것도** 렌더링하지 않습니다. disabled 상태도, 회색 행도,
   "곧 제공" 문구도 없습니다.
@@ -60,6 +75,15 @@
   (v1.2가 이 문서에서 제외했습니다).
 - Auto에 AI Review 전용 cyan→blue→purple을 재사용하지 않습니다. 신규 accent
   역할이 필요하면 **AGENTS.md 절차대로 token부터**.
+
+## 3.1 이 환경에서 확인하지 못한 것
+
+`mobile-composer-contract.spec.ts`의 **visual golden 2건**은 이 컨테이너에서
+911픽셀 차이로 실패합니다. **이 변경 때문이 아닙니다** — `develop`을 그대로
+체크아웃해 다시 빌드하고 돌렸을 때 **같은 911픽셀**이 나옵니다. 환경의 Chromium이
+build 1194이고 golden은 다른 build에서 기록됐습니다(@playwright/test 1.62.1은
+1234를 기대합니다). golden 재기록은 `visual-baseline/**` 브랜치에서 **사람이
+diff를 보고** 병합합니다(AGENTS.md).
 
 ## 4. 함께 넘어가는 나머지 §7 항목
 

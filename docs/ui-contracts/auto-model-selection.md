@@ -1,8 +1,13 @@
 # Auto model selection — UI contract
 
-- Status: **built, not shipped.** `TOMVERSE_AUTO_ROUTER_UI_ENABLED` is off, and
-  every readiness gate in `lib/autoRolloutReadiness.ts` is `pending`, so no
-  account is offered Auto today.
+- Status: **wired, not shipped.** `TOMVERSE_AUTO_ROUTER_UI_ENABLED` is off,
+  every readiness gate in `lib/autoRolloutReadiness.ts` is `pending`, and Auto
+  is offered in one product that no conversation belongs to yet — so no account
+  is offered Auto today. The controls are now mounted
+  (`ModelPickerPanel` and `ChatMessageList`), which is what makes §1 a rule
+  something executes rather than a claim about components nothing rendered.
+  Coverage: `tests/client/autoRoutingRender.test.tsx` and
+  `tests/e2e/auto-routing-toggle.spec.ts`.
 - Owner: Product, with Backend/AI as rollout owner
 - Server side: `docs/ops/tomverse-chat-auto-router-rollout.md`
 - Policy: `docs/policy/tomverse-chat-routing.md` §5
