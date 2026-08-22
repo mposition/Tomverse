@@ -628,6 +628,11 @@ default를 DB에 씁니다), 저장값 JSON 파싱 실패, schema 검증 실패.
 - **billing의 `allowDownloads`를 재사용하지 않습니다.** 그 권한은 대화 TXT
   내보내기의 것이며, 생성 파일은 로그인한 모든 계정이 쓸 수 있습니다:
   docs/policy/generated-artifacts.md §11.
+- **OOXML package 변경은 검사기가 아니라 대상 application에서 확인합니다.**
+  master마다 theme part를 하나씩 쓰고, `<a:spLocks noGrp="1"/>`를 쓰는 shape는
+  자기 `<p:ph>`를 갖습니다. theme을 공유한 deck은 ECMA-376 XSD와 Microsoft
+  OpenXmlValidator를 Office 2007~2021 여섯 버전 모두에서 통과하면서 PowerPoint가
+  열지 못했습니다: docs/policy/generated-artifacts.md §4.
 
 # Trace 기반 오류 신고 자동화
 
