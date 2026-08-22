@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { deflateSync, strToU8, zipSync } from "fflate";
+
+import { extractLegacyOfficeText } from "../lib/legacyOfficeText.ts";
 
 import { ChatArchiveError, expandChatArchive } from "../lib/chatArchive.ts";
 import { CHAT_ARCHIVE_ERROR_CODES as CODES } from "../lib/chatArchiveLimits.ts";
@@ -165,6 +169,46 @@ test("a refusal carries a code and never an entry path", async () => {
       assert.equal(error.message.includes("secrets"), false);
       return true;
     }
+  );
+});
+
+test("a legacy Office document inside an archive is read like any other", async () => {
+  // The seam between the two features: an archive entry goes through the same
+  // reader as a direct attachment, so a `.doc` in a ZIP has to reach the
+  // compound-file parser with nothing special done for it.
+  const legacy = (name) =>
+    new Uint8Array(
+      readFileSync(fileURLToPath(new URL(`./fixtures/legacyOffice/${name}`, import.meta.url)))
+    );
+  const zip = Buffer.from(
+    zipSync({
+      "docs/report.doc": legacy("sample.doc"),
+      "data/book.xls": legacy("sample.xls"),
+      "notes.rtf": legacy("sample.rtf"),
+      "readme.md": strToU8("# hi\n"),
+    })
+  );
+
+  const expanded = await expandChatArchive(zip, "account");
+  assert.deepEqual(
+    expanded.files.map((file) => file.entry.format.id),
+    // Sorted by path: data/, docs/, notes.rtf, readme.md.
+    ["xls", "doc", "rtf", "markdown"]
+  );
+  const byPath = new Map(
+    expanded.files.map((file) => [file.entry.path, file])
+  );
+  assert.ok(
+    extractLegacyOfficeText(
+      new Uint8Array(byPath.get("docs/report.doc").bytes),
+      "doc"
+    ).text.startsWith("Tomverse legacy fixture")
+  );
+  assert.ok(
+    extractLegacyOfficeText(
+      new Uint8Array(byPath.get("data/book.xls").bytes),
+      "xls"
+    ).text.includes("[Sheet: Quarter]")
   );
 });
 
