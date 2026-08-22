@@ -17,10 +17,13 @@
 청중이 없습니다. 두 결함은 같은 모양입니다 — 한 번 만들어진 사실이 다음 날까지
 살아남지 못합니다.**
 
-1. **신규 모델 후보는 발견된 날 하루만 존재합니다.** `newCandidates`는
-   `ProviderModelCatalogEntry` 행이 이미 있으면 비게 되고, 행은 첫 스캔에서
-   만들어집니다. 그러므로 어떤 후보도 이틀 연속 보고되지 않습니다.
-   `[코드]` `lib/providerModelCatalogMonitor.ts:213`
+1. **신규 모델 후보는 발견된 날 하루만 존재하고, 이미 손실이 발생했습니다.**
+   `newCandidates`는 `ProviderModelCatalogEntry` 행이 이미 있으면 비게 되고,
+   행은 첫 스캔에서 만들어집니다. production 실측(2026-08-17~22): 후보 6건이
+   보고됐고 **어느 하나도 두 번 보고되지 않았으며 5건은 저장소 어디에도
+   없습니다.** 그중 `qwen3.8-27b`는 Qwen 자신의 모델로 8/20에 한 번 보고된 뒤
+   사라졌습니다.
+   `[코드]` `lib/providerModelCatalogMonitor.ts:213` `[측정]` 5절 ML-01
 2. **그 후보를 다시 볼 수 있는 화면이 저장소에 하나도 없습니다.**
    `ProviderModelCatalogEntry`를 읽는 코드는 monitor 자기 자신뿐입니다 — admin
    page 없음, API 없음, 리포트 없음. 발견은 아무도 열 수 없는 서랍에 들어갑니다.
@@ -133,18 +136,41 @@ Railway cron `0 0 * * *` (= 10:00 Australia/Brisbane) `[코드]` `railway.provid
 각 finding은 ID · Severity · Evidence · 현재 동작 · 기대 동작 · 영향 · Root
 cause · 권고 · Acceptance criteria · 검증 방법 · 파일:line 순입니다.
 
-### ML-01 — 신규 후보는 발견 당일에만 보고된다 (P0, High)
+### ML-01 — 신규 후보는 발견 당일에만 보고된다 (P0, High) — **production에서 확인됨**
 
-- **Evidence**: `[코드]`
+- **Evidence**: `[코드]` `[측정]`
 - **현재 동작**: `newCandidates`는 `existingByApiModel`에 해당 `apiModel`이 없을
   때만 채워집니다. 그 map은 같은 함수 앞부분에서 `ProviderModelCatalogEntry`
   전체를 읽어 만들고, 행은 첫 관측에서 upsert로 생성됩니다. 따라서 어떤 모델도
   두 번 `newCandidates`에 들어가지 않습니다.
 - **기대 동작**: 미검토 후보는 검토·기각·연기 중 하나가 되기 전까지 매일 보고에
   남는다.
+- **`[측정]` production 실측 (2026-08-17 ~ 08-22)**
+
+  Railway `Provider Model Catalog` 서비스 cron 로그(`newCandidates` 카운트)와
+  `#all-tomverse`의 `Tomverse model catalog report` Slack 메시지(후보 이름)를
+  대조했습니다. 6일 연속 `checked 12/12 · missing 0 · lifecycle warnings 0 ·
+  registry auto-updates 0`입니다.
+
+  | 날짜 (AEST) | newCandidates | 보고된 후보 | 오늘 저장소에 있는가 |
+  |---|---|---|---|
+  | 8/17 | 0 | — | — |
+  | 8/18 | 0 | — | — |
+  | 8/19 | 2 | Qwen `ZHIPU/GLM-5.3` · Perplexity `perplexity/deepseek-v4-pro-0813` | **없음** · **없음** |
+  | 8/20 | 1 | Qwen `qwen3.8-27b` | **없음** |
+  | 8/21 | 1 | Perplexity `perplexity/glm-5.3` | **없음** |
+  | 8/22 | 2 | DeepSeek `deepseek-v4-flash-vision-exp` · Qwen `kimi-k3` | **없음** · 있음(moonshot) |
+
+  **6건 중 어느 하나도 두 번 보고되지 않았고, 5건은 저장소 어디에도
+  존재하지 않습니다**(`grep -ril` 전수, `lib/models.ts`·테스트·문서 포함).
+
+  가장 깨끗한 사례는 **`qwen3.8-27b`**입니다 — Qwen 자신의 카탈로그에서 나온
+  Qwen 자신의 모델이고, 2026-08-20에 한 번 보고됐으며, 그 뒤 이틀간의 리포트는
+  `New model candidates found today: None`을 출력했고, 저장소에는 없습니다.
+  검토됐는지 기각됐는지 **저장소가 답할 수 없습니다**(ML-03).
 - **영향**: cron 실패, 이메일 유실, 휴가, 다른 급한 일 — 어느 하나만 겹쳐도 그
-  모델은 영구히 사라집니다. 2026-08-22 현재 몇 건이 그렇게 사라졌는지는
-  `[확인 불가]`(23절 참조).
+  모델은 영구히 사라집니다. 위 표가 그 손실이 가설이 아니라 이미 일어난 일임을
+  보여 줍니다.
 - **Root cause**: "오늘의 변화"와 "미처리 목록"이 같은 배열로 표현됨.
 - **권고**: 5절의 `ModelLifecycleWorkItem` 도입. Daily 리포트는 `NEW TODAY`와
   `PENDING N DAYS`를 별도 섹션으로 렌더.
@@ -194,7 +220,9 @@ cause · 권고 · Acceptance criteria · 검증 방법 · 파일:line 순입니
 - **현재 동작**: Slack 20행, 이메일 100행에서 `…and N more`. 잘린 항목이 무엇인지
   다른 곳에서 볼 수 없습니다(ML-02 때문에).
 - **기대 동작**: 절단은 남되, 잘린 항목을 볼 수 있는 링크가 함께 있어야 합니다.
-- **영향**: backlog가 쌓이는 순간(ML-01 수정 직후) 정확히 이 절단이 문제가 됩니다.
+- **영향**: 현재는 **잠복 상태**입니다 — `[측정]` 8/17~8/22 실측에서 하루 최대
+  2행이라 상한에 닿은 적이 없습니다. backlog가 쌓이는 순간(ML-01 수정 직후)
+  정확히 이 절단이 문제가 됩니다.
 - **권고**: 절단 시 Admin Console deep link + 총계를 함께 출력.
 - **AC**: 101건일 때 이메일에 "100 shown of 101 · 전체 보기" 링크가 있다.
 - **검증**: unit test.
@@ -313,6 +341,58 @@ cause · 권고 · Acceptance criteria · 검증 방법 · 파일:line 순입니
 - **AC**: `--apply` 후 변경된 사용자 수 = record 행 수 = completion audience 크기.
 - **검증**: DB integration.
 - **파일**: `scripts/run-default-model-reconciliation.mjs:127-200`
+
+### ML-12 — 같은 모델이 provider마다 별개의 후보가 된다 (P1, Medium)
+
+- **Evidence**: `[코드]` `[측정]`
+- **현재 동작**: 후보의 identity는 `@@unique([provider, apiModel])`입니다
+  (`prisma/schema.prisma:1745`). 여러 provider가 같은 모델을 서빙하면 각각
+  별개의 행이 되고, 각각 따로 `newCandidates`에 들어갑니다.
+- **`[측정]` 실측 두 사례**
+  - **GLM-5.3이 두 번, 서로 다른 날, 서로 무관한 한 줄로 보고됐습니다** —
+    8/19에 `Qwen ZHIPU/GLM-5.3`, 8/21에 `Perplexity perplexity/glm-5.3`.
+    두 리포트 중 어느 쪽도 "이건 이틀 전에 본 그 모델"이라고 말하지 않습니다.
+    한편 **Zhipu 자신의 카탈로그 스캔은 이 모델을 한 번도 반환하지 않았고**,
+    registry는 여전히 `glm-5.2`입니다(`lib/models.ts:293`).
+  - **`kimi-k3`는 이미 카탈로그에 있는 모델인데 NEW로 보고됐습니다**(8/22) —
+    `(moonshot, kimi-k3)` 행은 있지만 `(qwen, kimi-k3)` 행은 없기 때문입니다
+    (`lib/models.ts:288`). 이미 출시한 모델에 "새 모델 발견" 줄이 붙습니다.
+- **기대 동작**: 이미 카탈로그에 있는 모델은 어느 provider 경로로 나타나든
+  후보가 아니어야 하고, 같은 모델의 서로 다른 provider 관측은 하나의 검토
+  대상으로 묶여야 합니다.
+- **영향**: 두 방향 모두 나쁩니다. 노이즈(`kimi-k3`)는 "새 후보" 섹션을 무시하게
+  만들고, 분산(GLM-5.3)은 같은 결정을 두 번 요구하면서 그것이 같은 결정임을
+  숨깁니다.
+- **Root cause**: candidate 판정이 `registryByApiModel`을 **해당 provider 안에서만**
+  조회합니다(`monitor.ts:186-196`).
+- **권고**: work item 생성 시 (a) provider 무관 `apiModel` 정규화 키로 기존
+  registry 전체를 조회해 이미 있으면 후보로 만들지 않고, (b) 정규화 키가 같은
+  관측을 하나의 work item에 `observedVia: [{provider, rawId}]`로 모읍니다.
+  관측 테이블(`ProviderModelCatalogEntry`)의 provider별 행은 그대로 둡니다 —
+  그것은 사실이고, 묶는 것은 결정 계층의 일입니다.
+- **AC**: 이미 registry에 있는 `apiModel`이 다른 provider 카탈로그에 나타나도
+  work item이 생기지 않는다. 같은 정규화 키의 두 provider 관측은 work item
+  하나에 모인다.
+- **검증**: pure unit + DB integration. 유료 turn 0.
+- **파일**: `lib/providerModelCatalogMonitor.ts:186-196,203-216`,
+  `prisma/schema.prisma:1745`
+
+### ML-13 — provider 라벨이 모델 소유자가 아니라 스캔한 provider다 (P1, Medium)
+
+- **Evidence**: `[코드]` `[측정]`
+- **현재 동작**: `providerName(result.provider)`는 **카탈로그를 스캔한 쪽**을
+  출력합니다(`report.ts:73-77`). 실측에서 그 결과는
+  `Qwen ZHIPU/GLM-5.3`, `Qwen kimi-k3`, `Perplexity perplexity/deepseek-v4-pro-0813`
+  입니다 — 읽으면 Qwen이 GLM을 냈고 Kimi를 냈다고 말하는 문장입니다.
+- **기대 동작**: "누구의 모델인가"와 "어느 카탈로그에서 봤는가"를 구분해
+  표기합니다.
+- **영향**: triage가 첫 줄부터 틀린 전제 위에서 시작합니다. ML-12와 겹쳐서,
+  같은 모델이 다른 이름표를 달고 다른 날 나타납니다.
+- **권고**: `owner/observed` 두 열로 렌더 — 예:
+  `GLM-5.3 · Zhipu 모델 · Qwen·Perplexity 카탈로그에서 관측`.
+  소유자를 확정할 수 없으면 `unknown`으로 두고 추측하지 않습니다.
+- **AC**: 리포트의 각 후보 줄이 관측 경로를 소유자와 구분해 말한다.
+- **파일**: `lib/providerModelCatalogReport.ts:10-22,73-77`
 
 ### EM-01 — segment/all-users fan-out 경로가 없다 (P0, High)
 
@@ -592,8 +672,9 @@ cause · 권고 · Acceptance criteria · 검증 방법 · 파일:line 순입니
 
 | # | 후보 원인 | 분류 | 근거 |
 |---|---|---|---|
-| 1 | 최초 발견 시에만 `newCandidates` | **코드로 확정** | `monitor.ts:213`. 이것이 주원인입니다 |
-| 2 | DB에 candidate는 남지만 이메일은 delta만 | **코드로 확정** | `report.ts:73-74`가 `result.newCandidates`만 읽음. DB 행은 `status:"candidate"`로 남아 있음 |
+| 1 | 최초 발견 시에만 `newCandidates` | **코드로 확정 + production 실측** | `monitor.ts:213`. 주원인이며 8/17~8/22 실측에서 후보 6건이 각각 한 번씩만 보고됨 |
+| 1b | 같은 모델이 provider마다 별개 후보 | **코드로 확정 + production 실측** | ML-12. GLM-5.3이 8/19·8/21에 무관한 두 줄로, `kimi-k3`는 이미 있는데 NEW로 |
+| 2 | DB에 candidate는 남지만 이메일은 delta만 | **코드로 확정 + production 실측** | `report.ts:73-74`가 `result.newCandidates`만 읽음. 8/17·8/18 리포트는 `New model candidates found today: None`을 출력 |
 | 3 | 미검토 후보 재조회 query 부재 | **코드로 확정** | `providerModelCatalogEntry`를 읽는 코드 0개(monitor 자신 제외) |
 | 4 | API key/계정별 model visibility | **운영 데이터 필요** | `npm run check:openai-model-access`가 이를 위해 존재. 실행에는 실제 키 필요 |
 | 5 | 공식 발표와 `/models` 반영 시점 차이 | **공식 자료 필요** | provider마다 다름. `[확인 불가]` |
@@ -612,8 +693,10 @@ cause · 권고 · Acceptance criteria · 검증 방법 · 파일:line 순입니
 | 18 | 공식 lifecycle/replacement metadata 부재 | **공식 자료 필요** | `lifecycleFromRecord`가 인식하는 필드는 `archived`/`deprecated`/`stage`/`lifecycle`/`status`뿐. 대부분의 provider가 이를 제공하지 않음 `[추정]` |
 
 **결론**: 신규 모델이 "누락"되는 지배적 원인은 provider 쪽이 아니라 **1+2+3의
-조합**입니다 — 발견은 되고, 저장도 되고, 하루만 보이고, 다시 볼 방법이 없습니다.
-10번(OpenAI prefix heuristic)이 두 번째로 실질적인 위험입니다.
+조합**이며, 이는 더 이상 추정이 아니라 **측정된 사실**입니다 — 발견은 되고,
+저장도 되고, 하루만 보이고, 다시 볼 방법이 없습니다. 1b(ML-12)가 그 위에
+노이즈와 분산을 얹습니다. 10번(OpenAI prefix heuristic)이 세 번째로 실질적인
+위험입니다.
 
 ---
 
@@ -1824,6 +1907,8 @@ post-run validation → completion(F). **이 순서를 바꾸지 않습니다.**
 - EM-12 legal/transactional template 7개 언어
 - EM-08 snapshot retention + 무한 증가 테이블 등록
 - ML-08 auto-disable → work item 생성
+- ML-12 provider 무관 후보 dedup (이미 있는 모델을 NEW로 보고하지 않기)
+- ML-13 리포트에서 모델 소유자와 관측 경로 분리
 - ML-10 reconciliation script 범용화 + precondition 검사
 - EM-06 campaign이 templateVersion pin
 - EM-11 standard drain job key + backlog incident
@@ -1861,10 +1946,11 @@ post-run validation → completion(F). **이 순서를 바꾸지 않습니다.**
 
 | # | 확인 불가 사실 | read-only 확인 방법 |
 |---|---|---|
-| U1 | 지금 DB에 미검토 candidate가 몇 건인지 | `SELECT provider, count(*) FROM "ProviderModelCatalogEntry" WHERE status='candidate' AND "modelRegistryId" IS NULL GROUP BY provider;` |
-| U2 | ML-01 때문에 놓친 모델이 실제로 있는지 | 위 결과와 `lib/models.ts` 카탈로그를 대조. 차집합이 답입니다 |
-| U3 | Daily 이메일이 실제로 도착하는지 | `SELECT status, count(*) FROM "AdminNotificationLog" WHERE "targetType"='ProviderModelCatalog' AND "createdAt" > now()-interval '30 days' GROUP BY status;` |
-| U4 | provider별 최근 성공 시각 | `SELECT provider, max("startedAt") FROM "ProviderModelCatalogRun" WHERE status='checked' GROUP BY provider;` |
+| U1 | 지금 DB에 미검토 candidate가 **누적 총** 몇 건인지 | `SELECT provider, count(*) FROM "ProviderModelCatalogEntry" WHERE status='candidate' AND "modelRegistryId" IS NULL GROUP BY provider;` — **미해결.** U2는 최근 6일 창만 덮습니다 |
+| U2 | ML-01 때문에 놓친 모델이 실제로 있는지 | **해결됨 (2026-08-22).** Railway cron 로그 + `#all-tomverse` Slack 리포트 + 저장소 `grep` 대조. **후보 6건 중 5건이 저장소에 없고, 어느 하나도 두 번 보고되지 않았습니다.** 5절 ML-01의 표 참조. DB를 쓰지 않았으므로 production 자격증명을 세션에 반입하지 않았습니다 |
+| U3 | Daily 이메일이 실제로 도착하는지 | **부분 해결.** cron 로그의 `emailDelivered: 1`·`slackDelivered: true`가 8/17~8/21 전일 확인됩니다. 다만 이는 **발송 시도의 성공**이지 수신이 아닙니다(EM-14: bounce 처리 없음). 수신 확인은 여전히 사서함 필요 |
+| U4 | provider별 최근 성공 시각 | **부분 해결.** 8/17~8/22 매일 `checked: 12/12 · failed: 0`. provider별 세부는 `SELECT provider, max("startedAt") FROM "ProviderModelCatalogRun" WHERE status='checked' GROUP BY provider;` |
+| U12 | Zhipu 카탈로그가 `glm-5.3`을 반환하지 않는 이유 (ML-12) | `SELECT * FROM "ProviderModelCatalogEntry" WHERE provider='zhipu';` — API key별 모델 가시성(6절 #4) 또는 endpoint 범위 차이 |
 | U5 | preference 행이 없는 계정 수 (EM-02 노출 규모) | `SELECT count(*) FROM "User" u WHERE NOT EXISTS (SELECT 1 FROM "EmailPreference" p WHERE p."userId"=u.id);` |
 | U6 | `MARKETING_EMAIL_FROM` production 설정 여부 | `GET /api/ready`의 `email-sending-identity` 항목, 또는 `npm run report:email-domains` |
 | U7 | DMARC 리포트 실수신 여부 | `dmarc@tomverse.app` 사서함 확인. 저장소 밖 |
@@ -1891,7 +1977,8 @@ post-run validation → completion(F). **이 순서를 바꾸지 않습니다.**
 - **신규 후보가 다음 날에도 추적되는가?**
   아니오 — `newCandidates`는 첫 관측에서만 채워지고
   (`lib/providerModelCatalogMonitor.ts:213`), 그 행을 다시 읽는 코드가 저장소에
-  없습니다.
+  없으며, 2026-08-17~22 production 실측에서 후보 6건 중 5건이 한 번 보고된 뒤
+  저장소 어디에도 남지 않았습니다.
 
 - **현재 Daily 이메일이 새 standard lane과 template registry를 활용하는가?**
   아니오 — `sendTransactionalEmail()` 직접 호출에 `white-space:pre-wrap` 평문이며
