@@ -152,6 +152,38 @@ module에는 "그 텍스트"가 아닌 명세가 없다. 그래서 그 형식에
 - **목록에 없는 확장자는 지원하지 않는다고 말한다.** 침묵이 가짜 링크의
   출발점이다.
 
+### OOXML package — 검사기 통과는 열린다는 뜻이 아니다
+
+`xlsx`·`docx`·`pptx`는 zip 안의 XML 묶음이고, 그 묶음이 성립하는지는 **서로 다른
+층에서 서로 다르게** 판정된다. 2026-08-22에 PowerPoint가 이 저장소가 만든 deck을
+전부 거절했고, 그때 이미 통과한 검사가 이렇다.
+
+| 검사 | 결과 |
+|---|---|
+| ECMA-376 XSD, 18개 part 전부 | 통과 |
+| Microsoft OpenXmlValidator, Office 2007~2021 | 오류 0건 |
+| OPC content type·relationship·dangling target | 통과 |
+| LibreOffice Impress, python-pptx | 열림 |
+
+원인은 **slide master와 notes master가 같은 theme part를 가리킨 것**이었다.
+theme part는 reader의 model에서 master 하나의 것이므로, 공유는 작은 package가
+아니라 열리지 않는 package다. 확정은 검사기가 아니라 한 곳만 다른 파일 셋을 실제
+PowerPoint에서 열어서 했다 — theme을 다시 공유로 되돌린 것만 실패했고, 같은
+라운드에서 relationship id를 `rIdCore`로 되돌린 것은 통과했다.
+
+그러므로:
+
+- **master마다 theme part를 하나씩 쓴다.** 합치자는 제안은 검사기와 테스트를
+  모두 통과하면서 파일을 못 열게 만든다. `tests/generatedArtifactPptx.test.mjs`가
+  분리와, notes 없는 deck에서 `theme2.xml`이 아예 없다는 것을 함께 고정한다 —
+  없는 part를 가리키는 content type override는 슬라이드를 읽기 전에 거절된다.
+- **placeholder는 선언과 이름이 같이 간다.** `<a:spLocks noGrp="1"/>`를 쓰고
+  `<p:nvPr/>`를 비워 두면 placeholder라고 말한 뒤 아무것도 지목하지 않는 shape가
+  된다. 자유 도형은 `txBox="1"`로 쓰고, placeholder는 자기 `<p:ph>`를 갖는다.
+- **package 형식의 변경은 검사기가 아니라 대상 application에서 확인한다.** 위
+  결함은 Microsoft 자기 검사기를 여섯 버전에서 통과했다. 통과 자체는 증거가
+  아니며, 회귀 테스트는 확인한 사실을 고정할 뿐 확인을 대신하지 않는다.
+
 ## 5. 저장, 전송, 다운로드
 
 ### 데이터 모델
