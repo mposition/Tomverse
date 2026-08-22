@@ -484,6 +484,79 @@ the sending identity"가 발송 직전, 즉 **1.8시간짜리 E2E 스위트 뒤*
 `node_modules`만 있으면 되므로 install 바로 뒤로 옮겼고, 여전히 리포트 발송보다
 앞입니다.
 
+#### 3.5.7 첫 실제 alert가 잡은 것 — Cloudflare Email Address Obfuscation (2026-08-22 04:30Z)
+
+3.5.3의 시험 발송은 "경로가 살아 있는가"만 답합니다. 시험이 아닌 첫 alert는
+2026-08-22 04:30:36Z에 왔고, 경로가 **실제 사고에서도 동작한다**는 것과 그 사고가
+무엇인지를 함께 알려 줬습니다.
+
+메일 자체: `From: Tomverse Insight <hello@mail.tomverse.app>`, DKIM `d=mail.tomverse.app`
+pass, SPF `send.mail.tomverse.app` pass, DMARC pass. 시험 발송과 같은 신원입니다.
+`documentUri`가 `staging.tomverse.app`이므로 **보낸 것은 staging 배포**이고,
+production 경로는 3.5.5의 실측이 별도로 증명합니다.
+
+**메일 본문의 URL을 그대로 읽으면 안 됩니다.** 수신함에서 본 본문에는
+`documentUri`·`blockedUri`가 `na01.safelinks.protection.outlook.com/?url=...`로 보였는데,
+이는 **Outlook이 수신 메일의 모든 URL을 재작성한 결과**이지 보고된 값이 아닙니다.
+코드상 그 값은 저장될 수 없습니다 — `isTrustedCspDocumentUri()`가 허용 host를
+요구하므로 safelinks host의 report는 버려지고, `sanitizeCspReportedUrl()`은
+`origin + pathname`만 남기므로 `?url=`이 붙을 수 없습니다(둘 다 `lib/cspReportCore.ts`).
+실제 값은 다음과 같습니다.
+
+| 필드 | 값 |
+|---|---|
+| documentUri | `https://staging.tomverse.app/auth/admin-reauthenticate` |
+| blockedUri | `https://staging.tomverse.app/cdn-cgi/scripts/5c5dd728/cloudflare-static/email-decode.min.js` |
+| violatedDirective | `script-src-elem` |
+| disposition | `enforce` |
+
+**원인.** Cloudflare **Email Address Obfuscation**이 켜져 있었습니다. 이 기능은 HTML
+안의 주소를 `[email protected]`으로 바꾸고 decode script를 edge에서 주입합니다.
+주입된 tag에는 nonce가 없습니다. `/auth/admin-reauthenticate`는 로그인한 운영자의
+주소를 그립니다(`app/(site)/(application)/auth/admin-reauthenticate/page.tsx`의
+`email={session?.user?.email || null}` → `AdminReauthenticationCard`의
+`Current account:`). Cloudflare 문서상 이 기능은 **가입 시 자동으로 켜집니다** — 누가
+켠 것이 아닙니다.
+
+**두 policy가 다르게 판정했습니다.** 이것이 이 건의 요점입니다.
+
+| 경로 | script-src | 결과 |
+|---|---|---|
+| `/support` 등 marketing | `'self' 'sha384-…'` (strict-dynamic 없음) | `'self'`가 살아 있어 **허용** — 주소는 정상 복원, 보고 없음 |
+| `/chat`, `/auth/**` 등 app | `'self' 'nonce-…' 'strict-dynamic'` | `strict-dynamic`이 `'self'`를 무력화 → **차단**, 화면에 `[email protected]`이 남음 |
+
+즉 **same-origin이라는 이유로 안심할 수 없습니다.** same-origin은 두 policy 중
+어느 쪽이 보고하느냐만 정하고, marketing 쪽에서는 build에 없는 script가 hash 회계
+밖에서 조용히 실행되고 있었습니다.
+
+**조치.** zone 전체에서 껐습니다(Security → Settings → Client-side abuse → Email
+Address Obfuscation → Off). 코드 변경 없음 — 주입된 것은 `src=` tag라 marketing
+policy의 inline `sha384` hash와 무관하고, 기능을 끄면 tag 자체가 사라집니다.
+
+경로별 configuration rule로 좁히는 대신 zone 전체를 끈 이유는, 이 기능이 가리고
+있던 주소가 두 종류뿐이기 때문입니다 — 법적 고지에 **공개하려고 적은**
+`support@tomverse.app`, 그리고 인증 뒤에서 **본인에게만 보이는** 본인 이메일.
+지키는 것이 없고 대가로 화면 하나가 깨집니다.
+
+**확인 (2026-08-22 05:20Z).** 두 host 모두 `cf-cache-status: DYNAMIC`, 즉 캐시가 아닌
+edge 실시간 응답입니다.
+
+```
+for h in tomverse.app staging.tomverse.app; do
+  echo -n "$h: "; curl -sS "https://$h/support" | grep -c '__cf_email__'
+done
+```
+
+| host | `__cf_email__` | `email-decode` | `support@tomverse.app` 원문 |
+|---|---|---|---|
+| `tomverse.app` | 0 | 0 | 1 |
+| `staging.tomverse.app` | 0 | 0 | 1 |
+
+**같은 계열의 두 번째입니다.** 첫 번째는 FINAL-F005(Browser Insights beacon)였고,
+합의된 해법은 그때도 "CSP를 푸는 것이 아니라 Cloudflare에서 끈다"였습니다. 규칙과
+두 사례의 차이는 `lib/csp.ts` 상단 주석에 적어 뒀습니다 — `/cdn-cgi/`를 allowlist에
+넣고 싶어질 바로 그 자리입니다.
+
 ### 3.6 정책 강화 (Phase 2)
 
 리포트가 깨끗하면 `p=quarantine`, 이후 `p=reject`. 각 단계 사이에 최소 2주.
