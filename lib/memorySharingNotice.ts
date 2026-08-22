@@ -14,7 +14,7 @@
  *     pair of facts a third party needs and the most they may have.
  *
  * The export copy is English because the export document is: its header
- * already reads "Tomverse Insight Export", and a file has no viewer locale to
+ * already reads "Tomverse Review Export", and a file has no viewer locale to
  * read. The share *page* has one, so it uses `share.personalizationNotice`
  * from the locale bundles instead of this string.
  */

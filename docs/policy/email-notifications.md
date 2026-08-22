@@ -162,7 +162,7 @@ marketing을 포함하지 않는다는 범위 결정.
   같은 key + **동일 payload**여야 중복이 억제되므로, 재시도 주체가 안정적인 key를
   쓰고 매 시도 동일 렌더 결과를 만들어야 합니다.
 - From 주소는 `TRANSACTIONAL_EMAIL_FROM` -> `EMAIL_FROM` -> 하드코딩 기본값
-  `Tomverse Insight <hello@tomverse.app>` 순. **스트림/도메인 분리 개념 없음.**
+  `Tomverse Review <hello@tomverse.app>` 순. **스트림/도메인 분리 개념 없음.**
 - `RESEND_API_KEY`가 없으면 `{ sent: false, skipped: true }`로 조용히 넘어감.
 - 실패는 `throw`. 호출자가 처리하지 않으면 그대로 유실.
 

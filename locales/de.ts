@@ -13,7 +13,7 @@ export const de = {
         dismiss: "Benachrichtigung schließen",
     },
     sidebar: {
-        title: "Tomverse Insight",
+        title: "Tomverse Review",
         accountTooltip: "Konto & Plan",
         accountTooltipGuest: "Anmelden oder registrieren",
         guestMenuTitle: "Gastmodus",
@@ -750,7 +750,7 @@ export const de = {
         close: "Schließen",
         paymentSuccessfulEyebrow: "Zahlung erfolgreich",
         paymentSuccessfulTitle: "Ihre Zahlung wurde erfolgreich abgeschlossen.",
-        paymentSuccessfulWelcome: "Willkommen in der Tomverse-Insight-Familie. Sie können jetzt in Ihrem {plan}-Arbeitsbereich höhere Kontingente und erweiterte Funktionen nutzen.",
+        paymentSuccessfulWelcome: "Willkommen in der Tomverse-Review-Familie. Sie können jetzt in Ihrem {plan}-Arbeitsbereich höhere Kontingente und erweiterte Funktionen nutzen.",
         testerPassActivatedEyebrow: "Tester Pass aktiviert",
         testerPassActivatedTitle: "Ihr 60-tägiger Founding Tester Pass ist aktiv.",
         testerPassActivatedWelcome: "Sie können den {plan}-Arbeitsbereich jetzt als Founding Tester nutzen.",

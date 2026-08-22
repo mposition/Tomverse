@@ -24,7 +24,7 @@ const DECK = {
   filename: "제품_소개.pptx",
   format: "pptx",
   slides: [
-    { layout: "title", title: "Tomverse Insight", subtitle: "2026년 제품 소개" },
+    { layout: "title", title: "Tomverse Review", subtitle: "2026년 제품 소개" },
     {
       layout: "titleAndContent",
       title: "핵심 기능",
@@ -68,7 +68,7 @@ test("an independent reader gets every slide's words back", async () => {
   });
   const text = document.toText();
   for (const expected of [
-    "Tomverse Insight",
+    "Tomverse Review",
     "2026년 제품 소개",
     "핵심 기능",
     "멀티 모델 비교",

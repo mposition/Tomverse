@@ -25,10 +25,10 @@ test("a delivered probe reports the address the provider accepted", () => {
   const result = probe({
     ok: true,
     providerMessageId: "resend-1",
-    from: "Tomverse Insight <hello@mail.tomverse.app>",
+    from: "Tomverse Review <hello@mail.tomverse.app>",
   });
   assert.equal(result.delivered, true);
-  assert.equal(result.from, "Tomverse Insight <hello@mail.tomverse.app>");
+  assert.equal(result.from, "Tomverse Review <hello@mail.tomverse.app>");
   assert.equal(result.providerMessageId, "resend-1");
   assert.equal(result.recipient, "ops@example.com");
   assert.equal(result.failure, null);

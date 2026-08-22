@@ -781,7 +781,7 @@ export function MobileChatShell({
         because the header already shows the brand mark; this is the structure,
         not a second copy of it.
       */}
-      <h1 className="sr-only">Tomverse Insight</h1>
+      <h1 className="sr-only">Tomverse Review</h1>
       <header
         ref={headerRef}
         data-testid="mobile-chat-header"

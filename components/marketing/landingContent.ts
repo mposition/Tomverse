@@ -130,8 +130,8 @@ export type LandingCopy = {
 };
 
 const en: LandingCopy = {
-  badge: "Tomverse Insight · Multi-AI Comparison & Review",
-  brandNote: "Tomverse Insight is the multi-AI comparison and review experience from Tomverse.",
+  badge: "Tomverse Review · Multi-AI Comparison & Review",
+  brandNote: "Tomverse Review is the multi-AI comparison and review experience from Tomverse.",
   title: "Ask once.\nCompare multiple AI answers.",
   description:
     "Compare GPT, Claude, and Gemini side by side,\nthen use AI Review to find differences and missing points.",
@@ -373,8 +373,8 @@ const en: LandingCopy = {
 };
 
 const ko: LandingCopy = {
-  badge: "Tomverse Insight · 멀티 AI 비교 및 검토",
-  brandNote: "Tomverse Insight는 Tomverse에서 제공하는 멀티 AI 비교 및 검토 경험입니다.",
+  badge: "Tomverse Review · 멀티 AI 비교 및 검토",
+  brandNote: "Tomverse Review는 Tomverse에서 제공하는 멀티 AI 비교 및 검토 경험입니다.",
   title: "한 번 질문하고,\n여러 AI 답변을 비교하세요.",
   description: "GPT, Claude, Gemini의 답변을 한 화면에서 비교하고,\nAI Review로 차이와 놓친 부분을 확인하세요.",
   primaryCta: "무료로 채팅 시작하기",
@@ -608,8 +608,8 @@ const ko: LandingCopy = {
 };
 
 const zh: LandingCopy = {
-  badge: "Tomverse Insight · 多 AI 比较与审查",
-  brandNote: "Tomverse Insight 是 Tomverse 提供的多 AI 比较与审查体验。",
+  badge: "Tomverse Review · 多 AI 比较与审查",
+  brandNote: "Tomverse Review 是 Tomverse 提供的多 AI 比较与审查体验。",
   title: "问一次，\n比较多个 AI 的回答。",
   description: "在一个页面比较 GPT、Claude 和 Gemini，再用 AI Review 找出差异与遗漏。",
   primaryCta: "免费开始聊天",
@@ -839,8 +839,8 @@ const zh: LandingCopy = {
 };
 
 const fr: LandingCopy = {
-  badge: "Tomverse Insight · Comparaison et revue multi-IA",
-  brandNote: "Tomverse Insight est l’expérience de comparaison et de revue multi-IA proposée par Tomverse.",
+  badge: "Tomverse Review · Comparaison et revue multi-IA",
+  brandNote: "Tomverse Review est l’expérience de comparaison et de revue multi-IA proposée par Tomverse.",
   title: "Posez une question.\nComparez plusieurs réponses IA.",
   description: "Comparez GPT, Claude et Gemini au même endroit, puis repérez les différences et les oublis avec AI Review.",
   primaryCta: "Commencer à discuter gratuitement",
@@ -1074,8 +1074,8 @@ const fr: LandingCopy = {
 };
 
 const de: LandingCopy = {
-  badge: "Tomverse Insight · Multi-KI-Vergleich und -Prüfung",
-  brandNote: "Tomverse Insight ist das Multi-KI-Vergleichs- und Prüferlebnis von Tomverse.",
+  badge: "Tomverse Review · Multi-KI-Vergleich und -Prüfung",
+  brandNote: "Tomverse Review ist das Multi-KI-Vergleichs- und Prüferlebnis von Tomverse.",
   title: "Einmal fragen.\nAntworten mehrerer KIs vergleichen.",
   description: "Vergleichen Sie GPT, Claude und Gemini an einem Ort und erkennen Sie mit AI Review Unterschiede und Lücken.",
   primaryCta: "Kostenlos chatten",
@@ -1309,8 +1309,8 @@ const de: LandingCopy = {
 };
 
 const es: LandingCopy = {
-  badge: "Tomverse Insight · Comparación y revisión multi-IA",
-  brandNote: "Tomverse Insight es la experiencia de comparación y revisión multi-IA de Tomverse.",
+  badge: "Tomverse Review · Comparación y revisión multi-IA",
+  brandNote: "Tomverse Review es la experiencia de comparación y revisión multi-IA de Tomverse.",
   title: "Pregunta una vez.\nCompara respuestas de varias IA.",
   description: "Compara GPT, Claude y Gemini en un solo lugar y usa AI Review para detectar diferencias y omisiones.",
   primaryCta: "Empezar a chatear gratis",
@@ -1544,8 +1544,8 @@ const es: LandingCopy = {
 };
 
 const pt: LandingCopy = {
-  badge: "Tomverse Insight · Comparação e revisão multi-IA",
-  brandNote: "Tomverse Insight é a experiência de comparação e revisão multi-IA da Tomverse.",
+  badge: "Tomverse Review · Comparação e revisão multi-IA",
+  brandNote: "Tomverse Review é a experiência de comparação e revisão multi-IA da Tomverse.",
   title: "Pergunte uma vez.\nCompare respostas de várias IAs.",
   description: "Compare GPT, Claude e Gemini em um só lugar e use o AI Review para encontrar diferenças e omissões.",
   primaryCta: "Começar a conversar grátis",

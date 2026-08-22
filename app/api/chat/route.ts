@@ -1857,7 +1857,7 @@ async function handleChatPost(
                     // Scanned or image-only PDFs have no local text layer.
                     // Validate them before leaving the process, then use OCR 4
                     // as a backend conversion model. It is never exposed in
-                    // the Insight model picker and never consumes user model
+                    // the Tomverse Review model picker and never consumes user model
                     // credits; its page cost is recorded as internal usage.
                     if (!extractedPdfText) {
                         if (!pdfValidated) {

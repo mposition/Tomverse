@@ -800,7 +800,7 @@ export const MODEL_PRICING: readonly ModelPricingProfile[] = [
     },
     {
         // Historical settlement profile only: Codestral is no longer
-        // enabled or listed in Insight, but old reservations remain payable.
+        // enabled or listed in Tomverse Review, but old reservations remain payable.
         modelId: "codestral",
         provider: "mistral",
         apiModelId: "codestral-latest",

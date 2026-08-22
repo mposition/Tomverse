@@ -107,7 +107,7 @@ test("font-black is reserved for headline-sized customer text", () => {
     // lines when the credit-pack checkout-return handler added its imports,
     // then down nineteen more when UX-010 gave ConfirmDialog its focus trap.
     "app/(site)/(application)/chat/ChatPageClient.tsx:357",
-    // Same "Tomverse Insight" brand span; it moved down four lines when the
+    // Same "Tomverse Review" brand span; it moved down four lines when the
     // superseded walkthrough embed above it was replaced by a stage diagram.
     "components/marketing/ChatWorkspaceGuide.tsx:190",
   ]);

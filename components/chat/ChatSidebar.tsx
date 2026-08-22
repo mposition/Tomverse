@@ -810,7 +810,7 @@ export function ChatSidebar({
                     {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img
                         src="/tomverse-logo.png"
-                        alt="Tomverse Insight"
+                        alt="Tomverse Review"
                         className="h-full w-full object-cover"
                     />
                 </span>
@@ -870,7 +870,7 @@ export function ChatSidebar({
                     {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img
                         src="/tomverse-logo.png"
-                        alt="Tomverse Insight"
+                        alt="Tomverse Review"
                         className="h-full w-full object-cover"
                     />
                 </span>
@@ -884,11 +884,11 @@ export function ChatSidebar({
                 */}
                 {isMobileDrawer ? (
                     <p className="text-sm font-bold tracking-tight text-zinc-800 dark:text-zinc-100">
-                        Tomverse Insight
+                        Tomverse Review
                     </p>
                 ) : (
                     <h1 className="text-base font-bold tracking-tight text-zinc-800 dark:text-zinc-100">
-                        Tomverse Insight
+                        Tomverse Review
                     </h1>
                 )}
                 <BuildStagingBadge />

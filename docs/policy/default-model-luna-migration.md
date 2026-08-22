@@ -1,6 +1,6 @@
 # 기본 모델 이전: GPT-5.4 mini → GPT-5.6 Luna
 
-Tomverse Insight의 OpenAI 기본 모델을 `gpt-5-4-mini`에서 `gpt-5-6-luna`로 옮긴
+Tomverse Review의 OpenAI 기본 모델을 `gpt-5-4-mini`에서 `gpt-5-6-luna`로 옮긴
 작업의 근거, 관찰 기준, 은퇴 조건, 배포·롤백 절차를 기록합니다. 기본 모델이나
 `gpt-5-4-mini`의 lifecycle을 건드리기 전에 읽어 주세요.
 

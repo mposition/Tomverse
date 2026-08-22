@@ -16,14 +16,14 @@ export const rootMetadata: Metadata = {
   metadataBase: new URL(SITE_ORIGIN),
   applicationName: SITE_NAME,
   title: {
-    default: "Tomverse Insight by Tomverse | Multi-AI Comparison & Review",
-    template: "%s | Tomverse Insight",
+    default: "Tomverse Review by Tomverse | Multi-AI Comparison & Review",
+    template: "%s | Tomverse Review",
   },
   description:
     "Compare GPT, Claude, and Gemini side by side, then use AI Review to identify differences, omissions, and points that need verification.",
-  authors: [{ name: "Tomverse Insight", url: SITE_ORIGIN }],
-  creator: "Tomverse Insight",
-  publisher: "Tomverse Insight",
+  authors: [{ name: "Tomverse Review", url: SITE_ORIGIN }],
+  creator: "Tomverse Review",
+  publisher: "Tomverse Review",
   category: "technology",
   formatDetection: {
     email: false,
@@ -33,7 +33,7 @@ export const rootMetadata: Metadata = {
   openGraph: {
     type: "website",
     siteName: SITE_NAME,
-    title: "Tomverse Insight by Tomverse | Multi-AI Comparison & Review",
+    title: "Tomverse Review by Tomverse | Multi-AI Comparison & Review",
     description:
       "Compare GPT, Claude, and Gemini side by side, then use AI Review to identify differences, omissions, and points that need verification.",
     url: SITE_ORIGIN,
@@ -43,19 +43,19 @@ export const rootMetadata: Metadata = {
         url: `${SITE_ORIGIN}/opengraph-image`,
         width: 1200,
         height: 630,
-        alt: "Tomverse Insight by Tomverse — compare GPT, Claude, and Gemini side by side",
+        alt: "Tomverse Review by Tomverse — compare GPT, Claude, and Gemini side by side",
       },
     ],
   },
   twitter: {
     card: "summary_large_image",
-    title: "Tomverse Insight by Tomverse | Multi-AI Comparison & Review",
+    title: "Tomverse Review by Tomverse | Multi-AI Comparison & Review",
     description:
       "Compare GPT, Claude, and Gemini side by side, then use AI Review to identify differences, omissions, and points that need verification.",
     images: [
       {
         url: `${SITE_ORIGIN}/twitter-image`,
-        alt: "Tomverse Insight by Tomverse — compare GPT, Claude, and Gemini side by side",
+        alt: "Tomverse Review by Tomverse — compare GPT, Claude, and Gemini side by side",
       },
     ],
   },
