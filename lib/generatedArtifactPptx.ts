@@ -46,7 +46,8 @@ const SLIDE_WIDTH = 12192000;
 const SLIDE_HEIGHT = 6858000;
 const MARGIN_X = 838200;
 
-const REL = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
+const REL =
+  "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
 
 /**
  * The fonts every text run names.
@@ -55,8 +56,7 @@ const REL = "http://schemas.openxmlformats.org/officeDocument/2006/relationships
  * bullet renders as text or as boxes. Named rather than embedded, like the
  * DOCX writer and for the same reason: PowerPoint has a font book.
  */
-const FONT_REFERENCE =
-  `<a:latin typeface="Calibri"/><a:ea typeface="Malgun Gothic"/><a:cs typeface="Calibri"/>`;
+const FONT_REFERENCE = `<a:latin typeface="Calibri"/><a:ea typeface="Malgun Gothic"/><a:cs typeface="Calibri"/>`;
 
 const textRuns = (value: string, size: number, bold: boolean): string => {
   const properties =
@@ -67,11 +67,25 @@ const textRuns = (value: string, size: number, bold: boolean): string => {
     .map(
       (line, index) =>
         (index > 0 ? `<a:br>${properties}</a:br>` : "") +
-        `<a:r>${properties}<a:t>${escapeXml(line)}</a:t></a:r>`
+        `<a:r>${properties}<a:t>${escapeXml(line)}</a:t></a:r>`,
     )
     .join("");
 };
 
+/**
+ * One text shape.
+ *
+ * `placeholder` decides which of two shapes this is, and the distinction is
+ * not cosmetic. `<a:spLocks noGrp="1"/>` with an empty `<p:nvPr/>` says "I am
+ * a placeholder" and then names no placeholder, and PowerPoint refuses the
+ * whole package for it -- "Sorry, PowerPoint can't read ...", with no repair
+ * offered. Word and every parser this repository tests with accept it, which
+ * is how it shipped.
+ *
+ * So a free-standing text box is written as one (`txBox="1"`, no lock), and
+ * the one shape that really is a placeholder -- the notes body -- carries a
+ * real `<p:ph>` that the notes master defines.
+ */
 const shape = (input: {
   id: number;
   name: string;
@@ -81,10 +95,14 @@ const shape = (input: {
   height: number;
   paragraphs: string;
   anchor?: "t" | "ctr";
+  placeholder?: string;
 }) =>
   `<p:sp><p:nvSpPr>` +
   `<p:cNvPr id="${input.id}" name="${escapeXml(input.name)}"/>` +
-  `<p:cNvSpPr><a:spLocks noGrp="1"/></p:cNvSpPr><p:nvPr/></p:nvSpPr>` +
+  (input.placeholder
+    ? `<p:cNvSpPr><a:spLocks noGrp="1"/></p:cNvSpPr>` +
+      `<p:nvPr>${input.placeholder}</p:nvPr></p:nvSpPr>`
+    : `<p:cNvSpPr txBox="1"/><p:nvPr/></p:nvSpPr>`) +
   `<p:spPr><a:xfrm><a:off x="${input.x}" y="${input.y}"/>` +
   `<a:ext cx="${input.width}" cy="${input.height}"/></a:xfrm>` +
   `<a:prstGeom prst="rect"><a:avLst/></a:prstGeom></p:spPr>` +
@@ -113,7 +131,7 @@ const slideXml = (slide: ArtifactSlideSpec): string => {
         height: 1600000,
         paragraphs: plainParagraph(slide.title, 4400, true),
         anchor: "ctr",
-      })
+      }),
     );
     if (slide.subtitle) {
       shapes.push(
@@ -125,7 +143,7 @@ const slideXml = (slide: ArtifactSlideSpec): string => {
           width,
           height: 900000,
           paragraphs: plainParagraph(slide.subtitle, 2000, false),
-        })
+        }),
       );
     }
   } else if (slide.layout === "sectionHeader") {
@@ -139,7 +157,7 @@ const slideXml = (slide: ArtifactSlideSpec): string => {
         height: 1200000,
         paragraphs: plainParagraph(slide.title, 3600, true),
         anchor: "ctr",
-      })
+      }),
     );
     if (slide.subtitle) {
       shapes.push(
@@ -151,7 +169,7 @@ const slideXml = (slide: ArtifactSlideSpec): string => {
           width,
           height: 700000,
           paragraphs: plainParagraph(slide.subtitle, 1800, false),
-        })
+        }),
       );
     }
   } else {
@@ -164,11 +182,12 @@ const slideXml = (slide: ArtifactSlideSpec): string => {
         width,
         height: 1100000,
         paragraphs: plainParagraph(slide.title, 3200, true),
-      })
+      }),
     );
     const body: string[] = [];
     if (slide.subtitle) body.push(plainParagraph(slide.subtitle, 2000, false));
-    for (const bullet of slide.bullets ?? []) body.push(bulletParagraph(bullet));
+    for (const bullet of slide.bullets ?? [])
+      body.push(bulletParagraph(bullet));
     if (body.length > 0) {
       shapes.push(
         shape({
@@ -179,7 +198,7 @@ const slideXml = (slide: ArtifactSlideSpec): string => {
           width,
           height: SLIDE_HEIGHT - 1800000 - 533400,
           paragraphs: body.join(""),
-        })
+        }),
       );
     }
   }
@@ -203,12 +222,13 @@ const notesSlideXml = (notes: string): string =>
   `<a:chOff x="0" y="0"/><a:chExt cx="0" cy="0"/></a:xfrm></p:grpSpPr>` +
   shape({
     id: 2,
-    name: "Notes Placeholder",
+    name: "Notes Placeholder 1",
     x: 0,
     y: 0,
     width: 6858000,
     height: 4114800,
     paragraphs: plainParagraph(notes, 1200, false),
+    placeholder: `<p:ph type="body" idx="1"/>`,
   }) +
   `</p:spTree></p:cSld><p:clrMapOvr><a:masterClrMapping/></p:clrMapOvr></p:notes>`;
 
@@ -220,14 +240,25 @@ const notesSlideXml = (notes: string): string =>
  * repair prompt. The values are the Office defaults, written out rather than
  * inherited, because there is nothing to inherit from in a package this file
  * builds from scratch.
+ *
+ * Built per master rather than shared. A theme part is one master's theme in
+ * PowerPoint's model, so pointing the slide master and the notes master at the
+ * same part is the shape of a file it refuses to open.
+ *
+ * That is the confirmed cause of the refusal this file was rewritten for, and
+ * nothing detected it: the shared-theme package passed the ECMA-376 schemas,
+ * Microsoft's own OpenXmlValidator across Office 2007 through 2021, an OPC
+ * check, LibreOffice and python-pptx. It was pinned by opening three packages
+ * that differed in one place each -- only the one that shared the theme again
+ * failed. See docs/policy/generated-artifacts.md section 4.
  */
 const themeColor = (name: string, value: string) =>
   `<a:${name}><a:srgbClr val="${value}"/></a:${name}>`;
 
-const THEME_XML =
+const themeXml = (name: string) =>
   `${XML_DECLARATION}` +
-  `<a:theme ${A_NS} name="Tomverse"><a:themeElements>` +
-  `<a:clrScheme name="Tomverse">` +
+  `<a:theme ${A_NS} name="${name}"><a:themeElements>` +
+  `<a:clrScheme name="${name}">` +
   `<a:dk1><a:sysClr val="windowText" lastClr="000000"/></a:dk1>` +
   `<a:lt1><a:sysClr val="window" lastClr="FFFFFF"/></a:lt1>` +
   themeColor("dk2", "44546A") +
@@ -241,11 +272,11 @@ const THEME_XML =
   themeColor("hlink", "0563C1") +
   themeColor("folHlink", "954F72") +
   `</a:clrScheme>` +
-  `<a:fontScheme name="Tomverse">` +
+  `<a:fontScheme name="${name}">` +
   `<a:majorFont><a:latin typeface="Calibri Light"/><a:ea typeface="Malgun Gothic"/><a:cs typeface=""/></a:majorFont>` +
   `<a:minorFont><a:latin typeface="Calibri"/><a:ea typeface="Malgun Gothic"/><a:cs typeface=""/></a:minorFont>` +
   `</a:fontScheme>` +
-  `<a:fmtScheme name="Tomverse">` +
+  `<a:fmtScheme name="${name}">` +
   `<a:fillStyleLst><a:solidFill><a:schemeClr val="phClr"/></a:solidFill>` +
   `<a:solidFill><a:schemeClr val="phClr"/></a:solidFill>` +
   `<a:solidFill><a:schemeClr val="phClr"/></a:solidFill></a:fillStyleLst>` +
@@ -272,10 +303,30 @@ const COLOUR_MAP =
   `accent2="accent2" accent3="accent3" accent4="accent4" accent5="accent5" ` +
   `accent6="accent6" hlink="hlink" folHlink="folHlink"/>`;
 
+/**
+ * The text styles a master is expected to define.
+ *
+ * Every real producer writes these three, and a master without them leaves
+ * PowerPoint with nothing to inherit from. Minimal on purpose: one level each,
+ * because this package's shapes carry their own run properties.
+ */
+const TEXT_STYLES =
+  `<p:txStyles>` +
+  `<p:titleStyle><a:lvl1pPr><a:defRPr sz="4400"/></a:lvl1pPr></p:titleStyle>` +
+  `<p:bodyStyle><a:lvl1pPr><a:defRPr sz="1800"/></a:lvl1pPr></p:bodyStyle>` +
+  `<p:otherStyle><a:lvl1pPr><a:defRPr sz="1800"/></a:lvl1pPr></p:otherStyle>` +
+  `</p:txStyles>`;
+
+const BACKGROUND =
+  `<p:bg><p:bgPr><a:solidFill><a:schemeClr val="bg1"/></a:solidFill>` +
+  `<a:effectLst/></p:bgPr></p:bg>`;
+
 const SLIDE_MASTER_XML =
   `${XML_DECLARATION}` +
-  `<p:sldMaster ${A_NS} ${P_NS} ${R_NS}><p:cSld>${EMPTY_TREE}</p:cSld>${COLOUR_MAP}` +
+  `<p:sldMaster ${A_NS} ${P_NS} ${R_NS}>` +
+  `<p:cSld>${BACKGROUND}${EMPTY_TREE}</p:cSld>${COLOUR_MAP}` +
   `<p:sldLayoutIdLst><p:sldLayoutId id="2147483649" r:id="rId1"/></p:sldLayoutIdLst>` +
+  TEXT_STYLES +
   `</p:sldMaster>`;
 
 const SLIDE_LAYOUT_XML =
@@ -284,10 +335,46 @@ const SLIDE_LAYOUT_XML =
   `<p:cSld name="Blank">${EMPTY_TREE}</p:cSld>` +
   `<p:clrMapOvr><a:masterClrMapping/></p:clrMapOvr></p:sldLayout>`;
 
+/**
+ * The notes master, with the body placeholder its notes slides refer to.
+ *
+ * A notes slide's `<p:ph type="body" idx="1"/>` inherits from this shape. With
+ * no placeholder here to inherit from, the notes slide names a placeholder
+ * that does not exist -- which is how python-pptx came to open the deck and
+ * then find no notes text frame on any slide.
+ */
 const NOTES_MASTER_XML =
   `${XML_DECLARATION}` +
-  `<p:notesMaster ${A_NS} ${P_NS} ${R_NS}><p:cSld>${EMPTY_TREE}</p:cSld>${COLOUR_MAP}` +
+  `<p:notesMaster ${A_NS} ${P_NS} ${R_NS}><p:cSld><p:spTree>` +
+  `<p:nvGrpSpPr><p:cNvPr id="1" name=""/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr>` +
+  `<p:grpSpPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="0" cy="0"/>` +
+  `<a:chOff x="0" y="0"/><a:chExt cx="0" cy="0"/></a:xfrm></p:grpSpPr>` +
+  `<p:sp><p:nvSpPr><p:cNvPr id="2" name="Notes Placeholder 1"/>` +
+  `<p:cNvSpPr><a:spLocks noGrp="1"/></p:cNvSpPr>` +
+  `<p:nvPr><p:ph type="body" idx="1"/></p:nvPr></p:nvSpPr>` +
+  `<p:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="6858000" cy="4114800"/></a:xfrm>` +
+  `<a:prstGeom prst="rect"><a:avLst/></a:prstGeom></p:spPr>` +
+  `<p:txBody><a:bodyPr wrap="square"/><a:lstStyle/><a:p><a:endParaRPr lang="en-US"/></a:p>` +
+  `</p:txBody></p:sp>` +
+  `</p:spTree></p:cSld>${COLOUR_MAP}` +
+  `<p:notesStyle><a:lvl1pPr><a:defRPr sz="1200"/></a:lvl1pPr></p:notesStyle>` +
   `</p:notesMaster>`;
+
+/**
+ * The three presentation-level parts every real producer writes.
+ *
+ * Empty of content and still not optional in practice: PowerPoint expects a
+ * presentation to relate to its display properties, its view state and its
+ * table styles, and a package that relates to none of them is a package no
+ * other producer has ever made. Written with default values rather than
+ * omitted, because "PowerPoint can't read this file" names no part and every
+ * absent one has to be ruled out by hand.
+ */
+const PRES_PROPS_XML = `${XML_DECLARATION}<p:presentationPr ${A_NS} ${P_NS} ${R_NS}/>`;
+
+const VIEW_PROPS_XML = `${XML_DECLARATION}<p:viewPr ${A_NS} ${P_NS} ${R_NS}/>`;
+
+const TABLE_STYLES_XML = `${XML_DECLARATION}<a:tblStyleLst ${A_NS} def="{5C22544A-7EE6-4342-B048-85BDC9FD1C3A}"/>`;
 
 /** The PresentationML package for an admitted presentation specification. */
 export const renderPresentationPptx = (spec: PresentationSpec): Uint8Array => {
@@ -306,16 +393,20 @@ export const renderPresentationPptx = (spec: PresentationSpec): Uint8Array => {
     `<Override PartName="/ppt/slideMasters/slideMaster1.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slideMaster+xml"/>`,
     `<Override PartName="/ppt/slideLayouts/slideLayout1.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slideLayout+xml"/>`,
     `<Override PartName="/ppt/theme/theme1.xml" ContentType="application/vnd.openxmlformats-officedocument.theme+xml"/>`,
+    `<Override PartName="/ppt/presProps.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.presProps+xml"/>`,
+    `<Override PartName="/ppt/viewProps.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.viewProps+xml"/>`,
+    `<Override PartName="/ppt/tableStyles.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.tableStyles+xml"/>`,
     ...slides.map(
       (_, index) =>
-        `<Override PartName="/ppt/slides/slide${index + 1}.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slide+xml"/>`
+        `<Override PartName="/ppt/slides/slide${index + 1}.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slide+xml"/>`,
     ),
     ...(hasNotes
       ? [
           `<Override PartName="/ppt/notesMasters/notesMaster1.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.notesMaster+xml"/>`,
+          `<Override PartName="/ppt/theme/theme2.xml" ContentType="application/vnd.openxmlformats-officedocument.theme+xml"/>`,
           ...[...notesBySlide.keys()].map(
             (index) =>
-              `<Override PartName="/ppt/notesSlides/notesSlide${index + 1}.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.notesSlide+xml"/>`
+              `<Override PartName="/ppt/notesSlides/notesSlide${index + 1}.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.notesSlide+xml"/>`,
           ),
         ]
       : []),
@@ -345,10 +436,25 @@ export const renderPresentationPptx = (spec: PresentationSpec): Uint8Array => {
 
   // --- presentation -------------------------------------------------------
   // Slide ids start at 256: PowerPoint reserves everything below it.
+  /*
+    Numeric relationship ids, in the order the relationships are written.
+    `Id` is an `xsd:ID` and a name like `rIdSlide1` is legal, but nothing else
+    in the ecosystem produces one, so nothing else is tested against one.
+    Keeping to `rId<n>` costs nothing and removes a whole class of "some
+    reader might not accept this".
+  */
+  const masterRelId = "rId1";
+  const presPropsRelId = "rId2";
+  const viewPropsRelId = "rId3";
+  const themeRelId = "rId4";
+  const tableStylesRelId = "rId5";
+  const slideRelId = (index: number) => `rId${6 + index}`;
+  const notesMasterRelId = `rId${6 + slides.length}`;
+
   const slideIdList = slides
     .map(
       (_, index) =>
-        `<p:sldId id="${256 + index}" r:id="rIdSlide${index + 1}"/>`
+        `<p:sldId id="${256 + index}" r:id="${slideRelId(index)}"/>`,
     )
     .join("");
   parts.push({
@@ -356,8 +462,10 @@ export const renderPresentationPptx = (spec: PresentationSpec): Uint8Array => {
     xml:
       `${XML_DECLARATION}` +
       `<p:presentation ${A_NS} ${P_NS} ${R_NS} saveSubsetFonts="1">` +
-      `<p:sldMasterIdLst><p:sldMasterId id="2147483648" r:id="rIdMaster"/></p:sldMasterIdLst>` +
-      (hasNotes ? `<p:notesMasterIdLst><p:notesMasterId r:id="rIdNotesMaster"/></p:notesMasterIdLst>` : "") +
+      `<p:sldMasterIdLst><p:sldMasterId id="2147483648" r:id="${masterRelId}"/></p:sldMasterIdLst>` +
+      (hasNotes
+        ? `<p:notesMasterIdLst><p:notesMasterId r:id="${notesMasterRelId}"/></p:notesMasterIdLst>`
+        : "") +
       `<p:sldIdLst>${slideIdList}</p:sldIdLst>` +
       `<p:sldSz cx="${SLIDE_WIDTH}" cy="${SLIDE_HEIGHT}"/>` +
       `<p:notesSz cx="6858000" cy="9144000"/>` +
@@ -365,49 +473,73 @@ export const renderPresentationPptx = (spec: PresentationSpec): Uint8Array => {
   });
 
   const presentationRels = [
-    relationship("rIdMaster", `${REL}/slideMaster`, "slideMasters/slideMaster1.xml"),
-    relationship("rIdTheme", `${REL}/theme`, "theme/theme1.xml"),
+    relationship(
+      masterRelId,
+      `${REL}/slideMaster`,
+      "slideMasters/slideMaster1.xml",
+    ),
+    relationship(presPropsRelId, `${REL}/presProps`, "presProps.xml"),
+    relationship(viewPropsRelId, `${REL}/viewProps`, "viewProps.xml"),
+    relationship(themeRelId, `${REL}/theme`, "theme/theme1.xml"),
+    relationship(tableStylesRelId, `${REL}/tableStyles`, "tableStyles.xml"),
     ...slides.map((_, index) =>
       relationship(
-        `rIdSlide${index + 1}`,
+        slideRelId(index),
         `${REL}/slide`,
-        `slides/slide${index + 1}.xml`
-      )
+        `slides/slide${index + 1}.xml`,
+      ),
     ),
     ...(hasNotes
       ? [
           relationship(
-            "rIdNotesMaster",
+            notesMasterRelId,
             `${REL}/notesMaster`,
-            "notesMasters/notesMaster1.xml"
+            "notesMasters/notesMaster1.xml",
           ),
         ]
       : []),
   ];
+  parts.push({ path: "ppt/presProps.xml", xml: PRES_PROPS_XML });
+  parts.push({ path: "ppt/viewProps.xml", xml: VIEW_PROPS_XML });
+  parts.push({ path: "ppt/tableStyles.xml", xml: TABLE_STYLES_XML });
   parts.push({
     path: "ppt/_rels/presentation.xml.rels",
     xml: `${XML_DECLARATION}${RELATIONSHIPS_OPEN}${presentationRels.join("")}</Relationships>`,
   });
 
   // --- master, layout, theme ---------------------------------------------
-  parts.push({ path: "ppt/slideMasters/slideMaster1.xml", xml: SLIDE_MASTER_XML });
+  parts.push({
+    path: "ppt/slideMasters/slideMaster1.xml",
+    xml: SLIDE_MASTER_XML,
+  });
   parts.push({
     path: "ppt/slideMasters/_rels/slideMaster1.xml.rels",
     xml:
       `${XML_DECLARATION}${RELATIONSHIPS_OPEN}` +
-      relationship("rId1", `${REL}/slideLayout`, "../slideLayouts/slideLayout1.xml") +
+      relationship(
+        "rId1",
+        `${REL}/slideLayout`,
+        "../slideLayouts/slideLayout1.xml",
+      ) +
       relationship("rId2", `${REL}/theme`, "../theme/theme1.xml") +
       `</Relationships>`,
   });
-  parts.push({ path: "ppt/slideLayouts/slideLayout1.xml", xml: SLIDE_LAYOUT_XML });
+  parts.push({
+    path: "ppt/slideLayouts/slideLayout1.xml",
+    xml: SLIDE_LAYOUT_XML,
+  });
   parts.push({
     path: "ppt/slideLayouts/_rels/slideLayout1.xml.rels",
     xml:
       `${XML_DECLARATION}${RELATIONSHIPS_OPEN}` +
-      relationship("rId1", `${REL}/slideMaster`, "../slideMasters/slideMaster1.xml") +
+      relationship(
+        "rId1",
+        `${REL}/slideMaster`,
+        "../slideMasters/slideMaster1.xml",
+      ) +
       `</Relationships>`,
   });
-  parts.push({ path: "ppt/theme/theme1.xml", xml: THEME_XML });
+  parts.push({ path: "ppt/theme/theme1.xml", xml: themeXml("Tomverse") });
 
   // --- slides -------------------------------------------------------------
   slides.forEach((slide, index) => {
@@ -420,12 +552,16 @@ export const renderPresentationPptx = (spec: PresentationSpec): Uint8Array => {
       path: `ppt/slides/_rels/slide${index + 1}.xml.rels`,
       xml:
         `${XML_DECLARATION}${RELATIONSHIPS_OPEN}` +
-        relationship("rId1", `${REL}/slideLayout`, "../slideLayouts/slideLayout1.xml") +
+        relationship(
+          "rId1",
+          `${REL}/slideLayout`,
+          "../slideLayouts/slideLayout1.xml",
+        ) +
         (notes
           ? relationship(
               "rId2",
               `${REL}/notesSlide`,
-              `../notesSlides/notesSlide${index + 1}.xml`
+              `../notesSlides/notesSlide${index + 1}.xml`,
             )
           : "") +
         `</Relationships>`,
@@ -434,13 +570,20 @@ export const renderPresentationPptx = (spec: PresentationSpec): Uint8Array => {
 
   // --- notes --------------------------------------------------------------
   if (hasNotes) {
-    parts.push({ path: "ppt/notesMasters/notesMaster1.xml", xml: NOTES_MASTER_XML });
+    parts.push({
+      path: "ppt/notesMasters/notesMaster1.xml",
+      xml: NOTES_MASTER_XML,
+    });
     parts.push({
       path: "ppt/notesMasters/_rels/notesMaster1.xml.rels",
       xml:
         `${XML_DECLARATION}${RELATIONSHIPS_OPEN}` +
-        relationship("rId1", `${REL}/theme`, "../theme/theme1.xml") +
+        relationship("rId1", `${REL}/theme`, "../theme/theme2.xml") +
         `</Relationships>`,
+    });
+    parts.push({
+      path: "ppt/theme/theme2.xml",
+      xml: themeXml("Tomverse Notes"),
     });
     for (const [index, notes] of notesBySlide) {
       parts.push({
@@ -451,11 +594,15 @@ export const renderPresentationPptx = (spec: PresentationSpec): Uint8Array => {
         path: `ppt/notesSlides/_rels/notesSlide${index + 1}.xml.rels`,
         xml:
           `${XML_DECLARATION}${RELATIONSHIPS_OPEN}` +
-          relationship("rId1", `${REL}/slide`, `../slides/slide${index + 1}.xml`) +
+          relationship(
+            "rId1",
+            `${REL}/slide`,
+            `../slides/slide${index + 1}.xml`,
+          ) +
           relationship(
             "rId2",
             `${REL}/notesMaster`,
-            "../notesMasters/notesMaster1.xml"
+            "../notesMasters/notesMaster1.xml",
           ) +
           `</Relationships>`,
       });

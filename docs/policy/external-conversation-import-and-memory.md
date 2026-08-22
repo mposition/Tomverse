@@ -1172,7 +1172,7 @@ AppSetting 기반, 기본값 전부 `false`, 설정 누락 시 fail-closed:
 |---|---|---|
 | 1 | `externalConversationImportEnabled` | ON (2026-08-19) |
 | 2 | `imageGenerationEnabled` | ON (2026-08-20) — 이 정책이 아니라 `docs/policy/image-generation.md`가 통제합니다 |
-| 3 | `assistantProfilesEnabled` | |
+| 3 | `assistantProfilesEnabled` | ON (2026-08-22) |
 | 4 | `assistantKnowledgeEnabled` | |
 | 5 | `memoryExtractionEnabled` | |
 | 6 | `memoryInjectionEnabled` | |

@@ -39,6 +39,12 @@ export const STAGING_VERIFICATION_FEATURES = [
         checklist: "docs/ops/assistant-profile-staging-checklist.md",
         records: "docs/ops/assistant-profile-staging-verification-records",
     },
+    {
+        key: "assistant-knowledge",
+        label: "assistant knowledge files (release C)",
+        checklist: "docs/ops/assistant-knowledge-staging-checklist.md",
+        records: "docs/ops/assistant-knowledge-staging-verification-records",
+    },
 ];
 
 export const stagingVerificationFeature = (key) => {
