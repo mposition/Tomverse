@@ -552,6 +552,43 @@ export const MODEL_PRICING: readonly ModelPricingProfile[] = [
         effectiveDate: "2026-08-01",
     },
     {
+        modelId: "gemini-3-7-flash",
+        provider: "google",
+        apiModelId: "gemini-3.7-flash",
+        ...DIRECT_STANDARD,
+        // The standard rate, deliberately, and not the introductory one.
+        //
+        // Google publishes gemini-3.7-flash at US$0.75/US$3.75 "through
+        // December 31, 2026" and US$1.50/US$7.50 "starting January 1, 2027".
+        // This type has `effectiveDate` and nothing else: it can say when a
+        // price starts and not when it stops. Recording the discount would
+        // therefore bill at half the real cost from 1 January until somebody
+        // noticed and shipped a new pricingVersion -- and nothing in this
+        // repository would notice, because an expired promotion looks exactly
+        // like a correct price.
+        //
+        // Registering the standard rate over-reserves during the discount,
+        // which is the direction this file already errs in everywhere else
+        // (see FALLBACK_PRICING and reservationOutputBasis). Taking the
+        // discount is a separate decision that needs a human holding the
+        // expiry date, not a default.
+        //
+        // It also happens to be identical to gemini-3-6-flash below, which is
+        // why the credit band does not move: same tiers, same cache
+        // multiplier, same context window, same output cap.
+        tiers: flatTier(1.5, 7.5, 0.1),
+        reasoningTokenBilling: "billed_as_output",
+        // US$14 per 1,000 grounded requests, the same rate 3.6 Flash carries.
+        nativeSearchCostMicroUsdPerQuery: 14_000,
+        maxOutputTokens: 65_536,
+        reservationOutputTokens: 8_192,
+        reservationOutputBasis: "conservative_default",
+        cachedInputPricingVerified: true,
+        priceSource: "google_gemini_3_7_flash_standard_api_list_price",
+        pricingVersion: "google-gemini-3.7-flash-2026-08-22",
+        effectiveDate: "2026-08-22",
+    },
+    {
         modelId: "gemini-3-6-flash",
         provider: "google",
         apiModelId: "gemini-3.6-flash",

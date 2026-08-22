@@ -4,8 +4,9 @@ import type { AiModel } from "@/lib/models";
 // Google made these rules part of the contract for Gemini 3.6 Flash,
 // Gemini 3.5 Flash-Lite, and later releases. Keep this exact allowlist next
 // to the request helper so no generateText path can accidentally reintroduce
-// sampling parameters for either stable Tomverse ID.
+// sampling parameters for any stable Tomverse ID on that line.
 export const GEMINI_STRICT_GENERATION_MODEL_IDS = new Set([
+  "gemini-3-7-flash",
   "gemini-3-6-flash",
   "gemini-2-5-flash",
 ]);

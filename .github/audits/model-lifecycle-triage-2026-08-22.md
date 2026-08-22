@@ -20,7 +20,7 @@ Qwen 3.8 계열 3건(`qwen3.8-max` · `qwen3.8-2.4t-a95b` · `qwen3.8-27b`)은
 
 | # | 결정 | 대상 | 성격 |
 |---|---|---|---|
-| D-1 | Gemini Flash 세대 이동 | `gemini-3.7-flash` | upgrade · **선례 있음 · 착수 가능** |
+| D-1 | Gemini Flash 세대 이동 | `gemini-3.7-flash` | upgrade · **완료 (2026-08-22)** |
 | D-2 | Zhipu GLM 세대 이동 | `glm-5.3` | upgrade · **blocked** |
 | D-3 | Qwen Flash 세대 이동 | `qwen3.7-flash` | upgrade |
 | D-4 | xAI 플래그십 세대 이동 | `grok-4.6` | upgrade · **연쇄 있음** |
@@ -44,6 +44,16 @@ triage 판정을 하려면 승인 뒤에 무슨 일이 남는지가 먼저 있�
 | 7 | 기본 모델을 건드리면 | `npm run check:default-models` · `docs/policy/default-model-luna-migration.md` | 게스트/계정 기본값이 어긋남 |
 | 8 | 공개 마케팅이 지목하면 | `lib/marketingModelReferences.ts` | `tests/marketingModelReferences.test.mjs` 실패 |
 | 9 | credit weight 확인 | `npm run report:model-credit-weights` | 코드와 DB가 어긋난 채 청구 |
+| **10** | **provider 요청 계약** | `GEMINI_STRICT_GENERATION_MODEL_IDS` (`lib/modelGenerationCompatibility.ts:8`) | Gemini 3.6 이후 모델에 sampling 파라미터가 실려 나감 — 주석이 "and later releases"로 계약을 명시 |
+| **11** | **native web search** | `WEB_SEARCH_CAPABILITIES` (`lib/webSearchCapability.ts:110`) | 조회 fallback이 `UNSUPPORTED` — 검색 가능한 모델이 조용히 검색을 잃음 |
+| **12** | **artifact tool** | `ARTIFACT_TOOL_CAPABILITIES` (`lib/generatedArtifactToolPolicy.ts:40`) | 미등록은 `unverified` → fail-closed. **의도된 안전값이며, 등록은 실제 실행 후에만** |
+| **13** | **picker 한국어 문구** | `koreanDescriptions` (`lib/modelPickerPresentation.ts`) | 한국어 UI에 설명이 비어 보임 |
+| **14** | **router 등재** | `ROUTER_SCORE_SNAPSHOT` (`lib/routerScorePolicy.ts`) | **누락이 중립이 아닙니다** — 미등재 모델은 neutral band로 라우팅되며 그건 아무도 하지 않은 결정입니다. `tests/routerScorePolicy.test.mjs`가 강제 |
+
+> **10~14는 2026-08-22 D-1 착수 중에 발견해 추가했습니다.** 최초 체크리스트는
+> 1~9만 담고 있었고, capability 표가 **모델 ID 단위**라는 점을 놓쳤습니다.
+> 그중 14번은 unit test가 실패시켜 알려 줬고, 12번은 등록하지 않는 것이
+> 정답이었습니다.
 
 **2·3번이 이 7건의 실질적 관문입니다.** `usageClass: "premium"` 또는
 `"premium-reasoning"`으로 넣으려면 검증된 공개 가격이 있어야 하고, 없으면
@@ -72,7 +82,7 @@ provider 공식 가격표를 사람이 읽어야 합니다. discovery가 `metada
 
 | 모델 | provider | 최초 발견 | 방치 | 권고 action | 신뢰도 | 상태 | 최대 blocker |
 |---|---|---|---|---|---|---|---|
-| `gemini-3.7-flash` | Google | 08-14 | 8일 | **upgrade** | **확정** | **착수 가능** | 없음 (§5.1) |
+| `gemini-3.7-flash` | Google | 08-14 | 8일 | **upgrade** | **확정** | **완료 (2026-08-22)** | — |
 | `glm-5.3` | Zhipu | 08-16 | 6일 | **upgrade** | 낮음 | **blocked** | 종량제 단가 공표 여부 (§5.2) |
 | `qwen3.7-flash` | Qwen | 07-25 | **28일** | **upgrade** | 중간 | awaiting_decision | 가격 확인 · 세대 정합성 |
 | `grok-4.6` | xAI | 08-13 | 9일 | **upgrade** | 중간 | awaiting_decision | **premium 가격 gate** · replacement 연쇄 |
@@ -80,8 +90,9 @@ provider 공식 가격표를 사람이 읽어야 합니다. discovery가 `metada
 | `qwen3.8-2.4t-a95b` | Qwen | 08-14 | 8일 | **monitor** | 낮음 | deferred(D-5 종속) | 제품 결정 부재 |
 | `qwen3.8-27b` | Qwen | 08-20 | 2일 | **monitor** | 낮음 | deferred(D-5 종속) | 제품 결정 부재 |
 
-**착수 순서(2026-08-22 조사 반영): D-1 → (D-3·D-4 자료 확보) → D-2 판정 → D-5.**
-D-1만 지금 착수 가능하고, D-2는 착수 자체가 막혔습니다. §5.7 참조.
+**착수 순서: ~~D-1~~(완료) → (D-3·D-4 자료 확보) → D-2 판정 → D-5.**
+D-1은 2026-08-22에 완료했습니다. 나머지는 전부 provider 공식 자료 확보에
+막혀 있습니다. §5.7 참조.
 
 ---
 
@@ -117,6 +128,53 @@ D-1만 지금 착수 가능하고, D-2는 착수 자체가 막혔습니다. §5.
 
 **승인되면 남는 일**: §1의 1·2·4·5·6·9. 7·8은 3.7 Flash를 기본 모델이나
 마케팅에 올릴 때만.
+
+---
+
+#### D-1 실행 기록 (2026-08-22 · 완료)
+
+`gemini-3-7-flash`를 카탈로그에 추가했습니다. **추가만 했고 3.6 Flash는 은퇴시키지
+않았습니다** — 추가는 되돌릴 수 있고 은퇴는 사용자 설정을 건드리는데, 그 통지
+경로가 아직 없다는 것이 이 감사의 결론이기 때문입니다. 두 모델이 당분간
+Advanced 대역에 함께 섭니다.
+
+변경한 6개 파일:
+
+| 파일 | 내용 |
+|---|---|
+| `lib/models.ts` | `advanced`·`Free`·1,048,576·`FULL_BINARY_INPUT`. 3.6 Flash 위에 배치 |
+| `lib/modelPricing.ts` | `flatTier(1.5, 7.5, 0.1)` · `maxOutputTokens: 65_536` · `reservationOutputTokens: 8_192` · `nativeSearchCostMicroUsdPerQuery: 14_000` |
+| `lib/modelGenerationCompatibility.ts` | `GEMINI_STRICT_GENERATION_MODEL_IDS` 등록 (체크리스트 10) |
+| `lib/webSearchCapability.ts` | `NATIVE_GOOGLE` — 공식 모델 페이지가 Search grounding "Supported" 확인 |
+| `lib/modelPickerPresentation.ts` | 한국어 설명 |
+| `lib/routerScorePolicy.ts` | `ROUTER_SCORE_SNAPSHOT` 등재 (품질 주장 없음, 다른 모든 cell과 같이 neutral) |
+
+**가격은 도입가가 아니라 정가로 등록했습니다.** 근거는 §5.1의 상자와 코드 주석에
+있습니다 — `ModelPricingProfile`이 만료를 표현하지 못하므로 $0.75/$3.75로 넣으면
+2027-01-01부터 절반으로 청구되고 아무것도 그것을 알아채지 못합니다.
+
+**검증**
+- `npm run check:model-pricing` — 통과 (explicit profile 35→36, fallback 0, unpriced premium 0)
+- `npm run check:default-models` — 통과
+- `npm run test:unit` — 4,161 통과 / 0 실패
+- `npm run typecheck` — 통과
+- `eslint` (변경 6파일) — 통과
+
+**일부러 하지 않은 것**
+- `ARTIFACT_TOOL_CAPABILITIES` 등록 — 표의 주석이 "A model moves here when
+  somebody has run the tool against it, not when somebody has read a
+  changelog"입니다. 지금은 `unverified` → fail-closed이며 이것이 **정상 동작**
+  입니다. 실제로 artifact tool을 한 번 돌린 뒤 별건으로 등록합니다.
+- `RECOMMENDED_MODEL_IDS` 변경 — picker의 추천 3종을 바꾸는 것은 제품 결정입니다.
+- `STATIC_CATALOG_RECONCILIATION_MODEL_IDS` — 기존 행 갱신용이고, 신규 모델은
+  `ensureModelRegistrySeeded()`가 삽입하므로 불필요합니다.
+- 3.6 Flash 은퇴 관련 일체(`replacementModelId`·`userVisibleNote`·사용자 안내).
+
+**남은 위험 1건 `[확인 불가]`**: Google AI 개발자 포럼에 "3.7 Flash가 문서화되지
+않은 32,768 토큰 한도로 유효한 요청을 거절한다"는 신고가 있습니다
+(`discuss.ai.google.dev` 차단으로 내용 미확인). 사실이라면
+`maxOutputTokens: 65_536`이 실패를 만듭니다. **staging에서 긴 출력 요청 1회**로
+확인한 뒤 필요하면 값을 내립니다. 공식 모델 페이지의 값은 65,536입니다.
 
 ---
 
