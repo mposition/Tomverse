@@ -46,6 +46,14 @@ const cellText = (value: ArtifactCellValue): string =>
  * contained one would silently move the rest of the table one column left.
  * Everything else is written literally -- the block types are already the
  * things Markdown has syntax for, so nothing needs to be invented.
+ *
+ * The backslash is escaped **first**, and the order is the whole correctness
+ * of it. Escaping only the pipe leaves a cell holding `a\|b` written as
+ * `a\\|b`, which a reader takes as one literal backslash followed by an
+ * unescaped pipe -- so the row breaks anyway, which is the failure this
+ * function exists to prevent. The same omission ate the backslash out of
+ * `C:\path|x`, which reached the file as `C:path`. Found by CodeQL on the
+ * release pull request.
  */
 export const renderDocumentMarkdown = (spec: DocumentSpec): string => {
   const lines: string[] = [];
@@ -53,7 +61,10 @@ export const renderDocumentMarkdown = (spec: DocumentSpec): string => {
   if (spec.subtitle) lines.push(`_${spec.subtitle}_`, "");
 
   const tableCell = (value: string) =>
-    value.replace(/\|/g, "\\|").replace(/\r?\n/g, "<br>");
+    value
+      .replace(/\\/g, "\\\\")
+      .replace(/\|/g, "\\|")
+      .replace(/\r?\n/g, "<br>");
 
   for (const block of spec.blocks) {
     switch (block.type) {

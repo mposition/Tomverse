@@ -157,6 +157,52 @@ test("Markdown carries every block as Markdown, not as prose about it", () => {
   assert.match(markdown, /^---$/m);
 });
 
+test("a backslash in a cell survives, and does not unescape the pipe after it", () => {
+  // Escaping the pipe alone wrote `a\|b` as `a\\|b`, which a reader takes as
+  // one literal backslash and then an *unescaped* pipe -- so the row broke
+  // anyway. The same omission ate the backslash out of a Windows path.
+  const admission = admitDocumentSpec({
+    filename: "t.md",
+    format: "md",
+    blocks: [
+      {
+        type: "table",
+        columns: ["a"],
+        rows: [["a\\|b"], ["C:\\path|x"]],
+      },
+    ],
+  });
+  assert.equal(admission.ok, true);
+  const markdown = renderDocumentMarkdown(admission.spec);
+
+  // Read the cell back the way a Markdown reader does: a backslash consumes
+  // the character after it, and a bare pipe ends the cell.
+  const readCell = (cell) => {
+    let out = "";
+    for (let index = 0; index < cell.length; index += 1) {
+      if (cell[index] === "\\" && index + 1 < cell.length) {
+        out += cell[index + 1];
+        index += 1;
+      } else if (cell[index] === "|") {
+        out += "\u0000BREAK";
+      } else {
+        out += cell[index];
+      }
+    }
+    return out;
+  };
+
+  const cells = markdown
+    .split("\n")
+    .filter((line) => line.startsWith("|"))
+    .map((line) => line.slice(1, -1).trim());
+  for (const [index, expected] of [["a\\|b"], ["C:\\path|x"]].entries()) {
+    const row = cells[index + 2];
+    assert.equal(readCell(row), expected[0], `row ${index}: ${row}`);
+    assert.ok(!readCell(row).includes("BREAK"), `row ${index} breaks the table`);
+  }
+});
+
 test("a pipe inside a cell does not break the Markdown table", () => {
   const admission = admitDocumentSpec({
     filename: "t.md",
